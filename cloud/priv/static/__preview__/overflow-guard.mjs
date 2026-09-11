@@ -222,6 +222,13 @@ import {
   registerDrift,
   RESIDUE_REGISTER,
 } from "./view-scope-census.mjs";
+// THE D253 CUE PREDICATE AND ITS BROWSER-SIDE MEASUREMENT, OWNED ONCE
+// (cch-w23-bl-three-screens-zero-geometry-coverage). Three legs in this file
+// need "can a cue ACTUALLY paint?" — `#members-body .set-row`, the `#activity`
+// feed and the overview digest — and a four-clause predicate copied three times
+// is three places for one clause to go missing. cue-paint-verdict.test.mjs
+// drives every branch, and the browser-side source string, with no browser.
+import { cuePaints, cueWhy, CUE_METRICS_FN } from "./cue-paint-verdict.mjs";
 // THE SWEEP'S OWN AXIS, IMPORTED RATHER THAN RETYPED (cch-w24-bl-phone-band-
 // unreachable-by-the-width-sweep). `W24-activity-feed-phone-band` asserts that
 // the band it drives TOUCHES breakpoint-sweep.mjs's narrowest width; a floor
@@ -281,6 +288,7 @@ const DEFECTS = [
   "W24-activity-feed-phone-band",
   "W35-hash-nav-hidden-view-residue",
   "W20-type-floor-instances",
+  "W23-overview-digest-activity-row",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -6654,39 +6662,18 @@ async function main() {
               `    rec.ctrls.push({k:c.className.split(' ')[0],t:(c.textContent||'').trim().slice(0,24),right:Math.round(cr.right*100)/100});` +
               `  });` +
               `  var n=r.querySelector(':scope > .tlv-head > .tlv-title');` +
-              `  if(n){var cs=getComputedStyle(n);` +
               // THE BREAK-OPPORTUNITY MEASUREMENT (charter D253), the same
-              // instrument the members roster uses and for the same reason:
-              // `text-overflow` paints when the overflowing LINE has no break
-              // opportunity that fits AND carries a text run to truncate.
-              // cssText is APPENDED, never assigned — assigning deletes the
-              // copied style attribute and measures the element under a cascade
-              // it does not have.
-              `    var cl=n.cloneNode(true);` +
-              `    cl.style.cssText+=';position:absolute!important;left:-99999px!important;top:0!important;visibility:hidden!important;width:min-content!important;max-width:none!important;min-width:0!important;height:auto!important;overflow:visible!important;flex:0 0 auto!important;';` +
-              `    n.parentNode.appendChild(cl);` +
-              `    var mw=Math.ceil(cl.getBoundingClientRect().width);` +
-              `    cl.parentNode.removeChild(cl);` +
-              // The widest TEXT run reachable through `display: inline` only —
-              // a line holding nothing but atomic inlines has nothing to
-              // ellipsize. `.tlv-coalesce-count` is an inline span and IS
-              // walked; an inline-block child would be an atom and is not.
-              `    var tw=0;` +
-              `    (function walk(e){` +
-              `      for(var k=0;k<e.childNodes.length;k++){var ch=e.childNodes[k];` +
-              `        if(ch.nodeType===3){` +
-              `          if(!(ch.nodeValue||'').trim()) continue;` +
-              `          var rg=document.createRange();rg.selectNodeContents(ch);` +
-              `          var rl=rg.getClientRects();` +
-              `          for(var q=0;q<rl.length;q++) tw=Math.max(tw,rl[q].width);` +
-              `        } else if(ch.nodeType===1){` +
-              `          var dd=getComputedStyle(ch).display;` +
-              `          if(dd==='inline'||dd==='contents') walk(ch);` +
-              `        }` +
-              `      }})(n);` +
-              `    rec.title={sw:n.scrollWidth,cw:n.clientWidth,mw:mw,tw:Math.round(tw*100)/100,` +
-              `      ws:cs.whiteSpace,te:cs.textOverflow,ov:cs.overflow,ox:cs.overflowX,` +
-              `      t:(n.textContent||'').trim().replace(/\\s+/g,' ').slice(0,48)};}` +
+              // instrument the members roster and the overview digest use and
+              // for the same reason: `text-overflow` paints when the
+              // overflowing LINE has no break opportunity that fits AND
+              // carries a text run to truncate. IMPORTED as a source string
+              // from cue-paint-verdict.mjs rather than written here — it was
+              // written twice in this file before the digest leg needed a
+              // third copy, and a ~20-line browser-side string is where a
+              // dropped `!important` or a mis-escaped regex hides from
+              // `node --check`. `.tlv-coalesce-count` is an inline span and IS
+              // walked by it; an inline-block child would be an atom and is not.
+              `  if(n){rec.title=${CUE_METRICS_FN}(n);}` +
               `  out.rows.push(rec);` +
               `});` +
               `return out;})()`,
@@ -6732,19 +6719,9 @@ async function main() {
               // spec does not blockify) AND the overflowing line has no break
               // opportunity that fits (min-content wider than the box) AND
               // there is a text run to truncate.
-              const clips = n.ox !== "visible";
-              const noBreakFits = n.mw > n.cw;
-              const hasRun = n.tw > 0;
-              const cueCanPaint = clips && noBreakFits && hasRun && n.te === "ellipsis";
-              if (!cueCanPaint) {
+              if (!cuePaints(n)) {
                 clipped++;
-                const why = !clips
-                  ? `the box does not clip horizontally (overflow-x "${n.ox}", shorthand "${n.ov}"), so no marker is ever reached`
-                  : n.te !== "ellipsis"
-                    ? `computed text-overflow is "${n.te}", so nothing is authored to paint`
-                    : !noBreakFits
-                      ? `min-content ${n.mw}px FITS inside clientWidth ${n.cw}px, so the overflow is VERTICAL — \`overflow: hidden\` eats whole lines and no marker is ever reached`
-                      : `the overflowing line carries no text run to truncate (widest run ${n.tw}px)`;
+                const why = cueWhy(n);
                 fail(D, `${scen}/${theme}@${width} row${r.i} \`.tlv-title\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of WHO DID WHAT is hidden with NO cue that can paint (measured min-content ${n.mw}px, widest text run ${n.tw}px; computed white-space "${n.ws}", text-overflow "${n.te}", overflow "${n.ov}", overflow-x "${n.ox}" — REPORTED, never the test; ${why})`);
               }
             }
@@ -6800,6 +6777,320 @@ async function main() {
         );
         fontPinnedEvidence(
           `What is ASSERTED is face-independent anyway — a control's right edge inside the viewport, a page that ` +
+          `does not scroll sideways, and text that either fits or carries a cue that can actually paint`,
+        );
+      }
+    }
+
+    // ── cch-w23-bl-three-screens-zero-geometry-coverage: THE OVERVIEW
+    //    DIGEST'S `.fleet-row.activity-row`, THE THIRD FAMILY ──────────────────
+    //
+    //    WHAT THE ROW ASKS FOR, AND WHAT WAS ACTUALLY MISSING. The row names
+    //    three row families and asks for each to be MEASURED before anything is
+    //    sliced. Two are discharged: `.tlv-row` by `W24-activity-feed-phone-band`
+    //    directly above (survived-contact, 36 cells), and the `#settings/env`
+    //    `.set-row` population by REFUTATION (the screen was deleted — that leg's
+    //    last ok-line carries the grep). The third, `.fleet-row.activity-row`,
+    //    had ZERO coverage and a zero committed count: on origin/main
+    //    `git grep -n 'activity-row' -- cloud/priv/static/__preview__/` was EMPTY,
+    //    while the CONTROL on the same path — `git grep -c 'fleet-row' --
+    //    cloud/priv/static/__preview__/` — printed overflow-guard.mjs 23. So this
+    //    file drove `.fleet-row` twenty-three times and never once on the
+    //    OVERVIEW DIGEST's variant of it. This leg is that count, paid.
+    //
+    //    THE FILING'S LINE NUMBERS ARE STALE AND THAT IS RE-DERIVED HERE, NOT
+    //    INHERITED. The row cites `activityRow` and the `list.slice(0,3)` call by
+    //    line number; every one of those numbers had rotted by the time this leg
+    //    was cut, so they are re-anchored here the way E11 demands — by FUNCTION
+    //    name plus the grep that re-derives it: `grep -n 'function activityRow'`
+    //    (the emitter) and `grep -n 'function loadOverviewDigest'` (the digest
+    //    painter; its `list.slice(0, 3).map(activityRow)` is the population
+    //    bound). The SHAPE the row describes is unchanged and is what matters:
+    //    the population is `list.slice(0, 3)`, so it is AT MOST THREE, always.
+    //
+    //    THE MANDATORY REFUSAL, AND WHY THIS SCREEN SPECIFICALLY NEEDS ONE.
+    //    `loadOverviewDigest` fetches `GET /v1/audit?limit=5` and then, on its
+    //    `if (!r.ok) { box.innerHTML = ""; return; }` arm (grep that string) — the audit
+    //    endpoint is admin-gated and the charter requires the digest to HIDE on
+    //    403 rather than error. An emptied container satisfies every per-row
+    //    assertion below having measured NOTHING: no name clipped, no badge
+    //    off-screen, page fits. A leg without this refusal would go green by
+    //    construction the day the fixture stops answering, or on any tree where
+    //    the preview mock's audit route changes shape. So zero rows in
+    //    `#overview-digest` is a FAILURE, per cell, and on `activity` the
+    //    population is asserted to be EXACTLY 3 as a precondition — a number the
+    //    emitter's own `slice(0, 3)` pins against a 7-event fixture.
+    //
+    //    THE AXIS IS THE CRUEL BAND, NOT THE W24 PHONE BAND, AND THE REASON IS
+    //    THIS FAMILY'S OWN BREAKPOINT. `.fleet-row`'s stack and
+    //    `.fleet-badges { justify-content: flex-start }` are declared inside
+    //    `@media (max-width: 899px)` (app.css:2680) — the row changes from a
+    //    two-column flex line into a stack at 899, and the badge column moves
+    //    from the right edge to the left. A 320-618 phone band never renders the
+    //    two-column form at all, so it would certify the family on one of its two
+    //    layouts. `[320, 360, 390, 430, 620, 720, 768, 830, 898, 900, 1000]`
+    //    (the same set `W21-cruel-content-text-bounded` drives, block-scoped here
+    //    per D247 rather than shared, since an axis one leg widens must not
+    //    silently move another's claim) straddles it: 898 is the last stacked
+    //    width and 900 the first two-column one, with 320 at the bottom for the
+    //    narrowest viewport this file drives anywhere.
+    //
+    //    THE CORPUS IS KIND, SAID PLAINLY RATHER THAN DRESSED UP AS AN AXIS.
+    //    This family's children SHARE CLASS TOKENS with the fleet row but carry
+    //    COMPLETELY DIFFERENT CONTENT, and inheriting D248's 253-character host
+    //    cruelty here would be measuring a string this emitter cannot produce:
+    //    `activityRow` renders `.fleet-name` as actor-email + humanised action +
+    //    an optional ` · metadata.name`, and `.fleet-url.dim` as a
+    //    `toLocaleString()` TIMESTAMP — never a host, never a URL. The two
+    //    shipped fixtures that populate the digest are `activity` (7 audit
+    //    events) and `mixed-fleet` (5). BOTH render `ada@acme.com` — 12
+    //    characters — as the actor: `auditEvent` DEFAULTS that actor
+    //    (scenarios.mjs:1613) and `mixedAudit`'s entries omit the field, so the
+    //    `|| "system"` fallback in `activityRow` is reached by NEITHER corpus.
+    //    THE MUTATION RUN IS WHAT SAYS SO: the first draft of this comment read
+    //    "mixed-fleet is actorless, every name begins system", and the injected
+    //    clip reded on `mixed-fleet/light@320 row0 .fleet-name "ada@acme.com
+    //    launched a Barkpark · Analytics"`. A fixture's DECLARED fields are not
+    //    its RENDERED ones. Neither
+    //    is cruel and this leg does not pretend otherwise: what it certifies is
+    //    the two layouts of the digest row on the corpus that SHIPS, with every
+    //    row walked. A cruel audit fixture is REAL residual work and deliberately
+    //    NOT built here — `scenarios.mjs` is read POSITIONALLY by smoke.mjs and
+    //    adding a scenario moves other instruments' coverage accounting, a
+    //    cascade this row did not buy.
+    //
+    //    THE THREE ASSERTIONS, AND WHY NONE OF THEM SUBSUMES THE OTHERS.
+    //      · `.fleet-name` and `.fleet-url.dim` are held to the SAME D253 cue
+    //        predicate the two legs above use, imported rather than retyped
+    //        (cue-paint-verdict.mjs). Both carry `overflow-wrap: break-word`
+    //        (app.css:1065/:1066) and neither declares `text-overflow`, so if
+    //        either ever DOES overflow its box there is no cue that can paint and
+    //        the text is simply gone — which is precisely the state the predicate
+    //        reds on, whatever the declarations say.
+    //      · EVERY `.fleet-badges .badge` right edge inside the viewport. The
+    //        badge is the row's only answer to "what kind of thing did this
+    //        happen to", and `.fleet-badges` is `justify-content: flex-end` above
+    //        899 — the side of the row that leaves the viewport first.
+    //      · `documentElement.scrollWidth <= clientWidth` per cell. The
+    //        `.instance-card-name` lesson from the cruel-content leg: a host that
+    //        never clips ITSELF drags the PAGE instead, and a per-element bound
+    //        is blind to it.
+    //
+    //    ROWS ARE ITERATED, NEVER SAMPLED (D228). The digest's three rows are not
+    //    interchangeable: on `activity` row 0 is a `member.invited` whose
+    //    metadata carries `email` and therefore renders NO ` · name` suffix,
+    //    while rows 1-2 are `site.deploy_requested`; on `mixed-fleet` row 0 is a
+    //    `barkpark.go_live` WITH a ` · Analytics` suffix and row 2 a
+    //    `subscription.activated` with none. A `querySelector` leg would measure
+    //    the shortest name on one fixture and the longest on the other.
+    if (requested.includes("W23-overview-digest-activity-row")) {
+      const D = "W23-overview-digest-activity-row";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      // The only two shipped fixtures whose `audit` list is non-empty AND whose
+      // overview renders — `activity` (activityFeed, 7 events) and `mixed-fleet`
+      // (mixedAudit, 5). Both are already driven by other instruments under
+      // these names, so this arm costs the scenario census nothing.
+      const DIG_SCENS = ["activity", "mixed-fleet"];
+      const DIG_WIDTHS = [320, 360, 390, 430, 620, 720, 768, 830, 898, 900, 1000];
+      // The family's own breakpoint, spelt as the pair that straddles it. See
+      // the block comment: `.fleet-row` stacks and `.fleet-badges` flips to
+      // flex-start inside `@media (max-width: 899px)`.
+      const ROW_STACK_EDGE = 899;
+      // ANTI-VACUITY 0 — THE AXIS. A set that sits entirely on one side of the
+      // stack edge measures one of this family's two layouts and calls it the
+      // family.
+      if (!DIG_WIDTHS.some((w) => w <= ROW_STACK_EDGE) || !DIG_WIDTHS.some((w) => w > ROW_STACK_EDGE)) {
+        fail(D, `axis check: every width in [${DIG_WIDTHS.join("/")}] falls on ONE side of ${ROW_STACK_EDGE} — \`.fleet-row\`'s stack and \`.fleet-badges\`' flex-start are declared inside \`@media (max-width: ${ROW_STACK_EDGE}px)\` (app.css), so this leg would certify one of the row's two layouts under the family's name`);
+      }
+      for (const need of [320, ROW_STACK_EDGE - 1, ROW_STACK_EDGE + 1]) {
+        if (!DIG_WIDTHS.includes(need)) {
+          fail(D, `axis check: ${need} is not in the width set — 320 is the narrowest viewport this file drives anywhere, and ${ROW_STACK_EDGE - 1}/${ROW_STACK_EDGE + 1} is the pair that straddles \`.fleet-row\`'s own stack edge. A set missing any of them drives the digest without the boundary that reshapes it`);
+        }
+      }
+      if (!DIG_SCENS.includes("activity") || DIG_SCENS.length < 2) {
+        fail(D, `axis check: the scenario set is [${DIG_SCENS.join(", ")}] — the digest is populated by exactly two shipped fixtures and \`activity\` is the one whose rows carry a real actor email (\`mixed-fleet\` renders the SAME default actor, but never the repeated-target grammar that gives \`activity\` a \` · name\` suffix on some rows and none on others), so a set without it, or with one member, measures one grammar and names the family`);
+      }
+      // The emitter's own cap, asserted rather than remembered: `activityRow` is
+      // called through `list.slice(0, 3)` (app.js, loadOverviewDigest). A cell
+      // that renders MORE than this means the digest stopped being a digest.
+      const DIGEST_CAP = 3;
+      const digestCells = DIG_SCENS.length * DIG_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${DIG_SCENS.length} scenarios x ${DIG_WIDTHS.length} widths x 2 themes` +
+        ` (${digestCells} cells; every #overview-digest .fleet-row.activity-row iterated: .fleet-name and` +
+        ` .fleet-url.dim scrollWidth vs clientWidth under the D253 cue predicate, every .fleet-badges .badge` +
+        ` right edge vs viewport, + page overflow. Band ${DIG_WIDTHS[0]}-${DIG_WIDTHS[DIG_WIDTHS.length - 1]},` +
+        ` straddling .fleet-row's ${ROW_STACK_EDGE}px stack edge; population <= ${DIGEST_CAP} by list.slice(0,3),` +
+        ` and ZERO rows is a FAILURE, not a pass — the 403 path empties this container)\n`,
+      );
+      let cells = 0, rowsSeen = 0, namesSeen = 0, urlsSeen = 0, badgesSeen = 0;
+      let clipped = 0, offScreen = 0, pageOver = 0, emptyCells = 0;
+      for (const scen of DIG_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter WIDE and assert the LANDED view — `?scen=` alone renders
+          // #overview, which is what this leg wants, but the hash is appended
+          // anyway so the readiness expression is the SAME shape every other leg
+          // uses and `mixed-fleet` (whose deepLink is #fleet) cannot land
+          // elsewhere.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#overview`,
+            `document.querySelector('#overview-digest .fleet-row.activity-row') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+          );
+          const row = [];
+          for (const width of DIG_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var d=document.documentElement;` +
+              `var box=document.querySelector('#overview-digest');` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,` +
+              `box:!!box,boxHtml:box?box.innerHTML.length:-1,rows:[]};` +
+              // EVERY row in document order (D228).
+              `[].slice.call(document.querySelectorAll('#overview-digest .fleet-row.activity-row')).forEach(function(r,i){` +
+              `  var rec={i:i,badges:[],name:null,url:null};` +
+              `  [].slice.call(r.querySelectorAll('.fleet-badges .badge')).forEach(function(b){` +
+              `    var br=b.getBoundingClientRect();` +
+              `    rec.badges.push({t:(b.textContent||'').trim().slice(0,24),right:Math.round(br.right*100)/100,w:Math.round(br.width*100)/100});` +
+              `  });` +
+              `  var nm=r.querySelector('.fleet-main > .fleet-name');` +
+              `  if(nm){rec.name=${CUE_METRICS_FN}(nm);}` +
+              // `.fleet-url.dim` by BOTH tokens: `.fleet-url` alone also matches
+              // the fleet row's host line elsewhere on this screen, and the
+              // digest's timestamp line is the one that carries `dim`.
+              `  var ul=r.querySelector('.fleet-main > .fleet-url.dim');` +
+              `  if(ul){rec.url=${CUE_METRICS_FN}(ul);}` +
+              `  out.rows.push(rec);` +
+              `});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-overview") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-overview" — the hash did not route, so nothing below this line measured the digest`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // THE MANDATORY REFUSAL. `loadOverviewDigest` empties
+            // `#overview-digest` on a 403 or an empty list (app.js: `if (!r.ok)
+            // { box.innerHTML = ""; return; }`), and an empty container passes
+            // every assertion below having measured nothing.
+            if (m.rows.length === 0) {
+              emptyCells++;
+              fail(D, `${scen}/${theme}@${width}: zero \`#overview-digest .fleet-row.activity-row\` rendered — the container ${m.box ? `exists and holds ${m.boxHtml} chars of HTML` : `is ABSENT from the document`}, so either the digest took its 403/empty path (\`if (!r.ok) { box.innerHTML = ""; return; }\`) or the fixture stopped answering \`GET /v1/audit\`. NOTHING was measured in this cell and that is not a pass`);
+              row.push(`${width}:0r!`);
+              continue;
+            }
+            if (m.rows.length > DIGEST_CAP) {
+              fail(D, `${scen}/${theme}@${width}: ${m.rows.length} digest rows rendered, more than the emitter's own cap of ${DIGEST_CAP} — \`loadOverviewDigest\` paints \`list.slice(0, ${DIGEST_CAP}).map(activityRow)\`, so a larger population means the glance is no longer a glance and this leg's numbers describe a screen that no longer exists`);
+            }
+            // THE PRECONDITION, on the fixture whose event count pins it. 7
+            // events through `slice(0, 3)` is 3 rows — a cell that renders 1 or
+            // 2 measured a DIFFERENT screen from the one the numbers below claim.
+            if (scen === "activity" && m.rows.length !== DIGEST_CAP) {
+              fail(D, `${scen}/${theme}@${width}: ${m.rows.length} digest rows, expected exactly ${DIGEST_CAP} — the \`activity\` fixture ships 7 audit events and \`loadOverviewDigest\` slices the first ${DIGEST_CAP}, so this population is pinned by the emitter and the fixture together. A short digest means the mock answered fewer events than it holds, and every clean number in this leg would be describing a smaller screen than the one that ships`);
+            }
+            rowsSeen += m.rows.length;
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the front screen is off-screen sideways, with the activity digest on it`);
+            }
+            let cellBadges = 0;
+            for (const r of m.rows) {
+              for (const b of r.badges) {
+                cellBadges++;
+                if (b.right > m.pcw) {
+                  offScreen++;
+                  fail(D, `${scen}/${theme}@${width} row${r.i} \`.fleet-badges .badge\` "${b.t}": right edge ${b.right} > viewport ${m.pcw} — the badge is OFF-SCREEN by ${Math.round((b.right - m.pcw) * 100) / 100}px, so WHAT KIND OF THING this entry happened to is unreadable`);
+                }
+              }
+              // Both text lines, same predicate, different sentences — the name
+              // is WHO DID WHAT and the url line is WHEN.
+              for (const [sel, what, n] of [
+                [".fleet-name", "WHO DID WHAT", r.name],
+                [".fleet-url.dim", "WHEN it happened", r.url],
+              ]) {
+                if (!n) continue;
+                if (sel === ".fleet-name") namesSeen++; else urlsSeen++;
+                if (n.sw <= n.cw) continue;
+                clipped++;
+                fail(D, `${scen}/${theme}@${width} row${r.i} \`${sel}\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of ${what} is hidden with NO cue that can paint (measured min-content ${n.mw}px, widest text run ${n.tw}px; computed white-space "${n.ws}", text-overflow "${n.te}", overflow "${n.ov}", overflow-x "${n.ox}" — REPORTED, never the test; ${cueWhy(n)})`);
+              }
+            }
+            badgesSeen += cellBadges;
+            // `Nr/Mc@W` — the population, the badge count and the page's own
+            // scrollWidth, so a reader re-derives both assertions from the clean
+            // line rather than trusting it.
+            row.push(`${width}:${m.rows.length}r/${cellBadges}c@${m.psw}`);
+          }
+          process.stdout.write(`   ${D} ${scen}/${theme}: ${row.join(" ")}\n`);
+        }
+      }
+      // ANTI-VACUITY 1 — the populations, asserted after both loops close. Each
+      // of these is a way the leg could print a clean line having measured an
+      // empty set of the thing it names.
+      if (rowsSeen === 0) {
+        fail(D, `NOT ONE \`#overview-digest .fleet-row.activity-row\` was rendered in any of the ${cells} cells — this leg measured the front screen and never the digest`);
+      }
+      if (namesSeen === 0) {
+        fail(D, `${rowsSeen} digest rows walked across ${cells} cells and NOT ONE carried a \`.fleet-name\` — the identity assertion fired nowhere, so this leg's clean line would be a sentence nothing measured`);
+      }
+      if (urlsSeen === 0) {
+        fail(D, `${rowsSeen} digest rows walked across ${cells} cells and NOT ONE carried a \`.fleet-url.dim\` — the timestamp line is emitted unconditionally by \`activityRow\`, so its absence means the selector no longer reaches it and "no timestamp clipped" is true of an empty set`);
+      }
+      if (badgesSeen === 0) {
+        fail(D, `${rowsSeen} digest rows walked across ${cells} cells and NOT ONE carried a \`.fleet-badges .badge\` — "no badge off-screen" is true of an empty set, which is not what this leg claims`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${DIG_WIDTHS.join("/")} on ${DIG_SCENS.join(" + ")} in both themes — ` +
+          `${rowsSeen} \`#overview-digest .fleet-row.activity-row\` iterated (never sampled: the three rows carry ` +
+          `different grammars, one with a \` · name\` suffix and one without), ${namesSeen} \`.fleet-name\` and ` +
+          `${urlsSeen} \`.fleet-url.dim\` held to the D253 cue predicate, ${badgesSeen} \`.fleet-badges .badge\` ` +
+          `asserted inside the viewport; ${clipped} text lines hidden with no cue that can paint, ${offScreen} ` +
+          `badges past the viewport edge, ${pageOver} pages scrolling sideways, ${emptyCells} empty containers. ` +
+          `Cells print rows/badges@documentElement.scrollWidth, so the population is legible per cell rather than ` +
+          `only in a failure`,
+        );
+        okLine(
+          `THE EMPTY DIGEST IS A FAILURE, NOT A PASS, AND THAT IS THE ASSERTION THIS SCREEN NEEDED MOST: ` +
+          `\`loadOverviewDigest\` fetches \`GET /v1/audit?limit=5\` and does \`if (!r.ok) { box.innerHTML = ""; ` +
+          `return; }\` — the endpoint is admin-gated and the charter requires the digest to HIDE on 403 rather ` +
+          `than error. Every per-row assertion above is vacuously true of an emptied container, so zero rows reds ` +
+          `per cell (${emptyCells} this run) and \`activity\` is additionally held to EXACTLY ${DIGEST_CAP} rows — ` +
+          `the number \`list.slice(0, ${DIGEST_CAP})\` pins against that fixture's 7 events`,
+        );
+        okLine(
+          `THE BAND STRADDLES THIS FAMILY'S OWN BREAKPOINT: \`.fleet-row\`'s stack and \`.fleet-badges\`' ` +
+          `flex-start are declared inside \`@media (max-width: ${ROW_STACK_EDGE}px)\` (app.css), so ${ROW_STACK_EDGE - 1} ` +
+          `renders the stacked form and ${ROW_STACK_EDGE + 1} the two-column one, and BOTH are driven in both ` +
+          `themes on both fixtures. The W24 phone band directly above (320-618) could not have done this — it ` +
+          `never reaches the two-column layout at all`,
+        );
+        okLine(
+          `THE CORPUS IS KIND AND THIS LEG DOES NOT PRETEND OTHERWISE: \`.fleet-name\` here is ` +
+          `actor-email + humanised action + an optional \` · metadata.name\`, and \`.fleet-url.dim\` is a ` +
+          `\`toLocaleString()\` TIMESTAMP — NEITHER IS A HOST, despite sharing class tokens with the fleet row ` +
+          `that D248 drives at 253 characters. The two shipped fixtures that populate this container are ` +
+          `\`activity\` (7 events) and \`mixed-fleet\` (5). BOTH render the actor \`ada@acme.com\`, 12 characters: ` +
+          `\`auditEvent\` DEFAULTS it (scenarios.mjs:1613) and mixedAudit omits the field, so \`activityRow\`'s ` +
+          `\`|| "system"\` fallback is reached by neither — established by the injected-clip MUTATION RUN, against ` +
+          `a first draft of this very sentence that claimed the opposite. A cruel audit fixture is REAL residual ` +
+          `work, deliberately not built here: scenarios.mjs ` +
+          `is read POSITIONALLY by smoke.mjs and a new scenario moves other instruments' coverage accounting`,
+        );
+        okLine(
+          `THIS IS THE THIRD AND LAST FAMILY cch-w23-bl-three-screens-zero-geometry-coverage NAMES. ` +
+          `\`.tlv-row\` is discharged by W24-activity-feed-phone-band directly above (survived contact, 36 cells); ` +
+          `the env \`.set-row\` population is discharged by REFUTATION (the screen was deleted — that leg's last ` +
+          `ok-line carries the grep); \`.fleet-row.activity-row\` had ZERO coverage on origin/main ` +
+          `(\`git grep -n 'activity-row' -- cloud/priv/static/__preview__/\` EMPTY, control ` +
+          `\`git grep -c 'fleet-row'\` -> 23 in this file) and is measured here. No slice is filed on suspicion: ` +
+          `this leg's verdict is whatever the numbers above say`,
+        );
+        fontPinnedEvidence(
+          `What is ASSERTED is face-independent anyway — a badge's right edge inside the viewport, a page that ` +
           `does not scroll sideways, and text that either fits or carries a cue that can actually paint`,
         );
       }
@@ -7053,6 +7344,29 @@ async function main() {
           scens: [
             { scen: "fleet-cruel-content" },
             { scen: "mixed-fleet", hash: "#instance/5b2c1e00-0000-4000-8000-0000000000a1" },
+            // ── THE PROSE CELL, and it is here because WITHOUT IT THE TORN-
+            //    TOKEN BOUND BELOW IS ITSELF GREEN BY CONSTRUCTION — the exact
+            //    fault this row was filed about, reproduced one layer up.
+            //    MEASURED, not feared: with `word-break: break-all` added to
+            //    `.bp-tl-fail` in app.css, the two cells above stayed at
+            //    `3T/0x/1u` at all 11 widths and the whole leg still exited 0.
+            //    The reason is the CRUEL fixture's own shape: `.bp-tl-fail`
+            //    renders `<b>Setup failed.</b> ` + the error, so on the cruel
+            //    screen the only tokens are "Setup", "failed." and one 512-char
+            //    run — and the two short words sit at the START of line 1,
+            //    where they fit whether or not the box breaks at any character.
+            //    A shredding declaration has nothing to shred.
+            //
+            //    `mixed-fleet`'s OTHER failed instance (`…a4`, "Reporting") is
+            //    the population that can lose: its provision_error is ordinary
+            //    PROSE — "verify.login: 500 — Studio never came up" — which
+            //    with the `Setup failed.` prefix wraps on its own at the phone
+            //    widths, so a break-at-any-character rule lands a line boundary
+            //    INSIDE a word that would have fit. This cell is a KIND cell by
+            //    the leg's own naming rule (the scenario is not /cruel/), which
+            //    is correct: the claim it buys is about ORDINARY copy, and the
+            //    kind ceiling keeps it honest.
+            { scen: "mixed-fleet", hash: "#instance/5b2c1e00-0000-4000-8000-0000000000a4" },
           ],
           cap: "provision_jobs.error is UNBOUNDED at every layer — a POSTGRES :text column (the `modify :error, :text` migration under cloud/priv/repo/migrations) and ProvisionJob.changeset (registry/provision_job.ex) casts :error with ZERO validate_length. The row's cruelMin is therefore the smallest MEASURED biting length, not a legal maximum",
           class: "UNCAPPED-DERIVED",
@@ -7095,7 +7409,58 @@ async function main() {
           //    lives in `.status-pill-detail`. A bound on the detail alone
           //    would score clean on a capsule that stacked 24px of its own.
           heights: [".bp-tl-fail", ".detail-title-row .status-pill", ".detail-title-row .status-pill-detail"],
-          predicate: "a person whose instance failed to provision can open its own screen, READ the whole reason, and still use the console — instead of getting an ellipsis in the header and a page dragged 3.7k pixels sideways",
+          // ── THE TORN-TOKEN AXIS (cchi-w25-bl-w21-bp-tl-fail-cell-is-an-
+          //    identity-under-anywhere). READ THIS BEFORE TRUSTING THE WIDTH
+          //    CELL ABOVE IT.
+          //
+          //    THE WIDTH CELL ON `.bp-tl-fail` IS AN IDENTITY, AND IT SAYS SO
+          //    HERE RATHER THAN IN A CHARTER. The per-element assertion this
+          //    leg runs is `scrollWidth > clientWidth`. Under the
+          //    `overflow-wrap: anywhere` wave 24 shipped on this box (app.css,
+          //    the `.bp-tl-fail` block), EVERY unbreakable run is broken at the
+          //    content edge, so `scrollWidth === clientWidth` holds by
+          //    CONSTRUCTION for any string of any length — and the same
+          //    declaration floors the box's min-content at one glyph, so
+          //    `documentElement.scrollWidth` cannot move either. MEASURED, not
+          //    argued: raising `CRUEL_PROVISION_ERROR_LEN` from 512 to 5000 (a
+          //    single unbreakable alnum run, 39132px of ink against 3993px)
+          //    left this leg's WIDTH half BYTE-IDENTICAL — the #instance width
+          //    row, the per-host populations and the "cells clean" line all
+          //    unchanged, exit 0 both runs. (The TIGHT-FIT HEIGHT lines added
+          //    after the original finding DO move — `.bp-tl-fail` 398.88px/20
+          //    line boxes to 3413.88px/180 at 320 — and stay green, because
+          //    that bound is a RATIO by design (D206). The width cell is the
+          //    identity; the height cell is merely length-proportional.)
+          //    `cruelMin: 512` does not save it: that is a `>=` FLOOR, so a 10x
+          //    lengthening sails through. On THIS host the width cell certifies
+          //    that a remedy exists; it certifies NOTHING about length, and a
+          //    green there is not a green anyone paid for.
+          //
+          //    SO THE CELL IS GIVEN A QUESTION IT CAN LOSE, and it is the one
+          //    question `anywhere` can actually get wrong: does the box break a
+          //    word THAT WOULD HAVE FIT? `anywhere` is correct exactly when the
+          //    token it broke could not fit its line whole; a box configured to
+          //    break at any character (`word-break: break-all`, `line-break:
+          //    anywhere`) shreds ordinary prose while scoring perfectly on
+          //    every width, height and page assertion in this file. "Setup
+          //    failed." is 80px against a 226px content box at 320 — app.css's
+          //    own w24-s2 comment CLAIMS it renders on exactly one line box,
+          //    and until now nothing asserted it.
+          //
+          //    THE PREDICATE IS TWO-VALUED, and this is the correction any port
+          //    of the D253 line-box instrument must carry or it reds on every
+          //    CORRECT wrap. A naive per-token rule calls the 512-char run
+          //    "torn across 19 line boxes", which is `anywhere` doing its job.
+          //    So each token's INK is summed from its own client rects and
+          //    compared to the host's CONTENT width:
+          //        ink <= content  and boxes > 1  -> TORN        (asserted)
+          //        ink >  content  and boxes > 1  -> UNFITTABLE  (reported,
+          //                                                       never asserted)
+          //    512ch = ~3993px of ink, 5000ch = ~39132px: both UNFITTABLE at
+          //    every width here, both reported, neither asserted. The short
+          //    prose tokens are the ones the assertion binds.
+          tokens: [".bp-tl-fail"],
+          predicate: "a person whose instance failed to provision can open its own screen, READ the whole reason, and still use the console — instead of getting an ellipsis in the header and a page dragged 3.7k pixels sideways. And the prose around the machine string is not SHREDDED to buy that: no word that would have fit its line is broken anyway",
         },
         // ── cch-w23-bl-site-domains-cruel-family: THE SITE LIST'S TWO CAPS ───
         //    The first families added to this table since the s4 shape landed,
@@ -7357,15 +7722,26 @@ async function main() {
       const CRUEL_SCENS = [...new Set(CRUEL_ROUTES.flatMap((r) => cruelCells(r).map((c) => c.scen)))];
       const cellCount = CRUEL_ROUTES.reduce((n, r) => n + cruelCells(r).length, 0) * CRUEL_WIDTHS.length * 2;
       const HEIGHT_HOSTS = [...new Set(CRUEL_ROUTES.flatMap((r) => r.heights || []))];
+      const TOKEN_HOSTS = [...new Set(CRUEL_ROUTES.flatMap((r) => r.tokens || []))];
       process.stdout.write(
         `\n${D} — ${CRUEL_SCENS.length} scenarios x ${CRUEL_ROUTES.length} routes x ${CRUEL_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells; ${CRUEL_ROUTES.map((r) => r.sel).join(" + ")} scrollWidth vs clientWidth, + documentElement.scrollWidth vs clientWidth` +
-        `${HEIGHT_HOSTS.length ? `, + a TIGHT-FIT HEIGHT bound on ${HEIGHT_HOSTS.join(" / ")}` : ""})\n`,
+        `${HEIGHT_HOSTS.length ? `, + a TIGHT-FIT HEIGHT bound on ${HEIGHT_HOSTS.join(" / ")}` : ""}` +
+        `${TOKEN_HOSTS.length ? `, + a TORN-TOKEN bound on ${TOKEN_HOSTS.join(" / ")} (ink <= content && boxes > 1)` : ""})\n`,
       );
       // A PIXEL, and the comment above the assertion says why it is a pixel.
       const HEIGHT_SLACK = 1;
       let cells = 0, seen = 0, spilled = 0, pageOver = 0, wentKind = 0, wentCruel = 0;
       let heightsSeen = 0, tooTall = 0;
+      // The torn-token population, kept SEPARATE from the width tallies because
+      // the two answer different questions on the same host: `spilled` is "did
+      // the box clip", `tornTokens` is "did the box shred". A run must be able
+      // to print 0/0 on the first and lose on the second.
+      let tokenHostsSeen = 0, tokensSeen = 0, tornTokens = 0, unfittableTokens = 0, maxTokenInk = 0;
+      // Which declared token hosts this run actually PAINTED, counted across
+      // every cell — the population the row-level anti-vacuity refusal below
+      // is scored against.
+      const tokenSeenBySel = new Map();
       // ── PER-HOST POPULATIONS (cchi-w22-bl-cruel-corpus-uncovered-caps-
       //    second-tranche). The aggregate `spilled` is one number over five
       //    families: a new row that measures NOTHING and a new row that
@@ -7400,13 +7776,14 @@ async function main() {
             );
             const row = [];
             const hRow = {};
+            const tkRow = {};
             for (const width of CRUEL_WIDTHS) {
               await setViewport(width);
               const m = await evalJs(
                 `(function(){` +
                 `var v=document.querySelector('section.view:not([hidden])');` +
                 `var d=document.documentElement;` +
-                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0,longest:0,hb:[]};` +
+                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0,longest:0,hb:[],tk:[]};` +
                 `[].slice.call(document.querySelectorAll(${JSON.stringify(route.sel)})).forEach(function(e,i){` +
                 // A node with no text can never clip and must not be counted as
                 // a measured assertion (the vacuous-green vector W20-S3 named on
@@ -7467,6 +7844,54 @@ async function main() {
                 `    var h=e.getBoundingClientRect().height;` +
                 `    var r2=function(x){return Math.round(x*100)/100;};` +
                 `    out.hb.push({sel:hsel,i:i,len:t.length,h:r2(h),lines:lines,lh:r2(lh),lhSrc:lhSrc,pad:r2(pad),bor:r2(bor),need:r2(lines*lh+pad+bor),mh:hs.minHeight});` +
+                `  });` +
+                `});` +
+                // ── THE TORN-TOKEN WALK (two-valued; see `tokens:` on the row)
+                // Same D253 Range mechanism as the height walk above, asked a
+                // different question: not how MANY line boxes the host painted,
+                // but whether any single WHITESPACE TOKEN was split across more
+                // than one of them while its own ink would have fit a line
+                // whole. Range offsets are taken inside ONE text node, so a
+                // token never spans the `<b>`/text-node seam — "failed." and
+                // the machine string are separate tokens, which is what a
+                // reader sees.
+                `[].slice.call(${JSON.stringify(route.tokens || [])}).forEach(function(tsel){` +
+                `  [].slice.call(document.querySelectorAll(tsel)).forEach(function(e,i){` +
+                `    var t=(e.textContent||'').trim(); if(!t) return;` +
+                `    var ts=getComputedStyle(e);` +
+                // CONTENT width, not clientWidth: clientWidth includes padding,
+                // and a token is laid out against the content box. Using the
+                // looser number would call a genuinely-unfittable token TORN by
+                // up to padding-x pixels.
+                `    var content=e.clientWidth-parseFloat(ts.paddingLeft)-parseFloat(ts.paddingRight);` +
+                `    var w2=document.createTreeWalker(e,NodeFilter.SHOW_TEXT,null);` +
+                `    var n2,toks=0,torn=0,unfit=0,bad2=[],maxInk=0;` +
+                `    while((n2=w2.nextNode())){` +
+                `      var s=n2.nodeValue||''; if(!s.trim()) continue;` +
+                `      var re=/\\S+/g,mm;` +
+                `      while((mm=re.exec(s))){` +
+                `        var rg2=document.createRange();` +
+                `        rg2.setStart(n2,mm.index); rg2.setEnd(n2,mm.index+mm[0].length);` +
+                `        var rr=rg2.getClientRects(); var ink=0,tops2={},boxes=0;` +
+                `        for(var q=0;q<rr.length;q++){` +
+                `          if(rr[q].width<=0&&rr[q].height<=0) continue;` +
+                `          ink+=rr[q].width;` +
+                `          var kk=Math.round(rr[q].top*4);` +
+                `          if(!tops2[kk]){tops2[kk]=1;boxes++;}` +
+                `        }` +
+                // A token that painted no rect is not a token this box rendered
+                // (display:none, a collapsed run) — it is not counted, so it can
+                // neither be asserted on nor inflate the population.
+                `        if(boxes===0) continue;` +
+                `        toks++;` +
+                `        if(ink>maxInk) maxInk=ink;` +
+                `        if(boxes>1){` +
+                `          if(ink<=content){torn++;bad2.push({tok:mm[0].slice(0,24),len:mm[0].length,ink:Math.round(ink),boxes:boxes});}` +
+                `          else unfit++;` +
+                `        }` +
+                `      }` +
+                `    }` +
+                `    out.tk.push({sel:tsel,i:i,content:Math.round(content),toks:toks,torn:torn,unfit:unfit,bad:bad2,maxInk:Math.round(maxInk),wb:ts.wordBreak,lb:ts.lineBreak,ow:ts.overflowWrap});` +
                 `  });` +
                 `});` +
                 `return out;})()`,
@@ -7542,6 +7967,41 @@ async function main() {
                   }
                 }
               }
+              // ── THE TORN-TOKEN ASSERTION, one line per host per width ─────
+              if ((route.tokens || []).length) {
+                // ANTI-VACUITY IS A ROW-LEVEL CHECK HERE, NOT A PER-CELL ONE,
+                // and the difference is the whole lesson of the first run of
+                // this block: the per-cell shape the height walk uses fired 22
+                // findings against `mixed-fleet#instance/…a1`, whose LIVE
+                // instance did not fail and therefore renders no `.bp-tl-fail`
+                // at all. An absent host on a screen it does not belong to is
+                // the honest answer, not a defect — the vacuity actually worth
+                // refusing is a declared token host that renders on NO cell of
+                // the whole leg. That is asserted once, after the loop, off
+                // `tokenSeenBySel`. (The height walk can afford the per-cell
+                // shape only because it declares THREE hosts and refuses
+                // against their union; a one-host row has no union to hide in.)
+                for (const b of m.tk) {
+                  tokenSeenBySel.set(b.sel, (tokenSeenBySel.get(b.sel) || 0) + 1);
+                  tokenHostsSeen++;
+                  tokensSeen += b.toks;
+                  unfittableTokens += b.unfit;
+                  if (b.maxInk > maxTokenInk) maxTokenInk = b.maxInk;
+                  tkRow[b.sel] = tkRow[b.sel] || {};
+                  tkRow[b.sel][width] = `${b.toks}T/${b.torn}x/${b.unfit}u`;
+                  // A host whose text painted NO tokens at all cannot lose this
+                  // bound — the same collapse the height walk refuses at
+                  // `lines === 0`, in its own vocabulary.
+                  if (b.toks === 0) {
+                    fail(D, `${scen}/${theme}@${width}${cell.hash} \`${b.sel}\` el${b.i}: the Range walk found ZERO painted whitespace tokens — the torn-token bound below cannot lose on this host, so a clean line here would certify nothing`);
+                    continue;
+                  }
+                  for (const t of b.bad) {
+                    tornTokens++;
+                    fail(D, `${scen}/${theme}@${width}${cell.hash} \`${b.sel}\` el${b.i}: the ${t.len}-character token "${t.tok}" is SPLIT ACROSS ${t.boxes} line boxes while its own ink measures ${t.ink}px against a ${b.content}px content box — it would have fit a line WHOLE and was broken anyway. Computed on the measured element: word-break "${b.wb}", line-break "${b.lb}", overflow-wrap "${b.ow}". This is the one thing \`overflow-wrap: anywhere\` is not allowed to do, and it is invisible to every width, height and page assertion in this leg — all of which score PERFECTLY on shredded prose`);
+                  }
+                }
+              }
             }
             process.stdout.write(`   ${cell.hash} ${scen}/${theme}  ${row.join(" ")}\n`);
             // BOTH NUMBERS PRINTED, per host per width (`height/tight-fit`), so
@@ -7552,6 +8012,14 @@ async function main() {
               const cells2 = CRUEL_WIDTHS.map((w) => `${w}:${(hRow[hsel] || {})[w] || "-"}`).join(" ");
               process.stdout.write(`      H ${hsel}  ${cells2}\n`);
             }
+            // The torn-token numbers, printed the same way and for the same
+            // reason: `tokens/torn/unfittable` per host per width, so a reader
+            // sees the population the verdict was scored over — and a token
+            // count that COLLAPSED to zero is readable, not merely refused.
+            for (const tsel of route.tokens || []) {
+              const cells3 = CRUEL_WIDTHS.map((w) => `${w}:${(tkRow[tsel] || {})[w] || "-"}`).join(" ");
+              process.stdout.write(`      T ${tsel}  ${cells3}\n`);
+            }
           }
         }
       }
@@ -7561,6 +8029,20 @@ async function main() {
       // skipped, a scenario list mutated mid-run, a `continue` that ran early.
       if (cells !== cellCount) {
         fail(D, `run check: drove ${cells} cells, the table declares ${cellCount} — the loop measured a different corpus than the header announced, so a "cells clean" line here would be counted over ${Math.abs(cellCount - cells)} cell(s) nobody drove`);
+      }
+      // ── THE TORN-TOKEN ANTI-VACUITY REFUSAL, scored once over the whole run.
+      // A host declared under `tokens:` that painted on ZERO cells means the
+      // bound above was never evaluated — a selector that went stale, a route
+      // that stopped rendering the box, a fixture that stopped failing. The
+      // ok-line would still print "0 torn", which is the exact green this row
+      // exists to make impossible.
+      for (const tsel of TOKEN_HOSTS) {
+        if (!tokenSeenBySel.get(tsel)) {
+          fail(D, `torn-token anti-vacuity: \`${tsel}\` is declared as a token host and painted on ZERO of the ${cells} cells driven — the torn-token bound was never evaluated, so "0 torn" below would be a green over an empty population, not a measurement`);
+        }
+      }
+      if (TOKEN_HOSTS.length && tokensSeen === 0) {
+        fail(D, `torn-token anti-vacuity: ${tokenHostsSeen} token-host measurement(s) walked ZERO painted whitespace tokens in total — the bound cannot lose over an empty token set`);
       }
       // ── THE PER-HOST POPULATION TABLE, PRINTED UNCONDITIONALLY ────────────
       // Not inside the ok-lines below: those print only when this leg took no
@@ -7603,6 +8085,27 @@ async function main() {
           `could have told 19 line boxes from 220. A LONGER error moves both sides together and stays green (D206: a ` +
           `pixel pin would pin the fixture string); only LAYOUT waste — a min-height, a per-line margin, a second copy ` +
           `of the box — moves the measured side alone`,
+        );
+        okLine(
+          `and the WIDTH CELL ON \`${TOKEN_HOSTS.join(" / ")}\` NOW HAS A QUESTION IT CAN LOSE (cchi-w25-bl-w21-bp-tl-` +
+          `fail-cell-is-an-identity-under-anywhere): under \`overflow-wrap: anywhere\` the per-element ` +
+          `\`scrollWidth > clientWidth\` test on that box is an IDENTITY — raising CRUEL_PROVISION_ERROR_LEN 512 -> 5000 ` +
+          `(3993px of ink -> 39132px) left the WIDTH half BYTE-IDENTICAL, exit 0 both runs, and \`cruelMin\` is a >= ` +
+          `FLOOR that a 10x lengthening sails through. ` +
+          `So a TORN-TOKEN bound is asserted beside it, TWO-VALUED so it does not red on a correct wrap: across ` +
+          `${tokenHostsSeen} host measurements, ${tokensSeen} painted whitespace tokens were walked with a Range and ` +
+          `${tornTokens} were TORN (split across >1 line box while their own ink would have fit the content box whole) ` +
+          `and ${unfittableTokens} were UNFITTABLE (ink > content — reported, NEVER asserted; the widest token measured ` +
+          `${maxTokenInk}px of ink). The unfittable arm is the correction that makes this portable: a naive per-token ` +
+          `rule calls the 512-character run "torn across 19 line boxes", which is \`anywhere\` doing its job. AND THE ` +
+          `ROW CARRIES A PROSE CELL FOR THE SAME REASON THIS BOUND EXISTS — on the CRUEL screen the only tokens are ` +
+          `"Setup", "failed." and one 512-char run, and the two short words sit at the start of line 1 where they fit ` +
+          `whatever the box does, so a shredding declaration has nothing to shred and this bound would have been green ` +
+          `by construction too. Driven with \`word-break: break-all\` on \`.bp-tl-fail\`: the cruel cells held at ` +
+          `3T/0x/1u across all 11 widths and the leg still exited 0, while \`mixed-fleet#instance/…a4\` ("Setup failed. ` +
+          `verify.login: 500 — Studio never came up", 9 tokens) tore "Studio" 40px/224px at 320, "never" 35px/264px at ` +
+          `360, "came" 33px/294px at 390 and "up" 16px/334px at 430 — 8 findings, ALL of them from this bound, with ` +
+          `every width, height and page assertion above scoring perfectly on the shredded prose`,
         );
         okLine(
           `PER HOST, including the zeros (cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche): ` +
@@ -7672,6 +8175,11 @@ async function main() {
         `H1 + .detail-url-text vs the page)\n`,
       );
       let cells = 0, pageOver = 0, h1Uncut = 0, urlUncut = 0;
+      // cchi-w22-bl-the-pinned-release-badge-does-not-break: the THIRD host on
+      // this page, driven by the same fixture. POPULATION IS PRINTED, not
+      // implied — a leg that says "0 offending" beside an unstated node count is
+      // the survived-contact verdict this corpus has already been burned by.
+      let pinCells = 0, pinNodes = 0, pinLen = 0, pinUncued = 0, pinWorstSw = 0, pinWorstCw = 0, pinWorstH = 0;
       for (const theme of ["light", "dark"]) {
         await setViewport(1000);
         await nav(
@@ -7687,8 +8195,43 @@ async function main() {
             `var d=document.documentElement;` +
             `var h1=document.querySelector('.detail-title-row h1');` +
             `var url=document.querySelector('.detail-url-text');` +
+            // THE PIN BADGE, measured with the D253 cue predicate's own three
+            // legs (charter D253, the .set-row-name arm): `mw` is a
+            // width:min-content clone appended into the element's OWN parent so
+            // every inherited breaking value is the real one, `tw` is the widest
+            // TEXT run reachable through display:inline only (a line holding one
+            // atomic inline has nothing to ellipsize), and `ox` is read by name
+            // because `overflow` is a shorthand that can serialise "visible clip".
+            `var pins=[];` +
+            `Array.prototype.forEach.call(document.querySelectorAll('.update-panel-body .rail-row .v .badge'),function(n){` +
+            `  var cs=getComputedStyle(n);` +
+            `  var cl=n.cloneNode(true);` +
+            `  cl.style.cssText+=';position:absolute!important;left:-99999px!important;top:0!important;visibility:hidden!important;width:min-content!important;max-width:none!important;min-width:0!important;height:auto!important;overflow:visible!important;flex:0 0 auto!important;';` +
+            `  n.parentNode.appendChild(cl);` +
+            `  var mw=Math.ceil(cl.getBoundingClientRect().width);` +
+            `  cl.parentNode.removeChild(cl);` +
+            `  var tw=0;` +
+            `  (function walk(e){` +
+            `    for(var k=0;k<e.childNodes.length;k++){var ch=e.childNodes[k];` +
+            `      if(ch.nodeType===3){` +
+            `        if(!(ch.nodeValue||'').trim()) continue;` +
+            `        var rg=document.createRange();rg.selectNodeContents(ch);` +
+            `        var rl=rg.getClientRects();` +
+            `        for(var q=0;q<rl.length;q++) tw=Math.max(tw,rl[q].width);` +
+            `      } else if(ch.nodeType===1){` +
+            `        var dd=getComputedStyle(ch).display;` +
+            `        if(dd==='inline'||dd==='contents') walk(ch);` +
+            `      }` +
+            `    }})(n);` +
+            `  var t=(n.textContent||'').trim();` +
+            `  var pr=n.parentNode;` +
+            `  pins.push({sw:n.scrollWidth,cw:n.clientWidth,h:Math.round(n.getBoundingClientRect().height),` +
+            `    w:Math.round(n.getBoundingClientRect().width),pw:pr?pr.clientWidth:null,` +
+            `    te:cs.textOverflow,ov:cs.overflow,ox:cs.overflowX,ws:cs.whiteSpace,mw:mw,` +
+            `    tw:Math.round(tw*100)/100,len:t.length,t:t.slice(0,18)});` +
+            `});` +
             `return {view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,` +
-            `h1sw:h1?h1.scrollWidth:null,h1cw:h1?h1.clientWidth:null,` +
+            `h1sw:h1?h1.scrollWidth:null,h1cw:h1?h1.clientWidth:null,pins:pins,` +
             `usw:url?url.scrollWidth:null,ucw:url?url.clientWidth:null};})()`,
           );
           cells++;
@@ -7724,6 +8267,54 @@ async function main() {
             urlUncut++;
             fail(D, `${theme}@${width}: .detail-url-text clientWidth ${m.ucw} > its own scrollWidth ${m.usw} — an impossible box, the measurement itself is broken`);
           }
+          // ── THE PIN BADGE ARM (cchi-w22-bl-the-pinned-release-badge-does-
+          //    not-break). `autoupdatePolicyLabel()` paints
+          //    "Pinned to " + vRel(pinned_release) into the Autoupdate rail row
+          //    as a `.badge` inside `.rail-row .v`. `.rail-row .v` breaks; the
+          //    `.badge` did not, and at the 255-char cap the pill grew to the
+          //    whole string and took the PAGE to 2054 against a 320 viewport
+          //    (24/24 cells, both themes, measured on this branch before the
+          //    fix). The page arm above would catch that — but only while the
+          //    fixture is cruel, so the fixture's own cruelty is asserted here
+          //    as well: an empty population, or a pin that quietly shortened,
+          //    reds rather than certifying a page that nothing was driving.
+          if (m.pins.length === 0) {
+            fail(D, `${theme}@${width}: zero \`.update-panel-body .rail-row .v .badge\` rendered — the Autoupdate policy row did not paint, so the pin host was not measured and this cell is not a pass`);
+          } else {
+            pinCells++;
+            pinNodes += m.pins.length;
+            const pin = m.pins.find((n) => n.len > 200);
+            if (!pin) {
+              fail(D, `${theme}@${width}: ${m.pins.length} policy badge(s) rendered but the longest is ${Math.max(...m.pins.map((n) => n.len))} characters — the fixture's 255-char pinned_release is not reaching this host, the leg has GONE KIND`);
+            } else {
+              pinLen = pin.len;
+              pinWorstSw = Math.max(pinWorstSw, pin.sw);
+              pinWorstCw = Math.max(pinWorstCw, pin.cw);
+              pinWorstH = Math.max(pinWorstH, pin.h);
+              // The D253 predicate, verbatim from the members-roster arm: a cue
+              // "can paint" only where `text-overflow: ellipsis` meets a box
+              // that actually clips HORIZONTALLY and a line with a real text run
+              // and NO break opportunity inside the box (mw > cw). A zero `mw`
+              // makes it false and FLAGS, never exempts.
+              // THE CONTAINMENT ARM, and it is the one that names the HOST on a
+              // regression. An UNCAPPED `white-space: nowrap` pill does not clip
+              // — its own box simply GROWS to the whole string, so
+              // `scrollWidth > clientWidth` is FALSE on it and the cue arm below
+              // stays silent while the page drags. What is true is that the pill
+              // is then wider than the `.rail-row .v` that contains it. One
+              // pixel of slack for sub-pixel rounding; the defect this catches
+              // measured 1941 inside 250.
+              if (pin.pw !== null && pin.w > pin.pw + 1) {
+                pinUncued++;
+                fail(D, `${theme}@${width}: the Autoupdate \`.badge\` "${pin.t}…" (${pin.len} painted chars, pinned_release at its 255 cap) is ${pin.w}px wide inside a ${pin.pw}px \`.rail-row .v\` — the pill overflows the rail value that contains it, and the page reads ${m.psw} against ${m.pcw}`);
+              }
+              const cuePaints = pin.te === "ellipsis" && pin.ox !== "visible" && pin.mw > pin.cw && pin.tw > 0;
+              if (pin.sw > pin.cw && !cuePaints) {
+                pinUncued++;
+                fail(D, `${theme}@${width}: the Autoupdate \`.badge\` "${pin.t}…" (${pin.len} chars) has scrollWidth ${pin.sw} > clientWidth ${pin.cw} — ${pin.sw - pin.cw}px of the pinned release is hidden with NO cue that can paint (min-content ${pin.mw} vs clientWidth ${pin.cw}, widest text run ${pin.tw}; computed text-overflow "${pin.te}", overflow "${pin.ov}", overflow-x "${pin.ox}", white-space "${pin.ws}")`);
+              }
+            }
+          }
           const bad = (over ? 1 : 0);
           row.push(`${width}:${m.psw}${bad ? "!" : ""}`);
         }
@@ -7737,6 +8328,15 @@ async function main() {
           `${cells} / ${cells} cells clean (${DETAIL_WIDTHS.join("/")} x 2 themes on instance-cruel-detail — the ` +
           `253-char custom_host and 255-char name fixture) — 0 pages dragging sideways, 0 h1 break-word failures, ` +
           `0 impossible .detail-url-text boxes`,
+        );
+        okLine(
+          `PIN HOST POPULATION (task-02a521fea7beeb2f): ${pinNodes} \`.update-panel-body .rail-row .v .badge\` nodes over ` +
+          `${pinCells} / ${cells} cells, the pinned one carrying ${pinLen} painted characters ("Pinned to " + a 255-char ` +
+          `pinned_release at its validate_length cap) — ${pinUncued} badges clipped with no cue that can paint (D253: ` +
+          `text-overflow ellipsis + a box that clips horizontally + min-content > clientWidth + a real text run, ` +
+          `measured, never inferred from a declaration). Worst badge geometry across the sweep: scrollWidth ` +
+          `${pinWorstSw} vs clientWidth ${pinWorstCw}, height ${pinWorstH}px, and no badge wider than the ` +
+          `\`.rail-row .v\` holding it — the pill stays one row tall and inside its own rail value`,
         );
         okLine(
           `TWO HOSTS, ONE PAGE (task-df8a6fced3a408a8): the original finding named .detail-url-text alone; ` +

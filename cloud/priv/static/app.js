@@ -4397,13 +4397,38 @@
   // switch for the whole rail, so both copies now name the whole rail. (The
   // surface already contained the honest word once, in the always-send row's
   // "master … switch"; that row now agrees with these two.)
+  // cch-w39-rv (charter D895 — KEEP ROLE-FREE DATA) — THE THIRD ARM, and it is a
+  // SPLIT of the shipped member sentence, not a newly authored one. `canManage`
+  // takes a third value, the string "unknown", for a /v1/me that is in flight,
+  // failed or stale: the read-only card renders exactly as it does for a
+  // confirmed member — same heading, same `<dl>`, same alerts/transport/from
+  // values, all of it /v1/notifications/settings' own answer and role-free —
+  // and the ONLY thing withheld is the role CLAIM, the trailing sentence "Only
+  // team admins can change these settings." That sentence is a fact about a
+  // role nobody read; the two before it are facts about the team's settings,
+  // which the server did send. Before this, the whole section was deleted under
+  // an unknown role because the claim happened to live inside it, so an outage
+  // cost a notifications user their own visible settings while a billing user
+  // kept the plan card — a difference nobody decided. The copy fence (D438)
+  // is honoured by CONSTRUCTION: no string is authored here, one shipped
+  // sentence is simply not appended.
+  var NOTIF_EMAIL_READONLY_PURPOSE =
+    "The master switch for every alert Barkpark sends &mdash; email and chat channels alike &mdash; and your team's alert email.";
+  var NOTIF_EMAIL_ADMIN_ONLY_CLAIM = " Only team admins can change these settings.";
+
   function notifEmailSectionHtml(s, canManage) {
     s = s || {};
     var transport = s.transport || "instance";
-    if (!canManage) {
+    if (canManage !== true) {
+      // The role claim is appended ONLY on a determinate refusal. Anything that
+      // is not a proven `true` and not a proven `false` (the "unknown" band)
+      // gets the data without the claim; a proven member keeps both, byte-for-
+      // byte, which is what the positive control in __app.test.mjs pins.
+      var roleKnown = canManage === false;
       return '<section class="set-section">' +
         '<h3 class="set-h">Alert delivery</h3>' +
-        '<p class="set-purpose">The master switch for every alert Barkpark sends &mdash; email and chat channels alike &mdash; and your team\'s alert email. Only team admins can change these settings.</p>' +
+        '<p class="set-purpose">' + NOTIF_EMAIL_READONLY_PURPOSE +
+          (roleKnown ? NOTIF_EMAIL_ADMIN_ONLY_CLAIM : "") + "</p>" +
         '<dl class="set-readonly">' +
           "<div><dt>All alerts (email and chat)</dt><dd>" + (s.alerts_enabled === false ? "Off" : "On") + "</dd></div>" +
           "<div><dt>Transport</dt><dd>" + esc(notifTransportLabel(transport)) + "</dd></div>" +
@@ -4730,8 +4755,16 @@
 
   function notifPageHtml(s, opts) {
     opts = opts || {};
+    // cch-w39-rv (D895) — the unknown page KEEPS the read-only alert-delivery
+    // card. It is /v1/notifications/settings' answer, which this page already
+    // has in hand and which every role may read; only the role claim on its
+    // purpose line is withheld (see notifEmailSectionHtml's third arm). The
+    // channels notice stays out — "managed by team admins" is a role claim with
+    // no data under it — and channels/matrix stay out because they are WRITE
+    // forms, which no unproven role may be handed (fail-closed, unchanged).
     if (opts.state && opts.state !== "loaded") {
-      return notifMeUnknownHtml(opts.state) + notifDeliveriesShellHtml(true);
+      return notifMeUnknownHtml(opts.state) + notifEmailSectionHtml(s, "unknown") +
+        notifDeliveriesShellHtml(true);
     }
     if (!opts.canManage) {
       return notifEmailSectionHtml(s, false) + notifMemberAdminNoticeHtml() + notifDeliveriesShellHtml(true);
