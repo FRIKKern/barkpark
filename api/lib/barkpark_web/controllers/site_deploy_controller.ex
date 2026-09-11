@@ -448,11 +448,23 @@ defmodule BarkparkWeb.SiteDeployController do
   # box — and nothing called `build_record/2`, so the answer to "why did build X
   # fail" was an SSH session. This is that answer over the existing admin door.
   #
-  # RAW LOG BYTES ARE DELIBERATELY NOT SERVED, AND THIS IS NOT A SIZE DECISION.
-  # The build env file carries `BARKPARK_TOKEN=` in plaintext and THE RECORDED
-  # BYTES ARE NEVER SCRUBBED AT WRITE — the log is captured verbatim, so what the
-  # build printed is on the box in the clear. `DeployRunner.build_record/2`
-  # refuses the bytes for exactly that reason.
+  # LOG BYTES ARE STILL NOT SERVED HERE — but as of 2026-09-11 the GROUND HAS
+  # MOVED, and the new ground is narrower. It used to be "the recorded bytes are
+  # never scrubbed at write": the log was captured verbatim by the deploy shell's
+  # `tee`, the build env file carries `BARKPARK_TOKEN=` in plaintext, and so what
+  # the build printed sat on the box in the clear. That hole is CLOSED
+  # (dr-bl-recorder-http-read-path c2): `DeployRunner.write_terminal_record/2`
+  # folds the log in place with `Barkpark.Sites.BuildLogScrub.raw/1` — the same
+  # `cloud/priv/secret-scrub.exs` pattern set the control plane's display
+  # boundary compiles — before it measures the file, and stamps the version it
+  # used onto the record as `log_scrub`.
+  #
+  # WHAT REMAINS is a separate criterion (c1) and a separate design: serving the
+  # bytes needs a size cap, a tail-vs-whole decision, and a rule for a record
+  # whose `log_scrub` is `nil` (never folded — a pre-2026-09-11 record whose log
+  # has since been evicted, or a fold that hit an IO error). A door that serves
+  # bytes MUST read that field and refuse a `nil`; nothing here does yet, so
+  # nothing here serves bytes.
   #
   # CORRECTED 2026-09-08 (task-04e89e88f056aa38), then CORRECTED AGAIN the same
   # day. The whole sequence is kept deliberately, so the next reader sees it:
@@ -480,10 +492,9 @@ defmodule BarkparkWeb.SiteDeployController do
   # `strip_ansi |> scrub`, test-pinned). A closed defect cannot carry a refusal,
   # which is the only reason the figure is no longer the ground here.
   #
-  # WHAT IS NOT REFUTED IS THE REFUSAL, and its ground is stated above: nothing
-  # scrubs the RECORDED LOG BYTES AT WRITE. Both landed scrubbers are
-  # DISPLAY-BOUNDARY, so a clean render says nothing about the bytes this
-  # endpoint would hand out. So this ships the STRUCTURED record — which is
+  # AND THAT REFUSAL HAS NOW BEEN PAID, not merely restated: the write-boundary
+  # scrub above is exactly the thing whose absence this comment named. What this
+  # endpoint ships is still the STRUCTURED record — which is
   # strictly more diagnostic than the one-line failure_reason and carries no
   # credential surface — and `log_path` + `log_bytes` + `journal_command` tell an
   # operator where the bytes are without moving them.
