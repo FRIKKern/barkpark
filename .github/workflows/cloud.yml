@@ -219,13 +219,44 @@ jobs:
           pin_ref="${DISPATCH_PIN_REF:-refs/pull/${{ github.event.pull_request.number }}/merge}"
           pin_script="scripts/cloud-path-escape-check.sh"
           pin_src="the PR HEAD checkout — NOT the commit this workflow file came from"
-          pinned="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/cloud-path-escape-check.pinned.sh"
+          # A PIN *ROOT*, not a loose file. cloud-path-escape-check.sh resolves
+          # its own DECL_ROOT as `dirname($0)/..`, and the census tier derives
+          # its corpus from a declaration FILE under that root. A pinned copy
+          # dropped straight into $RUNNER_TEMP therefore gets
+          # DECL_ROOT=/home/runner/work, finds no declaration, and exits 2 on
+          # EVERY `--match census` — which match_set below turns into a
+          # permanent census=true. Measured 2026-09-11 in case 10 of
+          # scripts/cloud-path-escape-check.test.sh: a docs-only fixture came
+          # back census=true. So the pinned copy lands at <pinroot>/scripts/
+          # and the declaration it NAMES is pinned beside it off the same ref —
+          # parser and corpus move together or not at all.
+          pinroot="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/dispatcher-pinroot"
+          rm -rf "$pinroot"
+          mkdir -p "$pinroot/scripts"
+          pinned="$pinroot/scripts/cloud-path-escape-check.sh"
 
           if git fetch --no-tags --quiet "$pin_remote" "+${pin_ref}:refs/dispatcher/pinned" 2>/dev/null \
              && git show refs/dispatcher/pinned:scripts/cloud-path-escape-check.sh >"$pinned" 2>/dev/null \
              && [ -s "$pinned" ]; then
             pin_script="$pinned"
             pin_src="${pin_ref} ($(git rev-parse refs/dispatcher/pinned))"
+            # The corpus declaration, from the SAME ref. The script names the
+            # file itself (`--census-source`) so this follows a rename of it
+            # instead of hard-coding a path here that goes quietly stale.
+            # A failure here is NAMED and NOT fatal: `--match census` then
+            # exits 2 and match_set dispatches census=true out loud — more
+            # runs, never a silent skip.
+            censrc="$(bash "$pin_script" --census-source 2>/dev/null || true)"
+            case "$censrc" in
+              */*)
+                mkdir -p "$pinroot/$(dirname "$censrc")"
+                git show "refs/dispatcher/pinned:${censrc}" >"$pinroot/$censrc" 2>/dev/null \
+                  || echo "::warning::dispatcher: pinned the script from ${pin_ref} but could NOT pin its census declaration '${censrc}' from the same ref. The census verdict below falls back to true."
+                ;;
+              *)
+                echo "::warning::dispatcher: the pinned script did not name a census declaration source (--census-source printed '${censrc}'). The census verdict below falls back to true."
+                ;;
+            esac
           else
             # NAMED, never silent — and deliberately NOT fatal. A merge ref is
             # absent for a PR with conflicts, and killing the dispatcher there
