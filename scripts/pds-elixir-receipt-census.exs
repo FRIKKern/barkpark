@@ -11100,7 +11100,20 @@ defmodule PDS.Census do
       exit: 0,
       expect: [
         "RESPONSE-CARRIES-THE-READ — A HYPOTHESIS COLUMN, NEVER A VERDICT",
-        "barkpark_web/controllers/github_status_controller.ex:65  health: status_fun().()",
+        # RE-DERIVED, NEVER RE-TYPED (pds-w39-status-only-receipts). This read `:65` and
+        # the site has been at `:92` for some time: MEASURED on origin/main at 93672ef92,
+        # BEFORE this wave touched the file, a plain `elixir scripts/pds-elixir-receipt-
+        # census.exs` prints `REFUSED  barkpark_web/controllers/github_status_controller
+        # .ex:92  health: status_fun().()`, and the identical line comes back after. So
+        # this case was the ONLY red in `--selftest` on a clean checkout, and it was red
+        # for a LINE, not for a behaviour — the arm it guards (RCR-CAPTURE-FIRE-REDS,
+        # RCR-FIRE-SET-PINNED) passed throughout. IT IS THIS FILE'S OWN NAMED DEFECT
+        # WEARING THE SELFTEST'S COAT: a {path,line} key that rots silently while the
+        # thing it names is fine, which is exactly why the register's citations were
+        # migrated to CONTENT keys. The expectation is left line-anchored rather than
+        # migrated here because the string it matches is the census's OWN PRINTED OUTPUT,
+        # where the line is part of the claim being asserted.
+        "barkpark_web/controllers/github_status_controller.ex:92  health: status_fun().()",
         "PASS  RESPONSE-CARRIES-READ-REFUSES-CAPTURE",
         "PASS  RESPONSE-CARRIES-THE-READ-PINNED"
       ],
