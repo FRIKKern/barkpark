@@ -118,11 +118,33 @@
 //   · block-registered tests  (`--demo-depth0-tests` → a `for`-block
 //     registration is never examined) — all three: fixtures/hazards.mjs
 //
+// THE ZONE ANCHOR'S POSITION — THE CAUSE, NOT THE CONSEQUENCE (cchi-w61)
+// -----------------------------------------------------------------------
+// Everything above measures the CONSEQUENCE: a test that already reads a late
+// binding across a suspension point. The scaffy generator
+// `ensure-console-hook-zones` plants a `console-tests` zone anchor
+// (`MARK:zone-console-tests`) at the harness TAIL, and
+// `add-console-helper` plants every new test group DIRECTLY BELOW that mark.
+// So the anchor's POSITION is the CAUSE: if it ever drifts above a depth-0
+// `await`, every group generated from then on is born above a suspension
+// point, and the first one that happens to read a late binding reds — which
+// may be waves later, in someone else's PR, for a reason that looks nothing
+// like the edit that caused it.
+//
+// That invariant used to live only as English, in the anchor comment itself
+// (__app.test.mjs, the block ending `MARK:zone-console-tests`). `zoneAnchor`
+// below makes it executable: when the measured file carries the mark, the
+// mark's line number must EXCEED the line of the LAST depth-0 `await`. It is
+// a SEPARATELY NAMED assertion (`ZONE ANCHOR ORDER`, not `TDZ ORDER`) because
+// it answers a different question, and it reds with `crossings: 0` — the
+// proof it catches the cause rather than waiting for the consequence.
+//
 // USAGE
 //   node scripts/console-tdz-order-check.mjs <file.mjs>
 //   node scripts/console-tdz-order-check.mjs --selftest
 //
-// EXIT: 0 clean · 1 crossings found · 2 refused to measure (bad args/unreadable)
+// EXIT: 0 clean · 1 crossings found, or the zone anchor is out of position
+//     · 2 refused to measure (bad args/unreadable)
 //     · 3 refused to measure (the lexer lost the file: brackets do not balance).
 
 import fs from "node:fs";
@@ -640,6 +662,48 @@ function isModuleEvaluated(masked, idx) {
   return true;
 }
 
+// ── 4e. THE SCAFFY ZONE ANCHOR ──────────────────────────────────────────────
+// The token `add-console-helper` anchors on (see
+// `scaffy/commands/add-console-helper.scaffy` op 3: `INSERT AFTER FIRST` the
+// line carrying this mark). Keyed on the mark rather than a line number on
+// purpose: the harness is edited every wave and a line pin breaks on the first
+// insertion above it.
+export const ZONE_ANCHOR_MARK = "MARK:zone-console-tests";
+
+// Where does the anchor sit relative to the file's suspension points? Pure and
+// exported so `--selftest` can grade the arm that decides the exit code.
+//
+// `boundaryLines` is the depth-0 `await` line set, ASCENDING, as `analyze`
+// derives it — the LAST entry is the one that matters, because a group planted
+// at the anchor is safe only when no suspension point remains below it.
+//
+// Reasons, and why each is or is not a defect:
+//   absent       — the file carries no anchor. Not a defect: this guard runs on
+//                  whatever file it is handed, and only __app.test.mjs has one.
+//   no-boundary  — an anchor but no depth-0 `await` at all. Nothing can drain
+//                  early, so position cannot hurt. Not a defect.
+//   below        — the invariant holds.
+//   above        — THE DEFECT this assertion exists for.
+//   ambiguous    — two or more mark lines. The generator's `INSERT AFTER FIRST`
+//                  would pick one of them and a reader cannot tell which, so
+//                  "the anchor's position" has no single answer. Refusing to
+//                  certify is the only honest verdict; reported as a defect.
+export function zoneAnchor(src, boundaryLines) {
+  const markLines = [];
+  const lines = src.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(ZONE_ANCHOR_MARK)) markLines.push(i + 1);
+  }
+  const lastAwaitLine = boundaryLines.length ? boundaryLines[boundaryLines.length - 1] : -1;
+  const base = { mark: ZONE_ANCHOR_MARK, markLines, lastAwaitLine };
+  if (!markLines.length) return { ...base, present: false, markLine: -1, ok: true, reason: "absent" };
+  if (markLines.length > 1) return { ...base, present: true, markLine: markLines[0], ok: false, reason: "ambiguous" };
+  const markLine = markLines[0];
+  if (lastAwaitLine < 0) return { ...base, present: true, markLine, ok: true, reason: "no-boundary" };
+  const below = markLine > lastAwaitLine;
+  return { ...base, present: true, markLine, ok: below, reason: below ? "below" : "above" };
+}
+
 // ── 5. THE ANALYSIS ─────────────────────────────────────────────────────────
 export function analyze(src, opts = {}) {
   const maskReport = {};
@@ -685,7 +749,11 @@ export function analyze(src, opts = {}) {
     if (firstOnly && boundaries.length) continue;
     boundaries.push(m.index);
   }
-  if (!boundaries.length) return { boundary: -1, boundaries: [], lex, awaitTokens };
+  // The anchor is measured off the RAW source, not the masked copy: it lives
+  // in a comment, and masking blanks comments out.
+  const anchor = zoneAnchor(src, boundaries.map(lineOf));
+
+  if (!boundaries.length) return { boundary: -1, boundaries: [], boundaryLines: [], lex, awaitTokens, anchor };
   const boundary = boundaries[0];
 
   // Depth-0 declarations, in source order. A `function` declaration is HOISTED
@@ -786,6 +854,7 @@ export function analyze(src, opts = {}) {
     crossings,
     lex,
     awaitTokens,
+    anchor,
   };
 }
 
@@ -836,12 +905,58 @@ export function reconcile(file, crossings, ledger = LATENT) {
 // reconciliation when there is one; without it every crossing is fatal.
 export function exitCodeFor(r, led = null) {
   if (!r.lex.ok) return 3;
+  // The anchor arm is independent of the crossing arm — it is the whole reason
+  // this assertion exists — so it is answered BEFORE the no-boundary shortcut
+  // and it can red on its own, with crossings still 0.
+  if (r.anchor && !r.anchor.ok) return 1;
   if (r.boundary < 0) return 0;
   if (led) return led.fresh.length || led.stale.length ? 1 : 0;
   return r.crossings.length ? 1 : 0;
 }
 
 // ── 6. CLI ──────────────────────────────────────────────────────────────────
+
+// The zone-anchor verdict, printed on EVERY run — green included — so the two
+// numbers the invariant rests on are on the record and a reader never has to
+// take the word "below" on trust.
+function reportAnchor(file, r) {
+  const a = r.anchor;
+  if (!a || !a.present) {
+    console.log(`  zone anchor (${ZONE_ANCHOR_MARK}): absent — this file carries no scaffy console-tests zone`);
+    return;
+  }
+  if (a.reason === "ambiguous") {
+    console.log(`  zone anchor (${ZONE_ANCHOR_MARK}): AMBIGUOUS — ${a.markLines.length} mark lines at ${a.markLines.join(", ")}`);
+    console.error(
+      `::error file=${file},line=${a.markLines[1]}::ZONE ANCHOR ORDER: ${file} carries ${a.markLines.length} ` +
+      `\`${ZONE_ANCHOR_MARK}\` lines (${a.markLines.join(", ")}). scaffy's add-console-helper op 3 plants every ` +
+      `new test group with INSERT AFTER FIRST on that mark, so with more than one the anchor's position has no ` +
+      `single answer and this guard will not certify one. Delete the duplicate zone comment, keeping the one ` +
+      `below the file's last top-level \`await\` (line ${a.lastAwaitLine}).`
+    );
+    return;
+  }
+  if (a.reason === "no-boundary") {
+    console.log(`  zone anchor (${ZONE_ANCHOR_MARK}): line ${a.markLine}; no depth-0 \`await\` in this file, so position cannot hurt`);
+    return;
+  }
+  console.log(
+    `  zone anchor (${ZONE_ANCHOR_MARK}): MARK line ${a.markLine} vs LAST depth-0 \`await\` line ` +
+    `${a.lastAwaitLine} — ${a.reason === "below" ? "BELOW, invariant holds" : "ABOVE, INVARIANT BROKEN"}`
+  );
+  if (a.ok) return;
+  console.error(
+    `::error file=${file},line=${a.markLine}::ZONE ANCHOR ORDER: the scaffy console-tests zone anchor ` +
+    `(\`${ZONE_ANCHOR_MARK}\`) is at line ${a.markLine}, ABOVE the file's LAST depth-0 \`await\` at line ` +
+    `${a.lastAwaitLine}. scaffy's add-console-helper plants every new test group DIRECTLY BELOW that mark, so ` +
+    `every group generated from now on is registered above a module suspension point and is drained while that ` +
+    `await settles — before the module bindings below it initialise. This is the CAUSE, and it is reported ` +
+    `whether or not any crossing exists yet: the crossing count above is about the tests that are here TODAY. ` +
+    `Move the zone comment (whole, on its own lines) back below line ${a.lastAwaitLine}, or hoist the await above ` +
+    `the anchor.`
+  );
+}
+
 function run(file, opts) {
   let src;
   try {
@@ -874,6 +989,8 @@ function run(file, opts) {
   }
   console.log(`  lexer health: balanced (${lexHealthLine(r.lex)})`);
 
+  reportAnchor(file, r);
+
   if (r.boundary < 0) {
     console.log("  module boundary: NONE — no depth-0 `await` in this file");
     if (r.awaitTokens > 0) {
@@ -883,7 +1000,7 @@ function run(file, opts) {
       );
     }
     console.log("  crossings: 0 (structurally impossible without a top-level await)");
-    return 0;
+    return exitCodeFor(r);
   }
   console.log(`  module suspension points: ${r.boundaries.length} depth-0 \`await\`(s) at line(s) ${r.boundaryLines.join(", ")}`);
   console.log(`  early test registrations (each above some suspension point): ${r.earlyTests}`);
@@ -1115,6 +1232,34 @@ function selftest() {
     console.error(`::error::console-tdz-order-check: SELF-TEST FAILED (${bad} of ${total} assertion(s)) — the lexer no longer sees what it claims to.`);
     return 1;
   }
+  // ── cchi-w61: the anchor assertion, graded on the CAUSE ──────────────────
+  // The pair is the proof. Both fixtures have ZERO crossings, so only the
+  // anchor's position can separate them — and it does, in both directions.
+  const anchorAbove = analyze(fixture("zone-anchor-above.mjs"), {});
+  check(
+    "an anchor ABOVE the last depth-0 `await` reds the ZONE ANCHOR arm with crossings STILL 0",
+    anchorAbove.anchor.reason === "above" &&
+      anchorAbove.crossings.length === 0 &&
+      exitCodeFor(anchorAbove) === 1,
+    `mark line ${anchorAbove.anchor.markLine} vs last await line ${anchorAbove.anchor.lastAwaitLine}, ` +
+    `crossings ${anchorAbove.crossings.length}, exit ${exitCodeFor(anchorAbove)}`
+  );
+  const anchorBelow = analyze(fixture("zone-anchor-below.mjs"), {});
+  check(
+    "…and the same file with the anchor BELOW it is green (so the arm measures POSITION, not presence)",
+    anchorBelow.anchor.reason === "below" && exitCodeFor(anchorBelow) === 0,
+    `mark line ${anchorBelow.anchor.markLine} vs last await line ${anchorBelow.anchor.lastAwaitLine}, ` +
+    `exit ${exitCodeFor(anchorBelow)}`
+  );
+  check(
+    "a file with NO anchor is not accused of anything",
+    analyze(clean, {}).anchor.reason === "absent" && analyze(crossing, {}).anchor.present === false
+  );
+  check(
+    "TWO mark lines are a REFUSAL to certify a position, not a coin flip",
+    zoneAnchor("x\n// MARK:zone-console-tests\ny\n// MARK:zone-console-tests\n", [1]).reason === "ambiguous"
+  );
+
   console.log(`  self-test: ${total}/${total} — the guard can still lose, and can still refuse.`);
   return 0;
 }

@@ -410,7 +410,17 @@ compose_up_repair() {
   out="$(compose up -d "$@" 2>&1)"; rc=$?
   [ -n "$out" ] && printf '%s\n' "$out"
   [ "$rc" = 0 ] && return 0
-  if printf '%s' "$out" | grep -qE 'has active endpoints|is not connected to the network'; then
+  # HERE-STRING, not `printf … | grep -q`.  `$out` is a whole `compose up -d`
+  # transcript — pulls, per-container Creating/Started lines — and the daemon
+  # names the wedged endpoint EARLY in it.  Under this file's `pipefail`,
+  # `grep -q` answers at that first match and closes the pipe, `printf` takes
+  # SIGPIPE and dies 141, and pipefail hands 141 back as the pipeline's status.
+  # 141 is not 0, so the branch reads "not a wedged endpoint", the repair below
+  # is skipped, and the 2026-07-21 48h47m blackout gets its sleep-and-retry that
+  # was measured 0-for-65.  The failure is OUTPUT-LENGTH DEPENDENT: it hides on a
+  # quiet box and appears exactly when the deploy is big and noisy.  A here-string
+  # has no producer process to kill.
+  if grep -qE 'has active endpoints|is not connected to the network' <<<"$out"; then
     log "$what: the daemon refused on a WEDGED ENDPOINT — the exact shape of the 2026-07-21 48h47m blackout, whose sleep-and-retry was measured 0-for-65. Clearing the endpoint BEFORE the retry."
     clear_wedged_endpoints || log "$what: the daemon named a wedged endpoint but none of $CP_NETWORK's endpoints is stale — retrying once anyway"
   else

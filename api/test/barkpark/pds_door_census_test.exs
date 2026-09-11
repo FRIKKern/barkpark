@@ -260,9 +260,24 @@ defmodule Barkpark.PdsDoorCensusTest do
     # is the one move this pin exists to refuse. RE-DERIVED by running the census
     # on this tree — it prints `harnesses : 6` and names the file — never by
     # adding this slice's delta to main's figure.
-    assert out =~ ~r/harnesses\s+: 6 /,
-           "the derived harness count moved off 6. Harness-hood is derived from the " <>
-             "*_test.sh / *.test.sh name; if a seventh harness landed, say so on purpose.\n#{out}"
+    #
+    # A SEVENTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-11):
+    # scripts/pds-read-preflight-audit_test.sh, the selftest for the anonymous-read
+    # preflight audit (#17651). It is a harness by the same derived *_test.sh rule,
+    # it is wired into shell-harnesses.yml (not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. It arrived with no disposition row, so main read UNDISPOSED 3 of
+    # 42 and this pin refuted 6 at 56c290852 — the pin did its job. RE-DERIVED by
+    # running the census on this tree: it prints `harnesses : 7` and names the file.
+    assert out =~ ~r/harnesses\s+: 7 /,
+           "the derived harness count moved off 7. Harness-hood is derived from the " <>
+             "*_test.sh / *.test.sh name; if an eighth harness landed (or one left), " <>
+             "say so on purpose.\n#{out}"
+
+    assert out =~ "pds-read-preflight-audit_test.sh",
+           "the census stopped naming pds-read-preflight-audit_test.sh among its derived " <>
+             "harnesses. The count above would still read 7 if a DIFFERENT harness had " <>
+             "replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-pull-proof_test.sh",
            "the census stopped naming pds-pull-proof_test.sh among its derived harnesses. " <>
