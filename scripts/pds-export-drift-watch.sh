@@ -75,6 +75,27 @@
 #     file is the whole point of the freeze surviving.
 #
 # ═════════════════════════════════════════════════════════════════════════════
+# THE WAVE-13 RECORD, WRITTEN DOWN RATHER THAN SUMMARISED AWAY
+# ═════════════════════════════════════════════════════════════════════════════
+# This instrument exists because a SOCIAL fix was tried first and did not take.
+# The charter's own words, PDS-D238 (.claude/workflows/bp-pds-charter.md:2168):
+#
+#   "A hold was requested from the fleet and no reply arrived. Silence is not
+#    consent. RULING: fire on cond_d's own check-and-go, accept the residual
+#    sha-drift window, and do NOT record the coordination attempt as having
+#    closed the risk."
+#
+# The specifics that made it urgent that day: #5097 was MERGEABLE and touched
+# api/**; #2907 was CONFLICTING and therefore not an immediate threat, but a
+# rebase re-arms it. Wave 13 fired anyway, knowingly, with the residual open.
+#
+# So the honest statement of what changed since is SMALL, and it is stated
+# small: the hold is STILL not granted, no fleet-wide merge protocol exists,
+# and this file does not create one. What it adds is that the residual is now
+# OBSERVED and COUNTED instead of merely accepted — which is the most a single
+# branch can add without claiming a consent nobody gave.
+#
+# ═════════════════════════════════════════════════════════════════════════════
 # FAIL CLOSED, EXACTLY AS cond_d ALREADY DOES (PDS-D98)
 # ═════════════════════════════════════════════════════════════════════════════
 # `gh`'s exit status is captured apart from its stdout. An API error and a
