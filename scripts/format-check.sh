@@ -240,9 +240,18 @@ if [ "${1:-}" != "--selftest" ]; then
   # refuse with 1. Either signal routes to exit 6.
   refused=""
   case "$rc" in 0|1) ;; *) refused="exit code $rc is neither 0 nor 1" ;; esac
-  if printf '%s' "$out" | grep -qE 'REFUSED|UNCHECKED'; then
-    refused="the \`mix\` on PATH refused to run the formatter"
-  fi
+  # NO PIPE. `printf "$out" | grep -q` is the SIGPIPE-141 trap under the
+  # `set -uo pipefail` above: grep -q exits at the FIRST match, closes the pipe,
+  # and the producer dies 141 with the rest of $out unwritten — so pipefail
+  # turns a TRUE match into a non-match and the refusal is reported as an
+  # ordinary formatting verdict. It needs the match EARLY and a long TAIL, which
+  # is exactly this shape: the wrapper refuses on its first line and mix's file
+  # listing follows. Measured 2026-09-11 on macOS bash 3.2, $out = 205,866 bytes
+  # with REFUSED on line 1: the old idiom answered 141/NON-MATCH 30 of 30 runs;
+  # this `case` answered MATCH 30 of 30. A shell `case` forks no writer.
+  case "$out" in
+    *REFUSED* | *UNCHECKED*) refused="the \`mix\` on PATH refused to run the formatter" ;;
+  esac
   if [ -n "$refused" ]; then
     say ""
     say "!! CANNOT READ FORMATTING (exit 6): $refused — the formatter DID NOT RUN."
@@ -291,11 +300,20 @@ check() { # name expected_rc must_match must_not_match rc output
   if [ "$rc" -ne "$want" ]; then
     say "  FAIL  $name — expected exit $want, got $rc"; fails=$((fails + 1)); return
   fi
-  if ! printf '%s' "$out" | grep -q "$yes"; then
-    say "  FAIL  $name — exit $rc was right but the message never says '$yes'"; fails=$((fails + 1)); return
-  fi
-  if [ -n "$no" ] && printf '%s' "$out" | grep -q "$no"; then
-    say "  FAIL  $name — the message ALSO says '$no', so the causes are not separated"; fails=$((fails + 1)); return
+  # Same NO-PIPE rule as the verdict path above, and it matters MORE here: this
+  # checker judges the script's own output, which is the longest output the file
+  # produces, and a 141 here would fail a TRUE assertion — the selftest would
+  # red on a correct script (or, negated at the third site, pass a wrong one).
+  # Every "$yes"/"$no" passed by the cases below is a plain literal, so the glob
+  # substring match is exactly the old `grep -q` BRE, minus the metacharacters.
+  case "$out" in
+    *"$yes"*) ;;
+    *) say "  FAIL  $name — exit $rc was right but the message never says '$yes'"; fails=$((fails + 1)); return ;;
+  esac
+  if [ -n "$no" ]; then
+    case "$out" in
+      *"$no"*) say "  FAIL  $name — the message ALSO says '$no', so the causes are not separated"; fails=$((fails + 1)); return ;;
+    esac
   fi
   say "  ok    $name (exit $rc, names '$yes')"
 }
