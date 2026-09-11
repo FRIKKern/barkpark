@@ -51,7 +51,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 fails=0
-ok()  { printf '  ok   %s\n' "$1"; }
+arms=0
+ok()  { arms=$((arms + 1)); printf '  ok   %s\n' "$1"; }
 bad() { printf '  FAIL %s\n     %s\n' "$1" "$2"; fails=$((fails + 1)); }
 
 [ -f "$PROOF" ] || { printf 'pds-pull-proof_test: the gate is pointed at nothing — %s does not exist\n' "$PROOF" >&2; exit 1; }
@@ -531,8 +532,28 @@ else
 fi
 
 printf '\n'
+
+# ── the receipt's own arithmetic is an arm ──────────────────────────────────
+# The headline total used to be hand-typed beside a hand-typed breakdown, and a
+# wave that added 17 arms typed 58 over a breakdown summing to 57. Nothing local
+# caught it: the harness printed a tidy PASS, and the arm-count door in
+# api/test/barkpark/pds_pull_proof_test.exs — which counts the REAL `ok` lines —
+# was the first reader to notice, in CI, one push later. So the receipt now
+# checks itself three ways before it is printed: the breakdown must SUM to the
+# declared total, and the declared total must equal the arms this run actually
+# printed. A miscount now reds here, in the second it is typed.
+ARMS_DECLARED=57
+ARMS_BREAKDOWN='13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording'
+breakdown_sum="$(printf '%s' "$ARMS_BREAKDOWN" | tr ',' '\n' | awk '{s += $1} END {print s + 0}')"
+if [ "$breakdown_sum" -ne "$ARMS_DECLARED" ]; then
+  bad 'the receipt adds up' "the declared total is $ARMS_DECLARED but the breakdown sums to $breakdown_sum — one of the two was typed and not counted"
+fi
+if [ "$arms" -ne "$ARMS_DECLARED" ]; then
+  bad 'the receipt counts the arms this run printed' "the receipt declares $ARMS_DECLARED arms; this run printed $arms ok line(s). Update BOTH the total and the breakdown category you changed, in the same commit as the arm."
+fi
+
 if [ "$fails" -eq 0 ]; then
-  printf 'pds-pull-proof_test: PASS (58 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording)\n'
+  printf 'pds-pull-proof_test: PASS (%s arms: %s)\n' "$ARMS_DECLARED" "$ARMS_BREAKDOWN"
   exit 0
 fi
 printf 'pds-pull-proof_test: FAIL — %s arm(s)\n' "$fails"
