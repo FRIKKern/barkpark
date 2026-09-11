@@ -1583,6 +1583,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
             append_message(acc, :tool, tool_line(name, input),
               tool_use_id: block["id"],
               output: nil,
+              # A LIVE row never carries the persisted D64 chip envelope — it
+              # reads its tool_result block UNCAPPED, so `output` alone chips
+              # (task-5a49dc55626ea80d). Seeded nil so the shared render seam
+              # threads the same three arguments on both paths.
+              mcp_chip: nil,
               # The settle gate's two facts, seeded honest: the row is born
               # UNSETTLED (its turn is running) and error-free. The turn's
               # terminal result frame flips `turn_settled`; a tool_result block
@@ -2319,7 +2324,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               by construction — the diff?/spawn? precedent. A host tool, an
               error string, or a truncated/oversized payload returns nil and
               keeps the generic ⎿ row below. --%>
-        <% mcp_chip = ChatToolRenderer.chip(@message[:tool], @message[:output]) %>
+        <% mcp_chip = ChatToolRenderer.chip(@message[:tool], @message[:output], @message[:mcp_chip]) %>
         <%!-- A Task/agent spawn (charter D40) gets a headline row: the
               gutter glyph plus the sub-agent's description; the frames it
               emits interleave below, indented under it. A plain tool row
@@ -5964,6 +5969,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       text: md,
       html: nil,
       output: Map.get(meta, "output"),
+      # The compact versioned chip envelope the store seam wrote for an
+      # mcp-tagged result (charter D64, task-5a49dc55626ea80d). `output` is
+      # capped at 4,000 characters, so a large result's JSON is cut mid-object
+      # and cannot decode; this is what keeps its chip a chip on replay. Absent
+      # on a host row, a small legacy row, or a pre-envelope row — all of which
+      # fall back to `output` exactly as before.
+      mcp_chip: Map.get(meta, "mcp_chip"),
       # Settle-gated gutter, REPLAY half: the Recorder stamped `turn_settled` on
       # this row when its turn's result frame landed, and `tool_error` when the
       # tool_result said `is_error` — so a reopened session draws the SAME ✓/✗/●
