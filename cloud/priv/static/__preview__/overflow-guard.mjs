@@ -5946,7 +5946,17 @@ async function main() {
           await setViewport(1000);
           await nav(
             `${BASE}/?scen=${scen}&theme=${theme}#operator`,
-            `document.querySelector('.op-gate .status-pill') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-operator';})()`,
+            // SCOPED (task-995fc7be51dab99e). The operator console is the one
+            // screen the W35 residue tour could never reach on `mixed-fleet` —
+            // it is fail-closed on `/v1/me` — so this pair of document-wide
+            // walks read CLEAN in that census for a reason about the fixture,
+            // not about the selector. Driven on `operator-console` with the
+            // console routed away, `.op-gate .status-pill` matches 4 times
+            // inside the HIDDEN #view-operator. Walking off `v` is the cch-w24-s5
+            // remedy; the zero-pill refusal below is what keeps the scoping
+            // honest, because a scope that matched nothing would fail, not pass.
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-operator' && v.querySelector('.op-gate .status-pill'));})()`,
           );
           const row = [];
           for (const width of GATE_WIDTHS) {
@@ -5956,7 +5966,7 @@ async function main() {
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var d=document.documentElement;` +
               `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,pills:0,bad:[],m:[]};` +
-              `[].slice.call(document.querySelectorAll('.op-gate .status-pill')).forEach(function(p,i){` +
+              `[].slice.call(v?v.querySelectorAll('.op-gate .status-pill'):[]).forEach(function(p,i){` +
               `  out.pills++;` +
               `  out.m.push(p.clientWidth+'/'+p.scrollWidth);` +
               `  if(p.scrollWidth>p.clientWidth) out.bad.push({i:i,sw:p.scrollWidth,cw:p.clientWidth,t:(p.textContent||'').trim().slice(0,32)});` +
@@ -11389,6 +11399,11 @@ async function main() {
       // cch-w24-s5 installed, the document-wide walk it replaced, and where the
       // SINGULAR `document.querySelector('.fleet-row')` — this leg's own
       // readiness idiom, and W15's — actually resolves.
+      // One expression, used for both pristine snapshots and the census below.
+      const VIEW_SIZES =
+        `(function(){var o={};[].slice.call(document.querySelectorAll('section.view')).forEach(function(v){` +
+        `o[v.id]=v.querySelectorAll('*').length;});return o;})()`;
+
       const FLEET_PROBE =
         `(function(){var v=document.querySelector('section.view:not([hidden])');` +
         `var first=document.querySelector('.fleet-row');` +
@@ -11410,19 +11425,34 @@ async function main() {
       // ── (1a) TODAY'S ENTRY: a full load straight at #fleet ────────────────
       await nav(`${BASE}/?scen=${SCEN}&theme=light&w35=fullload#fleet`, FLEET_READY);
       const full = await evalJs(FLEET_PROBE);
+      // THE PRISTINE BASELINE, HALF ONE. On this load exactly one view has ever
+      // painted (#fleet); every other `section.view` is the shell index.html
+      // shipped. Half two is taken on the #overview load below, which is
+      // pristine for #fleet. Taking BOTH is not tidiness: the single snapshot
+      // this replaced was read AFTER the #overview load, so `view-overview`'s
+      // "pristine shell" was its PAINTED size (212 elements) — and the
+      // never-painted detector then reported the landing screen, the one view
+      // that is painted on every single entry, as UNMEASURED. A baseline read
+      // after the thing it is a baseline for is not a baseline.
+      const SHELLS_AT_FLEET = await evalJs(VIEW_SIZES);
 
       // ── (1b) THE PERSON'S ENTRY: land on #overview, then hash-navigate ────
       await nav(`${BASE}/?scen=${SCEN}&theme=light&w35=hashnav#overview`, OVERVIEW_READY);
       const beforeHop = await evalJs(FLEET_PROBE);
-      // THE PRISTINE SHELLS, snapshotted before a single hop. index.html ships
-      // every `section.view` as an empty-ish shell; "did this screen actually
-      // paint during the tour" is only answerable against what it looked like
-      // before the tour, and a view that never painted would contribute zero
-      // residue FOR THE WRONG REASON.
-      const SHELLS = await evalJs(
-        `(function(){var o={};[].slice.call(document.querySelectorAll('section.view')).forEach(function(v){` +
-        `o[v.id]=v.querySelectorAll('*').length;});return o;})()`,
-      );
+      // THE PRISTINE BASELINE, HALF TWO, snapshotted before a single hop.
+      // index.html ships every `section.view` as an empty-ish shell; "did this
+      // screen actually paint during the tour" is only answerable against what
+      // it looked like before the tour, and a view that never painted would
+      // contribute zero residue FOR THE WRONG REASON.
+      const SHELLS_AT_OVERVIEW = await evalJs(VIEW_SIZES);
+      // The MINIMUM of the two loads, per view: whichever entry left that view
+      // untouched is the one holding its shipped shell size, and the smaller
+      // number is that one. #fleet is pristine at #overview, #overview is
+      // pristine at #fleet, and every other view is pristine in both.
+      const SHELLS = {};
+      for (const id of Object.keys(SHELLS_AT_OVERVIEW)) {
+        SHELLS[id] = Math.min(SHELLS_AT_OVERVIEW[id], SHELLS_AT_FLEET[id] ?? SHELLS_AT_OVERVIEW[id]);
+      }
       const hop = await hashNav("#fleet", "view-fleet");
       if (hop.landed !== "view-fleet") {
         return die(
@@ -11537,7 +11567,7 @@ async function main() {
 
       // ── (0c) THE RESIDUE CENSUS: per selector, per view, MEASURED ─────────
       const sels = docWide.map((e) => e.selector);
-      const resid = await evalJs(
+      const RESIDUE_PROBE =
         `(function(){var sels=${JSON.stringify(sels)};` +
         `var views=[].slice.call(document.querySelectorAll('section.view'));` +
         `var live=document.querySelector('section.view:not([hidden])');` +
@@ -11549,8 +11579,8 @@ async function main() {
         `  views.forEach(function(v){if(!v.hidden)return;var n=0;try{n=v.querySelectorAll(s).length;}catch(err){}` +
         `    if(n>0){e.hidden+=n;e.views.push(v.id);}});` +
         `  out.sel[s]=e;});` +
-        `return out;})()`,
-      );
+        `return out;})()`;
+      const resid = await evalJs(RESIDUE_PROBE);
 
       // WHICH SCREENS ACTUALLY PAINTED. A view still at its pristine shell size
       // contributes zero residue for a reason that has nothing to do with the
@@ -11569,6 +11599,37 @@ async function main() {
           `about the selector. Those columns are UNMEASURED, not clean\n`,
         );
       }
+
+      // ── THE PAINT PRECONDITION, ASSERTED PER VIEW (task-995fc7be51dab99e) ──
+      //  A NAMED HOLE IS STILL A HOLE. The line above has printed "these columns
+      //  are UNMEASURED" every run since this leg landed, and the run still
+      //  exited 0 — so the census's own honesty note was load-bearing prose that
+      //  gated nothing, and a screen that silently stopped painting would keep
+      //  reporting its selectors clean under a warning nobody blocks on.
+      //  Every view the tour ROUTED TO owes a paint: strictly more elements than
+      //  its pristine shell, and at least `MIN_PAINTED` of them, or this leg
+      //  REFUSES. A view the tour never visited is a different statement and is
+      //  handled below, by name, on a scenario that opens it.
+      const MIN_PAINTED = 8;
+      const visited = new Set([...hops.map((h) => h.landed), "view-overview"]);
+      const unpainted = [...visited].filter(
+        (id) => resid.painted[id] === undefined || resid.painted[id] <= (SHELLS[id] ?? 0) || resid.painted[id] < MIN_PAINTED,
+      );
+      if (unpainted.length) {
+        return die(
+          `${D}: the tour ROUTED TO ${unpainted.join(", ")} and ${unpainted.length === 1 ? "it" : "they"} never ` +
+          `painted — ${unpainted.map((id) => `${id} ${resid.painted[id] ?? "absent"} element(s) against a pristine shell of ${SHELLS[id] ?? "?"} and a floor of ${MIN_PAINTED}`).join("; ")}. ` +
+          `Every censused selector whose only host is that screen would read 0 hidden matches below for a ` +
+          `reason that has nothing to do with the selector, and this leg would print those columns as clean. ` +
+          `A hole reported as a zero is the defect this leg exists to catch, so it refuses rather than ` +
+          `printing a warning it does not act on.`,
+        );
+      }
+      process.stdout.write(
+        `   paint precondition: ${visited.size} routed view(s) each painted past their shipped shell and above ` +
+        `the ${MIN_PAINTED}-element floor — ` +
+        `${[...visited].sort().map((id) => `${id.replace("view-", "")} ${resid.painted[id]}`).join(" · ")}\n`,
+      );
 
       const bad = Object.entries(resid.sel).filter(([, v]) => v.err);
       if (bad.length) {
@@ -11590,9 +11651,76 @@ async function main() {
         );
       }
 
+      // ── (0d) THE VIEW THE MAIN TOUR CANNOT OPEN (task-995fc7be51dab99e) ──
+      //  `view-operator` is FAIL-CLOSED (app.js `loadOperator`, GR39/GR49): it
+      //  paints only for an account whose `/v1/me` carries
+      //  `user.platform_operator`, and `mixed-fleet` does not. So the main tour
+      //  above can never route there, and every censused selector whose only
+      //  host is the operator console read 0 hidden matches for a reason that
+      //  is about the FIXTURE, not the selector — an UNMEASURED column the
+      //  header called out in prose and nothing acted on.
+      //  A second entry, on `operator-console`, is what closes it: paint the
+      //  console, route AWAY so it is hidden residue like any other visited
+      //  screen, and ask the same per-selector question. The two measurements
+      //  are UNIONED — hidden counts summed, view lists merged — because the
+      //  register's question is "can a hidden view hold a match for this walk",
+      //  and one witness on any reachable fixture is an answer. The union is
+      //  monotone, so nothing the main tour proved exposed can be un-proven by
+      //  the second pass.
+      const OP_SCEN = "operator-console";
+      const OP_MIN = 8;
+      await nav(
+        `${BASE}/?scen=${OP_SCEN}&theme=light&w35=operator#overview`,
+        `(function(){var v=document.querySelector('section.view:not([hidden])');return !!(v && v.id==='view-overview');})()`,
+      );
+      const opHop = await hashNav("#operator", "view-operator");
+      if (opHop.landed !== "view-operator") {
+        return die(
+          `${D}: writing location.hash='#operator' on ${OP_SCEN} landed "${opHop.landed}" — the fail-closed ` +
+          `operator gate bounced an account the fixture declares a platform operator, so view-operator was ` +
+          `never painted and its residue column would be a hole reported as a zero.`,
+        );
+      }
+      const opSizes = await evalJs(VIEW_SIZES);
+      if (!(opSizes["view-operator"] > (SHELLS["view-operator"] ?? 0)) || opSizes["view-operator"] < OP_MIN) {
+        return die(
+          `${D}: #operator routed on ${OP_SCEN} but view-operator holds ${opSizes["view-operator"]} element(s) ` +
+          `against a pristine shell of ${SHELLS["view-operator"] ?? "?"} and a floor of ${OP_MIN} — the console ` +
+          `shell rendered without its body (the gate's "checking"/"couldn't check" arms both do exactly that), ` +
+          `so measuring its residue would measure an empty room.`,
+        );
+      }
+      // Route AWAY, so the console is hidden residue rather than the live view.
+      const opAway = await hashNav("#overview", "view-overview");
+      if (opAway.landed !== "view-overview") {
+        return die(`${D}: could not route away from #operator on ${OP_SCEN} (landed "${opAway.landed}") — the operator residue must be read with the console HIDDEN`);
+      }
+      const opResid = await evalJs(RESIDUE_PROBE);
+      const opBad = Object.entries(opResid.sel).filter(([, v]) => v.err);
+      if (opBad.length) {
+        fail(D, `${opBad.length} censused selector(s) threw during the ${OP_SCEN} pass: ${opBad.map(([sel, v]) => `${sel} (${v.err})`).join("; ")}`);
+      }
+      const opHidden = Object.entries(opResid.sel).filter(([sel, v]) => !v.err && v.views.includes("view-operator"));
+      process.stdout.write(
+        `   OPERATOR PASS on ${OP_SCEN}: view-operator painted ${opSizes["view-operator"]} element(s) ` +
+        `(pristine shell ${SHELLS["view-operator"] ?? "?"}), then hidden behind #overview. Views now hold ` +
+        `${Object.entries(opResid.painted).map(([k, n]) => `${k.replace("view-", "")}:${n}`).join(" ")} element(s). ` +
+        `${opHidden.length} censused selector(s) match inside the hidden operator console` +
+        `${opHidden.length ? `: ${opHidden.map(([sel, v]) => `${sel} x${v.hidden}`).join(", ")}` : " — MEASURED clean, not unmeasured"}\n`,
+      );
+
       // ── THE REGISTER, ratcheted in BOTH directions ────────────────────────
       const measured = {};
       for (const [sel, v] of Object.entries(resid.sel)) if (!v.err) measured[sel] = { hidden: v.hidden, views: v.views };
+      // UNION IN THE OPERATOR PASS. Summed and merged, never overwritten: the
+      // second fixture is an ADDITIONAL witness, and a selector exposed on
+      // mixed-fleet stays exposed whatever operator-console paints.
+      for (const [sel, v] of Object.entries(opResid.sel)) {
+        if (v.err) continue;
+        if (!measured[sel]) measured[sel] = { hidden: 0, views: [] };
+        measured[sel].hidden += v.hidden;
+        for (const id of v.views) if (!measured[sel].views.includes(id)) measured[sel].views.push(id);
+      }
       const drift = registerDrift(measured, RESIDUE_REGISTER);
       for (const line of drift.unregistered) {
         fail(D, `UNREGISTERED EXPOSURE — ${line}. A document-wide walk in this guard now reaches a view the person is not looking at, and no committed record says so. Scope the walk to \`section.view:not([hidden])\` the way cch-w24-s5 scoped \`.fleet-row\`, or add it to RESIDUE_REGISTER in view-scope-census.mjs with the reason it is harmless`);
@@ -11602,6 +11730,19 @@ async function main() {
       }
       for (const line of drift.moved) {
         fail(D, `EXPOSURE MOVED HOUSE — ${line}. The count is the same shape, the residue is somewhere else, and reading it as the same finding is how a census goes stale while staying green`);
+      }
+
+      // RE-ESTABLISH THE MUTATION'S VANTAGE. The operator pass above left the
+      // document on `operator-console` standing on #overview, and the mutation
+      // below needs exactly what the tour left behind: a PAINTED-AND-HIDDEN
+      // #view-overview with #fleet live. Re-entered the person's way (land on
+      // #overview, hash-navigate to #fleet) rather than by full load, because a
+      // full load at #fleet leaves #view-overview at its shell and the residue
+      // would be injected into a screen that never painted.
+      await nav(`${BASE}/?scen=${SCEN}&theme=light&w35=remut#overview`, OVERVIEW_READY);
+      const reMut = await hashNav("#fleet", "view-fleet");
+      if (reMut.landed !== "view-fleet") {
+        return die(`${D}: could not re-enter #fleet after the operator pass (landed "${reMut.landed}") — the mutation below has no vantage point`);
       }
 
       // ── (2) THE MUTATION: residue in a hidden view, on purpose ────────────
