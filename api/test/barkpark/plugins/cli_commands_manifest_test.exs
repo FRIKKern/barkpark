@@ -15,6 +15,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   """
   use ExUnit.Case, async: true
 
+  alias Barkpark.Content.Papers.EpicQuality
   alias Barkpark.Plugins.{Bulldocs, Capabilities, OnixEdit, Tasks}
   alias Barkpark.Tasks.Validation
 
@@ -252,6 +253,62 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       patch = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.patch"))
       assert patch.http.path_template == "/v1/plugins/bulldocs/papers/:slug/ops"
       assert patch.verb == "patch"
+    end
+
+    test "bulldocs.publish's summary names both composition caps and their tag scope" do
+      # WORDING PIN (task-4ff0ef8d27e6453b). EpicQuality refuses a canonical
+      # Epic Paper past 80 top-level blocks or 16 top-level headings. Both caps
+      # were enforced and documented NOWHERE a publisher looks: the manifest
+      # summary carried the reader spacing law and neither number, so the first
+      # a wave author heard of an 81st block was a 422. The numbers here are
+      # read from the module, so a cap that MOVES reds this test by name rather
+      # than leaving a stale number in the help text.
+      publish = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.publish"))
+      summary = publish.summary
+
+      assert summary =~ EpicQuality.canonical_tag(),
+             "bulldocs.publish's summary must name the tag the caps are scoped " <>
+               "to, or a publisher of an untagged paper reads them as universal. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "80 top-level blocks",
+             "bulldocs.publish's summary must state the top-level BLOCK cap " <>
+               "(EpicQuality @max_top_level_blocks). Got: #{summary}"
+
+      assert summary =~ "16 top-level headings",
+             "bulldocs.publish's summary must state the top-level HEADING cap " <>
+               "(EpicQuality @max_top_level_headings). Got: #{summary}"
+
+      assert summary =~ "top_level_block_overload",
+             "bulldocs.publish's summary must name the failure atom the 422 " <>
+               "carries, so a reader can match help text to a refusal body. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "top_level_heading_overload",
+             "bulldocs.publish's summary must name the heading failure atom. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "details.limits",
+             "bulldocs.publish's summary must point at the field carrying the " <>
+               "cap and the count, or the help text documents a number the " <>
+               "caller still cannot read back off the wire. Got: #{summary}"
+
+      # NON-VACUITY: the two numbers in the sentence are the module's live
+      # constants, proven by making EpicQuality itself state them. A cap bump
+      # that forgets the summary reds HERE, not in a reader's 422.
+      over_blocks = for i <- 1..81, do: %{"type" => "paragraph", "text" => "b#{i}"}
+      over_headings = for i <- 1..17, do: %{"type" => "heading", "level" => 2, "text" => "h#{i}"}
+
+      assert :top_level_block_overload in EpicQuality.failures(%{"blocks" => over_blocks})
+      assert :top_level_heading_overload in EpicQuality.failures(%{"blocks" => over_headings})
+
+      refute :top_level_block_overload in EpicQuality.failures(%{
+               "blocks" => Enum.take(over_blocks, 80)
+             })
+
+      refute :top_level_heading_overload in EpicQuality.failures(%{
+               "blocks" => Enum.take(over_headings, 16)
+             })
     end
   end
 

@@ -220,7 +220,7 @@ services:
     # `condition: service_healthy` consumer anywhere — a slow-but-fine first
     # boot must never be turned into a failed `docker compose up`.
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4000/api/schemas || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4000/status.json || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5

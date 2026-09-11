@@ -14,6 +14,7 @@ defmodule BarkparkWeb.TasksController.Params do
   alias Barkpark.Content.{CallerContext, Document, DraftId, Envelope}
   alias Barkpark.Content.Scope
   alias Barkpark.Tasks.{Close, Criteria, Dispatchability, QueueGate}
+  alias Barkpark.Tasks.Landed
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Query, as: TaskQuery
 
@@ -948,6 +949,33 @@ defmodule BarkparkWeb.TasksController.Params do
     # Same omit-when-absent contract as render_doc — a parent's rail shows
     # each child's criteria progress without a per-child fetch.
     |> put_criteria_progress(content)
+    # dr-bl-w6 — THE RAIL MUST NAME A NEVER-PUBLISHED CHILD.
+    #
+    # `documents.status` is the draft/published column, and an UNPAIRED
+    # `drafts.<id>` row (a task that was created and never published — the
+    # majority shape: `bp task create` lands a draft by default) is admitted to
+    # this rail ON PURPOSE. `Tasks.Query.collapse_twins/1` suppresses only a
+    # shadow whose DISTINCT published twin exists in scope, and the ruling that
+    # an unpaired shadow SURVIVES is pinned by
+    # `tasks_controller_test.exs`'s "an UNPAIRED drafts.<id> child is still
+    # counted" (excluding them would trade a documented over-count for an
+    # undocumented under-count of real, claimable work — `Tasks.Queue`'s
+    # moduledoc, "WHAT IS NOT AN AXIS — documents.status").
+    #
+    # What was NOT honest is that the summary said nothing about it. The parent
+    # renders `status` (render_doc/:full, line ~219) and every brief LIST card
+    # renders it under the same omit-when-"published" law
+    # (render_doc/:brief, cut (h)) — only the RAIL dropped the field, so a
+    # never-published child was indistinguishable from a published one in the
+    # very payload whose `children` array feeds `child_count` and every
+    # criteria_progress denominator derived from it. A consumer that wants to
+    # discount never-published rows could not: the discriminator was not on the
+    # wire.
+    #
+    # Additive by construction, and the omit law is the negative arm: a
+    # published child emits a BYTE-IDENTICAL summary (`put_unless` drops the
+    # steady state), so only the draft rows grow `"status":"draft"`.
+    |> put_unless(:status, doc.status, "published")
   end
 
   # ─── Opt building / int parsing / validation ────────────────────────────
@@ -2338,6 +2366,35 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   def parse_landed_criterion(_), do: {:error, :invalid_landed, @landed_criterion_msg}
+
+  @doc """
+  Parses the OPTIONAL `landed` digest off a CLOSE body.
+
+  THE UNLOCKED DOOR (task-4ab4a5b58bce97a6). Every other opt on close/2's
+  pipeline gets a `parse_*`; `landed` alone went through `put_opt/3` raw, so a
+  caller could post any JSON shape and `Tasks.Internal.merge_landed/2` would
+  normalise what it recognised and silently drop the rest — a 2xx asserting a
+  landing the ledger does not hold.
+
+  The check is NOT written here. It is `Tasks.Landed.check_digest/1`, the same
+  module (and, for `files`, the same `check_files/1`) the `/landed` route
+  already runs, so the close door and the landing door cannot drift into
+  disagreeing about what a storable digest is. This function only translates
+  that module's verdict into the door's tagged tuple.
+
+  SHAPE only (→ 422 `invalid_landed_digest`, naming the field). Whether the PR
+  it names actually merged for THIS task is not a shape question: it is
+  answered by the server's own observation in
+  `Tasks.Close.reconcile_merge_gate/3`, never by the caller's bytes.
+  """
+  @spec parse_landed_digest(term()) ::
+          {:ok, map() | nil} | {:error, :invalid_landed_digest, String.t()}
+  def parse_landed_digest(raw) do
+    case Landed.check_digest(raw) do
+      {:ok, digest} -> {:ok, digest}
+      {:error, message} -> {:error, :invalid_landed_digest, message}
+    end
+  end
 
   @doc """
   The two SHAPE rules a landing mark must satisfy before any DB work:

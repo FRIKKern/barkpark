@@ -1410,7 +1410,12 @@ else
 fi
 # …and the pinned ref must carry a script that DOES answer it, or the arm would
 # be measuring two broken copies agreeing.
-if (cd "$DR" && git show pinned-merge:scripts/cloud-path-escape-check.sh | grep -q 'cloud | census'); then
+# A HERE-STRING, not `git show … | grep -q`: under this file's `set -o pipefail`
+# a matching `grep -q` exits on the first hit, `git show` takes SIGPIPE part-way
+# through a 1000-line script, and pipefail hands back 141 — so a pinned ref that
+# DOES know the census set would read as one that does not, and this
+# precondition arm would red for a reason that never happened.
+if (cd "$DR" && grep -q 'cloud | census' <<<"$(git show pinned-merge:scripts/cloud-path-escape-check.sh)"); then
   ok "the pinned ref carries a script that KNOWS the census set"
 else
   no "the pinned ref's script does not know the census set either — nothing here discriminates"

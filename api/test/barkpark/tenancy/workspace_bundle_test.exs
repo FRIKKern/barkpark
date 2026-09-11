@@ -2214,9 +2214,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       put_import_lock_config!(
         bundle_import_ddl_lock_timeout: "300ms",
         bundle_import_ddl_lock_attempts: 3,
-        # One long backoff, so the release below lands INSIDE it with room on
-        # both sides rather than racing the next attempt.
-        bundle_import_ddl_lock_backoff_ms: [1_500]
+        # NOT load-bearing, and deliberately short. The release is sequenced on
+        # the refusal event that fires BEFORE this sleep (see below), so the
+        # lock is already free whatever the backoff is; a long one only made
+        # the test slower and invited the reader to believe the release was
+        # racing it. The earlier fixture used 1_500ms for exactly that reason
+        # and lost the race anyway.
+        bundle_import_ddl_lock_backoff_ms: [250]
       )
 
       %{ws_a: ws_a} = seed_two_workspaces!()
@@ -2228,29 +2232,85 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       assert docs_before > 0
 
       conn = hold_access_share_lock!("documents")
+      test_pid = self()
 
-      # Released ON THE OBSERVED WAIT, not on a wall-clock guess: the releaser
-      # polls pg_locks (through the holder's own backend) until the import is
-      # actually parked on `documents`, then waits past the 300ms lock_timeout
-      # so the FIRST attempt is guaranteed to have been refused, then rolls
-      # back — comfortably inside the 1.5s backoff. A sleep-N-milliseconds
-      # releaser would have to be either racy or slow.
-      releaser =
-        Task.async(fn ->
-          await_lock_waiter!(conn, "documents", 30_000)
-          Process.sleep(600)
-          release_access_share_lock_raw!(conn)
-        end)
+      # ── THE SEQUENCING, and why it is an ORDER rather than a duration ──────
+      #
+      # The holder lets go ON THE IMPORT'S FIRST REFUSAL, observed through the
+      # `[:barkpark, :workspace_bundle, :import, :lock_refused]` event the
+      # retry emits AFTER a refusal is final for that attempt and BEFORE its
+      # backoff sleep. Telemetry handlers run synchronously in the emitting
+      # process, so the `ROLLBACK` below — the statement that actually frees
+      # the lock, server-side and synchronously — has completed before attempt
+      # 2 is so much as scheduled. "Refused once, then the lock is free" is
+      # PROGRAM ORDER here. No scheduling gap can invert it.
+      #
+      # This replaced a releaser Task that polled pg_locks until the import was
+      # parked on `documents` and then slept a flat 600ms. Both halves were
+      # load-sensitive. The park it watched for lasts exactly `lock_timeout`
+      # (300ms), so a poller the runner does not schedule inside that window
+      # misses it and catches a LATER attempt's park instead; and the 600ms was
+      # a bare constant standing beside three independent timings (the 300ms
+      # lock_timeout, the 1.5s backoff, the 3-attempt budget). On run
+      # 34584565394 the release landed after the THIRD refusal — the import
+      # reported `... within 300ms after 3 attempt(s)` and gave up exactly as
+      # designed, with the fixture, not the engine, in the wrong.
+      handler_id = "out-waited-holder-#{inspect(self())}"
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:barkpark, :workspace_bundle, :import, :lock_refused],
+          fn _event, %{attempt: attempt}, _meta, _config ->
+            # The FIRST refusal and only the first: idempotent if a later
+            # attempt were somehow refused too, and it pins on the record WHICH
+            # refusal freed the lock.
+            if attempt == 1 do
+              {:ok, _} = Postgrex.query(conn, "ROLLBACK", [])
+              send(test_pid, {:holder_released_on_attempt, attempt})
+            end
+          end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
 
       {elapsed_us, result} =
-        :timer.tc(fn -> WorkspaceBundle.import_bundle(bundle, mode: :merge) end)
+        try do
+          :timer.tc(fn -> WorkspaceBundle.import_bundle(bundle, mode: :merge) end)
+        after
+          # Unconditional, and from the test process (the only one holding the
+          # sandbox): the ROLLBACK above frees the lock but leaves the pooled
+          # backend, and if the import raised the handler may never have run at
+          # all. This lock sits on a table EVERY bundle test's import must
+          # ALTER — leaking it reddens whichever unrelated test runs next.
+          release_access_share_lock!(conn)
+        end
 
-      :ok = Task.await(releaser, 30_000)
-      await_no_foreign_lock!("documents", 5_000)
+      # THE FIXTURE'S OWN INVARIANT, asserted rather than assumed: the release
+      # was triggered by the import's first refusal. Without this, a fixture
+      # whose holder quietly let go early (or never) could still satisfy
+      # everything below by accident.
+      assert_received {:holder_released_on_attempt, 1}
 
       assert {:ok, stats} = result
       assert stats.total_rows > 0
       assert stats.tables["workspaces"] == 1
+
+      # THE INVARIANT, and the reason `stats.attempts` exists at all: the import
+      # was refused ONCE on lock_timeout and the SECOND attempt is the one that
+      # took the lock. Observed attempts and their ORDER — not elapsed time.
+      #
+      # This assertion replaced an elapsed FLOOR (>= 1_800ms: the 300ms
+      # lock_timeout plus the 1.5s backoff). The floor was sound arithmetic and
+      # a wall-clock flake all the same: main run 34564685349 measured 4263ms on
+      # a loaded runner, and a floor can only ever be undercut by a machine that
+      # ran FASTER than the configured waits — which is not a thing a busy CI
+      # box does. `attempts == 2` says the same thing the floor was reaching
+      # for, and says it off a counter rather than a clock.
+      assert stats.attempts == 2,
+             "the import reported #{stats.attempts} attempt(s) — it was expected to be " <>
+               "refused once on lock_timeout and to take the lock on the second"
 
       # ROWS READ BACK, not merely {:ok, _}: the retried transaction is the one
       # that actually landed the members.
@@ -2261,11 +2321,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
                ws_a.id
              ]) == docs_before
 
-      # It really did WAIT: the first attempt's 300ms bound plus the 1.5s
-      # backoff cannot be undercut by a run that took the lock first time.
-      assert div(elapsed_us, 1000) >= 1_800,
-             "the import returned in #{div(elapsed_us, 1000)}ms — too fast to have been " <>
-               "refused once and retried"
+      # The only surviving clock assertion is an UPPER bound, and a generous one:
+      # it exists to catch an unbounded wait (the whole point of lock_timeout),
+      # not to time the retry. A loaded runner makes a test SLOWER, so a ceiling
+      # this far above the ~0.55s of configured waiting cannot be tripped by
+      # load — which is exactly the property the removed floor lacked. The
+      # @tag timeout above would eventually fire too; this names the reason.
+      assert div(elapsed_us, 1000) < 30_000,
+             "the import took #{div(elapsed_us, 1000)}ms — that is an unbounded wait, not a " <>
+               "bounded refusal followed by a retry"
     end
 
     @tag timeout: 60_000
@@ -2346,50 +2410,6 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       Postgrex.query(conn, "LOCK TABLE public.#{quote_ident(table)} IN ACCESS SHARE MODE", [])
 
     conn
-  end
-
-  # Block until some OTHER backend is PARKED waiting for a lock on `table` —
-  # i.e. the import has actually reached its ALTER and is queued behind us.
-  # Read through the holder's own connection: it is a different backend from
-  # the sandbox one the import runs on, and it needs no Ecto sandbox
-  # allowance, so this is safe to call from a Task.
-  defp await_lock_waiter!(conn, table, budget_ms) do
-    deadline = System.monotonic_time(:millisecond) + budget_ms
-
-    waiting? = fn ->
-      {:ok, %{rows: [[n]]}} =
-        Postgrex.query(
-          conn,
-          """
-          SELECT count(*)
-          FROM pg_locks l
-          JOIN pg_class c ON c.oid = l.relation
-          WHERE l.locktype = 'relation'
-            AND NOT l.granted
-            AND c.relname = $1
-          """,
-          [table]
-        )
-
-      n > 0
-    end
-
-    Stream.repeatedly(fn ->
-      cond do
-        waiting?.() -> :seen
-        System.monotonic_time(:millisecond) >= deadline -> :timeout
-        true -> (Process.sleep(20) && :retry) || :retry
-      end
-    end)
-    |> Enum.find(&(&1 != :retry))
-    |> case do
-      :seen ->
-        :ok
-
-      :timeout ->
-        raise "no backend ever queued for a lock on #{table} — the import never reached " <>
-                "its ALTER, so this test would prove nothing"
-    end
   end
 
   # ROLLBACK is what actually frees the lock, server-side and synchronously;

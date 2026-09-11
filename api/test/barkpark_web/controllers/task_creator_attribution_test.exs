@@ -164,6 +164,87 @@ defmodule BarkparkWeb.TaskCreatorAttributionTest do
     end
   end
 
+  # ── the draft twin of an ALREADY-PUBLISHED row is NOT a birth ──────────────
+
+  describe "a draft twin minted beside a published row" do
+    # THE DEFECT (task-a0c531e0082a788c, found by the cch-w65 packet #17706).
+    # The stamp's only definition of a birth was `prev_doc == nil`, and
+    # `prev_doc` is the DRAFTS-EXACT lookup. Editing a published-only row mints
+    # `drafts.<id>`, which no drafts-exact lookup can see — so the editor was
+    # stamped as the FILER and the publish promoted that stamp onto a row born
+    # weeks earlier. Measured live: 3 of the first 45 stamps credit an editor.
+    #
+    # THE GUARD, and which half of the prose it honours: the published
+    # counterpart's own `created_by` is what an update restores, and for a
+    # LEGACY row that value is `nil` — so the twin stays ABSENT, not marked.
+    # The prose already promises exactly that ("PRE-EXISTING ROWS STAY HONESTLY
+    # UNATTRIBUTED", "the ABSENCE of the key is itself the greppable signal"),
+    # so an explicit legacy marker would contradict the invariant it is meant
+    # to satisfy: a reader greps `content.created_by is null` for the legacy
+    # half, and a sentinel value would hide every one of those rows from it.
+    test "of a LEGACY published row leaves the creator ABSENT — the editor is not the filer",
+         %{conn: conn, beta: beta} do
+      publish_legacy_row("tca-twin-legacy", "Editing a legacy published row through the twin")
+
+      # THE PRECONDITION, asserted rather than assumed: the published row this
+      # twin is minted beside genuinely carries no creator.
+      refute Map.has_key?(published_content("tca-twin-legacy"), "created_by")
+
+      resp = replace_task(conn, "tca-twin-legacy", "tca-beta-token", %{"priority" => 1})
+      assert resp.status == 200
+
+      twin = draft_content("tca-twin-legacy")
+      assert twin["priority"] == 1
+      refute Map.has_key?(twin, "created_by")
+      refute twin["created_by"] == %{"kind" => "api_token", "id" => beta.id}
+
+      # ...and the publish does not promote a stamp onto the weeks-old row.
+      {:ok, _} = Content.publish_document("tca-twin-legacy", "task", @dataset)
+      refute Map.has_key?(published_content("tca-twin-legacy"), "created_by")
+    end
+
+    # THE OTHER HALF, which keeps the guard from being "never stamp when the
+    # drafts row is new": a twin of a published row that DOES carry a creator
+    # restores the ORIGINAL filer, it does not re-stamp the editor. Without
+    # this arm a fix that simply skipped the stamp whenever `prev_doc` was nil
+    # would pass the test above while DELETING a live attribution.
+    test "of an ATTRIBUTED published row restores the original filer, not the editor",
+         %{conn: conn, alpha: alpha, beta: beta} do
+      register_tag!("tasks")
+
+      assert create_task(conn, "tca-twin-attributed", "tca-alpha-token", %{
+               "description" => "An attributed task row whose filer must survive a later edit.",
+               "main_tag" => "tasks",
+               "tags" => [
+                 %{"tag" => "tasks", "strength" => 80, "rationale" => "a task-ledger fixture"}
+               ]
+             }).status == 200
+
+      assert stored_creator("tca-twin-attributed")["id"] == alpha.id
+      {:ok, _} = Content.publish_document("tca-twin-attributed", "task", @dataset)
+      assert published_content("tca-twin-attributed")["created_by"]["id"] == alpha.id
+
+      resp = replace_task(conn, "tca-twin-attributed", "tca-beta-token", %{"priority" => 1})
+      assert resp.status == 200
+
+      twin = draft_content("tca-twin-attributed")
+      assert twin["priority"] == 1
+      assert twin["created_by"]["id"] == alpha.id
+      refute twin["created_by"]["id"] == beta.id
+    end
+
+    # THE CONTROL that keeps both arms above from being vacuous: a genuine
+    # birth — an id with NO published counterpart — still names the caller.
+    # If the guard over-fired, this is the test that reds.
+    test "a birth with no published counterpart still names the caller", %{
+      conn: conn,
+      alpha: alpha
+    } do
+      assert create_task(conn, "tca-twin-control", "tca-alpha-token", %{}).status == 200
+      assert stored_creator("tca-twin-control")["id"] == alpha.id
+    end
+  end
+
   # ── c3: nothing is REFUSED for lacking a creator ───────────────────────────
 
   describe "a birth with nobody to name" do
@@ -266,6 +347,26 @@ defmodule BarkparkWeb.TaskCreatorAttributionTest do
     ])
   end
 
+  # THE DOOR THAT MINTS THE TWIN. `patch` on a bare task id is published-FIRST
+  # and lands in place, so it can never produce this defect; the CREATE family
+  # (`create` / `createOrReplace` / `createIfNotExists`, and
+  # `POST /api/documents/task`) ALWAYS writes `drafts.<id>` — which is why an
+  # edit of a published row through this door looked like a birth to the stamp.
+  defp replace_task(conn, id, token, content_extra) do
+    {:ok, published} = Content.get_document(id, "task", @dataset)
+
+    mutate(conn, token, [
+      %{
+        "createOrReplace" => %{
+          "_id" => id,
+          "_type" => "task",
+          "title" => published.title,
+          "content" => Map.merge(published.content, content_extra)
+        }
+      }
+    ])
+  end
+
   # The dedup wall refuses a near-duplicate title, so every fixture gets a
   # distinct one rather than an index-suffixed variant of the same sentence.
   @titles %{
@@ -274,10 +375,66 @@ defmodule BarkparkWeb.TaskCreatorAttributionTest do
     "tca-patch-forge" => "Whether a later patch can rename the original filer",
     "tca-q-alpha-1" => "Querying by identity, first row of the alpha lane",
     "tca-q-alpha-2" => "Backlink pagination across sheets and codelists",
-    "tca-q-beta-1" => "Media processing retries under a cold CDN cache"
+    "tca-q-beta-1" => "Media processing retries under a cold CDN cache",
+    "tca-twin-attributed" => "Whether editing a published row renames its filer",
+    "tca-twin-control" => "Scheduling ONIX exports against a throttled upstream"
   }
 
   defp title_for(id), do: Map.fetch!(@titles, id)
+
+  # The publish wall's E3 gate resolves every weighted tag against a PUBLISHED
+  # `type:tag` doc, and the test dataset starts with an empty registry — so a
+  # fixture that has to reach the published state registers its own tag first.
+  defp register_tag!(name) do
+    Barkpark.Content.TagRegistry.register!(@dataset)
+    {:ok, _} = Content.create_document("tag", %{"doc_id" => name, "title" => name}, @dataset, [])
+    {:ok, _} = Content.publish_document(name, "tag", @dataset, [])
+    name
+  end
+
+  # A row born the way the ~9,075 pre-stamp rows were — through the Writer with
+  # no `:caller_context`, so nothing to name — and then PUBLISHED, which is the
+  # state that turns the next edit's `drafts.<id>` write into a false birth.
+  defp publish_legacy_row(doc_id, title) do
+    register_tag!("tasks")
+
+    {:ok, _} =
+      Barkpark.Content.Writer.create_document(
+        "task",
+        %{
+          "doc_id" => doc_id,
+          "title" => title,
+          "content" => %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "priority" => 2,
+            # The authoring wall refuses a publish without one; this fixture has
+            # to REACH the published state to be the legacy row under test.
+            "description" =>
+              "A legacy published task row, born before the creator stamp shipped.",
+            "main_tag" => "tasks",
+            "tags" => [
+              %{"tag" => "tasks", "strength" => 80, "rationale" => "a task-ledger fixture"}
+            ]
+          }
+        },
+        @dataset,
+        source: :api
+      )
+
+    {:ok, _} = Content.publish_document(doc_id, "task", @dataset)
+    :ok
+  end
+
+  defp published_content(doc_id) do
+    {:ok, doc} = Content.get_document(doc_id, "task", @dataset)
+    doc.content
+  end
+
+  defp draft_content(doc_id) do
+    {:ok, doc} = Content.get_document("drafts." <> doc_id, "task", @dataset)
+    doc.content
+  end
 
   defp mutate(conn, token, mutations) do
     conn

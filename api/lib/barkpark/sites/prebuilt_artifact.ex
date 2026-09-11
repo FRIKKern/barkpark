@@ -26,10 +26,32 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       the same loop validates and writes.
 
     * **Symlinks are REFUSED, not sanitized.** A staged symlink is SERVED: the
-      static site root is `root * $ROOT/current` + `file_server`, and
-      `disable_symlinks` appears NOWHERE in this repo — so `leak.txt ->
+      static site root is `root * $ROOT/current` + `file_server`, so `leak.txt ->
       /opt/barkpark/.env` becomes an HTTP GET. There is no safe rewrite of a
       symlink here, only refusal.
+
+      `disable_symlinks` is DECLINED ON PURPOSE, and this sentence used to say
+      it merely "appears NOWHERE in this repo" — which read like an oversight
+      someone should close. It is not. Measured on caddy v2.11.4 (2026-09-11,
+      task-63877435cf4ad70a): `disable_symlinks` is not a Caddy construct at
+      ANY level — rejected as an unknown `file_server` subdirective, as an
+      unrecognized site directive, as an unrecognized global option, and as an
+      unknown field on the `http.handlers.file_server` JSON module. It is an
+      NGINX directive. Emitting it would not harden serving; it would make the
+      SHARED Caddyfile unparseable, so `caddy run` would refuse the whole file
+      and take every other site and the slot reverse_proxy down with it. And
+      even if it existed, the served root IS the `current` release symlink the
+      deploy repoints atomically (charter D11), so a "refuse anything reached
+      through a symlink" rule would refuse every request to every static site;
+      Caddy's `file_server` has no root-only exemption.
+
+      So the defence-in-depth behind this refusal is NOT a web-server directive.
+      It is a second fence at the FLIP: `deploy/site-deploy.sh`'s `do_switch`
+      walks the candidate release (`find -type l`) and refuses to repoint
+      `current` at a tree containing any symlink, leaving the previous release
+      serving. This module is fence one for the prebuilt path, that flip is
+      fence two for every path, and `internal/cli/sites_tarball.go` (charter
+      D120) refuses symlinks client-side before either.
 
     * **Regular files and directories ONLY.** Hard links, fifos, devices, the
       pax GLOBAL header (`g`) and the GNU long-name headers (`L`/`K`) are

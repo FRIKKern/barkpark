@@ -196,7 +196,8 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
       POST    /v1/sites/:id/rollback user(s) roll a site back to a prior deployment (write ability)
-      GET     /v1/sites/:id/deployments/:dep_id/build-log operator  the black box recorder's durable per-build record for THAT deployment (404 no such deployment / 410 evicted / 200 with an honest log_state)
+      GET     /v1/sites/:id/deployments/:dep_id/build-log user(s)  the black box recorder's durable per-build record for THAT deployment (read ability; 404 no such deployment / 410 evicted / 200 with an honest log_state)
+      GET     /v1/sites/:id/deployments/:dep_id/build-log/bytes operator  the recorded build log's BYTES for THAT deployment — a bounded tail (422 when the bytes were never scrubbed / 410 evicted / 404 no such deployment / 200 with an honest log_state)
       POST    /v1/sites/:id/deployments/:dep_id/promote user(s) rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact (write ability)
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
@@ -4457,9 +4458,13 @@ defmodule BarkparkCloud.Web.Router do
   # three stay the worker's alone. Fails CLOSED: an unset/blank/wrong token 401s
   # every route, so the kill switch can never be flipped by omission.
   #
-  #   GET  /v1/admin/autoupdate         → 200 {halted: bool}   — current state
-  #   POST /v1/admin/autoupdate/halt    → 200 {halted: true}   — engage
-  #   POST /v1/admin/autoupdate/resume  → 200 {halted: false}  — release
+  #   GET  /v1/admin/autoupdate         → 200 rollout state, halted: bool
+  #   POST /v1/admin/autoupdate/halt    → 200 rollout state, halted: true
+  #   POST /v1/admin/autoupdate/resume  → 200 rollout state, halted: false
+  #
+  # All three render `rollout_state_json/1` — the kill-switch LEVER plus the three
+  # fleet COUNTERS (eligible/behind/in_flight). See that function for why the
+  # lever alone was never a gauge.
   #
   # Halt stops the AutoupdateRolloutWorker from ADVANCING new self-updates fleet-
   # wide; settle bookkeeping for in-flight boxes continues so state stays honest.
@@ -4469,7 +4474,7 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      json(conn, 200, %{halted: Registry.autoupdate_halted?()})
+      json(conn, 200, rollout_state_json(Registry.autoupdate_halted?()))
     end
   end
 
@@ -4480,7 +4485,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(true)
-      json(conn, 200, %{halted: true})
+      json(conn, 200, rollout_state_json(true))
     end
   end
 
@@ -4491,7 +4496,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(false)
-      json(conn, 200, %{halted: false})
+      json(conn, 200, rollout_state_json(false))
     end
   end
 
@@ -4515,7 +4520,7 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      json(conn, 200, %{halted: Registry.autoupdate_halted?()})
+      json(conn, 200, rollout_state_json(Registry.autoupdate_halted?()))
     end
   end
 
@@ -4526,7 +4531,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(true)
-      json(conn, 200, %{halted: true})
+      json(conn, 200, rollout_state_json(true))
     end
   end
 
@@ -4537,7 +4542,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(false)
-      json(conn, 200, %{halted: false})
+      json(conn, 200, rollout_state_json(false))
     end
   end
 
@@ -5579,7 +5584,8 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # GET /v1/providers/capabilities → 200
-  #   {providers: {<kind>: {tier, capabilities, gaps}}}
+  #   {providers: {<kind>: {tier, capabilities, gaps}},
+  #    edge:      {<kind>: {capabilities, gaps, unknown}}}
   #
   # The CP-SERVED capability/tier conduit (charter Decision 16, folded into S11):
   # the SPA and the `bp` CLI read ONE server-owned contract instead of each
@@ -5597,6 +5603,13 @@ defmodule BarkparkCloud.Web.Router do
   #   * gaps         — a server-owned reason for EVERY false capability
   #                    (FailureCopy.capability_gap_reason/2), so no disabled
   #                    action is ever reason-less.
+  #
+  # `edge` is the SIBLING matrix, read the same generic way from
+  # edge_capabilities.json: what a provider adds IN FRONT of a box (dns/tls/cdn/
+  # tunnel/storage/edge_fn/full_host) rather than what it can provision. It
+  # carries `unknown` alongside its bools — the capabilities this repo's code
+  # cannot honestly answer for that kind, which a surface must render as "we
+  # don't know" rather than as a gap.
   #
   # Any signed-in user may read it — it's a static cross-surface contract, not
   # team-scoped estate data. Dev-tier rows are included; hiding them is the
@@ -8962,11 +8975,28 @@ defmodule BarkparkCloud.Web.Router do
   # GET /v1/sites/:id/deployments/:dep_id/build-log → the black box recorder's
   # durable per-build record, read BY DEPLOYMENT ID (dr-bl-recorder-http-read-path).
   #
-  # OPERATOR-GATED, and the gate is 403-dark in production today
-  # (`gr-ops-platform-admin-emails` leaves `PLATFORM_ADMIN_EMAILS` unset), so this
-  # route answers 403 to every real account until a human sets it. That is a human
-  # gate this route INHERITS, not a defect it introduces — and no test here asserts
-  # a live 200 from it.
+  # TEAM-SCOPED, the SAME door its siblings already use
+  # (dr-w19-site-build-log-is-operator-only). It shipped `operator`-gated, which is
+  # the `:platform_admin_emails` allowlist — unset on prod and unsettable through
+  # any route, console action or User field (`gr-ops-platform-admin-emails`) — so
+  # the ONE deploy-health read carrying a failed build's own words was readable by
+  # ZERO accounts while `GET /v1/sites/:id/deployments/:dep_id` next door answered
+  # every member of the owning team. Fail-closed to the point of uselessness is not
+  # a security posture: the person whose site failed to build could not read why.
+  #
+  # `{:ability, "read"}` is the sibling's own mode, not a new one — session OR a
+  # read-ability PAT, then `Registry.get_team_site/2`, so a FOREIGN team's site is
+  # the same 404 as one that does not exist. The site is resolved BY the wrapper
+  # and its `site.id` is what reaches `BuildLog`, so the read can never escape the
+  # caller's team even if the path id were to resolve some other way.
+  #
+  # WHAT CROSSES THE BOUNDARY IS UNCHANGED, and it is why widening the audience is
+  # safe: this route has never served raw log BYTES (the box refuses them — the
+  # build env file carries `BARKPARK_TOKEN=` in plaintext), only the explicitly
+  # allowlisted structured record — stages, exit code, a byte-capped
+  # `failure_reason`, and the `log_path` / `journal_command` naming where the bytes
+  # are. A field the box grows is invisible here until a human lists it, and the
+  # transport term is logged, never echoed.
   #
   # Every decision lives in `Sites.BuildLog`: the site scoping, the three
   # distinguishable answers (404 no-such-deployment / 410 evicted / 200 with an
@@ -8974,13 +9004,41 @@ defmodule BarkparkCloud.Web.Router do
   # This file is touched by every lane, so it carries the door and none of the
   # policy.
   get "/v1/sites/:id/deployments/:dep_id/build-log" do
+    with_team_site(conn, {:ability, "read"}, fn site ->
+      {status, payload} = Sites.BuildLog.for_deployment(site.id, conn.path_params["dep_id"])
+
+      json(conn, status, payload)
+    end)
+  end
+
+  # GET /v1/sites/:id/deployments/:dep_id/build-log/bytes → the recorded build
+  # log's BYTES, read BY DEPLOYMENT ID (dr-bl-recorder-http-read-path c1).
+  #
+  # A SUB-ROUTE, not a field on the record route above: serving bytes needs a
+  # REFUSAL (422 build_log_unscrubbed, for a record whose log_scrub is nil) that
+  # the record route's published 404/410/200 contract has no room for, and
+  # widening that route would let an existing caller's 200 silently become a 422.
+  # Everything else is inherited verbatim, so 404 and 410 mean here exactly what
+  # they mean next door.
+  #
+  # OPERATOR-GATED, AND DELIBERATELY NOT TEAM-SCOPED LIKE THE ROUTE ABOVE.
+  # #17693 widened that one to `{:ability, "read"}` and its security frame names
+  # the exact condition it widened under: "the widening moved WHO may ask, never
+  # WHAT is served … Not raw log bytes, and never has." THIS route serves the
+  # bytes, so that argument does not reach it and the audience does not move with
+  # it. `Auth.require_platform_operator/2` is 403-dark in production today
+  # (`gr-ops-platform-admin-emails`), which this route INHERITS from the row this
+  # task was filed under — no criterion here asserts a live 200 from it, and
+  # widening it is a separate decision with a separate secret-boundary review.
+  # All policy lives in `Sites.BuildLogBytes`.
+  get "/v1/sites/:id/deployments/:dep_id/build-log/bytes" do
     conn = Auth.require_platform_operator(conn, [])
 
     if conn.halted do
       conn
     else
       {status, body} =
-        Sites.BuildLog.for_deployment(conn.path_params["id"], conn.path_params["dep_id"])
+        Sites.BuildLogBytes.for_deployment(conn.path_params["id"], conn.path_params["dep_id"])
 
       json(conn, status, body)
     end
@@ -12202,6 +12260,28 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
+  # The rollout envelope every /v1/*/autoupdate route answers with — BOTH the
+  # worker-gated `/v1/admin/autoupdate*` trio and the platform-operator
+  # `/v1/operator/autoupdate*` proxies, so the counters cannot reach one
+  # principal and not the other (the proxies re-render rather than forward, which
+  # is exactly how a key survives on one and dies on the other).
+  #
+  # THE LEVER IS NOT A GAUGE (task-0f05a5f719493b5f). These routes used to emit
+  # `halted` alone. `halted` is a position the operator SET; it measures nothing
+  # about the fleet. The Go client has modelled the other three the whole time —
+  # `cloudclient.RolloutState` declares `in_flight`/`behind`/`eligible` as *int
+  # and `renderRolloutState` prints each behind a nil guard — so a control plane
+  # that omitted them made `bp cloud autoupdate status` print the halted line and
+  # then STOP, silently, which reads as a healthy lean envelope from an older CP.
+  # No CP ever emitted them; the blank was total and permanent.
+  #
+  # `halted` is passed in rather than re-read: the halt/resume twins have just
+  # WRITTEN it, and re-reading would race their own write. The counters are read
+  # fresh either way — they are a measurement, not an echo.
+  defp rollout_state_json(halted) when is_boolean(halted) do
+    Registry.autoupdate_rollout_counts() |> Map.put(:halted, halted)
+  end
+
   # One fleet row for GET /v1/operator/fleet — the cross-team operator roll-up.
   # A thin projection of the Barkpark row: identity + rollout channel + update
   # state + the in-flight marker (nil until a self-update is triggered). No
@@ -12229,7 +12309,16 @@ defmodule BarkparkCloud.Web.Router do
       update_state: bp.update_state,
       autoupdate_triggered_at: bp.autoupdate_triggered_at,
       apply_arming: bp.apply_arming,
-      apply_arming_checked_at: bp.apply_arming_checked_at
+      apply_arming_checked_at: bp.apply_arming_checked_at,
+      # cch-w63-bl — WHY `update_state` is "unknown", when it is. Written by
+      # `Registry.persist_update_unknown/2` from nine distinct call sites and
+      # already serialized to the member fleet row by `barkpark_json/6`; the
+      # operator roster omitted it, so `operatorRowState`'s unknown arm could
+      # only say "No update state reported yet." about a box that had in fact
+      # answered 401. `nil` means NOT MEASURED and the console whitelists the
+      # nine words rather than testing truthiness, so an unrecognised value
+      # falls through to the bare grey "Unknown".
+      update_unavailable_reason: bp.update_unavailable_reason
     }
   end
 
@@ -12610,6 +12699,21 @@ defmodule BarkparkCloud.Web.Router do
   @external_resource @providers_capabilities_fixture
   @providers_capabilities @providers_capabilities_fixture |> File.read!() |> Jason.decode!()
 
+  # The CP's committed copy of the EDGE capabilities fixture — the sibling of the
+  # compute matrix above, for what a provider adds IN FRONT of a box (dns/tls/
+  # cdn/tunnel/storage/edge_fn/full_host) rather than what it can provision.
+  # Byte-identical to internal/cli/cloud/edge_capabilities.json, and the drift
+  # gate lives on BOTH sides (edge_capabilities_contract_test.exs here,
+  # TestEdgeFixtureCopyIsByteIdentical in the Go package), so editing either copy
+  # alone reds both suites. Same compile-time read, same @external_resource
+  # recompile trigger.
+  @edge_capabilities_fixture Path.expand(
+                               "../../../priv/static/__fixtures__/edge_capabilities.json",
+                               __DIR__
+                             )
+  @external_resource @edge_capabilities_fixture
+  @edge_capabilities @edge_capabilities_fixture |> File.read!() |> Jason.decode!()
+
   # Build the GET /v1/providers/capabilities body from the committed fixture.
   # For each kind: split the tier (fixture value or the "prod" default) from the
   # capability bools (every boolean key, generically — no hardcoded list),
@@ -12630,7 +12734,32 @@ defmodule BarkparkCloud.Web.Router do
         {kind, %{tier: tier, capabilities: capabilities, gaps: gaps}}
       end)
 
-    %{providers: providers}
+    %{providers: providers, edge: edge_capabilities_payload()}
+  end
+
+  # The EDGE half of the same conduit: which edge features each provider adds in
+  # FRONT of a box. Built the SAME generic way as the compute half — every
+  # boolean key passes through (`capability_bools/1`, no hardcoded list) and every
+  # FALSE one gets a server-owned gap reason, so a new edge key flows to the SPA
+  # and the CLI with ZERO conduit change.
+  #
+  # The `unknown` key is NOT a capability and never reaches a surface as one: it
+  # names the capabilities this repo's code cannot honestly answer for that
+  # provider (vercel's TLS/CDN/DNS/…, which no code here drives). It is dropped
+  # by the SAME `is_boolean(value)` filter that drops the compute half's `tier`,
+  # and it rides the payload under its own key so a reading surface can say "we
+  # don't know" instead of rendering a gap reason that would be untrue.
+  defp edge_capabilities_payload do
+    Map.new(@edge_capabilities, fn {kind, row} ->
+      capabilities = capability_bools(row)
+
+      gaps =
+        for {capability, false} <- capabilities, into: %{} do
+          {capability, FailureCopy.capability_gap_reason(kind, capability)}
+        end
+
+      {kind, %{capabilities: capabilities, gaps: gaps, unknown: Map.get(row, "unknown", [])}}
+    end)
   end
 
   # tier reads from the fixture row ("dev" for the fake provider); every row
@@ -12669,9 +12798,15 @@ defmodule BarkparkCloud.Web.Router do
 
   defp split_provider_tier(row) do
     tier = Map.get(row, "tier", "prod")
-    capabilities = for {key, value} <- row, is_boolean(value), into: %{}, do: {key, value}
-    {tier, capabilities}
+    {tier, capability_bools(row)}
   end
+
+  # THE generic capability filter, shared by the compute and edge halves: a row's
+  # boolean-valued keys ONLY. Every non-bool key is metadata by construction —
+  # the compute matrix's `tier`, the edge matrix's `unknown` — so neither can
+  # leak in as a capability, and neither half needs a hardcoded key list.
+  defp capability_bools(row),
+    do: for({key, value} <- row, is_boolean(value), into: %{}, do: {key, value})
 
   # GET /v1/providers/:kind/catalog handler.
   defp providers_catalog(conn, kind) do

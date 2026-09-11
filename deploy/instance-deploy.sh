@@ -124,6 +124,59 @@ else
 fi
 
 HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
+# THE LIVENESS PATH every health gate below probes. NOT `/api/schemas`.
+#
+# `/api/schemas` is the LAST surviving legacy route (router.ex, the final
+# `scope "/api"`), and it pipes through `BarkparkWeb.Plugs.LegacyDeprecation`,
+# which stamps every response with
+#
+#     sunset: Wed, 31 Dec 2026 23:59:59 GMT
+#
+# That is a PUBLISHED removal date, not a hint. THE FAILURE MODE ON THAT DATE IS
+# FAIL-CLOSED, NOT QUIET: every probe below captures the status with
+# `-o /dev/null -w '%{http_code}'` (via bp_curl_code) and GATES on `= 200`, and
+# curl's own exit status is deliberately discarded (`|| echo 000`) because the
+# STATUS CODE is the signal. So a 404 from a retired route does not "go quiet" —
+# it disables the freshly-booted slot, resets the checkout to the live sha and
+# exits 24/14, or (post-flip) flips Caddy back. A healthy build on a healthy box
+# would stop deploying everywhere, and the log would blame the slot.
+#
+# `/status.json` (router.ex: `get("/status.json", StatusController, :show_json)`)
+# is the replacement: `pipe_through(:api)` only — no LegacyDeprecation, no
+# deprecation/sunset header, no token (the `:api` pipeline runs `OptionalToken`),
+# and not part of any versioned content contract. It is a STRICTLY STRONGER
+# liveness signal than the route it replaces: `StatusController.show_json/2` ->
+# `Barkpark.Status.health/0` -> `open_incidents/0` and `recent_incidents/1` are
+# bare `Repo.all/1` calls (NOT wrapped in `Status.safe/2`), so an unreachable
+# database raises and the probe sees 500, never 200. 200 means the endpoint is
+# up AND the database answers. `curl -s <box>/status.json | jq -r .commit` is
+# already the documented box smoke (CLAUDE.md).
+#
+# CONSUMERS OF THE SUNSET ROUTE, re-derived from origin/main on 2026-09-11 by
+# `git grep -n 'api/schemas' -- . ':!api/'`. The list this block used to carry
+# was the set PR #17745 CHECKED, not the set that exists: `cloud/support.go`
+# does not exist (the Go consumer is `internal/cli/cloud/support.go`), the
+# compose healthcheck is in the ROOT `docker-compose.yml` (not `cloud/`), and
+# seven further code consumers were never listed at all.
+#
+# RETARGETED to /status.json in PR "every remaining health consumer leaves the
+# sunset /api/schemas route" (task-539f1deeec25a8e7):
+#   docker-compose.yml (api healthcheck)      scripts/deploy-rebuild.sh (BP_HEALTH_URL)
+#   scripts/compose-smoke.sh (green arm)      scripts/create-quickstart-smoke.sh (boot poll)
+#   scripts/pds-scratch-target.sh (probe)     internal/cli/cloud/support.go (SupportLocalHealthProbe)
+#   deploy/uptime-kuma/README.md (monitor)    deploy/README.md (prose)
+#
+# STILL ON THE SUNSET ROUTE — out of that PR's fence, each still fails closed on
+# 2027-01-01 unless repointed (file:line on origin/main 2b1fcaef7):
+#   deploy.sh:356,419,427,434                 run.sh:18
+#   Makefile:299,305,307                      bin/barkpark:175,244,270,275,372,404,426
+#   deploy/site-deploy.sh:8 (comment only)    scripts/setup-windows.ps1:184,199,211
+#   internal/cli/setup/assets/deploy.sh       internal/provisioner/support.go:1076
+#   internal/cli/cloud/restore_driver.go:108,431   internal/cli/cloud_support_cmd.go:1685
+#   internal/cli/hetzner_instance_cmd.go:706-1858  internal/cli/hetzner_instance_transfer_cmd.go:145
+#   internal/cli/cloud_deploy_cmd.go:880           internal/cli/setup/local.go:461 (fallback, /v1/capabilities first)
+# This script honours \$BARKPARK_HEALTH_PATH and needs no change either way.
+HEALTH_PATH="${BARKPARK_HEALTH_PATH:-/status.json}"
 BLUE_PORT="${BARKPARK_PORT_BLUE:-4000}"
 GREEN_PORT="${BARKPARK_PORT_GREEN:-4001}"
 # Remote MCP endpoint (viable-everywhere D19). MUST stay outside the blue/green
@@ -464,7 +517,7 @@ if [ "$MODE" != "deploy" ]; then
   systemctl restart "barkpark-slot@$TARGET_SLOT"
   ok=0
   for _ in $(seq 1 40); do
-    code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || echo 000)"
+    code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}${HEALTH_PATH}" || echo 000)"
     if [ "$code" = "200" ]; then ok=1; log "slot $TARGET_SLOT healthy ($code)"; break; fi
     sleep 5
   done
@@ -516,8 +569,8 @@ if [ "$MODE" != "deploy" ]; then
     git reset --hard "$OLD"; exit 24
   fi
   exec 8>&-   # leaf lock: released the moment the file is written + reloaded
-  code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || echo 000)"
-  log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
+  code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}${HEALTH_PATH}" || echo 000)"
+  log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}${HEALTH_PATH} = $code)"
 
   # Drain, retire the rolled-away slot, and rewrite STATE to the rolled-back
   # sha (W6 D21) — keeps coalesce, the agent's git_commit, and the next
@@ -1236,7 +1289,7 @@ systemctl restart "barkpark-slot@$TARGET"
 
 ok=0
 for _ in $(seq 1 40); do
-  code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || echo 000)"
+  code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}${HEALTH_PATH}" || echo 000)"
   if [ "$code" = "200" ]; then ok=1; log "slot $TARGET healthy ($code)"; break; fi
   sleep 5
 done
@@ -1274,7 +1327,7 @@ cp -a "$CADDYFILE" "$CADDYFILE.pre-deploy"
 sed -i "s/localhost:${FLIP_FROM}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
 # Did the rewrite actually MOVE the upstream? The post-flip PUBLIC gate below
 # claims to catch "a sed that missed the live upstream line". It cannot: BOTH
-# slots serve /api/schemas, so when the flip is a no-op the OLD slot answers
+# slots serve the health path, so when the flip is a no-op the OLD slot answers
 # that probe 200 through the UNCHANGED Caddyfile, the gate passes, and the
 # script then disables the old slot — leaving Caddy proxying a dead port, exit
 # 0, "healthy" in every log line. A Caddyfile whose upstream is written some
@@ -1305,8 +1358,8 @@ if ! systemctl reload caddy; then
 fi
 exec 8>&-   # leaf lock: released the moment the flip is written + reloaded, so
             # the long non-Caddy tail below (go builds, npm ci) never holds it
-code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || echo 000)"
-log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
+code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}${HEALTH_PATH}" || echo 000)"
+log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}${HEALTH_PATH} = $code)"
 # GATE, not just log (pds-bl-w49): the pre-flip loop above only proves the app
 # boots on its OWN port (localhost:$TARGET_PORT) — it cannot catch a flip that
 # landed wrong (a sed that missed the live upstream line, a Caddy reload that
@@ -1318,7 +1371,7 @@ log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
 # flip Caddy back and walk away clean instead of shipping a silently-broken
 # deploy.
 if [ "$code" != "200" ]; then
-  log "post-flip public health check FAILED (https://${HEALTH_HOST}/api/schemas = $code) — flipping back to :$ACTIVE_PORT; it was never retired"
+  log "post-flip public health check FAILED (https://${HEALTH_HOST}${HEALTH_PATH} = $code) — flipping back to :$ACTIVE_PORT; it was never retired"
   revert_post_flip_health_fail() {
     cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"
     if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
@@ -1510,6 +1563,27 @@ else
       # token would serve EVERY tenant — the exact multi-tenant hole this wave
       # closes. Each install authenticates with its own workspace-bound token,
       # ciphered at rest under CONNECTORS_CREDENTIAL_KEY.
+      # ROTATION, NOT A FLAG DAY. The cipher opens a sealed row under the
+      # CURRENT key or any key in CONNECTORS_CREDENTIAL_KEY_PREVIOUS
+      # (connectors/src/config.ts `splitKeys` → crypto/credential-cipher.ts), and
+      # the unit reads ONLY this file (EnvironmentFile=/etc/barkpark/connectors.env).
+      # Until this writer emitted the key, setting _PREVIOUS in /opt/barkpark/.env
+      # reached nothing and the rotation documented directly above had to be
+      # completed by hand-editing the box's connectors.env.
+      #
+      # UNSET IS NOT EMPTY. `splitKeys` reads an absent value and an empty string
+      # the same way (an empty list either way), so emitting an empty line would
+      # not MISLEAD the bridge — but it would stop this file from being able to
+      # say "no rotation is in flight", and, once the operator deletes the line
+      # from .env after `npm run rewrap`, the line must DISAPPEAR here on the next
+      # deploy rather than linger as an empty claim. So: emitted only when there
+      # is a key to carry. Whitespace-only counts as unset, for the same reason
+      # loadConfig() trims CONNECTORS_CONNECT_SECRET before deciding.
+      CONNECTORS_PREV_KEY="${CONNECTORS_CREDENTIAL_KEY_PREVIOUS:-}"
+      case "$CONNECTORS_PREV_KEY" in
+        *[![:space:]]*) ;;
+        *) CONNECTORS_PREV_KEY="" ;;
+      esac
       mkdir -p "$(dirname "$CONNECTORS_ENV_FILE")"
       ( umask 077; : > "$CONNECTORS_ENV_FILE" )
       chmod 0600 "$CONNECTORS_ENV_FILE"
@@ -1522,7 +1596,14 @@ else
         # The SAME value Barkpark.Connectors signs tickets with (D50). If these
         # two ever disagree, every connect 401s and nothing else would catch it.
         printf 'CONNECTORS_CONNECT_SECRET=%s\n' "${CONNECTORS_CONNECT_SECRET:-}"
+        # Present ONLY during a rotation window — see the UNSET-IS-NOT-EMPTY note above.
+        if [ -n "$CONNECTORS_PREV_KEY" ]; then
+          printf 'CONNECTORS_CREDENTIAL_KEY_PREVIOUS=%s\n' "$CONNECTORS_PREV_KEY"
+        fi
       } > "$CONNECTORS_ENV_FILE"
+      if [ -n "$CONNECTORS_PREV_KEY" ]; then
+        log "connectors.env carries CONNECTORS_CREDENTIAL_KEY_PREVIOUS — a rotation window is OPEN; run \`npm run rewrap\` then delete the line from /opt/barkpark/.env"
+      fi
       install -m 0644 "$APP/deploy/systemd/barkpark-connectors.service" /etc/systemd/system/barkpark-connectors.service
       systemctl daemon-reload
       if systemctl enable barkpark-connectors >/dev/null 2>&1 && systemctl restart barkpark-connectors; then

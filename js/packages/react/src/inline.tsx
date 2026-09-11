@@ -93,6 +93,57 @@ export function textLeafValue(n: Record<string, unknown>): string {
   return str(n.value) || str(n.text)
 }
 
+/* ── THE code-block source-field contract (task-e9af9f95d290307d) ─────────────
+ *
+ * A standalone `code` block carries its source under one of FOUR keys. This is
+ * not a design, it is the corpus: measured over all 1050 `paper` + 8671 `task`
+ * documents on guerrilla.barkpark.cloud (10,608 block-level `code` nodes) —
+ * `value` 9711, `text` 460, `code` 327, `content` 30, and ZERO rows carrying two
+ * non-blank source keys.
+ *
+ * This SDK is the THIRD reader of that contract. Until this helper existed both
+ * JS readers (`blocks/core.ts` `code`, `toPlainText.ts` `case 'code'`) read
+ * `value` ONLY, so the 817 non-`value` blocks rendered hollow here exactly as
+ * they did on the web before compose.ex was fixed — while the Go TUI showed 327
+ * of them. The twins are `api/lib/barkpark/portable_doc/render/compose.ex`
+ * `code_source/1` and `internal/pdrender/code.go` `codeSource`, and all three
+ * answer to ONE fixture: `api/test/support/fixtures/code-source-aliases.json`
+ * (read here by `tests/code-source-aliases.parity.test.ts`).
+ *
+ * PRECEDENCE is FIRST NON-BLANK, not first-present: a leading key holding "" or
+ * whitespace falls through, so the Studio's seeded `value: ""` on every new code
+ * block cannot mask a real `code`. `value` leads because it is the canonical
+ * field and because bpml/printer.ex has printed exactly this order since it was
+ * written. `content` is an array of inline nodes and flattens to its text.
+ * Anything non-stringish coerces to '' through `str` and falls through.
+ *
+ * The winning key is returned VERBATIM (untrimmed): trimming is the SELECTION
+ * rule, never a transform on the source — a `<pre>` shows leading indentation
+ * and trailing newlines exactly as authored, so every `value`-shaped block
+ * renders byte-identically to before. */
+export const CODE_SOURCE_KEYS = ['value', 'code', 'content', 'text'] as const
+
+export function codeSource(b: Record<string, unknown> | null | undefined): string {
+  if (!isMap(b)) return ''
+  for (const key of CODE_SOURCE_KEYS) {
+    const source = codeSourceText(b[key])
+    if (source.trim() !== '') return source
+  }
+  return ''
+}
+
+/** ONE source key read as text: a stringish leaf through `str`, or an
+ * inline-node ARRAY (the `content` shape) flattened to its concatenated text.
+ * Twins: compose.ex `code_source_text/1`, code.go `codeSourceText`. */
+function codeSourceText(v: unknown): string {
+  if (Array.isArray(v)) {
+    return v
+      .map((n) => (typeof n === 'string' ? n : isMap(n) ? textLeafValue(n) : ''))
+      .join('')
+  }
+  return str(v)
+}
+
 /** Positive finite number from a number or numeric string, else undefined. */
 export function num(v: unknown): number | undefined {
   if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : undefined
@@ -421,12 +472,35 @@ function valuerefHtml(v: {
 /** The concatenated, UNESCAPED text of an inline-node tree — no markup. Used by
  * text-leaf emitters (inline code) that must fold nested `children` into a flat
  * string rather than nested elements. */
-function inlineText(nodes: unknown): string {
+export function inlineText(nodes: unknown): string {
   if (typeof nodes === 'string' || typeof nodes === 'number') return String(nodes)
   if (!Array.isArray(nodes)) return ''
   return nodes
     .map((n) => (isMap(n) ? textLeafValue(n) || inlineText(n.children) : inlineText(n)))
     .join('')
+}
+
+/* ── THE INLINE `code` node source contract (task-e4833f198e293ed1) ───────────
+ *
+ * An inline code chip's body is a FLAT STRING, never inlines — but 66 published
+ * paragraphs (2026-07-25 census) author it as `children` inline nodes with no
+ * `value`, which rendered an empty `<code></code>` here and composed an empty
+ * PdInlineCode in Elixir. THE LAW: `value` when it is a non-empty string, else
+ * the flattened plain text of `children`.
+ *
+ * FIRST NON-EMPTY, not first-non-blank — a `value` of `' '` WINS and keeps its
+ * space. That is deliberately the OPPOSITE of the BLOCK-level `code` contract
+ * (`codeSource` above, which trims to select among value|code|content|text): a
+ * block's source key is a choice among aliases, an inline chip's `value` is the
+ * authored body verbatim.
+ *
+ * Twins: `Render.Inline.inline_code_source/1`
+ * (api/lib/barkpark/portable_doc/render/inline.ex) and `inlineCodeSource`
+ * (internal/pdrender/inline.go). All three answer to ONE fixture,
+ * `api/test/support/fixtures/inline-code-source.json`, read here by
+ * `tests/inline-code-source.parity.test.ts`. */
+export function inlineCodeSource(node: Record<string, unknown>): string {
+  return str(node.value) || inlineText(node.children)
 }
 
 /** Render one inline node to an HTML string. */
@@ -472,7 +546,7 @@ export function renderInline(node: Inline): string {
       // carry that shape. Inline code is a TEXT leaf — the children are folded
       // to their concatenated text, never to nested markup, so the emitted
       // `<code>` body stays escaped plain text exactly as the `value` path.
-      return `<code>${escapeHtml(str(node.value) || inlineText(node.children))}</code>`
+      return `<code>${escapeHtml(inlineCodeSource(node))}</code>`
     case 'link':
       return `<a href="${safeUrl(str(node.href))}" style="${LINK_STYLE}">${renderInlines(node.children)}</a>`
     case 'wikilink': {
