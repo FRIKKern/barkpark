@@ -436,33 +436,54 @@ info "MemAvailable    ${MEM_AVAIL_KB} kB = ${MEM_AVAIL_MB} MiB (floor read from 
 #
 # The ledger is READ-ONLY here. It is not charged until window 2, below every refusal.
 if [ "$FULL_ACQ" = yes ]; then
+  info "attempt ledger  $(full_attempts) of $FULL_BUDGET spent so far · $FULL_ATTEMPTS_FILE (shared with the frozen harness)"
+  info "                this acquisition is FULL-fidelity, so it will charge 1 attempt — written just before the request, never here"
+  # THE BUDGET IS ENFORCED HERE, STRICTLY ABOVE THE SPEND.
+  #
+  # This instrument used to RECORD the spend and leave enforcement to the frozen
+  # harness's cond_c. Observed consequence: with attempts at 3 and a budget of 1
+  # it printed "attempt ledger  3 of 1 spent so far", charged 3 -> 4, and fired a
+  # ~2.2 GiB export anyway. The budget does not encode a bookkeeping preference —
+  # it encodes a live OOM risk to the content API (PDS-D156), and that risk does
+  # not care which process is holding the instrument. A ceiling anything can walk
+  # past is not a ceiling.
+  #
+  # The refusal sits beside the MemAvailable-floor refuse below and ABOVE every
+  # write: no lock is taken, no attempt is charged, the counter's value and mtime
+  # are untouched. It is NOT satisfied by moving PDS_FULL_EXPORT_MIN_MEM_MB (a
+  # different quantity, and this script only ever READS that floor) and NEVER by
+  # resetting the counter — PDS-D212 forbids it.
+  #
+  # The diagnostic case reading (a) — "measurement must stay reachable exactly
+  # when the climb cannot run" — is honoured by its OWN opt-out and nothing else:
+  # PDS_FULL_EXPORT_BUDGET_OVERRIDE=1, which does not fire silently. It says out
+  # loud that it is exceeding the budget and why that is permitted, and the run
+  # still charges the attempt like any other. A scoped run needs none of this: it
+  # is not the event the budget is stated on.
+  FULL_BUDGET_OVERRIDE="${PDS_FULL_EXPORT_BUDGET_OVERRIDE:-}"
+  if [ "$(full_attempts)" -ge "$FULL_BUDGET" ]; then
+    if [ -n "$FULL_BUDGET_OVERRIDE" ]; then
+      info ""
+      info "                ⚠ OVER BUDGET, PERMITTED BY OVERRIDE — $(full_attempts) attempt(s) already spent against a"
+      info "                  budget of $FULL_BUDGET, and PDS_FULL_EXPORT_BUDGET_OVERRIDE is set. The frozen harness's"
+      info "                  cond_c would REFUSE the crown climb in this state; this run is EXCEEDING that budget"
+      info "                  deliberately, because the operator asserted the diagnostic reading: a measurement of"
+      info "                  export demand must stay reachable exactly when the climb cannot run. It is about to"
+      info "                  fire a ~2.2 GiB export and will charge attempt $(( $(full_attempts) + 1 )) — the override buys"
+      info "                  permission, never a free attempt, and it NEVER resets the counter (PDS-D212)."
+      info ""
+    else
+      refuse "the full-export attempt budget is EXHAUSTED — $(full_attempts) attempt(s) already spent against PDS_FULL_EXPORT_BUDGET=$FULL_BUDGET ($FULL_ATTEMPTS_FILE, shared with the frozen harness). A FULL-fidelity acquisition here IS the ~2.2 GiB export that budget is stated on, and firing it risks OOM-killing the LIVE content API (PDS-D156); the frozen harness's cond_c would refuse the crown climb in exactly this state. Nothing was charged and the counter is untouched. Narrow the acquisition with --path '/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=production' (charges 0 attempts, takes no lock), or raise the ceiling honestly with PDS_FULL_EXPORT_BUDGET. To measure anyway with the budget knowingly exceeded, set PDS_FULL_EXPORT_BUDGET_OVERRIDE=1. NEVER reset the counter (PDS-D212), and never move PDS_FULL_EXPORT_MIN_MEM_MB — that is a different quantity."
+    fi
+  fi
+
+  # PDS-D31: only now, with every read-only refusal behind us, is the mutex taken.
   mkdir -p "$FULL_DIR"
   if mkdir "$FULL_LOCK" 2>/dev/null; then
     LOCK_OWNED=1
     info "lock            took $FULL_LOCK (shared with the frozen harness — PDS-D31)"
   else
     refuse "$FULL_LOCK is held by another run. Two concurrent FULL exports against this box OOM it (PDS-D31). A NARROWED acquisition (--path '/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=production') needs no mutex and runs beside a held lock."
-  fi
-  info "attempt ledger  $(full_attempts) of $FULL_BUDGET spent so far · $FULL_ATTEMPTS_FILE (shared with the frozen harness)"
-  info "                this acquisition is FULL-fidelity, so it will charge 1 attempt — written just before the request, never here"
-  # This instrument RECORDS; the frozen harness's cond_c ENFORCES. That split is
-  # deliberate (measuring must stay reachable), but "3 of 1 spent so far" said in
-  # the same calm voice as "0 of 5" is the very defect the REFUSAL block below
-  # exists to kill — an unusable number emitted as though it were usable. So the
-  # over-budget case is stated OUT LOUD, at the last moment it can still be
-  # cancelled by hand. Whether it should REFUSE is a policy call above this
-  # script: pds-bl-peak-budget-enforcement.
-  if [ "$(full_attempts)" -ge "$FULL_BUDGET" ]; then
-    info ""
-    info "                ⚠ OVER BUDGET — $(full_attempts) attempt(s) already spent against a budget of $FULL_BUDGET."
-    info "                  The frozen harness's cond_c would REFUSE the crown climb in this state."
-    info "                  This instrument does not enforce that gate, so it is ABOUT TO FIRE a"
-    info "                  ~2.2 GiB export anyway and charge attempt $(( $(full_attempts) + 1 )). If that is not"
-    info "                  what you want, interrupt now, or narrow the acquisition with"
-    info "                  --path '/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=production'."
-    info "                  Raise the ceiling honestly with PDS_FULL_EXPORT_BUDGET; NEVER reset the"
-    info "                  counter (PDS-D212)."
-    info ""
   fi
 else
   info "lock            NOT taken — $FULL_LOCK guards two concurrent FULL exports (PDS-D31), and this"
