@@ -65,6 +65,7 @@ defmodule Barkpark.Content.Mutations do
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Tasks.QueueGate
+  alias Barkpark.Tasks.Stage
 
   alias Barkpark.Content.{
     BoundFieldSync,
@@ -1044,9 +1045,18 @@ defmodule Barkpark.Content.Mutations do
   # all is logged and allowed (see that function's comment for why a hard
   # requirement is a protocol change, not a fence), so "every task row is
   # adjudicated" is NOT true by construction yet.
-  @disposition_key "disposition"
-  @reopen_trigger_key "reopen_trigger"
-  @trigger_required_dispositions ~w(parked)
+  #
+  # THE VOCABULARY IS NOT RETYPED HERE. `Barkpark.Tasks.Stage` is the one
+  # writer of an adjudication and therefore the one owner of its key names and
+  # its term set; this door SCREENS the same triple, so it reads them from
+  # Stage (`disposition_key/0`, `reopen_trigger_key/0`,
+  # `disposition_rerun_key/0`, `dispositions/0`,
+  # `trigger_required_dispositions/0`) rather than keeping a second copy. The
+  # copy used to sit 80 lines above a `Stage.dispositions()` call in this same
+  # function group: two spellings of one truth table, with nothing that reds
+  # when they diverge. Adding a fourth term to Stage now moves this door with
+  # it. `mutations_adjudication_vocabulary_lock_test.exs` is the both-directions
+  # lock; the same shape landed for the schema in #17843.
 
   # PDS wave 28: the FOURTH durable key gets the SAME raw-door treatment as the
   # term. `Tasks.Stage` screens a rerun that cannot fail (`git -C`, a `test`
@@ -1055,14 +1065,13 @@ defmodule Barkpark.Content.Mutations do
   # straight past, leaving the sanctioned-writer property as decoration. Any
   # CHANGE of the key through this door is refused and named to the verb;
   # `now == was` is not a change, so bookkeeping passes untouched.
-  @disposition_rerun_key "disposition_rerun"
 
   defp ensure_disposition_via_verb("task", nil, _merged, _opts), do: :ok
 
   defp ensure_disposition_via_verb("task", existing, merged, opts) do
     was = existing.content || %{}
-    was_term = was[@disposition_key]
-    now_term = merged[@disposition_key]
+    was_term = was[Stage.disposition_key()]
+    now_term = merged[Stage.disposition_key()]
 
     cond do
       # Replication mirrors upstream rows verbatim — checked BEFORE any change
@@ -1076,13 +1085,14 @@ defmodule Barkpark.Content.Mutations do
 
       # The RERUN changed through the raw door — the same bypass one field
       # over. Route it to the verb, which screens a rerun that cannot fail.
-      merged[@disposition_rerun_key] != was[@disposition_rerun_key] ->
-        {:error, {:invalid_task_content, rerun_bypass_error(merged[@disposition_rerun_key])}}
+      merged[Stage.disposition_rerun_key()] != was[Stage.disposition_rerun_key()] ->
+        {:error,
+         {:invalid_task_content, rerun_bypass_error(merged[Stage.disposition_rerun_key()])}}
 
       # The term is unchanged, but the trigger that makes a park honest is
       # being erased underneath it.
-      now_term in @trigger_required_dispositions and
-          trigger_erased?(was[@reopen_trigger_key], merged[@reopen_trigger_key]) ->
+      now_term in Stage.trigger_required_dispositions() and
+          trigger_erased?(was[Stage.reopen_trigger_key()], merged[Stage.reopen_trigger_key()]) ->
         {:error, {:invalid_task_content, trigger_erasure_error(now_term)}}
 
       true ->
@@ -1132,7 +1142,7 @@ defmodule Barkpark.Content.Mutations do
     cond do
       Keyword.get(opts, :source, :api) != :api -> :ok
       was_parent == now_parent -> :ok
-      merged[@disposition_key] in Barkpark.Tasks.Stage.dispositions() -> :ok
+      merged[Stage.disposition_key()] in Stage.dispositions() -> :ok
       true -> {:error, {:invalid_task_content, adoption_error(was_parent, now_parent)}}
     end
   end
@@ -1170,7 +1180,7 @@ defmodule Barkpark.Content.Mutations do
   # that the verb writes the triple atomically.
   defp disposition_bypass_error(was, now) do
     %{
-      @disposition_key => [
+      Stage.disposition_key() => [
         "cannot be set to #{inspect(now)} through /v1/data/mutate" <>
           if(is_binary(was), do: " (currently #{inspect(was)})", else: "") <>
           ". A disposition is an adjudication: written raw it carries no normalised term, no " <>
@@ -1191,7 +1201,7 @@ defmodule Barkpark.Content.Mutations do
   # rerun written raw is one nobody has checked can fail.
   defp rerun_bypass_error(now) do
     %{
-      @disposition_rerun_key => [
+      Stage.disposition_rerun_key() => [
         "cannot be set to #{inspect(now)} through /v1/data/mutate. The rerun is the one " <>
           "thing that could prove a durable reason WRONG, and it is screened at the verb's " <>
           "write seam — a rerun that cannot fail (`git -C`, a `test` predicate, `$( … )` " <>
@@ -1208,7 +1218,7 @@ defmodule Barkpark.Content.Mutations do
 
   defp trigger_erasure_error(term) do
     %{
-      @reopen_trigger_key => [
+      Stage.reopen_trigger_key() => [
         "cannot be erased through /v1/data/mutate while this task is #{inspect(term)}. The " <>
           "reopen trigger is the only thing that makes a park a deferral rather than a silent " <>
           "drop: without it nothing states what would bring the row back. Re-adjudicate it " <>

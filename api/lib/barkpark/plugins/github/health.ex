@@ -102,7 +102,34 @@ defmodule Barkpark.Plugins.Github.Health do
   Total by construction: any sub-read that fails (dark plugin, missing table,
   transient DB error) degrades to zeros for its section, never a raise.
 
-  The argument is a **dataset filter** (`nil` | `""` | `"<name>"`):
+  The argument is a **scope filter**. Two shapes:
+
+    * a binary / `nil` — the legacy DATASET-ONLY filter, described below. Every
+      existing caller (the admin `:ops` console, `bp github status`) keeps this
+      shape and its exact behaviour.
+    * a keyword or map carrying `:dataset` and/or `:workspace_ids` — the
+      MEMBERSHIP-FENCED read (`github-bridge-w9-health-workspace-isolation`).
+      `:workspace_ids` is the caller's own membership set, as produced by
+      `Tenancy.list_workspaces_for/1`. When present (INCLUDING an empty list) the
+      open-conflict read admits only rows whose `workspace_id` is in that set or
+      is NULL; absent means no membership fence at all.
+
+  ## Why a dataset string was never isolation, and why NULL is still admitted
+
+  A dataset slug is unique per PROJECT, not globally — every workspace gets a
+  `"production"` — so pinning to the bearer's own `api_token.dataset` (D18)
+  narrows a whole-fleet read to a SHARED LABEL. Two workspaces both named
+  `production` still read each other's quarantine. The `workspace_id` column
+  (migration 20260911120000) is the tenant key that string never was.
+
+  A NULL `workspace_id` is UNATTRIBUTED, not "everyone's": a `dedup_refused` row
+  has no `doc_id` to trace, and a `{doc_id, dataset}` under a shared slug names
+  no single tenant. Those rows were already visible at the dataset-string grain
+  and stay visible there — admitting them keeps the fence from silently blanking
+  an operator's existing backlog, while every row that CAN name its tenant is
+  fenced to it. New writes always stamp, so the NULL population does not grow.
+
+  The legacy dataset filter (`nil` | `""` | `"<name>"`):
 
     * a non-blank binary NARROWS the per-dataset rows AND the open-conflict
       read to that ONE dataset — this is what lets the JSON status controller
@@ -116,11 +143,15 @@ defmodule Barkpark.Plugins.Github.Health do
   The header `active`/`repo` and the fleet-wide `queue` depth are unaffected by
   the filter — they are plugin-global, not per-dataset.
   """
-  @spec snapshot(String.t() | nil | keyword()) :: t()
-  def snapshot(dataset_filter \\ nil) do
+  @spec snapshot(String.t() | nil | keyword() | map()) :: t()
+  def snapshot(filter \\ nil) do
     # A non-blank binary narrows the snapshot to one dataset; anything else
-    # (nil, blank, or the legacy keyword shape) is the whole-fleet view.
-    dataset = normalize_dataset(dataset_filter)
+    # (nil, blank, or a keyword/map without :dataset) is the whole-fleet view.
+    dataset = normalize_dataset(filter)
+    # The caller's membership set, or nil for "no membership fence" (every
+    # legacy caller). An EMPTY list is a real, fail-closed answer — a principal
+    # with no memberships — and is NOT the same as nil.
+    workspace_ids = normalize_workspace_ids(filter)
 
     # Resolve the repo ONCE and thread it down. Each `Settings.repo/0` is a DB
     # fallback read that logs an audit row, so a single read (vs one per section)
@@ -145,7 +176,7 @@ defmodule Barkpark.Plugins.Github.Health do
           false
         ),
       repo: repo,
-      conflicts: conflicts_snapshot(repo, dataset),
+      conflicts: conflicts_snapshot(repo, dataset, workspace_ids),
       datasets: datasets_snapshot(dataset),
       queue: queue_snapshot(),
       unacknowledged: unacknowledged_snapshot(dataset)
@@ -161,17 +192,52 @@ defmodule Barkpark.Plugins.Github.Health do
     end
   end
 
+  # A keyword/map filter carries the dataset under :dataset (string or atom key);
+  # recursing through the binary clause keeps blank-string handling in ONE place.
+  defp normalize_dataset(filter) when is_list(filter) do
+    if Keyword.keyword?(filter),
+      do: normalize_dataset(Keyword.get(filter, :dataset)),
+      else: nil
+  end
+
+  defp normalize_dataset(filter) when is_map(filter) do
+    normalize_dataset(Map.get(filter, :dataset, Map.get(filter, "dataset")))
+  end
+
   defp normalize_dataset(_), do: nil
+
+  # The membership fence. `nil` = UNFENCED (the filter carries no `:workspace_ids`
+  # key at all — every legacy caller, including the admin `:ops` console). A list
+  # — EMPTY INCLUDED — is a real membership answer and IS enforced; an empty one
+  # means "this principal is a member of nothing", which must fence, not widen.
+  # Two steps deliberately: `fence/1` LIFTS the key out of a keyword/map filter,
+  # `fence_ids/1` normalizes the lifted VALUE. Folding them into one clause set
+  # would make a plain list of ids (the value) collide with a keyword filter (the
+  # container) and silently drop the fence.
+  defp normalize_workspace_ids(filter) when is_list(filter) do
+    if Keyword.keyword?(filter), do: fence_ids(Keyword.get(filter, :workspace_ids)), else: nil
+  end
+
+  defp normalize_workspace_ids(filter) when is_map(filter) do
+    fence_ids(Map.get(filter, :workspace_ids, Map.get(filter, "workspace_ids")))
+  end
+
+  defp normalize_workspace_ids(_), do: nil
+
+  # Non-binary members are dropped rather than passed to the query, so a
+  # malformed caller can only ever NARROW the fence, never widen it.
+  defp fence_ids(ids) when is_list(ids), do: Enum.filter(ids, &is_binary/1)
+  defp fence_ids(_), do: nil
 
   # ---------------------------------------------------------------------------
   # (1) Conflicts — the visible quarantine (D7)
   # ---------------------------------------------------------------------------
 
-  defp conflicts_snapshot(repo, dataset) do
+  defp conflicts_snapshot(repo, dataset, workspace_ids) do
     safe(
       fn ->
-        counts = open_conflict_counts(repo, dataset)
-        rows = open_conflict_rows(repo, dataset)
+        counts = open_conflict_counts(repo, dataset, workspace_ids)
+        rows = open_conflict_rows(repo, dataset, workspace_ids)
 
         %{
           out_of_band_edit: Map.get(counts, "out_of_band_edit", 0),
@@ -192,11 +258,12 @@ defmodule Barkpark.Plugins.Github.Health do
   # (repo nil) so a pre-provisioning snapshot still surfaces orphaned rows. The
   # `dataset` filter is applied on top (D18) when the caller pins one, so a
   # per-dataset-scoped read never counts another dataset's quarantine.
-  defp open_conflict_counts(repo, dataset) do
+  defp open_conflict_counts(repo, dataset, workspace_ids) do
     Conflict
     |> where([c], is_nil(c.resolved_at))
     |> maybe_repo(repo)
     |> maybe_dataset(dataset)
+    |> maybe_workspaces(workspace_ids)
     |> group_by([c], c.kind)
     |> select([c], {c.kind, count(c.id)})
     |> Repo.all()
@@ -211,6 +278,17 @@ defmodule Barkpark.Plugins.Github.Health do
 
   defp maybe_dataset(query, _dataset), do: query
 
+  # THE TENANT FENCE. A list (empty included) restricts the read to rows this
+  # caller's memberships own, PLUS the unattributed (NULL) population the
+  # migration could not resolve — see the moduledoc for why NULL is admitted and
+  # why it cannot grow. `nil` = no fence (every legacy caller). Applied IN THE
+  # DATABASE, alongside repo/dataset, so the counts and the capped row list
+  # observe the identical window.
+  defp maybe_workspaces(query, ids) when is_list(ids),
+    do: where(query, [c], is_nil(c.workspace_id) or c.workspace_id in ^ids)
+
+  defp maybe_workspaces(query, _ids), do: query
+
   # Newest-first open rows for the console table / status JSON, capped at
   # `@open_conflicts_cap`. Applies the SAME repo + dataset filters as the counts
   # (dark → repo-wide; unpinned → all datasets) IN THE DATABASE so the cap and
@@ -218,11 +296,12 @@ defmodule Barkpark.Plugins.Github.Health do
   # pinned dataset's rows behind another dataset's newer ones. Built locally (not
   # via `Conflicts.list/1`, which has no `:dataset` option) to keep the D18
   # dataset narrowing inside this one slice.
-  defp open_conflict_rows(repo, dataset) do
+  defp open_conflict_rows(repo, dataset, workspace_ids) do
     Conflict
     |> where([c], is_nil(c.resolved_at))
     |> maybe_repo(repo)
     |> maybe_dataset(dataset)
+    |> maybe_workspaces(workspace_ids)
     |> order_by([c], desc: c.id)
     |> limit(@open_conflicts_cap)
     |> Repo.all()
@@ -235,6 +314,7 @@ defmodule Barkpark.Plugins.Github.Health do
       issue: c.issue,
       doc_id: c.doc_id,
       dataset: c.dataset,
+      workspace_id: c.workspace_id,
       kind: c.kind,
       detail: c.detail,
       inserted_at: c.inserted_at,

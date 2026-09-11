@@ -99,6 +99,7 @@ on:
     paths:
       - "scripts/main-gate-watch.sh"
       - "scripts/main-gate-watch.test.sh"
+      - "scripts/main-gate-watch-route.sh"
       - "scripts/main-verdict-presence.sh"
       - "scripts/main-verdict-presence.test.sh"
       - ".github/main-push-workflows.txt"
@@ -134,11 +135,84 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # ══ TWO JOBS, BECAUSE THERE ARE TWO FAILURE CLASSES ════════════════════════
+  #
+  # cch-w59-bl-main-gate-watch-has-no-notification-egress, residual 1. Until this
+  # split, ONE step of ONE job named `Main gate watch` mapped BOTH rc 1 ("main's
+  # tip is not green") and rc 3 ("this watch could not read branch protection")
+  # to `exit 1`. Those are different facts with different owners, and a fleet
+  # that sees the second often enough learns to read the first as noise.
+  #
+  # Now: `main-gate-watch-fault` runs the watch and owns rc 3 (and any rc the
+  # script does not define). `main-gate-watch` owns rc 0/1/2 and is SKIPPED on a
+  # fault — skipped, never green, because "this watch has no authority" must not
+  # render as "main is fine". The workflow RUN still fails on a fault (the fault
+  # job carries the red), so nothing here is a `|| true`: the split changes WHICH
+  # NAME screams, never WHETHER one does.
+  #
+  # The rc→outcome table is scripts/main-gate-watch-route.sh, not a `case` inline
+  # here, for one reason: a routing table living in a `run:` block cannot be
+  # driven offline. scripts/main-gate-watch.test.sh §14 runs that script once per
+  # (role, rc) pair and asserts exactly which role reds — the forced-both-ways
+  # proof this residual asks for, with no GitHub in the loop.
+  #
+  # ACCEPTED COST, STATED RATHER THAN HIDDEN: the control-plane convergence step
+  # rides the `main-gate-watch` job, so a tick that ends in a CONFIGURATION FAULT
+  # makes no control-plane observation. A fault is a red that must be fixed, not
+  # a steady state, and the observation resumes on the next tick.
+  main-gate-watch-fault:
+    name: Main gate watch configuration fault
+    # Never on pull_request: a name that never renders on a PR head can never be
+    # sampled into the required-check spec. Same fence as its two siblings, and
+    # it is why this new name needs no row in .github/required-checks.json.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      # The sibling job below reads this instead of re-running the watch: a
+      # second read is a second API round-trip that can disagree with the first,
+      # and then the two check runs would be judging different moments.
+      rc: ${{ steps.watch.outputs.rc }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The scream's own tripwire, first. If the read stops being able to fail —
+      # on a RED tip AND on a tip with no verdict at all — the watch below is
+      # decoration, and this run says so before it says anything about main. It
+      # sits in THIS job on purpose: a tripwire that cannot lose is a fault of
+      # the instrument, which is exactly this job's subject.
+      - name: Prove the watch can lose both ways (main-gate-watch.test.sh)
+        run: bash scripts/main-gate-watch.test.sh
+
+      - name: Does main's tip carry a verdict?
+        id: watch
+        env:
+          GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/main-gate-watch.sh --repo "${{ github.repository }}" --branch main || rc=$?
+          # Published BEFORE the routing call: the sibling job must learn the rc
+          # even when this step is about to red on it.
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          bash scripts/main-gate-watch-route.sh fault "$rc"
+
   main-gate-watch:
     name: Main gate watch
-    # Never on pull_request: a name that never renders on a PR head can never be
-    # sampled into the required-check spec.
-    if: github.event_name != 'pull_request'
+    needs: main-gate-watch-fault
+    # `always()` so a rc=1 red on the sibling (there is none by construction —
+    # the fault job is green on rc 0/1/2 — but a checkout or tripwire failure
+    # there also leaves rc empty) does not silently skip this job as "dependency
+    # failed" without saying why. The two rc tests below are the real fence:
+    #   rc == ''  -> the upstream died before publishing one. Unknown, not green.
+    #   rc == '3' -> CONFIGURATION FAULT. The sibling carries that scream under
+    #                its own name; this job must not render a verdict about main
+    #                it does not have.
+    if: >-
+      always()
+      && github.event_name != 'pull_request'
+      && needs.main-gate-watch-fault.outputs.rc != ''
+      && needs.main-gate-watch-fault.outputs.rc != '3'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -155,29 +229,14 @@ jobs:
           # sets the same depth for the same reason.
           fetch-depth: 0
 
-      # The scream's own tripwire, first. If the read stops being able to fail —
-      # on a RED tip AND on a tip with no verdict at all — the watch below is
-      # decoration, and this run says so before it says anything about main.
-      - name: Prove the watch can lose both ways (main-gate-watch.test.sh)
-        run: bash scripts/main-gate-watch.test.sh
-
-      - name: Does main's tip carry a verdict?
-        env:
-          GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
-        run: |
-          set -uo pipefail
-          rc=0
-          bash scripts/main-gate-watch.sh --repo "${{ github.repository }}" --branch main || rc=$?
-          case "$rc" in
-            0) exit 0 ;;
-            1) echo "::error::MAIN'S TIP DOES NOT CARRY A GREEN VERDICT on every watched required context (RED, or MISSING — never judged). This run fails, and it will keep failing on every scheduled run (delivered every 2-5 h, see the schedule header) until the tip is green."; exit 1 ;;
-            # WAITING is neither a pass nor a scream: a context is still in
-            # flight. Reddening here would false-red every fresh push to main
-            # for as long as CI takes, which is how a watch gets muted.
-            2) echo "::notice::WAITING — a watched context on main's tip is still running, or its row has not been created yet while a workflow run on the tip is still in flight. The next scheduled run decides."; exit 0 ;;
-            3) echo "::error::CONFIGURATION FAULT — this run could not read branch protection, or protection requires a context this watch has never classified. A watch with no live authority must not report success. See scripts/main-gate-watch.sh."; exit 1 ;;
-            *) echo "::error::main-gate-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
-          esac
+      # Interpretation only — the read itself happened once, in the sibling job.
+      # rc 0 green, rc 1 scream, rc 2 WAITING (neither a pass nor a scream: a
+      # context is still in flight, and reddening on it would false-red every
+      # fresh push to main for as long as CI takes, which is how a watch gets
+      # muted). rc 3 cannot arrive here — the job `if:` above excludes it — and
+      # the router reds as a ROUTING ERROR if it ever does.
+      - name: Is main's tip green on every watched required context?
+        run: bash scripts/main-gate-watch-route.sh verdict "${{ needs.main-gate-watch-fault.outputs.rc }}"
 
       # ── task-6f18e71a351f8081 A: a stale control plane is a RED CHECK, not an output ──
       # deploy.yml's convergence job deliberately exits 0 and leaves the scream to
@@ -269,6 +328,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Shell syntax
         run: bash -n scripts/main-gate-watch.sh
+      - name: Shell syntax (main-gate-watch-route.sh)
+        run: bash -n scripts/main-gate-watch-route.sh
       - name: Both-ways proofs (main-gate-watch.test.sh)
         run: bash scripts/main-gate-watch.test.sh
       - name: Shell syntax (main-verdict-presence.sh)

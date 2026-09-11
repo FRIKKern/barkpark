@@ -454,11 +454,18 @@ func checkNoRunningServer(baseURL string, plan SetupPlan) error {
 
 // barkparkAnswering reports whether something that LOOKS like Barkpark answers
 // at baseURL: a 2xx JSON body on /v1/capabilities (the same endpoint
-// waitServerUp gates on) or on /api/schemas. A connection refused, a non-2xx,
+// waitServerUp gates on) or on /status.json. A connection refused, a non-2xx,
 // or a non-JSON body all read as "no server".
+//
+// The fallback is /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, so after removal an OLDER running
+// server (one that predates /v1/capabilities) would read as "no server" and
+// `bp setup --target local` would run its destructive step into a live DB.
+// /status.json answers a JSON object, so the `{`/`[` body shape still holds.
 func barkparkAnswering(baseURL string) bool {
 	client := &http.Client{Timeout: 2 * time.Second}
-	for _, path := range []string{"/v1/capabilities", "/api/schemas"} {
+	for _, path := range []string{"/v1/capabilities", "/status.json"} {
 		resp, err := client.Get(baseURL + path)
 		if err != nil {
 			continue

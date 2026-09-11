@@ -209,9 +209,35 @@ defmodule Barkpark.PortableDoc.Render.ComponentsDetailTest do
     assert html =~ ~s(▸ charter)
   end
 
-  test "empty title or non-map yields empty string" do
-    assert Components.task_detail_html(%{"task" => %{"title" => ""}}) == ""
+  test "an unresolved task-detail renders the bp-tdetail--empty placeholder, not nothing" do
+    for block <- [
+          %{"task" => %{"title" => ""}},
+          %{"task" => %{"title" => "   "}},
+          %{"type" => "task-detail", "query" => %{"parent_id" => "nope"}},
+          %{"task" => %{}}
+        ] do
+      html = Components.task_detail_html(block)
+
+      assert html =~ ~s(class="bp-tdetail bp-tdetail--empty"),
+             "an unresolved task-detail must keep its place with a placeholder, got: #{inspect(html)}"
+
+      assert html =~ "No matching tasks."
+      refute html == ""
+      refute html =~ "bp-tdetail__title"
+    end
+  end
+
+  test "a non-map task-detail argument is not a block and still yields empty string" do
     assert Components.task_detail_html("x") == ""
+    assert Components.task_detail_html(nil) == ""
+    assert Components.task_detail_html([]) == ""
+  end
+
+  test "a resolved task-detail is untouched by the empty state" do
+    html = Components.task_detail_html(%{"task" => %{"title" => "real", "status" => "ready"}})
+    refute html =~ "bp-tdetail--empty"
+    refute html =~ "No matching tasks."
+    assert html =~ ~s(<div class="bp-tdetail"><div class="bp-tdetail__title">real</div>)
   end
 
   test "escapes hostile author strings" do
@@ -337,6 +363,236 @@ defmodule Barkpark.PortableDoc.Render.ComponentsBoardRoadmapTest do
     refute html =~ "<b>x</b>"
     assert html =~ "&lt;b&gt;x&lt;/b&gt;"
     assert html =~ "left:0%"
+  end
+end
+
+defmodule Barkpark.PortableDoc.Render.ComponentsRoadmapV2Test do
+  @moduledoc """
+  Roadmap v2 render lock. The geometry contract is Go's
+  (`internal/pdrender/taskblocks.go` — `roadmapSpan`/`roadmapLeftWidth`/
+  `roadmapTodayCell`, glyph precedence `today > milestone > note > fill`), so
+  this suite reads the SAME fixture the Go suite reads —
+  `internal/pdrender/testdata/sample_m22.json`, loaded by
+  `internal/pdrender/render_m22_test.go:19` — rather than a second copy that can
+  drift. One file, two suites.
+  """
+  use ExUnit.Case, async: true
+
+  alias Barkpark.PortableDoc.Render.Components
+
+  # The ONE shared v2 fixture. If this path ever moves, BOTH suites must move
+  # with it — which is the point.
+  @go_fixture Path.expand(
+                "../../../../../internal/pdrender/testdata/sample_m22.json",
+                __DIR__
+              )
+
+  defp v2_block do
+    assert File.exists?(@go_fixture),
+           "the shared Go v2 fixture is missing: #{@go_fixture}"
+
+    @go_fixture
+    |> File.read!()
+    |> Jason.decode!()
+    |> Map.fetch!("blocks")
+    |> Enum.find(&(&1["type"] == "roadmap"))
+  end
+
+  test "the shared Go fixture really carries the v2 shape (precondition)" do
+    block = v2_block()
+
+    assert block["start"] == "2026-01-01"
+    assert block["end"] == "2026-06-30"
+    assert block["today"] == "2026-03-20"
+
+    titles = Enum.map(block["snapshot"], & &1["title"])
+    assert "Discovery" in titles
+    assert "Kickoff" in titles
+    assert "Legacy plan" in titles
+
+    kickoff = Enum.find(block["snapshot"], &(&1["title"] == "Kickoff"))
+    assert kickoff["milestone"] == true
+
+    build = Enum.find(block["snapshot"], &(&1["title"] == "Build"))
+    assert build["note"] == true
+
+    legacy = Enum.find(block["snapshot"], &(&1["title"] == "Legacy plan"))
+    assert legacy["left"] == 5
+    assert legacy["width"] == 30
+    refute Map.has_key?(legacy, "start")
+  end
+
+  # c1 feature 1 — date rails.
+  test "a v2 row with ISO start/end DERIVES its geometry off the block span" do
+    html = Components.roadmap_html(v2_block())
+
+    # Discovery = 2026-01-01..2026-02-15 inside 2026-01-01..2026-06-30 (180 days).
+    # left = 0/180 = 0%; width = 45/180 = 25%.
+    assert html =~ ~s(<span class="bp-rm__bar bp-rm__bar--done" style="left:0.0%;width:25.0%">)
+
+    # Launch = 2026-05-01..2026-06-30 → left = 120/180, width = 180/180 - left.
+    launch_left = 120 / 180 * 100
+    launch_width = 100 - launch_left
+
+    assert html =~
+             ~s(style="left:#{launch_left}%;width:#{launch_width}%")
+
+    # The proof this is DERIVED and not the old fallback. MEASURED: running
+    # origin/main@a333e4b5's `roadmap_html/1` on this exact fixture emitted
+    # `style="left:0%;width:100%"` for EVERY dated lane (a dateless row reads
+    # left=0 and `clampf_width(nil, 0)` = 100 — a full-width bar).
+    refute html =~ ~s(style="left:0%;width:100%")
+  end
+
+  # c1 feature 1b — a dateless row inside a spanned block keeps its literal pct.
+  test "a row WITHOUT dates falls back to its literal pct even under a span" do
+    html = Components.roadmap_html(v2_block())
+
+    # "Legacy plan" carries left:5 width:30 and no dates — unchanged by the span.
+    assert html =~ ~s(style="left:5%;width:30%")
+  end
+
+  # c1 feature 2 — ISO today.
+  test "an ISO `today` derives its pct off the span; a number stays a pct" do
+    html = Components.roadmap_html(v2_block())
+
+    # 2026-03-20 is day 78 of the 180-day span.
+    iso_pct = 78 / 180 * 100
+    assert html =~ ~s(<span class="bp-rm__today" style="left:#{iso_pct}%"></span>)
+
+    # A numeric today is the v1 path and is untouched.
+    numeric =
+      Components.roadmap_html(%{
+        "today" => 34,
+        "snapshot" => [%{"title" => "a", "status" => "open", "left" => 0, "width" => 10}]
+      })
+
+    assert numeric =~ ~s(<span class="bp-rm__today" style="left:34%"></span>)
+
+    # An ISO today with NO block span draws nothing (Go returns cell -1).
+    spanless =
+      Components.roadmap_html(%{
+        "today" => "2026-03-20",
+        "snapshot" => [%{"title" => "a", "status" => "open", "left" => 0, "width" => 10}]
+      })
+
+    refute spanless =~ "bp-rm__today"
+  end
+
+  # c1 feature 3 — milestone marker at the bar's END edge.
+  test "milestone:true draws a marker at the bar's end edge" do
+    html = Components.roadmap_html(v2_block())
+
+    # Kickoff = 2026-01-08..2026-01-08 → left = width-floor start, a zero-length
+    # bar clamped to the 1% floor, so its marker sits at left + width.
+    assert html =~ ~s(<span class="bp-rm__ms" style=")
+
+    only =
+      Components.roadmap_html(%{
+        "snapshot" => [
+          %{"title" => "m", "status" => "done", "left" => 20, "width" => 30, "milestone" => true}
+        ]
+      })
+
+    assert only =~ ~s(<span class="bp-rm__ms" style="left:50%"></span>)
+  end
+
+  # c1 feature 4 — note marker at the bar's START edge.
+  test "note:true draws a marker at the bar's start edge" do
+    only =
+      Components.roadmap_html(%{
+        "snapshot" => [
+          %{"title" => "n", "status" => "ready", "left" => 20, "width" => 30, "note" => true}
+        ]
+      })
+
+    assert only =~ ~s(<span class="bp-rm__note" style="left:20%"></span>)
+  end
+
+  # c1 feature 5 — precedence, realized as PAINT order inside the track.
+  test "markers emit in Go's precedence order: bar, note, milestone, today" do
+    html =
+      Components.roadmap_html(%{
+        "today" => 50,
+        "snapshot" => [
+          %{
+            "title" => "all",
+            "status" => "done",
+            "left" => 20,
+            "width" => 30,
+            "note" => true,
+            "milestone" => true
+          }
+        ]
+      })
+
+    bar = :binary.match(html, ~s(class="bp-rm__bar)) |> elem(0)
+    note = :binary.match(html, ~s(class="bp-rm__note)) |> elem(0)
+    ms = :binary.match(html, ~s(class="bp-rm__ms)) |> elem(0)
+    today = :binary.match(html, ~s(class="bp-rm__today)) |> elem(0)
+
+    assert bar < note,
+           "fill must emit before note — Go: clsNote > clsFill"
+
+    assert note < ms,
+           "note must emit before milestone — Go: clsMilestone > clsNote"
+
+    assert ms < today,
+           "milestone must emit before today — Go: clsToday > clsMilestone"
+  end
+
+  # c2 — precomputed-geometry rows stay BYTE-IDENTICAL.
+  #
+  # Both strings below were captured by RUNNING `Components.roadmap_html/1` on
+  # origin/main@a333e4b588f1716e9e200cf9967f27f5d3224898, BEFORE the v2 change,
+  # and pasted here verbatim. They are not a re-derivation of the new code.
+  test "a v1 precomputed-geometry block renders byte-identical to pre-v2" do
+    input =
+      "test/support/fixtures/roadmap.golden.json"
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.fetch!("input")
+
+    assert Components.roadmap_html(input) ==
+             ~s(<div class="bp-roadmap"><div class="bp-rm__scale"><span>Q1</span><span>Q2</span><span>Q3</span></div><div class="bp-rm__lanes"><div class="bp-rm__lane bp-rm__lane--phase"><span class="bp-rm__lbl">Foundation</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--done" style="left:0%;width:40%"></span></div></div><div class="bp-rm__lane"><span class="bp-rm__lbl">Ship the board</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--progress" style="left:40%;width:35%"></span></div></div></div></div>)
+  end
+
+  test "a v1 numeric-today + width-clamp block renders byte-identical to pre-v2" do
+    html =
+      Components.roadmap_html(%{
+        "today" => 34,
+        "scale" => ["Jul 01", "Jul 08"],
+        "snapshot" => [
+          %{
+            "title" => "phase",
+            "status" => "in_progress",
+            "phase_row" => true,
+            "left" => 0,
+            "width" => 40
+          },
+          %{"title" => "over", "status" => "blocked", "left" => 90, "width" => 999}
+        ]
+      })
+
+    assert html ==
+             ~s(<div class="bp-roadmap"><div class="bp-rm__scale"><span>Jul 01</span><span>Jul 08</span></div><div class="bp-rm__lanes"><div class="bp-rm__lane bp-rm__lane--phase"><span class="bp-rm__lbl">phase</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--progress" style="left:0%;width:40%"></span><span class="bp-rm__today" style="left:34%"></span></div></div><div class="bp-rm__lane"><span class="bp-rm__lbl">over</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--blocked" style="left:90%;width:10%"></span><span class="bp-rm__today" style="left:34%"></span></div></div></div></div>)
+  end
+
+  # A malformed span must not activate the v2 path at all.
+  test "a malformed or inverted block span leaves every lane on the pct path" do
+    for {s, e} <- [{"2026-06-30", "2026-01-01"}, {"not-a-date", "2026-06-30"}, {"2026-01-01", ""}] do
+      html =
+        Components.roadmap_html(%{
+          "start" => s,
+          "end" => e,
+          "snapshot" => [
+            %{"title" => "x", "status" => "open", "start" => "2026-02-01", "end" => "2026-03-01"}
+          ]
+        })
+
+      assert html =~ ~s(style="left:0%;width:100%"),
+             "span #{inspect({s, e})} must NOT derive geometry"
+    end
   end
 end
 
