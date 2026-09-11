@@ -14,6 +14,48 @@ defmodule Barkpark.PortableDoc.Render.Inline do
 
   # ── inline walker (inline node/marks → Pd-tree fold) ───────────────────────
 
+  # ── RULINGS on the residual live-corpus INLINE shapes (task-e4833f198e293ed1)
+  #
+  # The 2026-07-25 census rendered all 537 published papers through the built
+  # @barkpark/react emitter and flagged every block whose tag-stripped output was
+  # empty. Four shapes were left undecided. The INLINE ones are ruled here; the
+  # BLOCK-level ones are NOT this module's readers and are named only so the next
+  # reader does not re-derive them.
+  #
+  #   INLINE · text leaf keyed `text` instead of `value` (13 list items, all in
+  #     workspace-bundle-keystone) → RULED A LEGITIMATE ALIAS, not a data defect.
+  #     The Hollow predicate already blesses BOTH spellings as text-carrying, so
+  #     repairing the data would leave every future writer of that spelling
+  #     producing a readable-by-contract, blank-in-fact paper. All three engines
+  #     now dual-read it: `compose_inline(%{"type" => "text"})` below,
+  #     `textLeafValue` in inline.tsx, `attrStrFirst(n, "value", "text")` in
+  #     inline.go. No surface leapfrogs; nothing left to do.
+  #
+  #   INLINE · `code` leaf whose body is in `children` (66 live paragraphs) →
+  #     FIXED CROSS-SURFACE by this row; see `inline_code_source/1`.
+  #
+  #   INLINE · a bare ARRAY where an inline node was expected, `[[{text…}]]`
+  #     (59 paragraphs + 18 list blocks) → FIXED CROSS-SURFACE by this row; the
+  #     Elixir and JS halves already shipped (`compose_inline(l) when is_list(l)`
+  #     below, `if (Array.isArray(node))` in inline.tsx) and the Go reader was
+  #     brought up to them (`case []any` in InlineRenderer.node).
+  #
+  #   NOT INLINE, DEFERRED to their own rows · a `list` block with its items in
+  #     `content` (18 blocks, the authoring contract is genuinely ambiguous — one
+  #     paper holds an array OF ARRAYS, another a FLAT inline run), and a
+  #     `callout` whose `content` holds BLOCK nodes (4 blocks, a real change to
+  #     the block grammar). Both live in `Render.Compose`, not here. A `code`
+  #     BLOCK whose body is in `content[]` was closed separately by the
+  #     code-block source-key contract (`Compose.code_source/1` +
+  #     test/support/fixtures/code-source-aliases.json).
+  #
+  #   NOT A RENDER DEFECT · `inlineText/1` in js/packages/react/src/toPlainText.ts
+  #     is a plain-text EXTRACTOR, not a renderer: it already concatenates a
+  #     node's own value AND its children, so an inline `code` with children
+  #     always yielded its text there. It does drop a bare-array node, which
+  #     understates a search snippet but never blanks a rendered surface — left
+  #     alone deliberately rather than changed without a measured need.
+
   def compose_inline_children(nodes) when is_list(nodes) do
     nodes
     |> unwrap_block_wrappers()
