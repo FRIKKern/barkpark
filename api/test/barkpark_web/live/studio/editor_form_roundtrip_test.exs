@@ -34,7 +34,7 @@ defmodule BarkparkWeb.Studio.EditorFormRoundtripTest do
   @type_name "landing"
 
   @hero %{
-    "assetId" => "asset-hero",
+    "assetId" => "hero",
     "url" => "https://cdn.example/hero.jpg",
     "alt" => "Hero",
     "focalX" => 0.4,
@@ -44,7 +44,7 @@ defmodule BarkparkWeb.Studio.EditorFormRoundtripTest do
   }
 
   @card_image %{
-    "assetId" => "asset-card",
+    "assetId" => "card",
     "url" => "https://cdn.example/card.jpg",
     "alt" => "",
     "focalX" => nil,

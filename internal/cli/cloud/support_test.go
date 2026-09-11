@@ -1,8 +1,12 @@
 package cloud
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSupportResetDefaultWorkspaceStep_DeleteTolerantScript pins the reset
@@ -151,5 +155,85 @@ func TestSupportMergeImportStep_CarriesItsEvidence(t *testing.T) {
 	}
 	if !redacted {
 		t.Fatal("the import step must Redact the box admin token")
+	}
+}
+
+// sunsetRunner is the fake SupportRunner whose box is POST-SUNSET: the legacy
+// /api/schemas route is gone (404 → `curl -fsS` exits non-zero, exactly what
+// the real box would do after 2026-12-31), and /status.json serves. Every other
+// capability is a no-op recorder. It is the fixture that makes the retarget
+// provable rather than asserted: on the pre-fix probe string this runner drives
+// ConfigureSupportHost to a health-local failure.
+type sunsetRunner struct {
+	outScripts []string
+}
+
+func (r *sunsetRunner) Run(_ context.Context, _ CaddyStep) error { return nil }
+
+func (r *sunsetRunner) RunOutput(_ context.Context, script string) (string, error) {
+	r.outScripts = append(r.outScripts, script)
+	switch {
+	case strings.Contains(script, "/api/schemas"):
+		// The route is RETIRED. curl -fsS on a 404 exits 22 and prints the
+		// reason on stderr; the caller sees a non-nil error.
+		return "curl: (22) The requested URL returned error: 404", fmt.Errorf("exit status 22")
+	case strings.Contains(script, "/status.json"):
+		return `{"status":"operational","commit":"deadbeef"}`, nil
+	}
+	// Anything else is the freshen cheap-check: report the box as CURRENT so
+	// freshen is a no-op and this test measures only the health gate.
+	return "FRESHEN_HEAD=abc123\nFRESHEN_REMOTE=abc123\n", nil
+}
+
+func (r *sunsetRunner) RunFeed(_ context.Context, _, _ string, _ io.Reader) (string, error) {
+	return "", nil
+}
+
+func (r *sunsetRunner) WaitReady(_ context.Context, _ time.Duration) error { return nil }
+
+// TestSupportLocalHealthProbe_LeavesTheSunsetRoute pins the probe PATH. The
+// legacy /api/schemas route pipes through BarkparkWeb.Plugs.LegacyDeprecation
+// and carries `sunset: Wed, 31 Dec 2026 23:59:59 GMT`; because the probe is
+// `curl -fsS`, a 404 from the retired route is an ERROR, so a support bring-up
+// on a healthy box would fail closed on 2027-01-01.
+func TestSupportLocalHealthProbe_LeavesTheSunsetRoute(t *testing.T) {
+	if strings.Contains(SupportLocalHealthProbe, "/api/schemas") {
+		t.Fatalf("the local health probe still targets the SUNSET route (removal 2026-12-31): %q", SupportLocalHealthProbe)
+	}
+	if !strings.Contains(SupportLocalHealthProbe, "http://localhost:4000/status.json") {
+		t.Fatalf("the local health probe must gate on localhost:4000/status.json, got %q", SupportLocalHealthProbe)
+	}
+	if !strings.Contains(SupportLocalHealthProbe, "-fsS") {
+		t.Fatalf("the probe must stay fail-closed on a non-2xx (-fsS), got %q", SupportLocalHealthProbe)
+	}
+}
+
+// TestConfigureSupportHost_SurvivesTheSunsetOfApiSchemas is the fixture proof
+// c1 asks for: a runner whose box 404s /api/schemas must still complete the
+// bring-up. Reverting SupportLocalHealthProbe to the legacy path reds this with
+// `health-local: ... not answering on the box`.
+func TestConfigureSupportHost_SurvivesTheSunsetOfApiSchemas(t *testing.T) {
+	r := &sunsetRunner{}
+	secrets, err := ConfigureSupportHost(context.Background(), r, SupportConfigureOpts{})
+	if err != nil {
+		t.Fatalf("bring-up failed on a box where only the SUNSET route is gone: %v", err)
+	}
+	if secrets.AdminToken == "" {
+		t.Fatalf("a green bring-up must return the minted secrets")
+	}
+
+	// CONTROL: the fixture is not vacuous — the health probe actually ran, and
+	// it ran against /status.json.
+	var probed bool
+	for _, s := range r.outScripts {
+		if strings.Contains(s, "/status.json") {
+			probed = true
+		}
+		if strings.Contains(s, "/api/schemas") {
+			t.Fatalf("a script still probed the sunset route: %q", s)
+		}
+	}
+	if !probed {
+		t.Fatalf("no script probed /status.json — the health gate never ran, so this green measured nothing: %v", r.outScripts)
 	}
 }

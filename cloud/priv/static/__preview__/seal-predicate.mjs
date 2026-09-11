@@ -137,8 +137,18 @@
 // complete.
 //
 // ---------------------------------------------------------------------------
-// WHY FOUR REFUSALS FIRE BEFORE ANY CLAUSE IS EVALUATED
+// WHY THESE REFUSALS FIRE BEFORE ANY CLAUSE IS EVALUATED
 //
+//   R8  --epic names an epic with NO REGISTER   — UNREGISTERED-EPIC, and it fires FIRST,
+//       ahead of R0, because every refusal below it reads a register this run has no
+//       business holding. `PERMANENT_HUMAN_GATES` and `KNOWN_DEFECTS` used to be FLAT
+//       module constants while `--epic` parameterized clause (a) ONLY, so a run naming
+//       any other epic scored b and c off Cloud Console's six CCH-D* defects and three
+//       human gates and printed `b=PASS c=PASS` about a population the reader was never
+//       told about — `in-epic-roster=false` on every gate, acted on nowhere. The
+//       registers are now keyed by epic (EPIC_REGISTERS); an epic with no entry is
+//       refused rather than handed somebody else's rows, and `registers=` on the token
+//       names which epic's register produced b and c on every run that has one.
 //   R0  --guard-cmd given without --ledger      — clause (b) would certify a stub
 //   R1  the defect register is empty            — clause (b) would certify nothing
 //   R2  no successor is named                   — clause (a) has no forwarding address
@@ -243,6 +253,7 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
 const arg = (n) => { const i = argv.indexOf(n); return i === -1 ? null : argv[i + 1]; };
@@ -276,7 +287,7 @@ const PENDING_STATUSES = ['considering'];
 // lifecycle=done, so it is an open row hanging under a closed goal — an address that
 // exists but no longer accepts mail. A gate belonging to a different, closed goal can
 // neither block nor unblock THIS epic's seal.
-const PERMANENT_HUMAN_GATES = {
+const CCH_PERMANENT_HUMAN_GATES = {
   'gr-ops-platform-admin-emails':
     'PLATFORM_ADMIN_EMAILS append on prod .env + redeploy. A human shell act; no commit can set an unset prod env var. The operator console — this epic\'s crown — is DARK until this fires.',
   'gr-backlog-qr-live-scan-proof':
@@ -300,7 +311,7 @@ const PERMANENT_HUMAN_GATES = {
 //                                  branch's required-context set, so there is nothing
 //                                  left for a path glob to be grepped against.
 //   unmeasured                     rung 3: the stated gap. FAILS clause (b).
-const KNOWN_DEFECTS = [
+const CCH_KNOWN_DEFECTS = [
   {
     id: 'CCH-D1-overview-refetch-storm',
     desc: 'One boot plus seven fleet ticks cost 40 HTTP requests; every live event refetched all five Overview reads',
@@ -377,6 +388,60 @@ const KNOWN_DEFECTS = [
     guardExpect: 'fence REFUSES an unattributed marker-span write',
   },
 ];
+
+// ---------------------------------------------------------------------------
+// THE REGISTERS ARE KEYED BY EPIC, AND THE KEY IS `--epic`.
+//
+// MEASURED BEFORE THIS FENCE EXISTED: the two FROZEN INPUTS above were flat module
+// constants, and `--epic` parameterized CLAUSE (a) ONLY. So a run naming ANY other
+// epic — `--epic task-fb4fb869490b4213`, the deploy-reliability goal — scored its
+// clause (b) over Cloud Console's six CCH-D* defects and its bucket (c) over Cloud
+// Console's three human gates, and printed `b=PASS c=PASS` about an epic neither
+// register has ever described. The run even printed `in-epic-roster=false` on all
+// three gates and passed them anyway. A green of that shape reports a Cloud Console
+// defect as deploy-reliability's residue: the verdict's letters are true of a
+// population the reader was never told about.
+//
+// THE FIX IS NOT A LOUDER LABEL. Naming the source register in the token would make
+// the contamination legible while still certifying it; the registers are SELECTED by
+// epic, and an epic with no entry gets a REFUSAL (UNREGISTERED-EPIC in `main`) rather
+// than a borrowed one. Both are done — the token carries `registers=` so a reader of
+// the machine line knows which population produced b and c, and there is no longer a
+// wrong answer for it to carry.
+//
+// NOTHING IS LOST BY THE MOVE. `cloud-console-hardening-epic`'s entry holds the SAME
+// two objects, by reference: the six CCH-D* rows and the three gate ids are the bytes
+// above, unedited. The fence is added; no register content is dropped, reworded or
+// re-ordered.
+//
+// A NEW EPIC IS A FILING, NOT A CODE CHANGE THIS FILE CAN GUESS. Deploy-reliability
+// gets a verdict here the day someone writes ITS defects and ITS human gates into this
+// table under its own key. Until then the honest answer to "does DR seal?" is "this
+// program has never been told what DR's b and c are", which is a refusal, not a PASS.
+const EPIC_REGISTERS = {
+  'cloud-console-hardening-epic': {
+    permanentHumanGates: CCH_PERMANENT_HUMAN_GATES,
+    knownDefects: CCH_KNOWN_DEFECTS,
+  },
+};
+
+// `hasOwnProperty`, never `EPIC_REGISTERS[EPIC]` alone: `--epic constructor` (or
+// `toString`, or `__proto__`) resolves on the prototype chain to a FUNCTION, which is
+// truthy, and the run would then read `.knownDefects` off it as undefined and fall
+// straight into the empty-register refusal wearing the wrong code. An epic is
+// registered only if this table itself carries the key.
+const REGISTERED = Object.prototype.hasOwnProperty.call(EPIC_REGISTERS, EPIC);
+const REGISTER = REGISTERED ? EPIC_REGISTERS[EPIC] : null;
+
+// The two names the whole file below already reads. Unregistered resolves to the EMPTY
+// register rather than to another epic's — so every downstream leg is scoring nothing
+// instead of scoring somebody else's rows, and `main`'s UNREGISTERED-EPIC refusal
+// fires before any of them run.
+const PERMANENT_HUMAN_GATES = REGISTER ? REGISTER.permanentHumanGates : {};
+const KNOWN_DEFECTS = REGISTER ? REGISTER.knownDefects : [];
+
+// What the verdict tokens print for `registers=`. A run that borrowed nothing says so.
+const REGISTER_KEY = REGISTERED ? EPIC : 'NONE';
 
 // ---------------------------------------------------------------------------
 // EXIT TRIAD, ported from tooling/grip/seal.mjs (read, never modified — that file
@@ -856,6 +921,160 @@ const fetchRoster = (parentId) => {
   }
   return rows;
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE ROSTER IS A TREE, AND CLAUSE (a) READ EXACTLY ONE LEVEL OF IT.
+//
+// MEASURED: `fetchRoster` above is one `filter[parent_id]` walk per PARENT, and main()
+// called it twice — once for the epic, once for the successor. Both reads are DIRECT
+// CHILDREN ONLY. So the population clause (a) certified was the epic's direct roster and
+// nothing beneath it, and a FILING ACT that reparents live rows one level down — under a
+// sibling that is already `done` — empties the counted population without finishing one
+// row. The fixture `filing-act-reparent.json` is that act at the live shape: 69 open rows
+// moved under an already-done sibling, nothing closed, and against the one-level reader
+// it printed `VERDICT: SEAL  a=PASS orphans=0` at exit 0.
+//
+// THE WALK IS BOUNDED OR IT REFUSES, and each bound is its own named fault:
+//   * DEPTH — `ROSTER_MAX_DEPTH` levels. A frontier that still has nodes when the cap is
+//     reached is NOT silently dropped: its ids come back as `unread` and main() refuses
+//     (`SUBTREE-UNREAD`). "I could not descend" is never "there was nothing down there".
+//   * CYCLES — an id reached twice is a parent chain that loops. `parent_id` is a single
+//     field so a real tree cannot produce one; a walk that ignored it would spin to the
+//     depth cap and then blame the cap, so the cycle is named where it happens.
+//   * PAGE-FULL, PER NODE — `fetchRoster` IS the per-node read, so every node inherits
+//     the whole pagination discipline above (window-advance, order verification, dedupe,
+//     server-total cross-check, draft cross-check) and any one of them failing refuses
+//     the ENTIRE walk rather than one branch of it.
+//
+// COST, STATED: two requests per node visited — one `/v1/data/query` page plus one
+// `/v1/tasks/:id` draft cross-check. The filing's note that "the endpoint returns no
+// child_count" is true of `/v1/data/query` and FALSE of `/v1/tasks/:id`, which this file
+// already reads per node, so a childless-node prune IS available. It is deliberately not
+// taken here: it would add a live-only branch no fixture can exercise, and the honest
+// number to quote is the unpruned one.
+const ROSTER_MAX_DEPTH = 8;
+function walkSubtree(rootId, rosterOf) {
+  const rows = [];
+  const seen = new Set([rootId]);
+  let frontier = [rootId];
+  let level = 0;
+  let depth = 0;
+  for (;;) {
+    const next = [];
+    for (const parent of frontier) {
+      const kids = rosterOf(parent);
+      if (!Array.isArray(kids))
+        throw new Infra(`the roster of ${parent}, reached at depth ${level} under ${rootId}, is not an array of documents`, 'ROSTER-NOT-AN-ARRAY');
+      for (const d of kids) {
+        if (!d || typeof d._id !== 'string' || d._id === '')
+          throw new Infra(
+            `a row under ${parent} carries no _id, so it cannot be placed in the subtree of ${rootId} and the completeness of that subtree is unknown. Nothing is asserted about clause (a).`,
+            'ROSTER-NOT-AN-ARRAY');
+        if (seen.has(d._id))
+          throw new Infra(
+            `the subtree of ${rootId} is NOT A TREE: ${d._id} was reached twice, the second time under ${parent} at depth ${level + 1}. \`parent_id\` is a single field, so a real tree cannot produce this — a walk that ignored it would spin to the depth cap and then report the cap as the fault. Nothing is asserted about clause (a).`,
+            'ROSTER-CYCLE');
+        seen.add(d._id);
+        rows.push({ ...d, _depth: level + 1, _parent: parent });
+        next.push(d._id);
+      }
+    }
+    if (next.length === 0) return { rows, depth, unread: [] };
+    depth = level + 1;
+    if (depth >= ROSTER_MAX_DEPTH) return { rows, depth, unread: next };
+    level = depth;
+    frontier = next;
+  }
+}
+
+// A fixture describes a TREE with `subtrees`: `{ "<parent id>": [rows] }`. The legacy
+// `children` array stays exactly what it was — the epic's DIRECT roster — so every
+// fixture written before this file could descend still reads identically, at depth 1
+// with an empty frontier below it. `forwarded` stays a flat id list for the successor's
+// direct roster; put rows under `subtrees["<successor>"]` to give the successor a tree.
+const subtreeOf = (fixture, id, seedId, seedRows) => {
+  const map = (fixture && fixture.subtrees) || {};
+  if (Object.prototype.hasOwnProperty.call(map, id)) return map[id] || [];
+  if (id === seedId) return seedRows;
+  return [];
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE ANTI-FILING ARM — A PRIOR CENSUS, KEYED BY `_id`.
+//
+// RECURSION ALONE DOES NOT REPLACE THIS, and that is the whole reason the arm exists.
+// A transitive read closes the reparent-one-level-down act; it does not close the act of
+// moving a live row OUT of the epic altogether, or unpublishing it, or retitling its
+// parent. Every one of those shrinks the counted population without finishing anything,
+// and every one of them is invisible to a predicate whose only memory is this run.
+//
+// THE CENSUS IS THE MEMORY: a committed file naming every row that was in the counted
+// population when it was captured, with the `lifecycle_status` it carried THEN. At seal
+// time, a census row that is no longer in the population must have EARNED its exit — it
+// must resolve, today, to `done` or `cancelled`. One that left without that transition is
+// a FILING EVENT: it is printed BY NAME and it blocks the seal.
+//
+// WHAT IS NOT A FILING EVENT, so the arm can still pass: a row already `done`/`cancelled`
+// at capture (it was never counted as residue), and a row still in the population (it did
+// not leave). A row that left and cannot be resolved at all is a filing event too — an
+// unreadable row is not a proven transition, and an unrun check is not a passed check.
+//
+// WHERE THE CENSUS COMES FROM, in precedence order: `--census <path>`, then a fixture's
+// own `priorCensus`, then the committed file for this epic under
+// `fixtures/seal-predicate/census/<epic>.json`. With none of the three the arm is NOT
+// RUN, the token says `census=NONE`, and no green anywhere claims it passed.
+const CENSUS_ARG = arg('--census');
+const CENSUS_DIR = fileURLToPath(new URL('./fixtures/seal-predicate/census/', import.meta.url));
+// `--epic` reaches the filesystem here, so only a bare slug may. Anything with a slash,
+// a dot segment or a backslash in it resolves to no default census at all rather than to
+// a path outside the register directory.
+// A FUNCTION, not an inline expression, and that is for the tests: the canned-ledger
+// chain in seal-predicate.test.mjs replaces whole function declarations, and a run over a
+// STUBBED ledger must hold no census — the real epic's census describes a population the
+// stub never served, so comparing the two would name 94 synthetic filing events.
+function censusDefaultPath() {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(EPIC) || EPIC.includes('..')) return null;
+  return `${CENSUS_DIR}${EPIC}.json`;
+}
+const CENSUS_DEFAULT = censusDefaultPath();
+// A row that was already closed when the census was captured was never counted as
+// residue, so its later movement is bookkeeping and not a filing act.
+const CLOSED_STATUSES = ['done', 'cancelled'];
+
+function loadCensus(fixture) {
+  const read = (path, key) => {
+    let parsed;
+    try { parsed = JSON.parse(readFileSync(path, 'utf8')); }
+    catch (e) { throw new Infra(`--census ${path}: ${String(e.message).slice(0, 90)}`, 'CENSUS-UNREADABLE'); }
+    const rows = parsed && parsed.rows;
+    if (!rows || typeof rows !== 'object' || Array.isArray(rows))
+      throw new Infra(
+        `the census at ${path} carries no \`rows\` object. A census is a map of _id -> lifecycle_status at capture time; without one the anti-filing arm would compare this run's population against nothing and pass by construction.`,
+        'CENSUS-UNREADABLE');
+    return { rows, key: parsed.epic || key, capturedAt: parsed.captured_at || 'UNSTATED' };
+  };
+  if (CENSUS_ARG) return read(CENSUS_ARG, 'argument');
+  if (fixture) return fixture.priorCensus ? { rows: fixture.priorCensus, key: 'fixture', capturedAt: 'fixture' } : null;
+  // THE COMMITTED CENSUS IS LIVE-ONLY, for the reason EMPTY-ROSTER is: a ledger fixture
+  // is a whole synthetic world, and measuring it against the LIVE epic's census would
+  // name every real row as a filing event and turn every mutation control into a
+  // refusal. A fixture that wants the arm carries its own `priorCensus`.
+  if (CENSUS_DEFAULT && existsSync(CENSUS_DEFAULT)) return read(CENSUS_DEFAULT, EPIC);
+  return null;
+}
+
+// Resolve a row that has LEFT the counted population, to see whether it earned its exit.
+// The fixture path reads the fixture's own `tasks` map (and `departed`, for rows a
+// fixture wants to describe without making them successors); the live path is one
+// `filter[_id]` lookup, already armed against a dropped filter and a wrong row.
+function resolveDeparted(id, fixture) {
+  if (fixture) {
+    const doc = ((fixture.departed || {})[id]) || ((fixture.tasks || {})[id]) || null;
+    return doc ? doc.lifecycle_status || null : null;
+  }
+  const doc = fetchById(id);
+  return doc ? doc.lifecycle_status || null : null;
+}
 // THE OTHER HALF OF THE SAME DISEASE, and the one wave 64 left standing. The roster read
 // was taught to page-or-refuse; this by-id read still could not tell the row it ASKED FOR
 // from a row it merely RECEIVED:
@@ -1559,6 +1778,7 @@ function ladderOnly(fixture, guardOverride, stamp, head) {
   const ladder = evaluateLadder(fixture, guardOverride, waivers);
 
   L.push(`=== SEAL PREDICATE — LADDER-ONLY READING, NO VERDICT — epic ${EPIC} ===`);
+  L.push(`registers: the ladder below is the ${REGISTER_KEY} register — ${KNOWN_DEFECTS.length} registered defect(s)`);
   L.push(`read at ${stamp}  (repo ${REPO}${head ? ` @ ${head}` : ''})`);
   L.push('This run evaluates CLAUSE (b) ONLY. Clause (a) and bucket (c) were NOT READ:');
   L.push('no roster was fetched, no successor was named, no gate was resolved. Nothing');
@@ -1618,7 +1838,7 @@ function ladderOnly(fixture, guardOverride, stamp, head) {
   // file's own tests) anchor on the token's HEAD (`^… LADDER-ONLY b-rungs=…`) and on its
   // TAIL (`mode=live repo=… head=…`), so a new field belongs between the two b-fields and
   // nowhere else.
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} b-unavailable=${unread.length}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} repo=${REPO} head=${head || 'NOT-READ'}`);
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} b-unavailable=${unread.length}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} repo=${REPO} head=${head || 'NOT-READ'}`);
   console.log(L.join('\n'));
   return 0;
 }
@@ -1721,6 +1941,28 @@ function main() {
 
   // ── REFUSALS. Evaluated BEFORE the roster is read, so nothing downstream can
   // print an unresolvable id as a forwarding address. ────────────────────────
+
+  // R8 — AN EPIC WITH NO REGISTER GETS NO VERDICT, and this one is FIRST because every
+  // refusal under it reads a register this run has no business holding. Before the
+  // registers were keyed by epic (see EPIC_REGISTERS above) the two FROZEN INPUTS were
+  // flat, so `--epic <anything>` scored clause (b) over Cloud Console's six CCH-D*
+  // defects and bucket (c) over Cloud Console's three human gates and printed
+  // `b=PASS c=PASS` — letters that were true of a population the reader was never told
+  // about. Keying the registers turns that into an EMPTY register for an unregistered
+  // epic, and an empty register would then trip R1/R7 below with the wrong sentence:
+  // "KNOWN_DEFECTS is empty" reads as "somebody gutted the register", when the truth is
+  // "this epic was never registered". Same exit, a different diagnosis, and the
+  // diagnosis is the whole value of a refusal.
+  //
+  // BOTH PATHS, fixture included — unlike EMPTY-ROSTER, which is live-only. A ledger
+  // fixture supplies a ROSTER; it has never supplied a register, so an unregistered
+  // epic is exactly as unscored on the fixture path as on the live one, and exempting
+  // the fixture path would leave the contamination reproducible by the one invocation
+  // this file's own tests use most.
+  if (!REGISTERED)
+    throw new Refusal('UNREGISTERED-EPIC',
+      `${EPIC} has no entry in EPIC_REGISTERS, so this program holds no defect register and no human-gate table for it. Clause (b) and bucket (c) are scored ENTIRELY from those two registers; with none, the only honest letters are UNEVALUATED. Registered epics: ${Object.keys(EPIC_REGISTERS).join(', ')}. Before the registers were keyed by epic this ran anyway and scored PASS letters for b and c over ANOTHER epic's six CCH-D* defects and three human gates — a Cloud Console defect reported as this epic's residue, with in-epic-roster=false printed on every gate and acted on nowhere. Register ${EPIC}'s OWN defects and OWN permanent human gates in EPIC_REGISTERS and re-run; an unrun clause is not a passed clause.`);
+
   if (!Array.isArray(KNOWN_DEFECTS) || KNOWN_DEFECTS.length === 0)
     throw new Refusal('EMPTY-DEFECT-REGISTER',
       'KNOWN_DEFECTS is empty — clause (b) would certify the word KNOWN over zero defects and spawn no guard at all. An unrun clause is not a passed clause.');
@@ -1785,8 +2027,27 @@ function main() {
   }
 
   // ── from here the successor is real (or TERMINAL), and may be named ─────────
-  const children = fixture ? fixture.children : fetchRoster(EPIC);
-  if (!Array.isArray(children)) throw new Infra('roster is not an array of documents', 'ROSTER-NOT-AN-ARRAY');
+  //
+  // TRANSITIVE, NOT DIRECT. `children` is now the WHOLE subtree of the epic — see
+  // `walkSubtree` above for why one level was a gauge a filing act could empty without
+  // finishing a row, and for the three bounds this walk refuses on. `direct` is kept
+  // separately because the two numbers ARE the relation the waves keep re-quoting as
+  // stale integers, and a relation can only be read off both.
+  const seedChildren = fixture ? fixture.children : null;
+  if (fixture && !Array.isArray(seedChildren)) throw new Infra('roster is not an array of documents', 'ROSTER-NOT-AN-ARRAY');
+  // ONE LINE, ON PURPOSE. This is the seam four mutation proofs in seal-predicate.test.mjs
+  // stand a canned roster in at — it is the successor of the old
+  // `const children = fixture ? fixture.children : fetchRoster(EPIC);` anchor, and those
+  // proofs assert it is PRESENT before replacing it, so a reword reds loudly here rather
+  // than silently putting the suite back on the network.
+  const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;
+  const rosterWalk = walkSubtree(EPIC, rosterSource);
+  const children = rosterWalk.rows;
+  const direct = children.filter((c) => c._depth === 1);
+  if (rosterWalk.unread.length)
+    throw new Infra(
+      `the subtree of ${EPIC} could not be descended to the end — the walk reached its ${ROSTER_MAX_DEPTH}-level cap with ${rosterWalk.unread.length} node(s) whose children were NEVER READ [${rosterWalk.unread.slice(0, 6).join(', ')}${rosterWalk.unread.length > 6 ? ', …' : ''}]. Every row beneath them is invisible, and clause (a) over a subtree this walk truncated reports orphans=0 as evidence of a sweep it never performed. Nothing is asserted about clause (a).`,
+      'SUBTREE-UNREAD');
 
   // ── CLAUSE (a)'s CARDINALITY FLOOR — THE FAIL-OPEN, AND IT IS THE WORSE HALF.
   //
@@ -1816,16 +2077,34 @@ function main() {
   // threshold nobody can derive, and a bar re-derived after seeing a result is not a
   // bar. Zero-versus-nonzero is the only cardinality claim this program can defend from
   // its own inputs.
-  if (!fixture && children.length === 0)
+  if (!fixture && direct.length === 0)
     throw new Refusal('EMPTY-ROSTER',
       `the live roster of ${EPIC} is EMPTY — zero children of any lifecycle_status. Clause (a) certifies that residue has a forwarding address, and over zero rows it cannot fail: orphans=0 is arithmetic, not evidence. An epic with no children is either a typo in --epic or a ledger this program could not read, and both are indistinguishable from a clean sweep once the count reaches the verdict line. Bucket (c) does not catch it either: the permanent human gates are fetched by hardcoded id INDEPENDENTLY of --epic, so they resolve for any epic string at all. An unrun clause is not a passed clause.`,
       'after the roster read, before any clause was evaluated');
 
   // The successor's own roster is the ONLY thing that makes a forwarding address "named".
   // TERMINAL claims there is nothing to forward, so it consults no roster at all.
-  const forwarded = terminal
-    ? new Set()
-    : (fixture ? new Set(fixture.forwarded || []) : new Set(fetchRoster(SUCCESSOR).map((c) => c._id)));
+  //
+  // FORWARDING RECURSES TOO, and that half was a FALSE FAIL sitting beside the false
+  // PASS. A row correctly forwarded to a GRANDCHILD of the successor — the ordinary
+  // shape when a successor epic has waves and the row lands in one — was absent from
+  // the successor's DIRECT roster, so clause (a) counted it as an orphan and printed it
+  // under UNNAMED RESIDUE. It had a forwarding address; the reader just could not see
+  // one level down. The seed stays `fixture.forwarded` (a flat id list, the direct
+  // roster) so every fixture written before this reads identically.
+  const forwardSeed = (fixture && Array.isArray(fixture.forwarded))
+    ? fixture.forwarded.map((f) => (typeof f === 'string' ? { _id: f } : f))
+    : [];
+  const forwardWalk = terminal
+    ? { rows: [], depth: 0, unread: [] }
+    : walkSubtree(SUCCESSOR, fixture
+      ? (id) => subtreeOf(fixture, id, SUCCESSOR, forwardSeed)
+      : fetchRoster);
+  if (forwardWalk.unread.length)
+    throw new Infra(
+      `the subtree of the successor ${SUCCESSOR} could not be descended to the end — the walk reached its ${ROSTER_MAX_DEPTH}-level cap with ${forwardWalk.unread.length} node(s) whose children were NEVER READ [${forwardWalk.unread.slice(0, 6).join(', ')}${forwardWalk.unread.length > 6 ? ', …' : ''}]. A forwarding address this walk could not reach is indistinguishable from one that does not exist, and clause (a) would print a correctly-forwarded row as UNNAMED RESIDUE. Nothing is asserted about clause (a).`,
+      'SUBTREE-UNREAD');
+  const forwarded = new Set(forwardWalk.rows.map((c) => c._id));
 
   const byStatus = {};
   for (const c of children) byStatus[c.lifecycle_status] = (byStatus[c.lifecycle_status] || 0) + 1;
@@ -1879,6 +2158,25 @@ function main() {
   // into an EXEMPT row — a fix that lowers the bar it was written to correct.
   const aPass = orphans.length === 0 && consideringResidue.length === 0;
 
+  // ── THE ANTI-FILING ARM. See the census block above for why recursion does not
+  // replace it: a transitive read closes "reparent one level down" and closes nothing
+  // else. The question here is not "what does the population contain" but "what LEFT
+  // it, and did it earn its exit". ─────────────────────────────────────────────────
+  const census = loadCensus(fixture);
+  const censusKey = census ? census.key : 'NONE';
+  const filingEvents = [];
+  if (census) {
+    const present = new Set(children.map((c) => c._id));
+    for (const [id, was] of Object.entries(census.rows)) {
+      if (CLOSED_STATUSES.includes(was)) continue;   // never counted as residue at capture
+      if (present.has(id)) continue;                 // still in the population; it did not leave
+      let now = null;
+      try { now = resolveDeparted(id, fixture); } catch (e) { now = null; }
+      if (now && CLOSED_STATUSES.includes(now)) continue;  // it left by being FINISHED
+      filingEvents.push({ id, was, now: now || 'UNREADABLE' });
+    }
+  }
+
   // Bucket (c): every hardcoded gate must resolve. A gate that silently vanished is a
   // gate that stopped being disclosed — that is NO SEAL, not a clean sheet.
   const gateReport = Object.entries(PERMANENT_HUMAN_GATES).map(([id, why]) => {
@@ -1900,8 +2198,16 @@ function main() {
   const defectUnread = ladder.filter((e) => e.unavailable.length);
 
   // ── output ─────────────────────────────────────────────────────────────────
+  L.push(`registers: clause (b) and bucket (c) are scored off the ${REGISTER_KEY} register — ${KNOWN_DEFECTS.length} registered defect(s), ${Object.keys(PERMANENT_HUMAN_GATES).length} permanent human gate(s)`);
   L.push(`epic ${EPIC}   successor: ${terminal ? `${TERMINAL} (no successor — post-condition roster read: live=0 considering=0)` : SUCCESSOR}`);
   L.push(`roster: ${children.length} children  ${JSON.stringify(byStatus)}`);
+  // THE RELATION, PRINTED AS A RELATION. dr-w25-bl-seal-clause-a-is-one-level-deep quoted
+  // "57+319" and the row that superseded it quoted "69+332"; both were integers pinned in
+  // prose and both were stale within a day of filing. Both numbers come off THIS line, of
+  // THIS run, so a future reader re-derives the relation instead of quoting an integer.
+  L.push(`depth: ${rosterWalk.depth} level(s) walked (cap ${ROSTER_MAX_DEPTH})  direct ${direct.length} + below ${children.length - direct.length} = ${children.length}  subtree-unread ${rosterWalk.unread.length}`);
+  L.push(`forwarding: successor subtree ${forwardWalk.rows.length} row(s) over ${forwardWalk.depth} level(s)`);
+  L.push(`census: ${census ? `${censusKey} (captured ${census.capturedAt}) — ${Object.keys(census.rows).length} row(s) recorded` : 'NONE — the anti-filing arm was NOT RUN and nothing here claims it passed'}`);
   L.push('');
   L.push(`CLAUSE (a) forwarding — residue ${residue.length} (live ${live.length}, considering ${considering.length})`);
   L.push(`  forwarded under successor : ${fwd.length}`);
@@ -1917,6 +2223,17 @@ function main() {
   // ledger. If the buckets ever double-count again, this line stops adding up.
   L.push(`  ── buckets partition residue: ${fwd.length} + ${gatedLive.length} + ${consideringResidue.length} + ${orphans.length} = ${residue.length}`);
   L.push('');
+  L.push(`ANTI-FILING — rows that LEFT the counted population since the ${censusKey} census`);
+  if (!census) {
+    L.push('  NOT RUN — no census. A population can shrink by filing and this run cannot tell.');
+  } else if (filingEvents.length === 0) {
+    L.push(`  ✓ 0 filing event(s): every census row that left resolves to done or cancelled today.`);
+  } else {
+    L.push(`  FILING EVENT(S) : ${filingEvents.length} — left the population with NO transition to done/cancelled`);
+    filingEvents.slice(0, 8).forEach((f) => L.push(`      ✗ ${f.id}  was=${f.was} now=${f.now}`));
+    if (filingEvents.length > 8) L.push(`      … and ${filingEvents.length - 8} more`);
+  }
+  L.push('');
   L.push('BUCKET (c) permanent human gates');
   for (const g of gateReport)
     L.push(`  ${g.resolved ? '✓' : '✗'} ${g.id}  status=${g.status} parent=${g.parent} in-epic-roster=${g.inRoster}`);
@@ -1927,7 +2244,7 @@ function main() {
 
   const gateMissing = gateReport.filter((g) => !g.resolved);
   const ok = aPass && defectFails.length === 0 && gateMissing.length === 0
-    && defectUnread.length === 0;
+    && defectUnread.length === 0 && filingEvents.length === 0;
   // FAIL outranks HISTORY-UNAVAILABLE: a defect this run DID measure and found unpaid is
   // a louder fact than one it could not look at, and `b-unavailable=` below carries the
   // second condition either way, so nothing is hidden by the precedence.
@@ -1970,6 +2287,12 @@ function main() {
       L.push('    checkout with full history (`git fetch --unshallow`) to get an answer.');
     }
     if (gateMissing.length) L.push(`  - ${gateMissing.length} hardcoded human gate(s) failed to resolve (bucket c)`);
+    if (filingEvents.length) {
+      L.push(`  - ${filingEvents.length} row(s) LEFT the counted population without a transition to done or cancelled (anti-filing): ${filingEvents.slice(0, 8).map((f) => `${f.id} (was ${f.was}, now ${f.now})`).join(', ')}${filingEvents.length > 8 ? ', …' : ''}`);
+      L.push('    A population that shrank by filing is not a population that was swept. This');
+      L.push('    is the one arm a recursive roster read does NOT subsume: it compares against');
+      L.push('    what was COUNTED BEFORE, not against what is reachable now.');
+    }
     L.push('  This is an acceptable, pre-committed outcome. The named successor is the honest handoff.');
   }
   // EVERY VERDICT LINE NAMES ITS POPULATION. `orphans=0` is a ratio with an unstated
@@ -1992,7 +2315,7 @@ function main() {
   // out of the task layer. Zero is the overwhelming majority of parents, and on those the
   // token stays byte-identical to every one quoted before this field existed.
   const draftCount = children.filter((c) => c && c._draft).length;
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${aPass ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}${draftCount ? ` drafts=${draftCount}` : ''}`);
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${aPass ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'} direct=${direct.length} depth=${rosterWalk.depth} subtree-unread=${rosterWalk.unread.length} census=${censusKey} filing-events=${filingEvents.length}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}${draftCount ? ` drafts=${draftCount}` : ''}`);
   console.log(L.join('\n'));
   return ok ? 0 : 1;
 }
@@ -2024,13 +2347,13 @@ try {
     // `repo=` is APPENDED AFTER `epic=` on both tokens below, never inserted before the
     // clause letters: readers (and this file's own tests) anchor on the
     // `a=… b=… c=… epic=…` run, and widening it in the middle breaks them for no gain.
-    console.log(`VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=${e.code} a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED epic=${EPIC} repo=${REPO}`);
+    console.log(`VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=${e.code} a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED epic=${EPIC} registers=${REGISTER_KEY} repo=${REPO}`);
     code = 3;
   } else {
     console.log(`INFRA FAULT at ${stamp}: ${e instanceof Infra ? e.message : `unexpected ${e.name}: ${e.message}`}`);
     console.log('  This is NOT a verdict. Nothing was measured, so nothing is claimed — the whole point');
     console.log('  of a third exit code is that this can never be read as NO SEAL.');
-    console.log(`VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=${EPIC} code=${(e instanceof Infra && e.code) || 'UNSPECIFIED'} repo=${REPO}`);
+    console.log(`VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=${EPIC} code=${(e instanceof Infra && e.code) || 'UNSPECIFIED'} repo=${REPO} registers=${REGISTER_KEY}`);
     code = 2;
   }
 }

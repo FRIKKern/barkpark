@@ -248,6 +248,34 @@ jobs:
       # ~0.25 s.
       - name: Site spawner live-proof judges self-check
         run: bash deploy/site-spawner-live-proof.sh --self-check
+      # THE FRESH-BOX PUSH-TO-LIVE ACCEPTANCE RUN, offline half
+      # (task jpf-bl-e2e-push-proof). site-push-live-proof.sh answers the one
+      # question none of the spawner proofs can: launch a box that did not
+      # exist, connect a repo, `git push` a sha, and is THAT sha live with zero
+      # manual steps — plus the watchdog rung (an unclaimable queued row must
+      # surface as deploy_stalled inside the 300 s horizon).
+      #
+      # Its LIVE half provisions a real Hetzner server and is deliberately NOT
+      # registered here: there is no provisioning Hetzner secret in this repo
+      # (the only one, HETZNER_DNS_TOKEN in renew-mail-cert.yml, is a DNS token
+      # that cannot create a server), so a CI arm for it could only ever be a
+      # skip that prints green. The live run is human-operated; its invocation
+      # and required env are at the top of the script.
+      #
+      # The three offline modes below are the same bargain the siblings above
+      # strike: --plan proves the rung list is printable and side-effect free,
+      # --self-check drives every judge with good AND bad input, and --negctl
+      # drives deliberately wrong fixtures through the REAL parsing path and
+      # asserts WHICH arm fired. --negctl caught a live defect on its first
+      # execution (a `grep -c … || printf 0` that made a clean run read as
+      # MANUAL_STEP_REQUIRED), which is the argument for registering all three
+      # rather than just the self-check. Offline, no credentials, ~0.3 s total.
+      - name: Push-to-live proof — plan (side-effect free)
+        run: bash deploy/site-push-live-proof.sh --plan
+      - name: Push-to-live proof — judges self-check
+        run: bash deploy/site-push-live-proof.sh --self-check
+      - name: Push-to-live proof — negative controls (fixture-driven)
+        run: bash deploy/site-push-live-proof.sh --negctl
       # Every timer-driven unit in deploy/systemd/ carries an OnFailure= handler,
       # that handler exists in-tree, and no scheduled service sets a Restart=
       # that would defer the failed state past it. Before task-0633ab45951a5780
