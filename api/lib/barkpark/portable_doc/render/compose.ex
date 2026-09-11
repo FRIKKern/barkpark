@@ -2095,6 +2095,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end)
   end
 
+  defp code_source_text(v), do: stringish(v)
+
   defp inline_leaf_source(node) do
     case stringish(Map.get(node, "value")) do
       "" -> node |> Map.get("text") |> stringish()
@@ -2102,7 +2104,6 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  defp code_source_text(v), do: stringish(v)
 
   # THE ONE blank-field reader every empty-chrome guard in this module shares, so
   # no two block types (and no two style arms of one type) can ever disagree about
