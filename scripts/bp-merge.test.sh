@@ -375,6 +375,18 @@ else
   fail=$((fail + 1)); echo "  FAIL passing an argument was not refused (rc=${rc:-0}): $out" >&2
 fi
 
+# A pipeline into `grep -q` is the 141 hazard this repo scans for: grep exits on
+# the FIRST match, the producer takes SIGPIPE, and under `set -o pipefail` a TRUE
+# assertion comes back FAILED — precisely under the load that makes the output
+# long, which is the refusal blocks below. `case` reads the whole string with no
+# pipe at all. (scripts/pipefail-sigpipe-scan.sh names the shape.)
+out_has() { # haystack needle
+  case "$1" in
+    *"$2"*) return 0 ;;
+    *)      return 1 ;;
+  esac
+}
+
 # ── 43-51. THE DIRTY / CONFLICTING SHAPE (measured 2026-09-11, PR #17612) ────
 # pr-required.sh printed MERGEABLE: 4/4 at 03:56Z. #17614, a sibling touching a
 # file this head also touched, merged at 03:5xZ. By 04:05Z the head CONFLICTED
@@ -417,7 +429,7 @@ advice_contains "44e …and tells the reader NOT to take gh's queue-the-merge of
 # refusal that quotes it verbatim without countering it teaches the abolished
 # verb in gh's voice, exactly as D78 found for the admin override.
 out="$(counter_line "$DIRTY_FIXTURE")"
-if printf '%s' "$out" | grep -q 'DEAD'; then
+if out_has "$out" 'DEAD'; then
   pass=$((pass + 1)); echo "  ok   45 counter_line answers gh's QUEUE-the-merge suggestion on the DIRTY message"
 else
   fail=$((fail + 1)); echo "  FAIL the DIRTY refusal quotes gh's queue suggestion with nothing beneath it" >&2
@@ -506,14 +518,14 @@ drive_main() { # state rc_of_the_api_read -> sets DM_RC, DM_OUT, DM_MERGE_CALLS,
 # 47. dirty: refused BY NAME, exit 4, and the merge call was never spent.
 drive_main dirty
 if [ "$DM_RC" = "4" ] && [ "$DM_MERGE_CALLS" -eq 0 ] \
-   && printf '%s' "$DM_OUT" | grep -q 'REFUSED — DIRTY'; then
+   && out_has "$DM_OUT" 'REFUSED — DIRTY'; then
   pass=$((pass + 1)); echo "  ok   47 mergeable_state=dirty refuses by NAME before the merge call (rc=$DM_RC, merge calls=$DM_MERGE_CALLS)"
 else
   fail=$((fail + 1))
   echo "  FAIL dirty was not refused pre-merge (rc=$DM_RC merge_calls=$DM_MERGE_CALLS)" >&2
   printf '%s\n' "$DM_OUT" | sed 's/^/       /' >&2
 fi
-if printf '%s' "$DM_OUT" | grep -q 'push --force-with-lease'; then
+if out_has "$DM_OUT" 'push --force-with-lease'; then
   pass=$((pass + 1)); echo "  ok   47a …and prints the rebase remedy, not just the verdict"
 else
   fail=$((fail + 1)); echo "  FAIL the dirty pre-flight refusal names no resolving command" >&2
@@ -522,7 +534,7 @@ fi
 # 48. unknown: GitHub has not computed it. Re-read, then REFUSE — never merge.
 drive_main unknown
 if [ "$DM_RC" = "1" ] && [ "$DM_MERGE_CALLS" -eq 0 ] && [ "$DM_API_CALLS" -eq 3 ] \
-   && printf '%s' "$DM_OUT" | grep -q "STILL 'unknown'"; then
+   && out_has "$DM_OUT" "STILL 'unknown'"; then
   pass=$((pass + 1)); echo "  ok   48 mergeable_state=unknown re-polls ($DM_API_CALLS reads) and then REFUSES — never a green"
 else
   fail=$((fail + 1))
@@ -534,7 +546,7 @@ fi
 # refuses unconditionally, which is the vacuous pass in the other direction.
 drive_main clean
 if [ "$DM_RC" = "0" ] && [ "$DM_MERGE_CALLS" -eq 1 ] \
-   && printf '%s' "$DM_OUT" | grep -q 'MERGED #123'; then
+   && out_has "$DM_OUT" 'MERGED #123'; then
   pass=$((pass + 1)); echo "  ok   49 CONTROL: mergeable_state=clean reaches the merge call and merges (merge calls=$DM_MERGE_CALLS)"
 else
   fail=$((fail + 1))
@@ -554,16 +566,16 @@ fi
 # measured nothing, or the refusal sounds like a finding about the PR.
 drive_main 'GraphQL: API rate limit already exceeded for user ID 32601161.' 1
 if [ "$DM_RC" = "1" ] && [ "$DM_MERGE_CALLS" -eq 0 ] \
-   && printf '%s' "$DM_OUT" | grep -q 'could not READ mergeable_state' \
-   && printf '%s' "$DM_OUT" | grep -q 'rate limit already exceeded' \
-   && printf '%s' "$DM_OUT" | grep -q 'NOTHING was measured'; then
+   && out_has "$DM_OUT" 'could not READ mergeable_state' \
+   && out_has "$DM_OUT" 'rate limit already exceeded' \
+   && out_has "$DM_OUT" 'NOTHING was measured'; then
   pass=$((pass + 1)); echo "  ok   50 a FAILED mergeable_state read refuses, quotes the API, and claims nothing about the PR"
 else
   fail=$((fail + 1))
   echo "  FAIL an unreadable pre-flight did not refuse honestly (rc=$DM_RC merge_calls=$DM_MERGE_CALLS)" >&2
   printf '%s\n' "$DM_OUT" | sed 's/^/       /' >&2
 fi
-unset -f gh drive_main drive_refuse
+unset -f gh drive_main drive_refuse out_has
 rm -rf "$BPM_TMP"
 trap - EXIT
 
