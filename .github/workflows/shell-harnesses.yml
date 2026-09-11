@@ -100,6 +100,19 @@ name: Shell harnesses
 # decision that scripts/registration-sample.sh exists to adjudicate.
 
 on:
+  # MANUAL LANE (task-bd8bd3dbff7b75aa). An operator can produce a COMPLETED
+  # harness verdict on main on demand. This is the answer to the residual the
+  # concurrency comment below names: main pushes share one group, so an
+  # intermediate sha's run is evicted while pending and main's harness state is
+  # ABSENT, not green. Before this trigger existed `gh workflow run
+  # shell-harnesses.yml --ref main` returned HTTP 422 and there was no way to
+  # ask for one. workflow_dispatch takes NO `paths:` filter (GitHub does not
+  # accept one on this event), so the twin on.pull_request.paths /
+  # on.push.paths lists below stay set-equal — adding this trigger adds no path.
+  # The `changes` dispatcher already handles it: its `event != pull_request`
+  # arm dispatches TRUE for every harness set, so a dispatched run measures
+  # everything, exactly like a push.
+  workflow_dispatch:
   pull_request:
     paths:
       - "scripts/doctor.sh"
@@ -864,7 +877,19 @@ concurrency:
   # scripts/main-run-concurrency-check.sh, which re-derives both facts.
   #
   # PRs are unchanged: their own per-ref group, and they still supersede.
-  group: shell-harnesses-${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
+  #
+  # THE DISPATCH LANE (task-bd8bd3dbff7b75aa). A workflow_dispatch run gets its
+  # own group keyed by run_id, so it is NEVER the pending run a main push
+  # evicts. Without this branch a manual run on main lands in the shared
+  # `-main` slot and the next merge cancels it while it waits — the operator
+  # asks for a verdict and gets `cancelled`, which is the exact hole this
+  # trigger exists to close. It costs one run's worth of runners, not one per
+  # merge, so the collapse's queue saving is untouched. cancel-in-progress is
+  # unchanged and still the VERBATIM never-cancel-main guard (a dispatch on
+  # main evaluates it false and so is never cancelled either); the marker's
+  # collapsed shape `'refs/heads/main' && 'main'` is still present verbatim,
+  # which is what scripts/main-run-concurrency-check.sh re-derives.
+  group: shell-harnesses-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || (github.ref == 'refs/heads/main' && 'main' || github.ref) }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
