@@ -419,6 +419,7 @@ export const SINGULAR_REGISTER = [
 
   // ── W22 / W24 / W25 / W26: modals, credential sheets and the launch wizard ──
   { leg: "W22-shared-modal-card-min-content-floor", selector: "#modal-root .modal-card", reason: "one door: the open modal's single card, polled for running animations before it is measured" },
+  { leg: "W22-url-remedy-pricing", selector: ".instance-card-url", reason: "readiness only: waits for the first address node to paint; the sweep itself is plural and scoped to the visible view, and prints every address it measured" },
   { leg: "W24-cred-dialog-button-alive", selector: "#modal-root .launch-connect-provider", reason: "one door: the connect button inside the open modal" },
   { leg: "W24-cred-dialog-button-alive", selector: "#provider-connect [data-connect-submit]", reason: "one door: the providers screen's single connect-submit control, under an id host" },
   { leg: "W25-launch-catalog-after-connect", arg: "${JSON.stringify(scope)}+' .launch-connect-provi", reason: "one door, scope-parameterised: the same connect button reached under whichever host (`#modal-root` / `#view-overview`) the cell drives" },
