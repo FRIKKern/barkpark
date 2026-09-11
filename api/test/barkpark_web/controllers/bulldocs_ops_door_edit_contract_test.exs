@@ -53,17 +53,13 @@ defmodule BarkparkWeb.BulldocsOpsDoorEditContractTest do
   @dataset "production"
 
   # The caps the publish-time floor enforces. `EpicQuality` keeps them in
-  # PRIVATE module attributes (@max_top_level_blocks / @max_top_level_headings)
-  # with no public accessor, so these two are RETYPED literals, not read from
-  # the module. The last test in this file is the pin that reds if the module's
-  # values ever move away from them.
+  # PRIVATE module attributes (@max_top_level_blocks / @max_top_level_headings),
+  # so these two are RETYPED literals — the fixture below is built by hand from
+  # them and reads better as numbers. They are NOT unanchored: `overload_limits/2`
+  # (public since #17644) returns the module's own `max` for a fired overload,
+  # and the last test in this file asserts these literals equal it.
   @max_blocks 80
   @max_headings 16
-
-  @epic_quality_source Path.expand(
-                         "../../../lib/barkpark/content/papers/epic_quality.ex",
-                         __DIR__
-                       )
 
   defp authed(conn) do
     conn
@@ -241,30 +237,34 @@ defmodule BarkparkWeb.BulldocsOpsDoorEditContractTest do
     assert length(Content.paper_blocks(slug, @dataset)) == 2
   end
 
-  test "PIN: the retyped caps still equal the private attributes in epic_quality.ex" do
-    # This file cannot read @max_top_level_blocks / @max_top_level_headings —
-    # they are private attributes with no accessor — so it retypes them above.
-    # A retyped constant rots silently, which is exactly what this pin refuses:
-    # move either cap in epic_quality.ex and this test reds, pointing the next
-    # reader at the two literals and at the at-cap fixture built from them.
-    source = File.read!(@epic_quality_source)
+  test "PIN: the retyped caps still equal the module's own limits" do
+    # This file retypes 80/16 above because the module keeps them in private
+    # attributes and the at-cap fixture is hand-built from them. A retyped
+    # constant rots silently, which is exactly what this pin refuses: it asks
+    # `EpicQuality` for the budget behind each overload and compares. Move
+    # either cap in epic_quality.ex and this test reds, pointing the next reader
+    # at the two literals and at the fixture they build.
+    limits =
+      EpicQuality.overload_limits(
+        %{"blocks" => []},
+        [:top_level_block_overload, :top_level_heading_overload]
+      )
 
-    # Assert the PRECONDITION of the pin itself. A renamed or deleted attribute
-    # would make the two value assertions below fail for the wrong reason, and a
-    # duplicated one would let a stale copy satisfy them — so require exactly one
-    # declaration line per attribute before comparing its value.
-    for attribute <- ["@max_top_level_blocks", "@max_top_level_headings"] do
-      assert length(Regex.scan(~r/^\s*#{attribute}\s+\d+$/m, source)) == 1,
-             "#{attribute} is no longer declared exactly once in epic_quality.ex; " <>
-               "this pin and the retyped literals above need rewriting."
-    end
+    # Assert the PRECONDITION of the pin. `overload_limits/2` reports only the
+    # budgets whose failure actually FIRED, so a renamed key would leave this
+    # test comparing nothing at all rather than comparing and disagreeing.
+    assert Map.keys(limits) |> Enum.sort() == ["top_level_blocks", "top_level_headings"],
+           "EpicQuality.overload_limits/2 no longer reports both budgets under the keys " <>
+             "this pin reads (#{inspect(Map.keys(limits))}); the pin needs rewriting."
 
-    assert source =~ ~r/^\s*@max_top_level_blocks\s+#{@max_blocks}$/m,
-           "epic_quality.ex's @max_top_level_blocks is no longer #{@max_blocks}; " <>
+    assert limits["top_level_blocks"]["max"] == @max_blocks,
+           "epic_quality.ex's top-level block cap is now " <>
+             "#{inspect(limits["top_level_blocks"]["max"])}, not #{@max_blocks}; " <>
              "update @max_blocks here and the at-cap fixture it builds."
 
-    assert source =~ ~r/^\s*@max_top_level_headings\s+#{@max_headings}$/m,
-           "epic_quality.ex's @max_top_level_headings is no longer #{@max_headings}; " <>
+    assert limits["top_level_headings"]["max"] == @max_headings,
+           "epic_quality.ex's top-level heading cap is now " <>
+             "#{inspect(limits["top_level_headings"]["max"])}, not #{@max_headings}; " <>
              "update @max_headings here and the at-cap fixture it builds."
   end
 end
