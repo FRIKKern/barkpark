@@ -1038,8 +1038,29 @@ defmodule Barkpark.Tenancy do
   @doc """
   Boolean face of `pulled_schema_row/2`: does a boot-time upsert of
   `name`/`dataset` match a pull-provenance-stamped row?
+
+  TWO first-argument shapes, ONE answer. Handed a NAME it resolves the row the
+  boot-time upsert would match — the DEFAULT-dataset-slot read documented above.
+  Handed a `%Content.SchemaDefinition{}` it answers about THAT row, which is how
+  a SCOPED caller asks the same question: `mix barkpark.workspace.provision_schemas`
+  already holds the target-scope row it is about to overwrite, and re-resolving
+  it by name here would silently answer about the Default slot instead of the
+  target workspace. Both shapes share `provenance_covered?/2`; there is no
+  second copy of the predicate.
   """
   @spec pulled_schema_row?(term(), term()) :: boolean()
+  def pulled_schema_row?(%Content.SchemaDefinition{} = row, dataset) when is_binary(dataset) do
+    provenance_covered?(row, dataset)
+  rescue
+    e ->
+      Logger.warning(
+        "Tenancy.pulled_schema_row?: pull-provenance read failed for row " <>
+          "#{inspect(row.name)}/#{inspect(dataset)} — proceeding unguarded: #{Exception.message(e)}"
+      )
+
+      false
+  end
+
   def pulled_schema_row?(name, dataset), do: not is_nil(pulled_schema_row(name, dataset))
 
   defp provenance_covered?(%Content.SchemaDefinition{workspace_id: nil}, _dataset), do: false
