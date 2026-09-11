@@ -206,6 +206,7 @@ import { driverSentence, widthDrivers } from "./width-drivers.mjs";
 // below 620, silently re-opening the gap in both files. breakpoint-sweep.mjs
 // guards its own main behind `process.argv[1]`, so importing it runs nothing.
 import { WIDTHS as SWEEP_WIDTHS } from "./breakpoint-sweep.mjs";
+import { edgeCoverSentence } from "./edge-cover-verdict.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -2205,11 +2206,22 @@ async function main() {
           `var tall=cols.reduce(function(a,b){return b.height>a.height?b:a;},cols[0]);` +
           `var name=function(el){return el?String(el.className||el.tagName):'nothing';};` +
           `var probes=cols.map(function(h){return name(document.elementFromPoint(cx,h.top+h.height/2));});` +
+          // The EDGE probe's own inputs, not just its answer. `tall.top + 2` is
+          // the y; which element wins it is decided by the corner's HEIGHT and
+          // by where the row sits relative to the sticky topbar, and until
+          // task-ca6e4c883c85e854 only the first of those was ever read back.
+          `var ey=tall.top+2;var eel=document.elementFromPoint(cx,ey);` +
+          `var bar=document.querySelector('header.topbar')||document.querySelector('.topbar');` +
+          `var br=bar?bar.getBoundingClientRect():null;` +
           `return {sl:s.scrollLeft,evLeft:R(ev.getBoundingClientRect().left),` +
           ` cornerH:R(cr.height),headH:R(tall.height),col0H:R(cols[0].height),` +
           ` heights:cols.map(function(h){return R(h.height);}),` +
           ` probes:probes,probeMiss:probes.filter(function(p){return p.indexOf('set-matrix-corner')<0;}).length,` +
-          ` edge:name(document.elementFromPoint(cx,tall.top+2))};})()`,
+          ` tallTop:R(tall.top),probeY:R(ey),scrollY:R(window.scrollY),` +
+          ` topbarBottom:br?R(br.bottom):null,topbarH:br?R(br.height):null,` +
+          ` topbarPos:bar?getComputedStyle(bar).position:null,` +
+          ` edgeInTopbar:eel?!!(eel.closest&&eel.closest('header.topbar,.topbar')):null,` +
+          ` edge:name(eel)};})()`,
         );
         await evalJs(`(function(){var s=document.querySelector('.set-matrix');s.scrollLeft=s.scrollWidth;})()`);
         await settle();
@@ -2244,8 +2256,19 @@ async function main() {
             const before = failures.length;
             if (mid.cornerH < mid.headH - 0.5) fail(D, `notif-configured/${theme}@${width}: the sticky corner is ${mid.cornerH}px tall in a ${mid.headH}px header row (columns ${mid.heights.join("/")}; column 0 alone reads ${mid.col0H}px) — the channel headings scroll THROUGH the pinned label column at the top (align-items:center collapses an empty cell)`);
             if (mid.probeMiss) fail(D, `notif-configured/${theme}@${width}: at the header row ${mid.probeMiss}/${mid.probes.length} column midpoints are covered by something other than .set-matrix-corner (${mid.probes.join(", ")})`);
-            if (!mid.edge.includes("set-matrix-corner")) fail(D, `notif-configured/${theme}@${width}: 2px below the top of the ${mid.headH}px header cell the label column is covered by "${mid.edge}", not .set-matrix-corner — a corner shorter than the TALLEST column leaves the heading scrolling through above it`);
-            if (failures.length === before) okLine(`notif-configured/${theme}@${width}: ${rest.hidden}/${rest.cols} channel columns off-screen at rest; label column sticks at ${mid.evLeft} through scrollLeft ${mid.sl}, corner covers the header row (${mid.cornerH}/${mid.headH}px, columns ${mid.heights.join("/")}); ${mid.probes.length} column midpoints + the tall column's top edge all hit .set-matrix-corner; reserved scrollbar track ${rest.track}px`);
+            // THE SENTENCE IS CHOSEN FROM THE MEASUREMENT, NOT FROM THE LEG'S
+            // ORIGINAL DEFECT (task-ca6e4c883c85e854). This red used to hard-type
+            // "a corner shorter than the TALLEST column …" for every cause, and
+            // on 2026-09-10 it fired six times against a corner that measured
+            // EXACTLY the header row (55/55 on both sides of the commit range)
+            // while the real cover was the sticky `.topbar` this guard's own
+            // scrollIntoView had scrolled the header row under. See
+            // ./edge-cover-verdict.mjs for the two mechanisms, their conditions,
+            // and the two ways it refuses to guess; both arms have browserless
+            // fixtures in ./edge-cover-verdict.test.mjs.
+            const edgeSentence = edgeCoverSentence(mid);
+            if (edgeSentence) fail(D, `notif-configured/${theme}@${width}: ${edgeSentence}`);
+            if (failures.length === before) okLine(`notif-configured/${theme}@${width}: ${rest.hidden}/${rest.cols} channel columns off-screen at rest; label column sticks at ${mid.evLeft} through scrollLeft ${mid.sl}, corner covers the header row (${mid.cornerH}/${mid.headH}px, columns ${mid.heights.join("/")}); ${mid.probes.length} column midpoints + the tall column's top edge (y ${mid.probeY}) all hit .set-matrix-corner, clear of the sticky topbar (tall.top ${mid.tallTop} >= topbar bottom ${mid.topbarBottom}, scrollY ${mid.scrollY}); reserved scrollbar track ${rest.track}px`);
           }
           // Cue 2 — the fade exists while clipped and retracts at the end.
           if (px(rest.fade) <= 0) fail(D, `notif-configured/${theme}@${width}: edge fade is ${rest.fade} while ${rest.sw - rest.cw}px of the matrix is hidden — nothing tells a person there is more`);
