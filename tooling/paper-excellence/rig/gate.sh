@@ -9,8 +9,8 @@
 #
 # Renders a COMMITTED fixture through the real PortableDoc renderer + the real
 # bulldocs layout, photographs it at 8 (2 schemes x 4 widths) cells, and exits
-# NONZERO the moment a content assertion fails. Every assertion is on DOM
-# content, never on an HTTP status.
+# NONZERO when a content assertion fails — at once for a single fixture, at the
+# END of a --panel census. Every assertion is on DOM content, not an HTTP status.
 #
 #   --panel   run EVERY committed fixture (fixtures/*.json) in one command
 #   --check   also diff this run's MEASUREMENTS against the committed
