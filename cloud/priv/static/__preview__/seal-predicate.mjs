@@ -1236,38 +1236,95 @@ function verifyCommit(d, commit, fixture, problems, unavailable) {
 // No YAML dependency (this file is spawned as a bare `node <path>`, with no package
 // resolution to lean on), so the workflow is read with a deliberately narrow
 // line parser over the `jobs:` block ALONE. Narrow is the point: everything it can
-// see is a key at a KNOWN indent, so a `#` comment — at any indent, carrying any
-// text — is structurally unreachable to it. That is the property leg 1 above lost.
+// see is a key at a KNOWN indent.
+//
+// WAVE 28 MUTATION SWEEP (dr-w28-bl-seal-predicate-parser-blind-spots-console-side).
+// Eight mutations of `.github/workflows/cloud.yml` were run at this parser. Three
+// SURVIVED — the suite already pinned them (name/if order swapped, inline-flow
+// `needs:` rewritten as a block sequence, the comment block stripped). FOUR DID NOT,
+// and the paragraph that used to stand here ("a `#` comment — at any indent, carrying
+// any text — is structurally unreachable to it") was the false reassurance that kept
+// anyone from looking. Each is now handled BELOW and mutation-proved in
+// seal-predicate.test.mjs:
+//
+//   M4  a column-0 `#` comment anywhere inside `jobs:`  — was read as "left the
+//       jobs: block", truncating the job graph. A comment is skipped at ANY indent,
+//       column 0 included; only a column-0 NON-comment ends the block.
+//   M5  `if: ${{ always() }}` instead of `if: always()` — the idiomatic GitHub
+//       Actions spelling, which a reviewer would wave through, and which silently
+//       dropped ALL FOUR rung-2 entries to rung 3. The `if:` expression is now
+//       unwrapped from its `${{ … }}` envelope before it is compared.
+//   M7  a tab-indented `needs:` — invisible to every ` {4}` anchor, so the
+//       aggregator lost its edge in silence. Tabs are ILLEGAL as YAML indentation:
+//       GitHub would refuse the file outright, so the honest answer is not a
+//       silently-different graph but a REFUSAL (exit 2) naming the line.
+//   M8  `cloud-gate:  # comment` after the job key — the job key stopped matching,
+//       so every key of that job was attributed to the PRECEDING job (`test`, which
+//       is matrixed), and leg B reported the aggregator as matrixed: a WRONG answer,
+//       not a missing one. A trailing comment on a job key is now tolerated, and any
+//       OTHER unrecognised line at job-key indent REFUSES rather than mis-attributes.
+//
+// M8's remedy is deliberately a predicate, not a two-case list: mis-attribution is
+// what a silently-skipped structural line always causes, so the skip is gone.
+
+// A `${{ … }}` envelope around an expression is transport, not meaning: GitHub
+// evaluates `if: always()` and `if: ${{ always() }}` identically. Unwrap exactly one
+// envelope; anything else is returned trimmed and unchanged.
+const unwrapExpr = (v) => {
+  const t = String(v == null ? '' : v).trim();
+  const m = t.match(/^\$\{\{([\s\S]*)\}\}$/);
+  return m ? m[1].trim() : t;
+};
 
 // Parse `jobs:` into { <key>: { name, if, needs: [], matrix: bool } }.
 // Both `needs:` spellings are handled, because both are legal and this repo uses one
 // of each: the inline flow sequence (`needs: [a, b]`) and the block sequence
 // (`needs:` then `  - a`). A bare scalar (`needs: changes`) is legal too.
-function parseWorkflowJobs(src) {
+// `label` is the workflow path, used only so a refusal can name the file it read.
+function parseWorkflowJobs(src, label = 'the workflow') {
   const lines = src.split('\n');
   let i = lines.findIndex((l) => /^jobs:\s*$/.test(l));
   if (i === -1) return null;
   const jobs = {};
   let cur = null;
+  const isSkippable = (l) => !l.trim() || /^\s*#/.test(l);
   for (i += 1; i < lines.length; i++) {
     const line = lines[i];
+    // M4. A comment is skipped at ANY indent — column 0 included — BEFORE the
+    // end-of-block test, so a `#` at column 0 can no longer truncate the graph.
+    // Blank lines likewise. Only a column-0 line carrying real content ends `jobs:`.
+    if (isSkippable(line)) continue;
     if (/^\S/.test(line)) break;                    // left the jobs: block
-    const jobKey = line.match(/^ {2}([A-Za-z0-9_.-]+):\s*$/);
+    // M7. A mapping key indented with a TAB is not legal YAML at all; GitHub would
+    // reject the workflow. Reading past it would silently publish a different job
+    // graph than the one CI runs, so this REFUSES instead (exit 2, nothing claimed).
+    if (/^[ ]*\t/.test(line) && /^[A-Za-z0-9_.-]+:(\s|$)/.test(line.trim()))
+      throw new Infra(`${label} line ${i + 1} indents \`${line.trim().split(/\s/)[0]}\` with a TAB. Tabs are not legal YAML indentation, so GitHub cannot run this workflow and this parser cannot honestly read its job graph. REFUSING to evaluate rung 2 rather than reporting a graph nobody runs.`);
+    // M8. A job key may carry a trailing `# comment`; it is still a job key.
+    const jobKey = line.match(/^ {2}([A-Za-z0-9_.-]+):\s*(?:#.*)?$/);
     if (jobKey) {
       cur = { key: jobKey[1], name: null, if: null, needs: [], matrix: false };
       jobs[cur.key] = cur;
       continue;
     }
+    // M8, generalised. Anything else at job-key indent is a structural line this
+    // parser does not understand. Skipping it silently attributes the FOLLOWING
+    // four-space keys to the PREVIOUS job — which is how `cloud-gate:  # comment`
+    // made leg B report the aggregator as matrixed. A wrong graph is worse than no
+    // graph, so refuse and name the line.
+    if (/^ {2}\S/.test(line))
+      throw new Infra(`${label} line ${i + 1} sits at job-key indent but is not a job key this parser can read: \`${line.trim().slice(0, 60)}\`. Reading past it would attribute the keys below it to the PRECEDING job and publish a job graph that is wrong rather than absent. REFUSING to evaluate rung 2.`);
     if (!cur) continue;
-    // Only keys at EXACTLY four spaces are job-level keys. A comment line starts
-    // with `#` after its indent and matches none of these patterns; a `run: |`
-    // body lives at six spaces or deeper and cannot reach here either.
+    // Only keys at EXACTLY four spaces are job-level keys. A comment line was
+    // already skipped above; a `run: |` body lives at six spaces or deeper and
+    // cannot reach here either.
     const key = line.match(/^ {4}([A-Za-z0-9_-]+):(.*)$/);
     if (key) {
       const [, k, restRaw] = key;
       const rest = restRaw.replace(/\s+#.*$/, '').trim();
       if (k === 'name') cur.name = rest.replace(/^['"]|['"]$/g, '');
-      else if (k === 'if') cur.if = rest;
+      // M5. `${{ always() }}` is the same expression as `always()`.
+      else if (k === 'if') cur.if = unwrapExpr(rest);
       else if (k === 'strategy') cur.strategyAt = i;
       else if (k === 'needs') {
         const flow = rest.match(/^\[(.*)\]$/);
@@ -1277,6 +1334,7 @@ function parseWorkflowJobs(src) {
           cur.needs = [rest.replace(/^['"]|['"]$/g, '')];
         } else {
           for (let j = i + 1; j < lines.length; j++) {
+            if (/^\s*#/.test(lines[j])) continue;   // a comment BETWEEN items is not the end of the list
             const item = lines[j].match(/^ {6}-\s*(.+?)\s*$/);
             if (!item) break;
             cur.needs.push(item[1].replace(/^['"]|['"]$/g, ''));
@@ -1416,7 +1474,7 @@ function evaluateLadder(fixture, guardOverride, waivers) {
       let required = null;
       if (!existsSync(wf)) problems.push(`measured_in_ci names ${workflow}, which does not exist`);
       else {
-        const jobs = parseWorkflowJobs(readFileSync(wf, 'utf8'));
+        const jobs = parseWorkflowJobs(readFileSync(wf, 'utf8'), workflow);
         if (!jobs) problems.push(`${workflow} has no \`jobs:\` block — it is not a workflow this measurement can live in`);
         else if (!jobs[job])
           problems.push(`${workflow} has no job \`${job}\` — the CI leg of this measurement does not exist`);

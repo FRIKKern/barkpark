@@ -185,6 +185,10 @@ code rather than in prose a reader has to notice:
   real: both tables were missing `claude-opus-5`, and `tally_wf.py` responded to
   an unrated model by dropping its dollars and returning 0.
 
+None of those three fixes answered the question this section actually raised —
+*who runs it?* — and §6 below is where that is decided and, as of 2026-09-11,
+wired.
+
 ## 6. Three more fail-opens, and the wiring decision (2026-09-11)
 
 The 2026-08-05 pass fixed what it named, and left three holes that all returned
@@ -224,3 +228,27 @@ is itself a PDS-class assertion sitting inside the CI config. Price is not an
 argument against wiring: `--self-test` is 0.03–0.04s real, `verify results/` is
 0.02s real. The wiring itself is tracked by `pds-w49-meter-ci-decision`; the
 decision above is the part this doc owns.
+
+**THE WIRING LANDED (2026-09-11), and here is exactly where it is.** Two
+halves, and neither is a gate without the other:
+
+- `scripts/elixir-path-escape-check.sh` declares four paths in
+  `ELIXIR_TEST_ONLY_PATHS` — `METER.md`, `meter.py`, `tally_wf.py` and the
+  `results/**` tree — so elixir.yml's dispatcher answers `--match test ->
+  true` for any PR touching them and the required Test job RUNS instead of
+  reporting `skipped`. The corpus is declared as a TREE on purpose: the change
+  that rotted this doc was an ADDED envelope, which has no filename a list
+  could carry in advance.
+- `api/test/barkpark/pds_meter_rider_test.exs` is the caller. It `System.cmd`s
+  `python3 meter.py --self-test` and `python3 meter.py verify results/` (rc read
+  from the process, NEVER through a pipe), REFUSES BY NAME rather than skipping
+  when python3 or any of the four paths is missing, and carries three mutants
+  proving the lane can red — a RATES drift, a population-marker drift and a
+  corpus drift — each against an unmutated CONTROL copy of the same tree.
+
+One measured trap is recorded there and belongs here too: **a RATES mutation of
+a row this corpus never reads greens at rc=0.** The table prices six models; the
+34 recorded envelopes exercise exactly one (`claude-sonnet-5`). Perturbing
+`claude-opus-5` by hand produced `34 envelopes — 34 exact`, rc=0 — a fail-demo
+that proves nothing. The rider therefore reads the model off an envelope's own
+`modelUsage` and perturbs the row that serves it.
