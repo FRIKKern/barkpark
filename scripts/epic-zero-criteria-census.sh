@@ -138,7 +138,7 @@ RESOLVE="auto"   # auto: on for a live read, off for a fixture (hermetic by defa
 DESCEND="auto"   # auto: on for a live read, off for a fixture (hermetic by default)
 MAX_DEPTH="${CENSUS_MAX_DEPTH:-6}"
 
-usage() { sed -n '2,127p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,129p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -334,8 +334,8 @@ if live_zero:
 
 if unwalked:
     print("")
-    print("UNKNOWN — REFUSING A BARE SILENT: %d of the rows in this population "
-          "are themselves PARENTS and their subtrees were NOT walked (%s). "
+    print("UNKNOWN — REFUSING A BARE SILENT: %d subtree(s) under this epic "
+          "were NOT walked (%s). "
           "This census read depth %d only, so the %d-row denominator above is "
           "not the epic roster. Nothing was found on the rail that WAS read "
           "— that is not the same finding as \"this epic has no criteria-less "
