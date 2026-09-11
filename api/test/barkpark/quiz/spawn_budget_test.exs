@@ -239,7 +239,7 @@ defmodule Barkpark.Quiz.SpawnBudgetTest do
       p = pin()
       on_exit(fn -> Quiz.stop_room(p) end)
 
-      assert {:ok, pid} = Room.ensure(p, who), "shadow mode must still start the room"
+      assert {:ok, pid} = Room.ensure(p, who)
       assert is_pid(pid)
 
       assert_received {:metered, [:barkpark, :quiz, :room_spawn, :refused], %{count: 1},
