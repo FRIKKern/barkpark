@@ -124,7 +124,9 @@ defmodule Barkpark.Tasks.CriteriaContractSubstitutionTest do
   defp claim!(doc_id, worker, scope) do
     {:ok, claimed} = Tasks.claim_by_id(doc_id, worker, scope)
 
-    assert is_binary(get_in(claimed.content, ["claim", "work_field_digests", "acceptance_criteria"])),
+    assert is_binary(
+             get_in(claimed.content, ["claim", "work_field_digests", "acceptance_criteria"])
+           ),
            "PRECONDITION: the sanctioned claim must stamp a criteria field digest — " <>
              "without it this whole file measures nothing"
 
@@ -232,7 +234,9 @@ defmodule Barkpark.Tasks.CriteriaContractSubstitutionTest do
       mk_published_task!(id, scope, own_criteria())
       claim!(id, "w", scope)
 
-      reworded = List.replace_at(own_criteria(), 0, %{"criterion" => "own c0, reworded", "met" => false})
+      reworded =
+        List.replace_at(own_criteria(), 0, %{"criterion" => "own c0, reworded", "met" => false})
+
       stage_draft!(id, %{"acceptance_criteria" => reworded}, scope)
 
       assert {:ok, _} = publish(id, scope)
@@ -247,7 +251,9 @@ defmodule Barkpark.Tasks.CriteriaContractSubstitutionTest do
       stage_draft!(id, %{"acceptance_criteria" => Enum.reverse(own_criteria())}, scope)
 
       assert {:ok, _} = publish(id, scope)
-      assert published_texts!(id, scope) == Enum.reverse(Enum.map(own_criteria(), & &1["criterion"]))
+
+      assert published_texts!(id, scope) ==
+               Enum.reverse(Enum.map(own_criteria(), & &1["criterion"]))
     end
 
     test "stamping evidence onto an unmet criterion", %{scope: scope} do
@@ -316,7 +322,12 @@ defmodule Barkpark.Tasks.CriteriaContractSubstitutionTest do
       claimed: claimed,
       foreign: foreign
     } do
-      drifted = put_in(claimed, ["claim", "work_field_digests", "acceptance_criteria"], "0" <> String.duplicate("f", 15))
+      drifted =
+        put_in(
+          claimed,
+          ["claim", "work_field_digests", "acceptance_criteria"],
+          "0" <> String.duplicate("f", 15)
+        )
 
       assert :ok = CriteriaContract.check_substitution(drifted, foreign)
     end
