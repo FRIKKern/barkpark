@@ -1401,6 +1401,13 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1.6rem 0;
 }
+/* Unresolved task-detail: the same honest dashed placeholder the sibling
+   live-query widgets use (.bp-tasks--empty), so an empty block keeps its
+   place in the column instead of collapsing to nothing. */
+.bp-paper-surface .bp-tdetail--empty {
+  font-family: var(--paper-font-mono); color: var(--paper-ink-soft); font-size: 0.85rem;
+  border: 1px dashed var(--paper-chrome-border); border-radius: 8px; padding: 14px; text-align: center; margin: 1.4rem 0;
+}
 /* The task title is free-form author text set at 1.15rem bold — the largest
    type inside the detail card, and the only one of the card-title family that
    outgrows prose. Measured at a 320px viewport, a single 30-character compound

@@ -209,9 +209,35 @@ defmodule Barkpark.PortableDoc.Render.ComponentsDetailTest do
     assert html =~ ~s(▸ charter)
   end
 
-  test "empty title or non-map yields empty string" do
-    assert Components.task_detail_html(%{"task" => %{"title" => ""}}) == ""
+  test "an unresolved task-detail renders the bp-tdetail--empty placeholder, not nothing" do
+    for block <- [
+          %{"task" => %{"title" => ""}},
+          %{"task" => %{"title" => "   "}},
+          %{"type" => "task-detail", "query" => %{"parent_id" => "nope"}},
+          %{"task" => %{}}
+        ] do
+      html = Components.task_detail_html(block)
+
+      assert html =~ ~s(class="bp-tdetail bp-tdetail--empty"),
+             "an unresolved task-detail must keep its place with a placeholder, got: #{inspect(html)}"
+
+      assert html =~ "No matching tasks."
+      refute html == ""
+      refute html =~ "bp-tdetail__title"
+    end
+  end
+
+  test "a non-map task-detail argument is not a block and still yields empty string" do
     assert Components.task_detail_html("x") == ""
+    assert Components.task_detail_html(nil) == ""
+    assert Components.task_detail_html([]) == ""
+  end
+
+  test "a resolved task-detail is untouched by the empty state" do
+    html = Components.task_detail_html(%{"task" => %{"title" => "real", "status" => "ready"}})
+    refute html =~ "bp-tdetail--empty"
+    refute html =~ "No matching tasks."
+    assert html =~ ~s(<div class="bp-tdetail"><div class="bp-tdetail__title">real</div>)
   end
 
   test "escapes hostile author strings" do
