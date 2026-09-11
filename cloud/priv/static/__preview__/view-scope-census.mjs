@@ -606,6 +606,9 @@ export async function runCensusCli(argv = []) {
 }
 
 // Run only when this file IS the entry point; an `import` of it runs nothing.
+// DELIBERATELY NOT A TOP-LEVEL `await`: a module with one is an ASYNC module for
+// every importer, and overflow-guard.mjs imports this file. `.then` keeps the
+// module synchronous and the CLI arm costs its importers nothing.
 if (process.argv[1] && process.argv[1].endsWith("view-scope-census.mjs")) {
-  process.exitCode = await runCensusCli(process.argv.slice(2));
+  runCensusCli(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }
