@@ -89,6 +89,37 @@ defmodule Barkpark.PortableDoc.Render.XssRenderSentinelTest do
     assert_no_xss(Render.render_block(block, %{style: :article}))
   end
 
+  # ── the ATTRIBUTE leg (2026-09-11) ──────────────────────────────────────────
+  #
+  # The three tests above drive TEXT leaves through `render_block/2`. They say
+  # nothing about the other place an author value lands: an ATTRIBUTE value. The
+  # source-scan guard (`attr_escape_guard_test.exs`) found one — `walk.ex`
+  # interpolated a PdText/PdParagraph node's `"color"` RAW into `style="…"` —
+  # so the moduledoc's "the whole render tree escapes at walk EMIT time" was
+  # true of the leaves and false of that attribute. This test pins the fix
+  # through the PUBLIC Pd-tree entry `render_html/2`.
+  @attr_payload ~s|red" onmouseover="alert(1)|
+
+  test "render_html/2 escapes an attribute-breakout payload in a PdText colour" do
+    root = %{"kind" => "PdText", "color" => @attr_payload, "children" => ["hi"]}
+    html = Render.render_html(root, %{doctype: false})
+
+    refute html =~ ~s|onmouseover="alert(1)"|,
+           "attribute breakout: a live event handler landed on the span: #{html}"
+
+    assert html =~ "&quot;", "expected the payload quote entity-escaped, got: #{html}"
+  end
+
+  test "render_html/2 escapes an attribute-breakout payload in a PdParagraph colour" do
+    root = %{"kind" => "PdParagraph", "color" => @attr_payload, "children" => ["hi"]}
+    html = Render.render_html(root, %{doctype: false})
+
+    refute html =~ ~s|onmouseover="alert(1)"|,
+           "attribute breakout: a live event handler landed on the paragraph: #{html}"
+
+    assert html =~ "&quot;", "expected the payload quote entity-escaped, got: #{html}"
+  end
+
   test "render_block/2 escapes a combined XSS payload in a callout title and body" do
     block = %{
       "id" => "c",
