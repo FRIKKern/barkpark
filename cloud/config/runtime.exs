@@ -281,13 +281,14 @@ if config_env() == :prod do
   # 429 `artifact_quota_exceeded` past it. Default 512 MB (see
   # `Sites.ArtifactQuota`); the literal string "infinity" disables the ceiling,
   # which is an explicit operator choice and never a default.
-  config :barkpark_cloud,
-         :artifact_quota_bytes,
-         case System.get_env("ARTIFACT_QUOTA_BYTES") do
-           nil -> 512 * 1024 * 1024
-           "infinity" -> :infinity
-           raw -> String.to_integer(raw)
-         end
+  artifact_quota_bytes =
+    case System.get_env("ARTIFACT_QUOTA_BYTES") do
+      nil -> 512 * 1024 * 1024
+      "infinity" -> :infinity
+      raw -> String.to_integer(raw)
+    end
+
+  config :barkpark_cloud, :artifact_quota_bytes, artifact_quota_bytes
 
   # Provisioning: the shared WORKER token the off-box Go warm-pool
   # provisioner presents to /v1/internal/provision-jobs/*. May be nil here — the

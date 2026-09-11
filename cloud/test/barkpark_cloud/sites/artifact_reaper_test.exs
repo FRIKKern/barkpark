@@ -29,6 +29,7 @@ defmodule BarkparkCloud.Sites.ArtifactReaperTest do
   to close.
   """
   use BarkparkCloud.DataCase, async: true
+  use Oban.Testing, repo: BarkparkCloud.Repo
 
   alias BarkparkCloud.{Accounts, Registry, Repo, Sites}
   alias BarkparkCloud.Registry.{Deployment, SiteArtifact}
