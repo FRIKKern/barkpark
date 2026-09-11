@@ -197,6 +197,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
       POST    /v1/sites/:id/rollback user(s) roll a site back to a prior deployment (write ability)
       GET     /v1/sites/:id/deployments/:dep_id/build-log user(s)  the black box recorder's durable per-build record for THAT deployment (read ability; 404 no such deployment / 410 evicted / 200 with an honest log_state)
+      GET     /v1/sites/:id/deployments/:dep_id/build-log/bytes operator  the recorded build log's BYTES for THAT deployment — a bounded tail (422 when the bytes were never scrubbed / 410 evicted / 404 no such deployment / 200 with an honest log_state)
       POST    /v1/sites/:id/deployments/:dep_id/promote user(s) rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact (write ability)
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
@@ -4457,9 +4458,13 @@ defmodule BarkparkCloud.Web.Router do
   # three stay the worker's alone. Fails CLOSED: an unset/blank/wrong token 401s
   # every route, so the kill switch can never be flipped by omission.
   #
-  #   GET  /v1/admin/autoupdate         → 200 {halted: bool}   — current state
-  #   POST /v1/admin/autoupdate/halt    → 200 {halted: true}   — engage
-  #   POST /v1/admin/autoupdate/resume  → 200 {halted: false}  — release
+  #   GET  /v1/admin/autoupdate         → 200 rollout state, halted: bool
+  #   POST /v1/admin/autoupdate/halt    → 200 rollout state, halted: true
+  #   POST /v1/admin/autoupdate/resume  → 200 rollout state, halted: false
+  #
+  # All three render `rollout_state_json/1` — the kill-switch LEVER plus the three
+  # fleet COUNTERS (eligible/behind/in_flight). See that function for why the
+  # lever alone was never a gauge.
   #
   # Halt stops the AutoupdateRolloutWorker from ADVANCING new self-updates fleet-
   # wide; settle bookkeeping for in-flight boxes continues so state stays honest.
@@ -4469,7 +4474,7 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      json(conn, 200, %{halted: Registry.autoupdate_halted?()})
+      json(conn, 200, rollout_state_json(Registry.autoupdate_halted?()))
     end
   end
 
@@ -4480,7 +4485,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(true)
-      json(conn, 200, %{halted: true})
+      json(conn, 200, rollout_state_json(true))
     end
   end
 
@@ -4491,7 +4496,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(false)
-      json(conn, 200, %{halted: false})
+      json(conn, 200, rollout_state_json(false))
     end
   end
 
@@ -4515,7 +4520,7 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      json(conn, 200, %{halted: Registry.autoupdate_halted?()})
+      json(conn, 200, rollout_state_json(Registry.autoupdate_halted?()))
     end
   end
 
@@ -4526,7 +4531,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(true)
-      json(conn, 200, %{halted: true})
+      json(conn, 200, rollout_state_json(true))
     end
   end
 
@@ -4537,7 +4542,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(false)
-      json(conn, 200, %{halted: false})
+      json(conn, 200, rollout_state_json(false))
     end
   end
 
@@ -8998,6 +9003,39 @@ defmodule BarkparkCloud.Web.Router do
     end)
   end
 
+  # GET /v1/sites/:id/deployments/:dep_id/build-log/bytes → the recorded build
+  # log's BYTES, read BY DEPLOYMENT ID (dr-bl-recorder-http-read-path c1).
+  #
+  # A SUB-ROUTE, not a field on the record route above: serving bytes needs a
+  # REFUSAL (422 build_log_unscrubbed, for a record whose log_scrub is nil) that
+  # the record route's published 404/410/200 contract has no room for, and
+  # widening that route would let an existing caller's 200 silently become a 422.
+  # Everything else is inherited verbatim, so 404 and 410 mean here exactly what
+  # they mean next door.
+  #
+  # OPERATOR-GATED, AND DELIBERATELY NOT TEAM-SCOPED LIKE THE ROUTE ABOVE.
+  # #17693 widened that one to `{:ability, "read"}` and its security frame names
+  # the exact condition it widened under: "the widening moved WHO may ask, never
+  # WHAT is served … Not raw log bytes, and never has." THIS route serves the
+  # bytes, so that argument does not reach it and the audience does not move with
+  # it. `Auth.require_platform_operator/2` is 403-dark in production today
+  # (`gr-ops-platform-admin-emails`), which this route INHERITS from the row this
+  # task was filed under — no criterion here asserts a live 200 from it, and
+  # widening it is a separate decision with a separate secret-boundary review.
+  # All policy lives in `Sites.BuildLogBytes`.
+  get "/v1/sites/:id/deployments/:dep_id/build-log/bytes" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {status, body} =
+        Sites.BuildLogBytes.for_deployment(conn.path_params["id"], conn.path_params["dep_id"])
+
+      json(conn, status, body)
+    end
+  end
+
   # POST /v1/sites/:id/rollback → 200 {ok, status, deployment_id,
   # previous_deployment_id, url} — the sub-second symlink flip back to the previous
   # release (charter D5, site-spawner D30).
@@ -12212,6 +12250,28 @@ defmodule BarkparkCloud.Web.Router do
       carrier: d.carrier,
       inserted_at: d.inserted_at
     }
+  end
+
+  # The rollout envelope every /v1/*/autoupdate route answers with — BOTH the
+  # worker-gated `/v1/admin/autoupdate*` trio and the platform-operator
+  # `/v1/operator/autoupdate*` proxies, so the counters cannot reach one
+  # principal and not the other (the proxies re-render rather than forward, which
+  # is exactly how a key survives on one and dies on the other).
+  #
+  # THE LEVER IS NOT A GAUGE (task-0f05a5f719493b5f). These routes used to emit
+  # `halted` alone. `halted` is a position the operator SET; it measures nothing
+  # about the fleet. The Go client has modelled the other three the whole time —
+  # `cloudclient.RolloutState` declares `in_flight`/`behind`/`eligible` as *int
+  # and `renderRolloutState` prints each behind a nil guard — so a control plane
+  # that omitted them made `bp cloud autoupdate status` print the halted line and
+  # then STOP, silently, which reads as a healthy lean envelope from an older CP.
+  # No CP ever emitted them; the blank was total and permanent.
+  #
+  # `halted` is passed in rather than re-read: the halt/resume twins have just
+  # WRITTEN it, and re-reading would race their own write. The counters are read
+  # fresh either way — they are a measurement, not an echo.
+  defp rollout_state_json(halted) when is_boolean(halted) do
+    Registry.autoupdate_rollout_counts() |> Map.put(:halted, halted)
   end
 
   # One fleet row for GET /v1/operator/fleet — the cross-team operator roll-up.

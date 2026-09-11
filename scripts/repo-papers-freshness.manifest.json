@@ -165,7 +165,7 @@
     },
     "ops-merge-gates": {
       "source": "docs/ops/merge-gates.md",
-      "baseline": 32,
+      "baseline": 0,
       "exempt": []
     },
     "ops-npm-rollback-playbook": {

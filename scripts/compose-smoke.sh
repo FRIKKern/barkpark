@@ -11,11 +11,11 @@
 #                  NON-ZERO at the migrate step and its logs must carry the anchor
 #                  line from runtime.exs's boot refusal. NEVER an HTTP probe:
 #                  Plug's 64-byte floor is LAZY — a short secret serves
-#                  /api/schemas 200 and only 500s on /login — so an HTTP probe of
-#                  /api/schemas is structurally blind to the trap (measured).
+#                  /status.json 200 and only 500s on /login — so an HTTP probe of
+#                  /status.json is structurally blind to the trap (measured).
 #   green          GREEN ARM (D20). Generated secrets → compose up → healthcheck
 #                  healthy → IN-CONTAINER `docker compose exec api wget` of
-#                  /api/schemas AND /login (the session route — the one Plug's
+#                  /status.json AND /login (the session route — the one Plug's
 #                  floor actually protects), both must succeed. Never a host-port
 #                  curl: a host beam.smp already bound to :4000 produced a
 #                  measured false 200.
@@ -133,7 +133,7 @@ arm_refusal() {
 # re-inspected those two signals ever again. The very next statement was the
 # in-container wget. So a container that died, restarted, or lost its listener
 # in the window between the last health probe and the exec was reported as
-# "in-container wget /api/schemas failed": an HTTP probe failure, when what
+# "in-container wget /status.json failed": an HTTP probe failure, when what
 # actually happened was a boot crash. Measured twice (#12879, #12889); it sent
 # two investigations at the diff instead of at the boot.
 #
@@ -208,15 +208,15 @@ arm_green() {
 
   # IN-CONTAINER probes via exec, verbatim the charter D20 commands. busybox
   # wget exits non-zero on any HTTP error status, so exit 0 asserts the 200.
-  note "green arm: in-container probe /api/schemas"
-  if ! compose exec -T api wget -q -O /dev/null http://localhost:4000/api/schemas; then
-    assert_container_alive "$cid" "the failed /api/schemas probe"
-    die "green arm: in-container wget /api/schemas failed"
+  note "green arm: in-container probe /status.json"
+  if ! compose exec -T api wget -q -O /dev/null http://localhost:4000/status.json; then
+    assert_container_alive "$cid" "the failed /status.json probe"
+    die "green arm: in-container wget /status.json failed"
   fi
-  pass "/api/schemas serves in-container"
+  pass "/status.json serves in-container"
 
   # /login is the SESSION route — the only probe Plug's lazy 64-byte floor can
-  # actually fail. /api/schemas alone is structurally blind to a short secret.
+  # actually fail. /status.json alone is structurally blind to a short secret.
   note "green arm: in-container probe /login (session route)"
   if ! compose exec -T api wget -q -O /dev/null http://localhost:4000/login; then
     assert_container_alive "$cid" "the failed /login probe"

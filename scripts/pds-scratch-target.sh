@@ -553,11 +553,12 @@ cmd_verify() {
 
   hr "2. the scratch server answers, and it is not on 4000"
   local code
-  code="$(bp_curl_code -s -o /dev/null "$PDS_SCRATCH_BASE/api/schemas" || true)"
+  # /status.json, not the sunset /api/schemas (removal 2026-12-31).
+  code="$(bp_curl_code -s -o /dev/null "$PDS_SCRATCH_BASE/status.json" || true)"
   if [ "$code" = "200" ]; then
-    ok "GET $PDS_SCRATCH_BASE/api/schemas -> 200"
+    ok "GET $PDS_SCRATCH_BASE/status.json -> 200"
   else
-    bad "GET $PDS_SCRATCH_BASE/api/schemas -> $code"
+    bad "GET $PDS_SCRATCH_BASE/status.json -> $code"
   fi
   # Report what (if anything) holds 4000 — someone else's dev server is fine,
   # OURS would mean the scratch target is not isolated at all.

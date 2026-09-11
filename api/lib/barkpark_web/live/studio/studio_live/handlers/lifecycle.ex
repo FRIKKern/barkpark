@@ -40,7 +40,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # document must not license folding an empty value on the next one.
       |> assign(editor_dirty: false, doc_conflict: false, editor_touched_paths: MapSet.new())
 
-    {:noreply, socket}
+    # E3.5 (Gyldendal friction 67): a deep link whose head was a dead display
+    # group (`/studio/content-types/<type>/<id>` on a declared desk) opened its
+    # document through the alias in `PaneBuilder.build/3`; rewrite the address
+    # bar to the canonical path ONCE so bookmarks and row clicks agree. The
+    # canonical path never aliases again, so the patch converges.
+    case socket.assigns[:editor_canonical_path] do
+      canonical when is_list(canonical) and canonical != path ->
+        {:noreply,
+         push_patch(socket, to: Shared.studio_path(socket, canonical, dataset, desk: desk))}
+
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   # A remote save of the open document arrived (another editor/session — the
