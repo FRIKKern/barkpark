@@ -230,6 +230,7 @@ import {
 // guards its own main behind `process.argv[1]`, so importing it runs nothing.
 import { WIDTHS as SWEEP_WIDTHS } from "./breakpoint-sweep.mjs";
 import { edgeCoverSentence } from "./edge-cover-verdict.mjs";
+import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -1335,6 +1336,7 @@ async function main() {
   // pin probe-bypassed, the old unconditional lines kept printing the full
   // claim while the pin had not been called once).
   let fontPinRuns = 0;
+  const crossDoc = createCrossDocumentNavigator("overflow-guard");
   const pinFonts = async (url) => {
     let report = null;
     try {
@@ -1386,10 +1388,23 @@ async function main() {
   // STALE SERVER refusals above, which fire before any navigation — carrying
   // the poll's own diagnosis (expr-false vs eval-threw counts, the last eval
   // error, and a final forced probe of what the page says it is).
+  //
+  // AND IT IS CROSS-DOCUMENT, ALWAYS (cch-w24-bl-hash-only-nav-is-same-document).
+  // This file drives EVERY cell through one session, so two consecutive cells
+  // whose URLs differ only by fragment are a SAME-DOCUMENT navigation: Chrome
+  // keeps the DOM and the next cell measures the last cell's paint. W24's
+  // `#overview` control reported TWO `#cred-submit` hosts for exactly that
+  // reason — a control holding the condition it is the control FOR. The same
+  // rule makes the stated retry above a NO-OP on any URL carrying a fragment
+  // (an identical fragment-bearing URL does not reload either), so the guard
+  // sits INSIDE the attempt loop. It rewrites only when Chrome's own rule says
+  // the load would be skipped, counts what it caught, and the count is printed
+  // at the end of every run whether it fired or not. See
+  // same-document-nav-census.mjs; the census there is the edit-time net.
   const nav = async (url, readyExpr) => {
     let exprFalse = 0, evalThrew = 0, lastErr = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
-      await cdp.send("Page.navigate", { url }, sessionId);
+      await cdp.send("Page.navigate", { url: crossDoc.next(url) }, sessionId);
       const t0 = Date.now();
       while (Date.now() - t0 < RENDER_CAP) {
         let ready = false;
@@ -10807,6 +10822,10 @@ async function main() {
   await teardown();
 
   process.stdout.write("\n");
+  // EARNED, NEVER NARRATED — the same contract as the FONT PINNED sentence
+  // above. It prints on a green run too, saying zero, because a guard that
+  // speaks only when it fires is indistinguishable from a guard nobody wired in.
+  process.stdout.write(crossDoc.line());
   if (failures.length) {
     const byDefect = [...new Set(failures.map((f) => f.defect))];
     process.stderr.write(`OVERFLOW GUARD FAIL — ${failures.length} finding(s) in: ${byDefect.join(", ")}\n`);
