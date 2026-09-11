@@ -20,6 +20,6 @@
     "internal/semrole/tokens_gen.go#Go semrole": "e15a4495b1f473b8465bffc84c9dca5621e03aba8a42bb0577f03f400629c5bf",
     "internal/taskboard/tokens_gen.go#Go board": "9215c045732c56f88ced73d318b154a15e94724a369cdfe6a2d6417e7c9c9852",
     "web/app/globals.css#web demo": "db891fc852d8b37af88bba52186a9acae034fd7fa952761f2e3950ed35763497",
-    "web/lib/tokens.gen.ts#web TS tokens": "66a0ed2b6c9a12ef4233fd7208c5ef7f9fad9d1a4597c30e42fa66eef3e466d8"
+    "web/lib/tokens.gen.ts#web TS tokens": "06533557ec601685c94025af9803ced58106ae6db23380191a68461bb8fb71d0"
   }
 }
