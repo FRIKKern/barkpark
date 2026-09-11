@@ -1466,6 +1466,14 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-rm__bar--done { background: var(--st-ok); }
 .bp-paper-surface .bp-rm__bar--cancel { background: var(--paper-ink-faint); }
 .bp-paper-surface .bp-rm__today { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--st-danger); opacity: 0.6; }
+/* roadmap v2 point markers — the HTML twin of the Go reader's diamond glyphs
+   (internal/pdrender/taskblocks.go: note ◇ at the bar's start, milestone ◆ at its
+   end). Both are rotated squares centred on their offset; milestone is filled and
+   note is hollow, so the two read apart with colour stripped. */
+.bp-paper-surface .bp-rm__ms,
+.bp-paper-surface .bp-rm__note { position: absolute; top: 6px; width: 10px; height: 10px; margin-left: -5px; transform: rotate(45deg); }
+.bp-paper-surface .bp-rm__ms { background: var(--paper-ink); }
+.bp-paper-surface .bp-rm__note { border: 1.5px solid var(--paper-ink-soft); background: var(--paper-bg); }
 
 /* ── status legend — the shared vocabulary key ── */
 .bp-paper-surface .bp-legend {
