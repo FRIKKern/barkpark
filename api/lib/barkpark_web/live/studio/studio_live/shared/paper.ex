@@ -202,61 +202,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   hook-invisible door — must ask it too, and must ask THIS copy. Do not
   re-derive it; a fork here is a fork in the authorization answer.
 
-  Inert (`false`, no query) unless `grant_graded?/1`; fail-closed on an
+  Inert (`false`, no query) unless the socket is grant-graded; fail-closed on an
   unresolvable target for a socket that IS grant-graded.
+
+  THE LADDER ITSELF LIVES IN `Caps.grant_target_denied?/4` — one owner, shared
+  with the SheetGrid route (`Shared.sheet_grant_target_denied?/1`), which used
+  to restate it. What stays HERE is the PAPER surface's one deliberate
+  difference: the grant list is RELOADED FRESH per op, because this runs in
+  `handle_info` where a revocation must stop admitting immediately. The owner
+  takes that list as an argument and never chooses a load strategy.
   """
   def grant_target_denied?(socket, type, doc_id) do
-    grant_graded?(socket.assigns) and not grant_admits_target?(socket, type, doc_id)
+    Caps.grant_target_denied?(socket.assigns, active_grants(socket), type, doc_id)
   end
 
   # The doc's `type` / `doc_id`, read TOTALLY: a pane doc is a `%Content.Document{}`
   # in the live path but a bare map in the unit fixtures, so `doc.type` would
   # raise a KeyError on a shape that has always been legal here. A missing key
-  # yields nil, which `write_target_scope/3` treats as an unresolvable target
-  # (fail-closed for a grant-graded socket, inert for every other one).
+  # yields nil, which `Caps.grant_target_denied?/4` treats as an unresolvable
+  # target (fail-closed for a grant-graded socket, inert for every other one).
   defp doc_field(doc, key) when is_map(doc), do: Map.get(doc, key)
   defp doc_field(_doc, _key), do: nil
-
-  # The two assigns that mean "this socket's write descends from a GRANT":
-  # `LiveScope.assign_grant_scope/2` sets `caller_context`, and
-  # `attach_write_gate/2` sets `write_gate?`.
-  defp grant_graded?(assigns) do
-    not is_nil(Map.get(assigns, :caller_context)) or Map.get(assigns, :write_gate?) == true
-  end
-
-  defp grant_admits_target?(socket, type, doc_id) do
-    case write_target_scope(socket, type, doc_id) do
-      %{} = target ->
-        socket
-        |> active_grants()
-        |> Enum.any?(&(Access.validate(&1, :write, target) == :ok))
-
-      nil ->
-        false
-    end
-  end
-
-  # The desk levels come from the MOUNT and the leaf levels from the DOC being
-  # written — the same broad→narrow ladder `LiveScope.write_target/3` feeds
-  # `Access.validate/3`, including its `Content.published_id/1` normalisation so
-  # a draft id is matched against the grant by its published identity.
-  defp write_target_scope(socket, type, doc_id) do
-    ws = socket.assigns[:current_workspace]
-    proj = socket.assigns[:current_project]
-    dataset = socket.assigns[:dataset]
-
-    if is_map(ws) and is_binary(Map.get(ws, :id)) and is_map(proj) and
-         is_binary(Map.get(proj, :id)) and is_binary(dataset) and is_binary(type) and
-         is_binary(doc_id) do
-      %{
-        workspace_id: ws.id,
-        project_id: proj.id,
-        dataset: dataset,
-        type: type,
-        doc_id: Content.published_id(doc_id)
-      }
-    end
-  end
 
   # Grants bind to a grantee USER; only a `current_user` can hold any. Fresh,
   # active-filtered load — the same call `Caps.derive/1` makes for expiry truth.
