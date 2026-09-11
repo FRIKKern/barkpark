@@ -25,7 +25,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,6 +42,225 @@ const SEAL = 0, NO_SEAL = 1, INFRA = 2, REFUSED = 3; // REFUSED (exit 3): nothin
 const EPIC = 'cloud-console-hardening-epic';
 
 const tmp = (prefix) => mkdtempSync(join(tmpdir(), prefix));
+
+// ── THE OBJECT DATABASE IS A PRECONDITION, NOT AN ASSUMPTION ────────────────
+//
+// FIFTH SIGHTING of the trap scripts/required-checks.test.sh was given an exit-3
+// refusal for (its own "the object database is a PRECONDITION" block, and charter
+// D423 / D547). The shape repeats because both suites reach past their own bytes:
+// this file drives the predicate with `--repo <root>` and the live / --ladder-only
+// tests read REAL history through it.
+//
+// MEASURED AT 3cb5f7f18, the same tree twice:
+//
+//   a real worktree                         101 passed,  0 failed, exit 0
+//   `git archive HEAD | tar -x` of it        65 passed, 36 failed, exit 1
+//
+// The 36 fail CLOSED — the predicate's own root guard answers
+// `code=REPO-NOT-A-GIT-WORK-TREE` at exit 2 and every live-path assertion reds by
+// name. They are not the finding. The finding is the OTHER 65: every one of them
+// is fixture-driven (`--ledger <fixture> --guard-cmd true`) or drives a synthetic
+// non-git root on purpose, so all 65 print `ok` in a tree git cannot see — and a
+// reader who runs this suite in an extract gets `65 passing` over a corpus whose
+// git half was never consulted. Nothing in the output says which half ran. A
+// degraded run is worse than no run, so refuse BEFORE the first test: name the
+// cause, name the fix, exit 3 — the sibling's code, and distinct from the 0 and 1
+// node's runner uses for "every test passed" / "a test failed".
+//
+// BOTH PROBES MATTER, and they are asked in this order:
+//
+//   1. `rev-parse --show-toplevel` must resolve and BE this root. It is the same
+//      question seal-predicate.mjs's own root guard asks, which is what makes the
+//      refusal honest — if the predicate would refuse the live path for the whole
+//      run, this suite has nothing to measure. It also reads a LINKED WORKTREE,
+//      where `.git` is a FILE (a `statSync('.git').isDirectory()` probe would
+//      refuse every worktree this epic works from — see the wave-27 test below).
+//   2. HEAD must resolve to a COMMIT. Probe 1 passes in a fresh `git init` with no
+//      commits — a real object database holding nothing — where the live tests
+//      would again score green over an empty history. Probe 1 catches the extract;
+//      probe 2 catches the empty database.
+//
+// WHAT IS DELIBERATELY *NOT* PROBED: depth. `actions/checkout@v4` is depth-1 by
+// default and that is what the Console gate runs, where wave 29 already teaches the
+// ladder to answer HISTORY-UNAVAILABLE instead of inventing ancestry. Refusing a
+// shallow clone here would red the required Console gate on every PR. Shallow is a
+// handled condition; ABSENT is not — and that is measured, not assumed: a
+// `git clone --depth 1` of this branch (1 commit, `.git/shallow` present, no
+// origin/main) runs 106 passed, 0 failed, exit 0.
+//
+// UNDER `node --test` THE RUNNER RE-CODES THIS. `node --test <file>` reports the
+// file as one failed test and exits 1, carrying `exitCode: 3` in its TAP diagnostic
+// and NOT ONE line of predicate output. Run the file directly —
+// `node cloud/priv/static/__preview__/seal-predicate.test.mjs` — and the 3 is the
+// process's own. Both are refusals; only the second can be read off `$?`.
+// ── THE EXTRACT AUDIT: WHICH OF THE LOST PREDICATES FAILED OPEN ─────────────
+//
+// s8's section 13 was the finding in required-checks.test.sh: a predicate printing
+// `ok` over a corpus of ZERO files. The same question, asked here and answered by
+// measurement instead of by analogy:
+//
+//   OF THE 36 PREDICATES AN EXTRACT LOSES, ALL 36 FAIL CLOSED. ZERO FAIL OPEN.
+//
+// and the reason is nameable rather than lucky: wave 27 gave seal-predicate.mjs a
+// ROOT GUARD (`code=REPO-NOT-A-GIT-WORK-TREE`, exit 2, before any clause is
+// evaluated), so a run over a tree git cannot read hands every test a refusal to
+// assert against rather than an empty corpus to score. required-checks.test.sh §13
+// had no such guard, which is exactly why IT failed open. The disease is shared;
+// this half of the symptom is not, and saying so is the finding.
+//
+// DERIVED TWICE, BY TWO INSTRUMENTS THAT COULD HAVE DISAGREED:
+//
+//   1. OUTPUT DIFF. Every spawn of the predicate recorded in both trees, keyed by
+//      test, compared after normalising the two roots, the temp dirs, the shas and
+//      the ISO timestamps. All 65 extract-passing tests produce BYTE-IDENTICAL
+//      predicate output in a real worktree and in the extract — they are
+//      fixture-driven (`--ledger <fixture> --guard-cmd true`) or drive a synthetic
+//      non-git root on purpose. A test handed identical evidence cannot have lost
+//      any. (Before the timestamps were normalised this same detector called 61 of
+//      the 65 "differing"; the difference was the clock. A detector that fires on
+//      everything measures nothing — which is why it is not the only one here.)
+//   2. SABOTAGED GIT. The full checkout re-run with a `git` first on PATH that
+//      exits 128 for every call: 61 passed, 40 failed. It catches everything the
+//      extract catches PLUS four wave-29 PROBE tests — those `git init` their OWN
+//      repositories under a temp dir, so they pass HONESTLY in an extract (the
+//      binary is there; only THIS tree's database is gone). Nothing goes the other
+//      way: not one extract-failing test passes under the shim.
+//
+// SO WHAT THE REFUSAL BUYS IS NOT A FALSE GREEN — IT IS A FALSE ACCUSATION. An
+// extract run exits 1, and in this tree's vocabulary (__preview__/exit-vocabulary.mjs)
+// exit 1 means "I MEASURED the subject and found the defect I NAME". Thirty-six reds
+// saying `fatal: not a git repository` send a reader to hunt a defect in a predicate
+// nothing ever read, six minutes at a time. Exit 3 says the opposite, by name, first.
+const NO_OBJECT_DATABASE = 3;
+
+// Returns the refusal message, or null when the root is readable. A pure function
+// of a directory, so the controls below can drive it at BOTH polarities instead of
+// asserting that the file "would have" refused.
+export function objectDatabaseRefusal(root) {
+  const how = 'run it from a real checkout or worktree: `git worktree add <dir> <rev> && cd <dir> && node --test cloud/priv/static/__preview__/seal-predicate.test.mjs`';
+  const top = spawnSync('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  if (top.status !== 0 || !top.stdout.trim())
+    return `seal-predicate.test.mjs: no git object database at ${root} (a \`git archive\` extract or a copied tree?); this suite spawns the predicate with \`--repo ${root}\` and its live / --ladder-only tests read real history through it, so without one this suite degrades instead of refusing (measured at 3cb5f7f18 over an extract of the same tree: 36 tests red with \`not a git repository\`, the other 65 printed ok having read nothing); ${how}`;
+  let real = root;
+  try { real = realpathSync(root); } catch { /* a root that cannot be realpath'd is caught by the compare below */ }
+  if (realpathSync(top.stdout.trim()) !== real)
+    return `seal-predicate.test.mjs: ${root} is INSIDE a git work tree but is not its top level (git says ${top.stdout.trim()}); the predicate's own root guard refuses this shape with code=REPO-NOT-A-GIT-WORK-TREE, so every live-path test here would measure the refusal instead of the subject; ${how}`;
+  const head = spawnSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { encoding: 'utf8' });
+  if (head.status !== 0 || !/^[0-9a-f]{40}$/.test(head.stdout.trim()))
+    return `seal-predicate.test.mjs: the git object database at ${root} holds no commit at HEAD (rev-parse rc ${head.status}) — an initialised repository with an EMPTY history reads as a checkout to every probe but answers nothing about ancestry; ${how}`;
+  return null;
+}
+
+// THE REFUSAL ITSELF, before the first test is even REGISTERED — and with
+// NO env-var escape hatch, because a precondition anyone can switch off is not one.
+// The controls below drive `objectDatabaseRefusal()` directly instead.
+//
+// `writeSync(2, …)` and not `process.stderr.write(…, cb)`: on a pipe — which is what
+// CI always gives you — stderr is asynchronous, so a callback-drained exit would let
+// the hundred-odd registrations below run first, and a plain `write(); exit()` can
+// terminate with the refusal still in the buffer, refusing SILENTLY. `writeSync`
+// returns only once the bytes are out, which is the one shape that is both drained
+// and immediate. Same reasoning __preview__/exit-vocabulary.mjs gives for draining.
+const OBJECT_DB_REFUSAL = objectDatabaseRefusal(REPO);
+if (OBJECT_DB_REFUSAL) {
+  writeSync(2, `${OBJECT_DB_REFUSAL}\n`);
+  process.exit(NO_OBJECT_DATABASE);
+}
+
+// ── THE CONTROLS FOR THE BLOCK ABOVE ────────────────────────────────────────
+//
+// A precondition that cannot lose is decoration. `objectDatabaseRefusal` is driven
+// at BOTH polarities here: it must return null for a root that really has a
+// database (and the positive control proves the probe SAW one, rather than merely
+// failing to object), and a NAMED message for each of the three ways the database
+// can be missing. The end-to-end case spawns a copy of this very file from a
+// `.git`-less tree, which is the extract shape itself.
+//
+// This whole family is registered like any other test, so it is inside the 101-test
+// floor the Console gate holds (.github/workflows/console-harness.yml).
+
+test('PRECONDITION positive control: the probe SEES this checkout\'s object database', () => {
+  assert.equal(objectDatabaseRefusal(REPO), null, 'this run is from a real checkout or worktree');
+  // Not "it did not object" — what it READ. A probe that returned null because both
+  // spawns silently failed would pass the line above and nothing else here.
+  const top = spawnSync('git', ['-C', REPO, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  assert.equal(top.status, 0, 'git answered');
+  assert.equal(realpathSync(top.stdout.trim()), realpathSync(REPO), 'and named THIS root as the top level');
+  const head = spawnSync('git', ['-C', REPO, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { encoding: 'utf8' });
+  assert.match(head.stdout.trim(), /^[0-9a-f]{40}$/, 'and the database holds a commit at HEAD');
+  // The discrimination itself: the SAME function, one directory apart, answers differently.
+  assert.notEqual(objectDatabaseRefusal(tmp('seal-pred-nodb-')), null,
+    'a probe that answers null everywhere measures nothing');
+});
+
+test('PRECONDITION: a `git archive` extract is named as one, with the cause and the fix', () => {
+  const msg = objectDatabaseRefusal(tmp('seal-pred-extract-'));
+  assert.match(msg, /^seal-predicate\.test\.mjs: no git object database at /, 'the file names itself and the cause');
+  assert.match(msg, /git archive/, 'and names the shape that produces it');
+  assert.match(msg, /36 tests red with .not a git repository., the other 65 printed ok having read nothing/,
+    'and says what a degraded run DID print, measured — the reason to refuse');
+  assert.match(msg, /git worktree add <dir> <rev>/, 'and names the FIX, not just the fault');
+});
+
+test('PRECONDITION: an initialised repository with an EMPTY history is refused too', () => {
+  const empty = tmp('seal-pred-nohead-');
+  const init = spawnSync('git', ['-C', empty, 'init', '--quiet'], { encoding: 'utf8' });
+  assert.equal(init.status, 0, `git init failed, so this control measured nothing: ${init.stderr}`);
+  // The precondition of the control: probe 1 PASSES here. Without this line a broken
+  // `git init` would make the assertion below pass for probe 1's reason instead.
+  const top = spawnSync('git', ['-C', empty, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  assert.equal(top.status, 0, 'this IS a git work tree — which is exactly why probe 1 cannot catch it');
+  assert.match(objectDatabaseRefusal(empty), /holds no commit at HEAD \(rev-parse rc \d+\)/);
+});
+
+test('PRECONDITION: a directory INSIDE the work tree but below its top is refused by name', () => {
+  const msg = objectDatabaseRefusal(HERE);
+  assert.match(msg, /is INSIDE a git work tree but is not its top level/);
+  assert.match(msg, /code=REPO-NOT-A-GIT-WORK-TREE/, 'named with the predicate\'s own refusal code');
+});
+
+test('PRECONDITION END-TO-END: this file, run from a `.git`-less tree, exits 3 before any test', () => {
+  // THE RECURSION FUSE, AND IT IS NOT PARANOIA — IT IS A MEASURED FORK BOMB. This
+  // case spawns a COPY of this file, and the copy contains this case. It terminates
+  // only because the copy refuses at load. Anyone disarming the refusal to prove it
+  // can lose — which is the first thing a reviewer should do — makes the copy run the
+  // whole suite, including this test, which copies itself again: 484 node processes
+  // in under two minutes, measured. So the child is told it is a child and declines,
+  // and the fuse lives HERE rather than in the precondition, which has no escape
+  // hatch by design.
+  if (process.env.SEAL_TEST_E2E_CHILD === '1') return;
+  // REPO is `resolve(HERE, '../../../..')`, so four levels of directory reproduce the
+  // real layout; nothing else is copied because the refusal must fire before the first
+  // read of the predicate, the fixtures or the workflow.
+  const root = tmp('seal-pred-e2e-');
+  const dir = join(root, 'cloud', 'priv', 'static', '__preview__');
+  mkdirSync(dir, { recursive: true });
+  const copy = join(dir, 'seal-predicate.test.mjs');
+  writeFileSync(copy, readFileSync(join(HERE, 'seal-predicate.test.mjs'), 'utf8'));
+
+  const child = { ...process.env, SEAL_TEST_E2E_CHILD: '1' };
+  const direct = spawnSync('node', [copy], { encoding: 'utf8', timeout: 120000, env: child });
+  assert.equal(direct.status, NO_OBJECT_DATABASE, `the suite must refuse, not run: ${direct.stdout}${direct.stderr}`);
+  assert.match(direct.stderr, /^seal-predicate\.test\.mjs: no git object database at /);
+  assert.doesNotMatch(`${direct.stdout}${direct.stderr}`, /^ok \d+ - /m, 'not one predicate ran');
+  assert.doesNotMatch(`${direct.stdout}${direct.stderr}`, /# pass \d+/, 'and no tally was printed');
+
+  // AND UNDER THE RUNNER, which re-codes it. `node --test` reports the file as one
+  // failed test at exit 1 and carries the 3 in its diagnostic — asserted so that a
+  // future node changing this is a red here rather than a surprise in CI.
+  // THE ENV IS SCRUBBED, AND THAT IS NOT COSMETIC. `node --test` exports
+  // NODE_TEST_CONTEXT to its children; a `node --test` spawned with it inherited
+  // believes it IS a child reporter, prints nothing and exits 0 — measured here as a
+  // green that proved nothing. A nested runner must be spawned clean or not at all.
+  const clean = { ...child };
+  for (const k of Object.keys(clean)) if (k.startsWith('NODE_TEST') || k === 'NODE_OPTIONS') delete clean[k];
+  const runner = spawnSync('node', ['--test', copy], { encoding: 'utf8', timeout: 120000, env: clean });
+  assert.equal(runner.status, 1, 'the runner re-codes a refusing file as a failed file');
+  assert.match(runner.stdout, /exitCode: 3/, 'and the 3 survives into the TAP diagnostic');
+  assert.match(`${runner.stdout}${runner.stderr}`, /no git object database at /, 'the cause is still printed');
+  assert.equal(runner.stdout.split('\n').filter((l) => /^ok \d+ - /.test(l)).length, 0,
+    'and not one predicate was scored');
+});
 
 function run(args) {
   const r = spawnSync('node', [PREDICATE, ...args], { encoding: 'utf8', timeout: 120000 });

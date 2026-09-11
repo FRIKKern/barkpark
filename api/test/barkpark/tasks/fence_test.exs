@@ -182,7 +182,6 @@ defmodule Barkpark.Tasks.FenceTest do
   describe "renewal semantics" do
     test "renewal refreshes ts_iso so the TTL sweeper won't reap a renewed lease",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
       task = mk_task!(uniq("renew-ttl"), scope, %{})
       {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "w", scope)
 
