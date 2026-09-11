@@ -2074,13 +2074,32 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end)
   end
 
+  # The `content` shape flattens an inline-node ARRAY. Each node contributes the
+  # FIRST NON-EMPTY of its `"value"` then its `"text"` — the same dual-read every
+  # text leaf gets (`compose_inline/1`, pdrender `inline.go`), and byte-for-byte
+  # the rule the two sibling readers apply: code.go `codeSourceText` does
+  # `if s := stringishAttr(v, "value"); s != "" { … } else { stringishAttr(v, "text") }`
+  # and inline.tsx `textLeafValue` does `str(n.value) || str(n.text)` — Go and JS
+  # agree with each other exactly, including that the test is NON-EMPTY, not
+  # non-blank: a node whose `value` is `" "` keeps the space rather than falling
+  # through to `text` (only the OUTER key precedence in `code_source/1` trims).
+  # Matching on `%{"value" => v}` first — which this did — yielded "" for a
+  # `{"value" => "", "text" => "x"}` node while both siblings yielded "x": a
+  # code block full in the TUI and in the SDK, hollow on web and email. The
+  # fixture's "content node: blank value falls back to text" case is the lock.
   defp code_source_text(nodes) when is_list(nodes) do
     Enum.map_join(nodes, "", fn
-      %{"value" => v} -> stringish(v)
-      %{"text" => t} -> stringish(t)
       s when is_binary(s) -> s
+      node when is_map(node) -> inline_leaf_source(node)
       _ -> ""
     end)
+  end
+
+  defp inline_leaf_source(node) do
+    case stringish(Map.get(node, "value")) do
+      "" -> node |> Map.get("text") |> stringish()
+      value -> value
+    end
   end
 
   defp code_source_text(v), do: stringish(v)
