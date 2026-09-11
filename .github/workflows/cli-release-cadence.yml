@@ -1,0 +1,133 @@
+name: cli-release-cadence
+
+# IS THE SHIPPED `bp` NEWER THAN THE NEWEST RELEASE A USER CAN INSTALL?
+# Row pds-bl-w49-cli-release-cadence-gate (PDS-D711).
+#
+# `curl -fsSL .../install-cli.sh | sh` resolves GitHub's `releases/latest`, and
+# cli-release.yml only ever cuts a release FROM a `cli-v*` tag push. So the
+# bytes a stranger runs are the tree AT THAT TAG — and nothing in this repo
+# measured whether the shipped source had moved past it. The oracle is
+# `scripts/cli-release-cadence-gate.sh`: newest `cli-v*` tag by VERSION sort vs
+# `git rev-list --count <tag>..HEAD -- internal/cli/setup/assets`. Pure git,
+# offline, no `gh`, no release feed, no network at all.
+#
+# ── WHY THIS IS ITS OWN FILE, and not a job bolted onto an existing workflow ──
+# Three candidate hosts were read before this file was written, and each refuses
+# the job on its own documented terms:
+#   * go-tests.yml — its `go-gate` aggregator states "EVERY job in this workflow
+#     is in `needs`", and `Go gate` is the name its header's step 3 intends to
+#     REGISTER as a required context. Adding a job that is red-until-a-tag-is-cut
+#     to that needs set would red the aggregator on every PR and foreclose that
+#     registration; adding it OUTSIDE the needs set would break the invariant the
+#     file is built on.
+#   * shell-harnesses.yml and deploy-harnesses.yml — both carry a workflow-level
+#     `pull_request: paths:` key. A paths-filtered workflow emits NO check run on
+#     a non-matching PR, so the verdict would be ABSENT rather than skipped, and
+#     three open PRs (#17852, #17834, #17756) are editing shell-harnesses.yml
+#     right now.
+# This file therefore copies posix-vacuous-green-census.yml's shape instead: an
+# UNFILTERED `pull_request` trigger with the path decision pushed down to a
+# job-level `if:` behind an always-running dispatcher, so the context is always
+# present and merely `skipped` when it has nothing to say.
+#
+# ── ADVISORY, IN WRITING ─────────────────────────────────────────────────────
+# .github/required-checks.json requires exactly four contexts — `Cloud gate`,
+# `Console gate`, `Elixir gate`, `PR references an active task`. `bp CLI release
+# cadence` is NOT one of them and is not proposed for the set here: promoting a
+# context is a branch-protection change (scripts/required-checks-floor.sh
+# --acknowledge-growth + scripts/required-checks-apply.sh --confirm) and this one
+# should not be promoted at all, because a red here is cleared by an ACT OF
+# RELEASE, not by a change to the PR. Pinning it would block every unrelated PR
+# on somebody else's tag. It is a signal a human answers with `git tag
+# cli-v<semver> && git push --tags`.
+#
+# ── THIS WORKFLOW IS RED ON MAIN TODAY, ON PURPOSE ───────────────────────────
+# At origin/main 5d1be5f1f the count is 3 (#15844, #17805, #17857 all landed
+# after cli-v1.21.0). The gate ships red because the condition it measures is
+# real and currently true; cutting cli-v1.22.0 is what makes it green.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly. Cadence drift is a slow condition — it needs a loop that never
+    # stops, not a fast one. Offset off the hour because GitHub queues cron
+    # under load: read this as "some time Thursday", never "at 09:14".
+    - cron: "14 9 * * 4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-release-cadence-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the gate dark
+  # exactly when main is moving fastest.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  changes:
+    name: cadence — did the CLI's shipped surface move?
+    runs-on: ubuntu-latest
+    outputs:
+      hit: ${{ steps.f.outputs.hit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: f
+        name: compare the PR against the gate's own inputs
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull_request (${{ github.event_name }}) — the cadence gate always runs"
+            echo "hit=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          changed="$(git diff --name-only "$base" HEAD)"
+          # A here-string, never `printf … | grep -q`: under pipefail that returns
+          # 141 when the reader exits first (scripts/pipefail-sigpipe-scan.sh
+          # hunts exactly this shape).
+          pat='^(internal/cli/|scripts/cli-release-cadence-gate\.sh|scripts/install-cli\.(sh|ps1)|\.github/workflows/cli-release(-cadence)?\.yml)'
+          if grep -Eq "$pat" <<<"$changed"; then
+            echo "hit=true" >>"$GITHUB_OUTPUT"
+            echo "the PR touches the CLI's shipped surface — running the cadence gate:"
+            grep -E "$pat" <<<"$changed"
+          else
+            echo "hit=false" >>"$GITHUB_OUTPUT"
+            echo "the PR touches none of the gate's inputs — skipping."
+            echo "This SKIPS the gate job; it does not make its context absent."
+            echo "Cadence is a property of main, not of this PR: push-to-main and"
+            echo "the weekly cron above both run it unconditionally."
+          fi
+
+  cadence:
+    name: bp CLI release cadence
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 IS LOAD-BEARING. actions/checkout's default fetches no
+      # tags at all, and a tag-vs-HEAD oracle with no tags in sight would have
+      # nothing to compare against. The script refuses (exit 2) rather than
+      # greening in that state — see its ANTI-VACUITY 1 — so a regression here
+      # surfaces as a named instrument fault, not as a silent pass.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: oracle syntax check
+        run: bash -n scripts/cli-release-cadence-gate.sh
+
+      # The oracle's own discrimination matrix, and it runs BEFORE the verdict:
+      # a green verdict from an instrument that cannot red means nothing. Seven
+      # checks against scratch repos in a tmpdir — green arm, red arm, the
+      # out-of-scope commit that must NOT red, version sort (lexical order would
+      # pick cli-v1.9.0 over cli-v1.21.0), and two instrument-fault arms.
+      - name: oracle selftest (fails this job)
+        run: bash scripts/cli-release-cadence-gate.sh --selftest
+
+      - name: cadence verdict (fails this job — ADVISORY, blocks no merge)
+        run: bash scripts/cli-release-cadence-gate.sh
