@@ -207,7 +207,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
-import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr, formatStderrTail } from "./bringup-retry.mjs";
 import { assertReadyHostsPaint as assertFloor } from "./ready-host-paint.mjs";
 import { selectDefects } from "./defect-selection.mjs";
 import { attentionScenarios } from "./attention-scenarios.mjs";
@@ -1063,9 +1063,15 @@ async function main() {
   // 1. Serve the tree. If the port is already held, our child dies with
   //    EADDRINUSE — that is fine IF AND ONLY IF whoever holds it serves this
   //    tree's exact bytes; the assertion below decides, never the spawn.
+  // STDERR IS PIPED, NOT DISCARDED. serve.mjs's own account of why it died —
+  // EADDRINUSE, a syntax error, a missing file — used to go on the floor, so
+  // the refusal below could only ever name the symptom ("nothing answered").
+  // captureStderr DRAINS continuously (an unread pipe fills and blocks the
+  // child) and keeps only a bounded tail.
   const serveChild = spawn("node", [path.join(HERE, "serve.mjs"), "--port", String(PORT)], {
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   });
+  const readServeStderr = captureStderr(serveChild);
   // LAST-DITCH REAPER, on EVERY exit path. The refusal path is supposed to
   // reap through die() -> teardown(), but any path that reaches process.exit
   // without it (a thrown-through exit, a future bare exit — one shipped in a
@@ -1128,7 +1134,16 @@ async function main() {
     await sleep(100);
   }
   // AUDITED (exit 2): the local static server never came up. Environment, not CSS.
-  if (!up) return die(`no server answered on :${PORT} within ${SERVER_CAP}ms`);
+  // The refusal carries OUR server's captured stderr, so it names a CAUSE and
+  // not only the symptom. Silence is itself reported: a serve.mjs that wrote
+  // nothing did not fail to bind, it failed to exist (or a foreign process
+  // holds the port and ours is the one that never spoke).
+  if (!up) {
+    return die(
+      `no server answered on :${PORT} within ${SERVER_CAP}ms\n` +
+      formatStderrTail(readServeStderr(), { who: "serve.mjs" }).replace(/\n$/, ""),
+    );
+  }
 
   // 1b. THE SERVER IS THIS TREE'S SERVER (cchi-w22-bl-guard-port-contention-
   //     silently-measures-a-foreign-tree). The byte-compare below cannot tell
@@ -1202,8 +1217,15 @@ async function main() {
   // D101 BRING-UP RETRY (deploy-reliability wave 8). Bounded, a FRESH profile
   // dir per attempt (the dir used to be mkdtemp'd once, so a retry would
   // re-race the same DevToolsActivePort path), and every failed attempt's
-  // Chrome stderr is printed — a refusal whose cause was discarded by
-  // `stdio: "ignore"` is a refusal nobody can audit.
+  // Chrome stderr is printed. BOTH children this run spawns now pipe their
+  // stderr — Chrome here, serve.mjs at the bring-up above — so no refusal on
+  // either path is left naming a symptom with the cause thrown away.
+  //
+  // NO RETRY ON THE SERVER BRING-UP, and that is deliberate: the bound of 3
+  // here rests on a measured per-attempt Chrome refusal rate (see
+  // bringup-retry.mjs). No such rate has been measured for serve.mjs, so it
+  // gets the stderr and not the loop. A retry with no measurement behind it
+  // is theatre.
   //
   // THE LINE THIS RETRY MUST NOT CROSS. cch-w19-bl-gr115's "do not paper over
   // the race" ruling governs exit-1 MEASURED intermittency: the browser came
