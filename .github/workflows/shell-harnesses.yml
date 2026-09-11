@@ -27,7 +27,7 @@ name: Shell harnesses
 # workflow, no Makefile target, no hook: break the census outright and nothing
 # reds. Only its `--self-test` rides this lane, and the split is deliberate.
 # `--self-test` is hermetic (mktemp fixtures through an in-script python3
-# classifier, 8 named mutation cases, no bp, no network). The census's LIVE
+# classifier, 26 named assertions over 9 arms, no bp, no network). The census's LIVE
 # ratchet shells `bp task get`, and `bp` is not on GitHub runners — it would
 # print `UNKNOWN: bp is not on PATH` and exit 2 on every PR forever, so it is
 # deliberately NOT wired here. Note this workflow is NOT one of main's required
@@ -1295,7 +1295,7 @@ jobs:
           python3 --version
       - name: epic-zero-criteria-census.sh syntax check
         run: bash -n scripts/epic-zero-criteria-census.sh
-      - name: census self-test (8 mutation cases, mktemp fixtures, no bp/network)
+      - name: census self-test (26 assertions over 9 arms, mktemp fixtures, no bp/network)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # ONLY --self-test. The live ratchet shells `bp task get` against the
         # server; `bp` is not on runners, so wiring it here would print
