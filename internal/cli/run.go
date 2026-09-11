@@ -644,6 +644,14 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	}
 	code := handleResponseHinted(out, m, cmd, status, respBody, hinter)
 
+	// `bp doc get` reads the PUBLISHED perspective, so a draft-only id 404s with
+	// a server hint that says the resource does not exist — the one sentence that
+	// is false here. One probe on the drafts lens, paid only on this command's
+	// 404 with no explicit --perspective, turns that into a statement about which
+	// lens answered. stderr only, after the render, so the exit code and every
+	// byte of `-o json` stay unchanged (doc_get_draft_perspective.go).
+	emitDocGetDraftPerspective(out, g, ctx, m, cmd, tail, status)
+
 	// The flag only ever overrides the HONEST success path (code == exitOK,
 	// meaning handleResponse's 2xx branch rendered it, not a screen's own
 	// refusal above with its own exit code). Rendering is byte-identical
