@@ -874,10 +874,15 @@ func shSingleQuote(s string) string {
 
 // deploySmokeURLs is the three golden-path checks printed on success — the SAME
 // trio the router card documents (API answers · Studio gated · documents query).
+//
+// The first URL is /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, so from 2027-01-01 every successful
+// deploy would hand the operator a smoke command that 404s on a healthy box.
 func deploySmokeURLs(fqdn string) []string {
 	base := "https://" + fqdn
 	return []string{
-		base + "/api/schemas",
+		base + "/status.json",
 		base + "/studio",
 		base + "/v1/data/query/production/post",
 	}
