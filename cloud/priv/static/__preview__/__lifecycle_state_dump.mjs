@@ -15,11 +15,14 @@
 //      that keeps the bytes and changes the value, and it breaks on a reformat
 //      that changes nothing. (Same rationale as __plan_features_dump.mjs and
 //      __plan_catalog_dump.mjs, its two siblings in this directory.)
-//   2. `LIFECYCLE_PILL_LABEL` declares SEVEN states, but `lifecyclePillState`
-//      can only ever RETURN five: `archived` and `adopted` are labels no input
-//      reaches. A guard that read the label map would pin two dead words and
-//      believe the console paints states it cannot paint. So this script drives
-//      the fold and collects what comes back.
+//   2. The label map is a DECLARATION and the painted set is a RESULT, and the
+//      two are not the same kind of thing. They drifted once already: the map
+//      declared SEVEN states while `lifecyclePillState` could only ever RETURN
+//      five, so `archived` and `adopted` were labels no input reached (deleted
+//      by cch-w54-bl). A guard that read the label map would have pinned two
+//      dead words and believed the console paints states it cannot paint. So
+//      this script drives the fold and collects what comes back — which stays
+//      right whichever way the two sets drift next.
 //
 // THE INPUT MATRIX IS DERIVED, NOT HAND-PICKED. `instanceLifecycle` — the fold
 // `lifecyclePillState` delegates to — reads exactly four fields off a box row:
@@ -40,7 +43,7 @@
 //
 //   {
 //     "painted": [{ "state": "...", "label": "...", "cls": "..." }],  // sorted by state
-//     "declared_labels": ["..."],                                     // LIFECYCLE_PILL_LABEL keys, for the dead-label note
+//     "declared_labels": ["..."],                                     // LIFECYCLE_PILL_LABEL keys, for the domain-vs-range arm
 //     "suspended": { "state": "...", "label": "...", "detail": "..." },
 //     "combos": 60
 //   }

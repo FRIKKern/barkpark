@@ -2135,10 +2135,29 @@
   // control plane actually did. The (state, reason) manifest —
   // cloud/test/barkpark_cloud/lifecycle_state_manifest_test.exs — reds if this
   // label starts claiming a halt again.
+  //
+  // cch-w54-bl (D-r12-w54) — THE MAP DECLARES EXACTLY WHAT THE FOLD CAN RETURN.
+  // It used to declare seven, of which `archived` and `adopted` were labels no
+  // input could reach: `lifecyclePillState` folds `instanceLifecycle(bp)`, whose
+  // whole vocabulary is removing / removeFailed / failed / provisioning /
+  // suspended / live, derived from four row fields (deprovision_status, host,
+  // provision_status, suspended). There is no `lifecycle_state` column and
+  // `barkpark_json/5` serializes no archived/adopted fact, so no producer exists
+  // to feed either word. DECISION: DELETE, not make-reachable — adding a state
+  // with no producer would be exactly the "label-map domain mistaken for the
+  // fold's range" error this rail already pays a guard to prevent. ("Archived"
+  // as a word survives elsewhere and means something else: GET /v1/archives and
+  // ArchiveStore list a team's torn-down instance BUNDLES, which is an object,
+  // not a state a live box wears.) The set-equality guard in __app.test.mjs
+  // ("cch-w54-bl: LIFECYCLE_PILL_LABEL's domain equals lifecyclePillState's
+  // range") DERIVES the range by driving one fixture per fold branch, so it reds
+  // in both directions: a re-added dead label, and a returned state with no
+  // label. `INSTANCE_LIFECYCLE` (the CSS-class vocabulary above) deliberately
+  // keeps all seven tokens — it is the S4 token/hue register and the styleguide
+  // paints all seven — so this delete is scoped to the LABELS.
   var LIFECYCLE_PILL_LABEL = {
     provisioning: "Provisioning", live: "Live", degraded: "Degraded",
-    stopped: "Suspended", archived: "Archived", decommissioned: "Decommissioning",
-    adopted: "Adopted",
+    stopped: "Suspended", decommissioned: "Decommissioning",
   };
 
   // Map the client-derived instance state (instanceLifecycle booleans, the same
@@ -28276,8 +28295,11 @@
       // The DOM mount (wireLifecycleActions/runDecommission) is browser-verified.
       lifecyclePillState: lifecyclePillState, lifecyclePill: lifecyclePill,
       // cch-w54-s1 — the DECLARED label map, exported so the manifest dump can
-      // report the two labels no input can reach (archived / adopted). The
-      // painted set itself is always read by RUNNING the fold, never from here.
+      // compare the declared domain against the painted range. cch-w54-bl
+      // deleted the two labels no input could reach (archived / adopted), so
+      // the two sets are equal today; the export stays because the painted set
+      // must keep being read by RUNNING the fold, never from here, and because
+      // both guards (node set-equality, Elixir manifest) need the domain.
       LIFECYCLE_PILL_LABEL: LIFECYCLE_PILL_LABEL,
       fleetInfraLine: fleetInfraLine, showLifecycleRow: showLifecycleRow,
       lifecycleActionsModel: lifecycleActionsModel, lifecycleActionRowHtml: lifecycleActionRowHtml,

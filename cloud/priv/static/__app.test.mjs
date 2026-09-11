@@ -11334,6 +11334,82 @@ test("S11b: lifecyclePillState folds each client state onto a canonical S4 state
   assert.equal(p.cls, "bp-inst--live");
 });
 
+// ── cch-w54-bl: the label map's DOMAIN is exactly the fold's RANGE ──────────
+// The map once declared seven states while the fold could return five, so
+// `archived` and `adopted` were labels no input reached. They were deleted (no
+// producer exists for either: instanceLifecycle reads four row fields and
+// barkpark_json/5 serializes no archived/adopted fact). This guard keeps the two
+// sets equal by DRIVING the fold — reading the map to learn what the console
+// paints is the exact error the deleted labels embodied.
+test("cch-w54-bl: LIFECYCLE_PILL_LABEL's domain equals lifecyclePillState's range", () => {
+  // The fold's branch precedence, in source order: removing wins, then the two
+  // error branches, then paused, then the two positive ones.
+  const FOLD_ORDER = ["removing", "removeFailed", "failed", "suspended", "provisioning", "live"];
+  const fixtures = [
+    ["removing", { deprovision_status: "pending", host: "h" }],
+    ["removeFailed", { deprovision_status: "failed", host: "h" }],
+    ["failed", { provision_status: "failed" }],
+    ["suspended", { host: "h", suspended: true }],
+    ["provisioning", {}],
+    ["live", { host: "h" }],
+  ];
+
+  // PRECONDITION, not decoration: each fixture must actually SELECT the branch it
+  // is named for and must not be shadowed by an earlier one. Without this, two
+  // fixtures could collapse onto a single branch and the "range" below would be
+  // built from fewer branches than it claims — a set that is right by accident.
+  for (const [branch, bp] of fixtures) {
+    const lc = hooks.instanceLifecycle(bp);
+    assert.ok(lc[branch],
+      branch + " fixture does not select the " + branch + " branch: " + JSON.stringify(lc));
+    for (const earlier of FOLD_ORDER.slice(0, FOLD_ORDER.indexOf(branch))) {
+      if (earlier === "removeFailed" && branch === "failed") continue; // same precedence level
+      assert.ok(!lc[earlier],
+        branch + " fixture is shadowed by the earlier " + earlier + " branch");
+    }
+  }
+
+  // THE RANGE, driven. Every value each of the four fields instanceLifecycle
+  // reads can hold, including the two absent forms — so a new branch inside the
+  // fold shows up here with no edit to this test.
+  const AXES = {
+    deprovision_status: [null, undefined, "pending", "claimed", "failed", "succeeded"],
+    host: ["", null, undefined, "box.barkpark.cloud"],
+    provision_status: [null, undefined, "failed", "succeeded"],
+    suspended: [false, true],
+  };
+  const range = new Set();
+  let combos = 0;
+  for (const deprovision_status of AXES.deprovision_status)
+    for (const host of AXES.host)
+      for (const provision_status of AXES.provision_status)
+        for (const suspended of AXES.suspended) {
+          combos += 1;
+          range.add(hooks.lifecyclePillState({ deprovision_status, host, provision_status, suspended }));
+        }
+  assert.ok(combos > 0, "the matrix drove no inputs at all");
+
+  // Every named branch's state is in the driven range (the two derivations agree).
+  for (const [branch, bp] of fixtures) {
+    assert.ok(range.has(hooks.lifecyclePillState(bp)),
+      "the cartesian matrix never reached the state the " + branch + " fixture folds to");
+  }
+
+  // The seventh branch — the fold's own `return ""` sentinel — has NO witness.
+  // `live`'s last conjunct IS bp.host, so a box with a host that is not
+  // removing / failed / suspended is live, and a box without one is provisioning
+  // or failed. "" is a defensive fallback, not a state, and is rightly unlabelled.
+  assert.ok(!range.has(""),
+    '"" is now reachable: the fold gained a state with no label. Give it a label ' +
+    "and a manifest row, or keep it unreachable.");
+
+  assert.deepEqual([...range].sort(), Object.keys(hooks.LIFECYCLE_PILL_LABEL).sort(),
+    "LIFECYCLE_PILL_LABEL's declared domain drifted from lifecyclePillState's driven range. " +
+    "A label with no fold branch is a state nothing can paint (that was `archived` and " +
+    "`adopted`, deleted by cch-w54-bl); a returned state with no label renders as " +
+    '"Unknown". Both are reds.');
+});
+
 // ── fleetInfraLine: region · size, blank-tolerant (pre-S6 rows) ─────────────
 test("S11b: fleetInfraLine renders present dimensions and stays empty when absent", () => {
   assert.equal(hooks.fleetInfraLine({}), ""); // old row: no region/server_type → nothing
