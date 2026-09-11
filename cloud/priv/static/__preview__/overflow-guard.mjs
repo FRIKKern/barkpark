@@ -85,6 +85,22 @@
 //        bottom edge is inside the pill's. The last two are what stop the
 //        naive detail-only remedy from scoring perfectly while painting the
 //        sentence 24px below the capsule.
+//    W35-hash-nav-hidden-view-residue  THE ENTRY PATH, which every leg above is
+//        blind to BY CONSTRUCTION: `nav()` changes the query string, so every
+//        cell in this file arrives by a full document load with exactly one
+//        view ever painted. A person lands on #overview and clicks through;
+//        app.js routes by `section.hidden` and never clears a view, so every
+//        screen they have visited is still matched by every document-wide
+//        selector here. Driven both ways on `mixed-fleet`@1000 the W15 fleet
+//        cell reads 5 rows in view either way and 5 vs 8 DOCUMENT-WIDE, with
+//        `document.querySelector('.fleet-row')` resolving into the hidden
+//        #view-overview. This leg censuses every walk in this file out of its
+//        own bytes (view-scope-census.mjs), tours every routable screen by
+//        hash, and measures which document-wide selectors match inside a hidden
+//        view — 23 of 57 do, all registered, all LATENT (no leg enters by hash
+//        today). Its mutation appends .fleet-row residue to the hidden
+//        #view-overview and asserts BOTH halves: the scoped walk does not move,
+//        the document-wide one does.
 //    GR115-bpconsole-dead-rule      at 700x800 .bp-console-body must compute
 //        the authored 40vh cap (320px) and the 13px legibility floor, same
 //        for .bp-console-toggle (pre-fix: 260px/12px/12px — the later base
@@ -199,6 +215,13 @@ import { fleetAxis, FLEET_PINNED_REPS, FLEET_SCEN_SKIP } from "./fleet-scenarios
 import { stylesheetProbeJs, stylesheetRefusal, stylesheetVerdict } from "./stylesheet-applied.mjs";
 import { ATTACH_CAP, withAttachDeadline } from "./attach-deadline.mjs";
 import { driverSentence, widthDrivers } from "./width-drivers.mjs";
+import {
+  censusWalks,
+  censusTally,
+  documentWideSelectors,
+  registerDrift,
+  RESIDUE_REGISTER,
+} from "./view-scope-census.mjs";
 // THE SWEEP'S OWN AXIS, IMPORTED RATHER THAN RETYPED (cch-w24-bl-phone-band-
 // unreachable-by-the-width-sweep). `W24-activity-feed-phone-band` asserts that
 // the band it drives TOUCHES breakpoint-sweep.mjs's narrowest width; a floor
@@ -255,6 +278,7 @@ const DEFECTS = [
   "W22-shared-modal-card-min-content-floor",
   "W19-topbar-vertical-cost",
   "W24-activity-feed-phone-band",
+  "W35-hash-nav-hidden-view-residue",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -10195,6 +10219,401 @@ async function main() {
         );
       }
     }
+
+    // ── W35: THE WALK THAT MEASURES A SCREEN NOBODY IS LOOKING AT ───────────
+    // Every OTHER leg in this file enters its scenario through `nav()`, which
+    // changes the QUERY STRING and therefore performs a full document load: one
+    // view has ever been painted and every other `section.view` is the empty
+    // shell index.html shipped. A person never arrives that way. They land on
+    // `#overview` and click through, app.js routes by setting `section.hidden`
+    // and never clears a view's innerHTML, and every screen they have already
+    // visited stays in the document — painted, laid out, and matched by every
+    // document-wide selector in this file.
+    //
+    // cch-w24-s5 scoped ONE walk (`.fleet-row`, W15) after measuring 8 rows
+    // document-wide against 5 in view on `mixed-fleet`. This leg is the CLASS:
+    //   (0) THE CENSUS — every `document.querySelector(All)?(…)` in this file,
+    //       classified by view-scope-census.mjs, then DRIVEN: after a person's
+    //       tour of every routable screen, how many matches does each
+    //       document-wide selector have inside a HIDDEN view? The static half
+    //       says where to look; only the browser says what is there.
+    //   (1) THE SEQUENCE — the same fleet cell entered both ways, counts side
+    //       by side.
+    //   (2) THE MUTATION — residue deliberately left in a hidden view must not
+    //       move the SCOPED walk, and must move the document-wide one. A proof
+    //       that only shows the green half shows nothing.
+    //
+    // WHY THIS LEG IS ALLOWED TO WRITE TO THE DOM, when no other leg here is:
+    // its subject IS the DOM's cross-view state, and the alternative (a
+    // committed fixture whose markup contains the residue) would prove that a
+    // selector matches markup somebody wrote, not that routing leaves it behind.
+    // The residue is injected under a `data-w35-residue` attribute, counted
+    // before and after, and its removal is ASSERTED — a leg that leaks residue
+    // would poison every later cell in this run.
+    if (requested.includes("W35-hash-nav-hidden-view-residue")) {
+      const D = "W35-hash-nav-hidden-view-residue";
+      const SCEN = "mixed-fleet";
+
+      // ── (0a) THE STATIC CENSUS, over this file's OWN bytes ────────────────
+      const walks = censusWalks(SELF_SRC);
+      const tally = censusTally(walks);
+      const docWide = documentWideSelectors(walks);
+      // INSTRUMENT INTEGRITY, not a finding: a census that reads zero walks has
+      // been defeated by a rename and everything below it would be vacuously
+      // green. This file is ~10k lines of browser probes; it cannot contain no
+      // element walks.
+      if (tally.total < 50 || docWide.length === 0) {
+        return die(
+          `${D}: the static census read ${tally.total} walk(s) and ${docWide.length} distinct document-wide ` +
+          `selector(s) out of this file's own bytes. That is not a clean file, it is a DEFEATED CENSUS — ` +
+          `view-scope-census.mjs's call pattern no longer matches how this guard spells its walks. ` +
+          `Nothing below this line would have measured anything.`,
+        );
+      }
+      const unresolved = walks.filter((w) => w.kind === "unresolved");
+      process.stdout.write(
+        `\n${D} — ${tally.total} element walks censused from this file's own bytes: ` +
+        `${tally["document-wide"]} document-wide (${docWide.length} distinct selectors), ` +
+        `${tally["id-anchored"]} id-anchored, ${tally["live-view"]} scoped to the live view, ` +
+        `${tally["global-chrome"]} page chrome, ${tally.unresolved} UNRESOLVED (selector built at runtime — ` +
+        `lines ${unresolved.map((w) => w.line).join(",") || "none"}; classified from bytes is impossible, so ` +
+        `they are NAMED rather than dropped)\n`,
+      );
+
+      // ── THE PERSON'S NAVIGATION, and why it is not `nav()` ────────────────
+      // `nav()` calls Page.navigate. This writes `location.hash`, which is what
+      // a click on the sidebar does: one document, one `hashchange`, no reload,
+      // every previously routed view left in place. The settle is a QUIESCENCE
+      // poll (the view's own text stops changing) rather than a fixed sleep,
+      // because each screen's paint arrives on its own fetch.
+      const hashNav = async (hash, wantView) => {
+        await evalJs(`(function(){location.hash=${JSON.stringify(hash)};return true;})()`);
+        const t0 = Date.now();
+        let landed = "none";
+        while (Date.now() - t0 < RENDER_CAP) {
+          landed = await evalJs(
+            `(function(){var v=document.querySelector('section.view:not([hidden])');return v?v.id:'none';})()`,
+          );
+          if (landed === wantView) break;
+          await sleep(50);
+        }
+        if (landed !== wantView) {
+          return { hash, want: wantView, landed, els: -1, settled: false };
+        }
+        let last = -1, stable = 0, els = 0;
+        for (let i = 0; i < 40 && stable < 2; i++) {
+          const n = await evalJs(
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return v?v.querySelectorAll('*').length:-1;})()`,
+          );
+          stable = n === last ? stable + 1 : 0;
+          last = n; els = n;
+          if (stable < 2) await sleep(75);
+        }
+        return { hash, want: wantView, landed, els, settled: stable >= 2 };
+      };
+
+      // The fleet cell, measured BOTH ways in one expression: the scoped walk
+      // cch-w24-s5 installed, the document-wide walk it replaced, and where the
+      // SINGULAR `document.querySelector('.fleet-row')` — this leg's own
+      // readiness idiom, and W15's — actually resolves.
+      const FLEET_PROBE =
+        `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+        `var first=document.querySelector('.fleet-row');` +
+        `return {view:v?v.id:'none',` +
+        ` rows:v?v.querySelectorAll('.fleet-row').length:-1,` +
+        ` docRows:document.querySelectorAll('.fleet-row').length,` +
+        ` firstRowIn:first?(first.closest('section.view')?first.closest('section.view').id:'outside-any-view'):'none',` +
+        ` residue:document.querySelectorAll('[data-w35-residue]').length};})()`;
+
+      const FLEET_READY =
+        `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+        `return !!(v && v.id==='view-fleet' && v.querySelector('.fleet-row'));})()`;
+      const OVERVIEW_READY =
+        `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+        `return !!(v && v.id==='view-overview' && v.querySelectorAll('*').length>20);})()`;
+
+      await setViewport(1000);
+
+      // ── (1a) TODAY'S ENTRY: a full load straight at #fleet ────────────────
+      await nav(`${BASE}/?scen=${SCEN}&theme=light&w35=fullload#fleet`, FLEET_READY);
+      const full = await evalJs(FLEET_PROBE);
+
+      // ── (1b) THE PERSON'S ENTRY: land on #overview, then hash-navigate ────
+      await nav(`${BASE}/?scen=${SCEN}&theme=light&w35=hashnav#overview`, OVERVIEW_READY);
+      const beforeHop = await evalJs(FLEET_PROBE);
+      // THE PRISTINE SHELLS, snapshotted before a single hop. index.html ships
+      // every `section.view` as an empty-ish shell; "did this screen actually
+      // paint during the tour" is only answerable against what it looked like
+      // before the tour, and a view that never painted would contribute zero
+      // residue FOR THE WRONG REASON.
+      const SHELLS = await evalJs(
+        `(function(){var o={};[].slice.call(document.querySelectorAll('section.view')).forEach(function(v){` +
+        `o[v.id]=v.querySelectorAll('*').length;});return o;})()`,
+      );
+      const hop = await hashNav("#fleet", "view-fleet");
+      if (hop.landed !== "view-fleet") {
+        return die(
+          `${D}: writing location.hash='#fleet' from #overview landed "${hop.landed}" — the SPA did not route, ` +
+          `so the sequence this leg exists to drive never happened and nothing below measures a person's path.`,
+        );
+      }
+      const seq = await evalJs(FLEET_PROBE);
+
+      process.stdout.write(
+        `   entry comparison on ${SCEN}@1000 — FULL LOAD (#fleet direct, what every leg in this file does): ` +
+        `${full.rows} row(s) in view, ${full.docRows} document-wide, singular .fleet-row resolves into ` +
+        `${full.firstRowIn}\n` +
+        `   entry comparison on ${SCEN}@1000 — HASH NAV (#overview, then location.hash='#fleet', what a person ` +
+        `does): ${seq.rows} row(s) in view, ${seq.docRows} document-wide, singular .fleet-row resolves into ` +
+        `${seq.firstRowIn}. #overview alone had already painted ${beforeHop.docRows} .fleet-row(s) before the ` +
+        `hop (view was ${beforeHop.view})\n`,
+      );
+
+      // THE PRECONDITION, asserted rather than assumed: if the two entries
+      // agree document-wide, this scenario no longer reproduces the
+      // inheritance and every green below is vacuous. That is a REFUSAL (the
+      // instrument cannot measure), never a clean run.
+      if (seq.docRows <= seq.rows) {
+        return die(
+          `${D}: the hash-navigation sequence measured ${seq.docRows} .fleet-row(s) document-wide against ` +
+          `${seq.rows} in the visible view — the hidden #view-overview is no longer painting rows under that ` +
+          `class, so THIS SCENARIO NO LONGER REPRODUCES the inheritance cch-w24-s5 was cut for. The mutation ` +
+          `below would pass against a condition that is not there. Re-pick the scenario, or retire this leg.`,
+        );
+      }
+      // The whole point of the s5 fix: the SCOPED count must not care how the
+      // person arrived. If it does, the scoping is not doing its job.
+      if (seq.rows !== full.rows) {
+        fail(D, `${SCEN}@1000: the SCOPED walk measured ${full.rows} row(s) entered by full load and ${seq.rows} entered by hash navigation — cch-w24-s5's scoping was supposed to make the count independent of the entry path, and it is not`);
+      }
+      okLine(
+        `THE ENTRY PATH CHANGES THE DOCUMENT-WIDE COUNT AND NOT THE SCOPED ONE: full load ${full.docRows} ` +
+        `document-wide / ${full.rows} in view; hash navigation ${seq.docRows} / ${seq.rows}. The scoped walk ` +
+        `cch-w24-s5 installed reads ${seq.rows} either way; the walk it replaced reads ` +
+        `${seq.docRows - full.docRows} more the moment a person reaches #fleet the way a person reaches it, ` +
+        `and the SINGULAR \`document.querySelector('.fleet-row')\` resolves into ${seq.firstRowIn} rather than ` +
+        `the fleet view. Every leg in this file enters by full load, so this difference is a property of the ` +
+        `HARNESS and not of any leg that looks clean under it`,
+      );
+
+      // ── (0b) THE TOUR: every routable screen, reached the way a person ────
+      //      reaches it, so the residue question is asked of a document that
+      //      has actually accumulated views.
+      const TOUR = [
+        ["#overview", "view-overview"],
+        ["#fleet", "view-fleet"],
+        ["#sites", "view-sites"],
+        ["#activity", "view-activity"],
+        ["#settings/billing", "view-billing"],
+        ["#settings/providers", "view-providers"],
+        ["#settings/notifications", "view-notifications"],
+        ["#settings/tokens", "view-tokens"],
+        ["#settings/members", "view-members"],
+      ];
+      const hops = [];
+      for (const [hash, want] of TOUR) hops.push(await hashNav(hash, want));
+      // The two DRILL-DOWNS, whose ids are read off the paint rather than typed:
+      // a hard-coded uuid that stopped existing would tour an empty shell and
+      // report less residue than the tree holds.
+      // The rows are `div[role=button][data-id]` with a click handler that
+      // writes the hash (app.js `.fleet-row[data-id]` / `.site-row[data-id]`
+      // wiring), never anchors — so the id is READ OFF THE PAINT and the hash
+      // is written the same way the handler would. A typed uuid that stopped
+      // existing would tour an empty shell and under-report the residue.
+      await hashNav("#fleet", "view-fleet");
+      const instId = await evalJs(
+        `(function(){var r=document.querySelector('section.view:not([hidden]) .fleet-row[data-id]');` +
+        `return r?r.getAttribute('data-id'):null;})()`,
+      );
+      const instHref = instId ? `#instance/${instId}` : null;
+      if (instHref) hops.push(await hashNav(instHref, "view-instance"));
+      await hashNav("#sites", "view-sites");
+      const siteId = await evalJs(
+        `(function(){var r=document.querySelector('section.view:not([hidden]) .site-row[data-id]');` +
+        `return r?r.getAttribute('data-id'):null;})()`,
+      );
+      const siteHref = siteId ? `#site/${siteId}` : null;
+      if (siteHref) hops.push(await hashNav(siteHref, "view-site"));
+      // End the tour where the measurement wants to stand: on #fleet, with
+      // every other view hidden and populated.
+      const finalHop = await hashNav("#fleet", "view-fleet");
+      hops.push(finalHop);
+
+      const unrouted = hops.filter((h) => h.landed !== h.want);
+      const unsettled = hops.filter((h) => h.landed === h.want && !h.settled);
+      process.stdout.write(
+        `   tour: ${hops.length} hash navigation(s), ${hops.length - unrouted.length} routed` +
+        `${unrouted.length ? ` (UNROUTED: ${unrouted.map((h) => `${h.hash}->${h.landed}`).join(", ")})` : ""}` +
+        `${unsettled.length ? ` (never quiesced: ${unsettled.map((h) => h.hash).join(", ")})` : ""}` +
+        ` · elements per screen: ${hops.map((h) => `${h.hash}:${h.els}`).join(" ")}\n`,
+      );
+      // A drill-down that was never reachable is a HOLE in the census, not a
+      // clean answer: `.detail-rail`, `.bp-tl-retry`, `.site-name` and friends
+      // only ever paint inside those two views.
+      if (!instHref || !siteHref) {
+        return die(
+          `${D}: the tour could not find a ${!instHref ? "#instance/" : "#site/"} link to follow on ${SCEN}, so ` +
+          `the ${!instHref ? "instance" : "site"} detail view was never painted. Every detail-view selector in ` +
+          `the census would report zero residue for the sole reason that nothing ever rendered there — a hole ` +
+          `reported as a clean column is the defect this leg exists to catch.`,
+        );
+      }
+      if (finalHop.landed !== "view-fleet") {
+        return die(`${D}: the tour did not end on #fleet (landed "${finalHop.landed}") — the residue census below would be taken from an unknown vantage point`);
+      }
+
+      // ── (0c) THE RESIDUE CENSUS: per selector, per view, MEASURED ─────────
+      const sels = docWide.map((e) => e.selector);
+      const resid = await evalJs(
+        `(function(){var sels=${JSON.stringify(sels)};` +
+        `var views=[].slice.call(document.querySelectorAll('section.view'));` +
+        `var live=document.querySelector('section.view:not([hidden])');` +
+        `var out={live:live?live.id:'none',painted:{},sel:{}};` +
+        `views.forEach(function(v){out.painted[v.id]=v.querySelectorAll('*').length;});` +
+        `sels.forEach(function(s){var e={total:0,live:0,hidden:0,views:[]};` +
+        `  try{e.total=document.querySelectorAll(s).length;}catch(err){e.err=String(err&&err.message||err);out.sel[s]=e;return;}` +
+        `  if(live){try{e.live=live.querySelectorAll(s).length;}catch(err){}}` +
+        `  views.forEach(function(v){if(!v.hidden)return;var n=0;try{n=v.querySelectorAll(s).length;}catch(err){}` +
+        `    if(n>0){e.hidden+=n;e.views.push(v.id);}});` +
+        `  out.sel[s]=e;});` +
+        `return out;})()`,
+      );
+
+      // WHICH SCREENS ACTUALLY PAINTED. A view still at its pristine shell size
+      // contributes zero residue for a reason that has nothing to do with the
+      // selectors — and a clean column read off an unpainted screen is the exact
+      // species of vacuous green this leg was cut to stop. Named, never netted
+      // into the total.
+      const neverPainted = Object.keys(resid.painted).filter((id) => resid.painted[id] <= (SHELLS[id] ?? 0));
+      process.stdout.write(
+        `   screens painted during the tour (elements now / pristine shell): ` +
+        `${Object.keys(resid.painted).map((id) => `${id.replace("view-", "")} ${resid.painted[id]}/${SHELLS[id] ?? "?"}`).join(" · ")}\n`,
+      );
+      if (neverPainted.length) {
+        process.stdout.write(
+          `   ! ${neverPainted.length} view(s) NEVER GREW past their shipped shell (${neverPainted.join(", ")}) — ` +
+          `every selector that only ever paints there reads 0 hidden matches below for a reason that is not ` +
+          `about the selector. Those columns are UNMEASURED, not clean\n`,
+        );
+      }
+
+      const bad = Object.entries(resid.sel).filter(([, v]) => v.err);
+      if (bad.length) {
+        fail(D, `${bad.length} censused selector(s) threw in the browser — the census cannot speak for them: ${bad.map(([s, v]) => `${s} (${v.err})`).join("; ")}`);
+      }
+      const exposed = Object.entries(resid.sel).filter(([, v]) => !v.err && v.hidden > 0);
+      const clean = Object.entries(resid.sel).filter(([, v]) => !v.err && v.hidden === 0);
+      process.stdout.write(
+        `   RESIDUE CENSUS after the tour, standing on ${resid.live} — ${exposed.length} of ${sels.length} ` +
+        `document-wide selector(s) match inside a HIDDEN view; ${clean.length} match none. Views hold ` +
+        `${Object.entries(resid.painted).map(([k, n]) => `${k.replace("view-", "")}:${n}`).join(" ")} element(s)\n`,
+      );
+      for (const [sel, v] of exposed.sort((a, b) => b[1].hidden - a[1].hidden)) {
+        const owners = docWide.find((e) => e.selector === sel);
+        process.stdout.write(
+          `      ${String(v.hidden).padStart(3)} hidden / ${String(v.live).padStart(3)} in view / ` +
+          `${String(v.total).padStart(3)} document-wide  ${sel}  [${owners ? owners.legs.join(", ") : "?"}]  ` +
+          `in ${v.views.join(",")}\n`,
+        );
+      }
+
+      // ── THE REGISTER, ratcheted in BOTH directions ────────────────────────
+      const measured = {};
+      for (const [sel, v] of Object.entries(resid.sel)) if (!v.err) measured[sel] = { hidden: v.hidden, views: v.views };
+      const drift = registerDrift(measured, RESIDUE_REGISTER);
+      for (const line of drift.unregistered) {
+        fail(D, `UNREGISTERED EXPOSURE — ${line}. A document-wide walk in this guard now reaches a view the person is not looking at, and no committed record says so. Scope the walk to \`section.view:not([hidden])\` the way cch-w24-s5 scoped \`.fleet-row\`, or add it to RESIDUE_REGISTER in view-scope-census.mjs with the reason it is harmless`);
+      }
+      for (const line of drift.stale) {
+        fail(D, `STALE REGISTER ROW — ${line}. Either the exposure was fixed (delete the row) or this tour stopped reaching the view that produced it, in which case the row is certifying a condition nobody can reproduce. A ratchet that only reds when the world gets worse is half an instrument`);
+      }
+      for (const line of drift.moved) {
+        fail(D, `EXPOSURE MOVED HOUSE — ${line}. The count is the same shape, the residue is somewhere else, and reading it as the same finding is how a census goes stale while staying green`);
+      }
+
+      // ── (2) THE MUTATION: residue in a hidden view, on purpose ────────────
+      // Standing on #fleet, `#view-overview` is hidden. Three `.fleet-row`
+      // elements are appended to it — exactly the shape the SPA leaves behind.
+      const RESIDUE_N = 3;
+      const preMut = await evalJs(FLEET_PROBE);
+      const injected = await evalJs(
+        `(function(){var h=document.getElementById('view-overview');` +
+        `if(!h) return {ok:false,why:'#view-overview is not in the document'};` +
+        `if(!h.hidden) return {ok:false,why:'#view-overview is NOT hidden — the residue would be visible and the mutation would prove nothing'};` +
+        `for(var i=0;i<${RESIDUE_N};i++){var d=document.createElement('div');` +
+        `  d.className='fleet-row';d.setAttribute('data-w35-residue','1');` +
+        `  d.innerHTML='<span class="fleet-name">w35-residue</span><span class="fleet-url">residue.example.com</span>';` +
+        `  h.appendChild(d);}` +
+        `return {ok:true,added:h.querySelectorAll('[data-w35-residue]').length};})()`,
+      );
+      if (!injected.ok) {
+        return die(`${D}: could not establish the mutation's PRECONDITION — ${injected.why}. Nothing was proven either way`);
+      }
+      const postMut = await evalJs(FLEET_PROBE);
+      const removed = await evalJs(
+        `(function(){var n=[].slice.call(document.querySelectorAll('[data-w35-residue]'));` +
+        `n.forEach(function(e){e.parentNode.removeChild(e);});` +
+        `return {left:document.querySelectorAll('[data-w35-residue]').length,removed:n.length};})()`,
+      );
+      const afterClean = await evalJs(FLEET_PROBE);
+
+      process.stdout.write(
+        `   MUTATION — ${RESIDUE_N} .fleet-row element(s) appended to the HIDDEN #view-overview while standing ` +
+        `on #fleet:\n` +
+        `      scoped walk (cch-w24-s5, \`v.querySelectorAll('.fleet-row')\`): ${preMut.rows} -> ${postMut.rows} ` +
+        `(delta ${postMut.rows - preMut.rows})\n` +
+        `      document-wide walk (what it replaced): ${preMut.docRows} -> ${postMut.docRows} ` +
+        `(delta ${postMut.docRows - preMut.docRows})\n` +
+        `      residue removed: ${removed.removed}, left behind: ${removed.left}; scoped walk after cleanup ` +
+        `${afterClean.rows}, document-wide ${afterClean.docRows}\n`,
+      );
+      if (postMut.rows !== preMut.rows) {
+        fail(D, `MUTATION: ${RESIDUE_N} rows appended to the HIDDEN #view-overview moved the SCOPED walk from ${preMut.rows} to ${postMut.rows}. cch-w24-s5's scoping does not hold — the leg is still measuring a screen nobody is looking at`);
+      }
+      if (postMut.docRows !== preMut.docRows + RESIDUE_N) {
+        fail(D, `MUTATION CONTROL: the document-wide walk went ${preMut.docRows} -> ${postMut.docRows} against an expected +${RESIDUE_N}. The residue did not land where this mutation says it landed, so the green half above proves nothing — a mutation nobody can see is not a control`);
+      }
+      if (removed.left !== 0 || afterClean.docRows !== preMut.docRows) {
+        fail(D, `MUTATION CLEANUP: ${removed.left} residue element(s) survive and the document-wide count is ${afterClean.docRows} against ${preMut.docRows} before injection — this leg has POISONED the document for every cell that runs after it`);
+      }
+
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `THE CENSUS IS DRIVEN, NOT ASSERTED: ${tally.total} walks read out of this file's own bytes ` +
+          `(${tally["document-wide"]} document-wide over ${docWide.length} distinct selectors, ` +
+          `${tally["live-view"]} already scoped to the live view, ${tally.unresolved} unresolved and NAMED), ` +
+          `then measured against a document a person had toured — ${hops.length} hash navigations across ` +
+          `${TOUR.length} tabs plus both drill-downs. ${exposed.length} selector(s) match inside a hidden view ` +
+          `and every one of them is in RESIDUE_REGISTER; ${clean.length} match none. The register reds in BOTH ` +
+          `directions: a new exposure and a row nobody can reproduce are each a refusal by name`,
+        );
+        okLine(
+          `WHAT THE ${exposed.length} REGISTERED EXPOSURES ARE, said plainly: NOT defects today. Every leg in ` +
+          `this file enters through \`nav()\`, a full document load, so no cell currently measures a hidden ` +
+          `view. Each registered selector is a walk whose ANSWER DEPENDS ON THE ENTRY PATH — the first cell ` +
+          `that reaches its screen by hash navigation measures those matches as if they were on the screen, ` +
+          `which is precisely how the W15 fleet walk read 8 rows against 5 for nine waves. Registering an ` +
+          `exposure records it; it does not discharge it, and the remedy per walk is cch-w24-s5's: compute ` +
+          `\`section.view:not([hidden])\` and walk THAT`,
+        );
+        okLine(
+          `THE MUTATION SHOWS BOTH HALVES: ${RESIDUE_N} .fleet-row elements appended to the HIDDEN ` +
+          `#view-overview left the scoped walk at ${postMut.rows} (delta 0) and moved the document-wide walk ` +
+          `${preMut.docRows} -> ${postMut.docRows}. The green half alone would be satisfied by a selector that ` +
+          `matches nothing, which is why the red half is asserted as an equality and not as a direction. The ` +
+          `document is restored: ${removed.removed} removed, ${removed.left} left`,
+        );
+        okLine(
+          `HONEST LIMIT: this leg drives ONE scenario (${SCEN}) at ONE width, and the residue census answers ` +
+          `"can a hidden view hold a match" — it does NOT answer "would that match change this leg's verdict", ` +
+          `which depends on what each leg then measures per element. A registered exposure is a walk whose ` +
+          `output is entry-path-dependent, nothing stronger; the ${tally.unresolved} runtime-built selectors are ` +
+          `outside the census altogether and are listed above rather than counted as clean`,
+        );
+      }
+    }
+
 
   } catch (err) {
     // AUDITED (exit 2): the probe itself threw, so NOTHING was measured — an
