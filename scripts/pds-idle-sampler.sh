@@ -89,14 +89,41 @@
 # 0.00 MiB, which reads to a threshold check as the quietest possible box and
 # PASSES. A vacuous zero must never authorise a measurement. Both legs refuse.
 #
+# WHY --window HAS NO DEFAULT (pds-bl-sampler-window-default-retired-engine).
+# This file used to default --window to 130 s, documented as "the canonical
+# export's wall time, so a control taken with the default is length-paired with
+# the canonical acquisition". That pairing claim is DEAD. The 130 s was measured
+# in wave 7 against the IN-MEMORY export engine (send_resp materialising the
+# whole tar as one BEAM binary), which wave 11 replaced with the streaming spill
+# engine now deployed. The deployed engine has never completed the full
+# canonical export, so its wall time is UNMEASURED — that is the open blocker
+# pds-bl-w13-export-duration-unmeasured, and until it is paid nobody, including
+# this script, knows whether the streaming engine is faster or slower than the
+# retired one.
+#
+# An inherited 130 s is worse than no number. A window shorter than the
+# acquisition it is paired with does not refuse: it closes early and reports an
+# ordinary-looking, too-LOW control, which flatters whatever measurement it is
+# placed beside. Nor does the launcher rescue the caller — scripts/pds-crown-
+# launch.sh never invokes this sampler (the ride-along is manual by
+# construction) and its own poll loop can wait hours before the export fires, so
+# no default can be length-paired with an event whose start time is unknown.
+#
+# The honest move is therefore NOT to substitute a guessed replacement. It is to
+# refuse to supply one: the caller must state the window, and owns the pairing
+# claim. Same anti-vacuous rule as PDS-D220a — a figure nobody measured must
+# never authorise a measurement. Until the blocker is paid, pass a generously
+# large window and truncate at ANALYSIS time using the transcript's own
+# idle_window_requested_s vs idle_window_s (both are on the machine line).
+#
 # USAGE
 #
-#   scripts/pds-idle-sampler.sh [--window <seconds>] [--label <text>]
+#   scripts/pds-idle-sampler.sh --window <seconds> [--label <text>]
 #                               [--out <file>]
 #
-#   --window   window length in seconds (default 130 — the canonical export's
-#              wall time, so a control taken with the default is length-paired
-#              with the canonical acquisition).
+#   --window   window length in seconds. REQUIRED — there is no default, and
+#              omitting it is a misconfiguration (exit 3), not an inherited
+#              number. See WHY --window HAS NO DEFAULT below.
 #   --label    free text recorded in the output (e.g. "beside-climb-w13").
 #   --out      also write the machine-readable line to this file.
 #
@@ -111,7 +138,8 @@
 #   No token is read and none is needed: nothing is fetched.
 #
 # EXIT: 0 measured · 2 refused (SSH unavailable, no comm-anchored BEAM, or a leg
-#       that logged nothing — PDS-D220a) · 3 misconfigured.
+#       that logged nothing — PDS-D220a) · 3 misconfigured (this includes a
+#       MISSING --window: see WHY --window HAS NO DEFAULT above).
 
 set -eu
 
@@ -142,7 +170,11 @@ SOURCE_SSH_KEY="${PDS_SOURCE_SSH_KEY:-$HOME/.ssh/barkpark_indx}"
 RUN_ID="${PDS_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 
 SAMPLE_HZ=1                       # stated in the output; see PDS-D114
-IDLE_SECONDS=130                  # the canonical export's wall time
+# NO DEFAULT. The empty string is the "caller said nothing" sentinel, refused
+# below. The old value (130 s) was the RETIRED in-memory engine's wall time and
+# the deployed streaming engine's is unmeasured — pds-bl-w13-export-duration-
+# unmeasured. See WHY --window HAS NO DEFAULT in the header.
+IDLE_SECONDS=""
 LABEL="unlabelled"
 OUT_FILE=""
 
@@ -172,16 +204,24 @@ while [ $# -gt 0 ]; do
     --window) IDLE_SECONDS="${2:-}"; shift 2 || die "--window needs a value" ;;
     --label)  LABEL="${2:-}"; shift 2 || die "--label needs a value" ;;
     --out)    OUT_FILE="${2:-}"; shift 2 || die "--out needs a value" ;;
-    # 1,114p — through the EXIT legend. The parent instrument stops at 80 and
+    # 1,142p — through the EXIT legend. The parent instrument stops at 80 and
     # drops its own exit codes; an operator whose sampler REFUSED mid-climb needs
     # to read "2 = refused" without opening the file.
-    -h|--help) sed -n '1,114p' "$0"; exit 0 ;;
+    -h|--help) sed -n '1,142p' "$0"; exit 0 ;;
     *) die "unknown argument '$1' (try --help). This instrument takes no --path: it fetches nothing." ;;
   esac
 done
 
+# The MISSING case is split out from the MALFORMED case on purpose: they are
+# different operator errors and the missing one needs to say what it is refusing
+# to guess. Refused here, before the first ssh, so a caller who forgot the flag
+# learns it in under a second rather than after a window has already run.
+if [ -z "$IDLE_SECONDS" ]; then
+  die "--window is REQUIRED and has no default. This instrument used to default to 130 s, described as the canonical export's wall time — that figure was measured on the RETIRED in-memory export engine (wave 7), not on the streaming spill engine deployed since wave 11, whose full-export duration is UNMEASURED (open blocker: pds-bl-w13-export-duration-unmeasured). A window shorter than the acquisition it is paired with does not refuse; it closes early and reports a real-looking, too-LOW control. Rather than guess a replacement, this instrument makes you state the window and own the pairing claim. Until that blocker is paid: pass a generously large window and truncate at ANALYSIS time using idle_window_requested_s vs idle_window_s on the machine line."
+fi
+
 case "$IDLE_SECONDS" in
-  ''|*[!0-9]*) die "--window must be a whole number of seconds (got '$IDLE_SECONDS')" ;;
+  *[!0-9]*) die "--window must be a whole number of seconds (got '$IDLE_SECONDS')" ;;
 esac
 [ "$IDLE_SECONDS" -ge 5 ] || die "--window must be at least 5 s to produce a usable control"
 
@@ -429,7 +469,9 @@ say "  BEAM RSS DRIFT (per process — the frozen procedure's quantity)"
 say "    baseline t=0 ......... ${IDLE_BASELINE_KB} kB   (one-shot ps, strictly pre-window — PDS-D185)"
 say "    peak ................. ${IDLE_PEAK_KB} kB   (MAX across ${BEAM_N} slot(s), ${IDLE_SAMPLES} readings)"
 say "    drift ................ ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB / 1024 = $(mib "$IDLE_DELTA_KB") MiB"
-say "    window ............... ${IDLE_WALL} s at ${SAMPLE_HZ} Hz · rate ${IDLE_RATE} MiB/s"
+say "    window ............... ${IDLE_WALL} s measured of ${IDLE_SECONDS} s requested, at ${SAMPLE_HZ} Hz · rate ${IDLE_RATE} MiB/s"
+say "                           (a measured window SHORTER than the requested one means"
+say "                            the sampler closed early; pair the two before quoting this)"
 say "    diagnostic ........... max across all slots at t=0 = ${IDLE_BASELINE_SET_KB} kB"
 if [ "$IDLE_DRIFT_SIGN" = negative_suspect ]; then
 say "    SIGN ................. NEGATIVE. The baseline is a one-shot on the PRIMARY"
@@ -461,7 +503,7 @@ say "    Both figures are kB/1024 (MiB), never /1000, and both are LOWER BOUNDS:
 say "    a spike between 1 Hz ticks is invisible (PDS-D114)."
 say ""
 
-MACHINE_LINE="PDS_IDLE_SAMPLE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acquisition=none sample_hz=$SAMPLE_HZ units=kB_div_1024 selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_t0_kb=$MEM_AVAIL_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_drift_sign=$IDLE_DRIFT_SIGN idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES threshold_applied=none"
+MACHINE_LINE="PDS_IDLE_SAMPLE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acquisition=none sample_hz=$SAMPLE_HZ units=kB_div_1024 selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_t0_kb=$MEM_AVAIL_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_requested_s=$IDLE_SECONDS idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_drift_sign=$IDLE_DRIFT_SIGN idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES threshold_applied=none"
 
 say "$MACHINE_LINE"
 say ""
