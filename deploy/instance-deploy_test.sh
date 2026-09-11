@@ -1378,4 +1378,107 @@ check "valid KEK: NOT reported as added"         "! grep -q 'added missing BARKP
 rm -rf "$TMP"
 
 echo
+echo "== Case: the backfill reads .env the way the SHELL does, and never destroys a rejected KEK (task-0fdde2a930463e93) =="
+# #17691 read the current value with an awk of the raw text after '='. The
+# CONSUMERS are the shell (this script's own `set -a; . ./.env; set +a`, and
+# api/start.sh's `source ../.env`), which accept quotes, an `export ` prefix and
+# leading whitespace, and strip trailing blanks. Every one of those forms is a
+# KEK a box BOOTS on and has sealed ciphertext under — and the awk read called
+# them invalid, so the deploy MINTED A NEW ONE over the top. There is no
+# BARKPARK_KEK_PREVIOUS handoff: that is irreversible loss of every encrypted
+# field. These cases pin the shell reading.
+
+# Rewrite .env so BARKPARK_KEK is carried by the EXACT raw line given.
+set_kek_line() { # $1=raw line
+  grep -v 'BARKPARK_KEK' "$APP/.env" > "$TMP/env.new"
+  printf '%s\n' "$1" >> "$TMP/env.new"
+  mv "$TMP/env.new" "$APP/.env"
+}
+# Byte-for-byte: every BARKPARK_KEK-bearing line, compared against a saved copy.
+kek_lines_unchanged() { # $1=saved .env
+  diff <(grep -a 'BARKPARK_KEK' "$1") <(grep -a 'BARKPARK_KEK' "$APP/.env") >/dev/null 2>&1
+}
+
+i=0
+while IFS='|' read -r label line; do
+  [ -n "$label" ] || continue
+  i=$((i + 1))
+  setup_case
+  set_kek_line "$line"
+  cp "$APP/.env" "$TMP/env.before"
+  check "$label: the fixture really carries that exact raw line" \
+    'grep -qxF -- "$line" "$APP/.env"'
+  rc="$(run_deploy 200 "kekform${i}sha")"
+  check "$label: exit 0"                          "[ '$rc' = '0' ]"
+  check "$label: the .env line is BYTE-FOR-BYTE unchanged" "kek_lines_unchanged '$TMP/env.before'"
+  check "$label: NOT reported as repaired"        "! grep -q 'repaired BARKPARK_KEK' '$TMP/out.log'"
+  check "$label: NOT reported as added"           "! grep -q 'added missing BARKPARK_KEK' '$TMP/out.log'"
+  check "$label: no SECOND assignment appended"   "[ \"\$(grep -c 'BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+  rm -rf "$TMP"
+done <<FORMS
+double-quoted KEK|BARKPARK_KEK="$VALID_KEK"
+single-quoted KEK|BARKPARK_KEK='$VALID_KEK'
+export-prefixed KEK|export BARKPARK_KEK=$VALID_KEK
+indented KEK|  BARKPARK_KEK=$VALID_KEK
+trailing-space KEK|BARKPARK_KEK=$VALID_KEK 
+FORMS
+
+# A trailing CR is the ONE form the row listed that the app does NOT boot on:
+# the shell keeps the \r (it is not IFS whitespace) and Base.decode64 refuses
+# it, so runtime.exs RAISES. Leaving it byte-for-byte untouched would leave a
+# box that cannot boot; re-minting would destroy the key. So: keep the KEY,
+# drop only the stray terminator, and say so in the log.
+setup_case
+crline="BARKPARK_KEK=$VALID_KEK"$'\r'
+set_kek_line "$crline"
+check "trailing-CR KEK: the fixture really carries the CR" 'grep -qxF -- "$crline" "$APP/.env"'
+rc="$(run_deploy 200 kekcrsha)"
+check "trailing-CR KEK: exit 0"                   "[ '$rc' = '0' ]"
+check "trailing-CR KEK: the KEY ITSELF survives — no fresh mint" \
+  "grep -q '^BARKPARK_KEK=$VALID_KEK\$' '$APP/.env'"
+check "trailing-CR KEK: the CR is gone (runtime.exs can decode it now)" \
+  '! grep -qxF -- "$crline" "$APP/.env"'
+check "trailing-CR KEK: exactly one assignment"   "[ \"\$(grep -c '^BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "trailing-CR KEK: logged as a NORMALISE, not a replace" \
+  "grep -q 'normalised BARKPARK_KEK in .env — the value carried trailing whitespace/CR' '$TMP/out.log'"
+check "trailing-CR KEK: NOT reported as repaired" "! grep -q 'repaired BARKPARK_KEK' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# A PRESENT, NON-EMPTY value that is still refused is REPLACED — but never
+# DESTROYED: the bytes are parked under a name nothing reads, so ciphertext
+# sealed under it stays recoverable.
+setup_case
+set_kek_line 'BARKPARK_KEK=x'
+check "rejected KEK: the fixture really is the refused value" "grep -q '^BARKPARK_KEK=x\$' '$APP/.env'"
+rc="$(run_deploy 200 kekparksha)"
+check "rejected KEK: exit 0"                      "[ '$rc' = '0' ]"
+check "rejected KEK: the old bytes are STILL in .env under a parked name" \
+  "grep -qE \"^BARKPARK_KEK_REJECTED_[0-9]{8}T[0-9]{6}Z='x'\\\$\" '$APP/.env'"
+check "rejected KEK: the log NAMES the preserved variable" \
+  "grep -q 'PRESERVED the rejected BARKPARK_KEK in .env as BARKPARK_KEK_REJECTED_' '$TMP/out.log'"
+check "rejected KEK: the ACTIVE key is a fresh app-valid mint" \
+  "grep -qE '^BARKPARK_KEK=[A-Za-z0-9+/]{43}=\$' '$APP/.env'"
+check "rejected KEK: exactly one ACTIVE assignment" "[ \"\$(grep -c '^BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "rejected KEK: the parked name is NOT one runtime.exs reads" \
+  "! grep -q '^BARKPARK_KEK_PREVIOUS=' '$APP/.env'"
+rm -rf "$TMP"
+
+# The other hole in the ABSENT arm: `export VAR=<refused>` failed `grep '^VAR='`,
+# so the loop APPENDED a second assignment instead of replacing — two keys in one
+# file, last-wins deciding which one boots. The replace must drop the export line.
+setup_case
+set_kek_line 'export BARKPARK_KEK=x'
+check "export-prefixed refused KEK: the fixture really is export-prefixed" \
+  "grep -q '^export BARKPARK_KEK=x\$' '$APP/.env'"
+rc="$(run_deploy 200 kekexportbadsha)"
+check "export-prefixed refused KEK: exit 0"       "[ '$rc' = '0' ]"
+check "export-prefixed refused KEK: the export line is GONE, not shadowed" \
+  "! grep -q '^export BARKPARK_KEK=' '$APP/.env'"
+check "export-prefixed refused KEK: exactly one assignment survives" \
+  "[ \"\$(grep -cE '^(export )?BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "export-prefixed refused KEK: the old bytes are parked, not destroyed" \
+  "grep -qE \"^BARKPARK_KEK_REJECTED_[0-9]{8}T[0-9]{6}Z='x'\\\$\" '$APP/.env'"
+rm -rf "$TMP"
+
+echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi
