@@ -72,10 +72,35 @@
 # and is filed separately. This instrument answers "how many are there right
 # now, and which ones", repeatably, after the fact.
 #
+# DEPTH — THE DENOMINATOR IS PART OF THE VERDICT (added 2026-09-11).
+# `bp task get <epic> -o json` renders ONE level: `child_tasks/2` in
+# tasks_controller.ex is a query filtered on `parent_id == <epic>`. A row
+# parented to a SUB-PARENT of the epic was therefore outside the population and
+# could not be seen — and re-parenting is a DOCUMENTED ROUTINE here (335 rows of
+# the deploy-reliability epic carry "Adopted by dr-backlog-never-started for
+# ROSTER HEADROOM (charter S-4c) … Disposition stays OPEN"). A housekeeping move
+# made for a page-limit reason used to empty the census population and flip the
+# verdict to SILENT with no defect fixed and no code change. So:
+#   * the census DESCENDS. Each row that is itself a parent is expanded with
+#     `bp task ls --parent <id> --all -o json`, which — unlike the child
+#     summaries on the epic read — carries `child_count` AND the full `content`,
+#     so one call per sub-parent both finds the next level and classifies it
+#     exactly. The classifier was already depth-agnostic: it takes a flat list.
+#   * the printed line STATES its own depth, its walked/unwalked sub-parent
+#     counts and its denominator, because a count that omits half the tree and
+#     does not say so is the defect.
+#   * a bare SILENT is IMPOSSIBLE while any sub-parent is unwalked. Unwalked
+#     subtree + nothing found on the walked rail is UNKNOWN (exit 2), never 0.
+# The sub-parent signal is `child_count`, which the epic read's child summaries
+# do NOT carry (verified 2026-09-11: child keys are doc_id, lifecycle_status,
+# title, criteria_progress, execution_class, inserted_at, updated_at). That is
+# why descent uses `bp task ls --parent` rather than the epic payload.
+#
 # EXIT CODES
-#   0  SILENT — every live child of the epic carries at least one criterion
-#   1  SCREAM — at least one live child carries zero; they are named, by class
-#   2  UNKNOWN — the ledger could not be read, or carried no children key.
+#   0  SILENT — every live row in a FULLY WALKED tree carries a criterion
+#   1  SCREAM — at least one live row carries zero; they are named, by class
+#   2  UNKNOWN — the ledger could not be read, carried no children key, or the
+#      tree was not walked to the bottom (a sub-parent stayed unexpanded).
 #      NEVER green. A census that cannot see is not a census that found
 #      nothing; that confusion is the epic's own sixth clause.
 #
@@ -86,6 +111,14 @@
 #                                                             # saved `bp task get -o json`
 #   scripts/epic-zero-criteria-census.sh --no-resolve         # live, but skip the
 #                                                             # per-row shape resolution
+#   scripts/epic-zero-criteria-census.sh --no-descend         # live, but stay at
+#                                                             # depth 1 (then a
+#                                                             # sub-parent forces
+#                                                             # UNKNOWN, not SILENT)
+#   scripts/epic-zero-criteria-census.sh --fixture <f> --descend
+#                                                             # walk a fixture's
+#                                                             # sub-parents too (NOT
+#                                                             # hermetic: it reads rows)
 #   scripts/epic-zero-criteria-census.sh --fixture <f> --resolve
 #                                                             # resolve a fixture's
 #                                                             # summary rows too (NOT
@@ -102,8 +135,10 @@ EPIC=""
 FIXTURE=""
 SELF_TEST=0
 RESOLVE="auto"   # auto: on for a live read, off for a fixture (hermetic by default)
+DESCEND="auto"   # auto: on for a live read, off for a fixture (hermetic by default)
+MAX_DEPTH="${CENSUS_MAX_DEPTH:-6}"
 
-usage() { sed -n '2,92p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,127p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -111,6 +146,8 @@ while [ $# -gt 0 ]; do
     --self-test)  SELF_TEST=1; shift ;;
     --resolve)    RESOLVE=1; shift ;;
     --no-resolve) RESOLVE=0; shift ;;
+    --descend)    DESCEND=1; shift ;;
+    --no-descend) DESCEND=0; shift ;;
     -h|--help)    usage; exit 0 ;;
     --*)          echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
     *)            EPIC="$1"; shift ;;
@@ -223,8 +260,39 @@ zero = [(s, c) for s, c in classified if s != "has"]
 live_zero = [(s, c) for s, c in zero if c.get("lifecycle_status") in LIVE]
 dead_zero = [(s, c) for s, c in zero if c.get("lifecycle_status") not in LIVE]
 
-print("epic %s — %d children, %d carry zero acceptance criteria"
-      % (label, len(children), len(zero)))
+# DEPTH. A row that is itself a parent hides a subtree; unless that subtree was
+# walked, this population is not the epic roster and must not be spoken of as
+# though it were. `child_count` arrives from the `bp task ls --parent` descent
+# (the epic-read child summaries do not carry it).
+meta = doc.get("_census")
+if not isinstance(meta, dict):
+    meta = {}
+walked = set(meta.get("walked") or [])
+depth = int(meta.get("depth") or 1)
+sub_parents = sorted(
+    c.get("doc_id") or "?"
+    for c in children
+    if isinstance(c, dict) and (c.get("child_count") or 0) > 0)
+unwalked = sorted(i for i in sub_parents if i not in walked)
+if meta.get("roster_read_failed"):
+    # child_count is unknown for every row, so "no sub-parents" would be a
+    # guess. Name the epic itself as the node whose shape was never read.
+    unwalked = unwalked + ["%s (parent-scoped roster read FAILED)" % label]
+elif (meta.get("descent_skipped") and children
+      and not any(isinstance(c, dict) and "child_count" in c for c in children)):
+    # Descent was off and NOT ONE row carries child_count — so "I saw no
+    # sub-parent" is not an observation, it is the absence of one. The epic
+    # epic-read child summaries never carry the key (see the DEPTH note above).
+    unwalked = unwalked + [
+        "%s (tree not walked and no row carries child_count — "
+        "sub-parents are UNKNOWABLE from this payload)" % label]
+
+print("epic %s — %d rows in the population, read to DEPTH %d "
+      "(%d sub-parents seen, %d walked, %d UNWALKED), "
+      "%d carry zero acceptance criteria"
+      % (label, len(children), depth, len(sub_parents),
+         len([i for i in sub_parents if i in walked]), len(unwalked),
+         len(zero)))
 
 if dead_zero:
     print("")
@@ -257,9 +325,29 @@ if live_zero:
           "a reason so it leaves this population honestly. An ABSENT class "
           "with rows in it is a bigger finding than the rows: some writer is "
           "filing published tasks without the key at all.")
+    if unwalked:
+        print("")
+        print("  AND THE COUNT IS A FLOOR: %d sub-parent(s) were not walked "
+              "(%s), so their subtrees are outside this denominator."
+              % (len(unwalked), ", ".join(unwalked)))
     sys.exit(1)
 
-print("SILENT: every live child carries at least one acceptance criterion.")
+if unwalked:
+    print("")
+    print("UNKNOWN — REFUSING A BARE SILENT: %d of the rows in this population "
+          "are themselves PARENTS and their subtrees were NOT walked (%s). "
+          "This census read depth %d only, so the %d-row denominator above is "
+          "not the epic roster. Nothing was found on the rail that WAS read "
+          "— that is not the same finding as \"this epic has no criteria-less "
+          "live rows\", and re-parenting a row one level down is a documented "
+          "housekeeping move here. Re-run without --no-descend, or walk those "
+          "ids, before reading this as green."
+          % (len(unwalked), ", ".join(unwalked), depth, len(children)))
+    sys.exit(2)
+
+print("SILENT: every live row carries at least one acceptance criterion "
+      "(%d rows, depth %d, %d sub-parents walked — the whole tree)."
+      % (len(children), depth, len(sub_parents)))
 sys.exit(0)
 '
 
@@ -357,6 +445,143 @@ $ids
 EOF
   printf '%s' "$ledger" | RESOLVE_DIR="$dir" python3 -c "$RESOLVE_PY" merge
   rm -rf "$dir"
+}
+
+# ---------------------------------------------------------------------------
+# Descent. The epic read is ONE level; a row parented to a sub-parent of the
+# epic is invisible to it. Each row that is itself a parent (child_count > 0)
+# is expanded with `bp task ls --parent <id> --all -o json`, whose rows carry
+# child_count AND the full content — so one call per sub-parent finds the next
+# level and classifies it exactly, with no per-row resolution. The fetch is a
+# variable so the self-test can pin this path without a network.
+# ---------------------------------------------------------------------------
+BP_TASK_LS_CMD="${BP_TASK_LS_CMD:-bp task ls}"
+
+# shellcheck disable=SC2016  # python source, not shell
+DESCEND_PY='
+import json, os, sys
+
+mode = sys.argv[1]
+raw = sys.stdin.read()
+try:
+    doc = json.loads(raw)
+except Exception:
+    sys.stdout.write(raw if mode in ("absorb", "mark") else "")
+    sys.exit(0)
+
+children = doc.get("children") if isinstance(doc, dict) else None
+if not isinstance(children, list):
+    sys.stdout.write(raw if mode in ("absorb", "mark") else "")
+    sys.exit(0)
+
+meta = doc.get("_census")
+if not isinstance(meta, dict):
+    meta = {}
+    doc["_census"] = meta
+walked = set(meta.get("walked") or [])
+
+if mode == "mark":
+    # The tree was NOT walked on this run. Record it: the classifier must not
+    # read "I saw no sub-parent" off a payload that could not carry one.
+    meta["descent_skipped"] = True
+    json.dump(doc, sys.stdout)
+    sys.exit(0)
+
+if mode == "frontier":
+    for c in children:
+        if not isinstance(c, dict):
+            continue
+        if (c.get("child_count") or 0) > 0 and c.get("doc_id") not in walked:
+            print(c["doc_id"])
+    sys.exit(0)
+
+# absorb: graft each fetched level onto the flat children list.
+fetched_dir = os.environ["ABSORB_DIR"]
+level = int(os.environ.get("ABSORB_LEVEL", "1"))
+index = {}
+for c in children:
+    if isinstance(c, dict) and c.get("doc_id"):
+        index[c["doc_id"]] = c
+
+for name in sorted(os.listdir(fetched_dir)):
+    if not name.endswith(".json"):
+        continue
+    parent_id = name[:-5]
+    try:
+        with open(os.path.join(fetched_dir, name)) as fh:
+            page = json.load(fh)
+    except Exception:
+        # A page we could not parse is a subtree we did not walk: leave the
+        # parent OUT of `walked` so the classifier refuses a bare SILENT.
+        continue
+    rows = page.get("docs") if isinstance(page, dict) else page
+    if not isinstance(rows, list):
+        continue
+    walked.add(parent_id)
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("doc_id"):
+            continue
+        existing = index.get(row["doc_id"])
+        if existing is not None:
+            # Same level, already listed by the epic read: enrich it rather
+            # than duplicating it. child_count is the whole point.
+            if "child_count" in row:
+                existing["child_count"] = row["child_count"]
+            if isinstance(row.get("content"), dict) and not isinstance(
+                    existing.get("content"), dict):
+                nested = existing.get("doc")
+                if not (isinstance(nested, dict)
+                        and isinstance(nested.get("content"), dict)):
+                    existing["content"] = row["content"]
+            continue
+        row["_census_parent"] = parent_id
+        children.append(row)
+        index[row["doc_id"]] = row
+
+meta["walked"] = sorted(walked)
+meta["depth"] = max(int(meta.get("depth") or 1), level)
+if level == 1 and os.environ.get("ROSTER_FAILED") == "1":
+    # The parent-scoped read of the epic itself failed, so `child_count` is
+    # unknown for EVERY row: we cannot even tell whether a sub-parent exists.
+    # That is a blind census, not a clean one.
+    meta["roster_read_failed"] = True
+json.dump(doc, sys.stdout)
+'
+
+descend_tree() { # stdin: ledger json -> stdout: ledger json with the tree flattened in
+  local ledger dir frontier id out level roster_failed
+  ledger="$(cat)"
+  level=1
+  roster_failed=0
+  while [ "$level" -le "$MAX_DEPTH" ]; do
+    if [ "$level" -eq 1 ]; then
+      # Level one exists already, but only as summaries with no child_count —
+      # read it again through `ls --parent` purely to learn who is a parent.
+      frontier="$EPIC"
+    else
+      frontier="$(printf '%s' "$ledger" | python3 -c "$DESCEND_PY" frontier)"
+    fi
+    [ -n "$frontier" ] || break
+    dir="$(mktemp -d)"
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      # shellcheck disable=SC2086  # BP_TASK_LS_CMD is a command + args, split on purpose
+      out="$($BP_TASK_LS_CMD --parent "$id" --all -o json 2>/dev/null)"
+      if [ -n "$out" ]; then
+        printf '%s' "$out" >"$dir/$id.json"
+      else
+        echo "  note: could not read the children of $id; its subtree stays UNWALKED" >&2
+        [ "$level" -eq 1 ] && roster_failed=1
+      fi
+    done <<EOF
+$frontier
+EOF
+    ledger="$(printf '%s' "$ledger" | ABSORB_DIR="$dir" ABSORB_LEVEL="$level" \
+      ROSTER_FAILED="$roster_failed" python3 -c "$DESCEND_PY" absorb)"
+    rm -rf "$dir"
+    level=$((level + 1))
+  done
+  printf '%s' "$ledger"
 }
 
 # ---------------------------------------------------------------------------
@@ -521,6 +746,106 @@ STUB
   check "--fixture --resolve still reds" 1 "$rc"
   expect "--resolve opts a fixture into the per-row read" "$out" "ABSENT (1)"
 
+  # 10. DEPTH. A child that is ITSELF A PARENT hides a subtree. A census that
+  #     stopped at depth 1 must not print a bare SILENT about it — before this
+  #     arm existed the script printed exactly that, and the verdict was only
+  #     ever about the direct rail.
+  cat >"$tmp/depth-blind.json" <<'JSON'
+{"children": [
+  {"doc_id": "plain-row", "lifecycle_status": "open", "child_count": 0,
+   "criteria_progress": {"met": 0, "total": 2}, "title": "fine"},
+  {"doc_id": "sub-parent", "lifecycle_status": "open", "child_count": 2,
+   "criteria_progress": {"met": 0, "total": 1}, "title": "is itself a parent"}
+]}
+JSON
+  out="$(bash "$0" --fixture "$tmp/depth-blind.json" depthfix)"; rc=$?
+  check "an unwalked sub-parent is UNKNOWN, never a bare SILENT" 2 "$rc"
+  expect "the refusal names the depth hole" "$out" "REFUSING A BARE SILENT"
+  expect "the printed line states its own depth" "$out" "read to DEPTH 1"
+  expect "the printed line states its denominator and unwalked count" \
+    "$out" "2 rows in the population"
+  expect "the unwalked sub-parent is named" "$out" "sub-parent"
+  refute "no bare SILENT is printed while a sub-parent is unwalked" \
+    "$out" "SILENT: every live row"
+
+  # 11. THE CONTROL for arm 10: the refusal is about UNWALKED subtrees, not a
+  #     blanket ban on green. Same corpus, every row a leaf -> SILENT, exit 0.
+  cat >"$tmp/depth-clean.json" <<'JSON'
+{"children": [
+  {"doc_id": "plain-row", "lifecycle_status": "open", "child_count": 0,
+   "criteria_progress": {"met": 0, "total": 2}, "title": "fine"},
+  {"doc_id": "leaf-row", "lifecycle_status": "open", "child_count": 0,
+   "criteria_progress": {"met": 0, "total": 1}, "title": "also fine"}
+]}
+JSON
+  out="$(bash "$0" --fixture "$tmp/depth-clean.json" depthclean)"; rc=$?
+  check "a fully-leaf corpus still goes green" 0 "$rc"
+  expect "the green line states depth and denominator too" \
+    "$out" "2 rows, depth 1, 0 sub-parents walked"
+
+  # 12. THE MUTATION PROOF — re-parenting, fixture-simulated (never on the live
+  #     ledger). BEFORE: a criteria-less live row sits on the epic's direct
+  #     rail and the census SCREAMS it. AFTER: the same row is adopted by a
+  #     sub-parent ("ROSTER HEADROOM", the documented housekeeping move) and
+  #     leaves the depth-1 payload entirely. No defect was fixed. The census
+  #     must not go green — and with descent it must still NAME the row.
+  cat >"$tmp/reparent-before.json" <<'JSON'
+{"children": [
+  {"doc_id": "sub-parent", "lifecycle_status": "open", "child_count": 1,
+   "criteria_progress": {"met": 0, "total": 1}, "title": "adopter"},
+  {"doc_id": "adopted-zero-row", "lifecycle_status": "open", "child_count": 0,
+   "title": "no criteria, still on the direct rail"}
+]}
+JSON
+  cat >"$tmp/reparent-after.json" <<'JSON'
+{"children": [
+  {"doc_id": "sub-parent", "lifecycle_status": "open",
+   "criteria_progress": {"met": 0, "total": 1}, "title": "adopter"}
+]}
+JSON
+  cat >"$tmp/stub-ls" <<'STUB'
+#!/usr/bin/env bash
+# stub of `bp task ls --parent <id> --all -o json`
+case "$2" in
+  reparented)
+    printf '%s' '{"docs":[{"doc_id":"sub-parent","lifecycle_status":"open","child_count":1,"title":"adopter","content":{"acceptance_criteria":[{"criterion":"a"}]}}]}' ;;
+  sub-parent)
+    printf '%s' '{"docs":[{"doc_id":"adopted-zero-row","lifecycle_status":"open","child_count":0,"title":"adopted for ROSTER HEADROOM","content":{"title":"t","description":"d"}}]}' ;;
+  *) exit 1 ;;
+esac
+STUB
+  chmod +x "$tmp/stub-ls"
+  out="$(bash "$0" --fixture "$tmp/reparent-before.json" before)"; rc=$?
+  check "BEFORE the re-parent: the criteria-less row reds on the direct rail" 1 "$rc"
+  expect "BEFORE names the row" "$out" "adopted-zero-row"
+  out="$(bash "$0" --fixture "$tmp/reparent-after.json" after)"; rc=$?
+  check "AFTER the re-parent, un-walked: UNKNOWN, not the old SILENT" 2 "$rc"
+  refute "AFTER un-walked never claims the epic is clean" "$out" "SILENT: every live row"
+  out="$(BP_TASK_LS_CMD="$tmp/stub-ls" bash "$0" --fixture "$tmp/reparent-after.json" \
+          --descend reparented)"; rc=$?
+  check "AFTER the re-parent, WALKED: the census still reds" 1 "$rc"
+  expect "the walk reaches depth 2" "$out" "read to DEPTH 2"
+  expect "the adopted row is still named after moving a level down" \
+    "$out" "adopted-zero-row"
+  expect "the grandchild is inside the denominator" "$out" "2 rows in the population"
+  expect "the walked sub-parent is counted as walked" "$out" "1 sub-parents seen, 1 walked, 0 UNWALKED"
+
+  # 13. A descent whose per-parent read FAILS must leave that subtree UNWALKED
+  #     — a read you could not make is not an empty subtree.
+  cat >"$tmp/stub-ls-dead" <<'STUB'
+#!/usr/bin/env bash
+case "$2" in
+  reparented)
+    printf '%s' '{"docs":[{"doc_id":"sub-parent","lifecycle_status":"open","child_count":1,"title":"adopter","content":{"acceptance_criteria":[{"criterion":"a"}]}}]}' ;;
+  *) exit 1 ;;
+esac
+STUB
+  chmod +x "$tmp/stub-ls-dead"
+  out="$(BP_TASK_LS_CMD="$tmp/stub-ls-dead" bash "$0" --fixture "$tmp/reparent-after.json" \
+          --descend reparented 2>/dev/null)"; rc=$?
+  check "a failed sub-parent read is UNKNOWN, not green" 2 "$rc"
+  expect "the unreadable subtree is reported UNWALKED" "$out" "1 UNWALKED"
+
   echo ""
   if [ "$fails" -eq 0 ]; then
     echo "self-test: PASS"
@@ -538,13 +863,20 @@ if [ -n "$FIXTURE" ]; then
     echo "UNKNOWN: fixture $FIXTURE is not readable." >&2
     exit 2
   fi
-  if [ "$RESOLVE" = "1" ]; then
-    # Opt-in only: a bare --fixture run stays hermetic.
-    resolve_shapes <"$FIXTURE" | classify "$EPIC"
-    exit "${PIPESTATUS[1]}"
+  ledger="$(cat "$FIXTURE")"
+  # Opt-in only: a bare --fixture run stays hermetic on BOTH axes. An
+  # unwalked sub-parent in the fixture then lands on the depth refusal
+  # rather than on a bare SILENT, which is the point.
+  if [ "$DESCEND" = "1" ]; then
+    ledger="$(printf '%s' "$ledger" | descend_tree)"
+  else
+    ledger="$(printf '%s' "$ledger" | python3 -c "$DESCEND_PY" mark)"
   fi
-  classify "$EPIC" <"$FIXTURE"
-  exit $?
+  if [ "$RESOLVE" = "1" ]; then
+    ledger="$(printf '%s' "$ledger" | resolve_shapes)"
+  fi
+  printf '%s' "$ledger" | classify "$EPIC"
+  exit "${PIPESTATUS[1]}"
 fi
 
 if ! command -v bp >/dev/null 2>&1; then
@@ -560,6 +892,14 @@ rc=$?
 if [ "$rc" -ne 0 ] || [ -z "$ledger" ]; then
   echo "UNKNOWN: \`bp task get $EPIC -o json\` failed (exit $rc) or returned nothing." >&2
   exit 2
+fi
+
+# The epic read is ONE level. Walk the sub-parents before anything is counted,
+# so the denominator is the epic's roster rather than its direct rail.
+if [ "$DESCEND" != "0" ]; then
+  ledger="$(printf '%s' "$ledger" | descend_tree)"
+else
+  ledger="$(printf '%s' "$ledger" | python3 -c "$DESCEND_PY" mark)"
 fi
 
 # The epic read hands back summaries; resolve the live zero rows so ABSENT and
