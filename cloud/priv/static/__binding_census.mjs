@@ -771,7 +771,21 @@ for (const s of sites) if (!seenByKey.has(keyOf(s))) seenByKey.set(keyOf(s), s);
 // The rule check (2d-ii) enforces, named here because THE FIXTURE CONTROL below
 // must exercise the very same function the live check runs. A control that
 // re-implements the rule it is proving has proven its own copy and nothing else.
-const verdictContrastLost = (pair) => pair.length > 1 && pair.every((r) => r.predicate === null);
+//
+// `!r.predicate`, NOT `r.predicate === null` — and that change is the whole of
+// cch-bl-2d-ii-identical-predicate's clause. The `=== null` spelling made this
+// rule disagree with the definition of "unpredicated" every other arm in this
+// file uses: `isUnboundElevated` just below tests `!r.predicate`, and so does
+// the classification summary's `pinnedUnpredicated`. A pair pinned
+// `predicate: ""` on both rows was therefore BOTH UNPREDICATED to the ratchet
+// and to the report, and PREDICATED to (2d-ii) — a flattening that the rule's
+// own sentence ("the pair may not go BOTH unpredicated") forbids and its code
+// could not see. One definition now, shared.
+//
+// THIS IS NOT A BAN ON THE PAIR SHARING A PREDICATE NAME. See THE RULING at
+// (2d) below: two rows carrying the SAME non-empty predicate is the shape the
+// fix this census exists to motivate produces, and it passes here on purpose.
+const verdictContrastLost = (pair) => pair.length > 1 && pair.every((r) => !r.predicate);
 
 // THE RATCHET'S RULE, named here for the same reason: the fixture control below
 // and the live arm (2j) far down this file both call THIS function. A control
@@ -906,10 +920,15 @@ if (FIXTURE_MODE) {
       continue;
     }
     if (kind === "pin-override") {
-      const om = rest.match(/^(.+?)[ \t]+predicate=(null|[A-Za-z_$][A-Za-z0-9_$]*)$/);
+      // `""` is a THIRD spelling on purpose, not typo-tolerance. The pin's
+      // falsy-but-not-null predicate is the flattening (2d-ii) could not see
+      // before cch-bl-2d-ii-identical-predicate, so the fixture has to be able
+      // to WRITE one: a mutant the fixture language cannot express is a mutant
+      // nobody can prove the rule against.
+      const om = rest.match(/^(.+?)[ \t]+predicate=(null|""|[A-Za-z_$][A-Za-z0-9_$]*)$/);
       if (!om) dieFixture(["  unparseable @pin-override: " + JSON.stringify(rest),
-        "  shape: @pin-override <fn>|<VERB> <route> predicate=<name|null>"]);
-      overrides.push({ key: om[1].trim(), predicate: om[2] === "null" ? null : om[2] });
+        '  shape: @pin-override <fn>|<VERB> <route> predicate=<name|null|"">']);
+      overrides.push({ key: om[1].trim(), predicate: om[2] === "null" ? null : om[2] === '""' ? "" : om[2] });
       continue;
     }
     const am = rest.match(/^([A-Z-]+)[ \t]+(.+)$/);
@@ -1686,6 +1705,63 @@ if (dupes.length) {
 //              predicate is still standing. It is strictly the weaker rule, so
 //              (2d-iii) subsumes it; (2d-ii) is kept for its message, which
 //              names the flattening case a reader is most likely to hit.
+//
+//      ── THE RULING ON AN IDENTICAL PREDICATE ACROSS THE PAIR ──────────────
+//      (cch-bl-2d-ii-identical-predicate.) The filing asks whether the pair
+//      going to ONE SHARED PREDICATE NAME is a flattening (2d-ii) ought to
+//      refuse. The answer is in two halves, and both are now mechanical.
+//
+//      HALF ONE — A SHARED NON-EMPTY PREDICATE IS PERMITTED, and that is a
+//      ruling, not an omission. If someone puts `providerCanWrite()` in front
+//      of the launch wizard's provider button, the bare row is honestly
+//      re-pinned `providerCanWrite` and the pair reads the same name twice.
+//      THAT IS THE FIX THIS CENSUS EXISTS TO MOTIVATE. Reding on it would
+//      re-commit the exact error charter D452 retired: `bp.predicate !== null`
+//      froze the defect by demanding the bare row stay unpredicated forever, and
+//      "the pair may not share a name" would freeze it one step later, by
+//      demanding the fix invent a second predicate for a single write law. One
+//      predicate for one family is not a lost fence; it is one fence, correctly
+//      named twice.
+//
+//      What a shared name COULD hide is a pin edit that copies the gated row's
+//      predicate onto the bare row without touching app.js. That is a claim
+//      about the TREE, and no pin-side rule can adjudicate it — (2d-ii) reads
+//      only the pin, so it would be guessing. The arm that can ask the tree is
+//      (2l), which renders an offer on `grant` and on `refuse` and reds on the
+//      disagreement; the residue is already named there as its own LIMIT A, and
+//      it belongs to that arm, not to this one. A rule that cannot tell the fix
+//      from the forgery must not pretend to: it permits both and points at the
+//      arm that measures.
+//
+//      HALF TWO — AN IDENTICAL FALSY PREDICATE IS REFUSED, and it was not
+//      before. `verdictContrastLost` used to spell "unpredicated"
+//      `predicate === null`, while `isUnboundElevated` and the classification
+//      summary both spell it `!predicate`. So a pair pinned `predicate: ""` on
+//      both rows was counted UNPREDICATED twice in the report and read as
+//      PREDICATED here — the one identical-predicate shape that really IS the
+//      pair going both unbound, sliding under the rule that names it. The two
+//      spellings are one now.
+//
+//      THE FIXTURE DRIVES THE MIXED CASE ON PURPOSE. The add fixture's
+//      `@pin-override` sets the gated row to `""` against a bare row pinned
+//      `null`, so the pair is {null, ""} — a mutant no single-value equality
+//      catches: `=== null` goes silent on it and `=== ""` goes silent on it, so
+//      either regression reds that cell instead of passing it. A both-null
+//      mutant proves strictly less, because it fires under the OLD spelling too.
+//      The remove fixture carries the other half: its `@pin-override` flattens
+//      the pair to `fixtureCanWrite` on BOTH rows and declares the arm must stay
+//      silent, so HALF ONE's ruling reds this file the day someone turns it into
+//      a name-sharing ban.
+//
+//      NAMED RESIDUE, so the next reader inherits it rather than rediscovering
+//      it: (2d-iii) still spells its own test `gp.predicate === null`. For the
+//      live pair that gap is closed by (2d-ii) — bare `null` plus gated `""` is
+//      now a red, just with (2d-ii)'s message instead of (2d-iii)'s. It stays
+//      open only for a pair whose BARE row is predicated and whose gated row is
+//      `""`, which requires the fix to have landed first. Left alone
+//      deliberately: widening it here would add a clause no fixture in this file
+//      drives, and an unproven clause is what this whole control exists to
+//      refuse.
 {
   const bare = sites.find((s) => s.fn === "submitProviderCred" && s.route === "/v1/providers");
   const gated = sites.find((s) => s.fn === "submitInlineProviderCred" && s.route === "/v1/providers");
