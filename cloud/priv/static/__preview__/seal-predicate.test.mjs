@@ -84,13 +84,53 @@ const tmp = (prefix) => mkdtempSync(join(tmpdir(), prefix));
 // default and that is what the Console gate runs, where wave 29 already teaches the
 // ladder to answer HISTORY-UNAVAILABLE instead of inventing ancestry. Refusing a
 // shallow clone here would red the required Console gate on every PR. Shallow is a
-// handled condition; ABSENT is not.
+// handled condition; ABSENT is not — and that is measured, not assumed: a
+// `git clone --depth 1` of this branch (1 commit, `.git/shallow` present, no
+// origin/main) runs 106 passed, 0 failed, exit 0.
 //
 // UNDER `node --test` THE RUNNER RE-CODES THIS. `node --test <file>` reports the
 // file as one failed test and exits 1, carrying `exitCode: 3` in its TAP diagnostic
 // and NOT ONE line of predicate output. Run the file directly —
 // `node cloud/priv/static/__preview__/seal-predicate.test.mjs` — and the 3 is the
 // process's own. Both are refusals; only the second can be read off `$?`.
+// ── THE EXTRACT AUDIT: WHICH OF THE LOST PREDICATES FAILED OPEN ─────────────
+//
+// s8's section 13 was the finding in required-checks.test.sh: a predicate printing
+// `ok` over a corpus of ZERO files. The same question, asked here and answered by
+// measurement instead of by analogy:
+//
+//   OF THE 36 PREDICATES AN EXTRACT LOSES, ALL 36 FAIL CLOSED. ZERO FAIL OPEN.
+//
+// and the reason is nameable rather than lucky: wave 27 gave seal-predicate.mjs a
+// ROOT GUARD (`code=REPO-NOT-A-GIT-WORK-TREE`, exit 2, before any clause is
+// evaluated), so a run over a tree git cannot read hands every test a refusal to
+// assert against rather than an empty corpus to score. required-checks.test.sh §13
+// had no such guard, which is exactly why IT failed open. The disease is shared;
+// this half of the symptom is not, and saying so is the finding.
+//
+// DERIVED TWICE, BY TWO INSTRUMENTS THAT COULD HAVE DISAGREED:
+//
+//   1. OUTPUT DIFF. Every spawn of the predicate recorded in both trees, keyed by
+//      test, compared after normalising the two roots, the temp dirs, the shas and
+//      the ISO timestamps. All 65 extract-passing tests produce BYTE-IDENTICAL
+//      predicate output in a real worktree and in the extract — they are
+//      fixture-driven (`--ledger <fixture> --guard-cmd true`) or drive a synthetic
+//      non-git root on purpose. A test handed identical evidence cannot have lost
+//      any. (Before the timestamps were normalised this same detector called 61 of
+//      the 65 "differing"; the difference was the clock. A detector that fires on
+//      everything measures nothing — which is why it is not the only one here.)
+//   2. SABOTAGED GIT. The full checkout re-run with a `git` first on PATH that
+//      exits 128 for every call: 61 passed, 40 failed. It catches everything the
+//      extract catches PLUS four wave-29 PROBE tests — those `git init` their OWN
+//      repositories under a temp dir, so they pass HONESTLY in an extract (the
+//      binary is there; only THIS tree's database is gone). Nothing goes the other
+//      way: not one extract-failing test passes under the shim.
+//
+// SO WHAT THE REFUSAL BUYS IS NOT A FALSE GREEN — IT IS A FALSE ACCUSATION. An
+// extract run exits 1, and in this tree's vocabulary (__preview__/exit-vocabulary.mjs)
+// exit 1 means "I MEASURED the subject and found the defect I NAME". Thirty-six reds
+// saying `fatal: not a git repository` send a reader to hunt a defect in a predicate
+// nothing ever read, six minutes at a time. Exit 3 says the opposite, by name, first.
 const NO_OBJECT_DATABASE = 3;
 
 // Returns the refusal message, or null when the root is readable. A pure function
