@@ -1675,6 +1675,12 @@ func supportLastLine(s string) string {
 // supportEnableImportStep flips the box's fail-closed bundle-import switch and
 // restarts Barkpark, then waits for the loopback API to answer again. The .env
 // edit is idempotent (strip + append, the secretsInstallStep idiom).
+//
+// The wait polls /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, and `curl -fsS` turns its eventual
+// 404 into a non-zero exit — so on 2027-01-01 this step would burn all 60
+// attempts and fail the import on a box that came back fine.
 func supportEnableImportStep() cloud.CaddyStep {
 	script := `set -e
 touch /opt/barkpark/.env
@@ -1682,7 +1688,7 @@ grep -v '^BARKPARK_ALLOW_BUNDLE_IMPORT=' /opt/barkpark/.env > /opt/barkpark/.env
 printf 'BARKPARK_ALLOW_BUNDLE_IMPORT=1\n' >> /opt/barkpark/.env.bpnew
 mv /opt/barkpark/.env.bpnew /opt/barkpark/.env
 systemctl restart barkpark
-for i in $(seq 1 60); do curl -fsS http://localhost:4000/api/schemas >/dev/null 2>&1 && exit 0; sleep 2; done
+for i in $(seq 1 60); do curl -fsS http://localhost:4000/status.json >/dev/null 2>&1 && exit 0; sleep 2; done
 echo 'barkpark did not come back after restart' >&2; exit 1`
 	return cloud.CaddyStep{
 		Title: "enable workspace bundle import (BARKPARK_ALLOW_BUNDLE_IMPORT=1) + restart",
