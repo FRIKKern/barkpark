@@ -97,8 +97,14 @@
 //        #view-overview. This leg censuses every walk in this file out of its
 //        own bytes (view-scope-census.mjs), tours every routable screen by
 //        hash, and measures which document-wide selectors match inside a hidden
-//        view — 23 of 57 do, all registered, all LATENT (no leg enters by hash
-//        today). Its mutation appends .fleet-row residue to the hidden
+//        view — the run PRINTS both numbers rather than this comment typing
+//        them, because every literal a header has typed about this file rotted
+//        inside a wave. They are all registered in RESIDUE_REGISTER, each with
+//        a written reason, and all LATENT (no leg enters by hash today). A
+//        SECOND PASS on `operator-console` paints #view-operator, which is
+//        fail-closed on mixed-fleet and is therefore the one screen the tour
+//        can never reach — its column used to read clean for a reason about the
+//        FIXTURE. Its mutation appends .fleet-row residue to the hidden
 //        #view-overview and asserts BOTH halves: the scoped walk does not move,
 //        the document-wide one does.
 //    GR115-bpconsole-dead-rule      at 700x800 .bp-console-body must compute
@@ -1888,7 +1894,11 @@ async function main() {
       await nav(`${BASE}/?scen=overview-past-due&theme=light`, `document.querySelectorAll('section.view:not([hidden]) .attention-row .attention-acts').length > 0`);
       const attPop = await evalJs(`document.querySelectorAll('section.view:not([hidden]) .attention-row .attention-acts').length`);
       const m = await evalJs(
-        `(function(){var row=document.querySelector('.attention-row');var cs=getComputedStyle(row);` +
+        // SCOPED (task-995fc7be51dab99e): the row whose cascade this asserts is
+        // the one on the screen, not whichever `.attention-row` a previously
+        // visited #overview happens to have left first in document order.
+        `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+        `var row=(v||document).querySelector('.attention-row');var cs=getComputedStyle(row);` +
         `var main=row.querySelector('.attention-main').getBoundingClientRect();` +
         `var acts=row.querySelector('.attention-acts').getBoundingClientRect();` +
         `return {dir:cs.flexDirection, align:cs.alignItems,` +
@@ -1902,7 +1912,10 @@ async function main() {
       }
       // The stack must stay scoped to the tablet block — at 900 it is a row.
       await setViewport(900);
-      const wide = await evalJs(`getComputedStyle(document.querySelector('.attention-row')).flexDirection`);
+      const wide = await evalJs(
+        `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+        `return getComputedStyle((v||document).querySelector('.attention-row')).flexDirection;})()`,
+      );
       if (wide !== "row") fail("GR109-attention-row-dead-rule", `@900 flex-direction is "${wide}", expected "row" — the tablet stack leaked above its breakpoint`);
       else okLine(`@900 still a row — the stack is scoped to <=768`);
 
@@ -1938,7 +1951,8 @@ async function main() {
           await setViewport(1000);
           await nav(
             `${BASE}/?scen=${scen}&theme=${theme}#overview`,
-            `document.querySelector('.attention-row .status-pill-detail') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-overview' && v.querySelector('.attention-row .status-pill-detail'));})()`,
           );
           const row = [];
           for (const width of ATT_WIDTHS) {
@@ -1948,7 +1962,7 @@ async function main() {
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var d=document.documentElement;` +
               `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,pills:0,clips:[],tall:[],out:[],w:[]};` +
-              `[].slice.call(document.querySelectorAll('.attention-row')).forEach(function(r,i){` +
+              `[].slice.call(v?v.querySelectorAll('.attention-row'):[]).forEach(function(r,i){` +
               `  out.rows++;` +
               `  var pill=r.querySelector('.status-pill'); if(!pill) return; out.pills++;` +
               `  var pr=pill.getBoundingClientRect();` +
@@ -2173,7 +2187,8 @@ async function main() {
             await setViewport(width);
             const m = await evalJs(
               `(function(){var d=document.documentElement;var R=function(v){return Math.round(v*1000)/1000;};` +
-              `var g=document.querySelector('.instances-grid');` +
+              `var lv=document.querySelector('section.view:not([hidden])');` +
+              `var g=(lv||document).querySelector('.instances-grid');` +
               `var cards=g?[].slice.call(g.querySelectorAll('.instance-card')):[];` +
               `var hits=[];` +
               `cards.forEach(function(c,i){var cr=c.getBoundingClientRect();` +
@@ -2425,7 +2440,7 @@ async function main() {
             const m = await evalJs(
               `(function(){var d=document.documentElement;` +
               `var v=document.querySelector('section.view:not([hidden])');` +
-              `var t=document.querySelector('.inst-tab[aria-current="page"]');` +
+              `var t=(v||document).querySelector('.inst-tab[aria-current="page"]');` +
               // W16-S3: THE RAIL'S OWN PILL, measured in the cells this leg
               // already visits. `cch-w14-bl-status-pill-label-overflows-rail`
               // lived HERE and every leg in this file walked past it: the page
@@ -2433,7 +2448,7 @@ async function main() {
               // page-level assertion certifies a rail whose label paints 36.52px
               // past its own chip. Both axes, because a wrap fixes the
               // horizontal one and can invent the vertical one.
-              `var rp=[].slice.call(document.querySelectorAll('.detail-rail .status-pill')).map(function(p){` +
+              `var rp=[].slice.call((v||document).querySelectorAll('.detail-rail .status-pill')).map(function(p){` +
               `  var pr=p.getBoundingClientRect(); var l=p.querySelector('.status-pill-label');` +
               `  return {sw:p.scrollWidth,cw:p.clientWidth,sh:p.scrollHeight,ch:p.clientHeight,` +
               `    lh:l?+l.getBoundingClientRect().height.toFixed(2):0,ph:+pr.height.toFixed(2),` +
@@ -2446,7 +2461,7 @@ async function main() {
               `    hasLabel:!!l,` +
               `    lsw:l?l.scrollWidth:0,lcw:l?l.clientWidth:0,t:(p.textContent||'').slice(0,40)};});` +
               `return {sw:d.scrollWidth, cw:d.clientWidth, view:v?v.id:'none', rp:rp,` +
-              ` rails:document.querySelectorAll('.detail-rail').length,` +
+              ` rails:(v||document).querySelectorAll('.detail-rail').length,` +
               ` tab:t?t.textContent:null, theme:d.getAttribute('data-theme')};})()`,
             );
             cells++;
@@ -2630,7 +2645,8 @@ async function main() {
           await setViewport(900);
           await nav(
             `${BASE}/?scen=${r.name}&theme=${theme}${r.hash}`,
-            `document.querySelector('.detail-head .fleet-url') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-site' && v.querySelector('.detail-head .fleet-url'));})()`,
           );
           const row = [];
           for (const width of SITE_PHONE_WIDTHS) {
@@ -2638,7 +2654,7 @@ async function main() {
             const m = await evalJs(
               `(function(){var d=document.documentElement;var R=function(v){return Math.round(v*100)/100;};` +
               `var v=document.querySelector('section.view:not([hidden])');` +
-              `var u=document.querySelector('.detail-head .fleet-url');` +
+              `var u=(v||document).querySelector('.detail-head .fleet-url');` +
               `var as=[].slice.call(document.querySelectorAll('.detail-head .fleet-url .site-open')).map(function(a){` +
               `  var rr=a.getBoundingClientRect();var cs=getComputedStyle(a);` +
               `  return {right:R(rr.right),w:R(rr.width),lines:a.getClientRects().length,` +
@@ -3190,7 +3206,7 @@ async function main() {
         await nav(
           `${BASE}/?scen=panel-overview&theme=light#instance/${INST}`,
           `(function(){var v=document.querySelector('section.view:not([hidden])');` +
-          `return v && v.id==='view-instance' && document.querySelector('.detail-grid--instance');})()`,
+          `return v && v.id==='view-instance' && v.querySelector('.detail-grid--instance');})()`,
         );
         await evalJs(`window.scrollTo(0, document.body.scrollHeight); void 0`);
         await sleep(120);
@@ -4663,7 +4679,8 @@ async function main() {
           await setViewport(1000);
           await nav(
             `${BASE}/?scen=${scen}&theme=${theme}#overview`,
-            `document.querySelector('.instance-card-head .status-pill-detail') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-overview' && v.querySelector('.instance-card-head .status-pill-detail'));})()`,
           );
           const row = [];
           for (const width of CARD_WIDTHS) {
@@ -4677,7 +4694,7 @@ async function main() {
               // counted as empty and asserted about NOTHING, and the cell's
               // non-empty count is asserted below so an all-empty render is a
               // failure rather than a clean score.
-              `[].slice.call(document.querySelectorAll('.instance-card-url')).forEach(function(e,i){` +
+              `[].slice.call(v?v.querySelectorAll('.instance-card-url'):[]).forEach(function(e,i){` +
               `  var t=(e.textContent||'').trim();` +
               `  if(!t){ out.urlsEmpty++; return; }` +
               `  out.urls++; out.urlH.push(e.offsetHeight);` +
@@ -4696,13 +4713,13 @@ async function main() {
               // and RESTORED in the same synchronous pass, so nothing below or
               // after this eval sees a mutated DOM.
               `var CAP=new Array(64).join('a')+'-5b2c1e.barkpark.cloud';` +
-              `[].slice.call(document.querySelectorAll('.instance-card-url')).forEach(function(e,i){` +
+              `[].slice.call(v?v.querySelectorAll('.instance-card-url'):[]).forEach(function(e,i){` +
               `  var t=(e.textContent||'').trim(); if(!t) return;` +
               `  e.textContent=CAP; out.stress++;` +
               `  if(e.scrollWidth>e.clientWidth) out.stressClips.push({i:i,sw:e.scrollWidth,cw:e.clientWidth,n:CAP.length});` +
               `  e.textContent=t;` +
               `});` +
-              `[].slice.call(document.querySelectorAll('.instance-card-head')).forEach(function(head,i){` +
+              `[].slice.call(v?v.querySelectorAll('.instance-card-head'):[]).forEach(function(head,i){` +
               `  var pill=head.querySelector('.status-pill'); if(!pill) return; out.pills++;` +
               `  var pr=pill.getBoundingClientRect();` +
               `  out.h.push(+pr.height.toFixed(2));` +
@@ -4724,7 +4741,7 @@ async function main() {
               // printed so this slice's "we did not disturb it" is a number a
               // reader can check, and it is NOT judged here — asserting another
               // slice's open row would red this leg on merged main.
-              `[].slice.call(document.querySelectorAll('.attention-row .status-pill-detail')).forEach(function(e,i){` +
+              `[].slice.call(v?v.querySelectorAll('.attention-row .status-pill-detail'):[]).forEach(function(e,i){` +
               `  out.att.push(e.clientWidth+'/'+e.scrollWidth);});` +
               `return out;})()`,
             );
@@ -6083,7 +6100,8 @@ async function main() {
           await setViewport(900);
           await nav(
             `${BASE}/?scen=${scen}&theme=${theme}#instance/${INST}`,
-            `document.querySelector('.detail-head-main') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-instance';})()`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-instance' && v.querySelector('.detail-head-main'));})()`,
           );
           const row = [];
           for (const width of HEAD_WIDTHS) {
@@ -6094,7 +6112,7 @@ async function main() {
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,` +
               `  copies:0,urlCopies:0,worst:0,bad:[],strips:[],tabStrips:0,tabLinks:0};` +
-              `[].slice.call(document.querySelectorAll('.copy-btn')).forEach(function(b,i){` +
+              `[].slice.call(v?v.querySelectorAll('.copy-btn'):[]).forEach(function(b,i){` +
               `  var r=b.getBoundingClientRect(); out.copies++;` +
               `  if(b.closest('.detail-url')) out.urlCopies++;` +
               `  if(r.right>out.worst) out.worst=+r.right.toFixed(2);` +
@@ -6113,7 +6131,7 @@ async function main() {
               // while its sentence about `.inst-tabs` had zero elements behind
               // it. `tabStrips` and `tabLinks` are the census the refusals below
               // are built on.
-              `[].slice.call(document.querySelectorAll('.inst-tabs')).forEach(function(s){` +
+              `[].slice.call(v?v.querySelectorAll('.inst-tabs'):[]).forEach(function(s){` +
               `  out.tabStrips++; out.tabLinks+=s.querySelectorAll('a.inst-tab').length;` +
               `  if(s.scrollWidth>s.clientWidth) out.strips.push({ox:getComputedStyle(s).overflowX,sw:s.scrollWidth,cw:s.clientWidth});` +
               `});` +
@@ -8246,7 +8264,8 @@ async function main() {
         await setViewport(1000);
         await nav(
           `${BASE}/?scen=instance-cruel-detail&theme=${theme}#instance/5b2c1e00-0000-4000-8000-0000000000c1`,
-          `document.querySelector('.detail-url-text') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-instance';})()`,
+          `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+          `return !!(v && v.id==='view-instance' && v.querySelector('.detail-url-text'));})()`,
         );
         const row = [];
         for (const width of DETAIL_WIDTHS) {
@@ -8255,8 +8274,8 @@ async function main() {
             `(function(){` +
             `var v=document.querySelector('section.view:not([hidden])');` +
             `var d=document.documentElement;` +
-            `var h1=document.querySelector('.detail-title-row h1');` +
-            `var url=document.querySelector('.detail-url-text');` +
+            `var h1=(v||document).querySelector('.detail-title-row h1');` +
+            `var url=(v||document).querySelector('.detail-url-text');` +
             // THE PIN BADGE, measured with the D253 cue predicate's own three
             // legs (charter D253, the .set-row-name arm): `mw` is a
             // width:min-content clone appended into the element's OWN parent so
@@ -8265,7 +8284,7 @@ async function main() {
             // atomic inline has nothing to ellipsize), and `ox` is read by name
             // because `overflow` is a shorthand that can serialise "visible clip".
             `var pins=[];` +
-            `Array.prototype.forEach.call(document.querySelectorAll('.update-panel-body .rail-row .v .badge'),function(n){` +
+            `Array.prototype.forEach.call((v||document).querySelectorAll('.update-panel-body .rail-row .v .badge'),function(n){` +
             `  var cs=getComputedStyle(n);` +
             `  var cl=n.cloneNode(true);` +
             `  cl.style.cssText+=';position:absolute!important;left:-99999px!important;top:0!important;visibility:hidden!important;width:min-content!important;max-width:none!important;min-width:0!important;height:auto!important;overflow:visible!important;flex:0 0 auto!important;';` +
@@ -8662,7 +8681,8 @@ async function main() {
           await setViewport(1000);
           await nav(
             `${BASE}/?scen=${scen}&theme=${theme}#overview`,
-            `document.querySelector('.attention-row .attention-name') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-overview' && v.querySelector('.attention-row .attention-name'));})()`,
           );
           const row = [];
           for (const width of NAME_WIDTHS) {
@@ -8672,7 +8692,7 @@ async function main() {
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var d=document.documentElement;` +
               `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,names:0,zero:[],cut:[],hit:[]};` +
-              `[].slice.call(document.querySelectorAll('.attention-row')).forEach(function(r,i){` +
+              `[].slice.call(v?v.querySelectorAll('.attention-row'):[]).forEach(function(r,i){` +
               `  var name=r.querySelector('.attention-name'); if(!name) return; out.names++;` +
               `  var label=(name.textContent||'').trim().slice(0,32);` +
               `  if(name.clientWidth<=0) out.zero.push({i:i,cw:name.clientWidth,sw:name.scrollWidth,t:label});` +
@@ -9196,7 +9216,8 @@ async function main() {
         await setViewport(900);
         await nav(
           `${BASE}/?scen=sites-on-instance&theme=${theme}${sc.deepLink}`,
-          `document.querySelector('.site-name') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-instance';})()`,
+          `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+          `return !!(v && v.id==='view-instance' && v.querySelector('.site-name'));})()`,
         );
         const row = [];
         for (const width of TRACK_WIDTHS) {
@@ -9205,9 +9226,9 @@ async function main() {
             `(function(){` +
             `var d=document.documentElement;` +
             `var v=document.querySelector('section.view:not([hidden])');` +
-            `var dm=document.querySelector('.detail-main');` +
-            `var g=document.querySelector('.detail-grid--instance');` +
-            `var names=[].slice.call(document.querySelectorAll('.site-name')).map(function(el){` +
+            `var dm=(v||document).querySelector('.detail-main');` +
+            `var g=(v||document).querySelector('.detail-grid--instance');` +
+            `var names=[].slice.call(v?v.querySelectorAll('.site-name'):[]).map(function(el){` +
             `  return {sw:el.scrollWidth,cw:el.clientWidth,len:(el.textContent||'').length};});` +
             // NAME THE BOX when the page drags. A page number alone sends the
             // next reader back into DevTools; the widest right edges are the
@@ -11818,7 +11839,8 @@ async function main() {
           `document is restored: ${removed.removed} removed, ${removed.left} left`,
         );
         okLine(
-          `HONEST LIMIT: this leg drives ONE scenario (${SCEN}) at ONE width, and the residue census answers ` +
+          `HONEST LIMIT: this leg drives TWO scenarios (${SCEN} for the tour, ${OP_SCEN} for the one view that ` +
+          `fixture cannot open) at ONE width, and the residue census answers ` +
           `"can a hidden view hold a match" — it does NOT answer "would that match change this leg's verdict", ` +
           `which depends on what each leg then measures per element. A registered exposure is a walk whose ` +
           `output is entry-path-dependent, nothing stronger; the ${tally.unresolved} runtime-built selectors are ` +

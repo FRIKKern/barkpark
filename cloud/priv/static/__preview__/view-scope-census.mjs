@@ -199,7 +199,16 @@ export function censusTally(walks) {
 //  comment is exactly what the cancelled row this file's cardinality half
 //  answers had rotted into.
 //
-//  TWO ROWS LEFT THIS LIST ON 2026-09-11 (task-39ebd948f40660e3) and neither was
+//  TWENTY ROWS LEFT THIS LIST ON 2026-09-11 (task-995fc7be51dab99e) AND THAT IS
+//  THE POINT OF THE ROW: each was a walk CONVERTED to `v.querySelectorAll(…)`
+//  off `section.view:not([hidden])`, leg by leg, with the owning leg re-run
+//  driven and its printed population unchanged — the wave-24 test, which is that
+//  a conversion is only a finding if the leg still measures what it measured.
+//  What is left is TWO rows, each carrying a written reason, and the reason is
+//  the register's whole contract now: a row that says only `latent` no longer
+//  parses (registerDrift's `reasonless` arm reds on it).
+//
+//  TWO ROWS LEFT THIS LIST EARLIER ON 2026-09-11 (task-39ebd948f40660e3) and neither was
 //  a fix to the exposure: `.attention-row .attention-acts` and `.instances-grid
 //  .instance-card` were both READINESS GATES converted to count the population
 //  they wait for, scoped to `section.view:not([hidden])`. A scoped walk is not
@@ -222,31 +231,8 @@ export function censusTally(walks) {
 //  scenario), so their columns are UNMEASURED rather than clean; the leg prints
 //  that line every run rather than letting a hole read as a zero.
 export const RESIDUE_REGISTER = [
-  { selector: ".attention-row", views: ["view-overview"], legs: "GR109-attention-row-dead-rule, W20-attention-name-column", status: "latent", reason: "W20 measures the attention COLUMN geometry and GR109 the stacked-row cascade; both enter by full load on an overview scenario, and scoping them is this row's remedy \u2014 until then the walk reads the overview rows a person has already visited" },
-  { selector: ".attention-row .attention-name", views: ["view-overview"], legs: "W20-attention-name-column", status: "latent", reason: "the name column's width is read off every attention row on the screen; a hidden overview keeps its own rows and would widen the census" },
-  { selector: ".attention-row .status-pill-detail", views: ["view-overview"], legs: "GR109-attention-row-dead-rule, W18-overview-card-pill", status: "latent", reason: "the pill cells GR109 and W18 measure; a hidden overview holds one per attention row" },
-  { selector: ".copy-btn", views: ["view-instance", "view-site"], legs: "W21-inst-head-320-copy-reachable", status: "latent", reason: "W21 asks whether the copy control is REACHABLE at 320 in the instance head; a hidden view-site keeps its own copy button painted" },
-  { selector: ".detail-grid--instance", views: ["view-instance"], legs: "W26-instance-track-min-content, W27-failed-retry-reachable-after-flick", status: "latent", reason: "the instance detail grid whose track widths W26 measures and W27 waits on; only one detail view is live, the other is hidden residue" },
-  { selector: ".detail-head .fleet-url", views: ["view-site"], legs: "W14-site-detail-phone-band", status: "latent", reason: "the site detail head's URL line W14 bounds; a hidden view-site keeps it after the tour" },
-  { selector: ".detail-head-main", views: ["view-instance"], legs: "W21-inst-head-320-copy-reachable", status: "latent", reason: "the detail head block W21 measures at 320; the other detail view keeps its own" },
-  { selector: ".detail-main", views: ["view-instance", "view-site"], legs: "W26-instance-track-min-content", status: "latent", reason: "the detail grid's main track W26 measures; instance and site each paint one and only one is live" },
-  { selector: ".detail-rail", views: ["view-instance", "view-site"], legs: "W13-detail-route-band", status: "latent", reason: "the rail W13 bounds per route; both detail views paint a rail and the hidden one is residue" },
-  { selector: ".detail-rail .status-pill", views: ["view-site"], legs: "W13-detail-route-band", status: "latent", reason: "the rail's route pills; the same two-detail-view residue as .detail-rail" },
-  { selector: ".detail-title-row h1", views: ["view-instance"], legs: "W21-detail-url-text-page-bound", status: "latent", reason: "the detail page title W21 bounds; the hidden instance view keeps its own h1" },
-  { selector: ".detail-url-text", views: ["view-instance"], legs: "W21-detail-url-text-page-bound", status: "latent", reason: "the instance URL W21 bounds; the hidden instance view keeps its own" },
-  { selector: ".fleet-row", views: ["view-overview", "view-providers"], legs: "W15-fleet-row-text-bounded, W35-hash-nav-hidden-view-residue", status: "latent", reason: "THE ORIGINAL FINDING (cch-w24-s5): #view-overview paints activity rows under the same class, so the document-wide count is 8 against 5 in view. W15's measuring walk is already scoped; the sites left here are W35's own controls, which are document-wide ON PURPOSE because the difference IS the subject" },
-  { selector: ".inst-tab[aria-current=\"page\"]", views: ["view-instance"], legs: "W13-detail-route-band", status: "latent", reason: "the current instance tab W13 reads; a hidden view-instance keeps its tablist with a current tab" },
-  { selector: ".inst-tabs", views: ["view-instance"], legs: "W21-inst-head-320-copy-reachable", status: "latent", reason: "the tab strip W21 measures at 320; the hidden instance view keeps it" },
-  { selector: ".instance-card-head", views: ["view-overview"], legs: "W18-overview-card-pill", status: "latent", reason: "the overview card head W18 measures; overview is the landing screen, so it is painted and hidden for every leg that routes away from it" },
-  { selector: ".instance-card-head .status-pill-detail", views: ["view-overview"], legs: "W18-overview-card-pill", status: "latent", reason: "the card pills W18 asserts per cell; same hidden-overview residue as the head" },
-  { selector: ".instance-card-url", views: ["view-overview"], legs: "W18-overview-card-pill", status: "latent", reason: "the card address W18 bounds (W22's own readiness was scoped to the live view under this row's task); the hidden overview keeps one per card" },
-  { selector: ".instances-grid", views: ["view-overview"], legs: "W12-narrow-viewport-truth", status: "latent", reason: "W12's overview grid, walked plurally off the element rather than the document; a hidden overview keeps its grid" },
-  { selector: ".site-name", views: ["view-sites", "view-instance"], legs: "W26-instance-track-min-content", status: "latent", reason: "the site name W26 measures in the instance detail's site list; view-sites keeps its own rows under the same class" },
-  { selector: ".site-row", views: ["view-sites", "view-instance"], legs: "W50-site-row-three-hosts-cruel-by-fixture", status: "latent", reason: "the site rows W50 drives across three hosts; view-instance's embedded site list paints rows under the same class" },
-  // task-02a521fea7beeb2f: the pin-badge walk in the W21 detail leg is document-wide by
-  // the same full-load entry as its siblings above; a hidden view-instance keeps one
-  // Autoupdate badge painted after the tour. Latent for the same reason as .detail-url-text.
-  { selector: ".update-panel-body .rail-row .v .badge", views: ["view-instance"], legs: "W21-detail-url-text-page-bound", status: "latent", reason: "the Autoupdate badge W21 bounds; a hidden view-instance keeps one painted after the tour" },
+  { selector: ".fleet-row", views: ["view-overview", "view-providers"], legs: "W15-fleet-row-text-bounded, W35-hash-nav-hidden-view-residue", status: "latent", reason: "THE ORIGINAL FINDING (cch-w24-s5): #view-overview paints activity rows under the same class, so the document-wide count runs ahead of the in-view one the moment a person hash-navigates. W15's measuring walk is already scoped; what is left document-wide is the pair of CONTROLS that print the difference — W15's `docRows` beside its scoped `rows`, and W35's own probe. Scoping those would delete the measurement, which is why this row exists rather than a conversion" },
+  { selector: ".site-row", views: ["view-sites", "view-instance"], legs: "W50-site-row-three-hosts-cruel-by-fixture", status: "latent", reason: "the site rows W50 drives across three hosts; view-instance's embedded site list paints rows under the same class. LEFT DOCUMENT-WIDE ON PURPOSE for now: W50 landed in the same wave as this sweep and its three-host cell table is the freshest code in the file, so converting it here would put a conversion and a new leg in one PR with no way to tell which moved a number. It is the next conversion, not a permanent exemption" },
 ];
 
 /**
@@ -363,6 +349,20 @@ export function viewHostOfIds(indexHtml) {
 //    · `counted-in-leg` — the owning leg also walks the SAME selector with
 //                         `querySelectorAll`, i.e. it prints the population.
 //
+//  A JURISDICTION NOTE, AND IT IS A REAL COST (task-995fc7be51dab99e). Both
+//  halves of this file count `document.querySelector(All)?(` sites and nothing
+//  else — that is the pattern, stated at the top. So the SCOPE half's own
+//  remedy, rewriting a walk as `v.querySelector(…)` off the live view, moves
+//  that walk OUT OF THIS HALF'S JURISDICTION: twelve singular walks were scoped
+//  under this row's task and their SINGULAR_REGISTER rows went stale in the same
+//  pass, correctly, because no `document.` walk matches them any more. The
+//  cardinality question those rows answered is not answered by anything now.
+//  That is a narrowing of this instrument, it is written here rather than left
+//  to be rediscovered, and the remedy is to teach `censusWalks` the scoped
+//  idiom — deliberately NOT done here, because `v` is also an ordinary loop
+//  variable in this guard and a naive second pattern would census element
+//  handles as walks.
+//
 //  WHAT THIS CENSUS DOES NOT CLAIM: it reads bytes, so it cannot tell you that a
 //  population really is 1 on a shipped fixture. Only a run can, which is why the
 //  discharge this file prefers is `counted-in-leg` — a number in the ok-line,
@@ -401,27 +401,15 @@ export const SINGULAR_REGISTER = [
   { leg: "W12-narrow-viewport-truth", selector: ".topbar", reason: "the class-only FALLBACK arm of `header.topbar` in the elementFromPoint probe — one topbar, and the probe tries the chrome spelling first" },
 
   // ── GR109 / W18 / W20: the overview's attention rows and cards ──
-  { leg: "GR109-attention-row-dead-rule", selector: ".attention-row .status-pill-detail", reason: "readiness for the pill cells; the measurement below walks every `.attention-row .status-pill-detail` with querySelectorAll" },
-  { leg: "W18-overview-card-pill", selector: ".instance-card-head .status-pill-detail", reason: "readiness only; this leg's cells walk the pills plurally and fail per pill" },
-  { leg: "W20-attention-name-column", selector: ".attention-row .attention-name", reason: "readiness only; the column measurement below is plural over the same class" },
 
   // ── W12: the overview grid and the notification matrix ──
-  { leg: "W12-narrow-viewport-truth", selector: ".instances-grid", reason: "singleton-by-layout: one grid per overview screen, and the cards inside it are walked plurally off THIS element (`g.querySelectorAll('.instance-card')`) rather than off the document" },
   { leg: "W12-narrow-viewport-truth", selector: ".set-matrix", reason: "singleton-by-layout: the notifications screen paints one matrix; the scroll probes drive that element and read `.set-matrix-event` out of it" },
   { leg: "W12-narrow-viewport-truth", selector: ".set-matrix .set-matrix-grid .set-matrix-event", reason: "readiness: waits for the first event cell to prove the matrix rendered; the overflow measurement scrolls the matrix, not a cell" },
 
   // ── W13 / W14 / W21 / W26 / W27: the detail screens ──
   { leg: "W13-detail-route-band", arg: "'${r.ready}') && (function(){var v=document.quer", reason: "readiness built from the route table's own `ready` string — one predicate per route, each asking only whether that screen painted" },
-  { leg: "W13-detail-route-band", selector: ".inst-tab[aria-current=\"page\"]", reason: "`aria-current=\"page\"` is single-valued per tablist by the ARIA contract: a second current tab is a tab-state defect, not a population" },
-  { leg: "W14-site-detail-phone-band", selector: ".detail-head .fleet-url", reason: "singleton-by-layout: one URL line in the site detail head" },
-  { leg: "W21-inst-head-320-copy-reachable", selector: ".detail-head-main", reason: "singleton-by-layout: one head block per detail screen" },
-  { leg: "W21-detail-url-text-page-bound", selector: ".detail-url-text", reason: "singleton-by-layout: one instance URL per detail screen (RESIDUE_REGISTER above carries it for the HIDDEN-view axis, which is a different question)" },
-  { leg: "W21-detail-url-text-page-bound", selector: ".detail-title-row h1", reason: "singleton-by-layout: one page title per detail screen" },
   { leg: "W21-cruel-content-text-bounded", arg: "'${route.ready}') && (function(){var v=document.", reason: "readiness built from the route table's own `ready` string, one per cruel-content route" },
   { leg: "W21-token-reveal-readable", selector: ".token-ab", reason: "one door: the create-token form's single always-on checkbox, ticked before submit" },
-  { leg: "W26-instance-track-min-content", selector: ".detail-main", reason: "singleton-by-layout: one main column per detail grid, measured as the track it is" },
-  { leg: "W26-instance-track-min-content", selector: ".detail-grid--instance", reason: "singleton-by-layout: one instance detail grid per screen, and it is the grid whose track widths this leg measures" },
-  { leg: "W27-failed-retry-reachable-after-flick", selector: ".detail-grid--instance", reason: "readiness: waits for the instance grid before the flick; the same single grid" },
   { leg: "W27-failed-retry-reachable-after-flick", selector: ".bp-timeline", reason: "readiness: one timeline per instance detail screen" },
 
   // ── W29: the deploy rail ──
