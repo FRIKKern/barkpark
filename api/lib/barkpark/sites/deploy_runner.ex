@@ -563,6 +563,161 @@ defmodule Barkpark.Sites.DeployRunner do
     _ -> []
   end
 
+  # ── the BYTES door's size policy (dr-bl-recorder-http-read-path c1) ────────
+  #
+  # A BOUNDED TAIL, NEVER THE WHOLE FILE. `@default_max_build_log_bytes` above is
+  # 256 MiB, and it is the RETENTION cap — the size a log is allowed to REACH on
+  # disk — not a serving cap. Reading a log that big to answer an HTTP request
+  # means `File.read!/1` puts the whole binary, its JSON encoding and the response
+  # buffer in memory at once, on a box that is also building sites. So the two
+  # numbers are deliberately separate and this one is four orders of magnitude
+  # smaller.
+  #
+  # The tail is read by SEEKING — `:file.position/2` to `{:eof, -cap}` and one
+  # `IO.binread/2` of at most `cap` bytes — so peak memory is the CAP, whatever
+  # the file size. 256 KiB is ~8x the real Next build log recovered off the box
+  # (30,993 bytes), so the common case is served WHOLE and `truncated` is false.
+  #
+  # The TAIL is the right end: a build's cause is at the bottom, which is the same
+  # reason `failure_reason` folds the TRAILING meaningful lines (@reason_lines).
+  @default_max_build_log_tail_bytes 262_144
+
+  @doc """
+  The recorded build log's BYTES for one deployment — a bounded TAIL, or a
+  refusal that says why (`dr-bl-recorder-http-read-path` c1).
+
+  Returns `{:ok, record_with_tail}` or `{:error, reason, record}`; the record is
+  carried on the refusals too, so a caller can always say which build it is
+  refusing about. Never raises.
+
+  THE REFUSAL IS THE POINT. `:log_scrub` is the pattern-set version the bytes
+  were folded with, and `nil` means NEVER FOLDED — a record written before the
+  write-boundary scrub existed whose log has since been evicted (nothing left to
+  heal), or a fold that hit an IO error. Those bytes may carry a plaintext
+  `BARKPARK_TOKEN=`, so this refuses `:unscrubbed` rather than serving them. It
+  is a REFUSAL, not an absence: an operator gets told the bytes exist and why
+  they are withheld, which is a different fact from "there is no log".
+
+  Reading goes through `build_record/2`, so an unstamped record whose log is
+  still on disk is FOLDED AND RE-STAMPED first (`heal_unscrubbed_log/1`) and then
+  served. The refusal is reached only when healing is impossible.
+
+  The other refusals are the recorder's own honest states: `:evicted` (retention
+  took the bytes, a tombstone says so), `:missing` (gone from disk, never
+  tombstoned — retention did NOT do it), `:never_recorded` (nothing was ever
+  written), `:unreadable` (the file is there and could not be read).
+  """
+  @spec build_log_tail(String.t(), String.t() | nil) :: {:ok, map()} | {:error, atom(), map()}
+  def build_log_tail(slug, build_id \\ nil) when is_binary(slug) do
+    record = build_record(slug, build_id)
+
+    case record.log_state do
+      :available -> serve_tail(record)
+      :evicted -> {:error, :evicted, record}
+      :missing -> {:error, :missing, record}
+      _other -> {:error, :never_recorded, record}
+    end
+  rescue
+    _ -> {:error, :unreadable, absent_record(slug, build_id)}
+  end
+
+  @doc "The serving cap for `build_log_tail/2` — config-injectable, so a test can drive PAST it."
+  @spec max_build_log_tail_bytes() :: pos_integer()
+  def max_build_log_tail_bytes do
+    Keyword.get(config(), :max_build_log_tail_bytes, @default_max_build_log_tail_bytes)
+  end
+
+  # NOT FOLDED — refuse. Matched BEFORE the read, so unscrubbed bytes are never
+  # loaded into this process at all, let alone rendered.
+  defp serve_tail(%{log_scrub: nil} = record), do: {:error, :unscrubbed, record}
+
+  defp serve_tail(record) do
+    case read_tail_bytes(record.log_path, max_build_log_tail_bytes()) do
+      {:ok, tail, total, truncated} ->
+        {:ok,
+         Map.merge(record, %{
+           tail: tail,
+           tail_bytes: byte_size(tail),
+           # Re-measured from the FILE, not trusted from the record: the record's
+           # `log_bytes` was written at finalize and a heal can have changed it.
+           log_bytes: total,
+           truncated: truncated
+         })}
+
+      :error ->
+        {:error, :unreadable, record}
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_tail_bytes(path, cap) when is_binary(path) and is_integer(cap) and cap > 0 do
+    File.open(path, [:read, :binary], fn fd ->
+      {:ok, total} = :file.position(fd, :eof)
+
+      if total <= cap do
+        {:ok, _} = :file.position(fd, :bof)
+        {printable(read_exactly(fd, total)), total, false}
+      else
+        {:ok, _} = :file.position(fd, {:eof, -cap})
+
+        # The seek lands MID-LINE. That first partial line is dropped rather than
+        # served, because a half line at the top of a log reads as a real line and
+        # is not one — and dropping it also removes the only place a multi-byte
+        # character can have been cut in half.
+        tail = fd |> read_exactly(cap) |> drop_partial_line() |> printable()
+
+        {truncation_notice(total - byte_size(tail), total) <> tail, total, true}
+      end
+    end)
+    |> case do
+      {:ok, {tail, total, truncated}} -> {:ok, tail, total, truncated}
+      _other -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  defp read_tail_bytes(_path, _cap), do: :error
+
+  defp read_exactly(_fd, 0), do: ""
+
+  defp read_exactly(fd, count) do
+    case IO.binread(fd, count) do
+      data when is_binary(data) -> data
+      _ -> ""
+    end
+  end
+
+  defp drop_partial_line(bin) do
+    case :binary.match(bin, "\n") do
+      {pos, len} -> binary_part(bin, pos + len, byte_size(bin) - pos - len)
+      :nomatch -> bin
+    end
+  end
+
+  # TRUNCATION IS VISIBLE, AND IT IS VISIBLE IN THE BYTES — not only in an
+  # envelope flag. The bytes are what a human reads; a caller that renders `tail`
+  # and ignores `truncated` must still see that it is looking at the end of
+  # something longer. Same doctrine as `cap_reason/1` on the record door: a quiet
+  # slice makes a partial diagnosis indistinguishable from a complete one.
+  defp truncation_notice(dropped, total) do
+    "…[truncated: this is the TAIL of the build log — " <>
+      "#{dropped} of #{total} bytes are not shown]\n"
+  end
+
+  # A JSON encoder raises on invalid UTF-8, and a build log is arbitrary process
+  # output. Anything that will not encode is dropped at the first bad byte rather
+  # than crashing the door.
+  defp printable(bin) when is_binary(bin) do
+    case :unicode.characters_to_binary(bin) do
+      valid when is_binary(valid) -> valid
+      {:error, ok, _rest} -> ok
+      {:incomplete, ok, _rest} -> ok
+    end
+  end
+
+  defp printable(_), do: ""
+
   @doc """
   Enforce the three retention caps on the durable build logs NOW and report the
   result — which cap was EFFECTIVE (`:bytes` | `:count` | `:age` | `:none`),

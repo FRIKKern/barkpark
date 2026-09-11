@@ -617,6 +617,14 @@ RUNLIST_AT_OVERRIDE=""
 # Like --runlist-at this is a TEST handle and nothing else — a live run takes
 # the serving arm's clock from the real clock at the real instant.
 SERVING_AT_OVERRIDE=""
+# THE ROWS ARM'S OWN CLOCK, PINNED — FIXTURES ONLY, AND REFUSED LIVE.
+# The third of the same family. `--now` is the instant the window was cut; the
+# crown row page is read after the run-list paging and every per-run jobs call,
+# so on a live run those two instants are minutes apart. A harness has to be
+# able to set them INDEPENDENTLY or the case is unreachable: with `--now` alone
+# the gap is zero by construction, which is exactly why every existing rows
+# probe is blind to it. A live run reads the real clock at the real instant.
+ROWS_AT_OVERRIDE=""
 
 WORK="$(mktemp -d 2>/dev/null || mktemp -d -t crown-reconcile)"
 cleanup() { rm -rf "$WORK"; }
@@ -641,6 +649,7 @@ while [ $# -gt 0 ]; do
     --now) NOW_OVERRIDE="${2:-}"; shift 2 ;;
     --runlist-at) RUNLIST_AT_OVERRIDE="${2:-}"; shift 2 ;;
     --serving-at) SERVING_AT_OVERRIDE="${2:-}"; shift 2 ;;
+    --rows-at) ROWS_AT_OVERRIDE="${2:-}"; shift 2 ;;
     --state-file) STATE_FILE="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "unknown flag: $1"; exit 3 ;;
@@ -663,6 +672,11 @@ fi
 
 if [ -n "$SERVING_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]; then
   warn "CONFIG: --serving-at is a FIXTURE-ONLY handle for widening the gap between the window cut and the serving read. A live run reads the real clock at the serving arm, and must not be handed one; pinning it by hand would let an operator dial a serving_since into or out of the future, which is the exact tolerance this arm exists to refuse."
+  exit 3
+fi
+
+if [ -n "$ROWS_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]; then
+  warn "CONFIG: --rows-at is a FIXTURE-ONLY handle for widening the gap between the window cut and the crown row read. A live run reads the real clock at the row read, and must not be handed one; pinning it by hand would let an operator dial a row into or out of the in-flight cap, which is the exact leniency this arm exists to bound."
   exit 3
 fi
 
@@ -1538,6 +1552,26 @@ if [ "$WIDE_SHAS" -eq 0 ]; then
     case "${QUIET_ROWS:-}" in ''|*[!0-9]*) QUIET_ROWS=0 ;; *) QUIET_ROWS_READ=1 ;; esac
   fi
 elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
+  # ── THE ROWS ARM'S CLOCK, TAKEN HERE ────────────────────────────────────
+  # One statement after the row page landed, because that is the instant these
+  # rows were frozen and the instant their ages are being judged at. `NOW_EPOCH`
+  # was read before the run-list paging, before every per-run jobs call and
+  # before this read; crown-reconcile's median body is 556s (task-b0c12a9316203c0f),
+  # so `NOW_EPOCH - rowat` understates every row's age by the script's own
+  # runtime. On the in-flight CAP below that error points ONE WAY: a row that has
+  # genuinely been waiting longer than the cap at the moment it is read is still
+  # scored as inside it, and keeps an alibi it has already outlived. Same family
+  # as RUNLIST_EPOCH and SERVING_NOW_EPOCH; same dividing line — the WINDOW
+  # arithmetic (CUTOFF_EPOCH, WIDE_EPOCH, the watermark's own comparison) stays
+  # on NOW_EPOCH, because it must match the run-list sample; a DURATION that ends
+  # at "now" must use a live now.
+  if [ -n "$ROWS_AT_OVERRIDE" ]; then
+    ROWS_NOW_EPOCH="$(epoch_of "$ROWS_AT_OVERRIDE")" || { warn "CONFIG: --rows-at is not an ISO-8601 instant: $ROWS_AT_OVERRIDE"; exit 3; }
+  elif [ -n "$NOW_OVERRIDE" ]; then
+    ROWS_NOW_EPOCH="$NOW_EPOCH"
+  else
+    ROWS_NOW_EPOCH="$(date -u +%s)"
+  fi
   jq --argjson cut "$CUTOFF_EPOCH" \
     '[.deliveries[]
       | select((.first_seen_at // "") != "")
@@ -1615,7 +1649,7 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
         # deferring the accusation with no end to the deferral. Charged against
         # the ROW's own first-seen instant, so one row gets one window and never
         # a fresh one per run, exactly as the serving grace is charged.
-        _inflight_age=$((NOW_EPOCH - rowat))
+        _inflight_age=$((ROWS_NOW_EPOCH - rowat))
         if [ "$_inflight_age" -gt "$SERVING_INFLIGHT_CAP_SECONDS" ]; then
           INFLIGHT_EXPIRED=$((INFLIGHT_EXPIRED + 1))
           printf '%s %s %s\n' "$sha" "$run" "$_inflight_age" >> "$WORK/inflight-expired.txt"

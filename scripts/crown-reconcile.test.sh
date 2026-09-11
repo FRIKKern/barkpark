@@ -37,6 +37,12 @@
 #         (w6) a TRUNCATED page cannot manufacture a ghost: the same
 #              row is rc 2 UNJUDGEABLE on a filled page and rc 1
 #              WRONG on a page that saw the whole window         → 2, then 1
+#         (w1c) …and the CAP that ends that exclusion is a DURATION,
+#              so it must end at the instant the rows were READ, not
+#              at the window cut minutes earlier. One row, two clocks:
+#              inside the cap at the cut, past it at the read     → 1
+#              with both controls held down — a young row is still
+#              deferred and a long-hung row is still accused  → 0, then 1
 #   (d) WINDOW EMPTY: nothing to compare is never a green            → exit 2
 #   (u) QUIET WINDOW: an empty window on a VERIFIED crown — serving
 #       sha recorded, re-ask list PRESENT-EMPTY, zero in-window rows —
@@ -799,6 +805,136 @@ run_cr 1 "run 3 has been in_progress for the whole 8h this row has existed" \
 saw "WRITTEN-IN-FLIGHT-EXPIRED: 1 crown row(s)" "a hung run is named and its deferral is ended, not renewed"
 saw "WRONG: 1 of 4" "and the row is ACCUSED — the exclusion cannot be held open forever"
 not_saw "WRITTEN-IN-FLIGHT: " "an expired row is never also reported as still deferred"
+
+section "(w1c) THE CAP IS A DURATION — IT ENDS WHEN THE ROWS WERE READ, NOT AT THE WINDOW CUT"
+# Sibling of (p2) on the serving arm, and the same defect one axis over. The cap
+# above is charged as `NOW_EPOCH - rowat`, and NOW_EPOCH is sampled ONCE, before
+# the run-list paging, before every per-run jobs call and before the crown row
+# read. crown-reconcile's median body is 556s (task-b0c12a9316203c0f), so by the
+# time a row is judged, that subtraction understates its age by ~9 minutes.
+#
+# THE DIRECTION MATTERS, AND THE FILING HAD IT BACKWARDS. A stale base makes
+# every row look YOUNGER, never older, so it cannot under-count the in-flight
+# population — it OVER-counts it. The population that moves when the base goes
+# live is exactly: rows whose true age at the read is between the cap and the
+# cap plus the body length. Under the stale clock each of those keeps an alibi it
+# has already outlived and is silently deferred again; under the live clock its
+# deferral ENDS and it is accused, which is what the cap was written to do. The
+# fix is therefore STRICTER, and this probe is a green that becomes a red.
+#
+# Every existing probe in (w) is structurally blind to it for the same reason
+# section (p2) gave: they pin `--now`, which makes the gap ZERO by construction.
+# `--rows-at` is the harness setting the row-read instant independently.
+ROWS_GAP=600                          # the measured body: the rows land 600s after the cut
+ROWS_MARGIN=300                       # …and this row sits 300s INSIDE the cap at the cut
+if [ -z "${CAP:-}" ] || [ -n "$(printf '%s' "${CAP:-x}" | tr -d '0-9')" ]; then
+  bad "SERVING_INFLIGHT_CAP_SECONDS is not derivable from $CR — the two-clock probe below would not know what it straddles"
+else
+  _now_epoch=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$NOW" +%s 2>/dev/null || date -u -d "$NOW" +%s)
+  # The row: CAP-300 old at the window cut (INSIDE the cap), CAP+300 old at the
+  # row read (PAST it). One row, one page, two clocks — the only difference.
+  _straddle=$((_now_epoch - CAP + ROWS_MARGIN))
+  STRADDLE_AT="$(date -u -r "$_straddle" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$_straddle" +%Y-%m-%dT%H:%M:%SZ)"
+  ROWS_LATE="$(date -u -r $((_now_epoch + ROWS_GAP)) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((_now_epoch + ROWS_GAP))" +%Y-%m-%dT%H:%M:%SZ)"
+  RUNS_W1C="$(runs_add runs-w1c "$RUNS_BASE" 3 "$SHA_C" in_progress null "$STRADDLE_AT")"
+  CROWN_W1C="$(crown_json crown-w1c \
+    "$(row "$SHA_A" cp false "$IN1" 1)" \
+    "$(row "$SHA_A" instance false "$IN1" 1)" \
+    "$(row "$SHA_B" instance false "$IN2" 2)" \
+    "$(row "$SHA_C" cp false "$STRADDLE_AT" 3)")"
+
+  # (w1c-a) THE DEFECT. Inside the cap when the window was cut, past it when the
+  # rows were actually read. A live clock ends the deferral; the stale one renews
+  # an alibi the row has already outlived.
+  run_cr 1 "a row past the cap AT THE ROW READ is accused, not deferred on a clock ${ROWS_GAP}s stale" \
+    --runs-fixture "$RUNS_W1C" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1C" \
+    --health-fixture "$HEALTH_BASE" --rows-at "$ROWS_LATE"
+  saw "WRITTEN-IN-FLIGHT-EXPIRED: 1 crown row(s)" "the cap is charged to the instant the rows were read"
+  saw "WRONG: 1 of 4" "and the row it no longer alibis is ACCUSED"
+  not_saw "WRITTEN-IN-FLIGHT: " "a row past the cap is never also reported as still deferred"
+  # MUTATION ANCHOR. Revert `_inflight_age` to NOW_EPOCH and THIS probe goes
+  # green-when-it-should-be-red (exit 0, WRITTEN-IN-FLIGHT) while (w1c-c) below
+  # STAYS red — a patch that only reds (w1c-c) has proved nothing, and the pair
+  # is the proof.
+
+  # (w1c-b) THE CONTROL THAT MUST STAY DEFERRED. A live clock is not a licence to
+  # accuse everything: a row minutes old is inside the cap under BOTH clocks and
+  # is still excluded. Without this, (w1c-a) would be indistinguishable from
+  # deleting the exclusion.
+  _young=$((_now_epoch - 60))
+  YOUNG_AT="$(date -u -r "$_young" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$_young" +%Y-%m-%dT%H:%M:%SZ)"
+  RUNS_W1C_Y="$(runs_add runs-w1c-young "$RUNS_BASE" 3 "$SHA_C" in_progress null "$YOUNG_AT")"
+  CROWN_W1C_Y="$(crown_json crown-w1c-young \
+    "$(row "$SHA_A" cp false "$IN1" 1)" \
+    "$(row "$SHA_A" instance false "$IN1" 1)" \
+    "$(row "$SHA_B" instance false "$IN2" 2)" \
+    "$(row "$SHA_C" cp false "$YOUNG_AT" 3)")"
+  run_cr 0 "a row 60s old is inside the cap under either clock and stays deferred" \
+    --runs-fixture "$RUNS_W1C_Y" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1C_Y" \
+    --health-fixture "$HEALTH_BASE" --rows-at "$ROWS_LATE"
+  saw "WRITTEN-IN-FLIGHT: 1 of 4" "the fresh clock does not accuse a row the cap still covers"
+  not_saw "WRITTEN-IN-FLIGHT-EXPIRED" "and it does not manufacture an expiry out of the ${ROWS_GAP}s gap"
+
+  # (w1c-c) THE CONTROL THAT MUST STAY RED. A row genuinely hours past the cap is
+  # past it under BOTH clocks and is accused either way. This is the arm that a
+  # mutation back to NOW_EPOCH does NOT move — which is precisely what makes
+  # (w1c-a) a measurement rather than a coincidence.
+  run_cr 1 "a row 8h past the cap is accused under either clock" \
+    --runs-fixture "$RUNS_W1B" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1B" \
+    --health-fixture "$HEALTH_BASE" --rows-at "$ROWS_LATE"
+  saw "WRITTEN-IN-FLIGHT-EXPIRED: 1 crown row(s)" "the genuinely hung row is still named"
+  saw "WRONG: 1 of 4" "and still accused — the live clock disarms nothing"
+fi
+
+# (w1c-d) The dial must never be reachable on a live run, for the same reason
+# --runlist-at and --serving-at are not: an operator who could pin the row-read
+# instant could dial a row into or out of the in-flight cap by hand.
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" \
+  CROWN_STATE_FILE="$TMP/state-rows-live.txt" \
+  bash "$CR" --now "$NOW" --rows-at "$NOW" 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+if [ "$rc" = "3" ]; then
+  ok "--rows-at on a live run is a CONFIGURATION fault (exit 3), not a dial"
+else
+  bad "--rows-at was accepted on a live run (exit $rc) — the row-read clock would be pinnable by hand"
+fi
+saw "FIXTURE-ONLY handle" "and it says why it refused"
+
+# (w1c-e) STRUCTURAL: a LIVE run must take the rows arm's clock from the real
+# clock. No fixture probe can observe the live branch (every probe pins `--now`),
+# so this reads the branch back out of the script — the one place the regression
+# would hide is an edit that quietly restores `ROWS_NOW_EPOCH="$NOW_EPOCH"` as
+# the unconditional default.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qF 'ROWS_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]' "$CR"; then
+  ok "--rows-at is guarded to fixture mode in the script itself"
+else
+  bad "--rows-at is no longer fenced to fixture mode — a live run could pin its own row-read clock"
+fi
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qE '^    ROWS_NOW_EPOCH="\$\(date -u \+%s\)"$' "$CR"; then
+  ok "a live run samples the rows arm's clock at the row read"
+else
+  bad "the live branch no longer takes a fresh clock — the rows arm is back on the stale NOW_EPOCH"
+fi
+# The stale subtraction itself, named: `_inflight_age` is what the CAP reads, and
+# an edit that puts NOW_EPOCH back there restores the over-lenient cap exactly.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qF '_inflight_age=$((ROWS_NOW_EPOCH - rowat))' "$CR"; then
+  ok "the rows arm's in-flight age is measured against the rows arm's clock"
+else
+  bad "the rows arm's in-flight age is no longer measured against ROWS_NOW_EPOCH — the stale cap returns"
+fi
+# AND THE WINDOW STAYS FROZEN. The dividing line this family is built on: a
+# duration that ends at "now" takes a live now; the window the two sides are cut
+# from must NOT move, or the run list and the crown stop describing one instant.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qF 'CUTOFF_EPOCH=$((NOW_EPOCH - WINDOW_HOURS * 3600))' "$CR"; then
+  ok "the window is still cut from NOW_EPOCH — only the durations moved"
+else
+  bad "the window cut no longer uses NOW_EPOCH — the two sides of the comparison can drift apart"
+fi
 
 section "(w2) time-keyed — the SAME fixture, red without the gap and green with it"
 # The run is not on the page AT ALL: id 9001 is above every id there, which is a

@@ -56,6 +56,7 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
     * `:rollback` — the reply to `rollback/2` (default: a successful flip)
     * `:build_record` — the reply to `build_record/3` (default: a definite
       `never_recorded`, the answer a real box gives for a build it never saw)
+    * `:build_log_bytes` — the reply to `build_log_bytes/3` (same default shape)
   """
   def program(opts) when is_list(opts) do
     ensure_store()
@@ -71,6 +72,7 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
         rollback: Keyword.get(opts, :rollback, {:ok, 200, %{"status" => "rolled_back"}}),
         teardown: Keyword.get(opts, :teardown, {:ok, 200, %{"status" => "torn_down"}}),
         build_record: Keyword.get(opts, :build_record),
+        build_log_bytes: Keyword.get(opts, :build_log_bytes),
         calls: []
       })
     end)
@@ -187,6 +189,48 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
     {:ok, 200, BarkparkCloud.BoxStatusPayloadFixture.status_body(overrides)}
   end
 
+  @doc """
+  The box's `record=1&bytes=1` answer, as
+  `BarkparkWeb.SiteDeployController.render_build_log_bytes/2` renders it
+  (`dr-bl-recorder-http-read-path` c1).
+
+  THIS FIXTURE IS LOCKED TO THE REAL EMITTER, not hand-agreed with it:
+  `BarkparkCloud.Sites.BuildLogBytesProducerLockTest` reads the api controller's
+  own key list out of source and reds if this map's keys drift from it. A
+  hand-typed copy on each side of a seam is an UNLOCKED MIRROR — both sides stay
+  self-consistent while the wire moves underneath them.
+
+  `status` and `log_state` are the required arguments because they are what the
+  control plane keys its answers on; every other key has a plausible default.
+  """
+  def build_log_bytes_payload(slug, build_id, status, log_state, opts \\ []) do
+    tail = Keyword.get(opts, :tail)
+
+    body =
+      %{
+        "slug" => slug,
+        "build_id" => build_id,
+        "record" => Keyword.get(opts, :record, "terminal"),
+        "log_state" => log_state,
+        "log_scrub" => Keyword.get(opts, :log_scrub, 1),
+        "log_path" =>
+          Keyword.get(opts, :log_path, "/var/lib/barkpark/site-runs/#{slug}-#{build_id}.log"),
+        "log_bytes" => Keyword.get(opts, :log_bytes, 31_402),
+        "tail_bytes" => Keyword.get(opts, :tail_bytes, tail && byte_size(tail)),
+        "truncated" => Keyword.get(opts, :truncated, false),
+        "tail" => tail,
+        "evicted_at" => Keyword.get(opts, :evicted_at)
+      }
+      |> maybe_error(Keyword.get(opts, :error))
+
+    {:ok, status, body}
+  end
+
+  defp maybe_error(body, nil), do: body
+
+  defp maybe_error(body, {code, message}),
+    do: Map.put(body, "error", %{"code" => code, "message" => message})
+
   ## ---------------------------------------------------------------------------
   ## BoxRelay behaviour
   ## ---------------------------------------------------------------------------
@@ -223,6 +267,28 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
          "build_id" => build_id,
          "record" => "absent",
          "log_state" => "never_recorded"
+       }}
+    )
+  end
+
+  # The BYTES read (`dr-bl-recorder-http-read-path` c1). Default is
+  # `never_recorded` with a null tail for the same reason `build_record/3`'s is:
+  # an unprogrammed fake must never hand back an invented log.
+  @impl true
+  def build_log_bytes(_bp, slug, build_id) do
+    record({:build_log_bytes, %{slug: slug, build_id: build_id}})
+
+    fetch(
+      :build_log_bytes,
+      {:ok, 200,
+       %{
+         "slug" => slug,
+         "build_id" => build_id,
+         "record" => "none",
+         "log_state" => "never_recorded",
+         "log_scrub" => nil,
+         "tail" => nil,
+         "truncated" => false
        }}
     )
   end
