@@ -3012,6 +3012,48 @@ test("gr-p5: operatorRowState renders ALL FOUR update_state values, unknown read
   assert.equal(hooks.operatorRowState(null).label, "Unknown");
 });
 
+test("cch-w63-bl: operatorRowState's unknown NOTE never asserts an absence the plane did not measure", () => {
+  // BEFORE this row the arm returned a single frozen note, "No update state
+  // reported yet.", for EVERY unknown box — and nothing in this file pinned that
+  // string (only role and label were asserted, two tests up). A box that answered
+  // our stored credential with a 401 had been measured: registry.ex's
+  // persist_update_unknown/2 stored `identity_refused`, and router.ex's
+  // operator_fleet_json/1 now serializes it.
+  const refused = hooks.operatorRowState({
+    update_state: "unknown",
+    update_unavailable_reason: "identity_refused",
+  });
+  assert.equal(refused.label, "Unknown", "the pill label is unchanged — only the note learned the cause");
+  assert.equal(refused.role, "neutral");
+  assert.equal(refused.note, "Could not check — the instance rejected our access credential");
+  assert.doesNotMatch(refused.note, /reported yet/,
+    "a measured cause must never be narrated as nothing having been reported");
+
+  // The sentence is ECHOED from the shared whitelist, not retyped here: the same
+  // reason through the member-facing reader yields the same words, so the two
+  // readers of one column cannot drift apart silently.
+  assert.equal(hooks.updateRefusalReason({ update_state: "unknown", update_unavailable_reason: "identity_refused" }), "identity_refused");
+
+  // A second rung, one that never built a request, to prove the arm is keyed on
+  // the reason and not hard-coded to the 401 case.
+  assert.match(
+    hooks.operatorRowState({ update_state: "unknown", update_unavailable_reason: "no_self_update_route" }).note,
+    /^Could not check — this release has no update-check route yet$/,
+  );
+
+  // NO reason measured → a neutral note that claims NO mechanism. It says what
+  // the console can see and stops; it does not assert that the plane never asked.
+  const bare = hooks.operatorRowState({ update_state: "unknown" });
+  assert.equal(bare.note, "Update state not reported.");
+  assert.equal(hooks.operatorRowState({}).note, "Update state not reported.");
+  assert.equal(hooks.operatorRowState(null).note, "Update state not reported.");
+  // A reason word this console does not recognise is NOT invented into copy.
+  assert.equal(
+    hooks.operatorRowState({ update_state: "unknown", update_unavailable_reason: "banana" }).note,
+    "Update state not reported.",
+  );
+});
+
 test("gr-p5: operatorRowState settle math — null-guarded, 20m grace, overdue is pause-not-retry", () => {
   const now = Date.parse("2026-07-19T18:00:00.000000Z");
   // GR48: autoupdate_triggered_at is NULL for a freshly-registered box.
