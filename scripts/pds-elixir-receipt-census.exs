@@ -10531,6 +10531,48 @@ defmodule PDS.Census do
         "AMBIGUOUS — no evidence here selects one of them"
       ],
       proves: "narrowing the writing-caller set back to ONE member silently deletes every ambiguity marker while the census still prints CENSUS OK at exit 0 — so the full-set walk in route/3 is the ONLY thing keeping the attribution sentence falsifiable, and no count, no shape and no other arm notices its loss"
+    },
+    # THE EXACT MINTED-EXPOSURE, AND THE PROXY IT REPLACED, AS A PAIR (PDS wave 46).
+    #
+    # WHY THE REPO CORPUS. The two numbers can only DISAGREE where a hop's winning
+    # substitution holds a minted position whose vars never reach the payload — and the
+    # synthetic tree's six routed write clauses each carry their OWN `json(...)` (read
+    # echo_controller_source/1 below), so they class locally and onehop_join/6 is never
+    # reached over them. A mutant there would substitute one zero for another, which is
+    # PDS-D541's unmutatability wearing this slice's name. Thirteen cases already ride
+    # `corpus: :repo` for the same reason.
+    #
+    # IT ASSERTS A WORD, NOT A COUNT. The blind shape derives a VERDICT from the exact
+    # number — "NO mint decides a printed class this run" versus "MINTS DECIDE n" — so
+    # the pair discriminates the two measures without pinning a bucket, and an honest
+    # corpus change that moves 27, 4 or 0 by one cannot red either case on its own.
+    #
+    # THE CONTROL IS HALF THE EVIDENCE, and it is a case rather than a promise: the
+    # mutant only proves the substitution is VISIBLE if the unmutated run says the other
+    # thing. The day the repo grows a mint that genuinely decides a row, the CONTROL goes
+    # red first and names exactly what changed, which is the correct order — a mutant
+    # that silently starts agreeing with its baseline is the failure this pair refuses.
+    %{
+      name: "MINTED-DECIDES-EXACT-CONTROL",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: ["NO mint decides a printed class this run", "CENSUS OK"],
+      refute: ["MINTS DECIDE"],
+      proves: "the unmutated census says NO mint decides a printed class on this tree, which is the baseline the mutant below has to flip — without it the mutant could pass while both measures agreed"
+    },
+    # THE ANCHOR IS SPLIT so this tuple does not match ITSELF — apply_mutation/2 refuses
+    # an ambiguous anchor, and a mut literal that occurs twice IS one.
+    %{
+      name: "MINTED-DECIDES-EXACT",
+      corpus: :repo,
+      argv: [],
+      mut: {"minted_deciding: best." <> "minted_decided,", "minted_deciding: best_minted,"},
+      exit: 0,
+      expect: ["MINTS DECIDE", "CENSUS OK"],
+      refute: ["NO mint decides a printed class this run"],
+      proves: "the exact measure is the intersection and NOT the proxy: substitute `best_minted` (a mint anywhere in the winning substitution) back into the slot the intersection fills and the derived verdict flips from NO mint decides to MINTS DECIDE, at exit 0 both times — which is precisely how the overstatement shipped unnoticed"
     }
   ]
 
