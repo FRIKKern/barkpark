@@ -2481,6 +2481,46 @@ test("gr-backlog-css: the E10 fixture reds --orphan-check and ONLY --orphan-chec
   }
 });
 
+// ── cch-w20-bl · THE TYPE FLOOR, asserted where the unit gate can see it ────
+// app.css publishes its own floor at :root — "Type scale (decision 29)",
+// `--text-xs: 12px` — and then shipped 48 declarations under it (44 spelt
+// `font-size:` plus `.deploy-console-toggle`'s `font:` SHORTHAND, which the
+// filing row's grep census could not see, and three more the row's 10/10.5/11
+// histogram had no bucket for: `.dom-rung-glyph` at 9px). Measured across 30
+// cells that painted 228 of 1560 text-bearing instances below the floor.
+//
+// NOTHING REFUSED IT, proven by mutation rather than grep: `.instance-card-
+// stat-k` 10px -> 6px — the front screen's own CPU/RAM/DISK/DOCS legend, 48
+// instances in 6/6 #overview cells — left __css_check at "0 error(s)" (its R4
+// reports every raw px font-size line and is REPORT-ONLY by construction), left
+// this suite unchanged, and left `overflow-guard --defect W18-overview-card-
+// pill` printing "28 / 28 cells clean" at rc=0 ON THAT VERY CARD.
+//
+// This is the refusal. The audit, the 12px-vs-13px argument, the committed
+// literal allowlist and its FATAL staleness clause (D180) all live in
+// __preview__/type-floor.mjs next to their own unit harness; this test is the
+// one line that puts them in front of the gate console-harness actually runs.
+// Dynamically imported so a broken helper reds HERE as a failed test rather
+// than as a module-load crash that takes the whole 769-test suite with it.
+test("cch-w20-bl type floor: no app.css declaration resolves below 12px outside the literal allowlist", async () => {
+  const { audit, APP_CSS, FLOOR_PX, ALLOWLIST } = await import("./__preview__/type-floor.mjs");
+  const css = fs.readFileSync(APP_CSS, "utf8");
+  const r = audit(css);
+
+  // ANTI-VACUITY FIRST (standing clause: a green with no subject). A parse
+  // defeated by a rename reports zero declarations and passes everything below.
+  assert.ok(r.decls.length > 200,
+    `the type-floor parse read only ${r.decls.length} font-size declarations out of app.css — it is DEFEATED, not clean`);
+  assert.ok(r.decls.some((d) => d.prop === "font"),
+    "the `font:` shorthand arm read nothing — the half the filing row's grep census missed is dark again");
+
+  assert.deepEqual(r.errors, [],
+    `app.css breaks the ${FLOOR_PX}px legibility floor (--text-xs, "Type scale (decision 29)").\n` +
+    `${ALLOWLIST.length} site(s) are exempt by NAME in type-floor.mjs's committed literal; each carries its own\n` +
+    `written reason and a stale entry is fatal. Raise the declaration, or argue it there.\n\n` +
+    r.errors.join("\n"));
+});
+
 // ── cch-w19-s4 · E14 wrap-recipe parity, driven in every direction ──────────
 // Charter D220 REFUSED D210's fourth-host extraction trigger and replaced it
 // with this instrument: the five-declaration recipe does not fix the fourth
