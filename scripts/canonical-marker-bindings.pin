@@ -53,6 +53,7 @@ share-scope-tenancy	declarable_scope?
 sheets-bg-sanitizer	sanitize_bg
 slug-resolve	resolve_doc
 status-vocabulary	role_for_status
+studio-grant-write-target-gate	grant_target_denied?
 studio-nav-model	default_top_menu_entries
 studio-scope-resolution	resolve_scope
 studio-shell-page-scroller	studio_page_scroll
