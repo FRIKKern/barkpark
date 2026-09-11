@@ -81,7 +81,13 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
     case title do
       "" ->
-        ""
+        # The block IS a task-detail, its query just resolved to nothing. Say so
+        # in the reader instead of erasing the block: a silent "" is a blank gap
+        # the author cannot diagnose, and it diverges from the edit canvas, which
+        # paints an explicit note. Same shape as the sibling live-query widgets
+        # (`bp-tasks bp-tasks--empty`), and the same copy the canvas preview uses
+        # so edit and reader read identically for the empty case.
+        ~s|<div class="bp-tdetail bp-tdetail--empty">No matching tasks.</div>|
 
       _ ->
         role = t |> get("status") |> stringish() |> role_of()
@@ -105,6 +111,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
     end
   end
 
+  # Policy (one rule, both arities): a MAP is a task-detail block — an
+  # unresolved one renders the `bp-tdetail--empty` placeholder above. A non-map
+  # argument is not a block at all (malformed input, never authored), so it
+  # emits nothing rather than a placeholder that would claim a block exists.
   def task_detail_html(_), do: ""
 
   defp detail_meta(t, role) do
