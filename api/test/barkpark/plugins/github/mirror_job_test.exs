@@ -54,7 +54,7 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
 
   alias Barkpark.{Content, LabelFixtures, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.Lifecycle
-  alias Barkpark.Plugins.Github.{Auth, Conflicts, Link, MirrorJob}
+  alias Barkpark.Plugins.Github.{Auth, Conflict, Conflicts, Link, MirrorJob}
   alias Barkpark.Plugins.Github.MirrorJobTest.{ProjectsStub, RelationsStub}
 
   @dataset "production"
@@ -598,6 +598,37 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       assert conflict.issue == 13
       assert conflict.doc_id == id
       assert conflict.detail["reason"] =~ "deleted or transferred"
+    end
+
+    test "the recorded conflict is ATTRIBUTED to the task's workspace (w9 isolation)", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 77, state: "synced"}, scope)
+
+      stub_get(bypass, 77)
+
+      Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/77", fn conn ->
+        Plug.Conn.resp(conn, 404, ~s({"message":"Not Found"}))
+      end)
+
+      # NOTE the opts: `fast()` carries NO :workspace_id. The attribution must
+      # still land, resolved from the LOADED task document — otherwise every job
+      # enqueued by the wave-2 drain (which does not stamp tenant scope on its
+      # args) would write an unattributed row and the fence would be vacuous for
+      # the whole live write path.
+      assert {:cancel, :detached} = MirrorJob.reconcile(id, @dataset, fast())
+
+      assert [conflict] =
+               Conflict
+               |> where([c], c.repo == ^@repo and c.issue == 77)
+               |> Repo.all()
+
+      assert conflict.workspace_id == scope[:workspace_id]
+      refute is_nil(conflict.workspace_id)
     end
   end
 

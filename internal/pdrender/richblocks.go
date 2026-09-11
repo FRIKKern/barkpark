@@ -33,6 +33,14 @@ import (
 // lipgloss/table auto-sizer stays the sole width authority. `cols` ABSENT ⇒ every
 // column is text ⇒ the render is byte-identical to a table with no spec. The key
 // is `cols`, NOT `columns` (an overloaded layout block name + layout attr).
+//
+// CROSS-RUNTIME: the web projection of this same spec lives in
+// api/lib/barkpark/portable_doc/render/compose.ex (table_col_types /
+// table_delta_cell / table_spark_cell) + walk.ex table_col_class. The type set
+// and the delta glyphs below are recorded once, for both, in
+// api/test/support/fixtures/table-col-types.json — the Elixir suite reads that
+// file; the literals here do NOT yet (a Go-side read is follow-up work). Change
+// a glyph or a type name in one place and you must change all three.
 type tableRenderer struct{ ir InlineRenderer }
 
 func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {

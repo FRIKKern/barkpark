@@ -1894,11 +1894,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
            the editor-header action list. See Goal barkpark-cjs s4. -->
 
       <!-- E2 secondary editor (read-only) — sits in the layout flex
-           row so it lands to the right of the primary editor pane. -->
+           row so it lands to the right of the primary editor pane.
+           `width_bucket` is load-bearing, not decoration: below `standard`
+           the card yields SERVER-SIDE instead of being painted and then
+           hidden by D36's `display: none`, so no reader, screen reader or
+           Tab key ever meets a pane the desk has decided not to show. The
+           header gains a "Close reference" action at those buckets (see
+           DocActions) because this card carries the only ✕. -->
       <.secondary_editor_card
         secondary_doc={@secondary_doc}
         secondary_schema={@secondary_schema}
         secondary_type={@secondary_type}
+        width_bucket={@width_bucket}
       />
 
       <!-- E2 secondary picker modal -->
