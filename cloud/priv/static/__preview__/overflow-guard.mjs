@@ -6799,15 +6799,18 @@ async function main() {
     //    OVERVIEW DIGEST's variant of it. This leg is that count, paid.
     //
     //    THE FILING'S LINE NUMBERS ARE STALE AND THAT IS RE-DERIVED HERE, NOT
-    //    INHERITED. The row says `activityRow app.js:12638, called at :5503 via
-    //    list.slice(0,3)`. On today's bytes `activityRow` is at app.js:20705 and
-    //    the digest paints at app.js:8595 inside `loadOverviewDigest`. The SHAPE
-    //    the row describes is unchanged and is what matters: the population is
-    //    `list.slice(0, 3)`, so it is AT MOST THREE, always.
+    //    INHERITED. The row cites `activityRow` and the `list.slice(0,3)` call by
+    //    line number; every one of those numbers had rotted by the time this leg
+    //    was cut, so they are re-anchored here the way E11 demands — by FUNCTION
+    //    name plus the grep that re-derives it: `grep -n 'function activityRow'`
+    //    (the emitter) and `grep -n 'function loadOverviewDigest'` (the digest
+    //    painter; its `list.slice(0, 3).map(activityRow)` is the population
+    //    bound). The SHAPE the row describes is unchanged and is what matters:
+    //    the population is `list.slice(0, 3)`, so it is AT MOST THREE, always.
     //
     //    THE MANDATORY REFUSAL, AND WHY THIS SCREEN SPECIFICALLY NEEDS ONE.
-    //    `loadOverviewDigest` fetches `GET /v1/audit?limit=5` and then, at
-    //    app.js:8591, `if (!r.ok) { box.innerHTML = ""; return; }` — the audit
+    //    `loadOverviewDigest` fetches `GET /v1/audit?limit=5` and then, on its
+    //    `if (!r.ok) { box.innerHTML = ""; return; }` arm (grep that string) — the audit
     //    endpoint is admin-gated and the charter requires the digest to HIDE on
     //    403 rather than error. An emptied container satisfies every per-row
     //    assertion below having measured NOTHING: no name clipped, no badge
