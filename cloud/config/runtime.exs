@@ -274,6 +274,20 @@ if config_env() == :prod do
   # volume) and the 32 MB cap is a module attribute on the router — a size that
   # bounds a build OUTPUT rather than a whole project dir needs no per-deploy
   # tuning knob.
+  #
+  # The PER-TEAM ceiling, however, IS a knob (ssw9-bl-artifact-retention-quota):
+  # 32 MB bounds one request, and nothing bounded the loop. ARTIFACT_QUOTA_BYTES
+  # sets the total live artifact bytes a team may hold; the upload route answers
+  # 429 `artifact_quota_exceeded` past it. Default 512 MB (see
+  # `Sites.ArtifactQuota`); the literal string "infinity" disables the ceiling,
+  # which is an explicit operator choice and never a default.
+  config :barkpark_cloud,
+         :artifact_quota_bytes,
+         case System.get_env("ARTIFACT_QUOTA_BYTES") do
+           nil -> 512 * 1024 * 1024
+           "infinity" -> :infinity
+           raw -> String.to_integer(raw)
+         end
 
   # Provisioning: the shared WORKER token the off-box Go warm-pool
   # provisioner presents to /v1/internal/provision-jobs/*. May be nil here — the
