@@ -63,6 +63,8 @@
 # bash 3.2 compatible (macOS system bash).
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 SELF="$(basename "$0")"
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
@@ -292,7 +294,7 @@ PY
 # query PERSPECTIVE OUTFILE — an INDEPENDENT read of the reserved type.
 query() {
   local persp="$1" out="$2" code
-  code="$(curl -sS --max-time 60 -o "$out" -w '%{http_code}' \
+  code="$(bp_curl_code -sS --max-time 60 -o "$out" \
       -H "Authorization: Bearer $ORACLE_TOKEN" \
       "$BASE/v1/data/query/$DATASET/$DOC_TYPE?perspective=$persp&limit=50")"
   [ "$code" = "200" ] || { printf '  independent read of perspective %s answered HTTP %s\n' "$persp" "$code" >&2; return 1; }

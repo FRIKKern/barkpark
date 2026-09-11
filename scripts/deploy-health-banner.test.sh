@@ -39,6 +39,8 @@
 #
 # Templated on scripts/install-cli.test.sh.
 set -uo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
@@ -192,7 +194,7 @@ PY
 SERVER_PID=$!
 disown $SERVER_PID 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  curl -fs "http://localhost:$OK_PORT/api/schemas" >/dev/null 2>&1 && break
+  bp_curl_body -s "http://localhost:$OK_PORT/api/schemas" >/dev/null 2>&1 && break
   sleep 0.3
 done
 run_slice "$TMP/cur.sh" "$OK_PORT" "$TMP/c.out"

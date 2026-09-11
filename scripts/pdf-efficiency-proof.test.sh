@@ -206,6 +206,10 @@ TARGET_BASE="${2:?base}"
 TARGET_TOKEN="stub-token"
 OP="pfx"
 DRV
+  # The extracted region now calls bp_curl_body, so the driver must source the
+  # same shared helper the proof script does (task-c2f96f8121c64601). Resolved
+  # from the SUBJECT's own directory, never hard-coded.
+  printf '. %q\n' "$(cd "$(dirname "$TARGET_SCRIPT")" && pwd)/lib/bp-curl.sh" >> "$2"
   cat "$1" >> "$2"
   cat >> "$2" <<'DRV'
 census_ours
