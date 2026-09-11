@@ -138,27 +138,53 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
   argument and every other key has a plausible default.
   """
   def terminal_record(slug, build_id, log_state, opts \\ []) do
-    {:ok, 200,
-     %{
-       "slug" => slug,
-       "build_id" => build_id,
-       "record" => Keyword.get(opts, :record, "present"),
-       "log_state" => log_state,
-       "log_path" =>
-         Keyword.get(opts, :log_path, "/var/lib/barkpark/site-runs/#{slug}-#{build_id}.log"),
-       "log_bytes" => Keyword.get(opts, :log_bytes, 31_402),
-       "exit_code" => Keyword.get(opts, :exit_code, 12),
-       "failure_reason" => Keyword.get(opts, :failure_reason, "BUILD failed (exit 12)"),
-       "stages" => Keyword.get(opts, :stages, [%{"name" => "BUILD", "status" => "failed"}]),
-       "unit_name" => Keyword.get(opts, :unit_name, "barkpark-site@#{slug}.service"),
-       "journal_command" =>
-         Keyword.get(opts, :journal_command, "journalctl -u barkpark-site@#{slug}"),
-       "mode" => Keyword.get(opts, :mode, "deploy"),
-       "runtime_target" => Keyword.get(opts, :runtime_target, "static"),
-       "started_at" => Keyword.get(opts, :started_at, "2026-08-06T01:00:00Z"),
-       "finished_at" => Keyword.get(opts, :finished_at, "2026-08-06T01:04:00Z"),
-       "evicted_at" => Keyword.get(opts, :evicted_at)
-     }}
+    defaults = %{
+      "record" => "present",
+      "log_path" => "/var/lib/barkpark/site-runs/#{slug}-#{build_id}.log",
+      "log_bytes" => 31_402,
+      "exit_code" => 12,
+      "failure_reason" => "BUILD failed (exit 12)",
+      "stages" => [%{"name" => "BUILD", "status" => "failed"}],
+      "unit_name" => "barkpark-site@#{slug}.service",
+      "journal_command" => "journalctl -u barkpark-site@#{slug}",
+      "mode" => "deploy",
+      "runtime_target" => "static",
+      "started_at" => "2026-08-06T01:00:00Z",
+      "finished_at" => "2026-08-06T01:04:00Z",
+      "evicted_at" => nil,
+      "route_status" => nil,
+      "route_detail" => nil
+    }
+
+    # THE KEY SET IS READ, NOT TYPED. `record_body/1` names every key
+    # `render_build_record/1` emits, straight out of the shared JSON, so a key
+    # added to the box's record door arrives in this fake automatically —
+    # carrying a sentinel until somebody gives it a default above. That is the
+    # whole point: a hand-authored body is a snapshot of the producer that can
+    # rot while both suites stay green.
+    body =
+      BarkparkCloud.BoxStatusPayloadFixture.record_body(%{
+        "slug" => slug,
+        "build_id" => build_id,
+        "log_state" => log_state
+      })
+
+    body =
+      Enum.reduce(defaults, body, fn {key, value}, acc ->
+        Map.put(acc, key, Keyword.get(opts, String.to_existing_atom(key), value))
+      end)
+
+    {:ok, 200, body}
+  end
+
+  @doc """
+  A FULL status body — every key `render_status/1` emits, one distinct sentinel
+  per key, read out of the shared JSON. For tests that need to prove what the
+  control plane does with a complete box report rather than the three-key
+  sketch `walk/2` returns.
+  """
+  def full_status(overrides \\ %{}) do
+    {:ok, 200, BarkparkCloud.BoxStatusPayloadFixture.status_body(overrides)}
   end
 
   ## ---------------------------------------------------------------------------

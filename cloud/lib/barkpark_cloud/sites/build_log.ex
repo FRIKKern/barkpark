@@ -107,8 +107,15 @@ defmodule BarkparkCloud.Sites.BuildLog do
   # later is dropped until a human lists it here. `log_state` is read separately
   # (it decides the status code) and re-stated in the body so a logged response is
   # self-describing.
+  # route_status/route_detail: the box has rendered these on the record door
+  # since #17640 and this allowlist did not list them, so the box's route
+  # verdict was dropped SILENTLY on the way to the operator reading a failed
+  # build. Found by the lock in
+  # cloud/test/barkpark_cloud/sites/box_status_payload_conformance_test.exs,
+  # which compares this list to the producer's own key set through `wire/3`.
   @record_keys ~w(
     slug build_id record log_state log_path log_bytes exit_code failure_reason
+    route_status route_detail
     stages unit_name journal_command mode runtime_target
     started_at finished_at evicted_at
   )
