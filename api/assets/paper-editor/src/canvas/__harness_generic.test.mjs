@@ -27,8 +27,8 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -157,7 +157,7 @@ const server = createServer((req, res) => {
   res.end(readFileSync(abs));
 });
 
-async function run(fixtureUrl) {
+async function run(fixtureUrl, netLogPath = null) {
   const { port } = server.address();
   const page =
     `http://127.0.0.1:${port}/${HARNESS_DIR}/__harness_generic.html` +
@@ -171,6 +171,7 @@ async function run(fixtureUrl) {
       "--hide-scrollbars",
       "--window-size=900,1200",
       "--virtual-time-budget=12000",
+      ...(netLogPath ? [`--log-net-log=${netLogPath}`, "--net-log-capture-mode=Default"] : []),
       "--dump-dom",
       page,
     ],
@@ -184,7 +185,22 @@ async function run(fixtureUrl) {
   }
   const unescape = (s) =>
     s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-  return { result: JSON.parse(unescape(m[1])), dom, page };
+  return { result: JSON.parse(unescape(m[1])), dom, page, origin: `http://127.0.0.1:${port}` };
+}
+
+// PHOENIX IS NEVER CONTACTED, and this measures it rather than asserting it.
+// "run it with Phoenix stopped" is unverifiable on a shared machine where
+// somebody else's `mix phx.server` may be listening on :4000 — and stopping a
+// server proves nothing about the NEXT run anyway. The net log names every URL
+// Chromium requested; if any of them leaves the static server's origin, the
+// page is not the self-contained static artifact it claims to be.
+function loggedRequests(netLogPath, origin) {
+  if (!existsSync(netLogPath)) return { all: [], foreign: ["<no net log was written>"] };
+  const raw = readFileSync(netLogPath, "utf8");
+  const urls = new Set();
+  for (const m of raw.matchAll(/"url":"(https?:[^"]+)"/g)) urls.add(m[1].replace(/\\u002F/g, "/"));
+  const all = [...urls];
+  return { all, foreign: all.filter((u) => !u.startsWith(origin)) };
 }
 
 // The red panel is only a real rejection if it is VISIBLE. Chromium's
@@ -223,8 +239,14 @@ if (!CHROME) {
   try {
     // ── the green: a real published paper, clean mount + round trip ──────────
     let green;
+    let net;
     await check("the real published-paper capture mounts clean and round trips", async () => {
-      green = (await run(REAL_FIXTURE)).result;
+      const NETLOG = mkdtempSync(join(tmpdir(), "bp-canvas-harness-"));
+      const netLogPath = join(NETLOG, "net.json");
+      const run1 = await run(REAL_FIXTURE, netLogPath);
+      green = run1.result;
+      net = loggedRequests(netLogPath, run1.origin);
+      rmSync(NETLOG, { recursive: true, force: true });
       if (green.error) throw new Error(`the harness rejected the real fixture: ${green.error}`);
       if (!green.ready) throw new Error("the harness never reached ready");
       if (!green.cleanMount.clean) {
@@ -245,6 +267,28 @@ if (!CHROME) {
           `${green.roundTrip.ids.length} ids, first=${green.roundTrip.ids[0]}, ` +
           `last=${green.roundTrip.ids[green.roundTrip.ids.length - 1]}`,
       );
+    });
+
+    await check("the proof touches NOTHING but the static server (Phoenix uncontacted)", () => {
+      if (!net) throw new Error("the green arm did not run, so no net log exists");
+      // NON-VACUITY. An empty net log would pass the filter below for free, so
+      // the count is asserted before the verdict: the page loads a document, a
+      // stylesheet, a 550KB bundle and a fixture, so anything under 4 means the
+      // log was not captured and this arm measured nothing.
+      if (net.all.length < 4) {
+        throw new Error(
+          `the net log named only ${net.all.length} URL(s) (${JSON.stringify(net.all)}) — ` +
+            "it was not captured, so this arm proves nothing",
+        );
+      }
+      if (net.foreign.length) {
+        throw new Error(
+          `Chromium requested ${net.foreign.length} URL(s) outside the static server:\n      ` +
+            net.foreign.join("\n      ") +
+            "\n      The harness must be static files only — no /api, no :4000, no CDN.",
+        );
+      }
+      console.log(`      all ${net.all.length} logged requests stayed on the static server's origin`);
     });
 
     // ── the reds: malformed input is refused, visibly ────────────────────────
