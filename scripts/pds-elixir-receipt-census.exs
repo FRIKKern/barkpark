@@ -5576,12 +5576,15 @@ defmodule PDS.Census do
   # discharge the ruling; it tells the ruler what the shape already says.
 
   # THE PRE-REGISTERED FIRE SET. Keyed on {short path, def label, payload key} and NEVER
-  # on a LINE: the seven line anchors this row was filed with (tasks_controller.ex:83,
-  # :224, :1008, :1015, :1696 and tickets_controller.ex:93, :169) had ALL rotted by the
-  # time a builder read them — :83 and :224 are comment lines today and the two tickets
-  # anchors render a VARIABLE (`tickets: rows`), not a call. A committed line number in
-  # this file is a snapshot that goes stale in days; {path, def, key} survives every edit
-  # that does not move the receipt out of its def or rename the payload key.
+  # on a LINE — and the row this arm was filed under is its own proof. It pre-registered
+  # SEVEN sites as bare line anchors, five in tasks_controller.ex and two in
+  # tickets_controller.ex, and ALL SEVEN had rotted by the time a builder read them: the
+  # five tasks anchors land on comment lines today, and both tickets anchors render a
+  # VARIABLE (`tickets: rows`), not a call, which is not this shape at all. A committed
+  # line number in this file is a snapshot that goes stale in days; {path, def, key}
+  # survives every edit that does not move the receipt out of its def or rename the
+  # payload key. (The rotted anchors themselves are NOT reprinted here: a dead line
+  # number in a comment is the exact thing this paragraph argues against.)
   #
   # IT REDS ON AN ARRIVAL, AND THAT COSTS NOTHING NEW. A site of this shape arriving is
   # a new `ok: true` literal, which ALREADY reds REGISTER-COMPLETE and already forces a
@@ -5590,10 +5593,9 @@ defmodule PDS.Census do
   # it only refuses a SILENT change to what the hypothesis column claims.
   # RE-DERIVED AT THE PR BASE, AND THE FILED SET WAS NOT THIS ONE. The row pre-registered
   # SEVEN sites in tasks_controller.ex and tickets_controller.ex; measured on this tree the
-  # arm fires on SIX, and not one of them is a filed anchor — tickets_controller.ex:93/:169
-  # render `tickets: rows`, a VARIABLE, which is not this shape at all, and the five
-  # tasks_controller anchors are comment lines today. The set below is what the predicate
-  # ACTUALLY fires on, printed by the run that derived it, not transcribed from the filing.
+  # arm fires on SIX, and not one of them is a filed anchor. The set below is what the
+  # predicate ACTUALLY fires on, printed by the run that derived it, not transcribed from
+  # the filing — which is why it is keyed on {path, def, payload key} and not on a line.
   @response_carries_read_expected [
     {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
      "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "scoped_liveview_path"},
@@ -10006,8 +10008,8 @@ defmodule PDS.Census do
     # THE FIRST IS THE PRECONDITION, NOT A CONTROL. A control over an absent site proves
     # nothing, and this exact arm is about a REFUSAL — "the tripwire did not fire" reads
     # identically whether the tripwire was refused or was never in the corpus at all. So
-    # the pristine run must first be seen to REACH github_status_controller.ex:65 and name
-    # it in the capture roll.
+    # the pristine run must first be seen to REACH the `status/2` receipt in
+    # github_status_controller.ex and name it in the capture roll.
     %{
       name: "RCR-TRIPWIRE-IS-REACHED",
       corpus: :repo,
