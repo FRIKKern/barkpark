@@ -275,7 +275,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   @type stats :: %{
           tables: %{optional(String.t()) => non_neg_integer()},
           total_rows: non_neg_integer(),
-          manifest: map()
+          manifest: map(),
+          attempts: pos_integer()
         }
 
   @doc """
@@ -614,8 +615,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     run_import_attempt(manifest, dumps, mode, ctx, 1)
   end
 
+  # `attempts` on the way OUT, mirroring `ImportLockError.attempts` on the way
+  # out of a refusal: a successful import that was refused once and retried is
+  # otherwise indistinguishable from one that took the lock first try, and the
+  # only thing a caller (or a test) could measure was elapsed wall time — which
+  # under CI load measures the machine, not the retry. This is the observable
+  # that makes the retry ASSERTABLE without a clock.
   defp run_import_attempt(manifest, dumps, mode, ctx, attempt) do
-    run_import_once(manifest, dumps, mode, ctx)
+    case run_import_once(manifest, dumps, mode, ctx) do
+      {:ok, stats} -> {:ok, Map.put(stats, :attempts, attempt)}
+      other -> other
+    end
   rescue
     e in ImportLockError ->
       budget = import_lock_attempts()
