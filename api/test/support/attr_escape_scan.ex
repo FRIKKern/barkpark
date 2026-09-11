@@ -72,7 +72,8 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
                 index: index,
                 clause: clause,
                 depth: 0,
-                seen: MapSet.new()
+                seen: MapSet.new(),
+                allow: guard_allowlist(clause.guard)
               })
 
             %{
@@ -117,6 +118,7 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
                   arity: length(params),
                   params: params,
                   private?: kind == :defp,
+                  guard: clause_guard(head),
                   body: Keyword.get(body, :do),
                   line: meta[:line]
                 }
@@ -145,6 +147,9 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
 
     %{clauses: clauses, calls: calls, by_name: Enum.group_by(clauses, &{&1.name, &1.arity})}
   end
+
+  defp clause_guard({:when, _, [_call, guard]}), do: guard
+  defp clause_guard(_), do: nil
 
   defp clause_head({:when, _, [call | _]}), do: clause_head(call)
   defp clause_head({name, _, args}) when is_atom(name) and is_list(args), do: {name, args}
@@ -215,6 +220,7 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
 
   def classify(expr, ctx) do
     cond do
+      MapSet.member?(ctx.allow, src(expr)) -> :allowlisted
       is_binary(expr) -> :literal
       is_number(expr) -> :numeric
       is_atom(expr) -> :literal
@@ -280,6 +286,26 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
   # blocks: the value is the last expression
   defp classify_node({:__block__, _, exprs}, ctx) when exprs != [],
     do: classify(List.last(exprs), bump(ctx))
+
+  # `if x in ~w(a b c), do: <uses x>, else: …` IS an allowlist: inside the
+  # then-branch the subject can only be one of the literals the condition
+  # names. This is the idiom the tree already uses (chip tones, card tones,
+  # box classes), so proving it keeps the reviewed residue honest instead of
+  # padding it with sites that ARE validated.
+  defp classify_node({:if, _, [{:in, _, [subject, list]} = _cond, branches]}, ctx) do
+    if literal_list?(list) do
+      allowed = %{ctx | allow: MapSet.put(ctx.allow, src(subject))}
+
+      branches
+      |> Enum.map(fn
+        {:do, body} -> classify(last_expr(body), bump(allowed))
+        {_other, body} -> classify(last_expr(body), bump(ctx))
+      end)
+      |> verdict(:allowlisted)
+    else
+      branches |> Enum.map(fn {_k, b} -> classify(last_expr(b), bump(ctx)) end) |> verdict(:branches)
+    end
+  end
 
   # case / cond / if / unless / with: every branch result must be safe
   defp classify_node({kind, _, args}, ctx) when kind in [:case, :cond, :if, :unless, :with] do
@@ -394,7 +420,12 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
 
           clauses
           |> Enum.map(fn clause ->
-            classify(clause.body, %{ctx | clause: clause, depth: ctx.depth + 1})
+            classify(clause.body, %{
+              ctx
+              | clause: clause,
+                depth: ctx.depth + 1,
+                allow: guard_allowlist(clause.guard)
+            })
           end)
           |> verdict(:helper)
         end
@@ -455,7 +486,13 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
             |> Enum.map(fn %{args: args, clause: caller} ->
               case Enum.at(args, idx) do
                 nil -> :unproven
-                arg -> classify(arg, %{ctx | clause: caller, depth: ctx.depth + 1})
+                arg ->
+                  classify(arg, %{
+                    ctx
+                    | clause: caller,
+                      depth: ctx.depth + 1,
+                      allow: guard_allowlist(caller.guard)
+                  })
               end
             end)
             |> verdict(:param)
@@ -500,6 +537,26 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
   end
 
   defp bump(ctx), do: %{ctx | depth: ctx.depth + 1}
+
+  # A list of literals: `~w(a b c)`, `["a", "b"]`, or a module attribute (a
+  # compile-time constant — author text cannot reach one).
+  def literal_list?({:sigil_w, _, _}), do: true
+  def literal_list?({:@, _, [{name, _, _}]}) when is_atom(name), do: true
+  def literal_list?(list) when is_list(list), do: Enum.all?(list, &is_binary/1)
+  def literal_list?(_), do: false
+
+  # `defp f(x) when x in @whitelist` is the same allowlist, written in the head.
+  def guard_allowlist(nil), do: MapSet.new()
+
+  def guard_allowlist(guard) do
+    guard
+    |> collect(fn
+      {:in, _, [subject, list]} -> [{subject, list}]
+      _ -> []
+    end)
+    |> Enum.filter(fn {_s, list} -> literal_list?(list) end)
+    |> MapSet.new(fn {s, _l} -> src(s) end)
+  end
 
   defp qualified_name({:__aliases__, _, parts}, fun),
     do: Enum.map_join(parts ++ [fun], ".", &Atom.to_string/1)
