@@ -132,8 +132,14 @@ run_slice() {
     bash "$1" > "$3" 2>&1
 }
 
-mkdir -p "$TMP/app"
+mkdir -p "$TMP/app/scripts/lib"
 printf 'PORT=4000\n' > "$TMP/app/.env"
+# The health section sources $APP_DIR/scripts/lib/bp-curl.sh (429 backoff,
+# task-90059c5c680f6665) and $TMP/app IS the $APP_DIR the slice sees. Carry the
+# helper in, or every case below silently takes deploy.sh's named degrade branch
+# and this harness proves nothing about the real helper (the #17562
+# deploy-receipt-failure.test.sh trap).
+cp "$ROOT/scripts/lib/bp-curl.sh" "$TMP/app/scripts/lib/bp-curl.sh"
 
 DEAD_PORT="$(free_port)"   # nothing bound: free_port closed the socket
 

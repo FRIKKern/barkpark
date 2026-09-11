@@ -60,6 +60,29 @@ APP="${BARKPARK_APP_DIR:-/opt/barkpark}"
 COMPOSE_FILE="$APP/cloud/docker-compose.yml"
 CADDYFILE="${BARKPARK_CADDYFILE:-/etc/caddy/Caddyfile}"
 LOCK="${BARKPARK_DEPLOY_LOCK:-/var/lock/barkpark-cp-deploy.lock}"
+
+# ---- 429 backoff, shared (task-90059c5c680f6665) ---------------------------
+# This script is SHIPPED STANDALONE: .github/workflows/deploy.yml scps it ALONE
+# to /tmp/<name>.$R.sh on the box, and the private-copy preamble above then
+# re-execs it out of TMPDIR. So NO path relative to the running file reaches
+# scripts/lib/bp-curl.sh — not $0, not BASH_SOURCE. The one place the helper
+# does exist on the box is the checkout this script deploys: $APP.
+#
+# Guarded, and the degrade is NAMED rather than silent. A box whose checkout
+# predates the helper must still deploy, and sourcing a missing file to take a
+# deploy down over a health PROBE would be a worse outage than an unhandled 429.
+# The shim reproduces bp_curl_code's contract exactly, including the part that
+# bites: on a transport failure it must print NOTHING (bare `curl -w` prints
+# 000 AND fails, so a naive `|| echo 000` shim would print 000000 — the latent
+# double named in scripts/lib/bp-curl.sh's header).
+if [ -r "$APP/scripts/lib/bp-curl.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$APP/scripts/lib/bp-curl.sh"
+else
+  echo "[cp-deploy] WARNING: $APP/scripts/lib/bp-curl.sh absent — the health probes below run WITHOUT the shared 429 backoff" >&2
+  bp_curl_code() { local __c; __c="$(curl -w '%{http_code}' "$@")" || return $?; printf '%s' "$__c"; }
+fi
+
 PROV_BIN="${1:-}"
 log() { echo "[cp-deploy $(date -u +%H:%M:%S)] $*"; }
 compose() { docker compose -f "$COMPOSE_FILE" --profile blue --profile green "$@"; }
@@ -473,7 +496,7 @@ fi
 
 ok=0
 for _ in $(seq 1 36); do
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 "http://localhost:${TARGET_PORT}/" || true)"
+  code="$(bp_curl_code -s -o /dev/null --max-time 6 "http://localhost:${TARGET_PORT}/" || echo 000)"
   # 404 is NOT accepted: it used to be, on the theory that "some route
   # answered" proves a live app — but a container that serves nothing but
   # 404s (image booted, app crashed, wrong port, static server up with the
@@ -491,10 +514,10 @@ fi
 # The '/' gate only proves the static SPA serves — it stayed green through a 16h
 # outage where every DB-backed route 500'd. Require a DB-touching endpoint too:
 # bad-creds login must answer 401 (a live auth stack), not 5xx/000 (dead pool).
-dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+dbcode="$(bp_curl_code -s -o /dev/null --max-time 10 \
   -X POST -H 'content-type: application/json' \
   -d '{"email":"cp-deploy-probe@invalid.example","password":"x"}' \
-  "http://localhost:${TARGET_PORT}/v1/auth/login" || true)"
+  "http://localhost:${TARGET_PORT}/v1/auth/login" || echo 000)"
 if [ "$dbcode" != "401" ]; then
   log "slot $TARGET DB probe failed (login=$dbcode, want 401) — abort (active slot untouched)"
   abort_deploy; exit 14
@@ -525,7 +548,7 @@ if ! systemctl reload caddy; then
   cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"; systemctl reload caddy || true
   abort_deploy; exit 14
 fi
-code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "barkpark.cloud:443:127.0.0.1" "https://barkpark.cloud/" || true)"
+code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "barkpark.cloud:443:127.0.0.1" "https://barkpark.cloud/" || echo 000)"
 log "Caddy now -> :$TARGET_PORT (https://barkpark.cloud/ = $code)"
 # GATE, not just a log line. instance-deploy.sh's twin of this curl was fixed in
 # pds-bl-w49; cp-deploy's was left captured, logged and never tested, so a
