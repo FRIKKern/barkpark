@@ -258,8 +258,8 @@ defmodule Barkpark.Content.CreateFamilyPublishedForkTest do
 
     {result, warnings} = warned_mutate([%{"createOrReplace" => attrs_for(id)}], scope)
 
-    assert {:ok, {_tx, [_r]}} = result,
-           "a claim whose lease has lapsed holds nothing — the write must land"
+    assert match?({:ok, {_tx, [_r]}}, result),
+           "a claim whose lease has lapsed holds nothing — the write must land, got: #{inspect(result)}"
 
     assert Enum.any?(warnings, &(&1.code == @code)),
            "the lapsed-lease path is the advisory path, got: #{inspect(warnings)}"
