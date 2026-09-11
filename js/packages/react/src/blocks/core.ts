@@ -22,6 +22,7 @@ import {
   meaningForRole,
   LEGEND_ROLES,
   textLeafValue,
+  codeSource,
 } from '../inline'
 import { renderBlock, renderBlocks } from './registry'
 import { listChildren } from '../list-children'
@@ -647,7 +648,15 @@ function codeBlockHtml(value: string): string {
   )
 }
 
-const code: Emit = (b) => codeBlockHtml(str(b.value))
+// The FOUR accepted source keys, first non-blank wins — `codeSource` in
+// ../inline.tsx carries the contract and the corpus counts. A blank/whitespace
+// source renders NOTHING (no empty `<pre>` slab), matching compose.ex's
+// `blank_code_source?/1` arm and pdrender's blank guard; the `image` emitter
+// below takes the same "sourceless block is editor scaffolding" exit.
+const code: Emit = (b) => {
+  const source = codeSource(b)
+  return source.trim() === '' ? '' : codeBlockHtml(source)
+}
 
 // The `bp-section-divider` classes carry no styling (every value is inline, the
 // same bytes figures.ex emits) — they are the handle the reader shell needs to

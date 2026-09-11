@@ -13882,3 +13882,89 @@ a ROUTE outcome yet. `dr-w21-bl-route-decision-reaches-no-plane` c1 (a non-zero 
 `deployments` table over a stated window) and c3 (the incidence re-taken over a denominator in the hundreds,
 ≥24h after the wave-20 marker repair) stay OPEN and are the successor's, in that order: serialize, deploy, then
 count. **D346 stands, un-amended: the arm decision had no durable channel. This entry builds one.**
+
+### D609 — 2026-09-11 — THE CENSUS 403 IS GONE. THE OPERATOR ROUTE ANSWERS 200 TODAY, BOTH ROUTES RETURN THE SAME NUMBERS, AND THE TEAM-SCOPED ROUTE STAYS CANONICAL ANYWAY.
+
+`dr-w30-bl-operator-census-403-blocks-the-fleet-ranking` asked for a ruling on a 403. **The 403 does not
+reproduce.** Re-read live at decision time, with the cloud PAT this Mac holds, against
+`https://api.barkpark.cloud`:
+
+| route | status | read at (`date -u`) | headline |
+|---|---|---|---|
+| `GET /v1/operator/deploy-ledger/census?from=2026-08-05T21:13:50Z&to=2026-09-11T00:00:00Z` | **200** | 2026-09-11T13:52:20Z | `volume 12689 · failed 1199 · live 4103 · deferred_total 7387 · total_sites 10 · failure_rate 9.45% · terminal_failure_rate 22.61%` |
+| `GET /v1/deploy-ledger/census?from=2026-08-05T21:13:50Z&to=2026-09-11T00:00:00Z` | **200** | 2026-09-11T13:52:20Z | the SAME `volume 12689 · failed 1199 · live 4103 · deferred_total 7387 · total_sites 10`, plus a `scope` key: `team "guerrilla" · registered_sites 14` |
+| `GET /v1/me` | **200** | 2026-09-11T13:52:52Z | `"platform_operator": true` for `frikk@guerrilla.no` |
+
+**D30 IS SUPERSEDED ON ITS FACTS, NOT ON ITS RULING.** D30 called the census "403-dark in production … a
+PERMANENT HUMAN GATE" because `require_platform_operator/2` gates on `email in platform_admin_emails()` and
+`PLATFORM_ADMIN_EMAILS` was unset on prod. Somebody set it: `/v1/me` now answers `platform_operator: true`, so
+`gr-ops-platform-admin-emails` — the human gate D30 filed a dependency on — has been discharged for this
+principal. Every charter line that asserts the census answers 403 to a real token (D30, D165's re-derivation at
+`:5129`, `:5472`, `:5916`, `:7146`, `:7626`) is **historical record, correct on its date, false today.** They are
+not struck: they dated a condition that has since changed, which is exactly what a dated entry is for.
+
+**THE RULING: THE TEAM-SCOPED ROUTE IS CANONICAL. The epic's readers do NOT get a platform_operator
+credential as a design dependency.** Three reasons, each read off the two responses above and not off the
+filing:
+
+1. **The operator route buys nothing.** Over the identical window the two routes return the identical
+   population — `volume 12689`, `total_sites 10`, class-for-class identical counts. The team owns every site
+   that has deployed. The "FLEET is far larger" premise the row was filed on is **false as measured**: there is
+   no fleet outside this team to see.
+2. **The credential is allowlist-shaped and can be emptied without a deploy.** `platform_operator` resolves
+   from `PLATFORM_ADMIN_EMAILS` at request time. An instrument pinned to the operator route goes dark the next
+   time that env var is edited, with no code change and no gate red — the same failure that darkened the crown.
+   The team route's authority is team membership, which the epic's readers hold by construction.
+3. **Only the team route names its own scope.** Its envelope carries `scope.team`, `scope.site_ids` and
+   `scope.registered_sites`; the operator envelope carries no scope key at all. A number that cannot say what
+   population it covers is the thing this epic exists to refuse.
+
+**THE LABELLING CONVENTION, BINDING ON EVERY FLEET-WIDE NUMBER THIS EPIC PUBLISHES** (this is the verbatim
+text; quote it, do not paraphrase it):
+
+> Every published fleet-wide number names its READER and its READING. A number is an INSTRUMENT READING only
+> when it was returned by a shipped HTTP route that answered 200 in the same session that publishes it, and it
+> is then published with the route path, the HTTP status, the pinned window, and the `date -u` instant of the
+> call. A number obtained any other way — SSH plus psql, a hand-rolled aggregate, a spreadsheet, a re-quote of
+> an earlier reading — is labelled **SQL-derived, not an instrument reading**, and may never be compared
+> side-by-side with an instrument reading without that label on it. The census's own `scope` block, when the
+> team route produced the number, is reproduced beside it; when the number came from the operator route, which
+> emits no scope block, the publication states "operator route, unscoped" in its place. A reading whose route
+> answered anything other than 200 is not a number at all: publish the status code and stop.
+
+This convention is what `dr-w30-bl-…` c1 asked for, with one inversion the live reading forced: c1 was drafted
+assuming the fleet number could ONLY be SQL-derived. It can be an instrument reading today. The convention
+therefore governs the LABEL, not the method, and it is the label that is mandatory.
+
+**WHAT THIS ENTRY DOES NOT CLOSE.** Nothing here says the operator route will still answer 200 tomorrow — the
+allowlist is prod configuration this epic does not own, and no test pins it. Any instrument that calls the
+operator route must still treat a 403 as a first-class outcome and surface it, never bury it. `D516`'s ranking
+stands on its own window and is untouched; the window read above is a DIFFERENT, later window and its
+`failure_rate 9.45%` may not be laid beside D516's `17.79%` without both windows printed.
+
+### D610 — 2026-09-11 — D469'S OFFLINE RULE CANNOT REACH A TASK TITLE. THE PROSE-ROT CLASS HAS NO AUTOMATED GUARD ON THE LEDGER, AND `dr-w27-bl-…` IS RETITLED BY HAND.
+
+**The retitle, done.** `dr-w27-bl-deferral-cause-is-null-on-59-percent` was titled
+*"59.7% of deferrals cannot name a cause, and the vocabulary changed twice inside one week"* — a decaying
+percentage over a CLOSED population, stated in the present tense. Patched and published at 2026-09-11T13:53:32Z
+(`bp doc patch task … --set title=… --yes`, then `bp doc publish task … --yes`). The row now reads:
+
+> The NULL-cause deferral population closed at 2026-08-07T10:01:54Z; the vocabulary changed twice in the week before it
+
+**The row was NOT closed and its criteria were NOT touched.** Read back at 2026-09-11T13:53:42Z:
+`lifecycle_status: open`, `acceptance_criteria` length 3 before and 3 after, and the three criterion strings
+compare byte-identical (`met` false → false on all three). The two live criteria survive verbatim:
+(2) *"Any rate this epic publishes states which vocabulary window it covers, and refuses to span
+2026-08-05T21:27:11 or the 2026-08-07 cause switch silently"* and (3) *"The interaction with dr-w27-s5 ARM D is
+recorded: the deferred population is a floor because a lost defer CAS produces no deferred row"*. The slug still
+embeds `59-percent`; that fossil is accepted, as the filing said.
+
+**THE GAP, RULED.** D469's prose-rot rule is **syntactic and offline by construction** — "no network in the
+unit gate" — and it scans instrument FILES in this repo. A Barkpark task title is a server-side row in the
+`production` dataset, reachable only over HTTP. **So the rule structurally cannot see the surface this defect
+lived on, and this class has NO automated guard.** Nothing in CI reds when a ledger title freezes a decaying
+number or narrates a closed population in the present tense; nothing did for the 33 days this title stood. The
+only mechanism is review, and review is what caught this one. **Naming that is the guard we have.** A network
+tier that could reach titles would have to run against prod on every PR, which D469 already refused for a
+reason that has not changed; the honest state is *known gap, deliberately unguarded, documented here so the next
+reader does not assume a gate exists.*

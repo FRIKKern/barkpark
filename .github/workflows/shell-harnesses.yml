@@ -290,6 +290,7 @@ on:
       # same reason: the PR that adds a TWELFTH fixture is the one that can
       # break the emitter's byte-identity claim.
       - "scripts/pds-live-hetzner-placement-group.sh"
+      - "scripts/pds-live-hetzner-placement-group_test.sh"
       - "internal/cli/testdata/pds_live_hetzner_*.json"
       # doc-gates-paths-parity-check.sh. Its subject set is exactly one file —
       # doc-gates.yml's two hand-maintained `paths:` lists — so that file must
@@ -437,6 +438,18 @@ on:
       - "templates/place-directory/install.sh"
       - "templates/place-directory/seed-places.json"
       - "templates/place-directory/schemas/place.json"
+      # CONSOLE SLICE GATE (task-b36dafdebcabe093). The workflow's own header
+      # rule — every script a job executes gets its own entry, D26 — was never
+      # paid for this pair: `tooling-harnesses` runs `node --check
+      # scripts/console-slice-gate.mjs` and `node --test
+      # scripts/console-slice-gate.test.mjs`, and neither file could trigger
+      # this workflow, so a PR editing only the gate script never ran its own
+      # selftest. The `.test.mjs` half is ALSO reached by the
+      # `scripts/*.test.mjs` glob below, and is named anyway: the glob dispatches
+      # to `console-refusal-capture` and `selftest-wiring-census`, NOT to
+      # `tooling-harnesses`, so the glob alone leaves this step dark.
+      - "scripts/console-slice-gate.mjs"
+      - "scripts/console-slice-gate.test.mjs"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -622,6 +635,7 @@ on:
       - "cloud/Dockerfile"
       - "cloud/lib/barkpark_cloud/web/router.ex"
       - "scripts/pds-live-hetzner-placement-group.sh"
+      - "scripts/pds-live-hetzner-placement-group_test.sh"
       - "internal/cli/testdata/pds_live_hetzner_*.json"
       - "scripts/doc-gates-paths-parity-check.sh"
       - ".github/workflows/doc-gates.yml"
@@ -739,6 +753,18 @@ on:
       - "templates/place-directory/install.sh"
       - "templates/place-directory/seed-places.json"
       - "templates/place-directory/schemas/place.json"
+      # CONSOLE SLICE GATE (task-b36dafdebcabe093). The workflow's own header
+      # rule — every script a job executes gets its own entry, D26 — was never
+      # paid for this pair: `tooling-harnesses` runs `node --check
+      # scripts/console-slice-gate.mjs` and `node --test
+      # scripts/console-slice-gate.test.mjs`, and neither file could trigger
+      # this workflow, so a PR editing only the gate script never ran its own
+      # selftest. The `.test.mjs` half is ALSO reached by the
+      # `scripts/*.test.mjs` glob below, and is named anyway: the glob dispatches
+      # to `console-refusal-capture` and `selftest-wiring-census`, NOT to
+      # `tooling-harnesses`, so the glob alone leaves this step dark.
+      - "scripts/console-slice-gate.mjs"
+      - "scripts/console-slice-gate.test.mjs"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -966,6 +992,8 @@ jobs:
           tooling-harnesses .github/workflows/security.yml
           tooling-harnesses .github/workflows/compose-smoke.yml
           tooling-harnesses .github/workflows/go-format.yml
+          tooling-harnesses scripts/console-slice-gate.mjs
+          tooling-harnesses scripts/console-slice-gate.test.mjs
           launcher-boot-selftest bin/barkpark
           launcher-boot-selftest scripts/barkpark-boot-selftest.sh
           workflow-portability scripts/workflow-portability-check.sh
@@ -988,6 +1016,7 @@ jobs:
           cloud-static-gz cloud/Dockerfile
           cloud-static-gz cloud/lib/barkpark_cloud/web/router.ex
           pds-hetzner-offline scripts/pds-live-hetzner-placement-group.sh
+          pds-hetzner-offline scripts/pds-live-hetzner-placement-group_test.sh
           pds-hetzner-offline internal/cli/testdata/pds_live_hetzner_*.json
           task-lease-renew scripts/task-lease-renew.sh
           task-lease-renew scripts/task-lease-renew.test.sh
@@ -2106,6 +2135,13 @@ jobs:
         # produces. There is no bare run to pair it with: the bare script is the
         # LIVE arm and needs the credential.
         run: bash scripts/pds-live-hetzner-placement-group.sh --selftest-offline
+      - name: pds-live-hetzner-placement-group_test.sh (offline diagnostic harness, stub bp, no credential)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # The eighth derived *_test.sh harness (#17687). Eight arms drive the
+        # runner's --selftest-probe entry point against a stub bp: 4 diagnostic
+        # (a failed read must quote bp's own sentence), 3 artifact-dir lifecycle,
+        # 1 positive control. Hermetic: no HCLOUD_* credential, no network.
+        run: bash scripts/pds-live-hetzner-placement-group_test.sh
 
   # ── TASK LEASE RENEW (task-16e56d05b809dd39) ───────────────────────────────
   # scripts/task-lease-renew.sh is the CI half of the ledger lease extension: it
