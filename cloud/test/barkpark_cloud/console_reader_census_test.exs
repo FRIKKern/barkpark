@@ -320,6 +320,17 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "no console surface uploads artifacts. Flip: a console artifact upload ships."
     },
     %{
+      code: "artifact_quota_exceeded",
+      site: "router.ex start_prebuilt_deploy (POST /v1/sites/:id/deployments/:dep_id/artifact)",
+      reason:
+        "CLI-only: the PER-TEAM ceiling on stored artifact bytes, refused on the same " <>
+          "bp prebuilt upload path as its three siblings above; zero app.js callers of " <>
+          "the artifact route. A 429 here tells a machine to let its in-flight deploys " <>
+          "settle (the reaper frees the bytes) or to raise ARTIFACT_QUOTA_BYTES — both " <>
+          "operator/CI moves, not console ones. Flip: a console artifact upload ships, " <>
+          "or the console grows a storage-usage surface that must name this ceiling."
+    },
+    %{
       code: "artifact_too_large",
       site:
         "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
