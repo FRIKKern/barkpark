@@ -15739,6 +15739,28 @@ defmodule BarkparkCloud.Web.Router do
   # sandbox-ownership cascade). A plain spawn inherits no ownership, so in the test
   # sandbox the DB read fails cleanly (rescued below, zero noise) while in prod it
   # checks out a normal pooled connection. A since-deleted barkpark is a no-op.
+  #
+  # cch-w65-bl — THE STRANDED-STAMP SEAM IS CLOSED, and s2 closed it, not a guard
+  # here. The worry was that this refresh runs OUTSIDE the hourly sweep's scope
+  # (`Registry.checkable_scope/1`: host set, not suspended), so a stamp it wrote
+  # on a row the sweep never revisits would stand uncorrected forever. Both halves
+  # are now answered, and neither wants code at this call site:
+  #
+  #   * NOTHING FABRICATED CAN BE WRITTEN. cch-w65-s2 made the clock a record of a
+  #     check that was actually made — `@unclocked_reasons` in registry.ex omits
+  #     `update_checked_at` on exactly the three rungs that return before a request
+  #     is built. The six rungs that still stamp all went through the transport, so
+  #     what this kick can persist is a TRUE attempt time, not an invented one.
+  #   * THE ROW IS IN SCOPE WHEN IT IS KICKED. The only caller is the provision
+  #     success path, and `Registry.succeed_job/3` lands the `ip` on the barkpark in
+  #     the SAME transaction that flips the job — so by the time this spawns, the
+  #     row satisfies `checkable_scope/1` and the hourly sweep owns it. A row that
+  #     leaves scope LATER (suspended, deprovisioned) keeps a true historical clock
+  #     on purpose (charter D789); preserving it is the fix, not the leak.
+  #
+  # So this stays fire-and-forget with no extra fence. What would reopen the seam
+  # is a SECOND caller that kicks a row which is not live — add one and the two
+  # bullets above stop holding.
   defp kick_update_status_refresh(barkpark_id) do
     spawn(fn ->
       try do
