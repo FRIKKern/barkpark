@@ -7,6 +7,11 @@
 #                                           effects, always exit 0.
 #   scripts/pds-pull-proof.sh --all         run the whole ladder.
 #   scripts/pds-pull-proof.sh --only 0a,7   run a subset (same rules).
+#   scripts/pds-pull-proof.sh --sweep-artifacts [--apply]
+#                                           list the stale artifact directories
+#                                           this harness can PROVE it owns, and
+#                                           with --apply remove exactly those.
+#                                           Refuses everything else, by name.
 #   scripts/pds-pull-proof.sh --help
 #
 # WHY THIS EXISTS BEFORE THE ENGINES DO (PDS-D39, "the proof is the program").
@@ -84,6 +89,17 @@
 #                        network, no export and no credentials); the pass then
 #                        says so, because the green is weaker without it.
 #   PDS_PROOF_LIB=1      load the rungs as a library without running any
+#   PDS_DEPLOYED_SHA     the SSH-less deploy pin, READ ONLY when SSH resolved no
+#                        sha of its own. It is believed, never verified, so every
+#                        line dating a claim by it says OPERATOR-ASSERTED.
+#   PDS_KEEP_ARTIFACTS=1 keep this run's ART_DIR on a CLEAN exit (it is kept
+#                        anyway after any FAIL, any ABORT or a non-zero exit)
+#   PDS_ARTIFACT_ROOT    default /tmp — the parent of pds-proof-art.<run tag>,
+#                        and the directory --sweep-artifacts walks
+#   PDS_SWEEP_MIN_AGE_HOURS  default 24 — an UNMARKED artifact directory younger
+#                        than this is refused by the sweep: the pre-marker
+#                        backlog is unmarked, so "no marker" alone can never mean
+#                        "abandoned"
 #
 # bash 3.2 compatible (macOS system bash).
 
@@ -125,7 +141,28 @@ RUN_ID="${PDS_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 RUN_TAG="$(printf '%s' "$RUN_ID" | cksum | awk '{printf "%x", $1}')"
 export BARKPARK_HOME="${BARKPARK_HOME:-/tmp/pds-proof.$RUN_TAG}"
 export PDS_SCRATCH_POINTER="${PDS_SCRATCH_POINTER:-/tmp/pds-scratch.$RUN_TAG.last}"
-ART_DIR="${PDS_PROOF_ARTIFACTS:-/tmp/pds-proof-art.$RUN_TAG}"
+ART_ROOT="${PDS_ARTIFACT_ROOT:-/tmp}"
+ART_DIR="${PDS_PROOF_ARTIFACTS:-$ART_ROOT/pds-proof-art.$RUN_TAG}"
+# THE ARTIFACT LEAK, AND WHY THE FIX IS OWNERSHIP RATHER THAN `rm -rf` (PDS-D641)
+#
+# ART_DIR used to be created and never removed: 18 stale /tmp/pds-proof-art.*
+# directories totalling 952 MB were measured on the scratch-target host, each
+# holding a real dev-profile export of PRODUCTION content in a world-readable
+# /tmp. But the naive fix — rm -rf the pattern on exit — is WORSE than the leak:
+# this wave runs beside two other cycles, and a concurrent run's ART_DIR looks
+# exactly like a stale one from outside.
+#
+# So removal is gated on PROVEN OWNERSHIP, never on a name match alone:
+#   · ART_DIR_OWNED is set ONLY when THIS process created the directory itself
+#     (an operator-supplied PDS_PROOF_ARTIFACTS pointing at a pre-existing
+#     directory is therefore NEVER removed — we did not make it, we do not take
+#     it), and
+#   · a marker file named this run: run_id, run_tag, pid and host, re-read at
+#     exit. A directory re-owned under us between mkdir and exit is refused.
+# Retained on ANY non-clean outcome (non-zero exit, any FAIL, any ABORT) and on
+# PDS_KEEP_ARTIFACTS=1, because the thing you want after a failure is the bundle.
+ART_MARKER_NAME=".pds-proof-owner"
+ART_DIR_OWNED=""
 MAX_HOME_LEN=85
 
 # ── the ONE full-fidelity export (PDS-D69/D70/D71) ───────────────────────────
@@ -235,11 +272,64 @@ head_step() { # id title
   rule
 }
 
+# ── artifact ownership ──────────────────────────────────────────
+
+art_marker_field() { # field dir -> value on stdout (empty when unreadable)
+  local f="$1" d="$2"
+  [ -f "$d/$ART_MARKER_NAME" ] || return 0
+  sed -n "s/^$f:[[:space:]]*//p" "$d/$ART_MARKER_NAME" 2>/dev/null | head -n 1
+  return 0
+}
+
+art_dir_ensure() { # create ART_DIR, claiming ownership ONLY if we made it
+  if [ ! -d "$ART_DIR" ]; then
+    mkdir -p "$ART_DIR" || return 1
+    {
+      printf 'harness: pds-pull-proof.sh\n'
+      printf 'run_id:  %s\n' "$RUN_ID"
+      printf 'run_tag: %s\n' "$RUN_TAG"
+      printf 'pid:     %s\n' "$$"
+      printf 'host:    %s\n' "$(uname -n 2>/dev/null || echo unknown)"
+      printf 'created: %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    } >"$ART_DIR/$ART_MARKER_NAME" 2>/dev/null || true
+    ART_DIR_OWNED=1
+  elif [ -z "$ART_DIR_OWNED" ] && [ "$(art_marker_field run_id "$ART_DIR")" = "$RUN_ID" ]; then
+    # our own directory from earlier in THIS process (the marker names this run)
+    ART_DIR_OWNED=1
+  fi
+  return 0
+}
+
+art_dir_cleanup() { # exit_status — called from the EXIT trap, must never abort it
+  local rc="${1:-0}"
+  [ -n "$ART_DIR_OWNED" ] || return 0
+  [ -d "$ART_DIR" ] || return 0
+  if [ -n "${PDS_KEEP_ARTIFACTS:-}" ]; then
+    printf '  artifacts RETAINED at %s (PDS_KEEP_ARTIFACTS is set)\n' "$ART_DIR"
+    return 0
+  fi
+  if [ "$rc" != "0" ] || [ "${N_FAIL:-0}" -gt 0 ] || [ "${N_ABORT:-0}" -gt 0 ]; then
+    printf '  artifacts RETAINED for diagnosis at %s (exit %s, %s FAIL, %s ABORT) — sweep later with PDS_ARTIFACT_ROOT=%s %s --sweep-artifacts --apply\n' \
+      "$ART_DIR" "$rc" "${N_FAIL:-0}" "${N_ABORT:-0}" "$ART_ROOT" "$SELF"
+    return 0
+  fi
+  # Re-read the marker at exit: a directory re-owned under us is not ours to remove.
+  if [ "$(art_marker_field run_id "$ART_DIR")" != "$RUN_ID" ]; then
+    printf '  artifacts REFUSED at %s — the owner marker no longer names this run (%s); left in place\n' \
+      "$ART_DIR" "$RUN_ID"
+    return 0
+  fi
+  rm -rf "$ART_DIR" 2>/dev/null || true
+  printf '  artifacts removed: %s (this run created it and its marker still named this run)\n' "$ART_DIR"
+  return 0
+}
+
 # ── temp hygiene ─────────────────────────────────────────────────────────────
 
 TMP_FILES=""
 TMP_DIRS=""
 cleanup() {
+  local rc=$?
   local f d
   for f in $TMP_FILES; do [ -f "$f" ] && rm -f "$f"; done
   for d in $TMP_DIRS; do [ -d "$d" ] && rm -rf "$d"; done
@@ -249,6 +339,8 @@ cleanup() {
   [ -n "$FULL_LOCK_OWNED" ] && [ -d "$FULL_LOCK" ] && rmdir "$FULL_LOCK" 2>/dev/null || true
   # A step-5 failure demo must never leave a blob truncated on the target.
   restore_blob_backup
+  # THIS RUN'S OWN artifacts, and nobody else's (see the ART_DIR block above).
+  art_dir_cleanup "$rc"
   return 0
 }
 trap cleanup EXIT
@@ -402,7 +494,7 @@ ensure_bp() { # 0 = $BP_BIN is a fresh binary that speaks the dialect
     BP_WHY="go is not on PATH, so a fresh bp cannot be built from this worktree (the installed bp predates the pull dialect and must not be used)"
     return 1
   fi
-  mkdir -p "$ART_DIR"
+  art_dir_ensure
   local out log cc
   out="$ART_DIR/bp"
   log="$ART_DIR/bp-build.log"
@@ -446,6 +538,11 @@ restore_blob_backup() {
 # ── cross-step state (derived at RUN time, never from a snapshot) ────────────
 
 DEPLOYED_SHA=""
+# HOW the sha above was obtained: "ssh" (measured off the box's own git HEAD
+# this run) or "operator-asserted" (PDS_DEPLOYED_SHA, believed, never verified).
+# It is carried, not discarded, because an asserted pin WEAKENS every claim it
+# dates and the transcript must say so wherever it prints one (PDS-D642).
+DEPLOYED_SHA_SOURCE=""
 DEPLOYED_VERSION=""
 DEPLOYED_UPTIME_0A=""
 DEV_BUNDLE=""
@@ -455,6 +552,13 @@ AMMO_FILE=""
 # ═════════════════════════════════════════════════════════════════════════════
 # THE PLAN
 # ═════════════════════════════════════════════════════════════════════════════
+
+sha_provenance_note() { # -> the disclosure that must ride beside an asserted pin
+  case "$DEPLOYED_SHA_SOURCE" in
+    operator-asserted) printf ' [sha OPERATOR-ASSERTED via PDS_DEPLOYED_SHA — believed, not measured against the box this run; every claim dated by it is only as good as that assertion]' ;;
+    *) printf '' ;;
+  esac
+}
 
 plan_row() { # id | title | precondition | today
   printf '  %-4s %s\n' "$1" "$2"
@@ -471,6 +575,8 @@ cmd_plan() {
   say "scratch root:  $BARKPARK_HOME  (${#BARKPARK_HOME} bytes, cap $MAX_HOME_LEN)"
   say "pointer:       $PDS_SCRATCH_POINTER"
   say "artifacts:     $ART_DIR   (RUN-scoped — invisible to the next run, by design)"
+  say "               removed on a CLEAN exit by this run's own trap; kept after any FAIL/ABORT"
+  say "               or with PDS_KEEP_ARTIFACTS=1. Backlog: $SELF --sweep-artifacts"
   say "full export:   $FULL_TAR"
   say "               budget=$FULL_BUDGET attempt(s) · spent so far=$([ -f "$FULL_ATTEMPTS_FILE" ] && cat "$FULL_ATTEMPTS_FILE" || echo 0) · on-disk bundle=$([ -s "$FULL_TAR" ] && echo "PRESENT ($(wc -c <"$FULL_TAR" | tr -d ' ') bytes, would be REUSED for 0 attempts)" || echo absent)"
   say "               min MemAvailable on the source before it is taken: ${FULL_MIN_MEM_MB} MB"
@@ -534,6 +640,105 @@ cmd_plan() {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
+# THE SWEEP — the pre-existing backlog, and the four things it REFUSES
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# The trap above only ever owns the directories THIS harness creates from here
+# on. The 952 MB already on disk predates it, so it needs a deliberate operator
+# verb — and that verb's whole design is what it will NOT touch:
+#
+#   REFUSED  a name this harness does not make      (not $ART_ROOT/pds-proof-art.<hex>)
+#   REFUSED  a directory owned by another unix user (stat uid != ours)
+#   REFUSED  a marker naming a LIVE pid on THIS host — a concurrent cycle owns it
+#   REFUSED  a directory younger than PDS_SWEEP_MIN_AGE_HOURS (default 24) when
+#            it carries no marker at all — the legacy backlog is unmarked, so
+#            "no marker" can never by itself mean "abandoned"
+#   REFUSED  this run's own ART_DIR
+#
+# It is a DRY RUN unless --apply is passed, and it prints the reason for every
+# directory on both sides of the line. There is no wildcard rm anywhere in it:
+# each removal names one path the loop proved it owns.
+
+art_uid_of() { # dir -> numeric owner uid ('' when unreadable)
+  stat -f %u "$1" 2>/dev/null || stat -c %u "$1" 2>/dev/null || true
+}
+
+art_dir_age_hours_ok() { # dir min_hours -> 0 when OLDER than min_hours
+  local d="$1" h="$2" found
+  found="$(find "$d" -maxdepth 0 -mmin +"$((h * 60))" 2>/dev/null || true)"
+  [ -n "$found" ]
+}
+
+cmd_sweep_artifacts() { # [--apply]
+  local apply=0 d name uid me pid host marker min_age kb
+  [ "${1:-}" = "--apply" ] && apply=1
+  min_age="${PDS_SWEEP_MIN_AGE_HOURS:-24}"
+  me="$(id -u)"
+
+  rule
+  say "PDS CROWN PROOF — ARTIFACT SWEEP over $ART_ROOT/pds-proof-art.*"
+  say "$([ "$apply" = 1 ] && echo 'MODE: --apply — proven-owned directories WILL be removed' || echo 'MODE: dry run — nothing is removed. Re-run with --apply to act.')"
+  say "unmarked directories must be older than ${min_age}h · this run is $RUN_ID (tag $RUN_TAG)"
+  rule
+
+  local n_own=0 n_refused=0 bytes_own=0
+  for d in "$ART_ROOT"/pds-proof-art.*; do
+    [ -e "$d" ] || continue
+    name="$(basename "$d")"
+    if [ ! -d "$d" ]; then
+      printf '  REFUSED  %-46s not a directory\n' "$name"; n_refused=$((n_refused + 1)); continue
+    fi
+    case "$name" in
+      pds-proof-art.*[!0-9a-f]*|pds-proof-art.)
+        printf '  REFUSED  %-46s not a name this harness makes (expected pds-proof-art.<hex run tag>)\n' "$name"
+        n_refused=$((n_refused + 1)); continue ;;
+    esac
+    if [ "$d" = "$ART_DIR" ]; then
+      printf '  REFUSED  %-46s THIS run owns it and is still using it\n' "$name"
+      n_refused=$((n_refused + 1)); continue
+    fi
+    uid="$(art_uid_of "$d")"
+    if [ -z "$uid" ] || [ "$uid" != "$me" ]; then
+      printf '  REFUSED  %-46s owned by uid %s, not by uid %s — another unix user\n' "$name" "${uid:-unreadable}" "$me"
+      n_refused=$((n_refused + 1)); continue
+    fi
+    marker="$(art_marker_field run_id "$d")"
+    if [ -n "$marker" ]; then
+      pid="$(art_marker_field pid "$d")"
+      host="$(art_marker_field host "$d")"
+      if [ "$host" != "$(uname -n 2>/dev/null || echo unknown)" ]; then
+        printf '  REFUSED  %-46s marker names host %s, not this one — liveness undecidable here\n' "$name" "${host:-unknown}"
+        n_refused=$((n_refused + 1)); continue
+      fi
+      if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        printf '  REFUSED  %-46s pid %s is ALIVE on this host — a concurrent run owns it (%s)\n' "$name" "$pid" "$marker"
+        n_refused=$((n_refused + 1)); continue
+      fi
+    elif ! art_dir_age_hours_ok "$d" "$min_age"; then
+      printf '  REFUSED  %-46s no owner marker AND younger than %sh — cannot be proved abandoned\n' "$name" "$min_age"
+      n_refused=$((n_refused + 1)); continue
+    fi
+
+    n_own=$((n_own + 1))
+    kb="$(du -sk "$d" 2>/dev/null | awk 'NR==1{print $1}')"
+    case "${kb:-}" in ''|*[!0-9]*) kb=0 ;; esac
+    bytes_own=$((bytes_own + kb))
+    if [ "$apply" = 1 ]; then
+      rm -rf "$d" 2>/dev/null || true
+      printf '  REMOVED  %-46s %s\n' "$name" "$([ -n "$marker" ] && echo "marker run $marker, pid ${pid:-?} not alive" || echo "unmarked and older than ${min_age}h")"
+    else
+      printf '  WOULD    %-46s %s\n' "$name" "$([ -n "$marker" ] && echo "marker run $marker, pid ${pid:-?} not alive" || echo "unmarked and older than ${min_age}h")"
+    fi
+  done
+
+  rule
+  say "$n_own directory(ies) proved owned ($((bytes_own / 1024)) MB) · $n_refused refused"
+  [ "$apply" = 1 ] || say "Nothing was removed. Re-run: $SELF --sweep-artifacts --apply"
+  rule
+  return 0
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
 # THE BANNER — the transcript opens by bounding every claim it is about to make
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -548,6 +753,14 @@ banner() {
   say "HONESTY BANNER — what this transcript does and does not claim."
   say ""
   say "  SOURCE          $SOURCE_BASE (workspace=$SOURCE_WS dataset=$SOURCE_DS)"
+  if [ -n "${PDS_DEPLOYED_SHA:-}" ]; then
+    say "  PIN OVERRIDE    PDS_DEPLOYED_SHA IS SET (${PDS_DEPLOYED_SHA}). If step 0a resolves"
+    say "                  no sha over SSH it will use that value — BELIEVED, not measured"
+    say "                  against the box this run. Every line dating a claim by it then"
+    say "                  says OPERATOR-ASSERTED, and step 8's sha re-pin is skipped,"
+    say "                  because a measured re-pin would convict the assertion rather"
+    say "                  than a redeploy. A measured pin always wins over this one."
+  fi
   say "  SERVED          resolved live in step 0a and printed there — version AND"
   say "                  git sha. Auto-deploy has been observed NOT firing, so the"
   say "                  box may be running older code than main; if it is, the"
@@ -571,6 +784,11 @@ banner() {
   say "     No schema_migrations HTTP surface exists; a stale build prints the same"
   say "     /status.json green (PDS-D47). Step 8 re-pins the same sha at the CLOSE:"
   say "     everything between them is dated by ONE build or the run says so."
+  say "   · Artifact scope — this run's artifacts live at $ART_DIR and are removed"
+  say "     by its own EXIT trap on a clean finish, scoped to a marker naming THIS"
+  say "     run. No other session's directory is ever touched; the backlog needs the"
+  say "     deliberate \`$SELF --sweep-artifacts --apply\`, which refuses by name"
+  say "     anything it cannot prove it owns."
   say "   · Refusal scope — step 7 proves the source refuses a MERGE import. The"
   say "     clean/restore mode is NOT gated by that flag, so 'guerrilla cannot be"
   say "     written' is a claim this transcript does not make (PDS-D73)."
@@ -621,9 +839,21 @@ step_0a() {
   # number and two different builds print it identically).
   if ssh_available; then
     DEPLOYED_SHA="$(ssh_src 'cd /opt/barkpark && git rev-parse HEAD' | tr -d '[:space:]' || true)"
+    [ -n "$DEPLOYED_SHA" ] && DEPLOYED_SHA_SOURCE="ssh"
     info "deployed sha    $DEPLOYED_SHA  (source of truth: the box's own git HEAD over SSH)"
   else
     info "deployed sha    UNRESOLVED over SSH ($SOURCE_SSH, key $SOURCE_SSH_KEY)"
+  fi
+  # THE SSH-LESS ESCAPE HATCH, AND IT IS REAL NOW (PDS-D642).
+  # step 0b's FIX text has always told the operator to `export PDS_DEPLOYED_SHA`.
+  # No code read it: an operator who followed the harness's own remediation got
+  # no effect and no warning. It is read HERE, and only when SSH resolved
+  # nothing — a measured pin always wins over an asserted one, never the other
+  # way round — and it is tagged so every line that quotes it discloses it.
+  if [ -z "$DEPLOYED_SHA" ] && [ -n "${PDS_DEPLOYED_SHA:-}" ]; then
+    DEPLOYED_SHA="$(printf '%s' "$PDS_DEPLOYED_SHA" | tr -d '[:space:]')"
+    DEPLOYED_SHA_SOURCE="operator-asserted"
+    info "deployed sha    $DEPLOYED_SHA  (OPERATOR-ASSERTED via PDS_DEPLOYED_SHA — this run did NOT measure it against the box)"
   fi
   if command -v gh >/dev/null 2>&1; then
     local last_deploy
@@ -633,7 +863,7 @@ step_0a() {
   fi
 
   # The one budgeted export: DEV profile. Never :full here (PDS-D31/D44).
-  mkdir -p "$ART_DIR"
+  art_dir_ensure
   local bundle hdr t0 t1 bytes elapsed fname
   bundle="$ART_DIR/dev-$SOURCE_WS-$SOURCE_DS.tar"
   hdr="$(mktmp)"
@@ -686,7 +916,7 @@ step_0a() {
   fi
 
   DEV_BUNDLE="$bundle"
-  pass 0a "source pinned: version=$version sha=${DEPLOYED_SHA:-unresolved}; dev dialect LIVE (HTTP 200, $bytes bytes, ${elapsed}s, $members members, profile=$profile dataset=$dataset, source_* present)"
+  pass 0a "source pinned: version=$version sha=${DEPLOYED_SHA:-unresolved}$(sha_provenance_note); dev dialect LIVE (HTTP 200, $bytes bytes, ${elapsed}s, $members members, profile=$profile dataset=$dataset, source_* present)"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -708,7 +938,7 @@ step_0b() {
 
   if [ -z "$DEPLOYED_SHA" ]; then
     abort 0b "env:deployed-sha-unresolved" \
-      "no run-time source of the deployed sha. /status.json carries a version string, not a sha. FIX: make SSH reachable (PDS_SOURCE_SSH=$SOURCE_SSH, key $SOURCE_SSH_KEY) or export PDS_DEPLOYED_SHA=<sha> from an authenticated source. Asserting on the version string alone would be exactly the vacuous green this step exists to refuse."
+      "no run-time source of the deployed sha. /status.json carries a version string, not a sha. FIX (in this order): make SSH reachable (PDS_SOURCE_SSH=$SOURCE_SSH, key $SOURCE_SSH_KEY) — that is the only MEASURED pin. Failing that, \`export PDS_DEPLOYED_SHA=<sha>\` from an authenticated source: step 0a reads it, but only when SSH resolved nothing, and every line dating a claim by it then carries the words OPERATOR-ASSERTED, because the harness is believing you rather than the box. Asserting on the version string alone would be exactly the vacuous green this step exists to refuse."
     return 0
   fi
 
@@ -727,7 +957,7 @@ step_0b() {
   fi
 
   if [ "$DEPLOYED_SHA" = "$worktree_sha" ]; then
-    pass 0b "deployed sha EQUALS the worktree the target migrated from ($worktree_sha)"
+    pass 0b "deployed sha EQUALS the worktree the target migrated from ($worktree_sha)$(sha_provenance_note)"
     return 0
   fi
 
@@ -762,7 +992,7 @@ step_0b() {
     info "below describes the DEPLOYED build, not main."
   fi
 
-  pass 0b "deploy provenance holds: the deployed sha $DEPLOYED_SHA IS AN ANCESTOR OF the worktree the target migrated from ($worktree_sha), $ahead commit(s) behind — $code_ahead code, $docs_ahead docs-only"
+  pass 0b "deploy provenance holds$(sha_provenance_note): the deployed sha $DEPLOYED_SHA IS AN ANCESTOR OF the worktree the target migrated from ($worktree_sha), $ahead commit(s) behind — $code_ahead code, $docs_ahead docs-only"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1115,7 +1345,7 @@ step_1() {
 
   local tar out rc t0 t1
   tar="$ART_DIR/pull-$SOURCE_WS-$SOURCE_DS.tar"
-  mkdir -p "$ART_DIR"
+  art_dir_ensure
   out="$(mktmp)"
 
   # ── the workspaces row BEFORE the import (PDS-D9 adoption fires silently) ──
@@ -1772,7 +2002,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   # when no sampler can be started the run says so and quotes nothing (below).
   local rss_log rss_pid beam_pid beam_all beam_n baseline_kb peak_kb
   rss_log="$ART_DIR/full-export-rss.log"
-  mkdir -p "$ART_DIR"
+  art_dir_ensure
   : >"$rss_log"
   beam_pid=""; rss_pid=""; beam_all=""; beam_n=0
   if ssh_available; then
@@ -2842,8 +3072,12 @@ step_8() {
 
   local sha_now
   sha_now=""
-  if [ -n "$DEPLOYED_SHA" ] && ssh_available; then
+  if [ -n "$DEPLOYED_SHA" ] && [ "$DEPLOYED_SHA_SOURCE" = "ssh" ] && ssh_available; then
     sha_now="$(ssh_src 'cd /opt/barkpark && git rev-parse HEAD' | tr -d '[:space:]' || true)"
+  elif [ "$DEPLOYED_SHA_SOURCE" = "operator-asserted" ]; then
+    # A measured re-pin differing from an ASSERTED one convicts the assertion,
+    # not the box, and this rung is about the box. Fall through to uptime.
+    info "sha re-pin      SKIPPED — 0a's pin was OPERATOR-ASSERTED (PDS_DEPLOYED_SHA), so a mismatch here would convict the assertion rather than a redeploy. The uptime signal below is this rung's evidence."
   fi
   if [ -n "$sha_now" ]; then
     info "sha at 0a       $DEPLOYED_SHA"
@@ -3038,12 +3272,20 @@ main() {
       summary
       exit $?
       ;;
+    --sweep-artifacts)
+      [ $# -le 2 ] || die "--sweep-artifacts takes at most --apply (got: $*)"
+      if [ $# -eq 2 ] && [ "$2" != "--apply" ]; then
+        die "--sweep-artifacts understands only --apply (got: $2). A flag this parser does not understand is REFUSED, never silently dropped (PDS-D89)."
+      fi
+      cmd_sweep_artifacts "${2:-}"
+      exit 0
+      ;;
     -h|--help|help)
-      sed -n '2,83p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,/^# bash 3\.2 compatible/p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
-      printf 'usage: %s {--plan|--all|--only <ids>|--help}\n' "$SELF" >&2
+      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--help}\n' "$SELF" >&2
       exit 3
       ;;
   esac
