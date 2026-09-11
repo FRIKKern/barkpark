@@ -4579,12 +4579,15 @@ export const SCENARIOS = {
   // overflows anywhere in the corpus (the w15 measurement: sw == cw == 240 in
   // EVERY cell). Same data, the cruel box's route.
   "instance-cruel-detail": {
-    label: "Instance detail — cruel content: the 253-char custom host reaches .detail-url-text, with the copy-btn carrying the full value",
+    label: "Instance detail — cruel content: the 253-char custom host reaches .detail-url-text, and a 255-char pinned_release reaches the Autoupdate rail's .badge",
     authed: true,
     deepLink: "#instance/5b2c1e00-0000-4000-8000-0000000000c1",
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
-      barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
+      // cchi-w22-bl-the-pinned-release-badge-does-not-break: the pinned twin, so
+      // the DETAIL route is driven at the pinned_release cap. Same row, same
+      // order, same 253-char host — one extra field.
+      barkparks: [cruelPinnedInstance, cruelProvisionErrorInstance, liveInstance],
       subscription: activeSub,
       sites: [],
       audit: [],

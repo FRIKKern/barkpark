@@ -52,6 +52,10 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/instance-deploy.sh"
+# An app-VALID KEK: base64 of 32 raw bytes (44 chars, one trailing '='), the
+# shape api/config/runtime.exs decodes. Alphanumeric on purpose so it can be
+# grepped for literally.
+VALID_KEK="JZPvbTh4LQuig6PAB7REzJsG5kaHfwCaHNeXFz784Pg="
 fails=0
 pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
@@ -297,7 +301,12 @@ EOF
   # wrapper is that we never rely on it.
   printf '#!/usr/bin/env node\n// fake cloud-sandbox-runner (harness source, %s)\nprocess.exit(0)\n' "$RANDOM" > "$APP/scripts/connectors/cloud-sandbox-runner.mjs"
   chmod 0755 "$APP/scripts/connectors/cloud-sandbox-runner.mjs"
-  printf 'BARKPARK_KEK=x\nBARKPARK_CLOAK_KEY=y\nPREVIEW_JWT_SECRET=z\nBARKPARK_RELEASE_CAPTURE_HMAC_SECRET=h\nDATABASE_URL=postgres://bp:pw@localhost/bp\n' > "$APP/.env"
+  # The KEK fixture must be a value the APP accepts: api/config/runtime.exs
+  # demands Base.decode64(BARKPARK_KEK) yield exactly 32 raw bytes and RAISES
+  # otherwise. The old fixture was `BARKPARK_KEK=x`, which every deploy now
+  # (correctly) repairs — a sandbox whose baseline is a value prod refuses
+  # cannot tell "left untouched" from "silently replaced".
+  printf 'BARKPARK_KEK=%s\nBARKPARK_CLOAK_KEY=y\nPREVIEW_JWT_SECRET=z\nBARKPARK_RELEASE_CAPTURE_HMAC_SECRET=h\nDATABASE_URL=postgres://bp:pw@localhost/bp\n' "$VALID_KEK" > "$APP/.env"
   cp "$HERE/systemd/barkpark-slot@.service" "$APP/deploy/systemd/"
   cp "$HERE/systemd/barkpark-mcp.service" "$APP/deploy/systemd/"
   cp "$HERE/systemd/barkpark-connectors.service" "$APP/deploy/systemd/"
@@ -1293,6 +1302,247 @@ check "queued: the heartbeat names seconds waited AND the unchanged 1800s budget
   "grep -qE 'still queued for the deploy lock — [0-9]+s waited of 1800s max' '$TMP/out.log'"
 check "queued: the lock was actually taken, not bypassed (the deploy flipped Caddy)" \
   "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
+rm -rf "$TMP"
+
+echo
+echo "== Case: secret backfill repairs an EMPTY or app-invalid value, not only an absent line (task-facd9f8a6d4d45c9) =="
+# The backfill used to be absence-only: `grep -q '^VAR='`. A line that is PRESENT
+# but empty matches that grep, got no backfill, and after the boot refusals such a
+# box fails EVERY deploy until a human edits .env. Four states, all here.
+
+# (1) ABSENT line — the case the loop was always designed for.
+setup_case
+grep -v '^BARKPARK_KEK=' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+rc="$(run_deploy 200 kekabsentsha)"
+check "absent KEK: exit 0"                       "[ '$rc' = '0' ]"
+check "absent KEK: appended"                     "[ \"\$(grep -c '^BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "absent KEK: the minted value is app-valid (base64 of 32 bytes)" \
+  "grep -qE '^BARKPARK_KEK=[A-Za-z0-9+/]{43}=\$' '$APP/.env'"
+check "absent KEK: logged as an ADD, not a repair"  "grep -q 'added missing BARKPARK_KEK to .env' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# (2) PRESENT but EMPTY — the whole point of this row. The mutation proof: revert
+# the fix in instance-deploy.sh and THIS arm is the one that fails.
+setup_case
+sed 's/^BARKPARK_KEK=.*/BARKPARK_KEK=/' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+check "empty KEK: the fixture really is empty before the deploy" "grep -q '^BARKPARK_KEK=\$' '$APP/.env'"
+rc="$(run_deploy 200 kekemptysha)"
+check "empty KEK: exit 0"                        "[ '$rc' = '0' ]"
+check "empty KEK: no longer empty"               "! grep -q '^BARKPARK_KEK=\$' '$APP/.env'"
+check "empty KEK: REPLACED by an app-valid secret" \
+  "grep -qE '^BARKPARK_KEK=[A-Za-z0-9+/]{43}=\$' '$APP/.env'"
+check "empty KEK: exactly one line, no duplicate" "[ \"\$(grep -c '^BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "empty KEK: the log names the EMPTY case"   "grep -q 'repaired BARKPARK_KEK in .env — the line is PRESENT but EMPTY' '$TMP/out.log'"
+# The same repair covers the other three variables the loop names — and nothing else.
+sed 's/^PREVIEW_JWT_SECRET=.*/PREVIEW_JWT_SECRET=/' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"; rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 jwtemptysha)"
+check "empty PREVIEW_JWT_SECRET: repaired too"   "! grep -q '^PREVIEW_JWT_SECRET=\$' '$APP/.env'"
+check "empty PREVIEW_JWT_SECRET: named in the log" \
+  "grep -q 'repaired PREVIEW_JWT_SECRET in .env — the line is PRESENT but EMPTY' '$TMP/out.log'"
+check "repair does not widen: DATABASE_URL untouched" \
+  "grep -q '^DATABASE_URL=postgres://bp:pw@localhost/bp\$' '$APP/.env'"
+rm -rf "$TMP"
+
+# (3) PRESENT with a value the APP refuses — wrong length / undecodable. This is
+# the old fixture's own value (`x`), which runtime.exs raises on.
+setup_case
+sed 's/^BARKPARK_KEK=.*/BARKPARK_KEK=x/' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+rc="$(run_deploy 200 kekbadsha)"
+check "invalid KEK: exit 0"                      "[ '$rc' = '0' ]"
+check "invalid KEK: the refused value is gone"   "! grep -q '^BARKPARK_KEK=x\$' '$APP/.env'"
+check "invalid KEK: REPLACED by an app-valid secret" \
+  "grep -qE '^BARKPARK_KEK=[A-Za-z0-9+/]{43}=\$' '$APP/.env'"
+check "invalid KEK: the log names the REFUSED-VALUE case" \
+  "grep -q 'repaired BARKPARK_KEK in .env — the value is not base64 of 32 bytes' '$TMP/out.log'"
+# A wrong-LENGTH but decodable value (base64 of 16 bytes) is refused the same way:
+# it decodes fine and is still not 32 bytes, so a decode-only check would pass it.
+sed 's|^BARKPARK_KEK=.*|BARKPARK_KEK=AAAAAAAAAAAAAAAAAAAAAA==|' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"; rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 kek16sha)"
+check "16-byte KEK: decodable but WRONG LENGTH — still repaired" \
+  "! grep -q '^BARKPARK_KEK=AAAAAAAAAAAAAAAAAAAAAA==\$' '$APP/.env'"
+check "16-byte KEK: the replacement is 32 bytes' worth" \
+  "grep -qE '^BARKPARK_KEK=[A-Za-z0-9+/]{43}=\$' '$APP/.env'"
+rm -rf "$TMP"
+
+# (4) A VALID value is LEFT ALONE — byte-identical, not rewritten, not logged.
+setup_case
+rc="$(run_deploy 200 kekgoodsha)"
+check "valid KEK: exit 0"                        "[ '$rc' = '0' ]"
+check "valid KEK: byte-identical after the deploy" \
+  "grep -q '^BARKPARK_KEK=$VALID_KEK\$' '$APP/.env'"
+check "valid KEK: exactly one line"              "[ \"\$(grep -c '^BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "valid KEK: NOT reported as repaired"      "! grep -q 'repaired BARKPARK_KEK' '$TMP/out.log'"
+check "valid KEK: NOT reported as added"         "! grep -q 'added missing BARKPARK_KEK' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo
+echo "== Case: the backfill reads .env the way the SHELL does, and never destroys a rejected KEK (task-0fdde2a930463e93) =="
+# #17691 read the current value with an awk of the raw text after '='. The
+# CONSUMERS are the shell (this script's own `set -a; . ./.env; set +a`, and
+# api/start.sh's `source ../.env`), which accept quotes, an `export ` prefix and
+# leading whitespace, and strip trailing blanks. Every one of those forms is a
+# KEK a box BOOTS on and has sealed ciphertext under — and the awk read called
+# them invalid, so the deploy MINTED A NEW ONE over the top. There is no
+# BARKPARK_KEK_PREVIOUS handoff: that is irreversible loss of every encrypted
+# field. These cases pin the shell reading.
+
+# Rewrite .env so BARKPARK_KEK is carried by the EXACT raw line given.
+set_kek_line() { # $1=raw line
+  grep -v 'BARKPARK_KEK' "$APP/.env" > "$TMP/env.new"
+  printf '%s\n' "$1" >> "$TMP/env.new"
+  mv "$TMP/env.new" "$APP/.env"
+}
+# Byte-for-byte: every BARKPARK_KEK-bearing line, compared against a saved copy.
+kek_lines_unchanged() { # $1=saved .env
+  diff <(grep -a 'BARKPARK_KEK' "$1") <(grep -a 'BARKPARK_KEK' "$APP/.env") >/dev/null 2>&1
+}
+
+i=0
+while IFS='|' read -r label line; do
+  [ -n "$label" ] || continue
+  i=$((i + 1))
+  setup_case
+  set_kek_line "$line"
+  cp "$APP/.env" "$TMP/env.before"
+  check "$label: the fixture really carries that exact raw line" \
+    'grep -qxF -- "$line" "$APP/.env"'
+  rc="$(run_deploy 200 "kekform${i}sha")"
+  check "$label: exit 0"                          "[ '$rc' = '0' ]"
+  check "$label: the .env line is BYTE-FOR-BYTE unchanged" "kek_lines_unchanged '$TMP/env.before'"
+  check "$label: NOT reported as repaired"        "! grep -q 'repaired BARKPARK_KEK' '$TMP/out.log'"
+  check "$label: NOT reported as added"           "! grep -q 'added missing BARKPARK_KEK' '$TMP/out.log'"
+  check "$label: no SECOND assignment appended"   "[ \"\$(grep -c 'BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+  rm -rf "$TMP"
+done <<FORMS
+double-quoted KEK|BARKPARK_KEK="$VALID_KEK"
+single-quoted KEK|BARKPARK_KEK='$VALID_KEK'
+export-prefixed KEK|export BARKPARK_KEK=$VALID_KEK
+indented KEK|  BARKPARK_KEK=$VALID_KEK
+trailing-space KEK|BARKPARK_KEK=$VALID_KEK 
+FORMS
+
+# A trailing CR is the ONE form the row listed that the app does NOT boot on:
+# the shell keeps the \r (it is not IFS whitespace) and Base.decode64 refuses
+# it, so runtime.exs RAISES. Leaving it byte-for-byte untouched would leave a
+# box that cannot boot; re-minting would destroy the key. So: keep the KEY,
+# drop only the stray terminator, and say so in the log.
+setup_case
+crline="BARKPARK_KEK=$VALID_KEK"$'\r'
+set_kek_line "$crline"
+check "trailing-CR KEK: the fixture really carries the CR" 'grep -qxF -- "$crline" "$APP/.env"'
+rc="$(run_deploy 200 kekcrsha)"
+check "trailing-CR KEK: exit 0"                   "[ '$rc' = '0' ]"
+check "trailing-CR KEK: the KEY ITSELF survives — no fresh mint" \
+  "grep -q '^BARKPARK_KEK=$VALID_KEK\$' '$APP/.env'"
+check "trailing-CR KEK: the CR is gone (runtime.exs can decode it now)" \
+  '! grep -qxF -- "$crline" "$APP/.env"'
+check "trailing-CR KEK: exactly one assignment"   "[ \"\$(grep -c '^BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "trailing-CR KEK: logged as a NORMALISE, not a replace" \
+  "grep -q 'normalised BARKPARK_KEK in .env — the value carried trailing whitespace/CR' '$TMP/out.log'"
+check "trailing-CR KEK: NOT reported as repaired" "! grep -q 'repaired BARKPARK_KEK' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# A PRESENT, NON-EMPTY value that is still refused is REPLACED — but never
+# DESTROYED: the bytes are parked under a name nothing reads, so ciphertext
+# sealed under it stays recoverable.
+setup_case
+set_kek_line 'BARKPARK_KEK=x'
+check "rejected KEK: the fixture really is the refused value" "grep -q '^BARKPARK_KEK=x\$' '$APP/.env'"
+rc="$(run_deploy 200 kekparksha)"
+check "rejected KEK: exit 0"                      "[ '$rc' = '0' ]"
+check "rejected KEK: the old bytes are STILL in .env under a parked name" \
+  "grep -qE \"^BARKPARK_KEK_REJECTED_[0-9]{8}T[0-9]{6}Z='x'\\\$\" '$APP/.env'"
+check "rejected KEK: the log NAMES the preserved variable" \
+  "grep -q 'PRESERVED the rejected BARKPARK_KEK in .env as BARKPARK_KEK_REJECTED_' '$TMP/out.log'"
+check "rejected KEK: the ACTIVE key is a fresh app-valid mint" \
+  "grep -qE '^BARKPARK_KEK=[A-Za-z0-9+/]{43}=\$' '$APP/.env'"
+check "rejected KEK: exactly one ACTIVE assignment" "[ \"\$(grep -c '^BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "rejected KEK: the parked name is NOT one runtime.exs reads" \
+  "! grep -q '^BARKPARK_KEK_PREVIOUS=' '$APP/.env'"
+rm -rf "$TMP"
+
+# The other hole in the ABSENT arm: `export VAR=<refused>` failed `grep '^VAR='`,
+# so the loop APPENDED a second assignment instead of replacing — two keys in one
+# file, last-wins deciding which one boots. The replace must drop the export line.
+setup_case
+set_kek_line 'export BARKPARK_KEK=x'
+check "export-prefixed refused KEK: the fixture really is export-prefixed" \
+  "grep -q '^export BARKPARK_KEK=x\$' '$APP/.env'"
+rc="$(run_deploy 200 kekexportbadsha)"
+check "export-prefixed refused KEK: exit 0"       "[ '$rc' = '0' ]"
+check "export-prefixed refused KEK: the export line is GONE, not shadowed" \
+  "! grep -q '^export BARKPARK_KEK=' '$APP/.env'"
+check "export-prefixed refused KEK: exactly one assignment survives" \
+  "[ \"\$(grep -cE '^(export )?BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
+check "export-prefixed refused KEK: the old bytes are parked, not destroyed" \
+  "grep -qE \"^BARKPARK_KEK_REJECTED_[0-9]{8}T[0-9]{6}Z='x'\\\$\" '$APP/.env'"
+rm -rf "$TMP"
+
+echo
+echo "== Case: CONNECTORS_CREDENTIAL_KEY_PREVIOUS propagates .env -> connectors.env (task-0459264e822b59d6) =="
+# The bridge opens a sealed row under the CURRENT key OR any key in
+# CONNECTORS_CREDENTIAL_KEY_PREVIOUS (connectors/src/config.ts splitKeys ->
+# crypto/credential-cipher.ts), and the unit reads ONLY connectors.env
+# (EnvironmentFile=). The writer emitted six keys and _PREVIOUS was not one of
+# them, so setting it in /opt/barkpark/.env reached nothing: a flag day, not a
+# rotation. Three states: unset (no line), set (carried), and cleared again
+# (the line DISAPPEARS on the next deploy — the end of the rotation window).
+
+# (1) UNSET — no line at all. An emitted-empty line would leave the file unable
+# to say "no rotation is in flight"; splitKeys reads "" and absent alike.
+setup_case
+rc="$(run_deploy 200 prevunsetsha)"
+check "no previous key: exit 0"                  "[ '$rc' = '0' ]"
+check "no previous key: NO _PREVIOUS line emitted (absent, not empty)" \
+  "! grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS' '$TMP/connectors.env'"
+check "no previous key: the current key is still written" \
+  "grep -qE '^CONNECTORS_CREDENTIAL_KEY=.+\$' '$TMP/connectors.env'"
+check "no previous key: no rotation-window log line" \
+  "! grep -q 'a rotation window is OPEN' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# (2) SET in /opt/barkpark/.env — a ROTATION. The old key must reach the bridge
+# on the NEXT DEPLOY, with no hand edit of /etc/barkpark/connectors.env.
+setup_case
+OLDKEY="MjSpkGTNeace3ZPhSld3fP3fqL5C0z55afNNlyDqWyU="
+printf 'CONNECTORS_CREDENTIAL_KEY_PREVIOUS=%s\n' "$OLDKEY" >> "$APP/.env"
+rc="$(run_deploy 200 prevsetsha)"
+check "rotation: exit 0"                         "[ '$rc' = '0' ]"
+check "rotation: the previous key lands in connectors.env VERBATIM" \
+  "grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS=$OLDKEY\$' '$TMP/connectors.env'"
+check "rotation: exactly one _PREVIOUS line" \
+  "[ \"\$(grep -c '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS=' '$TMP/connectors.env')\" = '1' ]"
+check "rotation: the CURRENT key is still there too (both keys, not a swap)" \
+  "grep -qE '^CONNECTORS_CREDENTIAL_KEY=.+\$' '$TMP/connectors.env'"
+check "rotation: current and previous are DIFFERENT values" \
+  "[ \"\$(grep '^CONNECTORS_CREDENTIAL_KEY=' '$TMP/connectors.env')\" != \"CONNECTORS_CREDENTIAL_KEY=$OLDKEY\" ]"
+check "rotation: the deploy says the window is open" \
+  "grep -q 'a rotation window is OPEN' '$TMP/out.log'"
+check "rotation: connectors.env still 0600" \
+  "[ \"\$(stat -c '%a' '$TMP/connectors.env' 2>/dev/null || stat -f '%Lp' '$TMP/connectors.env')\" = '600' ]"
+check "rotation: the unit was restarted by THIS deploy (no manual restart step)" \
+  "grep -q 'restart barkpark-connectors' '$SYSCTLLOG'"
+# (3) CLEARED — the operator deletes the line after `npm run rewrap`. The next
+# deploy must DROP it from connectors.env; a lingering line keeps a retired key live.
+grep -v '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS=' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"; rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 prevclearedsha)"
+check "window closed: exit 0"                    "[ '$rc' = '0' ]"
+check "window closed: the _PREVIOUS line is GONE from connectors.env" \
+  "! grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS' '$TMP/connectors.env'"
+check "window closed: the retired key appears NOWHERE in connectors.env" \
+  "! grep -qF '$OLDKEY' '$TMP/connectors.env'"
+rm -rf "$TMP"
+
+# (4) WHITESPACE-ONLY is treated as unset — an all-blank value would otherwise
+# emit a line that claims a rotation is in flight while carrying no key.
+setup_case
+printf 'CONNECTORS_CREDENTIAL_KEY_PREVIOUS=   \n' >> "$APP/.env"
+rc="$(run_deploy 200 prevblanksha)"
+check "blank previous key: treated as UNSET, no line emitted" \
+  "! grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS' '$TMP/connectors.env'"
 rm -rf "$TMP"
 
 echo
