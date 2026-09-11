@@ -36,13 +36,19 @@
 //
 // THE FIXTURE, ITS SOURCE TIER, AND HOW TO REFRESH IT
 //
-//   file   : tests/fixtures/capabilities.json
+//   file   : api/test/support/fixtures/sdk-capabilities-parity.json — read
+//            ACROSS the tree, the same way @barkpark/react's PortableDoc
+//            parity harnesses read their goldens out of that directory. It
+//            does not live under js/ because the Elixir producer-side lock
+//            below must read it from inside api/, or
+//            scripts/elixir-path-escape-check.sh reds it as an undispatched
+//            repo-root read.
 //   source : Barkpark.Plugins.Capabilities.manifest("admin", project: false)
 //            ["commands"] — tier "admin", UN-PROJECTED. The existence-hiding
 //            projection drops commands above the caller's tier, so a lower-tier
 //            cut would record a smaller route set and weaken every assertion
 //            here without anyone editing an assertion.
-//   refresh: cd api && mix run ../js/packages/core/tests/fixtures/refresh-capabilities.exs
+//   refresh: cd api && mix run test/support/fixtures/refresh-sdk-capabilities-parity.exs
 //            (on macOS prefix `CC=/usr/bin/clang`). The script rewrites ONLY
 //            `manifest_routes` + `generated_at`; `coverage` and `sdk_only` are
 //            hand-authored review artifacts and are carried through untouched,
@@ -55,27 +61,35 @@
 // PR that renames a route touches no js/ path and never runs this file. So the
 // real drift LOCK is
 // api/test/barkpark_web/contract/sdk_manifest_parity_test.exs: it reads THIS
-// fixture, asserts every covered route against the LIVE manifest the app
-// builds, and runs under the required Elixir gate on every PR. This file is the
-// consumer-side half — it is what guards the SDK surface, which the Elixir side
-// cannot see.
+// fixture (from inside its own tree, where the fixture lives), asserts every
+// covered route against the LIVE manifest the app builds, and runs under the
+// required Elixir gate on every PR. This file is the consumer-side half — it is
+// what guards the SDK surface, which the Elixir side cannot see.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from 'vitest'
 import { createClient } from '../src/client'
 import type { BarkparkClientConfig } from '../src/types'
-import fixture from './fixtures/capabilities.json'
+import { readFileSync } from 'node:fs'
 
 type CoverageEntry = { sdk_method: string; method: string; path_template: string }
 type SdkOnlyEntry = { sdk_method: string; rationale: string }
+type ManifestRoute = { command: string; method: string; path_template: string }
 
-const manifestRoutes = fixture.manifest_routes as Array<{
-  command: string
-  method: string
-  path_template: string
-}>
-const coverage = fixture.coverage as CoverageEntry[]
-const sdkOnly = fixture.sdk_only as SdkOnlyEntry[]
+const FIXTURE_URL = new URL(
+  '../../../../api/test/support/fixtures/sdk-capabilities-parity.json',
+  import.meta.url,
+)
+
+const fixture = JSON.parse(readFileSync(FIXTURE_URL, 'utf8')) as {
+  manifest_routes: ManifestRoute[]
+  coverage: CoverageEntry[]
+  sdk_only: SdkOnlyEntry[]
+}
+
+const manifestRoutes = fixture.manifest_routes
+const coverage = fixture.coverage
+const sdkOnly = fixture.sdk_only
 
 // Placeholder NAMES differ between the two surfaces on purpose (`:id` in the
 // SDK path builders, `:doc_id` / `:rev_id` / `:asset_id` in the manifest), and

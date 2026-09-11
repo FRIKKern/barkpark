@@ -6,18 +6,33 @@ defmodule BarkparkWeb.Contract.SdkManifestParityTest do
 
   The consumer half is `js/packages/core/tests/manifest-parity.test.ts`, which
   checks the SDK's coverage map against a CHECKED-IN SNAPSHOT of the manifest
-  (`js/packages/core/tests/fixtures/capabilities.json`). A snapshot is only as
-  fresh as its last refresh, and `.github/workflows/js-tests.yml` is
-  paths-filtered on `js/**` and is NOT in the required set
+  (`api/test/support/fixtures/sdk-capabilities-parity.json`, read across the
+  tree the way the @barkpark/react PortableDoc parity harnesses read their
+  goldens). A snapshot is only as fresh as its last refresh, and
+  `.github/workflows/js-tests.yml` is paths-filtered and is NOT in the
+  required set
   (`.github/required-checks.json`). So the PR that renames or retires a `/v1`
   route — an api-only diff — never runs the JS suite at all, and even if it did,
   the JS side would compare the SDK against the OLD snapshot and pass.
 
   A consumer test over a producer's snapshot is producer/consumer drift unless
   something on the PRODUCER side conformance-checks it. This file is that
-  something: it reads the JS fixture from the repo and asserts every route the
-  SDK claims to cover is still served by the manifest the app ACTUALLY builds,
-  under the required Elixir gate, on every PR.
+  something: it reads the fixture and asserts every route the SDK claims to
+  cover is still served by the manifest the app ACTUALLY builds, under the
+  required Elixir gate, on every PR.
+
+  ## Where the fixture lives, and why not under `js/`
+
+  `scripts/elixir-path-escape-check.sh` fails any repo-root read from
+  api/lib + api/test that elixir.yml's dispatcher does not dispatch on, and
+  reading the fixture out of `js/packages/core/tests/fixtures/` was exactly
+  such an escape. Parking the shared fixture in `api/test/support/fixtures/` —
+  the established one-fixture/two-engines pattern (`code-source-aliases.json`,
+  `inline-code-source.json`, `nested-list-carriers.json`) — keeps the producer
+  read inside its own tree, and `api/test/**` already dispatches this gate.
+  Refresh it with:
+
+      cd api && mix run test/support/fixtures/refresh-sdk-capabilities-parity.exs
 
   ## What is compared, and what is deliberately not
 
@@ -40,8 +55,8 @@ defmodule BarkparkWeb.Contract.SdkManifestParityTest do
 
   alias Barkpark.Plugins.Capabilities
 
-  # Repo-relative, resolved from the `api` directory `mix test` runs in.
-  @fixture_path Path.expand("../js/packages/core/tests/fixtures/capabilities.json", File.cwd!())
+  # Resolved from this file's own directory, so the read never leaves `api/`.
+  @fixture_path Path.expand("../../support/fixtures/sdk-capabilities-parity.json", __DIR__)
 
   # Floors, not exact counts — a new SDK method or a new command must not red
   # this file. They exist because every assertion below is an Enum.filter over a
@@ -56,11 +71,12 @@ defmodule BarkparkWeb.Contract.SdkManifestParityTest do
 
       {:error, reason} ->
         flunk("""
-        Could not read the JS parity fixture at #{@fixture_path}: #{inspect(reason)}.
+        Could not read the SDK parity fixture at #{@fixture_path}: #{inspect(reason)}.
 
-        This test is the PRODUCER-side lock on js/packages/core/tests/fixtures/\
-        capabilities.json. A missing file is a HARD failure, never a skip — a \
-        silent skip is exactly the outcome this test exists to prevent.
+        This test is the PRODUCER-side lock on \
+        api/test/support/fixtures/sdk-capabilities-parity.json. A missing file \
+        is a HARD failure, never a skip — a silent skip is exactly the outcome \
+        this test exists to prevent.
         """)
     end
   end
@@ -141,7 +157,7 @@ defmodule BarkparkWeb.Contract.SdkManifestParityTest do
 
              Every JS consumer calling these gets a 404 with no error on either \
              side. Fix the SDK path builder AND the coverage entry in \
-             #{Path.relative_to(@fixture_path, File.cwd!() |> Path.dirname())}, or — \
+             api/test/support/fixtures/sdk-capabilities-parity.json, or — \
              if the route moved on purpose — update both to the new template. \
              Refreshing the fixture snapshot alone does NOT clear this: the \
              coverage map is hand-authored and this assertion reads the LIVE \
