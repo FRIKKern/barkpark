@@ -118,6 +118,37 @@ defmodule BarkparkCloud.RawFailureChannelOracleTest do
     end
   end
 
+  # dr-bl-w8 — THE SECOND AXIS: NO TERMINAL ESCAPE BYTES ON THE WIRE.
+  #
+  # The sentinel refute above catches a boundary that never scrubs. It does NOT
+  # catch a boundary that scrubs WITHOUT stripping: `scrub/1` alone redacts the
+  # value and leaves the CSI/OSC runs sitting in the payload, so the field is
+  # secret-free and still carries raw terminal control bytes. That is a real
+  # residual channel — an escape run is a container (an OSC title string can
+  # hold arbitrary text between `\e]` and BEL), so bytes that never passed a
+  # scrub's key clause ride to the reader inside it, and every SPA renderer we
+  # have HTML-escapes rather than strips, so it renders as literal garbage.
+  #
+  # Every display boundary on main is `FailureCopy.raw/1` (`strip_ansi |>
+  # scrub`) or `humanize/1` (`classify |> strip_ansi |> scrub`), so a correct
+  # payload carries ZERO 0x1B. A NEW raw-failure field piped through a bare
+  # `scrub/1` — or through no fold at all — reds here even when its value
+  # happens to hold nothing secret-shaped.
+  #
+  # BOTH forms are checked: the raw byte (an email text_body is not JSON) and
+  # `\u001b`, which is how Jason encodes 0x1B inside a JSON string.
+  defp refute_escape_bytes!(rendered, where) do
+    refute rendered =~ "\e",
+           "#{where} shipped a raw 0x1B terminal escape byte.\n" <>
+             "A raw-failure field reached the wire without `FailureCopy.strip_ansi/1`.\n" <>
+             "The whole rendered payload was:\n#{inspect(rendered)}"
+
+    refute rendered =~ "\\u001b" or rendered =~ "\\u001B",
+           "#{where} shipped a JSON-encoded \\u001b terminal escape.\n" <>
+             "A raw-failure field reached the wire without `FailureCopy.strip_ansi/1`.\n" <>
+             "The whole rendered payload was:\n#{inspect(rendered)}"
+  end
+
   # THE FIXTURE ASSERTION (positive control). Which columns' bytes actually
   # REACHED this channel, and how many times. A vacuous fixture — one filtered
   # out upstream, as S2's lowercase stage name was — shows up here as a missing
@@ -132,6 +163,7 @@ defmodule BarkparkCloud.RawFailureChannelOracleTest do
 
   defp assert_channel!(rendered, where, expected_census) do
     refute_every_sentinel!(rendered, where)
+    refute_escape_bytes!(rendered, where)
 
     assert carrier_census(rendered) == expected_census, """
     #{where}: the CARRIER CENSUS moved.
@@ -442,5 +474,69 @@ defmodule BarkparkCloud.RawFailureChannelOracleTest do
         "dep-console" => 6
       })
     end
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## 4. dr-bl-w8 — console[].line is STRIPPED, not merely scrubbed.
+  ## ---------------------------------------------------------------------------
+
+  @doc false
+  # A secret spelled INSIDE the escape sequence, not beside it. An OSC string
+  # (`\e]0;…\a`) is a container: everything between `\e]` and the BEL is
+  # arbitrary text, and a bare `FailureCopy.scrub/1` does not look inside it —
+  # the run is not a key/value shape the scrub's clauses recognise, so under
+  # `scrub` alone BOTH the escape bytes and the token they carry ride to the
+  # reader in cleartext. `strip_ansi/1` deletes the whole run, so the ONLY fold
+  # that closes this is a strip that runs BEFORE the scrub, i.e.
+  # `FailureCopy.raw/1` — which is what `scrub_entry/2` calls.
+  @osc_secret "Wj4nQx8vTb2mYc6rKp1sGz9d"
+
+  defp osc_console_line(tag) do
+    "\e]0;api_key=#{@osc_secret}\a\e[31mBUILD failed\e[0m #{marker(tag)}"
+  end
+
+  test "console[].line: a secret carried INSIDE an escape sequence reaches the wire as neither ESC bytes nor the token",
+       %{site: site, deployment: d, token: token} do
+    d
+    |> Ecto.Changeset.change(
+      console: [
+        %{
+          "stage" => "BUILD",
+          "status" => "failed",
+          "line" => osc_console_line("dep-console"),
+          "detail" => osc_console_line("dep-console")
+        }
+      ]
+    )
+    |> Repo.update!()
+
+    body = get_body("/v1/sites/#{site.id}/deployments/#{d.id}", token)
+
+    # The DB still holds it raw — this is a display fold, not a data rewrite.
+    assert Repo.get(Deployment, d.id).console |> hd() |> Map.get("line") =~ @osc_secret
+
+    payload = Jason.decode!(body)["deployment"]
+    lines = for e <- payload["console"] || [], do: e["line"]
+
+    # POSITIVE CONTROL, first: the boundary actually rendered this line. Without
+    # it every assertion below is satisfiable by an EMPTY console array, which is
+    # exactly how a strip that ate the whole string would look.
+    assert lines != [],
+           "the deployment payload rendered NO console entries — the refutes below are vacuous"
+
+    assert Enum.any?(lines, &(&1 =~ marker("dep-console"))),
+           "console[].line lost its non-secret marker: #{inspect(lines)}"
+
+    for line <- lines do
+      refute line =~ @osc_secret,
+             "console[].line shipped the token spelled inside the OSC run: #{inspect(line)}"
+
+      refute line =~ "\e", "console[].line shipped a raw 0x1B byte: #{inspect(line)}"
+    end
+
+    # And the whole-payload form, so a SIBLING field that re-derives from the
+    # same raw column is covered too.
+    refute body =~ @osc_secret
+    refute_escape_bytes!(body, "GET /v1/sites/:id/deployments/:dep_id (OSC corpus)")
   end
 end
