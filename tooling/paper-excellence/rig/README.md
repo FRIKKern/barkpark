@@ -145,7 +145,34 @@ and reddened on font fallback rather than on a layout regression.
 ### Which image produced the committed baselines
 
 <!-- RECAPTURE-PROVENANCE -->
-_pending: filled by the re-capture run._
+
+| | |
+|---|---|
+| image | `ubuntu-latest` = **`ImageOS=ubuntu24 ImageVersion=20260907.300.1`**, `PRETTY_NAME="Ubuntu 24.04.5 LTS"` |
+| fonts on that image | **53** faces (`fc-list \| wc -l`) — no Iowan Old Style, no Source Serif 4 |
+| captured by | `paper-rig.yml` run **34642496728** (`workflow_dispatch`, `recapture: true`) on `studio/paper-rig-ci` |
+| browser | Playwright **1.59.1** chromium, installed globally, resolved via `PLAYWRIGHT_DIR` |
+| panel | 9 fixtures x light/dark x 1280/1920 = 36 JPEGs + 9 `report.json` |
+
+**This is the whole point of the arm.** The previous panel was a macOS capture,
+where the serif stack resolves to Iowan Old Style. Re-capturing the SAME
+fixtures in the image above moved exactly the numbers the host controls and
+nothing else — `heggemsnes-act` prose CPL `67.7 → 66.9`, `ingressRatio
+`0.783 → 0.785`, caption width `400.4 → 400`, and the section-boundary `y`
+offsets that follow from a different line box. Column width, band width, track
+counts, rule census, paragraph counts and blocked-request counts did not move.
+That is a font-fallback delta, measured rather than assumed — and it is why no
+CPL or font-metric threshold may be pinned against a laptop capture.
+
+`ingressRatio` is the one numeric arm the rig already asserts (`0.783 ± 0.01`).
+The Linux value, **0.785**, sits inside that tolerance with ~0.008 of margin, so
+the arm survives the host change untouched. No threshold is widened, narrowed or
+added by the re-baseline.
+
+Re-capture again with the `rig-recapture` label (or a `workflow_dispatch`), then
+download the `rig-baselines-<run id>` artifact into `baselines/` and commit —
+and update this table, because a panel whose image is unrecorded is a panel
+nobody can reproduce.
 
 ## Baselines
 
