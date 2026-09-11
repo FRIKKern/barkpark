@@ -4457,9 +4457,13 @@ defmodule BarkparkCloud.Web.Router do
   # three stay the worker's alone. Fails CLOSED: an unset/blank/wrong token 401s
   # every route, so the kill switch can never be flipped by omission.
   #
-  #   GET  /v1/admin/autoupdate         → 200 {halted: bool}   — current state
-  #   POST /v1/admin/autoupdate/halt    → 200 {halted: true}   — engage
-  #   POST /v1/admin/autoupdate/resume  → 200 {halted: false}  — release
+  #   GET  /v1/admin/autoupdate         → 200 rollout state, halted: bool
+  #   POST /v1/admin/autoupdate/halt    → 200 rollout state, halted: true
+  #   POST /v1/admin/autoupdate/resume  → 200 rollout state, halted: false
+  #
+  # All three render `rollout_state_json/1` — the kill-switch LEVER plus the three
+  # fleet COUNTERS (eligible/behind/in_flight). See that function for why the
+  # lever alone was never a gauge.
   #
   # Halt stops the AutoupdateRolloutWorker from ADVANCING new self-updates fleet-
   # wide; settle bookkeeping for in-flight boxes continues so state stays honest.
@@ -4469,7 +4473,7 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      json(conn, 200, %{halted: Registry.autoupdate_halted?()})
+      json(conn, 200, rollout_state_json(Registry.autoupdate_halted?()))
     end
   end
 
@@ -4480,7 +4484,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(true)
-      json(conn, 200, %{halted: true})
+      json(conn, 200, rollout_state_json(true))
     end
   end
 
@@ -4491,7 +4495,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(false)
-      json(conn, 200, %{halted: false})
+      json(conn, 200, rollout_state_json(false))
     end
   end
 
@@ -4515,7 +4519,7 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      json(conn, 200, %{halted: Registry.autoupdate_halted?()})
+      json(conn, 200, rollout_state_json(Registry.autoupdate_halted?()))
     end
   end
 
@@ -4526,7 +4530,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(true)
-      json(conn, 200, %{halted: true})
+      json(conn, 200, rollout_state_json(true))
     end
   end
 
@@ -4537,7 +4541,7 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       {:ok, _} = Registry.set_autoupdate_halted(false)
-      json(conn, 200, %{halted: false})
+      json(conn, 200, rollout_state_json(false))
     end
   end
 
@@ -12212,6 +12216,28 @@ defmodule BarkparkCloud.Web.Router do
       carrier: d.carrier,
       inserted_at: d.inserted_at
     }
+  end
+
+  # The rollout envelope every /v1/*/autoupdate route answers with — BOTH the
+  # worker-gated `/v1/admin/autoupdate*` trio and the platform-operator
+  # `/v1/operator/autoupdate*` proxies, so the counters cannot reach one
+  # principal and not the other (the proxies re-render rather than forward, which
+  # is exactly how a key survives on one and dies on the other).
+  #
+  # THE LEVER IS NOT A GAUGE (task-0f05a5f719493b5f). These routes used to emit
+  # `halted` alone. `halted` is a position the operator SET; it measures nothing
+  # about the fleet. The Go client has modelled the other three the whole time —
+  # `cloudclient.RolloutState` declares `in_flight`/`behind`/`eligible` as *int
+  # and `renderRolloutState` prints each behind a nil guard — so a control plane
+  # that omitted them made `bp cloud autoupdate status` print the halted line and
+  # then STOP, silently, which reads as a healthy lean envelope from an older CP.
+  # No CP ever emitted them; the blank was total and permanent.
+  #
+  # `halted` is passed in rather than re-read: the halt/resume twins have just
+  # WRITTEN it, and re-reading would race their own write. The counters are read
+  # fresh either way — they are a measurement, not an echo.
+  defp rollout_state_json(halted) when is_boolean(halted) do
+    Registry.autoupdate_rollout_counts() |> Map.put(:halted, halted)
   end
 
   # One fleet row for GET /v1/operator/fleet — the cross-team operator roll-up.
