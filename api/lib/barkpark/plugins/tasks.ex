@@ -1168,7 +1168,7 @@ defmodule Barkpark.Plugins.Tasks do
           "Record that this task's work LANDED — a commit, a PR number, a sentence — WITHOUT holding its claim. " <>
             "This is the verb CI can actually call: there is no worker_id and no observed_epoch, because a " <>
             "push-to-main workflow holds neither, which is exactly why `bp task stamp` refuses it (409 not_holder) " <>
-            "and why `bp task close` is not CI's to call. --commit/--pr/--note are UNIONED into content.landed, so " <>
+            "and why `bp task close` is not CI's to call. --commit/--pr/--note/--files are UNIONED into content.landed, so " <>
             "a second landing accumulates a second commit instead of replacing the first, and a close's own land " <>
             "digest is never clobbered (one merge rule, shared with close). " <>
             "--criterion N (ZERO-BASED — the first criterion is 0) additionally flips ONE acceptance criterion to " <>
@@ -1207,6 +1207,13 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary:
               "The landing sentence. Unioned into content.landed.notes, and REQUIRED with --criterion because it is the evidence written onto that criterion."
+          },
+          %{
+            name: "files",
+            type: "string",
+            repeatable: true,
+            summary:
+              "ONE changed path per occurrence — `--files api/lib/x.ex --files api/test/x_test.exs` — stored at content.landed.files as a LIST, which is the half a landing could not carry until this flag existed: the sha said a merge happened and only the --note PROSE said what it touched, and prose is not queryable. Rides the request BODY as a JSON array (never the query string), so one path and forty arrive in the same shape and a 40-path manifest never reaches the request-line wall. Up to 40 paths are kept verbatim; past that the server stores the count plus the sorted top-level dirs under `file_digests` instead. It is ALSO the overlap guard's only input: with files present the server refuses (409 landing_files_outside_row) a landing whose every path misses every path the row's own text names — a merge sealing work that was not this row's work. Omit it and that check is unmeasurable, and the response says so rather than letting silence read as a pass."
           },
           %{
             name: "criterion",
