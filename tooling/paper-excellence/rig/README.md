@@ -106,6 +106,47 @@ default page byte-identically. A workspace on another theme (e.g. `fjord`)
 drifts **colors only** — geometry and type are unaffected. If the product
 default moves, the rig reds rather than silently re-baselining every shot.
 
+## In CI — `.github/workflows/paper-rig.yml`
+
+The rig runs in CI since `pe-w2-rig-ci-image-baselines`. Before that it was
+wired into **nothing**: every assertion above was a laptop-only fact, and a
+renderer or paper-CSS change reached `main` having been photographed by nobody.
+
+| trigger | what runs |
+|---|---|
+| `push` to main / `pull_request` touching the renderer, `api/assets/paper-surface/**`, `bulldocs_live.ex` or `rig/**` | `gate.sh` on the default fixture — 8 cells, 5 DOM-content assertions each |
+| `workflow_dispatch` with `recapture: true`, or a `rig-recapture` LABEL on a pull request | `baseline.sh` over all 8 fixtures **inside the runner image**, then `git diff --stat` and an upload of `baselines/` as an artifact |
+
+The label route is not a convenience. `workflow_dispatch` is only dispatchable
+once the workflow file is on the **default** branch, so the very capture that has
+to happen before the first merge has no dispatch route at all; a label on the
+pull request is the one trigger available to it.
+
+Both trigger lists (`push.paths` and `pull_request.paths`) are byte-identical
+on purpose: a glob on one side only is silent in both directions — on
+`pull_request` only the gate goes dark at the merge, on `push` only it reds on
+protected `main` where nobody can land the fix through.
+
+The workflow is **advisory** and is deliberately absent from
+`.github/required-checks.json`. It carries a workflow-level `paths:` filter, and
+a filtered workflow emits no check run at all on a non-matching head — a
+REQUIRED name from such a workflow reports `is expected.` forever and deadlocks
+the pull request (honest-gates D18). Filtered + advisory is the consistent pair.
+
+Playwright is installed globally and resolved through `PLAYWRIGHT_DIR`, which is
+the first candidate `shoot.mjs` consults. Nothing under `js/` is installed for
+that job: the rig needs a browser, not the SDK monorepo.
+
+The PR arm does **not** pass `--check`. The committed `report.json` oracle is a
+numeric diff, and until the baselines were re-captured in this image (see
+below) a `--check` there would have compared a Linux run against macOS numbers
+and reddened on font fallback rather than on a layout regression.
+
+### Which image produced the committed baselines
+
+<!-- RECAPTURE-PROVENANCE -->
+_pending: filled by the re-capture run._
+
 ## Baselines
 
 `baselines/` holds the 9-paper panel: `agent-flight-recorder-charter`,
