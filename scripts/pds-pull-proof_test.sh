@@ -251,9 +251,134 @@ else
   bad "reason-discrimination" "expected 4 distinct reasons across 4 distinct failure modes, got $n_uniq distinct out of $n_distinct"
 fi
 
+# ── step 1's TARGET LIFECYCLE-CHECK precondition ────────────────────────────
+# (pds-bl-lifecycle-check-precondition)
+#
+# `grep -c lifecycle_status scripts/pds-pull-proof.sh` returned 0 on origin/main:
+# nothing in the ladder asserted that the target's
+# documents_task_lifecycle_status_check had been widened from 5 values to 7 by
+# PDS-D32's migrations. A pre-widening target therefore died mid-import on a raw
+# Postgrex CHECK violation that reads like an import-engine defect.
+#
+# THE FIXTURES ARE REAL pg_get_constraintdef OUTPUT, not the migration's source.
+# Postgres does not echo the DDL back: the migration writes `IN ('open', …)` and
+# the catalog prints `= ANY (ARRAY['open'::text, …])`. A matcher written against
+# the migration file would look right and match nothing. Both strings below were
+# taken verbatim from PostgreSQL 17 after applying the migration's up/0 and
+# down/0 bodies to a throwaway database.
+LC_WIDE="CHECK (((type <> 'task'::text) OR (NOT (content ? 'lifecycle_status'::text)) OR ((content ->> 'lifecycle_status'::text) = ANY (ARRAY['open'::text, 'in_progress'::text, 'blocked'::text, 'done'::text, 'cancelled'::text, 'considering'::text, 'researching'::text])))) NOT VALID"
+LC_NARROW="CHECK (((type <> 'task'::text) OR (NOT (content ? 'lifecycle_status'::text)) OR ((content ->> 'lifecycle_status'::text) = ANY (ARRAY['open'::text, 'in_progress'::text, 'blocked'::text, 'done'::text, 'cancelled'::text]))))"
+
+lc() { # <arm> <constraintdef> <expected missing list>
+  local arm="$1" def="$2" want="$3" got
+  got="$(lifecycle_missing_values "$def")"
+  if [ "$got" = "$want" ]; then ok "$arm  (missing: '${got:-<none>}')"
+  else bad "$arm" "lifecycle_missing_values printed '$got', expected '$want'"; fi
+}
+
+printf 'pds-pull-proof_test: lifecycle_missing_values — the step-1 precondition (fixtures are real pg_get_constraintdef output)\n'
+if ! declare -f lifecycle_missing_values >/dev/null 2>&1; then
+  bad 'lifecycle_missing_values is defined' "the sourced harness has no lifecycle_missing_values — step 1 cannot be asserting the target's lifecycle CHECK"
+else
+  lc 'WIDENED 7-value constraint (NOT VALID, as the migration leaves it) -> nothing missing' "$LC_WIDE"   ''
+  lc 'PRE-WIDENING 5-value constraint                -> names BOTH thought states' "$LC_NARROW" 'considering researching'
+  lc 'no lifecycle constraint text at all            -> names all seven'           'CHECK (true)' 'open in_progress blocked done cancelled considering researching'
+  # THE QUOTES ARE LOAD-BEARING, and this arm is what proves it: an unquoted
+  # substring search finds `open` inside `reopened_at` and reports a constraint
+  # that does NOT accept 'open' as though it did. Mutating the matcher from
+  # *"'$v'"* to *"$v"* reds exactly this arm and nothing else.
+  lc 'substring trap: reopened_at must not read as open' \
+     "CHECK ((NOT (content ? 'reopened_at'::text)) AND (content ->> 'lifecycle_status'::text) = ANY (ARRAY['in_progress'::text, 'blocked'::text, 'done'::text, 'cancelled'::text, 'considering'::text, 'researching'::text]))" \
+     'open'
+fi
+
+# ── step 4's maintenance-PG discovery verdict ───────────────────────────────
+# (pds-b-proof-instrument-control-auto)
+#
+# Step 4's positive control used to run only when an operator had exported
+# PDS_CONTROL_PG, so the default transcript printed `instrument control: NOT RUN`
+# beside a clean scan — the vacuous green PDS-D20 exists to refuse. Discovery
+# accepts a candidate on the SERVER's answers, never on the conninfo string, and
+# control_pg_verdict is that decision, isolated so every refusal can be driven
+# here without a PostgreSQL (this harness stays hermetic: no network, no DB).
+cpv() { # <arm> <probe line> <expected rc> <phrase the reason must contain, or '' on accept>
+  local arm="$1" line="$2" want_rc="$3" phrase="$4" rc
+  CONTROL_PG_WHY="__unset__"
+  control_pg_verdict "$line"; rc=$?
+  if [ "$rc" != "$want_rc" ]; then
+    bad "$arm" "control_pg_verdict returned $rc, expected $want_rc (reason: ${CONTROL_PG_WHY})"
+    return
+  fi
+  if [ "$want_rc" = 0 ]; then
+    if [ -n "${CONTROL_PG_WHY//__unset__/}" ]; then
+      bad "$arm" "accepted while holding a complaint (\$CONTROL_PG_WHY='$CONTROL_PG_WHY')"
+    else ok "$arm"; fi
+    return
+  fi
+  case "$CONTROL_PG_WHY" in
+    __unset__|"") bad "$arm" "refused and named nothing — a silent refusal is the NOT RUN this task exists to remove" ;;
+    *"$phrase"*)  ok "$arm  — $CONTROL_PG_WHY" ;;
+    *) bad "$arm" "refused for the WRONG reason: expected a message containing '$phrase', got: $CONTROL_PG_WHY" ;;
+  esac
+}
+
+printf 'pds-pull-proof_test: control_pg_verdict — discovery is local-or-nothing, and every refusal is named\n'
+if ! declare -f control_pg_verdict >/dev/null 2>&1; then
+  bad 'control_pg_verdict is defined' "the sourced harness has no control_pg_verdict — step 4's control is still gated on a hand-set PDS_CONTROL_PG"
+else
+  SOURCE_PG_DB="${SOURCE_PG_DB:-barkpark_prod}"
+  # THE REAL-SHAPE ARM. Every fixture below was hand-written as `t`/`f`, and the
+  # verdict passed all of them while REFUSING the only server anyone would point
+  # it at: psql prints `boolean::text` as `true`, not `t`. This line is the
+  # verbatim output of the shipped probe SQL against PostgreSQL 17 over a unix
+  # socket. A fixture set that cannot say what the system actually emits is a
+  # green with no subject.
+  cpv 'REAL probe output, PostgreSQL 17 over a unix socket -> ACCEPT' 'unix 5432 true postgres' 0 ''
+  cpv 'unix socket, may CREATE DATABASE, maintenance db  -> ACCEPT' 'unix 5432 t postgres'      0 ''
+  cpv 'the server says false, spelled out                -> refuse' 'unix 5432 false postgres'  1 'cannot CREATE DATABASE'
+  cpv 'loopback 127.0.0.1, same otherwise               -> ACCEPT' '127.0.0.1 5432 t postgres' 0 ''
+  cpv 'a REMOTE server                                  -> refuse' '10.0.0.5 5432 t postgres'  1 'neither a unix socket nor loopback'
+  cpv 'role cannot CREATE DATABASE                      -> refuse' 'unix 5432 f postgres'      1 'cannot CREATE DATABASE'
+  cpv 'it landed in the SOURCE PRODUCTION database      -> refuse' "unix 5432 t $SOURCE_PG_DB" 1 'production'
+  cpv 'a database merely NAMED like production          -> refuse' 'unix 5432 t app_production' 1 'production'
+  cpv 'the probe answered in an unexpected shape        -> refuse' 'unix 5432 t'               1 '4-field shape'
+  cpv 'the probe answered nothing at all                -> refuse' ''                          1 '4-field shape'
+fi
+
+# ── the harness is NOT RELOCATABLE, and says so ─────────────────────────────
+# (pds-bl-harness-not-relocatable)
+#
+# The published rehearsal recipe used to be "extract the one file and run it".
+# It cannot work: SCRIPT_DIR/REPO_ROOT derive from the invoked path, and
+# scripts/lib/bp-curl.sh is SOURCED at load — before argument parsing, before any
+# --only gating. This arm RUNS the relocation rather than quoting a remembered
+# error, so the header's claim is re-derived on every run instead of ageing.
+printf 'pds-pull-proof_test: a bare copy of the harness cannot run, and the header says so\n'
+RELOC="$TMP/reloc"; mkdir -p "$RELOC"
+cp "$PROOF" "$RELOC/pds-pull-proof.sh"
+reloc_out="$(bash "$RELOC/pds-pull-proof.sh" --plan 2>&1)"; reloc_rc=$?
+if [ "$reloc_rc" -eq 0 ]; then
+  bad 'a relocated copy still fails' "a bare copy at $RELOC/pds-pull-proof.sh exited 0 — if the harness became relocatable the header's recipe is now the wrong one and must be rewritten deliberately, not silently"
+else
+  case "$reloc_out" in
+    *bp-curl.sh*) ok "a relocated copy dies at load (rc=$reloc_rc) — $(printf '%s' "$reloc_out" | head -1)" ;;
+    *) bad 'a relocated copy dies at load' "it failed (rc=$reloc_rc) but not at the sourced sibling this header documents. Got: $(printf '%s' "$reloc_out" | head -1)" ;;
+  esac
+fi
+if grep -q 'IT IS NOT RELOCATABLE' "$PROOF"; then
+  ok 'the header states the harness is not relocatable'
+else
+  bad 'the header states the harness is not relocatable' "the file documents a recipe an operator cannot run: nothing in it says the whole scripts/ trio plus a real checkout is required"
+fi
+if grep -q 'git rev-parse HEAD:scripts/pds-pull-proof.sh' "$PROOF"; then
+  ok 'the header verifies the freeze with git rev-parse, by name'
+else
+  bad 'the header verifies the freeze with git rev-parse' "PDS-D159: the freeze is a recorded BLOB, and only git rev-parse proves the file is it"
+fi
+
 printf '\n'
 if [ "$fails" -eq 0 ]; then
-  printf 'pds-pull-proof_test: PASS (23 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination)\n'
+  printf 'pds-pull-proof_test: PASS (39 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable)\n'
   exit 0
 fi
 printf 'pds-pull-proof_test: FAIL — %s arm(s)\n' "$fails"
