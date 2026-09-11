@@ -10,8 +10,11 @@
 #
 # Usage:   scripts/release-scan.sh [ref]        (ref defaults to origin/main)
 # Env:     RELEASE_SCAN_REPO=owner/name         (defaults to FRIKKern/barkpark)
-#          RELEASE_SCAN_ALLOW_SHALLOW=1         (proceed on a shallow clone and
-#                                                mark the output `shallow:true`)
+#          RELEASE_SCAN_ALLOW_SHALLOW=1         (proceed on a TRUNCATED WALK — a
+#                                                graft on HEAD's own history, or a
+#                                                walk whose completeness cannot be
+#                                                established — and mark the output
+#                                                `shallow:true`)
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # HOW THE CI VERDICT IS DERIVED — and what it refuses to claim (honest-gates
@@ -83,22 +86,115 @@ fi
 REF="${1:-origin/main}"
 SLUG="${RELEASE_SCAN_REPO:-FRIKKern/barkpark}"
 
-# ── Shallow-clone guard ──────────────────────────────────────────────────────
-# Under a shallow clone `git describe --tags` finds no tag and `git log` walks
-# a truncated history: the script used to emit `commits: []`, a null
+# ── Truncated-walk guard ─────────────────────────────────────────────────────
+# Under a truncated history `git describe --tags` finds no tag and `git log`
+# walks a short range: the script used to emit `commits: []`, a null
 # suggested_version and exit 0 — indistinguishable from "nothing to release".
 # A reader that cannot see the history must say so, not shrug in green.
-is_shallow="$(git rev-parse --is-shallow-repository 2>/dev/null || echo unknown)"
-if [ "$is_shallow" != "false" ]; then
-  if [ "${RELEASE_SCAN_ALLOW_SHALLOW:-0}" = "1" ]; then
-    echo "release-scan: WARNING shallow repository (is-shallow=${is_shallow}) — commits[]/last_tag are TRUNCATED; output carries shallow:true" >&2
+#
+# THE STORE-LEVEL FLAG ALONE IS NOT THE QUESTION, and keying on it is how this
+# guard refused a checkout it could read in full. `git rev-parse
+# --is-shallow-repository` answers about the OBJECT STORE, which is
+# repository-wide: one off-HEAD `--depth` fetch sets it for a checkout whose
+# HEAD history reaches the root (measured on /Volumes/SATECHI/github/barkpark
+# 2026-08-02 — 5132 commits from HEAD, one root, and the sole graft in
+# .git/shallow not an ancestor of HEAD). The scan then FATALed at exit 3 and
+# advertised `git fetch --unshallow`, a remedy that does not describe what is
+# wrong; the other remedy, RELEASE_SCAN_ALLOW_SHALLOW=1, made a correct scan
+# stamp itself `shallow:true`. Both are a truthful reader calling itself blind.
+#
+# The question is whether a graft lies on HEAD's OWN history. This is the
+# predicate proven next door in scripts/pds-record-parity.sh (walk_truncation,
+# ruling 4) — store-shallow AND at least one entry of
+# $(git rev-parse --git-common-dir)/shallow is an ancestor of HEAD.
+#
+# IT FAILS CLOSED. An unreadable graft list, a missing common-dir, a graft that
+# cannot be tested, or a non-true/false answer from git all land on "unknown",
+# which takes the SAME path as "truncated": the existing FATAL at exit 3, still
+# escapable with RELEASE_SCAN_ALLOW_SHALLOW=1 and still declaring `shallow:true`
+# in the JSON (release-scan's truncated commits[] is useful draft material, which
+# is why this script has an escape and pds-record-parity.sh does not).
+#
+# Under a real `git clone --depth 1` the graft list holds HEAD itself, so
+# `--is-ancestor HEAD HEAD` is true and the case this guard exists for still
+# fires — see G4-G7 in scripts/release-scan.test.sh, and J for the off-HEAD
+# shape that pins the predicate against a simplification back to the flag.
+WALK_STATE=""
+WALK_GRAFT=""
+WALK_REASON=""
+walk_truncation() {
+  WALK_STATE=""; WALK_GRAFT=""; WALK_REASON=""
+
+  local store
+  store="$(git rev-parse --is-shallow-repository 2>/dev/null)" || store=""
+  case "$store" in
+    false) WALK_STATE="complete"; return 0 ;;
+    true)  : ;;
+    *)     WALK_STATE="unknown"
+           WALK_REASON="\`git rev-parse --is-shallow-repository\` answered '${store:-<nothing>}', which is neither true nor false"
+           return 0 ;;
+  esac
+
+  # Store-shallow. Now ask whether it touches HEAD.
+  local common
+  common="$(git rev-parse --git-common-dir 2>/dev/null)" || common=""
+  if [ -z "$common" ]; then
+    WALK_STATE="unknown"
+    WALK_REASON="the store is shallow but \`git rev-parse --git-common-dir\` answered nothing, so the graft list cannot be located"
+    return 0
+  fi
+
+  local grafts="${common%/}/shallow"
+  if [ ! -r "$grafts" ]; then
+    WALK_STATE="unknown"
+    WALK_REASON="the store is shallow but the graft list ${grafts} is missing or unreadable, so no graft can be tested against HEAD"
+    return 0
+  fi
+
+  local g rc
+  while read -r g || [ -n "$g" ]; do
+    case "$g" in ''|\#*) continue ;; esac
+    # NOT a bare call followed by `rc=$?`, which is how the donor spells it:
+    # pds-record-parity.sh runs `set -uo pipefail` with NO -e, this script runs
+    # `set -euo pipefail`, and exit 1 here is the EXPECTED answer "off HEAD's
+    # history". Under errexit the bare form kills the scan at exit 1 with an
+    # empty stderr on the very repo shape this guard was written to pass
+    # (measured while porting). An `if` makes the status a condition, which
+    # errexit never traps.
+    if git merge-base --is-ancestor "$g" HEAD >/dev/null 2>&1; then rc=0; else rc=$?; fi
+    case "$rc" in
+      0) WALK_STATE="truncated"; WALK_GRAFT="$g"; return 0 ;;
+      1) : ;;   # a real answer: this graft is off HEAD's history
+      *) WALK_STATE="unknown"
+         WALK_GRAFT="$g"
+         WALK_REASON="graft ${g} could not be tested against HEAD (git merge-base --is-ancestor exit ${rc})"
+         return 0 ;;
+    esac
+  done < "$grafts"
+
+  WALK_STATE="complete"
+  WALK_REASON="store-shallow, but no graft in ${grafts} lies on HEAD's history"
+  return 0
+}
+
+walk_truncation
+if [ "$WALK_STATE" != "complete" ]; then
+  if [ "$WALK_STATE" = "truncated" ]; then
+    walk_why="a graft on HEAD's own history (${WALK_GRAFT}) — the walk stops there"
+    walk_fix="fix with \`git fetch --unshallow\` (CI: check out with \`fetch-depth: 0\`)"
   else
-    echo "release-scan: FATAL shallow repository (is-shallow=${is_shallow}). git log/describe would silently under-report the release range." >&2
-    echo "release-scan: fix with \`git fetch --unshallow\`, or set RELEASE_SCAN_ALLOW_SHALLOW=1 to accept truncated commits[]." >&2
+    walk_why="walk completeness UNKNOWN, so this guard fails CLOSED: ${WALK_REASON}"
+    walk_fix="fix by making the graft list readable, or set RELEASE_SCAN_ALLOW_SHALLOW=1"
+  fi
+  if [ "${RELEASE_SCAN_ALLOW_SHALLOW:-0}" = "1" ]; then
+    echo "release-scan: WARNING truncated history (${walk_why}) — commits[]/last_tag are TRUNCATED; output carries shallow:true" >&2
+  else
+    echo "release-scan: FATAL shallow repository (${walk_why}). git log/describe would silently under-report the release range." >&2
+    echo "release-scan: ${walk_fix}, or set RELEASE_SCAN_ALLOW_SHALLOW=1 to accept truncated commits[]." >&2
     exit 3
   fi
 fi
-if [ "$is_shallow" = "false" ]; then shallow_json=false; else shallow_json=true; fi
+if [ "$WALK_STATE" = "complete" ]; then shallow_json=false; else shallow_json=true; fi
 
 # Newest vA.B.C release tag reachable from REF. The exclude globs drop the
 # separate cli-v* tag space and any pre-release/suffixed tag, matching
