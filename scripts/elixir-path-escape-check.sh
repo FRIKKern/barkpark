@@ -111,7 +111,21 @@ set -euo pipefail
 #   over-inclusion would cost the shim exactly what it exists to save (the same
 #   judgement the templates/** note below records). The register is edited only
 #   when a Paper heals, so the full-suite cost is rare and bounded.
+#   cloud/priv/secret-scrub.exs is the THIRD @external_resource that escapes
+#   api/, and the first one read from BOTH trees: it is the single
+#   secret-pattern set, compiled by api/lib/barkpark/sites/build_log_scrub.ex
+#   (the box's recorded-build-log WRITE boundary) AND by
+#   cloud/lib/barkpark_cloud/failure_copy.ex (the control plane's display
+#   boundary), because two OTP apps that cannot depend on each other may not each
+#   carry their own copy of a redaction table — a copy drifts in SILENCE, a
+#   redacted token and a leaked one being indistinguishable until someone reads
+#   the bytes. Editing it changes what BOTH scrubbers redact, so a PR touching it
+#   must compile and test this tree rather than skip it. Declared as an EXACT
+#   FILE, never `cloud/**`: that tree has its own gate (cloud.yml, via
+#   scripts/cloud-path-escape-check.sh), and dispatching the whole Elixir suite
+#   on it would be the over-inclusion the tooling/** note above refuses.
 ELIXIR_COMPILE_PATHS='api/**
+cloud/priv/secret-scrub.exs
 design/**
 tooling/pds/pre-gate-papers.json
 .github/workflows/elixir.yml
