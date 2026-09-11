@@ -1192,7 +1192,10 @@ function priorityLabel(p: unknown): string | null {
 function taskDetail(b: Block): string {
   const t = isMap(b.task) ? b.task : b
   const title = str(t.title).trim()
-  if (title === '') return ''
+  // Mirrors Render.Components.task_detail_html/1: an unresolved task-detail is
+  // still a block, so it keeps its place with the same placeholder the sibling
+  // live-query widgets use instead of collapsing to nothing.
+  if (title === '') return `<div class="bp-tdetail bp-tdetail--empty">No matching tasks.</div>`
   const role = roleOf(t.status)
 
   const sections: string[] = []

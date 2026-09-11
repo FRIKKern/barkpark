@@ -63,14 +63,14 @@ func (r *instSSHRecorder) count() int {
 	return len(r.calls)
 }
 
-// instHealthOK answers the health probe (…/api/schemas) with an in-memory 200
+// instHealthOK answers the health probe (…/status.json) with an in-memory 200
 // while passing every other instHTTP call (the control-plane fake!) through to
 // the real transport.
 func instHealthOK(t *testing.T) {
 	t.Helper()
 	old := instHTTP
 	instHTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if strings.HasSuffix(req.URL.Path, "/api/schemas") {
+		if strings.HasSuffix(req.URL.Path, "/status.json") {
 			rec := httptest.NewRecorder()
 			rec.WriteHeader(http.StatusOK)
 			return rec.Result(), nil
@@ -1011,7 +1011,7 @@ func TestInstanceEjectDetachIsConfirmedNotAssumed(t *testing.T) {
 // resurrect + adopt: the receipt residue (pds-w27-bl-…-verb-receipt-residue)
 // ---------------------------------------------------------------------------
 
-// instHealthStub answers the /api/schemas probe with `code` and counts the
+// instHealthStub answers the /status.json probe with `code` and counts the
 // hits, passing every other instHTTP call (the control-plane fake!) through to
 // the real transport. instHealthOK is the always-200 special case; a resurrect
 // receipt has to distinguish PROBED-OK from PROBED-AND-FAILED from NOT-PROBED,
@@ -1020,7 +1020,7 @@ func instHealthStub(t *testing.T, code int, hits *int) {
 	t.Helper()
 	old := instHTTP
 	instHTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if strings.HasSuffix(req.URL.Path, "/api/schemas") {
+		if strings.HasSuffix(req.URL.Path, "/status.json") {
 			*hits++
 			rec := httptest.NewRecorder()
 			rec.WriteHeader(code)
@@ -1118,7 +1118,7 @@ func TestInstanceResurrectReceiptStatesHealthInAllThreeModes(t *testing.T) {
 			// merely a different string for the same behaviour.
 			wantHits := hits > 0
 			if (m.args == nil) != wantHits {
-				t.Errorf("mode %q probed /api/schemas %d times — the receipt and the wire disagree about whether the gate ran", m.name, hits)
+				t.Errorf("mode %q probed /status.json %d times — the receipt and the wire disagree about whether the gate ran", m.name, hits)
 			}
 		})
 	}
