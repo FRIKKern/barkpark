@@ -264,7 +264,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { IDS, SCENARIOS } from "./scenarios.mjs";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
-import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr, formatStderrTail } from "./bringup-retry.mjs";
 import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -1921,7 +1921,11 @@ async function withBrowser(fn) {
   // THE EXPORT'S OWN serve.mjs. serve.mjs roots itself at its own parent
   // directory, so measuring an exported origin/main tree means running THAT
   // tree's server — not this worktree's server pointed elsewhere.
-  const serveChild = spawn("node", [path.join(ROOT, "__preview__", "serve.mjs"), "--port", String(PORT)], { stdio: "ignore" });
+  // STDERR IS PIPED, NOT DISCARDED: without it the refusal below can only say
+  // "nothing answered", never why. captureStderr drains continuously (an
+  // unread pipe fills and blocks the child) and keeps a bounded tail.
+  const serveChild = spawn("node", [path.join(ROOT, "__preview__", "serve.mjs"), "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] });
+  const readServeStderr = captureStderr(serveChild);
   let chrome = null, cdp = null, profile = null;
   const alive = (p) => { if (!p || p.pid == null) return false; try { process.kill(p.pid, 0); return true; } catch { return false; } };
   const reap = async (p) => {
@@ -1949,7 +1953,17 @@ async function withBrowser(fn) {
     try { const r = await fetch(`${BASE}/app.css`, { cache: "no-store" }); if (r.ok) { up = true; break; } } catch { /* not yet */ }
     await sleep(100);
   }
-  if (!up) return die(`no server answered on :${PORT} within ${SERVER_CAP}ms`);
+  // The refusal names a CAUSE: our serve.mjs's own stderr tail rides along.
+  // An empty tail is reported as empty — silence is itself a finding.
+  // NO RETRY on this bring-up: no per-attempt failure rate has been measured
+  // for serve.mjs (unlike Chrome's, in bringup-retry.mjs), and a retry with no
+  // measurement behind it is theatre.
+  if (!up) {
+    return die(
+      `no server answered on :${PORT} within ${SERVER_CAP}ms\n` +
+      formatStderrTail(readServeStderr(), { who: "serve.mjs" }).replace(/\n$/, ""),
+    );
+  }
 
   // SERVED BYTES == DISK BYTES. 20 worktrees share this checkout and a foreign
   // preview server has squatted this port class before, making a patched run
