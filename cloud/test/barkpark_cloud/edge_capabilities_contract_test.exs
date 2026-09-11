@@ -55,7 +55,7 @@ defmodule BarkparkCloud.EdgeCapabilitiesContractTest do
   defp unknown_keys(row), do: Map.get(row, @unknown_key, [])
 
   defp stated_or_unknown(row),
-    do: (row |> capability_bools() |> Map.keys()) |> Enum.concat(unknown_keys(row)) |> Enum.sort()
+    do: row |> capability_bools() |> Map.keys() |> Enum.concat(unknown_keys(row)) |> Enum.sort()
 
   test "the CP copy is BYTE-IDENTICAL to the canonical Go fixture" do
     assert File.exists?(@go_fixture),
@@ -131,7 +131,7 @@ defmodule BarkparkCloud.EdgeCapabilitiesContractTest do
     assert unknown_keys(row) == []
 
     for {capability, claimed} <- bools do
-      assert claimed == (capability in menu),
+      assert claimed == capability in menu,
              "edge_capabilities.json says cloudflare.#{capability}=#{claimed}, but " <>
                "Cloudflare.capabilities/0 is #{inspect(menu)} — the fixture and the " <>
                "module disagree about a capability we either implement or don't."
