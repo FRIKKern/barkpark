@@ -14,6 +14,48 @@ defmodule Barkpark.PortableDoc.Render.Inline do
 
   # ── inline walker (inline node/marks → Pd-tree fold) ───────────────────────
 
+  # ── RULINGS on the residual live-corpus INLINE shapes (task-e4833f198e293ed1)
+  #
+  # The 2026-07-25 census rendered all 537 published papers through the built
+  # @barkpark/react emitter and flagged every block whose tag-stripped output was
+  # empty. Four shapes were left undecided. The INLINE ones are ruled here; the
+  # BLOCK-level ones are NOT this module's readers and are named only so the next
+  # reader does not re-derive them.
+  #
+  #   INLINE · text leaf keyed `text` instead of `value` (13 list items, all in
+  #     workspace-bundle-keystone) → RULED A LEGITIMATE ALIAS, not a data defect.
+  #     The Hollow predicate already blesses BOTH spellings as text-carrying, so
+  #     repairing the data would leave every future writer of that spelling
+  #     producing a readable-by-contract, blank-in-fact paper. All three engines
+  #     now dual-read it: `compose_inline(%{"type" => "text"})` below,
+  #     `textLeafValue` in inline.tsx, `attrStrFirst(n, "value", "text")` in
+  #     inline.go. No surface leapfrogs; nothing left to do.
+  #
+  #   INLINE · `code` leaf whose body is in `children` (66 live paragraphs) →
+  #     FIXED CROSS-SURFACE by this row; see `inline_code_source/1`.
+  #
+  #   INLINE · a bare ARRAY where an inline node was expected, `[[{text…}]]`
+  #     (59 paragraphs + 18 list blocks) → FIXED CROSS-SURFACE by this row; the
+  #     Elixir and JS halves already shipped (`compose_inline(l) when is_list(l)`
+  #     below, `if (Array.isArray(node))` in inline.tsx) and the Go reader was
+  #     brought up to them (`case []any` in InlineRenderer.node).
+  #
+  #   NOT INLINE, DEFERRED to their own rows · a `list` block with its items in
+  #     `content` (18 blocks, the authoring contract is genuinely ambiguous — one
+  #     paper holds an array OF ARRAYS, another a FLAT inline run), and a
+  #     `callout` whose `content` holds BLOCK nodes (4 blocks, a real change to
+  #     the block grammar). Both live in `Render.Compose`, not here. A `code`
+  #     BLOCK whose body is in `content[]` was closed separately by the
+  #     code-block source-key contract (`Compose.code_source/1` +
+  #     test/support/fixtures/code-source-aliases.json).
+  #
+  #   NOT A RENDER DEFECT · `inlineText/1` in js/packages/react/src/toPlainText.ts
+  #     is a plain-text EXTRACTOR, not a renderer: it already concatenates a
+  #     node's own value AND its children, so an inline `code` with children
+  #     always yielded its text there. It does drop a bare-array node, which
+  #     understates a search snippet but never blanks a rendered surface — left
+  #     alone deliberately rather than changed without a measured need.
+
   def compose_inline_children(nodes) when is_list(nodes) do
     nodes
     |> unwrap_block_wrappers()
@@ -123,8 +165,31 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     }
   end
 
+  # Inline `code` leaf. The chip body is a FLAT STRING, never inlines — but a
+  # sizeable slice of the live corpus authors it as `children` inline nodes with
+  # no `value` at all (66 published paragraphs at the 2026-07-25 census), and
+  # this clause read `value` only, so those chips composed to an EMPTY
+  # PdInlineCode and the text vanished on the web, in email and in the TUI.
+  #
+  # @barkpark/react already carries the law this now mirrors —
+  # `js/packages/react/src/inline.tsx` `inlineCodeSource`:
+  #
+  #     return `<code>${escapeHtml(inlineCodeSource(node))}</code>`
+  #     // inlineCodeSource = str(node.value) || inlineText(node.children)
+  #
+  # FIRST NON-EMPTY, not first-non-blank: a `value` of `" "` WINS and keeps its
+  # space. That is the opposite of the BLOCK-level `code` contract
+  # (`Compose.code_source/1`, which trims to select across value|code|content|
+  # text) and the difference is deliberate — a block's source key is a choice
+  # among aliases, an inline chip's `value` is the authored body verbatim.
+  #
+  # The three engines answer to ONE fixture,
+  # `api/test/support/fixtures/inline-code-source.json`: this clause via
+  # `test/barkpark/portable_doc/render/inline_code_source_parity_test.exs`, the
+  # SDK via `js/packages/react/tests/inline-code-source.parity.test.ts`, and the
+  # Go TUI via `internal/pdrender/inline_code_source_parity_test.go`.
   def compose_inline(%{"type" => "code"} = n, _inside_link) do
-    %{"kind" => "PdInlineCode", "value" => Map.get(n, "value", "")}
+    %{"kind" => "PdInlineCode", "value" => inline_code_source(n)}
   end
 
   def compose_inline(%{"type" => "link"} = n, inside_link) do
@@ -264,6 +329,50 @@ defmodule Barkpark.PortableDoc.Render.Inline do
       other -> %{"kind" => "PdText", "children" => [other]}
     end
   end
+
+  @doc """
+  The body of an inline `code` leaf: `value` when it is a non-empty string,
+  else the flattened plain text of `children`.
+
+  Twins: `inlineCodeSource` in `js/packages/react/src/inline.tsx` and
+  `inlineCodeSource` in `internal/pdrender/inline.go`. All three are locked to
+  `api/test/support/fixtures/inline-code-source.json`.
+  """
+  def inline_code_source(%{} = n) do
+    case coerce_text_value(Map.get(n, "value", "")) do
+      "" -> flatten_inline_text(Map.get(n, "children"))
+      value -> value
+    end
+  end
+
+  def inline_code_source(_), do: ""
+
+  # Fold inline nodes to their concatenated plain text (markup is DROPPED — a
+  # code chip body is a flat string). Mirrors `inlineText` in inline.tsx:
+  # a string/finite number is itself, a map is `value` || legacy `text` || its
+  # own children, a nested array recurses, anything else contributes "".
+  defp flatten_inline_text(s) when is_binary(s), do: s
+  defp flatten_inline_text(n) when is_number(n), do: to_string(n)
+
+  defp flatten_inline_text(nodes) when is_list(nodes),
+    do: Enum.map_join(nodes, "", &flatten_inline_text_node/1)
+
+  defp flatten_inline_text(_), do: ""
+
+  defp flatten_inline_text_node(%{} = n) do
+    case coerce_text_value(Map.get(n, "value", "")) do
+      "" ->
+        case coerce_text_value(Map.get(n, "text", "")) do
+          "" -> flatten_inline_text(Map.get(n, "children"))
+          legacy -> legacy
+        end
+
+      value ->
+        value
+    end
+  end
+
+  defp flatten_inline_text_node(other), do: flatten_inline_text(other)
 
   # Fail-soft coercion for a text leaf's `value` — binaries pass through,
   # numbers stringify, anything else (map / list / bool / nil) → "". NEVER calls
