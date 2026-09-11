@@ -52,11 +52,18 @@ defmodule BarkparkWeb.BulldocsOpsDoorEditContractTest do
   @publish_path "/v1/plugins/bulldocs/papers"
   @dataset "production"
 
-  # The caps the publish-time floor enforces, read from the module that owns
-  # them rather than retyped: @max_top_level_blocks / @max_top_level_headings
-  # in epic_quality.ex are 80 and 16.
+  # The caps the publish-time floor enforces. `EpicQuality` keeps them in
+  # PRIVATE module attributes (@max_top_level_blocks / @max_top_level_headings)
+  # with no public accessor, so these two are RETYPED literals, not read from
+  # the module. The last test in this file is the pin that reds if the module's
+  # values ever move away from them.
   @max_blocks 80
   @max_headings 16
+
+  @epic_quality_source Path.expand(
+                         "../../../lib/barkpark/content/papers/epic_quality.ex",
+                         __DIR__
+                       )
 
   defp authed(conn) do
     conn
@@ -232,5 +239,32 @@ defmodule BarkparkWeb.BulldocsOpsDoorEditContractTest do
     # And the refusal is the RATCHET, not an AuthoringWall verdict: the wall
     # never runs on this door.
     assert length(Content.paper_blocks(slug, @dataset)) == 2
+  end
+
+  test "PIN: the retyped caps still equal the private attributes in epic_quality.ex" do
+    # This file cannot read @max_top_level_blocks / @max_top_level_headings —
+    # they are private attributes with no accessor — so it retypes them above.
+    # A retyped constant rots silently, which is exactly what this pin refuses:
+    # move either cap in epic_quality.ex and this test reds, pointing the next
+    # reader at the two literals and at the at-cap fixture built from them.
+    source = File.read!(@epic_quality_source)
+
+    # Assert the PRECONDITION of the pin itself. A renamed or deleted attribute
+    # would make the two value assertions below fail for the wrong reason, and a
+    # duplicated one would let a stale copy satisfy them — so require exactly one
+    # declaration line per attribute before comparing its value.
+    for attribute <- ["@max_top_level_blocks", "@max_top_level_headings"] do
+      assert length(Regex.scan(~r/^\s*#{attribute}\s+\d+$/m, source)) == 1,
+             "#{attribute} is no longer declared exactly once in epic_quality.ex; " <>
+               "this pin and the retyped literals above need rewriting."
+    end
+
+    assert source =~ ~r/^\s*@max_top_level_blocks\s+#{@max_blocks}$/m,
+           "epic_quality.ex's @max_top_level_blocks is no longer #{@max_blocks}; " <>
+             "update @max_blocks here and the at-cap fixture it builds."
+
+    assert source =~ ~r/^\s*@max_top_level_headings\s+#{@max_headings}$/m,
+           "epic_quality.ex's @max_top_level_headings is no longer #{@max_headings}; " <>
+             "update @max_headings here and the at-cap fixture it builds."
   end
 end
