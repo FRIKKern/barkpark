@@ -348,13 +348,15 @@ jobs:
         # scripts/check-deploy-smoke.sh is the tripwire that stops either
         # invariant regressing.
         run: |
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://barkpark.cloud/")"
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
+          code="$(bp_curl_code -s -o /dev/null --max-time 15 "https://barkpark.cloud/")"
           echo "https://barkpark.cloud/ = $code"
           echo "$code" | grep -qE '^(200|301|302)$'
-          dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+          dbcode="$(bp_curl_code -s -o /dev/null --max-time 15 \
             -X POST -H 'content-type: application/json' \
             -d '{"email":"deploy-smoke-probe@invalid.example","password":"x"}' \
-            "https://barkpark.cloud/v1/auth/login" || true)"
+            "https://barkpark.cloud/v1/auth/login" || echo 000)"
           echo "https://barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
           test "$dbcode" = "401"
       - name: Assert the control plane serves this commit or a descendant
@@ -555,16 +557,18 @@ jobs:
         # secret repointed at one box certify another. The deploy steps above own
         # that secret; this step asserts about the public name, and says so.
         run: |
-          code="$(curl -s -o /tmp/instance-schemas.json -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
+          code="$(bp_curl_code -s -o /tmp/instance-schemas.json --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
           echo "guerrilla /api/schemas = $code"
           test "$code" = "200"
           count="$(jq -e 'if type == "array" then length else error("not a JSON array") end' /tmp/instance-schemas.json)"
           echo "guerrilla /api/schemas catalog entries = $count"
           test "$count" -gt 0
-          dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+          dbcode="$(bp_curl_code -s -o /dev/null --max-time 15 \
             -X POST -H 'content-type: application/json' \
             -d '{"email":"deploy-smoke-probe@invalid.example","password":"x"}' \
-            "https://guerrilla.barkpark.cloud/v1/auth/login" || true)"
+            "https://guerrilla.barkpark.cloud/v1/auth/login" || echo 000)"
           echo "https://guerrilla.barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
           test "$dbcode" = "401"
       - name: Assert the content instance serves this commit or a descendant
