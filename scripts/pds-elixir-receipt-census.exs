@@ -1563,16 +1563,34 @@ defmodule PDS.Census do
       {"UNJUDGED", "the cited test has no injection seam, or DOES read Repo", :reds},
     context_differential_only:
       {"UNJUDGED", "the cited test builds a conn", :reds},
+    # THE TEXT SAYS WHAT judge_citation/4 DECIDES, NOT WHAT THE NAME SUGGESTS
+    # (pds-w39-vocab-text-overclaim). It READ "the Repo read compares a printed field, not
+    # existence" — a field-comparison predicate this arm has never implemented and which is
+    # undecidable on substrings. The arm fires on `not repo?`: the cited block carries NO
+    # named persistence token at all, which this file's own demotion note below already
+    # states in those words ("reads nothing back at all, so it cannot even assert that").
+    # A TEXT REPAIR, NOT A PROMOTION: the tier stays :advisory and the verdict of all
+    # five rows is unchanged — arming a real field comparison is a different slice.
     side_effect_existence_only:
-      {"UNJUDGED", "the Repo read compares a printed field, not existence", :advisory},
+      {"UNJUDGED",
+       "the cited block carries NO named persistence-read token at all (@repo_tokens), so it cannot even assert existence",
+       :advisory},
     shape_assertion_only:
       {"UNJUDGED", "the assertion can fail on a wrong payload (implementable ONLY as a denylist of weak predicates — is_list/is_map/is_binary/bare truthiness — so it is advisory, and this name promises more than its code delivers)", :advisory},
     payload_is_the_postcondition:
       {"UNJUDGED", "any emitted value traces to params[...] or a fn head", :advisory},
     request_param_echo:
       {"UNJUDGED", "no emitted value traces to a request parameter", :advisory},
+    # THE MODULE HALF ONLY, SAID IN THE VOCABULARY AND NOT ONLY AT THE PREDICATE
+    # (pds-w39-vocab-text-overclaim). It READ "any test references the site's module OR its
+    # route path"; no_observer_findings/1 is one String.contains? on the module name and
+    # carries no route index at all — its own head already says THE MODULE HALF ONLY.
+    # STILL INERT, NOT ARMED: no_observer carries ZERO top-level @register rows, so it
+    # prints under TIERED :reds BUT INERT. This edit moves no verdict.
     no_observer:
-      {"UNJUDGED", "any test references the site's module OR its route path", :reds},
+      {"UNJUDGED",
+       "any test FILE contains the site's module name as a substring (the module half only — no route index)",
+       :reds},
     basis_stale:
       {"UNJUDGED", "the current head_hash+expr_fp equal the recorded pair", :reds},
     partial_tag_coverage:
@@ -8582,8 +8600,103 @@ defmodule PDS.Census do
       {"LENS-CAN-MISS", resolved != [], lens_why},
       {"ROUTED-DISPOSITION-UNSHADOWED", disp.shadowed == [], shadow_why}
     ] ++
+      exclusion_table_checks(d) ++
       exclusion_freshness_checks(d) ++
       derivation_checks(d) ++ liveview_checks(d) ++ stale_arm_checks(d)
+  end
+
+  # ------------------------------------------ THE COMMITTED TABLE'S OWN TWO ARMS
+  #
+  # (A) EXCLUSION-CLASS-DECLARED (pds-bl-w41-exclusion-class-atom-ungated). Until this
+  # commit @routed_exclusion_classes was read at EXACTLY ONE site, and read as a
+  # `Map.get/3` DEFAULT. A DEFAULT IS NOT A CHECK: a committed row naming a class nobody
+  # declared printed `(no prose - see @routed_exclusion_classes)` under its own count and
+  # the run still exited 0 with CENSUS OK. MEASURED at origin/main 20d61d187 - re-labelling
+  # one row to a brand-new `:liveview_write_population` gave rc=0, every arm PASS, and a
+  # placeholder line. THE AFFORDANCE FOR A NEW CLASS IS PRESERVED ON PURPOSE: declaring the
+  # class in @routed_exclusion_classes in the SAME edit is what makes it green again, so
+  # this arm refuses an UNDECLARED class and never a new one.
+  #
+  # (B) EXCLUSION-MODULE-NAMED (pds-bl-w39-opaque-exclusion-row-unfalsifiable). A row whose
+  # module this corpus does not carry is OUT OF SCOPE by design - which is exactly why such
+  # a row is UNFALSIFIABLE: deleting it leaves the output byte-identical, so nothing forces
+  # a stale one out and nothing will ever notice if one is forgotten. Two halves, both here:
+  #   NAMED WITH A COUNT - every out-of-scope row is printed BY QUAD in this arm's sentence
+  #     (the freshness block prints only their COUNT), so a forgotten row is visible on
+  #     every run rather than silent.
+  #   REFUSED - a module string that is not a module ALIAS at all (the literal `"?"`) is
+  #     admissible ONLY on @routed_exclusion_opaque_class, the synthetic-fixture class whose
+  #     own prose says its members exist only in the --selftest corpus. THE ROWS THAT
+  #     MOTIVATED THIS ARE ALREADY GONE: the two wave-39 Sheets rows carried `"?"` under
+  #     `action_not_in_corpus`, a class wave 40 RETIRED once inline_alias_bindings/1 resolved
+  #     both modules. The arm is what stops the shape returning under a class that cannot
+  #     own it, on a table that could hold an unresolvable key with nothing to say about it.
+  #
+  # IT IS A PREDICATE OVER THE TABLE, NOT A LIST OF KNOWN-BAD ROWS: both halves move with
+  # the table, so an honest edit - a class declared, a fixture row added - cannot red them.
+  @routed_exclusion_opaque_class :selftest_fixture
+  @routed_exclusion_name_cap 24
+
+  # NO REGEX ENGINE, LIKE EVERY OTHER PREDICATE IN THIS FILE. An alias starts with an
+  # uppercase letter and carries only alias characters; `"?"` fails on the first clause.
+  defp module_alias?(<<c, _::binary>> = s) when c >= ?A and c <= ?Z do
+    s
+    |> String.to_charlist()
+    |> Enum.all?(&(&1 in ?A..?Z or &1 in ?a..?z or &1 in ?0..?9 or &1 in [?_, ?.]))
+  end
+
+  defp module_alias?(_), do: false
+
+  defp exclusion_table_checks(d) do
+    undeclared =
+      Enum.reject(@routed_excluded, fn {_m, _p, _mod, _a, c} ->
+        Map.has_key?(@routed_exclusion_classes, c)
+      end)
+
+    class_why =
+      if undeclared == [] do
+        "every one of the #{length(@routed_excluded)} committed disposition row(s) names a class DECLARED in the #{map_size(@routed_exclusion_classes)}-key @routed_exclusion_classes map - the class atom is CHECKED here, never defaulted (its one read site renders prose through Map.get/3, and a default prints a placeholder at exit 0)"
+      else
+        Enum.map_join(Enum.take(undeclared, 6), " · ", fn {m, p, mod, a, c} ->
+          "UNDECLARED EXCLUSION CLASS #{m} #{p} -> #{mod}.#{inspect(a)} [#{c}] - no prose in @routed_exclusion_classes decides anything about this row"
+        end) <>
+          " · #{length(undeclared)} row(s) in total; a class nobody declared disposes nothing, and the one read site would print a placeholder under its count"
+      end
+
+    out =
+      d
+      |> Map.get(:exclusion, %{})
+      |> Map.get(:rows, [])
+      |> Enum.filter(&(not &1.in_corpus?))
+
+    opaque =
+      Enum.reject(@routed_excluded, fn {_m, _p, mod, _a, c} ->
+        module_alias?(mod) or c == @routed_exclusion_opaque_class
+      end)
+
+    named =
+      cond do
+        out == [] -> "none"
+        length(out) > @routed_exclusion_name_cap ->
+          Enum.map_join(Enum.take(out, @routed_exclusion_name_cap), " · ", &exclusion_quad_label/1) <>
+            " · and #{length(out) - @routed_exclusion_name_cap} more (this corpus carries almost none of the real controllers)"
+
+        true -> Enum.map_join(out, " · ", &exclusion_quad_label/1)
+      end
+
+    module_why =
+      if opaque == [] do
+        "#{length(out)} row(s) name a module THIS corpus does not carry - judged neither way, and NAMED here rather than counted, so a stale row cannot sit unfalsifiable: #{named} · 0 row(s) carry a module string that is not an alias at all outside `#{@routed_exclusion_opaque_class}`"
+      else
+        Enum.map_join(Enum.take(opaque, 6), " · ", fn {m, p, mod, a, c} ->
+          "OPAQUE EXCLUSION MODULE #{m} #{p} -> #{inspect(mod)}.#{inspect(a)} [#{c}] - that string is not a module alias, so NO corpus can ever resolve it and no run can ever falsify this row; only `#{@routed_exclusion_opaque_class}` may carry one, because its members exist only in the --selftest corpus"
+        end)
+      end
+
+    [
+      {"EXCLUSION-CLASS-DECLARED", undeclared == [], class_why},
+      {"EXCLUSION-MODULE-NAMED", opaque == [], module_why}
+    ]
   end
 
   # THE LADDER'S :stale FRESHNESS ARM STOPS BEING UNGUARDED (task-ac55ff2388510d67).
@@ -9293,6 +9406,60 @@ defmodule PDS.Census do
       exit: 1,
       expect: ["FAIL  ROUTED-POPULATION-COMPLETE", "ORPHANED DISPOSITION", "/v1/selftest-never-routed"],
       proves: "a committed disposition that names NO live routed member reds too — one direction alone is half an arm, and a row judging nothing is the shape a stale table takes"
+    },
+    # THE CLASS ATOM STOPS BEING A DEFAULT (pds-bl-w41-exclusion-class-atom-ungated). The
+    # mutant is the EXACT edit the row was filed on: one committed disposition row
+    # re-labelled to a class nobody declared. Before EXCLUSION-CLASS-DECLARED it gave rc=0,
+    # every arm PASS and `(no prose - see @routed_exclusion_classes)` under its own count.
+    %{
+      name: "EXCLUSION-CLASS-UNDECLARED-REDS",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"\"/v1/selftest-fixture-close\", \"Barkpark.Filler.M1\", :noop, :selftest" <> "_fixture}",
+         "\"/v1/selftest-fixture-close\", \"Barkpark.Filler.M1\", :noop, :liveview_write_population}"},
+      exit: 1,
+      expect: [
+        "FAIL  EXCLUSION-CLASS-DECLARED",
+        "UNDECLARED EXCLUSION CLASS",
+        "liveview_write_population"
+      ],
+      proves: "a committed exclusion row naming a class @routed_exclusion_classes does not declare REDS BY NAME instead of printing a placeholder at exit 0 - and the affordance survives, because declaring the class in the same edit is what makes it green"
+    },
+    # THE UNDECLARED CLASS IS REFUSED, A NEW ONE IS NOT (the third criterion of that row,
+    # as a case rather than as prose). The SAME re-label, plus the one-line declaration a
+    # human owes it, exits 0 with the arm PASSING - so the arm cannot be read as a ban on
+    # new classes, which is the failure mode a hand-typed class allowlist would have had.
+    %{
+      name: "EXCLUSION-CLASS-DECLARED-IS-GREEN",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"    selftest_fixture:\n      \"2026-08-02 (PDS wave 38): a synthetic" <> " member",
+         "    liveview_write_population:\n      \"SELFTEST-ONLY DECLARATION - the mutant's new class, declared.\",\n    selftest_fixture:\n      \"2026-08-02 (PDS wave 38): a synthetic member"},
+      exit: 0,
+      expect: ["CENSUS OK", "PASS  EXCLUSION-CLASS-DECLARED"],
+      proves: "declaring a class in @routed_exclusion_classes keeps the census green - the arm refuses an UNDECLARED class, never a new one"
+    },
+    # THE OPAQUE ROW STOPS BEING UNFALSIFIABLE (pds-bl-w39-opaque-exclusion-row-unfalsifiable).
+    # `"?"` is not a module alias, so no corpus can resolve it and no run can refute the row.
+    # The mutant moves the one committed opaque row OFF the synthetic-fixture class that may
+    # carry it - which is exactly the shape the two retired wave-39 Sheets rows had under
+    # `action_not_in_corpus`, and which before this arm changed no printed number at all.
+    %{
+      name: "EXCLUSION-OPAQUE-MODULE-REDS",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"\"/plugins/var-live\", \"?\", :index, :selftest" <> "_fixture}",
+         "\"/plugins/var-live\", \"?\", :index, :liveview_handle_event}"},
+      exit: 1,
+      expect: [
+        "FAIL  EXCLUSION-MODULE-NAMED",
+        "OPAQUE EXCLUSION MODULE",
+        "/plugins/var-live"
+      ],
+      proves: "a committed disposition row whose module string is not a module alias reds BY NAME on any class but the synthetic-fixture one - a table that can hold an unresolvable key can hold a claim nothing will ever falsify"
     },
     %{
       name: "LENS-CAN-MISS-ARMED",
