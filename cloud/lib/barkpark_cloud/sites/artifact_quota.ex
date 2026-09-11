@@ -68,7 +68,8 @@ defmodule BarkparkCloud.Sites.ArtifactQuota do
   `:ok`, or `{:error, {:artifact_quota_exceeded, refusal}}`. Boundary: exactly AT
   the limit is allowed; one byte past it is refused.
   """
-  @spec check(binary(), non_neg_integer()) :: :ok | {:error, {:artifact_quota_exceeded, refusal()}}
+  @spec check(binary(), non_neg_integer()) ::
+          :ok | {:error, {:artifact_quota_exceeded, refusal()}}
   def check(team_id, requested_bytes)
       when is_binary(team_id) and is_integer(requested_bytes) and requested_bytes >= 0 do
     case limit_bytes() do
