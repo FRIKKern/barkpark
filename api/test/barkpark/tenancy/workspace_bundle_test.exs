@@ -1996,6 +1996,66 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── DDL lock contention (pds-bl-import-ddl-deadlock-flake) ───────────────────
+
+  describe "the import's DDL passes refuse fast and by name under lock contention" do
+    @tag timeout: 30_000
+    test "a foreign session holding AccessShareLock on a member table turns the import's " <>
+           "ALTER TABLE into a named ImportLockError instead of an unbounded wait" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+
+      # The stand-in for the background GenServer that merely READS a member
+      # table on its own pooled checkout (Barkpark.Pulse.Metrics was the one
+      # caught doing it in the wild): a SECOND, non-sandbox connection holding
+      # AccessShareLock, which conflicts with the AccessExclusiveLock every
+      # ALTER TABLE in the import's DDL passes needs.
+      hold_access_share_lock!("documents")
+
+      {elapsed_us, error} =
+        :timer.tc(fn ->
+          assert_raise WorkspaceBundle.ImportLockError, fn ->
+            WorkspaceBundle.import_bundle(bundle)
+          end
+        end)
+
+      assert error.phase == :drop_member_fks
+      assert error.code == "ddl_lock_not_available"
+      assert error.message =~ "another session holds a conflicting lock"
+      assert error.message =~ "Nothing was committed"
+
+      # THE POINT, and the half a raw Postgrex.Error would not give: BOUNDED.
+      # The import opts out of statement_timeout entirely, so without the
+      # lock_timeout this call simply never returns — and the observed flake
+      # (seed 162213) was that same wait closing into a 40P01 deadlock.
+      assert elapsed_us < 10_000_000,
+             "the import waited #{div(elapsed_us, 1000)}ms for a lock it should have " <>
+               "refused inside its configured lock_timeout"
+
+      # The refusal took the whole transaction with it — no partial import.
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) == 1
+    end
+  end
+
+  # A real second backend, OUTSIDE the ExUnit sandbox, parked in an open
+  # transaction holding AccessShareLock on `table` for the rest of the test.
+  # Supervised, so the lock is released when the test ends however it ends.
+  defp hold_access_share_lock!(table) do
+    conn_opts =
+      Repo.config()
+      |> Keyword.take([:hostname, :port, :username, :password, :database, :socket_dir, :ssl])
+      |> Keyword.put(:pool_size, 1)
+
+    conn = start_supervised!({Postgrex, conn_opts})
+
+    {:ok, _} = Postgrex.query(conn, "BEGIN", [])
+
+    {:ok, _} =
+      Postgrex.query(conn, "LOCK TABLE public.#{quote_ident(table)} IN ACCESS SHARE MODE", [])
+
+    conn
+  end
+
   # ── seed + helpers ────────────────────────────────────────────────────────────
 
   # Workspace A: full spread across every extraction path. Workspace B: the leak

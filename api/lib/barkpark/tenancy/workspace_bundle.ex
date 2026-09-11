@@ -19,6 +19,33 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ExportScopeError do
   @type t :: %__MODULE__{code: String.t(), message: String.t()}
 end
 
+defmodule Barkpark.Tenancy.WorkspaceBundle.ImportLockError do
+  @moduledoc """
+  The import transaction could NOT take the table locks its FK/trigger DDL
+  needs, and said so instead of waiting (or deadlocking) in silence.
+
+  The import brackets its `ALTER TABLE` passes with a bounded `SET LOCAL
+  lock_timeout` (see `WorkspaceBundle`'s `with_ddl_lock_timeout/2`). When some
+  other session holds a conflicting lock on a member table for longer than
+  that, Postgres refuses OUR statement and this exception names the phase and
+  the SQLSTATE rather than surfacing a raw `Postgrex.Error` — an import that
+  hit contention and an import that hit a corrupt bundle are different
+  operational stories and must not read the same.
+
+  `code` is a stable, machine-branchable reason:
+
+    * `"ddl_lock_not_available"` — 55P03, our statement timed out on the lock
+    * `"ddl_deadlock_detected"`  — 40P01, Postgres picked us as the victim
+
+  Both are RETRYABLE: nothing was committed (the whole import is one
+  transaction), so the caller may simply run the import again when the
+  competing session has let go.
+  """
+  defexception [:code, :phase, :message]
+
+  @type t :: %__MODULE__{code: String.t(), phase: atom(), message: String.t()}
+end
+
 defmodule Barkpark.Tenancy.WorkspaceBundle do
   @moduledoc """
   Export ANY workspace into one complete, self-describing bp-export-v1 bundle
@@ -221,6 +248,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     BundleIoError,
     Catalog,
     ExportScopeError,
+    ImportLockError,
     InvalidBundleError
   }
 
@@ -608,8 +636,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # ORIGINAL exception propagates untouched (no after-clause exists to
         # replace it with a 25P02 — the blindfold class of
         # task-63a199c0a0ce2a06 cannot recur).
-        member_fks = drop_member_fks!(live)
-        alter_user_triggers!(live, "DISABLE")
+        # BRACKETED BY A BOUNDED lock_timeout — see with_ddl_lock_timeout/2.
+        # These two passes are the only statements in the import that need
+        # AccessExclusiveLock, and they are where a background session holding
+        # AccessShareLock on a member table used to park this transaction
+        # forever (statement_timeout is 0 here) or lose a 40P01 coin-flip.
+        member_fks =
+          with_ddl_lock_timeout(:drop_member_fks, fn ->
+            fks = drop_member_fks!(live)
+            alter_user_triggers!(live, "DISABLE")
+            fks
+          end)
 
         stats =
           manifest["tables"]
@@ -627,8 +664,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             %{tables: tables, total_rows: total, manifest: manifest}
           end)
 
-        alter_user_triggers!(live, "ENABLE")
-        restore_member_fks!(member_fks)
+        with_ddl_lock_timeout(:restore_member_fks, fn ->
+          alter_user_triggers!(live, "ENABLE")
+          restore_member_fks!(member_fks)
+        end)
 
         # The manifest's declared root slug is a CLAIM; the workspaces COPY
         # member carries the actual slug. Re-read the seats that were vacant at
@@ -660,6 +699,89 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       end,
       timeout: :infinity
     )
+  end
+
+  # ── The DDL lock window (pds-bl-import-ddl-deadlock-flake) ──────────────────
+  #
+  # The import runs under `SET LOCAL statement_timeout = 0` because the COPY
+  # loop may legitimately take hours. That opt-out applies to LOCK WAITS too,
+  # and the FK/trigger passes below want AccessExclusiveLock on every member
+  # table. So any other session merely READING a member table (an ordinary
+  # background GenServer on its own pooled connection — `Barkpark.Pulse.Metrics`
+  # was the one caught doing it) parks this transaction indefinitely, and when
+  # that session then queues behind a lock WE already hold, Postgres closes the
+  # cycle and shoots one of us with 40P01 deadlock_detected.
+  #
+  # `lock_timeout` is the separate knob for exactly this: it bounds how long a
+  # statement waits FOR A LOCK without bounding how long it may RUN. Set below
+  # the server's `deadlock_timeout` (1 s by default), our ALTER gives up with
+  # 55P03 before the deadlock detector can form a cycle at all — the deadlock
+  # becomes an honest, named, retryable refusal. It is a race, not a proof: a
+  # box configured with a sub-750 ms `deadlock_timeout` can still hand us
+  # 40P01, which is why BOTH SQLSTATEs translate to the same named error.
+  #
+  # SET LOCAL, and reset to unbounded the moment the pass returns: the COPY
+  # loop between the two passes writes into tables this transaction already
+  # holds exclusively, so a lock bound there could only ever fire spuriously.
+  @ddl_lock_timeout_default "750ms"
+  @lock_timeout_shape ~r/^\d+(us|ms|s|min|h|d)?$/
+
+  defp with_ddl_lock_timeout(phase, fun) do
+    set_local_lock_timeout!(ddl_lock_timeout())
+    result = run_ddl_pass(phase, fun)
+    # Only on the success path: a refusal has already aborted the transaction,
+    # where any further statement — this one included — is a 25P02.
+    set_local_lock_timeout!("0")
+    result
+  end
+
+  defp run_ddl_pass(phase, fun) do
+    fun.()
+  rescue
+    e in Postgrex.Error ->
+      case lock_refusal_code(e) do
+        nil ->
+          reraise e, __STACKTRACE__
+
+        code ->
+          reraise ImportLockError,
+                  [
+                    code: code,
+                    phase: phase,
+                    message:
+                      "workspace bundle import could not lock its member tables during " <>
+                        "#{phase} within #{ddl_lock_timeout()} (#{code}): another session " <>
+                        "holds a conflicting lock. Nothing was committed — retry the " <>
+                        "import once that session has finished."
+                  ],
+                  __STACKTRACE__
+      end
+  end
+
+  defp lock_refusal_code(%Postgrex.Error{postgres: %{code: :lock_not_available}}),
+    do: "ddl_lock_not_available"
+
+  defp lock_refusal_code(%Postgrex.Error{postgres: %{code: :deadlock_detected}}),
+    do: "ddl_deadlock_detected"
+
+  defp lock_refusal_code(_error), do: nil
+
+  defp ddl_lock_timeout do
+    Application.get_env(:barkpark, :bundle_import_ddl_lock_timeout, @ddl_lock_timeout_default)
+  end
+
+  # Gated by @lock_timeout_shape, so what reaches SQL is digits plus an optional
+  # unit keyword and nothing else. `SET` takes no bind parameters.
+  # sobelow_skip ["SQL.Query"]
+  defp set_local_lock_timeout!(value) when is_binary(value) do
+    unless Regex.match?(@lock_timeout_shape, value) do
+      raise ArgumentError,
+            "invalid :bundle_import_ddl_lock_timeout #{inspect(value)}: expected a bare " <>
+              "integer (milliseconds) or an integer with a us|ms|s|min|h|d unit, e.g. \"750ms\""
+    end
+
+    Repo.query!("SET LOCAL lock_timeout = '#{value}'", [])
+    :ok
   end
 
   # ── Owner-privilege import mechanics (task-7889645a51769a36) ─────────────────
