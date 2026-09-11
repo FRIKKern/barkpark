@@ -62,6 +62,13 @@ defmodule Barkpark.StudioChat.Recorder do
   @default_max_runtime_text_bytes 1_048_576
   @runtime_text_truncation_marker "\n\n[… turn output truncated at the persist byte cap …]"
 
+  # The sibling cap for a TOOL RESULT's raw text: one `task_ready` dump was
+  # 112,838 characters, and every tool row would carry its result verbatim into
+  # jsonb without it. UNCHANGED by task-5a49dc55626ea80d — the chip envelope
+  # (`StudioChat.attach_tool_result/5`) exists precisely so replay parity does
+  # NOT require raising this number.
+  @result_text_cap 4_000
+
   # ── public API ─────────────────────────────────────────────────────────────
 
   @doc """
@@ -768,8 +775,12 @@ defmodule Barkpark.StudioChat.Recorder do
   # Attach it to the persisted tool row so replay shows the terminal's ⎿ line;
   # the frame also rebroadcasts so live tabs update their in-memory row.
   def handle_info({:claude_chat_event, %{"type" => "user"} = ev} = msg, state) do
-    for {tool_use_id, output, error?} <- user_tool_results(ev) do
-      StudioChat.attach_tool_result(state.session_id, tool_use_id, output, error?)
+    for {tool_use_id, output, error?, full_output} <- user_tool_results(ev) do
+      # `output` is what the ROW stores (capped); `full_output` is what the LIVE
+      # tab saw. The store seam reduces the full text to the D64 chip envelope
+      # for an mcp-tagged row, so a result past the cap replays as a chip
+      # instead of a generic row (task-5a49dc55626ea80d).
+      StudioChat.attach_tool_result(state.session_id, tool_use_id, output, error?, full_output)
     end
 
     broadcast(state, msg)
@@ -2358,7 +2369,7 @@ defmodule Barkpark.StudioChat.Recorder do
     Application.get_env(:barkpark, :studio_chat_idle_reap_ms, @idle_after_ms)
   end
 
-  # {tool_use_id, output, is_error?} triples off a wire user-frame; [] for
+  # {tool_use_id, output, is_error?, full_output} quads off a wire user-frame; [] for
   # anything else (our own echoed sends through test fakes never match). Output
   # capped so a huge tool result can't bloat the jsonb row. `is_error` is the
   # ONLY wire fact that turns a settled row's gutter ✗, so an ERROR result with
@@ -2372,14 +2383,18 @@ defmodule Barkpark.StudioChat.Recorder do
       # `result_text/1` answers nil for a contentless block — normalize to ""
       # so an ERROR result with no text still reaches the persist seam (whose
       # guard is `is_binary(output)`) instead of raising a FunctionClauseError.
-      {b["tool_use_id"], result_text(b["content"]) || "", b["is_error"] == true}
+      full = result_text(b["content"]) || ""
+      {b["tool_use_id"], String.slice(full, 0, @result_text_cap), b["is_error"] == true, full}
     end)
-    |> Enum.reject(fn {_id, out, error?} -> out == "" and not error? end)
+    |> Enum.reject(fn {_id, out, error?, _full} -> out == "" and not error? end)
   end
 
   defp user_tool_results(_), do: []
 
-  defp result_text(content) when is_binary(content), do: String.slice(content, 0, 4_000)
+  # The FULL result text — the cap is applied by the caller, which keeps the
+  # uncapped copy to reduce into the D64 chip envelope (nothing uncapped is ever
+  # persisted; see `StudioChat.attach_tool_result/5`).
+  defp result_text(content) when is_binary(content), do: content
 
   defp result_text(content) when is_list(content) do
     content
@@ -2388,7 +2403,6 @@ defmodule Barkpark.StudioChat.Recorder do
       _ -> ""
     end)
     |> Enum.join("\n")
-    |> String.slice(0, 4_000)
   end
 
   defp result_text(_), do: nil
