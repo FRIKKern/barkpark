@@ -9492,6 +9492,43 @@
     return /(^|\.)barkpark\.cloud$/.test(h) ? null : h;
   }
 
+  // cch-w57-bl — THE FLEET CHILD IS THE FOURTH RESIDUE, and the only one that
+  // is a BILLED MACHINE the operator never named in the confirm. Of the seven
+  // FK columns referencing `barkparks`, exactly one is `on_delete: :nilify_all`
+  // — barkparks.fleet_parent_id (20260723000000_add_fleet_group_to_barkparks.exs
+  // lines 15-17), and it is DELIBERATE: "deleting a main orphans (does not
+  // cascade-delete) its supports; they become ungrouped rather than silently
+  // vanishing". So DELETE /v1/barkparks/:id on a MAIN returns 200 and every
+  // support box SURVIVES with fleet_parent_id = nil — still running, still
+  // billed, no longer in a fleet. The sheet named the DNS, archive and billing
+  // residues and omitted the one that is an actual server.
+  //
+  // DERIVED, NEVER BLANKET, and off data the client ALREADY holds at the click:
+  // fleet_role/fleet_parent_id ride EVERY GET /v1/barkparks row (pinned over
+  // HTTP by terminal_act_residue_manifest_test.exs ROW 2 LEG 1), and supportsOf/2
+  // is the same filter the Overview's fleet card renders off — no new payload
+  // key, no second source of truth. Three arms, and only the first speaks: a
+  // main WITH supports names them; a main WITHOUT gets nothing; a SUPPORT box
+  // itself gets nothing (nothing is parented to a support, so supportsOf
+  // returns []). Pure and hooked, so all three are asserted without a browser.
+  function fleetChildResidueLines(supports) {
+    var kids = supports || [];
+    if (!kids.length) return [];
+    var names = kids.map(function (s) {
+      var n = String((s && (s.name || s.slug)) || "").trim();
+      var h = String((s && s.host) || "").trim();
+      if (n && h) return n + " (" + h + ")";
+      return n || h || "an unnamed support box";
+    });
+    var one = kids.length === 1;
+    return [
+      (one ? "Support box " : "Support boxes ") + names.join(", ") +
+      (one
+        ? " is grouped under this main. It stays running and keeps billing — tearing this main down only ungroups it, it is not torn down with it. Decommission it separately if you are done with it."
+        : " are grouped under this main. They stay running and keep billing — tearing this main down only ungroups them, they are not torn down with it. Decommission them separately if you are done with them."),
+    ];
+  }
+
   // The destroy-tier typed-confirm for Decommission (charter decision 21). Reuses
   // the EXACT deprovision request path the old Remove drove; the typed name echo
   // is the proof-of-attention gate (confirmModal DESTROY tier).
@@ -9540,6 +9577,12 @@
     // from this very box. An unread or failed read keeps the blanket sentence
     // verbatim: see archiveResidueLines.
     archiveResidueLines(archiveStoreSnapshot(), bp).forEach(function (l) { lines.push(l); });
+    // cch-w57-bl: the support boxes this main's delete ORPHANS, named before
+    // the button. fleetCache is the list loadInstance already awaited before it
+    // painted this page (ensureFleet().then(...)), so this is the same data the
+    // fleet card above the button is rendering; a null cache yields [] and the
+    // sentence simply does not fire.
+    fleetChildResidueLines(supportsOf(fleetCache, bp.id)).forEach(function (l) { lines.push(l); });
     lines.push("Billing does not stop here. The subscription belongs to the team; cancel it on Billing if this was " +
       "your last instance.");
     lines.push(live
@@ -28506,6 +28549,7 @@
       archiveStoreSnapshot: archiveStoreSnapshot,
       archiveVisibilityNote: archiveVisibilityNote,
       archiveResidueLines: archiveResidueLines,
+      fleetChildResidueLines: fleetChildResidueLines,
       // cch-w36-bl / cch-w77-bl (console-3-w26) — the copy seam this slice
       // fixed, exported so each arm is pinned DIRECTLY rather than through a
       // screen that happens to call it. metricsFailureCopy had no export at all,
