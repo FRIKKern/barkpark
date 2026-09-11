@@ -1802,10 +1802,11 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       dir = run_dir()
 
       # dr-w15: the positive pin for `exit_label(-1)`. Its bytes are BYTE-FROZEN
-      # — cloud/lib/barkpark_cloud/deploy_ledger.ex:919 starts_with-matches them
-      # to classify PROCESS_DIED — and until now every api-side assertion on this
-      # clause was a `refute` under a teardown. This is the state that produces
-      # it: a FLIP FAILURE (the engine's exit 24) logs no distinct marker, so
+      # — cloud/lib/barkpark_cloud/deploy_ledger.ex's `classify/2`
+      # starts_with-matches them to classify PROCESS_DIED — and until now every
+      # api-side assertion on this clause was a `refute` under a teardown. This
+      # is the state that produces it: a FLIP FAILURE (the engine's exit 24)
+      # logs no distinct marker, so
       # `rollback_outcome/1` finds neither a typed code nor a success line and
       # falls through to a fail-closed -1, in the deploy/rollback voice.
       engine =

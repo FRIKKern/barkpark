@@ -2666,7 +2666,8 @@ defmodule Barkpark.Sites.DeployRunner do
   #    21   :3226/:3229/:3232 (+ do_rollback:305/307 return 21)
   #    22   :3224 (+ do_rollback:301 return 22)
   #    23   :3214
-  #    24   do_rollback:317/318 return 24; deploy/site-deploy-node.sh:3115/3123/3127
+  #    24   do_rollback:317/318 return 24; deploy/site-deploy-node.sh's three
+  #         `rb_mark "rollback failed (exit 24)"; exit 24` lines
   #    -1   THIS module: :693 (port died with no exit_status) and
   #         `deploy_outcome/2`'s stages==[] / no-terminal arms
   #    -2   THIS module: :738 (the unit deadline watchdog)

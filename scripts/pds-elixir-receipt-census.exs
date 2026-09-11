@@ -8946,7 +8946,7 @@ defmodule PDS.Census do
       p("        this 0, is what says the predicate is live:")
       p("          git show 501fb9670^:api/lib/barkpark_web/controllers/scim_users_controller.ex")
       p("          # then census that one file: literal_arg_sites/2 returns")
-      p("          #   scim_users_controller.ex:78  render_user(conn, user, false)")
+      p("          #   scim_users_controller.ex:<line>  render_user(conn, user, false)")
     end
 
     p("  ALSO INVISIBLE: `mix ecto.migrations` reporting `up` (PDS-D311) — it reads a")

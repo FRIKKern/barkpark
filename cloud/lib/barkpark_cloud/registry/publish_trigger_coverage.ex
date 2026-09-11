@@ -83,7 +83,7 @@ defmodule BarkparkCloud.Registry.PublishTriggerCoverage do
   alias BarkparkCloud.Repo
 
   # COPIED, not imported: `@content_bound_kinds` is a private attribute of
-  # `BarkparkCloud.Registry` (registry.ex:252, `~w(static node)`), and that module
+  # `BarkparkCloud.Registry` (registry.ex, `@content_bound_kinds ~w(static node)`), and that module
   # is under an open change this file must not touch. `agrees_with_registry/0` and
   # the "pins the copy" test hold the two in agreement by comparing THIS list
   # against what `Registry.publish_trigger/1` actually rules `:not_applicable`, so
@@ -264,7 +264,7 @@ defmodule BarkparkCloud.Registry.PublishTriggerCoverage do
   end
 
   # The hourly template clock's population, restricted to ONE site. COPIED from
-  # `Registry.list_deployed_content_sites/0` (registry.ex:7168) — the query
+  # `Registry.list_deployed_content_sites/0` (registry.ex) — the query
   # `Sites.TemplateFreshnessWorker` sweeps — because that is a fleet-wide
   # `Repo.all` and this must be a pure per-row predicate. Kept total (all three
   # conditions, not just the deployment pointer) so the copy can be pinned

@@ -50,7 +50,7 @@ defmodule BarkparkCloud.RawFailureChannelOracleTest do
 
     * `lib/barkpark_cloud/sites/deploy.ex:141` (`stage_caption/2`'s non-failed
       arm, `strip_ansi |> scrub`)
-    * `lib/barkpark_cloud/web/router.ex:11752` (`class_then_capture/1`)
+    * `lib/barkpark_cloud/web/router.ex` (`class_then_capture/1`)
     * `lib/barkpark_cloud/notifications/event_email.ex:345`
       (`cause_then_capture/1`)
     * `lib/barkpark_cloud/failure_copy.ex:548` (`raw/1`)

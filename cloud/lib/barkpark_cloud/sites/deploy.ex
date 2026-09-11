@@ -144,7 +144,7 @@ defmodule BarkparkCloud.Sites.Deploy do
   # INSIDE the shape the scrubber matches on and the secret walks out in
   # cleartext (with raw 0x1B bytes attached, which a console then interprets).
   # Strip first, then redact — the order is the fix (dr-w8-s2).
-  # dr-w23-bl: that composition IS `FailureCopy.raw/1` (`failure_copy.ex:548`),
+  # dr-w23-bl: that composition IS `FailureCopy.raw/1` (`failure_copy.ex`, `raw/1`),
   # so the boundary names the entry point rather than re-deriving the order.
   def stage_caption(_status, detail), do: FailureCopy.raw(detail)
 

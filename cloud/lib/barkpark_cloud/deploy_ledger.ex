@@ -2786,7 +2786,7 @@ defmodule BarkparkCloud.DeployLedger do
   Whether `site_id` has content ANSWERING ON THE WEB — at least one live mark.
 
   THIS IS `delivery/3`'s OWN `live_marks` PREDICATE, ASKED AS AN EXISTENCE
-  QUESTION. `site_delivery/3` (below, `deploy_ledger.ex:2289`) builds a site's
+  QUESTION. `site_delivery/3` (below, in this module) builds a site's
   ordered list of "content answered on the web at" instants as
 
       rows
