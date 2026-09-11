@@ -1,22 +1,39 @@
 defmodule BarkparkWeb.BulldocsOpsDoorEditContractTest do
   @moduledoc """
-  THE CONTRACT PIN for `POST /v1/plugins/bulldocs/papers/:slug/ops`.
+  THE CONTRACT PIN for `POST /v1/plugins/bulldocs/papers/:slug/ops`, and the
+  place `docs/contracts/plugin-http-api.md` sends a reader for the reasoning
+  it has no byte budget to carry.
 
-  The ops door is an EDIT door. It deliberately does NOT mount
-  `Barkpark.Content.AuthoringWall.enforce/5`: its whole contract is the two
-  non-regression ratchets in `Barkpark.Content.Papers.BlockOps` —
-  `ratchet_hollow/2` and `reject_new_field_loss/2`. The five whole-document
-  floors (label spine, tag registry, dedup scan, epic quality, structure) are
-  PUBLISH-time properties, enforced by `POST /v1/plugins/bulldocs/papers` and
-  the ingest legs, and re-applied the next time the slug goes through one.
+  THE RULING (api lane, task-14107740b20c92fa). The ops door is an EDIT door.
+  It deliberately does NOT mount `Barkpark.Content.AuthoringWall.enforce/5`.
+  Its whole contract is the two non-regression ratchets in
+  `Barkpark.Content.Papers.BlockOps` — `ratchet_hollow/2` (a paper that HAS
+  content may not be edited back down to the bare skeleton) and
+  `reject_new_field_loss/2` (a clean note/card block may not be edited into
+  the shape that renders no prose). The publish door
+  (`POST /v1/plugins/bulldocs/papers`) and the ingest legs enforce the
+  whole-document floor: label spine, tag registry, dedup scan, epic quality
+  caps, structure.
 
-  Ruled by the api lane on task-14107740b20c92fa; written up in
-  `docs/contracts/plugin-http-api.md` (Bulldocs ops section) and pointed at
-  from `docs/api-v1.md` §8a.
+  WHY THE WALL DOES NOT MOUNT HERE.
 
-  THESE TESTS RED IF SOMEONE MOUNTS THE WALL ON /ops. That is intentional:
-  an intended future change updates this file and the contract doc TOGETHER,
-  so the ruling can never drift away from the code silently.
+    1. The five gates are whole-document FLOORS. A per-op mount would either
+       refuse every edit to a paper already past a floor — bricking exactly
+       the papers most in need of editing — or need a ratcheted variant of
+       every gate: five new mechanisms for one accidental asymmetry.
+    2. A dedup scan run per keystroke-level op is a cost with no
+       author-facing meaning.
+    3. The edit door's design is non-regression, and the floor is re-applied
+       the next time the slug goes through the publish/ingest door.
+
+  THE HONEST CAVEAT. A paper that is only ever edited via `/ops` after its
+  last publish can sit past the floor indefinitely. The floor is a
+  PUBLISH-TIME property, not an invariant of the stored row. That is the
+  cost of the ruling, stated rather than hidden.
+
+  THESE TESTS RED IF SOMEONE MOUNTS THE WALL ON /ops. That is intentional: an
+  intended future change updates this file and the contract doc TOGETHER, so
+  the ruling can never drift away from the code silently.
 
   THE CONTROL is the second half of the first test: the SAME content the ops
   door accepted is refused 422 `invalid_epic_paper_quality` by the publish
