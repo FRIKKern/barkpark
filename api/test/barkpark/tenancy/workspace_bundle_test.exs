@@ -20,9 +20,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
   describe "Catalog live enumerations (charter D4)" do
-    test "E1 = the 42 workspace_id tables including correction and release authority" do
+    test "E1 = the 43 workspace_id tables including correction and release authority" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 42
+      assert length(e1) == 43
+      # github_sync_conflicts joined in migration 20260911120000
+      # (github-bridge-w9-health-workspace-isolation): the GitHub conflict
+      # quarantine gained a real workspace_id, so it exports by
+      # `WHERE workspace_id = $ws` and tears down on the FK cascade instead of a
+      # (doc_id, dataset) semi-join keyed on a project-ambiguous dataset slug.
+      assert "github_sync_conflicts" in e1
       assert "roles" in e1
       # The paper view/edit trail (edit-on-the-link slice 4) carries a
       # workspace_id with no FK, exactly like audit_events.
@@ -79,10 +85,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
                   webhook_deliveries)
     end
 
-    test "E3 = the 4 dataset-column tables; the scope allowlist is EMPTY; data_keys, search_surface_config and the 5 sync_* tables all rode into E1" do
+    test "E3 = the 3 dataset-column tables; the scope allowlist is EMPTY; data_keys, search_surface_config, the 5 sync_* tables and github_sync_conflicts all rode into E1" do
       e3 = Catalog.live_e3(Repo)
-      assert length(e3) == 4
+      assert length(e3) == 3
       assert "authoring_exemptions" in e3
+      # github_sync_conflicts left E3 for E1 the same way the sync_* family did
+      # — it carries workspace_id now (20260911120000).
+      refute "github_sync_conflicts" in e3
       # The scope-column allowlist is now EMPTY — both former members gained a
       # real workspace_id column and moved to E1.
       assert Catalog.allowlist() == %{}
@@ -3074,13 +3083,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
     # E3 doc-keyed — every table in the class, on the same three anchors:
     # A-exclusive, co-owned, B-exclusive.
-    for {doc_id, dataset} <- [
-          {a_only.doc_id, excl_a},
-          {a_co.doc_id, shared},
-          {b_only.doc_id, excl_b}
+    for {doc_id, dataset, ws} <- [
+          {a_only.doc_id, excl_a, ws_a},
+          {a_co.doc_id, shared, ws_a},
+          {b_only.doc_id, excl_b, ws_b}
         ] do
       seed_exemption!(doc_id, dataset, "post")
-      insert_sync_conflict!(doc_id, dataset, tag)
+      insert_sync_conflict!(doc_id, dataset, tag, ws.id)
     end
 
     # E3 dataset-keyed, ATTRIBUTED (`shares` carries workspace_slug): A under its
@@ -3100,12 +3109,21 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     %{ws_a: ws_a, ws_b: ws_b, proj_a: proj_a, proj_b: proj_b, tag: tag}
   end
 
-  defp insert_sync_conflict!(doc_id, dataset, tag) do
+  # E1 since 20260911120000 — the row keys on its OWN workspace_id, so the
+  # fixture must stamp one or the table exports empty for every workspace and the
+  # lockstep assertion below measures nothing.
+  defp insert_sync_conflict!(doc_id, dataset, tag, workspace_id) do
     Repo.query!(
       "INSERT INTO github_sync_conflicts " <>
-        "(repo, issue, doc_id, dataset, kind, detail, inserted_at, updated_at) " <>
-        "VALUES ($1, $2, $3, $4, 'out_of_band_edit', '{}'::jsonb, now(), now())",
-      ["acme/lockstep-#{tag}", System.unique_integer([:positive]), doc_id, dataset]
+        "(repo, issue, doc_id, dataset, workspace_id, kind, detail, inserted_at, updated_at) " <>
+        "VALUES ($1, $2, $3, $4, $5, 'out_of_band_edit', '{}'::jsonb, now(), now())",
+      [
+        "acme/lockstep-#{tag}",
+        System.unique_integer([:positive]),
+        doc_id,
+        dataset,
+        Ecto.UUID.dump!(workspace_id)
+      ]
     )
   end
 end
