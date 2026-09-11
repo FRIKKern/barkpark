@@ -608,6 +608,15 @@ NOW_OVERRIDE=""
 # that excuses rows by hand, which is the tolerance this fix exists to refuse.
 # Live runs always take the watermark from the real clock, at the real instant.
 RUNLIST_AT_OVERRIDE=""
+# THE SERVING ARM'S OWN CLOCK, PINNED — FIXTURES ONLY, AND REFUSED LIVE.
+# Sibling of --runlist-at, for the OTHER gap in this script. `--now` is the
+# instant the window was cut; the serving arm runs after every API read this
+# script performs, so on a live run the two are minutes apart. A harness has to
+# be able to set them INDEPENDENTLY or it cannot express the case at all: with
+# `--now` alone the gap is zero by construction and the defect is unreachable.
+# Like --runlist-at this is a TEST handle and nothing else — a live run takes
+# the serving arm's clock from the real clock at the real instant.
+SERVING_AT_OVERRIDE=""
 
 WORK="$(mktemp -d 2>/dev/null || mktemp -d -t crown-reconcile)"
 cleanup() { rm -rf "$WORK"; }
@@ -631,6 +640,7 @@ while [ $# -gt 0 ]; do
     --commits-fixture) COMMITS_FIXTURE="${2:-}"; shift 2 ;;
     --now) NOW_OVERRIDE="${2:-}"; shift 2 ;;
     --runlist-at) RUNLIST_AT_OVERRIDE="${2:-}"; shift 2 ;;
+    --serving-at) SERVING_AT_OVERRIDE="${2:-}"; shift 2 ;;
     --state-file) STATE_FILE="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "unknown flag: $1"; exit 3 ;;
@@ -648,6 +658,11 @@ FIXTURE_MODE=0
 
 if [ -n "$RUNLIST_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]; then
   warn "CONFIG: --runlist-at is a FIXTURE-ONLY handle for widening the gap between the run-list sample and the crown sample. A live run takes its watermark from the real clock at the real instant, and must not be handed one; pinning it by hand would be a tolerance, not a consistent read."
+  exit 3
+fi
+
+if [ -n "$SERVING_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]; then
+  warn "CONFIG: --serving-at is a FIXTURE-ONLY handle for widening the gap between the window cut and the serving read. A live run reads the real clock at the serving arm, and must not be handed one; pinning it by hand would let an operator dial a serving_since into or out of the future, which is the exact tolerance this arm exists to refuse."
   exit 3
 fi
 
@@ -1686,6 +1701,32 @@ else
 fi
 
 # ── SERVING: what the box says it is running, versus the crown ───────────────
+#
+# THE CLOCK THIS ARM SUBTRACTS WITH IS SAMPLED HERE, NOT AT THE TOP OF THE FILE.
+# `NOW_EPOCH` was read before the run-list paging, the per-run jobs reads and the
+# crown read; on run 34573248644 those took 550s. The arm below asks "is the box's
+# serving_since ahead of NOW?" — a question whose answer is meaningless against a
+# clock that is minutes stale. That run reported
+#   SERVING-CLOCK-SKEW: ... serving_since 2026-09-11T07:20:55Z ... 488s in the FUTURE
+# and 07:20:55 minus the 07:12:47 banner instant is 488s TO THE SECOND: the number
+# WAS the script's own runtime. The control plane's clock was correct (a probe two
+# hours later had its `checked_at` agreeing with an independent clock to
+# sub-second, and health.ex's vm_started_at is `utc_now - uptime`, which can never
+# exceed the plane's own now). With a live clock the arm would have computed
+# age=+62s, taken the SERVING GRACE arm, and exited 0; instead the SKEW arm won,
+# SERVING_RED went to 1 and the gate paged at a deploy one minute old.
+#
+# Same shape and same remedy as RUNLIST_EPOCH above. A pinned `--now` run keeps
+# the old behaviour exactly — the gap is zero by construction there — so every
+# existing probe measures what it always measured; `--serving-at` is the handle
+# that lets a probe widen the gap on purpose.
+if [ -n "$SERVING_AT_OVERRIDE" ]; then
+  SERVING_NOW_EPOCH="$(epoch_of "$SERVING_AT_OVERRIDE")" || { warn "CONFIG: --serving-at is not an ISO-8601 instant: $SERVING_AT_OVERRIDE"; exit 3; }
+elif [ -n "$NOW_OVERRIDE" ]; then
+  SERVING_NOW_EPOCH="$NOW_EPOCH"
+else
+  SERVING_NOW_EPOCH="$(date -u +%s)"
+fi
 SERVING_RED=0
 # 1 ONLY when the serving check RAN end-to-end and the served sha HAS its cp
 # row. Condition (1) of the QUIET WINDOW arm (charter D597): a check that was
@@ -1713,7 +1754,7 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
     since="$(jq -r '.serving_since // empty' "$WORK/health.json" 2>/dev/null)"
     SERVING_SINCE="$since"
     since_epoch="$(epoch_of "$since" 2>/dev/null || echo 0)"
-    age=$((NOW_EPOCH - ${since_epoch:-0}))
+    age=$((SERVING_NOW_EPOCH - ${since_epoch:-0}))
     if crown_read "sha=$SERVING_SHA" "$WORK/rows-serving.json"; then
       cp_rows="$(jq --arg sha "$SERVING_SHA" '[.deliveries[] | select(.sha == $sha and .target == "cp")] | length' "$WORK/rows-serving.json" 2>/dev/null)"
       [ -n "$cp_rows" ] || cp_rows=0
@@ -1729,8 +1770,8 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
         # past the cap stops being an alibi and the accusation fires below as
         # SERVING-INFLIGHT-EXPIRED, naming the hung run.
         first_seen="$(state_first_seen "$SERVING_SHA")"
-        [ -n "$first_seen" ] || first_seen="$NOW_EPOCH"
-        graced_age=$((NOW_EPOCH - first_seen))
+        [ -n "$first_seen" ] || first_seen="$SERVING_NOW_EPOCH"
+        graced_age=$((SERVING_NOW_EPOCH - first_seen))
         # THE ORDER OF THESE ARMS IS THE BEHAVIOUR: IN-FLIGHT, then EPSILON,
         # then SKEW, then GRACE, then RED. The negative-age skew guard is right
         # about a real clock fault and WRONG about a deploy that is still
@@ -1803,7 +1844,7 @@ WAIVED_COUNT=0
 : > "$WORK/reask-keep.txt"
 while IFS=' ' read -r gsha gts; do
   [ -n "$gsha" ] || continue
-  gage=$((NOW_EPOCH - gts))
+  gage=$((SERVING_NOW_EPOCH - gts))
   if [ "$gsha" = "$GRACED_THIS_RUN" ]; then
     # Its grace window is still open and this run already said so by name.
     printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
@@ -1861,7 +1902,7 @@ while IFS=' ' read -r gsha gts; do
 done < "$WORK/reask.txt"
 
 if [ -n "$GRACED_THIS_RUN" ] && ! grep -q "^$GRACED_THIS_RUN " "$WORK/reask-keep.txt"; then
-  printf '%s %s\n' "$GRACED_THIS_RUN" "$NOW_EPOCH" >> "$WORK/reask-keep.txt"
+  printf '%s %s\n' "$GRACED_THIS_RUN" "$SERVING_NOW_EPOCH" >> "$WORK/reask-keep.txt"
 fi
 state_save "$WORK/reask-keep.txt"
 
@@ -1976,7 +2017,7 @@ fi
 if [ "$GRACED_RED" -gt 0 ]; then
   say "GRACED-UNRECORDED: ${GRACED_RED} sha(s) were granted the serving grace on an earlier run and STILL have no cp row. The grace was a DEFERRAL, and this is the deferred accusation — it fires whether or not the box still serves them:"
   while IFS=' ' read -r gsha gts; do
-    say "    ${gsha}  (first seen $(iso_of "$gts"), $((NOW_EPOCH - gts))s ago) — graced, then never recorded"
+    say "    ${gsha}  (first seen $(iso_of "$gts"), $((SERVING_NOW_EPOCH - gts))s ago) — graced, then never recorded"
   done < "$WORK/graced.txt"
 fi
 
