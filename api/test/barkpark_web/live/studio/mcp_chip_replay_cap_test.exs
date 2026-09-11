@@ -168,7 +168,9 @@ defmodule BarkparkWeb.Studio.McpChipReplayCapTest do
 
     test "a SMALL result is unchanged — no envelope needed, same chip both paths",
          %{sid: sid, recorder: recorder} do
-      output = Jason.encode!(%{"ok" => true, "doc" => %{"doc_id" => "task-abc", "title" => "Tiny"}})
+      output =
+        Jason.encode!(%{"ok" => true, "doc" => %{"doc_id" => "task-abc", "title" => "Tiny"}})
+
       tool = "mcp__barkpark__task_show"
 
       live = ChatToolRenderer.chip(tool, output)
