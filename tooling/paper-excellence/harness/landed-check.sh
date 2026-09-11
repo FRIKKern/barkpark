@@ -29,6 +29,8 @@
 # (`landed-check.sh; test $? -eq 1`) proves the not-landed arm fires. Once the
 # cold run pushes its paper, the same command flips to exit 0.
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/scripts/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 SLUG="${1:-${LANDED_SLUG:-pe-w7-cold-run-paper}}"
 
@@ -50,10 +52,15 @@ SERVER="${SERVER%/}"
 # existence arm. Never markdown: markdown 500s before the verdict.
 PAYLOAD='{"bpml":"<paper><h1>landed-check probe</h1><p>existence probe, not a real edit</p></paper>","baseRev":"1"}'
 
-BODY="$(curl -s -X POST "$SERVER/v1/plugins/bulldocs/papers/$SLUG/sync" \
+# The verdict is READ OUT OF A 404 BODY, which bp_curl_body withholds — so the
+# status is captured first with bp_curl_code and the body kept on disk.
+PROBE_BODY="$(mktemp)"
+trap 'rm -f "$PROBE_BODY"' EXIT
+bp_curl_code -s -o "$PROBE_BODY" -X POST "$SERVER/v1/plugins/bulldocs/papers/$SLUG/sync" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "$PAYLOAD")"
+  -d "$PAYLOAD" >/dev/null
+BODY="$(cat "$PROBE_BODY")"
 
 if printf '%s' "$BODY" | grep -q '"code":"not_found"'; then
   echo "landed-check: NOT landed — $SLUG absent on $SERVER (exit 1)"

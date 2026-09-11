@@ -90,6 +90,8 @@ A batch of mutations, applied atomically (any failure rolls back the batch). Bod
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
+All three create kinds write the **draft** row. Naming the id of an existing **published `task`** therefore forks a `drafts.<id>` twin: if that task holds a live claim the write is **refused** (422 `validation_failed`, `details._id` names the twin and the sanctioned verbs); otherwise it lands with a `create.forked_published` warning. Use `patch` to edit a published task in place.
+
 **`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
 
 The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:

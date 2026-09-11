@@ -1019,6 +1019,62 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert deferred.(@d_busy_bare) == "BOX_BUSY_DEFERRED"
     end
 
+    # dr-w4-bl-deferral-raw-column-ambiguous — THE HOLE S6 NAMED AND COULD NOT
+    # CLOSE, closed.
+    #
+    # `Sites.Deploy.refusal_detail/1` renders `{code, message}` as
+    # `"code — message"` and a CODELESS `{nil, message}` as the bare message. So
+    # a codeless envelope whose message is byte-for-byte
+    # `box_at_capacity — <the capacity prose>` persists to THE SAME
+    # `failure_reason` BYTES as a genuine coded refusal. S6's `@code_token`
+    # comment says it outright: "no rule over that column can tell them apart".
+    # It is right, which is why the code is now a COLUMN and this test compares
+    # two rows whose only difference is that column.
+    test "a CODELESS envelope with byte-identical capacity prose is NOT a capacity deferral" do
+      # THE PRECONDITION, ASSERTED AND NOT ASSUMED (else this test proves that
+      # two DIFFERENT strings classify differently, which nobody doubted).
+      spoof = %{
+        status: "deferred",
+        stage: "PLAN",
+        failure_reason: @d_capacity,
+        box_refusal_code: DeployLedger.no_box_code()
+      }
+
+      genuine = %{spoof | box_refusal_code: "box_at_capacity"}
+      assert spoof.failure_reason === genuine.failure_reason
+
+      # THE CRITERION.
+      refute DeployLedger.classify(spoof) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # …and it lands where a codeless 409 belongs (D7's busy slug), NOT in the
+      # tail: the box did answer, it simply named no cause.
+      assert DeployLedger.classify(spoof) == "BOX_BUSY_DEFERRED"
+
+      # THE CONTROL, which is the whole reason the refute above means anything:
+      # the same bytes WITH the box's code still classify as capacity.
+      assert DeployLedger.classify(genuine) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # D115 — A ROW NO CODE-AWARE WRITER TOUCHED DOES NOT MOVE. `nil` on the
+      # column is "nobody recorded a code", not "the box named none", and it
+      # keeps the prose fallback. The verbatim 2026-08 corpus above rides on
+      # exactly this.
+      assert DeployLedger.classify(%{
+               status: "deferred",
+               stage: "PLAN",
+               failure_reason: @d_capacity
+             }) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # The sentinel cannot COLLIDE with a real code, by construction rather than
+      # by luck: `@code_token` is `^[a-z][a-z0-9_]*$` and no parenthesis
+      # satisfies it. If someone widens that token, this reds.
+      refute Regex.match?(~r/^[a-z][a-z0-9_]*$/, DeployLedger.no_box_code())
+
+      # A column that names a code the ledger has never seen rises in the TAIL —
+      # it is not absorbed by the busy bucket the sentinel fills (D8).
+      assert DeployLedger.classify(%{spoof | box_refusal_code: "slot_reservation_denied"}) ==
+               "DEFERRED_UNCLASSIFIED"
+    end
+
     # The DEFERRED-SIDE MIRROR of "UNCLASSIFIED CAN GO UP" (D8) — which did not
     # exist: D8 was honoured for failed rows and violated for deferred ones,
     # because the deferred arm had exactly one answer and could not be wrong.

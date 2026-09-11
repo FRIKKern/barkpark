@@ -214,9 +214,78 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       refute view.writes
       assert Enum.all?([open, log, publish, link_task, touch], & &1.writes)
     end
+
+    test "bulldocs.publish's summary names the if-rev fence and the ops route that carries it" do
+      # WORDING PIN (task dr-w32-bl-post-papers-silently-ignores-ifrev).
+      # `POST /v1/plugins/bulldocs/papers` is an UNFENCED create-or-replace; it
+      # now REFUSES a body carrying `ifRev`/`if_rev` with a 400 naming the
+      # sibling ops route (BulldocsIngestController.refuse_unfenced_if_rev/2).
+      # That refusal is honest but invisible until you trip it: the asymmetry
+      # between `bulldocs publish` (no fence) and `bulldocs patch --if-rev`
+      # (fenced, 412 on a stale rev) was discoverable ONLY by reading the
+      # controller. The manifest summary is where a reader meets a verb —
+      # it flows to `bp bulldocs publish --help` and to docs/openapi.json —
+      # so the fence has to be stated there. This test reds if the sentence
+      # goes away.
+      publish = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.publish"))
+      summary = publish.summary
+
+      assert summary =~ "if-rev",
+             "bulldocs.publish's summary must name the if-rev fence, or the " <>
+               "asymmetry with bulldocs.patch is invisible. Got: #{summary}"
+
+      assert summary =~ "ifRev/if_rev is refused 400",
+             "bulldocs.publish's summary must say the key is REFUSED (not " <>
+               "honoured, not ignored) — that is the behaviour the route ships. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "/v1/plugins/bulldocs/papers/:slug/ops",
+             "bulldocs.publish's summary must name the route that actually " <>
+               "carries the fence. Got: #{summary}"
+
+      assert summary =~ "bp bulldocs patch --if-rev",
+             "bulldocs.publish's summary must name the CLI verb a fenced caller " <>
+               "should use instead. Got: #{summary}"
+
+      # Non-vacuity: the route the sentence points at is the one bulldocs.patch
+      # is actually grounded in, so this pin cannot drift away from the manifest.
+      patch = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.patch"))
+      assert patch.http.path_template == "/v1/plugins/bulldocs/papers/:slug/ops"
+      assert patch.verb == "patch"
+    end
   end
 
   describe "Tasks.cli_commands/0" do
+    # THE FILES MANIFEST IS DECLARED, OR NO CALLER CAN SEND ONE
+    # (task-074f50e46e4c926c). The server has stored `content.landed.files`
+    # since PR #17475 and every landing still recorded the sha alone, because
+    # the ONLY thing standing between the two was this declaration: `bp`'s
+    # splitArgs refuses an undeclared `--files` as an unknown flag and sends
+    # NOTHING, so the field was reachable by curl and by nothing a human types.
+    #
+    # `repeatable: true` is load-bearing twice over. Without it a SECOND
+    # `--files` is a usage error (refuseRepeatedFlag: bp will not silently keep
+    # one of two paths), so a manifest is capped at one path; and the Go client
+    # keys the JSON-array body encoding off the same flag, so dropping it turns
+    # `"files": ["a"]` into `"files": "a"` and the server's Landed.check_files/1
+    # 400s the request.
+    test "task.landed declares a repeatable --files flag, the only door to content.landed.files" do
+      landed = Enum.find(Tasks.cli_commands(), &(&1.id == "task.landed"))
+      files = Enum.find(landed.flags, &(&1.name == "files"))
+
+      assert files,
+             "task.landed declares no --files flag, so `bp task landed … --files x` is an " <>
+               "unknown-flag usage error and content.landed.files is unreachable from the CLI"
+
+      assert files.type == "string"
+      assert files[:repeatable] == true
+
+      # The summary is what `bp task landed --help` prints; it has to say the
+      # unit, because "files" plural invites a caller to pass a comma-joined
+      # list as ONE path.
+      assert files.summary =~ "ONE changed path per occurrence"
+    end
+
     test "declares the sixteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 

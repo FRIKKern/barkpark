@@ -39,6 +39,8 @@
 #
 # Templated on scripts/install-cli.test.sh.
 set -uo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
@@ -130,8 +132,14 @@ run_slice() {
     bash "$1" > "$3" 2>&1
 }
 
-mkdir -p "$TMP/app"
+mkdir -p "$TMP/app/scripts/lib"
 printf 'PORT=4000\n' > "$TMP/app/.env"
+# The health section sources $APP_DIR/scripts/lib/bp-curl.sh (429 backoff,
+# task-90059c5c680f6665) and $TMP/app IS the $APP_DIR the slice sees. Carry the
+# helper in, or every case below silently takes deploy.sh's named degrade branch
+# and this harness proves nothing about the real helper (the #17562
+# deploy-receipt-failure.test.sh trap).
+cp "$ROOT/scripts/lib/bp-curl.sh" "$TMP/app/scripts/lib/bp-curl.sh"
 
 DEAD_PORT="$(free_port)"   # nothing bound: free_port closed the socket
 
@@ -192,7 +200,7 @@ PY
 SERVER_PID=$!
 disown $SERVER_PID 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  curl -fs "http://localhost:$OK_PORT/api/schemas" >/dev/null 2>&1 && break
+  bp_curl_body -s "http://localhost:$OK_PORT/api/schemas" >/dev/null 2>&1 && break
   sleep 0.3
 done
 run_slice "$TMP/cur.sh" "$OK_PORT" "$TMP/c.out"

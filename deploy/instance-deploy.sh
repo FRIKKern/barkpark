@@ -100,6 +100,29 @@ set -uo pipefail
 APP="${BARKPARK_APP_DIR:-/opt/barkpark}"
 LOCK="${BARKPARK_DEPLOY_LOCK:-/var/lock/barkpark-instance-deploy.lock}"
 CADDYFILE="${BARKPARK_CADDYFILE:-/etc/caddy/Caddyfile}"
+
+# ---- 429 backoff, shared (task-90059c5c680f6665) ---------------------------
+# This script is SHIPPED STANDALONE: .github/workflows/deploy.yml scps it ALONE
+# to /tmp/<name>.$R.sh on the box, and the private-copy preamble above then
+# re-execs it out of TMPDIR. So NO path relative to the running file reaches
+# scripts/lib/bp-curl.sh — not $0, not BASH_SOURCE. The one place the helper
+# does exist on the box is the checkout this script deploys: $APP.
+#
+# Guarded, and the degrade is NAMED rather than silent. A box whose checkout
+# predates the helper must still deploy, and sourcing a missing file to take a
+# deploy down over a health PROBE would be a worse outage than an unhandled 429.
+# The shim reproduces bp_curl_code's contract exactly, including the part that
+# bites: on a transport failure it must print NOTHING (bare `curl -w` prints
+# 000 AND fails, so a naive `|| echo 000` shim would print 000000 — the latent
+# double named in scripts/lib/bp-curl.sh's header).
+if [ -r "$APP/scripts/lib/bp-curl.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$APP/scripts/lib/bp-curl.sh"
+else
+  echo "[instance-deploy] WARNING: $APP/scripts/lib/bp-curl.sh absent — the health probes below run WITHOUT the shared 429 backoff" >&2
+  bp_curl_code() { local __c; __c="$(curl -w '%{http_code}' "$@")" || return $?; printf '%s' "$__c"; }
+fi
+
 HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
 BLUE_PORT="${BARKPARK_PORT_BLUE:-4000}"
 GREEN_PORT="${BARKPARK_PORT_GREEN:-4001}"
@@ -441,7 +464,7 @@ if [ "$MODE" != "deploy" ]; then
   systemctl restart "barkpark-slot@$TARGET_SLOT"
   ok=0
   for _ in $(seq 1 40); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || true)"
+    code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || echo 000)"
     if [ "$code" = "200" ]; then ok=1; log "slot $TARGET_SLOT healthy ($code)"; break; fi
     sleep 5
   done
@@ -493,7 +516,7 @@ if [ "$MODE" != "deploy" ]; then
     git reset --hard "$OLD"; exit 24
   fi
   exec 8>&-   # leaf lock: released the moment the file is written + reloaded
-  code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || true)"
+  code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || echo 000)"
   log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
 
   # Drain, retire the rolled-away slot, and rewrite STATE to the rolled-back
@@ -1088,7 +1111,7 @@ systemctl restart "barkpark-slot@$TARGET"
 
 ok=0
 for _ in $(seq 1 40); do
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || true)"
+  code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || echo 000)"
   if [ "$code" = "200" ]; then ok=1; log "slot $TARGET healthy ($code)"; break; fi
   sleep 5
 done
@@ -1157,7 +1180,7 @@ if ! systemctl reload caddy; then
 fi
 exec 8>&-   # leaf lock: released the moment the flip is written + reloaded, so
             # the long non-Caddy tail below (go builds, npm ci) never holds it
-code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || true)"
+code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || echo 000)"
 log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
 # GATE, not just log (pds-bl-w49): the pre-flip loop above only proves the app
 # boots on its OWN port (localhost:$TARGET_PORT) — it cannot catch a flip that
@@ -1387,7 +1410,7 @@ else
           log "barkpark-connectors up (https://$HEALTH_HOST$CONNECTORS_PATH_PREFIX -> 127.0.0.1:$CONNECTORS_PORT)"
           # LOG-ONLY probe (never a gate — a polling-only bridge legitimately
           # serves no HTTP): does the path route actually reach the bridge?
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${CONNECTORS_PORT}${CONNECTORS_PATH_PREFIX}/health" || true)"
+          code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://127.0.0.1:${CONNECTORS_PORT}${CONNECTORS_PATH_PREFIX}/health" || echo 000)"
           log "connectors health probe: 127.0.0.1:${CONNECTORS_PORT}${CONNECTORS_PATH_PREFIX}/health = ${code:-000} (000 = no HTTP surface yet; provider webhooks would land on the maintenance 503 — see docs/ops/connectors-deploy.md)"
 
           # INSURANCE, NOT A GATE (connectors D54). The BRIDGE creates chat_bridge

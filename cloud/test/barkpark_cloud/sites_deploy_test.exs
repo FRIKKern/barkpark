@@ -1362,6 +1362,71 @@ defmodule BarkparkCloud.SitesDeployTest do
     # literal: a capacity chain gets 12 and a busy/stuck chain gets 6, so a
     # sentence that hardcoded either would misstate the other cause's whole
     # budget to the operator reading it.
+    # dr-w4-bl-deferral-raw-column-ambiguous — THE SPOOF, DRIVEN END TO END.
+    #
+    # Both runs below go through the REAL `start_on_box` → `box_refusal/3` →
+    # `defer/4` path. The only difference between the two 409 bodies is the
+    # presence of the `code` key: the codeless one's `message` is
+    # `"box_at_capacity — " <> <the verbatim capacity prose>`, so
+    # `refusal_detail/1` renders it to THE SAME BYTES the coded one renders to,
+    # and the test asserts that byte-identity rather than assuming it.
+    #
+    # Before the column, both rows classified BOX_AT_CAPACITY_DEFERRED and took
+    # the capacity leash of 12 — a forged cause with no code involved anywhere.
+    test "a CODELESS 409 forging the capacity bytes is deferred as BUSY, not as capacity" do
+      {bp, site} = setup_site()
+
+      # The verbatim body, READ from the fixture the api-side conformance test
+      # pins — never retyped here (#16598).
+      forged_message = "box_at_capacity — " <> BoxCapacityRefusalFixture.message()
+
+      # NO `code` KEY. This is the whole specimen.
+      FakeBoxRelay.program(start: {:ok, 409, %{"error" => %{"message" => forged_message}}})
+
+      {:ok, spoof} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(spoof.id)
+      spoof_row = Repo.get(Deployment, spoof.id)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "box_at_capacity",
+               "message" => BoxCapacityRefusalFixture.message()
+             }
+           }}
+      )
+
+      {:ok, coded} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(coded.id)
+      coded_row = Repo.get(Deployment, coded.id)
+
+      # THE PRECONDITION: the box's half of the two reasons is byte-identical.
+      # (`defer/3` appends its own `" — deferred: refusal N of B …"` clause,
+      # which is DOWNSTREAM of the classification and therefore differs — that
+      # divergence is the finding, not a flaw in the comparison.)
+      box_words = fn reason -> reason |> String.split(" — deferred: ") |> hd() end
+      assert box_words.(spoof_row.failure_reason) === box_words.(coded_row.failure_reason)
+
+      # THE COLUMN IS WHERE THEY DIFFER, and it was written at refusal time.
+      assert spoof_row.box_refusal_code == DeployLedger.no_box_code()
+      assert coded_row.box_refusal_code == "box_at_capacity"
+
+      # THE CRITERION, on the persisted rows.
+      refute DeployLedger.classify(spoof_row) == "BOX_AT_CAPACITY_DEFERRED"
+      assert DeployLedger.classify(spoof_row) == "BOX_BUSY_DEFERRED"
+      assert DeployLedger.classify(coded_row) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # …and the producer's OWN stamped cause agrees with the ledger, because it
+      # is computed through the same column-first reader. A forged capacity
+      # refusal takes the BUSY leash of 6, not the capacity leash of 12.
+      assert spoof_row.deferral_cause == "BOX_BUSY_DEFERRED"
+      assert spoof_row.deferral_bound == 6
+      assert coded_row.deferral_cause == "BOX_AT_CAPACITY_DEFERRED"
+      assert coded_row.deferral_bound == 12
+    end
+
     test "the rendered bound is the CAUSE's own bound — 12 for capacity, 6 for a busy box" do
       {bp, site} = setup_site()
 

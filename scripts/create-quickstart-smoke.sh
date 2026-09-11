@@ -33,6 +33,8 @@
 # 0 failures.
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 # Hand bp a CLOSED stdin, not the pipe a CI runner gives a `run:` step.
 #
@@ -172,7 +174,7 @@ cd "$REPO_ROOT"
 # Health-poll: /api/schemas returns 200 once the endpoint is up.
 booted=0
 for _ in $(seq 1 90); do
-  if curl -fsS "$API_URL/api/schemas" >/dev/null 2>&1; then booted=1; break; fi
+  if bp_curl_body -sS "$API_URL/api/schemas" >/dev/null 2>&1; then booted=1; break; fi
   # Fail fast if the server process died during boot.
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
     cat "$SERVER_LOG" >&2

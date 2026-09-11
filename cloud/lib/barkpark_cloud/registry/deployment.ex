@@ -295,6 +295,27 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :deferral_bound, :integer
     field :deferral_cause, :string
 
+    # dr-w4-bl-deferral-raw-column-ambiguous: THE BOX'S OWN CODE WORD, and not
+    # the ledger's name for it. `deferral_cause` above holds the CLASS, which
+    # `Sites.Deploy.defer/3` computes through `DeployLedger.classify/1` — off
+    # the prose. This holds `err["code"]` out of the decoded refusal envelope,
+    # read before any `failure_reason` string is built, so no `message` a box
+    # sends can reach it.
+    #
+    # THREE-VALUED, on purpose:
+    #
+    #   * NULL      — no code-aware writer touched this row (every row before
+    #                 this column, and every row outside a box refusal). The
+    #                 ledger falls back to the prose reader, so D115 holds and
+    #                 no historical row reclassifies.
+    #   * "(none)"  — a code-aware writer looked and the envelope carried NO
+    #                 `code` key. D7's codeless 409.
+    #   * a token   — the box's code, verbatim.
+    #
+    # "(none)" cannot collide with a real code by construction:
+    # `DeployLedger`'s `@code_token` is `^[a-z][a-z0-9_]*$`.
+    field :box_refusal_code, :string
+
     # dr-bl-deferral-scheduled-vs-actual-gap: THE CHAIN'S PACE, beside its
     # shape. The three columns above say how DEEP a chain went; these two say
     # how FAST, and they describe THE SAME INTERVAL — the gap between the
@@ -651,6 +672,13 @@ defmodule BarkparkCloud.Registry.Deployment do
       :deferral_cause,
       :deferral_scheduled_s,
       :deferral_actual_gap_s,
+      # dr-w4-bl-deferral-raw-column-ambiguous: the box's own refusal code, cast
+      # HERE and nowhere else for the same reason the chain columns are — it is
+      # something the box SAID while refusing this run, not something a caller
+      # may declare at create. A create-castable refusal code would let a row be
+      # born claiming the box named a cause it never named, which is the exact
+      # forgery this column exists to make impossible.
+      :box_refusal_code,
       :claim_worker,
       :claimed_at,
       :claim_epoch

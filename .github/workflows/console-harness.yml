@@ -768,11 +768,20 @@ jobs:
       #     `--render` cell below drives exactly ONE cell (901px, billing-trial)
       #     and the full render matrix is likewise unreached, deliberately
       #     (minutes, not seconds — see the paragraph above).
-      #   * cssom-parity.test.mjs, defect-selection.test.mjs,
-      #     exit-vocabulary.test.mjs, font-pin.test.mjs — four unit suites with
-      #     NO runner. The other four `__preview__` suites (seal-predicate,
-      #     breakpoint-sweep, bringup-retry, ready-host-paint) do run, above.
-      #     `scripts/console-export-tree.sh` lists three of these four in its
+      #   * (CLOSED, task-fcd10d9a24ab8ecf) This bullet used to read "cssom-
+      #     parity.test.mjs, defect-selection.test.mjs, exit-vocabulary.test.mjs,
+      #     font-pin.test.mjs — four unit suites with NO runner", and it was
+      #     wrong in the way this whole paragraph is built to be wrong: there
+      #     were FIVE. stylesheet-applied.test.mjs existed, was in neither this
+      #     list nor the "invoked outright" list below, and had ZERO hits in all
+      #     of .github/workflows — under a paragraph closing "that is every
+      #     executable file in this directory, accounted for one by one; the
+      #     class is enumerated, not sampled". All five are now run by the
+      #     `__preview__ suites no other step runs` step at the end of this job,
+      #     which SELECTS BY PREDICATE (every *.test.mjs whose basename no
+      #     `node --test` command line in this file names) precisely so that no
+      #     future member of this class depends on someone editing a comment.
+      #     `scripts/console-export-tree.sh` lists three of them in its
       #     VERIFY_GATES array, but that script is itself invoked by no `run:`
       #     step, so it is a list, not an invocation.
       #   * shoot.sh and reap-orphans.sh — the screenshot rig and its orphan
@@ -1541,6 +1550,86 @@ jobs:
             cloud/priv/static/__refusal_copy.remove.fixture.js && rc=0 || rc=$?
           echo "remove fixture under --add-check: rc=$rc (expect 0)"
           test "$rc" -eq 0
+
+      # ── THE SUITES NOBODY RUNS — CLOSED BY A PREDICATE, NOT BY A LIST ───────
+      #
+      # On origin/main FIVE `__preview__` suites executed on nobody's merge (68
+      # tests): stylesheet-applied, cssom-parity, defect-selection,
+      # exit-vocabulary, font-pin. Four of them were NAMED in this file's own
+      # comment block above — prose, not a `run:` line — and the fifth was in no
+      # list at all, under a paragraph that closes "that is every executable
+      # file in this directory, accounted for one by one; the class is
+      # enumerated, not sampled". A hand-kept enumeration cannot notice a file
+      # that ARRIVES. So this step keeps no list: it derives one.
+      #
+      # WHAT IT SELECTS: every *.test.mjs in the directory whose basename no
+      # `node --test` COMMAND LINE in this workflow already names (comments
+      # stripped first — a suite named only in prose is named by nobody). A new
+      # suite is therefore run by this step from the commit that adds it, with
+      # no workflow edit; a suite that later earns its own step drops out of
+      # here instead of running twice.
+      #
+      # WHY NOT A BARE `node --test <dir>/*.test.mjs` OVER THE WHOLE DIRECTORY:
+      # seal-predicate.test.mjs, which HAS its own step above, does not finish
+      # in ten minutes on a full (non-shallow) checkout — measured 2026-09-11,
+      # killed twice at 5.5 and 10 min on a developer machine, where it reads
+      # real git history through `--repo`. Re-running it here would buy nothing
+      # and pay that twice. The predicate above gets the coverage without the
+      # duplication, and the SELFTEST arm below is what makes the predicate
+      # honest rather than a second, cleverer list.
+      #
+      # THE FLOOR, and the reason there is one: `node --test` on a file that
+      # still LOADS but registers ZERO tests reports one passing test and exits
+      # 0 (task-2c39c3b9e1f925c2). 68 is this step's selection on 2026-09-11,
+      # measured on node 20.20.2 — 13 + 21 + 13 + 13 + 8, every suite green. It
+      # is `-lt`, so growth never reds and a gutted suite does.
+      - name: "__preview__ suites no other step runs (derived selection, 68-test floor)"
+        run: |
+          set -euo pipefail
+          dir=cloud/priv/static/__preview__
+          wf=.github/workflows/console-harness.yml
+
+          # Every suite that exists, found rather than globbed: `find` descends,
+          # a shell `*.test.mjs` does not, and the difference is the selftest.
+          all=$(find "$dir" -name '*.test.mjs' | sort)
+          flat=$(find "$dir" -maxdepth 1 -name '*.test.mjs' | sort)
+          if [ "$all" != "$flat" ]; then
+            echo "::error title=A preview suite a flat glob cannot reach::find sees a *.test.mjs that $dir/*.test.mjs does not — a suite in a subdirectory is a suite no runner in this file selects. Move it up, or teach this step to descend."
+            printf '%s\n' "find:" "$all" "flat glob:" "$flat"
+            exit 1
+          fi
+
+          # COMMAND LINES ONLY. Prose is not an invocation, and this file has
+          # four suites' worth of prose that claimed to be one.
+          cmds=$(sed 's/#.*//' "$wf" | grep -E 'node[[:space:]]+--test' || true)
+          named() { case "$cmds" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
+
+          # The predicate must still be able to say NO and to say YES, or its
+          # selection means nothing. Same shape as the tally self-tests above.
+          named "seal-predicate.test.mjs" || { echo "::error::selection self-test: the workflow scan no longer sees a suite this file demonstrably runs by name — the predicate has gone blind and would re-run everything or nothing"; exit 1; }
+          named "no-such-suite-zzz.test.mjs" && { echo "::error::selection self-test: the workflow scan matches a basename that appears nowhere — the predicate cannot say NO, so it would select nothing forever"; exit 1; } || true
+
+          todo=""
+          for f in $all; do
+            named "$(basename "$f")" || todo="$todo $f"
+          done
+          if [ -z "$todo" ]; then
+            echo "::error title=This step selected nothing::Every preview suite is claimed by another step. That may be correct, but an empty selection is indistinguishable from a broken predicate, so say so deliberately and lower the floor below."
+            exit 1
+          fi
+          echo "selected (run by no other step):$todo"
+
+          gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 68 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 68 — this floor can no longer lose"; exit 1; }
+
+          # shellcheck disable=SC2086 # word splitting is the selection
+          node --test $todo 2>&1 | tee /tmp/preview-unrun-suites.txt
+          tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/preview-unrun-suites.txt)
+          if [ "${tally:-0}" -lt 68 ]; then
+            echo "::error::preview suites: ran ${tally:-0} test(s), the committed floor is 68 — a suite that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+            exit 1
+          fi
+          echo "preview suites: ${tally} tests, floor 68 — the pin re-earned"
 
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes

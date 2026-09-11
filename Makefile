@@ -296,7 +296,7 @@ deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean re
 	echo ">> Pulled. The post-merge hook cleaned _build/prod, recompiled and restarted (recorded outcome: $$outcome)."; \
 	code=000; i=0; \
 	while [ "$$i" -lt "$(BP_DEPLOY_POLL_ATTEMPTS)" ]; do \
-	  code="$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:4000/api/schemas 2>/dev/null || echo 000)"; \
+	  code="$$(bash -c '. scripts/lib/bp-curl.sh; bp_curl_code -s -o /dev/null --max-time 5 http://localhost:4000/api/schemas' 2>/dev/null || echo 000)"; \
 	  if [ "$$code" = "200" ]; then break; fi; \
 	  i=$$((i + 1)); \
 	  sleep "$(BP_DEPLOY_POLL_SLEEP)"; \

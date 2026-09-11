@@ -175,7 +175,42 @@ GO
         echo "$out"
         exit 1
     fi
-    echo "go-literal-check --selftest: PASS — gate REDs on a planted literal, names file:line, passes clean + commented hex, and REFUSES to pass vacuously from narrowed ROOTS or from a relocated copy (the floor names itself in both)."
+    # 6) The PR-reference narrowing (2026-09-11) must be BOUNDED: `PR #123` in
+    #    help copy passes, and a REAL 3/6/8-digit literal still REDs from the
+    #    same file. Without this arm the two lookbehinds added to LITERAL could
+    #    widen (or be replaced by a blanket "digits only" exemption) and nothing
+    #    would notice the gate had gone blind.
+    cat >"$tmp/prref_cmd.go" <<'GO'
+package demo
+
+// The help copy that reddened main for 229 runs: a PR number is not a colour.
+var help = "Supply a reason: --merge-gated \"PR #123 merged to main as <sha>\""
+GO
+    if ! GO_LIT_SELFTEST="$tmp/prref_cmd.go" bash "$0" >/dev/null 2>&1; then
+        echo "go-literal-check --selftest: FAIL — 'PR #123' in help copy was flagged as a colour literal."
+        exit 1
+    fi
+    for hex in '#abc' '#a1b2c3' '#a1b2c3d4'; do
+        cat >"$tmp/prref_and_hex_cmd.go" <<GO
+package demo
+
+import "github.com/charmbracelet/lipgloss"
+
+var help = "--merge-gated \"PR #123 merged\""
+var planted = lipgloss.NewStyle().Foreground(lipgloss.Color("$hex"))
+GO
+        if out="$(GO_LIT_SELFTEST="$tmp/prref_and_hex_cmd.go" bash "$0" 2>&1)"; then
+            echo "go-literal-check --selftest: FAIL — a real $hex literal was NOT caught (the PR-reference narrowing went too wide)."
+            echo "$out"
+            exit 1
+        fi
+        if ! grep -q 'prref_and_hex_cmd.go:6' <<<"$out"; then
+            echo "go-literal-check --selftest: FAIL — the $hex RED did not name the planted file:line."
+            echo "$out"
+            exit 1
+        fi
+    done
+    echo "go-literal-check --selftest: PASS — gate REDs on a planted literal, names file:line, passes clean + commented hex, and REFUSES to pass vacuously from narrowed ROOTS or from a relocated copy (the floor names itself in both), and passes 'PR #123' help copy while still REDing #abc/#a1b2c3/#a1b2c3d4 in the same file."
     exit 0
 fi
 
@@ -205,7 +240,18 @@ else:
              os.path.join(root, "internal", "pdrender", "theme.go")]  # ts-w2b: pdrender chrome threaded onto tokens_gen.go; only pdBtnFg stays a lit-allow
 
 # A 3/6/8-digit #hex colour literal. Go has no hsl().
-LITERAL = re.compile(r"#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
+#
+# The two lookbehinds are the 2026-09-11 fix for a FALSE POSITIVE, not decoration.
+# The bare pattern matched `#123` inside the help copy
+# `--merge-gated "PR #123 merged to main as <sha>"` (internal/cli/tasks_stamp_cmd.go),
+# which reddened this gate on every push to main from 2026-09-09T18:52Z
+# (first red run 34412872796, sha 2ee884f75, #17107). A `#` that follows the
+# literal prose `PR ` is an issue/PR reference, and a `#` glued to a word char is
+# part of a longer token — neither is a colour anybody applied. Narrowing the
+# INSTRUMENT (rather than rewording the one help string) is what stops the class
+# from recurring the next time a CLI help line cites a PR number; selftest arm (6)
+# below is what keeps this narrowing from quietly swallowing a real literal.
+LITERAL = re.compile(r"(?<!\w)(?<!PR )#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
 
 # A flagged line is allowed only if it carries an explicit per-line resister
 # annotation earmarking the au-w4-cli-chrome-tokens follow-up.

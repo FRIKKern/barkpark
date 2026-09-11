@@ -9164,6 +9164,8 @@ defmodule BarkparkCloud.Web.Router do
   #     after a dropped response must not run the deploy twice)
   #   * a DIFFERENT digest → 409 artifact_conflict (silently swapping the bytes
   #     under a build_id that is already baked would be a lie about what is live)
+  #   * the team already over its stored-artifact ceiling → 429
+  #     artifact_quota_exceeded (ssw9-bl-artifact-retention-quota)
   post "/v1/sites/:id/deployments/:dep_id/artifact" do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
       case Registry.get_deployment(conn.path_params["dep_id"]) do
@@ -16785,7 +16787,31 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # ssw9-bl-artifact-retention-quota: the PER-TEAM ceiling, checked against the
+  # bytes we actually received rather than anything the client declared.
+  # `max_artifact_bytes()` above bounds ONE request; without this a write PAT
+  # could loop 32 MB uploads until `cloud_pgdata` was full. 429 (not 413): the
+  # body is a legal size, the ACCOUNT is over — the same distinction
+  # `rate_limited` draws, and it tells the client to reap or wait rather than to
+  # ship a smaller tarball.
   defp start_prebuilt_deploy(conn, site, deployment, bytes, sha) do
+    case Sites.ArtifactQuota.check(site.team_id, byte_size(bytes)) do
+      :ok ->
+        store_prebuilt_artifact(conn, site, deployment, bytes, sha)
+
+      {:error, {:artifact_quota_exceeded, q}} ->
+        json(conn, 429, %{
+          error: "artifact_quota_exceeded",
+          detail:
+            "this team already holds #{q.used_bytes} bytes of build artifacts and this upload adds #{q.requested_bytes}, over the #{q.limit_bytes}-byte ceiling — artifacts are reaped when their deployment settles, so let the in-flight deploys finish, or raise ARTIFACT_QUOTA_BYTES",
+          used_bytes: q.used_bytes,
+          requested_bytes: q.requested_bytes,
+          limit_bytes: q.limit_bytes
+        })
+    end
+  end
+
+  defp store_prebuilt_artifact(conn, site, deployment, bytes, sha) do
     case Sites.Deploy.store_artifact(deployment, bytes, sha) do
       {:ok, stamped} ->
         case Accounts.record_audit(%{

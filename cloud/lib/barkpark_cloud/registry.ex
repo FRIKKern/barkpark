@@ -7797,6 +7797,49 @@ defmodule BarkparkCloud.Registry do
   # ONE row (self); `nil` drops none — the same nil-trap as
   # `site_domain_claimed?/2`, so the exclusion is a conditional `where`, never
   # `b.id != ^nil`.
+  #
+  # NAMED `other_barkpark_custom_host?/2` until #14458 (3b34f91fc) folded the four
+  # legs into `hostname_claimed?/2` and renamed this one. The old spelling now
+  # survives nowhere in the tree, which is worth knowing when a filed defect asks
+  # for a change to a function by that name.
+  #
+  # THE ASYMMETRY WITH `provisioning_fqdn_claim/2` IS DELIBERATE: this leg has NO
+  # abandonment carve-out, and it must not grow one
+  # (`dr-w25-bl-gyldendal-taker-is-also-a-ghost`, ruled 2026-09-10). The two
+  # columns are not the same kind of name:
+  #
+  #   * `url` is a PLATFORM-MINTED provisioning FQDN (`<slug>-<hex>.barkpark.cloud`).
+  #     Nobody chose it, nobody points DNS at it by hand, and a row that never
+  #     came up leaves it squatted with no owner able to release it — the June-29
+  #     squat the carve-out exists to unstick.
+  #   * `custom_host` is a CUSTOMER'S DELIBERATE CLAIM on a name they control the
+  #     DNS for. Quietness is not abandonment of a NAME. Releasing it from a row
+  #     that has merely gone quiet is a hostname takeover: the next attach wins
+  #     the name, `/v1/tls/ask` starts answering 200 for the new owner, and the
+  #     original customer's cert renewal fails the next time Caddy asks — the
+  #     precise outcome charter D457 forbids ("DO NOT de-register
+  #     `gyldendal.barkpark.cloud` from `/v1/tls/ask` — the 200 belongs to team
+  #     Gyldendal's LEGITIMATE `custom_host`") and D605 re-affirms by keeping the
+  #     ask-gate name-bound.
+  #
+  # `last_seen_at IS NULL` cannot carry this weight in either direction. It means
+  # the AGENT never phoned home; it says nothing about the APP. Driven live
+  # 2026-09-10 against `gyldendal.barkpark.cloud` (see
+  # `tooling/grip/ledger/dr-w25-gyldendal-taker-probe-2026-09-10.md`): the box at
+  # 116.203.98.0 answers 302, `/status.json` reports `operational` on database,
+  # migrations and plugins, and `uptime_seconds` 5_568_983 = 64.5 days unbroken —
+  # while its Let's Encrypt certificate was RENEWED on 2026-09-05, i.e. the
+  # platform's own ask-gate authorised issuance for that name five days ago. A row
+  # the abandonment predicate would call a ghost is a continuously serving,
+  # cert-renewing customer instance.
+  #
+  # And porting the carve-out here would not even move the row that motivated the
+  # ask: `provisioning_fqdn_claim/2`'s three legs are ANDed, and
+  # `:active_subscription` alone holds the claim for a team on a live plan
+  # (charter D443 measured the silence-only predicate 0-for-3 on live data —
+  # yo/forever, Gyldendal/supporter, Guerrilla/forever were ALL entitled). The
+  # asymmetry is therefore not a gap; the symmetric version is a takeover vector
+  # that buys nothing.
   defp barkpark_custom_host_claimed?(norm, except_barkpark_id) do
     Barkpark
     |> where([b], b.custom_host == ^norm)
@@ -7816,7 +7859,7 @@ defmodule BarkparkCloud.Registry do
   # `barkparks_custom_host_unique_idx`) are DISJOINT and structurally cannot
   # see across them, so this pre-check is the only guard there is.
   #
-  # Self is EXCLUDED, exactly as `other_barkpark_custom_host?/2` does it: a row
+  # Self is EXCLUDED, exactly as `barkpark_custom_host_claimed?/2` does it: a row
   # attaching the host it ALREADY serves (its own provisioning FQDN — e.g.
   # re-attaching to re-run the DNS upsert after a repair) shadows nobody, so
   # refusing it would only block a legitimate re-attach. Excluding self cannot

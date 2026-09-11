@@ -2031,6 +2031,118 @@ defmodule Barkpark.Sites.DeployRunnerTest do
     end
   end
 
+  # ── THE ROUTE ARMING CHANNEL (charter D608, task dr-w21-bl-route-decision) ──
+  #
+  # Both engines emit `BPSTAGE name=ROUTE status=<ok|failed> … detail="…"` after
+  # their Caddy arming attempt, into the DURABLE STATUS FILE. Wave 21 measured
+  # that the decision reached nothing: `read_log_tail/1` structurally cannot
+  # carry it (emit() writes to stdout + the status file, never to the log file),
+  # and `fold_status_file/2` discarded it through `parse_stage_line/2`'s
+  # `name in @stage_names` guard.
+  #
+  # These tests drive the PRODUCTION path — systemd-run + `reconstruct/2` +
+  # `fold_status_file/2` — from a fixture status file, and NEVER the in-process
+  # Port fallback (`runner_mode: :port`, deploy_runner.ex's `render_run/1`),
+  # where a ROUTE line lands in the in-memory log and an assertion on it would
+  # be vacuous against prod. `runner_mode: :systemd` in both, deliberately.
+  describe "ROUTE arming channel (systemd reconstruct path)" do
+    test "a ROUTE line in the status file reaches the forwarded status as route_status/route_detail, and is NOT a stage" do
+      dir = run_dir()
+
+      seed_manifest(dir, "route-armed",
+        build_id: "r1",
+        status:
+          "BPSTAGE name=PLAN status=ok build_id=r1\n" <>
+            "BPSTAGE name=SWITCH status=ok build_id=r1\n" <>
+            "BPSTAGE name=ROUTE status=ok build_id=r1 detail=\"armed: wrote the BARKPARK_SITE_ROUTE:route-armed handle\"\n",
+        log: "done\n"
+      )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {echo_script("inactive"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+      status = GenServer.call(pid, {:status, "route-armed"})
+
+      # THE CRITERION: the arm decision is in what the runner forwards.
+      assert status.route_status == "ok"
+      assert status.route_detail =~ "armed: wrote the BARKPARK_SITE_ROUTE:route-armed handle"
+
+      # …and it is a MEASUREMENT, not a verdict: it never entered `stages`, so it
+      # cannot reach `deploy_outcome/2` or `stage_exit_code/1`.
+      assert Enum.map(status.stages, & &1.name) == ~w(PLAN SWITCH)
+      assert status.exit_code == 0
+    end
+
+    test "a FAILED ROUTE is reported without becoming the run's verdict" do
+      dir = run_dir()
+
+      seed_manifest(dir, "route-failed",
+        build_id: "r2",
+        status:
+          "BPSTAGE name=PLAN status=ok build_id=r2\n" <>
+            "BPSTAGE name=SWITCH status=ok build_id=r2\n" <>
+            "BPSTAGE name=ROUTE status=failed build_id=r2 detail=\"caddy validate rejected the block\"\n",
+        log: "done\n"
+      )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {echo_script("inactive"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+      status = GenServer.call(pid, {:status, "route-failed"})
+
+      assert status.route_status == "failed"
+      assert status.route_detail =~ "caddy validate rejected the block"
+
+      # The guard this test exists for: were ROUTE admitted to `@stage_names`,
+      # `deploy_outcome/2` would find a `failed` stage, hand `stage_exit_code/1`
+      # a name it has no clause for, and report exit_code -1 with a failure
+      # reason on a run that SWITCHed cleanly.
+      assert Enum.map(status.stages, & &1.name) == ~w(PLAN SWITCH)
+      assert status.exit_code == 0
+      assert status.failure_reason == nil
+    end
+
+    test "no ROUTE line at all reports nil — an honest 'nobody measured this', not a passing zero" do
+      dir = run_dir()
+
+      seed_manifest(dir, "route-silent",
+        build_id: "r3",
+        status:
+          "BPSTAGE name=PLAN status=ok build_id=r3\nBPSTAGE name=SWITCH status=ok build_id=r3\n",
+        log: "done\n"
+      )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {echo_script("inactive"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+      status = GenServer.call(pid, {:status, "route-silent"})
+
+      assert status.route_status == nil
+      assert status.route_detail == nil
+    end
+  end
+
   # ── control-plane System.cmd deadlines (never wedge the singleton) ─────────
   #
   # (felix W21) The three synchronous ctl commands — systemd-run (in {:trigger}),

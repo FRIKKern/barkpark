@@ -133,6 +133,8 @@
 # bash 3.2 compatible (macOS system bash).
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 # set -m FIRST (PDF-D28): job control gives any backgrounded helper its OWN
 # process group — the skeleton is transcribed from the donor proofs verbatim.
 set -m
@@ -240,32 +242,32 @@ fsub() { LC_ALL=C awk -v a="$1" -v b="$2" 'BEGIN{printf "%.2f", a - b}'; }
 ADMIN_TOKEN=""; CLOUD_TOKEN=""; APP_TOKEN=""; BP=""
 
 main_get() { # path -> body (guerrilla admin bearer)
-  curl -sS --max-time 25 -H "Authorization: Bearer $ADMIN_TOKEN" "$MAIN_BASE$1"
+  bp_curl_body -sS --max-time 25 -H "Authorization: Bearer $ADMIN_TOKEN" "$MAIN_BASE$1"
 }
 
 main_post_code() { # path json-body outfile bearer -> http code
-  curl -sS --max-time 25 -o "$3" -w '%{http_code}' -X POST "$1" \
+  bp_curl_code -sS --max-time 25 -o "$3" -X POST "$1" \
     -H "Authorization: Bearer $4" -H 'Content-Type: application/json' \
     -d "$2" 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
 anon_post_code() { # url -> http code, anonymous POST {} (probe: writes nothing)
-  curl -sS --max-time 25 -o /dev/null -w '%{http_code}' -X POST "$1" \
+  bp_curl_code -sS --max-time 25 -o /dev/null -X POST "$1" \
     -H 'Content-Type: application/json' -d '{}' 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
 cp_get() { # path -> body (cloud bearer)
-  curl -sS --max-time 25 -H "Authorization: Bearer $CLOUD_TOKEN" "$CP_BASE$1"
+  bp_curl_body -sS --max-time 25 -H "Authorization: Bearer $CLOUD_TOKEN" "$CP_BASE$1"
 }
 
 cp_post_code() { # path json-body outfile -> http code (cloud bearer)
-  curl -sS --max-time 30 -o "$3" -w '%{http_code}' -X POST "$CP_BASE$1" \
+  bp_curl_code -sS --max-time 30 -o "$3" -X POST "$CP_BASE$1" \
     -H "Authorization: Bearer $CLOUD_TOKEN" -H 'Content-Type: application/json' \
     -d "$2" 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
 cp_delete_code() { # path outfile -> http code (cloud bearer)
-  curl -sS --max-time 30 -o "$2" -w '%{http_code}' -X DELETE "$CP_BASE$1" \
+  bp_curl_code -sS --max-time 30 -o "$2" -X DELETE "$CP_BASE$1" \
     -H "Authorization: Bearer $CLOUD_TOKEN" 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
@@ -291,22 +293,22 @@ JMAIN_URL=""; JMAIN_TOKEN=""
 JTEAM_TOKEN=""; JTEAM_ID=""
 
 jcp_get() { # path -> body (journey-team session bearer)
-  curl -sS --max-time 25 -H "Authorization: Bearer $JTEAM_TOKEN" "$CP_BASE$1"
+  bp_curl_body -sS --max-time 25 -H "Authorization: Bearer $JTEAM_TOKEN" "$CP_BASE$1"
 }
 
 jcp_post_code() { # path json-body outfile -> http code (journey-team session)
-  curl -sS --max-time 30 -o "$3" -w '%{http_code}' -X POST "$CP_BASE$1" \
+  bp_curl_code -sS --max-time 30 -o "$3" -X POST "$CP_BASE$1" \
     -H "Authorization: Bearer $JTEAM_TOKEN" -H 'Content-Type: application/json' \
     -d "$2" 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
 jcp_delete_code() { # path outfile -> http code (journey-team session)
-  curl -sS --max-time 30 -o "$2" -w '%{http_code}' -X DELETE "$CP_BASE$1" \
+  bp_curl_code -sS --max-time 30 -o "$2" -X DELETE "$CP_BASE$1" \
     -H "Authorization: Bearer $JTEAM_TOKEN" 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
 jroster() { # the R1 main's roster (the journey truth for R2-R5)
-  curl -sS --max-time 25 -H "Authorization: Bearer $JMAIN_TOKEN" \
+  bp_curl_body -sS --max-time 25 -H "Authorization: Bearer $JMAIN_TOKEN" \
     "$JMAIN_URL/v1/fleet/roster?dataset=$DATASET"
 }
 
@@ -865,7 +867,7 @@ if [ "${MINT_ANON:-000}" != "401" ]; then
   exit 2
 fi
 ROSTER_TMP="$WORKDIR/roster-r0.json"
-PRECODE="$(curl -sS -o "$ROSTER_TMP" -w '%{http_code}' --max-time 25 \
+PRECODE="$(bp_curl_code -sS -o "$ROSTER_TMP" --max-time 25 \
   -H "Authorization: Bearer $ADMIN_TOKEN" "$MAIN_BASE/v1/fleet/roster?dataset=$DATASET" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
 ENVELOPE_OK="$(python3 -c '
 import json, sys
@@ -982,7 +984,7 @@ REG_EMAIL="bolla+$MAIN_NAME@jarl.no"
 REG_PASS="$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')"
 REG_OUT="$WORKDIR/register.json"
 say "  1a \$ POST $CP_BASE/v1/auth/register {email:$REG_EMAIL, team_name:$MAIN_NAME} (password random, never printed)"
-RCODE="$(curl -sS --max-time 30 -o "$REG_OUT" -w '%{http_code}' -X POST "$CP_BASE/v1/auth/register" \
+RCODE="$(bp_curl_code -sS --max-time 30 -o "$REG_OUT" -X POST "$CP_BASE/v1/auth/register" \
   -H 'Content-Type: application/json' \
   -d "{\"email\":\"$REG_EMAIL\",\"password\":\"$REG_PASS\",\"team_name\":\"$MAIN_NAME\"}" 2>/dev/null | tr -dc '0-9' | tail -c 3)"
 JTEAM_TOKEN="$(python3 -c '
@@ -1074,7 +1076,7 @@ say "      LIVE MAIN: id=$MAIN_ID url=$MAIN_URL host=$HOST health=$HEALTH"
 # reads + the phantom row + the teardown legs run against THE JOURNEY MAIN with
 # this bearer (the support's roster row lives THERE, never on guerrilla).
 CRED_OUT="$WORKDIR/credentials.json"
-CCODE="$(curl -sS --max-time 25 -o "$CRED_OUT" -w '%{http_code}' \
+CCODE="$(bp_curl_code -sS --max-time 25 -o "$CRED_OUT" \
   -H "Authorization: Bearer $JTEAM_TOKEN" "$CP_BASE/v1/barkparks/$MAIN_ID/credentials" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
 JMAIN_TOKEN="$(python3 -c '
 import json, sys
@@ -1402,7 +1404,7 @@ info "watch target: $WATCH_TARGET (budget ${WATCH_BUDGET}s) — the NAMED KEY RU
 DEADLINE_EPOCH="$(python3 -c "import time; print(int(time.time()) + $WATCH_BUDGET)")"
 STAGE=""; PARITY_OK=1; PARITY_N=0
 while :; do
-  TASK_JSON="$(curl -sS --max-time 20 -H "Authorization: Bearer $APP_TOKEN" "$MAIN_URL/v1/tasks/$ORDER_ID" 2>/dev/null || true)"
+  TASK_JSON="$(bp_curl_body -sS --max-time 20 -H "Authorization: Bearer $APP_TOKEN" "$MAIN_URL/v1/tasks/$ORDER_ID" 2>/dev/null || true)"
   LC="$(printf '%s' "$TASK_JSON" | python3 -c '
 import json, sys
 try:
@@ -1417,7 +1419,7 @@ print(doc.get("lifecycle_status") or c.get("lifecycle_status") or "")' 2>/dev/nu
   # MAIN-parity probe DURING execution: the JOURNEY main answers its roster read
   # fresh while the support works — offloading must not degrade the main.
   PARITY_N=$((PARITY_N + 1))
-  PCODE="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $JMAIN_TOKEN" "$JMAIN_URL/v1/fleet/roster?dataset=$DATASET" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
+  PCODE="$(bp_curl_code -sS --max-time 15 -o /dev/null -H "Authorization: Bearer $JMAIN_TOKEN" "$JMAIN_URL/v1/fleet/roster?dataset=$DATASET" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
   [ "${PCODE:-000}" = "200" ] || PARITY_OK=""
   # Derive the stage: task lifecycle is authoritative; roster adds live 'working'.
   case "$LC" in
@@ -1483,7 +1485,7 @@ except Exception:
     print("")' "$PROBE_OUT")"
 PROBE_BEFORE=""
 if [ -n "$PROBE_SECRET" ]; then
-  PROBE_BEFORE="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST "$JMAIN_URL/v1/fleet/support-tokens" \
+  PROBE_BEFORE="$(bp_curl_code -sS --max-time 20 -o /dev/null -X POST "$JMAIN_URL/v1/fleet/support-tokens" \
     -H "Authorization: Bearer $PROBE_SECRET" -H 'Content-Type: application/json' -d '{"name":""}' 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
   info "probe token minted on the journey main (HTTP ${PMCODE:-000}; ${#PROBE_SECRET} bytes, never printed); pre-revoke probe on the admin-gated mint endpoint -> HTTP ${PROBE_BEFORE:-000} (want 403)"
 else
@@ -1523,9 +1525,9 @@ say "      FOUR-SURFACE CENSUS (this harness's own re-reads — delete receipts 
 #    (custody gap, filed) — it dies with the main's deprovision below.
 if [ -n "$PROBE_SECRET" ] && [ -n "$PROBE_ID" ]; then
   RVOUT="$WORKDIR/probe-revoke.json"
-  RVCODE="$(curl -sS --max-time 20 -o "$RVOUT" -w '%{http_code}' -X DELETE "$JMAIN_URL/v1/fleet/support-tokens/$PROBE_ID" \
+  RVCODE="$(bp_curl_code -sS --max-time 20 -o "$RVOUT" -X DELETE "$JMAIN_URL/v1/fleet/support-tokens/$PROBE_ID" \
     -H "Authorization: Bearer $JMAIN_TOKEN" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
-  PROBE_AFTER="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST "$JMAIN_URL/v1/fleet/support-tokens" \
+  PROBE_AFTER="$(bp_curl_code -sS --max-time 20 -o /dev/null -X POST "$JMAIN_URL/v1/fleet/support-tokens" \
     -H "Authorization: Bearer $PROBE_SECRET" -H 'Content-Type: application/json' -d '{"name":""}' 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
   info "1. token probe (admin-gated mint endpoint, journey main): ${PROBE_BEFORE:-?} before revoke, DELETE -> ${RVCODE:-000}, ${PROBE_AFTER:-000} after — want 403 → 401"
   [ "${PROBE_BEFORE:-000}" = "403" ] || efail "the pre-revoke probe read ${PROBE_BEFORE:-000}, want 403 — the revocation probe proved nothing"
