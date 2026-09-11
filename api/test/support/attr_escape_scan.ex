@@ -307,6 +307,29 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
     end
   end
 
+  # `case <subject> do … s -> …` — a variable bound by a clause PATTERN carries
+  # the subject's verdict, so a proven-safe subject makes its pattern vars safe.
+  # This is what discharges the slug idiom the api-endpoint fix introduced:
+  # `case slugified do "" -> lit; s -> lit <> s end`.
+  defp classify_node({:case, _, [subject, [do: clauses]]}, ctx) when is_list(clauses) do
+    subject_verdict = classify(subject, bump(ctx))
+
+    clauses
+    |> Enum.map(fn
+      {:->, _, [pattern, body]} ->
+        ctx =
+          if subject_verdict == :unproven,
+            do: ctx,
+            else: %{ctx | allow: MapSet.union(ctx.allow, pattern_vars(pattern))}
+
+        classify(last_expr(body), bump(ctx))
+
+      other ->
+        classify(other, bump(ctx))
+    end)
+    |> verdict(:branches)
+  end
+
   # case / cond / if / unless / with: every branch result must be safe
   defp classify_node({kind, _, args}, ctx) when kind in [:case, :cond, :if, :unless, :with] do
     args
@@ -537,6 +560,16 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
   end
 
   defp bump(ctx), do: %{ctx | depth: ctx.depth + 1}
+
+  defp pattern_vars(pattern) do
+    pattern
+    |> collect(fn
+      {name, _, c} when is_atom(name) and is_atom(c) -> [Atom.to_string(name)]
+      _ -> []
+    end)
+    |> Enum.reject(&String.starts_with?(&1, "_"))
+    |> MapSet.new()
+  end
 
   # A list of literals: `~w(a b c)`, `["a", "b"]`, or a module attribute (a
   # compile-time constant — author text cannot reach one).
