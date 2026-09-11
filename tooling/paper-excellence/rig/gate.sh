@@ -5,6 +5,7 @@
 #   bash tooling/paper-excellence/rig/gate.sh --panel [out-dir]
 #   bash tooling/paper-excellence/rig/gate.sh --check [fixture.json] [out-dir]
 #   bash tooling/paper-excellence/rig/gate.sh --panel --check
+#   bash tooling/paper-excellence/rig/gate.sh --panel --stop-on-first-failure
 #
 # Renders a COMMITTED fixture through the real PortableDoc renderer + the real
 # bulldocs layout, photographs it at 8 (2 schemes x 4 widths) cells, and exits
@@ -14,6 +15,20 @@
 #   --panel   run EVERY committed fixture (fixtures/*.json) in one command
 #   --check   also diff this run's MEASUREMENTS against the committed
 #             baselines/<slug>.report.json — see §Report check below
+#   --stop-on-first-failure
+#             panel only: abandon the census at the first failing fixture
+#             (the pre-2026-09-11 behaviour; see §Census below)
+#
+# §Census — a panel run is a CENSUS, not a build gate. Until 2026-09-11 the
+# fixture loop ran under `set -e`, so ONE failing fixture aborted the whole
+# command and the run never reached — or mentioned — the fixtures behind it. A
+# known-red fixture at position 5 of 9 made the back half structurally
+# invisible, and because the only summary line printed after the loop, a
+# truncated run had no summary at all and read as complete. Now --panel keeps
+# going by default, prints one verdict line per fixture, closes with
+# "N committed, N attempted, M passed, K failed" (naming anything NOT REACHED),
+# and exits 1 at the END if any fixture failed. The census line is printed from
+# an EXIT trap, so even a hard abort states its own coverage.
 #
 # Paths are resolved to ABSOLUTE before the `cd api` below. A repo-relative
 # fixture path used to die inside render.exs, which `File.read!`s the path
@@ -77,6 +92,7 @@ abspath() {
 
 PANEL=0
 CHECK=0
+KEEP_GOING=1
 FIXTURE_ARG=""
 OUT_DIR_ARG=""
 POSITIONAL=0
@@ -85,8 +101,9 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --panel | --all) PANEL=1 ;;
     --check) CHECK=1 ;;
+    --stop-on-first-failure) KEEP_GOING=0 ;;
     -h | --help)
-      sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     -*) die "unknown flag $1 (see --help)" ;;
@@ -135,8 +152,16 @@ for FIXTURE in "${FIXTURES[@]}"; do
 done
 
 TOTAL_SHOTS=0
+ATTEMPTED=0
+PASSED=0
+VERDICTS=()
+CENSUS_PRINTED=0
 
-for FIXTURE in "${FIXTURES[@]}"; do
+# One fixture, end to end. Returns nonzero instead of exiting so the panel can
+# keep going; every step is checked explicitly because `if run_fixture …`
+# switches errexit OFF inside the function body.
+run_fixture() {
+  FIXTURE="$1"
   LABEL="$(basename "$FIXTURE" .json)"
   RENDERED="$OUT_DIR/$LABEL.html"
   REPORT="$SHOTS_DIR/$LABEL.report.json"
@@ -146,20 +171,32 @@ for FIXTURE in "${FIXTURES[@]}"; do
   # 1. Hermetic render. MIX_ENV=test + --no-start: the Repo never starts and the
   #    Endpoint never opens a socket (config/test.exs sets server: false).
   #    CC=clang because a `cc` shell alias can shadow the C compiler here.
-  ( cd "$REPO_ROOT/api" && CC=clang MIX_ENV=test mix run --no-start \
-      "$RIG_DIR/render.exs" "$FIXTURE" "$RENDERED" )
+  if ! ( cd "$REPO_ROOT/api" && CC=clang MIX_ENV=test mix run --no-start \
+      "$RIG_DIR/render.exs" "$FIXTURE" "$RENDERED" ); then
+    echo "rig/gate: FAIL — $LABEL: render.exs exited nonzero" >&2
+    return 1
+  fi
 
   # 2. Screenshot + DOM-content assertions. --check pins the capture to the
   #    baseline env so the fresh report is comparable to the committed one.
   if [ "$CHECK" = 1 ]; then
-    SHOT_FORMAT=jpeg SHOT_QUALITY=72 SHOT_WIDTHS=1280,1920 \
-      node "$RIG_DIR/shoot.mjs" "$RENDERED" "$SHOTS_DIR" "$LABEL"
+    if ! SHOT_FORMAT=jpeg SHOT_QUALITY=72 SHOT_WIDTHS=1280,1920 \
+      node "$RIG_DIR/shoot.mjs" "$RENDERED" "$SHOTS_DIR" "$LABEL"; then
+      echo "rig/gate: FAIL — $LABEL: shoot.mjs exited nonzero" >&2
+      return 1
+    fi
   else
-    node "$RIG_DIR/shoot.mjs" "$RENDERED" "$SHOTS_DIR" "$LABEL"
+    if ! node "$RIG_DIR/shoot.mjs" "$RENDERED" "$SHOTS_DIR" "$LABEL"; then
+      echo "rig/gate: FAIL — $LABEL: shoot.mjs exited nonzero" >&2
+      return 1
+    fi
   fi
 
   # 3. This run's shot count, from the report this run wrote.
-  RUN_SHOTS="$(node -e 'const fs=require("fs");process.stdout.write(String(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).shots.length))' "$REPORT")"
+  if ! RUN_SHOTS="$(node -e 'const fs=require("fs");process.stdout.write(String(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).shots.length))' "$REPORT")"; then
+    echo "rig/gate: FAIL — $LABEL: could not read shot count from $REPORT" >&2
+    return 1
+  fi
   TOTAL_SHOTS=$((TOTAL_SHOTS + RUN_SHOTS))
 
   # 4. Optional: the committed measurements are the oracle.
@@ -168,14 +205,66 @@ for FIXTURE in "${FIXTURES[@]}"; do
     if [ ! -f "$BASELINE" ]; then
       echo "rig/gate: FAIL — $LABEL has no committed baseline report at $BASELINE" >&2
       echo "rig/gate:        run \`bash tooling/paper-excellence/rig/baseline.sh $LABEL\` first" >&2
-      exit 1
+      return 1
     fi
-    node "$RIG_DIR/shoot.mjs" --report-diff "$BASELINE" "$REPORT"
+    if ! node "$RIG_DIR/shoot.mjs" --report-diff "$BASELINE" "$REPORT"; then
+      echo "rig/gate: FAIL — $LABEL: measurements drifted from $BASELINE" >&2
+      return 1
+    fi
   fi
 
   echo "rig/gate: PASS — $RENDERED + $RUN_SHOTS shots in $SHOTS_DIR"
+  return 0
+}
+
+# The run states its own coverage — from an EXIT trap, so a truncated or
+# aborted panel can never read as a complete one.
+panel_census() {
+  [ "$CENSUS_PRINTED" = 0 ] || return 0
+  CENSUS_PRINTED=1
+  echo "rig/gate: --- panel census ---"
+  if [ "${#VERDICTS[@]}" -gt 0 ]; then
+    for V in "${VERDICTS[@]}"; do
+      echo "rig/gate:   $V"
+    done
+  fi
+  NOT_REACHED=""
+  I=0
+  for F in "${FIXTURES[@]}"; do
+    I=$((I + 1))
+    if [ "$I" -gt "$ATTEMPTED" ]; then
+      NOT_REACHED="$NOT_REACHED $(basename "$F" .json)"
+    fi
+  done
+  echo "rig/gate: panel: ${#FIXTURES[@]} fixtures committed, $ATTEMPTED attempted, $PASSED passed, $((ATTEMPTED - PASSED)) failed, $TOTAL_SHOTS shots in $SHOTS_DIR"
+  if [ -n "$NOT_REACHED" ]; then
+    echo "rig/gate: panel: $((${#FIXTURES[@]} - ATTEMPTED)) fixture(s) NOT REACHED —$NOT_REACHED" >&2
+  fi
+}
+
+if [ "$PANEL" = 1 ]; then
+  trap panel_census EXIT
+fi
+
+for FIXTURE in "${FIXTURES[@]}"; do
+  LABEL="$(basename "$FIXTURE" .json)"
+  ATTEMPTED=$((ATTEMPTED + 1))
+  if run_fixture "$FIXTURE"; then
+    PASSED=$((PASSED + 1))
+    VERDICTS+=("PASS  $LABEL")
+  else
+    VERDICTS+=("FAIL  $LABEL")
+    if [ "$KEEP_GOING" = 0 ]; then
+      echo "rig/gate: --stop-on-first-failure — abandoning the census at $LABEL" >&2
+      break
+    fi
+  fi
 done
 
-if [ "${#FIXTURES[@]}" -gt 1 ]; then
-  echo "rig/gate: PASS — ${#FIXTURES[@]} fixtures, $TOTAL_SHOTS shots in $SHOTS_DIR"
+if [ "$PANEL" = 1 ]; then
+  panel_census
+  trap - EXIT
 fi
+
+[ "$PASSED" = "$ATTEMPTED" ] || exit 1
+[ "$ATTEMPTED" = "${#FIXTURES[@]}" ] || exit 1
