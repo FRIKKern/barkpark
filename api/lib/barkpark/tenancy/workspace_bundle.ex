@@ -625,7 +625,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           reraise finalize_lock_error(e, attempt, false), __STACKTRACE__
 
         attempt >= budget ->
-          reraise finalize_lock_error(e, budget, true), __STACKTRACE__
+          # `attempt`, not `budget`: the count is a MEASUREMENT of what was
+          # spent, not a restatement of the configured ceiling.
+          reraise finalize_lock_error(e, attempt, true), __STACKTRACE__
 
         true ->
           backoff = import_lock_backoff_ms(attempt)
