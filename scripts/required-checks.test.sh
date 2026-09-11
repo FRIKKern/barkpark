@@ -2514,7 +2514,17 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Does this diff touch the Astro finder surface?"
         --expect-unrendered "Finder island renders (headless chromium)"
         --expect-unrendered "bp-curl.sh 429 backoff matrix"
-        --expect-unrendered "console-refusal-capture.mjs controls")
+        --expect-unrendered "console-refusal-capture.mjs controls"
+        # ── 2026-09-11 (task-ea3c175c60dffec6): cloud.yml's `census` job
+        # (`name: Cloud reader-corpus census`) landed in #17595 at 02:40Z,
+        # AFTER the #17596 registry cut, so `Required-check spec drift
+        # (advisory)` reported it `unaccounted` on run 34555135817. It is an
+        # S3 SUBSUMED row — cloud.yml:555 `needs: [changes, compile, test,
+        # census, path-escape]` on the required `Cloud gate` — and it postdates
+        # the frozen pair (2026-07-31), so this window can never render it.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
+        # exactly this one as MISSING ACK_EX before it was typed here.
+        --expect-unrendered "Cloud reader-corpus census")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
