@@ -32075,3 +32075,135 @@ test("cchi-w61-bl: the console harness runs on the Node cloud/priv/static/__node
     `change the declaration deliberately (console-runtime-pin-check.sh will then ` +
     `require console-harness.yml's console-unit job to follow).`);
 });
+
+// ── cloud-console-user-security-log: the account modal's Security log ────────
+// The user-scoped trail (GET /v1/me/security-events) rendered beside Sessions.
+// Everything asserted here is a property the render could plausibly get wrong:
+// a verb the console has never heard of painted as a confident sentence, an
+// empty trail and a FAILED fetch painting the same reassuring blank, the IP
+// column leaking onto a security surface where it is uniform garbage (GR81),
+// and a fold whose count is retyped rather than derived.
+test("security log: the five verbs read as sentences and an unknown verb falls through to its slug", () => {
+  assert.equal(hooks.securityEventLabel("password_changed"), "Password changed");
+  assert.equal(hooks.securityEventLabel("two_factor_disabled"),
+    "Two-factor authentication turned off");
+  assert.equal(hooks.securityEventLabel("session_revoked"), "A device was signed out");
+  assert.equal(hooks.securityEventLabel("sessions_revoked_everywhere"), "Signed out everywhere");
+  assert.equal(hooks.securityEventLabel("email_changed"), "Email address changed");
+
+  // A verb this console has never heard of must read as "something I do not
+  // recognise happened" — never as the nearest friendly sentence.
+  assert.equal(hooks.securityEventLabel("account_deleted"), "account_deleted");
+  assert.equal(hooks.securityEventLabel(""), "Unknown change");
+  assert.equal(hooks.securityEventLabel(undefined), "Unknown change");
+});
+
+test("security log: the detail line carries the former email and the revoked count, and nothing else", () => {
+  assert.equal(
+    hooks.securityEventDetail({ action: "email_changed", metadata: { previous_email: "old@x.io" } }),
+    "from old@x.io");
+  assert.equal(
+    hooks.securityEventDetail({ action: "sessions_revoked_everywhere", metadata: { revoked: 3 } }),
+    "3 other devices");
+  assert.equal(
+    hooks.securityEventDetail({ action: "sessions_revoked_everywhere", metadata: { revoked: 1 } }),
+    "1 other device");
+  // Zero is a number, and "0 other devices" is the honest answer — not "".
+  assert.equal(
+    hooks.securityEventDetail({ action: "sessions_revoked_everywhere", metadata: { revoked: 0 } }),
+    "0 other devices");
+  // No filler: a verb with nothing extra to say says nothing extra.
+  assert.equal(hooks.securityEventDetail({ action: "password_changed", metadata: {} }), "");
+  assert.equal(hooks.securityEventDetail({}), "");
+  assert.equal(hooks.securityEventDetail(null), "");
+});
+
+test("security log: GR81 — the row never paints the stored ip, and hostile fields are escaped", () => {
+  const row = hooks.securityEventRowHtml({
+    id: "ev_1",
+    action: "password_changed",
+    ip: "172.18.0.1",
+    user_agent: "Mozilla/5.0 (Macintosh) Chrome/120",
+    metadata: {},
+    inserted_at: new Date().toISOString(),
+  });
+
+  // The IP is stored server-side and deliberately suppressed here: every
+  // control-plane request arrives from the Docker bridge gateway, so the value
+  // is identical for every client and can never separate "me" from "a stranger".
+  assert.ok(!row.includes("172.18.0.1"),
+    "GR81: the uniform bridge IP must not appear on a security surface: " + row);
+  assert.ok(row.includes("Password changed"));
+  assert.ok(row.includes("Chrome"), "the device label is the recognisable fact that survives");
+  // No control on a row that records something already done.
+  assert.ok(!row.includes("<button"), "a past event offers no action");
+
+  const nasty = hooks.securityEventRowHtml({
+    action: "email_changed",
+    metadata: { previous_email: "<script>alert(1)</script>@x.io" },
+    user_agent: "<img src=x onerror=1>",
+    inserted_at: new Date().toISOString(),
+  });
+  assert.ok(!nasty.includes("<script>"), "the former address is escaped: " + nasty);
+  assert.ok(!nasty.includes("<img"), "the user agent is escaped: " + nasty);
+});
+
+test("security log: an empty trail says what empty MEANS, and the fold count is derived", () => {
+  const empty = hooks.securityLogHtml([], false);
+  assert.ok(empty.includes("No sensitive changes recorded yet"),
+    "an empty log must state what empty means, not render a blank box: " + empty);
+  assert.ok(!empty.includes("session-row"));
+
+  const mk = (n) => Array.from({ length: n }, (_, i) => ({
+    id: "ev_" + i, action: "password_changed", user_agent: "barkpark-cli/0.9",
+    metadata: {}, inserted_at: new Date().toISOString(),
+  }));
+
+  const five = hooks.securityLogHtml(mk(5), false);
+  assert.equal((five.match(/class="session-row"/g) || []).length, 5);
+  assert.ok(!five.includes("security-log-fold"), "five rows must not grow a fold button");
+
+  const nine = hooks.securityLogHtml(mk(9), false);
+  assert.equal((nine.match(/class="session-row"/g) || []).length, 5);
+  assert.ok(nine.includes(">Show 4 more events<"), "the count must match the hidden tail: " + nine);
+  assert.ok(nine.includes('aria-expanded="false"'));
+  assert.ok(hooks.securityLogHtml(mk(6), false).includes(">Show 1 more event<"),
+    "one hidden row is an event, not events");
+
+  const open = hooks.securityLogHtml(mk(9), true);
+  assert.equal((open.match(/class="session-row"/g) || []).length, 9);
+  assert.ok(open.includes(">Show fewer<") && open.includes('aria-expanded="true"'));
+});
+
+test("security log: the modal mounts it, and a failed read never paints as an empty trail", () => {
+  // The section exists in the modal body, with the box the loader writes into.
+  const modal = hooks.accountModalHtml({ name: "Ada", email: "ada@x.io" }, "loaded");
+  assert.ok(modal.includes('id="security-log-box"'),
+    "the account modal must mount the security log box");
+  assert.ok(modal.includes(">Security log<"), "the section needs its heading");
+  // It sits beside Sessions, not somewhere else in the modal.
+  assert.ok(modal.indexOf('id="sessions-box"') < modal.indexOf('id="security-log-box"'),
+    "the security log belongs directly under Sessions");
+
+  // The DOM mount has no pure seam, so this arm reads source (same technique the
+  // sessions-fold arm above uses).
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function loadSecurityLog("));
+  const body = fn.slice(0, fn.indexOf("\n  // PUT /v1/account/password"));
+  assert.ok(body.includes('api("GET", "/v1/me/security-events")'),
+    "loadSecurityLog must read the user-scoped route");
+  assert.ok(body.includes('querySelector("#security-log-fold")'),
+    "loadSecurityLog must delegate the fold toggle through #security-log-fold");
+  // THE LOAD-BEARING ARM: a failed fetch and an empty trail must not paint the
+  // same thing. "Nothing has changed on your account" is exactly the
+  // reassurance a reader would wrongly take from a silent blank box.
+  assert.ok(body.includes("load your security log"),
+    "a failed read must say so: " + body);
+  assert.ok(!body.includes("No sensitive changes recorded yet"),
+    "the failure arm must not borrow the empty-state sentence");
+
+  // And the modal opener actually calls it — a render nothing invokes is dead.
+  const opener = src.slice(src.indexOf("function openAccountModal("));
+  assert.ok(opener.slice(0, 2000).includes("loadSecurityLog()"),
+    "openAccountModal must load the security log");
+});

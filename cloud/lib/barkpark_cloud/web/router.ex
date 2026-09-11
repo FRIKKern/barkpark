@@ -1713,12 +1713,30 @@ defmodule BarkparkCloud.Web.Router do
       metadata: metadata
     }
 
-    case Accounts.record_user_security_event(attrs) do
-      {:ok, _event} ->
-        :ok
+    # THE RESCUE IS THE BEST-EFFORT PROMISE, IN CODE. `Repo.insert/1` returns
+    # `{:error, changeset}` only for the constraints Ecto models; a DB-level
+    # refusal (22001 on an oversize column, a dead pool) RAISES, and a raise here
+    # turns a completed password rotation into a 500 — the exact outcome the
+    # comment above says must never happen. Measured, not theorised: before the
+    # migration sized `user_agent`, a 1012-character User-Agent aborted
+    # `DELETE /v1/account/sessions` with a Postgrex 22001 AFTER every session was
+    # already revoked. Both halves shipped; this one is the one that holds when
+    # the next unmodelled refusal arrives.
+    try do
+      case Accounts.record_user_security_event(attrs) do
+        {:ok, _event} ->
+          :ok
 
-      {:error, cs} ->
-        Logger.error("user security event #{action} failed for #{user.id}: #{inspect(cs)}")
+        {:error, cs} ->
+          Logger.error("user security event #{action} failed for #{user.id}: #{inspect(cs)}")
+          :ok
+      end
+    rescue
+      e ->
+        Logger.error(
+          "user security event #{action} raised for #{user.id}: #{Exception.message(e)}"
+        )
+
         :ok
     end
   end

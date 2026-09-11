@@ -32,7 +32,12 @@ defmodule BarkparkCloud.Repo.Migrations.CreateUserSecurityEvents do
 
       add :action, :string, null: false
       add :ip, :string
-      add :user_agent, :string
+      # SIZED, not defaulted. `add :user_agent, :string` is varchar(255) while
+      # `UserSecurityEvent.user_agent_max/0` truncates at 512 — a 300-char UA
+      # would pass the changeset and then abort in Postgres with 22001. Measured:
+      # it 500'd `DELETE /v1/account/sessions` in this slice's own test before
+      # the size landed. The two numbers are one number now.
+      add :user_agent, :string, size: 512
       add :metadata, :map, null: false, default: %{}
 
       timestamps(type: :utc_datetime_usec, updated_at: false)
