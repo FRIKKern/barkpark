@@ -13828,3 +13828,57 @@ instead of greening a box that cannot build.
   Closes `dr-w27-bl-d375-freeze-date-is-false-on-main` and `dr-w26-bl-d375-frozen-numerator-corrected`.
   Every figure in this entry is a 2026-08-09 reading; none of it is re-measurable from a developer Mac, which
   is itself the reason the COMMAND and the DATE travel with the number rather than the number travelling alone.
+### D608 — ROUTE GETS A NAMED SIBLING CHANNEL, NOT A SEAT IN `@stage_names`. THE WHITELIST IS A VERDICT LIST, AND ARMING IS A MEASUREMENT.
+
+**THE PREMISE, RE-DERIVED ON `origin/main` (`72ce16759`), NOT READ OFF THE FILING.** Both engines emit
+`BPSTAGE name=ROUTE status=<ok|failed> build_id=<id> detail="armed: …"` after their Caddy arming attempt
+(`deploy/site-deploy.sh:3982` `emit ROUTE ok` / `:3996` `emit ROUTE failed`, `deploy/site-deploy-node.sh:3572`
+`emit ROUTE ok`, with both engines' own self-tests pinning the wire at `site-deploy.sh:2377`-`:2525`). `emit()` (`deploy/lib/site-deploy-common.sh:55`-`:67`)
+writes that line to stdout and, when the transient unit named one, appends it to `$BARKPARK_SITE_STATUS_FILE` —
+**never** to `$BARKPARK_SITE_LOG_FILE`, which only `log()` writes. So `read_log_tail/1` structurally cannot carry
+it, and the file that DOES carry it is folded by `fold_status_file/2`, which passes every line through
+`parse_stage_line/2`'s `name in @stage_names` guard (`~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)`). ROUTE is not in
+that list, so the fold drops it. Wave 21's count — 0 of 19,327 console-carrying `deployments` rows mentioning
+ROUTE — is the downstream shadow of exactly that guard. **Premise confirmed; nothing in the tree had already
+routed it.**
+
+**THE RULING: A SIBLING CHANNEL.** ROUTE is NOT admitted to `@stage_names`. It gets `@route_re`,
+`parse_route_line/1`, `fold_route_file/1` and two keys — `route_status` / `route_detail` — on every status shape
+the runner forwards: `reconstruct/2`'s render, the durable terminal record, the record read-back, and `:idle`.
+This is the SERVED shape (`@served_re` + `fold_served_file/1` + `served_port`/`served_slot`) reused for the SERVED
+reason.
+
+**WHY, READ OFF THE CODE AND NOT OFF THE FILING.** `@stage_names` is not a display list; it is the gate into
+`stages`, and `stages` is what decides the run. `deploy_outcome/2`'s FIRST clause is
+`stages |> Enum.reverse() |> Enum.find(&(&1.status == "failed"))` → `{stage_exit_code(failed.name), terminal_reason(…)}`.
+`stage_exit_code/1` has clauses for PLAN/BUILD/STAGE/HEALTH/SWITCH and a catch-all `-1`. So admitting ROUTE would
+mean: a `ROUTE status=failed` line — which both engines DO emit, on a Caddy `validate` rejection, a lock refusal,
+or an unwritable Caddyfile, all of them NON-FATAL by the engines' own `return 1` discipline — sets the run's
+`exit_code` to `-1` ("abnormal end") and writes a `failure_reason`, on a deploy that had already emitted
+`SWITCH ok`. A doctrine change that silently converts a non-fatal arming miss into a failed deployment is not the
+invariant this row asked for: the criterion is *the decision REACHES the plane*, and whether an arming miss is
+FATAL is the open question `dr-w19-bl-arm-route-incidence-then-fatal` has not answered. A channel that forces the
+answer before the ruling is written is the same dishonesty this epic exists to stop.
+
+Three supporting reasons, each checkable:
+
+1. **The precedent is already in the tree and it points the other way.** SERVED is the node engine's slot
+   measurement; `deploy_runner.ex`'s own comment says *"SERVED is not in `@stage_names` above … it is a
+   measurement, never a verdict"*, and `api/test/barkpark_web/controllers/site_deploy_served_slot_test.exs:266`
+   PINS that — with the rationale written as *"the ROUTE precedent, charter D327"*. Admitting ROUTE would make a
+   live pin's stated reasoning false.
+2. **The whitelist buys nothing else.** `@stage_statuses` already contains `ok` and `failed`, and `@stage_re`
+   already matches ROUTE's shape. The ONLY thing a seat in `@stage_names` adds is verdict participation — the one
+   effect ruled out above.
+3. **It would be a doctrine change on a lane that cannot gate it.** `deploy_runner_stage_names_test.exs` is the
+   pin for that attribute and its required lane's path filter is `deploy/**` only; an `api/**`-only PR moving the
+   whitelist does not run it. The sibling channel leaves that pin and its shell half untouched and green — no pin
+   is moved, because none needs to be.
+
+**WHAT THIS ENTRY DOES NOT CLOSE.** The runner now forwards the arm decision; `render_status/1` in
+`api/lib/barkpark_web/controllers/site_deploy_controller.ex` does not yet serialize the two keys onto the
+`/v1/instance/site-deploy` door, and the prod API box is 10 days behind `main`, so no `deployments` row can carry
+a ROUTE outcome yet. `dr-w21-bl-route-decision-reaches-no-plane` c1 (a non-zero ROUTE count on the cloud
+`deployments` table over a stated window) and c3 (the incidence re-taken over a denominator in the hundreds,
+≥24h after the wave-20 marker repair) stay OPEN and are the successor's, in that order: serialize, deploy, then
+count. **D346 stands, un-amended: the arm decision had no durable channel. This entry builds one.**

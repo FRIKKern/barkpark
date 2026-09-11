@@ -207,6 +207,92 @@ defmodule BarkparkCloud.VercelTest do
 
       assert %{deployed: true, claim_url: nil} = Vercel.state(bp)
     end
+
+    # ── cch-w48: the claim-completion fact ────────────────────────────────
+    #
+    # Claiming a deployment is IRREVERSIBLE and happens entirely inside
+    # Vercel's UI. Before this, state/1 returned four keys and none of them
+    # was `claimed`, so after the transfer `deployed` was still true and
+    # `claim_url` was still fresh: the console repainted the identical claim
+    # link for up to 23h, then offered to re-mint one for a project the user
+    # already owned. The fact is READ through the client seam (never a local
+    # column — the mint stamp records only what WE did).
+
+    test "an undeployed instance is claimed: false with no platform call" do
+      {_token, team} = owner_token()
+      bp = bootstrapped_barkpark(team)
+
+      assert %{deployed: false, claimed: false} = Vercel.state(bp)
+    end
+
+    test "a deployed, un-transferred project reads claimed: false" do
+      {_token, team} = owner_token()
+      bp = bootstrapped_barkpark(team)
+      {:ok, _} = Vercel.deploy_for(bp)
+      bp = Repo.get!(BarkparkCloud.Registry.Barkpark, bp.id)
+
+      assert %{deployed: true, claimed: false} = Vercel.state(bp)
+    end
+
+    test "once the platform says the project LEFT our team, state carries claimed: true" do
+      {_token, team} = owner_token()
+      bp = bootstrapped_barkpark(team)
+      {:ok, _} = Vercel.deploy_for(bp)
+      bp = Repo.get!(BarkparkCloud.Registry.Barkpark, bp.id)
+
+      # The user completed the transfer on Vercel. Nothing local changed —
+      # which is exactly why the fact has to come from the client seam.
+      :ok = Fake.mark_claimed(bp.vercel_project_id)
+
+      state = Vercel.state(bp)
+      assert state.claimed == true
+      # The stored code is still FRESH: the old code would have repainted this
+      # claim link. The fact, not the link, is what the console now branches on.
+      assert is_binary(state.claim_url)
+    end
+
+    test "a failed completion read is nil — 'cannot tell', never 'not claimed'" do
+      {_token, team} = owner_token()
+      bp = bootstrapped_barkpark(team)
+      {:ok, _} = Vercel.deploy_for(bp)
+      bp = Repo.get!(BarkparkCloud.Registry.Barkpark, bp.id)
+
+      :ok = Fake.mark_unreadable(bp.vercel_project_id)
+
+      assert %{deployed: true, claimed: nil} = Vercel.state(bp)
+    end
+
+    test "the claimed fact survives a STALE code — the post-TTL arm can tell them apart" do
+      {_token, team} = owner_token()
+      bp = bootstrapped_barkpark(team)
+      {:ok, _} = Vercel.deploy_for(bp)
+
+      stale = DateTime.add(DateTime.utc_now(), -24 * 60 * 60, :second)
+
+      {:ok, bp} =
+        Repo.get!(BarkparkCloud.Registry.Barkpark, bp.id)
+        |> Ecto.Changeset.change(%{vercel_claim_minted_at: stale})
+        |> Repo.update()
+
+      :ok = Fake.mark_claimed(bp.vercel_project_id)
+
+      # claim_url nil (stale) AND claimed true: the two facts are orthogonal,
+      # and only the second one stops the re-mint offer.
+      assert %{claim_url: nil, claimed: true} = Vercel.state(bp)
+    end
+  end
+
+  describe "Fake.claimed?/1" do
+    test "defaults to false; mark_claimed/1 and mark_unreadable/1 drive the other two answers" do
+      assert {:ok, false} = Fake.claimed?("prj_1")
+
+      :ok = Fake.mark_claimed("prj_1")
+      assert {:ok, true} = Fake.claimed?("prj_1")
+      assert {:ok, false} = Fake.claimed?("prj_2")
+
+      :ok = Fake.mark_unreadable("prj_2")
+      assert {:error, :read_failed} = Fake.claimed?("prj_2")
+    end
   end
 
   ## Real client — pure request builders (no network, ever)
@@ -258,8 +344,19 @@ defmodule BarkparkCloud.VercelTest do
       assert req.url == "https://api.vercel.com/v9/projects/prj_1/transfer-request"
     end
 
+    test "project_request reads the project with our platform token (the completion read)" do
+      req = Real.project_request("vt_x", "prj_1")
+      assert req.method == :get
+      assert req.url == "https://api.vercel.com/v9/projects/prj_1"
+      assert {"Authorization", "Bearer vt_x"} in req.headers
+      assert req.body == ""
+    end
+
     test "callbacks fail closed without a platform token or HTTP client" do
       assert {:error, :not_configured} = Real.create_transfer_code("prj_1")
+      # The completion read fails CLOSED too: the context maps this to
+      # claimed: nil, i.e. "cannot tell" — never to "not claimed".
+      assert {:error, :not_configured} = Real.claimed?("prj_1")
     end
   end
 
@@ -341,8 +438,44 @@ defmodule BarkparkCloud.VercelTest do
       conn = call(:get, "/v1/barkparks/#{bp.id}/bootstrap", nil, token)
       assert conn.status == 200
 
-      assert %{"vercel" => %{"deployed" => true, "claim_url" => "https://" <> _}} =
-               json_body(conn)
+      assert %{
+               "vercel" => %{
+                 "deployed" => true,
+                 "claim_url" => "https://" <> _,
+                 "claimed" => false
+               }
+             } = json_body(conn)
+    end
+
+    # cch-w48: the console cannot branch on a fact the PAYLOAD drops. This is
+    # the end-to-end arm — the read happens in the router's process, which is
+    # the test process (Plug.Test), so the Fake's per-process flag reaches it.
+    test "a completed transfer reaches the console as vercel.claimed = true" do
+      configure_vercel!()
+      {token, team} = owner_token()
+      bp = bootstrapped_barkpark(team)
+      assert call(:post, "/v1/barkparks/#{bp.id}/vercel-deploy", %{}, token).status == 201
+
+      reloaded = Repo.get!(BarkparkCloud.Registry.Barkpark, bp.id)
+      :ok = Fake.mark_claimed(reloaded.vercel_project_id)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/bootstrap", nil, token)
+      assert conn.status == 200
+      assert %{"vercel" => %{"claimed" => true}} = json_body(conn)
+    end
+
+    test "an unreadable platform reaches the console as vercel.claimed = null" do
+      configure_vercel!()
+      {token, team} = owner_token()
+      bp = bootstrapped_barkpark(team)
+      assert call(:post, "/v1/barkparks/#{bp.id}/vercel-deploy", %{}, token).status == 201
+
+      reloaded = Repo.get!(BarkparkCloud.Registry.Barkpark, bp.id)
+      :ok = Fake.mark_unreadable(reloaded.vercel_project_id)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/bootstrap", nil, token)
+      assert conn.status == 200
+      assert %{"vercel" => %{"claimed" => nil}} = json_body(conn)
     end
   end
 end

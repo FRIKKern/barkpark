@@ -57,6 +57,8 @@
 # only be closed once per PREFIX).
 
 set -u
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 BP_SERVER="${BP_SERVER:-https://guerrilla.barkpark.cloud}"
 BP_TOKEN="${BP_TOKEN:-}"
 PREFIX="${PREFIX:-lvd-demo-$(date +%s)}"
@@ -95,28 +97,28 @@ wait_until() {
   done
 }
 graph_dependents_are() { # graph_dependents_are <doc_id> <n>
-  [ "$(curl -s "${AUTH[@]}" "$BP_SERVER/v1/graph/$1" | python3 -c "import json,sys;print(len(json.load(sys.stdin).get('dependents',[])))")" = "$2" ]
+  [ "$(bp_curl_body -s "${AUTH[@]}" "$BP_SERVER/v1/graph/$1" | python3 -c "import json,sys;print(len(json.load(sys.stdin).get('dependents',[])))")" = "$2" ]
 }
 graph_tasks_count_is() { # graph_tasks_count_is <doc_id> <n>
-  [ "$(curl -s "${AUTH[@]}" "$BP_SERVER/v1/graph/$1/tasks" | python3 -c "import json,sys;print(json.load(sys.stdin).get('count',0))")" = "$2" ]
+  [ "$(bp_curl_body -s "${AUTH[@]}" "$BP_SERVER/v1/graph/$1/tasks" | python3 -c "import json,sys;print(json.load(sys.stdin).get('count',0))")" = "$2" ]
 }
 
 say "Living Values §8 demo — server=$BP_SERVER prefix=$PREFIX ($V1 -> $V2)"
 
 # ── STEP 0: preflight ────────────────────────────────────────────────────────
-R=$(curl -s "${AUTH[@]}" "$BP_SERVER/v1/capabilities" | grep -o '"auth_tier":"[a-z]*"' | head -1)
+R=$(bp_curl_body -s "${AUTH[@]}" "$BP_SERVER/v1/capabilities" | grep -o '"auth_tier":"[a-z]*"' | head -1)
 check "API" "server reachable + token accepted (admin tier)" '"auth_tier":"admin"' "$R"
 
 # ── STEP 1: canonical value doc + TWO published papers (wire §Authoring) ─────
 say "STEP 1 — canonical value + two published inline-referencing papers"
-curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/data/mutate/$DATASET" -d "{
+bp_curl_body -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/data/mutate/$DATASET" -d "{
   \"mutations\":[{\"createOrReplace\":{\"_type\":\"metric\",\"_id\":\"$METRIC\",
     \"title\":\"$PREFIX launch metrics\",\"launch_delay\":\"$V1\"}}]}" >/dev/null
-curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/data/mutate/$DATASET" \
+bp_curl_body -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/data/mutate/$DATASET" \
   -d "{\"mutations\":[{\"publish\":{\"id\":\"$METRIC\",\"type\":\"metric\"}}]}" >/dev/null
 
 # Paper A — the wire §Authoring worked payload (valueref + D6 dual-written child).
-curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/plugins/bulldocs/papers" -d "{
+bp_curl_body -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/plugins/bulldocs/papers" -d "{
  \"slug\":\"$PAPER_A\",\"title\":\"$PREFIX launch plan (paper A)\",
  \"blocks\":[
   {\"id\":\"a-intro\",\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"value\":\"Paper A of the living-values demo. It inline-references the canonical launch metric.\"}]},
@@ -127,7 +129,7 @@ curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/plugins/bulldocs/papers
 # Paper B — second dependent + a title-valueref at paper A (the paper-canonical
 # case: gives paper A a reader-side "Used by" section). NOTE: the generic doc
 # envelope resolves a paper's `title` to its SLUG, so the pin is the slug.
-curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/plugins/bulldocs/papers" -d "{
+bp_curl_body -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/plugins/bulldocs/papers" -d "{
  \"slug\":\"$PAPER_B\",\"title\":\"$PREFIX capacity brief (paper B)\",
  \"blocks\":[
   {\"id\":\"b-intro\",\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"value\":\"Paper B - the second dependent of the canonical launch metric.\"}]},
@@ -150,11 +152,15 @@ fi
 
 # ── STEP 2: edit the canonical ONCE (guarded) → all dependents re-render ─────
 say "STEP 2 — one guarded edit propagates to every referencing doc"
-NEG=$(curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/data/mutate/$DATASET" -d "{
-  \"mutations\":[{\"patch\":{\"id\":\"$METRIC\",\"type\":\"metric\",\"set\":{\"launch_delay\":\"$V2\"},\"ifRevisionID\":\"bogus-rev\"}}]}")
+# A negative control READS the rejection body, so the status is captured first
+# (bp_curl_code) and the body kept — bp_curl_body withholds a non-2xx body.
+NEGF="$(mktemp)"
+bp_curl_code -s -o "$NEGF" -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/data/mutate/$DATASET" -d "{
+  \"mutations\":[{\"patch\":{\"id\":\"$METRIC\",\"type\":\"metric\",\"set\":{\"launch_delay\":\"$V2\"},\"ifRevisionID\":\"bogus-rev\"}}]}" >/dev/null
+NEG=$(cat "$NEGF"); rm -f "$NEGF"
 check "API" "negative control: bogus ifRevisionID rejected BEFORE write" "precondition_failed" "$NEG"
-REV=$(curl -s "${AUTH[@]}" "$BP_SERVER/v1/data/doc/$DATASET/metric/$METRIC" | python3 -c "import json,sys;d=json.load(sys.stdin);print((d.get('result') or d)['_rev'])")
-curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/data/mutate/$DATASET" -d "{
+REV=$(bp_curl_body -s "${AUTH[@]}" "$BP_SERVER/v1/data/doc/$DATASET/metric/$METRIC" | python3 -c "import json,sys;d=json.load(sys.stdin);print((d.get('result') or d)['_rev'])")
+bp_curl_body -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/data/mutate/$DATASET" -d "{
   \"mutations\":[{\"patch\":{\"id\":\"$METRIC\",\"type\":\"metric\",\"set\":{\"launch_delay\":\"$V2\"},\"ifRevisionID\":\"$REV\"}},
                  {\"publish\":{\"id\":\"$METRIC\",\"type\":\"metric\"}}]}" >/dev/null
 
@@ -162,7 +168,7 @@ check "public reader" "paper A re-renders new value (per-page-load, D2)" ">$V2" 
 check "public reader" "paper B re-renders new value (per-page-load, D2)" ">$V2" "$(reader_span "$PAPER_B" "$METRIC")"
 
 # Studio (per-request LiveView): session via one-click login ticket (dwb-7).
-TICKET=$(curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/auth/login-tickets" -d '{}' | python3 -c "import json,sys;print(json.load(sys.stdin).get('ticket',''))")
+TICKET=$(bp_curl_body -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/auth/login-tickets" -d '{}' | python3 -c "import json,sys;print(json.load(sys.stdin).get('ticket',''))")
 curl -s -c "$COOKIES" -o /dev/null "$BP_SERVER/login/ticket/$TICKET"
 STUDIO_A() { curl -s -b "$COOKIES" "$BP_SERVER/w/default/p/default/d/$DATASET/studio/open/paper/$PAPER_A"; }
 S=$(STUDIO_A | grep -o "data-valueref=\"$METRIC\"[^>]*>[^<]*" | head -1)
@@ -186,7 +192,7 @@ fi
 
 # ── STEP 3: used-by / impact panel lists the N dependents ────────────────────
 say "STEP 3 — used-by / impact panel"
-G=$(curl -s "${AUTH[@]}" "$BP_SERVER/v1/graph/$METRIC" | python3 -c "
+G=$(bp_curl_body -s "${AUTH[@]}" "$BP_SERVER/v1/graph/$METRIC" | python3 -c "
 import json,sys; d=json.load(sys.stdin)
 deps=sorted(x['doc_id'] for x in d.get('dependents',[]))
 kinds=sorted({e['kind'] for e in d.get('edges',[])})
@@ -208,20 +214,23 @@ check "public reader" "pinned literal drifted -> FLAGGED" 'data-valueref-state="
 S=$(STUDIO_A | grep -o 'phx-click="valueref-accept-baseline"[^>]*' | head -1)
 check "Studio" "accept-baseline affordance rendered on the drifted node" "phx-value-fallback=\"$V1\"" "$S"
 
-BEFORE=$(curl -s "${AUTH[@]}" "$BP_SERVER/v1/data/doc/$DATASET/paper/$PAPER_A" | python3 -c "import json,sys;d=json.load(sys.stdin);print(json.dumps((d.get('result') or d).get('blocks')))")
-PREV=$(curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/plugins/bulldocs/papers/$PAPER_A/ops" \
-  -d '{"ifRev":"999999","ops":[{"op":"patch-block","id":"a-valueref","patch":{}}]}')
+BEFORE=$(bp_curl_body -s "${AUTH[@]}" "$BP_SERVER/v1/data/doc/$DATASET/paper/$PAPER_A" | python3 -c "import json,sys;d=json.load(sys.stdin);print(json.dumps((d.get('result') or d).get('blocks')))")
+# Negative control again: keep the rejection body (see the mktemp note above).
+PREVF="$(mktemp)"
+bp_curl_code -s -o "$PREVF" -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/plugins/bulldocs/papers/$PAPER_A/ops" \
+  -d '{"ifRev":"999999","ops":[{"op":"patch-block","id":"a-valueref","patch":{}}]}' >/dev/null
+PREV=$(cat "$PREVF"); rm -f "$PREVF"
 check "API" "negative control: stale ifRev rejected, no ops applied" "precondition_failed" "$PREV"
-PREV=$(curl -s "${AUTH[@]}" "$BP_SERVER/v1/data/doc/$DATASET/paper/$PAPER_A" | python3 -c "import json,sys;d=json.load(sys.stdin);print((d.get('result') or d).get('rev','1'))")
+PREV=$(bp_curl_body -s "${AUTH[@]}" "$BP_SERVER/v1/data/doc/$DATASET/paper/$PAPER_A" | python3 -c "import json,sys;d=json.load(sys.stdin);print((d.get('result') or d).get('rev','1'))")
 # The accept write (see header: replicates the Studio handler's patch-block).
-A=$(curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/plugins/bulldocs/papers/$PAPER_A/ops" -d "{
+A=$(bp_curl_body -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/plugins/bulldocs/papers/$PAPER_A/ops" -d "{
  \"ifRev\":\"$PREV\",\"ops\":[{\"op\":\"patch-block\",\"id\":\"a-valueref\",\"patch\":{\"content\":[
   {\"type\":\"text\",\"value\":\"Launch delay is \"},
   {\"type\":\"valueref\",\"target\":\"$METRIC\",\"field\":\"launch_delay\",\"as\":\"duration\",\"fallback\":\"$V2\",\"label\":\"launch delay\",\"children\":[{\"type\":\"text\",\"value\":\"$V2\"}]},
   {\"type\":\"text\",\"value\":\" and the rollout plan assumes it.\"}]}}]}")
 check "API" "accept-baseline write applied (ifRev-guarded)" '"ok":true' "$A"
 check "public reader" "flag CLEARED - resolved at the new baseline" "data-valueref-state=\"resolved\">$V2" "$(reader_span "$PAPER_A" "$METRIC")"
-AFTER=$(curl -s "${AUTH[@]}" "$BP_SERVER/v1/data/doc/$DATASET/paper/$PAPER_A" | python3 -c "import json,sys;d=json.load(sys.stdin);print(json.dumps((d.get('result') or d).get('blocks')))")
+AFTER=$(bp_curl_body -s "${AUTH[@]}" "$BP_SERVER/v1/data/doc/$DATASET/paper/$PAPER_A" | python3 -c "import json,sys;d=json.load(sys.stdin);print(json.dumps((d.get('result') or d).get('blocks')))")
 DIFF=$(python3 - "$BEFORE" "$AFTER" <<'EOF'
 import json,sys
 a,b=json.loads(sys.argv[1]),json.loads(sys.argv[2])
@@ -242,14 +251,14 @@ check "API" "ONLY fallback + D6 text child changed" "changed=['blocks[1].content
 
 # ── STEP 5 (appendix, t8/t9 scope): expectation demo ─────────────────────────
 say "STEP 5 (appendix) — paper claim drives a task; close-with-criteria flips it"
-curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/data/mutate/$DATASET" -d "{
+bp_curl_body -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/data/mutate/$DATASET" -d "{
  \"mutations\":[{\"createOrReplace\":{\"_type\":\"task\",\"_id\":\"$TASK\",
   \"title\":\"$PREFIX: verify rollout capacity claim\",\"kind\":\"task\",\"lifecycle_status\":\"open\",\"priority\":3,
   \"design_doc\":\"$PAPER_A\",
   \"acceptance_criteria\":[{\"criterion\":\"Rollout capacity re-verified against the new launch delay\",\"met\":false,\"evidence\":\"\"}]}},
   {\"publish\":{\"id\":\"$TASK\",\"type\":\"task\"}}]}" >/dev/null
 wait_until 60 graph_tasks_count_is "$PAPER_A" 1 || true  # design_doc edge projection is async
-T=$(curl -s "${AUTH[@]}" "$BP_SERVER/v1/graph/$PAPER_A/tasks" | python3 -c "
+T=$(bp_curl_body -s "${AUTH[@]}" "$BP_SERVER/v1/graph/$PAPER_A/tasks" | python3 -c "
 import json,sys; d=json.load(sys.stdin)
 ts=d.get('tasks',[]); t=ts[0] if ts else {}
 p=t.get('criteria_progress') or {}
@@ -261,12 +270,12 @@ m=re.search(r'Driven tasks.*?</section>',t,re.S)
 print(re.sub(r'\s+',' ',re.sub('<[^>]+>',' ',m.group(0)))[:200] if m else 'ABSENT')")
 check "public reader" "Driven tasks section shows 0/1 met (unsatisfied)" "0/1 met" "$R"
 
-curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/tasks/$TASK/claim" -d "{\"worker_id\":\"$PREFIX-worker\"}" >/dev/null
-C=$(curl -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/tasks/$TASK/close" -d "{
+bp_curl_body -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/tasks/$TASK/claim" -d "{\"worker_id\":\"$PREFIX-worker\"}" >/dev/null
+C=$(bp_curl_body -s -X POST "${AUTH[@]}" "${JSON[@]}" "$BP_SERVER/v1/tasks/$TASK/close" -d "{
  \"worker_id\":\"$PREFIX-worker\",\"observed_epoch\":1,
  \"criteria\":[{\"index\":0,\"met\":true,\"evidence\":\"Capacity re-verified for the $V2 delay - living-values demo run\"}]}")
 check "API" "close-with-criteria: met+evidence atomic with the close CAS" '"ok":true' "$C"
-T=$(curl -s "${AUTH[@]}" "$BP_SERVER/v1/graph/$PAPER_A/tasks" | python3 -c "
+T=$(bp_curl_body -s "${AUTH[@]}" "$BP_SERVER/v1/graph/$PAPER_A/tasks" | python3 -c "
 import json,sys; d=json.load(sys.stdin)
 t=(d.get('tasks') or [{}])[0]
 p=t.get('criteria_progress') or {}

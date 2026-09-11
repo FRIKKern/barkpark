@@ -284,7 +284,13 @@ fi
 exit 0
 EOF
   chmod +x "$NODEDIR"/*
-  APP="$TMP/app"; mkdir -p "$APP/api" "$APP/deploy/systemd" "$APP/connectors" "$APP/scripts/connectors"
+  APP="$TMP/app"; mkdir -p "$APP/api" "$APP/deploy/systemd" "$APP/connectors" "$APP/scripts/connectors" "$APP/scripts/lib"
+  # instance-deploy.sh's health probes AND the /mcp smoke it copies below both
+  # source scripts/lib/bp-curl.sh (429 backoff, task-90059c5c680f6665) out of
+  # $APP. The sandbox must carry it or both silently take their degrade path and
+  # this harness proves nothing about the real helper (the #17562
+  # deploy-receipt-failure.test.sh trap).
+  cp "$HERE/../scripts/lib/bp-curl.sh" "$APP/scripts/lib/bp-curl.sh"
   # The Cloud sandbox runner source the deploy installs onto PATH (D265). A
   # distinctive body so the Case-15 cmp is meaningful (a stale/wrong copy would
   # differ). The env-node shebang is deliberately present — the whole point of the

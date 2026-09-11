@@ -979,6 +979,18 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "and keeping it would be a pure leak on the plane's only durable volume.",
       anchor: ~r/drop_artifact\(ctx\.id\)/
     },
+    "barkpark_cloud/sites/artifact_reaper.ex|reap" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the SWEEP half of the same class as drop_artifact above, and the same excuse: it " <>
+          "deletes stored build bytes whose deployment has already reached a terminal " <>
+          "status, plus rows the retired site-scoped upload route left bound to no " <>
+          "deployment at all. The deployment row — the record of what happened, and the " <>
+          "one a team can see — is never touched; only the payload goes. An audit event " <>
+          "per reaped tarball would be a per-minute machine trail of nothing a person did.",
+      anchor: ~r/site artifact reaper: deleted/
+    },
     "barkpark_cloud/push.ex|enforce_device_cap" => %{
       kind: :allowlisted,
       count: 1,

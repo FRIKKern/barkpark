@@ -50,6 +50,9 @@ x-control-plane: &control_plane
     - GOOGLE_OAUTH_CLIENT_SECRET
     # Trial tier (dwb-13): optional knob, defaults to 14 in runtime.exs.
     - TRIAL_DAYS
+    # Per-team stored-artifact ceiling in bytes (ssw9-bl-artifact-retention-quota):
+    # optional knob, defaults to 512 MB in runtime.exs; "infinity" disables it.
+    - ARTIFACT_QUOTA_BYTES
     # Zero-paste Vercel handoff (task-4e4a53b101a97051): passthrough-only, both
     # optional — unset means the feature is OFF (503 feature_not_configured) and
     # the SPA keeps the classic clone-URL flow. Set VERCEL_PLATFORM_TOKEN in

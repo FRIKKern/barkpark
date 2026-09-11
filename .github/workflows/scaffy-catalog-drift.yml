@@ -117,6 +117,8 @@ jobs:
       - name: Self-test — hermetic fixture, green and red both proven
         run: |
           set -uo pipefail
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           tmp="$RUNNER_TEMP/scaffy-drift-selftest"
           rm -rf "$tmp"
           mkdir -p "$tmp/fixture/v1/data/query/production" "$tmp/xdg/barkpark" "$tmp/payloads"
@@ -136,7 +138,7 @@ jobs:
           srv=$!
           trap 'kill "$srv" 2>/dev/null || true' EXIT
           for _ in $(seq 1 50); do
-            curl -fsS -o /dev/null "http://127.0.0.1:8765/v1/data/query/production/command" 2>/dev/null && break
+            bp_curl_body -sS -o /dev/null "http://127.0.0.1:8765/v1/data/query/production/command" >/dev/null 2>&1 && break
             sleep 0.2
           done
 

@@ -195,10 +195,19 @@ import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.
 import { assertReadyHostsPaint as assertFloor } from "./ready-host-paint.mjs";
 import { selectDefects } from "./defect-selection.mjs";
 import { attentionScenarios } from "./attention-scenarios.mjs";
+import { fleetAxis, FLEET_PINNED_REPS, FLEET_SCEN_SKIP } from "./fleet-scenarios.mjs";
 import { stylesheetProbeJs, stylesheetRefusal, stylesheetVerdict } from "./stylesheet-applied.mjs";
+import { ATTACH_CAP, withAttachDeadline } from "./attach-deadline.mjs";
+import { driverSentence, widthDrivers } from "./width-drivers.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
+// THIS FILE'S OWN BYTES. The W26 leg's coverage sentence is recounted from the
+// width/viewport axes declared below rather than typed (task-72ffb2fdecffd2d3),
+// and the only honest source for "what does this file declare" is the file.
+// Read once, at module load: a derivation that re-read on every leg would be
+// measuring whatever the disk held mid-run.
+const SELF_SRC = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
 const PORT = Number(process.env.OVERFLOW_GUARD_PORT || 4199);
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -647,7 +656,19 @@ const ATT_WIDTHS = [320, 360, 375, 390, 430, 620, 769, 800];
 // understated a band that runs 320-860. Paying a row while leaving the guard
 // blind to that row's worst width is this wave's disease; this is the cure.
 const FLEET_WIDTHS = [320, 360, 390, 430, 620, 721, 769, 800, 830, 860, 899, 900, 940, 983, 1000];
-const FLEET_SCENS = ["mixed-fleet", "fleet-v4", "fleet-support-failed"];
+// THE SCENARIO AXIS IS GONE FROM THIS FILE — it is DERIVED at leg time, the way
+// GR109's was (#16372). It used to read:
+//
+//     const FLEET_SCENS = ["mixed-fleet", "fleet-v4", "fleet-support-failed"];
+//
+// Three names against a corpus that renders `.fleet-row` in ONE HUNDRED AND TEN
+// scenarios. 107 were never driven at element level, and — worse than the hole —
+// the leg could not REFUSE on one it had no coverage for: an unlisted scenario
+// is not walked, so the run goes green having measured nothing about it. The
+// derivation, the content-classing that keeps 110 scenarios from becoming 107
+// copies of the same three questions, the itemised skip ledger and the refusal
+// all live in fleet-scenarios.mjs; read its header before touching this leg.
+// Filed as cch-bl-w15-fleet-leg-scenario-axis-of-two.
 const FLEET_TEXT_SELS = [".fleet-name", ".fleet-url", ".fleet-meta"];
 
 // cchi-w23 — EVERY SUB-HOST THIS LEG ASSERTS ON, AND WHETHER A ROW MAY LACK IT.
@@ -1208,20 +1229,50 @@ async function main() {
   const devPort = brought.devPort;
 
   let sessionId;
+  // THE ONLY STRETCH OF THIS FILE THAT USED TO HAVE NO CLOCK ON IT
+  // (task-3eda8d2ebb0b2327). Everything either side is bounded — SERVER_CAP the
+  // static-server poll, DEVTOOLS_CAP the DevToolsActivePort poll,
+  // BRINGUP_ATTEMPTS the launch loop, the render/eval caps every leg — but the
+  // attach itself awaited three things that can never settle: a `fetch` with no
+  // AbortSignal, a websocket `open` promise that listens for open and error and
+  // NOTHING ELSE, and a `cdp.send` whose resolver is freed only by a reply frame
+  // or by the socket closing. A debugger that ACCEPTS and then answers nothing
+  // settles none of them.
+  //
+  // Measured against a deaf CDP stub on origin/main a2deecc1f: the guard printed
+  // `>> chrome  DeafChrome/0.0` and then sat alive at %CPU 0.0 with empty
+  // stderr, forever. That is the fourth ending an instrument is not allowed to
+  // have — it did not measure, it did not find a defect, and it did not refuse,
+  // so console-refusal-capture.mjs had no sentence to quote and the merge button
+  // got an anonymous red.
+  //
+  // `attach()` names each step so the refusal says WHICH one went deaf.
+  const attach = (step, work) => withAttachDeadline(work, { step });
   try {
-    const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
+    const version = await (await attach(
+      "GET /json/version",
+      // The deadline REJECTS but cannot close an fd, so the fetch carries its
+      // own abort: otherwise the refusal would print over a live socket.
+      fetch(`http://127.0.0.1:${devPort}/json/version`, { signal: AbortSignal.timeout(ATTACH_CAP) }),
+    )).json();
     process.stdout.write(`>> chrome     ${version.Browser} · node ${process.version}\n`);
-    cdp = await Cdp.connect(version.webSocketDebuggerUrl);
-    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
-    ({ sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true }));
-    await cdp.send("Runtime.enable", {}, sessionId);
-    await cdp.send("Page.enable", {}, sessionId);
-    await cdp.send("Network.enable", {}, sessionId);
+    cdp = await attach("websocket open", Cdp.connect(version.webSocketDebuggerUrl));
+    const { targetId } = await attach("Target.createTarget", cdp.send("Target.createTarget", { url: "about:blank" }));
+    ({ sessionId } = await attach("Target.attachToTarget", cdp.send("Target.attachToTarget", { targetId, flatten: true })));
+    await attach("Runtime.enable", cdp.send("Runtime.enable", {}, sessionId));
+    await attach("Page.enable", cdp.send("Page.enable", {}, sessionId));
+    await attach("Network.enable", cdp.send("Network.enable", {}, sessionId));
     // GR125(b): Chrome memory-caches app.css across same-URL navigations —
     // without this, a mutated stylesheet measures as the original.
-    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
+    await attach("Network.setCacheDisabled", cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId));
   } catch (err) {
-    // AUDITED (exit 2): the debugger transport failed before any measurement ran.
+    // AUDITED (exit 2), TWO CLASSES THROUGH ONE DOOR. A transport THROW means
+    // the debugger said no; an `attachTimeout` means it said nothing at all.
+    // Both are environment faults with no measurement behind them, so both are
+    // exit 2 — but they are named apart, because "CDP bring-up failed: The
+    // operation was aborted" over a deaf endpoint is the vaguest true sentence
+    // available and a reviewer would go hunting for a CSS bug nobody measured.
+    if (err && err.attachTimeout) return die(err.message);
     return die(`CDP bring-up failed: ${err.message}`);
   }
 
@@ -4205,12 +4256,58 @@ async function main() {
     //    Element-level geometry, not page-level. See the note by FLEET_WIDTHS.
     if (requested.includes("W15-fleet-row-text-bounded")) {
       const D = "W15-fleet-row-text-bounded";
+      // DERIVED, not typed — the same shape GR109 uses above (#16372).
+      // fleetAxis() THROWS on an empty derivation, on a lost positive control,
+      // on a skip entry that matches nothing or that names a scenario it cannot
+      // justify excluding, and — the reason this row was filed — on any
+      // fleet-bearing scenario the leg has NO COVERAGE for. die() carries every
+      // one of those to exit 2, which is where a half-instrument belongs: an
+      // unaccounted scenario used simply not to be walked, and the run went
+      // green having measured nothing about it.
+      let FLEET_AXIS;
+      try {
+        const { SCENARIOS } = await import("./scenarios.mjs");
+        FLEET_AXIS = fleetAxis(SCENARIOS);
+      } catch (e) {
+        return die(`${D}: ${e && e.message ? e.message : e}`);
+      }
+      const FLEET_SCENS = FLEET_AXIS.drive;
       const cellCount = FLEET_SCENS.length * FLEET_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${FLEET_SCENS.length} scenarios x ${FLEET_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges + .status-pill HEIGHT;` +
         ` all ${FLEET_SUB_HOSTS.length} sub-hosts CENSUSED per row and their zero refused per cell)\n`,
       );
+      process.stdout.write(
+        `   scenario axis DERIVED from app.js fleetNestedRowsHtml() over scenarios.mjs — ` +
+        `${FLEET_AXIS.bearing.length} fleet-bearing scenario(s) collapse to ${FLEET_AXIS.classes.length} ` +
+        `distinct rendered-row markups; ${FLEET_SCENS.length} driven (pinned first): ${FLEET_SCENS.join(", ")}\n`,
+      );
+      // ITEMISED, never bare. Every fleet-bearing scenario this leg does NOT
+      // drive is named here with the reason it is out — a byte-identical twin
+      // that IS driven, or a written FLEET_SCEN_SKIP reason / filed row id.
+      // Names are grouped by reason so the ledger is readable, not summarised:
+      // every excluded scenario appears by name on one of these lines.
+      {
+        const byRep = new Map();
+        const reasoned = [];
+        for (const s of FLEET_AXIS.skipped) {
+          if (s.sameAs) {
+            if (!byRep.has(s.sameAs)) byRep.set(s.sameAs, { sig: s.sig, names: [] });
+            byRep.get(s.sameAs).names.push(s.scen);
+          } else reasoned.push(s);
+        }
+        process.stdout.write(`   NOT DRIVEN — ${FLEET_AXIS.skipped.length} scenario(s), every one itemised:\n`);
+        for (const [rep, g] of byRep) {
+          process.stdout.write(
+            `   · rendered-row markup byte-identical to ${rep} (sig ${g.sig}), ${g.names.length}: ${g.names.join(", ")}\n`,
+          );
+        }
+        for (const s of reasoned) {
+          process.stdout.write(`   · ${s.scen} — ${s.row ? `filed as ${s.row}; ` : ""}${s.why}\n`);
+        }
+        if (!FLEET_AXIS.skipped.length) process.stdout.write(`   · none\n`);
+      }
       let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, pageOver = 0, rowsSeen = 0, overflowed = 0, foreignRows = 0;
       // cchi-w23: per-selector sub-host census, and the count of legitimately
       // bare rows the two conditional emitters account for.
@@ -4382,6 +4479,15 @@ async function main() {
           `messages, ${squeezed} squeezed badge columns, ${overflowed} chips shorter than their own text, ` +
           `${pageOver} pages scrolling sideways; ` +
           `${FLEET_KNOWN.length} itemised known row(s), every other cell judged`,
+        );
+        okLine(
+          `scenario axis ACCOUNTED, not merely walked: ${FLEET_AXIS.bearing.length} fleet-bearing scenario(s) derived ` +
+          `from the shipped fleetNestedRowsHtml() over scenarios.mjs, collapsing to ${FLEET_AXIS.classes.length} distinct ` +
+          `rendered-row markups; ${FLEET_SCENS.length} driven, ${FLEET_AXIS.skipped.length} itemised above ` +
+          `(${FLEET_AXIS.skipped.filter((s) => s.sameAs).length} byte-identical twins of a driven scenario, ` +
+          `${FLEET_SCEN_SKIP.length} carrying a written reason or filed row id). The positive control ` +
+          `${FLEET_PINNED_REPS.join("/")} is asserted present in the derivation, and a fleet-bearing scenario that is ` +
+          `neither driven, nor a twin of a driven one, nor itemised REFUSES this run at exit 2`,
         );
       }
     }
@@ -7781,10 +7887,23 @@ async function main() {
     //    `s.name`, capped at 255 by a `validate_length` a census reads straight
     //    off. It is the census-invisible emitter that carries the live defect.
     //
-    //    1280 APPEARS IN NO INSTRUMENT IN THIS REPO TODAY — this leg is the
-    //    first to drive it, and it is not decoration: the defect persists above
-    //    every band any other leg sweeps (2577/1280), so a sweep that stops at
-    //    1024 certifies a desktop that is still dragging.
+    //    WHY 1280 IS IN THIS AXIS — and the claim that used to sit here, which
+    //    was FALSE (task-72ffb2fdecffd2d3). These four lines read "1280 APPEARS
+    //    IN NO INSTRUMENT IN THIS REPO TODAY — this leg is the first to drive
+    //    it … the defect persists above every band any other leg sweeps
+    //    (2577/1280), so a sweep that stops at 1024 certifies a desktop that is
+    //    still dragging". Both halves were wrong, and the counter-examples were
+    //    in THIS FILE: `FLICK_VIEWPORTS` (the W27-failed-retry leg) has driven
+    //    1280x900 since 7c8fa229a, 2026-08-03 — and hard-guards it with an axis
+    //    check that REFUSES if the cell ever leaves — while six axes here sweep
+    //    to 1440, well above 1280. The true reason 1280 belongs in THIS axis is
+    //    unaffected and stands on its own: the instance grid still read 2577/1280
+    //    on the defective tree, so this leg's own band has to reach it.
+    //
+    //    The coverage claim is no longer prose. It is COMPUTED from the declared
+    //    axes at print time by width-drivers.mjs and printed below, so the next
+    //    axis edit MOVES the sentence instead of rotting it — breakpoint-sweep.
+    //    mjs:611, "A COMMENT CANNOT BE DERIVED, only RECOUNTED".
     //
     //    THE FIXTURE EXISTED AND NOTHING MEASURED IT: `sites-on-instance` drives
     //    the same rows — including the 253-char cruel domain — through the
@@ -7901,10 +8020,14 @@ async function main() {
         okLine(
           `900/1000/1280 are the DRIVEN widths (all three measured broken); 320/390/720 are NEGATIVE CONTROLS — ` +
           `the ≤899 block single-columns the grid there and every number was byte-identical across the fix, so ` +
-          `they detect only a remedy that re-shreds the phone layout. 1280 is driven by NO other instrument in ` +
-          `this repo: the defect outlived every band swept above, and a sweep stopping at 1024 certifies a ` +
-          `desktop that is still dragging`,
+          `they detect only a remedy that re-shreds the phone layout`,
         );
+        // THE COVERAGE SENTENCE, RECOUNTED (task-72ffb2fdecffd2d3). What stood
+        // here claimed "1280 is driven by NO other instrument in this repo" on
+        // every clean run, for thirty-nine days after FLICK_VIEWPORTS in this
+        // same file started driving it. Derived from THIS FILE'S OWN BYTES so
+        // the next axis edit moves it.
+        okLine(driverSentence(widthDrivers(SELF_SRC, 1280, "TRACK_WIDTHS")));
       }
     }
 
