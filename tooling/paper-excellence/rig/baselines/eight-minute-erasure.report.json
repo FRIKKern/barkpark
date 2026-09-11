@@ -19,7 +19,7 @@
       "cell": "eight-minute-erasure__light__1280",
       "file": "eight-minute-erasure__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2326031,
+      "bytes": 2338025,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -239,8 +239,8 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 835.1,
-            "width": 580,
+            "y": 823.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -249,8 +249,8 @@
           },
           {
             "px": 2,
-            "y": 1629.2,
-            "width": 580,
+            "y": 1617.2,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -259,8 +259,8 @@
           },
           {
             "px": 2,
-            "y": 2450.7,
-            "width": 580,
+            "y": 2438.7,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -269,8 +269,8 @@
           },
           {
             "px": 2,
-            "y": 4209.9,
-            "width": 580,
+            "y": 4197.9,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -279,8 +279,8 @@
           },
           {
             "px": 2,
-            "y": 5616.2,
-            "width": 580,
+            "y": 5604.2,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -289,8 +289,8 @@
           },
           {
             "px": 2,
-            "y": 7173,
-            "width": 580,
+            "y": 7161,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -299,8 +299,8 @@
           },
           {
             "px": 2,
-            "y": 8084.5,
-            "width": 580,
+            "y": 8072.5,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -315,7 +315,7 @@
       "cell": "eight-minute-erasure__light__1920",
       "file": "eight-minute-erasure__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2510836,
+      "bytes": 2524808,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -535,8 +535,8 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 835.1,
-            "width": 580,
+            "y": 823.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -545,8 +545,8 @@
           },
           {
             "px": 2,
-            "y": 1629.2,
-            "width": 580,
+            "y": 1617.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -555,8 +555,8 @@
           },
           {
             "px": 2,
-            "y": 2450.7,
-            "width": 580,
+            "y": 2438.7,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -565,8 +565,8 @@
           },
           {
             "px": 2,
-            "y": 4185.9,
-            "width": 580,
+            "y": 4173.9,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -575,8 +575,8 @@
           },
           {
             "px": 2,
-            "y": 5592.2,
-            "width": 580,
+            "y": 5580.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -585,8 +585,8 @@
           },
           {
             "px": 2,
-            "y": 7149,
-            "width": 580,
+            "y": 7137,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -595,8 +595,8 @@
           },
           {
             "px": 2,
-            "y": 8060.5,
-            "width": 580,
+            "y": 8048.5,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -611,7 +611,7 @@
       "cell": "eight-minute-erasure__dark__1280",
       "file": "eight-minute-erasure__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2316477,
+      "bytes": 2328798,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -831,8 +831,8 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 835.1,
-            "width": 580,
+            "y": 823.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -841,8 +841,8 @@
           },
           {
             "px": 2,
-            "y": 1629.2,
-            "width": 580,
+            "y": 1617.2,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -851,8 +851,8 @@
           },
           {
             "px": 2,
-            "y": 2450.7,
-            "width": 580,
+            "y": 2438.7,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -861,8 +861,8 @@
           },
           {
             "px": 2,
-            "y": 4209.9,
-            "width": 580,
+            "y": 4197.9,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -871,8 +871,8 @@
           },
           {
             "px": 2,
-            "y": 5616.2,
-            "width": 580,
+            "y": 5604.2,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -881,8 +881,8 @@
           },
           {
             "px": 2,
-            "y": 7173,
-            "width": 580,
+            "y": 7161,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -891,8 +891,8 @@
           },
           {
             "px": 2,
-            "y": 8084.5,
-            "width": 580,
+            "y": 8072.5,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -907,7 +907,7 @@
       "cell": "eight-minute-erasure__dark__1920",
       "file": "eight-minute-erasure__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2501931,
+      "bytes": 2517063,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -1127,8 +1127,8 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 835.1,
-            "width": 580,
+            "y": 823.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1137,8 +1137,8 @@
           },
           {
             "px": 2,
-            "y": 1629.2,
-            "width": 580,
+            "y": 1617.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1147,8 +1147,8 @@
           },
           {
             "px": 2,
-            "y": 2450.7,
-            "width": 580,
+            "y": 2438.7,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1157,8 +1157,8 @@
           },
           {
             "px": 2,
-            "y": 4185.9,
-            "width": 580,
+            "y": 4173.9,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1167,8 +1167,8 @@
           },
           {
             "px": 2,
-            "y": 5592.2,
-            "width": 580,
+            "y": 5580.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1177,8 +1177,8 @@
           },
           {
             "px": 2,
-            "y": 7149,
-            "width": 580,
+            "y": 7137,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1187,8 +1187,8 @@
           },
           {
             "px": 2,
-            "y": 8060.5,
-            "width": 580,
+            "y": 8048.5,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [

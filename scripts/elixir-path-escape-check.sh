@@ -276,6 +276,26 @@ scripts/prod-build-cache-guard.sh'
 #   resolved 50 reads, printed OK, and dispatched on none of them. A path
 #   constant one binding away from its `Path.join` is a blind spot of every
 #   door below; the test carries a comment saying so.
+#   THE scaffy-duels METER ENTRIES (2026-09-11, pds-w49-meter-ci-decision) are
+#   the wiring half of METER.md §6's decision. `tooling/scaffy-duels/meter.py` is
+#   the executable half of the cost standard; it was fast, self-proving and
+#   CORRECT, and it still drifted 24 -> 34 envelopes unnoticed because ZERO of 43
+#   workflow files ever called it. The blocking route is this list plus
+#   api/test/barkpark/pds_meter_rider_test.exs, which shells the instrument and
+#   rides the already-required `Elixir gate`; a workflow with a workflow-level
+#   `on: paths:` filter is REFUSED as the venue (required-checks.json S4 — such a
+#   workflow can never be required, so it would be an advisory lane wearing a
+#   gate's name).
+#   THREE EXACT FILES AND ONE TREE, never `tooling/**` or `tooling/scaffy-duels/**`:
+#   METER.md carries the population marker and the §3 literals `verify` asserts,
+#   meter.py is the instrument, tally_wf.py is the mirrored rate table
+#   `--self-test` proves identical. `results/**` is the ONE tree, and it is a
+#   tree on purpose: it is the corpus the assertions are taken over, its own
+#   .gitignore calls the registered results "the benchmark's data of record", and
+#   an ADDED envelope — the exact change that rotted the doc — has no filename
+#   this list could have named in advance. It is 34 committed envelopes / ~255 KB
+#   that move only when a duel is recorded, so the full-suite cost is rare and
+#   bounded, which is the same judgement the templates/** note above records.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
@@ -312,6 +332,10 @@ scripts/unreachable-assert-message-check.sh
 templates/astro-search-starter/public/bp-graph.js
 templates/search-starter/lib/__test-stub-barkpark-core.mjs
 templates/search-starter/public/bp-graph.js
+tooling/scaffy-duels/METER.md
+tooling/scaffy-duels/meter.py
+tooling/scaffy-duels/results/**
+tooling/scaffy-duels/tally_wf.py
 web/__tests__/**
 web/components/**
 web/lib/**

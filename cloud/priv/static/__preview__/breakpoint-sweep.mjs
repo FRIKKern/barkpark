@@ -264,7 +264,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { IDS, SCENARIOS } from "./scenarios.mjs";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
-import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr, formatStderrTail } from "./bringup-retry.mjs";
 import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -276,6 +276,45 @@ const CSS_PATH = process.env.BREAKPOINT_SWEEP_CSS || path.join(ROOT, "app.css");
 // only ever be proven for the CSS-side member. Parsing-only, like its twin:
 // Leg B still serves and drives the real tree.
 const HTML_PATH = process.env.BREAKPOINT_SWEEP_HTML || path.join(ROOT, "index.html");
+
+// ── THE REPO-RELATIVE LITERALS ARE LOAD-BEARING, NOT DECORATION ──────────────
+// tooling/gate-map composes a slice's gate by extracting each instrument's SCAN
+// SITES from its source text. It can see a readdir, a glob, a `find`, a
+// `git ls-files`, and a repo-relative literal path. It cannot see
+// `path.join(ROOT, "app.css")`, where ROOT is an env-overridable `path.resolve`
+// — and until this block landed, nothing in this file spelled the stylesheet's
+// repo-relative path at all. MEASURED on origin/main a917280fb:
+//
+//   node tooling/gate-map/gate-map.mjs --for cloud/priv/static/app.css
+//   → GATE 16 instrument(s) … and NOT breakpoint-sweep.mjs
+//
+// So the one instrument that DERIVES its width axis from app.css was the one
+// instrument a CSS slice's composed gate never named. That is the wave-17 red
+// (cch-w17-bl-css-slice-gate-must-include-leg-a) at its source: cch-w16-s6 added
+// `@media (max-width: 830px)` behind a fully green gate, and Leg A — wired in
+// console-harness.yml — exited 2 with "UNCOVERED breakpoint 830px" on arrival.
+//
+// The refusal underneath is what keeps these constants from rotting into an
+// advertisement: if the default read ever stops being these two files, the sweep
+// refuses by name instead of carrying a literal that lies to the composer.
+export const CSS_SOURCE = "cloud/priv/static/app.css";
+export const HTML_SOURCE = "cloud/priv/static/index.html";
+
+for (const [declared, resolved, override] of [
+  [CSS_SOURCE, CSS_PATH, "BREAKPOINT_SWEEP_CSS"],
+  [HTML_SOURCE, HTML_PATH, "BREAKPOINT_SWEEP_HTML"],
+]) {
+  // An explicit override (or a relocated ROOT) means the operator is deliberately
+  // parsing another tree — a mutation seam, not a drift. Only the DEFAULT read is
+  // what the composer is being told about, so only the default read is asserted.
+  if (process.env[override] || process.env.BREAKPOINT_SWEEP_ROOT) continue;
+  if (!resolved.split(path.sep).join("/").endsWith(declared)) {
+    throw new Error(
+      `breakpoint-sweep REFUSES: it advertises ${declared} to tooling/gate-map but its default read is ${resolved}. ` +
+        `A composed gate would omit this instrument for the file it actually parses. Fix the constant and the read together.`,
+    );
+  }
+}
 const PORT = Number(process.env.BREAKPOINT_SWEEP_PORT || 4207);
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -1882,7 +1921,11 @@ async function withBrowser(fn) {
   // THE EXPORT'S OWN serve.mjs. serve.mjs roots itself at its own parent
   // directory, so measuring an exported origin/main tree means running THAT
   // tree's server — not this worktree's server pointed elsewhere.
-  const serveChild = spawn("node", [path.join(ROOT, "__preview__", "serve.mjs"), "--port", String(PORT)], { stdio: "ignore" });
+  // STDERR IS PIPED, NOT DISCARDED: without it the refusal below can only say
+  // "nothing answered", never why. captureStderr drains continuously (an
+  // unread pipe fills and blocks the child) and keeps a bounded tail.
+  const serveChild = spawn("node", [path.join(ROOT, "__preview__", "serve.mjs"), "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] });
+  const readServeStderr = captureStderr(serveChild);
   let chrome = null, cdp = null, profile = null;
   const alive = (p) => { if (!p || p.pid == null) return false; try { process.kill(p.pid, 0); return true; } catch { return false; } };
   const reap = async (p) => {
@@ -1910,7 +1953,17 @@ async function withBrowser(fn) {
     try { const r = await fetch(`${BASE}/app.css`, { cache: "no-store" }); if (r.ok) { up = true; break; } } catch { /* not yet */ }
     await sleep(100);
   }
-  if (!up) return die(`no server answered on :${PORT} within ${SERVER_CAP}ms`);
+  // The refusal names a CAUSE: our serve.mjs's own stderr tail rides along.
+  // An empty tail is reported as empty — silence is itself a finding.
+  // NO RETRY on this bring-up: no per-attempt failure rate has been measured
+  // for serve.mjs (unlike Chrome's, in bringup-retry.mjs), and a retry with no
+  // measurement behind it is theatre.
+  if (!up) {
+    return die(
+      `no server answered on :${PORT} within ${SERVER_CAP}ms\n` +
+      formatStderrTail(readServeStderr(), { who: "serve.mjs" }).replace(/\n$/, ""),
+    );
+  }
 
   // SERVED BYTES == DISK BYTES. 20 worktrees share this checkout and a foreign
   // preview server has squatted this port class before, making a patched run

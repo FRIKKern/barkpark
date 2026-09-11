@@ -365,12 +365,12 @@ test('defect 3b: a successor that exists but is UNPUBLISHED does not resolve', (
 // register entry, so it tracks whatever the register actually contains.
 test('defect 4: an empty KNOWN_DEFECTS register cannot seal (sentinel derived, not hardcoded)', () => {
   const src = readFileSync(PREDICATE, 'utf8');
-  const firstId = (src.match(/const KNOWN_DEFECTS = \[\s*\{\s*\n\s*id: '([^']+)'/) || [])[1];
-  assert.ok(firstId, 'the emptiness sentinel must be derivable from KNOWN_DEFECTS[0].id');
+  const firstId = (src.match(/const CCH_KNOWN_DEFECTS = \[\s*\{\s*\n\s*id: '([^']+)'/) || [])[1];
+  assert.ok(firstId, 'the emptiness sentinel must be derivable from CCH_KNOWN_DEFECTS[0].id');
   assert.match(src, new RegExp(firstId), 'sanity: the derived sentinel is present BEFORE the mutation');
 
-  const mutated = src.replace(/const KNOWN_DEFECTS = \[[\s\S]*?\n\];/, 'const KNOWN_DEFECTS = [];');
-  assert.notEqual(mutated, src, 'the KNOWN_DEFECTS mutation must actually apply');
+  const mutated = src.replace(/const CCH_KNOWN_DEFECTS = \[[\s\S]*?\n\];/, 'const CCH_KNOWN_DEFECTS = [];');
+  assert.notEqual(mutated, src, 'the CCH_KNOWN_DEFECTS mutation must actually apply');
   assert.doesNotMatch(mutated, new RegExp(firstId), 'the register must really be empty');
   const path = join(mkdtempSync(join(tmpdir(), 'seal-pred-')), 'empty-register.mjs');
   writeFileSync(path, mutated);
@@ -516,13 +516,28 @@ test('wave 7: the predicate names the epic it is judging, in the header and the 
 
 test('wave 7: --epic retargets the subject of every clause, including the refusal path', () => {
   const OTHER = 'some-other-epic-entirely';
-  const { out } = fixtureRun('sealable.json', ['--epic', OTHER]);
+  // RETARGETED AT WAVE 25, and the retarget IS the finding. What wave 7 pinned here is
+  // that the epic under judgement is named in the HEADER and in the MACHINE TOKEN, on
+  // the verdict path and on the refusal path alike — every line below still asserts
+  // exactly that. What is GONE is this invocation reaching `VERDICT: SEAL`: an epic
+  // with no entry in EPIC_REGISTERS is now REFUSED before R0/R1, because clause (b)
+  // and bucket (c) are scored ENTIRELY off the epic-keyed registers and this program
+  // holds none for OTHER. Before that fence, this same call sealed `some-other-epic-
+  // entirely` over Cloud Console's six CCH-D* defects and three human gates.
+  const { status, out } = fixtureRun('sealable.json', ['--epic', OTHER]);
+  assert.equal(status, REFUSED, 'an unregistered epic gets no verdict at all');
   assert.match(out, new RegExp(`^=== SEAL PREDICATE — epic ${OTHER} ===$`, 'm'));
   assert.match(out, new RegExp(`epic=${OTHER}`));
+  assert.match(out, new RegExp(`REFUSED reason=UNREGISTERED-EPIC .*epic=${OTHER}`));
   // A refusal must carry the epic too — a verdict about an unnamed epic is unreadable.
   const refused = fixtureRun('zero-live-null-successor.json', ['--epic', OTHER]);
   assert.match(refused.out, new RegExp(`^=== SEAL PREDICATE — epic ${OTHER} ===$`, 'm'));
-  assert.match(refused.out, new RegExp(`REFUSED reason=NO-SUCCESSOR .*epic=${OTHER}`));
+  assert.match(refused.out, new RegExp(`REFUSED reason=UNREGISTERED-EPIC .*epic=${OTHER}`));
+  // …and the REGISTERED epic still reaches its verdict on the same fixture, so the two
+  // lines above are a fence and not a blanket refusal that would pass for any reason.
+  const registered = fixtureRun('sealable.json');
+  assert.equal(registered.status, SEAL, 'control: the fixture itself still seals for the epic that HAS a register');
+  assert.match(registered.out, new RegExp(`^=== SEAL PREDICATE — epic ${EPIC} ===$`, 'm'));
 });
 
 // ── R4 — FORWARDING TO YOURSELF IS NOT FORWARDING ───────────────────────────
@@ -1503,7 +1518,7 @@ test('wave 11: --ladder-only is still bound by R0 and R1 — no stub, no empty r
   assert.match(token(stub.out), /REFUSED reason=GUARD-OVERRIDE-WITHOUT-FIXTURE/);
 
   const emptied = mutatedRun(
-    (s) => s.replace(/^const KNOWN_DEFECTS = \[[\s\S]*?^\];$/m, 'const KNOWN_DEFECTS = [];'),
+    (s) => s.replace(/^const CCH_KNOWN_DEFECTS = \[[\s\S]*?^\];$/m, 'const CCH_KNOWN_DEFECTS = [];'),
     ['--ladder-only', '--repo', REPO]);
   assert.equal(emptied.status, REFUSED, 'R1 still refuses an empty register on the reading path too');
   assert.match(token(emptied.out), /REFUSED reason=EMPTY-DEFECT-REGISTER/);
@@ -2218,7 +2233,7 @@ test('wave 64: the roster request actually CARRIES offset, order and count — r
 
 test('wave 29: bucket (c) REFUSES an empty gate table instead of certifying c=PASS over zero gates', () => {
   const empty = (s) => {
-    const out = s.replace(/^const PERMANENT_HUMAN_GATES = \{[\s\S]*?^\};$/m, 'const PERMANENT_HUMAN_GATES = {};');
+    const out = s.replace(/^const CCH_PERMANENT_HUMAN_GATES = \{[\s\S]*?^\};$/m, 'const CCH_PERMANENT_HUMAN_GATES = {};');
     assert.notEqual(out, s, 'the gate-table mutation must actually apply');
     return out;
   };
@@ -2719,4 +2734,339 @@ test('wave 68: a 429 that CLEARS lets the read succeed — the retry recovers, i
   assert.ok(callCount(log) >= 2, 'the throttled attempt and at least the one that succeeded');
   assert.doesNotMatch(token(r.out), /code=LEDGER-RATE-LIMITED/,
     'a throttle that CLEARED must not still be reported as a rate-limit fault — the read succeeded');
+});
+
+// ═══ WAVE 28 — THE FOUR LEG-B PARSER BLIND SPOTS ════════════════════════════
+// (dr-w28-bl-seal-predicate-parser-blind-spots-console-side)
+//
+// Deploy-reliability wave 28 mutation-swept the leg-B job-graph reader with EIGHT
+// mutations of `.github/workflows/cloud.yml`. Three SURVIVED — the cases above
+// already pin them. FOUR DID NOT, and this block is the executable spec for them.
+// None was ever present on main: they are latent, not live. Confirmed at build time
+// against a917280fb, and each mutator below re-asserts the absence on the tree it is
+// handed, so the day one of these lands in cloud.yml the SANITY line reds first and
+// says so rather than letting the case pass for the wrong reason.
+//
+// Every arm is a MUTATION PROOF in the shape this file already uses: the specimen is
+// a cloud.yml variant fed through `synthRepo`, and the whole file re-runs against the
+// PRE-FIX predicate through `SEAL_PREDICATE_PATH` (see the header). Pre-fix, all four
+// specimens below answered WRONG; the expected pre-fix answer is recorded per arm.
+//
+// The control for all four is the wave-9 CONTROL above: unmutated workflow -> SEAL.
+
+// Return the source of the `cloud-gate:` job alone, so a mutator cannot resolve
+// through `report-main-failure:` (which also carries an inline `needs:`) — the same
+// bounding the wave-9 `needs:` spelling case had to adopt.
+const cloudGateBody = (text) => {
+  const from = text.search(/^ {2}cloud-gate:$/m);
+  assert.notEqual(from, -1, 'sanity: cloud.yml must declare a cloud-gate job at column 2');
+  const rest = text.slice(from + 1);
+  const next = rest.search(/^ {2}[A-Za-z0-9_-]+:$/m);
+  return next === -1 ? rest : rest.slice(0, next);
+};
+
+// The `jobs:` block as raw text — everything a column-0 line has NOT yet ended.
+const jobsBlock = (text) => {
+  const at = text.search(/^jobs:$/m);
+  assert.notEqual(at, -1, 'sanity: cloud.yml must declare a top-level jobs: block');
+  return text.slice(at);
+};
+
+// ── M4 — a column-0 `#` comment INSIDE jobs: ────────────────────────────────
+// PRE-FIX: `/^\S/.test(line)` read the `#` as "left the jobs: block", truncating the
+// job graph at that line. With the comment above `cloud-gate:` the aggregator simply
+// ceased to exist and all four rung-2 entries dropped to rung 3 —
+// "NO job both `needs:` `test` and carries `if: always()`" x4, exit 1.
+// A comment is not structure; it must move NOTHING.
+test('wave 28 M4: a column-0 `#` comment inside jobs: does not truncate the job graph', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    assert.doesNotMatch(jobsBlock(src), /^#/m,
+      'sanity: this mutation must be LATENT — cloud.yml carries no column-0 comment inside jobs: today');
+    const mutated = src.replace(/^ {2}cloud-gate:$/m,
+      '# a column-0 comment, legal YAML, structurally meaningless\n  cloud-gate:');
+    assert.notEqual(mutated, src, 'the column-0 comment must actually be inserted');
+    assert.match(jobsBlock(mutated), /^#/m, 'the comment must land INSIDE the jobs: block');
+    return mutated;
+  } });
+  assert.equal(status, SEAL, `a comment must satisfy nothing AND break nothing: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /NO job both `needs:`/,
+    'the aggregator is still there — a `#` at column 0 must not end the job graph');
+  assert.match(token(out), /b=PASS/);
+});
+
+// ── M5 — `if: ${{ always() }}` ──────────────────────────────────────────────
+// THE DANGEROUS ONE. `if: ${{ always() }}` is idiomatic GitHub Actions and evaluates
+// identically to `if: always()`; a reviewer would wave it through. PRE-FIX the leg
+// compared the raw string against /^always\(\)$/, so the aggregator stopped being a
+// candidate and ALL FOUR rung-2 entries silently dropped to rung 3 (exit 1) over a
+// workflow that had not changed behaviour in any way.
+test('wave 28 M5: `if: ${{ always() }}` is the same expression as `if: always()`', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    assert.doesNotMatch(src, /\$\{\{\s*always\(\)\s*\}\}/,
+      'sanity: this mutation must be LATENT — cloud.yml spells it bare today');
+    const bare = cloudGateBody(src).match(/^ {4}if: always\(\)$/m);
+    assert.ok(bare, 'sanity: cloud-gate must carry a bare `if: always()` for this case to rewrap');
+    const mutated = src.replace(bare[0], '    if: ${{ always() }}');
+    assert.notEqual(mutated, src, 'the ${{ }} rewrap must actually apply');
+    assert.ok(!/^ {4}if: always\(\)$/m.test(cloudGateBody(mutated)),
+      'the bare spelling must be GONE from cloud-gate, else this resolves through the old form');
+    return mutated;
+  } });
+  assert.equal(status, SEAL, `the envelope is transport, not meaning: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /NO job both `needs:`/);
+  assert.match(token(out), /b=PASS/);
+});
+
+// ── M7 — a TAB-indented `needs:` ────────────────────────────────────────────
+// PRE-FIX: every anchor is ` {4}`, so a tab-indented key matched nothing and the
+// aggregator lost its `needs:` edge in silence — 4x "NO job both", exit 1.
+// The fix is NOT to accept it. Tabs are illegal as YAML indentation: GitHub would
+// refuse the workflow outright, so a parser that "read it anyway" would publish a job
+// graph nobody runs. Exit 2 — a refusal, not a verdict — is the honest answer.
+test('wave 28 M7: a TAB-indented key REFUSES rather than silently losing the edge', () => {
+  const root = synthRepo({ workflow: (src) => {
+    assert.doesNotMatch(src, /\t/, 'sanity: this mutation must be LATENT — cloud.yml has no tab anywhere today');
+    const inline = cloudGateBody(src).match(/^ {4}needs: \[[^\]]*\]$/m);
+    assert.ok(inline, 'sanity: cloud-gate must declare an inline needs: for this case to re-indent');
+    const mutated = src.replace(inline[0], inline[0].replace(/^ {4}/, '\t'));
+    assert.notEqual(mutated, src, 'the tab re-indent must actually apply');
+    assert.match(mutated, /^\tneeds: \[/m, 'the needs: key must really be tab-indented');
+    return mutated;
+  } });
+  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', root, '--guard-cmd', 'true']);
+  assert.equal(status, INFRA, 'an unreadable job graph must not be reported through the verdict code');
+  assert.match(out, /INFRA FAULT at /);
+  assert.match(out, /indents `needs:` with a TAB/);
+  assert.match(out, /Tabs are not legal YAML indentation/);
+  assert.match(out, /REFUSING to evaluate rung 2 rather than reporting a graph nobody runs/);
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN/);
+  assert.doesNotMatch(out, /NO job both `needs:`/,
+    'the pre-fix answer was a measured-looking rung-3 claim over a file GitHub cannot even load');
+});
+
+// ── M8 — `cloud-gate:  # comment` after the job key ─────────────────────────
+// The worst of the four, because it is not blindness but a WRONG ANSWER. PRE-FIX the
+// job-key pattern required nothing after the colon, so the line matched neither the
+// job-key anchor nor the four-space key anchor and was SKIPPED — which left `cur`
+// pointing at the PRECEDING job, and every one of cloud-gate's keys (`name:`, `if:`,
+// `needs:`) was attributed to it. On main today that neighbour is `census`, which is
+// matrixed, so leg B reported "the only job(s) aggregating `test` (census) carry a
+// `strategy.matrix` … rung 3" — a confident, specific, false diagnosis.
+test('wave 28 M8: a trailing comment on a job key does not hand the job to its neighbour', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    assert.doesNotMatch(jobsBlock(src), /^ {2}[A-Za-z0-9_.-]+:[ \t]*#/m,
+      'sanity: this mutation must be LATENT — no job key in cloud.yml carries a trailing comment today');
+    const mutated = src.replace(/^ {2}cloud-gate:$/m, '  cloud-gate:  # the aggregator');
+    assert.notEqual(mutated, src, 'the trailing comment must actually be added');
+    return mutated;
+  } });
+  assert.equal(status, SEAL, `a trailing comment on a job key changes no structure: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /carry a `strategy\.matrix`/,
+    'the pre-fix answer blamed the PRECEDING job\'s matrix for a job that has none');
+  assert.match(token(out), /b=PASS/);
+});
+
+// M8, the DURABLE arm. The case above reds pre-fix only while cloud-gate's neighbour
+// happens to be matrixed — true today (`census`), true at wave 28 (`test`), but that
+// is cloud.yml's business and not this file's. This arm removes the coincidence: with
+// `name:` dropped the aggregator renders as its KEY, so the run says out loud WHICH
+// job it resolved. Post-fix that is `cloud-gate`; pre-fix it was whatever job
+// preceded it, under that job's own identity.
+test('wave 28 M8 (durable): the commented job key is read AS ITS OWN JOB, named in the output', () => {
+  const { status, out } = synthRun({
+    workflow: (src) => {
+      const body = cloudGateBody(src);
+      const named = body.match(/^ {4}name: .+$/m);
+      assert.ok(named, 'sanity: cloud-gate must carry a name: for this case to drop');
+      return src
+        .replace(/^ {2}cloud-gate:$/m, '  cloud-gate:  # the aggregator')
+        .replace(named[0], '    # name: dropped, so the rendered context is the job KEY');
+    },
+    requiredChecks: (rc) => {
+      rc.protection.required_status_checks.checks =
+        rc.protection.required_status_checks.checks.filter((c) => c.context !== AGG);
+      rc.protection.required_status_checks.checks.push({ context: 'cloud-gate', app_id: 15368 });
+      return rc;
+    },
+  });
+  assert.equal(status, SEAL, `the aggregator must resolve under its own key: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "cloud-gate" on main/,
+    'the job resolved must be cloud-gate itself, not the job declared above it');
+  assert.match(token(out), /b=PASS/);
+});
+
+// ── M8 GENERALISED — the skip is gone, not special-cased ────────────────────
+// A two-case list ("plain key, or key plus comment") would be a snapshot. The defect
+// M8 exposed is that ANY unreadable line at job-key indent silently re-homes the keys
+// below it, so the silent skip itself is removed: an unrecognised structural line is
+// a refusal, never a guess. `cloud-gate: {}` is legal YAML this parser does not read.
+test('wave 28: an unreadable line at job-key indent REFUSES instead of mis-attributing', () => {
+  const root = synthRepo({ workflow: (src) =>
+    src.replace(/^ {2}cloud-gate:$/m, '  cloud-gate: {}') });
+  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', root, '--guard-cmd', 'true']);
+  assert.equal(status, INFRA);
+  assert.match(out, /sits at job-key indent but is not a job key this parser can read/);
+  assert.match(out, /attribute the keys below it to the PRECEDING job/);
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT/);
+});
+
+// ── THE FOUR ARE LATENT ON THIS TREE, AND THAT IS ASSERTED, NOT ASSUMED ─────
+// Criterion c1 as a test. Each mutator above asserts its own absence, but only over
+// the source it is handed; this reads the COMMITTED cloud.yml once and states the
+// whole claim in one place, so "latent, not live" reds the day it stops being true
+// rather than being re-derived by whoever next reads the row.
+test('wave 28: all four specimens are absent from the committed cloud.yml', () => {
+  const src = readFileSync(CLOUD_WF, 'utf8');
+  const block = jobsBlock(src);
+  assert.doesNotMatch(block, /^#/m, 'M4: no column-0 comment inside jobs:');
+  assert.doesNotMatch(src, /\$\{\{\s*always\(\)\s*\}\}/, 'M5: always() is spelled bare');
+  assert.doesNotMatch(src, /\t/, 'M7: no tab anywhere in the file');
+  assert.doesNotMatch(block, /^ {2}[A-Za-z0-9_.-]+:[ \t]*#/m, 'M8: no job key carries a trailing comment');
+  // …and the controls, so a doesNotMatch above cannot pass because the haystack is empty.
+  assert.match(block, /^ {2}cloud-gate:$/m, 'control: the jobs: block really was read');
+  assert.match(src, /^#/m, 'control: the file DOES carry column-0 comments — above jobs:, where they are legal to this parser');
+  assert.match(src, /^ {4}if: always\(\)$/m, 'control: the bare always() this suite rewraps really is there');
+});
+
+// ── WAVE 25 — THE TWO FROZEN REGISTERS ARE KEYED BY EPIC ────────────────────
+//
+// THE DEFECT, MEASURED AT a333e4b58 BEFORE THE FENCE:
+//
+//   node seal-predicate.mjs --ledger <sealable> --repo <root> --guard-cmd true \
+//        --epic task-fb4fb869490b4213            # the deploy-reliability GOAL
+//   -> exit 0
+//   -> VERDICT: SEAL
+//   -> VERDICT-TOKEN: SEAL-PREDICATE SEAL a=PASS b=PASS c=PASS … epic=task-fb4fb869490b4213
+//   -> and in its body, Cloud Console's own rows, printed as that epic's:
+//        ✓ gr-ops-platform-admin-emails  status=open
+//          parent=cloud-console-hardening-epic in-epic-roster=false
+//        ✓ CCH-D1-overview-refetch-storm  (rung 1)
+//
+// `PERMANENT_HUMAN_GATES` and `KNOWN_DEFECTS` were FLAT module constants and `--epic`
+// parameterized clause (a) ONLY, so clauses b and c scored one epic's registers for
+// every epic. The run even printed `in-epic-roster=false` on all three gates and passed
+// them anyway.
+//
+// The registers are now selected by `--epic` out of `EPIC_REGISTERS`, an epic with no
+// entry is REFUSED (`UNREGISTERED-EPIC`) before any clause, and every token carries
+// `registers=` so a reader of the machine line knows which population produced b and c.
+const DR_EPIC = 'task-fb4fb869490b4213';   // the deploy-reliability goal, unregistered here
+const CCH_DEFECT_IDS = [
+  'CCH-D1-overview-refetch-storm',
+  'CCH-D2-session-peer-ip-is-the-docker-bridge',
+  'CCH-D3-bearer-token-in-the-access-log',
+  'CCH-D4-head-prober-gets-a-session-token',
+  'CCH-D5-rate-limiter-sees-every-user-as-one',
+  'CCH-D6-css-check-passes-on-deleted-code',
+];
+const CCH_GATE_IDS = [
+  'gr-ops-platform-admin-emails',
+  'gr-backlog-qr-live-scan-proof',
+  'cch-hg-compose-network-recreation',
+];
+
+// c3 — THE FENCE IS ADDED, NO REGISTER CONTENT IS LOST. The six defect rows and the
+// three gate ids must still be exactly the register this epic is judged on: same six,
+// same three, same cardinalities on the disclosure line.
+test('wave 25: the Cloud Console register survives the move to EPIC_REGISTERS intact', () => {
+  const { status, out } = fixtureRun('sealable.json');
+  assert.equal(status, SEAL, 'the registered epic still reaches a verdict');
+  assert.match(out, /^CLAUSE \(b\) known user-facing defects — 6 registered$/m);
+  for (const id of CCH_DEFECT_IDS) assert.match(out, new RegExp(`^  [✓◐] ${id}  \\(rung [12]`, 'm'), `${id} is still registered`);
+  for (const id of CCH_GATE_IDS) assert.match(out, new RegExp(`^  ✓ ${id}  status=`, 'm'), `${id} is still disclosed`);
+  // Cardinality, so a SEVENTH row silently added to the register reds here too.
+  assert.equal(out.split('\n').filter((l) => /^  [✓✗] [a-z]/.test(l)).length, 3, 'exactly three human gates, no more');
+  // And the disclosure line states the population b and c were scored over.
+  assert.match(out, /^registers: clause \(b\) and bucket \(c\) are scored off the cloud-console-hardening-epic register — 6 registered defect\(s\), 3 permanent human gate\(s\)$/m);
+});
+
+// c0 — THE TOKEN STATES WHICH EPIC'S REGISTERS PRODUCED b AND c.
+test('wave 25: every verdict token names the register that produced b and c', () => {
+  assert.match(token(fixtureRun('sealable.json').out), / registers=cloud-console-hardening-epic /);
+  assert.match(token(fixtureRun('sealable.json', ['--epic', DR_EPIC]).out), / registers=NONE /);
+  // The ladder-only reading is clause (b) and nothing else, so it must name its register too.
+  const ladder = run(['--ledger', withRequired('ladder-no-waiver.json'), '--repo', REPO, '--ladder-only']);
+  assert.match(token(ladder.out), / registers=cloud-console-hardening-epic /);
+  assert.match(ladder.out, /^registers: the ladder below is the cloud-console-hardening-epic register — 6 registered defect\(s\)$/m);
+});
+
+// c4 — THE REFUSAL IS RUN, AND ITS STDOUT IS READ.
+test('wave 25: --epic naming an epic with NO register is REFUSED, and says why', () => {
+  const { status, out } = fixtureRun('sealable.json', ['--epic', DR_EPIC]);
+  assert.equal(status, REFUSED, 'nothing was measured, so this is exit 3 and never a verdict');
+  assert.match(out, /^VERDICT: NO SEAL — REFUSED$/m);
+  assert.doesNotMatch(out, /^VERDICT: SEAL$/m);
+  assert.match(out, new RegExp(`REFUSED at .*, before any clause was evaluated: ${DR_EPIC} has no entry in EPIC_REGISTERS`));
+  assert.match(out, /Registered epics: cloud-console-hardening-epic\./, 'the refusal names what IS registered');
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=UNREGISTERED-EPIC a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
+  // THE PIN THE ROW ASKED FOR, IN ITS OWN WORDS: a deploy-reliability run made before
+  // DR's register is filed cannot print b=PASS. Not "does not today" — cannot: b is
+  // UNEVALUATED on the only line that carries it.
+  assert.doesNotMatch(out, /b=PASS/, 'a DR run before DR has a register must never print b=PASS');
+  assert.doesNotMatch(out, /c=PASS/);
+  // And it never got as far as another epic's rows.
+  for (const id of CCH_DEFECT_IDS) assert.doesNotMatch(out, new RegExp(id), `${id} belongs to another epic and must not appear`);
+  for (const id of CCH_GATE_IDS) assert.doesNotMatch(out, new RegExp(id), `${id} belongs to another epic and must not appear`);
+  // The refusal fires BEFORE R1/R7 rather than letting an empty register wear their
+  // sentence — "this epic was never registered" and "somebody gutted the register" are
+  // different diagnoses, and the diagnosis is the whole value of a refusal.
+  assert.doesNotMatch(out, /KNOWN_DEFECTS is empty/);
+  assert.doesNotMatch(out, /PERMANENT_HUMAN_GATES is empty/);
+});
+
+// c1 — TWO EPICS, AND THE DEFECT/GATE SETS DIFFER. The same fixture, the same flags,
+// one flag value apart: the registered epic is scored over six defects and three gates,
+// the unregistered one over NOTHING. A register that answered the same for both is the
+// defect this row was filed for.
+test('wave 25: MUTATION — two epics, two different register populations', () => {
+  const cch = fixtureRun('sealable.json');
+  const dr = fixtureRun('sealable.json', ['--epic', DR_EPIC]);
+  const idsIn = (out) => [...CCH_DEFECT_IDS, ...CCH_GATE_IDS].filter((id) => out.includes(id));
+  assert.deepEqual(idsIn(cch.out), [...CCH_DEFECT_IDS, ...CCH_GATE_IDS], 'the registered epic sees all nine rows');
+  assert.deepEqual(idsIn(dr.out), [], 'the unregistered epic sees none of them');
+  assert.notEqual(cch.status, dr.status, `the two runs must not reach the same outcome (${cch.status} vs ${dr.status})`);
+  assert.equal(cch.status, SEAL);
+  assert.equal(dr.status, REFUSED);
+});
+
+// c5 — THE GUARD CAN LOSE. The mutation re-flattens the registers exactly as they stood
+// at a333e4b58 — `REGISTER` resolved to the Cloud Console entry whatever `--epic` said,
+// and `REGISTERED` was unconditionally true so no refusal could fire — and the run that
+// this suite now asserts is a refusal becomes, verbatim, the contaminated SEAL.
+test('wave 25: the contamination REPRODUCES on the old flat-register shape', () => {
+  const flatten = (src) => src
+    .replace('const REGISTERED = Object.prototype.hasOwnProperty.call(EPIC_REGISTERS, EPIC);',
+             'const REGISTERED = true;')
+    .replace('const REGISTER = REGISTERED ? EPIC_REGISTERS[EPIC] : null;',
+             "const REGISTER = EPIC_REGISTERS['cloud-console-hardening-epic'];");
+  const pre = mutatedRun(flatten,
+    ['--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'true', '--epic', DR_EPIC]);
+  // The old shape: exit 0, VERDICT: SEAL, b=PASS c=PASS, over an epic whose registers
+  // this program has never held.
+  assert.equal(pre.status, SEAL, `the mutation must reproduce the defect, or this proves nothing: ${pre.out}`);
+  assert.match(pre.out, /^VERDICT: SEAL$/m);
+  assert.match(token(pre.out), new RegExp(`SEAL a=PASS b=PASS c=PASS .*epic=${DR_EPIC}`));
+  assert.match(pre.out, /CCH-D1-overview-refetch-storm/, 'another epic\'s defect, printed as this one\'s');
+  assert.match(pre.out, /gr-ops-platform-admin-emails  status=\w+ parent=cloud-console-hardening-epic in-epic-roster=false/,
+    'the run even prints the gate is not in this epic\'s roster and passes it anyway');
+  // The SAME invocation against the committed file: refused, nothing certified.
+  const now = fixtureRun('sealable.json', ['--epic', DR_EPIC]);
+  assert.equal(now.status, REFUSED);
+  assert.match(token(now.out), /REFUSED reason=UNREGISTERED-EPIC/);
+});
+
+// …AND THE FENCE IS A KEY LOOKUP ON THIS TABLE, NOT A PROTOTYPE WALK. `--epic
+// constructor` resolves on Object.prototype to a truthy FUNCTION; a bare
+// `EPIC_REGISTERS[EPIC]` would take it for a register, read `undefined` off it, and
+// refuse with the WRONG code (EMPTY-DEFECT-REGISTER) — or, with a different downstream,
+// throw. Two inherited names are driven because one could pass by accident.
+test('wave 25: an inherited property name is NOT a registered epic', () => {
+  for (const name of ['constructor', 'toString', '__proto__']) {
+    const { status, out } = fixtureRun('sealable.json', ['--epic', name]);
+    assert.equal(status, REFUSED, `--epic ${name} must be refused, not resolved off the prototype`);
+    assert.match(out, /reason=UNREGISTERED-EPIC/, `--epic ${name} refuses with the register code, not a downstream one`);
+  }
 });
