@@ -1,6 +1,45 @@
 #!/usr/bin/env bash
 # Exact live-corpus smoke audit for every published Paper and every reader edge.
 # Emits one JSON summary and exits non-zero if any Paper fails.
+#
+# ── RULING 2026-09-11: the CLI arm `empty_output` IS NOT RETRIED ──────────────
+# Asked (task-cf4c1d8aa8162d8a, opened off PR #15760 / task-3ef7bfabef8c9c73)
+# whether an empty render — `bp paper view` exiting 0 with nothing on stdout —
+# should ride the same 0/0.25/1/4 s ladder as the `"code":"internal_error"`
+# envelope. It should not. Three reasons, in the order the evidence forced them:
+#
+# 1. `empty_output` has never been witnessed. PR #15760 (merged 39adf71208,
+#    2026-09-03) made the leg name its arm. The six paper-readers reds since —
+#    runs 33956981205, 34024640087, 34110681290, 34211257256, 34336441737,
+#    34462179731 — carry 6,274 CLI observations and 0 `empty_output`. Every CLI
+#    red in them is `command_failed` with a NAMED stderr: 5 on 2026-09-06
+#    (exit 4, `… source: status 500: <!DOCTYPE html>`) and 1 on 2026-09-08
+#    (exit 4, `Get "https://guerrilla.barkpark.cloud/…`).
+# 2. The two reds that prompted the question do not support it. Run 33194662611
+#    (2026-08-28) was NOT a CLI red at all — all four failures read
+#    `cli:{ok:true}`, `tui:{max_display_width:80,overflow_lines:0}`, and failed
+#    on curl `status:0` edges (the transport class already retried below). Only
+#    run 33615074664 (2026-09-02) shows `cli:{ok:false}` with tui 0/0, and it
+#    pre-dates the arm witness, so it cannot say whether it was empty or failed.
+#    One unrecoverable observation is not a policy.
+# 3. An empty render is not transient-SHAPED the way a 500 is. The
+#    internal_error envelope is the server ASSERTING "retry shortly"; a clean
+#    exit with empty stdout asserts nothing, and is the exact shape of a real
+#    regression (a Paper whose body renders to nothing). Retrying it four times
+#    would launder that regression into a slow flake — and an audit that retries
+#    a silent wrong answer has stopped looking.
+#
+# The ruling is PINNED, not merely written: the fixtures
+# `BP_FIXTURE_CLI_EMPTY` and `BP_FIXTURE_CLI_EMPTY_ONCE` in
+# scripts/audit-paper-readers-test.sh require `cli.attempts == 1` and
+# `cli.arm == "empty_output"` for a persistently-empty AND a once-empty-then-
+# full render. Adding a retry here reds both. REVISIT only if a witness
+# artifact ever records `cli.arm == "empty_output"` — quote the run id.
+#
+# NOTE, out of scope for that ruling and unfixed: the `command_failed` reds
+# above got attempts == 1 too, because their stderr is an HTML 500 page rather
+# than the JSON `"code":"internal_error"` envelope the loop greps for. That is
+# the gap the real reds walk through; it is a separate decision.
 set -uo pipefail
 
 server="${BP_AUDIT_SERVER:-guerrilla}"
@@ -251,7 +290,10 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
   # Same narrow transport retry for the CLI reader edge: retry ONLY when the
   # command failed AND its stderr carries the server's internal_error envelope.
   # A CLI failure for any other reason (bad render, empty body, auth, usage)
-  # is never retried.
+  # is never retried. The empty-body half of that sentence was re-examined and
+  # DELIBERATELY KEPT on 2026-09-11 — see the RULING block at the top of this
+  # file for the run ids and the reasoning. The `((cli_exit == 0))` break below
+  # is that ruling: a clean exit ends the loop whether or not stdout was empty.
   # The CLI leg fails three distinguishable ways and the witness used to record
   # only `cli:{ok:false}` for all three — widthcheck on an empty file reports
   # 0/0, so a failed command and an empty render left byte-identical evidence
