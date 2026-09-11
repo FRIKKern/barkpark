@@ -238,6 +238,30 @@ scripts/prod-build-cache-guard.sh'
 #   in the DISPATCH set, so a PR editing EITHER side runs this required suite —
 #   one door watched and the other open is not a lock. Two exact files, never
 #   `js/**` or `templates/**`: the trees would be far more CI than this buys.
+#   THE THREE bp-graph.js MIRROR ENTRIES, read by
+#   api/test/barkpark_web/static/bp_graph_escape_lock_test.exs (task-e3cf9937e4762bb0):
+#     web/public/bp-graph.js
+#     templates/search-starter/public/bp-graph.js
+#     templates/astro-search-starter/public/bp-graph.js
+#   The graph widget ships as FOUR byte-identical copies; api/priv/static/assets
+#   holds the canonical one and the other three are what actually serve the
+#   page. The test asserts the four-copy identity AND that every innerHTML sink
+#   in the canonical copy escapes its server strings. Its only prior locks —
+#   web/__tests__/graph-xss.test.ts and scripts/check-bp-graph-drift.sh via
+#   bp-graph-drift.yml — are both ADVISORY, so the escape could be stripped and
+#   merged past the required set.
+#   Declared for BOTH of this list's effects, and the second is again the point:
+#   without these three rows a PR that edits ONLY a mirror skips the Elixir
+#   suite, and the identity assertion never runs on the one PR that breaks it.
+#   Three EXACT files, never `web/**` or `templates/**` (see the note above on
+#   why the bare templates tree stays out). The widget is a generated artifact
+#   touched only when the graph is rebuilt, so the full-suite cost is rare.
+#   The reads are written INLINE at the read site — `Path.join(@repo_root,
+#   "web/public/bp-graph.js")` — precisely so THIS census can see them: with the
+#   same three paths held in a module attribute and joined from it, the census
+#   resolved 50 reads, printed OK, and dispatched on none of them. A path
+#   constant one binding away from its `Path.join` is a blind spot of every
+#   door below; the test carries a comment saying so.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
@@ -271,12 +295,15 @@ scripts/test-env-leak-allowlist.txt
 scripts/test-env-leak-gate.sh
 scripts/test-env-leak-gate.test.sh
 scripts/unreachable-assert-message-check.sh
+templates/astro-search-starter/public/bp-graph.js
 templates/search-starter/lib/__test-stub-barkpark-core.mjs
+templates/search-starter/public/bp-graph.js
 web/__tests__/**
 web/components/**
 web/lib/**
 web/node_modules/**
 web/public/assets/bp-paper-editor.css
+web/public/bp-graph.js
 web/public/bp-paper-editor.bundle.js'
 
 # EXEMPT — escapes that resolve to a real file but are NOT reachable from the
