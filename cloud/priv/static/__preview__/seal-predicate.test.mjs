@@ -1013,9 +1013,31 @@ test('wave 9: the resolver never greps the workflow text for the registered path
 // i.e. red a correct configuration.
 test('wave 9: the aggregator is found through EITHER YAML needs: spelling', () => {
   const asBlock = synthRun({ workflow: (src) => {
-    const mutated = src.replace('    needs: [changes, compile, test, path-escape]',
-      '    needs:\n      - changes\n      - compile\n      - test\n      - path-escape');
+    // DERIVED, never a pinned member list. This case used to `.replace()` the
+    // literal `needs: [changes, compile, test, path-escape]`; the day cloud.yml
+    // gained the `census` job the literal stopped existing, the replace became a
+    // no-op, and the `notEqual` below reported it as a FAILURE OF THIS FILE
+    // rather than of the thing under test. The members are cloud.yml's business
+    // — what this case asks is only whether the resolver reads BOTH spellings.
+    // Bounded to the cloud-gate job itself: `report-main-failure` below it also
+    // carries an inline `needs:`, and an unbounded slice would let this case
+    // resolve through THAT line.
+    const jobBody = (text) => {
+      const from = text.search(/^ {2}cloud-gate:$/m);
+      assert.notEqual(from, -1, 'sanity: cloud.yml must declare a cloud-gate job');
+      const rest = text.slice(from + 1);
+      const next = rest.search(/^ {2}[A-Za-z0-9_-]+:$/m);
+      return next === -1 ? rest : rest.slice(0, next);
+    };
+    const inline = jobBody(src).match(/^ {4}needs: \[([^\]]*)\]$/m);
+    assert.ok(inline, 'sanity: cloud-gate must declare an inline flow-sequence needs: for this case to rewrite');
+    const members = inline[1].split(',').map((m) => m.trim()).filter(Boolean);
+    assert.ok(members.length > 1, `sanity: the aggregator must need more than one job, read ${members.length}`);
+    const block = ['    needs:', ...members.map((m) => `      - ${m}`)].join('\n');
+    const mutated = src.replace(inline[0], block);
     assert.notEqual(mutated, src, 'the needs: rewrite must actually apply');
+    assert.ok(!/^ {4}needs: \[/m.test(jobBody(mutated)),
+      'the inline spelling must be GONE, else this resolves through the old form and proves nothing');
     return mutated;
   } });
   assert.equal(asBlock.status, SEAL, `a block-sequence needs: must resolve identically: ${token(asBlock.out)}`);
