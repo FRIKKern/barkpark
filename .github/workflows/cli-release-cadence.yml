@@ -3,10 +3,13 @@ name: cli-release-cadence
 # IS THE SHIPPED `bp` NEWER THAN THE NEWEST RELEASE A USER CAN INSTALL?
 # Row pds-bl-w49-cli-release-cadence-gate (PDS-D711).
 #
-# `curl -fsSL .../install-cli.sh | sh` resolves GitHub's `releases/latest`, and
-# cli-release.yml only ever cuts a release FROM a `cli-v*` tag push. So the
-# bytes a stranger runs are the tree AT THAT TAG — and nothing in this repo
-# measured whether the shipped source had moved past it. The oracle is
+# `curl -fsSL .../install-cli.sh | sh` resolves the newest `cli-v*` GITHUB
+# RELEASE (install-cli.sh:31-41 prefers `/releases?per_page=30` and falls back
+# to the `releases/latest` redirect only when that API is unreachable — stated
+# precisely because the row's c4 exists to stop this mechanism being
+# mis-described). cli-release.yml only ever cuts such a release FROM a `cli-v*`
+# tag push. So the bytes a stranger runs are the tree AT THAT TAG — and nothing
+# in this repo measured whether the shipped source had moved past it. The oracle is
 # `scripts/cli-release-cadence-gate.sh`: newest `cli-v*` tag by VERSION sort vs
 # `git rev-list --count <tag>..HEAD -- internal/cli/setup/assets`. Pure git,
 # offline, no `gh`, no release feed, no network at all.

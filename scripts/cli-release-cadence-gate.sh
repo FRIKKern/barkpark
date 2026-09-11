@@ -2,9 +2,11 @@
 # CLI RELEASE CADENCE GATE — is the shipped `bp` source newer than its newest release tag?
 #
 # Row pds-bl-w49-cli-release-cadence-gate (PDS-D711). The CLI is distributed as a
-# tagged binary: `curl -fsSL .../install-cli.sh | sh` resolves GitHub's
-# `releases/latest`, which cli-release.yml only ever cuts FROM a `cli-v*` tag
-# push. So everything a `curl|sh` user runs is the tree AT THAT TAG. Nothing
+# tagged binary: `curl -fsSL .../install-cli.sh | sh` resolves the newest
+# `cli-v*` GitHub RELEASE (install-cli.sh:31-41 prefers `/releases?per_page=30`,
+# falling back to the `releases/latest` redirect), and cli-release.yml only ever
+# cuts such a release FROM a `cli-v*` tag push. So everything a `curl|sh` user
+# runs is the tree AT THAT TAG. Nothing
 # measured whether the shipped source had moved past it, and the first time that
 # mattered a fix to the go:embed'ed installer sat on main, unreleased, for weeks
 # while every fresh install kept getting the pre-fix bytes.
