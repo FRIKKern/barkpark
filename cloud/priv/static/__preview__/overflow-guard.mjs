@@ -197,9 +197,17 @@ import { selectDefects } from "./defect-selection.mjs";
 import { attentionScenarios } from "./attention-scenarios.mjs";
 import { fleetAxis, FLEET_PINNED_REPS, FLEET_SCEN_SKIP } from "./fleet-scenarios.mjs";
 import { stylesheetProbeJs, stylesheetRefusal, stylesheetVerdict } from "./stylesheet-applied.mjs";
+import { ATTACH_CAP, withAttachDeadline } from "./attach-deadline.mjs";
+import { driverSentence, widthDrivers } from "./width-drivers.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
+// THIS FILE'S OWN BYTES. The W26 leg's coverage sentence is recounted from the
+// width/viewport axes declared below rather than typed (task-72ffb2fdecffd2d3),
+// and the only honest source for "what does this file declare" is the file.
+// Read once, at module load: a derivation that re-read on every leg would be
+// measuring whatever the disk held mid-run.
+const SELF_SRC = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
 const PORT = Number(process.env.OVERFLOW_GUARD_PORT || 4199);
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -1221,20 +1229,50 @@ async function main() {
   const devPort = brought.devPort;
 
   let sessionId;
+  // THE ONLY STRETCH OF THIS FILE THAT USED TO HAVE NO CLOCK ON IT
+  // (task-3eda8d2ebb0b2327). Everything either side is bounded — SERVER_CAP the
+  // static-server poll, DEVTOOLS_CAP the DevToolsActivePort poll,
+  // BRINGUP_ATTEMPTS the launch loop, the render/eval caps every leg — but the
+  // attach itself awaited three things that can never settle: a `fetch` with no
+  // AbortSignal, a websocket `open` promise that listens for open and error and
+  // NOTHING ELSE, and a `cdp.send` whose resolver is freed only by a reply frame
+  // or by the socket closing. A debugger that ACCEPTS and then answers nothing
+  // settles none of them.
+  //
+  // Measured against a deaf CDP stub on origin/main a2deecc1f: the guard printed
+  // `>> chrome  DeafChrome/0.0` and then sat alive at %CPU 0.0 with empty
+  // stderr, forever. That is the fourth ending an instrument is not allowed to
+  // have — it did not measure, it did not find a defect, and it did not refuse,
+  // so console-refusal-capture.mjs had no sentence to quote and the merge button
+  // got an anonymous red.
+  //
+  // `attach()` names each step so the refusal says WHICH one went deaf.
+  const attach = (step, work) => withAttachDeadline(work, { step });
   try {
-    const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
+    const version = await (await attach(
+      "GET /json/version",
+      // The deadline REJECTS but cannot close an fd, so the fetch carries its
+      // own abort: otherwise the refusal would print over a live socket.
+      fetch(`http://127.0.0.1:${devPort}/json/version`, { signal: AbortSignal.timeout(ATTACH_CAP) }),
+    )).json();
     process.stdout.write(`>> chrome     ${version.Browser} · node ${process.version}\n`);
-    cdp = await Cdp.connect(version.webSocketDebuggerUrl);
-    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
-    ({ sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true }));
-    await cdp.send("Runtime.enable", {}, sessionId);
-    await cdp.send("Page.enable", {}, sessionId);
-    await cdp.send("Network.enable", {}, sessionId);
+    cdp = await attach("websocket open", Cdp.connect(version.webSocketDebuggerUrl));
+    const { targetId } = await attach("Target.createTarget", cdp.send("Target.createTarget", { url: "about:blank" }));
+    ({ sessionId } = await attach("Target.attachToTarget", cdp.send("Target.attachToTarget", { targetId, flatten: true })));
+    await attach("Runtime.enable", cdp.send("Runtime.enable", {}, sessionId));
+    await attach("Page.enable", cdp.send("Page.enable", {}, sessionId));
+    await attach("Network.enable", cdp.send("Network.enable", {}, sessionId));
     // GR125(b): Chrome memory-caches app.css across same-URL navigations —
     // without this, a mutated stylesheet measures as the original.
-    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
+    await attach("Network.setCacheDisabled", cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId));
   } catch (err) {
-    // AUDITED (exit 2): the debugger transport failed before any measurement ran.
+    // AUDITED (exit 2), TWO CLASSES THROUGH ONE DOOR. A transport THROW means
+    // the debugger said no; an `attachTimeout` means it said nothing at all.
+    // Both are environment faults with no measurement behind them, so both are
+    // exit 2 — but they are named apart, because "CDP bring-up failed: The
+    // operation was aborted" over a deaf endpoint is the vaguest true sentence
+    // available and a reviewer would go hunting for a CSS bug nobody measured.
+    if (err && err.attachTimeout) return die(err.message);
     return die(`CDP bring-up failed: ${err.message}`);
   }
 
@@ -7849,10 +7887,23 @@ async function main() {
     //    `s.name`, capped at 255 by a `validate_length` a census reads straight
     //    off. It is the census-invisible emitter that carries the live defect.
     //
-    //    1280 APPEARS IN NO INSTRUMENT IN THIS REPO TODAY — this leg is the
-    //    first to drive it, and it is not decoration: the defect persists above
-    //    every band any other leg sweeps (2577/1280), so a sweep that stops at
-    //    1024 certifies a desktop that is still dragging.
+    //    WHY 1280 IS IN THIS AXIS — and the claim that used to sit here, which
+    //    was FALSE (task-72ffb2fdecffd2d3). These four lines read "1280 APPEARS
+    //    IN NO INSTRUMENT IN THIS REPO TODAY — this leg is the first to drive
+    //    it … the defect persists above every band any other leg sweeps
+    //    (2577/1280), so a sweep that stops at 1024 certifies a desktop that is
+    //    still dragging". Both halves were wrong, and the counter-examples were
+    //    in THIS FILE: `FLICK_VIEWPORTS` (the W27-failed-retry leg) has driven
+    //    1280x900 since 7c8fa229a, 2026-08-03 — and hard-guards it with an axis
+    //    check that REFUSES if the cell ever leaves — while six axes here sweep
+    //    to 1440, well above 1280. The true reason 1280 belongs in THIS axis is
+    //    unaffected and stands on its own: the instance grid still read 2577/1280
+    //    on the defective tree, so this leg's own band has to reach it.
+    //
+    //    The coverage claim is no longer prose. It is COMPUTED from the declared
+    //    axes at print time by width-drivers.mjs and printed below, so the next
+    //    axis edit MOVES the sentence instead of rotting it — breakpoint-sweep.
+    //    mjs:611, "A COMMENT CANNOT BE DERIVED, only RECOUNTED".
     //
     //    THE FIXTURE EXISTED AND NOTHING MEASURED IT: `sites-on-instance` drives
     //    the same rows — including the 253-char cruel domain — through the
@@ -7969,10 +8020,14 @@ async function main() {
         okLine(
           `900/1000/1280 are the DRIVEN widths (all three measured broken); 320/390/720 are NEGATIVE CONTROLS — ` +
           `the ≤899 block single-columns the grid there and every number was byte-identical across the fix, so ` +
-          `they detect only a remedy that re-shreds the phone layout. 1280 is driven by NO other instrument in ` +
-          `this repo: the defect outlived every band swept above, and a sweep stopping at 1024 certifies a ` +
-          `desktop that is still dragging`,
+          `they detect only a remedy that re-shreds the phone layout`,
         );
+        // THE COVERAGE SENTENCE, RECOUNTED (task-72ffb2fdecffd2d3). What stood
+        // here claimed "1280 is driven by NO other instrument in this repo" on
+        // every clean run, for thirty-nine days after FLICK_VIEWPORTS in this
+        // same file started driving it. Derived from THIS FILE'S OWN BYTES so
+        // the next axis edit moves it.
+        okLine(driverSentence(widthDrivers(SELF_SRC, 1280, "TRACK_WIDTHS")));
       }
     }
 
