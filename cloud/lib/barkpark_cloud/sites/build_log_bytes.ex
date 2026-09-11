@@ -90,6 +90,13 @@ defmodule BarkparkCloud.Sites.BuildLogBytes do
   @truncation_marker "\n…[truncated by the control plane at #{@max_tail_bytes} bytes]"
 
   @doc """
+  The field allowlist, exposed so `BuildLogBytesProducerLockTest` can compare it
+  against the api's real emitter instead of against a second hand-typed copy.
+  """
+  @spec __bytes_keys__() :: [String.t()]
+  def __bytes_keys__, do: Enum.sort(@bytes_keys)
+
+  @doc """
   Resolve `{site_id, deployment_id}` to the wire answer.
 
   Site scoping is not decoration: `dep_id` alone would let an operator read any
@@ -217,7 +224,28 @@ defmodule BarkparkCloud.Sites.BuildLogBytes do
 
   ## ---------------------------------------------------------------------------
 
-  defp decide(body, base) do
+  # AN OLD BOX IS NOT AN EMPTY LOG, AND IT IS NOT AN UNSCRUBBED ONE EITHER. The
+  # discriminator is the PRESENCE of the `tail` key, not its value: the byte door
+  # emits `tail` on every shape it can answer in (null included), and the RECORD
+  # door — which is what a box too old for `bytes=1` answers — emits no `tail` and
+  # no `log_scrub` at all. Keying on `Map.get/2` would read that missing
+  # `log_scrub` as an explicit null and refuse 422 "these bytes were never
+  # scrubbed", which is a claim about bytes nobody looked at.
+  defp decide(body, base) when is_map(body) do
+    if Map.has_key?(body, "tail") do
+      decide_bytes(body, base)
+    else
+      {502,
+       Map.merge(base, %{
+         error: "box_unreachable",
+         detail:
+           "the box answered the structured record, not the bytes — it is too old to serve them",
+         box_log_state: Map.get(body, "log_state")
+       })}
+    end
+  end
+
+  defp decide_bytes(body, base) do
     case {Map.get(body, "log_state"), Map.get(body, "log_scrub"), Map.get(body, "tail")} do
       # NOT FOLDED — refused on this end too, even though the box should already
       # have refused it with a 422.
@@ -234,14 +262,14 @@ defmodule BarkparkCloud.Sites.BuildLogBytes do
          |> Map.put(:available, true)
          |> Map.merge(record(body))}
 
-      # `available` with no bytes is not an empty log — it is a box that does not
-      # know this flag, answering the RECORD. Fail closed.
+      # `available`, the `tail` key present and NULL, and a log_scrub. The bytes
+      # are on the box and the box sent none: not an empty log, not a refusal —
+      # an answer this end cannot report on. Fail closed.
       {"available", _scrub, _tail} ->
         {502,
          Map.merge(base, %{
            error: "box_unreachable",
-           detail:
-             "the box answered available without the log bytes — it is too old to serve them",
+           detail: "the box answered available but sent no bytes",
            box_log_state: "available"
          })}
 
