@@ -1997,11 +1997,29 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   end
 
   # ── DDL lock contention (pds-bl-import-ddl-deadlock-flake) ───────────────────
+  #
+  # Three tests, one axis: what the import does when another session holds a
+  # conflicting lock on a member table.
+  #
+  #   1. no retry budget (attempts: 1) — the refusal is bounded and NAMED.
+  #   2. holder lets go inside the backoff — the import RETRIES and completes.
+  #   3. holder never lets go — the refusal names how many attempts were spent.
+  #
+  # Every one drives the engine through the real `ALTER TABLE` against a real
+  # second backend; none of them stubs Postgrex.
 
   describe "the import's DDL passes refuse fast and by name under lock contention" do
-    @tag timeout: 30_000
+    @tag timeout: 60_000
     test "a foreign session holding AccessShareLock on a member table turns the import's " <>
            "ALTER TABLE into a named ImportLockError instead of an unbounded wait" do
+      # attempts: 1 — the retry is OFF here on purpose, so this test measures
+      # exactly one thing: the translation of 55P03 into a named, bounded
+      # refusal. The retry itself is measured by the two tests below.
+      put_import_lock_config!(
+        bundle_import_ddl_lock_timeout: "300ms",
+        bundle_import_ddl_lock_attempts: 1
+      )
+
       %{ws_a: ws_a} = seed_two_workspaces!()
       {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
 
@@ -2030,6 +2048,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
       assert error.phase == :drop_member_fks
       assert error.code == "ddl_lock_not_available"
+      assert error.attempts == 1
+      assert error.retried?
       assert error.message =~ "another session holds a conflicting lock"
       assert error.message =~ "Nothing was committed"
 
@@ -2037,13 +2057,140 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       # The import opts out of statement_timeout entirely, so without the
       # lock_timeout this call simply never returns — and the observed flake
       # (seed 162213) was that same wait closing into a 40P01 deadlock.
-      assert elapsed_us < 10_000_000,
+      assert elapsed_us < 30_000_000,
              "the import waited #{div(elapsed_us, 1000)}ms for a lock it should have " <>
                "refused inside its configured lock_timeout"
 
       # The refusal took the whole transaction with it — no partial import.
       assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) == 1
     end
+
+    # THE FIX FOR THE CI RED AT f2c6845d1b. Bounding the lock wait made the
+    # import honest; it did not make it SUCCEED. A background reader that holds
+    # AccessShareLock for longer than the bound now turns a rare 40P01 into a
+    # frequent named refusal — which is what reddened this very module's Elixir
+    # gate (run 34554873798, `merge import mode (PDS-D8) … converges
+    # media_files.size`, at max_cases: 1, so no other TEST held the lock).
+    # Nothing is committed on a refusal, so the whole transaction re-runs.
+    @tag timeout: 60_000
+    test "a holder that lets go inside the backoff window is out-waited: the second attempt " <>
+           "takes the lock and the import completes" do
+      put_import_lock_config!(
+        bundle_import_ddl_lock_timeout: "300ms",
+        bundle_import_ddl_lock_attempts: 3,
+        # One long backoff, so the release below lands INSIDE it with room on
+        # both sides rather than racing the next attempt.
+        bundle_import_ddl_lock_backoff_ms: [1_500]
+      )
+
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+
+      docs_before =
+        scalar("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [ws_a.id])
+
+      assert docs_before > 0
+
+      conn = hold_access_share_lock!("documents")
+
+      # Released ON THE OBSERVED WAIT, not on a wall-clock guess: the releaser
+      # polls pg_locks (through the holder's own backend) until the import is
+      # actually parked on `documents`, then waits past the 300ms lock_timeout
+      # so the FIRST attempt is guaranteed to have been refused, then rolls
+      # back — comfortably inside the 1.5s backoff. A sleep-N-milliseconds
+      # releaser would have to be either racy or slow.
+      releaser =
+        Task.async(fn ->
+          await_lock_waiter!(conn, "documents", 30_000)
+          Process.sleep(600)
+          release_access_share_lock_raw!(conn)
+        end)
+
+      {elapsed_us, result} =
+        :timer.tc(fn -> WorkspaceBundle.import_bundle(bundle, mode: :merge) end)
+
+      :ok = Task.await(releaser, 30_000)
+      await_no_foreign_lock!("documents", 5_000)
+
+      assert {:ok, stats} = result
+      assert stats.total_rows > 0
+      assert stats.tables["workspaces"] == 1
+
+      # ROWS READ BACK, not merely {:ok, _}: the retried transaction is the one
+      # that actually landed the members.
+      assert scalar("SELECT name FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) ==
+               ws_a.name
+
+      assert scalar("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [
+               ws_a.id
+             ]) == docs_before
+
+      # It really did WAIT: the first attempt's 300ms bound plus the 1.5s
+      # backoff cannot be undercut by a run that took the lock first time.
+      assert div(elapsed_us, 1000) >= 1_800,
+             "the import returned in #{div(elapsed_us, 1000)}ms — too fast to have been " <>
+               "refused once and retried"
+    end
+
+    @tag timeout: 60_000
+    test "a holder kept for the whole budget exhausts it: ImportLockError names the attempt " <>
+           "count and the import is still bounded" do
+      put_import_lock_config!(
+        bundle_import_ddl_lock_timeout: "250ms",
+        bundle_import_ddl_lock_attempts: 3,
+        bundle_import_ddl_lock_backoff_ms: [100, 100]
+      )
+
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+
+      conn = hold_access_share_lock!("documents")
+
+      {elapsed_us, error} =
+        try do
+          :timer.tc(fn ->
+            assert_raise WorkspaceBundle.ImportLockError, fn ->
+              WorkspaceBundle.import_bundle(bundle)
+            end
+          end)
+        after
+          release_access_share_lock!(conn)
+        end
+
+      assert error.attempts == 3
+      assert error.code == "ddl_lock_not_available"
+      assert error.phase == :drop_member_fks
+      assert error.message =~ "after 3 attempt(s)"
+
+      # THE LOWER BOUND IS THE PROOF THAT IT RETRIED: three 250ms lock waits
+      # plus two 100ms backoffs cannot be spent by a single attempt.
+      assert div(elapsed_us, 1000) >= 950,
+             "gave up in #{div(elapsed_us, 1000)}ms — that is one attempt, not three"
+
+      # BOUNDED all the same: a budget is not a licence to hang.
+      assert elapsed_us < 30_000_000
+
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) == 1
+    end
+  end
+
+  # Application env for the lock/retry knobs, restored on exit whether the key
+  # was set before or absent entirely — `Application.put_env` has no "unset"
+  # twin, so the absent case must delete rather than write back a nil.
+  defp put_import_lock_config!(opts) do
+    for {key, value} <- opts do
+      previous = Application.fetch_env(:barkpark, key)
+      Application.put_env(:barkpark, key, value)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, prior} -> Application.put_env(:barkpark, key, prior)
+          :error -> Application.delete_env(:barkpark, key)
+        end
+      end)
+    end
+
+    :ok
   end
 
   # A real second backend, OUTSIDE the ExUnit sandbox, parked in an open
@@ -2065,14 +2212,65 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     conn
   end
 
+  # Block until some OTHER backend is PARKED waiting for a lock on `table` —
+  # i.e. the import has actually reached its ALTER and is queued behind us.
+  # Read through the holder's own connection: it is a different backend from
+  # the sandbox one the import runs on, and it needs no Ecto sandbox
+  # allowance, so this is safe to call from a Task.
+  defp await_lock_waiter!(conn, table, budget_ms) do
+    deadline = System.monotonic_time(:millisecond) + budget_ms
+
+    waiting? = fn ->
+      {:ok, %{rows: [[n]]}} =
+        Postgrex.query(
+          conn,
+          """
+          SELECT count(*)
+          FROM pg_locks l
+          JOIN pg_class c ON c.oid = l.relation
+          WHERE l.locktype = 'relation'
+            AND NOT l.granted
+            AND c.relname = $1
+          """,
+          [table]
+        )
+
+      n > 0
+    end
+
+    Stream.repeatedly(fn ->
+      cond do
+        waiting?.() -> :seen
+        System.monotonic_time(:millisecond) >= deadline -> :timeout
+        true -> (Process.sleep(20) && :retry) || :retry
+      end
+    end)
+    |> Enum.find(&(&1 != :retry))
+    |> case do
+      :seen ->
+        :ok
+
+      :timeout ->
+        raise "no backend ever queued for a lock on #{table} — the import never reached " <>
+                "its ALTER, so this test would prove nothing"
+    end
+  end
+
   # ROLLBACK is what actually frees the lock, server-side and synchronously;
-  # stopping the pool afterwards just reclaims the backend. Both matter: this
-  # lock sits on a table EVERY bundle test's import must ALTER, so leaving it
-  # to process teardown reddens whichever unrelated test runs next (an earlier
-  # draft of this test did exactly that at seed 741453).
-  defp release_access_share_lock!(conn) do
+  # stopping the pool afterwards just reclaims the backend.
+  defp release_access_share_lock_raw!(conn) do
     _ = Postgrex.query(conn, "ROLLBACK", [])
     _ = GenServer.stop(conn, :normal, 5_000)
+    :ok
+  end
+
+  # Both matter: this lock sits on a table EVERY bundle test's import must
+  # ALTER, so leaving it to process teardown reddens whichever unrelated test
+  # runs next (an earlier draft of this test did exactly that at seed 741453).
+  # Callable only from the sandbox-owning test process — await_no_foreign_lock!
+  # reads through the Repo.
+  defp release_access_share_lock!(conn) do
+    release_access_share_lock_raw!(conn)
     await_no_foreign_lock!("documents", 5_000)
   end
 
