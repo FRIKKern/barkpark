@@ -92,6 +92,10 @@ on:
       # run on THIS PR to catch a TUI divergence from the new projection.
       - "internal/pdrender/testdata/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
+      # PRE-EXISTING RATCHET RED on origin/main 038d310fce (#17729), not
+      # introduced here: internal/pdrender/inline_code_source_parity_test.go
+      # reads this fixture, so an edit to it must dispatch the Go suite.
+      - "api/test/support/fixtures/inline-code-source.json"
       # Taskboard TUI golden frames (internal/taskboard/testdata/*.txt). The
       # compose/render/glyph-budget suites assert the committed frames byte-for-byte
       # and inventory every glyph in them; a golden REGEN (or a hand-added fixture)
@@ -507,7 +511,7 @@ jobs:
             exit 1
           fi
           if [ "$n" -lt 30 ]; then
-            echo "::error::dispatcher: parsed only ${n} path glob(s) from ${wf}; the declared list is 44 since task-bb930319aeac0266 (was 15 since #15007). A truncated parse makes every PR look Go-free. Refusing to emit a verdict."
+            echo "::error::dispatcher: parsed only ${n} path glob(s) from ${wf}; the declared list is 47, counted 2026-09-11 on task-a1d681421c82e995 (44 at task-bb930319aeac0266; 15 from #15007 until it). A truncated parse makes every PR look Go-free. Refusing to emit a verdict."
             exit 1
           fi
 
