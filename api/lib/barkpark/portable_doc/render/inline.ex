@@ -123,8 +123,31 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     }
   end
 
+  # Inline `code` leaf. The chip body is a FLAT STRING, never inlines — but a
+  # sizeable slice of the live corpus authors it as `children` inline nodes with
+  # no `value` at all (66 published paragraphs at the 2026-07-25 census), and
+  # this clause read `value` only, so those chips composed to an EMPTY
+  # PdInlineCode and the text vanished on the web, in email and in the TUI.
+  #
+  # @barkpark/react already carries the law this now mirrors —
+  # `js/packages/react/src/inline.tsx` `inlineCodeSource`:
+  #
+  #     return `<code>${escapeHtml(inlineCodeSource(node))}</code>`
+  #     // inlineCodeSource = str(node.value) || inlineText(node.children)
+  #
+  # FIRST NON-EMPTY, not first-non-blank: a `value` of `" "` WINS and keeps its
+  # space. That is the opposite of the BLOCK-level `code` contract
+  # (`Compose.code_source/1`, which trims to select across value|code|content|
+  # text) and the difference is deliberate — a block's source key is a choice
+  # among aliases, an inline chip's `value` is the authored body verbatim.
+  #
+  # The three engines answer to ONE fixture,
+  # `api/test/support/fixtures/inline-code-source.json`: this clause via
+  # `test/barkpark/portable_doc/render/inline_code_source_parity_test.exs`, the
+  # SDK via `js/packages/react/tests/inline-code-source.parity.test.ts`, and the
+  # Go TUI via `internal/pdrender/inline_code_source_parity_test.go`.
   def compose_inline(%{"type" => "code"} = n, _inside_link) do
-    %{"kind" => "PdInlineCode", "value" => Map.get(n, "value", "")}
+    %{"kind" => "PdInlineCode", "value" => inline_code_source(n)}
   end
 
   def compose_inline(%{"type" => "link"} = n, inside_link) do
@@ -264,6 +287,50 @@ defmodule Barkpark.PortableDoc.Render.Inline do
       other -> %{"kind" => "PdText", "children" => [other]}
     end
   end
+
+  @doc """
+  The body of an inline `code` leaf: `value` when it is a non-empty string,
+  else the flattened plain text of `children`.
+
+  Twins: `inlineCodeSource` in `js/packages/react/src/inline.tsx` and
+  `inlineCodeSource` in `internal/pdrender/inline.go`. All three are locked to
+  `api/test/support/fixtures/inline-code-source.json`.
+  """
+  def inline_code_source(%{} = n) do
+    case coerce_text_value(Map.get(n, "value", "")) do
+      "" -> flatten_inline_text(Map.get(n, "children"))
+      value -> value
+    end
+  end
+
+  def inline_code_source(_), do: ""
+
+  # Fold inline nodes to their concatenated plain text (markup is DROPPED — a
+  # code chip body is a flat string). Mirrors `inlineText` in inline.tsx:
+  # a string/finite number is itself, a map is `value` || legacy `text` || its
+  # own children, a nested array recurses, anything else contributes "".
+  defp flatten_inline_text(s) when is_binary(s), do: s
+  defp flatten_inline_text(n) when is_number(n), do: to_string(n)
+
+  defp flatten_inline_text(nodes) when is_list(nodes),
+    do: Enum.map_join(nodes, "", &flatten_inline_text_node/1)
+
+  defp flatten_inline_text(_), do: ""
+
+  defp flatten_inline_text_node(%{} = n) do
+    case coerce_text_value(Map.get(n, "value", "")) do
+      "" ->
+        case coerce_text_value(Map.get(n, "text", "")) do
+          "" -> flatten_inline_text(Map.get(n, "children"))
+          legacy -> legacy
+        end
+
+      value ->
+        value
+    end
+  end
+
+  defp flatten_inline_text_node(other), do: flatten_inline_text(other)
 
   # Fail-soft coercion for a text leaf's `value` — binaries pass through,
   # numbers stringify, anything else (map / list / bool / nil) → "". NEVER calls
