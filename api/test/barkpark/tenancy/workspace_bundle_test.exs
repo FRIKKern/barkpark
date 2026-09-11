@@ -2252,6 +2252,21 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       assert stats.total_rows > 0
       assert stats.tables["workspaces"] == 1
 
+      # THE INVARIANT, and the reason `stats.attempts` exists at all: the import
+      # was refused ONCE on lock_timeout and the SECOND attempt is the one that
+      # took the lock. Observed attempts and their ORDER — not elapsed time.
+      #
+      # This assertion replaced an elapsed FLOOR (>= 1_800ms: the 300ms
+      # lock_timeout plus the 1.5s backoff). The floor was sound arithmetic and
+      # a wall-clock flake all the same: main run 34564685349 measured 4263ms on
+      # a loaded runner, and a floor can only ever be undercut by a machine that
+      # ran FASTER than the configured waits — which is not a thing a busy CI
+      # box does. `attempts == 2` says the same thing the floor was reaching
+      # for, and says it off a counter rather than a clock.
+      assert stats.attempts == 2,
+             "the import reported #{stats.attempts} attempt(s) — it was expected to be " <>
+               "refused once on lock_timeout and to take the lock on the second"
+
       # ROWS READ BACK, not merely {:ok, _}: the retried transaction is the one
       # that actually landed the members.
       assert scalar("SELECT name FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) ==
@@ -2261,11 +2276,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
                ws_a.id
              ]) == docs_before
 
-      # It really did WAIT: the first attempt's 300ms bound plus the 1.5s
-      # backoff cannot be undercut by a run that took the lock first time.
-      assert div(elapsed_us, 1000) >= 1_800,
-             "the import returned in #{div(elapsed_us, 1000)}ms — too fast to have been " <>
-               "refused once and retried"
+      # The only surviving clock assertion is an UPPER bound, and a generous one:
+      # it exists to catch an unbounded wait (the whole point of lock_timeout),
+      # not to time the retry. A loaded runner makes a test SLOWER, so a ceiling
+      # this far above the ~1.8s of configured waiting cannot be tripped by
+      # load — which is exactly the property the removed floor lacked. The
+      # @tag timeout above would eventually fire too; this names the reason.
+      assert div(elapsed_us, 1000) < 30_000,
+             "the import took #{div(elapsed_us, 1000)}ms — that is an unbounded wait, not a " <>
+               "bounded refusal followed by a retry"
     end
 
     @tag timeout: 60_000
