@@ -197,6 +197,17 @@ on:
       # consumer of the BP API sources. Its harness runs a fake loopback server.
       - "scripts/lib/bp-curl.sh"
       - "scripts/lib/bp-curl.test.sh"
+      # MAIN WORKFLOW ROLL-UP (task-b4aa15924d214156). The roll-up whose roster
+      # is the TREE, not a watched set: every .github/workflows/ file, its
+      # newest completed conclusion on main, and REQUIRED vs ADVISORY derived
+      # from .github/required-checks.json. The last entry is an INPUT, not the
+      # harness: the harness reads the committed spec live to prove the four
+      # required contexts label their four workflows and that no context name
+      # is spelled out in the script body, so a spec edit can invalidate this
+      # matrix without touching either script.
+      - "scripts/main-workflow-rollup.sh"
+      - "scripts/main-workflow-rollup.test.sh"
+      - ".github/required-checks.json"
       # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
       # trees out of the Elixir census that greps the Go package AND out of the
       # package itself, then mutate both. Same rule as seal-run.test.sh above —
@@ -569,6 +580,17 @@ on:
       # consumer of the BP API sources. Its harness runs a fake loopback server.
       - "scripts/lib/bp-curl.sh"
       - "scripts/lib/bp-curl.test.sh"
+      # MAIN WORKFLOW ROLL-UP (task-b4aa15924d214156). The roll-up whose roster
+      # is the TREE, not a watched set: every .github/workflows/ file, its
+      # newest completed conclusion on main, and REQUIRED vs ADVISORY derived
+      # from .github/required-checks.json. The last entry is an INPUT, not the
+      # harness: the harness reads the committed spec live to prove the four
+      # required contexts label their four workflows and that no context name
+      # is spelled out in the script body, so a spec edit can invalidate this
+      # matrix without touching either script.
+      - "scripts/main-workflow-rollup.sh"
+      - "scripts/main-workflow-rollup.test.sh"
+      - ".github/required-checks.json"
       # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
       # trees out of the Elixir census that greps the Go package AND out of the
       # package itself, then mutate both. Same rule as seal-run.test.sh above —
@@ -898,6 +920,7 @@ jobs:
       which-gates: ${{ steps.sets.outputs.which-gates }}
       bp-curl: ${{ steps.sets.outputs.bp-curl }}
       sunset-route-consumers: ${{ steps.sets.outputs.sunset-route-consumers }}
+      main-workflow-rollup: ${{ steps.sets.outputs.main-workflow-rollup }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
     steps:
       - uses: actions/checkout@v4
@@ -1117,6 +1140,9 @@ jobs:
           which-gates .github/workflows/go-tests.yml
           bp-curl scripts/lib/bp-curl.sh
           bp-curl scripts/lib/bp-curl.test.sh
+          main-workflow-rollup scripts/main-workflow-rollup.sh
+          main-workflow-rollup scripts/main-workflow-rollup.test.sh
+          main-workflow-rollup .github/required-checks.json
           landed-mark scripts/lib/bp-curl.sh
           task-lease-renew scripts/lib/bp-curl.sh
           deploy-receipt-honesty scripts/deploy-receipt-failure.test.sh
@@ -2856,3 +2882,35 @@ jobs:
       - name: "sunset-route-consumers.test.sh (11 assertions incl. both fixture controls, hermetic loopback server)"
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/sunset-route-consumers.test.sh
+
+  main-workflow-rollup:
+    needs: [changes]
+    if: needs.changes.outputs.main-workflow-rollup == 'true'
+    # THE DENOMINATOR IS THE TREE (task-b4aa15924d214156). main-gate-watch.sh
+    # reads branch protection's required set and stale-verdict-watch.sh reads
+    # the open-PR population; neither can report a workflow nobody told it to
+    # look at, so a workflow that drifted out of the watched set — or that has
+    # never had a run on main at all — reads as an absence, and an absence
+    # reads as a green. This roll-up enumerates .github/workflows/ off the
+    # tree, prints the count it enumerated, and prints a zero-run workflow in
+    # words. Only the HERMETIC harness rides here: synthetic workflow trees, a
+    # recorded actions/runs payload, an injected clock, and a `gh` stub that
+    # exits 97 on any call, so it cannot rot into a network skip. The LIVE
+    # roll-up is a runbook command (it needs a token that can list runs) and is
+    # deliberately not wired as a scheduled job in this change.
+    name: every workflow's main verdict (roll-up denominator + grace window)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+        # DEFAULT depth. Every fixture is built under mktemp; the only tree the
+        # harness reads is the working copy of .github/workflows.
+      - name: subject syntax check
+        run: bash -n scripts/main-workflow-rollup.sh
+      - name: harness syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/main-workflow-rollup.test.sh
+      - name: "both directions on fixtures + the three named mutations (staleness, roster, spec label)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/main-workflow-rollup.test.sh
