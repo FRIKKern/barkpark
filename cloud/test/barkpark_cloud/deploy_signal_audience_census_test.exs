@@ -1599,11 +1599,56 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     assert length(live) > 0
   end
 
-  test "the moduledoc states the LIMIT of the claim" do
+  # THE MODULEDOC, AND NOTHING ELSE. The test below used to read the WHOLE FILE
+  # into `src` — so every `assert src =~ "..."` matched ITS OWN ASSERTION
+  # LITERAL, and the guard was VACUOUS on main for all three of its probes.
+  # Measured, not assumed (dr-w19-audience-registry-fail-open): deleting the
+  # sentence from the moduledoc left the test GREEN. Scoping the read to the
+  # moduledoc is what makes the probe about the doc rather than about itself.
+  defp moduledoc_text do
     src = File.read!(@self)
 
-    assert src =~ "This proves an AUDIENCE SHAPE, not DELIVERY"
-    assert src =~ "the registry FAILS OPEN: an unregistered signal is invisible"
-    assert src =~ "does NOT prove any route returns 200"
+    # The LAST `@moduledoc` before `use ExUnit.Case` — this file carries four of
+    # them (the three readers, then the census), and a non-greedy match from the
+    # front lands on `GoReader`'s.
+    [head, _] = String.split(src, "\n  use ExUnit.Case", parts: 2)
+
+    head
+    |> String.split("  @moduledoc \"\"\"\n")
+    |> List.last()
+    |> String.split("\n  \"\"\"")
+    |> hd()
+  end
+
+  test "the moduledoc states the LIMIT of the claim" do
+    src = moduledoc_text()
+
+    # THE CONTROL ON THE PROBE. If `src` ever grows back into the whole file,
+    # these assertions start matching themselves and stop measuring anything.
+    refute src =~ "assert src =~",
+           "the limit probe is reading its own assertions again — scope it to the moduledoc"
+
+    assert byte_size(src) < byte_size(File.read!(@self)) / 2
+
+    # WHITESPACE-TOLERANT, because the moduledoc is HARD-WRAPPED at 80 columns and
+    # "does NOT prove any route returns 200" is split across two lines in it. The
+    # old whole-file probe matched the ASSERTION LITERAL and never the doc, which
+    # is how a probe for a sentence that is not literally present stayed green.
+    assert src =~ ~r/This proves an AUDIENCE SHAPE,\s+not DELIVERY/
+    assert src =~ ~r/does NOT prove any\s+route returns 200/
+
+    # dr-w19-audience-registry-fail-open RETRACTED the old admission — "the
+    # registry FAILS OPEN: an unregistered signal is invisible to this file" —
+    # and this assertion used to grep for exactly that sentence. IT WOULD HAVE
+    # STAYED GREEN ON THE RETRACTION: the retraction QUOTES the sentence it
+    # retracts, three lines above the correction, so the old probe matched its
+    # own obituary and reported that the file still admitted a hole it had just
+    # closed. A guard must probe the NEW text.
+    assert src =~ "the registry no longer fails open"
+    assert src =~ "This moduledoc used to end:"
+
+    # And the NEW claim carries its own limit, which is narrower than "no deploy
+    # signal can hide": the derivation reads two shapes and is blind to the rest.
+    assert src =~ ~r/The derivation sees\s+the two shapes it reads and no others/
   end
 end
