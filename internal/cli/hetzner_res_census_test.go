@@ -327,15 +327,22 @@ var hzResDispositions = map[string]hzResDisposition{
 // above, and no gate would notice. So three things are now MECHANICAL:
 //
 //	1. A paid note must NAME its paying symbol as the first token after
-//	   `paid: `, and that symbol must actually be CALLED from the source file
-//	   that emits the key (hzResPaidSymbol + the companion assertion).
+//	   `paid: `, and that symbol must actually be CALLED BY THE FUNCTION that
+//	   emits the key (hzResPaidSymbol + hzResCallsWithin). It was a whole-FILE
+//	   grep until PDS-D446b measured what that missed; the scope is the
+//	   emitting function, and an unresolvable site is REFUSED BY NAME rather
+//	   than falling back to the file.
 //	2. The symbol must be legal FOR THAT CLASS. A `create` or `request-echo` row
 //	   paid with hzResDestroyed REDS, because the destroy helper's nil branch
 //	   means the opposite thing there — the measured fail-open this wave shipped
 //	   the mutation apparatus to stop.
 //	3. Every KIND currently in the ledger must still be emitted. The glob makes
 //	   a NEW file cheap to enrol; nothing made a kind LEAVING cost anything
-//	   louder than a tidy-looking row deletion.
+//	   louder than a tidy-looking row deletion. THIS RULING NO LONGER LIVES IN
+//	   TestHetznerResourceDispositionsAreBoundToRealCode: it was asserted there
+//	   AND in TestHetznerResourceCensusKindSetIsExact, so one removed kind
+//	   reddened twice. ARM 1 is the single owner now — it holds both
+//	   directions, and the duplicate was cosmetic, never a second opinion.
 
 // hzResPaidSymbol extracts the symbol a `paid:` note names — the first token
 // after "paid: ". Returns "" for an unpaid row or a note that names nothing.
@@ -846,6 +853,72 @@ func hzResCallersOf(t *testing.T, fnName string, paramIdx int) []hzResCaller {
 	return callers
 }
 
+// hzResFuncScope is the key hzResCallsWithin maps on: one FUNCTION in one file.
+// A plain "file:func" string would be ambiguous the moment a name contains a
+// colon; a struct key cannot be.
+type hzResFuncScope struct {
+	file string
+	fn   string
+}
+
+// hzResCallsWithin maps every function declared in the globbed sources to the
+// set of names it CALLS. It is RULING 1's scope: a `paid:` note's symbol has to
+// be called by the function that emits the receipt, not merely to appear
+// somewhere in the same file.
+//
+// WHY A FILE-WIDE GREP WAS NOT A BINDING (PDS-D446b). Twelve destroy rows name
+// ONE paying symbol, and two of them — bucket/delete and object/rm — are emitted
+// from the SAME file. Turn object/rm's hzResDestroyedDeclared call into a bare
+// hzResDone and the verb has lost its confirming read entirely, yet the key
+// still emits (hzResDone is an emitter too), the row still says
+// `paid: hzResDestroyedDeclared`, RULING 2 still passes (the symbol is legal for
+// the class), and the file-wide grep still reads TRUE — because bucket/delete
+// mentions the symbol thirty lines up. The declaration `func hzSizeVerdict(` is
+// enough on its own for the two rows whose paying symbol is not their emitter.
+// File-scope proximity is not a binding; it is a coincidence that has held.
+//
+// Names are collected with hzResCalleeName, so a generic instantiation
+// (`hzResDestroyed[T](…)`) counts as a call of the symbol it instantiates. A
+// method value or selector call contributes its SELECTOR name, which is
+// deliberately lenient: this arm exists to catch a MISSING read, and the cost of
+// leniency is a false green, never a false red.
+func hzResCallsWithin(files map[string]*ast.File) map[hzResFuncScope]map[string]bool {
+	calls := map[hzResFuncScope]map[string]bool{}
+	for path, file := range files {
+		for _, d := range file.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || fn.Name == nil {
+				continue
+			}
+			scope := hzResFuncScope{file: path, fn: fn.Name.Name}
+			if calls[scope] == nil {
+				calls[scope] = map[string]bool{}
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if name, _ := hzResCalleeName(call.Fun); name != "" {
+					calls[scope][name] = true
+				}
+				return true
+			})
+		}
+	}
+	return calls
+}
+
+// hzResEmittingSite strips the " (via file:line)" suffix hzResBuildCensus adds to
+// a key resolved through a dispatch caller, leaving the "file:line" of the SITE
+// that actually emitted the receipt.
+func hzResEmittingSite(where string) string {
+	if i := strings.Index(where, " (via "); i >= 0 {
+		return where[:i]
+	}
+	return where
+}
+
 // hzResCensus is the derived population: the resolved (kind, action) keys, the
 // sites that emitted each, and the opaque callers that could not be resolved.
 type hzResCensus struct {
@@ -853,13 +926,19 @@ type hzResCensus struct {
 	keys       map[string][]string // "kind/action" → "file:line" emitters
 	nonLiteral []hzResSite
 	opaque     []hzResCaller
+	// siteOf resolves a "file:line" emitter string back to the SITE that
+	// produced it. RULING 1 needs the site, not the file: the emitting
+	// FUNCTION is the scope a `paid:` note's symbol has to be found in, and
+	// a "file:line" string alone cannot name it.
+	siteOf map[string]hzResSite
 }
 
 func hzResBuildCensus(t *testing.T) hzResCensus {
 	t.Helper()
-	c := hzResCensus{sites: hzResSitesFromSource(t), keys: map[string][]string{}}
+	c := hzResCensus{sites: hzResSitesFromSource(t), keys: map[string][]string{}, siteOf: map[string]hzResSite{}}
 	for _, s := range c.sites {
 		where := fmt.Sprintf("%s:%d", s.file, s.line)
+		c.siteOf[where] = s
 		// THE SINGLE LOAD-BEARING DETECTOR FOR A NON-LITERAL KIND, and the one
 		// place it is caught. Four tests appear to red on that mutation; they are
 		// NOT four arms — they are THIS t.Errorf, reached through every test that
@@ -1016,6 +1095,8 @@ func TestHetznerResourceDispositionsAreBoundToRealCode(t *testing.T) {
 		}
 		src[path] = string(b)
 	}
+	_, parsed := hzResParseSources(t)
+	callsWithin := hzResCallsWithin(parsed)
 
 	for key, wheres := range c.keys {
 		disp, ok := hzResDispositions[key]
@@ -1043,36 +1124,123 @@ func TestHetznerResourceDispositionsAreBoundToRealCode(t *testing.T) {
 				key, disp.class, symbol, legal)
 		}
 
-		// RULING 1 — the companion grep: the named symbol is actually CALLED
-		// from the source file that emits this key.
-		file, _, _ := strings.Cut(wheres[0], ":")
-		body, seen := src[file]
-		if !seen {
+		// RULING 1 — the companion binding: the named symbol is actually
+		// CALLED BY THE FUNCTION that emits this key. Scoped to the function,
+		// not the file: see hzResCallsWithin for the measured reason.
+		where := hzResEmittingSite(wheres[0])
+		file, _, _ := strings.Cut(where, ":")
+		if _, seen := src[file]; !seen {
 			t.Errorf("%q is emitted from %q, which is not one of the scanned sources %v", key, file, hzResSourceFiles(t))
 			continue
 		}
-		if !strings.Contains(body, symbol+"(") {
-			t.Errorf("%q claims to be paid by %s, but %s never CALLS %s — the row describes code that is not "+
-				"there, which is the one failure a prose ledger cannot catch by itself", key, symbol, file, symbol)
+		site, resolved := c.siteOf[where]
+		if !resolved {
+			// REFUSE BY NAME rather than fall back to the file. A key whose
+			// emitting site cannot be resolved is a key whose paying symbol
+			// has no scope to be checked in, and a silent file-wide fallback
+			// is exactly the weaker predicate this ruling replaced.
+			t.Errorf("UNRESOLVED-EMITTING-SITE: %q is emitted at %q, which the census cannot resolve back to a "+
+				"site — so %s cannot be bound to the function that emits this receipt. Do not weaken this to a "+
+				"file-wide grep: teach hzResBuildCensus the shape instead", key, where, symbol)
+			continue
+		}
+		scope := hzResFuncScope{file: site.file, fn: site.enclosing}
+		if !callsWithin[scope][symbol] {
+			t.Errorf("%q claims to be paid by %s, but %s (%s) never CALLS %s — the row describes code that is not "+
+				"in the function that emits this receipt. A mention elsewhere in %s is NOT the payment: twelve "+
+				"destroy rows share one paying symbol, so a file-wide grep stays green on a verb that lost its "+
+				"confirming read", key, symbol, site.enclosing, where, symbol, file)
 		}
 	}
 
-	// RULING 3 — the per-KIND presence assertion. The glob makes a new file
-	// cheap to enrol; nothing made a kind LEAVING cost anything.
-	live := map[string]bool{}
-	for key := range c.keys {
-		kind, _, _ := strings.Cut(key, "/")
-		live[kind] = true
+	// RULING 3 LIVES IN ARM 1 NOW — pds-bl-census-kind-vanished-double-reports.
+	// The pinned-kind-is-live direction used to be asserted HERE as well as in
+	// TestHetznerResourceCensusKindSetIsExact, so a kind removed without its pin
+	// reddened twice, in two functions, with two differently-worded messages.
+	// The DECISION taken (not an omission): ARM 1 is the single owner of the
+	// per-kind population, because it owns the converse direction too
+	// (RATCHET/KIND-UNPINNED) and the two directions belong in one place. This
+	// test keeps the two rulings that are about a DISPOSITION's prose — the
+	// class binding and the paying symbol — and says nothing about kinds.
+	t.Logf("KINDS=%d %v (population owned by TestHetznerResourceCensusKindSetIsExact)",
+		len(hzResLedgerKinds), hzResLedgerKinds)
+}
+
+// TestHetznerPaidSymbolBindsToTheEmittingFunction is PDS-D446b's demonstration,
+// staged rather than described: the OLD whole-file predicate and the NEW
+// per-function one, run side by side over ONE synthetic source, with the answer
+// they disagree on named.
+//
+// The source below is the real mutation in miniature. `destroyObject` is a
+// destroy verb that LOST its confirming read — it reports on an exit code and a
+// bare hzResDone — while `deleteBucket`, thirty lines away in the SAME file,
+// still calls the paying symbol. That is not a contrived shape: bucket/delete
+// (hetzner_storage_cmd.go:465) and object/rm (:761) are exactly this pair, and
+// they are two of the twelve destroy rows that share one symbol.
+//
+// A synthetic source, not the tree, because this arm must keep failing for the
+// OLD predicate forever — a demonstration that reads the live sources stops
+// demonstrating anything the day someone fixes the sources.
+func TestHetznerPaidSymbolBindsToTheEmittingFunction(t *testing.T) {
+	const src = `package demo
+
+func destroyObject(out *writer, key string) int {
+	// The confirming read is GONE: no hzResDestroyedDeclared, no absent func.
+	// The receipt still emits, so the (kind, action) key still exists and the
+	// disposition row still says ` + "`paid: hzResDestroyedDeclared`" + `.
+	return hzResDone(out, "rm", "object", key, key, nil)
+}
+
+func deleteBucket(out *writer, name string) int {
+	return hzResDestroyedDeclared(out, "delete", "bucket", name, name, nil,
+		"a non-binding ListBuckets", func() (bool, error) { return true, nil })
+}
+`
+	const symbol = "hzResDestroyedDeclared"
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "synthetic_census_demo.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse synthetic source: %v", err)
 	}
-	for _, kind := range hzResLedgerKinds {
-		if !live[kind] {
-			t.Errorf("kind %q emits NO receipt in %v any more. If that verb family really was removed, delete its "+
-				"rows AND this pin in the same edit — a kind that leaves silently takes its obligations with it",
-				kind, hzResSourceFiles(t))
-		}
+	calls := hzResCallsWithin(map[string]*ast.File{"synthetic_census_demo.go": f})
+
+	emitter := hzResFuncScope{file: "synthetic_census_demo.go", fn: "destroyObject"}
+	payer := hzResFuncScope{file: "synthetic_census_demo.go", fn: "deleteBucket"}
+
+	// THE PRECONDITION. Without it the two verdicts below could both be right
+	// about a source that holds neither function.
+	if len(calls[emitter]) == 0 || len(calls[payer]) == 0 {
+		t.Fatalf("the synthetic source did not yield both functions: %v", calls)
 	}
-	sort.Strings(hzResLedgerKinds)
-	t.Logf("KINDS=%d %v", len(hzResLedgerKinds), hzResLedgerKinds)
+
+	// THE OLD PREDICATE — whole FILE. It reads GREEN on the verb that lost its
+	// read. This assertion is the hole: it must keep passing, because the day
+	// it stops, this demonstration has stopped demonstrating.
+	if !strings.Contains(src, symbol+"(") {
+		t.Fatalf("CONTROL BROKEN: the whole-file predicate did not even find %s in a source that calls it — "+
+			"the old-predicate arm is measuring nothing", symbol)
+	}
+
+	// THE NEW PREDICATE — the emitting FUNCTION. It must RED on the same source.
+	if calls[emitter][symbol] {
+		t.Errorf("the per-function binding found %s in destroyObject, which does not call it — the new predicate "+
+			"is no stronger than the whole-file grep it replaced", symbol)
+	}
+
+	// THE OTHER DIRECTION, without which the arm above would pass on a
+	// predicate that simply answered false to everything.
+	if !calls[payer][symbol] {
+		t.Errorf("the per-function binding did NOT find %s in deleteBucket, which calls it on its only statement — "+
+			"the new predicate reds on honest code", symbol)
+	}
+
+	// And the emitter that IS there must still be seen, so a green above cannot
+	// be a scan that read no calls at all.
+	if !calls[emitter]["hzResDone"] {
+		t.Errorf("the per-function binding did not see hzResDone in destroyObject — the scan read no calls, so " +
+			"every verdict in this test is vacuous")
+	}
 }
 
 // TestHetznerResourceCensusMeasuresTheKnownPopulation holds the ONE population
