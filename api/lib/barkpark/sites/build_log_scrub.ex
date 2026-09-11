@@ -214,6 +214,10 @@ defmodule Barkpark.Sites.BuildLogScrub do
     end
   end
 
+  # `tmp` is this module's own `<log path>.scrub-<int>` — never caller data, and
+  # the only thing ever removed here is the half-written fold this function is
+  # cleaning up after.
+  # sobelow_skip ["Traversal.FileModule"]
   defp fail(tmp, reason) do
     _ = File.rm(tmp)
     {:error, reason}
@@ -223,6 +227,10 @@ defmodule Barkpark.Sites.BuildLogScrub do
   # would let `strip_ansi/1`'s weld rule and the patterns' `\\s` classes see a
   # boundary that the next line's first byte does not actually have. Split it
   # off, fold the content, put it back byte-identically.
+  # sobelow_skip ["XSS.Raw"]
+  # The `raw/1` here is THIS MODULE's fold (strip_ansi |> scrub), not
+  # `Phoenix.HTML.raw/1`. Nothing on this path reaches a template; the value is
+  # a line of a build log on its way back to disk.
   defp fold_line(line) do
     case split_suffix(line) do
       {content, suffix} -> raw(content) <> suffix
