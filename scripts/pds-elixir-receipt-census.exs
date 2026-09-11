@@ -72,6 +72,7 @@
 #   elixir scripts/pds-elixir-receipt-census.exs --keys     # STDOUT: the register key, TSV, one line per emitted site
 #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys # STDOUT: the EXCLUSION anchor, TSV, one line per @routed_excluded row
 #   elixir scripts/pds-elixir-receipt-census.exs --citations # STDOUT: every evidence citation RESOLVED BY CONTENT, TSV: path, line, block fingerprint, marker
+#   elixir scripts/pds-elixir-receipt-census.exs --routed-rows # PROPOSE paste-ready @routed_excluded rows for every undisposed member; NEVER writes
 #   elixir scripts/pds-elixir-receipt-census.exs --selftest # mutate this file over a synthetic corpus; prove the arms can go RED
 #
 # EXIT: 0 all integrity checks pass · 1 an integrity check failed · 2 corpus refused OR
@@ -2535,6 +2536,7 @@ defmodule PDS.Census do
           exclusion_keys?: false,
           selftest?: false,
           citations?: false,
+          routed_rows?: false,
           files_from: nil
         },
         []
@@ -2552,6 +2554,13 @@ defmodule PDS.Census do
   defp parse_args(["--citations" | rest], o, bad),
     do: parse_args(rest, %{o | citations?: true}, bad)
 
+  # ON THE STRICT LIST BY NAME, like every other flag: `--routed-row`, `--routed_rows`
+  # and every other near-miss fall to the catch-all clause below and exit 2 (PDS-D493).
+  # A swallowed near-miss would print the ordinary census and read as "the affordance
+  # found nothing", which is the worst answer this flag could give.
+  defp parse_args(["--routed-rows" | rest], o, bad),
+    do: parse_args(rest, %{o | routed_rows?: true}, bad)
+
   defp parse_args(["--files-from", path | rest], o, bad),
     do: parse_args(rest, %{o | files_from: path}, bad)
 
@@ -2566,7 +2575,7 @@ defmodule PDS.Census do
     p("REFUSED: UNKNOWN ARGUMENT")
     Enum.each(msgs, &p("  " <> &1))
     p("")
-    p("  accepted: --sites · --files-from FILE · --keys · --exclusion-keys · --citations · --selftest")
+    p("  accepted: --sites · --files-from FILE · --keys · --exclusion-keys · --citations · --routed-rows · --selftest")
     p("  A swallowed flag is a census measuring a lens nobody asked for. Exit 2.")
     System.halt(2)
   end
@@ -2619,7 +2628,13 @@ defmodule PDS.Census do
     report_judgment_register(classified)
     falsifiers = if register_scope(classified) == :real, do: report_basis_falsifiers(classified), else: :skipped
     if show_sites?, do: report_each_site(classified)
-    routed = report_routed_population(routed_derivation(parsed), classified, parsed, index)
+
+    # THE HYPOTHESIS COLUMN, COMPUTED ONCE AND READ TWICE — by the printer and by its own
+    # two arms. It is handed NOTHING but `classified` and `index` and returns a map of its
+    # own, so there is no path from here to a verdict (see response_carries_read/2).
+    rcr = response_carries_read(classified, index)
+    report_response_carries_read(rcr)
+    routed = report_routed_population(routed_derivation(parsed), classified, parsed, index, opts)
     report_lens_can_miss(routed)
     blind = report_blind_spots(parsed)
     delegate = report_delegate_probe(index)
@@ -2628,7 +2643,7 @@ defmodule PDS.Census do
     ms = cpu1 - cpu0
 
     integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms,
-      parsed, falsifiers, routed, route_closure, blind)
+      parsed, falsifiers, routed, route_closure, blind, rcr)
   end
 
   # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
@@ -5532,6 +5547,323 @@ defmodule PDS.Census do
     end
   end
 
+
+  # --------------------------- RESPONSE-CARRIES-THE-READ (PDS-D490) — A HYPOTHESIS ONLY
+  #
+  # THE SHAPE, AND WHY IT NEEDS NO DATAFLOW. `json(conn, %{ok: true, <key>: <call>(...)})`
+  # — the payload key's value IS the call, a DIRECT SIBLING of the `ok: true` pair inside
+  # the SAME map literal. `expr` (PDS-D498) already retains that `%{}` node, so the whole
+  # question is in-AST and structural: does the `ok: true` pair have a sibling pair whose
+  # value is a call this file's own route lens resolves to a Repo READ verb? No dataflow
+  # is asked for and none is used — the sibling relation is read off the container, and
+  # the read is read off `bfs/7`, the same walker `route/3` takes.
+  #
+  # AN ARM MAY WRITE THE HYPOTHESIS COLUMN AND MAY NEVER WRITE A VERDICT (PDS-D469, and
+  # it is the reason this shape was FILED rather than folded into the lens). Wave 34
+  # measured static shapes manufacturing false compliance AND false accusation in the
+  # same instrument in the same week, so the number that matters — UNJUDGED — may be
+  # moved only by a ruling with a reason attached. THE STRUCTURAL GUARANTEE, AND IT IS
+  # STRUCTURAL RATHER THAN PROMISED: `response_carries_read/2` takes `classified` and
+  # `index` and returns a FRESH map of its own; it never returns a site, never merges a
+  # field into one, and its result is read at exactly TWO places — the printer below and
+  # `response_carries_read_checks/1`. `classify/2`, `dispose_routed/4`, `@register`,
+  # `@roster` and every verdict-bearing function are downstream of neither. There is no
+  # code path from this block to a verdict to delete, which is why the claim is checkable
+  # by grepping `response_carries_read(` rather than by trusting this paragraph.
+  #
+  # WHAT IT BUYS. Without it every future arrival of this shape costs another hand ruling
+  # — the ~2/day treadmill the arrival tripwire exists to escape. The hypothesis does not
+  # discharge the ruling; it tells the ruler what the shape already says.
+
+  # THE PRE-REGISTERED FIRE SET. Keyed on {short path, def label, payload key} and NEVER
+  # on a LINE — and the row this arm was filed under is its own proof. It pre-registered
+  # SEVEN sites as bare line anchors, five in tasks_controller.ex and two in
+  # tickets_controller.ex, and ALL SEVEN had rotted by the time a builder read them: the
+  # five tasks anchors land on comment lines today, and both tickets anchors render a
+  # VARIABLE (`tickets: rows`), not a call, which is not this shape at all. A committed
+  # line number in this file is a snapshot that goes stale in days; {path, def, key}
+  # survives every edit that does not move the receipt out of its def or rename the
+  # payload key. (The rotted anchors themselves are NOT reprinted here: a dead line
+  # number in a comment is the exact thing this paragraph argues against.)
+  #
+  # IT REDS ON AN ARRIVAL, AND THAT COSTS NOTHING NEW. A site of this shape arriving is
+  # a new `ok: true` literal, which ALREADY reds REGISTER-COMPLETE and already forces a
+  # register row in the same commit. Appending one line here is a strictly smaller edit
+  # than the one the arrival already demands, so this arm adds no tax to honest change —
+  # it only refuses a SILENT change to what the hypothesis column claims.
+  # RE-DERIVED AT THE PR BASE, AND THE FILED SET WAS NOT THIS ONE. The row pre-registered
+  # SEVEN sites in tasks_controller.ex and tickets_controller.ex; measured on this tree the
+  # arm fires on SIX, and not one of them is a filed anchor. The set below is what the
+  # predicate ACTUALLY fires on, printed by the run that derived it, not transcribed from
+  # the filing — which is why it is keyed on {path, def, payload key} and not on a line.
+  @response_carries_read_expected [
+    {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
+     "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "scoped_liveview_path"},
+    {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
+     "BarkparkWeb.BulldocsIngestController.ingest_html_write/2", "scoped_liveview_path"},
+    {"barkpark_web/controllers/query_controller.ex", "BarkparkWeb.QueryController.counts/2",
+     "counts"},
+    {"barkpark_web/controllers/tasks_controller.ex", "BarkparkWeb.TasksController.fleet_roster/2",
+     "documents"},
+    {"barkpark_web/controllers/tasks_controller.ex", "BarkparkWeb.TasksController.prime/2",
+     "rails"},
+    {"barkpark_web/controllers/tasks_controller.ex",
+     "BarkparkWeb.TasksController.task_list_response/4", "docs"}
+  ]
+
+  # THE ARM'S OWN TRIPWIRE, AND IT IS WHAT MAKES THIS FALSIFIABLE RATHER THAN FLATTERING.
+  # `github_status_controller.ex` `status/2` renders `health: status_fun().(...)` — the
+  # SAME syntactic shape, dispatching through a runtime-configured capture
+  # (`Application.get_env(:barkpark, :github_status_fun) || (&default_status/1)`) that no
+  # build-free lens can resolve to a def. THE ARM MUST REFUSE IT and the site must stay
+  # UNJUDGED. An arm that fires here is matching SYNTAX rather than evidence and must not
+  # ship. Both halves are asserted below: the site must be SEEN (precondition — a control
+  # over an absent site proves nothing) and it must be in the refused roll, not the fired
+  # one.
+  @response_carries_read_tripwire {"barkpark_web/controllers/github_status_controller.ex",
+                                   "BarkparkWeb.GithubStatusController.status/2"}
+
+  defp response_carries_read(classified, index) do
+    rows = Enum.flat_map(classified, &rcr_site(&1, index))
+
+    %{
+      fired: rows |> Enum.filter(&(&1.verdict == :fires)) |> Enum.sort_by(& &1.id),
+      refused: rows |> Enum.filter(&(&1.verdict != :fires)) |> Enum.sort_by(& &1.id),
+      scope: register_scope(classified)
+    }
+  end
+
+  # THE CONTAINER, OR NOTHING. A site whose retained `expr` is not a map literal cannot
+  # have a SIBLING pair by construction, so it contributes no row at all rather than a
+  # refusal — a refusal over a site the shape does not describe would inflate the refused
+  # roll with the whole population and make the tripwire unreadable inside it.
+  defp rcr_site(%{expr: {:%{}, _, pairs}} = s, index) when is_list(pairs) do
+    if rcr_ok_true?(pairs), do: Enum.flat_map(pairs, &rcr_pair(&1, s, index)), else: []
+  end
+
+  defp rcr_site(_s, _index), do: []
+
+  defp rcr_ok_true?(pairs) do
+    Enum.any?(pairs, fn
+      {l, r} -> rcr_ok_key?(lit(l)) and match?({:lit, true, _}, lit(r))
+      _ -> false
+    end)
+  end
+
+  defp rcr_ok_key?({:lit, k, _}) when k in [:ok, "ok"], do: true
+  defp rcr_ok_key?(_), do: false
+
+  defp rcr_pair({l, r}, s, index) do
+    with {:lit, key, meta} <- lit(l),
+         false <- key in [:ok, "ok"],
+         true <- meta[:format] == :keyword or match?([_ | _], meta[:assoc]),
+         {:call, target, text} <- rcr_call(r) do
+      [rcr_row(s, key, target, text, index)]
+    else
+      _ -> []
+    end
+  end
+
+  defp rcr_pair(_pair, _s, _index), do: []
+
+  # THE VALUE MUST *BE* THE CALL, NOT MERELY CONTAIN ONE. `health: status_fun().(
+  # effective_dataset(conn, requested))` CONTAINS a resolvable local call in an ARGUMENT;
+  # what PRODUCES the rendered value is the capture dispatch. Reading "contains a call"
+  # instead of "is a call" would fire this arm on the tripwire through the argument — the
+  # exact false positive the tripwire exists to catch — so only the OUTERMOST form is read.
+  defp rcr_call({{:., _, [{:__aliases__, _, segs}, f]}, _, args}) when is_atom(f) and is_list(args),
+    do: {:call, {:remote, segs, f, length(args)}, "#{Enum.join(segs, ".")}.#{f}/#{length(args)}"}
+
+  # FIELD ACCESS IS NOT A CALL, AND CONFLATING THE TWO DROWNS THE TRIPWIRE. `doc.doc_id`
+  # quotes as `{{:., _, [var, :doc_id]}, meta, []}` — the SAME outer shape as a dispatch,
+  # separated only by `meta[:no_parens]`. The first cut of this predicate read all 45 of
+  # them as runtime captures, which buried the ONE capture the tripwire is about inside a
+  # class of things that are not calls at all. A field read renders a value the map
+  # already held; it names no callee, so the shape this arm describes simply does not
+  # apply and the site contributes NO row.
+  defp rcr_call({{:., _, [_head, f]}, meta, []}) when is_atom(f) do
+    if meta[:no_parens], do: :no, else: {:call, {:capture, "#{f}()"}, "#{f}()"}
+  end
+
+  # A DOT-CALL WHOSE HEAD IS NOT A MODULE ALIAS — `fun.(args)` (a capture held in a
+  # variable or returned by a call), `var.fun(args)` on a runtime module. Named, refused,
+  # and NEVER resolved: there is no def to name.
+  defp rcr_call({{:., _, [head]}, _, args}) when is_list(args),
+    do: {:call, {:capture, one_line(Macro.to_string(head))}, one_line(Macro.to_string(head)) <> ".()"}
+
+  defp rcr_call({{:., _, _}, _, args} = node) when is_list(args),
+    do: {:call, {:capture, one_line(Macro.to_string(node))}, one_line(Macro.to_string(node))}
+
+  defp rcr_call({f, _, args}) when is_atom(f) and is_list(args) do
+    if rcr_local_name?(f),
+      do: {:call, {:local, f, length(args)}, "#{f}/#{length(args)}"},
+      else: :no
+  end
+
+  defp rcr_call(_), do: :no
+
+  # CONTAINERS AND CONTROL FORMS WEAR THE {form, meta, args} SHAPE. `%{}`, `{}`, `<<>>`,
+  # `__block__` and every operator are not calls to a def; `if`/`case`/`cond`/`with`/`fn`
+  # are control forms whose VALUE is whichever branch ran, which is a dataflow question
+  # this file refuses. Both sets are excluded by name and by spelling, not by one or the
+  # other: `:__block__` passes a leading-underscore identifier test, and `:%{}` fails a
+  # name list that forgot it.
+  @rcr_not_a_call ~w(fn if unless case cond with try for receive quote unquote do)a
+
+  defp rcr_local_name?(f) do
+    f not in @rcr_not_a_call and Regex.match?(~r/^[a-z][A-Za-z0-9_]*[?!]?$/, Atom.to_string(f))
+  end
+
+  defp rcr_row(s, key, target, text, index) do
+    {verdict, why} = rcr_verdict(target, s, index)
+
+    %{
+      id: {short(s.path), (s.owner && label(s.owner)) || "?", to_string(key)},
+      line: s.line,
+      call: text,
+      verdict: verdict,
+      why: why
+    }
+  end
+
+  defp rcr_verdict({:capture, what}, _s, _index),
+    do:
+      {:refused_capture,
+       "REFUSED: the value dispatches through a runtime capture (#{what}). No def is named, " <>
+         "so the route lens resolves nothing and this site stays UNJUDGED — matching the syntax here would be matching syntax INSTEAD OF evidence"}
+
+  defp rcr_verdict({:remote, segs, f, arity}, _s, index),
+    do: rcr_resolved(resolve(index, segs, f, arity), index, "#{Enum.join(segs, ".")}.#{f}/#{arity}")
+
+  defp rcr_verdict({:local, f, arity}, s, index) do
+    case s.owner do
+      nil ->
+        {:refused_unresolved,
+         "REFUSED: #{f}/#{arity} is a LOCAL call and this site has no owning def, so there is no module to resolve it in"}
+
+      d ->
+        rcr_resolved(resolve(index, d.module, f, arity), index, "#{f}/#{arity}")
+    end
+  end
+
+  defp rcr_resolved([], _index, text),
+    do: {:refused_unresolved, "REFUSED: #{text} resolves to NO def in this corpus"}
+
+  defp rcr_resolved(ds, index, text) do
+    case Enum.find(ds, &rcr_def_reads?(index, &1)) do
+      nil ->
+        {:refused_no_read,
+         "REFUSED: #{text} resolves to #{length(ds)} def(s), NONE of which reaches a Repo read verb at depth <= #{@evidence_depth}"}
+
+      d ->
+        {:fires,
+         "#{text} reaches a Repo READ verb at depth <= #{@evidence_depth} through #{label(d)}"}
+    end
+  end
+
+  defp rcr_def_reads?(index, d) do
+    {verbs, _, _} = bfs([{d, 0, [label(d)]}], index, MapSet.new(), %{}, nil, [], @evidence_depth)
+    Map.has_key?(verbs, :read)
+  end
+
+  defp report_response_carries_read(%{scope: :scoped_out}), do: :ok
+
+  defp report_response_carries_read(h) do
+    p("RESPONSE-CARRIES-THE-READ — A HYPOTHESIS COLUMN, NEVER A VERDICT (PDS-D490/D469)")
+    p(String.duplicate("-", 78))
+
+    wrap(
+      "IN-AST, SIBLING-PAIR, NO DATAFLOW: the question is whether the `ok: true` pair has " <>
+        "a sibling pair inside the SAME map literal whose value IS a call this file's own " <>
+        "route lens resolves to a Repo READ verb. NOTHING HERE MOVES A VERDICT. Every site " <>
+        "below still carries its own judgment-register row and its own reason; UNJUDGED is " <>
+        "not reduced by one, because a hypothesis is not a ruling (PDS-D469).",
+      "  "
+    )
+
+    p("")
+    p("  FIRED #{pad(length(h.fired))} site(s) — HYPOTHESIS: the payload key's value is the read")
+
+    Enum.each(h.fired, fn r ->
+      {path, fun, key} = r.id
+      p("      HYPOTHESIS  #{path}:#{r.line}  #{key}: #{r.call}")
+      p("                  fn #{fun}")
+      wrap(r.why, "                  ")
+    end)
+
+    if h.fired == [], do: p("      none")
+
+    caps = Enum.filter(h.refused, &(&1.verdict == :refused_capture))
+
+    p("")
+
+    p(
+      "  REFUSED #{pad(length(h.refused))} site(s) of the SAME syntactic shape — " <>
+        Enum.map_join(Enum.sort(Enum.frequencies_by(h.refused, & &1.verdict)), " · ", fn {v, n} ->
+          "#{v} #{n}"
+        end)
+    )
+
+    p("      THE CAPTURE REFUSALS, NAMED IN FULL — this is the class the tripwire lives in:")
+
+    Enum.each(caps, fn r ->
+      {path, fun, key} = r.id
+      p("      REFUSED  #{path}:#{r.line}  #{key}: #{r.call}")
+      p("               fn #{fun}")
+      wrap(r.why, "               ")
+    end)
+
+    if caps == [], do: p("      none — and that is itself a FINDING about this arm: the tripwire is gone")
+
+    p("")
+  end
+
+  # THE TWO ARMS. Both are SCOPED exactly as the register arms are: over a synthetic or
+  # truncated corpus `register_scope/1` returns `:scoped_out`, no arm is contributed, and
+  # nothing certifies an empty set at exit 0 (PDS-D541).
+  defp response_carries_read_checks(%{scope: :scoped_out}), do: []
+
+  defp response_carries_read_checks(h) do
+    fired = Enum.map(h.fired, & &1.id)
+    expected = @response_carries_read_expected
+    extra = fired -- expected
+    missing = expected -- fired
+
+    pinned_why =
+      if extra == [] and missing == [] do
+        "the hypothesis fires on EXACTLY the #{length(expected)} pre-registered site(s) and no others — keyed on {path, def, payload key}, never on a line, so an edit that shifts the receipt does not red this and an edit that MOVES it does"
+      else
+        Enum.join(
+          ["the fired set is not the pre-registered set — anything else firing is a FINDING ABOUT THE ARM, not about the corpus"] ++
+            Enum.map(extra, fn {p, f, k} -> "UNREGISTERED FIRE #{p} #{f} #{k}" end) ++
+            Enum.map(missing, fn {p, f, k} -> "PRE-REGISTERED SITE NO LONGER FIRES #{p} #{f} #{k}" end),
+          " · "
+        )
+      end
+
+    seen = Enum.filter(h.fired ++ h.refused, &(rcr_site_id(&1) == @response_carries_read_tripwire))
+    trip_fired = Enum.filter(h.fired, &(rcr_site_id(&1) == @response_carries_read_tripwire))
+
+    trip_why =
+      cond do
+        seen == [] ->
+          "THE TRIPWIRE IS NOT IN THIS RUN AT ALL — #{elem(@response_carries_read_tripwire, 0)} #{elem(@response_carries_read_tripwire, 1)} produced neither a fire nor a refusal, so the refusal below would be a control over an absent site and would prove nothing (a control says nothing about the precondition)"
+
+        trip_fired != [] ->
+          "THE ARM FIRED ON THE TRIPWIRE. #{elem(@response_carries_read_tripwire, 1)} dispatches through a runtime capture the route lens cannot resolve; an arm that fires here is matching SYNTAX rather than evidence and must not ship"
+
+        true ->
+          "#{elem(@response_carries_read_tripwire, 1)} wears the SAME syntactic shape and is REFUSED, not judged — #{length(seen)} row(s) seen, #{length(trip_fired)} fired. The site stays UNJUDGED, which is the only thing that makes this arm falsifiable rather than flattering"
+      end
+
+    [
+      {"RESPONSE-CARRIES-THE-READ-PINNED", extra == [] and missing == [], pinned_why},
+      {"RESPONSE-CARRIES-READ-REFUSES-CAPTURE", seen != [] and trip_fired == [], trip_why}
+    ]
+  end
+
+  defp rcr_site_id(%{id: {path, fun, _key}}), do: {path, fun}
+
   # ----------------------------------------------------- routed population (L4a-d)
 
   # THE WHOLE DERIVATION, IN ONE PASS OVER THE SOURCES THE CENSUS ALREADY READ. Returns
@@ -7140,7 +7472,119 @@ defmodule PDS.Census do
 
   # -- report -----------------------------------------------------------------
 
-  defp report_routed_population(:no_router, _classified, _parsed, _index) do
+  # ------------------------------ THE DISPOSITION REGEN AFFORDANCE (`--routed-rows`)
+  #
+  # THE TAX THIS PAYS. ROUTED-POPULATION-COMPLETE keys #{length(@routed_excluded)}
+  # committed rows on {method, path, module, action}, which is what makes an ARRIVING
+  # write route visible — and it also means EVERY honest route change (a new endpoint, a
+  # renamed path, a controller move) reds the census with no mechanical way to repair the
+  # table. The FAIL line names at most FOUR offenders and the rest had to be re-derived by
+  # hand, or by re-adding the temporary dump block that generated the table in the first
+  # place. That is a recurring tax, not a one-off.
+  #
+  # A PROPOSAL, NEVER A `--fix`. Nothing here writes a file, and that is the whole design:
+  # the arm exists because a HUMAN decides the class. A flag that edited
+  # @routed_excluded in place would launder an arrival into an exclusion with no ruling
+  # attached, which is exactly the false compliance PDS-D469 demoted static shapes for.
+  # It prints Elixir a reviewer pastes, reads and signs.
+  #
+  # THE CLASS IS DERIVED BY THE RULE THAT GENERATED THE SHIPPED TABLE, and only among
+  # DECLARED classes. `:live` is a routed method whose writes live in handle_event/3 with
+  # no {Controller, action} pair for the register to key on -> :liveview_handle_event;
+  # everything else reaching no `ok: true` receipt this lens keys on ->
+  # :status_only_receipt. `action_not_in_corpus` IS RETIRED (PDS wave 40, it held exactly
+  # two rows and both were a local-variable controller binding) and is NOT resurrected
+  # here: a member whose module this corpus does not carry gets `:NEEDS_CLASS`, which is
+  # UNDECLARED on purpose — pasted unedited it reds EXCLUSION-CLASS-DECLARED instead of
+  # entering the table as a guess.
+  #
+  # THE THIRD DIRECTION (the row asked for it to be considered, and it is cheap here):
+  # a committed row whose class no longer matches the shape it describes. Compared ONLY
+  # over the two DERIVABLE classes — `:repaired_computed_receipt` and `:selftest_fixture`
+  # are human rulings and synthetic fixtures that no rule can re-derive, so including
+  # them would print a "mismatch" on every row of them, every run, forever.
+  @routed_rows_derivable [:liveview_handle_event, :status_only_receipt]
+
+  defp routed_rows_proposal(disp, parsed) do
+    mods = module_file_index(parsed)
+
+    reclass =
+      for {m, path, mod, a, c} <- @routed_excluded,
+          c in @routed_rows_derivable,
+          {derived, _note} = routed_row_class({m, path, mod, a}, mods),
+          derived in @routed_rows_derivable,
+          derived != c,
+          do: {{m, path, mod, a}, c, derived}
+
+    p("")
+    p("  PASTE-READY @routed_excluded PROPOSAL (--routed-rows) — A PROPOSAL, NEVER A WRITE")
+
+    wrap(
+      "Nothing below is written to any file. The class on each ADD line is DERIVED by the " <>
+        "same rule that generated the shipped table (`:live` -> :liveview_handle_event, " <>
+        "otherwise :status_only_receipt); a member whose module this corpus does not carry " <>
+        "gets :NEEDS_CLASS, which is UNDECLARED and reds EXCLUSION-CLASS-DECLARED if it is " <>
+        "pasted without a human ruling. A DELETE line names a committed row that judges no " <>
+        "live member. A RE-CLASS line names a row whose committed class no longer matches " <>
+        "the shape it describes. THE HUMAN DECIDES THE CLASS — this only spares the typing.",
+      "      "
+    )
+
+    p("")
+    p("      ADD #{pad(length(disp.undisposed))} row(s) — every UNDISPOSED routed-write member:")
+
+    if disp.undisposed == [] do
+      p("        (none — every routed-write member carries a disposition)")
+    else
+      disp.undisposed
+      |> Enum.sort()
+      |> Enum.each(fn {m, path, mod, a} = key ->
+        {class, note} = routed_row_class(key, mods)
+        p("    {#{inspect(m)}, #{inspect(path)}, #{inspect(mod)}, #{inspect(a)}, #{inspect(class)}},")
+        if note != "", do: p("    #{note}")
+      end)
+    end
+
+    p("")
+    p("      DELETE #{pad(length(disp.orphans))} row(s) — committed, naming NO live routed member:")
+
+    if disp.orphans == [] do
+      p("        (none)")
+    else
+      Enum.each(Enum.sort(disp.orphans), fn {{m, path, mod, a}, c} ->
+        p("    {#{inspect(m)}, #{inspect(path)}, #{inspect(mod)}, #{inspect(a)}, #{inspect(c)}},   # DELETE: judges no live routed member")
+      end)
+    end
+
+    p("")
+    p("      RE-CLASS #{pad(length(reclass))} row(s) — committed class != the class the rule derives today:")
+
+    if reclass == [] do
+      p("        (none — every derivable committed class still matches its shape)")
+    else
+      Enum.each(reclass, fn {{m, path, mod, a}, was, now} ->
+        p("    {#{inspect(m)}, #{inspect(path)}, #{inspect(mod)}, #{inspect(a)}, #{inspect(now)}},   # RE-CLASS: committed #{inspect(was)}")
+      end)
+    end
+
+    p("")
+  end
+
+  defp routed_row_class({method, _path, _mod, _action}, _mods) when method == @routed_live_method,
+    do: {:liveview_handle_event, ""}
+
+  defp routed_row_class({_method, _path, mod, _action}, mods) do
+    if Map.has_key?(mods, mod) do
+      {:status_only_receipt, ""}
+    else
+      {:NEEDS_CLASS,
+       "# CLASS NOT DERIVED: this corpus carries no module #{inspect(mod)}, so the rule " <>
+         "cannot be evaluated. `action_not_in_corpus` is RETIRED (PDS wave 40) and must NOT " <>
+         "be resurrected — a HUMAN decides. Pasted unedited this row reds EXCLUSION-CLASS-DECLARED."}
+    end
+  end
+
+  defp report_routed_population(:no_router, _classified, _parsed, _index, _opts) do
     p("ROUTED-WRITE POPULATION — SKIPPED (this corpus carries no #{@router_path})")
     p(String.duplicate("-", 78))
     p("  NOT A PASS. Without the router there is no population to dispose, so the two")
@@ -7149,7 +7593,8 @@ defmodule PDS.Census do
     :no_router
   end
 
-  defp report_routed_population(d, classified, parsed, index) do
+
+  defp report_routed_population(d, classified, parsed, index, opts) do
     disp = dispose_routed(d.population, classified, parsed, index)
     lives = Enum.filter(d.population, fn {m, _, _, _} -> m == @routed_live_method end)
     live_mods = lives |> Enum.map(fn {_, _, mod, _} -> mod end) |> Enum.uniq() |> length()
@@ -7182,6 +7627,8 @@ defmodule PDS.Census do
     p("                  exclusion row — rows the precedence SWALLOWS, which is why every")
     p("                  number on this page can be identical with the table one row larger.")
     p("    sum       #{pad(disp.judged + disp.rostered + disp.excluded + length(disp.undisposed))}  == population #{length(d.population)}")
+
+    if opts.routed_rows?, do: routed_rows_proposal(disp, parsed)
 
     p("")
     p("  JUDGED FRACTION #{disp.ladder.judged_coverage}/#{length(d.population)} — the share of the routed write")
@@ -9550,6 +9997,108 @@ defmodule PDS.Census do
       expect: {:keys, {:reds, "does not DISCRIMINATE"}},
       proves: "dropping expr_fp from the key collapses two sites in one clause to one row — the register would silently lose a site"
     },
+    # ---- RESPONSE-CARRIES-THE-READ (PDS-D490), THREE CASES ON THE REPO CORPUS -------
+    #
+    # WHY `corpus: :repo` FOR ALL THREE (PDS-D541). Both arms scope themselves through
+    # register_scope/1, which is :scoped_out over the synthetic tree — an arm proven only
+    # where it is switched off is proven nowhere, and a mutant there would print
+    # SELFTEST OK having run no predicate at all. Nothing below writes to api/lib: each
+    # case runs a MUTATED COPY of this file with cwd at the repo, read-only.
+    #
+    # THE FIRST IS THE PRECONDITION, NOT A CONTROL. A control over an absent site proves
+    # nothing, and this exact arm is about a REFUSAL — "the tripwire did not fire" reads
+    # identically whether the tripwire was refused or was never in the corpus at all. So
+    # the pristine run must first be seen to REACH the `status/2` receipt in
+    # github_status_controller.ex and name it in the capture roll.
+    %{
+      name: "RCR-TRIPWIRE-IS-REACHED",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "RESPONSE-CARRIES-THE-READ — A HYPOTHESIS COLUMN, NEVER A VERDICT",
+        "barkpark_web/controllers/github_status_controller.ex:65  health: status_fun().()",
+        "PASS  RESPONSE-CARRIES-READ-REFUSES-CAPTURE",
+        "PASS  RESPONSE-CARRIES-THE-READ-PINNED"
+      ],
+      proves: "the repo corpus DOES carry the tripwire — the same syntactic shape dispatching through a runtime capture — and the arm names it in the REFUSED roll, so the two mutants below have something real to destroy"
+    },
+    %{
+      name: "RCR-CAPTURE-FIRE-REDS",
+      corpus: :repo,
+      argv: [],
+      # PROMOTE THE CAPTURE REFUSAL TO A FIRE. This is the failure the row was filed
+      # against, spelt in one atom: an arm that answers on SYNTAX rather than on evidence.
+      # THE ANCHOR IS SPLIT BECAUSE THIS CASE TABLE IS IN THE SAME FILE. A contiguous
+      # "{:refused_capture," here occurs TWICE — once in the predicate and once in this
+      # literal — and apply_mutation/2 refuses an ambiguous anchor (it did, on the first
+      # run of this case). The `<>` keeps the source spelling unique.
+      mut: {"      {:refused" <> "_capture,", "      {:fires,"},
+      exit: 1,
+      expect: ["FAIL  RESPONSE-CARRIES-READ-REFUSES-CAPTURE", "THE ARM FIRED ON THE TRIPWIRE"],
+      proves: "an arm that fires on a runtime-configured capture — the same syntax, no resolvable callee — reds by name instead of adding an unfalsifiable hypothesis to a site that must stay UNJUDGED"
+    },
+    %{
+      name: "RCR-FIRE-SET-PINNED",
+      corpus: :repo,
+      argv: [],
+      # STOP READING LOCAL HELPER CALLS — the shape a narrowing to remote calls only
+      # takes. Five of the six pre-registered sites render a LOCAL helper
+      # (`scoped_liveview_path/1`, `published_type_counts/2`, `prime_rails/2`,
+      # `render_task_list/3`), so the fired set collapses 6 -> 1 and the arm must name
+      # every site that fell out.
+      #
+      # WHY A NARROWING AND NOT A WIDENING, MEASURED RATHER THAN PREFERRED. Two widenings
+      # were tried first and BOTH left the fired set at exactly 6: admitting `:write`
+      # beside `:read` in rcr_def_reads?/2, and raising its budget from @evidence_depth 6
+      # to @route_depth 12. Every call this arm already resolves that touches the store at
+      # all touches it with a read, and no further depth reaches one. A mutant that moves
+      # nothing proves nothing, so the shipped mutant is the one that was SEEN to move the
+      # set.
+      mut: {"if rcr_local" <> "_name?(f),", "if false,"},
+      exit: 1,
+      expect: [
+        "FAIL  RESPONSE-CARRIES-THE-READ-PINNED",
+        "PRE-REGISTERED SITE NO LONGER FIRES"
+      ],
+      proves: "a predicate that stops resolving local helper calls drops five of the six pre-registered sites and the arm reds NAMING each one — the fire set is pinned to what the predicate actually does, not to a count that agrees with itself"
+    },
+    # ---- THE DISPOSITION REGEN AFFORDANCE (`--routed-rows`), TWO CASES ---------------
+    #
+    # THE ROUTE IS PLANTED IN THE DERIVATION, NOT IN THE FIXTURE ROUTER — same reason as
+    # ROUTED-ARRIVAL-REDS below: the corpora are written ONCE with the UNMUTATED
+    # write_corpus!/2, so a mutation to the fixture heredoc changes a function the mutant
+    # never calls and the case passes vacuously.
+    #
+    # THE SECOND HALF OF THIS CASE IS THE ONE THAT MATTERS. It requires the proposal AND
+    # `FAIL ROUTED-POPULATION-COMPLETE` in the SAME run: the affordance printed the row
+    # the human must sign and the census still went RED on the undisposed arrival. That is
+    # "a proposal, never a --fix", asserted mechanically rather than promised in prose.
+    %{
+      name: "ROUTED-ROWS-PROPOSES-NEVER-FIXES",
+      corpus: :full,
+      argv: ["--routed-rows"],
+      mut:
+        {"(literal ++ mounted)" <> "\n        |> Enum.map",
+         "(literal ++ mounted ++ [{:post, \"/v1/selftest-planted\", \"Barkpark.Filler.M1\", :noop}])\n        |> Enum.map"},
+      exit: 1,
+      expect: [
+        "PASTE-READY @routed_excluded PROPOSAL (--routed-rows) — A PROPOSAL, NEVER A WRITE",
+        "{:post, \"/v1/selftest-planted\", \"Barkpark.Filler.M1\", :noop, :status_only_receipt},",
+        "FAIL  ROUTED-POPULATION-COMPLETE"
+      ],
+      proves: "a planted arrival is emitted as a paste-ready @routed_excluded row with its class DERIVED by the table's own rule, and the census still reds on the same run — the affordance spares the typing and never launders the arrival"
+    },
+    %{
+      name: "ROUTED-ROWS-ARGV-STRICT",
+      corpus: :full,
+      argv: ["--routed-row"],
+      mut: nil,
+      exit: 2,
+      expect: ["REFUSED: UNKNOWN ARGUMENT", "unknown argument \"--routed-row\"", "--routed-rows"],
+      proves: "the affordance is on the STRICT ARGV list by name — an adjacent misspelling exits 2 instead of running the ordinary census and reading as 'the affordance found nothing'"
+    },
     # THE ROUTED-POPULATION ARMS (PDS wave 38). Both directions, plus the blind-shape
     # detector.
     #
@@ -11568,7 +12117,7 @@ defmodule PDS.Census do
     [{"SELFTEST-FLOOR-MULTIPLIER", printed == counted and counted > 0, why}]
   end
 
-  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed, route_closure, blind) do
+  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed, route_closure, blind, rcr) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
@@ -11657,7 +12206,8 @@ defmodule PDS.Census do
         roster_freshness_checks(classified, parsed) ++
         falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified) ++
         route_depth_checks(route_closure, classified) ++
-        mount_mirror_checks(parsed) ++ selftest_floor_checks(floor_mult)
+        mount_mirror_checks(parsed) ++ selftest_floor_checks(floor_mult) ++
+        response_carries_read_checks(rcr)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
