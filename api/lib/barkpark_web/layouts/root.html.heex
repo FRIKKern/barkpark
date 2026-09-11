@@ -1954,11 +1954,14 @@
        tag. `.pane-header` above already declares `display: flex` and
        `.pane-column-collapsed-label` below already declares `display: flex`, so
        the computed display is `flex` in both cases exactly as it was while they
-       were divs — this line re-states it inside the collapsed scope so deleting
-       it from the shared `.pane-header` rule cannot silently collapse the strip
-       to an inline box. Do not remove it while the children are spans. */
+       were divs, and NO rule had to be added here to keep it that way.
+       Consequence to respect: `display: flex` on `.pane-header` is now
+       LOAD-BEARING for the collapsed strip, not merely a restatement of what
+       a <div> already was. Deleting it would drop this box to an inline one.
+       It is deliberately NOT re-stated inside this rule: `display` counts as
+       box geometry to wide_geometry_lock_test's census, and an unscoped
+       geometry declaration on a pane family reds that lock. */
     .pane-column--collapsed .pane-header {
-      display: flex;
       justify-content: center;
       padding: 0;
       color: var(--fg-dim);
