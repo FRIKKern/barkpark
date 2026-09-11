@@ -908,8 +908,63 @@ cmd_collect() {
       info "a defect."
       ;;
     STILL-RUNNING)
+      # ── the escape hatch, named ONLY where it is safe ─────────────────────
+      #
+      # `arm --force` is the sanctioned way past a false STILL-RUNNING, and
+      # arm's OWN refusal says so verbatim ("Use `collect` first, or --force if
+      # you know that pid is not a climb."). But that message is only reachable
+      # by running the very command this branch tells the operator NOT to run,
+      # so an operator who obeys never learns the flag exists.
+      #
+      # Naming it unconditionally here would be worse than hiding it: on a
+      # genuinely live climb --force stacks two full exports and OOMs the live
+      # box (PDS-D31). So it is conditioned on the SAME identity evidence the
+      # arm-time guard uses (pid_live_ours). Two cases reach STILL-RUNNING:
+      #
+      #   fingerprint RECORDED and MATCHING -> the pid provably IS this climb.
+      #       --force is named only to be REFUSED, with the reason.
+      #   NO fingerprint recorded (a run dir armed before the identity check
+      #       landed) -> pid_live_ours degraded to plain pid_live, so identity
+      #       is UNPROVEN in either direction. That is the exact shape that
+      #       strands an obedient operator, and the only one where --force is
+      #       offered — after a hand check that disproves the climb.
+      set +e
+      pid_live_ours "$pid" "${p:+$(dirname "$p")/meta}"
+      rc=$?
+      set -e
       info "Neither marker, and \`ps -p $pid\` shows the process. Come back later;"
       info "do NOT re-arm — two concurrent full exports would OOM the live box."
+      info ""
+      if [ -n "$PID_IDENT_RECORDED" ] && [ "$rc" -eq 0 ]; then
+        info "IDENTITY PROVEN — the fingerprint recorded at arm and the one \`ps\`"
+        info "reports now AGREE, so this pid is the armed child, not a recycled"
+        info "slot:"
+        info "  recorded at arm: $PID_IDENT_RECORDED"
+        info "  seen now:        $PID_IDENT_SEEN"
+        info "\`arm --force\` exists for a pid that is provably NOT this climb."
+        info "This one provably IS one, so --force is the WRONG tool here: it"
+        info "would put a second full export on the live box. Wait."
+      else
+        info "IDENTITY UNPROVEN — this run dir records no pid_fingerprint (it was"
+        info "armed before the identity check landed), so liveness ALONE cannot"
+        info "separate the armed child from an unrelated process that inherited"
+        info "the number. STILL-RUNNING here is a degraded read, not a proof."
+        info ""
+        info "Disprove the climb by hand BEFORE doing anything else:"
+        info ""
+        info "    ps -o pid=,comm=,lstart=,args= -p $pid"
+        info ""
+        info "If that is this launcher's child (a \`bash …/child.sh\`), it IS the"
+        info "climb: come back later, exactly as above. If it is something else"
+        info "entirely — a shell, an editor, a build — then the climb is already"
+        info "dead and its pid slot was reused, and the sanctioned escape is:"
+        info ""
+        info "    $SELF arm --force"
+        info ""
+        info "That is the same flag arm's own refusal names. Do not reach for it"
+        info "on a pid you could not identify: --force on a live climb is two"
+        info "concurrent full exports and an OOM on the live box (PDS-D31)."
+      fi
       ;;
     KILLED)
       set +e
@@ -925,6 +980,8 @@ cmd_collect() {
         info "The armed child is gone; its pid number was reused by an"
         info "unrelated process. This reads KILLED because the CLIMB is dead —"
         info "do NOT kill pid $pid, it belongs to something else."
+        info "You do not need \`arm --force\` for this: arm runs the SAME identity"
+        info "comparison, sees the same mismatch, and arms without being forced."
       elif [ "$rc" -eq 2 ]; then
         # NOT kern.maxproc — see pid_live's header: maxproc caps concurrent
         # processes, not pid VALUES, and bounding on it calls live pids dead.
@@ -1204,6 +1261,64 @@ DUMMY
   write_run_meta "$scratch/identmeta" cafe0002 ident-id "$$" "$scratch/ident.log"
   out="$(grep '^pid_fingerprint=' "$scratch/identmeta/meta" | cut -d= -f2- || true)"
   check "$out" "$(pid_fingerprint "$$")" "write_run_meta records the arm-time comm+lstart fingerprint"
+
+  # ── 4c · the --force escape, named only for a pid that is not provably ours
+  #
+  # (pds-bl-collect-stillrunning-hides-force.) arm's refusal names --force;
+  # collect's STILL-RUNNING branch named it NOWHERE, so an operator who obeys
+  # "do NOT re-arm" could never reach the one message that documents the flag.
+  # It must now be reachable from collect — but ONLY where the identity check
+  # has not proved the pid IS this climb. Both fixtures below classify
+  # STILL-RUNNING; what is under test is which advisory collect prints.
+  say ""
+  say "4c · collect names \`arm --force\` only where the pid is not provably ours"
+
+  # (a) identity PROVEN — fingerprint recorded AND matching. The invocation must
+  #     be WITHHELD, with the reason, and the do-not-re-arm warning must stand.
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/ident.log" --pid-file "$scratch/ident-match/child.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"IDENTITY PROVEN"*) ok "a matching fingerprint is reported as IDENTITY PROVEN" ;;
+    *)                   bad "collect does not report a matching fingerprint as proof of identity" ;;
+  esac
+  case "$out" in
+    *"$SELF arm --force"*) bad "collect offers the --force invocation for a pid it PROVED is this climb" ;;
+    *)                     ok "the --force invocation is withheld from a provably-live climb" ;;
+  esac
+  case "$out" in
+    *"--force is the WRONG tool here"*) ok "collect says WHY --force is refused on a live climb" ;;
+    *)                                  bad "collect withholds --force without giving the reason" ;;
+  esac
+  case "$out" in
+    *"do NOT re-arm"*) ok "a genuinely live climb still gets the unambiguous do-not-re-arm warning" ;;
+    *)                 bad "the do-not-re-arm warning was lost from a genuinely live climb" ;;
+  esac
+
+  # (b) identity UNPROVEN — a run dir with no recorded fingerprint, where
+  #     pid_live_ours degraded to plain pid_live. This is the shape that strands
+  #     an obedient operator, so the escape must be NAMED, gated on a hand check.
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/ident.log" --pid-file "$scratch/ident-legacy/child.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"IDENTITY UNPROVEN"*) ok "a run dir with no fingerprint is reported as IDENTITY UNPROVEN" ;;
+    *)                     bad "collect presents a degraded liveness read as a proof" ;;
+  esac
+  case "$out" in
+    *"$SELF arm --force"*) ok "collect names the \`arm --force\` escape where identity is unproven" ;;
+    *)                     bad "the documented --force escape is still undiscoverable from collect" ;;
+  esac
+  case "$out" in
+    *"ps -o pid=,comm=,lstart=,args= -p"*) ok "the escape is gated on a hand identity check the operator can run" ;;
+    *)                                     bad "collect offers --force with no way to disprove the climb first" ;;
+  esac
+  case "$out" in
+    *"do NOT re-arm"*) ok "the unproven case still warns against re-arming on this evidence alone" ;;
+    *)                 bad "the do-not-re-arm warning was lost from the unproven case" ;;
+  esac
 
   # NO-TRANSCRIPT
   state="$(classify "$scratch/absent.log" "$scratch/dummy.pid")"
