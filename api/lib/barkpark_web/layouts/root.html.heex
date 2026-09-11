@@ -1947,7 +1947,18 @@
       .pane-column, .pane-column--collapsed { transition: background var(--dur-1); }
       .pane-column--collapsed > * { animation: none; }
     }
+    /* The collapsed strip's two children are <span>s, NOT <div>s: their
+       parent is a <button>, whose HTML5 content model admits phrasing content
+       only. A <span> takes `display:inline` from the UA sheet, so the flex box
+       both boxes rely on has to be ASSERTED by class, never inherited from the
+       tag. `.pane-header` above already declares `display: flex` and
+       `.pane-column-collapsed-label` below already declares `display: flex`, so
+       the computed display is `flex` in both cases exactly as it was while they
+       were divs — this line re-states it inside the collapsed scope so deleting
+       it from the shared `.pane-header` rule cannot silently collapse the strip
+       to an inline box. Do not remove it while the children are spans. */
     .pane-column--collapsed .pane-header {
+      display: flex;
       justify-content: center;
       padding: 0;
       color: var(--fg-dim);
