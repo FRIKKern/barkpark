@@ -379,6 +379,41 @@ FAKE
   check "a wrapper REFUSAL refuses as itself and is NEVER reported as unformatted" 6 "CANNOT READ" "UNFORMATTED" "$rc" "$out"
   check "and it quotes the wrapper's own words so the reader can see WHO refused" 6 "REFUSED on this box" "" "$rc" "$out"
   check "and it says NO CLAIM, so nothing downstream reads exit 6 as a verdict" 6 "NO CLAIM" "" "$rc" "$out"
+
+  # 5b. THE VOCABULARY TEST, LOAD-BEARING, ON OUTPUT THAT OUTRUNS THE PIPE.
+  #     Case 5's fake mix exits 2, so the `case "$rc"` above already sets
+  #     $refused and the REFUSED/UNCHECKED test is never reached — gut that test
+  #     and case 5 still passes. This wrapper refuses with exit 1 instead (the
+  #     "a future wrapper may refuse with 1" case the comment up at the verdict
+  #     path names), so the vocabulary test is the ONLY thing standing between a
+  #     refusal and "!! UNFORMATTED (exit 1) — a real verdict".
+  #
+  #     And it puts REFUSED on the FIRST line with ~205 KB of listing behind it,
+  #     which is the SIGPIPE shape: a reader that exits at the first match closes
+  #     the pipe, the producer dies 141, `set -o pipefail` propagates it, and the
+  #     TRUE match reads as no match. Measured 2026-09-11 (macOS bash 3.2): with
+  #     the pre-fix `printf | grep -q` idiom this arm reported UNFORMATTED exit 1;
+  #     shorten the listing to 10 lines and the SAME idiom answers exit 6, so the
+  #     hazard is the output SIZE, not the refusal.
+  mkdir -p "$tmp/refuse1/api/deps" "$tmp/refuse1/.github/workflows" "$tmp/refuse1/bin"
+  : > "$tmp/refuse1/api/deps/keep"
+  printf 'jobs:\n  format:\n    strategy:\n      matrix:\n        elixir: ["%s"]\n' "$running_probe" \
+    > "$tmp/refuse1/.github/workflows/elixir.yml"
+  cat > "$tmp/refuse1/bin/mix" <<'FAKE1'
+#!/usr/bin/env bash
+echo "mix format is REFUSED on this box: the shim declined to run the formatter." >&2
+awk 'BEGIN{for(i=0;i<4200;i++) printf "lib/barkpark/some/long/module/path/file_%05d.ex\n", i}' >&2
+exit 1
+FAKE1
+  chmod +x "$tmp/refuse1/bin/mix"
+  out="$(PATH="$tmp/refuse1/bin:$PATH" FORMAT_CHECK_ROOT="$tmp/refuse1" \
+    FORMAT_CHECK_WORKFLOW="$tmp/refuse1/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
+  # The producing fixture must actually be huge, or this arm is vacuous.
+  if [ "${#out}" -lt 100000 ]; then
+    say "  FAIL  the exit-1 refusal fixture never produced a large output (${#out} bytes)"; fails=$((fails + 1))
+  else
+    check "a wrapper refusing with exit 1 behind 200KB of output is STILL a refusal, not a verdict" 6 "CANNOT READ" "!! UNFORMATTED" "$rc" "$out"
+  fi
 else
   say "  skip  wrapper-refusal case — no elixir on PATH to pin an expectation to"
 fi
