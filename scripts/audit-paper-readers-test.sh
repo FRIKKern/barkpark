@@ -47,6 +47,12 @@ if [[ " $* " == *" paper view "* && " $* " == *" --profile none "* ]]; then
   if [[ "${BP_FIXTURE_CLI_EMPTY:-}" == "1" ]]; then
     exit 0
   fi
+  # The SAME shape, but healing on the second call — a would-be transient. The
+  # ruling at the top of audit-paper-readers.sh says the audit must NOT chase
+  # it, so this stub exists to prove the second call never happens.
+  if [[ "${BP_FIXTURE_CLI_EMPTY_ONCE:-}" == "1" && "$(bp_count cli_empty_once)" -le 1 ]]; then
+    exit 0
+  fi
   if [[ "${BP_FIXTURE_WIDE:-}" == "1" ]]; then
     printf '%081d\n' 0
     exit 0
@@ -236,6 +242,43 @@ jq -e '
     .tui.max_display_width == 0 and .tui.overflow_lines == 0
   )
 ' "$tmp/cli-empty-result.json" >/dev/null
+
+# ── RULING PIN: empty_output is NOT retried (2026-09-11) ──────────────────────
+# The fixture above already fixes the persistent case at ONE attempt. This one
+# fixes the transient case: a render that is empty on call 1 and readable on
+# call 2. If the audit ever grew an empty-output retry, this run would go GREEN
+# — so it must stay RED at attempts == 1. Evidence for the ruling (full
+# reasoning in the script header): 6,274 CLI observations across the six reds
+# since PR #15760 named the arm (runs 33956981205, 34024640087, 34110681290,
+# 34211257256, 34336441737, 34462179731) contain ZERO empty_output; every CLI
+# red there is command_failed with a named stderr. An empty render on a clean
+# exit is also the shape of a real regression, and retrying it would launder
+# that regression as a flake.
+mkdir "$tmp/counts-cli-empty-once"
+if PATH="$tmp:$PATH" BP_FIXTURE_CLI_EMPTY_ONCE=1 \
+  BP_FIXTURE_COUNT_DIR="$tmp/counts-cli-empty-once" BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/cli-empty-once-result.json"; then
+  printf 'a once-empty CLI render was retried to green — empty_output must NOT be retried (see the RULING block in audit-paper-readers.sh)\n' >&2
+  exit 1
+fi
+
+jq -e '
+  .ok == false and .failed == 1 and
+  (.failures[0].cli | .ok == false and .arm == "empty_output" and
+    .exit == 0 and .attempts == 1 and .stderr == "") and
+  (.failures[0].tui | .max_display_width == 0 and .overflow_lines == 0)
+' "$tmp/cli-empty-once-result.json" >/dev/null
+
+# Control: the stub really does heal on its SECOND call, so the red above is
+# the audit declining to retry and not a stub that can only ever be empty. The
+# second paper in the same run consumed call 2 and rendered fine.
+jq -e '[.results[] | select(.cli.arm == "ok" and .cli.ok)] | length == 1' \
+  "$tmp/cli-empty-once-result.json" >/dev/null
+if [[ "$(cat "$tmp/counts-cli-empty-once/bp_cli_empty_once" 2>/dev/null)" != "2" ]]; then
+  printf 'the once-empty CLI stub was not invoked exactly twice; the pin measured nothing\n' >&2
+  exit 1
+fi
 
 # The two reds above are indistinguishable in the OLD witness and must stay
 # distinguishable in this one: same tui metrics, different arm.
