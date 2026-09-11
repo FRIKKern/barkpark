@@ -167,10 +167,16 @@ probe "internal/provisioner/support.go (supportEnableImportStep restart wait)" \
 
 echo ""
 echo "---- CENSUS: who is STILL on the sunset route (a predicate over the tree, not a list)"
-# A line is a PROBE when it names api/schemas AND carries a fetch verb. Positive
-# matching, deliberately: an exclusion list ("drop anything with echo") already
-# produced a MEASURED false absence here — Makefile:299 and run.sh:18 both pipe
-# their probe through `|| echo 000` and vanished from the census.
+# A line is a PROBE when it names api/schemas AND carries a fetch verb or builds
+# a probe URL. Positive matching, deliberately: an exclusion list ("drop
+# anything with echo") already produced a MEASURED false absence here —
+# Makefile:299 and run.sh:18 both pipe their probe through `|| echo 000` and
+# vanished from the census.
+#
+# The verb set is VALIDATED IN BOTH DIRECTIONS against origin/main at fe01df112:
+# run over the pre-repoint tree it names all eleven cli-fence sites this PR
+# changed (the nine probes plus the vendored deploy.sh's `curl -v` diagnostic),
+# and over the post-repoint tree it names only the api fence's seven.
 #
 # Scope is the shipping health surface: the root entry points, the deploy/setup
 # scripts, and the Go CLI + provisioner. Tests, testdata and this harness are
@@ -185,7 +191,7 @@ census_probes() {
   # shellcheck disable=SC2086  # deliberate word-splitting: one grep over the set
   grep -nE 'api/schemas' $files 2>/dev/null \
     | grep -vE ':[0-9]+:[[:space:]]*(#|//)' \
-    | grep -E '(curl|wget|bp_curl_[a-z]+|bp_health_probe|Invoke-WebRequest|http\.Get|client\.Get|HealthURL[[:space:]]*=|healthcheck)'
+    | grep -E '(curl|wget|bp_curl_[a-z]+|bp_health_probe|Invoke-WebRequest|http\.Get|client\.Get|healthcheck|[Uu][Rr][Ll][A-Za-z]*[[:space:]]*:?=|base \+|\[\]string\{)'
 }
 
 # CONTROL: the census must be able to SEE the route at all. If the file set or
