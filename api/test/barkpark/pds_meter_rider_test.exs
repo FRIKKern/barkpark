@@ -108,8 +108,12 @@ defmodule Barkpark.PdsMeterRiderTest do
     {envelope_name, corpus_factor} = {first_envelope_name(corpus), 1.25}
 
     arms = [
-      self_test: fn -> System.cmd(python, [meter, "--self-test"], cd: root, stderr_to_stdout: true) end,
-      verify: fn -> System.cmd(python, [meter, "verify", corpus], cd: root, stderr_to_stdout: true) end,
+      self_test: fn ->
+        System.cmd(python, [meter, "--self-test"], cd: root, stderr_to_stdout: true)
+      end,
+      verify: fn ->
+        System.cmd(python, [meter, "verify", corpus], cd: root, stderr_to_stdout: true)
+      end,
       unknown_command: fn ->
         System.cmd(python, [meter, "--not-a-real-command"], cd: root, stderr_to_stdout: true)
       end,
@@ -236,7 +240,8 @@ defmodule Barkpark.PdsMeterRiderTest do
   test "meter.py REFUSES an unknown command — ARGV-STRICT, not a shrug", ctx do
     {out, rc} = ctx.runs.unknown_command
 
-    assert rc == 2, "expected meter.py to refuse an unknown command with exit 2, got #{rc}.\n#{out}"
+    assert rc == 2,
+           "expected meter.py to refuse an unknown command with exit 2, got #{rc}.\n#{out}"
 
     assert out =~ "unknown command", out
   end
