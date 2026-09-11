@@ -4218,12 +4218,58 @@ async function main() {
     //    Element-level geometry, not page-level. See the note by FLEET_WIDTHS.
     if (requested.includes("W15-fleet-row-text-bounded")) {
       const D = "W15-fleet-row-text-bounded";
+      // DERIVED, not typed — the same shape GR109 uses above (#16372).
+      // fleetAxis() THROWS on an empty derivation, on a lost positive control,
+      // on a skip entry that matches nothing or that names a scenario it cannot
+      // justify excluding, and — the reason this row was filed — on any
+      // fleet-bearing scenario the leg has NO COVERAGE for. die() carries every
+      // one of those to exit 2, which is where a half-instrument belongs: an
+      // unaccounted scenario used simply not to be walked, and the run went
+      // green having measured nothing about it.
+      let FLEET_AXIS;
+      try {
+        const { SCENARIOS } = await import("./scenarios.mjs");
+        FLEET_AXIS = fleetAxis(SCENARIOS);
+      } catch (e) {
+        return die(`${D}: ${e && e.message ? e.message : e}`);
+      }
+      const FLEET_SCENS = FLEET_AXIS.drive;
       const cellCount = FLEET_SCENS.length * FLEET_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${FLEET_SCENS.length} scenarios x ${FLEET_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges + .status-pill HEIGHT;` +
         ` all ${FLEET_SUB_HOSTS.length} sub-hosts CENSUSED per row and their zero refused per cell)\n`,
       );
+      process.stdout.write(
+        `   scenario axis DERIVED from app.js fleetNestedRowsHtml() over scenarios.mjs — ` +
+        `${FLEET_AXIS.bearing.length} fleet-bearing scenario(s) collapse to ${FLEET_AXIS.classes.length} ` +
+        `distinct rendered-row markups; ${FLEET_SCENS.length} driven (pinned first): ${FLEET_SCENS.join(", ")}\n`,
+      );
+      // ITEMISED, never bare. Every fleet-bearing scenario this leg does NOT
+      // drive is named here with the reason it is out — a byte-identical twin
+      // that IS driven, or a written FLEET_SCEN_SKIP reason / filed row id.
+      // Names are grouped by reason so the ledger is readable, not summarised:
+      // every excluded scenario appears by name on one of these lines.
+      {
+        const byRep = new Map();
+        const reasoned = [];
+        for (const s of FLEET_AXIS.skipped) {
+          if (s.sameAs) {
+            if (!byRep.has(s.sameAs)) byRep.set(s.sameAs, { sig: s.sig, names: [] });
+            byRep.get(s.sameAs).names.push(s.scen);
+          } else reasoned.push(s);
+        }
+        process.stdout.write(`   NOT DRIVEN — ${FLEET_AXIS.skipped.length} scenario(s), every one itemised:\n`);
+        for (const [rep, g] of byRep) {
+          process.stdout.write(
+            `   · rendered-row markup byte-identical to ${rep} (sig ${g.sig}), ${g.names.length}: ${g.names.join(", ")}\n`,
+          );
+        }
+        for (const s of reasoned) {
+          process.stdout.write(`   · ${s.scen} — ${s.row ? `filed as ${s.row}; ` : ""}${s.why}\n`);
+        }
+        if (!FLEET_AXIS.skipped.length) process.stdout.write(`   · none\n`);
+      }
       let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, pageOver = 0, rowsSeen = 0, overflowed = 0, foreignRows = 0;
       // cchi-w23: per-selector sub-host census, and the count of legitimately
       // bare rows the two conditional emitters account for.
@@ -4395,6 +4441,15 @@ async function main() {
           `messages, ${squeezed} squeezed badge columns, ${overflowed} chips shorter than their own text, ` +
           `${pageOver} pages scrolling sideways; ` +
           `${FLEET_KNOWN.length} itemised known row(s), every other cell judged`,
+        );
+        okLine(
+          `scenario axis ACCOUNTED, not merely walked: ${FLEET_AXIS.bearing.length} fleet-bearing scenario(s) derived ` +
+          `from the shipped fleetNestedRowsHtml() over scenarios.mjs, collapsing to ${FLEET_AXIS.classes.length} distinct ` +
+          `rendered-row markups; ${FLEET_SCENS.length} driven, ${FLEET_AXIS.skipped.length} itemised above ` +
+          `(${FLEET_AXIS.skipped.filter((s) => s.sameAs).length} byte-identical twins of a driven scenario, ` +
+          `${FLEET_SCEN_SKIP.length} carrying a written reason or filed row id). The positive control ` +
+          `${FLEET_PINNED_REPS.join("/")} is asserted present in the derivation, and a fleet-bearing scenario that is ` +
+          `neither driven, nor a twin of a driven one, nor itemised REFUSES this run at exit 2`,
         );
       }
     }
