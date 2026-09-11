@@ -768,11 +768,20 @@ jobs:
       #     `--render` cell below drives exactly ONE cell (901px, billing-trial)
       #     and the full render matrix is likewise unreached, deliberately
       #     (minutes, not seconds — see the paragraph above).
-      #   * cssom-parity.test.mjs, defect-selection.test.mjs,
-      #     exit-vocabulary.test.mjs, font-pin.test.mjs — four unit suites with
-      #     NO runner. The other four `__preview__` suites (seal-predicate,
-      #     breakpoint-sweep, bringup-retry, ready-host-paint) do run, above.
-      #     `scripts/console-export-tree.sh` lists three of these four in its
+      #   * (CLOSED, task-fcd10d9a24ab8ecf) This bullet used to read "cssom-
+      #     parity.test.mjs, defect-selection.test.mjs, exit-vocabulary.test.mjs,
+      #     font-pin.test.mjs — four unit suites with NO runner", and it was
+      #     wrong in the way this whole paragraph is built to be wrong: there
+      #     were FIVE. stylesheet-applied.test.mjs existed, was in neither this
+      #     list nor the "invoked outright" list below, and had ZERO hits in all
+      #     of .github/workflows — under a paragraph closing "that is every
+      #     executable file in this directory, accounted for one by one; the
+      #     class is enumerated, not sampled". All five are now run by the
+      #     `__preview__ suites no other step runs` step at the end of this job,
+      #     which SELECTS BY PREDICATE (every *.test.mjs whose basename no
+      #     `node --test` command line in this file names) precisely so that no
+      #     future member of this class depends on someone editing a comment.
+      #     `scripts/console-export-tree.sh` lists three of them in its
       #     VERIFY_GATES array, but that script is itself invoked by no `run:`
       #     step, so it is a list, not an invocation.
       #   * shoot.sh and reap-orphans.sh — the screenshot rig and its orphan
