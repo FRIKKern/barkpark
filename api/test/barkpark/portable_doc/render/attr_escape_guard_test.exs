@@ -45,19 +45,52 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeGuardTest do
   # {file, attribute, expression source} — NOT by line, so an unrelated edit
   # above does not silently re-arm or void an entry.
   @reviewed %{
-    # -- engine-owned CSS fragments: locals bound to literal-only branches the
-    #    prover loses across a multi-clause helper boundary.
-    {"cards_email.ex", "style", "top"} => "skin accent hex chosen by kind; no author text",
-    {"cards_email.ex", "style", "border"} => "skin border hex; no author text",
-    {"walk.ex", "style", "Enum.join(out, \";\")"} =>
-      "out is a list of literal CSS fragments built in-clause",
-    {"walk.ex", "colspan", "cs"} => "integer from Map.get |> to_int clamp",
-    {"walk.ex", "rowspan", "rs"} => "integer from Map.get |> to_int clamp",
-    {"fleet_email.ex", "style", "6 + pad"} => "integer arithmetic",
-    {"panels_email.ex", "style", "hex"} => "skin hex literal",
-    {"data_viz.ex", "viewBox", "h"} => "numeric viewBox string built from floats",
-    {"data_viz.ex", "d", "d"} => "SVG path built from formatted floats",
-    {"figures.ex", "data-cast-rows", "rows"} => "integer row count"
+    # ── components.ex ─────────────────────────────────────────────────────────
+    {"components.ex", "class", "role"} =>
+      "role is StatusVocab.role_for_status/1 output or a board_roles/0 literal; glyph_html/1 never sees author text",
+    {"components.ex", "class", "src_class"} =>
+      "pnode_source/1 returns the literal \" bp-pnode--src\" or \"\" — the author string goes to the escaped body, not the class",
+    {"components.ex", "style", "color"} =>
+      "the @filetree_markers module attribute's literal token colour (split_filetree_note/1 returns the marker, not the line)",
+    {"components.ex", "style", "pad"} =>
+      "pad = 14 + depth * 18 and row_html/1 int-guards depth (is_integer, 0 < d < 6, else 0)",
+
+    # ── compose.ex ────────────────────────────────────────────────────────────
+    {"compose.ex", "data-level", "rel"} =>
+      "the TOC relative level — an integer (it is used as an Enum.slice/2 range bound)",
+    {"compose.ex", "data-tab-index", "i"} => "Enum.with_index/1's index — an integer",
+
+    # ── data_viz.ex (SVG geometry: every coordinate is a formatted float) ──────
+    {"data_viz.ex", "class", "cls"} =>
+      "tone_class/2 allowlists the tone in its case-clause guard (~w(info ok warn danger)) and otherwise returns the literal base class",
+    {"data_viz.ex", "class", "k"} => "Enum.map_join(0..3, …)'s integer bin index",
+    {"data_viz.ex", "cx", "sx"} => "route coordinate — a float off the computed coords list",
+    {"data_viz.ex", "cy", "sy"} => "route coordinate — a float off the computed coords list",
+    {"data_viz.ex", "cx", "fx"} => "route coordinate — a float off the computed coords list",
+    {"data_viz.ex", "cy", "fy"} => "route coordinate — a float off the computed coords list",
+    {"data_viz.ex", "points", "pts"} => "a space-joined list of fmt/1-formatted floats",
+
+    # ── fleet_email.ex ────────────────────────────────────────────────────────
+    {"fleet_email.ex", "width", "remaining"} =>
+      "100 - left - width, both of which are clampf/1 floats",
+
+    # ── walk.ex ───────────────────────────────────────────────────────────────
+    {"walk.ex", "class", "role_class"} =>
+      "apply_text_role/4 returns one of five literal bp-role-* classes (or nil, which emits no attribute)",
+    {"walk.ex", "class", "td_class"} =>
+      "\"bp-sheet__td\" joined with sheet_default_align_class/1's literal class or nil",
+    {"walk.ex", "data-valueref-state", "state"} =>
+      "one of the literals \"resolved\" / \"drift\" / \"dangling\" — valueref/2's case returns it in a tuple with the escaped text",
+    {"walk.ex", "style", "bg"} => "Util.tone_palette/1's {bg, fg} hex pair from the TokensGen callout table",
+    {"walk.ex", "style", "fg"} => "Util.tone_palette/1's {bg, fg} hex pair from the TokensGen callout table",
+    {"walk.ex", "style", "box_style(Map.get(n, \"style\"))"} =>
+      "box_style/1 wraps EVERY value it emits in escape_attr/1 (maybe_flex/maybe_push/maybe_border) — the raw node map never reaches the attribute",
+    {"walk.ex", "style", "extra"} =>
+      "sheet_cell_style/3: literal b/i fragments, a bg validated against ~r/^#[0-9a-f]{6}\\z/ (sheet_bg_valid?/1), and an al allowlisted to left|center|right",
+    {"walk.ex", "style", "style"} =>
+      "sheet_inline_style/1's subject is w_style <> extra <> err — each validated at its own site (see the two entries around this one)",
+    {"walk.ex", "style", "w_style"} =>
+      "col_width_style/2 emits width:<n>px only when the stored width is a positive INTEGER, else \"\""
   }
 
   test "every attribute interpolation in the render tree is provably escape-safe" do

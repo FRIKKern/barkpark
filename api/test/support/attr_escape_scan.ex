@@ -40,11 +40,12 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
   # functions LOOKS UP by its argument and returns a table value — none returns
   # its argument — so no author text can come back out. Adding a module here is
   # a claim about that module's whole surface; check it before you do.
-  @engine_modules ~w(StatusVocab TokensGen Palettes Stylesheet Util.tone_palette
+  @engine_modules ~w(StatusVocab TokensGen Palettes Stylesheet SectionLayout
                      Barkpark.PortableDoc.Render.StatusVocab
                      Barkpark.PortableDoc.Render.TokensGen
                      Barkpark.PortableDoc.Render.Palettes
-                     Barkpark.PortableDoc.Render.Stylesheet)
+                     Barkpark.PortableDoc.Render.Stylesheet
+                     Barkpark.PortableDoc.Render.SectionLayout)
   @max_depth 8
 
   @doc """
@@ -466,10 +467,34 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
         ctx = %{ctx | seen: MapSet.put(ctx.seen, seen_key)}
 
         case bindings(ctx.clause, var) do
-          [] -> resolve_param(var, ctx)
-          rhss -> rhss |> Enum.map(&classify(&1, bump(ctx))) |> verdict(:local)
+          [] ->
+            case case_subjects(ctx.clause, var) do
+              [] -> resolve_param(var, ctx)
+              subjects -> subjects |> Enum.map(&classify(&1, bump(ctx))) |> verdict(:case_bound)
+            end
+
+          rhss ->
+            rhss |> Enum.map(&classify(&1, bump(ctx))) |> verdict(:local)
         end
     end
+  end
+
+  # A var bound by a `case` clause PATTERN carries the case subject's verdict —
+  # the same rule the inline `case` classifier applies, reached from a site that
+  # sits INSIDE the branch rather than from the case expression itself.
+  defp case_subjects(clause, var) do
+    collect(clause.body, fn
+      {:case, _, [subject, [do: clauses]]} when is_list(clauses) ->
+        if Enum.any?(clauses, fn
+             {:->, _, [pattern, _body]} -> MapSet.member?(pattern_vars(pattern), Atom.to_string(var))
+             _ -> false
+           end),
+           do: [subject],
+           else: []
+
+      _ ->
+        []
+    end)
   end
 
   defp bindings(clause, var) do
