@@ -1,7 +1,10 @@
-// __harness_generic.test.mjs — the runner for __harness_generic.html, and the
-// lock on __harness.html.
+// __harness_generic_run.mjs — the browser runner for __harness_generic.html.
 //
-//   node api/assets/paper-editor/src/canvas/__harness_generic.test.mjs
+//   node api/assets/paper-editor/src/canvas/__harness_generic_run.mjs
+//
+// THE ONE COMMAND. That line, from a clean checkout at the repo root, is the
+// whole reproduction: it starts a static file server over the repo, drives
+// headless Chromium against the generic harness, and prints every assertion.
 //
 // WHAT IT PROVES. A static file server over the repo (NO Phoenix, no database,
 // no /api) plus headless Chromium, driving the generic canvas harness:
@@ -13,18 +16,22 @@
 //      assertions reporting the error instead of a false green;
 //   3. a MUTATED block (a real fixture with one block's id removed) reds the
 //      same way — the harness does not shrug and mount a half-run;
-//   4. __harness.html is byte-locked: its sha256 is pinned here, so the S1
-//      regression cannot be quietly generalized away.
+//   4. Chromium contacted NOTHING but that static server.
+//
+// The byte-lock on __harness.html and the fixture's provenance need no browser,
+// so they live in __harness_lock.test.mjs and run in `npm test` on every PR.
 //
 // CHROME. Same discovery as src/__narrow_render.mjs: BP_CHROME, then the
-// puppeteer cache, then the system Chrome. With no browser this prints SKIP for
-// the browser arms and still runs the byte-lock — a gate that cannot run
-// everywhere is a gate people learn to ignore, but a sha256 needs no browser.
+// puppeteer cache, then the system Chrome. With no browser it prints SKIP and
+// exits 0: a gate that cannot run everywhere is a gate people learn to ignore,
+// and the always-on half already lives in __harness_lock.test.mjs.
 //
 // NOT IN `npm test`, for the same reason __narrow_render.mjs is not: the suite
-// must stay runnable on a machine with no Chromium.
+// must stay runnable on a machine with no Chromium. __test_chain_census.mjs
+// blesses exactly this shape — "runner entrypoints such as __smoke.mjs /
+// __narrow_render.mjs do not match" its __*.test.mjs predicate — which is why
+// this file is named _run.mjs rather than .test.mjs.
 
-import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
@@ -54,48 +61,7 @@ const check = async (name, fn) => {
   }
 };
 
-// ── 1. the byte-lock on the S1 harness ───────────────────────────────────────
-//
-// __harness.html's hardcoded three-block RUN and its S1 assertions are the
-// regression; __harness_generic.html exists precisely so nobody has to
-// generalize them. If this pin reds, either the S1 harness was edited (revert
-// it, or move the change into the generic harness) or the edit is intentional
-// and the reviewer updates the pin DELIBERATELY, in the same PR, with a reason.
-const S1_HARNESS_SHA256 =
-  "4ee15511d3566c4c26e75754e248edf3885d20965676a9f8062d60ba71980fb4";
-
-await check("__harness.html is byte-locked (S1 assertions unchanged)", () => {
-  const path = join(REPO, HARNESS_DIR, "__harness.html");
-  const actual = createHash("sha256").update(readFileSync(path)).digest("hex");
-  if (actual !== S1_HARNESS_SHA256) {
-    throw new Error(
-      `${HARNESS_DIR}/__harness.html changed.\n` +
-        `      pinned  ${S1_HARNESS_SHA256}\n` +
-        `      actual  ${actual}\n` +
-        "      The S1 harness is load-bearing for the continuous-canvas regression.\n" +
-        "      Parameterized work belongs in __harness_generic.html. If this edit is\n" +
-        "      deliberate, update S1_HARNESS_SHA256 in this file and say why.",
-    );
-  }
-});
-
-// ── 2. the real-paper fixture is a real capture ──────────────────────────────
-
-const fixturePath = join(REPO, HARNESS_DIR, "__fixtures/paper-mechanical-spacing-doctrine.json");
-await check("the committed fixture is a versioned capture of a published paper", () => {
-  const f = JSON.parse(readFileSync(fixturePath, "utf8"));
-  if (f.version !== 1) throw new Error(`version is ${JSON.stringify(f.version)}, expected 1`);
-  if (!Array.isArray(f.blocks) || f.blocks.length === 0) throw new Error("blocks is not a non-empty array");
-  if (!f.capture || !f.capture.paper_slug || !f.capture.paper_rev) {
-    throw new Error("capture.paper_slug / capture.paper_rev missing — the provenance IS the evidence");
-  }
-  const types = new Set(f.blocks.map((b) => b.type));
-  if (types.size < 5) {
-    throw new Error(`only ${types.size} distinct block types — too tame to be a real-paper proof`);
-  }
-});
-
-// ── 3. chrome ────────────────────────────────────────────────────────────────
+// ── 1. chrome ────────────────────────────────────────────────────────────────
 
 function findChrome() {
   if (process.env.BP_CHROME) return process.env.BP_CHROME;
@@ -128,7 +94,9 @@ function findChrome() {
 
 const CHROME = findChrome();
 
-// ── 4. the static server ─────────────────────────────────────────────────────
+const fixturePath = join(REPO, HARNESS_DIR, "__fixtures/paper-mechanical-spacing-doctrine.json");
+
+// ── 2. the static server ─────────────────────────────────────────────────────
 //
 // Plain files off disk, rooted at the repo. `overlay` serves a few in-memory
 // fixtures (the malformed and mutated arms) so the repo is not littered with
@@ -323,5 +291,5 @@ if (!CHROME) {
   }
 }
 
-console.log(failures === 0 ? "\nOK  __harness_generic.test.mjs" : `\n${failures} FAILING  __harness_generic.test.mjs`);
+console.log(failures === 0 ? "\nOK  __harness_generic_run.mjs" : `\n${failures} FAILING  __harness_generic_run.mjs`);
 process.exit(failures === 0 ? 0 : 1);

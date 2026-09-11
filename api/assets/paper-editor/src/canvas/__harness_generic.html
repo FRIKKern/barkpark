@@ -8,7 +8,7 @@
   <!--
     THE GENERIC CANVAS HARNESS. __harness.html (beside this file) hardcodes its
     own three-block S1 run and its assertions are load-bearing for that
-    regression, so it stays byte-locked (see __harness_generic.test.mjs). This
+    regression, so it stays byte-locked (see __harness_lock.test.mjs). This
     file is the parameterized counterpart: it mounts ANY versioned blocks JSON
     through the SAME production bundle, so a real-paper canvas investigation no
     longer forks a harness into /tmp where nobody can review or re-run it.
@@ -16,7 +16,7 @@
     ── THE ONE COMMAND ───────────────────────────────────────────────────────
     From a clean checkout, repo root:
 
-        node api/assets/paper-editor/src/canvas/__harness_generic.test.mjs
+        node api/assets/paper-editor/src/canvas/__harness_generic_run.mjs
 
     That starts a static file server over the repo, drives headless Chromium
     against this page, and prints the __assertCleanMount / __assertRoundTrip
