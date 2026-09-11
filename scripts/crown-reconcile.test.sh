@@ -2663,12 +2663,14 @@ saw "2 of them DELIVERED" "the cancelled-but-delivering run is still counted as 
 saw "1 delivered nothing" "the cancelled-before-any-leg run is still counted as NONDELIVERING"
 saw "1 were CANCELLED_NONDELIVERING" "the superseded push is named, not pooled under 'a docs-only merge'"
 saw "1 of the 2 that DELIVERED are CANCELLED_DELIVERING" "the delivered-then-cancelled run is named in the OTHER direction too"
+saw "CANCEL RATE, LIVE: 2 of the 3 completed run(s) in this window were CANCELLED (66.7%)" "the SUM of both classes prints over the population, so deploy.yml never has to quote a frozen 344-of-1,378"
 
 # NON-VACUITY: an ordinary window with NO cancelled run prints the clause with
 # zeroes, so the two counts above are a measurement and not a constant.
 run_cr 0 "the base window, where nothing was cancelled" $(base_args)
 saw "0 were CANCELLED_NONDELIVERING" "with nothing cancelled the count is 0, so the arm above measured something"
 saw "0 of the 2 that DELIVERED are CANCELLED_DELIVERING" "…in both directions"
+saw "CANCEL RATE, LIVE: 0 of the 2 completed run(s) in this window were CANCELLED (0.0%)" "and the rate is 0.0% when nothing was cancelled — a measurement, not a constant"
 
 # MUTATION: drop the split. The clause is the only place these two classes are
 # ever said, so silencing its `say` is exactly "the split was dropped".
@@ -2682,6 +2684,18 @@ run_cr 0 "the same fixture, against a script whose split was dropped" \
 CR_ALT=""
 not_saw "CANCELLED_NONDELIVERING" "without the split the superseded push is anonymous again — the assertions above are differences, not defaults"
 not_saw "CANCELLED_DELIVERING" "…and so is the delivered-then-cancelled run"
+
+# MUTATION: drop the summed rate. It is the only line that states cancelled over
+# the POPULATION, which is the shape deploy.yml's comment froze.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text
+mutate_cr drop-cancel-rate \
+  'say "  CANCEL RATE, LIVE:' \
+  ': "  CANCEL RATE, LIVE:'
+CR_ALT="$MUT_OUT"
+run_cr 0 "the same fixture, against a script whose summed cancel rate was dropped" \
+  --runs-fixture "$RUNS_Y" --jobs-fixture "$JOBS_Y" --crown-fixture "$CROWN_Y" --health-fixture "$HEALTH_BASE"
+CR_ALT=""
+not_saw "CANCEL RATE, LIVE" "without the line the rate is unstated again — the two assertions above are differences, not defaults"
 
 section "(z) the run listing PAGES to the window start — 101 rows is a COUNT, not a floor"
 # `per_page=100` with no `page=` was ONE page read as if it were the 24h window,

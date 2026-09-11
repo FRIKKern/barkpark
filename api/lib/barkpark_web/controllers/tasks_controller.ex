@@ -1161,6 +1161,15 @@ defmodule BarkparkWeb.TasksController do
     with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
          {:ok, observed_epoch} <- Params.fetch_int(params, "observed_epoch"),
          {:ok, criteria} <- Params.parse_criteria(params["criteria"]),
+         # THE LAND DIGEST IS PARSED, NOT PASSED THROUGH (task-4ab4a5b58bce97a6).
+         # This line used to be `Params.put_opt(:landed, params["landed"])` two
+         # statements below — the ONE opt on this pipeline with no `parse_*` —
+         # so any JSON shape reached `Tasks.Internal.merge_landed/2`, which
+         # normalised the keys it knew and dropped the rest under a 2xx. The
+         # checker is `Tasks.Landed.check_digest/1`, the SAME module (and, for
+         # `files`, the same `check_files/1`) the `/landed` route runs: one
+         # shared function, never a mirror this door could drift from.
+         {:ok, landed} <- Params.parse_landed_digest(params["landed"]),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
       opts =
         [observed_epoch: observed_epoch]
@@ -1168,7 +1177,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:lifecycle_status, params["lifecycle_status"])
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:criteria, if(criteria == [], do: nil, else: criteria))
-        |> Params.put_opt(:landed, params["landed"])
+        |> Params.put_opt(:landed, landed)
         # The two LOUD overrides (PDS-D288/D289). Without these two lines the
         # honesty gates are refuse-only over HTTP — a lead could not seal a
         # foreign task and nobody could close over an honest unmet criterion
@@ -1259,6 +1268,20 @@ defmodule BarkparkWeb.TasksController do
 
       {:error, :invalid_criteria, msg} ->
         bad_request(conn, msg)
+
+      # A malformed land digest is a TYPED refusal that NAMES THE FIELD, not a
+      # bare 400: the caller has to be able to tell "my `landed` map is the
+      # wrong shape" from "my `criteria` are" without reading prose, because
+      # the shape that used to be accepted here is the one that wrote nothing.
+      {:error, :invalid_landed_digest, msg} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          ok: false,
+          reason: "invalid_landed_digest",
+          field: "landed",
+          message: msg
+        })
 
       {:error, :not_found} ->
         not_found(conn, "task not found")

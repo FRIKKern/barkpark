@@ -330,7 +330,15 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         out
       end
 
-    out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
+    # The author's colour is the ONE leaf on this path that reaches an
+    # attribute, so it is escaped like every other: an unescaped `"` here would
+    # close `style="` and let the next token land as a new attribute
+    # (`red" onmouseover="…`). `escape_attr/1` is a no-op for every legitimate
+    # colour value, so the byte-locked email golden is unmoved.
+    out =
+      if Map.get(n, "color"),
+        do: ["color:#{escape_attr(to_string(Map.get(n, "color")))}" | out],
+        else: out
 
     # Article-only typographic roles. These now carry a `bp-role-*` CLASS (the
     # role typography lives in `.bp-paper-surface`); author marks in `out` are
@@ -425,7 +433,16 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         out
       end
 
-    out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
+    # The author's colour is the ONE leaf on this path that reaches an
+    # attribute, so it is escaped like every other: an unescaped `"` here would
+    # close `style="` and let the next token land as a new attribute
+    # (`red" onmouseover="…`). `escape_attr/1` is a no-op for every legitimate
+    # colour value, so the byte-locked email golden is unmoved.
+    out =
+      if Map.get(n, "color"),
+        do: ["color:#{escape_attr(to_string(Map.get(n, "color")))}" | out],
+        else: out
+
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
     out = body_type(n, pal) ++ Enum.reverse(out)
 
