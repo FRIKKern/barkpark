@@ -302,11 +302,13 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert :top_level_block_overload in EpicQuality.failures(%{"blocks" => over_blocks})
       assert :top_level_heading_overload in EpicQuality.failures(%{"blocks" => over_headings})
 
-      refute :top_level_block_overload in
-               EpicQuality.failures(%{"blocks" => Enum.take(over_blocks, 80)})
+      refute :top_level_block_overload in EpicQuality.failures(%{
+               "blocks" => Enum.take(over_blocks, 80)
+             })
 
-      refute :top_level_heading_overload in
-               EpicQuality.failures(%{"blocks" => Enum.take(over_headings, 16)})
+      refute :top_level_heading_overload in EpicQuality.failures(%{
+               "blocks" => Enum.take(over_headings, 16)
+             })
     end
   end
 

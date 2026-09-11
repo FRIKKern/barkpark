@@ -367,6 +367,7 @@ defmodule Barkpark.Content.Papers.EpicQualityTest do
 
     refute EpicQuality.empty_paragraph?(%{"type" => "heading", "level" => 1, "text" => "Heading"})
   end
+
   describe "overload limits on the wire" do
     test "a heading overload carries max 16 and the actual count, and only that budget" do
       content =
@@ -415,5 +416,4 @@ defmodule Barkpark.Content.Papers.EpicQualityTest do
     assert doc =~ "AuthoringWall.enforce/5"
     assert doc =~ "ratchet"
   end
-
 end
