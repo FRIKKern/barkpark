@@ -78,6 +78,14 @@ prefix in either table.
 
 ## 3. What the money actually is — measured structure
 
+**Every figure in this section is re-taken, not remembered.** `python3 meter.py
+shares` recomputes the corpus total, the by-dollar shares, the median envelope
+cost and the median shares straight from the envelopes, and `meter.py verify`
+asserts the literals below against that recompute whenever the run covers the
+canonical corpus — so a corpus that grows reds here even if the population
+markers were dutifully bumped. Until 2026-09-11 they were hand-computed literals
+with no re-taker in the repo (see §5).
+
 **Two statistics, each stamped with its population.** A single share number here
 is not safe to quote: the per-envelope median and the cost-weighted share
 disagree about which lever matters, and the disagreement is the finding, not a
@@ -177,7 +185,42 @@ code rather than in prose a reader has to notice:
   real: both tables were missing `claude-opus-5`, and `tally_wf.py` responded to
   an unrated model by dropping its dollars and returning 0.
 
-**Still unwired, deliberately.** Nothing here adds a CI workflow: gating this
-requires first deciding whether `results/` is a corpus CI may walk, which is a
-decision and not a build step. Until that is made, the rule remains "run it
-before you publish a dollar figure" — and the lesson above is what that costs.
+## 6. Three more fail-opens, and the wiring decision (2026-09-11)
+
+The 2026-08-05 pass fixed what it named, and left three holes that all returned
+rc=0 while asserting something nothing had measured — the same disease, inside
+the instrument written to cure it. All three were mutation-proved before and
+after; `meter.py --self-test` now carries them.
+
+- **The §3 dollars had no re-taker.** `$66.40`, `$0.5857` and the eight
+  percentages above were HAND-COMPUTED LITERALS. The population marker forces a
+  doc *touch* when the corpus grows; it does not force the *dollars* to move. Add
+  a 35th envelope, bump both markers, leave §3 alone — rc=0. `meter.py` grew a
+  third verb, `shares`, which emits those statistics from the envelopes, and
+  `verify` asserts §3 against it. The self-test runs that mutation itself.
+- **The corpus-absent fail-open.** The population arm sat behind a bare
+  `if os.path.isdir(CORPUS_DIR)`, and the banner printed "the population
+  assertion fires from the corpus path AND an ancestor" whether or not it had.
+  In a tree without `results/`, a population mutation greened at rc=0 under that
+  banner. Inside a git checkout, where `results/` is committed data of record, an
+  absent corpus is now a REFUSAL, not a skipped arm.
+- **The twin-absent fail-open.** Deleting `tally_wf.py` gave rc=0 with
+  "parity unasserted". The copy-away constraint is about `tally_wf.py`
+  travelling, not about `meter.py` running outside its checkout — so inside a
+  checkout an absent twin is a deletion and a refusal, and outside one the banner
+  names the mirror arm as NOT RUN instead of printing "self-test OK" over it.
+
+**The wiring decision.** The instrument is to be wired, and the route is named:
+a path declared in `ELIXIR_TEST_ONLY_PATHS` (`scripts/elixir-path-escape-check.sh`)
+plus an ExUnit rider that shells out to `meter.py --self-test` and
+`meter.py verify results/`, so it rides the **required `Elixir gate`**. A
+workflow with a workflow-level `on: paths:` filter is REFUSED as the venue:
+`.github/required-checks.json`'s S4 doctrine disqualifies such a workflow from
+ever being required (an absent required context reports "expected" forever,
+D18), so that route would be an advisory lane wearing a gate's name.
+`shell-harnesses.yml` is wrong twice over — paths-filtered *and* not required;
+its header's claim that "the harness rides its own required lane" is false, and
+is itself a PDS-class assertion sitting inside the CI config. Price is not an
+argument against wiring: `--self-test` is 0.03–0.04s real, `verify results/` is
+0.02s real. The wiring itself is tracked by `pds-w49-meter-ci-decision`; the
+decision above is the part this doc owns.
