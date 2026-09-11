@@ -297,6 +297,16 @@ config :barkpark_cloud, Oban,
        # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
        # crashed worker never strands a site's deploys behind an eternal spinner.
        {"* * * * *", BarkparkCloud.Workers.StaleDeploymentReaper},
+       # ssw9-bl-artifact-retention-quota: reap `site_artifacts` bytes whose
+       # deployment has settled. `Sites.Deploy` drops them in-driver on the live
+       # and failed paths, but a row terminated by the reaper ABOVE (a prebuilt
+       # deploy minted, uploaded and then abandoned) never runs a driver at all,
+       # and neither does a `cancelled` one — so those bytes had no reaper. This
+       # sweep keys on the STORED status, deriving "terminal" from
+       # `Deployment.transitions/0`, so it covers every terminal writer including
+       # ones that do not exist yet. Ordered after the deployment reaper on
+       # purpose: the tick that fails an abandoned row is the tick that reaps it.
+       {"* * * * *", BarkparkCloud.Sites.ArtifactReaper},
        # warm-pool twin of the two reapers above (task-d5f8c2634f323169). Recovery
        # of a leaked `warm_servers` claim was LAZY — `reap_stale_warm_claims/0`
        # ran only from INSIDE the two claim transactions — and the provisioner
