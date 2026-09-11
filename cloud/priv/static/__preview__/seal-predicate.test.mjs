@@ -220,6 +220,15 @@ test('PRECONDITION: a directory INSIDE the work tree but below its top is refuse
 });
 
 test('PRECONDITION END-TO-END: this file, run from a `.git`-less tree, exits 3 before any test', () => {
+  // THE RECURSION FUSE, AND IT IS NOT PARANOIA — IT IS A MEASURED FORK BOMB. This
+  // case spawns a COPY of this file, and the copy contains this case. It terminates
+  // only because the copy refuses at load. Anyone disarming the refusal to prove it
+  // can lose — which is the first thing a reviewer should do — makes the copy run the
+  // whole suite, including this test, which copies itself again: 484 node processes
+  // in under two minutes, measured. So the child is told it is a child and declines,
+  // and the fuse lives HERE rather than in the precondition, which has no escape
+  // hatch by design.
+  if (process.env.SEAL_TEST_E2E_CHILD === '1') return;
   // REPO is `resolve(HERE, '../../../..')`, so four levels of directory reproduce the
   // real layout; nothing else is copied because the refusal must fire before the first
   // read of the predicate, the fixtures or the workflow.
@@ -229,7 +238,8 @@ test('PRECONDITION END-TO-END: this file, run from a `.git`-less tree, exits 3 b
   const copy = join(dir, 'seal-predicate.test.mjs');
   writeFileSync(copy, readFileSync(join(HERE, 'seal-predicate.test.mjs'), 'utf8'));
 
-  const direct = spawnSync('node', [copy], { encoding: 'utf8', timeout: 120000 });
+  const child = { ...process.env, SEAL_TEST_E2E_CHILD: '1' };
+  const direct = spawnSync('node', [copy], { encoding: 'utf8', timeout: 120000, env: child });
   assert.equal(direct.status, NO_OBJECT_DATABASE, `the suite must refuse, not run: ${direct.stdout}${direct.stderr}`);
   assert.match(direct.stderr, /^seal-predicate\.test\.mjs: no git object database at /);
   assert.doesNotMatch(`${direct.stdout}${direct.stderr}`, /^ok \d+ - /m, 'not one predicate ran');
@@ -242,7 +252,7 @@ test('PRECONDITION END-TO-END: this file, run from a `.git`-less tree, exits 3 b
   // NODE_TEST_CONTEXT to its children; a `node --test` spawned with it inherited
   // believes it IS a child reporter, prints nothing and exits 0 — measured here as a
   // green that proved nothing. A nested runner must be spawned clean or not at all.
-  const clean = { ...process.env };
+  const clean = { ...child };
   for (const k of Object.keys(clean)) if (k.startsWith('NODE_TEST') || k === 'NODE_OPTIONS') delete clean[k];
   const runner = spawnSync('node', ['--test', copy], { encoding: 'utf8', timeout: 120000, env: clean });
   assert.equal(runner.status, 1, 'the runner re-codes a refusing file as a failed file');
