@@ -81,6 +81,19 @@ Six leads run concurrently. Do not do lane work yourself while they run.
 - **A lead returns → same turn: read its report, relaunch a successor `lead-<lane>-2`
   on the lane's next slice.** Landing and relaunching are one motion. The pipeline never
   idles while there is ready work and quota.
+- **Round start, step (1), before ANY dispatch: DERIVE the lane's open-PR set.**
+  `bash .claude/skills/orchestrate-tasks/helpers/lane-open-prs.sh <branch-prefix>[,<p2>] [held-rows-file]`
+  prints every open PR on the lane's branch prefixes (number, draft flag, head sha, created_at,
+  the `Task:` trailer) and, per held row, the ledger's own `claim.lease_extension.pr` — then a
+  DISPATCH BLOCK naming the rows that already have a PR. Give the successor prompt this output,
+  not the predecessor's table. **A handoff table is a SNAPSHOT**: 2026-09-11, lead-api-r9 wrote
+  status.md at 06:35Z calling two rows untriaged, its workers opened #17709 (06:55Z) and #17706
+  (06:51Z) for exactly those rows, and r9 died on the Fable cap before amending the table. The
+  successor dispatched two duplicate workers off that table; one shipped #17716, which
+  contradicted the correct PR and had to be closed. Both facts were readable the whole time —
+  from GitHub and from the claim lease. Derive the set every round; never inherit it. (A failed
+  read prints `CANNOT READ` and exits 3, so an unreadable lane is never mistaken for an idle one;
+  `--selftest` runs the parse against a fixture and refuses on an empty one.)
 - **Fable death.** A lead that dies on the Fable cap is relaunched on `opus` with the
   same prompt; its workers were already Opus.
 
