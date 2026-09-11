@@ -128,9 +128,9 @@ Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the gl
 - `POST P/v1/schemas/:dataset` — upsert; 201 with the schema object.
 - `DELETE P/v1/schemas/:dataset/:name` → `{"deleted": "post"}`
 
-## 8a. Plugin HTTP surfaces — Tickets `/v1/tickets`, Sheets `POST /v1/plugins/sheets/:slug/ops`
+## 8a. Plugin HTTP surfaces — Tickets `/v1/tickets`, Sheets `POST /v1/plugins/sheets/:slug/ops`, Bulldocs paper ops
 
-Contract: [contracts/plugin-http-api.md](contracts/plugin-http-api.md) (`bptk_` submitter keys, operator/admin routes, attachment and write limits; Sheets ops apply individually, `sort_range`, no filter wire endpoint).
+Contract: [contracts/plugin-http-api.md](contracts/plugin-http-api.md) (`bptk_` submitter keys, operator/admin routes, attachment and write limits; Sheets ops apply individually, `sort_range`, no filter wire endpoint). `POST /v1/plugins/bulldocs/papers/:slug/ops` is an EDIT door: the AuthoringWall does NOT run there — its whole contract is `ratchet_hollow/2` + `reject_new_field_loss/2`, and the five publish-time floors are re-applied at the next publish.
 
 ## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
 

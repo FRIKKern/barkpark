@@ -89,6 +89,20 @@ function bpLqip(v) {
   return typeof v === "string" && v !== "" ? v : null;
 }
 
+// The CANONICAL assetId spelling is the bare blob id (Gyldendal friction 78):
+// the migration wrote every cover that way, `Barkpark.Media.get_file/2` and the
+// rendition URLs take it, and the asset document is `asset-<blob id>`. The
+// asset browser hands us the DOCUMENT id (`drafts.asset-<id>` / `asset-<id>`),
+// so a fresh pick used to store a second spelling beside the migrated one.
+// Strip both prefixes on the way in; a value already bare is untouched.
+function bpCanonicalAssetId(id) {
+  if (typeof id !== "string") return "";
+  let v = id.trim();
+  if (v.startsWith("drafts.")) v = v.slice("drafts.".length);
+  if (v.startsWith("asset-")) v = v.slice("asset-".length);
+  return v;
+}
+
 function bpParseMediaValue(raw) {
   const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null };
   if (!raw || typeof raw !== "string") return empty;
@@ -98,7 +112,7 @@ function bpParseMediaValue(raw) {
       const o = JSON.parse(trimmed);
       return {
         url: o.url || "",
-        assetId: o.assetId || o.id || "",
+        assetId: bpCanonicalAssetId(o.assetId || o.id || ""),
         alt: typeof o.alt === "string" ? o.alt : "",
         focalX: bpFocalCoord(o.focalX),
         focalY: bpFocalCoord(o.focalY),
@@ -736,7 +750,7 @@ class BpMediaPicker extends HTMLElement {
     const keptAlt = this._meta.alt && this._meta.alt !== "" ? this._meta.alt : file.alt || "";
     this._meta = {
       url: file.url || "",
-      assetId: file.assetId || "",
+      assetId: bpCanonicalAssetId(file.assetId || ""),
       alt: keptAlt,
       focalX: null,
       focalY: null,
@@ -798,7 +812,7 @@ class BpMediaPicker extends HTMLElement {
     const fi = (detail.asset && detail.asset.fileInfo) || {};
     this._select({
       url: detail.url,
-      assetId: detail.id,
+      assetId: bpCanonicalAssetId(detail.id),
       mime: detail.mime,
       alt: detail.title || "",
       width: fi.width,
@@ -844,7 +858,8 @@ class BpMediaPicker extends HTMLElement {
       this._select({
         url: data.url,
         mime: data.mimeType,
-        assetId: data.assetDocId || "",
+        // The upload receipt names the asset DOCUMENT; store the canonical blob id.
+        assetId: bpCanonicalAssetId(data.assetDocId || ""),
         alt: "",
         width: fi.width || data.width,
         height: fi.height || data.height

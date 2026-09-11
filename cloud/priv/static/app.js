@@ -11471,7 +11471,31 @@
     if (st === "current") return { role: "ok", label: "Current", note: "" };
     if (st === "behind") return { role: "warn", label: "Behind", note: "Eligible for the next advance." };
     if (st === "disabled") return { role: "neutral", label: "Autoupdate off", note: "This instance opted out; the rollout skips it." };
-    if (st === "unknown") return { role: "neutral", label: "Unknown", note: "No update state reported yet." };
+    // cch-w63-bl — THE OPERATOR HALF OF THE unknown ARM. This line used to read
+    // "No update state reported yet." unconditionally: a POSITIVE claim about an
+    // absence, asserted over a box whose probe the plane HAD measured and stored
+    // (`persist_update_unknown/2` in registry.ex writes one of nine named causes
+    // into `update_unavailable_reason`). A box that answered our credential with a
+    // 401 rendered as a box nobody had ever asked. Nothing pinned the string.
+    //
+    // The reason is ECHOED, NOT MINTED: `updateRefusalReason` is the same console
+    // whitelist the member surface uses (cch-w63-s5) and UPDATE_REFUSAL_TEXT the
+    // same sentences, so the two readers of one column now agree. "Could not check"
+    // is updateBadge's own label for this case, not a new phrase.
+    //
+    // When no reason is present the note claims NO mechanism: "Update state not
+    // reported." says what the console can see and stops — it does not assert the
+    // plane never asked, which is exactly the claim that was false before.
+    if (st === "unknown") {
+      var refusal = updateRefusalReason(bp);
+      return {
+        role: "neutral",
+        label: "Unknown",
+        note: refusal
+          ? "Could not check — " + UPDATE_REFUSAL_TEXT[refusal]
+          : "Update state not reported.",
+      };
+    }
     return { role: "neutral", label: cap(st), note: "" };
   }
 

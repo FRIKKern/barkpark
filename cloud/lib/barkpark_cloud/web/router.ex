@@ -197,6 +197,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
       POST    /v1/sites/:id/rollback user(s) roll a site back to a prior deployment (write ability)
       GET     /v1/sites/:id/deployments/:dep_id/build-log user(s)  the black box recorder's durable per-build record for THAT deployment (read ability; 404 no such deployment / 410 evicted / 200 with an honest log_state)
+      GET     /v1/sites/:id/deployments/:dep_id/build-log/bytes operator  the recorded build log's BYTES for THAT deployment — a bounded tail (422 when the bytes were never scrubbed / 410 evicted / 404 no such deployment / 200 with an honest log_state)
       POST    /v1/sites/:id/deployments/:dep_id/promote user(s) rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact (write ability)
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
@@ -5583,7 +5584,8 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # GET /v1/providers/capabilities → 200
-  #   {providers: {<kind>: {tier, capabilities, gaps}}}
+  #   {providers: {<kind>: {tier, capabilities, gaps}},
+  #    edge:      {<kind>: {capabilities, gaps, unknown}}}
   #
   # The CP-SERVED capability/tier conduit (charter Decision 16, folded into S11):
   # the SPA and the `bp` CLI read ONE server-owned contract instead of each
@@ -5601,6 +5603,13 @@ defmodule BarkparkCloud.Web.Router do
   #   * gaps         — a server-owned reason for EVERY false capability
   #                    (FailureCopy.capability_gap_reason/2), so no disabled
   #                    action is ever reason-less.
+  #
+  # `edge` is the SIBLING matrix, read the same generic way from
+  # edge_capabilities.json: what a provider adds IN FRONT of a box (dns/tls/cdn/
+  # tunnel/storage/edge_fn/full_host) rather than what it can provision. It
+  # carries `unknown` alongside its bools — the capabilities this repo's code
+  # cannot honestly answer for that kind, which a surface must render as "we
+  # don't know" rather than as a gap.
   #
   # Any signed-in user may read it — it's a static cross-surface contract, not
   # team-scoped estate data. Dev-tier rows are included; hiding them is the
@@ -9002,6 +9011,39 @@ defmodule BarkparkCloud.Web.Router do
     end)
   end
 
+  # GET /v1/sites/:id/deployments/:dep_id/build-log/bytes → the recorded build
+  # log's BYTES, read BY DEPLOYMENT ID (dr-bl-recorder-http-read-path c1).
+  #
+  # A SUB-ROUTE, not a field on the record route above: serving bytes needs a
+  # REFUSAL (422 build_log_unscrubbed, for a record whose log_scrub is nil) that
+  # the record route's published 404/410/200 contract has no room for, and
+  # widening that route would let an existing caller's 200 silently become a 422.
+  # Everything else is inherited verbatim, so 404 and 410 mean here exactly what
+  # they mean next door.
+  #
+  # OPERATOR-GATED, AND DELIBERATELY NOT TEAM-SCOPED LIKE THE ROUTE ABOVE.
+  # #17693 widened that one to `{:ability, "read"}` and its security frame names
+  # the exact condition it widened under: "the widening moved WHO may ask, never
+  # WHAT is served … Not raw log bytes, and never has." THIS route serves the
+  # bytes, so that argument does not reach it and the audience does not move with
+  # it. `Auth.require_platform_operator/2` is 403-dark in production today
+  # (`gr-ops-platform-admin-emails`), which this route INHERITS from the row this
+  # task was filed under — no criterion here asserts a live 200 from it, and
+  # widening it is a separate decision with a separate secret-boundary review.
+  # All policy lives in `Sites.BuildLogBytes`.
+  get "/v1/sites/:id/deployments/:dep_id/build-log/bytes" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {status, body} =
+        Sites.BuildLogBytes.for_deployment(conn.path_params["id"], conn.path_params["dep_id"])
+
+      json(conn, status, body)
+    end
+  end
+
   # POST /v1/sites/:id/rollback → 200 {ok, status, deployment_id,
   # previous_deployment_id, url} — the sub-second symlink flip back to the previous
   # release (charter D5, site-spawner D30).
@@ -12267,7 +12309,16 @@ defmodule BarkparkCloud.Web.Router do
       update_state: bp.update_state,
       autoupdate_triggered_at: bp.autoupdate_triggered_at,
       apply_arming: bp.apply_arming,
-      apply_arming_checked_at: bp.apply_arming_checked_at
+      apply_arming_checked_at: bp.apply_arming_checked_at,
+      # cch-w63-bl — WHY `update_state` is "unknown", when it is. Written by
+      # `Registry.persist_update_unknown/2` from nine distinct call sites and
+      # already serialized to the member fleet row by `barkpark_json/6`; the
+      # operator roster omitted it, so `operatorRowState`'s unknown arm could
+      # only say "No update state reported yet." about a box that had in fact
+      # answered 401. `nil` means NOT MEASURED and the console whitelists the
+      # nine words rather than testing truthiness, so an unrecognised value
+      # falls through to the bare grey "Unknown".
+      update_unavailable_reason: bp.update_unavailable_reason
     }
   end
 
@@ -12648,6 +12699,21 @@ defmodule BarkparkCloud.Web.Router do
   @external_resource @providers_capabilities_fixture
   @providers_capabilities @providers_capabilities_fixture |> File.read!() |> Jason.decode!()
 
+  # The CP's committed copy of the EDGE capabilities fixture — the sibling of the
+  # compute matrix above, for what a provider adds IN FRONT of a box (dns/tls/
+  # cdn/tunnel/storage/edge_fn/full_host) rather than what it can provision.
+  # Byte-identical to internal/cli/cloud/edge_capabilities.json, and the drift
+  # gate lives on BOTH sides (edge_capabilities_contract_test.exs here,
+  # TestEdgeFixtureCopyIsByteIdentical in the Go package), so editing either copy
+  # alone reds both suites. Same compile-time read, same @external_resource
+  # recompile trigger.
+  @edge_capabilities_fixture Path.expand(
+                               "../../../priv/static/__fixtures__/edge_capabilities.json",
+                               __DIR__
+                             )
+  @external_resource @edge_capabilities_fixture
+  @edge_capabilities @edge_capabilities_fixture |> File.read!() |> Jason.decode!()
+
   # Build the GET /v1/providers/capabilities body from the committed fixture.
   # For each kind: split the tier (fixture value or the "prod" default) from the
   # capability bools (every boolean key, generically — no hardcoded list),
@@ -12668,7 +12734,32 @@ defmodule BarkparkCloud.Web.Router do
         {kind, %{tier: tier, capabilities: capabilities, gaps: gaps}}
       end)
 
-    %{providers: providers}
+    %{providers: providers, edge: edge_capabilities_payload()}
+  end
+
+  # The EDGE half of the same conduit: which edge features each provider adds in
+  # FRONT of a box. Built the SAME generic way as the compute half — every
+  # boolean key passes through (`capability_bools/1`, no hardcoded list) and every
+  # FALSE one gets a server-owned gap reason, so a new edge key flows to the SPA
+  # and the CLI with ZERO conduit change.
+  #
+  # The `unknown` key is NOT a capability and never reaches a surface as one: it
+  # names the capabilities this repo's code cannot honestly answer for that
+  # provider (vercel's TLS/CDN/DNS/…, which no code here drives). It is dropped
+  # by the SAME `is_boolean(value)` filter that drops the compute half's `tier`,
+  # and it rides the payload under its own key so a reading surface can say "we
+  # don't know" instead of rendering a gap reason that would be untrue.
+  defp edge_capabilities_payload do
+    Map.new(@edge_capabilities, fn {kind, row} ->
+      capabilities = capability_bools(row)
+
+      gaps =
+        for {capability, false} <- capabilities, into: %{} do
+          {capability, FailureCopy.capability_gap_reason(kind, capability)}
+        end
+
+      {kind, %{capabilities: capabilities, gaps: gaps, unknown: Map.get(row, "unknown", [])}}
+    end)
   end
 
   # tier reads from the fixture row ("dev" for the fake provider); every row
@@ -12707,9 +12798,15 @@ defmodule BarkparkCloud.Web.Router do
 
   defp split_provider_tier(row) do
     tier = Map.get(row, "tier", "prod")
-    capabilities = for {key, value} <- row, is_boolean(value), into: %{}, do: {key, value}
-    {tier, capabilities}
+    {tier, capability_bools(row)}
   end
+
+  # THE generic capability filter, shared by the compute and edge halves: a row's
+  # boolean-valued keys ONLY. Every non-bool key is metadata by construction —
+  # the compute matrix's `tier`, the edge matrix's `unknown` — so neither can
+  # leak in as a capability, and neither half needs a hardcoded key list.
+  defp capability_bools(row),
+    do: for({key, value} <- row, is_boolean(value), into: %{}, do: {key, value})
 
   # GET /v1/providers/:kind/catalog handler.
   defp providers_catalog(conn, kind) do

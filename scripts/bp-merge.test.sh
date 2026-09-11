@@ -375,6 +375,228 @@ else
   fail=$((fail + 1)); echo "  FAIL passing an argument was not refused (rc=${rc:-0}): $out" >&2
 fi
 
+# A pipeline into `grep -q` is the 141 hazard this repo scans for: grep exits on
+# the FIRST match, the producer takes SIGPIPE, and under `set -o pipefail` a TRUE
+# assertion comes back FAILED — precisely under the load that makes the output
+# long, which is the refusal blocks below. `case` reads the whole string with no
+# pipe at all. (scripts/pipefail-sigpipe-scan.sh names the shape.)
+out_has() { # haystack needle
+  case "$1" in
+    *"$2"*) return 0 ;;
+    *)      return 1 ;;
+  esac
+}
+
+# ── 43-51. THE DIRTY / CONFLICTING SHAPE (measured 2026-09-11, PR #17612) ────
+# pr-required.sh printed MERGEABLE: 4/4 at 03:56Z. #17614, a sibling touching a
+# file this head also touched, merged at 03:5xZ. By 04:05Z the head CONFLICTED
+# with the base, gh refused with the string below, and the table answered
+# UNRECOGNISED — the correct fail-closed answer, and useless advice: it sends
+# the reader to re-run the merge by hand, which refuses identically forever.
+DIRTY_FIXTURE='X Pull request FRIKKern/barkpark#17612 is not mergeable: the merge commit cannot be cleanly created. To have the pull request merged after all the requirements have been met, add the --auto flag. Run the following to resolve the merge conflicts locally: gh pr checkout 17612 && git fetch origin main && git merge origin/main'
+check "43 the DIRTY refusal is NAMED, not UNRECOGNISED (measured 2026-09-11, #17612)" DIRTY \
+  "$DIRTY_FIXTURE"
+# THE TRAP, kept as a live control rather than a comment. 'is not mergeable'
+# ALSO prefixes the CLIENT_BLOCK message, so an arm keyed on that substring
+# alone relabels every client-side block — the DOMINANT arm under protection
+# (D79) — as a merge conflict, and sends its reader to rebase a branch that has
+# nothing wrong with it. Row 9 above asserts the same thing from the other side;
+# this row exists so a future widening of the DIRTY needle reds HERE by name.
+check "43b …and the CLIENT_BLOCK message, which ALSO says 'is not mergeable', is untouched" CLIENT_BLOCK \
+  'X Pull request FRIKKern/barkpark#6414 is not mergeable: the base branch policy prohibits the merge.'
+# BOTH needles are required. A 'not mergeable' that names no reason is not a
+# measured shape and must keep refusing.
+check "43c a bare 'is not mergeable' with no reason still REFUSES" UNRECOGNISED \
+  'X Pull request FRIKKern/barkpark#17612 is not mergeable.'
+# And the second needle alone, with no gh preamble, is still the conflict.
+check "43d the conflict sentence alone is still DIRTY" DIRTY \
+  'is not mergeable: the merge commit cannot be cleanly created.'
+
+advice_contains "44 DIRTY advice says the required contexts are a SEPARATE question" \
+                DIRTY 'NOT a finding about the required contexts'
+advice_contains "44a …and says waiting never clears it"          DIRTY 'Waiting will never clear it'
+advice_contains "44b …and names the rebase, in the branch OWN worktree" DIRTY 'rebase origin/main'
+advice_contains "44c …and names the re-push form"                DIRTY 'push --force-with-lease'
+advice_contains "44d …and says to wait for the contexts on the NEW head" DIRTY 'run this again'
+# NEVER the queue. bp-merge.test.sh already ratchets the flag out of every
+# executable line of bp-merge.sh (rows 22/23), so the advice argues against
+# gh's suggestion WITHOUT spelling it — asserted on the sentence, not the flag.
+advice_contains "44e …and tells the reader NOT to take gh's queue-the-merge offer (D53)" \
+                DIRTY 'keeps unattended merging switched OFF'
+
+# The counter-line must fire on THIS message too. gh appends a second
+# suggestion here — queue the merge for after the requirements are met — and a
+# refusal that quotes it verbatim without countering it teaches the abolished
+# verb in gh's voice, exactly as D78 found for the admin override.
+out="$(counter_line "$DIRTY_FIXTURE")"
+if out_has "$out" 'DEAD'; then
+  pass=$((pass + 1)); echo "  ok   45 counter_line answers gh's QUEUE-the-merge suggestion on the DIRTY message"
+else
+  fail=$((fail + 1)); echo "  FAIL the DIRTY refusal quotes gh's queue suggestion with nothing beneath it" >&2
+fi
+if [ -z "$(counter_line 'GraphQL: Required status check "Elixir gate" is in progress.')" ]; then
+  pass=$((pass + 1)); echo "  ok   45a …and still stays SILENT on a message that suggested nothing"
+else
+  fail=$((fail + 1)); echo "  FAIL the queue counter-line fires on a message that made no suggestion" >&2
+fi
+
+# ── 46. THE EXIT CODE IS DISTINCT, and it is DRIVEN, not grepped ─────────────
+# Every other refusal exits 1, which a caller may sensibly retry or wait on. A
+# conflict never clears by waiting, so DIRTY exits 4. refuse() is driven for
+# real here — it only reads globals, so setting them is the whole setup.
+drive_refuse() { # state message -> prints rc
+  local st="$1" msg="$2" rc=0
+  (
+    PR_STATE_READ="OPEN"; PR_STATE_ERROR=""
+    PR_NUMBER=123; PR_URL="https://github.com/FRIKKern/barkpark/pull/123"; HEAD_SHA=deadbeef
+    refuse "$st" "$msg"
+  ) >/dev/null 2>&1 || rc=$?
+  printf '%s\n' "$rc"
+}
+rc_dirty="$(drive_refuse DIRTY "$DIRTY_FIXTURE")"
+rc_wait="$(drive_refuse WAIT 'GraphQL: Required status check "Elixir gate" is in progress.')"
+if [ "$rc_dirty" = "4" ]; then
+  pass=$((pass + 1)); echo "  ok   46 refuse() exits 4 on DIRTY — a code a retry-on-1 caller must not retry"
+else
+  fail=$((fail + 1)); echo "  FAIL refuse() exited $rc_dirty on DIRTY, not the documented 4" >&2
+fi
+if [ "$rc_wait" = "1" ]; then
+  pass=$((pass + 1)); echo "  ok   46a …and every other refusal still exits 1 (control: WAIT)"
+else
+  fail=$((fail + 1)); echo "  FAIL the new exit code leaked onto other states (WAIT exited $rc_wait)" >&2
+fi
+
+# ── 47-51. THE PRE-FLIGHT READ, driven end-to-end through main() with a STUBBED
+# gh. Not a re-implementation of main's ordering: main() itself is called, so
+# resolve_pr → preflight → preflight_mergeable → merge_loop is the REAL order,
+# and the assertion "zero merge calls" is made against a LOG of every gh argv
+# the run produced. A test that asserted "the read happens first" by grepping
+# the source would stay green if someone moved the call after merge_loop.
+BPM_TMP="$(mktemp -d)"
+trap 'rm -rf "$BPM_TMP"' EXIT
+printf '#!/usr/bin/env bash\nexit 0\n' > "$BPM_TMP/verify.sh"
+chmod +x "$BPM_TMP/verify.sh"
+GH_ARGV_LOG="$BPM_TMP/gh-argv.log"
+GH_MERGEABLE_STATE="clean"
+GH_MERGEABLE_RC=0
+gh() {
+  printf '%s\n' "$*" >> "$GH_ARGV_LOG"
+  case "$1" in
+    pr)
+      case "${2:-}" in
+        view)
+          case "$*" in
+            *"--json state"*) printf 'OPEN\n' ;;
+            *) printf '{"number":123,"url":"https://github.com/FRIKKern/barkpark/pull/123","headRefOid":"deadbeef","state":"OPEN","isDraft":false}\n' ;;
+          esac ;;
+        merge) printf 'Merged pull request #123 (stub)\n' ;;
+        *) return 1 ;;
+      esac ;;
+    api)
+      if [ "$GH_MERGEABLE_RC" -ne 0 ]; then
+        printf '%s\n' "$GH_MERGEABLE_STATE" >&2
+        return "$GH_MERGEABLE_RC"
+      fi
+      printf '%s\n' "$GH_MERGEABLE_STATE" ;;
+    *) return 1 ;;
+  esac
+}
+# The re-poll is real; only its CLOCK is neutralised, so the unknown arm does
+# not spend 12 wall seconds in CI.
+MERGEABLE_POLLS=3
+MERGEABLE_POLL_SECONDS=0
+
+drive_main() { # state rc_of_the_api_read -> sets DM_RC, DM_OUT, DM_MERGE_CALLS, DM_API_CALLS
+  GH_MERGEABLE_STATE="$1"; GH_MERGEABLE_RC="${2:-0}"
+  : > "$GH_ARGV_LOG"
+  DM_RC=0
+  DM_OUT="$( VERIFY="$BPM_TMP/verify.sh" main 2>&1 )" || DM_RC=$?
+  DM_MERGE_CALLS="$(grep -c '^pr merge' "$GH_ARGV_LOG" || true)"
+  DM_API_CALLS="$(grep -c '^api ' "$GH_ARGV_LOG" || true)"
+}
+
+# 47. dirty: refused BY NAME, exit 4, and the merge call was never spent.
+drive_main dirty
+if [ "$DM_RC" = "4" ] && [ "$DM_MERGE_CALLS" -eq 0 ] \
+   && out_has "$DM_OUT" 'REFUSED — DIRTY'; then
+  pass=$((pass + 1)); echo "  ok   47 mergeable_state=dirty refuses by NAME before the merge call (rc=$DM_RC, merge calls=$DM_MERGE_CALLS)"
+else
+  fail=$((fail + 1))
+  echo "  FAIL dirty was not refused pre-merge (rc=$DM_RC merge_calls=$DM_MERGE_CALLS)" >&2
+  printf '%s\n' "$DM_OUT" | sed 's/^/       /' >&2
+fi
+if out_has "$DM_OUT" 'push --force-with-lease'; then
+  pass=$((pass + 1)); echo "  ok   47a …and prints the rebase remedy, not just the verdict"
+else
+  fail=$((fail + 1)); echo "  FAIL the dirty pre-flight refusal names no resolving command" >&2
+fi
+
+# 48. unknown: GitHub has not computed it. Re-read, then REFUSE — never merge.
+drive_main unknown
+if [ "$DM_RC" = "1" ] && [ "$DM_MERGE_CALLS" -eq 0 ] && [ "$DM_API_CALLS" -eq 3 ] \
+   && out_has "$DM_OUT" "STILL 'unknown'"; then
+  pass=$((pass + 1)); echo "  ok   48 mergeable_state=unknown re-polls ($DM_API_CALLS reads) and then REFUSES — never a green"
+else
+  fail=$((fail + 1))
+  echo "  FAIL unknown was mishandled (rc=$DM_RC merge_calls=$DM_MERGE_CALLS api_calls=$DM_API_CALLS)" >&2
+  printf '%s\n' "$DM_OUT" | sed 's/^/       /' >&2
+fi
+
+# 49. THE POSITIVE CONTROL. Without it every row above passes on a script that
+# refuses unconditionally, which is the vacuous pass in the other direction.
+drive_main clean
+if [ "$DM_RC" = "0" ] && [ "$DM_MERGE_CALLS" -eq 1 ] \
+   && out_has "$DM_OUT" 'MERGED #123'; then
+  pass=$((pass + 1)); echo "  ok   49 CONTROL: mergeable_state=clean reaches the merge call and merges (merge calls=$DM_MERGE_CALLS)"
+else
+  fail=$((fail + 1))
+  echo "  FAIL the clean control did not merge (rc=$DM_RC merge_calls=$DM_MERGE_CALLS)" >&2
+  printf '%s\n' "$DM_OUT" | sed 's/^/       /' >&2
+fi
+# `unstable` is a NON-required check being red. The branch policy allows it, so
+# the pre-flight must not invent a refusal the server would not make.
+drive_main unstable
+if [ "$DM_RC" = "0" ] && [ "$DM_MERGE_CALLS" -eq 1 ]; then
+  pass=$((pass + 1)); echo "  ok   49a CONTROL: 'unstable' (a non-required check is red) is NOT a conflict and still merges"
+else
+  fail=$((fail + 1)); echo "  FAIL the pre-flight refused 'unstable', which the branch policy allows (rc=$DM_RC)" >&2
+fi
+
+# 50. AN UNREADABLE READ IS A REFUSAL, never a skip — and it must SAY it
+# measured nothing, or the refusal sounds like a finding about the PR.
+drive_main 'GraphQL: API rate limit already exceeded for user ID 32601161.' 1
+if [ "$DM_RC" = "1" ] && [ "$DM_MERGE_CALLS" -eq 0 ] \
+   && out_has "$DM_OUT" 'could not READ mergeable_state' \
+   && out_has "$DM_OUT" 'rate limit already exceeded' \
+   && out_has "$DM_OUT" 'NOTHING was measured'; then
+  pass=$((pass + 1)); echo "  ok   50 a FAILED mergeable_state read refuses, quotes the API, and claims nothing about the PR"
+else
+  fail=$((fail + 1))
+  echo "  FAIL an unreadable pre-flight did not refuse honestly (rc=$DM_RC merge_calls=$DM_MERGE_CALLS)" >&2
+  printf '%s\n' "$DM_OUT" | sed 's/^/       /' >&2
+fi
+unset -f gh drive_main drive_refuse out_has
+rm -rf "$BPM_TMP"
+trap - EXIT
+
+# 51. The read is the one the task specifies — REST .mergeable_state — and not a
+# re-derivation from a check rollup, which cannot see the diff at all.
+if grep -qF -- 'gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER" --jq' "$ROOT/scripts/bp-merge.sh" \
+   && grep -qF -- ".mergeable_state" "$ROOT/scripts/bp-merge.sh"; then
+  pass=$((pass + 1)); echo "  ok   51 the pre-flight reads .mergeable_state over REST, the same read pr-required makes"
+else
+  fail=$((fail + 1)); echo "  FAIL the mergeable_state read is not a REST .mergeable_state read" >&2
+fi
+# And it is WIRED into main between the deadlock pre-flight and the merge loop.
+# Rows 47-50 drive this for real; this row exists so a deletion reds with a
+# sentence that names the cause rather than only a wrong exit code.
+if awk '/^  preflight_mergeable$/ {seen=1} /^  merge_loop$/ {print (seen ? "OK" : "LATE"); exit}' \
+     "$ROOT/scripts/bp-merge.sh" | grep -q OK; then
+  pass=$((pass + 1)); echo "  ok   51a …and main() runs it BEFORE merge_loop"
+else
+  fail=$((fail + 1)); echo "  FAIL preflight_mergeable is not called before merge_loop in main()" >&2
+fi
+
 echo
 echo "bp-merge harness: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1

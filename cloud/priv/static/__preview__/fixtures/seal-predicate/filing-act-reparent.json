@@ -1,0 +1,334 @@
+{
+  "_comment": "THE FILING ACT, at the live shape. 69 OPEN rows reparented one level down, under a sibling that is already `done`. NOTHING is finished: the same 69 rows are open before and after. The epic's DIRECT roster is one done row, so a predicate that reads one level prints VERDICT: SEAL a=PASS orphans=0 at exit 0 \u2014 a gauge emptied by a filing act. Drive it with the `subtrees`-blind mutation in seal-predicate.test.mjs to reproduce that seal; the committed file answers NO-SEAL with 69 orphans at depth 2.",
+  "successor": "cch-fixture-successor-epic",
+  "tasks": {
+    "cch-fixture-successor-epic": {
+      "_id": "cch-fixture-successor-epic",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    }
+  },
+  "children": [
+    {
+      "_id": "gr-fixture-done-sink",
+      "lifecycle_status": "done"
+    }
+  ],
+  "subtrees": {
+    "gr-fixture-done-sink": [
+      {
+        "_id": "gr-fixture-reparented-01",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-02",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-03",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-04",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-05",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-06",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-07",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-08",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-09",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-10",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-11",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-12",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-13",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-14",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-15",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-16",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-17",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-18",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-19",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-20",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-21",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-22",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-23",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-24",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-25",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-26",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-27",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-28",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-29",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-30",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-31",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-32",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-33",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-34",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-35",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-36",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-37",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-38",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-39",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-40",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-41",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-42",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-43",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-44",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-45",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-46",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-47",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-48",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-49",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-50",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-51",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-52",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-53",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-54",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-55",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-56",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-57",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-58",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-59",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-60",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-61",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-62",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-63",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-64",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-65",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-66",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-67",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-68",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-reparented-69",
+        "lifecycle_status": "open"
+      }
+    ]
+  },
+  "forwarded": [],
+  "gates": {
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "cch-hg-compose-network-recreation": {
+      "_id": "cch-hg-compose-network-recreation",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    }
+  },
+  "landed": [
+    "481d6f231",
+    "8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4",
+    "d157d098c78bc6604d00d84e22d038bdb176ef58",
+    "26acc7a91be0f0352efdb3e89b2017accb786367",
+    "58862f621"
+  ],
+  "unmeasuredWaivers": [
+    "CCH-D5-rate-limiter-sees-every-user-as-one"
+  ],
+  "defectCommits": {}
+}

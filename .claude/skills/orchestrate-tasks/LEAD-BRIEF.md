@@ -42,6 +42,8 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    gate to run, the commit rules, and "report what the filing got WRONG". Five workers
    at most in flight; parallelise across rows, not inside one.
 4. **Worker builds** in `git worktree add $ORCH/wt/<lane>-<slug> -b <lane>/<slug> origin/main`.
+   IMMEDIATELY record the base: `git -C <wt> merge-base HEAD origin/main > $ORCH/tmp/<lane>-w<N>/base.sha`.
+   That file is the only reset target rule 5 allows; `origin/main` moves while the worker works.
    Elixir gates run inside that worktree (`cd api && mix test <files>`; never borrow
    `_build` from another tree). Go: `go build ./... && go test ./internal/cli/...`.
    `cc` on this Mac is a Claude Code shim: cgo/NIF builds die on a fake "unknown option" — use
@@ -49,7 +51,7 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    A change with a test proves red-without / green-with (mutation-prove it).
 5. **Commit rules** (worker): `git add <exact paths>`; `git commit -- <exact paths>`;
    then `git log -1 --stat` and READ the list — a file you did not write means another
-   writer is in your tree; strip it (`git reset --soft`, restage yours only) before pushing.
+   writer is in your tree; strip it (`git reset --soft <the literal base sha you recorded at worktree creation>` — NEVER `origin/main`, which moves; restage yours only) before pushing.
    No `Co-Authored-By` lines. Commit BEFORE reporting — the branch ref outlives the dir.
 6. **PR** (worker): `git push -u origin <lane>/<slug>`; `gh pr create` with a body that
    ends in the trailer line `Task: <doc_id>`. Report the PR URL and criteria status.
