@@ -805,13 +805,26 @@ defmodule BarkparkWeb.TasksController do
         # reports — one query, one number, and `doc.child_count` now means the
         # same thing on `bp task get` as it does on a `bp task ls` / `ready`
         # card. The top-level key is UNCHANGED for the readers already on it.
-        child_counts = %{Params.strip_draft_prefix(doc.doc_id) => length(children)}
+        # task-e4f1d8e178509fc9: seal ONCE, then derive EVERY number and every
+        # summary from that one sealed list. Before this, both `child_count`
+        # keys counted the UNSEALED `children` while the `children:` array was
+        # rendered off `seal_docs(children, conn)` — two parallel derivations
+        # that agree only because `seal_docs/2` happens to be a
+        # length-preserving `Enum.map`. That is an incidental property of an
+        # unrelated helper, not a stated invariant: the day a seal drops a doc,
+        # the count would describe rows the caller never received (the shape
+        # PDS-D502 refuted). No behaviour change today — one list, one length.
+        sealed_children = seal_docs(children, conn)
+
+        child_counts = %{
+          Params.strip_draft_prefix(doc.doc_id) => length(sealed_children)
+        }
 
         json(conn, %{
           ok: true,
           doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts, child_counts),
-          children: Enum.map(seal_docs(children, conn), &Params.child_summary/1),
-          child_count: length(children)
+          children: Enum.map(sealed_children, &Params.child_summary/1),
+          child_count: length(sealed_children)
         })
 
       {:error, :not_found} ->
