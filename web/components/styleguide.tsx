@@ -45,6 +45,15 @@ const READING_SCALE = readingTypeOrder.map((label) => ({ label, ...readingType[l
 
 const mono: CSSProperties = { fontFamily: "var(--font-mono, ui-monospace, monospace)" };
 
+/* The page's OWN chrome spends the same emitted ladder it documents. A style
+ * guide that sets its headings by hand while preaching the token is the exact
+ * drift this page exists to catch, so every heading and lede below is a step. */
+const step = (k: (typeof chromeTypeOrder)[number]): CSSProperties => ({
+  fontSize: chromeType[k].size,
+  lineHeight: chromeType[k].lineHeight,
+  fontWeight: chromeType[k].weight,
+});
+
 export function Styleguide() {
   return (
     <main
@@ -65,7 +74,7 @@ export function Styleguide() {
           margin: "0 0 .25rem",
         }}
       >
-        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>Web style guide</h1>
+        <h1 style={{ margin: 0, ...step("2xl") }}>Web style guide</h1>
         {/* Two orthogonal switches (theme-system D36): the picker swaps the whole
             palette (data-bp-theme), the toggle flips light/dark (data-theme).
             Every swatch below re-skins live off the emitted vars for both. */}
@@ -83,7 +92,7 @@ export function Styleguide() {
       </p>
 
       <section style={{ margin: "0 0 2.5rem" }}>
-        <h2 style={{ margin: "0 0 .75rem", fontSize: 20, fontWeight: 700 }}>Palette</h2>
+        <h2 style={{ margin: "0 0 .75rem", ...step("xl") }}>Palette</h2>
         <div
           style={{
             display: "grid",
@@ -113,8 +122,8 @@ export function Styleguide() {
       </section>
 
       <section style={{ margin: "0 0 2.5rem" }}>
-        <h2 style={{ margin: "0 0 .25rem", fontSize: 20, fontWeight: 700 }}>Status roles</h2>
-        <p style={{ color: "var(--color-muted-text)", fontSize: 13, margin: "0 0 .75rem" }}>
+        <h2 style={{ margin: "0 0 .25rem", ...step("xl") }}>Status roles</h2>
+        <p style={{ color: "var(--color-muted-text)", ...step("sm"), margin: "0 0 .75rem" }}>
           The four semantic voices — ok / warn / danger / info.
         </p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
@@ -147,10 +156,10 @@ export function Styleguide() {
       </section>
 
       <section>
-        <h2 style={{ margin: "0 0 .25rem", fontSize: 20, fontWeight: 700 }}>
+        <h2 style={{ margin: "0 0 .25rem", ...step("xl") }}>
           Type ladder — UI chrome
         </h2>
-        <p style={{ color: "var(--color-muted-text)", fontSize: 13, margin: "0 0 .75rem" }}>
+        <p style={{ color: "var(--color-muted-text)", ...step("sm"), margin: "0 0 .75rem" }}>
           Read live from <code style={mono}>tokens.json type.chrome</code> via the emitted{" "}
           <code style={mono}>lib/tokens.gen.ts</code> — size, line height and weight all come
           from the token. No copy of this scale lives in this file.
@@ -171,10 +180,10 @@ export function Styleguide() {
       </section>
 
       <section style={{ marginTop: "2rem" }}>
-        <h2 style={{ margin: "0 0 .25rem", fontSize: 20, fontWeight: 700 }}>
+        <h2 style={{ margin: "0 0 .25rem", ...step("xl") }}>
           Type ladder — reading (paper surface)
         </h2>
-        <p style={{ color: "var(--color-muted-text)", fontSize: 13, margin: "0 0 .75rem" }}>
+        <p style={{ color: "var(--color-muted-text)", ...step("sm"), margin: "0 0 .75rem" }}>
           Read live from <code style={mono}>tokens.json type.reading</code> via the same emitted{" "}
           <code style={mono}>lib/tokens.gen.ts</code>. These are the leaves{" "}
           <code style={mono}>paper-surface.css</code> emits as{" "}
