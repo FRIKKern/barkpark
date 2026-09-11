@@ -353,7 +353,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     do: compose_block(Map.put(b, "type", "blockquote"), style)
 
   # Pullquote — italic serif, larger, muted, with a 3px terracotta left-border
-  # (mirrors doc.css `.pullquote`) in article mode. The clause is style-INVARIANT:
+  # (mirrors `.bp-paper-surface .bp-role-pullquote` in
+  # api/assets/paper-surface/paper-surface.css — `border-left: 3px solid
+  # var(--paper-reading-accent)`) in article mode. The clause is style-INVARIANT:
   # it emits the same PdParagraph with `_role: "pullquote"` in every style, and
   # walk.ex paints the full role treatment (terracotta left-border + sizing) at
   # BOTH `:article` (via the `.bp-role-pullquote` class) and email/default (via
@@ -498,9 +500,15 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  # Article mode: the doc.css `hr.section` look — a centered "§" glyph
+  # Article mode: the `.bp-section-divider` look — a centered "§" glyph
   # straddling a hairline rule (the glyph sits on the warm parchment, masking
-  # the rule behind it). Email/default mode: a plain `PdHr`, unchanged.
+  # the rule behind it). There is no `hr.section` selector anywhere in this repo:
+  # the divider's visual declarations are INLINE in
+  # `Figures.section_divider_html/0`, and the only stylesheet that restates them
+  # is the edit mirror `.bp-paper-editor-body .bp-section-divider{,__mark}`
+  # (api/assets/paper-editor/src/styles.css). paper-surface.css mentions
+  # `.bp-section-divider` only in the divider-before-h2 dedup rule, never for the
+  # glyph's own look. Email/default mode: a plain `PdHr`, unchanged.
   def compose_block(%{"type" => "divider"}, :article) do
     %{"kind" => "_raw", "html" => Figures.section_divider_html()}
   end
@@ -516,10 +524,13 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # it. The mermaid source is entity-encoded (& < >) so it round-trips through
   # the extractor and Mermaid decodes it at runtime.
   #
-  # In article mode: a bordered, parchment, inset figure card (mirrors doc.css
-  # `figure`); the figcaption carries a bold "Figure N." run-in and is styled by
-  # the ONE `.bp-figcaption` class (paper-surface.css) the diagram/asciicast
-  # emitters in figures.ex share.
+  # In article mode: a bordered, parchment, inset figure card whose frame is
+  # INLINE on the `<figure>` in `Figures.diagram_html/3` — paper-surface.css
+  # carries no `figure` selector, so the card has no stylesheet counterpart. The
+  # figcaption carries a bold "Figure N." run-in and is the part that DOES: the
+  # ONE `.bp-figcaption` class (`.bp-paper-surface .bp-figcaption`,
+  # api/assets/paper-surface/paper-surface.css) the diagram/asciicast emitters in
+  # figures.ex share.
   # In email/default mode: degrade gracefully — Mermaid never runs in email, so
   # we render the caption then the source as a plain code block.
   # CONTENTLESS DIAGRAM (the empty-chrome invariant — see `blank_field?/2`): a
