@@ -416,18 +416,33 @@ MEM_AVAIL_MB=$((MEM_AVAIL_KB / 1024))
 info "deployed sha    $DEPLOYED_SHA"
 info "MemAvailable    ${MEM_AVAIL_KB} kB = ${MEM_AVAIL_MB} MiB (floor read from PDS_FULL_EXPORT_MIN_MEM_MB=${FULL_MIN_MEM_MB}, never written here)"
 
-# PDS-D31: two concurrent full exports OOM the box. The lock is the frozen
-# harness's own, so this instrument and that harness are mutually exclusive.
-mkdir -p "$FULL_DIR"
-if mkdir "$FULL_LOCK" 2>/dev/null; then
-  LOCK_OWNED=1
-  info "lock            took $FULL_LOCK (shared with the frozen harness — PDS-D31)"
-else
-  refuse "$FULL_LOCK is held by another run. Two concurrent exports against this box OOM it (PDS-D31)."
-fi
-
-# READ-ONLY here. The ledger is not charged until window 2, below every refusal.
+# THE PDS-D31 MUTEX IS TAKEN ONLY ON THE PATH THAT CAN CONTEND FOR IT.
+#
+# It used to be acquired unconditionally, ABOVE this branch and above the
+# MemAvailable floor gate. But the hazard the lock exists for is two concurrent
+# ~2.2 GiB FULL exports OOM-killing the live content API — and a SCOPED run
+# (profile=dev -> FULL_ACQ=no) is not that event: it charges no attempt, skips
+# the floor gate for the same reason, and its work is pure ssh/ps/awk
+# observation. Gating harmless observation behind the export mutex forced every
+# measure rung to be strictly sequenced against every climb rung even when they
+# contended for nothing, and it is what drove the lock-free fork
+# scripts/pds-idle-sampler.sh (PDS-D237) into existence.
+#
+# So the lock now sits BELOW the FULL_ACQ decision, inside the branch that
+# performs the acquisition the mutex serialises. A full-fidelity run still takes
+# it and still refuses when it is held. Nothing else changed about the lock: same
+# path, same shared-with-the-frozen-harness semantics, same cleanup via
+# LOCK_OWNED in the EXIT trap.
+#
+# The ledger is READ-ONLY here. It is not charged until window 2, below every refusal.
 if [ "$FULL_ACQ" = yes ]; then
+  mkdir -p "$FULL_DIR"
+  if mkdir "$FULL_LOCK" 2>/dev/null; then
+    LOCK_OWNED=1
+    info "lock            took $FULL_LOCK (shared with the frozen harness — PDS-D31)"
+  else
+    refuse "$FULL_LOCK is held by another run. Two concurrent FULL exports against this box OOM it (PDS-D31). A NARROWED acquisition (--path '/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=production') needs no mutex and runs beside a held lock."
+  fi
   info "attempt ledger  $(full_attempts) of $FULL_BUDGET spent so far · $FULL_ATTEMPTS_FILE (shared with the frozen harness)"
   info "                this acquisition is FULL-fidelity, so it will charge 1 attempt — written just before the request, never here"
   # This instrument RECORDS; the frozen harness's cond_c ENFORCES. That split is
@@ -450,6 +465,9 @@ if [ "$FULL_ACQ" = yes ]; then
     info ""
   fi
 else
+  info "lock            NOT taken — $FULL_LOCK guards two concurrent FULL exports (PDS-D31), and this"
+  info "                acquisition is NARROWED: ssh/ps/awk observation plus a scoped request cannot contend"
+  info "                for the ~2.2 GiB the mutex serialises. A scoped run may therefore ride beside a climb."
   info "attempt ledger  $(full_attempts) of $FULL_BUDGET spent so far · $FULL_ATTEMPTS_FILE (read only)"
   info "                this acquisition is NARROWED, so it charges 0 attempts and leaves that file's value and mtime untouched"
 fi
