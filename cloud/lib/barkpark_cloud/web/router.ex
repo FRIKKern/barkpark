@@ -196,7 +196,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
       POST    /v1/sites/:id/rollback user(s) roll a site back to a prior deployment (write ability)
-      GET     /v1/sites/:id/deployments/:dep_id/build-log operator  the black box recorder's durable per-build record for THAT deployment (404 no such deployment / 410 evicted / 200 with an honest log_state)
+      GET     /v1/sites/:id/deployments/:dep_id/build-log user(s)  the black box recorder's durable per-build record for THAT deployment (read ability; 404 no such deployment / 410 evicted / 200 with an honest log_state)
       POST    /v1/sites/:id/deployments/:dep_id/promote user(s) rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact (write ability)
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
@@ -8962,11 +8962,28 @@ defmodule BarkparkCloud.Web.Router do
   # GET /v1/sites/:id/deployments/:dep_id/build-log → the black box recorder's
   # durable per-build record, read BY DEPLOYMENT ID (dr-bl-recorder-http-read-path).
   #
-  # OPERATOR-GATED, and the gate is 403-dark in production today
-  # (`gr-ops-platform-admin-emails` leaves `PLATFORM_ADMIN_EMAILS` unset), so this
-  # route answers 403 to every real account until a human sets it. That is a human
-  # gate this route INHERITS, not a defect it introduces — and no test here asserts
-  # a live 200 from it.
+  # TEAM-SCOPED, the SAME door its siblings already use
+  # (dr-w19-site-build-log-is-operator-only). It shipped `operator`-gated, which is
+  # the `:platform_admin_emails` allowlist — unset on prod and unsettable through
+  # any route, console action or User field (`gr-ops-platform-admin-emails`) — so
+  # the ONE deploy-health read carrying a failed build's own words was readable by
+  # ZERO accounts while `GET /v1/sites/:id/deployments/:dep_id` next door answered
+  # every member of the owning team. Fail-closed to the point of uselessness is not
+  # a security posture: the person whose site failed to build could not read why.
+  #
+  # `{:ability, "read"}` is the sibling's own mode, not a new one — session OR a
+  # read-ability PAT, then `Registry.get_team_site/2`, so a FOREIGN team's site is
+  # the same 404 as one that does not exist. The site is resolved BY the wrapper
+  # and its `site.id` is what reaches `BuildLog`, so the read can never escape the
+  # caller's team even if the path id were to resolve some other way.
+  #
+  # WHAT CROSSES THE BOUNDARY IS UNCHANGED, and it is why widening the audience is
+  # safe: this route has never served raw log BYTES (the box refuses them — the
+  # build env file carries `BARKPARK_TOKEN=` in plaintext), only the explicitly
+  # allowlisted structured record — stages, exit code, a byte-capped
+  # `failure_reason`, and the `log_path` / `journal_command` naming where the bytes
+  # are. A field the box grows is invisible here until a human lists it, and the
+  # transport term is logged, never echoed.
   #
   # Every decision lives in `Sites.BuildLog`: the site scoping, the three
   # distinguishable answers (404 no-such-deployment / 410 evicted / 200 with an
@@ -8974,16 +8991,11 @@ defmodule BarkparkCloud.Web.Router do
   # This file is touched by every lane, so it carries the door and none of the
   # policy.
   get "/v1/sites/:id/deployments/:dep_id/build-log" do
-    conn = Auth.require_platform_operator(conn, [])
+    with_team_site(conn, {:ability, "read"}, fn site ->
+      {status, payload} = Sites.BuildLog.for_deployment(site.id, conn.path_params["dep_id"])
 
-    if conn.halted do
-      conn
-    else
-      {status, body} =
-        Sites.BuildLog.for_deployment(conn.path_params["id"], conn.path_params["dep_id"])
-
-      json(conn, status, body)
-    end
+      json(conn, status, payload)
+    end)
   end
 
   # POST /v1/sites/:id/rollback → 200 {ok, status, deployment_id,
