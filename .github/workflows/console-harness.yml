@@ -1048,6 +1048,24 @@ jobs:
       - name: CSS/token drift gate
         run: node cloud/priv/static/__css_check.mjs
 
+      # ── THE SINGULAR-SELECTOR CENSUS (task-39ebd948f40660e3) ───────────────
+      # view-scope-census.mjs classifies every `document.querySelector(All)?(`
+      # site in overflow-guard.mjs. Its SCOPE half (which walks are
+      # document-wide) is driven in a browser by the guard's own W35 leg; this
+      # CARDINALITY half is pure and browserless, so it belongs here rather than
+      # behind a Chrome bring-up: a singular walk reads ONE element of a
+      # population and the leg never says whether the population was 1, 3 or 40.
+      # It reds on a singular walk that neither prints its population nor carries
+      # a committed one-line reason, and — symmetrically, D180 — on a register
+      # row that matches no walk in the guard.
+      #
+      # Its OWN unit tests run in the derived-selection step at the end of this
+      # job (this command line is not a `node --test`, so the selection predicate
+      # there still picks up view-scope-census.test.mjs). This step is the arm
+      # that runs the census against the SHIPPED guard and prints it.
+      - name: Singular-selector population census (overflow-guard.mjs)
+        run: node cloud/priv/static/__preview__/view-scope-census.mjs --list
+
       # ── STEP ORDER IS PART OF THE INSTRUMENT (cch-w45, wave 45) ────────────
       #
       # THE SEVEN CENSUSES BELOW RUN DERIVED-FIRST, PINNED-SECOND, ON PURPOSE.

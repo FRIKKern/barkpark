@@ -22,6 +22,12 @@ import {
   viewHostOfIds,
   RESIDUE_REGISTER,
   LIVE_VIEW_SELECTOR,
+  SINGULAR_REGISTER,
+  singularCensus,
+  classifyCardinality,
+  walkKey,
+  registerKey,
+  grepCounts,
 } from "./view-scope-census.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -242,4 +248,135 @@ test("viewHostOfIds: an id app.js paints at runtime is absent, and absence is no
 test("the guard registers the leg that drives this census", () => {
   assert.match(GUARD, /"W35-hash-nav-hidden-view-residue"/);
   assert.match(GUARD, /requested\.includes\("W35-hash-nav-hidden-view-residue"\)/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE CARDINALITY HALF (task-39ebd948f40660e3)
+// ─────────────────────────────────────────────────────────────────────────────
+//  Same rule as every assertion above: each test names a way the singular census
+//  can go quietly wrong, and fails on THAT shape. The two that matter most are
+//  the two reds — an unregistered walk and a register row nobody can reach —
+//  because a register that can only say "fine" is not an instrument.
+
+test("singularCensus: a bare singular walk with no reason is UNREGISTERED", () => {
+  const src = [
+    'if (requested.includes("LEG-A")) {',
+    "  document.querySelector('.row');",
+    "}",
+  ].join("\n");
+  const c = singularCensus(src, []);
+  assert.equal(c.unregistered.length, 1);
+  assert.match(c.unregistered[0], /LEG-A :: \.row/);
+  assert.equal(c.stale.length, 0);
+});
+
+test("singularCensus: a register row matching no walk is STALE — staleness is fatal (D180)", () => {
+  const src = 'if (requested.includes("LEG-A")) {\n  document.querySelector("#only-id");\n}\n';
+  const c = singularCensus(src, [{ leg: "LEG-A", selector: ".gone", reason: "a walk that was deleted" }]);
+  assert.equal(c.stale.length, 1);
+  assert.match(c.stale[0], /LEG-A :: \.gone/);
+  // THE CONTROL FOR THE CONTROL: the same source with no register is clean on
+  // the stale arm, so the row above is what produced the red, not the source.
+  assert.equal(singularCensus(src, []).stale.length, 0);
+});
+
+test("singularCensus: a leg that WALKS THE SAME SELECTOR plurally prints the population, and owes no row", () => {
+  const src = [
+    'if (requested.includes("LEG-A")) {',
+    "  document.querySelector('.row');",
+    "  document.querySelectorAll('.row').length;",
+    "}",
+  ].join("\n");
+  const c = singularCensus(src, []);
+  assert.equal(c.unregistered.length, 0);
+  assert.equal(c.sites[0].discharge, "counted-in-leg");
+  // THE MUTATION: the SAME plural walk in a DIFFERENT leg discharges nothing.
+  const other = [
+    'if (requested.includes("LEG-A")) {',
+    "  document.querySelector('.row');",
+    "}",
+    'if (requested.includes("LEG-B")) {',
+    "  document.querySelectorAll('.row').length;",
+    "}",
+  ].join("\n");
+  assert.equal(singularCensus(other, []).unregistered.length, 1);
+});
+
+test("classifyCardinality: a DESCENDANT of the live view is a population, not the view host", () => {
+  // THE MUTATION THIS CATCHES: discharging every selector that CONTAINS the
+  // scoped idiom. `section.view:not([hidden])` is one element by construction;
+  // `section.view:not([hidden]) .fleet-row` is five rows on mixed-fleet, and a
+  // singular read of it is exactly the defect this census exists to find.
+  const host = { leg: "L", selector: LIVE_VIEW_SELECTOR, all: false, arg: null };
+  const row = { leg: "L", selector: `${LIVE_VIEW_SELECTOR} .fleet-row`, all: false, arg: null };
+  assert.equal(classifyCardinality(host, new Set(), []), "live-view-host");
+  assert.equal(classifyCardinality(row, new Set(), []), "unregistered");
+});
+
+test("classifyCardinality: an id is one host only when it is the LAST compound", () => {
+  const idc = (sel) => classifyCardinality({ leg: "L", selector: sel, all: false, arg: null }, new Set(), []);
+  assert.equal(idc("#cred-token"), "singleton-id");
+  assert.equal(idc("#modal-root #cred-token"), "singleton-id");
+  // An id ANCESTOR with a class terminal is a population under one host —
+  // `#overview-body .instance-card` is five cards, and the old scope census
+  // calls it "id-anchored". That classification answers a different question.
+  assert.equal(idc("#overview-body .instance-card"), "unregistered");
+});
+
+test("classifyCardinality: an UNRESOLVED site can never be discharged by another leg's plural walk", () => {
+  // MEASURED WHILE WRITING THIS: keying an unresolved site as `leg :: null`
+  // collided with any other runtime-built plural walk in the same leg and
+  // silently discharged three of the guard's six unresolved sites against a
+  // count of something else.
+  const src = [
+    'if (requested.includes("LEG-A")) {',
+    "  document.querySelector(`.${a} .x`);",
+    "  document.querySelectorAll(`.${b} .y`).length;",
+    "}",
+  ].join("\n");
+  const c = singularCensus(src, []);
+  assert.equal(c.unregistered.length, 1);
+  assert.match(c.unregistered[0], /«/);
+});
+
+test("walkKey / registerKey: a register row and the walk it discharges spell the same key", () => {
+  const w = { leg: "L", selector: ".x", arg: null, all: false };
+  assert.equal(walkKey(w), registerKey({ leg: "L", selector: ".x", reason: "r" }));
+  const u = { leg: "L", selector: null, arg: "${sel}')", all: false };
+  assert.equal(walkKey(u), registerKey({ leg: "L", arg: "${sel}')", reason: "r" }));
+});
+
+test("THE GUARD'S OWN BYTES: every singular walk is discharged and every register row is reachable", () => {
+  const c = singularCensus(GUARD);
+  assert.deepEqual(c.unregistered, [], "a singular walk in overflow-guard.mjs prints no population and carries no committed reason");
+  assert.deepEqual(c.stale, [], "a SINGULAR_REGISTER row matches no walk in overflow-guard.mjs — staleness is fatal (D180)");
+  // A FLOOR, never an equality: a census of this guard that suddenly reads a
+  // handful of singular walks has been defeated by a rename, not cleaned up.
+  assert.ok(c.sites.length > 120, `only ${c.sites.length} singular walks censused`);
+  assert.ok(SINGULAR_REGISTER.length > 0);
+});
+
+test("SINGULAR_REGISTER: every row carries a real one-line reason, and no row is written twice", () => {
+  const seen = new Set();
+  for (const r of SINGULAR_REGISTER) {
+    const k = registerKey(r);
+    assert.ok(!seen.has(k), `${k} is registered twice — one of the two rows can never be reached`);
+    seen.add(k);
+    assert.ok(typeof r.reason === "string" && r.reason.trim().length > 20, `${k} carries no reason worth reading`);
+    assert.ok(!/\bTODO\b/.test(r.reason), `${k} carries a placeholder reason`);
+  }
+});
+
+test("grepCounts: the header's three numbers are DERIVED, and the guard no longer types them", () => {
+  // THE ROT THIS CATCHES: overflow-guard.mjs's header carried `68 occurrences /
+  // 55 lines / 15 All` as hand-typed literals. Measured on this tree the file is
+  // an order of magnitude past all three. The numbers now come from here.
+  const g = grepCounts(GUARD);
+  assert.ok(g.occurrences > 200, `querySelector( occurrences read ${g.occurrences}`);
+  assert.ok(g.lines > 200 && g.lines <= g.occurrences);
+  assert.ok(g.allOccurrences > 50);
+  assert.equal(grepCounts("a.querySelector(x); b.querySelectorAll(y);").occurrences, 1, "the two patterns must stay disjoint");
+  assert.equal(grepCounts("a.querySelector(x); b.querySelectorAll(y);").allOccurrences, 1);
+  // And the guard must not have grown a new hand-typed pair beside them.
+  assert.ok(!/querySelector\[\(\][^\n]*→\s*\d+/.test(GUARD), "the guard's header has typed a selector count again instead of pointing at this census");
 });
