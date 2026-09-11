@@ -221,6 +221,99 @@ done <<<"$(cd "$ROOT/api" && ls lib/barkpark/*.ex 2>/dev/null | head -40)"
 [ "$crossed" -eq 1 ] || bad "the BY-NAME net reaches a non-convention caller" "no fixture found — the mapper may be dead"
 
 echo
+echo "=== §2b  RULE 3 — the web-surface hop (the #17153 blind spot)"
+#
+# THE DEFECT THIS SECTION EXISTS FOR. #17153 changed api/lib/barkpark/tasks/landed.ex,
+# the selector narrowed to 263 of 1676 files, the required gate went green, and
+# main reddened at test/barkpark_web/controllers/tasks_landed_test.exs:115. That
+# test is a `use BarkparkWeb.ConnCase` HTTP contract test: it reaches the changed
+# context over the ROUTER and names no module the closure or the by-name test
+# grep could see.
+#
+# Both arms below are needed. The positive one alone is satisfied by a rule that
+# selects the whole controllers/ tree; the negative one alone is satisfied by a
+# rule that selects nothing.
+
+# ── the real specimen, on the real tree ────────────────────────────────────
+specimen_lib="api/lib/barkpark/tasks/landed.ex"
+specimen_test="test/barkpark_web/controllers/tasks_landed_test.exs"
+if [ ! -f "$ROOT/${specimen_lib}" ] || [ ! -f "$ROOT/api/${specimen_test}" ]; then
+  bad "the #17153 specimen is still in the tree" "$specimen_lib / $specimen_test — the arm below cannot run"
+else
+  # The PRECONDITION, asserted rather than assumed: if the contract test ever
+  # starts naming the module, the by-name net reaches it and this arm stops
+  # measuring RULE 3 while still passing. Red on that instead.
+  if grep -qF 'Tasks.Landed' "$ROOT/api/${specimen_test}" 2>/dev/null; then
+    bad "the specimen contract test names NO module of the changed context" \
+        "$specimen_test now names Tasks.Landed — the by-name net reaches it, so this arm no longer measures the web-surface hop"
+  else
+    ok "precondition: $specimen_test names no module of the changed context (so only RULE 3 can reach it)"
+    assert_selects "a changed context selects its web surface's ConnCase contract test" "$specimen_lib" "$specimen_test"
+  fi
+fi
+
+# ── the negative control: a FAMILY, not the directory ──────────────────────
+# A rule that answered "every controller test" would satisfy the arm above and
+# buy nothing. Count what the specimen actually drags out of controllers/ and
+# compare it against the directory.
+ctl_total="$(cd "$ROOT/api" && find test/barkpark_web/controllers -name '*_test.exs' | awk 'END{print NR}')"
+sel_out="$(sel "$specimen_lib")"
+if is_all "$sel_out"; then
+  bad "the specimen does not select ALL" "it selected ALL — §2b measured nothing"
+else
+  ctl_sel="$(grep -c '^test/barkpark_web/controllers/' <<<"$sel_out" || true)"
+  if [ "${ctl_total:-0}" -gt 0 ] && [ "${ctl_sel:-0}" -gt 0 ] && [ "$ctl_sel" -lt "$ctl_total" ]; then
+    ok "the specimen selects $ctl_sel of $ctl_total controller tests — a family, not the directory"
+  else
+    bad "the specimen selects a strict subset of controllers/" "got $ctl_sel of $ctl_total"
+  fi
+fi
+
+# ── a synthetic tree, because the real one cannot be mutated ───────────────
+# lib/barkpark/widgets/gizmo.ex  <- the changed context
+# lib/barkpark_web/controllers/gizmo_controller.ex  <- names it (the lib->lib hop)
+# test/barkpark_web/controllers/gizmo_wire_test.exs <- names NEITHER module
+# test/barkpark_web/controllers/unrelated_thing_test.exs <- must stay out
+mkdir -p "$tmp/api4/lib/barkpark/widgets" "$tmp/api4/lib/barkpark_web/controllers" "$tmp/api4/test/barkpark_web/controllers"
+printf 'defmodule Barkpark.Widgets.Gizmo do\n  def record(_), do: :ok\nend\n' >"$tmp/api4/lib/barkpark/widgets/gizmo.ex"
+printf 'defmodule BarkparkWeb.GizmoController do\n  alias Barkpark.Widgets.Gizmo\n  def create(c, _), do: Gizmo.record(c)\nend\n' >"$tmp/api4/lib/barkpark_web/controllers/gizmo_controller.ex"
+printf 'defmodule BarkparkWeb.GizmoWireTest do\n  use BarkparkWeb.ConnCase, async: true\n  test "POST /v1/gizmos", %%{conn: conn} do\n    assert conn\n  end\nend\n' >"$tmp/api4/test/barkpark_web/controllers/gizmo_wire_test.exs"
+printf 'defmodule BarkparkWeb.UnrelatedThingTest do\n  use BarkparkWeb.ConnCase, async: true\nend\n' >"$tmp/api4/test/barkpark_web/controllers/unrelated_thing_test.exs"
+
+# the planted contract test names neither module — assert it, or the fixture is
+# proving the by-name net instead of RULE 3
+if grep -qE 'Barkpark\.Widgets\.Gizmo|GizmoController' "$tmp/api4/test/barkpark_web/controllers/gizmo_wire_test.exs"; then
+  bad "the planted contract test names no module" "the fixture would be caught by the by-name net — it proves nothing about RULE 3"
+else
+  ok "the planted contract test names neither the context nor its controller"
+fi
+
+synth_out="$(printf 'api/lib/barkpark/widgets/gizmo.ex\n' | BP_IMPACTED_XREF_DIR="$tmp/api4" bash "$SEL" --select 2>/dev/null)"
+if is_all "$synth_out"; then
+  bad "the planted ConnCase contract test is selected" "the synthetic tree selected ALL"
+elif grep -qxF 'test/barkpark_web/controllers/gizmo_wire_test.exs' <<<"$synth_out"; then
+  ok "a planted ConnCase contract test for a lib module IS selected (the lib->lib hop, then the name family)"
+else
+  bad "the planted ConnCase contract test is selected" "not in the $(printf '%s\n' "$synth_out" | awk 'END{print NR}')-file selection"
+fi
+if grep -qxF 'test/barkpark_web/controllers/unrelated_thing_test.exs' <<<"$synth_out"; then
+  bad "an unrelated controller test in the SAME directory stays out" "unrelated_thing_test.exs was dragged in — the rule is a directory scan, not a family"
+else
+  ok "an unrelated controller test in the same directory stays out"
+fi
+
+# a lib module NO web surface names must add no web tests at all
+printf 'defmodule Barkpark.Widgets.Hermit do\nend\n' >"$tmp/api4/lib/barkpark/widgets/hermit.ex"
+herm_out="$(printf 'api/lib/barkpark/widgets/hermit.ex\n' | BP_IMPACTED_XREF_DIR="$tmp/api4" bash "$SEL" --select 2>/dev/null)"
+if is_all "$herm_out"; then
+  bad "a lib module no web surface names drags in no controller test" "it selected ALL"
+elif grep -q '^test/barkpark_web/controllers/' <<<"$herm_out"; then
+  bad "a lib module no web surface names drags in no controller test" "it selected $(grep -c '^test/barkpark_web/controllers/' <<<"$herm_out")"
+else
+  ok "a lib module NO web surface names drags in no controller test (the hop is a hop, not a default)"
+fi
+
+echo
 echo "=== §3  THE ALWAYS SET"
 
 always="$(bash "$SEL" --print-always 2>/dev/null)"
