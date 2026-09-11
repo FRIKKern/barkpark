@@ -380,7 +380,11 @@ defmodule Barkpark.Plugins.Bulldocs do
             "body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables " <>
             "in the terminal reader. " <>
             "Reader spacing law: empty paragraph blocks are editor scaffolds, not published " <>
-            "layout — remove them from ingest payloads; shared reader tokens own section rhythm.",
+            "layout — remove them from ingest payloads; shared reader tokens own section rhythm. " <>
+            "No if-rev on this verb: it is an unfenced create-or-replace, and a body carrying " <>
+            "ifRev/if_rev is refused 400. The fenced path is " <>
+            "POST /v1/plugins/bulldocs/papers/:slug/ops (bp bulldocs patch --if-rev), " <>
+            "which rejects a stale rev with 412 precondition_failed.",
         http: %{method: "POST", path_template: "/v1/plugins/bulldocs/papers"},
         auth_tier: "ingest",
         args: [
