@@ -7689,6 +7689,14 @@ defmodule PDS.Census do
         %{
           local
           | why: hop_refusal(emitting, mute),
+            # THE POLARITY FOLLOWS THE RECEIPT, NOT THE CLAUSE (pds-bl-w41-error-branch-verdicts).
+            # This clause emits nothing; whatever status literals its own body carries belong
+            # to a path the class was NOT read off, so claiming an outcome from them would be
+            # the same misattribution this block exists to end.
+            outcome: :no_emission,
+            outcome_why:
+              "no response call in this clause and the hop decided nothing — the receipt is " <>
+                "assembled elsewhere and this pass names no outcome for it",
             hop: %{
               decided: nil,
               target: nil,
@@ -7716,6 +7724,12 @@ defmodule PDS.Census do
           | class: best.class,
             producer: best.producer,
             why: "ONE HOP into #{label} — #{best.why} (this clause's own body has no response call)",
+            # AND WHEN THE HOP DECIDES, THE OUTCOME COMES FROM THE CLAUSE THAT EMITS. `best`
+            # is the hop target read where it stands, so its polarity describes the response
+            # this row's class was actually derived from — the local body's markers describe
+            # a different path and are dropped here on purpose.
+            outcome: best.outcome,
+            outcome_why: "ONE HOP into #{label} — #{best.outcome_why}",
             hop: %{
               decided: best.class,
               target: label,
@@ -8268,13 +8282,16 @@ defmodule PDS.Census do
         kinds = graded |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
         why = graded |> Enum.map(&elem(&1, 1)) |> Enum.uniq() |> Enum.join("; ")
 
+        # `error_branch` MEANS EVERY RESPONSE THIS CLAUSE CAN BUILD IS A FAILURE, and the
+        # bar is that high on purpose. A clause holding a 404 arm beside an unmarked
+        # success arm is `mixed`: its CLASS was derived over the union of both arms
+        # (`emits` falls back to the whole body when no `{:ok, _}` scope exists), so
+        # calling the whole clause an error branch would trade one over-claim for
+        # another. Only an unanimous set earns the flat verdict.
         cond do
-          kinds == [:error_branch] -> {:error_branch, why}
-          kinds == [:success_receipt] -> {:success_receipt, why}
-          kinds == [:unmarked] -> {:unmarked, why}
-          :error_branch in kinds and :success_receipt in kinds -> {:mixed, why}
+          length(kinds) == 1 -> {hd(kinds), why}
           :mixed in kinds -> {:mixed, why}
-          :error_branch in kinds -> {:error_branch, why}
+          :error_branch in kinds -> {:mixed, why}
           :success_receipt in kinds -> {:success_receipt, why}
           true -> {:unmarked, why}
         end
@@ -11345,6 +11362,49 @@ defmodule PDS.Census do
       exit: 0,
       expect: ["PASS  DERIVATION-CLASS-WITNESS", "store_derived — all 6", "A RELATION, NEVER A COUNT"],
       proves: "the six fixture receipts move request_echo -> store_derived under an honest repair and the witness arm stays green — it asserts a relation between the class and its producer, not a class count, so a repaired controller cannot red it"
+    },
+    # SUCCESS RECEIPT vs ERROR BRANCH, ARMED FROM BOTH SIDES
+    # (pds-bl-w41-error-branch-verdicts).
+    #
+    # Its corpus is the REPO and it has to be: the synthetic fixture carries no controller
+    # whose clauses answer different outcomes, so over the fixture this block prints its
+    # measured zero and the derivation is never exercised.
+    #
+    # THE CONTROL NAMES THE ROW THE FINDING WAS FILED ON. `SessionController.account`
+    # prints `request_echo` — a true sentence about the clause that re-renders the sign-in
+    # form after a failed credential check. The control asserts that the page now says so.
+    #
+    # AND THE MUTANT IS THE EXACT WRONG METHOD THE CRITERION FORBIDS: it replaces the
+    # derivation with a verdict read off the clause's POSITION in the def, which is the
+    # cheapest head-shaped heuristic available and the one a reader would most plausibly
+    # reach for. Under it every row reads success_receipt, all ten error-branch rows
+    # vanish, and the page prints its measured zero — so a green here is a statement that
+    # the ten verdicts came out of the RESPONSES those clauses build.
+    %{
+      name: "OUTCOME-NAMES-THE-ERROR-BRANCH",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "SUCCESS RECEIPT vs ERROR BRANCH",
+        "row(s) whose printed class was earned on an ERROR branch",
+        "BarkparkWeb.SessionController.account  ·  prints request_echo"
+      ],
+      refute: ["NO row on this corpus prints a class earned on an error branch"],
+      proves: "the census now distinguishes a verdict about a SUCCESS receipt from a verdict about an ERROR branch, and names /login/account — whose printed request_echo is earned by the clause that re-renders the form after a failed credential check — as one of the rows decided on a failure path"
+    },
+    %{
+      name: "OUTCOME-DERIVED-BY-RUN-ARMED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"outcome = clause_" <> "outcome(body, scopes)",
+         "outcome = if(d.line > 0, do: {:success_receipt, \"read off the clause's position\"}, else: clause_outcome(body, scopes))"},
+      exit: 0,
+      expect: ["NO row on this corpus prints a class earned on an error branch"],
+      refute: ["BarkparkWeb.SessionController.account  ·  prints request_echo"],
+      proves: "replacing the per-clause derivation with a verdict read off the clause's POSITION in the def erases all ten error-branch rows and prints the measured zero instead — so the shipped verdicts are derived from the response each clause builds, not from a head heuristic that would have printed the same page shape"
     },
     # THE PRECEDENCE RULE IS PRINTED, NOT IMPLIED (pds-bl-w41-clause-precedence-mask).
     # Its corpus is the REPO and it has to be: the synthetic tree carries no action whose
