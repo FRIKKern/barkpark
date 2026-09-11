@@ -703,6 +703,75 @@ defmodule BarkparkCloud.FailureCopy do
 
   def humanize(other), do: other
 
+  # ── THE AGENCY SEAM (dr-w15-bl-failure-copy-has-no-agency) ──────────────────
+  #
+  # ONE TOKEN CROSSES: the deploy ledger's CLASS. Everything else in this module
+  # reads the raw `failure_reason` string with its own substring clauses, and
+  # that is exactly the hazard this seam refuses to repeat — two independent
+  # taxonomies over one string, drifting separately. `DeployLedger`'s `@agency`
+  # map already answers WHO a class accuses, off its CLOSED class enum; a second
+  # regex here would be a second opinion with no way to notice it had diverged.
+  # `DeployLedger.agency/1` is the ONLY source of fault below — this function
+  # does not look at `failure_reason` at all, and must not start.
+  #
+  # Direction of the dependency is deliberate: the customer copy layer READS the
+  # operator taxonomy. The reverse (a ledger that mints prose) would put customer
+  # sentences inside the module that counts numerators.
+  #
+  # NO CATCH-ALL CLAUSE on `fault_sentence/1`. An agency value this module has no
+  # sentence for must RAISE, not fall into a soothing default: the exhaustiveness
+  # test walks the ledger's whole class enum, so a fourth agency added upstream
+  # reds here instead of silently rendering the `:ambiguous` line for it.
+  #
+  # An unknown class is `:ambiguous` (that is `agency/1`'s own contract), which
+  # is the safe direction for copy for the same reason it is for a numerator: a
+  # class nobody mapped must not read as an accusation of the customer.
+
+  @doc """
+  What to tell the CUSTOMER about fault for a deploy failure CLASS.
+
+  Takes a `DeployLedger` class token — the operator taxonomy's own string, e.g.
+  `"BUILD_FAILED"` — and answers the one sentence that names WHO. The fault is
+  derived from `DeployLedger.agency/1` and from nothing else, so a class whose
+  agency changes in the ledger changes what this says on the same commit.
+
+  A class the ledger does not know (and `nil`) is `:ambiguous`: honest about not
+  knowing, never an accusation.
+
+  This is the ONLY function in this module that takes a class rather than a raw
+  reason string. `humanize/1` remains `String.t() -> String.t()` and is
+  unchanged: the two answer different questions (WHAT happened vs WHOSE it was)
+  and a caller that wants both renders both.
+  """
+  @spec fault_line(String.t() | nil) :: String.t()
+  # NOT A PIPE, deliberately: the reachability census reads the AST, and a piped
+  # `|> DeployLedger.agency()` parses as `agency/0` — the call site would be
+  # counted at the wrong arity and `agency/1` would keep reading :internal_only
+  # while this file calls it. (Measured: it did, on the first run of this slice.)
+  def fault_line(class) do
+    fault_sentence(BarkparkCloud.DeployLedger.agency(class))
+  end
+
+  # `:box` — our hosting side. Says so plainly, and says the person has nothing
+  # to fix, because the most expensive wrong move here is a customer rewriting a
+  # build that was never the problem.
+  defp fault_sentence(:box),
+    do:
+      "This one is on our side — the hosting platform, not your site. Nothing to change in your project; deploying again is the right next step."
+
+  # `:site` — the site's own build or payload. Names the project without naming a
+  # specific mistake: the class knows the SIDE, not the line.
+  defp fault_sentence(:site),
+    do:
+      "This one came from your project — the build or the files it sent, not the hosting platform. Deploying again without a change will hit the same thing."
+
+  # `:ambiguous` — the honest third bucket. It exists so neither side is accused
+  # on a guess (charter D148); the copy has to be equally honest or the bucket is
+  # laundered back into one of the other two at the surface.
+  defp fault_sentence(:ambiguous),
+    do:
+      "We can't tell yet which side this started on. Deploying again is worth one try; if it repeats, send us the deploy and we'll look."
+
   # Every DNS-step error shape the tree can emit, VERB-ANCHORED. The producers
   # are READ-ONLY (`internal/**`) and are exactly two `fmt.Errorf` prefixes:
   #
