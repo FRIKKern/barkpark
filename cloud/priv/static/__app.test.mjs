@@ -226,6 +226,113 @@ test("cch-w36-s1: the /new launch 403 toast BRANCHES ON THE SLUG, never on the s
   assert.equal(odd.billingAction, false);
 });
 
+// ── cch-w48-bl · THE scope:"token" REFUSAL, THROUGH EVERY EMITTER THAT READS
+//    `required` ────────────────────────────────────────────────────────────
+//
+// THE EMITTER SET IS DERIVED, NOT QUOTED. `grep -n '\.required' app.js` on the
+// base commit returns exactly TWO reader sites: the one inside
+// forbiddenEvidenceCopy (friendly()'s 403-evidence fence) and the one inside
+// newLaunchRefusalToast. There is no third; `["required"]` returns none. Both
+// are driven below, with BOTH payload shapes, so "every emitter" is a set this
+// file measured rather than a count the filing asserted.
+//
+// WHAT THE SERVER ACTUALLY SENDS (measured in cloud/lib/barkpark_cloud/web/
+// auth.ex): require_ability/2 answers `{error:"forbidden", required:<ability>,
+// scope:"token"}` — the ONLY emit site of scope:"token" in the tree — and
+// POST /v1/launch reaches it, because go_live/1's PAT branch is
+// `Auth.require_ability(conn, "deploy")`. `deploy` there is a PAT ABILITY, not
+// a team role: the ability list is fixed by POST /v1/tokens at mint and no
+// route in router.ex updates it, so "an admin on this team can grant it" and
+// "Ask a team deploy" are both remedies that cannot be carried out by anyone.
+//
+// THE FILING WAS HALF WRONG ABOUT WHICH EMITTER LIED. It said friendly() "gets
+// it right" on the identical payload. It did not: on the base commit
+// friendly({error:"forbidden", scope:"token", required:"deploy"}) returned
+// 'You need the "deploy" permission on this team — an admin on this team can
+// grant it.' — the SAME fabricated remedy in a quieter register. Both emitters
+// lied; only the sentences differed.
+const TOKEN_403 = { error: "forbidden", scope: "token", required: "deploy" };
+const TEAM_403 = { error: "forbidden", scope: "team", required: "admin" };
+
+test("cch-w48-bl: a scope:token refusal never renders a team role — friendly()", () => {
+  const body = hooks.friendly(TOKEN_403, "We couldn't launch for this team.");
+
+  assert.match(body, /"deploy" ability/,
+    "the refusal names the ability the server asked for, not a humanized guess");
+  assert.doesNotMatch(body, /an admin on this team can grant it/,
+    "no admin can grant a PAT ability — a token's abilities are fixed at mint");
+  assert.doesNotMatch(body, /role on this team/,
+    "an ability does not live on a team; saying it does is half the defect");
+  assert.doesNotMatch(body, /"deploy" permission on this team/,
+    "the exact sentence the base commit shipped for this payload");
+  assert.match(body, /No team role grants it/,
+    "the sentence DELETES the team-role remedy rather than leaving it unsaid");
+  assert.notEqual(body, "We couldn't launch for this team.",
+    "it is evidence copy, not the caller's fallback — the arm must actually fire");
+});
+
+test("cch-w48-bl: a scope:token refusal never renders a team role — newLaunchRefusalToast()", () => {
+  const refusal = hooks.newLaunchRefusalToast(TOKEN_403);
+
+  assert.doesNotMatch(refusal.body, /Ask a team deploy/,
+    "there is no team 'deploy' to ask — this was the shipped sentence on the launch path");
+  assert.doesNotMatch(refusal.body, /deploy role on this team/,
+    "a PAT ability rendered as a team role is the whole defect");
+  assert.doesNotMatch(refusal.body, /an admin on this team can grant it/,
+    "the quieter half of the same lie must not arrive through the delegation either");
+  assert.match(refusal.body, /"deploy" ability/);
+  assert.equal(refusal.billingAction, false);
+
+  // ONE TRUTH, not two sentences to keep in step. The token arm delegates to
+  // friendly() — it does not carry its own copy of the ability vocabulary — so
+  // the two emitters are byte-identical on the same bytes. This is the
+  // assertion that reds if someone "fixes" the toast by writing a second
+  // sentence beside the first.
+  assert.equal(refusal.body, hooks.friendly(TOKEN_403, "We couldn't launch for this team."),
+    "the toast's token arm IS friendly()'s sentence, never a second copy of it");
+});
+
+test("cch-w48-bl: the team and platform arms are byte-for-byte unchanged", () => {
+  // These four strings are the SHIPPED sentences on the base commit, retyped
+  // here on purpose: this arm's whole job is to red if the scope branch leaks
+  // into a payload it was never meant to touch.
+  assert.equal(hooks.friendly(TEAM_403, "FB"),
+    "You need the admin role on this team — an admin on this team can grant it.");
+  assert.equal(hooks.friendly({ error: "forbidden", scope: "team", required: "owner" }, "FB"),
+    "You need the owner role on this team — only the team owner can grant it.");
+  assert.equal(
+    hooks.friendly({ error: "forbidden", scope: "platform", required: "platform_operator" }, "FB"),
+    "That's limited to platform operators — no team role grants it.");
+  // primary_team is the pre-cch-w37-s3 spelling; a payload still carrying it
+  // must take the same path it always did.
+  assert.equal(hooks.friendly({ error: "forbidden", scope: "primary_team", required: "admin" }, "FB"),
+    "You need the admin role on this team — an admin on this team can grant it.");
+
+  assert.equal(hooks.newLaunchRefusalToast(TEAM_403).body, hooks.launchRoleClause("admin"),
+    "the team arm still renders the ONE clause, not the delegation");
+  assert.equal(hooks.newLaunchRefusalToast({ error: "forbidden", required: "admin" }).body,
+    hooks.launchRoleClause("admin"),
+    "a payload with no scope at all is a TEAM refusal by every existing pin — unchanged");
+  // The bare arm's D537 delegation is untouched.
+  assert.equal(hooks.newLaunchRefusalToast({ error: "forbidden" }).body,
+    hooks.friendly({ error: "forbidden" }, "We couldn't launch for this team."));
+});
+
+test("cch-w48-bl: scope:token with an unlabellable `required` renders no sentence at all", () => {
+  // The token arm reuses the same label fence as the role tail: an unbounded
+  // echo of a server string into copy is how a message becomes markup. No
+  // sentence is better than a fabricated one.
+  const body = hooks.friendly(
+    { error: "forbidden", scope: "token", required: "<img src=x onerror=1>" },
+    "FALLBACK");
+  // forbiddenEvidenceCopy returns null, so friendly() falls to its curated
+  // `forbidden` entry — the D447 generic that claims no role and invents no
+  // remedy. NOT the caller's fallback: the curated rung precedes it.
+  assert.equal(body,
+    "You don't have permission to do that, and the refusal didn't say which role would allow it.");
+  assert.doesNotMatch(body, /onerror/, "an unlabellable `required` never reaches copy");
+});
+
 // ── cch-w10-oauth-exchange-code · THE OAUTH LANDING GATE ───────────────────
 // This path had ZERO coverage before this group: `handleOAuthReturn` was not in
 // __bpTestHook, and "oauth" appeared in this file exactly twice, both inside one
@@ -24729,7 +24836,17 @@ test("cch-w35-s4: the no-team arm is MAPPED, never echoed as its slug", () => {
 });
 
 test("cch-w35-s4: an unwritten `required` renders as a bounded label, and junk falls through", () => {
+  // cch-w48-bl AMENDS THIS LINE, and the amendment IS the defect this row
+  // names. It used to expect 'You need the "deploy" permission on this team —
+  // an admin on this team can grant it.' for a scope:"token" payload: a PAT
+  // ability rendered as a team-grantable permission. The label fence is what
+  // this test is actually about and it is unchanged — the bounded-label
+  // property now holds on the token arm instead of the role tail.
   assert.equal(hooks.friendly({ error: "forbidden", required: "deploy", scope: "token" }),
+    'That access token doesn\'t carry the "deploy" ability. No team role grants it — ' +
+    "a token's abilities are fixed when it is created.");
+  // The SAME unwritten label with a TEAM scope keeps the role tail verbatim.
+  assert.equal(hooks.friendly({ error: "forbidden", required: "deploy", scope: "team" }),
     'You need the "deploy" permission on this team — an admin on this team can grant it.');
   // Not a label → no interpolation, no markup, back to the curated entry.
   for (const junk of ["<img src=x onerror=alert(1)>", "Admin", "", "  ", "a".repeat(64), 7, null, {}]) {
@@ -27311,7 +27428,10 @@ test("cch-w67: siteDeleteFailureCopy — SEVEN typed arms, every one a DISTINCT 
   // cch-w67 review wired the shipped reader for those two fields in.
   const other = hooks.siteDeleteFailureCopy(403, { error: "forbidden", scope: "token", required: "write" });
   assert.match(other.body, /still registered/);
-  assert.match(other.body, /"write" permission/);
+  // cch-w48-bl: scope:"token" now renders the ABILITY sentence here too — this
+  // reader delegates to friendly(), so it inherited the fix without an edit.
+  assert.match(other.body, /"write" ability/);
+  assert.doesNotMatch(other.body, /an admin on this team can grant it/);
   assert.doesNotMatch(other.body, /didn't say why/);
   assert.equal(other.recovery, "close", "no second click grants an authority you don't hold");
   // A BARE forbidden carries no evidence, so it keeps the generic relay — the
