@@ -152,12 +152,30 @@ HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
 # up AND the database answers. `curl -s <box>/status.json | jq -r .commit` is
 # already the documented box smoke (CLAUDE.md).
 #
-# CONSUMERS STILL ON THE SUNSET ROUTE as of 2026-09-11 (out of this script's
-# fence, each fails closed on 2027-01-01 unless repointed): the docker-compose
-# healthcheck, `cloud/support.go`, `scripts/deploy-rebuild.sh` (BP_HEALTH_URL
-# default), `scripts/create-quickstart-smoke.sh`, `scripts/compose-smoke.sh`,
-# `scripts/pds-scratch-target.sh`, and the Uptime Kuma monitor documented in
-# `deploy/uptime-kuma/README.md`. Repoint them too; this script honours $BARKPARK_HEALTH_PATH.
+# CONSUMERS OF THE SUNSET ROUTE, re-derived from origin/main on 2026-09-11 by
+# `git grep -n 'api/schemas' -- . ':!api/'`. The list this block used to carry
+# was the set PR #17745 CHECKED, not the set that exists: `cloud/support.go`
+# does not exist (the Go consumer is `internal/cli/cloud/support.go`), the
+# compose healthcheck is in the ROOT `docker-compose.yml` (not `cloud/`), and
+# seven further code consumers were never listed at all.
+#
+# RETARGETED to /status.json in PR "every remaining health consumer leaves the
+# sunset /api/schemas route" (task-539f1deeec25a8e7):
+#   docker-compose.yml (api healthcheck)      scripts/deploy-rebuild.sh (BP_HEALTH_URL)
+#   scripts/compose-smoke.sh (green arm)      scripts/create-quickstart-smoke.sh (boot poll)
+#   scripts/pds-scratch-target.sh (probe)     internal/cli/cloud/support.go (SupportLocalHealthProbe)
+#   deploy/uptime-kuma/README.md (monitor)    deploy/README.md (prose)
+#
+# STILL ON THE SUNSET ROUTE — out of that PR's fence, each still fails closed on
+# 2027-01-01 unless repointed (file:line on origin/main 2b1fcaef7):
+#   deploy.sh:356,419,427,434                 run.sh:18
+#   Makefile:299,305,307                      bin/barkpark:175,244,270,275,372,404,426
+#   deploy/site-deploy.sh:8 (comment only)    scripts/setup-windows.ps1:184,199,211
+#   internal/cli/setup/assets/deploy.sh       internal/provisioner/support.go:1076
+#   internal/cli/cloud/restore_driver.go:108,431   internal/cli/cloud_support_cmd.go:1685
+#   internal/cli/hetzner_instance_cmd.go:706-1858  internal/cli/hetzner_instance_transfer_cmd.go:145
+#   internal/cli/cloud_deploy_cmd.go:880           internal/cli/setup/local.go:461 (fallback, /v1/capabilities first)
+# This script honours \$BARKPARK_HEALTH_PATH and needs no change either way.
 HEALTH_PATH="${BARKPARK_HEALTH_PATH:-/status.json}"
 BLUE_PORT="${BARKPARK_PORT_BLUE:-4000}"
 GREEN_PORT="${BARKPARK_PORT_GREEN:-4001}"
