@@ -955,8 +955,13 @@ if [ "$MODE" = selftest ]; then
   # teardown's typed failure (task-d1fc3ff3a8892663) — the slot letter alone did
   # not name the resource that collides with the next deploy. Both sit outside
   # both optional blocks, so BOTH floors move by the same 2.
-  SELFTEST_FLOOR_MIN=436
-  SELFTEST_FLOOR_FULL=453
+  # 2026-09-11 (same row, review): +2 more (436->438, 453->455) — the fixture
+  # separation of the env-file port from the handed pair, and the CONTROL that
+  # the handed pair is NOT what the message names. The first two checks above
+  # were VACUOUS until these landed: the fixture handed the teardown the same
+  # ports the env files carried, so held_port's env read was unmeasured.
+  SELFTEST_FLOOR_MIN=438
+  SELFTEST_FLOOR_FULL=455
   TESTS=0; FAILS=0
   check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
 
@@ -2289,8 +2294,24 @@ NOSTOP
     [ -n "$WARM_UP_PRE3" ]
   check "no-stop-case PRECONDITION: warm's route was ARMED before the teardown" \
     grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
+  # THE FIXTURE MUST SEPARATE THE TWO PORTS, or the assertion below is VACUOUS.
+  # held_port reads the slot's EnvironmentFile and falls back to slot_port (i.e.
+  # $SITE_PORT_A/B, THIS invocation's inputs). Hand the teardown the pair warm was
+  # deployed on and the two are the same number, so the check passes even when
+  # held_port never opens the env file — proven: gutting held_port to `slot_port
+  # "$1"` left the whole suite green. So this teardown is handed a DIFFERENT pair
+  # (exactly the real case the function exists for: a --teardown invoked without
+  # SITE_PORT_A/B, or with a re-derived pair, while the units still hold the ports
+  # they were STARTED with). The env file is the truth; the handed pair is the lie.
+  nsp_env_a="$(awk -F= '$1=="PORT"{print $2; exit}' "$SENV/warm__a.env")"
+  nsp_env_b="$(awk -F= '$1=="PORT"{print $2; exit}' "$SENV/warm__b.env")"
+  nsp_wrong_a=18301; nsp_wrong_b=18302   # a pair warm was NEVER deployed on
+  check "no-stop-case FIXTURE: the slot env files really carry warm's DEPLOYED ports, and the pair this teardown is handed really DIFFERS from them (without that, the held-port check below passes on the fallback)" \
+    sh -c "[ '$nsp_env_a' = '$T_PORT_C' ] && [ '$nsp_env_b' = '$T_PORT_D' ] \
+        && [ '$nsp_env_a' != '$nsp_wrong_a' ] && [ '$nsp_env_a' != '$nsp_wrong_b' ] \
+        && [ '$nsp_env_b' != '$nsp_wrong_a' ] && [ '$nsp_env_b' != '$nsp_wrong_b' ]"
   env PATH="$STOPBIN:$FAKEBIN:$PATH" \
-    SITE_SLUG=warm SITE_PORT_A="$T_PORT_C" SITE_PORT_B="$T_PORT_D" \
+    SITE_SLUG=warm SITE_PORT_A="$nsp_wrong_a" SITE_PORT_B="$nsp_wrong_b" \
     BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
     BARKPARK_CADDYFILE="$CF" BARKPARK_SITE_DEPLOY_LOCK="$TD/warm.lock" \
     BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" BARKPARK_SITE_LOG_FILE="$TD/td-nostop.log" \
@@ -2312,11 +2333,16 @@ NOSTOP
   nostop_ports_named=1
   for nsp_slot in a b; do
     case "$WARM_UP_PRE3" in *"$nsp_slot"*) ;; *) continue ;; esac
-    nsp_port="$T_PORT_C"; [ "$nsp_slot" = b ] && nsp_port="$T_PORT_D"
+    nsp_port="$nsp_env_a"; [ "$nsp_slot" = b ] && nsp_port="$nsp_env_b"
     grep -q "port $nsp_port still held" "$TD/td-nostop.out" || nostop_ports_named=0
   done
-  check "node no-stop teardown names the still-HELD PORT of every slot that would not stop" \
+  check "node no-stop teardown names the still-HELD PORT (the one in the slot's EnvironmentFile) of every slot that would not stop" \
     [ "$nostop_ports_named" = 1 ]
+  # THE CONTROL for the check above: the port it names must be the one the UNIT
+  # HOLDS, never the pair this invocation happened to be handed. Without this arm
+  # a held_port that never reads the env file still reads green.
+  check "node no-stop teardown does NOT name the port pair this invocation was handed (the stranded listener holds the port it was STARTED with, not the caller's guess)" \
+    sh -c "! grep -q 'port $nsp_wrong_a still held' '$TD/td-nostop.out' && ! grep -q 'port $nsp_wrong_b still held' '$TD/td-nostop.out'"
   check "node no-stop teardown says the held port collides with the next deploy" \
     grep -q 'collides on them' "$TD/td-nostop.out"
   check "node no-stop teardown RESTORED the route (no dead route over a live slot)" \
