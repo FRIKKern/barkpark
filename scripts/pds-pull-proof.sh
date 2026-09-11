@@ -1231,9 +1231,28 @@ GRAIN_VERDICT
 # ═════════════════════════════════════════════════════════════════════════════
 
 # Bare-slug E3 tables, from api/lib/barkpark/tenancy/workspace_bundle/catalog.ex
-# (@e3_dataset_keyed). Derived from the source at run time when it is readable;
-# this fallback is only used to NAME the exclusion, never to assert a count.
+# (@e3_dataset_keyed). This literal is only ever used to NAME the pre-declared
+# PDS-D45 exclusion, never to assert a count. It is NOT silently authoritative:
+# e3_bare_slug_derive below reads @e3_dataset_keyed out of the catalog source at
+# run time, and step 2 FAILS LOUDLY if the two disagree. The literal is used
+# unchecked only when the source is unreadable, and the run says so when it is.
 E3_BARE_SLUG_FALLBACK="preview_token_jti shares"
+E3_BARE_SLUG_SOURCE_REL="api/lib/barkpark/tenancy/workspace_bundle/catalog.ex"
+
+# The derivation the comment above promises. Prints the space-separated table
+# list from the catalog's `@e3_dataset_keyed ~w(...)` attribute, or nothing (and
+# a non-zero exit) when the source is unreadable or the attribute does not parse
+# — an unparseable source must read as "not derived", never as "derived empty",
+# because an empty derivation would otherwise mismatch the literal and red a
+# healthy run for a reason that has nothing to do with the catalog's contents.
+e3_bare_slug_derive() {
+  local src="$REPO_ROOT/$E3_BARE_SLUG_SOURCE_REL" out
+  [ -r "$src" ] || return 1
+  out="$(sed -n 's/^[[:space:]]*@e3_dataset_keyed[[:space:]]*~w(\([^)]*\)).*/\1/p' "$src" \
+          | head -n 1 | tr -s '[:space:]' ' ' | sed 's/^ *//; s/ *$//')"
+  [ -n "$out" ] || return 1
+  printf '%s' "$out"
+}
 
 src_total() { # type perspective -> integer (or empty)
   local t="$1" p="$2"
@@ -1414,8 +1433,18 @@ step_2() {
   say "  nothing. tables/shares.copy is 0 BYTES in the full bundle for exactly this"
   say "  reason. Discovering it mid-run looks like data loss; it is a known,"
   say "  bounded ownership artifact."
-  local bare_slug shares_rows owners
+  local bare_slug shares_rows owners e3_derived
   bare_slug="$E3_BARE_SLUG_FALLBACK"
+  e3_derived="$(e3_bare_slug_derive || true)"
+  if [ -z "$e3_derived" ]; then
+    info "bare-slug E3 list NOT derived this run ($E3_BARE_SLUG_SOURCE_REL unreadable, or its @e3_dataset_keyed did not parse) — the exclusion below is named from the in-script literal, UNCHECKED against the catalog"
+  elif [ "$e3_derived" != "$E3_BARE_SLUG_FALLBACK" ]; then
+    fail 2 "THE BARE-SLUG E3 TABLE LIST HAS MOVED: $E3_BARE_SLUG_SOURCE_REL declares @e3_dataset_keyed = '$e3_derived', this harness names '$E3_BARE_SLUG_FALLBACK'. The PDS-D45 pre-declared shortfall would name the WRONG tables, so step 2's honest shortfall declaration would be quietly wrong rather than loudly wrong. FIX: set E3_BARE_SLUG_FALLBACK to '$e3_derived' and re-read the exclusion prose above it."
+    return 0
+  else
+    bare_slug="$e3_derived"
+    info "bare-slug E3 list DERIVED this run from $E3_BARE_SLUG_SOURCE_REL (@e3_dataset_keyed = '$e3_derived') and it MATCHES the in-script literal"
+  fi
   if ssh_available; then
     shares_rows="$(src_psql "SELECT count(*) FROM shares WHERE dataset='$SOURCE_DS'" | tr -d '[:space:]' || true)"
     owners="$(src_psql "SELECT count(DISTINCT p.workspace_id) FROM datasets d JOIN projects p ON p.id=d.project_id WHERE d.slug='$SOURCE_DS'" | tr -d '[:space:]' || true)"
@@ -2040,7 +2069,7 @@ print(c.index("id")+1, c.index("doc_id")+1, c.index("type")+1, len(c))' "$bdir/m
     return 0
   fi
 
-  local fdir f_cols f_i_docid f_i_type f_rows
+  local fdir f_cols f_i_docid f_i_type f_n_cols f_docs_copy f_docs_rows f_first_fields f_rows
   fdir="$(mktemp -d "${TMPDIR:-/tmp}/pds-full.XXXXXX")"
   TMP_DIRS="$TMP_DIRS $fdir"
   if ! tar -xf "$FULL_TAR" -C "$fdir" manifest.json tables/documents.copy 2>/dev/null; then
@@ -2053,19 +2082,52 @@ d=json.load(open(sys.argv[1]))
 t=[x for x in d["tables"] if x["name"]=="documents"]
 if not t: sys.exit(1)
 c=t[0]["columns"]
-print(c.index("doc_id")+1, c.index("type")+1)' "$fdir/manifest.json" 2>/dev/null || true)"
+print(c.index("doc_id")+1, c.index("type")+1, len(c))' "$fdir/manifest.json" 2>/dev/null || true)"
   if [ -z "$f_cols" ]; then
     fail 3 "the full bundle's manifest does not describe a documents member — the control cannot be run"
     return 0
   fi
   f_i_docid="$(printf '%s' "$f_cols" | awk '{print $1}')"
   f_i_type="$(printf '%s' "$f_cols" | awk '{print $2}')"
+  f_n_cols="$(printf '%s' "$f_cols" | awk '{print $3}')"
+
+  # (d0) THE CONTROL'S PARSE IS AN ASSERTION TOO — the mirror of (b0) above.
+  # The dev leg refuses to trust its tab-split until the member is shown to BE
+  # COPY TEXT; the control leg used to parse blind. Its polarity ("> 0") means a
+  # broken grammar collapses NF, matches nothing, and surfaces as the generic
+  # "THE CONTROL DID NOT FIRE" — which BLAMES THE AMMO for a grammar problem.
+  # So the same three assertions run here, and they fail with a NAMED grammar
+  # message that says the ammo is not the suspect.
+  if ! int_ok "$f_n_cols"; then
+    fail 3 "CONTROL GRAMMAR, NOT AMMO: the FULL bundle manifest's documents column count read as '${f_n_cols:-<empty>}', not an integer — the control's COPY TEXT grammar assertion cannot be evaluated, and an unevaluated grammar check makes the control's own count vacuous."
+    return 0
+  fi
+  f_docs_copy="$fdir/tables/documents.copy"
+  if [ ! -s "$f_docs_copy" ]; then
+    fail 3 "CONTROL GRAMMAR, NOT AMMO: tables/documents.copy is absent or empty in the FULL bundle — a control that counts zero over an empty member has not been shown capable of a non-zero at all, so it says nothing about the ammo and nothing about the dev bundle's zero."
+    return 0
+  fi
+  f_docs_rows="$(first_int "$(grep -c . "$f_docs_copy" 2>/dev/null)")"
+  f_first_fields="$(first_int "$(head -n 1 "$f_docs_copy" | awk -F'\t' '{print NF}')")"
+  if ! int_ok "$f_first_fields"; then
+    fail 3 "CONTROL GRAMMAR, NOT AMMO: the FULL bundle's tables/documents.copy first row yielded no field count — the member could not be read as text at all, so the control's COPY TEXT grammar assertion cannot be evaluated."
+    return 0
+  fi
+  if [ "$f_first_fields" -ne "$f_n_cols" ]; then
+    fail 3 "CONTROL GRAMMAR, NOT AMMO: the FULL bundle's tables/documents.copy is not the COPY TEXT grammar this control parses — its first row splits into $f_first_fields tab-separated fields, its own manifest declares $f_n_cols columns. A tab-split scan of a non-text dump finds nothing for ANY ammo, so the doc_id is not the suspect: the member's grammar is."
+    return 0
+  fi
+  info "control grammar COPY TEXT confirmed in the FULL bundle: $f_docs_rows row(s), first row = $f_first_fields fields = its manifest's $f_n_cols columns"
+
+  # The non-empty predicates on a and b mirror the dev leg's (u != "") guard.
+  # Empty ammo compared against a field an NF-short member does not have matches
+  # EVERY line, which would manufacture a firing control out of garbage.
   f_rows="$(awk -F'\t' -v a="$doc_id" -v b="$pub_id" -v idc="$f_i_docid" -v it="$f_i_type" '
-            $it == "ticket" || $idc == a || $idc == b { n++ } END { print n + 0 }' \
-            "$fdir/tables/documents.copy" 2>/dev/null || echo ERR)"
+            $it == "ticket" || (a != "" && $idc == a) || (b != "" && $idc == b) { n++ }
+            END { print n + 0 }' "$f_docs_copy" 2>/dev/null || echo ERR)"
   info "full bundle     ticket ROWS in tables/documents.copy: $f_rows (the control must be > 0)"
   if ! int_ok "$f_rows" || [ "$f_rows" -eq 0 ]; then
-    fail 3 "THE CONTROL DID NOT FIRE: the FULL bundle carries $f_rows ticket rows too. Either the ammo (doc_id=$doc_id) is wrong or this bundle is not full fidelity — and until the assertion is shown capable of a non-zero, the dev bundle's zero above proves nothing (PDS-D20)."
+    fail 3 "THE CONTROL DID NOT FIRE — AND IT IS NOT A GRAMMAR PROBLEM: the FULL bundle's COPY TEXT grammar was CONFIRMED above ($f_docs_rows rows, first row = $f_first_fields fields = its manifest's $f_n_cols columns), so the parse is sound and this count of $f_rows is a real read. That leaves AMMO or FIDELITY: either the ammo (doc_id=$doc_id) is wrong, or this bundle is not full fidelity — and until the assertion is shown capable of a non-zero, the dev bundle's zero above proves nothing (PDS-D20)."
     return 0
   fi
 
