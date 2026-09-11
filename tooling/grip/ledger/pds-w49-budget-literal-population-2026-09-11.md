@@ -61,9 +61,10 @@ Three rosters were ADDED that the basename filter misses. **Final population: 18
 | 17 | `api/test/search_golden/baseline.json` | golden search scores | `mix search.eval --baseline` (`api/lib/mix/tasks/search.eval.ex:8`) | **no CI step found** — and `--write-baseline` (line 9) rewrites it in one command | **NO** |
 | 18 | `internal/apiclient/testdata/doc_decode_baseline.txt` | tolerant-decode baseline | `internal/apiclient/doc_tolerant_decode_test.go:161` | `.github/workflows/go-tests.yml` | **NO** |
 
-**Tally: 14 of 18 are fully blind to a same-PR move. 3 are partially covered (count-only,
-via the silencer ratchet, on an advisory job). 1 — `scripts/.silencer-counts` — IS the
-partial coverage and has no guard above it.**
+**Tally: 15 of 18 rows are fully blind to a same-PR move (rows 1-5 and 9-18); 3 rows
+(6, 7, 8) are partially covered — count-only, via `scripts/silencer-growth-ratchet.sh`,
+on an advisory job. One of the 15 blind rows, `scripts/.silencer-counts` (row 9), IS that
+partial coverage: the ratchet's own roster has nothing ratcheting it.**
 
 ### Second-order finding: none of these gates is merge-blocking
 
