@@ -5303,11 +5303,18 @@ defmodule BarkparkCloud.Registry do
   """
   @spec autoupdate_in_flight() :: [Barkpark.t()]
   def autoupdate_in_flight do
-    from(b in Barkpark,
-      where: not is_nil(b.autoupdate_triggered_at),
-      order_by: [asc: b.autoupdate_triggered_at]
-    )
+    autoupdate_in_flight_query()
+    |> order_by([b], asc: b.autoupdate_triggered_at)
     |> Repo.all()
+  end
+
+  # The IN-FLIGHT predicate, shared by the list the rollout worker walks and the
+  # `in_flight` counter the operator route reports. One predicate, two consumers:
+  # a counter that re-typed this `where` beside the list would be a SECOND
+  # definition of in-flight-ness, free to drift from the gate it claims to
+  # measure.
+  defp autoupdate_in_flight_query do
+    from(b in Barkpark, where: not is_nil(b.autoupdate_triggered_at))
   end
 
   @doc """
@@ -5347,27 +5354,95 @@ defmodule BarkparkCloud.Registry do
   """
   @spec next_autoupdate_candidate(nil | binary()) :: Barkpark.t() | nil
   def next_autoupdate_candidate(channel \\ nil) do
-    base =
-      from(b in Barkpark,
-        where: not is_nil(b.host) and b.host != "",
-        where: b.suspended == false,
-        where: b.update_state == "behind",
-        where: b.autoupdate_enabled == true,
-        where: b.autoupdate_paused == false,
-        where: is_nil(b.pinned_release),
-        where: is_nil(b.autoupdate_triggered_at),
-        where: is_nil(b.apply_arming) or b.apply_arming != "unarmed",
-        order_by: [asc: b.update_checked_at],
-        limit: 1
-      )
-
-    base
+    autoupdate_candidate_query()
+    |> order_by([b], asc: b.update_checked_at)
+    |> limit(1)
     |> maybe_filter_channel(channel)
     |> Repo.one()
   end
 
+  # The ELIGIBILITY predicate itself, with no order and no limit — the set
+  # `next_autoupdate_candidate/1` takes the head of, and the set the `eligible`
+  # counter counts. The docstring above is the contract for BOTH; the counter
+  # deliberately does not restate it, because a counter that re-typed these eight
+  # `where` clauses would be a second definition of eligibility and would drift
+  # from the rollout it claims to gauge (the operator would then read a number
+  # about a policy that is not the one running).
+  defp autoupdate_candidate_query do
+    from(b in Barkpark,
+      where: not is_nil(b.host) and b.host != "",
+      where: b.suspended == false,
+      where: b.update_state == "behind",
+      where: b.autoupdate_enabled == true,
+      where: b.autoupdate_paused == false,
+      where: is_nil(b.pinned_release),
+      where: is_nil(b.autoupdate_triggered_at),
+      where: is_nil(b.apply_arming) or b.apply_arming != "unarmed"
+    )
+  end
+
   defp maybe_filter_channel(query, nil), do: query
   defp maybe_filter_channel(query, channel), do: where(query, [b], b.channel == ^channel)
+
+  @doc """
+  The fleet ROLLOUT GAUGE: `%{eligible:, behind:, in_flight:}` — the three
+  counters `GET /v1/admin/autoupdate` (and its `/v1/operator/autoupdate` twin)
+  report alongside the `halted` lever, and the three `bp cloud autoupdate status`
+  prints. Until task-0f05a5f719493b5f nothing anywhere computed them: the routes
+  emitted `halted` alone, the Go `RolloutState` nil-guarded the three absent
+  pointers, and the gauge read blank on every control plane that has ever run.
+
+  Each counter is defined ONCE, off the same query the rollout itself runs, and
+  each means a different thing — the spread between them is the whole point:
+
+    * `in_flight` — instances the rollout has TRIGGERED and is waiting to settle
+      (`autoupdate_triggered_at` stamped). Same predicate as
+      `autoupdate_in_flight/0`, which is the serial-of-1 gate: non-zero here is
+      exactly why `eligible` is not advancing.
+    * `eligible` — instances the policy would update RIGHT NOW: the full set
+      `next_autoupdate_candidate/1` takes its head from, unordered and unlimited
+      and across every channel. Note it EXCLUDES in-flight boxes (the candidate
+      predicate requires `autoupdate_triggered_at` to be nil), so `eligible` is
+      the queue still to be started, never the work in progress.
+    * `behind` — instances whose OWN last verdict is `behind`, over the same live
+      managed fleet frame (`host` set, not billing-suspended). This is drift, not
+      policy: a box that is pinned, paused, opted out, measured-unarmed or
+      already in flight still counts here. So `eligible <= behind` always holds
+      by construction, and the GAP is the operator's real question — "the fleet
+      is 9 behind but the rollout would only move 2" is the sentence a blank
+      gauge could never say.
+
+  WHAT `behind` DELIBERATELY DOES NOT COUNT: an instance on `update_state`
+  `"unknown"` — a box the control plane could not read. Unmeasured is not behind,
+  and folding it in would put a reachability failure into a drift number where
+  nobody could tell the two apart. Such a box is invisible to this gauge by
+  design; `unarmed_autoupdate_boxes/0` and the fleet roll-up are where an
+  operator sees non-answering instances.
+  """
+  @spec autoupdate_rollout_counts() :: %{
+          eligible: non_neg_integer(),
+          behind: non_neg_integer(),
+          in_flight: non_neg_integer()
+        }
+  def autoupdate_rollout_counts do
+    %{
+      eligible: Repo.aggregate(autoupdate_candidate_query(), :count),
+      behind: Repo.aggregate(autoupdate_behind_query(), :count),
+      in_flight: Repo.aggregate(autoupdate_in_flight_query(), :count)
+    }
+  end
+
+  # DRIFT, over the same live managed frame as eligibility: an instance whose own
+  # last verdict says it is not on the blessed release. No policy clauses — those
+  # are what make `eligible` smaller, and keeping them out of here is what makes
+  # the two numbers worth printing side by side.
+  defp autoupdate_behind_query do
+    from(b in Barkpark,
+      where: not is_nil(b.host) and b.host != "",
+      where: b.suspended == false,
+      where: b.update_state == "behind"
+    )
+  end
 
   @doc """
   Is the canary staging gate GREEN — i.e. may prod-channel boxes advance?

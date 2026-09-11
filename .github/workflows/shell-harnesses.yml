@@ -27,7 +27,7 @@ name: Shell harnesses
 # workflow, no Makefile target, no hook: break the census outright and nothing
 # reds. Only its `--self-test` rides this lane, and the split is deliberate.
 # `--self-test` is hermetic (mktemp fixtures through an in-script python3
-# classifier, 8 named mutation cases, no bp, no network). The census's LIVE
+# classifier, 26 named assertions over 9 arms, no bp, no network). The census's LIVE
 # ratchet shells `bp task get`, and `bp` is not on GitHub runners — it would
 # print `UNKNOWN: bp is not on PATH` and exit 2 on every PR forever, so it is
 # deliberately NOT wired here. Note this workflow is NOT one of main's required
@@ -290,6 +290,7 @@ on:
       # same reason: the PR that adds a TWELFTH fixture is the one that can
       # break the emitter's byte-identity claim.
       - "scripts/pds-live-hetzner-placement-group.sh"
+      - "scripts/pds-live-hetzner-placement-group_test.sh"
       - "internal/cli/testdata/pds_live_hetzner_*.json"
       # doc-gates-paths-parity-check.sh. Its subject set is exactly one file —
       # doc-gates.yml's two hand-maintained `paths:` lists — so that file must
@@ -622,6 +623,7 @@ on:
       - "cloud/Dockerfile"
       - "cloud/lib/barkpark_cloud/web/router.ex"
       - "scripts/pds-live-hetzner-placement-group.sh"
+      - "scripts/pds-live-hetzner-placement-group_test.sh"
       - "internal/cli/testdata/pds_live_hetzner_*.json"
       - "scripts/doc-gates-paths-parity-check.sh"
       - ".github/workflows/doc-gates.yml"
@@ -988,6 +990,7 @@ jobs:
           cloud-static-gz cloud/Dockerfile
           cloud-static-gz cloud/lib/barkpark_cloud/web/router.ex
           pds-hetzner-offline scripts/pds-live-hetzner-placement-group.sh
+          pds-hetzner-offline scripts/pds-live-hetzner-placement-group_test.sh
           pds-hetzner-offline internal/cli/testdata/pds_live_hetzner_*.json
           task-lease-renew scripts/task-lease-renew.sh
           task-lease-renew scripts/task-lease-renew.test.sh
@@ -1295,7 +1298,7 @@ jobs:
           python3 --version
       - name: epic-zero-criteria-census.sh syntax check
         run: bash -n scripts/epic-zero-criteria-census.sh
-      - name: census self-test (8 mutation cases, mktemp fixtures, no bp/network)
+      - name: census self-test (26 assertions over 9 arms, mktemp fixtures, no bp/network)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # ONLY --self-test. The live ratchet shells `bp task get` against the
         # server; `bp` is not on runners, so wiring it here would print
@@ -1822,6 +1825,18 @@ jobs:
           node tooling/gate-map/gate-map.mjs --verify
           node --test tooling/gate-map/gate-map.test.mjs
 
+      - name: "console-slice-gate: an axis-blind CSS slice gate is REFUSED, not merely listed"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # The wave-17 red (cch-w17-bl-css-slice-gate-must-include-leg-a). The
+        # sibling above COMPOSES a gate; this one REFUSES a proposed gate that
+        # omits an instrument reading the touched paths — and its selftest is
+        # built to lose: reverting breakpoint-sweep.mjs's source declaration
+        # reds 5 of its 9 arms (measured in the PR that wired it). Hermetic,
+        # sub-second, no browser.
+        run: |
+          node --check scripts/console-slice-gate.mjs
+          node --test scripts/console-slice-gate.test.mjs
+
       - name: paper-reader audit fixture
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # paper-readers.yml executes audit-paper-readers.sh on every run; its
@@ -2094,6 +2109,13 @@ jobs:
         # produces. There is no bare run to pair it with: the bare script is the
         # LIVE arm and needs the credential.
         run: bash scripts/pds-live-hetzner-placement-group.sh --selftest-offline
+      - name: pds-live-hetzner-placement-group_test.sh (offline diagnostic harness, stub bp, no credential)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # The eighth derived *_test.sh harness (#17687). Eight arms drive the
+        # runner's --selftest-probe entry point against a stub bp: 4 diagnostic
+        # (a failed read must quote bp's own sentence), 3 artifact-dir lifecycle,
+        # 1 positive control. Hermetic: no HCLOUD_* credential, no network.
+        run: bash scripts/pds-live-hetzner-placement-group_test.sh
 
   # ── TASK LEASE RENEW (task-16e56d05b809dd39) ───────────────────────────────
   # scripts/task-lease-renew.sh is the CI half of the ledger lease extension: it
