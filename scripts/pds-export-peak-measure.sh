@@ -416,40 +416,79 @@ MEM_AVAIL_MB=$((MEM_AVAIL_KB / 1024))
 info "deployed sha    $DEPLOYED_SHA"
 info "MemAvailable    ${MEM_AVAIL_KB} kB = ${MEM_AVAIL_MB} MiB (floor read from PDS_FULL_EXPORT_MIN_MEM_MB=${FULL_MIN_MEM_MB}, never written here)"
 
-# PDS-D31: two concurrent full exports OOM the box. The lock is the frozen
-# harness's own, so this instrument and that harness are mutually exclusive.
-mkdir -p "$FULL_DIR"
-if mkdir "$FULL_LOCK" 2>/dev/null; then
-  LOCK_OWNED=1
-  info "lock            took $FULL_LOCK (shared with the frozen harness — PDS-D31)"
-else
-  refuse "$FULL_LOCK is held by another run. Two concurrent exports against this box OOM it (PDS-D31)."
-fi
-
-# READ-ONLY here. The ledger is not charged until window 2, below every refusal.
+# THE PDS-D31 MUTEX IS TAKEN ONLY ON THE PATH THAT CAN CONTEND FOR IT.
+#
+# It used to be acquired unconditionally, ABOVE this branch and above the
+# MemAvailable floor gate. But the hazard the lock exists for is two concurrent
+# ~2.2 GiB FULL exports OOM-killing the live content API — and a SCOPED run
+# (profile=dev -> FULL_ACQ=no) is not that event: it charges no attempt, skips
+# the floor gate for the same reason, and its work is pure ssh/ps/awk
+# observation. Gating harmless observation behind the export mutex forced every
+# measure rung to be strictly sequenced against every climb rung even when they
+# contended for nothing, and it is what drove the lock-free fork
+# scripts/pds-idle-sampler.sh (PDS-D237) into existence.
+#
+# So the lock now sits BELOW the FULL_ACQ decision, inside the branch that
+# performs the acquisition the mutex serialises. A full-fidelity run still takes
+# it and still refuses when it is held. Nothing else changed about the lock: same
+# path, same shared-with-the-frozen-harness semantics, same cleanup via
+# LOCK_OWNED in the EXIT trap.
+#
+# The ledger is READ-ONLY here. It is not charged until window 2, below every refusal.
 if [ "$FULL_ACQ" = yes ]; then
   info "attempt ledger  $(full_attempts) of $FULL_BUDGET spent so far · $FULL_ATTEMPTS_FILE (shared with the frozen harness)"
   info "                this acquisition is FULL-fidelity, so it will charge 1 attempt — written just before the request, never here"
-  # This instrument RECORDS; the frozen harness's cond_c ENFORCES. That split is
-  # deliberate (measuring must stay reachable), but "3 of 1 spent so far" said in
-  # the same calm voice as "0 of 5" is the very defect the REFUSAL block below
-  # exists to kill — an unusable number emitted as though it were usable. So the
-  # over-budget case is stated OUT LOUD, at the last moment it can still be
-  # cancelled by hand. Whether it should REFUSE is a policy call above this
-  # script: pds-bl-peak-budget-enforcement.
+  # THE BUDGET IS ENFORCED HERE, STRICTLY ABOVE THE SPEND.
+  #
+  # This instrument used to RECORD the spend and leave enforcement to the frozen
+  # harness's cond_c. Observed consequence: with attempts at 3 and a budget of 1
+  # it printed "attempt ledger  3 of 1 spent so far", charged 3 -> 4, and fired a
+  # ~2.2 GiB export anyway. The budget does not encode a bookkeeping preference —
+  # it encodes a live OOM risk to the content API (PDS-D156), and that risk does
+  # not care which process is holding the instrument. A ceiling anything can walk
+  # past is not a ceiling.
+  #
+  # The refusal sits beside the MemAvailable-floor refuse below and ABOVE every
+  # write: no lock is taken, no attempt is charged, the counter's value and mtime
+  # are untouched. It is NOT satisfied by moving PDS_FULL_EXPORT_MIN_MEM_MB (a
+  # different quantity, and this script only ever READS that floor) and NEVER by
+  # resetting the counter — PDS-D212 forbids it.
+  #
+  # The diagnostic case reading (a) — "measurement must stay reachable exactly
+  # when the climb cannot run" — is honoured by its OWN opt-out and nothing else:
+  # PDS_FULL_EXPORT_BUDGET_OVERRIDE=1, which does not fire silently. It says out
+  # loud that it is exceeding the budget and why that is permitted, and the run
+  # still charges the attempt like any other. A scoped run needs none of this: it
+  # is not the event the budget is stated on.
+  FULL_BUDGET_OVERRIDE="${PDS_FULL_EXPORT_BUDGET_OVERRIDE:-}"
   if [ "$(full_attempts)" -ge "$FULL_BUDGET" ]; then
-    info ""
-    info "                ⚠ OVER BUDGET — $(full_attempts) attempt(s) already spent against a budget of $FULL_BUDGET."
-    info "                  The frozen harness's cond_c would REFUSE the crown climb in this state."
-    info "                  This instrument does not enforce that gate, so it is ABOUT TO FIRE a"
-    info "                  ~2.2 GiB export anyway and charge attempt $(( $(full_attempts) + 1 )). If that is not"
-    info "                  what you want, interrupt now, or narrow the acquisition with"
-    info "                  --path '/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=production'."
-    info "                  Raise the ceiling honestly with PDS_FULL_EXPORT_BUDGET; NEVER reset the"
-    info "                  counter (PDS-D212)."
-    info ""
+    if [ -n "$FULL_BUDGET_OVERRIDE" ]; then
+      info ""
+      info "                ⚠ OVER BUDGET, PERMITTED BY OVERRIDE — $(full_attempts) attempt(s) already spent against a"
+      info "                  budget of $FULL_BUDGET, and PDS_FULL_EXPORT_BUDGET_OVERRIDE is set. The frozen harness's"
+      info "                  cond_c would REFUSE the crown climb in this state; this run is EXCEEDING that budget"
+      info "                  deliberately, because the operator asserted the diagnostic reading: a measurement of"
+      info "                  export demand must stay reachable exactly when the climb cannot run. It is about to"
+      info "                  fire a ~2.2 GiB export and will charge attempt $(( $(full_attempts) + 1 )) — the override buys"
+      info "                  permission, never a free attempt, and it NEVER resets the counter (PDS-D212)."
+      info ""
+    else
+      refuse "the full-export attempt budget is EXHAUSTED — $(full_attempts) attempt(s) already spent against PDS_FULL_EXPORT_BUDGET=$FULL_BUDGET ($FULL_ATTEMPTS_FILE, shared with the frozen harness). A FULL-fidelity acquisition here IS the ~2.2 GiB export that budget is stated on, and firing it risks OOM-killing the LIVE content API (PDS-D156); the frozen harness's cond_c would refuse the crown climb in exactly this state. Nothing was charged and the counter is untouched. Narrow the acquisition with --path '/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=production' (charges 0 attempts, takes no lock), or raise the ceiling honestly with PDS_FULL_EXPORT_BUDGET. To measure anyway with the budget knowingly exceeded, set PDS_FULL_EXPORT_BUDGET_OVERRIDE=1. NEVER reset the counter (PDS-D212), and never move PDS_FULL_EXPORT_MIN_MEM_MB — that is a different quantity."
+    fi
+  fi
+
+  # PDS-D31: only now, with every read-only refusal behind us, is the mutex taken.
+  mkdir -p "$FULL_DIR"
+  if mkdir "$FULL_LOCK" 2>/dev/null; then
+    LOCK_OWNED=1
+    info "lock            took $FULL_LOCK (shared with the frozen harness — PDS-D31)"
+  else
+    refuse "$FULL_LOCK is held by another run. Two concurrent FULL exports against this box OOM it (PDS-D31). A NARROWED acquisition (--path '/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=production') needs no mutex and runs beside a held lock."
   fi
 else
+  info "lock            NOT taken — $FULL_LOCK guards two concurrent FULL exports (PDS-D31), and this"
+  info "                acquisition is NARROWED: ssh/ps/awk observation plus a scoped request cannot contend"
+  info "                for the ~2.2 GiB the mutex serialises. A scoped run may therefore ride beside a climb."
   info "attempt ledger  $(full_attempts) of $FULL_BUDGET spent so far · $FULL_ATTEMPTS_FILE (read only)"
   info "                this acquisition is NARROWED, so it charges 0 attempts and leaves that file's value and mtime untouched"
 fi
@@ -535,6 +574,18 @@ if [ "$IDLE_SAMPLES" -le 0 ]; then
   refuse "the IDLE CONTROL window logged ZERO samples over its ${IDLE_WALL} s, so there is no peak to subtract a baseline from. An empty log peaks at 0 kB, so the drift would have been reported as 0 − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB. A NEGATIVE control is not a control (PDS-D220a — the same defect as the acquisition window's, on the leg that gives the demand figure its meaning). The RSS sampler almost certainly lost its ssh session; re-run."
 fi
 
+# PDS-D220a KEYED ON THE QUANTITY, NOT ON A PROXY FOR IT (review, wave 13; ported
+# from scripts/pds-idle-sampler.sh, where this refusal already lives).
+# The refusal above tests SAMPLE COUNT, but the wreck its own text describes is a
+# VACUOUS PEAK. Those come apart: a log of well-formed-looking lines whose rss
+# field is absent or zero (a session torn mid-write, a `ps` that returned nothing)
+# counts as samples > 0 and still peaks at 0 kB. Reproduced by mutation — 1–2
+# samples, peak 0 kB, drift −191.63 MiB, EXIT 0. A zero peak is vacuous however
+# many lines produced it, and no new threshold is invented to say so.
+if [ "$IDLE_PEAK_KB" -le 0 ]; then
+  refuse "the IDLE CONTROL window logged ${IDLE_SAMPLES} sample(s) but its PEAK is ${IDLE_PEAK_KB} kB, so the drift would have been reported as ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB. A NEGATIVE control is not a control (PDS-D220a). A non-empty log with a zero peak means the rss field never arrived — the remote loop's \`ps\` returned nothing, or the session tore mid-write. Re-run."
+fi
+
 # The MemAvailable leg refuses on the same rule, for a sharper reason. Its
 # range is what PDS-D221's 1048.16 MiB contamination-abort threshold is stated
 # on, and a leg that logged nothing yields min 0 / max 0 / range 0.00 MiB —
@@ -546,7 +597,26 @@ if [ "$IDLE_MEMAVAIL_SAMPLES" -le 0 ]; then
   refuse "the idle window's MemAvailable leg logged ZERO samples, so its range is vacuously 0 kB = 0.00 MiB. PDS-D221 states its contamination-abort threshold (1048.16 MiB) on THIS range, and an unsampled leg would clear that threshold as though the box were perfectly quiet (PDS-D220a/PDS-D220b). A range that was never measured must not authorise a measurement; re-run."
 fi
 
+# A negative drift that survives the vacuous-peak refusal is REPORTED, never
+# refused. It is legitimately reachable on a healthy box: the baseline is a
+# one-shot on the PRIMARY slot, the peak is the MAX ACROSS THE SET, and this box
+# runs blue/green — so a primary retired mid-window leaves a successor whose RSS
+# is honestly lower. GC on a quiet slot does the same, smaller. Refusing would
+# invent a magnitude threshold this charter has not licensed (PDS-D232). So the
+# reader is told the sign is suspect and why, and it rides the machine line so a
+# downstream consumer cannot miss it.
+IDLE_DRIFT_SIGN=ok
+if [ "$IDLE_DELTA_KB" -lt 0 ]; then
+  IDLE_DRIFT_SIGN=negative_suspect
+fi
+
 info "idle drift      ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB   [BEAM RSS]"
+if [ "$IDLE_DRIFT_SIGN" = negative_suspect ]; then
+info "                SIGN NEGATIVE — the baseline is a one-shot on the PRIMARY slot and the peak is the MAX"
+info "                ACROSS THE SET; on a blue/green box a primary retired mid-window leaves a successor with"
+info "                honestly lower RSS. NOT refused (no magnitude threshold is licensed — PDS-D232). Treat"
+info "                this control as SUSPECT, not as a drift of 0. Carried as idle_drift_sign=negative_suspect."
+fi
 info "MemAvailable    min ${IDLE_MEMAVAIL_MIN_KB} kB · max ${IDLE_MEMAVAIL_MAX_KB} kB over ${IDLE_MEMAVAIL_SAMPLES} readings"
 info "                range ${IDLE_MEMAVAIL_MAX_KB} − ${IDLE_MEMAVAIL_MIN_KB} = ${IDLE_MEMAVAIL_RANGE_KB} kB = ${IDLE_MEMAVAIL_RANGE_MIB} MiB   [WHOLE BOX]"
 info "                this is the quantity PDS-D221's 1048.16 MiB threshold is stated on (PDS-D220b);"
@@ -636,8 +706,35 @@ if [ "$EXPORT_SAMPLES" -le 0 ]; then
   refuse "the acquisition window logged ZERO samples, so there is no peak to subtract a baseline from. GET $ACQ_PATH returned HTTP $HTTP_CODE after ${EXPORT_WALL} s — faster than the ${SAMPLE_HZ} Hz sampler's first tick — and an empty log peaks at 0 kB, so the delta would have been reported as 0 − ${EXPORT_BASELINE_KB} = ${EXPORT_DELTA_KB} kB = $(mib "$EXPORT_DELTA_KB") MiB. A NEGATIVE demand is not a measurement of anything (PDS-D220a). Re-run against an acquisition that lasts at least one sampler tick."
 fi
 
+# THE SAME GUARD, KEYED ON THE PEAK (PDS-D220a). The refusal above tests SAMPLE
+# COUNT while its text describes a vacuous PEAK, and those come apart exactly as
+# they do on the control leg: a remote `ps` that returns nothing, or a session
+# torn mid-write, yields well-formed lines with an absent rss field — samples > 0,
+# peak 0 kB, a large negative delta, and EXIT 0 feeding the floor derivation.
+# This leg is the one that produces the demand figure, so a vacuous zero here can
+# authorise a bad floor directly.
+if [ "$EXPORT_PEAK_KB" -le 0 ]; then
+  refuse "the acquisition window logged ${EXPORT_SAMPLES} sample(s) but its PEAK is ${EXPORT_PEAK_KB} kB, so the delta would have been reported as ${EXPORT_PEAK_KB} − ${EXPORT_BASELINE_KB} = ${EXPORT_DELTA_KB} kB = $(mib "$EXPORT_DELTA_KB") MiB. A NEGATIVE demand is not a measurement of anything (PDS-D220a). A non-empty log with a zero peak means the rss field never arrived — the remote loop's \`ps\` returned nothing, or the session tore mid-write. Nothing is quoted from it; re-run."
+fi
+
+# A genuinely negative delta that SURVIVES the refusal above (a real peak, below
+# the pre-fire baseline) is REPORTED as suspect and not refused — same reasoning
+# and same PDS-D232 restraint as the control leg. The derivability verdict below
+# already refuses to build a floor on it; this field says why the sign is what it
+# is, and rides the machine line.
+EXPORT_DRIFT_SIGN=ok
+if [ "$EXPORT_DELTA_KB" -lt 0 ]; then
+  EXPORT_DRIFT_SIGN=negative_suspect
+fi
+
 info "peak            ${EXPORT_PEAK_KB} kB (MAX over ${EXPORT_SAMPLES} readings across ${BEAM_N} slot(s))"
 info "export delta    ${EXPORT_PEAK_KB} − ${EXPORT_BASELINE_KB} = ${EXPORT_DELTA_KB} kB = $(mib "$EXPORT_DELTA_KB") MiB"
+if [ "$EXPORT_DRIFT_SIGN" = negative_suspect ]; then
+info "                SIGN NEGATIVE — a real peak that never rose above the pre-fire baseline within the"
+info "                ${SAMPLE_HZ} Hz grid (blue/green primary retirement, or GC). NOT refused (PDS-D232 licenses no"
+info "                magnitude threshold); the floor verdict below declines to derive from it. Carried as"
+info "                export_drift_sign=negative_suspect."
+fi
 say ""
 
 # ── how well paired are the two windows? ─────────────────────────────────────
@@ -784,7 +881,7 @@ else
 fi
 say ""
 
-MACHINE_LINE="PDS_PEAK_MEASURE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acq_path=$ACQ_PATH full_acquisition=$FULL_ACQ http_code=$HTTP_CODE bytes=$BYTES sample_hz=$SAMPLE_HZ units=kB_div_1024 compression=none selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_kb=$MEM_AVAIL_KB floor_mb=$FULL_MIN_MEM_MB export_baseline_kb=$EXPORT_BASELINE_KB export_peak_kb=$EXPORT_PEAK_KB export_delta_kb=$EXPORT_DELTA_KB export_delta_mib=$(mib "$EXPORT_DELTA_KB") export_samples=$EXPORT_SAMPLES export_window_s=$EXPORT_WALL export_baseline_set_kb=$EXPORT_BASELINE_SET_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES canonical_reference_mib=2235.43 full_attempt_charged=$ATTEMPT_CHARGED attempts_after=${ATTEMPTS_AFTER:-unknown} attempts_budget=$FULL_BUDGET floor_derivable=$FLOOR_DERIVABLE floor_refusal=$FLOOR_REFUSAL_CODE"
+MACHINE_LINE="PDS_PEAK_MEASURE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acq_path=$ACQ_PATH full_acquisition=$FULL_ACQ http_code=$HTTP_CODE bytes=$BYTES sample_hz=$SAMPLE_HZ units=kB_div_1024 compression=none selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_kb=$MEM_AVAIL_KB floor_mb=$FULL_MIN_MEM_MB export_baseline_kb=$EXPORT_BASELINE_KB export_peak_kb=$EXPORT_PEAK_KB export_delta_kb=$EXPORT_DELTA_KB export_delta_mib=$(mib "$EXPORT_DELTA_KB") export_samples=$EXPORT_SAMPLES export_drift_sign=$EXPORT_DRIFT_SIGN export_window_s=$EXPORT_WALL export_baseline_set_kb=$EXPORT_BASELINE_SET_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_drift_sign=$IDLE_DRIFT_SIGN idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES canonical_reference_mib=2235.43 full_attempt_charged=$ATTEMPT_CHARGED attempts_after=${ATTEMPTS_AFTER:-unknown} attempts_budget=$FULL_BUDGET floor_derivable=$FLOOR_DERIVABLE floor_refusal=$FLOOR_REFUSAL_CODE"
 
 say "$MACHINE_LINE"
 say ""

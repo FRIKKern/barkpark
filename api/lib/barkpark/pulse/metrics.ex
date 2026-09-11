@@ -28,7 +28,17 @@ defmodule Barkpark.Pulse.Metrics do
   process, no `:scheduler_wall_time` flag flip, nothing.
   """
 
-  use GenServer
+  # `shutdown: 20_000`: `terminate/2` below flushes the buffered billable cost
+  # through a real Postgres write, and the supervisor's shutdown timeout is the
+  # hard bound on that flush — a `terminate/2` that has not returned when the
+  # timeout expires is brutally killed and the buffer is lost exactly as if no
+  # `terminate/2` existed. The default 5_000 from `use GenServer` is SHORTER
+  # than Ecto's own default 15_000 query timeout, so a stalled/checkout-starved
+  # Repo would hit the supervisor's axe BEFORE the query gave up and the rescue
+  # below could run. 20_000 leaves the query room to time out and be swallowed.
+  # Same reasoning as the in-tree sibling `Plugins.Sheets.Session`
+  # (`shutdown: 30_000` for its debounced upsert).
+  use GenServer, shutdown: 20_000
 
   @tick_ms 2_000
   @month_seconds 2_592_000
@@ -79,10 +89,16 @@ defmodule Barkpark.Pulse.Metrics do
 
   # ── sampler ───────────────────────────────────────────────────────────
 
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(opts),
+    do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
   @impl true
   def init(_opts) do
+    # The whole point of `terminate/2` below. Without this flag the supervisor's
+    # shutdown `exit(:shutdown)` kills this process outright and `terminate/2`
+    # is never called, so every graceful stop discards the buffered cost.
+    Process.flag(:trap_exit, true)
+
     :erlang.system_flag(:scheduler_wall_time, true)
     ref = :counters.new(2, [:write_concurrency])
     :persistent_term.put(@counters_key, ref)
@@ -130,6 +146,44 @@ defmodule Barkpark.Pulse.Metrics do
     {:reply, snap, %{state | tref: nil}}
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    # DURABILITY SEAM. Compute cost accrues into `cost_pending_nanos` and only
+    # reaches the durable meter once a minute (see `do_sample/1`), while
+    # `init/1` re-seeds `cost_total_nanos` from that meter. Without this flush a
+    # stop discards up to 60 s of billable cost SILENTLY: the total simply
+    # resumes from the last flushed value, so `eur_total` steps backwards on the
+    # storm dashboard after every deploy and the meter under-counts forever.
+    # This box auto-deploys on merge, so that is not a rare crash path — it is
+    # the normal one.
+    #
+    # Reached only on a GRACEFUL stop with `trap_exit` set (see `init/1`): a
+    # `Supervisor`/`Application` shutdown, `GenServer.stop/1`, or the VM's
+    # SIGTERM handler running `init:stop()`. A `:brutal_kill`, a SIGKILL, or an
+    # overrun of the `shutdown: 20_000` budget above still loses the buffer —
+    # nothing in OTP can promise otherwise.
+    #
+    # Fully guarded: the Repo may already be down or unreachable at shutdown,
+    # and a `terminate/2` that raises would log a crash report on every single
+    # clean stop. Losing the flush is exactly the pre-existing behaviour; an
+    # exception here would be a new one.
+    case state do
+      %{cost_pending_nanos: pending} when is_integer(pending) and pending > 0 ->
+        try do
+          Barkpark.Pulse.add_cost_nanos(pending)
+        rescue
+          _ -> :ok
+        catch
+          :exit, _ -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+
+    :ok
+  end
+
   # One sampling pass: snapshot + atomically drain the counters, integrate cost,
   # publish to :persistent_term, broadcast vitals. Returns {snap, new_state}.
   # Does NOT touch the timer — the caller owns cadence (handle_info re-arms the
@@ -159,8 +213,15 @@ defmodule Barkpark.Pulse.Metrics do
     cost_total = state.cost_total_nanos + tick_nanos
     cost_pending = state.cost_pending_nanos + tick_nanos
 
+    # FLUSH WINDOW. `ticks` starts at 0, so the old `rem(state.ticks, 30) == 0`
+    # fired on the VERY FIRST tick — a durable meter write 2 s after boot, then
+    # every 60 s. `rem(state.ticks, 30) == 0` is the same once-a-minute
+    # cadence with the first flush at the first FULL minute, which is what the
+    # comment above and the moduledoc have always claimed. The up-to-60 s buffer
+    # this leaves exposed is no longer a loss: `terminate/2` flushes it on every
+    # graceful stop.
     cost_pending =
-      if cost_pending > 0 and rem(state.ticks, 30) == 0 do
+      if cost_pending > 0 and rem(state.ticks + 1, 30) == 0 do
         try do
           Barkpark.Pulse.add_cost_nanos(cost_pending)
           0
@@ -176,7 +237,13 @@ defmodule Barkpark.Pulse.Metrics do
     snap = Map.put(snap, :cost_eur_total, cost_total / 1_000_000_000)
     :persistent_term.put(@snapshot_key, snap)
 
-    # storage is a DB read — refresh once a minute, keep the cached value between
+    # storage is a DB read — refresh once a minute, keep the cached value between.
+    # DELIBERATELY still `rem(state.ticks, 30) == 0`, i.e. it DOES fire on the
+    # first tick 2 s after boot: this is a cached READ that only feeds the
+    # dashboard's bytes/rows figures, and warming it immediately is the point —
+    # the alternative is a storm dashboard reporting 0 bytes / 0 rows for the
+    # first minute after every restart. Unlike the cost flush above, nothing is
+    # buffered and nothing can be lost, so the first-tick firing is a feature.
     storage =
       if rem(state.ticks, 30) == 0 do
         try do
