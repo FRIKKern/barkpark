@@ -345,6 +345,160 @@ else
   cpv 'the probe answered nothing at all                -> refuse' ''                          1 '4-field shape'
 fi
 
+# ── STEP 8'S CROSS-INVOCATION PIN TRIPLE ────────────────────────────────────
+# (pds-bl-step8-cross-invocation-gap)
+#
+# Step 8's guarantee is PROCESS-LOCAL: DEPLOYED_SHA and DEPLOYED_UPTIME_0A are
+# set only by an in-process step 0a, so a run can compare only its OWN 0a
+# against its OWN 8. PDS-D101 makes a deferred 3/4 a SECOND full --all
+# invocation, so a real transcript can span several, and contiguity ACROSS them
+# was a check nothing emitted the inputs for. `pin_triple_line` emits them on
+# ONE grep-able line.
+#
+# THE ARMS MEASURE THE CHAIN, NOT THE FORMAT. A line that prints the right seven
+# keys with the WRONG sha bound to sha_8 would pass a field-presence check and
+# still make a contiguous pair read as a break — so the last two arms build TWO
+# invocations' lines and assert the contiguity verdict both directions.
+printf 'pds-pull-proof_test: pin_triple_line — the (0a sha, 8 sha, run tag) triple step 8 emits\n'
+if ! declare -f pin_triple_line >/dev/null 2>&1; then
+  bad 'pin_triple_line is defined' "the sourced harness has no pin_triple_line — step 8 emits nothing a reader can chain across invocations"
+else
+  # field extractor over the emitted line, by key — never by position
+  ptf() { printf '%s' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p"; }
+
+  RUN_ID='20260911T000000Z-1111'; RUN_TAG='aaaa1111'
+  DEPLOYED_SHA='1111111111111111111111111111111111111111'
+  DEPLOYED_SHA_SOURCE='ssh'; DEPLOYED_UPTIME_0A='100'
+  line_a="$(pin_triple_line "$DEPLOYED_SHA" '420')"
+
+  case "$line_a" in
+    PDS-PIN-TRIPLE\ *) ok 'the line carries the PDS-PIN-TRIPLE prefix, so a reader can grep it out of a transcript' ;;
+    *) bad 'the line carries the PDS-PIN-TRIPLE prefix' "got: $line_a" ;;
+  esac
+
+  missing=''
+  for k in run_tag run_id sha_0a sha_8 uptime_0a uptime_8 pin_source; do
+    [ -n "$(ptf "$line_a" "$k")" ] || missing="$missing $k"
+  done
+  if [ -z "$missing" ]; then ok 'all seven keys are present and non-empty'
+  else bad 'all seven keys are present' "empty or absent:$missing — in: $line_a"; fi
+
+  # THE TWO SHAS MUST DIVERGE IN THE FIXTURE, or the arm cannot tell them apart.
+  # Every line above passes the SAME sha as both the 0a pin and the re-pin, so a
+  # `pin_triple_line` that printed $1 twice would satisfy all of them. This arm
+  # is the redeploy shape — step 8's own fail path — where they genuinely differ.
+  line_moved="$(pin_triple_line '3333333333333333333333333333333333333333' '')"
+  if [ "$(ptf "$line_moved" sha_0a)" = "$DEPLOYED_SHA" ] &&
+     [ "$(ptf "$line_moved" sha_8)" = '3333333333333333333333333333333333333333' ]; then
+    ok 'when the box redeployed mid-run the line keeps BOTH shas apart: sha_0a is the pin, sha_8 the re-pin'
+  else bad 'sha_0a is step 0a'"'"'s pin and sha_8 the re-pin' "sha_0a=$(ptf "$line_moved" sha_0a) (expected $DEPLOYED_SHA), sha_8=$(ptf "$line_moved" sha_8) (expected 3333…)"; fi
+  if [ "$(ptf "$line_a" run_tag)" = "$RUN_TAG" ]; then
+    ok 'run_tag names the invocation, so the RSS artifact directory is addressable from the same line'
+  else bad 'run_tag names the invocation' "run_tag=$(ptf "$line_a" run_tag), RUN_TAG=$RUN_TAG"; fi
+
+  # UNRESOLVED, NOT EMPTY. A step 8 whose SSH re-pin failed must still emit a
+  # chainable line; an empty value would collapse the field and shift every
+  # later key if a reader ever split on position.
+  if [ "$(ptf "$(pin_triple_line '' '')" sha_8)" = 'unresolved' ]; then
+    ok 'an unread re-pin prints sha_8=unresolved rather than collapsing the field'
+  else bad 'an unread re-pin prints sha_8=unresolved' "got: $(pin_triple_line '' '')"; fi
+
+  # ── THE CONTIGUITY VERDICT, BOTH DIRECTIONS ───────────────────────────────
+  # Invocation B starts where A closed: A.sha_8 == B.sha_0a is CONTIGUOUS.
+  RUN_ID='20260911T001000Z-2222'; RUN_TAG='bbbb2222'
+  DEPLOYED_SHA="$(ptf "$line_a" sha_8)"; DEPLOYED_UPTIME_0A='900'
+  line_b="$(pin_triple_line "$DEPLOYED_SHA" '1200')"
+  if [ "$(ptf "$line_a" sha_8)" = "$(ptf "$line_b" sha_0a)" ]; then
+    ok 'two invocations off the same build chain: A.sha_8 == B.sha_0a'
+  else bad 'two invocations off the same build chain' "A.sha_8=$(ptf "$line_a" sha_8) B.sha_0a=$(ptf "$line_b" sha_0a)"; fi
+
+  # THE NEGATIVE CONTROL. A deploy landing in the gap BETWEEN invocations is
+  # invisible to both runs' step 8 — and this is the comparison that sees it.
+  DEPLOYED_SHA='2222222222222222222222222222222222222222'
+  line_c="$(pin_triple_line "$DEPLOYED_SHA" '1200')"
+  if [ "$(ptf "$line_a" sha_8)" != "$(ptf "$line_c" sha_0a)" ]; then
+    ok 'a deploy in the gap between invocations SHOWS: A.sha_8 != C.sha_0a'
+  else bad 'a deploy in the gap between invocations shows' "the chain read as contiguous across two different builds — A.sha_8=$(ptf "$line_a" sha_8) C.sha_0a=$(ptf "$line_c" sha_0a)"; fi
+fi
+
+# ── THE RSS PEAK BELONGS TO THE INVOCATION THAT MEASURED IT ─────────────────
+# (pds-bl-step8-cross-invocation-gap, criterion 2)
+#
+# The peak lives in a per-invocation RUN_TAG-keyed artifact directory, so a
+# REUSE invocation — 0 attempts, parked bundle — measured nothing at all. It
+# used to print the parked .meta verbatim and set no RSS line, which lets a
+# reader take the previous run's figure as this run's.
+printf 'pds-pull-proof_test: rss_reuse_attribution — a reuse invocation has no RSS of its own\n'
+if ! declare -f rss_reuse_attribution >/dev/null 2>&1; then
+  bad 'rss_reuse_attribution is defined' "the sourced harness has no rss_reuse_attribution — a reusing invocation says nothing about whose RSS peak the transcript is showing"
+else
+  FULL_META="$TMP/reuse.meta"
+  cat >"$FULL_META" <<'META'
+served_sha:     1111111111111111111111111111111111111111
+rss_peak_kb:    1638400
+run_id:         20260911T000000Z-1111
+META
+  RUN_ID='20260911T001000Z-2222'; RUN_TAG='bbbb2222'
+  att="$(rss_reuse_attribution)"
+  case "$att" in
+    *'measured NO RSS of its own'*) ok 'a reuse invocation says it measured none' ;;
+    *) bad 'a reuse invocation says it measured none' "got: $att" ;;
+  esac
+  case "$att" in
+    *'20260911T000000Z-1111'*) ok 'the sentence names the run that DID measure the peak' ;;
+    *) bad 'the sentence names the measuring run' "the parked run_id is absent from: $att" ;;
+  esac
+  case "$att" in
+    *'1638400 KB'*) ok 'the sentence carries the parked peak, so no reader has to open the sidecar' ;;
+    *) bad 'the sentence carries the parked peak' "got: $att" ;;
+  esac
+  # THE ATTRIBUTION IS THE POINT: naming the peak is worthless if the sentence
+  # also reads as though THIS run produced it.
+  case "$att" in
+    *"never to run $RUN_ID"*) ok 'it denies the peak to THIS run by name' ;;
+    *) bad 'it denies the peak to this run by name' "got: $att" ;;
+  esac
+  # An absent sidecar must not print a bare empty figure that reads as 0 MB.
+  FULL_META="$TMP/does-not-exist.meta"
+  case "$(rss_reuse_attribution)" in
+    *'(unknown KB)'*'by run unknown'*) ok 'an unreadable sidecar prints unknown, never an empty figure that reads as zero' ;;
+    *) bad 'an unreadable sidecar prints unknown' "got: $(rss_reuse_attribution)" ;;
+  esac
+fi
+
+# ── THE PROSE THE TRANSCRIPT IS JUDGED ON ───────────────────────────────────
+# Three sentences the crown proof's honesty law requires, each pinned by the
+# phrase a rewrite would have to keep. A grep, because the claim IS the wording.
+printf 'pds-pull-proof_test: the honesty wording these tasks landed\n'
+# pds-bl-rss-ambient-caveat: whole-process RSS, banner AND sidecar
+if grep -q 'RSS scope — that peak is WHOLE-PROCESS beam.smp RSS over the export' "$PROOF"; then
+  ok 'the honesty banner labels the peak WHOLE-PROCESS, not export-exclusive'
+else
+  bad 'the banner labels the peak WHOLE-PROCESS' "the same beam.smp serves the live content API throughout the export window; a peak printed without that caveat reads as the export's own cost"
+fi
+if grep -q '^rss_scope: .*WHOLE-PROCESS beam.smp RSS over the export window' "$PROOF"; then
+  ok 'the .meta sidecar carries the same scope, so a parked bundle outlives the transcript that explained it'
+else
+  bad 'the .meta sidecar carries rss_scope' "the sidecar is what the NEXT run reads; a caveat that lives only in this run's banner does not travel with the figure"
+fi
+# pds-bl-step6-tag-exclusion-stale-comment: tag IS guarded, excluded for scope
+if grep -q 'outside the guard$' "$PROOF" || grep -q 'outside the guard entirely' "$PROOF"; then
+  bad 'the THE 34 block no longer says `tag` is outside the guard' "PDS-D125/D126 put TagRegistry behind the SAME Tenancy.pulled_schema_row/2 predicate (api/lib/barkpark/content/tag_registry.ex:101); the exclusion is a SCOPING decision and the comment must say so"
+else
+  ok 'the THE 34 block no longer claims `tag` is written outside the guard'
+fi
+if grep -q 'It is excluded for SCOPING reasons, not for' "$PROOF"; then
+  ok 'the THE 34 block states the real reason `tag` is excluded from the sentinel scope'
+else
+  bad 'the THE 34 block states why `tag` is excluded' "excluding a now-guarded row is still correct, but the stated reasoning must be the true one"
+fi
+# pds-bl-step8-cross-invocation-gap: step 8 names the gap it cannot vouch for
+if grep -q 'THIS RUNG IS PROCESS-LOCAL and does not claim otherwise' "$PROOF"; then
+  ok 'step 8 names the cross-invocation gap it does not vouch for'
+else
+  bad 'step 8 names the cross-invocation gap' "step 8 has no baseline from any earlier invocation; a PASS that does not say so reads as a whole-transcript guarantee"
+fi
+
 # ── the harness is NOT RELOCATABLE, and says so ─────────────────────────────
 # (pds-bl-harness-not-relocatable)
 #
@@ -378,7 +532,7 @@ fi
 
 printf '\n'
 if [ "$fails" -eq 0 ]; then
-  printf 'pds-pull-proof_test: PASS (40 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable)\n'
+  printf 'pds-pull-proof_test: PASS (58 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording)\n'
   exit 0
 fi
 printf 'pds-pull-proof_test: FAIL — %s arm(s)\n' "$fails"
