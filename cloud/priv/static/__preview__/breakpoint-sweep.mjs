@@ -329,6 +329,23 @@ export function boundaryWalk(breakpoints) {
 // Leg A refusing here is the design working: a breakpoint the stylesheet
 // declares and this list does not is a set of widths nothing drives.
 export const BREAKPOINTS = [620, 720, 740, 768, 830, 899, 904];
+// THIS AXIS' FLOOR IS 619 AND THAT IS DERIVED, NOT A CHOICE
+// (cch-w24-bl-phone-band-unreachable-by-the-width-sweep). `boundaryWalk` emits
+// b-1/b/b+1, the lowest declared boundary is 620, so the narrowest width this
+// sweep drives is 619 — and app.css carries NO `@media` boundary below 620, so
+// there is nothing lower for Leg A's census to derive. Reaching 320 through
+// `BREAKPOINTS` would mean declaring a boundary the stylesheet does not have,
+// which is exactly the phantom Leg A refuses in the other direction (cch-w15).
+//
+// SO THE PHONE BAND 320-618 IS REACHED BY A DIFFERENT INSTRUMENT, AND THE SEAM
+// IS ASSERTED RATHER THAN ASSUMED: overflow-guard.mjs's
+// `W24-activity-feed-phone-band` leg IMPORTS this `WIDTHS` export, takes its
+// minimum, and REFUSES unless it drives `min - 1`. Lower a boundary here — or
+// let that leg's band be trimmed — and the gap reds in that file instead of
+// re-opening in silence in both. `#sites` is covered the same way, by
+// `W21-cruel-content-text-bounded`'s `#sites` rows and
+// `W50-site-row-three-hosts-cruel-by-fixture` (#16318 / #16137), whose axes
+// start at 320.
 export const WIDTHS = boundaryWalk(BREAKPOINTS);
 
 const INST = IDS.liveInstance;

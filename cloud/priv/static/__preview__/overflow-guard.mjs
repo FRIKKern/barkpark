@@ -199,6 +199,13 @@ import { fleetAxis, FLEET_PINNED_REPS, FLEET_SCEN_SKIP } from "./fleet-scenarios
 import { stylesheetProbeJs, stylesheetRefusal, stylesheetVerdict } from "./stylesheet-applied.mjs";
 import { ATTACH_CAP, withAttachDeadline } from "./attach-deadline.mjs";
 import { driverSentence, widthDrivers } from "./width-drivers.mjs";
+// THE SWEEP'S OWN AXIS, IMPORTED RATHER THAN RETYPED (cch-w24-bl-phone-band-
+// unreachable-by-the-width-sweep). `W24-activity-feed-phone-band` asserts that
+// the band it drives TOUCHES breakpoint-sweep.mjs's narrowest width; a floor
+// copied as a numeral would go stale the day the stylesheet grows a boundary
+// below 620, silently re-opening the gap in both files. breakpoint-sweep.mjs
+// guards its own main behind `process.argv[1]`, so importing it runs nothing.
+import { WIDTHS as SWEEP_WIDTHS } from "./breakpoint-sweep.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -246,6 +253,7 @@ const DEFECTS = [
   "W50-site-row-three-hosts-cruel-by-fixture",
   "W22-shared-modal-card-min-content-floor",
   "W19-topbar-vertical-cost",
+  "W24-activity-feed-phone-band",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -6407,6 +6415,329 @@ async function main() {
         fontPinnedEvidence(
           `What is ASSERTED is face-independent anyway — a control's right edge inside the viewport, and ` +
           `text that either fits or carries a paintable cue`,
+        );
+      }
+    }
+
+    // ── cch-w24-bl-phone-band-unreachable-by-the-width-sweep: THE ACTIVITY
+    //    FEED BELOW THE SWEEP'S FLOOR ────────────────────────────────────────
+    //
+    //    THE GAP, RE-DERIVED ON origin/main RATHER THAN INHERITED FROM THE
+    //    FILING. `breakpoint-sweep.mjs` derives its width axis from the
+    //    stylesheet: `BREAKPOINTS = [620, 720, 740, 768, 830, 899, 904]` and
+    //    `WIDTHS = boundaryWalk(BREAKPOINTS)` emits b-1/b/b+1 for each, so its
+    //    NARROWEST driven width is 619 — imported below rather than typed, so
+    //    this leg cannot go on claiming a floor the sweep has moved. `#activity`
+    //    is one of that sweep's 25 registered cells (`{ name: "activity", scen:
+    //    "activity", hash: "#activity", … sentinel: "#activity-body .tlv-row" }`),
+    //    and NOTHING in this repo rendered it below 619 before this leg: the
+    //    file-wide axis recount printed under the ok-lines is what says so, per
+    //    run, instead of a sentence a later edit can falsify in silence.
+    //
+    //    WHY NOT WIDEN THE SWEEP, WITH THE NUMBERS. Its axis is DERIVED from
+    //    `app.css`'s own `@media` boundaries and Leg A refuses in BOTH
+    //    directions — a declared breakpoint the stylesheet does not carry is a
+    //    phantom (cch-w15), a stylesheet breakpoint this list lacks is an
+    //    UNCOVERED refusal. There is no `@media` boundary anywhere below 620, so
+    //    reaching 320 through `BREAKPOINTS` would mean declaring a boundary that
+    //    does not exist — buying phone coverage by making the sweep's central
+    //    refusal lie. The cost is the other half: the sweep renders 25 cells x 2
+    //    themes, so each added width is 50 renders (~37s at its own measured
+    //    0.73s/cell), and seven phone widths would add ~4.3 minutes to a job
+    //    that is already the console's longest. This leg pays 2 scenarios x 2
+    //    themes x 9 widths = 36 cells for the ONE screen the row names.
+    //
+    //    THE ROW'S NAMED TRAP IS ALREADY PAID, AND THAT IS A CORRECTION TO THE
+    //    FILING, NOT A SIDESTEP. The row says a 320-width render cell "reds main
+    //    on the folded shell's Q3 fold budget" (`.content` 344.5px down against
+    //    a 320px budget). On today's bytes it does not:
+    //    `cch-w24-bl-q3-fold-budget-is-a-shell-property-at-320` landed, and Q3
+    //    now measures SCREEN TOP = first painted box of the live `section.view`
+    //    MINUS the folded chrome's bottom (`foldVerdict` in breakpoint-sweep.mjs,
+    //    24px at 320 against a 320px budget), with the shell's own cost pinned
+    //    separately at `SHELL_CHROME_CEILING = 378.5`. So the trap is stale; the
+    //    reason this leg lives here is the DERIVED-AXIS argument above, which is
+    //    a property of the sweep and does not expire.
+    //
+    //    `#settings/env` IS REFUTED, NOT DEFERRED. The row (and
+    //    cch-w23-bl-three-screens-zero-geometry-coverage before it) names
+    //    `#settings/env` / `#env-body` / `envVarRowHtml` / the `env-populated`
+    //    fixture as an unmeasured screen. That screen NO LONGER EXISTS: the team
+    //    env-var page was deleted by cch-w53-bl's env-var Option A (ruled
+    //    2026-09-02) — `git grep -n 'view-env\|envVarRowHtml\|#env-body' --
+    //    cloud/priv/static/app.js cloud/priv/static/index.html` is EMPTY, the
+    //    surviving `env-editor` scenario is the SITE env-blob editor at
+    //    `#site/<id>` (breakpoint-sweep.mjs's residue map says so at its own
+    //    entry), `env-populated` is not a scenario at all, and
+    //    `cloud/priv/static/__app.test.mjs` asserts the absence in both
+    //    artefacts ("index.html must not register the env screen" / "must not
+    //    link the env screen"). A leg driving `#settings/env` would measure a
+    //    population of ZERO under a screen name — the exact failure the w23 row
+    //    filed about `.env-row` and `.audit-row`, one rung up.
+    //
+    //    THE TWO ASSERTIONS, AND WHY NEITHER ALONE REACHES THIS SCREEN.
+    //      · `.tlv-title` (app.css:4601) is `flex: 1 1 auto; min-width: 0;
+    //        overflow: hidden; text-overflow: ellipsis; white-space: nowrap` —
+    //        and `@media (max-width: 620px)` (app.css:4705) flips it to
+    //        `white-space: normal` while `.tlv-head` gains `flex-wrap: wrap`.
+    //        THAT FLIP IS THE PHONE BAND'S OWN RULE and 620 is its only edge the
+    //        sweep touches: everything the rule governs from 619 down was driven
+    //        by nothing. An identity that wraps is not automatically an identity
+    //        that FITS — `overflow: hidden` still clips whatever no break
+    //        opportunity can bring inside the box — so the row's title is held
+    //        to the SAME cue predicate the members roster uses (D253): it either
+    //        fits, or a cue can ACTUALLY PAINT, measured per row as a min-content
+    //        width plus a non-zero text run, never read off a `white-space`
+    //        declaration.
+    //      · THE CONTROLS. `.tlv-toggle` ("Details"), `.tlv-coalesce-toggle`
+    //        ("Show all N" / "Collapse") and `.tlv-when` are all `flex: 0 0 auto`
+    //        in a head that wraps below 620. A per-element bound says nothing
+    //        about whether the person can REACH them, so every control's right
+    //        edge is asserted inside the viewport, and `documentElement
+    //        .scrollWidth <= clientWidth` is asserted per cell on top — the
+    //        `.instance-card-name` lesson from the cruel-content leg, where the
+    //        host that never clips itself drags the page instead.
+    //
+    //    ROWS ARE ITERATED, NEVER SAMPLED (D228), and the feed's first row is
+    //    exactly the trap that rule exists for: on `activity` the newest entry
+    //    is a singleton `member.invited` with the shortest title in the fixture,
+    //    while the three coalesced `site.deploy_requested` rows below it carry
+    //    the "x N" count, the cadence meta and the "Show all 3" button. A
+    //    `querySelector('.tlv-row')` leg reads the one row with no button at all.
+    //
+    //    THE CORPUS IS KIND ON BOTH ARMS, SAID PLAINLY RATHER THAN DRESSED UP
+    //    AS AN AXIS. `activity` (7 audit entries, longest actor 12 chars) and
+    //    `mixed-fleet` (5) are the only two shipped fixtures that populate this
+    //    feed, and neither is cruel — `tlvEntryTitle` renders `actor + " " +
+    //    humanAction(type)` for audit rows, and the server's email cap (160,
+    //    the length `members-cruel-content` already drives on the roster) has
+    //    never been rendered into a `.tlv-title`. A cruel activity fixture is
+    //    therefore REAL residual work and is deliberately NOT built here: adding
+    //    a scenario moves breakpoint-sweep's coverage accounting (`hash:#activity`
+    //    is one of its two ZERO-RESIDUE families, asserted as such), which is a
+    //    cascade this row did not buy. What this leg certifies is the band, on
+    //    the corpus that ships, with both populations walked — not a cruelty
+    //    claim it has no fixture for.
+    if (requested.includes("W24-activity-feed-phone-band")) {
+      const D = "W24-activity-feed-phone-band";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      // Both fixtures that populate `#activity-body`. `activity` is the one
+      // whose deepLink is this screen and the only one that coalesces; the
+      // sweep drives BOTH names already, so this arm costs the scenario census
+      // nothing.
+      const ACT_SCENS = ["activity", "mixed-fleet"];
+      // The phone band, ending ON the sweep's floor: 618 is the last width the
+      // sweep cannot reach, and 619/620 are ITS widths, driven here as the
+      // handoff control so the two axes are proven CONTIGUOUS rather than
+      // assumed to be. 620 is also the `@media (max-width: 620px)` edge where
+      // `.tlv-title` flips to `white-space: normal`, so the pair 618/620 holds
+      // the rule's own band and the pair 620/(sweep's 621) holds its edge.
+      const ACT_WIDTHS = [320, 360, 390, 430, 480, 560, 618, 619, 620];
+      // ANTI-VACUITY 0 — THE AXIS, AND ITS TOP IS DERIVED FROM THE OTHER
+      // INSTRUMENT. This is the assertion that makes the row's defect unable to
+      // re-open quietly: if the sweep ever lowers its floor this check follows
+      // it, and if this leg's band is ever trimmed above the floor the gap it
+      // was built to close reds here instead of going unmeasured in both files.
+      const SWEEP_FLOOR = Math.min(...SWEEP_WIDTHS);
+      if (!ACT_WIDTHS.includes(SWEEP_FLOOR - 1)) {
+        fail(D, `axis check: breakpoint-sweep.mjs's narrowest driven width is ${SWEEP_FLOOR} (imported from its own WIDTHS, never typed here) and this leg does not drive ${SWEEP_FLOOR - 1} — the two axes no longer TOUCH, so ${SWEEP_FLOOR - 1} is a width neither instrument renders and the gap this leg exists to close has re-opened`);
+      }
+      if (Math.max(...ACT_WIDTHS) < SWEEP_FLOOR) {
+        fail(D, `axis check: this leg's widest width is ${Math.max(...ACT_WIDTHS)} and the sweep's narrowest is ${SWEEP_FLOOR} — with no overlap neither instrument drives the handoff, and "contiguous" would be an inference rather than a measurement`);
+      }
+      for (const need of [320, 620]) {
+        if (!ACT_WIDTHS.includes(need)) {
+          fail(D, `axis check: ${need} is not in the width set — 320 is the narrowest viewport this file drives anywhere, and 620 is the edge of \`@media (max-width: 620px)\` (app.css), the rule that gives \`.tlv-title\` \`white-space: normal\` and \`.tlv-head\` \`flex-wrap: wrap\`. A set missing either drives the phone band without its own boundary`);
+        }
+      }
+      if (!ACT_SCENS.includes("activity")) {
+        fail(D, `axis check: \`activity\` is not in the scenario set — it is the only fixture whose deepLink is this screen and the only one whose feed COALESCES (three consecutive site.deploy_requested rows on one target), so without it this leg never measures \`.tlv-coalesce\`, its count, its meta or its "Show all N" control`);
+      }
+      if (ACT_SCENS.length < 2) {
+        fail(D, `axis check: one scenario only — a bound proven on a single fixture's row set is a bound proven on one row set, and this feed is populated by two`);
+      }
+      const cellCount = ACT_SCENS.length * ACT_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${ACT_SCENS.length} scenarios x ${ACT_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells; every #activity-body .tlv-row iterated: .tlv-title scrollWidth vs clientWidth with a` +
+        ` cue that can actually paint, every .tlv-when/.tlv-toggle/.tlv-coalesce-toggle right edge vs viewport,` +
+        ` + page overflow. Band ${ACT_WIDTHS[0]}-${ACT_WIDTHS[ACT_WIDTHS.length - 1]}, meeting breakpoint-sweep's floor of ${SWEEP_FLOOR})\n`,
+      );
+      let cells = 0, rowsSeen = 0, titlesSeen = 0, ctrlsSeen = 0, coalesceSeen = 0;
+      let clipped = 0, offScreen = 0, pageOver = 0;
+      for (const scen of ACT_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter WIDE and assert the LANDED view — `?scen=` alone renders
+          // #overview (the W13/W15 note) and a phantom feed is worse than none.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#activity`,
+            `document.querySelector('#activity-body .tlv-row') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-activity';})()`,
+          );
+          const row = [];
+          for (const width of ACT_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var d=document.documentElement;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:[]};` +
+              // EVERY row in document order (D228) — row 0 is the singleton
+              // `member.invited` with no button at all.
+              `[].slice.call(document.querySelectorAll('#activity-body .tlv-row')).forEach(function(r,i){` +
+              `  var rec={i:i,coalesce:r.classList.contains('tlv-coalesce'),ctrls:[],title:null};` +
+              `  [].slice.call(r.querySelectorAll(':scope > .tlv-head > .tlv-when, :scope > .tlv-head > .tlv-toggle, :scope > .tlv-head > .tlv-coalesce-toggle')).forEach(function(c){` +
+              `    var cr=c.getBoundingClientRect();` +
+              `    rec.ctrls.push({k:c.className.split(' ')[0],t:(c.textContent||'').trim().slice(0,24),right:Math.round(cr.right*100)/100});` +
+              `  });` +
+              `  var n=r.querySelector(':scope > .tlv-head > .tlv-title');` +
+              `  if(n){var cs=getComputedStyle(n);` +
+              // THE BREAK-OPPORTUNITY MEASUREMENT (charter D253), the same
+              // instrument the members roster uses and for the same reason:
+              // `text-overflow` paints when the overflowing LINE has no break
+              // opportunity that fits AND carries a text run to truncate.
+              // cssText is APPENDED, never assigned — assigning deletes the
+              // copied style attribute and measures the element under a cascade
+              // it does not have.
+              `    var cl=n.cloneNode(true);` +
+              `    cl.style.cssText+=';position:absolute!important;left:-99999px!important;top:0!important;visibility:hidden!important;width:min-content!important;max-width:none!important;min-width:0!important;height:auto!important;overflow:visible!important;flex:0 0 auto!important;';` +
+              `    n.parentNode.appendChild(cl);` +
+              `    var mw=Math.ceil(cl.getBoundingClientRect().width);` +
+              `    cl.parentNode.removeChild(cl);` +
+              // The widest TEXT run reachable through `display: inline` only —
+              // a line holding nothing but atomic inlines has nothing to
+              // ellipsize. `.tlv-coalesce-count` is an inline span and IS
+              // walked; an inline-block child would be an atom and is not.
+              `    var tw=0;` +
+              `    (function walk(e){` +
+              `      for(var k=0;k<e.childNodes.length;k++){var ch=e.childNodes[k];` +
+              `        if(ch.nodeType===3){` +
+              `          if(!(ch.nodeValue||'').trim()) continue;` +
+              `          var rg=document.createRange();rg.selectNodeContents(ch);` +
+              `          var rl=rg.getClientRects();` +
+              `          for(var q=0;q<rl.length;q++) tw=Math.max(tw,rl[q].width);` +
+              `        } else if(ch.nodeType===1){` +
+              `          var dd=getComputedStyle(ch).display;` +
+              `          if(dd==='inline'||dd==='contents') walk(ch);` +
+              `        }` +
+              `      }})(n);` +
+              `    rec.title={sw:n.scrollWidth,cw:n.clientWidth,mw:mw,tw:Math.round(tw*100)/100,` +
+              `      ws:cs.whiteSpace,te:cs.textOverflow,ov:cs.overflow,ox:cs.overflowX,` +
+              `      t:(n.textContent||'').trim().replace(/\\s+/g,' ').slice(0,48)};}` +
+              `  out.rows.push(rec);` +
+              `});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-activity") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-activity" — the hash did not route, so nothing below this line measured the feed`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty feed is not a clean feed. `#activity-body` also
+            // renders a teaching empty state, which would satisfy every
+            // assertion below having measured no row.
+            if (m.rows.length === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero \`#activity-body .tlv-row\` rendered — the feed painted its empty state (or the fixture stopped populating \`audit\`), so nothing was measured and this is not a pass`);
+              row.push(`${width}:0r`);
+              continue;
+            }
+            rowsSeen += m.rows.length;
+            coalesceSeen += m.rows.filter((r) => r.coalesce).length;
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the activity feed is off-screen sideways, on a screen whose whole job is to be read`);
+            }
+            let cellCtrls = 0;
+            for (const r of m.rows) {
+              for (const c of r.ctrls) {
+                cellCtrls++;
+                if (c.right > m.pcw) {
+                  offScreen++;
+                  fail(D, `${scen}/${theme}@${width} row${r.i} \`.${c.k}\` "${c.t}": right edge ${c.right} > viewport ${m.pcw} — the control is OFF-SCREEN by ${Math.round((c.right - m.pcw) * 100) / 100}px, so the person cannot reach it`);
+                }
+              }
+              const n = r.title;
+              if (!n) continue;
+              titlesSeen++;
+              if (n.sw <= n.cw) continue;
+              // A CUE THAT CAN ACTUALLY PAINT — MEASURED, NEVER READ OFF THE
+              // DECLARATIONS (D253). `text-overflow: ellipsis` paints only
+              // where the box CLIPS horizontally (`overflow-x` read by name:
+              // the shorthand serialises "visible clip" for a legal pair the
+              // spec does not blockify) AND the overflowing line has no break
+              // opportunity that fits (min-content wider than the box) AND
+              // there is a text run to truncate.
+              const clips = n.ox !== "visible";
+              const noBreakFits = n.mw > n.cw;
+              const hasRun = n.tw > 0;
+              const cueCanPaint = clips && noBreakFits && hasRun && n.te === "ellipsis";
+              if (!cueCanPaint) {
+                clipped++;
+                const why = !clips
+                  ? `the box does not clip horizontally (overflow-x "${n.ox}", shorthand "${n.ov}"), so no marker is ever reached`
+                  : n.te !== "ellipsis"
+                    ? `computed text-overflow is "${n.te}", so nothing is authored to paint`
+                    : !noBreakFits
+                      ? `min-content ${n.mw}px FITS inside clientWidth ${n.cw}px, so the overflow is VERTICAL — \`overflow: hidden\` eats whole lines and no marker is ever reached`
+                      : `the overflowing line carries no text run to truncate (widest run ${n.tw}px)`;
+                fail(D, `${scen}/${theme}@${width} row${r.i} \`.tlv-title\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of WHO DID WHAT is hidden with NO cue that can paint (measured min-content ${n.mw}px, widest text run ${n.tw}px; computed white-space "${n.ws}", text-overflow "${n.te}", overflow "${n.ov}", overflow-x "${n.ox}" — REPORTED, never the test; ${why})`);
+              }
+            }
+            ctrlsSeen += cellCtrls;
+            row.push(`${width}:${m.rows.length}r/${cellCtrls}c@${m.psw}`);
+          }
+          process.stdout.write(`   ${D} ${scen}/${theme}: ${row.join(" ")}\n`);
+        }
+      }
+      // ANTI-VACUITY 1 — the populations, asserted after both loops close. A
+      // feed that renders rows but no CONTROL satisfies "no control off-screen"
+      // having measured no control, and a run that never saw a coalesced row
+      // measured the singleton grammar twice under two fixture names.
+      if (titlesSeen === 0) {
+        fail(D, `${rowsSeen} \`.tlv-row\` walked across ${cells} cells and NOT ONE carried a \`.tlv-title\` — the identity assertion fired nowhere, so this leg's clean line would be a sentence nothing measured`);
+      }
+      if (ctrlsSeen === 0) {
+        fail(D, `${rowsSeen} \`.tlv-row\` walked across ${cells} cells and NOT ONE carried a \`.tlv-when\`/\`.tlv-toggle\`/\`.tlv-coalesce-toggle\` — "no control off-screen" is true of an empty set, which is not what this leg claims`);
+      }
+      if (coalesceSeen === 0) {
+        fail(D, `no \`.tlv-coalesce\` row was rendered in any of the ${cells} cells — the \`activity\` fixture's three consecutive site.deploy_requested rows on one target are what produce the coalesced grammar ("x N", the cadence meta, "Show all 3"), so a run without one measured the singleton row twice and the fold grammar never`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${ACT_WIDTHS.join("/")} on ${ACT_SCENS.join(" + ")} in both themes — ` +
+          `${rowsSeen} \`#activity-body .tlv-row\` iterated (never sampled: row 0 is the singleton with no button), ` +
+          `${titlesSeen} \`.tlv-title\` held to the D253 cue predicate, ${ctrlsSeen} controls asserted inside the ` +
+          `viewport, ${coalesceSeen} of the rows coalesced; ${clipped} identities hidden with no cue that can paint, ` +
+          `${offScreen} controls past the viewport edge, ${pageOver} pages scrolling sideways. Cells print ` +
+          `rows/controls@documentElement.scrollWidth, so a page that starts dragging is legible in the table rather ` +
+          `than only in a failure`,
+        );
+        okLine(
+          `THE BAND IS CONTIGUOUS WITH breakpoint-sweep.mjs, AND THAT IS DERIVED: its narrowest driven width is ` +
+          `${SWEEP_FLOOR} (imported from its exported WIDTHS, which it in turn derives from app.css's own @media ` +
+          `boundaries via boundaryWalk), this leg drives ${SWEEP_FLOOR - 1} and below, and ${SWEEP_FLOOR}/${SWEEP_FLOOR + 1} ` +
+          `are driven by BOTH as the handoff. cch-w24-bl-phone-band-unreachable-by-the-width-sweep's defect — "the ` +
+          `phone band 320-618 is unmeasured on every screen it owns" — therefore cannot re-open for \`#activity\` ` +
+          `without reding the axis check above, which reads the sweep's floor rather than repeating it`,
+        );
+        okLine(
+          `WHO ELSE DRIVES 320 IN THIS FILE, RECOUNTED FROM THE DECLARED AXES rather than asserted: ` +
+          `${driverSentence(widthDrivers(SELF_SRC, 320, "ACT_WIDTHS"))}. What was true of \`#activity\` before this ` +
+          `leg is the narrower claim, and it is the row's: none of those axes NAVIGATES to it — every one of them ` +
+          `drives #overview, #fleet, #billing, #settings/* or a detail route`,
+        );
+        okLine(
+          `\`#settings/env\` IS NOT MEASURED HERE AND THAT IS A REFUTATION, NOT A GAP: the team env-var screen was ` +
+          `deleted by cch-w53-bl's env-var Option A (ruled 2026-09-02). \`view-env\`, \`envVarRowHtml\` and ` +
+          `\`#env-body\` are absent from app.js and index.html, \`env-populated\` is not a scenario, the surviving ` +
+          `\`env-editor\` fixture is the SITE env-blob editor at \`#site/<id>\`, and __app.test.mjs asserts both ` +
+          `absences. A leg driving it would measure a population of ZERO under a screen name`,
+        );
+        fontPinnedEvidence(
+          `What is ASSERTED is face-independent anyway — a control's right edge inside the viewport, a page that ` +
+          `does not scroll sideways, and text that either fits or carries a cue that can actually paint`,
         );
       }
     }
