@@ -526,7 +526,7 @@ defmodule Barkpark.Content.DedupWall do
 
   defp fetch_candidates(ref, type, dataset, opts) do
     title = field_str(ref, :title)
-    timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
+    timeout = resolve_timeout(opts)
     incumbent = DraftId.published_id(field_str(ref, :id))
 
     if timeout <= 0 do
@@ -650,7 +650,7 @@ defmodule Barkpark.Content.DedupWall do
       end
 
       Logger.warning("Content.DedupWall degraded: candidate fetch failed: #{inspect(e)}")
-      {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
+      {:degraded, reason_phrase(e, resolve_timeout(opts))}
   catch
     # Pool-checkout death arrives as an EXIT, not an exception — a rescue-only
     # clause lets it through as a 500. This is the clause Tasks.Dedup needed.
@@ -735,6 +735,48 @@ defmodule Barkpark.Content.DedupWall do
 
   defp raise_on_code_errors?,
     do: Application.get_env(:barkpark, :dedup_raise_on_code_errors, false)
+
+  # ── THE SCAN BUDGET, AND WHY ITS OVERRIDE IS COMPILED OUT OF PROD ───────────
+  #
+  # THE PROBLEM (dr-w32-bl-dedup-outage-unreachable-from-http). The degraded arm
+  # — `{:error, {:dedup_unavailable, _}}`, the ONE wall shape that is a transient
+  # OUTAGE rather than a policy refusal — fired only on a non-string dataset or
+  # an explicit `dedup_timeout_ms` opt. Neither is settable from an HTTP request:
+  # the ingest controller's `put_scope/3` always threads a string dataset and
+  # `Content.upsert_paper/1` passes no opts through. So the ingest controller's
+  # four `{:error, {:dedup_unavailable, reason}}` arms were unreachable from the
+  # wire, and the 503 envelope they render was asserted NOWHERE above unit level.
+  # That is precisely how this shape shipped as a 409 plugin-veto in the first
+  # place: no test could see what the door actually said.
+  #
+  # THE DECISION (option (a) of the row, ruled by the lead). The DEFAULT budget —
+  # what every request gets when no opt is passed — becomes overridable through
+  # `Application.get_env(:barkpark, :dedup_timeout_ms)`, so a ConnCase can drive
+  # the whole HTTP stack into a degraded scan with `put_env(…, 0)` and read the
+  # wire shape the controller emits.
+  #
+  # WHY IT IS `Mix.env() == :test` AND NOT A RUNTIME FLAG. A runtime-only default
+  # would mean a prod config file — or anything that can write application env in
+  # a running node — could steer the wall into permanent self-inflicted degraded
+  # mode, turning every publish into a 503 with no database fault behind it. The
+  # sibling door above (`raise_on_code_errors?`) is safe as pure runtime config
+  # because its worst case is a LOUD raise on an already-broken path; this one's
+  # worst case is a silent, total, fail-closed outage. So the `get_env` read is
+  # COMPILED AWAY outside `:test`: in `:prod` and `:dev` `default_timeout/0` is
+  # the literal `@query_timeout_ms` and there is no config key to find.
+  #
+  # PROD BEHAVIOUR IS BYTE-IDENTICAL. Same constant, same call, one extra inlined
+  # zero-arity function. An explicit `dedup_timeout_ms` opt still wins everywhere
+  # — the override only supplies the DEFAULT.
+  @test_env Mix.env() == :test
+
+  defp resolve_timeout(opts), do: Keyword.get(opts, :dedup_timeout_ms, default_timeout())
+
+  if @test_env do
+    defp default_timeout, do: Application.get_env(:barkpark, :dedup_timeout_ms, @query_timeout_ms)
+  else
+    defp default_timeout, do: @query_timeout_ms
+  end
 
   # ── shaping ──────────────────────────────────────────────────────────────────
 

@@ -207,7 +207,12 @@ write_status restart applied
 
 # The probe target and its bound. Defaults are the prod values; the harness
 # shrinks the loop so the refusal arm is provable in ~0s.
-BP_HEALTH_URL="${BP_HEALTH_URL:-http://localhost:4000/api/schemas}"
+# /status.json, NOT /api/schemas: the legacy route carries a published
+# `sunset: Wed, 31 Dec 2026 23:59:59 GMT` (BarkparkWeb.Plugs.LegacyDeprecation),
+# and this loop GATES on `= 200`, so on removal day a healthy box would exit 15
+# on every deploy. /status.json is `pipe_through(:api)` only and is strictly
+# stronger: Status.health/0 runs bare Repo.all/1, so a dead DB is a 500, not a 200.
+BP_HEALTH_URL="${BP_HEALTH_URL:-http://localhost:4000/status.json}"
 BP_HEALTH_ATTEMPTS="${BP_HEALTH_ATTEMPTS:-40}"
 BP_HEALTH_SLEEP="${BP_HEALTH_SLEEP:-3}"
 

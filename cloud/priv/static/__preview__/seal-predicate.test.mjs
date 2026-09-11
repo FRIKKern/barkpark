@@ -365,12 +365,12 @@ test('defect 3b: a successor that exists but is UNPUBLISHED does not resolve', (
 // register entry, so it tracks whatever the register actually contains.
 test('defect 4: an empty KNOWN_DEFECTS register cannot seal (sentinel derived, not hardcoded)', () => {
   const src = readFileSync(PREDICATE, 'utf8');
-  const firstId = (src.match(/const KNOWN_DEFECTS = \[\s*\{\s*\n\s*id: '([^']+)'/) || [])[1];
-  assert.ok(firstId, 'the emptiness sentinel must be derivable from KNOWN_DEFECTS[0].id');
+  const firstId = (src.match(/const CCH_KNOWN_DEFECTS = \[\s*\{\s*\n\s*id: '([^']+)'/) || [])[1];
+  assert.ok(firstId, 'the emptiness sentinel must be derivable from CCH_KNOWN_DEFECTS[0].id');
   assert.match(src, new RegExp(firstId), 'sanity: the derived sentinel is present BEFORE the mutation');
 
-  const mutated = src.replace(/const KNOWN_DEFECTS = \[[\s\S]*?\n\];/, 'const KNOWN_DEFECTS = [];');
-  assert.notEqual(mutated, src, 'the KNOWN_DEFECTS mutation must actually apply');
+  const mutated = src.replace(/const CCH_KNOWN_DEFECTS = \[[\s\S]*?\n\];/, 'const CCH_KNOWN_DEFECTS = [];');
+  assert.notEqual(mutated, src, 'the CCH_KNOWN_DEFECTS mutation must actually apply');
   assert.doesNotMatch(mutated, new RegExp(firstId), 'the register must really be empty');
   const path = join(mkdtempSync(join(tmpdir(), 'seal-pred-')), 'empty-register.mjs');
   writeFileSync(path, mutated);
@@ -516,13 +516,28 @@ test('wave 7: the predicate names the epic it is judging, in the header and the 
 
 test('wave 7: --epic retargets the subject of every clause, including the refusal path', () => {
   const OTHER = 'some-other-epic-entirely';
-  const { out } = fixtureRun('sealable.json', ['--epic', OTHER]);
+  // RETARGETED AT WAVE 25, and the retarget IS the finding. What wave 7 pinned here is
+  // that the epic under judgement is named in the HEADER and in the MACHINE TOKEN, on
+  // the verdict path and on the refusal path alike — every line below still asserts
+  // exactly that. What is GONE is this invocation reaching `VERDICT: SEAL`: an epic
+  // with no entry in EPIC_REGISTERS is now REFUSED before R0/R1, because clause (b)
+  // and bucket (c) are scored ENTIRELY off the epic-keyed registers and this program
+  // holds none for OTHER. Before that fence, this same call sealed `some-other-epic-
+  // entirely` over Cloud Console's six CCH-D* defects and three human gates.
+  const { status, out } = fixtureRun('sealable.json', ['--epic', OTHER]);
+  assert.equal(status, REFUSED, 'an unregistered epic gets no verdict at all');
   assert.match(out, new RegExp(`^=== SEAL PREDICATE — epic ${OTHER} ===$`, 'm'));
   assert.match(out, new RegExp(`epic=${OTHER}`));
+  assert.match(out, new RegExp(`REFUSED reason=UNREGISTERED-EPIC .*epic=${OTHER}`));
   // A refusal must carry the epic too — a verdict about an unnamed epic is unreadable.
   const refused = fixtureRun('zero-live-null-successor.json', ['--epic', OTHER]);
   assert.match(refused.out, new RegExp(`^=== SEAL PREDICATE — epic ${OTHER} ===$`, 'm'));
-  assert.match(refused.out, new RegExp(`REFUSED reason=NO-SUCCESSOR .*epic=${OTHER}`));
+  assert.match(refused.out, new RegExp(`REFUSED reason=UNREGISTERED-EPIC .*epic=${OTHER}`));
+  // …and the REGISTERED epic still reaches its verdict on the same fixture, so the two
+  // lines above are a fence and not a blanket refusal that would pass for any reason.
+  const registered = fixtureRun('sealable.json');
+  assert.equal(registered.status, SEAL, 'control: the fixture itself still seals for the epic that HAS a register');
+  assert.match(registered.out, new RegExp(`^=== SEAL PREDICATE — epic ${EPIC} ===$`, 'm'));
 });
 
 // ── R4 — FORWARDING TO YOURSELF IS NOT FORWARDING ───────────────────────────
@@ -1430,16 +1445,16 @@ test('wave 11: --ladder-only does NOT swallow an INFRA FAULT into a clean read',
 // HERMETIC HERE SCOPES TO THE NETWORK AND NOTHING WIDER. This run still reads real git
 // history through `--repo REPO` (filed as cch-w28-followup-seal-suite-depth1-coupling).
 const stubbedLiveRoster = (src) => {
-  const from = 'const children = fixture ? fixture.children : fetchRoster(EPIC);';
+  const from = 'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;';
   // ASSERTED PRESENT BEFORE IT IS REPLACED. `String.prototype.replace` on an anchor that
   // has drifted is a SILENT no-op, and `mutatedRun`'s own `assert.notEqual(out, src)`
   // only proves SOMETHING changed — which the day this line is reworded would leave the
   // test back on the network with nothing saying so.
   assert.ok(src.includes(from), `mutation anchor has drifted out of the predicate: ${from}`);
-  return src.replace(from,
-    'const children = fixture ? fixture.children : ['
-    + '{ _id: "stub-open-row", lifecycle_status: "open", parent_id: EPIC }, '
-    + '{ _id: "stub-done-row", lifecycle_status: "done", parent_id: EPIC }];');
+  // The canned rows are LEAVES: the walk is transitive since wave 26, so the stand-in
+  // must answer for the epic AND for every row under it, or the walk leaves the fixture
+  // and goes back on the network for their children.
+  return src.replace(from, 'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : ((id) => (id === EPIC ? [{ _id: "stub-open-row", lifecycle_status: "open", parent_id: EPIC }, { _id: "stub-done-row", lifecycle_status: "done", parent_id: EPIC }] : []));');
 };
 
 test('wave 11: --ladder-only reaches the ladder the live refusals never can', () => {
@@ -1503,7 +1518,7 @@ test('wave 11: --ladder-only is still bound by R0 and R1 — no stub, no empty r
   assert.match(token(stub.out), /REFUSED reason=GUARD-OVERRIDE-WITHOUT-FIXTURE/);
 
   const emptied = mutatedRun(
-    (s) => s.replace(/^const KNOWN_DEFECTS = \[[\s\S]*?^\];$/m, 'const KNOWN_DEFECTS = [];'),
+    (s) => s.replace(/^const CCH_KNOWN_DEFECTS = \[[\s\S]*?^\];$/m, 'const CCH_KNOWN_DEFECTS = [];'),
     ['--ladder-only', '--repo', REPO]);
   assert.equal(emptied.status, REFUSED, 'R1 still refuses an empty register on the reading path too');
   assert.match(token(emptied.out), /REFUSED reason=EMPTY-DEFECT-REGISTER/);
@@ -1628,8 +1643,7 @@ test('wave 27: the root guard reads a LINKED WORKTREE, where `.git` is a FILE, n
 // cloud-console-hardening-epicc". Reproduced here WITHOUT the network by standing an
 // empty array in for the live roster fetch — the same population that typo produced.
 const emptyLiveRoster = (src) => {
-  const out = src.replace('const children = fixture ? fixture.children : fetchRoster(EPIC);',
-    'const children = fixture ? fixture.children : [];');
+  const out = src.replace('const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;', 'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : ((id) => (id === EPIC ? [] : []));');
   assert.notEqual(out, src, 'the empty-live-roster mutation must actually apply');
   return out;
 };
@@ -1659,7 +1673,7 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
   const sealed = mutatedRun(
     (src) => mustReplace(
       mustReplace(emptyLiveRoster(src),
-        'if (!fixture && children.length === 0)', 'if (false && children.length === 0)'),
+        'if (!fixture && direct.length === 0)', 'if (false && direct.length === 0)'),
       'const fetchById = (id) => {',
       'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {'),
     ['--repo', REPO, '--successor', 'TERMINAL']);
@@ -1706,7 +1720,8 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
 // THE FABRICATION SENTENCES, RELOCATED — reachable WITHOUT git history.
 // `Sealed 0 children of …` is the sentence the empty-roster floor exists to prevent, so
 // it must stay pinned somewhere a depth-1 CI clone can reach. The floor is live-only
-// (`if (!fixture && children.length === 0)`), so a ledger fixture with an EMPTY
+// (`if (!fixture && direct.length === 0)` — the floor is on the DIRECT level, so an
+// epic whose direct roster is empty is refused whatever hangs below), so a fixture with an EMPTY
 // `children` array walks straight into it — and the fixture path stands `landed` in for
 // ancestry, so clause (b) never touches git at all. The one thing this demonstration
 // does NOT carry, relative to the live control above, is `mode=live`: it proves the
@@ -1735,11 +1750,17 @@ test('wave 28: the fabrication sentence is reachable over an empty FIXTURE roste
 // its tree is unquotable.
 test('wave 27: the verdict token names the roster it counted and the tree it read', () => {
   // The LIVE verdict path, reached hermetically through the control mutation above.
+  // ASSERTED PRESENT BEFORE REPLACED. A bare `.replace` on a drifted anchor is a SILENT
+  // no-op, and this chain's own `assert.notEqual(out, src)` is satisfied by the roster
+  // mutation alone — measured at wave 26, when the floor's anchor moved from `children`
+  // to `direct` and this test redded on a token it could not explain.
+  const must26 = (src, from, to) => { assert.ok(src.includes(from), `anchor drifted: ${from}`); return src.replace(from, to); };
   const live = mutatedRun(
-    (src) => emptyLiveRoster(src)
-      .replace('if (!fixture && children.length === 0)', 'if (false && children.length === 0)')
-      .replace('const fetchById = (id) => {',
-        'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {'),
+    (src) => must26(
+      must26(emptyLiveRoster(src),
+        'if (!fixture && direct.length === 0)', 'if (false && direct.length === 0)'),
+      'const fetchById = (id) => {',
+      'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {'),
     ['--repo', REPO, '--successor', 'TERMINAL']);
   assert.match(token(live.out), /roster=0 repo=\S+ head=[0-9a-f]{7,}/,
     'a live verdict states its population AND the tree it was taken from');
@@ -1913,8 +1934,8 @@ test('wave 29 THE VERDICT PATH: HISTORY-UNAVAILABLE is a LETTER at exit 1, never
   const { root } = synthGitRepo({});
   const must = (s, from, to) => { assert.ok(s.includes(from), `anchor drifted: ${from}`); return s.replace(from, to); };
   const mut = (src) => must(
-    must(src, 'const children = fixture ? fixture.children : fetchRoster(EPIC);',
-      'const children = fixture ? fixture.children : [{ _id: "x", lifecycle_status: "done" }];'),
+    must(src, 'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;',
+      'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : ((id) => (id === EPIC ? [{ _id: "x", lifecycle_status: "done" }] : []));'),
     'const fetchById = (id) => {',
     'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {');
   const { status, out } = mutatedRun(mut, ['--repo', root, '--successor', 'TERMINAL']);
@@ -1937,8 +1958,8 @@ test('wave 29: a checkout with WHOLE history is BYTE-IDENTICAL to the undiscrimi
   // ancestry leg. `b-unavailable=` is appended ONLY when non-zero for exactly this
   // reason — a new field on every green would make every previously-quoted token
   // unmatchable for a condition that did not occur.
-  const roster = (src) => src.replace('const children = fixture ? fixture.children : fetchRoster(EPIC);',
-    'const children = fixture ? fixture.children : [{ _id: "x", lifecycle_status: "done" }];');
+  const roster = (src) => src.replace('const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;',
+    'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : ((id) => (id === EPIC ? [{ _id: "x", lifecycle_status: "done" }] : []));');
   const stubGate = (src) => src.replace('const fetchById = (id) => {',
     'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {');
   const now = mutatedRun((s) => stubGate(roster(s)), ['--repo', REPO, '--successor', 'TERMINAL']);
@@ -2002,6 +2023,16 @@ const cannedLedger = (o) => 'function q(params) {\n'
   + '    }\n'
   + '    return { result: { documents: [], count: 0, offset: 0, limit: n, total: 0 } };\n'
   + '  }\n'
+  // THE CANNED LEDGER IS A TREE, AND IT HAS EXACTLY ONE PARENT. Wave 26 made clause (a)
+  // TRANSITIVE, so `fetchRoster` is now called once per NODE, not once per run. A stub
+  // that ignores `filter[parent_id]` and serves `row-0…row-N` to every question makes
+  // `row-0` its own child's parent, and the walk answers `code=ROSTER-CYCLE` — measured,
+  // 15 of these tests at once. The generator's rows already declare
+  // `parent_id: "cloud-console-hardening-epic"`, so serving them under any OTHER parent
+  // was always a stub answering a question it was not asked; it simply had no reader
+  // until the walk could descend. Every canned row is therefore a LEAF.
+  + '  if (p.get("filter[parent_id]") !== "cloud-console-hardening-epic")\n'
+  + '    return { result: { documents: [], count: 0, offset: 0, limit: Number(p.get("limit") || 0), total: 0 } };\n'
   + '  const ROWS = ' + (o.rows === Infinity ? 'Infinity' : String(o.rows))
   + ', TOTAL = ' + (o.total === undefined || o.total === null ? 'null' : String(o.total))
   + ', DESC = ' + Boolean(o.descending)
@@ -2033,16 +2064,29 @@ const cannedTasks = (o) => {
   const rows = o.rows === Infinity ? 0 : Number(o.rows || 0);
   const served = o.total === undefined || o.total === null ? rows : Number(o.total);
   const n = o.childCount === undefined ? served : Number(o.childCount);
+  // LEAVES HAVE NO CHILDREN HERE EITHER. The transitive walk cross-checks EVERY node it
+  // visits, and a canned `child_count` of N for a leaf whose published roster is empty is
+  // a gap — `ROSTER-DRAFT-BLIND` on a parent the test never meant to describe. The count
+  // belongs to the one parent the canned roster actually serves.
   return 'function qTasks(id) {\n'
-    + '  return { doc: { child_count: ' + n + ' } };\n'
+    + '  return { doc: { child_count: id === "cloud-console-hardening-epic" ? ' + n + ' : 0 } };\n'
     + '}\n'
     + 'function _unused_real_qTasks(id) {';
 };
 const must = (s, from, to) => { assert.ok(s.includes(from), `anchor drifted: ${from}`); return s.replace(from, to); };
 const chain = (...fns) => (s) => fns.reduce((acc, f) => f(acc), s);
+// A CANNED LEDGER HOLDS NO PRIOR CENSUS. The committed census for this epic
+// (fixtures/seal-predicate/census/cloud-console-hardening-epic.json) describes 94 real
+// rows; a stub that serves `row-0…row-N` never served one of them, so leaving the census
+// armed would print 94 synthetic filing events and spend 94 by-id lookups per test on a
+// comparison that means nothing. Stubbing the ledger stubs its census too.
+const cannedCensusDefault = 'function censusDefaultPath() {\n  return null;\n}\n'
+  + 'function _unused_real_censusDefaultPath() {';
 const withLedger = (o) => (s) => must(
-  must(s, 'function q(params) {', cannedLedger(o)),
-  'function qTasks(id) {', cannedTasks(o));
+  must(
+    must(s, 'function q(params) {', cannedLedger(o)),
+    'function qTasks(id) {', cannedTasks(o)),
+  'function censusDefaultPath() {', cannedCensusDefault);
 const withPageLimit = (n) => (s) => must(s, 'const ROSTER_PAGE_LIMIT = 500;', `const ROSTER_PAGE_LIMIT = ${n};`);
 const withMaxPages = (n) => (s) => must(s, 'const ROSTER_MAX_PAGES = 40;', `const ROSTER_MAX_PAGES = ${n};`);
 // READ ON THE CLAUSE-(a) LETTERS, NEVER ON THE EXIT CODE, in every control below. The
@@ -2218,7 +2262,7 @@ test('wave 64: the roster request actually CARRIES offset, order and count — r
 
 test('wave 29: bucket (c) REFUSES an empty gate table instead of certifying c=PASS over zero gates', () => {
   const empty = (s) => {
-    const out = s.replace(/^const PERMANENT_HUMAN_GATES = \{[\s\S]*?^\};$/m, 'const PERMANENT_HUMAN_GATES = {};');
+    const out = s.replace(/^const CCH_PERMANENT_HUMAN_GATES = \{[\s\S]*?^\};$/m, 'const CCH_PERMANENT_HUMAN_GATES = {};');
     assert.notEqual(out, s, 'the gate-table mutation must actually apply');
     return out;
   };
@@ -2469,7 +2513,8 @@ test('wave 66: a cross-check that CANNOT BE READ refuses — an unverified popul
   const unreadable = rosterRun(chain(
     withLedger({ rows: 7, total: 7 }),
     withPageLimit(3),
-    (s) => must(s, 'return { doc: { child_count: 7 } };', 'return { doc: {} };')));
+    (s) => must(s, 'return { doc: { child_count: id === "cloud-console-hardening-epic" ? 7 : 0 } };',
+      'return { doc: {} };')));
   assert.equal(unreadable.status, INFRA, 'a cross-check that produced no number certifies nothing');
   assert.match(token(unreadable.out), /code=DRAFT-CROSSCHECK-UNREADABLE/);
   assert.match(unreadable.out, /no numeric child_count/);
@@ -2719,4 +2764,550 @@ test('wave 68: a 429 that CLEARS lets the read succeed — the retry recovers, i
   assert.ok(callCount(log) >= 2, 'the throttled attempt and at least the one that succeeded');
   assert.doesNotMatch(token(r.out), /code=LEDGER-RATE-LIMITED/,
     'a throttle that CLEARED must not still be reported as a rate-limit fault — the read succeeded');
+});
+
+// ═══ WAVE 28 — THE FOUR LEG-B PARSER BLIND SPOTS ════════════════════════════
+// (dr-w28-bl-seal-predicate-parser-blind-spots-console-side)
+//
+// Deploy-reliability wave 28 mutation-swept the leg-B job-graph reader with EIGHT
+// mutations of `.github/workflows/cloud.yml`. Three SURVIVED — the cases above
+// already pin them. FOUR DID NOT, and this block is the executable spec for them.
+// None was ever present on main: they are latent, not live. Confirmed at build time
+// against a917280fb, and each mutator below re-asserts the absence on the tree it is
+// handed, so the day one of these lands in cloud.yml the SANITY line reds first and
+// says so rather than letting the case pass for the wrong reason.
+//
+// Every arm is a MUTATION PROOF in the shape this file already uses: the specimen is
+// a cloud.yml variant fed through `synthRepo`, and the whole file re-runs against the
+// PRE-FIX predicate through `SEAL_PREDICATE_PATH` (see the header). Pre-fix, all four
+// specimens below answered WRONG; the expected pre-fix answer is recorded per arm.
+//
+// The control for all four is the wave-9 CONTROL above: unmutated workflow -> SEAL.
+
+// Return the source of the `cloud-gate:` job alone, so a mutator cannot resolve
+// through `report-main-failure:` (which also carries an inline `needs:`) — the same
+// bounding the wave-9 `needs:` spelling case had to adopt.
+const cloudGateBody = (text) => {
+  const from = text.search(/^ {2}cloud-gate:$/m);
+  assert.notEqual(from, -1, 'sanity: cloud.yml must declare a cloud-gate job at column 2');
+  const rest = text.slice(from + 1);
+  const next = rest.search(/^ {2}[A-Za-z0-9_-]+:$/m);
+  return next === -1 ? rest : rest.slice(0, next);
+};
+
+// The `jobs:` block as raw text — everything a column-0 line has NOT yet ended.
+const jobsBlock = (text) => {
+  const at = text.search(/^jobs:$/m);
+  assert.notEqual(at, -1, 'sanity: cloud.yml must declare a top-level jobs: block');
+  return text.slice(at);
+};
+
+// ── M4 — a column-0 `#` comment INSIDE jobs: ────────────────────────────────
+// PRE-FIX: `/^\S/.test(line)` read the `#` as "left the jobs: block", truncating the
+// job graph at that line. With the comment above `cloud-gate:` the aggregator simply
+// ceased to exist and all four rung-2 entries dropped to rung 3 —
+// "NO job both `needs:` `test` and carries `if: always()`" x4, exit 1.
+// A comment is not structure; it must move NOTHING.
+test('wave 28 M4: a column-0 `#` comment inside jobs: does not truncate the job graph', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    assert.doesNotMatch(jobsBlock(src), /^#/m,
+      'sanity: this mutation must be LATENT — cloud.yml carries no column-0 comment inside jobs: today');
+    const mutated = src.replace(/^ {2}cloud-gate:$/m,
+      '# a column-0 comment, legal YAML, structurally meaningless\n  cloud-gate:');
+    assert.notEqual(mutated, src, 'the column-0 comment must actually be inserted');
+    assert.match(jobsBlock(mutated), /^#/m, 'the comment must land INSIDE the jobs: block');
+    return mutated;
+  } });
+  assert.equal(status, SEAL, `a comment must satisfy nothing AND break nothing: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /NO job both `needs:`/,
+    'the aggregator is still there — a `#` at column 0 must not end the job graph');
+  assert.match(token(out), /b=PASS/);
+});
+
+// ── M5 — `if: ${{ always() }}` ──────────────────────────────────────────────
+// THE DANGEROUS ONE. `if: ${{ always() }}` is idiomatic GitHub Actions and evaluates
+// identically to `if: always()`; a reviewer would wave it through. PRE-FIX the leg
+// compared the raw string against /^always\(\)$/, so the aggregator stopped being a
+// candidate and ALL FOUR rung-2 entries silently dropped to rung 3 (exit 1) over a
+// workflow that had not changed behaviour in any way.
+test('wave 28 M5: `if: ${{ always() }}` is the same expression as `if: always()`', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    assert.doesNotMatch(src, /\$\{\{\s*always\(\)\s*\}\}/,
+      'sanity: this mutation must be LATENT — cloud.yml spells it bare today');
+    const bare = cloudGateBody(src).match(/^ {4}if: always\(\)$/m);
+    assert.ok(bare, 'sanity: cloud-gate must carry a bare `if: always()` for this case to rewrap');
+    const mutated = src.replace(bare[0], '    if: ${{ always() }}');
+    assert.notEqual(mutated, src, 'the ${{ }} rewrap must actually apply');
+    assert.ok(!/^ {4}if: always\(\)$/m.test(cloudGateBody(mutated)),
+      'the bare spelling must be GONE from cloud-gate, else this resolves through the old form');
+    return mutated;
+  } });
+  assert.equal(status, SEAL, `the envelope is transport, not meaning: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /NO job both `needs:`/);
+  assert.match(token(out), /b=PASS/);
+});
+
+// ── M7 — a TAB-indented `needs:` ────────────────────────────────────────────
+// PRE-FIX: every anchor is ` {4}`, so a tab-indented key matched nothing and the
+// aggregator lost its `needs:` edge in silence — 4x "NO job both", exit 1.
+// The fix is NOT to accept it. Tabs are illegal as YAML indentation: GitHub would
+// refuse the workflow outright, so a parser that "read it anyway" would publish a job
+// graph nobody runs. Exit 2 — a refusal, not a verdict — is the honest answer.
+test('wave 28 M7: a TAB-indented key REFUSES rather than silently losing the edge', () => {
+  const root = synthRepo({ workflow: (src) => {
+    assert.doesNotMatch(src, /\t/, 'sanity: this mutation must be LATENT — cloud.yml has no tab anywhere today');
+    const inline = cloudGateBody(src).match(/^ {4}needs: \[[^\]]*\]$/m);
+    assert.ok(inline, 'sanity: cloud-gate must declare an inline needs: for this case to re-indent');
+    const mutated = src.replace(inline[0], inline[0].replace(/^ {4}/, '\t'));
+    assert.notEqual(mutated, src, 'the tab re-indent must actually apply');
+    assert.match(mutated, /^\tneeds: \[/m, 'the needs: key must really be tab-indented');
+    return mutated;
+  } });
+  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', root, '--guard-cmd', 'true']);
+  assert.equal(status, INFRA, 'an unreadable job graph must not be reported through the verdict code');
+  assert.match(out, /INFRA FAULT at /);
+  assert.match(out, /indents `needs:` with a TAB/);
+  assert.match(out, /Tabs are not legal YAML indentation/);
+  assert.match(out, /REFUSING to evaluate rung 2 rather than reporting a graph nobody runs/);
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN/);
+  assert.doesNotMatch(out, /NO job both `needs:`/,
+    'the pre-fix answer was a measured-looking rung-3 claim over a file GitHub cannot even load');
+});
+
+// ── M8 — `cloud-gate:  # comment` after the job key ─────────────────────────
+// The worst of the four, because it is not blindness but a WRONG ANSWER. PRE-FIX the
+// job-key pattern required nothing after the colon, so the line matched neither the
+// job-key anchor nor the four-space key anchor and was SKIPPED — which left `cur`
+// pointing at the PRECEDING job, and every one of cloud-gate's keys (`name:`, `if:`,
+// `needs:`) was attributed to it. On main today that neighbour is `census`, which is
+// matrixed, so leg B reported "the only job(s) aggregating `test` (census) carry a
+// `strategy.matrix` … rung 3" — a confident, specific, false diagnosis.
+test('wave 28 M8: a trailing comment on a job key does not hand the job to its neighbour', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    assert.doesNotMatch(jobsBlock(src), /^ {2}[A-Za-z0-9_.-]+:[ \t]*#/m,
+      'sanity: this mutation must be LATENT — no job key in cloud.yml carries a trailing comment today');
+    const mutated = src.replace(/^ {2}cloud-gate:$/m, '  cloud-gate:  # the aggregator');
+    assert.notEqual(mutated, src, 'the trailing comment must actually be added');
+    return mutated;
+  } });
+  assert.equal(status, SEAL, `a trailing comment on a job key changes no structure: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /carry a `strategy\.matrix`/,
+    'the pre-fix answer blamed the PRECEDING job\'s matrix for a job that has none');
+  assert.match(token(out), /b=PASS/);
+});
+
+// M8, the DURABLE arm. The case above reds pre-fix only while cloud-gate's neighbour
+// happens to be matrixed — true today (`census`), true at wave 28 (`test`), but that
+// is cloud.yml's business and not this file's. This arm removes the coincidence: with
+// `name:` dropped the aggregator renders as its KEY, so the run says out loud WHICH
+// job it resolved. Post-fix that is `cloud-gate`; pre-fix it was whatever job
+// preceded it, under that job's own identity.
+test('wave 28 M8 (durable): the commented job key is read AS ITS OWN JOB, named in the output', () => {
+  const { status, out } = synthRun({
+    workflow: (src) => {
+      const body = cloudGateBody(src);
+      const named = body.match(/^ {4}name: .+$/m);
+      assert.ok(named, 'sanity: cloud-gate must carry a name: for this case to drop');
+      return src
+        .replace(/^ {2}cloud-gate:$/m, '  cloud-gate:  # the aggregator')
+        .replace(named[0], '    # name: dropped, so the rendered context is the job KEY');
+    },
+    requiredChecks: (rc) => {
+      rc.protection.required_status_checks.checks =
+        rc.protection.required_status_checks.checks.filter((c) => c.context !== AGG);
+      rc.protection.required_status_checks.checks.push({ context: 'cloud-gate', app_id: 15368 });
+      return rc;
+    },
+  });
+  assert.equal(status, SEAL, `the aggregator must resolve under its own key: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "cloud-gate" on main/,
+    'the job resolved must be cloud-gate itself, not the job declared above it');
+  assert.match(token(out), /b=PASS/);
+});
+
+// ── M8 GENERALISED — the skip is gone, not special-cased ────────────────────
+// A two-case list ("plain key, or key plus comment") would be a snapshot. The defect
+// M8 exposed is that ANY unreadable line at job-key indent silently re-homes the keys
+// below it, so the silent skip itself is removed: an unrecognised structural line is
+// a refusal, never a guess. `cloud-gate: {}` is legal YAML this parser does not read.
+test('wave 28: an unreadable line at job-key indent REFUSES instead of mis-attributing', () => {
+  const root = synthRepo({ workflow: (src) =>
+    src.replace(/^ {2}cloud-gate:$/m, '  cloud-gate: {}') });
+  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', root, '--guard-cmd', 'true']);
+  assert.equal(status, INFRA);
+  assert.match(out, /sits at job-key indent but is not a job key this parser can read/);
+  assert.match(out, /attribute the keys below it to the PRECEDING job/);
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT/);
+});
+
+// ── THE FOUR ARE LATENT ON THIS TREE, AND THAT IS ASSERTED, NOT ASSUMED ─────
+// Criterion c1 as a test. Each mutator above asserts its own absence, but only over
+// the source it is handed; this reads the COMMITTED cloud.yml once and states the
+// whole claim in one place, so "latent, not live" reds the day it stops being true
+// rather than being re-derived by whoever next reads the row.
+test('wave 28: all four specimens are absent from the committed cloud.yml', () => {
+  const src = readFileSync(CLOUD_WF, 'utf8');
+  const block = jobsBlock(src);
+  assert.doesNotMatch(block, /^#/m, 'M4: no column-0 comment inside jobs:');
+  assert.doesNotMatch(src, /\$\{\{\s*always\(\)\s*\}\}/, 'M5: always() is spelled bare');
+  assert.doesNotMatch(src, /\t/, 'M7: no tab anywhere in the file');
+  assert.doesNotMatch(block, /^ {2}[A-Za-z0-9_.-]+:[ \t]*#/m, 'M8: no job key carries a trailing comment');
+  // …and the controls, so a doesNotMatch above cannot pass because the haystack is empty.
+  assert.match(block, /^ {2}cloud-gate:$/m, 'control: the jobs: block really was read');
+  assert.match(src, /^#/m, 'control: the file DOES carry column-0 comments — above jobs:, where they are legal to this parser');
+  assert.match(src, /^ {4}if: always\(\)$/m, 'control: the bare always() this suite rewraps really is there');
+});
+
+// ── WAVE 25 — THE TWO FROZEN REGISTERS ARE KEYED BY EPIC ────────────────────
+//
+// THE DEFECT, MEASURED AT a333e4b58 BEFORE THE FENCE:
+//
+//   node seal-predicate.mjs --ledger <sealable> --repo <root> --guard-cmd true \
+//        --epic task-fb4fb869490b4213            # the deploy-reliability GOAL
+//   -> exit 0
+//   -> VERDICT: SEAL
+//   -> VERDICT-TOKEN: SEAL-PREDICATE SEAL a=PASS b=PASS c=PASS … epic=task-fb4fb869490b4213
+//   -> and in its body, Cloud Console's own rows, printed as that epic's:
+//        ✓ gr-ops-platform-admin-emails  status=open
+//          parent=cloud-console-hardening-epic in-epic-roster=false
+//        ✓ CCH-D1-overview-refetch-storm  (rung 1)
+//
+// `PERMANENT_HUMAN_GATES` and `KNOWN_DEFECTS` were FLAT module constants and `--epic`
+// parameterized clause (a) ONLY, so clauses b and c scored one epic's registers for
+// every epic. The run even printed `in-epic-roster=false` on all three gates and passed
+// them anyway.
+//
+// The registers are now selected by `--epic` out of `EPIC_REGISTERS`, an epic with no
+// entry is REFUSED (`UNREGISTERED-EPIC`) before any clause, and every token carries
+// `registers=` so a reader of the machine line knows which population produced b and c.
+const DR_EPIC = 'task-fb4fb869490b4213';   // the deploy-reliability goal, unregistered here
+const CCH_DEFECT_IDS = [
+  'CCH-D1-overview-refetch-storm',
+  'CCH-D2-session-peer-ip-is-the-docker-bridge',
+  'CCH-D3-bearer-token-in-the-access-log',
+  'CCH-D4-head-prober-gets-a-session-token',
+  'CCH-D5-rate-limiter-sees-every-user-as-one',
+  'CCH-D6-css-check-passes-on-deleted-code',
+];
+const CCH_GATE_IDS = [
+  'gr-ops-platform-admin-emails',
+  'gr-backlog-qr-live-scan-proof',
+  'cch-hg-compose-network-recreation',
+];
+
+// c3 — THE FENCE IS ADDED, NO REGISTER CONTENT IS LOST. The six defect rows and the
+// three gate ids must still be exactly the register this epic is judged on: same six,
+// same three, same cardinalities on the disclosure line.
+test('wave 25: the Cloud Console register survives the move to EPIC_REGISTERS intact', () => {
+  const { status, out } = fixtureRun('sealable.json');
+  assert.equal(status, SEAL, 'the registered epic still reaches a verdict');
+  assert.match(out, /^CLAUSE \(b\) known user-facing defects — 6 registered$/m);
+  for (const id of CCH_DEFECT_IDS) assert.match(out, new RegExp(`^  [✓◐] ${id}  \\(rung [12]`, 'm'), `${id} is still registered`);
+  for (const id of CCH_GATE_IDS) assert.match(out, new RegExp(`^  ✓ ${id}  status=`, 'm'), `${id} is still disclosed`);
+  // Cardinality, so a SEVENTH row silently added to the register reds here too.
+  assert.equal(out.split('\n').filter((l) => /^  [✓✗] [a-z]/.test(l)).length, 3, 'exactly three human gates, no more');
+  // And the disclosure line states the population b and c were scored over.
+  assert.match(out, /^registers: clause \(b\) and bucket \(c\) are scored off the cloud-console-hardening-epic register — 6 registered defect\(s\), 3 permanent human gate\(s\)$/m);
+});
+
+// c0 — THE TOKEN STATES WHICH EPIC'S REGISTERS PRODUCED b AND c.
+test('wave 25: every verdict token names the register that produced b and c', () => {
+  assert.match(token(fixtureRun('sealable.json').out), / registers=cloud-console-hardening-epic /);
+  assert.match(token(fixtureRun('sealable.json', ['--epic', DR_EPIC]).out), / registers=NONE /);
+  // The ladder-only reading is clause (b) and nothing else, so it must name its register too.
+  const ladder = run(['--ledger', withRequired('ladder-no-waiver.json'), '--repo', REPO, '--ladder-only']);
+  assert.match(token(ladder.out), / registers=cloud-console-hardening-epic /);
+  assert.match(ladder.out, /^registers: the ladder below is the cloud-console-hardening-epic register — 6 registered defect\(s\)$/m);
+});
+
+// c4 — THE REFUSAL IS RUN, AND ITS STDOUT IS READ.
+test('wave 25: --epic naming an epic with NO register is REFUSED, and says why', () => {
+  const { status, out } = fixtureRun('sealable.json', ['--epic', DR_EPIC]);
+  assert.equal(status, REFUSED, 'nothing was measured, so this is exit 3 and never a verdict');
+  assert.match(out, /^VERDICT: NO SEAL — REFUSED$/m);
+  assert.doesNotMatch(out, /^VERDICT: SEAL$/m);
+  assert.match(out, new RegExp(`REFUSED at .*, before any clause was evaluated: ${DR_EPIC} has no entry in EPIC_REGISTERS`));
+  assert.match(out, /Registered epics: cloud-console-hardening-epic\./, 'the refusal names what IS registered');
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=UNREGISTERED-EPIC a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
+  // THE PIN THE ROW ASKED FOR, IN ITS OWN WORDS: a deploy-reliability run made before
+  // DR's register is filed cannot print b=PASS. Not "does not today" — cannot: b is
+  // UNEVALUATED on the only line that carries it.
+  assert.doesNotMatch(out, /b=PASS/, 'a DR run before DR has a register must never print b=PASS');
+  assert.doesNotMatch(out, /c=PASS/);
+  // And it never got as far as another epic's rows.
+  for (const id of CCH_DEFECT_IDS) assert.doesNotMatch(out, new RegExp(id), `${id} belongs to another epic and must not appear`);
+  for (const id of CCH_GATE_IDS) assert.doesNotMatch(out, new RegExp(id), `${id} belongs to another epic and must not appear`);
+  // The refusal fires BEFORE R1/R7 rather than letting an empty register wear their
+  // sentence — "this epic was never registered" and "somebody gutted the register" are
+  // different diagnoses, and the diagnosis is the whole value of a refusal.
+  assert.doesNotMatch(out, /KNOWN_DEFECTS is empty/);
+  assert.doesNotMatch(out, /PERMANENT_HUMAN_GATES is empty/);
+});
+
+// c1 — TWO EPICS, AND THE DEFECT/GATE SETS DIFFER. The same fixture, the same flags,
+// one flag value apart: the registered epic is scored over six defects and three gates,
+// the unregistered one over NOTHING. A register that answered the same for both is the
+// defect this row was filed for.
+test('wave 25: MUTATION — two epics, two different register populations', () => {
+  const cch = fixtureRun('sealable.json');
+  const dr = fixtureRun('sealable.json', ['--epic', DR_EPIC]);
+  const idsIn = (out) => [...CCH_DEFECT_IDS, ...CCH_GATE_IDS].filter((id) => out.includes(id));
+  assert.deepEqual(idsIn(cch.out), [...CCH_DEFECT_IDS, ...CCH_GATE_IDS], 'the registered epic sees all nine rows');
+  assert.deepEqual(idsIn(dr.out), [], 'the unregistered epic sees none of them');
+  assert.notEqual(cch.status, dr.status, `the two runs must not reach the same outcome (${cch.status} vs ${dr.status})`);
+  assert.equal(cch.status, SEAL);
+  assert.equal(dr.status, REFUSED);
+});
+
+// c5 — THE GUARD CAN LOSE. The mutation re-flattens the registers exactly as they stood
+// at a333e4b58 — `REGISTER` resolved to the Cloud Console entry whatever `--epic` said,
+// and `REGISTERED` was unconditionally true so no refusal could fire — and the run that
+// this suite now asserts is a refusal becomes, verbatim, the contaminated SEAL.
+test('wave 25: the contamination REPRODUCES on the old flat-register shape', () => {
+  const flatten = (src) => src
+    .replace('const REGISTERED = Object.prototype.hasOwnProperty.call(EPIC_REGISTERS, EPIC);',
+             'const REGISTERED = true;')
+    .replace('const REGISTER = REGISTERED ? EPIC_REGISTERS[EPIC] : null;',
+             "const REGISTER = EPIC_REGISTERS['cloud-console-hardening-epic'];");
+  const pre = mutatedRun(flatten,
+    ['--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'true', '--epic', DR_EPIC]);
+  // The old shape: exit 0, VERDICT: SEAL, b=PASS c=PASS, over an epic whose registers
+  // this program has never held.
+  assert.equal(pre.status, SEAL, `the mutation must reproduce the defect, or this proves nothing: ${pre.out}`);
+  assert.match(pre.out, /^VERDICT: SEAL$/m);
+  assert.match(token(pre.out), new RegExp(`SEAL a=PASS b=PASS c=PASS .*epic=${DR_EPIC}`));
+  assert.match(pre.out, /CCH-D1-overview-refetch-storm/, 'another epic\'s defect, printed as this one\'s');
+  assert.match(pre.out, /gr-ops-platform-admin-emails  status=\w+ parent=cloud-console-hardening-epic in-epic-roster=false/,
+    'the run even prints the gate is not in this epic\'s roster and passes it anyway');
+  // The SAME invocation against the committed file: refused, nothing certified.
+  const now = fixtureRun('sealable.json', ['--epic', DR_EPIC]);
+  assert.equal(now.status, REFUSED);
+  assert.match(token(now.out), /REFUSED reason=UNREGISTERED-EPIC/);
+});
+
+// …AND THE FENCE IS A KEY LOOKUP ON THIS TABLE, NOT A PROTOTYPE WALK. `--epic
+// constructor` resolves on Object.prototype to a truthy FUNCTION; a bare
+// `EPIC_REGISTERS[EPIC]` would take it for a register, read `undefined` off it, and
+// refuse with the WRONG code (EMPTY-DEFECT-REGISTER) — or, with a different downstream,
+// throw. Two inherited names are driven because one could pass by accident.
+test('wave 25: an inherited property name is NOT a registered epic', () => {
+  for (const name of ['constructor', 'toString', '__proto__']) {
+    const { status, out } = fixtureRun('sealable.json', ['--epic', name]);
+    assert.equal(status, REFUSED, `--epic ${name} must be refused, not resolved off the prototype`);
+    assert.match(out, /reason=UNREGISTERED-EPIC/, `--epic ${name} refuses with the register code, not a downstream one`);
+  }
+});
+
+// ═══ WAVE 26 — CLAUSE (a) IS A SUBTREE, AND A POPULATION CAN SHRINK BY FILING ═══
+//
+// THE DEFECT, IN ONE SENTENCE: `fetchRoster` reads ONE `filter[parent_id]` level, and
+// clause (a) was scored over that level alone — so reparenting live rows one step down,
+// under a sibling that is already `done`, emptied the counted population without
+// finishing a single row. A filing act, printed as `VERDICT: SEAL a=PASS orphans=0`.
+//
+// THE SAME BLINDNESS RAN THE OTHER WAY and produced a FALSE FAIL beside the false pass:
+// a row correctly forwarded to a GRANDCHILD of the successor — the ordinary shape once a
+// successor epic has waves — was absent from the successor's DIRECT roster and got
+// printed under UNNAMED RESIDUE. Both halves are driven below, in both directions.
+//
+// THE MUTATION IS ONE LINE AND IT RECONSTRUCTS THE ONE-LEVEL READER EXACTLY: blind
+// `subtreeOf` to a fixture's `subtrees` map and every walk collapses to its seed — the
+// epic's direct `children`, the successor's direct `forwarded`. That is the pre-fix
+// program, and the two fixtures are graded against it and against the committed file.
+const oneLevel = (src) => {
+  const out = src.replace('const map = (fixture && fixture.subtrees) || {};', 'const map = {};');
+  assert.notEqual(out, src, 'the one-level mutation must actually apply');
+  return out;
+};
+// A ledger fixture written on the fly, for shapes no committed fixture should carry (a
+// parent CYCLE is not a tree and has no business sitting in the fixture directory).
+const adHocLedger = (obj) => {
+  const p = join(tmp('seal-pred-adhoc-'), 'ledger.json');
+  writeFileSync(p, JSON.stringify({ requiredContexts: [AGG], ...obj }));
+  return p;
+};
+const adHocRun = (obj, extra = []) =>
+  run(['--ledger', adHocLedger(obj), '--repo', REPO, '--guard-cmd', 'true', ...extra]);
+const SEALABLE = JSON.parse(readFileSync(FIX('sealable.json'), 'utf8'));
+
+// c0 — THE FILING ACT SEALS THE ONE-LEVEL READER AND IS REFUSED BY THIS FILE.
+test('wave 26: MUTATION — 69 rows reparented under a done sibling SEAL the one-level reader', () => {
+  const ledger = withRequired('filing-act-reparent.json');
+  const args = ['--ledger', ledger, '--repo', REPO, '--guard-cmd', 'true'];
+  const pre = mutatedRun(oneLevel, args);
+  // THE OLD TOKEN. Exit 0, over a population of ONE done row, with 69 open rows one
+  // level below it that this reading never asked about.
+  assert.equal(pre.status, SEAL, `the mutation must reproduce the defect, or this proves nothing: ${pre.out}`);
+  assert.match(pre.out, /^VERDICT: SEAL$/m);
+  assert.match(token(pre.out), /SEAL a=PASS b=PASS c=PASS orphans=0 /);
+  assert.match(token(pre.out), /\broster=1\b/, 'the whole certified population was the done sink');
+
+  // THE NEW TOKEN, same fixture, same flags.
+  const now = run(args);
+  assert.equal(now.status, NO_SEAL, 'a filing act must not seal');
+  assert.match(now.out, /^VERDICT: NO SEAL$/m);
+  assert.match(token(now.out), /NO-SEAL a=FAIL /);
+  assert.match(token(now.out), /\borphans=69\b/, 'all 69 reparented rows are residue');
+  assert.match(token(now.out), /\broster=70\b/, 'the population is the SUBTREE, not the level');
+  assert.match(token(now.out), /\bdirect=1\b/, 'and the direct level is printed beside it');
+  assert.match(token(now.out), /\bdepth=2 subtree-unread=0\b/);
+  assert.match(now.out, /^depth: 2 level\(s\) walked \(cap 8\)  direct 1 \+ below 69 = 70  subtree-unread 0$/m,
+    'the RELATION is printed as a relation — both numbers, of this run');
+  assert.match(now.out, /✗ gr-fixture-reparented-01/, 'and the residue is named, not merely counted');
+});
+
+// c0 — THE WALK IS BOUNDED, AND A BOUND IT HIT IS A REFUSAL, NEVER A CLEAN READ.
+test('wave 26: a subtree the walk could not descend REFUSES and names the nodes', () => {
+  const capOne = (src) => {
+    const out = src.replace('const ROSTER_MAX_DEPTH = 8;', 'const ROSTER_MAX_DEPTH = 1;');
+    assert.notEqual(out, src, 'the depth-cap mutation must actually apply');
+    return out;
+  };
+  const capped = mutatedRun(capOne,
+    ['--ledger', withRequired('filing-act-reparent.json'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(capped.status, INFRA, 'a subtree it could not read is not a subtree it read and found clean');
+  assert.match(capped.out, /could not be descended to the end/);
+  assert.match(capped.out, /1 node\(s\) whose children were NEVER READ \[gr-fixture-done-sink\]/);
+  assert.match(token(capped.out), /INFRA-FAULT .*code=SUBTREE-UNREAD/);
+  // AND THE CONTROL: the very same fixture, at the committed cap, is READ — so the
+  // refusal above is the cap firing and not the fixture being unreadable.
+  const read = run(['--ledger', withRequired('filing-act-reparent.json'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(read.status, NO_SEAL);
+  assert.match(token(read.out), /\bsubtree-unread=0\b/);
+});
+
+test('wave 26: a parent CYCLE is named where it happens, not blamed on the depth cap', () => {
+  const { status, out } = adHocRun({
+    successor: SEALABLE.successor, tasks: SEALABLE.tasks, gates: SEALABLE.gates,
+    landed: SEALABLE.landed, unmeasuredWaivers: SEALABLE.unmeasuredWaivers, defectCommits: {},
+    children: [{ _id: 'cyc-a', lifecycle_status: 'done' }],
+    forwarded: [],
+    subtrees: { 'cyc-a': [{ _id: 'cyc-b', lifecycle_status: 'done' }], 'cyc-b': [{ _id: 'cyc-a', lifecycle_status: 'done' }] },
+  });
+  assert.equal(status, INFRA);
+  assert.match(out, /is NOT A TREE: cyc-a was reached twice, the second time under cyc-b at depth 3/);
+  assert.match(token(out), /INFRA-FAULT .*code=ROSTER-CYCLE/);
+});
+
+// c1 — FORWARDING RECURSES, AND THE FALSE FAIL IS DRIVEN IN BOTH DIRECTIONS.
+test('wave 26: MUTATION — a row forwarded to a GRANDCHILD read as an orphan', () => {
+  const args = ['--ledger', withRequired('forward-to-grandchild.json'), '--repo', REPO, '--guard-cmd', 'true'];
+  const pre = mutatedRun(oneLevel, args);
+  assert.equal(pre.status, NO_SEAL, `the mutation must reproduce the false FAIL: ${pre.out}`);
+  assert.match(token(pre.out), /NO-SEAL a=FAIL /);
+  assert.match(token(pre.out), /\borphans=1\b/);
+  assert.match(pre.out, /✗ gr-fixture-forwarded-deep/,
+    'the pre-fix reader prints a row that HAS a forwarding address as UNNAMED RESIDUE');
+
+  const now = run(args);
+  assert.equal(now.status, SEAL, 'a row forwarded one level deeper is still forwarded');
+  assert.match(token(now.out), /SEAL a=PASS /);
+  assert.match(token(now.out), /\borphans=0\b/);
+  assert.doesNotMatch(now.out, /✗ gr-fixture-forwarded-deep/);
+  assert.match(now.out, /^forwarding: successor subtree 2 row\(s\) over 2 level\(s\)$/m,
+    'and the successor subtree it consulted is printed, so the PASS names its own evidence');
+  // The forwarded row is counted on the forwarding line, not exempted.
+  assert.match(now.out, /^ {2}forwarded under successor : 1$/m);
+});
+
+// c2 — THE ANTI-FILING ARM. Recursion does NOT subsume it: this compares against what
+// was COUNTED BEFORE, and the mutation pair is the whole proof that it can lose.
+test('wave 26: a census row that LEFT the population without a transition blocks the seal', () => {
+  const red = fixtureRun('census-departure.json');
+  assert.equal(red.status, NO_SEAL, 'a population that shrank by filing is not one that was swept');
+  assert.match(token(red.out), /\bcensus=fixture filing-events=1\b/);
+  assert.match(red.out, /✗ gr-fixture-departed-1  was=open now=open/, 'the row is named, not counted');
+  assert.match(red.out, /LEFT the counted population without a transition to done or cancelled/);
+  // Clause (a) itself is CLEAN on this fixture — so the red is the arm's, and only the
+  // arm's. Without this line the test could pass on an orphan nobody intended.
+  assert.match(token(red.out), /a=PASS b=PASS c=PASS orphans=0 /);
+
+  // THE OTHER DIRECTION, one field apart: the same departure, EARNED.
+  const green = fixtureRun('census-departure-transitioned.json');
+  assert.equal(green.status, SEAL);
+  assert.match(token(green.out), /\bcensus=fixture filing-events=0\b/);
+  assert.match(green.out, /✓ 0 filing event\(s\)/);
+});
+
+test('wave 26: MUTATION — dropping the arm from `ok` re-seals the filed row', () => {
+  const drop = (src) => {
+    const out = src.replace('&& defectUnread.length === 0 && filingEvents.length === 0;',
+                            '&& defectUnread.length === 0;');
+    assert.notEqual(out, src, 'the arm mutation must actually apply');
+    return out;
+  };
+  const pre = mutatedRun(drop,
+    ['--ledger', withRequired('census-departure.json'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(pre.status, SEAL, 'without the arm the filed row seals — which is what the arm is for');
+  assert.match(token(pre.out), /SEAL a=PASS/);
+  // …and it STILL prints filing-events=1. A field a verdict ignores is the shape this
+  // row was filed against: the number was legible and nothing acted on it.
+  assert.match(token(pre.out), /\bfiling-events=1\b/);
+});
+
+test('wave 26: with NO census the arm is NOT RUN, and no green claims it passed', () => {
+  const { status, out } = fixtureRun('sealable.json');
+  assert.equal(status, SEAL);
+  assert.match(token(out), /\bcensus=NONE filing-events=0\b/);
+  assert.match(out, /NOT RUN — no census\. A population can shrink by filing and this run cannot tell\./,
+    'an arm that did not run says so IN the output, not only in a field');
+});
+
+test('wave 26: a census file with no `rows` object is refused, never read as empty', () => {
+  const p = join(tmp('seal-pred-census-'), 'census.json');
+  writeFileSync(p, JSON.stringify({ epic: 'cloud-console-hardening-epic' }));
+  const { status, out } = fixtureRun('sealable.json', ['--census', p]);
+  assert.equal(status, INFRA, 'a census this run could not read is not a census it read and found clean');
+  assert.match(out, /carries no `rows` object/);
+  assert.match(token(out), /code=CENSUS-UNREADABLE/);
+  // The positive control: the SAME flag with a real census is read and scored.
+  const ok = join(tmp('seal-pred-census-'), 'census.json');
+  writeFileSync(ok, JSON.stringify({ epic: 'cloud-console-hardening-epic', captured_at: '2026-09-11', rows: { 'gr-fixture-gone': 'open' } }));
+  const scored = fixtureRun('sealable.json', ['--census', ok]);
+  assert.equal(scored.status, NO_SEAL);
+  assert.match(token(scored.out), /\bfiling-events=1\b/);
+  assert.match(scored.out, /✗ gr-fixture-gone  was=open now=UNREADABLE/,
+    'a row that left and cannot be resolved is not a proven transition');
+});
+
+// c3 — PAID BY #17798 (R8 UNREGISTERED-EPIC), PINNED HERE ON THE LADDER-ONLY PATH.
+// Wave 25 pinned the refusal on the FIXTURE path and pinned `registers=` on a
+// ladder-only reading of a REGISTERED epic. Neither run is this one: `--ladder-only`
+// with an UNREGISTERED `--epic` is the invocation the row named, and nothing held it.
+test('wave 26: --ladder-only with an unregistered --epic is REFUSED, not read', () => {
+  const { status, out } = run(['--ladder-only', '--repo', REPO, '--epic', 'totally-fake-epic-xyz']);
+  assert.equal(status, REFUSED, 'exit 3 — nothing was measured, so nothing may be quoted');
+  assert.match(token(out), /REFUSED reason=UNREGISTERED-EPIC a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED epic=totally-fake-epic-xyz registers=NONE /);
+  assert.doesNotMatch(out, /LADDER-ONLY/, 'no reading may be printed off a register this run never held');
+  assert.doesNotMatch(out, /b-clean=/, 'the six Cloud Console rungs may not be scored under another epic\'s label');
+  for (const id of CCH_DEFECT_IDS) assert.doesNotMatch(out, new RegExp(id), `${id} belongs to another epic`);
+  // AND THE CONTROL, one flag value apart: the registered epic DOES get a reading.
+  const read = run(['--ladder-only', '--repo', REPO, '--epic', EPIC]);
+  assert.equal(read.status, SEAL);
+  assert.match(token(read.out), /LADDER-ONLY .* registers=cloud-console-hardening-epic /);
+});
+
+// c2 — THE COMMITTED CENSUS IS THE REGISTER, AND IT IS READ BY THE PROGRAM, NOT BY EYE.
+test('wave 26: the committed census for this epic parses and the predicate can load it', () => {
+  const path = join(HERE, 'fixtures', 'seal-predicate', 'census', `${EPIC}.json`);
+  const c = JSON.parse(readFileSync(path, 'utf8'));
+  assert.equal(c.epic, EPIC, 'the census names the epic it was captured for');
+  assert.match(c.captured_at, /^\d{4}-\d{2}-\d{2}/, 'a census with no capture date dates nothing');
+  const ids = Object.keys(c.rows);
+  assert.ok(ids.length > 0, 'an empty census would pass by construction');
+  for (const id of ids) {
+    assert.equal(typeof c.rows[id], 'string', `${id} carries no lifecycle_status`);
+    assert.ok(!['done', 'cancelled'].includes(c.rows[id]),
+      `${id} was already closed at capture — a closed row can never be a filing event, so recording it only grows the file`);
+  }
+  // AND THE PROGRAM READS IT. Pointed at a fixture whose population is three rows, every
+  // census id is a departure — which is the loud proof that the file is loadable, keyed
+  // by _id, and scored, rather than merely well-formed JSON sitting in the tree.
+  const { status, out } = fixtureRun('sealable.json', ['--census', path]);
+  assert.equal(status, NO_SEAL);
+  assert.match(token(out), new RegExp(`census=${EPIC} filing-events=${ids.length}\\b`));
+  assert.match(out, new RegExp(`✗ ${ids[0]}  was=${c.rows[ids[0]]} now=`));
 });

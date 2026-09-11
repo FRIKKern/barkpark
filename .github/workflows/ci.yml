@@ -1,28 +1,88 @@
 name: ci
 
-# Lighthouse CI against the Next.js demo at web/ (Vercel-deployed).
+# Lighthouse CI against the Next.js demo at web/ (Vercel-deployed), and the
+# REAL web/ gate: typecheck + the node --test unit suite + lint.
 #
-# Phase 8 slice 8.0 originally targeted apps/demo, which is being retired
-# by PR #60 (web/scaffold-1) in favour of a standalone web/ Next.js app.
-# Task #34 repoints this workflow at web/ and adds a paths filter so the
-# job only runs on changes that can plausibly affect Lighthouse scores —
-# unrelated API/Studio/docs PRs no longer pay the ~2 minute cost.
+# Jobs:
+#   0. changes      — the DISPATCHER. Always runs. Computes the changed-path set
+#                     and emits the one boolean the expensive jobs are gated on.
+#   1. path-escape  — the path ratchet + its harness. Unfiltered, blocking.
+#   2. lighthouse   — Lighthouse CI. Gated on the web path set. continue-on-error,
+#                     and therefore deliberately OUTSIDE the aggregator (below).
+#   3. web-checks   — typecheck + unit tests + lint. Gated on the web path set.
+#   4. web-gate     — the AGGREGATOR. The one name that should be REQUIRED.
 #
-# Still fail-soft (continue-on-error: true) — scores are runner-noise
-# sensitive and lighthouserc.json assertions are `warn`. A follow-up can
-# tighten to `error` once baselines stabilise on web/.
+# ── THE SKIP SHIM (transplanted from cloud.yml / console-harness.yml) ────────
+#
+# THIS WORKFLOW MUST NEVER REGAIN A `paths:` KEY ON ITS `pull_request` ARM.
+#
+# It carried one until this slice (pds-bl-w48-web-gate-cannot-block-and-greens-
+# vacuously). Measured on live GitHub: a paths-filtered workflow emits NO
+# workflow run and NO check run at all, so a branch-protection rule requiring a
+# name from it leaves the PR BLOCKED forever —
+#     Required status check "X" is expected.   <- never reported: deadlock
+#     Required status check "X" is failing.    <- an actual red
+# Re-measured for THIS workflow at wave 49: `web/ typecheck + unit tests + lint`
+# is present and green on the web-touching head 47d113bb (#9599) and ABSENT from
+# the full check-run list of b7202bea (#9614). That is why
+# .github/required-checks.json carries the name in `.exclusions` with an
+# `S4 PATHS-FILTERED` reason instead of in the required set — the generator
+# could not register a name that is absent on most heads.
+#
+# A job skipped by a job-level `if:` DOES publish a check run, with conclusion
+# `skipped`, and GitHub counts `skipped` as PASSING for a required context. That
+# is what makes the shim work — and it is also the trap: a job whose `needs`
+# dependency FAILED reports `skipped` too. `if: always()` buys the RIGHT TO
+# DECIDE; it does not decide. Hence `web-gate` below, which enumerates every
+# upstream result and fails on anything outside an explicit allow-set.
+#
+# REGISTER THE AGGREGATOR, NEVER THE LEAF. `web-checks` can be legitimately
+# `skipped` (the diff touched no web path), so registering IT would just move
+# the vacuous green from "web/ is absent" to "web/ was untouched". The name to
+# register from this workflow is `Web gate`. That registration is a
+# branch-protection change (the required set goes 4 -> 5, via
+# `scripts/required-checks-floor.sh --acknowledge-growth` and
+# `scripts/required-checks-apply.sh --confirm`) and is deliberately NOT part of
+# this workflow change: this file is mergeable without it, and the aggregator
+# publishes its verdict either way.
+#
+# THE PATH SET lives in scripts/web-path-escape-check.sh, not here — that script
+# is also the RATCHET that re-derives web/'s real cross-tree reads from the
+# working tree and fails when one is not dispatched on. One declaration, so the
+# filter and its proof cannot drift. It found three trees the old trigger set
+# never covered (js/packages/core, js/packages/react, scripts/node-test-floor.mjs
+# and the starter templates under js/packages/create-barkpark-app), so a PR
+# editing a template that web/'s own tests pin dispatched NO web job at all.
 
 on:
+  pull_request:
   push:
     branches: [main]
+    # PATHS-FILTERED ON THE push ARM ONLY (the same distinction
+    # console-harness.yml records above its own key, task-7ef9d81ed33d2b9c):
+    # branch protection never evaluates a push-to-main run — it gates merges
+    # INTO main, and by the time this arm fires the merge has already happened.
+    # So a filter here costs no required context and saves a full Next build on
+    # every merge that cannot change this workflow's verdict.
+    # scripts/shim-trigger-filter-check.sh reads exactly this distinction: its
+    # predicate is `on.pull_request.paths`/`paths-ignore` and nothing else.
+    #
+    # KEPT IN STEP WITH THE DISPATCHED SET: these are the same trees
+    # scripts/web-path-escape-check.sh declares, plus the script itself. A merge
+    # that touches none of them cannot change what this workflow would say.
     paths:
       - "web/**"
+      - "js/packages/core/**"
+      - "js/packages/react/**"
+      - "js/packages/create-barkpark-app/templates/**"
+      - "js/pnpm-lock.yaml"
+      - "js/package.json"
+      - "js/pnpm-workspace.yaml"
+      - "js/tsconfig.base.json"
+      - "js/turbo.json"
       - "lighthouserc.json"
-      - ".github/workflows/ci.yml"
-  pull_request:
-    paths:
-      - "web/**"
-      - "lighthouserc.json"
+      - "scripts/node-test-floor.mjs"
+      - "scripts/web-path-escape-check.sh"
       - ".github/workflows/ci.yml"
 
 concurrency:
@@ -33,8 +93,236 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    # THE DISPATCHER. No `if:`, no matrix, no path filter — it runs on every
+    # event, always, so the jobs behind it always have a defined answer.
+    #
+    # It never emits `false` when it cannot tell. On an unresolvable base, a
+    # base with no common ancestor, or an uninterpretable verdict it FAILS; on
+    # an empty diff — rare but legal — it dispatches TRUE. That polarity is the
+    # whole point: a dispatcher that "couldn't tell" and emitted false would
+    # skip the web suite and publish a green required context.
+    # Never a silent false: fail, or run everything.
+    name: Dispatch (web paths)
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.sets.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
+          # `refs/pull/N/merge` — a commit that already contains main's advance
+          # — while `pull_request.base.sha` LAGS the base branch tip. The
+          # three-dot diff below then sweeps in every commit main gained since
+          # that stale base, and a one-file PR dispatches as if it touched ten
+          # (honest-gates D34). Pinning the head sha makes the diff describe
+          # THIS PR. This job ONLY: every other job here keeps the merge ref,
+          # because they must test the merged result.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # FULL HISTORY, BLOBLESS — two ORTHOGONAL axes, both needed. A
+          # three-dot diff resolves a MERGE BASE, and a shallow clone has none
+          # (actions/checkout's default depth is 1, which is why dropping this
+          # line is not "whatever the filter gives you"). `filter: blob:none`
+          # omits blob CONTENTS only; `git diff --name-only` reads trees, so the
+          # path set is unchanged BY CONSTRUCTION. The derivation, re-runnable:
+          # `bash scripts/dispatch-blobless-proof.sh` (read 2026-09-03: 5 sampled
+          # PRs identical on both sides).
+          fetch-depth: 0
+          filter: blob:none
+
+      - id: sets
+        name: Compute the changed-path set
+        run: |
+          set -euo pipefail
+
+          event="${{ github.event_name }}"
+          if [ "$event" != "pull_request" ]; then
+            # push-to-main (and anything else): NEVER skip. Main is the branch
+            # every other run is compared against; a partial main is worse than
+            # a slow one, and there is no reviewer left to notice.
+            echo "event '$event' is not a pull_request — the path set is true."
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then
+            echo "::error::dispatcher: the PR carries no base sha. Refusing to guess — a guessed base skips the suite and reports green."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            # The base commit can be absent from this checkout during burst
+            # merges. Try to fetch it once, then give up loudly.
+            git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::error::dispatcher: PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base."
+            exit 1
+          fi
+
+          # A base with NO common ancestor makes the three-dot diff exit 128
+          # with a raw `fatal: … no merge base` and ZERO annotation. Name the
+          # condition instead. There is deliberately NO two-dot fallback —
+          # `base HEAD` sweeps in the base's ENTIRE content and dispatches true
+          # for the wrong reason, which is the "verdict from an unknown base"
+          # this job refuses.
+          if ! git merge-base "$base" HEAD >/dev/null 2>&1; then
+            echo "::error::dispatcher: PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Refusing to emit a path verdict — and refusing a two-dot fallback, which would sweep in the base's entire content. Rebase the branch onto its base branch."
+            exit 1
+          fi
+
+          echo "diff base: ${base} (three-dot against HEAD)"
+          # `-z` + `--no-renames` are BOTH load-bearing; either alone certifies
+          # a hole (measured, wave 10): `--name-only` octal-escapes and QUOTES
+          # any non-ASCII path, so the anchored ERE misses it and the gate greens
+          # over a suite that never ran; rename detection prints only the
+          # DESTINATION, so `git mv web/a.ts docs/a.ts` would read as "web/ lost
+          # nothing".
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          echo "changed files:"
+          printf '%s\n' "$changed"
+
+          if [ -z "$changed" ]; then
+            # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
+            # PR, nets to nothing against the base. Run everything instead:
+            # expensive, never wrong. Never `false`, the only unsafe answer.
+            echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching web=true and running the WHOLE web suite rather than skipping it — a skip here would green a gate nothing measured."
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # ── THE SCRIPT MUST MATCH THE WORKFLOW (task-3a81e68f7027ca98) ───
+          # GitHub takes the WORKFLOW FILE for a `pull_request` run from the
+          # MERGE REF, while this job deliberately checks out the PR HEAD (the
+          # D34 note above). Those are two different commits, so an invocation
+          # written here otherwise runs against the BRANCH's copy of the script
+          # — and every head branched before this script existed answers
+          # `unknown path set` and exits 2. Measured on PR #17575 (job
+          # 103113143741) for cloud.yml's dispatcher; it is a CLASS, not a
+          # one-off, and it fires hardest for a script that is BRAND NEW, as
+          # this one is: every open PR predates it.
+          #
+          # THE SPLIT: the DIFF still comes from the head checkout (D34 intact);
+          # the SCRIPT is pinned to the commit this workflow file came from, so
+          # flag and parser are matched BY CONSTRUCTION rather than by rebase
+          # etiquette. The two DISPATCH_PIN_* hooks are how a fixture repo can
+          # drive this block; Actions sets neither, so the tested path IS the
+          # shipped path.
+          pin_remote="${DISPATCH_PIN_REMOTE:-origin}"
+          pin_ref="${DISPATCH_PIN_REF:-refs/pull/${{ github.event.pull_request.number }}/merge}"
+          pin_script="scripts/web-path-escape-check.sh"
+          pin_src="the PR HEAD checkout — NOT the commit this workflow file came from"
+          # A PIN *ROOT*, not a loose file: the script resolves its own repo root
+          # as `dirname($0)/..`, so a copy dropped straight into $RUNNER_TEMP
+          # would scan /home/runner/work. `--match` never reads the tree, but
+          # pinning the ROOT keeps that true of every future flag as well.
+          pinroot="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/dispatcher-pinroot"
+          rm -rf "$pinroot"
+          mkdir -p "$pinroot/scripts"
+          pinned="$pinroot/scripts/web-path-escape-check.sh"
+
+          if git fetch --no-tags --quiet "$pin_remote" "+${pin_ref}:refs/dispatcher/pinned" 2>/dev/null \
+             && git show refs/dispatcher/pinned:scripts/web-path-escape-check.sh >"$pinned" 2>/dev/null \
+             && [ -s "$pinned" ]; then
+            pin_script="$pinned"
+            pin_src="${pin_ref} ($(git rev-parse refs/dispatcher/pinned))"
+          else
+            # NAMED, never silent — and deliberately NOT fatal. A merge ref is
+            # absent for a PR with conflicts, and killing the dispatcher there
+            # would leave the gated jobs with no answer at all, which is the
+            # very failure this change exists to end.
+            echo "::warning::dispatcher: could NOT read scripts/web-path-escape-check.sh out of ${pin_ref} on remote '${pin_remote}' (an absent merge ref — a conflicted PR — is the usual cause). Falling back to the PR HEAD's own copy, which may predate this workflow. A verdict this fallback cannot compute becomes true (the WHOLE web suite runs) and says so by name below. Degraded read, not a green."
+          fi
+          echo "path-set script: ${pin_src}"
+
+          # NEVER exit 2 on skew, and never a silent `false`. A refusal from the
+          # script — exit 2 on an unknown set name, exit 127 on a head that has
+          # no such file — says THIS STEP could not measure the question, not
+          # that the answer is no. So "could not tell" dispatches TRUE and prints
+          # a ::warning:: naming the skew. This does NOT hide a broken script:
+          # the `path-escape` job below is DELIBERATELY UNFILTERED, runs
+          # `--selftest` and the ratchet off the merge ref on every PR, and reds
+          # the same aggregator.
+          #
+          # A here-string, never a pipe: `--match` answers through `grep -Eq`,
+          # which exits the instant it matches, and a writer still holding bytes
+          # then takes SIGPIPE that `set -o pipefail` promotes over the match
+          # that DID occur (the house D37 rule).
+          # THE `--match` STAYS AT THE CALL SITE, spelled out: scripts/which-gates.sh
+          # discovers "which gate will this diff dispatch" by scraping
+          # `--match <set>` at command position out of these workflows.
+          match_set() {
+            local flag="$1" want="$2" out rc=0
+            if [ "$flag" != "--match" ]; then
+              echo "::error::dispatcher: match_set takes '--match <set>' verbatim (got '${flag}')."
+              exit 1
+            fi
+            out="$(bash "$pin_script" --match "$want" <<<"$changed")" || rc=$?
+            case "$out" in
+              true | false)
+                printf '%s' "$out"
+                return 0
+                ;;
+            esac
+            echo "::warning::dispatcher: ${pin_script} could not answer '--match ${want}' (exit ${rc}, printed '${out}'). The script was read from ${pin_src}; a workflow/script VERSION SKEW is the usual cause — this head predates the flag this workflow calls with. Dispatching ${want}=true: running more, never a silent skip." >&2
+            printf 'true'
+          }
+
+          web="$(match_set --match web)"
+
+          # Belt and braces. `match_set` cannot return anything but true|false,
+          # so this is unreachable TODAY — it is the guard on a future edit that
+          # computes a verdict without going through it.
+          case "$web" in
+            true | false) ;;
+            *)
+              echo "::error::dispatcher: refusing to emit the uninterpretable verdict web=${web}."
+              exit 1
+              ;;
+          esac
+
+          echo "verdict: web=${web}"
+          echo "web=${web}" >> "$GITHUB_OUTPUT"
+
+  path-escape:
+    # DELIBERATELY UNFILTERED — no `if:`, no dependency on the dispatcher. This
+    # job proves the dispatcher's path set still covers everything the web gate
+    # reads, so gating it on that same set would let it go dark exactly when it
+    # is needed (honest-gates D26: a harness nobody runs is not a ratchet). It
+    # costs a few seconds of bash and python.
+    name: Web path-escape ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+
+      # Harness FIRST, subject second — the house selftest-first idiom. A gate
+      # that cannot be shown to fail is not evidence that nothing failed.
+      - name: Harness (the ratchet must be able to fail)
+        run: bash scripts/web-path-escape-check.sh --selftest
+
+      - name: Every cross-tree read of the web gate is dispatched on
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/web-path-escape-check.sh
+
   lighthouse:
+    # Lighthouse against the built web/ app. STILL fail-soft
+    # (continue-on-error: true) — scores are runner-noise sensitive and
+    # lighthouserc.json's assertions are `warn`.
+    #
+    # GATED, BUT NOT AGGREGATED. It carries `continue-on-error: true`, and a
+    # continue-on-error job that exits 1 renders a RED check run while
+    # `needs.<job>.result` reads `success` — measured on a throwaway probe repo
+    # and pinned by scripts/security-gate-shape.test.sh. `success` does not
+    # decompose, so a continue-on-error job inside `web-gate`'s `needs` would
+    # launder its own red into a green gate, unfalsifiably. It is therefore
+    # deliberately ABSENT from that needs set. The job-level `if:` below is
+    # still required: without the workflow-level paths filter this job would
+    # otherwise pay a full Next build on every PR in the repo.
     name: Lighthouse CI — web/
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
 
@@ -51,18 +339,26 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Skip — web/ not present
+      # REFUSE, NEVER ECHO-AND-SUCCEED. This step used to be
+      # `echo "web/ not found — Lighthouse job skipped."` with every real step
+      # gated on `present == 'true'`, so an absent web/ concluded SUCCESS having
+      # measured nothing. The dispatcher said this diff touches the web path
+      # set; a missing web/ therefore contradicts the verdict this job runs on.
+      - name: Refuse — dispatched on web paths but web/ is absent
         if: steps.detect.outputs.present != 'true'
-        run: echo "web/ not found — Lighthouse job skipped."
+        run: |
+          echo "::error::Lighthouse CI — web/: the dispatcher resolved web=true for this head, but web/ or web/package.json does not exist. Refusing to conclude success having measured nothing. If web/ was retired, retire this workflow's jobs and their path set in the same commit."
+          exit 1
 
+      # Every step below is UNGATED on purpose. Steps run in order and a failed
+      # step aborts the job, so the refusal above is the only guard needed — and
+      # a guard that cannot be silently satisfied by a missing tree.
       - name: Install pnpm
-        if: steps.detect.outputs.present == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
       - name: Setup Node (pnpm store cached on the lockfile)
-        if: steps.detect.outputs.present == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -78,7 +374,6 @@ jobs:
       # (continue-on-error). Build core first, then install web/ so the link
       # points at the built package.
       - name: Build @barkpark/core (web's linked dependency)
-        if: steps.detect.outputs.present == 'true'
         working-directory: js
         run: |
           pnpm install --frozen-lockfile
@@ -89,22 +384,18 @@ jobs:
       # the Next build to resolve `@barkpark/react`. Built AFTER core because
       # react's DTS build imports core's declarations.
       - name: Build @barkpark/react (web's linked dependency)
-        if: steps.detect.outputs.present == 'true'
         working-directory: js
         run: pnpm --filter @barkpark/react build
 
       - name: Install web/ deps
-        if: steps.detect.outputs.present == 'true'
         working-directory: web
         run: pnpm install --frozen-lockfile
 
       - name: Build web/
-        if: steps.detect.outputs.present == 'true'
         working-directory: web
         run: pnpm run build
 
       - name: Start web/ (background)
-        if: steps.detect.outputs.present == 'true'
         working-directory: web
         run: |
           pnpm run start &
@@ -121,18 +412,17 @@ jobs:
           exit 1
 
       - name: Run Lighthouse CI
-        if: steps.detect.outputs.present == 'true'
         run: pnpm dlx @lhci/cli@latest autorun --config=./lighthouserc.json
 
       - name: Stop web/
-        if: always() && steps.detect.outputs.present == 'true'
+        if: always()
         run: |
           if [ -f /tmp/web.pid ]; then
             kill "$(cat /tmp/web.pid)" 2>/dev/null || true
           fi
 
       - name: Upload Lighthouse artifact
-        if: always() && steps.detect.outputs.present == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: lighthouse-report
@@ -147,8 +437,16 @@ jobs:
   # ran locally / at Vercel build — a broken test or type error could land on
   # main unnoticed. Node 22 is required: the suite is `node --test` over `.ts`
   # files, which relies on type-stripping (default-on since Node 22.18).
+  #
+  # THE NAME IS FROZEN. `web/ typecheck + unit tests + lint` already has a row
+  # in .github/required-checks.json's `.exclusions`; renaming it would orphan
+  # that row and, once `Web gate` is registered, change a name a reader tracks.
+  # This job is gated by the dispatcher and JUDGED by `web-gate`; it is never
+  # the name to register (a leaf can be legitimately skipped).
   web-checks:
     name: web/ typecheck + unit tests + lint
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -164,18 +462,34 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Skip — web/ not present
+      # ── THE VACUOUS GREEN THIS SLICE EXISTS TO REMOVE (defect 2) ──────────
+      # This step used to read `echo "web/ not found — web-checks skipped."`,
+      # and it was the job's ONLY ungated step: all eight real steps carried
+      # `if: steps.detect.outputs.present == 'true'`. With web/ absent the job
+      # therefore concluded SUCCESS having typechecked, tested and linted
+      # nothing — a green identical to a full pass. Dormant on main only because
+      # web/ exists there; a green whose correctness rests on a tree still being
+      # present is not a gate.
+      #
+      # REFUSE BY NAME instead. And note the pairing: without it, registering
+      # `Web gate` would simply relocate the vacuity from "web/ absent" to
+      # "web/ untouched", which is why the two halves land together.
+      - name: Refuse — dispatched on web paths but web/ is absent
         if: steps.detect.outputs.present != 'true'
-        run: echo "web/ not found — web-checks skipped."
+        run: |
+          echo "::error::web/ typecheck + unit tests + lint: the dispatcher resolved web=true for this head, but web/ or web/package.json does not exist. Refusing to conclude success having typechecked nothing. If web/ was retired, retire this job and its path set (scripts/web-path-escape-check.sh) in the same commit."
+          exit 1
 
+      # Every step below is UNGATED on purpose: steps run in order and a failed
+      # step aborts the job, so the refusal above already stops an absent-web/
+      # run. A `present == 'true'` guard on each step is what made the whole job
+      # skippable into a green.
       - name: Install pnpm
-        if: steps.detect.outputs.present == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
       - name: Setup Node (pnpm store cached on the lockfile)
-        if: steps.detect.outputs.present == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -190,7 +504,6 @@ jobs:
       # modules (e.g. lib/papers.ts) to load. Build it first from the js/
       # workspace, then install web/ so the link resolves to the built package.
       - name: Build @barkpark/core (web's linked dependency)
-        if: steps.detect.outputs.present == 'true'
         working-directory: js
         run: |
           pnpm install --frozen-lockfile
@@ -201,26 +514,165 @@ jobs:
       # test modules (section-grid-render / component-golden-parity) to load
       # `renderPortableDocument`. Built AFTER core (react's DTS imports core).
       - name: Build @barkpark/react (web's linked dependency)
-        if: steps.detect.outputs.present == 'true'
         working-directory: js
         run: pnpm --filter @barkpark/react build
 
       - name: Install web/ deps
-        if: steps.detect.outputs.present == 'true'
         working-directory: web
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        if: steps.detect.outputs.present == 'true'
         working-directory: web
         run: pnpm run typecheck
 
       - name: Unit tests
-        if: steps.detect.outputs.present == 'true'
         working-directory: web
         run: pnpm run test
 
       - name: Lint
-        if: steps.detect.outputs.present == 'true'
         working-directory: web
         run: pnpm run lint
+
+  web-gate:
+    # ── THE AGGREGATOR — the one name that should carry branch protection ──
+    #
+    # Deliberate shape, every part of it load-bearing, ported from cloud.yml's
+    # `cloud-gate` because the hazards are identical:
+    #
+    #   * NO `strategy.matrix`. The published check-run name is then exactly the
+    #     `name:` string below — a constant. A matrixed leaf publishes either the
+    #     matrix tuple or, if it never STARTED, the literal uninterpolated
+    #     `${{ matrix.x }}` (D20). That is also why this is a NEW job and never a
+    #     rename of a leaf.
+    #
+    #   * `if: always()`. Without it this job would itself be `skipped` whenever
+    #     an upstream failed — publishing a PASSING context out of a failed run.
+    #
+    #   * It ASSERTS on every upstream result instead of echoing them.
+    #     `if: always()` buys the right to decide; it does not decide. A probe
+    #     aggregator that merely printed `needs.will-fail.result` reported
+    #     `success`, and a PR merged through it (honest-gates D19).
+    #
+    #   * `lighthouse` is NOT in `needs`, and that is the ONE exception a reader
+    #     must not "fix": it carries `continue-on-error: true`, whose red reads
+    #     back as `success` (see that job's own note). A job whose failure is
+    #     invisible cannot be judged, so it is not judged. If it ever loses
+    #     continue-on-error, it must be ADDED here in the same commit — and then
+    #     `decide` below gets a fourth call.
+    #
+    # Allow-set, exhaustively: `success` always; `skipped` ONLY when the
+    # dispatcher output that gated that job was literally 'false'. Everything
+    # else — `failure`, `cancelled`, an unrecognised value, an empty string —
+    # is a FAILURE, including a failure of the dispatcher itself.
+    name: Web gate
+    if: always()
+    needs: [changes, web-checks, path-escape]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide (fail-closed over every upstream result)
+        env:
+          R_CHANGES: ${{ needs.changes.result }}
+          R_WEB: ${{ needs.web-checks.result }}
+          R_ESCAPE: ${{ needs.path-escape.result }}
+          O_WEB: ${{ needs.changes.outputs.web }}
+        run: |
+          set -euo pipefail
+
+          echo "dispatcher outputs: web='${O_WEB}'"
+          echo
+
+          bad=0
+
+          # ── D770/D771 — `bad` SAYS THAT something is wrong, never WHICH ───
+          # The step LOG names the offending job; the `::error::` is the ONLY
+          # line the check-run API carries, and so the only line a human at the
+          # merge button ever reads. `bad` is a bit; this is the set behind it,
+          # appended at EVERY `bad=1` site so it can never disagree with the
+          # verdict. DERIVED from `${job}`, never hardcoded. Comma-joined, not
+          # space-joined: job names contain spaces.
+          reds=""
+
+          # ── D377 tally: did anything SUBSTANTIVE actually run? ────────────
+          # `bad` answers "is anything wrong"; it cannot answer "was anything
+          # tested". Only PATH-GATED jobs count: the dispatcher and the ratchet
+          # carry the gate value NEVER and run on every head, so they are
+          # present in a "nothing ran" run exactly as in a full one and can
+          # distinguish nothing.
+          dispatched=0
+          not_dispatched=""
+
+          # decide <job-name> <result> <gate-value>
+          #   gate-value is the dispatcher output that gated the job, or the
+          #   literal string NEVER for jobs that must always run. A skip is
+          #   accepted only against a gate-value of exactly 'false'.
+          decide() {
+            local job="$1" result="$2" gate="$3"
+            case "$result" in
+              success)
+                echo "  ok      ${job}: success"
+                ;;
+              skipped)
+                if [ "$gate" = "false" ]; then
+                  echo "  ok      ${job}: skipped — dispatcher said this path set was not touched (gate='false')"
+                else
+                  echo "  FAIL    ${job}: skipped, but its gate is '${gate}', not 'false'."
+                  echo "          A skip here does NOT mean 'not needed'. It means the job never ran —"
+                  echo "          most often because an upstream FAILED. Refusing to green a gate on it."
+                  bad=1
+                  reds="${reds:+${reds}, }${job}"
+                fi
+                ;;
+              failure | cancelled)
+                echo "  FAIL    ${job}: ${result}"
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              '')
+                echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
+                echo "          or the run object is malformed. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              *)
+                echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+            esac
+            # Tally, for the D377 notice at the bottom of this step. NEVER-gated
+            # jobs are excluded on purpose (see the declaration above).
+            if [ "$gate" != "NEVER" ]; then
+              case "$result" in
+                success) dispatched=$((dispatched + 1)) ;;
+                skipped) not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
+          }
+
+          # The dispatcher itself may never skip: without it there are no gate
+          # values, so nothing downstream can be judged.
+          decide "changes (dispatcher)"  "${R_CHANGES}" "NEVER"
+          decide "path-escape ratchet"   "${R_ESCAPE}"  "NEVER"
+          decide "web-checks"            "${R_WEB}"     "${O_WEB}"
+
+          echo
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::Web gate: at least one upstream job is not in the allow-set (see above). NOT IN THE ALLOW-SET: ${reds}"
+            exit 1
+          fi
+
+          # ── D377/D378 — SAY IT WHERE A PERSON AND AN API CAN READ IT ──────
+          # A skip-shim aggregator concludes `success` whenever the diff misses
+          # its path set, and the check run it publishes is byte-identical to
+          # one where the whole suite passed. $GITHUB_STEP_SUMMARY does NOT reach
+          # the check-run API (0 of 32 check-runs on a sampled sha returned a
+          # non-null summary); a bare ::notice:: does (probe
+          # probe/elixir-gate-annotation, run 31055317124). ONE notice, never one
+          # per job — GitHub caps annotations at 10 per level per step and
+          # truncates the rest silently. And NO COMMA in the property section:
+          # `,` is the workflow-command property separator and would truncate the
+          # title at delivery (measured on #9677's head dad4b33bb).
+          if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=Web gate: green — nothing ran::NOTHING WEB RAN on this head.%0AWeb gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no web job executed', never as 'the web suite passed'."
+          fi
+          echo "Web gate: every upstream job either succeeded or was legitimately not dispatched."

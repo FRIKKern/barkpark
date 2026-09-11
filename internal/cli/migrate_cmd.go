@@ -489,6 +489,26 @@ func migrateTypeReceipt(typ string, written, total int) string {
 // through Enum.map_reduce), so its LENGTH is the measurement; len(docs) is only
 // what we asked for. A response we cannot read is an error, not a full count:
 // "we could not tell" must never be reported as "all of them landed".
+//
+// PER-OP RESULT SEMANTICS — what a results row does and does NOT prove
+// (pds-w48-createifnotexists-probe, PROBED against a running local server on
+// origin/main 3c8b7999d, not inferred). A row means a mutation was APPLIED, not
+// that a document was WRITTEN. createIfNotExists against an id that already
+// exists still yields a row — `{"id":"drafts.cine-probe-x","operation":"noop",
+// "document":{…the EXISTING document, unchanged _rev…}}` — because
+// mutations.ex:427-443 returns {:ok, existing, "noop"} and apply_mutations
+// renders every {:ok, doc, op} tuple as a results row alike. The probe's batch
+// arm makes it concrete: [existing, new] came back as 2 results with operations
+// [noop, create] — one write. So len(results) counts applied mutations, and a
+// full count here is NOT by itself proof that every document changed.
+//
+// This migrator is safe from that gap by construction, not by luck:
+// migrateWriteBatch below sends createOrReplace exclusively, and
+// createOrReplace has no noop arm — every one of its rows is a write. The
+// moment a createIfNotExists (or any op with a noop arm) enters a batch this
+// function counts, this count stops being a write count and the caller must
+// split on results[].operation instead — that is the CLI distinguishing
+// wrote-vs-noop, and it is deliberately not built until something needs it.
 func migrateBatchWritten(respBody []byte) (int, error) {
 	var parsed struct {
 		Results []json.RawMessage `json:"results"`

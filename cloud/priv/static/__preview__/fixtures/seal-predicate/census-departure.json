@@ -1,0 +1,72 @@
+{
+  "_comment": "THE ANTI-FILING ARM, RED. `priorCensus` recorded gr-fixture-departed-1 as OPEN; it is no longer anywhere in the epic's subtree, and it resolves TODAY to open. It left the counted population without being finished \u2014 a FILING EVENT \u2014 and it blocks the seal by name. Everything else in this fixture is sealable.json's happy path.",
+  "successor": "cch-fixture-successor-epic",
+  "tasks": {
+    "cch-fixture-successor-epic": {
+      "_id": "cch-fixture-successor-epic",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    }
+  },
+  "children": [
+    {
+      "_id": "gr-fixture-done-1",
+      "lifecycle_status": "done"
+    },
+    {
+      "_id": "gr-fixture-done-2",
+      "lifecycle_status": "done"
+    },
+    {
+      "_id": "gr-fixture-cancelled-1",
+      "lifecycle_status": "cancelled"
+    }
+  ],
+  "forwarded": [],
+  "priorCensus": {
+    "gr-fixture-departed-1": "open",
+    "gr-fixture-done-1": "done"
+  },
+  "departed": {
+    "gr-fixture-departed-1": {
+      "_id": "gr-fixture-departed-1",
+      "lifecycle_status": "open"
+    }
+  },
+  "gates": {
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "cch-hg-compose-network-recreation": {
+      "_id": "cch-hg-compose-network-recreation",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    }
+  },
+  "landed": [
+    "481d6f231",
+    "8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4",
+    "d157d098c78bc6604d00d84e22d038bdb176ef58",
+    "26acc7a91be0f0352efdb3e89b2017accb786367",
+    "58862f621"
+  ],
+  "unmeasuredWaivers": [
+    "CCH-D5-rate-limiter-sees-every-user-as-one"
+  ],
+  "defectCommits": {}
+}
