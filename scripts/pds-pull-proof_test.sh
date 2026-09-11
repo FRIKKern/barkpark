@@ -378,7 +378,7 @@ fi
 
 printf '\n'
 if [ "$fails" -eq 0 ]; then
-  printf 'pds-pull-proof_test: PASS (39 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable)\n'
+  printf 'pds-pull-proof_test: PASS (40 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable)\n'
   exit 0
 fi
 printf 'pds-pull-proof_test: FAIL — %s arm(s)\n' "$fails"
