@@ -14,8 +14,16 @@ defmodule Barkpark.Quiz.SpawnBudgetTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.RateLimiterSandbox
+
   alias Barkpark.Quiz
   alias Barkpark.Quiz.{Room, SpawnBudget}
+
+  # `:barkpark_rate_limiter` is a :named_table — whole-node state no sandbox
+  # rolls back. Without this every budget assertion here inherits whatever
+  # earlier files spent. Safe only because this module is `async: false`, which
+  # `RateLimiterAsyncIsolationTest` pins.
+  setup :reset_rate_limiter!
 
   setup do
     original = Application.get_env(:barkpark, :quiz_room_spawn)

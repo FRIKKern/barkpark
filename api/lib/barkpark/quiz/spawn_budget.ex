@@ -118,9 +118,15 @@ defmodule Barkpark.Quiz.SpawnBudget do
         per_hour = per_hour()
         who = principal(source)
 
-        key = RateLimiter.scoped_key(source, {:quiz_room_spawn, bucket_id(who)})
+        key = {:quiz_room_spawn, bucket_id(who)}
+        opts = [capacity: per_hour, refill_per_sec: per_hour / 3600]
 
-        case RateLimiter.check(key, capacity: per_hour, refill_per_sec: per_hour / 3600) do
+        # `source` (a conn, or a socket connect_info map), never a bare key —
+        # see `RateLimiter.scoped_key/2`, the identity function unless a test
+        # stamped a scope. Written INLINE at the call site because that is the
+        # shape `RateLimiterScopedKeyCoverageTest` requires: a key scoped on an
+        # earlier line and passed by variable reads compliant and is not.
+        case RateLimiter.check(RateLimiter.scoped_key(source, key), opts) do
           :ok -> :ok
           :rate_limited -> refuse(mode, who, per_hour)
         end
