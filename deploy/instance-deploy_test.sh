@@ -1481,4 +1481,69 @@ check "export-prefixed refused KEK: the old bytes are parked, not destroyed" \
 rm -rf "$TMP"
 
 echo
+echo "== Case: CONNECTORS_CREDENTIAL_KEY_PREVIOUS propagates .env -> connectors.env (task-0459264e822b59d6) =="
+# The bridge opens a sealed row under the CURRENT key OR any key in
+# CONNECTORS_CREDENTIAL_KEY_PREVIOUS (connectors/src/config.ts splitKeys ->
+# crypto/credential-cipher.ts), and the unit reads ONLY connectors.env
+# (EnvironmentFile=). The writer emitted six keys and _PREVIOUS was not one of
+# them, so setting it in /opt/barkpark/.env reached nothing: a flag day, not a
+# rotation. Three states: unset (no line), set (carried), and cleared again
+# (the line DISAPPEARS on the next deploy — the end of the rotation window).
+
+# (1) UNSET — no line at all. An emitted-empty line would leave the file unable
+# to say "no rotation is in flight"; splitKeys reads "" and absent alike.
+setup_case
+rc="$(run_deploy 200 prevunsetsha)"
+check "no previous key: exit 0"                  "[ '$rc' = '0' ]"
+check "no previous key: NO _PREVIOUS line emitted (absent, not empty)" \
+  "! grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS' '$TMP/connectors.env'"
+check "no previous key: the current key is still written" \
+  "grep -qE '^CONNECTORS_CREDENTIAL_KEY=.+\$' '$TMP/connectors.env'"
+check "no previous key: no rotation-window log line" \
+  "! grep -q 'a rotation window is OPEN' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# (2) SET in /opt/barkpark/.env — a ROTATION. The old key must reach the bridge
+# on the NEXT DEPLOY, with no hand edit of /etc/barkpark/connectors.env.
+setup_case
+OLDKEY="MjSpkGTNeace3ZPhSld3fP3fqL5C0z55afNNlyDqWyU="
+printf 'CONNECTORS_CREDENTIAL_KEY_PREVIOUS=%s\n' "$OLDKEY" >> "$APP/.env"
+rc="$(run_deploy 200 prevsetsha)"
+check "rotation: exit 0"                         "[ '$rc' = '0' ]"
+check "rotation: the previous key lands in connectors.env VERBATIM" \
+  "grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS=$OLDKEY\$' '$TMP/connectors.env'"
+check "rotation: exactly one _PREVIOUS line" \
+  "[ \"\$(grep -c '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS=' '$TMP/connectors.env')\" = '1' ]"
+check "rotation: the CURRENT key is still there too (both keys, not a swap)" \
+  "grep -qE '^CONNECTORS_CREDENTIAL_KEY=.+\$' '$TMP/connectors.env'"
+check "rotation: current and previous are DIFFERENT values" \
+  "[ \"\$(grep '^CONNECTORS_CREDENTIAL_KEY=' '$TMP/connectors.env')\" != \"CONNECTORS_CREDENTIAL_KEY=$OLDKEY\" ]"
+check "rotation: the deploy says the window is open" \
+  "grep -q 'a rotation window is OPEN' '$TMP/out.log'"
+check "rotation: connectors.env still 0600" \
+  "[ \"\$(stat -c '%a' '$TMP/connectors.env' 2>/dev/null || stat -f '%Lp' '$TMP/connectors.env')\" = '600' ]"
+check "rotation: the unit was restarted by THIS deploy (no manual restart step)" \
+  "grep -q 'restart barkpark-connectors' '$SYSCTLLOG'"
+# (3) CLEARED — the operator deletes the line after `npm run rewrap`. The next
+# deploy must DROP it from connectors.env; a lingering line keeps a retired key live.
+grep -v '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS=' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"; rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 prevclearedsha)"
+check "window closed: exit 0"                    "[ '$rc' = '0' ]"
+check "window closed: the _PREVIOUS line is GONE from connectors.env" \
+  "! grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS' '$TMP/connectors.env'"
+check "window closed: the retired key appears NOWHERE in connectors.env" \
+  "! grep -qF '$OLDKEY' '$TMP/connectors.env'"
+rm -rf "$TMP"
+
+# (4) WHITESPACE-ONLY is treated as unset — an all-blank value would otherwise
+# emit a line that claims a rotation is in flight while carrying no key.
+setup_case
+printf 'CONNECTORS_CREDENTIAL_KEY_PREVIOUS=   \n' >> "$APP/.env"
+rc="$(run_deploy 200 prevblanksha)"
+check "blank previous key: treated as UNSET, no line emitted" \
+  "! grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS' '$TMP/connectors.env'"
+rm -rf "$TMP"
+
+echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

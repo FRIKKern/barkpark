@@ -178,6 +178,23 @@ slot_port()  { [ "$1" = a ] && printf '%s' "$PORT_A" || printf '%s' "$PORT_B"; }
 other_slot() { [ "$1" = a ] && printf b || printf a; }
 slot_env()   { printf '%s/%s.env' "$SLOT_ENV_DIR" "$(slot_inst "$1")"; }
 
+# The port a RUNNING slot actually holds. Read from the slot's EnvironmentFile —
+# that PORT= line is what systemd handed the node process, so it is the truth
+# about the listener; $PORT_A/$PORT_B are only this INVOCATION's inputs and a
+# teardown that was not handed SITE_PORT_A/B falls back to the derived pair,
+# which need not be the pair the site was deployed on. Falls back to slot_port
+# when the env file is already gone.
+held_port() { # <slot> -> the port the unit was started with
+  local f p; f="$(slot_env "$1")"
+  p=""
+  # No `… | head -1`: a reader that exits early SIGPIPEs its producer, and this
+  # file runs under `set -o pipefail` (scripts/pipefail-sigpipe-scan.sh). Take
+  # the first line in the shell instead.
+  [ -f "$f" ] && p="$(sed -n 's/^PORT=//p' "$f")"
+  p="${p%%$'\n'*}"
+  printf '%s' "${p:-$(slot_port "$1")}"
+}
+
 # The build_id a slot is configured for = basename of RELEASE_DIR in its env file.
 read_slot_build() { # <slot> -> build_id or ""
   local f; f="$(slot_env "$1")"
@@ -934,8 +951,17 @@ if [ "$MODE" = selftest ]; then
   # asserted ONE url, so a release whose LINKED route 404s/500s passed HEALTH and
   # switched live (ssw11-bl-node-engine-health-one-path). All 38 sit outside both
   # optional blocks, so BOTH floors move by the same 38.
-  SELFTEST_FLOOR_MIN=434
-  SELFTEST_FLOOR_FULL=451
+  # 2026-09-11: +2 (434->436, 451->453) for the still-HELD PORT in the no-stop
+  # teardown's typed failure (task-d1fc3ff3a8892663) — the slot letter alone did
+  # not name the resource that collides with the next deploy. Both sit outside
+  # both optional blocks, so BOTH floors move by the same 2.
+  # 2026-09-11 (same row, review): +2 more (436->438, 453->455) — the fixture
+  # separation of the env-file port from the handed pair, and the CONTROL that
+  # the handed pair is NOT what the message names. The first two checks above
+  # were VACUOUS until these landed: the fixture handed the teardown the same
+  # ports the env files carried, so held_port's env read was unmeasured.
+  SELFTEST_FLOOR_MIN=438
+  SELFTEST_FLOOR_FULL=455
   TESTS=0; FAILS=0
   check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
 
@@ -2268,8 +2294,24 @@ NOSTOP
     [ -n "$WARM_UP_PRE3" ]
   check "no-stop-case PRECONDITION: warm's route was ARMED before the teardown" \
     grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
+  # THE FIXTURE MUST SEPARATE THE TWO PORTS, or the assertion below is VACUOUS.
+  # held_port reads the slot's EnvironmentFile and falls back to slot_port (i.e.
+  # $SITE_PORT_A/B, THIS invocation's inputs). Hand the teardown the pair warm was
+  # deployed on and the two are the same number, so the check passes even when
+  # held_port never opens the env file — proven: gutting held_port to `slot_port
+  # "$1"` left the whole suite green. So this teardown is handed a DIFFERENT pair
+  # (exactly the real case the function exists for: a --teardown invoked without
+  # SITE_PORT_A/B, or with a re-derived pair, while the units still hold the ports
+  # they were STARTED with). The env file is the truth; the handed pair is the lie.
+  nsp_env_a="$(awk -F= '$1=="PORT"{print $2; exit}' "$SENV/warm__a.env")"
+  nsp_env_b="$(awk -F= '$1=="PORT"{print $2; exit}' "$SENV/warm__b.env")"
+  nsp_wrong_a=18301; nsp_wrong_b=18302   # a pair warm was NEVER deployed on
+  check "no-stop-case FIXTURE: the slot env files really carry warm's DEPLOYED ports, and the pair this teardown is handed really DIFFERS from them (without that, the held-port check below passes on the fallback)" \
+    sh -c "[ '$nsp_env_a' = '$T_PORT_C' ] && [ '$nsp_env_b' = '$T_PORT_D' ] \
+        && [ '$nsp_env_a' != '$nsp_wrong_a' ] && [ '$nsp_env_a' != '$nsp_wrong_b' ] \
+        && [ '$nsp_env_b' != '$nsp_wrong_a' ] && [ '$nsp_env_b' != '$nsp_wrong_b' ]"
   env PATH="$STOPBIN:$FAKEBIN:$PATH" \
-    SITE_SLUG=warm SITE_PORT_A="$T_PORT_C" SITE_PORT_B="$T_PORT_D" \
+    SITE_SLUG=warm SITE_PORT_A="$nsp_wrong_a" SITE_PORT_B="$nsp_wrong_b" \
     BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
     BARKPARK_CADDYFILE="$CF" BARKPARK_SITE_DEPLOY_LOCK="$TD/warm.lock" \
     BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" BARKPARK_SITE_LOG_FILE="$TD/td-nostop.log" \
@@ -2284,6 +2326,25 @@ NOSTOP
     grep -q '^TEARDOWN_FAILED=warm detail="' "$TD/td-nostop.out"
   check "node no-stop teardown names the slot that would not stop" \
     grep -q 'would NOT stop' "$TD/td-nostop.out"
+  # A SLOT LETTER IS NOT THE LEAKED RESOURCE (task-d1fc3ff3a8892663). The stranded
+  # node process keeps its LISTENER, and that port is what the next deploy of this
+  # site collides on. A PREDICATE over every slot the precondition proved running,
+  # not a hard-coded pair: it stays true if the fixture's running set changes.
+  nostop_ports_named=1
+  for nsp_slot in a b; do
+    case "$WARM_UP_PRE3" in *"$nsp_slot"*) ;; *) continue ;; esac
+    nsp_port="$nsp_env_a"; [ "$nsp_slot" = b ] && nsp_port="$nsp_env_b"
+    grep -q "port $nsp_port still held" "$TD/td-nostop.out" || nostop_ports_named=0
+  done
+  check "node no-stop teardown names the still-HELD PORT (the one in the slot's EnvironmentFile) of every slot that would not stop" \
+    [ "$nostop_ports_named" = 1 ]
+  # THE CONTROL for the check above: the port it names must be the one the UNIT
+  # HOLDS, never the pair this invocation happened to be handed. Without this arm
+  # a held_port that never reads the env file still reads green.
+  check "node no-stop teardown does NOT name the port pair this invocation was handed (the stranded listener holds the port it was STARTED with, not the caller's guess)" \
+    sh -c "! grep -q 'port $nsp_wrong_a still held' '$TD/td-nostop.out' && ! grep -q 'port $nsp_wrong_b still held' '$TD/td-nostop.out'"
+  check "node no-stop teardown says the held port collides with the next deploy" \
+    grep -q 'collides on them' "$TD/td-nostop.out"
   check "node no-stop teardown RESTORED the route (no dead route over a live slot)" \
     grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
   check "node no-stop teardown left the Caddyfile BYTE-IDENTICAL to the pre-teardown snapshot" \
@@ -3250,15 +3311,19 @@ if [ "$MODE" = teardown ]; then
   stop_slot a; stop_slot b
   # THE INVERSE HAZARD, measured rather than assumed: systemctl can report success
   # and leave a unit up (a stuck ExecStop, a unit that restarts itself). Ask.
+  # Name the PORT each surviving slot still HOLDS, not just the slot letter: the
+  # operator's next collision is a port collision (the next deploy of this site
+  # allocates the same pair and the stranded listener already owns it), and the
+  # letter alone does not tell them which listener to hunt.
   still_up=""
-  slot_running a && still_up="a"
-  slot_running b && still_up="${still_up:+$still_up and }b"
+  slot_running a && still_up="a (port $(held_port a) still held)"
+  slot_running b && still_up="${still_up:+$still_up and }b (port $(held_port b) still held)"
   if [ -n "$still_up" ]; then
     # teardown_failed_node removes $CF_SNAPSHOT on its way out, on every arm.
     if with_caddy_lock restore_caddyfile_snapshot "$CF_SNAPSHOT"; then
-      teardown_failed_node "slot(s) $still_up would NOT stop — the caddy /sites/$SITE_SLUG route came down first, so this run RESTORED the pre-teardown Caddyfile: the route is armed again over the slot(s) that are still running, which serves real bytes instead of stranding a dead route over a live process. Nothing was deleted (the release tree at $ROOT and both slot env files are kept); fix the slot unit and re-run --teardown"
+      teardown_failed_node "slot(s) $still_up would NOT stop — the caddy /sites/$SITE_SLUG route came down first, so this run RESTORED the pre-teardown Caddyfile: the route is armed again over the slot(s) that are still running, which serves real bytes instead of stranding a dead route over a live process. Nothing was deleted (the release tree at $ROOT and both slot env files are kept). Until that unit stops, the port(s) named above stay BOUND by the stranded node process and the next deploy of this site collides on them; fix the slot unit and re-run --teardown"
     fi
-    teardown_failed_node "slot(s) $still_up would NOT stop AND the caddy /sites/$SITE_SLUG route could not be put back — the disarm succeeded, the restore was rejected, so this site is now UNROUTED with slot(s) $still_up still running. Nothing was deleted (the release tree at $ROOT and both slot env files are kept); stop the slot unit(s) by hand (\`systemctl stop barkpark-site@${SITE_SLUG}__<slot>\`) and re-run --teardown"
+    teardown_failed_node "slot(s) $still_up would NOT stop AND the caddy /sites/$SITE_SLUG route could not be put back — the disarm succeeded, the restore was rejected, so this site is now UNROUTED with slot(s) $still_up still running. Nothing was deleted (the release tree at $ROOT and both slot env files are kept); the port(s) named above stay BOUND by the stranded node process and will collide with the next deploy of this site; stop the slot unit(s) by hand (\`systemctl stop barkpark-site@${SITE_SLUG}__<slot>\`) and re-run --teardown"
   fi
   [ -n "$CF_SNAPSHOT" ] && rm -f "$CF_SNAPSHOT"
   rm -f "$(slot_env a)" "$(slot_env b)" 2>/dev/null || true

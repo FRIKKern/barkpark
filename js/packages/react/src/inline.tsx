@@ -472,12 +472,35 @@ function valuerefHtml(v: {
 /** The concatenated, UNESCAPED text of an inline-node tree — no markup. Used by
  * text-leaf emitters (inline code) that must fold nested `children` into a flat
  * string rather than nested elements. */
-function inlineText(nodes: unknown): string {
+export function inlineText(nodes: unknown): string {
   if (typeof nodes === 'string' || typeof nodes === 'number') return String(nodes)
   if (!Array.isArray(nodes)) return ''
   return nodes
     .map((n) => (isMap(n) ? textLeafValue(n) || inlineText(n.children) : inlineText(n)))
     .join('')
+}
+
+/* ── THE INLINE `code` node source contract (task-e4833f198e293ed1) ───────────
+ *
+ * An inline code chip's body is a FLAT STRING, never inlines — but 66 published
+ * paragraphs (2026-07-25 census) author it as `children` inline nodes with no
+ * `value`, which rendered an empty `<code></code>` here and composed an empty
+ * PdInlineCode in Elixir. THE LAW: `value` when it is a non-empty string, else
+ * the flattened plain text of `children`.
+ *
+ * FIRST NON-EMPTY, not first-non-blank — a `value` of `' '` WINS and keeps its
+ * space. That is deliberately the OPPOSITE of the BLOCK-level `code` contract
+ * (`codeSource` above, which trims to select among value|code|content|text): a
+ * block's source key is a choice among aliases, an inline chip's `value` is the
+ * authored body verbatim.
+ *
+ * Twins: `Render.Inline.inline_code_source/1`
+ * (api/lib/barkpark/portable_doc/render/inline.ex) and `inlineCodeSource`
+ * (internal/pdrender/inline.go). All three answer to ONE fixture,
+ * `api/test/support/fixtures/inline-code-source.json`, read here by
+ * `tests/inline-code-source.parity.test.ts`. */
+export function inlineCodeSource(node: Record<string, unknown>): string {
+  return str(node.value) || inlineText(node.children)
 }
 
 /** Render one inline node to an HTML string. */
@@ -523,7 +546,7 @@ export function renderInline(node: Inline): string {
       // carry that shape. Inline code is a TEXT leaf — the children are folded
       // to their concatenated text, never to nested markup, so the emitted
       // `<code>` body stays escaped plain text exactly as the `value` path.
-      return `<code>${escapeHtml(str(node.value) || inlineText(node.children))}</code>`
+      return `<code>${escapeHtml(inlineCodeSource(node))}</code>`
     case 'link':
       return `<a href="${safeUrl(str(node.href))}" style="${LINK_STYLE}">${renderInlines(node.children)}</a>`
     case 'wikilink': {
