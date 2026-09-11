@@ -1071,6 +1071,21 @@ defmodule Barkpark.Tenancy do
   way back. It is pinned by `bootstrap_guard_test.exs` ("CLEARING the stamp is a
   real escape hatch"). There is no CLI/HTTP surface for it yet
   (`pds-bl-clear-pull-provenance`); a remote console is the only front door.
+
+  BOTH DIRECTIONS ARE AUDIT-VISIBLE (`pds-bl-clear-pull-provenance` c2). Every
+  successful write appends one `plugin_settings` row to the tamper-evident
+  `audit_events` chain — `pull_provenance_set` when the map carries keys,
+  `pull_provenance_cleared` when it is empty — carrying the workspace id, the
+  dataset slug, and the provenance key names (never values). A matching
+  `Logger.info` names the same three facts for an operator watching the log.
+  A CLEAR is the mutation that hands local plugin authority back, so it must
+  never be a silent state change.
+
+  Best-effort, same contract as `Webhooks`' audit hook: the emit result is
+  discarded and an infra raise/throw is swallowed, so an audit hiccup can never
+  fail a settings write that already committed. It is emitted AFTER the update,
+  outside any transaction this function opens — callers must not wrap it in one
+  (see `Barkpark.Audit.emit/1`: a failed emit dooms an ENCLOSING transaction).
   """
   @spec set_pull_provenance(Workspace.t() | binary(), binary(), map()) ::
           {:ok, Workspace.t()}
@@ -1101,6 +1116,7 @@ defmodule Barkpark.Tenancy do
     })
     |> Repo.update()
     |> bust_default_scope()
+    |> audit_pull_provenance(workspace, dataset_slug, provenance)
   end
 
   defp do_set_pull_provenance(id, dataset_slug, provenance) when is_binary(id) do
@@ -1112,6 +1128,40 @@ defmodule Barkpark.Tenancy do
 
   defp do_set_pull_provenance(_workspace_or_id, _dataset_slug, _provenance),
     do: {:error, :not_found}
+
+  # One audit row + one log line per SUCCESSFUL provenance write. A failed
+  # update audits nothing — there is no state change to record.
+  defp audit_pull_provenance({:ok, %Workspace{} = updated} = result, workspace, slug, provenance) do
+    cleared? = map_size(provenance) == 0
+    action = if cleared?, do: "pull_provenance_cleared", else: "pull_provenance_set"
+    keys = provenance |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()
+
+    Logger.info(
+      "Tenancy.set_pull_provenance: #{action} for workspace #{inspect(workspace.slug)} " <>
+        "(#{updated.id}) dataset #{inspect(slug)}; provenance keys: #{inspect(keys)}"
+    )
+
+    Barkpark.Audit.emit(%{
+      category: "plugin_settings",
+      action: action,
+      subject: updated.id,
+      workspace_id: updated.id,
+      metadata: %{
+        "workspace_slug" => workspace.slug,
+        "dataset" => slug,
+        "cleared" => cleared?,
+        "provenance_keys" => keys
+      }
+    })
+
+    result
+  rescue
+    _ -> result
+  catch
+    _, _ -> result
+  end
+
+  defp audit_pull_provenance(result, _workspace, _slug, _provenance), do: result
 
   @doc "Fetch a Project by its id, or nil. `nil` or malformed id returns nil."
   @spec get_project_by_id(binary() | nil) :: Project.t() | nil
