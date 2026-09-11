@@ -1822,6 +1822,18 @@ jobs:
           node tooling/gate-map/gate-map.mjs --verify
           node --test tooling/gate-map/gate-map.test.mjs
 
+      - name: "console-slice-gate: an axis-blind CSS slice gate is REFUSED, not merely listed"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # The wave-17 red (cch-w17-bl-css-slice-gate-must-include-leg-a). The
+        # sibling above COMPOSES a gate; this one REFUSES a proposed gate that
+        # omits an instrument reading the touched paths — and its selftest is
+        # built to lose: reverting breakpoint-sweep.mjs's source declaration
+        # reds 5 of its 9 arms (measured in the PR that wired it). Hermetic,
+        # sub-second, no browser.
+        run: |
+          node --check scripts/console-slice-gate.mjs
+          node --test scripts/console-slice-gate.test.mjs
+
       - name: paper-reader audit fixture
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # paper-readers.yml executes audit-paper-readers.sh on every run; its
