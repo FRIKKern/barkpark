@@ -492,6 +492,142 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── the GENERAL lockstep (pds-bl-export-teardown-lockstep-untested) ──────────
+  #
+  # The block above binds ONE table (`shares`) by example. This one binds EVERY
+  # table in `Catalog.e3_doc_keyed/0`, `Catalog.e3_dataset_keyed/0` and
+  # `Catalog.allowlist/0` — including tables that do not exist yet, because both
+  # arms iterate the catalog rather than a hand-written list. The defect it
+  # closes: the exporter and the teardown used to BUILD the same SQL twice, with
+  # a comment asserting they matched; a prototype split `shares` and 98 tests
+  # stayed green while a row the bundle carried survived the teardown.
+
+  describe "export and teardown derive every string-keyed predicate from ONE source" do
+    test "STRUCTURAL: each class's teardown DELETE carries the exporter's own WHERE verbatim" do
+      f = seed_lockstep_fixture!()
+
+      # Read BEFORE the teardown: `slugs` is derived from projects+datasets that
+      # only leave at `Repo.delete(workspace)`.
+      scope = tenant_scope_for(f.ws_a)
+      classes = lockstep_classes()
+
+      # POSITIVE CONTROL. Every assertion below is quantified over a catalog
+      # class; an empty class makes its arm vacuously true. The two live classes
+      # must be non-empty or this test measured nothing. (`allowlist` is
+      # legitimately `%{}` as of Wave 5 — its arm is allowed to be empty, which
+      # is precisely why the control cannot be "the union is non-empty".)
+      assert Keyword.fetch!(classes, :e3_doc) != [],
+             "Catalog.e3_doc_keyed/0 is EMPTY — the e3_doc arm of this test measured nothing"
+
+      assert Keyword.fetch!(classes, :e3_dataset) != [],
+             "Catalog.e3_dataset_keyed/0 is EMPTY — the e3_dataset arm measured nothing"
+
+      sqls = trace_repo_query(fn -> assert {:ok, _} = Tenancy.delete_workspace(f.ws_a) end)
+
+      for {kind, tables} <- classes, table <- tables do
+        expected = WorkspaceBundle.tenant_scope_where(table, kind, scope)
+        prefix = "DELETE FROM #{quote_ident(table)} t "
+        delete = Enum.find(sqls, &String.starts_with?(&1, prefix))
+
+        assert delete,
+               "the teardown issued NO sweep for #{table} (#{kind}) — a table the exporter " <>
+                 "carries but `delete_workspace/1` never touches orphans on every teardown"
+
+        assert String.contains?(delete, expected),
+               """
+               #{table} (#{kind}): the teardown predicate is NOT the extraction predicate.
+
+               exporter (WorkspaceBundle.tenant_scope_where/4):
+                 #{expected}
+
+               teardown DELETE actually issued:
+                 #{delete}
+
+               These must be ONE string, not two that happen to agree — see
+               pds-bl-export-teardown-lockstep-untested.
+               """
+      end
+    end
+
+    test "BEHAVIOURAL: the teardown sweeps exactly the rows A's bundle carries, sparing co-owned" do
+      f = seed_lockstep_fixture!()
+      scope_a = tenant_scope_for(f.ws_a)
+      scope_b = tenant_scope_for(f.ws_b)
+      classes = lockstep_classes()
+
+      assert Keyword.fetch!(classes, :e3_doc) != [] and
+               Keyword.fetch!(classes, :e3_dataset) != [],
+             "a catalog class is empty — this behavioural arm measured nothing"
+
+      {:ok, bundle} = WorkspaceBundle.export(f.ws_a.id)
+      {manifest, _dumps} = Archive.unpack(bundle)
+      index = table_index(manifest)
+
+      # For each table: the rows the bundle carries for A, and the subset a
+      # SIBLING also owns. `t::text` is a whole-row identity that needs no
+      # per-table primary key, so this is uniform across every class.
+      measured =
+        for {kind, tables} <- classes, table <- tables do
+          where_a = WorkspaceBundle.tenant_scope_where(table, kind, scope_a)
+          where_b = WorkspaceBundle.tenant_scope_where(table, kind, scope_b)
+
+          carried = member_rows(table, where_a)
+          sibling = member_rows(table, where_b)
+          co_owned = Enum.filter(carried, &(&1 in sibling))
+
+          # CONTROLS: a table with no A row, or nothing the sweep must actually
+          # remove, cannot fail the post-teardown assertion.
+          assert carried != [],
+                 "fixture regression: the bundle carries no #{table} row for A"
+
+          assert sibling != [],
+                 "fixture regression: the co-tenant owns no #{table} row"
+
+          assert carried -- co_owned != [],
+                 "fixture regression: every #{table} row A carries is ALSO the sibling's, so " <>
+                   "the sweep has nothing it is obliged to delete"
+
+          # Binds the shared predicate to what the EXPORT actually emitted: if
+          # `tenant_scope_where/4` were not the function the dump is built from,
+          # these two counts would part company.
+          assert index[table]["row_count"] == length(carried),
+                 "#{table}: the bundle's member row_count (#{index[table]["row_count"]}) does " <>
+                   "not match the shared extraction predicate's count (#{length(carried)})"
+
+          {kind, table, carried, sibling, co_owned}
+        end
+
+      # The D7 asymmetry must be EXERCISED, not merely tolerated: at least one
+      # doc-keyed table has a row a second workspace also owns, so the
+      # sibling-guard arm below is a real assertion.
+      assert Enum.any?(measured, fn {kind, _t, _c, _s, co} -> kind == :e3_doc and co != [] end),
+             "fixture regression: no co-owned (doc_id, dataset) row — the sibling-guard is untested"
+
+      assert {:ok, _} = Tenancy.delete_workspace(f.ws_a)
+
+      for {kind, table, carried, sibling, co_owned} <- measured do
+        survivors = Enum.sort(rows_still_present(table, carried))
+
+        assert survivors == Enum.sort(co_owned),
+               """
+               #{table} (#{kind}): export and teardown disagree.
+
+               carried by A's bundle: #{length(carried)}
+               still present after delete_workspace(A): #{length(survivors)}
+               legitimately spared (a sibling owns them too, charter D7): #{length(co_owned)}
+
+               A row the bundle claimed as A's that survives A's teardown is an
+               orphan the backup said was owned; a row deleted that a sibling
+               owns is a cross-tenant delete. Both are this assertion failing.
+               """
+
+        # Fail-CLOSED across the tenant boundary: nothing of B's leaves.
+        assert length(rows_still_present(table, sibling)) == length(sibling),
+               "#{table} (#{kind}): delete_workspace(A) removed rows the co-tenant B owns"
+      end
+    end
+  end
+
   # ── search_surface_config per-workspace E1 attribution (Wave 5 Slice A) ───────
 
   describe "search_surface_config is exported per-workspace (charter D45/D49)" do
@@ -2810,4 +2946,146 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   defp quote_ident(ident), do: ~s("#{String.replace(ident, "\"", "\"\"")}")
 
   defp unique(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  # ── the general export/teardown lockstep (pds-bl-export-teardown-lockstep-untested) ──
+
+  # The three string-keyed catalog classes, each paired with the predicate KIND
+  # `WorkspaceBundle.tenant_scope_where/4` builds for it. Derived, never listed:
+  # a new table in any class is covered the moment it is pinned.
+  defp lockstep_classes do
+    [
+      {:e3_doc, Catalog.e3_doc_keyed()},
+      {:e3_dataset, Catalog.e3_dataset_keyed()},
+      {:allowlist, Map.keys(Catalog.allowlist())}
+    ]
+  end
+
+  # The tenant literals both halves of the lockstep read — the same three keys
+  # `Tenancy.delete_workspace/1` builds and the export ctx carries.
+  defp tenant_scope_for(ws) do
+    %{
+      ws_lit: Catalog.uuid_literal!(ws.id),
+      ws_slug_lit: Catalog.text_literal(ws.slug),
+      slugs: WorkspaceBundle.dataset_slugs_for(ws.id)
+    }
+  end
+
+  # Whole-row identities for the rows a predicate selects. `t::text` needs no
+  # per-table primary key, so one helper serves every class — including a future
+  # table whose key shape nobody here anticipated.
+  defp member_rows(table, where) do
+    Repo.query!("SELECT t::text FROM #{quote_ident(table)} t #{where}", []).rows
+    |> List.flatten()
+  end
+
+  defp rows_still_present(table, rows) do
+    Repo.query!(
+      "SELECT t::text FROM #{quote_ident(table)} t WHERE t::text = ANY($1::text[])",
+      [rows]
+    ).rows
+    |> List.flatten()
+  end
+
+  # Call-trace `Repo.query!` for the duration of `fun`, returning every SQL
+  # string in call order. The teardown's sweeps are raw `Repo.query!/2` strings
+  # built at run time, so the emitted SQL is the only place the teardown's
+  # ACTUAL predicate can be read — a source grep would assert about the file,
+  # not about what ran. Same seam (and same separate-tracer-process
+  # requirement) as `trace_repo_transaction/1` above.
+  defp trace_repo_query(fun) do
+    me = self()
+    tracer = spawn_link(fn -> trace_collector([], me) end)
+
+    :erlang.trace_pattern({Repo, :query!, :_}, true, [:local])
+    :erlang.trace(self(), true, [:call, {:tracer, tracer}])
+
+    try do
+      fun.()
+    after
+      :erlang.trace(self(), false, [:call])
+      :erlang.trace_pattern({Repo, :query!, :_}, false, [:local])
+    end
+
+    send(tracer, {:dump, me})
+
+    receive do
+      {:traced, msgs} ->
+        for {:trace, _pid, :call, {_m, :query!, [sql | _]}} <- msgs, is_binary(sql), do: sql
+    after
+      5_000 -> flunk("the trace collector never answered")
+    end
+  end
+
+  # Two workspaces sharing a dataset slug, with a row in EVERY live string-keyed
+  # table for each — plus one `(doc_id, dataset)` pair both workspaces own, which
+  # is what makes the teardown's sibling-guard (charter D7) a live arm rather
+  # than dead code.
+  defp seed_lockstep_fixture! do
+    ws_a = create_workspace!(unique("wsa"))
+    proj_a = create_project!(ws_a, unique("proja"))
+    ws_b = create_workspace!(unique("wsb"))
+    proj_b = create_project!(ws_b, unique("projb"))
+
+    tag = System.unique_integer([:positive])
+    excl_a = "excl-a-#{tag}"
+    excl_b = "excl-b-#{tag}"
+    shared = "shared-prod-#{tag}"
+
+    seed_dataset!(proj_a.id, excl_a)
+    seed_dataset!(proj_a.id, shared)
+    seed_dataset!(proj_b.id, excl_b)
+    seed_dataset!(proj_b.id, shared)
+
+    {:ok, a_only} =
+      create_document_in!(ws_a, proj_a, "post", %{"doc_id" => "only-a-#{tag}"}, excl_a)
+
+    # The co-owned anchor pair rides the SHARED slug on purpose: `create_document`
+    # materialises a `datasets` row for the project it writes under, so anchoring
+    # B's twin on A's exclusive slug would silently make that slug shared and
+    # empty A's own exclusive set.
+    {:ok, a_co} = create_document_in!(ws_a, proj_a, "post", %{"doc_id" => "co-#{tag}"}, shared)
+    {:ok, b_co} = create_document_in!(ws_b, proj_b, "post", %{"doc_id" => "co-#{tag}"}, shared)
+
+    {:ok, b_only} =
+      create_document_in!(ws_b, proj_b, "post", %{"doc_id" => "only-b-#{tag}"}, excl_b)
+
+    assert a_co.doc_id == b_co.doc_id,
+           "fixture regression: the co-owned anchor documents must share a doc_id"
+
+    # E3 doc-keyed — every table in the class, on the same three anchors:
+    # A-exclusive, co-owned, B-exclusive.
+    for {doc_id, dataset} <- [
+          {a_only.doc_id, excl_a},
+          {a_co.doc_id, shared},
+          {b_only.doc_id, excl_b}
+        ] do
+      seed_exemption!(doc_id, dataset, "post")
+      insert_sync_conflict!(doc_id, dataset, tag)
+    end
+
+    # E3 dataset-keyed, ATTRIBUTED (`shares` carries workspace_slug): A under its
+    # exclusive slug AND under the shared one — the shared-slug row is the whole
+    # reason the attributed arm exists.
+    insert_share!(ws_a.slug, proj_a.slug, excl_a)
+    insert_share!(ws_a.slug, proj_a.slug, shared)
+    insert_share!(ws_b.slug, proj_b.slug, shared)
+
+    # E3 dataset-keyed, UNATTRIBUTABLE (`preview_token_jti` has only a slug): the
+    # shared-slug row attributes to neither workspace and is DECLARED as loss, so
+    # it is in nobody's carried set.
+    insert_preview_jti!("A-JTI-#{tag}", excl_a)
+    insert_preview_jti!("B-JTI-#{tag}", excl_b)
+    insert_preview_jti!("SHARED-JTI-#{tag}", shared)
+
+    %{ws_a: ws_a, ws_b: ws_b, proj_a: proj_a, proj_b: proj_b, tag: tag}
+  end
+
+  defp insert_sync_conflict!(doc_id, dataset, tag) do
+    Repo.query!(
+      "INSERT INTO github_sync_conflicts " <>
+        "(repo, issue, doc_id, dataset, kind, detail, inserted_at, updated_at) " <>
+        "VALUES ($1, $2, $3, $4, 'out_of_band_edit', '{}'::jsonb, now(), now())",
+      ["acme/lockstep-#{tag}", System.unique_integer([:positive]), doc_id, dataset]
+    )
+  end
 end
