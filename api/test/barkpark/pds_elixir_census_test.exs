@@ -321,8 +321,16 @@ defmodule Barkpark.PdsElixirCensusTest do
            "the tripwire arm is missing or red. An arm that fires on a runtime-configured " <>
              "capture is matching SYNTAX rather than evidence and must not ship.\n#{out}"
 
+    # THE ANCHOR CARRIES A LINE, SO A MOVE OF THE SITE IS A CHANGE HERE. It moved
+    # 65 -> 92 when `status/2` grew the workspace-membership fence: the call is now
+    # `status_fun().(filter)` over a `filter` keyword list built above it, which is
+    # more lines before the same call. The census still PRINTS `status_fun().()` —
+    # it names the runtime capture it refuses to resolve, not the argument list — so
+    # only the line number moved. RE-DERIVED, not guessed: `elixir
+    # scripts/pds-elixir-receipt-census.exs` from the repo root, read off its
+    # "THE CAPTURE REFUSALS, NAMED IN FULL" block.
     assert out =~
-             "barkpark_web/controllers/github_status_controller.ex:65  health: status_fun().()",
+             "barkpark_web/controllers/github_status_controller.ex:92  health: status_fun().()",
            "the tripwire site was never REACHED by this run, so the refusal above is a control " <>
              "over an absent site and proves nothing. Re-derive the anchor before editing " <>
              "this assertion away.\n#{out}"

@@ -450,6 +450,23 @@ on:
       # `tooling-harnesses`, so the glob alone leaves this step dark.
       - "scripts/console-slice-gate.mjs"
       - "scripts/console-slice-gate.test.mjs"
+      # ── SUNSET-ROUTE CONSUMERS (task-a6613aa3eddb3c80) ─────────────────────
+      # scripts/sunset-route-consumers.test.sh landed in #17772 wired to
+      # NOTHING: `selftest-wiring-census` printed
+      # `ORPHAN scripts/sunset-route-consumers.test.sh` and concluded `fail` on
+      # that very PR, and the PR merged anyway because this workflow is an S4
+      # PATHS-FILTERED exclusion in .github/required-checks.json — the census is
+      # advisory here, so its red was argued away instead of fixed. The harness
+      # EXTRACTS each consumer's probe URL from the consumer file at run time,
+      # so the guarded subjects are listed beside it: reverting any one of them
+      # to `/api/schemas` must red this lane, which it cannot do if the edit
+      # never starts the run.
+      - "scripts/sunset-route-consumers.test.sh"
+      - "scripts/create-quickstart-smoke.sh"
+      - "docker-compose.yml"
+      - "internal/cli/cloud/support.go"
+      - "deploy/README.md"
+      - "deploy/uptime-kuma/README.md"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -765,6 +782,23 @@ on:
       # `tooling-harnesses`, so the glob alone leaves this step dark.
       - "scripts/console-slice-gate.mjs"
       - "scripts/console-slice-gate.test.mjs"
+      # ── SUNSET-ROUTE CONSUMERS (task-a6613aa3eddb3c80) ─────────────────────
+      # scripts/sunset-route-consumers.test.sh landed in #17772 wired to
+      # NOTHING: `selftest-wiring-census` printed
+      # `ORPHAN scripts/sunset-route-consumers.test.sh` and concluded `fail` on
+      # that very PR, and the PR merged anyway because this workflow is an S4
+      # PATHS-FILTERED exclusion in .github/required-checks.json — the census is
+      # advisory here, so its red was argued away instead of fixed. The harness
+      # EXTRACTS each consumer's probe URL from the consumer file at run time,
+      # so the guarded subjects are listed beside it: reverting any one of them
+      # to `/api/schemas` must red this lane, which it cannot do if the edit
+      # never starts the run.
+      - "scripts/sunset-route-consumers.test.sh"
+      - "scripts/create-quickstart-smoke.sh"
+      - "docker-compose.yml"
+      - "internal/cli/cloud/support.go"
+      - "deploy/README.md"
+      - "deploy/uptime-kuma/README.md"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -863,6 +897,7 @@ jobs:
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
       which-gates: ${{ steps.sets.outputs.which-gates }}
       bp-curl: ${{ steps.sets.outputs.bp-curl }}
+      sunset-route-consumers: ${{ steps.sets.outputs.sunset-route-consumers }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
     steps:
       - uses: actions/checkout@v4
@@ -1095,6 +1130,15 @@ jobs:
           place-directory-install templates/place-directory/seed-places.json
           place-directory-install templates/place-directory/schemas/place.json
           place-directory-install scripts/*.test.sh
+          sunset-route-consumers scripts/sunset-route-consumers.test.sh
+          sunset-route-consumers scripts/deploy-rebuild.sh
+          sunset-route-consumers scripts/compose-smoke.sh
+          sunset-route-consumers scripts/pds-scratch-target.sh
+          sunset-route-consumers scripts/create-quickstart-smoke.sh
+          sunset-route-consumers docker-compose.yml
+          sunset-route-consumers internal/cli/cloud/support.go
+          sunset-route-consumers deploy/README.md
+          sunset-route-consumers deploy/uptime-kuma/README.md
           '
           self=".github/workflows/shell-harnesses.yml"
 
@@ -2782,3 +2826,33 @@ jobs:
       - name: "place-directory-install.test.sh (27 assertions, 4 arms incl. the mutation)"
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/place-directory-install.test.sh
+
+  sunset-route-consumers:
+    needs: [changes]
+    if: needs.changes.outputs.sunset-route-consumers == 'true'
+    # THE POST-SUNSET WORLD (task-a6613aa3eddb3c80). `/api/schemas` carries a
+    # PUBLISHED removal date (`sunset: Wed, 31 Dec 2026 23:59:59 GMT`), and
+    # every health consumer in the deploy surface gates on the STATUS CODE — so
+    # on 2027-01-01 a healthy box turns each of them red. #17772 retargeted the
+    # fenced consumers to /status.json and shipped the harness that proves it,
+    # but wired the harness to nothing: it was the sole `ORPHAN` in
+    # scripts/selftest-wiring-census.sh on main from 8970ea272 until this job.
+    #
+    # Hermetic and fast: one python3 fake box on 127.0.0.1 that 404s the sunset
+    # route and 200s /status.json, measured 0.3 s / 11 assertions locally. No
+    # probe string is retyped in the harness — each consumer's URL is EXTRACTED
+    # from the consumer file at run time, which is why the guarded subjects sit
+    # in this job's roster rows above: a revert reds HERE without anyone editing
+    # the harness. Two controls run before any verdict (the box really 404s the
+    # sunset route; it really 200s /status.json), so a green cannot be free.
+    name: sunset-route health consumers survive 2027-01-01
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: harness syntax check
+        run: bash -n scripts/sunset-route-consumers.test.sh
+      - name: "sunset-route-consumers.test.sh (11 assertions incl. both fixture controls, hermetic loopback server)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/sunset-route-consumers.test.sh
