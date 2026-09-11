@@ -64,8 +64,9 @@
 #    produced", and EXCLUDE DNS resolution failure, which is a persistent
 #    config fault we must see immediately. The Go-string equivalents of that
 #    same list: connection refused/reset, i/o timeout, Client.Timeout, context
-#    deadline exceeded, TLS handshake, EOF — retried; `no such host` /
-#    `server misbehaving` — NOT retried, one attempt, exactly like curl exit 6.
+#    deadline exceeded, TLS handshake, EOF — retried; every resolver failure
+#    (`dial tcp: lookup <host> …`, whatever its tail) — NOT retried, one
+#    attempt, exactly like curl exit 6.
 #
 # Evidence (the six paper-readers reds since #15760, 6,274 CLI observations —
 # runs 33956981205, 34024640087, 34110681290, 34211257256, 34336441737,
@@ -142,7 +143,12 @@ cli_retryable() {
   # 3. a Go transport error: the client never reached the box. Same classes the
   #    HTTP legs retry via transport_retryable, minus DNS resolution failure,
   #    which is persistent by nature and must be seen on attempt 1.
-  if grep -Eq 'no such host|server misbehaving' "$err" 2>/dev/null; then
+  #    The exclusion is keyed on `lookup ` — Go renders EVERY resolver failure
+  #    as `dial tcp: lookup <host> …`, and its tail can be `no such host`,
+  #    `server misbehaving` OR `i/o timeout`. Keying only on the first two
+  #    would let a resolver timeout in through clause 3 below; measured on
+  #    fixture BP_FIXTURE_CLI_DNS, which carries that exact wording.
+  if grep -Eq 'no such host|server misbehaving|lookup ' "$err" 2>/dev/null; then
     return 1
   fi
   grep -Eq 'connection refused|connection reset|i/o timeout|Client\.Timeout|context deadline exceeded|TLS handshake|tls: |unexpected EOF|: EOF' \
