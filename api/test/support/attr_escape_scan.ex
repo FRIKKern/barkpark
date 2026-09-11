@@ -30,7 +30,9 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
                   tones colors palette_for)a
   # Taint-preserving wrappers: the verdict is the verdict of their subject.
   @passthrough ~w(to_string trim downcase upcase capitalize slice
-                  Enum.join Enum.map_join String.trim String.downcase String.upcase
+                  Enum.join Enum.map_join Enum.reverse Enum.sort Enum.uniq Enum.take
+                  Enum.filter Enum.reject Enum.concat List.wrap List.flatten
+                  String.trim String.downcase String.upcase
                   String.slice Integer.to_string Float.to_string List.to_string)
   @max_depth 8
 
@@ -154,10 +156,11 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
   @open_attr ~r/([A-Za-z_][A-Za-z0-9_:.-]*)="([^"]*)$/
 
   def attr_sites(clause) do
+    # `~s(…)` carries its `<<>>` as a child, so matching the binary alone sees
+    # both plain strings and sigils — and matching the sigil TOO would count
+    # every ~s site twice.
     collect(clause.body, fn
       {:<<>>, meta, parts} -> [{meta[:line], parts}]
-      {:sigil_s, meta, [{:<<>>, _, parts}, _]} -> [{meta[:line], parts}]
-      {:sigil_S, _, _} -> []
       _ -> []
     end)
     |> Enum.flat_map(fn {line, parts} -> parts_sites(line, parts) end)
@@ -280,7 +283,8 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
   # a slug strip IS an allowlist: String.replace(x, ~r/[^…]/, "") keeps only
   # the characters the class names, so no quote/angle can survive.
   defp classify_node(
-         {{:., _, [String, :replace]}, _, [_subject, {:sigil_r, _, [{:<<>>, _, [rx]}, _]}, ""]},
+         {{:., _, [{:__aliases__, _, [:String]}, :replace]}, _,
+          [_subject, {:sigil_r, _, [{:<<>>, _, [rx]}, _]}, ""]},
          _ctx
        )
        when is_binary(rx) do
@@ -288,6 +292,19 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
          not String.contains?(rx, "<"),
        do: :slugified,
        else: :unproven
+  end
+
+  # A lookup into a table the ENGINE minted (a zero-arity constant map, a module
+  # attribute, a palette field) cannot yield author text, whatever the key is.
+  # The same shape over a NODE map (`Map.get(n, "style")`) is exactly the read
+  # this guard exists to catch, so the subject — never the function — decides.
+  defp classify_node({{:., _, [{:__aliases__, _, [:Map]}, f]}, _, [subject | _]}, ctx)
+       when f in [:get, :fetch, :fetch!, :get_lazy] do
+    case classify(subject, bump(ctx)) do
+      v when v in [:engine_call, :engine_table, :palette, :module_attr, :literal_list, :literal] ->
+        :engine_table
+      _ -> :unproven
+    end
   end
 
   # calls
