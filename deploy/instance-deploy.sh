@@ -1510,6 +1510,27 @@ else
       # token would serve EVERY tenant — the exact multi-tenant hole this wave
       # closes. Each install authenticates with its own workspace-bound token,
       # ciphered at rest under CONNECTORS_CREDENTIAL_KEY.
+      # ROTATION, NOT A FLAG DAY. The cipher opens a sealed row under the
+      # CURRENT key or any key in CONNECTORS_CREDENTIAL_KEY_PREVIOUS
+      # (connectors/src/config.ts `splitKeys` → crypto/credential-cipher.ts), and
+      # the unit reads ONLY this file (EnvironmentFile=/etc/barkpark/connectors.env).
+      # Until this writer emitted the key, setting _PREVIOUS in /opt/barkpark/.env
+      # reached nothing and the rotation documented directly above had to be
+      # completed by hand-editing the box's connectors.env.
+      #
+      # UNSET IS NOT EMPTY. `splitKeys` reads an absent value and an empty string
+      # the same way (an empty list either way), so emitting an empty line would
+      # not MISLEAD the bridge — but it would stop this file from being able to
+      # say "no rotation is in flight", and, once the operator deletes the line
+      # from .env after `npm run rewrap`, the line must DISAPPEAR here on the next
+      # deploy rather than linger as an empty claim. So: emitted only when there
+      # is a key to carry. Whitespace-only counts as unset, for the same reason
+      # loadConfig() trims CONNECTORS_CONNECT_SECRET before deciding.
+      CONNECTORS_PREV_KEY="${CONNECTORS_CREDENTIAL_KEY_PREVIOUS:-}"
+      case "$CONNECTORS_PREV_KEY" in
+        *[![:space:]]*) ;;
+        *) CONNECTORS_PREV_KEY="" ;;
+      esac
       mkdir -p "$(dirname "$CONNECTORS_ENV_FILE")"
       ( umask 077; : > "$CONNECTORS_ENV_FILE" )
       chmod 0600 "$CONNECTORS_ENV_FILE"
@@ -1522,7 +1543,14 @@ else
         # The SAME value Barkpark.Connectors signs tickets with (D50). If these
         # two ever disagree, every connect 401s and nothing else would catch it.
         printf 'CONNECTORS_CONNECT_SECRET=%s\n' "${CONNECTORS_CONNECT_SECRET:-}"
+        # Present ONLY during a rotation window — see the UNSET-IS-NOT-EMPTY note above.
+        if [ -n "$CONNECTORS_PREV_KEY" ]; then
+          printf 'CONNECTORS_CREDENTIAL_KEY_PREVIOUS=%s\n' "$CONNECTORS_PREV_KEY"
+        fi
       } > "$CONNECTORS_ENV_FILE"
+      if [ -n "$CONNECTORS_PREV_KEY" ]; then
+        log "connectors.env carries CONNECTORS_CREDENTIAL_KEY_PREVIOUS — a rotation window is OPEN; run \`npm run rewrap\` then delete the line from /opt/barkpark/.env"
+      fi
       install -m 0644 "$APP/deploy/systemd/barkpark-connectors.service" /etc/systemd/system/barkpark-connectors.service
       systemctl daemon-reload
       if systemctl enable barkpark-connectors >/dev/null 2>&1 && systemctl restart barkpark-connectors; then
