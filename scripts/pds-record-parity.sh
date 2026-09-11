@@ -873,7 +873,14 @@ axis_b() {
   now="$(now_epoch)"
   grace_secs=$(( GRACE_HOURS * 3600 ))
 
-  local n_terminal=0 n_open=0 n_notfound=0 n_unchecked=0 n_grace=0 n_root=0 n_leaf=0
+  # THE REDDING TALLY IS TWO CLASSES, NOT ONE. `n_leaf` used to be a single
+  # counter bumped from BOTH the 404 branch and the DIVERGENT branch, printed
+  # under one label — "LEAF slices (REDDING)" — that names only the second.
+  # It read clean only while not-found was 0; the day an id is renamed the
+  # headline grows for a reason its own sentence denies, and the reader cannot
+  # tell which half moved. Count them separately and print the composition.
+  local n_terminal=0 n_open=0 n_notfound=0 n_unchecked=0 n_grace=0 n_root=0
+  local n_leaf_open=0 n_leaf_ghost=0
   local tid latest prlist lifecycle parent has_result age
   while read -r tid; do
     [ -n "$tid" ] || continue
@@ -898,7 +905,7 @@ axis_b() {
     case "$LF_CODE" in
       404)
         echo "    NOT-FOUND  ${tid}  merged over a task id the ledger does not carry  ${prlist}"
-        n_notfound=$((n_notfound + 1)); n_leaf=$((n_leaf + 1)); raise 1
+        n_notfound=$((n_notfound + 1)); n_leaf_ghost=$((n_leaf_ghost + 1)); raise 1
         continue ;;
       2??) : ;;
       *)
@@ -957,10 +964,11 @@ axis_b() {
 
     echo "    DIVERGENT  ${tid}  lifecycle=${lifecycle}  parent=${parent}  merged over an OPEN row  ${prlist}"
     printf '%s\n' "$tid" >> "$leaves"
-    n_leaf=$((n_leaf + 1)); raise 1
+    n_leaf_open=$((n_leaf_open + 1)); raise 1
   done < <(cut -f1 "$ids" | sort -u)
 
   local n_divergent=$(( n_open + n_notfound ))
+  local n_leaf=$(( n_leaf_open + n_leaf_ghost ))
   echo
   echo "  AXIS B TALLY"
   echo "    terminal (done|cancelled):   ${n_terminal}"
@@ -971,6 +979,8 @@ axis_b() {
   echo "       EPIC-ROOT-IN-FLIGHT (advisory): ${n_root}"
   echo "       leaf, suppressed by ${GRACE_HOURS}h grace: ${n_grace}"
   echo "       LEAF slices (REDDING):          ${n_leaf}"
+  echo "         of which merged over an OPEN row:    ${n_leaf_open}"
+  echo "         of which merged over a MISSING id:   ${n_leaf_ghost}"
   return 0
 }
 

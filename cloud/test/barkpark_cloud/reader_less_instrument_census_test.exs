@@ -136,21 +136,24 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
   #11169, which owns this file's tail.
   """
 
-  # The repo root, walked with `Path.dirname/1` rather than a parent-relative
-  # path literal. THIS IS NOT COSMETIC AND IT IS NOT FREE — read the DISPATCH
-  # BLINDNESS paragraph in the census's own moduledoc.
-  # `scripts/cloud-path-escape-check.sh` resolves every parent-relative string
-  # literal in `cloud/**` against `CLOUD_PATHS`; `internal`, `web`, `js` and
-  # `api` are not declared there, and the declaration lives in a file this slice
-  # does not own (dr-w26-s4-census-scores-a-caller-less-producer). A parent-relative literal naming those trees fails
-  # that gate on arrival — measured, not assumed: writing one here reds it with
-  # `UNCOVERED repo-root read: internal`, which is exactly the honest complaint
-  # the moduledoc records and files rather than silences.
+  # The repo root, in the house form every other census here uses
+  # (`Path.expand("../..", __DIR__)` and friends). Two facts, both MEASURED on
+  # 2026-09-11 (lead-deploy-r8), so the next reader does not re-derive them:
   #
-  # Walking with `Path.dirname/1` does not BUY dispatch coverage — it only stops
-  # a gate from failing over a declaration this slice cannot make. The gap is
-  # real and is written down where a reader will find it.
-  @repo_root __DIR__ |> Path.dirname() |> Path.dirname() |> Path.dirname()
+  #   * `scripts/cloud-path-escape-check.sh` does NOT see this literal. Its
+  #     resolver normalises `cloud/test/barkpark_cloud/../../..` to the EMPTY
+  #     path and `continue`s past it, so `--list-escapes` lists nothing for this
+  #     file (the earlier claim that a parent-relative literal here "reds the
+  #     gate on arrival" was true only of a literal NAMING a tree, e.g.
+  #     `"../../../internal"`; a root-resolving one is skipped). The previous
+  #     `Path.dirname/1` walk therefore bought nothing and hid nothing.
+  #   * Dispatch coverage for `internal`, `web`, `js` and `api` comes from
+  #     `@roots` below, not from any literal: since #17522 the Cloud gate's
+  #     census tier DERIVES its path set from this file's `@roots` line
+  #     (`cloud-path-escape-check.sh --census-source` names this file, and its
+  #     harness proves a synthetic `@roots` takes). Edit `@roots` and the
+  #     dispatch condition follows; that is the seam, and it is the only one.
+  @repo_root Path.expand("../../..", __DIR__)
 
   # THE READER CORPUS. Positively declared; five trees.
   @roots ~w(internal cloud/priv/static web js api)

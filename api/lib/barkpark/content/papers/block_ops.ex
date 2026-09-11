@@ -2215,9 +2215,22 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- preflight_table_editor_ops(blocks, [op]),
          {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
          {:ok, applied_op} <- lower_editor_block_op(blocks, op),
-         {:ok, new_blocks} <- Patch.apply_patch(blocks, applied_op),
+         {:ok, patched} <- Patch.apply_patch(blocks, applied_op),
+         # HOIST (PDS, document surface): mint ids BEFORE `locate_paper_affected`,
+         # exactly as `apply_paper_block_op/4` (:816) and the batch fold (:1932)
+         # already do. `locate_paper_affected` reads the affected block out of the
+         # post-op list, so an id-less append/insert-after handed the RAW patched
+         # list reports `block_id: nil` for a block that `upsert_document`'s own
+         # chokepoint then mints and persists — the receipt withholding the id it
+         # created. `ensure_block_ids/1` is idempotent and only fills a
+         # missing/blank id, so the downstream chokepoint stays a byte-identical
+         # no-op over this list. The no-op comparison deliberately stays on
+         # `patched` (pre-mint) so a revision-fenced op over a list that was
+         # ALREADY id-less on disk keeps reporting `no_op` instead of being
+         # promoted to a write by the minting alone.
+         new_blocks = ensure_block_ids(patched),
          {:ok, affected} <- locate_paper_affected(applied_op, new_blocks) do
-      if not is_nil(if_rev) and new_blocks == blocks do
+      if not is_nil(if_rev) and patched == blocks do
         {:ok, document_no_op_receipt(doc, op, affected)}
       else
         persist_document_block_op(
@@ -2903,9 +2916,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # whose freshly-appended block was still id-less, which is exactly how the
   # batch receipt came to withhold the id it had minted and persisted.
   # `fold_paper_ops/2` now mints per op, so both paper paths honour it.
-  # `apply_document_block_op/5` still does not (its ids are minted downstream in
-  # `upsert_document`), so an id-less block op on a DOCUMENT reports block_id
-  # nil — a known, untouched gap on a different surface, not this contract.
+  # `apply_document_block_op/5` (:2218) now honours it too — it minted downstream
+  # in `upsert_document` only, so an id-less block op on a DOCUMENT reported
+  # block_id nil for a block it had persisted with a minted id. Every caller of
+  # this function now mints first.
   defp lower_editor_block_op(
          blocks,
          %{"op" => "patch-card-body", "id" => id, "content" => content} = op

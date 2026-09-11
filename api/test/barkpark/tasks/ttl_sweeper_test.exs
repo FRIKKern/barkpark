@@ -195,8 +195,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
   describe "sweep/1 — happy path" do
     test "claim with stale ts_iso → reaped, epoch bumped, worker nil, event emitted",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       phase_id = uniq("phase-happy")
       task = mk_task!(uniq("happy"), scope, %{"parent_id" => phase_id})
 
@@ -238,8 +236,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
     test "sweep drops the dead worker's resource fences from the claim map",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("res-sweep"), scope)
 
       {:ok, claimed} =
@@ -259,8 +255,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
     end
 
     test "perform/1 with synthetic Oban.Job runs the sweep", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       phase_id = uniq("phase-perform")
       task = mk_task!(uniq("perform"), scope, %{"parent_id" => phase_id})
 
@@ -283,8 +277,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
     end
 
     test "claim with NULL ts_iso (malformed) is also reaped", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       phase_id = uniq("phase-null")
       task = mk_task!(uniq("null"), scope, %{"parent_id" => phase_id})
 
@@ -313,8 +305,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
   describe "sweep/1 — not expired" do
     test "claim with fresh ts_iso (now) → not swept, no event", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       phase_id = uniq("phase-fresh")
       task = mk_task!(uniq("fresh"), scope, %{"parent_id" => phase_id})
 
@@ -339,8 +329,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
   describe "fencing kick — the W7-05↔W7-04 integration" do
     test "claim → sweep → late close with old epoch → {:error, :fenced_off}",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       phase_id = uniq("phase-fence")
       task = mk_task!(uniq("fence"), scope, %{"parent_id" => phase_id})
 
@@ -379,8 +367,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
   describe "re-claimable after sweep" do
     test "ready/1 surfaces the swept task; new claim by worker B → epoch=3",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       phase_id = uniq("phase-reclaim")
       task = mk_task!(uniq("reclaim"), scope, %{"parent_id" => phase_id})
 
@@ -422,8 +408,11 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
   describe "advisory-lock contention" do
     test "5 sweeps + 1 close on the same expired task — consistent final state",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
+      # The 6 `Task.async_stream/3` children below — 5 `TtlSweeper.sweep/1`
+      # tasks and 1 `Tasks.close/3` task — get this test's connection from the
+      # `shared: not tags[:async]` owner `DataCase.setup_sandbox/1` already
+      # started for this `async: false` case; the explicit
+      # `Sandbox.mode(Repo, {:shared, self()})` this replaced was redundant.
       phase_id = uniq("phase-contend")
       task = mk_task!(uniq("contend"), scope, %{"parent_id" => phase_id})
 
@@ -510,8 +499,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
   describe "no-op on terminal-state tasks" do
     test "done task with stale ts_iso is NOT swept", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       phase_id = uniq("phase-done")
       task = mk_task!(uniq("done"), scope, %{"parent_id" => phase_id})
 
@@ -537,8 +524,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
     end
 
     test "cancelled task with stale ts_iso is NOT swept", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       phase_id = uniq("phase-canc")
       task = mk_task!(uniq("canc"), scope, %{"parent_id" => phase_id})
 
@@ -564,8 +549,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
     test "open task (never claimed) is NOT swept regardless of any stale fields",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("never"), scope)
       assert task.content["lifecycle_status"] == "open"
 
@@ -580,8 +563,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
   describe "multi-task sweep" do
     test "3 expired + 2 fresh → swept=3, skipped=0; fresh untouched", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       phase_id = uniq("phase-multi")
 
       expired_tasks =
@@ -667,8 +648,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
   describe "sweep_engagement/1" do
     test "researching with stale engagement.ts → considering, engagement cleared, event emitted",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       engagement = %{
         "object" => "research",
         "holder" => "cycle-w1",
@@ -704,8 +683,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
     test "considering with stale engagement → engagement cleared, STAYS considering",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       engagement = %{"object" => "build", "holder" => "cycle-w2", "ts" => iso_ago(600)}
       task = mk_thought_task!(uniq("eng-con"), scope, "considering", engagement)
 
@@ -724,8 +701,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
     test "TTL boundary: fresh engagement survives, stale lapses — same sweep",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       fresh_engagement = %{"object" => "research", "holder" => "h-fresh", "ts" => iso_ago(200)}
       stale_engagement = %{"object" => "research", "holder" => "h-stale", "ts" => iso_ago(400)}
 
@@ -751,8 +726,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
     test "considering WITHOUT an engagement map is the resting state — never a candidate",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_thought_task!(uniq("eng-rest"), scope, "considering", nil)
 
       sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, untouched: [task])
@@ -764,8 +737,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
     test "researching WITHOUT an engagement map is malformed and lapses to considering",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_thought_task!(uniq("eng-bare"), scope, "researching", nil)
 
       sweep_asserting!(fn -> TtlSweeper.sweep_engagement(300) end, reaped: [task])
@@ -780,8 +751,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
     end
 
     test "lapse is idempotent: a second sweep finds nothing to lapse", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       engagement = %{"object" => "research", "holder" => "h-once", "ts" => iso_ago(600)}
       task = mk_thought_task!(uniq("eng-idem"), scope, "researching", engagement)
 
@@ -796,8 +765,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
     test "non-thought lifecycles are never touched, stale engagement or not",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       stale = %{"object" => "research", "holder" => "h-x", "ts" => iso_ago(999_999)}
 
       open_task = mk_task!(uniq("eng-open"), scope, %{"engagement" => stale})
@@ -829,8 +796,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
     # 15-minute half-life. These two reds are the guard.
     test "a reason written through the stage verb SURVIVES the lapse that clears its lease",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       reason = "parked: waiting on the crown proof — reopen when pds-w20-crown-fire closes"
       task = mk_task!(uniq("eng-durable"), scope)
 
@@ -865,8 +830,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
     test "a LEGACY engagement.note is promoted to disposition_reason on the way out",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # A row written BEFORE the split: the reason still rides the lease.
       engagement = %{
         "object" => "research",
@@ -887,8 +850,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
     end
 
     test "promotion never overwrites a reason already adjudicated", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("eng-nooverwrite"), scope, %{
           "lifecycle_status" => "considering",
@@ -909,8 +870,6 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
     test "perform/1 runs BOTH sweeps: lease reap + engagement lapse in one job",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # A stale claim for the lease sweep…
       phase_id = uniq("phase-both")
       _lease_task = mk_task!(uniq("both-lease"), scope, %{"parent_id" => phase_id})
