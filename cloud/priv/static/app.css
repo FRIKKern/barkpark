@@ -5326,18 +5326,35 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .cmdk-row:hover { background: var(--muted-surface); }
 .cmdk-row.is-active { background: var(--muted-surface); }
 .cmdk-empty { padding: 24px 12px; text-align: center; color: var(--muted-text); font-size: 13px; }
+/* The footer WRAPS, and that is what lets its key caps join the type scale.
+   A nowrap flex row's min-content width is the SUM of its three hints, so the
+   footer grew with its kbd type and pushed `span.cmdk-hint` outside the card at
+   320 (overflow-guard's W22 min-content leg: `N descendants paint OUTSIDE the
+   card`). Wrapping makes the row's min-content the WIDEST SINGLE HINT instead
+   of the sum, so the caps can sit on `--text-xs` with room to spare. Declared
+   unconditionally rather than inside a phone-band media query: wrapping is
+   inert at any width where the three hints fit on one line, which is every
+   width above the band, and a media query would hide the property from the
+   min-content probe that forces `width: min-content` on the card. `row-gap` is
+   deliberately smaller than the column gap — 16px between stacked lines reads
+   as three separate footers. */
 .cmdk-foot {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  column-gap: 16px;
+  row-gap: 6px;
   padding: 10px 16px;
   border-top: 1px solid var(--border);
   font-size: 12px;
   color: var(--muted-text);
 }
 .cmdk-hint { display: inline-flex; align-items: center; gap: 5px; }
+/* Key CAPS (esc, Enter, the arrows) are text a person reads, not a glyph in a
+   declared box, so they ride the scale. This was the one non-glyph entry in
+   type-floor.mjs's allowlist; the wrap rule above is what paid for it. */
 .cmdk-foot kbd {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 1px 5px;
   border: 1px solid var(--border);
   border-radius: 4px;
