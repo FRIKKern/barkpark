@@ -325,7 +325,13 @@ head_step() { # id title
 art_marker_field() { # field dir -> value on stdout (empty when unreadable)
   local f="$1" d="$2"
   [ -f "$d/$ART_MARKER_NAME" ] || return 0
-  sed -n "s/^$f:[[:space:]]*//p" "$d/$ART_MARKER_NAME" 2>/dev/null | head -n 1
+  # NOT `sed … | head -n 1`: `head` exits after one line, `sed` takes SIGPIPE on
+  # the rest of the marker file, and under this script's `set -euo pipefail` the
+  # bare pipeline's 141 KILLS THE HARNESS — on a marker file that is merely
+  # longer than the pipe buffer.  Capture, then take the first line in the shell.
+  local raw
+  raw="$(sed -n "s/^$f:[[:space:]]*//p" "$d/$ART_MARKER_NAME" 2>/dev/null || true)"
+  [ -n "$raw" ] && printf '%s\n' "${raw%%$'\n'*}"
   return 0
 }
 

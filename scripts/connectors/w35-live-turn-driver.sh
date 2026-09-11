@@ -96,6 +96,15 @@
 set -uo pipefail
 export LC_ALL=C
 
+# SUBSTRING TESTS ARE A BUILTIN `case`, NEVER `printf | grep -q`.  Under this
+# script's `set -o pipefail` a matching `grep -q` exits on the FIRST hit, the
+# printf takes SIGPIPE, and pipefail promotes 141 over the match — so a TRUE
+# assertion reads as FAIL once the payload outgrows the pipe buffer (~512 B on
+# darwin, 64 KB on the Linux runners).  Every haystack here is captured command
+# output of unbounded length.  `has_sub NEEDLE HAYSTACK` has no producer
+# process to kill, so the verdict cannot depend on the payload's length.
+has_sub() { case "$2" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
+
 SCRIPT_NAME="w35-live-turn-driver.sh"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHIM="$HERE/cloud-sandbox-runner.mjs"
@@ -200,7 +209,7 @@ preflight_or_refuse() {
   out="$(CONNECTORS_VERCEL_SCOPE="$SCOPE" bash "$PREFLIGHT" 2>&1)"
   rc=$?
   printf '%s\n' "$out"
-  if [ "$rc" -ne 0 ] || ! printf '%s' "$out" | grep -q "PREFLIGHT OK"; then
+  if [ "$rc" -ne 0 ] || ! has_sub "PREFLIGHT OK" "$out"; then
     fail "preflight" "preflight-vercel.sh did not print PREFLIGHT OK (exit $rc) — fix the named miss above before any live turn"
   fi
 }
@@ -243,14 +252,14 @@ assert_clean() {
   local id ls_out snaps_out
   ls_out="$(vc sandbox ls --scope "$SCOPE" 2>/dev/null || true)"
   for id in ${TRACKED_IDS[@]+"${TRACKED_IDS[@]}"}; do
-    if printf '%s' "$ls_out" | grep -q "$id"; then
+    if has_sub "$id" "$ls_out"; then
       fail "teardown-lingering-sandbox" "sandbox $id still present in 'vercel sandbox ls --scope $SCOPE' after teardown — remove it manually (vercel sandbox remove $id --scope $SCOPE)"
     fi
   done
   if [ "$BAKE_MODE" -ne 1 ]; then
     snaps_out="$(vc sandbox snapshots ls 2>/dev/null || true)"
     for id in ${TRACKED_IDS[@]+"${TRACKED_IDS[@]}"}; do
-      if printf '%s' "$snaps_out" | grep -q "$id"; then
+      if has_sub "$id" "$snaps_out"; then
         fail "teardown-lingering-snapshot" "a snapshot for sandbox $id survives in 'vercel sandbox snapshots ls' — delete it manually (vercel sandbox snapshots ls / delete)"
       fi
     done
@@ -351,7 +360,7 @@ mode_bake() {
   # Registry check BEFORE any create: a 404 here costs zero sandboxes.
   note "bake: npm view @anthropic-ai/claude-code@$pin version (registry check BEFORE create)"
   local view_out
-  if ! view_out="$(npm view "@anthropic-ai/claude-code@$pin" version 2>&1)" || ! printf '%s' "$view_out" | grep -q "$pin"; then
+  if ! view_out="$(npm view "@anthropic-ai/claude-code@$pin" version 2>&1)" || ! has_sub "$pin" "$view_out"; then
     fail "bake-npm-pin" "pinned claude $pin does not resolve on the npm registry — nothing was created. npm said: $(printf '%.200s' "$view_out")"
   fi
   note "bake: pin $pin resolves on the registry"
@@ -450,7 +459,7 @@ mode_multiturn() {
     shim_err_tail "$err2"
     fail "multiturn-turn2-result" "turn 2 result frame is missing/is_error"
   fi
-  if ! printf '%s' "$txt2" | grep -q "$codeword"; then
+  if ! has_sub "$codeword" "$txt2"; then
     fail "multiturn-recall" "turn 2 did NOT recall the codeword — the filesystem resumed but the conversation did not; check the --resume/--session-id wiring (got: $(printf '%.160s' "$txt2"))"
   fi
   echo "W35 MULTITURN PASS: codeword recalled through --resume $uuid on sandbox $sid"
@@ -618,7 +627,7 @@ FAKE
     fi
     local m
     for m in "$@"; do
-      if ! printf '%s' "$DRV_OUT" | grep -qF -- "$m"; then
+      if ! has_sub "$m" "$DRV_OUT"; then
         red "$desc — exit $DRV_RC correct but missing marker '$m'"
         printf '%s\n' "$DRV_OUT" | sed 's/^/        /' >&2
         return 1
@@ -690,7 +699,7 @@ FAKE
       red "$desc — the planted key never crossed as an --env pair (no turn dispatched?)"
       return 1
     fi
-    if printf '%s' "$DRV_OUT" | grep -qF -- "$PLANTED_KEY"; then
+    if has_sub "$PLANTED_KEY" "$DRV_OUT"; then
       red "$desc — the planted key LEAKED into the driver's own stdout/stderr"
       return 1
     fi
@@ -849,7 +858,7 @@ FAKE
     "ANTHROPIC_API_KEY=$PLANTED_KEY" "W35_MUTATE=drop-resume" "TMPDIR=$leg/tmp" \
     "$bash_bin" "$0" multiturn 2>&1)"
   rc8=$?
-  if [ "$rc8" -eq 1 ] && printf '%s' "$out8" | grep -qF "mutation-live"; then
+  if [ "$rc8" -eq 1 ] && has_sub "mutation-live" "$out8"; then
     say "live mode REFUSES the mutation knob (fail closed, exit 1, named [mutation-live])"
   else
     red "live mode did not refuse W35_MUTATE (exit $rc8) — a mutated live turn could fabricate a green"
