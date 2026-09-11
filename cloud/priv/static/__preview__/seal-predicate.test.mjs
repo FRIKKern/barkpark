@@ -2720,3 +2720,198 @@ test('wave 68: a 429 that CLEARS lets the read succeed — the retry recovers, i
   assert.doesNotMatch(token(r.out), /code=LEDGER-RATE-LIMITED/,
     'a throttle that CLEARED must not still be reported as a rate-limit fault — the read succeeded');
 });
+
+// ═══ WAVE 28 — THE FOUR LEG-B PARSER BLIND SPOTS ════════════════════════════
+// (dr-w28-bl-seal-predicate-parser-blind-spots-console-side)
+//
+// Deploy-reliability wave 28 mutation-swept the leg-B job-graph reader with EIGHT
+// mutations of `.github/workflows/cloud.yml`. Three SURVIVED — the cases above
+// already pin them. FOUR DID NOT, and this block is the executable spec for them.
+// None was ever present on main: they are latent, not live. Confirmed at build time
+// against a917280fb, and each mutator below re-asserts the absence on the tree it is
+// handed, so the day one of these lands in cloud.yml the SANITY line reds first and
+// says so rather than letting the case pass for the wrong reason.
+//
+// Every arm is a MUTATION PROOF in the shape this file already uses: the specimen is
+// a cloud.yml variant fed through `synthRepo`, and the whole file re-runs against the
+// PRE-FIX predicate through `SEAL_PREDICATE_PATH` (see the header). Pre-fix, all four
+// specimens below answered WRONG; the expected pre-fix answer is recorded per arm.
+//
+// The control for all four is the wave-9 CONTROL above: unmutated workflow -> SEAL.
+
+// Return the source of the `cloud-gate:` job alone, so a mutator cannot resolve
+// through `report-main-failure:` (which also carries an inline `needs:`) — the same
+// bounding the wave-9 `needs:` spelling case had to adopt.
+const cloudGateBody = (text) => {
+  const from = text.search(/^ {2}cloud-gate:$/m);
+  assert.notEqual(from, -1, 'sanity: cloud.yml must declare a cloud-gate job at column 2');
+  const rest = text.slice(from + 1);
+  const next = rest.search(/^ {2}[A-Za-z0-9_-]+:$/m);
+  return next === -1 ? rest : rest.slice(0, next);
+};
+
+// The `jobs:` block as raw text — everything a column-0 line has NOT yet ended.
+const jobsBlock = (text) => {
+  const at = text.search(/^jobs:$/m);
+  assert.notEqual(at, -1, 'sanity: cloud.yml must declare a top-level jobs: block');
+  return text.slice(at);
+};
+
+// ── M4 — a column-0 `#` comment INSIDE jobs: ────────────────────────────────
+// PRE-FIX: `/^\S/.test(line)` read the `#` as "left the jobs: block", truncating the
+// job graph at that line. With the comment above `cloud-gate:` the aggregator simply
+// ceased to exist and all four rung-2 entries dropped to rung 3 —
+// "NO job both `needs:` `test` and carries `if: always()`" x4, exit 1.
+// A comment is not structure; it must move NOTHING.
+test('wave 28 M4: a column-0 `#` comment inside jobs: does not truncate the job graph', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    assert.doesNotMatch(jobsBlock(src), /^#/m,
+      'sanity: this mutation must be LATENT — cloud.yml carries no column-0 comment inside jobs: today');
+    const mutated = src.replace(/^ {2}cloud-gate:$/m,
+      '# a column-0 comment, legal YAML, structurally meaningless\n  cloud-gate:');
+    assert.notEqual(mutated, src, 'the column-0 comment must actually be inserted');
+    assert.match(jobsBlock(mutated), /^#/m, 'the comment must land INSIDE the jobs: block');
+    return mutated;
+  } });
+  assert.equal(status, SEAL, `a comment must satisfy nothing AND break nothing: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /NO job both `needs:`/,
+    'the aggregator is still there — a `#` at column 0 must not end the job graph');
+  assert.match(token(out), /b=PASS/);
+});
+
+// ── M5 — `if: ${{ always() }}` ──────────────────────────────────────────────
+// THE DANGEROUS ONE. `if: ${{ always() }}` is idiomatic GitHub Actions and evaluates
+// identically to `if: always()`; a reviewer would wave it through. PRE-FIX the leg
+// compared the raw string against /^always\(\)$/, so the aggregator stopped being a
+// candidate and ALL FOUR rung-2 entries silently dropped to rung 3 (exit 1) over a
+// workflow that had not changed behaviour in any way.
+test('wave 28 M5: `if: ${{ always() }}` is the same expression as `if: always()`', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    assert.doesNotMatch(src, /\$\{\{\s*always\(\)\s*\}\}/,
+      'sanity: this mutation must be LATENT — cloud.yml spells it bare today');
+    const bare = cloudGateBody(src).match(/^ {4}if: always\(\)$/m);
+    assert.ok(bare, 'sanity: cloud-gate must carry a bare `if: always()` for this case to rewrap');
+    const mutated = src.replace(bare[0], '    if: ${{ always() }}');
+    assert.notEqual(mutated, src, 'the ${{ }} rewrap must actually apply');
+    assert.ok(!/^ {4}if: always\(\)$/m.test(cloudGateBody(mutated)),
+      'the bare spelling must be GONE from cloud-gate, else this resolves through the old form');
+    return mutated;
+  } });
+  assert.equal(status, SEAL, `the envelope is transport, not meaning: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /NO job both `needs:`/);
+  assert.match(token(out), /b=PASS/);
+});
+
+// ── M7 — a TAB-indented `needs:` ────────────────────────────────────────────
+// PRE-FIX: every anchor is ` {4}`, so a tab-indented key matched nothing and the
+// aggregator lost its `needs:` edge in silence — 4x "NO job both", exit 1.
+// The fix is NOT to accept it. Tabs are illegal as YAML indentation: GitHub would
+// refuse the workflow outright, so a parser that "read it anyway" would publish a job
+// graph nobody runs. Exit 2 — a refusal, not a verdict — is the honest answer.
+test('wave 28 M7: a TAB-indented key REFUSES rather than silently losing the edge', () => {
+  const root = synthRepo({ workflow: (src) => {
+    assert.doesNotMatch(src, /\t/, 'sanity: this mutation must be LATENT — cloud.yml has no tab anywhere today');
+    const inline = cloudGateBody(src).match(/^ {4}needs: \[[^\]]*\]$/m);
+    assert.ok(inline, 'sanity: cloud-gate must declare an inline needs: for this case to re-indent');
+    const mutated = src.replace(inline[0], inline[0].replace(/^ {4}/, '\t'));
+    assert.notEqual(mutated, src, 'the tab re-indent must actually apply');
+    assert.match(mutated, /^\tneeds: \[/m, 'the needs: key must really be tab-indented');
+    return mutated;
+  } });
+  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', root, '--guard-cmd', 'true']);
+  assert.equal(status, INFRA, 'an unreadable job graph must not be reported through the verdict code');
+  assert.match(out, /INFRA FAULT at /);
+  assert.match(out, /indents `needs:` with a TAB/);
+  assert.match(out, /Tabs are not legal YAML indentation/);
+  assert.match(out, /REFUSING to evaluate rung 2 rather than reporting a graph nobody runs/);
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN/);
+  assert.doesNotMatch(out, /NO job both `needs:`/,
+    'the pre-fix answer was a measured-looking rung-3 claim over a file GitHub cannot even load');
+});
+
+// ── M8 — `cloud-gate:  # comment` after the job key ─────────────────────────
+// The worst of the four, because it is not blindness but a WRONG ANSWER. PRE-FIX the
+// job-key pattern required nothing after the colon, so the line matched neither the
+// job-key anchor nor the four-space key anchor and was SKIPPED — which left `cur`
+// pointing at the PRECEDING job, and every one of cloud-gate's keys (`name:`, `if:`,
+// `needs:`) was attributed to it. On main today that neighbour is `census`, which is
+// matrixed, so leg B reported "the only job(s) aggregating `test` (census) carry a
+// `strategy.matrix` … rung 3" — a confident, specific, false diagnosis.
+test('wave 28 M8: a trailing comment on a job key does not hand the job to its neighbour', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    assert.doesNotMatch(jobsBlock(src), /^ {2}[A-Za-z0-9_.-]+:[ \t]*#/m,
+      'sanity: this mutation must be LATENT — no job key in cloud.yml carries a trailing comment today');
+    const mutated = src.replace(/^ {2}cloud-gate:$/m, '  cloud-gate:  # the aggregator');
+    assert.notEqual(mutated, src, 'the trailing comment must actually be added');
+    return mutated;
+  } });
+  assert.equal(status, SEAL, `a trailing comment on a job key changes no structure: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /carry a `strategy\.matrix`/,
+    'the pre-fix answer blamed the PRECEDING job\'s matrix for a job that has none');
+  assert.match(token(out), /b=PASS/);
+});
+
+// M8, the DURABLE arm. The case above reds pre-fix only while cloud-gate's neighbour
+// happens to be matrixed — true today (`census`), true at wave 28 (`test`), but that
+// is cloud.yml's business and not this file's. This arm removes the coincidence: with
+// `name:` dropped the aggregator renders as its KEY, so the run says out loud WHICH
+// job it resolved. Post-fix that is `cloud-gate`; pre-fix it was whatever job
+// preceded it, under that job's own identity.
+test('wave 28 M8 (durable): the commented job key is read AS ITS OWN JOB, named in the output', () => {
+  const { status, out } = synthRun({
+    workflow: (src) => {
+      const body = cloudGateBody(src);
+      const named = body.match(/^ {4}name: .+$/m);
+      assert.ok(named, 'sanity: cloud-gate must carry a name: for this case to drop');
+      return src
+        .replace(/^ {2}cloud-gate:$/m, '  cloud-gate:  # the aggregator')
+        .replace(named[0], '    # name: dropped, so the rendered context is the job KEY');
+    },
+    requiredChecks: (rc) => {
+      rc.protection.required_status_checks.checks =
+        rc.protection.required_status_checks.checks.filter((c) => c.context !== AGG);
+      rc.protection.required_status_checks.checks.push({ context: 'cloud-gate', app_id: 15368 });
+      return rc;
+    },
+  });
+  assert.equal(status, SEAL, `the aggregator must resolve under its own key: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "cloud-gate" on main/,
+    'the job resolved must be cloud-gate itself, not the job declared above it');
+  assert.match(token(out), /b=PASS/);
+});
+
+// ── M8 GENERALISED — the skip is gone, not special-cased ────────────────────
+// A two-case list ("plain key, or key plus comment") would be a snapshot. The defect
+// M8 exposed is that ANY unreadable line at job-key indent silently re-homes the keys
+// below it, so the silent skip itself is removed: an unrecognised structural line is
+// a refusal, never a guess. `cloud-gate: {}` is legal YAML this parser does not read.
+test('wave 28: an unreadable line at job-key indent REFUSES instead of mis-attributing', () => {
+  const root = synthRepo({ workflow: (src) =>
+    src.replace(/^ {2}cloud-gate:$/m, '  cloud-gate: {}') });
+  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', root, '--guard-cmd', 'true']);
+  assert.equal(status, INFRA);
+  assert.match(out, /sits at job-key indent but is not a job key this parser can read/);
+  assert.match(out, /attribute the keys below it to the PRECEDING job/);
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT/);
+});
+
+// ── THE FOUR ARE LATENT ON THIS TREE, AND THAT IS ASSERTED, NOT ASSUMED ─────
+// Criterion c1 as a test. Each mutator above asserts its own absence, but only over
+// the source it is handed; this reads the COMMITTED cloud.yml once and states the
+// whole claim in one place, so "latent, not live" reds the day it stops being true
+// rather than being re-derived by whoever next reads the row.
+test('wave 28: all four specimens are absent from the committed cloud.yml', () => {
+  const src = readFileSync(CLOUD_WF, 'utf8');
+  const block = jobsBlock(src);
+  assert.doesNotMatch(block, /^#/m, 'M4: no column-0 comment inside jobs:');
+  assert.doesNotMatch(src, /\$\{\{\s*always\(\)\s*\}\}/, 'M5: always() is spelled bare');
+  assert.doesNotMatch(src, /\t/, 'M7: no tab anywhere in the file');
+  assert.doesNotMatch(block, /^ {2}[A-Za-z0-9_.-]+:[ \t]*#/m, 'M8: no job key carries a trailing comment');
+  // …and the controls, so a doesNotMatch above cannot pass because the haystack is empty.
+  assert.match(block, /^ {2}cloud-gate:$/m, 'control: the jobs: block really was read');
+  assert.match(src, /^#/m, 'control: the file DOES carry column-0 comments — above jobs:, where they are legal to this parser');
+  assert.match(src, /^ {4}if: always\(\)$/m, 'control: the bare always() this suite rewraps really is there');
+});
