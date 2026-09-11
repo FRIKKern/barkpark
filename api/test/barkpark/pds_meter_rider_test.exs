@@ -20,7 +20,7 @@ defmodule Barkpark.PdsMeterRiderTest do
   without touching a byte of `.github/`. Same shape, same reason, as
   `api/test/barkpark/pds_elixir_census_test.exs` next door.
 
-  ## The four "../../../tooling/scaffy-duels/..." STRING LITERALS are load-bearing
+  ## The four `../../../tooling/scaffy-duels/…` STRING LITERALS are load-bearing
 
   `scripts/elixir-path-escape-check.sh` resolves exactly these literals to build
   the census of repo-root reads, and `--check` reds unless every one of them is
@@ -54,11 +54,15 @@ defmodule Barkpark.PdsMeterRiderTest do
 
   ## Price, MEASURED on the builder's host
 
-  darwin, `hw.ncpu` 10, load1 11,58 at the time of the meter runs. `--self-test`
-  real 0,08-0,09 s / user 0,03 s (n=3, `/usr/bin/time -p`); `verify results/`
-  real 0,08 s. The mutants each cost one more `verify` plus a ~612 KB directory
-  copy. The module's own price is `Finished in`, quoted in the PR -- not the
-  `--slowest` list, which attributes a `setup_all` to no test at all.
+  darwin, `hw.ncpu` 10. The instrument alone, load1 11,58, n=3, `/usr/bin/time
+  -p`: `--self-test` real 0,08-0,09 s / user 0,03 s; `verify results/` real
+  0,08 s. THIS MODULE, by ExUnit's own `Finished in`, n=3, load1 stamped per run
+  (23,86 / 22,83 / 21,82 on a ten-core box carrying other agents' suites): 2,1 /
+  3,2 / 1,1 s. The spread IS the load, not the arms -- seven arms each shelling
+  one python3 over 34 envelopes, three of them after a ~612 KB directory copy.
+  Re-meter before quoting any of it; and read the module's price off `Finished
+  in`, never the `--slowest` list, which attributes a `setup_all` to no test at
+  all.
 
   `async: false`: the arms shell subprocesses and write scratch trees; they have
   no business racing the async lane.
