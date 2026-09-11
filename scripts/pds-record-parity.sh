@@ -480,9 +480,13 @@ check_alloc() {
     echo "pds-record-parity: UNCHECKED: ${ALLOC_LEDGER} carries no SEED row — nothing has been" >&2
     echo "  minted through the arbiter yet, so there is no population to check. Run" >&2
     echo "  --allocate-d once to adopt it." >&2
-    return 2
+    # `return 2` ALONE IS THE VACUOUS GREEN. The caller folds through raise() and
+    # scores WORST; a bare return here printed UNCHECKED to stderr and then exited
+    # 0 — a verb reporting success having verified nothing, inside the arm written
+    # to make that impossible. The selftest fixture below caught it.
+    raise 2; return 0
   fi
-  defs="$(charter_defined_numbers)" || { echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found" >&2; return 2; }
+  defs="$(charter_defined_numbers)" || { echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found" >&2; raise 2; return 0; }
   res="$(alloc_ledger_numbers)"
   echo "D-NUMBER ALLOCATION — every number minted since the seed was reserved first"
   echo "  ledger:     ${ALLOC_LEDGER}"
@@ -522,6 +526,7 @@ if [ "$CHECK_ALLOC" -eq 1 ]; then
   case "$WORST" in
     0) echo "pds-record-parity: PARITY — every number above the seed was reserved before it was minted." ;;
     1) echo "pds-record-parity: DIVERGENT — see above." >&2 ;;
+    2) echo "pds-record-parity: UNCHECKED — the allocation ledger could not be scored. NOT a pass." >&2 ;;
   esac
   exit "$WORST"
 fi
