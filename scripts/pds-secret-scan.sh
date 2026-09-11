@@ -40,10 +40,12 @@
 #   * access_grants — 2 revoked synthetic rows (kept as a secondary PII signal,
 #     not as the discriminator).
 #
-#   THE ONE REAL DISCRIMINATOR is `webhooks.secret`: a plain Ecto :string, 8 rows
-#   on guerrilla, 8 distinct 43-char plaintext values, workspace-attributed, E1
-#   (guaranteed present in a FULL bundle) and `:deny` in the dev partition
-#   (guaranteed absent from a DEV bundle). The control is anchored there.
+#   THE ONE REAL *VALUE* DISCRIMINATOR is `webhooks.secret`: a plain Ecto :string,
+#   8 rows on guerrilla, 8 distinct 43-char plaintext values, workspace-attributed,
+#   E1 (guaranteed present in a FULL bundle) and `:deny` in the dev partition
+#   (guaranteed absent from a DEV bundle). The VALUE control is anchored there.
+#   `api_tokens` has a discriminator too, but a STRUCTURAL one, described next —
+#   the two are different KINDS of evidence and the output never conflates them.
 #
 # THE MEMBER-PRESENCE CHECK — a SECOND, STRUCTURAL discriminator (PDS-D532).
 # `--deny-member tables/api_tokens.copy` asks one question only: is this member
@@ -376,9 +378,16 @@ mechanism_line() { # profile clean?
       say "  result here means only that the enumerated values were not present."
       ;;
     full)
-      say "full profile: $HITS hits — full fidelity carries every E1 table verbatim,"
-      say "  including webhooks.secret. Hits are EXPECTED here; zero hits means the"
-      say "  ammo was wrong, not that the bundle is clean."
+      if [ "$(ammo_count)" -eq 0 ]; then
+        # Saying "zero hits means the ammo was wrong" over an invocation that
+        # carried NO ammo would itself be a claim about a scan that never ran.
+        say "full profile: no value scan ran (0 ammo values) — full fidelity carries"
+        say "  every E1 table verbatim, so nothing here is a statement about values."
+      else
+        say "full profile: $HITS value hits — full fidelity carries every E1 table"
+        say "  verbatim, including webhooks.secret. Hits are EXPECTED here; zero hits"
+        say "  means the ammo was wrong, not that the bundle is clean."
+      fi
       ;;
     *) : ;;
   esac
