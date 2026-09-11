@@ -1217,7 +1217,19 @@ defmodule BarkparkCloud.SitesDeployTest do
 
       # ACTUAL: the difference of the two rows' `inserted_at` — the SAME column
       # and the same arithmetic the 2,262-deferral hand measurement used.
-      assert second_row.deferral_actual_gap_s == 61
+      #
+      # DERIVED, NEVER A LITERAL. A literal 61 here asserts that ZERO wall-clock
+      # time passed between the backdate and the second enqueue, which is false
+      # the moment the suite crosses a second boundary in between — under CI
+      # load it reds with `left: 62, right: 61` on PRs that touch nothing near
+      # this file (run 34555593107, 2026-09-11). The expected value is read off
+      # the two rows' OWN stamps, so the assertion measures what the column
+      # recorded against what the rows say, and the floor below is what proves
+      # the 61s backdate actually took.
+      assert second_row.deferral_actual_gap_s ==
+               DateTime.diff(second_row.inserted_at, backdated)
+
+      assert second_row.deferral_actual_gap_s >= 61
 
       # SCHEDULED: the window the ladder asked for when round 1 re-queued. Read
       # off `deferral_backoff_seconds/1` and never a literal, so an operator who
