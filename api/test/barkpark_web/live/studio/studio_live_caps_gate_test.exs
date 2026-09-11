@@ -371,24 +371,102 @@ defmodule BarkparkWeb.Studio.StudioLiveCapsGateTest do
 
   # ── comprehensiveness: every privileged event is classified (default-deny) ───
 
+  # ── the DERIVED corpus (pds-bl-w41) ─────────────────────────────────────────
+  #
+  # THE RULE, NOT A LIST. The `:studio_caps_gate` is an
+  # `attach_hook(_, :handle_event, _)` armed by `BarkparkWeb.Studio.Caps.attach/1`.
+  # A hook attached in ONE LiveView's mount sees exactly that LiveView's own
+  # `handle_event/3` dispatch — so the corpus is "every file under the studio
+  # LiveView root that calls `Caps.attach(`", COMPUTED by `caps_gate_hosts/0` at
+  # test time, not a hand-maintained `File.read!`. Heads are read out of the AST
+  # (`Code.string_to_quoted!` + `Macro.prewalk`), so a `when`-guarded or
+  # non-literal head is SEEN rather than silently missed by a
+  # `def handle_event("` regex.
+  #
+  # PLUS the hook pass-through set: `BarkparkWeb.StudioChrome` attaches
+  # `:studio_chrome_nav` from an `on_mount` (i.e. BEFORE `Caps.attach/1` runs in
+  # `StudioLive.mount`, so it runs FIRST) and `:cont`s its `@per_view_events` on
+  # StudioLive, which keeps its own richer handlers. Those names therefore DO
+  # reach `Caps.classify/1` and belong to the corpus.
+  #
+  # DELIBERATELY OUT OF CORPUS (not forgotten):
+  #   * `sheet_grid.ex` (80 clauses), `paper_field_block.ex` (4) and every other
+  #     `use BarkparkWeb, :live_component` module — a `phx-target`ed component
+  #     event is dispatched to `handle_event/3` on the COMPONENT and never
+  #     traverses the parent LiveView's hook chain, so `:studio_caps_gate` is
+  #     STRUCTURALLY blind to them. They carry their own predicates (the
+  #     `write_capable` assign, `Caps.write_capable?/2`) — covered by
+  #     `pds_w41_caps_component_gate_test.exs`.
+  #   * the sibling studio LiveViews that do NOT call `Caps.attach/1`
+  #     (`chat_live.ex` 45, `settings_live.ex` 11, `connectors_live.ex` 8,
+  #     `api_tester_live.ex` 8, `tmux_live.ex` 4, `org_admin_live.ex` 4,
+  #     `chat_hosts_live.ex` 2, `styleguide_live.ex` 1, `media_live.ex` 1).
+  #     `/chat`, `/chat-hosts`, `/settings`, `/connectors`, `/org-admin`,
+  #     `/styleguide` and `/tmux` sit in an admin `live_session`
+  #     (`{LiveAuth, :admin}` / `:scoped_admin`), so the MOUNT is their gate;
+  #     `/media` and `/api-tester` sit in `:scoped_studio` and gate per-event in
+  #     the module (`ApiTesterLive` re-derives `Caps.derive(socket).admin` before
+  #     `run` / `run-all`; `MediaLive` has no privileged head at all — its only
+  #     `handle_event/3` clause is the unknown-event catch-all).
+  #   * the trailing NON-LITERAL catch-all in `studio_live.ex` carries no event
+  #     name, so `classify/1` can never see it. It is safe only as the file's
+  #     LAST clause — the arm reds on any non-literal head that is not last.
+
+  @studio_live_root "lib/barkpark_web/live/studio"
+  @studio_live_file "lib/barkpark_web/live/studio/studio_live.ex"
+  @chrome_file "lib/barkpark_web/studio_chrome.ex"
+
   describe "gate comprehensiveness (default-deny by construction)" do
-    test "every live handle_event head classifies to a KNOWN tier — never the :deny default" do
-      source =
-        File.read!(Path.join(File.cwd!(), "lib/barkpark_web/live/studio/studio_live.ex"))
+    test "every handle_event head under the :studio_caps_gate classifies to a KNOWN tier" do
+      hosts = caps_gate_hosts()
 
-      events =
-        Regex.scan(~r/def handle_event\("([^"]+)"/, source)
-        |> Enum.map(fn [_, name] -> name end)
-        |> Enum.uniq()
+      # CONTROL 1 — the derivation is not empty. An empty corpus makes every
+      # assertion below vacuously true, which is the exact failure this arm was
+      # filed for.
+      assert hosts != [],
+             "DERIVATION FOUND NO GATE HOST: no file under " <>
+               "#{@studio_live_root} calls `Caps.attach(`. Either the gate moved " <>
+               "or this arm is now scanning nothing."
 
-      # sanity: we actually parsed a substantial set of heads
-      assert length(events) > 50
+      # CONTROL 2 — the one host we know arms it is in the derived set.
+      assert @studio_live_file in hosts,
+             "derived gate hosts #{inspect(hosts)} do not include #{@studio_live_file}"
 
-      unclassified = Enum.filter(events, &(Caps.classify(&1) == :deny))
+      scans = Enum.map(hosts, &scan_handle_event_heads/1)
+      chrome = chrome_per_view_events()
+
+      # CONTROL 3 — the hook-routed set parsed.
+      assert chrome != [],
+             "failed to parse @per_view_events out of #{@chrome_file}"
+
+      scanned = corpus_report(scans, chrome)
+
+      literal = scans |> Enum.flat_map(& &1.literal) |> Enum.uniq()
+
+      # NON-VACUITY FLOOR, derived across the whole corpus (was `> 50` against
+      # one file). 113 literal heads live in studio_live.ex alone at the time of
+      # writing; a corpus that parses to fewer than 100 means the AST walk broke.
+      assert length(literal) > 100,
+             "corpus parsed only #{length(literal)} literal event heads — the AST " <>
+               "walk is broken or the corpus shrank.\n#{scanned}"
+
+      # A non-literal head (e.g. the trailing logging catch-all) carries no event
+      # name, so `classify/1` can never see it. That is only safe when it is the
+      # LAST clause in its file: a non-literal head placed EARLIER silently
+      # swallows privileged event names ahead of every literal head below it.
+      early = scans |> Enum.flat_map(& &1.early_non_literal)
+
+      assert early == [],
+             "NON-LITERAL handle_event head that is NOT the file's final clause — " <>
+               "it can match privileged event names that `Caps.classify/1` will " <>
+               "never see: #{inspect(early)}\n#{scanned}"
+
+      unclassified = Enum.filter(literal ++ chrome, &(Caps.classify(&1) == :deny))
 
       assert unclassified == [],
              "these Studio events fall to the default-DENY tier — classify them in " <>
-               "BarkparkWeb.Studio.Caps (safe/read/write/admin): #{inspect(unclassified)}"
+               "BarkparkWeb.Studio.Caps (safe/read/write/admin): #{inspect(unclassified)}" <>
+               "\n#{scanned}"
     end
 
     test "the default (an unknown event) is DENY, and admin/write tiers are non-empty" do
@@ -397,5 +475,97 @@ defmodule BarkparkWeb.Studio.StudioLiveCapsGateTest do
       assert Caps.classify("save") == :write
       assert Caps.classify("select") == :none
     end
+  end
+
+  # ── corpus derivation helpers (the rule is stated above the describe) ───────
+
+  # THE RULE. Every file under the studio LiveView root whose source arms the
+  # gate. Returns cwd-relative paths (cwd is `api/` under `mix test`).
+  defp caps_gate_hosts do
+    Path.join([File.cwd!(), @studio_live_root, "**/*.ex"])
+    |> Path.wildcard()
+    |> Enum.filter(&String.contains?(File.read!(&1), "Caps.attach("))
+    |> Enum.map(&Path.relative_to(&1, File.cwd!()))
+    |> Enum.sort()
+  end
+
+  defp scan_handle_event_heads(rel) do
+    clauses =
+      Path.join(File.cwd!(), rel)
+      |> File.read!()
+      |> Code.string_to_quoted!()
+      |> handle_event_clauses()
+      |> Enum.sort_by(&elem(&1, 0))
+
+    last_line =
+      case List.last(clauses) do
+        {line, _head} -> line
+        nil -> nil
+      end
+
+    %{
+      file: rel,
+      total: length(clauses),
+      literal: for({_line, head} <- clauses, is_binary(head), do: head),
+      non_literal: for({line, head} <- clauses, not is_binary(head), do: "#{rel}:#{line}"),
+      early_non_literal:
+        for(
+          {line, head} <- clauses,
+          not is_binary(head),
+          line != last_line,
+          do: "#{rel}:#{line}"
+        )
+    }
+  end
+
+  defp handle_event_clauses(ast) do
+    {_ast, acc} =
+      Macro.prewalk(ast, [], fn
+        {:def, meta, [call | _body]} = node, acc -> {node, collect_clause(meta, call, acc)}
+        node, acc -> {node, acc}
+      end)
+
+    acc
+  end
+
+  defp collect_clause(meta, {:when, _, [call | _guard]}, acc), do: collect_clause(meta, call, acc)
+
+  defp collect_clause(meta, {:handle_event, _, [head, _params, _socket]}, acc),
+    do: [{Keyword.get(meta, :line), head} | acc]
+
+  defp collect_clause(_meta, _call, acc), do: acc
+
+  # The chrome hook `:cont`s these on StudioLive (it only INTERCEPTS them on
+  # surfaces that define no handler), so they reach `Caps.classify/1` too.
+  defp chrome_per_view_events do
+    {_ast, names} =
+      Path.join(File.cwd!(), @chrome_file)
+      |> File.read!()
+      |> Code.string_to_quoted!()
+      |> Macro.prewalk([], fn
+        {:@, _, [{:per_view_events, _, [{:sigil_w, _, [{:<<>>, _, [raw]}, _]}]}]} = node, _acc
+        when is_binary(raw) ->
+          {node, String.split(raw)}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    names
+  end
+
+  # EVERY scanned file is NAMED here, and this string is appended to EVERY red
+  # this arm can raise (pds-bl-w41 c1).
+  defp corpus_report(scans, chrome) do
+    files =
+      Enum.map_join(scans, "\n", fn s ->
+        "  * #{s.file} — #{s.total} handle_event/3 clauses (#{length(s.literal)} literal, " <>
+          "#{length(s.non_literal)} non-literal" <>
+          if(s.non_literal == [], do: "", else: " at " <> Enum.join(s.non_literal, ", ")) <> ")"
+      end)
+
+    "SCANNED CORPUS (derived: every file under #{@studio_live_root} calling " <>
+      "`Caps.attach(`, plus the chrome hook pass-through set):\n" <>
+      files <> "\n  * #{@chrome_file} — @per_view_events: #{inspect(chrome)}"
   end
 end
