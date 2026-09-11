@@ -175,7 +175,34 @@ defmodule BarkparkWeb.LegacyController do
   defp non_binary_id?(value) when is_binary(value), do: false
   defp non_binary_id?(_value), do: true
 
+  # THE CREATE-FAMILY FORK FENCE, SECOND DOOR (task-f0de48637a21d3dc).
+  # `Content.upsert_document/4` does `raw_id && DraftId.draft_id(raw_id)`
+  # (content/writer.ex) — always draft-prefixed, no published-first resolution,
+  # no `land_patch` publish leg — and this controller does NOT go through
+  # `Content.apply_mutations/3`, so none of the task claim guards that live in
+  # `Content.Mutations` are on this path at all. `POST /api/documents/task?id=<an
+  # existing published task id>` therefore forks the same `drafts.<id>` twin the
+  # mutate create family forks, on a route that takes the id from a QUERY PARAM.
+  # Same fence, same predicate, same error family: refuse when the published row
+  # carries a live claim, otherwise land as today. The advisory half is inert
+  # here (this controller never opens the `Warnings` queue with `reset/0`, and
+  # `Warnings.put/3` drops silently when nobody listens) — the refusal is the
+  # half that matters on this door.
   defp do_create(conn, type, attrs, doc_id) do
+    opts = [source: :api] ++ scope_opts(conn)
+
+    case Content.Mutations.ensure_create_not_forking_published_task(
+           type,
+           doc_id,
+           @dataset,
+           opts
+         ) do
+      :ok -> do_create_write(conn, type, attrs, doc_id, opts)
+      {:error, _} = err -> err
+    end
+  end
+
+  defp do_create_write(conn, type, attrs, doc_id, opts) do
     internal_attrs = %{
       "doc_id" => doc_id,
       "title" => Map.get(attrs, "title"),
@@ -183,12 +210,7 @@ defmodule BarkparkWeb.LegacyController do
       "content" => Map.drop(attrs, ["id", "doc_id", "title", "status", "updatedAt"])
     }
 
-    case Content.upsert_document(
-           type,
-           internal_attrs,
-           @dataset,
-           [source: :api] ++ scope_opts(conn)
-         ) do
+    case Content.upsert_document(type, internal_attrs, @dataset, opts) do
       {:ok, doc} ->
         # Echo the created doc through the REAL caller (same redaction boundary
         # as a read), not the :internal no-redaction sentinel — uniform with the
