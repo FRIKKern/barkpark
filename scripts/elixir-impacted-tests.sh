@@ -44,6 +44,26 @@
 # from a plugin list. The ALWAYS set below is the deliberate net under that
 # blind spot, and main-per-sha plus the nightly is the net under the net.
 #
+# ONE INSTANCE OF THAT RISK WAS PAID FOR, AND IS NOW NARROWED. #17153 (elixir.yml
+# run 34413856059, job 102674795600) changed api/lib/barkpark/tasks/landed.ex,
+# narrowed to `selection: 263 of 1676 test files`, went 4/4 green, and reddened
+# main at api/test/barkpark_web/controllers/tasks_landed_test.exs:115 — a
+# `use BarkparkWeb.ConnCase` HTTP contract test that reaches Tasks.Landed over
+# the router and never names the module, so neither the closure (runtime edge)
+# nor the by-name test grep (no module name in the file) could see it.
+#
+# RULE 3 below (`web_surface_tests`) now CATCHES that class: one extra by-name
+# hop through the LIB tree finds the web-surface module that DOES name the
+# changed context (`alias Barkpark.Tasks.Landed` in tasks_controller.ex), and
+# the contract-test family named after that surface inside its own test
+# directory is selected. It is derived from the tree on every run, not pinned.
+#
+# IT STILL CANNOT SEE: a contract test whose basename shares no stem with the
+# surface it exercises; a surface that reaches the changed module through a
+# SECOND runtime hop (registry, plugin route, configured implementation) rather
+# than by naming it; a test outside the surface's own test directory. Those
+# remain the ALWAYS set's job, and main-per-sha plus the nightly's after that.
+#
 # ── USAGE ─────────────────────────────────────────────────────────────────
 #
 #   git diff --name-only HEAD^1 HEAD | scripts/elixir-impacted-tests.sh --select
@@ -376,6 +396,105 @@ tests_naming_modules() {
 }
 
 # ---------------------------------------------------------------------------
+# RULE 3 — THE WEB-SURFACE HOP. The fix for the runtime-only-caller blind spot,
+# measured on a real miss rather than imagined.
+# ---------------------------------------------------------------------------
+# THE INCIDENT (#17153, elixir.yml run 34413856059, job 102674795600). That PR
+# changed api/lib/barkpark/tasks/landed.ex and added a `landings` key to the
+# landed record. The selector narrowed to `selection: 263 of 1676 test files`,
+# the required Elixir gate went green, and on merge main reddened at
+# api/test/barkpark_web/controllers/tasks_landed_test.exs:115 — an exact-equality
+# assert on the landed map, broken by #17153's own change.
+#
+# WHY BOTH EXISTING HALVES MISSED IT, precisely:
+#   * the compile closure yields LIB files only, and a plain remote call from a
+#     controller into a context is a RUNTIME edge, so `--label compile-connected`
+#     never names the controller;
+#   * the by-name net greps the TEST tree for the closure's module names, and
+#     tasks_landed_test.exs is a `use BarkparkWeb.ConnCase` HTTP contract test
+#     that reaches Tasks.Landed over the router. It names the URL, not the
+#     module: `grep -n 'Tasks\.Landed' test/barkpark_web/controllers/tasks_landed_test.exs`
+#     is EMPTY (verified 2026-09-11).
+#
+# THE MISSING HOP is therefore lib -> lib, not lib -> test: the controller DOES
+# name the context (`alias Barkpark.Tasks.Landed`, tasks_controller.ex:106). So
+# this rule takes one extra by-name step through the LIB tree, keeps only the
+# callers that sit on a web surface (`lib/barkpark_web/**` — controllers, live
+# views, channels, plugs: the modules a ConnCase/LiveViewTest file exercises
+# over the wire instead of by name), and maps each to the FAMILY of tests named
+# after it inside its own test directory.
+#
+# A PREDICATE, NOT A LIST. `tasks_controller.ex` -> stem `tasks` ->
+# `test/barkpark_web/controllers/tasks_*_test.exs`. A contract test added
+# tomorrow for a route of an existing controller is in the net tomorrow, with no
+# registration step. Pinning tasks_landed_test.exs by name would have fixed one
+# file and left the class open (D-"an enumeration is a snapshot, a predicate is
+# a rule").
+#
+# WHAT IT STILL CANNOT SEE, stated so the next miss is not a surprise:
+#   * a contract test whose basename shares NO stem with the controller it
+#     exercises (`test/barkpark_web/controllers/foo_test.exs` hitting
+#     BarkparkWeb.BarController) — the name family is the only link this rule
+#     has, because the route table is assembled by macros;
+#   * a web surface that reaches the changed module through ANOTHER runtime hop
+#     (a registry lookup, a `Application.get_env` implementation, a plugin route)
+#     rather than by naming it — one lib->lib step is taken, not a closure;
+#   * a test outside the caller's own test directory.
+# For all three, main-per-sha and the nightly remain the net under the net.
+#
+# `_controller` / `_live` / `_channel` / `_plug` / `_html` / `_json` are stripped
+# from the stem because the Phoenix convention puts them on the MODULE and not
+# on the contract test (`tasks_controller.ex` <-> `tasks_landed_test.exs`). A
+# stem shorter than 3 characters is dropped rather than globbed: `a_*_test.exs`
+# would be a directory scan wearing the shape of a rule.
+WEB_SURFACE_PREFIX='lib/barkpark_web/'
+
+web_surface_tests() {
+  # module names on stdin; api-relative test paths on stdout
+  local mods callers c reldir stem d
+  mods="$(LC_ALL=C sort -u | sed '/^$/d')"
+  [ -n "$mods" ] || return 0
+  # ONE grep for the whole module set, same reason as tests_naming_modules: a
+  # per-module pass over lib/ would cost more than the tests it saves.
+  callers="$(cd -- "$API_DIR" 2>/dev/null && printf '%s\n' "$mods" \
+    | grep -rlF -f - "$WEB_SURFACE_PREFIX" --include='*.ex' 2>/dev/null || true)"
+  [ -n "$callers" ] || return 0
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    reldir="${c#lib/}"
+    reldir="$(dirname "$reldir")"
+    stem="$(basename "$c" .ex)"
+    # A module that lives in its own subdirectory (tasks_controller/params.ex)
+    # has no test directory of its own; the contract tests sit one level up,
+    # named after the PARENT. One fallback level, then give up — a deeper walk
+    # would climb to test/barkpark_web and glob the world.
+    if [ ! -d "$API_DIR/test/$reldir" ]; then
+      stem="$(basename "$reldir")"
+      reldir="$(dirname "$reldir")"
+      [ -d "$API_DIR/test/$reldir" ] || continue
+    fi
+    case "$stem" in
+      *_controller) stem="${stem%_controller}" ;;
+      *_live) stem="${stem%_live}" ;;
+      *_channel) stem="${stem%_channel}" ;;
+      *_plug) stem="${stem%_plug}" ;;
+      *_html) stem="${stem%_html}" ;;
+      *_json) stem="${stem%_json}" ;;
+    esac
+    [ "${#stem}" -ge 3 ] || continue
+    d="test/$reldir"
+    (
+      cd -- "$API_DIR" 2>/dev/null || exit 0
+      # `ls` on a no-match glob would print an error and, under set -e in the
+      # caller, is not worth the risk; `find -name` returns empty quietly.
+      find "$d" -maxdepth 1 -name "${stem}_test.exs" -o -maxdepth 1 -path "$d/${stem}_*_test.exs" 2>/dev/null || true
+    )
+  done <<EOF
+$callers
+EOF
+}
+
+# ---------------------------------------------------------------------------
 # --select
 # ---------------------------------------------------------------------------
 select_tests() {
@@ -487,6 +606,10 @@ EOF
 $closure_all
 EOF
     sel="${sel}$(printf '%s\n' "$closure_all" | modules_of | tests_naming_modules)
+"
+    # RULE 3: the lib->lib hop onto a web surface, then that surface's own
+    # contract-test family. See web_surface_tests above for the incident.
+    sel="${sel}$(printf '%s\n' "$closure_all" | modules_of | web_surface_tests)
 "
   fi
 
