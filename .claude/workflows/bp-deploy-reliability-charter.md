@@ -4119,7 +4119,7 @@ UP box unavailable.
   customer demand from platform churn — D3's vacuous green in its purest form. The survey's mechanism argument
   (Oban holds zero retryable/available/executing `site_deploy` work, so the re-queue is delivered by the next
   webhook and cutting the amplifier could make time-to-web WORSE) is real but is downgraded by D192 to a
-  hypothesis. **Both stay filed. The label must exist BEFORE the cut, not after.**
+  hypothesis. **Both stay filed. The label must exist BEFORE the cut, not after.** *[AMENDED IN PLACE 2026-09-10 by D606: the "no label" clause is now HISTORICAL — #17489 shipped an operator-assigned `deployments.demand_class` stamped at create; the precondition is the prod `Registry.DemandCensus` BEFORE number in task-b20d6fdf723bf8af c1, not a derived axis. D223's refutation of the DERIVED axis stands. See D606.]*
 - **D207 — TWO CHARTER FACTS ARE NOW FALSE AND ARE CLOSED BY RULING, NOT RE-SURVEYED.** D11's "an EXISTING
   COLUMN nobody sets" is dead: all five `site-autodeploy-*` webhooks carry `types={paper}`. And D169f/D181's
   "the 03:46:11Z delivery-leak stop has no commit and no deploy to explain it — cause NOT established" is
@@ -13715,3 +13715,40 @@ cannot be measured is not met. The deploy path runs the same function ADVISORY w
 content deploy never dies for a site prerequisite. `instance-deploy_test.sh` Case 19 drives every arm: each
 removal demands ITS code, and the OTHER three must still report `ok`, so a check that stops discriminating reds
 instead of greening a box that cannot build.
+
+### Round-3 lead rulings (lead-deploy-r7, 2026-09-10)
+
+- **D605 — `/v1/tls/ask` STAYS NAME-BOUND; BOX-BINDING IS RULED OUT UNTIL A SOURCE-RANGE PERIMETER EXISTS.**
+  Closes `dr-w24-bl-tls-ask-allowlist-is-not-box-bound` by ruling, as its one criterion allows. Re-derived on
+  `origin/main` 2026-09-10: `get "/v1/tls/ask"` (router.ex ~:9654) reads only `?domain=` and answers
+  `Registry.domain_registered?/1` (registry.ex ~:8169: site domains, live preview hosts, custom_host) — the gate
+  is name-only, exactly as filed. It CANNOT be box-bound honestly today, for a structural reason, not a sizing
+  one: Caddy's `on_demand_tls.ask` puts NO caller identity on the wire, so "the asking box" can only ever mean
+  the request's source address, and the control plane rewrites `conn.remote_ip` from `X-Forwarded-For` only
+  for `trusted_peer?/1` peers (router.ex ~:538-546). A box-bound ask is therefore a SOURCE-RANGE assertion —
+  the same mechanism as `INTERNAL_ALLOWED_CIDRS` in #17134 (`dr-w24-bl-internal-write-route-is-publicly-
+  reachable`), which is owner-gated because nobody but the owner can enumerate the ranges. Building the
+  stricter gate before that perimeter exists would refuse legitimate on-demand issuance for any box whose
+  egress address is not the one a row happens to record (a site mid-migration, a preview slot, a NAT change) —
+  a fleet-wide certificate outage, which is a worse failure than the one contested name the wave-24 join found
+  (exactly 1 row fleet-wide). The contested-name defect itself is handled at CLAIM time by the `url`-host leg
+  of `custom_host_taken?/2` (the wave-24 slice), which is where an ownership dispute belongs; the issuance gate's
+  job is only to be a cert-issuance DoS guard, and "SOME row owns this name" is the correct contract for that.
+  **RULING: not built this wave. Successor, filed only AFTER #17134 merges with a real CIDR list: "tls ask
+  binds the answer to the asking box's declared source range", with the allowlist measured, not assumed.**
+
+- **D606 — THE DEMAND-CUT PRECONDITION, RECONCILED: ONE ROW SURVIVES, AND THE CUT WAITS FOR A BEFORE NUMBER.**
+  D206 filed the fan-out cut behind "a label"; D223 then ruled the DERIVED customer/platform axis unbuildable
+  (no team axis: one team owns all 13 sites; AMPLIFIED/UNIQUE does not separate populations). #17489
+  (`a0552783c`) shipped something D223 did not refute: an OPERATOR-ASSIGNED per-site `demand_class`, stamped
+  onto `deployments.demand_class` at create by `Registry.classify_site_demand/2`, read by
+  `Registry.DemandCensus.census/1`, built so it CAN be wrong. Whether that answers D223 or renames the problem
+  is decided by ONE measurement, not by argument: the prod census over a 24h window with the five demo sites
+  classified `platform`. If `by_class` separates populations (unclassified is NOT the largest bucket;
+  platform_share and top5 reproduce the fixture's 98.4%), the precondition D206 wanted exists. If it cannot, the
+  cut has no instrument and stays closed. **RULING: `dr-w14-bl-demand-cut-needs-a-fresh-argument` is CLOSED
+  by this entry — its "replacement precondition" IS that census, and the regression instrument after any cut is
+  `by_class[customer]` flat within noise while `by_class[platform]` falls (task-b20d6fdf723bf8af c3).
+  `task-b20d6fdf723bf8af` is the single surviving row; D206 is annotated in place. The cut is NOT built until
+  c1's BEFORE number is quoted from prod. D180 stands: `@build_slot_capacity` is not raised. Round 3 does not
+  touch a webhook.**

@@ -350,7 +350,7 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   @declared [
     # -- REACHABLE ------------------------------------------------------------
     {:census, 3, :reachable,
-     "GET /v1/cloud/deployments/census — router.ex calls it with the parsed window. THE deploy-reliability headline read."},
+     "GET /v1/operator/deploy-ledger/census (operator tier) and GET /v1/deploy-ledger/census (user tier, team-scoped — the read a non-operator can actually reach) both call it with the parsed window in router.ex. THE deploy-reliability headline read."},
     {:classify, 1, :reachable,
      "router.ex serialises `failure_class` off a row, and sites/deploy.ex classifies a deferral at re-queue time."},
     {:list_page, 2, :reachable,
