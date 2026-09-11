@@ -1054,8 +1054,12 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
         ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
 
       argv = read_lines(argv_file)
-      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--session-id", uuid])
-      refute "--resume" in argv
+
+      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--session-id", uuid]),
+             "argv did not carry [\"--session-id\", #{uuid}].\nargv=#{inspect(argv, limit: :infinity)}\n#{writers(argv_file)}"
+
+      refute "--resume" in argv,
+             "argv unexpectedly carried --resume.\nargv=#{inspect(argv, limit: :infinity)}"
 
       ClaudeChat.close(session)
     end
@@ -1072,8 +1076,12 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
         })
 
       argv = read_lines(argv_file)
-      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--resume", uuid])
-      refute "--session-id" in argv
+
+      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--resume", uuid]),
+             "argv did not carry [\"--resume\", #{uuid}].\nargv=#{inspect(argv, limit: :infinity)}\n#{writers(argv_file)}"
+
+      refute "--session-id" in argv,
+             "argv unexpectedly carried --session-id.\nargv=#{inspect(argv, limit: :infinity)}"
 
       ClaudeChat.close(session)
     end
@@ -2359,7 +2367,13 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       )
 
     File.rm_rf(file)
-    on_exit(fn -> File.rm_rf(file) end)
+    File.rm_rf(file <> ".writers")
+
+    on_exit(fn ->
+      File.rm_rf(file)
+      File.rm_rf(file <> ".writers")
+    end)
+
     file
   end
 
@@ -2369,7 +2383,17 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     path =
       Path.join(System.tmp_dir!(), "claude_echo_#{System.unique_integer([:positive])}.sh")
 
-    File.write!(path, "#!/bin/sh\nprintf '%s\\n' \"$@\" > '#{argv_file}'\ncat\n")
+    # Every invocation also APPENDS one line to `<argv_file>.writers`. The file
+    # itself is overwritten, so a SECOND spawn reaching the same fake binary
+    # (a session that outlived its test and respawned against the CURRENT
+    # global `:claude_chat` config) silently replaces the argv under the
+    # reader. The sidecar makes that visible instead of leaving a bare
+    # "expected truthy, got false".
+    File.write!(
+      path,
+      "#!/bin/sh\necho \"$$\" >> '#{argv_file}.writers'\nprintf '%s\\n' \"$@\" > '#{argv_file}'\ncat\n"
+    )
+
     File.chmod!(path, 0o755)
     on_exit(fn -> File.rm_rf(path) end)
     path
@@ -2434,6 +2458,19 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   end
 
   defp read_lines(file), do: file |> wait_for_file() |> String.split("\n", trim: true)
+
+  # How many fake-binary invocations wrote this capture file. More than one
+  # means a foreign spawn clobbered the argv under the assertion.
+  defp writers(file) do
+    case File.read(file <> ".writers") do
+      {:ok, body} ->
+        pids = String.split(body, "\n", trim: true)
+        "fake-binary invocations that wrote this file: #{length(pids)} (pids #{inspect(pids)})"
+
+      _ ->
+        "fake-binary invocation log unavailable"
+    end
+  end
 
   defp read_frame(file), do: file |> wait_for_file() |> String.trim() |> Jason.decode!()
 
