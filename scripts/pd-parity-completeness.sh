@@ -45,7 +45,11 @@ FIXTURES="$ROOT/api/test/support/fixtures/pd-parity"
 # scaffy:add-block-type CodeTabs MARK:parity-count-script-code-tabs
 # scaffy:add-block-type Tabs MARK:parity-count-script-tabs
 # scaffy:add-block-type Route MARK:parity-count-script-route
-EXPECTED_COUNT=64
+# 2026-09-11 (gates/docgates-s27, task-bb00494a36b31342): 64 -> 65. #17199
+# (c438d1215) added the reader-synthesised `pre-gate-badge` clause to compose.ex
+# without its golden, which red this guard on main from 2026-09-09. Derivation:
+# the DISPATCHED census below minus EXCLUDED, measured at 65 on this commit.
+EXPECTED_COUNT=65
 
 if [ ! -f "$COMPOSE" ]; then
   echo "FAIL: compose.ex not found at $COMPOSE" >&2

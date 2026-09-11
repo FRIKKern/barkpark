@@ -1,5 +1,6 @@
 agent-backup-state	NewBackupProbe
 audit-emit	emit
+build-log-write-scrub	raw
 chat-stable-boundary	advance
 chat-stable-segments	advance
 cloud-provider-seam	DetectCapabilities
