@@ -85,6 +85,10 @@ type dispatchError struct {
 	// code overrides the envelope error code. Empty means "usage" — the code
 	// every build-stage failure carried before the manifest-drift refusal.
 	code string
+	// exit overrides the process exit code. Zero means exitUsage — what every
+	// build-stage failure returned before the refused-credential refusal, which
+	// is an auth failure (exitAuth) and must not be spelled as a typo.
+	exit int
 }
 
 // envelopeCode is the error code this failure renders under.
@@ -93,6 +97,14 @@ func (e *dispatchError) envelopeCode() string {
 		return e.code
 	}
 	return "usage"
+}
+
+// exitCode is the process exit status this failure returns.
+func (e *dispatchError) exitCode() int {
+	if e.exit != 0 {
+		return e.exit
+	}
+	return exitUsage
 }
 
 func (e *dispatchError) Error() string { return e.msg }
@@ -122,6 +134,14 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	argMap, err := bindArgs(cmd, posArgs)
 	if err != nil {
 		return nil, &dispatchError{msg: err.Error(), withUsage: true}
+	}
+
+	// A CONFIGURED credential the server has already refused is an error, not a
+	// licence to read anonymously (refused_credential.go). Checked before any
+	// I/O and before buildBody can consume stdin, so a refused invocation sends
+	// nothing and reads nothing.
+	if msg := refusedCredentialRefusal(g, ctx, m); msg != "" {
+		return nil, &dispatchError{msg: msg, withUsage: false, code: refusedCredentialCode, exit: exitAuth}
 	}
 
 	needsPerspectiveAuth := nonPublishedPerspectiveRequiresAuth(cmd, cmdFlags)
@@ -460,7 +480,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 				usageCommand(out, cmd)
 			}
 		}
-		return exitUsage
+		return derr.exitCode()
 	}
 
 	// --status rides the RESOLVED url, so it is visible to --dry-run, to the
@@ -1335,7 +1355,20 @@ func authHeaders(cmd manifest.Command, ctx manifest.Context) map[string]string {
 	h := map[string]string{}
 	switch cmd.AuthTier {
 	case "none":
-		// Public, unauthenticated. Send nothing.
+		// Public — the command needs no credential, which is NOT the same as
+		// "must not carry one" (task-621bcf889e730f4c). Withholding a bearer
+		// the caller configured is what let BARKPARK_TOKEN=not-a-real-token
+		// read the whole task type at rc=0: the headerless GET
+		// /v1/data/query/production/task is a legitimate anonymous request, and
+		// the server answered it as one. The SAME read carrying the garbage
+		// bearer is a 401. So a public tier sends the bearer whenever one is
+		// configured; an OptionalToken read ignores a credential it does not
+		// need, and a refused one now fails loudly instead of being laundered
+		// into an anonymous 200. A caller with no token still sends no header,
+		// which is the public floor itself and is unchanged.
+		if ctx.Token != "" {
+			h["Authorization"] = "Bearer " + ctx.Token
+		}
 	case "read", "write", "admin", "scoped_admin":
 		if ctx.Token != "" {
 			h["Authorization"] = "Bearer " + ctx.Token

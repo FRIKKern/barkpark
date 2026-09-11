@@ -377,10 +377,23 @@ func TestAuthHeaders(t *testing.T) {
 		t.Errorf("flat read should carry token when present: %v", h)
 	}
 
-	// none -> never carries a token, even when one is present.
+	// none -> carries the token WHEN ONE IS CONFIGURED (task-621bcf889e730f4c).
+	// This assertion is the REVERSE of what it was: the floor used to withhold a
+	// bearer it was holding, which is what let BARKPARK_TOKEN=not-a-real-token
+	// read the whole task type at rc=0 — the headerless query is a legitimate
+	// anonymous request and guerrilla answered it as one, while the SAME read
+	// carrying that bearer is a 401. "Needs no credential" is not "must not
+	// carry one".
 	none := manifest.Command{ID: "x.public", AuthTier: "none", HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/data/doc/:dataset/:type/:id"}}
-	if h := authHeaders(none, ctx); h["Authorization"] != "" {
-		t.Errorf("none tier must not send a token: %v", h)
+	if h := authHeaders(none, ctx); h["Authorization"] != "Bearer tok" {
+		t.Errorf("none tier must present a configured token: %v", h)
+	}
+
+	// The public FLOOR itself is unchanged: no token in context, no header —
+	// this is the control that keeps the fix above from becoming "tier none
+	// always authenticates", which would break every anonymous caller.
+	if h := authHeaders(none, manifest.Context{}); h["Authorization"] != "" {
+		t.Errorf("none tier with no token must send nothing: %v", h)
 	}
 
 	// No token in context -> no Authorization header for an auth tier.
@@ -423,7 +436,12 @@ func TestBuildManifestRequestAuthenticatesNonPublishedPerspective(t *testing.T) 
 			})
 		}
 
-		t.Run(verb+"_published_stays_public", func(t *testing.T) {
+		// A published read now ALSO carries the configured bearer
+		// (task-621bcf889e730f4c) — the "stays byte-for-byte public" half of
+		// this test was the defect, not the contract. A caller with NO token is
+		// the case that stays public, and TestTokenlessReadStaysAnonymous
+		// (refused_credential_test.go) is its lock.
+		t.Run(verb+"_published_carries_the_configured_bearer", func(t *testing.T) {
 			req, derr := buildManifestRequest(
 				globals{}, baseCtx, m, *cmd,
 				[]string{"post", "--perspective", "published"},
@@ -432,8 +450,8 @@ func TestBuildManifestRequestAuthenticatesNonPublishedPerspective(t *testing.T) 
 			if derr != nil {
 				t.Fatalf("buildManifestRequest: %v", derr)
 			}
-			if got := req.headers["Authorization"]; got != "" {
-				t.Errorf("published Authorization = %q, want public request unchanged", got)
+			if got := req.headers["Authorization"]; got != "Bearer draft-reader-token" {
+				t.Errorf("published Authorization = %q, want the configured bearer", got)
 			}
 		})
 	}
@@ -3243,9 +3261,12 @@ func TestBuildManifestRequestAuthenticatesDraftIDOnPublicRead(t *testing.T) {
 		}
 	})
 
-	// NEGATIVE ARM: the published read must not gain a credential. A fix that
-	// attaches the bearer unconditionally fails here.
-	t.Run("plain_id_stays_public", func(t *testing.T) {
+	// The published read carries the bearer too, as of
+	// task-621bcf889e730f4c: withholding a CONFIGURED credential was the defect
+	// (a refused token became an anonymous 200 at rc=0). The arm that keeps
+	// this from meaning "tier none always authenticates" is the TOKENLESS one
+	// below — and TestTokenlessReadStaysAnonymous locks it end to end.
+	t.Run("plain_id_carries_the_configured_bearer", func(t *testing.T) {
 		req, derr := buildManifestRequest(
 			globals{}, ctx, m, *cmd,
 			[]string{"paper", "l5goc-draft-probe-2"},
@@ -3254,8 +3275,26 @@ func TestBuildManifestRequestAuthenticatesDraftIDOnPublicRead(t *testing.T) {
 		if derr != nil {
 			t.Fatalf("buildManifestRequest: %v", derr)
 		}
+		if got := req.headers["Authorization"]; got != "Bearer draft-reader-token" {
+			t.Errorf("Authorization = %q, want the configured bearer", got)
+		}
+	})
+
+	// NEGATIVE ARM: a caller holding NO token still sends no header — the
+	// public floor, unchanged.
+	t.Run("plain_id_tokenless_stays_public", func(t *testing.T) {
+		anon := ctx
+		anon.Token = ""
+		req, derr := buildManifestRequest(
+			globals{}, anon, m, *cmd,
+			[]string{"paper", "l5goc-draft-probe-2"},
+			false,
+		)
+		if derr != nil {
+			t.Fatalf("buildManifestRequest: %v", derr)
+		}
 		if got := req.headers["Authorization"]; got != "" {
-			t.Errorf("Authorization = %q, want the published read to stay byte-for-byte public", got)
+			t.Errorf("Authorization = %q, want a tokenless published read to stay byte-for-byte public", got)
 		}
 	})
 }
