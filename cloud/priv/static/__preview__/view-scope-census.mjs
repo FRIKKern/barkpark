@@ -130,6 +130,14 @@ export function censusWalks(source) {
         leg,
         all: !!m[1],
         selector,
+        // THE ARGUMENT AS WRITTEN, for the sites whose selector cannot be read
+        // from the bytes. A LINE NUMBER IS NOT A KEY — this file grows by
+        // hundreds of lines a wave and every pinned line rots — so the
+        // cardinality register below keys an unresolved site by leg + this
+        // snippet. Whitespace is collapsed and it is cut at 48 chars: enough to
+        // tell two `${…}`-built walks in one leg apart, short enough that a
+        // reflow of the expression's tail does not invent a new site.
+        arg: selector === null ? rest.replace(/\s+/g, " ").trim().slice(0, 48) : null,
         kind: selector === null ? "unresolved" : classifySelector(selector),
       });
     }
@@ -185,8 +193,18 @@ export function censusTally(walks) {
 //  MEASURED 2026-09-11 on `mixed-fleet` at 1000px, after a 12-hop tour of every
 //  routable screen plus both drill-downs (overflow-guard.mjs's
 //  `W35-hash-nav-hidden-view-residue` leg; its output is the only thing that may
-//  edit this list). 23 of 57 distinct document-wide selectors match inside a
-//  hidden view.
+//  edit this list). The leg PRINTS both numbers every run — how many distinct
+//  document-wide selectors the static census found and how many of them match
+//  inside a hidden view — so they are not typed here; a pair of literals in a
+//  comment is exactly what the cancelled row this file's cardinality half
+//  answers had rotted into.
+//
+//  TWO ROWS LEFT THIS LIST ON 2026-09-11 (task-39ebd948f40660e3) and neither was
+//  a fix to the exposure: `.attention-row .attention-acts` and `.instances-grid
+//  .instance-card` were both READINESS GATES converted to count the population
+//  they wait for, scoped to `section.view:not([hidden])`. A scoped walk is not
+//  document-wide, so it leaves the residue census entirely — and the ratchet's
+//  stale arm is what noticed, exactly as designed.
 //
 //  `status: "latent"` IS THE HONEST WORD AND IT IS NOT "harmless". Every leg in
 //  overflow-guard.mjs enters its scenario through `nav()`, i.e. a full document
@@ -205,7 +223,6 @@ export function censusTally(walks) {
 //  that line every run rather than letting a hole read as a zero.
 export const RESIDUE_REGISTER = [
   { selector: ".attention-row", views: ["view-overview"], legs: "GR109-attention-row-dead-rule, W20-attention-name-column", status: "latent" },
-  { selector: ".attention-row .attention-acts", views: ["view-overview"], legs: "GR109-attention-row-dead-rule", status: "latent" },
   { selector: ".attention-row .attention-name", views: ["view-overview"], legs: "W20-attention-name-column", status: "latent" },
   { selector: ".attention-row .status-pill-detail", views: ["view-overview"], legs: "GR109-attention-row-dead-rule, W18-overview-card-pill", status: "latent" },
   { selector: ".copy-btn", views: ["view-instance", "view-site"], legs: "W21-inst-head-320-copy-reachable", status: "latent" },
@@ -224,7 +241,6 @@ export const RESIDUE_REGISTER = [
   { selector: ".instance-card-head .status-pill-detail", views: ["view-overview"], legs: "W18-overview-card-pill", status: "latent" },
   { selector: ".instance-card-url", views: ["view-overview"], legs: "W18-overview-card-pill", status: "latent" },
   { selector: ".instances-grid", views: ["view-overview"], legs: "W12-narrow-viewport-truth", status: "latent" },
-  { selector: ".instances-grid .instance-card", views: ["view-overview"], legs: "W12-narrow-viewport-truth", status: "latent" },
   { selector: ".site-name", views: ["view-sites", "view-instance"], legs: "W26-instance-track-min-content", status: "latent" },
   { selector: ".site-row", views: ["view-sites", "view-instance"], legs: "W50-site-row-three-hosts-cruel-by-fixture", status: "latent" },
   // task-02a521fea7beeb2f: the pin-badge walk in the W21 detail leg is document-wide by
@@ -290,4 +306,306 @@ export function viewHostOfIds(indexHtml) {
     if (r) out[m[1]] = r.view;
   }
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE CARDINALITY HALF — WHICH WALKS READ **ONE** OF A POPULATION
+//  (task-39ebd948f40660e3, re-cut of the cancelled cchi-w23 population register)
+// ─────────────────────────────────────────────────────────────────────────────
+//  The SCOPE half above asks WHERE a walk can reach. This half asks HOW MANY it
+//  stood in front of. `document.querySelector('.deploy-row')` returns the FIRST
+//  row on the page and says nothing about whether there was one row, three, or
+//  forty — so a leg that keys its readiness, its click, or its measurement on a
+//  singular walk can be measuring a half-painted screen, an arbitrary member of
+//  a population, or (worst) a population of one that quietly became a population
+//  of many when a fixture grew. Nothing in the file records which.
+//
+//  A singular walk therefore OWES one of two things, and this census is what
+//  collects the debt:
+//    · THE LEG PRINTS THE POPULATION — the same leg also walks the same
+//      selector with `querySelectorAll`, so the run's own output carries the
+//      count the singular read stood for. This is the D228 remedy and the only
+//      discharge that is re-earned on every run.
+//    · A COMMITTED ONE-LINE REASON — an entry in SINGULAR_REGISTER below saying
+//      why one is the right number to read, or why the population does not
+//      matter at that site.
+//  Anything else is UNREGISTERED and reds. THE STALENESS CLAUSE IS FATAL AND
+//  SYMMETRIC (D180): a register entry matching no site in the guard reds just as
+//  loudly, because a reason nobody can reach certifies nothing.
+//
+//  FOUR CLASSES ARE DISCHARGED MECHANICALLY, by a rule rather than by a row —
+//  an enumeration is a snapshot, a predicate is a rule, and a hand-kept list of
+//  ~200 sites would rot inside a wave:
+//    · `singleton-id`   — the selector's LAST compound is an `#id`. An id is one
+//                         host by the HTML contract; a second match is a
+//                         duplicate-id defect, which is a different finding and
+//                         one several legs count on purpose.
+//    · `live-view-host` — the selector IS `section.view:not([hidden])`. app.js's
+//                         `applyRoute` hides every view but the routed one, so
+//                         the visible view is a singleton by construction; and
+//                         a walk that reads a DESCENDANT of it is NOT in this
+//                         class, because the descendant is a population.
+//    · `global-chrome`  — page chrome outside every view (GLOBAL_CHROME), one
+//                         copy in index.html, verified by `verifyGlobalChrome`.
+//    · `counted-in-leg` — the owning leg also walks the SAME selector with
+//                         `querySelectorAll`, i.e. it prints the population.
+//
+//  WHAT THIS CENSUS DOES NOT CLAIM: it reads bytes, so it cannot tell you that a
+//  population really is 1 on a shipped fixture. Only a run can, which is why the
+//  discharge this file prefers is `counted-in-leg` — a number in the ok-line,
+//  re-measured every run — and why a register row is a REASON, never a count.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// THE REGISTER. One row per singular walk this file cannot discharge by rule,
+// each carrying the reason one is the right number to read — or the reason the
+// population does not change what the site does with its match.
+//
+// THREE SHAPES DOMINATE, and naming them is most of the value:
+//   · READINESS — the walk is inside a `nav()` / `credWait` / `exitWait`
+//     predicate and its only question is "has this screen painted at all yet".
+//     It asserts nothing about the count, and the cells that follow do the
+//     measuring. It is still a POPULATION-BLIND wait: it fires on the FIRST
+//     match, so a screen that paints its rows one at a time can be measured
+//     half-drawn. Where that risk is real the remedy is the D228 conversion
+//     (three sites were converted under this row's task), not a row here.
+//   · SINGLETON-BY-LAYOUT — one per painted screen (a rail, a grid, a card
+//     head). A second one is a defect, and it is not this walk's defect.
+//   · ONE DOOR — a click or typing target inside an open modal, where a second
+//     copy would mean two modals are open at once.
+//
+// KEYED BY LEG + SELECTOR, NEVER BY LINE. Every line number in this guard rots:
+// the row this register answers was CANCELLED because its own literals had.
+export const SINGULAR_REGISTER = [
+  // ── prologue: the door table and its helpers ──
+  { leg: "(prologue)", selector: "#modal-root .launch-connect-provider", reason: "modal door table: an EXISTENCE predicate for the one connect door a launch modal opens with; two would mean two modals are open at once" },
+  { leg: "(prologue)", arg: "'#modal-root ${sel}')`;", reason: "`openWith(sel)` builds a per-caller existence predicate — the population question belongs to each call site, and this census keys those separately" },
+  { leg: "(prologue)", arg: "${JSON.stringify(sel)});if(!e) throw new Error('", reason: "`clickOne(sel)` is named for its contract: click the FIRST match, throw when there is none; a caller that needs every match does not use this helper" },
+
+  // ── topbar / chrome ──
+  { leg: "GR108-tablet-topbar-overflow", selector: ".topbar", reason: "readiness: the topbar is page chrome outside every view, one copy in index.html (the `header.topbar` arm of GLOBAL_CHROME; this site spells it class-only)" },
+  { leg: "W20-phone-band-billing-chip", selector: ".topbar", reason: "readiness: the same single topbar, waited on before the billing chip is read" },
+  { leg: "GR115-bpconsole-dead-rule", selector: ".topbar", reason: "readiness: the same single topbar, on the `empty` scenario where nothing else paints" },
+  { leg: "W12-narrow-viewport-truth", selector: ".topbar", reason: "the class-only FALLBACK arm of `header.topbar` in the elementFromPoint probe — one topbar, and the probe tries the chrome spelling first" },
+
+  // ── GR109 / W18 / W20: the overview's attention rows and cards ──
+  { leg: "GR109-attention-row-dead-rule", selector: ".attention-row .status-pill-detail", reason: "readiness for the pill cells; the measurement below walks every `.attention-row .status-pill-detail` with querySelectorAll" },
+  { leg: "W18-overview-card-pill", selector: ".instance-card-head .status-pill-detail", reason: "readiness only; this leg's cells walk the pills plurally and fail per pill" },
+  { leg: "W20-attention-name-column", selector: ".attention-row .attention-name", reason: "readiness only; the column measurement below is plural over the same class" },
+
+  // ── W12: the overview grid and the notification matrix ──
+  { leg: "W12-narrow-viewport-truth", selector: ".instances-grid", reason: "singleton-by-layout: one grid per overview screen, and the cards inside it are walked plurally off THIS element (`g.querySelectorAll('.instance-card')`) rather than off the document" },
+  { leg: "W12-narrow-viewport-truth", selector: ".set-matrix", reason: "singleton-by-layout: the notifications screen paints one matrix; the scroll probes drive that element and read `.set-matrix-event` out of it" },
+  { leg: "W12-narrow-viewport-truth", selector: ".set-matrix .set-matrix-grid .set-matrix-event", reason: "readiness: waits for the first event cell to prove the matrix rendered; the overflow measurement scrolls the matrix, not a cell" },
+
+  // ── W13 / W14 / W21 / W26 / W27: the detail screens ──
+  { leg: "W13-detail-route-band", arg: "'${r.ready}') && (function(){var v=document.quer", reason: "readiness built from the route table's own `ready` string — one predicate per route, each asking only whether that screen painted" },
+  { leg: "W13-detail-route-band", selector: ".inst-tab[aria-current=\"page\"]", reason: "`aria-current=\"page\"` is single-valued per tablist by the ARIA contract: a second current tab is a tab-state defect, not a population" },
+  { leg: "W14-site-detail-phone-band", selector: ".detail-head .fleet-url", reason: "singleton-by-layout: one URL line in the site detail head" },
+  { leg: "W21-inst-head-320-copy-reachable", selector: ".detail-head-main", reason: "singleton-by-layout: one head block per detail screen" },
+  { leg: "W21-detail-url-text-page-bound", selector: ".detail-url-text", reason: "singleton-by-layout: one instance URL per detail screen (RESIDUE_REGISTER above carries it for the HIDDEN-view axis, which is a different question)" },
+  { leg: "W21-detail-url-text-page-bound", selector: ".detail-title-row h1", reason: "singleton-by-layout: one page title per detail screen" },
+  { leg: "W21-cruel-content-text-bounded", arg: "'${route.ready}') && (function(){var v=document.", reason: "readiness built from the route table's own `ready` string, one per cruel-content route" },
+  { leg: "W21-token-reveal-readable", selector: ".token-ab", reason: "one door: the create-token form's single always-on checkbox, ticked before submit" },
+  { leg: "W26-instance-track-min-content", selector: ".detail-main", reason: "singleton-by-layout: one main column per detail grid, measured as the track it is" },
+  { leg: "W26-instance-track-min-content", selector: ".detail-grid--instance", reason: "singleton-by-layout: one instance detail grid per screen, and it is the grid whose track widths this leg measures" },
+  { leg: "W27-failed-retry-reachable-after-flick", selector: ".detail-grid--instance", reason: "readiness: waits for the instance grid before the flick; the same single grid" },
+  { leg: "W27-failed-retry-reachable-after-flick", selector: ".bp-timeline", reason: "readiness: one timeline per instance detail screen" },
+
+  // ── W29: the deploy rail ──
+  { leg: "W29-deploy-rail-live-url-wrap", selector: ".deploy-rail-live .site-open", reason: "readiness: the live rail paints one open-site link" },
+  { leg: "W29-deploy-rail-live-url-wrap", selector: ".detail-head .fleet-url .site-open", reason: "readiness: the head's own open-site link, one per detail head" },
+  { leg: "W29-deploy-rail-live-url-wrap", selector: ".deploy-rail-live .copy-btn", reason: "singleton-by-layout: one copy button in the live rail — the leg asserts its ancestry rather than assuming the class is unique document-wide" },
+  { leg: "W29-deploy-rail-live-url-wrap", selector: ".detail-grid > .detail-main > #deploy-rail-slot > section.deploy-rail", reason: "the ancestry assertion itself: a child-combinator path through an id slot, which is one host by the id contract" },
+
+  // ── W22 / W24 / W25 / W26: modals, credential sheets and the launch wizard ──
+  { leg: "W22-shared-modal-card-min-content-floor", selector: "#modal-root .modal-card", reason: "one door: the open modal's single card, polled for running animations before it is measured" },
+  { leg: "W22-url-remedy-pricing", selector: ".instance-card-url", reason: "readiness only: waits for the first address node to paint; the sweep itself is plural and scoped to the visible view, and prints every address it measured" },
+  { leg: "W24-cred-dialog-button-alive", selector: "#modal-root .launch-connect-provider", reason: "one door: the connect button inside the open modal" },
+  { leg: "W24-cred-dialog-button-alive", selector: "#provider-connect [data-connect-submit]", reason: "one door: the providers screen's single connect-submit control, under an id host" },
+  { leg: "W25-launch-catalog-after-connect", arg: "${JSON.stringify(scope)}+' .launch-connect-provi", reason: "one door, scope-parameterised: the same connect button reached under whichever host (`#modal-root` / `#view-overview`) the cell drives" },
+  { leg: "W25-launch-catalog-after-connect", selector: "#view-overview .launch-form .form-input", reason: "one door: the wizard's first text field on the overview host — the leg types into the field it is about to read back" },
+  { leg: "W25-launch-catalog-after-connect", selector: "#modal-root .launch-form .form-input", reason: "one door: the same wizard field on the modal host" },
+  { leg: "W26-cred-sheet-exits", selector: "#launch-modal-slot .launch-form .form-input", reason: "one door: the wizard's name field inside the slot the sheet mounts in" },
+  { leg: "W26-cred-sheet-exits", selector: "#view-overview .launch-form .form-input", reason: "one door: the same field on the overview host, typed into and read back" },
+  { leg: "W26-cred-sheet-exits", selector: "#view-overview .launch-connect-provider", reason: "one door: the connect button the exit probes click" },
+  { leg: "W26-cred-sheet-exits", selector: "#modal-root .choice-list", reason: "one door: the open sheet's provider picker — its presence IS the assertion; the choices inside it are not this leg's subject" },
+  { leg: "W26-cred-sheet-exits", selector: "#modal-root .modal-title", reason: "one door: the open sheet's title, read as text to say WHICH sheet is open" },
+  { leg: "W26-cred-sheet-exits", selector: "#modal-root .modal-x[data-close]", reason: "one door: the close ×; the probe reports its absence by name rather than silently missing it" },
+  { leg: "W26-cred-sheet-exits", selector: "#modal-root .modal-backdrop[data-close]", reason: "one door: the single backdrop of the open sheet" },
+
+  // ── W24 / W26: the /new deploy theater ──
+  { leg: "W24-theater-failed-hostname-whole", selector: ".new-failed", reason: "singleton-by-layout: one failure panel per theater screen — also the readiness gate for it" },
+  { leg: "W24-theater-failed-hostname-whole", selector: ".new-console-text", reason: "readiness: waits for the console pane to paint before its text is measured" },
+  { leg: "W24-theater-failed-hostname-whole", selector: ".new-theater-grid", reason: "singleton-by-layout: one theater grid per screen; the STEPS inside it are counted plurally in the same probe" },
+  { leg: "W26-new-ready-and-launch-bounded", selector: ".new-ready", reason: "singleton-by-layout: one ready card per theater screen" },
+  { leg: "W26-new-ready-and-launch-bounded", selector: ".new-ready .mono", reason: "the ready card's FIRST monospace line is the URL this leg bounds; reading past it would measure the sha run instead" },
+  { leg: "W26-new-ready-and-launch-bounded", selector: ".new-launch", reason: "singleton-by-layout: one launch panel per /new screen" },
+  { leg: "W26-new-ready-and-launch-bounded", selector: ".new-card", reason: "singleton-by-layout: the card that CONTAINS the field this cell measures — a second card would not be that field's ancestor" },
+
+  // ── W35 / W50 / W20-type-floor ──
+  { leg: "W35-hash-nav-hidden-view-residue", selector: "section.view:not([hidden]) .fleet-row[data-id]", reason: "the tour needs ONE instance id to drill into; any row's `data-id` serves, and the row is already scoped to the visible view" },
+  { leg: "W35-hash-nav-hidden-view-residue", selector: "section.view:not([hidden]) .site-row[data-id]", reason: "the same, for the site drill-down" },
+  { leg: "W50-site-row-three-hosts-cruel-by-fixture", arg: "'${t.ready}') && (function(){var v=document.quer", reason: "readiness built from the cell table's own `ready` string, one per host cell" },
+  { leg: "W20-type-floor-instances", selector: "#billing-plan-section .set-h", reason: "readiness for the billing screen: one section heading, under an id host" },
+  { leg: "W20-type-floor-instances", selector: "#billing-recommended .loading", reason: "readiness, NEGATED: waits for the recommended panel to stop showing a spinner — the question is whether ANY loading node remains, so one match is enough to keep waiting" },
+  { leg: "W20-type-floor-instances", selector: "#activity-body .tlv-row", reason: "readiness for the activity feed: the first row proves the feed painted" },
+];
+
+/** A singular walk's stable identity: the owning leg plus what it walks. */
+export function walkKey(w) {
+  return `${w.leg} :: ${w.selector === null ? `«${w.arg}»` : w.selector}`;
+}
+
+// `#foo` as the last compound of the selector, at the end of the string.
+const TERMINAL_ID_RE = /(?:^|[\s>+~])#[A-Za-z][\w-]*$/;
+
+/**
+ * Classify ONE singular walk by how its population is accounted for.
+ * `allKeys` is the set of `leg :: selector` keys of the file's PLURAL walks.
+ * Returns one of: "singleton-id" | "live-view-host" | "global-chrome" |
+ * "counted-in-leg" | "registered" | "unregistered".
+ */
+export function classifyCardinality(w, allKeys, register = SINGULAR_REGISTER) {
+  if (w.selector !== null) {
+    const s = w.selector.trim();
+    if (s === LIVE_VIEW_SELECTOR) return "live-view-host";
+    if (GLOBAL_CHROME.includes(s)) return "global-chrome";
+    if (TERMINAL_ID_RE.test(s)) return "singleton-id";
+  }
+  // AN UNRESOLVED SITE CAN NEVER BE `counted-in-leg`. Its selector is null, and
+  // `leg :: null` would collide with any OTHER runtime-built walk in the same
+  // leg that happens to be plural — discharging a walk nobody has classified
+  // against a count of something else. Measured while writing this: three of the
+  // six unresolved sites fell into that hole.
+  if (w.selector !== null && allKeys.has(`${w.leg} :: ${w.selector}`)) return "counted-in-leg";
+  const key = walkKey(w);
+  return register.some((r) => registerKey(r) === key) ? "registered" : "unregistered";
+}
+
+/** A register row's key, spelled exactly the way `walkKey` spells a walk's. */
+export function registerKey(r) {
+  return `${r.leg} :: ${r.selector === null || r.selector === undefined ? `«${r.arg}»` : r.selector}`;
+}
+
+/**
+ * THE CENSUS. Every singular `document.querySelector(` site in `source`, in file
+ * order, each with the line, the leg, the selector (or the raw argument, for a
+ * runtime-built one) and its discharge class.
+ * Returns `{ sites, tally, unregistered, stale, lines }` where `lines` is the
+ * printable census and `unregistered`/`stale` are the two red arms.
+ */
+export function singularCensus(source, register = SINGULAR_REGISTER) {
+  const walks = censusWalks(source);
+  const allKeys = new Set(walks.filter((w) => w.all).map((w) => `${w.leg} :: ${w.selector}`));
+  const sites = walks
+    .filter((w) => !w.all)
+    .map((w) => ({ ...w, discharge: classifyCardinality(w, allKeys, register) }));
+
+  const tally = {};
+  for (const s of sites) tally[s.discharge] = (tally[s.discharge] || 0) + 1;
+
+  const unregistered = sites
+    .filter((s) => s.discharge === "unregistered")
+    .map((s) => `${walkKey(s)} (line ${s.line}) — a singular walk with no printed population and no committed reason`);
+
+  const reached = new Set(sites.map(walkKey));
+  const stale = register
+    .filter((r) => !reached.has(registerKey(r)))
+    .map((r) => `${registerKey(r)} — registered, but no singular walk in the guard matches it`);
+
+  const lines = sites.map(
+    (s) => `  ${String(s.line).padStart(5)}  ${s.discharge.padEnd(14)}  ${s.leg}  ${s.selector === null ? `«${s.arg}»` : s.selector}`,
+  );
+  return { sites, tally, unregistered, stale, lines };
+}
+
+/**
+ * The three numbers overflow-guard.mjs's header used to carry as hand-typed
+ * literals (`68 / 55 / 15` against a file that measures 253 / 224 / 98 — every
+ * one of them dead by wave 23, and the row this census answers was CANCELLED
+ * because it quoted them). Derived here with the counting rule beside it, so the
+ * header can point at a command instead of a number. The patterns are exactly
+ * the ones the header quoted: `querySelector[(]` and `querySelectorAll[(]` are
+ * disjoint, and both count `e.querySelector(` on an element handle, which the
+ * call-site census above deliberately does not.
+ */
+export function grepCounts(source) {
+  const text = String(source);
+  const occ = (text.match(/querySelector\(/g) || []).length;
+  const allOcc = (text.match(/querySelectorAll\(/g) || []).length;
+  const lines = text.split("\n").filter((l) => l.includes("querySelector(")).length;
+  const allLines = text.split("\n").filter((l) => l.includes("querySelectorAll(")).length;
+  return { occurrences: occ, lines, allOccurrences: allOcc, allLines };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE BUILD-TIME ARM: `node cloud/priv/static/__preview__/view-scope-census.mjs`
+// ─────────────────────────────────────────────────────────────────────────────
+//  Prints the cardinality census of overflow-guard.mjs — every singular walk
+//  with its line, its leg, its selector and its discharge — and exits:
+//    0 — every singular walk is discharged, and every register row is reachable
+//    1 — UNREGISTERED singular walks, or STALE register rows (D180), or both
+//    2 — REFUSED: the guard could not be read. A refusal is not a pass.
+//  It is browserless and dependency-free, so it runs in the same job as the unit
+//  harness rather than behind a Chrome bring-up. The module half is unchanged by
+//  it: importing this file runs nothing.
+export async function runCensusCli(argv = []) {
+  const { default: fs } = await import("node:fs");
+  const { default: path } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const target = path.join(here, "overflow-guard.mjs");
+  let src;
+  try {
+    src = fs.readFileSync(target, "utf8");
+  } catch (e) {
+    process.stdout.write(`view-scope-census: REFUSED — cannot read ${target}: ${e.message}\n`);
+    return 2;
+  }
+  const c = singularCensus(src);
+  const g = grepCounts(src);
+  const verbose = argv.includes("--list");
+  process.stdout.write(
+    `\nSINGULAR-SELECTOR CENSUS — overflow-guard.mjs\n` +
+    `  document.querySelector(All)? call sites: ${censusWalks(src).length} ` +
+    `(grep rule, for the header that used to type these: querySelector[(] ${g.occurrences} occurrences on ` +
+    `${g.lines} lines; querySelectorAll[(] ${g.allOccurrences} on ${g.allLines})\n` +
+    `  singular sites: ${c.sites.length}\n` +
+    Object.entries(c.tally).sort().map(([k, v]) => `    ${k.padEnd(14)} ${v}\n`).join("") +
+    `  register rows: ${SINGULAR_REGISTER.length}\n`,
+  );
+  if (verbose) process.stdout.write(c.lines.join("\n") + "\n");
+  if (!c.sites.length) {
+    process.stdout.write(`view-scope-census: REFUSED — ZERO singular walks in a guard that is ${src.split("\n").length} lines long. The call pattern stopped matching how this file spells its walks; an empty census is not a clean one\n`);
+    return 2;
+  }
+  let bad = 0;
+  for (const u of c.unregistered) {
+    bad++;
+    process.stdout.write(`  UNREGISTERED  ${u}\n`);
+  }
+  for (const st of c.stale) {
+    bad++;
+    process.stdout.write(`  STALE         ${st}\n`);
+  }
+  if (bad) {
+    process.stdout.write(
+      `\nview-scope-census: ${c.unregistered.length} unregistered singular walk(s), ${c.stale.length} stale ` +
+      `register row(s). A singular walk owes either a PRINTED POPULATION in its leg's ok-line (walk the same ` +
+      `selector with querySelectorAll, scoped to \`${LIVE_VIEW_SELECTOR}\`) or a one-line reason in ` +
+      `SINGULAR_REGISTER. A register row that matches no walk is fatal in the same way and for the same reason ` +
+      `(D180): a reason nobody can reach certifies nothing — delete it.\n`,
+    );
+    return 1;
+  }
+  process.stdout.write(`view-scope-census: every singular walk is accounted for, and every register row is reachable\n`);
+  return 0;
+}
+
+// Run only when this file IS the entry point; an `import` of it runs nothing.
+// DELIBERATELY NOT A TOP-LEVEL `await`: a module with one is an ASYNC module for
+// every importer, and overflow-guard.mjs imports this file. `.then` keeps the
+// module synchronous and the CLI arm costs its importers nothing.
+if (process.argv[1] && process.argv[1].endsWith("view-scope-census.mjs")) {
+  runCensusCli(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }

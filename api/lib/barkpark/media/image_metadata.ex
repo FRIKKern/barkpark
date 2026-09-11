@@ -67,6 +67,14 @@ defmodule Barkpark.Media.ImageMetadata do
   @spec backfill(term(), String.t(), keyword()) :: term()
   def backfill(%{"assetId" => asset_id} = image, dataset, opts)
       when is_binary(asset_id) and asset_id != "" do
+    # One spelling for `assetId` (Gyldendal friction 78): the bare blob id —
+    # what the migration wrote, what `Media.get_file/2` and the renditions
+    # take. The picker used to store the asset DOCUMENT id (`asset-<blob>`)
+    # on a fresh pick, so two spellings lived side by side. This is a
+    # normalisation of the key that names the asset, not an overwrite of any
+    # metadata: a bare id passes through byte-identically.
+    image = Map.put(image, "assetId", file_id(asset_id))
+
     if complete?(image) do
       image
     else
@@ -188,8 +196,10 @@ defmodule Barkpark.Media.ImageMetadata do
 
   # ── helpers ─────────────────────────────────────────────────────────────────
 
-  # The picker stores the blob id as `assetId`; the companion document is
-  # `asset-<blob id>`. Accept either spelling.
+  # The canonical `assetId` is the blob id; the companion document is
+  # `asset-<blob id>` and its draft twin `drafts.asset-<blob id>`. Accept every
+  # spelling on the way in, emit the bare one.
+  defp file_id("drafts.asset-" <> rest), do: rest
   defp file_id("asset-" <> rest), do: rest
   defp file_id(id), do: id
 

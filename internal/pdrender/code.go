@@ -73,13 +73,10 @@ type codeKey struct {
 }
 
 func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
-	// Field-name reconciliation (verified against live Bulldocs JSON): code
-	// blocks emit their source under EITHER `code` (the newer shape, e.g.
-	// {"type":"code","code":"…","language":"bash"}) OR `value` (the legacy/
-	// flat-mode shape render.ex's compose_block reads). Prefer the live `code`
-	// key, fall back to `value`; likewise `language`||`lang`. Without this dual
-	// read a real `code`-shaped block renders as an EMPTY accent bar.
-	source := attrStrFirst(b.Attrs, "code", "value")
+	// THE code-block source-field contract — see codeSource at the bottom of this
+	// file. Both engines read the same four keys in the same order; the shared
+	// fixture ../../api/test/support/fixtures/code-source-aliases.json is the lock.
+	source := codeSource(b.Attrs)
 	lang := attrStrFirst(b.Attrs, "language", "lang") // usually absent; tolerated.
 
 	// A blank or whitespace-only source renders NOTHING — no lines, no accent
@@ -87,14 +84,12 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 	// block composes to nothing, not an empty box); before this guard the Go
 	// readers painted a lone "▌" where the web rendered nothing, a View/TUI
 	// parity break on the same block (task-841c27ea82903f48). Checked before
-	// the cache key so the empty case never occupies a slot. Re-expressed
-	// through the shared blankAttr leaf reader (blank.go) when the four other
-	// media guards landed, exactly as compose.ex re-expressed
-	// `blank_code_source?/1` through `blank_field?/2` in #14991 — one definition
-	// of blank, applied to code's documented dual-read (`code`||`value`).
-	// Behaviour-identical for every string/nil case; a non-stringish (map) value
-	// now reads as blank, which is what compose.ex has always said.
-	if blankAttr(b.Attrs, "code") && blankAttr(b.Attrs, "value") {
+	// the cache key so the empty case never occupies a slot. Expressed as
+	// "the SELECTED source is blank" so the guard and the emitter can never
+	// disagree about which keys count — the same collapse compose.ex made when
+	// `blank_code_source?/1` became `code_source(b) == ""`. A non-stringish (map)
+	// value reads as blank, which is what compose.ex has always said.
+	if strings.TrimSpace(source) == "" {
 		return nil
 	}
 
@@ -282,4 +277,74 @@ func hashStrings(parts ...string) uint64 {
 	}
 	sum := h.Sum(nil)
 	return binary.BigEndian.Uint64(sum[:8])
+}
+
+// ── THE code-block source-field contract (task-e9af9f95d290307d) ─────
+//
+// A standalone `code` block carries its source under one of FOUR keys. This is
+// not a design; it is the corpus. Measured 2026-09-11 against
+// https://guerrilla.barkpark.cloud, dataset `production`, over all 1050 `paper`
+// and 8671 `task` documents (10,608 block-level `code` nodes):
+//
+//	value    9711   the canonical shape; every first-party producer writes it
+//	code      327   this repo's own mdlite adapter (internal/taskboard/mdlite.go)
+//	                and agent-authored JSON; ALL 219 task-side code blocks
+//	text      460   agent-authored paper JSON
+//	content    30   agent-authored paper JSON, an inline-node ARRAY
+//	both        0   no live row carries two non-blank source keys
+//
+// Before this list, Go read `code`||`value` while compose.ex read `value` ONLY,
+// so 817 authored blocks were hollow on every web/email surface and 327 of them
+// were full here — the same document full in one reader and hollow in another.
+// api/lib/barkpark/portable_doc/render/compose.ex `code_source/1` now reads THIS
+// list in THIS order, and api/test/support/fixtures/code-source-aliases.json is
+// the single file both engines' tests assert against (one file, not a mirror
+// pair: a mirror pair can drift, a shared file cannot).
+//
+// PRECEDENCE is FIRST NON-BLANK, not first-present: a leading key holding "" or
+// whitespace falls through, so a Studio-seeded empty `value` cannot mask a real
+// `code`. That is a deliberate difference from attrStrFirst, which compares
+// against "" untrimmed. `value` leads (it did NOT before) because it is the
+// canonical field and because api bpml/printer.ex has printed exactly
+// ["value","code","content","text"] since it was written — one order, reused.
+// With `both` = 0 in the corpus the order is unobservable on live data.
+//
+// The winning key is returned VERBATIM: trimming is the selection rule, never a
+// transform on the source.
+var codeSourceKeys = []string{"value", "code", "content", "text"}
+
+func codeSource(m map[string]any) string {
+	for _, k := range codeSourceKeys {
+		source := codeSourceText(m, k)
+		if strings.TrimSpace(source) != "" {
+			return source
+		}
+	}
+	return ""
+}
+
+// codeSourceText reads ONE key as source text: a stringish leaf through the
+// shared stringishAttr reader, or an inline-node ARRAY (the `content` shape)
+// flattened to its concatenated text. Mirrors compose.ex `code_source_text/1`.
+func codeSourceText(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	if nodes, ok := m[key].([]any); ok {
+		var sb strings.Builder
+		for _, n := range nodes {
+			switch v := n.(type) {
+			case string:
+				sb.WriteString(v)
+			case map[string]any:
+				if s := stringishAttr(v, "value"); s != "" {
+					sb.WriteString(s)
+				} else {
+					sb.WriteString(stringishAttr(v, "text"))
+				}
+			}
+		}
+		return sb.String()
+	}
+	return stringishAttr(m, key)
 }

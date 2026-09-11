@@ -1,0 +1,119 @@
+name: POSIX vacuous-green census
+
+# scripts/posix-vacuous-green-census.sh asserts that every scripts/*.sh using
+# process substitution is either interpreter-GUARDED, or COMMENT-ONLY, or
+# RECORDED in scripts/.posix-vacuous-green-census with the exit code a real
+# `sh` run produced.
+#
+# THE DEFECT. bash reads a script INCREMENTALLY. Invoked as `sh` it is in POSIX
+# mode, where `< <(…)` is a parse error — so it runs everything above that line
+# and exits with the status of the LAST COMPLETED COMMAND.
+# scripts/required-checks.test.sh exited 0 after 68 of its 170 assertions
+# exactly that way (#10728); #17126 measured the population and guarded the
+# seven other files that exited 0.
+#
+# WHY A WORKFLOW AND NOT JUST THAT PR. Both of those were MEASUREMENTS, and a
+# measurement is a snapshot: it says nothing about the script someone adds
+# tomorrow. This wires the PREDICATE. The population is derived from the tree on
+# every run, so a new member with no guard and no roster line reds on the PR
+# that adds it, named, instead of waiting for the next census.
+#
+# WHAT REDS. THIS WORKFLOW IS ADVISORY. It publishes no context in
+# .github/required-checks.json's required set (exactly: Cloud gate, Console
+# gate, Elixir gate, PR references an active task) and nothing here can stop a
+# merge. Wiring makes the census RUN, not BLOCK.
+#
+#   1. the selftest — fails this job. 9 arms in mktemp fixtures, no network:
+#      a positive control that the census finds all three classes (3 = 1+1+1),
+#      four mutations (roster line removed; guard removed; guard moved BELOW the
+#      first process substitution; exit 0 smuggled in under a non-honest class)
+#      each red NAMING the file, their restores green, and a CANNOT-READ arm.
+#   2. the census over the tree — fails this job on an unaccounted member.
+#   3. --list — never fails; prints every member with its class so the census
+#      shows its NEGATIVES rather than only its hits.
+#
+# The PR filter lives on the JOB as an `if:` over an output the `changes` job
+# computes, never on a workflow-level `paths:` — a workflow-level paths list is
+# how a check-run goes ABSENT rather than skipped, and absent is the failure
+# mode that leaves a context "expected" forever.
+#
+# Task: cch-w53-fu-posix-vacuous-green-census-across-scripts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly. A latent class needs a loop that never stops, not a fast one.
+    # Offset off the hour because GitHub queues cron under load — read this as
+    # "some time Tuesday", never "at 17:23".
+    - cron: "23 17 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: posix-vacuous-green-census-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the census dark
+  # exactly when main is moving fastest.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  changes:
+    name: census — did the population's inputs move?
+    runs-on: ubuntu-latest
+    outputs:
+      hit: ${{ steps.f.outputs.hit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: f
+        name: compare the PR against the census's own targets
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull_request (${{ github.event_name }}) — the census always runs"
+            echo "hit=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          changed="$(git diff --name-only "$base" HEAD)"
+          # A here-string, never `printf … | grep -q`: under pipefail that
+          # returns 141 when the reader exits first, and a gate that hosts the
+          # defect class this repo hunts is the loudest way to lose an argument.
+          if grep -Eq '^scripts/' <<<"$changed"; then
+            echo "hit=true" >>"$GITHUB_OUTPUT"
+            echo "the PR touches scripts/ — running the census:"
+            grep -E '^scripts/' <<<"$changed"
+          else
+            echo "hit=false" >>"$GITHUB_OUTPUT"
+            echo "the PR touches nothing under scripts/ — skipping."
+            echo "This SKIPS the census job; it does not make its context absent."
+          fi
+
+  census:
+    name: POSIX vacuous-green census
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: census syntax check
+        run: bash -n scripts/posix-vacuous-green-census.sh
+
+      # The census's own discrimination matrix. It must pass BEFORE its verdict
+      # over the tree means anything: three of its arms exist to prove the
+      # census reds NAMING the file, not merely that it reds.
+      - name: census selftest (fails this job)
+        run: bash scripts/posix-vacuous-green-census.sh --selftest
+
+      - name: census over the tree (fails this job)
+        run: bash scripts/posix-vacuous-green-census.sh
+
+      # Advisory: the negatives, printed, so "23 measured non-vacuous" is
+      # readable rather than inferred from silence. Never fails.
+      - name: every member with its class (advisory)
+        run: bash scripts/posix-vacuous-green-census.sh --list

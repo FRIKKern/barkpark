@@ -1,0 +1,4 @@
+{
+  "cloudflare": { "dns": true,       "tls": true,  "cdn": true,  "tunnel": false, "storage": false, "edge_fn": false, "full_host": false },
+  "vercel":     { "full_host": true, "unknown": ["cdn", "dns", "edge_fn", "storage", "tls", "tunnel"] }
+}

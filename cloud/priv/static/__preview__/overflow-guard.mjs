@@ -157,37 +157,60 @@
 //  read identically under both, and the run prints the reserved track width it
 //  measured either way.
 //
-//  HONEST SCOPE — A WORKFLOW DOES RUN THIS FILE, AND IT IS NOT A REQUIRED CHECK
-//  (corrects charter D109, which this header carried as "THIS FILE IS RUN BY NO
-//  WORKFLOW" long after it stopped being true). Re-derived, by line:
-//  `.github/workflows/console-harness.yml:487` declares the `overflow-guard:`
-//  job ("Overflow guard (rendered)"), whose `run:` block opens at :508 and
-//  invokes `node cloud/priv/static/__preview__/overflow-guard.mjs` at :511, one
-//  invocation with no `--defect`, on every console-touching PR. What remains
-//  true is the WEAKER sentence, and only that one: the job reaches branch
-//  protection through `Console gate`, which is ADVISORY — the live required set
-//  is `Elixir gate` and `PR references an active task`, and `grep -n "Overflow
-//  guard" .github/required-checks.json` returns nothing. So its red is VISIBLE
-//  and does not by itself block a merge. It is also still a developer tripwire
-//  and the seal predicate's shell-out. A header that quotes a workflow — or an
-//  exit code — has to be re-driven when it is quoted, or the guard's own
-//  documentation becomes the untested sentence this guard exists to replace.
+//  HONEST SCOPE — A WORKFLOW DOES RUN THIS FILE, AND IT REACHES A REQUIRED
+//  CHECK (corrects charter D109, which this header carried as "THIS FILE IS RUN
+//  BY NO WORKFLOW" long after it stopped being true). ANCHORED BY NAME, NEVER
+//  BY LINE — the two previous revisions of this paragraph both cited line
+//  numbers in `.github/workflows/console-harness.yml`, and both were stale
+//  within a wave because every insert above the job shifts them. Re-derive
+//  with names, which do not move:
+//    grep -n '^  overflow-guard:' .github/workflows/console-harness.yml
+//    grep -n 'name: Overflow guard (rendered)' .github/workflows/console-harness.yml
+//    grep -n 'overflow-guard.mjs' .github/workflows/console-harness.yml
+//  The job id is `overflow-guard`, its rendered check-run context is
+//  `Overflow guard (rendered)`, and its step "Overflow guard — every defect leg
+//  in one browser run" invokes `node
+//  cloud/priv/static/__preview__/overflow-guard.mjs` ONCE with no `--defect`,
+//  on every console-touching PR. The job reaches branch protection through the
+//  aggregator `Console gate`, which IS in the live required set — re-derive
+//  that too rather than trusting this sentence:
+//    python3 -c "import json;print([c['context'] for c in json.load(open('.github/required-checks.json'))['protection']['required_status_checks']['checks']])"
+//    grep -n 'Overflow guard' .github/required-checks.json
+//  The first prints the four required contexts (`Cloud gate`, `Console gate`,
+//  `Elixir gate`, `PR references an active task`); the second now MATCHES, on
+//  an S3-SUBSUMED exclusion row saying this leaf is already enforced through
+//  the aggregator. The header's old sentence — "`Console gate` is ADVISORY" and
+//  "that grep returns nothing" — is FALSE on both halves as of a333e4b58, and
+//  is corrected here rather than deleted so the next reader sees the drift.
+//  A red here therefore does block a merge, through `Console gate`. It is also
+//  still a developer tripwire and the seal predicate's shell-out. A header that
+//  quotes a workflow — or an exit code — has to be re-driven when it is quoted,
+//  or the guard's own documentation becomes the untested sentence this guard
+//  exists to replace.
 //  The history is worth keeping straight: a tree whose body scrolled 106px at
 //  390px passed every required context because nothing measured below 700px and
 //  nothing ran this file. The second half of that has since been fixed.
 //
-//  THE SELECTOR CENSUS OF THIS FILE, with the counting rule beside it, because a
-//  census quoted without its rule is how two irreconcilable numbers get cited as
-//  one pair. The patterns below are written with a bracketed paren ON PURPOSE —
-//  as regexes they match exactly what the bare string does, but they do not
-//  themselves match, so quoting the census here does not move it:
-//    grep -o 'querySelector[(]'    | wc -l  →  68  OCCURRENCES
-//    grep -c 'querySelector[(]'             →  55  LINES carrying at least one
-//    grep -o 'querySelectorAll[(]' | wc -l  →  15  (grep -c agrees: 15)
-//  The two patterns are disjoint — `querySelectorAll[(]` does not match
-//  `querySelector[(]`. Charter D258's "65 / 20 per CALL" is refuted here: 65 is
-//  unreproducible by any rule against these bytes, and 20 is this file's 15
-//  POOLED with breakpoint-sweep.mjs's 5. Quote 68/55/15, never a mixed pair.
+//  THE SELECTOR CENSUS OF THIS FILE IS NOT TYPED HERE ANY MORE
+//  (task-39ebd948f40660e3). It used to be: three literals, with their counting
+//  rule beside them, and by the time anybody read them again the file had grown
+//  past every one by an order of magnitude — the row that sent somebody to check
+//  was CANCELLED because its own quoted numbers were dead. A number in a comment
+//  has no way to notice that the bytes under it moved.
+//
+//  So the numbers come from a command, and the command is the census:
+//      node cloud/priv/static/__preview__/view-scope-census.mjs
+//  which prints the call-site count, the same three grep-rule figures
+//  (`querySelector[(]` occurrences, the lines carrying at least one, and the
+//  disjoint `querySelectorAll[(]` count — the patterns are written bracketed so
+//  quoting them does not move them), and the CARDINALITY census: every singular
+//  walk in this file with its leg, its selector and how its population is
+//  accounted for. It exits 1 on a singular walk that neither prints its
+//  population nor carries a committed reason, and on a register row that matches
+//  no walk. `--list` prints every site.
+//
+//  Charter D258's "65 / 20 per CALL" is refuted by any run of it: neither figure
+//  is reproducible by any rule against these bytes.
 //
 //  Exit codes: 0 = every requested defect measured fixed · 1 = a DEFECT WAS
 //  MEASURED and is still present · 2 = REFUSED to measure (no/unusable Chrome,
@@ -290,6 +313,7 @@ const DEFECTS = [
   "W20-type-floor-instances",
   "W23-overview-digest-activity-row",
   "W27-failed-bar-announces-the-count",
+  "W22-url-remedy-pricing",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -1868,7 +1892,16 @@ async function main() {
     if (requested.includes("GR109-attention-row-dead-rule")) {
       process.stdout.write(`\nGR109-attention-row-dead-rule — overview-past-due attention queue\n`);
       await setViewport(768);
-      await nav(`${BASE}/?scen=overview-past-due&theme=light`, `document.querySelector('.attention-row .attention-acts')`);
+      // D228: THE POPULATION, NOT THE FIRST OF IT (task-39ebd948f40660e3). This
+      // gate read `document.querySelector('.attention-row .attention-acts')`,
+      // i.e. it entered on the FIRST row's button group and said nothing about
+      // how many rows the queue holds — and the measurement immediately below
+      // reads `.attention-row` singular off the same paint. A queue caught one
+      // row in would be measured, and certified, on a screen the fixture never
+      // meant to show. Scoped to the visible view so the count stays out of the
+      // hidden-view residue class the W35 leg polices.
+      await nav(`${BASE}/?scen=overview-past-due&theme=light`, `document.querySelectorAll('section.view:not([hidden]) .attention-row .attention-acts').length > 0`);
+      const attPop = await evalJs(`document.querySelectorAll('section.view:not([hidden]) .attention-row .attention-acts').length`);
       const m = await evalJs(
         `(function(){var row=document.querySelector('.attention-row');var cs=getComputedStyle(row);` +
         `var main=row.querySelector('.attention-main').getBoundingClientRect();` +
@@ -1880,7 +1913,7 @@ async function main() {
       if (m.align !== "flex-start") fail("GR109-attention-row-dead-rule", `@768 align-items is "${m.align}", expected "flex-start" — the authored rule is cascade-dead (row stacks but stays centred)`);
       if (Math.abs(m.actsLeft - m.mainLeft) > 1) fail("GR109-attention-row-dead-rule", `@768 .attention-acts left ${m.actsLeft} != .attention-main left ${m.mainLeft} — buttons are centred, not left-aligned`);
       if (!failures.some((f) => f.defect === "GR109-attention-row-dead-rule")) {
-        okLine(`@768 computed column/flex-start; acts left ${m.actsLeft} == main left ${m.mainLeft}`);
+        okLine(`@768 computed column/flex-start; acts left ${m.actsLeft} == main left ${m.mainLeft} — the readiness gate stood in front of ${attPop} .attention-row .attention-acts group(s) on overview-past-due, counted rather than assumed (D228), and the geometry above is the FIRST row's`);
       }
       // The stack must stay scoped to the tablet block — at 900 it is a row.
       await setViewport(900);
@@ -2131,14 +2164,25 @@ async function main() {
       let wideCards = 0;
       let wideHits = 0;
       const scenCounts = [];
+      const readyPop = [];
       for (const scen of CARD_SCENS) {
         let scenN = null;
         for (const theme of ["light", "dark"]) {
           await setViewport(390);
           await nav(
             `${BASE}/?scen=${scen}&theme=${theme}#overview`,
-            `document.querySelector('.instances-grid .instance-card')`,
+            // D228: THE POPULATION, NOT THE FIRST OF IT (task-39ebd948f40660e3).
+            // This gate read `document.querySelector('.instances-grid
+            // .instance-card')` and entered the moment ONE card existed. The
+            // cells below measure every card in the grid, so a grid caught
+            // mid-paint is measured short and the per-scenario `n` printed
+            // beside it is the number that was there when the FIRST card
+            // arrived, not the fixture's. Scoped to the visible view so the
+            // count stays out of the hidden-view residue class W35 polices.
+            `document.querySelectorAll('section.view:not([hidden]) .instances-grid .instance-card').length > 0`,
           );
+          // The population the gate stood in front of, re-measured per cell.
+          readyPop.push(`${scen}/${theme}:${await evalJs(`document.querySelectorAll('section.view:not([hidden]) .instances-grid .instance-card').length`)}`);
           const row = [];
           for (const width of PHONE_WIDTHS) {
             await setViewport(width);
@@ -2181,7 +2225,7 @@ async function main() {
       // A selector that stops matching must RED, not sail through zero
       // iterations printing a tick.
       if (walked === 0) fail(D, `#overview: .instances-grid .instance-card matched NOTHING across ${CARD_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes — the selector no longer reaches the population it certifies`);
-      else okLine(`instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
+      else okLine(`READINESS STOOD IN FRONT OF ${readyPop.join(", ")} card(s) — the gate counts the population it waits for (D228), so a grid caught one card into its paint cannot pass for a painted grid. instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
 
       // (b) the notifications matrix must ADMIT it is clipped. Two independent
       //     cues, both measured: a label column that stays put while the
@@ -8811,12 +8855,22 @@ async function main() {
       );
       let cells = 0, hostsSeen = 0, torn = 0, pageOver = 0, stressRuns = 0, stressSpill = 0;
       let boxOver = 0, midCells = 0, midBoxOver = 0, midPageOver = 0;
+      const stepPop = [];
       for (const theme of ["light", "dark"]) {
         await setViewport(FAIL_WIDTHS[FAIL_WIDTHS.length - 1]);
         await nav(
           `${BASE}${sc.pathname}${sc.search}&scen=theater-failed&theme=${theme}`,
-          `document.querySelector('.new-failed') && document.querySelector('.new-step-detail') && document.querySelector('.new-console-text')`,
+          // D228 on the STEP CAPTIONS (task-39ebd948f40660e3): this gate read
+          // `document.querySelector('.new-step-detail')` and entered on the
+          // FIRST step's caption, while the cells below measure every rendered
+          // hostname run on the screen. The theater renders its steps into
+          // `#new-body` one list at a time, so a screen caught between steps was
+          // measurable and certifiable. `#new-body` is an id host, not a view —
+          // the /new theater is its own page, outside every `section.view` —
+          // which is also why this count is not spelled with the live-view idiom.
+          `document.querySelector('.new-failed') && document.querySelectorAll('#new-body .new-step-detail').length > 0 && document.querySelector('.new-console-text')`,
         );
+        stepPop.push(`${theme}:${await evalJs(`document.querySelectorAll('#new-body .new-step-detail').length`)}`);
         const row = [];
         for (const width of FAIL_WIDTHS) {
           await setViewport(width);
@@ -9029,7 +9083,9 @@ async function main() {
         okLine(
           `${cells} / ${cells} cells clean (${hostsSeen} rendered "${HOSTNAME}" text runs measured — EVERY one on the ` +
           `screen, not a pinned selector) across ${FAIL_WIDTHS.join("/")} in both themes; ${torn} torn hostnames, ` +
-          `${pageOver} pages scrolling sideways. Cells print hosts-found and, when torn, the count`,
+          `${pageOver} pages scrolling sideways. Cells print hosts-found and, when torn, the count. The readiness ` +
+          `gate stood in front of ${stepPop.join(" / ")} .new-step-detail caption(s) under #new-body — counted, not ` +
+          `assumed (D228), so a theater caught between steps cannot pass for a finished one`,
         );
         okLine(
           `THE CRUEL HALF RAN ${stressRuns} time(s) at ${FAIL_WIDTHS[0]} with ${stressSpill} box spill(s): a ` +
@@ -11113,6 +11169,7 @@ async function main() {
         `${DEPLOY_DETAIL_BUILDER_MAX} — reported, not pinned). lines= is measured height / line-height\n`,
       );
       let cells = 0, seen = 0, cruelSeen = 0, kindSeen = 0;
+      const railPop = [];
       let worstLines = 0, worstAt = "", kindWorstLines = 0, pageOver = 0;
       let capAttrWorst = 0;
       for (const theme of ["light", "dark"]) {
@@ -11130,8 +11187,19 @@ async function main() {
           // deployments fetch having landed. The caption's absence is caught
           // where it belongs — by this leg's own zero-box refusal below, which
           // says which screen was empty instead of blaming a stylesheet.
-          `document.querySelector('.deploy-row') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
+          // D228: THE POPULATION, NOT THE FIRST OF IT (task-39ebd948f40660e3).
+          // This gate read `document.querySelector('.deploy-row')` — one row of
+          // a list whose length it never said. A rail that painted ONE row of a
+          // multi-deployment fixture satisfies a singular probe exactly as well
+          // as a fully painted one, and every cell below would then measure a
+          // half-drawn screen while the ok-line said "clean". The count is
+          // scoped to the visible view so it stays out of the hidden-view
+          // residue class the W35 leg polices.
+          `document.querySelectorAll('section.view:not([hidden]) .deploy-row').length > 0 && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
         );
+        // The population the readiness gate stood in front of, re-measured every
+        // entry and printed in this leg's ok-line — never typed into a comment.
+        railPop.push(`${theme}:${await evalJs(`document.querySelectorAll('section.view:not([hidden]) .deploy-row').length`)}`);
         const row = [];
         for (const width of DD_WIDTHS) {
           await setViewport(width);
@@ -11209,6 +11277,9 @@ async function main() {
         okLine(
           `${cells} / ${cells} cells clean across ${DD_WIDTHS.join("/")} in both themes — ${cruelSeen} cruel and ` +
           `${kindSeen} kind captions measured out of ${seen} .deploy-detail boxes, ${pageOver} page(s) dragging. ` +
+          `The readiness gate stood in front of ${railPop.join(" / ")} .deploy-row(s) in the visible view (D228: the ` +
+          `gate counts the population it waits for, so a rail that painted ONE row of the fixture's list cannot pass ` +
+          `for a rail that painted all of them). ` +
           `The ${DEPLOY_DETAIL_STORE_CAP}-char caption paints at most ${worstLines} line-boxes (worst: ${worstAt}) ` +
           `against a bound of ${DETAIL_MAX_LINES}, and is CLIPPED in every cell — the bound is engaging, not ` +
           `decorative`,
@@ -11672,15 +11743,26 @@ async function main() {
           // is a DOCUMENT-WIDE walk, and W35's census (view-scope-census.mjs, run
           // over this file's own bytes) refuses one that can match inside a hidden
           // view — `.instance-card` matches 5 nodes in a hidden #view-overview.
-          ready: `document.querySelector('#overview-body .instance-card')` },
+          // D228 (task-39ebd948f40660e3): COUNTED, not "at least one". The gate
+          // used to enter on the first card of a five-card fixture while the
+          // cells below walk every text-bearing element on the screen, so a
+          // grid caught mid-paint was measured and certified. `pop` is the same
+          // selector the gate waits on; the leg prints what it stood in front of.
+          pop: "#overview-body .instance-card",
+          ready: `document.querySelectorAll('#overview-body .instance-card').length > 0` },
         { name: "billing", scen: "billing-past-due", hash: "#billing", view: "view-billing",
           ready: `document.querySelector('#billing-plan-section .set-h') && !document.querySelector('#billing-recommended .loading')` },
         { name: "activity", scen: "activity", hash: "#activity", view: "view-activity",
           ready: `document.querySelector('#activity-body .tlv-row')` },
         { name: "sites", scen: "mixed-fleet", hash: "#sites", view: "view-sites",
-          ready: `document.querySelector('#sites-body .site-row')` },
+          pop: "#sites-body .site-row",
+          ready: `document.querySelectorAll('#sites-body .site-row').length > 0` },
         { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet",
-          ready: `document.querySelector('.fleet-row')` },
+          // AND SCOPED WHILE WE ARE HERE: a bare `.fleet-row` is the
+          // document-wide walk the comment on the overview route above refuses,
+          // and this route was spelling it. The live-view idiom is cch-w24-s5's.
+          pop: "section.view:not([hidden]) .fleet-row",
+          ready: `document.querySelectorAll('section.view:not([hidden]) .fleet-row').length > 0` },
       ];
 
       // ANTI-VACUITY 0 — THE INSTRUMENT AND THE FLOOR ARE THE SAME FLOOR.
@@ -11728,6 +11810,7 @@ async function main() {
         `return out;})()`;
 
       let tfCells = 0, tfText = 0, tfBelow = 0, tfAllowed = 0, tfViol = 0;
+      const tfPop = [];
       const tfPerRoute = new Map();
       const tfHist = {};
       for (const rt of TF_ROUTES) {
@@ -11740,6 +11823,9 @@ async function main() {
             `${BASE}/?scen=${rt.scen}&theme=${theme}${rt.hash}`,
             `${rt.ready} && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id===${JSON.stringify(rt.view)};})()`,
           );
+          if (rt.pop && theme === "light") {
+            tfPop.push(`${rt.name}:${await evalJs(`document.querySelectorAll(${JSON.stringify(rt.pop)}).length`)}`);
+          }
           const line = [];
           for (const width of TF_WIDTHS) {
             await setViewport(width);
@@ -11776,7 +11862,8 @@ async function main() {
           `instances, ${tfBelow} of them below ${TF_FLOOR}px — and ALL ${tfAllowed} of those match one of the ` +
           `${TF_ALLOW.length} selectors named in type-floor.mjs's committed literal allowlist, ` +
           `${tfViol} unexplained. Below-floor histogram ${hist || "(empty)"}. Per route (below/text): ` +
-          `${perRoute}. The filing census read 228 of 1560 across the same 30-cell shape`,
+          `${perRoute}. The filing census read 228 of 1560 across the same 30-cell shape. The readiness gates that ` +
+          `count their population (D228) stood in front of ${tfPop.join(", ")} element(s)`,
         );
         okLine(
           `THE TWO HALVES MEASURE DIFFERENT THINGS AND NEITHER IS THE OTHER'S EVIDENCE: the source parse ` +
@@ -12075,6 +12162,299 @@ async function main() {
           `transition, so \`patchProvisionOverall\`'s in-place re-announcement on a LIVE run is covered by the ` +
           `pure-helper harness only (the \`cch-w27-s6\` tests in __app.test.mjs). What is now covered in a ` +
           `browser, and was covered nowhere before, is the mounted terminal bar on both failed fixtures`,
+        );
+      }
+    }
+
+
+    // ── W22-URL-REMEDY-PRICING: the three candidates, DRIVEN, not argued ─────
+    //    cch-w22-bl-url-remedy-candidates-never-priced. The row this pays back
+    //    (cch-w18-bl-instance-card-url-ellipsised-on-phone, criterion 1) asked
+    //    for at least THREE candidates driven cell-for-cell — (a) render the
+    //    address without its scheme, (b) let the line wrap, (c) shrink the
+    //    token — each with its own clipped-cell count, and said in terms: "A
+    //    candidate is not eliminated by argument."
+    //
+    //    WHAT SHIPPED INSTEAD (#8984): (a)+(b) TOGETHER — `displayUrl(bp)`
+    //    strips the scheme at both text sites and `.instance-card-url` gained
+    //    `overflow-wrap: break-word` — with (a)-alone killed in a PR sentence
+    //    ("the shave alone cannot BOUND anything: a 63-char slug at the DNS cap
+    //    plus @base_domain is an 85-character address") and (c) never driven at
+    //    all. The sentence is true. It is still a sentence, and the ledger
+    //    asked for a number.
+    //
+    //    THIS LEG PRICES THEM. It edits NOTHING under app.js/app.css: each
+    //    candidate is applied as a RUNTIME override — one injected <style> rule
+    //    on `.instance-card-url` plus the text the candidate would have put in
+    //    the node — measured, and restored inside the same synchronous pass, so
+    //    no later leg and no later cell sees a mutated DOM or a leftover sheet.
+    //
+    //    FIVE TRACKS, and the first one is why the other four mean anything:
+    //      none    the PRE-remedy state: `https://…` in the node, no wrap. The
+    //              positive control. If THIS scores zero clipped cells the grid
+    //              cannot separate anything and the leg REFUSES (exit 2).
+    //      a       shave alone:  displayUrl text, `overflow-wrap: normal`.
+    //      b       wrap alone:   `https://…` text, `overflow-wrap: break-word`.
+    //      c       shrink alone: `https://…` text, no wrap, font-size at the
+    //              legibility floor (URL_SHRINK_FLOOR).
+    //      a+b     what #8984 shipped, re-measured beside its alternatives.
+    //
+    //    TWO CORPORA, because the shipped leg's OWN history proves one of them
+    //    cannot separate the candidates. `W18-overview-card-pill` measures the
+    //    fixture's addresses (~32 chars shaved) and a DNS-cap stress string in
+    //    the same cell precisely because on the KIND strings the shave alone
+    //    clears every CARD_WIDTH — revert the stylesheet and that loop still
+    //    scores clean. So every track here is driven twice: once on the
+    //    fixture's own addresses and once on the 85-character address a real
+    //    customer can create (63-char slug at the API's validate_length cap +
+    //    `-5b2c1e.barkpark.cloud`), injected the way the W18 leg injects its
+    //    stress string — by swapping the text node, never by editing a fixture.
+    //
+    //    (c) IS PRICED TWICE OVER. A shrink is not a boolean: it either clears
+    //    at a size a person can read or it does not. So beside its clipped-cell
+    //    count at the floor, each cell reports the font-size that WOULD clear
+    //    the control's own string there (12px * clientWidth / scrollWidth) —
+    //    the number that says whether (c) lost on legibility or on arithmetic.
+    const URL_SHRINK_FLOOR = 9;       // px — the smallest mono the address is read at
+    const URL_SHIPPED_PX = 12;        // px — app.css's `.instance-card-url` font-size
+    // The same worst-case address the W18 leg stresses with, spelt out here so
+    // the two legs cannot drift apart silently. 63 `a` + 22 = 85 characters.
+    const URL_CAP_SHAVED = new Array(64).join("a") + "-5b2c1e.barkpark.cloud";
+    const URL_TRACKS = [
+      { key: "none", label: "pre-remedy control (scheme kept, no wrap)", scheme: true, css: "overflow-wrap: normal !important; word-break: normal !important;", px: URL_SHIPPED_PX },
+      { key: "a", label: "(a) shave alone", scheme: false, css: "overflow-wrap: normal !important; word-break: normal !important;", px: URL_SHIPPED_PX },
+      { key: "b", label: "(b) wrap alone", scheme: true, css: "overflow-wrap: break-word !important; word-break: normal !important;", px: URL_SHIPPED_PX },
+      { key: "c", label: `(c) shrink alone @ ${URL_SHRINK_FLOOR}px`, scheme: true, css: `overflow-wrap: normal !important; word-break: normal !important; font-size: ${URL_SHRINK_FLOOR}px !important;`, px: URL_SHRINK_FLOOR },
+      // THE SHIPPED TRACK IS DRIVEN WITHOUT AN OVERRIDE — `css: ""`, `live:
+      // true` — and that is the difference between pricing a candidate and
+      // guarding a product. Every other track forces its rule with
+      // `!important`, so a forced `a+b` would score a flawless zero on a tree
+      // where app.css's `overflow-wrap: break-word` had been deleted: the leg
+      // would be measuring its own stylesheet. Here the live cascade governs,
+      // its computed wrap and size are REPORTED rather than asserted, and the
+      // only thing judged is whether the address still fits — so deleting the
+      // shipped declaration reds this leg at exit 1 on the geometry, which is
+      // what a regression looks like.
+      { key: "a+b", label: "(a)+(b) — what #8984 shipped, on the LIVE cascade", scheme: false, css: "", live: true, px: URL_SHIPPED_PX, wrap: "break-word" },
+    ];
+    if (requested.includes("W22-url-remedy-pricing")) {
+      const D = "W22-url-remedy-pricing";
+      // The 320/360/390 sub-grid the filed criterion names, driven inside the
+      // full CARD_WIDTHS sweep so the phone band is scored separately AND the
+      // tablet/desktop cells are not quietly dropped.
+      const PRICE_PHONE = [320, 360, 390];
+      const cellCount = CARD_SCENS.length * CARD_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${URL_TRACKS.length} candidate tracks x ${CARD_SCENS.length} scenarios x ` +
+        `${CARD_WIDTHS.length} widths x 2 themes (${cellCount} cells per track, ` +
+        `${cellCount * URL_TRACKS.length} measurements) x 2 corpora (the fixture's own addresses, and the ` +
+        `${URL_CAP_SHAVED.length}-char DNS cap). Phone sub-grid = ${PRICE_PHONE.join("/")} ` +
+        `(${CARD_SCENS.length * PRICE_PHONE.length * 2} cells), the band the filed criterion names\n`,
+      );
+      // clipped[corpus][track] = cells where ANY non-empty address had
+      // scrollWidth > clientWidth. vclip likewise for scrollHeight.
+      const zero = () => Object.fromEntries(URL_TRACKS.map((t) => [t.key, 0]));
+      const tally = { kind: zero(), cruel: zero() };
+      const phoneTally = { kind: zero(), cruel: zero() };
+      const vtally = { kind: zero(), cruel: zero() };
+      const worstShrink = { kind: URL_SHIPPED_PX, cruel: URL_SHIPPED_PX };
+      let cells = 0, nodesSeen = 0, emptySeen = 0;
+      const liveComputed = new Set();
+      for (const scen of CARD_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#overview`,
+            `document.querySelector('.instance-card-url') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+          );
+          const row = [];
+          for (const width of CARD_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              // SCOPED to the visible view, and PLURAL. A document-wide walk
+              // here would read the addresses of every parked view in the SPA
+              // shell and price a screen nobody is looking at.
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `if(!v) return {view:'none'};` +
+              `var d=document.documentElement;` +
+              `var out={view:v.id,theme:d.getAttribute('data-theme'),nodes:0,empty:0,tracks:{},refusal:null};` +
+              `var nodes=[].slice.call(v.querySelectorAll('.instance-card-url')).filter(function(e){return (e.textContent||'').trim();});` +
+              `out.empty=v.querySelectorAll('.instance-card-url').length-nodes.length;` +
+              `out.nodes=nodes.length;` +
+              `if(!nodes.length) return out;` +
+              // THE PREMISE, ASSERTED RATHER THAN ASSUMED. Every track below
+              // reconstructs the pre-remedy string by putting `https://` back
+              // on. That is only the inverse of `displayUrl` while the SHIPPED
+              // text is actually shaved — if a future edit puts the scheme back
+              // in the node, "https://" + text is a double scheme and every
+              // number in this leg is about a string the product never renders.
+              `var orig=nodes.map(function(e){return (e.textContent||'').trim();});` +
+              `for(var i=0;i<orig.length;i++){ if(orig[i].indexOf('://')>=0){ out.refusal='the rendered address "'+orig[i].slice(0,48)+'" already carries its scheme — displayUrl() no longer shaves, so this leg cannot reconstruct the pre-remedy string and every candidate below would be priced on a double-schemed address'; return out; } }` +
+              `var CAP=${JSON.stringify(URL_CAP_SHAVED)};` +
+              `var sheet=document.createElement('style');document.head.appendChild(sheet);` +
+              `var TRACKS=${JSON.stringify(URL_TRACKS)};` +
+              `try{` +
+              `for(var ti=0;ti<TRACKS.length;ti++){` +
+              `  var tr=TRACKS[ti];` +
+              `  sheet.textContent='.instance-card-url{'+tr.css+'}';` +
+              `  var rec={clip:{kind:0,cruel:0},vclip:{kind:0,cruel:0},worst:{kind:null,cruel:null},live:null,shrink:{kind:${URL_SHIPPED_PX},cruel:${URL_SHIPPED_PX}}};` +
+              `  var corpora=[['kind',null],['cruel',CAP]];` +
+              `  for(var ci=0;ci<corpora.length;ci++){` +
+              `    var cname=corpora[ci][0], forced=corpora[ci][1];` +
+              `    for(var i=0;i<nodes.length;i++){` +
+              `      var e=nodes[i];` +
+              `      var shaved=forced===null?orig[i]:forced;` +
+              `      var want=tr.scheme?('https://'+shaved):shaved;` +
+              `      e.textContent=want;` +
+              // APPLIED, OR THE LEG REFUSES. A candidate priced through a rule
+              // the cascade discarded scores a beautiful zero and measures the
+              // shipped stylesheet under another name.
+              `      var cs=getComputedStyle(e);` +
+              `      if((e.textContent||'')!==want){ out.refusal='track '+tr.key+': the '+cname+' address did not land in the node'; return out; }` +
+              `      if(cname==='cruel' && (e.textContent||'').length!==CAP.length+(tr.scheme?8:0)){ out.refusal='track '+tr.key+': the cruel address is '+(e.textContent||'').length+' chars in the DOM, expected '+(CAP.length+(tr.scheme?8:0)); return out; }` +
+              // APPLIED, ASSERTED APPLIED — for the FORCED tracks only. The
+              // live track has no override to verify; its computed pair is
+              // recorded below and printed, never asserted, because asserting
+              // it would turn a stylesheet regression into an exit-2 refusal
+              // ("nothing was measured") when it is exactly a measured defect.
+              `      if(!tr.live){` +
+              `        if(Math.round(parseFloat(cs.fontSize))!==tr.px){ out.refusal='track '+tr.key+': computed font-size is '+cs.fontSize+', the candidate asked for '+tr.px+'px — the override did not apply, so this candidate could not be priced'; return out; }` +
+              `        var wantWrap=tr.css.indexOf('break-word')>=0?'break-word':'normal';` +
+              `        if(cs.overflowWrap!==wantWrap){ out.refusal='track '+tr.key+': computed overflow-wrap is "'+cs.overflowWrap+'", the candidate asked for "'+wantWrap+'" — the override did not apply'; return out; }` +
+              `      } else { rec.live=cs.overflowWrap+'/'+cs.fontSize; }` +
+              `      var r=e.getBoundingClientRect();` +
+              `      if(r.width<=0||r.height<=0){ out.refusal='track '+tr.key+': the '+cname+' address paints a '+r.width+'x'+r.height+' box — it did not paint at all'; return out; }` +
+              `      if(e.scrollWidth>e.clientWidth){` +
+              `        rec.clip[cname]++;` +
+              `        var pct=Math.round((1-e.clientWidth/e.scrollWidth)*100);` +
+              `        if(!rec.worst[cname]||pct>rec.worst[cname].pct) rec.worst[cname]={i:i,sw:e.scrollWidth,cw:e.clientWidth,pct:pct,n:want.length};` +
+              `      }` +
+              `      if(e.scrollHeight>e.clientHeight) rec.vclip[cname]++;` +
+              // THE SHRINK PRICE, taken off the control track only: the size
+              // that WOULD have cleared this cell's own string at this width.
+              `      if(tr.key==='none'&&e.scrollWidth>e.clientWidth){` +
+              `        var need=Math.floor(${URL_SHIPPED_PX}*e.clientWidth/e.scrollWidth);` +
+              `        if(need<rec.shrink[cname]) rec.shrink[cname]=need;` +
+              `      }` +
+              `    }` +
+              `  }` +
+              `  out.tracks[tr.key]=rec;` +
+              `}` +
+              `}finally{` +
+              // RESTORED IN THE SAME PASS — sheet removed, every text node put
+              // back — so nothing after this eval sees the pricing rig.
+              `  sheet.remove();` +
+              `  for(var i=0;i<nodes.length;i++) nodes[i].textContent=orig[i];` +
+              `}` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-overview") {
+              return die(`${D}: ${scen}/${theme}@${width} rendered section.view "${m.view}", asked for "view-overview" — the hash did not route, so no candidate was priced on the front screen`);
+            }
+            if (m.theme !== theme) {
+              return die(`${D}: ${scen}/${theme}@${width} computed data-theme "${m.theme}" — the theme did not apply and the two theme columns are the same measurement twice`);
+            }
+            if (m.refusal) {
+              return die(`${D}: ${scen}/${theme}@${width} — ${m.refusal}`);
+            }
+            if (!m.nodes) {
+              return die(`${D}: ${scen}/${theme}@${width} rendered ZERO non-empty .instance-card-url (${m.empty} empty node(s)) — the front screen printed no address, so nothing could be priced here`);
+            }
+            nodesSeen += m.nodes;
+            emptySeen += m.empty;
+            const phone = PRICE_PHONE.includes(width);
+            const cellBits = [];
+            for (const tr of URL_TRACKS) {
+              const rec = m.tracks[tr.key];
+              for (const corpus of ["kind", "cruel"]) {
+                if (rec.clip[corpus]) {
+                  tally[corpus][tr.key]++;
+                  if (phone) phoneTally[corpus][tr.key]++;
+                }
+                if (rec.vclip[corpus]) vtally[corpus][tr.key]++;
+                if (tr.key === "none" && rec.shrink[corpus] < worstShrink[corpus]) worstShrink[corpus] = rec.shrink[corpus];
+              }
+              if (rec.live) liveComputed.add(rec.live);
+              cellBits.push(`${tr.key}:${rec.clip.kind}k/${rec.clip.cruel}c`);
+            }
+            // THE ONLY ASSERTION IN THIS LEG, and it is about the SHIPPED
+            // remedy, not about the candidates: pricing an alternative must
+            // never red a run, but the winner regressing must. The candidates
+            // are COUNTED and printed; only `a+b` is judged.
+            const shipped = m.tracks["a+b"];
+            if (shipped.clip.kind || shipped.clip.cruel) {
+              const w = shipped.worst.cruel || shipped.worst.kind;
+              fail(D, `${scen}/${theme}@${width}: the SHIPPED remedy (a)+(b) clipped ${shipped.clip.kind} fixture address(es) and ${shipped.clip.cruel} at the ${URL_CAP_SHAVED.length}-char DNS cap — url${w.i} scrollWidth ${w.sw} > clientWidth ${w.cw}, ${w.pct}% of a ${w.n}-character address unrendered. The remedy this leg was written to price has stopped bounding the thing it shipped for`);
+            }
+            if (shipped.vclip.kind || shipped.vclip.cruel) {
+              fail(D, `${scen}/${theme}@${width}: the SHIPPED remedy wraps the address into a box that then HIDES lines — scrollHeight > clientHeight on ${shipped.vclip.kind} fixture and ${shipped.vclip.cruel} DNS-cap address(es). \`overflow: hidden\` on .instance-card-url eats whole lines with nothing painted to say so, which is the horizontal defect turned ninety degrees`);
+            }
+            row.push(`${width}:${m.nodes}u ${cellBits.join(" ")}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // THE SEPARATION REFUSAL. A pricing grid on which the PRE-REMEDY state
+      // does not clip has priced nothing: every candidate would score a
+      // flawless zero and the winner would be whichever one was listed first.
+      if (!tally.cruel.none && !tally.kind.none) {
+        return die(`${D}: the pre-remedy control clipped ZERO of ${cells} cells on BOTH corpora — there is no defect on this grid, so the ${URL_TRACKS.length - 1} candidates were compared against nothing. Either the fixture addresses shrank or the card got wider; re-derive the corpus before trusting any count in this file`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        const line = (corpus) => URL_TRACKS.map((t) => `${t.key}=${tally[corpus][t.key]}/${cells}`).join("  ");
+        const pcells = CARD_SCENS.length * PRICE_PHONE.length * 2;
+        const pline = (corpus) => URL_TRACKS.map((t) => `${t.key}=${phoneTally[corpus][t.key]}/${pcells}`).join("  ");
+        okLine(
+          `THE THREE CANDIDATES, PRICED — clipped cells out of ${cells} (${CARD_SCENS.join(" + ")} x ` +
+          `${CARD_WIDTHS.join("/")} x light+dark), ${nodesSeen} non-empty address node(s) measured ` +
+          `(${emptySeen} empty nodes asserted about nothing — a provisioning box renders a chip, not an address). ` +
+          `KIND corpus (the fixture's own addresses): ${line("kind")}. CRUEL corpus (the ` +
+          `${URL_CAP_SHAVED.length}-char DNS cap): ${line("cruel")}`,
+        );
+        okLine(
+          `THE PHONE SUB-GRID the filed criterion names (${PRICE_PHONE.join("/")} x ${CARD_SCENS.length} scenarios ` +
+          `x 2 themes = ${pcells} cells): KIND ${pline("kind")} | CRUEL ${pline("cruel")}`,
+        );
+        okLine(
+          `WHY THE KIND CORPUS CANNOT PICK A WINNER, as a number rather than as the claim it used to be: on the ` +
+          `fixture's own addresses candidate (a) — the scheme shave ALONE, no wrap — scores ` +
+          `${tally.kind.a} clipped cells, the same as the shipped ${tally.kind["a+b"]}. Reverting the stylesheet ` +
+          `is invisible on this corpus. At the DNS cap the two separate: (a) alone ${tally.cruel.a}, ` +
+          `(a)+(b) ${tally.cruel["a+b"]}. That separation is the whole reason the cruel address is injected`,
+        );
+        okLine(
+          `CANDIDATE (c), DRIVEN FOR THE FIRST TIME (the filed row's own words: "never driven at all"). At the ` +
+          `${URL_SHRINK_FLOOR}px legibility floor it clips ${tally.cruel.c} of ${cells} cells at the DNS cap ` +
+          `(${tally.kind.c} on the fixture corpus) against ${URL_SHIPPED_PX}px shipped. The size that WOULD have ` +
+          `cleared the worst cell is ${worstShrink.cruel}px at the cap (${worstShrink.kind}px on the fixture ` +
+          `strings) — derived from the control's own scrollWidth/clientWidth at ${URL_SHIPPED_PX}px, not guessed. ` +
+          `(c) does not lose on taste: it loses because the address does not fit at any size a person reads, and ` +
+          `it bounds nothing — the NEXT character re-opens the defect, which is the property (b) has and (a)/(c) ` +
+          `structurally cannot`,
+        );
+        okLine(
+          `VERTICAL COST, the axis a shrink and a wrap trade against each other: wrapping candidates hide lines ` +
+          `in ${vtally.cruel.b + vtally.cruel["a+b"]} cell(s) at the cap ((b) ${vtally.cruel.b}, (a)+(b) ` +
+          `${vtally.cruel["a+b"]}) — \`.instance-card-url\` carries \`overflow: hidden\`, so a wrap that outgrows ` +
+          `its box eats whole lines silently. The shipped track is ASSERTED on this axis; the alternatives are ` +
+          `counted only`,
+        );
+        okLine(
+          `THE SHIPPED TRACK WAS MEASURED ON THE LIVE CASCADE, not on an override of this leg's own making: ` +
+          `computed \`overflow-wrap\`/\`font-size\` on \`.instance-card-url\` across all ${cells} cells was ` +
+          `${[...liveComputed].join(", ")}. Delete app.css's \`overflow-wrap: break-word\` and the (a)+(b) ` +
+          `column goes red on GEOMETRY at exit 1 — the four candidate tracks force their rules with ` +
+          `\`!important\` and would each score exactly what they score today`,
+        );
+        okLine(
+          `NOTHING UNDER app.js OR app.css IS IN THIS LEG'S DIFF. Every candidate is a runtime override — one ` +
+          `injected <style> on \`.instance-card-url\` plus the text that candidate would have rendered — applied, ` +
+          `asserted APPLIED at the computed style (a candidate the cascade discarded would score a perfect zero ` +
+          `and be measuring the shipped sheet under another name: that is an exit-2 refusal here, not a pass), ` +
+          `measured, and restored with the sheet removed inside the same synchronous pass. The DOM walk is scoped ` +
+          `to \`section.view:not([hidden])\` and PLURAL`,
         );
       }
     }

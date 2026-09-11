@@ -447,6 +447,73 @@ defmodule Barkpark.PdsDoorCensusTest do
     end
   end
 
+  test "the census's OWN price row headlines its GATED arm, and the ungated figure survives as prose",
+       ctx do
+    out = ctx.check_out
+
+    row =
+      out
+      |> String.split("\n")
+      |> Enum.find(&String.match?(&1, ~r{^\s+scripts/pds-door-census\.sh\s}))
+
+    assert row,
+           "the census printed no row for itself, so this assertion has no subject at all.\n#{out}"
+
+    # THE RULE THIS PINS is stated above PDS_DOOR_PRICES: the CPU= field is the
+    # arm a REQUIRED GATE actually runs, and every other figure about the same
+    # instrument is trailing prose in the same cell. This row headlined `--check`
+    # — the one arm no gate runs — for four waves, while naming its gated arm as
+    # prose, and every other row in the ledger headlined its gated arm. A column
+    # whose rows measure different KINDS of thing is not comparable to itself.
+    assert row =~ ~r/load1=[\d.]+ arm=--selftest /,
+           "the census's own price row does not headline its gated arm. `--selftest` is what " <>
+             "api/test/barkpark/pds_door_census_test.exs runs on every required Elixir gate; " <>
+             "`--check` is run by nothing. The headline must be the gated arm; the --check " <>
+             "figure belongs in the same cell as trailing prose.\nRow: #{row}"
+
+    refute row =~ ~r/load1=[\d.]+ arm=--check /,
+           "the headline arm moved back to --check.\nRow: #{row}"
+
+    # AND THE UNGATED FIGURE IS NOT DELETED. A deleted measurement is a fact
+    # destroyed, and this row is the only place either figure is written down.
+    assert row =~ "--check is CPU=",
+           "the --check figure was deleted rather than kept as prose. Moving the headline is " <>
+             "not licence to throw the other measurement away.\nRow: #{row}"
+  end
+
+  test "a price row that carries a content key is FRESH on this tree — the self-pricing fixpoint",
+       ctx do
+    out = ctx.check_out
+
+    # `key=` is emitted by `--measure` immediately after `arm=<argv>`, and
+    # `price_stale_error` reads it from exactly that position. Matching it here
+    # the same way is what keeps this assertion about the token rather than
+    # about any `key=` a row happens to mention in prose.
+    keyed =
+      out
+      |> String.split("\n")
+      |> Enum.filter(&String.match?(&1, ~r/ arm=\S+ key=[0-9a-f]{12} /))
+
+    assert length(keyed) >= 2,
+           "fewer than two keyed price rows. The predicate this test pins can only be shown " <>
+             "working while at least two rows carry a key: one run then demonstrates a fresh " <>
+             "row passing beside whatever a stale one would do, which a single-keyed column " <>
+             "cannot.\n#{out}"
+
+    refute out =~ "PRICE-STALE —",
+           "a price row is PRICE-STALE on an unmutated tree. THE KEY ELIDES BOTH LEDGER " <>
+             "LITERALS, so this did NOT fire because a price was pasted: something else about " <>
+             "the instrument changed and its row was not re-measured. Re-take it with " <>
+             "`--measure <basename> <its gated arm>` and paste the row.\n#{out}"
+
+    refute out =~ "PRICE-STALE KEY MALFORMED",
+           "a price row carries a key nobody can recompute a shape for.\n#{out}"
+
+    assert ctx.check_rc == 0,
+           "the census reds on this tree, so the freshness above was asserted against a run " <>
+             "that already failed for some other reason.\n#{out}"
+  end
+
   test "the COUNTS block ACCOUNTS FOR every row of the column, zeroes included", ctx do
     out = ctx.check_out
 
