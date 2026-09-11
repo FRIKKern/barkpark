@@ -1583,6 +1583,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
             append_message(acc, :tool, tool_line(name, input),
               tool_use_id: block["id"],
               output: nil,
+              # A LIVE row never carries the persisted D64 chip envelope — it
+              # reads its tool_result block UNCAPPED, so `output` alone chips
+              # (task-5a49dc55626ea80d). Seeded nil so the shared render seam
+              # threads the same three arguments on both paths.
+              mcp_chip: nil,
               # The settle gate's two facts, seeded honest: the row is born
               # UNSETTLED (its turn is running) and error-free. The turn's
               # terminal result frame flips `turn_settled`; a tool_result block
@@ -2319,7 +2324,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               by construction — the diff?/spawn? precedent. A host tool, an
               error string, or a truncated/oversized payload returns nil and
               keeps the generic ⎿ row below. --%>
-        <% mcp_chip = ChatToolRenderer.chip(@message[:tool], @message[:output]) %>
+        <% mcp_chip = ChatToolRenderer.chip(@message[:tool], @message[:output], @message[:mcp_chip]) %>
         <%!-- A Task/agent spawn (charter D40) gets a headline row: the
               gutter glyph plus the sub-agent's description; the frames it
               emits interleave below, indented under it. A plain tool row
@@ -4556,9 +4561,39 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # Every session BELONGS to the workspace it is created in — managed and
         # registered-host alike (herd charter D43h: `BlockedSweeper` is
         # fail-closed on NULL owners, so a `nil`-owned session can never fire
-        # `chat_blocked`). Stamp the resolved scope workspace, falling back to
-        # the seeded Default Workspace; `:global` (a `nil`-owned session) is
-        # reserved for a pre-tenancy instance with no Default Workspace.
+        # `chat_blocked`). Stamp the resolved scope workspace; `:global` (a
+        # `nil`-owned session) stays reserved for a pre-tenancy instance with no
+        # Default Workspace.
+        #
+        # ── THE RULING (task-995f53ef7b7c4471) ───────────────────────────────
+        #
+        # THE READ-SIDE PRECEDENT IS APPLIED, NOT DISTINGUISHED. PR #14460
+        # ("pin the seeded Default only where the principal is authorized
+        # there", merged 2026-09-01) governs this CREATE path as well: after it,
+        # `StudioChrome.default_scope_fallback/1` pins the seeded Default ONLY
+        # when `Tenancy.Auth.authorize(principal, default_ws.id, :read) == :ok`,
+        # so on this mount a nil `:current_workspace` WITH a Default workspace
+        # present is not an absence of tenancy — it is an AUTHORITY VERDICT the
+        # chrome already reached and left in the assign. A create cannot re-run
+        # a mount's membership check, and it does not have to: it reads the
+        # answer the mount recorded. The old unconditional
+        # `Tenancy.get_default_workspace()` fallback re-derived Default from the
+        # very row the chrome had just REFUSED to pin, laundering that refusal
+        # into a durable `owner_workspace_id` stamp.
+        #
+        # THE CREATE IS REFUSED, NOT STAMPED `:global`. Minting a NULL-owner
+        # session would trade a tenancy-attribution defect for two fail-CLOSED
+        # product defects that D43h/D58h make deliberate: `BlockedSweeper`
+        # filters `not is_nil(s.owner_workspace_id)` before anything else, so
+        # the session could NEVER fire `chat_blocked`; and
+        # `StudioChat.scope_sessions/2`'s `owner_workspace_id == ^ws` (and its
+        # byte-faithful term twin `scope_match?/2`) means a NULL owner is
+        # INVISIBLE to every workspace-scoped caller — the creator would watch
+        # their own session vanish from the sidebar. D43h/D58h are fail-CLOSED
+        # on NULL owners, never fail-open; the `:global`→true clause of
+        # `scope_match?/2` is the CALLER's scope, not the session's owner.
+        # Refusing reuses the de-fanged failure path below, keeps the operator's
+        # words in hand, and amends no charter decision.
         scope =
           case socket.assigns[:current_workspace] do
             %{id: ws_id} when is_binary(ws_id) ->
@@ -4566,7 +4601,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
             _ ->
               case Barkpark.Tenancy.get_default_workspace() do
-                %{id: ws_id} -> {:workspace, ws_id}
+                %{id: _default_ws_id} -> :unauthorized
                 nil -> :global
               end
           end
@@ -4574,22 +4609,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # De-fanged strict match (charter D24): a create failure must NOT crash
         # the LiveView (a crashed tab restores nothing). Post an honest line and
         # go offline; the caller withdraws the echo and hands the words back.
-        case StudioChat.create_session(
-               %{
-                 id: id,
-                 provider: socket.assigns.provider,
-                 execution_target: socket.assigns.execution_target,
-                 execution_host_id: socket.assigns.execution_host_id,
-                 cwd: Runtime.cwd(socket.assigns.provider),
-                 mode: socket.assigns.mode
-               },
-               scope
-             ) do
+        # The refusal above rides the same road for the same reason.
+        case create_session_row(socket, id, scope) do
           {:ok, _} ->
             socket
             |> assign(store_session_id: id, session_id: id, status: :working)
             |> push_patch(to: chat_patch_to("#{socket.assigns.chat_base_path}/#{id}", socket))
             |> spawn_session(id, false)
+
+          {:error, :unauthorized_workspace} ->
+            socket
+            |> append_message(
+              :system,
+              "⚠ Couldn't start a new chat — this login isn't authorized in any workspace, and every chat session has to belong to one. Your message was kept; ask an admin for workspace access."
+            )
+            |> assign(session: nil, status: :offline)
 
           {:error, reason} ->
             Logger.warning("studio chat: failed to create session row: #{inspect(reason)}")
@@ -4605,6 +4639,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
       id ->
         spawn_session(socket, id, true)
     end
+  end
+
+  # The `:unauthorized` scope never reaches the store: there is no workspace to
+  # stamp, and a NULL-owner row is the outcome D43h/D58h exist to prevent (see
+  # the ruling above `ensure_session/1`).
+  defp create_session_row(_socket, _id, :unauthorized), do: {:error, :unauthorized_workspace}
+
+  defp create_session_row(socket, id, scope) do
+    StudioChat.create_session(
+      %{
+        id: id,
+        provider: socket.assigns.provider,
+        execution_target: socket.assigns.execution_target,
+        execution_host_id: socket.assigns.execution_host_id,
+        cwd: Runtime.cwd(socket.assigns.provider),
+        mode: socket.assigns.mode
+      },
+      scope
+    )
   end
 
   # Bring the runtime up for `store_id` (fresh: `--session-id`; reopen:
@@ -5916,6 +5969,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       text: md,
       html: nil,
       output: Map.get(meta, "output"),
+      # The compact versioned chip envelope the store seam wrote for an
+      # mcp-tagged result (charter D64, task-5a49dc55626ea80d). `output` is
+      # capped at 4,000 characters, so a large result's JSON is cut mid-object
+      # and cannot decode; this is what keeps its chip a chip on replay. Absent
+      # on a host row, a small legacy row, or a pre-envelope row — all of which
+      # fall back to `output` exactly as before.
+      mcp_chip: Map.get(meta, "mcp_chip"),
       # Settle-gated gutter, REPLAY half: the Recorder stamped `turn_settled` on
       # this row when its turn's result frame landed, and `tool_error` when the
       # tool_result said `is_error` — so a reopened session draws the SAME ✓/✗/●

@@ -286,6 +286,17 @@ func TestPDSLiveManifestStatusAndBodyCohere(t *testing.T) {
 // and so is any kind whose message does not name its own collection — `network`
 // answers "entity not found" and needs an override, which weakens this arm for
 // that one row and says so in the manifest.
+//
+// THE WRONG-ID HALF IS NOW BOUND, FOR THE ROWS THAT CAN CARRY IT
+// (pds-bl-wrongpath-arm-blind-to-wrong-id-2). Five of the ten harvested 404
+// bodies name the id they were asked about — "certificate with ID 999999999 not
+// found" — and TestPDSLive404BodiesNameTheHarvestedID holds those to the id the
+// manifest's own `request` line claims. The other five (network, placement-group,
+// server, volume, zone) answer without any id at all, so for THEM the collection
+// token remains the only binding available and the limit above is PERMANENT on
+// measured grounds: there is nothing in the bytes to bind to. That split is
+// counted at every run rather than remembered, so a future harvest that starts
+// naming ids moves rows from the silent column to the bound one on its own.
 var pdsSegmentInRequest = regexp.MustCompile(`/v1/([a-z_]+)/`)
 
 // pdsExpectedMessageToken derives the token from the manifest's own `request`
@@ -304,6 +315,144 @@ func pdsExpectedMessageToken(request, override string) string {
 	return strings.ReplaceAll(seg, "_", " ")
 }
 
+// pdsIDInRequest reads the id the harvest ASKED FOR out of the manifest's own
+// request line — `GET /v1/certificates/999999999`, and `GET
+// /v1/placement_groups/1806023 (after DELETE)`, whose trailing prose must not
+// confuse it.
+var pdsIDInRequest = regexp.MustCompile(`/v1/[a-z_]+/(\d+)`)
+
+// pdsIDInMessage finds every id-shaped run in an error message. Three digits
+// minimum: hcloud ids are millions, and a shorter floor would bind on a stray
+// number inside an English sentence. Quoting varies by kind ("firewall with ID
+// '999999999'"), so the run is found, not parsed.
+var pdsIDInMessage = regexp.MustCompile(`\d{3,}`)
+
+// pdsIDBindingProblem judges ONE fixture row's message against the id its
+// request claims. It returns ("", false) for a body that names no id at all —
+// which is a MEASURED half of this corpus, not a failure — and a problem string
+// when the body names an id that is not the one asked for.
+//
+// THIS IS THE WRONG-ID HALF OF PDS-D440. The collection-token arm above passes
+// a right-collection/wrong-id harvest: /v1/certificates/999999999 filed over a
+// body that says "certificate with ID 111111111 not found" contains the token
+// "certificate" and sails through. Nothing else in this file reads the id.
+func pdsIDBindingProblem(request, message string) (problem string, bound bool) {
+	mm := pdsIDInRequest.FindStringSubmatch(request)
+	if len(mm) != 2 {
+		return fmt.Sprintf("no id could be read out of request %q — every harvested row states the id it asked for", request), false
+	}
+	asked := mm[1]
+	found := pdsIDInMessage.FindAllString(message, -1)
+	if len(found) == 0 {
+		return "", false
+	}
+	for _, got := range found {
+		if got != asked {
+			return fmt.Sprintf("the body names id %q but the manifest says the harvest asked for %q (%s) — a right-collection/wrong-id harvest is exactly what the collection-token arm cannot see",
+				got, asked, request), true
+		}
+	}
+	return "", true
+}
+
+// TestPDSLive404BodiesNameTheHarvestedID binds the ID, not only the collection.
+func TestPDSLive404BodiesNameTheHarvestedID(t *testing.T) {
+	m := loadPDSLiveManifest(t)
+	var boundKinds, silentKinds []string
+	for _, f := range m.Fixtures {
+		if f.HTTPStatus != 404 {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join("testdata", f.File))
+		if err != nil {
+			t.Fatalf("%s: %v", f.File, err)
+		}
+		problem, bound := pdsIDBindingProblem(f.Request, pdsErrorEnvelope(body).Error.Message)
+		if problem != "" {
+			t.Errorf("%s (%s): %s", f.File, f.Kind, problem)
+		}
+		if bound {
+			boundKinds = append(boundKinds, f.Kind)
+		} else {
+			silentKinds = append(silentKinds, f.Kind)
+		}
+	}
+	sort.Strings(boundKinds)
+	sort.Strings(silentKinds)
+
+	// THE LENS, LOGGED RATHER THAN REMEMBERED. On the 2026-08-01 harvest this
+	// reads ID-BOUND=5 [certificate firewall floating-ip load-balancer
+	// primary-ip] / ID-SILENT=5 [network placement-group server volume zone].
+	t.Logf("ID-BOUND=%d %v  ID-SILENT=%d %v", len(boundKinds), boundKinds, len(silentKinds), silentKinds)
+
+	// A VACUITY FLOOR, not a census. Below two rows this arm would pass by
+	// looking at almost nothing, and the id-silent half can only grow smaller.
+	if len(boundKinds) < 2 {
+		t.Fatalf("only %d rows carried an id to bind (%v) — this arm is vacuous below two", len(boundKinds), boundKinds)
+	}
+
+	// THE PLANTED WRONG-ID ROW: right collection, wrong id. The collection-token
+	// arm passes it — asserted here, because a demonstration of what this arm
+	// adds is worth nothing without showing the older arm missing it.
+	const plantedReq = "GET /v1/certificates/999999999"
+	const plantedMsg = "certificate with ID 111111111 not found"
+	if token := pdsExpectedMessageToken(plantedReq, ""); !strings.Contains(plantedMsg, token) {
+		t.Fatalf("CONTROL BROKEN: the planted wrong-ID body failed the COLLECTION arm (token %q) — it is supposed "+
+			"to pass that arm, which is the whole reason the id arm exists", token)
+	}
+	if problem, bound := pdsIDBindingProblem(plantedReq, plantedMsg); problem == "" || !bound {
+		t.Error("a right-collection/wrong-id body raised NO id problem — the arm is decorative")
+	}
+	// The honest row must not raise, or the arm above is a predicate that
+	// complains about everything.
+	if problem, bound := pdsIDBindingProblem(plantedReq, "certificate with ID 999999999 not found"); problem != "" || !bound {
+		t.Errorf("an honest right-id body raised %q (bound=%v)", problem, bound)
+	}
+	// And an id-silent body is SILENT, never a failure: five real rows are that
+	// shape, and turning them red would be an over-read of the corpus.
+	if problem, bound := pdsIDBindingProblem("GET /v1/volumes/999999999", "volume not found"); problem != "" || bound {
+		t.Errorf("an id-silent body was not treated as unbindable: problem=%q bound=%v", problem, bound)
+	}
+}
+
+// TestPDSLiveMessageTokenOverridesAreAudited confirms what the wrong-path arm's
+// limit rests on: `network` is the ONLY row taking a message-token override
+// today, and any row that takes one — 404 or not — must state a measured reason.
+//
+// The COUNT is logged, not pinned. A second override with a real measured reason
+// is legitimate growth (another kind could start answering "entity not found"),
+// and pinning the count would tax that while catching nothing the reason guard
+// below does not already catch. What is GATED is the reason, and it is gated over
+// EVERY fixture here — the wrong-path arm checks it only on the 404 rows it
+// iterates, so a non-404 row could carry an unexplained override unseen.
+func TestPDSLiveMessageTokenOverridesAreAudited(t *testing.T) {
+	m := loadPDSLiveManifest(t)
+	var overridden []string
+	for _, f := range m.Fixtures {
+		if f.MessageTokenOverride == "" {
+			if strings.TrimSpace(f.MessageTokenReason) != "" {
+				t.Errorf("%s (%s): carries a message_token_reason with NO override — a reason for a check that is "+
+					"not weakened is prose nothing holds", f.File, f.Kind)
+			}
+			continue
+		}
+		overridden = append(overridden, fmt.Sprintf("%s=%q", f.Kind, f.MessageTokenOverride))
+		if len(f.MessageTokenReason) < 40 {
+			t.Errorf("%s (%s): message_token_override=%q with no stated measured reason (%d chars) — an unexplained "+
+				"override is how a wrong-path harvest talks its way past the collection arm",
+				f.File, f.Kind, f.MessageTokenOverride, len(f.MessageTokenReason))
+		}
+	}
+	sort.Strings(overridden)
+	// MEASURED, on the 2026-08-01 harvest: exactly one — network="entity",
+	// because the network 404 says "entity not found" and names no collection.
+	t.Logf("MESSAGE-TOKEN-OVERRIDES=%d %v", len(overridden), overridden)
+	if len(overridden) == 0 {
+		t.Error("no fixture carries a message-token override — if the network row stopped needing one, delete this " +
+			"arm and the limit paragraph above it in the same commit rather than leaving both measuring nothing")
+	}
+}
+
 func TestPDSLiveFixturesComeFromTheirDeclaredPath(t *testing.T) {
 	m := loadPDSLiveManifest(t)
 	checked := 0
@@ -311,10 +460,11 @@ func TestPDSLiveFixturesComeFromTheirDeclaredPath(t *testing.T) {
 		if f.HTTPStatus != 404 {
 			continue
 		}
-		if f.MessageTokenOverride != "" && len(f.MessageTokenReason) < 40 {
-			t.Errorf("%s (%s): message_token_override=%q with no stated measured reason — an unexplained override is how a wrong-path harvest talks its way past this arm",
-				f.File, f.Kind, f.MessageTokenOverride)
-		}
+		// The override's REASON is audited by TestPDSLiveMessageTokenOverridesAreAudited,
+		// which is the single owner: it reads EVERY fixture, not only the 404 rows
+		// this loop iterates. Asserting it here too would red one unexplained
+		// override twice, in two functions, with two wordings — the duplication
+		// pds-bl-census-kind-vanished-double-reports removed from the census.
 		token := pdsExpectedMessageToken(f.Request, f.MessageTokenOverride)
 		if token == "" {
 			t.Errorf("%s (%s): no collection token could be derived from request %q", f.File, f.Kind, f.Request)

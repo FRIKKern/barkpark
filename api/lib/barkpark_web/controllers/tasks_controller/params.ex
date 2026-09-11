@@ -948,6 +948,33 @@ defmodule BarkparkWeb.TasksController.Params do
     # Same omit-when-absent contract as render_doc — a parent's rail shows
     # each child's criteria progress without a per-child fetch.
     |> put_criteria_progress(content)
+    # dr-bl-w6 — THE RAIL MUST NAME A NEVER-PUBLISHED CHILD.
+    #
+    # `documents.status` is the draft/published column, and an UNPAIRED
+    # `drafts.<id>` row (a task that was created and never published — the
+    # majority shape: `bp task create` lands a draft by default) is admitted to
+    # this rail ON PURPOSE. `Tasks.Query.collapse_twins/1` suppresses only a
+    # shadow whose DISTINCT published twin exists in scope, and the ruling that
+    # an unpaired shadow SURVIVES is pinned by
+    # `tasks_controller_test.exs`'s "an UNPAIRED drafts.<id> child is still
+    # counted" (excluding them would trade a documented over-count for an
+    # undocumented under-count of real, claimable work — `Tasks.Queue`'s
+    # moduledoc, "WHAT IS NOT AN AXIS — documents.status").
+    #
+    # What was NOT honest is that the summary said nothing about it. The parent
+    # renders `status` (render_doc/:full, line ~219) and every brief LIST card
+    # renders it under the same omit-when-"published" law
+    # (render_doc/:brief, cut (h)) — only the RAIL dropped the field, so a
+    # never-published child was indistinguishable from a published one in the
+    # very payload whose `children` array feeds `child_count` and every
+    # criteria_progress denominator derived from it. A consumer that wants to
+    # discount never-published rows could not: the discriminator was not on the
+    # wire.
+    #
+    # Additive by construction, and the omit law is the negative arm: a
+    # published child emits a BYTE-IDENTICAL summary (`put_unless` drops the
+    # steady state), so only the draft rows grow `"status":"draft"`.
+    |> put_unless(:status, doc.status, "published")
   end
 
   # ─── Opt building / int parsing / validation ────────────────────────────

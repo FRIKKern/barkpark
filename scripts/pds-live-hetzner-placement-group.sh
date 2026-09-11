@@ -96,6 +96,7 @@
 #   PDS_LIVE_BP        use this bp binary instead of building one (selftest hook)
 #   PDS_LIVE_GO        go binary (default: go); CC defaults to /usr/bin/clang
 #   PDS_LIVE_ART       artifact dir (default: /tmp/pds-live-w30.<pid>)
+#   PDS_LIVE_KEEP_ART  keep the artifact dir even on a clean exit (default: no)
 #   PDS_LIVE_HARVEST   dir to write harvested fixture bytes into (default: none)
 #   HCLOUD_TOKEN / HCLOUD_CONFIG / HCLOUD_CONTEXT — read by bp, never by name here
 #
@@ -116,7 +117,31 @@ PG_PREFIX="${PDS_LIVE_PG_PREFIX:-pds-live-w30-}"
 ART="${PDS_LIVE_ART:-/tmp/pds-live-w30.$$}"
 GO_BIN="${PDS_LIVE_GO:-go}"
 
+# THE ARTIFACT DIR IS DECIDED, NOT LEFT TO PILE UP (wave 31). Every run used to
+# leave one /tmp/pds-live-w30.<pid> behind forever, because the dir was the ONLY
+# place a failed read's bytes existed — a refusal that says "go look in /tmp" has
+# to keep /tmp. Now the bytes are QUOTED INLINE (see read_failure_reason), so the
+# residue has a rule instead of an excuse:
+#   · clean exit (rc=0)  -> the dir is REMOVED. Nothing on a green path points a
+#     human at it, so keeping it only accumulated.
+#   · any non-zero exit  -> the dir is KEPT and its path is printed. That is the
+#     one case where the receipts are worth reading, and it is also the case a
+#     human is already reading stderr for.
+#   · PDS_LIVE_KEEP_ART=1 -> always kept, for a debugging session that wants the
+#     green run's receipts too.
+# ONLY THE PROCESS THAT CREATED THE DIR MAY REMOVE IT. --selftest spawns children
+# with PDS_LIVE_ART pointed at the PARENT'S dir; a child that reaped it would
+# delete the stubs and counters the parent is still driving mid-run.
+ART_OWNED="${PDS_LIVE_ART_OWNED:-0}"
+[ -d "$ART" ] || ART_OWNED=1
 mkdir -p "$ART"
+
+# The two project reads write to FIXED paths, not to `local f=` names invisible
+# outside their own function. reserved_names and pg_count are both called inside
+# `$( )`, so a caller holds only their RETURN CODE — and until these globals
+# existed, read_failure_reason could name nothing but the directory.
+HZ_LIST_ART="$ART/list.$$.json"
+HZ_COUNT_ART="$ART/count.$$.json"
 
 # ── vocabulary ───────────────────────────────────────────────────────────────
 #
@@ -129,6 +154,31 @@ ok()     { printf '  PASS    %s\n' "$*"; }
 refuse() { printf '\n%s: REFUSE — %s\n' "$SELF" "$*" >&2; exit 3; }
 failed() { printf '\n%s: FAIL — %s\n' "$SELF" "$*" >&2; exit 1; }
 usage()  { printf '%s: %s\n' "$SELF" "$*" >&2; exit 2; }
+
+# art_reap RC — the artifact-dir rule above, applied once, by the owner only.
+# It is armed as an EXIT trap immediately below so it covers refuse/failed/usage
+# too. run() and --selftest-probe REPLACE that trap with `cleanup`, which calls
+# this function itself rather than letting it be silently dropped.
+art_reap() {
+  [ "$ART_OWNED" = "1" ] || return 0
+  ART_OWNED=0
+  if [ "$1" != "0" ] || [ -n "${PDS_LIVE_KEEP_ART:-}" ]; then
+    printf '  artifacts KEPT: %s\n' "$ART" >&2
+    return 0
+  fi
+  rm -rf "$ART"
+}
+trap 'art_reap "$?"' EXIT
+
+# stub_server_reap — the EXIT handler the localhost stub server installs. It is a
+# NAMED FUNCTION rather than a quoted trap body: the rc it hands art_reap is then
+# visibly assigned, where a single-quoted trap string is opaque to every reader
+# (static analysis included, which reads it as an unassigned variable).
+stub_server_reap() {
+  local rc=$?
+  kill "$STUB_PID" 2>/dev/null || true
+  art_reap "$rc"
+}
 
 # jsonq FILE EXPR — evaluate a python expression over the parsed body `d`.
 # Exits non-zero if the body is not JSON at all, which is itself an assertion.
@@ -676,7 +726,7 @@ PY
 # reserved_names — names in the live project matching the reserved prefix.
 # rc 0 = answered (the names, possibly none) · 1 = read failed · 2 = wrong shape.
 reserved_names() {
-  local f="$ART/list.$$.json"
+  local f="$HZ_LIST_ART"
   hz_read "$f" || return 1
   shape_ok "$f" || return 2
   PREFIX="$PG_PREFIX" python3 -c '
@@ -692,17 +742,38 @@ for g in d.get("placement_groups") or []:
 
 # pg_count — same contract, same three return codes.
 pg_count() {
-  local f="$ART/count.$$.json"
+  local f="$HZ_COUNT_ART"
   hz_read "$f" || return 1
   shape_ok "$f" || return 2
   jsonq "$f" 'len(d.get("placement_groups") or [])'
 }
 
-# read_failure_reason RC — the sentence that names WHICH half went wrong.
+# read_failure_reason RC [RECEIPT] — the sentence that names WHICH half went
+# wrong, AND QUOTES WHAT BP ACTUALLY SAID.
+#
+# hz_read sends bp's stdout AND stderr into the receipt file (`>"$out" 2>&1`), so
+# on a rate limit the file holds `bp: hetzner: rate limited (429)` and the
+# terminal used to hold only "see the artifact dir /tmp/pds-live-w30.41234". A
+# human reading a CLEANUP UNVERIFIED line at 3am had to go find a directory to
+# learn WHY the project could not be read — correct, and illegible. The preflight
+# already did the right thing one screen up (`bp said: %s`, head -c 400); this is
+# the same move for the fence, the cleanup and the final assertion.
+#
+# The quote is trimmed to ONE LINE of at most 200 bytes: these sentences are
+# interpolated into refuse/failed/CLEANUP UNVERIFIED lines, and an HTML error
+# page pasted whole would bury the refusal it is supposed to explain.
+bp_said() {
+  local f="${1:-}" q=""
+  [ -n "$f" ] && [ -s "$f" ] || { printf '%s' "<the receipt was empty>"; return 0; }
+  q="$(head -c 200 "$f" | tr '\n\r\t' '   ' | sed 's/  */ /g; s/^ //; s/ $//')"
+  [ -n "$q" ] || q="<the receipt held only whitespace>"
+  printf '%s' "$q"
+}
+
 read_failure_reason() {
   case "$1" in
-    2) printf '%s' "bp exited 0 but its receipt is not a placement_groups listing — AN EXIT CODE ALONE IS NOT SUCCESS" ;;
-    *) printf '%s' "the \`bp cloud hetzner placement-group list\` read exited non-zero (see the artifact dir $ART for what bp said)" ;;
+    2) printf '%s' "bp exited 0 but its receipt is not a placement_groups listing — AN EXIT CODE ALONE IS NOT SUCCESS. bp said: $(bp_said "${2:-}")" ;;
+    *) printf '%s' "the \`bp cloud hetzner placement-group list\` read exited non-zero. bp said: $(bp_said "${2:-}") (full receipt: ${2:-$ART})" ;;
   esac
 }
 
@@ -716,7 +787,7 @@ fence_or_refuse() {
   existing="$(reserved_names)"
   frc=$?
   set -e
-  [ "$frc" -eq 0 ] || refuse "the fence read did not answer: $(read_failure_reason "$frc"). Refusing to create anything in a project whose contents could not be read — an unreadable project is NOT an empty one."
+  [ "$frc" -eq 0 ] || refuse "the fence read did not answer: $(read_failure_reason "$frc" "$HZ_LIST_ART"). Refusing to create anything in a project whose contents could not be read — an unreadable project is NOT an empty one."
   if [ -n "$existing" ]; then
     refuse "the reserved prefix \"$PG_PREFIX\" already matches: $existing. Either a previous run leaked or something else owns the name — refusing to start rather than adopt a resource this run did not create."
   fi
@@ -783,7 +854,7 @@ cleanup() {
     set -e
     if [ "$crc" -ne 0 ]; then
       printf '\n== cleanup (exit rc=%s): the project could NOT be read\n' "$rc" >&2
-      cleanup_unverified "$(read_failure_reason "$crc")"
+      cleanup_unverified "$(read_failure_reason "$crc" "$HZ_LIST_ART")"
     elif [ -n "$leftovers" ]; then
       printf '\n== cleanup (exit rc=%s): reserved-prefix groups still present\n' "$rc" >&2
       local n
@@ -796,7 +867,7 @@ cleanup() {
       crc=$?
       set -e
       if [ "$crc" -ne 0 ]; then
-        cleanup_unverified "$(read_failure_reason "$crc")"
+        cleanup_unverified "$(read_failure_reason "$crc" "$HZ_LIST_ART")"
       elif [ -n "$leftovers" ]; then
         printf '  CLEANUP INCOMPLETE — still present: %s. Delete by hand: bp cloud hetzner placement-group delete <name> --yes\n' "$leftovers" >&2
         CLEANUP_UNVERIFIED=1
@@ -810,6 +881,11 @@ cleanup() {
   if [ "$CLEANUP_UNVERIFIED" = "1" ] && [ "$rc" -eq 0 ]; then
     rc=1
   fi
+  # This function IS the EXIT trap from here on — it replaced `art_reap` at the
+  # trap site in run(). Calling it explicitly is not belt-and-braces: bash runs
+  # ONE EXIT trap, so dropping this line resurrects the /tmp pile-up on exactly
+  # the paths that arm a cleanup.
+  art_reap "$rc"
   exit $rc
 }
 
@@ -1007,6 +1083,12 @@ DR_STUB=""
 DR_EMPTY=""
 DR_N=0
 
+# The sentence rows 11 and 12 chase. It is deliberately not a string any
+# production path could print by accident: if it reaches the runner's output, it
+# got there by being READ BACK OUT OF THE RECEIPT.
+HZ_STUB_SAY_NEEDLE="DISTINCTIVE-STUB-SENTENCE-4711"
+HZ_STUB_SAY="bp: hetzner: rate limited (429) $HZ_STUB_SAY_NEEDLE"
+
 # write_degraded_stub PATH — a stub bp for the DEGRADED-READ states.
 #
 # It answers the first $STUB_HONEST_READS list reads honestly (one
@@ -1029,7 +1111,7 @@ case "$*" in
     case "${STUB_MODE:-clean}" in
       nonjson) echo '<html>504 Gateway Time-out</html>'; exit 0 ;;
       nokey)   echo '{"ok":true}'; exit 0 ;;
-      rcfail)  echo 'bp: hetzner: rate limited (429)' >&2; exit 1 ;;
+      rcfail)  echo "${STUB_SAY:-bp: hetzner: rate limited (429)}" >&2; exit 1 ;;
       *)       echo '{"placement_groups":[]}'; exit 0 ;;
     esac
     ;;
@@ -1194,6 +1276,21 @@ mutation_blocks() {
   dr_case "10. healthy: the delete receipt CONFIRMED the group was gone" cleanup 0 "receipt: confirmed_gone=true" \
     "STUB_MODE=clean"   "STUB_HONEST_READS=1" "STUB_DELETE=confirm"
 
+  # ── AND THE REFUSAL MUST SAY WHY, NOT WHERE ────────────────────────────────
+  # Rows 1 and 4 above only ever asserted that a degraded read REFUSES. They
+  # passed on a runner whose entire explanation was "see the artifact dir
+  # /tmp/pds-live-w30.<pid>" — honest, and unreadable without a second trip to
+  # /tmp. hz_read folds bp's stderr into the receipt file (`>"$out" 2>&1`), so
+  # the sentence exists; nothing printed it. These two rows pin the propagation
+  # end to end: the STUB chooses a sentence no source file contains, and it must
+  # appear in the RUNNER'S OWN OUTPUT. A needle this arbitrary cannot be
+  # satisfied by any hardcoded message — only by quoting the receipt.
+  say "  the reason must carry what bp ITSELF said, not a path to go read it:"
+  dr_case "11. fence refusal QUOTES what bp said" fence 3 "$HZ_STUB_SAY_NEEDLE" \
+    "STUB_MODE=rcfail"  "STUB_HONEST_READS=0" "STUB_SAY=$HZ_STUB_SAY"
+  dr_case "12. CLEANUP UNVERIFIED QUOTES what bp said" cleanup nonzero "$HZ_STUB_SAY_NEEDLE" \
+    "STUB_MODE=rcfail"  "STUB_HONEST_READS=1" "STUB_SAY=$HZ_STUB_SAY"
+
 }
 
 selftest() {
@@ -1295,7 +1392,9 @@ PY
   while [ ! -s "$portfile" ] && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
   STUB_PORT="$(cat "$portfile" 2>/dev/null || true)"
   [ -n "$STUB_PORT" ] || failed "the localhost stub server did not come up"
-  trap 'kill "$STUB_PID" 2>/dev/null || true' EXIT
+  # This REPLACES the process-wide EXIT trap, so it carries the reap itself —
+  # see the note on cleanup(): bash runs exactly one EXIT trap.
+  trap stub_server_reap EXIT
 }
 
 # stub_says STATUS CONTENT-TYPE BODY-TEXT — what the next request gets back.
@@ -1316,7 +1415,13 @@ selftest_offline() {
       unsets="$unsets -u $v"
     done
     # shellcheck disable=SC2086
-    exec env $unsets PDS_LIVE_OFFLINE_SCRUBBED=1 "$0" --selftest-offline
+    # ART is carried ACROSS THE EXEC, ownership included. `exec` keeps the same
+    # $$, so the re-exec'd process recomputes the same default path, finds the
+    # directory already there and would conclude it belongs to somebody else —
+    # and then nobody reaps it.
+    exec env $unsets PDS_LIVE_OFFLINE_SCRUBBED=1 \
+      "PDS_LIVE_ART=$ART" "PDS_LIVE_ART_OWNED=$ART_OWNED" \
+      "$0" --selftest-offline
   fi
 
   step "CREDENTIAL-FREE BY CONSTRUCTION, AND THEN COUNTED"
@@ -1538,7 +1643,7 @@ run() {
   baseline="$(pg_count)"
   brc=$?
   set -e
-  [ "$brc" -eq 0 ] || refuse "the baseline count read did not answer: $(read_failure_reason "$brc"). Refusing to create anything without a baseline to return the project to."
+  [ "$brc" -eq 0 ] || refuse "the baseline count read did not answer: $(read_failure_reason "$brc" "$HZ_COUNT_ART"). Refusing to create anything without a baseline to return the project to."
   CLEANUP_ARMED=1
   trap cleanup EXIT INT TERM HUP QUIT
   ok "zero placement groups match \"$PG_PREFIX\"; project baseline = $baseline group(s); cleanup trap armed on EXIT/INT/TERM/HUP/QUIT"
@@ -1651,8 +1756,8 @@ run() {
   after="$(pg_count)"
   arc=$?
   set -e
-  [ "$lrc" -eq 0 ] || failed "the final read did not answer: $(read_failure_reason "$lrc"). This run CANNOT claim it left the project as it found it — the cleanup trap is still armed and will say so."
-  [ "$arc" -eq 0 ] || failed "the final count read did not answer: $(read_failure_reason "$arc")."
+  [ "$lrc" -eq 0 ] || failed "the final read did not answer: $(read_failure_reason "$lrc" "$HZ_LIST_ART"). This run CANNOT claim it left the project as it found it — the cleanup trap is still armed and will say so."
+  [ "$arc" -eq 0 ] || failed "the final count read did not answer: $(read_failure_reason "$arc" "$HZ_COUNT_ART")."
   [ -z "$leftovers" ] || failed "reserved-prefix groups survive the run: $leftovers"
   [ "$after" = "$baseline" ] || failed "the project holds $after placement group(s), baseline was $baseline"
   CLEANUP_ARMED=0

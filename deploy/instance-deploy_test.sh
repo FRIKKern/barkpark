@@ -187,10 +187,20 @@ EOF
   # so a slot that boots healthy on its OWN port (pre-flip, plain
   # http://localhost:$PORT) can still be driven to fail the PUBLIC post-flip
   # gate (pds-bl-w49: that curl used to be captured, logged, and ignored).
+  # PATH-AWARE, and the fake box's DEFAULT WORLD IS POST-SUNSET: `/api/schemas`
+  # answers SCHEMAS_CODE, which defaults to 404 — what the real box serves after
+  # the removal published in api/lib/barkpark_web/plugs/legacy_deprecation.ex
+  # (`sunset: Wed, 31 Dec 2026 23:59:59 GMT`). Every case in this file therefore
+  # runs against a box on which the legacy route is GONE, so a probe that still
+  # gated on it would fail closed (exit 24/14) and red its case. Set
+  # SCHEMAS_CODE=200 to simulate a box from before the removal.
   cat > "$dir/curl" <<'EOF'
 #!/usr/bin/env bash
 for a in "$@"; do
   case "$a" in *:4020*) printf '%s' "${CONNECTORS_HEALTH_CODE:-000}"; exit 0 ;; esac
+done
+for a in "$@"; do
+  case "$a" in */api/schemas*) printf '%s' "${SCHEMAS_CODE:-404}"; exit 0 ;; esac
 done
 for a in "$@"; do
   case "$a" in --resolve) printf '%s' "${PUBLIC_HEALTH_CODE:-${HEALTH_CODE:-200}}"; exit 0 ;; esac
@@ -539,6 +549,46 @@ check "no enable of the unproven slot"       "! grep -q 'enable barkpark-slot@gr
 check "state file NOT advanced"              "[ ! -f '$APP/.instance-deploy-last' ]"
 check "slot sha stamp NOT left claiming an unproven build" "[ ! -e '$APP/.slots/green.sha' ]"
 rm -rf "$TMP"
+
+echo "== Case 3d: the SUNSET /api/schemas route is GONE (post-2026-12-31) -> the deploy still completes =="
+# ROOT CAUSE this guards: every blue/green health gate used to probe
+# /api/schemas -- the last surviving legacy route, which
+# BarkparkWeb.Plugs.LegacyDeprecation stamps `sunset: Wed, 31 Dec 2026
+# 23:59:59 GMT`. The failure mode on that date is FAIL-CLOSED, not quiet: the
+# probes capture the status with `-o /dev/null -w '%{http_code}'` and gate on
+# `= 200`, so a 404 from a route retired ON SCHEDULE disables the
+# freshly-booted slot, resets the checkout to the live sha and exits 24/14 --
+# a healthy build on a healthy box, stopped, with the slot blamed in the log.
+# The fake box answers /api/schemas with SCHEMAS_CODE (404 by default), so this
+# case IS a healthy box on which the legacy route has already been removed.
+setup_case
+rc="$(run_deploy 200 sunsetgonesha)"
+check "exit 0 with the legacy route already removed" "[ '$rc' = '0' ]"
+check "Caddy flipped to :4001"            "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
+check "state file = sunsetgonesha (it really completed)" "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'sunsetgonesha' ]"
+check "the public gate probed /status.json and saw 200" "grep -q 'test.example/status.json = 200' '$TMP/out.log'"
+check "nothing in the deploy log probes the sunset route" "! grep -q '/api/schemas' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo "== Case 3d-control: the same post-sunset box, SICK on the new path -> still fails closed =="
+# The other direction. Swapping one URL for another can quietly DISARM a probe:
+# a gate that passes for a healthy box proves nothing until it also STOPS for a
+# box that is not serving. Same box as 3d, but /status.json answers 500.
+setup_case
+rc="$(run_deploy 500 sunsetsicksha)"
+check "exit 14 (a sick box on the new path stops the deploy)" "[ '$rc' = '14' ]"
+check "the unhealthy slot is named in the log" "grep -q 'slot green UNHEALTHY' '$TMP/out.log'"
+check "Caddy never flipped"                "[ \"\$(first_upstream)\" = 'localhost:4000' ]"
+check "state file NOT advanced"            "[ ! -f '$APP/.instance-deploy-last' ]"
+rm -rf "$TMP"
+
+echo "== Case 3e: no health probe in the script is bound to a sunset-bearing route =="
+# A PREDICATE over the file, not a memory of four line numbers: any bp_curl_code
+# whose URL names /api/schemas is a gate on a published removal schedule.
+check "no probe in instance-deploy.sh targets /api/schemas" "! grep -qE 'bp_curl_code.*/api/schemas' '$SCRIPT'"
+check "the health path is ONE variable, not N literals" "[ \"\$(grep -c 'HEALTH_PATH' '$SCRIPT')\" -ge '5' ]"
+check "the sunset date is recorded where a deploy owner reads" "grep -q 'sunset: Wed, 31 Dec 2026 23:59:59 GMT' '$SCRIPT'"
+check "and so is the consequence (fail-closed, not quiet)" "grep -qi 'FAIL-CLOSED, NOT QUIET' '$SCRIPT'"
 
 echo "== Case 4: production box (no .staging) REFUSES a non-main DEPLOY_REF =="
 setup_case   # no $APP/.staging marker
@@ -1478,6 +1528,71 @@ check "export-prefixed refused KEK: exactly one assignment survives" \
   "[ \"\$(grep -cE '^(export )?BARKPARK_KEK=' '$APP/.env')\" = '1' ]"
 check "export-prefixed refused KEK: the old bytes are parked, not destroyed" \
   "grep -qE \"^BARKPARK_KEK_REJECTED_[0-9]{8}T[0-9]{6}Z='x'\\\$\" '$APP/.env'"
+rm -rf "$TMP"
+
+echo
+echo "== Case: CONNECTORS_CREDENTIAL_KEY_PREVIOUS propagates .env -> connectors.env (task-0459264e822b59d6) =="
+# The bridge opens a sealed row under the CURRENT key OR any key in
+# CONNECTORS_CREDENTIAL_KEY_PREVIOUS (connectors/src/config.ts splitKeys ->
+# crypto/credential-cipher.ts), and the unit reads ONLY connectors.env
+# (EnvironmentFile=). The writer emitted six keys and _PREVIOUS was not one of
+# them, so setting it in /opt/barkpark/.env reached nothing: a flag day, not a
+# rotation. Three states: unset (no line), set (carried), and cleared again
+# (the line DISAPPEARS on the next deploy — the end of the rotation window).
+
+# (1) UNSET — no line at all. An emitted-empty line would leave the file unable
+# to say "no rotation is in flight"; splitKeys reads "" and absent alike.
+setup_case
+rc="$(run_deploy 200 prevunsetsha)"
+check "no previous key: exit 0"                  "[ '$rc' = '0' ]"
+check "no previous key: NO _PREVIOUS line emitted (absent, not empty)" \
+  "! grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS' '$TMP/connectors.env'"
+check "no previous key: the current key is still written" \
+  "grep -qE '^CONNECTORS_CREDENTIAL_KEY=.+\$' '$TMP/connectors.env'"
+check "no previous key: no rotation-window log line" \
+  "! grep -q 'a rotation window is OPEN' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# (2) SET in /opt/barkpark/.env — a ROTATION. The old key must reach the bridge
+# on the NEXT DEPLOY, with no hand edit of /etc/barkpark/connectors.env.
+setup_case
+OLDKEY="MjSpkGTNeace3ZPhSld3fP3fqL5C0z55afNNlyDqWyU="
+printf 'CONNECTORS_CREDENTIAL_KEY_PREVIOUS=%s\n' "$OLDKEY" >> "$APP/.env"
+rc="$(run_deploy 200 prevsetsha)"
+check "rotation: exit 0"                         "[ '$rc' = '0' ]"
+check "rotation: the previous key lands in connectors.env VERBATIM" \
+  "grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS=$OLDKEY\$' '$TMP/connectors.env'"
+check "rotation: exactly one _PREVIOUS line" \
+  "[ \"\$(grep -c '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS=' '$TMP/connectors.env')\" = '1' ]"
+check "rotation: the CURRENT key is still there too (both keys, not a swap)" \
+  "grep -qE '^CONNECTORS_CREDENTIAL_KEY=.+\$' '$TMP/connectors.env'"
+check "rotation: current and previous are DIFFERENT values" \
+  "[ \"\$(grep '^CONNECTORS_CREDENTIAL_KEY=' '$TMP/connectors.env')\" != \"CONNECTORS_CREDENTIAL_KEY=$OLDKEY\" ]"
+check "rotation: the deploy says the window is open" \
+  "grep -q 'a rotation window is OPEN' '$TMP/out.log'"
+check "rotation: connectors.env still 0600" \
+  "[ \"\$(stat -c '%a' '$TMP/connectors.env' 2>/dev/null || stat -f '%Lp' '$TMP/connectors.env')\" = '600' ]"
+check "rotation: the unit was restarted by THIS deploy (no manual restart step)" \
+  "grep -q 'restart barkpark-connectors' '$SYSCTLLOG'"
+# (3) CLEARED — the operator deletes the line after `npm run rewrap`. The next
+# deploy must DROP it from connectors.env; a lingering line keeps a retired key live.
+grep -v '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS=' "$APP/.env" > "$TMP/env.new" && mv "$TMP/env.new" "$APP/.env"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"; rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 prevclearedsha)"
+check "window closed: exit 0"                    "[ '$rc' = '0' ]"
+check "window closed: the _PREVIOUS line is GONE from connectors.env" \
+  "! grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS' '$TMP/connectors.env'"
+check "window closed: the retired key appears NOWHERE in connectors.env" \
+  "! grep -qF '$OLDKEY' '$TMP/connectors.env'"
+rm -rf "$TMP"
+
+# (4) WHITESPACE-ONLY is treated as unset — an all-blank value would otherwise
+# emit a line that claims a rotation is in flight while carrying no key.
+setup_case
+printf 'CONNECTORS_CREDENTIAL_KEY_PREVIOUS=   \n' >> "$APP/.env"
+rc="$(run_deploy 200 prevblanksha)"
+check "blank previous key: treated as UNSET, no line emitted" \
+  "! grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS' '$TMP/connectors.env'"
 rm -rf "$TMP"
 
 echo

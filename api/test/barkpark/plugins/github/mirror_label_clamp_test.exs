@@ -19,7 +19,7 @@ defmodule Barkpark.Plugins.Github.MirrorLabelClampTest do
   # async: false — Auth is a singleton GenServer and we mutate Application env.
   use Barkpark.DataCase, async: false
 
-  alias Barkpark.{Content, Tasks, TenancyFixtures}
+  alias Barkpark.{Content, LabelFixtures, Tasks, TenancyFixtures}
   alias Barkpark.Plugins.Github.{Auth, Link, MirrorJob}
 
   @dataset "production"
@@ -84,19 +84,28 @@ defmodule Barkpark.Plugins.Github.MirrorLabelClampTest do
     end
   end
 
+  # Created AND PUBLISHED: `MirrorJob`'s publish gate refuses a task with no
+  # published row (`{:cancel, :unpublished}`), so a draft-only fixture would
+  # never reach the close PATCH this repro is about. `LabelFixtures` supplies
+  # the description + registered weighted tags the publish wall demands.
   defp mk_task!(doc_id, content, scope) do
-    {:ok, doc} =
+    {:ok, _draft} =
       Content.create_document(
         "task",
         %{
           "doc_id" => doc_id,
           "title" => Map.get(content, "title", doc_id),
-          "content" => Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content)
+          "content" =>
+            LabelFixtures.with_registered_labels(
+              Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content),
+              @dataset
+            )
         },
         @dataset,
         scope
       )
 
+    {:ok, doc} = Content.publish_document(doc_id, "task", @dataset, scope)
     doc
   end
 

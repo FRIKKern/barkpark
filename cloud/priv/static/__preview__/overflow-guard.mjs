@@ -289,6 +289,7 @@ const DEFECTS = [
   "W35-hash-nav-hidden-view-residue",
   "W20-type-floor-instances",
   "W23-overview-digest-activity-row",
+  "W27-failed-bar-announces-the-count",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -11575,6 +11576,289 @@ async function main() {
           `anything under a \`hidden\` ancestor or sized 0x0, and each route is driven on ONE fixture ` +
           `(${TF_ROUTES.map((r) => `${r.name}:${r.scen}`).join(", ")}). A sub-floor pseudo-element is outside ` +
           `this leg's reach and outside the source parse's blind spot both — it is covered by neither`,
+        );
+      }
+    }
+
+
+    // ── W27-S6 FOLLOW-UP: THE FAILED PROVISIONING MASTER BAR, RE-READ OFF THE
+    //    SCREEN INSTEAD OF OFF THE HELPER ──────────────────────────────────
+    //    THE HOLE THIS FILLS. cch-w27-s6 changed the failed bar to announce the
+    //    COUNT the step list already shows (scen=failed 4 of 6 -> 67,
+    //    scen=fleet-support-failed 3 of 6 -> 50) instead of an expectedMs
+    //    weighting of hand-written constants (82 and 53). That fix is guarded
+    //    ONLY in the pure-helper harness (__app.test.mjs, the `cch-w27-s6`
+    //    tests): they call provisionOverallHtml directly and assert its STRING.
+    //    Between that helper and the person sit instanceTimelineHtml's mount,
+    //    the SSE re-render, the 1s tick's in-place patch and app.css — none of
+    //    which a string match can see. `aria-valuenow`, `data-overall` and
+    //    `prov-overall` appeared ZERO times across every leg in this file
+    //    before this one, so the RENDERED bar had never been read at all.
+    //
+    //    THE TWO THINGS THIS LEG ASSERTS THAT THE UNIT PROOF CANNOT:
+    //      (a) the number that reaches the accessibility tree and the number
+    //          the eye reads off the track are the SAME number, and both are
+    //          the count — `aria-valuenow` is read off the mounted element and
+    //          the fill is measured as PAINTED WIDTH / TRACK WIDTH, not as the
+    //          inline style string the helper wrote. A mount or a tick that
+    //          re-patched either one would red here and nowhere else.
+    //      (b) the phone arm. 320x568 is the width no instrument in this file
+    //          had ever driven this element at: the bar must still be inside
+    //          the viewport, the track must not clip its own fill, the page
+    //          must not scroll sideways, "Setup failed" must be whole, and the
+    //          `.prov-overall.is-failed` STYLING must survive — the danger fill
+    //          and the danger summary colour are compared against the SAME
+    //          scenario+theme measured at 1280, so a media block that quietly
+    //          restyled the failed state on phones is a red, not a shrug.
+    //
+    //    THE EXPECTED FIGURE IS NOT A TYPED NUMERAL ALONE. Each cell counts
+    //    `li.new-step.done` in the RENDERED checklist inside the same view and
+    //    requires round(done/steps*100) to equal both the announced value and
+    //    the leg's literal. A guard that only retyped 67 beside the helper that
+    //    produces 67 is a tautology; this one fails if the bar and the list a
+    //    person reads it against ever disagree, whichever of them moved.
+    //
+    //    ANTI-VACUITY: zero bars, zero tracks, zero fills or zero checklist
+    //    rows in any cell is a FAILURE, not a clean cell (the GR109 singular-
+    //    selector lesson). Every walk below is scoped to
+    //    `section.view:not([hidden])` — the W35 register stays untouched.
+    if (requested.includes("W27-failed-bar-announces-the-count")) {
+      const D = "W27-failed-bar-announces-the-count";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      //
+      // THE IDS ARE THE ONES scenarios.mjs MINTS: `failed` deep-links
+      // IDS.soloFailed, and `fleet-support-failed` deep-links the LIVE main —
+      // the failed box in that fixture is the SUPPORT row (FLEET_IDS.
+      // supportFailed), which is the one this leg must open. Re-derive with
+      // `grep -n 'soloFailed:\|supportFailed:' cloud/priv/static/__preview__/scenarios.mjs`.
+      const BAR_CASES = [
+        {
+          scen: "failed", id: "5b2c1e00-0000-4000-8000-0000000000b2",
+          expect: 67, weighted: 82, shows: "4 of 6",
+        },
+        {
+          scen: "fleet-support-failed", id: "5b2c1e00-0000-4000-8000-0000000000fc",
+          expect: 50, weighted: 53, shows: "3 of 6",
+        },
+      ];
+      // WIDE FIRST, ALWAYS: the 1280 cell is the control the 320 cell's
+      // restyle check is measured against, so it must have run.
+      const BAR_VIEWPORTS = [{ w: 1280, h: 900 }, { w: 320, h: 568 }];
+      // ANTI-VACUITY 0 — the axis itself. The criterion names both viewports;
+      // an edit that drops either leaves a leg that passes having never asked
+      // the question it exists for.
+      for (const want of [1280, 320]) {
+        if (!BAR_VIEWPORTS.some((v) => v.w === want)) {
+          fail(D, `axis check: ${want} is not in this leg's viewport set — the claim is about the RENDERED bar at 1280x900 AND 320x568, and a leg missing one of them cannot make it`);
+        }
+      }
+      const barCells = BAR_CASES.length * BAR_VIEWPORTS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${BAR_CASES.length} failed scenarios x ${BAR_VIEWPORTS.length} viewports x 2 themes` +
+        ` (${barCells} cells; #instance/<failed id> .prov-overall-track aria-valuenow + PAINTED fill width)\n`,
+      );
+      let cells = 0, barsSeen = 0, stepsSeen = 0, weightedSeen = 0, clipped = 0, restyled = 0;
+      // scen|theme -> the 1280 reading the phone arm is compared against.
+      const wideStyle = new Map();
+      const paintedPcts = [];
+      for (const c of BAR_CASES) {
+        for (const theme of ["light", "dark"]) {
+          // Enter at the WIDE viewport and pin the hash: `?scen=` alone renders
+          // #overview (the W13 routing trap), and an overview screen measured
+          // under an instance-route heading is a phantom table.
+          await setViewport(BAR_VIEWPORTS[0].w, BAR_VIEWPORTS[0].h);
+          await nav(
+            `${BASE}/?scen=${c.scen}&theme=${theme}#instance/${c.id}`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-instance' && v.querySelector('.prov-overall-track'));})()`,
+          );
+          const row = [];
+          for (const vp of BAR_VIEWPORTS) {
+            await setViewport(vp.w, vp.h);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,` +
+              `  bars:0,tracks:0,fills:0,steps:0,done:0};` +
+              `if(!v) return out;` +
+              `var bars=v.querySelectorAll('.prov-overall'); out.bars=bars.length;` +
+              `var lis=v.querySelectorAll('.bp-timeline .new-steps > li.new-step'); out.steps=lis.length;` +
+              `for(var i=0;i<lis.length;i++) if(/(^|\\s)done(\\s|$)/.test(lis[i].className)) out.done++;` +
+              `if(!bars.length) return out;` +
+              `var o=bars[0];` +
+              `out.tracks=o.querySelectorAll('.prov-overall-track').length;` +
+              `out.fills=o.querySelectorAll('[data-overall-fill]').length;` +
+              `var t=o.querySelector('.prov-overall-track'), f=o.querySelector('[data-overall-fill]');` +
+              `if(!t||!f) return out;` +
+              `out.cls=o.className;` +
+              `out.isFailed=/(^|\\s)is-failed(\\s|$)/.test(o.className);` +
+              `out.role=t.getAttribute('role');` +
+              `out.vmin=t.getAttribute('aria-valuemin'); out.vmax=t.getAttribute('aria-valuemax');` +
+              `out.hasValue=t.hasAttribute('aria-valuenow');` +
+              `out.valuenow=t.getAttribute('aria-valuenow');` +
+              `out.inline=f.style.width;` +
+              `var tr=t.getBoundingClientRect(), fr=f.getBoundingClientRect(), orr=o.getBoundingClientRect();` +
+              `out.trackW=+tr.width.toFixed(2); out.fillW=+fr.width.toFixed(2);` +
+              `out.painted=tr.width>0?+((fr.width/tr.width)*100).toFixed(2):null;` +
+              `out.trackCW=t.clientWidth; out.trackSW=t.scrollWidth;` +
+              `out.oLeft=+orr.left.toFixed(2); out.oRight=+orr.right.toFixed(2);` +
+              `out.oDisplay=getComputedStyle(o).display;` +
+              `out.fillBg=getComputedStyle(f).backgroundColor;` +
+              `var sum=o.querySelector('[data-overall-summary]');` +
+              `out.summary=sum?(sum.textContent||'').trim():null;` +
+              `out.sumCW=sum?sum.clientWidth:0; out.sumSW=sum?sum.scrollWidth:0;` +
+              `out.sumColor=sum?getComputedStyle(sum).color:null;` +
+              `return out;})()`,
+            );
+            cells++;
+            const at = `${c.scen}/${theme}@${vp.w}x${vp.h}`;
+            if (m.view !== "view-instance") {
+              fail(D, `${at}: rendered section.view "${m.view}", asked for "view-instance" — the hash did not route, so nothing below this line measures the failed instance workspace`);
+              row.push(`${vp.w}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${at}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty list is not a clean list. A bar that stopped
+            // mounting would score zero wrong numbers and read as a pass.
+            if (m.bars !== 1 || m.tracks !== 1 || m.fills !== 1) {
+              fail(D, `${at}: ${m.bars} \`.prov-overall\` / ${m.tracks} \`.prov-overall-track\` / ${m.fills} \`[data-overall-fill]\` in the visible view — exactly one of each is the mount this leg reads. Nothing was measured; this is not a pass`);
+              row.push(`${vp.w}:0b`);
+              continue;
+            }
+            barsSeen++;
+            if (!m.isFailed) {
+              fail(D, `${at}: the master bar computed class "${m.cls}" — a terminated run must carry \`prov-overall is-failed\`, and the count-based figure below is only the honest one BECAUSE the run has stopped`);
+            }
+            // (1) THE PROGRESSBAR IS STILL A PROGRESSBAR WITH A VALUE. A failed
+            //     run deliberately KEEPS aria-valuenow (a valueless
+            //     progressbar announces "still working" to a screen reader).
+            if (m.role !== "progressbar" || m.vmin !== "0" || m.vmax !== "100") {
+              fail(D, `${at}: the track announces role="${m.role}" aria-valuemin="${m.vmin}" aria-valuemax="${m.vmax}" — the mounted bar must still be a bounded progressbar`);
+            }
+            if (!m.hasValue) {
+              fail(D, `${at}: the mounted track carries NO aria-valuenow — a stopped run that drops its value announces "still working", which is the opposite of what the screen says ("${m.summary}")`);
+              row.push(`${vp.w}:novalue`);
+              continue;
+            }
+            // (2) THE FIGURE IS DERIVED FROM THE RENDERED CHECKLIST, not only
+            //     retyped. Zero rows makes the derivation vacuous, so it reds.
+            if (m.steps === 0) {
+              fail(D, `${at}: zero \`li.new-step\` in the timeline checklist — the expected figure is derived from the rows a person actually reads, and with no rows this leg's whole claim is untestable. Not a pass`);
+              row.push(`${vp.w}:0s`);
+              continue;
+            }
+            stepsSeen += m.steps;
+            const derived = Math.round((m.done / m.steps) * 100);
+            if (derived !== c.expect) {
+              fail(D, `${at}: the rendered checklist reads ${m.done} of ${m.steps} done -> ${derived}, but this leg expects ${c.expect} (${c.shows}) — the fixture or the row grammar moved, so the announced value can no longer be checked against what the eye reads`);
+            }
+            // (3) THE ANNOUNCEMENT.
+            if (m.valuenow === String(c.weighted)) weightedSeen++;
+            if (m.valuenow !== String(c.expect)) {
+              fail(D, `${at}: .prov-overall-track aria-valuenow="${m.valuenow}", expected "${c.expect}" — the checklist on this very screen reads ${m.done} of ${m.steps} done${m.valuenow === String(c.weighted) ? `, and ${c.weighted} is the expectedMs weighting of hand-written per-step constants read aloud as progress on a run that has already stopped` : ""}`);
+            }
+            // (4) THE PAINT, measured as WIDTH, not as the inline string the
+            //     helper wrote — the mount, the SSE re-render and the 1s tick
+            //     all patch this element after the string is gone.
+            if (m.inline !== `${c.expect}%`) {
+              fail(D, `${at}: [data-overall-fill] inline width is "${m.inline}", expected "${c.expect}%"`);
+            }
+            if (!(m.trackW > 0)) {
+              fail(D, `${at}: the track measured ${m.trackW}px wide — a zero-width track makes the painted percentage undefined and every fill assertion vacuous`);
+              row.push(`${vp.w}:0w`);
+              continue;
+            }
+            paintedPcts.push(m.painted);
+            if (Math.abs(m.painted - c.expect) > 0.6) {
+              fail(D, `${at}: the fill PAINTS ${m.fillW}px of a ${m.trackW}px track = ${m.painted}%, expected ${c.expect}% — the number the eye reads off the bar and the number the screen reader is given have come apart`);
+            }
+            // (5) THE PHONE ARM: no clip, no page overflow, no restyle.
+            if (m.trackSW > m.trackCW) {
+              clipped++;
+              fail(D, `${at}: .prov-overall-track scrollWidth ${m.trackSW} > clientWidth ${m.trackCW} — the track is clipping its own fill`);
+            }
+            if (m.fillW > m.trackW + 0.5) {
+              clipped++;
+              fail(D, `${at}: the fill is ${m.fillW}px inside a ${m.trackW}px track — it paints outside the bar it is a fraction of`);
+            }
+            if (m.oLeft < -0.5 || m.oRight > m.pcw + 0.5) {
+              clipped++;
+              fail(D, `${at}: .prov-overall spans ${m.oLeft}..${m.oRight} against a ${m.pcw}px viewport — the failed bar is off-screen at rest`);
+            }
+            if (m.psw !== m.pcw) {
+              fail(D, `${at}: documentElement.scrollWidth ${m.psw} != clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the failed instance workspace is off-screen sideways`);
+            }
+            if (m.oDisplay === "none") {
+              fail(D, `${at}: .prov-overall computes display:none — the bar this leg just read an announcement off is not on the screen at this width`);
+            }
+            if (m.sumSW > m.sumCW + 0.5) {
+              clipped++;
+              fail(D, `${at}: the summary "${m.summary}" is ${m.sumSW}px inside a ${m.sumCW}px box — the one sentence saying the run is over is truncated`);
+            }
+            // THE RESTYLE CONTROL: the wide cell for this scenario+theme is the
+            // baseline. `.prov-overall.is-failed` paints the danger colour on
+            // the fill and the summary; a media block that changed either on
+            // phones would otherwise be invisible to every assertion above.
+            const key = `${c.scen}|${theme}`;
+            if (vp.w === BAR_VIEWPORTS[0].w) {
+              wideStyle.set(key, { fillBg: m.fillBg, sumColor: m.sumColor, summary: m.summary });
+            } else {
+              const base = wideStyle.get(key);
+              if (!base) {
+                fail(D, `${at}: no ${BAR_VIEWPORTS[0].w}px baseline was recorded for ${key} — the restyle comparison has nothing to compare against and did not run`);
+              } else {
+                if (m.fillBg !== base.fillBg) {
+                  restyled++;
+                  fail(D, `${at}: the is-failed fill computes ${m.fillBg} where the ${BAR_VIEWPORTS[0].w}px cell computed ${base.fillBg} — the failed state was RESTYLED at phone width`);
+                }
+                if (m.sumColor !== base.sumColor) {
+                  restyled++;
+                  fail(D, `${at}: the is-failed summary computes ${m.sumColor} where the ${BAR_VIEWPORTS[0].w}px cell computed ${base.sumColor} — the failed state was RESTYLED at phone width`);
+                }
+                if (m.summary !== base.summary) {
+                  fail(D, `${at}: the summary reads "${m.summary}" where the ${BAR_VIEWPORTS[0].w}px cell read "${base.summary}" — the headline changed with the viewport`);
+                }
+              }
+            }
+            row.push(`${vp.w}:v${m.valuenow}/${m.painted}%of${m.trackW}px/${m.done}of${m.steps}`);
+          }
+          process.stdout.write(`   ${c.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // LEG-LEVEL ANTI-VACUITY: a run in which no cell ever read a bar is not a
+      // clean run, whatever the per-cell refusals did.
+      if (barsSeen !== cells) {
+        fail(D, `only ${barsSeen} of ${cells} cells read a mounted master bar — this leg's claim is about every one of them`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean: the RENDERED \`.prov-overall-track\` announced ` +
+          `${BAR_CASES.map((c) => `${c.scen} ${c.expect}`).join(" / ")} at ` +
+          `${BAR_VIEWPORTS.map((v) => `${v.w}x${v.h}`).join(" and ")} in both themes, and the fill PAINTED ` +
+          `the same figure (${[...new Set(paintedPcts)].sort((a, b) => a - b).join("/")}% of the track measured ` +
+          `as width, not read off the inline style). ${weightedSeen} cell(s) announced the expectedMs-weighted ` +
+          `figure (${BAR_CASES.map((c) => c.weighted).join("/")}) — zero is the whole point of cch-w27-s6`,
+        );
+        okLine(
+          `THE EXPECTED FIGURE IS DERIVED, NOT ONLY RETYPED: ${stepsSeen} \`li.new-step\` counted across the ` +
+          `${cells} cells, and every cell required round(done/steps*100) to equal BOTH the announced value and ` +
+          `this leg's literal. If the bar and the checklist a person reads it against ever disagree, this reds ` +
+          `whichever of the two moved — a leg that only matched ${BAR_CASES[0].expect} against the helper that ` +
+          `produces ${BAR_CASES[0].expect} would not`,
+        );
+        okLine(
+          `THE PHONE ARM IS A SEPARATE CLAIM: at 320x568 the bar stayed inside the viewport, the track did not ` +
+          `clip its fill (${clipped} clips), the page did not scroll sideways, "Setup failed" stayed whole, and ` +
+          `\`.prov-overall.is-failed\` computed the SAME danger fill and summary colour as its own 1280 cell ` +
+          `(${restyled} restyles). The 1280 cell is the control, so a media block that quietly repainted the ` +
+          `failed state on phones reds here rather than passing as "it still fits"`,
+        );
+        okLine(
+          `HONEST LIMIT: this leg reads the bar AT REST after the mount settles. It does not drive an SSE step ` +
+          `transition, so \`patchProvisionOverall\`'s in-place re-announcement on a LIVE run is covered by the ` +
+          `pure-helper harness only (the \`cch-w27-s6\` tests in __app.test.mjs). What is now covered in a ` +
+          `browser, and was covered nowhere before, is the mounted terminal bar on both failed fixtures`,
         );
       }
     }

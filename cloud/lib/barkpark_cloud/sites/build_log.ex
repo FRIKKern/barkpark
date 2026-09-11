@@ -1,7 +1,16 @@
 defmodule BarkparkCloud.Sites.BuildLog do
   @moduledoc """
-  deploy-reliability `dr-bl-recorder-http-read-path` — the OPERATOR read path for
-  the black box recorder, addressed by DEPLOYMENT ID.
+  deploy-reliability `dr-bl-recorder-http-read-path` — the TEAM-SCOPED read path
+  for the black box recorder, addressed by DEPLOYMENT ID.
+
+  It shipped operator-gated and `dr-w19-site-build-log-is-operator-only` re-pointed
+  it: `:platform_admin_emails` is unset on prod and unsettable through any route,
+  so the one deploy-health read carrying a failed build's own words was readable by
+  zero accounts. The router now takes it through `with_team_site(conn, {:ability,
+  "read"}, …)` — the SAME door `GET /v1/sites/:id/deployments/:dep_id` uses — and
+  hands this module the already-team-scoped `site.id`. Nothing about WHAT crosses
+  the boundary changed (see the raw-bytes and field-allowlist sections below);
+  only who may ask.
 
   ## What this closes
 
@@ -9,7 +18,7 @@ defmodule BarkparkCloud.Sites.BuildLog do
   `Barkpark.Sites.DeployRunner.build_record/2` reads a per-build terminal record
   keyed on `{slug, build_id}`, and the box's admin door already serves it
   (`GET /v1/admin/site-deploy?slug=…&build_id=…&record=1`). Nothing in the control
-  plane ever CALLED it. An operator asking "why did deployment `<uuid>` fail?" had
+  plane ever CALLED it. A team asking "why did deployment `<uuid>` fail?" had
   exactly two answers: the one-line `failure_reason` on the Deployment row, or an
   SSH session. This module is the third.
 
@@ -28,13 +37,14 @@ defmodule BarkparkCloud.Sites.BuildLog do
   The defect this module refuses to reproduce: on the box's poll door, a
   superseded build, a never-started one and a nonexistent slug all collapse into
   one 404, which `SiteDeployController.resolve_status_match/2` documents the
-  control plane treats as KEEP WAITING. Reused here that would tell an operator
+  control plane treats as KEEP WAITING. Reused here that would tell a reader
   "not yet" about a log that was deleted a week ago.
 
   So the states are separated BY STATUS CODE, not only by a body field — a client
   that reads nothing but the status still cannot conflate them:
 
-    * **404 `not_found`** — no such deployment, or not this site's. Existence-leak
+    * **404 `not_found`** — no such deployment, not this site's, or not a site
+      this caller's team owns (the router's `with_team_site/3` answers that one). Existence-leak
       parity with `GET /v1/sites/:id/deployments/:dep_id`, deliberately identical
       so this route leaks no deployment ids the sibling withholds.
     * **410 `build_log_evicted`** — a TOMBSTONE says so. The bytes existed and
@@ -71,6 +81,10 @@ defmodule BarkparkCloud.Sites.BuildLog do
   `journal_command` naming where the bytes are — which carries no credential
   surface and is strictly more diagnostic than the one-line `failure_reason`.
 
+  That refusal is load-bearing NOW that the audience is a whole team rather than
+  an empty operator allowlist: the widening moved WHO may ask, never WHAT is
+  served.
+
   Serving the bytes needs SCRUB-AT-WRITE on the box first (`strip_ansi |> scrub`,
   paid once at write). That is a `deploy/` + `api/` slice, not a control-plane one.
 
@@ -79,13 +93,13 @@ defmodule BarkparkCloud.Sites.BuildLog do
   Same doctrine as the box door, for the same reason and one more: this end also
   crosses a trust boundary. The box's answer is a decoded JSON map from a REMOTE
   process; rendering it wholesale would mean the day the box grows a `log_tail`
-  field is the day this route starts serving credentials to anyone the operator
-  gate lets through. Naming each key means a new upstream field is invisible here
+  field is the day this route starts serving credentials to every member of the
+  owning team. Naming each key means a new upstream field is invisible here
   until a human adds it on purpose.
 
   ## Not SSE-broadcast
 
-  Pull-only, one deployment per request, operator-gated. The live console
+  Pull-only, one deployment per request, team-scoped. The live console
   (`Deployment.console`) is the broadcast surface and it is a different, already
   worker-redacted stream. A recorded build log must never ride a fan-out channel:
   the audience of an SSE topic is everyone subscribed to it, which is not the
@@ -131,7 +145,7 @@ defmodule BarkparkCloud.Sites.BuildLog do
   Resolve `{site_id, deployment_id}` to the wire answer — the whole route in one
   function, so the registry-shaped router carries ten lines and no policy.
 
-  The site scoping is NOT decoration. `dep_id` alone would let an operator read
+  The site scoping is NOT decoration. `dep_id` alone would let a caller read
   any deployment through any site's URL, which makes an audit line about
   `/v1/sites/<a>/…` a lie about which site was read. A deployment that does not
   belong to THIS site is the same 404 as one that does not exist, matching
