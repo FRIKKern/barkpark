@@ -255,10 +255,61 @@ has_site_route_marker() { grep -qE "$(site_route_marker_re)" "$1"; }
 # runs (no fixture fork — the test proves the real primitives).
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# FENCE TWO — A RELEASE THAT CONTAINS ANY SYMLINK NEVER GOES LIVE (task-63877435cf4ad70a).
+#
+# WHY IT IS HERE AND NOT IN THE CADDYFILE. A staged symlink is a SERVED file:
+# `root * $ROOT/current` + `file_server` dereferences it, so `leak.txt ->
+# /opt/barkpark/.env` is an HTTP-reachable secret (site-spawner charter D90).
+# The web-server-side defence everyone reaches for -- `disable_symlinks` -- is
+# DECLINED ON PURPOSE, and the reason is not taste:
+#
+#   1. IT IS NOT A CADDY DIRECTIVE AT ALL. Measured on caddy v2.11.4
+#      (2026-09-11, transcript in the PR): `disable_symlinks` is rejected as an
+#      unknown file_server SUBDIRECTIVE, as an unrecognized SITE directive, as
+#      an unrecognized GLOBAL option, and as an unknown field on the
+#      `http.handlers.file_server` JSON module. It is an NGINX directive. So
+#      emitting it does not weaken or harden serving -- it makes the Caddyfile
+#      UNPARSEABLE, and this Caddyfile is SHARED: one bad block and `caddy run`
+#      refuses the whole file, taking every other site AND the slot
+#      reverse_proxy down with it.
+#   2. EVEN IF IT EXISTED, the served root IS the `current` symlink this very
+#      function repoints (D11). A "refuse anything reached through a symlink"
+#      rule refuses the root itself, so it would refuse EVERY request to EVERY
+#      static site. Caddy's file_server has no root-only exemption.
+#
+# So the second layer lives at the FLIP, where the tree is on disk, fully
+# staged, and still not reachable: walk the candidate release and refuse to
+# repoint `current` at it if it contains any symlink. Fence one is the packer's
+# client-side refusal (charter D120, internal/cli/sites_tarball.go); fence two
+# is this. `find -type l` LSTATS, so it sees the link itself and never follows
+# it, and it is scoped to the candidate dir, so a symlink elsewhere on the box
+# is none of its business. A refusal leaves the live symlink UNMOVED -- the old
+# release keeps serving, which is the safe direction.
+#
+# NOT COVERED, on purpose: --rollback (do_rollback) repoints at a release that
+# already passed THIS fence on the run that first published it, and re-walking
+# it would turn a recovery path into a second place to fail.
+# ---------------------------------------------------------------------------
+SWITCH_REFUSED_LINKS=""
+release_symlinks() { # <release-dir> -> prints each symlink found, one per line
+  [ -d "$1" ] || return 0
+  find "$1" -type l 2>/dev/null
+}
+
 # SWITCH: atomic current -> releases/<BUILD_ID>.  Records the build we flip away
 # from in .previous so --rollback (and a forward re-rollback) is a pure pointer.
+#
+# Returns 2 (not 1) when the symlink fence above bites, so the caller can tell
+# "the rename failed" from "we refused to publish these bytes" and word it
+# honestly to the operator.
 do_switch() {
   local prev=""
+  local links; links="$(release_symlinks "$RELEASES/$BUILD_ID")"
+  if [ -n "$links" ]; then
+    SWITCH_REFUSED_LINKS="$(printf '%s\n' "$links" | head -5 | tr '\n' ' ')"
+    return 2
+  fi
   [ -L "$CURRENT" ] && prev="$(basename "$(readlink "$CURRENT")")"
   ln -sfn "releases/$BUILD_ID" "$CURRENT.tmp" || return 1
   atomic_symlink_swap "$CURRENT.tmp" "$CURRENT" || { rm -f "$CURRENT.tmp"; return 1; }
@@ -814,8 +865,12 @@ if [ "$MODE" = selftest ]; then
   # and the staging-time RETIRE key (D80). 36 of the 44 are unit rows outside
   # every optional block, so BOTH floors move by those; the remaining 8 need a
   # real caddy(1) and land in FULL only.
-  SELFTEST_FLOOR_MIN=112
-  SELFTEST_FLOOR_FULL=502
+  # 2026-09-11: +27 (112->123, 502->529) for the symlink flip fence
+  # (task-63877435cf4ad70a) — 11 primitive rows on do_switch (always run, so BOTH
+  # floors move) and 16 e2e rows driving the real engine with a staged
+  # `leak.txt -> /opt/barkpark/.env` plus its clean-release control (FULL only).
+  SELFTEST_FLOOR_MIN=123
+  SELFTEST_FLOOR_FULL=529
   TESTS=0; FAILS=0
   check() { # <label> <cond-cmd...>
     local label="$1"; shift
@@ -842,6 +897,42 @@ if [ "$MODE" = selftest ]; then
   check "current -> releases/b2"        [ "$(live_build)" = b2 ]
   check ".previous records b1"          [ "$(cat "$ROOT/.previous")" = b1 ]
   check "no current.tmp residue"        [ ! -e "$CURRENT.tmp" ]
+
+  # -------------------------------------------------------------------------
+  # FENCE TWO, AT THE PRIMITIVE (task-63877435cf4ad70a). The e2e block below
+  # proves this end to end through the real engine, but e2e is OPTIONAL (it needs
+  # the fake-bin fixtures), so the fence is ALSO pinned here, in the always-run
+  # tier, on the same do_switch the deploy path calls. Its own tmp site keeps the
+  # b1..b7 fixture state below untouched.
+  # -------------------------------------------------------------------------
+  echo "[selftest] SWITCH refuses a release containing a symlink (disable_symlinks is declined; this is the fence)"
+  SLS="$TD/symlink-fence"
+  mkdir -p "$SLS/releases/leak" "$SLS/releases/clean" "$SLS/releases/deep/assets"
+  printf 'x' > "$SLS/releases/leak/index.html"
+  printf 'x' > "$SLS/releases/clean/index.html"
+  printf 'x' > "$SLS/releases/deep/index.html"
+  ln -sfn /opt/barkpark/.env "$SLS/releases/leak/leak.txt"
+  ln -sfn ../../../../etc/passwd "$SLS/releases/deep/assets/pw"
+  sl_save_root="$ROOT"; sl_save_rel="$RELEASES"; sl_save_cur="$CURRENT"; sl_save_bid="${BUILD_ID:-}"
+  ROOT="$SLS"; RELEASES="$SLS/releases"; CURRENT="$SLS/current"
+  # A clean release goes live first, so "the live link never moved" has a subject.
+  BUILD_ID=clean; do_switch; sl_clean_rc=$?
+  check "a CLEAN release flips (rc 0)"              [ "$sl_clean_rc" = 0 ]
+  check "…and current really points at it"          [ "$(readlink "$CURRENT")" = releases/clean ]
+  check "precondition: the leak fixture really holds a symlink (non-vacuous)" \
+    [ -L "$SLS/releases/leak/leak.txt" ]
+  BUILD_ID=leak; do_switch; sl_leak_rc=$?
+  check "a release with a ROOT symlink is REFUSED (rc 2, not 0 and not 1)" [ "$sl_leak_rc" = 2 ]
+  refused_names() { case "$SWITCH_REFUSED_LINKS" in *"$1"*) return 0;; *) return 1;; esac; }
+  check "…the refusal NAMES the link"               refused_names leak.txt
+  check "…the LIVE symlink never moved"             [ "$(readlink "$CURRENT")" = releases/clean ]
+  check "…and no current.tmp residue was left"      [ ! -e "$CURRENT.tmp" ]
+  BUILD_ID=deep; do_switch; sl_deep_rc=$?
+  check "a NESTED symlink is refused too (the walk is not root-only)" [ "$sl_deep_rc" = 2 ]
+  check "…and that refusal names the nested path"   refused_names assets/pw
+  check "…live still on clean after the nested refusal" [ "$(readlink "$CURRENT")" = releases/clean ]
+  ROOT="$sl_save_root"; RELEASES="$sl_save_rel"; CURRENT="$sl_save_cur"; BUILD_ID="$sl_save_bid"
+  check "the fence block restored the fixture globals" [ "$(live_build)" = b2 ]
 
   echo "[selftest] ROLLBACK repoints to the previous release, forward-rollable"
   do_rollback
@@ -952,7 +1043,9 @@ if [ "$MODE" = selftest ]; then
     SITE_SLUG="$__save"; return "$__rc"
   }
   bp_verdict() { bp_rw "$1" "$2" "$3"; echo $?; }
-  # (1) THE PRE-FIX STATIC SHAPE, byte for byte as guerrilla carries it.
+  # (1) THE PRE-FIX STATIC SHAPE, byte for byte as guerrilla carries it. Like
+  #     every emitted block it carries NO `disable_symlinks` — declined, see
+  #     release_symlinks/do_switch; the fixtures mirror what the arm emits.
   { printf 'example.com {\n'
     printf "\t# BARKPARK_SITE_ROUTE:bare1 — static site 'bare1' served from its immutable current release.\n"
     printf '\thandle_path /sites/bare1/* {\n'
@@ -1595,6 +1688,11 @@ mkdir -p dist
   [ -n "$corpus" ] && printf '<meta name="bp-corpus-status" content="%s">\n' "$corpus"
   printf '</head><body><h1>hello</h1></body></html>\n'
 } > dist/index.html
+# THE SYMLINK-LEAK FIXTURE (task-63877435cf4ad70a). A build that drops a symlink
+# into dist/ — the charter-D90 shape verbatim. STAGE's `cp -a` preserves it, so
+# the release tree really carries a link pointing outside itself and the flip
+# fence is measured on the genuine article, not on a mock.
+[ -f ./.leak-symlink ] && ln -sfn /opt/barkpark/.env dist/leak.txt
 exit 0
 FAKENPM
     chmod +x "$FAKEBIN"/*
@@ -1663,6 +1761,63 @@ FAKENPM
     cp "$E2E/e1-index.bak" "$E2E_SITE/releases/e1/index.html"
     check "the tree is restored (the digest comes back)" \
       sh -c "[ \"\$(cd '$E2E_SITE/releases/e1' && find . -type f ! -name '.bp-build-sha256' ! -name '.bp-prebuilt-sha256' ! -name '.bp-health-failed' -exec $SHA_CMD {} + | LC_ALL=C sort | $SHA_CMD | cut -d' ' -f1)\" = '$E1_SHA' ]"
+
+    # -----------------------------------------------------------------------
+    # FENCE TWO, E2E (task-63877435cf4ad70a): A RELEASE CARRYING A SYMLINK IS
+    # REFUSED AT THE FLIP, AND A CLEAN ONE STILL FLIPS.
+    #
+    # `disable_symlinks` is DECLINED (it is not a Caddy directive at any level —
+    # measured on caddy 2.11.4 — and the served root IS the current symlink), so
+    # this is the ONLY server-side layer behind the packer's refusal. It is
+    # driven through the REAL engine end to end: the fake npm stages
+    # `dist/leak.txt -> /opt/barkpark/.env`, STAGE's `cp -a` preserves it, and
+    # SWITCH must refuse rather than publish an HTTP-reachable secret.
+    #
+    # BOTH directions are asserted, and the CLEAN arm is the control: delete the
+    # `find -type l` refusal in do_switch and the leak rows go red BY NAME while
+    # the clean rows stay green — which is what separates "the fence works" from
+    # "the deploy happens to fail here".
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: SWITCH REFUSES a release containing a symlink; a clean release still flips"
+    E2E_LIVE_BEFORE="$(livenow)"
+    check "precondition: a previous release IS live before the refusal (non-vacuous)" \
+      [ "$E2E_LIVE_BEFORE" = releases/e1 ]
+    : > "$SRC/.leak-symlink"
+    rc="$(e2e_deploy sl1)"
+    check "the fixture really staged a symlink (control on the FIXTURE, not the verdict)" \
+      [ -L "$E2E_SITE/releases/sl1/leak.txt" ]
+    check "…and it really points outside the release" \
+      [ "$(readlink "$E2E_SITE/releases/sl1/leak.txt")" = /opt/barkpark/.env ]
+    check "leak release: the deploy exits 16 (SWITCH failed)"  [ "$rc" = 16 ]
+    check "leak release: SWITCH is narrated as FAILED"         saw SWITCH failed sl1
+    check "leak release: the refusal NAMES the offending link" \
+      grep -q 'leak.txt' "$E2E/out.log"
+    check "leak release: the refusal says the release contains symlink(s)" \
+      grep -q 'the staged release contains symlink(s)' "$E2E/out.log"
+    check "leak release: it is NOT reported as a swap/permissions failure" \
+      no_log_match 'atomic swap of current -> releases/sl1 failed'
+    check "leak release: the LIVE symlink never moved"         [ "$(livenow)" = "$E2E_LIVE_BEFORE" ]
+    # `-e` is FALSE for a DANGLING link, so it would pass even after a bad flip
+    # on a box with no /opt/barkpark/.env — measured: it stayed green under the
+    # mutation. Test for the LINK itself.
+    check "leak release: leak.txt is NOT present under the served root at all" \
+      sh -c "[ ! -L '$E2E_SITE/current/leak.txt' ] && [ ! -e '$E2E_SITE/current/leak.txt' ]"
+    check "leak release: RETIRE never ran (the run stopped at the flip)" \
+      no_log_match '^BPSTAGE name=RETIRE .*build_id=sl1'
+    # THE CONTROL ARM — the fence must not be a blanket "SWITCH now fails".
+    # `npm run build` never cleans dist/, so the staged link survives the
+    # sentinel — remove both, or every LATER deploy inherits it.
+    rm -f "$SRC/.leak-symlink" "$SRC/dist/leak.txt"
+    rc="$(e2e_deploy cl1)"
+    check "clean release: the deploy still exits 0"            [ "$rc" = 0 ]
+    check "clean release: SWITCH ok"                           saw SWITCH ok cl1
+    check "clean release: the flip really happened"            [ "$(livenow)" = releases/cl1 ]
+    check "clean release: it carries NO symlink (control)" \
+      sh -c "[ -z \"\$(find '$E2E_SITE/releases/cl1' -type l)\" ]"
+    # Restore the state the following blocks were written against: e1 live.
+    E2E_REV=rev-1 rc="$(e2e_deploy e1)"
+    check "state restored for the blocks below: e1 is live again" \
+      [ "$(livenow)" = releases/e1 ]
 
     echo "[selftest] e2e: a no-op redeploy of the live build speaks on every stage"
     : > "$SRC/.npm-calls"
@@ -2813,6 +2968,8 @@ FAKECP
       HUROOT="$HU/sites/hideup/current"
       # THE PRE-HIDE SHAPE, byte for byte as guerrilla carries it: this engine's
       # own marker comment, the handle_path, the root, and a BARE file_server.
+      # (Bare of `hide`, not of `disable_symlinks` — that one is declined on
+      # every site; the flip fence release_symlinks/do_switch covers it.)
       { printf 'example.com {\n'
         printf "\t# BARKPARK_SITE_ROUTE:hideup — static site 'hideup' served from its immutable current release.\n"
         printf '\t# handle_path strips the /sites/hideup prefix; root follows the symlink.\n'
@@ -3809,6 +3966,10 @@ arm_caddy_site_route() {
     # Idempotent by construction: the awk demands EXACTLY ONE bare `file_server`
     # inside this site's block, so an already-hidden block (and every node-route
     # block, which has no file_server at all) rewrites nothing.
+    # The upgrade adds `hide` and NOTHING ELSE — no `disable_symlinks`, on
+    # purpose (task-63877435cf4ad70a): it is not a Caddy directive at any level
+    # and the served root IS the current symlink; the fence is at the flip, in
+    # release_symlinks/do_switch above.
     # ---------------------------------------------------------------------
     local upgraded=0
     local utmp; utmp="$(mktemp)"
@@ -3914,6 +4075,10 @@ arm_caddy_site_route() {
 		# is packaging junk and repo/secret shapes: a staged file is a SERVED file,
 		# and a release staged before the extractor learned to refuse junk still
 		# has \`.DS_Store\` and \`._*\` sidecars sitting in its root.
+		# NO \`disable_symlinks\` HERE, ON PURPOSE (task-63877435cf4ad70a): it is not a
+		# Caddy directive at any level (measured, caddy 2.11.4) and even if it were,
+		# \`root\` above IS the current symlink, so it would refuse every request. The
+		# symlink threat is fenced at the FLIP instead — see release_symlinks/do_switch.
 		file_server {
 			hide $HIDE_LIST
 		}
@@ -3998,7 +4163,17 @@ fi
 
 # ---- SWITCH (D11) — atomic symlink flip, no Caddy reload -------------------
 emit SWITCH started
-if ! do_switch; then
+do_switch; switch_rc=$?
+if [ "$switch_rc" = 2 ]; then
+  # FENCE TWO bit (see release_symlinks above): the staged tree contains a
+  # symlink, and a staged symlink is a SERVED file. Refuse the flip rather than
+  # publish it — `disable_symlinks` is not available to us (it is not a Caddy
+  # directive at any level), so this is where that threat is closed.
+  DETAIL="refusing to publish releases/$BUILD_ID — the staged release contains symlink(s): ${SWITCH_REFUSED_LINKS}— a symlink under the served root is dereferenced by file_server, so it would be an HTTP-reachable file outside the release (charter D90). The live release is UNTOUCHED and still serving. Re-pack without symlinks (the packer refuses them too, charter D120) and re-deploy"
+  log "SWITCH REFUSED for build $BUILD_ID — symlink in the staged release, live release untouched: $DETAIL"
+  emit SWITCH failed "$DETAIL"
+  exit 16
+elif [ "$switch_rc" != 0 ]; then
   DETAIL="atomic swap of current -> releases/$BUILD_ID failed — healthy but couldn't go live; check $ROOT is writable and 'current' isn't a dir or an immutable file"
   log "SWITCH failed for build $BUILD_ID — live release untouched (fail closed): $DETAIL"
   emit SWITCH failed "$DETAIL"
