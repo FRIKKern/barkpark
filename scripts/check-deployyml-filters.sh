@@ -26,8 +26,18 @@
 #            filter regex — every merge that can START this workflow must be
 #            able to DEPLOY something. A path that is deliberately targetless
 #            (editing the workflow file itself) must say so with a
-#            `deploy-filter-exempt:` comment in the block ABOVE it, which makes
-#            the exception explicit and reviewable instead of invisible.
+#            `deploy-filter-exempt[<job>,…]:` comment in the block ABOVE it,
+#            which makes the exception explicit and reviewable instead of
+#            invisible — and BOUNDED: the annotation names the job(s) it
+#            deliberately does not target, each named job's regex must indeed
+#            NOT match the entry, the entry must still target every job it did
+#            not name, and an entry exempt from EVERY job must be a single file.
+#            A tree (`x/**`) that starts the workflow deploys something, so a
+#            tree can never be fully exempt. Measured (task-9ece1f95b89111cf):
+#            an unbounded `deploy-filter-exempt:` over `internal/**` plus
+#            `internal|` stripped from both regexes read OK at rc=0 — the
+#            annotation silenced the forward arm, the reverse arm had no prefix
+#            left to judge, and TARGET_PAIRS did not list internal.
 #
 #   reverse  every alternation prefix inside a `changes` job filter must be
 #            REACHABLE from `on.push.paths` — a prefix the workflow never starts
@@ -44,14 +54,25 @@
 #            `cmd/` matching the control-plane filter while instance-deploy.sh is
 #            the only thing that builds the agent binary out of it.
 #
+#   coverage the table above is an ENUMERATION, and an enumeration is a
+#            snapshot: a path it omits is a path the target arm never judges.
+#            So it is held to `on.push.paths` as a PREDICATE, both ways: every
+#            listed entry that is not exempt from every job must have a row
+#            naming a job it is not exempt from (UNDECLARED otherwise), and
+#            every row's prefix must be a listed entry (UNLISTED otherwise —
+#            a row whose tree cannot start the workflow guards nothing).
+#
 # `--selftest` PROVES the tripwire on temp copies (plants nothing in the tree):
 # the real file passes, a copy with `templates` stripped from the instance regex
 # FAILS, an unexplained targetless path FAILS, an unreachable job-filter prefix
 # FAILS, a deleted required path FAILS, a copy with `cmd` stripped from the
 # instance regex FAILS ON THE TARGET ARM ALONE (every other arm reads clean —
-# that is the whole point of the arm), and a copy that is not parseable YAML at
-# all FAILS. Modelled on scripts/connectors-catalog-drift-check.sh's bundled
-# selftest.
+# that is the whole point of the arm), a copy that is not parseable YAML at
+# all FAILS, a tree exempted from every job with its prefix stripped from both
+# regexes (Mutation C) FAILS, an unbounded exemption FAILS, an exemption whose
+# named job still matches FAILS, and a routed path with no TARGET_PAIRS row
+# FAILS on the coverage predicate alone. Modelled on
+# scripts/connectors-catalog-drift-check.sh's bundled selftest.
 
 set -euo pipefail
 
@@ -150,8 +171,11 @@ PY
 # The `on.push.paths` entries, one per line, unquoted. Reads only the block
 # between `paths:` and the next top-level key, so a `paths:` elsewhere in the
 # file (or a job-level one) can never widen the set. An entry whose preceding
-# comment block carries `deploy-filter-exempt:` is emitted with a trailing
-# "\tEXEMPT" column.
+# comment block carries `deploy-filter-exempt[<jobs>]:` is emitted with a
+# trailing "\tEXEMPT:<jobs>" column (`EXEMPT:cp,instance`); the legacy
+# unbounded spelling `deploy-filter-exempt:` yields "\tEXEMPT:" with an EMPTY
+# job list, which the forward arm reds as UNBOUNDED — an exemption that names
+# nothing exempts from everything, which is how Mutation C read green.
 extract_paths() {
   awk '
     # `on:` and its quoted spellings are the same key to GitHub (YAML 1.1
@@ -164,15 +188,27 @@ extract_paths() {
     in_on && /^[A-Za-z"\047]/ { in_on = 0 }
     in_on && /^    paths:/    { in_paths = 1; exempt = 0; next }
     in_paths && /^    [a-z]/  { in_paths = 0 }
-    in_paths && /^ *#/        { if ($0 ~ /deploy-filter-exempt:/) exempt = 1; next }
+    in_paths && /^ *#/ {
+      if ($0 ~ /deploy-filter-exempt/) {
+        exempt = 1
+        jobs = ""
+        if (match($0, /deploy-filter-exempt\[[^]]*\]/)) {
+          # "deploy-filter-exempt[" is 21 bytes; drop it and the closing "]".
+          jobs = substr($0, RSTART + 21, RLENGTH - 22)
+          gsub(/[ \t]/, "", jobs)
+        }
+      }
+      next
+    }
     in_paths && /^ *- / {
       line = $0
       sub(/^ *- */, "", line)
       gsub(/"/, "", line)
       gsub(/\047/, "", line)
       if (line == "") next
-      print line "\t" (exempt ? "EXEMPT" : "REQUIRED")
+      print line "\t" (exempt ? "EXEMPT:" jobs : "REQUIRED")
       exempt = 0
+      jobs = ""
     }
   ' "$1"
 }
@@ -194,6 +230,17 @@ extract_paths() {
 extract_regexes() {
   deploy_yaml_job_lines "$1" changes \
     | { grep -oE "grep -qE '[^']+'" || true; } | sed -E "s/^grep -qE '//; s/'$//"
+}
+
+# The same filters, each PAIRED with the job flag its line sets — one
+# "<job>\t<regex>" per line (`cp\t^(cloud|…)/`). The bounded-exemption arm needs
+# to know WHICH job a regex dispatches: an exemption that names `cp` is a claim
+# about the cp regex specifically. Same scope as extract_regexes; a filter line
+# that sets no `<job>=true` is not a dispatch and is not paired.
+extract_job_regexes() {
+  deploy_yaml_job_lines "$1" changes \
+    | { grep -oE "grep -qE '[^']+'; then [a-z_]+=true" || true; } \
+    | sed -E "s/^grep -qE '([^']+)'; then ([a-z_]+)=true$/\2\t\1/"
 }
 
 # A path glob reduced to ONE representative file path, which is what the job
@@ -624,7 +671,132 @@ TARGET_PAIRS=(
   "templates|instance|the content box builds sites FROM templates/ (charter D57a)"
   "api|instance|instance-deploy.sh builds and releases the api/ Phoenix app onto the box"
   "cloud|cp|the control plane is what cloud/ runs on"
+  "internal|cp|deploy.yml's control-plane job cross-builds bp-provisioner from ./cmd/barkpark-provisioner, which imports internal/cli/cloud, internal/hetzner, internal/provisioner (cmd/barkpark-provisioner/main.go); an internal-only fix must roll the CP or the stale binary keeps provisioning (bit us 2026-07-24)"
+  "internal|instance|instance-deploy.sh's 'go build ./cmd/barkpark-agent' pulls internal/agent (cmd/barkpark-agent imports it) — the agent binary is rebuilt ONLY there"
+  "deploy|cp|deploy.yml's control-plane job scp's deploy/cp-deploy.sh onto the CP and runs it — the deploy script IS the artifact"
+  "deploy|instance|deploy.yml's instance job scp's deploy/instance-deploy.sh onto guerrilla and runs it, and it installs deploy/systemd/*.service"
 )
+
+# ── coverage: the table above held to on.push.paths as a PREDICATE ───────────
+#
+# THE HOLE THIS ARM CLOSES
+#
+# TARGET_PAIRS is an enumeration. Measured (task-9ece1f95b89111cf, Mutation C):
+# with `internal/**` annotated exempt and `internal|` stripped from BOTH job
+# regexes, forward said "exempt", reverse had no `internal` prefix left to find
+# unreachable, presence only pins scripts/connectors, and the target arm — the
+# one arm that could have driven internal/x through the step — had no row for
+# it. Green at rc=0 over a workflow where an internal-only merge fires neither
+# deploy job. A path the table omits is a path the target arm never judges, and
+# nothing said the table had to be complete.
+#
+# So: every on.push.paths entry that is not exempt from EVERY job must have at
+# least one TARGET_PAIRS row for its prefix naming a job it is not exempt from
+# (UNDECLARED otherwise), and every row's prefix must be a listed entry
+# (UNLISTED otherwise — a row for a tree that cannot start the workflow guards
+# nothing, and it is how a deleted path+regex pair hides behind a still-green
+# target line). A row naming a job the entry is exempt from is a CONTRADICTION.
+# The bounded-exemption rule in check_file (a tree can never be fully exempt)
+# is what stops an author from escaping this predicate by annotation.
+
+# The prefix a TARGET_PAIRS row would carry for one on.push.paths glob:
+#   "cloud/**" -> cloud   "scripts/connectors/**" -> scripts/connectors
+# A shape this cannot reduce (a mid-path wildcard, a bare file) is printed
+# verbatim, so it can only be satisfied by a row spelling it the same way — a
+# new shape must be taught here deliberately, never passed over.
+prefix_of_glob() {
+  case "$1" in
+    */\*\*) printf '%s\n' "${1%/\*\*}" ;;
+    */\*)    printf '%s\n' "${1%/\*}" ;;
+    *)      printf '%s\n' "$1" ;;
+  esac
+}
+
+# check_target_coverage <yml> <label> — 0 if the predicate holds both ways.
+check_target_coverage() {
+  local yml="$1" label="$2"
+  local path state ex_jobs prefix pair p_prefix p_job rows failures=0 covered
+  local listed=""
+
+  while IFS=$'\t' read -r path state; do
+    [ -n "$path" ] || continue
+    prefix="$(prefix_of_glob "$path")"
+    listed="${listed}|${prefix}|"
+    ex_jobs=""
+    case "$state" in EXEMPT:*) ex_jobs="${state#EXEMPT:}" ;; esac
+
+    rows=0; covered=0
+    for pair in "${TARGET_PAIRS[@]}"; do
+      p_prefix="${pair%%|*}"
+      p_job="${pair#*|}"; p_job="${p_job%%|*}"
+      [ "$p_prefix" = "$prefix" ] || continue
+      rows=$((rows + 1))
+      case ",$ex_jobs," in
+        *",$p_job,"*)
+          echo "  CONTRADICTION  $path  ->  exempt from '$p_job' yet TARGET_PAIRS says $prefix must reach $p_job" >&2
+          failures=$((failures + 1)) ;;
+        *) covered=$((covered + 1)) ;;
+      esac
+    done
+
+    if [ "$covered" -gt 0 ]; then
+      echo "  covered  $path  ->  $covered TARGET_PAIRS row(s) for $prefix"
+      continue
+    fi
+
+    # No row names a job this entry must reach. That is fine ONLY for an entry
+    # exempt from every job — and check_file has already required such an entry
+    # to be a single file (a tree can never be fully exempt). So a fully-exempt
+    # entry here is a file the forward arm vouched for; anything else is an
+    # entry the target arm never judges.
+    case "$state" in
+      EXEMPT:?*)
+        if [ "$rows" -eq 0 ] && [ -n "$ex_jobs" ] && exempt_covers_every_job "$yml" "$ex_jobs"; then
+          echo "  covered  $path  ->  exempt from every job; no row expected"
+          continue
+        fi ;;
+    esac
+    echo "  UNDECLARED  $path  ->  no TARGET_PAIRS row names a job '$prefix' must reach; the target arm never judges it" >&2
+    failures=$((failures + 1))
+  done <<EOF
+$(extract_paths "$yml")
+EOF
+
+  for pair in "${TARGET_PAIRS[@]}"; do
+    p_prefix="${pair%%|*}"
+    case "$listed" in
+      *"|$p_prefix|"*) ;;
+      *)
+        echo "  UNLISTED  $p_prefix  ->  TARGET_PAIRS names it but no on.push.paths entry is '$p_prefix/**'; a merge there never starts the workflow, so the row guards nothing" >&2
+        failures=$((failures + 1)) ;;
+    esac
+  done
+
+  if [ "$failures" -gt 0 ]; then
+    echo "FAIL[$label] coverage: $failures on.push.paths <-> TARGET_PAIRS mismatch(es)." >&2
+    echo "Fix: for UNDECLARED, add a '<prefix>|<job>|<why>' row derived from what a deploy script BUILDS from" >&2
+    echo "that tree (never from the regexes under test). For UNLISTED, list the tree under on.push.paths" >&2
+    echo "or delete the row. For CONTRADICTION, the exemption and the row disagree — one of them is wrong." >&2
+    return 1
+  fi
+  return 0
+}
+
+# exempt_covers_every_job <yml> <cp,instance> — 0 iff the comma list names
+# every job the `changes` job dispatches.
+exempt_covers_every_job() {
+  local yml="$1" ex_jobs="$2" jr_job jr_re
+  while IFS=$'\t' read -r jr_job jr_re; do
+    [ -n "$jr_job" ] || continue
+    case ",$ex_jobs," in
+      *",$jr_job,"*) ;;
+      *) return 1 ;;
+    esac
+  done <<EOF
+$(extract_job_regexes "$yml")
+EOF
+  return 0
+}
 
 # Set by check_target so the OK line can report a NON-ZERO count — an arm that
 # silently checked nothing is a green line that means nothing.
@@ -685,7 +857,15 @@ check_target() {
     return 1
   fi
 
-  if [ "$rc" -ne 0 ]; then
+  # Completeness, asserted and not assumed: a non-empty table that omits a
+  # listed tree certified nothing ABOUT THAT TREE.
+  local coverage_rc=0
+  check_target_coverage "$yml" "$label" || coverage_rc=$?
+  if [ "$coverage_rc" -ne 0 ]; then
+    rc=1
+  fi
+
+  if [ "$failures" -gt 0 ]; then
     echo "FAIL[$label]: $failures declared (prefix -> job) pair(s) reached the WRONG job." >&2
     echo "Fix: add the prefix to that job's grep -qE regex in the 'changes' job. A prefix already" >&2
     echo "matched by the OTHER job's regex is invisible to the forward arm — that is this arm's job." >&2
@@ -717,17 +897,101 @@ check_file() {
     return 1
   fi
 
-  local path state sample matched re
+  # The bounded-exemption arm needs regex -> job. A `changes` filter this
+  # pairing cannot read is a dispatch the arm cannot answer for: fail CLOSED.
+  local job_regexes all_jobs="" jr_job jr_re
+  job_regexes="$(extract_job_regexes "$yml")"
+  if [ -z "$job_regexes" ]; then
+    echo "FAIL[$label]: no \"grep -qE '…'; then <job>=true\" filters found inside the 'changes' job — the" >&2
+    echo "job pairing is broken, so no exemption can be bounded and no path can be judged." >&2
+    return 1
+  fi
+  while IFS=$'\t' read -r jr_job jr_re; do
+    [ -n "$jr_job" ] || continue
+    all_jobs="$all_jobs|$jr_job|"
+  done <<EOF
+$job_regexes
+EOF
+
+  local path state sample matched re regexes_for_path
+  local ex_jobs ex_job ex_bad ex_full remaining
   while IFS=$'\t' read -r path state; do
     [ -n "$path" ] || continue
-    if [ "$state" = "EXEMPT" ]; then
-      exempted=$((exempted + 1))
-      echo "  exempt   $path (deploy-filter-exempt)"
-      continue
-    fi
+    sample="$(sample_for "$path")"
+
+    case "$state" in
+      EXEMPT:*)
+        exempted=$((exempted + 1))
+        ex_jobs="${state#EXEMPT:}"
+        if [ -z "$ex_jobs" ]; then
+          echo "  UNBOUNDED  $path  ->  'deploy-filter-exempt:' names no job; write 'deploy-filter-exempt[<job>,…]:' naming the job(s) it deliberately does not target" >&2
+          failures=$((failures + 1))
+          continue
+        fi
+        # Every named job must exist, and its regex must NOT match the entry —
+        # an exemption over a path the job DOES target is a false statement,
+        # and a false statement is what the next author copies.
+        ex_bad=0
+        while IFS= read -r ex_job; do
+          [ -n "$ex_job" ] || continue
+          case "$all_jobs" in
+            *"|$ex_job|"*) ;;
+            *)
+              echo "  UNKNOWN-JOB  $path  ->  deploy-filter-exempt names '$ex_job', but no 'changes' filter sets ${ex_job}=true" >&2
+              ex_bad=1; continue ;;
+          esac
+          while IFS=$'\t' read -r jr_job jr_re; do
+            [ "$jr_job" = "$ex_job" ] || continue
+            if grep -qE "$jr_re" <<<"$sample"; then
+              echo "  STALE-EXEMPT  $path  ->  exempt from '$ex_job', but the $ex_job filter $jr_re matches it — the annotation is false" >&2
+              ex_bad=1
+            fi
+          done <<EOF
+$job_regexes
+EOF
+        done <<EOF
+$(printf '%s\n' "$ex_jobs" | tr ',' '\n')
+EOF
+        if [ "$ex_bad" -ne 0 ]; then
+          failures=$((failures + 1))
+          continue
+        fi
+        # Which jobs did the annotation NOT name? Those it must still target.
+        ex_full=1; remaining=""
+        while IFS=$'\t' read -r jr_job jr_re; do
+          [ -n "$jr_job" ] || continue
+          case ",$ex_jobs," in
+            *",$jr_job,"*) ;;
+            *) ex_full=0; remaining="${remaining}${jr_re}"$'\n' ;;
+          esac
+        done <<EOF
+$job_regexes
+EOF
+        if [ "$ex_full" -eq 1 ]; then
+          # Fully targetless. Only a single FILE may be that: a tree that starts
+          # the workflow is listed because something is built from it, and a
+          # tree exempt from every job is exactly the green-over-nothing this
+          # gate exists for (Mutation C).
+          case "$path" in
+            *\**)
+              echo "  TARGETLESS-TREE  $path  ->  a tree (glob) cannot be exempt from every deploy job; a merge under it starts the workflow and deploys nothing" >&2
+              failures=$((failures + 1))
+              continue ;;
+          esac
+          echo "  exempt   $path (deploy-filter-exempt[$ex_jobs]; single file, no job's filter matches it)"
+          continue
+        fi
+        # Partially exempt: judged like any other path, against the jobs it
+        # did NOT exempt itself from.
+        echo "  exempt   $path from [$ex_jobs] only; must still target another job:"
+        regexes_for_path="$remaining"
+        ;;
+      *)
+        regexes_for_path="$regexes"
+        ;;
+    esac
 
     checked=$((checked + 1))
-    sample="$(sample_for "$path")"
     matched=""
     while IFS= read -r re; do
       [ -n "$re" ] || continue
@@ -736,7 +1000,7 @@ check_file() {
         break
       fi
     done <<EOF
-$regexes
+$regexes_for_path
 EOF
 
     if [ -n "$matched" ]; then
@@ -767,9 +1031,10 @@ EOF
   check_reverse "$yml" "$label" || reverse_rc=$?
 
   if [ "$failures" -gt 0 ]; then
-    echo "FAIL[$label]: $failures path(s) start the deploy workflow but target no deploy job." >&2
+    echo "FAIL[$label]: $failures path(s) start the deploy workflow but target no deploy job (or carry an exemption that is unbounded, false, or over a tree)." >&2
     echo "Fix: add the prefix to the matching job's grep -qE regex in the 'changes' job," >&2
-    echo "or, if it is deliberately targetless, add a '# deploy-filter-exempt: <why>' comment above it." >&2
+    echo "or, ONLY for a single file that deploys nothing, add a '# deploy-filter-exempt[<job>,…]: <why>'" >&2
+    echo "comment above it naming every job it does not target. A tree can never be fully exempt." >&2
     return 1
   fi
 
@@ -794,7 +1059,7 @@ EOF
     return 1
   fi
 
-  echo "OK[$label]: $checked path(s) each target at least one deploy job ($exempted exempt); reverse: $REVERSE_PREFIXES regex prefix(es), all reachable from on.push.paths; target: $TARGET_CHECKED declared (prefix -> job) pair(s), each reaching the job that builds it."
+  echo "OK[$label]: $checked path(s) each target at least one deploy job ($exempted exempt, each bounded); reverse: $REVERSE_PREFIXES regex prefix(es), all reachable from on.push.paths; target: $TARGET_CHECKED declared (prefix -> job) pair(s), each reaching the job that builds it, and every listed tree has a row."
   return 0
 }
 
@@ -811,14 +1076,14 @@ selftest() {
   local rc=0
   local out sub_rc
 
-  echo "selftest 1/12: the real workflow passes"
+  echo "selftest 1/16: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/12: dropping 'templates' from the instance regex must FAIL (the original bug)"
+  echo "selftest 2/16: dropping 'templates' from the instance regex must FAIL (the original bug)"
   sed "s#|connectors|templates|scripts/connectors)/#|connectors|scripts/connectors)/#" "$real" > "$tmp/mutated.yml"
   if cmp -s "$real" "$tmp/mutated.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the instance regex no longer looks as expected" >&2
@@ -831,7 +1096,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/12: an unexplained targetless path must FAIL"
+  echo "selftest 3/16: an unexplained targetless path must FAIL"
   awk '{ print } /^      - "connectors\/\*\*"$/ { print "      - \"totally-unrouted/**\"" }' \
     "$real" > "$tmp/orphan.yml"
   sub_rc=0
@@ -856,7 +1121,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 4/12: another job's own regex must NOT rescue a drifted dispatch filter"
+  echo "selftest 4/16: another job's own regex must NOT rescue a drifted dispatch filter"
   # The disarm shape, verbatim: strip `templates` from the instance filter AND
   # append a recorder job whose shell carries a copy of the same regex. Before
   # extract_regexes was scoped to `changes`, this read OK at rc=0.
@@ -880,7 +1145,7 @@ YML
   fi
 
   echo
-  echo "selftest 5/12: the YAML arm must PASS the real workflow and FAIL an unparseable one"
+  echo "selftest 5/16: the YAML arm must PASS the real workflow and FAIL an unparseable one"
   # The measured shape, verbatim: a heredoc body written at two spaces inside a
   # `run: |` block. Two spaces is LESS than the block scalar's content indent, so
   # the scalar ends there and the line is parsed as a YAML key with no ':'.
@@ -912,7 +1177,7 @@ YML
   fi
 
   echo
-  echo "selftest 6/12: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
+  echo "selftest 6/16: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
   # Mirror of case 2, but for DELETION not drift: strip the required push-path
   # line entirely. The drift arm now sees nothing to judge — the false-green W35
   # exists to close (charter D275). (Since the reverse arm landed, this half also
@@ -931,7 +1196,7 @@ YML
   fi
 
   echo
-  echo "selftest 7/12: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
+  echo "selftest 7/16: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
   # `web` is dispatched by the control-plane filter, but no on.push.paths entry
   # delivers a web/ file — so a web-only merge never starts the workflow and that
   # arm of the filter can only ever fire on somebody else's co-triggering merge.
@@ -955,7 +1220,7 @@ YML
   fi
 
   echo
-  echo "selftest 8/12: the reverse arm must actually RUN on the real workflow (non-vacuity)"
+  echo "selftest 8/16: the reverse arm must actually RUN on the real workflow (non-vacuity)"
   # A direction that silently checks nothing is worse than no direction: it puts
   # the word "reverse" in a green line. So the count must be non-zero AND the
   # per-prefix verdicts must be present, on the REAL file.
@@ -978,7 +1243,7 @@ YML
   fi
 
   echo
-  echo "selftest 9/12: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
+  echo "selftest 9/16: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
   # The D275 shape, and the reason the allowlist is not made redundant by the
   # reverse arm: with the push-path line AND its regex prefix both gone, the
   # forward arm has no path to judge and the reverse arm has no prefix to judge.
@@ -1010,7 +1275,7 @@ YML
   fi
 
   echo
-  echo "selftest 10/12: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
+  echo "selftest 10/16: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
   # The fail-closed arm of prefixes_of, proven rather than asserted. A dispatch
   # filter that is not an anchored alternation is a filter this direction cannot
   # answer for — and "could not look" must never print as "it is fine". Without
@@ -1036,7 +1301,7 @@ YML
   fi
 
   echo
-  echo "selftest 11/12: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
+  echo "selftest 11/16: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
   # THE MUTATION THAT MATTERS. Every case above mutates a LIST; this one mutates
   # the line that feeds them, back to exactly what deploy.yml carried before the
   # wave-10 sweep. Both false-green shapes must reappear, or the behaviour arm is
@@ -1094,7 +1359,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 12/12: stripping 'cmd' from the instance regex must FAIL — on the TARGET arm ALONE"
+  echo "selftest 12/16: stripping 'cmd' from the instance regex must FAIL — on the TARGET arm ALONE"
   # THE MUTATION THIS ARM EXISTS FOR, and the one no other arm can feel. cmd/**
   # stays listed in on.push.paths and stays matched by the CONTROL-PLANE regex,
   # so the forward arm still prints `ok`, the reverse arm still finds every
@@ -1155,6 +1420,196 @@ PYMUT
   fi
 
   echo
+  echo "selftest 13/16: Mutation C — a TREE exempted from every job, its prefix stripped from BOTH regexes, must FAIL"
+  # THE MEASURED FALSE GREEN (task-9ece1f95b89111cf). Before the bounded
+  # exemption: `# deploy-filter-exempt:` above `- "internal/**"` plus
+  # `internal|` removed from the cp AND instance filters read
+  # `OK … 7 path(s) … (2 exempt); reverse: 7 regex prefix(es), all reachable`
+  # at rc=0 — the annotation silenced forward, reverse had no prefix left, and
+  # TARGET_PAIRS had no internal row. This case uses the STRONGEST spelling an
+  # author could reach for (bounded, naming both jobs) so the tree rule is the
+  # detector, not the UNBOUNDED spelling case 14 pins. The reverse arm must
+  # read clean (there is no internal prefix left for it to find), the presence
+  # arm must read clean, and the red must name internal/** as TARGETLESS-TREE.
+  python3 - "$real" "$tmp/mutation-c.yml" <<'PYMUT'
+import sys
+s = open(sys.argv[1]).read()
+path = '      - "internal/**"\n'
+cp_new = "'^(cloud|deploy|internal|cmd)/'"
+cp_old = "'^(cloud|deploy|cmd)/'"
+in_new = "'^(api|internal|cmd|deploy|connectors|templates|scripts/connectors)/'"
+in_old = "'^(api|cmd|deploy|connectors|templates|scripts/connectors)/'"
+for anchor in (path, cp_new, in_new):
+    n = s.count(anchor)
+    if n != 1:
+        sys.exit("MUTATION ANCHOR %r matched %d times, wanted exactly 1 — deploy.yml no longer "
+                 "looks as this selftest expects. Fix the anchor, do not loosen it." % (anchor, n))
+out = (s.replace(path, '      # deploy-filter-exempt[cp,instance]: mutation C\n' + path)
+        .replace(cp_new, cp_old).replace(in_new, in_old))
+if out == s:
+    sys.exit("MUTATION produced an IDENTICAL file — it did not apply")
+open(sys.argv[2], "w").write(out)
+PYMUT
+  mut_rc=$?
+  if [ "$mut_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the Mutation C copy could not be built — case 13 proves nothing" >&2
+    rc=1
+  elif cmp -s "$real" "$tmp/mutation-c.yml"; then
+    echo "SELFTEST FAIL: Mutation C changed nothing" >&2
+    rc=1
+  else
+    sub_rc=0
+    out="$(check_file "$tmp/mutation-c.yml" "mutation-c" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: Mutation C read GREEN — a tree exempt from every job passed the gate again" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'TARGETLESS-TREE  internal/\*\*' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not on the bounded-exemption arm naming internal/** as a targetless tree" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif grep -qE 'DRIFT|UNREACHABLE|MISSING|UNBOUNDED' <<<"$out"; then
+      echo "SELFTEST FAIL: another list arm also red — this fixture is meant to prove that forward," >&2
+      echo "               reverse and presence all read CLEAN once the tree is annotated and its" >&2
+      echo "               prefix is gone from both regexes, which is why the bound is load-bearing" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'reverse: 7 regex prefix(es), all reachable' <<<"$out"; then
+      echo "SELFTEST FAIL: the reverse arm did not read the measured shape (7 prefixes, all reachable) —" >&2
+      echo "               the fixture did not reach the state Mutation C describes" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: forward, reverse and presence read clean; only the tree rule reds, naming internal/**"
+    fi
+  fi
+
+  echo
+  echo "selftest 14/16: the legacy UNBOUNDED 'deploy-filter-exempt:' spelling must FAIL"
+  # The spelling the measured green used. An exemption that names no job
+  # exempts from every job — over a tree it is Mutation C, over a file it is a
+  # claim nobody can check. Either way it is refused by name.
+  python3 - "$real" "$tmp/unbounded.yml" <<'PYMUT'
+import sys
+s = open(sys.argv[1]).read()
+path = '      - "internal/**"\n'
+n = s.count(path)
+if n != 1:
+    sys.exit("MUTATION ANCHOR matched %d times, wanted exactly 1" % n)
+out = s.replace(path, '      # deploy-filter-exempt: unbounded spelling\n' + path)
+if out == s:
+    sys.exit("MUTATION produced an IDENTICAL file — it did not apply")
+open(sys.argv[2], "w").write(out)
+PYMUT
+  mut_rc=$?
+  if [ "$mut_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the unbounded-exemption copy could not be built — case 14 proves nothing" >&2
+    rc=1
+  else
+    sub_rc=0
+    out="$(check_file "$tmp/unbounded.yml" "unbounded" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: an unbounded exemption read GREEN" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'UNBOUNDED  internal/\*\*' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not by naming internal/** as UNBOUNDED" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: an exemption that names no job is refused by name"
+    fi
+  fi
+
+  echo
+  echo "selftest 15/16: a listed, ROUTED tree with no TARGET_PAIRS row must FAIL — on the coverage predicate ALONE"
+  # The enumeration hole with no exemption involved: add web/** to
+  # on.push.paths AND to the cp regex. Forward prints its cheerful ok, reverse
+  # finds web reachable, presence and producer read clean, every declared pair
+  # still reaches its job — and nothing has ever driven web/x through the step.
+  # Only the coverage predicate can say the table is missing a row.
+  python3 - "$real" "$tmp/undeclared.yml" <<'PYMUT'
+import sys
+s = open(sys.argv[1]).read()
+path = '      - "cloud/**"\n'
+cp_new = "'^(cloud|deploy|internal|cmd)/'"
+for anchor in (path, cp_new):
+    n = s.count(anchor)
+    if n != 1:
+        sys.exit("MUTATION ANCHOR %r matched %d times, wanted exactly 1" % (anchor, n))
+out = (s.replace(path, path + '      - "web/**"\n')
+        .replace(cp_new, "'^(cloud|deploy|internal|cmd|web)/'"))
+if out == s:
+    sys.exit("MUTATION produced an IDENTICAL file — it did not apply")
+open(sys.argv[2], "w").write(out)
+PYMUT
+  mut_rc=$?
+  if [ "$mut_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the undeclared-tree copy could not be built — case 15 proves nothing" >&2
+    rc=1
+  else
+    sub_rc=0
+    out="$(check_file "$tmp/undeclared.yml" "undeclared" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: a routed tree with no TARGET_PAIRS row read GREEN — the table is an unchecked enumeration again" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'UNDECLARED  web/\*\*' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not on the coverage predicate naming web/**" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif grep -qE 'DRIFT|UNREACHABLE|MISSING|ESCAPE|WRONG-JOB|TARGETLESS|UNBOUNDED|STALE' <<<"$out"; then
+      echo "SELFTEST FAIL: another arm also red — this fixture is meant to prove every other arm" >&2
+      echo "               reads a routed-but-undeclared tree as fine, which is why the" >&2
+      echo "               coverage predicate is load-bearing and not redundant" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q '  ok       web/\*\*  ->  ' <<<"$out"; then
+      echo "SELFTEST FAIL: the forward arm did not print its 'ok' for web/** — the fixture is not routed" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: forward still prints 'ok web/**'; only the coverage predicate reds, naming web"
+    fi
+  fi
+
+  echo
+  echo "selftest 16/16: an exemption whose named job's filter STILL matches the path must FAIL"
+  # A bounded exemption is a checkable claim; this is the check. cloud/** is
+  # matched by the cp filter, so `deploy-filter-exempt[cp]` above it is false.
+  python3 - "$real" "$tmp/stale-exempt.yml" <<'PYMUT'
+import sys
+s = open(sys.argv[1]).read()
+path = '      - "cloud/**"\n'
+n = s.count(path)
+if n != 1:
+    sys.exit("MUTATION ANCHOR matched %d times, wanted exactly 1" % n)
+out = s.replace(path, '      # deploy-filter-exempt[cp]: a false claim\n' + path)
+if out == s:
+    sys.exit("MUTATION produced an IDENTICAL file — it did not apply")
+open(sys.argv[2], "w").write(out)
+PYMUT
+  mut_rc=$?
+  if [ "$mut_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the stale-exemption copy could not be built — case 16 proves nothing" >&2
+    rc=1
+  else
+    sub_rc=0
+    out="$(check_file "$tmp/stale-exempt.yml" "stale-exempt" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: a false exemption read GREEN — the bound is not checked" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q "STALE-EXEMPT  cloud/\*\*  ->  exempt from 'cp'" <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not by naming cloud/** as STALE-EXEMPT from cp" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: an exemption the filter contradicts is refused by name"
+    fi
+  fi
+
+  echo
   echo "selftest: the target arm must be NON-VACUOUS on the real workflow"
   sub_rc=0
   out="$(check_file "$real" "target-count" 2>&1)" || sub_rc=$?
@@ -1168,6 +1623,10 @@ PYMUT
     rc=1
   elif ! grep -q '  target   cmd/x  ->  instance=true' <<<"$out"; then
     echo "SELFTEST FAIL: the target arm did not judge the cmd -> instance pair" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  elif ! grep -q '  covered  internal/\*\*  ->  ' <<<"$out"; then
+    echo "SELFTEST FAIL: the coverage predicate did not judge internal/** on the real workflow" >&2
     printf '%s\n' "$out" >&2
     rc=1
   else

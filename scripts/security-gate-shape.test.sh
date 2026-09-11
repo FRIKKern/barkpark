@@ -95,11 +95,30 @@ def emit(k, v):
     out.write(f"{k}={v}\n")
 
 
-# D18: a workflow-level paths filter emits NO check run — the required name then
-# sits "is expected." forever and the PR is BLOCKED with nothing to fix.
+# D18: a paths filter on the PULL_REQUEST arm emits NO check run — the required
+# name then sits "is expected." forever and the PR is BLOCKED with nothing to
+# fix. NARROWED TO THAT ARM 2026-09-10 (task-7ef9d81ed33d2b9c), from `any arm`.
+# The reason D18 gives is about a REQUIRED CONTEXT ON A PULL REQUEST, and branch
+# protection never evaluates a push-to-main run: it gates merges INTO main, and
+# the push arm fires after the merge. Reading every arm therefore refused a key
+# on `push:` for a hazard that key cannot cause — and it is the same predicate
+# scripts/shim-trigger-filter-check.sh has always used
+# (`on.pull_request.paths`/`paths-ignore`, nothing else). The mutant below
+# plants its filter on `pull_request`, so this assertion still fires.
 emit("workflow_paths", any(
-    isinstance(v, dict) and ("paths" in v or "paths-ignore" in v)
-    for v in (on or {}).values()))
+    isinstance((on or {}).get(arm), dict)
+    and ("paths" in on[arm] or "paths-ignore" in on[arm])
+    for arm in ("pull_request", "pull_request_target")))
+
+# THE VENUE PIN, the positive half (task-7ef9d81ed33d2b9c). The push:main arm
+# IS paths-filtered on purpose — measured 2026-09-10T11:30Z, 11 of the day's 122
+# stacked push:main runs were this workflow, every one for a superseded sha, and
+# this workflow is per-sha grouped so it never collapses. Asserted TRUE below so
+# deleting that filter is a RED here and not a silent return to a full run per
+# merge; scripts/main-verdict-presence.sh re-derives the same key into the
+# ALWAYS/CONDITIONAL tier of .github/main-push-workflows.txt.
+push = (on or {}).get("push")
+emit("push_paths", isinstance(push, dict) and "paths" in push)
 
 agg = jobs.get(AGG, {})
 needs = list(agg.get("needs", []))
@@ -115,12 +134,44 @@ coe = [n for n, j in jobs.items() if j.get("continue-on-error") is True]
 emit("coe_jobs", ",".join(sorted(coe)))
 emit("coe_in_needs", ",".join(sorted(set(coe) & set(needs))))
 
+# THE POST-VERDICT CATEGORY, ported verbatim in shape from
+# scripts/cloud-path-escape-check.test.sh, where cloud.yml's identical reporter
+# already forced it. Exactly one shape of blocking job legitimately cannot live
+# in `needs`: a reporter that runs AFTER the aggregator concluded, to carry
+# main's own red to a human. Wiring it in is not a trade-off, it is a CYCLE
+# (security-gate -> reporter -> security-gate) and GitHub refuses to load it.
+#
+# THIS IS A PREDICATE, NOT A SKIP LIST — a named exemption would go stale the
+# moment a second reporter is added, and would also exempt a job that merely
+# borrowed the name. A job is post-verdict iff ALL THREE hold:
+#   (1) needs == [AGG] EXACTLY — so `needs` really is the cycle, not a wiring
+#       decision somebody declined to make;
+#   (2) its `if:` starts with an ANCHORED failure(). The loose \bfailure\(\)
+#       admits `success() || failure()` — a job that runs on EVERY GREEN wearing
+#       post-verdict clothes. The anchor is load-bearing;
+#   (3) it is NOT continue-on-error, so it keeps its own exit-1. That retained
+#       can-lose property is what the exemption is granted in exchange for; a
+#       MUTED reporter is named by post_verdict_muted and never exempted.
+POST_VERDICT_IF = re.compile(r"^failure\(\)(\s|&|$)")
+def post_verdict_shape(j):
+    return (list(j.get("needs") or []) == [AGG]
+            and bool(POST_VERDICT_IF.match(str(j.get("if", "")).strip())))
+post_verdict = {n for n, j in jobs.items()
+                if post_verdict_shape(j) and j.get("continue-on-error") is not True}
+post_verdict_muted = {n for n, j in jobs.items()
+                      if post_verdict_shape(j) and j.get("continue-on-error") is True}
+emit("post_verdict_jobs", ",".join(sorted(post_verdict)))
+emit("post_verdict_muted", ",".join(sorted(post_verdict_muted)))
+
 # …and the mirror hazard, which the allow-set cannot see: a BLOCKING job in this
 # workflow that nobody wired into `needs`. The aggregator cannot judge a job it
-# was never told about, so it greens while that job reds.
+# was never told about, so it greens while that job reds. Post-verdict jobs are
+# subtracted — they cannot be in `needs` without a cycle, and they are held to
+# the three-part predicate above instead, which is STRICTER, not laxer.
 blocking = {n for n, j in jobs.items()
             if j.get("continue-on-error") is not True and n != AGG}
-emit("blocking_not_in_needs", ",".join(sorted(blocking - set(needs))))
+emit("blocking_not_in_needs",
+     ",".join(sorted(blocking - set(needs) - post_verdict)))
 
 # D36 — THE OTHER HALF OF THAT GUARD. Reaching `needs` alone changes nothing:
 # `needs.<job>.result` is only consulted if the job is bound to a step env var
@@ -189,6 +240,7 @@ assert_fact_min() {
 
 echo "case 1: security.yml carries the shim shape"
 assert_fact workflow_paths False
+assert_fact push_paths True
 assert_fact agg_present True
 assert_fact agg_matrix False
 assert_fact agg_if "always()"
@@ -210,6 +262,12 @@ assert_fact coe_in_needs ""
 # sobelow loses continue-on-error, it moves from the first set into the second
 # and this line demands it be added.
 assert_fact blocking_not_in_needs ""
+# The reporter that carries main's post-merge red to a human is the one blocking
+# job that cannot be in `needs` (it would be a cycle). It must be present, and
+# it must not be muted: a continue-on-error reporter cannot report its own
+# non-delivery, which is the failure this arm exists to make loud.
+assert_fact post_verdict_jobs "report-main-failure"
+assert_fact post_verdict_muted ""
 # …and every job that IS in needs must actually be judged (D36).
 assert_fact needs_without_decide ""
 assert_fact_min needs_count 3
@@ -239,7 +297,8 @@ wf = yaml.safe_load(open(src))
 jobs = wf["jobs"]
 agg = jobs["security-gate"]
 step = next(s for s in agg["steps"] if "run" in s)
-assert mode in ("clean", "launder", "unwired", "orphan", "paths", "matrix"), mode
+assert mode in ("clean", "launder", "unwired", "orphan", "paths", "pushpaths", "matrix",
+                "reporter-muted", "reporter-alwaysruns", "reporter-unwired"), mode
 
 if mode == "launder":
     # Put the continue-on-error job back into needs — the exact regression the
@@ -258,8 +317,26 @@ elif mode == "paths":
     on = wf.pop(True, None) or wf.pop("on", None)
     on["pull_request"] = {"paths": ["api/**"]}
     wf["on"] = on
+elif mode == "pushpaths":
+    # THE VENUE PIN's negative half: strip the push arm's paths filter and the
+    # workflow is back to a full run on every merge to main.
+    on = wf.pop(True, None) or wf.pop("on", None)
+    on["push"].pop("paths", None)
+    wf["on"] = on
 elif mode == "matrix":
     agg["strategy"] = {"matrix": {"otp": ["27.0"]}}
+elif mode == "reporter-muted":
+    # A MUTED reporter cannot report its own non-delivery. It must lose the
+    # exemption and fall back into blocking_not_in_needs.
+    jobs["report-main-failure"]["continue-on-error"] = True
+elif mode == "reporter-alwaysruns":
+    # `success() || failure()` runs on EVERY GREEN wearing post-verdict clothes.
+    # The anchored regex must refuse it.
+    jobs["report-main-failure"]["if"] = "success() || failure()"
+elif mode == "reporter-unwired":
+    # A blocking job that merely LOOKS post-verdict because someone deleted its
+    # needs must NOT be exempted — that is the mirror hazard, not a reporter.
+    jobs["report-main-failure"]["needs"] = []
 
 yaml.safe_dump(wf, open(dst, "w"))
 PY
@@ -284,8 +361,25 @@ mutant clean    blocking_not_in_needs ""
 mutant launder  coe_in_needs          "sobelow"         # the laundering regression is DETECTED
 mutant unwired  blocking_not_in_needs "mix-audit"       # an unjudged blocking job is DETECTED
 mutant orphan   needs_without_decide  "a11y-ceiling"    # reaching needs is not enough (D36)
-mutant paths    workflow_paths        "True"            # a re-added on:paths is DETECTED
+mutant paths    workflow_paths        "True"            # a re-added pull_request paths is DETECTED
+mutant clean    push_paths            "True"            # the venue pin is TRUE on the shipped file
+mutant pushpaths push_paths           "False"           # deleting the push paths filter is DETECTED
 mutant matrix   agg_matrix            "True"            # a matrixed aggregator is DETECTED
+# The post-verdict exemption is a PREDICATE, and each of its three clauses is
+# proven able to withdraw it.
+mutant clean            post_verdict_jobs     "report-main-failure"
+mutant clean            post_verdict_muted    ""
+mutant reporter-muted   post_verdict_jobs     ""                    # clause (3): muting withdraws it
+mutant reporter-muted   post_verdict_muted    "report-main-failure"
+# A MUTED reporter does NOT fall into blocking_not_in_needs — continue-on-error
+# removes it from `blocking` in the first place. Its detector is
+# post_verdict_muted above (which fires, one line up); this line pins that the
+# mirror guard is NOT the detector, so nobody later reads its silence as cover.
+mutant reporter-muted   blocking_not_in_needs ""
+mutant reporter-alwaysruns post_verdict_jobs  ""                    # clause (2): an unanchored if is refused
+mutant reporter-alwaysruns blocking_not_in_needs "report-main-failure"
+mutant reporter-unwired post_verdict_jobs     ""                    # clause (1): empty needs is not the cycle
+mutant reporter-unwired blocking_not_in_needs "report-main-failure"
 echo
 
 # ── case 5: the dispatcher, driven against a real git repo ─────────────────

@@ -93,6 +93,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   def list_topic(dataset, _ws_id), do: "documents:#{dataset}"
 
+  @doc """
+  THE CONSUMER-SIDE TENANT FENCE for the GLOBAL document stream
+  (task-be3b3aa6da5df3a2, instance 6).
+
+  `list_topic/2` above already prefers the workspace-keyed topic
+  `documents:ws:<id>:<dataset>` whenever a workspace is in context — but the
+  fallback clause, and every consumer that joins `documents:<dataset>` directly
+  (`ChatLive.subscribe_hand_tasks/1`), ride the GLOBAL topic, which
+  `Content.Broadcast` fires UNCONDITIONALLY for every tenant while the
+  workspace-keyed twin is conditional on `doc.workspace_id`.
+
+  THE TOPIC STRING IS THE BROADCASTER'S TO CHANGE; THE FILTER IS OURS. The
+  payload already carries `:workspace_id` (`content/broadcast.ex` stamps it on
+  both mutation messages), so a consumer can fence itself without any change to
+  the producer — which is why this is a predicate here rather than a new topic
+  there.
+
+  Fail-closed in the direction that matters, permissive only for the SHARED
+  layer, mirroring `Content.Scope.scope_to_workspace_or_global/3`:
+
+    * a message stamped with ANOTHER workspace  -> refused
+    * a message stamped with OUR workspace      -> admitted
+    * a message with NO workspace (shared layer)-> admitted to any tenant
+    * an UNRESOLVED consumer (`ws_id` nil)      -> shared layer ONLY
+  """
+  @spec own_tenant?(map(), binary() | nil) :: boolean()
+  def own_tenant?(msg, ws_id) when is_map(msg) do
+    case Map.get(msg, :workspace_id) do
+      nil -> true
+      ^ws_id when is_binary(ws_id) -> true
+      _ -> false
+    end
+  end
+
   @doc false
   def ensure_presence_subscription(socket) do
     if connected?(socket) do
@@ -393,6 +427,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
 
+    # Storage shape BEFORE the write and before the buffer merge below: the
+    # browser posts `doc[featuredPublications][0]` rows as an index-keyed map
+    # and a nested image as its JSON string (Gyldendal friction 65/66). The
+    # save path coerces its own copy; the buffer must see the same shape or
+    # the next render walks a map where it expects a list.
+    params = Barkpark.Content.Forms.coerce_params(params, schema)
+
+    # Denormalised image metadata (Gyldendal parity E1.7): a freshly picked
+    # asset arrives as {url, assetId, alt, focal…}; the site needs width /
+    # height / lqip on the stored value. Filled from the asset, never
+    # overwriting what is already there, never raising into the save.
+    params =
+      Barkpark.Media.ImageMetadata.backfill_params(
+        params,
+        schema,
+        socket.assigns.dataset,
+        ScopeHelpers.scope_opts(socket)
+      )
+
     if doc && type do
       case Content.upsert_draft(
              doc,
@@ -403,7 +456,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
              hook_opts(socket)
            ) do
         {:ok, saved_doc, errs} ->
-          new_title = Map.get(params, "title", doc.title)
+          # The persisted title, not the posted one: a titleless type's column
+          # is derived on write (Gyldendal parity E1.8), and the desk row must
+          # show what the store holds.
+          new_title = saved_doc.title || Map.get(params, "title", doc.title)
 
           panes =
             PaneBuilder.update_title(
@@ -419,6 +475,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             editor_form: Map.merge(socket.assigns[:editor_form] || %{}, params),
             save_status: "Saved",
             validation_errors: errs,
+            validation_warnings: validation_warnings(schema, new_title, saved_doc.content),
             cross_violations: compute_cross_violations(schema, params)
           )
           |> maybe_refresh_content_preview()
@@ -534,7 +591,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
         # ── the four NON-WALL rejection shapes (ae-nonwall-rejection-render) ──
         #
-        # Wave-11's census (charter D83a) proved these are the only real
+        # Wave-11's census (authoring-excellence charter D83a) proved these are the only real
         # `{:error, reason}` shapes beyond the wall tuples that reach here. Each
         # one degraded to the content-free "Action failed", which tells an author
         # nothing about a situation every one of them can be recovered from.
@@ -1579,7 +1636,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   end
 
   @doc false
-  defdelegate paper_stream_items(blocks, dataset, scope), to: Paper
+  defdelegate paper_stream_items(blocks, dataset, scope, paper_id \\ nil), to: Paper
+
+  @doc false
+  defdelegate paper_doc_id(paper), to: Paper
 
   @doc false
   defdelegate paper_stream_block_id(block, index), to: Paper
@@ -1623,6 +1683,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   def compute_cross_violations(schema, form) do
     Barkpark.Content.CrossValidator.violations(schema, form)
   end
+
+  @doc """
+  Warning-level findings for the open document against the schema the Studio
+  resolved (Gyldendal parity E1.6). `%{}` without a schema.
+  """
+  def validation_warnings(nil, _title, _content), do: %{}
+
+  def validation_warnings(schema, title, content),
+    do: Barkpark.Content.Validation.check(content, title, schema).warnings
 
   @doc false
   def resolve_nav_group(_current, _old, nil), do: nil
@@ -1955,40 +2024,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @spec sheet_authz_ctx(map()) :: map()
   def sheet_authz_ctx(assigns) when is_map(assigns), do: Map.take(assigns, @sheet_authz_keys)
 
-  defp sheet_grant_target_denied?(assigns) do
-    grant_graded?(assigns) and not grant_admits_sheet?(assigns)
-  end
-
-  # The two assigns that mean "this socket's write descends from a GRANT":
-  # `LiveScope.assign_grant_scope/2` sets `caller_context`, and
-  # `attach_write_gate/2` sets `write_gate?`. Same pair `Caps.restricted?/1` and
-  # `Shared.Paper.grant_graded?/1` read.
-  defp grant_graded?(assigns) do
-    not is_nil(Map.get(assigns, :caller_context)) or Map.get(assigns, :write_gate?) == true
-  end
-
-  # `Access.validate/3` — the SAME containment ladder `attach_write_gate/2`'s
-  # `write_target_permitted?/4` walks, over the SAME grant set it captured, so
-  # the two routes answer this target identically. Deliberately NOT
-  # `Access.admits_desk?/3`: that helper is the mechanism this closes.
+  # ONE LADDER, ONE OWNER: `Caps.grant_target_denied?/4`. This surface used to
+  # RESTATE the containment walk (pds-w41 bolted a second copy on because the
+  # paper copy was `defp`), which is exactly the drift shape `Caps`' own
+  # moduledoc warns about. What is left here is the SHEET surface's one
+  # deliberate difference, and it is a pair of ARGUMENTS, not a fork:
   #
-  # The grants come from `caller_context` rather than a fresh reload: expiry
-  # truth already arrives through `Caps.write_capable_now?/1` (an expired grant
-  # makes `caps.write` false and the `and` above short-circuits), while a grant
-  # ADDED mid-session leaves this set stale-NARROW, which over-restricts and
-  # never under-restricts — the same disposition `attach_write_gate/2`
-  # documents for its own captured ctx.
-  defp grant_admits_sheet?(assigns) do
-    case sheet_write_target(assigns) do
-      %{} = target ->
-        Enum.any?(
-          grant_ctx_grants(assigns),
-          &(Barkpark.Access.validate(&1, :write, target) == :ok)
-        )
+  #   * the grants come from `caller_context` rather than a fresh reload —
+  #     `render/1` is a hot path and a `Repo` round trip per parent render is
+  #     not a thing to add to it. Expiry truth already arrives through
+  #     `Caps.write_capable_now?/1` (an expired grant makes `caps.write` false
+  #     and the `and` at the callsite short-circuits), and a grant ADDED
+  #     mid-session leaves this set stale-NARROW, which over-restricts and never
+  #     under-restricts — the same disposition `attach_write_gate/2` documents
+  #     for its own captured ctx;
+  #   * the leaf comes from the `:sheet_doc` assign, read totally by
+  #     `Caps.doc_leaf/1`, so a sheet doc with no type or doc_id resolves to an
+  #     unresolvable target and FAILS CLOSED for a grant-graded socket.
+  defp sheet_grant_target_denied?(assigns) do
+    {type, doc_id} = Caps.doc_leaf(Map.get(assigns, :sheet_doc))
 
-      nil ->
-        false
-    end
+    Caps.grant_target_denied?(assigns, grant_ctx_grants(assigns), type, doc_id)
   end
 
   defp grant_ctx_grants(assigns) do
@@ -1997,42 +2053,4 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       _ -> []
     end
   end
-
-  # The desk levels come from the MOUNT and the leaf levels from the SHEET the
-  # component is about to write — the same broad→narrow ladder
-  # `LiveScope.write_target/3` feeds `Access.validate/3`, including its
-  # `Content.published_id/1` normalisation so a draft id is matched against the
-  # grant by its published identity.
-  #
-  # FAIL-CLOSED on an unresolvable target (no workspace / project / dataset, or
-  # a sheet doc with no type or doc_id): `nil` here denies for a grant-graded
-  # socket, matching `write_target/3`'s `:error -> halt`. Inert for every other
-  # socket, which never reaches this.
-  defp sheet_write_target(assigns) do
-    ws = Map.get(assigns, :current_workspace)
-    proj = Map.get(assigns, :current_project)
-    dataset = Map.get(assigns, :dataset)
-    doc = Map.get(assigns, :sheet_doc)
-    type = sheet_doc_field(doc, :type)
-    doc_id = sheet_doc_field(doc, :doc_id)
-
-    if is_map(ws) and is_binary(Map.get(ws, :id)) and is_map(proj) and
-         is_binary(Map.get(proj, :id)) and is_binary(dataset) and is_binary(type) and
-         is_binary(doc_id) do
-      %{
-        workspace_id: ws.id,
-        project_id: proj.id,
-        dataset: dataset,
-        type: type,
-        doc_id: Content.published_id(doc_id)
-      }
-    end
-  end
-
-  # Read TOTALLY: the sheet doc is a `%Content.Document{}` on the live path but a
-  # bare map in unit fixtures, so `doc.type` would raise a KeyError on a shape
-  # that has always been legal here. A missing key yields nil, which
-  # `sheet_write_target/1` treats as unresolvable (fail-closed).
-  defp sheet_doc_field(doc, key) when is_map(doc), do: Map.get(doc, key)
-  defp sheet_doc_field(_doc, _key), do: nil
 end

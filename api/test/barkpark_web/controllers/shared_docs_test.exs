@@ -331,7 +331,17 @@ defmodule BarkparkWeb.SharedDocsTest do
 
       # A :read share is method-aware: it never grants on POST, so the normal
       # token/membership gate denies the anonymous caller.
-      assert conn.status in [401, 403]
+      # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+      # Both it and the permission-tier gates answer 403 with code "forbidden", so
+      # `reason` is the ONLY discriminator: the membership arm carries
+      # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+      # old assertion accepted any of three statuses — unauthorized, forbidden or
+      # not-found — so it was green on a deleted route and on a lost
+      # authentication too.
+      assert conn.status == 403
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "forbidden"
+      assert err["reason"] == "not_a_member"
       refute conn.status in [200, 201]
 
       # And nothing was written: the doc must not exist in the scope.
@@ -353,7 +363,17 @@ defmodule BarkparkWeb.SharedDocsTest do
 
       conn = get(conn, query_path(ws, project))
 
-      assert conn.status in [401, 403, 404]
+      # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+      # Both it and the permission-tier gates answer 403 with code "forbidden", so
+      # `reason` is the ONLY discriminator: the membership arm carries
+      # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+      # old assertion accepted any of three statuses — unauthorized, forbidden or
+      # not-found — so it was green on a deleted route and on a lost
+      # authentication too.
+      assert conn.status == 403
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "forbidden"
+      assert err["reason"] == "not_a_member"
       refute conn.status == 200
     end
 
@@ -367,7 +387,17 @@ defmodule BarkparkWeb.SharedDocsTest do
 
       conn = get(conn, doc_path(ws, project, "p1"))
 
-      assert conn.status in [401, 403, 404]
+      # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+      # Both it and the permission-tier gates answer 403 with code "forbidden", so
+      # `reason` is the ONLY discriminator: the membership arm carries
+      # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+      # old assertion accepted any of three statuses — unauthorized, forbidden or
+      # not-found — so it was green on a deleted route and on a lost
+      # authentication too.
+      assert conn.status == 403
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "forbidden"
+      assert err["reason"] == "not_a_member"
       refute conn.status == 200
     end
 
@@ -380,7 +410,17 @@ defmodule BarkparkWeb.SharedDocsTest do
 
       conn = get(conn, query_path(ws, project))
 
-      assert conn.status in [401, 403, 404]
+      # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+      # Both it and the permission-tier gates answer 403 with code "forbidden", so
+      # `reason` is the ONLY discriminator: the membership arm carries
+      # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+      # old assertion accepted any of three statuses — unauthorized, forbidden or
+      # not-found — so it was green on a deleted route and on a lost
+      # authentication too.
+      assert conn.status == 403
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "forbidden"
+      assert err["reason"] == "not_a_member"
       refute conn.status == 200
     end
   end
@@ -399,7 +439,17 @@ defmodule BarkparkWeb.SharedDocsTest do
 
       conn = get(conn, query_path(ws, project))
 
-      assert conn.status in [401, 403, 404]
+      # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+      # Both it and the permission-tier gates answer 403 with code "forbidden", so
+      # `reason` is the ONLY discriminator: the membership arm carries
+      # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+      # old assertion accepted any of three statuses — unauthorized, forbidden or
+      # not-found — so it was green on a deleted route and on a lost
+      # authentication too.
+      assert conn.status == 403
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "forbidden"
+      assert err["reason"] == "not_a_member"
       refute conn.status == 200
     end
   end

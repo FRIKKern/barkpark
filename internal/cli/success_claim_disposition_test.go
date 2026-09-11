@@ -184,6 +184,13 @@ var claimDispositions = []claimDisposition{
 	// carries no class at all, so the post-condition the receipt must switch on is
 	// still the box's raw stdout.
 	{Name: "supportAddRun.success/max-class-degraded", Post: []string{"capacity_stdout"}},
+	// The MAIN'S reading. Both paths are LOAD-BEARING and must not be tidied to
+	// one: arm 3 synthesises a single-axis pair through probeVaryingOnly, so
+	// dropping the status from the composer while it still prints the capacity
+	// (or the reverse) reds exactly one of them. The box is not in the probe at
+	// all — it is held fixed at supportSuccessHost outside it — so there is no
+	// identity path to declare here.
+	{Name: "supportAddRun.success/roster-fact", Post: []string{"status", "capacity.max_class"}},
 	{
 		Name:     "supportAddRun.success",
 		Identity: []string{"ID", "Name"},
@@ -242,6 +249,32 @@ var claimDispositions = []claimDisposition{
 		Name:     "renderSiteSettingsUpdated",
 		Identity: []string{"ID", "Name", "Slug", "Dataset"},
 		Post:     []string{"Theme"},
+	},
+
+	// ── cloud_site_doctor.go — the per-substrate receipt (ssw8) ─────────────
+	// The identity is the ROW that was examined (same site, same clock, same
+	// substrate key) plus, on the honesty row, the server's own sentences —
+	// held byte-identical so the pair cannot pass by printing two different
+	// strings. The axis is the substrate's STATE and the three report-level
+	// numbers that state moves.
+	{
+		Name: "renderSiteDoctorReport/absent-vs-present",
+		Identity: []string{
+			"Site.ID", "Site.Slug", "CheckedAt", "UnknownCount",
+			"Substrates.#1.Key", "Substrates.#1.Detail",
+		},
+		Post: []string{"OK", "AbsentCount", "Substrates.#1.State", "Substrates.#1.Repair"},
+	},
+	{
+		// Unreadable is declared @len, not by value: the axis is whether the
+		// doctor ABSTAINED on this substrate at all, which is exactly what a
+		// by-value comparison of two lists would have blurred.
+		Name: "renderSiteDoctorReport/unknown-is-not-absent",
+		Identity: []string{
+			"Site.ID", "Site.Slug", "CheckedAt",
+			"Substrates.#1.Key", "Substrates.#1.Detail", "Substrates.#1.Repair",
+		},
+		Post: []string{"OK", "AbsentCount", "UnknownCount", "Unreadable@len", "Substrates.#1.State"},
 	},
 
 	// ── tasks_stamp_cmd.go — the ledger row the store actually holds ────────

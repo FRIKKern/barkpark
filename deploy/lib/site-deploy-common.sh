@@ -410,3 +410,240 @@ build_gate_release() {
   BUILD_GATE_HELD=0
   log "BUILD: fleet build slot released"
 }
+
+# ---------------------------------------------------------------------------
+# RETIRE ORDERING — the sort key is the STAGING time, never the builder's clock.
+#
+# Both engines used to prune with `ls -1dt "$RELEASES"/*/`, i.e. newest-first by
+# the release dir's MTIME. That is not the staging time. STAGE copies with
+# `cp -a "$SRC/dist/."` (static) / `cp -a "$SITE_SRC/.next/standalone/."` (node),
+# and `cp -a` PRESERVES the source timestamps — proven on both GNU and BSD cp
+# with a 2020-stamped source — so a release dir inherits "when the builder last
+# wrote dist/", not "when this release was staged". Any path that stages a
+# PRE-EXISTING dist (a re-upload, a cached build, a prebuilt artifact) therefore
+# sorts a brand-new release as if it were old, and RETIRE deletes the newest
+# releases while keeping the oldest.
+#
+# Worse, the tie case is silently wrong rather than merely arbitrary: with EQUAL
+# mtimes GNU coreutils `ls -t` falls back to NAME ASCENDING (measured on 9.4:
+# b1..b7 — the exact reverse of newest-first), so a run that stages every release
+# from one unchanging dist retires in perfect reverse order.
+#
+# The remedy is a stamp written BY THE STAGING STEP, at
+# `<releases>/.staged/<build_id>`, holding "<epoch> <seq>". It lives OUTSIDE the
+# release dir on purpose: the static engine's `file_server` serves the release
+# tree, and a marker inside it would be one more fetchable internal (the exact
+# defect the `hide` upgrade closed). `<seq>` is a per-site monotonic counter, so
+# two stagings inside the same second still order — the deploy lock (queue depth
+# 1) is what makes it monotonic.
+#
+# Releases staged BEFORE this landed carry no stamp; they fall back to the dir
+# mtime, which is exactly the old key, so the ordering degrades to today's
+# behaviour for them and is exact for everything staged from now on.
+# ---------------------------------------------------------------------------
+
+# Whole-second mtime of <path>, portable. GNU `stat -f` means FILESYSTEM status
+# (it would succeed and print nonsense), so probe GNU's `-c` FIRST and only fall
+# back to BSD's `-f`; validate the result is digits before trusting either.
+dir_mtime_epoch() { # <path>
+  local m
+  m="$(stat -c %Y "$1" 2>/dev/null)" || m=""
+  case "$m" in ''|*[!0-9]*) m="$(stat -f %m "$1" 2>/dev/null)" ;; esac
+  case "$m" in ''|*[!0-9]*) m=0 ;; esac
+  printf '%s' "$m"
+}
+
+# Stamp a release with the time IT WAS STAGED. Best-effort in every direction: a
+# stamp that cannot be written costs the ordering its precision, never the deploy.
+stamp_release_staged() { # <releases-dir> <build-id>
+  local sd="$1/.staged" seq=0
+  mkdir -p "$sd" 2>/dev/null || return 0
+  if [ -f "$sd/.seq" ]; then
+    seq="$(cat "$sd/.seq" 2>/dev/null)"
+    case "$seq" in ''|*[!0-9]*) seq=0 ;; esac
+  fi
+  seq=$((seq + 1))
+  printf '%s\n' "$seq" > "$sd/.seq" 2>/dev/null || true
+  printf '%s %s\n' "$(date -u +%s)" "$seq" > "$sd/$2" 2>/dev/null || true
+  return 0
+}
+
+# Release dirs, NEWEST STAGED FIRST. Fixed-width zero-padded keys so a plain
+# `sort -r` is a numeric sort; the dir path is the descending tie-break, so the
+# order is deterministic even when two releases share a key (it is never the
+# name-ASCENDING order `ls -t` falls back to).
+releases_newest_first() { # <releases-dir>
+  local rel="$1" sd="$1/.staged" d id key
+  [ -d "$rel" ] || return 0
+  for d in "$rel"/*/; do
+    [ -d "$d" ] || continue
+    id="$(basename "$d")"
+    key=""
+    if [ -f "$sd/$id" ]; then
+      key="$(awk 'NR==1 { printf "%019d.%09d", $1 + 0, $2 + 0; exit }' "$sd/$id" 2>/dev/null)"
+    fi
+    case "$key" in ''|*[!0-9.]*) key="$(printf '%019d.%09d' "$(dir_mtime_epoch "$d")" 0)" ;; esac
+    printf '%s\t%s\n' "$key" "$d"
+  done | sort -r | cut -f2-
+}
+
+# Prune release dirs to the newest <retain> by STAGING time, never removing one
+# of the protected build ids (live / previous / a warm slot's build). Sets PRUNED
+# to what it actually removed, so a RETIRE line is honest when the answer is zero.
+# The loop must run in THIS shell (process substitution, never a pipe) or PRUNED
+# would die with a subshell.
+PRUNED=0
+prune_release_dirs() { # <releases-dir> <retain> [protected-id …]
+  local rel="$1" retain="$2"; shift 2
+  local d id p i=0 skip
+  PRUNED=0
+  [ -d "$rel" ] || return 0
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    id="$(basename "$d")"
+    i=$((i + 1))
+    [ "$i" -le "$retain" ] && continue
+    skip=0
+    for p in "$@"; do [ -n "$p" ] && [ "$id" = "$p" ] && { skip=1; break; }; done
+    [ "$skip" = 1 ] && continue
+    if rm -rf "$d"; then
+      rm -f "$rel/.staged/$id" 2>/dev/null || true
+      PRUNED=$((PRUNED + 1)); log "RETIRE: removed old release $id"
+    fi
+  done < <(releases_newest_first "$rel")
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# THE BARE PATH (D79). `handle_path /sites/<slug>/*` does NOT match the BARE
+# `/sites/<slug>` — no trailing slash — so that request falls through the site
+# block to the slot `reverse_proxy localhost:4000` and is answered by Barkpark's
+# OWN API with its document-not-found JSON. That is worse than a 404: the
+# platform's internals are served to a site visitor. Measured live: four sites,
+# three of them static.
+#
+# The node engine has emitted a bare-path route since #3382. The static engine
+# never has, and neither engine ever upgraded a block armed BEFORE that — the
+# marker guard freezes the FIRST shape forever.
+#
+# THE TRAP, and the reason the predicate is not "is the marker present": a
+# basePath site canonicalizes in the OPPOSITE direction (Next 308s
+# `${basePath}/` -> `${basePath}`), so composing a Caddy bare -> slash redir with
+# it is an unbounded 308 cycle. So the guard is read FROM THE BLOCK'S OWN BYTES,
+# and only a block whose shape this engine can actually recognise is touched:
+#
+#   * a `redir @…` anywhere in the block  -> the bare path is already handled
+#   * an `@… path …/sites/<slug>…` matcher listing the UN-SUFFIXED path -> the
+#     block already covers the bare path without a redir; that is the basePath
+#     shape and adding a redir would build the loop
+#   * a `handle_path /sites/<slug>/* {` line -> the STRIPPING shape: the app is
+#     served at root and owns no canonicalization of its own, so a bare -> slash
+#     308 is safe and correct. This is the ONLY shape that gets upgraded.
+#   * anything else (a non-stripping `handle`, a hand-edited block, a shape a
+#     later version writes) -> LEFT ALONE. Not guessed at.
+#
+# Idempotent and self-disarming by construction: the moment a block is upgraded
+# it carries `redir @`, so the first predicate skips it forever. And it inserts
+# ONLY — every other line, the `reverse_proxy` port line included, is copied
+# through byte for byte, so it can never collide with the port flip.
+# ---------------------------------------------------------------------------
+
+# Caddy matcher names share the FQDN block, so derive one per slug; strip
+# non-alnum so the name is always valid. Byte-identical to the node engine's arm.
+caddy_bare_matcher_name() { printf 'bare_%s' "$(printf '%s' "$SITE_SLUG" | tr -cd 'A-Za-z0-9')"; }
+
+# Rewrite <src> into <dst>, inserting the bare-path matcher + redir into THIS
+# site's block. Pure: it reads and writes files and nothing else, so the
+# self-tests can pin the predicate without a Caddyfile commit or a caddy(1).
+# EXIT: 0 inserted · 10 already covered · 11 basePath-shaped (deliberately not
+# touched) · 12 block shape unrecognised (left alone) · 13 no block for this slug.
+caddy_bare_path_rewrite() { # <src> <dst>
+  BP_MARK="$(site_route_marker_re)" BP_SLUG="$SITE_SLUG" BP_MNAME="$(caddy_bare_matcher_name)" awk '
+    function flush(   i, hasredir, hasbare, hidx, ind) {
+      hasredir = 0; hasbare = 0; hidx = 0
+      for (i = 1; i <= n; i++) {
+        if (buf[i] ~ /^[ \t]*redir[ \t]+@/) hasredir = 1
+        if (buf[i] ~ ("^[ \t]*@[A-Za-z0-9_]+[ \t]+path[ \t]+([^ \t]+[ \t]+)*/sites/" slug "([ \t]|$)")) hasbare = 1
+        if (!hidx && buf[i] ~ ("^[ \t]*handle_path[ \t]+/sites/" slug "/\\*[ \t]*\\{")) hidx = i
+      }
+      if (hasredir)   verdict = 10
+      else if (hasbare) verdict = 11
+      else if (hidx)  verdict = 0
+      else            verdict = 12
+      for (i = 1; i <= n; i++) {
+        if (verdict == 0 && i == hidx) {
+          match(buf[i], /^[ \t]*/); ind = substr(buf[i], 1, RLENGTH)
+          printf "%s# The bare path (no trailing slash) does NOT match handle_path, so redirect\n", ind
+          printf "%s# it to the canonical slashed form via an EXACT path matcher (never a prefix,\n", ind
+          printf "%s# so it can never swallow the asset requests the handle serves). Without it the\n", ind
+          printf "%s# bare path falls through to the slot reverse_proxy and answers with the\n", ind
+          printf "%s# platform own API error JSON.\n", ind
+          printf "%s@%s path /sites/%s\n", ind, mname, slug
+          printf "%sredir @%s /sites/%s/ 308\n", ind, mname, slug
+        }
+        print buf[i]
+      }
+      n = 0
+    }
+    BEGIN { m = ENVIRON["BP_MARK"]; slug = ENVIRON["BP_SLUG"]; mname = ENVIRON["BP_MNAME"]; verdict = 13; n = 0 }
+    !inb && !seen && $0 ~ m { inb = 1; seen = 1; depth = 0; opened = 0; n = 0 }
+    inb {
+      buf[++n] = $0
+      o = gsub(/[{]/, "&"); c = gsub(/[}]/, "&"); depth += o - c
+      if (o > 0) opened = 1
+      if (opened && depth <= 0) { inb = 0; flush() }
+      next
+    }
+    { print }
+    END { if (n > 0) flush(); exit verdict }
+  ' "$1" > "$2"
+}
+
+# Commit that rewrite: backup -> write -> `caddy validate` -> reload, revert on
+# any rejection. Runs under with_caddy_lock (the caller wraps it), like every
+# other Caddyfile read-modify-write. NON-FATAL in every direction — the site is
+# already being served; a rejected or unwritable upgrade leaves the route exactly
+# as it was. Sets BARE_UPGRADE_VERDICT to the outcome for the caller's prose.
+# RETURNS 0 only when the Caddyfile actually changed.
+# shellcheck disable=SC2034  # read by BOTH engines' ROUTE prose, never in this file
+BARE_UPGRADE_VERDICT=""
+upgrade_caddy_bare_path() {
+  BARE_UPGRADE_VERDICT=""
+  command -v caddy >/dev/null 2>&1 || { BARE_UPGRADE_VERDICT="no-caddy"; return 1; }
+  [ -f "$CADDYFILE" ] || { BARE_UPGRADE_VERDICT="no-caddyfile"; return 1; }
+  local tmp rc; tmp="$(mktemp)"
+  caddy_bare_path_rewrite "$CADDYFILE" "$tmp"; rc=$?
+  if [ "$rc" != 0 ]; then
+    rm -f "$tmp"
+    case "$rc" in
+      10) BARE_UPGRADE_VERDICT="already-covered" ;;
+      11) BARE_UPGRADE_VERDICT="basepath-shaped" ;;
+      12) BARE_UPGRADE_VERDICT="unrecognised" ;;
+      *)  BARE_UPGRADE_VERDICT="no-block" ;;
+    esac
+    return 1
+  fi
+  local bak; bak="${CADDYFILE}.bak.bare.${SITE_SLUG}.$(date -u +%Y%m%d%H%M%S)"
+  cp -a "$CADDYFILE" "$bak"
+  if cp "$tmp" "$CADDYFILE"; then
+    rm -f "$tmp"
+    chmod --reference="$bak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+    chown --reference="$bak" "$CADDYFILE" 2>/dev/null || true
+    if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+      rm -f "$bak"
+      systemctl reload caddy 2>/dev/null || true
+      BARE_UPGRADE_VERDICT="upgraded"
+      log "upgraded the already-armed /sites/$SITE_SLUG block with a bare-path 308 redir"
+      return 0
+    fi
+    cp -a "$bak" "$CADDYFILE" && rm -f "$bak"
+    BARE_UPGRADE_VERDICT="rejected"
+    log "caddy validate rejected the /sites/$SITE_SLUG bare-path upgrade — reverted, Caddy untouched"
+    return 1
+  fi
+  cp -a "$bak" "$CADDYFILE" 2>/dev/null; rm -f "$bak" "$tmp"
+  # shellcheck disable=SC2034  # read by BOTH engines' ROUTE prose, never in this file
+  BARE_UPGRADE_VERDICT="unwritable"
+  log "could not rewrite $CADDYFILE for the /sites/$SITE_SLUG bare-path upgrade — Caddy untouched"
+  return 1
+}

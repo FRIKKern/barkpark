@@ -107,8 +107,16 @@ const WRITE_SHAPES = [
   // freely through its host language's API: `node -e 'require("fs").rmSync(…)'`
   // and `python3 -c 'import os; os.remove(…)'` were both classified safe BEFORE
   // this file gained quote awareness (verified against the pre-change module).
-  // Quoted code is scanned raw, so naming the APIs closes it. Same caveat as
-  // INTERPRETER_SHAPES below: a denylist of mutating APIs cannot be complete.
+  // AN INTERPRETER'S quoted code is scanned raw — `executesItsQuotedArgument`
+  // suppresses quote-blanking for exactly those shapes — so naming the APIs
+  // closes it there. The flat sentence this comment used to carry ("Quoted code
+  // is scanned raw") was FALSE for every other head, and the falsehood was
+  // load-bearing: it read as a promise that quoting changes nothing, when
+  // quoting a grep PATTERN is precisely what flips this rule off. That made a
+  // real, undocumented workaround look impossible, and sent readers hunting a
+  // regex bug instead of the operand-vs-syntax confusion fixed below by
+  // `blankSearchTerms`. Same caveat as INTERPRETER_SHAPES below: a denylist of
+  // mutating APIs cannot be complete.
   [/\b(rmSync|unlinkSync|rmdirSync|writeFileSync|appendFileSync|renameSync|truncateSync)\b/, "fs mutation API"],
   [/\b(shutil\.rmtree|os\.(remove|unlink|rmdir|rename|truncate))\b/, "fs mutation API"],
   // Elixir/Erlang — this repo's primary runtime, so an `elixir -e` / `iex -e`
@@ -258,6 +266,160 @@ export function blankQuotedSpans(command) {
   return quote === null ? out : null;
 }
 
+// ── SEARCH TERMS ARE OPERANDS, NOT SYNTAX ───────────────────────────────────
+//
+// `blankQuotedSpans` above fixed one half of the operand-vs-syntax confusion:
+// text the AUTHOR quoted is data. It left the other half open, because a
+// matcher's PATTERN does not need quotes to be an operand. MEASURED against
+// origin/main's own two gates on 2026-09-10, over screen.mjs's three named sets
+// plus the row's specimen: `screenCommand` ADMITTED and `classifySafety`
+// REFUSED all seven of
+//
+//   git show origin/main:tooling/grip/record.mjs | grep -c writeFileSync
+//   grep -rn rmSync tooling/grip/
+//   grep -e writeFileSync -n tooling/grip/record.mjs
+//   git grep -n writeFileSync -- tooling/grip
+//   grep -n publish docs/INDEX.md
+//   grep -rn mutate tooling/
+//   git log --grep=publish -5
+//
+// — every one of them a READ whose only sin is what it SEARCHES FOR. So a row
+// `ledger.mjs prescreen` calls storable was one `adjudicate.mjs` then refused
+// to re-run, and the epic's own seal evidence (which greps for write-API names
+// by construction) sat on the wrong side of that line. Quoting the pattern
+// flipped the verdict, which is a workaround nobody documented and nobody
+// should need.
+//
+// So: inside a MATCHER segment, blank the pattern operand the same 1:1 way
+// quoted spans are blanked. Three guards keep this from widening the gate:
+//
+//   • it runs ONLY on the quote-blanked string, so an interpreter shape (whose
+//     quoted argument IS its program) never reaches it — see classifySafety;
+//   • it blanks the PATTERN ONLY: one positional per segment, or the value of
+//     `-e`/`--regexp`/`--grep`. Every other token — paths, redirects, the next
+//     pipeline segment — is left byte-identical, so `grep -rn foo . > out` is
+//     still refused for the redirect and `grep foo | rm -rf x` is still refused
+//     for the `rm`;
+//   • a token carrying ANY shell metacharacter is left RAW. If it is not a
+//     plain word, this function does not claim to know it is data.
+//
+// The direction of the error stays where the rest of this file puts it: getting
+// this wrong costs a FALSE REFUSAL of a read, never a false permission on a
+// write.
+
+const MATCHER_HEAD = /^(grep|egrep|fgrep|rg|ag|ack)$/;
+
+// Flags whose VALUE is the pattern — blank the value, and the positional that
+// follows is then a PATH, not a pattern.
+const PATTERN_VALUE_FLAG = /^(-e|--regexp|--grep)$/;
+
+// Flags whose value is NOT a pattern and must be stepped over so the positional
+// scan does not mistake the value for the pattern.
+const SKIP_VALUE_FLAG = /^(-f|--file|-m|--max-count|-A|-B|-C|--after-context|--before-context|--context|--include|--exclude|--exclude-dir|--include-dir|--binary-files|--color|--colour|--devices|--directories|-d|--label)$/;
+
+// Anything that is not a plain word is not provably data.
+const PLAIN_WORD = /^[^<>|;&$`()\'"]+$/;
+
+function blankSpan(chars, start, end) {
+  for (let i = start; i < end; i++) chars[i] = " ";
+}
+
+/**
+ * Blank the PATTERN operand of every matcher segment, 1:1, so offsets survive.
+ * Input MUST already be quote-blanked (never the raw string of an interpreter
+ * shape). Pure.
+ */
+export function blankSearchTerms(scanned) {
+  const src = String(scanned || "");
+  const chars = [...src];
+
+  // Quoted spans are already blanked, so a metacharacter here is real syntax:
+  // segment boundaries are honest.
+  let segStart = 0;
+  const segments = [];
+  for (let i = 0; i <= src.length; i++) {
+    if (i === src.length || "|;&".includes(src[i])) {
+      if (i > segStart) segments.push([segStart, i]);
+      segStart = i + 1;
+    }
+  }
+
+  for (const [from, to] of segments) {
+    const tokens = [];
+    const re = /\S+/g;
+    re.lastIndex = 0;
+    const seg = src.slice(from, to);
+    for (let m; (m = re.exec(seg)) !== null; ) {
+      tokens.push({ text: m[0], start: from + m.index, end: from + m.index + m[0].length });
+    }
+    if (!tokens.length) continue;
+
+    // Step past leading `VAR=value` assignments to find the head.
+    let i = 0;
+    while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i].text)) i++;
+    if (i >= tokens.length) continue;
+
+    const head = tokens[i].text.split("/").pop();
+    let patternIsPositional = true;
+
+    if (MATCHER_HEAD.test(head)) {
+      i++;
+    } else if (head === "git") {
+      // Find git's sub-verb, skipping globals (and their separated values).
+      i++;
+      while (i < tokens.length && tokens[i].text.startsWith("-")) {
+        const g = tokens[i].text;
+        i++;
+        if (/^(-c|-C|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--attr-source|--config-env)$/.test(g)) i++;
+      }
+      if (i >= tokens.length) continue;
+      const verb = tokens[i].text;
+      i++;
+      if (verb === "grep") {
+        // `git grep [flags] PATTERN [-- paths]` — same shape as grep.
+      } else if (verb === "log" || verb === "show" || verb === "rev-list") {
+        // Only `--grep`/`--author`-style pattern flags carry data here; there is
+        // no positional pattern to blank.
+        patternIsPositional = false;
+      } else {
+        continue;
+      }
+    } else {
+      continue;
+    }
+
+    let seenPatternFlag = false;
+    for (; i < tokens.length; i++) {
+      const t = tokens[i].text;
+      if (t === "--") break;                       // everything after is a path
+      if (t.startsWith("-") && t !== "-") {
+        const eq = t.indexOf("=");
+        if (eq > 0 && PATTERN_VALUE_FLAG.test(t.slice(0, eq))) {
+          const vStart = tokens[i].start + eq + 1;
+          if (PLAIN_WORD.test(src.slice(vStart, tokens[i].end))) {
+            blankSpan(chars, vStart, tokens[i].end);
+            seenPatternFlag = true;
+          }
+          continue;
+        }
+        if (PATTERN_VALUE_FLAG.test(t)) {
+          const v = tokens[i + 1];
+          if (v && PLAIN_WORD.test(v.text)) { blankSpan(chars, v.start, v.end); i++; }
+          seenPatternFlag = true;
+          continue;
+        }
+        if (SKIP_VALUE_FLAG.test(t)) { i++; continue; }
+        continue;                                   // valueless flag or cluster
+      }
+      if (!patternIsPositional || seenPatternFlag) break;
+      if (PLAIN_WORD.test(t)) blankSpan(chars, tokens[i].start, tokens[i].end);
+      break;                                        // exactly ONE positional pattern
+    }
+  }
+
+  return chars.join("");
+}
+
 /**
  * Classify a command as safe to re-run, or refuse it. Pure; no execution.
  * @returns {{safe: boolean, reason: string}}
@@ -268,7 +430,9 @@ export function classifySafety(command) {
 
   // Scan the SYNTAX, not the text — except where the quoted text IS the syntax.
   const blanked = executesItsQuotedArgument(cmd) ? null : blankQuotedSpans(cmd);
-  const scanned = blanked ?? cmd;
+  // A matcher's PATTERN is an operand whether or not the author quoted it, so
+  // blank it too — but only on the path where quote-blanking already applied.
+  const scanned = blanked === null ? cmd : blankSearchTerms(blanked);
 
   for (const [re, why] of KNOWN_WRITERS) {
     if (re.test(scanned)) return { safe: false, reason: `known writer: ${why}` };
@@ -492,6 +656,15 @@ const GIT_LISTERS = new Set([
   "status", "show-ref", "for-each-ref", "blame", "describe", "shortlog",
 ]);
 const GO_LISTERS = new Set(["vet", "build", "list"]);
+// `git grep` is a MATCHER, not an UNKNOWN. Its exit-code grammar is grep's —
+// rc1 is a genuine no-match — and census.mjs's own classifier has always said
+// so (GIT_MATCHER there). rerun.mjs did not, so every `git grep` fell to
+// FAMILY.UNKNOWN, where the DEFAULT branch rules ANY nonzero exit FAILED with
+// absenceEligible:true. That put rc128 — an unresolvable ref, a missing repo —
+// on the same footing as a real no-match: an environment fault laundered into
+// a proven absence, inside the instrument built to abolish exactly that. The
+// rc128 UNAVAILABLE rules lived only in CONTENT_FETCH and were unreachable.
+const GIT_MATCHERS = new Set(["grep"]);
 
 /** Tokens of a command segment, with env assignments stripped. */
 function tokens(segment) {
@@ -521,13 +694,13 @@ function gitSubcommand(rest) {
 const AMBIGUOUS_LIST = /\|\||&&|;/;
 
 /** Which tool family's exit-code grammar governs this command? Pure. */
-export function classifyFamily(command) {
+function lastStageParts(command) {
   const cmd = String(command || "").trim();
-  if (!cmd) return FAMILY.UNKNOWN;
+  if (!cmd) return null;
   // Scan SYNTAX, not text — a `|` or the word `diff` inside a quoted pattern is
   // data, exactly as in classifySafety. An unterminated quote falls back to raw.
   const blanked = blankQuotedSpans(cmd) ?? cmd;
-  if (AMBIGUOUS_LIST.test(blanked)) return FAMILY.UNKNOWN;
+  if (AMBIGUOUS_LIST.test(blanked)) return null;
 
   // Find the pipe on the BLANKED text (a quoted `|` is data, not a pipeline),
   // then slice the ORIGINAL at that offset — blanking is 1:1, so the offsets
@@ -536,10 +709,14 @@ export function classifyFamily(command) {
   // argument to -C: the whole command falls to UNKNOWN.
   const pipe = blanked.lastIndexOf("|");
   const parts = tokens(pipe === -1 ? cmd : cmd.slice(pipe + 1));
-  if (parts.length === 0) return FAMILY.UNKNOWN;
+  if (parts.length === 0) return null;
+  return { head: parts[0].split("/").pop(), rest: parts.slice(1) };
+}
 
-  const head = parts[0].split("/").pop();
-  const rest = parts.slice(1);
+export function classifyFamily(command) {
+  const stage = lastStageParts(command);
+  if (!stage) return FAMILY.UNKNOWN;
+  const { head, rest } = stage;
   const has = (...flags) => rest.some((t) => flags.some((f) => t === f || t.startsWith(`${f}=`)));
 
   if (MATCHER_HEADS.has(head)) return FAMILY.MATCHER;
@@ -554,6 +731,7 @@ export function classifyFamily(command) {
     const { verb, args } = gitSubcommand(rest);
     const hasArg = (...flags) => args.some((t) => flags.some((f) => t === f || t.startsWith(`${f}=`)));
     if (verb === "merge-base") return hasArg("--is-ancestor") ? FAMILY.PREDICATE : FAMILY.QUERY_LISTER;
+    if (GIT_MATCHERS.has(verb)) return FAMILY.MATCHER;
     if (GIT_CONTENT_FETCH.has(verb)) return FAMILY.CONTENT_FETCH;
     if (verb === "diff" && hasArg("--quiet", "--exit-code")) return FAMILY.DIFFER;
     if (GIT_LISTERS.has(verb)) return FAMILY.QUERY_LISTER;
@@ -564,6 +742,144 @@ export function classifyFamily(command) {
     return GO_LISTERS.has(verb) ? FAMILY.QUERY_LISTER : FAMILY.UNKNOWN;
   }
   return FAMILY.UNKNOWN;
+}
+
+// ── SILENT BY DESIGN — a predicate that answers with its exit code alone ─────
+//
+// D6 says a silent success is a broken read, and that rule has no exception for
+// a command that was ASKED to be silent. Two of the best-polarised spellings in
+// the grammar are exactly that shape, and both were measured on this host:
+//
+//   git cat-file -e origin/main:<path>   rc0 present / rc128 absent, 0 bytes
+//   grep -q <pat> <file>                 rc0 match  / rc1 no-match,  0 bytes
+//
+// Before this rule the first hit CONTENT-FETCH's "exited 0 but returned no
+// bytes" and the second hit MATCHER's "grep exited 0 (match) yet produced no
+// output": each arrived at the verdict layer saying NOTHING, and an honest
+// author reads "null read" and concludes the tool is broken. The suppression is
+// NARROW ON PURPOSE — it fires only when the flag that demands silence is on
+// the command line, so a plain `grep` that exits 0 with no output keeps its
+// NULL-READ ruling, which is the defect D6 was written for.
+const QUIET_CLUSTER = /^-[A-Za-z]*q[A-Za-z]*$/;
+const QUIET_LONG = new Set(["--quiet", "--silent"]);
+const isQuietFlag = (t) => QUIET_LONG.has(t) || QUIET_CLUSTER.test(t);
+
+/** Is this command's silence at exit 0 the ANSWER rather than a failed read? */
+export function isSilentByDesign(command) {
+  const stage = lastStageParts(command);
+  if (!stage) return false;
+  const { head, rest } = stage;
+  if (head === "git") {
+    const { verb, args } = gitSubcommand(rest);
+    // `cat-file -e` prints nothing by contract; `cat-file -t` prints the type.
+    if (verb === "cat-file") return args.includes("-e");
+    if (GIT_MATCHERS.has(verb)) return args.some(isQuietFlag);
+    return false;
+  }
+  if (MATCHER_HEADS.has(head)) return rest.some(isQuietFlag);
+  return false;
+}
+
+// ── A TOOLCHAIN FAULT IS NOT A REFUTATION ────────────────────────────────────
+//
+// THE DEFECT, measured on this host 2026-09-10 against origin/main bb175f130:
+//
+//   go test ./internal/cli -run TestSiteClaimsAreProbedWithResponseTypes
+//     exit 1
+//     stdout: FAIL\tgithub.com/FRIKKern/barkpark/internal/cli [build failed]
+//     stderr: # runtime/cgo
+//             error: unknown option '-E'
+//
+// `go test` is not in GO_LISTERS (`vet`, `build`, `list`), so it fell to
+// FAMILY.UNKNOWN, whose DEFAULT branch rules ANY nonzero exit FAILED with
+// absenceEligible:true. FAILED travels adjudicate.mjs's EXECUTION_MAP to
+// VERDICTS.FAILED, which tooling/pds/adjudicate.mjs turns into
+// PDS_VERDICT.REFUTED / "PASS-CONTRADICTED": *the command ran and REFUTES the
+// claim*. The test binary was never produced. Nothing was asserted. A host
+// whose `cc` is a shim was silently converted into evidence that a guard is
+// broken — the mirror image of the laundered-absence class this file exists to
+// abolish, and it fires on the BEHAVIOUR-class recipe, the one an epic files
+// most.
+//
+// THE EXIT CODE CANNOT BE THE DISCRIMINATOR. Both of these exit 1, measured
+// side by side on this host:
+//
+//   a genuine assertion failure  --- FAIL: TestGenuineFailure (0.00s)
+//                                FAIL\tprobe\t0.152s
+//   a package that never built   FAIL\tprobe [setup failed]
+//                                # probe
+//                                p_test.go:5:3: no required module provides package …
+//
+// So the discriminator is the OUTPUT MARKER, and the marker table is keyed BY
+// HEAD rather than being one flat regex list: `node --test` printing the string
+// "[build failed]" out of a FIXTURE must not be read as Go's build-failure
+// banner. A toolchain's own dialect only speaks for that toolchain.
+//
+// Fails CLOSED in one direction only: a matched marker demotes a decisive
+// verdict to UNAVAILABLE (inadmissible for a pass AND for an absence). It can
+// never promote anything, and it is inert at exit 0.
+const TOOLCHAIN_FAULTS = new Map([
+  ["go", [
+    [/\[build failed\]/, "the Go package failed to BUILD — the test binary was never produced"],
+    [/\[setup failed\]/, "the Go package failed to SET UP — the test binary was never produced"],
+    [/^# \S*cgo\b/m, "cgo could not be compiled by this host's C driver"],
+    [/no required module provides package/, "a module dependency is not present on this host"],
+    [/cannot find package|package \S+ is not in (?:GOROOT|std)/, "a package could not be resolved on this host"],
+    [/build constraints exclude all Go files/, "no Go file in the package builds on this host"],
+    [/go: (?:updates to go\.mod needed|cannot find main module|download|module .* found .* but does not contain)/, "the Go module graph could not be resolved on this host"],
+    [/go: -.*flag provided but not defined|flag provided but not defined: -/, "the toolchain rejected the recipe's own flags — nothing was run"],
+  ]],
+  ["mix", [
+    [/== Compilation error/, "Elixir compilation failed — no test was run"],
+    [/\*\* \(Mix\)/, "mix could not set the run up"],
+    [/Could not compile dependency|could not compile dependency/, "a dependency failed to compile on this host"],
+  ]],
+  ["npm", JS_FAULTS()],
+  ["pnpm", JS_FAULTS()],
+  ["yarn", JS_FAULTS()],
+  ["node", JS_FAULTS()],
+  ["cargo", [
+    [/^error\[E\d+\]|could not compile/m, "the Rust crate failed to compile — no test binary was produced"],
+  ]],
+]);
+
+/**
+ * `Cannot find module` and friends are the JS toolchain's build faults: the
+ * module graph never resolved, so no test ever ran. Anchored to a stderr-shaped
+ * line so a test that PRINTS the phrase in an assertion message is not caught.
+ */
+function JS_FAULTS() {
+  return [
+    [/^\s*(?:Error: )?Cannot find module /m, "a JS module could not be resolved on this host"],
+    [/ERR_MODULE_NOT_FOUND|code: 'MODULE_NOT_FOUND'/, "a JS module could not be resolved on this host"],
+    [/npm ERR! (?:code )?E(?:NOENT|RESOLVE|ACCES)/, "npm could not set the run up on this host"],
+  ];
+}
+
+/**
+ * Did this command fail to BUILD/SET UP rather than to ASSERT? Pure.
+ *
+ * @returns {string|null} the reason, or null when this is not a toolchain fault
+ */
+export function classifyToolchainFault(command, run = {}) {
+  const stage = lastStageParts(command);
+  if (!stage) return null;
+  const markers = TOOLCHAIN_FAULTS.get(stage.head);
+  if (!markers) return null;
+  // Inert at success and when nothing was measured. A fault is only ever read
+  // out of a run that ALREADY failed — this never manufactures a failure.
+  if (run.exit === 0 || run.exit === null || run.exit === undefined) return null;
+  const text = `${String(run.stdout ?? "")}\n${String(run.stderr ?? "")}`;
+  for (const [pattern, why] of markers) {
+    if (pattern.test(text)) return why;
+  }
+  return null;
+}
+
+/** Is git the tool that produced this exit code? (rc128 is git's dialect.) */
+function isGitLed(command) {
+  const stage = lastStageParts(command);
+  return !!stage && stage.head === "git";
 }
 
 // FOUR SEMANTICS SHARE EXIT 128, and only one of them is decay. Keying decay on
@@ -578,6 +894,26 @@ export function classifyFamily(command) {
 const GIT_PATH_GONE = /does not exist in|exists on disk, but not in/i;
 const GIT_REF_GONE = /invalid object name|unknown revision or path not in the working tree|bad revision|ambiguous argument/i;
 const GIT_WRONG_CWD = /not a git repository/i;
+
+/**
+ * The rc128 discriminator, shared by every git-led family.
+ *
+ * It used to live INSIDE `case FAMILY.CONTENT_FETCH`, which made it unreachable
+ * for any other git command — the whole point of the git grep fault. Hoisting
+ * it here is what lets a MATCHER whose head is `git` reach the same rules.
+ */
+function gitExit128(stderr, ok) {
+  if (GIT_WRONG_CWD.test(stderr)) {
+    return ok(VERDICT.UNAVAILABLE, "not a git repository here — an environment fault, never decay", false);
+  }
+  if (GIT_REF_GONE.test(stderr)) {
+    return ok(VERDICT.UNAVAILABLE, `the ref could not be resolved here (unfetched or renamed): ${firstLine(stderr)} — an environment fault, never decay`, false);
+  }
+  if (GIT_PATH_GONE.test(stderr)) {
+    return ok(VERDICT.FAILED, `the ref resolved and the path is NOT in it: ${firstLine(stderr)}`);
+  }
+  return ok(VERDICT.UNAVAILABLE, `git exited 128 with an unrecognised reason: ${firstLine(stderr) || "(no stderr)"}`, false);
+}
 
 /**
  * Rule on a completed run's (family, exit, output) triple. Pure — separable from
@@ -602,12 +938,36 @@ export function classifySilence(command, run = {}) {
   const bytes = Buffer.byteLength(stdout, "utf8");
   const ok = (verdict, reason, absenceEligible = true) => ({ family, verdict, reason, absenceEligible });
 
+  // A BUILD THAT NEVER RAN IS NOT A REFUTATION. This runs BEFORE the family
+  // switch on purpose: the fault is a property of the RUN, not of the family,
+  // and every family's nonzero branch (UNKNOWN's default FAILED, QUERY-LISTER's
+  // `exited N`) would otherwise convert it into a decisive answer. UNAVAILABLE
+  // is INADMISSIBLE for a pass AND for an absence, so downstream it reads as
+  // "says nothing either way" rather than "REFUTES the claim".
+  const toolchainFault = classifyToolchainFault(command, run);
+  if (toolchainFault) {
+    return ok(
+      VERDICT.UNAVAILABLE,
+      `${toolchainFault} — the command never reached an assertion, so this is an environment fault, never a refutation`,
+      false,
+    );
+  }
+
   switch (family) {
     // grep rc0 must PRINT: "matched" with nothing to show is a broken read.
     case FAMILY.MATCHER:
-      if (exit === 0 && empty) return ok(VERDICT.NULL_READ, "grep exited 0 (match) yet produced no output");
+      if (exit === 0 && empty) {
+        // `-q` was asked for: the exit code IS the output.
+        if (isSilentByDesign(command)) return ok(VERDICT.OK, "the matcher matched and was told to answer with its exit code alone (-q) — silence is the designed answer");
+        return ok(VERDICT.NULL_READ, "grep exited 0 (match) yet produced no output");
+      }
       if (exit === 0) return ok(VERDICT.OK, `matched, ${bytes} bytes of output`);
       if (exit === 1) return ok(VERDICT.FAILED, "ran fine and matched nothing — a genuine no-match");
+      // `git grep` is a MATCHER whose ERRORS are spoken in git's dialect: an
+      // unresolvable ref and a missing repo both exit 128, and reading either
+      // as a matcher tool-error (let alone as the UNKNOWN default's "FAILED,
+      // absence-eligible") is an environment fault dressed as proof.
+      if (exit === 128 && isGitLed(command)) return gitExit128(stderr, ok);
       // ugrep (this host's `grep`) words its rc2 warning differently from GNU
       // grep, so this keys on the EXIT CODE, never on the message.
       return ok(VERDICT.NULL_READ, `the matcher errored (exit ${exit}) — a tool error is not an absence`, false);
@@ -632,20 +992,14 @@ export function classifySilence(command, run = {}) {
       return ok(VERDICT.FAILED, `exited ${exit}: ${firstLine(stderr) || "(no stderr)"}`);
 
     case FAMILY.CONTENT_FETCH:
-      if (exit === 0 && empty) return ok(VERDICT.NULL_READ, "the fetch exited 0 but returned no bytes");
-      if (exit === 0) return ok(VERDICT.OK, `fetched ${bytes} bytes`);
-      if (exit === 128) {
-        if (GIT_WRONG_CWD.test(stderr)) {
-          return ok(VERDICT.UNAVAILABLE, "not a git repository here — an environment fault, never decay", false);
-        }
-        if (GIT_REF_GONE.test(stderr)) {
-          return ok(VERDICT.UNAVAILABLE, `the ref could not be resolved here (unfetched or renamed): ${firstLine(stderr)} — an environment fault, never decay`, false);
-        }
-        if (GIT_PATH_GONE.test(stderr)) {
-          return ok(VERDICT.FAILED, `the ref resolved and the path is NOT in it: ${firstLine(stderr)}`);
-        }
-        return ok(VERDICT.UNAVAILABLE, `git exited 128 with an unrecognised reason: ${firstLine(stderr) || "(no stderr)"}`, false);
+      if (exit === 0 && empty) {
+        // `git cat-file -e <ref>:<path>` is an EXISTENCE CHECK: rc0 means the
+        // blob is there and printing nothing is the contract, not a null read.
+        if (isSilentByDesign(command)) return ok(VERDICT.OK, "the existence check passed — `cat-file -e` answers with its exit code alone, so silence is the designed answer");
+        return ok(VERDICT.NULL_READ, "the fetch exited 0 but returned no bytes");
       }
+      if (exit === 0) return ok(VERDICT.OK, `fetched ${bytes} bytes`);
+      if (exit === 128) return gitExit128(stderr, ok);
       return ok(VERDICT.FAILED, `exited ${exit}: ${firstLine(stderr) || "(no stderr)"}`);
 
     // Unrecognised: keep the pre-existing conservative default exactly. An

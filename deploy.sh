@@ -325,12 +325,35 @@ ufw --force enable
 # It used to be taken and discarded: 30 failed probes fell through silently and
 # the "Barkpark is running!" banner printed unconditionally, exit 0. Never let
 # the banner outrun the probe again.
+# ---- 429 backoff, shared (task-90059c5c680f6665) ---------------------------
+# This script arrives over STDIN (`ssh root@VPS 'bash -s' < deploy.sh`, the usage
+# at the top), so $0 is `bash` and BASH_SOURCE names no file — there is no
+# sibling path to scripts/lib/bp-curl.sh. What DOES exist by now is the checkout
+# step 1 made: $APP_DIR, which this script cd'd into above.
+#
+# Guarded, and the degrade is NAMED rather than silent: `.` on a missing file
+# under `set -euo pipefail` would abort a PROVISIONING run at step 11, which is a
+# far worse outcome than an unhandled 429 on a localhost boot probe. The shim
+# keeps -f's semantics, which is what this probe deliberately relies on (see the
+# comment on the probe itself).
+if [ -r "$APP_DIR/scripts/lib/bp-curl.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$APP_DIR/scripts/lib/bp-curl.sh"
+else
+  echo ">> WARNING: $APP_DIR/scripts/lib/bp-curl.sh absent — the health probe below runs WITHOUT the shared 429 backoff" >&2
+  bp_curl_body() { curl -fsS "$@"; }
+fi
+
 echo ">> Waiting for API on localhost:$APP_PORT..."
 HEALTHY=0
 for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
-  # -f so a non-2xx (a booting or crashed endpoint answering 500) is NOT read
-  # as healthy: the measurement is a good answer, not merely an open socket.
-  if curl -fs "http://localhost:$APP_PORT/api/schemas" > /dev/null 2>&1; then
+  # bp_curl_body is the exact drop-in for the `curl -fs` this replaced: it
+  # captures the status FIRST and returns 22 — curl -f's own code — on any
+  # non-2xx. That -f semantics is the point of the probe: a booting or crashed
+  # endpoint answering 500 is NOT read as healthy; the measurement is a good
+  # answer, not merely an open socket. A 429 is now backed off rather than
+  # counted as one of the failed attempts.
+  if bp_curl_body -s "http://localhost:$APP_PORT/api/schemas" > /dev/null 2>&1; then
     echo "   Ready! (probe $i/$HEALTH_ATTEMPTS)"
     HEALTHY=1
     break

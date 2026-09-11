@@ -131,46 +131,22 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
   defp tier_tokens, do: Lens.tier_tokens()
   defp guard_tier, do: Lens.guard_tier()
 
-  # Routes whose post-guard `Auth.forbidden(required: …)` is NOT a tier and must
-  # not be read as one — a NAMED consent list, exactly like @unresolved_consent,
-  # asserted below in both directions so it cannot rot.
-  @elevation_consent %{
-    {"POST", "/v1/tokens"} =>
-      "the 403 is PAYLOAD-conditional, not principal-conditional: any member may " <>
-        "mint a `read` PAT, and `create_personal_access_token/3` refuses only when " <>
-        "the requested abilities include deploy/root/write (anti-escalation). The " <>
-        "row's `user` is correct — an `admin` cell here would tell every member " <>
-        "they cannot mint the token they can in fact mint. `user` and not `user(s)`: " <>
-        "the outer guard IS `Auth.require_user`, so PAT management is session-only, " <>
-        "exactly as the comment above the route says."
-  }
-
-  # Rows whose guard this resolver CANNOT reach, each with the reason it cannot.
-  # This is a NAMED consent list, not a silent skip: an unresolved row that is not
-  # listed here fails the census, and a listed row that becomes resolvable fails it
-  # too, so the list cannot rot in either direction.
-  @unresolved_consent %{
-    {"GET", "/v1/events"} =>
-      "authenticates inline in `require_user_sse/1` — Bearer OR a single-use `?ticket=` — " <>
-        "invoking neither `Auth.require_*` nor `with_team_role/3`. That bespoke dual path is " <>
-        "exactly what the row's starred `user*` tier documents."
-  }
+  # The two NAMED consent lists moved to `RouterTierLens` (cause-only tripwire,
+  # cchi-w40-bl) so a second census reads the SAME rulings instead of minting a
+  # second opinion about the same rows. They are still asserted in BOTH
+  # directions below — this file remains the place they cannot rot.
+  defp elevation_consent, do: Lens.elevation_consent()
+  defp unresolved_consent, do: Lens.unresolved_consent()
 
   # The census must not shrink silently. If a refactor makes currently-resolvable
   # rows unresolvable, the split moves and this reds — lower it deliberately, in
   # the same commit as the routes you removed, or not at all.
   @resolved_floor 161
 
-  defp documented_tier(method, path) do
-    moduledoc_block()
-    |> String.split("\n")
-    |> Enum.find_value(fn line ->
-      case Regex.run(@tier_row_re, line) do
-        [_, ^method, ^path, tier] -> if tier in tier_tokens(), do: tier, else: nil
-        _ -> nil
-      end
-    end)
-  end
+  # ONE derivation of the declared tier column, in the lens, so the cause-only
+  # tripwire (`router_cause_only_refusal_test.exs`) reads the same rows this
+  # census does instead of carrying a second copy of @tier_row_re.
+  defp documented_tier(method, path), do: Lens.declared_tier(method, path)
 
   # Every tier-bearing row of the table: {METHOD, path, tier-as-written}.
   defp tier_rows do
@@ -196,12 +172,8 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
   defp guard_in(body, defs, depth), do: Lens.guard_in(body, defs, depth)
 
   # The guard the row is censused against: the raw guard, minus any elevation the
-  # consent list has ruled is not a tier (see @elevation_consent).
-  defp route_guard(method, path) do
-    guard = raw_route_guard(method, path)
-
-    if Map.has_key?(@elevation_consent, {method, path}), do: base_guard(guard), else: guard
-  end
+  # consent list has ruled is not a tier (see `RouterTierLens.elevation_consent/0`).
+  defp route_guard(method, path), do: Lens.route_guard(method, path)
 
   # {resolved, unresolved} — resolved carries {method, path, documented, enforced},
   # unresolved carries {method, path, documented, why}.
@@ -237,41 +209,41 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     # (1) Not vacuously green: the census must actually reach nearly all of its
     # population, and every row it cannot reach must be NAMED with a reason.
     unnamed =
-      Enum.reject(unresolved, fn {m, p, _, _} -> Map.has_key?(@unresolved_consent, {m, p}) end)
+      Enum.reject(unresolved, fn {m, p, _, _} -> Map.has_key?(unresolved_consent(), {m, p}) end)
 
     assert unnamed == [], """
     #{length(unnamed)} tier-bearing row(s) have no resolvable guard AND no entry in
-    @unresolved_consent. A row the resolver cannot reach is a row this census is
+    `RouterTierLens.unresolved_consent/0`. A row the resolver cannot reach is a row this census is
     green over BY CONSTRUCTION. Either teach `guard_in/3` the idiom, or add the row
-    to @unresolved_consent WITH the reason it is unreachable:
+    to `RouterTierLens.unresolved_consent/0` WITH the reason it is unreachable:
 
     #{Enum.map_join(unnamed, "\n", fn {m, p, t, why} -> "  #{m} #{p} (doc: #{t}) — #{inspect(why)}" end)}
     """
 
     # (2) The consent list cannot rot: every consented row must still exist AND
     # still be genuinely unresolvable.
-    for {{m, p}, reason} <- @unresolved_consent do
+    for {{m, p}, reason} <- unresolved_consent() do
       assert Enum.any?(rows, fn {rm, rp, _} -> {rm, rp} == {m, p} end),
-             "@unresolved_consent names #{m} #{p}, which is no longer a tier-bearing " <>
+             "`RouterTierLens.unresolved_consent/0` names #{m} #{p}, which is no longer a tier-bearing " <>
                "route-table row. Drop the consent entry."
 
       assert Enum.any?(unresolved, fn {rm, rp, _, _} -> {rm, rp} == {m, p} end),
-             "@unresolved_consent excuses #{m} #{p} (#{reason}) but the resolver now " <>
+             "`RouterTierLens.unresolved_consent/0` excuses #{m} #{p} (#{reason}) but the resolver now " <>
                "RESOLVES it. Delete the consent entry so the row is censused."
     end
 
     # (2b) The ELEVATION consent list cannot rot in either direction either: every
     # consented row must still exist AND its body must still perform the elevation
     # the entry excuses. If the refusal goes away, the excuse must go with it.
-    for {{m, p}, reason} <- @elevation_consent do
+    for {{m, p}, reason} <- elevation_consent() do
       assert Enum.any?(rows, fn {rm, rp, _} -> {rm, rp} == {m, p} end),
-             "@elevation_consent names #{m} #{p}, which is no longer a tier-bearing " <>
+             "`RouterTierLens.elevation_consent/0` names #{m} #{p}, which is no longer a tier-bearing " <>
                "route-table row. Drop the consent entry."
 
       raw = raw_route_guard(m, p)
 
       assert raw != nil and raw != base_guard(raw),
-             "@elevation_consent excuses #{m} #{p} (#{reason}) but its body no longer " <>
+             "`RouterTierLens.elevation_consent/0` excuses #{m} #{p} (#{reason}) but its body no longer " <>
                "performs a post-guard elevation (raw guard: #{inspect(raw)}). Delete the " <>
                "consent entry so the row is censused on its guard alone."
     end
@@ -431,7 +403,7 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     # `:session` branch is textually FIRST, so a lens that reads the joined
     # helper body first-hit-wins hands `require_user` to all ELEVEN delegating
     # /v1/sites routes — and the distinctions this family draws (a PAT reaches
-    # six of them and is turned away from five; one of those five is admin-only)
+    # six of them and is turned away from five; two of those five are admin-only)
     # become unsayable in the contract a CLI or SDK author reads.
     #
     # This is a GATE defect, never a live auth hole: every one of the eleven
@@ -439,7 +411,6 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     session_only = [
       {"GET", "/v1/sites/:id/deployments"},
       {"GET", "/v1/sites/:id/previews"},
-      {"POST", "/v1/sites/:id/env"},
       {"POST", "/v1/sites/:id/domains"}
     ]
 
@@ -447,7 +418,12 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     # is a different tier, and folding it into session_only would re-assert the
     # `user` cell this route no longer enforces.
     admin_only = [
-      {"POST", "/v1/sites/:id/github"}
+      {"POST", "/v1/sites/:id/github"},
+      # Moved off `:session` by the owner ruling on task-9dfa4854b5e22e94
+      # (built as task-49f9a3dbb16823ce): the site env blob is a whole-blob
+      # REPLACE of the secrets injected into the site's build and runtime, so
+      # it now sits at the same tier as POST/DELETE /v1/env-vars.
+      {"POST", "/v1/sites/:id/env"}
     ]
 
     pat_reachable = [
@@ -494,22 +470,32 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
 
     # THE DISCRIMINATION, stated as an inequality so it cannot pass vacuously:
     # two routes into the same helper, differing only in the mode they pass.
-    assert raw_route_guard("POST", "/v1/sites/:id/env") !=
+    # (The `:session` exemplar is DOMAINS, not ENV — env moved to `:team_admin`
+    # under the owner ruling on task-9dfa4854b5e22e94, and an exemplar that
+    # changes mode stops discriminating the mode it was chosen for.)
+    assert raw_route_guard("POST", "/v1/sites/:id/domains") !=
              raw_route_guard("PATCH", "/v1/sites/:id"),
-           "POST /v1/sites/:id/env (:session) and PATCH /v1/sites/:id ({:ability, \"write\"}) " <>
+           "POST /v1/sites/:id/domains (:session) and PATCH /v1/sites/:id ({:ability, \"write\"}) " <>
              "collapsed to one guard key — the lens is back to first-clause-wins"
 
-    assert guard_tier()[raw_route_guard("POST", "/v1/sites/:id/env")] == "user"
+    assert guard_tier()[raw_route_guard("POST", "/v1/sites/:id/domains")] == "user"
     assert guard_tier()[raw_route_guard("PATCH", "/v1/sites/:id")] == "user(s)"
 
     # THREE modes, three tiers, from one helper — the same inequality extended to
     # `:team_admin`, so a lens that collapsed it back onto `:session` reds here.
     assert raw_route_guard("POST", "/v1/sites/:id/github") !=
-             raw_route_guard("POST", "/v1/sites/:id/env"),
-           "POST /v1/sites/:id/github (:team_admin) and POST /v1/sites/:id/env (:session) " <>
+             raw_route_guard("POST", "/v1/sites/:id/domains"),
+           "POST /v1/sites/:id/github (:team_admin) and POST /v1/sites/:id/domains (:session) " <>
              "collapsed to one guard key — the lens is back to first-clause-wins"
 
     assert guard_tier()[raw_route_guard("POST", "/v1/sites/:id/github")] == "admin"
+
+    # The re-tiered route itself, asserted on BOTH halves: the body now takes the
+    # `:team_admin` arm and the table row says `admin`. If either half moves
+    # without the other, this reds — which is the whole point of the row moving
+    # in the same commit as the enforcement.
+    assert raw_route_guard("POST", "/v1/sites/:id/env") == "require_team_admin"
+    assert documented_tier("POST", "/v1/sites/:id/env") == "admin"
 
     # …and `user(s)` must survive normalization as its own tier, or the census
     # folds it back into `user` and both halves agree again by construction.

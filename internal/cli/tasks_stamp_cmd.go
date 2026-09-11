@@ -74,7 +74,15 @@ import (
 // impossible anyway. Documented-0-based + a translating echo is the
 // least-surprise, fully-backward-compatible fix.
 func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
-	declared := commandDeclaresFlag(cmd, "merge-gated")
+	// THE OVERRIDE'S FLAG TYPE, not merely its presence. `--merge-gated` used to
+	// be a bare boolean and is now a REASON-CARRYING string flag, so the wrapper
+	// must route three worlds, not two: a current server declares it "string"
+	// (flag + reason ride the POST), a server between the two changes declares
+	// it "bool" (the reason cannot land there, so only the bare flag is
+	// forwarded), and a server predating the server-side guard declares it not
+	// at all (flag AND reason are stripped and the legacy tripwire runs).
+	gatedType := commandFlagType(cmd, "merge-gated")
+	declared := gatedType != ""
 
 	// THE NON-EVALUATING DOOR (tasks_stamp_criterion_file.go). `--criterion-text-file
 	// <path>` (or `-` for stdin) is resolved FIRST, into the inline
@@ -88,7 +96,19 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		return useError(out, criterionTextSourceCode, err.Error(), exitValidation)
 	}
 
-	sa, forward := parseStampArgs(tail, declared)
+	sa, forward := parseStampArgs(tail, gatedType)
+
+	// THE OVERRIDE NOW COSTS A SENTENCE (pds-bl-merge-gated-override-carries-no-reason).
+	// A bare `--merge-gated` is refused BEFORE anything is sent. The flag is the
+	// one escape from the merge-gate refusal, and while it was a bare boolean an
+	// override cost one word and recorded nothing — so a reflex override and a
+	// deliberate one were byte-identical on the record, and the guard's whole
+	// strength was that a human read the refusal and stopped. Requiring a reason
+	// LOOSENS NOTHING: every criterion the guard refuses today it still refuses,
+	// and the escape now has to be a statement somebody signed.
+	if sa.mergeGated && strings.TrimSpace(sa.mergeGatedReason) == "" {
+		return useError(out, mergeGatedReasonCode, mergeGatedReasonMessage, exitValidation)
+	}
 
 	// LEGACY-SERVER FALLBACK ONLY. When the server declares --merge-gated it
 	// owns the verdict (it can read the stored `merge_gate` field; we cannot),
@@ -98,7 +118,7 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	// edges but strictly better than shipping the met-flip unguarded.
 	if !declared && stampMergeGateFallback(sa) {
 		return useError(out, "merge_gated_criterion",
-			"refusing to stamp a MERGE-GATED criterion met: --criterion-text carries the MERGE-GATED marker, and that row is the lead's to close (a builder flipping it fabricates a done before the PR exists). Pass --merge-gated to override only if you are the lead closing the gate. (This server is too old to declare --merge-gated, so the match is on the TEXT you passed and may be a false positive on a criterion that merely MENTIONS merge-gating.)",
+			"refusing to stamp a MERGE-GATED criterion met: --criterion-text carries the MERGE-GATED marker, and that row is the lead's to close (a builder flipping it fabricates a done before the PR exists). Pass --merge-gated \"<why this stamp is yours to make>\" to override — it is an ASSERTION, not a permission: nothing checks that you are a lead, and the server cannot, because it authenticates your api_token and not the worker_id you typed. The override is RECORDED as an assertion (content.merge_gate_autostamp.stamp_overrides, carrying \"verified\": false, your asserted worker, and the token actually authenticated). (This server is too old to declare --merge-gated, so the match is on the TEXT you passed and may be a false positive on a criterion that merely MENTIONS merge-gating.)",
 			exitValidation)
 	}
 
@@ -122,9 +142,13 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	// document's `ok`.
 	cap := beginStampCapture(out, g, cmd)
 
-	// Hand the real POST to the shared dispatch, with the CLI-only
-	// --merge-gated stripped (the server does not declare that flag, so an
-	// un-stripped token would fail splitArgs with "unknown flag").
+	// Hand the real POST to the shared dispatch. Whether `forward` still carries
+	// --merge-gated is CONDITIONAL and parseStampArgs owns the decision: when the
+	// server DECLARES the flag it is forwarded like any other, because the server
+	// enforces the gate and needs to see the override; only against a legacy
+	// manifest that does not declare it is it stripped, since an undeclared token
+	// fails splitArgs with "unknown flag". See the doc comment on parseStampArgs
+	// and the fallback branch above.
 	rc := runCommand(out, g, ctx, m, cmd, forward)
 
 	// THE READ-BACK (PDS-D359/D361). A 2xx is not a landed write: the epic has
@@ -180,6 +204,30 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	rc, receipt := confirmStampLanded(out, ctx, req, rc)
 	return cap.flush(out, rc, receipt)
 }
+
+const (
+	// mergeGatedReasonCode is the CLI-side error code for a bare
+	// `--merge-gated`. It is CLI-side and not a server code on purpose: the
+	// refusal is about the INVOCATION, which the wrapper can see whole, and
+	// refusing here means the reflex override never leaves the machine. The
+	// server refuses the reason-less spelling too (`merge_gated_reason_required`
+	// out of `Params.stamp_merge_gated/1`), because a CLI-only guard is bypassed
+	// by a direct POST — the same argument that moved the merge-gate verdict
+	// itself onto the server.
+	mergeGatedReasonCode = "merge_gated_reason_required"
+
+	// mergeGatedReasonMessage names what to supply, in the spelling to type.
+	mergeGatedReasonMessage = "refusing a bare --merge-gated: the override now takes a REASON. " +
+		"It is the ONE flag that lets a --met flip a row the lead closes on merge, and while it was a bare " +
+		"boolean it cost one word and recorded nothing — a reflex override and a deliberate one were " +
+		"indistinguishable on the record, because the record was empty either way. " +
+		"Supply why this stamp is yours to make: --merge-gated \"PR #123 merged to main as <sha>; " +
+		"I am the lead closing the gate\". " +
+		"The reason is PERSISTED beside the stamp (content.merge_gate_autostamp.stamp_overrides[].reason) " +
+		"on the same write as the flip, the shape the close path's close_override.* records already use. " +
+		"It is still an ASSERTION and not a permission — nothing checks that you are a lead — but it is now " +
+		"an assertion somebody signed."
+)
 
 // stampReadbackRetryDelay is the whole budget of the stamp read-back's second
 // look — the twin of closeClaimRecheckDelay, and short enough that an operator
@@ -340,6 +388,15 @@ func stampReceipt(req stampRequest, stored taskboard.CriterionItem, readback api
 		"criterion_number": req.index + 1,
 		"problems":         problems,
 	}
+	// `notes` is the machine half of the advisory: never a problem (the write
+	// landed), always the same text the human receipt printed, so a scripted
+	// caller that branches on `confirmed` can still SEE that its --miss left
+	// met standing and read the verb that lowers it.
+	notes := []string{}
+	if n := missLeftMetTrueNote(req, stored); n != "" {
+		notes = append(notes, n)
+	}
+	r["notes"] = notes
 	r["stored"] = map[string]any{
 		"criterion":      stored.Criterion,
 		"met":            stored.Met,
@@ -397,6 +454,13 @@ func renderStampVerdict(out *writer, req stampRequest, stored taskboard.Criterio
 		}
 		out.progressf("✓ the store holds it — criterion index %d (#%d as boards number them): %s",
 			req.index, req.index+1, storedCriterionSummary(stored))
+		// The miss landed AND met is still true. That is not a failure, so the
+		// exit code does not move — but it is the exact moment the caller
+		// learns the flag did not do what they reached for it to do, so the
+		// reachable remedy is named right here.
+		if note := missLeftMetTrueNote(req, stored); note != "" {
+			out.progressf("  ! %s", note)
+		}
 		return exitOK
 	}
 	out.userErr("stamp NOT confirmed by the store — the write did not land as asked")
@@ -407,6 +471,9 @@ func renderStampVerdict(out *writer, req stampRequest, stored taskboard.Criterio
 	out.errf("  the store holds:    %s", storedCriterionSummary(stored))
 	for _, m := range mismatches {
 		out.errf("  ✗ %s", m)
+	}
+	if note := missLeftMetTrueNote(req, stored); note != "" {
+		out.errf("  ! %s", note)
 	}
 	out.errf("  ✗ NOT stored — stamp again (re-read with `bp task get %s` first if the criteria list may have moved). A stamp is only real once the store holds it.", req.docID)
 	return exitConflict
@@ -531,7 +598,13 @@ type stampArgs struct {
 	met           bool
 	miss          bool
 	withdraw      bool
-	mergeGated    bool
+	// mergeGated is FLAG PRESENCE, not permission: `--merge-gated` appeared in
+	// the tail at all.
+	mergeGated bool
+	// mergeGatedReason is the REASON the flag carried. A present flag with a
+	// blank reason is a usage refusal (see runTaskStamp) — the whole point of
+	// the change is that the override can no longer be free.
+	mergeGatedReason string
 }
 
 // parseStampArgs pulls the criterion index, criterion-text, the met/miss
@@ -540,13 +613,18 @@ type stampArgs struct {
 // order preserved, so the CLI never re-indexes --criterion (the index the
 // builder types is the index the server receives).
 //
-// `mergeGatedDeclared` says whether the SERVER declares --merge-gated. When it
-// does the flag is forwarded like any other (the server enforces the gate and
-// needs to see the override); when it does not, the flag is stripped, because
-// an undeclared token fails splitArgs with "unknown flag" — that is the
-// pre-existing behaviour, kept only for older servers. Both `--flag value` and
-// `--flag=value` spellings are recognized. Parsing here is advisory only.
-func parseStampArgs(tail []string, mergeGatedDeclared bool) (stampArgs, []string) {
+// `mergeGatedType` is the SERVER's declared type for --merge-gated, from the
+// manifest: "string" on a current server (the flag carries a REASON and both
+// tokens ride the POST), "bool" on a server that declares the older reason-less
+// flag (the reason cannot land there, so only the bare flag is forwarded — the
+// value token would otherwise bind as a positional and fail splitArgs), and ""
+// on a server that predates the server-side guard entirely (flag AND reason are
+// stripped, because an undeclared token fails splitArgs with "unknown flag").
+// In every case sa.mergeGated / sa.mergeGatedReason record what the CALLER
+// typed, so the CLI-side reason refusal is identical against all three. Both
+// `--flag value` and `--flag=value` spellings are recognized. Parsing here is
+// advisory only.
+func parseStampArgs(tail []string, mergeGatedType string) (stampArgs, []string) {
 	var sa stampArgs
 	forward := make([]string, 0, len(tail))
 	for i := 0; i < len(tail); i++ {
@@ -561,8 +639,32 @@ func parseStampArgs(tail []string, mergeGatedDeclared bool) (stampArgs, []string
 		switch name {
 		case "--merge-gated":
 			sa.mergeGated = true
-			if !mergeGatedDeclared {
-				continue // legacy server: undeclared flag, never forwarded.
+			sa.mergeGatedReason = spaceVal()
+			// Does a SEPARATE token carry the reason (the `--flag value`
+			// spelling)? Then it must be consumed here, or it would bind as a
+			// positional against a server that does not take a value.
+			separate := !inline && i+1 < len(tail) && !strings.HasPrefix(tail[i+1], "-")
+			switch mergeGatedType {
+			case "string":
+				// Current server: flag and (on the next iteration) its reason
+				// both ride the POST, order preserved.
+			case "bool":
+				// Reason-less server: forward the BARE flag, drop the reason —
+				// in BOTH spellings, so `--merge-gated=<why>` and
+				// `--merge-gated <why>` reach it identically. Appended
+				// explicitly rather than falling through to the shared append,
+				// which would re-read tail[i] AFTER the value was consumed.
+				if separate {
+					i++
+				}
+				forward = append(forward, "--merge-gated")
+				continue
+			default:
+				// Legacy server: undeclared flag, never forwarded — nor its reason.
+				if separate {
+					i++
+				}
+				continue
 			}
 		case "--met":
 			sa.met = true
@@ -613,12 +715,25 @@ func isMergeGatedText(s string) bool {
 // name — the capability probe that decides whether --merge-gated can ride the
 // POST or must be stripped for an older server.
 func commandDeclaresFlag(cmd manifest.Command, name string) bool {
+	return commandFlagType(cmd, name) != ""
+}
+
+// commandFlagType returns the manifest's declared TYPE for a flag, or "" when
+// the command does not declare it at all. Presence alone stopped being enough
+// once --merge-gated grew a reason: a server can declare the flag and still not
+// take a value for it, and forwarding the reason there fails splitArgs.
+// A declared flag with an empty type in the manifest reads as "string", which
+// is what the manifest's own default is.
+func commandFlagType(cmd manifest.Command, name string) string {
 	for _, f := range cmd.Flags {
 		if f.Name == name {
-			return true
+			if f.Type == "" {
+				return "string"
+			}
+			return f.Type
 		}
 	}
-	return false
+	return ""
 }
 
 // stampEchoLine renders the one-line, human-facing confirmation of WHICH
@@ -636,7 +751,10 @@ func stampEchoLine(sa stampArgs) string {
 	case sa.met:
 		outcome = "met"
 	case sa.miss:
-		outcome = "miss (attempt)"
+		// A miss is the outcome operators reach for when they mean "lower this"
+		// — and it lowers nothing. Say so BEFORE the write, and name the verb
+		// that does (missLeftMetTrueNote says it again after).
+		outcome = "miss (attempt) — met is UNCHANGED; " + stampWithdrawFlag + " is the verb that lowers a wrong met"
 	case sa.withdraw:
 		// Spelled out because a withdrawal is the one outcome that makes the
 		// board's number go DOWN, and an operator who typed the wrong index

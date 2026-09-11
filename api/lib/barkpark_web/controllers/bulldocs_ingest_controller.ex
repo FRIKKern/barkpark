@@ -737,6 +737,19 @@ defmodule BarkparkWeb.BulldocsIngestController do
       %{
         "slug" => slug,
         "blocks" => blocks,
+        # The caller's own title (task-4b8770c64ccac487). This whitelist used
+        # to carry no "title", so `BlockOps.paper_title/2`'s `content["title"]`
+        # branch was UNREACHABLE from HTTP: a body carrying a top-level title
+        # got the ordinary 200 receipt and stored the first heading's text
+        # instead — honoured and discarded were byte-identical on the wire.
+        # The sibling dry-run `/papers/validate` reads the key (it walls a ref
+        # built with `title: merged["title"]`), so the two doors disagreed
+        # about one field of one body; the JS SDK's `Paper#toJSON` documents
+        # and emits it, and the BPML grammar spells it `<paper title="…">`.
+        # Honouring is the parity-preserving ruling and adds no new semantics:
+        # the derivation ALREADY prefers an explicit title over the heading.
+        # Absent/blank → nil → the heading (then the slug) still wins.
+        "title" => params["title"],
         "style" => params["style"] || "article",
         "source_doc" => params["source_doc"],
         "event_type" => params["event_type"],
@@ -770,6 +783,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
           ok: true,
           slug: paper.doc_id,
           rev: to_string(get_in(paper.content, ["rev"])),
+          # ADDITIVE (task-4b8770c64ccac487) — the EFFECTIVE stored title, so a
+          # producer can tell from the receipt which title it actually
+          # published under: the one it sent, or the derived heading/slug. A
+          # dropped or overridden title is no longer indistinguishable from an
+          # honoured one.
+          title: paper.title,
           liveview_path: "/papers/#{paper.doc_id}",
           # ADDITIVE (P4) — the canonical scoped reader URL when the paper's
           # tenancy resolves; liveview_path stays byte-identical forever

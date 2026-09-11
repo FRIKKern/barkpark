@@ -175,6 +175,45 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
   # ── normalize_list_items/1 — the flat-string list-item chokepoint ──────────
 
   describe "BlockOps.normalize_list_items/1" do
+    test "encoded inline arrays retain reader text, marks and unknown metadata" do
+      inline = [
+        %{
+          "type" => "strong",
+          "children" => [%{"type" => "text", "value" => "Gamma"}],
+          "audit" => "keep"
+        }
+      ]
+
+      wrapped = %{"id" => "owned", "content" => inline, "audit" => %{"keep" => true}}
+
+      blocks = [
+        %{"type" => "list", "items" => [Jason.encode!(inline), wrapped, "plain", 12, nil]}
+      ]
+
+      [normalized] = BlockOps.normalize_list_items(blocks)
+
+      assert normalized["items"] == [
+               inline,
+               wrapped,
+               [%{"type" => "text", "value" => "plain"}],
+               [%{"type" => "text", "value" => "12"}],
+               []
+             ]
+
+      assert BlockOps.normalize_list_items([normalized]) == [normalized]
+
+      for style <- [:article, :email] do
+        assert Barkpark.PortableDoc.Render.render_blocks(blocks, %{style: style}) ==
+                 Barkpark.PortableDoc.Render.render_blocks([normalized], %{style: style})
+      end
+    end
+
+    test "JSON-looking prose remains literal unless readers recognize an inline array" do
+      strings = ["[]", "[1]", "[\"word\"]", "{}", "[broken"]
+      [normalized] = BlockOps.normalize_list_items([%{"type" => "list", "items" => strings}])
+      assert normalized["items"] == Enum.map(strings, &[%{"type" => "text", "value" => &1}])
+    end
+
     test "coerces a flat-STRING list item to a single text inline node" do
       [block] =
         BlockOps.normalize_list_items([
@@ -851,6 +890,23 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
 
       {:ok, stored} = Content.get_document(Content.draft_id(doc_id), type, "production")
       assert_all_blocks_have_ids(stored.content["blocks"])
+    end
+
+    test "upsert_paper stores encoded list content without exposing JSON syntax" do
+      slug = "choke-paper-encoded-#{System.unique_integer([:positive])}"
+      inline = [%{"type" => "strong", "children" => [%{"type" => "text", "value" => "Gamma"}]}]
+      item = %{"id" => "retained", "text" => "Beta", "audit" => %{"keep" => true}}
+      blocks = [%{"id" => "encoded", "type" => "list", "items" => [Jason.encode!(inline), item]}]
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: slug, style: "article", blocks: blocks})
+        )
+
+      stored = Content.get_paper(slug).content
+      assert hd(stored["blocks"])["items"] == [inline, item]
+      assert stored["body_html"] =~ "Gamma"
+      refute stored["body_html"] =~ "&quot;type&quot;"
     end
 
     test "upsert_paper stores NORMALIZED list items (flat-string item → canonical inline array)" do

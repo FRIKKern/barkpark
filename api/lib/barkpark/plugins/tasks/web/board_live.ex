@@ -174,6 +174,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Document
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Content.Scope
@@ -197,7 +198,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     connected = connected?(socket)
 
     if connected do
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      # The document-list stream, tenant-fenced (task-5d0615ee60143cc8). The bare
+      # `documents:<dataset>` topic fans every tenant's frame out to every
+      # subscriber, so `Content.Broadcast` now strips a WORKSPACE-OWNED document's
+      # payload from it and carries the payload on the workspace-keyed topic alone.
+      # `subscribe_documents/2` joins BOTH — the shared layer on the global topic,
+      # this surface's own workspace on the keyed one — so every document arrives
+      # exactly once, WITH its payload, and no foreign tenant's body ever does.
+      Broadcast.subscribe_documents(@dataset, board_workspace_id())
       Process.send_after(self(), :refresh, @refresh_ms)
     end
 
@@ -320,17 +328,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   #
   # The browser hook (`BarkparkBoardDrag`) pushes `restage` with the dragged
   # card's `doc_id` and the target column's `data-col`. We NEVER take the card's
-  # possibly-stale board epoch on faith: we resolve the Default-workspace scope
-  # (D12 — the same scope `tasks_controller` writes through) and FRESH-read the
-  # live task row for its uuid pk, observed epoch, and true claim holder, then
-  # let the pure `Board.restage_plan/4` decide which fenced primitive (if any)
-  # the drop maps to. The write rides THIS per-socket event — no new process,
-  # no raw Content write (charter D1/D5): a claim goes through
-  # `Tasks.claim_by_id/3`, a close through `Tasks.close/3`, exactly as `bp` does.
+  # possibly-stale board epoch on faith: we resolve the write's workspace scope
+  # (`restage_workspace_id/1` — WHICH MOUNT AM I?, below) and FRESH-read the live
+  # task row for its uuid pk, observed epoch, and true claim holder, then let the
+  # pure `Board.restage_plan/4` decide which fenced primitive (if any) the drop
+  # maps to. The write rides THIS per-socket event — no new process, no raw
+  # Content write (charter D1/D5): a claim goes through `Tasks.claim_by_id/3`, a
+  # close through `Tasks.close/3`, exactly as `bp` does.
   @impl true
   def handle_event("restage", %{"doc_id" => doc_id, "to_col" => to_col_raw}, socket) do
     with to_col when not is_nil(to_col) <- parse_col(to_col_raw),
-         %{id: ws_id} <- Tenancy.get_default_workspace(),
+         ws_id when is_binary(ws_id) <- restage_workspace_id(socket),
          {:ok, %Document{} = doc} <- fetch_live_task(doc_id, ws_id),
          prev when not is_nil(prev) <- socket.assigns.board.cards_by_id[doc_id] do
       content = doc.content || %{}
@@ -352,9 +360,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         scope: [workspace_id: ws_id]
       })
     else
-      # No default workspace, an unknown column, a row that vanished, or a card
-      # not on this board — refuse silently-but-visibly (never a raw write, never
-      # a crash). The board is unchanged; a dismissible notice tells the user.
+      # No resolvable write workspace, an unknown column, a row that vanished, or
+      # a card not on this board — refuse silently-but-visibly (never a raw
+      # write, never a crash). The board is unchanged; a dismissible notice
+      # tells the user. A card belonging to a DIFFERENT workspace than the one
+      # this mount writes lands here too: `fetch_live_task/2` is workspace-fenced,
+      # so the scoped mount refuses a foreign row instead of mutating it.
       _ -> {:noreply, assign(socket, :notice, "That drop can't be applied right now.")}
     end
   end
@@ -588,10 +599,50 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     end
   end
 
-  # Fresh-read the live task row scoped to the Default workspace (D12 — the same
-  # scope `tasks_controller` writes through), with the exact/`drafts.` fallback
+  # ── WHICH MOUNT AM I? The restage write's workspace (task-09ef21eb0e6d3ae4) ──
+  #
+  # One `plugin_routes(scope: :ops)` spec (`plugins/tasks.ex`) mounts this module
+  # TWICE, and the two mounts must write to DIFFERENT workspaces:
+  #
+  #   * FLAT — `/admin/projects`, `live_session :plugin_ops` (router.ex). Its
+  #     `on_mount` list is `[{LiveAuth, :ops}, {LiveAuth, :require_org_mfa},
+  #     {StudioChrome, :default}]`: no tenant resolver, no `session:` builder, so
+  #     NOTHING ever puts `:current_workspace` on this socket. Charter D12 stands
+  #     here UNAMENDED and this row does not touch it — the instance-operator's
+  #     board resolves the seeded Default workspace, the same scope `bp`'s own
+  #     `/v1/tasks` writes resolve to via `AssignDefaultScope`, so the board the
+  #     operator drags is the board the CLI writes.
+  #
+  #   * SCOPED — `/w/:workspace_slug/p/:project_slug/admin/projects`,
+  #     `live_session :scoped_plugin_ops` behind the `:scoped_browser` pipeline.
+  #     It adds `{BarkparkWeb.PluginScopeSession, :scope}` to `on_mount` and
+  #     carries `session: {BarkparkWeb.PluginScopeSession, :build, []}`, which
+  #     copies `ResolveWorkspace`'s RESOLVED workspace id across the HTTP→WS
+  #     boundary; the hook runs BEFORE `mount/3` and assigns
+  #     `:current_workspace`. Before this fix the write ignored it and claimed /
+  #     closed DEFAULT's rows from a URL that said otherwise.
+  #
+  # THE DISCRIMINATOR IS THE SESSION, NEVER THE URL. We do not parse `/w/…` out
+  # of a path: a LiveView re-mounts over an already-open socket on
+  # `live_redirect` and on reconnect, replaying the SIGNED session against
+  # whatever path the client asks for, and no router pipeline runs on that join.
+  # `:current_workspace` present therefore MEANS this socket passed
+  # `ResolveWorkspace`'s membership gate for that exact workspace — a fact the
+  # client cannot forge — while its absence is the flat mount, byte-identical to
+  # the pre-fix behaviour. Fail-closed on a malformed assign: fall back to
+  # Default only when the scoped hook assigned nothing at all.
+  defp restage_workspace_id(socket) do
+    case socket.assigns[:current_workspace] do
+      %{id: id} when is_binary(id) -> id
+      _ -> board_workspace_id()
+    end
+  end
+
+  # Fresh-read the live task row scoped to the workspace `restage_workspace_id/1`
+  # resolved for THIS mount, with the exact/`drafts.` fallback
   # `find_task_by_doc_id`/`claim_by_id` use so a mutate-created `drafts.<id>` row
-  # resolves from its published logical id.
+  # resolves from its published logical id. The narrowing is what makes a foreign
+  # card's drop a REFUSAL rather than a cross-workspace write.
   defp fetch_live_task(doc_id, ws_id) do
     case fetch_task_exact(doc_id, ws_id) do
       {:ok, _} = hit ->
@@ -3784,5 +3835,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp empty_board?(board) do
     board.cancelled_count == 0 and
       Enum.all?(Board.columns(), fn col -> board.columns[col] == [] end)
+  end
+
+  # The workspace whose task payloads this board renders. The board reads the
+  # flat/default scope (`Board.snapshot/1` is workspace-less), which is the
+  # scope `bp`'s own `/v1/tasks` writes resolve to via AssignDefaultScope — so
+  # the default workspace's keyed topic is the one carrying its cards.
+  defp board_workspace_id do
+    case Tenancy.get_default_workspace() do
+      %{id: id} when is_binary(id) -> id
+      _ -> nil
+    end
   end
 end

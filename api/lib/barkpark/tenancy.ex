@@ -244,6 +244,145 @@ defmodule Barkpark.Tenancy do
   end
 
   @doc """
+  Set (or clear) an organization's ALLOWED AUTHENTICATION METHODS
+  (era-bl-allowed-auth-methods). Mirrors `set_organization_require_mfa/3` and
+  `set_organization_session_policy/3`: UUID-guarded, `:not_found` on an
+  unknown/malformed id, and the change is audited on the tamper-evident trail
+  (`auth` / `allowed_auth_methods_changed`).
+
+  `methods` is either `nil` (CLEAR the policy — every door open again, the
+  zero-tax default) or a non-empty list of method names drawn from
+  `Organization.auth_methods/0` (`"password"`, `"magic_link"`, `"passkey"`,
+  `"sso"`; atoms are accepted and normalised). SSO-only is `["sso"]`. Anything
+  else returns `{:error, :invalid_policy}` WITHOUT touching the DB — a typo
+  must never silently disable a login door.
+
+  `opts` may carry `:actor_id` / `:actor_type` (defaults `"admin"`).
+  """
+  @spec set_organization_allowed_auth_methods(binary(), [String.t() | atom()] | nil, keyword()) ::
+          {:ok, Organization.t()} | {:error, Ecto.Changeset.t() | :not_found | :invalid_policy}
+  def set_organization_allowed_auth_methods(organization_id, methods, opts \\ [])
+      when is_binary(organization_id) do
+    with {:ok, _} <- Ecto.UUID.cast(organization_id),
+         {:ok, normalised} <- normalise_auth_methods(methods),
+         %Organization{} = org <- Repo.get(Organization, organization_id) do
+      result =
+        org
+        |> Organization.changeset(%{
+          slug: org.slug,
+          name: org.name,
+          allowed_auth_methods: normalised
+        })
+        |> Repo.update()
+
+      with {:ok, _updated} <- result do
+        audit_org_auth_change(
+          org,
+          "allowed_auth_methods_changed",
+          %{"allowed_auth_methods" => normalised},
+          opts
+        )
+      end
+
+      result
+    else
+      :error -> {:error, :not_found}
+      nil -> {:error, :not_found}
+      {:error, :invalid_policy} = err -> err
+    end
+  end
+
+  # nil clears. A list is deduped + sorted so the stored policy has ONE
+  # canonical byte shape (["sso","password"] and ["password","sso"] are the
+  # same policy and must not read as a change). Membership in the closed
+  # vocabulary is re-checked by the changeset; rejecting here keeps the DB
+  # untouched on a bad call, matching `session_policy_changes/1`.
+  defp normalise_auth_methods(nil), do: {:ok, nil}
+
+  defp normalise_auth_methods(methods) when is_list(methods) and methods != [] do
+    normalised =
+      methods
+      |> Enum.map(fn
+        m when is_atom(m) -> Atom.to_string(m)
+        m when is_binary(m) -> m
+        _ -> :invalid
+      end)
+
+    vocabulary = Organization.auth_methods()
+
+    if Enum.all?(normalised, &(is_binary(&1) and &1 in vocabulary)) do
+      {:ok, normalised |> Enum.uniq() |> Enum.sort()}
+    else
+      {:error, :invalid_policy}
+    end
+  end
+
+  defp normalise_auth_methods(_), do: {:error, :invalid_policy}
+
+  @doc """
+  Resolve the STRICTEST allowed-auth-methods policy GOVERNING this user across
+  every organization reachable through their `principal_type: "user"` workspace
+  memberships (era-bl-allowed-auth-methods).
+
+  Mirrors `org_requires_mfa_for_user?/1`'s governing model: any governing org
+  can tighten, and a laxer org grants no escape. Returns `nil` when NO
+  governing org sets a policy — the zero-tax default meaning "every method
+  allowed". Otherwise returns the INTERSECTION of the non-NULL policies: a
+  method must be permitted by EVERY governing org that expressed an opinion.
+  Orgs with a NULL policy express none and are ignored.
+
+  The intersection CAN be empty — two governing orgs allowing disjoint sets
+  leave the user no door. That is the honest strictest-wins reading, not a
+  bug: the alternative (union) would let a second org re-open a door the
+  first one closed, which is exactly the bypass this policy exists to stop.
+  """
+  @spec org_allowed_auth_methods_for_user(binary()) :: [String.t()] | nil
+  def org_allowed_auth_methods_for_user(user_id) when is_binary(user_id) do
+    Repo.all(
+      from m in Membership,
+        join: w in Workspace,
+        on: w.id == m.workspace_id,
+        join: o in Organization,
+        on: o.id == w.organization_id,
+        where:
+          m.principal_type == "user" and m.principal_id == ^user_id and
+            not is_nil(o.allowed_auth_methods),
+        select: o.allowed_auth_methods
+    )
+    |> case do
+      [] ->
+        nil
+
+      lists ->
+        lists
+        |> Enum.map(&MapSet.new/1)
+        |> Enum.reduce(&MapSet.intersection/2)
+        |> Enum.sort()
+    end
+  end
+
+  def org_allowed_auth_methods_for_user(_), do: nil
+
+  @doc """
+  May this user authenticate with `method` (era-bl-allowed-auth-methods)?
+
+  `true` whenever no governing org expressed a policy — the zero-tax path an
+  ordinary org never leaves. `false` only when at least one governing org set
+  an allow-list and the strictest resolution
+  (`org_allowed_auth_methods_for_user/1`) does not contain `method`.
+  """
+  @spec auth_method_allowed_for_user?(binary(), String.t()) :: boolean()
+  def auth_method_allowed_for_user?(user_id, method)
+      when is_binary(user_id) and is_binary(method) do
+    case org_allowed_auth_methods_for_user(user_id) do
+      nil -> true
+      allowed -> method in allowed
+    end
+  end
+
+  def auth_method_allowed_for_user?(_, _), do: true
+
+  @doc """
   Does any organization GOVERNING this user require MFA enrolment?
 
   The governing rule (owner-ratified 2026-07-05): **ANY-org-requires →
@@ -273,7 +412,47 @@ defmodule Barkpark.Tenancy do
   @production_dataset_slug "production"
 
   @doc """
-  Returns the seeded Default Workspace, or nil if the backfill hasn't run.
+  Returns the instance-default Workspace, or nil if the seat is VACANT.
+
+  ## The seat is a boolean, not a string — DECIDED 2026-09-09 (task-566dc5be4871353b)
+
+  This used to be `Repo.get_by(Workspace, slug: @default_slug)`, which made a
+  security-relevant SINGLETON identifiable by a MUTABLE, USER-CLAIMABLE string:
+  whoever held the slug WAS the instance default, because `AssignDefaultScope`
+  binds every flat route to this row and `Content.WriteScope.resolve_write_scope/1`
+  stamps an UNSCOPED WRITE with it. PR #12879 made the seat untakeable by a
+  principal at `do_create_workspace_with_owner/3`; it deliberately did not change
+  what IDENTIFIES the seat, and every remaining variant followed from that — a
+  RENAME frees it identically to a delete, since `Workspace.changeset/2` casts
+  `:slug`.
+
+  CHOSEN: `workspaces.is_default`, a boolean with a PARTIAL UNIQUE INDEX
+  (`workspaces_single_default_index`, `WHERE is_default`) so at most one row can
+  hold the seat, and `Workspace.changeset/2` does NOT cast the field — so no
+  attrs map any caller can build reaches it. The seat is therefore not
+  addressable by any user-supplied string at all, and the rename path is CLOSED
+  rather than left unreachable-for-now.
+
+  THE DECIDING CONSTRAINT was the bundle import's PDS-D9 adopt branch
+  (`WorkspaceBundle.adopt_or_refuse_root_slug!/1`), which DELETES an empty
+  `default` shell in-transaction and lets the imported workspace take the slug.
+  A boolean survives that as two SQL statements after the members land, against a
+  table the import already writes — it does not widen that transaction's failure
+  surface, which is exactly why this work was deferred out of the p0.
+
+  REJECTED — a settings/singleton pointer row: same security properties, but it
+  drags a SECOND table into the import transaction and adds an indirection to a
+  function called on every flat `/v1/*` request. REJECTED — a stable well-known
+  UUID: the identity would then be a value the bundle's `workspaces` COPY member
+  carries verbatim, so a crafted bundle claims the seat by shipping that id — the
+  same "identity transferable through user input" defect, relocated not closed.
+
+  DEGRADES TO VACANCY, NEVER TO CAPTURE. A vacant seat returns `nil` here and an
+  unscoped write lands with `workspace_id` NULL — a bounded problem — instead of
+  being attributed to a workspace somebody claimed, which is an unbounded
+  privilege transfer. Vacancy is a NORMAL state, not only a corrupt one:
+  `SupportResetDefaultWorkspaceStep` deletes the row and the following
+  `SupportAdminTokenStep` re-mints it, and the seat is vacant between the two.
 
   Read through `DefaultScopeCache` — `Plugs.AssignDefaultScope` calls this on
   every flat `/v1/*` request, including requests that touch no data at all. A
@@ -283,8 +462,61 @@ defmodule Barkpark.Tenancy do
   @spec get_default_workspace() :: Workspace.t() | nil
   def get_default_workspace do
     DefaultScopeCache.fetch(:default_workspace, fn ->
-      Repo.get_by(Workspace, slug: @default_slug)
+      Repo.get_by(Workspace, is_default: true)
     end)
+  end
+
+  @doc """
+  Get-or-create the instance-default Workspace and ESTABLISH it in the seat.
+
+  The ONE writer that puts a workspace into the seat from application code (the
+  bundle import's adopt branch is the other, and it transfers rather than
+  establishes). Called by `Seeds.Shared.ensure_default_scope/0`, and through it
+  by `mix frt.seed` and the support box's `SupportAdminTokenStep` re-mint.
+
+  Idempotent and vacancy-tolerant in BOTH directions, because the support bracket
+  produces each state on purpose:
+
+    * seat held      → returns the holder untouched.
+    * seat vacant, no `default`-slugged row → mints one and takes the seat.
+    * seat vacant, a `default`-slugged row STILL PRESENT → adopts THAT row rather
+      than trying to insert a second one, which would collide on
+      `workspaces_slug_index`. This is the state a migration leaves behind if the
+      backfill ran while the flag had been cleared, and the state an operator
+      leaves by clearing the flag by hand.
+
+  The seat is taken by a bare `Repo.update_all` on purpose: `is_default` is NOT
+  cast by `Workspace.changeset/2` (see that field's comment), so there is no
+  changeset path to it — which is the property that makes the seat unclaimable.
+  """
+  @spec establish_default_workspace!() :: Workspace.t()
+  def establish_default_workspace! do
+    case get_default_workspace() do
+      %Workspace{} = ws ->
+        ws
+
+      nil ->
+        ws =
+          case Repo.get_by(Workspace, slug: @default_slug) do
+            %Workspace{} = existing ->
+              existing
+
+            nil ->
+              {:ok, minted} =
+                create_workspace(%{slug: @default_slug, name: "Default Workspace"})
+
+              minted
+          end
+
+        {1, _} =
+          Repo.update_all(
+            from(w in Workspace, where: w.id == ^ws.id),
+            set: [is_default: true]
+          )
+
+        DefaultScopeCache.invalidate()
+        %{ws | is_default: true}
+    end
   end
 
   @doc """
@@ -306,7 +538,7 @@ defmodule Barkpark.Tenancy do
         from(p in Project,
           join: w in Workspace,
           on: w.id == p.workspace_id,
-          where: w.slug == ^@default_slug and p.slug == ^@default_slug,
+          where: w.is_default and p.slug == ^@default_slug,
           select: p
         )
       )
@@ -1107,8 +1339,17 @@ defmodule Barkpark.Tenancy do
 
   # ── Instance-singleton seat guard (task-94a6ed8ced1fc547) ───────────────────
   #
-  # `get_default_workspace/0` identifies a security-relevant SINGLETON by a
-  # mutable string — `Repo.get_by(Workspace, slug: @default_slug)`. Whoever holds
+  # HISTORICAL FRAMING, kept because it explains the guard's PLACEMENT. When this
+  # guard was written, `get_default_workspace/0` identified a security-relevant
+  # SINGLETON by a mutable string — `Repo.get_by(Workspace, slug: @default_slug)`.
+  # It no longer does (task-566dc5be4871353b, 2026-09-09: the seat is
+  # `workspaces.is_default`, uncast and partial-unique), so holding the slug no
+  # longer takes the seat and this guard is now DEFENCE IN DEPTH rather than the
+  # wall. It stays: the `default` slug remains reserved, `get_default_project/0`
+  # still keys the PROJECT on it, and a principal minting a workspace under the
+  # instance's own reserved name is a confusion worth refusing on its own terms.
+  # Read the rest of this block as the reason the chokepoint is here rather than
+  # in a controller. Back then: whoever held
   # that slug IS the instance default: `AssignDefaultScope` binds every flat
   # route to it, and `Content.WriteScope.resolve_write_scope/1` stamps an
   # UNSCOPED WRITE with it. So while the seat is vacant, taking the slug takes
@@ -1143,11 +1384,15 @@ defmodule Barkpark.Tenancy do
   # branches and the support box's `case "$code" in 2*|409|422)` tolerance both
   # keep working untouched.
   #
-  # RESIDUE, stated rather than implied: renaming a workspace INTO the slug
-  # bypasses this, since `Workspace.changeset/2` casts `:slug`. There is no
-  # `update_workspace/2` and no HTTP update route today, so it is unreachable —
-  # but the end state is to stop identifying the singleton by a claimable string
-  # at all, which is a data-model change this guard does not attempt.
+  # THE RESIDUE IS DISCHARGED (task-566dc5be4871353b). It used to read: renaming a
+  # workspace INTO the slug bypasses this, since `Workspace.changeset/2` casts
+  # `:slug` — unreachable today (no `update_workspace/2`, no HTTP update route)
+  # but permitted by the changeset, so any fix framed as "you cannot delete the
+  # Default" was incomplete by construction. That end state has now landed: the
+  # singleton is no longer identified by a claimable string at all. A rename into
+  # or out of `default` moves NOTHING, because the seat is `is_default`, which no
+  # changeset casts — so the door stays shut for the `update_workspace/2` nobody
+  # has written yet.
   defp singleton_slug_error(attrs) do
     %Workspace{}
     |> Workspace.changeset(attrs)
@@ -1672,8 +1917,14 @@ defmodule Barkpark.Tenancy do
   # (`WorkspaceBundle.dataset_slugs_for/1`) needs its projects+datasets still
   # present — both leave only at `Repo.delete(workspace)`.
   #
-  # The predicate shapes are the EXACT keystone extraction shapes
-  # (`WorkspaceBundle.copy_where/4`), so export and teardown agree on membership:
+  # The predicate shapes ARE the keystone extraction shapes — not a copy of them:
+  # every sweep below calls `WorkspaceBundle.tenant_scope_where/4`, the same
+  # function the exporter's `copy_where/3` delegates to, so export and teardown
+  # cannot disagree on membership by construction. They USED to be two
+  # independent constructions with a comment asserting agreement; a prototype
+  # desynchronized `shares` and 98 tests stayed green while a row the bundle
+  # carried survived its own workspace's teardown
+  # (`pds-bl-export-teardown-lockstep-untested`). What each shape means:
   #   * E3 doc-keyed — a `(doc_id, dataset)` semi-join (EXISTS, never a JOIN,
   #     which would fan out on the 2-document case — charter D6), PLUS a
   #     sibling-guard `NOT EXISTS` so a `(doc_id, dataset)` row ALSO owned by a
@@ -1698,32 +1949,39 @@ defmodule Barkpark.Tenancy do
   #     currently matches no table; the shape is retained for any future
   #     bare-`scope` tenant table.
   defp delete_workspace_string_keyed(%Workspace{id: ws_id, slug: ws_slug}) do
-    ws_lit = Catalog.uuid_literal!(ws_id)
-    slugs = WorkspaceBundle.dataset_slugs_for(ws_id)
+    # The one tenant-literal bundle both halves of the lockstep read. Its keys
+    # are exactly `WorkspaceBundle.tenant_scope` — the export ctx is a superset
+    # of the same shape, which is how one predicate builder serves both.
+    scope = %{
+      ws_lit: Catalog.uuid_literal!(ws_id),
+      ws_slug_lit: Catalog.text_literal(ws_slug),
+      slugs: WorkspaceBundle.dataset_slugs_for(ws_id)
+    }
 
-    Enum.each(Catalog.e3_doc_keyed(), &delete_e3_doc_keyed(&1, ws_lit))
-    Enum.each(Catalog.e3_dataset_keyed(), &delete_e3_dataset_keyed(&1, ws_slug, slugs))
-
-    for {table, prefix} <- Catalog.allowlist() do
-      delete_allowlist_scoped(table, prefix, slugs)
-    end
+    Enum.each(Catalog.e3_doc_keyed(), &delete_e3_doc_keyed(&1, scope))
+    Enum.each(Catalog.e3_dataset_keyed(), &delete_e3_dataset_keyed(&1, scope))
+    Enum.each(Map.keys(Catalog.allowlist()), &delete_allowlist_scoped(&1, scope))
 
     :ok
   end
 
-  # E3 doc-keyed sweep: mirrors `WorkspaceBundle.copy_where(_, :e3_doc, …)`
-  # verbatim (the `(doc_id, dataset)` EXISTS semi-join) + the sibling-guard.
+  # E3 doc-keyed sweep: the extraction predicate ITSELF
+  # (`WorkspaceBundle.tenant_scope_where(_, :e3_doc, …)` — the `(doc_id,
+  # dataset)` EXISTS semi-join, with the empty anchor-narrowing the whole-
+  # workspace path uses) EXTENDED by the sibling-guard. The extension is
+  # deliberate and one-directional (charter D7): a `(doc_id, dataset)` row a
+  # DIFFERENT workspace also owns travels in this workspace's bundle but must
+  # SURVIVE its teardown, because an orphan beats a cross-tenant delete.
   # Reachability: both interpolands are closed — `table` comes from
-  # `Catalog.e3_doc_keyed/0` (a pinned literal map) via `qi/1`, `ws_lit` from
-  # `Catalog.uuid_literal!/1`, which raises on anything that is not a UUID.
+  # `Catalog.e3_doc_keyed/0` (a pinned literal map) via `qi/1`, `scope.ws_lit`
+  # from `Catalog.uuid_literal!/1`, which raises on anything that is not a UUID.
   # sobelow_skip ["SQL.Query"]
-  defp delete_e3_doc_keyed(table, ws_lit) do
+  defp delete_e3_doc_keyed(table, scope) do
     Repo.query!(
       "DELETE FROM #{qi(table)} t " <>
-        "WHERE EXISTS (SELECT 1 FROM documents d " <>
-        "WHERE d.workspace_id = #{ws_lit} AND d.doc_id = t.doc_id AND d.dataset = t.dataset) " <>
-        "AND NOT EXISTS (SELECT 1 FROM documents d2 " <>
-        "WHERE d2.doc_id = t.doc_id AND d2.dataset = t.dataset AND d2.workspace_id <> #{ws_lit})",
+        WorkspaceBundle.tenant_scope_where(table, :e3_doc, scope) <>
+        " AND NOT EXISTS (SELECT 1 FROM documents d2 " <>
+        "WHERE d2.doc_id = t.doc_id AND d2.dataset = t.dataset AND d2.workspace_id <> #{scope.ws_lit})",
       []
     )
   end
@@ -1737,41 +1995,39 @@ defmodule Barkpark.Tenancy do
   # rows its own bundle said it owned. That desync passed 98 tests, which is why
   # the binding assertion lives in workspace_bundle_test.exs and not in a comment.
   #
+  # The two arms live in `tenant_scope_where/4` and are described there:
+  #   * a table with its OWN workspace slug column is swept by THAT column
+  #     (`workspaces.slug` is uniquely indexed, so it names ONE tenant), which
+  #     reaches the shared-slug rows the bare predicate cannot — exactly the
+  #     rows the export carries;
+  #   * a table without one keeps the bare, workspace-EXCLUSIVE slug set. An
+  #     empty set yields `ANY(ARRAY[]::text[])`, which matches nothing —
+  #     fail-closed: a row under a shared slug is LEFT (an orphan is
+  #     recoverable; a cross-tenant delete is not), and the export declares that
+  #     same population as loss.
   # Reachability: `table` and `col` are pinned `Catalog` literals via `qi/1`;
-  # `ws_slug` and `slugs` are rendered by `Catalog.text_literal/1` /
+  # the slug literals are rendered by `Catalog.text_literal/1` /
   # `text_array_literal/1`, which single-quote and double every embedded quote.
   # sobelow_skip ["SQL.Query"]
-  defp delete_e3_dataset_keyed(table, ws_slug, slugs) do
-    where =
-      case Map.fetch(Catalog.e3_dataset_workspace_slug_column(), table) do
-        # Safe precisely because `workspaces.slug` is uniquely indexed, so this
-        # names ONE tenant — and it sweeps the shared-slug rows the bare
-        # predicate below cannot touch, exactly the ones the export now carries.
-        {:ok, col} ->
-          "t.#{qi(col)} = #{Catalog.text_literal(ws_slug)}"
-
-        # The bare, workspace-EXCLUSIVE slug set. An empty set yields
-        # `ANY(ARRAY[]::text[])`, which matches nothing — fail-closed: a row
-        # under a shared slug is LEFT (an orphan is recoverable; a cross-tenant
-        # delete is not). The export declares that same population as loss.
-        :error ->
-          "t.dataset = ANY(#{Catalog.text_array_literal(slugs)})"
-      end
-
-    Repo.query!("DELETE FROM #{qi(table)} t WHERE #{where}", [])
+  defp delete_e3_dataset_keyed(table, scope) do
+    Repo.query!(
+      "DELETE FROM #{qi(table)} t " <>
+        WorkspaceBundle.tenant_scope_where(table, :e3_dataset, scope),
+      []
+    )
   end
 
-  # allowlist sweep: mirrors `WorkspaceBundle.copy_where(_, :allowlist, …)` —
-  # the `scope`-column tables prefixed per `Catalog.allowlist/0`.
+  # allowlist sweep: the extraction predicate itself
+  # (`WorkspaceBundle.tenant_scope_where(_, :allowlist, …)`) — the
+  # `scope`-column tables prefixed per `Catalog.allowlist/0`.
   # Reachability: DEAD as of Wave 5 — `Catalog.allowlist/0` is `%{}`, so the
-  # only call site's `for` comprehension never iterates; if it is ever revived,
-  # the interpolands are a pinned table name and a `text_array_literal/1` array.
+  # only call site iterates zero tables; if it is ever revived, the interpolands
+  # are a pinned table name and a `text_array_literal/1` array.
   # sobelow_skip ["SQL.Query"]
-  defp delete_allowlist_scoped(table, prefix, slugs) do
-    scopes = Enum.map(slugs, &(prefix <> &1))
-
+  defp delete_allowlist_scoped(table, scope) do
     Repo.query!(
-      "DELETE FROM #{qi(table)} t WHERE t.scope = ANY(#{Catalog.text_array_literal(scopes)})",
+      "DELETE FROM #{qi(table)} t " <>
+        WorkspaceBundle.tenant_scope_where(table, :allowlist, scope),
       []
     )
   end

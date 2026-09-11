@@ -18,15 +18,22 @@
 //
 // Run: node tooling/pds/rerun-adjudicate.test.mjs
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import { forbiddenSpelling, FORBIDDEN_NAMES, LEGAL_SUBSTITUTES, SILENT_PREDICATES } from "./spellings.mjs";
-import { varianceSet, overClaim, isUnknownVariance, CLAIM_CLASS } from "./variance.mjs";
-import { bindClaim } from "./binding.mjs";
+import { varianceSet, overClaim, isUnknownVariance, CLAIM_CLASS, AXIS,
+         countingSpelling, equalityGrade,
+         BEHAVIOUR_HEADS, BEHAVIOUR_HEAD_PROBES, EXECUTOR_UNREACHABLE_BEHAVIOUR_HEADS } from "./variance.mjs";
+// READ-ONLY import of grip's shipped screen. The lock in section 10 is only
+// worth anything because it asks the LIVE executor, not a copy of its answer.
+import { screenCommand } from "../grip/screen.mjs";
+import { deriveLevel } from "../grip/level.mjs";
+import { bindClaim, deriveTerms, TERM_KEYS } from "./binding.mjs";
 import { loadCorpus, liveAdjudicated } from "./corpus.mjs";
-import { adjudicateCorpus, estimateMs, toFact, PDS_VERDICT } from "./adjudicate.mjs";
+import { adjudicateCorpus, estimateMs, toFact, PDS_VERDICT,
+         storedRecipe, STORED_CLAIM_CLASS, STORED_ORIGIN, SIDECAR_ORIGIN } from "./adjudicate.mjs";
 import { renderVerdict, bannedWordingIn } from "./verdict.mjs";
 import { loadRecipes, DEFAULT_CORPUS, REPO_ROOT, main } from "./rerun-adjudicate.mjs";
 
@@ -127,6 +134,100 @@ function sh(cmd) {
   // `git show -C` is a diff copy-detection flag, NOT a chdir. Over-refusing it
   // would cost honest reads for nothing.
   ok("3.5 `git show -C` (copy detection) is not swept in", forbiddenSpelling("git show -C origin/main") === null);
+}
+
+// ── 3b. THE MIRROR LOCK: ONE COMMITTED SPELLING LIST, TWO SCREENS ────────────
+//
+// pds-w28-bl-two-rerun-screens-drift. Wave 28 shipped this file AND the Elixir
+// write seam (api/lib/barkpark/tasks/stage.ex @forbidden_rerun_shapes) as two
+// hand-maintained answers to one question, and nothing re-derived that they
+// agreed. They already disagreed on four measured spellings and on the ORDER of
+// two arms. The fix is not a third copy of the expectations: it is ONE file,
+// fixtures/rerun-spellings.json, that both suites read and assert their own
+// column of. The Elixir half is api/test/barkpark/tasks/rerun_spelling_mirror_test.exs.
+//
+// THE EXTRACTOR REFUSES AN EMPTY READ. A lock that can go quiet is not a lock,
+// and this epic has already watched a spotless `# fail 0` prove nothing.
+{
+  // THE ONE LIST LIVES UNDER api/, ON PURPOSE. scripts/elixir-path-escape-check.sh
+  // forbids the Elixir suite from reading a repo-root path elixir.yml does not
+  // dispatch on, and tooling/pds/** is not dispatched — a fixture here would be
+  // read by an Elixir suite CI never re-runs when it changes. So this gate
+  // reaches INTO api/ instead. Still one file; only this direction is guarded.
+  const fixturePath = fileURLToPath(new URL("../../api/test/fixtures/rerun-spellings.json", import.meta.url));
+
+  function loadSpellings(path) {
+    const raw = readFileSync(path, "utf8"); // throws on a missing fixture
+    if (raw.trim() === "") throw new Error(`rerun-spellings.json is EMPTY: ${path}`);
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data.cases) || data.cases.length === 0) {
+      throw new Error("rerun-spellings.json carries no cases — the mirror lock would pass vacuously");
+    }
+    return data;
+  }
+
+  // The anti-vacuity arm, RUN rather than trusted: the loader must throw on
+  // exactly the two shapes that would otherwise turn every case below green.
+  let refusedEmpty = false;
+  let refusedNoCases = false;
+  try {
+    const tmp = fileURLToPath(new URL("../../api/test/fixtures/.mirror-lock-probe.json", import.meta.url));
+    writeFileSync(tmp, "");
+    try { loadSpellings(tmp); } catch { refusedEmpty = true; }
+    writeFileSync(tmp, '{"cases":[]}');
+    try { loadSpellings(tmp); } catch { refusedNoCases = true; }
+    unlinkSync(tmp);
+  } catch (err) {
+    ok("3b.0 anti-vacuity probe ran", false, String(err));
+  }
+  ok("3b.1 the extractor REFUSES an empty fixture read", refusedEmpty);
+  ok("3b.2 the extractor REFUSES a zero-case fixture", refusedNoCases);
+
+  const fx = loadSpellings(fixturePath);
+  ok("3b.3 the shared fixture is substantive", fx.cases.length >= 15, `${fx.cases.length} cases`);
+
+  // Column 1: this screen's verdict on every case.
+  let drift = 0;
+  for (const c of fx.cases) {
+    const got = forbiddenSpelling(c.command)?.name ?? null;
+    if (got !== c.js) drift++;
+    ok(`3b.4 ${JSON.stringify(c.command)} → ${c.js}`, got === c.js,
+      `fixture ${c.js}, measured ${got} — ${c.why}`);
+  }
+  eq("3b.5 zero drift between this screen and the shared list", drift, 0);
+
+  // Column 2: the ORDER. A fixture pinning only the value set is blind to two
+  // arms transposed — the admit/refuse verdict is identical, the NAMED remedy
+  // is not, and that is precisely how wave 28 shipped.
+  ok("3b.6 the fixture's js precedence IS this file's RULES order",
+    JSON.stringify(fx.precedence.js) === JSON.stringify([...FORBIDDEN_NAMES]),
+    `fixture ${JSON.stringify(fx.precedence.js)} vs shipped ${JSON.stringify([...FORBIDDEN_NAMES])}`);
+
+  const multi = fx.cases.filter((c) => Array.isArray(c.multi_breach));
+  ok("3b.7 at least one multi-breach case pins the arm order", multi.length > 0);
+  for (const c of multi) {
+    // CONTROL: a multi-breach case only tests precedence if the other classes
+    // really fire on it. Map each declared elixir class to its js name and
+    // require the winner to be the FIRST one in this file's order.
+    const names = c.multi_breach.map((k) => fx.class_map[k]).filter(Boolean);
+    const first = FORBIDDEN_NAMES.find((n) => names.includes(n));
+    const got = forbiddenSpelling(c.command)?.name ?? null;
+    ok(`3b.8 ${JSON.stringify(c.command)} reports the first-listed of ${names.join("/")}`,
+      got === first, `expected ${first}, got ${got}`);
+  }
+
+  // Column 3: every case where the two seams differ carries a WRITTEN reason.
+  // A disagreement is allowed; an undocumented one is the original defect.
+  for (const c of fx.cases) {
+    const mirrored = c.elixir ? fx.class_map[c.elixir] : null;
+    const documented = typeof c.divergence === "string" && c.divergence.trim() !== "";
+    if (mirrored !== c.js) {
+      ok(`3b.9 divergence on ${JSON.stringify(c.command)} is written down`, documented,
+        `elixir ${c.elixir} mirrors to ${mirrored}, js ${c.js}, no divergence sentence`);
+    } else {
+      ok(`3b.10 ${JSON.stringify(c.command)} agrees and claims no divergence`, !documented);
+    }
+  }
 }
 
 // ── 4. VARIANCE-SKIP, NOT STRICT POLARITY ────────────────────────────────────
@@ -318,6 +419,394 @@ function sh(cmd) {
   ok("9.2 a REFUTED ruling is readable as data", Boolean(badRow), JSON.stringify(bad.counts));
   eq("9.3 and reading it did not touch process.exitCode", process.exitCode, before);
   ok("9.4 the CLI entry point is a function that RETURNS an rc", typeof main === "function");
+}
+
+// ── 10. THE ADVERTISED BEHAVIOUR HEADS vs WHAT THE EXECUTOR ALLOWS ───────────
+//
+// A MIRROR NEEDS A LOCK, NOT TWO HAND-WRITTEN COPIES. variance.mjs advertises
+// nine heads as paying for a BEHAVIOUR claim; grip's screen refuses most of
+// them. That divergence is fine — the two answer different questions — but it
+// is only HONEST while the README says so and says so ACCURATELY. All three
+// surfaces are compared here against the live screen, so drift in ANY of them
+// (a head added to variance, a head un-refused in grip, a stale README) reds.
+{
+  // 10.1 the probes really are behaviour commands — otherwise the lock below
+  // would pass over a list of harmless greps and prove nothing.
+  for (const head of BEHAVIOUR_HEADS) {
+    const probe = BEHAVIOUR_HEAD_PROBES[head];
+    const v = varianceSet(probe);
+    ok(`10.1 ${head}: the probe classifies onto BEHAVIOUR`,
+      v.axes.includes(AXIS.BEHAVIOUR), `${probe} → ${JSON.stringify(v.axes)}`);
+  }
+
+  // 10.2 MEASURE, do not assume: hand each probe to the live screen.
+  const refused = [];
+  const admitted = [];
+  const reasons = [];
+  for (const head of BEHAVIOUR_HEADS) {
+    const probe = BEHAVIOUR_HEAD_PROBES[head];
+    const screened = screenCommand(probe);
+    (screened.ok ? admitted : refused).push(head);
+    reasons.push(`      ${screened.ok ? "ADMIT " : "REFUSE"}  ${head.padEnd(8)}$ ${probe}\n                  ${screened.reason}`);
+  }
+  refused.sort();
+
+  eq("10.2 the measured refused set is exactly variance.mjs's stated limit",
+    refused.join(" "), [...EXECUTOR_UNREACHABLE_BEHAVIOUR_HEADS].sort().join(" "));
+  ok("10.3 at least one head IS reachable — a lock over an all-refused list is vacuous",
+    admitted.length > 0, `admitted: ${JSON.stringify(admitted)}`);
+
+  // 10.4 the README's stated-limit line is the third copy, and it is parsed,
+  // never eyeballed. `an absence is never caught by inspection`.
+  const readme = readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
+  const m = /<!--\s*pds-stated-limit:\s*executor-unreachable-behaviour-heads\s*=\s*([^>]*?)-->/.exec(readme);
+  ok("10.4 README.md carries the pds-stated-limit line", Boolean(m));
+  eq("10.5 README's stated limit names exactly the measured refused heads",
+    m ? m[1].trim().split(/\s+/).sort().join(" ") : "(absent)",
+    refused.join(" "));
+
+  process.stdout.write("\n  EXECUTOR REACHABILITY OF THE ADVERTISED BEHAVIOUR HEADS (live screenCommand)\n");
+  for (const line of reasons) process.stdout.write(`${line}\n`);
+}
+
+// ── 11. THE ROW'S OWN STORED RERUN IS READ, AND IT IS SCREENED THE SAME WAY ──
+//
+// WAVE 28 SHIPPED BOTH HALVES OF THIS INSTRUMENT AND NEVER JOINED THEM.
+// `bp task stage --rerun` writes `content.disposition_rerun`; corpus.mjs has
+// normalised that field off every row since day one; and `toFact()` sourced
+// `rerun` from the recipes.json sidecar and NOTHING ELSE. A row carrying a
+// stored rerun was therefore reported PROSE-ONLY / NO-RERUN — "asserted by
+// nobody" — which is FALSE about that row: somebody asserted it, in the field
+// built for it, and the instrument printed the opposite.
+//
+// This section is the JOIN, and it is proven on REAL ROWS. The shipped 172-row
+// snapshot carries ZERO stored reruns, so it can only prove the ABSENCE; the
+// three rows that DO carry one were read verbatim off the live board on
+// 2026-09-10 into fixtures/stored-rerun-rows-2026-09-10.json.
+{
+  const bare = adjudicateCorpus(rows, [], RUN);
+  eq("11.1 the shipped snapshot carries ZERO stored reruns — the disconnect's baseline",
+    bare.storedRerun.rows, 0);
+  ok("11.2 and the census PRINTS that zero rather than assuming it",
+    /stored rerun\s+0 of 172 row\(s\) carry a stored disposition_rerun/.test(renderVerdict(bare, { source: "test" })),
+    renderVerdict(bare, { source: "test" }).split("\n").filter((l) => l.includes("stored rerun")).join(""));
+
+  const stored = liveAdjudicated(loadCorpus(
+    fileURLToPath(new URL("./fixtures/stored-rerun-rows-2026-09-10.json", import.meta.url))));
+  eq("11.3 the live fixture is the three rows that carry one", stored.length, 3);
+  eq("11.4 and the census counts all three", adjudicateCorpus(stored, [], RUN).storedRerun.rows, 3);
+
+  // ── THE BUG, REPRODUCED AND QUOTED, ON A REAL ROW ─────────────────────────
+  // Strip the field and you have EXACTLY what origin/main's adjudicator saw.
+  const real = stored.find((r) => r.doc_id === "pds-bl-remaining-os-create-sinks");
+  const blinded = adjudicateCorpus([{ ...real, disposition_rerun: "" }], [], RUN).rows[0];
+  eq("11.5 BEFORE (the field unread): a stored rerun adjudicates PROSE-ONLY", blinded.verdict, PDS_VERDICT.PROSE_ONLY);
+  eq("11.6 ...with reason NO-RERUN", blinded.reason, "NO-RERUN");
+  ok("11.7 ...and the note says 'asserted by nobody' about a row somebody asserted",
+    blinded.note.includes("asserted by nobody"), blinded.note);
+
+  const report = adjudicateCorpus(stored, [], RUN);
+  const byId = new Map(report.rows.map((r) => [r.doc_id, r]));
+  const pass = byId.get("pds-bl-remaining-os-create-sinks");
+
+  // ── THE PASSING REAL ROW ──────────────────────────────────────────────────
+  // $ git grep -n os.Create origin/main -- internal/cli/context_render.go
+  // The derived term `os.Create` occurs LITERALLY in the row's own title, the
+  // command's rc moves on CONTENT, and it re-derives at HEAD.
+  eq("11.8 AFTER: the same real row RE-DERIVES from its own stored rerun", pass.verdict, PDS_VERDICT.RE_DERIVED);
+  eq("11.9 and the verdict names the row as its source, not the sidecar", pass.origin, STORED_ORIGIN);
+  eq("11.10 the stored rerun's command is the row's, byte for byte", pass.command, real.disposition_rerun);
+  eq("11.11 it is levelled by grip exactly like a sidecar recipe",
+    pass.level, deriveLevel(real.disposition_rerun));
+  eq("11.11b and that level is L3 — a lock over a value nobody pinned proves nothing", pass.level, "L3");
+  eq("11.12 at the FLOOR claim class, because no author declared one", pass.claim_class, STORED_CLAIM_CLASS);
+  eq("11.13 and the floor is `existence`, never `absence` — polarity is never guessed", STORED_CLAIM_CLASS, "existence");
+  ok("11.14 the derived term really is the one bound", deriveTerms(real.disposition_rerun).token === "os.Create",
+    JSON.stringify(deriveTerms(real.disposition_rerun)));
+  ok("11.15 and it occurs literally in the row's own title — a real binding, not a manufactured one",
+    real.title.includes("os.Create"), real.title);
+
+  // ── THE REFUSED REAL ROWS ─────────────────────────────────────────────────
+  // Both grep for an expression the row's TITLE never names. That is a genuine
+  // UNBOUND-CLAIM: the command may well be about the reason prose, but grip is
+  // handed the title as the claim, and this instrument may not silently admit a
+  // command bound to a sentence it was never checked against.
+  for (const id of ["pds-bl-stray-keys-on-acceptance-criteria", "pds-w12-crown-climb-preconditions"]) {
+    const r = byId.get(id);
+    eq(`11.16 ${id} is REFUSED, not quietly admitted`, r.verdict, PDS_VERDICT.REFUSED);
+    eq(`11.17 ${id} refuses at the BINDING screen`, r.reason, "UNBOUND-CLAIM");
+    ok(`11.18 ${id} names the term that failed to bind`,
+      r.note.includes("does not occur in the claim prose"), r.note);
+  }
+  eq("11.19 one of the three real stored reruns re-derives; two refuse — a measured number",
+    `${report.counts[PDS_VERDICT.RE_DERIVED] ?? 0}/${report.counts[PDS_VERDICT.REFUSED] ?? 0}`, "1/2");
+
+  // ── EVERY SCREEN A SIDECAR RECIPE FACES, A STORED RERUN FACES TOO ─────────
+  // Same real row each time; ONLY the stored command moves.
+  const host = rows.find((r) => r.doc_id === "pds-bl-secret-scan-invisible-tables");
+  ok("11.20 the screen host is a real snapshot row whose title names a file",
+    host.title.includes("pds-secret-scan.sh"), host.title);
+  const screened = (command) => adjudicateCorpus([{ ...host, disposition_rerun: command }], [], RUN).rows[0];
+
+  const spelled = screened("git -C /tmp cat-file -t origin/main:scripts/pds-secret-scan.sh");
+  eq("11.21 SPELLING screen: a forbidden spelling in a stored rerun is REFUSED", spelled.verdict, PDS_VERDICT.REFUSED);
+  eq("11.22 ...by name", spelled.reason, "GIT-DASH-C");
+
+  const counted = screened("git rev-list --count origin/main..HEAD -- scripts/pds-secret-scan.sh");
+  eq("11.23 VARIANCE screen: an uncompared count is REFUSED", counted.verdict, PDS_VERDICT.REFUSED);
+  eq("11.24 ...by name", counted.reason, "UNCOMPARED-COUNT");
+
+  const skipped = screened("git rev-list --count origin/main..HEAD -- scripts/pds-secret-scan.sh | grep -qx 0");
+  eq("11.25 VARIANCE screen: an ANCESTRY rc cannot pay for the floor class", skipped.verdict, PDS_VERDICT.REFUSED);
+  eq("11.26 ...by name", skipped.reason, "VARIANCE-SKIP");
+
+  const untermed = screened("bash scripts/pds-secret-scan.sh --selftest");
+  eq("11.27 FAIL-CLOSED: a command whose subject cannot be named is REFUSED", untermed.verdict, PDS_VERDICT.REFUSED);
+  eq("11.28 ...by name, never silently admitted unbound", untermed.reason, "MISSING-TERMS");
+
+  const admitted = screened("git cat-file -t origin/main:scripts/pds-secret-scan.sh");
+  eq("11.29 and a stored rerun that PASSES all three screens re-derives", admitted.verdict, PDS_VERDICT.RE_DERIVED);
+  eq("11.30 ...at the level its command earns",
+    admitted.level, deriveLevel("git cat-file -t origin/main:scripts/pds-secret-scan.sh"));
+  eq("11.30b ...which is L3", admitted.level, "L3");
+
+  // ── PREFERENCE: THE ROW WINS, THE SIDECAR IS THE EXPLICIT FALLBACK ────────
+  const sidecarRow = rows.find((r) => r.doc_id === "pds-bl-harness-not-relocatable");
+  const sidecarOnly = adjudicateCorpus([sidecarRow], recipes, RUN);
+  eq("11.31 FALLBACK: a row with no stored rerun still uses its recipes.json recipe",
+    sidecarOnly.rows[0].origin, SIDECAR_ORIGIN);
+  eq("11.32 ...and the census says so", sidecarOnly.storedRerun.fromSidecar, 1);
+
+  const both = adjudicateCorpus(
+    [{ ...sidecarRow, disposition_rerun: "git cat-file -t origin/main:scripts/pds-pull-proof.sh" }],
+    recipes, RUN);
+  eq("11.33 PREFERENCE: when both exist, the ROW's stored rerun is the one adjudicated",
+    both.rows[0].origin, STORED_ORIGIN);
+  eq("11.34 ...and the shadowed sidecar recipe is reported BY NAME, never silently dropped",
+    both.storedRerun.shadowedRecipes.join(","), "pds-bl-harness-not-relocatable");
+  ok("11.35 ...and the rendered census names it too",
+    renderVerdict(both, { source: "test" }).includes("SHADOWED by the row's own"));
+
+  eq("11.36 storedRecipe() returns null for a row with no stored rerun", storedRecipe(sidecarRow), null);
+
+  process.stdout.write("\n  STORED RERUNS ON THE LIVE BOARD (fixtures/stored-rerun-rows-2026-09-10.json)\n");
+  for (const r of report.rows) {
+    process.stdout.write(`      ${r.verdict.padEnd(11)} ${r.reason.padEnd(18)} ${r.doc_id}\n`);
+    process.stdout.write(`                  $ ${r.command}\n`);
+  }
+}
+
+// ── 12. A COUNT NOBODY GRADED, AND A NUMBER NOBODY BOUND ─────────────────────
+//
+// NEW SECTION, ADDED AFTER §11 (task pds-w29-bl-grip-count-uncompared).
+//
+// THE HOLE, AS WAVE 29'S OWN FIELD REPORT FOUND IT. `variance.mjs` named
+// UNCOMPARED-COUNT for exactly two shapes — a `| wc` tail and an ungraded
+// `git rev-list --count` — and the `git grep` branch returned
+// `axes=[EXISTENCE, CONTENT]` BEFORE any tail rule could fire, so `git grep -c`
+// PAID IN FULL for a content-token claim. Meanwhile `TERM_KEYS` had no place
+// for a quantity, so the NUMBER in a claim bound to nothing and was structurally
+// immune to §6's mutation method.
+//
+// THE ASYMMETRY WAS THE DAMNING PART: the same population claim spelled
+// `| wc -l` was REFUSED and spelled `grep -c` was RUBBER-STAMPED, for the same
+// unasserted number. The screen refused the honest author and admitted the other
+// one.
+//
+// EVERY ASSERTION BELOW IS EITHER A PURE CLASSIFICATION OR A REAL EXECUTION AT
+// HEAD. The true count is MEASURED from the shell in this process, never typed
+// in, so this section cannot go stale into a false green when the tree moves.
+{
+  const countLedger = [];
+
+  // ── 12.0 THE HOLE, REPRODUCED ON LIVE CODE ───────────────────────────────
+  //
+  // Not a story about origin/main: the reproduction is run HERE, by declaring
+  // the recipe THE WAY ORIGIN/MAIN COULD DECLARE IT — with no `quantity` term,
+  // because there was no such term key to declare. The command is byte-identical
+  // across the two claims and only the number moves.
+  const N = sh("git grep -l hzResDone origin/main -- internal/cli | wc -l | tr -d ' '").stdout.trim();
+  ok("12.0 the true count is MEASURED from the shell, not typed into this file", /^\d+$/.test(N) && Number(N) > 0, N);
+
+  const gradedCmd = `git grep -l hzResDone origin/main -- internal/cli | wc -l | tr -d " " | grep -x ${N}`;
+  const hostRow = { ...rows[0], doc_id: "pds-w29-count-probe", title: "a synthetic host row for the count screen" };
+  const trueClaim = `hzResDone appears in exactly ${N} file(s) under internal/cli in origin/main.`;
+  const lieClaim = "hzResDone appears in exactly 9999 file(s) under internal/cli in origin/main.";
+  const adjudicate1 = (recipe) =>
+    adjudicateCorpus([hostRow], [{ ...recipe, doc_id: hostRow.doc_id }], RUN).rows[0];
+
+  // The origin/main recipe shape: terms WITHOUT a quantity.
+  const unbound = { claim_class: CLAIM_CLASS.QUANTITY, terms: { token: "hzResDone" }, command: gradedCmd };
+  const beforeTrue = adjudicate1({ ...unbound, claim: trueClaim });
+  const beforeLie = adjudicate1({ ...unbound, claim: lieClaim });
+  eq("12.1 BEFORE (no quantity term): the command is byte-identical across the two claims",
+    beforeTrue.command, beforeLie.command);
+  eq("12.2 BEFORE: the TRUE count and the FABRICATED count reach the IDENTICAL verdict",
+    `${beforeTrue.verdict}/${beforeTrue.reason}`, `${beforeLie.verdict}/${beforeLie.reason}`);
+  eq("12.3 BEFORE: and that identical verdict is the strongest one this instrument has",
+    beforeLie.verdict, PDS_VERDICT.RE_DERIVED);
+  eq("12.4 BEFORE: quoted — PASS-ADMITTED over a number nobody asserted", beforeLie.reason, "PASS-ADMITTED");
+  countLedger.push({
+    what: "the number rides free when nothing binds it",
+    command: gradedCmd,
+    a: `claim says ${N} (true)  → ${beforeTrue.verdict}/${beforeTrue.reason}`,
+    b: `claim says 9999 (false) → ${beforeLie.verdict}/${beforeLie.reason}`,
+  });
+
+  // AND THE OTHER HALF OF THE HOLE: `-c` was invisible to the classifier.
+  // grip's `gitVerb` reads the same verb with and without it, so the git branch
+  // returned CONTENT axes and a content-token claim was paid in full.
+  const withC = "git grep -c hzResDone origin/main -- internal/cli";
+  const withoutC = "git grep -n hzResDone origin/main -- internal/cli";
+  eq("12.5 the classifier's own verb split cannot see `-c` — the same verb either way",
+    varianceSet(withoutC).axes.join(","), "EXISTENCE,CONTENT");
+  ok("12.6 BEFORE: that axis set PAYS IN FULL for a content-token claim",
+    overClaim(CLAIM_CLASS.CONTENT, { axes: [AXIS.EXISTENCE, AXIS.CONTENT], masked: null, why: "origin/main's literal return for a `git grep` source" }) === null);
+
+  // THE FILING'S HEADLINE VERDICT IS STALE, AND SAYING SO IS PART OF THE FIX.
+  // It reports RE-DERIVED / PASS-ADMITTED for `git grep -c`, measured on
+  // origin/main 0f28d541e. RE-MEASURED against origin/main 61f1afcea by running
+  // that tree's own adjudicator: `git grep -c …` lands REFUSED /
+  // REJECTED:UNSAFE-RERUN, because grip's caller-boundary screen parses the `-c`
+  // as git's GLOBAL `-c key=value` flag and refuses ("git -c hzResDone is not a
+  // key=value pair"). That is an ACCIDENT in a tree PDS does not own
+  // (tooling/grip/**, PDS-D386) and it is not a count screen: the plain-grep
+  // spellings of the same act sail straight past it. So the durable half of the
+  // finding — the one asserted above and closed below — is that the VARIANCE
+  // SCREEN pays in full for a command that asserts no number, whatever the
+  // runtime happens to do with it afterwards.
+
+  // ── 12.7 THE RULE: A COUNTING STAGE IS UNCOMPARED UNLESS GRADED ──────────
+  //
+  // Stated on the ACT, not on a list of spellings — an enumeration is a
+  // snapshot and a predicate is a rule, and a two-item list is exactly how
+  // `grep -c` walked past this screen for a wave.
+  const UNGRADED = [
+    ["wc", "git grep -n hzResDone origin/main -- internal/cli | wc -l"],
+    ["git grep -c", withC],
+    ["grep -c", "grep -c hzResDone internal/cli/hetzner_lb_cmd.go"],
+    ["grep -vc", "git grep -n hzResDone origin/main -- internal/cli | grep -vc 'func hzResDone'"],
+    ["git rev-list --count", "git rev-list --count origin/main..abc123"],
+  ];
+  for (const [name, cmd] of UNGRADED) {
+    const v = varianceSet(cmd);
+    eq(`12.7 ${name}: an ungraded counting stage is UNCOMPARED-COUNT`, v.masked, "UNCOMPARED-COUNT");
+    eq(`12.8 ${name}: it pays for NO axis at all`, v.axes.length, 0);
+    ok(`12.9 ${name}: and the refusal NAMES ITS SUBSTITUTE rather than only saying no`,
+      v.why.includes("SUBSTITUTE:") && v.why.includes("grep -qx"), v.why);
+    eq(`12.10 ${name}: the counting act is named by the predicate, not guessed`,
+      typeof countingSpelling(cmd.split("|").pop().trim()) === "string" || countingSpelling(cmd.split("|")[0].trim()) !== null, true);
+  }
+
+  // AND THE REFUSAL REACHES THE VERDICT, not just the classifier.
+  const refusedRow = adjudicate1({ claim_class: CLAIM_CLASS.CONTENT, claim: "hzResDone still occurs under internal/cli", terms: { token: "hzResDone" }, command: withC });
+  eq("12.11 END TO END: the `git grep -c` recipe that used to PASS-ADMIT is now REFUSED", refusedRow.verdict, PDS_VERDICT.REFUSED);
+  eq("12.12 ...by name", refusedRow.reason, "UNCOMPARED-COUNT");
+  ok("12.13 ...and the refusal note carries the substitute an author can act on",
+    refusedRow.note.includes("SUBSTITUTE:"), refusedRow.note);
+  // AND THE SPELLINGS GRIP'S SCREEN DOES ADMIT — where the hole was live at
+  // HEAD, not merely at the filing's commit. RE-MEASURED against origin/main
+  // 61f1afcea with that tree's own adjudicator:
+  //   grep -c  …                     INCONCLUSIVE / NULL-READ   (a count, admitted)
+  //   … | grep -vc 'func hzResDone'  REFUTED / PASS-CONTRADICTED (a TRUE claim
+  //                                  called false, off a count nobody graded)
+  // Both now refuse by name instead.
+  const plainC = adjudicate1({ claim_class: CLAIM_CLASS.CONTENT, claim: "hzResDone still occurs under internal/cli", terms: { token: "hzResDone" }, command: "grep -c hzResDone internal/cli/hetzner_lb_cmd.go" });
+  eq("12.13b the plain `grep -c` spelling grip DOES admit is refused at the count screen", plainC.reason, "UNCOMPARED-COUNT");
+  const vcRow = adjudicate1({ claim_class: CLAIM_CLASS.CONTENT, claim: "hzResDone still occurs under internal/cli", terms: { token: "hzResDone" }, command: "git grep -n hzResDone origin/main -- internal/cli | grep -vc 'func hzResDone'" });
+  eq("12.13c and so is the `grep -vc` tail that used to REFUTE a true claim", vcRow.reason, "UNCOMPARED-COUNT");
+
+  countLedger.push({
+    what: "counting shapes for a content claim — every one paid in full at the variance screen",
+    command: `${withC}   |   grep -c …   |   … | grep -vc …`,
+    a: `BEFORE  overClaim(content-token, [EXISTENCE,CONTENT]) === null  — the screen charged nothing`,
+    b: `AFTER   ${refusedRow.reason} / ${plainC.reason} / ${vcRow.reason}`,
+  });
+
+  // ── 12.14 NO OVER-REFUSAL: AN HONEST GRADED COUNT STILL RE-DERIVES ───────
+  const honest = { claim_class: CLAIM_CLASS.QUANTITY, claim: trueClaim, terms: { token: "hzResDone", quantity: N }, command: gradedCmd };
+  const honestRow = adjudicate1(honest);
+  eq(`12.14 an equality-graded count (\`| grep -x ${N}\`) still RE-DERIVES`, honestRow.verdict, PDS_VERDICT.RE_DERIVED);
+  eq("12.15 ...by execution at HEAD, not by a binding artefact", honestRow.reason, "PASS-ADMITTED");
+  eq("12.16 the grade is read as an equality against an integer literal", equalityGrade(`grep -x ${N}`), N);
+  ok("12.17 a grade without `-x` is NOT an equality grade — `5` would match `15`",
+    equalityGrade("grep -q 5") === null);
+  eq("12.18 a graded count pays on the QUANTITY axis and on nothing borrowed",
+    varianceSet(gradedCmd).axes.join(","), AXIS.QUANTITY);
+
+  // ── 12.19 THE QUANTITY TERM BINDS, AND THE MUTATION REDS ─────────────────
+  ok("12.19 `quantity` is a declarable term key", TERM_KEYS.includes("quantity"));
+  const mutated = { ...honest, claim: lieClaim };
+  eq("12.20 MUTATION: the command is BYTE-IDENTICAL across the lie", mutated.command, honest.command);
+  ok("12.21 ...and only the number moved", mutated.claim !== honest.claim && mutated.claim.includes("9999"));
+  const mutatedRow = adjudicate1(mutated);
+  eq("12.22 MUTATED NUMBER REDS to REFUSED", mutatedRow.verdict, PDS_VERDICT.REFUSED);
+  eq("12.23 ...with UNBOUND-CLAIM — the number is bound to something now", mutatedRow.reason, "UNBOUND-CLAIM");
+  ok("12.24 ...and the note names the quantity term that failed to bind",
+    mutatedRow.note.includes('term quantity="' + N + '"'), mutatedRow.note);
+  ok("12.25 CONTROL: the honest recipe does NOT red with UNBOUND-CLAIM", honestRow.reason !== "UNBOUND-CLAIM", honestRow.reason);
+  countLedger.push({
+    what: "the same lie, with the quantity term declared",
+    command: gradedCmd,
+    a: `claim says ${N} (true)  → ${honestRow.verdict}/${honestRow.reason}`,
+    b: `claim says 9999 (false) → ${mutatedRow.verdict}/${mutatedRow.reason}   <-- RED`,
+  });
+
+  // A number that binds must bind in the COMMAND too, not only in the prose.
+  const proseOnlyNumber = bindClaim({ doc_id: "x", claim_class: "quantity", claim: "exactly 50 call sites", command: withC, terms: { quantity: "50" } });
+  ok("12.26 a quantity that occurs only in the prose is UNBOUND-CLAIM",
+    proseOnlyNumber.rejections.some((r) => r.reason === "UNBOUND-CLAIM"));
+  ok("12.27 CONTROL: `quantity` is not rejected as an unrecognised key",
+    !proseOnlyNumber.rejections.some((r) => r.reason === "UNKNOWN-TERM"),
+    JSON.stringify(proseOnlyNumber.rejections));
+
+  // ── 12.28 THE ASYMMETRY IS CLOSED IN THE REPORTED DIRECTION ──────────────
+  //
+  // The reported direction is a POPULATION claim spelled two ways. Before this
+  // change `wc` was REFUSED and `grep -c` was ADMITTED. Both spellings must now
+  // reach the SAME verdict — refused while ungraded, admitted once graded.
+  const popClaim = `hzResDone appears in exactly ${N} file(s) under internal/cli in origin/main.`;
+  const wcUngraded = "git grep -l hzResDone origin/main -- internal/cli | wc -l";
+  const grepCUngraded = "git grep -c hzResDone origin/main -- internal/cli";
+  const wcRow = adjudicate1({ claim_class: CLAIM_CLASS.QUANTITY, claim: popClaim, terms: { token: "hzResDone" }, command: wcUngraded });
+  const grepCRow = adjudicate1({ claim_class: CLAIM_CLASS.QUANTITY, claim: popClaim, terms: { token: "hzResDone" }, command: grepCUngraded });
+  eq("12.28 the `wc` spelling and the `grep -c` spelling of ONE population claim reach the SAME verdict",
+    `${wcRow.verdict}/${wcRow.reason}`, `${grepCRow.verdict}/${grepCRow.reason}`);
+  eq("12.29 ...and that shared verdict is the refusal, not the rubber stamp", grepCRow.reason, "UNCOMPARED-COUNT");
+  countLedger.push({
+    what: "the asymmetry, closed",
+    command: `${wcUngraded}   vs   ${grepCUngraded}`,
+    a: `wc      → ${wcRow.verdict}/${wcRow.reason}`,
+    b: `grep -c → ${grepCRow.verdict}/${grepCRow.reason}   (was RE-DERIVED/PASS-ADMITTED)`,
+  });
+
+  // Graded, the two spellings agree on the axis as well as on the verdict.
+  eq("12.30 graded, both spellings classify onto the SAME axis set",
+    varianceSet(`${wcUngraded} | tr -d " " | grep -x ${N}`).axes.join(","),
+    varianceSet(`${grepCUngraded} | grep -x ${N}`).axes.join(","));
+
+  // ── 12.31 THE RULE DOES NOT EAT THE REST OF THE TABLE ────────────────────
+  // Controls: shapes that carry no counting stage must be untouched by it.
+  eq("12.31 CONTROL: a plain `git grep` is still EXISTENCE,CONTENT",
+    varianceSet(withoutC).masked, null);
+  eq("12.32 CONTROL: a masked pipe is still PIPE-MASKED-RC, not renamed to a count",
+    varianceSet("git show origin/main:no/such/path.md | sed -n '1p'").masked, "PIPE-MASKED-RC");
+  eq("12.33 CONTROL: a graded `rev-list --count` still pays for ANCESTRY",
+    overClaim(CLAIM_CLASS.ANCESTRY, varianceSet("git rev-list --count origin/main..abc123 | grep -x 0")), null);
+  ok("12.34 CONTROL: an unclassified command still DEMOTES rather than refusing",
+    isUnknownVariance(varianceSet("ls -la tooling/pds")));
+  eq("12.35 CONTROL: `git -c user.name=x grep -n tok origin/main` is a global flag, not a count",
+    countingSpelling("git -c user.name=x grep -n tok origin/main"), null);
+  eq("12.36 CONTROL: `git grep -C 3` is context, not `--count`",
+    countingSpelling("git grep -C 3 tok origin/main"), null);
+
+  process.stdout.write("\n  THE COUNT SCREEN — the command held still, the number moved\n");
+  for (const e of countLedger) {
+    process.stdout.write(`      ${e.what}\n`);
+    process.stdout.write(`        $ ${e.command}\n`);
+    process.stdout.write(`          ${e.a}\n`);
+    process.stdout.write(`          ${e.b}\n`);
+  }
 }
 
 /** The one term that moved between two claim strings, for the printed ledger. */

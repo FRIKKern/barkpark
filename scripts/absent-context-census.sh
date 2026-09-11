@@ -138,6 +138,25 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# ── the shared check-runs reader ─────────────────────────────────────────────
+# The live check-run read goes through scripts/lib/check-runs.sh (the same
+# primitive required-checks-{generate,verify}.sh, registration-sample.sh and
+# registration-deadlock-sweep.sh read through) rather than through gh_api below.
+# gh_api's `--paginate` does walk the pages, but it has NO notion of "did I get
+# everything": a page that fails mid-walk and a feed that genuinely ended are
+# the same short answer, and a census that under-counts RENDERED names reports
+# a rendered context as ABSENT. The lib ends its read in a comparison against
+# the feed's own `total_count` and REFUSES rather than returning a set it
+# cannot vouch for — which lands here as the UNKNOWN row census_head already
+# writes for an unreadable feed.
+CHECK_RUNS_LIB="${BARKPARK_CHECK_RUNS_LIB:-$REPO_ROOT/scripts/lib/check-runs.sh}"
+if [ ! -f "$CHECK_RUNS_LIB" ]; then
+  echo "FAIL: no check-runs reader at $CHECK_RUNS_LIB — refusing to census without the shared primitive" >&2
+  exit 3
+fi
+# shellcheck source=scripts/lib/check-runs.sh
+. "$CHECK_RUNS_LIB"
+
 SPEC="$REPO_ROOT/.github/required-checks.json"
 WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
 FIXTURES=""
@@ -347,8 +366,30 @@ read_check_runs() { # <sha>
     f="$(fixture "checkruns-$sha.json")" || { warn "fixtures mode: missing checkruns-$sha.json"; return 1; }
     jq -c '.check_runs[] | {name, status, conclusion}' "$f"
   else
-    gh_api "repos/$REPO/commits/$sha/check-runs?per_page=100" \
-      '.check_runs[] | {name, status, conclusion}'
+    # PAGED, AND IT PROVES ITS OWN COMPLETENESS. `?per_page=100` on its own
+    # truncates at 100 silently (measured 2026-09-07 on head 33799f6d8:
+    # total_count 122, 100 rows returned, 22 distinct NAMES invisible). For THIS
+    # instrument a short read is not a smaller answer, it is a WRONG one in the
+    # loud direction: every name it cannot see is a name that renders nowhere as
+    # far as the census can tell, so a genuinely-rendered required context is
+    # reported ABSENT. check_runs_feed returns the whole feed or refuses; a
+    # refusal reaches census_head as UNKNOWN (exit 2), never as a clean head.
+    local feed errf rc=0
+    errf="$(mktemp)"
+    feed="$(check_runs_feed "$REPO" "$sha" 2>"$errf")" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      # The credential fault must stay separable from the network blip: this is
+      # the ONLY read some heads reach, and grading a 401 as UNKNOWN(2) instead
+      # of CONFIGURATION FAULT(3) tells the fleet to retry a token that will
+      # never work. gh's own stderr rides through the lib's refusal line.
+      is_config_fault "$(cat "$errf")" && CONFIG_FAULT=1
+      warn "  read failed: check-runs for $sha"
+      warn "$(sed 's/^/    /' "$errf" | head -5)"
+      rm -f "$errf"
+      return 1
+    fi
+    rm -f "$errf"
+    printf '%s\n' "$feed" | jq -c '.check_runs[] | {name, status, conclusion}'
   fi
 }
 
@@ -561,8 +602,8 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
           # `needs:`-gated job,
           # and renders no check run for it, until every one of its `needs:`
           # has concluded. All three gates here are terminal aggregators
-          # (`Cloud gate` needs [changes, compile, test, path-escape]; Console
-          # and Elixir the same shape), so for the whole first phase of every
+          # (`Cloud gate` needs [changes, compile, test, census, path-escape];
+          # Console and Elixir the same shape), so for the whole first phase of every
           # pull request's CI those names render NOWHERE while their producing
           # run is perfectly healthy.
           #

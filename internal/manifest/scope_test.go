@@ -343,3 +343,109 @@ func TestScopedMirrorFlagStillComposesEverything(t *testing.T) {
 		t.Errorf("URL = %q, want %q", got, want)
 	}
 }
+
+// ── The second door: a `-s <saved-name>`-injected scope ──────────────────────
+//
+// StatedScope's provenance-AND-divergence rule closed the door that keying on
+// WorkspaceExplicit alone left open. It did not close the SECOND one:
+// internal/cli/cli.go copies a saved server entry's workspace/project/dataset
+// into the flags map at FLAG precedence when `-s <name>` names a known entry, so
+// `bp -s gyldendal task ready` — no -w typed anywhere — read as stated AND
+// divergent and was refused, with no command line the operator could type to
+// get past it short of deleting their own saved entry.
+//
+// AttributeServerEntry marks those keys; the tests below pin both directions.
+
+// TestStatedScopeIgnoresAServerEntryInjectedWorkspace is the fix, stated as the
+// value that lands: a divergent workspace that arrived from the saved entry is
+// NOT a stated scope, so nothing about the request changes and no refusal fires.
+func TestStatedScopeIgnoresAServerEntryInjectedWorkspace(t *testing.T) {
+	ctx := statedCtx("gyldendal", "books")
+	ctx.WorkspaceFromServerEntry = true
+	ctx.ProjectFromServerEntry = true
+
+	if got := StatedScope(ctx); len(got) != 0 {
+		t.Fatalf("StatedScope(-s <entry> with workspace=gyldendal project=books, nothing typed) = %v, want empty — "+
+			"a saved server entry's own scope is not something the operator stated on this command line, "+
+			"and refusing it leaves no command line that works", got)
+	}
+}
+
+// TestStatedScopeStillReportsTheTypedFlagAlongsideAnInjectedOne — the half of
+// the subtraction that must NOT over-apply. cli.go injects a key only where the
+// operator did not set the matching flag, so a typed -w and an injected -p can
+// coexist on one invocation; the typed one is still stated.
+func TestStatedScopeStillReportsTheTypedFlagAlongsideAnInjectedOne(t *testing.T) {
+	ctx := statedCtx("gyldendal", "books")
+	ctx.ProjectFromServerEntry = true // -p came from the entry, -w was typed
+
+	got := StatedScope(ctx)
+	if len(got) != 1 || got[0] != "-w" {
+		t.Errorf("StatedScope(typed -w gyldendal + injected -p books) = %v, want [-w]", got)
+	}
+}
+
+// TestStatedScopeIsUnchangedForEveryNonInjectedLayer is the REGRESSION fence in
+// the other direction: env, .barkpark.json and the saved active config all reach
+// StatedScope with the FromServerEntry flags false, and they must read exactly
+// as they did before this change. If the subtraction ever widens to "any layer
+// but the flag", this reds.
+func TestStatedScopeIsUnchangedForEveryNonInjectedLayer(t *testing.T) {
+	ctx := statedCtx("gyldendal", "books")
+	if ctx.WorkspaceFromServerEntry || ctx.ProjectFromServerEntry {
+		t.Fatal("statedCtx must leave the injection flags at their false zero value")
+	}
+	got := StatedScope(ctx)
+	if len(got) != 2 || got[0] != "-w" || got[1] != "-p" {
+		t.Errorf("StatedScope(stated, divergent, not injected) = %v, want [-w -p]", got)
+	}
+}
+
+// TestAttributeServerEntryRelabelsOnlyTheInjectedScopeKeys pins the stamp
+// itself: the three scope keys it is told about get LayerServerEntry, every
+// other field keeps the layer the fold chose, and a key that did NOT win at the
+// flag layer is left alone so the label never outruns the value.
+func TestAttributeServerEntryRelabelsOnlyTheInjectedScopeKeys(t *testing.T) {
+	ctx := Context{Workspace: "gyldendal", Project: "books", Dataset: "staging", Token: "t"}
+	src := Sources{
+		Workspace: LayerFlag,
+		Project:   LayerFlag,
+		Dataset:   LayerFlag,
+		Token:     LayerFlag,
+		Server:    LayerFlag,
+		Output:    LayerDefault,
+	}
+
+	ctx, src = AttributeServerEntry(ctx, src, map[string]bool{
+		FlagWorkspace: true,
+		FlagProject:   true,
+		FlagDataset:   true,
+		FlagToken:     true, // ignored: the token has its own provenance path
+		FlagServer:    true, // ignored: -s IS what the operator named
+	})
+
+	for _, tc := range []struct{ name, got, want string }{
+		{"workspace", src.Workspace, LayerServerEntry},
+		{"project", src.Project, LayerServerEntry},
+		{"dataset", src.Dataset, LayerServerEntry},
+		{"token", src.Token, LayerFlag},
+		{"server", src.Server, LayerFlag},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("Sources.%s = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+	if !ctx.WorkspaceFromServerEntry || !ctx.ProjectFromServerEntry || !ctx.DatasetFromServerEntry {
+		t.Errorf("Context injection flags = %v/%v/%v, want all true",
+			ctx.WorkspaceFromServerEntry, ctx.ProjectFromServerEntry, ctx.DatasetFromServerEntry)
+	}
+
+	// A key the caller injected that a HIGHER layer then supplied keeps the
+	// label of the value that actually won.
+	ctx2 := Context{Workspace: "env-ws"}
+	src2 := Sources{Workspace: LayerEnv}
+	ctx2, src2 = AttributeServerEntry(ctx2, src2, map[string]bool{FlagWorkspace: true})
+	if src2.Workspace != LayerEnv || ctx2.WorkspaceFromServerEntry {
+		t.Errorf("a non-flag-layer workspace was relabelled: src=%q injected=%v", src2.Workspace, ctx2.WorkspaceFromServerEntry)
+	}
+}

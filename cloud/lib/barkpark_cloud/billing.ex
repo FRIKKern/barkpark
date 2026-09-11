@@ -984,6 +984,115 @@ defmodule BarkparkCloud.Billing do
     end
   end
 
+  # The gateway-side subscription statuses that mean THE PAYER IS CURRENT. Stripe's
+  # own vocabulary, not ours: `"active"` and `"trialing"` are the two states in
+  # which Stripe considers the subscription live and billing. Everything else —
+  # `"past_due"`, `"unpaid"`, `"canceled"`, `"incomplete"`,
+  # `"incomplete_expired"`, `"paused"` — is NOT a licence to run a fleet, and an
+  # UNKNOWN status Stripe invents tomorrow falls on the refusing side by
+  # construction (an allowlist, never a denylist: a fail-open list here would be
+  # a billing bypass one Stripe release note wide).
+  @gateway_paid_statuses ~w(active trialing)
+
+  @doc """
+  THE OPERATOR LIFT for a billing suspension (task-75decf22069ee083) — re-read
+  `team`'s subscription from the payment gateway and, if the gateway says the
+  payer is current, run the ordinary recovery.
+
+  ## The hole this closes
+
+  Entry into billing suspension is automatic and fleet-wide
+  (`cancel_subscription/1` and `maybe_enforce/1` both bulk-suspend every managed
+  box a team owns). The exit was a webhook and nothing else, and one exit is
+  MISSING: a Stripe-side reactivation of the SAME `canceled` subscription arrives
+  as `customer.subscription.updated{status: "active"}`, an object that carries no
+  `metadata.team_id`/`plan`, so `activate_from_metadata/1` returns
+  `{:error, :missing_metadata}` and nothing happens. `subscription_by_customer/1`
+  cannot rescue it either — it filters `status in ["active", "past_due"]`, so the
+  `canceled` row is invisible to it. The row stays `canceled`, every managed box
+  stays suspended, and until this function existed there was NO route at ANY auth
+  tier that could lift it: the only remedy was a hand-written DB write or an
+  `iex` session on the box.
+
+  ## Why this is not a billing bypass
+
+  It NEVER takes the caller's word for it, and it never takes OUR OWN ROW's word
+  for it either. The decision is made against `Gateway.retrieve_subscription/1` —
+  the gateway's live answer — because the stale row is exactly the thing being
+  corrected: a predicate over our own `subscriptions` table (`entitled?/1`, say)
+  would refuse the headline case above, which is the one an operator is called
+  for. A team the gateway does not report as `active`/`trialing` is REFUSED,
+  loudly, carrying the status it was refused for.
+
+  ## Why it writes nothing of its own
+
+  The success arm delegates to `recover_subscription/1` — the SAME transition
+  `invoice.paid` runs. So this function adds no new writer of
+  `barkparks.suspended`: it reuses the reason- and mode-scoped
+  `Registry.resume_billing_suspended/1` (managed rows whose `suspended_reason` is
+  `"billing_lapsed"` or `"billing_past_due"`), which is why an operator lift
+  cannot clear a `"quota_exceeded"` flag the billing axis never set, and cannot
+  revive a `self_hosted` row `suspend_team_barkparks/2` refuses to touch.
+
+  Returns `{:ok, %{gateway_status: status, subscription: sub}}`,
+  `{:error, :no_subscription}` (no row, or a row with no gateway id — nothing to
+  ask about), `{:error, {:unpaid, status}}`, or `{:error, {:gateway, reason}}`.
+  """
+  @spec resume_billing_suspension(Team.t() | binary()) ::
+          {:ok, %{gateway_status: String.t(), subscription: Subscription.t()}}
+          | {:error, :no_subscription}
+          | {:error, {:unpaid, String.t() | nil}}
+          | {:error, {:gateway, term()}}
+  def resume_billing_suspension(team) do
+    tid = team_id(team)
+
+    case recoverable_subscription(tid) do
+      nil ->
+        {:error, :no_subscription}
+
+      %Subscription{gateway_subscription_id: gsid} = sub when is_binary(gsid) and gsid != "" ->
+        ask_gateway_then_recover(sub, gsid)
+
+      %Subscription{} ->
+        # A row with no gateway-side id (a `forever` comp, a locally granted
+        # trial). There is nothing to ask the payment provider about, so there is
+        # no evidence on which to lift — refused, not granted.
+        {:error, :no_subscription}
+    end
+  end
+
+  defp ask_gateway_then_recover(%Subscription{} = sub, gsid) do
+    case gateway().retrieve_subscription(gsid) do
+      {:ok, %{} = object} ->
+        status = Map.get(object, "status")
+
+        if status in @gateway_paid_statuses do
+          with {:ok, sub} <- recover_subscription(sub) do
+            {:ok, %{gateway_status: status, subscription: sub}}
+          end
+        else
+          {:error, {:unpaid, status}}
+        end
+
+      {:error, reason} ->
+        {:error, {:gateway, reason}}
+    end
+  end
+
+  # The row this lift operates on. `live_subscription/1` FIRST (the
+  # one-live-per-team partial unique index makes it unambiguous), and only then
+  # the newest row of any status — because the whole point is to reach a row that
+  # has fallen OUT of the live set, which is precisely what `live_subscription/1`
+  # and `subscription_by_customer/1` are both blind to.
+  defp recoverable_subscription(tid) do
+    live_subscription(tid) ||
+      Subscription
+      |> where([s], s.team_id == ^tid)
+      |> order_by([s], desc: s.inserted_at, desc: s.id)
+      |> limit(1)
+      |> Repo.one()
+  end
+
   # past_due is entitled while inside the grace window; past it, the team's managed
   # boxes are suspended with the softer "billing_past_due" reason. In PRODUCTION
   # that suspend is unreachable: the only caller is `mark_past_due/2`, which

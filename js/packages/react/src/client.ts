@@ -287,11 +287,43 @@ async function ensureAsciinemaStyles(): Promise<void> {
   }
 }
 
+/**
+ * The asciinema-player theme for the ACTIVE color mode. Like mermaid, the player
+ * bakes its palette into inline CSS custom properties on the mount point (it does
+ * NOT read `.bp-paper-surface`'s tokens), so a fixed `theme:'asciinema'` paints a
+ * near-black terminal on a light paper — the one embed on the page that ignores
+ * the reader's mode.
+ *
+ * It DELEGATES to {@link activeMermaidTheme} rather than re-deriving: one
+ * theme-derivation seam means the two lazy embeds on a page can never disagree
+ * about which mode is active (a `data-theme` stamp read twice, by two slightly
+ * different readers, is exactly how a diagram goes dark while a cast stays light).
+ *
+ * The names are asciinema-player 3.x BUILT-INS, not custom CSS: the shipped
+ * stylesheet (node_modules/asciinema-player/dist/bundle/asciinema-player.css)
+ * defines `.asciinema-player-theme-{asciinema,dracula,gruvbox-dark,monokai,nord,
+ * seti,solarized-dark,solarized-light,tango}`, and `solarized-light`
+ * (`--term-color-background: #fdf6e3`) is the ONLY one of the nine with a light
+ * background — every other built-in backgrounds between #002b36 and #2e3440.
+ *
+ * Exported for tests; safe anywhere `document` exists.
+ */
+export function activeAsciicastTheme(
+  doc: Document = document,
+): 'asciinema' | 'solarized-light' {
+  return activeMermaidTheme(doc) === 'dark' ? 'asciinema' : 'solarized-light'
+}
+
 async function hydrateAsciicast(root: ParentNode): Promise<number> {
   const nodes = Array.from(
     root.querySelectorAll<HTMLElement>(ASCIICAST_SELECTOR),
   )
   if (nodes.length === 0) return 0
+
+  // Resolved ONCE per hydrate pass, not per node: every player on a page shares
+  // the one active mode, and re-reading `data-theme` mid-loop could straddle a
+  // flip and mount two casts in different palettes.
+  const theme = activeAsciicastTheme(ownerDocument(root))
 
   const [player] = await Promise.all([
     import('asciinema-player') as Promise<unknown> as Promise<AsciinemaLike>,
@@ -313,7 +345,7 @@ async function hydrateAsciicast(root: ParentNode): Promise<number> {
       poster: el.dataset.castPoster || 'npt:0:1',
       rows: el.dataset.castRows ? Number(el.dataset.castRows) : undefined,
       idleTimeLimit: 2,
-      theme: 'asciinema',
+      theme,
     })
     el.dataset.asciicastDone = 'true'
     mounted += 1

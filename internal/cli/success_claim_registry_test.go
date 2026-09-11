@@ -125,6 +125,37 @@ type claimSite struct {
 
 func strp(s string) *string { return &s }
 
+// siteDoctorWebhookUnreadable and siteDoctorWebhookRepair are the SERVER's own
+// sentences, held identical across the unknown/absent pair so the printed
+// difference can only be the STATE — not two different strings the row authored.
+const (
+	siteDoctorWebhookUnreadable = "the box's webhook list could not be read, so whether the row exists is UNMEASURED"
+	siteDoctorWebhookRepair     = "the hourly ContentWebhookReconciler re-arms this row idempotently; there is NO on-demand verb"
+)
+
+// siteDoctorReportFixture is the shared doctor report the two enrolled rows vary
+// from. It is rebuilt on every call (the substrate slice included), so a mutation
+// applied by one half can never leak into the other.
+func siteDoctorReportFixture(mut func(*cloudclient.SiteDoctorReport)) cloudclient.SiteDoctorReport {
+	r := cloudclient.SiteDoctorReport{
+		OK:        true,
+		CheckedAt: "2026-09-10T09:00:00Z",
+		Site: cloudclient.SiteDoctorSite{
+			ID: "11111111-2222-3333-4444-555555555555", Slug: "blog", Name: "Blog",
+			Kind: "static", Framework: "astro", Instance: "acme",
+		},
+		Substrates: []cloudclient.SiteDoctorSubstrate{
+			{Key: "cp_row", State: cloudclient.SiteDoctorPresent, Detail: "the control-plane `sites` row exists"},
+			{Key: "content_webhook", State: cloudclient.SiteDoctorPresent, Detail: "the box carries this site's content-publish webhook"},
+		},
+		Unreadable: []string{},
+	}
+	if mut != nil {
+		mut(&r)
+	}
+	return r
+}
+
 // successClaimRegistry is the enrolled set. Add a row when you add a receipt.
 func successClaimRegistry() []claimSite {
 	autoupdate := func(verb string) func(*writer, any) {
@@ -542,6 +573,57 @@ func successClaimRegistry() []claimSite {
 			Contradicted: spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.Theme = "fjord" }),
 		},
 
+		// ── cloud_site_doctor.go — the per-substrate receipt (ssw8-site-doctor) ──
+		// The doctor is a READ verb, so its "claim" is not "I changed something":
+		// it is "here is what exists, and here is what to do about what does not".
+		// Both halves are cloudclient.SiteDoctorReport — the type GET
+		// /v1/sites/:id/doctor decodes into — so the printed difference can only
+		// come from the server's answer.
+		{
+			// The substrate verdict itself. A webhook the box does NOT carry is a
+			// site that will never receive a content publish, and the receipt has
+			// to read differently from the one that says it is armed.
+			Name: "renderSiteDoctorReport/absent-vs-present",
+			Render: func(out *writer, resp any) {
+				renderSiteDoctorReport(out, "blog", resp.(cloudclient.SiteDoctorReport))
+			},
+			Backed: siteDoctorReportFixture(nil),
+			Contradicted: siteDoctorReportFixture(func(r *cloudclient.SiteDoctorReport) {
+				r.Substrates[1].State = cloudclient.SiteDoctorAbsent
+				r.Substrates[1].Repair = siteDoctorWebhookRepair
+				r.OK = false
+				r.AbsentCount = 1
+			}),
+		},
+		{
+			// THE HONESTY AXIS, and the reason this row exists at all. The server
+			// is three-valued on purpose: `unknown` means the doctor could not
+			// PERFORM that read, `absent` is a claim that the substrate is gone —
+			// and the operator's next move is opposite in the two cases (do NOT
+			// arm a webhook on the strength of a failed read). A receipt that
+			// printed the same bytes for both would reintroduce, one layer out,
+			// the exact collapse the route was built to prevent.
+			Name: "renderSiteDoctorReport/unknown-is-not-absent",
+			Render: func(out *writer, resp any) {
+				renderSiteDoctorReport(out, "blog", resp.(cloudclient.SiteDoctorReport))
+			},
+			Backed: siteDoctorReportFixture(func(r *cloudclient.SiteDoctorReport) {
+				r.Substrates[1].State = cloudclient.SiteDoctorUnknown
+				r.Substrates[1].Detail = siteDoctorWebhookUnreadable
+				r.Substrates[1].Repair = siteDoctorWebhookRepair
+				r.UnknownCount = 1
+				r.Unreadable = []string{"content_webhook"}
+			}),
+			Contradicted: siteDoctorReportFixture(func(r *cloudclient.SiteDoctorReport) {
+				r.Substrates[1].State = cloudclient.SiteDoctorAbsent
+				r.Substrates[1].Detail = siteDoctorWebhookUnreadable
+				r.Substrates[1].Repair = siteDoctorWebhookRepair
+				r.OK = false
+				r.AbsentCount = 1
+				r.Unreadable = []string{}
+			}),
+		},
+
 		// ── tasks_stamp_cmd.go — the LEDGER ROW the store actually holds ────────
 		{
 			// PDS-D359/D361, wave 26. `bp task stamp` is the verb every acceptance
@@ -697,6 +779,32 @@ func successClaimRegistry() []claimSite {
 			Backed:       map[string]any{"capacity_stdout": `{"size_class":"standard"}`},
 			Contradicted: map[string]any{"capacity_stdout": `{"error":"fleet-run.sh: capacity: no such file"}`},
 		},
+		{
+			// THE OTHER HALF of the supportAddRun.success gap (/max-class closed the
+			// first). stepOnline polls until the MAIN'S ROSTER ROW truthfully reads
+			// online-with-capacity — the strongest post-condition this verb has,
+			// because it is what the MAIN observed and not what the local verb asked
+			// for — and both facts used to die in stepOnline: supportAddRun carried
+			// no field for them, so success() could name them on neither surface and
+			// no row could declare them as its axis.
+			//
+			// The probe is THE ROSTER ROW ITSELF, taken WHOLE (PDS-D431): production's
+			// observeRoster does the status/capacity extraction, so a production edit
+			// that stops carrying either fact reds here rather than leaving the row
+			// probing a sentence the CLI no longer composes. The box is held fixed at
+			// supportSuccessHost — the address is the /success row's axis, not this
+			// one's — and the pair moves only the main's reading.
+			Name: "supportAddRun.success/roster-fact",
+			Render: func(out *writer, resp any) {
+				r := supportAddIdentity
+				r.out = out
+				r.host = supportSuccessHost
+				r.observeRoster(resp.(map[string]any))
+				r.success()
+			},
+			Backed:       map[string]any{"status": "idle", "capacity": map[string]any{"max_class": "medium"}},
+			Contradicted: map[string]any{"status": "working", "capacity": map[string]any{"max_class": "small"}},
+		},
 	}
 }
 
@@ -759,6 +867,36 @@ func TestSupportCapacityNarrationStatesTheDegradedMeasure(t *testing.T) {
 		t.Errorf("supportAddRun.success does not print supportCapacityNarration's degraded sentence (%q) when the "+
 			"box's answer carries no class — the branch is live in production but unreachable from the receipt.\nreceipt: %q",
 			degraded, receipt)
+	}
+}
+
+// TestSupportSuccessPrintsTheUnreadRosterThroughTheEnrolledRow closes the fork
+// the pair property cannot reach on its own. Both halves of
+// supportAddRun.success/roster-fact carry a row the poll DID read, so the
+// composer's unread branch — live the moment any caller reaches success() without
+// a completed poll — would be exercised by nothing and could be mutated to print
+// an empty tail while every arm stayed green.
+//
+// It asserts by CALLING supportRosterFactNarration and requiring the receipt the
+// enrolled row renders to contain what it returned — never by restating the text
+// here (#8688: a test that restates a string proves the string exists, not that
+// production emits it).
+func TestSupportSuccessPrintsTheUnreadRosterThroughTheEnrolledRow(t *testing.T) {
+	unread := supportRosterFactNarration("", nil)
+	site := registryRow(t, "supportAddRun.success/roster-fact")
+	receipt := renderClaim(t, site, map[string]any{})
+	if !strings.Contains(receipt, unread) {
+		t.Errorf("supportAddRun.success does not print supportRosterFactNarration's unread sentence (%q) when "+
+			"the roster row carried neither fact — the branch is live in production but unreachable from the "+
+			"receipt.\nreceipt: %q", unread, receipt)
+	}
+	// The control: the same row DOES print the measured sentence when the main
+	// answered, so the arm above is about the fork and not about the row being
+	// silent everywhere.
+	backed := renderClaim(t, site, site.Backed)
+	if !strings.Contains(backed, supportRosterFactNarration("idle", map[string]any{"max_class": "medium"})) {
+		t.Fatalf("fixture drift: the backed half no longer prints the MEASURED roster sentence, so the unread "+
+			"arm above is not measuring a fork.\nreceipt: %q", backed)
 	}
 }
 
@@ -960,6 +1098,9 @@ var requiredEnrollments = []string{
 	"renderSiteRolledBack",
 	"renderSiteDeleted",
 	"renderSiteSettingsUpdated",
+	// ssw8 — the doctor receipt, the read verb whose whole value is the third
+	// value (unknown) staying distinguishable from the second (absent).
+	"renderSiteDoctorReport",
 	// PDS wave 26 — the ledger writer this epic's own evidence is made of,
 	// and its two siblings on the same ledger (pds-w26-close-pulse-readback).
 	"renderStampVerdict",
@@ -1124,6 +1265,7 @@ var siteResponseTypedRows = []string{
 	"renderSiteRolledBack",
 	"renderSiteDeleted",
 	"renderSiteSettingsUpdated",
+	"renderSiteDoctorReport",
 }
 
 // provenanceOutOfScope is the EXPLICIT grandfather set for

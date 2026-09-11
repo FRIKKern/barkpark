@@ -47,17 +47,24 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
     assert html =~ "Card title"
     assert html =~ "Card body"
     assert html =~ ~s(src="/image.png")
-    assert html =~ ~s(href="/read")
 
-    assert form_value(form, "card-title") == ["Card title"]
-    assert form_value(form, "card-media-src") == ["/image.png"]
+    assert form_value(form, "card-title") == []
+    assert form_value(form, "card-media-src") == []
     assert form_value(form, "card-media-alt") == ["Cover"]
-    assert form_value(form, "card-action-label") == ["Read"]
+    assert Enum.empty?(LazyHTML.query(form, "[name='card-action-label']"))
+    action_form = LazyHTML.query(preview, "[data-test-id='paper-card-action-label-form']")
+    assert LazyHTML.text(LazyHTML.query(action_form, "textarea")) == "Read"
+
+    assert LazyHTML.attribute(LazyHTML.query(action_form, "[name]"), "name") == [
+             "block_id",
+             "card-action-label"
+           ]
+
     assert form_value(form, "card-action-href") == ["/read"]
     assert selected_value(form, "card-action-priority") == ["primary"]
     assert selected_value(form, "card-tone") == ["info"]
     assert Enum.empty?(LazyHTML.query(form, "[name*='body'], textarea"))
-    assert Enum.count(LazyHTML.query(tree, "form")) == 1
+    assert Enum.count(LazyHTML.query(tree, "form")) == 3
     assert Enum.count(LazyHTML.query(tree, "bp-paper-editor[data-editor-mode='card-body']")) == 1
 
     assert Enum.count(LazyHTML.query(card_frame, "bp-paper-editor[data-editor-mode='card-body']")) ==
@@ -65,13 +72,30 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
 
     assert length(:binary.matches(html, "Card body")) == 1
 
-    assert child_kinds(card_frame) == ["img", "h3", "div", "a"]
-    assert LazyHTML.attribute(LazyHTML.query(card_frame, "h3"), "class") == []
+    assert child_kinds(card_frame) == ["div", "form", "div", "div"]
+
+    assert LazyHTML.attribute(LazyHTML.query(card_frame, "h3"), "class") == [
+             "bp-paper-card-title-heading bp-paper-card-title-owner"
+           ]
+
+    assert Enum.count(LazyHTML.query(card_frame, "[data-paper-card-title-owner]")) == 1
+    assert Enum.count(LazyHTML.query(card_frame, "textarea[name='card-title']")) == 1
+    assert Enum.count(LazyHTML.query(form, "[data-test-id='paper-card-title-focus']")) == 1
     assert LazyHTML.attribute(LazyHTML.query(card_frame, "img"), "src") == ["/image.png"]
 
-    assert LazyHTML.attribute(LazyHTML.query(card_frame, "a"), "class") == [
+    media_owner = LazyHTML.query(card_frame, "[data-test-id='paper-card-image-preview']")
+    assert LazyHTML.attribute(media_owner, "data-image-owner") == ["card"]
+    assert Enum.count(LazyHTML.query(media_owner, "[data-paper-figure-image-picker]")) == 1
+    assert Enum.empty?(LazyHTML.query(form, "[name='card-media-src']"))
+
+    assert LazyHTML.attribute(
+             LazyHTML.query(card_frame, "[data-paper-card-action-paint]"),
+             "class"
+           ) == [
              "bp-button bp-button--primary"
            ]
+
+    assert Enum.empty?(LazyHTML.query(card_frame, "a textarea, a input, a [contenteditable]"))
 
     controls = LazyHTML.query(tree, "#card-controls-card")
     assert LazyHTML.attribute(controls, "open") == []
@@ -85,6 +109,36 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
 
     assert css =~
              ".bp-paper-contextual-controls--card[open] > .bp-paper-contextual-panel"
+  end
+
+  test "existing action gets one selector-safe field and fallback focus without literal HTML" do
+    card = %{
+      "id" => "card: /[action]#?",
+      "type" => "card",
+      "slots" => %{"action" => [%{"type" => "action", "label" => " <literal> ", "href" => "/go"}]}
+    }
+
+    tree = card |> render_fields() |> LazyHTML.from_fragment()
+
+    [field_id] =
+      LazyHTML.attribute(LazyHTML.query(tree, "textarea[name='card-action-label']"), "id")
+
+    assert field_id =~ ~r/^card-action-label-[A-Za-z0-9_-]+$/
+    trigger = LazyHTML.query(tree, "[data-test-id='paper-card-action-label-focus']")
+    assert LazyHTML.attribute(trigger, "aria-controls") == [field_id]
+    assert hd(LazyHTML.attribute(trigger, "phx-click")) =~ "##{field_id}"
+    [focus_commands] = LazyHTML.attribute(trigger, "phx-click")
+
+    assert [["remove_attr", %{"attr" => "open"}], ["focus", _]] =
+             Enum.map(Jason.decode!(focus_commands), fn [command, args] ->
+               [command, Map.take(args, ["attr"])]
+             end)
+
+    assert LazyHTML.text(LazyHTML.query(tree, "textarea[name='card-action-label']")) ==
+             " <literal> "
+
+    assert Enum.empty?(LazyHTML.query(tree, "literal"))
+    assert Enum.count(LazyHTML.query(tree, "[name='card-action-label']")) == 1
   end
 
   test "missing slots are editable and unknown binary selections remain selectable unchanged" do

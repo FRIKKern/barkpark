@@ -358,6 +358,42 @@ try {
     focused.remove();
   }
 
+  // Save receipts refresh carrier attributes, including listItem descendants.
+  // An unrelated remote edit must not map away the local text's undo steps.
+  for (const [kind, makeBlock] of Object.entries({
+    heading: (text) => ({ id: "local", type: "heading", level: 2, text }),
+    paragraph: (text) => paragraph("local", text),
+    paragraphText: (text) => ({ id: "local", type: "paragraph", content: [], text }),
+    list: (text) => ({ id: "local", type: "list", items: [{ id: "item", text, audit: "keep" }] }),
+    nestedList: (text) => ({ id: "local", type: "list", items: [{ id: "parent", text: "", children: [
+      { id: "frame", type: "list", ordered: true, audit: "keep frame", items: [{ id: "child", text }] },
+    ] }] }),
+  })) {
+    const carrierCanvas = document.createElement("bp-paper-canvas");
+    carrierCanvas.blocks = [paragraph("remote", "Original remote"), makeBlock("Original local")];
+    document.body.appendChild(carrierCanvas);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 50));
+      const editor = carrierCanvas._editor;
+      let textEnd;
+      editor.state.doc.descendants((node, position) => {
+        if (node.isText && node.text === "Original local") textEnd = position + node.nodeSize;
+      });
+      assert.equal(typeof textEnd, "number", kind);
+      editor.view.dispatch(editor.state.tr.insertText(" edited", textEnd));
+      carrierCanvas._applyExternalContent([
+        paragraph("remote", "Remote change"), makeBlock("Original local edited"),
+      ]);
+      assert.equal(editor.commands.undo(), true, `${kind}: local undo survives carrier refresh`);
+      assert.equal(editor.state.doc.child(1).textContent, "Original local", kind);
+      assert.equal(editor.state.doc.firstChild.textContent, "Remote change", kind);
+      assert.equal(editor.commands.redo(), true, kind);
+      assert.equal(editor.state.doc.child(1).textContent, "Original local edited", kind);
+    } finally {
+      carrierCanvas.remove();
+    }
+  }
+
   const lead = paragraph("lead", "Lead");
   const sibling = paragraph("sibling", "Sibling");
   for (const [kind, remote] of Object.entries({

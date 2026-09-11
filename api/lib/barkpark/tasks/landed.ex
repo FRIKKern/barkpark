@@ -117,6 +117,25 @@ defmodule Barkpark.Tasks.Landed do
   # consulted when the author declared no explicit `merge_gate` flag.
   @landing_worded ~r/pr\s+merged|merged\s+to\s+main|merged\s+into\s+main/i
 
+  # How many changed paths a landing stores VERBATIM before the digest replaces
+  # them with a count and the sorted top-level dirs. 40 is the size at which a
+  # human stops reading the list and starts reading the shape.
+  @files_verbatim_limit 40
+
+  @files_message ~s|files must be a LIST OF STRINGS — the paths this landing changed, e.g. | <>
+                   ~s|"files": ["api/lib/barkpark/tasks/landed.ex", "api/test/barkpark/tasks/landed_test.exs"]. | <>
+                   ~s|It was not, so NOTHING was recorded: a files value this verb cannot store is refused HERE | <>
+                   ~s|rather than dropped with a 2xx that says the paths landed. Send a JSON array, or repeat the | <>
+                   ~s|bracketed query key (files[]=a/b.ex&files[]=c/d.ex). Omit it entirely to record the landing | <>
+                   ~s|sentence without paths.|
+
+  # A path-shaped token inside a row's own prose: two or more slash-joined
+  # segments (`api/lib/barkpark/tasks/landed.ex`, `internal/cli`, `docs/ops/`).
+  # Deliberately NOT bare words — "tasks" or "api" written in a sentence names
+  # a subject, not a fence, and treating it as one would make every row overlap
+  # everything.
+  @path_token ~r{[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.*-]+)+}
+
   @doc """
   Record a landing on a task WITHOUT holding its claim.
 
@@ -145,27 +164,36 @@ defmodule Barkpark.Tasks.Landed do
     index = Keyword.get(opts, :criterion)
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
-    digest = digest(commit, pr, note)
+    case check_files(Keyword.get(opts, :files)) do
+      # A `files` value this verb cannot store is REFUSED, never dropped. The
+      # controller turns the same check into a 400 naming the field; this arm is
+      # what makes a direct `Tasks.record_landing(id, files: 5)` refuse too.
+      {:error, _message} ->
+        {:error, :invalid_files}
 
-    cond do
-      map_size(digest) == 0 ->
-        {:error, :empty_landing}
+      {:ok, files} ->
+        digest = digest(commit, pr, note, files)
 
-      not (is_nil(index) or (is_integer(index) and index >= 0)) ->
-        {:error, :invalid_criteria}
+        cond do
+          map_size(digest) == 0 ->
+            {:error, :empty_landing}
 
-      not is_nil(index) and is_nil(note) ->
-        # The note IS the evidence a flip writes. A flip with nothing to say
-        # would stamp `met: true` with an empty proof — the exact shape
-        # `Tasks.Stamp` refuses as `:evidence_required`.
-        {:error, :note_required}
+          not (is_nil(index) or (is_integer(index) and index >= 0)) ->
+            {:error, :invalid_criteria}
 
-      true ->
-        do_record(task_id, digest, index, note, caller_token_id)
+          not is_nil(index) and is_nil(note) ->
+            # The note IS the evidence a flip writes. A flip with nothing to say
+            # would stamp `met: true` with an empty proof — the exact shape
+            # `Tasks.Stamp` refuses as `:evidence_required`.
+            {:error, :note_required}
+
+          true ->
+            do_record(task_id, digest, index, note, files, pr, caller_token_id)
+        end
     end
   end
 
-  defp do_record(task_id, digest, index, note, caller_token_id) do
+  defp do_record(task_id, digest, index, note, files, pr, caller_token_id) do
     result =
       Repo.transaction(fn ->
         # Close-family advisory lock: serialize with close/stamp/release over
@@ -181,7 +209,7 @@ defmodule Barkpark.Tasks.Landed do
           %Document{} = doc ->
             observed_rev = doc.rev
 
-            with {:ok, updates} <- criterion_update(doc, index, note),
+            with {:ok, updates} <- criterion_update(doc, index, note, files, pr),
                  merged = merge_landed(doc.content || %{}, digest),
                  {:ok, new_content} <- merge_criteria(merged, updates),
                  {:ok, updated} <-
@@ -233,9 +261,9 @@ defmodule Barkpark.Tasks.Landed do
   #
   # No `:criterion` means no criteria update at all — the landing sentence is
   # recorded and nothing is flipped. That is the default shape.
-  defp criterion_update(_doc, nil, _note), do: {:ok, []}
+  defp criterion_update(_doc, nil, _note, _files, _pr), do: {:ok, []}
 
-  defp criterion_update(%Document{content: content}, index, note) do
+  defp criterion_update(%Document{content: content} = doc, index, note, files, pr) do
     entry =
       (content || %{})
       |> Map.get("acceptance_criteria")
@@ -261,6 +289,17 @@ defmodule Barkpark.Tasks.Landed do
       not merge_discharges?(entry) ->
         {:error, :criterion_demands_demonstration}
 
+      # THE PATHS THIS LANDING TOUCHED ARE NOT THIS ROW'S (task-726717ba693eb424).
+      # Merge-shaped and merge-discharged say the row is sealed BY A MERGE; they
+      # never asked WHICH merge. A PR that changed only `cloud/` can carry a
+      # perfectly true landing sentence and flip a row whose every named path is
+      # under `api/lib/barkpark/tasks/` — and nothing in the sentence is false,
+      # which is exactly why no reader catches it. So the last guard compares
+      # what the PR CHANGED against what the ROW NAMES, and refuses the flip
+      # when the two share nothing. It can only fire when the caller SENT files:
+      # a fileless landing is unmeasurable, not suspect, so it keeps the
+      # behaviour it has always had (see `overlap_report/3`, which says so in
+      # the response instead of leaving the caller to guess).
       true ->
         # The `"criterion"` guard is the STORED text, read off the row inside
         # this lock — never a caller-supplied string. That is what lets a
@@ -269,15 +308,17 @@ defmodule Barkpark.Tasks.Landed do
         # moved between the read and the write, and CI never had to be trusted
         # with the text. A criterion row carrying no text at all cannot be
         # flipped by anyone — merge_criteria refuses it, and so it should.
-        {:ok,
-         [
-           %{
-             "index" => index,
-             "met" => true,
-             "evidence" => note,
-             "criterion" => criterion_text(entry)
-           }
-         ]}
+        with :ok <- files_overlap(doc, files, pr) do
+          {:ok,
+           [
+             %{
+               "index" => index,
+               "met" => true,
+               "evidence" => note,
+               "criterion" => criterion_text(entry)
+             }
+           ]}
+        end
     end
   end
 
@@ -387,18 +428,255 @@ defmodule Barkpark.Tasks.Landed do
     end
   end
 
+  # ─── THE OVERLAP GUARD ────────────────────────────────────────────────────
+  #
+  # A merge-shaped criterion says "a merge seals this row". It never said WHICH
+  # merge, and until this guard nothing asked. So a landing mark carrying a PR
+  # that changed only `cloud/` could flip a criterion whose every named path is
+  # under `api/lib/barkpark/tasks/`, with a landing sentence in which every
+  # single word is TRUE — the PR did merge, that is its sha — which is precisely
+  # why no reader downstream ever catches it. The row ends up sealed by work
+  # that was not its work.
+  #
+  # THE COMPARISON IS COARSE ON PURPOSE. A false refusal is a loud wall in front
+  # of a legitimate merge; a false permit is a silent fabricated done. So the
+  # test is TOP-LEVEL AREAS, not exact paths: the landing overlaps the row if any
+  # changed path shares a top-level segment with a path the row's own text names,
+  # or is a segment-prefix of one (either direction), or if its basename appears
+  # verbatim in that text. Anything narrower would red on a row that names
+  # `api/lib/x.ex` when the PR also had to touch `api/test/x_test.exs`.
+  #
+  # AND IT IS UNMEASURABLE IN TWO DIRECTIONS, BOTH OF WHICH PERMIT.
+  #   * The landing carried NO files — nothing to compare. That is today's
+  #     behaviour, unchanged, and `overlap_report/3` says so in the response
+  #     rather than letting a caller read the silence as a passed check.
+  #   * The ROW names no path-shaped token anywhere in its title, description or
+  #     criteria. Then the row states no fence and the guard has no opinion; a
+  #     refusal here would be the guard asserting a mismatch it never measured.
+  @spec files_overlap(Document.t(), [String.t()] | nil, String.t() | nil) ::
+          :ok | {:error, {:landing_files_outside_row, String.t()}}
+  def files_overlap(_doc, nil, _pr), do: :ok
+
+  def files_overlap(%Document{} = doc, files, pr) when is_list(files) do
+    text = row_text(doc)
+    named = row_paths(text)
+
+    cond do
+      named == [] -> :ok
+      Enum.any?(files, &overlaps?(&1, named, text)) -> :ok
+      true -> {:error, {:landing_files_outside_row, refusal(doc, files, named, pr)}}
+    end
+  end
+
+  @doc """
+  What the overlap guard DID, in the shape the `landed` response carries.
+
+  A guard that silently does nothing on a fileless landing is indistinguishable
+  from a guard that ran and passed, so the response says which of the two
+  happened every time a criterion flip is asked for. Returns `%{}` when no flip
+  was requested — there is nothing to report about a landing sentence.
+  """
+  @spec overlap_report(Document.t(), [String.t()] | nil, non_neg_integer() | nil) :: map()
+  def overlap_report(_doc, _files, nil), do: %{}
+
+  def overlap_report(%Document{} = doc, files, _criterion) do
+    text = row_text(doc)
+    named = row_paths(text)
+
+    cond do
+      is_nil(files) or files == [] ->
+        %{
+          overlap: %{
+            checked: false,
+            reason:
+              "this landing carried no files, so no path-overlap check ran — a criterion flip on a " <>
+                "fileless landing keeps exactly the behaviour it has always had. Pass files:[...] (the " <>
+                "paths the PR changed) and the flip is checked against the paths this row names."
+          }
+        }
+
+      named == [] ->
+        %{
+          overlap: %{
+            checked: false,
+            files: files,
+            reason:
+              "this row's title, description and criteria name no path-shaped token, so there was " <>
+                "nothing to compare the landing's files against — the guard has no opinion on a row " <>
+                "that states no fence, and permits rather than asserting a mismatch it never measured."
+          }
+        }
+
+      true ->
+        %{overlap: %{checked: true, files: files, row_paths: named}}
+    end
+  end
+
+  # Title + description + every criterion's wording: the three places a row is
+  # allowed to say what it is about.
+  defp row_text(%Document{title: title, content: content}) do
+    content = content || %{}
+
+    criteria =
+      case Map.get(content, "acceptance_criteria") do
+        list when is_list(list) -> Enum.map(list, &(criterion_text(&1) || ""))
+        _ -> []
+      end
+
+    [title || "", Map.get(content, "description") || "" | criteria]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.join("\n")
+  end
+
+  defp row_paths(text) do
+    @path_token
+    |> Regex.scan(text)
+    |> Enum.map(fn [match | _] -> String.trim_trailing(match, "/") end)
+    # A version ("1.2"), a bare host or an "and/or" are slash-joined tokens that
+    # name no directory. A path token has to start with a segment that could BE
+    # one, so drop the ones whose first segment has a dot in it.
+    |> Enum.reject(&(&1 == "" or String.contains?(top_level(&1), ".")))
+    |> Enum.uniq()
+  end
+
+  defp overlaps?(file, named, text) do
+    fsegs = String.split(file, "/")
+
+    Enum.any?(named, fn path ->
+      psegs = String.split(path, "/")
+
+      hd(fsegs) == hd(psegs) or List.starts_with?(fsegs, psegs) or
+        List.starts_with?(psegs, fsegs)
+    end) or String.contains?(text, Path.basename(file))
+  end
+
+  # NAMES THE ROW, THE PR AND BOTH SIDES OF THE COMPARISON — because the caller
+  # cannot re-derive any of the three from a token, and the honest recovery
+  # ("record the sentence, flip nothing") has to be one flag away.
+  defp refusal(%Document{doc_id: doc_id, title: title}, files, named, pr) do
+    ~s|the files this landing changed overlap nothing task row #{doc_id} ("#{title}") names, so the | <>
+      ~s|--criterion flip is refused and NOTHING was written (the flip and the landing sentence ride one CAS). | <>
+      ~s|#{pr_phrase(pr)} changed: #{listing(files)}. The row's title, description and criteria name: | <>
+      ~s|#{listing(named)}. A merge-shaped criterion says a MERGE seals this row; it never said which merge, | <>
+      ~s|and a landing sentence in which every word is true can still seal a row the PR never served. | <>
+      ~s|Re-run without --criterion to record the landing sentence alone, or flip the row this PR actually did | <>
+      ~s|the work for. If the row really is discharged by paths it never names, say so on the criterion — the | <>
+      ~s|paths belong in its wording.|
+  end
+
+  defp pr_phrase(nil), do: "This landing (no PR given)"
+  defp pr_phrase(pr), do: "PR #{pr}"
+
+  # Bounded the same way the stored digest is: past the verbatim limit a reader
+  # wants the shape, not 600 paths inside an error message.
+  defp listing(paths) when length(paths) <= @files_verbatim_limit, do: Enum.join(paths, ", ")
+
+  defp listing(paths),
+    do: "#{length(paths)} paths across #{Enum.join(top_level_dirs(paths), ", ")}"
+
   # ─── The landing sentence ─────────────────────────────────────────────────
   #
   # Three scalars in, a `merge_landed`-shaped digest out. The plural keys are
   # deliberate: `content.landed` is a UNION of lists, so a second landing mark
   # on the same row accumulates a second commit rather than replacing the
   # first.
-  defp digest(commit, pr, note) do
+  # `landings` is the PAIRED entry, and it is written ONLY when this one call
+  # knew BOTH halves (cch-w63). `prs` and `commits` are parallel lists that
+  # accumulate across calls, so on a row with four landings they say WHICH four
+  # PRs and WHICH four shas and never which sha paid which PR — the join lived
+  # only in the `notes` sentence, which is prose. Here both scalars are in hand
+  # at once, so the association is recorded where it was observed instead of
+  # being re-derived downstream from a sentence.
+  #
+  # A call carrying only one half writes only that half's scalar list and NO
+  # pair. Emitting `%{"pr" => n}` with no commit would be a pair asserting an
+  # association this caller never had, which is the absent-vs-empty collapse
+  # this tree refuses everywhere else.
+  defp digest(commit, pr, note, files) do
     %{}
     |> put_present("commits", commit)
     |> put_present("prs", pr)
     |> put_present("notes", note)
+    |> put_files(files)
+    |> put_landing(pr, commit)
   end
+
+  # THE CHANGED PATHS, STORED AS PATHS (task-726717ba693eb424). `@landed_keys`
+  # has accepted a `files` key since the close family shared this merge, and
+  # this verb never wrote one — so a caller who sent `files: [...]` got a 2xx and
+  # a ledger row where the paths existed only inside the `notes` SENTENCE, which
+  # is prose no reader can query. Same defect the `landings` pair fixed, one key
+  # over.
+  #
+  # BOUNDED, BECAUSE A LEDGER ROW IS NOT A DIFF. Up to
+  # `@files_verbatim_limit` paths are stored VERBATIM and read back verbatim —
+  # the shape a reader wants for the landings that actually name a fence. Past
+  # it, storing 600 paths would make `content.landed` the largest thing on the
+  # row and say less than three lines would, so the digest replaces them: the
+  # COUNT plus the SORTED top-level dirs, under a DIFFERENT key
+  # (`file_digests`), so "verbatim" and "summarised" are told apart by which key
+  # is present and never by inspecting a list's elements.
+  defp put_files(map, nil), do: map
+
+  defp put_files(map, files) when length(files) <= @files_verbatim_limit,
+    do: Map.put(map, "files", files)
+
+  defp put_files(map, files),
+    do:
+      Map.put(map, "file_digests", [
+        %{"count" => length(files), "dirs" => top_level_dirs(files)}
+      ])
+
+  @doc """
+  The SHAPE check on a landing's `files`, returning the message the HTTP door
+  renders as a 400.
+
+  Public because the refusal has to happen at BOTH doors and say the same thing
+  at each: the controller needs the sentence, and `record/2` needs the verdict
+  so a direct call cannot post a `files` value the store would silently drop.
+
+    * absent / `nil` → `{:ok, nil}` (record the landing without paths)
+    * a list of strings → `{:ok, cleaned}`; blanks are dropped, order and
+      duplicates are collapsed by `Enum.uniq/1`, and a list that cleans down to
+      nothing is the same as absent
+    * anything else → `{:error, message}`, and NOTHING is written
+  """
+  @spec check_files(term()) :: {:ok, [String.t()] | nil} | {:error, String.t()}
+  def check_files(nil), do: {:ok, nil}
+
+  def check_files(list) when is_list(list) do
+    if Enum.all?(list, &is_binary/1) do
+      case list |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) |> Enum.uniq() do
+        [] -> {:ok, nil}
+        cleaned -> {:ok, cleaned}
+      end
+    else
+      {:error, @files_message}
+    end
+  end
+
+  def check_files(_), do: {:error, @files_message}
+
+  defp top_level_dirs(files) do
+    files
+    |> Enum.map(&top_level/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  # A path at the repo root has no dir; it gets "." so a caller reading `dirs`
+  # never has to guess whether an empty string meant "root" or "we lost it".
+  defp top_level(path) do
+    case String.split(path, "/", parts: 2) do
+      [first, _rest] when first != "" -> first
+      _ -> "."
+    end
+  end
+
+  defp put_landing(map, pr, commit) when is_binary(pr) and is_binary(commit),
+    do: Map.put(map, "landings", [%{"pr" => pr, "commit" => commit}])
+
+  defp put_landing(map, _pr, _commit), do: map
 
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, [value])

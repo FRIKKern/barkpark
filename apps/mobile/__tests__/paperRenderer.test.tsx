@@ -104,6 +104,31 @@ beforeEach(() => {
   resetUnknownBlockLog()
 })
 
+describe('nested list carriers', () => {
+  it('preserves the shared mixed-list reading order and source metadata', () => {
+    const fixture = require('../../../api/test/support/fixtures/nested-list-carriers.json')
+    const before = JSON.stringify(fixture)
+    const result = render(fixture.blocks[0])
+    expect(result.text).toBe('•Plan1.Build•Verify2.Ship•Flat sibling•Fallback parent1.Alias child')
+    expect(JSON.stringify(fixture)).toBe(before)
+  })
+
+  it('keeps invalid child fields opaque', () => {
+    for (const children of [
+      null,
+      'invalid',
+      {},
+      [{ type: 'paragraph', text: 'opaque' }],
+      [{ type: 'list', items: 'invalid' }],
+    ]) {
+      const item = { text: 'Flat', audit: true }
+      expect(render({ type: 'list', items: [{ ...item, children }] })).toEqual(
+        render({ type: 'list', items: [item] }),
+      )
+    }
+  })
+})
+
 /* ── the capstone corpus (criterion 1) ──────────────────────────────────────── */
 
 describe('capstone fixture — 104 blocks, 0 empty, 0 unknown', () => {

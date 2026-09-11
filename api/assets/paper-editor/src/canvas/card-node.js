@@ -7,16 +7,17 @@
 //                  that JOINS the run + FormatBubble (the callout body precedent). A
 //                  PM NodeView has EXACTLY ONE contentDOM, so the body slot claims it.
 //   * title slot → an attr-backed contentEditable ISLAND writing node.attrs.title
-//                  (the section.title precedent: debounced, re-entrancy-guarded
-//                  setNodeMarkup; Enter suppressed; cleared → null round-trips ABSENT).
+//                  immediately outside composition (the callout title precedent;
+//                  Enter suppressed; cleared → null round-trips ABSENT).
 //   * media/action slots → PRESENT-ONLY attrs carrying the WHOLE image/action element
 //                  (deep-cloned; the bpColumnAtom/section.cells precedent), painted
 //                  read-only with the reader class AND edited by REAL controls: the
 //                  media slot by the <bp-media-picker chrome="ghost"> WC (the
 //                  field-node buildPickerNodeView MOUNT PATTERN — value/scope seed,
 //                  bubbling bp-change → attrs.media={type:"image",src}); the action
-//                  slot by a label/href/priority editor (the action-node pattern —
-//                  attrs.action={type:"action",label,href,priority?} PRESENT-ONLY).
+//                  slot label directly in a reader-styled plaintext island, while
+//                  href/priority stay in the action-node-style controls. Every
+//                  scalar write starts from latest attrs.action so opaque keys survive.
 //
 // ── VIEW⇄EDIT PARITY (MODEL B — byte-aligned with card_html/2) ────────────────
 //
@@ -26,8 +27,8 @@
 // the ONE shared compose→walk bridge:
 //   media  → <img src alt style="max-width:100%;height:auto"[ width height]>
 //            (walk.ex image/1 — a bare img, NO wrapper div)
-//   title  → <h2>text</h2> (PdHeading, default level 2 — here a contentEditable
-//            island writing node.attrs.title)
+//   title  → <hN>text</hN> (PdHeading's authored level, default 2 — here a
+//            contentEditable island writing node.attrs.title)
 //   body   → <p>…</p> (PdParagraph, classless — here the contentDOM IS the <p>)
 //   action → <a href class="bp-button[ bp-button--primary]">label</a>
 //            (walk.ex button/2's binary priority collapse)
@@ -79,18 +80,27 @@ function normalizeActionPriority(p) {
 // has NO server-side JSON normalizer (unlike the field path's media_field_url/1), so a
 // JSON blob written into attrs.media.src renders a broken <img src="{…}"> on the reader
 // (walk.ex image/1). This is the exact JSON-tolerant fallback root.html.heex uses for
-// the field-image path. Non-string, empty/whitespace, or an unparseable envelope → ""
-// (a CLEAR, or a safe degrade — NEVER the raw blob). A bare URL passes through verbatim.
-export function mediaUrlFromValue(raw) {
-  if (typeof raw !== "string") return "";
+// the field-image path. A bare URL (including the intentional empty-string CLEAR)
+// passes through verbatim. The validity bit is important at the event boundary:
+// malformed picker events must be ignored, not mistaken for a clear.
+function parsedMediaUrl(raw) {
+  if (typeof raw !== "string") return { valid: false };
   if (raw.trim().startsWith("{")) {
     try {
-      return JSON.parse(raw).url || "";
+      const parsed = JSON.parse(raw);
+      return typeof parsed?.url === "string"
+        ? { valid: true, src: parsed.url }
+        : { valid: false };
     } catch {
-      return "";
+      return { valid: false };
     }
   }
-  return raw;
+  return { valid: true, src: raw };
+}
+
+export function mediaUrlFromValue(raw) {
+  const parsed = parsedMediaUrl(raw);
+  return parsed.valid ? parsed.src : "";
 }
 
 // The TipTap node NAME is `bpCard` (its portable-doc bpType stays "card"); run-convert
@@ -129,6 +139,15 @@ function jsonAttr(attrKey, dataName) {
     renderHTML: (attrs) =>
       attrs[attrKey] != null ? { [dataName]: JSON.stringify(attrs[attrKey]) } : {},
   };
+}
+
+function cardTitleLevel(node) {
+  const title = node?.attrs?.bpBlock?.slots?.title;
+  const level = Array.isArray(title) && title.length === 1 ? title[0]?.level : null;
+  if (level === 1 || level === "1") return 1;
+  if (level === 2 || level === "2") return 2;
+  if (level === 3 || level === "3") return 3;
+  return 2;
 }
 
 export const Card = Node.create({
@@ -214,20 +233,21 @@ export const Card = Node.create({
   //   <div class="bp-canvas-card bp-card[ bp-card--<tone>]" data-bp-type="card">
   //     <div class="bp-canvas-card__controls">              ← PM-safe chrome (fenced)
   //       <bp-media-picker chrome="ghost">                  ← the REAL media editor
-  //       <input action-label> <input action-href> <select action-priority>
+  //       <button focus-action-label> <input action-href> <select action-priority>
   //     </div>
   //     <img style="max-width:100%;height:auto">            ← media slot (present-only,
   //                                                            the reader's bare <img>)
-  //     <h2 contenteditable>TITLE</h2>                       ← EDITABLE title island
+  //     <hN contenteditable=false><span contenteditable>TITLE</span></hN>
+  //                                                          ← EDITABLE title island
   //     <p>…</p>                                             ← contentDOM (editable body)
-  //     <a class="bp-button[ bp-button--primary]">…</a>      ← action slot (present-only,
-  //                                                            the reader's PdButton)
+  //     <a class="bp-button[ bp-button--primary]">…</a>      ← View: reader PdButton
+  //     <span class="bp-button[…]" contenteditable>…</span>  ← Edit: label island
   //   </div>
   //
   // Colour rides ENTIRELY on `bp-card--<tone>` (reader cascade + embedder mirror);
   // the slots are the reader's OWN bare-semantic shapes, so the surface h2/p/img/
   // .bp-button rules paint them identically in View and Edit. The title island
-  // writes node.attrs.title via a debounced, re-entrancy-guarded setNodeMarkup;
+  // writes node.attrs.title via a composition-aware immediate setNodeMarkup;
   // its events/mutations are hidden from PM (stopEvent/ignoreMutation).
   addNodeView() {
     return ({ node, editor, getPos }) => {
@@ -269,7 +289,13 @@ export const Card = Node.create({
       actionLabelInput.type = "text";
       actionLabelInput.className = "bp-canvas-card__input";
       actionLabelInput.placeholder = "action label";
-      actionLabelInput.setAttribute("data-test-id", "paper-card-action-label");
+      actionLabelInput.setAttribute("data-test-id", "paper-card-action-label-create");
+
+      const actionLabelControl = document.createElement("button");
+      actionLabelControl.type = "button";
+      actionLabelControl.className = "bp-canvas-card__input";
+      actionLabelControl.textContent = "Edit action label";
+      actionLabelControl.setAttribute("data-test-id", "paper-card-action-label-control");
 
       const actionHrefInput = document.createElement("input");
       actionHrefInput.type = "url";
@@ -296,6 +322,7 @@ export const Card = Node.create({
       controls.append(
         mediaPicker,
         actionLabelInput,
+        actionLabelControl,
         actionHrefInput,
         actionPrioritySelect
       );
@@ -307,27 +334,81 @@ export const Card = Node.create({
       mediaImg.setAttribute("contenteditable", "false");
       mediaImg.style.maxWidth = "100%";
       mediaImg.style.height = "auto";
+      const mediaPaint = document.createElement("button");
+      mediaPaint.type = "button";
+      mediaPaint.className = "bp-canvas-card__media-paint";
+      mediaPaint.setAttribute("contenteditable", "false");
+      mediaPaint.setAttribute("aria-haspopup", "dialog");
+      mediaPaint.setAttribute("data-test-id", "paper-card-media-control");
+      mediaPaint.textContent = "Change image";
+      const syncMediaPaintBounds = () => {
+        if (mediaPaint.hidden) return;
+        mediaPaint.style.left = `${mediaImg.offsetLeft}px`;
+        mediaPaint.style.top = `${mediaImg.offsetTop}px`;
+        mediaPaint.style.width = `${mediaImg.offsetWidth}px`;
+        mediaPaint.style.height = `${mediaImg.offsetHeight}px`;
+      };
+      const mediaPaintObserver = typeof ResizeObserver === "function"
+        ? new ResizeObserver(syncMediaPaintBounds)
+        : null;
+      mediaPaintObserver?.observe(mediaImg);
+      const onMediaLoad = () => syncMediaPaintBounds();
+      mediaImg.addEventListener("load", onMediaLoad);
 
-      // title slot — the reader's semantic <h2> (PdHeading, default level 2), here
-      // an editable contentEditable island writing node.attrs.title.
-      const titleEl = document.createElement("h2");
+      // Title slot — the reader's semantic heading level. A contentEditable=false
+      // parent makes its plaintext-only child a separate browser editing host, so
+      // Chrome cannot redirect a pointer selection into the surrounding PM body.
+      const titleLevel = cardTitleLevel(node);
+      const titleHost = document.createElement(`h${titleLevel}`);
+      titleHost.contentEditable = "false";
+      const titleEl = document.createElement("span");
       titleEl.setAttribute("data-test-id", "paper-card-title");
+      titleEl.setAttribute("role", "textbox");
+      titleEl.setAttribute("aria-label", "Card title");
+      titleEl.setAttribute("aria-multiline", "false");
+      titleEl.tabIndex = 0;
+      titleEl.style.cursor = "text";
+      titleHost.appendChild(titleEl);
 
       // body slot — the reader's <p>: the contentDOM IS the paragraph, so PM fills
       // the card's inline* content straight into the same classless <p> shape
       // card_html/2 emits (zero wrapper).
       const body = document.createElement("p");
 
-      // action slot — the reader's PdButton anchor (walk.ex button/2). Read-only
-      // chrome, present-only; label/href/priority are edited via the controls bar.
+      // action slot — View keeps the reader's PdButton anchor. Edit swaps in a
+      // non-link sibling with the same reader classes as the canonical plaintext
+      // label island, avoiding both navigation and nested interactive content.
       const actionLink = document.createElement("a");
       actionLink.setAttribute("contenteditable", "false");
+      const actionLabelBoundary = document.createElement("span");
+      actionLabelBoundary.contentEditable = "false";
+      const actionLabelHost = document.createElement("span");
+      actionLabelHost.setAttribute("data-test-id", "paper-card-action-label");
+      actionLabelHost.setAttribute("role", "textbox");
+      actionLabelHost.setAttribute("aria-label", "Card action label");
+      actionLabelHost.setAttribute("aria-multiline", "false");
+      actionLabelHost.tabIndex = 0;
+      actionLabelHost.style.cursor = "text";
+      actionLabelBoundary.appendChild(actionLabelHost);
 
       // Reader order: media, title, body, action. Controls ride at the top (edit-only).
-      dom.append(controls, mediaImg, titleEl, body, actionLink);
+      dom.append(
+        controls,
+        mediaImg,
+        mediaPaint,
+        titleHost,
+        body,
+        actionLink,
+        actionLabelBoundary,
+      );
 
       let syncingTitle = false;
       let titleFocused = false;
+      let titleComposing = false;
+      let titleDirty = false;
+      let syncingActionLabel = false;
+      let actionComposing = false;
+      let actionLabelDirty = false;
 
       const currentNode = () => {
         if (typeof getPos !== "function") return node;
@@ -344,20 +425,27 @@ export const Card = Node.create({
         const title = a.title;
         const hasTitle = title != null && title !== "";
         const shown = hasTitle ? title : "";
-        if (titleEl.textContent !== shown) {
+        if (!titleComposing && !titleDirty && titleEl.textContent !== shown) {
           syncingTitle = true;
           titleEl.textContent = shown;
           syncingTitle = false;
         }
         const editable = editor.isEditable;
-        titleEl.contentEditable = editable ? "true" : "false";
-        titleEl.style.display = hasTitle || (editable && titleFocused) ? "" : "none";
+        titleEl.contentEditable = editable ? "plaintext-only" : "false";
+        titleHost.style.display = hasTitle || (editable && titleFocused) ? "" : "none";
 
         // media slot (present-only): show the bare <img> iff a media element with
         // a src. width/height mirror PdImage's optional dims (the media element is
         // carried VERBATIM, so an API-authored width/height paints here too).
         const media = a.media;
         const src = (media && media.src) || "";
+        const directMedia = Boolean(
+          media &&
+          typeof media === "object" &&
+          typeof media.src === "string" &&
+          media.src !== "" &&
+          (!Object.prototype.hasOwnProperty.call(media, "type") || media.type === "image")
+        );
         if (src) {
           mediaImg.setAttribute("src", src);
           mediaImg.setAttribute("alt", (media && media.alt) || "");
@@ -375,6 +463,21 @@ export const Card = Node.create({
         } else {
           mediaImg.style.display = "none";
         }
+        mediaPaint.hidden = !editable || !directMedia;
+        mediaPaint.setAttribute(
+          "aria-label",
+          media && typeof media.alt === "string" && media.alt !== ""
+            ? `Replace Card image: ${media.alt}`
+            : "Replace Card image",
+        );
+        if (directMedia) {
+          if (mediaPicker.previousElementSibling !== mediaPaint) mediaPaint.after(mediaPicker);
+          mediaPicker.hidden = true;
+          syncMediaPaintBounds();
+        } else {
+          if (mediaPicker.parentElement !== controls) controls.prepend(mediaPicker);
+          mediaPicker.hidden = false;
+        }
         // Keep the media picker in sync with an EXTERNAL attr change (an echo, an undo)
         // via its `value` PROPERTY setter (re-renders the preview; does NOT re-fire
         // bp-change). Only write when it differs so we never yank the picker the user
@@ -387,20 +490,35 @@ export const Card = Node.create({
         const action = a.action;
         const label = (action && action.label) || "";
         const href = (action && action.href) || "";
-        if (label || href) {
-          actionLink.textContent = label;
-          actionLink.setAttribute("href", href);
-          actionLink.className =
-            action && action.priority === "primary"
-              ? "bp-button bp-button--primary"
-              : "bp-button";
+        if (!actionComposing && !actionLabelDirty && actionLabelHost.textContent !== label) {
+          syncingActionLabel = true;
+          actionLabelHost.textContent = label;
+          syncingActionLabel = false;
+        }
+        const hasAction = Boolean(action && typeof action === "object");
+        actionLink.textContent = label;
+        actionLink.setAttribute("href", href);
+        actionLink.className =
+          action && action.priority === "primary"
+            ? "bp-button bp-button--primary"
+            : "bp-button";
+        if (!editable && (label || href)) {
           actionLink.style.display = "";
         } else {
           actionLink.style.display = "none";
         }
-        if (actionLabelInput.value !== label && document.activeElement !== actionLabelInput) {
-          actionLabelInput.value = label;
-        }
+        actionLabelHost.className = action && action.priority === "primary"
+          ? "bp-button bp-button--primary"
+          : "bp-button";
+        actionLabelHost.contentEditable = editable && hasAction ? "plaintext-only" : "false";
+        actionLabelHost.style.display = editable && hasAction ? "" : "none";
+        actionLabelInput.hidden = hasAction;
+        actionLabelInput.disabled = !editable || hasAction;
+        if (!hasAction && actionLabelInput.value !== label &&
+            document.activeElement !== actionLabelInput) actionLabelInput.value = label;
+        actionLabelControl.hidden = !hasAction;
+        actionLabelControl.textContent = "Edit action label";
+        actionLabelControl.disabled = !editable;
         if (actionHrefInput.value !== href && document.activeElement !== actionHrefInput) {
           actionHrefInput.value = href;
         }
@@ -433,52 +551,138 @@ export const Card = Node.create({
           .run();
       };
 
-      // ── title island: debounced write-back (cleared → null → round-trips ABSENT).
-      let writeTimer = null;
+      // ── title island: immediate, composition-aware write-back. The canvas owns
+      // network batching, while the node attr must settle before blur, flush, or body
+      // editing can repaint the title from stale authority.
       const commitTitleWrite = () => {
+        if (!titleDirty || titleComposing || syncingTitle || !editor.isEditable) return;
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur || cur.type.name !== BP_CARD_NODE_NAME) return;
         const raw = titleEl.textContent || "";
         const nextTitle = raw === "" ? null : raw;
-        writeAttr((attrs) => {
-          if ((attrs.title || null) === nextTitle) return attrs;
-          attrs.title = nextTitle;
-          return attrs;
-        });
+        titleDirty = false;
+        if ((cur.attrs.title || null) === nextTitle) return;
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, {
+          ...cur.attrs,
+          title: nextTitle,
+        }));
       };
-      const scheduleTitleWrite = () => {
-        if (syncingTitle) return;
-        if (!editor.isEditable) return;
-        if (writeTimer) clearTimeout(writeTimer);
-        writeTimer = setTimeout(() => {
-          writeTimer = null;
-          commitTitleWrite();
-        }, 250);
-      };
-      const flushTitleWrite = () => {
-        if (!writeTimer) return;
-        clearTimeout(writeTimer);
-        writeTimer = null;
+      const onTitleInput = () => {
+        titleDirty = true;
         commitTitleWrite();
       };
-      const onTitleInput = () => scheduleTitleWrite();
       const onTitleFocus = () => {
         titleFocused = true;
-        if (editor.isEditable) titleEl.style.display = "";
+        if (editor.isEditable) titleHost.style.display = "";
       };
       const onTitleBlur = () => {
+        titleComposing = false;
+        commitTitleWrite();
         titleFocused = false;
         paint(currentNode());
       };
       const onTitleKeydown = (e) => {
+        if (e.isComposing) return;
         if (e.key === "Enter") {
           e.preventDefault();
           titleEl.blur();
+        } else if ((e.metaKey || e.ctrlKey) && !e.altKey &&
+          (e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
+          e.preventDefault();
+          const redo = e.shiftKey || e.key.toLowerCase() === "y";
+          editor.commands[redo ? "redo" : "undo"]();
         }
+      };
+      const onTitleCompositionStart = () => { titleComposing = true; };
+      const onTitleCompositionEnd = () => {
+        titleComposing = false;
+        commitTitleWrite();
       };
       titleEl.addEventListener("input", onTitleInput);
       titleEl.addEventListener("focus", onTitleFocus);
       titleEl.addEventListener("blur", onTitleBlur);
       titleEl.addEventListener("keydown", onTitleKeydown);
-      dom.addEventListener("bp-flush-node", flushTitleWrite);
+      titleEl.addEventListener("compositionstart", onTitleCompositionStart);
+      titleEl.addEventListener("compositionend", onTitleCompositionEnd);
+
+      // ── action-label island: a non-link reader-styled sibling is the sole label editor.
+      // Only its label key changes; the action element's href representation,
+      // priority (including unknown values), IDs and opaque metadata survive exactly.
+      const commitActionLabelWrite = () => {
+        if (!actionLabelDirty || actionComposing || syncingActionLabel || !editor.isEditable) return;
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur || cur.type.name !== BP_CARD_NODE_NAME) return;
+        const raw = actionLabelHost.textContent || "";
+        const previous = cur.attrs.action && typeof cur.attrs.action === "object"
+          ? cur.attrs.action
+          : null;
+        actionLabelDirty = false;
+        if (!previous) return;
+        const previousLabel = previous.label == null ? "" : previous.label;
+        if (previousLabel === raw) return;
+        const action = { ...previous, label: raw };
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, {
+          ...cur.attrs,
+          action,
+        }));
+      };
+      const onActionLabelInput = () => {
+        actionLabelDirty = true;
+        commitActionLabelWrite();
+      };
+      const onActionFocus = () => {
+        const action = currentNode()?.attrs.action;
+        if (editor.isEditable && action && typeof action === "object") {
+          actionLabelHost.style.display = "";
+        }
+      };
+      const onActionBlur = () => {
+        actionComposing = false;
+        commitActionLabelWrite();
+        paint(currentNode());
+      };
+      const onActionKeydown = (event) => {
+        if (!editor.isEditable || event.isComposing) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          actionLabelHost.blur();
+        } else if ((event.metaKey || event.ctrlKey) && !event.altKey &&
+          (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+          event.preventDefault();
+          const redo = event.shiftKey || event.key.toLowerCase() === "y";
+          editor.commands[redo ? "redo" : "undo"]();
+        }
+      };
+      const onActionCompositionStart = () => { actionComposing = true; };
+      const onActionCompositionEnd = () => {
+        actionComposing = false;
+        commitActionLabelWrite();
+      };
+      const focusActionLabel = () => {
+        if (!editor.isEditable) return;
+        const current = currentNode();
+        if (!current?.attrs.action || typeof current.attrs.action !== "object") return;
+        paint(current);
+        actionLabelHost.focus();
+      };
+      actionLabelHost.addEventListener("input", onActionLabelInput);
+      actionLabelHost.addEventListener("focus", onActionFocus);
+      actionLabelHost.addEventListener("blur", onActionBlur);
+      actionLabelHost.addEventListener("keydown", onActionKeydown);
+      actionLabelHost.addEventListener("compositionstart", onActionCompositionStart);
+      actionLabelHost.addEventListener("compositionend", onActionCompositionEnd);
+      actionLabelControl.addEventListener("click", focusActionLabel);
+      const flushIslandWrites = () => {
+        commitTitleWrite();
+        commitActionLabelWrite();
+      };
+      dom.addEventListener("bp-flush-node", flushIslandWrites);
 
       // ── media control: read the picker's PARSED accessor (e.target.meta.url), with a
       // JSON-tolerant fallback (mediaUrlFromValue) over the bp-change STRING detail — the
@@ -488,48 +692,94 @@ export const Card = Node.create({
       // {type:"image",src} — NEVER write the raw value. An empty string is a CLEAR →
       // attrs.media=null → round-trips ABSENT (removal lands).
       const onMediaChange = (e) => {
-        const meta = (e.target && e.target.meta) || {};
-        const src = meta.url || mediaUrlFromValue((e.detail && e.detail.value) || "");
+        const metaUrl = e.target?.meta?.url;
+        const parsed = typeof metaUrl === "string" && metaUrl
+          ? { valid: true, src: metaUrl }
+          : parsedMediaUrl(e.detail?.value);
+        if (!parsed.valid) return;
+        const { src } = parsed;
         writeAttr((attrs) => {
           if (src === "") {
             attrs.media = null; // clear → round-trips ABSENT (removal lands)
           } else {
-            const prev = attrs.media && typeof attrs.media === "object" ? attrs.media : {};
-            attrs.media = { ...prev, type: "image", src };
+            const prev = attrs.media && typeof attrs.media === "object" ? attrs.media : null;
+            attrs.media = prev ? { ...prev, src } : { type: "image", src };
           }
           return attrs;
         });
       };
       mediaPicker.addEventListener("bp-change", onMediaChange);
+      const openMediaPicker = () => {
+        if (!editor.isEditable || mediaPaint.hidden) return;
+        const opened = typeof mediaPicker.openBrowser === "function" && mediaPicker.openBrowser();
+        if (!opened && typeof mediaPicker.openFileDialog === "function") {
+          mediaPicker.openFileDialog();
+        }
+      };
+      const onMediaPaintClick = () => openMediaPicker();
+      const onMediaPaintKeydown = (event) => {
+        if ((event.metaKey || event.ctrlKey) && !event.altKey &&
+            (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+          event.preventDefault();
+          const redo = event.shiftKey || event.key.toLowerCase() === "y";
+          editor.commands[redo ? "redo" : "undo"]();
+        } else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openMediaPicker();
+        }
+      };
+      mediaPaint.addEventListener("click", onMediaPaintClick);
+      mediaPaint.addEventListener("keydown", onMediaPaintKeydown);
 
       // ── action controls: set/clear the action element's label/href/priority.
       // type:"action" is ALWAYS present (no server normalize net — dropping it renders
       // nothing in email while tests stay green). priority is PRESENT-ONLY: written
       // only when "primary"; "secondary" drops the key (nil≡secondary zero-op), so a
       // never-set action never gains a spurious priority:"secondary".
-      const writeAction = () => {
+      const writeNewAction = () => {
         const label = actionLabelInput.value || "";
         const href = actionHrefInput.value || "";
-        const priority = actionPrioritySelect.value; // "primary" | "secondary"
+        const priority = actionPrioritySelect.value;
         writeAttr((attrs) => {
-          if (label === "" && href === "") {
-            attrs.action = null; // clear → round-trips ABSENT
+          const prev = attrs.action && typeof attrs.action === "object" ? attrs.action : null;
+          if (prev || (label === "" && href === "")) return attrs;
+          attrs.action = { type: "action", label, href };
+          if (priority === "primary") attrs.action.priority = "primary";
+          return attrs;
+        });
+      };
+      const writeActionHref = () => {
+        const href = actionHrefInput.value || "";
+        writeAttr((attrs) => {
+          const prev = attrs.action && typeof attrs.action === "object" ? attrs.action : null;
+          if (!prev) {
+            const label = actionLabelInput.value || "";
+            if (label === "" && href === "") return attrs;
+            attrs.action = { type: "action", label, href };
+            if (actionPrioritySelect.value === "primary") attrs.action.priority = "primary";
           } else {
-            const prev = attrs.action && typeof attrs.action === "object" ? attrs.action : {};
-            const next = { ...prev, type: "action", label, href };
-            if (priority === "primary") {
-              next.priority = "primary";
-            } else {
-              delete next.priority; // present-only: secondary ≡ nil, never emit it
-            }
-            attrs.action = next;
+            attrs.action = { ...prev, href };
           }
           return attrs;
         });
       };
-      actionLabelInput.addEventListener("change", writeAction);
-      actionHrefInput.addEventListener("change", writeAction);
-      actionPrioritySelect.addEventListener("change", writeAction);
+      const writeActionPriority = () => {
+        const priority = actionPrioritySelect.value; // "primary" | "secondary"
+        writeAttr((attrs) => {
+          const prev = attrs.action && typeof attrs.action === "object" ? attrs.action : null;
+          const label = actionLabelInput.value || "";
+          const href = actionHrefInput.value || "";
+          if (!prev && label === "" && href === "") return attrs;
+          const next = prev ? { ...prev } : { type: "action", label, href };
+          if (priority === "primary") next.priority = "primary";
+          else delete next.priority;
+          attrs.action = next;
+          return attrs;
+        });
+      };
+      actionLabelInput.addEventListener("change", writeNewAction);
+      actionHrefInput.addEventListener("change", writeActionHref);
+      actionPrioritySelect.addEventListener("change", writeActionPriority);
 
       paint(node);
 
@@ -538,34 +788,54 @@ export const Card = Node.create({
         contentDOM: body,
         update: (updated) => {
           if (updated.type.name !== BP_CARD_NODE_NAME) return false;
+          if (cardTitleLevel(updated) !== titleLevel) return false;
           paint(updated);
           return true;
         },
         stopEvent: (e) => {
           const t = e && e.target;
-          return !!(t && (titleEl.contains(t) || controls.contains(t)));
+          return !!(t && (
+            titleEl.contains(t) || actionLabelHost.contains(t) || mediaPaint.contains(t) ||
+            mediaPicker.contains(t) || controls.contains(t)
+          ));
         },
         ignoreMutation: (m) => {
-          if (m.type === "selection") return false; // let PM own selection
+          if (m.type === "selection") {
+            return document.activeElement === titleEl ||
+              document.activeElement === actionLabelHost;
+          }
           if (m.type === "attributes" && m.target === dom) return true;
           if (titleEl.contains(m.target)) return true; // title edits are attr writes
           if (controls.contains(m.target)) return true; // controls (inc. the picker WC's own preview DOM) are attr writes
-          if (mediaImg.contains(m.target)) return true; // media slot is attr-painted
-          if (actionLink.contains(m.target)) return true; // action slot is attr-painted
+          if (mediaImg.contains(m.target) || mediaPaint.contains(m.target) ||
+              mediaPicker.contains(m.target)) return true; // media slot and picker are attr-painted
+          if (actionLink.contains(m.target) || actionLabelBoundary.contains(m.target)) return true;
           // Let PM handle mutations inside the editable body (contentDOM); ignore chrome.
           return !body.contains(m.target);
         },
         destroy: () => {
-          if (writeTimer) clearTimeout(writeTimer);
-          dom.removeEventListener("bp-flush-node", flushTitleWrite);
+          dom.removeEventListener("bp-flush-node", flushIslandWrites);
           titleEl.removeEventListener("input", onTitleInput);
           titleEl.removeEventListener("focus", onTitleFocus);
           titleEl.removeEventListener("blur", onTitleBlur);
           titleEl.removeEventListener("keydown", onTitleKeydown);
+          titleEl.removeEventListener("compositionstart", onTitleCompositionStart);
+          titleEl.removeEventListener("compositionend", onTitleCompositionEnd);
+          actionLabelHost.removeEventListener("input", onActionLabelInput);
+          actionLabelHost.removeEventListener("focus", onActionFocus);
+          actionLabelHost.removeEventListener("blur", onActionBlur);
+          actionLabelHost.removeEventListener("keydown", onActionKeydown);
+          actionLabelHost.removeEventListener("compositionstart", onActionCompositionStart);
+          actionLabelHost.removeEventListener("compositionend", onActionCompositionEnd);
+          actionLabelControl.removeEventListener("click", focusActionLabel);
           mediaPicker.removeEventListener("bp-change", onMediaChange);
-          actionLabelInput.removeEventListener("change", writeAction);
-          actionHrefInput.removeEventListener("change", writeAction);
-          actionPrioritySelect.removeEventListener("change", writeAction);
+          mediaPaint.removeEventListener("click", onMediaPaintClick);
+          mediaPaint.removeEventListener("keydown", onMediaPaintKeydown);
+          mediaImg.removeEventListener("load", onMediaLoad);
+          mediaPaintObserver?.disconnect();
+          actionLabelInput.removeEventListener("change", writeNewAction);
+          actionHrefInput.removeEventListener("change", writeActionHref);
+          actionPrioritySelect.removeEventListener("change", writeActionPriority);
         },
       };
     };

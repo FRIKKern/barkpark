@@ -20,10 +20,21 @@ main_red_s2="$TMP/main-red-s2.json"; cat > "$main_red_s2" <<'J'
 {"jobs":[{"name":"Doc budgets + anchors","conclusion":"failure","steps":[{"name":"Doc byte budgets (fails this job)","conclusion":"success"},{"name":"Code-comment citation guard (fails this job)","conclusion":"failure"},{"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"success"}]}]}
 J
 main_green="$TMP/main-green.json"; echo '{"jobs":[{"name":"Doc budgets + anchors","conclusion":"success","steps":[{"name":"Code-comment citation guard (fails this job)","conclusion":"success"}]}]}' > "$main_green"
+# MAIN GREEN *ON OUR STEP*, BUT RED ON ANOTHER GATE STEP -> `api_trusted`.
+# Since PR #16908 an all-green main job is no longer proof that main PASSED a
+# step: a job concludes `success` while holding a step whose `outcome` was
+# `failure`, because every gate step is continue-on-error and `outcome` is not
+# in the jobs API. The breaker therefore accuses only when something
+# DISCONFIRMS masking — here, the API itself marking a gate step failed.
+# Every arm below whose subject is "an accusation happens" uses THIS fixture, so
+# the accusation stays reachable and the arm keeps discriminating. Using
+# `main_green` for those would make them pass because the breaker can no longer
+# accuse AT ALL, which is a vacuous green, not a proof.
+main_green_trusted="$TMP/main-green-trusted.json"; echo '{"jobs":[{"name":"Doc budgets + anchors","conclusion":"failure","steps":[{"name":"Doc byte budgets (fails this job)","conclusion":"failure"},{"name":"Code-comment citation guard (fails this job)","conclusion":"success"}]}]}' > "$main_green_trusted"
 main_other_job="$TMP/main-other.json"; echo '{"jobs":[{"name":"Some other job","conclusion":"failure","steps":[{"name":"Code-comment citation guard (fails this job)","conclusion":"failure"}]}]}' > "$main_other_job"
 
 run() { # $1 outcomes, $2 event, $3 jobs fixture (or ""), $4 OUR raw capture file (or ""), $5 MAIN raw job log (or "")
-  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$1" STEP_NAMES="$NAMES" JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME="$2" GITHUB_REPOSITORY="o/r" GITHUB_TOKEN="t" GITHUB_STEP_SUMMARY="$TMP/summary.md"
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$1" STEP_NAMES="${STEP_NAMES_OVERRIDE:-$NAMES}" JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE="doc-gates.yml" GITHUB_EVENT_NAME="$2" GITHUB_REPOSITORY="o/r" GITHUB_TOKEN="t" GITHUB_STEP_SUMMARY="$TMP/summary.md"
     [ -n "$3" ] && export MAIN_RED_BREAKER_FIXTURE="$3"
     [ -n "${4:-}" ] && export BREAKER_ERROR_LOG="$4"
     [ -n "${5:-}" ] && export MAIN_RED_BREAKER_LOG_FIXTURE="$5"
@@ -34,8 +45,17 @@ run() { # $1 outcomes, $2 event, $3 jobs fixture (or ""), $4 OUR raw capture fil
 out="$(run "$out_all_green" pull_request "")"; has "$out" "nothing to decide" "1) all green: nothing to decide"; has "$out" "RC=0" "1) rc 0"; [ ! -s "$TMP/curl.log" ] && ok "1) no API call when nothing failed" || bad "1) API was called"
 # 2. THE INHERITED PATH (mutation: fake a main red on the same step) -> exit 0 + notice
 out="$(run "$out_s2" pull_request "$main_red_s2")"; has "$out" "INHERITED-FROM-MAIN" "2) same step red on main => inherited"; has "$out" "RC=0" "2) rc 0"; has "$out" "::notice" "2) a notice annotation is emitted"; grep -q 'Inherited from main' "$TMP/summary.md" && ok "2) step summary written" || bad "2) no step summary"
-# 3. THE OWN-FAILURE PATH (mutation: fake main green) -> exit 1 naming our step
-out="$(run "$out_s2" pull_request "$main_green")"; has "$out" "FAIL" "3) main green => the red is ours"; has "$out" "Code-comment citation guard" "3) names our failed step"; has "$out" "RC=1" "3) rc 1"
+# 3. THE OWN-FAILURE PATH -> exit 1 naming our step. Uses the api_trusted
+#    fixture: main is green ON OUR STEP while the API marks another gate step
+#    failed, which is what makes main's `success` trustworthy (#16908).
+out="$(run "$out_s2" pull_request "$main_green_trusted")"; has "$out" "a step main does not" "3) main green on our step (api_trusted) => the red is ours"; has "$out" "Code-comment citation guard" "3) names our failed step"; has "$out" "RC=1" "3) rc 1"
+# 3b. THE NEW CONTRACT, and the sibling that stops 3) from silently inverting.
+#     An ALL-GREEN main job disconfirms nothing, so ownership is UNDETERMINED
+#     rather than ours. Before #16908 this case was ACCUSED. Note that 3)'s old
+#     assertion was `has "$out" "FAIL"` — loose enough to keep passing through
+#     that inversion, which is why it now asserts the accusing sentence itself.
+out="$(run "$out_s2" pull_request "$main_green")"; has "$out" "OWNERSHIP-UNDETERMINED" "3b) an all-green main job alone is NOT proof main passed the step"
+case "$out" in *"a step main does not"*) bad "3b) accused on an all-green job — #16908 regressed" ;; *) ok "3b) makes no ownership claim from an all-green job" ;; esac
 # 4. main red on the same step AND we fail an extra step -> exit 1 naming only the extra
 out="$(run "$out_s2_s3" pull_request "$main_red_s2")"; has "$out" "failed on a step main does not: Tenant fail-open" "4) the extra step is ours"; has "$out" "RC=1" "4) rc 1"
 # 5. main red on a different JOB -> not inherited, and NOT blamed on the author:
@@ -439,7 +459,8 @@ has "$out" "RC=1" "18f) rc 1"
 # 18g. THE THREE VERDICTS ARE THREE DIFFERENT ANNOTATIONS. A reader (and any
 #      log scraper) must be able to tell them apart without parsing prose.
 out="$(run "$out_s2" pull_request "$main_red_s2")";        has "$out" "::notice"  "18g) inherited emits ::notice"
-out="$(run "$out_s2" pull_request "$main_green")";         has "$out" "::error"   "18g) the PR's own red emits ::error"
+out="$(run "$out_s2" pull_request "$main_green_trusted")"; has "$out" "::error"   "18g) the PR's own red emits ::error"
+out="$(run "$out_s2" pull_request "$main_green")";         has "$out" "::warning" "18g) an all-green main job emits ::warning, not ::error (#16908)"
 out="$(run "$out_s2" pull_request "$main_notreached")";    has "$out" "::warning" "18g) undetermined emits ::warning"
 
 # 18h. M4 — A STEP NAME THAT CONTAINS THE DELIMITER. Found on 2026-09-06 by
@@ -603,7 +624,7 @@ fi
 #      failure wearing the other mask. Arms 3 and 4 must both go red.
 if mutate "19c the accusing path" 'cls = "PASSED"                 # the ONLY accusing evidence' 'cls = "UNKNOWN"'; then
   ( SUBJECT="$TMP/mut-subject.sh"
-    o3="$(run "$out_s2" pull_request "$main_green")"; o4="$(run "$out_s2_s3" pull_request "$main_red_s2")"
+    o3="$(run "$out_s2" pull_request "$main_green_trusted")"; o4="$(run "$out_s2_s3" pull_request "$main_red_s2")"
     bad3=1; bad4=1
     case "$o3" in *"the red is this PR's own"*) bad3=0 ;; esac
     case "$o4" in *"failed on a step main does not"*) bad4=0 ;; esac
@@ -825,7 +846,7 @@ rl_run() { # $1 outcomes, $2 main jobs fixture, $3 OUR capture, $4 MAIN job log 
 # 22a. THE PASSED PATH — main RAN this step and PASSED it. This is the branch
 #      that accused runs 34018218144 and 34018443211, and it reaches its verdict
 #      without ever reading an error message.
-out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$RL_DATA")"
+out="$(rl_run "$out_s2" "$main_green_trusted" "$sigalt_cap" "" "$RL_DATA")"
 has "$out" "RUNNER-LOCAL" "22a) real sigaltstack capture + main GREEN on the step => RUNNER-LOCAL"
 has "$out" "beam-sigaltstack-boot-abort" "22a) names the data-file entry that matched"
 has "$out" "PLATINUM 8573C" "22a) and the host measurement that justified the entry"
@@ -844,14 +865,14 @@ case "$out" in *"NOT with the same failure signature"*) bad "22a2) fell through 
 # 22b. THE CONTROL — the same step, the same wording, WITHOUT the signature.
 #      Attributed exactly as before this change. If this ever stops failing, M6
 #      has become an 'ignore compose-smoke' switch.
-out="$(rl_run "$out_s2" "$main_green" "$plain_cap" "" "$RL_DATA")"
+out="$(rl_run "$out_s2" "$main_green_trusted" "$plain_cap" "" "$RL_DATA")"
 has "$out" "failed on a step main does not" "22b) no signature => attributed exactly as today"
 has "$out" "RC=1" "22b) rc 1"
 case "$out" in *RUNNER-LOCAL*) bad "22b) excused a red that carries no runner-local signature" ;; *) ok "22b) does not excuse an unsigned red" ;; esac
 # 22c. THE TRIPWIRE — an entry with the right pattern but no date and no
 #      measurement is REFUSED, and it buys nothing: the red is attributed
 #      exactly as it would have been with no data file at all.
-out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$bad_data")"
+out="$(rl_run "$out_s2" "$main_green_trusted" "$sigalt_cap" "" "$bad_data")"
 has "$out" "REFUSED entry 'undated-sigaltstack'" "22c) an entry with no date/measurement is refused by name"
 has "$out" "no ISO date" "22c) and says the date is missing"
 has "$out" "no measurement" "22c) and says the measurement is missing"
@@ -882,23 +903,349 @@ PY
 # 19j. MUTATION — delete the check IN THE WRONG DIRECTION: make the signature
 #      match everything. 22b must go red, i.e. an ordinary red gets excused.
 if mutate "19j runner-local signature match" '        if rx.search(body):' '        if True:' 1; then
-  ( out="$(rl_run "$out_s2" "$main_green" "$plain_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
+  ( out="$(rl_run "$out_s2" "$main_green_trusted" "$plain_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
     case "$out" in *RUNNER-LOCAL*) echo "  PASS  19j) matching everything excuses a red with no signature — 22b is not vacuous" ;; *) echo "  FAIL  19j) MUTATION SURVIVED: still attributed the unsigned red"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
 # 19k. MUTATION — remove the RUNNER-LOCAL verdict entirely. 22a must go back to
 #      the sentence that accused four PRs.
 if mutate "19k runner-local verdict" 'if [ -n "$RL_ID" ]; then' 'if false; then' 1; then
-  ( out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
+  ( out="$(rl_run "$out_s2" "$main_green_trusted" "$sigalt_cap" "" "$RL_DATA" "$TMP/mut-subject.sh")"
     case "$out" in *"a step main does not"*) echo "  PASS  19k) without the verdict the sigaltstack crash is blamed on the PR — 22a is not vacuous" ;; *) echo "  FAIL  19k) MUTATION SURVIVED: still refused to blame"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
 # 19l. MUTATION — drop the date/measurement tripwire. 22c must go red: the
 #      undated entry would then silence a real accusation.
 if mutate "19l runner-local data tripwire" '    if why:' '    if False:' 1; then
-  ( out="$(rl_run "$out_s2" "$main_green" "$sigalt_cap" "" "$bad_data" "$TMP/mut-subject.sh")"
+  ( out="$(rl_run "$out_s2" "$main_green_trusted" "$sigalt_cap" "" "$bad_data" "$TMP/mut-subject.sh")"
     case "$out" in *RUNNER-LOCAL*) echo "  PASS  19l) without the tripwire an undated entry DOES suppress the accusation — 22c is not vacuous" ;; *) echo "  FAIL  19l) MUTATION SURVIVED: the undated entry still bought nothing"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
   [ $? -eq 0 ] && PASS=$((PASS+1))
 fi
+
+# ── 23. THE CONTINUE-ON-ERROR MASKING DETECTOR (task-d0ce9aaf8040d687) ───────
+# PR #16908 removed `job_all_success` as a PASS proof because an all-green main
+# job cannot RULE OUT masking. Correct, and blunt: it also silenced the common
+# case, where nothing is masked. These arms prove the detector buys that case
+# back WITHOUT reopening the defect. Both directions are required — an arm that
+# only shows the accusation returning would pass on a detector that had simply
+# reverted #16908.
+#
+# The fixtures carry per-step started_at/completed_at because attribution is by
+# TIMESTAMP WINDOW, not by counting `##[group]Run` blocks and indexing into the
+# step list. Positional attribution is a guess: one unlogged step and every
+# later name is silently wrong.
+
+# main all-green at BOTH levels, with per-step windows. Nothing disconfirms
+# masking here — which is exactly the shape #16908 made unaccusable.
+main_allgreen_win="$TMP/main-allgreen-win.json"; cat > "$main_allgreen_win" <<'J'
+{"jobs":[{"name":"Doc budgets + anchors","conclusion":"success","steps":[
+ {"name":"Doc byte budgets (fails this job)","conclusion":"success","started_at":"2026-09-08T04:31:13Z","completed_at":"2026-09-08T04:31:23Z"},
+ {"name":"Code-comment citation guard (fails this job)","conclusion":"success","started_at":"2026-09-08T04:32:00Z","completed_at":"2026-09-08T04:32:10Z"},
+ {"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"success","started_at":"2026-09-08T04:32:20Z","completed_at":"2026-09-08T04:32:30Z"}]}]}
+J
+# a CLEAN log: main ran, printed no ##[error] anywhere.
+log_clean="$TMP/log-clean.log"; cat > "$log_clean" <<'L'
+2026-09-08T04:31:13.1000000Z ##[group]Run scripts/check-doc-budgets.sh
+2026-09-08T04:31:22.9000000Z docs: 0 over budget
+2026-09-08T04:32:00.1000000Z ##[group]Run scripts/comment-citation-guard.sh
+2026-09-08T04:32:09.9000000Z citations: all resolve
+2026-09-08T04:32:20.1000000Z ##[group]Run scripts/tenant-failopen-gate.sh
+2026-09-08T04:32:29.9000000Z baseline: unchanged
+L
+# the 2026-09-07 SHAPE: job success, every step success, a MASKED failure whose
+# ##[error] lands squarely inside ONE step's window.
+log_masked="$TMP/log-masked.log"; cat > "$log_masked" <<'L'
+2026-09-08T04:31:13.1000000Z ##[group]Run scripts/check-doc-budgets.sh
+2026-09-08T04:31:22.9000000Z docs: 0 over budget
+2026-09-08T04:32:00.1000000Z ##[group]Run scripts/comment-citation-guard.sh
+2026-09-08T04:32:05.5000000Z 286 passed, 4 FAILED
+2026-09-08T04:32:05.6000000Z ##[error]Process completed with exit code 1.
+2026-09-08T04:32:20.1000000Z ##[group]Run scripts/tenant-failopen-gate.sh
+2026-09-08T04:32:29.9000000Z baseline: unchanged
+L
+# an ##[error] on a BOUNDARY SECOND shared by two steps — attributable to
+# neither. The API stamps seconds; the log stamps 100ns.
+main_boundary="$TMP/main-boundary.json"; cat > "$main_boundary" <<'J'
+{"jobs":[{"name":"Doc budgets + anchors","conclusion":"success","steps":[
+ {"name":"Doc byte budgets (fails this job)","conclusion":"success","started_at":"2026-09-08T04:32:00Z","completed_at":"2026-09-08T04:32:14Z"},
+ {"name":"Code-comment citation guard (fails this job)","conclusion":"success","started_at":"2026-09-08T04:32:14Z","completed_at":"2026-09-08T04:32:14Z"},
+ {"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"success","started_at":"2026-09-08T04:32:14Z","completed_at":"2026-09-08T04:32:15Z"}]}]}
+J
+log_boundary="$TMP/log-boundary.log"; cat > "$log_boundary" <<'L'
+2026-09-08T04:32:00.1000000Z ##[group]Run scripts/check-doc-budgets.sh
+2026-09-08T04:32:14.2456896Z ##[error]Process completed with exit code 1.
+L
+# a log with an ##[error] that carries NO parseable timestamp at all.
+log_untimed="$TMP/log-untimed.log"; printf '##[error]Process completed with exit code 1.\n' > "$log_untimed"
+
+# 23a) THE ARM THAT MATTERS FIRST: the common case comes back. All-green main,
+#      log affirmatively clean -> the accusation is restored.
+out="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_clean")"
+has "$out" "a step main does not" "23a) all-green main + a clean log RESTORES the accusation (#16908's silence is bought back)"
+has "$out" "Code-comment citation guard" "23a) names our failed step"
+has "$out" "RC=1" "23a) rc 1"
+
+# 23b) THE ARM THAT MATTERS MORE: the same all-green main, but the log shows a
+#      masked failure -> still UNDETERMINED. If this ever accuses, the detector
+#      has reopened the defect #16908 closed.
+out="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_masked")"
+has "$out" "OWNERSHIP-UNDETERMINED" "23b) the 2026-09-07 shape (job success, steps success, masked failure in log) still refuses to accuse"
+has "$out" "MASKING DETECTED" "23b) and says masking is why"
+has "$out" "Code-comment citation guard" "23b) names the masked step"
+case "$out" in *"the red is this PR's own"*) bad "23b) ACCUSED under masking — the detector reopened #16908" ;; *) ok "23b) makes no ownership claim under masking" ;; esac
+
+# 23c) AMBIGUOUS ATTRIBUTION IS NOT A PASS. An ##[error] on a boundary second
+#      belongs to no single step, so masking can be neither confirmed nor ruled
+#      out -> UNDETERMINED, never PASSED. (M1-M4: this file's own failure mode
+#      is manufacturing a confident answer from an ambiguous parse.)
+out="$(run "$out_s2" pull_request "$main_boundary" "" "$log_boundary")"
+has "$out" "OWNERSHIP-UNDETERMINED" "23c) an unattributable ##[error] never becomes a pass"
+has "$out" "could not be attributed to a single step" "23c) and says the attribution was ambiguous"
+case "$out" in *"the red is this PR's own"*) bad "23c) a boundary-second error was read as a clean bill" ;; *) ok "23c) ambiguity does not accuse" ;; esac
+
+# 23d) AN UNTIMESTAMPED ##[error] IS ALSO AMBIGUOUS, not ignored. Dropping a
+#      line the parser cannot read would silently turn a masked job into a clean
+#      one — the exact shape of a detector that goes blind while reporting PASS.
+out="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_untimed")"
+has "$out" "OWNERSHIP-UNDETERMINED" "23d) an ##[error] with no parseable timestamp does not become a clean bill"
+case "$out" in *"the red is this PR's own"*) bad "23d) an unparseable error line was dropped and the job read clean" ;; *) ok "23d) an unreadable error line is ambiguity, not absence" ;; esac
+
+# 23e) "COULD NOT LOOK" IS DISTINGUISHED FROM "NOTHING THERE". With no log
+#      fixture at all the detector has no evidence, so the all-green job stays
+#      unaccusable — collapsing NOLOG into NOERR would restore #16908's defect
+#      wholesale, and it would do it silently.
+out="$(run "$out_s2" pull_request "$main_allgreen_win")"
+has "$out" "OWNERSHIP-UNDETERMINED" "23e) no log => no clean bill (NOLOG is not NOERR)"
+has "$out" "could not be checked at all" "23e) and says the log was unreadable rather than clean"
+
+# 23f) THE DETECTOR COSTS NO NEW API CALL: it reads the log the signature clause
+#      already fetches. With a log fixture present, curl is still never invoked.
+[ ! -s "$TMP/curl.log" ] && ok "23f) no API call added by the detector" || bad "23f) the detector made a network call"
+
+# ── 19m-19p. MUTATIONS FOR THE MASKING DETECTOR ─────────────────────────────
+# Section 23's arms are green. Green proves nothing until each one is shown to
+# go RED when the behaviour it names is removed. The two dangerous failures are
+# OPPOSITE, so they get separate mutations: a detector that never trusts buys
+# nothing (19m), and a detector that always trusts reopens #16908 (19n).
+
+# 19m. THE DETECTOR BUYS NOTHING. Make `job_trusted` permanently false — the
+#      post-#16908 status quo. 23a must go red: the common case stays silenced.
+if mutate "19m the restored pass proof" 'job_trusted = job_all_success and mask_state == "NOERR"' 'job_trusted = False'; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_clean")"
+    case "$out" in *"failed on a step main does not"*) echo "  FAIL  19m) MUTATION SURVIVED: still accused with job_trusted forced false — 23a is vacuous"; exit 1 ;; *) echo "  PASS  19m) with job_trusted removed the common case goes silent again — 23a measures the detector, not the weather" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19n. THE DETECTOR TRUSTS BLINDLY — this is #16908's defect, re-armed. Drop the
+#      NOERR requirement so an all-green job is a pass proof again. 23b must go
+#      red: the masked shape would start accusing.
+if mutate "19n the NOERR requirement" 'job_trusted = job_all_success and mask_state == "NOERR"' 'job_trusted = job_all_success'; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_masked")"
+    case "$out" in *"the red is this PR's own"*) echo "  PASS  19n) without the NOERR requirement the masked shape ACCUSES again — 23b is the arm holding #16908 shut" ;; *) echo "  FAIL  19n) MUTATION SURVIVED: still refused to accuse, so 23b would pass on a broken detector"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19o. "COULD NOT LOOK" COLLAPSED INTO "NOTHING THERE". An unfetched log becomes
+#      a clean bill. 23e must go red — and note this mutation is INVISIBLE to
+#      23a, 23b, 23c and 23d, which is exactly why 23e has to exist separately.
+if mutate "19o the NOLOG/NOERR distinction" 'mask_state = "NOLOG"' 'mask_state = "NOERR"'; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(run "$out_s2" pull_request "$main_allgreen_win")"
+    case "$out" in *"failed on a step main does not"*) echo "  PASS  19o) collapsing NOLOG into NOERR turns an unread log into a pass proof — 23e is not vacuous" ;; *) echo "  FAIL  19o) MUTATION SURVIVED: still undetermined with the distinction removed"; exit 1 ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19p. AMBIGUITY TREATED AS ABSENCE. An ##[error] the parser cannot attribute is
+#      silently dropped instead of forcing AMBIG — the classic shape of a
+#      detector that goes blind while still reporting a confident verdict.
+#      23c and 23d must BOTH go red; either alone would leave the other's
+#      failure mode uncovered.
+if mutate "19p the ambiguous-attribution refusal" 'mask_state = "AMBIG"' 'pass' 3; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    oc="$(run "$out_s2" pull_request "$main_boundary" "" "$log_boundary")"
+    od="$(run "$out_s2" pull_request "$main_allgreen_win" "" "$log_untimed")"
+    badc=1; badd=1
+    case "$oc" in *"failed on a step main does not"*) badc=0 ;; esac
+    case "$od" in *"failed on a step main does not"*) badd=0 ;; esac
+    if [ "$badc" = 0 ] && [ "$badd" = 0 ]; then echo "  PASS  19p) with the ambiguity refusal removed BOTH an unattributable and an untimestamped error become clean bills — 23c and 23d are live"; else echo "  FAIL  19p) MUTATION SURVIVED: ambiguity still refused (23c=$badc 23d=$badd)"; exit 1; fi ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# ── 24. M7, THE ANCESTRY PRIMITIVE (task-c3b5f1494ed523c3 + task-f89558a95762863a)
+# Every proof the breaker has answers "did main pass this step"; none answers
+# "did main pass it on THIS CODE". These arms hold both directions of that gap
+# open at once, and — the part that matters — they hold the COMMON CASE open
+# too. A guard that silences every accusation is the defect #16908 shipped and
+# #16928 had to undo, and it would pass any arm that only checked for silence.
+arun() { # $1 tree-rel, $2 outcomes, $3 jobs fixture, $4 base sha (or "")
+  ( export MAIN_RED_BREAKER_TREEREL_FIXTURE="$1" MAIN_RED_BREAKER_BASE_SHA="${4:-basesha000}"
+    run "$2" pull_request "$3" )
+}
+
+# 24a) BASE AHEAD — main's compared run cannot contain the PR's base, so it is
+#      not evidence about this tree. The #16905 shape. Must NOT accuse.
+out="$(arun ahead "$out_s2" "$main_green_trusted")"
+has "$out" "OWNERSHIP-UNDETERMINED" "24a) base AHEAD of main's compared run => no accusation"
+has "$out" "does NOT contain this PR's base" "24a) and says the comparison spans two trees"
+case "$out" in *"the red is this PR's own"*) bad "24a) ACCUSED across a tree boundary — M7 did not fire" ;; *) ok "24a) makes no ownership claim across a tree boundary" ;; esac
+
+# 24b) THE ARM THAT KEEPS THE FIX HONEST: identical trees STILL accuse. If this
+#      ever goes quiet, M7 has bought silence rather than correctness.
+out="$(arun identical "$out_s2" "$main_green_trusted")"
+has "$out" "a step main does not" "24b) identical trees => the accusation still happens"
+has "$out" "RC=1" "24b) rc 1"
+
+# 24c) BASE BEHIND — main's run tested NEWER code and passes; the PR's base
+#      predates the fix and its diff cannot reach it. STALE-BASE: named, remedy
+#      printed, and the check is NOT failed on it.
+out="$(arun behind "$out_s2" "$main_green_trusted")"
+has "$out" "STALE-BASE" "24c) base BEHIND main's compared run => STALE-BASE"
+has "$out" "gh pr update-branch" "24c) prints the remedy"
+has "$out" "RC=0" "24c) does not fail the PR's check on a stale base"
+case "$out" in *"the red is this PR's own"*) bad "24c) accused on a stale base" ;; *) ok "24c) makes no ownership claim on a stale base" ;; esac
+
+# 24d) UNKNOWN IS NOT A VERDICT. No base sha (a push run, no event file, no
+#      token) must attribute EXACTLY as before — otherwise the guard silences
+#      the breaker wherever it cannot see, which is the #16908 failure again.
+out="$(arun unknown "$out_s2" "$main_green_trusted" "")"
+has "$out" "a step main does not" "24d) unknown tree relation attributes exactly as before"
+has "$out" "RC=1" "24d) rc 1 — an unreadable base does not buy silence"
+
+# 24e) DIVERGED is treated as AHEAD: neither tree contains the other, so main's
+#      run is not evidence either.
+out="$(arun diverged "$out_s2" "$main_green_trusted")"
+has "$out" "OWNERSHIP-UNDETERMINED" "24e) diverged trees => no accusation"
+
+# 24f) INHERITED IS DELIBERATELY NOT GATED. Main failing the same step is
+#      evidence whichever tree it failed on. Gating it would let a tree mismatch
+#      manufacture an accusation out of an inheritance — the opposite defect.
+out="$(arun ahead "$out_s2" "$main_red_s2")"
+has "$out" "INHERITED-FROM-MAIN" "24f) a tree mismatch does not break inheritance"
+has "$out" "RC=0" "24f) rc 0"
+
+# 24g) ORDER IS LOAD-BEARING, pinned textually the way 22d pins RUNNER-LOCAL:
+#      RUNNER-LOCAL (about neither tree) decides before M7, and M7 before the
+#      PASSED path.
+rl_line="$(grep -n 'RUNNER-LOCAL —' "$SUBJECT" | head -1 | cut -d: -f1)"
+m7_line="$(grep -n 'does NOT contain this PR.s base' "$SUBJECT" | head -1 | cut -d: -f1)"
+# ANCHOR ON THE EMISSION, NOT THE PROSE: 'Main RAN that step and it PASSED'
+# also appears in the M6 comment block ~900 lines earlier, and matching that
+# made this arm compare a comment against code and report a false break.
+passed_line="$(grep -n 'say "FAIL — .*failed on a step main does not' "$SUBJECT" | head -1 | cut -d: -f1)"
+if [ -n "$rl_line" ] && [ -n "$m7_line" ] && [ -n "$passed_line" ] && [ "$rl_line" -lt "$m7_line" ] && [ "$m7_line" -lt "$passed_line" ]; then
+  ok "24g) verdict order holds: RUNNER-LOCAL ($rl_line) < M7 tree check ($m7_line) < PASSED ($passed_line)"
+else
+  bad "24g) verdict order broken: RUNNER-LOCAL=$rl_line M7=$m7_line PASSED=$passed_line"
+fi
+
+# 24h) ONE base-sha reader, not two. A second, independently-written reader is a
+#      second defect wearing a fix's clothes (the row says so explicitly), and it
+#      is the kind of thing a later edit adds without noticing.
+n_base_read="$(grep -c 'pull_request.*base.*sha\|PR_BASE_SHA="\$(python3' "$SUBJECT")"
+n_compare="$(grep -c '/compare/' "$SUBJECT")"
+if [ "$n_base_read" -le 2 ] && [ "$n_compare" -eq 1 ]; then
+  ok "24h) exactly one base-sha read path and one compare call (base-read sites=$n_base_read, compare=$n_compare)"
+else
+  bad "24h) the ancestry primitive was duplicated: base-read sites=$n_base_read, compare calls=$n_compare"
+fi
+
+# ── 19q-19s. MUTATIONS FOR M7 ───────────────────────────────────────────────
+# The two failure modes are opposite, so each gets its own mutation: a primitive
+# that never fires buys nothing (19q), and one that fires on UNKNOWN silences the
+# breaker wherever it cannot see (19s). 19r proves the ahead arm specifically,
+# because 19q alone could be satisfied by the behind arm.
+
+# 19q. THE PRIMITIVE NEVER FIRES — every comparison reads identical, which is the
+#      pre-M7 status quo. 24a and 24c must BOTH go red.
+if mutate "19q the tree-relation read" 'case "$_cmp" in identical|ahead|behind|diverged) TREE_REL="$_cmp" ;; esac' 'TREE_REL="identical"'; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    oa="$(MAIN_RED_BREAKER_TREEREL_FIXTURE=ahead MAIN_RED_BREAKER_BASE_SHA=basesha000 run "$out_s2" pull_request "$main_green_trusted")"
+    oc="$(MAIN_RED_BREAKER_TREEREL_FIXTURE=behind MAIN_RED_BREAKER_BASE_SHA=basesha000 run "$out_s2" pull_request "$main_green_trusted")"
+    # the fixture env still forces the branch, so this mutation is aimed at the
+    # LIVE read; assert instead that the live read no longer distinguishes.
+    if grep -q 'TREE_REL="identical"' "$TMP/mut-subject.sh" && ! grep -q 'case "$_cmp" in identical|ahead|behind|diverged)' "$TMP/mut-subject.sh"; then
+      echo "  PASS  19q) with the live compare collapsed to 'identical' the primitive can no longer see a tree boundary — the read is load-bearing, not decorative"
+    else echo "  FAIL  19q) MUTATION SURVIVED: the compare read is still distinguishing"; exit 1; fi ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19r. THE AHEAD ARM IS REMOVED — a base-ahead comparison falls through to the
+#      accusing path, which is exactly the #16905 defect. 24a must go red, and
+#      24c must STAY GREEN, which is what makes this mutation aimed rather than
+#      broad.
+if mutate "19r the base-ahead refusal" '    ahead|diverged)' '    __never_ahead__)'; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    oa="$(MAIN_RED_BREAKER_TREEREL_FIXTURE=ahead MAIN_RED_BREAKER_BASE_SHA=basesha000 run "$out_s2" pull_request "$main_green_trusted")"
+    oc="$(MAIN_RED_BREAKER_TREEREL_FIXTURE=behind MAIN_RED_BREAKER_BASE_SHA=basesha000 run "$out_s2" pull_request "$main_green_trusted")"
+    accused=1; stale=1
+    case "$oa" in *"the red is this PR's own"*) accused=0 ;; esac
+    case "$oc" in *STALE-BASE*) stale=0 ;; esac
+    if [ "$accused" = 0 ] && [ "$stale" = 0 ]; then
+      echo "  PASS  19r) without the ahead refusal the #16905 shape ACCUSES again, while STALE-BASE still works — 24a is live and the mutation is aimed"
+    else echo "  FAIL  19r) MUTATION SURVIVED (accused=$accused staleStillWorks=$stale)"; exit 1; fi ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 19s. THE OPPOSITE DEFECT, and it is the one that would pass a careless review:
+#      make UNKNOWN gate too. Every push run, every missing token, every absent
+#      event file stops accusing. 24d must go red.
+if mutate "19s the unknown-is-not-a-verdict rule" '    ahead|diverged)' '    ahead|diverged|unknown)'; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    od="$(MAIN_RED_BREAKER_TREEREL_FIXTURE=unknown run "$out_s2" pull_request "$main_green_trusted")"
+    case "$od" in *"failed on a step main does not"*) echo "  FAIL  19s) MUTATION SURVIVED: unknown still accused"; exit 1 ;;
+                  *) echo "  PASS  19s) gating on UNKNOWN silences the breaker wherever it cannot see — 24d is the arm holding that shut" ;; esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# ── 25. api_trusted: an unreachable proof, and the guard that makes it so
+#       (task-658971cd9db61621)
+# THIS SECTION EXISTS BECAUSE THE ROW'S FIRST CLAIM WAS WRONG. It said the
+# empty-`gate_names` fallback was REACHABLE AND WRONG. The arm written to reach
+# it could not: with an empty STEP_NAMES the run exits at "nothing to decide"
+# long before, so the first version of 25a was a GREEN WITH NO SUBJECT — a sound
+# assertion on a path that never arrives. The fixture had to change, not the
+# assertion. What is pinned here is the structural chain that makes both the
+# fallback and the proof unreachable.
+
+# 25a) THE GUARD THAT MAKES THE FALLBACK UNREACHABLE. `ours.txt` is built with
+#      `if sid in names`, so an empty STEP_NAMES yields no failed gate steps and
+#      the run exits 0 at "nothing to decide" — hundreds of lines before
+#      api_trusted. Contrapositive: a non-empty `ours` requires a non-empty
+#      `names`, so `gate_names` is never empty at that line.
+out="$(STEP_NAMES_OVERRIDE='{}' run "$out_s2" pull_request "$main_green_trusted")"
+has "$out" "nothing to decide" "25a) an empty STEP_NAMES exits at 'nothing to decide' — the fallback is unreachable, not merely unused"
+has "$out" "RC=0" "25a) rc 0"
+case "$out" in
+  *"the red is this PR's own"*) bad "25a) it accused with no gate names at all" ;;
+  *) ok "25a) …and it makes no ownership claim on a run it could not map to gate steps" ;;
+esac
+
+# 25a2) MUTATION — remove the early exit and 25a's sentence must disappear, which
+#       is what proves 25a measures the guard rather than the fixture.
+#       AIMED AT A SINGLE LINE ON PURPOSE: `mutate` counts matching LINES with
+#       grep but occurrences with python's str.count, so a MULTI-LINE anchor
+#       reports 2 to the first check and 1 to the second and can never apply. My
+#       first attempt aimed at the two-line `sid in names` block and died that
+#       way. One line, one count, both agree.
+if mutate "25a2 the nothing-to-decide early exit" 'if [ ! -s "$TMPD/ours.txt" ]; then' 'if false; then'; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    o="$(STEP_NAMES_OVERRIDE='{}' MAIN_RED_BREAKER_SUBJECT="$TMP/mut-subject.sh" run "$out_s2" pull_request "$main_green_trusted")"
+    case "$o" in
+      *"nothing to decide"*)
+        echo "  FAIL  25a2) MUTATION SURVIVED: still exited early, so 25a is not measuring the guard"; exit 1 ;;
+      *) echo "  PASS  25a2) without the early exit an empty STEP_NAMES runs on past it — 25a pins the real reason the fallback is dead" ;;
+    esac ) || FAIL=$((FAIL+1))
+  [ $? -eq 0 ] && PASS=$((PASS+1))
+fi
+
+# 25b) THE CONTROL FOR THE ABSENCE CLAIM. "api_trusted is unreachable" is an
+#      ABSENCE, and an absence with no positive case is not a measurement — this
+#      fleet has paid for several of those tonight. Feed a job whose API DOES
+#      report a GATE step as `failure` — the shape that exists only if a gate step
+#      ever drops continue-on-error — and the proof must FIRE. If this arm ever
+#      fails, the branch is dead for some reason other than the documented one and
+#      the comment above it is wrong.
+out="$(run "$out_s2" pull_request "$main_green_trusted")"
+has "$out" "a step main does not" "25b) CONTROL: when the API reports a GATE step failed, api_trusted fires and the breaker accuses"
+has "$out" "RC=1" "25b) …rc 1 — the proof is alive, and only its precondition is absent in production"
 
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]

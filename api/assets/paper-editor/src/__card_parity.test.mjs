@@ -114,10 +114,16 @@ check("tone/title/media/action attrs are present-only (null renders NO data-attr
 });
 
 // ── 4. SOURCE: the four slots mount the reader's model-B elements ─────────────
-check("title slot is a semantic <h2> island (reader: PdHeading default level 2)", () => {
+check("title slot keeps its semantic heading around a separately editable island", () => {
   assert.ok(
-    /const titleEl = document\.createElement\("h2"\);/.test(SRC),
-    "title island is no longer an <h2> — the reader renders the title slot as <h2>",
+    /const titleHost = document\.createElement\(`h\$\{titleLevel\}`\);/.test(SRC) &&
+      /const titleEl = document\.createElement\("span"\);/.test(SRC),
+    "the Card title no longer uses its authored semantic heading around the editable text",
+  );
+  assert.ok(
+    /titleHost\.contentEditable = "false";/.test(SRC) &&
+      /titleEl\.contentEditable = editable \? "plaintext-only" : "false";/.test(SRC),
+    "the title lost its nested plaintext editing-host boundary",
   );
 });
 
@@ -158,10 +164,34 @@ check("action slot is the reader's PdButton anchor with the binary priority coll
 
 // ── 5. SOURCE: reader slot ORDER media, title, body, action (controls ride at
 //        the top, OUTSIDE the reader-shape subtree) ────────────────────────────
-check("mounted order is controls, media, title, body, action (reader slot order)", () => {
+check("mounted order keeps reader slots before the edit-only action-label twin", () => {
   assert.ok(
-    /dom\.append\(controls, mediaImg, titleEl, body, actionLink\);/.test(SRC),
+    /dom\.append\(\s*controls,\s*mediaImg,\s*mediaPaint,\s*titleHost,\s*body,\s*actionLink,\s*actionLabelBoundary,?\s*\);/.test(SRC),
     "the mounted slot order no longer matches the reader's media, title, body, action",
+  );
+});
+
+check("direct media editing keeps the bare image and adds a sibling native control", () => {
+  assert.ok(
+    /const mediaImg = document\.createElement\("img"\);/.test(SRC) &&
+      /const mediaPaint = document\.createElement\("button"\);/.test(SRC) &&
+      /mediaPaint\.setAttribute\("aria-haspopup", "dialog"\);/.test(SRC),
+    "the Card image lost its bare reader element or sibling picker control",
+  );
+});
+
+check("direct action-label editing uses a non-link plaintext sibling", () => {
+  assert.ok(
+    /actionLabelBoundary\.contentEditable = "false";/.test(SRC) &&
+      /actionLabelBoundary\.appendChild\(actionLabelHost\);/.test(SRC) &&
+      /const actionLabelHost = document\.createElement\("span"\);/.test(SRC) &&
+      /actionLabelHost\.contentEditable = editable && hasAction \? "plaintext-only" : "false";/.test(SRC),
+    "the action label lost its independent ProseMirror-fenced plaintext editing host",
+  );
+  assert.ok(
+    /actionLink\.style\.display = "none";/.test(SRC) &&
+      /actionLabelHost\.style\.display = editable && hasAction \? "" : "none";/.test(SRC),
+    "View/Edit no longer expose mutually exclusive link and editing hosts",
   );
 });
 

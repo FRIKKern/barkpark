@@ -157,6 +157,16 @@ SHA_C="cccccccccccccccccccccccccccccccccccccccc"
 SHA_D="dddddddddddddddddddddddddddddddddddddddd"
 
 # ── fixture builders ─────────────────────────────────────────────────────────
+# EVERY run fixture states an `updated_at`, because the live Actions run listing
+# always does and crown-reconcile's second alibi constraint
+# (dr-w29-s1-followup-run-id-alibi-is-self-reported) is checked against the
+# created..updated SPAN. A fixture that omitted it would exercise the REFUSAL
+# path on every arm below and make each of them measure the wrong thing.
+RUN_SPAN_SECONDS=600
+iso_plus() { # <iso> <seconds>
+  jq -rn --arg t "$1" --argjson d "$2" \
+    '(($t | sub("\\.[0-9]+"; "") | sub("Z?$"; "Z") | fromdateiso8601) + $d) | todateiso8601'
+}
 runs_json() { # <name> <sha:created>...
   local out="$TMP/$1.json"; shift
   local first=1
@@ -166,8 +176,8 @@ runs_json() { # <name> <sha:created>...
     for spec in "$@"; do
       [ "$first" = 1 ] || printf ','
       first=0
-      printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' \
-        "$n" "${spec%%:*}" "${spec#*:}"
+      printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}' \
+        "$n" "${spec%%:*}" "${spec#*:}" "$(iso_plus "${spec#*:}" "$RUN_SPAN_SECONDS")"
       n=$((n + 1))
     done
     printf ']}'
@@ -196,7 +206,7 @@ with_inflight() { # <name> <in-flight-sha> <in-flight-created> <sha:created>...
   base="$(runs_json "$name-completed" "$@")"
   out="$TMP/$name.json"
   jq --arg sha "$isha" --arg created "$icreated" \
-    '.workflow_runs += [{id: 9001, head_sha: $sha, conclusion: null, status: "in_progress", created_at: $created}]' \
+    '.workflow_runs += [{id: 9001, head_sha: $sha, conclusion: null, status: "in_progress", created_at: $created, updated_at: $created}]' \
     "$base" > "$out" 2>/dev/null
   fixture_ok "$out"
   echo "$out"
@@ -211,7 +221,8 @@ runs_add() { # <name> <base-json> <id> <sha> <status> <conclusion|null> <created
   jq --argjson id "$3" --arg sha "$4" --arg st "$5" --arg cc "$6" --arg cr "$7" \
     '.workflow_runs += [{id: $id, head_sha: $sha, status: $st,
                          conclusion: (if $cc == "null" then null else $cc end),
-                         created_at: $cr}]' "$2" > "$out" 2>/dev/null
+                         created_at: $cr,
+                         updated_at: ((($cr | sub("\\.[0-9]+"; "") | sub("Z?$"; "Z") | fromdateiso8601) + 600) | todateiso8601)}]' "$2" > "$out" 2>/dev/null
   fixture_ok "$out"
   echo "$out"
 }
@@ -232,12 +243,12 @@ runs_filled() { # <name> <first-id> <shaA:created> <shaB:created> <filler-sha> <
   local a="${3%%:*}" acr="${3#*:}" b="${4%%:*}" bcr="${4#*:}"
   {
     printf '{"truncated":true,"workflow_runs":['
-    printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$base" "$a" "$acr"
-    printf ',{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$((base + 1))" "$b" "$bcr"
+    printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}' "$base" "$a" "$acr" "$(iso_plus "$acr" "$RUN_SPAN_SECONDS")"
+    printf ',{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}' "$((base + 1))" "$b" "$bcr" "$(iso_plus "$bcr" "$RUN_SPAN_SECONDS")"
     local i=2
     while [ "$i" -lt 100 ]; do
-      printf ',{"id":%d,"head_sha":"%s","conclusion":null,"status":"in_progress","created_at":"%s"}' \
-        "$((base + i))" "$fsha" "$fcreated"
+      printf ',{"id":%d,"head_sha":"%s","conclusion":null,"status":"in_progress","created_at":"%s","updated_at":"%s"}' \
+        "$((base + i))" "$fsha" "$fcreated" "$fcreated"
       i=$((i + 1))
     done
     printf ']}'
@@ -510,6 +521,92 @@ run_cr 0 "$SHA_C was SERVED by run 2, whose own head sha is $SHA_B" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_SERVED" --health-fixture "$HEALTH_BASE"
 not_saw "WRONG:" "a row whose delivering run is real is never accused over its sha"
 
+section "(c2c) MUTATION: the delivering_run_id is REAL but WRONG — the alibi is self-reported"
+# THE HOLE, IN ONE SENTENCE (dr-w29-s1-followup-run-id-alibi-is-self-reported).
+# `delivering_run_id` is written by the recorder ABOUT ITSELF (GITHUB_RUN_ID), so
+# the (c2) arm above only asks "does the run this row names exist and deliver?".
+# It never asks "could THAT run have written THIS row?". A plausible-but-wrong id
+# — a run that delivered something else, a retry's id, a transposed digit landing
+# on a real deploy — is waved through by (c2): the row exists, the run exists,
+# nothing compares them.
+#
+# This row is that shape and NOTHING else. It names run 1, which is a REAL
+# delivering run in this very fixture (the base arm above clears rows against
+# it), and its sha is $SHA_C, a served sha — so (c) cannot catch it either, and
+# (c2b) proves a served sha alone is never an accusation. The ONLY thing wrong
+# with it is the pair: run 1 ran $IN1..$IN1+600s and this row was first seen at
+# $IN2, 20 minutes after that run ended. Under the self-reported alibi alone
+# this whole file is RECONCILED (rc 0).
+CROWN_REALWRONGRUN="$(crown_json crown-realwrongrun \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN2" 1)")"
+run_cr 1 "a row first seen at $IN2 names run 1, a REAL delivering run that had ended by then" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_REALWRONGRUN" --health-fixture "$HEALTH_BASE"
+saw "ALIBI-WINDOW: 1 crown row(s)" "the second constraint fires by name, so the reader sees WHICH alibi failed"
+saw "$SHA_C" "it names the row whose stated deliverer could not have written it"
+saw "AFTER it ended" "it says which side of the run's span the row fell on"
+saw "alibi-window=1" "the verdict line carries the new class, so a log grep finds it"
+saw "WRONG: 1 of 4" "an alibi failure is counted INTO WRONG — it is a statement about the pair, not a deferral"
+
+# THE CONTROL, AND IT IS THE WHOLE POINT. Same fixture, same run id, same sha —
+# only the row's own first_seen_at moves back inside run 1's span. If this arm
+# reds, the constraint is not measuring the PAIR, it is just accusing $SHA_C.
+CROWN_REALRIGHTRUN="$(crown_json crown-realrightrun \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN1" 1)")"
+run_cr 0 "the SAME row, first seen INSIDE run 1's span, is clean" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_REALRIGHTRUN" --health-fixture "$HEALTH_BASE"
+not_saw "ALIBI-WINDOW" "moving one instant inside the span is the ONLY difference between this and the red above"
+
+# THE SKEW ALLOWANCE IS REAL AND IT IS BOUNDED. A row a few seconds ahead of its
+# run's start is inter-clock jitter and must clear; the constant is read back out
+# of the script so a later widening to a comfortable value reds here.
+ALIBI_SKEW="$(sed -n 's/^ALIBI_SKEW_SECONDS=\([0-9]*\).*/\1/p' "$CR" | head -1)"
+case "${ALIBI_SKEW:-}" in
+  ''|*[!0-9]*) bad "ALIBI_SKEW_SECONDS could not be read out of $CR — the band assertion below would be vacuous" ;;
+  *) if [ "$ALIBI_SKEW" -ge 1 ] && [ "$ALIBI_SKEW" -le 120 ]; then
+       ok "the run-interval tolerance is ${ALIBI_SKEW}s — inside the 1..120s band a same-provider clock pair justifies"
+     else
+       bad "ALIBI_SKEW_SECONDS is ${ALIBI_SKEW}s — outside the 1..120s band; a tolerance wide enough to be comfortable re-admits the neighbouring run"
+     fi ;;
+esac
+IN1_MINUS="$(iso_plus "$IN1" -30)"
+CROWN_SKEWED="$(crown_json crown-skewed \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN1_MINUS" 1)")"
+run_cr 0 "a row 30s AHEAD of its run's created_at clears — that is clock jitter, not a wrong id" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_SKEWED" --health-fixture "$HEALTH_BASE"
+not_saw "ALIBI-WINDOW" "the ${ALIBI_SKEW}s allowance is applied at the START of the span too, not only the end"
+
+section "(c2d) NO SPAN, NO VERDICT — an absent updated_at REFUSES rather than clears"
+# The second constraint's own failure mode. A run listing with no `updated_at`
+# leaves nothing to compare the row against — and the wrong answer is the
+# COMFORTING one: falling back to bare membership would silently restore the very
+# hole (c2c) closes, and every run would look green again. The other wrong answer
+# is accusing over a missing field. Refuse: a named class, in neither direction,
+# subtracted from the WRONG denominator, rc 2.
+RUNS_NOSPAN="$(jq 'del(.workflow_runs[].updated_at)' "$RUNS_BASE" > "$TMP/runs-nospan.json" && echo "$TMP/runs-nospan.json")"
+fixture_ok "$RUNS_NOSPAN"
+if grep -q 'updated_at' "$RUNS_NOSPAN"; then
+  bad "the no-span fixture still carries updated_at — the refusal arm below would be vacuous"
+else
+  ok "the no-span fixture genuinely states no updated_at on any run"
+fi
+run_cr 2 "with no run span on the page, a row naming a real delivering run is DEFERRED, not cleared" \
+  --runs-fixture "$RUNS_NOSPAN" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+saw "ALIBI-INTERVAL-UNREADABLE" "the refusal is a named class, not a silent clear"
+not_saw "RECONCILED:" "an unreadable span never greens — the comforting direction is the one this arm forbids"
+# …and the SAME fixture with the span restored is green, so the red above is the
+# missing field and nothing else about this fixture.
+run_cr 0 "the same rows with the run spans present reconcile" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+
 section "(c3) NO delivering_run_id at all — the head sha is the FALLBACK, not dead"
 CROWN_NORUNID_OK="$(crown_json crown-norunid-ok \
   "$(row "$SHA_A" cp false "$IN1" omit)" \
@@ -579,9 +676,9 @@ LIVE_SHA2="c47ced9291264e75149a7adbda46ce1532d947c3"
 LIVE_PRIOR="f74939277c283668f461a92989820bcecb05733b"
 RUNS_LIVE="$TMP/runs-live.json"
 printf '%s' '{"workflow_runs":[
-  {"id":32726853417,"head_sha":"'"$LIVE_SHA"'","status":"in_progress","conclusion":null,"created_at":"2026-08-24T12:23:37Z"},
-  {"id":32726835915,"head_sha":"'"$LIVE_SHA2"'","status":"in_progress","conclusion":null,"created_at":"2026-08-24T12:23:24Z"},
-  {"id":32723174205,"head_sha":"'"$LIVE_PRIOR"'","status":"completed","conclusion":"success","created_at":"2026-08-24T11:41:52Z"}]}' \
+  {"id":32726853417,"head_sha":"'"$LIVE_SHA"'","status":"in_progress","conclusion":null,"created_at":"2026-08-24T12:23:37Z","updated_at":"2026-08-24T12:23:37Z"},
+  {"id":32726835915,"head_sha":"'"$LIVE_SHA2"'","status":"in_progress","conclusion":null,"created_at":"2026-08-24T12:23:24Z","updated_at":"2026-08-24T12:23:24Z"},
+  {"id":32723174205,"head_sha":"'"$LIVE_PRIOR"'","status":"completed","conclusion":"success","created_at":"2026-08-24T11:41:52Z","updated_at":"2026-08-24T11:51:52Z"}]}' \
   > "$RUNS_LIVE"
 fixture_ok "$RUNS_LIVE"
 # EVERY run on this page states its legs, including the two that were in flight.
@@ -1379,8 +1476,18 @@ saw "BEHIND: 1 of 2" "after the writer existed, a missing row is BEHIND again"
 
 section "(m2) a window of NOTHING BUT pre-writer runs has no denominator"
 RUNS_ALL_PRE="$(runs_json runs-all-pre "$SHA_A:$PRE" "$SHA_B:$PRE")"
+# The rows are stamped at PRE too, INSIDE the spans of the runs they name. Using
+# CROWN_BASE here (rows first seen hours after runs that had already ended) makes
+# this fixture state an impossible pair, and the run-interval alibi constraint
+# correctly calls that WRONG (exit 1) — which is a true verdict about a fixture
+# that never meant to say it, and it would hide the empty-denominator refusal
+# this section is actually about.
+CROWN_ALL_PRE="$(crown_json crown-all-pre \
+  "$(row "$SHA_A" cp false "$PRE" 1)" \
+  "$(row "$SHA_A" instance false "$PRE" 1)" \
+  "$(row "$SHA_B" instance false "$PRE" 2)")"
 run_cr 2 "every delivering run in the window predates the recorder" \
-  --runs-fixture "$RUNS_ALL_PRE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+  --runs-fixture "$RUNS_ALL_PRE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_ALL_PRE" --health-fixture "$HEALTH_BASE"
 saw "PREDATE the recorder's birth" "an all-exempt window is refused, not rounded to reconciled"
 not_saw "RECONCILED:" "it never claims reconciliation over an empty BEHIND denominator"
 
@@ -1572,7 +1679,13 @@ esac
 SH
 cat > "$FAKE/curl" <<'SH'
 #!/usr/bin/env bash
-cat "$CR_FAKE_HEALTH"
+# Honours -o the way curl does (the subject now reads the health body through
+# scripts/lib/bp-curl.sh, which captures the status with -w and the body with
+# -o) and answers 200 as the status.
+out=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+if [ -n "$out" ]; then cat "$CR_FAKE_HEALTH" > "$out"; else cat "$CR_FAKE_HEALTH"; fi
+printf 200
 SH
 cat > "$FAKE/ssh" <<'SH'
 #!/usr/bin/env bash
@@ -2339,11 +2452,11 @@ runs_bulk() { # <name> <first-id> <count> <sha:created> <filler-sha> <filler-cre
     printf '{'
     [ "$trunc" = "true" ] && printf '"truncated":true,'
     printf '"workflow_runs":['
-    printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$base" "$a" "$acr"
+    printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}' "$base" "$a" "$acr" "$(iso_plus "$acr" "$RUN_SPAN_SECONDS")"
     local i=1
     while [ "$i" -lt "$count" ]; do
-      printf ',{"id":%d,"head_sha":"%s","conclusion":null,"status":"in_progress","created_at":"%s"}' \
-        "$((base + i))" "$fsha" "$fcreated"
+      printf ',{"id":%d,"head_sha":"%s","conclusion":null,"status":"in_progress","created_at":"%s","updated_at":"%s"}' \
+        "$((base + i))" "$fsha" "$fcreated" "$fcreated"
       i=$((i + 1))
     done
     printf ']}'

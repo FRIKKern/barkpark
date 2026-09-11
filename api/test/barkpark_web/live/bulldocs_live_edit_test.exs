@@ -153,6 +153,138 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
     end
   end
 
+  test "a reconnect resumes only this writable Paper's existing editing mode", %{
+    conn: conn,
+    slug: slug
+  } do
+    before = stored_blocks(slug)
+
+    conn =
+      conn
+      |> writer_conn()
+      |> put_connect_params(%{"paper_editing_key" => "#{@dataset}:paper:#{slug}"})
+
+    {:ok, view, _html} = live(conn, "/papers/#{slug}")
+    assert assigns_of(view).editing?
+    assert has_element?(view, "#paper-edit-toggle[data-editing=true]")
+    assert stored_blocks(slug) == before
+  end
+
+  test "reconnect mode hints cannot grant edit authority or target another Paper", %{
+    conn: conn,
+    slug: slug
+  } do
+    for {session, key} <- [
+          {conn, "#{@dataset}:paper:#{slug}"},
+          {writer_conn(conn), "#{@dataset}:paper:other"}
+        ] do
+      {:ok, view, _html} =
+        live(put_connect_params(session, %{"paper_editing_key" => key}), "/papers/#{slug}")
+
+      refute assigns_of(view).editing?
+    end
+  end
+
+  test "authenticated leases resume ownership and pending exact-once replay unfreezes it", %{
+    conn: conn,
+    slug: slug
+  } do
+    writer = writer_conn(conn)
+    {:ok, first, _html} = live(writer, "/papers/#{slug}")
+    render_click(first, "paper-toggle-edit", %{})
+
+    original_rev = assigns_of(first).paper_rev
+
+    first_payload = %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => original_rev,
+      "container_kind" => "document",
+      "container_run_ids" => ["b-head", "b-body", "b-extra"],
+      "ops" => [
+        %{
+          "op" => "append-block",
+          "block" => %{
+            "id" => "first-reconnect-table",
+            "type" => "table",
+            "head" => [[], []],
+            "rows" => [[[], []]]
+          }
+        }
+      ]
+    }
+
+    render_hook(first, "paper-ops", first_payload)
+    leases = assigns_of(first).paper_canvas_lease_tokens |> Map.values()
+    assert length(leases) == 1
+    persisted_rev = assigns_of(first).paper_rev
+    assert persisted_rev == original_rev + 1
+
+    reconnect = %{
+      "paper_editing_key" => "#{@dataset}:paper:#{slug}",
+      "paper_canvas_lease_key" => "#{@dataset}:paper:#{slug}",
+      "paper_canvas_leases" => leases,
+      "paper_canvas_lease_pending" => true
+    }
+
+    {:ok, resumed, html} = live(put_connect_params(writer, reconnect), "/papers/#{slug}")
+
+    assert assigns_of(resumed).editing?,
+           inspect(
+             Map.take(assigns_of(resumed), [
+               :editing?,
+               :can_edit?,
+               :paper_canvas_resume_status,
+               :paper_canvas_resume_attempt,
+               :paper_canvas_resume_halt,
+               :paper_canvas_retained
+             ]),
+             pretty: true
+           )
+
+    assert assigns_of(resumed).paper_canvas_resume_status == :pending
+
+    assert MapSet.member?(
+             assigns_of(resumed).paper_canvas_retained.owners.document,
+             "first-reconnect-table"
+           )
+
+    assert html =~ ~s(data-paper-canvas-resume-state="pending")
+    assert html =~ ~s(inert)
+
+    pending_payload = %{
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => persisted_rev,
+      "container_kind" => "document",
+      "container_run_ids" => [
+        "b-head",
+        "b-body",
+        "b-extra",
+        "first-reconnect-table"
+      ],
+      "ops" => [
+        %{
+          "op" => "append-block",
+          "block" => %{
+            "id" => "pending-reconnect-table",
+            "type" => "table",
+            "head" => [[], []],
+            "rows" => [[[], []]]
+          }
+        }
+      ]
+    }
+
+    render_hook(resumed, "paper-ops", pending_payload)
+
+    assert assigns_of(resumed).paper_canvas_resume_status == :resumed
+    refute render(resumed) =~ ~s(data-paper-canvas-resume-halt="true")
+    assert assigns_of(resumed).paper_rev == persisted_rev + 1
+    assert length(Map.values(assigns_of(resumed).paper_canvas_lease_tokens)) == 2
+
+    render_hook(resumed, "paper-ops", pending_payload)
+    assert assigns_of(resumed).paper_rev == persisted_rev + 1
+  end
+
   describe "criterion 2 — anonymous: no editor markup, every edit event refused" do
     test "the anonymous render carries neither the toggle nor the editor", %{
       conn: conn,
@@ -224,21 +356,50 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert block_text(slug, "b-body") == "Original body text"
     end
 
-    test "the reader's OWN events keep working — the gate is not a blanket paper-* block",
+    test "the reader's socket-local events keep working — the gate is not a blanket paper-* block",
+         %{conn: conn, slug: slug} do
+      {:ok, view, _html} = live(conn, "/papers/#{slug}")
+
+      render_hook(view, "rail-select", %{"event-id" => "some-event"})
+      assert assigns_of(view).selected_event_id == "some-event"
+      refute flash_of(view)["error"]
+
+      render_hook(view, "close-diff", %{})
+      assert assigns_of(view).diff_open == false
+      refute flash_of(view)["error"]
+    end
+
+    # Ruling arpss-bulldocs-anon-paper-event-write-ruling (2026-09-10):
+    # `paper-action` used to run on THIS anonymous socket (it acked the click
+    # and wrote a paper_events row). It no longer does. It is still not an
+    # @edit_events member — the second, weaker gate catches it, with its own
+    # copy — which is exactly why the two arms are asserted separately.
+    test "paper-action is refused on an anonymous socket, with the anon copy",
          %{conn: conn, slug: slug} do
       {:ok, view, _html} = live(conn, "/papers/#{slug}")
 
       render_hook(view, "paper-action", %{"action" => "grill"})
 
-      # The handler ran (it acks the click inline); the gate never saw it.
+      assert assigns_of(view).last_action == nil
+      assert flash_of(view)["error"] == Edit.anon_denial()
+      refute flash_of(view)["error"] == Edit.denial()
+      assert Process.alive?(view.pid)
+    end
+
+    # The weaker gate, proved weaker: a READ-only token cannot edit, but it is
+    # a principal, so the reader's own control runs for it.
+    test "paper-action runs for a read-only token — a principal, not a writer",
+         %{conn: conn, slug: slug} do
+      raw = "eol-action-reader-#{System.unique_integer([:positive])}"
+      {:ok, _token} = Auth.create_token(raw, "eol action reader", @dataset, ["read"])
+
+      {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
+
+      assert assigns_of(view).can_edit? == false
+      render_hook(view, "paper-action", %{"action" => "grill"})
+
       assert assigns_of(view).last_action == "grill"
       refute flash_of(view)["error"]
-
-      render_hook(view, "rail-select", %{"event-id" => "some-event"})
-      assert assigns_of(view).selected_event_id == "some-event"
-
-      render_hook(view, "close-diff", %{})
-      assert assigns_of(view).diff_open == false
     end
   end
 
@@ -489,6 +650,100 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
                BulldocsLive.handle_event("paper-op", fresh_rebase, conflicted_socket)
 
       assert block_text(slug, "b-extra") == "Stale tab"
+    end
+
+    test "new table keeps one reader editor until leaving Edit releases session ownership", %{
+      conn: conn,
+      slug: slug
+    } do
+      {:ok, view, _} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+      request_id = Ecto.UUID.generate()
+
+      render_hook(view, "paper-ops", %{
+        "request_id" => request_id,
+        "if_rev" => assigns_of(view).paper_rev,
+        "container_kind" => "document",
+        "container_run_ids" => ["b-head", "b-body", "b-extra"],
+        "ops" => [
+          %{
+            "op" => "append-block",
+            "block" => %{"id" => "new-table", "type" => "table", "rows" => [["Native"]]}
+          }
+        ]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{
+        request_id: ^request_id,
+        runs: [%{blocks: blocks}]
+      })
+
+      assert Enum.count(blocks, &(&1["id"] == "new-table")) == 1
+      refute has_element?(view, ~s(bp-paper-editor[data-editor-mode="table"]))
+
+      assert assigns_of(view).paper_canvas_retained.owners == %{
+               document: MapSet.new(["new-table"])
+             }
+
+      saved = stored_blocks(slug)
+      render_click(view, "paper-toggle-edit", %{})
+      assert assigns_of(view).paper_canvas_retained == nil
+      render_click(view, "paper-toggle-edit", %{})
+      assert has_element?(view, ~s(bp-paper-editor[data-editor-mode="table"]))
+      assert stored_blocks(slug) == saved
+    end
+
+    test "a new Table stays in its nested Section reader run after acknowledgement", %{
+      conn: conn,
+      slug: slug
+    } do
+      intro = %{"id" => "nested-intro", "type" => "paragraph", "text" => "Keep"}
+      target = %{"id" => "nested-target", "type" => "paragraph", "text" => "/table"}
+
+      assert {:ok, _} =
+               Content.apply_paper_block_ops(
+                 slug,
+                 [
+                   %{
+                     "op" => "append-block",
+                     "block" => %{
+                       "id" => "nested-section",
+                       "type" => "section",
+                       "blocks" => [intro, target]
+                     }
+                   }
+                 ],
+                 @dataset
+               )
+
+      {:ok, view, _} = live(writer_conn(conn), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+      request_id = Ecto.UUID.generate()
+      table = %{"id" => "nested-table", "type" => "table", "rows" => [["Native"]]}
+
+      render_hook(view, "paper-ops", %{
+        "request_id" => request_id,
+        "if_rev" => assigns_of(view).paper_rev,
+        "container_kind" => "section",
+        "container_id" => "nested-section",
+        "container_run_ids" => ["nested-intro", "nested-target"],
+        "ops" => [%{"op" => "replace-block", "id" => "nested-target", "block" => table}]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{request_id: ^request_id, runs: runs})
+
+      run_id =
+        BarkparkWeb.Studio.StudioLive.PaperCanvas.section_run_slug(slug, "nested-section")
+        |> BarkparkWeb.Studio.StudioLive.PaperCanvas.run_id(0)
+
+      assert %{blocks: [^intro, %{"id" => "nested-table"}]} =
+               Enum.find(runs, &(&1.run_id == run_id))
+
+      refute has_element?(view, ~s(bp-paper-editor[data-editor-mode="table"]))
+
+      assert assigns_of(view).paper_canvas_retained.owners == %{
+               {:section, "nested-section"} => MapSet.new(["nested-table"])
+             }
     end
 
     test "a paper-ops batch folds atomically through apply_paper_block_ops", %{

@@ -7907,7 +7907,7 @@ so **every residue row was counted as carrying a disposition.** On the live boar
 `172/172 PASS` over 15 rows nobody adjudicated. **The epic's own certifying instrument was emitting
 the exact class of success claim the epic exists to kill**, in the same wave that turned the law onto
 the ledger writer. Fixed at review, mutation-proven (restoring the old numerator reds the selftest,
-79 → 80 checks). The denominator is unchanged and still the whole live board. **Nobody should read
+which gained exactly one check). The denominator is unchanged and still the whole live board. **Nobody should read
 that as a builder failure — it is what a review is for, and it is the single best argument in this
 epic's history for the reviewer phase existing at all.**
 
@@ -8405,7 +8405,7 @@ mean something. `hzResDone` stays cut (PDS-D367).
   census whose real code was 1. **The epic's own law, violated by the epic's own certifying command.**
   Every certifying invocation redirects to a file and captures `$?` directly.
   Separately: the census execs `python3 -`, so `sys.path[0]` is the CWD and `bisect` is a transitive
-  stdlib import. A stray `bisect.py` in the working directory fails ALL 80 checks **and executes that
+  stdlib import. A stray `bisect.py` in the working directory fails EVERY check in the selftest **and executes that
   file's top-level code** — reproduced accidentally when a real leftover script in a shared scratchpad
   issued live `bp` writes during a selftest run. That is arbitrary code execution inside a certifying
   run; it is filed, and until it is fixed every gate runs from a clean directory.
@@ -8487,7 +8487,7 @@ reached by paying the round, not by moving the bar. It certifies **THE ROUND, ne
 | `pds-w27-round-bare-30` | #8408 | clause 4(a) 30 → 0, clause 1 held (+30 reasons raised BOTH counts by exactly 30 — that arithmetic IS the collision proof). All 30 verdicts re-derived by content, not inherited. |
 | `pds-w27-round-contradiction-13` | #8409 | 14 rows (a 14th minted mid-run) lifted out of `@claimable_statuses`. Reviewer re-ran the gate twice AND with a reader-independent derivation over the paged 3993-row corpus: 0 both ways, store-wide. |
 | `pds-w27-reader-transport-honesty` | #8410 | nine HTTP-200 poisons flip rc=0 → rc=1 with the named code `unreadable_list_page`; the fallback is DELETED, not guarded. |
-| `pds-w27-census-self-honesty` | #8411 | clause 6 as a row-ID list, pipeable `--json`, `&order=_createdAt:asc`. Selftest 80 → 106 checks. |
+| `pds-w27-census-self-honesty` | #8411 | clause 6 as a row-ID list, pipeable `--json`, `&order=_createdAt:asc`. Selftest 80 → 106 checks as of 2026-07-31 — re-derive, never quote. |
 | `pds-w27-brief-card-disposition` | #8412 | the adjudication term rides the brief card, and the hostile tripwire MOVED (28640 → 29790 B) before the renderer line was written. |
 | `pds-w27-hetzner-gate-file-blindness` | #8413 | derivation globbed to 11 files / 20 sites; `archive` and `eject` now observe what they claim; the anti-DISARM gate refuses a keyed verb whose shape reads no table. |
 
@@ -8786,9 +8786,12 @@ That is this wave.
   polluted directory on the host. Reproduced by accident THREE times, once inside this wave.
 
 - **PDS-D400 — TWO NUMBERS THIS WAVE RETIRES FROM CIRCULATION.** The census hash is **sha256**, not
-  md5 (`census.sh:641`). And PDS-D383's "a stray `bisect.py` fails ALL 80 checks" is stale in
-  quantity — the selftest is **106 checks** today and the stray fails **103**; the same stale 80
-  appears in the row's own description and in `tooling/grip/ledger/pds-w27-census-json-honesty-2026-07-31.md:63`.
+  md5 (`census.sh:641`). And PDS-D383's original "fails ALL 80 checks" was stale in quantity —
+  **106 checks, measured 2026-07-31 by `bash scripts/pds-ledger-census_test.sh`**, of which the stray
+  failed **103**; the same stale 80 appeared in the row's own description and in
+  `tooling/grip/ledger/pds-w27-census-json-honesty-2026-07-31.md`.
+  Those two figures are DATED READINGS, not standing properties: the count moves every wave, so
+  re-derive it and never quote this line. (D383's sentence now states totality without a count.)
   Three independent copies of one number that moved and no instrument noticed — a clean live specimen
   for the authored-rerun regime this wave installs.
 
@@ -13348,7 +13351,9 @@ second in-tree venue ("**AND IN BOTH @moduledocs**"), with a grep on shipped sou
   reveal an unstated cut in `(4.45 s, 8.91 s]`. **A class whose predicate does not exist cannot descend
   from its substitution.**
 * **D647's ledger-census price is SUPERSEDED**: 24.05–24.34 s CPU at load1 ~8, not 42.6–49.3. Its
-  **144 checks** figure stands (load-independent, five runs), and D637's 107 is dead.
+  **144 checks** figure stands as a same-day reading (load-independent, five runs; measured
+  2026-08-04 by `bash scripts/pds-ledger-census_test.sh` — the count moves per wave, re-derive it),
+  and D637's 107 is dead.
 * **THE 40 s DOOR PRICES A DOOR NOBODY WALKS THROUGH.** `git grep -in 'pds' origin/main -- .github`
   returns **ONE** line repo-wide and it is a prose comment (`paper-readers.yml:60`) — reproducing D607
   at 20 instruments. `pds-ledger-census_test.sh` has **no executable caller anywhere in the repo**: 20
@@ -13422,7 +13427,8 @@ second in-tree venue ("**AND IN BOTH @moduledocs**"), with a grep on shipped sou
   `+0` and `+1` rather than `==0` and `!=0`. **Adjudicating alone would make the original pass and be
   re-taken hostage by the very next charter. Fix the coupling, do not just clear the corpus.**
 * **`pds-ledger-census_test.sh`'s tiering is REFRAMED, not answered.** Its 144 checks do essentially no
-  work — the whole cost is booting the census 144 times: 144 × `census --help` (zero fixture work) costs
+  work — 144 measured 2026-08-04 by that harness, re-derive it, the count moves per wave. The whole
+  cost is booting the census 144 times: 144 × `census --help` (zero fixture work) costs
   **more** than the entire suite, and 144 bare `python3 -I -c pass` is the ~7 s floor. The census is
   `exec python3 -I - "$@" <<'PYEOF'`, re-parsing a 1,103-line program every invocation. **Refuse the
   "cheap arm / expensive arm" split**: all 144 checks cost the same and each is a distinct failure mode,
@@ -15011,7 +15017,7 @@ The 16.8x scratch-target collapse is NOT vacuity: the un-metered run executes al
 is contention, not a skipped path. **A criterion-4 correction the builder must carry**: `--measure` DISCARDS
 the subject's output, so the run tail needs a separate un-metered run — and the two harnesses do not agree on
 their tail. `pds-scratch-target_test.sh` prints `---- 0 failure(s)`; `pds-ledger-census_test.sh` prints
-`SELFTEST PASS: 173 checks.` and contains **no `failure(s)` string on the green path at all**. A criterion
+`SELFTEST PASS: <N> checks.` (N re-derived by the run, never pinned) and contains **no `failure(s)` string on the green path at all**. A criterion
 demanding a "`0 failure(s)`-class line" from the ledger harness is unsatisfiable as written.
 
 Two more blockers the dispatch did not name. **THE SLICE IS DOUBLY FILED**:
@@ -15216,5 +15222,7 @@ for no dataset carrying tasks, so this is a test-level proof of an ARMED path, e
 it was filed. That is the point: fail-closed costs nothing while the path is cold, and it never silently
 destroys stamped evidence once the path warms. **A future sync-of-tasks feature must now design its
 reconciliation deliberately, against a door that refuses it** — and this decision is the reason it must,
-rather than inheriting a hole nobody re-derived. `pds-bl-github-linkput-auto-publish-erasure` stays open
-for the audit-trail half neither closure answers.
+rather than inheriting a hole nobody re-derived. LEDGER NOTE 2026-09-10 (lead-gates-r4, from #17222's
+charter-ledger sweep): `pds-bl-github-linkput-auto-publish-erasure` is `done` on the ledger — closed by the
+lead after #13122 merged with every criterion stamped — so it does NOT stay open; the audit-trail half
+neither closure answers has no open row tracking it and needs one if anyone wants it built.

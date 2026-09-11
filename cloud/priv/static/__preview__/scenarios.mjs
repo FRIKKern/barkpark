@@ -527,6 +527,20 @@ function site(over) {
       domains: [],
       scale_mode: "always_on",
       port: 3000,
+      // cch-w43-bl (the envelope census, generalized past /v1/me): `theme` and
+      // `url` are stated by `site_json/2` on EVERY site row and READ by app.js
+      // (`themeSel.value = site.theme || ""` and `siteThemeOptionsHtml(site.theme
+      // || "")` preselect the palette; `if (s && s.url) return s.url` is the
+      // Visit door). This producer stated NEITHER, so no preview scenario could
+      // paint either band and every gate downstream of them certified a site the
+      // console had never been shown.
+      //
+      // Null is the honest default for both, and for different reasons: an
+      // unthemed site takes the template default (the select's own "" option),
+      // and the LIST surface calls `site_json/1` → `site_json(s, nil)`, which
+      // makes `url` nil for every row it serves. A row that IS themed overrides.
+      theme: null,
+      url: null,
       // ssw8 (charter D82): the ELEVEN binding fields site_json/2 serializes.
       // The factory emitted 21 fields and NOT ONE of them was a binding field,
       // so no fixture could express binding truth at all. Shape derived from
@@ -600,6 +614,14 @@ const boundSite = site({
   bootstrap_workspace: "acme", bootstrap_project: "site", bootstrap_dataset: "production",
   workspace: "acme", project: "site", dataset: "production",
   content_bound: true,
+  // cch-w43-bl: the corpus's ONE themed site. `site_json/2` sends `theme` on
+  // every row and app.js preselects the site-theme <select> from it, but until
+  // this line NO fixture carried a non-null theme, so the selected-option band
+  // had never been painted by any scenario — the select rendered its "Template
+  // default" arm in 100% of preview renders and the gate certified the other
+  // arm by never rendering it. A site that already declares a template is where
+  // a palette belongs.
+  theme: "ember",
 });
 // `content_bound` is DELETED, not false: a control plane that predates the field
 // says nothing, and "nothing" must not be read as "no".
@@ -632,12 +654,22 @@ const bindingSites = [boundSite, unknownBindingSite, mismatchedBindingSite];
 // gets its own states-complete rows: live / rebuilding / deploy-failed /
 // never-deployed — one per pill role. Real fields only; the invented
 // Marketing/Docs "kind" taxonomy has no field to render.
-const lastDeploy = (status, trigger, ago) => ({
+// cch-w43-bl (the envelope census, generalized): `put_last_deployment/3` folds
+// `last_deployment_json/1` onto every /v1/sites row, and that helper states SIX
+// keys — status, trigger, failure_class, failure_reason, inserted_at,
+// updated_at. This producer stated four. app.js binds the embed to the very
+// identifier the deploy rows use (`var d = s && s.last_deployment`), so the two
+// unstated keys are read off it exactly as they are read off a deployment.
+// Null is the honest default: a last deploy that did not fail has no class and
+// no reason.
+const lastDeploy = (status, trigger, ago, over) => Object.assign({
   status,
   trigger,
+  failure_class: null,
+  failure_reason: null,
   updated_at: tMinus(ago),
   inserted_at: tMinus(ago + 120),
-});
+}, over || {});
 // cch-w16-s4 (charter D199) — THE FIXTURE FIDELITY REPAIR. Until this slice
 // `site()` defaulted `current_deployment_id: null` and NOT ONE list row
 // overrode it, so the corpus asserted a state the SERVER CANNOT PRODUCE: pill
@@ -1065,6 +1097,29 @@ function deployment(over) {
       // fail. The key is on the base shape so a fixture that forgets it is a
       // missing key rather than a different wire.
       failure_class: null,
+      // cch-w43-bl (the envelope census, generalized): the THREE remaining keys
+      // `deployment_json/1` states on every row that app.js reads and this
+      // producer did not state.
+      //
+      //   * trigger — `deployTriggerLabel(d.trigger)` is a meta chip on BOTH
+      //     deploy rows (production and preview) and `d.trigger ===
+      //     "content-auto"` gates the auto-deploy copy. Only a handful of
+      //     hand-overridden rows carried it, so the DEFAULT row — the one behind
+      //     most of the corpus — rendered a deploy list with no provenance chip
+      //     at all, which is a shape the server cannot produce: every real row
+      //     has a trigger. "manual" is the honest default (someone pressed
+      //     Deploy); content-auto rows override.
+      //   * failure_code / failure_message — the box's refusal, UNFUSED
+      //     (`{ code: d.failure_code, message: d.failure_message }`). Null on
+      //     every row that is not a typed box refusal, which is the default.
+      trigger: "manual",
+      failure_code: null,
+      failure_message: null,
+      // `stage` rides the same base shape (`DeployLedger` stamps it) and is null
+      // on a row no stage was recorded for. Carried so a fixture that omits it
+      // is a MISSING key rather than a different wire — dr-w1-s2's rule for
+      // `failure_class` above, applied to the sibling it left behind.
+      stage: null,
       became_live_at: null,
       environment: "production",
       branch: null,
@@ -2547,14 +2602,19 @@ const siteStatesDomains = {
 // that no longer exists, which is the exact shape wave 30 exists to remove;
 // `__app.test.mjs`'s bidirectional census guards app.js but has no reach into
 // this file, so it stayed green.
+//
+// NINE AS OF dr-w13-bl-abandonment-splits-off-the-flood. `deployment_abandoned`
+// is the given-up rebuild chain, split off `deployment_failed` with its own
+// column, producer, renderer arms and console row in one change — so the fixture
+// seeds it too, and it is default-ON like every other failure.
 const NOTIF_EVENT_KEYS = [
   "provision_succeeded", "provision_failed", "deployment_failed",
-  "deployment_succeeded", "deployment_refused",
+  "deployment_succeeded", "deployment_refused", "deployment_abandoned",
   "agent_reachable", "agent_unreachable", "subscription_past_due",
 ];
 const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
 const NOTIF_CHANNEL_TYPES = ["discord", "slack", "telegram", "pushover", "webhook"];
-const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "deployment_refused", "agent_unreachable", "subscription_past_due"];
+const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "deployment_refused", "deployment_abandoned", "agent_unreachable", "subscription_past_due"];
 function notifSettings(over) {
   const base = {
     transport: "instance",
@@ -2805,6 +2865,85 @@ if (cruelName.length !== BARKPARK_NAME_MAX) {
   throw new Error(`cruel fixture: name is ${cruelName.length} chars, the server's cap is ${BARKPARK_NAME_MAX}`);
 }
 
+// ── cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche ────────────────────
+// TWO MORE 255-CAP TEXT HOSTS the corpus had never populated with a maximal
+// value. Both are built the way `CRUEL_SITE_NAME` is — literal concatenation
+// checked by `atLength`, so a corpus edit that quietly shortens either one
+// refuses on LOAD in every consumer of this module instead of passing on a
+// stale literal.
+//
+// 1) `github.account_login` → `.fleet-name` on the GitHub connection card
+//    (app.js `githubCardHtml`, the connected arm: `'GitHub · ' + esc(
+//    g.account_login)`). EFFECTIVE CAP 255, and 255 is the min of the only two
+//    layers that bound it: `validate_length(:account_login, max: 255)`
+//    (github/installation.ex:48) and the `add :account_login, :string` column
+//    (priv/repo/migrations/20260702160000_create_github_installations.exs:18,
+//    i.e. varchar(255)). NOTHING downstream shortens it — app.js `esc()`es and
+//    paints, and the card has no truncation of its own.
+//
+//    REACHABILITY: L2 (a source derivation, no write was run). The value does
+//    NOT come from any Barkpark request field. `POST /v1/github/installations`
+//    (router.ex:5753, `Auth.require_team_admin`) reads only `installation_id`
+//    from the body; `GitHub.record_installation/2` (github.ex:114) then takes
+//    `account_login` from `client().get_installation/1`, which in prod is
+//    `Real.get_installation/1` reading `decoded["account"]["login"]` off
+//    api.github.com (github/real.ex:51-56). So the ledger row below is
+//    INADMISSIBLE-by-derivation and deliberately NOT a reachability claim: it
+//    is an UPPER BOUND on a host whose producer this repo does not bound.
+//    That is precisely why the twin is worth carrying — nothing in Barkpark
+//    would stop a long login if GitHub ever returned one.
+//
+// 2) `barkpark.pinned_release` → `.fleet-meta` (the mono metadata line under a
+//    fleet row's name). EFFECTIVE CAP 255: `validate_length(:pinned_release,
+//    max: 255)` in `autoupdate_changeset/2` (registry/barkpark.ex:981) and the
+//    `add :pinned_release, :string` column (priv/repo/migrations/
+//    20260707110000_add_autoupdate_to_barkparks.exs:20). The changeset's only
+//    other clause is an `update_change` TRIM (barkpark.ex:977-980) — no
+//    format regex, so a length-only cruel string is server-legal here (unlike
+//    `site.domains`, which is FORMAT-LEGAL). The downstream derivation
+//    LENGTHENS rather than shortens: `fleetAutoupdateText` renders
+//    `"pinned " + vRel(pinned_release)` and `vRel` prepends a "v" to anything
+//    that does not already start with one — so the fixture starts with "v" and
+//    the rendered segment is exactly `"pinned " + 255` = 262 characters.
+//
+//    REACHABILITY: L2. `PATCH /v1/barkparks/:id/autoupdate` (router.ex:4271,
+//    `Auth.require_current_team_admin`) casts the body's `pinned_release`
+//    straight into `autoupdate_changeset/2`, and the console writes it from
+//    `#pin-input` (app.js `openPinModal`), an input with NO `maxlength` and no
+//    client-side format check — `value = $("#pin-input").value.trim()`. A team
+//    admin can type 255 characters into that box and have the server keep
+//    them. This one IS a reachability claim.
+//
+//    SINGLE UNBROKEN TOKEN, on purpose: `.fleet-meta` (app.css:1069) declares
+//    font-size/colour/font-family/margin and NOTHING about wrapping, so a
+//    string with a hyphen or a dot in it would wrap by itself and the row
+//    would be BREAKABLE rather than cruel.
+const cruelAccountLogin = atLength("github account_login",
+  "AcmeEngineeringNorthernEuropeanPlatformInfrastructureGroup" +
+  "ContentDeliveryAndPublishingOperationsOrganisationAccount" +
+  "ForTheWholeNordicForlagsgruppenIncludingEverySubsidiary" +
+  "AndItsSharedDeploymentToolingAndReleaseAutomationTeamAccountForEveryRegionAndImprints", 255);
+const cruelPinnedRelease = atLength("barkpark pinned_release",
+  "vAcmePublishingPlatformProductionReleaseCandidateBuild" +
+  "FromTheNordicForlagsgruppenMonorepoPipelineNumber" +
+  "SevenThousandTwoHundredAndEightyOneRebuiltAfterThe" +
+  "ArchiveMigrationOfEighteenNinetyTwoToTwentyTwentySixAcrossEveryImprintAndSubsidiaryFinalTaggedRebuilds", 255);
+// The cruelty is SHAPE as well as length on both: a break opportunity makes the
+// host wrap itself and the cell can no longer fail (the ledger's BREAKABLE
+// refusal). Asserted here, at load, rather than trusted by eye.
+for (const [what, v] of [["github account_login", cruelAccountLogin], ["barkpark pinned_release", cruelPinnedRelease]]) {
+  if (/[\s\-./_]/.test(v)) {
+    throw new Error("cruel fixture " + what + " carries a line-break opportunity (space, hyphen, dot, slash or underscore) — it would wrap by itself, which is BREAKABLE, not cruel");
+  }
+}
+// vRel() prepends "v" to anything that does not start with one, so a pin that
+// lost its leading "v" would render 256 characters and this fixture's own
+// derivation ("pinned " + 255 = 262) would be a sentence about a different
+// string.
+if (cruelPinnedRelease[0] !== "v") {
+  throw new Error("cruel fixture barkpark pinned_release must start with \"v\" — vRel() prepends one otherwise and the rendered length stops matching the cap this fixture cites");
+}
+
 // The cruel row is a LIVE, healthy, up-to-date box: nothing about its state is
 // unusual, and that is the point — the ONLY variable is the length of two
 // strings a person is allowed to type.
@@ -2831,6 +2970,28 @@ const cruelInstance = bpBase({
   provider: "hetzner",
   provision_status: "succeeded",
 });
+
+// cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche — THE PINNED TWIN, and
+// it is a per-SCENARIO override rather than a field on `cruelInstance` itself,
+// because `cruelInstance` is also the subject of `instance-cruel-detail`.
+//
+// MEASURED, NOT GUESSED. With the pin on the shared row, overflow-guard's
+// W21-detail-url-text-page-bound leg went red 24/24 cells: the instance detail
+// page read documentElement.scrollWidth 2054 against a 320 viewport (2294 at
+// 830-1000, 2378 at 1440), in BOTH themes. The host is a DIFFERENT one from
+// this row's `.fleet-meta` — `autoupdatePolicyLabel()` paints the pin into the
+// detail rail's "Autoupdate" row as a `.badge` inside `.rail-row .v`, and while
+// `.rail-row .v` carries `word-break: break-word` + `min-width: 0` the `.badge`
+// inside it does not break. That is a REAL, REACHABLE defect on a second host
+// and it is deliberately OUT of this slice's fence (which is one host, one CSS
+// rule); it is reported with its numbers rather than half-fixed here.
+//
+// A VALUE ON AN EXISTING ROW, never a new row: smoke.mjs pins this fixture's
+// `barkparks.length` at 3 and reads three rows out of it by predicate
+// (custom_host > 200, provision_error > 200, the one other host-bearing row),
+// so an inserted row is the wave-23 defect this corpus already paid for once.
+// A spread keeps all four of those counts identical.
+const cruelPinnedInstance = { ...cruelInstance, pinned_release: cruelPinnedRelease };
 
 // ── cch-w23-s1 — THE CRUEL PROVISION ERROR (the SHAPE axis, not the length) ──
 // The cruel corpus above bites on two strings a PERSON types. This one bites on
@@ -3931,6 +4092,35 @@ export const SCENARIOS = {
         is_trial: false,
         trial_days_remaining: null,
       },
+      // ── cch-w49-bl · THE ONE usageSummary FIXTURE ON A BILLING ACTOR ──────
+      // Minted here and NOWHERE else on the #billing slice, deliberately. This
+      // is the only billing actor whose subscription is `active` — the exact
+      // (and only) state for which Usage.instance_quota/1 answers a number, so
+      // it is the one actor where a rendered ceiling is a DERIVED fact rather
+      // than a fixture the console was handed. Every other billing actor keeps
+      // no fixture and therefore keeps the OMIT arm: the stub answers
+      // {team:{},instances:[]}, usageInstanceCeiling() reads null, and
+      // planCeilingHtml() renders "".
+      //
+      // The numeral is the SERVER's, not a choice: `supporter` → 3 is what
+      // Billing.limits/0 answers on a booted BEAM, pinned by running in BOTH
+      // directions — usage_summary_route_test.exs ("an active subscription →
+      // the plan ceiling with warn_at derived": quota 3, warn_at 2) and
+      // billing_client_mirror_test.exs's cross-layer mirror. warn_at 2 is
+      // compose/1's derivation of the same quota, carried so the shape matches
+      // the route's real envelope rather than a hand-built subset.
+      usageSummary: {
+        team: {
+          instances: {
+            value: 1,
+            quota: 3,
+            warn_at: 2,
+            source: "control-plane.team_instances",
+            measured_at: null,
+          },
+        },
+        instances: [],
+      },
       sites: [],
       audit: [],
     },
@@ -4337,10 +4527,23 @@ export const SCENARIOS = {
     deepLink: "#fleet",
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
-      barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
+      barkparks: [cruelPinnedInstance, cruelProvisionErrorInstance, liveInstance],
       subscription: activeSub,
       sites: cruelFleetSites,
       audit: [],
+      // cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche — THE GITHUB
+      // HALF. The connection card's `.fleet-name` is a 255-cap text host
+      // (`installation.account_login`) and every populated `github` fixture in
+      // this file carries the same 16-character "acme-engineering", so no
+      // instrument had ever driven it at the cap. Route-gated exactly like the
+      // other three: `route()` answers /v1/github/installation only when the
+      // scenario carries a `github` key, so no other scenario moves by a byte.
+      // `install_url` rides along so a hypothetical disconnect repaints the
+      // honest reconnect arm rather than "aren't configured yet".
+      github: {
+        connected: true, account_login: cruelAccountLogin, configured: true,
+        install_url: "https://github.com/apps/barkpark-cloud/installations/new",
+      },
     },
   },
   // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts (absorbing
@@ -5236,6 +5439,46 @@ export const SCENARIOS = {
         const m = me("Guerrilla");
         return Object.assign({}, m, { user: Object.assign({}, m.user, { two_factor_enabled: true }) });
       })(),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      accountSessions: accountSessions,
+    },
+  },
+  // cch-w39-s2-fu — THE UNKNOWN ARM, AS A BROWSER-REACHABLE STATE.
+  // cch-w39-s2 shipped `#a2f-retry` on the two-factor panel's unknown arm and
+  // proved it by node test only: markup plus the loadMe() re-entry SHAPE. A
+  // modal control's reachability is not a markup question — the whole failure
+  // class this file's oracle exists for (#4592) is a control that EXISTS in the
+  // DOM and cannot be reached on screen — so the control needed a state a
+  // browser could actually land on, and no scenario in this corpus put the
+  // account modal in front of a /v1/me that never answers.
+  //
+  // It consumes the `meFault` override cch-w37-s6 already merged (route() in
+  // this file) rather than minting a second failure idiom, and it is STICKY (no
+  // `times`): this state's subject is the unknown that PERSISTS, and a fault
+  // that heals would repaint the determinate panel out from under the assertion.
+  //
+  // WHY THE MODAL OPENS AT ALL. mock.js's ?modal=account drive waits for the
+  // account chip to carry a real email and gives up after 40 tries. That
+  // give-up branch was UNREACHABLE until cch-w39-s2 fixed its `> 40` / `< 40`
+  // off-by-one, so before that commit a scenario shaped like this one simply
+  // stopped, silently, with no modal to measure. This is the first fixture that
+  // reaches it — and it is what makes `modal-oracle`'s account-2fa-unknown
+  // state land instead of timing out.
+  //
+  // The `account-modal` NAME PREFIX auto-enrols it in shoot.sh's screenshot set
+  // (GR76) with zero harness change — intended: the honest-unknown panel is a
+  // state a human should get an eye on, and it is exactly the frame where a
+  // regression would repaint the determinate "Off" pill.
+  "account-modal-me-unreadable": {
+    label: "Account modal — /v1/me never lands: the two-factor row reads Unknown, offers Retry, and never offers setup",
+    authed: true,
+    deepLink: "",
+    data: {
+      me: me("Guerrilla"),
+      meFault: { status: 500, body: { error: "internal" } },
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [],

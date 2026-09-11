@@ -22,7 +22,9 @@
        the page. The block container is transparent with generous rhythm;
        the move/delete controls + drag grip are de-emphasised, hover-revealed
        (a floating toolbar replaces them in B2). */
-    .bp-paper-editor { display: flex; flex-direction: column; gap: 0; padding: 0; }
+    /* Authored siblings use the reader's collapsing block margins. Contain the
+       document's outer margins without turning each block into a flex item. */
+    .bp-paper-editor { display: flow-root; padding: 0; }
     /* spd-w18 — the empty-body sentence is a real message, not chrome. It was
        `--paper-ink-faint` + italic, which is the same faint-grey family the
        owner read as a dead control; raised to `--paper-ink-soft` upright so it
@@ -122,6 +124,30 @@
     .bp-paper-edit-toolbar .btn:hover { background: transparent; color: var(--paper-ink-soft); }
     .bp-paper-edit-toolbar .btn-destructive:hover { color: var(--paper-accent); background: var(--paper-accent-soft); }
     .bp-paper-edit-toolbar .btn:disabled { opacity: 0.35; }
+    /* Narrow pages have no outer gutter for the desktop control rail. Dock
+       only the focused block's controls; placing them above the block covers
+       the preceding prose, and nested blocks must not stack several docks. */
+    @media (max-width: 720px) {
+      .bp-paper-edit-toolbar {
+        position: fixed; top: auto; left: 0; right: 0; bottom: 0; transform: none;
+        flex-direction: row; justify-content: flex-end; z-index: 10;
+        padding: 0.5rem max(1rem, env(safe-area-inset-right, 0px)) calc(0.5rem + env(safe-area-inset-bottom, 0px));
+        border-radius: 0;
+      }
+      .bp-paper-edit-toolbar .bp-paper-edit-actions { flex-direction: row; }
+      .bp-paper-edit-block:is(:hover, :focus-within) .bp-paper-edit-toolbar {
+        opacity: 0; pointer-events: none;
+      }
+      .bp-paper-edit-block:focus-within:not(:has(.bp-paper-edit-block:focus-within)) > .bp-paper-edit-toolbar {
+        opacity: 1; pointer-events: auto;
+      }
+      .bp-paper-edit-toolbar .btn,
+      .bp-paper-edit-toolbar .bp-paper-drag-grip { min-width: 32px; height: 32px; }
+      .bp-paper-editor { padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); }
+      body:has(.bp-paper-editor) > .bp-view-controls {
+        padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+      }
+    }
     /* The ⋮⋮ drag handle — grab affordance, warms on hover like the others. */
     .bp-paper-drag-grip {
       display: inline-flex; align-items: center; justify-content: center;
@@ -196,6 +222,9 @@
     /* Edit forms — inputs read as quiet underlined text on the page, not
        boxed form controls (the page IS the form). */
     .bp-paper-edit-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+    /* Authoring fields can use an external hidden form owner. The display rule
+       above must not override its native hidden state or create a margin stop. */
+    .bp-paper-edit-form[hidden] { display: none; }
     .bp-paper-edit-text { flex: 1 1 200px; min-width: 120px; }
     .bp-paper-edit-textarea { flex: 1 1 100%; width: 100%; }
     .bp-paper-edit-form input[type="text"],
@@ -578,6 +607,20 @@
     }
     .bp-paper-add-block label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--paper-ink-soft); font-family: var(--font); }
     .bp-paper-add-block select { font-family: var(--font); font-size: 13px; }
+    .bp-paper-surface .bp-paper-add-block { flex-wrap: wrap; }
+    .bp-paper-surface .bp-paper-add-block label {
+      flex-wrap: wrap; min-width: 0; font-family: var(--paper-font-ui, system-ui, sans-serif);
+    }
+    .bp-paper-surface .bp-paper-add-block :is(select, button) {
+      background: var(--paper-bg-deep); color: var(--paper-ink);
+      border: 1px solid var(--paper-rule); border-radius: 6px;
+      padding: 7px 12px; max-width: 100%;
+      font: 500 0.8rem/1.4 var(--paper-font-ui, system-ui, sans-serif);
+    }
+    .bp-paper-surface .bp-paper-add-block button { cursor: pointer; color: var(--paper-accent); }
+    .bp-paper-surface .bp-paper-add-block :is(select, button):focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 2px;
+    }
 
     /* ── Properties panel (Storage Model A) — a quiet collapsible above the
        body. Each row is a bound field rendered as label + cap badge + unbind ×
@@ -629,6 +672,15 @@
        very first block in the editor zeroes its leading margin so the document
        doesn't open with a gap. */
     .bp-paper-editor-body { outline: none; }
+    [data-bp-text-boundary] {
+      margin-block: 12px;
+      padding: 10px 12px;
+      border-inline-start: 2px solid var(--paper-accent, currentColor);
+      color: var(--paper-ink-soft);
+      font-family: var(--paper-font-ui, system-ui, sans-serif);
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
     /* Empty-block ghost text — @tiptap/extension-placeholder stamps `is-empty`
        (current empty node) / `is-editor-empty` (whole-empty editor) + a
        `data-placeholder` attr on the node. Render it as a muted, non-shifting
@@ -674,7 +726,28 @@
       border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
       padding-top: var(--bp-section-gap);
     }
-    .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+.bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+/* A nested disclosure heading is not a document section boundary. */
+.bp-expandable__body .bp-paper-editor-body > .ProseMirror > h2 {
+  margin-top: 1.9em; border-top: 0; padding-top: 0;
+}
+/* Reader-suppressed scaffolds remain keyboard-reachable without reserving
+ * document space until selected. These are transient editor decorations. */
+.bp-paper-editor-body .ProseMirror > .bp-resting-scaffold {
+  display: none;
+}
+.bp-paper-editor-body .bp-scaffold-control {
+  position: absolute; inset-inline-start: -24px; width: 24px; height: 24px;
+  padding: 0; border: 0; border-radius: 4px; background: var(--paper-bg);
+  color: var(--paper-ink-soft); font: 14px/24px var(--paper-font-mono);
+  cursor: pointer;
+}
+.bp-paper-editor-body .bp-scaffold-control:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px;
+}
+@media (max-width: 720px) {
+  .bp-paper-editor-body .bp-scaffold-control { inset-inline-start: -16px; background: transparent; }
+}
     /* THE LINK AFFORDANCE — byte-mirrored from the reader's `.bp-paper-surface a`
        (paper-surface.css carries the measurement: `--paper-accent-soft` as a
        border-bottom computed to 1.14–1.35:1 over the reading ground, so the old
@@ -696,8 +769,8 @@
     .bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
     .bp-paper-editor-body ul,
     .bp-paper-editor-body ol { padding-left: var(--bp-list-indent); }
-    .bp-paper-editor-body ul li { list-style: disc; }
-    .bp-paper-editor-body ol li { list-style: decimal; }
+    .bp-paper-editor-body ul > li { list-style: disc; }
+    .bp-paper-editor-body ol > li { list-style: decimal; }
     /* Article-chrome ROLE prose (eyebrow/byline/ingress/pullquote) — the canvas
        node-view emits `<p class="bp-role-*">` matching the reader, so these MIRROR
        the single-source `.bp-paper-surface .bp-role-*` rules in paper-surface.css
@@ -812,11 +885,14 @@
       letter-spacing: 0.02em;
       color: var(--paper-ink-faint);
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
       align-items: baseline;
     }
     .bp-paper-footer-sep { opacity: 0.5; }
     .bp-paper-footer-save { margin-left: auto; color: var(--paper-ink-soft); }
+    .bp-paper-history-controls { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    [data-paper-history-status] { color: var(--paper-ink-soft); }
     /* Restore the surface's old-style hanging figures in the editable text.
        The bundled ProseMirror base CSS kills ligatures + onum with
        `font-variant-ligatures: none` / `font-feature-settings: "liga" 0`;
@@ -888,6 +964,7 @@
          never px (D2). Keep BYTE-ALIGNED with styles.css. */
     .bp-canvas-section > .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
     @media (max-width: 720px) { .bp-canvas-section > .bp-section__grid { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) { .bp-canvas-section .bp-section__cell { grid-column: 1 / -1 !important; } }
     .bp-canvas-section .bp-section__cell { min-width: 0; }
     .bp-canvas-section .bp-section__cell > :first-child { margin-top: 0; }
     .bp-canvas-section.bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
@@ -917,6 +994,7 @@
     .bp-canvas-card { position: relative; }
     .bp-canvas-card__controls { position: absolute; bottom: 100%; left: 0; right: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
     .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; pointer-events: auto; }
+    .bp-canvas-card:has([data-test-id="paper-card-action-label"]:focus) .bp-canvas-card__controls { opacity: 0; pointer-events: none; }
     .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
     /* notes-grid split: the `note` WIDGET edit chrome. UNLIKE card, note does NOT
          class-share with the reader (parity §3 forbids bp-notes / bp-note__ in the
@@ -1540,8 +1618,36 @@
       color: var(--paper-accent); border-color: var(--paper-accent);
     }
 
+/* Native collection controls belong outside the authored card/stat content.
+   Closed controls leave reader geometry intact; the fallback opens in flow. */
+.bp-paper-contextual-controls.bp-paper-cards-config,
+.bp-paper-contextual-controls.bp-paper-stats-config {
+  top: auto; bottom: 100%;
+}
+.bp-paper-contextual-controls.bp-paper-cards-config[open],
+.bp-paper-contextual-controls.bp-paper-stats-config[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-cards-config > .bp-paper-contextual-panel,
+.bp-paper-stats-config > .bp-paper-contextual-panel {
+  max-height: none; overflow: visible;
+}
 /* PM list items require a paragraph; reader items carry inline text. */
 .bp-paper-editor-body li > p { margin: 0; }
+/* No authored article palette: retain the browser's legacy paragraph rhythm. */
+[data-paper-palette="legacy"] .bp-paper-editor-body .ProseMirror > p { margin: 1em 0; }
+[data-paper-palette="legacy"] .bp-paper-contextual-controls {
+  top: auto; bottom: 100%; color: CanvasText;
+}
+[data-paper-palette="legacy"] .bp-paper-contextual-toggle {
+  background: Canvas; font-size: 0.75rem; line-height: 1; padding: 1px 6px;
+}
+[data-paper-palette="legacy"] .bp-paper-contextual-controls[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+[data-paper-palette="legacy"] .bp-paper-contextual-panel {
+  background: Canvas; color: CanvasText; max-height: none; overflow: visible;
+}
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
 /* Opening paragraphs retain the reader's role-specific rhythm. Clamping them
@@ -1573,6 +1679,16 @@
    summary pair preserves keyboard and disclosure semantics without JS. */
 .bp-paper-edit-block:has(.bp-paper-contextual-editor) { margin-top: 0; }
 .bp-paper-contextual-editor { position: relative; }
+/* The reader paint is nested inside the existing Paper surface. Do not reset
+   its authored evidence band to the default tokens at that extra boundary. */
+.bp-paper-surface .bp-canvas-stats-inline > .bp-paper-surface {
+  --bp-evidence-band: inherit;
+  --bp-evidence-band-max: inherit;
+  --bp-evidence-fill: inherit;
+  --bp-evidence-gutter: inherit;
+  --bp-evidence-width: inherit;
+  --bp-evidence-pull: inherit;
+}
 /* Figure is a reader-wide evidence surface. Expand the editor block itself to
    that same band so its hover outline and floating toolbar surround the child
    and caption instead of staying behind in the narrow prose column. The inner
@@ -1583,6 +1699,342 @@
   margin-inline: var(--bp-evidence-pull, 0px);
   width: var(--bp-evidence-width, 100%);
   box-sizing: border-box;
+}
+.bp-paper-figure-image { position: relative; }
+.bp-canvas-card__media-paint {
+  position: absolute; padding: 0; margin: 0; border: 0;
+  border-radius: 0; background: transparent; color: transparent;
+  font-size: 0; cursor: pointer;
+}
+.bp-canvas-card__media-paint:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-canvas-card > bp-media-picker.bp-canvas-card__media-picker[hidden] {
+  display: none !important;
+}
+.bp-paper-figure-editor-frame { display: flow-root; }
+[data-paper-figure-image-trigger] { cursor: pointer; outline-offset: 3px; }
+.bp-paper-figure-image-trigger {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent;
+}
+[data-paper-figure-image-trigger]:focus-visible {
+  outline: 2px solid var(--paper-accent);
+}
+.bp-paper-figure-image-controls {
+  position: absolute; top: 0; right: 0; z-index: 4;
+  width: min(32rem, calc(100vw - 2rem)); max-width: 100%;
+  color: var(--paper-ink-soft);
+  font-family: var(--paper-font-ui, system-ui, sans-serif);
+  font-size: 0.8125rem; line-height: 1.4;
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-figure-image:hover > .bp-paper-figure-image-controls,
+.bp-paper-figure-image:focus-within > .bp-paper-figure-image-controls,
+.bp-paper-figure-image-controls[open] { opacity: 1; pointer-events: auto; }
+.bp-paper-figure-image[data-image-src=""] > .bp-paper-figure-image-controls {
+  opacity: 1; pointer-events: auto;
+  position: relative; min-height: 44px; margin-left: auto;
+}
+.bp-paper-figure-image[data-image-src=""] > .bp-paper-figure-image-controls > summary {
+  min-height: 44px; box-sizing: border-box;
+}
+.bp-paper-figure-image-controls > summary {
+  cursor: pointer; width: max-content; max-width: 100%; margin-left: auto;
+  padding: 0.35rem 0.65rem; border: 1px solid var(--paper-rule); border-radius: 4px;
+  background: var(--paper-bg);
+}
+.bp-paper-figure-image-controls > summary:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-paper-figure-image-picker {
+  max-height: min(70vh, 42rem); overflow: auto;
+  box-sizing: border-box; margin-top: 0.55rem; padding: 0.75rem;
+  background: var(--paper-bg); border: 1px solid var(--paper-rule); border-radius: 4px;
+}
+@media (hover: none) {
+  .bp-paper-figure-image-controls { opacity: 1; pointer-events: auto; }
+  .bp-paper-figure-image-controls > summary { min-height: 44px; box-sizing: border-box; }
+}
+.bp-paper-edit-form.bp-paper-figure-caption-form { display: block; margin: 0; padding: 0; }
+.bp-paper-figure-caption-form:not(:focus-within) {
+  position: absolute; inset: 0 0 auto; clip-path: inset(50%);
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-figure-caption-paint {
+  display: block; width: 100%; padding: 0; margin: 0; border: 0;
+  background: transparent; color: inherit; font: inherit; text-align: inherit;
+  letter-spacing: inherit; word-spacing: inherit;
+  white-space: normal; cursor: text;
+}
+.bp-paper-figure-caption-paint:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-figcaption:has(.bp-paper-figure-caption-form:focus-within) > .bp-paper-figure-caption-paint {
+  display: none;
+}
+.bp-paper-figure-caption-form > label.sr-only,
+.bp-paper-card-action-label-form > label.sr-only,
+.bp-paper-section-title-form > label.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+textarea.bp-paper-figure-caption-input {
+  display: block; width: 100%; min-width: 0; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: transparent; color: inherit; font: inherit;
+  resize: none; overflow: hidden; outline-offset: 3px;
+}
+textarea.bp-paper-figure-caption-input:focus-visible {
+  outline: 2px solid var(--paper-accent);
+}
+.bp-paper-section-title-editor {
+  position: relative; min-width: 0;
+}
+.bp-paper-edit-form.bp-paper-card-title-form {
+  display: block; margin: 0; padding: 0;
+}
+.bp-paper-card-title-owner {
+  position: relative;
+}
+[data-paper-card-title-paint] {
+  display: block; width: 100%; max-width: 100%; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent; color: inherit;
+  font: inherit; text-align: inherit; letter-spacing: inherit; word-spacing: inherit;
+  white-space: normal; text-wrap: inherit; overflow-wrap: anywhere; cursor: text;
+}
+textarea.bp-paper-inline-text.bp-paper-card-title-input {
+  display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent;
+  color: inherit; font: inherit; letter-spacing: inherit; word-spacing: inherit;
+  text-align: inherit; resize: none; overflow: hidden; overflow-wrap: anywhere;
+}
+.bp-paper-card-title-input:not(:focus) {
+  position: absolute; inset: 0; opacity: 0; pointer-events: none;
+  clip-path: inset(50%); contain: size;
+}
+.bp-paper-card-title-owner:has(.bp-paper-card-title-input:focus)
+  > [data-paper-card-title-paint] { display: none; }
+[data-paper-card-title-paint]:focus-visible,
+.bp-paper-card-title-input:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-paper-card-action-label-owner {
+  display: inline-grid; position: relative; max-width: 100%; vertical-align: baseline;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint],
+.bp-paper-edit-form.bp-paper-card-action-label-form {
+  grid-area: 1 / 1; box-sizing: border-box; margin: 0; max-width: 100%;
+  font: inherit; font-weight: bold; text-align: inherit; letter-spacing: inherit;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint] {
+  cursor: text; white-space: normal; overflow-wrap: anywhere;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint]:not(.bp-button--primary),
+.bp-paper-edit-form.bp-paper-card-action-label-form:not(.bp-button--primary) {
+  background: transparent;
+}
+.bp-paper-edit-form.bp-paper-card-action-label-form {
+  display: block; width: 0; min-width: 100%;
+}
+.bp-paper-card-action-label-form:not(:focus-within) {
+  opacity: 0; pointer-events: none; clip-path: inset(50%); contain: size;
+}
+.bp-paper-card-action-label-owner:has(.bp-paper-card-action-label-form:focus-within)
+  > [data-paper-card-action-paint] { visibility: hidden; }
+textarea.bp-paper-inline-text.bp-paper-card-action-label-input {
+  display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent;
+  color: inherit; font: inherit; font-weight: inherit; letter-spacing: inherit;
+  text-align: inherit; resize: none; overflow: hidden; overflow-wrap: anywhere;
+}
+.bp-paper-card-action-label-owner > [data-paper-card-action-paint]:focus-visible,
+.bp-paper-card-action-label-input:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-paper-section-title-editor--stack {
+  width: 100%; max-width: 100%;
+}
+.bp-paper-edit-form.bp-paper-section-title-form {
+  display: block; margin: 0; padding: 0;
+}
+.bp-paper-section-title-form:not(:focus-within) {
+  position: absolute; inset: 0; clip-path: inset(50%);
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-section-title-paint {
+  display: block; width: max-content; max-width: 100%;
+  margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: transparent; color: inherit; font: inherit; font-weight: inherit;
+  text-align: inherit; letter-spacing: inherit; word-spacing: inherit;
+  white-space: normal; overflow-wrap: anywhere; cursor: text;
+}
+.bp-paper-section-title-paint:focus-visible,
+.bp-paper-section-title-input:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-paper-section-title-editor:has(.bp-paper-section-title-form:focus-within)
+  > .bp-paper-section-title-paint {
+  display: none;
+}
+textarea.bp-paper-inline-text.bp-paper-section-title-input {
+  display: block; width: 100%; min-width: 0; max-width: 100%;
+  box-sizing: border-box; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent;
+  color: inherit; font: inherit; font-weight: inherit; text-align: inherit;
+  letter-spacing: inherit; resize: none; overflow: hidden;
+  overflow-wrap: anywhere;
+}
+[data-paper-section-title-empty="true"]:not(:focus-within) {
+  height: 0; margin-block: 0;
+}
+[data-paper-section-title-empty="true"]:focus-within {
+  min-height: 1lh;
+}
+.bp-paper-links-header-editor,
+.bp-paper-links-title-owner,
+.bp-paper-links-description-owner { position: relative; min-width: 0; width: 100%; }
+.bp-paper-links-title-heading,
+.bp-paper-links-description-paragraph {
+  margin: 0; padding: 0; color: inherit; font: inherit; letter-spacing: inherit;
+}
+.bp-paper-edit-form.bp-paper-links-title-form,
+.bp-paper-edit-form.bp-paper-links-description-form {
+  display: block; margin: 0; padding: 0; color: inherit; font: inherit;
+}
+.bp-paper-links-title-form:not(:focus-within) {
+  position: absolute; inset: 0 0 auto; clip-path: inset(50%);
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-links-description-form:not(:focus-within) {
+  position: absolute; inset: 0 0 auto; clip-path: inset(50%);
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-links-header-editor label.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+[data-paper-links-title-paint],
+[data-paper-links-description-paint] {
+  display: block; width: 100%; padding: 0; margin: 0; border: 0;
+  background: transparent; color: inherit; font: inherit; text-align: inherit;
+  letter-spacing: inherit; word-spacing: inherit; white-space: normal; cursor: text;
+}
+.bp-paper-links-title-owner:has(.bp-paper-links-title-form:focus-within)
+  > .bp-paper-links-title-heading { display: none; }
+.bp-paper-links-description-owner:has(.bp-paper-links-description-form:focus-within)
+  > .bp-paper-links-description-paragraph { display: none; }
+textarea.bp-paper-inline-text.bp-paper-links-title-input,
+textarea.bp-paper-inline-text.bp-paper-links-description-input {
+  display: block; width: 100%; min-width: 0; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: transparent; color: inherit; font: inherit; letter-spacing: inherit;
+  resize: none; overflow: hidden; overflow-wrap: anywhere; outline-offset: 3px;
+}
+.bp-paper-links-title-input::placeholder,
+.bp-paper-links-description-input::placeholder { color: inherit; opacity: 1; }
+[data-paper-links-title-paint]:focus-visible,
+[data-paper-links-description-paint]:focus-visible,
+.bp-paper-links-title-input:focus-visible,
+.bp-paper-links-description-input:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+[data-paper-links-description-empty="true"]:not(:focus-within) {
+  height: 0; margin-block: 0 !important; padding-block: 0;
+}
+[data-paper-links-header-empty="true"]:not(:focus-within) {
+  height: 0; margin-block: 0 !important; padding-block: 0;
+  overflow: hidden;
+}
+[data-paper-link-card-editable] { position: relative; isolation: isolate; }
+[data-paper-link-open] {
+  position: absolute; inset: 0; z-index: 1; border-radius: inherit;
+}
+[data-paper-link-open]:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-paper-link-open-label {
+  position: absolute; right: 0.35rem; bottom: 0.35rem;
+  padding: 0.2rem 0.45rem; background: var(--paper-bg); color: var(--paper-accent);
+  font: 0.75rem/1.4 var(--bp-font-sans, system-ui); opacity: 0;
+}
+[data-paper-link-open]:focus-visible .bp-paper-link-open-label { opacity: 1; }
+.bp-paper-link-ref-title-owner,
+.bp-paper-link-ref-description-owner {
+  position: relative; z-index: 2; min-width: 0; width: 100%; pointer-events: none;
+}
+.bp-paper-link-ref-title-heading,
+.bp-paper-link-ref-description-paint-wrapper {
+  display: block; margin: 0; padding: 0; color: inherit; font: inherit;
+  letter-spacing: inherit;
+}
+.bp-paper-edit-form.bp-paper-link-ref-title-form,
+.bp-paper-edit-form.bp-paper-link-ref-description-form {
+  display: block; margin: 0; padding: 0; color: inherit; font: inherit;
+  pointer-events: auto;
+}
+.bp-paper-link-ref-title-form:not(:focus-within) {
+  position: absolute; inset: 0 0 auto; clip-path: inset(50%);
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-link-ref-description-form:not(:focus-within) {
+  position: absolute; inset: 0 0 auto; clip-path: inset(50%);
+  opacity: 0; pointer-events: none;
+}
+[data-paper-link-card-editable] label.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+[data-paper-link-ref-title-paint],
+[data-paper-link-ref-description-paint] {
+  display: block; width: 100%; padding: 0; margin: 0; border: 0;
+  background: transparent; color: inherit; font: inherit; text-align: inherit;
+  letter-spacing: inherit; word-spacing: inherit; white-space: normal;
+  cursor: text; pointer-events: auto;
+}
+.bp-paper-link-ref-title-owner:has(.bp-paper-link-ref-title-form:focus-within)
+  > .bp-paper-link-ref-title-heading { display: none; }
+.bp-paper-link-ref-description-owner:has(.bp-paper-link-ref-description-form:focus-within)
+  > .bp-paper-link-ref-description-paint-wrapper { display: none; }
+textarea.bp-paper-inline-text.bp-paper-link-ref-title-input,
+textarea.bp-paper-inline-text.bp-paper-link-ref-description-input {
+  display: block; width: 100%; min-width: 0; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: transparent; color: inherit; font: inherit; letter-spacing: inherit;
+  resize: none; overflow: hidden; overflow-wrap: anywhere; outline-offset: 3px;
+}
+.bp-paper-link-ref-title-input::placeholder,
+.bp-paper-link-ref-description-input::placeholder { color: inherit; opacity: 1; }
+[data-paper-link-ref-title-paint]:focus-visible,
+[data-paper-link-ref-description-paint]:focus-visible,
+.bp-paper-link-ref-title-input:focus-visible,
+.bp-paper-link-ref-description-input:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+[data-paper-link-ref-description-empty="true"]:not(:focus-within) {
+  height: 0; margin-block: 0 !important; padding-block: 0;
+}
+.bp-paper-figure-editor-frame > .bp-figcaption { position: relative; }
+[data-paper-figure-caption-empty="true"]:not(:focus-within) {
+  height: 0; margin: 0;
+}
+[data-paper-figure-caption-empty="true"]:not(:focus-within) > .bp-paper-figure-caption-form {
+  position: absolute; inset: 0 0 auto; clip-path: inset(50%);
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-figure-caption-add {
+  position: absolute; right: 0; bottom: 0; z-index: 2;
+  min-height: 44px; padding: 0.35rem 0.65rem;
+  color: var(--paper-ink-soft); background: var(--paper-bg);
+  border: 1px solid var(--paper-rule); border-radius: 4px;
+  font-family: var(--paper-font-ui, system-ui, sans-serif);
+  font-size: 0.8125rem; line-height: 1.4; cursor: pointer;
+}
+.bp-paper-figure-caption-add:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-figcaption:has(.bp-paper-figure-caption-form:focus-within) > .bp-paper-figure-caption-add {
+  visibility: hidden; pointer-events: none;
 }
 .bp-paper-edit-block[data-block-type="columns"]:has([data-paper-columns-editor-frame]),
 .bp-paper-edit-block[data-block-type="section"]:has([data-paper-section-editor-frame].bp-section--wide) {
@@ -1603,22 +2055,6 @@
   margin-top: 0;
 }
 :is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-test-id="paper-terminal-readonly"] > .bp-term {
-  margin-top: 0;
-}
-/* Reader Terminal margins collapse in normal block flow. The edit surface is a
-   flex column whose contextual wrappers prevent that collapse, so consecutive
-   Terminals otherwise receive two 1.6rem margins. Preserve the reader's single
-   beat without changing either frame's canonical margin token. */
-.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-block[data-block-type="terminal"] > .bp-paper-contextual-editor > [data-paper-terminal-editor-frame] {
-  margin-top: 0;
-}
-.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-block[data-block-type="terminal"] > .bp-paper-contextual-editor > [data-test-id="paper-terminal-readonly"] > .bp-term {
-  margin-top: 0;
-}
-/* A paragraph's 12pt leading margin also collapses into the preceding
-   Terminal's larger 1.6rem bottom margin in View. Its canvas wrapper prevents
-   that in Edit, so suppress only that first paragraph's redundant leading leg. */
-.bp-paper-edit-block[data-block-type="terminal"] + .bp-paper-edit-canvas .bp-paper-editor-body .ProseMirror > p:first-child {
   margin-top: 0;
 }
 .bp-paper-card-body-editor,
@@ -1711,6 +2147,9 @@
 .bp-paper-contextual-preview textarea.bp-paper-inline-text::placeholder {
   color: var(--paper-ink-soft);
 }
+/* The citation is inline authoring, not a separate bound-field block. The
+   quote already owns its reader margin; its form must not add another gap. */
+.bp-paper-edit-block[data-block-type="blockquote"]:has(.bp-paper-quote-editor) { margin-top: 0; }
 .bp-paper-quote-editor .bp-paper-editor-body {
   background: transparent;
   color: inherit;
@@ -1718,7 +2157,14 @@
 }
 .bp-paper-quote-editor .bp-paper-editor-body p { margin: 0; }
 .bp-paper-edit-form.bp-paper-quote-cite-form { display: block; margin: 0; padding: 0; }
-.bp-paper-quote-editor .bp-blockquote__cite { display: flex; align-items: baseline; }
+.bp-paper-quote-editor .bp-blockquote__cite { display: block; position: relative; }
+.bp-paper-quote-editor .bp-blockquote__cite::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  pointer-events: none;
+}
 .bp-expandable.bp-paper-contextual-preview > summary > textarea.bp-paper-inline-text {
   display: inline-block;
   width: calc(100% - 1.5em);
@@ -1738,21 +2184,69 @@
 .bp-paper-contextual-panel .bp-paper-edit-actions {
   flex-direction: row; flex-wrap: wrap; gap: 0.4rem;
 }
-.bp-paper-contextual-panel button {
+.bp-paper-contextual-panel button,
+.bp-paper-history-controls button {
   min-height: 2rem; padding: 0.35rem 0.65rem;
   font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.8125rem;
   line-height: 1.3; color: var(--paper-ink-soft); background: transparent;
   border: 1px solid var(--paper-rule); border-radius: 4px; cursor: pointer;
 }
-.bp-paper-contextual-panel button:hover:not(:disabled) {
+.bp-paper-contextual-panel button:hover:not(:disabled),
+.bp-paper-history-controls button:hover:not(:disabled) {
   color: var(--paper-ink); background: var(--paper-accent-soft);
 }
-.bp-paper-contextual-panel button:disabled { opacity: 0.45; cursor: default; }
-.bp-paper-contextual-panel :is(summary, button, input, textarea, select):focus-visible {
+.bp-paper-contextual-panel button:disabled,
+.bp-paper-history-controls button:disabled { opacity: 0.45; cursor: default; }
+.bp-paper-contextual-panel :is(summary, button, input, textarea, select):focus-visible,
+.bp-paper-history-controls button:focus-visible {
   outline: 2px solid var(--paper-accent); outline-offset: 2px;
+}
+@media (max-width: 600px), (pointer: coarse) {
+  .bp-paper-history-controls button { min-width: 44px; min-height: 44px; }
 }
 @media (hover: none) {
   .bp-paper-contextual-editor > .bp-paper-contextual-controls {
     opacity: 1; pointer-events: auto;
   }
+}
+/* Recovery is editor chrome, never a replacement document. */
+[data-bp-paper-conflict],
+[data-test-id="paper-canvas-resume-warning"] {
+  box-sizing: border-box; max-width: 100%; margin: 16px 0 24px; padding: 16px;
+  border: 1px solid var(--paper-rule); border-inline-start: 3px solid var(--paper-accent);
+  border-radius: 6px; color: var(--paper-ink); background: var(--paper-bg);
+  font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 14px; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+[data-bp-paper-conflict] .bp-conflict-title { display: block; font-size: 15px; margin-bottom: 4px; }
+[data-bp-paper-conflict] .bp-conflict-description { display: block; color: var(--paper-ink-soft); }
+[data-bp-paper-conflict] .bp-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+[data-bp-paper-conflict] button,
+[data-test-id="paper-canvas-resume-warning"] button {
+  min-height: 44px; padding: 8px 12px; border: 1px solid var(--paper-rule);
+  border-radius: 4px; background: transparent; color: var(--paper-ink);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+[data-bp-paper-conflict] button[data-action="keep"] { border-color: var(--paper-accent); color: var(--paper-accent); }
+[data-bp-paper-conflict] button:disabled { opacity: .55; cursor: not-allowed; }
+[data-bp-paper-conflict] :is(button, summary, pre, textarea):focus-visible,
+[data-test-id="paper-canvas-resume-warning"] :is(button, summary, a):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 3px; }
+[data-bp-paper-conflict] [data-conflict-detail] { margin-top: 12px; border-top: 1px solid var(--paper-rule); padding-top: 12px; }
+[data-bp-paper-conflict] [data-conflict-message] { margin: 0 0 12px; font: inherit; }
+[data-bp-paper-conflict] [data-reference-draft-text] {
+  box-sizing: border-box; width: 100%; max-width: 100%; min-height: 6rem;
+  margin: 8px 0 12px; padding: 12px; border: 1px solid var(--paper-rule); border-radius: 4px;
+  color: var(--paper-ink); background: var(--paper-bg-deep); font: inherit;
+  line-height: 1.5; resize: vertical;
+}
+[data-bp-paper-conflict] summary,
+[data-test-id="paper-canvas-resume-warning"] summary { cursor: pointer; color: var(--paper-ink-soft); }
+[data-test-id="paper-canvas-resume-warning"] p { margin: 0 0 12px; font: inherit; }
+[data-test-id="paper-canvas-resume-warning"] details { margin-top: 12px; }
+[data-test-id="paper-canvas-resume-warning"] a { color: var(--paper-accent); }
+[data-bp-paper-conflict] pre {
+  box-sizing: border-box; width: 100%; max-height: 16rem; overflow: auto;
+  margin: 12px 0 0; padding: 12px; border: 1px solid var(--paper-rule); border-radius: 4px;
+  color: var(--paper-ink); background: var(--paper-bg-deep); font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
 }

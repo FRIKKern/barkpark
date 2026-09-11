@@ -49,15 +49,7 @@ defmodule BarkparkWeb.PaperEditorTestHelpers do
         # opt-out — pin it here so `open_editor/1` finds the toggle and the blocks
         # render per-block, independent of the flipped default. async:false makes
         # the process-global env put safe; on_exit restores it.
-        prev = System.get_env("BARKPARK_PAPER_CANVAS")
-        System.put_env("BARKPARK_PAPER_CANVAS", "0")
-
-        on_exit(fn ->
-          case prev do
-            nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
-            v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
-          end
-        end)
+        pin_paper_canvas!("0")
 
         seed_paper_schema!()
         seed_block_paper!()
@@ -68,6 +60,36 @@ defmodule BarkparkWeb.PaperEditorTestHelpers do
 
   @dataset "production"
   @slug "2026-05-24-editor-paper"
+
+  @doc """
+  Pin `BARKPARK_PAPER_CANVAS` for the duration of ONE test, restoring the
+  process-global env on exit (charter D233).
+
+  This is the repo's SINGLE flag-restore idiom for the paper canvas. It used to
+  live inline in the `using` setup below; it is a named function so that any
+  suite needing the OTHER flag value — or needing both, one per `describe` —
+  reuses it instead of hand-rolling a second `get_env`/`put_env`/`on_exit`
+  triple that can drift from this one. `async: false` is the caller's
+  responsibility: the put is process-global.
+
+  `prev == nil` restores by DELETING the var, never by writing `""` — an empty
+  string is not an opt-out (`paper_canvas_enabled?/0` reads it as true), but it
+  is also not the unset state the live hosts run in, and a suite that left it
+  behind would mask the very drift this pin exists to expose.
+  """
+  def pin_paper_canvas!(value) when is_binary(value) do
+    prev = System.get_env("BARKPARK_PAPER_CANVAS")
+    System.put_env("BARKPARK_PAPER_CANVAS", value)
+
+    ExUnit.Callbacks.on_exit(fn ->
+      case prev do
+        nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+        v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+      end
+    end)
+
+    :ok
+  end
 
   @doc """
   Seed the minimal `paper` schema in the `production` dataset.

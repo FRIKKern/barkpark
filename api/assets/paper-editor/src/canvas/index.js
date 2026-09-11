@@ -31,6 +31,10 @@
 
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { ListItemSource } from "../list-item-source.js";
+import { HeadingSource } from "../heading-source.js";
+import { ParagraphSource } from "../paragraph-source.js";
+import { portableTextBoundary } from "../portable-text-boundary.js";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
@@ -39,7 +43,7 @@ import Typography from "@tiptap/extension-typography";
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
 // PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
 import { TextSelection, NodeSelection, Plugin } from "@tiptap/pm/state";
-import { Fragment, Slice } from "@tiptap/pm/model";
+import { Fragment, Slice, Mark } from "@tiptap/pm/model";
 import { Extension } from "@tiptap/core";
 
 // PURE S0 projector + op-mapper — used verbatim (do NOT reinvent the diff).
@@ -60,6 +64,7 @@ import {
 } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
+import { restingScaffolds } from "./resting-scaffolds.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
 // no edit UI; PM's atom selection + Backspace-delete come free. See ./divider-node.js.
@@ -270,6 +275,25 @@ import {
 import { Wikilink, Blockref, Tag, Valueref } from "../marks.js";
 import { DEBOUNCE_MS, PLACEHOLDER } from "../contract.js";
 
+// Collect attribute-only refreshes without replacing text or changing its undo
+// mappings. List carriers live on descendants, not just the top-level block.
+function attributeRefreshes(node, replacement, position) {
+  if (node.eq(replacement)) return [];
+  if (node.type !== replacement.type || node.isText ||
+      !Mark.sameSet(node.marks, replacement.marks) ||
+      node.childCount !== replacement.childCount) return null;
+  const changes = node.sameMarkup(replacement) ? [] : [{ position, replacement }];
+  let offset = position + 1;
+  for (let index = 0; index < node.childCount; index++) {
+    const child = node.child(index);
+    const nested = attributeRefreshes(child, replacement.child(index), offset);
+    if (nested === null) return null;
+    changes.push(...nested);
+    offset += child.nodeSize;
+  }
+  return changes;
+}
+
 // One-shot, id-guarded self-inject of the standalone stylesheet — IDENTICAL
 // contract to ../index.js:ensureStyles (same <link>, same id-guard, same
 // BP_PAPER_EDITOR_NO_INJECT opt-out). Both elements share the one stylesheet, so
@@ -352,6 +376,8 @@ function normalizeCanvasDoc(doc) {
   const stripNested = (node) => {
     if (node && node.attrs) {
       const a = node.attrs;
+      if (a.bpParagraphSource == null) delete a.bpParagraphSource;
+      if (a.bpListFrameSource == null) delete a.bpListFrameSource;
       if (
         a.bpId == null &&
         a.bpType == null &&
@@ -542,6 +568,18 @@ class BpPaperCanvas extends HTMLElement {
     // Bound listener for the textarea's own Mod-Shift-m (toggle BACK to rich) +
     // Escape — kept as a field so the exact identity is removed on cleanup.
     this._onSourceKeyDown = null;
+    // Responsive Studio morphs can blur the rich editor immediately BEFORE the
+    // custom element's disconnectedCallback. Keep the last focused intent alive
+    // through the current DOM mutation only; onBlur clears it in a microtask.
+    this._richFocusIntent = false;
+    this._richFocusIntentVersion = 0;
+    // Reconnect recovery temporarily freezes the stable editor root with `inert`.
+    // Keep a separate, one-shot focus intent so that freeze-induced blur can return
+    // to the exact same rich editor after a successful retry without touching its
+    // ProseMirror selection or history. Deliberate focus elsewhere cancels it.
+    this._resumeFocusIntent = null;
+    this._resumeFocusState = "idle"; // "idle" | "armed" | "cancelled"
+    this._onResumeFocusIn = null;
   }
 
   connectedCallback() {
@@ -582,6 +620,10 @@ class BpPaperCanvas extends HTMLElement {
       element: this._mount,
       editable: this._editable,
       extensions: [
+      ListItemSource,
+      HeadingSource,
+      ParagraphSource,
+        portableTextBoundary(this),
         // pdd-t2/t14: the doctrine template-lock veto as a REAL ProseMirror
         // plugin. `filterTransaction` is a PLUGIN-spec option — as an
         // editorProps entry it is silently ignored by the view (found live in
@@ -632,6 +674,9 @@ class BpPaperCanvas extends HTMLElement {
         StarterKit.configure({
           // Same as ../index.js: heading levels 1–3, lists, history on.
           heading: { levels: [1, 2, 3] },
+          // Authored quotes have a dedicated PortableDoc editor. Native nested
+          // quotes lose their body on save and preempt `> [!note] ` shorthand.
+          blockquote: false,
           // Disable StarterKit's built-in horizontalRule so ONLY the canvas
           // `divider` node owns the <hr> parse rule + insert command. Otherwise
           // two nodes claim <hr> (ambiguous on paste/setContent) and
@@ -676,6 +721,7 @@ class BpPaperCanvas extends HTMLElement {
         // THE make-or-break: declares bpId/bpType on the block nodes so the run's
         // ids survive the setContent->getJSON round-trip runToOps depends on.
         BpAttrs,
+        restingScaffolds(this),
         // S3: the divider atom node — a non-prose leaf living INSIDE the canvas
         // document. Registers the `divider` node type (toDOM <hr>, bpId/bpType
         // attrs) so runToTiptap's { type:"divider" } node mounts as an atom and
@@ -915,8 +961,20 @@ class BpPaperCanvas extends HTMLElement {
       onSelectionUpdate: () => {
         if (this._bubble) this._bubble.update();
       },
-      onBlur: () => { if (this._bubble) this._bubble.update(); },
-      onFocus: () => { if (this._bubble) this._bubble.update(); },
+      onBlur: () => {
+        const version = ++this._richFocusIntentVersion;
+        queueMicrotask(() => {
+          if (this._richFocusIntentVersion === version && !this._editor?.isFocused) {
+            this._richFocusIntent = false;
+          }
+        });
+        if (this._bubble) this._bubble.update();
+      },
+      onFocus: () => {
+        this._richFocusIntentVersion += 1;
+        this._richFocusIntent = true;
+        if (this._bubble) this._bubble.update();
+      },
     });
 
     // Selection format toolbar — REUSED verbatim from ../format-bubble.js. It is
@@ -946,6 +1004,152 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   disconnectedCallback() {
+    // LiveView may move this keyed canvas between responsive Studio columns.
+    // Custom-element reactions report that connected-to-connected reparent as a
+    // disconnect followed synchronously by a reconnect. Defer destructive
+    // teardown one microtask so the same editor, history, and pending debounce
+    // survive that move; a genuine removal is still torn down immediately after
+    // the current DOM mutation finishes.
+    const editor = this._editor;
+    const ownerDocument = this.ownerDocument;
+    const restoreRichFocus =
+      this._mode === "rich" &&
+      this._editable &&
+      editor?.isEditable === true &&
+      this._richFocusIntent === true;
+    queueMicrotask(() => {
+      if (!this.isConnected) {
+        this._teardownDisconnected();
+        return;
+      }
+
+      // A DOM move drops native focus to <body>; Blink also delivers a blur that
+      // clears TipTap's live isFocused flag before this microtask. The value
+      // captured above is the pre-move intent. Restore only that narrow case. A
+      // prior blur, any meaningful intervening focus, an editor replacement,
+      // source mode, read mode, cross-document move, or inert destination wins.
+      const activeElement = ownerDocument?.activeElement;
+      const focusIsEmpty =
+        activeElement == null ||
+        activeElement === ownerDocument.body ||
+        activeElement === ownerDocument.documentElement;
+      if (
+        restoreRichFocus &&
+        this._editor === editor &&
+        this.ownerDocument === ownerDocument &&
+        this._mode === "rich" &&
+        this._editable &&
+        editor.isEditable === true &&
+        this.closest("[inert]") == null &&
+        focusIsEmpty
+      ) {
+        editor.view.focus();
+      }
+    });
+  }
+
+  captureResumeFocus() {
+    if (this._resumeFocusState !== "idle") {
+      return this._resumeFocusState === "armed";
+    }
+
+    const editor = this._editor;
+    const ownerDocument = this.ownerDocument;
+    const activeElement = ownerDocument?.activeElement;
+    const paperRoot = this.closest(".bp-paper-editor[data-paper-doc-key]");
+    const paperRootId = paperRoot?.id;
+    const paperDocKey = paperRoot?.getAttribute("data-paper-doc-key");
+    const hasRichFocus =
+      editor?.view?.hasFocus?.() === true &&
+      activeElement != null &&
+      this.contains(activeElement);
+
+    if (
+      !this.isConnected ||
+      this._mode !== "rich" ||
+      !this._editable ||
+      editor?.isEditable !== true ||
+      !hasRichFocus ||
+      !paperRoot ||
+      !paperRootId ||
+      !paperDocKey
+    ) {
+      return false;
+    }
+
+    this._resumeFocusIntent = {
+      editor,
+      ownerDocument,
+      paperRootId,
+      paperDocKey,
+    };
+    this._resumeFocusState = "armed";
+    this._onResumeFocusIn = (event) => {
+      const target = event.target;
+      const emptyFocusTarget =
+        target == null || target === ownerDocument.body || target === ownerDocument.documentElement;
+      if (!emptyFocusTarget && !this.contains(target)) this._cancelResumeFocus();
+    };
+    ownerDocument.addEventListener("focusin", this._onResumeFocusIn, true);
+    return true;
+  }
+
+  restoreResumeFocus() {
+    const intent = this._resumeFocusIntent;
+    const armed = this._resumeFocusState === "armed";
+    this._clearResumeFocusIntent();
+    if (!armed || !intent) return false;
+
+    const { editor, ownerDocument, paperRootId, paperDocKey } = intent;
+    const activeElement = ownerDocument?.activeElement;
+    const paperRoot = this.closest(".bp-paper-editor[data-paper-doc-key]");
+    const focusIsEmpty =
+      activeElement == null ||
+      activeElement === ownerDocument.body ||
+      activeElement === ownerDocument.documentElement;
+
+    if (
+      !this.isConnected ||
+      this._editor !== editor ||
+      this.ownerDocument !== ownerDocument ||
+      this._mode !== "rich" ||
+      !this._editable ||
+      editor.isEditable !== true ||
+      paperRoot?.id !== paperRootId ||
+      paperRoot?.getAttribute("data-paper-doc-key") !== paperDocKey ||
+      this.closest("[inert]") != null ||
+      !focusIsEmpty
+    ) {
+      return false;
+    }
+
+    editor.view.focus();
+    return true;
+  }
+
+  _cancelResumeFocus() {
+    if (this._resumeFocusState !== "armed") return;
+    const ownerDocument = this._resumeFocusIntent?.ownerDocument;
+    if (ownerDocument && this._onResumeFocusIn) {
+      ownerDocument.removeEventListener("focusin", this._onResumeFocusIn, true);
+    }
+    this._resumeFocusIntent = null;
+    this._resumeFocusState = "cancelled";
+    this._onResumeFocusIn = null;
+  }
+
+  _clearResumeFocusIntent() {
+    const ownerDocument = this._resumeFocusIntent?.ownerDocument;
+    if (ownerDocument && this._onResumeFocusIn) {
+      ownerDocument.removeEventListener("focusin", this._onResumeFocusIn, true);
+    }
+    this._resumeFocusIntent = null;
+    this._resumeFocusState = "idle";
+    this._onResumeFocusIn = null;
+  }
+
+  _teardownDisconnected() {
+    this._clearResumeFocusIntent();
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
@@ -986,6 +1190,8 @@ class BpPaperCanvas extends HTMLElement {
     this._sourceBaselineBlocks = null;
     this._sourceOriginalMd = "";
     this._mode = "rich";
+    this._richFocusIntentVersion += 1;
+    this._richFocusIntent = false;
     if (this._editor) {
       this._editor.destroy();
       this._editor = null;
@@ -1030,6 +1236,55 @@ class BpPaperCanvas extends HTMLElement {
       sourceChanged || this._debounceTimer || this._inflightOps ||
       this._dirtyWhileInflight
     );
+  }
+
+  // Read-only recovery seam for a reconnect halt. This projects the live editor
+  // instead of the acknowledged `blocks` baseline, so debounced prose is not
+  // omitted. Source mode always includes the textarea verbatim; if its markdown
+  // cannot be projected, the raw text and an explicit error remain exportable.
+  recoverySnapshot() {
+    if (this._mode === "source" && this._sourceEl) {
+      const rawSource = this._sourceEl.value;
+      try {
+        const baseline = this._sourceBaselineBlocks || [];
+        const blocks = clampLockedPrefix(
+          baseline,
+          realignBlockIds(baseline, markdownToBlocks(rawSource)),
+        );
+        return {
+          mode: "markdown",
+          raw_source: rawSource,
+          blocks: deepCloneBlocks(blocks),
+        };
+      } catch (_error) {
+        return {
+          mode: "markdown",
+          raw_source: rawSource,
+          serialization_error: "The Markdown draft could not be projected to PortableDoc blocks.",
+        };
+      }
+    }
+
+    let rawEditorDocument = null;
+    try {
+      rawEditorDocument = this._editor?.getJSON?.() || null;
+      if (!rawEditorDocument) {
+        return {
+          mode: "rich",
+          serialization_error: "The live rich-text document was unavailable.",
+        };
+      }
+      return {
+        mode: "rich",
+        blocks: deepCloneBlocks(docToBlocks(normalizeCanvasDoc(rawEditorDocument))),
+      };
+    } catch (_error) {
+      return {
+        mode: "rich",
+        ...(rawEditorDocument ? { raw_editor_document: rawEditorDocument } : {}),
+        serialization_error: "The rich-text draft could not be projected to PortableDoc blocks.",
+      };
+    }
   }
 
   // Explicit conflict resolution seam. Normal echoes never erase newer local
@@ -2446,7 +2701,19 @@ class BpPaperCanvas extends HTMLElement {
           tr.delete(position, position + removed.nodeSize);
         }
         const node = state.doc.child(previousIndex++);
-        if (!node.eq(replacement)) tr.replaceWith(position, position + node.nodeSize, replacement);
+        if (!node.eq(replacement)) {
+          // Saved carrier metadata can change without changing the text. Refresh
+          // attributes in place: replacing that text maps local undo steps away.
+          const refreshes = attributeRefreshes(node, replacement, position);
+          if (refreshes !== null) {
+            for (const refresh of refreshes) {
+              const target = refresh.replacement;
+              tr.setNodeMarkup(refresh.position, target.type, target.attrs, target.marks);
+            }
+          } else {
+            tr.replaceWith(position, position + node.nodeSize, replacement);
+          }
+        }
         position += replacement.nodeSize;
       });
       while (previousIndex < state.doc.childCount) {

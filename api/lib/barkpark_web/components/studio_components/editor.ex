@@ -137,6 +137,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :type, :string, default: nil
   attr :required, :boolean, default: false
   attr :errors, :list, default: []
+  # Gyldendal parity E1.6 — warning-level findings (schema `"level": "warning"`
+  # rules): rendered under the input like errors, in the warning colour, and
+  # never a gate. `has-warning` on the wrapper, no `has-error`.
+  attr :warnings, :list, default: []
   attr :onix_element, :string, default: nil
   # Gyldendal parity E1.5 — the schema field's `description`, rendered as
   # Sanity does: muted helper text directly under the title, above the input.
@@ -145,7 +149,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def editor_field(assigns) do
     ~H"""
-    <div class={"editor-field #{if @errors != [], do: "has-error"}"}>
+    <div class={"editor-field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
       <label class="editor-field-label">
         <%= @label %>
         <%= if @required do %><span class="field-required">*</span><% end %>
@@ -160,6 +164,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <%= render_slot(@inner_block) %>
       <%= if @errors != [] do %>
         <div class="field-errors"><%= Enum.join(@errors, ", ") %></div>
+      <% end %>
+      <%= if @warnings != [] do %>
+        <div class="field-warnings" role="note"><%= Enum.join(@warnings, ", ") %></div>
       <% end %>
     </div>
     """
@@ -359,6 +366,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :editor_form, :map, required: true
   attr :dataset, :string, default: "production"
   attr :validation_errors, :map, default: %{}
+  attr :validation_warnings, :map, default: %{}
   attr :parent_assigns, :map, default: %{}
   attr :doc_key, :string, default: "doc"
   attr :doc_type, :string, default: "document"
@@ -368,13 +376,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     ~H"""
     <% field_name = @field["name"] %>
     <% type = @field["type"] %>
-    <% rules = @field["validation"] || %{} %>
+    <% rules = Barkpark.Content.Validation.rules_at(@field["validation"], :error) %>
     <% required? = rules["required"] == true %>
     <% errors = Map.get(@validation_errors, field_name, []) %>
+    <% warnings = Map.get(@validation_warnings, field_name, []) %>
     <%= if self_titled?(type) do %>
       <%!-- v2 structural types render their own <legend>; skip outer label,
            but keep error display + onix hint as inline rows below the field. --%>
-      <div class={"editor-field editor-field-self-titled #{if errors != [], do: "has-error"}"}>
+      <div class={"editor-field editor-field-self-titled #{if errors != [], do: "has-error"} #{if warnings != [], do: "has-warning"}"}>
         <%= if PluginAdapter.v2?(@field) do %>
           <%= PluginAdapter.render(@parent_assigns, @field) %>
         <% else %>
@@ -397,6 +406,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <%= if errors != [] do %>
           <div class="field-errors"><%= Enum.join(errors, ", ") %></div>
         <% end %>
+        <%= if warnings != [] do %>
+          <div class="field-warnings" role="note"><%= Enum.join(warnings, ", ") %></div>
+        <% end %>
       </div>
     <% else %>
       <%!-- Gyldendal parity E1.5: the type name is NOT shown next to the
@@ -406,6 +418,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         label={@field["title"] || field_name}
         required={required?}
         errors={errors}
+        warnings={warnings}
         onix_element={onix_element(@field)}
         description={field_description(@field)}
       >
@@ -472,6 +485,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :editor_is_draft, :boolean, default: false
   attr :dataset, :string, required: true
   attr :validation_errors, :map, default: %{}
+  attr :validation_warnings, :map, default: %{}
   attr :save_status, :string, default: ""
 
   # ── Concurrent-edit conflict (studio-concurrent-edit) ──────────────
@@ -529,6 +543,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # spd-bl-focus-after-select — threaded through to document_header above.
   attr :focus_on_mount, :boolean, default: false
 
+  # THE ADMIN-TIER AFFORDANCE ANSWER, THREADED IN — NEVER RE-DERIVED HERE
+  # (task-ea341f86571c5981). `Caps.admin_affordance?/1` at the StudioLive call
+  # site reads the already-derived `:caps` assign; this component only consults
+  # the boolean. Default FALSE fails closed: a caller that forgets to thread it
+  # hides the admin-tier doc actions rather than advertising them.
+  attr :admin?, :boolean, default: false
+
   slot :extra_actions
   slot :empty_state
 
@@ -552,7 +573,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="editor-panel" data-role="content">
         <.document_header
           dataset={@dataset}
-          title={@editor_doc.title || singleton_title(@editor_schema) || "Untitled"}
+          title={@editor_doc.title || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || "Untitled"}
           focus_on_mount={@focus_on_mount}
         >
           <:status_pill>
@@ -588,6 +609,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   action={action}
                   editor_doc={@editor_doc}
                   dataset={@dataset}
+                  admin?={@admin?}
                   workspace_slug={scope_slug(@parent_assigns, :current_workspace)}
                   project_slug={scope_slug(@parent_assigns, :current_project)}
                 />
@@ -639,7 +661,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               </div>
             <% end %>
 
-            <form phx-submit="save" phx-change="autosave" id="editor-form">
+            <%!-- phx-auto-recover="ignore" (Gyldendal friction 65/66): LiveView
+                  1.1 re-posts EVERY id-bearing form[phx-change] on socket rejoin
+                  (getFormsForRecovery filters only on the ignore attribute), so a
+                  deploy restart, a laptop waking, or a network blip turned an
+                  untouched editor into an "autosave" of the browser's whole form
+                  — a draft with no keystroke, and before Forms.coerce_params a
+                  corrupt one. Autosave already persists each change within its
+                  500 ms debounce, so recovery has nothing to restore. --%>
+            <form phx-submit="save" phx-change="autosave" phx-auto-recover="ignore" id="editor-form">
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
                     field (the twin's Forside — Sanity's `preview.prepare`
@@ -651,6 +681,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 label="Title"
                 required={(get_title_validation(@editor_schema) || %{})["required"] == true}
                 errors={Map.get(@validation_errors, "title", [])}
+                warnings={Map.get(@validation_warnings, "title", [])}
               >
                 <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
               </.editor_field>
@@ -662,6 +693,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     editor_form={@editor_form}
                     dataset={@dataset}
                     validation_errors={@validation_errors}
+                    validation_warnings={@validation_warnings}
                     parent_assigns={@parent_assigns}
                     doc_key={@editor_doc.doc_id}
                     doc_type={@editor_doc.type}
@@ -671,6 +703,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               <% end %>
               <div class="editor-actions">
                 <span class="save-status" role="status" aria-live="polite"><%= @save_status %></span>
+                <%!-- Gyldendal parity E1.6 — the publish bar's warning count:
+                      Sanity's warning-level validation nags here and never
+                      blocks; the fields carry the wording inline. --%>
+                <% warning_count = @validation_warnings |> Map.values() |> Enum.map(&length/1) |> Enum.sum() %>
+                <span
+                  :if={warning_count > 0}
+                  class="bp-validation-warnings"
+                  role="status"
+                  data-test-id="validation-warnings"
+                ><%= warning_count %> warning<%= if warning_count != 1, do: "s" %> — publishing is still allowed</span>
               </div>
             </form>
           <% end %>
@@ -734,6 +776,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
     * `"event"` → `<button phx-click=<opts.event>>`
     * `"modal"` → `<button phx-click="schema_action" phx-value-name=<name>>`
+      — rendered ONLY when `@admin?`, because `schema_action` is `:admin`-tier
+      in `BarkparkWeb.Studio.Caps.classify/1`
     * `"link"`  → `<a href=<interpolated-href>>`
 
   Class / style / `data-test-id` are read off `opts` so the host's built-in
@@ -749,6 +793,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # carry :workspace / :project placeholders alongside :dataset / :id.
   attr :workspace_slug, :string, default: ""
   attr :project_slug, :string, default: ""
+  # See `studio_editor_shell/1`'s note: the `"modal"` kind dispatches
+  # `schema_action`, which `Caps.classify/1` rules :admin-tier, so it renders
+  # only for an admin seat. `"event"` and `"link"` actions are unaffected.
+  attr :admin?, :boolean, default: false
 
   def doc_action_button(assigns) do
     ~H"""
@@ -773,6 +821,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         ><.doc_action_glyph action={@action} /></a>
       <% "modal" -> %>
         <button
+          :if={@admin?}
           type="button"
           class={action_button_class(@action)}
           style={action_button_style(@action)}
@@ -1056,9 +1105,21 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # Gyldendal parity E1.5 — see the Title input comment in the shell.
   defp title_input?(nil), do: true
 
+  # Gyldendal parity E1.8: a type with no `title` field renders no synthetic
+  # Title input when something else backs the list rows — a singleton (the
+  # header shows the schema title) OR a `list_preview.title` field (the title
+  # column is derived from it on write). A titleless type with neither keeps
+  # the input: it is the only thing that can name its rows.
   defp title_input?(schema) do
-    not (singleton?(schema) and is_nil(Enum.find(schema.fields, &(&1["name"] == "title"))))
+    has_title_field = not is_nil(Barkpark.Content.TitleDerivation.title_field(schema))
+
+    has_title_field or
+      not (singleton?(schema) or
+             is_binary(Barkpark.Content.TitleDerivation.preview_title_field(schema)))
   end
+
+  defp preview_title(doc, schema),
+    do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
 
   defp singleton_title(schema) do
     if schema && singleton?(schema) && title_input?(schema) == false, do: schema.title, else: nil
@@ -1073,7 +1134,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   defp get_title_validation(schema) do
     case Enum.find(schema.fields, &(&1["name"] == "title")) do
-      %{"validation" => v} -> v
+      # Error-level rules only: a warning-level `required` nags, it does not
+      # paint the asterisk (Gyldendal parity E1.6).
+      %{"validation" => v} -> Barkpark.Content.Validation.rules_at(v, :error)
       _ -> nil
     end
   end

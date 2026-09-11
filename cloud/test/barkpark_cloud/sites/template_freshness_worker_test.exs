@@ -25,7 +25,7 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
   alias BarkparkCloud.StudioLinkFakeHttpClient
 
   @instance_url "https://acme.barkpark.cloud"
-  @analytics_path "/w/acme/p/blog/v1/data/analytics/production"
+  @probe_path "/w/acme/p/blog/v1/data/query/production/post"
 
   ## Fixtures
 
@@ -110,10 +110,13 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
 
   defp sweep, do: TemplateFreshnessWorker.perform(%Oban.Job{args: %{}})
 
-  # The scoped analytics reads this owner has seen — MEASURED, not claimed.
-  defp analytics_reads do
+  # The scoped content-revision probes this owner has seen — MEASURED, not
+  # claimed. The probe is the TYPE-SCOPED published query (D162): it stopped
+  # reading the dataset-wide analytics window, which the box truncates to 50
+  # events BEFORE the cloud could filter it to the bound type.
+  defp probe_reads do
     StudioLinkFakeHttpClient.requests()
-    |> Enum.count(&String.contains?(&1.url, "/v1/data/analytics/"))
+    |> Enum.count(&String.contains?(&1.url, "/v1/data/query/"))
   end
 
   ## ---------------------------------------------------------------------------
@@ -155,11 +158,11 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
     end
 
     test "SKIPS a site whose content_rev cannot be read — no build storm on a sick box" do
-      # The box's scoped analytics read is failing. `Deploy.enqueue/4` would
+      # The box's scoped content probe is failing. `Deploy.enqueue/4` would
       # fail-open to a random "u…" content_rev and therefore a NEW build_id on
       # every tick; the worker must not go anywhere near that on a schedule.
       StudioLinkFakeHttpClient.program(%{
-        @analytics_path => {:ok, %{status: 502, body: "upstream down"}}
+        @probe_path => {:ok, %{status: 502, body: "upstream down"}}
       })
 
       bp = team_fixture() |> live_barkpark()
@@ -172,7 +175,7 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
           s = deployed(s, bp)
 
           StudioLinkFakeHttpClient.program(%{
-            @analytics_path => {:ok, %{status: 502, body: "upstream down"}}
+            @probe_path => {:ok, %{status: 502, body: "upstream down"}}
           })
 
           s
@@ -261,10 +264,10 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
 
       assert {:ok, %{enqueued: 1, code_rev_unknown: 0}} = sweep()
 
-      # A box whose analytics read fails is SKIPPED; one sick box must not read
+      # A box whose content probe fails is SKIPPED; one sick box must not read
       # as two distinct diagnoses.
       StudioLinkFakeHttpClient.program(%{
-        @analytics_path => {:ok, %{status: 502, body: "upstream down"}}
+        @probe_path => {:ok, %{status: 502, body: "upstream down"}}
       })
 
       assert {:ok, %{skipped: 1, code_rev_unknown: 0}} = sweep()
@@ -288,7 +291,7 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
     end
   end
 
-  describe "one analytics read per site per tick (residue 2a)" do
+  describe "one content probe per site per tick (residue 2a)" do
     test "the probed content_rev is handed to Deploy.enqueue instead of re-read — on BOTH tick kinds" do
       StudioLinkFakeHttpClient.program(%{})
       bp = team_fixture() |> live_barkpark()
@@ -299,13 +302,13 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
       StudioLinkFakeHttpClient.program(%{})
       assert {:ok, %{enqueued: 1}} = sweep()
 
-      assert analytics_reads() == 1,
+      assert probe_reads() == 1,
              "enqueue-tick: the sweep probes content_rev, then Deploy.enqueue/5 must REUSE it"
 
       StudioLinkFakeHttpClient.program(%{})
       assert {:ok, %{duplicate: 1}} = sweep()
 
-      assert analytics_reads() == 1,
+      assert probe_reads() == 1,
              "quiet-tick: the no-op path pays exactly one read too"
     end
 
@@ -319,11 +322,11 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
       # One enqueues, one defers (per-box start cap) — the deferred site is
       # skipped BEFORE probing, so it costs no read at all.
       assert {:ok, %{enqueued: 1, deferred: 1}} = sweep()
-      assert analytics_reads() == 1
+      assert probe_reads() == 1
 
       StudioLinkFakeHttpClient.program(%{})
       assert {:ok, %{enqueued: 1, duplicate: 1}} = sweep()
-      assert analytics_reads() == 2
+      assert probe_reads() == 2
     end
   end
 
@@ -434,14 +437,14 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
              "one refused site must never cost the rest of the fleet its freshness sweep"
     end
 
-    test "a refused site costs NO analytics read — the guard runs before the box is touched" do
+    test "a refused site costs NO content probe — the guard runs before the box is touched" do
       StudioLinkFakeHttpClient.program(%{})
       bp = team_fixture() |> live_barkpark()
       _site = site_fixture(bp, "static", "astro") |> deployed_prebuilt(bp)
 
       StudioLinkFakeHttpClient.program(%{})
       assert {:ok, %{refused: 1}} = sweep()
-      assert analytics_reads() == 0
+      assert probe_reads() == 0
     end
   end
 

@@ -156,7 +156,7 @@ defmodule Barkpark.PortableDoc.TiersTest do
     # docs/decisions/0006-canonical-block-type-count.md) as part of that change —
     # never the other way round. The number is downstream of the code; nothing
     # is allowed to pin a count to make a sentence somewhere else come true.
-    @canonical_block_type_count 79
+    @canonical_block_type_count 80
 
     test "length(known_types/0) is EXACTLY the pinned canonical count" do
       assert length(Tiers.known_types()) == @canonical_block_type_count

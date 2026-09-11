@@ -598,6 +598,159 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
     end
   end
 
+  describe "the measure's UPPER clamp (spd-b7) — the band's other end" do
+    # The floor above is HALF a contract. Until spd-b7 the only thing stopping
+    # the Studio surface from widening was the shared `.bp-paper-surface`
+    # block's `max-width: 660px` — a pixel number the PUBLIC READER owns, which
+    # says nothing about characters and which no Studio-scoped rule referenced.
+    # Measured in Chrome on this branch (headless chromium 1217, dev server,
+    # `barkpark-chronicle` open in the Paper editor): with the clamp's
+    # declaration disabled the surface renders 660px at viewports 900 / 1280 /
+    # 2560, and with it enabled it renders 660px at the same three. The clamp
+    # closes ZERO pixels today, exactly like the floor's token did (D93/D103),
+    # and it is shipped as the band's missing half rather than as a measure fix.
+    #
+    # It is NOT inert, and that was proven the only way it can be — by
+    # experiment. Swapping the px term to 600px in the sheet moved the rendered
+    # surface to 600px at viewport 1280 and to the floor's 630.578px at 900 and
+    # 2560 (where `min-inline-size` then outranks it). So this (0,2,0) selector
+    # really does own the used value over the shared (0,1,0) `max-width`, even
+    # though one is logical and the other physical and the shared rule is ~2500
+    # lines LATER in the sheet.
+    @clamp_selector @paper_floor_selector
+
+    defp clamp_blocks! do
+      css()
+      |> blocks!(@clamp_selector)
+      |> Enum.filter(&(&1 =~ ~r/(?:^|;)\s*max-inline-size\s*:/))
+    end
+
+    test "the Studio-scoped surface declares max-inline-size exactly once" do
+      blocks = clamp_blocks!()
+
+      assert length(blocks) == 1,
+             """
+             #{length(blocks)} rules on the `#{@clamp_selector}` selector line
+             declare `max-inline-size`, not 1.
+
+             Two upper bounds on one box is a source-order race for the number
+             that decides the widest the reading measure may ever be — the same
+             shape wide_geometry_lock_test.exs refuses for the shared cap.
+             """
+    end
+
+    test "the clamp is a min() of a ch term and the shared cap, never a bare ch" do
+      [clamp] = clamp_blocks!()
+      value = value!([clamp], "max-inline-size", @clamp_selector)
+
+      [_, ch, multiplier, token, px] =
+        Regex.run(
+          ~r/^min\(\s*calc\(\s*(\d+)ch\s*\+\s*(\d+)\s*\*\s*var\(\s*(--[\w-]+)\s*\)\s*\)\s*,\s*(\d+)px\s*\)$/,
+          value
+        ) ||
+          flunk("""
+          The upper clamp is no longer `min(calc(<n>ch + <k> * var(--token)), <px>px)`: `#{value}`.
+
+          The `min()` is the whole safety property. `max-inline-size` here and
+          `max-width` on the shared `.bp-paper-surface` block are THE SAME
+          property in a horizontal writing mode and cascade together, so this
+          (0,2,0) selector REPLACES the shared cap instead of joining it —
+          proven in Chrome by swapping the px term to 600px and watching the
+          surface render 600px. A bare `calc(70ch + 2 * var(--paper-gutter))`
+          therefore WIDENS the Studio surface past the 660px column the public
+          reader renders and breaks View/Edit measure parity. The `min()` lets
+          this clamp tighten the measure and never loosen it.
+          """)
+
+      assert String.to_integer(ch) == 70,
+             "the epic's band tops out at 70ch; the sheet now says #{ch}ch"
+
+      assert String.to_integer(multiplier) == 2,
+             """
+             The clamp adds back #{multiplier} gutter(s), not 2.
+
+             `box-sizing: border-box` is global and the surface pads BOTH sides,
+             so an upper bound that adds back one gutter (or none) caps the
+             CONTENT measure a gutter short of the ch figure it advertises —
+             the border-box confusion that produced the disproven 67.6ch.
+             """
+
+      assert token == "--paper-gutter",
+             "the clamp consumes `#{token}`, which is not the token the surface pads with"
+
+      assert String.to_integer(px) > 0, "the clamp's px term is #{px}px"
+    end
+
+    test "the clamp's px term IS the shared cap, derived from the sheet" do
+      # THE DRIFT GUARD. The px term restates a literal that belongs to the
+      # shared `.bp-paper-surface` block, and a restated literal is precisely
+      # what D103 made the floor stop doing. It cannot become a token without
+      # editing the shared block (which spd-b7 must not touch), so it is pinned
+      # by DERIVATION instead: both numbers are read off the sheet and compared.
+      # If the reader's column moves and this does not, the Studio surface
+      # silently stops matching it and View wraps at a different word than Edit.
+      [clamp] = clamp_blocks!()
+      value = value!([clamp], "max-inline-size", @clamp_selector)
+      [_, px] = Regex.run(~r/,\s*(\d+)px\s*\)$/, value) || flunk("no px term in `#{value}`")
+
+      shared_cap = value!(blocks!(css(), @reader_selector), "max-width", @reader_selector)
+
+      assert "#{px}px" == shared_cap,
+             """
+             The Studio clamp caps at #{px}px while the shared surface caps at
+             #{shared_cap}.
+
+             These are the same box in two rules, and the Studio one WINS
+             (0,2,0 over 0,1,0). A difference here is a Studio-only reading
+             measure: the same paper, the same type scale, lines wrapping at
+             different words in View than in Edit — which is the exact contract
+             this file exists to hold.
+             """
+    end
+
+    test "the band is ordered — the floor's ch sits strictly below the clamp's" do
+      # A "clamp" whose lower bound meets or exceeds its upper bound is not a
+      # band, and CSS resolves that silently in the floor's favour (min beats
+      # max) rather than erroring. Both numbers are read from the sheet.
+      floor =
+        css()
+        |> at_rule_body!(@paper_gate)
+        |> blocks!(@paper_floor_selector)
+        |> value!("min-inline-size", @paper_floor_selector)
+
+      [_, floor_ch] = Regex.run(~r/(\d+)ch/, floor)
+      [clamp] = clamp_blocks!()
+      [_, clamp_ch] = Regex.run(~r/(\d+)ch/, value!([clamp], "max-inline-size", @clamp_selector))
+
+      assert String.to_integer(floor_ch) < String.to_integer(clamp_ch),
+             """
+             The measure band is inverted or empty: floor #{floor_ch}ch, clamp #{clamp_ch}ch.
+
+             CSS resolves min-inline-size over max-inline-size, so an inverted
+             band does not error — it silently ships the floor as the measure
+             and the clamp becomes decoration. Measured on this branch: with the
+             clamp's px term at 600px (below the floor's resolved 630.591px) the
+             surface rendered 630.578px, the floor winning exactly as described.
+             """
+    end
+
+    test "the clamp is deliberately UNGATED — no @container gate hides it" do
+      gate_body = at_rule_body!(css(), @paper_gate)
+
+      refute gate_body =~ "max-inline-size",
+             """
+             The upper clamp moved inside `@container #{@paper_gate}`.
+
+             The floor is gated because raising a MINIMUM in a column that
+             cannot honour it manufactures a horizontal scrollbar (D39). A
+             MAXIMUM can only ever remove width, so gating it buys nothing and
+             costs the clamp at every column narrower than the gate — including
+             viewport 1280, whose reading column measured 676px on this branch
+             and therefore never enters the gate at all.
+             """
+    end
+  end
+
   describe "the classic floor (D40) — .editor-body.editor-panel-main:not(.bp-paper-body)" do
     test "is 48ch on the three-class selector that outranks the flex reset" do
       floor =
@@ -764,6 +917,58 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
              41.8 CPL, inside the 40-46 editorial band. At the 20px this reader
              used to render, the column was 350px and the measure 35.4.
              """
+    end
+
+    test "the reader's TOP-LEVEL rule PADS with the gutter token, not a literal" do
+      # The mirror, on the READER sheet, of the Studio-side consumption pin
+      # ("the reader's padding CONSUMES the same token the floor does", which
+      # reads root.html.heex). Every other reader pin above is derived from
+      # `--paper-gutter` DECLARATIONS (the ladder) or from the @media bodies, so
+      # the top-level rule can go on declaring the token while its padding
+      # restates `56px 40px 96px` — the ORIGINAL desync shape — and the whole
+      # file stays green. This is the one that looks at what actually renders.
+      padding = reader_shell_padding!()
+
+      assert padding =~ ~r/var\(\s*--paper-gutter\s*\)/,
+             """
+             The reader shell `#{@reader_shell_selector}` in bulldocs.html.heex
+             pads `padding: #{padding}` — a gutter LITERAL, not the token.
+
+             `--paper-gutter` can stay declared and the ladder pins above still
+             agree, so the value is back to living in two places and the two
+             shells drift the moment either sheet is edited. Pad with
+             `var(--paper-gutter)`.
+             """
+    end
+
+    defp reader_shell_padding! do
+      src = File.read!(@bulldocs)
+
+      block =
+        case Enum.filter(
+               top_level_blocks(src, @reader_shell_selector),
+               &(&1 =~ ~r/--paper-gutter\s*:/)
+             ) do
+          [one] ->
+            one
+
+          other ->
+            flunk(
+              "expected exactly ONE top-level `#{@reader_shell_selector}` rule in " <>
+                "bulldocs.html.heex declaring `--paper-gutter`, found #{length(other)}"
+            )
+        end
+
+      case Regex.run(~r/(?<![-\w])padding\s*:\s*([^;}]+)/, block) do
+        [_, value] ->
+          String.trim(value)
+
+        nil ->
+          flunk(
+            "the top-level `#{@reader_shell_selector}` rule in bulldocs.html.heex " <>
+              "declares no `padding` at all — the reader column has no gutter"
+          )
+      end
     end
 
     test "no reader breakpoint pads the shell with a gutter LITERAL" do

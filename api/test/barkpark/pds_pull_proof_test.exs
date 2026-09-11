@@ -3,6 +3,12 @@ defmodule Barkpark.PdsPullProofTest do
   The door for `scripts/pds-pull-proof_test.sh` — the offline harness that pins
   PDS-D261 / `pds-bl-w16-full-meta-permissive-default`.
 
+  It also pins the two preconditions added alongside it — step 1's live read of
+  the target's `documents_task_lifecycle_status_check` and step 4's discovery of
+  a maintenance PostgreSQL for the secret scanner's own firing control — and the
+  fact that the harness is NOT relocatable, which is what its published
+  rehearsal recipe rests on.
+
   `full_meta_ok()` decides whether the ONE full-fidelity export bundle parked at
   `$FULL_TAR` may be reused as the control that steps 3 and 4 take their
   differentials off. Before this rider it was `[ -s "$FULL_TAR" ]` plus a
@@ -65,7 +71,18 @@ defmodule Barkpark.PdsPullProofTest do
              nothing readable) — the conflation that made the permissive default
              possible. A red in the first group means the " <>
              "permissive default came back; a red in the second means the tightening turned " <>
-             "into an always-refuse, which is the same defect with a new mechanism.\n#{out}"
+             "into an always-refuse, which is the same defect with a new mechanism. " <>
+             "Seventeen further arms cover the harness's two other preconditions and its own " <>
+             "portability: four drive `lifecycle_missing_values` against REAL " <>
+             "`pg_get_constraintdef` output for the pre- and post-widening " <>
+             "`documents_task_lifecycle_status_check` (the catalog prints `= ANY (ARRAY[...])`, " <>
+             "never the migration's `IN (...)`, so a matcher written off the migration file " <>
+             "would match nothing), ten drive `control_pg_verdict` — step 4's maintenance-PG " <>
+             "discovery, which accepts a candidate only on the SERVER's own answers and must " <>
+             "refuse a remote server, an unprivileged role, a production database and a probe " <>
+             "it cannot parse — and three relocate the shipped script to a temp directory and " <>
+             "assert it still dies at load, because the published rehearsal recipe rests on " <>
+             "that being true.\n#{out}"
 
     assert out =~ "pds-pull-proof_test: PASS",
            "the harness exited 0 without printing its PASS line — an exit code that does not " <>
@@ -74,15 +91,15 @@ defmodule Barkpark.PdsPullProofTest do
     # Non-vacuity: a harness whose fixtures stopped building would print a
     # tidy PASS over zero arms. The count is asserted, not assumed.
     assert out =~
-             "PASS (23 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination)",
+             "PASS (40 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable)",
            "the harness passed with an arm count this door does not recognise. If arms were " <>
              "added or removed deliberately, update this assertion in the same commit — an " <>
              "unpinned count lets a shrinking harness keep printing PASS.\n#{out}"
 
     ok_lines = out |> String.split("\n") |> Enum.count(&String.starts_with?(&1, "  ok   "))
 
-    assert ok_lines == 23,
-           "expected 23 `ok` arm lines, counted #{ok_lines}. A pass prints a real count; a " <>
+    assert ok_lines == 40,
+           "expected 40 `ok` arm lines, counted #{ok_lines}. A pass prints a real count; a " <>
              "green with no arms means the harness never ran its assertions.\n#{out}"
   end
 end

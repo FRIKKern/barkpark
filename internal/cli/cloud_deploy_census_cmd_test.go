@@ -204,6 +204,68 @@ func TestDeployCensusAbandonmentThreeStates(t *testing.T) {
 	}
 }
 
+// TestDeployCensusAbandonmentCarriesItsThreeLabels pins dr-w33-bl: a bare
+// `abandoned: 7` reads as a live gauge of a live writer, and on the corpus this
+// epic measured it is nothing of the kind. The control plane's own three labels
+// — which basis measured it, how much is historical, how much the backfill
+// wrote — must reach the operator's screen VERBATIM, and must be ABSENT rather
+// than invented when the control plane does not send them.
+func TestDeployCensusAbandonmentCarriesItsThreeLabels(t *testing.T) {
+	seven, zero, four := 7, 0, 4
+	basis := "basis: PROSE — the census fold carries no chain columns. " +
+		"HISTORICAL: newest counted abandonment 2026-08-07T03:41:33Z. " +
+		"BACKFILL-WRITTEN: 7 of 7 counted row(s) settled before the live writer's first chain stamp; 0 were writer-stamped."
+
+	// DECODED OFF THE WIRE, not hand-built: a struct edit that drops the
+	// `json:"abandoned_basis"` tag reds here and not only in the renderer.
+	const payload = `{"abandoned":7,"abandoned_unreadable":0,"abandoned_basis":"basis: PROSE — x. HISTORICAL: y. BACKFILL-WRITTEN: 7 of 7 counted row(s); 0 were writer-stamped."}`
+
+	var decoded cloudclient.DeployCensus
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if decoded.AbandonedBasis == nil {
+		t.Fatalf("abandoned_basis did not decode — the struct tag is missing")
+	}
+	for _, want := range []string{"basis: PROSE", "HISTORICAL:", "BACKFILL-WRITTEN:"} {
+		if !strings.Contains(deployCensusAbandonment(decoded), want) {
+			t.Fatalf("the rendered sentence dropped %q: %q", want, deployCensusAbandonment(decoded))
+		}
+	}
+
+	// The labels ride BOTH endings — the exact count and the lower bound.
+	exact := deployCensusAbandonment(cloudclient.DeployCensus{
+		Abandoned: &seven, AbandonedUnreadable: &zero, AbandonedBasis: &basis,
+	})
+	if !strings.Contains(exact, "abandoned publishes: 7") || !strings.Contains(exact, "BACKFILL-WRITTEN: 7 of 7") {
+		t.Fatalf("the exact ending lost the count or the labels: %q", exact)
+	}
+
+	bounded := deployCensusAbandonment(cloudclient.DeployCensus{
+		Abandoned: &seven, AbandonedUnreadable: &four, AbandonedBasis: &basis,
+	})
+	if !strings.Contains(bounded, "LOWER BOUND") || !strings.Contains(bounded, "basis: PROSE") {
+		t.Fatalf("the lower-bound ending lost the bound or the labels: %q", bounded)
+	}
+
+	// THE CONTROL, and it is the point: an older control plane sends no labels,
+	// and this reader must then say NOTHING about the basis rather than assert
+	// one it did not measure.
+	silent := deployCensusAbandonment(cloudclient.DeployCensus{Abandoned: &seven, AbandonedUnreadable: &zero})
+	if silent != "abandoned publishes: 7" {
+		t.Fatalf("a control plane that sent no labels got labels anyway: %q", silent)
+	}
+
+	// …and an EMPTY string is the same silence, not a dangling em dash.
+	empty := ""
+	blank := deployCensusAbandonment(cloudclient.DeployCensus{
+		Abandoned: &seven, AbandonedUnreadable: &zero, AbandonedBasis: &empty,
+	})
+	if blank != "abandoned publishes: 7" {
+		t.Fatalf("an empty basis rendered a separator with nothing after it: %q", blank)
+	}
+}
+
 // TestDeployCensusClassRowDecodesAndRendersAgency pins the dr-w31 fix:
 // DeployLedger emits `agency` on every class row and it must (a) decode onto
 // DeployCensusClass.Agency and (b) render as an "accuses:" cell — an older
@@ -1188,6 +1250,188 @@ func TestCloudDeploymentsCapacityCrossReference(t *testing.T) {
 	}
 	if strings.Contains(quiet, "ONE cause reported through TWO cohorts") {
 		t.Fatalf("the cross-reference line printed for a window with neither capacity cohort:\n%s", quiet)
+	}
+}
+
+// censusBoxDoorEnvelope is the dr-w22-s5 door term over the shape the defect was
+// measured on: the capacity marker appears on 1,810 rows, 1,804 of which the
+// cause-keyed predicate can see, and SIX of which settled `failed` with a NULL
+// `deferral_cause` and are therefore invisible to it.
+//
+// The `deferred` cohort row carries 1,804 — the number the old screen printed —
+// so the fixture reproduces the exact discrepancy the term exists to disclose.
+const censusBoxDoorEnvelope = `{
+  "window": {"from": "2026-08-06T22:29:27Z", "to": "2026-08-08T00:00:00Z"},
+  "volume": 10200,
+  "failed": 20,
+  "failure_rate": {"sample": 10200, "pct": 0.2, "numerator": 20, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [],
+  "deferred": [
+    {"class": "BOX_AT_CAPACITY_DEFERRED", "label": "the box was at capacity; re-queued", "count": 1804,
+     "share": {"sample": 10200, "pct": 17.69, "numerator": 1804, "min_sample": 200, "refused": false, "reason": null}}
+  ],
+  "box_door": {
+    "refusals": 1810,
+    "cause_keyed": 1804,
+    "unkeyed": 6,
+    "by_status": [{"status": "deferred", "count": 1804}, {"status": "failed", "count": 6}],
+    "predicate": "failure_reason LIKE '%409%box_at_capacity%', across ALL statuses",
+    "cause_predicate": "status = 'deferred' AND deferral_cause = 'BOX_AT_CAPACITY_DEFERRED'",
+    "basis": "every row in the window whose failure_reason carries the box's own capacity-409 marker"
+  },
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200
+}`
+
+// censusBoxDoorAgreeEnvelope is the SAME term over a window in which the two
+// predicates agree. The line must still print — and must say the agreement is a
+// measurement of THIS window, not a property of the door — because a reader who
+// sees the line only when it disagrees cannot tell "no gap" from "no term".
+const censusBoxDoorAgreeEnvelope = `{
+  "window": {"from": "2026-08-07T00:00:00Z", "to": "2026-08-07T06:00:00Z"},
+  "volume": 900,
+  "failed": 4,
+  "failure_rate": {"sample": 900, "pct": 0.44, "numerator": 4, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [],
+  "deferred": [],
+  "box_door": {
+    "refusals": 12,
+    "cause_keyed": 12,
+    "unkeyed": 0,
+    "by_status": [{"status": "deferred", "count": 12}],
+    "predicate": "failure_reason LIKE '%409%box_at_capacity%', across ALL statuses",
+    "cause_predicate": "status = 'deferred' AND deferral_cause = 'BOX_AT_CAPACITY_DEFERRED'",
+    "basis": "every row in the window whose failure_reason carries the box's own capacity-409 marker"
+  },
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200
+}`
+
+// TestCloudDeploymentsBoxDoorDenominator: the door's own denominator reaches the
+// ONLY format a proof may quote (charter D220), and it DISCLOSES the gap rather
+// than reconciling it.
+//
+// Four arms, and the last two are the ones that make the first two mean
+// something:
+//
+//  1. the gap renders — refusals, the cause-keyed count, the missing rows AND
+//     the status split that evidences them;
+//  2. the deferral cohort is UNCHANGED beside it — this reader moves no row;
+//  3. an agreeing window still prints the line, saying so;
+//  4. a control plane that sends NO term prints NOT MEASURED, never a 0 — the
+//     shape every reader of this door had before this slice.
+func TestCloudDeploymentsBoxDoorDenominator(t *testing.T) {
+	newCensusServer(t, 200, censusBoxDoorEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	line := censusLineContaining(t, stdout, "box door — REFUSALS")
+	for _, want := range []string{
+		"REFUSALS 1810",
+		"sees 1804",
+		"MISSING 6",
+		"deferred 1804, failed 6",
+		"box_at_capacity",
+		"BOX_AT_CAPACITY_DEFERRED",
+	} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("door line %q missing %q — the count, the gap and the population must all ride it", line, want)
+		}
+	}
+	// NOTHING MOVED: the per-cause deferral row still renders its own 1,804
+	// under its own heading. The term is additive by construction and this is
+	// the assertion that says so.
+	deferrals := censusSectionAfter(t, stdout, "deferrals (in the volume")
+	if !strings.Contains(deferrals, "BOX_AT_CAPACITY_DEFERRED") || !strings.Contains(deferrals, "1804") {
+		t.Fatalf("the deferral cohort changed beside the new term:\n%s", stdout)
+	}
+	t.Logf("`bp cloud deployments -o table` with the door term:\n%s", stdout)
+
+	// AGREEMENT IS ALSO A MEASUREMENT. The line prints, and it says the two
+	// predicates agree in THIS window rather than falling silent.
+	newCensusServer(t, 200, censusBoxDoorAgreeEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 6, 0, 0, 0, time.UTC))
+	agree, _, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	agreeLine := censusLineContaining(t, agree, "box door — REFUSALS")
+	if !strings.Contains(agreeLine, "MISSES NONE") || !strings.Contains(agreeLine, "this window") {
+		t.Fatalf("an agreeing window must SAY it agrees, and say over what: %q", agreeLine)
+	}
+
+	// AND THE ABSENCE ARM. A control plane with no term must not decode into a
+	// door that refused nothing.
+	newCensusServer(t, 200, censusTodayEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+	old, _, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if strings.Contains(old, "box door — REFUSALS") {
+		t.Fatalf("a control plane sending no box_door term rendered a count:\n%s", old)
+	}
+	if !strings.Contains(old, "box door NOT MEASURED") {
+		t.Fatalf("a missing term must render NOT MEASURED, never silence:\n%s", old)
+	}
+}
+
+// TestDeployCensusBoxDoorDecodesAndNeverSubtracts: the typed decode, and the one
+// arithmetic this renderer must NOT perform.
+//
+// `unkeyed` is the producer's own count of the marked rows the cause-keyed
+// predicate misses. Deriving it here as refusals-causeKeyed is signed: a
+// cause-keyed row whose failure_reason carries no marker drives the difference
+// negative and the screen prints a negative count of missing rows. This test
+// feeds exactly that shape and asserts the rendered line takes the producer's
+// number.
+func TestDeployCensusBoxDoorDecodesAndNeverSubtracts(t *testing.T) {
+	var census cloudclient.DeployCensus
+	if err := json.Unmarshal([]byte(censusBoxDoorEnvelope), &census); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if census.BoxDoor == nil {
+		t.Fatalf("box_door did not decode into a typed field")
+	}
+	if census.BoxDoor.Refusals != 1810 || census.BoxDoor.CauseKeyed != 1804 || census.BoxDoor.Unkeyed != 6 {
+		t.Fatalf("decoded door is wrong: %+v", *census.BoxDoor)
+	}
+	if len(census.BoxDoor.ByStatus) != 2 || census.BoxDoor.ByStatus[1].Status != "failed" {
+		t.Fatalf("the status split did not decode: %+v", census.BoxDoor.ByStatus)
+	}
+
+	// THE SIGNED SHAPE. refusals - cause_keyed is -3 here; the producer counted
+	// 0 missed rows, and the render must quote the producer.
+	skew := &cloudclient.DeployBoxDoor{
+		Refusals:       1,
+		CauseKeyed:     4,
+		Unkeyed:        0,
+		ByStatus:       []cloudclient.DeployBoxDoorStatus{{Status: "deferred", Count: 1}},
+		Predicate:      "failure_reason LIKE '%409%box_at_capacity%', across ALL statuses",
+		CausePredicate: "status = 'deferred' AND deferral_cause = 'BOX_AT_CAPACITY_DEFERRED'",
+	}
+	line := deployCensusDoorLine(skew)
+	if strings.Contains(line, "MISSING -") || strings.Contains(line, "-3") {
+		t.Fatalf("the renderer subtracted and printed a negative gap: %q", line)
+	}
+	if !strings.Contains(line, "MISSES NONE") {
+		t.Fatalf("the renderer must quote the producer's own zero: %q", line)
+	}
+
+	// A producer that sends no split must not have one invented for it.
+	noSplit := &cloudclient.DeployBoxDoor{Refusals: 9, CauseKeyed: 4, Unkeyed: 5}
+	if got := deployCensusDoorLine(noSplit); !strings.Contains(got, "no status split") {
+		t.Fatalf("a missing split must be stated, not skipped: %q", got)
+	}
+
+	// And a window that never touched the door prints nothing at all.
+	if got := deployCensusDoorLine(&cloudclient.DeployBoxDoor{}); got != "" {
+		t.Fatalf("an untouched door asserted a split it did not have: %q", got)
 	}
 }
 
@@ -2983,5 +3227,116 @@ func TestDeployCensusPctRendersEnvelopeVerbatim(t *testing.T) {
 	none := cloudclient.DeployRate{Sample: 500, Numerator: 3, MinSample: 200}
 	if _, okRate := deployCensusPct(none); okRate {
 		t.Error("a node without pct must never yield a percentage")
+	}
+}
+
+// censusVocabularyEnvelope carries the dr-w16-s3 class ENUM beside an OBSERVED
+// class table that is a strict subset of it: `classes` names one class, the
+// vocabulary names three, so the "not seen in this window" line has something
+// true to say and cannot be produced by echoing the observed rows.
+const censusVocabularyEnvelope = `{
+  "window": {"from": "2026-07-31T00:00:00Z", "to": "2026-08-07T00:00:00Z"},
+  "volume": 2216,
+  "failed": 832,
+  "failure_rate": {"sample": 2216, "pct": 37.5, "numerator": 832, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [
+    {"class": "BOX_BUSY_409", "label": "the box was already deploying", "agency": "box", "count": 832, "share": {"sample": 832, "pct": 100.0, "numerator": 832, "min_sample": 200, "refused": false, "reason": null}}
+  ],
+  "not_attempted": [],
+  "sites": [],
+  "vocabulary": {
+    "classes": ["BOX_BUSY_409", "UNCLASSIFIED"],
+    "deferred_classes": ["BOX_AT_CAPACITY_DEFERRED"],
+    "not_attempted_classes": ["GITHUB_PUSH_UNBUILDABLE"]
+  },
+  "min_sample": 200
+}`
+
+// TestCloudDeploymentsVocabularyNamesWhatTheWindowDidNotSee: the legend's whole
+// reason to exist. `classes` is what the WINDOW saw; a class missing from it
+// means "no rows here" and never "no such class", and nothing else on the
+// screen can tell those apart. The line must carry the counts AND the names.
+func TestCloudDeploymentsVocabularyNamesWhatTheWindowDidNotSee(t *testing.T) {
+	newCensusServer(t, 200, censusVocabularyEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "class vocabulary (what the ledger can NAME") {
+		t.Fatalf("no vocabulary section rendered:\n%s", stdout)
+	}
+	line := censusLineContaining(t, stdout, "not seen in this window")
+	// THREE of the four named classes had no row in this window; BOX_BUSY_409
+	// did, so it must NOT be on this line — an implementation that listed the
+	// whole enum would pass a bare "contains UNCLASSIFIED" check.
+	for _, want := range []string{"3 of 4", "UNCLASSIFIED", "BOX_AT_CAPACITY_DEFERRED", "GITHUB_PUSH_UNBUILDABLE"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("quiet-class line %q missing %q", line, want)
+		}
+	}
+	if strings.Contains(line, "BOX_BUSY_409") {
+		t.Fatalf("quiet-class line %q names a class this window DID see", line)
+	}
+}
+
+// TestCloudDeploymentsVocabularyAbsenceRendersNothing: a control plane older
+// than the key sends none, and an empty legend claiming the ledger names no
+// classes is the ABSENT-collapsed-into-ZERO defect this epic is named for.
+func TestCloudDeploymentsVocabularyAbsenceRendersNothing(t *testing.T) {
+	newCensusServer(t, 200, censusCompleteEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	if strings.Contains(stdout, "class vocabulary") || strings.Contains(stdout, "not seen in this window") {
+		t.Fatalf("an envelope with NO vocabulary key rendered a legend anyway:\n%s", stdout)
+	}
+}
+
+// TestDeployCensusUnreachableEpisodeLine pins the OPERATOR SURFACE for
+// BOX_UNREACHABLE (dr-w32-bl-box-unreachable-needs-an-episode-alarm).
+//
+// Before this line the class reached a human only through the generic class-row
+// loop, which prints a name, a count and a share and is identical for every
+// class. That is true and insufficient here: the class is EPISODIC and
+// self-healing, so a count over a wide window counts blips, and it is a DELIVERY
+// failure, so the obvious remedy a bare count suggests — rebuild the sites — is
+// the wrong action.
+//
+// The two arms are the test. The zero arm is the control: without it the
+// present arm would also pass on a line that printed unconditionally, which
+// would put incident vocabulary on a screen that recorded no incident.
+func TestDeployCensusUnreachableEpisodeLine(t *testing.T) {
+	present := cloudclient.DeployCensus{
+		Classes: []cloudclient.DeployCensusClass{
+			{Class: "BOX_UNREACHABLE", Label: "the instance could not be reached at all", Count: 9},
+			{Class: "BUILD_FAILED", Label: "the build failed", Count: 4},
+		},
+	}
+
+	got := deployCensusUnreachableEpisodeLine(present)
+	for _, want := range []string{
+		"BOX_UNREACHABLE 9",
+		"DELIVERY failure",
+		"EPISODIC",
+		"--from/--to",
+		"3 or more rows across 2 or more sites inside 60 minutes",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the episode line %q is missing %q", got, want)
+		}
+	}
+
+	// THE CONTROL. A window with no rows of this class has no episode to
+	// describe, and the line must be absent rather than rendered at zero.
+	absent := cloudclient.DeployCensus{
+		Classes: []cloudclient.DeployCensusClass{{Class: "BUILD_FAILED", Label: "the build failed", Count: 4}},
+	}
+	if line := deployCensusUnreachableEpisodeLine(absent); line != "" {
+		t.Fatalf("no BOX_UNREACHABLE rows must render no episode line, got %q", line)
 	}
 }

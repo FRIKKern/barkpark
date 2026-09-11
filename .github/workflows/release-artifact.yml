@@ -6,6 +6,27 @@ name: release-artifact
 # a non-api merge is box-inert, so the box just fast-forwards (no rebuild, no
 # artifact needed). A missing artifact simply makes the box fall back to an
 # on-box compile, so a gap here is never a breakage.
+#
+# WHO CONSUMES THIS, AND WHO NEVER DOES (pds wave-49: the checksum gate looked
+# structurally unreached). The ONLY consumer is scripts/fetch-prebuilt.sh, whose
+# only caller is scripts/apply-update.sh:69 — reached from
+# internal/cli/cloud/freshen.go:108 (`bash scripts/apply-update.sh`), i.e. the
+# `bp cloud` freshen/rebuild path on a SINGLE-CHECKOUT box. That box does verify
+# the checksum (fetch-prebuilt.sh:61-65 recomputes sha256 and falls back on a
+# mismatch), so the gate is reached — on that lane.
+#
+# Blue/green SLOT boxes never consume it, by design. fetch-prebuilt.sh:22-25
+# refuses BEFORE any fetch when the checkout has a `.slots` dir:
+#     if [ -d "$REPO/.slots" ]; then
+#       echo "[fetch-prebuilt] blue/green slot layout detected — use deploy/instance-deploy.sh" >&2
+#       exit 3
+# and deploy/instance-deploy.sh — the slot deployer — has ZERO references to
+# prebuilt (`grep -c prebuilt deploy/instance-deploy.sh` -> 0). guerrilla is a
+# slot box (`bp cloud status` shows barkpark-slot@blue.service as its serving
+# unit), so guerrilla NEVER fetches an artifact this workflow mints; the slot
+# deployer compiles on-box into the inactive slot instead. Teaching
+# instance-deploy.sh to consume the artifact would be a separate, deliberate
+# change — it is not two lanes accidentally disagreeing.
 on:
   push:
     branches: [main]
@@ -56,7 +77,7 @@ jobs:
             gh release create "$TAG" \
               --latest=false \
               --title "build $SHA" \
-              --notes "Precompiled api/_build/prod for $SHA (elixir/otp pinned via .tool-versions). Consumed by scripts/fetch-prebuilt.sh." \
+              --notes "Precompiled api/_build/prod for $SHA (elixir/otp pinned via .tool-versions). Consumed ONLY by scripts/fetch-prebuilt.sh, reached from scripts/apply-update.sh on the bp-cloud freshen/rebuild path for SINGLE-CHECKOUT boxes. Blue/green SLOT boxes (guerrilla included) NEVER consume it: fetch-prebuilt.sh exits 3 when the checkout has a .slots dir, and deploy/instance-deploy.sh has zero prebuilt references — the slot deployer compiles on-box into the inactive slot." \
               artifact/api-build.tar.zst artifact/api-build.tar.zst.sha256 artifact/stamp.json
           else
             gh release upload "$TAG" \

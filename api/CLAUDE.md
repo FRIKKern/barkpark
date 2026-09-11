@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: api-surface | budget: 1600tok -->
 # api/ — Phoenix API + LiveView Studio
 
-Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.server` on `:4000`. Deep dives: `docs/cards/` via the root routing table. Plugin contract canon: `lib/barkpark/plugin.ex` @moduledoc.
+Elixir/Phoenix backend: CRUD, real-time, plugins, Studio. Dev: `mix phx.server` on `:4000`. Plugin contract: `lib/barkpark/plugin.ex` @moduledoc.
 
 ## Key files
 
@@ -21,12 +21,12 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 
 ## Bulldocs (the Papers surface)
 
-**Papers** is the **Bulldocs plugin** — plugin/producer brand; a **paper** is the artifact (persisted `type` stays `"paper"`, reader URL `/papers/:slug`). **Core keeps the reusable machinery, the plugin is thin wiring.**
+**Papers** is the Bulldocs plugin/producer; a **paper** is the `type:"paper"` artifact at `/papers/:slug`. Core owns the machinery; plugin wiring stays thin.
 
-- **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis,Bpml}` (block engine); `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
+- **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis,Bpml}`; `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
 - **Bulldocs-owned:** `BarkparkWeb.BulldocsLive` (reader), `BulldocsIngestController` / `BulldocsIntentsController`, `Barkpark.Plugins.Bulldocs.Events`, `layouts/bulldocs.html.heex`.
-- **Reader editing:** `BulldocsLive.Edit` shares Studio canvas + `PaperViewer`. View awaits all form-owned fields. Focus pins visible revisions; overlaps require review. Cites/labels stay inline.
-- **Plugin module:** `register_schemas/1` + `register_routes/1` — reader on `:public_root`, ingest API on `:ingest` (`/v1/plugins/bulldocs/*`). Reused by any plugin wanting a reader or token-gated ingest.
+- **Reader editing:** Public/Studio share canvas + `PaperViewer`. View flushes; focus pins revisions; overlaps need review. Figure writes child `src`; empty captions are zero-flow. Null-type Card media stays contextual and exact. Card titles edit in place unless rich. Undo/Redo: authorized single-use 1h receipts, session queue; text history stays native. Clients get opaque refs, never inverses.
+- **Plugin module:** `register_schemas/1` + `register_routes/1` expose the `:public_root` reader and `:ingest` API (`/v1/plugins/bulldocs/*`) for reuse.
 - **Sessions:** 2nd blocks type (whitelist `{paper, session}`); routes `/v1/plugins/bulldocs/sessions*`; private+unwalled schema; Studio pane read-only v1 (`bp session publish` writes).
 
 **Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` for legacy producers — externally gated, do NOT drop. Ingest auth: `:ingest_token` from `BARKPARK_INGEST_TOKEN` (legacy `PAPERFLOW_INGEST_TOKEN`). See `docs/decisions/deferred.md`.
@@ -68,6 +68,6 @@ Sanity's `drafts.` prefix convention (api-v1.md §6) — `Content.publish_docume
 After every mutation `Content` broadcasts (content/broadcast.ex — `tap_broadcast` / `broadcast_document_mutation`):
 
 - `"documents:#{dataset}"` — global per-dataset stream (legacy, untouched)
-- `"documents:ws:#{workspace_id}:#{dataset}"` — additive workspace-scoped stream (only when the doc carries a `workspace_id`)
+- `"documents:ws:#{workspace_id}:#{dataset}"` — additive workspace-scoped stream (only if the doc carries `workspace_id`)
 
-`/v1/data/listen/:dataset` streams these as SSE. Task mutations emit `mutation_events` rows — 16 kinds: `task.{claimed,closed,compacted,compaction_restored,criterion,engagement_lapsed,landed,lease_expired,lease_renewed,mutated,pulse,referenced,relabeled,released,reparented,staged}` (`tasks.ex`, `tasks/landed.ex`, `tasks/renew.ex`, `tasks/ttl_sweeper.ex`, `tasks/compactor.ex`). The `@event_task_*` attributes own this roster — EMITTED names only, never verbs like `task.get`; `scripts/roster-drift-check.sh` re-derives and diffs this line. A consumer switching on a stale subset drops kinds silently.
+`/v1/data/listen/:dataset` streams these as SSE. Task mutations emit `mutation_events` rows — 17 kinds: `task.{claimed,closed,compacted,compaction_restored,criterion,discharged,engagement_lapsed,landed,lease_expired,lease_renewed,mutated,pulse,referenced,relabeled,released,reparented,staged}` (`tasks.ex`, `tasks/landed.ex`, `tasks/renew.ex`, `tasks/ttl_sweeper.ex`, `tasks/compactor.ex`). The `@event_task_*` attributes own this roster — EMITTED names only, never verbs like `task.get`; `scripts/roster-drift-check.sh` re-derives and diffs this line. A consumer on a stale subset drops kinds silently.

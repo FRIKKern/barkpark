@@ -3,6 +3,7 @@
 
 import type { PortableTextBlock, PortableTextNode } from './PortableText'
 import { type Block, str, isMap, asList } from './inline'
+import { listChildren } from './list-children'
 
 /**
  * Extracts the plain text from a PortableDocument value — the utility behind
@@ -175,15 +176,13 @@ function childrenText(list: unknown): string {
  * extracted as label-only. */
 function noteText(m: unknown): string {
   const rec = isMap(m) ? m : {}
-  const body = [str(rec.lead).trim(), proseContent(rec as Block)]
-    .filter((s) => s !== '')
-    .join(' ')
+  const body = [str(rec.lead).trim(), proseContent(rec as Block)].filter((s) => s !== '').join(' ')
   return [str(rec.label), body].filter((s) => s !== '').join(' ')
 }
 
 function listText(b: Block): string {
   return asList(b.items)
-    .map((it) => listItemText(it))
+    .flatMap((it) => [listItemText(it), ...listChildren(it).map(listText)])
     .filter((s) => s !== '')
     .join('\n')
 }

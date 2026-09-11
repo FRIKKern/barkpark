@@ -447,7 +447,13 @@ setup_flip() {
   APPDIR="$FTMP/opt/barkpark"; FAKEBIN="$FTMP/bin"; DSTATE="$FTMP/dstate"
   CADDY="$FTMP/etc/caddy/Caddyfile"
   DOCKERLOG="$FTMP/docker.log"; GITLOG="$FTMP/git.log"; SYSCTLLOG="$FTMP/systemctl.log"
-  mkdir -p "$APPDIR/cloud" "$FAKEBIN" "$DSTATE" "$FTMP/etc/caddy"
+  mkdir -p "$APPDIR/cloud" "$FAKEBIN" "$DSTATE" "$FTMP/etc/caddy" "$APPDIR/scripts/lib"
+  # The health probes source $APP/scripts/lib/bp-curl.sh (429 backoff,
+  # task-90059c5c680f6665). The sandbox IS the $APP the script sees, so it must
+  # carry the helper — otherwise every arm below silently takes the script's
+  # named degrade path and this harness proves nothing about the real helper
+  # (the #17562 deploy-receipt-failure.test.sh trap).
+  cp "$HERE/../scripts/lib/bp-curl.sh" "$APPDIR/scripts/lib/bp-curl.sh"
   : > "$DOCKERLOG"; : > "$GITLOG"; : > "$SYSCTLLOG"
   make_flip_fakes "$FAKEBIN"
   : > "$APPDIR/cloud/docker-compose.yml"

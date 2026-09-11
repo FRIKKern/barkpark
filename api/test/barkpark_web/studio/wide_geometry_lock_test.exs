@@ -290,6 +290,11 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
     {".editor-with-preview .editor-panel-main.bp-paper-body", ~w(container-name container-type)},
     {".editor-with-preview.has-onix-preview .editor-panel-main", ~w(flex max-width)},
 
+    # Paper-only inner chrome, queried against the entire panel at <=720px.
+    # This changes header rows, not the panel's width or reading measure.
+    {~S|.editor-panel[data-test-id="studio-paper-editor"] > .editor-header|,
+     ~w(display flex-shrink)},
+
     # --- a different element that merely shares the name prefix ---
     {".pane-column-collapsed-label", ~w(display flex overflow)}
   ]
@@ -305,6 +310,16 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   # Mis-point one and the rule keeps applying at a threshold measured against a
   # box up to 300px off, silently.
   @container_at_rules [
+    {"panel", "max-width: 720px",
+     ~S|.editor-panel[data-test-id="studio-paper-editor"] > .editor-header|,
+     """
+     The Paper header spans the WHOLE PANE, including any docked inspector,
+     rather than the reading column. Its direct action buttons need a second
+     row only when that whole pane is narrow. The selector changes the header
+     child, not the panel box. At measured viewport 1280/1440 the panels are
+     976/1136px and retain the original 42px flex header. A narrow pane on a
+     larger viewport intentionally receives the accessible wrapping layout.
+     """},
     {"content", "min-width: 720px", ".bp-paper-surface",
      """
      The protected measure's subject is the READING COLUMN. It asks whether
@@ -335,6 +350,21 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   ]
 
   describe "the wide desk's box geometry, pinned as literal constants" do
+    test "the narrow Paper header changes only its inner rows" do
+      selector = ~S|.editor-panel[data-test-id="studio-paper-editor"] > .editor-header|
+      header = block!(selector)
+
+      assert value!(header, selector, "display") == "grid"
+      assert value!(header, selector, "grid-template-columns") == "minmax(0, 1fr)"
+      assert value!(header, selector, "height") == "auto"
+      assert value!(header, selector, "flex-shrink") == "0"
+      assert value!(header, selector, "gap") == "8px"
+      assert value!(header, selector, "padding-block") == "8px"
+
+      actions = selector <> " > div:last-child"
+      assert value!(block!(actions), actions, "flex-wrap") == "wrap"
+    end
+
     test ".pane-layout is a flex row that SCROLLS horizontally rather than clipping" do
       block = block!(".pane-layout")
 
@@ -656,6 +686,11 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
               ".editor-with-preview .editor-panel-main",
               ".editor-with-preview.has-onix-preview .editor-panel-main",
               ".pane-column-collapsed-label",
+              # Paper-only INNER header chrome, like the sidebar children
+              # above. The census pins display/flex-shrink, the literal test
+              # pins its rows, and the at-rule pin requires panel <=720px.
+              # No exemption for the panel itself or arbitrary descendants.
+              ~S|.editor-panel[data-test-id="studio-paper-editor"] > .editor-header|,
               # A REAL WIDENING OF THE PERMITTED SET, not boilerplate (spd-w5,
               # charter D114). Unlike every other entry above, this rule DOES
               # apply at viewport 1280 and 1440 — the paper editor declares a
@@ -738,7 +773,7 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
       end
     end
 
-    test "the at-rule census is exactly these three — a new one lands in front of a reader" do
+    test "the at-rule census is exactly the declared set — a new one lands in front of a reader" do
       actual = container_at_rules() |> Enum.map(fn {n, c, _} -> {n, c} end) |> Enum.sort()
       expected = @container_at_rules |> Enum.map(fn {n, c, _, _} -> {n, c} end) |> Enum.sort()
 

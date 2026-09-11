@@ -225,9 +225,15 @@ defmodule BarkparkWeb.AppTokenControllerTest do
       # With NO Default Workspace resolvable the fallback fails CLOSED: a
       # workspace-less [read,write,chat] token is the tenant-less credential
       # this endpoint must never mint. (Rename inside the sandbox — rolled back.)
+      #
+      # The rename alone stopped hiding it at task-566dc5be4871353b: the seat is
+      # `workspaces.is_default` now, not the slug, so the seat is cleared through
+      # the shared fixture and the rename only frees the name.
       default_ws
       |> Ecto.Changeset.change(slug: "default-hidden-#{System.unique_integer([:positive])}")
       |> Repo.update!()
+
+      vacate_default_seat!()
 
       hidden = mint(admin, %{email: unique_email()})
       assert json_response(hidden, 422)["error"]["code"] == "unprocessable"

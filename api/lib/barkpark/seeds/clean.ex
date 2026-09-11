@@ -150,8 +150,32 @@ defmodule Barkpark.Seeds.Clean do
           #{raw}
 
       Connect with:  bp setup --target connect \\
-                       --server http://localhost:4000 --token <token>
+                       --server #{connect_url()} --token <token>
     ==========================================================\
     """)
+  end
+
+  @doc """
+  The box's ACTUAL base URL — what the store-it-now banner tells the owner to
+  point `bp setup --target connect` at.
+
+  A hardcoded `http://localhost:4000` is a copy-pasteable instruction that
+  cannot work on any box not on the default port (observed against a `:47016`
+  personal box) — the same defect class as a vacuous green.
+
+  NOT `Endpoint.url/0`: `config/runtime.exs` pins the PUBLIC `url:` port to
+  80/443 because every prod box is proxy-fronted, so `url/0` renders
+  "http://localhost" on a personal box. The port a client must actually dial is
+  the LISTEN port in the `:http` config, which `runtime.exs` sets from `PORT` in
+  every env — the same `PORT` `bin/barkpark` exports.
+
+  Public (not `defp`) so the URL can be read back WITHOUT minting a token:
+  `PORT=47016 mix run -e 'IO.puts(Barkpark.Seeds.Clean.connect_url())'` is the
+  whole non-default-port proof.
+  """
+  def connect_url do
+    url = BarkparkWeb.Endpoint.config(:url) || []
+    http = BarkparkWeb.Endpoint.config(:http) || []
+    "#{url[:scheme] || "http"}://#{url[:host] || "localhost"}:#{http[:port] || 4000}"
   end
 end

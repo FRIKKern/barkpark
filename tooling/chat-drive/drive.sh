@@ -63,6 +63,8 @@
 # makes a pending card older than that permanently unanswerable.
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SERVER="${BARKPARK_SERVER:-https://guerrilla.barkpark.cloud}"
@@ -110,11 +112,11 @@ req() { # method url token [json-body]
   local method="$1" url="$2" token="$3" data="${4:-}"
   local tmp; tmp="$(mktemp)"
   if [ -n "$data" ]; then
-    STATUS="$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" \
+    STATUS="$(bp_curl_code -sS -o "$tmp" -X "$method" \
       -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
       --data "$data" "$url")"
   else
-    STATUS="$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" \
+    STATUS="$(bp_curl_code -sS -o "$tmp" -X "$method" \
       -H "Authorization: Bearer $token" "$url")"
   fi
   BODY="$(cat "$tmp")"; rm -f "$tmp"
@@ -208,16 +210,16 @@ cleanup_best_effort() {
   CLEANED=1
   set +e
   if [ -n "$SID" ] && [ -n "$MEMBER_TOKEN" ]; then
-    curl -sS -o /dev/null -X POST -H "Authorization: Bearer $MEMBER_TOKEN" \
-      "$SERVER/v1/chat/sessions/$SID/interrupt"
-    curl -sS -o /dev/null -X POST -H "Authorization: Bearer $MEMBER_TOKEN" \
-      "$SERVER/v1/chat/sessions/$SID/archive"
+    bp_curl_code -sS -o /dev/null -X POST -H "Authorization: Bearer $MEMBER_TOKEN" \
+      "$SERVER/v1/chat/sessions/$SID/interrupt" >/dev/null
+    bp_curl_code -sS -o /dev/null -X POST -H "Authorization: Bearer $MEMBER_TOKEN" \
+      "$SERVER/v1/chat/sessions/$SID/archive" >/dev/null
   fi
   if [ -n "$MEMBER_TOKEN" ]; then
-    curl -sS -o /dev/null -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
+    bp_curl_code -sS -o /dev/null -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
       -H "Content-Type: application/json" \
       --data "$(jq -cn --arg t "$MEMBER_TOKEN" '{token:$t}')" \
-      "$SERVER/v1/auth/app-tokens"
+      "$SERVER/v1/auth/app-tokens" >/dev/null
   fi
   [ -n "$SSE_PID" ] && kill "$SSE_PID" 2>/dev/null
   set -e

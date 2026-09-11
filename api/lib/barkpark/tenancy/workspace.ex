@@ -74,6 +74,25 @@ defmodule Barkpark.Tenancy.Workspace do
     field :expires_at, :utc_datetime_usec
     field :tier, :string
 
+    # THE INSTANCE-DEFAULT SEAT (task-566dc5be4871353b, 2026-09-09). At most one
+    # row in the table may hold it — `workspaces_single_default_index` is a
+    # PARTIAL unique index `WHERE is_default`.
+    #
+    # DELIBERATELY NOT CAST BELOW, and that omission is the whole control. The
+    # seat used to be `slug == "default"`, so it moved with any write that could
+    # set a slug: a delete freed it, and `changeset/2` casts `:slug`, so a RENAME
+    # would have moved it identically the day someone added `update_workspace/2`
+    # or an HTTP update route. An uncast field cannot be reached by ANY attrs map
+    # — not the controllers', not the Studio's, not a bundle manifest's — so the
+    # rename path is CLOSED rather than merely unreachable, and it closes for a
+    # future `update_workspace/2` that nobody has written yet.
+    #
+    # The flag moves through exactly two writers, both of which bypass this
+    # changeset on purpose: `Tenancy.establish_default_workspace!/0` and
+    # `Tenancy.WorkspaceBundle`'s in-transaction transfer on the PDS-D9 adopt
+    # branch.
+    field :is_default, :boolean, default: false
+
     # Thin Organization tier (era-w1-org): nullable, additive, not read by any
     # authorization path — a workspace joins an org when SSO/SCIM is configured.
     belongs_to :organization, Barkpark.Tenancy.Organization

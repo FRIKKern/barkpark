@@ -8,6 +8,8 @@ Shape of the system:
 - `Intelligence.record/6` + `record_interaction/4` capture query/interaction events; the crystallizer batch-distills them.
 - Phase tracker + deliberate-skip table (P9/P10 triggers) → docs/search/ROADMAP.md.
 
+Media HTTP responses — asset `absoluteUrl` and the `/v1/media/*` list envelope (`total`/`hasMore`/`nextOffset`/`nextCursor`, and the two meanings of `count`): [../contracts/media-http-envelope.md](../contracts/media-http-envelope.md).
+
 Media discovery: the **Find-vs-Pick** philosophy (search-first Find pane vs browse Pick modal) and the OpenSearch-vs-Meilisearch decision point live in docs/media/DISCOVERY.md. Media plugin itself: `api/lib/barkpark/plugins/media.ex`; assets in `priv/plugins/media/`.
 
 ## Code anchors

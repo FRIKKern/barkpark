@@ -220,3 +220,56 @@ test('the run and the flattened artifact record which document, from which sourc
   assert.match(SRC, /measured_document: run\.measured_document/,
     'the long-standing name stays: committed runs in scripts/measurements/ are read by it');
 });
+
+// ── 5. the NAMED target's refusal, and the wrong-document guard ──────────────
+//
+// Criterion 2 of spd-w6-instrument-default-doc-ages-off is "a missing or
+// ambiguous target fails with a named diagnostic instead of silently measuring
+// another Paper". Section 3 above pins that for the EMPTY pane, which is the
+// resolver's own case and reachable purely in memory. The NAMED case is not:
+// it lives inside `drillToDocument`, behind playwright, a minted ticket and a
+// live pane, so it was proven exactly once — by a run — and a wording that a
+// later edit flattens into "target not found" would take nothing red with it.
+// A run is not a guard. These read the source instead.
+//
+// PROVEN LIVE on 2026-09-10 against deployed guerrilla, `--doc=` with a slug
+// that does not exist: exit 1, zero bytes on stdout, and stderr naming the
+// slug, the flag it came from, the pane count, the 100 rows it did see, the
+// first 8 of their phx-value-ids, and `--doc=newest`. That run is the subject;
+// what follows is what keeps it true.
+
+test('a NAMED target that is not in the pane refuses by name, not by silence', () => {
+  const start = SRC.indexOf("if (target.mode === 'named') {");
+  const end = SRC.indexOf('const landed = await tryOpenRow(page, named);', start);
+  assert.ok(start !== -1, "the named-target branch lost its anchor `if (target.mode === 'named')`");
+  assert.ok(end > start, 'the named-target refusal lost its end anchor `tryOpenRow` — a -1 here would ' +
+    'have handed every assertion below the whole rest of the file');
+  const branch = SRC.slice(start, end);
+
+  assert.match(branch, /await named\.count\(\) === 0/,
+    'the absence must be TESTED. A locator that matches nothing and is clicked anyway times out ' +
+    'somewhere else entirely, and the reader gets a selector timeout instead of a named target.');
+  assert.match(branch, /no row with phx-value-id="\$\{target\.slug\}"/,
+    'the refusal must quote the slug it looked for — the operator cannot replace a target the ' +
+    'message will not name');
+  assert.match(branch, /target came from the \$\{target\.source\}/,
+    'and where it came from: --doc=, BP_DESK_DOC and the default are three different bugs');
+  assert.match(branch, /slice\(0, 8\)/,
+    'the refusal must list what it DID see; "not found" with no sample is how a root-pane read ' +
+    'went seven weeks misdiagnosed (D138 failure C)');
+  assert.match(branch, /--doc=newest/,
+    'and it must name the non-ageing default as the way past a target that has simply aged off');
+});
+
+test('landing on a DIFFERENT document than the one clicked is a refusal, never a measurement', () => {
+  const start = SRC.indexOf('const slugInUrl = decodeURIComponent');
+  assert.ok(start !== -1, 'the landed-URL assertion lost its anchor');
+  const guard = SRC.slice(start, start + 600);
+
+  assert.match(guard, /slugInUrl !== target\.slug/,
+    'the ambiguous case is not "no row matched" — it is a row that matched and opened something ' +
+    'else. Without this comparison the matrix would carry another Paper\'s geometry under this ' +
+    'run\'s measured_doc, which is the silent substitution criterion 2 forbids.');
+  assert.match(guard, /clicked the row for "\$\{target\.slug\}" but landed on "\$\{slugInUrl\}"/,
+    'and it must print BOTH names — a mismatch reported as a bare failure is unactionable');
+});

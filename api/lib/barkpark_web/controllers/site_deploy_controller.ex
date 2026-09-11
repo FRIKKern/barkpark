@@ -28,13 +28,15 @@ defmodule BarkparkWeb.SiteDeployController do
       `E_HARDLINK` / `E_SPECIAL_FILE` / `E_UNKNOWN_TYPE` / `E_MODE_BITS` /
       `E_BAD_NAME` / `E_UNSAFE_PARENT` / `E_ENTRY_TOO_LARGE` /
       `E_TOTAL_TOO_LARGE` / `E_COMPRESSION_RATIO` / `E_TOO_MANY_ENTRIES` /
-      `E_NO_INDEX` — the 18 typed refusals a PREBUILT artifact can draw from the
+      `E_NO_INDEX` / `E_JUNK_ENTRY` — the 19 typed refusals a PREBUILT artifact can draw from the
       box (`Barkpark.Sites.PrebuiltArtifact`). These are 400s, not 500s: the
       bytes are the caller's, and the box never falls back to building the site
       itself when it refuses them. `E_MALFORMED` covers framing as well as
       corruption — a stream with no end-of-archive marker, or a gzip member that
       never terminates, is a truncated upload; `E_NO_INDEX` is the archive that
-      arrived WHOLE and still has nothing to serve.
+      arrived WHOLE and still has nothing to serve; `E_JUNK_ENTRY` is packaging
+      junk (`.DS_Store`, an AppleDouble `._*` sidecar, a real `PaxHeader`
+      directory) and its message names the repack incantation.
     * **409** `already_running` — a run for THAT SLUG is in flight. A different
       slug (or an unrelated self-update) never collides.
     * **409** `box_at_capacity` — a DIFFERENT slug is building and the box's
@@ -446,11 +448,53 @@ defmodule BarkparkWeb.SiteDeployController do
   # box — and nothing called `build_record/2`, so the answer to "why did build X
   # fail" was an SSH session. This is that answer over the existing admin door.
   #
-  # RAW LOG BYTES ARE DELIBERATELY NOT SERVED, AND THIS IS NOT A SIZE DECISION.
-  # The build env file carries `BARKPARK_TOKEN=` in plaintext, and the measured
-  # leak rate of the shared scrubber against this box's own `bppat_` token shape
-  # is 95.1% (DeployRunner :1153-1155). DeployRunner :404-406 refuses the bytes
-  # for exactly that reason. So this ships the STRUCTURED record — which is
+  # LOG BYTES ARE STILL NOT SERVED HERE — but as of 2026-09-11 the GROUND HAS
+  # MOVED, and the new ground is narrower. It used to be "the recorded bytes are
+  # never scrubbed at write": the log was captured verbatim by the deploy shell's
+  # `tee`, the build env file carries `BARKPARK_TOKEN=` in plaintext, and so what
+  # the build printed sat on the box in the clear. That hole is CLOSED
+  # (dr-bl-recorder-http-read-path c2): `DeployRunner.write_terminal_record/2`
+  # folds the log in place with `Barkpark.Sites.BuildLogScrub.raw/1` — the same
+  # `cloud/priv/secret-scrub.exs` pattern set the control plane's display
+  # boundary compiles — before it measures the file, and stamps the version it
+  # used onto the record as `log_scrub`.
+  #
+  # WHAT REMAINS is a separate criterion (c1) and a separate design: serving the
+  # bytes needs a size cap, a tail-vs-whole decision, and a rule for a record
+  # whose `log_scrub` is `nil` (never folded — a pre-2026-09-11 record whose log
+  # has since been evicted, or a fold that hit an IO error). A door that serves
+  # bytes MUST read that field and refuse a `nil`; nothing here does yet, so
+  # nothing here serves bytes.
+  #
+  # CORRECTED 2026-09-08 (task-04e89e88f056aa38), then CORRECTED AGAIN the same
+  # day. The whole sequence is kept deliberately, so the next reader sees it:
+  # (1) this comment ORIGINALLY rested the refusal on "the measured leak rate of
+  # the shared scrubber against this box's own `bppat_` token shape is 95.1%";
+  # (2) THE FIRST CORRECTION replaced that with "the figure matched neither of
+  # them … Neither is 95.1%" — which is FALSE, and it shipped; (3) this is the
+  # repair.
+  #
+  # 95.1% IS REAL. `.claude/workflows/bp-deploy-reliability-charter.md`,
+  # decision D29, quoting its own derivation: 2,000 tokens minted with the
+  # production expression — `Barkpark.Auth.create_personal_access_token/3` in
+  # `api/lib/barkpark/auth.ex` — of which the `BARKPARK_TOKEN=<tok>` shape leaks
+  # 1902/2000 = 95.1% through
+  # `FailureCopy.scrub/1`. That is PER-SHAPE. The 94.3% in
+  # `cloud/lib/barkpark_cloud/failure_copy.ex` is the AGGREGATE — "a real token
+  # measured 94.3% LEAKED through `scrub/1` in four of six shapes". Different
+  # scopes, both real; neither refutes the other, and treating them as rivals is
+  # what produced the false correction.
+  #
+  # WHAT HAS CHANGED is that 95.1% is HISTORICAL, not live: the defect it
+  # measured is CLOSED. Re-read on main on 2026-09-08 in that same file —
+  # shape-blindness is closed (`@secret_patterns` now carries
+  # `bppat_`/`bpcs_`/`bp_<kind>_`) and ordering is closed (`raw/1` =
+  # `strip_ansi |> scrub`, test-pinned). A closed defect cannot carry a refusal,
+  # which is the only reason the figure is no longer the ground here.
+  #
+  # AND THAT REFUSAL HAS NOW BEEN PAID, not merely restated: the write-boundary
+  # scrub above is exactly the thing whose absence this comment named. What this
+  # endpoint ships is still the STRUCTURED record — which is
   # strictly more diagnostic than the one-line failure_reason and carries no
   # credential surface — and `log_path` + `log_bytes` + `journal_command` tell an
   # operator where the bytes are without moving them.
@@ -485,6 +529,15 @@ defmodule BarkparkWeb.SiteDeployController do
       log_bytes: record.log_bytes,
       exit_code: record.exit_code,
       failure_reason: cap_reason(record.failure_reason),
+      # THE ARM DECISION, on the TERMINAL door too (charter D608). It outlives
+      # the unit for the same reason the served slot does: the Caddyfile it was
+      # read out of has moved on by the time anyone asks a finished build what it
+      # did to the route. `build_record/2` already carries both keys on every
+      # shape it can answer in (`render_terminal_record/1` lifts them out of the
+      # record JSON, `absent_record/2` nils them), so the live status door and
+      # this one cannot disagree about a build.
+      route_status: Map.get(record, :route_status),
+      route_detail: Map.get(record, :route_detail),
       # The BPSTAGE fold. Retained separately from the 500-line log ring and
       # IMMUNE to it, so these survive after the log itself is evicted — which
       # is what makes this record useful at the end of a retention window
@@ -549,6 +602,29 @@ defmodule BarkparkWeb.SiteDeployController do
       # crash this door.
       served_port: Map.get(status, :served_port),
       served_slot: Map.get(status, :served_slot),
+      # THE ARM DECISION (charter D608). Both engines emit
+      # `BPSTAGE name=ROUTE status=<ok|failed> detail="…"` into the durable
+      # status file after their Caddy arming attempt, and `fold_route_file/1`
+      # lifts it into the status map as a SIBLING of `stages` — deliberately not
+      # a stage, because a name inside `@stage_names` reaches `stage_exit_code/1`
+      # and would turn a report into a verdict on a run that already emitted
+      # SWITCH ok.
+      #
+      # Until this key existed the decision was durable and UNREPORTED: the run
+      # knew it, the record kept it, and nothing downstream could read it — the
+      # control plane's `deployments` table carried a ROUTE outcome on 0 of
+      # 19,327 console-bearing rows. This is the wire half of that.
+      #
+      # NIL-HONEST, never omitted — the opposite discipline from
+      # `health_exit_code` below, and the difference is the value that would be
+      # invented. An unmeasured health code would be invented as 0, which IS the
+      # success code, so absence is the only honest answer there. `route_status`
+      # is a STRING; an unmeasured one is `null` and reads as "nobody measured
+      # this" on its face, exactly like `served_slot` beside it. A box older than
+      # the ROUTE engines (or a run that died before arming) sends `null`, and
+      # the cloud consumer omits a nil rather than writing it over a column.
+      route_status: Map.get(status, :route_status),
+      route_detail: Map.get(status, :route_detail),
       started_at: iso(status.started_at),
       finished_at: iso(status.finished_at)
     }
@@ -587,6 +663,19 @@ defmodule BarkparkWeb.SiteDeployController do
 
   defp atom_or_nil(nil), do: nil
   defp atom_or_nil(atom) when is_atom(atom), do: Atom.to_string(atom)
+
+  # A BINARY IS ALREADY THE ANSWER, and this clause is not defensive padding —
+  # without it `GET ?record=1` raised `FunctionClauseError` (a 500) on EVERY
+  # record a real run ever wrote. `write_terminal_record/2` persists
+  # `"mode" => to_string(manifest.mode)` and `"runtime_target" =>
+  # to_string(manifest.runtime_target)`, `render_terminal_record/1` hands those
+  # strings straight through, and `render_build_record/1` then called
+  # `atom_or_nil/1` on `"deploy"`. The suite missed it because the one fixture
+  # exercising this door omits both keys, so the only clause it ever reached was
+  # the `nil` one — a green over a door that could not answer about a build that
+  # exists. The live-status path is unaffected (`status_from_record/1` re-atomizes
+  # both through `safe_atom/3`), which is why the two doors disagreed at all.
+  defp atom_or_nil(value) when is_binary(value), do: value
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

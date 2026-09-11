@@ -92,6 +92,46 @@ defmodule Barkpark.Content do
     do: Query.collect_all_documents(type, dataset, opts)
 
   @doc """
+  The WHOLE-CORPUS read for an in-memory fold: every document of every named
+  type, drafts-merged, in ONE query per ACL class. The bounded, single-sort
+  counterpart to `collect_all_documents/3`'s per-type OFFSET walk — see
+  `Content.Query.collect_corpus_documents/3` for the measured plan that made
+  the difference.
+  """
+  @spec collect_corpus_documents([String.t()], String.t(), keyword()) ::
+          {[struct()], nil | :cap}
+  def collect_corpus_documents(types, dataset, opts \\ []),
+    do: Query.collect_corpus_documents(types, dataset, opts)
+
+  @doc """
+  The LIVE-EXTRACT SET — draft twins, plus anything written inside the
+  projector-lag window. See `Content.Query.collect_live_extract_documents/3`.
+  """
+  @spec collect_live_extract_documents([String.t()], String.t(), keyword()) ::
+          {[struct()], nil | :cap}
+  def collect_live_extract_documents(types, dataset, opts \\ []),
+    do: Query.collect_live_extract_documents(types, dataset, opts)
+
+  @doc """
+  Every logical document id in scope and NOT ONE BYTE of `content` — the
+  membership set the drafts graph's phantom lens needs. See
+  `Content.Query.collect_corpus_slugs/3`.
+  """
+  @spec collect_corpus_slugs([String.t()], String.t(), keyword()) ::
+          {[%{doc_id: String.t(), type: String.t()}], nil | :cap}
+  def collect_corpus_slugs(types, dataset, opts \\ []),
+    do: Query.collect_corpus_slugs(types, dataset, opts)
+
+  @doc """
+  The scoped corpus's `documents.id` PKs as a QUERY, for a `subquery/1` — the
+  scoping pipeline, reusable by a read that cannot express it itself. See
+  `Content.Query.corpus_scope_ids_query/3`.
+  """
+  @spec corpus_scope_ids_query([String.t()], String.t(), keyword()) :: Ecto.Query.t()
+  def corpus_scope_ids_query(types, dataset, opts \\ []),
+    do: Query.corpus_scope_ids_query(types, dataset, opts)
+
+  @doc """
   One page plus an exact `has_more` — `{documents, has_more}`. The page is what
   `list_documents/3` would return; `has_more` says whether any row exists past
   it, so a caller can tell an EXHAUSTED page from a TRUNCATED one (a bare list
@@ -124,6 +164,15 @@ defmodule Barkpark.Content do
           %{optional(String.t()) => Document.t()}
   def get_documents_by_ids(doc_ids, dataset, opts \\ []),
     do: Query.get_documents_by_ids(doc_ids, dataset, opts)
+
+  @doc """
+  Batched `get_document/4` EXISTENCE for one type — see
+  `Barkpark.Content.Query.resolvable_doc_ids/4`.
+  """
+  @spec resolvable_doc_ids([String.t()], String.t() | nil, String.t() | nil, keyword()) ::
+          MapSet.t(String.t())
+  def resolvable_doc_ids(doc_ids, type, dataset, opts \\ []),
+    do: Query.resolvable_doc_ids(doc_ids, type, dataset, opts)
 
   @doc """
   Grant-narrowed COUNT companion to `get_documents_by_ids/3`: how many of the
@@ -782,6 +831,27 @@ defmodule Barkpark.Content do
           request_id,
           principal_key,
           resolver,
+          opts
+        )
+
+  @doc "Apply one server-authorized contextual Paper history continuation exactly once."
+  def apply_paper_contextual_history_once(
+        slug,
+        history_ref,
+        action,
+        dataset,
+        request_id,
+        principal_key,
+        opts \\ []
+      ),
+      do:
+        Papers.BlockOps.apply_paper_contextual_history_once(
+          slug,
+          history_ref,
+          action,
+          dataset,
+          request_id,
+          principal_key,
           opts
         )
 

@@ -36,9 +36,11 @@ echo "[build-prebuilt] compiling api/ (MIX_ENV=prod, clean checkout) for $SHA"
   mix compile
 )
 
-# The exact runtime this compiled BEAM is valid on. The box checks all three
-# (elixir, erts, arch) — erts+elixir together pin bytecode compatibility, arch
-# pins the native NIFs (bcrypt, etc.).
+# The exact runtime this compiled BEAM is valid on. The box checks ALL FOUR
+# (elixir, otp, erts, arch) — erts+elixir together pin bytecode compatibility,
+# arch pins the native NIFs (bcrypt, etc.), and otp is the coarse release string
+# the other two descend from. Nothing is published here that fetch-prebuilt.sh
+# does not gate on: an ungated receipt field asserts a check that does not exist.
 ELIXIR_V="$(elixir --version | sed -n 's/^Elixir \([0-9][0-9.]*\).*/\1/p' | head -1)"
 OTP_V="$(erl -noshell -eval 'io:fwrite("~s", [erlang:system_info(otp_release)]), halt().')"
 ERTS_V="$(erl -noshell -eval 'io:fwrite("~s", [erlang:system_info(version)]), halt().')"

@@ -74,12 +74,41 @@
         this._searchTimer = setTimeout(() => this._loadAssets(), 250);
       });
       document.addEventListener("keydown", (e) => {
-        if (this._open && e.key === "Escape") this.close();
+        if (!this._open) return;
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          this.close();
+          return;
+        }
+        if (e.key !== "Tab") return;
+        const focusable = Array.from(this.querySelectorAll(
+          'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )).filter((node) => !node.hidden && !node.closest("[hidden]"));
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (!this.contains(document.activeElement)) {
+          e.preventDefault();
+          (e.shiftKey ? last : first).focus();
+        } else if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       });
     }
 
     open(opts) {
       opts = opts || {};
+      if (!this._open) {
+        const active = document.activeElement;
+        this._returnFocus = active && active !== document.body && active !== document.documentElement
+          ? active
+          : null;
+      }
       clearTimeout(this._searchTimer);
       this._searchTimer = null;
       this._onSelect = opts.onSelect || null;
@@ -111,6 +140,11 @@
       this._requestContext = null;
       this.hidden = true;
       this._onSelect = null;
+      const returnFocus = this._returnFocus;
+      this._returnFocus = null;
+      if (returnFocus && returnFocus.isConnected && !returnFocus.closest?.("[inert]")) {
+        returnFocus.focus();
+      }
     }
 
     _dataset() {

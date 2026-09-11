@@ -115,6 +115,23 @@
 # quietly re-implementing at leaf granularity, forever, the aggregator the run
 # just disqualified.
 #
+# AND A PULL_REQUEST-ONLY NAME IS CLASSIFIED, NOT WAITED FOR (S8)
+#
+# Stage 2 iterates the S1 intersection, i.e. names that RENDERED on the sampled
+# shas, and the sampled shas are branch heads. A workflow triggered only by
+# `pull_request` publishes against a PR's merge ref and never against a commit
+# on main, so no window can put its names in front of the selection: the census
+# was structurally blind to EVERY pull_request-only check name, and the three
+# committed rows for such names each arrived by hand and had to be re-typed as
+# `--expect-unrendered` on every regeneration. S8 derives those candidates from
+# the workflow source — a pull_request trigger, no branch-head trigger, no paths
+# filter — and applies the STATIC exclusion grounds only. It can never promote:
+# a required context must be a byte-for-byte copy of a name GitHub was observed
+# to publish, and an S8 candidate's string came from a `name:` template, so a
+# candidate with no static ground stays unaccounted and a candidate the
+# committed spec REQUIRES is skipped outright. Its rows defer to a committed row
+# for the same context.
+#
 # USAGE
 #   scripts/required-checks-generate.sh --sha <sha> --sha <sha> [--out FILE]
 #   scripts/required-checks-generate.sh --sha <sha> --explain      # the ledger
@@ -174,9 +191,15 @@ EXPECT_DEMOTED=()
 # subsumed — but must still never gate a merge. Each needs one line of why.
 ADVISORY_BY_INTENT_NAMES=(
   "PR task gate self-test"
+  "Filebase aesthetics critic (advisory, main + nightly)"
+  "pipefail scan — did the scanner's inputs move?"
+  "pipefail SIGPIPE scan"
 )
 ADVISORY_BY_INTENT_REASONS=(
   "the task gate's own harness — it proves the gate CAN fail; requiring it makes the tripwire's tripwire load-bearing"
+  "ADDED 2026-09-09 (#17079, 6e3e353ee) — pr-meta.yml job 'aesthetics' carries a job-level 'if: github.event_name != pull_request', so on every PR head it is SKIPPED and publishes no verdict a PR could clear; its two critic steps carry step-level continue-on-error, so the job reds only when the harness itself breaks. Retire this row if the job ever gains a pull_request arm that concludes on its own findings."
+  "ADDED 2026-09-09 (#17081, e4acd4339) — pipefail-sigpipe-scan.yml job 'changes' is a DISPATCHER: it only computes the 'hit' output the scan job reads, and asserts nothing about the tree. Requiring it would pin the scan's own venue predicate to the merge button. Retire this row if the job ever carries the verdict itself."
+  "ADDED 2026-09-09 (#17081, e4acd4339) — pipefail-sigpipe-scan.yml job 'scan' is advisory by its own header ('THIS WORKFLOW IS ADVISORY … nothing here can stop a merge'): it SKIPS on a PR touching none of scripts/, .github/workflows/ or deploy/, and its high-confidence ratchet reds on a repo-wide count that no single PR can clear. Retire this row when the ratchet's baseline is zero and a deadlock sweep reports no casualties."
 )
 
 # S7 EXCLUDED BY DECISION: names that pass every mechanical stage — green on
@@ -198,6 +221,50 @@ EXCLUDED_BY_DECISION_REASONS=(
 )
 
 die() { echo "FAIL: $*" >&2; exit 1; }
+
+# ── S4's ABSOLUTE arm: a workflow with NO pull_request trigger at all ────────
+# `pf` above catches a workflow-level `on: pull_request: paths:` — the filter
+# that makes a name ABSENT on a PR that misses the paths. A workflow that never
+# triggers on pull_request AT ALL is the same failure mode without the escape
+# hatch: the name is not `skipped` on a PR, it is absent, and a required absent
+# context reports "expected" forever (D18). The committed spec has carried five
+# such rows ("S4 STRUCTURALLY ABSENT ON EVERY PR HEAD" — main-gate-watch,
+# stale-verdict-watch, cron-overdue-probe …) with NO stage able to derive them,
+# so each arrived by hand and the sixth was missed: `landed-mark.yml` landed
+# push-only and its name sat unaccounted on every main head until
+# task-2e28697e29983544. This is that stage.
+#
+# FAIL-SAFE DIRECTION: an unreadable or unknown file claims a trigger. The cost
+# of a false "has a PR trigger" is that a name stays UNACCOUNTED and the census
+# clause says so out loud; the cost of a false "absent" is a silent exclusion
+# row nobody typed.
+workflow_has_pr_trigger() { # <basename of a workflow file>
+  local f="$WORKFLOW_DIR/$1"
+  [ -n "$1" ] && [ -f "$f" ] || return 0
+  awk '
+    # the same three spellings the index matches: bare, "on", '"'"'on'"'"'
+    /^("on"|\047on\047|on)[ \t]*:/ {
+      # the inline forms — `on: [push, pull_request]` and `on: pull_request`
+      if ($0 ~ /pull_request/) { found = 1 }
+      inon = 1; next
+    }
+    inon && /^[A-Za-z"\047]/ { inon = 0 }
+    inon && /^  pull_request(_target)?[ \t]*:/ { found = 1 }
+    inon && /^  - pull_request(_target)?[ \t]*$/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$f"
+}
+
+
+# A usage error is not a verdict: this script's nonzero codes describe something
+# it MEASURED, and a caller who typed the command wrong measured nothing. It
+# therefore gets a word and a code of its own (sysexits EX_USAGE) instead of
+# borrowing `die`'s FAIL/1, which made a did-not-run
+# indistinguishable from a real finding. 64 rather than 2 because 2 is a
+# MEASURED verdict elsewhere in this toolchain (GROWTH in
+# required-checks-floor.sh, "could not be evaluated" in the deadlock sweep), and
+# one usage code across the family beats a per-script guess.
+usage_error() { echo "usage error: $*" >&2; exit 64; }
 note() { [ "$EXPLAIN" -eq 1 ] && echo "$*" >&2 || true; }
 
 rule_enabled() {
@@ -706,7 +773,7 @@ main() {
       --status-source) SOURCE_FEED="status"; shift ;;
       --allow-single-sha) ALLOW_SINGLE_SHA=1; shift ;;
       -h|--help) usage 0 ;;
-      *) die "unknown argument: $1 (try --help)" ;;
+      *) usage_error "unknown argument: $1 (try --help)" ;;
     esac
   done
 
@@ -876,6 +943,11 @@ EOF
       reason="S4 PATHS-FILTERED: $file only runs on matching paths, so on other PRs this name is ABSENT — a required absent context never reports"
     fi
 
+    # S4, the absolute arm — no pull_request trigger anywhere in the workflow
+    if [ -z "$reason" ] && [ -n "$file" ] && ! workflow_has_pr_trigger "$file"; then
+      reason="S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: $file job '$job' — the workflow carries no pull_request trigger, so on a PR this name is not SKIPPED, it is ABSENT, and a required absent context reports 'expected' forever (D18). Derived from the workflow's own \`on:\` block, not from a list."
+    fi
+
     # S5 red on main
     if [ -z "$reason" ]; then
       local mc
@@ -917,6 +989,136 @@ $file	$job	$needs
     fi
   done <<EOF
 $intersection
+EOF
+
+  # ── S8 PULL-REQUEST-ONLY: the census's structural blind spot ────────────────
+  #
+  # STAGE 2 ABOVE ITERATES THE INTERSECTION, so every classification this script
+  # makes is a classification of a name that RENDERED on the sampled shas — and
+  # the sampled shas are BRANCH HEADS. A workflow triggered only by
+  # `pull_request` / `pull_request_target` publishes its check runs against a
+  # PR's merge ref and never against a commit on main, so no sampling window,
+  # however wide, can put its names in front of stage 2. The census is
+  # structurally blind to EVERY pull_request-only check name, and the evidence is
+  # in the committed spec: `PR task gate self-test` and both dependabot rows
+  # arrived BY HAND, and each has to be re-acknowledged with
+  # `--expect-unrendered` on every regeneration, forever
+  # (cgsi-bl-pr-task-gate-selftest-unclassified).
+  #
+  # This stage offers those names to the selection instead of waiting for a
+  # sample that cannot exist. The candidate set is DERIVED FROM THE WORKFLOW
+  # SOURCE, never from a list: a job whose workflow carries a pull_request
+  # trigger, carries NO branch-head trigger (`workflow_has_head_trigger`, the
+  # same predicate `unrenderable_hint` already answers with), and is NOT
+  # paths-filtered.
+  #
+  # WHY A PATHS FILTER DISQUALIFIES A CANDIDATE. An UNFILTERED pull_request
+  # workflow renders on EVERY pull request, so the only thing standing between
+  # its name and a classification is which event type the census sampled — that
+  # is this stage's business, and nothing else's. A paths-filtered one is absent
+  # on some PRs too: its ground is S4, its absence is a fact about the PR rather
+  # than about the sample, and the LOSS refusal's own PULL_REQUEST-ONLY hint
+  # already names it. Claiming it here would state a SAMPLING ground for an
+  # absence the sampling did not cause.
+  #
+  # IT CAN ONLY EXCLUDE, AND IT MUST NEVER PROMOTE. That is why it is narrower
+  # than stage 2 rather than a copy of it. Every context in the spec is a
+  # byte-for-byte copy of a name GitHub was OBSERVED to publish, because `PUT
+  # …/protection` accepts a typo and deadlocks main forever (D21) — and a name
+  # derived from a `name:` TEMPLATE has been observed by nobody. So a candidate
+  # no static exclusion ground catches is left exactly as it is today
+  # (unaccounted, answered by `--expect-unrendered`), and a candidate the
+  # COMMITTED spec REQUIRES is skipped outright rather than contradicting live
+  # branch protection on the strength of a string this run never saw.
+  #
+  # THE GROUNDS ARE THE STATIC ONES ONLY: a job-level `continue-on-error`, the
+  # advisory-by-intent list, and the S7 hold list. S5 is a COLOUR and no static
+  # read knows it. S3 and S6 are relations among names this run SELECTED, and
+  # this stage selects nothing.
+  #
+  # A MATRIXED JOB, OR ONE WHOSE `name:` INTERPOLATES, IS NOT A CANDIDATE: the
+  # RENDERED name carries a matrix tuple the source does not spell, so the string
+  # this stage would write down is a guess. `job_for_name` tolerates that suffix
+  # when matching an OBSERVED name; there is no observed name here.
+  #
+  # AND THE ROW IT WRITES DEFERS TO A COMMITTED ONE. Every other stage's reason
+  # is a live statement about the source and rightly overwrites a stale committed
+  # one (the `.exclusions` union keeps the LAST row per context). An S8 reason
+  # says only "this name cannot reach the census, and here is the static ground
+  # for holding it out" — which is a strict subset of what a hand row for the
+  # same name already says, and those hand rows carry dated grounds and
+  # retirement triggers no derivation can restate. So S8 rows are marked
+  # `derived_class: "S8"` and the merge lets the BASE row win for them; the
+  # marker never reaches the emitted file. On a greenfield emit (`--no-merge`)
+  # there is no base and the derived row stands alone.
+  # The trigger questions are answered ONCE PER WORKFLOW FILE, not once per job:
+  # a repo of this size indexes hundreds of jobs and both predicates spawn awk.
+  local s8_pronly="" s8f
+  while IFS= read -r s8f; do
+    [ -n "$s8f" ] || continue
+    [ -f "$WORKFLOW_DIR/$s8f" ] || continue
+    workflow_has_pr_trigger "$s8f" || continue
+    workflow_has_head_trigger "$WORKFLOW_DIR/$s8f" && continue
+    s8_pronly="$s8_pronly,$s8f"
+  done <<EOF
+$(cut -f1 <<<"$idx" | sort -u)
+EOF
+
+  local s8_seen="" ifile ijob iname imatrixed icoe ipf ineeds
+  while IFS=$'\t' read -r ifile ijob iname imatrixed icoe ipf _ilaunder ineeds; do
+    [ -n "$ifile" ] && [ -n "$ijob" ] || continue
+    case ",$s8_pronly," in *",$ifile,"*) : ;; *) continue ;; esac
+    [ "$imatrixed" = "0" ] || continue
+    case "$iname" in *'${{'*) continue ;; esac
+    [ "$ipf" = "0" ] || continue
+    # It rendered after all — then stage 2 owns it, on evidence rather than on
+    # a template. (Unreachable on a correct tree; cheap, and the alternative is
+    # two rows for one context.)
+    grep -qxF "$iname" <<<"$intersection" && continue
+    case ",$s8_seen," in *",$iname,"*) continue ;; esac
+    s8_seen="$s8_seen,$iname"
+
+    if [ -n "$committed_required" ] && grep -qxF "$iname" <<<"$committed_required"; then
+      note "  s8 skip  $iname — the COMMITTED spec REQUIRES it; a static derivation never demotes an observed, live required context"
+      continue
+    fi
+
+    local s8ground="" s8i
+    if [ "$icoe" != "-" ]; then
+      s8ground="S2 ADVISORY: job '$ijob' carries continue-on-error: $icoe — needs.<job>.result reads success even when it failed"
+    fi
+    if [ -z "$s8ground" ]; then
+      s8i=0
+      while [ "$s8i" -lt "${#ADVISORY_BY_INTENT_NAMES[@]}" ]; do
+        if [ "$iname" = "${ADVISORY_BY_INTENT_NAMES[$s8i]}" ]; then
+          s8ground="S2 ADVISORY BY INTENT: ${ADVISORY_BY_INTENT_REASONS[$s8i]}"
+          break
+        fi
+        s8i=$((s8i + 1))
+      done
+    fi
+    if [ -z "$s8ground" ]; then
+      s8i=0
+      while [ "$s8i" -lt "${#EXCLUDED_BY_DECISION_NAMES[@]}" ]; do
+        if [ "$iname" = "${EXCLUDED_BY_DECISION_NAMES[$s8i]}" ]; then
+          s8ground="${EXCLUDED_BY_DECISION_REASONS[$s8i]}"
+          break
+        fi
+        s8i=$((s8i + 1))
+      done
+    fi
+    if [ -z "$s8ground" ]; then
+      note "  s8 unaccounted  $iname ($ifile job '$ijob') — pull_request-only and unfiltered, but no STATIC ground holds it out, and this stage never promotes; it stays answerable by --expect-unrendered"
+      continue
+    fi
+
+    exclusions_json="$(printf '%s' "$exclusions_json" | jq \
+      --arg c "$iname" \
+      --arg r "S8 PULL-REQUEST-ONLY: $ifile job '$ijob' — the workflow carries a pull_request trigger, NO branch-head trigger and no pull_request paths filter, so this name renders on EVERY pull request head and on NO commit of $BRANCH. The census samples branch heads, so no sampling window can ever offer this name to the selection; it is classified here from the workflow's own \`on:\` block rather than left unaccounted. It is CLASSIFIED, NEVER PROMOTED: a required context must be a byte-for-byte copy of a name GitHub was observed to publish (D21), and this string came from a \`name:\` template. The static ground for holding it out is — $s8ground" \
+      '. + [{context: $c, reason: $r, derived_class: "S8"}]')"
+    note "  exclude  $iname  — S8 PULL-REQUEST-ONLY ($ifile job '$ijob')"
+  done <<EOF
+$idx
 EOF
 
   # ── S6: an EXCLUDED aggregator DEMOTES its leaves ───────────────────────────
@@ -1275,7 +1477,19 @@ EOF
         # emit one context on both lists.
         exclusions: ((($b.exclusions // [] | map(select(.context as $c | $promoted_drop | index($c) | not)))
                       + $exclusions)
-                     | group_by(.context) | map(.[-1]) | sort_by(.context))
+                     | group_by(.context)
+                     # The LAST row in each group wins — except for an S8 row,
+                     # which DEFERS to a committed one. An S8 reason states only
+                     # that the name cannot reach the census plus the static
+                     # ground for holding it out; a hand row for the same
+                     # context carries a dated ground and a retirement trigger
+                     # that no derivation can restate, and letting the shorter
+                     # derived text overwrite it is the wave-57 disease with the
+                     # arrow reversed. The marker is stripped either way, so it
+                     # never reaches the emitted file.
+                     | map((if ((.[-1].derived_class // "") == "S8") and (length > 1)
+                            then .[0] else .[-1] end) | del(.derived_class))
+                     | sort_by(.context))
       }')"
 
   local emitted

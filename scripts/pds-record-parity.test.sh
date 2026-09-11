@@ -470,6 +470,13 @@ run 1 "axis B REDS on the one leaf slice merged over an open row" -- --axis b --
 says "DIVERGENT  fixture-leaf-open" "the red names the leaf row"
 says "EPIC-ROOT-IN-FLIGHT  fixture-root-open" "an open epic ROOT is advisory, never redding"
 says "LEAF slices (REDDING):          1" "exactly one leaf reds"
+# THE REDDING COMPOSITION, arm 1 of 3. The headline counts TWO classes — a
+# merge over an open row and a merge over an id the ledger does not carry —
+# under a label that names only the first. Here the ghost half is 0, so the
+# headline and the open half agree; that agreement is exactly what made the
+# conflation invisible, and is why the split must be PRINTED, not inferred.
+says "of which merged over an OPEN row:    1" "the redding headline prints its OPEN-row half"
+says "of which merged over a MISSING id:   0" "…and its MISSING-id half, which is zero here"
 says_not "DIVERGENT  fixture-leaf-done" "a done row is parity"
 says_not "DIVERGENT  fixture-cancelled" "a cancelled row is terminal, not divergent"
 
@@ -535,6 +542,30 @@ prs "$FX404/prs.json" \
 ledger "$FX404" fixture-leaf-done 200 "$(task_doc fixture-leaf-done done fixture-root-open)"
 run 1 "a merged PR naming a task the ledger does not carry is a definitive RED" -- --axis b --fixture-dir "$FX404"
 says "NOT-FOUND  fixture-ghost" "the 404 row is named"
+# ARM 2 of 3 — the MIRROR. One ghost, no open leaf: the headline is 1 again,
+# but now it is the MISSING-id half that carries it. A single conflated
+# counter prints an identical headline for arm 1 and arm 2; only the
+# composition lines tell the two windows apart.
+says "LEAF slices (REDDING):          1" "the ghost reds the headline"
+says "of which merged over an OPEN row:    0" "no open-row leaf in this window"
+says "of which merged over a MISSING id:   1" "the ghost is counted as the MISSING-id half"
+
+# ARM 3 of 3 — BOTH AT ONCE, the independence proof. One merge over an open
+# leaf and one over an id the ledger does not carry, in the same window: the
+# headline must be 2 and each half must be 1. Compare against arms 1 and 2,
+# where the same halves read 1/0 and 0/1 — each moves without the other.
+FXMIX="$TMP/fxmix"
+mkdir -p "$FXMIX"
+prs "$FXMIX/prs.json" \
+  "601|2026-01-01T00:00:00Z|fixture-ghost" \
+  "602|2026-01-05T04:00:00Z|fixture-leaf-open"
+ledger "$FXMIX" fixture-leaf-open  200 "$(task_doc fixture-leaf-open  open fixture-root-open)"
+run 1 "a window carrying BOTH redding classes reds once and reports both" -- --axis b --fixture-dir "$FXMIX"
+says "DIVERGENT  fixture-leaf-open" "the open-row leaf is named"
+says "NOT-FOUND  fixture-ghost" "the ghost is named in the same run"
+says "LEAF slices (REDDING):          2" "the headline is the SUM of the two classes"
+says "of which merged over an OPEN row:    1" "the OPEN-row half moved independently"
+says "of which merged over a MISSING id:   1" "the MISSING-id half moved independently"
 
 # …but a DECLARED ABSENCE is not a ghost. #6371 on the live record says
 # literally `Task: n/a`; the canonical grammar extracts `n/a` as an id and the

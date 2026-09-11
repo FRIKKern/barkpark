@@ -532,8 +532,10 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def delete(conn, %{"dataset" => dataset, "id" => id} = params) do
+    scope = scope_opts(conn)
+
     with :ok <- require_write(conn),
-         {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+         {:ok, file} <- Media.get_file(id, scope),
          :ok <- ensure_dataset(file, dataset),
          # WHERE-USED GUARD (pe-w2-bl-media-delete-where-used): papers embed
          # media as RAW `/media/files/...` URL STRINGS, invisible to every
@@ -541,8 +543,12 @@ defmodule BarkparkWeb.V1.MediaController do
          # edges only), so this door used to answer 200 while blanking a live
          # page. Consult usage BEFORE the irreversible delete.
          {:ok, override} <- refuse_if_referenced(conn, file, params),
+         # The forced-delete WITNESS rides down to the `media.deleted` webhook
+         # too (task-303e3b171435d767): the receipt below only reaches the
+         # CALLER, while a link-graph rebuilder or reindexer sees a delete it
+         # must apply and could not learn it was contested.
          {:ok, deleted} <-
-           Media.delete_file(id, Keyword.put(scope_opts(conn), :where_used, :guard)) do
+           Media.delete_file(id, Keyword.merge(scope, where_used: :guard, override: override)) do
       # RECEIPT LAW (pds w40): `Media.delete_file/2` returns the row
       # `Repo.delete(file, stale_error_field: :id)` removed (media.ex:413-455).
       # This used to discard it and echo the `:id` path param. NOTE the trap the
@@ -614,14 +620,21 @@ defmodule BarkparkWeb.V1.MediaController do
     if RequireWritePermission.granted?(conn), do: :ok, else: {:error, :forbidden}
   end
 
-  # Force-release privilege for `undo_checkout`. NOTE: write==force-release is
-  # DELIBERATE here — any write token may release ANY actor's checkout lock,
-  # diverging from the pure-admin sibling `Access.admin?/1` (access.ex). The
-  # holder-only fallback in `Checkout.ensure_can_release/3` is therefore dead on
-  # the API path (`require_write` runs first, so admin? is always true). This is
-  # the current, intended posture; whether it SHOULD tighten to true-admin is
-  # tracked separately (felix-w28-bl-checkout-tighten-adjudication) — do not
-  # change behavior here.
+  # FORCE-RELEASE IS ADMIN-ONLY (felix-w28-bl-checkout-tighten-adjudication,
+  # ruled 2026-09-09). This helper used to fold "write" in alongside "admin", so
+  # ANY write token could release ANY other editor's checkout lock and the
+  # holder-only fallback in `Checkout.ensure_can_release/3` was dead on the API
+  # path. That fold was copy-paste, not design — it was unique against the
+  # pure-admin siblings `Media.Storage.Access.admin?/1` (access.ex) and
+  # `Studio.Caps.admin?/1` (studio/caps.ex).
+  #
+  # The posture now: `require_write/1` still gates the route, so a write token
+  # reaches `Checkout.undo_checkout/4` — but with `admin? == false`, which means
+  # it may release ONLY a lock it holds itself (the `holder == actor` branch of
+  # `ensure_can_release/3`, now live rather than dead). Releasing SOMEONE ELSE's
+  # lock requires a true `admin` permission. A stuck lock is an annoyance; a
+  # silent steal of another editor's in-flight work is not.
+  #
   # A token-less principal reaches here since the account arm on `require_write/1`
   # (and, before it, `share_writer`). `Auth.has_permission?/2` is
   # `permission in (token.permissions || [])`, so a nil token RAISES BadMapError
@@ -629,7 +642,7 @@ defmodule BarkparkWeb.V1.MediaController do
   defp admin?(conn) do
     case conn.assigns[:api_token] do
       %Barkpark.Auth.ApiToken{} = token ->
-        Auth.has_permission?(token, "admin") or Auth.has_permission?(token, "write")
+        Auth.has_permission?(token, "admin")
 
       _ ->
         false

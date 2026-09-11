@@ -14,6 +14,8 @@
 # installation_id, private_key, webhook_secret, project_id) — the shape
 # Settings.get_credentials/0 reads.
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-ca8fffa7ca885413)
 
 CREDS="" INSTALL="" REPO="FRIKKern/barkpark" PROJECT="" BASE="" TOKEN=""
 while [ $# -gt 0 ]; do case "$1" in
@@ -47,7 +49,7 @@ PY
 )"
 
 echo ">> PUT ${BASE%/}/v1/plugins/settings/github ..."
-code="$(curl -sS -o /tmp/gh-provision.out -w '%{http_code}' \
+code="$(bp_curl_code -sS -o /tmp/gh-provision.out \
   -X PUT "${BASE%/}/v1/plugins/settings/github" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   --data "$BODY")"

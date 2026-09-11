@@ -14,25 +14,30 @@ const bootstrap = match[1];
 
 const editorScripts = [
   "/assets/bp-paper-editor.bundle.js",
+  "/assets/bp-asset-browser.js",
   "/assets/bp-media-picker.js",
   "/assets/bp-reference-picker.js",
   "/assets/bp-rich-text-editor.js",
   "/assets/bp-paper-editor-hooks.js",
 ];
-const editorStyle = "/assets/bp-paper-editor-shell.css";
+const editorStyles = [
+  "/assets/bp-paper-editor-shell.css",
+  "/assets/bp-media-picker.css",
+];
 
-function installDefinitions(window, { elements = true } = {}) {
+function installDefinitions(window, { elements = true, assetBrowser = true } = {}) {
   window.BarkparkPaperEditorHooks = Object.fromEntries([
     "BarkparkPaperEditToggle", "BarkparkPaperEditor", "BarkparkPaperCanvas",
-    "BarkparkFieldBlockBridge", "BarkparkFieldBridge",
+    "BarkparkFieldBlockBridge", "BarkparkFieldBridge", "BarkparkFigureImageBridge",
     "BarkparkPaperSortable", "BarkparkPaperContextMenu", "BarkparkPaperAutoSize",
   ].map((name) => [name, { mounted() {} }]));
   if (elements) {
     for (const name of [
-      "bp-paper-editor", "bp-paper-canvas", "bp-media-picker",
+      "bp-paper-editor", "bp-paper-canvas", "bp-asset-browser", "bp-media-picker",
       "bp-reference-picker", "bp-rich-text-editor",
     ]) window.customElements.define(name, class extends window.HTMLElement {});
   }
+  if (assetBrowser) window.BpAssetBrowser = { ensure: () => ({ open() {} }) };
 }
 
 function setup({ editable }) {
@@ -127,7 +132,7 @@ async function tick() {
   lazyToggle.mounted.call(firstHook);
   await tick();
 
-  assert.deepEqual(requested.map(pathOf), [editorStyle, editorScripts[0]]);
+  assert.deepEqual(requested.map(pathOf), [...editorStyles, editorScripts[0]]);
   assert.equal(connections.length, 1, "connected-only authorization must keep the original socket");
   assert.equal(toggle.disabled, true, "Edit stays inert until every editor dependency is ready");
 
@@ -146,7 +151,8 @@ async function tick() {
   const replacementHook = { el: replacement };
   lazyToggle.mounted.call(replacementHook);
   await tick();
-  assert.equal(requested.length, 2, "a reconnect must share the in-flight asset load");
+  assert.equal(requested.length, editorStyles.length + 1,
+    "a reconnect must share the in-flight asset load");
 
   for (let index = 0; index < editorScripts.length; index += 1) {
     const script = requested.find((node) => pathOf(node) === editorScripts[index]);
@@ -161,7 +167,9 @@ async function tick() {
     await tick();
   }
 
-  requested.find((node) => pathOf(node) === editorStyle).dispatchEvent(new window.Event("load"));
+  for (const style of editorStyles) {
+    requested.find((node) => pathOf(node) === style).dispatchEvent(new window.Event("load"));
+  }
   await tick();
 
   assert.equal(window.lazyToggleMounted, 1, "the authorized toggle must activate after lazy load");
@@ -211,7 +219,7 @@ async function tick() {
   const { dom, window, requested, connections } = setup({ editable: true });
   await tick();
 
-  assert.deepEqual(requested.map(pathOf), [editorStyle, editorScripts[0]]);
+  assert.deepEqual(requested.map(pathOf), [...editorStyles, editorScripts[0]]);
   assert.equal(connections.length, 0, "LiveSocket must wait for editor dependencies");
 
   for (let index = 0; index < editorScripts.length; index += 1) {
@@ -226,7 +234,9 @@ async function tick() {
   }
 
   assert.equal(connections.length, 0, "LiveSocket must also wait for editor CSS");
-  requested.find((node) => pathOf(node) === editorStyle).dispatchEvent(new window.Event("load"));
+  for (const style of editorStyles) {
+    requested.find((node) => pathOf(node) === style).dispatchEvent(new window.Event("load"));
+  }
   await tick();
 
   assert.equal(connections.length, 1);
@@ -239,7 +249,7 @@ async function tick() {
   dom.window.close();
 }
 
-for (const failingAsset of [editorScripts[0], editorStyle]) {
+for (const failingAsset of [editorScripts[0], ...editorStyles]) {
   const { dom, window, requested, connections, errors } = setup({ editable: true });
   await tick();
 
@@ -256,14 +266,17 @@ for (const failingAsset of [editorScripts[0], editorStyle]) {
   dom.window.close();
 }
 
-for (const missing of ["hooks", "elements"]) {
+for (const missing of ["hooks", "elements", "asset-browser-api"]) {
   const { dom, window, requested, connections } = setup({ editable: true });
   if (missing === "elements") installDefinitions(window, { elements: false });
+  if (missing === "asset-browser-api") installDefinitions(window, { assetBrowser: false });
   for (const asset of editorScripts) {
     await tick();
     requested.find((node) => pathOf(node) === asset).dispatchEvent(new window.Event("load"));
   }
-  requested.find((node) => pathOf(node) === editorStyle).dispatchEvent(new window.Event("load"));
+  for (const style of editorStyles) {
+    requested.find((node) => pathOf(node) === style).dispatchEvent(new window.Event("load"));
+  }
   await tick();
   assert.equal(connections.length, 0, "loaded files without editor definitions must not connect");
   assert.equal(window.document.querySelector("button").disabled, true);
@@ -271,4 +284,4 @@ for (const missing of ["hooks", "elements"]) {
   dom.window.close();
 }
 
-console.log("public layout editor bootstrap: 8 scenarios passed");
+console.log("public layout editor bootstrap scenarios passed");

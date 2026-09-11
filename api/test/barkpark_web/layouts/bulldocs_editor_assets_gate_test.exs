@@ -113,4 +113,10 @@ defmodule BarkparkWeb.Layouts.BulldocsEditorAssetsGateTest do
     assert render_layout(%{}) =~
              "Object.assign(PaperHooks, window.BarkparkPaperEditorHooks || {});"
   end
+
+  test "reconnect mode hints are read afresh on each socket join" do
+    html = render_layout(%{})
+    assert html =~ "params: () => ({"
+    assert html =~ "window.BarkparkPaperEditorConnectParams?.()"
+  end
 end

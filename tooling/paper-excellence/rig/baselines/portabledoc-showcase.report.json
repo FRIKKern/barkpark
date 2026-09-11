@@ -19,7 +19,7 @@
       "cell": "portabledoc-showcase__light__1280",
       "file": "portabledoc-showcase__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2341917,
+      "bytes": 2402681,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -136,17 +136,17 @@
       "maxWidth": "660px",
       "proseCpl": 71.8,
       "proseCplSamples": 14,
-      "captionCpl": 69.5,
-      "captionWidth": 453.5,
+      "captionCpl": 62.6,
+      "captionWidth": 400.4,
       "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 541.7,
+          "width": 544,
           "offCentre": 0,
-          "left": 369.2,
-          "right": 910.8,
-          "inkWidth": 541.7,
+          "left": 368,
+          "right": 912,
+          "inkWidth": 542,
           "inkOffCentre": 0
         },
         {
@@ -288,12 +288,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 4,
           "emptyTracks": 0,
           "probe": null
@@ -302,12 +302,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 198,
+        "total": 208,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 188,
+          "1": 198,
           "2": 10
         },
         "heavyRules": [
@@ -333,7 +333,7 @@
           },
           {
             "px": 2,
-            "y": 3295.1,
+            "y": 3293.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -343,7 +343,7 @@
           },
           {
             "px": 2,
-            "y": 5329.6,
+            "y": 5344.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -353,7 +353,7 @@
           },
           {
             "px": 2,
-            "y": 6723.9,
+            "y": 6746.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -363,7 +363,7 @@
           },
           {
             "px": 2,
-            "y": 7734.7,
+            "y": 7761.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -373,7 +373,7 @@
           },
           {
             "px": 2,
-            "y": 8210.9,
+            "y": 8237.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -383,7 +383,7 @@
           },
           {
             "px": 2,
-            "y": 9564.2,
+            "y": 9638.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -393,7 +393,7 @@
           },
           {
             "px": 2,
-            "y": 11634.9,
+            "y": 11713.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -403,7 +403,7 @@
           },
           {
             "px": 2,
-            "y": 13523.6,
+            "y": 13616.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -413,13 +413,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "portabledoc-showcase__light__1920",
       "file": "portabledoc-showcase__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2570260,
+      "bytes": 2639677,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -536,17 +536,17 @@
       "maxWidth": "660px",
       "proseCpl": 72.2,
       "proseCplSamples": 14,
-      "captionCpl": 69.5,
-      "captionWidth": 453.5,
+      "captionCpl": 62.6,
+      "captionWidth": 400.4,
       "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 541.7,
+          "width": 544,
           "offCentre": 0,
-          "left": 689.2,
-          "right": 1230.8,
-          "inkWidth": 541.7,
+          "left": 688,
+          "right": 1232,
+          "inkWidth": 542,
           "inkOffCentre": 0
         },
         {
@@ -702,12 +702,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 198,
+        "total": 208,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 188,
+          "1": 198,
           "2": 10
         },
         "heavyRules": [
@@ -733,7 +733,7 @@
           },
           {
             "px": 2,
-            "y": 3295.1,
+            "y": 3293.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -743,7 +743,7 @@
           },
           {
             "px": 2,
-            "y": 5329.6,
+            "y": 5344.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -753,7 +753,7 @@
           },
           {
             "px": 2,
-            "y": 6723.9,
+            "y": 6746.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -763,7 +763,7 @@
           },
           {
             "px": 2,
-            "y": 7734.7,
+            "y": 7761.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -773,7 +773,7 @@
           },
           {
             "px": 2,
-            "y": 8210.9,
+            "y": 8237.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -783,7 +783,7 @@
           },
           {
             "px": 2,
-            "y": 9617.7,
+            "y": 9692.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -793,7 +793,7 @@
           },
           {
             "px": 2,
-            "y": 11693.2,
+            "y": 11772.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -803,7 +803,7 @@
           },
           {
             "px": 2,
-            "y": 13635.3,
+            "y": 13728.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -813,13 +813,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "portabledoc-showcase__dark__1280",
       "file": "portabledoc-showcase__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2338975,
+      "bytes": 2381096,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -936,17 +936,17 @@
       "maxWidth": "660px",
       "proseCpl": 71.8,
       "proseCplSamples": 14,
-      "captionCpl": 69.5,
-      "captionWidth": 453.5,
+      "captionCpl": 62.6,
+      "captionWidth": 400.4,
       "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 541.7,
+          "width": 544,
           "offCentre": 0,
-          "left": 369.2,
-          "right": 910.8,
-          "inkWidth": 541.7,
+          "left": 368,
+          "right": 912,
+          "inkWidth": 542,
           "inkOffCentre": 0
         },
         {
@@ -1088,12 +1088,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 4,
           "emptyTracks": 0,
           "probe": null
@@ -1102,12 +1102,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 198,
+        "total": 208,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 188,
+          "1": 198,
           "2": 10
         },
         "heavyRules": [
@@ -1133,7 +1133,7 @@
           },
           {
             "px": 2,
-            "y": 3295.1,
+            "y": 3293.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1143,7 +1143,7 @@
           },
           {
             "px": 2,
-            "y": 5329.6,
+            "y": 5344.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1153,7 +1153,7 @@
           },
           {
             "px": 2,
-            "y": 6723.9,
+            "y": 6746.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1163,7 +1163,7 @@
           },
           {
             "px": 2,
-            "y": 7734.7,
+            "y": 7761.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1173,7 +1173,7 @@
           },
           {
             "px": 2,
-            "y": 8210.9,
+            "y": 8237.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1183,7 +1183,7 @@
           },
           {
             "px": 2,
-            "y": 9564.2,
+            "y": 9638.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1193,7 +1193,7 @@
           },
           {
             "px": 2,
-            "y": 11634.9,
+            "y": 11713.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1203,7 +1203,7 @@
           },
           {
             "px": 2,
-            "y": 13523.6,
+            "y": 13616.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1213,13 +1213,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "portabledoc-showcase__dark__1920",
       "file": "portabledoc-showcase__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2565416,
+      "bytes": 2615240,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -1336,17 +1336,17 @@
       "maxWidth": "660px",
       "proseCpl": 72.2,
       "proseCplSamples": 14,
-      "captionCpl": 69.5,
-      "captionWidth": 453.5,
+      "captionCpl": 62.6,
+      "captionWidth": 400.4,
       "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 541.7,
+          "width": 544,
           "offCentre": 0,
-          "left": 689.2,
-          "right": 1230.8,
-          "inkWidth": 541.7,
+          "left": 688,
+          "right": 1232,
+          "inkWidth": 542,
           "inkOffCentre": 0
         },
         {
@@ -1502,12 +1502,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 198,
+        "total": 208,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 188,
+          "1": 198,
           "2": 10
         },
         "heavyRules": [
@@ -1533,7 +1533,7 @@
           },
           {
             "px": 2,
-            "y": 3295.1,
+            "y": 3293.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1543,7 +1543,7 @@
           },
           {
             "px": 2,
-            "y": 5329.6,
+            "y": 5344.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1553,7 +1553,7 @@
           },
           {
             "px": 2,
-            "y": 6723.9,
+            "y": 6746.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1563,7 +1563,7 @@
           },
           {
             "px": 2,
-            "y": 7734.7,
+            "y": 7761.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1573,7 +1573,7 @@
           },
           {
             "px": 2,
-            "y": 8210.9,
+            "y": 8237.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1583,7 +1583,7 @@
           },
           {
             "px": 2,
-            "y": 9617.7,
+            "y": 9692.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1593,7 +1593,7 @@
           },
           {
             "px": 2,
-            "y": 11693.2,
+            "y": 11772.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1603,7 +1603,7 @@
           },
           {
             "px": 2,
-            "y": 13635.3,
+            "y": 13728.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1613,7 +1613,7 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     }
   ]
 }

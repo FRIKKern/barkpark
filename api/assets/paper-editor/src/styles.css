@@ -534,6 +534,27 @@
   padding-top: var(--bp-section-gap);
 }
 .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+/* A nested disclosure heading is not a document section boundary. */
+.bp-expandable__body .bp-paper-editor-body > .ProseMirror > h2 {
+  margin-top: 1.9em; border-top: 0; padding-top: 0;
+}
+/* Out-of-flow access to reader-suppressed scaffolds. Selecting one restores
+ * native editing; no content or persisted layout attributes are changed. */
+.bp-paper-editor-body .ProseMirror > .bp-resting-scaffold {
+  display: none;
+}
+.bp-paper-editor-body .bp-scaffold-control {
+  position: absolute; inset-inline-start: -24px; width: 24px; height: 24px;
+  padding: 0; border: 0; border-radius: 4px; background: var(--paper-bg);
+  color: var(--paper-ink-soft); font: 14px/24px var(--paper-font-mono);
+  cursor: pointer;
+}
+.bp-paper-editor-body .bp-scaffold-control:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px;
+}
+@media (max-width: 720px) {
+  .bp-paper-editor-body .bp-scaffold-control { inset-inline-start: -16px; background: transparent; }
+}
 /* THE LINK AFFORDANCE — byte-mirrored from the reader's `.bp-paper-surface a`
  * (paper-surface.css carries the measurement: `--paper-accent-soft` as a
  * border-bottom computed to 1.14–1.35:1 over the reading ground, so the old
@@ -558,8 +579,8 @@
 .bp-paper-editor-body ul,
 .bp-paper-editor-body ol { padding-left: var(--bp-list-indent); }
 .bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
-.bp-paper-editor-body ul li { list-style: disc; }
-.bp-paper-editor-body ol li { list-style: decimal; }
+.bp-paper-editor-body ul > li { list-style: disc; }
+.bp-paper-editor-body ol > li { list-style: decimal; }
 /* Article-chrome ROLE prose (eyebrow/byline/ingress/pullquote) — mirror of the
  * single-source .bp-paper-surface .bp-role-* rules (paper-surface.css). The canvas
  * node emits `<p class="bp-role-*">` matching the reader; pullquote's italic rides
@@ -576,6 +597,7 @@
  * hand-copy hex. Keep BYTE-IDENTICAL with the root.html.heex copy (view_edit_parity_test
  * §2 guards drift vs the reader). */
 .bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
+.bp-cols__c .bp-table { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
 .bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 600; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); background: var(--paper-bg-deep); white-space: nowrap; }
 .bp-paper-editor-body .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
 .bp-paper-editor-body .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
@@ -634,6 +656,7 @@
  * paper-surface.css + root.html.heex. */
 .bp-paper-editor-body .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
 @media (max-width: 720px) { .bp-paper-editor-body .bp-section__grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .bp-paper-editor-body .bp-section__cell { grid-column: 1 / -1 !important; } }
 .bp-paper-editor-body .bp-section__cell { min-width: 0; }
 .bp-paper-editor-body .bp-section__cell > :first-child { margin-top: 0; }
 .bp-paper-editor-body .bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
@@ -916,6 +939,17 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body .bp-card--ok { border-left-color: var(--st-ok); }
 .bp-paper-editor-body .bp-card--warn { border-left-color: var(--st-warn); }
 .bp-paper-editor-body .bp-card--danger { border-left-color: var(--st-danger); }
+.bp-canvas-card__media-paint {
+  position: absolute; padding: 0; margin: 0; border: 0;
+  border-radius: 0; background: transparent; color: transparent;
+  font-size: 0; cursor: pointer;
+}
+.bp-canvas-card__media-paint:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
+.bp-canvas-card > bp-media-picker.bp-canvas-card__media-picker[hidden] {
+  display: none !important;
+}
 /* The card's action slot is the reader's PdButton anchor; mirror the
  * `.bp-paper-surface .bp-button` rules byte-for-byte (the .bp-canvas-action
  * precedent above) so the embedder paints it identically to /papers. */
@@ -923,6 +957,7 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-card { position: relative; }
 .bp-canvas-card__controls { position: absolute; bottom: 100%; left: 0; right: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
 .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; pointer-events: auto; }
+.bp-canvas-card:has([data-test-id="paper-card-action-label"]:focus) .bp-canvas-card__controls { opacity: 0; pointer-events: none; }
 .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
 .bp-canvas-card__select { flex: 0 0 auto; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
 /* The real media picker rides the whole control row (its own ghost frame paints the
@@ -1268,10 +1303,48 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   font-size: 13px;
 }
 
+/* Native collection controls belong outside the authored card/stat content.
+   Closed controls leave reader geometry intact; the fallback opens in flow. */
+.bp-paper-contextual-controls.bp-paper-cards-config,
+.bp-paper-contextual-controls.bp-paper-stats-config {
+  top: auto; bottom: 100%;
+}
+.bp-paper-contextual-controls.bp-paper-cards-config[open],
+.bp-paper-contextual-controls.bp-paper-stats-config[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-cards-config > .bp-paper-contextual-panel,
+.bp-paper-stats-config > .bp-paper-contextual-panel {
+  max-height: none; overflow: visible;
+}
 /* PM list items require a paragraph; reader items carry inline text. */
 .bp-paper-editor-body li > p { margin: 0; }
+/* No authored article palette: retain the browser's legacy paragraph rhythm. */
+[data-paper-palette="legacy"] .bp-paper-editor-body .ProseMirror > p { margin: 1em 0; }
+[data-paper-palette="legacy"] .bp-paper-contextual-controls {
+  top: auto; bottom: 100%; color: CanvasText;
+}
+[data-paper-palette="legacy"] .bp-paper-contextual-toggle {
+  background: Canvas; font-size: 0.75rem; line-height: 1; padding: 1px 6px;
+}
+[data-paper-palette="legacy"] .bp-paper-contextual-controls[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+[data-paper-palette="legacy"] .bp-paper-contextual-panel {
+  background: Canvas; color: CanvasText; max-height: none; overflow: visible;
+}
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
+
+[data-bp-text-boundary] {
+  margin-block: 12px;
+  padding: 10px 12px;
+  border-inline-start: 2px solid var(--paper-accent, currentColor);
+  color: var(--paper-ink-soft);
+  font-family: var(--paper-font-ui, system-ui, sans-serif);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
 /* Opening paragraphs retain the reader's role-specific rhythm. Clamping them
    lifts the Chronicle navigation and title by one paragraph margin in Edit. */
 .bp-paper-editor > .bp-paper-edit-canvas:nth-child(1 of .bp-paper-edit-canvas, .bp-paper-edit-block) .bp-paper-editor-body .ProseMirror > :first-child:not(p) { margin-top: 0; }
@@ -1283,6 +1356,14 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-code:focus-within .bp-canvas-code-lang { opacity: 1; pointer-events: auto; }
 /* Server-painted bodies own their rhythm; wrappers must allow margin collapse. */
 .bp-canvas-fleet { margin: 0; overflow: visible; white-space: normal; }
+.bp-paper-surface .bp-canvas-stats-inline > .bp-paper-surface {
+  --bp-evidence-band: inherit;
+  --bp-evidence-band-max: inherit;
+  --bp-evidence-fill: inherit;
+  --bp-evidence-gutter: inherit;
+  --bp-evidence-width: inherit;
+  --bp-evidence-pull: inherit;
+}
 
 /* Diagram configuration stays outside the reader figure's layout. */
 .bp-canvas-diagram { position: relative; }
@@ -1295,3 +1376,38 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-diagram-field { display: grid; gap: 0.3rem; min-width: 0; }
 .bp-canvas-diagram-area, .bp-canvas-diagram-caption { width: 100%; box-sizing: border-box; color: var(--paper-ink); background: transparent; border: 1px solid var(--paper-rule); border-radius: 3px; padding: 0.5rem; }
 .bp-canvas-diagram-editor :is(summary, input, textarea):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+/* Recovery is editor chrome, never a replacement document. */
+[data-bp-paper-conflict],
+[data-test-id="paper-canvas-resume-warning"] {
+  box-sizing: border-box; max-width: 100%; margin: 16px 0 24px; padding: 16px;
+  border: 1px solid var(--paper-rule); border-inline-start: 3px solid var(--paper-accent);
+  border-radius: 6px; color: var(--paper-ink); background: var(--paper-bg);
+  font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 14px; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+[data-bp-paper-conflict] .bp-conflict-title { display: block; font-size: 15px; margin-bottom: 4px; }
+[data-bp-paper-conflict] .bp-conflict-description { display: block; color: var(--paper-ink-soft); }
+[data-bp-paper-conflict] .bp-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+[data-bp-paper-conflict] button,
+[data-test-id="paper-canvas-resume-warning"] button {
+  min-height: 44px; padding: 8px 12px; border: 1px solid var(--paper-rule);
+  border-radius: 4px; background: transparent; color: var(--paper-ink);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+[data-bp-paper-conflict] button[data-action="keep"] { border-color: var(--paper-accent); color: var(--paper-accent); }
+[data-bp-paper-conflict] button:disabled { opacity: .55; cursor: not-allowed; }
+[data-bp-paper-conflict] :is(button, summary, pre):focus-visible,
+[data-test-id="paper-canvas-resume-warning"] :is(button, summary, a):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 3px; }
+[data-bp-paper-conflict] [data-conflict-detail] { margin-top: 12px; border-top: 1px solid var(--paper-rule); padding-top: 12px; }
+[data-bp-paper-conflict] [data-conflict-message] { margin: 0 0 12px; font: inherit; }
+[data-bp-paper-conflict] summary,
+[data-test-id="paper-canvas-resume-warning"] summary { cursor: pointer; color: var(--paper-ink-soft); }
+[data-test-id="paper-canvas-resume-warning"] p { margin: 0 0 12px; font: inherit; }
+[data-test-id="paper-canvas-resume-warning"] details { margin-top: 12px; }
+[data-test-id="paper-canvas-resume-warning"] a { color: var(--paper-accent); }
+[data-bp-paper-conflict] pre {
+  box-sizing: border-box; width: 100%; max-height: 16rem; overflow: auto;
+  margin: 12px 0 0; padding: 12px; border: 1px solid var(--paper-rule); border-radius: 4px;
+  color: var(--paper-ink); background: var(--paper-bg-deep); font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}

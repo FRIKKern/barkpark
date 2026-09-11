@@ -51,6 +51,7 @@ defmodule BarkparkWeb.BulldocsLive do
 
   alias Barkpark.Content
   alias Barkpark.Content.Labels
+  alias Barkpark.Content.Papers.PreGateRegister
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
@@ -125,6 +126,7 @@ defmodule BarkparkWeb.BulldocsLive do
       # grades writable only for the ONE paper it binds, so the workspace alone
       # is not enough to decide. The credential arm is unchanged.
       |> assign(:can_edit?, PaperViewer.can_edit?(socket.assigns, paper.workspace_id, slug))
+      |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       # Slice 2 (task-633d25cac4262afc): edit-mode state + the event gate. The
       # gate is attached for EVERY viewer — it is what makes a `paper-*` edit
       # event unreachable without `:can_edit?`, so it must not be conditional
@@ -154,6 +156,19 @@ defmodule BarkparkWeb.BulldocsLive do
         source ->
           source
       end
+
+    socket =
+      socket
+      |> BarkparkWeb.PaperCanvasLease.resume_socket(
+        paper,
+        source_blocks(reader_source),
+        socket.assigns[:can_edit?] == true
+      )
+      |> then(fn resumed ->
+        if resumed.assigns.paper_canvas_resume_status in [:resumed, :pending, :blocked],
+          do: assign(resumed, :editing?, true),
+          else: resumed
+      end)
 
     paper_link_refs = reader_source |> source_blocks() |> paper_link_refs()
 
@@ -265,6 +280,13 @@ defmodule BarkparkWeb.BulldocsLive do
       # at all. `:last_action` acknowledges the most recent click inline.
       |> assign(:paper_actions, paper_actions(paper))
       |> assign(:last_action, nil)
+      # Ruling arpss-bulldocs-anon-paper-event-write-ruling (2026-09-10):
+      # anonymous visitors are READ ONLY on the public reader. `:can_act?` is
+      # the RENDER half of that — an anonymous visitor is not shown a control
+      # the server would refuse. The binding half is `Edit.attach_gate/1`,
+      # which halts the four `paper_events` writers for a principal-less
+      # socket whether or not a button was ever rendered.
+      |> assign(:can_act?, Edit.principal?(socket.assigns))
       # P6.U4 Simplify control. `:simplify?` gates the button (true only when the
       # paper carries a goal_id — Simplify applies to any goal-bearing paper).
       # `:pending_simplify` holds the in-flight `simplified-<n>` branch name once a
@@ -301,6 +323,18 @@ defmodule BarkparkWeb.BulldocsLive do
       # reader would make every social preview look like a visit, and tracking
       # it would track a process that is about to exit.
       |> join_paper_presence()
+
+    # A socket reconnect must not replace a still-dirty, ignored client canvas
+    # with the reader. The hint only restores presentation for this exact Paper;
+    # Edit.toggle rechecks the freshly resolved viewer's write authority.
+    socket =
+      if connected?(socket) and
+           socket.assigns.paper_canvas_resume_status == :none and
+           (get_connect_params(socket) || %{})["paper_editing_key"] == "#{dataset}:paper:#{slug}" do
+        Edit.toggle(socket)
+      else
+        socket
+      end
 
     {:ok, socket, layout: false}
   end
@@ -751,18 +785,27 @@ defmodule BarkparkWeb.BulldocsLive do
       case Edit.apply_ops(socket, ops, request_id, is_map(params) && params["if_rev"], context) do
         {:ok, socket, receipt, outcome} ->
           {:reply,
-           %{
-             saved: true,
-             request_id: request_id,
-             replayed: outcome == :replayed,
-             rev: receipt.rev
-           }, socket}
+           Edit.receipt_result(receipt, request_id, outcome)
+           |> Map.merge(%{
+             retained_leases:
+               BarkparkWeb.Studio.StudioLive.Shared.Paper.canvas_reply_leases(
+                 socket,
+                 context,
+                 ops
+               ),
+             retained_lease_overflow: BarkparkWeb.PaperCanvasLease.blocked?(socket)
+           }), socket}
 
         {:error, socket} ->
           reply = socket.assigns[:last_save_result] || %{saved: false, request_id: request_id}
           {:reply, Map.put_new(reply, :request_id, request_id), socket}
       end
     end
+  end
+
+  def handle_event("paper-history-step", params, socket) do
+    socket = Edit.apply_history_step(socket, params)
+    {:reply, socket.assigns[:last_save_result] || %{saved: false}, socket}
   end
 
   def handle_event("paper-edit-block", params, socket),
@@ -992,7 +1035,14 @@ defmodule BarkparkWeb.BulldocsLive do
         |> assign(:paper_link_details, Map.get(resolvers, :paper_links, %{}))
         |> stream(
           :blocks,
-          to_stream_items(resolved, paper_article?(paper), resolvers)
+          to_stream_items(
+            # Grandfather badge (task-597ea451072da061): register membership AND
+            # the STORED blocks still refused by the gate → one synthesised block
+            # under the byline. Resolved blocks render; stored blocks decide.
+            PreGateRegister.annotate(resolved, paper.doc_id, blocks),
+            paper_article?(paper),
+            resolvers
+          )
         )
 
       _ ->
@@ -1347,7 +1397,11 @@ defmodule BarkparkWeb.BulldocsLive do
             |> ensure_document_changes_subscription(paper, refs)
             |> stream(
               :blocks,
-              to_stream_items(resolved, article?, resolvers),
+              to_stream_items(
+                PreGateRegister.annotate(resolved, paper.doc_id, blocks),
+                article?,
+                resolvers
+              ),
               reset: true
             )
             |> assign(:rev, paper_rev(paper))
@@ -1424,7 +1478,7 @@ defmodule BarkparkWeb.BulldocsLive do
           non-article papers (which keep the dark chrome above) — those emit
           bare `<h1>/<p>/…` the surface rules would restyle. The parchment
           reader skin re-skins the `--paper-*` tokens on this same element. --%>
-    <main class={[
+    <main data-paper-palette={if @article?, do: "article", else: "legacy"} class={[
       "bp-paper-shell",
       @article? && "bp-paper-surface",
       @article? && "bp-paper-article",
@@ -1502,8 +1556,15 @@ defmodule BarkparkWeb.BulldocsLive do
             empty set (no/unknown source_doc) renders no bar at all. Each click
             fires "paper-action" which records the intent as a paper_events
             row (routing Option B — orchestrator reads them; no daemon, no
-            nonce). `:last_action` shows a small inline confirmation. --%>
-      <div :if={@paper_actions != []} id="paper-action-bar" class="bp-paper-actions">
+            nonce). `:last_action` shows a small inline confirmation.
+            Rendered only for an identified viewer (`@can_act?`): the event
+            behind these buttons WRITES, and the ruling makes an anonymous
+            visitor read-only. The server gate is the real fence. --%>
+      <div
+        :if={@paper_actions != [] and @can_act?}
+        id="paper-action-bar"
+        class="bp-paper-actions"
+      >
         <button
           :for={action <- @paper_actions}
           type="button"
@@ -1527,7 +1588,7 @@ defmodule BarkparkWeb.BulldocsLive do
             of scope here). Once a request is pending (`@pending_simplify`),
             Accept/Reject render and record the user's decision on that branch.
             `:last_simplify` shows a small inline confirmation. --%>
-      <div :if={@simplify?} id="paper-simplify" class="bp-paper-simplify">
+      <div :if={@simplify? and @can_act?} id="paper-simplify" class="bp-paper-simplify">
         <button
           type="button"
           class="bp-paper-action"
@@ -1577,6 +1638,9 @@ defmodule BarkparkWeb.BulldocsLive do
             scope_prefix={@scope_prefix}
             picker_browse={@picker_browse?}
             canvas_eligible={true}
+            canvas_retained={Map.get(assigns, :paper_canvas_retained)}
+            canvas_resume_halt={Map.get(assigns, :paper_canvas_resume_halt, false)}
+            canvas_resume_state={Map.get(assigns, :paper_canvas_resume_status, :none)}
             task_previews={@task_previews}
             paper_links={@paper_link_details}
             save_status={@save_status}

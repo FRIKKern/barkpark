@@ -5,8 +5,8 @@ Wire facts: `Webhooks.Dispatcher` → `@barkpark/nextjs` `createWebhookHandler`.
 
 ## HMAC signing
 
-Header value: `t=<unix>,v1=<hex>` (combined) where `<hex> = HMAC_SHA256(secret, "<timestamp>.<rawBody>")`,
-timestamp in unix seconds, hex lowercase. Hash the body **exactly as received** —
+Header value: `t=<unix>,v1=<hex>` where `<hex> = HMAC_SHA256(secret, "<timestamp>.<rawBody>")`,
+hex lowercase. Hash the body **exactly as received** —
 never re-serialize.
 
 ## Headers — dispatcher ↔ handler
@@ -16,9 +16,7 @@ never re-serialize.
 | Dispatcher sends (`attempt/5`) | `x-barkpark-signature: t=<unix>,v1=<hex>` (combined) · `x-barkpark-delivery-id: <mutation_events.id>` · legacy `x-barkpark-timestamp` + `x-barkpark-event-id` also sent |
 | SDK handler expects (`createWebhookHandler`) | `x-barkpark-signature: t=<unix>,v1=<hex>` (combined, Stripe-style) · `x-barkpark-delivery-id: <id>` (optional; falls back to `payload.deliveryId`) |
 
-Dispatcher emits the combined header + `x-barkpark-delivery-id`, matching handler;
 `verify_signature/4` accepts either form (legacy split form also parses).
-Signed material unchanged.
 
 ## Freshness
 
@@ -27,7 +25,7 @@ Outside the window → `401 {"error":"stale"}`.
 
 ## Secret rotation — `previousSecret`
 
-`createWebhookHandler({secret, previousSecret?})` accepts either secret (constant-time) for zero-downtime rotation; `Dispatcher.verify_signature/4` checks primary + unexpired previous secrets.
+`createWebhookHandler({secret, previousSecret?})` accepts either secret (constant-time); `verify_signature/4` checks primary + unexpired previous secrets.
 
 ## Canonical tag scheme
 
@@ -41,7 +39,6 @@ handler reconstructs `_all` from payload and augments `doc:`/`type:` from
 `dataset`/`doc_id`/`type` — additive (Set-deduped); when `sync_tags` absent,
 field-derived tags are the only source. All six events
 (`create update publish unpublish discardDraft delete`) invalidate all three tags.
-`patch` is valid per `@valid_events` (`webhook.ex`) but not dispatched by `tap_broadcast`.
 
 ## Handler responses / retries
 
@@ -50,6 +47,12 @@ Handler: `200 {ok:true}` · `200 {deduped:true}` (delivery-id LRU, 512 ids) ·
 Dispatcher: jittered backoff (base `[1s,5s,30s]`, capped), 3 attempts; retries
 5xx/transport + transient 4xx `429/408/425` (honors `Retry-After`), other 4xx
 terminal; dedup `UNIQUE(endpoint_id,event_id)`. Media mirrors the classification.
+
+## `media.deleted` override witness
+
+`?force=true` ONLY: `forced: true` + `referencedByCount`, the where-used census
+the door took pre-delete. Both keys ABSENT otherwise, so `forced` is signal, not
+a mostly-false field.
 
 ## Code anchors
 

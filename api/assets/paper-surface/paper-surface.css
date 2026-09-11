@@ -542,8 +542,8 @@ html[data-theme="dark"] .bp-paper-body {
 /* `margin: 0 0 24px` bottom-gap is VIEW-ONLY (Edit omits it — see token block). */
 .bp-paper-surface ul, .bp-paper-surface ol { margin: 0 0 24px; padding-left: var(--bp-list-indent); }
 .bp-paper-surface li { margin: var(--bp-li-gap) 0 0; }
-.bp-paper-surface ul li { list-style: disc; }
-.bp-paper-surface ol li { list-style: decimal; }
+.bp-paper-surface ul > li { list-style: disc; }
+.bp-paper-surface ol > li { list-style: decimal; }
 .bp-paper-surface code {
   font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
   background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
@@ -739,6 +739,10 @@ html[data-theme="dark"] .bp-paper-body {
    and a wide table returns to scrolling inside it — the doc-overflow contract is
    unchanged at every width (measured: 360/768/1280/1920, all seven fixtures). */
 .bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
+/* A column is an authored boundary. Its table may scroll inside that slot,
+   but must not borrow the page-wide evidence band and cover the next column.
+   Set the tokens on the table itself so nested editor hosts cannot reset them. */
+.bp-paper-surface .bp-cols__c .bp-table { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
 /* A table with no rows paints NOTHING and still spent `--bp-air-table` doing it.
    Found by the divider dedup below: `portabledoc-showcase` renders a `sheet`
    whose cells resolve through a caller-supplied map, so without one it falls back
@@ -865,9 +869,10 @@ html[data-theme="dark"] .bp-paper-body {
    claim about a position belongs. The block stays in the document, keeps
    round-tripping through every engine, and stops painting a second boundary.
 
-   VIEW ONLY, on the precedent of `p:empty` above (Reader-Owned Spacing
-   Doctrine): in the editor an invisible block is one the author cannot select or
-   delete, so `.bp-paper-editor-body` deliberately keeps drawing it.
+   Reader-only selectors, on the precedent of `p:empty` above. The editor's
+   resting-scaffolds extension mirrors suppression with a labelled gutter
+   control: selection restores the native divider for editing/deletion. The
+   document and its undo history retain the original block throughout.
 
    TWO LEGS, the same two the section head has: the flat body (legacy reader and
    the render rig) and the block-backed reader, where every top-level block is
@@ -1504,6 +1509,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    mirrors (the .bp-cols trio precedent). */
 .bp-paper-surface .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
 @media (max-width: 720px) { .bp-paper-surface .bp-section__grid { grid-template-columns: 1fr; } }
+/* Authored desktop spans must not create implicit tracks in the one-column reader. */
+@media (max-width: 720px) { .bp-paper-surface .bp-section__cell { grid-column: 1 / -1 !important; } }
 .bp-paper-surface .bp-section__cell { min-width: 0; }
 .bp-paper-surface .bp-section__cell > :first-child { margin-top: 0; }
 .bp-paper-surface .bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
@@ -2087,3 +2094,25 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 /* valueref-accept: the inline baseline-accept affordance (walk.ex). */
 .bp-paper-surface .bp-valueref-accept { appearance: none; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg-deep); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.75rem; padding: 1px 7px; margin-left: 6px; cursor: pointer; vertical-align: 1px; }
 .bp-paper-surface .bp-valueref-accept:hover { border-color: var(--paper-accent); }
+
+/* pre-gate badge (compose.ex `pre-gate-badge`, inserted by
+   Content.Papers.PreGateRegister.annotate/3): the 2026-09-02 grandfather ruling
+   made visible. One line under the byline rule, in the SYSTEM's voice — the
+   masthead roles are the author's serif, this is caps-mono — sized below the
+   byline (0.9em of the body) so it annotates the title block and never competes
+   with it. Colour is the existing callout tone FOREGROUND only (no pill, no
+   rule, no motion): neutral for the 37 papers whose reader is unaffected, the
+   warn tone for the one whose table header renders empty. The browser title
+   attribute carries the register's reader_behaviour. `--tucked` is set only
+   when the badge sits directly under a byline: its negative top margin
+   collapses against the byline's 1.4rem bottom margin to a 0.5rem seat under
+   the rule; without a byline the 0.6rem top margin seats it under the title
+   like a dateline (reader-owned spacing — no spacer block). Prints as plain
+   text. */
+.bp-paper-surface .bp-pregate {
+  margin: 0.6rem 0 1.4rem; font-family: var(--paper-font-mono); font-size: 0.72rem;
+  font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1.4;
+  color: var(--bp-tone-neutral-fg); hyphens: none; overflow-wrap: break-word;
+}
+.bp-paper-surface .bp-pregate--warning { color: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-pregate--tucked { margin-top: -0.9rem; }

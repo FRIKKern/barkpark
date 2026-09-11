@@ -361,7 +361,31 @@ fx_stop_clean_slate_says_so() {
   expect_contains "$out" "server not running"
 }
 
-DIFFERENTIAL="fx_up_stale_pidfile fx_up_adopts_answering_listener fx_up_listener_not_answering fx_stop_refuses_uncorroborated_pidfile fx_stop_refuses_unidentified_port_holder fx_stop_clean_slate_says_so"
+# D7  Every branch of `up` that prints the /studio URL also reports whether the
+#     box HAS the credential that URL needs. Pre-fix: the boot line names
+#     /studio and stops there — a success claim about a door the box may have no
+#     key to. Post-fix: the same line is followed by an explicit credential
+#     verdict, and when there is none it names the verb that mints one.
+#
+#     The probe is deterministic under this harness WITHOUT a database: $PG
+#     resolves from $0, which run_fn sets to the harness, so it is
+#     <repo>/scripts/barkpark-pg — a path that does not exist. admin_token_count
+#     therefore fails (127), report_credential reads that as "cannot show you a
+#     key", and the NONE branch is the one under test. That is the branch that
+#     matters: it is the fresh-box state this row exists to fix.
+fx_up_reports_missing_credential() {
+  local lib="$1" lpid out rc
+  new_home
+  export BARKPARK_HOME="$HOME_DIR" PORT HARNESS_CURL_RC=0
+  lpid="$(spawn_listener "$PORT")"
+  printf '%s\n' "$lpid" >"$PIDFILE"
+  out="$(run_fn "$lib" start_server)"; rc=$?
+  expect_rc "$rc" 0
+  expect_contains "$out" "admin credential: NONE"
+  expect_contains "$out" "bin/barkpark token"
+}
+
+DIFFERENTIAL="fx_up_stale_pidfile fx_up_adopts_answering_listener fx_up_listener_not_answering fx_stop_refuses_uncorroborated_pidfile fx_stop_refuses_unidentified_port_holder fx_stop_clean_slate_says_so fx_up_reports_missing_credential"
 CONTROL="fx_ctl_up_noop_when_running fx_ctl_stop_kills_corroborated"
 
 # Run one fixture against one tree in isolation and report only whether all its
@@ -461,7 +485,7 @@ for fx in $CONTROL; do
 done
 
 if [ "$FAILURES" -eq 0 ]; then
-  say "barkpark-boot-selftest: OK — 6 differential fixtures pass on the fix and fail on the pinned pre-fix launcher, 2 controls pass on both."
+  say "barkpark-boot-selftest: OK — 7 differential fixtures pass on the fix and fail on the pinned pre-fix launcher, 2 controls pass on both."
   exit 0
 fi
 say "barkpark-boot-selftest: $FAILURES failure(s)."

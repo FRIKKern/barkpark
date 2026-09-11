@@ -32,12 +32,17 @@ defmodule Barkpark.PortableDoc.Render.Figures do
       ~s|overflow-x:auto;white-space:pre">#{escape_html(value)}</pre>|
   end
 
-  # The doc.css `hr.section` look: a centered "§" glyph straddling a hairline
+  # The `.bp-section-divider` look: a centered "§" glyph straddling a hairline
   # rule. The glyph sits in an inline-block box with the PAGE colour as its
   # background, masking the rule that runs behind it across the column — so it
   # paints `--paper-bg`, the token the reader body and the Studio surface stand
   # on. It painted `--paper-bg-deep` while the reader body did too; once the
   # page moved to `--paper-bg` a deep mask would read as a tile around the §.
+  # (No `hr.section` rule exists in this repo — the only stylesheet restatement
+  # of these declarations is the edit mirror
+  # `.bp-paper-editor-body .bp-section-divider{,__mark}` in
+  # api/assets/paper-editor/src/styles.css; paper-surface.css names the class
+  # only in its divider-before-h2 dedup rule.)
   #
   # The `bp-section-divider` class carries NO styling here — every value stays
   # inline, and view_edit_parity_test.exs §8 still compares those inline
@@ -97,7 +102,8 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # a container to measure nor a viewport worth breaking out of.
   #
   # The canonical paper-article figure for a Mermaid diagram. Article mode: a
-  # bordered, parchment, inset card mirroring doc.css `figure`; the figcaption
+  # bordered, parchment, inset card whose frame is INLINE below — paper-surface.css
+  # carries no `figure` selector, so the card has no stylesheet rule; the figcaption
   # carries the bold "Figure N." run-in and is styled by ONE class,
   # `.bp-figcaption` (paper-surface.css, mirrored on both editor surfaces and
   # gated by view_edit_parity_test.exs §2/§5). Email mode degrades to the
@@ -177,8 +183,13 @@ defmodule Barkpark.PortableDoc.Render.Figures do
     rows_attr =
       if is_integer(rows) and rows in 6..40, do: ~s( data-cast-rows="#{rows}"), else: ""
 
+    # `~s|…|`, not `~s(…)`: a paren-delimited sigil whose body contains
+    # `var(--paper-rule, #dde7e2)` makes the tokenizer read `border-radius:6px`
+    # as a keyword argument ("keyword argument must be followed by space after:
+    # radius:") and the file will not compile. The pipe delimiter has no such
+    # ambiguity, and the sibling figure/divider strings above already use it.
     ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">| <>
-      ~s(<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr}#{rows_attr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>) <>
+      ~s|<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr}#{rows_attr} style="border:1px solid var(--paper-rule, #dde7e2);border-radius:6px;overflow:hidden"></div>| <>
       cap <>
       "</figure>"
   end

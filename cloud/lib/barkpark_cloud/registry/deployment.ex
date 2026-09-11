@@ -71,6 +71,34 @@ defmodule BarkparkCloud.Registry.Deployment do
   # HEALTH certified bytes this fleet produced.
   @sources ~w(box-build prebuilt)
 
+  # dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): WHOSE DEMAND this
+  # build serves — the axis `trigger` and `source` structurally cannot answer.
+  #
+  # Those two are 99.06% ONE pair on the live control plane (`content-auto` /
+  # `box-build`, 2,415 of 2,438 rows): they say a content publish asked and the
+  # box built, which is true of a customer's publish and of the demo fleet
+  # churning against itself in exactly the same words. 98.4% of a 24h window's
+  # attempts land on five demo sites and six sites took ZERO, so cutting the
+  # amplifier would move every published rate while no instrument could say
+  # whether the fleet got BETTER or the load merely got SMALLER — charter D3's
+  # vacuous green.
+  #
+  #   * "customer"     — the site was classified `customer` when this build was
+  #     minted. Demand the fleet exists to serve.
+  #   * "platform"     — the site was classified `platform`: demo, fixture,
+  #     capstone or internal. Self-inflicted churn.
+  #   * "unclassified" — the site carried NO class. This is NOT a synonym for
+  #     customer and is never collapsed into one: it is the honest record that a
+  #     build happened on a site nobody has classified, and it is exactly the
+  #     population a census must report separately or lie about.
+  #
+  # Stamped at CREATE from `Site.demand_class` and never mutated by a transition
+  # — a build cannot change whose demand it served. It is stored on the ROW
+  # rather than read through a join at census time because a site can be
+  # reclassified, and a census that joined would let today's classification
+  # rewrite what past load was.
+  @demand_classes ~w(customer platform unclassified)
+
   # cch-w34: the `git_ref` column's own ceiling, restated where the WRITE PATH
   # can see it. `deployments.git_ref` is `varchar(255)`; until this attribute
   # existed the only thing enforcing it was Postgres, which does not return an
@@ -158,10 +186,36 @@ defmodule BarkparkCloud.Registry.Deployment do
     # pre-W9 row reads as box-build.
     field :source, :string, default: "box-build"
 
+    # dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): "customer" |
+    # "platform" | "unclassified" — WHOSE DEMAND this build served, as of the
+    # moment it was minted. NULL on every pre-D206 row (no backfill: a backfill
+    # would claim a classification nobody made).
+    field :demand_class, :string
+
     # The sha256 of the uploaded tarball, recorded by the artifact route BEFORE
     # the driver is started — so a prebuilt deployment that reached the box can
     # always name the exact bytes it was asked to serve. Nil on a box-build.
     field :artifact_sha256, :string
+
+    # dr-w12-bl-box-build-writes-no-digest (charter D188): THE SERVED RECEIPT.
+    # The sha256 of the release TREE the box measured through its own `current`
+    # symlink AFTER SWITCH committed — the bytes Caddy is actually serving.
+    #
+    # Distinct from `artifact_sha256` above, which digests the UPLOADED TARBALL
+    # on the 6 prebuilt rows of 30,633 and is NULL on every box build. Two
+    # reasons it is not that column: the quantities differ (a compressed archive
+    # vs an extracted tree), and `Registry`'s prebuilt-upload reaper is
+    # `source == "prebuilt" and is_nil(artifact_sha256)` — widening what writes
+    # that column is the one change that would silently redefine "minted but
+    # never uploaded".
+    #
+    # NOT an identity key: one `content_rev` produced FOUR distinct artifacts on
+    # this fleet. It is a RECEIPT of which bytes were served, and its only
+    # comparison is against the box's INDEPENDENT STAGE-time reading of the same
+    # tree (`Sites.Deploy` fails the deployment when the two disagree). NULL on
+    # every pre-D188 row and on any box that predates the marker — "not
+    # measured", never "matched".
+    field :build_sha256, :string
 
     field :claim_worker, :string
     field :claimed_at, :utc_datetime_usec
@@ -211,6 +265,28 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :port, :integer
     field :health_exit_code, :integer
 
+    # deploy-reliability W21 (charter D608): THE ARM DECISION, AS DATA.
+    #
+    #   * `route_status` — the box's own `BPSTAGE name=ROUTE status=…` token:
+    #     "ok" (Caddy is arming this site's route), "failed" (the arm was
+    #     refused), or NULL — never measured, which is every row written before
+    #     the engines gained ROUTE on 2026-08-08, every row from a box that has
+    #     not pulled since, and every run that died before arming.
+    #   * `route_detail` — the box's own sentence about it ("already armed",
+    #     "caddy validate rejected the block"). BOX-AUTHORED FREE TEXT relayed
+    #     verbatim, the same class as a stage's `detail`.
+    #
+    # COLUMNS, NOT A CONSOLE ENTRY, and that is the point of the wave: `console`
+    # is capped and drops its oldest lines, so a ROUTE entry is droppable and an
+    # aggregate over it is unanswerable. Wave 21 measured exactly that — 0 of
+    # 19,327 console-carrying rows contained "ROUTE". A column can be counted.
+    #
+    # NULLABLE, NEVER DEFAULTED, for the same reason `health_exit_code` is: the
+    # value a default would invent ("ok") is the SUCCESS token, so a defaulted
+    # row would certify an arm nobody attempted.
+    field :route_status, :string
+    field :route_detail, :string
+
     # deploy-reliability W12 (S6): THE CHAIN, AS DATA. Until now a deferral's
     # position in its chain existed only as English inside `failure_reason`
     # ("refusal 3 of 12 in this site's current chain") and the Go CLI read it
@@ -219,8 +295,19 @@ defmodule BarkparkCloud.Registry.Deployment do
     #
     # These ride ALONGSIDE the sentence, which is PRESERVED (Vercel keeps
     # `readyStateReason` beside `readyState`): the prose is the operator's, the
-    # columns are the aggregate's. Written by `Sites.Deploy.defer/3` on
-    # `deferred` rows only — NULL on every other row and on pre-W12 deferrals,
+    # columns are the aggregate's.
+    #
+    # WRITTEN ON TWO KINDS OF ROW, not one. `Sites.Deploy.defer/3` stamps all
+    # three on each `deferred` round (deploy.ex:1657-1659) AND on the TERMINAL
+    # round, which it settles `failed` through the three-arg `fail/3`
+    # (deploy.ex:1583-1587, W28-S6). This comment used to say "`deferred` rows
+    # only — NULL on every other row", which was false from the day that branch
+    # landed and pointed the wrong way: a reader trusting it would conclude the
+    # abandonment cannot be found as data and would go on scanning the prose.
+    # A `failed` row with `deferral_depth >= deferral_bound` IS the abandonment,
+    # and `DeployLedger.classify/1` reads exactly that.
+    #
+    # Still NULL on every row outside a deferral chain, and on pre-W12 deferrals,
     # which are honestly unknown rather than backfilled out of their own prose.
     #
     # `deferral_bound` is the CAUSE's own budget (12 for capacity, 6 for a busy
@@ -229,6 +316,45 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :deferral_depth, :integer
     field :deferral_bound, :integer
     field :deferral_cause, :string
+
+    # dr-w4-bl-deferral-raw-column-ambiguous: THE BOX'S OWN CODE WORD, and not
+    # the ledger's name for it. `deferral_cause` above holds the CLASS, which
+    # `Sites.Deploy.defer/3` computes through `DeployLedger.classify/1` — off
+    # the prose. This holds `err["code"]` out of the decoded refusal envelope,
+    # read before any `failure_reason` string is built, so no `message` a box
+    # sends can reach it.
+    #
+    # THREE-VALUED, on purpose:
+    #
+    #   * NULL      — no code-aware writer touched this row (every row before
+    #                 this column, and every row outside a box refusal). The
+    #                 ledger falls back to the prose reader, so D115 holds and
+    #                 no historical row reclassifies.
+    #   * "(none)"  — a code-aware writer looked and the envelope carried NO
+    #                 `code` key. D7's codeless 409.
+    #   * a token   — the box's code, verbatim.
+    #
+    # "(none)" cannot collide with a real code by construction:
+    # `DeployLedger`'s `@code_token` is `^[a-z][a-z0-9_]*$`.
+    field :box_refusal_code, :string
+
+    # dr-bl-deferral-scheduled-vs-actual-gap: THE CHAIN'S PACE, beside its
+    # shape. The three columns above say how DEEP a chain went; these two say
+    # how FAST, and they describe THE SAME INTERVAL — the gap between the
+    # previous deferral of this chain and this one — so the scheduled-vs-actual
+    # ratio is per-row arithmetic and never a self-join.
+    #
+    #   * `deferral_scheduled_s`  — the window `deferral_backoff_seconds/1`
+    #     asked for when the PREVIOUS round re-queued.
+    #   * `deferral_actual_gap_s` — `inserted_at(this) - inserted_at(previous)`.
+    #
+    # NULLABLE AND NEVER DEFAULTED, for the same reason `health_exit_code` is:
+    # depth 1 has no previous round, so there IS no interval, and a 0 would
+    # render "no gap was measured" as "the rebuild fired instantly". Written by
+    # `Sites.Deploy.defer/3` in the same fenced transition as the depth trio;
+    # NULL on every pre-existing row, never backfilled.
+    field :deferral_scheduled_s, :integer
+    field :deferral_actual_gap_s, :integer
 
     # deploy-reliability W12 (S6): THE ATTEMPTS THAT MINTED NO ROW.
     # `Sites.AutoDeployWorker.defer_behind_running_build/2` refuses a second
@@ -245,6 +371,28 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :coalesced_attempts, :integer, default: 0
     field :coalesced_last_at, :utc_datetime_usec
 
+    # deploy-reliability W8 (dr-bl-w8-graced-deploys-are-uncounted): THE SAVES,
+    # AS DATA. `Sites.Deploy` already counts graced poll refusals — on `ctx`, an
+    # in-memory map that `forget_graced_refusals/1` CLEARS on any poll that
+    # reached the box. That reset is correct for the caption it feeds, and it
+    # means the count survives exactly one way: into the `failure_reason` of a
+    # deploy that failed anyway. Every grace that WORKED left no trace, and the
+    # start-retry arm recorded nothing in any outcome.
+    #
+    # These are the durable counterpart: monotonic per run, independent of
+    # `ctx`, so a reaching poll cannot erase them and a build that went `live`
+    # can still say what it survived. Charter D114 is why it matters — a
+    # one-literal wire rename kills 3 start retries and 45 poll-grace beats with
+    # no line saying so, and "zero saves" is the only shape that regression has.
+    #
+    # NULLABLE (pre-W8 rows are honestly unknown, never a backfilled 0 — on this
+    # column that lie is load-bearing) and NOT castable on any changeset, for the
+    # same reason `coalesced_attempts` is not: they are bumped by an atomic
+    # `UPDATE` mid-run, and a read-modify-write would lose the count.
+    field :graced_poll_refusals, :integer, default: 0
+    field :graced_start_retries, :integer, default: 0
+    field :last_graced_at, :utc_datetime_usec
+
     belongs_to :site, BarkparkCloud.Registry.Site
 
     timestamps(type: :utc_datetime_usec)
@@ -259,6 +407,25 @@ defmodule BarkparkCloud.Registry.Deployment do
 
   @doc "The valid deploy triggers (provenance): manual | content-auto (charter D49)."
   def triggers, do: @triggers
+
+  @doc """
+  The valid demand classes on a deployment row (charter D206):
+  customer | platform | unclassified.
+  """
+  @spec demand_classes() :: [String.t()]
+  def demand_classes, do: @demand_classes
+
+  @doc """
+  The class to STAMP on a build minted for `site` — the site's own class, or
+  `"unclassified"` when nobody has classified it.
+
+  The fallback is a distinct third value, never `"customer"`: an unlabelled
+  site's churn counted as demand is the precise error this label exists to make
+  impossible.
+  """
+  @spec demand_class_for(term()) :: String.t()
+  def demand_class_for(%{demand_class: class}) when class in @demand_classes, do: class
+  def demand_class_for(_site), do: "unclassified"
 
   @doc "The valid deploy sources (where the bytes were built): box-build | prebuilt (charter D86)."
   def sources, do: @sources
@@ -302,13 +469,40 @@ defmodule BarkparkCloud.Registry.Deployment do
   fenced builder pipeline and the on-box agent flips the live pointer only once
   the new row goes live (superseded deployments stay terminal-`live`).
 
+  IDENTITY TRAVELS WITH THE PIN (deploy-reliability W12). A promote is the
+  documented ROLLBACK primitive — promoting an OLDER artifact IS the rollback —
+  so the one thing the minted row must never lose is WHICH BYTES it is pinned
+  to. `artifact_url` names the location; `artifact_sha256` names the bytes at
+  that location, and `content_rev` names the content they were built from. They
+  are one fact in three fields, and copying only the location made the promoted
+  row unable to answer "what did I roll back TO?" — on the single path where
+  that is the whole question. All three ride together.
+
+  `source` is deliberately NOT carried, and that is not an oversight: it is
+  pipeline provenance ("box-build" | "prebuilt"), not content identity. A
+  promoted row minted as `prebuilt` would be `Deployment.prebuilt?/1`-true with
+  no `SiteArtifact` bytes of its own (the artifact store is keyed on deployment
+  id, and a promote uploads nothing), so `Sites.Deploy` would hand the box a
+  digest with no tarball and the row would sit queued forever. The promoted row
+  rebuilds; it still NAMES the artifact it was promoted from.
+
   `delivery_id` is deliberately absent: a promote is an operator action, not a
   GitHub redelivery, so it must not borrow (and collide on) the delivery-id
   idempotency index. `environment` is left to the schema default ("production").
   """
-  @spec promotion_attrs(t()) :: %{git_ref: String.t() | nil, artifact_url: String.t() | nil}
+  @spec promotion_attrs(t()) :: %{
+          git_ref: String.t() | nil,
+          artifact_url: String.t() | nil,
+          content_rev: String.t() | nil,
+          artifact_sha256: String.t() | nil
+        }
   def promotion_attrs(%__MODULE__{} = source),
-    do: %{git_ref: source.git_ref, artifact_url: source.artifact_url}
+    do: %{
+      git_ref: source.git_ref,
+      artifact_url: source.artifact_url,
+      content_rev: source.content_rev,
+      artifact_sha256: source.artifact_sha256
+    }
 
   @doc """
   Changeset for creating a Deployment. `site_id` is required; `status` is not
@@ -335,12 +529,18 @@ defmodule BarkparkCloud.Registry.Deployment do
       # row (this changeset, never `transition_changeset/2` — a builder must not
       # be able to restate which bytes it was handed).
       :source,
-      :artifact_sha256
+      :artifact_sha256,
+      # charter D206: WHOSE demand. Stamped by `Registry.create_deployment/2`
+      # and `create_failed_deployment/3` from the site's own class — never
+      # supplied by a public caller in practice, but castable here because the
+      # stamp rides in through `attrs` like every other create-time provenance.
+      :demand_class
     ])
     |> validate_required([:site_id])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:trigger, @triggers)
     |> validate_inclusion(:source, @sources)
+    |> validate_inclusion(:demand_class, @demand_classes)
     |> validate_git_ref_length()
     |> assoc_constraint(:site)
     # site-spawner W1: PLAN idempotency backstop. A repeat build_id for the same
@@ -402,12 +602,18 @@ defmodule BarkparkCloud.Registry.Deployment do
       # from the box. Both provenance fields are cast here for exactly that
       # reason.
       :source,
-      :artifact_sha256
+      :artifact_sha256,
+      # charter D206, and the fork comment above is exactly why this line
+      # exists: a preview build is load on the fleet like any other, and a
+      # demand class cast only in `changeset/2` would be silently dropped on
+      # every preview deploy — a census hole that answers 201.
+      :demand_class
     ])
     |> validate_required([:site_id, :branch, :preview_slug, :preview_host])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:environment, @environments)
     |> validate_inclusion(:source, @sources)
+    |> validate_inclusion(:demand_class, @demand_classes)
     |> validate_git_ref_length()
     |> assoc_constraint(:site)
     # dwb-18 twins for the preview path: the same globally-unique delivery_id
@@ -458,6 +664,21 @@ defmodule BarkparkCloud.Registry.Deployment do
       :slot,
       :port,
       :health_exit_code,
+      # deploy-reliability W21 (charter D608): the arm decision, cast HERE and
+      # nowhere else, for exactly the reason `slot` and `health_exit_code` are —
+      # it is something the BOX OBSERVED while driving this build, not something
+      # a caller may declare at create. A create-castable `route_status` would
+      # let a deployment be born claiming a Caddy route nobody armed.
+      :route_status,
+      :route_detail,
+      # charter D188: the SERVED digest, cast here for exactly the reason `slot`
+      # and `health_exit_code` are — it is something the box MEASURED while
+      # driving this build, not something a caller may declare at create. A
+      # create-castable receipt would let a row be born naming bytes nobody
+      # served. It is deliberately not `artifact_sha256`, which stays
+      # create-only: a builder must not be able to restate which bytes it was
+      # HANDED, but it is the only witness of which bytes it SERVED.
+      :build_sha256,
       # deploy-reliability W12 (S6): the chain, as data. Cast HERE and nowhere
       # else — a deferral is a TRANSITION (`queued|building|pushing → deferred`),
       # so the structured chain is written by the same fenced write that settles
@@ -469,9 +690,24 @@ defmodule BarkparkCloud.Registry.Deployment do
       # a DIFFERENT process than the one holding that row's claim, and a
       # changeset write would be a read-modify-write that loses concurrent
       # attempts — which is the entire count.
+      #
+      # `graced_poll_refusals` / `graced_start_retries` / `last_graced_at` are
+      # NOT here for the same reason (deploy-reliability W8): they are bumped by
+      # an atomic `UPDATE` from inside the poll loop, mid-transition, and a
+      # changeset write would both lose bumps and be refused by the from-status
+      # guard on a run that has not moved status yet.
       :deferral_depth,
       :deferral_bound,
       :deferral_cause,
+      :deferral_scheduled_s,
+      :deferral_actual_gap_s,
+      # dr-w4-bl-deferral-raw-column-ambiguous: the box's own refusal code, cast
+      # HERE and nowhere else for the same reason the chain columns are — it is
+      # something the box SAID while refusing this run, not something a caller
+      # may declare at create. A create-castable refusal code would let a row be
+      # born claiming the box named a cause it never named, which is the exact
+      # forgery this column exists to make impossible.
+      :box_refusal_code,
       :claim_worker,
       :claimed_at,
       :claim_epoch

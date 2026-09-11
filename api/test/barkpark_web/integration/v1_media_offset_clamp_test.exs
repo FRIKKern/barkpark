@@ -89,6 +89,37 @@ defmodule BarkparkWeb.Integration.V1MediaOffsetClampTest do
     assert body["result"]["offset"] == @ceiling
   end
 
+  test "GET /v1/media/:dataset/collections (index) clamps offset — the SECOND door the filing missed",
+       %{conn: conn} do
+    # Found the same way: by re-deriving the `params["offset"]` site set from
+    # api/lib rather than trusting the earlier sweep's list. `index/2` builds
+    # its OWN opts (it does not go through `MediaSearchParams.parse/1` the way
+    # its `assets` and `share_view` siblings in the same file do), so it kept
+    # `parse_int(params["offset"], 0)` with no ceiling. Its sink,
+    # `Collections.list/2`, only floors (`Keyword.get(opts, :offset, 0) |> max(0)`)
+    # — so this was a real Postgres `OFFSET 5000000` under a `LIMIT <= 1000`.
+    #
+    # The envelope echoes the RESOLVED `offset`, and `hasMore`/`nextOffset` are
+    # computed from that same binding, so the echo IS the observation.
+    body =
+      conn
+      |> get("/v1/media/production/collections", %{"offset" => @absurd, "limit" => "5"})
+      |> json_response(200)
+
+    assert body["result"]["offset"] == @ceiling
+  end
+
+  test "the collections index leaves a legitimate in-range offset alone", %{conn: conn} do
+    # Non-vacuity for the door above: a hardcoded ceiling, or an `index/2` that
+    # dropped `offset` on the floor, would pass that test and fail this one.
+    body =
+      conn
+      |> get("/v1/media/production/collections", %{"offset" => "37", "limit" => "5"})
+      |> json_response(200)
+
+    assert body["result"]["offset"] == 37
+  end
+
   test "a legitimate in-range offset still reaches the paginator unchanged", %{conn: conn} do
     # Non-vacuity: a clamp written as a constant, or a door that ignored
     # `offset` entirely, would pass all three tests above.

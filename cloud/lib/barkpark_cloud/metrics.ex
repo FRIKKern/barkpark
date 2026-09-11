@@ -53,7 +53,9 @@ defmodule BarkparkCloud.Metrics do
           swap: %{used_pct: number | nil, total_bytes: number | nil},
           beam: %{pss_bytes: number | nil, swap_bytes: number | nil},
           load15: number | nil,
-          cores: number | nil
+          cores: number | nil,
+          mem: number | nil,                      # % — the `pressure` verdict's input
+          disk: number | nil                      # % — same; the SERIES renders both
         },
         pressure: %{                               # the VERDICT — see `pressure/1`
           state: "struggling" | "watch" | "calm" | "unknown",
@@ -104,6 +106,26 @@ defmodule BarkparkCloud.Metrics do
   swapless box — measured, and the answer is none; a nil total is "we could not
   measure"). Every scalar takes the SAME nil-not-zero pass as a series point, so
   a `-1` sentinel is nil here too and the renderer never words a sentinel.
+
+  WHO READS `latest` (recorded because it was disputed). Task
+  `cch-w51-bl-metrics-latest-block-is-produced-and-rendered-by-nothing` filed
+  this whole block as produced-with-no-renderer, on the evidence that
+  `metricsSeries` in `cloud/priv/static/app.js` never destructures
+  `payload.latest`. That evidence is true and the conclusion is not: the block's
+  reader is the OTHER surface. `bp cloud instance top`
+  (`internal/cli/cloud_instance_top_cmd.go`) decodes it as
+  `cloudclient.MetricsLatest` and renders `db_size` + `top_relations` through
+  `storageLines/1`, the `swap` pair through `swapStatValue/2`, `beam` in the
+  stat grid, and reads `cores` as the capability inference `spaceLines/1` keys
+  off. `load15`, `mem` and `disk` are inputs to the `pressure` verdict computed
+  in this module and are deliberately not printed twice — each is carried with
+  its reason in `metricScalarNotRendered` in
+  `internal/cli/cloud_instance_top_scalars_test.go`, the tripwire that reds when
+  a key inside this block gains no reader and no reason. The envelope's
+  TOP-LEVEL key set has its own census one level up:
+  `cloud/test/barkpark_cloud/metrics_envelope_reader_census_test.exs`, which
+  reds when a new sibling of `latest` is served and neither surface reads it.
+  So: nothing here is removed, and the two nil-not-zero decisions above stand.
 
   `status` uses `Registry.health_stale_after_seconds/0` — the SAME CP-wide
   degraded threshold (180s) the staleness worker uses, never a new constant.

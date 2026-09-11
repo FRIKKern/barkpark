@@ -7,8 +7,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
   `Workspace.changeset/2`'s `validate_exclusion(:slug, @reserved_slugs)` (the
   routing prefixes). task-545166efceb1bc91.
 
-  WHY THE SEAT IS WORTH TAKING. `Tenancy.get_default_workspace/0` is
-  `Repo.get_by(Workspace, slug: "default")`. Whoever holds that slug IS the
+  WHY THE SEAT IS WORTH TAKING. `Tenancy.get_default_workspace/0` reads the
+  uncast `workspaces.is_default` column (task-566dc5be4871353b); it used to be
+  `Repo.get_by(Workspace, slug: "default")`, and whoever held that slug WAS the
   instance default — `AssignDefaultScope` binds every flat route to it and
   `Content.WriteScope.resolve_write_scope/1` stamps an UNSCOPED WRITE with it.
   The `unique_index(:workspaces, [:slug])` the import route leans on refuses a
@@ -54,16 +55,43 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
   @singleton_slug "default"
 
   setup do
-    # Vacate the seat by RENAME, not by the real teardown: the multi-table
-    # cascade deadlocked against the test's own transaction under the shared
-    # sandbox (Postgrex 40P01, documented in tenancy_singleton_slug_test.exs).
-    # Every arm here needs only that `get_default_workspace/0` resolves to
-    # nothing before the fixture builds its own "default"-slugged source.
+    # Vacate the seat WITHOUT the real teardown: the multi-table cascade
+    # deadlocked against the test's own transaction under the shared sandbox
+    # (Postgrex 40P01, documented in tenancy_singleton_slug_test.exs). Every arm
+    # here needs only that `get_default_workspace/0` resolves to nothing before
+    # the fixture builds its own "default"-slugged source.
+    #
+    # THIS SETUP USED TO BE A RENAME ALONE, and that it no longer suffices is
+    # the whole of task-566dc5be4871353b in one statement. While the seat WAS
+    # the `default` slug, moving the slug moved the seat — which is precisely
+    # the residue PR #12879 could not close, because `Workspace.changeset/2`
+    # casts `:slug` and any future `update_workspace/2` would have handed a
+    # principal the instance default for free. The seat is now
+    # `workspaces.is_default`, which no changeset casts, so the rename below is
+    # inert and the flag has to be cleared explicitly.
     {_n, _} =
       Repo.update_all(
         from(w in Workspace, where: w.slug == ^@singleton_slug),
         set: [slug: "parked-for-reserved-slug-test"]
       )
+
+    # THE RENAME PATH IS CLOSED — asserted here rather than in prose, and in the
+    # one place a regression would silently make every arm below vacuous: if the
+    # seat ever becomes slug-derived again, this refute reds and names why.
+    parked = Tenancy.get_default_workspace()
+
+    assert match?(%Workspace{slug: "parked-for-reserved-slug-test"}, parked),
+           "RENAME MOVED THE SEAT: get_default_workspace/0 stopped resolving the renamed " <>
+             "workspace, so the singleton is once again identified by a mutable, " <>
+             "user-claimable string (task-566dc5be4871353b); got #{inspect(parked)}"
+
+    {_n, _} =
+      Repo.update_all(
+        from(w in Workspace, where: w.is_default == true),
+        set: [is_default: false]
+      )
+
+    Barkpark.Tenancy.DefaultScopeCache.invalidate()
 
     refute Tenancy.get_default_workspace()
     :ok
@@ -219,6 +247,92 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
     end
   end
 
+  describe "the instance-default SEAT cannot travel in a bundle (task-566dc5be4871353b)" do
+    test "a CRAFTED bundle shipping is_default = t cannot CAPTURE the vacant seat" do
+      # The seat is no longer a string, so `assert_root_slug_not_vacant_reserved!/2`
+      # — which polices reserved SLUGS — sees nothing wrong with this bundle: its
+      # root slug is ordinary. The claim rides in the COLUMN instead, through the
+      # raw COPY that reaches no changeset. If `settle_default_seat!/2` did not
+      # clear it, moving the seat off the slug would have RELOCATED the capture
+      # rather than closed it.
+      {src, bundle, src_manifest} = exported_source_with_slug!(unique("ordinary"))
+      purge!(src, src_manifest)
+      refute Tenancy.get_default_workspace()
+
+      {manifest, dumps} = Archive.unpack(bundle)
+      crafted = repack(manifest, Map.put(dumps, "workspaces", claim_seat(manifest, dumps)))
+
+      # Fixture assumption, asserted: the tampering actually landed a `t`.
+      assert seat_byte(manifest, Map.put(dumps, "workspaces", claim_seat(manifest, dumps))) == "t"
+
+      outcome = import_outcome(crafted)
+      assert {:imported, {:ok, _stats}} = outcome
+
+      captured = Tenancy.get_default_workspace()
+
+      refute captured,
+             "CAPTURE THROUGH THE COLUMN: a caller-supplied bundle claimed the " <>
+               "instance-default seat by shipping is_default = t in the workspaces " <>
+               "member — get_default_workspace/0 now returns #{inspect(captured && captured.id)} " <>
+               "(imported workspace src.id=#{src.id}). Import outcome: #{inspect(outcome)}"
+
+      # DEGRADED TO VACANCY, not to capture: the workspace itself landed fine.
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [src.id]) == 1
+    end
+
+    test "a CRAFTED bundle cannot STEAL a seat another workspace already holds" do
+      {src, bundle, src_manifest} = exported_source_with_slug!(unique("ordinary"))
+      purge!(src, src_manifest)
+
+      holder = Tenancy.establish_default_workspace!()
+
+      {manifest, dumps} = Archive.unpack(bundle)
+      crafted = repack(manifest, Map.put(dumps, "workspaces", claim_seat(manifest, dumps)))
+
+      # WHICH WALL CATCHES IT, and why it is the coarser one. `settle_default_seat!/2`
+      # runs after the members land, so with the seat OCCUPIED the partial unique
+      # index gets there first and aborts the COPY — a Postgrex 23505, which the
+      # HTTP edge renders as a logged 500 rather than the 422 invalid_bundle a
+      # crafted bundle normally earns. That asymmetry is deliberate and stated
+      # rather than papered over: the DANGEROUS arm is the vacant seat (the arm
+      # above), and that one is closed cleanly by the clear. This arm cannot
+      # capture anything — the seat is already held — so it is worth exactly one
+      # fail-closed rollback and no extra pre-flight pass over the dump.
+      err =
+        assert_raise Postgrex.Error, fn ->
+          WorkspaceBundle.import_bundle(crafted)
+        end
+
+      assert err.postgres.constraint == "workspaces_single_default_index"
+
+      assert Tenancy.get_default_workspace().id == holder.id,
+             "a crafted bundle took the seat away from the workspace holding it"
+
+      # Fail-closed: the abort rolled the whole import back.
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [src.id]) == 0
+    end
+
+    test "the EXPORT never carries a live seat out of the instance" do
+      src = create_workspace!(unique("src"))
+      proj = create_project!(src, unique("srcproj"))
+      {:ok, _doc} = create_document_in!(src, proj, "post", %{"doc_id" => unique("d")}, "test")
+
+      # Put THIS workspace in the seat, then export it.
+      {1, _} =
+        Repo.update_all(from(w in Workspace, where: w.id == ^src.id), set: [is_default: true])
+
+      Barkpark.Tenancy.DefaultScopeCache.invalidate()
+      assert Tenancy.get_default_workspace().id == src.id
+
+      {:ok, bundle} = WorkspaceBundle.export(src.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      assert seat_byte(manifest, dumps) == "f",
+             "the exporter carried the instance-default seat into a bundle — landing that " <>
+               "bundle anywhere else hands the seat to whoever runs the import"
+    end
+  end
+
   describe "the rule is CONSULTED, not restated" do
     test "Tenancy.reserved_workspace_slugs/0 composes the singleton with Workspace.reserved_slugs/0" do
       reserved = Tenancy.reserved_workspace_slugs()
@@ -292,6 +406,43 @@ defmodule Barkpark.Tenancy.WorkspaceBundleReservedSlugTest do
   end
 
   defp quote_ident(ident), do: ~s("#{String.replace(ident, "\"", "\"\"")}")
+
+  # The `is_default` field of the single root row in the `workspaces` member,
+  # read out of the COPY text by the manifest's own column order (never by a
+  # hard-coded index — the column list is the manifest's, and it moves).
+  defp seat_index(manifest) do
+    entry = Enum.find(manifest["tables"], &(&1["name"] == "workspaces"))
+    idx = Enum.find_index(entry["columns"], &(&1 == "is_default"))
+
+    assert idx,
+           "the workspaces member no longer carries an is_default column — this whole " <>
+             "describe block is measuring nothing"
+
+    idx
+  end
+
+  defp seat_byte(manifest, dumps) do
+    dumps
+    |> Map.fetch!("workspaces")
+    |> String.split("\n", trim: true)
+    |> hd()
+    |> String.split("\t")
+    |> Enum.at(seat_index(manifest))
+  end
+
+  # The same dump with the root row's `is_default` flipped to `t` — a bundle no
+  # honest exporter produces, which is exactly why the import may not trust one.
+  defp claim_seat(manifest, dumps) do
+    idx = seat_index(manifest)
+
+    dumps
+    |> Map.fetch!("workspaces")
+    |> String.split("\n", trim: true)
+    |> Enum.map_join("\n", fn line ->
+      line |> String.split("\t") |> List.replace_at(idx, "t") |> Enum.join("\t")
+    end)
+    |> Kernel.<>("\n")
+  end
 
   # The engine refuses a crafted bundle by RAISING (the 422 invalid_bundle
   # oracle at the HTTP edge), so every arm has to name both outcomes to be able

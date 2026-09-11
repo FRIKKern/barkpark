@@ -113,8 +113,14 @@ func barkparkPaperTheme() pdrender.Theme {
 	t.Heading[1] = lipgloss.NewStyle().Bold(true).Foreground(accent)  // highlight → L2
 	t.Heading[2] = lipgloss.NewStyle().Bold(true).Foreground(dimText) // dim → L3
 
-	// Code block: a left accent bar (mirrors doc.css's 3px border) + a chroma
-	// style picked by background.
+	// Code block: a left accent bar + a chroma style picked by background. The bar
+	// is TUI-ONLY and has no stylesheet counterpart: the web article code block
+	// paints a flat --paper-bg-deep slab with `border:0`
+	// (Figures.code_block_html/1), and its 3px --bp-codeblock-accent-w left bar was
+	// retired with task-ddb1e0ab09a62466 (see the code-BLOCK frame token comment in
+	// api/assets/paper-surface/paper-surface.css). The 3px accent-bar idiom this
+	// borrows survives on the pullquote: `.bp-paper-surface .bp-role-pullquote`
+	// `border-left: 3px solid var(--paper-reading-accent)`.
 	t.CodeBar = lipgloss.NewStyle().Foreground(accent)
 	if dark {
 		t.ChromaStyle = "monokai"
@@ -254,17 +260,14 @@ func (m model) buildPaperContent(width int) string {
 	return rendered
 }
 
-// paperReadFailedNotice is the paper pane's member of the shared read-failure
-// vocabulary — the same ✕ glyph, dim styling and "the server refused or is
-// unreachable" second line that failedDocListInterior and renderReadFailedState
-// use, so the TUI speaks about a failed read with ONE voice. It says
-// "referenced documents", not "documents": the paper itself rendered, only its
-// references did not resolve. Like its siblings it advertises no key — the TUI
-// binds no refresh.
+// paperReadFailedNotice uses the same glyph, dim styling and second line as the
+// other read-failure states. It names referenced documents because the paper
+// itself rendered; only its references did not resolve. It advertises no key
+// because the TUI binds no refresh for this state.
 func paperReadFailedNotice() []string {
 	return []string{
 		dimStyle.Render("   ✕ Couldn't load referenced documents"),
-		dimStyle.Render("   the server refused or is unreachable"),
+		dimStyle.Render("   the request failed"),
 		"",
 	}
 }

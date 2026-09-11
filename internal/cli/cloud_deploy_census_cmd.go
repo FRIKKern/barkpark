@@ -401,6 +401,15 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		}
 		out.outf("")
 	}
+	// THE EPISODE NOTE, printed IMMEDIATELY under the failure-class table it
+	// qualifies and above every other cohort, because it is about one row in
+	// that table and nothing else on this screen. The generic class row gives
+	// BOX_UNREACHABLE a count; this gives it the behaviour the count does not
+	// carry.
+	if line := deployCensusUnreachableEpisodeLine(census); line != "" {
+		out.outf("%s", line)
+		out.outf("")
+	}
 	if len(census.Deferred) > 0 {
 		out.outf("deferrals (in the volume, never in the failure numerator)")
 		for _, c := range census.Deferred {
@@ -425,6 +434,13 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		out.outf("%s", line)
 		out.outf("")
 	}
+	// THE DOOR'S OWN DENOMINATOR, printed immediately under the cross-reference
+	// that names the two cohorts, because it is the line that says the two
+	// cohorts do not add up to the door.
+	if line := deployCensusDoorLine(census.BoxDoor); line != "" {
+		out.outf("%s", line)
+		out.outf("")
+	}
 	renderDeployDeferralWait(out, census.DeferralWait)
 	renderDeployCoverageCohorts(out, census.CoverageCohorts, pinnedWindow)
 
@@ -435,6 +451,8 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		}
 		out.outf("")
 	}
+
+	renderDeployVocabulary(out, census)
 
 	renderDeployDelivery(out, census.Delivery, siteLimit)
 
@@ -469,6 +487,65 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		out.outf("no site had a deploy row in this window — widen it with --days.")
 	}
 }
+
+// renderDeployVocabulary prints the ledger's CLASS ENUM — what it can ever
+// name — as distinct from the three cohort tables above, which are what THIS
+// WINDOW observed (dr-w16-s3-followup-class-vocabulary-unreachable).
+//
+// The distinction is the only reason this section exists. A class absent from
+// `failure classes` means "no rows in this window" and never "no such class",
+// so the one reading nothing else on this screen offers is WHICH named classes
+// did not fire — a clean run and an unmeasured one look identical without it.
+//
+// A nil Vocabulary is a control plane that predates the key: the section is
+// skipped entirely rather than rendered empty, because an empty legend claims
+// the ledger names no classes at all.
+func renderDeployVocabulary(out *writer, census cloudclient.DeployCensus) {
+	v := census.Vocabulary
+	if v == nil {
+		return
+	}
+	if len(v.Classes) == 0 && len(v.DeferredClasses) == 0 && len(v.NotAttemptedClasses) == 0 {
+		return
+	}
+
+	out.outf("class vocabulary (what the ledger can NAME — the tables above are what this window SAW)")
+	out.outf("  %-18s %3d", "failure", len(v.Classes))
+	out.outf("  %-18s %3d  (in the volume, never in the failure numerator)", "deferral", len(v.DeferredClasses))
+	out.outf("  %-18s %3d  (outside every denominator)", "never attempted", len(v.NotAttemptedClasses))
+
+	seen := map[string]bool{}
+	for _, rows := range [][]cloudclient.DeployCensusClass{census.Classes, census.Deferred, census.NotAttempted} {
+		for _, c := range rows {
+			seen[c.Class] = true
+		}
+	}
+	var quiet []string
+	for _, names := range [][]string{v.Classes, v.DeferredClasses, v.NotAttemptedClasses} {
+		for _, n := range names {
+			if !seen[n] {
+				quiet = append(quiet, sanitizeCell(n))
+			}
+		}
+	}
+	if len(quiet) > 0 {
+		shown := quiet
+		suffix := ""
+		if len(shown) > deployCensusQuietClassLimit {
+			shown = shown[:deployCensusQuietClassLimit]
+			suffix = fmt.Sprintf(" … and %d more", len(quiet)-deployCensusQuietClassLimit)
+		}
+		out.outf("  not seen in this window: %d of %d — %s%s",
+			len(quiet), len(quiet)+len(seen), strings.Join(shown, ", "), suffix)
+	}
+	out.outf("")
+}
+
+// deployCensusQuietClassLimit caps the names printed on the "not seen" line.
+// The line reports the FULL count either way and says how many it withheld —
+// a truncation that hides its own size is the silent cut the census's own
+// `truncated` marker exists to end.
+const deployCensusQuietClassLimit = 12
 
 // deployCensusHeadline builds THE line: the rate, its volume, and the
 // denominator it was taken against, all together, never apart.
@@ -690,6 +767,131 @@ func deployCensusCapacityLine(census cloudclient.DeployCensus) string {
 		abandoned, deferred)
 }
 
+// deployCensusUnreachableEpisodeLine is the OPERATOR SURFACE for BOX_UNREACHABLE
+// (dr-w32-bl-box-unreachable-needs-an-episode-alarm).
+//
+// Before this line, the class reached a human ONLY as a generic row in the
+// failure-class table — a name, a count and a share, rendered by the same loop
+// that renders BUILD_FAILED. That table is true and it is not enough, because
+// this class does not behave like the others: measured over 24 days on the live
+// ledger, its 143 rows fall into 58 EPISODES across 6 sites and EVERY ONE
+// SELF-HEALED, the largest after 1h51m and the MEDIAN AFTER ONE SINGLE ROW. An
+// operator reading "BOX_UNREACHABLE 143" in a multi-day census has no way to
+// tell 143 separate outages from 58 blips, and the count alone invites the wrong
+// action — rebuilding sites whose deploys were never delivered to the box at
+// all.
+//
+// SO THE LINE SAYS THE THREE THINGS THE COUNT CANNOT:
+//
+//   - the rows are a DELIVERY failure, not a build failure: the control plane
+//     could not reach the box, so nothing ran on it and nothing is half-done;
+//   - the class is EPISODIC and self-healing, so a count over a wide window is a
+//     count of blips, and the way to see episode structure is to narrow --from
+//     and --to (which is why this line names those flags);
+//   - an alarm exists and what its shape is, so the operator knows whether
+//     silence means "nobody is watching" or "no episode crossed the bar".
+//
+// The threshold quoted here is stated as a SHAPE and must stay in step with
+// `BoxUnreachableEpisodeAlert.min_rows/0`, `min_sites/0` and `window_minutes/0`
+// on the control plane, which is where its derivation from the quiet baseline is
+// written down.
+//
+// It returns "" when the window holds no rows of this class: a note about an
+// absent class is noise, and printing it at zero would put an incident vocabulary
+// on a screen that recorded no incident.
+func deployCensusUnreachableEpisodeLine(census cloudclient.DeployCensus) string {
+	n := deployCensusClassCount(census.Classes, "BOX_UNREACHABLE")
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("BOX_UNREACHABLE %d in this window is a DELIVERY failure, not a build failure: the control plane could not reach the instance, so these deploys never started on it and nothing on the box is half-finished — re-publish and they go through. "+
+		"This class is EPISODIC and self-heals (measured: 143 rows over 24 days were 58 episodes, median ONE row, largest 1h51m), so a count over a wide window counts blips, not outages — narrow --from/--to to about an hour to see one episode's real shape. "+
+		"An alarm already watches it: %d or more rows across %d or more sites inside %d minutes mails the team once per episode, and once again when it clears.",
+		n, boxUnreachableAlarmRows, boxUnreachableAlarmSites, boxUnreachableAlarmWindowMinutes)
+}
+
+// The alarm's shape, as the control plane's BoxUnreachableEpisodeAlert defines
+// it. Named constants rather than literals in the format string so a reader
+// grepping for the alarm's terms finds them, and so the two halves of the
+// sentence cannot drift apart in an edit.
+const (
+	boxUnreachableAlarmRows          = 3
+	boxUnreachableAlarmSites         = 2
+	boxUnreachableAlarmWindowMinutes = 60
+)
+
+// deployCensusDoorLine renders the box door's own denominator: how often the
+// door REFUSED, beside how often the cause-keyed reader could SEE it refuse.
+//
+// It exists because the two numbers are not the same number and every screen so
+// far printed only the second. `deferral_cause` is written in exactly one code
+// path (`Sites.Deploy.defer/3`), so a capacity 409 that terminated `failed`
+// rather than being re-queued carries the 409 marker in `failure_reason` and a
+// NULL cause — a real refusal at the same door, invisible to a predicate keyed
+// on the cause column.
+//
+// IT DISCLOSES THE GAP, IT DOES NOT RECONCILE IT. The deferral rows above are
+// unchanged; this line names its OWN population (the producer's predicate, in
+// the producer's words), gives the refusal count, and states the difference as a
+// number the producer counted rather than one this reader subtracted. Where the
+// gap is non-zero it also prints the status split, because "6 of these settled
+// failed" is the evidence for the sentence and a reader who cannot see it has to
+// take the gap on trust.
+//
+// A nil node prints NOT MEASURED, never a zero: a control plane that predates
+// the term has not measured the door, and rendering that silence as "the door
+// refused 0 times" is the flattering reading of an absence.
+//
+// It returns "" only when the term was measured and the door was never touched
+// in this window — refusals AND cause_keyed both zero. A window in which the
+// door never opened has no door to report, and printing "0, and the old reader
+// misses 0 of them" would assert a discrepancy this window did not have.
+func deployCensusDoorLine(d *cloudclient.DeployBoxDoor) string {
+	if d == nil {
+		return "box door NOT MEASURED: this control plane sends no box_door term, so how often the box refused a slot is UNKNOWN — the deferral rows above are the door's RE-QUEUES, which is a LOWER BOUND on its refusals, not a count of them."
+	}
+	if d.Refusals == 0 && d.CauseKeyed == 0 {
+		return ""
+	}
+
+	predicate := strings.TrimSpace(d.Predicate)
+	if predicate == "" {
+		predicate = "the control plane named no predicate for this population"
+	}
+	causePredicate := strings.TrimSpace(d.CausePredicate)
+	if causePredicate == "" {
+		causePredicate = "the cause-keyed predicate was not named"
+	}
+
+	line := fmt.Sprintf("box door — REFUSALS %d over its own population (%s). The cause-keyed reader (%s) sees %d",
+		d.Refusals, sanitizeCell(predicate), sanitizeCell(causePredicate), d.CauseKeyed)
+
+	if d.Unkeyed == 0 {
+		return line + ", and MISSES NONE of them in this window — the two predicates agree here, which is a measurement of this window and not a property of the door."
+	}
+	return line + fmt.Sprintf(", MISSING %d of them: %s. The deferral rows above are unchanged and still correct for what they count; this is the larger question (how often the door REFUSED, not how often it RE-QUEUED), and the difference is disclosed here rather than reconciled away.",
+		d.Unkeyed, deployCensusDoorStatusSplit(d.ByStatus))
+}
+
+// deployCensusDoorStatusSplit renders the marked population's status split —
+// the evidence for the gap, in the producer's own buckets. It never invents a
+// bucket: a producer that sent no split gets a sentence saying so, because a
+// silent omission here would leave the gap number standing on nothing.
+func deployCensusDoorStatusSplit(rows []cloudclient.DeployBoxDoorStatus) string {
+	if len(rows) == 0 {
+		return "the control plane sent no status split for the marked rows, so WHERE the missed rows settled is unstated"
+	}
+	parts := make([]string, 0, len(rows))
+	for _, r := range rows {
+		status := strings.TrimSpace(r.Status)
+		if status == "" {
+			status = "(no status)"
+		}
+		parts = append(parts, fmt.Sprintf("%s %d", sanitizeCell(status), r.Count))
+	}
+	return "the marked rows settled " + strings.Join(parts, ", ")
+}
+
 // deployCensusClassCount reads ONE named class count out of a cohort, or 0 when
 // this window carried no such class. It matches the class name exactly — a
 // prefix or contains match would fold BOX_AT_CAPACITY_DEFERRED and a future
@@ -765,9 +967,21 @@ func deployCensusAbandonment(census cloudclient.DeployCensus) string {
 	if census.AbandonedUnreadable != nil && *census.AbandonedUnreadable > 0 {
 		return fmt.Sprintf(
 			"abandoned publishes: %d or more — %d failed row(s) recorded no reason, so the abandonment marker could not be read on them (LOWER BOUND)",
-			*census.Abandoned, *census.AbandonedUnreadable)
+			*census.Abandoned, *census.AbandonedUnreadable) + deployCensusAbandonmentLabels(census)
 	}
-	return fmt.Sprintf("abandoned publishes: %d", *census.Abandoned)
+	return fmt.Sprintf("abandoned publishes: %d", *census.Abandoned) + deployCensusAbandonmentLabels(census)
+}
+
+// deployCensusAbandonmentLabels appends the control plane's own three labels to
+// the abandonment sentence — which basis measured it, how much is historical,
+// how much the backfill wrote. VERBATIM from the envelope and never synthesised
+// here: a control plane that does not send them gets no labels rather than a
+// label this reader made up.
+func deployCensusAbandonmentLabels(census cloudclient.DeployCensus) string {
+	if census.AbandonedBasis == nil || strings.TrimSpace(*census.AbandonedBasis) == "" {
+		return ""
+	}
+	return " — " + strings.TrimSpace(*census.AbandonedBasis)
 }
 
 // deployCensusPct renders a rate node as a percentage, or reports that it has

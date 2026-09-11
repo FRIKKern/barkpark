@@ -17,6 +17,8 @@ defmodule BarkparkWeb.QueryController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
+  require Logger
+
   action_fallback(BarkparkWeb.FallbackController)
 
   # The value sets THESE routes declare in `Barkpark.Plugins.Capabilities` (and
@@ -42,7 +44,95 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
+  # ─── THE READ-SIDE DBConnection CLASSIFICATION (task-5a7f007878b56e6a) ───
+  #
+  # THE READ TWIN OF PR #15489. That row wrapped `Content.Writer.create_document/4`
+  # so a checkout lost mid-write answers 503 `storage_unavailable` /
+  # `connection_unavailable` instead of 500 `internal_error / "unknown error
+  # (DBConnection.ConnectionError)"`. It deliberately did not widen into the read
+  # path, and the read path had the identical hole: zero `rescue` in all of
+  # `content/query.ex`, `content/graph.ex` and `content.ex`.
+  #
+  # WHY THE READ SIDE IS THE WORSE HALF. A 500 on create fails loudly and the
+  # caller resends. A 500 on read happens INSIDE an SSR build: the page renders
+  # with no content document, the deploy's HEALTH gate reads an empty
+  # `bp-doc-id` marker and refuses the switch after the whole build has been
+  # paid for — and the failure is then captioned by its SYMPTOM ("marker is
+  # empty") rather than its CAUSE (the pool). `internal_error` is not on
+  # `BarkparkCloud.Sites.Deploy.transient_refusal?/1`'s list, so the one
+  # condition that clears by itself was the one every caller was told to
+  # escalate.
+  #
+  # THE FIX IS A REGION, NOT A CALL SITE — the same argument #15489 made at the
+  # write door. Every Repo call inside `query_index!/4` can be refused a
+  # checkout (`fetch_schema`, `Content.list_documents_page/3`, `Expand.expand/4`,
+  # the optional `?count=true` total, `Content.schema_hash_for_dataset/2`,
+  # `maybe_resolve_tasks/3`) and the caller's remedy is identical at every one of
+  # them: resend. Naming a single call site would leave the other five raising.
+  #
+  # NO FAIL-OPEN — THE SHARP EDGE ON A READ PATH. `rescue e in
+  # DBConnection.ConnectionError` matches that ONE struct. The rescue returns an
+  # `{:error, …}` tuple and can never return `{:ok, _}`, `[]`, or a 200 with an
+  # empty `documents` list. That matters more here than at the write door: an
+  # empty 200 is precisely the shape that produced the deploy failures this row
+  # was filed from, so a rescue that "recovered" into an empty page would ship a
+  # WORSE defect than the 500 it replaced. Any other exception — a
+  # `Postgrex.Error`, an `Ecto.QueryError`, an `ArgumentError` from a bad filter
+  # — propagates exactly as it did before.
+  #
+  # BLAST RADIUS, STATED. This covers `GET /v1/data/query/:dataset/:type` and
+  # NOTHING ELSE in this controller. `backlinks/2`, `related/2`, `counts/2` and
+  # the document-show door are DELIBERATELY NOT WRAPPED and still raise as they
+  # did; the `:query_index` fault seam below is the only site, and a sibling
+  # seam in `TasksController` pins the untouched graph doors the same way
+  # #15489's `:upsert_prev_doc_lookup` seam pinned `upsert_document/4`.
   defp query_index(conn, dataset, type, params) do
+    query_index!(conn, dataset, type, params)
+  rescue
+    e in DBConnection.ConnectionError ->
+      Logger.error(
+        "BarkparkWeb.QueryController.index/2: the database connection was lost mid-read " <>
+          "(dataset=#{inspect(dataset)} type=#{inspect(type)}) — answering 503 " <>
+          "storage_unavailable/connection_unavailable. exception=#{Exception.message(e)}"
+      )
+
+      {:error, {:connection_unavailable, :read, read_fault_message(e)}}
+  end
+
+  # The caller-facing sentence. Where the write twin's message warns that the
+  # write is AMBIGUOUS, this one says the opposite and says it first: nothing
+  # was read, nothing changed, and an empty result is NOT the answer to this
+  # request. That sentence is the deliverable — the deploys this row came from
+  # failed because an unreadable corpus was rendered as an empty page.
+  defp read_fault_message(%DBConnection.ConnectionError{} = e) do
+    "the database connection was lost while reading documents " <>
+      "(#{Exception.message(e)}). No documents were read and nothing was " <>
+      "changed. This is transient: resend the identical request. Do NOT treat " <>
+      "this as an empty result — a build that renders what it managed to read " <>
+      "will ship a page with no content."
+  end
+
+  # Test-only fault seam, mirroring `Content.Writer.inject_write_fault!/1`
+  # (PR #15489) verbatim in intent: the SQL sandbox cannot produce a REAL
+  # rescuable transport failure — a pool timeout under
+  # `Ecto.Adapters.SQL.Sandbox` arrives as an ownership-shutdown EXIT and takes
+  # the test's own connection with it — so the test raises the exact exception
+  # the live 500 carried, at the exact read it was raised at. The config value
+  # is `{site, exception_module, message}` so the SAME seam proves both halves:
+  # a `DBConnection.ConnectionError` becomes the named 503, and ANY OTHER
+  # exception still propagates untouched. `nil` in every non-test env.
+  defp inject_read_fault!(site) do
+    case Application.get_env(:barkpark, :reader_fault) do
+      {^site, module, message} when is_atom(module) and is_binary(message) ->
+        raise module, message
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp query_index!(conn, dataset, type, params) do
+    inject_read_fault!(:query_index)
     t0 = System.monotonic_time(:microsecond)
     perspective = AnonPerspective.resolve(conn, params)
     # Clamp to the same bounds Content.list_documents enforces (limit [1,1000],
@@ -52,7 +142,13 @@ defmodule BarkparkWeb.QueryController do
     limit = parse_int(params["limit"], 100) |> min(1000) |> max(1)
     offset = parse_int(params["offset"], 0) |> max(0) |> min(100_000)
     order = parse_order_param(params["order"])
-    filter_map = params |> Map.get("filter", %{}) |> normalize_filter_map()
+
+    filter_map =
+      params
+      |> Map.get("filter", %{})
+      |> normalize_filter_map()
+      |> with_id_prefix(params["id_prefix"])
+
     expand_spec = parse_expand(params["expand"])
 
     schema = fetch_schema(conn, type, dataset)
@@ -513,11 +609,28 @@ defmodule BarkparkWeb.QueryController do
   # drafts where they exist and published rows where they do not, so a
   # published-only document must not start 404ing under `?perspective=drafts`.
   #
-  # `:published` and `:raw` keep the exact-id lookup, and they genuinely coincide
-  # here: doc-get addresses ONE row by id, so "raw" (no perspective filter) and
-  # "published" resolve to the same row. A caller that spells `drafts.<id>`
-  # still gets that row — the documented bare-`bp doc get` asymmetry, which is a
-  # different thing from an explicit flag being ignored.
+  # `:raw` means NO perspective filter, so it prefers the row the id names and
+  # falls back to the draft twin when the bare id names nothing
+  # (task-aa22f3bd921e1c56). Before that fallback existed, `doc get <type>
+  # <publishedId> --perspective raw` answered not_found for an unpublished
+  # document that `doc patch`, `doc publish`, `doc discardDraft` and `doc
+  # delete` all reach by the SAME bare id — `Mutations.get_patch_base/4` and
+  # `Content.publish_document/4` each try `drafts.<id>`. So the read-back
+  # straight after a create reported the document did not exist, which is the
+  # false negative that makes an operator or an agent retry the create and
+  # produce duplicates. The accepted id set is now one set across read and
+  # write.
+  #
+  # The order is the opposite of `:drafts` on purpose. Under `:drafts` the twin
+  # WINS when both rows exist, because the caller asked for the unpublished
+  # edit. Under `:raw` the exact row wins, because the caller named a row; the
+  # twin is reached only when the bare id resolves to nothing, and
+  # `drafts.<id>` still names it explicitly.
+  #
+  # `:published` keeps the exact-id lookup with no fallback, and that is the
+  # correct answer rather than the same defect: publishing is the act of making
+  # a document public, so an unpublished document is genuinely absent from the
+  # published perspective.
   #
   # NO NEW EXPOSURE, and this is the part worth checking rather than assuming.
   # `AnonPerspective.resolve/2` pins every anonymous and `public-read` caller to
@@ -525,18 +638,29 @@ defmodule BarkparkWeb.QueryController do
   # names a `drafts.` id. For an authed caller nothing widens either: doc-get
   # already served `GET /v1/data/doc/:ds/:type/drafts.<id>` to any read token, so
   # honouring the flag reaches the SAME row by a different spelling. Pinned both
-  # ways in query_controller_perspective_test.exs.
+  # ways in query_controller_perspective_test.exs, and for `:raw` in
+  # doc_get_id_parity_test.exs.
   defp get_document_for_perspective(conn, doc_id, type, dataset, params) do
     case AnonPerspective.resolve(conn, params) do
-      :drafts ->
-        case Content.get_document(DraftId.draft_id(doc_id), type, dataset, scope_opts(conn)) do
-          {:ok, draft} -> {:ok, draft}
-          _ -> Content.get_document(doc_id, type, dataset, scope_opts(conn))
-        end
-
-      _ ->
-        Content.get_document(doc_id, type, dataset, scope_opts(conn))
+      :drafts -> first_hit(conn, [DraftId.draft_id(doc_id), doc_id], type, dataset)
+      :raw -> first_hit(conn, [doc_id, DraftId.draft_id(doc_id)], type, dataset)
+      _ -> Content.get_document(doc_id, type, dataset, scope_opts(conn))
     end
+  end
+
+  # Try each spelling in order and answer with the first row that resolves.
+  # `DraftId.draft_id/1` is idempotent, so a caller who already spelled
+  # `drafts.<id>` asks the same question twice and gets the same answer — no
+  # second row is reachable that the exact-id lookup would not have found.
+  defp first_hit(conn, spellings, type, dataset) do
+    opts = scope_opts(conn)
+
+    Enum.reduce_while(spellings, {:error, :not_found}, fn spelling, acc ->
+      case Content.get_document(spelling, type, dataset, opts) do
+        {:ok, _doc} = ok -> {:halt, ok}
+        _ -> {:cont, acc}
+      end
+    end)
   end
 
   # ─── ?resolve=tasks — the API resolve seam (p-resolve-seam) ────────────────
@@ -1221,6 +1345,22 @@ defmodule BarkparkWeb.QueryController do
     Enum.map(rendered, fn doc ->
       Map.filter(doc, fn {k, _v} -> String.starts_with?(k, "_") or MapSet.member?(keep, k) end)
     end)
+  end
+
+  # `?id_prefix=` -> an `_id startsWith` clause on the SAME filter map, or an
+  # `{:error, _}` sentinel that the `match?({:error, _}, filter_map)` guard in
+  # `query_index!/4` already turns into a 400 `invalid_filter`. The rule itself
+  # lives in `Content.Query.merge_id_prefix/2` — ONE derivation shared with
+  # `LegacyController.index/2`, because the two list doors are the duplicated
+  # emitter this fix exists for. An already-failed filter map short-circuits:
+  # the first refusal is the one the caller gets.
+  defp with_id_prefix({:error, _} = err, _id_prefix), do: err
+
+  defp with_id_prefix(filter_map, id_prefix) when is_map(filter_map) do
+    case Content.Query.merge_id_prefix(filter_map, id_prefix) do
+      {:ok, merged} -> merged
+      {:error, _} = err -> err
+    end
   end
 
   defp normalize_filter_map(map) when is_map(map) do

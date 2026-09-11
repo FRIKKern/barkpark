@@ -134,14 +134,57 @@ const list: Render = (b, ctx, key) => {
   const items = asList(b.items)
   return (
     <View key={key} style={{ marginVertical: 6, gap: 4 }}>
-      {items.map((item, i) => (
-        <View key={i} style={{ flexDirection: 'row', paddingLeft: 8 }}>
-          <Text style={[bodyText(ctx), { width: 24 }]}>{ordered ? `${i + 1}.` : '•'}</Text>
+      {items.map((item, i) => {
+        const children = isMap(item)
+          ? asList(item.children).filter(
+              (child) =>
+                isMap(child) &&
+                typeof child.type === 'string' &&
+                [
+                  'list',
+                  'bulletList',
+                  'bullet_list',
+                  'bulleted-list',
+                  'bulleted_list',
+                  'ordered-list',
+                  'numbered_list',
+                ].includes(child.type) &&
+                Array.isArray(child.items),
+            )
+          : []
+        const body = (
           <Text style={[bodyText(ctx), { flex: 1 }]}>
             {renderInlineNodes(itemInlines(item), ctx)}
           </Text>
-        </View>
-      ))}
+        )
+        return (
+          <View key={i} style={{ flexDirection: 'row', paddingLeft: 8 }}>
+            <Text style={[bodyText(ctx), { width: 24 }]}>{ordered ? `${i + 1}.` : '•'}</Text>
+            {children.length === 0 ? (
+              body
+            ) : (
+              <View style={{ flex: 1 }}>
+                {body}
+                {children.map((child, j) => {
+                  const nested = child as Record<string, unknown>
+                  return list(
+                    {
+                      ...nested,
+                      type: 'list',
+                      ordered:
+                        nested.ordered === true ||
+                        nested.type === 'ordered-list' ||
+                        nested.type === 'numbered_list',
+                    },
+                    ctx,
+                    j,
+                  )
+                })}
+              </View>
+            )}
+          </View>
+        )
+      })}
     </View>
   )
 }

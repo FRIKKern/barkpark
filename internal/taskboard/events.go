@@ -76,6 +76,25 @@ const (
 	// legacy backstop loop — degraded, honest, never worse than before.
 	maxDrainPages = 2000
 
+	// tipProbeLimit is the page size for a SEEK probe (seekEventsTip). A probe
+	// asks one question — "does any event exist past this id?" — and one event is
+	// all the answer needs, so it asks for one. That is the entire point of the
+	// seek: a 500-event page off this feed measured ~70 KB on guerrilla
+	// (2026-09-09), a 1-event page ~200 bytes.
+	tipProbeLimit = 1
+
+	// seekProbeStep is the first stride the tip search jumps. The doubling walk
+	// starts here rather than at 1 so a cursor a few hundred ids behind the tip
+	// is bounded in one or two probes instead of ten.
+	seekProbeStep = 1024
+
+	// maxSeekProbes bounds the seek the way maxDrainPages bounds the walk: a
+	// doubling bracket plus a binary search over an int64 id space is ~2*63
+	// probes in the absolute worst case, so anything past this means the feed is
+	// not behaving as a monotonic keyset and the seek gives up (the caller falls
+	// back to the page walk, which is exactly what it did before).
+	maxSeekProbes = 160
+
 	// minRelistEvery is the floor between two HEAVY reads, and it is a separate
 	// number from basePollEvery on purpose — the two answer different questions.
 	// basePollEvery is how fast the board NOTICES (cheap, indexed); this is how
@@ -171,6 +190,111 @@ func FetchTaskEvents(c *apiclient.Client, since int64, limit int) (TaskEventsPag
 	return page, nil
 }
 
+// seekEventsTip finds the EXACT tip of the keyset feed without reading the
+// history between `since` and it.
+//
+// WHY THIS EXISTS. The catch-up walk below (handleEventsResult's HasMore arm)
+// pages the feed 500 events at a time at drainPollEvery to move the cursor to
+// the tip. Every one of those pages is thrown away: decision #4 says events
+// never carry truth, so the only thing the walk extracts from a page is the bit
+// `len(events) > 0`, and the board already holds a snapshot NEWER than any of
+// that history. Measured on guerrilla 2026-09-09: the feed tip was id 363451 and
+// each 500-event page ~70 KB, so a cold cursor cost 726 pages / ~117 MB and ~115
+// seconds of a `bp tasks` launch at ~13-15%% of a core — to learn one boolean.
+//
+// So: bound the tip, then bisect for it. Two predicates, one request each, both
+// asking for a SINGLE event:
+//
+//	nonempty(x) — some event has id > x  ⟺  x < tip
+//	empty(x)    — no event has id > x    ⟺  x >= tip
+//
+// Doubling from `since` finds an x with empty(x); the bisection then returns the
+// SMALLEST x that is empty, which is the tip id itself. Cost is O(log N) probes
+// of ~200 bytes instead of O(N/500) pages of ~70 KB.
+//
+// THE NO-OVERSHOOT PROPERTY IS THE WHOLE SAFETY ARGUMENT. A cursor placed ABOVE
+// the tip would silently swallow every event created afterwards whose id lands
+// underneath it — a board that goes permanently stale and says it is live. The
+// returned value is never above the tip because it is an id the search PROVED
+// has nothing past it while `hi-1` still did: the bisection only ever returns a
+// boundary it observed from both sides, never an unverified doubling bound.
+//
+// A refusal (a probe error, or the probe budget running out) returns the error
+// and the caller falls back to the page walk — degraded to exactly the old
+// behaviour, never worse.
+func seekEventsTip(fetch func(*apiclient.Client, int64, int) (TaskEventsPage, error), c *apiclient.Client, since int64) (int64, time.Duration, error) {
+	if since < 0 {
+		since = 0
+	}
+	var slowest time.Duration
+	probes := 0
+	// nonempty reports whether any event sits past x. It also carries the
+	// slowest single probe out, because that — not the sum of the walk — is the
+	// server latency the paused state is allowed to judge.
+	nonempty := func(x int64) (bool, error) {
+		probes++
+		if probes > maxSeekProbes {
+			return false, fmt.Errorf("seek %s: probe budget (%d) exhausted", taskEventsPath, maxSeekProbes)
+		}
+		start := time.Now()
+		page, err := fetch(c, x, tipProbeLimit)
+		if d := time.Since(start); d > slowest {
+			slowest = d
+		}
+		if err != nil {
+			return false, err
+		}
+		return len(page.Events) > 0, nil
+	}
+
+	// Bracket: lo is known-nonempty, hi is known-empty. The caller only seeks
+	// after a FULL page, which already proved nonempty(since) — but prove it
+	// again rather than inherit it, because a caught-up feed must return `since`
+	// unchanged instead of bisecting a range that has no boundary in it.
+	lo := since
+	more, err := nonempty(lo)
+	if err != nil {
+		return 0, slowest, err
+	}
+	if !more {
+		return lo, slowest, nil
+	}
+	step := int64(seekProbeStep)
+	hi := lo + step
+	for {
+		if hi < lo { // int64 overflow: the id space is exhausted, give up honestly
+			return 0, slowest, fmt.Errorf("seek %s: id space overflow above %d", taskEventsPath, lo)
+		}
+		more, err := nonempty(hi)
+		if err != nil {
+			return 0, slowest, err
+		}
+		if !more {
+			break
+		}
+		lo = hi
+		step *= 2
+		hi = lo + step
+	}
+
+	// Bisect (lo, hi]: lo is nonempty, hi is empty, so the smallest empty id —
+	// the tip — is in there. Invariant holds at every step, so the answer is
+	// always an id observed empty whose predecessor was observed nonempty.
+	for hi-lo > 1 {
+		mid := lo + (hi-lo)/2
+		more, err := nonempty(mid)
+		if err != nil {
+			return 0, slowest, err
+		}
+		if more {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return hi, slowest, nil
+}
+
 // --- message types -----------------------------------------------------------
 
 // eventsPollMsg is the self-clocking poll tick. It carries the generation it was
@@ -209,6 +333,35 @@ func (m Model) pollEventsCmd(gen int) tea.Cmd {
 		start := now()
 		page, err := fetch(client, since, taskEventsPageLimit)
 		return eventsResultMsg{gen: gen, page: page, err: err, elapsed: now().Sub(start)}
+	}
+}
+
+// seekTipCmd runs seekEventsTip off the update loop and reports it as an
+// ORDINARY poll result: a caught-up page (HasMore false, no events) carrying the
+// tip cursor. That is not a disguise, it is the truth of what happened — the
+// cursor is now at the tip and there is nothing left to walk — and it means the
+// result reducer's existing arms handle the outcome with no second code path:
+// drainOwed still buys exactly ONE re-list, and a failed seek takes the same
+// back-off-and-do-not-consume arm any failed poll takes, which drops the board
+// back onto the page walk.
+func (m Model) seekTipCmd(gen int) tea.Cmd {
+	fetch := m.fetchEvents
+	client := m.client
+	since := m.eventCursor
+	return func() tea.Msg {
+		tip, slowest, err := seekEventsTip(fetch, client, since)
+		if err != nil {
+			return eventsResultMsg{gen: gen, err: err, elapsed: slowest}
+		}
+		return eventsResultMsg{
+			gen:  gen,
+			page: TaskEventsPage{OK: true, Cursor: tip},
+			// The seek is many round trips; reporting their SUM as elapsed would
+			// trip slowReadThreshold and pause a board whose server answered every
+			// probe promptly. The slowest single probe is the honest measure of
+			// the latency this loop is allowed to judge.
+			elapsed: slowest,
+		}
 	}
 }
 
@@ -290,7 +443,17 @@ func (m Model) handleEventsResult(msg eventsResultMsg) (Model, tea.Cmd) {
 	}
 	m.ui.Paused = false
 	m.ui.RetryAt = time.Time{}
-	m.eventCursor = msg.page.Cursor
+	// The cursor advances HERE, on every consumed read — a drain page, a seek
+	// that landed on the tip, or a quiet caught-up poll. Persisting it here (and
+	// not only where a re-list lands, live.go) is the point: the catch-up path
+	// never re-lists, so a board that walked the feed to the tip and then quit
+	// used to save nothing and start the walk over on the next launch. The write
+	// is a ~30-byte atomic rename, guarded on an actual advance so a caught-up
+	// board (the server echoes `since` back) rewrites nothing on every poll.
+	if msg.page.Cursor > m.eventCursor {
+		m.eventCursor = msg.page.Cursor
+		m.persistEventCursor()
+	}
 
 	if msg.page.HasMore {
 		m.drainPages++
@@ -308,6 +471,16 @@ func (m Model) handleEventsResult(msg eventsResultMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pollEvery = basePollEvery
+		if m.drainPages == 1 {
+			// FIRST full page of a drain: do not walk the backlog, seek past it.
+			// The board already holds a snapshot newer than every event in there
+			// and reads nothing from those pages but "something moved" — which
+			// drainOwed has already recorded. Keep pollInFlight held: the seek IS
+			// this loop's in-flight read, and releasing it here would let a stray
+			// tick start a second one.
+			m.pollInFlight = true
+			return m, m.seekTipCmd(msg.gen)
+		}
 		return m, m.armNextPoll(drainPollEvery)
 	}
 

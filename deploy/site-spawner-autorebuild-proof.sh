@@ -59,6 +59,14 @@
 #   82 BURST_NOT_A_BURST            — fewer publishes than would let coalescing be observed (a vacuous burst test)
 #   90 SELF_CHECK_FAILED            — a named red did NOT fire on input that must trigger it
 set -uo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/lib/bp-curl.sh"   # 429 backoff, shared (task-90059c5c680f6665)
+# 429 backoff, shared (task-90059c5c680f6665). Every probe below reads its status
+# out of a `.code` file. bp_curl_code prints NOTHING and returns curl's rc on a
+# transport failure (curl -w alone printed 000 AND failed), so each site's
+# trailing `|| true` becomes `|| echo 000 >"<the .code file>"` — without it the
+# file would be left EMPTY and every `[ "$hc" = "200" ]` below would compare
+# against the empty string instead of the 000 the old code wrote.
 
 # ---- Config -----------------------------------------------------------------
 
@@ -288,8 +296,11 @@ cleanup() {
       note "         There is no DELETE /v1/sites/:id route yet (see site-spawner-backlog-token-revoke),"
       note "         so it is LEFT IN PLACE deliberately, with its releases dir, Caddy block AND its"
       note "         content-publish webhook row on $INSTANCE. Remove by hand: on $LIVE_HOST →"
-      note "         rm -rf /opt/barkpark/sites/$CREATED_SITE, drop the '# barkpark-site:$CREATED_SITE'"
-      note "         handle_path block from /etc/caddy/Caddyfile, and unregister the box webhook."
+      note "         rm -rf /opt/barkpark/sites/$CREATED_SITE, drop the handle_path block from"
+      note "         /etc/caddy/Caddyfile whose guard comment reads 'BARKPARK_SITE_ROUTE:$CREATED_SITE'"
+      note "         (that marker, NOT the old '# barkpark-site<colon>' string, is what deploy/site-deploy.sh writes;"
+      note "         grepping the old string finds nothing and the route stays live), and"
+      note "         unregister the box webhook."
     fi
     if [ -n "$PUBLISHED_DOCS" ]; then
       note "         The proof PUBLISHED papers into $DATASET (ids: $PUBLISHED_DOCS) — they are real"
@@ -503,8 +514,8 @@ preflight() {
   if [ -z "$CLOUD_TOKEN" ]; then
     wall "$E_NO_SESSION" "no cloud session token in $CFG." "bp login"
   else
-    curl -sS -m 30 -o "$TMP/bps.json" -w '%{http_code}' \
-      -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/barkparks" >"$TMP/bps.code" 2>"$TMP/bps.err" || true
+    bp_curl_code -sS -m 30 -o "$TMP/bps.json" \
+      -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/barkparks" >"$TMP/bps.code" 2>"$TMP/bps.err" || echo 000 >"$TMP/bps.code"
     hc="$(cat "$TMP/bps.code" 2>/dev/null || echo 000)"
     if [ "$hc" = "200" ]; then
       ok "cloud session present → $CLOUD_URL (team ${CLOUD_TEAM:-?})"
@@ -540,8 +551,8 @@ PY
   srv="$(cfgval server)"; srv="${srv:-https://$LIVE_HOST}"
   ws="${DATASET%%/*}"; ds="${DATASET##*/}"; proj="$(printf '%s' "$DATASET" | cut -d/ -f2)"
   local scoped="$srv/w/$ws/p/$proj/v1/data/query/$ds/$DOC_TYPE?limit=1"
-  curl -sS -m 30 -o "$TMP/content.json" -w '%{http_code}' \
-    -H "Authorization: Bearer $(cfgval token)" "$scoped" >"$TMP/content.code" 2>/dev/null || true
+  bp_curl_code -sS -m 30 -o "$TMP/content.json" \
+    -H "Authorization: Bearer $(cfgval token)" "$scoped" >"$TMP/content.code" 2>/dev/null || echo 000 >"$TMP/content.code"
   hc="$(cat "$TMP/content.code" 2>/dev/null || echo 000)"
   local count; count="$(jget "$TMP/content.json" result.count)"; count="${count:-0}"
   if [ "$hc" != "200" ]; then
@@ -595,9 +606,9 @@ publish_paper() {
 
 # list_deployments — refreshes $TMP/deployments.json from the CP, newest first.
 list_deployments() {
-  curl -sS -m 30 -o "$TMP/deployments.json" -w '%{http_code}' \
+  bp_curl_code -sS -m 30 -o "$TMP/deployments.json" \
     -H "Authorization: Bearer $CLOUD_TOKEN" \
-    "$CLOUD_URL/v1/sites/$SITE_ID/deployments" >"$TMP/deployments.code" 2>/dev/null || true
+    "$CLOUD_URL/v1/sites/$SITE_ID/deployments" >"$TMP/deployments.code" 2>/dev/null || echo 000 >"$TMP/deployments.code"
 }
 
 live_proof() {
@@ -627,8 +638,8 @@ live_proof() {
   CREATED_SITE="$SLUG"
   ok "site created — $SITE_ID"
 
-  curl -sS -m 30 -o "$TMP/site.json" -w '%{http_code}' \
-    -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/sites/$SITE_ID" >"$TMP/site.code" 2>/dev/null || true
+  bp_curl_code -sS -m 30 -o "$TMP/site.json" \
+    -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/sites/$SITE_ID" >"$TMP/site.code" 2>/dev/null || echo 000 >"$TMP/site.code"
   local hc; hc="$(cat "$TMP/site.code")"
   [ "$hc" = "200" ] ||
     fail "$E_CREATE_FAILED" "GET /v1/sites/$SITE_ID answered HTTP $hc — the site we just created is not readable."

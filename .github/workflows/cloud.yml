@@ -11,8 +11,10 @@ name: cloud
 #                     emits the one boolean the expensive jobs are gated on.
 #   1. compile      — compile + format. Gated on the cloud path set.
 #   2. test         — Postgres + `mix test`. Gated on the cloud path set.
-#   3. path-escape  — the path ratchet + its harness. Unfiltered, blocking.
-#   4. cloud-gate   — the AGGREGATOR. The one name that should be REQUIRED.
+#   3. census       — ONE test file. Gated on the CENSUS path set, and only when
+#                     the cloud set did NOT select (`test` already runs it then).
+#   4. path-escape  — the path ratchet + its harness. Unfiltered, blocking.
+#   5. cloud-gate   — the AGGREGATOR. The one name that should be REQUIRED.
 #
 # ── WHY THERE IS NO `on: … paths:` FILTER HERE ANY MORE ──────────────────────
 # This workflow carried one until wave 9. A WORKFLOW-LEVEL paths filter emits NO
@@ -56,6 +58,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       cloud: ${{ steps.sets.outputs.cloud }}
+      # THE SECOND, CHEAPER VERDICT (dr-w26-followup-reader-corpus-dispatch).
+      # `cloud` says "run compile+test"; `census` says "re-run the reader-corpus
+      # census". They are independent questions with independent prices — see
+      # THE CENSUS TIER in scripts/cloud-path-escape-check.sh — and EVERY exit
+      # from the step below must set BOTH, or a downstream `if:` reads an empty
+      # string and the job silently never runs.
+      census: ${{ steps.sets.outputs.census }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -115,8 +124,9 @@ jobs:
             # push-to-main (and anything else): NEVER skip. Main is the branch
             # every other run is compared against; a partial main is worse than
             # a slow one, and there is no reviewer left to notice.
-            echo "event '$event' is not a pull_request — the path set is true."
+            echo "event '$event' is not a pull_request — the path sets are true."
             echo "cloud=true" >> "$GITHUB_OUTPUT"
+            echo "census=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -174,22 +184,149 @@ jobs:
             # never wrong. Never `false`, which is the only truly unsafe answer.
             echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching cloud=true and running the WHOLE suite rather than skipping it — a skip here would green a required context nothing measured. Cost: the full Cloud compile + test suite."
             echo "cloud=true" >> "$GITHUB_OUTPUT"
+            echo "census=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # The path set is declared ONCE, in the ratchet that proves it.
-          cloud="$(printf '%s\n' "$changed" | bash scripts/cloud-path-escape-check.sh --match cloud)"
+          # ── THE SCRIPT MUST MATCH THE WORKFLOW (task-3a81e68f7027ca98) ───
+          # GitHub takes the WORKFLOW FILE for a `pull_request` run from the
+          # MERGE REF, while this job deliberately checks out the PR HEAD (the
+          # D34 note on the checkout above). Those are two different commits, so
+          # the invocation written here used to run against the BRANCH's copy of
+          # scripts/cloud-path-escape-check.sh. Any head branched before a
+          # change to that script's CLI surface then answered
+          # `cloud-path-escape-check: unknown path set 'census' (want cloud)`
+          # and exited 2 — a RED required `Cloud gate` with no defect in the PR.
+          # Measured 2026-09-11 on PR #17575, job 103113143741, `changed files:
+          # scripts/format-check.sh`. It is a CLASS, not a one-off: the same
+          # skew fires for every future flag this step learns, against every PR
+          # branched before it, until each one is update-branched.
+          #
+          # THE SPLIT. The DIFF still comes from the head checkout — D34 intact,
+          # the changed-file set must describe THIS PR and not main's advance.
+          # The SCRIPT is pinned to the commit the workflow file itself came
+          # from, the merge ref, so flag and parser are matched BY CONSTRUCTION
+          # rather than by rebase etiquette. A `git show` off a fetched ref; the
+          # checkout is a blobless partial clone, so this costs one commit, its
+          # trees and one blob, never a second working tree.
+          #
+          # The two DISPATCH_PIN_* hooks are how case 10 of
+          # scripts/cloud-path-escape-check.test.sh drives this exact block
+          # against a local fixture repo (it points them at a ref inside the
+          # fixture). Actions sets neither; the defaults below are the real
+          # values, so the tested path IS the shipped path.
+          pin_remote="${DISPATCH_PIN_REMOTE:-origin}"
+          pin_ref="${DISPATCH_PIN_REF:-refs/pull/${{ github.event.pull_request.number }}/merge}"
+          pin_script="scripts/cloud-path-escape-check.sh"
+          pin_src="the PR HEAD checkout — NOT the commit this workflow file came from"
+          # A PIN *ROOT*, not a loose file. cloud-path-escape-check.sh resolves
+          # its own DECL_ROOT as `dirname($0)/..`, and the census tier derives
+          # its corpus from a declaration FILE under that root. A pinned copy
+          # dropped straight into $RUNNER_TEMP therefore gets
+          # DECL_ROOT=/home/runner/work, finds no declaration, and exits 2 on
+          # EVERY `--match census` — which match_set below turns into a
+          # permanent census=true. Measured 2026-09-11 in case 10 of
+          # scripts/cloud-path-escape-check.test.sh: a docs-only fixture came
+          # back census=true. So the pinned copy lands at <pinroot>/scripts/
+          # and the declaration it NAMES is pinned beside it off the same ref —
+          # parser and corpus move together or not at all.
+          pinroot="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/dispatcher-pinroot"
+          rm -rf "$pinroot"
+          mkdir -p "$pinroot/scripts"
+          pinned="$pinroot/scripts/cloud-path-escape-check.sh"
 
-          case "${cloud}" in
-            true | false) ;;
-            *)
-              echo "::error::dispatcher: refusing to emit the uninterpretable verdict cloud=${cloud}."
+          if git fetch --no-tags --quiet "$pin_remote" "+${pin_ref}:refs/dispatcher/pinned" 2>/dev/null \
+             && git show refs/dispatcher/pinned:scripts/cloud-path-escape-check.sh >"$pinned" 2>/dev/null \
+             && [ -s "$pinned" ]; then
+            pin_script="$pinned"
+            pin_src="${pin_ref} ($(git rev-parse refs/dispatcher/pinned))"
+            # The corpus declaration, from the SAME ref. The script names the
+            # file itself (`--census-source`) so this follows a rename of it
+            # instead of hard-coding a path here that goes quietly stale.
+            # A failure here is NAMED and NOT fatal: `--match census` then
+            # exits 2 and match_set dispatches census=true out loud — more
+            # runs, never a silent skip.
+            censrc="$(bash "$pin_script" --census-source 2>/dev/null || true)"
+            case "$censrc" in
+              */*)
+                mkdir -p "$pinroot/$(dirname "$censrc")"
+                git show "refs/dispatcher/pinned:${censrc}" >"$pinroot/$censrc" 2>/dev/null \
+                  || echo "::warning::dispatcher: pinned the script from ${pin_ref} but could NOT pin its census declaration '${censrc}' from the same ref. The census verdict below falls back to true."
+                ;;
+              *)
+                echo "::warning::dispatcher: the pinned script did not name a census declaration source (--census-source printed '${censrc}'). The census verdict below falls back to true."
+                ;;
+            esac
+          else
+            # NAMED, never silent — and deliberately NOT fatal. A merge ref is
+            # absent for a PR with conflicts, and killing the dispatcher there
+            # would leave the gated jobs with no answer at all, which is the
+            # very failure this change exists to end.
+            echo "::warning::dispatcher: could NOT read scripts/cloud-path-escape-check.sh out of ${pin_ref} on remote '${pin_remote}' (an absent merge ref — a conflicted PR — is the usual cause). Falling back to the PR HEAD's own copy, which may predate this workflow's CLI surface. A verdict this fallback cannot compute becomes true (the WHOLE suite runs) and says so by name below. Degraded read, not a green."
+          fi
+          echo "path-set script: ${pin_src}"
+
+          # NEVER exit 2 on skew, and never a silent `false`. A refusal from the
+          # script — exit 2 on an unknown set name, exit 127 on a head that has
+          # no such file — says THIS STEP could not measure the question, not
+          # that the answer is no. So the answer to "could not tell" is the
+          # expensive one: dispatch TRUE, run everything, print a ::warning
+          # naming the skew. Same polarity as the empty-diff branch above and as
+          # the job header: fail, or run everything; never a silent false.
+          # This does NOT hide a genuinely broken script — the `path-escape` job
+          # below is DELIBERATELY UNFILTERED and runs `--selftest` and the
+          # ratchet itself on every PR, off the merge ref, and reds the same
+          # required context.
+          #
+          # A here-string for BOTH sets, never a pipe: `--match` answers through
+          # `grep -Eq`, which exits the instant it matches, and a writer still
+          # holding bytes then takes SIGPIPE that `set -o pipefail` promotes over
+          # the match that DID occur (the house D37 rule). A here-string has no
+          # writer process. The `cloud` call carried that pipe until this change.
+          # THE `--match` STAYS AT THE CALL SITE, spelled out. scripts/which-gates.sh
+          # discovers "which gate will this diff dispatch" by scraping the
+          # dispatch call sites out of these workflows, and it keys on
+          # `--match <set>` at command position. Hiding the flag inside the
+          # helper made that scan find ZERO call sites repo-wide and print its
+          # CANNOT READ (measured 2026-09-11, task-3a81e68f7027ca98) — so the
+          # helper takes the flag verbatim and refuses anything else, and the
+          # two calls below read exactly as the console and elixir ones do.
+          match_set() {
+            local flag="$1" want="$2" out rc=0
+            if [ "$flag" != "--match" ]; then
+              echo "::error::dispatcher: match_set takes '--match <set>' verbatim (got '${flag}')."
               exit 1
-              ;;
-          esac
+            fi
+            out="$(bash "$pin_script" --match "$want" <<<"$changed")" || rc=$?
+            case "$out" in
+              true | false)
+                printf '%s' "$out"
+                return 0
+                ;;
+            esac
+            echo "::warning::dispatcher: ${pin_script} could not answer '--match ${want}' (exit ${rc}, printed '${out}'). The script was read from ${pin_src}; a workflow/script VERSION SKEW is the usual cause — this head predates the flag this workflow calls with. Dispatching ${want}=true: running more, never a silent skip." >&2
+            printf 'true'
+          }
 
-          echo "verdict: cloud=${cloud}"
+          cloud="$(match_set --match cloud)"
+          census="$(match_set --match census)"
+
+          # Belt and braces. `match_set` cannot return anything but true|false,
+          # so this loop is unreachable TODAY — it is kept as the guard on a
+          # future edit that computes a verdict without going through it.
+          for pair in "cloud=${cloud}" "census=${census}"; do
+            case "${pair#*=}" in
+              true | false) ;;
+              *)
+                echo "::error::dispatcher: refusing to emit the uninterpretable verdict ${pair}."
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "verdict: cloud=${cloud} census=${census}"
           echo "cloud=${cloud}" >> "$GITHUB_OUTPUT"
+          echo "census=${census}" >> "$GITHUB_OUTPUT"
 
   path-escape:
     # DELIBERATELY UNFILTERED — no `if:`, no dependency on the dispatcher. This
@@ -201,11 +338,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        id: setup
 
       - name: Harness (the ratchet must be able to fail)
         run: bash scripts/cloud-path-escape-check.sh --selftest
 
       - name: Every repo-root read is dispatched on
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/cloud-path-escape-check.sh
 
       # ── the FailureCopy scrub/strip_ansi ORDER tripwire ──────────────────
@@ -230,11 +369,13 @@ jobs:
       # Harness FIRST, subject second — the house selftest-first idiom. A gate
       # that cannot be shown to fail is not evidence that nothing failed.
       - name: Harness (the scrub-order tripwire must be able to fail)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/failure-copy-scrub-order-check.sh --selftest
 
       - name: No display boundary scrubs before it strips ANSI
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/failure-copy-scrub-order-check.sh
@@ -261,11 +402,13 @@ jobs:
       #
       # Harness FIRST, subject second — the house selftest-first idiom.
       - name: Harness (the DNS vocabulary pin must be able to fail)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/cli-dns-step-vocabulary-check.sh --selftest
 
       - name: Every DNS step verb the Go readers emit is classified
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/cli-dns-step-vocabulary-check.sh
@@ -301,7 +444,15 @@ jobs:
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
       - name: Format check
-        run: mix format --check-formatted
+        # THE VERSION IS PART OF THE VERDICT. This job formats with Elixir
+        # ${{ matrix.elixir }}; dev checkouts run 1.19.x, and the two formatters
+        # disagree — so a green local `mix format --check-formatted` is NOT this
+        # gate (task-417026dfc4826971, PR #17482). Say so AT THE POINT OF
+        # FAILURE, or the next agent spends a cycle re-running the green one.
+        run: |
+          if mix format --check-formatted; then exit 0; fi
+          echo "::error title=Cloud format gate ran Elixir ${{ matrix.elixir }}::This job formatted with Elixir ${{ matrix.elixir }} (pinned in .github/workflows/cloud.yml). Dev checkouts run 1.19.x and the two formatters DISAGREE, so a green local 'cd cloud && mix format --check-formatted' does not measure this gate — and a local 'mix format' will rewrite gate-correct bytes into gate-red ones. Reproduce the gate locally with: make cloud-format-check"
+          exit 1
 
   test:
     name: Cloud control-plane (test)
@@ -384,6 +535,105 @@ jobs:
       - name: Test
         run: mix test
 
+  census:
+    # ── THE CHEAP TIER (dr-w26-followup-reader-corpus-dispatch) ──────────────
+    #
+    # cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs walks
+    # FIVE trees of source — internal, cloud/priv/static, web, js, api — asking
+    # which registered instruments have a reader. Two of those trees are inside
+    # the cloud path set; api/, web/ and js/ are deliberately NOT, because
+    # declaring them there was built and MEASURED at +2233 newly-dispatching
+    # commits per 60 days (api/** alone 1438) — 33% -> 77% of all commits paying
+    # for the whole Postgres-backed suite. So a reader ARRIVING in api/ — the
+    # rot-clearing direction, the good one — did not re-run the census that
+    # scores it, and the stale row's red landed on some later, innocent,
+    # cloud-touching PR instead.
+    #
+    # This job is the honest price of that signal: the census needs ITSELF
+    # dispatched, not the suite. One `mix test` of one file.
+    #
+    # THE `if:` IS THE WHOLE MECHANISM, and both halves are load-bearing:
+    #   * `census == 'true'`  — the diff touched a tree ReaderScan walks. The
+    #     roots are DERIVED from that test's own `@roots` declaration, so the
+    #     corpus and the dispatch condition cannot drift (THE CENSUS TIER in
+    #     scripts/cloud-path-escape-check.sh).
+    #   * `cloud != 'true'`   — when the cloud set DID select, the `test` job
+    #     above already runs this file as part of `mix test`. Running it here
+    #     too would buy a second runner for the same assertions and nothing
+    #     else. The aggregator knows this: a skip against cloud=true is in its
+    #     allow-set, and the reason is written there too.
+    #
+    # NOT a workflow-level `on: … paths:` filter, and never one: that shape
+    # emits no check run at all and deadlocks the required context (D18/D89 —
+    # see the header of this file). The filter stays DOWN here, in a job-level
+    # `if:` fed by the always-running dispatcher.
+    name: Cloud reader-corpus census
+    needs: changes
+    if: needs.changes.outputs.census == 'true' && needs.changes.outputs.cloud != 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud
+    services:
+      # The census module is `use ExUnit.Case, async: true` and touches no rows,
+      # but cloud/test/test_helper.exs calls `Sandbox.mode(BarkparkCloud.Repo,
+      # :manual)` on the way in — that is suite-wide setup, not this file's, and
+      # it needs a live Repo. Same service block as `test`, deliberately: the
+      # saving this job exists for is NOT running the other ~N thousand tests,
+      # and buying it by starving the helper would just trade a green for a
+      # crash on the first api-only PR.
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: barkpark_cloud_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      MIX_ENV: test
+      DATABASE_URL: ecto://postgres:postgres@localhost:5432/barkpark_cloud_test
+    strategy:
+      matrix:
+        # The same tuple as `compile`/`test`, so the deps cache key below is the
+        # one those jobs already populated rather than a second cold cache.
+        otp: ["27.0"]
+        elixir: ["1.18.1"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            cloud/deps
+            cloud/_build
+          key: cloud-test-${{ runner.os }}-otp${{ matrix.otp }}-${{ hashFiles('cloud/mix.lock') }}
+      - name: Fetch deps
+        run: mix deps.get
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+      - name: Create the test database
+        run: mix ecto.create
+      - name: Migrate
+        run: mix ecto.migrate
+      # ONE FILE, NAMED ONCE. `scripts/cloud-path-escape-check.sh
+      # --census-source` prints this same path — it is where the tier reads its
+      # roots — and the path-escape harness asserts the two agree, so this job
+      # can never end up dispatching on one census's corpus while running
+      # another's file.
+      - name: Reader-corpus census
+        run: mix test test/barkpark_cloud/reader_less_instrument_census_test.exs
+
   cloud-gate:
     # ── THE AGGREGATOR — the one name that should carry branch protection ──
     #
@@ -418,7 +668,7 @@ jobs:
     # is a FAILURE, including a failure of the dispatcher itself.
     name: Cloud gate
     if: always()
-    needs: [changes, compile, test, path-escape]
+    needs: [changes, compile, test, census, path-escape]
     runs-on: ubuntu-latest
     steps:
       - name: Decide (fail-closed over every upstream result)
@@ -426,12 +676,14 @@ jobs:
           R_CHANGES: ${{ needs.changes.result }}
           R_COMPILE: ${{ needs.compile.result }}
           R_TEST: ${{ needs.test.result }}
+          R_CENSUS: ${{ needs.census.result }}
           R_ESCAPE: ${{ needs.path-escape.result }}
           O_CLOUD: ${{ needs.changes.outputs.cloud }}
+          O_CENSUS: ${{ needs.changes.outputs.census }}
         run: |
           set -euo pipefail
 
-          echo "dispatcher outputs: cloud='${O_CLOUD}'"
+          echo "dispatcher outputs: cloud='${O_CLOUD}' census='${O_CENSUS}'"
           echo
 
           bad=0
@@ -512,10 +764,33 @@ jobs:
 
           # The dispatcher itself may never skip: without it there are no gate
           # values, so nothing downstream can be judged.
+          # ── the census job's gate is DERIVED, because it is a CONJUNCTION ──
+          # `decide` accepts a skip only against the literal string 'false', and
+          # the census job carries two conditions, not one. It legitimately does
+          # not run in TWO different worlds and they must both resolve to
+          # 'false' here, or the allow-set would red an honest skip:
+          #   * the diff touched no tree the reader census walks (census=false);
+          #   * the CLOUD set selected, so the `test` job above already ran that
+          #     file inside `mix test` (cloud=true) — a skip here means covered,
+          #     not unmeasured.
+          # Anything else — an empty or garbage dispatcher output — falls
+          # through UNCHANGED and is therefore not 'false', so a skip against it
+          # reds exactly as it does for compile/test. Never a default of
+          # 'false': that is the one value that licenses a silent skip.
+          case "${O_CENSUS}:${O_CLOUD}" in
+            false:*)    census_gate=false ;;
+            true:true)  census_gate=false ;;
+            true:false) census_gate=true ;;
+            *)          census_gate="${O_CENSUS}" ;;
+          esac
+          echo "census job gate (derived from census='${O_CENSUS}' cloud='${O_CLOUD}'): ${census_gate}"
+          echo
+
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
           decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
           decide "compile"                 "${R_COMPILE}" "${O_CLOUD}"
           decide "test"                    "${R_TEST}"    "${O_CLOUD}"
+          decide "census (reader corpus)"  "${R_CENSUS}"  "${census_gate}"
 
           echo
           if [ "$bad" -ne 0 ]; then
@@ -591,7 +866,7 @@ jobs:
             Read the aggregator's "Decide (fail-closed over every upstream
             result)" step first — it names which upstream job is outside the
             allow-set (`changes` dispatcher, `path-escape` ratchet, `compile`,
-            `test`) and on which OTP/Elixir matrix leg.
+            `test`, `census`) and on which OTP/Elixir matrix leg.
 
             This issue is idempotent per key: an ongoing failure appends a
             comment rather than opening a new issue. CLOSE IT once main is green

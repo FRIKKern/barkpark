@@ -99,7 +99,15 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
       refute conn.status in [200, 201],
              "a cookie-authenticated write succeeded with no CSRF header"
 
-      assert conn.status in [401, 403]
+      # WHICH GATE — AND IT IS NOT THE ONE THE TEST NAME IMPLIES. The refusal
+      # observed here is the CSRF gate: 403 with code "csrf_required", not the
+      # membership or permission gate. The old assertion accepted unauthorized or
+      # forbidden alike, and hid that: it was green on a CSRF rejection that never
+      # reached the authorisation check the test is about. Pinning the code is
+      # what makes the gap visible; widening it again would re-hide it.
+      assert conn.status == 403
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "csrf_required"
     end
 
     test "a NON-member with a valid account session is still refused", %{
@@ -248,8 +256,16 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
       refute conn.status == 500,
              "a token-less principal raised instead of being answered: #{conn.status} #{conn.resp_body}"
 
-      assert conn.status in [401, 403, 404],
+      # WHICH GATE: the NOT-FOUND oracle — 404 `not_found`, not a 403. A
+      # cross-tenant caller must not learn the resource exists, so the refusal is
+      # indistinguishable from a route miss BY DESIGN. Pinning it is what stops
+      # the assertion from also passing on a genuine 403 (which would leak
+      # existence) or on an authentication failure.
+      assert conn.status == 404,
              "expected an honest refusal or not-found, got #{conn.status} #{conn.resp_body}"
+
+      err = Jason.decode!(conn.resp_body)["error"]
+      assert err["code"] == "not_found"
     end
   end
 end

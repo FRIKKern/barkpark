@@ -1658,7 +1658,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       input = @pd_parity_input_asciicast
 
       assert Render.render_block(input, %{style: :article}) ==
-               ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><div class="bp-asciicast" data-cast-src="https://example.com/casts/demo.cast" data-cast-poster="npt:0:12" style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div><figcaption class="bp-figcaption">A terminal walkthrough</figcaption></figure>|
+               ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><div class="bp-asciicast" data-cast-src="https://example.com/casts/demo.cast" data-cast-poster="npt:0:12" style="border:1px solid var(--paper-rule, #dde7e2);border-radius:6px;overflow:hidden"></div><figcaption class="bp-figcaption">A terminal walkthrough</figcaption></figure>|
 
       assert Render.render_block(input, %{style: :email}) ==
                ~s|<figure style="margin:16px 0"><a href="https://example.com/casts/demo.cast">Terminal recording</a><div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">A terminal walkthrough</div></figure>|

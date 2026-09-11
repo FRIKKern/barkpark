@@ -129,7 +129,17 @@ defmodule BarkparkWeb.SharedEditTest do
 
   test "the token cannot mutate a different workspace/project", ctx do
     resp = ctx.conn |> auth(ctx.edit_token) |> post(mutate_path(ctx.ws_b, ctx.proj_b), @create)
-    assert resp.status in [401, 403, 404]
+    # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+    # Both it and the permission-tier gates answer 403 with code "forbidden", so
+    # `reason` is the ONLY discriminator: the membership arm carries
+    # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+    # old assertion accepted any of three statuses — unauthorized, forbidden or
+    # not-found — so it was green on a deleted route and on a lost
+    # authentication too.
+    assert resp.status == 403
+    err = Jason.decode!(resp.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    assert err["reason"] == "not_a_member"
     refute resp.status == 200
   end
 
@@ -139,7 +149,17 @@ defmodule BarkparkWeb.SharedEditTest do
       |> auth(ctx.edit_token)
       |> post(mutate_path(ctx.ws_a, ctx.proj_a, "staging"), @create)
 
-    assert resp.status in [401, 403, 404]
+    # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+    # Both it and the permission-tier gates answer 403 with code "forbidden", so
+    # `reason` is the ONLY discriminator: the membership arm carries
+    # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+    # old assertion accepted any of three statuses — unauthorized, forbidden or
+    # not-found — so it was green on a deleted route and on a lost
+    # authentication too.
+    assert resp.status == 403
+    err = Jason.decode!(resp.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    assert err["reason"] == "not_a_member"
     refute resp.status == 200
   end
 
@@ -147,7 +167,15 @@ defmodule BarkparkWeb.SharedEditTest do
 
   test "the token is REJECTED on the flat mutate route (no scope binding there)", ctx do
     resp = ctx.conn |> auth(ctx.edit_token) |> post("/v1/data/mutate/#{@dataset}", @create)
-    assert resp.status in [401, 403]
+    # WHICH GATE: a PERMISSION-TIER refusal — `{:error, :forbidden}`, which
+    # carries NO `reason`. Deliberately distinct from `ResolveWorkspace`'s
+    # membership arm (`:forbidden_membership`, reason "not_a_member"): both are
+    # 403 "forbidden", so the absence of `reason` is what says the caller got
+    # past the membership check and was refused on its authority.
+    assert resp.status == 403
+    err = Jason.decode!(resp.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    refute Map.has_key?(err, "reason")
     refute resp.status == 200
 
     # and nothing was written to the Default workspace via the flat route
@@ -208,7 +236,15 @@ defmodule BarkparkWeb.SharedEditTest do
 
     resp = ctx.conn |> auth(ctx.edit_token) |> get("/v1/data/doc/#{@dataset}/post/drafts.#{id}")
 
-    assert resp.status in [401, 403]
+    # WHICH GATE: a PERMISSION-TIER refusal — `{:error, :forbidden}`, which
+    # carries NO `reason`. Deliberately distinct from `ResolveWorkspace`'s
+    # membership arm (`:forbidden_membership`, reason "not_a_member"): both are
+    # 403 "forbidden", so the absence of `reason` is what says the caller got
+    # past the membership check and was refused on its authority.
+    assert resp.status == 403
+    err = Jason.decode!(resp.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    refute Map.has_key?(err, "reason")
     refute resp.resp_body =~ "Default Draft"
   end
 
@@ -217,7 +253,15 @@ defmodule BarkparkWeb.SharedEditTest do
 
     resp = ctx.conn |> auth(ctx.edit_token) |> get("/api/documents/post/drafts.#{id}")
 
-    assert resp.status in [401, 403]
+    # WHICH GATE: a PERMISSION-TIER refusal — `{:error, :forbidden}`, which
+    # carries NO `reason`. Deliberately distinct from `ResolveWorkspace`'s
+    # membership arm (`:forbidden_membership`, reason "not_a_member"): both are
+    # 403 "forbidden", so the absence of `reason` is what says the caller got
+    # past the membership check and was refused on its authority.
+    assert resp.status == 403
+    err = Jason.decode!(resp.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    refute Map.has_key?(err, "reason")
     refute resp.resp_body =~ "Default Draft"
   end
 
@@ -229,7 +273,17 @@ defmodule BarkparkWeb.SharedEditTest do
       |> put_req_header("content-type", "application/json")
       |> post(mutate_path(ctx.ws_a, ctx.proj_a), @create)
 
-    assert resp.status in [401, 403, 404]
+    # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+    # Both it and the permission-tier gates answer 403 with code "forbidden", so
+    # `reason` is the ONLY discriminator: the membership arm carries
+    # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+    # old assertion accepted any of three statuses — unauthorized, forbidden or
+    # not-found — so it was green on a deleted route and on a lost
+    # authentication too.
+    assert resp.status == 403
+    err = Jason.decode!(resp.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    assert err["reason"] == "not_a_member"
     refute resp.status == 200
   end
 
@@ -239,7 +293,17 @@ defmodule BarkparkWeb.SharedEditTest do
     share_a!("docs:read", ctx.ws_a, ctx.proj_a)
 
     resp = ctx.conn |> auth(ctx.edit_token) |> post(mutate_path(ctx.ws_a, ctx.proj_a), @create)
-    assert resp.status in [401, 403, 404]
+    # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+    # Both it and the permission-tier gates answer 403 with code "forbidden", so
+    # `reason` is the ONLY discriminator: the membership arm carries
+    # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+    # old assertion accepted any of three statuses — unauthorized, forbidden or
+    # not-found — so it was green on a deleted route and on a lost
+    # authentication too.
+    assert resp.status == 403
+    err = Jason.decode!(resp.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    assert err["reason"] == "not_a_member"
     refute resp.status == 200
   end
 
@@ -261,7 +325,17 @@ defmodule BarkparkWeb.SharedEditTest do
       |> auth(docs_only)
       |> post(media_upload_path(ctx.ws_a, ctx.proj_a), %{})
 
-    assert resp.status in [401, 403, 404]
+    # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+    # Both it and the permission-tier gates answer 403 with code "forbidden", so
+    # `reason` is the ONLY discriminator: the membership arm carries
+    # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+    # old assertion accepted any of three statuses — unauthorized, forbidden or
+    # not-found — so it was green on a deleted route and on a lost
+    # authentication too.
+    assert resp.status == 403
+    err = Jason.decode!(resp.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    assert err["reason"] == "not_a_member"
     refute resp.status == 200
   end
 
@@ -288,7 +362,17 @@ defmodule BarkparkWeb.SharedEditTest do
       Auth.create_share_token(ctx.ws_a.slug, ctx.proj_a.slug, @dataset, ["media"])
 
     resp = ctx.conn |> auth(media_token) |> post(mutate_path(ctx.ws_a, ctx.proj_a), @create)
-    assert resp.status in [401, 403, 404]
+    # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+    # Both it and the permission-tier gates answer 403 with code "forbidden", so
+    # `reason` is the ONLY discriminator: the membership arm carries
+    # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+    # old assertion accepted any of three statuses — unauthorized, forbidden or
+    # not-found — so it was green on a deleted route and on a lost
+    # authentication too.
+    assert resp.status == 403
+    err = Jason.decode!(resp.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    assert err["reason"] == "not_a_member"
     refute resp.status == 200
   end
 

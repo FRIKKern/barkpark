@@ -45,13 +45,22 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
   asserts BOTH halves — the query budget and the wiring — so re-pointing the
   callsite at the deriving twin reds.
 
-  ## THE SECOND STALENESS IS NOT CLOSED, AND IS ASSERTED OPEN
+  ## THE SECOND STALENESS WAS CLOSED ON 2026-09-07, AND SECTION 4 FLIPPED
 
-  `Tenancy.Auth.permits?/2` reads the `%ApiToken{}` STRUCT captured at mount by
-  the session plug, so a token downgraded to `["read"]` (or revoked) IN THE DB
-  still derives `write == true` on an already-mounted socket. The last test in
-  this file asserts that gap BY RUN — an escalated 1337 reaching the store —
-  so the word "fresh" cannot be read as covering it. See the pds-w42 PR body.
+  This section used to read "THE SECOND STALENESS IS NOT CLOSED, AND IS
+  ASSERTED OPEN": `Tenancy.Auth.permits?/2` read the `%ApiToken{}` STRUCT
+  captured at mount, so a token downgraded to `["read"]` (or revoked) IN THE DB
+  still derived `write == true` on an already-mounted socket, and section 4
+  asserted that gap BY RUN — an escalated 1337 reaching the store.
+
+  task-02925b8af783e517 closed it: `Caps.derive_from_assigns/1` now RELOADS the
+  `%ApiToken{}` per derive through `Auth.verify_token/1`'s own liveness
+  predicate (`kind == "api"`, not revoked, not expired). Section 4 keeps the
+  identical repro and asserts the OPPOSITE verdict — both write routes denied,
+  `@orig` intact — plus a not-downgraded control so the denial cannot be the
+  reload failing open-shut for every token. The revoke / expiry / disable arms
+  and the anonymous-escalation proof live in
+  `caps_principal_freshness_test.exs`.
 
   `async: false` — sheet sessions are globally-registered processes reading
   through the SQL sandbox in shared mode, same as the sibling SheetGrid suites.
@@ -390,10 +399,26 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
     end
   end
 
-  # ── 4. THE SECOND STALENESS — asserted OPEN, by run ─────────────────────────
+  # ── 4. THE SECOND STALENESS — CLOSED 2026-09-07, and this arm FLIPPED ───────
+  #
+  # THIS TEST USED TO ASSERT THE BUG. Verbatim, it read
+  # `assert Caps.derive(socket_of(view)).write == true` followed by
+  # `assert persisted_a1(ws, sheet) == %{"v" => 1337}` — a deliberate
+  # assertion that the downgraded token STILL wrote, so the gap could not be
+  # papered over by the word "fresh". Its own comment named the flip as the
+  # follow-up and named this file as where it lands. That follow-up is
+  # task-02925b8af783e517 and it has landed, so the assertions are REWRITTEN
+  # IN PLACE to the fixed behaviour rather than deleted: the same repro, the
+  # opposite verdict, and no second test anywhere asserting the old one.
+  #
+  # THE ORACLE IS THE SAME `lie_shape/3` TUPLE the rest of this file uses —
+  # {fresh derive, stale mount-time `:caps` assign, what landed in A1}. The
+  # middle element stays TRUE on purpose: nothing re-stamps the render
+  # snapshot, and principal freshness does not pretend to. What changed is
+  # that no authorization reads it any more.
 
-  describe "token permissions are NOT fresh (the gap this change does not close)" do
-    test "downgrading the token to [\"read\"] in the DB leaves the derive write-capable", %{
+  describe "token permissions ARE fresh (task-02925b8af783e517)" do
+    test "downgrading the token to [\"read\"] in the DB denies BOTH write routes", %{
       conn: conn,
       default_ws: ws,
       default_proj: proj
@@ -409,20 +434,60 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
         |> Plug.Test.init_test_session(%{"api_token" => raw})
         |> live(scoped_studio("/d/#{@dataset}/studio/sheet/#{sheet}"))
 
+      # PRE-CONDITION, not decoration: this socket really was write-capable
+      # BEFORE the downgrade, so the refusal below cannot be "sheets never
+      # wrote here". Without it the whole arm is vacuous.
+      assert socket_of(view).assigns.caps.write == true
+      assert Caps.derive(socket_of(view)).write == true
+
+      # THE PRODUCTION TRIGGER: one column edit, no re-mount, no event on this
+      # socket. The membership row is untouched and still says member — the
+      # ONLY thing that changed is the token's permissions array, which is
+      # exactly the input pds-w42 could not reach.
       {1, _} =
         Barkpark.Auth.ApiToken
         |> where([t], t.id == ^token.id)
         |> Repo.update_all(set: [permissions: ["read"]])
 
-      # The membership row is re-read and still says member; the PERMISSIONS
-      # come off the struct the session plug captured at mount, so the fresh
-      # derive is fresh only for MEMBERSHIP. This is a KNOWN-OPEN gap, asserted
-      # so it cannot be papered over by the word "fresh": flipping it to a
-      # denial is a deliberate follow-up, and this test is where it lands.
+      # Route A — straight at the LiveView. `Caps.gate/3` derives fresh and
+      # halts (`edit-commit` is unclassified ⇒ the default-DENY tier).
+      render_hook(view, "edit-commit", %{"value" => "1337", "move" => "none"})
+      assert flash_error(view) == "You don't have access to do that."
+
+      # Route B — the SAME event string, the SAME socket, at the COMPONENT,
+      # where `gate/3` is structurally unreachable and the component's own
+      # write seam is the wall.
+      component_write(view, sheet, "1337")
+
+      assert lie_shape(view, ws, sheet) == {false, true, @orig}
+    end
+
+    test "NO OVER-DENY: the same token, NOT downgraded, still writes both routes", %{
+      conn: conn,
+      default_ws: ws,
+      default_proj: proj
+    } do
+      # The control for the arm above. Principal freshness must deny a token
+      # the DB downgraded and NOTHING else — if the reload itself (a wrong
+      # WHERE clause, a `kind` mismatch, a cast failure) denied every token,
+      # the arm above would go green for the wrong reason and this reds.
+      sheet = slug("w42-tokfresh-ok")
+      create_sheet!(ws, proj, sheet)
+
+      raw = slug("w42-tok")
+      {:ok, _token} = Auth.create_token(raw, "w42 writer", @dataset, ["read", "write"])
+
+      {:ok, view, _html} =
+        conn
+        |> Plug.Test.init_test_session(%{"api_token" => raw})
+        |> live(scoped_studio("/d/#{@dataset}/studio/sheet/#{sheet}"))
+
       assert Caps.derive(socket_of(view)).write == true
 
       component_write(view, sheet, "1337")
+
       assert persisted_a1(ws, sheet) == %{"v" => 1337}
+      assert render(view) =~ ~s(data-v="1337")
     end
   end
 

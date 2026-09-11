@@ -33,6 +33,70 @@ defmodule BarkparkWeb.PaperCardEditingTest do
   end
 
   for host <- [:public, :studio] do
+    test "#{host}: direct action label preserves every other source through replay, conflict and reload",
+         %{conn: conn} do
+      host = unquote(host)
+      {slug, original} = create_card_grid()
+      {view, path} = mount_editor(conn, host, slug)
+
+      assert has_element?(
+               view,
+               "[data-test-id='paper-card-action-label-form'] textarea[name='card-action-label']"
+             )
+
+      request = Ecto.UUID.generate()
+      revision = socket_of(view).assigns.paper_rev
+
+      params = %{
+        "block_id" => "story:2",
+        "card-action-label" => "  Direct <label>  ",
+        "request_id" => request,
+        "if_rev" => revision
+      }
+
+      render_hook(view, "paper-block-autosave", params)
+      assert_reply(view, %{saved: true, request_id: ^request})
+
+      expected =
+        update_in(
+          original,
+          ["blocks", Access.at(0), "blocks", Access.at(1), "slots", "action", Access.at(0)],
+          &Map.put(&1, "label", "  Direct <label>  ")
+        )
+
+      actual = stored(slug).content
+      assert actual["blocks"] == expected["blocks"]
+      assert actual["body"]["blocks"] == expected["blocks"]
+
+      assert Map.drop(actual["body"], ["blocks", "html"]) ==
+               Map.drop(original["body"], ["blocks", "html"])
+
+      # The normal write projection refreshes rendered HTML and revision metadata.
+      assert Map.drop(actual, ["blocks", "body", "body_html", "rev"]) ==
+               Map.drop(original, ["blocks", "body", "body_html", "rev"])
+
+      assert actual["body_html"] =~ "Direct &lt;label&gt;"
+      expected = actual
+      render_hook(view, "paper-block-autosave", params)
+      assert_reply(view, %{saved: true, replayed: true, request_id: ^request})
+      assert stored(slug).content == expected
+
+      stale_request = Ecto.UUID.generate()
+
+      render_hook(view, "paper-block-autosave", %{
+        params
+        | "request_id" => stale_request,
+          "card-action-label" => "Stale overwrite"
+      })
+
+      assert_reply(view, %{saved: false, request_id: ^stale_request})
+      assert stored(slug).content == expected
+      {:ok, reloaded, _} = live(conn, path)
+      toggle_public_editor(reloaded, host)
+      assert render(reloaded) =~ "Direct &lt;label&gt;"
+      assert stored(slug).content == expected
+    end
+
     test "#{host}: grid Card chrome edits preserve slots, siblings, and placement through reload",
          %{conn: conn} do
       host = unquote(host)
@@ -239,6 +303,200 @@ defmodule BarkparkWeb.PaperCardEditingTest do
       {:ok, _, _} = live(conn, path)
       assert stored(slug).content == original
     end
+
+    test "#{host}: explicit-null Card media stays contextual at root and in Section and Columns",
+         %{conn: conn} do
+      host = unquote(host)
+      {slug, original} = create_null_media_cards()
+      {view, path} = mount_editor(conn, host, slug)
+      ids = ["null-root", "null-section", "null-column"]
+      html = render(view)
+      tree = LazyHTML.from_fragment(html)
+
+      assert Enum.sort(
+               LazyHTML.attribute(
+                 LazyHTML.query(
+                   tree,
+                   "[data-test-id='paper-card-editor'] input[name='block_id']"
+                 ),
+                 "value"
+               )
+             ) == Enum.sort(ids)
+
+      assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-card-contextual-editor']")) ==
+               3
+
+      assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-card-body-editor']")) == 3
+      assert Enum.count(LazyHTML.query(tree, "textarea[name='card-title']")) == 3
+      refute has_element?(view, "input[name='card-title']")
+      assert Enum.count(LazyHTML.query(tree, "input[name='card-media-src']")) == 3
+
+      assert LazyHTML.attribute(
+               LazyHTML.query(tree, "input[name='card-media-src']"),
+               "value"
+             ) == List.duplicate("/media/null-type.png", 3)
+
+      refute has_element?(view, "img[src='/media/null-type.png']")
+      refute html =~ "data-bp-opaque"
+
+      canvas_payloads =
+        tree
+        |> LazyHTML.query("[data-test-id='paper-canvas-run'][data-canvas-blocks]")
+        |> LazyHTML.attribute("data-canvas-blocks")
+
+      assert canvas_payloads != []
+      assert Enum.any?(canvas_payloads, &(&1 =~ "canvas-neighbor"))
+
+      for id <- ids, payload <- canvas_payloads do
+        refute payload =~ id
+      end
+
+      for {id, index} <- Enum.with_index(ids, 1) do
+        before_card = find_block!(stored(slug).content["blocks"], id)
+        before_media = get_in(before_card, ["slots", "media", Access.at(0)])
+        assert Map.fetch!(before_media, "type") === nil
+        request = Ecto.UUID.generate()
+
+        render_hook(view, "paper-block-autosave", %{
+          "block_id" => id,
+          "card-title" => "Edited null Card #{index}",
+          "request_id" => request,
+          "if_rev" => socket_of(view).assigns.paper_rev
+        })
+
+        assert_reply(view, %{saved: true, request_id: ^request})
+        edited = find_block!(stored(slug).content["blocks"], id)
+        assert Map.drop(edited, ["slots"]) === Map.drop(before_card, ["slots"])
+        assert Map.drop(edited["slots"], ["title"]) === Map.drop(before_card["slots"], ["title"])
+        assert get_in(edited, ["slots", "media", Access.at(0)]) === before_media
+
+        assert edited["slots"]["title"] === [
+                 Map.put(hd(before_card["slots"]["title"]), "text", "Edited null Card #{index}")
+               ]
+      end
+
+      saved = stored(slug).content
+      {:ok, reloaded, _} = live(conn, path)
+      toggle_public_editor(reloaded, host)
+
+      for {id, index} <- Enum.with_index(ids, 1) do
+        assert has_element?(
+                 reloaded,
+                 "#card-title-#{Base.url_encode64(id, padding: false)}",
+                 "Edited null Card #{index}"
+               )
+
+        assert get_in(find_block!(saved["blocks"], id), ["slots", "media", Access.at(0)]) ===
+                 get_in(find_block!(original["blocks"], id), ["slots", "media", Access.at(0)])
+      end
+
+      assert stored(slug).content === saved
+    end
+
+    test "#{host}: direct titles retain source through replay, conflict, undo, redo and reload",
+         %{conn: conn} do
+      host = unquote(host)
+      {slug, _original} = create_null_media_cards()
+      {view, path} = mount_editor(conn, host, slug)
+
+      for {id, title, card_path} <- [
+            {"null-root", "  Direct <title>  ", [Access.at(0)]},
+            {"null-section", "", [Access.at(2), "blocks", Access.at(0)]},
+            {"null-column", "   ", [Access.at(3), "columns", Access.at(0), Access.at(0)]}
+          ] do
+        before = stored(slug).content["blocks"]
+        forward_id = Ecto.UUID.generate()
+
+        params = %{
+          "block_id" => id,
+          "card-title" => title,
+          "request_id" => forward_id,
+          "if_rev" => socket_of(view).assigns.paper_rev
+        }
+
+        render_hook(view, "paper-block-autosave", params)
+
+        assert_reply(view, %{
+          saved: true,
+          request_id: ^forward_id,
+          history_step: %{version: 1, ref: ^forward_id, action: "undo"}
+        })
+
+        expected = put_in(before, card_path ++ ["slots", "title", Access.at(0), "text"], title)
+        assert stored(slug).content["blocks"] === expected
+        assert stored(slug).content["body"]["blocks"] === expected
+        saved = stored(slug).content
+
+        # A lost ACK is retried with the identical envelope, not a second mutation.
+        render_hook(view, "paper-block-autosave", params)
+        assert_reply(view, %{saved: true, replayed: true, request_id: ^forward_id})
+        assert stored(slug).content === saved
+
+        stale_id = Ecto.UUID.generate()
+
+        render_hook(view, "paper-block-autosave", %{
+          params
+          | "request_id" => stale_id,
+            "card-title" => "Stale overwrite"
+        })
+
+        assert_reply(view, %{saved: false, request_id: ^stale_id})
+        assert stored(slug).content === saved
+
+        # A later independent Card edit must survive title history in both hosts.
+        media_id = Ecto.UUID.generate()
+
+        render_hook(view, "paper-block-autosave", %{
+          "block_id" => id,
+          "card-media-alt" => "Concurrent description #{id}",
+          "request_id" => media_id,
+          "if_rev" => socket_of(view).assigns.paper_rev
+        })
+
+        assert_reply(view, %{saved: true, request_id: ^media_id})
+        media_path = card_path ++ ["slots", "media", Access.at(0), "alt"]
+        expected = put_in(expected, media_path, "Concurrent description #{id}")
+        before = put_in(before, media_path, "Concurrent description #{id}")
+        assert stored(slug).content["blocks"] === expected
+
+        undo_id = Ecto.UUID.generate()
+
+        render_hook(view, "paper-history-step", %{
+          "history_ref" => forward_id,
+          "action" => "undo",
+          "request_id" => undo_id,
+          "if_rev" => socket_of(view).assigns.paper_rev
+        })
+
+        assert_reply(view, %{saved: true, history_step: %{ref: ^undo_id, action: "redo"}})
+        assert stored(slug).content["blocks"] === before
+
+        redo_id = Ecto.UUID.generate()
+
+        render_hook(view, "paper-history-step", %{
+          "history_ref" => undo_id,
+          "action" => "redo",
+          "request_id" => redo_id,
+          "if_rev" => socket_of(view).assigns.paper_rev
+        })
+
+        assert_reply(view, %{saved: true, request_id: ^redo_id})
+        assert stored(slug).content["blocks"] === expected
+        assert has_element?(view, "#card-title-#{Base.url_encode64(id, padding: false)}")
+      end
+
+      final = stored(slug).content
+      {:ok, reloaded, _} = live(conn, path)
+      toggle_public_editor(reloaded, host)
+      assert stored(slug).content === final
+
+      assert Enum.count(
+               LazyHTML.query(
+                 LazyHTML.from_fragment(render(reloaded)),
+                 "textarea[name='card-title']"
+               )
+             ) == 3
+    end
   end
 
   defp create_card_grid do
@@ -316,6 +574,115 @@ defmodule BarkparkWeb.PaperCardEditingTest do
     original = Map.put(paper.content, "blocks", blocks)
     paper |> Ecto.Changeset.change(content: original) |> Repo.update!()
     {slug, original}
+  end
+
+  defp create_null_media_cards do
+    slug = "card-null-media-#{System.unique_integer([:positive])}"
+
+    card = fn id ->
+      %{
+        "id" => id,
+        "type" => "card",
+        "tone" => "ok",
+        "unknown" => %{"card" => id},
+        "slots" => %{
+          "title" => [
+            %{
+              "type" => "heading",
+              "level" => 3,
+              "text" => "Original #{id}",
+              "unknown" => ["title"]
+            }
+          ],
+          "body" => [
+            %{
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Editable body #{id}"}],
+              "unknown" => ["body"]
+            }
+          ],
+          "media" => [
+            %{
+              "type" => nil,
+              "src" => "/media/null-type.png",
+              "alt" => "Explicit null media",
+              "width" => 320,
+              "height" => 180,
+              "unknown" => %{"media" => [id, nil, 1, 1.0]}
+            }
+          ],
+          "action" => [
+            %{
+              "type" => "action",
+              "label" => "Read",
+              "href" => "/papers/original",
+              "unknown" => ["action"]
+            }
+          ],
+          "custom" => [%{"opaque" => [1, 2, 3]}]
+        }
+      }
+    end
+
+    blocks = [
+      card.("null-root"),
+      %{
+        "id" => "canvas-neighbor",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Canvas ownership control"}]
+      },
+      %{
+        "id" => "null-section-owner",
+        "type" => "section",
+        "variant" => "stack",
+        "blocks" => [card.("null-section")]
+      },
+      %{
+        "id" => "null-columns-owner",
+        "type" => "columns",
+        "columns" => [[card.("null-column")], []],
+        "unknown" => %{"columns" => true}
+      }
+    ]
+
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          dataset: @dataset,
+          title: "Explicit null Card media",
+          blocks: blocks
+        })
+      )
+
+    original = Map.put(paper.content, "blocks", blocks)
+    paper |> Ecto.Changeset.change(content: original) |> Repo.update!()
+    {slug, original}
+  end
+
+  defp find_block!(blocks, id) do
+    Enum.find_value(blocks, fn
+      %{"id" => ^id} = block ->
+        block
+
+      %{"type" => "section", "blocks" => children} when is_list(children) ->
+        find_block(children, id)
+
+      %{"type" => "columns", "columns" => columns} when is_list(columns) ->
+        columns
+        |> List.flatten()
+        |> find_block(id)
+
+      _block ->
+        nil
+    end) || flunk("missing block #{inspect(id)}")
+  end
+
+  defp find_block(blocks, id) do
+    Enum.find_value(blocks, fn
+      %{"id" => ^id} = block -> block
+      _block -> nil
+    end)
   end
 
   defp mount_editor(conn, host, slug) do

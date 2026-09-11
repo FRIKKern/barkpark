@@ -1,6 +1,11 @@
 BRAILLE CHART BLOCK                                         
 ───────────────────                                         
                                                             
+A braille step-line plot: an auto-scaled series, the SAME   
+series pinned to a tall axes.max (the curve compresses to   
+the floor — proof min/max drives the render), a multi-series
+case with xLabels + legend, and a degraded empty series.    
+                                                            
 Weekly signups (auto-scaled)                                
 12┤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⠤⠤⠒⠒⠉⠑⠒⠢⠤⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
  8┤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⠤⠔⠒⠊⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠑⠒⠢⠤⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀

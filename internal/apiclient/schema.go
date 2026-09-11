@@ -77,10 +77,16 @@ type ListPreview struct {
 
 // Schema defines a document type.
 type Schema struct {
-	Name        string
-	Title       string
-	Icon        string
-	Visibility  string // "public" or "private"
+	Name       string
+	Title      string
+	Icon       string
+	Visibility string // "public" or "private"
+	// Singleton marks a type with exactly one document (Settings, and the
+	// structure endpoint's placement rule keys on THIS and never on
+	// Visibility). The server has emitted it since task-567f0fb2429086df; it
+	// was absent from the decode struct below, and encoding/json drops unknown
+	// fields SILENTLY, so it never reached a caller.
+	Singleton   bool
 	Fields      []Field
 	ListPreview ListPreview
 }
@@ -131,6 +137,7 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 			Title      string `json:"title"`
 			Icon       string `json:"icon"`
 			Visibility string `json:"visibility"`
+			Singleton  bool   `json:"singleton"`
 			// listPreview values are either a field-name string or
 			// {"field": f, "prefix": p} — kept raw here, shaped by
 			// parseListPreview below.
@@ -168,6 +175,7 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 			Title:       as.Title,
 			Icon:        as.Icon,
 			Visibility:  as.Visibility,
+			Singleton:   as.Singleton,
 			ListPreview: parseListPreview(as.ListPreview),
 		}
 		for _, af := range as.Fields {

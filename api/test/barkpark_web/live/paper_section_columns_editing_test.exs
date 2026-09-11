@@ -125,9 +125,93 @@ defmodule BarkparkWeb.PaperSectionColumnsEditingTest do
 
       assert final_columns["unknown"] == ["preserve"]
 
+      add_track_request = Ecto.UUID.generate()
+      add_track_source = columns_structure_params(final_columns, "add-column")
+      add_track_rev = socket_of(view).assigns.paper_rev
+
+      render_hook(
+        view,
+        "paper-edit-block",
+        Map.merge(add_track_source, %{
+          "request_id" => add_track_request,
+          "if_rev" => add_track_rev
+        })
+      )
+
+      assert_reply(view, %{
+        saved: true,
+        request_id: ^add_track_request,
+        replayed: false,
+        rev: track_revision
+      })
+
+      after_track_append = stored(slug).content
+      [_, _, appended_columns] = after_track_append["blocks"]
+      assert appended_columns["columns"] == final_columns["columns"] ++ [[]]
+      assert Map.drop(appended_columns, ["columns"]) == Map.drop(final_columns, ["columns"])
+
+      render_hook(
+        view,
+        "paper-edit-block",
+        Map.merge(add_track_source, %{
+          "request_id" => add_track_request,
+          "if_rev" => add_track_rev
+        })
+      )
+
+      assert_reply(view, %{
+        saved: true,
+        request_id: ^add_track_request,
+        replayed: true,
+        rev: ^track_revision
+      })
+
+      assert stored(slug).content == after_track_append
+
+      stale_track_request = Ecto.UUID.generate()
+
+      render_hook(
+        view,
+        "paper-edit-block",
+        Map.merge(add_track_source, %{
+          "request_id" => stale_track_request,
+          "if_rev" => socket_of(view).assigns.paper_rev
+        })
+      )
+
+      assert_reply(view, %{
+        saved: false,
+        request_id: ^stale_track_request,
+        rejected: "validation"
+      })
+
+      assert stored(slug).content == after_track_append
+
+      submit_structure(
+        view,
+        columns_structure_params(appended_columns, "remove-column:2")
+      )
+
+      after_track_remove = stored(slug).content
+      [_, _, removed_columns] = after_track_remove["blocks"]
+      assert removed_columns == final_columns
+
+      assert has_element?(
+               view,
+               "[data-column-index='1'] [data-test-id='paper-column-remove-reason']",
+               "Remove this column's children first."
+             )
+
       {:ok, reloaded, _} = live(conn, path)
       toggle_public_editor(reloaded, host)
-      assert stored(slug).content == final
+
+      assert has_element?(
+               reloaded,
+               "[data-column-index='1'] [data-test-id='paper-column-remove-reason']",
+               "Remove this column's children first."
+             )
+
+      assert stored(slug).content == after_track_remove
     end
 
     for collision <- [:cross_column, :outside_container] do
@@ -299,6 +383,23 @@ defmodule BarkparkWeb.PaperSectionColumnsEditingTest do
       {slug, original} = create_legacy_nested_paper()
       {view, path} = mount_editor(conn, host, slug)
       [projected] = Content.ensure_block_ids(original["blocks"])
+      preserve_request = Ecto.UUID.generate()
+
+      render_hook(view, "paper-edit-block", %{
+        "block_id" => projected["id"],
+        "title" => "  Preserved title  ",
+        "request_id" => preserve_request,
+        "if_rev" => socket_of(view).assigns.paper_rev
+      })
+
+      assert_reply(view, %{saved: true, request_id: ^preserve_request})
+      preserved = stored(slug).content
+
+      assert preserved["blocks"] == [Map.put(projected, "title", "  Preserved title  ")]
+
+      derived_keys = ~w(blocks body body_html body_html_sv preview rev)
+      assert Map.drop(preserved, derived_keys) == Map.drop(original, derived_keys)
+
       request = Ecto.UUID.generate()
 
       render_hook(view, "paper-edit-block", %{
@@ -311,7 +412,6 @@ defmodule BarkparkWeb.PaperSectionColumnsEditingTest do
       assert_reply(view, %{saved: true, request_id: ^request})
       cleared = stored(slug).content
       assert cleared["blocks"] == [Map.put(projected, "title", nil)]
-      derived_keys = ~w(blocks body body_html body_html_sv preview rev)
       assert Map.drop(cleared, derived_keys) == Map.drop(original, derived_keys)
 
       invalid_request = Ecto.UUID.generate()
@@ -390,6 +490,33 @@ defmodule BarkparkWeb.PaperSectionColumnsEditingTest do
         "section-action" => action
       },
       fn {id, index}, params -> Map.put(params, "section-child-#{index}-id", id) end
+    )
+  end
+
+  defp columns_structure_params(%{"id" => id, "columns" => columns}, action) do
+    columns
+    |> Enum.with_index()
+    |> Enum.reduce(
+      %{
+        "block_id" => id,
+        "column-count" => Integer.to_string(length(columns)),
+        "column-new-child-id" => "unused-column-child",
+        "column-action" => action
+      },
+      fn {children, column_index}, params ->
+        children
+        |> Enum.with_index()
+        |> Enum.reduce(
+          Map.put(
+            params,
+            "column-#{column_index}-child-count",
+            Integer.to_string(length(children))
+          ),
+          fn {child, child_index}, acc ->
+            Map.put(acc, "column-#{column_index}-child-#{child_index}-id", child["id"])
+          end
+        )
+      end
     )
   end
 

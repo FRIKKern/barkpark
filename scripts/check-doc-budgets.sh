@@ -285,17 +285,52 @@ if [ "$MODE" = selftest ]; then
   # (0) pristine, pinned tree passes
   bash "$SELF" --span-only >/dev/null 2>&1 || fail_selftest "a pristine pinned tree did not pass"
 
-  # (a) three plausible note lines INSIDE the span, no marker moved → must RED
-  awk '{ print }
+  # (a)/(b) plant sizing. The plant used to be a FIXED 126B (one blank + two note
+  # lines). That is a constant measured against a MOVING quantity: the pinned
+  # onramp body grows, the 4000B span cap does not, and on 2026-09-10 (b1d4c32e5,
+  # #17286) the body reached 3884B — 116B of headroom — so the 126B plant pushed
+  # arm (b)'s re-pinned span to 4010B, arm (b) RED, and doc-gates step s1 went red
+  # on main for a violation that existed nowhere in the tree. The instrument was
+  # wrong, not the tree (the shipping check was green throughout).
+  #
+  # So the plant is SIZED FROM THE MEASURED HEADROOM: exactly (cap - pinned span)
+  # bytes, one line, which puts arm (b)'s re-pinned span at the cap EXACTLY —
+  # the tightest arm (b) can be while still being the "reviewed path passes" case.
+  # Raising the real cap would be the other way to make this green and is exactly
+  # what must never happen: the cap is the bound on the exclusion.
+  onramp_b_ln=$(grep -n -x -- '<!-- barkpark:onramp:begin -->' "$PRISTINE" | cut -d: -f1)
+  onramp_e_ln=$(grep -n -x -- '<!-- barkpark:onramp:end -->' "$PRISTINE" | cut -d: -f1)
+  if [ -z "$onramp_b_ln" ] || [ -z "$onramp_e_ln" ]; then
+    fail_selftest "CANNOT READ the onramp markers in $PRISTINE — arms (a)/(b) cannot be sized"
+  fi
+  pristine_span=$(sed -n "${onramp_b_ln},${onramp_e_ln}p" "$PRISTINE" | wc -c | tr -d ' ')
+  span_headroom=$((ONRAMP_SPAN_CAP - pristine_span))
+  if [ "$span_headroom" -lt 8 ]; then
+    fail_selftest "CANNOT RUN arms (a)/(b): the pinned onramp span is ${pristine_span}B against a" \
+                  "${ONRAMP_SPAN_CAP}B cap, leaving ${span_headroom}B — too little room to plant even a" \
+                  "minimal in-span line. This is a REAL finding about docs/setup/CODEX.md, not a" \
+                  "harness bug: trim the onramp body. Never raise the cap."
+  fi
+  plant_bytes="$span_headroom"
+  [ "$plant_bytes" -gt 120 ] && plant_bytes=120
+  # exactly $plant_bytes bytes on the wire: ($plant_bytes - 1) ASCII chars + \n
+  plant_line=$(printf '%s' "> Codex note: prefer the MCP surface when it is available.$(printf '%*s' 200 '' | tr ' ' '.')" \
+               | cut -c "1-$((plant_bytes - 1))")
+
+  # (a) a plausible note line INSIDE the span, no marker moved → must RED, and
+  #     must red on the GOLDEN MISMATCH, not incidentally on the span cap.
+  awk -v line="$plant_line" '{ print }
        $0 == "<!-- barkpark:onramp:begin -->" && !planted {
-         print "";
-         print "> Codex note: prefer the MCP surface when it is available.";
-         print "> Codex note: see the internal runbook before editing this block.";
+         print line;
          planted = 1
        }' "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
-  if bash "$SELF" --span-only >/dev/null 2>&1; then
+  if plant_out=$(bash "$SELF" --span-only 2>&1); then
     fail_selftest "prose inserted INSIDE the onramp span did NOT red the gate"
   fi
+  case "$plant_out" in
+    *"does NOT match"*) : ;;
+    *) fail_selftest "arm (a) red for the WRONG reason (expected the golden mismatch): $plant_out" ;;
+  esac
 
   # (b) the SAME plant, legitimately re-pinned → must PASS (the reviewed path)
   bash "$SELF" --regen-onramp-golden >/dev/null
@@ -786,7 +821,7 @@ fi
 # makes both sides zero and the check agrees with itself. So the number is
 # pinned here, by hand. Adding or removing a cap row is therefore a two-line
 # edit: the row, and this number. That is intended friction, not an oversight.
-CAPS_ROWS_EXPECTED=37
+CAPS_ROWS_EXPECTED=39
 CAPS_ROWS_WALKED=0
 CAPS_PATHS=""
 if [ "$SPAN_ONLY" != "1" ]; then
@@ -814,6 +849,8 @@ docs/contracts/close-packet.md 4400
 docs/contracts/cloud-object-authz.md 4800
 docs/contracts/canonical-impl-markers.md 3000
 docs/contracts/sheets-engine.md 2600
+docs/contracts/document-graph-and-history.md 2600
+docs/contracts/media-http-envelope.md 2600
 README.md 7400
 docs/ops/PROD_OPS.md 6000
 docs/ops/merge-gates.md 64000

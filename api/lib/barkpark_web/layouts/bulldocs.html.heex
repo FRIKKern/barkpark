@@ -54,9 +54,9 @@
   <BarkparkWeb.ShareMeta.head preview={assigns[:preview]} page_title={assigns[:page_title]} />
   <%!-- asciinema-player CSS for `asciicast` blocks (a stylesheet, not a blocking
         <script> — the golden no-blocking-script-in-head rule covers JS; the
-        player JS itself loads `defer` in the body alongside mermaid). Pinned to
-        3.8.0, the version proven in .artifacts/proofs-index.html. --%>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.css" />
+        player JS loads `defer` in the body alongside mermaid, where the full
+        self-hosting note lives. Vendored 3.8.0, served off `/assets/`. --%>
+  <link rel="stylesheet" href="/assets/asciinema-player.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     body { margin: 0; background: #0b0b0d; color: #e7e7ea;
@@ -2565,10 +2565,35 @@
         diagram <pre> elements arrive AFTER the initial parse. --%>
   <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <%!-- asciinema-player engine for `asciicast` blocks. Same `defer` discipline
-        as mermaid (NEVER blocking in <head>); the PaperMermaid hook's
-        runAsciicast() mounts a player per `div.bp-asciicast`, with the same
-        deferred-load retry guard. Pinned to 3.8.0 (proven CDN/version). --%>
-  <script defer src="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"></script>
+        as mermaid (NEVER blocking in <head>, still at the bottom of <body>);
+        the PaperMermaid hook's runAsciicast() mounts a player per
+        `div.bp-asciicast`, with the same deferred-load retry guard.
+
+        SELF-HOSTED off `/assets/`, no longer cdn.jsdelivr.net — this is the
+        note the <head> stylesheet line defers to. An asciicast paper used to
+        be dead behind a strict CSP, in an air-gapped reader, or with the CDN
+        blocked, and every reader page paid a third-party connection for the
+        stylesheet whether or not it held a recording. Vendored 3.8.0: the SAME
+        version and the SAME upstream dist bytes both tags used to name.
+        Provenance, sha256 digests and the re-vendor commands are in
+        priv/static/assets/asciinema-player.LICENSE.txt. The bundle carries its
+        `vt` WebAssembly inline as a base64 `data:` payload and references no
+        external URL, so once it is local the player makes exactly ONE request:
+        the `fetch()` of the recording named by `data-cast-src`. It still
+        defines the same `window.AsciinemaPlayer` global the hook below waits
+        on, and the emitted asciicast MARKUP is untouched, so the three render
+        engines' golden parity fixtures are unaffected.
+
+        THE <head> HUNK IS LINE-COUNT FROZEN, and that is why this note is down
+        here rather than up there. `api/.sobelow-skips` pins this file's one
+        reviewed XSS.Raw waiver by LINE — `bulldocs.html.heex:95`, the
+        `raw(Render.Stylesheet.css())` call in <head>. Any net line change
+        ABOVE that line moves the construct out from under its baseline entry,
+        which reds two blocking security.yml jobs at once: the regression gate
+        sees an unwaived "new" finding, and the staleness ratchet sees a
+        baseline entry pointing at nothing. Prose added below line 95 is free;
+        prose added above it is not. --%>
+  <script defer src="/assets/asciinema-player.min.js"></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
   <%!-- The zero-dependency Canvas2D corpus-graph renderer (same asset Studio
@@ -2830,11 +2855,11 @@
     const publicBootNonce = document.currentScript && document.currentScript.nonce;
     const paperEditorHookNames = [
       "BarkparkPaperEditToggle", "BarkparkPaperEditor", "BarkparkPaperCanvas",
-      "BarkparkFieldBlockBridge", "BarkparkFieldBridge",
+      "BarkparkFieldBlockBridge", "BarkparkFieldBridge", "BarkparkFigureImageBridge",
       "BarkparkPaperSortable", "BarkparkPaperContextMenu", "BarkparkPaperAutoSize"
     ];
     const paperEditorElementNames = [
-      "bp-paper-editor", "bp-paper-canvas", "bp-media-picker",
+      "bp-paper-editor", "bp-paper-canvas", "bp-asset-browser", "bp-media-picker",
       "bp-reference-picker", "bp-rich-text-editor"
     ];
     let paperEditorAssetsReady;
@@ -2864,10 +2889,14 @@
 
     async function loadPaperEditorAssets() {
       window.BP_PAPER_EDITOR_NO_INJECT = true;
-      const styleReady = loadPaperEditorStyle("/assets/bp-paper-editor-shell.css");
+      const styleReady = Promise.all([
+        loadPaperEditorStyle("/assets/bp-paper-editor-shell.css"),
+        loadPaperEditorStyle("/assets/bp-media-picker.css")
+      ]);
       const scriptsReady = (async () => {
         for (const src of [
           "/assets/bp-paper-editor.bundle.js",
+          "/assets/bp-asset-browser.js",
           "/assets/bp-media-picker.js",
           "/assets/bp-reference-picker.js",
           "/assets/bp-rich-text-editor.js",
@@ -2892,6 +2921,9 @@
         if (!window.customElements?.get(name)) {
           throw new Error(`Editor component unavailable: ${name}`);
         }
+      }
+      if (typeof window.BpAssetBrowser?.ensure !== "function") {
+        throw new Error("Editor asset browser API unavailable");
       }
       Object.assign(PaperHooks, window.BarkparkPaperEditorHooks);
     }
@@ -2982,7 +3014,10 @@
 
       let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
       let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-        params: { _csrf_token: csrfToken },
+        params: () => ({
+          _csrf_token: csrfToken,
+          ...(window.BarkparkPaperEditorConnectParams?.() || {})
+        }),
         hooks: PaperHooks,
         dom: {
           onBeforeElUpdated: (fromEl, toEl) =>

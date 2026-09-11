@@ -217,8 +217,12 @@ Measured 2026-09-02 02:10Z: all 17 leads hit the Opus 5-hour limit within one mi
   advisory sweep (`helpers/ci-advisory-sweep.sh`), and the merge sweep (`helpers/merge-sweep.sh`) —
   squash-merges any campaign PR whose FOUR required checks are green **by head sha and whose base is
   main** (a stacked PR merges into its parent otherwise), never closes ledger rows. Its first pass
-  landed 31 reviewed PRs while every lead was down. Read required checks with `helpers/pr-required.sh`;
-  `gh pr checks` renders cancelled/queued as fail.
+  landed 31 reviewed PRs while every lead was down. Read required checks with
+  `helpers/pr-required.sh <pr> FRIKKern/barkpark` — **always pass owner/repo as arg 2**; the
+  cwd-derived default goes empty whenever the cwd is not the repo (it resets between tool calls),
+  and an empty repo made this script print `0/4` at exit 0 for PRs that were at 3/4 (2026-09-02).
+  `gh pr checks` renders cancelled/queued as fail. A `CANNOT READ` last line is a REFUSAL, not a
+  verdict and not a zero — never fold it into a not-yet count.
 - **Write `$ORCH/RESUME.md`** the moment the fleet drops: per lane, the live concerns and the relaunch
   prompt (`lead-<lane>-r`: read brief → status → decisions → merge-sweep.log; RE-CLAIM rows first, the
   leases lapsed; stamp + close what the sweep merged; continue).

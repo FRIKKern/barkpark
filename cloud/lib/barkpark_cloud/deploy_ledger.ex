@@ -61,11 +61,25 @@ defmodule BarkparkCloud.DeployLedger do
 
   ## Why GITHUB_PUSH_UNBUILDABLE is out of the denominator (D19)
 
-  Exactly 7 rows, born `failed` on purpose by `Registry.record_unbuildable_push`
-  because `github_build_available?/1` is a hardcoded `false`. Only the
-  human-gated gh-1 can ever move them, so counting them permanently inflates a
-  rate this epic cannot touch. They are reported in their own `not_attempted`
-  bucket — visible, but never in a denominator.
+  Rows born `failed` on purpose by `Registry.create_failed_deployment/3`, from
+  the webhook's fallback arm. They were never a build ATTEMPT — no builder ever
+  claimed them, nothing ran — so counting them as failures measures a build that
+  did not happen. They are reported in their own `not_attempted` bucket —
+  visible, but never in a denominator.
+
+  THE RATIONALE, CORRECTED. This paragraph used to say the exclusion held
+  "because `github_build_available?/1` is a hardcoded `false`". It is not, and
+  on the evidence of the corrected siblings it never was by the time this was
+  read: the router's predicate is `is_binary(site.github_repo)`, a real
+  repo-present gate. So the 7 historical rows are LEGACY — born before that
+  flip — and the class stays live only for the flip-safe fallback arm (a push on
+  a site with no linked repo). The exclusion still holds on its OWN ground
+  (never attempted), not on an availability claim that is false.
+
+  That the population is now bounded rather than growing-under-a-permanent-block
+  is a reason to REVISIT whether this class deserves a standing exclusion; it is
+  not a licence to change the arithmetic from a docstring. `@not_attempted_classes`
+  below is unchanged by the correction of this prose.
 
   ## Why a rate below n≈200 is REFUSED (D3, the standing law)
 
@@ -163,6 +177,8 @@ defmodule BarkparkCloud.DeployLedger do
 
   import Ecto.Query, warn: false
 
+  alias BarkparkCloud.DeployLedger.ClassContinuity
+  alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Registry.Deployment
   alias BarkparkCloud.Registry.Site
   alias BarkparkCloud.Repo
@@ -195,6 +211,16 @@ defmodule BarkparkCloud.DeployLedger do
     "SOURCE_UNFETCHABLE",
     "STALE_LEASE",
     "PROCESS_DIED",
+    # dr — THE SIX SHAPES THAT SAT IN `UNCLASSIFIED` WITH THEIR CAUSE ALREADY IN
+    # THE STRING. Each of these five names was written off a REAL production row
+    # (the census beside each arm below), never off a status range and never as a
+    # bucket: a 4xx the ledger has still not seen keeps rising in `UNCLASSIFIED`,
+    # which is the whole reason that class earns its keep.
+    "ARCHIVE_TOO_LARGE_400",
+    "ARCHIVE_UNSUPPORTED_ENTRY_400",
+    "BOX_UNAUTHORIZED_401",
+    "BOX_ROUTE_UNKNOWN_404",
+    "CONTAINER_START_REFUSED_125",
     "UNCLASSIFIED"
   ]
 
@@ -285,8 +311,24 @@ defmodule BarkparkCloud.DeployLedger do
     "SOURCE_UNFETCHABLE" => "the build inputs could not be read",
     "STALE_LEASE" => "the builder lease went stale",
     "PROCESS_DIED" => "the deploy process died abnormally",
+    # The box read the archive's own header and refused it before staging a byte:
+    # the entries DECLARE more than the instance's total cap. The remedy is on
+    # the payload — ship fewer/smaller bytes — never on the box's health.
+    "ARCHIVE_TOO_LARGE_400" =>
+      "the instance refused the upload (HTTP 400): the archive declares more bytes than its total cap",
+    # A tar entry type the box's extractor does not stage. TWO causes with one
+    # shape (see `@agency`): a packer that emitted one, or a box that predates
+    # the extractor's pax arm (BOX-LAGS-CLI, charter D112).
+    "ARCHIVE_UNSUPPORTED_ENTRY_400" =>
+      "the instance refused the upload (HTTP 400): the archive carries a tar entry type its extractor will not stage",
+    "BOX_UNAUTHORIZED_401" =>
+      "the instance rejected the deploy credential (HTTP 401) — the token is missing, expired or wrong for this box",
+    "BOX_ROUTE_UNKNOWN_404" =>
+      "the instance does not know the deploy route at all (HTTP 404) — a box/control-plane version skew",
+    "CONTAINER_START_REFUSED_125" =>
+      "docker on the box refused to start the container (exit 125) — the daemon rejected the run before the image ever ran",
     "UNCLASSIFIED" => "not yet named by the ledger",
-    "GITHUB_PUSH_UNBUILDABLE" => "GitHub push builds are not available yet",
+    "GITHUB_PUSH_UNBUILDABLE" => "a GitHub push with no source to build from",
     "BOX_BUSY_DEFERRED" => "the box was busy; the rebuild was re-queued, not lost",
     "BOX_AT_CAPACITY_DEFERRED" =>
       "the box was at its concurrent-build cap; the rebuild was re-queued, not lost",
@@ -339,7 +381,7 @@ defmodule BarkparkCloud.DeployLedger do
       method: "schema_commit",
       source: "#10248",
       voids:
-        "the deferral chain columns are NULL before this instant — every deferral is still prose in `failure_reason`. No count in this envelope reads them yet, so nothing refuses on it; a later wave that aggregates chain depth must."
+        "the deferral chain columns are NULL before this instant — every deferral is still prose in `failure_reason`. `classify/1` NOW READS THEM (`abandoned_by_columns/1`, `depth >= bound`) on any row that carries them, falling back to the prose regex when they are NULL, so a pre-instant row is named by prose and a post-instant one by columns. Nothing REFUSES on this boundary: the two bases were reconciled to exact agreement before the reader swapped (7 == 7, prose-but-unstamped 0, predicate-but-not-failed 0), and `census/3`'s fold still carries no chain columns at all — see `abandoned_basis`."
     },
     %{
       subject: "deferral_cause / deferral_depth / deferral_bound",
@@ -362,6 +404,25 @@ defmodule BarkparkCloud.DeployLedger do
   # second CP applies the same migration at a different time, and a bare literal
   # would silently mis-state the floor there.
   @coalesced_counter_since ~U[2026-08-07 10:02:23Z]
+
+  # THE DOOR MARKER, and it is PROSE. `failure_reason` is the only field both
+  # sides of the 2026-08-05 status boundary write identically for a capacity
+  # refusal, which is why the honest door predicate keys on it rather than on
+  # `status` or on `deferral_cause`.
+  # THE ABANDONMENT PROSE MARKER, AS A SQL `LIKE` (the `@abandoned` regex's
+  # sargable twin) and the instant the live writer first stamped a chain column.
+  # Together they let `abandoned_basis/1` say which basis measured the published
+  # count and how much of it the BACKFILL wrote rather than `defer/3`.
+  @abandonment_marker "% — and it has now refused %rebuilds in a row for this site,%"
+  @chain_columns_first_write ~U[2026-08-07 10:12:35.033826Z]
+
+  @box_door_marker "%409%box_at_capacity%"
+  @box_door_cause "BOX_AT_CAPACITY_DEFERRED"
+
+  @box_door_predicate "failure_reason LIKE '%409%box_at_capacity%', across ALL statuses"
+  @box_door_cause_predicate "status = 'deferred' AND deferral_cause = 'BOX_AT_CAPACITY_DEFERRED'"
+
+  @box_door_basis "every row in the window whose failure_reason carries the box's own capacity-409 marker, whatever status it settled in — the door's REFUSALS, which is a superset of the door's RE-QUEUES"
 
   @coalesced_basis "attempts that minted NO deployment row (AutoDeployWorker coalesced them onto an in-flight build) — DISJOINT from `volume`, never folded into it"
 
@@ -542,6 +603,32 @@ defmodule BarkparkCloud.DeployLedger do
   @spec min_sample() :: pos_integer()
   def min_sample, do: @min_sample
 
+  @doc """
+  THE CLASS-CONTINUITY GAUGE over `[from, to)` and the immediately-prior
+  EQUAL-LENGTH window — did a cause class die, or was it renamed?
+
+  Charter D265 clause (iv): the basis is SELF-DERIVED here, by running `census/3`
+  a second time over `[from - (to - from), from)`. No store, no committed
+  baseline, nothing that can go stale between the two readings — and both
+  censuses are produced by the same code, so the gauge cannot be fed a basis
+  shaped by an older version of this module.
+
+  `opts` are passed to BOTH censuses unchanged, so a site-scoped reading is
+  compared against a site-scoped basis and never against the fleet.
+
+      iex> DeployLedger.class_continuity(~U[2026-08-06 00:00:00Z], ~U[2026-08-07 00:00:00Z])
+
+  See `BarkparkCloud.DeployLedger.ClassContinuity` for the verdict vocabulary
+  (`:renamed` / `:repaired` / `:new_cause`) and the refusal shape.
+  """
+  @spec class_continuity(DateTime.t(), DateTime.t(), keyword()) :: map()
+  def class_continuity(%DateTime{} = from, %DateTime{} = to, opts \\ []) do
+    length = DateTime.diff(to, from, :second)
+    basis_from = DateTime.add(from, -length, :second)
+
+    ClassContinuity.gauge(census(basis_from, from, opts), census(from, to, opts))
+  end
+
   @doc "Human-facing one-liner for a class name."
   @spec label(class()) :: String.t()
   def label(class) when is_binary(class), do: Map.get(@labels, class, class)
@@ -585,6 +672,19 @@ defmodule BarkparkCloud.DeployLedger do
     "BOX_DEPLOY_DISABLED_503" => :box,
     "BOX_RUNNER_UNAVAILABLE_503" => :box,
     "BOX_RATE_LIMITED_429" => :box,
+    # A 401 is the box refusing the CREDENTIAL it was handed. The deploy token is
+    # minted and rotated on the box side; a site's content cannot make a box say
+    # 401. (1 row, 2026-09.)
+    "BOX_UNAUTHORIZED_401" => :box,
+    # A 404 on the deploy route is a box that does not have the route — a version
+    # skew on the box, which is BOX-LAGS-CLI pointed at the deploy door. The
+    # request was well-formed; the door was not there. (2 rows, 2026-09.)
+    "BOX_ROUTE_UNKNOWN_404" => :box,
+    # `docker run` exit 125 is the DAEMON refusing before the image ran — the
+    # production instance of it is a Created-but-never-started container squatting
+    # the name (`internal/runtime/runtime.go:543`). That is the box's own docker
+    # state, not anything the site built. (1 row, 2026-09.)
+    "CONTAINER_START_REFUSED_125" => :box,
     "ABANDONED_AT_CAPACITY" => :box,
     "ABANDONED_BOX_STUCK" => :box,
     # THE BOX DID NOT ANSWER, or answered with a broken switch. The builder lease
@@ -602,6 +702,12 @@ defmodule BarkparkCloud.DeployLedger do
     # and the corpus 403 a site's own read token earned.
     "BUILD_FAILED" => :site,
     "FORBIDDEN_403" => :site,
+    # THE SITE'S OWN PAYLOAD. The box read the archive's declared totals off its
+    # header and refused before staging a byte; the cap is published and the
+    # bytes are the uploader's. Nothing about the box's health is implicated —
+    # calling this `:box` would accuse a box for a decision the payload forced.
+    # (3 rows, 2026-09 — the largest single shape in this batch.)
+    "ARCHIVE_TOO_LARGE_400" => :site,
     # NEITHER, HONESTLY.
     #
     # `CONTENT_API_403` looks like `FORBIDDEN_403`'s twin and is not: its eleven
@@ -628,6 +734,17 @@ defmodule BarkparkCloud.DeployLedger do
     # the agency map was written, which is precisely the drift a hand-listed set
     # would have merged green.)
     "ABANDONED_UNCLASSIFIED" => :ambiguous,
+    # `ARCHIVE_UNSUPPORTED_ENTRY_400` is NOT its sibling's twin, and the
+    # difference is documented on our own packer. `internal/cli/sites_tarball.go:249`
+    # states that a box which predates the extractor's pax arm answers
+    # E_UNKNOWN_TYPE for bytes every CURRENT box stages — BOX-LAGS-CLI is a
+    # supported product state (charter D112). So one shape carries two causes with
+    # opposite owners: a packer that emitted an entry type nobody stages (`:site`),
+    # or a box too old to stage one that is fine (`:box`). The persisted string
+    # cannot tell them apart, and guessing either way is D148's error in one of
+    # its two directions. It is `:ambiguous` until the box version travels beside
+    # the refusal. (1 row, 2026-09.)
+    "ARCHIVE_UNSUPPORTED_ENTRY_400" => :ambiguous,
     # A timeout can be a swapping box or a build that genuinely got bigger;
     # unfetchable inputs can be an empty artifact url or a box that cannot reach
     # storage; a died process names no owner at all; and UNCLASSIFIED is by
@@ -661,19 +778,119 @@ defmodule BarkparkCloud.DeployLedger do
   `failure_reason` (the census folds over grouped maps, not structs).
   """
   @spec classify(Deployment.t() | map() | nil) :: class() | nil
-  def classify(%{status: "failed"} = row),
-    do: classify(Map.get(row, :stage), Map.get(row, :failure_reason))
+  def classify(%{status: "failed"} = row) do
+    case abandoned_by_columns(row) do
+      nil -> classify(Map.get(row, :stage), Map.get(row, :failure_reason))
+      class -> class
+    end
+  end
 
   # A DEFERRAL is not a failure and not a nil — see `@deferred_classes`. It reads
   # the (stage, RAW reason) pair exactly like the failed arm above, and for the
   # same reason: this clause used to match `status` alone, so a capacity refusal,
   # a busy-slug refusal, a broken re-queue and a nil reason ALL answered
   # `BOX_BUSY_DEFERRED` — a taxonomy with one arm cannot be wrong, and was.
+  #
+  # COLUMN FIRST, EXACTLY LIKE THE `failed` ARM ABOVE (dr-w4-bl-deferral-raw-
+  # column-ambiguous). The box's own code word is `box_refusal_code` on the row;
+  # the prose reader is the fallback for rows written before that column and for
+  # synthesised maps that carry no such key. See `box_code/1`.
   def classify(%{status: "deferred"} = row),
-    do: classify_deferred(Map.get(row, :stage), Map.get(row, :failure_reason))
+    do:
+      classify_deferred(
+        Map.get(row, :stage),
+        Map.get(row, :failure_reason),
+        box_code(row)
+      )
 
   def classify(%{status: _other}), do: nil
   def classify(nil), do: nil
+
+  # THE ABANDONMENT PREDICATE, AS DATA (dr-w34-bl). Until this arm the ONLY handle
+  # the ledger had on a given-up publish was `@abandoned` — a regex over the
+  # English sentence `Sites.Deploy.abandonment_reason/3` writes. W28-S6 made that
+  # unnecessary for every row written since: the abandonment branch stamps
+  # `deferral_depth` / `deferral_bound` / `deferral_cause` onto the row it settles
+  # `failed` (`sites/deploy.ex:1583-1587`), so the fact is a column and no longer a
+  # sentence. The prose reader stays as the fallback for the pre-W28 corpus.
+  #
+  # THE PREDICATE IS `depth >= bound`, AND THE `>=` IS THE WHOLE POINT.
+  #
+  #   * NOT `depth == bound`. The producer's guard is `prior >= bound - 1`
+  #     (`sites/deploy.ex:1561`) stamping `prior + 1`, so `>=` is the only relation
+  #     it actually guarantees. OVERSHOOT IS REACHABLE: `consecutive_deferrals/2`
+  #     scans `@deferral_scan_depth` = 14 rows while the busy bound is 6, so a
+  #     chain that grew past 6 without abandoning — two drivers racing the
+  #     head-of-stream scan, or a bound that was lowered after the chain started —
+  #     settles at depth 7..14 against bound 6. `==` drops every one of those rows
+  #     and THE ABANDONMENT COUNT GOES DOWN, which is the same vacuous-green
+  #     inversion `abandoned_class/1`'s D8 arm was fixed to refuse, reintroduced by
+  #     the very swap meant to harden it.
+  #   * NOT `deferral_cause IS NOT NULL`. That column is written on EVERY ordinary
+  #     deferred row too (`sites/deploy.ex:1657-1659`), 1,665 of them against 7
+  #     abandonments — it is a "post-2026-08-07 deferral" marker, not an
+  #     abandonment marker.
+  #
+  # EXCLUSIVITY IS STRUCTURAL, not a second condition to keep in sync: this clause
+  # only runs on `status: "failed"`, and no `deferred` row can satisfy the
+  # predicate anyway because `defer/3` settles the bound-th round `failed` (the
+  # highest depth a deferred row can carry is bound - 1).
+  #
+  # THE CENSUS IS UNTOUCHED BY THIS, ON PURPOSE. `census/3`'s fold groups by
+  # `[site_id, stage, status, failure_reason]` and its group maps carry none of
+  # these keys, so `Map.get/2` answers nil and every census row takes the prose
+  # path byte-identically. Widening that GROUP BY is a SEPARATE, separately-costed
+  # change against the documented ~1,400-groups baseline, and is deliberately not
+  # made here.
+  # ── THE FOUR BLIND SPOTS OF THIS GAUGE (dr-w33-bl) ────────────────────────
+  #
+  # Each is derived from the PRODUCER's source, not guessed, and each makes the
+  # count below read LOW — never high. Written HERE, beside the predicate, so a
+  # reader of the number meets them without having to find a charter.
+  #
+  #   1. PREBUILT DEPLOYS NEVER ENTER THE GAUGE. `Sites.Deploy.defer/3`'s FIRST
+  #      `cond` arm sends a prebuilt publish straight to `fail/3` with NO extra
+  #      map, so it stamps no `deferral_depth`/`deferral_bound` and appends no
+  #      abandonment sentence. A prebuilt chain can be refused forever and BOTH
+  #      bases — columns and prose — stay silent on it.
+  #
+  #   2. A LOST FENCED CAS ERASES AN ABANDONMENT FROM BOTH BASES, SILENTLY.
+  #      `fail/3` settles the terminal round under a fenced compare-and-set; when
+  #      another writer wins the fence the row is never written as `failed` with
+  #      the extra, and nothing alerts. The abandonment HAPPENED and no basis
+  #      records it, so this count has no coverage term for it.
+  #
+  #   3. PREVIEW CAN NEVER ABANDON. The chain counters scan
+  #      `environment: "production"` only, so `consecutive_deferrals/2` reads 0
+  #      for every preview chain, the bound is never reached, and a preview
+  #      publish refused a hundred times in a row is structurally incapable of
+  #      producing an `ABANDONED_*` row.
+  #
+  #   4. SCAN DEPTH BOUNDS THE BOUND. `@deferral_scan_depth` is
+  #      `@max_consecutive_capacity_deferrals + 2` = 14, so a capacity cap raised
+  #      PAST 14 makes the terminal arm structurally unreachable: the scan can
+  #      never observe a chain long enough to satisfy `prior >= bound - 1`, the
+  #      gauge becomes a permanent zero, and NOTHING fails anywhere to say so.
+  #      Raising the cap is therefore a change to this gauge, not only to retries.
+  defp abandoned_by_columns(row) do
+    depth = Map.get(row, :deferral_depth)
+    bound = Map.get(row, :deferral_bound)
+
+    if is_integer(depth) and is_integer(bound) and depth >= bound do
+      abandoned_class_of(Map.get(row, :deferral_cause))
+    end
+  end
+
+  # The stamped cause IS a `@deferred_classes` member — `Sites.Deploy` writes it
+  # straight out of `classify/1`'s deferred arm — so this mapping is the column
+  # twin of `abandoned_class/1`'s prose one, and answers the same three names.
+  # An unnamed or missing cause is `ABANDONED_UNCLASSIFIED` and never `nil`: the
+  # columns already PROVE the row is an abandonment, so dropping it out of the
+  # cohort because its cause is unnamed is D8's inversion (the count falls while
+  # the fleet abandons more).
+  defp abandoned_class_of("BOX_AT_CAPACITY_DEFERRED"), do: "ABANDONED_AT_CAPACITY"
+  defp abandoned_class_of("BOX_BUSY_DEFERRED"), do: "ABANDONED_BOX_STUCK"
+  defp abandoned_class_of(_unnamed), do: "ABANDONED_UNCLASSIFIED"
 
   @doc """
   Classify a FAILED row from its `stage` and its RAW `failure_reason`.
@@ -716,6 +933,13 @@ defmodule BarkparkCloud.DeployLedger do
 
       stage == "BUILD" and build_failure?(reason) ->
         build_class(reason)
+
+      # THE TOOLCHAIN'S OWN WRAPPED STEP ERRORS — the two shapes that are NOT box
+      # refusals (they never match `@refusal`) and NOT the deploy script's
+      # `BUILD failed …` either, so they fell through to the tail with a perfectly
+      # readable cause in the string.
+      class = toolchain_class(reason) ->
+        class
 
       source_unfetchable?(reason) ->
         "SOURCE_UNFETCHABLE"
@@ -855,6 +1079,33 @@ defmodule BarkparkCloud.DeployLedger do
     end
   end
 
+  # THE 400 SPLITS ON THE BOX'S TYPED CODE, and reads it through the ONE parser
+  # that already knows the typed shape. `deferral_code/1` deliberately requires a
+  # lowercase `snake_case` token (`@code_token`), which is the box's PLAIN code
+  # vocabulary; the extractor's refusals are SCREAMING_SNAKE `E_*` codes and would
+  # every one of them read as `:prose` there. Rather than widen a reader whose
+  # narrowness is load-bearing for the 409/503 spoof close, this arm calls
+  # `FailureCopy.typed_refusal_fields/1` — the module that already owns the typed
+  # split, anchored on the same caption, and whose output is the very
+  # `failure_code` key the wire already carries.
+  #
+  # TWO CODES ARE NAMED, and both were read off a real row. A 400 whose code the
+  # ledger has never seen (`E_SYMLINK`, `E_COMPRESSION_RATIO`, `E_TOO_MANY_ENTRIES`,
+  # … all of which `api/lib/barkpark/sites/prebuilt_artifact.ex` can emit) is
+  # `UNCLASSIFIED` on purpose — the same rule the arity-1 tail below states. An
+  # `ARCHIVE_REFUSED_400` bucket over the whole status would name every one of
+  # those in advance and tell nobody when a new one arrived.
+  defp refusal_class("400", reason) do
+    case FailureCopy.typed_refusal_fields(reason) do
+      # 3 rows, 2026-09: "…(HTTP 400): E_TOTAL_TOO_LARGE — the archive's entries
+      # declare more than the 67108864 byte total cap…"
+      {"E_TOTAL_TOO_LARGE", _message} -> "ARCHIVE_TOO_LARGE_400"
+      # 1 row, 2026-09: "…(HTTP 400): E_UNKNOWN_TYPE — …"
+      {"E_UNKNOWN_TYPE", _message} -> "ARCHIVE_UNSUPPORTED_ENTRY_400"
+      _unnamed -> "UNCLASSIFIED"
+    end
+  end
+
   defp refusal_class(code, _reason), do: refusal_class(code)
 
   # `Sites.Deploy.abandonment_reason/3` writes this clause, and nothing else in
@@ -904,9 +1155,19 @@ defmodule BarkparkCloud.DeployLedger do
   defp refusal_class("500"), do: "BOX_500"
   defp refusal_class("503"), do: "BOX_UNAVAILABLE_503"
   defp refusal_class("429"), do: "BOX_RATE_LIMITED_429"
-  # A refusal status the ledger has never named (404, 400, …) is UNCLASSIFIED on
+  # 1 row, 2026-09: "…(HTTP 401): unauthorized — missing or invalid token
+  # [box request_id: …]". The status alone is the whole cause here — a 401 is the
+  # box refusing the credential — so this arm reads NO detail, unlike the 400 and
+  # 503 arms whose status genuinely carries more than one story.
+  defp refusal_class("401"), do: "BOX_UNAUTHORIZED_401"
+  # 2 rows, 2026-09: the BARE "the instance refused the deploy (HTTP 404)", no
+  # code word at all. Same reasoning as the 401.
+  defp refusal_class("404"), do: "BOX_ROUTE_UNKNOWN_404"
+  # A refusal status the ledger has never named (402, 418, …) is UNCLASSIFIED on
   # purpose: inventing a BOX_REFUSED_OTHER bucket would make the taxonomy look
-  # complete while telling nobody a new refusal shape appeared.
+  # complete while telling nobody a new refusal shape appeared. The four codes
+  # named above this line were each written off a production row and NOT off a
+  # status range, which is the only way this tail is ever allowed to shrink.
   defp refusal_class(_other), do: "UNCLASSIFIED"
 
   ## ── The DEFERRED taxonomy ─────────────────────────────────────────────────
@@ -919,7 +1180,33 @@ defmodule BarkparkCloud.DeployLedger do
   # designed — vacuous RED, the mirror image of the vacuous green this epic
   # refuses. The honest tail rises INSIDE the deferred cohort: in `volume`, out
   # of the numerator, on its own reported line.
-  defp classify_deferred(_stage, reason) when is_binary(reason) do
+  # THE SENTINEL THAT SAYS "A CODE-AWARE WRITER LOOKED, AND THERE WAS NO CODE"
+  # (dr-w4-bl-deferral-raw-column-ambiguous). It has to be a VALUE and not NULL:
+  # NULL already means "nobody recorded a code on this row" — every row written
+  # before the column existed — and collapsing the two would reclassify the
+  # historical corpus, which is D115's whole prohibition.
+  #
+  # It cannot collide with a real code BY CONSTRUCTION, not by luck: a code is
+  # `@code_token`, `^[a-z][a-z0-9_]*$`, which no parenthesis can satisfy. That is
+  # pinned by a test rather than asserted here.
+  @no_box_code "(none)"
+
+  @doc "The sentinel `Sites.Deploy` stamps when a refusal envelope carried no `code`."
+  @spec no_box_code() :: String.t()
+  def no_box_code, do: @no_box_code
+
+  # The box's code word AS DATA, or `nil` when the row carries none — which is
+  # NOT the same as the box having named none (that is `:none`). `nil` is the
+  # only value that hands the question back to the prose reader.
+  defp box_code(row) do
+    case Map.get(row, :box_refusal_code) do
+      @no_box_code -> :none
+      code when is_binary(code) -> {:code, code}
+      _absent -> nil
+    end
+  end
+
+  defp classify_deferred(_stage, reason, column_code) when is_binary(reason) do
     cond do
       # A deferral whose re-queue BROKE is a lost publish, not a re-queue. Rows
       # written before dr-w3 S3 settled `deferred` with this text (the driver now
@@ -934,26 +1221,42 @@ defmodule BarkparkCloud.DeployLedger do
       refusal_code(reason) != "409" ->
         "DEFERRED_UNCLASSIFIED"
 
-      deferral_code(reason) == {:code, "box_at_capacity"} ->
-        "BOX_AT_CAPACITY_DEFERRED"
-
-      # `already_running` — and the BARE 409 with no code at all, which is D7's
-      # 43%: a codeless 409 predates the concurrent-build cap entirely, so the
-      # only thing it can be is the busy slug. `:none` is that codeless 409 and
-      # NOT `:prose`: a box that sent unreadable words did say something, and
-      # folding it in here would absorb an unnamed cause into the busy bucket.
-      deferral_code(reason) in [:none, {:code, "already_running"}] ->
-        "BOX_BUSY_DEFERRED"
-
+      # THE CODE COMES FROM THE COLUMN WHEN THE ROW HAS ONE, AND ONLY THEN FROM
+      # THE STRING (dr-w4-bl-deferral-raw-column-ambiguous). dr-w4 S6 closed
+      # every spoof a rule over `failure_reason` CAN close and stated the one it
+      # cannot: `refusal_detail/1` renders `{nil, message}` as the bare message,
+      # so a CODELESS envelope whose message is byte-for-byte
+      # `box_at_capacity — <prose>` persists to the same bytes as a genuine
+      # coded refusal. Identical bytes cannot be told apart by any reader of
+      # those bytes. `Sites.Deploy` now records `err["code"]` — read off the
+      # decoded envelope, before any string is built — and this arm prefers it.
+      #
+      # `column_code` is `nil` for a row no code-aware writer touched, and the
+      # prose reader keeps those rows EXACTLY as it classified them before, so
+      # the verbatim 2026-08 corpus does not move (D115).
       true ->
-        "DEFERRED_UNCLASSIFIED"
+        deferred_class_of(column_code || deferral_code(reason))
     end
   end
 
   # A nil reason on a deferred row is the tail too: the driver always writes the
   # box's own words, so a deferral with no reason is a producer this module does
   # not know about.
-  defp classify_deferred(_stage, _reason), do: "DEFERRED_UNCLASSIFIED"
+  defp classify_deferred(_stage, _reason, _column_code), do: "DEFERRED_UNCLASSIFIED"
+
+  # One name per code word, from EITHER source — so a column-written row and a
+  # pre-column row of the same cause can never be given different names.
+  defp deferred_class_of({:code, "box_at_capacity"}), do: "BOX_AT_CAPACITY_DEFERRED"
+
+  # `already_running` — and the BARE 409 with no code at all, which is D7's
+  # 43%: a codeless 409 predates the concurrent-build cap entirely, so the only
+  # thing it can be is the busy slug. `:none` is that codeless 409 and NOT
+  # `:prose`: a box that sent unreadable words did say something, and folding it
+  # in here would absorb an unnamed cause into the busy bucket.
+  defp deferred_class_of(code) when code in [:none, {:code, "already_running"}],
+    do: "BOX_BUSY_DEFERRED"
+
+  defp deferred_class_of(_unnamed), do: "DEFERRED_UNCLASSIFIED"
 
   # The box's own refusal CODE out of a deferral reason: what follows the anchored
   # 409 prefix, up to the driver's own ` — ` suffix separator (the stored reason
@@ -1128,6 +1431,46 @@ defmodule BarkparkCloud.DeployLedger do
 
   defp build_class(reason) do
     if Regex.match?(@corpus_403, reason), do: "FORBIDDEN_403", else: "BUILD_FAILED"
+  end
+
+  # `internal/builder/builder.go:377` wraps the image build's own exit:
+  # `fmt.Errorf("nixpacks build: %w", err)`. 2 rows, 2026-09.
+  #
+  # ANY exit status, deliberately, and this is NOT the catch-all D8 forbids: the
+  # code is the SITE BUILD's own exit and carries nothing the ledger could act on
+  # differently, exactly as `build_failure?/1` above already reads
+  # `"BUILD failed (exit"` for every N. The class it answers is the EXISTING
+  # `BUILD_FAILED`, not a new name, because the meaning and the owner are
+  # identical to the on-box script's: the site's build exited non-zero, and the
+  # remedy is in the site's source. A second name for one meaning splits a class
+  # without giving an operator a different action.
+  @nixpacks_build ~r/^nixpacks build: exit status \d+$/
+
+  # `internal/runtime/runtime.go:565` wraps the container start:
+  # `fmt.Errorf("docker run: %w", err)`. 1 row, 2026-09, at exit 125.
+  #
+  # 125 ONLY, and here the code IS the discriminator: docker's own contract makes
+  # 125 "the daemon/CLI failed before the container ran" — the production case is
+  # a Created-but-never-started container squatting the name, which that file's
+  # own comment at :543 records — while 126/127 mean the container DID run and its
+  # entrypoint failed, and any other status is the app's own exit. Those are three
+  # different remedies for one prefix, so a `docker run: ` prefix arm would be
+  # precisely the bucket that looks complete and reports nothing. An unnamed
+  # `docker run` exit rises in `UNCLASSIFIED`, where someone has to look at it.
+  @docker_run_125 ~r/^docker run: exit status 125$/
+
+  # BOTH ARE FULL-STRING ANCHORED (`^…$`) and therefore need no stage gate. The
+  # BUILD arm above is stage-gated because `"BUILD failed (exit"` is a PREFIX and
+  # a captured log from another stage could carry those bytes; a whole-string
+  # match cannot be a substring of a log, so gating these on a stage would add an
+  # assumption about which stage the producer's row carries — and that assumption
+  # is not verifiable from the classifier.
+  defp toolchain_class(reason) do
+    cond do
+      Regex.match?(@nixpacks_build, reason) -> "BUILD_FAILED"
+      Regex.match?(@docker_run_125, reason) -> "CONTAINER_START_REFUSED_125"
+      true -> nil
+    end
   end
 
   defp source_unfetchable?(reason) do
@@ -1324,6 +1667,34 @@ defmodule BarkparkCloud.DeployLedger do
       # is a COUNT of real rows, and D9's ruling is that counts stay while
       # ratios go.
       deferred_total: deferred_total,
+      # THE DOOR'S OWN DENOMINATOR, read off the DURABLE ROWS and not off the
+      # cause column (dr-w22-s5, charter D379). Every reader of "how often did
+      # the box refuse a slot" has keyed on
+      # `status='deferred' AND deferral_cause='BOX_AT_CAPACITY_DEFERRED'`, and
+      # that predicate is STRUCTURALLY short: `deferral_cause` is written in
+      # exactly one place — `Sites.Deploy.defer/3` — so a capacity 409 that
+      # settled `failed` instead of being re-queued carries the 409 in
+      # `failure_reason` and a NULL cause, and the cause-keyed reader cannot see
+      # it. Measured on the live corpus over the box's own journal window, that
+      # is six rows the door undercounted itself by.
+      #
+      # THE HONEST PREDICATE IS THE PROSE MARKER, ACROSS ALL STATUSES. It is
+      # deliberately NOT a replacement for the `deferred` cohort rows above —
+      # those stay, byte for byte, because they are the correct answer to a
+      # different question ("how much did the door RE-QUEUE"). This term answers
+      # "how often did the door REFUSE", which is the larger set, and it carries
+      # the DIFFERENCE as its own scalar so the gap is DISCLOSED rather than
+      # silently reconciled by a reader who sees only whichever number is
+      # nearer.
+      #
+      # NOT REFUSED ACROSS THE VOCABULARY BOUNDARY, and that is the point of
+      # building it this way: the boundary at 2026-08-05T21:13:50Z is exactly the
+      # instant the same refusal stopped being written `failed` and started being
+      # written `deferred`, so every status-keyed quantity blends two taxonomies
+      # across it. This one keys on `failure_reason`, which BOTH vocabularies
+      # write identically — so it is the one door count a straddling window can
+      # still answer.
+      box_door: box_door(scoped),
       # THE ABSOLUTE COUNT AND ITS COVERAGE, side by side. Neither is refused
       # across the boundary for the same reason `deferred_total` is not: they
       # are counts. `abandoned` is a LOWER BOUND whenever `abandoned_unreadable`
@@ -1331,6 +1702,13 @@ defmodule BarkparkCloud.DeployLedger do
       # carrying a comment.
       abandoned: abandoned,
       abandoned_unreadable: abandoned_unreadable,
+      # THE THREE LABELS THE COUNT ABOVE CANNOT CARRY AS AN INTEGER (dr-w33-bl,
+      # charter D559): WHICH BASIS measured it, how much of it is HISTORICAL,
+      # and how much of it the BACKFILL wrote rather than the live writer. A
+      # bare `abandoned: 7` reads as a live gauge of a live writer; it is not
+      # one, and the wire now says so in the same envelope instead of leaving it
+      # to a wave to rediscover.
+      abandoned_basis: abandoned_basis(scoped),
       not_attempted: not_attempted_rows,
       sites: Enum.take(sites, site_limit),
       # THE TRUNCATION MARKER. `site_limit` has always defaulted to 50 and has
@@ -1359,7 +1737,39 @@ defmodule BarkparkCloud.DeployLedger do
       # THE SECOND INDEPENDENT COUNT, in the code and not in a test.
       completeness: completeness(scoped, volume, not_attempted_rows),
       boundaries: @boundaries,
+      # THE CLASS VOCABULARY, ON THE WIRE (dr-w16-s3-followup-class-vocabulary-unreachable).
+      # `classes` above is what this WINDOW OBSERVED; this is what the ledger can
+      # ever say. A reader cannot tell those apart from the observed list alone —
+      # a class missing from `classes` means "no rows here", never "no such
+      # class" — so a legend built from the observed rows is a legend that
+      # changes shape with the window, and a CLI that wants a stable one has to
+      # hard-code the enum on the far side of the wire. That is the second
+      # drifting definition `deployCensusDeferredTotal` already cost this
+      # census once.
+      vocabulary: vocabulary(),
       min_sample: @min_sample
+    }
+  end
+
+  # THE THREE ENUMS `classify/2` CAN RETURN, as one node. Written as a named
+  # producer rather than an inline literal for the same reason `site_row/2` is:
+  # the payload census can only walk a named `def`/`defp`.
+  #
+  # These are LISTS OF STRINGS, so the evaluated walk records the node and its
+  # three keys and nothing below them — the class NAMES are data, not wire keys,
+  # and a new class must not red a key-set register.
+  #
+  # It is also the reader that took `classes/0`, `deferred_classes/0` and
+  # `not_attempted_classes/0` off the reachability allowlist: all three were
+  # publics with ZERO callers in `cloud/lib`, kept warm by nine test references
+  # and reachable by no operator (D245). They are read HERE now, and what they
+  # return reaches a human through the census envelope `Web.Router` already
+  # serialises whole — no new route, and no edit to router.ex.
+  defp vocabulary do
+    %{
+      classes: classes(),
+      deferred_classes: deferred_classes(),
+      not_attempted_classes: not_attempted_classes()
     }
   end
 
@@ -1419,6 +1829,105 @@ defmodule BarkparkCloud.DeployLedger do
   # about THIS control plane's database, not about this source tree.
   defp coalesced_counter_since do
     Application.get_env(:barkpark_cloud, :coalesced_counter_since, @coalesced_counter_since)
+  end
+
+  # THE DOOR TERM. Two counts over the SAME scoped source the rest of the census
+  # reads — same window, same `:site_ids` narrowing — plus the rows the
+  # cause-keyed reader misses, counted DIRECTLY rather than subtracted.
+  #
+  # `unkeyed` is a THIRD query, not `refusals - cause_keyed`. A subtraction is
+  # signed: a cause-keyed row whose `failure_reason` does not carry the marker
+  # would push the difference negative and the census would print a negative
+  # count of missing rows. Counting the missed rows themselves cannot go
+  # negative and answers the question the operator actually asks — WHICH rows
+  # does the old predicate not see.
+  # WHICH BASIS MEASURED `abandoned`, AND WHAT THE ROWS UNDER IT ARE. Derived,
+  # never asserted: the two population terms are read off the scoped rows here.
+  #
+  # THE BASIS IS PROSE, AND THAT IS STRUCTURAL. `census/3`'s fold groups by
+  # `[site_id, stage, status, failure_reason]` and selects only those four plus a
+  # count, so its group maps carry NO chain columns — `abandoned_by_columns/1`'s
+  # `Map.get/2` answers nil on every one of them and the count above is named by
+  # the `@abandoned` regex, not by `depth >= bound`. The classifier reading
+  # columns did NOT make this number a column reading.
+  defp abandoned_basis(scoped) do
+    marked =
+      from(d in scoped,
+        where: d.status == "failed" and like(d.failure_reason, ^@abandonment_marker)
+      )
+
+    counted = Repo.aggregate(marked, :count, :id)
+    newest = Repo.aggregate(marked, :max, :inserted_at)
+
+    writer_stamped =
+      Repo.aggregate(
+        from(d in marked, where: d.inserted_at >= ^@chain_columns_first_write),
+        :count,
+        :id
+      )
+
+    first_write = DateTime.to_iso8601(@chain_columns_first_write)
+
+    historical =
+      case newest do
+        nil -> "HISTORICAL: no abandonment matched in this window"
+        %DateTime{} = t -> "HISTORICAL: newest counted abandonment #{DateTime.to_iso8601(t)}"
+        t -> "HISTORICAL: newest counted abandonment #{NaiveDateTime.to_iso8601(t)}"
+      end
+
+    "basis: PROSE — `failure_reason` matched the abandonment sentence; the census fold " <>
+      "carries no `deferral_depth`/`deferral_bound`, so `classify/1`'s column predicate " <>
+      "(`depth >= bound`) did not run on this count. " <>
+      historical <>
+      ". BACKFILL-WRITTEN: #{counted - writer_stamped} of #{counted} counted row(s) settled " <>
+      "before #{first_write}, the live writer's first chain stamp, so their chain columns came " <>
+      "from the backfill migration and not from `Sites.Deploy.defer/3`; #{writer_stamped} " <>
+      "were writer-stamped."
+  end
+
+  defp box_door(scoped) do
+    marked = from(d in scoped, where: like(d.failure_reason, ^@box_door_marker))
+
+    refusals = Repo.aggregate(marked, :count, :id)
+
+    cause_keyed =
+      Repo.aggregate(
+        from(d in scoped,
+          where: d.status == "deferred" and d.deferral_cause == ^@box_door_cause
+        ),
+        :count,
+        :id
+      )
+
+    unkeyed =
+      Repo.aggregate(
+        from(d in marked,
+          where:
+            is_nil(d.deferral_cause) or d.status != "deferred" or
+              d.deferral_cause != ^@box_door_cause
+        ),
+        :count,
+        :id
+      )
+
+    by_status =
+      Repo.all(
+        from(d in marked,
+          group_by: d.status,
+          order_by: [desc: count(d.id)],
+          select: %{status: d.status, count: count(d.id)}
+        )
+      )
+
+    %{
+      refusals: refusals,
+      cause_keyed: cause_keyed,
+      unkeyed: unkeyed,
+      by_status: by_status,
+      predicate: @box_door_predicate,
+      cause_predicate: @box_door_cause_predicate,
+      basis: @box_door_basis
+    }
   end
 
   defp coalesced_attempts(scoped, from) do
@@ -2273,6 +2782,67 @@ defmodule BarkparkCloud.DeployLedger do
     }
   end
 
+  @doc """
+  Whether `site_id` has content ANSWERING ON THE WEB — at least one live mark.
+
+  THIS IS `delivery/3`'s OWN `live_marks` PREDICATE, ASKED AS AN EXISTENCE
+  QUESTION. `site_delivery/3` (below, in this module) builds a site's
+  ordered list of "content answered on the web at" instants as
+
+      rows
+      |> Enum.filter(&(&1.status == "live" and &1.became_live_at != nil))
+
+  over a source query already narrowed to `environment == "production"`. Those
+  are exactly the three clauses below. Writing them a second time somewhere else
+  is how the fleet ends up with two definitions of "this site is on the web" and
+  the one a human is shown becomes a coin toss — the same argument
+  `SitePublishWaitingAlert` and `DeployRateAlert` both make for reading their
+  cohort out of this module instead of hand-rolling a query.
+
+  ONE DELIBERATE DIFFERENCE FROM `delivery/3`: NO WINDOW. `delivery/3` is a
+  measurement over a pinned door, so its `live_marks` are the marks INSIDE that
+  door. This is not a measurement, it is a fact about the site right now — a
+  site that went live eight months ago and has not deployed since is still
+  serving its content to every reader, and a 24h door would call it dark. The
+  door belongs to the percentile, not to the question "is anything up".
+
+  THE SECOND DELIBERATE DIFFERENCE: UNMETERED ROWS COUNT HERE. `delivery/3`
+  requires `became_live_at` because it needs an INSTANT to subtract; a `live`
+  row without one is counted as `unmetered` and is never a mark (jarl-website
+  alone has 55 such rows). This function needs no instant — it asks whether
+  anything is up, and a `live` production row says content answered on the web
+  whether or not the ledger can name the second it did. Requiring the stamp here
+  would read 55 rows' worth of serving site as DARK, and its only caller
+  (`Notifications.DeploymentFailedPolicy`) turns a dark verdict into a customer
+  email. The doubt falls toward "up", which is the direction that does not
+  manufacture the alarm this predicate exists to suppress.
+  """
+  @spec content_on_web?(Ecto.UUID.t()) :: boolean()
+  def content_on_web?(site_id) when is_binary(site_id) do
+    case Ecto.UUID.cast(site_id) do
+      {:ok, id} ->
+        Repo.exists?(
+          from(d in Deployment,
+            where: d.site_id == ^id,
+            where: d.environment == "production",
+            where: d.status == "live"
+          )
+        )
+
+      # A NON-CASTABLE ID IS `false`, NOT A RAISE. `d.site_id == ^"nope"` makes
+      # `Repo.exists?` raise `Ecto.Query.CastError`, and this predicate is read
+      # on the reaper's post-commit alert path, where a raise fails a sweep whose
+      # four bulk passes have ALREADY COMMITTED — Oban then re-drives a sweep
+      # that can no longer find those rows. `false` is also the SAFE verdict for
+      # the sole caller: `DeploymentFailedPolicy` reads it as "nothing is up", so
+      # the doubt falls toward SENDING the alarm, never toward suppressing it.
+      :error ->
+        false
+    end
+  end
+
+  def content_on_web?(_site_id), do: false
+
   # One site's rows folded into observations. `live_marks` is that site's ordered
   # list of "content answered on the web at" instants; a row that did not itself
   # reach live is DELIVERED by the first mark at or after it (that is when the
@@ -2647,5 +3217,320 @@ defmodule BarkparkCloud.DeployLedger do
       absorption: rate_basis(total(deferred), total(attempted), @basis_attempted),
       box_caused: rate_basis(box_caused, failed, @basis_failed)
     }
+  end
+
+  ## ── The release journey — a RUN, never a rev group (D142/D161) ────────────
+
+  # THE SEGMENTATION, CARRIED IN THE PAYLOAD. A journey figure whose segmentation
+  # rule is not printed beside it cannot be audited, and this rule is the whole
+  # finding: the SAME corpus reads 695 journeys segmented by run and a different,
+  # smaller number segmented by `content_rev`, because one rev went live ELEVEN
+  # times in 61 minutes.
+  @journey_segmentation "a maximal RUN of rows for ONE `site_id`, ordered by `inserted_at` ASC (`id` breaks ties), terminated by the next `live`/`failed` row. Never a `content_rev` group: D162 rules that column is not a revision, it is not injective, and it recurs — one rev went live 11 times in 61 minutes, so a rev group is a content EPOCH and not a release"
+
+  # WHAT THIS METRIC IS, AND — LOUDLY — WHAT IT IS NOT. `delivery/3`'s @doc
+  # rejects run-keying for the WAIT clock and it is right to: a `failed` row
+  # CLOSES a run, so consecutive failures become singleton runs of identically
+  # 0.0 s and site d8e9c2c7's 6 h 17 m outage decomposes into 82 runs, 80 of them
+  # 0.0 s. D161 scopes that refusal exactly: *"segment by RUN, never by rev
+  # group, continues to govern the abandoned rate and attempt-cluster reporting
+  # unchanged; it does NOT govern a latency."* THIS IS AN ATTEMPT COUNT. It
+  # publishes NO elapsed time at all — not a p50, not a p95, not a max — for
+  # precisely the reason `delivery/3` says it must not, and the wire carries no
+  # seconds key it could be misread through.
+  @journey_basis "ATTEMPTS PER TERMINATED JOURNEY — a COUNT of rows, never an elapsed time. Run-keying is structurally unfit for a wait clock (D161: 80 of one site's 82 runs read 0.0 s across a 6 h 17 m outage) and this node therefore publishes no seconds key of any kind"
+
+  # Terminal FOR A JOURNEY, which is a narrower word than terminal for a ROW.
+  # `cancelled` settles a row and is counted terminal by `@basis_terminal`, but a
+  # cancellation does not answer "did this content reach the web", so a run is
+  # NOT closed by one: the cancelled row joins the run and the next `live`/`failed`
+  # row closes it. Stated here rather than assumed, because a reader who imports
+  # `@basis_terminal`'s meaning gets a different segmentation.
+  @journey_terminal_statuses ~w(live failed)
+
+  # THE REGIME BOUNDARY (charter D137), the instant guerrilla cut blue/green.
+  # `box_at_capacity` has ZERO rows before 22:29:27Z and `already_running`'s last
+  # row is 19:37:26Z — the two 409 classes have zero temporal overlap, so what
+  # changed at this instant is a CODE PATH going live, not the load. NO FIGURE
+  # CROSSES IT: this node reports each cohort per SIDE, and a run that straddles
+  # the instant is its own third bucket rather than being assigned to a side by a
+  # tiebreak nobody could audit.
+  @journey_regime_boundary %{
+    subject: "blue/green deploy path",
+    instant: ~U[2026-08-06 22:24:16Z],
+    method: "systemd_unit_transition",
+    source: "charter D137",
+    voids:
+      "no rate crosses this instant. Pre-door 1,032 failed / 1,611 terminal = 64.1%; post-door 8 failed / 223 terminal = 3.6% with 677 of 900 rows ABSORBED, while live/hr roughly DOUBLED. An attempts-per-release figure taken across the door is a blend of two deploy paths, so every cohort below is reported per side and a straddling run is bucketed as STRADDLING, never folded into either side"
+  }
+
+  # THE UNMETERED RULE, stated as a value and not as a comment. A journey whose
+  # HEAD rev is NULL or the empty sentinel is counted and named, never folded
+  # into the metered population: 78 rows in 24 h carry a NULL `content_rev`, and
+  # the empty string is precisely what `Sites.Deploy`'s `@unknown_content_rev`
+  # degrades to on a STRAINED box — the exact condition under which an
+  # attempts-per-release figure is most load-bearing and most easily faked.
+  @journey_unmetered "a journey whose HEAD `content_rev` is NULL or the empty `@unknown_content_rev` sentinel. UNMETERED: outside the numerator AND the denominator, reported as its own count beside the figure it is excluded from. Folding it in fabricates releases out of rows nobody can attribute to any content, and it does so hardest on a strained box"
+
+  # The three buckets, in the order a reader wants them. `straddling` is LAST and
+  # is a bucket rather than a side, which is why it is named here beside them
+  # instead of being derived from a comparison somewhere in the fold.
+  @journey_sides [:pre, :post, :straddling]
+
+  @doc """
+  ATTEMPTS PER RELEASE over a PINNED window, segmented by RUN.
+
+  Ten waves of this epic counted ROWS. A customer does not experience a row: a
+  customer experiences a JOURNEY — the attempts that had to be made before
+  something reached the web — and the ledger could not answer "how many attempts
+  does one release cost" at all.
+
+  ## The segmentation, and the one it refuses
+
+  #{@journey_segmentation}
+
+  Segmenting by `content_rev` group instead makes ELEVEN releases of one rev
+  read as ONE, so attempts-per-release inflates by exactly the collapse factor
+  and the fleet reads worse than it is on the corpus where the rev recurs most.
+  That is not a tuning choice; it is a different question with the same name.
+
+  ## ORDER ASC, AND TAKE THE HEAD OFF THE ORDER
+
+  A DESC-ordered window defines the journey BACKWARDS — the terminal becomes the
+  group MINIMUM — and the query returns a confident wrong answer rather than an
+  error (1,345 journeys / 1.7264 attempts against the true 695 / 2.00). The run
+  number here is `count of terminal rows STRICTLY BEFORE this row`, computed
+  `order by inserted_at asc, id asc`, which makes the terminal the last row of
+  its own group by construction. The head rev is the FIRST row's rev in that
+  order and never `min(content_rev)`: a sha256 prefix has no ordering, so `min`
+  returns whichever hex sorts lowest and that is not a fact about time.
+
+  ## What it is NOT
+
+  #{@journey_basis}
+
+  ## UNMETERED, never folded
+
+  #{@journey_unmetered}
+
+  ## Per side of the regime boundary, always
+
+  Every cohort is reported per side of #{DateTime.to_iso8601(@journey_regime_boundary.instant)}
+  (#{@journey_regime_boundary.source}). A run that STRADDLES the instant is its
+  own bucket: it began under one deploy path and ended under the other, so
+  assigning it to either side would put attempts from the pre-door path into a
+  post-door figure.
+
+  ## The cohorts
+
+  * `live` — journeys terminated by a `live` row. THE fleet attempts-per-release.
+  * `live_contended` — the SUBSET of those with at least one `deferred` row in
+    the run. The direction's "4.0 attempts/release" is true of this subset only;
+    quoting it as the fleet number is the same sin as quoting the fleet number
+    at a contended site.
+  * `failed` — journeys terminated by a `failed` row. Attempts per failure.
+  * `open_runs` — trailing rows with no terminal row in the window. NOT a
+    journey, never metered, counted so a reader can see how much of the window
+    is still running.
+  """
+  @spec journeys(DateTime.t(), DateTime.t(), keyword()) :: map()
+  def journeys(%DateTime{} = from, %DateTime{} = to, opts \\ []) do
+    site_ids = Keyword.get(opts, :site_ids)
+
+    scoped =
+      from(d in Deployment,
+        where: d.inserted_at >= ^from and d.inserted_at < ^to
+      )
+      |> scope_to_sites(site_ids)
+
+    # ONE `Repo.all`, and the run number is computed IN THE QUERY so the ordering
+    # that defines a journey is auditable in the SQL rather than reconstructed in
+    # Elixir. `rows between unbounded preceding and 1 preceding` counts terminals
+    # STRICTLY BEFORE the row, so every row of a run shares a number and the
+    # terminal is the group's last row by construction.
+    #
+    # THE `coalesce` IS LOAD-BEARING AND WAS FOUND BY A RED, NOT BY READING. A
+    # SUM over an EMPTY frame is NULL, not 0 — so the FIRST row of every site
+    # partition came back `run_no: nil` while its successors came back `0`, and
+    # `Enum.group_by/2` put the head of every journey in a group of its own. The
+    # figure that produced was not an error: it was a confidently wrong
+    # attempts-per-release, one attempt light on every site, which is exactly the
+    # failure shape this whole metric exists to refuse.
+    rows =
+      Repo.all(
+        from(d in scoped,
+          select: %{
+            id: d.id,
+            site_id: d.site_id,
+            inserted_at: d.inserted_at,
+            status: d.status,
+            content_rev: d.content_rev,
+            run_no:
+              fragment(
+                "coalesce(sum(case when ? in ('live','failed') then 1 else 0 end) over (partition by ? order by ? asc, ? asc rows between unbounded preceding and 1 preceding), 0)",
+                d.status,
+                d.site_id,
+                d.inserted_at,
+                d.id
+              )
+          }
+        )
+      )
+
+    journeys =
+      rows
+      |> Enum.group_by(&{&1.site_id, &1.run_no})
+      |> Enum.map(fn {_key, run} -> journey_row(run) end)
+
+    %{
+      window: %{from: from, to: to},
+      segmentation: @journey_segmentation,
+      basis: @journey_basis,
+      unmetered_rule: @journey_unmetered,
+      terminal_statuses: @journey_terminal_statuses,
+      boundary: @journey_regime_boundary,
+      sides: Enum.map(@journey_sides, &journey_side(journeys, &1))
+    }
+  end
+
+  # A run -> a journey. Sorted on the SAME key the window used, so the head this
+  # reads and the head the run number was computed from cannot disagree.
+  defp journey_row(run) do
+    sorted = Enum.sort_by(run, &{&1.inserted_at, &1.id})
+    head = hd(sorted)
+    last = List.last(sorted)
+
+    %{
+      site_id: head.site_id,
+      attempts: length(sorted),
+      head_rev: head.content_rev,
+      metered: journey_metered?(head.content_rev),
+      contended: Enum.any?(sorted, &(&1.status == "deferred")),
+      terminal: if(last.status in @journey_terminal_statuses, do: last.status, else: nil),
+      started_at: head.inserted_at,
+      ended_at: last.inserted_at
+    }
+  end
+
+  # THE UNMETERED PREDICATE, two clauses and no `if`. `@unreadable_content_rev`
+  # is the SAME empty-string constant `deferral_outcome/3` refuses on, reused
+  # rather than re-typed: a second literal is a second place for the sentinel to
+  # drift.
+  defp journey_metered?(nil), do: false
+  defp journey_metered?(@unreadable_content_rev), do: false
+  defp journey_metered?(rev) when is_binary(rev), do: true
+
+  # Which side of the door a journey belongs to. A run wholly before the instant
+  # is `:pre`; a run that BEGINS at or after it is `:post`; anything else began
+  # before and ended after, which is `:straddling` and is not a side at all.
+  defp journey_side_of(%{started_at: started, ended_at: ended}) do
+    instant = @journey_regime_boundary.instant
+
+    cond do
+      DateTime.compare(ended, instant) == :lt -> :pre
+      DateTime.compare(started, instant) != :lt -> :post
+      true -> :straddling
+    end
+  end
+
+  defp journey_side(journeys, side) do
+    mine = Enum.filter(journeys, &(journey_side_of(&1) == side))
+    live = Enum.filter(mine, &(&1.terminal == "live"))
+
+    %{
+      side: side,
+      live: journey_cohort(live, "attempts per LIVE-terminated journey (a release)"),
+      live_contended:
+        journey_cohort(
+          Enum.filter(live, & &1.contended),
+          "attempts per LIVE-terminated journey carrying at least one `deferred` row — the CONTENDED subset, never the fleet figure"
+        ),
+      failed:
+        journey_cohort(
+          Enum.filter(mine, &(&1.terminal == "failed")),
+          "attempts per FAILED-terminated journey"
+        ),
+      # NOT a cohort and deliberately not given a rate: a run with no terminal row
+      # in the window has not cost its attempts yet, and dividing by it would
+      # publish a release that has not happened.
+      open_runs: Enum.count(mine, &is_nil(&1.terminal))
+    }
+  end
+
+  # The figure, its journey count, and the population it EXCLUDED — one node, so
+  # a renderer cannot put the ratio on the operator's screen without the count it
+  # was taken over.
+  defp journey_cohort(journeys, basis) do
+    {metered, unmetered} = Enum.split_with(journeys, & &1.metered)
+    count = length(metered)
+    attempts = Enum.reduce(metered, 0, &(&1.attempts + &2))
+
+    %{
+      basis: basis,
+      journeys: count,
+      attempts: attempts,
+      unmetered_journeys: length(unmetered),
+      unmetered_attempts: Enum.reduce(unmetered, 0, &(&1.attempts + &2)),
+      attempts_per_journey: if(count == 0, do: nil, else: Float.round(attempts / count, 2)),
+      refused: count == 0,
+      reason:
+        if(count == 0,
+          do:
+            "no METERED journey in this cohort — it is empty, or every journey in it has a NULL/empty head `content_rev`",
+          else: nil
+        )
+    }
+  end
+
+  @doc """
+  `journeys/3` rendered as the lines an operator reads — the figure and its
+  journey count ON THE SAME LINE, always.
+
+  A ratio printed without the population it was taken over is the defect this
+  whole epic keeps re-finding, and a renderer that has to fetch the count from a
+  second key is a renderer that will one day forget. So the join happens HERE,
+  next to the numbers, and every consumer inherits it.
+
+  Returns a list of strings, one per line, with no trailing newline.
+  """
+  @spec journey_report(map()) :: [binary()]
+  def journey_report(%{sides: sides} = node) do
+    [
+      "DEPLOY JOURNEYS — a release journey is a RUN, never a `content_rev` group",
+      "  window        : #{DateTime.to_iso8601(node.window.from)} -> #{DateTime.to_iso8601(node.window.to)}",
+      "  segmentation  : #{node.segmentation}",
+      "  basis         : #{node.basis}",
+      "  unmetered     : #{node.unmetered_rule}",
+      "  regime door   : #{DateTime.to_iso8601(node.boundary.instant)} (#{node.boundary.source}) — every figure below is per SIDE; a run that straddles the door is its own bucket"
+    ] ++ Enum.flat_map(sides, &journey_side_lines/1)
+  end
+
+  defp journey_side_lines(side) do
+    [
+      "  #{journey_side_caption(side.side)}",
+      "    live-terminated  : #{journey_cohort_line(side.live)}",
+      "    contended subset : #{journey_cohort_line(side.live_contended)}",
+      "    failed-terminated: #{journey_cohort_line(side.failed)}",
+      "    open runs (no terminal row in window, never metered): #{side.open_runs}"
+    ]
+  end
+
+  defp journey_side_caption(:pre), do: "PRE-DOOR (run ended before the boundary)"
+  defp journey_side_caption(:post), do: "POST-DOOR (run began at or after the boundary)"
+
+  defp journey_side_caption(:straddling),
+    do: "STRADDLING (began before the door, ended after — its own bucket, never a side)"
+
+  # THE ONE LINE. Figure, journey count and the excluded UNMETERED count travel
+  # together or not at all — including on the refusal arm, which still prints the
+  # unmetered count because "REFUSED" plus a non-zero exclusion is a different
+  # fact from "REFUSED" plus an empty cohort.
+  defp journey_cohort_line(%{refused: true} = c),
+    do: "REFUSED over 0 journeys (#{c.unmetered_journeys} UNMETERED journeys excluded)"
+
+  defp journey_cohort_line(c) do
+    "#{:erlang.float_to_binary(c.attempts_per_journey, decimals: 2)} attempts over " <>
+      "#{c.journeys} journeys (#{c.attempts} attempts; " <>
+      "#{c.unmetered_journeys} UNMETERED journeys excluded)"
   end
 end

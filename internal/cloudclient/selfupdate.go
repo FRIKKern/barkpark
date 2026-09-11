@@ -90,7 +90,7 @@ func (c *Client) TriggerSelfUpdate(ctx context.Context, id string, force bool) (
 	// client (tests) is honored untouched; only the lazily-built fallback is widened.
 	rc := *c
 	if rc.HTTP == nil {
-		rc.HTTP = &http.Client{Timeout: VerifyTimeout}
+		rc.HTTP = newHTTPClient(VerifyTimeout)
 	}
 	// The body rides ONLY on a forced call. The route reads
 	// `conn.body_params["force"] == true`, so an absent body and {"force":false}

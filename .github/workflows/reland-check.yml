@@ -237,8 +237,12 @@ jobs:
           # Best-effort dependency-edge suppression: needs a read token.
           deps=()
           if [ -n "${LEDGER_TOKEN:-}" ] && [ -n "${PR_TASK:-}" ]; then
-            if curl -sS -m 20 -H "Authorization: Bearer ${LEDGER_TOKEN}" -o /tmp/edges.json \
-                "${LEDGER_BASE%/}/v1/tasks/${PR_TASK}/edges" 2>/dev/null; then
+            # Status captured FIRST (class C before this change: `if curl …`
+            # could not see a 429 at all); a 429 is backed off by
+            # scripts/lib/bp-curl.sh honouring the response's retry_after.
+            . scripts/lib/bp-curl.sh
+            if bp_curl_body -sS -m 20 -H "Authorization: Bearer ${LEDGER_TOKEN}" \
+                "${LEDGER_BASE%/}/v1/tasks/${PR_TASK}/edges" > /tmp/edges.json 2>/dev/null; then
               while IFS= read -r dep; do
                 [ -n "$dep" ] && deps+=(--dep "$dep")
               done < <(python3 -c "import json;[print(e) for e in (lambda d:[x.get('to_id') or x.get('doc_id') for x in (d.get('dependencies') or d.get('edges') or [])])(json.load(open('/tmp/edges.json'))) if e]" 2>/dev/null || true)

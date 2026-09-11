@@ -27,6 +27,7 @@ defmodule Barkpark.Tasks.ReceiptHonestyTest do
   use Barkpark.DataCase, async: false
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Document
   alias Barkpark.Tasks.{Close, Edges, Stamp}
   alias BarkparkWeb.TasksController.Params
@@ -191,7 +192,7 @@ defmodule Barkpark.Tasks.ReceiptHonestyTest do
       # `reconcile_merge_gate/3` returns only the stamped indices to its caller;
       # its receipt reaches the world through the broadcast, so that is where it
       # is checked.
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      subscribe_task_stream!()
 
       assert {:ok, :stamped, [0]} =
                Close.reconcile_merge_gate(task.id, %{"prs" => ["8764"]})
@@ -225,7 +226,7 @@ defmodule Barkpark.Tasks.ReceiptHonestyTest do
       # receipt would have broadcast.
       pre_close_updated_at = Repo.get!(Document, dependent.id).updated_at
 
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      subscribe_task_stream!()
 
       assert {:ok, claimed} = Tasks.claim_by_id(blocker_id, "w-receipt", scope)
 
@@ -281,5 +282,18 @@ defmodule Barkpark.Tasks.ReceiptHonestyTest do
       assert Repo.get!(Document, task.id).content["lifecycle_status"] == "in_progress",
              "the refused close wrote nothing"
     end
+  end
+
+  # The task stream, on the topic that CARRIES THE PAYLOAD (task-5d0615ee60143cc8).
+  # These rows are written in the instance-default workspace, and
+  # `Content.Broadcast` now strips `:doc`/`:document` from a WORKSPACE-OWNED
+  # document's frame on the global `documents:<dataset>` topic — the global topic
+  # has no workspace component, so every co-dataset tenant subscribes to it. The
+  # full frame rides `documents:ws:<id>:<dataset>`, which is where an assertion
+  # about the payload belongs (tasks_claim_test's own reconcile arm already
+  # subscribed there).
+  defp subscribe_task_stream! do
+    {ws, _project} = TenancyFixtures.ensure_default_scope!()
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Broadcast.workspace_list_topic(@dataset, ws.id))
   end
 end

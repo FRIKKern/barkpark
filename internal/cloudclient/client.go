@@ -12,9 +12,13 @@
 // but it shares no code and no types: the two clients answer to different
 // services and must be free to drift.
 //
-// YAGNI by design (cloud-12b): no retries, no pagination, no websocket, no warm-
-// pool poll. The 25 methods below are exactly the surface the user-facing `bp`
-// Cloud commands drive; the real provisioning happens server-side and is
+// YAGNI by design (cloud-12b): no pagination, no websocket, no warm-pool poll.
+// The ONE exception is backpressure: the control plane answers 429 with the
+// number of seconds to wait, and treating that as a hard failure reports a
+// one-second throttle as a broken service. Every lazily-built client here comes
+// from newHTTPClient (retry.go), which installs a 429-ONLY retry — no 500 is
+// ever repeated. The 25 methods below are exactly the surface the user-facing
+// `bp` Cloud commands drive; the real provisioning happens server-side and is
 // reflected back in the returned Barkpark row.
 package cloudclient
 
@@ -361,9 +365,12 @@ type RunawayProc struct {
 // Result and ExecMainStatus are read TOGETHER or not at all. Measured on
 // guerrilla 2026-09-01: barkpark-site@search__b reads Result "exit-code" with
 // ExecMainStatus 143 — 128+15, i.e. Next.js exiting on the SIGTERM of its own
-// retire, filed by systemd as an exit code because the unit lacks
-// SuccessExitStatus=143 (PR #14863). `result` alone reads a deliberate stop as
-// a crash.
+// retire, filed by systemd as an exit code because that box's unit file predates
+// SuccessExitStatus=143. PR #14863 landed that line (merged 2026-09-02) into
+// deploy/systemd/barkpark-site@.service and deploy/site-deploy-node.sh
+// preflight-enforces it, so this is the LEGACY-BOX path — boxes provisioned
+// before it and not yet redeployed. On those, `result` alone reads a deliberate
+// stop as a crash.
 //
 // The pointers carry the same law as every pointer in Pressure: nil is "the
 // control plane could not read this property", never a fabricated 0 — and a pid
@@ -443,7 +450,7 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: DefaultTimeout}
+	return newHTTPClient(DefaultTimeout)
 }
 
 // url joins the (trimmed) BaseURL with a leading-slash path segment. It is the
@@ -1181,7 +1188,7 @@ func (c *Client) DomainStatus(ctx context.Context, id string) (DomainStatusResul
 	// only the lazily-built fallback is widened, and only for this call.
 	dc := *c
 	if dc.HTTP == nil {
-		dc.HTTP = &http.Client{Timeout: DomainStatusTimeout}
+		dc.HTTP = newHTTPClient(DomainStatusTimeout)
 	}
 	status, raw, err := dc.do(ctx, "GET", "/v1/barkparks/"+esc(id)+"/domain-status", true, nil)
 	if err != nil {
@@ -1518,7 +1525,7 @@ func (c *Client) VerifyInstance(ctx context.Context, id string) (VerifyResult, e
 	// only the lazily-built fallback is widened, and only for this call.
 	vc := *c
 	if vc.HTTP == nil {
-		vc.HTTP = &http.Client{Timeout: VerifyTimeout}
+		vc.HTTP = newHTTPClient(VerifyTimeout)
 	}
 	status, raw, err := vc.do(ctx, "POST", "/v1/barkparks/"+esc(id)+"/verify", true, nil)
 	if err != nil {
@@ -2632,7 +2639,7 @@ func (c *Client) UploadDeploymentArtifact(ctx context.Context, siteID, deploymen
 
 	client := c.HTTP
 	if client == nil {
-		client = &http.Client{}
+		client = newHTTPClient(0)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -2707,6 +2714,136 @@ func (c *Client) ListSpawnSiteDeployments(ctx context.Context, siteID string, li
 		return SiteDeploymentPage{}, fmt.Errorf("decode deployments response: %w", err)
 	}
 	return page, nil
+}
+
+// SiteDeploymentPageMax is the server's hard per-window cap on
+// GET /v1/sites/:id/deployments: `limit` above this is clamped by the control
+// plane, not honoured. It is a WIRE FACT, declared here so a walk's round-trip
+// budget is derived from the real page size rather than from a number the caller
+// hoped for — a budget computed against 500 would promise a quarter of the trips
+// it actually spends.
+const SiteDeploymentPageMax = 200
+
+// SiteDeploymentWalkBudget is a bounded keyset walk's PLAN, stated before the
+// first request rather than discovered after the last.
+//
+// WHY A PLAN AND NOT TWO INTS. A site accrues one deployment row per push, and
+// the route hands out at most SiteDeploymentPageMax rows per round trip — so
+// "read this site's cost" is a request for Rows/PageSize round trips, and a
+// caller that does not state that number up front has not decided how much of
+// someone's rate limit it is going to spend. `bp sites` already pays extra round
+// trips per site; a cost walk added on top of that is an N+1 unless the N is
+// bounded HERE and printed by whoever renders the result.
+//
+//	Rows     — how many rows the caller wants, at most.
+//	PageSize — rows per request; clamped into [1, SiteDeploymentPageMax].
+//	MaxPages — the round-trip ceiling, derived from the two above.
+type SiteDeploymentWalkBudget struct {
+	Rows     int
+	PageSize int
+	MaxPages int
+}
+
+// NewSiteDeploymentWalkBudget derives the round-trip budget from a row target.
+// pageSize <= 0 means "ask for the biggest window the server will give", which
+// is the fewest round trips for a given row count.
+func NewSiteDeploymentWalkBudget(rows, pageSize int) SiteDeploymentWalkBudget {
+	if rows < 1 {
+		rows = 1
+	}
+	if pageSize <= 0 || pageSize > SiteDeploymentPageMax {
+		pageSize = SiteDeploymentPageMax
+	}
+	if pageSize > rows {
+		pageSize = rows
+	}
+	pages := rows / pageSize
+	if rows%pageSize != 0 {
+		pages++
+	}
+	return SiteDeploymentWalkBudget{Rows: rows, PageSize: pageSize, MaxPages: pages}
+}
+
+// SiteDeploymentWalk is what a bounded walk actually read, and — the half that
+// makes it quotable — WHERE IT STOPPED.
+//
+// ListSpawnSiteDeployments returns one page and a cursor; a caller that follows
+// the cursor and then reports `len(rows)` has produced a number that is either a
+// site total or a floor, and NOTHING in the return value says which. That is the
+// defect this type exists to close: `Truncated` is true exactly when the server
+// still had a cursor to give when the walk stopped, so a renderer can never quote
+// a bounded read as a site's whole history.
+//
+// StoppedBy names the bound in the walk's own vocabulary — "rows" (the row target
+// was reached), "pages" (the round-trip budget was spent), "exhausted" (the server
+// stopped sending a cursor: this IS the whole ledger) — so the rendered line can
+// say which bound bit rather than a generic "there may be more".
+type SiteDeploymentWalk struct {
+	Deployments []SiteDeployment
+	Budget      SiteDeploymentWalkBudget
+	Pages       int
+	Truncated   bool
+	StoppedBy   string
+}
+
+// WalkSpawnSiteDeployments follows `next_cursor` across GET /v1/sites/:id/deployments
+// until the budget is spent or the server stops sending a cursor, newest-first.
+//
+// It is the WIDE twin of ListDeploymentsAll, and it differs in the one way that
+// matters to anything that quotes a number off it: ListDeploymentsAll truncates
+// at maxRows and returns a plain slice, so its caller cannot tell a complete
+// ledger from a floor. This returns the bound it stopped on.
+//
+// A repeated cursor is an error, never an infinite request stream — a server bug
+// must not become an unbounded client loop.
+func (c *Client) WalkSpawnSiteDeployments(ctx context.Context, siteID string, budget SiteDeploymentWalkBudget) (SiteDeploymentWalk, error) {
+	if budget.PageSize <= 0 || budget.MaxPages <= 0 || budget.Rows <= 0 {
+		budget = NewSiteDeploymentWalkBudget(budget.Rows, budget.PageSize)
+	}
+	walk := SiteDeploymentWalk{Budget: budget, StoppedBy: "exhausted"}
+	seen := map[string]bool{}
+	before := ""
+	for walk.Pages < budget.MaxPages {
+		want := budget.PageSize
+		if left := budget.Rows - len(walk.Deployments); left < want {
+			want = left
+		}
+		if want <= 0 {
+			break
+		}
+		page, err := c.ListSpawnSiteDeployments(ctx, siteID, want, before)
+		if err != nil {
+			return SiteDeploymentWalk{}, err
+		}
+		walk.Pages++
+		walk.Deployments = append(walk.Deployments, page.Deployments...)
+		cursor := strings.TrimSpace(page.NextCursor)
+		if cursor == "" || len(page.Deployments) == 0 {
+			// The server has nothing behind this window: what we hold IS the ledger.
+			walk.StoppedBy = "exhausted"
+			walk.Truncated = false
+			return walk, nil
+		}
+		if seen[cursor] {
+			return SiteDeploymentWalk{}, fmt.Errorf("deployments walk: server repeated cursor %q — refusing to loop", cursor)
+		}
+		seen[cursor] = true
+		before = cursor
+		if len(walk.Deployments) >= budget.Rows {
+			walk.Deployments = walk.Deployments[:budget.Rows]
+			walk.Truncated = true
+			walk.StoppedBy = "rows"
+			return walk, nil
+		}
+	}
+	// Fell out of the loop with a live cursor in hand: the round-trip budget, not
+	// the ledger, is what ended this read.
+	walk.Truncated = true
+	walk.StoppedBy = "pages"
+	if len(walk.Deployments) > budget.Rows {
+		walk.Deployments = walk.Deployments[:budget.Rows]
+	}
+	return walk, nil
 }
 
 // DeployRate is one rate NODE from the fleet deploy census: a percentage that
@@ -2877,12 +3014,18 @@ type DeployCensus struct {
 	// nil = this control plane does not count abandonments; 0 with 0 unreadable =
 	// none happened; 0 with N unreadable = nothing legible said so, and 0 is a
 	// LOWER BOUND. That is the whole reason these are pointers.
-	DeferredTotal       *int                `json:"deferred_total"`
-	Abandoned           *int                `json:"abandoned"`
-	AbandonedUnreadable *int                `json:"abandoned_unreadable"`
-	NotAttempted        []DeployCensusClass `json:"not_attempted"`
-	Sites               []DeployCensusSite  `json:"sites"`
-	MinSample           int                 `json:"min_sample"`
+	DeferredTotal       *int `json:"deferred_total"`
+	Abandoned           *int `json:"abandoned"`
+	AbandonedUnreadable *int `json:"abandoned_unreadable"`
+	// AbandonedBasis carries the three labels the integer above cannot: WHICH
+	// BASIS measured it (prose, not the chain columns — the census fold carries
+	// none), how much of it is HISTORICAL, and how much of it the BACKFILL wrote
+	// rather than the live writer. Absent on a control plane that predates it,
+	// and the renderer then says nothing rather than inventing a label.
+	AbandonedBasis *string             `json:"abandoned_basis"`
+	NotAttempted   []DeployCensusClass `json:"not_attempted"`
+	Sites          []DeployCensusSite  `json:"sites"`
+	MinSample      int                 `json:"min_sample"`
 	// Delivery is the dr-w11-s4 addition: the time-to-web census. A POINTER
 	// because today's control plane sends no `delivery` key at all, and "the
 	// control plane does not measure delivery yet" must not decode to "delivery
@@ -2921,6 +3064,16 @@ type DeployCensus struct {
 	// `-o json` re-emits Raw verbatim — no Go struct in this package named it,
 	// so no human render could.
 	CoalescedAttempts *DeployCoalescedAttempts `json:"coalesced_attempts"`
+	// BoxDoor is the dr-w22-s5 addition: the door's own denominator, keyed on the
+	// capacity-409 PROSE MARKER in failure_reason across ALL statuses, rather than
+	// on `deferral_cause` — which is written in exactly one code path, so a
+	// capacity refusal that settled `failed` carries a NULL cause and is invisible
+	// to every cause-keyed reader.
+	//
+	// A POINTER, and not for style: a control plane older than this term sends no
+	// key, and a zero-valued struct would render "the door refused 0 times" over a
+	// window in which it refused thousands. nil MUST render as NOT MEASURED.
+	BoxDoor *DeployBoxDoor `json:"box_door"`
 	// TotalSites and Truncated are the dr-w24 server-side cut markers.
 	// `DeployLedger.census/3` clamps `sites` at 50 rows and has always cut
 	// SILENTLY on this wire: before these two fields the CLI's own "… and N
@@ -2946,7 +3099,39 @@ type DeployCensus struct {
 	// A nil slice is a control plane that sent none; the render layer already
 	// treats "no boundary rows" as "no provenance to offer", never as an error.
 	Boundaries []DeployCensusBoundary `json:"boundaries"`
-	Raw        []byte                 `json:"-"`
+	// Vocabulary is the class enum the ledger can EVER return, as distinct from
+	// Classes, which is what this WINDOW observed
+	// (dr-w16-s3-followup-class-vocabulary-unreachable). The difference is the
+	// whole point: a class absent from Classes means "no rows in this window",
+	// never "no such class", so a legend built from Classes changes shape with
+	// the window and a CLI that wants a stable one has to hard-code the enum on
+	// this side of the wire — the second drifting definition
+	// deployCensusDeferredTotal already cost this census once.
+	//
+	// A POINTER, for the same reason every neighbour above is one: a control
+	// plane older than this key sends nothing, and a zero-valued struct would
+	// render an EMPTY legend — "the ledger names no failure classes" — which is
+	// the most flattering possible reading of an absence. nil MUST render as
+	// NOT SENT.
+	Vocabulary *DeployVocabulary `json:"vocabulary"`
+	Raw        []byte            `json:"-"`
+}
+
+// DeployVocabulary is the three closed enums `DeployLedger.classify/2` can
+// return: the failure classes, the deferral classes (counted in volume, never
+// in a failure numerator) and the never-attempted classes (never in a rate
+// DENOMINATOR at all). Three lists and not one, because the three are
+// arithmetically different and a legend that flattens them invites a reader to
+// sum across them.
+//
+// Every field is a plain []string: the class NAMES are data, not wire keys, so
+// a class added to the ledger's enum changes no shape here and reds no key-set
+// register. A nil slice is a control plane that sent that enum empty; the
+// render says so rather than printing a blank section.
+type DeployVocabulary struct {
+	Classes             []string `json:"classes"`
+	DeferredClasses     []string `json:"deferred_classes"`
+	NotAttemptedClasses []string `json:"not_attempted_classes"`
 }
 
 // DeployCensusCompleteness is the envelope's own audit of itself: a SECOND,
@@ -2995,6 +3180,35 @@ type DeployCoalescedAttempts struct {
 	Reason  string `json:"reason"`
 	Since   string `json:"since"`
 	Basis   string `json:"basis"`
+}
+
+// DeployBoxDoor is the box door's REFUSAL count beside the door's RE-QUEUE
+// count, with the rows the second one cannot see carried as its own scalar.
+//
+// Refusals counts every row in the window whose failure_reason carries the
+// capacity-409 marker, in WHATEVER status it settled. CauseKeyed counts what the
+// old predicate saw — status='deferred' AND deferral_cause=BOX_AT_CAPACITY_DEFERRED.
+// Unkeyed is the producer's DIRECT count of the marked rows the cause-keyed
+// predicate misses; it is deliberately not derived here as Refusals-CauseKeyed,
+// because that subtraction is signed and this reader must not be able to print a
+// negative count of missing rows.
+//
+// ByStatus is the marked population split by the status it settled in — the
+// evidence for the gap, on the same line as the gap.
+type DeployBoxDoor struct {
+	Refusals       int                   `json:"refusals"`
+	CauseKeyed     int                   `json:"cause_keyed"`
+	Unkeyed        int                   `json:"unkeyed"`
+	ByStatus       []DeployBoxDoorStatus `json:"by_status"`
+	Predicate      string                `json:"predicate"`
+	CausePredicate string                `json:"cause_predicate"`
+	Basis          string                `json:"basis"`
+}
+
+// DeployBoxDoorStatus is ONE status bucket of the marked door population.
+type DeployBoxDoorStatus struct {
+	Status string `json:"status"`
+	Count  int    `json:"count"`
 }
 
 // DeployDeliveryWindow is the delivery census's PINNED window WITH its width —
@@ -3322,7 +3536,7 @@ func (c *Client) FleetDeployCensus(ctx context.Context, from, to time.Time) (Dep
 	// untouched; only the lazily-built fallback is widened, and only for this call.
 	cc := *c
 	if cc.HTTP == nil {
-		cc.HTTP = &http.Client{Timeout: FleetDeployCensusTimeout}
+		cc.HTTP = newHTTPClient(FleetDeployCensusTimeout)
 	}
 	status, body, err := cc.do(ctx, "GET", "/v1/deploy-ledger/census?"+q.Encode(), true, nil)
 	if err != nil {
@@ -4092,7 +4306,7 @@ func (c *Client) Rollback(ctx context.Context, id string) (RollbackResult, error
 	// (tests) is honored untouched; only the lazily-built fallback is widened.
 	rc := *c
 	if rc.HTTP == nil {
-		rc.HTTP = &http.Client{Timeout: VerifyTimeout}
+		rc.HTTP = newHTTPClient(VerifyTimeout)
 	}
 	status, raw, err := rc.do(ctx, "POST", "/v1/barkparks/"+esc(id)+"/rollback", true, nil)
 	if err != nil {

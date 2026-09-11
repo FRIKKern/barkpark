@@ -85,11 +85,37 @@
 //        bottom edge is inside the pill's. The last two are what stop the
 //        naive detail-only remedy from scoring perfectly while painting the
 //        sentence 24px below the capsule.
+//    W35-hash-nav-hidden-view-residue  THE ENTRY PATH, which every leg above is
+//        blind to BY CONSTRUCTION: `nav()` changes the query string, so every
+//        cell in this file arrives by a full document load with exactly one
+//        view ever painted. A person lands on #overview and clicks through;
+//        app.js routes by `section.hidden` and never clears a view, so every
+//        screen they have visited is still matched by every document-wide
+//        selector here. Driven both ways on `mixed-fleet`@1000 the W15 fleet
+//        cell reads 5 rows in view either way and 5 vs 8 DOCUMENT-WIDE, with
+//        `document.querySelector('.fleet-row')` resolving into the hidden
+//        #view-overview. This leg censuses every walk in this file out of its
+//        own bytes (view-scope-census.mjs), tours every routable screen by
+//        hash, and measures which document-wide selectors match inside a hidden
+//        view — 23 of 57 do, all registered, all LATENT (no leg enters by hash
+//        today). Its mutation appends .fleet-row residue to the hidden
+//        #view-overview and asserts BOTH halves: the scoped walk does not move,
+//        the document-wide one does.
 //    GR115-bpconsole-dead-rule      at 700x800 .bp-console-body must compute
 //        the authored 40vh cap (320px) and the 13px legibility floor, same
 //        for .bp-console-toggle (pre-fix: 260px/12px/12px — the later base
 //        rules discarded the media block's declarations at equal
 //        specificity). Includes the .bp-console.is-collapsed twin control.
+//        GATED ON THE CASCADE (cch-w19-bl-gr115-intermittent-ua-defaults):
+//        every assertion in this leg reads a COMPUTED STYLE, so on a document
+//        app.css never reached every one of them is a UA default — which is
+//        what run 30714372486 printed as SIX findings a one-declaration
+//        mutation could not have caused, while run 30714465001 on
+//        byte-identical content printed the leg clean. stylesheet-applied.mjs
+//        establishes the precondition IN THE MEASUREMENT'S OWN EVALUATE and
+//        refuses at exit 2 when it fails; its witnesses are BASE declarations
+//        outside the 720 block, so a genuinely cascade-dead rule still exits 1
+//        (all three directions driven locally — see that file's header).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  EVIDENCE HYGIENE, EACH PROVEN LIVE THIS EPIC (GR125)
@@ -185,9 +211,35 @@ import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.
 import { assertReadyHostsPaint as assertFloor } from "./ready-host-paint.mjs";
 import { selectDefects } from "./defect-selection.mjs";
 import { attentionScenarios } from "./attention-scenarios.mjs";
+import { fleetAxis, FLEET_PINNED_REPS, FLEET_SCEN_SKIP } from "./fleet-scenarios.mjs";
+import { stylesheetProbeJs, stylesheetRefusal, stylesheetVerdict } from "./stylesheet-applied.mjs";
+import { ATTACH_CAP, withAttachDeadline } from "./attach-deadline.mjs";
+import { driverSentence, widthDrivers } from "./width-drivers.mjs";
+import {
+  censusWalks,
+  censusTally,
+  documentWideSelectors,
+  registerDrift,
+  RESIDUE_REGISTER,
+} from "./view-scope-census.mjs";
+// THE SWEEP'S OWN AXIS, IMPORTED RATHER THAN RETYPED (cch-w24-bl-phone-band-
+// unreachable-by-the-width-sweep). `W24-activity-feed-phone-band` asserts that
+// the band it drives TOUCHES breakpoint-sweep.mjs's narrowest width; a floor
+// copied as a numeral would go stale the day the stylesheet grows a boundary
+// below 620, silently re-opening the gap in both files. breakpoint-sweep.mjs
+// guards its own main behind `process.argv[1]`, so importing it runs nothing.
+import { WIDTHS as SWEEP_WIDTHS } from "./breakpoint-sweep.mjs";
+import { edgeCoverSentence } from "./edge-cover-verdict.mjs";
+import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
+// THIS FILE'S OWN BYTES. The W26 leg's coverage sentence is recounted from the
+// width/viewport axes declared below rather than typed (task-72ffb2fdecffd2d3),
+// and the only honest source for "what does this file declare" is the file.
+// Read once, at module load: a derivation that re-read on every leg would be
+// measuring whatever the disk held mid-run.
+const SELF_SRC = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
 const PORT = Number(process.env.OVERFLOW_GUARD_PORT || 4199);
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -224,7 +276,270 @@ const DEFECTS = [
   "W29-deploy-rail-live-url-wrap",
   "W34-deploy-detail-render-bound",
   "W50-site-row-three-hosts-cruel-by-fixture",
+  "W22-shared-modal-card-min-content-floor",
+  "W19-topbar-vertical-cost",
+  "W24-activity-feed-phone-band",
+  "W35-hash-nav-hidden-view-residue",
+  "W20-type-floor-instances",
 ];
+
+// ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
+// THE PHONE BAND, same four widths the account leg above drives (480 is the
+// account body's own upper edge and belongs to that leg, not to this one).
+const FLOOR_WIDTHS = [320, 360, 390, 430];
+
+// The instance / site ids the preview corpus mints (scenarios.mjs → IDS). Spelt
+// out rather than imported: scenarios.mjs is a 340KB module and this file needs
+// exactly three strings from it.
+const FLOOR_INST = "5b2c1e00-0000-4000-8000-0000000000a1";
+const FLOOR_INST_BEHIND = "5b2c1e00-0000-4000-8000-0000000000a2";
+const FLOOR_SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
+const MODAL_OPEN = "(function(){var r=document.getElementById('modal-root');return !!(r && !r.hidden && r.querySelector('.modal-card'));})()";
+const openWith = (sel) => `${MODAL_OPEN} && !!document.querySelector('#modal-root ${sel}')`;
+const clickOne = (sel) => `(function(){var e=document.querySelector(${JSON.stringify(sel)});if(!e) throw new Error('no ${sel} to click');e.click();return true;})()`;
+// ── `land` IS A PAINT CHECK, NEVER A BARE EXISTENCE CHECK ────────────────────
+// Every control below already lives in index.html before its view is routed in,
+// so `document.getElementById('members-invite')` is TRUE from the moment the
+// parser reaches that line — while the node sits inside a `hidden` section, box
+// 0x0. nav() polls readiness every 100ms and runs the rendered-host floor
+// (ready-host-paint.mjs) the INSTANT it flips, so a bare existence check hands
+// the floor an invisible host and the whole guard exits 2 (REFUSED), taking
+// every other leg's verdict with it. MEASURED on two different hosts in CI on
+// this branch: `#modal-root` (hidden until init opens the dialog) and
+// `#members-invite` (hidden until #settings/members routes).
+//
+// `shown` states what the leg actually needs, in the floor's OWN terms: at
+// least one match with a non-zero border box. It is deliberately written as a
+// LITERAL, SINGLE-QUOTED `document.querySelectorAll('…')` so the floor still
+// DERIVES the selector from it and paint-checks it — a readiness expression
+// built from variables derives nothing, which would silence the floor rather
+// than satisfy it. `some` over ALL matches, not the first: `#fleet-add-support,
+// #fleet-add-support-cta` is a two-host selector whose first match in document
+// order is not always the painted one.
+const shown = (sel) => `[].slice.call(document.querySelectorAll('${sel}')).some(function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;})`;
+
+// THE ROSTER, derived from the bytes: every distinct `openModal(` caller in
+// cloud/priv/static/app.js, found by name rather than counted from the filing
+// row (which said "15+"). `openConfirmModal` is the shared confirm SHELL and
+// appears here once per distinct BODY it is given, because the floor is a
+// property of the content, not of the shell.
+//
+// `land` is the screen that must exist before the gesture runs; `drive` is the
+// gesture; `open` is the poll that says THIS body — not merely some dialog — is
+// up. An entry with `unreachable` states why, and states it in terms of what
+// the PREVIEW CORPUS cannot produce, never "it was hard".
+// `?modal=account` OPENS THE DIALOG FROM INIT, so `land` for those three must
+// name the OPEN card and never the shell. `#modal-root` ships in index.html
+// carrying the `hidden` attribute (cloud/priv/static/index.html:566), so
+// `document.getElementById('modal-root')` is TRUE from the moment the parser
+// reaches that line — before init has opened anything. nav() polls readiness
+// every 100ms and runs the rendered-host floor the instant it flips, so
+// whichever side of that race the runner lands on decides the run: the poll
+// that fires first sees one matched node, box 0x0, opacity "1", nothing
+// animating — the display:none class the floor exists to refuse — and the
+// whole guard exits 2 (REFUSED), taking every other leg's verdict with it.
+// MEASURED, deterministically, by dropping `&modal=account` from the first
+// entry so the modal is provably closed at the gate: `READY HOST NOT PAINTED:
+// "#modal-root" matches 1 node(s) … box 0x0, computed opacity "1", no
+// animation running` — the CI refusal verbatim. The gesture-driven entries
+// below were never exposed: their `land` names a control INSIDE the dialog,
+// which matches ZERO nodes while it is shut, and a zero-match selector is
+// skipped by the floor rather than judged.
+//
+// The remedy is to make readiness say what the leg actually needs: `land` is
+// now the body's own `open` poll, so the gate cannot flip until the card is
+// mounted AND painting. It also STRENGTHENS the floor — `#modal-root .am-modal`
+// is a literal selector the floor now derives and paint-checks too.
+const MODAL_CENSUS = [
+  { body: "account (2FA off)", scen: "account-modal", suffix: "&modal=account",
+    land: openWith(".am-modal"), open: openWith(".am-modal") },
+  { body: "account (2FA enroll)", scen: "account-modal-2fa-badcode", suffix: "&modal=account",
+    land: openWith(".a2f-enroll"), open: openWith(".a2f-enroll") },
+  { body: "account (2FA on)", scen: "account-modal-2fa-on", suffix: "&modal=account",
+    land: openWith(".am-modal"), open: openWith(".am-modal") },
+  { body: "account (session revoke confirm)", scen: "account-modal-revoke", suffix: "&modal=account",
+    land: shown(".session-row .btn"),
+    drive: clickOne(".session-row .btn"), open: openWith(".confirm-modal, form") },
+  { body: "token create", scen: "tokens-populated", suffix: "#settings/tokens",
+    land: shown("#token-add"), drive: clickOne("#token-add"),
+    open: openWith("#token-name") },
+  { body: "token revoke confirm", scen: "tokens-revoke", suffix: "#settings/tokens",
+    land: shown(".token-revoke[data-id]"),
+    drive: clickOne(".token-revoke[data-id]"), open: MODAL_OPEN },
+  { body: "member invite", scen: "members-populated", suffix: "#settings/members",
+    land: shown("#members-invite"), drive: clickOne("#members-invite"),
+    open: openWith("#invite-submit") },
+  { body: "member role change", scen: "members-populated", suffix: "#settings/members",
+    land: shown("[data-member-role]"), drive: clickOne("[data-member-role]"),
+    open: MODAL_OPEN },
+  { body: "member remove confirm", scen: "members-populated", suffix: "#settings/members",
+    land: shown("[data-member-remove]"), drive: clickOne("[data-member-remove]"),
+    open: MODAL_OPEN },
+  { body: "invite revoke confirm", scen: "members-populated", suffix: "#settings/members",
+    land: shown("[data-invite-revoke]"), drive: clickOne("[data-invite-revoke]"),
+    open: MODAL_OPEN },
+  { body: "webhook create", scen: "webhooks-panel", suffix: `#instance/${FLOOR_INST}/webhooks`,
+    land: shown("[data-wh-new]"), drive: clickOne("[data-wh-new]"),
+    open: MODAL_OPEN },
+  { body: "webhook edit", scen: "webhooks-panel", suffix: `#instance/${FLOOR_INST}/webhooks`,
+    land: shown("[data-wh-edit]"), drive: clickOne("[data-wh-edit]"),
+    open: MODAL_OPEN },
+  { body: "webhook delete confirm", scen: "webhooks-panel", suffix: `#instance/${FLOOR_INST}/webhooks`,
+    land: shown("[data-wh-delete]"), drive: clickOne("[data-wh-delete]"),
+    open: MODAL_OPEN },
+  { body: "site env editor", scen: "env-editor", suffix: `#site/${FLOOR_SITE}`,
+    land: shown("#site-env-edit"), drive: clickOne("#site-env-edit"),
+    open: MODAL_OPEN },
+  { body: "site deploy confirm", scen: "env-editor", suffix: `#site/${FLOOR_SITE}`,
+    land: shown("#site-deploy"), drive: clickOne("#site-deploy"),
+    open: MODAL_OPEN },
+  // `rollback`, not `env-editor`: #site-github renders only when the deployment
+  // reports a configured GitHub App AND the actor holds admin authority, and
+  // `rollback` is the fixture that carries `github: {configured: true}`. Driven
+  // on env-editor the readiness poll times out — the door is honestly withheld.
+  { body: "site github", scen: "rollback", suffix: `#site/${FLOOR_SITE}`,
+    land: shown("#site-github"), drive: clickOne("#site-github"),
+    open: MODAL_OPEN },
+  { body: "deployment promote confirm", scen: "rollback", suffix: `#site/${FLOOR_SITE}`,
+    land: shown(".dep-promote"), drive: clickOne(".dep-promote"),
+    open: MODAL_OPEN },
+  { body: "site create", scen: "sites-on-instance", suffix: `#instance/${FLOOR_INST}`,
+    land: shown("#site-new-btn"), drive: clickOne("#site-new-btn"),
+    open: MODAL_OPEN },
+  { body: "instance update confirm", scen: "instance-behind", suffix: `#instance/${FLOOR_INST_BEHIND}`,
+    land: shown("#inst-update"), drive: clickOne("#inst-update"),
+    open: MODAL_OPEN },
+  { body: "instance attach domain", scen: "panel-overview", suffix: `#instance/${FLOOR_INST}`,
+    land: shown("#inst-domain"), drive: clickOne("#inst-domain"),
+    open: MODAL_OPEN },
+  { body: "autoupdate pin", scen: "instance-behind", suffix: `#instance/${FLOOR_INST_BEHIND}`,
+    land: shown('[data-au="pin"]'), drive: clickOne('[data-au="pin"]'),
+    open: MODAL_OPEN },
+  { body: "fleet add support", scen: "fleet-support-empty", suffix: `#instance/${FLOOR_INST}`,
+    land: shown("#fleet-add-support, #fleet-add-support-cta"),
+    drive: clickOne("#fleet-add-support, #fleet-add-support-cta"), open: MODAL_OPEN },
+  { body: "offload a task", scen: "fleet-support-online", suffix: `#instance/${FLOOR_INST}`,
+    land: shown("[data-offload-support]"),
+    drive: clickOne("[data-offload-support]"), open: MODAL_OPEN },
+  { body: "launch wizard", scen: "mixed-fleet", suffix: "#overview",
+    land: shown("#scope-switch"),
+    drive: "(function(){document.getElementById('scope-switch').click();var l=document.getElementById('scope-launch');if(!l) throw new Error('no #scope-launch in the scope menu');l.click();return true;})()",
+    open: openWith("#launch-modal-slot") },
+  { body: "provider credential", scen: "providers-empty", suffix: "#settings/providers",
+    land: shown("#scope-switch"),
+    drive: "(function(){document.getElementById('scope-switch').click();var l=document.getElementById('scope-launch');if(!l) throw new Error('no #scope-launch in the scope menu');l.click();window.setTimeout(function(){var c=document.querySelector('#modal-root .launch-connect-provider');if(c) c.click();},1200);return true;})()",
+    open: "!!document.querySelector('#modal-root #cred-token')" },
+  { body: "command palette", scen: "mixed-fleet", suffix: "#overview",
+    land: shown("#scope-switch"),
+    drive: "(function(){document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',metaKey:true,bubbles:true}));return true;})()",
+    open: openWith(".cmdk") },
+  { body: "archive resurrect", scen: "fleet-archives-stored", suffix: "#fleet",
+    land: shown(".archive-resurrect-btn"),
+    drive: clickOne(".archive-resurrect-btn"), open: MODAL_OPEN },
+  { body: "plan cancel", scen: "billing-portal-return", suffix: "#billing",
+    land: shown("#plan-cancel"), drive: clickOne("#plan-cancel"),
+    open: MODAL_OPEN },
+  // ── NOT REACHED, and why. Each of these opens ONLY from a SERVER answer the
+  //    preview corpus does not mint, so no gesture chain in this harness can
+  //    produce it. Their floors are UNKNOWN, and that is the honest word.
+  { body: "token reveal (write-once PAT)",
+    unreachable: "opens on the 201 from POST /v1/tokens (revealToken). modal-oracle.mjs OWNS this body — it drives the real mint chain on `tokens-reveal` and asserts it at its own two cells — so measuring it here would be a second, divergent owner of one dialog rather than new coverage" },
+  { body: "webhook secret reveal (rotate)",
+    unreachable: "showWebhookSecretModal opens only on a 200 from POST /v1/…/webhooks/:id/rotate carrying `secret`; the preview corpus answers rotate with no secret, so the dialog has no fixture" },
+  { body: "instance update conflict",
+    unreachable: "openUpdateConflictModal opens only on a 409 from the update POST whose body parses to a `pinned` conflict; the corpus has no 409-conflict update fixture" },
+  { body: "invite reveal (accept URL)",
+    unreachable: "revealInvite opens only on the 201 from POST /v1/teams/:id/invitations carrying `accept_url`; the corpus answers the create with no accept_url, so the sheet has no fixture" },
+];
+
+// THE PROBE. Borrow-and-restore, because a leg that leaves `width: min-content`
+// on the card poisons every cell after it.
+const FLOOR_PROBE_JS = `(function(){
+  var root=document.getElementById('modal-root');
+  var card=root&&root.querySelector('.modal-card');
+  if(!root||!card) return {open:false};
+  var d=document.documentElement;
+  var cs=getComputedStyle(root);
+  var avail=root.clientWidth-parseFloat(cs.paddingLeft||0)-parseFloat(cs.paddingRight||0);
+  var pw=card.style.getPropertyValue('width'), pwp=card.style.getPropertyPriority('width');
+  var px=card.style.getPropertyValue('max-width'), pxp=card.style.getPropertyPriority('max-width');
+  var pn=card.style.getPropertyValue('min-width'), pnp=card.style.getPropertyPriority('min-width');
+  card.style.setProperty('width','min-content','important');
+  card.style.setProperty('max-width','none','important');
+  card.style.setProperty('min-width','auto','important');
+  var floor=+card.getBoundingClientRect().width.toFixed(2);
+  card.style.removeProperty('width'); card.style.removeProperty('max-width'); card.style.removeProperty('min-width');
+  if(pw) card.style.setProperty('width',pw,pwp);
+  if(px) card.style.setProperty('max-width',px,pxp);
+  if(pn) card.style.setProperty('min-width',pn,pnp);
+  void card.offsetWidth;
+  var spill=[], outside=[], padded=[], wide=[], all=root.querySelectorAll('*'), vw=d.clientWidth;
+  var cr=card.getBoundingClientRect();
+  var ccs=getComputedStyle(card);
+  var inL=cr.left+parseFloat(ccs.borderLeftWidth||0)+parseFloat(ccs.paddingLeft||0);
+  var inR=cr.right-parseFloat(ccs.borderRightWidth||0)-parseFloat(ccs.paddingRight||0);
+  var rr=root.getBoundingClientRect();
+  for(var i=0;i<all.length;i++){
+    var el=all[i], r=el.getBoundingClientRect();
+    if(r.width<=0||r.height<=0) continue;
+    var cn=(typeof el.className==='string'&&el.className.trim())?'.'+el.className.trim().split(/\\s+/).join('.'):'';
+    var nm=(el.id?'#'+el.id:el.tagName.toLowerCase())+cn;
+    if(r.left<-0.5||r.right>vw+0.5) spill.push({s:nm,l:+r.left.toFixed(2),r:+r.right.toFixed(2)});
+    // THE HALF-REMEDY DETECTOR (cch-w22-s4's stated reason for scoping its track
+    // clamp): a clamped card whose CONTENT was never reflowed keeps its old
+    // width and paints over the card's own border and background. That leaves
+    // the VIEWPORT scan clean while the dialog looks broken, so it is measured
+    // separately — against the card's own border box, and only for descendants
+    // of the card itself.
+    if(card.contains(el) && (r.left<cr.left-0.5||r.right>cr.right+0.5)) outside.push({s:nm,l:+r.left.toFixed(2),r:+r.right.toFixed(2)});
+    // …and the SOFTER shape one step in: content that has eaten the card's own
+    // padding but has not yet crossed its border. Reported, never failed — the
+    // card still looks whole, and calling it a defect would make the census
+    // unable to tell 'looks broken' from 'is tight'.
+    // OUT-OF-FLOW DESCENDANTS ARE EXCLUDED HERE, and only here: .modal-x is
+    // absolutely positioned at top/right 12px, so it lives in the card's
+    // padding BY DESIGN and would otherwise print this note on every cell in
+    // the census. The border-box check above still sees it.
+    if(card.contains(el) && el!==card && (r.left<inL-0.5||r.right>inR+0.5)){
+      var pos=getComputedStyle(el).position;
+      if(pos!=='absolute'&&pos!=='fixed') padded.push({s:nm,l:+r.left.toFixed(2),r:+r.right.toFixed(2)});
+    }
+    // WHO IS ACTUALLY WIDE. The root scrolls by the widest right edge in its
+    // own scroll box; naming it is the difference between 'the dialog scrolls'
+    // and a remedy that can be written. (No backticks in this string: it is a
+    // template literal, and one would end it mid-probe.)
+    var rir=r.right-rr.left+root.scrollLeft;
+    wide.push({s:nm,x:+rir.toFixed(2),w:+r.width.toFixed(2),sw:el.scrollWidth,cw:el.clientWidth});
+  }
+  wide.sort(function(a,b){return b.x-a.x;});
+  // THE BISECT, run only when the floor is over the line: which ROW of the body
+  // actually demands the width. This is cch-w22-s4's hand method made part of
+  // the instrument — force width:min-content on each of the card's own children
+  // in turn and read its box. Without it a remedy is guesswork, and s4's own
+  // finding (clamping an item does NOT lower a flex container's contribution)
+  // is unverifiable from the card total alone.
+  var bisect=[];
+  if(floor>avail+0.5){
+    var kids=card.querySelectorAll('*');
+    for(var k=0;k<kids.length;k++){
+      var kd=kids[k];
+      var kw=kd.style.getPropertyValue('width'), kwp=kd.style.getPropertyPriority('width');
+      kd.style.setProperty('width','min-content','important');
+      var kb=+kd.getBoundingClientRect().width.toFixed(2);
+      kd.style.removeProperty('width'); if(kw) kd.style.setProperty('width',kw,kwp);
+      var kcn=(typeof kd.className==='string'&&kd.className.trim())?'.'+kd.className.trim().split(/\\s+/).join('.'):'';
+      bisect.push({s:(kd.id?'#'+kd.id:kd.tagName.toLowerCase())+kcn,mc:kb});
+    }
+    bisect.sort(function(a,b){return b.mc-a.mc;});
+    bisect=bisect.slice(0,5);
+  }
+  return {open:true,floor:floor,avail:+avail.toFixed(2),vw:vw,
+    cardL:+cr.left.toFixed(2),cardR:+cr.right.toFixed(2),cardW:+cr.width.toFixed(2),
+    rsw:root.scrollWidth,rcw:root.clientWidth,psw:d.scrollWidth,pcw:d.clientWidth,
+    descN:all.length,spillN:spill.length,spill:spill.slice(0,4),
+    outN:outside.length,out:outside.slice(0,4),padN:padded.length,pad:padded.slice(0,3),
+    wideN:wide.length,wide:wide.slice(0,3),bisect:bisect};
+})()`;
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
 // instance-card-head -- cloud/priv/static/__preview__ .github` exited 1 with no
@@ -376,7 +691,19 @@ const ATT_WIDTHS = [320, 360, 375, 390, 430, 620, 769, 800];
 // understated a band that runs 320-860. Paying a row while leaving the guard
 // blind to that row's worst width is this wave's disease; this is the cure.
 const FLEET_WIDTHS = [320, 360, 390, 430, 620, 721, 769, 800, 830, 860, 899, 900, 940, 983, 1000];
-const FLEET_SCENS = ["mixed-fleet", "fleet-v4", "fleet-support-failed"];
+// THE SCENARIO AXIS IS GONE FROM THIS FILE — it is DERIVED at leg time, the way
+// GR109's was (#16372). It used to read:
+//
+//     const FLEET_SCENS = ["mixed-fleet", "fleet-v4", "fleet-support-failed"];
+//
+// Three names against a corpus that renders `.fleet-row` in ONE HUNDRED AND TEN
+// scenarios. 107 were never driven at element level, and — worse than the hole —
+// the leg could not REFUSE on one it had no coverage for: an unlisted scenario
+// is not walked, so the run goes green having measured nothing about it. The
+// derivation, the content-classing that keeps 110 scenarios from becoming 107
+// copies of the same three questions, the itemised skip ledger and the refusal
+// all live in fleet-scenarios.mjs; read its header before touching this leg.
+// Filed as cch-bl-w15-fleet-leg-scenario-axis-of-two.
 const FLEET_TEXT_SELS = [".fleet-name", ".fleet-url", ".fleet-meta"];
 
 // cchi-w23 — EVERY SUB-HOST THIS LEG ASSERTS ON, AND WHETHER A ROW MAY LACK IT.
@@ -937,20 +1264,50 @@ async function main() {
   const devPort = brought.devPort;
 
   let sessionId;
+  // THE ONLY STRETCH OF THIS FILE THAT USED TO HAVE NO CLOCK ON IT
+  // (task-3eda8d2ebb0b2327). Everything either side is bounded — SERVER_CAP the
+  // static-server poll, DEVTOOLS_CAP the DevToolsActivePort poll,
+  // BRINGUP_ATTEMPTS the launch loop, the render/eval caps every leg — but the
+  // attach itself awaited three things that can never settle: a `fetch` with no
+  // AbortSignal, a websocket `open` promise that listens for open and error and
+  // NOTHING ELSE, and a `cdp.send` whose resolver is freed only by a reply frame
+  // or by the socket closing. A debugger that ACCEPTS and then answers nothing
+  // settles none of them.
+  //
+  // Measured against a deaf CDP stub on origin/main a2deecc1f: the guard printed
+  // `>> chrome  DeafChrome/0.0` and then sat alive at %CPU 0.0 with empty
+  // stderr, forever. That is the fourth ending an instrument is not allowed to
+  // have — it did not measure, it did not find a defect, and it did not refuse,
+  // so console-refusal-capture.mjs had no sentence to quote and the merge button
+  // got an anonymous red.
+  //
+  // `attach()` names each step so the refusal says WHICH one went deaf.
+  const attach = (step, work) => withAttachDeadline(work, { step });
   try {
-    const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
+    const version = await (await attach(
+      "GET /json/version",
+      // The deadline REJECTS but cannot close an fd, so the fetch carries its
+      // own abort: otherwise the refusal would print over a live socket.
+      fetch(`http://127.0.0.1:${devPort}/json/version`, { signal: AbortSignal.timeout(ATTACH_CAP) }),
+    )).json();
     process.stdout.write(`>> chrome     ${version.Browser} · node ${process.version}\n`);
-    cdp = await Cdp.connect(version.webSocketDebuggerUrl);
-    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
-    ({ sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true }));
-    await cdp.send("Runtime.enable", {}, sessionId);
-    await cdp.send("Page.enable", {}, sessionId);
-    await cdp.send("Network.enable", {}, sessionId);
+    cdp = await attach("websocket open", Cdp.connect(version.webSocketDebuggerUrl));
+    const { targetId } = await attach("Target.createTarget", cdp.send("Target.createTarget", { url: "about:blank" }));
+    ({ sessionId } = await attach("Target.attachToTarget", cdp.send("Target.attachToTarget", { targetId, flatten: true })));
+    await attach("Runtime.enable", cdp.send("Runtime.enable", {}, sessionId));
+    await attach("Page.enable", cdp.send("Page.enable", {}, sessionId));
+    await attach("Network.enable", cdp.send("Network.enable", {}, sessionId));
     // GR125(b): Chrome memory-caches app.css across same-URL navigations —
     // without this, a mutated stylesheet measures as the original.
-    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
+    await attach("Network.setCacheDisabled", cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId));
   } catch (err) {
-    // AUDITED (exit 2): the debugger transport failed before any measurement ran.
+    // AUDITED (exit 2), TWO CLASSES THROUGH ONE DOOR. A transport THROW means
+    // the debugger said no; an `attachTimeout` means it said nothing at all.
+    // Both are environment faults with no measurement behind them, so both are
+    // exit 2 — but they are named apart, because "CDP bring-up failed: The
+    // operation was aborted" over a deaf endpoint is the vaguest true sentence
+    // available and a reviewer would go hunting for a CSS bug nobody measured.
+    if (err && err.attachTimeout) return die(err.message);
     return die(`CDP bring-up failed: ${err.message}`);
   }
 
@@ -980,6 +1337,7 @@ async function main() {
   // pin probe-bypassed, the old unconditional lines kept printing the full
   // claim while the pin had not been called once).
   let fontPinRuns = 0;
+  const crossDoc = createCrossDocumentNavigator("overflow-guard");
   const pinFonts = async (url) => {
     let report = null;
     try {
@@ -1031,10 +1389,23 @@ async function main() {
   // STALE SERVER refusals above, which fire before any navigation — carrying
   // the poll's own diagnosis (expr-false vs eval-threw counts, the last eval
   // error, and a final forced probe of what the page says it is).
+  //
+  // AND IT IS CROSS-DOCUMENT, ALWAYS (cch-w24-bl-hash-only-nav-is-same-document).
+  // This file drives EVERY cell through one session, so two consecutive cells
+  // whose URLs differ only by fragment are a SAME-DOCUMENT navigation: Chrome
+  // keeps the DOM and the next cell measures the last cell's paint. W24's
+  // `#overview` control reported TWO `#cred-submit` hosts for exactly that
+  // reason — a control holding the condition it is the control FOR. The same
+  // rule makes the stated retry above a NO-OP on any URL carrying a fragment
+  // (an identical fragment-bearing URL does not reload either), so the guard
+  // sits INSIDE the attempt loop. It rewrites only when Chrome's own rule says
+  // the load would be skipped, counts what it caught, and the count is printed
+  // at the end of every run whether it fired or not. See
+  // same-document-nav-census.mjs; the census there is the edit-time net.
   const nav = async (url, readyExpr) => {
     let exprFalse = 0, evalThrew = 0, lastErr = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
-      await cdp.send("Page.navigate", { url }, sessionId);
+      await cdp.send("Page.navigate", { url: crossDoc.next(url) }, sessionId);
       const t0 = Date.now();
       while (Date.now() - t0 < RENDER_CAP) {
         let ready = false;
@@ -1295,6 +1666,173 @@ async function main() {
       if (measured === 0) fail(D, `#billing-chip measured in ZERO cells across 2 scenarios x ${PHONE_WIDTHS.length} widths x 2 themes — the leg no longer reaches the population it certifies`);
     }
 
+    // ── W19: THE 620 WRAP'S VERTICAL PRICE, PINNED AS A RATIO ──────────────
+    // cch-w19-s2 (PR #8945) made the topbar WRAP at <=620 to stop the money
+    // message being cut. It bought horizontal legibility with vertical space
+    // and nothing in this file priced the trade: every leg above asks whether
+    // something is CLIPPED, which is structurally blind to a header that grows
+    // by stacking whole lines. `header.topbar` is `position: sticky` chrome
+    // stacked above `main.content`, so every pixel it gains is a pixel the
+    // first screen loses on a phone.
+    //
+    // WHY A RATIO AND NOT A PIXEL (the filing asked for a RELATION, charter
+    // D218). A 4px font-face delta moves every absolute number in this file,
+    // so `h <= 120` is a guard that reds on a font swap and says nothing about
+    // the wrap. The ratio's numerator and denominator move TOGETHER under a
+    // font delta: the phone-band height is divided by the SAME PAGE's
+    // unwrapped height, measured live at 621 in the same scenario, the same
+    // theme and the same run. What it prices is exactly the wrap — how many
+    // times taller the header gets when it stacks.
+    //
+    // AND THE DENOMINATOR IS ITSELF PINNED, which is the half a ratio alone
+    // gets wrong. Make the topbar taller at EVERY width and the ratio does not
+    // move: 2.12 stays 2.12 while the person loses the same pixels. So the
+    // 621 baseline is separately held under a fraction of the VIEWPORT height
+    // — the other relation the filing offers — and the two together bound the
+    // absolute cost without pinning a pixel.
+    //
+    // SIBLING, NOT DUPLICATE: breakpoint-sweep.mjs's SHELL_CHROME_CEILING
+    // (378.5) already pins `aside.sidebar` + `header.topbar` bottom, and its
+    // header names this very wrap as the growth it catches. It is an absolute
+    // pixel, it pools the sidebar in, and its width axis is DERIVED from
+    // app.css's @media boundaries — so on a bare run it never reaches a phone
+    // width at all, and the one CI invocation that does (`--render --widths
+    // 320,390,620 --cell members,members-member`) drives the MEMBERS cells,
+    // where no billing chip is in the header. This leg is the billing-scenario
+    // half at phone widths, expressed as a relation.
+    if (requested.includes("W19-topbar-vertical-cost")) {
+      const D = "W19-topbar-vertical-cost";
+      // The band the wrap owns, plus 621 as the first width ABOVE it — the
+      // unwrapped control, and this leg's denominator.
+      const TB_SCENS = ["billing-trial", "billing-past-due"];
+      const TB_WIDTHS = [320, 360, 375, 390, 430, 470, 500, 620];
+      const TB_BASELINE_WIDTH = 621;
+      // MEASURED ON THIS TREE (the numbers are in the PR body, per cell): the
+      // worst phone-band cell is 2.12x its own 621 baseline. 2.25 leaves
+      // roughly 7px of slack at a 56px baseline — LESS than one wrapped line
+      // (~19px at the shipped type), so a header that stacks one more line
+      // reds, while a font-metric wobble does not.
+      const TB_GROWTH_CEILING = 2.25;
+      // The denominator's own bound, against the viewport: 56 / 800 = 0.07.
+      const TB_BASELINE_VH = 0.1;
+      const tbCells = TB_SCENS.length * 2 * (TB_WIDTHS.length + 1);
+      process.stdout.write(
+        `\n${D} — ${TB_SCENS.length} billing scenarios x 2 themes x ${TB_WIDTHS.length} phone widths ` +
+        `+ the ${TB_BASELINE_WIDTH} unwrapped baseline (${tbCells} cells; header.topbar border-box height, ` +
+        `main.content top offset, and the growth RATIO against each row's own ${TB_BASELINE_WIDTH} height)\n`,
+      );
+      let tbMeasured = 0, tbBarsSeen = 0, tbOverGrowth = 0, tbOverBase = 0, tbZero = 0;
+      let worstRatio = 0, worstRatioAt = "none", worstTop = 0, worstTopAt = "none";
+      const probe = (
+        `(function(){` +
+        `var v=document.querySelector('section.view:not([hidden])');` +
+        `var d=document.documentElement;` +
+        // COUNTED, not first-match: a zero here is the vacuity refusal below,
+        // and a silently-renamed class must read as zero rather than as a
+        // clean cell.
+        `var bars=document.querySelectorAll('header.topbar');` +
+        `var c=document.querySelector('main.content');` +
+        `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),vw:d.clientWidth,vh:d.clientHeight,` +
+        `bars:bars.length,h:null,bottom:null,pos:null,contentTop:null,chip:null};` +
+        `if(bars.length){var r=bars[0].getBoundingClientRect();` +
+        `out.h=Math.round(r.height*100)/100; out.bottom=Math.round(r.bottom*100)/100;` +
+        `out.pos=getComputedStyle(bars[0]).position;}` +
+        `if(c){out.contentTop=Math.round(c.getBoundingClientRect().top*100)/100;}` +
+        `var ch=document.getElementById('billing-chip');` +
+        `if(ch&&!ch.hidden){out.chip=(ch.textContent||'').trim().slice(0,40);}` +
+        `return out;})()`
+      );
+      for (const scen of TB_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter at the baseline width and assert the chip is LIVE before any
+          // height is read — a header measured without its billing chip is the
+          // 56px control wearing the phone band's name.
+          await setViewport(TB_BASELINE_WIDTH);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}`,
+            `document.querySelector('header.topbar') && (function(){var c=document.getElementById('billing-chip');return c && !c.hidden;})()`,
+          );
+          const base = await evalJs(probe);
+          const row = [];
+          if (!base || !base.bars) {
+            tbZero++;
+            fail(D, `${scen}/${theme}@${TB_BASELINE_WIDTH}: ZERO header.topbar matched — the baseline this row's whole ratio divides by was never measured, so no cell below it certifies anything. This is a refusal, not a pass`);
+            process.stdout.write(`   topbar ${scen}/${theme}  baseline UNMEASURED — row skipped\n`);
+            continue;
+          }
+          tbMeasured++;
+          tbBarsSeen += base.bars;
+          if (base.pos !== "sticky") {
+            fail(D, `${scen}/${theme}@${TB_BASELINE_WIDTH}: header.topbar computes position:${base.pos}, not sticky — this leg prices STACKED chrome, and a topbar that scrolls away costs the first screen nothing. The premise it measures under is gone`);
+          }
+          const baseBudget = Math.round(TB_BASELINE_VH * base.vh * 100) / 100;
+          if (base.h > baseBudget) {
+            tbOverBase++;
+            fail(D, `${scen}/${theme}@${TB_BASELINE_WIDTH}: the UNWRAPPED topbar is ${base.h}px against a ${baseBudget}px ceiling (${TB_BASELINE_VH} of a ${base.vh}px viewport) — this is the ratio's own denominator, and a header that grows at EVERY width moves the person's pixels without moving the ratio one bit`);
+          }
+          row.push(`${TB_BASELINE_WIDTH}:h${base.h} top${base.contentTop} [BASE]`);
+          for (const width of TB_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(probe);
+            if (!m || !m.bars) {
+              tbZero++;
+              fail(D, `${scen}/${theme}@${width}: ZERO header.topbar matched — nothing was measured in this cell and an empty measurement is not a clean one`);
+              row.push(`${width}:0bars`);
+              continue;
+            }
+            tbMeasured++;
+            tbBarsSeen += m.bars;
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply, so the dark half of this row measured the light one`);
+            if (m.chip == null) {
+              fail(D, `${scen}/${theme}@${width}: #billing-chip is absent or hidden — the header measured here is not the one this scenario is about, and its height is the control's, not the wrap's`);
+            }
+            const ratio = Math.round((m.h / base.h) * 10000) / 10000;
+            const topFrac = m.contentTop == null ? null : Math.round((m.contentTop / m.vh) * 10000) / 10000;
+            if (ratio > worstRatio) { worstRatio = ratio; worstRatioAt = `${scen}/${theme}@${width}`; }
+            if (m.contentTop != null && m.contentTop > worstTop) { worstTop = m.contentTop; worstTopAt = `${scen}/${theme}@${width}`; }
+            if (ratio > TB_GROWTH_CEILING) {
+              tbOverGrowth++;
+              fail(D, `${scen}/${theme}@${width}: header.topbar is ${m.h}px — ${ratio}x its own ${TB_BASELINE_WIDTH} baseline of ${base.h}px, over the ${TB_GROWTH_CEILING}x ceiling — ${(m.h - base.h * TB_GROWTH_CEILING).toFixed(2)}px past the bar, on a header that has grown ${(m.h - base.h).toFixed(2)}px over its own unwrapped self. That is the top of every phone's first screen: main.content now starts ${m.contentTop} down a ${m.vh}px viewport`);
+            }
+            row.push(`${width}:h${m.h} x${ratio} top${m.contentTop}${topFrac == null ? "" : `(${topFrac})`}`);
+          }
+          process.stdout.write(`   topbar ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // THE DENOMINATOR, PRINTED. The ✓ below is a claim about THESE cells.
+      process.stdout.write(
+        `   MEASURED ${tbMeasured} of ${tbCells} header.topbar cells ` +
+        `(${TB_SCENS.length} scenarios x ${TB_WIDTHS.length + 1} widths x 2 themes; ` +
+        `${tbBarsSeen} header.topbar element(s) seen, ${tbZero} cell(s) matched none)\n`,
+      );
+      // A leg that measured nothing certifies nothing. This arm cannot be
+      // satisfied by an empty loop, a renamed class or a screen that stopped
+      // rendering the shell.
+      if (tbMeasured === 0) {
+        fail(D, `header.topbar measured in ZERO of ${tbCells} cells — the leg no longer reaches the population it certifies, and an empty sweep is a REFUSAL, never a pass`);
+      } else if (tbMeasured < tbCells) {
+        process.stdout.write(
+          `   ! only ${tbMeasured} of ${tbCells} cells were MEASURED — the remaining ${tbCells - tbMeasured} are ✗ above ` +
+          `and this band is NOT certified for them\n`,
+        );
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${tbMeasured} / ${tbCells} cells clean: the phone-band topbar peaks at ${worstRatio}x its own ` +
+          `${TB_BASELINE_WIDTH} baseline (${worstRatioAt}) against a ${TB_GROWTH_CEILING}x ceiling, and the ` +
+          `baseline itself stays under ${TB_BASELINE_VH} of the viewport. THE COST IS NOW PRICED, NOT ARGUED: ` +
+          `worst main.content top offset ${worstTop}px at ${worstTopAt}`,
+        );
+        okLine(
+          `THE RELATION IS THE POINT, and both halves can lose. The ratio divides by the SAME page's unwrapped ` +
+          `height read live at ${TB_BASELINE_WIDTH}, so a font-metric delta (D218) moves numerator and denominator ` +
+          `together and does not red this leg — while one more wrapped line (~19px at the shipped type, against ` +
+          `a ${TB_BASELINE_WIDTH}px-wide baseline that measures 56px tall) does. The baseline's own viewport fraction is what stops a header that grows at ` +
+          `EVERY width from hiding inside an unchanged ratio`,
+        );
+      }
+    }
+
     // ── GR109: the stacked attention row is left-aligned, not centred ───────
     if (requested.includes("GR109-attention-row-dead-rule")) {
       process.stdout.write(`\nGR109-attention-row-dead-rule — overview-past-due attention queue\n`);
@@ -1454,6 +1992,10 @@ async function main() {
         `var out={bpMax:getComputedStyle(body).maxHeight,bpFs:getComputedStyle(body).fontSize,` +
         `togFs:getComputedStyle(tog).fontSize,newMax:getComputedStyle(nb).maxHeight,` +
         `newFs:getComputedStyle(nb).fontSize};` +
+        // THE CASCADE PRECONDITION, read in THIS evaluate — see
+        // stylesheet-applied.mjs. A second round trip would judge a
+        // different moment than the one it excuses.
+        `out.css=` + stylesheetProbeJs("host") + `;` +
         // Twin control (.bp-console.is-collapsed, GR115): transition:none on the
         // caret first, or the synchronous read returns the transition's START
         // value and manufactures a false red.
@@ -1464,6 +2006,23 @@ async function main() {
         `out.caretTransform=getComputedStyle(caret).transform;` +
         `host.remove();return out;})()`,
       );
+      // ── THE CASCADE PRECONDITION, BEFORE ANY COMPARISON ────────────────
+      // Every assertion below reads a COMPUTED STYLE, so every one of them is
+      // a UA default on a document app.css never reached — which is exactly
+      // the six findings run 30714372486 printed and run 30714465001, on
+      // byte-identical content, did not. That is an ENVIRONMENT fact and it
+      // speaks as exit 2. The witnesses are BASE declarations outside the
+      // @media block this leg hunts, so a genuinely cascade-dead 720-block
+      // rule moves none of them and still exits 1.
+      const cascade = stylesheetVerdict(m.css);
+      if (cascade.kind !== "ok") {
+        await die(stylesheetRefusal({
+          url: `${BASE}/?scen=empty&theme=light`,
+          reason: cascade.reason,
+          report: m.css,
+        }));
+        return;
+      }
       // 40vh of the 800px emulated viewport = 320px; pre-fix computes 260px.
       if (m.bpMax !== "320px") fail("GR115-bpconsole-dead-rule", `.bp-console-body max-height computes ${m.bpMax}, expected 320px (40vh @ 800) — the 720-block cap is cascade-dead`);
       if (m.bpFs !== "13px") fail("GR115-bpconsole-dead-rule", `.bp-console-body font-size computes ${m.bpFs}, expected 13px — the legibility floor ("no theater text falls below 13px") is false`);
@@ -1687,11 +2246,22 @@ async function main() {
           `var tall=cols.reduce(function(a,b){return b.height>a.height?b:a;},cols[0]);` +
           `var name=function(el){return el?String(el.className||el.tagName):'nothing';};` +
           `var probes=cols.map(function(h){return name(document.elementFromPoint(cx,h.top+h.height/2));});` +
+          // The EDGE probe's own inputs, not just its answer. `tall.top + 2` is
+          // the y; which element wins it is decided by the corner's HEIGHT and
+          // by where the row sits relative to the sticky topbar, and until
+          // task-ca6e4c883c85e854 only the first of those was ever read back.
+          `var ey=tall.top+2;var eel=document.elementFromPoint(cx,ey);` +
+          `var bar=document.querySelector('header.topbar')||document.querySelector('.topbar');` +
+          `var br=bar?bar.getBoundingClientRect():null;` +
           `return {sl:s.scrollLeft,evLeft:R(ev.getBoundingClientRect().left),` +
           ` cornerH:R(cr.height),headH:R(tall.height),col0H:R(cols[0].height),` +
           ` heights:cols.map(function(h){return R(h.height);}),` +
           ` probes:probes,probeMiss:probes.filter(function(p){return p.indexOf('set-matrix-corner')<0;}).length,` +
-          ` edge:name(document.elementFromPoint(cx,tall.top+2))};})()`,
+          ` tallTop:R(tall.top),probeY:R(ey),scrollY:R(window.scrollY),` +
+          ` topbarBottom:br?R(br.bottom):null,topbarH:br?R(br.height):null,` +
+          ` topbarPos:bar?getComputedStyle(bar).position:null,` +
+          ` edgeInTopbar:eel?!!(eel.closest&&eel.closest('header.topbar,.topbar')):null,` +
+          ` edge:name(eel)};})()`,
         );
         await evalJs(`(function(){var s=document.querySelector('.set-matrix');s.scrollLeft=s.scrollWidth;})()`);
         await settle();
@@ -1726,8 +2296,19 @@ async function main() {
             const before = failures.length;
             if (mid.cornerH < mid.headH - 0.5) fail(D, `notif-configured/${theme}@${width}: the sticky corner is ${mid.cornerH}px tall in a ${mid.headH}px header row (columns ${mid.heights.join("/")}; column 0 alone reads ${mid.col0H}px) — the channel headings scroll THROUGH the pinned label column at the top (align-items:center collapses an empty cell)`);
             if (mid.probeMiss) fail(D, `notif-configured/${theme}@${width}: at the header row ${mid.probeMiss}/${mid.probes.length} column midpoints are covered by something other than .set-matrix-corner (${mid.probes.join(", ")})`);
-            if (!mid.edge.includes("set-matrix-corner")) fail(D, `notif-configured/${theme}@${width}: 2px below the top of the ${mid.headH}px header cell the label column is covered by "${mid.edge}", not .set-matrix-corner — a corner shorter than the TALLEST column leaves the heading scrolling through above it`);
-            if (failures.length === before) okLine(`notif-configured/${theme}@${width}: ${rest.hidden}/${rest.cols} channel columns off-screen at rest; label column sticks at ${mid.evLeft} through scrollLeft ${mid.sl}, corner covers the header row (${mid.cornerH}/${mid.headH}px, columns ${mid.heights.join("/")}); ${mid.probes.length} column midpoints + the tall column's top edge all hit .set-matrix-corner; reserved scrollbar track ${rest.track}px`);
+            // THE SENTENCE IS CHOSEN FROM THE MEASUREMENT, NOT FROM THE LEG'S
+            // ORIGINAL DEFECT (task-ca6e4c883c85e854). This red used to hard-type
+            // "a corner shorter than the TALLEST column …" for every cause, and
+            // on 2026-09-10 it fired six times against a corner that measured
+            // EXACTLY the header row (55/55 on both sides of the commit range)
+            // while the real cover was the sticky `.topbar` this guard's own
+            // scrollIntoView had scrolled the header row under. See
+            // ./edge-cover-verdict.mjs for the two mechanisms, their conditions,
+            // and the two ways it refuses to guess; both arms have browserless
+            // fixtures in ./edge-cover-verdict.test.mjs.
+            const edgeSentence = edgeCoverSentence(mid);
+            if (edgeSentence) fail(D, `notif-configured/${theme}@${width}: ${edgeSentence}`);
+            if (failures.length === before) okLine(`notif-configured/${theme}@${width}: ${rest.hidden}/${rest.cols} channel columns off-screen at rest; label column sticks at ${mid.evLeft} through scrollLeft ${mid.sl}, corner covers the header row (${mid.cornerH}/${mid.headH}px, columns ${mid.heights.join("/")}); ${mid.probes.length} column midpoints + the tall column's top edge (y ${mid.probeY}) all hit .set-matrix-corner, clear of the sticky topbar (tall.top ${mid.tallTop} >= topbar bottom ${mid.topbarBottom}, scrollY ${mid.scrollY}); reserved scrollbar track ${rest.track}px`);
           }
           // Cue 2 — the fade exists while clipped and retracts at the end.
           if (px(rest.fade) <= 0) fail(D, `notif-configured/${theme}@${width}: edge fade is ${rest.fade} while ${rest.sw - rest.cw}px of the matrix is hidden — nothing tells a person there is more`);
@@ -3585,16 +4166,219 @@ async function main() {
       }
     }
 
+    // ── W22: THE SHARED `.modal-card` MIN-CONTENT FLOOR, CENSUSED ───────────
+    //    cch-w22-s4 reflowed the ACCOUNT modal and filed the rest: `.modal-root`
+    //    is a grid whose implicit `auto` column's minimum IS the card's
+    //    min-content, and `.modal-card { width: 100%; max-width: 420px }` is a
+    //    CAP — it can only narrow the card below the space OFFERED, never below
+    //    the width its own content DEMANDS. So every body sharing `.modal-card`
+    //    has a floor, and any floor above viewport-minus-the-root's-padding
+    //    turns `.modal-root` into a silent horizontal scroller on a phone.
+    //
+    //    THE MEASUREMENT, and why it is not a scrollWidth read. A floor is an
+    //    INTRINSIC property of the body's content; the sideways scroll is its
+    //    CONSEQUENCE, and the consequence can be masked (by a track clamp) while
+    //    the floor is untouched — which is exactly the half-remedy s4 refused to
+    //    ship. So each cell measures BOTH: `width: min-content` forced on the
+    //    card with `max-width: none` (the floor itself, borrow-and-restore), AND
+    //    the resting geometry — `.modal-root` scrollWidth/clientWidth plus EVERY
+    //    descendant's viewport rect, iterated, never sampled (D228).
+    //
+    //    THE ROSTER IS DERIVED FROM THE BYTES, not from the row's "15+":
+    //    `grep -n 'openModal(' cloud/priv/static/app.js` names 28 distinct
+    //    openers. Each is either given a real gesture chain here or NAMED
+    //    UNREACHABLE with the reason — a body silently omitted is a body whose
+    //    floor this leg would be claiming to know and does not.
+    if (requested.includes("W22-shared-modal-card-min-content-floor")) {
+      const D = "W22-shared-modal-card-min-content-floor";
+      process.stdout.write(
+        `\n${D} — ${MODAL_CENSUS.length} \`.modal-card\` bodies (every openModal() caller in app.js),` +
+        ` ${MODAL_CENSUS.filter((e) => !e.unreachable).length} driven x ${FLOOR_WIDTHS.length} phone widths x 2 themes` +
+        ` (floor = card width:min-content, borrowed and restored; every #modal-root descendant iterated)\n`,
+      );
+      // A bounded poll for a gesture's effect. `nav` owns the LOAD; a modal
+      // opens on a click whose async chain has no load event to key on.
+      const floorWait = async (expr) => {
+        for (let w = 0; w < 6000; w += 100) {
+          let v = false;
+          try { v = !!(await evalJs(`!!(${expr})`)); } catch { /* mid-repaint */ }
+          if (v) return true;
+          await sleep(100);
+        }
+        return false;
+      };
+      // MODAL_FLOOR_ONLY is a DEBUG narrowing for working a single body, and it
+      // is refused in CI: a leg that can be silently reduced to one dialog is a
+      // leg whose census count means nothing. It prints what it dropped.
+      const only = (process.env.MODAL_FLOOR_ONLY || "").trim();
+      const roster = only ? MODAL_CENSUS.filter((e) => e.body.includes(only)) : MODAL_CENSUS;
+      if (only) process.stdout.write(`   !! MODAL_FLOOR_ONLY=${JSON.stringify(only)} — ${MODAL_CENSUS.length - roster.length} of ${MODAL_CENSUS.length} bodies DROPPED. This run is a debug narrowing and censuses nothing.\n`);
+      // SETTLE BEFORE MEASURING. `.modal-card` carries `animation: modal-in`
+      // (150ms, opacity + translateY + scale(0.99)). Measured mid-flight the
+      // card reports a SCALED box — the first draft of this leg read the plan
+      // cancel body as 271.76px at x=25.41 (a 0.99 scale of its rest width from
+      // a rest origin of 24) and reported a 2px sideways scroll that does not
+      // exist at rest. Same reasoning as ready-host-paint.mjs's settle: a host
+      // judged mid-fade-in is a host judged wrong.
+      const settleCard = async () => {
+        for (let w = 0; w < 2000; w += 50) {
+          let running = 0;
+          try {
+            running = await evalJs(
+              `(function(){var c=document.querySelector('#modal-root .modal-card');if(!c) return 0;` +
+              `if(!c.getAnimations) return 0;` +
+              `return c.getAnimations({subtree:true}).filter(function(a){return a.playState==='running';}).length;})()`,
+            );
+          } catch { /* mid-repaint */ }
+          if (!running) return true;
+          await sleep(50);
+        }
+        return false;
+      };
+      let reached = 0, named = 0, floorCells = 0, overFloor = 0, spillCells = 0, cardSpillCells = 0, padCells = 0, unsettled = 0;
+      const census = [];
+      for (const e of roster) {
+        if (e.unreachable) {
+          named++;
+          process.stdout.write(`   – ${e.body}: NOT REACHED — ${e.unreachable}\n`);
+          census.push({ body: e.body, reached: false, why: e.unreachable });
+          continue;
+        }
+        let openedOnce = false;
+        for (const theme of ["light", "dark"]) {
+          await setViewport(900);
+          const url = `${BASE}/?scen=${e.scen}&theme=${theme}${e.suffix || ""}`;
+          await nav(url, e.land);
+          if (e.drive) { try { await evalJs(e.drive); } catch (err) { fail(D, `${e.body}/${theme}: the gesture chain threw (${err.message}) — nothing about this body was measured`); continue; } }
+          if (!(await floorWait(e.open))) {
+            fail(D, `${e.body}/${theme}: declared REACHABLE but the dialog never opened (waited on ${e.open}) — an unreached body is not a clean body, and its floor is still unknown`);
+            continue;
+          }
+          openedOnce = true;
+          const row = [];
+          for (const width of FLOOR_WIDTHS) {
+            await setViewport(width);
+            if (!(await settleCard())) {
+              unsettled++;
+              fail(D, `${e.body}/${theme}@${width}: the card still had a RUNNING animation after 2000ms — every box below would be a mid-flight layout, so this cell was not measured`);
+              continue;
+            }
+            const m = await evalJs(FLOOR_PROBE_JS);
+            floorCells++;
+            if (!m.open) {
+              fail(D, `${e.body}/${theme}@${width}: #modal-root carries no .modal-card at this width — the dialog closed itself under the resize, so this cell measured nothing`);
+              row.push(`${width}:closed`);
+              continue;
+            }
+            const over = m.floor > m.avail + 0.5;
+            if (over) {
+              overFloor++;
+              if (m.bisect && m.bisect.length) {
+                process.stdout.write(`     · ${e.body}/${theme}@${width} floor ${m.floor} > ${m.avail} offered — widest rows: ${m.bisect.map((b) => `${b.s} ${b.mc}`).join(", ")}\n`);
+              }
+            }
+            row.push(`${width}:${m.floor}/${m.avail}${over ? "!" : ""}`);
+            census.push({ body: e.body, theme, width, floor: m.floor, avail: m.avail, over, rsw: m.rsw, rcw: m.rcw, spill: m.spillN });
+            // THE OBSERVABLE, which is what a person actually suffers. Reported
+            // per cell whether or not the floor is over the line — a body can
+            // spill for a reason that is not its floor, and that is a finding too.
+            if (m.rsw > m.rcw + 0.5) {
+              spillCells++;
+              fail(D, `${e.body}/${theme}@${width}: \`.modal-root\` scrollWidth ${m.rsw} > clientWidth ${m.rcw} — the dialog scrolls sideways by ${Math.round(m.rsw - m.rcw)}px with no visible affordance (card min-content floor ${m.floor} against ${m.avail} of offered width). The page reads clean: documentElement ${m.psw}/${m.pcw}. Card is ${m.cardW}px at ${m.cardL}..${m.cardR}; widest in the root's scroll box: ${m.wide.map((x) => `${x.s} to x=${x.x} (${x.w}px, scroll ${x.sw}/${x.cw})`).join(", ") || "none named"}`);
+            }
+            if (m.spillN > 0) {
+              fail(D, `${e.body}/${theme}@${width}: ${m.spillN} of ${m.descN} #modal-root descendants rest OUTSIDE the ${m.vw}px viewport — e.g. ${m.spill.map((s) => `${s.s} at ${s.l}..${s.r}`).join(", ")}`);
+            }
+            if (m.padN > 0) {
+              padCells++;
+              process.stdout.write(`     · ${e.body}/${theme}@${width}: ${m.padN} descendant(s) have eaten the card's own padding (content box ${m.cardW}px wide) but stay inside its border — reported, not failed: ${m.pad.map((x) => `${x.s} ${x.l}..${x.r}`).join(", ")}\n`);
+            }
+            if (m.outN > 0) {
+              cardSpillCells++;
+              fail(D, `${e.body}/${theme}@${width}: ${m.outN} of ${m.descN} descendants paint OUTSIDE the card's own box (card ${m.cardL}..${m.cardR}, ${m.cardW}px wide against a ${m.floor}px min-content floor) — e.g. ${m.out.map((s) => `${s.s} at ${s.l}..${s.r}`).join(", ")}. This is the HALF-REMEDY shape: the track was clamped and the content was not reflowed`);
+            }
+          }
+          process.stdout.write(`   ${e.body} · ${theme}  ${row.join("  ")}\n`);
+        }
+        if (openedOnce) reached++;
+      }
+      // AUDITED: a census that reached nothing is not a clean census.
+      if (only) {
+        fail(D, `MODAL_FLOOR_ONLY was set to ${JSON.stringify(only)} — ${roster.length} of ${MODAL_CENSUS.length} bodies were driven. A narrowed run can never report a clean census, so it reds by construction rather than printing a claim about bodies it never opened.`);
+      } else if (floorCells === 0) {
+        fail(D, `ZERO cells measured across ${MODAL_CENSUS.length} declared bodies — not one dialog opened, so this leg certifies nothing`);
+      } else if (reached === 0) {
+        fail(D, `ZERO of ${MODAL_CENSUS.length} bodies were reached — every entry named itself unreachable, which is a census of nothing`);
+      } else if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${floorCells} cells across ${reached} REACHED bodies (${named} named unreachable, roster derived from ` +
+          `${MODAL_CENSUS.length} openModal() callers in app.js): every card's min-content floor measured by forcing ` +
+          `width:min-content with max-width:none and restoring it, at ${FLOOR_WIDTHS.join("/")} in both themes. ` +
+          `${overFloor} floor(s) exceed the offered width; ${spillCells} cell(s) scroll sideways; ${cardSpillCells} ` +
+          `cell(s) paint outside the card's own border box (${padCells} more merely eat its padding); every #modal-root descendant ITERATED for a rect outside the ` +
+          `viewport AND (for card descendants) outside the card, never sampled. Every cell was measured only after the ` +
+          `card's own animations had stopped running (${unsettled} cells refused for an unsettled card)`,
+        );
+      }
+      process.stdout.write(`   census rows: ${census.length}\n`);
+    }
+
     // ── W15: the fleet row's CELLS, which every leg above is blind to ───────
     //    Element-level geometry, not page-level. See the note by FLEET_WIDTHS.
     if (requested.includes("W15-fleet-row-text-bounded")) {
       const D = "W15-fleet-row-text-bounded";
+      // DERIVED, not typed — the same shape GR109 uses above (#16372).
+      // fleetAxis() THROWS on an empty derivation, on a lost positive control,
+      // on a skip entry that matches nothing or that names a scenario it cannot
+      // justify excluding, and — the reason this row was filed — on any
+      // fleet-bearing scenario the leg has NO COVERAGE for. die() carries every
+      // one of those to exit 2, which is where a half-instrument belongs: an
+      // unaccounted scenario used simply not to be walked, and the run went
+      // green having measured nothing about it.
+      let FLEET_AXIS;
+      try {
+        const { SCENARIOS } = await import("./scenarios.mjs");
+        FLEET_AXIS = fleetAxis(SCENARIOS);
+      } catch (e) {
+        return die(`${D}: ${e && e.message ? e.message : e}`);
+      }
+      const FLEET_SCENS = FLEET_AXIS.drive;
       const cellCount = FLEET_SCENS.length * FLEET_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${FLEET_SCENS.length} scenarios x ${FLEET_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges + .status-pill HEIGHT;` +
         ` all ${FLEET_SUB_HOSTS.length} sub-hosts CENSUSED per row and their zero refused per cell)\n`,
       );
+      process.stdout.write(
+        `   scenario axis DERIVED from app.js fleetNestedRowsHtml() over scenarios.mjs — ` +
+        `${FLEET_AXIS.bearing.length} fleet-bearing scenario(s) collapse to ${FLEET_AXIS.classes.length} ` +
+        `distinct rendered-row markups; ${FLEET_SCENS.length} driven (pinned first): ${FLEET_SCENS.join(", ")}\n`,
+      );
+      // ITEMISED, never bare. Every fleet-bearing scenario this leg does NOT
+      // drive is named here with the reason it is out — a byte-identical twin
+      // that IS driven, or a written FLEET_SCEN_SKIP reason / filed row id.
+      // Names are grouped by reason so the ledger is readable, not summarised:
+      // every excluded scenario appears by name on one of these lines.
+      {
+        const byRep = new Map();
+        const reasoned = [];
+        for (const s of FLEET_AXIS.skipped) {
+          if (s.sameAs) {
+            if (!byRep.has(s.sameAs)) byRep.set(s.sameAs, { sig: s.sig, names: [] });
+            byRep.get(s.sameAs).names.push(s.scen);
+          } else reasoned.push(s);
+        }
+        process.stdout.write(`   NOT DRIVEN — ${FLEET_AXIS.skipped.length} scenario(s), every one itemised:\n`);
+        for (const [rep, g] of byRep) {
+          process.stdout.write(
+            `   · rendered-row markup byte-identical to ${rep} (sig ${g.sig}), ${g.names.length}: ${g.names.join(", ")}\n`,
+          );
+        }
+        for (const s of reasoned) {
+          process.stdout.write(`   · ${s.scen} — ${s.row ? `filed as ${s.row}; ` : ""}${s.why}\n`);
+        }
+        if (!FLEET_AXIS.skipped.length) process.stdout.write(`   · none\n`);
+      }
       let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, pageOver = 0, rowsSeen = 0, overflowed = 0, foreignRows = 0;
       // cchi-w23: per-selector sub-host census, and the count of legitimately
       // bare rows the two conditional emitters account for.
@@ -3766,6 +4550,15 @@ async function main() {
           `messages, ${squeezed} squeezed badge columns, ${overflowed} chips shorter than their own text, ` +
           `${pageOver} pages scrolling sideways; ` +
           `${FLEET_KNOWN.length} itemised known row(s), every other cell judged`,
+        );
+        okLine(
+          `scenario axis ACCOUNTED, not merely walked: ${FLEET_AXIS.bearing.length} fleet-bearing scenario(s) derived ` +
+          `from the shipped fleetNestedRowsHtml() over scenarios.mjs, collapsing to ${FLEET_AXIS.classes.length} distinct ` +
+          `rendered-row markups; ${FLEET_SCENS.length} driven, ${FLEET_AXIS.skipped.length} itemised above ` +
+          `(${FLEET_AXIS.skipped.filter((s) => s.sameAs).length} byte-identical twins of a driven scenario, ` +
+          `${FLEET_SCEN_SKIP.length} carrying a written reason or filed row id). The positive control ` +
+          `${FLEET_PINNED_REPS.join("/")} is asserted present in the derivation, and a fleet-bearing scenario that is ` +
+          `neither driven, nor a twin of a driven one, nor itemised REFUSES this run at exit 2`,
         );
       }
     }
@@ -5689,6 +6482,329 @@ async function main() {
       }
     }
 
+    // ── cch-w24-bl-phone-band-unreachable-by-the-width-sweep: THE ACTIVITY
+    //    FEED BELOW THE SWEEP'S FLOOR ────────────────────────────────────────
+    //
+    //    THE GAP, RE-DERIVED ON origin/main RATHER THAN INHERITED FROM THE
+    //    FILING. `breakpoint-sweep.mjs` derives its width axis from the
+    //    stylesheet: `BREAKPOINTS = [620, 720, 740, 768, 830, 899, 904]` and
+    //    `WIDTHS = boundaryWalk(BREAKPOINTS)` emits b-1/b/b+1 for each, so its
+    //    NARROWEST driven width is 619 — imported below rather than typed, so
+    //    this leg cannot go on claiming a floor the sweep has moved. `#activity`
+    //    is one of that sweep's 25 registered cells (`{ name: "activity", scen:
+    //    "activity", hash: "#activity", … sentinel: "#activity-body .tlv-row" }`),
+    //    and NOTHING in this repo rendered it below 619 before this leg: the
+    //    file-wide axis recount printed under the ok-lines is what says so, per
+    //    run, instead of a sentence a later edit can falsify in silence.
+    //
+    //    WHY NOT WIDEN THE SWEEP, WITH THE NUMBERS. Its axis is DERIVED from
+    //    `app.css`'s own `@media` boundaries and Leg A refuses in BOTH
+    //    directions — a declared breakpoint the stylesheet does not carry is a
+    //    phantom (cch-w15), a stylesheet breakpoint this list lacks is an
+    //    UNCOVERED refusal. There is no `@media` boundary anywhere below 620, so
+    //    reaching 320 through `BREAKPOINTS` would mean declaring a boundary that
+    //    does not exist — buying phone coverage by making the sweep's central
+    //    refusal lie. The cost is the other half: the sweep renders 25 cells x 2
+    //    themes, so each added width is 50 renders (~37s at its own measured
+    //    0.73s/cell), and seven phone widths would add ~4.3 minutes to a job
+    //    that is already the console's longest. This leg pays 2 scenarios x 2
+    //    themes x 9 widths = 36 cells for the ONE screen the row names.
+    //
+    //    THE ROW'S NAMED TRAP IS ALREADY PAID, AND THAT IS A CORRECTION TO THE
+    //    FILING, NOT A SIDESTEP. The row says a 320-width render cell "reds main
+    //    on the folded shell's Q3 fold budget" (`.content` 344.5px down against
+    //    a 320px budget). On today's bytes it does not:
+    //    `cch-w24-bl-q3-fold-budget-is-a-shell-property-at-320` landed, and Q3
+    //    now measures SCREEN TOP = first painted box of the live `section.view`
+    //    MINUS the folded chrome's bottom (`foldVerdict` in breakpoint-sweep.mjs,
+    //    24px at 320 against a 320px budget), with the shell's own cost pinned
+    //    separately at `SHELL_CHROME_CEILING = 378.5`. So the trap is stale; the
+    //    reason this leg lives here is the DERIVED-AXIS argument above, which is
+    //    a property of the sweep and does not expire.
+    //
+    //    `#settings/env` IS REFUTED, NOT DEFERRED. The row (and
+    //    cch-w23-bl-three-screens-zero-geometry-coverage before it) names
+    //    `#settings/env` / `#env-body` / `envVarRowHtml` / the `env-populated`
+    //    fixture as an unmeasured screen. That screen NO LONGER EXISTS: the team
+    //    env-var page was deleted by cch-w53-bl's env-var Option A (ruled
+    //    2026-09-02) — `git grep -n 'view-env\|envVarRowHtml\|#env-body' --
+    //    cloud/priv/static/app.js cloud/priv/static/index.html` is EMPTY, the
+    //    surviving `env-editor` scenario is the SITE env-blob editor at
+    //    `#site/<id>` (breakpoint-sweep.mjs's residue map says so at its own
+    //    entry), `env-populated` is not a scenario at all, and
+    //    `cloud/priv/static/__app.test.mjs` asserts the absence in both
+    //    artefacts ("index.html must not register the env screen" / "must not
+    //    link the env screen"). A leg driving `#settings/env` would measure a
+    //    population of ZERO under a screen name — the exact failure the w23 row
+    //    filed about `.env-row` and `.audit-row`, one rung up.
+    //
+    //    THE TWO ASSERTIONS, AND WHY NEITHER ALONE REACHES THIS SCREEN.
+    //      · `.tlv-title` (app.css:4601) is `flex: 1 1 auto; min-width: 0;
+    //        overflow: hidden; text-overflow: ellipsis; white-space: nowrap` —
+    //        and `@media (max-width: 620px)` (app.css:4705) flips it to
+    //        `white-space: normal` while `.tlv-head` gains `flex-wrap: wrap`.
+    //        THAT FLIP IS THE PHONE BAND'S OWN RULE and 620 is its only edge the
+    //        sweep touches: everything the rule governs from 619 down was driven
+    //        by nothing. An identity that wraps is not automatically an identity
+    //        that FITS — `overflow: hidden` still clips whatever no break
+    //        opportunity can bring inside the box — so the row's title is held
+    //        to the SAME cue predicate the members roster uses (D253): it either
+    //        fits, or a cue can ACTUALLY PAINT, measured per row as a min-content
+    //        width plus a non-zero text run, never read off a `white-space`
+    //        declaration.
+    //      · THE CONTROLS. `.tlv-toggle` ("Details"), `.tlv-coalesce-toggle`
+    //        ("Show all N" / "Collapse") and `.tlv-when` are all `flex: 0 0 auto`
+    //        in a head that wraps below 620. A per-element bound says nothing
+    //        about whether the person can REACH them, so every control's right
+    //        edge is asserted inside the viewport, and `documentElement
+    //        .scrollWidth <= clientWidth` is asserted per cell on top — the
+    //        `.instance-card-name` lesson from the cruel-content leg, where the
+    //        host that never clips itself drags the page instead.
+    //
+    //    ROWS ARE ITERATED, NEVER SAMPLED (D228), and the feed's first row is
+    //    exactly the trap that rule exists for: on `activity` the newest entry
+    //    is a singleton `member.invited` with the shortest title in the fixture,
+    //    while the three coalesced `site.deploy_requested` rows below it carry
+    //    the "x N" count, the cadence meta and the "Show all 3" button. A
+    //    `querySelector('.tlv-row')` leg reads the one row with no button at all.
+    //
+    //    THE CORPUS IS KIND ON BOTH ARMS, SAID PLAINLY RATHER THAN DRESSED UP
+    //    AS AN AXIS. `activity` (7 audit entries, longest actor 12 chars) and
+    //    `mixed-fleet` (5) are the only two shipped fixtures that populate this
+    //    feed, and neither is cruel — `tlvEntryTitle` renders `actor + " " +
+    //    humanAction(type)` for audit rows, and the server's email cap (160,
+    //    the length `members-cruel-content` already drives on the roster) has
+    //    never been rendered into a `.tlv-title`. A cruel activity fixture is
+    //    therefore REAL residual work and is deliberately NOT built here: adding
+    //    a scenario moves breakpoint-sweep's coverage accounting (`hash:#activity`
+    //    is one of its two ZERO-RESIDUE families, asserted as such), which is a
+    //    cascade this row did not buy. What this leg certifies is the band, on
+    //    the corpus that ships, with both populations walked — not a cruelty
+    //    claim it has no fixture for.
+    if (requested.includes("W24-activity-feed-phone-band")) {
+      const D = "W24-activity-feed-phone-band";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      // Both fixtures that populate `#activity-body`. `activity` is the one
+      // whose deepLink is this screen and the only one that coalesces; the
+      // sweep drives BOTH names already, so this arm costs the scenario census
+      // nothing.
+      const ACT_SCENS = ["activity", "mixed-fleet"];
+      // The phone band, ending ON the sweep's floor: 618 is the last width the
+      // sweep cannot reach, and 619/620 are ITS widths, driven here as the
+      // handoff control so the two axes are proven CONTIGUOUS rather than
+      // assumed to be. 620 is also the `@media (max-width: 620px)` edge where
+      // `.tlv-title` flips to `white-space: normal`, so the pair 618/620 holds
+      // the rule's own band and the pair 620/(sweep's 621) holds its edge.
+      const ACT_WIDTHS = [320, 360, 390, 430, 480, 560, 618, 619, 620];
+      // ANTI-VACUITY 0 — THE AXIS, AND ITS TOP IS DERIVED FROM THE OTHER
+      // INSTRUMENT. This is the assertion that makes the row's defect unable to
+      // re-open quietly: if the sweep ever lowers its floor this check follows
+      // it, and if this leg's band is ever trimmed above the floor the gap it
+      // was built to close reds here instead of going unmeasured in both files.
+      const SWEEP_FLOOR = Math.min(...SWEEP_WIDTHS);
+      if (!ACT_WIDTHS.includes(SWEEP_FLOOR - 1)) {
+        fail(D, `axis check: breakpoint-sweep.mjs's narrowest driven width is ${SWEEP_FLOOR} (imported from its own WIDTHS, never typed here) and this leg does not drive ${SWEEP_FLOOR - 1} — the two axes no longer TOUCH, so ${SWEEP_FLOOR - 1} is a width neither instrument renders and the gap this leg exists to close has re-opened`);
+      }
+      if (Math.max(...ACT_WIDTHS) < SWEEP_FLOOR) {
+        fail(D, `axis check: this leg's widest width is ${Math.max(...ACT_WIDTHS)} and the sweep's narrowest is ${SWEEP_FLOOR} — with no overlap neither instrument drives the handoff, and "contiguous" would be an inference rather than a measurement`);
+      }
+      for (const need of [320, 620]) {
+        if (!ACT_WIDTHS.includes(need)) {
+          fail(D, `axis check: ${need} is not in the width set — 320 is the narrowest viewport this file drives anywhere, and 620 is the edge of \`@media (max-width: 620px)\` (app.css), the rule that gives \`.tlv-title\` \`white-space: normal\` and \`.tlv-head\` \`flex-wrap: wrap\`. A set missing either drives the phone band without its own boundary`);
+        }
+      }
+      if (!ACT_SCENS.includes("activity")) {
+        fail(D, `axis check: \`activity\` is not in the scenario set — it is the only fixture whose deepLink is this screen and the only one whose feed COALESCES (three consecutive site.deploy_requested rows on one target), so without it this leg never measures \`.tlv-coalesce\`, its count, its meta or its "Show all N" control`);
+      }
+      if (ACT_SCENS.length < 2) {
+        fail(D, `axis check: one scenario only — a bound proven on a single fixture's row set is a bound proven on one row set, and this feed is populated by two`);
+      }
+      const cellCount = ACT_SCENS.length * ACT_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${ACT_SCENS.length} scenarios x ${ACT_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells; every #activity-body .tlv-row iterated: .tlv-title scrollWidth vs clientWidth with a` +
+        ` cue that can actually paint, every .tlv-when/.tlv-toggle/.tlv-coalesce-toggle right edge vs viewport,` +
+        ` + page overflow. Band ${ACT_WIDTHS[0]}-${ACT_WIDTHS[ACT_WIDTHS.length - 1]}, meeting breakpoint-sweep's floor of ${SWEEP_FLOOR})\n`,
+      );
+      let cells = 0, rowsSeen = 0, titlesSeen = 0, ctrlsSeen = 0, coalesceSeen = 0;
+      let clipped = 0, offScreen = 0, pageOver = 0;
+      for (const scen of ACT_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter WIDE and assert the LANDED view — `?scen=` alone renders
+          // #overview (the W13/W15 note) and a phantom feed is worse than none.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#activity`,
+            `document.querySelector('#activity-body .tlv-row') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-activity';})()`,
+          );
+          const row = [];
+          for (const width of ACT_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var d=document.documentElement;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:[]};` +
+              // EVERY row in document order (D228) — row 0 is the singleton
+              // `member.invited` with no button at all.
+              `[].slice.call(document.querySelectorAll('#activity-body .tlv-row')).forEach(function(r,i){` +
+              `  var rec={i:i,coalesce:r.classList.contains('tlv-coalesce'),ctrls:[],title:null};` +
+              `  [].slice.call(r.querySelectorAll(':scope > .tlv-head > .tlv-when, :scope > .tlv-head > .tlv-toggle, :scope > .tlv-head > .tlv-coalesce-toggle')).forEach(function(c){` +
+              `    var cr=c.getBoundingClientRect();` +
+              `    rec.ctrls.push({k:c.className.split(' ')[0],t:(c.textContent||'').trim().slice(0,24),right:Math.round(cr.right*100)/100});` +
+              `  });` +
+              `  var n=r.querySelector(':scope > .tlv-head > .tlv-title');` +
+              `  if(n){var cs=getComputedStyle(n);` +
+              // THE BREAK-OPPORTUNITY MEASUREMENT (charter D253), the same
+              // instrument the members roster uses and for the same reason:
+              // `text-overflow` paints when the overflowing LINE has no break
+              // opportunity that fits AND carries a text run to truncate.
+              // cssText is APPENDED, never assigned — assigning deletes the
+              // copied style attribute and measures the element under a cascade
+              // it does not have.
+              `    var cl=n.cloneNode(true);` +
+              `    cl.style.cssText+=';position:absolute!important;left:-99999px!important;top:0!important;visibility:hidden!important;width:min-content!important;max-width:none!important;min-width:0!important;height:auto!important;overflow:visible!important;flex:0 0 auto!important;';` +
+              `    n.parentNode.appendChild(cl);` +
+              `    var mw=Math.ceil(cl.getBoundingClientRect().width);` +
+              `    cl.parentNode.removeChild(cl);` +
+              // The widest TEXT run reachable through `display: inline` only —
+              // a line holding nothing but atomic inlines has nothing to
+              // ellipsize. `.tlv-coalesce-count` is an inline span and IS
+              // walked; an inline-block child would be an atom and is not.
+              `    var tw=0;` +
+              `    (function walk(e){` +
+              `      for(var k=0;k<e.childNodes.length;k++){var ch=e.childNodes[k];` +
+              `        if(ch.nodeType===3){` +
+              `          if(!(ch.nodeValue||'').trim()) continue;` +
+              `          var rg=document.createRange();rg.selectNodeContents(ch);` +
+              `          var rl=rg.getClientRects();` +
+              `          for(var q=0;q<rl.length;q++) tw=Math.max(tw,rl[q].width);` +
+              `        } else if(ch.nodeType===1){` +
+              `          var dd=getComputedStyle(ch).display;` +
+              `          if(dd==='inline'||dd==='contents') walk(ch);` +
+              `        }` +
+              `      }})(n);` +
+              `    rec.title={sw:n.scrollWidth,cw:n.clientWidth,mw:mw,tw:Math.round(tw*100)/100,` +
+              `      ws:cs.whiteSpace,te:cs.textOverflow,ov:cs.overflow,ox:cs.overflowX,` +
+              `      t:(n.textContent||'').trim().replace(/\\s+/g,' ').slice(0,48)};}` +
+              `  out.rows.push(rec);` +
+              `});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-activity") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-activity" — the hash did not route, so nothing below this line measured the feed`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty feed is not a clean feed. `#activity-body` also
+            // renders a teaching empty state, which would satisfy every
+            // assertion below having measured no row.
+            if (m.rows.length === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero \`#activity-body .tlv-row\` rendered — the feed painted its empty state (or the fixture stopped populating \`audit\`), so nothing was measured and this is not a pass`);
+              row.push(`${width}:0r`);
+              continue;
+            }
+            rowsSeen += m.rows.length;
+            coalesceSeen += m.rows.filter((r) => r.coalesce).length;
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the activity feed is off-screen sideways, on a screen whose whole job is to be read`);
+            }
+            let cellCtrls = 0;
+            for (const r of m.rows) {
+              for (const c of r.ctrls) {
+                cellCtrls++;
+                if (c.right > m.pcw) {
+                  offScreen++;
+                  fail(D, `${scen}/${theme}@${width} row${r.i} \`.${c.k}\` "${c.t}": right edge ${c.right} > viewport ${m.pcw} — the control is OFF-SCREEN by ${Math.round((c.right - m.pcw) * 100) / 100}px, so the person cannot reach it`);
+                }
+              }
+              const n = r.title;
+              if (!n) continue;
+              titlesSeen++;
+              if (n.sw <= n.cw) continue;
+              // A CUE THAT CAN ACTUALLY PAINT — MEASURED, NEVER READ OFF THE
+              // DECLARATIONS (D253). `text-overflow: ellipsis` paints only
+              // where the box CLIPS horizontally (`overflow-x` read by name:
+              // the shorthand serialises "visible clip" for a legal pair the
+              // spec does not blockify) AND the overflowing line has no break
+              // opportunity that fits (min-content wider than the box) AND
+              // there is a text run to truncate.
+              const clips = n.ox !== "visible";
+              const noBreakFits = n.mw > n.cw;
+              const hasRun = n.tw > 0;
+              const cueCanPaint = clips && noBreakFits && hasRun && n.te === "ellipsis";
+              if (!cueCanPaint) {
+                clipped++;
+                const why = !clips
+                  ? `the box does not clip horizontally (overflow-x "${n.ox}", shorthand "${n.ov}"), so no marker is ever reached`
+                  : n.te !== "ellipsis"
+                    ? `computed text-overflow is "${n.te}", so nothing is authored to paint`
+                    : !noBreakFits
+                      ? `min-content ${n.mw}px FITS inside clientWidth ${n.cw}px, so the overflow is VERTICAL — \`overflow: hidden\` eats whole lines and no marker is ever reached`
+                      : `the overflowing line carries no text run to truncate (widest run ${n.tw}px)`;
+                fail(D, `${scen}/${theme}@${width} row${r.i} \`.tlv-title\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of WHO DID WHAT is hidden with NO cue that can paint (measured min-content ${n.mw}px, widest text run ${n.tw}px; computed white-space "${n.ws}", text-overflow "${n.te}", overflow "${n.ov}", overflow-x "${n.ox}" — REPORTED, never the test; ${why})`);
+              }
+            }
+            ctrlsSeen += cellCtrls;
+            row.push(`${width}:${m.rows.length}r/${cellCtrls}c@${m.psw}`);
+          }
+          process.stdout.write(`   ${D} ${scen}/${theme}: ${row.join(" ")}\n`);
+        }
+      }
+      // ANTI-VACUITY 1 — the populations, asserted after both loops close. A
+      // feed that renders rows but no CONTROL satisfies "no control off-screen"
+      // having measured no control, and a run that never saw a coalesced row
+      // measured the singleton grammar twice under two fixture names.
+      if (titlesSeen === 0) {
+        fail(D, `${rowsSeen} \`.tlv-row\` walked across ${cells} cells and NOT ONE carried a \`.tlv-title\` — the identity assertion fired nowhere, so this leg's clean line would be a sentence nothing measured`);
+      }
+      if (ctrlsSeen === 0) {
+        fail(D, `${rowsSeen} \`.tlv-row\` walked across ${cells} cells and NOT ONE carried a \`.tlv-when\`/\`.tlv-toggle\`/\`.tlv-coalesce-toggle\` — "no control off-screen" is true of an empty set, which is not what this leg claims`);
+      }
+      if (coalesceSeen === 0) {
+        fail(D, `no \`.tlv-coalesce\` row was rendered in any of the ${cells} cells — the \`activity\` fixture's three consecutive site.deploy_requested rows on one target are what produce the coalesced grammar ("x N", the cadence meta, "Show all 3"), so a run without one measured the singleton row twice and the fold grammar never`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${ACT_WIDTHS.join("/")} on ${ACT_SCENS.join(" + ")} in both themes — ` +
+          `${rowsSeen} \`#activity-body .tlv-row\` iterated (never sampled: row 0 is the singleton with no button), ` +
+          `${titlesSeen} \`.tlv-title\` held to the D253 cue predicate, ${ctrlsSeen} controls asserted inside the ` +
+          `viewport, ${coalesceSeen} of the rows coalesced; ${clipped} identities hidden with no cue that can paint, ` +
+          `${offScreen} controls past the viewport edge, ${pageOver} pages scrolling sideways. Cells print ` +
+          `rows/controls@documentElement.scrollWidth, so a page that starts dragging is legible in the table rather ` +
+          `than only in a failure`,
+        );
+        okLine(
+          `THE BAND IS CONTIGUOUS WITH breakpoint-sweep.mjs, AND THAT IS DERIVED: its narrowest driven width is ` +
+          `${SWEEP_FLOOR} (imported from its exported WIDTHS, which it in turn derives from app.css's own @media ` +
+          `boundaries via boundaryWalk), this leg drives ${SWEEP_FLOOR - 1} and below, and ${SWEEP_FLOOR}/${SWEEP_FLOOR + 1} ` +
+          `are driven by BOTH as the handoff. cch-w24-bl-phone-band-unreachable-by-the-width-sweep's defect — "the ` +
+          `phone band 320-618 is unmeasured on every screen it owns" — therefore cannot re-open for \`#activity\` ` +
+          `without reding the axis check above, which reads the sweep's floor rather than repeating it`,
+        );
+        okLine(
+          `WHO ELSE DRIVES 320 IN THIS FILE, RECOUNTED FROM THE DECLARED AXES rather than asserted: ` +
+          `${driverSentence(widthDrivers(SELF_SRC, 320, "ACT_WIDTHS"))}. What was true of \`#activity\` before this ` +
+          `leg is the narrower claim, and it is the row's: none of those axes NAVIGATES to it — every one of them ` +
+          `drives #overview, #fleet, #billing, #settings/* or a detail route`,
+        );
+        okLine(
+          `\`#settings/env\` IS NOT MEASURED HERE AND THAT IS A REFUTATION, NOT A GAP: the team env-var screen was ` +
+          `deleted by cch-w53-bl's env-var Option A (ruled 2026-09-02). \`view-env\`, \`envVarRowHtml\` and ` +
+          `\`#env-body\` are absent from app.js and index.html, \`env-populated\` is not a scenario, the surviving ` +
+          `\`env-editor\` fixture is the SITE env-blob editor at \`#site/<id>\`, and __app.test.mjs asserts both ` +
+          `absences. A leg driving it would measure a population of ZERO under a screen name`,
+        );
+        fontPinnedEvidence(
+          `What is ASSERTED is face-independent anyway — a control's right edge inside the viewport, a page that ` +
+          `does not scroll sideways, and text that either fits or carries a cue that can actually paint`,
+        );
+      }
+    }
+
     // ── W21-S3: CONTENT IS THE VARIABLE, and every leg above is blind to it ──
     //    Every leg in this file drives the KIND corpus: the longest host any
     //    fixture ships is 32 characters and the longest name is 10. The server
@@ -6054,6 +7170,121 @@ async function main() {
           kindMax: 64,
           predicate: "a person on the sites list can tell their sites apart by the name they typed — the whole name, not the leading fragment that happened to fit",
         },
+        // ── cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche ──────────
+        //    TWO MORE 255-CAP TEXT HOSTS, found while building the cap→host
+        //    edge table and not taken in wave 22. Both were UNLISTED here and
+        //    unpopulated in the corpus: the fixture values live beside their
+        //    derivations in scenarios.mjs (`cruelAccountLogin` /
+        //    `cruelPinnedRelease`), and the cruel side of both is the same
+        //    `fleet-cruel-content` every row above uses.
+        //
+        //    THE FILING'S NUMBERS WERE STALE, AND E11 IS WHY THEY ARE NOT
+        //    REPLACED WITH NEW ONES (charter D41): every host below is anchored
+        //    by FUNCTION, with the grep that re-derives it —
+        //    `githubCardHtml()` for `.fleet-name`
+        //    (grep -n 'function githubCardHtml' cloud/priv/static/app.js),
+        //    `fleetMetaHtml()` / `fleetAutoupdateText()` for `.fleet-meta`, and
+        //    `openPinModal()` for the write. The filed line numbers (2473 for
+        //    the card, 6794-6822 for the pin modal, app.css 989 for the meta
+        //    rule) all point at unrelated code on this tree; the app.css rule
+        //    is the one citation kept as a number, because E11's ban is
+        //    shape-scoped to `app.js:<digits>` and app.css cites itself by line
+        //    throughout. The filing also reported
+        //    `grep -c account_login scenarios.mjs = 0`; it is 5 on this tree —
+        //    four of them the SAME 16-character "acme-engineering", which is
+        //    the condition the row actually describes (populated, never cruel),
+        //    not absence.
+        {
+          hash: "#settings/providers", view: "view-providers", sel: ".fleet-name", ready: ".fleet-row",
+          scopes: ".fleet-main, .fleet-row",
+          scens: [
+            { scen: "fleet-cruel-content", hash: "#settings/providers" },
+            { scen: "providers-connected", hash: "#settings/providers" },
+          ],
+          cap: "installation.account_login <= 255 — validate_length(:account_login, max: 255) in Installation.changeset/2 (github/installation.ex:48) AND the varchar(255) column (`add :account_login, :string`, priv/repo/migrations/20260702160000_create_github_installations.exs:18). The EFFECTIVE cap is the min of those two and nothing downstream shortens it: githubCardHtml esc()s the value into `'GitHub · ' + login` with no truncation of its own, so the host renders 9 + 255 = 264 characters",
+          // INADMISSIBLE, and the derivation is a WRITE-PATH one rather than a
+          // role one (L2, no write was run). NO Barkpark request field carries
+          // this value: `POST /v1/github/installations` (router.ex:5753, team
+          // admin) reads only `installation_id` from the body, and
+          // `GitHub.record_installation/2` (github.ex:114) takes the login from
+          // `client().get_installation/1` — `Real.get_installation/1` reading
+          // `decoded["account"]["login"]` off api.github.com (github/real.ex:
+          // 51-56). So no person can type 255 characters into this host through
+          // this system, and the row is an UPPER BOUND, exactly as
+          // `.instance-card-name` above is — NOT a reachability claim.
+          //
+          // IT STILL PAYS RENT, and that is why it is listed rather than
+          // dropped: the producer is a third-party API this repo does not
+          // bound, and the two layers that DO bound it (changeset + column)
+          // both sit at 255. If GitHub ever answers with a long account login,
+          // 255 characters is what this card must survive, and no other
+          // instrument would have found out.
+          class: "INADMISSIBLE",
+          cruelMin: 255,
+          // `providers-connected` renders "GitHub · acme-engineering" (25
+          // characters). 64 is the ceiling every row in this table uses, and it
+          // sits comfortably above a real GitHub login — github.com itself does
+          // not mint one anywhere near it — while a drift toward the 255-char
+          // twin reds.
+          kindMax: 64,
+          predicate: "a person who connected GitHub can read WHICH account Barkpark is acting through — the whole login, not the fragment that fits before the Connected badge",
+        },
+        {
+          hash: "#fleet", view: "view-fleet", sel: ".fleet-meta", ready: ".fleet-row",
+          scopes: ".fleet-main, .fleet-row",
+          scens: ["fleet-cruel-content", "mixed-fleet"],
+          cap: "barkpark.pinned_release <= 255 — validate_length(:pinned_release, max: 255) in autoupdate_changeset/2 (registry/barkpark.ex:981) AND the varchar(255) column (`add :pinned_release, :string`, priv/repo/migrations/20260707110000_add_autoupdate_to_barkparks.exs:20). The changeset's ONLY other clause is an update_change TRIM (barkpark.ex:977-980) — no format regex, so a length-only cruel string is server-legal here, unlike site.domains above. The downstream derivation LENGTHENS: fleetAutoupdateText renders `\"pinned \" + vRel(pinned_release)` and vRel prepends a \"v\" to anything that does not carry one, so the fixture starts with \"v\" and the segment paints exactly 262 characters",
+          // CRUEL, and this one IS a reachability claim (L2 — a source
+          // derivation, no write was run). `PATCH /v1/barkparks/:id/autoupdate`
+          // (router.ex:4271, Auth.require_current_team_admin) casts the body's
+          // `pinned_release` straight into the narrow autoupdate_changeset, and
+          // the console writes it from `#pin-input` (app.js openPinModal,
+          // :11164-11192) — an input with NO `maxlength` attribute and no
+          // client-side format check, submitted as
+          // `$("#pin-input").value.trim()`. A team admin types the value and
+          // the server keeps all 255 characters of it.
+          //
+          // THE HOST HAS NO WRAP PROTECTION: `.fleet-meta` (app.css:1069)
+          // declares font-size, colour, font-family and margin-top and NOTHING
+          // about wrapping or overflow — which is why the fixture string is a
+          // single unbroken token (scenarios.mjs refuses one that is not).
+          class: "CRUEL",
+          cruelMin: 255,
+          // `mixed-fleet`'s meta line is the ordinary region · size · version ·
+          // channel · autoupdate sentence. 64 is this table's shared ceiling and
+          // is the number to move — with its measurement quoted — if an
+          // ordinary fleet row ever legitimately renders a longer meta line.
+          kindMax: 64,
+          predicate: "a person scanning their fleet can read WHAT VERSION a box is frozen on — the tag they typed into the pin box, whole, not the leading fragment that fit before the row ran out",
+        },
+      ];
+      // ── THE REFUSAL HALF OF THE LEDGER (cchi-w22-bl-cruel-corpus-uncovered-
+      //    caps-second-tranche). A family that cannot be DRIVEN is not the same
+      //    as a family with no verdict, and the table above has no room for it:
+      //    every row there walks cells and dies on "zero NON-EMPTY selector".
+      //    So an uncoverable host lands HERE, with the same evidence a row
+      //    carries plus the one thing a row does not need — what the corpus
+      //    would have to grow for the row to become drivable. It is PRINTED in
+      //    the ok-lines below, so a reader sees the listed population and the
+      //    refused one together and a future corpus change can flip an entry
+      //    into CRUEL_ROUTES instead of rediscovering it.
+      const CRUEL_REFUSALS = [
+        {
+          field: "barkpark.vercel_deploy_url",
+          // THE KEY RENAME, RECORDED (the row's criterion 3). A name-keyed
+          // census over app.js for `vercel_deploy_url` returns ZERO and
+          // declares the field unrendered. It is rendered — under a DIFFERENT
+          // KEY, as both the href and the link text, three times.
+          from: "vercel.ex:125 (serialized as deployment_url)",
+          // The filing pinned `vercel.ex:107`; on origin/main the
+          // `deployment_url: bp.vercel_deploy_url` line of `Vercel.state/1` is
+          // :125. The FILE and the SYMBOL are what to re-derive against:
+          // `grep -n 'deployment_url' cloud/lib/barkpark_cloud/vercel.ex`.
+          host: ".new-fineprint .mono — href AND text on all THREE arms of the claim ladder: vercelClaimLinkHtml(), vercelClaimedHtml() and vercelClaimUnknownHtml() (re-derive: grep -n 'function vercelClaim' cloud/priv/static/app.js)",
+          cap: "barkpark.vercel_deploy_url <= 255 — validate_length(:vercel_deploy_url, max: 255) in vercel_changeset/2 (registry/barkpark.ex:1027) AND the varchar(255) column (`add :vercel_deploy_url, :string`, priv/repo/migrations/20260705200000_add_vercel_claim_to_barkparks.exs:10). No downstream derivation shortens it; the producer LENGTHENS by 8 (`\"https://\" <> url`, vercel/real.ex:61)",
+          reachability: "L2 (source derivation, no write run) — MACHINE-WRITTEN, never person-typed. The sole writer is Vercel.deploy_for/1 -> persist/2 (vercel.ex:76-88, :194-203), whose value is `deployed.deployment_url` from client().deploy_project/3; in prod that is Real.deploy_project/3 returning `\"https://\" <> deployment[\"url\"]` from api.vercel.com (vercel/real.ex:51-62). Its one caller is POST /v1/barkparks/:id/vercel-deploy (router.ex:5292)",
+          why: "UNREACHABLE BY THE CORPUS, at two independent rungs, and neither is a fixture VALUE this slice could add. (1) `vercelClaimHtml` renders nothing unless `boot.vercel` is present, and `boot` is GET /v1/barkparks/:id/bootstrap — a path scenarios.mjs's route() does not model, so it falls to the terminal `/v1/` 200 {} and `boot.vercel` is undefined in EVERY scenario. (2) Even with that arm, the host lives on the /new READY screen, which `newRenderReady` reaches only from `newCheckStatus`'s poll (re-derive: grep -n 'function newRenderReady\\|function newCheckStatus' cloud/priv/static/app.js) — ZERO scenarios deep-link `#new`, so there is no hash that lands there. Covering it needs a bootstrap route arm carrying a `vercel` block AND a scenario that drives the create flow to `step === \"ready\"`, which is a corpus build, not a cruel string",
+        },
       ];
       // Per-scenario hash, normalized once. A row may hand `scens` a bare
       // scenario name (the hash is the row's) or `{ scen, hash }` (its own).
@@ -6102,6 +7333,21 @@ async function main() {
           fail(D, `axis check ${at}: the row is missing its ${!route.cap ? "cap citation" : "person-facing predicate"} — a cruel row that cannot say which cap it is cut to, or which person it is for, is a fixture with no claim attached`);
         }
       }
+      // THE REFUSAL TABLE'S OWN SHAPE CHECK. An entry that cannot say which
+      // KEY it is serialized under, which cap it carries, how its reachability
+      // was settled, or WHY nothing drives it is not a recorded verdict — it is
+      // a note. The `from:` field is the one this table exists for: it is the
+      // answer to a name-keyed grep that returned zero.
+      for (const r of CRUEL_REFUSALS) {
+        for (const f of ["field", "from", "host", "cap", "reachability", "why"]) {
+          if (!r[f]) {
+            fail(D, `refusal check \`${r.field || "<unnamed>"}\`: the entry is missing its \`${f}\` — an uncoverable family with an incomplete record is indistinguishable from a family nobody looked at`);
+          }
+        }
+        if (!/^L1|^L2/.test(r.reachability || "")) {
+          fail(D, `refusal check \`${r.field}\`: the reachability verdict does not open with L1 (a write that was run) or L2 (a source derivation) — an unlabelled verdict is the kind this epic has been wrong about twice`);
+        }
+      }
       if (!CRUEL_WIDTHS.some((w) => w <= 899) || !CRUEL_WIDTHS.some((w) => w >= 900)) {
         fail(D, `axis check: the width set does not straddle 899 — \`.fleet-row\` is column-direction below and row-direction above, so a bound proven on one side is unproven on the other`);
       }
@@ -6120,7 +7366,23 @@ async function main() {
       const HEIGHT_SLACK = 1;
       let cells = 0, seen = 0, spilled = 0, pageOver = 0, wentKind = 0, wentCruel = 0;
       let heightsSeen = 0, tooTall = 0;
+      // ── PER-HOST POPULATIONS (cchi-w22-bl-cruel-corpus-uncovered-caps-
+      //    second-tranche). The aggregate `spilled` is one number over five
+      //    families: a new row that measures NOTHING and a new row that
+      //    measures a clean host print the same 0. So every row keeps its own
+      //    tally and the ok-line prints it PER HOST — the population it drove,
+      //    the non-empty nodes it measured, the longest string it saw on each
+      //    side of the axis, and the offending cells including the zeros. A
+      //    survived-contact verdict is only a verdict with the numbers beside
+      //    it.
+      const perHost = new Map();
+      const statOf = (r) => {
+        const k = `${r.hash} ${r.sel}`;
+        if (!perHost.has(k)) perHost.set(k, { cells: 0, seen: 0, spilled: 0, pageOver: 0, cruelMax: 0, kindMax: 0 });
+        return perHost.get(k);
+      };
       for (const route of CRUEL_ROUTES) {
+        const st = statOf(route);
         for (const cell of cruelCells(route)) {
           const scen = cell.scen;
           // The naming rule, restated where it is USED: a fixture is cruel iff
@@ -6210,6 +7472,7 @@ async function main() {
                 `return out;})()`,
               );
               cells++;
+              st.cells++;
               if (m.view !== route.view) {
                 fail(D, `${scen}/${theme}@${width}${cell.hash}: rendered section.view "${m.view}", asked for "${route.view}" — the hash did not route, so nothing below this line measures ${route.sel}`);
                 row.push(`${width}:?`);
@@ -6222,6 +7485,9 @@ async function main() {
                 continue;
               }
               seen += m.n;
+              st.seen += m.n;
+              if (isCruel) { if (m.longest > st.cruelMax) st.cruelMax = m.longest; }
+              else if (m.longest > st.kindMax) st.kindMax = m.longest;
               // ── THE AXIS, ASSERTED IN BOTH DIRECTIONS (D285) ──────────────
               // The one-sided version — a name regex here, a load-time throw in
               // the fixture that fires only when a CRUEL string SHORTENS — left
@@ -6238,10 +7504,12 @@ async function main() {
               }
               if (m.psw > m.pcw) {
                 pageOver++;
+                st.pageOver++;
                 fail(D, `${scen}/${theme}@${width}${cell.hash}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the page is off-screen sideways. A host on this route has no bound, so it never clips ITSELF: it pushes the PAGE, which is invisible to an element-only scorer`);
               }
               for (const b of m.bad) {
                 spilled++;
+                st.spilled++;
                 fail(D, `${scen}/${theme}@${width}${cell.hash} el${b.i} in \`${b.scope}\` (matched \`${route.sel}\`): scrollWidth ${b.sw} > clientWidth ${b.cw} — ${Math.round((1 - b.cw / b.sw) * 100)}% of a ${b.len}-character value ("${b.t}…") is not rendered. Computed ON THE MEASURED ELEMENT: overflow-wrap "${b.ow}", white-space "${b.ws}", text-overflow "${b.te}", overflow "${b.ov}". The scope named here is the wrapper a remedy has to be authored against — not the row's selector`);
               }
               row.push(`${width}:${m.n}x${m.worst}${m.bad.length ? "!" + m.bad.length : ""}${m.psw > m.pcw ? "P" + (m.psw - m.pcw) : ""}`);
@@ -6294,6 +7562,23 @@ async function main() {
       if (cells !== cellCount) {
         fail(D, `run check: drove ${cells} cells, the table declares ${cellCount} — the loop measured a different corpus than the header announced, so a "cells clean" line here would be counted over ${Math.abs(cellCount - cells)} cell(s) nobody drove`);
       }
+      // ── THE PER-HOST POPULATION TABLE, PRINTED UNCONDITIONALLY ────────────
+      // Not inside the ok-lines below: those print only when this leg took no
+      // failure at all, and the numbers a reader most needs — which host
+      // carried the offending cells — are exactly the numbers a failing run
+      // withholds if they ride a green-only line. Zeros are printed too: a
+      // host whose cruel twin found nothing gets its survived-contact verdict
+      // WITH its population, which is the only thing that separates it from a
+      // host that measured nothing at all.
+      process.stdout.write(`   ${D} — per-host populations (cells / non-empty nodes / longest cruel / longest kind / offending cells / pages over)\n`);
+      for (const [k, v] of perHost) {
+        process.stdout.write(
+          `      ${k}  cells ${v.cells}  nodes ${v.seen}  cruelMax ${v.cruelMax}  kindMax ${v.kindMax}  offending ${v.spilled}  pageOver ${v.pageOver}\n`,
+        );
+      }
+      for (const r of CRUEL_REFUSALS) {
+        process.stdout.write(`      REFUSED ${r.field} -> ${r.host}  from: ${r.from}  offending 0 (NOT MEASURED — see the refusal entry)\n`);
+      }
       if (!failures.some((f) => f.defect === D)) {
         okLine(
           `${cells} / ${cells} cells clean (${seen} non-empty ${CRUEL_ROUTES.map((r) => r.sel).join(" / ")} measured) across ` +
@@ -6318,6 +7603,20 @@ async function main() {
           `could have told 19 line boxes from 220. A LONGER error moves both sides together and stays green (D206: a ` +
           `pixel pin would pin the fixture string); only LAYOUT waste — a min-height, a per-line margin, a second copy ` +
           `of the box — moves the measured side alone`,
+        );
+        okLine(
+          `PER HOST, including the zeros (cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche): ` +
+          [...perHost].map(([k, v]) => `${k} ${v.spilled}/${v.cells} offending over ${v.seen} nodes (cruel ${v.cruelMax} / kind ${v.kindMax})`).join("; ") +
+          `. The aggregate number above is five families deep, so a row that measured NOTHING and a row that measured a CLEAN host both printed 0 into it; ` +
+          `these are the populations behind each verdict. A 0 beside a non-zero \`nodes\` count and a cruelMax at or above the row's floor is a SURVIVED-CONTACT verdict — the host was driven at its cap and held`,
+        );
+        okLine(
+          `and the REFUSAL half of the ledger, printed rather than dropped: ` +
+          (CRUEL_REFUSALS.length
+            ? CRUEL_REFUSALS.map((r) => `${r.field} (${r.from}) -> ${r.host}, ${r.reachability.split(" —")[0]}`).join("; ")
+            : "none") +
+          `. ${CRUEL_REFUSALS.length} famil${CRUEL_REFUSALS.length === 1 ? "y" : "ies"} carr${CRUEL_REFUSALS.length === 1 ? "ies" : "y"} a cap, a host and a settled reachability verdict and STILL cannot be driven by this corpus — the reason is in the entry's \`why\`, and it names what the corpus would have to grow. ` +
+          `The \`from:\` field is the point: a name-keyed grep for \`vercel_deploy_url\` over app.js returns ZERO and declares the field unrendered, because the SPA reads it under the key \`deployment_url\``,
         );
         okLine(
           `each finding names the WRAPPER SCOPE it measured (${CRUEL_ROUTES.map((r) => r.scopes).join(" | ")}) rather than the ` +
@@ -7165,10 +8464,23 @@ async function main() {
     //    `s.name`, capped at 255 by a `validate_length` a census reads straight
     //    off. It is the census-invisible emitter that carries the live defect.
     //
-    //    1280 APPEARS IN NO INSTRUMENT IN THIS REPO TODAY — this leg is the
-    //    first to drive it, and it is not decoration: the defect persists above
-    //    every band any other leg sweeps (2577/1280), so a sweep that stops at
-    //    1024 certifies a desktop that is still dragging.
+    //    WHY 1280 IS IN THIS AXIS — and the claim that used to sit here, which
+    //    was FALSE (task-72ffb2fdecffd2d3). These four lines read "1280 APPEARS
+    //    IN NO INSTRUMENT IN THIS REPO TODAY — this leg is the first to drive
+    //    it … the defect persists above every band any other leg sweeps
+    //    (2577/1280), so a sweep that stops at 1024 certifies a desktop that is
+    //    still dragging". Both halves were wrong, and the counter-examples were
+    //    in THIS FILE: `FLICK_VIEWPORTS` (the W27-failed-retry leg) has driven
+    //    1280x900 since 7c8fa229a, 2026-08-03 — and hard-guards it with an axis
+    //    check that REFUSES if the cell ever leaves — while six axes here sweep
+    //    to 1440, well above 1280. The true reason 1280 belongs in THIS axis is
+    //    unaffected and stands on its own: the instance grid still read 2577/1280
+    //    on the defective tree, so this leg's own band has to reach it.
+    //
+    //    The coverage claim is no longer prose. It is COMPUTED from the declared
+    //    axes at print time by width-drivers.mjs and printed below, so the next
+    //    axis edit MOVES the sentence instead of rotting it — breakpoint-sweep.
+    //    mjs:611, "A COMMENT CANNOT BE DERIVED, only RECOUNTED".
     //
     //    THE FIXTURE EXISTED AND NOTHING MEASURED IT: `sites-on-instance` drives
     //    the same rows — including the 253-char cruel domain — through the
@@ -7285,10 +8597,14 @@ async function main() {
         okLine(
           `900/1000/1280 are the DRIVEN widths (all three measured broken); 320/390/720 are NEGATIVE CONTROLS — ` +
           `the ≤899 block single-columns the grid there and every number was byte-identical across the fix, so ` +
-          `they detect only a remedy that re-shreds the phone layout. 1280 is driven by NO other instrument in ` +
-          `this repo: the defect outlived every band swept above, and a sweep stopping at 1024 certifies a ` +
-          `desktop that is still dragging`,
+          `they detect only a remedy that re-shreds the phone layout`,
         );
+        // THE COVERAGE SENTENCE, RECOUNTED (task-72ffb2fdecffd2d3). What stood
+        // here claimed "1280 is driven by NO other instrument in this repo" on
+        // every clean run, for thirty-nine days after FLICK_VIEWPORTS in this
+        // same file started driving it. Derived from THIS FILE'S OWN BYTES so
+        // the next axis edit moves it.
+        okLine(driverSentence(widthDrivers(SELF_SRC, 1280, "TRACK_WIDTHS")));
       }
     }
 
@@ -9103,6 +10419,567 @@ async function main() {
       }
     }
 
+    // ── W35: THE WALK THAT MEASURES A SCREEN NOBODY IS LOOKING AT ───────────
+    // Every OTHER leg in this file enters its scenario through `nav()`, which
+    // changes the QUERY STRING and therefore performs a full document load: one
+    // view has ever been painted and every other `section.view` is the empty
+    // shell index.html shipped. A person never arrives that way. They land on
+    // `#overview` and click through, app.js routes by setting `section.hidden`
+    // and never clears a view's innerHTML, and every screen they have already
+    // visited stays in the document — painted, laid out, and matched by every
+    // document-wide selector in this file.
+    //
+    // cch-w24-s5 scoped ONE walk (`.fleet-row`, W15) after measuring 8 rows
+    // document-wide against 5 in view on `mixed-fleet`. This leg is the CLASS:
+    //   (0) THE CENSUS — every `document.querySelector(All)?(…)` in this file,
+    //       classified by view-scope-census.mjs, then DRIVEN: after a person's
+    //       tour of every routable screen, how many matches does each
+    //       document-wide selector have inside a HIDDEN view? The static half
+    //       says where to look; only the browser says what is there.
+    //   (1) THE SEQUENCE — the same fleet cell entered both ways, counts side
+    //       by side.
+    //   (2) THE MUTATION — residue deliberately left in a hidden view must not
+    //       move the SCOPED walk, and must move the document-wide one. A proof
+    //       that only shows the green half shows nothing.
+    //
+    // WHY THIS LEG IS ALLOWED TO WRITE TO THE DOM, when no other leg here is:
+    // its subject IS the DOM's cross-view state, and the alternative (a
+    // committed fixture whose markup contains the residue) would prove that a
+    // selector matches markup somebody wrote, not that routing leaves it behind.
+    // The residue is injected under a `data-w35-residue` attribute, counted
+    // before and after, and its removal is ASSERTED — a leg that leaks residue
+    // would poison every later cell in this run.
+    if (requested.includes("W35-hash-nav-hidden-view-residue")) {
+      const D = "W35-hash-nav-hidden-view-residue";
+      const SCEN = "mixed-fleet";
+
+      // ── (0a) THE STATIC CENSUS, over this file's OWN bytes ────────────────
+      const walks = censusWalks(SELF_SRC);
+      const tally = censusTally(walks);
+      const docWide = documentWideSelectors(walks);
+      // INSTRUMENT INTEGRITY, not a finding: a census that reads zero walks has
+      // been defeated by a rename and everything below it would be vacuously
+      // green. This file is ~10k lines of browser probes; it cannot contain no
+      // element walks.
+      if (tally.total < 50 || docWide.length === 0) {
+        return die(
+          `${D}: the static census read ${tally.total} walk(s) and ${docWide.length} distinct document-wide ` +
+          `selector(s) out of this file's own bytes. That is not a clean file, it is a DEFEATED CENSUS — ` +
+          `view-scope-census.mjs's call pattern no longer matches how this guard spells its walks. ` +
+          `Nothing below this line would have measured anything.`,
+        );
+      }
+      const unresolved = walks.filter((w) => w.kind === "unresolved");
+      process.stdout.write(
+        `\n${D} — ${tally.total} element walks censused from this file's own bytes: ` +
+        `${tally["document-wide"]} document-wide (${docWide.length} distinct selectors), ` +
+        `${tally["id-anchored"]} id-anchored, ${tally["live-view"]} scoped to the live view, ` +
+        `${tally["global-chrome"]} page chrome, ${tally.unresolved} UNRESOLVED (selector built at runtime — ` +
+        `lines ${unresolved.map((w) => w.line).join(",") || "none"}; classified from bytes is impossible, so ` +
+        `they are NAMED rather than dropped)\n`,
+      );
+
+      // ── THE PERSON'S NAVIGATION, and why it is not `nav()` ────────────────
+      // `nav()` calls Page.navigate. This writes `location.hash`, which is what
+      // a click on the sidebar does: one document, one `hashchange`, no reload,
+      // every previously routed view left in place. The settle is a QUIESCENCE
+      // poll (the view's own text stops changing) rather than a fixed sleep,
+      // because each screen's paint arrives on its own fetch.
+      const hashNav = async (hash, wantView) => {
+        await evalJs(`(function(){location.hash=${JSON.stringify(hash)};return true;})()`);
+        const t0 = Date.now();
+        let landed = "none";
+        while (Date.now() - t0 < RENDER_CAP) {
+          landed = await evalJs(
+            `(function(){var v=document.querySelector('section.view:not([hidden])');return v?v.id:'none';})()`,
+          );
+          if (landed === wantView) break;
+          await sleep(50);
+        }
+        if (landed !== wantView) {
+          return { hash, want: wantView, landed, els: -1, settled: false };
+        }
+        let last = -1, stable = 0, els = 0;
+        for (let i = 0; i < 40 && stable < 2; i++) {
+          const n = await evalJs(
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return v?v.querySelectorAll('*').length:-1;})()`,
+          );
+          stable = n === last ? stable + 1 : 0;
+          last = n; els = n;
+          if (stable < 2) await sleep(75);
+        }
+        return { hash, want: wantView, landed, els, settled: stable >= 2 };
+      };
+
+      // The fleet cell, measured BOTH ways in one expression: the scoped walk
+      // cch-w24-s5 installed, the document-wide walk it replaced, and where the
+      // SINGULAR `document.querySelector('.fleet-row')` — this leg's own
+      // readiness idiom, and W15's — actually resolves.
+      const FLEET_PROBE =
+        `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+        `var first=document.querySelector('.fleet-row');` +
+        `return {view:v?v.id:'none',` +
+        ` rows:v?v.querySelectorAll('.fleet-row').length:-1,` +
+        ` docRows:document.querySelectorAll('.fleet-row').length,` +
+        ` firstRowIn:first?(first.closest('section.view')?first.closest('section.view').id:'outside-any-view'):'none',` +
+        ` residue:document.querySelectorAll('[data-w35-residue]').length};})()`;
+
+      const FLEET_READY =
+        `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+        `return !!(v && v.id==='view-fleet' && v.querySelector('.fleet-row'));})()`;
+      const OVERVIEW_READY =
+        `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+        `return !!(v && v.id==='view-overview' && v.querySelectorAll('*').length>20);})()`;
+
+      await setViewport(1000);
+
+      // ── (1a) TODAY'S ENTRY: a full load straight at #fleet ────────────────
+      await nav(`${BASE}/?scen=${SCEN}&theme=light&w35=fullload#fleet`, FLEET_READY);
+      const full = await evalJs(FLEET_PROBE);
+
+      // ── (1b) THE PERSON'S ENTRY: land on #overview, then hash-navigate ────
+      await nav(`${BASE}/?scen=${SCEN}&theme=light&w35=hashnav#overview`, OVERVIEW_READY);
+      const beforeHop = await evalJs(FLEET_PROBE);
+      // THE PRISTINE SHELLS, snapshotted before a single hop. index.html ships
+      // every `section.view` as an empty-ish shell; "did this screen actually
+      // paint during the tour" is only answerable against what it looked like
+      // before the tour, and a view that never painted would contribute zero
+      // residue FOR THE WRONG REASON.
+      const SHELLS = await evalJs(
+        `(function(){var o={};[].slice.call(document.querySelectorAll('section.view')).forEach(function(v){` +
+        `o[v.id]=v.querySelectorAll('*').length;});return o;})()`,
+      );
+      const hop = await hashNav("#fleet", "view-fleet");
+      if (hop.landed !== "view-fleet") {
+        return die(
+          `${D}: writing location.hash='#fleet' from #overview landed "${hop.landed}" — the SPA did not route, ` +
+          `so the sequence this leg exists to drive never happened and nothing below measures a person's path.`,
+        );
+      }
+      const seq = await evalJs(FLEET_PROBE);
+
+      process.stdout.write(
+        `   entry comparison on ${SCEN}@1000 — FULL LOAD (#fleet direct, what every leg in this file does): ` +
+        `${full.rows} row(s) in view, ${full.docRows} document-wide, singular .fleet-row resolves into ` +
+        `${full.firstRowIn}\n` +
+        `   entry comparison on ${SCEN}@1000 — HASH NAV (#overview, then location.hash='#fleet', what a person ` +
+        `does): ${seq.rows} row(s) in view, ${seq.docRows} document-wide, singular .fleet-row resolves into ` +
+        `${seq.firstRowIn}. #overview alone had already painted ${beforeHop.docRows} .fleet-row(s) before the ` +
+        `hop (view was ${beforeHop.view})\n`,
+      );
+
+      // THE PRECONDITION, asserted rather than assumed: if the two entries
+      // agree document-wide, this scenario no longer reproduces the
+      // inheritance and every green below is vacuous. That is a REFUSAL (the
+      // instrument cannot measure), never a clean run.
+      if (seq.docRows <= seq.rows) {
+        return die(
+          `${D}: the hash-navigation sequence measured ${seq.docRows} .fleet-row(s) document-wide against ` +
+          `${seq.rows} in the visible view — the hidden #view-overview is no longer painting rows under that ` +
+          `class, so THIS SCENARIO NO LONGER REPRODUCES the inheritance cch-w24-s5 was cut for. The mutation ` +
+          `below would pass against a condition that is not there. Re-pick the scenario, or retire this leg.`,
+        );
+      }
+      // The whole point of the s5 fix: the SCOPED count must not care how the
+      // person arrived. If it does, the scoping is not doing its job.
+      if (seq.rows !== full.rows) {
+        fail(D, `${SCEN}@1000: the SCOPED walk measured ${full.rows} row(s) entered by full load and ${seq.rows} entered by hash navigation — cch-w24-s5's scoping was supposed to make the count independent of the entry path, and it is not`);
+      }
+      okLine(
+        `THE ENTRY PATH CHANGES THE DOCUMENT-WIDE COUNT AND NOT THE SCOPED ONE: full load ${full.docRows} ` +
+        `document-wide / ${full.rows} in view; hash navigation ${seq.docRows} / ${seq.rows}. The scoped walk ` +
+        `cch-w24-s5 installed reads ${seq.rows} either way; the walk it replaced reads ` +
+        `${seq.docRows - full.docRows} more the moment a person reaches #fleet the way a person reaches it, ` +
+        `and the SINGULAR \`document.querySelector('.fleet-row')\` resolves into ${seq.firstRowIn} rather than ` +
+        `the fleet view. Every leg in this file enters by full load, so this difference is a property of the ` +
+        `HARNESS and not of any leg that looks clean under it`,
+      );
+
+      // ── (0b) THE TOUR: every routable screen, reached the way a person ────
+      //      reaches it, so the residue question is asked of a document that
+      //      has actually accumulated views.
+      const TOUR = [
+        ["#overview", "view-overview"],
+        ["#fleet", "view-fleet"],
+        ["#sites", "view-sites"],
+        ["#activity", "view-activity"],
+        ["#settings/billing", "view-billing"],
+        ["#settings/providers", "view-providers"],
+        ["#settings/notifications", "view-notifications"],
+        ["#settings/tokens", "view-tokens"],
+        ["#settings/members", "view-members"],
+      ];
+      const hops = [];
+      for (const [hash, want] of TOUR) hops.push(await hashNav(hash, want));
+      // The two DRILL-DOWNS, whose ids are read off the paint rather than typed:
+      // a hard-coded uuid that stopped existing would tour an empty shell and
+      // report less residue than the tree holds.
+      // The rows are `div[role=button][data-id]` with a click handler that
+      // writes the hash (app.js `.fleet-row[data-id]` / `.site-row[data-id]`
+      // wiring), never anchors — so the id is READ OFF THE PAINT and the hash
+      // is written the same way the handler would. A typed uuid that stopped
+      // existing would tour an empty shell and under-report the residue.
+      await hashNav("#fleet", "view-fleet");
+      const instId = await evalJs(
+        `(function(){var r=document.querySelector('section.view:not([hidden]) .fleet-row[data-id]');` +
+        `return r?r.getAttribute('data-id'):null;})()`,
+      );
+      const instHref = instId ? `#instance/${instId}` : null;
+      if (instHref) hops.push(await hashNav(instHref, "view-instance"));
+      await hashNav("#sites", "view-sites");
+      const siteId = await evalJs(
+        `(function(){var r=document.querySelector('section.view:not([hidden]) .site-row[data-id]');` +
+        `return r?r.getAttribute('data-id'):null;})()`,
+      );
+      const siteHref = siteId ? `#site/${siteId}` : null;
+      if (siteHref) hops.push(await hashNav(siteHref, "view-site"));
+      // End the tour where the measurement wants to stand: on #fleet, with
+      // every other view hidden and populated.
+      const finalHop = await hashNav("#fleet", "view-fleet");
+      hops.push(finalHop);
+
+      const unrouted = hops.filter((h) => h.landed !== h.want);
+      const unsettled = hops.filter((h) => h.landed === h.want && !h.settled);
+      process.stdout.write(
+        `   tour: ${hops.length} hash navigation(s), ${hops.length - unrouted.length} routed` +
+        `${unrouted.length ? ` (UNROUTED: ${unrouted.map((h) => `${h.hash}->${h.landed}`).join(", ")})` : ""}` +
+        `${unsettled.length ? ` (never quiesced: ${unsettled.map((h) => h.hash).join(", ")})` : ""}` +
+        ` · elements per screen: ${hops.map((h) => `${h.hash}:${h.els}`).join(" ")}\n`,
+      );
+      // A drill-down that was never reachable is a HOLE in the census, not a
+      // clean answer: `.detail-rail`, `.bp-tl-retry`, `.site-name` and friends
+      // only ever paint inside those two views.
+      if (!instHref || !siteHref) {
+        return die(
+          `${D}: the tour could not find a ${!instHref ? "#instance/" : "#site/"} link to follow on ${SCEN}, so ` +
+          `the ${!instHref ? "instance" : "site"} detail view was never painted. Every detail-view selector in ` +
+          `the census would report zero residue for the sole reason that nothing ever rendered there — a hole ` +
+          `reported as a clean column is the defect this leg exists to catch.`,
+        );
+      }
+      if (finalHop.landed !== "view-fleet") {
+        return die(`${D}: the tour did not end on #fleet (landed "${finalHop.landed}") — the residue census below would be taken from an unknown vantage point`);
+      }
+
+      // ── (0c) THE RESIDUE CENSUS: per selector, per view, MEASURED ─────────
+      const sels = docWide.map((e) => e.selector);
+      const resid = await evalJs(
+        `(function(){var sels=${JSON.stringify(sels)};` +
+        `var views=[].slice.call(document.querySelectorAll('section.view'));` +
+        `var live=document.querySelector('section.view:not([hidden])');` +
+        `var out={live:live?live.id:'none',painted:{},sel:{}};` +
+        `views.forEach(function(v){out.painted[v.id]=v.querySelectorAll('*').length;});` +
+        `sels.forEach(function(s){var e={total:0,live:0,hidden:0,views:[]};` +
+        `  try{e.total=document.querySelectorAll(s).length;}catch(err){e.err=String(err&&err.message||err);out.sel[s]=e;return;}` +
+        `  if(live){try{e.live=live.querySelectorAll(s).length;}catch(err){}}` +
+        `  views.forEach(function(v){if(!v.hidden)return;var n=0;try{n=v.querySelectorAll(s).length;}catch(err){}` +
+        `    if(n>0){e.hidden+=n;e.views.push(v.id);}});` +
+        `  out.sel[s]=e;});` +
+        `return out;})()`,
+      );
+
+      // WHICH SCREENS ACTUALLY PAINTED. A view still at its pristine shell size
+      // contributes zero residue for a reason that has nothing to do with the
+      // selectors — and a clean column read off an unpainted screen is the exact
+      // species of vacuous green this leg was cut to stop. Named, never netted
+      // into the total.
+      const neverPainted = Object.keys(resid.painted).filter((id) => resid.painted[id] <= (SHELLS[id] ?? 0));
+      process.stdout.write(
+        `   screens painted during the tour (elements now / pristine shell): ` +
+        `${Object.keys(resid.painted).map((id) => `${id.replace("view-", "")} ${resid.painted[id]}/${SHELLS[id] ?? "?"}`).join(" · ")}\n`,
+      );
+      if (neverPainted.length) {
+        process.stdout.write(
+          `   ! ${neverPainted.length} view(s) NEVER GREW past their shipped shell (${neverPainted.join(", ")}) — ` +
+          `every selector that only ever paints there reads 0 hidden matches below for a reason that is not ` +
+          `about the selector. Those columns are UNMEASURED, not clean\n`,
+        );
+      }
+
+      const bad = Object.entries(resid.sel).filter(([, v]) => v.err);
+      if (bad.length) {
+        fail(D, `${bad.length} censused selector(s) threw in the browser — the census cannot speak for them: ${bad.map(([s, v]) => `${s} (${v.err})`).join("; ")}`);
+      }
+      const exposed = Object.entries(resid.sel).filter(([, v]) => !v.err && v.hidden > 0);
+      const clean = Object.entries(resid.sel).filter(([, v]) => !v.err && v.hidden === 0);
+      process.stdout.write(
+        `   RESIDUE CENSUS after the tour, standing on ${resid.live} — ${exposed.length} of ${sels.length} ` +
+        `document-wide selector(s) match inside a HIDDEN view; ${clean.length} match none. Views hold ` +
+        `${Object.entries(resid.painted).map(([k, n]) => `${k.replace("view-", "")}:${n}`).join(" ")} element(s)\n`,
+      );
+      for (const [sel, v] of exposed.sort((a, b) => b[1].hidden - a[1].hidden)) {
+        const owners = docWide.find((e) => e.selector === sel);
+        process.stdout.write(
+          `      ${String(v.hidden).padStart(3)} hidden / ${String(v.live).padStart(3)} in view / ` +
+          `${String(v.total).padStart(3)} document-wide  ${sel}  [${owners ? owners.legs.join(", ") : "?"}]  ` +
+          `in ${v.views.join(",")}\n`,
+        );
+      }
+
+      // ── THE REGISTER, ratcheted in BOTH directions ────────────────────────
+      const measured = {};
+      for (const [sel, v] of Object.entries(resid.sel)) if (!v.err) measured[sel] = { hidden: v.hidden, views: v.views };
+      const drift = registerDrift(measured, RESIDUE_REGISTER);
+      for (const line of drift.unregistered) {
+        fail(D, `UNREGISTERED EXPOSURE — ${line}. A document-wide walk in this guard now reaches a view the person is not looking at, and no committed record says so. Scope the walk to \`section.view:not([hidden])\` the way cch-w24-s5 scoped \`.fleet-row\`, or add it to RESIDUE_REGISTER in view-scope-census.mjs with the reason it is harmless`);
+      }
+      for (const line of drift.stale) {
+        fail(D, `STALE REGISTER ROW — ${line}. Either the exposure was fixed (delete the row) or this tour stopped reaching the view that produced it, in which case the row is certifying a condition nobody can reproduce. A ratchet that only reds when the world gets worse is half an instrument`);
+      }
+      for (const line of drift.moved) {
+        fail(D, `EXPOSURE MOVED HOUSE — ${line}. The count is the same shape, the residue is somewhere else, and reading it as the same finding is how a census goes stale while staying green`);
+      }
+
+      // ── (2) THE MUTATION: residue in a hidden view, on purpose ────────────
+      // Standing on #fleet, `#view-overview` is hidden. Three `.fleet-row`
+      // elements are appended to it — exactly the shape the SPA leaves behind.
+      const RESIDUE_N = 3;
+      const preMut = await evalJs(FLEET_PROBE);
+      const injected = await evalJs(
+        `(function(){var h=document.getElementById('view-overview');` +
+        `if(!h) return {ok:false,why:'#view-overview is not in the document'};` +
+        `if(!h.hidden) return {ok:false,why:'#view-overview is NOT hidden — the residue would be visible and the mutation would prove nothing'};` +
+        `for(var i=0;i<${RESIDUE_N};i++){var d=document.createElement('div');` +
+        `  d.className='fleet-row';d.setAttribute('data-w35-residue','1');` +
+        `  d.innerHTML='<span class="fleet-name">w35-residue</span><span class="fleet-url">residue.example.com</span>';` +
+        `  h.appendChild(d);}` +
+        `return {ok:true,added:h.querySelectorAll('[data-w35-residue]').length};})()`,
+      );
+      if (!injected.ok) {
+        return die(`${D}: could not establish the mutation's PRECONDITION — ${injected.why}. Nothing was proven either way`);
+      }
+      const postMut = await evalJs(FLEET_PROBE);
+      const removed = await evalJs(
+        `(function(){var n=[].slice.call(document.querySelectorAll('[data-w35-residue]'));` +
+        `n.forEach(function(e){e.parentNode.removeChild(e);});` +
+        `return {left:document.querySelectorAll('[data-w35-residue]').length,removed:n.length};})()`,
+      );
+      const afterClean = await evalJs(FLEET_PROBE);
+
+      process.stdout.write(
+        `   MUTATION — ${RESIDUE_N} .fleet-row element(s) appended to the HIDDEN #view-overview while standing ` +
+        `on #fleet:\n` +
+        `      scoped walk (cch-w24-s5, \`v.querySelectorAll('.fleet-row')\`): ${preMut.rows} -> ${postMut.rows} ` +
+        `(delta ${postMut.rows - preMut.rows})\n` +
+        `      document-wide walk (what it replaced): ${preMut.docRows} -> ${postMut.docRows} ` +
+        `(delta ${postMut.docRows - preMut.docRows})\n` +
+        `      residue removed: ${removed.removed}, left behind: ${removed.left}; scoped walk after cleanup ` +
+        `${afterClean.rows}, document-wide ${afterClean.docRows}\n`,
+      );
+      if (postMut.rows !== preMut.rows) {
+        fail(D, `MUTATION: ${RESIDUE_N} rows appended to the HIDDEN #view-overview moved the SCOPED walk from ${preMut.rows} to ${postMut.rows}. cch-w24-s5's scoping does not hold — the leg is still measuring a screen nobody is looking at`);
+      }
+      if (postMut.docRows !== preMut.docRows + RESIDUE_N) {
+        fail(D, `MUTATION CONTROL: the document-wide walk went ${preMut.docRows} -> ${postMut.docRows} against an expected +${RESIDUE_N}. The residue did not land where this mutation says it landed, so the green half above proves nothing — a mutation nobody can see is not a control`);
+      }
+      if (removed.left !== 0 || afterClean.docRows !== preMut.docRows) {
+        fail(D, `MUTATION CLEANUP: ${removed.left} residue element(s) survive and the document-wide count is ${afterClean.docRows} against ${preMut.docRows} before injection — this leg has POISONED the document for every cell that runs after it`);
+      }
+
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `THE CENSUS IS DRIVEN, NOT ASSERTED: ${tally.total} walks read out of this file's own bytes ` +
+          `(${tally["document-wide"]} document-wide over ${docWide.length} distinct selectors, ` +
+          `${tally["live-view"]} already scoped to the live view, ${tally.unresolved} unresolved and NAMED), ` +
+          `then measured against a document a person had toured — ${hops.length} hash navigations across ` +
+          `${TOUR.length} tabs plus both drill-downs. ${exposed.length} selector(s) match inside a hidden view ` +
+          `and every one of them is in RESIDUE_REGISTER; ${clean.length} match none. The register reds in BOTH ` +
+          `directions: a new exposure and a row nobody can reproduce are each a refusal by name`,
+        );
+        okLine(
+          `WHAT THE ${exposed.length} REGISTERED EXPOSURES ARE, said plainly: NOT defects today. Every leg in ` +
+          `this file enters through \`nav()\`, a full document load, so no cell currently measures a hidden ` +
+          `view. Each registered selector is a walk whose ANSWER DEPENDS ON THE ENTRY PATH — the first cell ` +
+          `that reaches its screen by hash navigation measures those matches as if they were on the screen, ` +
+          `which is precisely how the W15 fleet walk read 8 rows against 5 for nine waves. Registering an ` +
+          `exposure records it; it does not discharge it, and the remedy per walk is cch-w24-s5's: compute ` +
+          `\`section.view:not([hidden])\` and walk THAT`,
+        );
+        okLine(
+          `THE MUTATION SHOWS BOTH HALVES: ${RESIDUE_N} .fleet-row elements appended to the HIDDEN ` +
+          `#view-overview left the scoped walk at ${postMut.rows} (delta 0) and moved the document-wide walk ` +
+          `${preMut.docRows} -> ${postMut.docRows}. The green half alone would be satisfied by a selector that ` +
+          `matches nothing, which is why the red half is asserted as an equality and not as a direction. The ` +
+          `document is restored: ${removed.removed} removed, ${removed.left} left`,
+        );
+        okLine(
+          `HONEST LIMIT: this leg drives ONE scenario (${SCEN}) at ONE width, and the residue census answers ` +
+          `"can a hidden view hold a match" — it does NOT answer "would that match change this leg's verdict", ` +
+          `which depends on what each leg then measures per element. A registered exposure is a walk whose ` +
+          `output is entry-path-dependent, nothing stronger; the ${tally.unresolved} runtime-built selectors are ` +
+          `outside the census altogether and are listed above rather than counted as clean`,
+        );
+      }
+    }
+
+
+    // ── W20 TYPE FLOOR: WHAT THE DECLARATIONS ACTUALLY PAINT ────────────────
+    // BLOCK-SCOPED (D247): every axis, selector and literal below belongs to
+    // this leg alone, and the only thing it imports is the floor's own module.
+    //
+    // WHY A BROWSER LEG AT ALL, when __preview__/type-floor.mjs already parses
+    // app.css and __app.test.mjs already reds on it. Because the source parse
+    // answers "is this declaration below the floor" and the filing row's claim
+    // is a different sentence: "228 of 1560 TEXT-BEARING INSTANCES compute
+    // below it, 48 of them the front screen's own CPU / RAM / DISK / DOCS
+    // legend". A declaration is one line; an instance is a painted box, and no
+    // count of lines predicts one. This leg counts the boxes, per route, in a
+    // real browser, at build time — the source parse is not its evidence and it
+    // is not the source parse's.
+    //
+    // It is also the half that sees what a stylesheet parse cannot: cascade.
+    // A rule raised to `var(--text-xs)` that is then OUTRANKED by a sub-floor
+    // declaration elsewhere still paints small, and only a computed style says
+    // so. (Today none is — but "today none is" is a measurement, not a
+    // property of the file.)
+    //
+    // HONEST LIMITS, stated rather than discovered later: this leg reads
+    // ELEMENT computed styles with at least one non-whitespace direct text
+    // child. It does NOT see `::before`/`::after` content (the chip glyphs and
+    // the `.oauth-divider` rules are drawn there), it does not see text inside
+    // a closed `<details>` or a `hidden` ancestor (deliberately — those are not
+    // painted), and it measures ONE fixture per route.
+    if (requested.includes("W20-type-floor-instances")) {
+      const D = "W20-type-floor-instances";
+      const { FLOOR_PX: TF_FLOOR, ALLOWLIST: TF_ALLOW, audit: tfAudit, APP_CSS: TF_CSS } =
+        await import("./type-floor.mjs");
+
+      // THE 30 CELLS the filing row measured: 5 routes x 3 phone widths x 2
+      // themes. Same shape, so the before/after numbers in the PR body are
+      // comparable to the census that opened the row.
+      const TF_WIDTHS = [320, 390, 430];
+      const TF_ROUTES = [
+        { name: "overview", scen: "mixed-fleet", hash: "#overview", view: "view-overview",
+          // ID-ANCHORED ON PURPOSE: a bare `document.querySelector('.instance-card')`
+          // is a DOCUMENT-WIDE walk, and W35's census (view-scope-census.mjs, run
+          // over this file's own bytes) refuses one that can match inside a hidden
+          // view — `.instance-card` matches 5 nodes in a hidden #view-overview.
+          ready: `document.querySelector('#overview-body .instance-card')` },
+        { name: "billing", scen: "billing-past-due", hash: "#billing", view: "view-billing",
+          ready: `document.querySelector('#billing-plan-section .set-h') && !document.querySelector('#billing-recommended .loading')` },
+        { name: "activity", scen: "activity", hash: "#activity", view: "view-activity",
+          ready: `document.querySelector('#activity-body .tlv-row')` },
+        { name: "sites", scen: "mixed-fleet", hash: "#sites", view: "view-sites",
+          ready: `document.querySelector('#sites-body .site-row')` },
+        { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet",
+          ready: `document.querySelector('.fleet-row')` },
+      ];
+
+      // ANTI-VACUITY 0 — THE INSTRUMENT AND THE FLOOR ARE THE SAME FLOOR.
+      // The allowlist this leg exempts elements by is the SAME committed
+      // literal the source parse uses; it is not re-typed here, because two
+      // copies of an exemption list drift and the drift is silent.
+      const tfSource = tfAudit(fs.readFileSync(TF_CSS, "utf8"));
+      if (tfSource.errors.length) {
+        fail(D, `the SOURCE parse already refuses app.css (${tfSource.errors.length} error(s)) — fix type-floor.mjs's findings before reading this leg's instance counts:\n     ${tfSource.errors.join("\n     ")}`);
+      }
+      if (!(TF_FLOOR > 0) || TF_ALLOW.length === 0) {
+        return die(`${D}: the floor module handed back floor=${TF_FLOOR} and a ${TF_ALLOW.length}-entry allowlist — an empty exemption list would make every cell below vacuously strict and a zero floor would make it vacuously green. Nothing was measured.`);
+      }
+      const TF_SEL = TF_ALLOW.map((a) => a.selector);
+
+      process.stdout.write(
+        `\n${D} — ${TF_ROUTES.length} routes x ${TF_WIDTHS.length} phone widths x 2 themes ` +
+        `(${TF_ROUTES.length * TF_WIDTHS.length * 2} cells; every painted element with a direct text node, ` +
+        `computed font-size vs the ${TF_FLOOR}px floor --text-xs publishes). Source parse: ` +
+        `${tfSource.decls.length} declarations, ${tfSource.below.length} below the floor, all ` +
+        `${TF_ALLOW.length} by NAME in the committed literal (${TF_SEL.join(", ")})\n`,
+      );
+
+      const tfProbe = (floor, allow) =>
+        `(function(){` +
+        `var ALLOW=${JSON.stringify(allow)};` +
+        `var v=document.querySelector('section.view:not([hidden])');` +
+        `var out={view:v?v.id:'none',theme:document.documentElement.getAttribute('data-theme'),total:0,below:0,allowed:0,viol:[],hist:{}};` +
+        `var all=document.body.querySelectorAll('*');` +
+        `for(var i=0;i<all.length;i++){var e=all[i];` +
+        `if(e.closest('[hidden]'))continue;` +
+        `var r=e.getBoundingClientRect();if(r.width===0&&r.height===0)continue;` +
+        `var t='';for(var j=0;j<e.childNodes.length;j++){var n=e.childNodes[j];if(n.nodeType===3)t+=n.nodeValue;}` +
+        `if(!t.replace(/\\s+/g,''))continue;` +
+        `out.total++;` +
+        `var fsz=parseFloat(getComputedStyle(e).fontSize);` +
+        `if(!(fsz<${floor}))continue;` +
+        `out.below++;out.hist[String(fsz)]=(out.hist[String(fsz)]||0)+1;` +
+        `var ok=false;for(var a=0;a<ALLOW.length;a++){try{if(e.matches(ALLOW[a])){ok=true;break;}}catch(err){}}` +
+        `if(ok){out.allowed++;continue;}` +
+        `var cls=(typeof e.className==='string'&&e.className)?('.'+e.className.split(/\\s+/).filter(Boolean).join('.')):'';` +
+        `var d=e.tagName.toLowerCase()+cls;` +
+        `var f=null;for(var q=0;q<out.viol.length;q++)if(out.viol[q].sel===d&&out.viol[q].px===fsz)f=out.viol[q];` +
+        `if(f)f.n++;else out.viol.push({sel:d,px:fsz,n:1,text:t.replace(/\\s+/g,' ').trim().slice(0,26)});}` +
+        `return out;})()`;
+
+      let tfCells = 0, tfText = 0, tfBelow = 0, tfAllowed = 0, tfViol = 0;
+      const tfPerRoute = new Map();
+      const tfHist = {};
+      for (const rt of TF_ROUTES) {
+        for (const theme of ["light", "dark"]) {
+          // Enter WIDE and assert the LANDED view: `?scen=` alone renders
+          // #overview, and a phantom route would print five copies of the
+          // front screen's numbers under five different names.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${rt.scen}&theme=${theme}${rt.hash}`,
+            `${rt.ready} && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id===${JSON.stringify(rt.view)};})()`,
+          );
+          const line = [];
+          for (const width of TF_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(tfProbe(TF_FLOOR, TF_SEL));
+            tfCells++;
+            if (m.view !== rt.view) {
+              fail(D, `${rt.name}/${theme}@${width}: the visible view is ${m.view}, not ${rt.view} — this cell measured another screen`);
+              continue;
+            }
+            if (m.total === 0) {
+              fail(D, `${rt.name}/${theme}@${width}: ZERO text-bearing elements — the walk is defeated, not clean`);
+              continue;
+            }
+            tfText += m.total; tfBelow += m.below; tfAllowed += m.allowed;
+            for (const k of Object.keys(m.hist)) tfHist[k] = (tfHist[k] || 0) + m.hist[k];
+            const prev = tfPerRoute.get(rt.name) || { text: 0, below: 0, allowed: 0 };
+            tfPerRoute.set(rt.name, { text: prev.text + m.total, below: prev.below + m.below, allowed: prev.allowed + m.allowed });
+            for (const v of m.viol) {
+              tfViol += v.n;
+              fail(D, `${rt.name}/${theme}@${width}: ${v.n} instance(s) of ${v.sel} compute ${v.px}px, below the ${TF_FLOOR}px floor ("${v.text}") — raise the declaration or name it in type-floor.mjs's literal allowlist`);
+            }
+            line.push(`${width}:${m.total}t ${m.below}<f (${m.allowed} allow)`);
+          }
+          process.stdout.write(`   ${rt.name}/${theme}  ${line.join("  ")}\n`);
+        }
+      }
+
+      if (!failures.some((f) => f.defect === D)) {
+        const hist = Object.keys(tfHist).map(Number).sort((a, b) => a - b).map((k) => `${k}px:${tfHist[k]}`).join(" / ");
+        const perRoute = [...tfPerRoute.entries()]
+          .map(([n, v]) => `${n} ${v.below}/${v.text}`).join(" · ");
+        okLine(
+          `THE INSTANCE COUNT IS DRIVEN, NOT QUOTED: ${tfCells} cells, ${tfText} painted text-bearing ` +
+          `instances, ${tfBelow} of them below ${TF_FLOOR}px — and ALL ${tfAllowed} of those match one of the ` +
+          `${TF_ALLOW.length} selectors named in type-floor.mjs's committed literal allowlist, ` +
+          `${tfViol} unexplained. Below-floor histogram ${hist || "(empty)"}. Per route (below/text): ` +
+          `${perRoute}. The filing census read 228 of 1560 across the same 30-cell shape`,
+        );
+        okLine(
+          `THE TWO HALVES MEASURE DIFFERENT THINGS AND NEITHER IS THE OTHER'S EVIDENCE: the source parse ` +
+          `(type-floor.mjs, run above on app.css's own bytes) read ${tfSource.decls.length} font-size-bearing ` +
+          `declarations — ${tfSource.decls.filter((d) => d.prop === "font").length} of them the \`font:\` ` +
+          `SHORTHAND a \`grep font-size:\` census cannot see — and found ${tfSource.below.length} below the ` +
+          `floor, every one allowlisted by name. This leg then asked what those declarations PAINT. A ` +
+          `declaration raised in source but outranked in the cascade would be green there and red here`,
+        );
+        okLine(
+          `HONEST LIMIT: element computed styles with a direct non-whitespace text child only. ` +
+          `\`::before\`/\`::after\` content is NOT measured (several chips draw their glyph there), nor is ` +
+          `anything under a \`hidden\` ancestor or sized 0x0, and each route is driven on ONE fixture ` +
+          `(${TF_ROUTES.map((r) => `${r.name}:${r.scen}`).join(", ")}). A sub-floor pseudo-element is outside ` +
+          `this leg's reach and outside the source parse's blind spot both — it is covered by neither`,
+        );
+      }
+    }
+
+
   } catch (err) {
     // AUDITED (exit 2): the probe itself threw, so NOTHING was measured — an
     // incomplete run must never be reported as a measured overflow.
@@ -9112,6 +10989,10 @@ async function main() {
   await teardown();
 
   process.stdout.write("\n");
+  // EARNED, NEVER NARRATED — the same contract as the FONT PINNED sentence
+  // above. It prints on a green run too, saying zero, because a guard that
+  // speaks only when it fires is indistinguishable from a guard nobody wired in.
+  process.stdout.write(crossDoc.line());
   if (failures.length) {
     const byDefect = [...new Set(failures.map((f) => f.defect))];
     process.stderr.write(`OVERFLOW GUARD FAIL — ${failures.length} finding(s) in: ${byDefect.join(", ")}\n`);

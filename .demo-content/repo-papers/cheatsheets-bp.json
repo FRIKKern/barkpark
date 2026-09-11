@@ -52,7 +52,7 @@
           [
             {
               "type": "text",
-              "value": "bp setup --target connect --server URL --token $TOKEN",
+              "value": "bp setup --target connect --server URL --token $TOK",
               "marks": [
                 "code"
               ]
@@ -83,7 +83,7 @@
           [
             {
               "type": "text",
-              "value": "list / switch saved servers"
+              "value": "list / switch servers"
             }
           ],
           [
@@ -187,7 +187,7 @@
           [
             {
               "type": "text",
-              "value": "one document"
+              "value": "one doc"
             }
           ],
           [
@@ -219,7 +219,44 @@
           [
             {
               "type": "text",
-              "value": "bp doc query post --filter 'status=draft' --perspective raw",
+              "value": "bp doc query post --filter 'status=draft'",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp doc create <type>",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "/"
+            },
+            {
+              "type": "text",
+              "value": "patch <type> <id>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "write / edit one document"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp doc patch post p1 --set title=New",
               "marks": [
                 "code"
               ]
@@ -239,13 +276,68 @@
           [
             {
               "type": "text",
-              "value": "atomic batch (create/patch/publish/…)"
+              "value": "atomic batch; also "
+            },
+            {
+              "type": "text",
+              "value": "publish",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "/"
+            },
+            {
+              "type": "text",
+              "value": "unpublish",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "/"
+            },
+            {
+              "type": "text",
+              "value": "delete",
+              "marks": [
+                "code"
+              ]
             }
           ],
           [
             {
               "type": "text",
-              "value": "bp doc mutate -f muts.json",
+              "value": "bp doc publish post p1",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp make schema <type>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "v2 skeleton — edit before applying"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp make schema product --out product.json",
               "marks": [
                 "code"
               ]
@@ -271,7 +363,70 @@
           [
             {
               "type": "text",
-              "value": "bp schema apply --file post.json",
+              "value": "bp schema apply --file product.json",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp seed <type>",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "schema-valid sample docs"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp seed product --count 5 --publish",
+              "marks": [
+                "code"
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp tinker",
+              "marks": [
+                "code"
+              ]
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "authed REPL ("
+            },
+            {
+              "type": "text",
+              "value": "drafts",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ")"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "query product",
               "marks": [
                 "code"
               ]
@@ -297,7 +452,7 @@
           [
             {
               "type": "text",
-              "value": "bp media upload photo.jpg",
+              "value": "bp media upload a.jpg",
               "marks": [
                 "code"
               ]
@@ -349,7 +504,7 @@
           [
             {
               "type": "text",
-              "value": "bp search query norway",
+              "value": "bp search query oslo",
               "marks": [
                 "code"
               ]
@@ -393,11 +548,33 @@
             },
             {
               "type": "text",
-              "value": " / "
+              "value": "/"
             },
             {
               "type": "text",
               "value": "ready",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "/"
+            },
+            {
+              "type": "text",
+              "value": "get",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "/"
+            },
+            {
+              "type": "text",
+              "value": "prime",
               "marks": [
                 "code"
               ]
@@ -406,7 +583,14 @@
           [
             {
               "type": "text",
-              "value": "all / unblocked tasks"
+              "value": "the task board — full surface in "
+            },
+            {
+              "type": "text",
+              "value": "tasks.md",
+              "marks": [
+                "code"
+              ]
             }
           ],
           [
@@ -423,115 +607,29 @@
           [
             {
               "type": "text",
-              "value": "bp task prime",
-              "marks": [
-                "code"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "agent rehydration, one call"
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "bp task prime --worker a1",
-              "marks": [
-                "code"
-              ]
-            }
-          ]
-        ],
-        [
-          [
-            {
-              "type": "text",
-              "value": "bp task next <worker>",
-              "marks": [
-                "code"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "claim the NEXT ready task"
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "bp task next a1",
-              "marks": [
-                "code"
-              ]
-            }
-          ]
-        ],
-        [
-          [
-            {
-              "type": "text",
-              "value": "bp task get <id>",
-              "marks": [
-                "code"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "task + child rail"
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "bp task get task-101",
-              "marks": [
-                "code"
-              ]
-            }
-          ]
-        ],
-        [
-          [
-            {
-              "type": "text",
-              "value": "bp task claim <id> <worker>",
-              "marks": [
-                "code"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "fenced claim"
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "--resources a.go,b.go",
+              "value": "bp task next",
               "marks": [
                 "code"
               ]
             },
             {
               "type": "text",
-              "value": " fences files"
-            }
-          ]
-        ],
-        [
-          [
+              "value": "/"
+            },
             {
               "type": "text",
-              "value": "bp task close <id> <worker> <epoch>",
+              "value": "claim",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": "/"
+            },
+            {
+              "type": "text",
+              "value": "close",
               "marks": [
                 "code"
               ]
@@ -540,39 +638,13 @@
           [
             {
               "type": "text",
-              "value": "close, CAS on epoch"
+              "value": "claim/close, CAS on the epoch"
             }
           ],
           [
             {
               "type": "text",
               "value": "bp task close task-101 a1 1",
-              "marks": [
-                "code"
-              ]
-            }
-          ]
-        ],
-        [
-          [
-            {
-              "type": "text",
-              "value": "bp migrate <from> <to>",
-              "marks": [
-                "code"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "copy docs between servers"
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "bp migrate prod local --yes",
               "marks": [
                 "code"
               ]
@@ -600,42 +672,12 @@
               "marks": [
                 "code"
               ]
-            },
-            {
-              "type": "text",
-              "value": " releases"
             }
           ],
           [
             {
               "type": "text",
               "value": "bp upgrade --check",
-              "marks": [
-                "code"
-              ]
-            }
-          ]
-        ],
-        [
-          [
-            {
-              "type": "text",
-              "value": "bp uninstall",
-              "marks": [
-                "code"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "remove config / dev stack"
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "bp uninstall --local --dry-run",
               "marks": [
                 "code"
               ]
@@ -763,17 +805,6 @@
         {
           "type": "text",
           "value": "../cli/HANDBOOK.md",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " · tasks: "
-        },
-        {
-          "type": "text",
-          "value": "tasks.md",
           "marks": [
             "code"
           ]

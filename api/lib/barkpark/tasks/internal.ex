@@ -10,6 +10,7 @@ defmodule Barkpark.Tasks.Internal do
   alias Barkpark.Content
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Repo
+  alias Barkpark.Tasks.BriefMirror
 
   # New rev token, same shape as `Content.generate_rev/0`. Kept here so the task
   # modules do not depend on a private function in another module.
@@ -48,6 +49,8 @@ defmodule Barkpark.Tasks.Internal do
   # existing error (`:stale_claim` for the lifecycle/claim arms, `:stale_rev` for
   # the merge reconcile), so no caller's return shape moves.
   def fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev) do
+    new_content = resync_brief_on_mirrored_change(doc, new_content)
+
     query =
       from(d in Document,
         where: d.id == ^doc.id and d.rev == ^observed_rev,
@@ -61,6 +64,116 @@ defmodule Barkpark.Tasks.Internal do
       {0, _} -> :stale
     end
   end
+
+  # ─── The brief mirror on the TASK door (task-59ced18605d8ef81) ────────────
+  #
+  # WHICH DOORS PR #16279 CLOSED, AND WHICH IT DID NOT. That PR ended brief
+  # drift by calling `BriefMirror.maybe_resync_task_brief/2` from the attrs
+  # pipeline of `Content.Writer` — `create_document/4` and
+  # `upsert_document/4`. Those are the DOCUMENT doors: `bp doc
+  # patch`, the MCP bridge, Studio, raw HTTP. They are covered and stay covered
+  # (`Tasks.BriefMirrorWiringTest` pins both).
+  #
+  # It did NOT close this one, and this one is the whole `bp task` verb family.
+  # `fenced_content_write/4` is a bare rev-fenced `Repo.update_all` that never
+  # passes through `Content.Writer`, so nothing in that pipeline — the brief
+  # mirror included — runs on it. Eighteen modules across `api/lib` call it:
+  # claim, close, compactor, discharge, fence, fleet, landed, move, mutations,
+  # pulse, release, renew, stage, stamp, ttl_sweeper, this module, plus the two
+  # GitHub plugin callers (`plugins/github/adopt.ex`, `link.ex`). Half a fix
+  # read as a whole one, which is why it is written down here rather than left
+  # for the next reader to re-derive.
+  #
+  # WHAT THIS IS AND IS NOT. It is not a repair for a live drift: a structural
+  # sweep of all 18 callers (write shapes only — `Map.put(` / `put_in(` /
+  # `Map.merge(`) enumerates 53 distinct literal keys they write and
+  # `"description"` is not among them, while the three `"criterion"` writes are
+  # two integer indices (discharge, pulse) and one CAS guard that
+  # `apply_criteria_update/2` refuses unless it EQUALS the stored text. So no
+  # verb shipping today drifts a brief here and no verb's behaviour changes.
+  # The defect is that the door is STRUCTURALLY INCAPABLE of re-deriving, and
+  # nothing tested that. The day a verb starts writing a mirrored block, the
+  # drift returns silently. This closes the capability gap; the detector for it
+  # is `test/barkpark/tasks/internal_brief_mirror_cas_test.exs`.
+  #
+  # MECHANISM, AND WHY NOT THE OBVIOUS ONE. The invariant is: A TASK CAS WRITE
+  # NEVER STORES A MIRRORED FIELD ITS OWN BRIEF CONTRADICTS. Three ways to hold
+  # it were on the table.
+  #
+  #   * Call the mirror UNCONDITIONALLY, as `Content.Writer` does. Rejected on
+  #     two counts. Cost: claim/pulse/stamp/renew are the hot path and would
+  #     each walk and rebuild the brief's blocks on every write, for a result
+  #     identical to the input in every case that ships today. Worse, it makes
+  #     every claim and pulse an UNRECORDED CONTENT EDIT — it would silently
+  #     repair the historically-drifted rows `gr-bl-brief-drift-backfill-714`
+  #     is measuring, moving that sweep's population under it. A CAS write must
+  #     change what its verb named and nothing else.
+  #   * REFUSE a write that carries a changed mirrored block. Rejected: it
+  #     converts a latent gap into a runtime wall in front of a verb nobody has
+  #     written yet, and `Content.Writer` already treats such an edit as
+  #     supported (its own moduledoc records a client-side refusal being built
+  #     first and rejected on evidence).
+  #   * RE-DERIVE ONLY WHEN A MIRRORED INPUT ACTUALLY MOVED. Chosen. The cost on
+  #     the hot path is one `==` on the description term plus, only when the
+  #     criteria list is not the same term, one pass extracting the criterion
+  #     texts on each side — and the verbs that rebuild the list (stamp, close,
+  #     landed, discharge) carry the criterion binaries through unchanged, so
+  #     that comparison is pointer-equal per element and single-digit in length.
+  #     No verb shipping today reaches the mirror at all.
+  #
+  # The detector is deliberately keyed on the STORED row, and it carries arms in
+  # BOTH directions: a description / criterion-text / criteria-membership change
+  # must reach the brief, and a claim-shaped write must leave an in-sync brief
+  # byte-identical AND leave a stale one stale.
+  defp resync_brief_on_mirrored_change(%Document{type: "task"} = doc, new_content)
+       when is_map(new_content) do
+    if mirrored_inputs_moved?(doc.content, new_content) do
+      case BriefMirror.maybe_resync_task_brief(
+             %{"content" => new_content, "title" => doc.title},
+             "task"
+           ) do
+        %{"content" => resynced} -> resynced
+        _ -> new_content
+      end
+    else
+      new_content
+    end
+  end
+
+  defp resync_brief_on_mirrored_change(_doc, new_content), do: new_content
+
+  # The two blocks `BriefMirror` derives, and only those: `purpose-copy` from
+  # `content["description"]` and `criteria-list` from the criterion TEXTS of
+  # `content["acceptance_criteria"]`. Everything else a verb writes — met,
+  # evidence, attempts, withdrawals, discharge_marks, claim, lifecycle — is
+  # invisible to the mirror and must not trigger a re-derive.
+  #
+  # Deliberately MORE sensitive than the mirror's own rule (no trimming, blanks
+  # kept), so the only possible error is a needless re-derive, which is a no-op.
+  # A `nil`/absent stored content cannot be compared, so it counts as moved.
+  defp mirrored_inputs_moved?(old, new) when is_map(old) do
+    Map.get(old, "description") != Map.get(new, "description") or
+      criterion_texts_moved?(
+        Map.get(old, "acceptance_criteria"),
+        Map.get(new, "acceptance_criteria")
+      )
+  end
+
+  defp mirrored_inputs_moved?(_old, _new), do: true
+
+  defp criterion_texts_moved?(same, same), do: false
+
+  defp criterion_texts_moved?(old, new),
+    do: stored_criterion_texts(old) != stored_criterion_texts(new)
+
+  defp stored_criterion_texts(list) when is_list(list) do
+    Enum.map(list, fn
+      entry when is_map(entry) -> Map.get(entry, "criterion")
+      _ -> nil
+    end)
+  end
+
+  defp stored_criterion_texts(_), do: []
 
   # Holder check shared by the holder-gated write paths (release, stamp, pulse):
   # the caller must BE the lease holder — `claim.worker` must equal `worker_id`
@@ -473,7 +586,28 @@ defmodule Barkpark.Tasks.Internal do
   # persisted key. Widening a union can only persist MORE of what a caller
   # actually sent — no existing close passes them, so close's stored shape is
   # unchanged.
-  @landed_keys ~w(prs files capability_slugs commits notes)
+  # `landings` is the PAIRED key and the reason the union has to hold maps as
+  # well as scalars (cch-w63). `prs` and `commits` are PARALLEL LISTS: a row
+  # that accumulated four landings carries four numbers and four shas, and
+  # NOTHING in the stored shape says which sha paid which PR — the pairing
+  # existed only inside the `notes` SENTENCE ("landed on main as <sha> by PR
+  # #<n>"), i.e. exactly the prose reconstruction a structured field is meant to
+  # end. `landings` carries `%{"pr" => "<n>", "commit" => "<sha>"}` so the two
+  # facts are joined at the point they were known, by the writer that knew both.
+  #
+  # It is ADDITIVE, never a replacement: `prs` and `commits` keep being written
+  # and every existing reader (close's artifact gate, reland-check.yml,
+  # landed-open-report.sh) is untouched. A landing that knows only one half
+  # still writes that half into its scalar list and no pair — a half-pair would
+  # assert an association nobody observed.
+  # `file_digests` is the BOUNDED spelling of `files` (task-726717ba693eb424).
+  # A landing that changed more paths than a ledger row should carry verbatim
+  # stores `%{"count" => n, "dirs" => [sorted top-level dirs]}` under this key
+  # INSTEAD of `files`, so the two shapes never mix inside one list and a reader
+  # can tell a verbatim list from a summary by WHICH KEY IS PRESENT rather than
+  # by inspecting the elements. Union-merged like every other key: two big
+  # landings on one row accumulate two digests.
+  @landed_keys ~w(prs files file_digests capability_slugs commits notes landings)
 
   def merge_landed(content, landed) when is_map(landed) and map_size(landed) > 0 do
     existing =
@@ -541,18 +675,7 @@ defmodule Barkpark.Tasks.Internal do
       rev: doc.rev,
       previous_rev: previous_rev,
       source: to_string(source),
-      document:
-        Map.merge(
-          %{
-            "doc_id" => doc.doc_id,
-            "type" => doc.type,
-            "title" => doc.title,
-            "status" => doc.status,
-            "content" => doc.content,
-            "rev" => doc.rev
-          },
-          extra_document
-        ),
+      document: Map.merge(envelope_document(doc), extra_document),
       workspace_id: doc.workspace_id,
       project_id: doc.project_id,
       dataset_id: doc.dataset_id,
@@ -560,6 +683,44 @@ defmodule Barkpark.Tasks.Internal do
     })
     |> Repo.insert!()
   end
+
+  # ─── THE ENVELOPE HALF OF `mutation_events.document` ──────────────────────
+  #
+  # ONE definition of the Envelope-shaped view a task mutation event carries,
+  # so a READER can say what is envelope and what is a writer's typed stamp
+  # WITHOUT re-listing the stamps by hand. `Tasks.Events.replay_since/3`'s
+  # `:payload` projection is exactly `document` MINUS `envelope_keys/0` MINUS
+  # `audit_keys/0` — which is why these two lists live next to the writer that
+  # produces them rather than in the reader that subtracts them. Move a key
+  # into the envelope here and the feed stops projecting it in the same commit.
+  @envelope_keys ~w(doc_id type title status content rev)
+
+  # The audit stamps a writer merges alongside the envelope that are NOT for
+  # the poll feed. `caller_stamp/1`'s `caller_token_id` attributes the event to
+  # the authenticated bearer; that is an audit fact for the store, not a field
+  # a statusline / TUI / deck poller should receive.
+  @audit_keys ~w(caller_token_id)
+
+  @doc "The Envelope-shaped view of `doc` that every task mutation event carries."
+  @spec envelope_document(Document.t()) :: map()
+  def envelope_document(%Document{} = doc) do
+    %{
+      "doc_id" => doc.doc_id,
+      "type" => doc.type,
+      "title" => doc.title,
+      "status" => doc.status,
+      "content" => doc.content,
+      "rev" => doc.rev
+    }
+  end
+
+  @doc "The keys `envelope_document/1` writes — the half a payload reader subtracts."
+  @spec envelope_keys() :: [String.t()]
+  def envelope_keys, do: @envelope_keys
+
+  @doc "Writer-merged keys that are audit stamps, never feed payload."
+  @spec audit_keys() :: [String.t()]
+  def audit_keys, do: @audit_keys
 
   # Audit stamp: the id of the api_token that drove this workflow mutation.
   # Returns an `extra_document`-shaped fragment so it merges into the event's
@@ -570,6 +731,49 @@ defmodule Barkpark.Tasks.Internal do
   # `nil` and emits NO key, so pre-existing events stay byte-identical.
   def caller_stamp(token_id) when is_binary(token_id), do: %{"caller_token_id" => token_id}
   def caller_stamp(_), do: %{}
+
+  # ─── THE ACTOR STAMP (tlv-bl-events-actor-attribution) ────────────────────
+  #
+  # WHO held the lease, and on WHICH epoch, at the moment this mutation
+  # committed — stamped ONTO the event so a close/claim is attributable from
+  # the event feed alone.
+  #
+  # THE GAP THIS CLOSES. A done-set audit (wave 7, 2026-08-18) replayed 560
+  # task events and could not attribute a single close to a worker: every
+  # projected row was exactly `{at, doc_id, event, id, rev}`, so per-row close
+  # provenance was recoverable ONLY by fetching each done row's top-level
+  # `content.claim` map — N document reads to answer "who closed what, when".
+  # The claim map is the LIVE lease and is mutable (a later re-claim, a pulse,
+  # a compaction), so it is also not a history: it says who holds the row NOW,
+  # not who closed it THEN. The event is the durable, append-only record, and
+  # this is the field that makes it answer the question.
+  #
+  # WHY IT IS A TYPED STAMP AND NOT AN ENVELOPE KEY. `Tasks.Events`'s
+  # `:payload` projection is `document` MINUS `envelope_keys/0` MINUS
+  # `audit_keys/0`, so an `extra_document` merge surfaces on
+  # `bp task events --payload` the moment it is written, with no reader edit —
+  # the derived-projection contract `events.ex` documents. It is deliberately
+  # NOT an audit key: `caller_token_id` is the bearer the server
+  # AUTHENTICATED, while `actor` is the worker identity the ledger's CAS
+  # actually fenced on, which is the one an auditor reconstructs provenance
+  # from.
+  #
+  # Nil-safe in both slots: a claimless close (139 of 6,617 terminal rows on
+  # the guerrilla ledger carry no claim at all — container and root rows) emits
+  # the keys it has and NO `actor` key when it has neither, so those events
+  # stay byte-identical and go on saying, truthfully, that nobody held the row.
+  @spec actor_stamp(term(), term()) :: map()
+  def actor_stamp(worker, epoch) do
+    actor =
+      %{}
+      |> maybe_put("worker", if(is_binary(worker) and worker != "", do: worker))
+      |> maybe_put("epoch", if(is_integer(epoch), do: epoch))
+
+    if map_size(actor) == 0, do: %{}, else: %{"actor" => actor}
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   # Every CAS write path bypasses Content's canonical write path
   # (`tap_broadcast/5`), so these mirror its PubSub so the SSE listen endpoint

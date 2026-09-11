@@ -20,6 +20,17 @@
 #                                               cancelled, or never reached the step
 #   RUNNER-LOCAL             exit 0, ::warning  the HOST caused it — a known signature
 #                                               in this red's OWN body (see M6)
+#   STALE-BASE               exit 0, ::warning  main's compared run tested NEWER code
+#                                               and passes; your base predates the fix
+#                                               your diff cannot reach (see M7)
+#
+# VERDICT ORDER, and it is load-bearing (pinned by a textual arm, as #16384's
+# 22d pins RUNNER-LOCAL): RUNNER-LOCAL is decided FIRST, because a host-caused
+# crash is about neither tree. Then M7's tree check, because a comparison across
+# different code cannot support ANY ownership claim. Only then PASSED. INHERITED
+# is deliberately NOT gated by M7 — main failing the same step is evidence
+# whichever tree it failed on, and gating it would let a tree mismatch
+# manufacture an accusation out of an inheritance.
 #
 # UNDETERMINED still exits 1 — these are non-required jobs, so the red blocks
 # nothing, and failing closed can never wave a real PR defect through. What
@@ -138,6 +149,61 @@
 #     REFUSES an entry missing either field, says so in the log, and attributes
 #     the red exactly as if the entry were absent. A future entry therefore
 #     costs its author a measurement, which is the price of the exemption.
+#
+# M7. IT COMPARED AGAINST A DIFFERENT TREE AND CALLED THE DIFFERENCE "YOURS"
+#     (task-c3b5f1494ed523c3 base-behind, task-f89558a95762863a base-ahead).
+#     EVERY PROOF THIS SCRIPT HAD ANSWERS "DID MAIN PASS THIS STEP". NONE OF
+#     THEM ANSWERS "DID MAIN PASS IT ON THIS CODE." api_trusted, log_parsed and
+#     job_trusted are all statements about main's RUN; the verdict is a
+#     statement about the PR's TREE.
+#
+#     MEASURED 2026-09-08, 60 failed pull_request runs, 19 carrying the accusing
+#     sentence, each classified by comparing the PR's baseRefOid against the
+#     head_sha of the main run THE BREAKER ITSELF NAMES:
+#       base AHEAD of main's compared run   7 / 19
+#       identical (a sound comparison)      9 / 19
+#       base BEHIND main's compared run     3 / 19
+#       diverged / unclassifiable           0 / 19
+#     FEWER THAN HALF OF ITS ACCUSATIONS RESTED ON A LIKE-FOR-LIKE COMPARISON.
+#
+#     PROVEN WRONG END TO END on PR #16905, doc-gates run 34184567216: the
+#     breaker printed "Main RAN that step and it PASSED, so the red is this PR's
+#     own. (Main run 34184554269, head 5ebf6e29 …)". What failed was a NOVEL
+#     stale-lineref finding against the events-landed payload test, whose comment
+#     cited a line in tasks/landed.ex that had since moved. (Named without the
+#     file:line form on purpose — quoting a line number here would itself be the
+#     defect the sweep exists to stop, and the escape hatch is not the answer.)
+#     #16905 changed only plugins/tasks.ex and docs/openapi.json — neither file.
+#     The citing test ARRIVED ON MAIN in eb582a3f0 at 03:44:33Z; the compared
+#     main run was created 03:44:32Z, ONE SECOND EARLIER, and
+#     compare(5ebf6e293...eb582a3f0) = ahead 1 / behind 0. #16905's base IS
+#     eb582a3f0. Lineref counts: main 03:44Z 145 known / 0 novel; #16905 145 / 1
+#     novel; main 04:30Z 145 / 5 novel INCLUDING the identical finding — main
+#     caught up and failed on the same thing 43 minutes later. A ONE-SECOND
+#     WINDOW IN A FLEET THAT MERGES CONSTANTLY IS NOT A CORNER CASE.
+#
+#     THE LIMIT ON THAT NUMBER, stated because it is easy to inflate: base-ahead
+#     proves the COMPARISON IS UNSOUND, not that each of those 7 verdicts was
+#     factually wrong. Only #16905 is proven wrong end to end. Do not restate
+#     7/19 as "7 false accusations".
+#
+#     FIX: ONE base-sha read and ONE compare call, consumed by BOTH directions.
+#     ahead/diverged -> UNDETERMINED (main's run is not evidence about this
+#     tree); behind -> STALE-BASE, exit 0, naming `gh pr update-branch`;
+#     identical -> attributed exactly as before; unknown -> attributed exactly
+#     as before, because a guard that fires when it cannot see would silence the
+#     breaker wholesale (which is what #16908 did and #16928 had to undo).
+#     A SECOND, INDEPENDENTLY-WRITTEN BASE-SHA READER WOULD BE A SECOND DEFECT
+#     WEARING A FIX'S CLOTHES: there is exactly one, and both verdicts use it.
+#
+#     NOT COVERED HERE, AND NOT PRETENDED TO BE: a genuinely FLAKY job. On the
+#     same sha as #16905's doc-gates red, compose-smoke run 34184567197 failed
+#     on attempt 1 — the breaker accusing via its Smoke arms Decide step — and
+#     SUCCEEDED on attempt 2 of the SAME run id, i.e. an unchanged tree by
+#     construction. There the comparison was SOUND and the job is simply
+#     non-deterministic. M7 leaves that case untouched by design; it is sized
+#     first and built second under task-f89558a95762863a, because one instance
+#     is not a rate.
 #
 #     WHY ONLY ON A PULL REQUEST. The not-a-pull_request clause below still
 #     exits first, so a push to main never prints RUNNER-LOCAL. That is
@@ -575,6 +641,69 @@ for j in d.get("jobs") or []:
 print(best)
 PY
 MAIN_JOB_ID="$(head -1 "$TMPD/mainjob.id" 2>/dev/null | tr -d "[:space:]")"
+
+# ── M7: THE ANCESTRY PRIMITIVE — WHICH TREE DID MAIN RUN? ────────────────────
+# Every proof this script had answers "did main pass this step". NONE of them
+# answers "did main pass it on THIS CODE". `api_trusted`, `log_parsed` and
+# `job_trusted` are all statements about main's RUN; the verdict is a statement
+# about the PR's TREE. That gap is M7, and it produces false accusations in BOTH
+# directions off the same missing fact:
+#
+#   BASE AHEAD  — the PR's base contains commits no completed main run has yet
+#                 exercised. Main's job could not have executed the defect, so
+#                 "Main RAN that step and it PASSED" is true of a tree that does
+#                 not contain the bug, asserted about a tree that does.
+#   BASE BEHIND — main's compared run tested NEWER code than the PR. A step main
+#                 passes may pass BECAUSE OF A FIX THE PR'S BASE PREDATES, which
+#                 the PR's diff cannot reach. That is the STALE-BASE class.
+#
+# ONE READ AND ONE COMPARE SETTLE BOTH. A second, independently-written base-sha
+# reader would be a second defect wearing a fix's clothes, so there is exactly
+# one here and both verdicts consume it.
+#
+# MEASURED 2026-09-08 over 60 failed pull_request runs: 19 carried the accusing
+# sentence — 7 base-ahead, 3 base-behind, 9 identical, 0 unclassifiable. FEWER
+# THAN HALF OF THE BREAKER'S ACCUSATIONS RESTED ON A LIKE-FOR-LIKE COMPARISON.
+# That line alone justifies the primitive without any single verdict having to
+# be proven wrong — and the limit is stated on purpose: base-ahead proves the
+# COMPARISON UNSOUND, not that each of those 7 verdicts was factually wrong.
+# Only PR #16905 is proven wrong end to end (main run 34184554269 created
+# 03:44:32Z on head 5ebf6e293; the citing test arrived in eb582a3f0 at
+# 03:44:33Z; compare = ahead 1 / behind 0; #16905's base IS eb582a3f0; main
+# failed the identical finding 43 minutes later).
+#
+# UNKNOWN IS NOT A VERDICT AND MUST NOT SILENCE ANYTHING. On a push run there is
+# no base; with no token or no event file the read fails. In every such case
+# TREE_REL is `unknown` and attribution proceeds exactly as before — a guard
+# that fires when it cannot see would silence the breaker wholesale, which is
+# the failure #16908 caused and #16928 had to undo.
+PR_BASE_SHA="${MAIN_RED_BREAKER_BASE_SHA:-}"
+if [ -z "$PR_BASE_SHA" ] && [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ] && [ -s "${GITHUB_EVENT_PATH:-/nonexistent}" ]; then
+  PR_BASE_SHA="$(python3 -c 'import json,sys
+try:
+    print((json.load(open(sys.argv[1])).get("pull_request") or {}).get("base",{}).get("sha") or "")
+except Exception:
+    print("")' "$GITHUB_EVENT_PATH" 2>/dev/null | tr -d "[:space:]")"
+fi
+
+# identical | ahead | behind | diverged | unknown.
+# `ahead` means the SECOND ref is ahead of the first: base is a DESCENDANT of
+# main's compared head, i.e. main's run never contained the base. The direction
+# is easy to invert, so it is asserted by a harness arm rather than by comment.
+TREE_REL="${MAIN_RED_BREAKER_TREEREL_FIXTURE:-}"
+if [ -z "$TREE_REL" ]; then
+  TREE_REL="unknown"
+  if [ -n "$PR_BASE_SHA" ] && [ -n "${MAIN_RUN_SHA:-}" ] && [ -z "${MAIN_RED_BREAKER_FIXTURE:-}" ]; then
+    _cmp="$(curl -sS --max-time 20 "${auth[@]}" "${API}/compare/${MAIN_RUN_SHA}...${PR_BASE_SHA}" 2>/dev/null \
+            | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("status") or "")
+except Exception:
+    print("")' 2>/dev/null | tr -d "[:space:]")"
+    case "$_cmp" in identical|ahead|behind|diverged) TREE_REL="$_cmp" ;; esac
+  fi
+fi
+
 MAIN_LOG="$TMPD/main-job.log"; : > "$MAIN_LOG"
 if [ -n "${MAIN_RED_BREAKER_LOG_FIXTURE:-}" ]; then
   cp -- "$MAIN_RED_BREAKER_LOG_FIXTURE" "$MAIN_LOG" 2>/dev/null || : > "$MAIN_LOG"
@@ -589,7 +718,7 @@ fi
 # UNKNOWN     main's success is masked by continue-on-error, or the job/JSON is
 #             missing                      -> UNDETERMINED
 python3 - "$MAIN_JOBS" "$JOB_NAME" "$TMPD/ours.txt" "$TMPD/names.json" "$MAIN_LOG" > "$TMPD/report.txt" 2>/dev/null <<'PY'
-import json, re, sys
+import calendar, json, re, sys, time
 
 jobs_path, want, ours_path, names_path, log_path = sys.argv[1:6]
 ours = [l.rstrip("\n") for l in open(ours_path) if l.strip()]
@@ -687,9 +816,190 @@ for j in legs:
 
 # (c) of the three PASS proofs: if the API marks a GATE step failed, this job's
 # step conclusions are NOT continue-on-error-masked, so `success` means passed.
-api_trusted = bool(api_failed & gate_names) if gate_names else bool(api_failed)
+#
+# WHY THIS BRANCH NEVER FIRES IN PRODUCTION, MEASURED RATHER THAN ASSUMED
+# (task-658971cd9db61621). Across the SIX workflows that invoke this script,
+# every step carrying an `id: sN` — which is exactly what STEP_NAMES maps, so
+# exactly what `gate_names` holds — also carries `continue-on-error: true`.
+# 57 of 57, read from the workflow files on 2026-09-08:
+#     compose-smoke.yml 4/4 · doc-gates.yml 30/30 · go-format.yml 3/3 ·
+#     required-checks-drift.yml 6/6 · security.yml 14/14
+# Repo-wide the ratio is about 73 `continue-on-error` keys over ~886 step-starts
+# across 64 workflow files (~8%), so the concentration is a property of the
+# BREAKER JOBS specifically — and it is the shape this file's own header
+# prescribes, not a smell. A continue-on-error step is reported by the jobs API
+# with conclusion "success" EVEN WHEN IT FAILED, so `api_failed` can never
+# contain a gate step and this intersection is empty BY CONSTRUCTION. That is
+# why it fired 0 times in 34 sampled main jobs: an unreachable branch, not a
+# quiet week.
+#
+# THE FAILURES ARE NOT SWALLOWED, WHICH IS WHY THAT SHAPE IS CORRECT: the Decide
+# step running this script is not continue-on-error, and it fails the job on what
+# the gate steps recorded (main run 34187182735: job `failure`, step 35 Decide
+# `failure`, every gate step `success`). continue-on-error is how one adjudicator
+# gets to see every failed gate before judging, not how failures disappear.
+#
+# IT IS KEPT, NOT DELETED. The unreachability is a property of the current job
+# SHAPE, not of this logic: the moment any gate step drops `continue-on-error`,
+# or a new breaker job adopts a different shape, this becomes live and is the
+# strongest of the three proofs. Arm 25b is the CONTROL that keeps the claim
+# honest — it feeds a job whose API DOES report a gate step `failure` and asserts
+# this fires, so "unreachable" rests on a positive case rather than on an absence
+# nobody probed.
+#
+# THE EMPTY-`gate_names` FALLBACK IS REMOVED, AND IT WAS DEAD CODE RATHER THAN A
+# LIVE BUG — a correction to this row's own first claim. It read
+# `... if gate_names else bool(api_failed)`, widening to EVERY step main ran. That
+# would be wrong if reached: Decide is the only non-continue-on-error step, so on
+# any red main it is in `api_failed`, and the fallback would have read TRUE —
+# asserting "this job's conclusions are not masked" ON THE STRENGTH OF MAIN'S OWN
+# DECIDE STEP HAVING FAILED. But it cannot be reached, and the chain is
+# structural: `ours.txt` is built with `if sid in names`, so an empty STEP_NAMES
+# yields no failed gate steps and the run exits at "no gate step failed — nothing
+# to decide" hundreds of lines earlier. Contrapositive: a non-empty `ours`
+# REQUIRES a non-empty `names`, and `set(names.values())` of a non-empty mapping
+# is non-empty. An unparseable STEP_NAMES exits 2 earlier still. Arm 25a pins that
+# early exit with a mutation on the guard that produces it.
+#
+# It is deleted anyway, because it was unreachable only by virtue of a guard three
+# hundred lines away: a reader who changes that guard would silently re-arm a
+# predicate that reads main's own failure as proof of someone else's health.
+api_trusted = bool(api_failed & gate_names)
 job_all_success = bool(legs) and all(c == "success" for c in job_concls)
 job_cancelled = any(c in ("cancelled", None, "") for c in job_concls)
+
+# ── (d) the CONTINUE-ON-ERROR MASKING DETECTOR ──────────────────────────────
+# `job_all_success` was removed as a PASS proof (task-11e4855cc32c281c, PR
+# #16908) because an all-green job cannot RULE OUT masking: a step whose
+# `outcome` was `failure` still reports `conclusion: success`, and `outcome` is
+# absent from the jobs API entirely. That removal was correct and it was blunt —
+# it silenced the accusation in the common case too, where nothing is masked at
+# all. This detector buys the common case back by answering the question
+# `job_all_success` could not: IS anything masked in this job?
+#
+# The evidence is main's OWN job log, which this script has already fetched for
+# the signature clause — no new API call. A step that printed `##[error]` under
+# an API conclusion of `success` is masked BY DEFINITION.
+#
+# ATTRIBUTION IS DELIBERATELY NOT POSITIONAL. The raw job log carries no step
+# names, so the tempting move is to count `##[group]Run` blocks and index into
+# the API's ordered step list. That is a guess wearing a structure's clothes: one
+# unlogged step and every later name is wrong, silently. Instead each log line's
+# own timestamp is matched against the API's per-step [started_at, completed_at]
+# window. The API stamps at SECOND precision while the log stamps at 100ns, so
+# adjacent steps routinely share a boundary second and a line can land inside
+# more than one window — that case is AMBIGUOUS and is reported as such. A
+# masked job with an unattributable step is still a masked job; the verdict that
+# matters is the job-level one, and the step name is a courtesy.
+#
+# MEASURED ON REAL DATA, 2026-09-08, main run 34187182735 job 101937772871
+# ('Doc budgets + anchors', 39 steps, job conclusion `failure` while EVERY gate
+# step reads `success` — the masking shape, live on main):
+#   - its 2 `##[error]` lines attributed to 3 and 9 candidate steps, never to 1.
+#     A job of many sub-second gates shares boundary seconds constantly, so on
+#     real logs this detector resolves to AMBIG far more often than to a named
+#     step. That is the honest answer and it costs nothing: AMBIG and MASKED
+#     both refuse to trust the job, which is the verdict `job_trusted` needs.
+#     THE STEP NAME IS A BONUS THAT USUALLY WILL NOT ARRIVE. Do not "fix" this
+#     by narrowing to one owner — picking among equals is guessing.
+#   - the positional alternative is REFUTED, not merely disliked: that job's log
+#     holds 34 `##[group]Run` blocks against 37 executed steps. Indexing the
+#     step list by log block would have mis-named every step after the third
+#     divergence, silently and confidently.
+#
+# FOUR STATES, because "no masking found" and "could not look" are different
+# claims and collapsing them is how a detector manufactures a confident wrong
+# answer (this file's own M1-M4 failure mode):
+#   NOLOG   the log was absent or empty — we could not look. NOT a clean bill.
+#   NOERR   the log was read and contains no `##[error]` at all — positive
+#           evidence of no masking, and the ONLY state that restores a pass.
+#   MASKED  at least one `##[error]` under a step the API calls `success`.
+#   AMBIG   errors present but not attributable to a step, or the log parsed
+#           strangely. Treated exactly like MASKED: never a clean bill.
+TS = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.\d+)?Z?\s")
+
+def _secs(t):
+    try:
+        return calendar.timegm(time.strptime(t[:19], "%Y-%m-%dT%H:%M:%S"))
+    except Exception:
+        return None
+
+mask_state, masked_steps = "NOLOG", set()
+err_times, log_lines_seen = [], 0
+try:
+    with open(log_path, errors="replace") as fh:
+        for raw in fh:
+            log_lines_seen += 1
+            line = raw.rstrip("\r\n")
+            if "##[error]" not in line:
+                continue
+            m = TS.match(line)
+            err_times.append(_secs(m.group(1)) if m else None)
+except Exception:
+    err_times, log_lines_seen = [], 0
+
+if log_lines_seen == 0:
+    mask_state = "NOLOG"
+elif not err_times:
+    mask_state = "NOERR"
+else:
+    # windows: step name -> list of (start, end) across matrix legs
+    windows = []
+    for j in legs:
+        for s in j.get("steps") or []:
+            a, b = _secs(s.get("started_at") or ""), _secs(s.get("completed_at") or "")
+            if a is None or b is None:
+                continue
+            windows.append((a, b, s.get("name"), s.get("conclusion")))
+    if not windows:
+        mask_state = "AMBIG"        # errors, but no windows to attribute them to
+    else:
+        mask_state = "NOERR"
+        for t in err_times:
+            if t is None:
+                mask_state = "AMBIG"      # an ##[error] we could not even timestamp
+                continue
+            owners = [(n, c) for (a, b, n, c) in windows if a <= t <= b]
+            if len(owners) == 1:
+                n, c = owners[0]
+                if c == "success":
+                    masked_steps.add(n)
+                    if mask_state != "AMBIG":
+                        mask_state = "MASKED"
+                # an ##[error] under a step the API ALREADY calls failure is not
+                # masking — it is the API telling the truth. Not a clean bill
+                # either, but it disconfirms nothing, so leave the state alone.
+            else:
+                # zero owners (an error outside every step window, e.g. a job
+                # level annotation) or several (a shared boundary second).
+                mask_state = "AMBIG"
+
+# The proof `job_all_success` was NOT: an all-green job whose log affirmatively
+# shows no masking. NOERR is doing the load-bearing work here — without it this
+# is the same weak evidence #16908 removed, and re-adding it would reopen that
+# defect rather than fix this one.
+#
+# WHAT THIS ACTUALLY BUYS, MEASURED 2026-09-08 over 34 breaker-bearing main jobs
+# across 120 main runs (task-d0ce9aaf8040d687 asked for a number, not an
+# impression):
+#     carried an old pass proof already : 24 / 34   (log_parsed 24, api_trusted 0)
+#     job_trusted true                  : 29 / 34
+#     NEWLY accusable because of this   : 10 / 34
+#     no proof at all, before or after  :  0 / 34
+# `api_trusted` fired ZERO times in the sample: after #16908 the accusing path
+# was resting almost entirely on main's own Decide line being readable.
+#
+# THE FIRST PASS OF THIS MEASUREMENT SAID 31 AND WAS WRONG BY 3x. It counted
+# every all-green, clean-log job as newly accusable without checking whether the
+# job ALREADY had a proof — and an all-green main job makes the breaker print
+# "no gate step failed in '<job>'" into its own log, which sets `log_green` ->
+# `log_parsed` -> already a pass. The 10 that remain are real: they are the
+# security.yml matrix jobs (Sobelow, Dependency CVE audit), whose Decide line
+# does not round-trip under their matrix-suffixed job names. A denominator
+# derived from the property being measured cannot detect that property's
+# absence; log_parsed had to be READ out of the log, exactly as this script
+# reads it.
+job_trusted = job_all_success and mask_state == "NOERR"
 
 print("STATUS=%s" % status)
 print("LEGS=%d" % len(legs))
@@ -697,6 +1007,9 @@ print("JOBCONCL=%s" % ",".join(str(c) for c in job_concls))
 print("LOGPARSED=%d" % int(log_parsed))
 print("LOGGREEN=%d" % int(log_green))
 print("LOGAMBIGUOUS=%d" % int(log_ambiguous))
+print("MASKSTATE=%s" % mask_state)
+print("MASKEDSTEPS=%s" % ";".join(sorted(masked_steps)))
+print("JOBTRUSTED=%d" % int(job_trusted))
 print("MAINFAILED=%s" % ";".join(sorted(api_failed | log_failed)))
 # LOG_DERIVED: at least one of OUR steps matched only through main's log line.
 print("LOGDERIVED=%d" % int(bool([s for s in ours if s in log_failed and s not in api_failed])))
@@ -714,12 +1027,40 @@ for s in ours:
             cls = "NOTREACHED"
         elif job_cancelled:
             cls = "NOTREACHED"
-        elif st == "success" and log_ambiguous and not api_trusted and not job_all_success:
+        elif st == "success" and log_ambiguous and not api_trusted and not job_trusted:
             # M4: main's failed-step list came back ';'-joined and a name may
             # have been shredded by the split, so "absent from main's set" is
             # not trustworthy. Undetermined — never blame.
             cls = "UNKNOWN"
-        elif st == "success" and (job_all_success or log_parsed or api_trusted):
+        elif st == "success" and (log_parsed or api_trusted or job_trusted):
+            # `job_all_success` USED TO BE A THIRD PROOF HERE AND IT IS NOT ONE.
+            # It is back as `job_trusted`, WHICH IS NOT THE SAME PREDICATE: it is
+            # `job_all_success` AND the masking detector affirmatively finding no
+            # `##[error]` anywhere in main's log (MASKSTATE=NOERR). The bare form
+            # asserted a pass from the ABSENCE of disconfirming evidence; this one
+            # asserts it from PRESENT evidence that nothing was masked. NOLOG and
+            # AMBIG both refuse it — "I could not look" is not "nothing there".
+            # (task-11e4855cc32c281c, measured 2026-09-07 on PR #16791.) The
+            # sibling proof `api_trusted` two blocks up carries the correct
+            # reasoning in its own comment: "if the API marks a GATE step failed,
+            # this job's step conclusions are NOT continue-on-error-masked, so
+            # `success` means passed." `job_all_success` is the case where
+            # NOTHING disconfirms masking — an all-green job is the weakest
+            # possible evidence, not a third proof, because a job concludes
+            # `success` while containing a step whose `outcome` was `failure`.
+            #
+            # WHAT IT COST: main's `Required-check spec gate` concluded success
+            # with every step reading `conclusion: success`, while its own log
+            # said `286 passed, 4 FAILED` — s1's `outcome: failure` is invisible
+            # to the jobs API. This clause therefore emitted "Main RAN that step
+            # and it PASSED, so the red is this PR's own" against the one PR that
+            # was FIXING the swallow. A breaker that accuses the repair is worse
+            # than one that stays quiet.
+            #
+            # An all-green-job-only case now falls through to UNKNOWN, whose
+            # message already names this exact hazard. THE TWO ERRORS ARE NOT
+            # SYMMETRIC: a false accusation sends a lane hunting a red it did not
+            # cause; a missed accusation leaves it undetermined, where it looks.
             cls = "PASSED"                 # the ONLY accusing evidence
         else:
             cls = "UNKNOWN"
@@ -728,6 +1069,12 @@ PY
 if [ ! -s "$TMPD/report.txt" ]; then
   undetermined "Main's jobs listing could not be classified at all (the classifier produced no output)."
 fi
+# Read-only diagnostic seam. The verdict lines below are ordered — a step main's
+# own Decide line already names as failed is settled BEFORE the masking clause
+# is ever consulted — so on a real run the detector's verdict is usually not
+# visible in the output at all. This makes it inspectable without a second copy
+# of the classifier, which would be an instrument that agrees with itself.
+[ -n "${MAIN_RED_BREAKER_REPORT_OUT:-}" ] && cp -- "$TMPD/report.txt" "$MAIN_RED_BREAKER_REPORT_OUT" 2>/dev/null
 
 get() { sed -n "s/^$1=//p" "$TMPD/report.txt" | head -1; }
 STATUS="$(get STATUS)"; LEGS="$(get LEGS)"; LOG_DERIVED="$(get LOGDERIVED)"
@@ -736,6 +1083,19 @@ STATUS="$(get STATUS)"; LEGS="$(get LEGS)"; LOG_DERIVED="$(get LOGDERIVED)"
 # one job failing, and a reader should not have to guess which they were told.
 [ "${LEGS:-0}" -gt 1 ] 2>/dev/null && MAIN_RUN_DESC="${MAIN_RUN_DESC} (${LEGS} matrix legs of this job were unioned.)"
 MAINS_1L="$(get MAINFAILED)"
+# The masking detector's verdict, stated in words rather than left implicit. A
+# reader who is told "UNDETERMINED" deserves to know WHICH of the two very
+# different reasons applies: main's log showed a masked failure, or the log
+# could not be read at all. Silence that does not say why is the thing this
+# script exists to stop.
+MASKSTATE="$(get MASKSTATE)"; MASKEDSTEPS="$(get MASKEDSTEPS)"
+case "$MASKSTATE" in
+  MASKED) MASK_1L=" MASKING DETECTED in main's job: main's log prints '##[error]' under step(s) the jobs API calls 'success'${MASKEDSTEPS:+ — ${MASKEDSTEPS}}, so main's step conclusions are not trustworthy here and an all-green job proves nothing." ;;
+  AMBIG)  MASK_1L=" Main's log holds '##[error]' that could not be attributed to a single step (adjacent steps share a boundary second, or the error sits outside every step window), so masking can be neither confirmed nor ruled out." ;;
+  NOLOG)  MASK_1L=" Main's job log was empty or could not be fetched, so masking could not be checked at all — that is not a clean bill of health." ;;
+  NOERR)  MASK_1L=" Main's log contains no '##[error]' anywhere, so nothing in that job is continue-on-error masked." ;;
+  *)      MASK_1L="" ;;
+esac
 cls_of() { awk -F'\t' -v c="$1" '$1=="STEP" && $2==c {print $3}' "$TMPD/report.txt"; }
 NOTREACHED="$(cls_of NOTREACHED)"; PASSED="$(cls_of PASSED)"; UNKNOWN="$(cls_of UNKNOWN)"; FAILEDONMAIN="$(cls_of FAILED)"
 
@@ -752,7 +1112,28 @@ fi
 # same defect wearing the opposite mask — a breaker that never accuses is as
 # useless as one that always does. So a PASSED step is reported, and the steps
 # that could not be settled are named in the SAME line rather than dropped.
+# ── M7 GATES THE ACCUSING PATH, AND ONLY THE ACCUSING PATH ──────────────────
+# These sit AFTER the RUNNER-LOCAL verdict (which is about the host, not either
+# tree) and BEFORE the PASSED path, because PASSED is the only verdict that
+# claims "this red is yours" and therefore the only one a tree mismatch can
+# falsify. INHERITED is untouched: main failing the same step is evidence
+# regardless of which tree it failed on, and gating it would let a tree mismatch
+# manufacture an accusation out of an inheritance — the opposite defect.
 if [ -n "$PASSED" ]; then
+  case "$TREE_REL" in
+    ahead|diverged)
+      undetermined "Main's compared run does NOT contain this PR's base, so it is not evidence about this tree: main run ${MAIN_RUN_ID} tested head ${MAIN_RUN_SHA:-?}, this PR's base is ${PR_BASE_SHA:-?}, and comparing them reports '${TREE_REL}' — the base carries commit(s) that run never executed. 'Main runs and passes this step' is therefore a statement about DIFFERENT CODE. Step(s) held back from attribution: $(printf '%s' "$PASSED" | tr '\n' ';'). Measured 2026-09-08: 7 of 19 accusations were made across this boundary."
+      ;;
+    behind)
+      # STALE-BASE. Main's run tested NEWER code and passed; the PR's base
+      # predates that. The red is neither main's (main is green there now) nor
+      # reachable by the PR's diff. This is NOT a failure of the PR, so the
+      # check is not failed on it — exit 0, with the remedy named.
+      say "STALE-BASE — '${JOB_NAME}' failed on step(s) main's newer tree passes: $(printf '%s' "$PASSED" | tr '\n' ';'). Main's compared run ${MAIN_RUN_ID} tested head ${MAIN_RUN_SHA:-?}, which is AHEAD of this PR's base ${PR_BASE_SHA:-?} — so main may pass that step because of a fix your base predates, and your diff cannot reach it. REMEDY: gh pr update-branch, then re-run. This is not attributed to you and this job does not fail on it. ${MAIN_RUN_DESC}"
+      echo "::warning title=Main-red breaker: stale base::'${JOB_NAME}' failed on step(s) main's NEWER tree passes. Your base (${PR_BASE_SHA:-?}) predates main's compared head (${MAIN_RUN_SHA:-?}). Remedy: gh pr update-branch."
+      exit 0
+      ;;
+  esac
   UNSETTLED="$(printf '%s\n%s' "$NOTREACHED" "$UNKNOWN" | sed '/^$/d' | tr '\n' ';')"
   say "FAIL — '${JOB_NAME}' failed on a step main does not: $(printf '%s' "$PASSED" | tr '\n' ';'). Main RAN that step and it PASSED, so the red is this PR's own.${MAINS_1L:+ (Main is red on: ${MAINS_1L}; those are inherited, the rest is yours.)}${UNSETTLED:+ Ownership of these other failed step(s) is UNDETERMINED, not attributed to you: ${UNSETTLED}} ${MAIN_RUN_DESC}"
   echo "::error title=Main-red breaker: this PR's own red::'${JOB_NAME}' failed on a step main runs and passes: $(printf '%s' "$PASSED" | tr '\n' ';')."
@@ -763,7 +1144,7 @@ if [ -n "$NOTREACHED" ]; then
   undetermined "Main's job did NOT REACH these step(s): $(printf '%s' "$NOTREACHED" | tr '\n' ';') — they are skipped/cancelled or absent from main's step list, because one red step skips every later step in the same job. Main not failing a step it never ran is not evidence that it passes."
 fi
 if [ -n "$UNKNOWN" ]; then
-  undetermined "Main's state for these step(s) is UNKNOWN: $(printf '%s' "$UNKNOWN" | tr '\n' ';'). Main's jobs API reports them 'success', but every gate step runs with continue-on-error — which reports 'success' for a FAILED step — and main's own Decide line could not be read to settle it."
+  undetermined "Main's state for these step(s) is UNKNOWN: $(printf '%s' "$UNKNOWN" | tr '\n' ';'). Main's jobs API reports them 'success', but every gate step runs with continue-on-error — which reports 'success' for a FAILED step — and main's own Decide line could not be read to settle it.${MASK_1L}"
 fi
 if [ -z "$FAILEDONMAIN" ]; then
   undetermined "No step could be classified against main at all."

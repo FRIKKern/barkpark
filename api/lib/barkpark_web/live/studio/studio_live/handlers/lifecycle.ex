@@ -10,6 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PresenceState
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper
   alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, Shared}
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
@@ -201,8 +202,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   def document_changed(%{type: type} = msg, socket) do
     viewing_type = socket.assigns[:editor_type] || Enum.at(socket.assigns.nav_path, 0)
+    ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
 
     cond do
+      # task-be3b3aa6da5df3a2 (instance 6, the half that is in reach) — THE
+      # CONSUMER-SIDE FENCE on the GLOBAL document stream. `Shared.list_topic/2`
+      # already prefers `documents:ws:<id>:<dataset>` when a workspace is
+      # resolved, but its fallback clause rides `documents:<dataset>`, which
+      # `Content.Broadcast` fires UNCONDITIONALLY for every tenant (the
+      # workspace-keyed twin is conditional on `doc.workspace_id`). The payload
+      # already carries `:workspace_id`, so this socket can refuse a foreign
+      # tenant's frame without any change to the producer.
+      not Shared.own_tenant?(msg, ws_id) ->
+        {:noreply, socket}
+
       # Our OWN write — the handle_event that performed it already refreshed our
       # state, so a broadcast-driven `rebuild_panes` (a fresh DB reload) is both
       # redundant AND, in tests, an in-flight query that outlives the test that
@@ -235,8 +248,67 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
     {:noreply, Shared.paper_op(socket, op)}
   end
 
+  # pds-w42-bl-tree-codelist-readonly-guard-inert — THE GUARD, ARMED WHERE THE
+  # PRINCIPAL IS.
+  #
+  # `TreeCodelistField.handle_event("tree_node_select", …)` carries a
+  # `readonly` guard, but on the Studio path that guard is INERT by
+  # construction: `PaperFieldBlock` mounts the component without a `readonly`
+  # assign, so `CodelistField`'s `attr :readonly, default: false` hands it
+  # `false` for every principal. The one callsite that DOES pass `readonly`
+  # (codelist_field.ex) passes no `notify_id`, so `maybe_notify_select/2`
+  # short-circuits there and that path cannot write at all. Guard and danger
+  # were disjoint.
+  #
+  # The component cannot be the place to fix it: a LiveComponent has no
+  # principal. Nor can a `:handle_event` hook see this hop —
+  # `maybe_notify_select/2` does `send(self(), {:tree_codelist_change, …})`,
+  # a handle_INFO, exactly the blindness `Shared.Paper.write_denied?/1`
+  # documents for `{:paper_op, …}`. So the question is asked HERE, on the
+  # parent socket, which is the first place that holds the principal.
+  #
+  # ONE PREDICATE, NOT A FORK: `Shared.Paper.write_denied?/1` and
+  # `grant_target_denied?/3` are the SAME copies the chokepoint asks, in the
+  # same order, with the same refusals.
+  #
+  # WHAT THIS DOES NOT CLOSE, SAID PLAINLY. `TreeCodelistField` still assigns
+  # its own `:selected` in `handle_event("tree_node_select", …)` before the
+  # notify, and LiveView does not re-invoke a component whose assigns did not
+  # change — so a denied principal's PICKER still paints the clicked row until
+  # something else moves the block's value. Closing that needs the `readonly`
+  # prop to actually reach the component, i.e. a capability attr plumbed
+  # through `PaperEditor.paper_block_fields/1` (14 callsites) to the
+  # `codelist`+`variant: "tree"` render head in `PaperFieldBlock`. It is a UI
+  # AFFORDANCE, exactly like `SheetGrid`'s snapshot prop: a stale-TRUE one
+  # costs a denied write at this seam, never a persisted one.
+  #
+  # DEFENCE IN DEPTH, NOT THE ONLY WALL. The chokepoint already refuses the
+  # resulting `{:paper_op, …}`, so persisted state was safe. What was NOT safe
+  # is what a refusal at the chokepoint leaves behind: `send_update` runs
+  # `PaperFieldBlock.update(%{tree_value: code}, …)`, which moves the
+  # component's OWN `:value` and sets `pending_value?`, so a denied principal's
+  # editor renders the forged code back as if it had been accepted, and that
+  # pending value survives the parent's echo. Stopping the hop stops that too.
   def tree_codelist_change(%{id: id, value: code}, socket) do
-    send_update(BarkparkWeb.Studio.PaperFieldBlock, id: id, tree_value: code)
-    {:noreply, socket}
+    doc = socket.assigns[:editor_doc] || socket.assigns[:paper_doc]
+    type = doc_field(doc, :type) || socket.assigns[:editor_type]
+
+    cond do
+      Paper.write_denied?(socket) ->
+        {:noreply, Paper.refuse_write_denied(socket)}
+
+      Paper.grant_target_denied?(socket, type, doc_field(doc, :doc_id)) ->
+        {:noreply, Paper.refuse_outside_grant(socket)}
+
+      true ->
+        send_update(BarkparkWeb.Studio.PaperFieldBlock, id: id, tree_value: code)
+        {:noreply, socket}
+    end
   end
+
+  # Read a pane doc's field TOTALLY — the live path carries a
+  # `%Content.Document{}` while unit fixtures carry a bare map, and `doc.type`
+  # would raise a KeyError on the latter. Mirrors `Shared.Paper.doc_field/2`.
+  defp doc_field(doc, key) when is_map(doc), do: Map.get(doc, key)
+  defp doc_field(_doc, _key), do: nil
 end

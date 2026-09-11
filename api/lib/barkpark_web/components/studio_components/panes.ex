@@ -482,6 +482,14 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   attr :badge, :string, default: nil
   attr :meta, :string, default: nil
 
+  # ── Row media (Gyldendal parity E3.3) ──────────────────────────────────
+  # `media` is the image url a schema's `list_preview.media` field resolved
+  # to; `media_slot` says the row belongs to a pane whose type declares one,
+  # so a row WITHOUT an image still reserves the box and the titles align.
+  # Both absent → no media markup at all (the legacy row, byte-identical).
+  attr :media, :string, default: nil
+  attr :media_slot, :boolean, default: false
+
   # ── Bulk-publish multi-select (Task barkpark-3yq) ─────────────────────
   # When `selectable` is true, the row renders a left-anchored checkbox
   # whose `phx-click="toggle-doc-checkbox"` event toggles inclusion in
@@ -540,6 +548,13 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         phx-value-pane={@phx_value_pane}
         phx-value-id={@phx_value_id}
       >
+        <%= if @media do %>
+          <span class="pane-doc-media" aria-hidden="true"><img src={@media} alt="" loading="lazy" /></span>
+        <% else %>
+          <%= if @media_slot do %>
+            <span class="pane-doc-media pane-doc-media-empty" aria-hidden="true"></span>
+          <% end %>
+        <% end %>
         <span class="pane-doc-main">
           <span class="pane-doc-title">
             <span class={"pane-doc-dot #{if @is_draft, do: "draft", else: @status}"}></span>

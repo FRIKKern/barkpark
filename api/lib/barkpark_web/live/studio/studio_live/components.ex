@@ -25,6 +25,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # HTTP 500 on /studio/rest and /studio/plugins). The literal `name="…"` sites
   # in this file stay literal — the icons tripwire owns those.
   alias BarkparkWeb.Icons
+  alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -43,6 +45,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:paper_html, :string, default: "")
   attr(:paper_block_mode, :boolean, default: false)
   attr(:paper_edit_mode, :boolean, default: false)
+  attr(:paper_canvas_retained, :any, default: nil)
+  attr(:paper_canvas_resume_halt, :boolean, default: false)
+  attr(:paper_canvas_resume_status, :atom, default: :none)
   # t9 — live task-block previews (block_id ⇒ preview entry), display-only rows
   # the Edit-mode boundary widgets paint (Shared.push_task_previews fills it).
   attr(:task_previews, :map, default: %{})
@@ -70,6 +75,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:sidebar_slug_draft, :string, default: nil)
   attr(:sidebar_slug_feedback, :any, default: nil)
   attr(:workspace_label, :string, default: nil)
+  # task-be3b3aa6da5df3a2 (instance 3) — threaded PAST this component to the
+  # inspector, exactly like `width_bucket` above: this view does not read with
+  # it, `paper_metadata_sidebar/1` does.
+  attr(:scope, :list, default: [])
   # sup-w5 — the socket-owned save mirror (Shared.Paper computes both on every
   # write). Threaded into the canvas <.paper_block_editor> below so the footer
   # echoes the REAL status and a plugin-halt raises the shared banner, instead
@@ -283,15 +292,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               landmark on the destination, a truthful `aria-expanded` on its
               control, and `inert` on what the panel covers. --%>
         <div class="editor-body editor-panel-main bp-paper-body" inert={@inspector_destination}>
-          <%!-- The accessible name is added ONLY when the always-editable
-                canvas is the surface (@canvas_on keeps the OFF path
-                byte-identical, D3; @show_editor keeps the name honest — an
-                HTML-only legacy paper on the ON path renders a READ-ONLY raw
-                body, which must not be announced as "Editing"). --%>
+          <%!-- The accessible name. On the canvas path it is UNCHANGED: the
+                "Editing …" name is still added only when the always-editable
+                canvas is genuinely the surface (@show_editor keeps it honest —
+                an HTML-only legacy paper on the ON path renders a READ-ONLY raw
+                body and must not be announced as "Editing").
+
+                spd-canvas-off-nonempty-guard — the OFF path used to get NO name
+                at all, because the whole expression was gated on @canvas_on.
+                That left the opt-out arm's landmark anonymous: a screen reader
+                announced a bare `main`, and for a blocks-list document with an
+                empty body there was not a single character inside it either. It
+                now carries the document's TITLE — the truthful name for a
+                surface that is a reading pane until the author presses Edit.
+                It is deliberately NOT "Editing …": the OFF path opens read-only,
+                and borrowing the canvas name would announce a mode the reader
+                is not in. --%>
           <main
             class="bp-paper-shell bp-paper-surface"
             data-test-id="studio-paper-shell"
-            aria-label={@canvas_on && @show_editor && @slug && "Editing #{@title}"}
+            aria-label={
+              @slug &&
+                if(@canvas_on, do: @show_editor && "Editing #{@title}", else: @title)
+            }
           >
             <%!-- Sentinel: rendered once, OUTSIDE the streamed/re-assigned
                   container. It survives a handle_info DOM diff but would be
@@ -316,6 +339,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   api_token_raw={@api_token_raw}
                   scope_prefix={@scope_prefix}
                   canvas_eligible={true}
+                  canvas_retained={@paper_canvas_retained}
+                  canvas_resume_halt={@paper_canvas_resume_halt}
+                  canvas_resume_state={@paper_canvas_resume_status}
                   task_previews={@task_previews}
                   paper_links={@paper_links}
                   save_status={@save_status}
@@ -332,6 +358,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       papers (the "stale content after a jump" bug). Within
                       the SAME paper the id is stable, so `{:paper_block}`
                       deltas still diff in place with no remount. --%>
+                <%!-- spd-canvas-off-nonempty-guard — the empty-body sentence
+                      for THIS arm. A blocks-list document whose list is EMPTY
+                      renders a stream container with zero children, and this
+                      arm is where a `BARKPARK_PAPER_CANVAS=0` host lands on
+                      open: the author saw an entirely blank region and was told
+                      nothing about which document it was or how to start it.
+                      The editor arm has said this since spd-w18; the read-only
+                      arm never did, and `blank_body?/1`'s never-blank notice
+                      cannot cover it (a blocks LIST makes `paper_block_mode`
+                      true, so that cond clause is unreachable here).
+
+                      It is a SIBLING of the <article>, never a child: a
+                      `phx-update="stream"` container may only hold stream
+                      children, and a static child inside it would survive every
+                      later insert. `:if` on the block list means the very first
+                      block the author adds removes it. --%>
+                <p
+                  :if={@edit_blocks == []}
+                  class="bp-paper-editor-empty"
+                  data-test-id="paper-blocks-empty-readonly"
+                >
+                  This {@doc_type} (<code>{@slug}</code>) has no body blocks yet. Choose Edit above to add one.
+                </p>
                 <article
                   id={"paper-body-#{@slug}"}
                   data-rev={@paper_rev}
@@ -440,6 +489,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           :if={@paper_doc}
           paper_doc={@paper_doc}
           dataset={@dataset}
+          scope={@scope}
           workspace_label={@workspace_label}
           panel_open={@sidebar_open}
           user_opened={@sidebar_user_opened}
@@ -546,6 +596,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:paper_doc, :map, required: true)
   attr(:dataset, :string, required: true)
   attr(:workspace_label, :string, default: nil)
+  # task-be3b3aa6da5df3a2 (instance 3) — THE TENANT SCOPE, threaded as data.
+  # The Relations rows below resolve each reference's TITLE through
+  # `Content.reference_title/4`, and the 3-arity call this replaced dropped
+  # `workspace_id`, `project_id`, `caller_context` AND `grant_scoped` — every
+  # narrowing the body of the SAME paper applies when it resolves the SAME
+  # reference (`Shared.Paper.paper_stream_items/3`). A component function is
+  # handed `assigns` and nothing else, so the scope has to ARRIVE here; the
+  # only call site computes it with `ScopeHelpers.scope_opts_from_assigns/1`,
+  # the one seam (never a hand-rolled `[workspace_id: …]` copy).
+  # Default `[]` keeps an un-threaded call site byte-identical to the 3-arity
+  # behaviour it had, rather than silently failing closed mid-render.
+  attr(:scope, :list, default: [])
   attr(:panel_open, :boolean, default: true)
   # D91. Distinct from `panel_open` and NOT a synonym for it: `panel_open` is
   # the server's state (and it also gates whether the body/title exist in the
@@ -639,7 +701,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             Map.put(
               rel,
               :title,
-              Barkpark.Content.reference_title(rel.id, rel.ref_type, assigns.dataset)
+              Barkpark.Content.reference_title(
+                rel.id,
+                rel.ref_type,
+                assigns.dataset,
+                assigns.scope
+              )
             )
           end)
       )
@@ -1488,6 +1555,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     is_draft={item.is_draft}
                     badge={item[:badge]}
                     meta={item[:meta] || item[:updated]}
+                    media={item[:media]}
+                    media_slot={item[:media_slot] == true}
                     selected={item.id == pane[:selected]}
                     selectable={pane[:type_name] != nil}
                     checked={MapSet.member?(@selected_doc_ids, item.id)}
@@ -1551,6 +1620,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <%= cond do %>
         <% @editor_view == :paper -> %>
         <.studio_paper_view
+          paper_canvas_retained={Map.get(assigns, :paper_canvas_retained)}
+          paper_canvas_resume_halt={Map.get(assigns, :paper_canvas_resume_halt, false)}
+          paper_canvas_resume_status={Map.get(assigns, :paper_canvas_resume_status, :none)}
           focus_on_mount={@focus_doc_on_open}
           paper_doc={@paper_doc}
           paper_rev={@paper_rev}
@@ -1563,6 +1635,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}
           dataset={@dataset}
+          scope={ScopeHelpers.scope_opts_from_assigns(assigns)}
           scope_prefix={@scope_prefix}
           streams={@streams}
           backlinks_used_by={@backlinks_used_by}
@@ -1744,6 +1817,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </div>
         <% else %>
           <.studio_editor_shell
+            admin?={Caps.admin_affordance?(@caps)}
             focus_on_mount={@focus_doc_on_open}
             editor_doc={@editor_doc}
             editor_schema={@editor_schema}
@@ -1752,6 +1826,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             editor_is_draft={@editor_is_draft}
             dataset={@dataset}
             validation_errors={@validation_errors}
+            validation_warnings={@validation_warnings}
             cross_violations={@cross_violations}
             save_status={@save_status}
             doc_conflict={@doc_conflict}
@@ -1834,7 +1909,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       />
 
       <!-- E3 bulk publish floating action bar -->
-      <.bulk_action_bar selected_doc_ids={@selected_doc_ids} />
+      <.bulk_action_bar
+        selected_doc_ids={@selected_doc_ids}
+        admin?={Caps.admin_affordance?(@caps)}
+      />
 
       <!-- Schema-action ConfirmModal — gated by `confirm_modal` assign -->
       <%= if @confirm_modal do %>

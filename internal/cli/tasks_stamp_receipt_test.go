@@ -57,7 +57,9 @@ func (s *stampReceiptServer) start(t *testing.T) {
 				return
 			}
 			if s.applyStamp {
-				q := r.URL.Query()
+				// Read the query+body MERGE, as Phoenix does: stamp prose rides
+				// the body since #17000 (task-b71ece4e1a8d1f6d).
+				q := stampMergedParams(r)
 				if idx := q.Get("criterion"); idx == "0" {
 					s.criteria[0]["met"] = q.Get("met") == "true"
 					s.criteria[0]["evidence"] = q.Get("evidence")

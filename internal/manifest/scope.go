@@ -51,6 +51,31 @@ import "sort"
 // so the case that is currently CORRECT (floor scope, flat route) keeps its
 // byte-identical behaviour and only the case that is currently WRONG changes.
 
+// THE DATASET ARM, BUILT — see dataset_scope.go. This file's rules cover -w/-p
+// ONLY, and that is still true: there is no DatasetTyped read here, no dataset
+// entry in scopeDispositions, and no dataset arm in refuseUnrepresentableScope's
+// -w/-p block. The dataset axis got its OWN file, its own four-way fate, and its
+// own per-noun disposition table, because two of the three rules differ:
+//
+//  1. There is no dataset MIRROR to route to. Every scoped_prefix the live
+//     manifest advertises is "/w/:workspace_slug/p/:project_slug" — no dataset
+//     segment anywhere — so ScopeMirrored has no dataset counterpart, and
+//     dataset_scope_test.go DERIVES that from the fixture rather than asserting
+//     it by hand.
+//  2. The arming provenance is NARROWER. StatedScope reads WorkspaceExplicit,
+//     which any layer above Defaults sets. StatedDataset reads DatasetTyped,
+//     which only a flag-precedence value sets, because an ambient
+//     BARKPARK_DATASET / .barkpark.json / saved-config dataset is a standing
+//     preference rather than a claim about this invocation — and refusing on it
+//     would brick every developer with a non-production default. See the
+//     DatasetTyped comment in context.go.
+//
+// What is UNCHANGED is the severity ordering this block originally recorded: a
+// dropped -w answers about another TENANT, a dropped -d about another dataset
+// INSIDE the workspace you already named. That is why -w/-p shipped first and
+// why refuseUnrepresentableScope still reports the -w/-p refusal ahead of the
+// dataset one when both apply.
+
 // ScopeFate is what happens to an operator-stated -w/-p on one command.
 type ScopeFate int
 
@@ -96,13 +121,32 @@ var (
 // `-w default` on an instance whose real workspace is named `default` is not a
 // wrong answer waiting to happen, and a Context built as a literal (a test, a
 // caller that skips Resolve) reads as not-stated and is left alone.
+//
+// THE SECOND DOOR, AND WHY THE ...FromServerEntry SUBTRACTION IS HERE.
+// Provenance alone was never enough, and neither is provenance AND divergence,
+// because one thing that is not the operator's hand also writes at FLAG
+// precedence: `bp -s <saved-name>` copies that saved entry's workspace/project/
+// dataset into the flags map (internal/cli/cli.go's FindServer branch). Before
+// the subtraction below, `bp -s gyldendal task ready` — with no -w typed
+// anywhere on the command line — resolved Workspace=gyldendal at LayerFlag,
+// read as STATED and divergent, and was REFUSED. There is nothing the operator
+// can do about that except stop using their own saved server. The precedence is
+// right (naming a server IS a deliberate choice, and its saved scope should beat
+// env and the active config); it is the claim "they stated it" that is false, so
+// that is the only thing corrected. See AttributeServerEntry in context.go.
+//
+// The subtraction only ever turns a refusal OFF. A typed -w, a BARKPARK_*
+// workspace, a .barkpark.json and the saved active config all resolve with the
+// FromServerEntry flags false and are read exactly as they were before.
 func StatedScope(ctx Context) []string {
 	floor := DefaultDefaults()
 	var out []string
-	if ctx.WorkspaceExplicit && ctx.Workspace != "" && ctx.Workspace != floor.Workspace {
+	if ctx.WorkspaceExplicit && !ctx.WorkspaceFromServerEntry &&
+		ctx.Workspace != "" && ctx.Workspace != floor.Workspace {
 		out = append(out, "-w")
 	}
-	if ctx.ProjectExplicit && ctx.Project != "" && ctx.Project != floor.Project {
+	if ctx.ProjectExplicit && !ctx.ProjectFromServerEntry &&
+		ctx.Project != "" && ctx.Project != floor.Project {
 		out = append(out, "-p")
 	}
 	return out

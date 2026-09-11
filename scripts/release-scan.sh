@@ -10,8 +10,11 @@
 #
 # Usage:   scripts/release-scan.sh [ref]        (ref defaults to origin/main)
 # Env:     RELEASE_SCAN_REPO=owner/name         (defaults to FRIKKern/barkpark)
-#          RELEASE_SCAN_ALLOW_SHALLOW=1         (proceed on a shallow clone and
-#                                                mark the output `shallow:true`)
+#          RELEASE_SCAN_ALLOW_SHALLOW=1         (proceed on a TRUNCATED WALK — a
+#                                                graft on HEAD's own history, or a
+#                                                walk whose completeness cannot be
+#                                                established — and mark the output
+#                                                `shallow:true`)
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # HOW THE CI VERDICT IS DERIVED — and what it refuses to claim (honest-gates
@@ -65,25 +68,133 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# ── the shared check-runs reader ─────────────────────────────────────────────
+# The check-run read goes through scripts/lib/check-runs.sh — the paged read
+# that ends in a comparison against the feed's own `total_count` and refuses
+# rather than emitting a set it cannot vouch for. `check_runs_feed` hands back
+# the RAW feed, not the lib's per-name TSV, because the advisory derivation
+# below counts reds PER SUITE and a dedup-by-name would collapse two reds of
+# one name into one — turning "cannot_tell" into a confident "blocking".
+CHECK_RUNS_LIB="${BARKPARK_CHECK_RUNS_LIB:-$REPO_ROOT/scripts/lib/check-runs.sh}"
+if [ ! -f "$CHECK_RUNS_LIB" ]; then
+  echo "release-scan: no check-runs reader at $CHECK_RUNS_LIB — refusing to derive a CI verdict without the shared primitive" >&2
+  exit 1
+fi
+# shellcheck source=scripts/lib/check-runs.sh
+. "$CHECK_RUNS_LIB"
+
 REF="${1:-origin/main}"
 SLUG="${RELEASE_SCAN_REPO:-FRIKKern/barkpark}"
 
-# ── Shallow-clone guard ──────────────────────────────────────────────────────
-# Under a shallow clone `git describe --tags` finds no tag and `git log` walks
-# a truncated history: the script used to emit `commits: []`, a null
+# ── Truncated-walk guard ─────────────────────────────────────────────────────
+# Under a truncated history `git describe --tags` finds no tag and `git log`
+# walks a short range: the script used to emit `commits: []`, a null
 # suggested_version and exit 0 — indistinguishable from "nothing to release".
 # A reader that cannot see the history must say so, not shrug in green.
-is_shallow="$(git rev-parse --is-shallow-repository 2>/dev/null || echo unknown)"
-if [ "$is_shallow" != "false" ]; then
-  if [ "${RELEASE_SCAN_ALLOW_SHALLOW:-0}" = "1" ]; then
-    echo "release-scan: WARNING shallow repository (is-shallow=${is_shallow}) — commits[]/last_tag are TRUNCATED; output carries shallow:true" >&2
+#
+# THE STORE-LEVEL FLAG ALONE IS NOT THE QUESTION, and keying on it is how this
+# guard refused a checkout it could read in full. `git rev-parse
+# --is-shallow-repository` answers about the OBJECT STORE, which is
+# repository-wide: one off-HEAD `--depth` fetch sets it for a checkout whose
+# HEAD history reaches the root (measured on /Volumes/SATECHI/github/barkpark
+# 2026-08-02 — 5132 commits from HEAD, one root, and the sole graft in
+# .git/shallow not an ancestor of HEAD). The scan then FATALed at exit 3 and
+# advertised `git fetch --unshallow`, a remedy that does not describe what is
+# wrong; the other remedy, RELEASE_SCAN_ALLOW_SHALLOW=1, made a correct scan
+# stamp itself `shallow:true`. Both are a truthful reader calling itself blind.
+#
+# The question is whether a graft lies on HEAD's OWN history. This is the
+# predicate proven next door in scripts/pds-record-parity.sh (walk_truncation,
+# ruling 4) — store-shallow AND at least one entry of
+# $(git rev-parse --git-common-dir)/shallow is an ancestor of HEAD.
+#
+# IT FAILS CLOSED. An unreadable graft list, a missing common-dir, a graft that
+# cannot be tested, or a non-true/false answer from git all land on "unknown",
+# which takes the SAME path as "truncated": the existing FATAL at exit 3, still
+# escapable with RELEASE_SCAN_ALLOW_SHALLOW=1 and still declaring `shallow:true`
+# in the JSON (release-scan's truncated commits[] is useful draft material, which
+# is why this script has an escape and pds-record-parity.sh does not).
+#
+# Under a real `git clone --depth 1` the graft list holds HEAD itself, so
+# `--is-ancestor HEAD HEAD` is true and the case this guard exists for still
+# fires — see G4-G7 in scripts/release-scan.test.sh, and J for the off-HEAD
+# shape that pins the predicate against a simplification back to the flag.
+WALK_STATE=""
+WALK_GRAFT=""
+WALK_REASON=""
+walk_truncation() {
+  WALK_STATE=""; WALK_GRAFT=""; WALK_REASON=""
+
+  local store
+  store="$(git rev-parse --is-shallow-repository 2>/dev/null)" || store=""
+  case "$store" in
+    false) WALK_STATE="complete"; return 0 ;;
+    true)  : ;;
+    *)     WALK_STATE="unknown"
+           WALK_REASON="\`git rev-parse --is-shallow-repository\` answered '${store:-<nothing>}', which is neither true nor false"
+           return 0 ;;
+  esac
+
+  # Store-shallow. Now ask whether it touches HEAD.
+  local common
+  common="$(git rev-parse --git-common-dir 2>/dev/null)" || common=""
+  if [ -z "$common" ]; then
+    WALK_STATE="unknown"
+    WALK_REASON="the store is shallow but \`git rev-parse --git-common-dir\` answered nothing, so the graft list cannot be located"
+    return 0
+  fi
+
+  local grafts="${common%/}/shallow"
+  if [ ! -r "$grafts" ]; then
+    WALK_STATE="unknown"
+    WALK_REASON="the store is shallow but the graft list ${grafts} is missing or unreadable, so no graft can be tested against HEAD"
+    return 0
+  fi
+
+  local g rc
+  while read -r g || [ -n "$g" ]; do
+    case "$g" in ''|\#*) continue ;; esac
+    # NOT a bare call followed by `rc=$?`, which is how the donor spells it:
+    # pds-record-parity.sh runs `set -uo pipefail` with NO -e, this script runs
+    # `set -euo pipefail`, and exit 1 here is the EXPECTED answer "off HEAD's
+    # history". Under errexit the bare form kills the scan at exit 1 with an
+    # empty stderr on the very repo shape this guard was written to pass
+    # (measured while porting). An `if` makes the status a condition, which
+    # errexit never traps.
+    if git merge-base --is-ancestor "$g" HEAD >/dev/null 2>&1; then rc=0; else rc=$?; fi
+    case "$rc" in
+      0) WALK_STATE="truncated"; WALK_GRAFT="$g"; return 0 ;;
+      1) : ;;   # a real answer: this graft is off HEAD's history
+      *) WALK_STATE="unknown"
+         WALK_GRAFT="$g"
+         WALK_REASON="graft ${g} could not be tested against HEAD (git merge-base --is-ancestor exit ${rc})"
+         return 0 ;;
+    esac
+  done < "$grafts"
+
+  WALK_STATE="complete"
+  WALK_REASON="store-shallow, but no graft in ${grafts} lies on HEAD's history"
+  return 0
+}
+
+walk_truncation
+if [ "$WALK_STATE" != "complete" ]; then
+  if [ "$WALK_STATE" = "truncated" ]; then
+    walk_why="a graft on HEAD's own history (${WALK_GRAFT}) — the walk stops there"
+    walk_fix="fix with \`git fetch --unshallow\` (CI: check out with \`fetch-depth: 0\`)"
   else
-    echo "release-scan: FATAL shallow repository (is-shallow=${is_shallow}). git log/describe would silently under-report the release range." >&2
-    echo "release-scan: fix with \`git fetch --unshallow\`, or set RELEASE_SCAN_ALLOW_SHALLOW=1 to accept truncated commits[]." >&2
+    walk_why="walk completeness UNKNOWN, so this guard fails CLOSED: ${WALK_REASON}"
+    walk_fix="fix by making the graft list readable, or set RELEASE_SCAN_ALLOW_SHALLOW=1"
+  fi
+  if [ "${RELEASE_SCAN_ALLOW_SHALLOW:-0}" = "1" ]; then
+    echo "release-scan: WARNING truncated history (${walk_why}) — commits[]/last_tag are TRUNCATED; output carries shallow:true" >&2
+  else
+    echo "release-scan: FATAL shallow repository (${walk_why}). git log/describe would silently under-report the release range." >&2
+    echo "release-scan: ${walk_fix}, or set RELEASE_SCAN_ALLOW_SHALLOW=1 to accept truncated commits[]." >&2
     exit 3
   fi
 fi
-if [ "$is_shallow" = "false" ]; then shallow_json=false; else shallow_json=true; fi
+if [ "$WALK_STATE" = "complete" ]; then shallow_json=false; else shallow_json=true; fi
 
 # Newest vA.B.C release tag reachable from REF. The exclude globs drop the
 # separate cli-v* tag space and any pre-release/suffixed tag, matching
@@ -159,8 +270,32 @@ CI_UNKNOWN='{"status":"unknown","status_reason":"gh unavailable or no check data
 
 # A check run carries .check_suite.id inline but NOT the suite's conclusion,
 # so the second call is genuinely needed to learn the rollup.
-runs_json="$(gh api "repos/${SLUG}/commits/${head_sha}/check-runs?per_page=100" \
-  --jq '[.check_runs[] | {name, status, conclusion, suite_id: .check_suite.id}]' 2>/dev/null || true)"
+#
+# THE READ IS PAGED AND PROVES ITS OWN COMPLETENESS, and for THIS script that is
+# a correctness fix, not tidiness. `?per_page=100` alone truncates at 100 with
+# no error and no flag (measured 2026-09-07 on head 33799f6d8: total_count 122,
+# 100 rows returned). Truncation here fails in the REASSURING direction, the
+# opposite of the census's: `$refids` below is the set of suite ids REFERENCED
+# by a check run, and ci.status is derived from those suites ALONE. A suite
+# whose runs all sit past row 100 is never referenced, so its conclusion never
+# reaches the rollup — a RED suite goes missing and the scan reports
+# ci.status "success" on a head that is failing, handing the release curator a
+# green light for a broken candidate. checks_total under-reports with it.
+#
+# So an incomplete read is NOT allowed to look like a small one: check_runs_feed
+# refuses, and the refusal lands on the honest degrade path this script already
+# owns (ci.status "unknown"), with a status_reason that NAMES the truncation
+# instead of blaming a missing feed. Best-effort is kept — a CI read that
+# cannot be vouched for must never fail the whole scan (git failure does that,
+# gh failure never has).
+ci_read_refused=""
+runs_json=""
+if ! ci_feed="$(check_runs_feed "$SLUG" "$head_sha" 2>&1)"; then
+  ci_read_refused="$(printf '%s' "$ci_feed" | head -1 | cut -c1-300)"
+else
+  runs_json="$(printf '%s' "$ci_feed" \
+    | jq -c '[.check_runs[] | {name, status, conclusion, suite_id: .check_suite.id}]' 2>/dev/null || true)"
+fi
 suites_json="$(gh api "repos/${SLUG}/commits/${head_sha}/check-suites?per_page=100" \
   --jq '[.check_suites[] | {id, status, conclusion}]' 2>/dev/null || true)"
 
@@ -211,7 +346,16 @@ classify_cancelled() {
         })'
 }
 
-if [ -z "$runs_json" ] || [ -z "$suites_json" ]; then
+if [ -n "$ci_read_refused" ]; then
+  # DISTINCT from "gh unavailable or no check data". The feed WAS reachable and
+  # answered; what could not be obtained is the WHOLE of it, and a partial
+  # rollup is indistinguishable from a green one. Say which it was.
+  ci_json="$(jq -n --arg why "$ci_read_refused" \
+    '{status:"unknown",
+      status_reason:("the check-run feed for this head could not be read COMPLETELY, so no rollup is derivable from it (a truncated read would look green): " + $why),
+      advisory_certainty:"cannot_tell", checks_total:0, suites_total:0,
+      failures:[], cancelled_runs:[]}')"
+elif [ -z "$runs_json" ] || [ -z "$suites_json" ]; then
   ci_json="$CI_UNKNOWN"
 else
   # Here-string, NOT `printf | grep -q`: grep -q closes its input on the first

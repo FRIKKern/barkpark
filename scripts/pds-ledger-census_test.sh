@@ -108,6 +108,25 @@ envelope() {
     "$count" "$offset" "$limit" "$docs"
 }
 
+# THE SAME ENVELOPE, BUT STATING `result.total` ITSELF.
+#
+# WHY THE PLAIN `envelope` DOES NOT CARRY ONE. `result.total` is a fact about the
+# WHOLE population, and a canned page only knows its own rows -- so the fixture
+# TRANSPORT derives it the way the server does, by counting the distinct `_id`s
+# across every canned page of the lens (see `FixtureTransport._with_derived_total`
+# in the census). That keeps the sixty-odd pre-existing fixtures below honest
+# without making each of them restate, and hand-maintain, a number.
+#
+# This helper is the OVERRIDE, and it is the whole mutation lever for clause 12:
+# a page that states a SHORT total models the server the clause exists to
+# convict, and one that states `null` models a server that ignored `count=true`
+# altogether. A written `total` always beats the derived one.
+envelope_total() {
+  local count=$1 offset=$2 limit=$3 total=$4 docs=$5
+  printf '{"result":{"count":%s,"offset":%s,"limit":%s,"total":%s,"perspective":"published","documents":[%s]}}' \
+    "$count" "$offset" "$limit" "$total" "$docs"
+}
+
 # THE HEALTHY CORPUS. 7 rows over 2 pages of limit 4, so the walk MUST reach
 # page 1 to be complete: `deep-a` and `deep-b` are grandchildren that live only
 # on the second page. Every reason is distinct, every disposition is in
@@ -115,8 +134,12 @@ envelope() {
 # row, `kid-c`, the only LIVE park, carries the STRUCTURED `reopen_trigger`
 # field. That asymmetry is the point: a healthy board is 1 structured against 4
 # prose-only, and the two numbers are reported side by side, never summed.
+# The two OPTIONAL trailing arguments are clause 12's lever: pass `<total0>`
+# `<total1>` and each page STATES that total instead of letting the transport
+# derive the honest 7. Omitted -- which is how every pre-existing caller below
+# invokes it -- the fixture is byte-identical to what it was before clause 12.
 build_healthy() {
-  local dir=$1
+  local dir=$1 total0=${2:-} total1=${3:-}
   local p0 p1
   p0="$(row "$ROOT_SLUG" 'null' open open 'root row. REOPEN: never'),"
   p0+="$(row kid-a "\"$ROOT_SLUG\"" open open 'kid a reason one. REOPEN: alpha'),"
@@ -125,8 +148,13 @@ build_healthy() {
   p1="$(row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta'),"
   p1+="$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),"
   p1+="$(row unrelated 'null' open open 'not under the root at all. REOPEN: foxtrot')"
-  page "$dir" 0 200 "$(envelope 4 0 4 "$p0")"
-  page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
+  if [[ -n $total0 ]]; then
+    page "$dir" 0 200 "$(envelope_total 4 0 4 "$total0" "$p0")"
+    page "$dir" 1 200 "$(envelope_total 3 4 4 "${total1:-$total0}" "$p1")"
+  else
+    page "$dir" 0 200 "$(envelope 4 0 4 "$p0")"
+    page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
+  fi
 }
 
 # THE BOUND CORPUS. The healthy board, except that the ROOT ROW DECLARES ITS OWN
@@ -726,6 +754,58 @@ expect_status_matching "wrong offset echoed fails closed" 2 "server answered a d
 echo
 
 # =============================================================================
+# CLAUSE 12 — `count=true`, AND `collected == total`.
+#
+# Clause 1 above proves the server HONOURED the page it was asked for. It cannot
+# prove the walk REACHED THE END, because without a total the only termination
+# signal is `len(docs) < limit` -- and a server that stops early produces a short
+# page exactly as happily as a server that finished. Measured on the live board
+# 2026-07-30: every page came back with `total_field=None`, because the census
+# never sent `count=true`; the wave-27 run terminated on pages [1000,1000,1000,
+# 980] and reported corpus_size 3980 on the short page ALONE. That number could
+# have been 3980 of 3980 or 3980 of 40,000 and the run would have looked
+# identical. These fixtures pin all three ways the total can convict a read.
+# =============================================================================
+echo "clause 12 — collected must equal the total the server states"
+# GREEN CONTROL FIRST: a page that states the CORRECT total must still census
+# cleanly, or the guard has degraded into always-red and every red below is
+# worthless.
+GOODTOTAL="$TMP/total-correct"
+build_healthy "$GOODTOTAL" 7
+expect_status "an explicit CORRECT total censuses cleanly" 0 \
+  run --page-limit 4 --fixture-dir "$GOODTOTAL"
+# THE MUTATION. The source says the population is 5; the walk collected 7 and
+# terminated on a short page. Under the pre-clause-12 census this exited 0.
+SHORTTOTAL="$TMP/total-short"
+build_healthy "$SHORTTOTAL" 5
+expect_status_matching "a SHORT total fails closed" 2 "TRUNCATED WALK: collected 7 distinct task row(s) but the server says result.total=5" \
+  run --page-limit 4 --fixture-dir "$SHORTTOTAL"
+# and the same mutation the other way: a total LARGER than what was collected is
+# the real shape of a truncated walk, and must be just as fatal.
+LONGTOTAL="$TMP/total-long"
+build_healthy "$LONGTOTAL" 40000
+expect_status_matching "a total the walk never reached fails closed" 2 "result.total=40000" \
+  run --page-limit 4 --fixture-dir "$LONGTOTAL"
+# A POPULATION THAT MOVED under the walk: the pages disagree about how big it is,
+# so no single number describes what was read.
+SKEWTOTAL="$TMP/total-disagrees"
+build_healthy "$SKEWTOTAL" 7 9
+expect_status_matching "totals that disagree across pages fail closed" 2 "result.total DISAGREED across the walk" \
+  run --page-limit 4 --fixture-dir "$SKEWTOTAL"
+# A SERVER THAT IGNORED `count=true`. The parameter was sent and the envelope
+# came back with no usable total, which is a transport failure -- NEVER a quiet
+# fallback to "the short page ended it".
+NOTOTAL="$TMP/total-absent"
+build_healthy "$NOTOTAL" null
+expect_status_matching "a 2xx with no usable total fails closed" 2 "result.total is missing or not an int" \
+  run --page-limit 4 --fixture-dir "$NOTOTAL"
+NEGTOTAL="$TMP/total-negative"
+build_healthy "$NEGTOTAL" -1
+expect_status_matching "a negative total fails closed" 2 "result.total=-1 is negative" \
+  run --page-limit 4 --fixture-dir "$NEGTOTAL"
+echo
+
+# =============================================================================
 # CLAUSE 2 — THE LENS. `.children` is one level. On the live board it scores 181
 # of 287. The guard is a fixpoint assertion, not a claim about which lens was
 # used, so it catches any walk that stops early.
@@ -1248,9 +1328,12 @@ echo
 #   synthetic in_progress row whose claim.ts_iso is older than the TTL. That
 #   fixture is the difference between an arm and a decoration.
 #
-#   SHAPE C is reported on its own line and never folded: `open` while still
-#   wearing a finished claim. A worker-keyed check reads it as HELD; an
-#   expiry-keyed check cannot see it at all.
+#   SHAPE C is reported on its own line and never folded: LIVE (open,
+#   in_progress or blocked) while still wearing a finished claim. A worker-keyed
+#   check reads it as HELD; an expiry-keyed check cannot see it at all. Its key
+#   was the LITERAL `open` until wave 47, which made it vacuous on a FULL
+#   denominator — all 19 live specimens on the board are `blocked`. Block (f2)
+#   below pins the denominator, the two refusals, and the mutant.
 #
 # THE GREENS ARE LOAD-BEARING, as everywhere else in this file: a RELEASED
 # claim, a FRESH lease and a TERMINAL row wearing an expired claim must all stay
@@ -1424,6 +1507,109 @@ expect_output_contains "shape C is its own ROW-ID LIST" \
   "$(printf '"lapse_shape_c": [\n    "deep-a"\n  ]')" \
   run --page-limit 4 --fixture-dir "$SHAPEC" --json
 
+# (f2) CLAUSE 7C — THE DENOMINATOR IS STATED, AND THE GREEN IS REFUSABLE
+# (wave 47, pds-bl-w47-stale-claim-third-shape-rescoped criterion 3).
+#
+# THE ARM SHIPPED VACUOUS, ON A NON-EMPTY DENOMINATOR. Its lifecycle key was the
+# LITERAL `open`. Measured board-wide 2026-09-10 over the 7014 claim-carrying
+# task rows: of the 267 non-terminal claim-carrying rows, 19 are shape C and ALL
+# NINETEEN are `blocked` — zero `open`, zero `in_progress`. The predicate
+# therefore matched NOTHING, anywhere, and printed PASS standing beside every
+# specimen it exists to name. That is not an empty-set vacuous green; it is a
+# narrow KEY over a full denominator, which no "did you check for an empty set?"
+# rule catches.
+#
+# THREE THINGS ARE PINNED HERE, AND THE FOURTH IS THE MUTANT:
+#   (i)   the arm PRINTS its denominator, the lifecycle values that denominator
+#         admits, and the specimen count it found;
+#   (ii)  an EMPTY denominator REFUSES — a shape measured over no rows has not
+#         passed, it has failed to run;
+#   (iii) ZERO found while a POSITIVE CONTROL of the same shape stands in the
+#         corpus REFUSES. The control is the claim fingerprint over EVERY
+#         non-terminal row — derived from the corpus, never a hard-coded row id,
+#         which would rot the first time the board moved;
+#   (iv)  reverting the predicate to the literal `open` over a fixture carrying
+#         `blocked` specimens must RED. It is the mutant that proves (iii) is an
+#         arm and not a decoration.
+
+# (i) A BLOCKED row wearing a finished claim IS shape C — the live board's only
+# shape-C lifecycle, and the one the shipped key could not see.
+SHAPECBLOCKED="$TMP/lapse-shape-c-blocked"
+build_healthy "$SHAPECBLOCKED"
+page "$SHAPECBLOCKED" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' blocked open 'deep a reason four. REOPEN: delta' '{"worker":"epic-builder-wave-40","epoch":2,"ts_iso":"2026-07-29T09:00:00.000000Z","closed_at":"2026-07-29T11:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status_matching "a BLOCKED row wearing a closed claim is shape C (the live board's only shape-C lifecycle)" 1 "row(s) are SHAPE C" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED" --assert-round-done
+expect_output_contains "the arm NAMES the lifecycle values its denominator admits" \
+  "key: lifecycle in {open, in_progress, blocked} + claim.worker SET + claim.closed_at SET" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED"
+expect_output_contains "and prints the DENOMINATOR beside the specimen count" \
+  "DENOMINATOR 3 row(s) admit those lifecycles (of 3 live); FOUND 1 specimen(s)" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED"
+expect_output_contains "the round-done line states the population, never just a ratio" \
+  "denominator admits open/in_progress/blocked; 1 found; 1 control(s), 0 hidden" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED" --assert-round-done
+expect_output_contains "the blocked specimen rides --json as a ROW-ID LIST" \
+  "$(printf '"lapse_shape_c": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED" --json
+
+# (ii) AN EMPTY DENOMINATOR REFUSES. Every closure row is terminal, so the arm
+# admits nobody: its 0 specimens measured nothing and must not read as a green.
+SHAPECNODENOM="$TMP/lapse-shape-c-empty-denominator"
+mkdir -p "$SHAPECNODENOM"
+SHAPECNODENOM_P0="$(row "$ROOT_SLUG" 'null' 'done' closed 'root row. REOPEN: never'),"
+SHAPECNODENOM_P0+="$(row kid-a "\"$ROOT_SLUG\"" 'done' closed 'kid a reason one. REOPEN: alpha'),"
+SHAPECNODENOM_P0+="$(row kid-b "\"$ROOT_SLUG\"" 'done' closed 'kid b reason two. REACTIVATE: bravo'),"
+SHAPECNODENOM_P0+="$(row kid-c "\"$ROOT_SLUG\"" cancelled closed 'kid c reason three. REOPEN: charlie')"
+page "$SHAPECNODENOM" 0 200 "$(envelope 4 0 4 "$SHAPECNODENOM_P0")"
+page "$SHAPECNODENOM" 1 200 "$(envelope 0 4 4 '')"
+expect_status_matching "an EMPTY shape-C denominator refuses the green" 1 "shape C measured an EMPTY denominator" \
+  run --page-limit 4 --fixture-dir "$SHAPECNODENOM" --assert-round-done
+expect_output_contains "and it says WHICH lifecycles nobody held" \
+  "no row in the closure carries any of the lifecycles this arm admits (open, in_progress, blocked)" \
+  run --page-limit 4 --fixture-dir "$SHAPECNODENOM" --assert-round-done
+
+# (iii) ZERO FOUND WITH A POSITIVE CONTROL PRESENT REFUSES. `considering` is
+# non-terminal and NOT admitted, so a `considering` row wearing a finished claim
+# is a specimen of the shape that the admitted set hides — exactly the failure
+# the literal-`open` key was, one lifecycle over.
+SHAPECHIDDEN="$TMP/lapse-shape-c-hidden-control"
+build_healthy "$SHAPECHIDDEN"
+page "$SHAPECHIDDEN" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' considering open 'deep a reason four. REOPEN: delta' '{"worker":"epic-builder-wave-40","epoch":2,"ts_iso":"2026-07-29T09:00:00.000000Z","closed_at":"2026-07-29T11:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status_matching "zero found with a positive control present refuses the green" 1 "shape C found ZERO over a denominator of 2" \
+  run --page-limit 4 --fixture-dir "$SHAPECHIDDEN" --assert-round-done
+expect_status_matching "and it NAMES the control row rather than counting it" 1 "not the board being clean: deep-a" \
+  run --page-limit 4 --fixture-dir "$SHAPECHIDDEN" --assert-round-done
+
+# THE GREEN IS LOAD-BEARING. A corpus with NO shape-C fingerprint anywhere finds
+# zero, has zero controls, and PASSES — saying out loud that the zero is
+# unexercised. Without this, (ii) and (iii) would just be "always red".
+expect_output_contains "a zero with NO control says so instead of claiming a clean board" \
+  "this 0 is UNEXERCISED: no positive control of this shape exists in the corpus" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and the field-read control says whether claim.closed_at was ever read" \
+  "CONTROL claim.closed_at read on 0 row(s) of ANY lifecycle -- the key field was NEVER exercised" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "while a corpus that DOES carry the field says it was exercised" \
+  "CONTROL claim.closed_at read on 1 row(s) of ANY lifecycle -- the key field was exercised" \
+  run --page-limit 4 --fixture-dir "$SHAPECBLOCKED"
+
+# (iv) THE MUTANT. The census source with its shape-C lifecycle key reverted to
+# the literal `open` that shipped, run against the fixture whose specimen is
+# `blocked`. It must RED — and it must red through the CONTROL, not through the
+# specimen count, because the mutant's specimen count is exactly the 0 that
+# printed PASS on the live board for as long as the arm existed.
+SHAPECMUTANT="$TMP/pds-ledger-census-mutant-literal-open.sh"
+sed 's/if row_lifecycle in LAPSE_C_LIFECYCLES and worker and claim_field(claim, "closed_at"):/if row_lifecycle == LIFECYCLE_OPEN and worker and claim_field(claim, "closed_at"):/' \
+  "$CENSUS" > "$SHAPECMUTANT"
+expect_status "the mutant is a REAL edit of the source, not a no-op sed" 1 \
+  cmp -s "$CENSUS" "$SHAPECMUTANT"
+expect_status_matching "MUTANT: the literal-\`open\` key reds over a blocked specimen" 1 "shape C found ZERO over a denominator of 3" \
+  bash "$SHAPECMUTANT" --root "$ROOT_SLUG" --pace 0 --retries 0 --page-limit 4 \
+  --fixture-dir "$SHAPECBLOCKED" --assert-round-done
+expect_status_matching "MUTANT: and the control it fails on is the blocked row itself" 1 "not the board being clean: deep-a" \
+  bash "$SHAPECMUTANT" --root "$ROOT_SLUG" --pace 0 --retries 0 --page-limit 4 \
+  --fixture-dir "$SHAPECBLOCKED" --assert-round-done
+
 # (g) THE CONTROL. A board with no claims at all is silent on all three shapes —
 # an arm that reds on the healthy corpus would make every red above meaningless.
 expect_status "the healthy corpus is silent on all three shapes" 0 \
@@ -1435,7 +1621,7 @@ expect_output_contains "shape B reads 0 on a healthy board" \
   "shape B  in_progress held past the lease     0" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
 expect_output_contains "shape C reads 0 on a healthy board" \
-  "shape C  open with a claim never cleared     0" \
+  "shape C  live with a claim never cleared     0" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
 
 # (h) THE LENS IS PRINTED, AND IT IS DERIVED. /v1/data/query answers
@@ -2002,6 +2188,80 @@ expect_status_matching "--anchor and --anchor-from-paper are mutually exclusive"
   run --page-limit 4 --fixture-dir "$HEALTHY" --anchor 2020-01-01T00:00:00Z --anchor-from-paper "$WAVE_SLUG"
 expect_status_matching "an --anchor that is not an instant is a usage error" 3 "not an ISO-8601 instant" \
   run --page-limit 4 --fixture-dir "$HEALTHY" --anchor "last tuesday"
+
+# =============================================================================
+# CLAUSE 11 — THE READ-BACK ARM IS LIVE-ONLY, AND WHAT IS PINNED HERE IS THAT
+# THIS HARNESS CANNOT RUN IT.
+#
+# Every other clause in this file is proved by making the census red on canned
+# bytes. Clause 11 cannot be, and that is not a gap in the harness -- it is the
+# clause. The arm issues a WRITE and re-reads it; --fixture-dir replaces the
+# transport with files this very script wrote, so a fixture "read-back" reads
+# back whatever the fixture author put there. It would be a green bought by
+# choosing the answer, which is the same fault --anchor and --reason-repo are
+# refused for.
+#
+# So what is pinned below is the REFUSAL and the GUARDS -- reachable with no
+# server, because they fire before any transport is built -- plus the LABEL: the
+# arm's live-only heading is printed on every run, including the runs that do
+# not ask for it, so a reader can see that it exists and did not run. The
+# absence check is paired with a control on the SAME output; an `output lacks X`
+# with nothing that must be present is a check that also passes on an empty
+# string.
+# =============================================================================
+echo
+echo "clause 11 — the read-back arm is LIVE-ONLY and this harness refuses it"
+expect_status_matching "--assert-readback under --fixture-dir is REFUSED" 3 \
+  "LIVE-ONLY arm and is refused under" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --assert-readback kid-a \
+      --readback-criterion 0 --readback-worker w --readback-epoch 1
+expect_status_matching "and the refusal says WHY a fixture cannot prove it" 3 \
+  "proves the fixture, not the ledger" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --assert-readback kid-a \
+      --readback-criterion 0 --readback-worker w --readback-epoch 1
+# HOLDER-ONLY AND EPOCH-FENCED, so the arm refuses to guess either. This fires
+# with no --fixture-dir and no server: the guard is argv-only.
+expect_status_matching "--assert-readback without a worker is a usage error" 3 \
+  "--readback-worker is required with --assert-readback" \
+  run --page-limit 4 --assert-readback kid-a --readback-criterion 0 --readback-epoch 1
+expect_status_matching "--assert-readback without an epoch is a usage error" 3 \
+  "--readback-epoch is required with --assert-readback" \
+  run --page-limit 4 --assert-readback kid-a --readback-criterion 0 --readback-worker w
+expect_status_matching "--assert-readback without a criterion is a usage error" 3 \
+  "--readback-criterion is required with --assert-readback" \
+  run --page-limit 4 --assert-readback kid-a --readback-worker w --readback-epoch 1
+# A MODIFIER THAT MODIFIES NOTHING MUST NOT BE REACHABLE -- the same ruling
+# --anchor-unbound carries. Otherwise a run believes it asked for a probe it
+# never armed.
+expect_status_matching "--readback-dry-run alone does nothing and says so" 3 \
+  "--readback-dry-run does nothing without --assert-readback" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --readback-dry-run
+expect_status_matching "--readback-bp alone does nothing and says so" 3 \
+  "--readback-bp does nothing without --assert-readback" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --readback-bp /bin/true
+expect_status_matching "the two non-certifying modes are mutually exclusive" 3 \
+  "mutually exclusive" \
+  run --page-limit 4 --assert-readback kid-a --readback-criterion 0 \
+      --readback-worker w --readback-epoch 1 --readback-dry-run --readback-bp /bin/true
+# THE LABEL, ON A RUN THAT DID NOT ASK FOR THE ARM. Both halves are asserted on
+# the same output: the heading must be PRESENT (control) and the arm's own body
+# must be ABSENT (the claim). Without the control, deleting the whole block
+# would pass the absence check.
+expect_output_contains "the LIVE-ONLY label prints on every run" \
+  "LIVE-ONLY ARM: it WRITES, so it can never" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and it says the hermetic selftest does not carry it" \
+  "NOT in the hermetic selftest" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "a fixture run reports the arm as NOT RUN" \
+  "NOT RUN -- pass --assert-readback" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_lacks "and no fixture run ever executes the write channel" \
+  "  write chan  " \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "the arm states it mints no row and no GitHub issue" \
+  "it creates no task, so it mints no GitHub issue" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
 
 # =============================================================================
 # CLAUSE 8 — A REASON, READ AGAINST ITS OWN CITED ARTIFACTS (the wave-27

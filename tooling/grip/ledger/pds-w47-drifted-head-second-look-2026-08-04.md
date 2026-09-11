@@ -98,6 +98,10 @@ Five mismatch. Re-derive each:
     git -C "$R" show origin/main:.claude/workflows/bp-pds-charter.md | grep -n '79 → 80 checks'
     #   row cites charter:5515; the string is at :7765. The row about stale citations
     #   carries a stale citation. Substance intact.
+    #   [2026-09-10] THIS PROBE IS NOW DEAD BY DESIGN: pds-w28-census-check-count-citations-stale
+    #   removed the absolute pair from that sentence (it now reads "which gained exactly one check"),
+    #   because the census check count moves every wave. Re-derive with
+    #   `bash scripts/pds-ledger-census_test.sh`, never grep a committed count.
 
     git -C "$R" show origin/main:api/lib/barkpark/tasks/stage.ex | grep -n 'forbidden_rerun_shapes'
     #   row cites stage.ex:113 for the -C loop; :113 is @doc prose, the attribute is :248

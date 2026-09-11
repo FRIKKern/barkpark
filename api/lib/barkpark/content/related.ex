@@ -394,7 +394,7 @@ defmodule Barkpark.Content.Related do
   # ONE PREDICATE, not a third copy: the tier test is
   # `Schema.bypasses_visibility_gate?/1` and the allowlist is
   # `Schema.public_type_names/2` — the exact pair `Content.Query`'s
-  # `restrict_to_visible_types/3` applies (query.ex:1719-1726, the canonical
+  # `restrict_to_visible_types/3` applies (query.ex, `restrict_to_visible_types/3`, the canonical
   # shape). Copied locally rather than called cross-module: that function is
   # private to Query and query.ex is owned by another task this cycle.
   #

@@ -44,12 +44,34 @@ defmodule Barkpark.Tasks.StampTest do
       {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
     end
 
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
     %{scope: scope}
   end
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  # A RAW store write that installs criteria the write door would now refuse.
+  #
+  # `Validation.criteria_violation/1` (cdd-criteria-shape-gate) halts an entry
+  # with no usable `criterion`, or a non-boolean `met`, at BOTH write doors — so
+  # a fixture carrying one can no longer be built through
+  # `Content.create_document/4`. The rows these tests model are real regardless:
+  # they were written before the gate existed, and 3 live task rows still carried
+  # a textless criterion when the gate was measured on 2026-09-07. The guard
+  # under test is precisely the one that has to MEET such a row without
+  # manufacturing a met-flip, so the row is installed BEHIND the door, the way
+  # history put it there, and the guard is measured unchanged. Building it
+  # through the front door instead would silently convert this into a test of
+  # the front door — which is `criteria_shape_shared_test.exs`'s job.
+  defp install_legacy_criteria!(task_id, criteria) do
+    stored = Repo.get!(Document, task_id)
+    content = Map.put(stored.content, "acceptance_criteria", criteria)
+
+    {1, _} =
+      from(d in Document, where: d.id == ^stored.id)
+      |> Repo.update_all(set: [content: content, rev: Barkpark.Tasks.Internal.generate_rev()])
+
+    Repo.get!(Document, task_id)
+  end
 
   defp default_criteria do
     [
@@ -581,9 +603,26 @@ defmodule Barkpark.Tasks.StampTest do
       assert [met_ev, miss_ev] = criterion_events(met_doc.doc_id)
       assert met_ev.mutation == Tasks.event_kinds().criterion
 
+      # UPDATED, NOT LOOSENED. This assertion is a change-detector on the
+      # payload SHAPE and it fired when evidence provenance was added — which is
+      # what it is for. The expected map gains the two new keys rather than
+      # relaxing to a subset match: a `=~` or Map.take here would stop noticing
+      # the next key that appears, which is the failure this arm exists to
+      # prevent. The digest is the sha256 of "proof attached", derived
+      # independently (not by re-running the implementation's own expression).
       assert met_ev.document["criterion_stamp"] ==
-               %{"index" => 0, "result" => "met", "worker" => "w"}
+               %{
+                 "index" => 0,
+                 "result" => "met",
+                 "worker" => "w",
+                 "evidence_sha256" =>
+                   "d75cbca834ef34a7453d978e8301fe14f760672a42f765db98c1e5c3a086c417",
+                 "evidence_bytes" => 14
+               }
 
+      # A MISS WRITES NO EVIDENCE, so it carries no provenance — absent, not
+      # empty-string, so a consumer can tell "no evidence was written" from
+      # "evidence was written and was blank".
       assert miss_ev.document["criterion_stamp"] ==
                %{"index" => 1, "result" => "miss", "worker" => "w"}
 
@@ -592,6 +631,63 @@ defmodule Barkpark.Tasks.StampTest do
       assert met_ev.rev == met_doc.rev
       assert miss_ev.rev == miss_doc.rev
       assert miss_ev.previous_rev == met_doc.rev
+    end
+
+    # THE ARM THAT MAKES THE DIGEST WORTH CARRYING. A field that is always
+    # present and always EQUAL would satisfy "the payload has a digest" while
+    # detecting nothing — the inert-guard shape this family of rows exists to
+    # catch. So discrimination is asserted directly, in both directions, with
+    # the expected digests derived independently of the implementation.
+    test "the digest DISCRIMINATES: one byte apart differs, identical repeats match",
+         %{scope: scope} do
+      # sha256("proof attached")  = d75cbca8… (14 bytes)
+      # sha256("proof attachee")  = dddb93aa… (14 bytes)  — ONE byte different
+      # sha256("proof attached ") = e0988f86… (15 bytes)  — trailing space only
+      same = "d75cbca834ef34a7453d978e8301fe14f760672a42f765db98c1e5c3a086c417"
+      one_byte = "dddb93aaf746f75205f173f6ef02c765ebbb49e87f99808c5fcea25dc7a7f587"
+      trailing = "e0988f862485e56f2f89de50fe8e63b2c743834c5b6336a76bb531c40622275d"
+
+      stamp = fn evidence ->
+        doc_id = uniq("digest")
+        task = mk_task!(doc_id, scope)
+        {_c, epoch} = claim!(doc_id, "w", scope)
+
+        {:ok, doc} =
+          Stamp.stamp(task.id, "w",
+            observed_epoch: epoch,
+            criterion: 0,
+            criterion_text: "gate passes",
+            outcome: {:met, evidence}
+          )
+
+        [ev] = criterion_events(doc.doc_id)
+        ev.document["criterion_stamp"]
+      end
+
+      a = stamp.("proof attached")
+      b = stamp.("proof attachee")
+      c = stamp.("proof attached ")
+      again = stamp.("proof attached")
+
+      # Independently-derived oracles, not the implementation's own expression.
+      assert a["evidence_sha256"] == same
+      assert b["evidence_sha256"] == one_byte
+      assert a["evidence_bytes"] == 14
+
+      # DISCRIMINATION: a single differing byte moves the digest.
+      assert a["evidence_sha256"] != b["evidence_sha256"]
+
+      # STABILITY: identical evidence re-stamped yields the identical digest, so
+      # a difference means a real change rather than incidental noise.
+      assert again["evidence_sha256"] == a["evidence_sha256"]
+
+      # RAW BYTES, NOT NORMALISED. This is the arm that fails if anyone
+      # "helpfully" trims before hashing: a trailing space must move BOTH the
+      # digest and the length, because a tool that mangled the text is exactly
+      # the case worth catching.
+      assert c["evidence_sha256"] == trailing
+      assert c["evidence_sha256"] != a["evidence_sha256"]
+      assert c["evidence_bytes"] == 15
     end
   end
 
@@ -695,7 +791,7 @@ defmodule Barkpark.Tasks.StampTest do
                  criterion: 1,
                  criterion_text: text,
                  outcome: {:met, "PR #123 merged, sha an ancestor of origin/main"},
-                 merge_gated: true
+                 merge_gated: "PR #1 merged to main; the lead is closing the gate"
                )
 
       row = Enum.at(stamped.content["acceptance_criteria"], 1)
@@ -1136,7 +1232,7 @@ defmodule Barkpark.Tasks.StampTest do
           observed_epoch: epoch,
           criterion: 1,
           criterion_text: text,
-          merge_gated: true,
+          merge_gated: "PR #1 merged to main; the lead is closing the gate",
           outcome: {:met, "PR #123 merged"}
         )
 
@@ -1395,12 +1491,22 @@ defmodule Barkpark.Tasks.StampTest do
       # The case that makes the pinning line load-bearing: with the line
       # removed, a stored met=true and a stored met=false both survive
       # untouched, and only THIS row can tell you the guard is gone.
+      # An absent `met` is legal shape and goes in through the front door; a
+      # STRING `met` is not, and is installed behind the write gate (see
+      # install_legacy_criteria!/2) — the malformed row this guard exists for
+      # was always a stored row, never an authored one.
       criteria = [
         %{"criterion" => "no met key at all", "evidence" => "prose only"},
-        %{"criterion" => "met is a string", "met" => "true", "evidence" => ""}
+        %{"criterion" => "met is a string", "met" => false, "evidence" => ""}
       ]
 
-      {task, closed} = closed_task!(scope, criteria)
+      {task, _closed} = closed_task!(scope, criteria)
+
+      closed =
+        install_legacy_criteria!(task.id, [
+          %{"criterion" => "no met key at all", "evidence" => "prose only"},
+          %{"criterion" => "met is a string", "met" => "true", "evidence" => ""}
+        ])
 
       assert {:ok, doc} =
                Stamp.stamp(task.id, "sweeper",

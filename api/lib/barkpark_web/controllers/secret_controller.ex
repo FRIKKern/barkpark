@@ -36,6 +36,7 @@ defmodule BarkparkWeb.SecretController do
   alias Barkpark.Repo
   alias Barkpark.Secrets
   alias Barkpark.Secrets.SecretAudit
+  alias BarkparkWeb.ErrorResponse
 
   # `GET …/:name/audit` pagination — newest-first over the write-only audit
   # log. Bounded so a caller can never pull the whole table in one request; the
@@ -43,6 +44,33 @@ defmodule BarkparkWeb.SecretController do
   # 20260717070000).
   @default_audit_limit 50
   @max_audit_limit 200
+
+  # The OTHER end of the same page. `limit` was clamped at BOTH ends while
+  # `offset` was only FLOORED, so `?offset=5000000` reached Postgres as a real
+  # OFFSET and made it walk the prefix while holding a pooled connection shared
+  # with every other read on the box (task-2fd4f84fb06c96bf).
+  #
+  # WHY A 400 AND NOT A CLAMP — the two parameters are not symmetric:
+  #
+  #   * Clamping `limit` is safe because `limit` does not decide WHICH rows you
+  #     see, only how many; a caller that asked for 10_000 and got 200 has a
+  #     prefix of the page it asked for, and the walk still terminates.
+  #   * Clamping `offset` is NOT safe, and not merely because "a security read
+  #     should not silently serve a different page". It breaks TERMINATION. The
+  #     way to walk this log — documented in `audit/2`'s own @doc, in this same
+  #     change, precisely so this sentence cites something real rather than a
+  #     convention nobody wrote down — is to page forward until a page comes
+  #     back empty. Under a silent ceiling, every offset at or above the cap
+  #     returns the SAME non-empty page, so that loop never ends and the caller
+  #     re-reads rows it has already seen — an auditor walking a secret's trail
+  #     would conclude they had read the whole log while looping on one window.
+  #     A clamp converts an over-large offset into a WRONG ANSWER; a 400
+  #     converts it into a refusal the caller can see.
+  #
+  # The floor stays a clamp (`max(0)`): clamping BELOW zero does not break
+  # termination — offset 0 is the page a negative offset is asking for — and a
+  # negative offset costs the database nothing.
+  @max_audit_offset 100_000
 
   def index(conn, _params) do
     with {:ok, scope} <- resolve_scope(conn) do
@@ -104,7 +132,25 @@ defmodule BarkparkWeb.SecretController do
   write-only `secrets_audit` log (`set`/`reveal`/`delete` stamps). Rows are
   MASKED: metadata only (action, actor, workspace_id, inserted_at), NEVER a
   secret value — the audit schema stores no ciphertext, so there is nothing to
-  reveal. Newest-first, paginated (`?limit=&offset=`).
+  reveal. Newest-first, paginated (`?limit=&offset=`). `limit` is clamped into
+  1..#{@max_audit_limit}; `offset` is floored at 0 but an offset above
+  `@max_audit_offset` is a 400, not a silent clamp — see the attribute's own
+  comment for why the two ends are treated differently.
+
+  HOW TO WALK THE WHOLE TRAIL, stated here because the refusal above depends on
+  it and a justification that cites an undocumented convention is not a
+  justification: this response carries no total and no continuation token, so a
+  caller reads the trail by paging forward — `?offset=` advanced by `?limit=`
+  each time — UNTIL A PAGE COMES BACK EMPTY. That empty page is the only
+  termination signal there is. It is why an over-large `offset` refuses instead
+  of clamping: a clamp would answer every offset at or above the ceiling with
+  the SAME non-empty page, the empty page would never arrive, and a caller
+  walking to exhaustion would loop on one window while believing it had read
+  everything. (The failure needs a trail longer than #{@max_audit_offset} rows
+  for one name in one tier; a shorter trail returns an empty page at the
+  ceiling and terminates correctly either way. Rare is not the same as
+  acceptable on a security read, and an auditor is exactly the caller who
+  eventually has a trail that long.)
 
   Tenant-walled through the same `resolve_scope/1` D199 guard as every other
   verb: the flat route reads the GLOBAL tier (`workspace_id IS NULL`), the
@@ -118,9 +164,8 @@ defmodule BarkparkWeb.SecretController do
   state, not an error.
   """
   def audit(conn, %{"name" => name} = params) do
-    with {:ok, scope} <- resolve_scope(conn) do
-      {limit, offset} = page(params)
-
+    with {:ok, scope} <- resolve_scope(conn),
+         {:ok, {limit, offset}} <- page(params) do
       rows =
         SecretAudit
         |> where([a], a.name == ^name)
@@ -132,6 +177,24 @@ defmodule BarkparkWeb.SecretController do
         |> Enum.map(&audit_view/1)
 
       json(conn, %{name: name, audit: rows, limit: limit, offset: offset})
+    else
+      # REUSES the already-registered `malformed` code (400) rather than minting
+      # a token: growing `Errors.known_codes/0` grows the served OpenAPI
+      # `Error.code` enum and docs/api-v1.md §9 for zero client-visible gain,
+      # and `Barkpark.Content.Errors` is not this controller's to edit. The
+      # message and `details` carry the specifics the code-wide hint cannot.
+      {:error, {:offset_too_large, requested}} ->
+        ErrorResponse.emit_custom(
+          conn,
+          400,
+          "malformed",
+          "offset #{requested} exceeds the maximum audit offset of #{@max_audit_offset}; " <>
+            "page forward with ?limit= and ?offset= instead of seeking",
+          %{parameter: "offset", requested: requested, max: @max_audit_offset}
+        )
+
+      other ->
+        other
     end
   end
 
@@ -172,7 +235,11 @@ defmodule BarkparkWeb.SecretController do
       |> to_int(0)
       |> max(0)
 
-    {limit, offset}
+    if offset > @max_audit_offset do
+      {:error, {:offset_too_large, offset}}
+    else
+      {:ok, {limit, offset}}
+    end
   end
 
   defp to_int(nil, default), do: default

@@ -55,6 +55,7 @@ defmodule Barkpark.Tasks.Pulse do
       emit_broadcasts: 1
     ]
 
+  alias Barkpark.Tasks.SessionId
   alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.Document
   alias Barkpark.Repo
@@ -74,6 +75,9 @@ defmodule Barkpark.Tasks.Pulse do
     * `:criterion` — optional non-negative integer index into
       `acceptance_criteria`, naming which lock the worker is on.
     * `:caller_token_id` — audit stamp for the mutation_event.
+    * `:session` — server-derived session discriminator (Barkpark.Tasks.SessionId)
+      recorded on `claim.session`. ATTRIBUTION ONLY: the holder check below is
+      byte-unchanged and still fences on `worker` alone.
 
   No `:observed_epoch` — pulse deliberately has no epoch fence (see moduledoc).
 
@@ -88,6 +92,7 @@ defmodule Barkpark.Tasks.Pulse do
     text = Keyword.fetch!(opts, :text)
     criterion = Keyword.get(opts, :criterion)
     caller_token_id = Keyword.get(opts, :caller_token_id)
+    session = Keyword.get(opts, :session)
 
     result =
       Repo.transaction(fn ->
@@ -111,7 +116,7 @@ defmodule Barkpark.Tasks.Pulse do
           %Document{} = doc ->
             with :ok <- check_live(doc),
                  :ok <- check_holder(doc, worker_id) do
-              apply_pulse(doc, worker_id, text, criterion, caller_token_id)
+              apply_pulse(doc, worker_id, text, criterion, caller_token_id, session)
             end
         end
       end)
@@ -169,7 +174,14 @@ defmodule Barkpark.Tasks.Pulse do
   # refresh, work_digest DELIBERATELY untouched) plus the now-line. `ts` on
   # the now-line is the SAME instant as the lease's `ts_iso`, so decay
   # rendering needs no clock reconciliation.
-  defp apply_pulse(%Document{content: content} = doc, worker_id, text, criterion, caller_token_id) do
+  defp apply_pulse(
+         %Document{content: content} = doc,
+         worker_id,
+         text,
+         criterion,
+         caller_token_id,
+         session
+       ) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     claim = Map.get(content, "claim") || %{}
@@ -187,6 +199,13 @@ defmodule Barkpark.Tasks.Pulse do
       |> Map.put("epoch", next_epoch)
       |> Map.put("ts_iso", ts_iso)
       |> Map.put("now", now)
+      # WHO wrote this now-line (task-f79e39f4992749a5). A now-line's own
+      # generation label is a CLAIM, not proof of authorship — that is exactly
+      # what made it unreliable evidence. `claim.session` is server-derived
+      # from a key the caller never gets back and cannot be replayed off the
+      # row, so a now-line written by a woken predecessor of the same lane is
+      # separable from the live session's. `session_origin` is untouched.
+      |> SessionId.put_session(session)
 
     new_content = Map.put(content, "claim", new_claim)
 
@@ -202,6 +221,7 @@ defmodule Barkpark.Tasks.Pulse do
             Map.merge(
               %{"pulse" => Map.merge(now, %{"worker" => worker_id, "epoch" => next_epoch})},
               caller_stamp(caller_token_id)
+              |> Map.merge(SessionId.session_stamp(session))
             )
           )
 

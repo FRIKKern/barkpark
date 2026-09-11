@@ -5,6 +5,12 @@
 
 Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
+**Reading this from a JavaScript or TypeScript app?** Use the SDK rather than raw
+`fetch`: `@barkpark/core` wraps these routes (query builder, mutations, media,
+`listen()`), and `@barkpark/nextjs` adds App Router integration. Consumption
+guide: [cards/js-sdk.md](cards/js-sdk.md). Prose docs site: `pnpm -C js install
+&& pnpm -C js --filter @barkpark/docs dev`.
+
 ## 1a. Workspace → Project → Dataset hierarchy
 
 A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Documents** (§3). Canonical paths start `/w/:workspace_slug/p/:project_slug/v1/data/...`.
@@ -56,25 +62,17 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-Fetch one document. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published.
+Fetch one document. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin — so the bare `_publishedId` reaches an unpublished document under both, exactly as `patch`/`publish`/`discardDraft`/`delete` do.
+
+**Read-after-write is IMMEDIATE, not eventual.** A mutation is visible on the next read — 63 reads across 3 timed trials on live production, first sample t+0.45s, zero misses (`pds-bl-doc-patch-propagation-lag`). Responses carry `cache-control: max-age=0, private, must-revalidate` and the ETag is folded from the row's own `_id:_rev`, so no shared cache can serve a stale body. What looks like propagation lag is the **draft/published split**: a write that lands on `drafts.<id>` is served by `?perspective=drafts`, and by `raw` when the document has no published row — `published` and `bp task get` do an exact-id lookup and keep returning the published row until the draft is published. Diagnose a "missing" write by reading `?perspective=drafts` once, not by polling `published`.
 
 ### 5a. Reference Expansion
 
 `?expand=true` (or `?expand=author,category`) inlines reference fields with the referenced document — single refs and `arrayOf`-of-reference lists, values plain ids or `{_ref: id}`. **Depth 1** only; nested refs and missing targets stay raw (expanded = map, raw = string).
 
-### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [token]
+### 5b/5c. Graph reads + history [token]
 
-Inbound refs (reverse of §5a) — docs referencing `:id`: `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered; out-of-tenant/hidden omitted.
-
-Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap (Σ `LEAST(src,cand)/100` + main_tag bonus) + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`. Anon 404.
-
-Tags — `GET /v1/data/tags/:dataset` (`?type=`, default `paper,task`): per-tag per-type published counts → `{result:{tags:[{tag,counts,total}],count}}`; `/tags/:dataset/:tag`: docs by tag strength (legacy flat last) → `result.documents:[{doc_id,type,title,strength,rationale,main_tag_match}]`. Anon 404.
-
-Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts, one aggregate → `{ok,dataset,perspective:"published",counts:{<type>:N}}` (frozen, not `result`-wrapped). Anon 404. Published-only; other `?perspective` → 400 (§4).
-
-### 5c. History [token]
-
-Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,rev,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{rev,…content}}`, where `:id` is EITHER the revision UUID or the document `_rev` hash (disjoint shapes; a null `rev` resolves by UUID only); `POST revision/:dataset/:id/restore` restores as a draft.
+`/v1/data/{backlinks,related,tags,counts,history,revision}`: [contracts/document-graph-and-history.md](contracts/document-graph-and-history.md).
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
@@ -92,6 +90,8 @@ A batch of mutations, applied atomically (any failure rolls back the batch). Bod
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
+All three create kinds write the **draft** row. Naming the id of an existing **published `task`** therefore forks a `drafts.<id>` twin: if that task holds a live claim the write is **refused** (422 `validation_failed`, `details._id` names the twin and the sanctioned verbs); otherwise it lands with a `create.forked_published` warning. Use `patch` to edit a published task in place.
+
 **`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
 
 The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
@@ -103,7 +103,7 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 
 **Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`); a paper-ingest 200 too.
 
-Failures: §9. `content.dedup_bypass: true` skips the duplicate scan — an owner decision, persisted on the doc.
+Failures: §9. A write whose searchable text (title + every string in `content`) exceeds Postgres' **1 048 575-byte** full-text index cap is refused `422 searchable_text_too_large` (`details.limit_bytes`/`.field`/`.field_bytes`) and nothing is written — the cap is on the derived tsvector, not the body, so a long repetitive document can pass where a shorter high-entropy one fails. `content.dedup_bypass: true` skips the duplicate scan — an owner decision, persisted on the doc.
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
@@ -136,9 +136,9 @@ Contract: [contracts/plugin-http-api.md](contracts/plugin-http-api.md) (`bptk_` 
 
 Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless legacy aliases. Contract: [`cycle-fleet.md`](contracts/cycle-fleet.md).
 
-## 8d. Media asset record — `absoluteUrl`
+## 8d. Media — asset record (`absoluteUrl`) + `/v1/media/*` list envelope
 
-Asset urls (`url`/`originalUrl`/`previewUrl`/`thumbnailUrl`/`renditions.*`/`cdnUrls.*`) are RELATIVE paths and stay so. The upload `201` and `GET /v1/media/:dataset/:id` also carry **`absoluteUrl`** — same binary, host from `:media_cdn, :base_url` else the API's origin (`PHX_SCHEME`/`PHX_HOST`), `/w/:ws/p/:proj` prefix applied.
+Contract: [contracts/media-http-envelope.md](contracts/media-http-envelope.md).
 
 ## 9. Error Codes
 
@@ -146,7 +146,7 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 
 Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `schema_unknown` 404 (registered; no producer in api/lib today) · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
-`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required` 422 · `storage_unavailable` 503 (media/dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (the paper’s `content["rev"]` is present but not an integer — a failed READ of the op anchor, never a rev mismatch; absent is legitimate and anchors on 0).
+`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required` 422 · `searchable_text_too_large` 422 (§6) · `storage_unavailable` 503 (media/dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (the paper’s `content["rev"]` is present but not an integer — a failed READ of the op anchor, never a rev mismatch; absent is legitimate and anchors on 0). · `auth_method_not_allowed` 403 (org `allowed_auth_methods` allow-list; NULL = all open; `social` is separate from `sso`) — checked AFTER the credential, so a wrong password still returns `invalid_credentials` 401.
 
 Endpoint-specific: [api/error-codes.md](api/error-codes.md); source `Errors.known_codes/0`.
 

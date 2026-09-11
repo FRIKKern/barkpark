@@ -142,8 +142,23 @@ const SECTION_RULE_MIN_PX = 1;
 // list. No Barkpark block emits it yet, and an allowlist entry that can never
 // match is a decoy: it reads as coverage and gates nothing. The device that ships
 // the framed finale extends this list, on purpose, with a fixture behind it.
-const STRUCTURAL_RULE_SELECTOR =
-  ".bp-paper-surface > #paper-body > h2, .bp-paper-surface > #paper-body > div:not([class]) > h2";
+//
+// The list MIRRORS the section-head device's own selector list in
+// api/assets/paper-surface/paper-surface.css, and it has to be extended
+// whenever that one is. #15806 added the three CONTAINER legs — the level-2
+// heading that opens a `section` container, one box deeper than a bare block —
+// and this list was not extended with them, so `eight-minute-erasure`'s closing
+// declaration section (`#paper-body > div > div > h2:first-child`) read as a
+// component drawing 2px mid-argument: "1 of 7 heavy horizontal rules are NOT
+// section boundaries — 2px, 580px wide — h2". It is a section boundary; the
+// allowlist was one device behind.
+const STRUCTURAL_RULE_SELECTOR = [
+  ".bp-paper-surface > #paper-body > h2",
+  ".bp-paper-surface > #paper-body > div:not([class]) > h2",
+  ".bp-paper-surface > #paper-body > div:not([class]) > div:not([class]) > h2:first-child",
+  ".bp-paper-surface > #paper-body > .bp-section--wide > h2:first-child",
+  ".bp-paper-surface > #paper-body > div:not([class]) > .bp-section--wide > h2:first-child",
+].join(", ");
 
 // ── The INGRESS RATIO contract (pe-w2-bl-device5-ratio-arm, charter D6) ──────
 // The opening ingress reads BIGGER than the body prose, and that size
@@ -612,6 +627,21 @@ async function main() {
             // stack whose first element child is the leading rule.
             const stack = el.tagName === "DIV" && el.children.length === 1 ? el.firstElementChild : null;
             const lead = stack && stack.firstElementChild;
+            // The THIRD shape (#15806): compose drops the container's leading
+            // rule pair when the stack OPENS with the heading, and the
+            // section-head device sizes that h2 instead — the CSS leg
+            // `> #paper-body > div:not([class]) > div:not([class]) > h2:first-child`
+            // (plus its two `.bp-section--wide` siblings). It is the SAME sized
+            // boundary as a top-level heading: 92px of air over a 2px rule. The
+            // walk stopped one box short of it, so `eight-minute-erasure`'s
+            // closing declaration section painted a heavy rule that no measured
+            // boundary accounted for.
+            if (lead && lead.tagName === "H2" && !(el.getAttribute("class") || "").trim()) {
+              const stackClass = (stack.getAttribute("class") || "").trim();
+              if (stackClass === "" || stackClass === "bp-section--wide") {
+                return { kind: "heading", el: lead, label: lead.textContent.trim().slice(0, 44) };
+              }
+            }
             if (lead && lead.tagName === "HR") {
               const h2 = stack.querySelector("h2");
               return {
@@ -1006,11 +1036,20 @@ async function main() {
         // all would report zero strays and be just as broken. Every boundary the
         // beat assertion above measured must also appear in the census as a heavy
         // rule, so the two halves cannot pass each other's absence.
-        if (census.structuralHeavy !== sized.length) {
+        // The mirror is against every boundary whose rule PAINTS HEAVY, not
+        // against the heading-shaped ones. Until #15806 those were the same set;
+        // that commit gave the CONTAINER-opening h2 the same device, so
+        // `eight-minute-erasure`'s closing declaration section draws 2px while
+        // `design-probe`'s three containers still draw 1px. Comparing the census
+        // against `sized.length` counted the first as a boundary that is not
+        // there ("7 heavy section rule(s) but 6 … measured") and would have
+        // counted the second as a rule that does not paint.
+        const heavyBeats = seen.sectionBeats.filter((b) => b.rule >= HEAVY_PX);
+        if (census.structuralHeavy !== heavyBeats.length) {
           fail(
-            `${cell}: the census sees ${census.structuralHeavy} heavy section rule(s) but ${sized.length} ` +
-              `section boundary/-ies were measured — a boundary is being counted whose rule does not paint ` +
-              `(or paints below ${HEAVY_PX}px)`,
+            `${cell}: the census sees ${census.structuralHeavy} heavy section rule(s) but ${heavyBeats.length} ` +
+              `section boundary/-ies measured a rule at or above ${HEAVY_PX}px — a boundary is being counted ` +
+              `whose rule does not paint, or a heavy rule is painting where no boundary was measured`,
           );
         }
         assertions += 2;
@@ -1229,7 +1268,7 @@ async function main() {
             `${sized.length} sized section beats` +
             (sized.length ? ` at ${sized[0].gap}px over a ${sized[0].rule}px rule` : "") +
             (seen.sectionBeats.length - sized.length
-              ? `, ${seen.sectionBeats.length - sized.length} UNSIZED container heads` +
+              ? `, ${seen.sectionBeats.length - sized.length} container heads (unasserted)` +
                 ` at ${seen.sectionBeats.find((b) => b.kind === "container").gap}px` +
                 ` over a ${seen.sectionBeats.find((b) => b.kind === "container").rule}px rule`
               : "") +

@@ -29,9 +29,9 @@ type headingRenderer struct{ ir InlineRenderer }
 
 func (h headingRenderer) Render(b Block, ctx RenderCtx) []string {
 	level := headingLevel(b.Attrs)
-	text := sanitizeDisplayText(attrStr(b.Attrs, "text"))
-	if text == "" {
-		text = h.ir.Inline(attrSlice(b.Attrs, "content"), ctx)
+	text := sanitizeDisplayText(stringishAttr(b.Attrs, "text"))
+	if content := attrSlice(b.Attrs, "content"); len(content) > 0 {
+		text = h.ir.Inline(content, ctx)
 	}
 	style := ctx.Theme.Heading[level-1]
 
@@ -73,7 +73,13 @@ func headingLevel(m map[string]any) int {
 type paragraphRenderer struct{ ir InlineRenderer }
 
 func (p paragraphRenderer) Render(b Block, ctx RenderCtx) []string {
-	inline := p.ir.Inline(attrSlice(b.Attrs, "content"), ctx)
+	content := attrSlice(b.Attrs, "content")
+	if len(content) == 0 {
+		if text, ok := b.Attrs["text"].(string); ok {
+			content = []any{text}
+		}
+	}
+	inline := p.ir.Inline(content, ctx)
 	if inline == "" {
 		return nil
 	}
@@ -87,7 +93,7 @@ func (p paragraphRenderer) Render(b Block, ctx RenderCtx) []string {
 type listRenderer struct{ ir InlineRenderer }
 
 func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
-	ordered := attrBool(b.Attrs, "ordered")
+	ordered := attrBool(b.Attrs, "ordered") || b.Type == "ordered-list" || b.Type == "numbered_list"
 	items := attrSlice(b.Attrs, "items")
 	var out []string
 	for i, item := range items {
@@ -107,6 +113,29 @@ func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
 				out = append(out, ctx.Theme.Dim.Render(prefix)+line)
 			} else {
 				out = append(out, strings.Repeat(" ", indent)+line)
+			}
+		}
+		if record, ok := item.(map[string]any); ok {
+			for _, value := range attrSlice(record, "children") {
+				child, ok := value.(map[string]any)
+				if !ok {
+					continue
+				}
+				kind := attrStr(child, "type")
+				switch kind {
+				case "list", "bulletList", "bullet_list", "bulleted-list", "bulleted_list", "ordered-list", "numbered_list":
+				default:
+					continue
+				}
+				if _, ok := child["items"].([]any); !ok {
+					continue
+				}
+				childCtx := ctx
+				childCtx.Width = bodyWidth
+				childCtx.Depth++
+				for _, line := range lr.Render(Block{Type: kind, Attrs: child}, childCtx) {
+					out = append(out, strings.Repeat(" ", indent)+line)
+				}
 			}
 		}
 	}
