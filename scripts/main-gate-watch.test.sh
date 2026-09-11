@@ -858,6 +858,170 @@ else
   echo "  skip python3+pyyaml unavailable — YAML parse not checked here (CI parses it by running the workflow)"
 fi
 
+
+# ═══ 14. rc 3 and rc 1 red under DIFFERENT check-run names ═══════════════════
+# cch-w59-bl-main-gate-watch-has-no-notification-egress, residual 1. The defect
+# was that ONE step of ONE job mapped BOTH "main's tip is not green" (rc 1) and
+# "this watch could not read branch protection" (rc 3) to `exit 1`, so a broken
+# watcher rendered exactly like a red main.
+#
+# The proof has to FORCE BOTH, which is why the rc->outcome table lives in
+# scripts/main-gate-watch-route.sh instead of in a `run:` block nobody can drive
+# offline. Two halves, and BOTH are needed:
+#   (a) the router: for every rc, exactly the right role reds.
+#   (b) the wiring: the workflow actually gives the two roles two different job
+#       NAMES, and actually skips the verdict job on rc 3. A perfect router
+#       wired into one job proves nothing.
+section "14. a CONFIGURATION FAULT and a red main red under different names"
+
+ROUTE="$REPO_ROOT/scripts/main-gate-watch-route.sh"
+
+if [ -f "$ROUTE" ]; then
+  ok "the router exists: scripts/main-gate-watch-route.sh"
+else
+  bad "scripts/main-gate-watch-route.sh is missing — the two failure classes have no separate owner"
+fi
+
+# (a) FORCE EVERY rc THROUGH BOTH ROLES — as JOB OUTCOMES, not as raw exits.
+# The run-level fact the residual is about is the PAIR of check-run conclusions,
+# and the verdict job's conclusion on rc 3 is SKIPPED (its `if:` fences rc 3
+# out), not an exit code. Modelling only the router's exits would score rc 3 as
+# "both red" and miss that the split works. So the fence is modelled here, and
+# the wiring half below proves the workflow really carries it.
+route_rc() {  # role rc -> prints exit code, never dies
+  local r=0
+  bash "$ROUTE" "$1" "$2" >/dev/null 2>&1 || r=$?
+  echo "$r"
+}
+# The fence, verbatim from the verdict job's `if:` in the workflow: rc '' or '3'
+# -> the job never runs. Anything else -> the router decides.
+verdict_job() {
+  case "$1" in
+    ''|3) echo skipped ;;
+    *)    if [ "$(route_rc verdict "$1")" = 0 ]; then echo green; else echo RED; fi ;;
+  esac
+}
+fault_job() {
+  if [ "$(route_rc fault "$1")" = 0 ]; then echo green; else echo RED; fi
+}
+while read -r rc want_fault want_verdict note; do
+  got_fault="$(fault_job "$rc")"
+  got_verdict="$(verdict_job "$rc")"
+  if [ "$got_fault" = "$want_fault" ] && [ "$got_verdict" = "$want_verdict" ]; then
+    ok "rc=$rc: 'Main gate watch configuration fault' $got_fault, 'Main gate watch' $got_verdict ($note)"
+  else
+    bad "rc=$rc: fault job $got_fault (want $want_fault), verdict job $got_verdict (want $want_verdict) — $note"
+  fi
+done <<'TABLE'
+0 green green green:-neither-check-run-screams
+1 green RED red-main:-ONLY-'Main-gate-watch'-screams
+2 green green waiting:-neither-check-run-screams
+3 RED skipped CONFIGURATION-FAULT:-ONLY-the-fault-name-screams,-and-the-verdict-name-is-SKIPPED-(never-green)
+TABLE
+
+# The two rows that carry the whole residual, asserted AGAINST EACH OTHER rather
+# than only against constants: the PAIR of check-run conclusions must DIFFER
+# between a red main and a configuration fault, and in particular the name that
+# screams must not be the same name. If a future edit fused the classes again,
+# every row above could still be re-baselined one-by-one while this one could
+# not be satisfied at all without a real split.
+pair1="$(fault_job 1)/$(verdict_job 1)"
+pair3="$(fault_job 3)/$(verdict_job 3)"
+if [ "$pair1" != "$pair3" ] && [ "$(verdict_job 1)" = RED ] && [ "$(fault_job 3)" = RED ] \
+   && [ "$(fault_job 1)" != RED ] && [ "$(verdict_job 3)" != RED ]; then
+  ok "a red main (fault/verdict = $pair1) and a CONFIGURATION FAULT ($pair3) scream under DIFFERENT names"
+else
+  bad "a red main ($pair1) and a CONFIGURATION FAULT ($pair3) are not separated by name — the classes are fused"
+fi
+
+# And on a fault the verdict name must be SKIPPED, never green: "this watch has
+# no authority" must not render as "main is fine". (A `|| true` softening would
+# show up here as `green`.)
+if [ "$(verdict_job 3)" = skipped ]; then
+  ok "on a CONFIGURATION FAULT 'Main gate watch' is SKIPPED, not green — no authority, no verdict"
+else
+  bad "on a CONFIGURATION FAULT 'Main gate watch' renders $(verdict_job 3) — a watch with no authority must never report success"
+fi
+
+# The defensive arm: if the fence ever drifts and rc 3 DOES reach the verdict
+# role, it must red as a routing error rather than answer a question it cannot.
+if [ "$(route_rc verdict 3)" != 0 ]; then
+  ok "if the fence drifts and rc=3 reaches the verdict role anyway, the router reds instead of guessing"
+else
+  bad "the verdict role passes on rc=3 — a drifted fence would render a green verdict with no authority behind it"
+fi
+
+# An rc the script does not define, and a MISSING rc (the shape an empty
+# `needs.<job>.outputs.rc` takes when the upstream job died before writing
+# GITHUB_OUTPUT), must never read as a pass in either role.
+for bogus in 7 "" "x"; do
+  bf="$(route_rc fault "$bogus")"; bv="$(route_rc verdict "$bogus")"
+  if [ "$bf" != 0 ] && [ "$bv" != 0 ]; then
+    ok "an undefined rc ('${bogus}') reds in both roles (fault=$bf verdict=$bv) — never a silent pass"
+  else
+    bad "an undefined rc ('${bogus}') passed a role (fault=$bf verdict=$bv)"
+  fi
+done
+
+# ...and the router itself must be able to LOSE. Mutate the rc=3 fault arm to a
+# pass in a scratch copy and assert the table above would have caught it.
+sed 's|^        exit 1$|        exit 0|' "$ROUTE" > "$TMP/route-softened.sh"
+if cmp -s "$ROUTE" "$TMP/route-softened.sh"; then
+  bad "the softened-router mutant was never BUILT (no `exit 1` arm matched) — the next assertion would prove nothing"
+else
+  mr=0
+  bash "$TMP/route-softened.sh" fault 3 >/dev/null 2>&1 || mr=$?
+  if [ "$mr" = 0 ]; then
+    ok "the router CAN lose: a softened copy passes on rc=3, and section 14a asserts it must not"
+  else
+    bad "the softened copy still reds on rc=3 — the mutation did not reach the arm, so 14a is unproven"
+  fi
+fi
+
+# (b) THE WIRING. Two distinct job NAMES, each shelling its own role, and the
+# verdict job fenced off rc 3. Parsed as YAML, not grepped: a `name:` is a
+# structural fact and a grep over prose that ARGUES about these names would
+# match its own explanation.
+if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
+  wiring="$(python3 - "$WF" <<'PYWIRE'
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+jobs = d.get("jobs") or {}
+def job_with(role):
+    hits = []
+    for jid, j in jobs.items():
+        for st in (j.get("steps") or []):
+            if ("main-gate-watch-route.sh %s" % role) in (st.get("run") or ""):
+                hits.append((jid, j.get("name") or jid, str(j.get("if") or "")))
+    return hits
+f, v = job_with("fault"), job_with("verdict")
+problems = []
+if len(f) != 1: problems.append("expected exactly 1 job shelling the router as `fault`, found %d" % len(f))
+if len(v) != 1: problems.append("expected exactly 1 job shelling the router as `verdict`, found %d" % len(v))
+if not problems:
+    (fid, fname, fif), (vid, vname, vif) = f[0], v[0]
+    if fid == vid:
+        problems.append("both roles run in the SAME job `%s` — the failure classes still share one check-run name" % fid)
+    if fname == vname:
+        problems.append("both jobs render the SAME check-run name %r" % fname)
+    if "!= '3'" not in vif.replace('"', "'"):
+        problems.append("the verdict job `%s` is not fenced off rc 3 (if: %r) — a fault would red it as a red main" % (vid, vif))
+    if "needs" not in (jobs[vid] or {}):
+        problems.append("the verdict job `%s` does not `needs:` the job that produces the rc" % vid)
+    if not problems:
+        print("OK %s|%s" % (fname, vname))
+if problems:
+    print("BAD " + "; ".join(problems))
+PYWIRE
+)" || wiring="BAD the wiring reader itself failed"
+  case "$wiring" in
+    OK\ *) ok "the workflow wires the roles to two different check-run names: ${wiring#OK }" ;;
+    *)     bad "workflow wiring: ${wiring#BAD }" ;;
+  esac
+else
+  bad "python3+pyyaml unavailable — the wiring half of section 14 CANNOT READ, and an unread wiring is not a proven one"
+fi
+
 bash -n "$WATCH" && ok "main-gate-watch.sh passes bash -n" || bad "main-gate-watch.sh has a syntax error"
 
 echo

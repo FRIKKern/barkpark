@@ -1443,6 +1443,22 @@ awk 'NF {print $2}' "$WORK/wide-unreadable-sorted.txt" | sort -u > "$WORK/wide-u
 say ""
 say "POPULATION: ${COMPLETED_COUNT}${FLOOR} completed deploy.yml run(s) on main in the window — a run DELIVERED when its control-plane OR instance job concluded success, WHATEVER the run's overall conclusion, because a run whose only failing job is the other leg still put code on a box; ${DELIVERING} of them DELIVERED, ${MIXED_LEG} of those delivered with the OTHER leg FAILED, ${NONDELIVERING} delivered nothing (no leg concluded success — a docs-only merge skips both), ${JOBS_UNREADABLE} unreadable."
 say "  CANCELLED, NAMED IN BOTH DIRECTIONS: of the ${NONDELIVERING} that delivered nothing, ${CANCELLED_NONDELIVERING} were CANCELLED_NONDELIVERING — a superseded push, not a docs-only merge, and the parenthetical above is wrong about them; and ${CANCELLED_DELIVERING} of the ${DELIVERING} that DELIVERED are CANCELLED_DELIVERING — a leg concluded success and the run was cancelled anyway, so those runs put code on a box while their record-delivery job died with the cancel, and the crown may hold no row for a delivery that happened."
+# CANCEL RATE, printed rather than quoted. .github/workflows/deploy.yml keeps its
+# `report-deploy-failure` guard at bare `failure()` — which is FALSE for
+# `cancelled` — on the strength of a cancel rate written into a comment as
+# "344 of the window's 1,378 runs". Nothing re-derived it and nothing went red
+# when it drifted, so the guard's own evidence aged in silence. The two class
+# counts above already name every cancelled run; one more line states the SUM
+# over the population it was measured on, so the number a reader acts on is
+# always the one this run just computed. `pct` is defined further down the file,
+# so the ratio is formatted inline here (task-d37e762904be6571).
+CANCELLED_TOTAL=$((CANCELLED_NONDELIVERING + CANCELLED_DELIVERING))
+if [ "${COMPLETED_COUNT:-0}" -gt 0 ]; then
+  CANCEL_RATE="$(awk -v n="$CANCELLED_TOTAL" -v d="$COMPLETED_COUNT" 'BEGIN { printf "%.1f%%", (n * 100) / d }')"
+else
+  CANCEL_RATE="n/a"
+fi
+say "  CANCEL RATE, LIVE: ${CANCELLED_TOTAL} of the ${COMPLETED_COUNT}${FLOOR} completed run(s) in this window were CANCELLED (${CANCEL_RATE}) — re-derived every run, with its denominator beside it, so no comment anywhere has to quote a frozen one."
 say "WATERMARK: the run list was sampled at ${RUNLIST_ISO} and the crown is read after it — ${NONTERMINAL_RUNS} run(s) on the page were NON-TERMINAL at that instant, page run ids span ${MIN_RUN_ID}..${MAX_RUN_ID}. A row written by a run that was not terminal then is excluded from BOTH sides as WRITTEN-IN-FLIGHT rather than accused, and is judged normally by the next run."
 if [ "$FLOOR" = "+" ]; then
   say "  TRUNCATION RESIDUAL, stated rather than left to the plus sign: the run listing was paged ${RUNS_PAGES_READ} time(s) and still stopped short of the window start, so runs older than id ${MIN_RUN_ID} were never examined. A delivering run that fell off the page CANNOT be counted BEHIND by this run — the BEHIND denominator above is a floor, and its silence is a blind spot, not a clean reading."

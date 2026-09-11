@@ -197,6 +197,17 @@ on:
       # consumer of the BP API sources. Its harness runs a fake loopback server.
       - "scripts/lib/bp-curl.sh"
       - "scripts/lib/bp-curl.test.sh"
+      # MAIN WORKFLOW ROLL-UP (task-b4aa15924d214156). The roll-up whose roster
+      # is the TREE, not a watched set: every .github/workflows/ file, its
+      # newest completed conclusion on main, and REQUIRED vs ADVISORY derived
+      # from .github/required-checks.json. The last entry is an INPUT, not the
+      # harness: the harness reads the committed spec live to prove the four
+      # required contexts label their four workflows and that no context name
+      # is spelled out in the script body, so a spec edit can invalidate this
+      # matrix without touching either script.
+      - "scripts/main-workflow-rollup.sh"
+      - "scripts/main-workflow-rollup.test.sh"
+      - ".github/required-checks.json"
       # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
       # trees out of the Elixir census that greps the Go package AND out of the
       # package itself, then mutate both. Same rule as seal-run.test.sh above —
@@ -339,6 +350,16 @@ on:
       - "scripts/branch-owner.test.sh"
       - "scripts/pr-overlap.sh"
       - "scripts/pr-overlap.test.sh"
+      # ── PRINCIPAL GATE (task-226f1718bb56d489 + task-b512e2d54791f042).
+      # Three harnesses that POST real side effects on an ambient credential.
+      # Their --selftest matrices drive a FAKE curl and assert the exit code
+      # BESIDE the recorded argv, so "refused" and "refused BEFORE the write"
+      # stay distinguishable. The shared gate is the fourth entry: one
+      # implementation, so a mutation there must red all three lanes.
+      - "scripts/media-smoke.sh"
+      - "scripts/pdf-efficiency-proof.sh"
+      - "scripts/pdf-kill-listener-proof.sh"
+      - "scripts/lib/principal-gate.sh"
       # ── LANDED MARK (task-2e16f1390ffc064f) ─────────────────────────────────
       # Per file, never a directory glob — D26 — with two exceptions, both
       # INPUTS rather than neighbours. scripts/pr-task-gate.sh OWNS the `Task:`
@@ -438,6 +459,35 @@ on:
       - "templates/place-directory/install.sh"
       - "templates/place-directory/seed-places.json"
       - "templates/place-directory/schemas/place.json"
+      # CONSOLE SLICE GATE (task-b36dafdebcabe093). The workflow's own header
+      # rule — every script a job executes gets its own entry, D26 — was never
+      # paid for this pair: `tooling-harnesses` runs `node --check
+      # scripts/console-slice-gate.mjs` and `node --test
+      # scripts/console-slice-gate.test.mjs`, and neither file could trigger
+      # this workflow, so a PR editing only the gate script never ran its own
+      # selftest. The `.test.mjs` half is ALSO reached by the
+      # `scripts/*.test.mjs` glob below, and is named anyway: the glob dispatches
+      # to `console-refusal-capture` and `selftest-wiring-census`, NOT to
+      # `tooling-harnesses`, so the glob alone leaves this step dark.
+      - "scripts/console-slice-gate.mjs"
+      - "scripts/console-slice-gate.test.mjs"
+      # ── SUNSET-ROUTE CONSUMERS (task-a6613aa3eddb3c80) ─────────────────────
+      # scripts/sunset-route-consumers.test.sh landed in #17772 wired to
+      # NOTHING: `selftest-wiring-census` printed
+      # `ORPHAN scripts/sunset-route-consumers.test.sh` and concluded `fail` on
+      # that very PR, and the PR merged anyway because this workflow is an S4
+      # PATHS-FILTERED exclusion in .github/required-checks.json — the census is
+      # advisory here, so its red was argued away instead of fixed. The harness
+      # EXTRACTS each consumer's probe URL from the consumer file at run time,
+      # so the guarded subjects are listed beside it: reverting any one of them
+      # to `/api/schemas` must red this lane, which it cannot do if the edit
+      # never starts the run.
+      - "scripts/sunset-route-consumers.test.sh"
+      - "scripts/create-quickstart-smoke.sh"
+      - "docker-compose.yml"
+      - "internal/cli/cloud/support.go"
+      - "deploy/README.md"
+      - "deploy/uptime-kuma/README.md"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -540,6 +590,17 @@ on:
       # consumer of the BP API sources. Its harness runs a fake loopback server.
       - "scripts/lib/bp-curl.sh"
       - "scripts/lib/bp-curl.test.sh"
+      # MAIN WORKFLOW ROLL-UP (task-b4aa15924d214156). The roll-up whose roster
+      # is the TREE, not a watched set: every .github/workflows/ file, its
+      # newest completed conclusion on main, and REQUIRED vs ADVISORY derived
+      # from .github/required-checks.json. The last entry is an INPUT, not the
+      # harness: the harness reads the committed spec live to prove the four
+      # required contexts label their four workflows and that no context name
+      # is spelled out in the script body, so a spec edit can invalidate this
+      # matrix without touching either script.
+      - "scripts/main-workflow-rollup.sh"
+      - "scripts/main-workflow-rollup.test.sh"
+      - ".github/required-checks.json"
       # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
       # trees out of the Elixir census that greps the Go package AND out of the
       # package itself, then mutate both. Same rule as seal-run.test.sh above —
@@ -662,6 +723,12 @@ on:
       - "scripts/branch-owner.test.sh"
       - "scripts/pr-overlap.sh"
       - "scripts/pr-overlap.test.sh"
+      # PRINCIPAL GATE — mirrored from on.pull_request.paths (the parity check
+      # at the end of this workflow reds unless the two lists are set-equal).
+      - "scripts/media-smoke.sh"
+      - "scripts/pdf-efficiency-proof.sh"
+      - "scripts/pdf-kill-listener-proof.sh"
+      - "scripts/lib/principal-gate.sh"
       # ── LANDED MARK (task-2e16f1390ffc064f) — mirrors the pull_request list
       # above, globs included. A lane wired on PRs only goes dark the moment a
       # merge lands, and landed-mark.sh's whole subject IS the merge.
@@ -741,6 +808,35 @@ on:
       - "templates/place-directory/install.sh"
       - "templates/place-directory/seed-places.json"
       - "templates/place-directory/schemas/place.json"
+      # CONSOLE SLICE GATE (task-b36dafdebcabe093). The workflow's own header
+      # rule — every script a job executes gets its own entry, D26 — was never
+      # paid for this pair: `tooling-harnesses` runs `node --check
+      # scripts/console-slice-gate.mjs` and `node --test
+      # scripts/console-slice-gate.test.mjs`, and neither file could trigger
+      # this workflow, so a PR editing only the gate script never ran its own
+      # selftest. The `.test.mjs` half is ALSO reached by the
+      # `scripts/*.test.mjs` glob below, and is named anyway: the glob dispatches
+      # to `console-refusal-capture` and `selftest-wiring-census`, NOT to
+      # `tooling-harnesses`, so the glob alone leaves this step dark.
+      - "scripts/console-slice-gate.mjs"
+      - "scripts/console-slice-gate.test.mjs"
+      # ── SUNSET-ROUTE CONSUMERS (task-a6613aa3eddb3c80) ─────────────────────
+      # scripts/sunset-route-consumers.test.sh landed in #17772 wired to
+      # NOTHING: `selftest-wiring-census` printed
+      # `ORPHAN scripts/sunset-route-consumers.test.sh` and concluded `fail` on
+      # that very PR, and the PR merged anyway because this workflow is an S4
+      # PATHS-FILTERED exclusion in .github/required-checks.json — the census is
+      # advisory here, so its red was argued away instead of fixed. The harness
+      # EXTRACTS each consumer's probe URL from the consumer file at run time,
+      # so the guarded subjects are listed beside it: reverting any one of them
+      # to `/api/schemas` must red this lane, which it cannot do if the edit
+      # never starts the run.
+      - "scripts/sunset-route-consumers.test.sh"
+      - "scripts/create-quickstart-smoke.sh"
+      - "docker-compose.yml"
+      - "internal/cli/cloud/support.go"
+      - "deploy/README.md"
+      - "deploy/uptime-kuma/README.md"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -831,6 +927,7 @@ jobs:
       doc-gates-paths-parity: ${{ steps.sets.outputs.doc-gates-paths-parity }}
       merge-gate-bridge: ${{ steps.sets.outputs.merge-gate-bridge }}
       fleet-coordination-harnesses: ${{ steps.sets.outputs.fleet-coordination-harnesses }}
+      principal-gate-harnesses: ${{ steps.sets.outputs.principal-gate-harnesses }}
       compose-smoke-dispatcher: ${{ steps.sets.outputs.compose-smoke-dispatcher }}
       workflow-trigger-coverage: ${{ steps.sets.outputs.workflow-trigger-coverage }}
       orphan-harnesses: ${{ steps.sets.outputs.orphan-harnesses }}
@@ -839,6 +936,8 @@ jobs:
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
       which-gates: ${{ steps.sets.outputs.which-gates }}
       bp-curl: ${{ steps.sets.outputs.bp-curl }}
+      sunset-route-consumers: ${{ steps.sets.outputs.sunset-route-consumers }}
+      main-workflow-rollup: ${{ steps.sets.outputs.main-workflow-rollup }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
     steps:
       - uses: actions/checkout@v4
@@ -968,6 +1067,8 @@ jobs:
           tooling-harnesses .github/workflows/security.yml
           tooling-harnesses .github/workflows/compose-smoke.yml
           tooling-harnesses .github/workflows/go-format.yml
+          tooling-harnesses scripts/console-slice-gate.mjs
+          tooling-harnesses scripts/console-slice-gate.test.mjs
           launcher-boot-selftest bin/barkpark
           launcher-boot-selftest scripts/barkpark-boot-selftest.sh
           workflow-portability scripts/workflow-portability-check.sh
@@ -1024,6 +1125,10 @@ jobs:
           fleet-coordination-harnesses scripts/branch-owner.test.sh
           fleet-coordination-harnesses scripts/pr-overlap.sh
           fleet-coordination-harnesses scripts/pr-overlap.test.sh
+          principal-gate-harnesses scripts/media-smoke.sh
+          principal-gate-harnesses scripts/pdf-efficiency-proof.sh
+          principal-gate-harnesses scripts/pdf-kill-listener-proof.sh
+          principal-gate-harnesses scripts/lib/principal-gate.sh
           compose-smoke-dispatcher scripts/compose-smoke-dispatch.test.sh
           compose-smoke-dispatcher .github/workflows/compose-smoke.yml
           compose-smoke-dispatcher scripts/env-census.py
@@ -1056,6 +1161,9 @@ jobs:
           which-gates .github/workflows/go-tests.yml
           bp-curl scripts/lib/bp-curl.sh
           bp-curl scripts/lib/bp-curl.test.sh
+          main-workflow-rollup scripts/main-workflow-rollup.sh
+          main-workflow-rollup scripts/main-workflow-rollup.test.sh
+          main-workflow-rollup .github/required-checks.json
           landed-mark scripts/lib/bp-curl.sh
           task-lease-renew scripts/lib/bp-curl.sh
           deploy-receipt-honesty scripts/deploy-receipt-failure.test.sh
@@ -1069,6 +1177,15 @@ jobs:
           place-directory-install templates/place-directory/seed-places.json
           place-directory-install templates/place-directory/schemas/place.json
           place-directory-install scripts/*.test.sh
+          sunset-route-consumers scripts/sunset-route-consumers.test.sh
+          sunset-route-consumers scripts/deploy-rebuild.sh
+          sunset-route-consumers scripts/compose-smoke.sh
+          sunset-route-consumers scripts/pds-scratch-target.sh
+          sunset-route-consumers scripts/create-quickstart-smoke.sh
+          sunset-route-consumers docker-compose.yml
+          sunset-route-consumers internal/cli/cloud/support.go
+          sunset-route-consumers deploy/README.md
+          sunset-route-consumers deploy/uptime-kuma/README.md
           '
           self=".github/workflows/shell-harnesses.yml"
 
@@ -1643,10 +1760,12 @@ jobs:
       - name: pds-scratch-target two-root coexistence + teardown
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/pds-scratch-target_test.sh
-      - name: pds-read-preflight-audit census ratchet + crown-stamp refusal pairs (stub bp, no server)
+      - name: pds-read-preflight-audit census ratchet + crown-stamp refusal/read-back pairs (stub bp, no server)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # 4 arms, each a mutation beside a control. pds-crown-stamp.sh is a
-        # subject of arm 3, so an edit to it re-runs this job.
+        # 5 arms, each a mutation beside a control. pds-crown-stamp.sh is a
+        # subject of arms 3 and 5, so an edit to it re-runs this job. Arm 5 is
+        # the read-back evidence diff: a stub bp that ACKS a met-to-met stamp and
+        # drops the evidence must red, the honest stub must stay green.
         run: bash scripts/pds-read-preflight-audit_test.sh
 
   ci-failure-issue-filer:
@@ -2395,6 +2514,49 @@ jobs:
   #
   # All three harnesses stub git, gh and bp; nothing reaches the network, a
   # credential, or the real repo. python3 is the sole unstubbed dependency.
+  principal-gate-harnesses:
+    needs: [changes]
+    if: needs.changes.outputs.principal-gate-harnesses == 'true'
+    name: media-smoke / pdf-proof principal-gate matrices
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (the gate parses the receipt with it)
+        id: setup
+        # pg_url_host and pg_capabilities_tier are python3 one-liners. Without
+        # python3 every host would parse as '' and every arm would refuse — the
+        # suite would go green on a gate that cannot read anything. Make the
+        # dependency fail BY NAME instead.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — the principal gate parses URLs and receipts with it" >&2
+            exit 1
+          }
+          python3 --version
+      - name: principal-gate library syntax check
+        run: bash -n scripts/lib/principal-gate.sh
+      - name: media-smoke.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/media-smoke.sh
+      - name: media-smoke principal gate (4 arms, fake curl, no network)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # NO `continue-on-error` here or anywhere in this file. It launders a
+        # red into a green job conclusion.
+        run: bash scripts/media-smoke.sh --selftest
+      - name: pdf-efficiency-proof.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/pdf-efficiency-proof.sh
+      - name: pdf-efficiency-proof principal gate (5 arms, no scratch boot)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/pdf-efficiency-proof.sh --selftest
+      - name: pdf-kill-listener-proof.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/pdf-kill-listener-proof.sh
+      - name: pdf-kill-listener-proof principal gate (5 arms, no scratch boot)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/pdf-kill-listener-proof.sh --selftest
+
   fleet-coordination-harnesses:
     needs: [changes]
     if: needs.changes.outputs.fleet-coordination-harnesses == 'true'
@@ -2756,3 +2918,66 @@ jobs:
       - name: "place-directory-install.test.sh (27 assertions, 4 arms incl. the mutation)"
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/place-directory-install.test.sh
+
+  sunset-route-consumers:
+    needs: [changes]
+    if: needs.changes.outputs.sunset-route-consumers == 'true'
+    # THE POST-SUNSET WORLD (task-a6613aa3eddb3c80). `/api/schemas` carries a
+    # PUBLISHED removal date (`sunset: Wed, 31 Dec 2026 23:59:59 GMT`), and
+    # every health consumer in the deploy surface gates on the STATUS CODE — so
+    # on 2027-01-01 a healthy box turns each of them red. #17772 retargeted the
+    # fenced consumers to /status.json and shipped the harness that proves it,
+    # but wired the harness to nothing: it was the sole `ORPHAN` in
+    # scripts/selftest-wiring-census.sh on main from 8970ea272 until this job.
+    #
+    # Hermetic and fast: one python3 fake box on 127.0.0.1 that 404s the sunset
+    # route and 200s /status.json, measured 0.3 s / 11 assertions locally. No
+    # probe string is retyped in the harness — each consumer's URL is EXTRACTED
+    # from the consumer file at run time, which is why the guarded subjects sit
+    # in this job's roster rows above: a revert reds HERE without anyone editing
+    # the harness. Two controls run before any verdict (the box really 404s the
+    # sunset route; it really 200s /status.json), so a green cannot be free.
+    name: sunset-route health consumers survive 2027-01-01
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: harness syntax check
+        run: bash -n scripts/sunset-route-consumers.test.sh
+      - name: "sunset-route-consumers.test.sh (11 assertions incl. both fixture controls, hermetic loopback server)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/sunset-route-consumers.test.sh
+
+  main-workflow-rollup:
+    needs: [changes]
+    if: needs.changes.outputs.main-workflow-rollup == 'true'
+    # THE DENOMINATOR IS THE TREE (task-b4aa15924d214156). main-gate-watch.sh
+    # derives its roster from the contexts branch protection holds, and
+    # stale-verdict-watch.sh derives its from the open-PR population; neither
+    # can report a workflow nobody told it to look at, so one that drifted out
+    # of the watched set — or that has
+    # never had a run on main at all — reads as an absence, and an absence
+    # reads as a green. This roll-up enumerates .github/workflows/ off the
+    # tree, prints the count it enumerated, and prints a zero-run workflow in
+    # words. Only the HERMETIC harness rides here: synthetic workflow trees, a
+    # recorded actions/runs payload, an injected clock, and a `gh` stub that
+    # exits 97 on any call, so it cannot rot into a network skip. The LIVE
+    # roll-up is a runbook command (it needs a token that can list runs) and is
+    # deliberately not wired as a scheduled job in this change.
+    name: every workflow's main verdict (roll-up denominator + grace window)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+        # DEFAULT depth. Every fixture is built under mktemp; the only tree the
+        # harness reads is the working copy of .github/workflows.
+      - name: subject syntax check
+        run: bash -n scripts/main-workflow-rollup.sh
+      - name: harness syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/main-workflow-rollup.test.sh
+      - name: "both directions on fixtures + the three named mutations (staleness, roster, spec label)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/main-workflow-rollup.test.sh

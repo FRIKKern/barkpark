@@ -20,8 +20,11 @@ defmodule BarkparkWeb.Studio.StudioLivePhoneDrillTest do
       announced — because a `phx-click` div is invisible to everyone not
       using a mouse, and spd-s4 made that strip the primary back-nav.
 
-  Assertions run on the rendered HTML string (no Floki in this app's deps)
-  plus `has_element?/2`, which uses LiveViewTest's own DOM engine.
+  Assertions run on the rendered HTML string plus `has_element?/2`, which uses
+  LiveViewTest's own DOM engine. The button-content-model test additionally
+  parses with `LazyHTML` — LiveView 1.1's test-only DOM dep (this app has no
+  Floki); a structural question about which TAGS live inside the button cannot
+  be answered by a substring match.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -31,6 +34,15 @@ defmodule BarkparkWeb.Studio.StudioLivePhoneDrillTest do
   alias Barkpark.TenancyFixtures
 
   @dataset "production"
+
+  # Flow-content tags that a <button> may not contain. Enumerated so the
+  # content-model test below catches more than the two <div>s that prompted it.
+  @flow_only_tags ~w(
+    div p section article aside nav header footer main
+    ul ol li dl dt dd table thead tbody tr td th
+    h1 h2 h3 h4 h5 h6 blockquote figure figcaption
+    form fieldset pre hr address details dialog
+  )
 
   setup %{conn: conn} do
     {_ws, _proj} = TenancyFixtures.ensure_default_scope!()
@@ -254,6 +266,59 @@ defmodule BarkparkWeb.Studio.StudioLivePhoneDrillTest do
              )
 
       assert html =~ ~s(aria-label="Back to Post")
+    end
+
+    # The button content model, enforced STRUCTURALLY rather than by a string
+    # match on the two class names that happen to be there today. `<button>`
+    # admits PHRASING content only; a flow element inside it is invalid markup
+    # that every browser silently renders, which is exactly why nothing in this
+    # suite noticed the two `<div>`s that shipped with the button conversion.
+    #
+    # The assertion parses the rendered page with LazyHTML (LiveView 1.1's own
+    # test DOM engine, a test-only dep — this file's moduledoc used to say the
+    # app has no HTML parser in test; it has this one) and asks, for EVERY flow
+    # tag in the list below, whether one is a descendant of the strip button.
+    # It is a list, not a bare "no div", so a future refactor that reaches for
+    # <p>, <section> or <ul> is caught by the same test, and the failure
+    # message NAMES the offending tag.
+    test "the strip button contains NO flow-content element (button content model)",
+         %{conn: conn} do
+      {:ok, view, _html} = open_doc(conn)
+      html = set_bucket(view, "narrow")
+
+      doc = LazyHTML.from_fragment(html)
+
+      # Control: the selector this test depends on must actually MATCH, or
+      # every "no flow content" verdict below would be vacuously true on an
+      # empty node set.
+      strips = LazyHTML.query(doc, "button.pane-column--collapsed")
+
+      assert Enum.count(strips) > 0,
+             "no button.pane-column--collapsed rendered — the structural assertion " <>
+               "below would pass vacuously; the fixture, not the markup, is broken"
+
+      offenders =
+        for tag <- @flow_only_tags,
+            found = LazyHTML.query(doc, "button.pane-column--collapsed #{tag}"),
+            Enum.count(found) > 0,
+            do: "<#{tag}> x#{Enum.count(found)}"
+
+      assert offenders == [],
+             "the collapsed strip <button> contains flow content, which its HTML5 " <>
+               "content model (phrasing content only) forbids: " <>
+               Enum.join(offenders, ", ") <>
+               " — use <span> and assert the display in CSS instead"
+
+      # And the positive half: the two boxes are still THERE, as spans.
+      assert Enum.count(LazyHTML.query(doc, "button.pane-column--collapsed span.pane-header")) >
+               0
+
+      assert Enum.count(
+               LazyHTML.query(
+                 doc,
+                 "button.pane-column--collapsed span.pane-column-collapsed-label"
+               )
+             ) > 0
     end
 
     # spd-w5 / charter D79. `aria-expanded` shipped hardcoded to "false" and a

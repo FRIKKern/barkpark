@@ -730,8 +730,21 @@ jobs:
     #     deploys nothing reports nothing.
     #
     #   * `failure()` NOT `always()`. `failure()` is FALSE for `cancelled`, and
-    #     that is deliberate: 344 of the window's 1,378 runs were cancelled, and
-    #     a cancellation here is never a lost delivery. It is now nearly extinct
+    #     that is deliberate: a cancellation here is never a lost delivery.
+    #     EVIDENCE, AND ITS DATE. The pair once quoted here — 344 of 1,378 runs
+    #     cancelled, ~25% — was written with NO window and NO run range, so it
+    #     could not be reproduced or aged; it is HISTORY, not a live fact, and
+    #     is kept only to date the reasoning. Re-derived 2026-09-11 over the
+    #     last 100 deploy.yml runs, run ids 34548108045..34589153315, window
+    #     2026-09-11T00:49:15Z-2026-09-11T10:25:35Z: 0 cancelled, 15 failure,
+    #     85 success — 0%, not 25%, which is the drift this comment could not
+    #     show. Nothing here quotes a rate any more: `scripts/crown-reconcile.sh`
+    #     prints CANCEL RATE, LIVE with its denominator every scheduled run
+    #     (`.github/workflows/crown-reconcile.yml`, `cron: 5 */6 * * *`), and
+    #     anyone can re-measure in one command:
+    #       gh run list -R FRIKKern/barkpark --workflow=deploy.yml --limit 100 \
+    #         --json conclusion,createdAt,databaseId
+    #     It is now nearly extinct
     #     as well — since task-8e5eae5c71635a5e each push holds its OWN
     #     concurrency group, so no queued push run is evicted by the next merge;
     #     what remains is a hand-cancel or a superseded dispatch. Either way
@@ -769,8 +782,10 @@ jobs:
     # (dr-w33-s4, decided at review). Four other alert guards in this repository
     # widened to `failure() || cancelled()` this wave, because on a SCHEDULED
     # workflow a cancelled run is silence wearing a non-red conclusion. Here it
-    # is not: the bullet forty lines above already measured it — 344 of 1,378
-    # runs cancelled, `concurrency` is `cancel-in-progress: false`, and the
+    # is not: the bullet above carries the measurement WITH the window and run
+    # range it was taken over, and names the scheduled job that re-derives it —
+    # read the rate there, never from this line. `concurrency` is
+    # `cancel-in-progress: false`, and the
     # `changes` job anchors its diff base to the last SUCCESSFUL run, so the next
     # run deploys the UNION of every push not yet shipped. Since
     # task-8e5eae5c71635a5e a push run is not even EVICTABLE — its concurrency
