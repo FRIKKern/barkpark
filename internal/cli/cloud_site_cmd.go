@@ -199,8 +199,22 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	// Honor both spellings: the local flag when a future parser change delivers
 	// it, else the global capture. (Live-caught: the verb was unusable end-to-end
 	// while its direct-call unit tests stayed green.)
+	//
+	// The global capture is GATED ON g.datasetSet — the bit that is true only
+	// when -d/--dataset was TYPED IN ARGV (globals.go) — not on g.dataset merely
+	// being non-empty. Reading it unconditionally cannot tell an operator-typed
+	// triple from a value some other layer supplied: the resolved content context
+	// carries an ambient dataset from ~/.config/barkpark/config.json /
+	// BARKPARK_DATASET, and paper_cmd.go:169 already REWRITES g.dataset mid-run
+	// from a pasted Paper URL. Either one reaching here would spawn a site — a
+	// durable, tenant-scoped, billable object — against a workspace/project/
+	// dataset the operator never named, with exit 0. Creation is the one place
+	// where an ambient scope must not be inferred, so with nothing typed we fall
+	// through to parseDatasetTriple's honest "--dataset is required" usage error.
+	// Same contract, same discriminator, as exportDatasetScope in
+	// cloud_workspace_cmd.go.
 	rawTriple := a.val("dataset")
-	if rawTriple == "" {
+	if rawTriple == "" && g.datasetSet {
 		rawTriple = g.dataset
 	}
 	ws, proj, ds, derr := parseDatasetTriple(rawTriple)
