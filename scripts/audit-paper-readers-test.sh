@@ -663,6 +663,10 @@ jq -e '
     .cli.exit == 4 and .cli.attempts == 1 and
     (.cli.stderr | contains("lookup fixture.invalid"))
   )
-' "$tmp/cli-dns-result.json" >/dev/null
+' "$tmp/cli-dns-result.json" >/dev/null || {
+  printf 'a DNS resolution failure on the CLI leg was retried (attempts %s) — the resolver exclusion is gone\n' \
+    "$(jq -r '.failures[0].cli.attempts' "$tmp/cli-dns-result.json")" >&2
+  exit 1
+}
 
 printf 'paper reader audit fixture: PASS\n'
