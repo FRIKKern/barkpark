@@ -447,7 +447,9 @@ const CENSUS: Record<string, Record<string, number>> = {
     'roles.paperPullquote': 1,
     'scale.base': 1,
     'scale.sm': 3,
-    'scale.xs': 2,
+    // 2 -> 3 (docgates-s27): the pre-gate-badge renderer is the third xs run
+    // in this file, alongside eyebrow and the callout label.
+    'scale.xs': 3,
   },
   'papers/portabledoc/blocks/dataviz.tsx': {
     'roles.statValue': 1,

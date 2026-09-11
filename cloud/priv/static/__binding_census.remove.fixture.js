@@ -28,11 +28,24 @@
 // ── the cross cell: `--add-check` on THIS file, which must exit 0 ─────────────
 // Arms are mode-scoped, so these two are out of scope under `--remove-check` and
 // evaluated only in the cross run. That run is what proves the ADD arm can stay
-// silent, and it is the VERDICT-COLLAPSE arm's silent side: this fixture
-// declares no `@pin-override`, so the provider pair keeps its contrasting
-// verdicts and (2d-ii) must not fire. Paired with the add fixture's must-flag
-// row, that arm is measured in BOTH directions — the difference between a
-// tripwire and an alarm that is simply always on.
+// silent, and it is the VERDICT-COLLAPSE arm's silent side. Paired with the add
+// fixture's must-flag row, that arm is measured in BOTH directions — the
+// difference between a tripwire and an alarm that is simply always on.
+//
+// THE SILENT SIDE NOW CARRIES THE RULING, NOT JUST AN UNTOUCHED PAIR
+// (cch-bl-2d-ii-identical-predicate). This fixture used to declare no
+// `@pin-override` at all, so its must-clear proved only that a pair with
+// CONTRASTING verdicts stays quiet — which is the easy half and is not the
+// question anyone asks. The override below flattens the pair to ONE SHARED
+// PREDICATE NAME, `fixtureCanWrite` on both rows: the exact shape the real
+// console reaches the day somebody puts `providerCanWrite()` in front of the
+// launch wizard's provider button and honestly re-pins the bare row. (2d) rules
+// that shape PERMITTED — one fence for one write family, correctly named twice —
+// and this cell is where that ruling stops being prose. If (2d-ii) ever grows a
+// "the pair may not share a name" clause, this cell reds, which is precisely the
+// D452 failure mode (a rule that reds on the plausible fix) caught by
+// measurement instead of by review.
+// @pin-override fixtureBareProvider|POST /v1/fixture/providers predicate=fixtureCanWrite
 // @must-clear ADD fixtureTeamWrite|DELETE /v1/fixture/team/:*
 // @must-clear VERDICT-COLLAPSE POST /v1/fixture/providers
 

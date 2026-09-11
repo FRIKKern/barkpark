@@ -7,15 +7,15 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc client — 2026-09-08 nested-reader rebase: 24565 B -> 24631 B (+66); shared child-list validation/rendering and recursive extraction; existing cap retained",
+  "name": "PortableDoc client — 2026-09-11 pre-gate-badge emitter (docgates-s27): 24630 B -> 24717 B (+87); one <p> emitter + registry entry for the reader-synthesised badge #17199 added to compose.ex; 33 B headroom",
   "path": "dist/index.mjs",
-  "limit": "24.66 KB",
+  "limit": "24.75 KB",
   "gzip": true
  },
  {
-  "name": "RSC server — 2026-09-08 nested-reader rebase: 23547 B -> 23622 B (+75); shared child-list guard, semantic rendering and recursive plain text after reuse/flatMap trimming; 28 B headroom",
+  "name": "RSC server — 2026-09-11 pre-gate-badge emitter (docgates-s27): 23618 B -> 23702 B (+84); same emitter through the server entry; 28 B headroom",
   "path": "dist/server.mjs",
-  "limit": "23.65 KB",
+  "limit": "23.73 KB",
   "gzip": true
  },
  {
@@ -35,9 +35,9 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc subpath — 2026-09-08 nested-reader rebase: 20646 B -> 20700 B (+54); shared child-list guard and semantic recursion; 30 B headroom",
+  "name": "PortableDoc subpath — 2026-09-11 pre-gate-badge emitter (docgates-s27): 20697 B -> 20780 B (+83); same emitter through the PortableDoc subpath; 30 B headroom",
   "path": "dist/portable-doc.mjs",
-  "limit": "20.73 KB",
+  "limit": "20.81 KB",
   "gzip": true
  }
 ]

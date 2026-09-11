@@ -27,9 +27,165 @@
 # GATE (cb-live-smoke): `bash -n scripts/cmux-smoke.sh && bash scripts/cmux-smoke.sh`
 # must end in a PASS summary with 0 failures; paste the output (incl. both shasum
 # proofs + the dead-server assertions) as task evidence.
+#
+# PRINCIPAL GATE (task-d9a297da227cd39e, 2026-09-11). Until this slice the ONLY
+# thing standing between `bash scripts/cmux-smoke.sh` and four REAL ledger writes
+# was `command -v bp`. The `bp task get cmux-bridge-goal` preflight below is a
+# REACHABILITY check, not an authority check: it says a document resolved, never
+# WHICH server answered nor at WHAT tier — a prod config with a still-valid token
+# passes it and every write then lands on prod. So before the FIRST write the run
+# now asserts, off one `bp whoami -o json` receipt (`bp` reads the same env this
+# script exports, so the receipt describes the principal the writes will use):
+#
+#   * auth_tier is a WRITING tier (writer_tier: admin/editor/write/writer/operator).
+#     An anonymous or read-only caller is refused BY NAME — `bp whoami` exits 0
+#     either way, so the refusal is made on the receipt's SHAPE, never on its rc
+#     (the stance of scripts/pds-live-bp-write-receipt.sh's preflight(), and of
+#     scripts/demo-living-values.sh's `"auth_tier":"admin"` check off
+#     GET /v1/capabilities).
+#   * the resolved server's HOST equals the host this smoke DECLARES
+#     ($CMUX_SMOKE_EXPECT_HOST, default guerrilla.barkpark.cloud). What used to
+#     be `WARNING: … proceeding anyway` is now a refusal.
+#
+#   ./scripts/cmux-smoke.sh --selftest   prove both refusals + the positive
+#                                        control, offline, with a fake bp on PATH.
+#
+# EXIT: 0 pass · 1 an assertion FAILED · 2 usage · 3 REFUSED (principal gate) ·
+#       4 CANNOT READ (the whoami receipt could not be taken or parsed).
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+SELFTEST=0
+case "${1:-}" in
+  --selftest) SELFTEST=1 ;;
+  "") : ;;
+  *) echo "usage: $0 [--selftest]" >&2; exit 2 ;;
+esac
+
+# --- the principal gate's refusals, named -----------------------------------------
+refuse()     { printf 'REFUSED: %s\n' "$*" >&2; exit 3; }
+cannot_read(){ printf 'CANNOT READ: %s\n' "$*" >&2; exit 4; }
+
+# writer_tier TIER — may this tier write? Anything that is not a resolved writing
+# principal fails CLOSED. (Same table as pds-live-bp-write-receipt.sh:writer_tier.)
+writer_tier() {
+  case "$1" in
+    admin|editor|write|writer|operator) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# =================================================================================
+# --selftest — the principal gate, proven OFFLINE (task-d9a297da227cd39e).
+#
+# Three arms, each a full re-exec of THIS script against a FAKE bp that records
+# every argv it is given to a file. The assertion that matters is not the exit
+# code alone: it is the exit code BESIDE the recorded argv. A gate that refuses
+# after issuing a write would show rc!=0 and a write in the log, and that is the
+# failure this harness exists to catch — so arms 1 and 2 assert ZERO lines in the
+# log matching a ledger write verb, and arm 3 (the positive control) asserts the
+# opposite, that `task create` IS reached. Without arm 3 a script that refused
+# unconditionally would pass arms 1 and 2.
+#
+# No network, no token, no real config: the child gets a scratch HOME carrying a
+# synthetic ~/.config/barkpark/config.json, which is also why its shasum
+# isolation proof has something to read.
+# =================================================================================
+selftest() {
+  local root fake_home fake_bin log out rc st_pass=0 st_fail=0
+  root="$(pwd)"
+  st_ok()  { echo "  ✓ $1"; st_pass=$((st_pass + 1)); }
+  st_bad() { echo "  ✗ $1"; st_fail=$((st_fail + 1)); }
+
+  # writes_in LOG → the number of recorded argv lines that are a LEDGER WRITE.
+  # `task get`, `cmux …` and `whoami` are reads and must not count; counting them
+  # would make every arm look like it wrote and the harness would prove nothing.
+  writes_in() {
+    /usr/bin/grep -cE '^(task (create|close|claim|stamp)|doc (patch|publish))\b' "$1" 2>/dev/null || true
+  }
+
+  # arm LABEL TIER CFG_SERVER WHOAMI_SERVER EXPECT_WRITES(yes|no) EXPECT_RC(zero|nonzero) GATE_REACHED(yes|no)
+  #
+  # CFG_SERVER and WHOAMI_SERVER are separate on purpose: the config names the
+  # server the run was POINTED at, whoami names the one bp actually RESOLVED, and
+  # the two disagreeing (env override, stale active set) is precisely the case a
+  # single check would miss.
+  arm() {
+    local label="$1" tier="$2" cfg_server="$3" who_server="$4" want_writes="$5" want_rc="$6" gate_reached="$7" n
+    fake_home="$(mktemp -d)"; fake_bin="$(mktemp -d)"
+    log="$fake_bin/argv.log"; out="$fake_bin/run.out"
+    : >"$log"
+    mkdir -p "$fake_home/.config/barkpark"
+    printf '{"server":"%s","token":"fake-token","workspace":"w","project":"p","dataset":"production"}\n' \
+      "$cfg_server" >"$fake_home/.config/barkpark/config.json"
+
+    # THE FAKE bp. It records first and answers second, so an argv that reaches it
+    # is in the log even when the answer is a failure.
+    cat >"$fake_bin/bp" <<FAKE
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$log"
+case "\$1 \$2" in
+  "whoami -o") printf '{"auth_tier":"%s","server":"%s","name":"fake","dataset":"production"}\n' "$tier" "$who_server" ;;
+  "task get")  exit 0 ;;
+  "task create") printf '{"id":"fake-T-\$RANDOM"}\n' ;;
+  *) : ;;
+esac
+exit 0
+FAKE
+    chmod +x "$fake_bin/bp"
+
+    rc=0
+    env -i PATH="$fake_bin:/usr/bin:/bin" HOME="$fake_home" \
+        XDG_CONFIG_HOME="$fake_home/.config" \
+        CMUX_SMOKE_EXPECT_HOST=guerrilla.barkpark.cloud \
+        BP="$fake_bin/bp" \
+        bash "$root/scripts/cmux-smoke.sh" >"$out" 2>&1 || rc=$?
+
+    n="$(writes_in "$log")"
+    case "$want_rc" in
+      nonzero) if [ "$rc" -ne 0 ]; then st_ok "$label: exit $rc (non-zero)"; else st_bad "$label: exit 0 — the gate did NOT refuse"; fi ;;
+      zero)    st_ok "$label: exit $rc (the fake bp cannot complete the live smoke; the write-reached assertion below is this arm's subject)" ;;
+    esac
+    case "$want_writes" in
+      no)  if [ "$n" -eq 0 ]; then st_ok "$label: ZERO ledger-write argv recorded (read back from the fixture's own log)"; else st_bad "$label: $n ledger write(s) recorded — the refusal came TOO LATE"; fi ;;
+      yes) if [ "$n" -gt 0 ]; then st_ok "$label: $n ledger-write argv recorded — the first write IS reached on a good principal"; else st_bad "$label: ZERO writes recorded — the gate refuses unconditionally, so the refusing arms prove nothing"; fi ;;
+    esac
+    # The refusal must name itself, not merely exit non-zero.
+    if [ "$want_rc" = nonzero ]; then
+      if /usr/bin/grep -q '^REFUSED: ' "$out"; then st_ok "$label: refusal is named on stderr (REFUSED:)"; else st_bad "$label: exited non-zero with no REFUSED: line"; fi
+    fi
+    # THE PRECONDITION, asserted rather than assumed: a child that died before it
+    # ever reached the gate would ALSO record zero writes — a vacuous pass.
+    case "$gate_reached" in
+      yes) if /usr/bin/grep -q '^whoami -o json$' "$log"; then st_ok "$label: fixture reached the whoami gate (argv recorded)"; else st_bad "$label: whoami never ran — the child died earlier, so this arm measured nothing"; fi ;;
+      no)  if /usr/bin/grep -q '^whoami -o json$' "$log"; then st_bad "$label: whoami ran — this arm is supposed to refuse on the CONFIG host, before any probe"; else st_ok "$label: refused on the config host before any bp probe (no whoami argv)"; fi ;;
+    esac
+    rm -rf "$fake_home" "$fake_bin"
+  }
+
+  echo "=== cmux-smoke --selftest: the principal gate, offline ==="
+  echo ""
+  echo "--- arm 1: WRONG TIER (auth_tier=none, declared host everywhere) ---"
+  arm "wrong-tier" "none"  "https://guerrilla.barkpark.cloud" "https://guerrilla.barkpark.cloud" no  nonzero yes
+  echo ""
+  echo "--- arm 2: WRONG HOST as bp RESOLVED it (config says guerrilla, whoami says api) ---"
+  arm "wrong-host-resolved" "admin" "https://guerrilla.barkpark.cloud" "https://api.barkpark.cloud" no  nonzero yes
+  echo ""
+  echo "--- arm 3: WRONG HOST in the active config (refused before any bp probe) ---"
+  arm "wrong-host-config"   "admin" "https://api.barkpark.cloud"       "https://api.barkpark.cloud" no  nonzero no
+  echo ""
+  echo "--- arm 4: POSITIVE CONTROL (auth_tier=admin, declared host) ---"
+  arm "good-principal"      "admin" "https://guerrilla.barkpark.cloud" "https://guerrilla.barkpark.cloud" yes zero yes
+  echo ""
+  echo "=== SELFTEST: $st_pass passed, $st_fail failed ==="
+  [ "$st_fail" -eq 0 ]
+}
+
+if [ "$SELFTEST" = "1" ]; then
+  selftest
+  exit $?
+fi
 
 # --- resolve bp or REFUSE (idp-interop.sh stance: no silent skip) ----------------
 BP_BIN="${BP:-bp}"
@@ -69,6 +225,17 @@ print("yes" if sys.argv[1] in json.load(sys.stdin) else "no")
 ' "$2"
 }
 
+# url_host URL → the hostname, '' when the URL has none. Compared against the
+# DECLARED host: a substring match ('*guerrilla*') would accept
+# https://guerrilla.evil.example and reject a legitimate port/path spelling.
+url_host() {
+  printf '%s' "$1" | python3 -c '
+import sys
+from urllib.parse import urlparse
+print(urlparse(sys.stdin.read().strip()).hostname or "")
+'
+}
+
 # =================================================================================
 # 1. Capture the REAL guerrilla creds + untouched-config shasums BEFORE any
 #    reassignment or any bp write. Everything after this runs in a scratch HOME.
@@ -88,10 +255,13 @@ G_WORKSPACE="$(read_cfg workspace)"
 G_PROJECT="$(read_cfg project)"
 G_DATASET="$(read_cfg dataset)"
 [ -n "$G_SERVER" ] && [ -n "$G_TOKEN" ] || die "config missing server/token."
-case "$G_SERVER" in
-  *guerrilla*) : ;;
-  *) echo "WARNING: active server '$G_SERVER' is not guerrilla — proceeding anyway." >&2 ;;
-esac
+# The host this smoke DECLARES. Overridable so a local/staging box can be named
+# explicitly — but never silently: an unset override means guerrilla, and a
+# mismatch is a refusal, not the WARNING this line used to print.
+EXPECT_HOST="${CMUX_SMOKE_EXPECT_HOST:-guerrilla.barkpark.cloud}"
+CFG_HOST="$(url_host "$G_SERVER")"
+[ "$CFG_HOST" = "$EXPECT_HOST" ] || refuse "the active bp config names server '$G_SERVER' (host '$CFG_HOST'), but this smoke declares host '$EXPECT_HOST'. It writes REAL rows — it will not write them to a server it was not pointed at. Run \`bp use\` to select the right server, or set CMUX_SMOKE_EXPECT_HOST deliberately."
+
 
 # The isolation proof: both real targets, byte-for-byte, before and after.
 sha_of() { [ -f "$1" ] && shasum -a 256 "$1" | awk '{print $1}' || echo "ABSENT"; }
@@ -160,6 +330,38 @@ new_smoke_task() {  # → prints the created task id
     --set 'acceptance_criteria:=[{"criterion":"smoke","met":false}]' \
     -o json 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])'
 }
+
+# =================================================================================
+# PRINCIPAL GATE (mandatory, and FIRST — see the header block). One
+# `bp whoami -o json` receipt, taken under the scratch HOME + the exported env,
+# i.e. through the exact credential ladder every write below will descend.
+# Nothing has written yet at this point: the first ledger write is
+# new_smoke_task's `bp task create` in scenario B.
+# =================================================================================
+echo ""
+echo "--- principal gate: writing tier + declared host, BEFORE the first write ---"
+WHO="$SCRATCH/whoami.json"
+WHO_RC=0
+"$BP" whoami -o json >"$WHO" 2>/dev/null || WHO_RC=$?
+[ "$WHO_RC" -eq 0 ] || cannot_read "\`bp whoami -o json\` exited $WHO_RC — bp cannot describe the credential it resolved, so this run cannot know whose ledger it is about to write. Nothing has been written."
+WHO_TIER="$(python3 -c '
+import sys, json
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+print(d.get("auth_tier") or "" if isinstance(d, dict) else "")
+' "$WHO" 2>/dev/null)" || cannot_read "the \`bp whoami -o json\` receipt is not parseable JSON. Nothing has been written."
+WHO_SERVER="$(python3 -c '
+import sys, json
+d = json.load(open(sys.argv[1]))
+print(d.get("server") or "")
+' "$WHO" 2>/dev/null)" || cannot_read "the \`bp whoami -o json\` receipt is not parseable JSON. Nothing has been written."
+WHO_HOST="$(url_host "$WHO_SERVER")"
+
+writer_tier "$WHO_TIER" || refuse "bp resolved auth_tier=\"${WHO_TIER:-<absent>}\", which is not a writing tier. Note that \`bp whoami\` EXITS 0 for an anonymous caller too, and that the reachability preflight below would also pass — so this refusal is made on the receipt's SHAPE. Nothing has been written."
+[ "$WHO_HOST" = "$EXPECT_HOST" ] || refuse "bp resolved server '$WHO_SERVER' (host '${WHO_HOST:-<absent>}'), but this smoke declares host '$EXPECT_HOST'. The reachability preflight cannot see this: a live prod server answers \`bp task get\` perfectly well. Nothing has been written."
+ok "principal gate: auth_tier=$WHO_TIER (writing) and host=$WHO_HOST == declared $EXPECT_HOST"
 
 # =================================================================================
 # PREFLIGHT (mandatory): a known task must resolve on guerrilla. Under an isolated

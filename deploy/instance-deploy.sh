@@ -584,11 +584,136 @@ if [ "$NEW" = "$OLD" ] && [ "$(cat "$STATE" 2>/dev/null)" = "$NEW" ]; then
   exit 0
 fi
 
-# Backfill the prod-required secret keys if absent (each RAISES at boot).
+# ---- The prod-required secret keys (each RAISES at boot) -------------------
+# An ABSENT line is not the only broken state. A line that is PRESENT but empty
+# (`BARKPARK_KEK=`) matches `grep '^VAR='` exactly as a good one does, so the
+# absence-only backfill this loop used to be skipped it — and after the boot
+# refusals such a box fails EVERY deploy until a human edits .env by hand
+# (fail-closed: the old slot keeps serving, but nobody is coming). The KEK has a
+# third broken state on top of that: a non-empty value the app REFUSES.
+#
+# So: absent, empty, and (for the KEK) structurally invalid are ONE case here —
+# mint a fresh secret and APPEND-OR-REPLACE it, naming which case fired. Scope is
+# the four variables this loop already names; nothing else in .env is touched.
+# A non-empty value that is REJECTED is never destroyed: it is parked in .env
+# under a name nothing reads (see env_park_rejected) BEFORE the mint is written.
+
+# HOW THE CURRENT VALUE IS READ (task-0fdde2a930463e93). The CONSUMERS of .env
+# are the SHELL: this very script sources it a few hundred lines down
+# (`set -a; . ./.env; set +a`) and api/start.sh does `source ../.env` at every
+# boot. So the value the app actually holds is whatever the shell ASSIGNS —
+# which accepts `VAR="…"`, `VAR='…'`, `export VAR=…`, a leading-whitespace
+# line, and strips trailing blanks as token separators. An awk of the raw text
+# after '=' sees the QUOTES, the `export`, the indentation and the blanks, and
+# calls a WORKING KEK invalid — and the arm below would then REPLACE the key
+# every existing ciphertext on that box is sealed under (there is no
+# BARKPARK_KEK_PREVIOUS handoff yet). Irreversible data loss on a healthy box.
+# So read it the way the consumers do: source .env in a subshell and print the
+# expanded value. This is NOT a new trust boundary — the same file is sourced
+# by this script and by start.sh anyway; reading it 150 lines earlier changes
+# nothing about what can execute.
+env_shell_read() { # $1=var; stdout = the value the shell would see, "" when unset
+  # The subshell is made immune to this script's `set -u`/pipefail: a .env that
+  # expands an unset variable must not abort the read (it does not abort the
+  # real `. ./.env` later either, which runs with -u off for the same reason).
+  ( set +u +o pipefail; unset "$1"; . ./.env >/dev/null 2>&1 || true; printf '%s' "${!1-}" )
+}
+env_shell_is_set() { # $1=var; 0 when the shell sees an ASSIGNMENT (even an empty one)
+  ( set +u +o pipefail; unset "$1"; . ./.env >/dev/null 2>&1 || true; [ -n "${!1+set}" ] )
+}
+
+env_assign_line() { # $1=var; stdout = the LAST raw line that assigns it, "" if none
+  awk -v k="$1" '{ l = $0; sub(/^[ \t]+/, "", l); sub(/^export[ \t]+/, "", l)
+                   if (index(l, k "=") == 1) last = $0 } END { print last }' .env 2>/dev/null || true
+}
+
+# Park a REJECTED but non-empty value before a fresh mint overwrites it. The
+# parked name is one NOTHING reads (runtime.exs reads BARKPARK_KEK and
+# BARKPARK_KEK_PREVIOUS, never *_REJECTED_*), so the box boots on the mint while
+# the operator keeps the bytes needed to recover ciphertext sealed under the old
+# key. Single-quoted (with the '\'' escape) so a value with spaces or quotes
+# cannot break the sourcing of .env it now rides in.
+env_park_rejected() { # $1=var $2=value the shell saw
+  local v="$1" val="$2" ts esc raw
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  esc="${val//\'/\'\\\'\'}"
+  raw="$(env_assign_line "$v")"
+  { printf '# %s was REJECTED by the deploy at %s and a fresh secret minted; original line: %s\n' "$v" "$ts" "$raw"
+    printf "%s_REJECTED_%s='%s'\n" "$v" "$ts" "$esc"; } >> .env || return 1
+  log "PRESERVED the rejected ${v} in .env as ${v}_REJECTED_${ts} — nothing reads that name; recover any ciphertext sealed under it BEFORE deleting the line"
+}
+
+secret_value_ok() { # $1=var $2=current value — 1 ⇒ the deploy must mint a fresh one
+  [ -n "$2" ] || return 1
+  if [ "$1" = BARKPARK_KEK ]; then
+    # api/config/runtime.exs (the `case System.get_env("BARKPARK_KEK")` block)
+    # demands Base.decode64/1 yield EXACTLY 32 raw bytes and RAISES otherwise.
+    # Base64 of 32 bytes is exactly 43 standard-alphabet characters plus one
+    # '=' — so this pattern IS that decode, in the shell, with no openssl
+    # round-trip. The shell gate and the app therefore agree on "valid" by
+    # construction; anything the app would refuse, this refuses too.
+    [[ "$2" =~ ^[A-Za-z0-9+/]{43}=$ ]] || return 1
+  fi
+  return 0
+}
+
+env_replace_line() { # $1=var $2=value — drop every line that ASSIGNS var, append the new one
+  local v="$1" val="$2" tmp
+  tmp="$(mktemp)" || return 1
+  # Written back THROUGH the existing .env (`cat > .env`, never `mv`) so the
+  # file's mode 0600 and its ownership survive the repair — a mktemp file mv'd
+  # into place would carry the deploy user's, not the box's.
+  # The drop matches what the SHELL calls an assignment (optional indentation,
+  # optional `export `), not `^VAR=`: an `export VAR=…` line left behind would
+  # otherwise survive the replace and, being sourced after nothing, leave TWO
+  # assignments in the file whose order decides which key the app boots on.
+  { awk -v k="$v" '{ l = $0; sub(/^[ \t]+/, "", l); sub(/^export[ \t]+/, "", l)
+                     if (index(l, k "=") != 1) print }' .env > "$tmp" &&
+    printf '%s=%s\n' "$v" "$val" >> "$tmp" &&
+    cat "$tmp" > .env; } || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+}
+
 for v in BARKPARK_KEK BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_RELEASE_CAPTURE_HMAC_SECRET; do
-  if ! grep -q "^${v}=" .env 2>/dev/null; then
+  # "Absent" means the SHELL sees no assignment — not that `grep '^VAR='` misses.
+  # The old grep missed `export VAR=…` and indented lines and appended a SECOND
+  # assignment; last-wins then booted the box on the fresh mint while the real
+  # key sat two lines above.
+  if ! env_shell_is_set "$v"; then
     echo "${v}=$(openssl rand -base64 32)" >> .env
     log "added missing ${v} to .env"
+    continue
+  fi
+  cur="$(env_shell_read "$v")"
+  # A value the shell and the app both accept is LEFT ALONE — byte for byte. The
+  # line is never normalised, re-quoted or rewritten: there is nothing to fix.
+  secret_value_ok "$v" "$cur" && continue
+  # A value whose ONLY defect is a stray line terminator (a .env edited on
+  # Windows: `VAR=<key>\r`) is a REAL key — the bytes before the CR are the
+  # secret the box's ciphertext is sealed under. runtime.exs still RAISES on it
+  # (Base.decode64 refuses the \r), so it cannot be left untouched either. Drop
+  # the terminator, KEEP the key: the only edit is the artifact.
+  trimmed="$cur"
+  while [ -n "$trimmed" ] && [ "${trimmed: -1}" = $'\r' ]; do trimmed="${trimmed%$'\r'}"; done
+  if [ -n "$trimmed" ] && [ "$trimmed" != "$cur" ] && secret_value_ok "$v" "$trimmed"; then
+    if env_replace_line "$v" "$trimmed"; then
+      log "normalised ${v} in .env — the value carried trailing whitespace/CR (runtime.exs would RAISE); the KEY ITSELF is unchanged, only the stray terminator was dropped"
+    else
+      log "WARN: ${v} in .env carries a trailing CR and the in-place normalise FAILED — boot will refuse; strip the CR by hand, do NOT re-mint (that destroys the key)"
+    fi
+    continue
+  fi
+  if [ -z "$cur" ]; then
+    reason="the line is PRESENT but EMPTY"
+  else
+    reason="the value is not base64 of 32 bytes (runtime.exs would RAISE at boot)"
+    # NEVER silently destroy a non-empty secret: park it first, then mint.
+    env_park_rejected "$v" "$cur" || log "WARN: could not preserve the rejected ${v} before replacing it"
+  fi
+  if env_replace_line "$v" "$(openssl rand -base64 32)"; then
+    log "repaired ${v} in .env — ${reason}; a fresh secret REPLACED it"
+  else
+    log "WARN: ${v} in .env is unusable (${reason}) and the in-place repair FAILED — boot will refuse"
   fi
 done
 
