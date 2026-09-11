@@ -9290,6 +9290,34 @@ async function main() {
       // changes character. All five are DRIVEN — every one of them measured
       // spilling with the wrap deleted (see the mutation lines below).
       const ROW_WIDTHS = [320, 390, 430, 620, 900];
+      // ── THE `.site-meta` LINE BUDGET BAND (this row).
+      //
+      // Every assertion in this leg before this one scores CLIPPING —
+      // scrollWidth vs clientWidth — and a `.site-meta` that WRAPS clips
+      // nothing. It is clean by every existing measure while costing the row a
+      // whole extra line, which is the one thing a person reading a list
+      // actually sees. So the count of LINES is measured here, and it is
+      // measured per track, because the two builders do not agree.
+      //
+      // THE FILED PREMISE WAS THAT `.site-meta` STAYS ON ONE LINE AT 320 ONCE A
+      // ROW CARRIES A DOMAIN COUNT. IT DOES NOT, AND THAT IS NOT A REGRESSION.
+      // The measurement is written down in app.js above `siteMoreDomainsSeg`
+      // (grep -n 'WHAT IT COSTS, MEASURED' cloud/priv/static/app.js): on the
+      // #sites row "the meta line wraps at 320/360/390 and the row grows
+      // 166 -> 184px (+18, exactly one 18px line); at 430 it does not wrap";
+      // "on the instance-workspace card the shorter meta line absorbs it with
+      // NO wrap at any width". The shipped bytes do exactly that, and this
+      // sweep reproduces it independently — so what is pinned here is the
+      // MEASURED TRUTH per track per width, not the claim, and 430 is driven
+      // because it is the documented width at which the global row stops
+      // wrapping. A budget that asserted "one line everywhere" would red main
+      // on the first run; a budget that asserted "at most two" would not notice
+      // the global row going to three. Exact equality, both directions.
+      //
+      // 360 IS DRIVEN BY NO OTHER CELL OF THIS LEG. It is added here rather
+      // than to ROW_WIDTHS so the "all five measured spilling with the wrap
+      // deleted" record above stays exactly as wide as the run that proved it.
+      const META_LINE_WIDTHS = [320, 360, 390, 430];
       // The reachability ceiling. Stated as the viewport height rather than a
       // literal so the two can never drift apart.
       const ROW_HEIGHT_CEILING = HEIGHT;
@@ -9317,6 +9345,14 @@ async function main() {
           // property of the fixture.
           sitePill: true,
           sitePillWhy: null,
+          // THE MEASURED LINE COUNT OF THIS BUILDER'S `.site-meta`, DECLARED
+          // PER WIDTH (this row), the sitePill/sitePillWhy precedent above.
+          // Asserted by EQUALITY in both directions: a third line is a row
+          // that grew, and a row that silently drops to one means either the
+          // segment stopped painting or the meta line lost content — both
+          // findings, neither a moved number.
+          metaLines: { 320: 2, 360: 2, 390: 2, 430: 1 },
+          metaLinesWhy: "app.js's own pre-ship measurement above siteMoreDomainsSeg (grep -n 'WHAT IT COSTS, MEASURED' cloud/priv/static/app.js): on the #sites row \"the meta line wraps at 320/360/390 and the row grows 166 -> 184px (+18, exactly one 18px line); at 430 it does not wrap\". The global row carries `fw · on <instance> · updated <when>` BEFORE the count — the longest meta string of the two builders — so 320-390 is the band where the count does not fit beside it",
         },
         {
           scen: "sites-on-instance",
@@ -9335,6 +9371,14 @@ async function main() {
           // this annotation reds instead of quietly widening the leg's meaning.
           sitePill: false,
           sitePillWhy: "the compact siteRow emits no `.site-status` wrapper — its only `.status-pill` is the payload-conditional binding chip (siteBindingChip -> siteBindingPill, \"\" when the binding model is silent), which no row is obliged to carry",
+          // The compact row's meta is `fw · <repo@branch>` and nothing else,
+          // so the same segment lands on a much shorter line. app.js: "on the
+          // instance-workspace card the shorter meta line absorbs it with NO
+          // wrap at any width (128 -> 128 at 320)". Declared ONE at every
+          // driven width, which is what makes the global track's TWO a
+          // property of that builder rather than of the segment.
+          metaLines: { 320: 1, 360: 1, 390: 1, 430: 1 },
+          metaLinesWhy: "the compact siteRow's meta line is `framework · repo@branch` only — no instance link, no `updated …` clause — so the count rides a line with room for it at every driven width (app.js's pre-ship measurement: 128 -> 128px at 320)",
         },
       ];
       for (const t of TRACKS) {
@@ -9363,6 +9407,15 @@ async function main() {
         `because a clip-only scorer reads a shredded 0px box as clean\n`,
       );
       let cells = 0, hostCells = 0, hostSpill = 0, pageOver = 0, tall = 0, cruelSeen = 0, maxRowH = 0;
+      // The line-budget half. `metaSubjects` is the POPULATION the assertion is
+      // about: rows whose `.site-meta` actually paints a `+N more domain(s)`
+      // count. A row without one is NOT the subject — its meta line is a
+      // strictly shorter string by construction, so scoring it would
+      // manufacture a green that says nothing about the segment. `metaCells`
+      // counts the cells that reached the assertion at all, so a sweep that
+      // measured nothing cannot read as a sweep that measured clean.
+      let metaCells = 0, metaSubjects = 0, metaOver = 0, metaUnder = 0, metaMissing = 0;
+      const metaSubjectTracks = new Map(TRACKS.map((t) => [t.scen, 0]));
       // cch-w19-bl-w13 criterion 4. `sitePills` is the population the owing
       // track is held to; `sitePillLabels` is its second-order half; `chipPills`
       // is the binding chips, counted so they can be PRINTED and never mistaken
@@ -9513,7 +9566,118 @@ async function main() {
             );
           }
           process.stdout.write(`   ${t.scen}/${theme}  ${line.join("  ")}\n`);
+          // ── THE `.site-meta` LINE BUDGET (this row), SAME PAGE, NO RE-NAV.
+          // The claim is about the WIDTH, not the entry path, and a second
+          // nav() per theme would double this leg's browser cost for nothing.
+          //
+          // THE INSTRUMENT IS Range.getClientRects OVER THE META'S OWN
+          // CONTENTS. `.site-meta` is a block, so `meta.getClientRects()` is
+          // ONE box at any line count — it cannot answer this question at all.
+          // A Range over its contents has one rect per line box, and distinct
+          // rounded `top` values is the line count. height / line-height is
+          // carried beside it per cell as the corroborating second reading,
+          // never as the verdict: a meta whose line-height resolved to
+          // `normal` would make that ratio a guess, and the printed pair is
+          // what lets a reader see the two readings agree.
+          const metaLine = [];
+          for (const width of META_LINE_WIDTHS) {
+            await setViewport(width);
+            const mm = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `if(!v) return {view:'none',rows:[]};` +
+              // Scoped to the LIVE VIEW and then to the ROW (cch-w24-s5's
+              // remedy): this addition puts NO new document-wide walk in the
+              // file, so the W35 residue register is untouched by it.
+              `var rows=[].slice.call(v.querySelectorAll('.site-row')).map(function(row){` +
+              `  var id=row.getAttribute('data-id');` +
+              `  var meta=row.querySelector('.site-meta');` +
+              `  if(!meta) return {id:id,meta:0};` +
+              `  var txt=(meta.textContent||'');` +
+              // THE SUBJECT TEST, read off the PAINTED TEXT rather than off the
+              // fixture: siteMoreDomainsSeg emits "+N more domain(s)" or
+              // NOTHING AT ALL, so a row with no match genuinely carries none.
+              `  var seg=txt.match(/\\+(\\d+) more domains?/);` +
+              `  var rg=document.createRange(); rg.selectNodeContents(meta);` +
+              `  var tops=[];` +
+              `  [].slice.call(rg.getClientRects()).forEach(function(r){` +
+              `    if(r.width<=0||r.height<=0) return;` +
+              `    var k=Math.round(r.top*2)/2;` +
+              `    if(tops.indexOf(k)<0) tops.push(k);});` +
+              `  var lh=parseFloat(getComputedStyle(meta).lineHeight);` +
+              `  var h=meta.getBoundingClientRect().height;` +
+              `  return {id:id,meta:1,dc:seg?Number(seg[1]):0,lines:tops.length,len:txt.length,` +
+              `    lh:(lh===lh)?Math.round(lh*10)/10:null,h:Math.round(h*10)/10,` +
+              `    hl:(lh===lh&&lh>0)?Math.round(h/lh*100)/100:null};});` +
+              `return {view:v.id,rows:rows};})()`,
+            );
+            if (mm.view !== t.view) {
+              fail(D, `${t.scen}/${theme}@${width}: the .site-meta line-budget sweep rendered section.view "${mm.view}", asked for "${t.view}" — no meta line on this cell was measured`);
+              metaLine.push(`${width}:?`);
+              continue;
+            }
+            metaCells++;
+            const noMeta = mm.rows.filter((r) => !r.meta);
+            metaMissing += noMeta.length;
+            for (const r of noMeta) {
+              fail(D, `${t.scen}/${theme}@${width}: the .site-row ${r.id} has no \`.site-meta\` host at all — ${t.builder} emits one unconditionally, so the line the domain count is supposed to ride does not exist and nothing about this row was measured`);
+            }
+            const want = t.metaLines[width];
+            const subjects = mm.rows.filter((r) => r.meta && r.dc > 0);
+            metaSubjects += subjects.length;
+            metaSubjectTracks.set(t.scen, metaSubjectTracks.get(t.scen) + subjects.length);
+            for (const r of subjects) {
+              if (typeof want !== "number") {
+                fail(D, `${t.scen}/${theme}@${width}: the track declares no \`metaLines\` entry for ${width}px, so the .site-row ${r.id}'s meta (measured ${r.lines} line(s)) was compared against nothing — a driven width with no declaration is an unmeasured width, not a clean one`);
+                continue;
+              }
+              if (r.lines === want) continue;
+              if (r.lines > want) metaOver++; else metaUnder++;
+              fail(D, `${t.scen}/${theme}@${width}: the .site-row ${r.id}'s \`.site-meta\` — the one carrying "+${r.dc} more domain${r.dc === 1 ? "" : "s"}" — renders on ${r.lines} line(s), ${r.lines > want ? "MORE" : "FEWER"} than the ${want} this track declares (${r.len} characters; Range.getClientRects over the meta's own contents found ${r.lines} distinct line-box tops, corroborated by height/line-height ${r.h}/${r.lh} = ${r.hl}). ${r.lines > want ? `The domain count costs this row an extra line it did not cost before on ${t.builder}` : `The meta line got SHORTER on ${t.builder} — either the count stopped riding it or the line lost content; a row that improves is still a row that changed`}. The declaration's basis: ${t.metaLinesWhy}`);
+            }
+            // PRINTED PER CELL, clean or not — the MEASURED line count per
+            // subject row, keyed by the tail of its data-id, beside what the
+            // track declared. A red run is the run whose table a reader most
+            // needs, so this line is unconditional (the W13 precedent).
+            metaLine.push(
+              `${width}:${subjects.length}/${mm.rows.length}r want${want === undefined ? "?" : want} ` +
+              (subjects.length
+                ? subjects.map((r) => `${String(r.id).slice(-4)}+${r.dc}=${r.lines}L h${r.h}/lh${r.lh}=${r.hl}`).join(" ")
+                : "NO-SUBJECT"),
+            );
+          }
+          process.stdout.write(`   ${t.scen}/${theme}  meta-line  ${metaLine.join("  ")}\n`);
         }
+      }
+      // ── THE LINE-BUDGET PRECONDITION, AND IT IS A REFUSAL (exit 2), NOT A
+      // fail(). "The meta lines came out as declared" is a statement about the
+      // rows CARRYING A DOMAIN COUNT. A fixture row without one paints a
+      // strictly shorter string, so scoring it proves nothing about the
+      // segment — an all-clean sweep over a corpus with no subject is the exact
+      // shape of green this leg exists to deny, and it is an ENVIRONMENT fault
+      // (the fixture stopped supplying the subject), which is what exit 2
+      // means in this file. Refused BEFORE the OK lines, never after them.
+      if (metaCells === 0) {
+        return die(`${D}: the .site-meta line-budget sweep reached ZERO cells across ${META_LINE_WIDTHS.join("/")} on ${TRACKS.length} tracks x 2 themes — the band was never driven, so its verdict is about nothing`);
+      }
+      if (metaSubjects === 0) {
+        return die(`${D}: ${metaCells} cell(s) swept at ${META_LINE_WIDTHS.join("/")} and NOT ONE .site-row painted a \`+N more domain(s)\` count in its \`.site-meta\` — no fixture site has two or more \`domains\` entries (siteExtraDomains returns 0 below length 2, and siteMoreDomainsSeg then emits nothing at all), so the row this assertion is about is not on the page. A fixture row WITHOUT a domain count is NOT the subject; refusing rather than printing a clean line about rows that were never it`);
+      }
+      for (const t of TRACKS) {
+        if (metaSubjectTracks.get(t.scen) === 0) {
+          return die(`${D}: the ${t.scen} track (${t.builder}) swept ${META_LINE_WIDTHS.join("/")} with ZERO rows carrying a domain count while the other track had some — \`siteMoreDomainsSeg\` is spliced VERBATIM INTO BOTH row builders, so this builder's half of the line budget went unmeasured and the leg's green would be one builder's. Put a site with 2+ \`domains\` on this track's fixture rather than letting the other builder's rows carry the verdict`);
+        }
+      }
+      // THE LINE-BUDGET CENSUS, printed UNCONDITIONALLY beside the pill one.
+      process.stdout.write(
+        `\n   ${D} — \`.site-meta\` LINE BUDGET, per track, MEASURED vs DECLARED:\n` +
+        `   ${"track".padEnd(20)}${"subjects".padEnd(10)}${META_LINE_WIDTHS.map((w) => `${w}px`.padEnd(7)).join("")}basis\n`,
+      );
+      for (const t of TRACKS) {
+        process.stdout.write(
+          `   ${t.scen.padEnd(20)}${String(metaSubjectTracks.get(t.scen)).padEnd(10)}` +
+          `${META_LINE_WIDTHS.map((w) => `${t.metaLines[w]}L`.padEnd(7)).join("")}${t.metaLinesWhy}\n`,
+        );
       }
       // cch-w19-bl-w13 criterion 4, THE NON-VACUITY NET. The per-row refusals
       // above are the real assertion; this one is what survives an edit that
@@ -9595,6 +9759,36 @@ async function main() {
           `width is 619, and no --render cell at 320 is wired into CI (Q3 BELOW THE FOLD at 320 is a SHELL ` +
           `property and would red main on shipped bytes). This leg reaches that band through overflow-guard, ` +
           `whose CI invocation carries no --defect flag and therefore runs it`,
+        );
+        okLine(
+          `THE MEETING OF THE DOMAIN COUNT AND THE META LINE IS MEASURED AT LAST (this row): every assertion ` +
+          `above scores CLIPPING, scrollWidth vs clientWidth, and a \`.site-meta\` that WRAPS clips nothing — so ` +
+          `this whole leg read clean while the "+N more domains" segment could have been costing every row an ` +
+          `extra line, which is the only part of it a person scrolling a list sees. ${metaSubjects} subject ` +
+          `row-cell(s) across ${META_LINE_WIDTHS.join("/")} x 2 themes x ${TRACKS.length} builders ` +
+          `(${metaCells} cells), ${metaOver} over the declaration and ${metaUnder} under it, ${metaMissing} rows ` +
+          `with no \`.site-meta\` host at all. The instrument is Range.getClientRects over the meta's OWN ` +
+          `CONTENTS — the element is a block, so its own rect is ONE box at any line count and cannot answer ` +
+          `this — with height/line-height printed beside every cell as the corroborating second reading`,
+        );
+        okLine(
+          `THE FILED PREMISE WAS FALSE AND THE MEASUREMENT IS WHAT SAYS SO: this row was cut on the claim that ` +
+          `\`.site-meta\` stays on ONE line at 320 once a row carries a domain count. On the #sites row it does ` +
+          `NOT, it takes TWO, and that was measured and written down BEFORE the segment shipped (app.js above ` +
+          `\`siteMoreDomainsSeg\`: "the meta line wraps at 320/360/390 and the row grows 166 -> 184px (+18, ` +
+          `exactly one 18px line); at 430 it does not wrap"). So what is pinned here is the measured truth per ` +
+          `track per width — ` + TRACKS.map((t) => `${t.scen} ${META_LINE_WIDTHS.map((w) => `${w}:${t.metaLines[w]}L`).join(" ")}`).join("; ") + ` — ` +
+          `by EQUALITY in both directions. 430 is driven because it is the documented width at which the global ` +
+          `row stops wrapping: a budget of "one line everywhere" would red main on its first run, and a budget ` +
+          `of "at most two" would not notice the global row reaching three`,
+        );
+        okLine(
+          `THE SUBJECT IS ASSERTED, NOT ASSUMED: a row enters the line-budget assertion only when its PAINTED ` +
+          `meta text matches \`+N more domain(s)\` — the string \`siteMoreDomainsSeg\` emits, or emits NOTHING at ` +
+          `all when \`siteExtraDomains\` reads under two \`domains\` entries. A run whose fixture holds no such ` +
+          `row REFUSES (exit 2) rather than printing this line, per track as well as in total, because a clean ` +
+          `sweep over a corpus with no subject is a green about the wrong rows. Measured subjects per track: ` +
+          TRACKS.map((t) => `${t.scen} ${metaSubjectTracks.get(t.scen)}`).join(", "),
         );
       }
     }
