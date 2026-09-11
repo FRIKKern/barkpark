@@ -2031,7 +2031,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
     end
   end
 
-  # ── THE ROUTE ARMING CHANNEL (charter D607, task dr-w21-bl-route-decision) ──
+  # ── THE ROUTE ARMING CHANNEL (charter D608, task dr-w21-bl-route-decision) ──
   #
   # Both engines emit `BPSTAGE name=ROUTE status=<ok|failed> … detail="…"` after
   # their Caddy arming attempt, into the DURABLE STATUS FILE. Wave 21 measured

@@ -331,7 +331,7 @@ defmodule Barkpark.Sites.DeployRunner do
   # known", never a guess at which half is serving.
   @served_slots ~w(a b)
 
-  # ── THE ROUTE ARMING CHANNEL (charter D607) ───────────────────────────────
+  # ── THE ROUTE ARMING CHANNEL (charter D608) ───────────────────────────────
   #
   # Both engines emit, after their Caddy arming attempt,
   #
