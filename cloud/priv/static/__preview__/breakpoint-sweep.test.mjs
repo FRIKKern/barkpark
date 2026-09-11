@@ -1027,8 +1027,12 @@ test("every residue family has a written reason, and no reason outlives its fami
 
 // ── the residue's TYPED numerals: 21 of them, none of which could lose ───────
 //
-// WHAT THESE THREE ARMS OWN (charter D527). The census five (108/25/26/83/13)
-// were already asserted above; what was NOT asserted is every OTHER typed
+// WHAT THESE THREE ARMS OWN (charter D527). The census five were asserted above
+// as a DERIVED report (and their two typed copies in breakpoint-sweep.mjs's
+// prose only from cch-w48-bl onward — D527 wrote that they were owned while
+// they were not, which is how they came to read 120/25/24/96/13 against a
+// measured 125/25/24/101/13 under four green harnesses); what was NOT asserted
+// by D527 is every OTHER typed
 // number the residue carries — the 13 `// <family> — N` group headers inside
 // the SCENARIO_RESIDUE literal, the 8 `These N` clauses inside
 // RESIDUE_FAMILY_REASONS, and the two ZERO-residue family names in
@@ -1137,6 +1141,185 @@ test("the two ZERO-residue families are named, and 15 families over all scenario
     "the families every one of whose scenarios is rendered by a cell");
   // the relation, derived rather than typed: 15 - 13 IS the two above
   assert.equal(allFamilies.size - residueFamilies.size, zeroResidue.length);
+});
+
+// ── the OWNERSHIP-MAP arms: the block that CLAIMS ownership was itself unowned ─
+//
+// (cch-w48-bl-the-scenario-census-five-numerals-cannot-lose.) The block headed
+// "WHICH ARM OWNS WHICH NUMERAL" in breakpoint-sweep.mjs wrote "Every numeral in
+// this block is now named by the arm that reds when it drifts" — and the census
+// five printed one bullet under that sentence were named by NOTHING. They proved
+// it on main, not in theory: both typed copies (that bullet and "THE CENSUS THIS
+// RECONCILES AGAINST:" above it) read 120 / 25 / 24 / 96 / 13 while
+// `scenarioReport` derived 125 / 25 / 24 / 101 / 13, and the bare sweep exited 0
+// while PRINTING 125/101 on its own `>> scenarios` line, and this suite reported
+// 76 pass / 0 fail, over the gap. The census test above asserts the DERIVED
+// report; the header-census arm below owns ONE line of prose; neither reads
+// these two sites.
+//
+// FOUR ARMS, AND THE LAST IS THE POINT. Three recount values (the census five at
+// both sites; the map's own family numerals; its `exits N` against `refuse`).
+// The fourth walks EVERY integer in the block and reds on any one no owning
+// regex consumed — so the next number typed into this block is unowned until an
+// arm claims it, rather than silently inheriting the block's claim of total
+// coverage. Numerals
+// that MUST NOT track today's census (the 104/79 double-claim, the 99/74
+// precedent) sit below an explicit HISTORICAL rule and are COUNTED rather than
+// recounted: the block states how many it is not guarding, and that count is
+// derived by the same walk.
+
+const SWEEP_PROSE = SWEEP_SRC.replace(/^[ \t]*\/\/ ?/gm, "");
+
+// Both committed copies of the census five, each with the axis each numeral
+// spells, so a failure names the numeral AND the site rather than a line number
+// that drifts on every reflow.
+const CENSUS_PROSE_SITES = [
+  {
+    site: '"THE CENSUS THIS RECONCILES AGAINST:"',
+    re: /THE CENSUS THIS RECONCILES AGAINST:\s+(\d+)\s+scenarios\s+·\s+(\d+)\s+cells\s+over\s+(\d+)\s+DISTINCT\s+scenarios[^·]*·\s+residue exactly\s+(\d+)\s+·\s+(\d+)\s+families/g,
+    axes: ["total", "cells", "distinctCovered", "residue", "families"],
+  },
+  {
+    site: 'the ownership map\'s "N / N / N / N / N" bullet',
+    re: /\*\s+(\d+)\s+\/\s+(\d+)\s+\/\s+(\d+)\s+\/\s+(\d+)\s+\/\s+(\d+)\s+—\s+"the census five/g,
+    axes: ["total", "cells", "distinctCovered", "residue", "families"],
+  },
+];
+
+test("the census five in breakpoint-sweep.mjs's prose are recounted from the derived report", () => {
+  const r = scenarioReport({ scenarios: SCENARIOS });
+  for (const { site, re, axes } of CENSUS_PROSE_SITES) {
+    const matches = [...SWEEP_PROSE.matchAll(re)];
+    // MATCH-COUNT FLOOR, same law as the header-census and chronicle arms: a
+    // wording drift that slid out from under this regex would leave the arm
+    // vacuous-green over the exact rot it exists to catch. Re-point the regex at
+    // the wording on disk; never lower the floor, never delete the site.
+    assert.equal(matches.length, 1,
+      `match-count floor: ${site} in breakpoint-sweep.mjs matched ${matches.length} times, expected exactly 1 — ` +
+      "the census-five wording drifted out from under this regex (or a second copy appeared); re-point it at the bytes on disk");
+    axes.forEach((axis, i) => {
+      assert.equal(Number(matches[0][i + 1]), r[axis],
+        `breakpoint-sweep.mjs, ${site}: types ${axis}=${matches[0][i + 1]}; scenarioReport derives ${r[axis]}`);
+    });
+  }
+});
+
+// The ownership-map block as bytes: from its own heading to the literal it sits
+// above, comment markers stripped so a numeral split across a hard wrap still
+// reads as prose.
+function ownershipMapBlock(src = SWEEP_SRC) {
+  const start = src.indexOf("// WHICH ARM OWNS WHICH NUMERAL");
+  assert.ok(start >= 0,
+    "breakpoint-sweep.mjs no longer carries a `// WHICH ARM OWNS WHICH NUMERAL` heading — this parser has no range to read");
+  const end = src.indexOf("export const SCENARIO_RESIDUE", start);
+  assert.ok(end > start,
+    "the ownership-map block is no longer terminated by `export const SCENARIO_RESIDUE` — the parse range is unbounded");
+  return src.slice(start, end).replace(/^[ \t]*\/\/ ?/gm, "");
+}
+
+// A standalone integer: `cch-w47-s4`, `D527` and `#8849` are identifiers, not
+// numerals, and `104/79` is TWO.
+const BLOCK_NUMERAL = /(?<![\w#.-])\d+(?![\w-])/g;
+
+// Every regex that OWNS a live numeral inside the block, and the arm that reds
+// when it drifts. The coverage walk below consumes these ranges; anything left
+// over above the HISTORICAL rule is, by definition, unowned.
+const OWNED_BLOCK_SITES = [
+  { what: "the census five bullet", owner: "the census five in breakpoint-sweep.mjs's prose are recounted from the derived report", re: /\*\s+\d+\s+\/\s+\d+\s+\/\s+\d+\s+\/\s+\d+\s+\/\s+\d+\s+—\s+"the census five/g },
+  { what: "the ZERO-residue bullet's family total", owner: "the ownership map's own family numerals are recounted from the literal", re: /\*\s+(\d+), and the two ZERO-residue names/g },
+  { what: 'the quoted "N families over all scenarios is not N"', owner: "the ownership map's own family numerals are recounted from the literal", re: /(\d+)\s+families over all\s+scenarios is not\s+(\d+)/g },
+  { what: "the header arm's family span", owner: "the ownership map's own family numerals are recounted from the literal", re: /which spans all\s+(\d+)/g },
+  { what: "the `exits N` refusal claim", owner: "the ownership map's `exits N` claim is read from the sweep's refusal helper", re: /exits\s+(\d+)\s+—/g },
+  { what: "the count of HISTORICAL numerals", owner: "every numeral in the ownership-map block is owned by a named arm, or sits below the HISTORICAL rule", re: /(\d+)\s+numerals sit below the rule/g },
+];
+
+const HISTORICAL_RULE = "HISTORICAL — FROZEN QUOTES OF PAST STATES";
+
+test("the ownership map's own family numerals are recounted from the literal", () => {
+  const block = ownershipMapBlock();
+  const allFamilies = new Set(Object.values(SCENARIOS).map((s) => familyOf(s)));
+  const residueFamilies = derivedFamilyCounts();
+  const lead = [...block.matchAll(/\*\s+(\d+), and the two ZERO-residue names/g)];
+  assert.equal(lead.length, 1,
+    "match-count floor: the ownership map's ZERO-residue bullet lead matched " +
+    `${lead.length} times, expected exactly 1 — re-point this regex at the wording on disk`);
+  assert.equal(Number(lead[0][1]), allFamilies.size,
+    `the ownership map's ZERO-residue bullet leads with ${lead[0][1]} families over all scenarios; familyOf derives ${allFamilies.size}`);
+  const quoted = [...block.matchAll(/(\d+)\s+families over all\s+scenarios is not\s+(\d+)/g)];
+  assert.equal(quoted.length, 1,
+    `match-count floor: the quoted "N families over all scenarios is not N" matched ${quoted.length} times, expected exactly 1`);
+  assert.equal(Number(quoted[0][1]), allFamilies.size,
+    `the ownership map quotes ${quoted[0][1]} families over all scenarios; familyOf derives ${allFamilies.size}`);
+  assert.equal(Number(quoted[0][2]), residueFamilies.size,
+    `the ownership map quotes "is not ${quoted[0][2]}" for the residue families; the literal holds ${residueFamilies.size}`);
+  const span = [...block.matchAll(/which spans all\s+(\d+)/g)];
+  assert.equal(span.length, 1,
+    `match-count floor: the header arm's "spans all N" matched ${span.length} times, expected exactly 1`);
+  assert.equal(Number(span[0][1]), residueFamilies.size,
+    `the ownership map says the header arm spans all ${span[0][1]} families; the literal holds ${residueFamilies.size}`);
+  // and the two names, which are the reason that bullet exists at all
+  for (const family of [...allFamilies].filter((f) => !residueFamilies.has(f))) {
+    assert.ok(block.includes(`\`${family}\``),
+      `${family} has ZERO residue entries but the ownership map does not name it`);
+  }
+});
+
+test("the ownership map's `exits N` claim is read from the sweep's refusal helper", () => {
+  const block = ownershipMapBlock();
+  const helper = [...SWEEP_SRC.matchAll(/const refuse = \([^)]*\) => \{[\s\S]*?process\.exit\((\d+)\)/g)];
+  assert.equal(helper.length, 1,
+    `match-count floor: breakpoint-sweep.mjs's \`refuse\` helper matched ${helper.length} times, expected exactly 1 — ` +
+    "the refusal helper was renamed or reshaped; re-point this regex, never delete the arm");
+  const claim = [...block.matchAll(/exits\s+(\d+)\s+—/g)];
+  assert.equal(claim.length, 1,
+    `match-count floor: the ownership map's \`exits N\` claim matched ${claim.length} times, expected exactly 1`);
+  assert.equal(Number(claim[0][1]), Number(helper[0][1]),
+    `the ownership map says a stale residue entry exits ${claim[0][1]}; \`refuse\` calls process.exit(${helper[0][1]})`);
+});
+
+test("every numeral in the ownership-map block is owned by a named arm, or sits below the HISTORICAL rule", () => {
+  const block = ownershipMapBlock();
+  const rule = block.indexOf(HISTORICAL_RULE);
+  assert.ok(rule > 0,
+    `the ownership-map block no longer carries its "${HISTORICAL_RULE}" rule — without it this arm cannot tell a live numeral from a frozen quote`);
+  assert.equal(block.split(HISTORICAL_RULE).length - 1, 1,
+    "the HISTORICAL rule appears more than once in the ownership-map block — the live/frozen split is ambiguous");
+
+  // consume every range an owning regex claims, and refuse a regex that claims none
+  const covered = [];
+  for (const { what, owner, re } of OWNED_BLOCK_SITES) {
+    const hits = [...block.matchAll(re)];
+    assert.equal(hits.length, 1,
+      `match-count floor: ${what} matched ${hits.length} times inside the ownership-map block, expected exactly 1 — ` +
+      `the wording drifted out from under "${owner}", which would leave that arm vacuous-green; re-point the regex at the bytes on disk`);
+    assert.ok(hits[0].index < rule,
+      `${what} was found BELOW the HISTORICAL rule — an owned numeral cannot sit in the frozen section`);
+    covered.push([hits[0].index, hits[0].index + hits[0][0].length, what, owner]);
+  }
+
+  const live = [];
+  const frozen = [];
+  for (const m of block.matchAll(BLOCK_NUMERAL)) {
+    (m.index < rule ? live : frozen).push(m);
+  }
+  assert.ok(live.length > 0,
+    "no live numerals parsed out of the ownership-map block at all — this arm has gone vacuous and should be re-pointed, not kept green");
+
+  for (const m of live) {
+    const owner = covered.find(([from, to]) => m.index >= from && m.index < to);
+    const context = block.slice(Math.max(0, m.index - 70), m.index + 70).replace(/\s+/g, " ");
+    assert.ok(owner,
+      `the ownership-map block types the numeral ${m[0]} at block offset ${m.index}, and NO arm owns it: …${context}… ` +
+      "— either give it an owning arm (add its regex to OWNED_BLOCK_SITES) or move it below the HISTORICAL rule, where it is counted rather than recounted. " +
+      "A numeral inside the sentence that claims total coverage is exactly the rot this arm exists to end.");
+  }
+
+  const declared = [...block.matchAll(/(\d+)\s+numerals sit below the rule/g)];
+  assert.equal(declared.length, 1,
+    `match-count floor: the ownership map's HISTORICAL count matched ${declared.length} times, expected exactly 1`);
+  assert.equal(Number(declared[0][1]), frozen.length,
+    `the ownership map states that ${declared[0][1]} numerals sit below the HISTORICAL rule; ${frozen.length} do ` +
+    `(${frozen.map((m) => m[0]).join(", ")}) — the block is overstating or understating its own uncovered set`);
 });
 
 // ── the HEADER-CENSUS arm: the sweep's own summary line can actually lose ────
