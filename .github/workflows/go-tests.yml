@@ -390,7 +390,76 @@ jobs:
             exit 0
           fi
 
+          # ── THE DECLARATION MUST MATCH THE PARSER (task-a1d681421c82e995) ─
+          # The HEAD-CHECKOUT ASYMMETRY above is REAL for the ratchet step and
+          # it is real HERE TOO — but not for the reason that comment gives.
+          # Read this step's two halves apart:
+          #
+          #   * the PARSER, the sentinel list and the floor below are TEXT IN
+          #     THIS WORKFLOW FILE, and GitHub takes the workflow file for a
+          #     `pull_request` run from the MERGE REF;
+          #   * the DECLARATION they judge — `on.push.paths` — was read off
+          #     `.github/workflows/go-tests.yml` ON DISK, i.e. out of the PR
+          #     HEAD checkout (the D34 `ref:` above).
+          #
+          # So parser and declaration did NOT travel together: they are two
+          # different commits of the same file. That is exactly the class
+          # #17622 (45c98ae0e) fixed for cloud/console/elixir, and go-tests.yml
+          # was excluded from it on the argument quoted in the ratchet comment
+          # above — "both of the ratchet's inputs come from the head". True of
+          # the RATCHET step (tree and list, both head). NOT true of this one,
+          # whose judge comes from the merge ref.
+          #
+          # It is not hypothetical. The floor below is `-lt 30` and names a
+          # declared list of 44 (task-bb930319aeac0266); the same list was 15
+          # from #15007 until that landed. Any head branched inside that window
+          # parses 15 globs, the merge ref's floor of 30 fires, and `changes`
+          # exits 1 — a RED dispatcher with no defect in the PR, and no path
+          # verdict for the job behind it. The sentinel checks are the same
+          # shape: a sentinel this file learns tomorrow reds every head that
+          # predates the glob it names. A CLASS, not a one-off, and the remedy
+          # is per-PR `update-branch` forever.
+          #
+          # THE SPLIT, same as cloud.yml's. The DIFF still comes from the head
+          # checkout — D34 intact, the changed-file set must describe THIS PR.
+          # The DECLARATION is pinned to the commit this workflow file came
+          # from, so the list and the parser/floor/sentinels that judge it are
+          # matched BY CONSTRUCTION rather than by rebase etiquette. A `git
+          # show` off a fetched ref; the checkout is a partial clone, so this
+          # costs one commit, its trees and one blob, never a second worktree.
+          #
+          # The two DISPATCH_PIN_* hooks are how case 6 of
+          # scripts/go-path-escape-check.test.sh drives this exact block
+          # against a local fixture repo. Actions sets neither; the defaults
+          # below are the real values, so the tested path IS the shipped path.
+          #
+          # This does NOT reopen the ratchet question above: the ratchet keeps
+          # reading the HEAD's script against the HEAD's tree and its absence
+          # stays guard-and-named. Only the DECLARATION this step parses moves.
           wf=".github/workflows/go-tests.yml"
+          pin_remote="${DISPATCH_PIN_REMOTE:-origin}"
+          pin_ref="${DISPATCH_PIN_REF:-refs/pull/${{ github.event.pull_request.number }}/merge}"
+          pin_src="the PR HEAD checkout — NOT the commit this workflow file came from"
+          pinroot="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/go-dispatcher-pinroot"
+          rm -rf "$pinroot"
+          mkdir -p "$pinroot/.github/workflows"
+          pinned="$pinroot/.github/workflows/go-tests.yml"
+          if git fetch --no-tags --quiet "$pin_remote" "+${pin_ref}:refs/dispatcher/go-pinned" 2>/dev/null \
+             && git show refs/dispatcher/go-pinned:.github/workflows/go-tests.yml >"$pinned" 2>/dev/null \
+             && [ -s "$pinned" ]; then
+            wf="$pinned"
+            pin_src="${pin_ref} ($(git rev-parse refs/dispatcher/go-pinned))"
+          else
+            # NAMED, never silent — and deliberately NOT fatal. A merge ref is
+            # absent for a PR with conflicts, and killing the dispatcher there
+            # would leave the gated job with no answer at all, which is the
+            # very failure this whole job exists to end. The fallback is the
+            # head's own copy: the PRE-#17622 behaviour, no worse, and it says
+            # so by name.
+            echo "::warning::dispatcher: could NOT read .github/workflows/go-tests.yml out of ${pin_ref} on remote '${pin_remote}' (an absent merge ref — a conflicted PR — is the usual cause). Falling back to the PR HEAD's own copy of the declaration, which may predate the floor and sentinels this workflow file checks it against. Degraded read, not a green."
+          fi
+          echo "path-set declaration: ${pin_src}"
+
           if [ ! -f "$wf" ]; then
             echo "::error::dispatcher: $wf is not in this checkout, so the path set cannot be read from its single declaration. Refusing to guess."
             exit 1
