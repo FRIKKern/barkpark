@@ -165,6 +165,7 @@ defmodule Barkpark.Sites.DeployRunner do
 
   require Logger
 
+  alias Barkpark.Sites.BuildLogScrub
   alias Barkpark.Sites.DeployRequest
   alias Barkpark.Sites.PrebuiltArtifact
   alias Barkpark.Sites.Provisioner
@@ -498,10 +499,45 @@ defmodule Barkpark.Sites.DeployRunner do
   def build_record(slug, build_id \\ nil) when is_binary(slug) do
     case find_terminal_record(slug, build_id) do
       nil -> absent_record(slug, build_id)
-      record -> render_terminal_record(record)
+      record -> record |> heal_unscrubbed_log() |> render_terminal_record()
     end
   rescue
     _ -> absent_record(slug, build_id)
+  end
+
+  # THE CRASH WINDOW, closed on the way past. A log is folded at finalize, so a
+  # box that died between the shell's `tee` and `write_terminal_record/2` leaves
+  # raw bytes on disk with no stamp. That run finalizes on the next `status/1`
+  # (the manifest is left on disk precisely so it can) — but a record written
+  # BEFORE this scrub existed never will, and the read is the next thing that
+  # touches it. So the single-record read heals: an unstamped record whose log is
+  # still on disk gets folded, re-measured and re-stamped here, once.
+  #
+  # `build_records/0` deliberately does NOT do this — healing a whole directory
+  # on a list call would fold every log on the box behind one HTTP request.
+  #
+  # Best-effort by construction: a failed fold returns the record untouched, and
+  # it therefore still reads as unstamped (raw), which is the honest answer.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp heal_unscrubbed_log(record) do
+    log_file = record["log_file"]
+
+    with true <- record["log_scrub"] != BuildLogScrub.version(),
+         true <- is_binary(log_file),
+         true <- File.regular?(log_file),
+         :ok <- BuildLogScrub.scrub_file(log_file) do
+      healed =
+        record
+        |> Map.put("log_scrub", BuildLogScrub.version())
+        |> Map.put("log_bytes", file_size(log_file))
+
+      _ = File.write(record_path_for_log(log_file), Jason.encode!(healed))
+      healed
+    else
+      _ -> record
+    end
+  rescue
+    _ -> record
   end
 
   @doc """
@@ -3134,6 +3170,28 @@ defmodule Barkpark.Sites.DeployRunner do
   defp record_path_for_log(log_path),
     do: String.replace_suffix(log_path, ".log", ".terminal.json")
 
+  # Fold the recorded log in place with `BuildLogScrub.raw/1` and return the
+  # scrub version to stamp, or `nil` if nothing was folded.
+  #
+  # NEVER raises and never fails the finalize: a terminal record that could not
+  # be written is a build whose outcome is lost, which is strictly worse than an
+  # unstamped one. An IO error therefore lands as `nil` (the record then says, by
+  # the absence of the stamp, that its bytes are raw) plus a warning.
+  defp scrub_recorded_log(log_file) do
+    case BuildLogScrub.scrub_file(log_file) do
+      :ok ->
+        if is_binary(log_file), do: BuildLogScrub.version(), else: nil
+
+      {:error, reason} ->
+        Logger.warning(
+          "[site-deploy] could not scrub the recorded build log #{inspect(log_file)}: " <>
+            inspect(reason)
+        )
+
+        nil
+    end
+  end
+
   # Written ONCE per deployment, at finalize. ~1 KB, and it outlives the log.
   # Reachability: the path is `run_state_dir()` + a validated slug + a
   # charset-validated build_id (or a server-generated `<mode>-<ms>` tag).
@@ -3142,6 +3200,14 @@ defmodule Barkpark.Sites.DeployRunner do
     dir = run_state_dir()
     tag = manifest_tag(manifest)
     log_file = manifest.log_file
+
+    # SCRUB AT WRITE, and BEFORE the bytes are measured. The deploy shell's
+    # `tee` wrote this log verbatim, and the build env it sourced carries
+    # `BARKPARK_TOKEN=` in plaintext — so this is the one moment at which the
+    # recorded bytes stop being raw. `log_bytes` below is deliberately computed
+    # AFTER this call: a byte count that described the unscrubbed file would
+    # describe a file that no longer exists.
+    scrub_version = scrub_recorded_log(log_file)
 
     payload = %{
       "slug" => manifest.slug,
@@ -3172,6 +3238,11 @@ defmodule Barkpark.Sites.DeployRunner do
       "log_file" => log_file,
       "log_bytes" => file_size(log_file),
       "log_state" => Atom.to_string(live_log_state(log_file)),
+      # The scrub STAMP: the version of the pattern set these bytes were folded
+      # with, or `nil` when the fold did not happen (no log, or an IO error).
+      # `nil` is the honest marker that this log's bytes were never redacted —
+      # nothing downstream may treat an unstamped record as safe.
+      "log_scrub" => scrub_version,
       "evicted_at" => nil,
       "started_at" => iso_or_nil(manifest.started_at),
       "finished_at" => iso_or_nil(Map.get(render, :finished_at) || DateTime.utc_now())
@@ -3317,6 +3388,7 @@ defmodule Barkpark.Sites.DeployRunner do
       log_state: :never_recorded,
       log_path: nil,
       log_bytes: nil,
+      log_scrub: nil,
       exit_code: nil,
       failure_reason: nil,
       stages: [],
@@ -3344,6 +3416,11 @@ defmodule Barkpark.Sites.DeployRunner do
       log_state: resolved_log_state(record, log_path),
       log_path: log_path,
       log_bytes: record["log_bytes"],
+      # The pattern-set version these bytes were folded with. `nil` means NOT
+      # SCRUBBED — a record written before the write-boundary scrub existed, or
+      # one whose fold hit an IO error. Any door that serves bytes must read
+      # this, not assume it.
+      log_scrub: record["log_scrub"],
       exit_code: record["exit_code"],
       failure_reason: record["failure_reason"],
       stages: record["stages"] || [],

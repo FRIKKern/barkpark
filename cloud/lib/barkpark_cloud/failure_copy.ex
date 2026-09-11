@@ -356,141 +356,42 @@ defmodule BarkparkCloud.FailureCopy do
   @spec typed_refusal_message(term()) :: String.t() | nil
   def typed_refusal_message(reason), do: reason |> typed_refusal_fields() |> elem(1)
 
-  @redaction "[redacted]"
+  # THE SECRET TABLE IS NOT IN THIS FILE ANY MORE — it is `priv/secret-scrub.exs`.
+  #
+  # It moved for ONE reason: a second app has to scrub with the SAME set. The
+  # box (`api/`) writes a recorded build log to disk and that WRITE boundary has
+  # to redact before the bytes are durable (dr-bl-recorder-http-read-path, c2);
+  # `api/` and `cloud/` are separate OTP apps with no dependency either way, so
+  # the only alternatives were ONE file read by both or a hand-copied table in
+  # the box. A copied redaction table drifts in silence — a redacted token and a
+  # leaked one look identical until someone reads the bytes — so the set moved
+  # out and BOTH modules read the same file:
+  #
+  #   * this module (the control plane's DISPLAY boundary), and
+  #   * `Barkpark.Sites.BuildLogScrub` (the box's recorded-log WRITE boundary).
+  #
+  # Every clause, its order and every comment explaining WHY a guard is shaped
+  # the way it is went with it, verbatim. Read them there before editing one.
+  #
+  # `@external_resource` is what keeps this honest: editing the fixture
+  # recompiles this module, and `failure_copy_scrub_lock_test.exs` re-reads the
+  # file at TEST time and fails if the compiled set has drifted from it (the
+  # same test exists on the api side, against the same file).
+  @secret_scrub_fixture Path.expand("../../priv/secret-scrub.exs", __DIR__)
+  @external_resource @secret_scrub_fixture
+  @secret_scrub @secret_scrub_fixture |> Code.eval_file() |> elem(0)
 
-  # STATUS PROSE in a value position — never a credential. A remote capture says
-  # "no bearer token found", "token: expired", "api_key: not set" far more often
-  # than it says "token: <a live token>", and redacting the word `expired` tells
-  # a person a secret leaked when none did. Every entry is an ordinary English
-  # word that no generated credential can be, so this guard costs the scrub no
-  # coverage; it is anchored with `\b` so it can only skip the WHOLE value.
-  @prose_value "(?:token|tokens|credential|credentials|value|header|auth|expired|missing|invalid|unset|unknown|empty|none|null|nil|set|required|absent|not)\\b"
+  @redaction @secret_scrub.redaction
+  @secret_patterns @secret_scrub.patterns
+  @ansi_run @secret_scrub.ansi_run
 
-  # The secret shapes a remote capture can carry, most specific first. Each entry
-  # is `{pattern, replacement}` and every one carries POSITIVE and NEGATIVE rows
-  # in `failure_copy_test.exs`'s table — a pattern without both is not shippable,
-  # because the failure mode here is silent COPY LOSS (a redacted git SHA reads
-  # exactly like a redacted token) rather than a crash.
-  @secret_patterns [
-    # `Authorization: Bearer sk-live-…`. The scheme word is kept so the line
-    # still says what KIND of credential was refused; everything after it goes.
-    #
-    # The `@prose_value` guard is why this does not maul English: "no bearer
-    # token found in the request" is a COMMON failure string and an unguarded
-    # `bearer\s+\S+` rendered it "no bearer [redacted] found" — a redaction
-    # where no secret ever was, which is its own small lie on the person's
-    # screen. The guard is a stop-list of words no credential can be, so it
-    # weakens the redaction for nothing.
-    {~r/\b(bearer\s+)(?!#{@prose_value})\S+/i, "\\1#{@redaction}"},
+  @doc false
+  @spec compiled_secret_patterns() :: [{Regex.t(), String.t()}]
+  def compiled_secret_patterns, do: @secret_patterns
 
-    # A DB URL's USERINFO — `ecto://user:PASS@host/db`. The SCHEME and everything
-    # from the `@` on are kept (they name the host that refused); only the
-    # `user:pass` is redacted.
-    #
-    # This clause is the one the Go runner has carried all along
-    # (`ectoUserinfoRe`, `internal/cli/cloud/warmpool.go`) and this boundary never
-    # grew. It is NOT reachable by any clause above it: `DATABASE_URL` is not one
-    # of the key clause's key words, so a `DATABASE_URL=ecto://…` env fold never
-    # matched there, and the password sits behind a `//` that the bare-token
-    # clause cannot see (a real DB password usually carries a `-`/`_`/symbol, so
-    # it is not a contiguous 32+ alnum run either). A migrate failure is the most
-    # common way this capture is produced, and it shipped in cleartext.
-    #
-    # `postgres`/`postgresql` ride along because `deploy.sh` writes the `ecto://`
-    # spelling but Ecto/psql errors echo the other two back.
-    {~r{\b(ecto|postgres|postgresql)://[^\s:/@]+:[^\s@]+@}, "\\1://#{@redaction}@"},
-
-    # `client_secret=…`, `token: …`, `api-key=…`. The KEY and its separator are
-    # kept (they name what leaked); the value is redacted up to the next
-    # delimiter. `authorization` is deliberately absent — the Bearer clause above
-    # already owns that line and keeps the scheme word.
-    #
-    # Same `@prose_value` guard, same reason: "token: expired" and
-    # "no api_key: set in the config file" are status prose, not credentials.
-    #
-    # The left edge is `(?<![A-Za-z0-9])`, NOT `\b`. `_` is a word character, so
-    # `\b` cannot fire between the `_` and the `TOKEN` in `BARKPARK_TOKEN=…` —
-    # which made every `[A-Z_]*TOKEN=` env fold invisible to this clause, and an
-    # env fold is the single most common way a provisioner capture carries a
-    # live credential. The lookbehind excludes only alphanumerics, so
-    # `BARKPARK_TOKEN=`, `MY_SECRET=` and `DEPLOY_TOKEN=` all match while
-    # `xtoken=` (a longer word merely ENDING in `token`) still does not.
-    #
-    # `(?![=:])` in the value position is the price of that widening. Reaching
-    # past `_` puts every `*_token`/`*_password` identifier in a captured stack
-    # trace or source echo inside this clause's reach, and `=` is not in the
-    # value's stop set — so `hashed_password == before` would render
-    # "hashed_password =[redacted] before", copy loss where no secret ever was.
-    # A COMPARISON is not an assignment. A real value never STARTS with `=` or
-    # `:`, so the guard costs no redaction (`token=abc==` still redacts whole).
-    # `<` joins `=`/`:` in the value-position stop set for the same reason they
-    # are there: it marks copy that is NOT a credential. The provisioner
-    # deliberately narrates the provider-key hand-off as
-    # `printf 'ANTHROPIC_API_KEY=<your-key>\n' >> …` — the agent key is the one
-    # secret Barkpark never copies, so the developer pastes it themselves — and
-    # that line reaches the console fold like any other capture. Redacting
-    # `<your-key>` into `[redacted]` destroyed the only copy telling the person
-    # what to type, which is the same class of copy loss as the `hashed_password
-    # == before` case the `(?![=:])` guard already fixes. A real credential never
-    # STARTS with `<`, so this costs the redaction nothing.
-    {~r/(?<![A-Za-z0-9])((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?![=:<])(?!#{@prose_value})[^\s"',;)]+/i,
-     "\\1#{@redaction}"},
-
-    # Provider-prefixed credentials: Stripe/OpenAI `sk-`/`pk-`, GitHub `ghp_`/
-    # `github_pat_`, Slack `xoxb-`, AWS `AKIA…`, Hetzner `hcloud_`, and — since
-    # deploy-reliability W2 S4 — BARKPARK'S OWN `bppat_` (PAT, `auth.ex`) and
-    # `bpcs_` (scoped chat/MCP session token, `auth.ex`). These carry hyphens and
-    # underscores, so the bare-token clause below (which is `[A-Za-z0-9]` only)
-    # cannot see them.
-    #
-    # Our own prefixes are the load-bearing addition, not a tidy-up. A minted PAT
-    # is `bppat_` + `Base.url_encode64(32 bytes, padding: false)`, and ~94% of
-    # those 43-char bodies contain a `-` or `_` that breaks the bare-token
-    # clause's contiguous-alnum run — so before this clause knew the prefix, a
-    # real token measured 94.3% LEAKED through `scrub/1` in four of six shapes
-    # (`BARKPARK_TOKEN=…`, `export BARKPARK_TOKEN=…`, bare in prose, and a
-    # colourised `token=…`), and the ~6% that redacted did so by accident of the
-    # alphabet. Matching the TOKEN — not the syntax around it — is what makes
-    # this hole close independently of env-var spelling, prose and colour codes.
-    #
-    # Our prefixes require `_` specifically (the vendor arm keeps `[-_]`): every
-    # Barkpark credential is minted with an underscore, and `bpcs-mint-refused`
-    # — a real sentinel in `api/lib/barkpark_web/studio/claude_chat.ex` — is
-    # copy a person needs to read, not a secret. `bp-` alone is deliberately
-    # absent: every provisioned site is named `bp-<slug>-<hash>`.
-    # `bp_<kind>_` is the MINTED BOX CREDENTIAL family — `bp_admin_…` (every
-    # provisioned site's per-instance admin token, `setup.GenerateAdminToken`),
-    # `bp_read_…`, and any sibling kind minted later. It was the conspicuous gap
-    # in this arm: `bppat_`/`bpcs_` are the tokens a PERSON mints, while
-    # `bp_<kind>_` is the one the CONTROL PLANE mints for every box it builds —
-    # the credential most likely to be in a provisioner capture in the first
-    # place. The Go side has never been blind to it (`adminTokenRe` in
-    # `internal/provisioner/console.go`, `builderTokenRe` in
-    # `internal/builder/console.go` — the latter is exactly `bp_[a-z]+_`), so
-    # this clause brings the display boundary level with the two worker-side
-    # scrubs rather than trusting them to have caught it upstream.
-    #
-    # `_` after `bp` is load-bearing and NOT a tidy-up: `bp-` is the site-name
-    # prefix (`bp-<slug>-<hash>.barkpark.cloud`), pinned as a negative below. The
-    # `[a-z]+` kind keeps that separation exact — a hostname can never enter this
-    # clause, because a hostname's separator is a hyphen.
-    {~r/\b(?:(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[baprs]|hcloud)[-_]|(?:bppat|bpcs)_|bp_[a-z]+_)[A-Za-z0-9\-_]{8,}/,
-     @redaction},
-
-    # An AWS access key id: `AKIA` + 16 uppercase alphanumerics, no separator, so
-    # it needs its own clause (the prefixed clause above requires a `-`/`_`, and
-    # the bare-token clause below requires a lowercase letter).
-    {~r/\bAKIA[0-9A-Z]{16}\b/, @redaction},
-
-    # A bare high-entropy token. NARROW ON PURPOSE: 32+ alphanumerics that mix
-    # lower, upper AND digits, and never a 40-char lowercase-hex git SHA. The
-    # naive `\b[A-Za-z0-9]{40,}\b` passes the whole cloud suite while silently
-    # eating the commit a person deployed; the mixed-case requirement alone also
-    # spares a UUID segment, a lowercase `sha256:` digest, a hostname and a
-    # semver, all of which are negatives in the table.
-    {~r/\b(?![a-f0-9]{40}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{32,}\b/,
-     @redaction}
-  ]
+  @doc false
+  @spec compiled_ansi_run() :: String.t()
+  def compiled_ansi_run, do: @ansi_run
 
   @doc """
   Redact secret-shaped SUBSTRINGS from a string bound for a person's screen or
@@ -512,21 +413,9 @@ defmodule BarkparkCloud.FailureCopy do
   end
 
   def scrub(other), do: other
-
-  # A terminal control sequence: ESC (0x1B) followed by either a CSI parameter
-  # run terminated by a final byte (`\e[31m`, `\e[22m`, `\e[2K`), an OSC string
-  # terminated by BEL or ST, or a bare two-byte escape. Anchored on the REAL
-  # 0x1B byte — the literal four-character text `\x1B` appears in zero rows; the
-  # bytes appear in 1,366.
-  # Ordered: OSC first (it swallows a payload), then CSI, then a bare two-byte
-  # escape as the fallback — PCRE alternation is ordered, so the specific arms
-  # always win over the catch-all.
-  #
-  # Held as a SOURCE STRING, not only as a compiled regex, because `strip_ansi/1`
-  # needs the same run in two patterns (below) and a second hand-copied literal
-  # is a drift hazard: the day someone teaches one arm about DCS, the other keeps
-  # the old vocabulary and the boundary silently splits in two.
-  @ansi_run "\x1B(?:\\][^\x07\x1B]*(?:\x07|\x1B\\\\)|\\[[0-?]*[ -/]*[@-~]|[ -~])"
+  # The ANSI run source is `priv/secret-scrub.exs`'s `ansi_run` — read there for
+  # why it is held as a SOURCE STRING and why the arms are ordered OSC-first.
+  # It is bound to `@ansi_run` beside the secret table above.
 
   # THE FUSING RUN (dr-osc-residual-strip-fuses-tokens, dr-w22-bl): one or more
   # escape runs sitting BETWEEN two alphanumerics. Replacing that with the empty
