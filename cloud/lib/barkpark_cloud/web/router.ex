@@ -5579,7 +5579,8 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # GET /v1/providers/capabilities → 200
-  #   {providers: {<kind>: {tier, capabilities, gaps}}}
+  #   {providers: {<kind>: {tier, capabilities, gaps}},
+  #    edge:      {<kind>: {capabilities, gaps, unknown}}}
   #
   # The CP-SERVED capability/tier conduit (charter Decision 16, folded into S11):
   # the SPA and the `bp` CLI read ONE server-owned contract instead of each
@@ -5597,6 +5598,13 @@ defmodule BarkparkCloud.Web.Router do
   #   * gaps         — a server-owned reason for EVERY false capability
   #                    (FailureCopy.capability_gap_reason/2), so no disabled
   #                    action is ever reason-less.
+  #
+  # `edge` is the SIBLING matrix, read the same generic way from
+  # edge_capabilities.json: what a provider adds IN FRONT of a box (dns/tls/cdn/
+  # tunnel/storage/edge_fn/full_host) rather than what it can provision. It
+  # carries `unknown` alongside its bools — the capabilities this repo's code
+  # cannot honestly answer for that kind, which a surface must render as "we
+  # don't know" rather than as a gap.
   #
   # Any signed-in user may read it — it's a static cross-surface contract, not
   # team-scoped estate data. Dev-tier rows are included; hiding them is the
@@ -12610,6 +12618,21 @@ defmodule BarkparkCloud.Web.Router do
   @external_resource @providers_capabilities_fixture
   @providers_capabilities @providers_capabilities_fixture |> File.read!() |> Jason.decode!()
 
+  # The CP's committed copy of the EDGE capabilities fixture — the sibling of the
+  # compute matrix above, for what a provider adds IN FRONT of a box (dns/tls/
+  # cdn/tunnel/storage/edge_fn/full_host) rather than what it can provision.
+  # Byte-identical to internal/cli/cloud/edge_capabilities.json, and the drift
+  # gate lives on BOTH sides (edge_capabilities_contract_test.exs here,
+  # TestEdgeFixtureCopyIsByteIdentical in the Go package), so editing either copy
+  # alone reds both suites. Same compile-time read, same @external_resource
+  # recompile trigger.
+  @edge_capabilities_fixture Path.expand(
+                               "../../../priv/static/__fixtures__/edge_capabilities.json",
+                               __DIR__
+                             )
+  @external_resource @edge_capabilities_fixture
+  @edge_capabilities @edge_capabilities_fixture |> File.read!() |> Jason.decode!()
+
   # Build the GET /v1/providers/capabilities body from the committed fixture.
   # For each kind: split the tier (fixture value or the "prod" default) from the
   # capability bools (every boolean key, generically — no hardcoded list),
@@ -12630,7 +12653,32 @@ defmodule BarkparkCloud.Web.Router do
         {kind, %{tier: tier, capabilities: capabilities, gaps: gaps}}
       end)
 
-    %{providers: providers}
+    %{providers: providers, edge: edge_capabilities_payload()}
+  end
+
+  # The EDGE half of the same conduit: which edge features each provider adds in
+  # FRONT of a box. Built the SAME generic way as the compute half — every
+  # boolean key passes through (`capability_bools/1`, no hardcoded list) and every
+  # FALSE one gets a server-owned gap reason, so a new edge key flows to the SPA
+  # and the CLI with ZERO conduit change.
+  #
+  # The `unknown` key is NOT a capability and never reaches a surface as one: it
+  # names the capabilities this repo's code cannot honestly answer for that
+  # provider (vercel's TLS/CDN/DNS/…, which no code here drives). It is dropped
+  # by the SAME `is_boolean(value)` filter that drops the compute half's `tier`,
+  # and it rides the payload under its own key so a reading surface can say "we
+  # don't know" instead of rendering a gap reason that would be untrue.
+  defp edge_capabilities_payload do
+    Map.new(@edge_capabilities, fn {kind, row} ->
+      capabilities = capability_bools(row)
+
+      gaps =
+        for {capability, false} <- capabilities, into: %{} do
+          {capability, FailureCopy.capability_gap_reason(kind, capability)}
+        end
+
+      {kind, %{capabilities: capabilities, gaps: gaps, unknown: Map.get(row, "unknown", [])}}
+    end)
   end
 
   # tier reads from the fixture row ("dev" for the fake provider); every row
@@ -12669,9 +12717,15 @@ defmodule BarkparkCloud.Web.Router do
 
   defp split_provider_tier(row) do
     tier = Map.get(row, "tier", "prod")
-    capabilities = for {key, value} <- row, is_boolean(value), into: %{}, do: {key, value}
-    {tier, capabilities}
+    {tier, capability_bools(row)}
   end
+
+  # THE generic capability filter, shared by the compute and edge halves: a row's
+  # boolean-valued keys ONLY. Every non-bool key is metadata by construction —
+  # the compute matrix's `tier`, the edge matrix's `unknown` — so neither can
+  # leak in as a capability, and neither half needs a hardcoded key list.
+  defp capability_bools(row),
+    do: for({key, value} <- row, is_boolean(value), into: %{}, do: {key, value})
 
   # GET /v1/providers/:kind/catalog handler.
   defp providers_catalog(conn, kind) do
