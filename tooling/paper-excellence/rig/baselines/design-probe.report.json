@@ -19,7 +19,7 @@
       "cell": "design-probe__light__1280",
       "file": "design-probe__light__1280.jpeg",
       "scale": 2,
-      "bytes": 305792,
+      "bytes": 318258,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -71,11 +71,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 290.6,
+          "width": 293.6,
           "offCentre": 0,
-          "left": 494.7,
-          "right": 785.3,
-          "inkWidth": 290.6,
+          "left": 493.2,
+          "right": 786.8,
+          "inkWidth": 291.6,
           "inkOffCentre": 0
         },
         {
@@ -124,12 +124,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 4,
           "emptyTracks": 0,
           "probe": null
@@ -138,22 +138,22 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 9,
+        "total": 18,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 18
         },
         "heavyRules": []
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "design-probe__light__1920",
       "file": "design-probe__light__1920.jpeg",
       "scale": 2,
-      "bytes": 334122,
+      "bytes": 348043,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -205,11 +205,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 290.6,
+          "width": 293.6,
           "offCentre": 0,
-          "left": 814.7,
-          "right": 1105.3,
-          "inkWidth": 290.6,
+          "left": 813.2,
+          "right": 1106.8,
+          "inkWidth": 291.6,
           "inkOffCentre": 0
         },
         {
@@ -272,22 +272,22 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 9,
+        "total": 18,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 18
         },
         "heavyRules": []
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "design-probe__dark__1280",
       "file": "design-probe__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 306787,
+      "bytes": 315191,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -339,11 +339,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 290.6,
+          "width": 293.6,
           "offCentre": 0,
-          "left": 494.7,
-          "right": 785.3,
-          "inkWidth": 290.6,
+          "left": 493.2,
+          "right": 786.8,
+          "inkWidth": 291.6,
           "inkOffCentre": 0
         },
         {
@@ -392,12 +392,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 4,
           "emptyTracks": 0,
           "probe": null
@@ -406,22 +406,22 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 9,
+        "total": 18,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 18
         },
         "heavyRules": []
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "design-probe__dark__1920",
       "file": "design-probe__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 335095,
+      "bytes": 344735,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -473,11 +473,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 290.6,
+          "width": 293.6,
           "offCentre": 0,
-          "left": 814.7,
-          "right": 1105.3,
-          "inkWidth": 290.6,
+          "left": 813.2,
+          "right": 1106.8,
+          "inkWidth": 291.6,
           "inkOffCentre": 0
         },
         {
@@ -540,16 +540,16 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 9,
+        "total": 18,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 18
         },
         "heavyRules": []
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     }
   ]
 }

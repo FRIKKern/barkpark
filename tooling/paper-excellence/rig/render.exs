@@ -58,17 +58,30 @@ defmodule Rig.Render do
         fixtures = Path.wildcard(Path.join(fixture_dir, "*.json")) |> Enum.sort()
         fixtures == [] && die("batch directory has no JSON fixtures: #{fixture_dir}")
 
-        Enum.each(fixtures, fn fixture_path ->
-          slug = fixture_path |> Path.basename() |> Path.rootname()
-          render_one!(fixture_path, Path.join([site_dir, "papers", slug, "index.html"]))
-        end)
+        slugs =
+          Enum.map(fixtures, fn fixture_path ->
+            slug = fixture_path |> Path.basename() |> Path.rootname()
+            render_one!(fixture_path, Path.join([site_dir, "papers", slug, "index.html"]))
+            slug
+          end)
+
+        # The site's landing page is a COPY of one rendered paper, and which one
+        # is chosen from what this run actually rendered — never from a name.
+        # `barkpark-chronicle` was hardcoded here by #13364 and has never been a
+        # committed fixture, so every --batch over `rig/fixtures/` rendered all of
+        # them and then died on `File.cp!` with `no such file or directory`. A
+        # landing page picked from the batch cannot miss its own source.
+        landing = if "barkpark-chronicle" in slugs, do: "barkpark-chronicle", else: hd(slugs)
 
         File.cp!(
-          Path.join([site_dir, "papers", "barkpark-chronicle", "index.html"]),
+          Path.join([site_dir, "papers", landing, "index.html"]),
           Path.join(site_dir, "index.html")
         )
 
-        IO.puts("rig/render: batch rendered #{length(fixtures)} papers -> #{site_dir}")
+        IO.puts(
+          "rig/render: batch rendered #{length(fixtures)} papers -> #{site_dir} " <>
+            "(index.html <- papers/#{landing})"
+        )
 
       _ ->
         die("usage: render.exs <fixture.json> <out.html> | --batch <fixture-dir> <site-dir>")

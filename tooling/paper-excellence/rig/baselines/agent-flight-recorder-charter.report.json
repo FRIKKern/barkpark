@@ -1,5 +1,5 @@
 {
-  "label": "heggemsnes-act",
+  "label": "agent-flight-recorder-charter",
   "deviceScaleFactor": 2,
   "fullPage": true,
   "format": "jpeg",
@@ -16,17 +16,17 @@
   ],
   "shots": [
     {
-      "cell": "heggemsnes-act__light__1280",
-      "file": "heggemsnes-act__light__1280.jpeg",
+      "cell": "agent-flight-recorder-charter__light__1280",
+      "file": "agent-flight-recorder-charter__light__1280.jpeg",
       "scale": 2,
-      "bytes": 1172402,
+      "bytes": 1081803,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 16,
+      "paragraphs": 6,
       "sectionBeats": [
         {
           "kind": "heading",
-          "head": "The case, in full",
+          "head": "Pillar 1 — priming visibility (start + done)",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -34,7 +34,7 @@
         },
         {
           "kind": "heading",
-          "head": "What we hold",
+          "head": "Pillar 2 — crash recovery",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -42,7 +42,7 @@
         },
         {
           "kind": "heading",
-          "head": "The Articles",
+          "head": "Pillar 3 — signatures: who did what, not 'ag",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -50,7 +50,7 @@
         },
         {
           "kind": "heading",
-          "head": "Remedies executed under this Act",
+          "head": "Decisions to make (the epic's Decide phase)",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -58,7 +58,7 @@
         },
         {
           "kind": "heading",
-          "head": "Scope and force",
+          "head": "Measured costs (from the flight-recorder cos",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -70,25 +70,43 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 67.7,
-      "proseCplSamples": 14,
+      "proseCpl": 71.9,
+      "proseCplSamples": 5,
       "captionCpl": null,
       "captionWidth": null,
       "evidenceBand": 1180,
       "bandRows": [
         {
-          "kind": "bp-stats",
+          "kind": "bp-table",
           "width": 1180,
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1178,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         }
       ],
-      "ingressPresent": true,
-      "ingressRatio": 0.783,
-      "ingressNote": null,
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
       "toneSamples": {
         ".bp-callout--info": {
           "color": "rgb(45, 94, 143)",
@@ -121,33 +139,24 @@
         "fontSize": "36px",
         "fontWeight": "400"
       },
-      "statTracks": [
-        7
-      ],
-      "statTracksNote": null,
-      "statRemainder": [
-        {
-          "tracks": 7,
-          "cells": 4,
-          "emptyTracks": 0,
-          "probe": null
-        }
-      ],
+      "statTracks": null,
+      "statTracksNote": "no .bp-stats in this fixture",
+      "statRemainder": [],
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 14,
+        "total": 25,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9,
+          "1": 20,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 933.5,
+            "y": 706.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -157,7 +166,7 @@
           },
           {
             "px": 2,
-            "y": 1708.8,
+            "y": 1490,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -167,7 +176,7 @@
           },
           {
             "px": 2,
-            "y": 2237.7,
+            "y": 2147.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -177,7 +186,7 @@
           },
           {
             "px": 2,
-            "y": 3640.5,
+            "y": 2685.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -187,7 +196,7 @@
           },
           {
             "px": 2,
-            "y": 3891.8,
+            "y": 3336.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -200,17 +209,17 @@
       "blockedRequests": 1
     },
     {
-      "cell": "heggemsnes-act__light__1920",
-      "file": "heggemsnes-act__light__1920.jpeg",
+      "cell": "agent-flight-recorder-charter__light__1920",
+      "file": "agent-flight-recorder-charter__light__1920.jpeg",
       "scale": 2,
-      "bytes": 1262228,
+      "bytes": 1156482,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 16,
+      "paragraphs": 6,
       "sectionBeats": [
         {
           "kind": "heading",
-          "head": "The case, in full",
+          "head": "Pillar 1 — priming visibility (start + done)",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -218,7 +227,7 @@
         },
         {
           "kind": "heading",
-          "head": "What we hold",
+          "head": "Pillar 2 — crash recovery",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -226,7 +235,7 @@
         },
         {
           "kind": "heading",
-          "head": "The Articles",
+          "head": "Pillar 3 — signatures: who did what, not 'ag",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -234,7 +243,7 @@
         },
         {
           "kind": "heading",
-          "head": "Remedies executed under this Act",
+          "head": "Decisions to make (the epic's Decide phase)",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -242,7 +251,7 @@
         },
         {
           "kind": "heading",
-          "head": "Scope and force",
+          "head": "Measured costs (from the flight-recorder cos",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -254,25 +263,43 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 67.7,
-      "proseCplSamples": 14,
+      "proseCpl": 71.9,
+      "proseCplSamples": 5,
       "captionCpl": null,
       "captionWidth": null,
       "evidenceBand": 1360,
       "bandRows": [
         {
-          "kind": "bp-stats",
+          "kind": "bp-table",
           "width": 1360,
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1358,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1207.4,
+          "offCentre": 0,
+          "left": 356.3,
+          "right": 1563.7,
+          "inkWidth": 1205.4,
           "inkOffCentre": 0
         }
       ],
-      "ingressPresent": true,
-      "ingressRatio": 0.783,
-      "ingressNote": null,
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
       "toneSamples": {
         ".bp-callout--info": {
           "color": "rgb(45, 94, 143)",
@@ -305,33 +332,24 @@
         "fontSize": "36px",
         "fontWeight": "400"
       },
-      "statTracks": [
-        9
-      ],
-      "statTracksNote": null,
-      "statRemainder": [
-        {
-          "tracks": 9,
-          "cells": 4,
-          "emptyTracks": 0,
-          "probe": null
-        }
-      ],
+      "statTracks": null,
+      "statTracksNote": "no .bp-stats in this fixture",
+      "statRemainder": [],
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 14,
+        "total": 25,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9,
+          "1": 20,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 914.3,
+            "y": 706.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -341,7 +359,7 @@
           },
           {
             "px": 2,
-            "y": 1689.6,
+            "y": 1437.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -351,7 +369,7 @@
           },
           {
             "px": 2,
-            "y": 2218.5,
+            "y": 2095.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -361,7 +379,7 @@
           },
           {
             "px": 2,
-            "y": 3621.3,
+            "y": 2633.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -371,7 +389,7 @@
           },
           {
             "px": 2,
-            "y": 3872.6,
+            "y": 3284.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -384,17 +402,17 @@
       "blockedRequests": 1
     },
     {
-      "cell": "heggemsnes-act__dark__1280",
-      "file": "heggemsnes-act__dark__1280.jpeg",
+      "cell": "agent-flight-recorder-charter__dark__1280",
+      "file": "agent-flight-recorder-charter__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 1159654,
+      "bytes": 1070004,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 16,
+      "paragraphs": 6,
       "sectionBeats": [
         {
           "kind": "heading",
-          "head": "The case, in full",
+          "head": "Pillar 1 — priming visibility (start + done)",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -402,7 +420,7 @@
         },
         {
           "kind": "heading",
-          "head": "What we hold",
+          "head": "Pillar 2 — crash recovery",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -410,7 +428,7 @@
         },
         {
           "kind": "heading",
-          "head": "The Articles",
+          "head": "Pillar 3 — signatures: who did what, not 'ag",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -418,7 +436,7 @@
         },
         {
           "kind": "heading",
-          "head": "Remedies executed under this Act",
+          "head": "Decisions to make (the epic's Decide phase)",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -426,7 +444,7 @@
         },
         {
           "kind": "heading",
-          "head": "Scope and force",
+          "head": "Measured costs (from the flight-recorder cos",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -438,25 +456,43 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 67.7,
-      "proseCplSamples": 14,
+      "proseCpl": 71.9,
+      "proseCplSamples": 5,
       "captionCpl": null,
       "captionWidth": null,
       "evidenceBand": 1180,
       "bandRows": [
         {
-          "kind": "bp-stats",
+          "kind": "bp-table",
           "width": 1180,
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1178,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         }
       ],
-      "ingressPresent": true,
-      "ingressRatio": 0.783,
-      "ingressNote": null,
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
       "toneSamples": {
         ".bp-callout--info": {
           "color": "rgb(157, 184, 255)",
@@ -489,33 +525,24 @@
         "fontSize": "36px",
         "fontWeight": "400"
       },
-      "statTracks": [
-        7
-      ],
-      "statTracksNote": null,
-      "statRemainder": [
-        {
-          "tracks": 7,
-          "cells": 4,
-          "emptyTracks": 0,
-          "probe": null
-        }
-      ],
+      "statTracks": null,
+      "statTracksNote": "no .bp-stats in this fixture",
+      "statRemainder": [],
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 14,
+        "total": 25,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9,
+          "1": 20,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 933.5,
+            "y": 706.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -525,7 +552,7 @@
           },
           {
             "px": 2,
-            "y": 1708.8,
+            "y": 1490,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -535,7 +562,7 @@
           },
           {
             "px": 2,
-            "y": 2237.7,
+            "y": 2147.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -545,7 +572,7 @@
           },
           {
             "px": 2,
-            "y": 3640.5,
+            "y": 2685.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -555,7 +582,7 @@
           },
           {
             "px": 2,
-            "y": 3891.8,
+            "y": 3336.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -568,17 +595,17 @@
       "blockedRequests": 1
     },
     {
-      "cell": "heggemsnes-act__dark__1920",
-      "file": "heggemsnes-act__dark__1920.jpeg",
+      "cell": "agent-flight-recorder-charter__dark__1920",
+      "file": "agent-flight-recorder-charter__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 1249618,
+      "bytes": 1144763,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 16,
+      "paragraphs": 6,
       "sectionBeats": [
         {
           "kind": "heading",
-          "head": "The case, in full",
+          "head": "Pillar 1 — priming visibility (start + done)",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -586,7 +613,7 @@
         },
         {
           "kind": "heading",
-          "head": "What we hold",
+          "head": "Pillar 2 — crash recovery",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -594,7 +621,7 @@
         },
         {
           "kind": "heading",
-          "head": "The Articles",
+          "head": "Pillar 3 — signatures: who did what, not 'ag",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -602,7 +629,7 @@
         },
         {
           "kind": "heading",
-          "head": "Remedies executed under this Act",
+          "head": "Decisions to make (the epic's Decide phase)",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -610,7 +637,7 @@
         },
         {
           "kind": "heading",
-          "head": "Scope and force",
+          "head": "Measured costs (from the flight-recorder cos",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -622,25 +649,43 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 67.7,
-      "proseCplSamples": 14,
+      "proseCpl": 71.9,
+      "proseCplSamples": 5,
       "captionCpl": null,
       "captionWidth": null,
       "evidenceBand": 1360,
       "bandRows": [
         {
-          "kind": "bp-stats",
+          "kind": "bp-table",
           "width": 1360,
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1358,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1207.4,
+          "offCentre": 0,
+          "left": 356.3,
+          "right": 1563.7,
+          "inkWidth": 1205.4,
           "inkOffCentre": 0
         }
       ],
-      "ingressPresent": true,
-      "ingressRatio": 0.783,
-      "ingressNote": null,
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
       "toneSamples": {
         ".bp-callout--info": {
           "color": "rgb(157, 184, 255)",
@@ -673,33 +718,24 @@
         "fontSize": "36px",
         "fontWeight": "400"
       },
-      "statTracks": [
-        9
-      ],
-      "statTracksNote": null,
-      "statRemainder": [
-        {
-          "tracks": 9,
-          "cells": 4,
-          "emptyTracks": 0,
-          "probe": null
-        }
-      ],
+      "statTracks": null,
+      "statTracksNote": "no .bp-stats in this fixture",
+      "statRemainder": [],
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 14,
+        "total": 25,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9,
+          "1": 20,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 914.3,
+            "y": 706.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -709,7 +745,7 @@
           },
           {
             "px": 2,
-            "y": 1689.6,
+            "y": 1437.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -719,7 +755,7 @@
           },
           {
             "px": 2,
-            "y": 2218.5,
+            "y": 2095.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -729,7 +765,7 @@
           },
           {
             "px": 2,
-            "y": 3621.3,
+            "y": 2633.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -739,7 +775,7 @@
           },
           {
             "px": 2,
-            "y": 3872.6,
+            "y": 3284.7,
             "width": 580,
             "parts": 1,
             "structural": true,
