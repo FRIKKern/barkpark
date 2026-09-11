@@ -28,8 +28,10 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
   alias Barkpark.Accounts
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
+  alias Barkpark.Content.Analytics
   alias Barkpark.Content.CallerContext
   alias Barkpark.Repo
+  alias Barkpark.Structure
   alias Barkpark.Tenancy
 
   @dataset "production"
@@ -541,6 +543,32 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       # The un-granted type: EMPTY. This is the load-bearing assertion — if
       # `scope_to_grants` were a no-op the desk query would surface the note.
       assert Content.list_documents("note", @dataset, opts) == []
+
+      # SECOND SEAM, SAME FIXTURE (task-bdd08ef832ba341a). `list_documents/3` is
+      # not the only read this socket makes: the mounted desk closes with a
+      # …Rest tier fed by `Analytics.type_census/2`, which reports TYPE NAMES and
+      # COUNTS. Until PR #14079 it read `:workspace_id` and nothing else, so the
+      # `wrong-type` note seeded above was disclosed to THIS grantee, on THIS
+      # socket, as "note (1)" — while every assertion above stayed green. Pin the
+      # census here too, in the suite that owns grant admission, so a future
+      # re-widening of `LiveScope`/`maybe_scope_to_grants` reds in this file.
+      census = Analytics.type_census(@dataset, opts)
+
+      assert census == [%{type: "post", total: 1}],
+             "the census must report EXACTLY the grant's type and its honest count"
+
+      refute Enum.any?(census, &(&1.type == "note")),
+             "LEAK: the census named a document type outside the caller's grant"
+
+      # ...and through the tier the census actually renders: "type (N)".
+      rest_titles =
+        case Enum.find(Structure.build(@dataset, opts).items, &(&1.id == "rest")) do
+          nil -> []
+          node -> Enum.map(node.items || [], & &1.title)
+        end
+
+      assert "post (1)" in rest_titles
+      refute Enum.any?(rest_titles, &String.starts_with?(&1, "note"))
     end
 
     test "NO WIDEN — a project-scoped grant does NOT admit a SIBLING project's desk (403)", %{

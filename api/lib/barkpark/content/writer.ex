@@ -460,15 +460,15 @@ defmodule Barkpark.Content.Writer do
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
-      create_after_dedup(type, attrs, dataset, ctx, prev_doc, opts)
+      create_after_dedup(type, attrs, dataset, doc_id, ctx, prev_doc, opts)
     end
   end
 
-  defp create_after_dedup(type, attrs, dataset, ctx, prev_doc, opts) do
+  defp create_after_dedup(type, attrs, dataset, doc_id, ctx, prev_doc, opts) do
     # THE CREATOR STAMP (task-aa3502ad7645afbd). Server-set, here, so the
     # `:before_save` payload below already carries it. See
-    # `stamp_task_creator/4`.
-    attrs = stamp_task_creator(type, attrs, prev_doc, opts)
+    # `stamp_task_creator/6`.
+    attrs = stamp_task_creator(type, attrs, prev_doc, doc_id, dataset, opts)
 
     # XSS hardening: the raw mutate/Writer path stores content verbatim, so an
     # attacker-supplied content["body_html"] would persist and later be emitted
@@ -1007,16 +1007,16 @@ defmodule Barkpark.Content.Writer do
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
-      upsert_after_gate(type, attrs, dataset, ctx, prev_doc, opts)
+      upsert_after_gate(type, attrs, dataset, doc_id, ctx, prev_doc, opts)
     end
   end
 
-  defp upsert_after_gate(type, attrs, dataset, ctx, prev_doc, opts) do
+  defp upsert_after_gate(type, attrs, dataset, doc_id, ctx, prev_doc, opts) do
     # THE CREATOR STAMP (task-aa3502ad7645afbd). This door has its own INSERT
     # branch (`do_upsert_after_gate`'s `_ ->` clause), which is a BIRTH by the
     # same definition every birth guard above uses — so the stamp rides here
     # too, or `POST /api/documents/task` would file an unattributable row.
-    attrs = stamp_task_creator(type, attrs, prev_doc, opts)
+    attrs = stamp_task_creator(type, attrs, prev_doc, doc_id, dataset, opts)
 
     # The UPDATE half of the mutate-path schema check (task-41a740fd6701ec28).
     # One call covers both branches below: `attrs` reaching here is already the
@@ -1569,6 +1569,14 @@ defmodule Barkpark.Content.Writer do
   # what the revision path records. An api_token yields
   # `{"api_token", <token id>}`, a Studio user session `{"user", <user id>}`.
   #
+  # WHAT COUNTS AS A BIRTH. Not "the writer loaded no `prev_doc`": that lookup
+  # is DRAFTS-EXACT, and every create-family write targets `drafts.<id>`, so an
+  # EDIT of a published-only row arrives with a nil `prev_doc` and would be
+  # stamped as a birth (task-a0c531e0082a788c — it was, on 3 live rows, and the
+  # publish promoted the editor onto a row born weeks earlier). A birth is a
+  # write with no PUBLISHED counterpart either; when one exists, its own
+  # `created_by` is restored exactly as the update arm restores a draft's.
+  #
   # WHO GETS STAMPED, AND WHO HONESTLY DOES NOT. The stamp is written only when
   # the principal has an IDENTITY to name — a non-nil `actor_id` — and only when
   # the write is not replication:
@@ -1603,21 +1611,65 @@ defmodule Barkpark.Content.Writer do
   # ~9,075 rows born before this have no creator to recover, and the update arm
   # below is what keeps them that way — a patch to a legacy row DROPS a
   # body-supplied `created_by` rather than crediting whoever touched the row
-  # next, which is the exact failure the row was filed against.
-  defp stamp_task_creator("task", attrs, prev_doc, opts) do
+  # next, which is the exact failure the row was filed against. The
+  # published-counterpart arm extends that to the EDIT of a legacy row through
+  # the create family: it restores the counterpart's `nil`, so the twin stays
+  # unstamped and the publish has nothing to promote.
+  defp stamp_task_creator("task", attrs, prev_doc, doc_id, dataset, opts) do
     if Keyword.get(opts, :source, :api) == :sync do
       attrs
     else
-      put_created_by(attrs, resolved_created_by(prev_doc, opts))
+      put_created_by(attrs, resolved_created_by(prev_doc, doc_id, dataset, opts))
     end
   end
 
-  defp stamp_task_creator(_type, attrs, _prev_doc, _opts), do: attrs
+  defp stamp_task_creator(_type, attrs, _prev_doc, _doc_id, _dataset, _opts), do: attrs
 
-  # A BIRTH (`prev_doc == nil`) names the caller; an UPDATE restores whatever
-  # the stored row carried, which is `nil` for every row born before this
-  # shipped. Either way the caller's own value never survives.
-  defp resolved_created_by(nil = _prev_doc, opts) do
+  # An UPDATE (a drafts-exact `prev_doc`) restores whatever the stored row
+  # carried, which is `nil` for every row born before this shipped. The
+  # caller's own value never survives either way.
+  defp resolved_created_by(%Document{content: content}, _doc_id, _dataset, _opts)
+       when is_map(content),
+       do: Map.get(content, "created_by")
+
+  # NO `prev_doc` IS NOT YET A BIRTH (task-a0c531e0082a788c). `prev_doc` is the
+  # DRAFTS-EXACT lookup, and the create family always writes `drafts.<id>` — so
+  # editing a PUBLISHED-only row mints a twin no drafts-exact lookup can see,
+  # and the stamp read that as a birth and credited the EDITOR as the filer,
+  # which the publish then promoted onto a row born weeks earlier. Measured
+  # live: 3 of the first 45 stamps. So the counterpart is consulted BEFORE the
+  # caller, published-fallback — the same two steps `resolve_lifecycle_was/4`
+  # and `resolve_close_reason_was/4` take, through the same scoped opts.
+  #
+  # Its `created_by` is what an update restores, whatever that value is: the
+  # ORIGINAL filer on an attributed row, and `nil` on a LEGACY one — so a
+  # legacy row's twin stays honestly ABSENT rather than carrying a marker. That
+  # is what the invariant above already promises ("the ABSENCE of the key is
+  # itself the greppable signal"): a sentinel would hide exactly the rows
+  # `content.created_by is null` is meant to find.
+  defp resolved_created_by(nil = _prev_doc, doc_id, dataset, opts) do
+    case published_counterpart(doc_id, dataset, opts) do
+      %Document{content: content} -> Map.get(content || %{}, "created_by")
+      nil -> caller_creator_stamp(opts)
+    end
+  end
+
+  defp resolved_created_by(_prev_doc, _doc_id, _dataset, _opts), do: nil
+
+  # The bare (published) id of a `drafts.`-prefixed write target, if a row
+  # lives there. `nil` for a genuine birth — no counterpart, nothing to
+  # restore — which is the only case that reaches the caller stamp.
+  defp published_counterpart(doc_id, dataset, opts) do
+    with id when is_binary(id) <- doc_id,
+         pid when pid != "" and pid != id <- DraftId.published_id(id),
+         {:ok, %Document{} = published} <- Content.get_document(pid, "task", dataset, opts) do
+      published
+    else
+      _ -> nil
+    end
+  end
+
+  defp caller_creator_stamp(opts) do
     case Barkpark.Content.CallerContext.actor_stamp_from_opts(opts) do
       %{actor_id: id, actor_kind: kind, actor_label: label} when is_binary(id) ->
         base = %{
@@ -1632,11 +1684,6 @@ defmodule Barkpark.Content.Writer do
         nil
     end
   end
-
-  defp resolved_created_by(%Document{content: content}, _opts) when is_map(content),
-    do: Map.get(content, "created_by")
-
-  defp resolved_created_by(_prev_doc, _opts), do: nil
 
   # Writes back under whichever `content` key the attrs already used (internal
   # callers build atom-keyed attrs; the HTTP doors build string-keyed ones), and

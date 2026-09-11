@@ -548,6 +548,29 @@ runs no build, so `DeployRunner` writes the run's provenance there itself —
 the digest, the staged path, and this unreproducible-release warning — instead of
 leaving the deployment pointing at an empty file.
 
+### The fresh-box push-to-live acceptance run
+
+`deploy/site-spawner-live-proof.sh` and its siblings all start from a box that
+already exists. `deploy/site-push-live-proof.sh` starts from nothing:
+
+    bash deploy/site-push-live-proof.sh --plan        # every rung; no side effects
+    bash deploy/site-push-live-proof.sh --self-check  # offline; every judge, good AND bad input
+    bash deploy/site-push-live-proof.sh --negctl      # offline; wrong fixtures must be judged red
+    bash deploy/site-push-live-proof.sh               # THE LIVE RUN (real box, real money)
+
+The live run launches a Hetzner box, connects a public repo to a site on it,
+pushes a known sha, and asserts that exact sha reaches the site host with **zero
+manual steps** — then mints a deliberately unclaimable deployment and asserts
+`deploy_stalled` surfaces in `bp cloud status` inside the 300 s horizon, then
+destroys the box (census delta zero on three surfaces, also from the trap).
+
+It needs credentials that are not in CI: `HCLOUD_TOKEN` (or a selected `hcloud`
+context) for provisioning **and teardown**, a `bp login` cloud session, and
+`PUSH_REPO` / `PUSH_REPO_TOKEN`. Rung 0 refuses to create anything it cannot
+prove it can destroy. Only the three offline modes are registered in
+`.github/workflows/deploy-harnesses.yml`. Scan the transcript before committing
+it: `--scan-transcript <file>` must print zero hits.
+
 ### The proof script
 
 `deploy/site-spawner-live-proof.sh` drives that whole journey against the live

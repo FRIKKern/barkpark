@@ -143,7 +143,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SCENARIOS } from "./scenarios.mjs";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
-import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr, formatStderrTail } from "./bringup-retry.mjs";
 import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -906,18 +906,32 @@ async function main() {
 
   try {
     // ── boot serve.mjs ───────────────────────────────────────────────────────
+    // STDERR IS PIPED, NOT DISCARDED. captureStderr drains continuously (an
+    // unread pipe fills and blocks the child) and keeps a bounded tail, so the
+    // refusal below can name a CAUSE (EADDRINUSE, a syntax error, a missing
+    // file) instead of only the symptom. NO RETRY is added here: unlike
+    // Chrome's bring-up, no per-attempt failure rate has been measured for
+    // serve.mjs, and a retry with no measurement behind it is theatre.
     server = spawn(process.execPath, [path.join(HERE, "serve.mjs"), "--port", String(port)], {
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
     });
+    const readServeStderr = captureStderr(server);
     let up = false;
     for (let w = 0; w < SERVER_UP_CAP; w += 100) {
       if (await httpOk(`http://127.0.0.1:${port}/`)) { up = true; break; }
       await sleep(100);
     }
-    if (!up) throw new Error(`preview server never answered on :${port} (port in use? node error?)`);
+    if (!up) {
+      throw new Error(
+        `preview server never answered on :${port} (port in use? node error?)\n` +
+        formatStderrTail(readServeStderr(), { who: "serve.mjs" }).replace(/\n$/, ""),
+      );
+    }
     // The stale-server guard, CONSUMER SIDE (gr-blk-serve-stale-guard): "the
     // port answers" is not "OUR server answers". If serve.mjs died EADDRINUSE
-    // (stdio is ignored here — nobody hears it), the 200 above came from a
+    // (its stderr is captured above and printed in the never-answered refusal,
+    // but a squatter makes the poll SUCCEED, so no refusal fires), the 200
+    // above came from a
     // FOREIGN worktree's squatter and every modal state below would be judged
     // against another tree's bytes. serve.mjs refuses and diagnoses on its own
     // now, but a port-polling consumer must assert tree identity itself.

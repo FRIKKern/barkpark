@@ -19,7 +19,7 @@
       "cell": "hobby-hardening-capstone__light__1280",
       "file": "hobby-hardening-capstone__light__1280.jpeg",
       "scale": 2,
-      "bytes": 10390087,
+      "bytes": 10604552,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -303,7 +303,7 @@
           {
             "px": 2,
             "y": 2125.6,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -313,7 +313,7 @@
           {
             "px": 2,
             "y": 4248.9,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -323,7 +323,7 @@
           {
             "px": 2,
             "y": 6435.5,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -333,7 +333,7 @@
           {
             "px": 2,
             "y": 15420.8,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -343,7 +343,7 @@
           {
             "px": 2,
             "y": 18665.4,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -353,7 +353,7 @@
           {
             "px": 2,
             "y": 21520,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -363,7 +363,7 @@
           {
             "px": 2,
             "y": 23329.2,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -373,7 +373,7 @@
           {
             "px": 2,
             "y": 24690.2,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -383,7 +383,7 @@
           {
             "px": 2,
             "y": 26074.5,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -393,7 +393,7 @@
           {
             "px": 2,
             "y": 28426.1,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -403,7 +403,7 @@
           {
             "px": 2,
             "y": 29995.2,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -418,7 +418,7 @@
       "cell": "hobby-hardening-capstone__light__1920",
       "file": "hobby-hardening-capstone__light__1920.jpeg",
       "scale": 2,
-      "bytes": 11118973,
+      "bytes": 11210457,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -702,7 +702,7 @@
           {
             "px": 2,
             "y": 2106.4,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -712,7 +712,7 @@
           {
             "px": 2,
             "y": 4229.7,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -722,7 +722,7 @@
           {
             "px": 2,
             "y": 6338.1,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -732,7 +732,7 @@
           {
             "px": 2,
             "y": 15251.5,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -742,7 +742,7 @@
           {
             "px": 2,
             "y": 18212.2,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -752,7 +752,7 @@
           {
             "px": 2,
             "y": 20623.3,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -762,7 +762,7 @@
           {
             "px": 2,
             "y": 22302,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -772,7 +772,7 @@
           {
             "px": 2,
             "y": 23506.4,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -782,7 +782,7 @@
           {
             "px": 2,
             "y": 24760.3,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -792,7 +792,7 @@
           {
             "px": 2,
             "y": 27111.9,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -802,7 +802,7 @@
           {
             "px": 2,
             "y": 28681,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -817,7 +817,7 @@
       "cell": "hobby-hardening-capstone__dark__1280",
       "file": "hobby-hardening-capstone__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 10141685,
+      "bytes": 10489676,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -1101,7 +1101,7 @@
           {
             "px": 2,
             "y": 2125.6,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1111,7 +1111,7 @@
           {
             "px": 2,
             "y": 4248.9,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1121,7 +1121,7 @@
           {
             "px": 2,
             "y": 6435.5,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1131,7 +1131,7 @@
           {
             "px": 2,
             "y": 15420.8,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1141,7 +1141,7 @@
           {
             "px": 2,
             "y": 18665.4,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1151,7 +1151,7 @@
           {
             "px": 2,
             "y": 21520,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1161,7 +1161,7 @@
           {
             "px": 2,
             "y": 23329.2,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1171,7 +1171,7 @@
           {
             "px": 2,
             "y": 24690.2,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1181,7 +1181,7 @@
           {
             "px": 2,
             "y": 26074.5,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1191,7 +1191,7 @@
           {
             "px": 2,
             "y": 28426.1,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1201,7 +1201,7 @@
           {
             "px": 2,
             "y": 29995.2,
-            "width": 580,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1216,7 +1216,7 @@
       "cell": "hobby-hardening-capstone__dark__1920",
       "file": "hobby-hardening-capstone__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 11003907,
+      "bytes": 11090557,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -1500,7 +1500,7 @@
           {
             "px": 2,
             "y": 2106.4,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1510,7 +1510,7 @@
           {
             "px": 2,
             "y": 4229.7,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1520,7 +1520,7 @@
           {
             "px": 2,
             "y": 6338.1,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1530,7 +1530,7 @@
           {
             "px": 2,
             "y": 15251.5,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1540,7 +1540,7 @@
           {
             "px": 2,
             "y": 18212.2,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1550,7 +1550,7 @@
           {
             "px": 2,
             "y": 20623.3,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1560,7 +1560,7 @@
           {
             "px": 2,
             "y": 22302,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1570,7 +1570,7 @@
           {
             "px": 2,
             "y": 23506.4,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1580,7 +1580,7 @@
           {
             "px": 2,
             "y": 24760.3,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1590,7 +1590,7 @@
           {
             "px": 2,
             "y": 27111.9,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1600,7 +1600,7 @@
           {
             "px": 2,
             "y": 28681,
-            "width": 580,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [

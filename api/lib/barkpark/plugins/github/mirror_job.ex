@@ -20,7 +20,8 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
     1. Load the task's CURRENT state DRAFT-FIRST (contract #2): `content.github`
        bookkeeping is written to the DRAFT row by `Link.put`, so reading the
        published perspective would miss `github.issue` and CREATE a duplicate
-       issue. Absent task → `{:cancel, :task_gone}`.
+       issue. Absent task → `{:cancel, :task_gone}`. Absent PUBLISHED row →
+       `{:cancel, :unpublished}` (the publish gate below).
     2. `Link.get/1`. A `state: "detached"` link → `{:cancel, :detached}`: the
        issue was deleted/transferred out-of-band and we NEVER recreate it (D7).
        A `state: "intake"` link → `{:cancel, :intake}` (D13, the PRE-ADOPTION
@@ -54,6 +55,32 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
        so the NEXT reconcile can detect the next drift. Absent a stored
        fingerprint (first-ever mirror, or a pre-slice task) → record nothing this
        pass, just PATCH + stamp the fingerprint (rolls forward, no backfill).
+
+  ## Publish gate
+
+  The mirror projects ONLY tasks that have a PUBLISHED row. An issue is a public
+  promise; a draft is not. `bp task create` writes the `drafts.<id>` row first
+  and that draft-create mutation drains straight to here, so before this gate the
+  bridge minted a real, numbered, world-visible issue for a row nobody had
+  published — and `bp doc delete task drafts.<id>` then left that issue OPEN with
+  no ledger row behind it (measured on issues 8425/8426).
+
+  So reconcile asks a second question of the PUBLISHED id after the draft-first
+  load: no published row → `{:cancel, :unpublished}`, before any GitHub call.
+  The draft-first load itself is unchanged (contract #2: the `content.github`
+  bookkeeping of a never-published task lives on its draft row).
+
+  Nothing is lost, only deferred: publishing emits its own `mutation_events` row
+  (`Content.Lifecycle` → `Broadcast.tap_broadcast(…, "publish", …, source: :api)`)
+  which `Outbox.fetch/3` includes (type `task`, `source != "github"`), so the
+  DrainWorker enqueues a fresh job and the now-published task mirrors then. A
+  task that IS published keeps mirroring even while a draft twin is live — the
+  gate asks only whether a published row EXISTS.
+
+  `:unpublished` is a new CANCEL reason. It is NOT a fifth entry in D8's fixed
+  four-type ERROR set below: no exception type is added, and the classification
+  of a GitHub failure is untouched. This is a pre-flight refusal to call GitHub
+  at all, a sibling of `:task_gone` / `:detached` / `:intake` / `:repo_unconfigured`.
 
   ## Error classification (contract #3, D8's fixed 4-type set, D9)
 
@@ -205,6 +232,23 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
           # consent-moment push must stay live.
           intake?(link) ->
             {:cancel, :intake}
+
+          # PUBLISH GATE. A task with NO published row has never been said out
+          # loud — `bp task create` writes the `drafts.<id>` row first, and the
+          # outbox event for that draft create drains here. Mirroring it mints a
+          # real GitHub issue for a row that may never be published at all, and
+          # discarding the draft then ORPHANS that issue (open, with no ledger
+          # row behind it — measured on issues 8425/8426). So: project only what
+          # is published. The draft-first load above STAYS (contract #2 — the
+          # `content.github` bookkeeping lives on the draft of a never-published
+          # task); this gate asks a SEPARATE question of the published id.
+          # The publish itself emits a `mutation_events` row (`Lifecycle`'s
+          # `tap_broadcast(…, "publish", …, source: :api)`) that `Outbox.fetch/3`
+          # includes (type `task`, source != "github"), so the DrainWorker
+          # re-enqueues and a draft that is LATER published mirrors then —
+          # nothing is lost, it is only deferred to the promise.
+          not published?(doc_id, dataset, opts) ->
+            {:cancel, :unpublished}
 
           # A `relink: true` job (D11-retry) BYPASSES the synced coalesce guard so
           # a child that is already synced still re-runs to link its now-mirrored
@@ -607,6 +651,18 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # before converge — see the pre-adoption gate in reconcile/3.
   defp intake?(link) when is_map(link), do: Map.get(link, "state") == "intake"
   defp intake?(_), do: false
+
+  # The PUBLISH GATE's question (see reconcile/3): does a PUBLISHED row exist for
+  # this task? Asked of the published id ONLY — `load_task/3` deliberately reads
+  # draft-first for bookkeeping, so its result cannot answer this. A draft-only
+  # task returns false and the reconcile cancels `:unpublished` before any
+  # GitHub write.
+  defp published?(doc_id, dataset, opts) do
+    case Content.get_document(Content.published_id(doc_id), @task_type, dataset, opts) do
+      {:ok, %Document{}} -> true
+      _ -> false
+    end
+  end
 
   defp issue_number(link) when is_map(link) do
     case Map.get(link, "issue") do

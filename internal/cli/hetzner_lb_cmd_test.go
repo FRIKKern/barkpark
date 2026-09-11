@@ -36,11 +36,39 @@ package cli
 // non-numeric token. A post-read spelled that way reads a stale collection body.
 // TestHetznerLBPostReadBindsOnTheResolvedIDNotTheName is the NEGATIVE PIN.
 
+// THE POST-READ COVERAGE CENSUS — READ THIS BEFORE TRUSTING THE PIN COUNT
+// ------------------------------------------------------------------------
+// The ten mutating sites in hzLBVerbCases are pinned at TWO different
+// strengths, and over-reading the weaker one is the mistake this note exists to
+// stop:
+//
+//	BY READ COUNT (structural, weakest): every one of the ten, via the
+//	  `if n := f.count("GET", tc.getPath); n < 2` assertion in
+//	  TestHetznerLBFamilyMutationsReportWhatTheServerNowSays — "want >= 2
+//	  (resolve + confirm)". It proves a second read HAPPENED. It says NOTHING
+//	  about what that read addressed: a regression that keeps the resolved-id
+//	  GET and ADDITIONALLY re-reads by name (belt-and-braces, then trusts the
+//	  wrong body) still satisfies `>= 2`.
+//	BY CONTENT (a stale-but-plausible by-name LIST, strongest): THREE sites —
+//	  load-balancer add-target, floating-ip assign, primary-ip assign — via
+//	  hzByNamePinCases / TestHetznerLBPostReadBindsOnTheResolvedIDNotTheName.
+//	  One per kind that takes a name argument. These reds survive a fully
+//	  CORRECT name-filtered LIST fixture, because the exactly-once LIST count is
+//	  the assertion doing the work.
+//
+// So: seven of the ten mutating sites are pinned by READ COUNT, NOT by content.
+// The SIX creates carry no by-name pin and structurally cannot —
+// hzResObservedResponse performs no post-GET, so there is no read to re-spell;
+// their weakness is a different one (see
+// TestHetznerCreateReceiptsNeverPrintABlankValue and
+// TestHetznerCreateAdvisoryExclusions).
+
 import (
 	"context"
 	"encoding/json"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -479,61 +507,153 @@ func TestHetznerLBUnregisteredPathIsTheWrongArm(t *testing.T) {
 	}
 }
 
+// hzByNamePinCase is one site whose resolve goes through a NAME-FILTERED LIST.
+// The fixture makes that list STALE on purpose while the single-resource GET
+// holds the truth, so a post-read re-spelled by NAME reads a body that is wrong
+// in a way no red announces.
+type hzByNamePinCase struct {
+	name     string
+	args     []string
+	listPath string
+	listName string
+	// listBody is the name-filtered LIST answer, frozen BEFORE the mutation and
+	// CORRECT in shape — it is a fully-valid collection body, which is what
+	// makes this pin unrescuable by a better fixture.
+	listBody string
+	getPath  string
+	envelope string
+	before   string
+	after    string
+	postPath string
+	actionID string
+	setup    func(*fakeHzAPI)
+	wantKeys map[string]any
+}
+
+// hzByNamePinCases is the by-NAME pin, generalised past add-target.
+//
+// resolveHzLB / resolveHzFloatingIP / resolveHzPrimaryIP all funnel through
+// hzResolve → <Client>.Get → getByIDOrName, which for a NON-NUMERIC token calls
+// GetByName → firstByName → List(…{Name: token}) — the name-filtered LIST
+// (hcloud-go v2.44.0 hcloud/floating_ip.go:126, primary_ip.go:203-213). One
+// site per kind that takes a name argument and re-reads afterwards.
+func hzByNamePinCases() []hzByNamePinCase {
+	return []hzByNamePinCase{
+		{
+			name:     "load-balancer add-target",
+			args:     []string{"load-balancer", "add-target", "web-lb", "--server", "42"},
+			listPath: "/load_balancers", listName: "web-lb",
+			listBody: `{"load_balancers":[{"id":7,"name":"web-lb","public_net":{"enabled":true,"ipv4":{},"ipv6":{}},` +
+				`"load_balancer_type":{"id":1,"name":"lb11"},"algorithm":{"type":"round_robin"},"services":[],"targets":[]}],` +
+				`"meta":{"pagination":{"page":1,"per_page":25,"total_entries":1}}}`,
+			getPath: "/load_balancers/7", envelope: "load_balancer",
+			before: hzLBEmpty, after: hzLBServerTargetBody,
+			postPath: "/load_balancers/7/actions/add_target", actionID: "301",
+			setup:    hzServerLookup,
+			wantKeys: map[string]any{hzKeyConfirmedPresent: true, "target_observed": true, "server": "web-1"},
+		},
+		{
+			// The STALE LIST says `server: null` — a floating IP that is still
+			// free. A by-name post-read would read that and REFUSE a correct
+			// assign.
+			name:     "floating-ip assign",
+			args:     []string{"floating-ip", "assign", "web-vip", "--server", "42"},
+			listPath: "/floating_ips", listName: "web-vip",
+			listBody: `{"floating_ips":[{"id":11,"name":"web-vip","type":"ipv4","ip":"192.0.2.99","dns_ptr":[],"server":null}],` +
+				`"meta":{"pagination":{"page":1,"per_page":25,"total_entries":1}}}`,
+			getPath: "/floating_ips/11", envelope: "floating_ip",
+			before: hzFIPFree, after: hzFIPAssigned,
+			postPath: "/floating_ips/11/actions/assign", actionID: "303",
+			setup:    hzServerLookup,
+			wantKeys: map[string]any{hzKeyConfirmedPresent: true, "assigned": true, "server_id": float64(42)},
+		},
+		{
+			// The STALE LIST says `assignee_id: null`. Note resolveHzPrimaryIP
+			// parses an IP literal FIRST — a name token still lands on the LIST.
+			name:     "primary-ip assign",
+			args:     []string{"primary-ip", "assign", "web-pip", "--server", "42"},
+			listPath: "/primary_ips", listName: "web-pip",
+			listBody: `{"primary_ips":[{"id":9,"name":"web-pip","type":"ipv4","ip":"192.0.2.50","dns_ptr":[],` +
+				`"assignee_id":null,"assignee_type":"server"}],` +
+				`"meta":{"pagination":{"page":1,"per_page":25,"total_entries":1}}}`,
+			getPath: "/primary_ips/9", envelope: "primary_ip",
+			before: hzPIPFree, after: hzPIPAssigned,
+			postPath: "/primary_ips/9/actions/assign", actionID: "304",
+			setup:    hzServerLookup,
+			wantKeys: map[string]any{hzKeyConfirmedPresent: true, "assigned": true, "assignee_id": float64(42)},
+		},
+	}
+}
+
 // TestHetznerLBPostReadBindsOnTheResolvedIDNotTheName is THE NEGATIVE PIN
 // (PDS-D416): the test that would go GREEN — and then be worthless — if a
 // builder re-resolved by NAME instead of by the id the verb already holds.
 //
 // resolveHzLB → hzResolve → LoadBalancer.Get sends a non-numeric token straight
 // to the NAME-FILTERED LIST. This fixture makes that list STALE on purpose: it
-// keeps saying `targets: []` after the target was added, exactly like the
-// fixture that shipped in hetzner_net_cmd_test.go. A by-name post-read would
-// therefore read `targets: []` and REFUSE a correct add-target — and it fails
+// keeps saying the pre-mutation state after the mutation applied, exactly like
+// the fixture that shipped in hetzner_net_cmd_test.go. A by-name post-read would
+// therefore read the stale body and REFUSE a correct mutation — and it fails
 // on the measured baseline too, where the naive by-name read reported
 // `targets seen: 0` in all four fixture variants including a stateful lying
 // fake, so no fixture can rescue that spelling.
 //
-// Two assertions, and the second is the structural one: the receipt confirms,
-// and the name-filtered LIST is queried EXACTLY ONCE — the resolve, never again.
+// GENERALISED past add-target: the same shape now covers one floating-ip and
+// one primary-ip site, because their resolvers go through a name-filtered LIST
+// too (hcloud-go getByIDOrName → GetByName → List{Name}). The other seven
+// mutating sites are pinned by READ COUNT only — see the census note in this
+// file's header.
+//
+// Two assertions per case, and the second is the structural one: the receipt
+// confirms, and the name-filtered LIST is queried EXACTLY ONCE — the resolve,
+// never again. That second assertion reds even when the LIST fixture is made
+// fully CORRECT, which is what makes the pin unrescuable.
 func TestHetznerLBPostReadBindsOnTheResolvedIDNotTheName(t *testing.T) {
-	f := newFakeHzAPI(t)
-	st := &hzMutState{}
-	// THE STALE LIST: the by-name resolve's answer, frozen before the mutation.
-	f.mux.HandleFunc("GET /load_balancers", func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("name"); got != "web-lb" {
-			t.Errorf("lb lookup name = %q, want web-lb", got)
-		}
-		hzWriteJSON(w, 200, `{"load_balancers":[{"id":7,"name":"web-lb","public_net":{"enabled":true,"ipv4":{},"ipv6":{}},`+
-			`"load_balancer_type":{"id":1,"name":"lb11"},"algorithm":{"type":"round_robin"},"services":[],"targets":[]}],`+
-			`"meta":{"pagination":{"page":1,"per_page":25,"total_entries":1}}}`)
-	})
-	// THE TRUTH, addressable only by the RESOLVED id.
-	hzMutResource(f, "/load_balancers/7", "load_balancer", hzLBEmpty, hzLBServerTargetBody, st)
-	hzMutAction(f, "/load_balancers/7/actions/add_target", "301", st)
-	hzActionsAllSucceed(f)
-	hzServerLookup(f)
+	for _, tc := range hzByNamePinCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeHzAPI(t)
+			st := &hzMutState{}
+			// THE STALE LIST: the by-name resolve's answer, frozen before the
+			// mutation.
+			f.mux.HandleFunc("GET "+tc.listPath, func(w http.ResponseWriter, r *http.Request) {
+				if got := r.URL.Query().Get("name"); got != tc.listName {
+					t.Errorf("%s lookup name = %q, want %q", tc.name, got, tc.listName)
+				}
+				hzWriteJSON(w, 200, tc.listBody)
+			})
+			// THE TRUTH, addressable only by the RESOLVED id.
+			hzMutResource(f, tc.getPath, tc.envelope, tc.before, tc.after, st)
+			hzMutAction(f, tc.postPath, tc.actionID, st)
+			hzActionsAllSucceed(f)
+			if tc.setup != nil {
+				tc.setup(f)
+			}
 
-	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "load-balancer", "add-target", "web-lb", "--server", "42")
-	if code != exitOK {
-		t.Fatalf("a CORRECT add-target was refused: the post-read re-resolved BY NAME and was handed the stale "+
-			"collection body (PDS-D416). exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
-		t.Fatalf("receipt is not JSON: %v\n%s", err, stdout)
-	}
-	if payload[hzKeyConfirmedPresent] != true || payload["target_observed"] != true {
-		t.Errorf("receipt = %v, want %s=true and target_observed=true off the single-resource GET",
-			payload, hzKeyConfirmedPresent)
-	}
-	if payload["server"] != "web-1" {
-		t.Errorf("receipt server = %v, want the human NAME while the predicate bound on the id", payload["server"])
-	}
-	if n := f.count("GET", "/load_balancers"); n != 1 {
-		t.Errorf("the name-filtered LIST was queried %d time(s), want exactly 1 (the resolve). A post-read that "+
-			"re-resolves by name reads a collection body that can be stale in ways no red announces", n)
-	}
-	if n := f.count("GET", "/load_balancers/7"); n < 1 {
-		t.Errorf("the single-resource GET fired %d time(s) — the confirming read must address the resolved id", n)
+			stdout, stderr, code := runHzCLI(t, "json", append([]string{"hetzner"}, tc.args...)...)
+			if code != exitOK {
+				t.Fatalf("%s: a CORRECT mutation was refused: the post-read re-resolved BY NAME and was handed "+
+					"the stale collection body (PDS-D416). exit %d\nstdout: %s\nstderr: %s", tc.name, code, stdout, stderr)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+				t.Fatalf("%s receipt is not JSON: %v\n%s", tc.name, err, stdout)
+			}
+			for k, want := range tc.wantKeys {
+				if payload[k] != want {
+					t.Errorf("%s receipt %s = %#v, want %#v off the single-resource GET (receipt: %v)",
+						tc.name, k, payload[k], want, payload)
+				}
+			}
+			if n := f.count("GET", tc.listPath); n != 1 {
+				t.Errorf("%s: the name-filtered LIST %s was queried %d time(s), want exactly 1 (the resolve). "+
+					"A post-read that re-resolves by name reads a collection body that can be stale in ways "+
+					"no red announces", tc.name, tc.listPath, n)
+			}
+			if n := f.count("GET", tc.getPath); n < 1 {
+				t.Errorf("%s: the single-resource GET %s fired %d time(s) — the confirming read must address "+
+					"the resolved id", tc.name, tc.getPath, n)
+			}
+		})
 	}
 }
 
@@ -987,5 +1107,94 @@ func newJSONTestWriter() (*writer, func() string) {
 			return s
 		}
 		return strings.TrimSpace(stderr.String())
+	}
+}
+
+// hzBlankExtraLine matches a receipt extra line whose VALUE is empty —
+// `  location: ` with nothing behind the colon. A receipt key with no value is
+// not an honest empty state: it tells an operator the field was observed and
+// reads as blank, when the truth is the response never carried it.
+var hzBlankExtraLine = regexp.MustCompile(`(?m)^\s+[a-z0-9_]+:[ \t]*$`)
+
+// TestHetznerCreateReceiptsNeverPrintABlankValue is the PDS-D432 residue made
+// mechanical.
+//
+// hcloud-go's schema types make this a WHOLE CLASS, not one site: schema.
+// PrimaryIP.Location, schema.LoadBalancer.Location, schema.FloatingIP.
+// HomeLocation and schema.LoadBalancer.LoadBalancerType are all VALUE types, so
+// the converter hands back a NON-NIL pointer with an EMPTY Name whenever the
+// create response omits that object. Every observer that guarded on `!= nil`
+// therefore enrolled the key and printed nothing behind it.
+//
+// The last row is the MEASURED specimen: the shipped hzLBCreateCases primary-ip
+// fixture omits the top-level `location`, and the receipt printed `  location: `
+// at exit 0.
+func TestHetznerCreateReceiptsNeverPrintABlankValue(t *testing.T) {
+	type blankCase struct {
+		name     string
+		args     []string
+		postPath string
+		response string
+		actions  bool
+		absent   string
+	}
+	cases := []blankCase{}
+	for _, tc := range hzLBCreateCases() {
+		cases = append(cases, blankCase{tc.name, tc.args, tc.postPath, tc.response, tc.actions, ""})
+	}
+	cases = append(cases,
+		blankCase{
+			// THE SPECIMEN: no top-level location object at all.
+			name:     "primary-ip create whose response OMITS the top-level location",
+			args:     []string{"primary-ip", "create", "--type", "ipv4", "--datacenter", "nbg1-dc3", "--name", "web-ip"},
+			postPath: "/primary_ips",
+			response: `{"primary_ip":{"id":19,"name":"web-ip","ip":"192.0.2.50","type":"ipv4","assignee_type":"server",` +
+				`"assignee_id":null,"datacenter":{"id":3,"name":"nbg1-dc3","location":{"id":1,"name":"nbg1"}},"dns_ptr":[]}}`,
+			absent: "location:",
+		},
+		blankCase{
+			name: "load-balancer create whose response OMITS location and load_balancer_type",
+			args: []string{"load-balancer", "create", "--name", "web-lb", "--type", "lb11",
+				"--location", "nbg1", "--algorithm", "round_robin"},
+			postPath: "/load_balancers",
+			response: `{"load_balancer":{"id":7,"name":"web-lb",` +
+				`"public_net":{"enabled":true,"ipv4":{"ip":"192.0.2.7"},"ipv6":{}},` +
+				`"algorithm":{"type":"round_robin"},"services":[],"targets":[]},` +
+				`"action":{"id":401,"command":"create_load_balancer","status":"running","progress":0}}`,
+			actions: true,
+			absent:  "location:",
+		},
+		blankCase{
+			name:     "floating-ip create whose response OMITS home_location",
+			args:     []string{"floating-ip", "create", "--type", "ipv4", "--home-location", "nbg1", "--name", "web-vip"},
+			postPath: "/floating_ips",
+			response: `{"floating_ip":{"id":11,"name":"web-vip","ip":"192.0.2.99","type":"ipv4","dns_ptr":[]}}`,
+			absent:   "home_location:",
+		},
+	)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeHzAPI(t)
+			f.mux.HandleFunc("POST "+tc.postPath, func(w http.ResponseWriter, r *http.Request) {
+				hzWriteJSON(w, 201, tc.response)
+			})
+			if tc.actions {
+				hzActionsAllSucceed(f)
+			}
+
+			stdout, stderr, code := runHzCLI(t, "table", append([]string{"hetzner"}, tc.args...)...)
+			if code != exitOK {
+				t.Fatalf("%s create exited %d, stderr: %s\nstdout: %s", tc.name, code, stderr, stdout)
+			}
+			if m := hzBlankExtraLine.FindString(stdout); m != "" {
+				t.Errorf("%s receipt carries a key with an EMPTY value (%q) — a receipt key with no value "+
+					"is not an honest empty state; the key must be omitted when the response never carried it\n"+
+					"receipt: %q", tc.name, strings.TrimSpace(m), stdout)
+			}
+			if tc.absent != "" && strings.Contains(stdout, tc.absent) {
+				t.Errorf("%s receipt still carries %q off a response that never sent that object\nreceipt: %q",
+					tc.name, tc.absent, stdout)
+			}
+		})
 	}
 }
