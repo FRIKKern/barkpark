@@ -199,7 +199,16 @@ export function censusTally(walks) {
 //  comment is exactly what the cancelled row this file's cardinality half
 //  answers had rotted into.
 //
-//  TWO ROWS LEFT THIS LIST ON 2026-09-11 (task-39ebd948f40660e3) and neither was
+//  TWENTY ROWS LEFT THIS LIST ON 2026-09-11 (task-995fc7be51dab99e) AND THAT IS
+//  THE POINT OF THE ROW: each was a walk CONVERTED to `v.querySelectorAll(…)`
+//  off `section.view:not([hidden])`, leg by leg, with the owning leg re-run
+//  driven and its printed population unchanged — the wave-24 test, which is that
+//  a conversion is only a finding if the leg still measures what it measured.
+//  What is left is TWO rows, each carrying a written reason, and the reason is
+//  the register's whole contract now: a row that says only `latent` no longer
+//  parses (registerDrift's `reasonless` arm reds on it).
+//
+//  TWO ROWS LEFT THIS LIST EARLIER ON 2026-09-11 (task-39ebd948f40660e3) and neither was
 //  a fix to the exposure: `.attention-row .attention-acts` and `.instances-grid
 //  .instance-card` were both READINESS GATES converted to count the population
 //  they wait for, scoped to `section.view:not([hidden])`. A scoped walk is not
@@ -222,41 +231,31 @@ export function censusTally(walks) {
 //  scenario), so their columns are UNMEASURED rather than clean; the leg prints
 //  that line every run rather than letting a hole read as a zero.
 export const RESIDUE_REGISTER = [
-  { selector: ".attention-row", views: ["view-overview"], legs: "GR109-attention-row-dead-rule, W20-attention-name-column", status: "latent" },
-  { selector: ".attention-row .attention-name", views: ["view-overview"], legs: "W20-attention-name-column", status: "latent" },
-  { selector: ".attention-row .status-pill-detail", views: ["view-overview"], legs: "GR109-attention-row-dead-rule, W18-overview-card-pill", status: "latent" },
-  { selector: ".copy-btn", views: ["view-instance", "view-site"], legs: "W21-inst-head-320-copy-reachable", status: "latent" },
-  { selector: ".detail-grid--instance", views: ["view-instance"], legs: "W26-instance-track-min-content, W27-failed-retry-reachable-after-flick", status: "latent" },
-  { selector: ".detail-head .fleet-url", views: ["view-site"], legs: "W14-site-detail-phone-band", status: "latent" },
-  { selector: ".detail-head-main", views: ["view-instance"], legs: "W21-inst-head-320-copy-reachable", status: "latent" },
-  { selector: ".detail-main", views: ["view-instance", "view-site"], legs: "W26-instance-track-min-content", status: "latent" },
-  { selector: ".detail-rail", views: ["view-instance", "view-site"], legs: "W13-detail-route-band", status: "latent" },
-  { selector: ".detail-rail .status-pill", views: ["view-site"], legs: "W13-detail-route-band", status: "latent" },
-  { selector: ".detail-title-row h1", views: ["view-instance"], legs: "W21-detail-url-text-page-bound", status: "latent" },
-  { selector: ".detail-url-text", views: ["view-instance"], legs: "W21-detail-url-text-page-bound", status: "latent" },
-  { selector: ".fleet-row", views: ["view-overview", "view-providers"], legs: "W15-fleet-row-text-bounded, W35-hash-nav-hidden-view-residue", status: "latent" },
-  { selector: ".inst-tab[aria-current=\"page\"]", views: ["view-instance"], legs: "W13-detail-route-band", status: "latent" },
-  { selector: ".inst-tabs", views: ["view-instance"], legs: "W21-inst-head-320-copy-reachable", status: "latent" },
-  { selector: ".instance-card-head", views: ["view-overview"], legs: "W18-overview-card-pill", status: "latent" },
-  { selector: ".instance-card-head .status-pill-detail", views: ["view-overview"], legs: "W18-overview-card-pill", status: "latent" },
-  { selector: ".instance-card-url", views: ["view-overview"], legs: "W18-overview-card-pill", status: "latent" },
-  { selector: ".instances-grid", views: ["view-overview"], legs: "W12-narrow-viewport-truth", status: "latent" },
-  { selector: ".site-name", views: ["view-sites", "view-instance"], legs: "W26-instance-track-min-content", status: "latent" },
-  { selector: ".site-row", views: ["view-sites", "view-instance"], legs: "W50-site-row-three-hosts-cruel-by-fixture", status: "latent" },
-  // task-02a521fea7beeb2f: the pin-badge walk in the W21 detail leg is document-wide by
-  // the same full-load entry as its siblings above; a hidden view-instance keeps one
-  // Autoupdate badge painted after the tour. Latent for the same reason as .detail-url-text.
-  { selector: ".update-panel-body .rail-row .v .badge", views: ["view-instance"], legs: "W21-detail-url-text-page-bound", status: "latent" },
+  { selector: ".fleet-row", views: ["view-overview", "view-providers"], legs: "W15-fleet-row-text-bounded, W35-hash-nav-hidden-view-residue", status: "latent", reason: "THE ORIGINAL FINDING (cch-w24-s5): #view-overview paints activity rows under the same class, so the document-wide count runs ahead of the in-view one the moment a person hash-navigates. W15's measuring walk is already scoped; what is left document-wide is the pair of CONTROLS that print the difference — W15's `docRows` beside its scoped `rows`, and W35's own probe. Scoping those would delete the measurement, which is why this row exists rather than a conversion" },
+  { selector: ".site-row", views: ["view-sites", "view-instance"], legs: "W50-site-row-three-hosts-cruel-by-fixture", status: "latent", reason: "the site rows W50 drives across three hosts; view-instance's embedded site list paints rows under the same class. LEFT DOCUMENT-WIDE ON PURPOSE for now: W50 landed in the same wave as this sweep and its three-host cell table is the freshest code in the file, so converting it here would put a conversion and a new leg in one PR with no way to tell which moved a number. It is the next conversion, not a permanent exemption" },
 ];
 
 /**
  * Compare a measured exposure map against RESIDUE_REGISTER.
  * `measured` is `{ [selector]: { hidden: <count>, views: [<view id>, …] } }`.
- * Returns `{ unregistered, stale, moved, ok }` — all four arrays of strings.
+ * Returns `{ unregistered, stale, moved, reasonless, ok }` — all five arrays of
+ * strings.
+ *
+ * `reasonless` IS A FIFTH RED ARM AND IT IS NOT DECORATION (task-995fc7be51dab99e).
+ * The criterion this register answers is "SCOPED, or kept document-wide WITH A
+ * WRITTEN REASON". A row carrying only `status: "latent"` discharges neither
+ * half: it records that a walk reaches a hidden view and says nothing about why
+ * that is the right thing for it to do. A register whose rows can be added
+ * without a sentence is a place to park a finding, so the absence of the
+ * sentence reds — here, statically, in the same pass as the other three arms,
+ * and not only in the browser leg.
  */
 export function registerDrift(measured, register = RESIDUE_REGISTER) {
   const reg = new Map(register.map((r) => [r.selector, r]));
   const unregistered = [], stale = [], moved = [], ok = [];
+  const reasonless = register
+    .filter((r) => typeof r.reason !== "string" || r.reason.trim().length < 20)
+    .map((r) => `${r.selector} — registered as exposed in ${r.views.join("/")} with no written reason (a one-line \`reason:\` saying why this walk stays document-wide is what the row owes)`);
   for (const [selector, m] of Object.entries(measured)) {
     const r = reg.get(selector);
     if (m.hidden > 0 && !r) { unregistered.push(`${selector} — ${m.hidden} match(es) in hidden ${m.views.join("/")}`); continue; }
@@ -270,7 +269,7 @@ export function registerDrift(measured, register = RESIDUE_REGISTER) {
     const m = measured[r.selector];
     if (!m || m.hidden === 0) stale.push(`${r.selector} — registered as exposed in ${r.views.join("/")}, measured 0 matches in any hidden view`);
   }
-  return { unregistered, stale, moved, ok };
+  return { unregistered, stale, moved, reasonless, ok };
 }
 
 /**
@@ -350,6 +349,20 @@ export function viewHostOfIds(indexHtml) {
 //    · `counted-in-leg` — the owning leg also walks the SAME selector with
 //                         `querySelectorAll`, i.e. it prints the population.
 //
+//  A JURISDICTION NOTE, AND IT IS A REAL COST (task-995fc7be51dab99e). Both
+//  halves of this file count `document.querySelector(All)?(` sites and nothing
+//  else — that is the pattern, stated at the top. So the SCOPE half's own
+//  remedy, rewriting a walk as `v.querySelector(…)` off the live view, moves
+//  that walk OUT OF THIS HALF'S JURISDICTION: twelve singular walks were scoped
+//  under this row's task and their SINGULAR_REGISTER rows went stale in the same
+//  pass, correctly, because no `document.` walk matches them any more. The
+//  cardinality question those rows answered is not answered by anything now.
+//  That is a narrowing of this instrument, it is written here rather than left
+//  to be rediscovered, and the remedy is to teach `censusWalks` the scoped
+//  idiom — deliberately NOT done here, because `v` is also an ordinary loop
+//  variable in this guard and a naive second pattern would census element
+//  handles as walks.
+//
 //  WHAT THIS CENSUS DOES NOT CLAIM: it reads bytes, so it cannot tell you that a
 //  population really is 1 on a shipped fixture. Only a run can, which is why the
 //  discharge this file prefers is `counted-in-leg` — a number in the ok-line,
@@ -388,27 +401,15 @@ export const SINGULAR_REGISTER = [
   { leg: "W12-narrow-viewport-truth", selector: ".topbar", reason: "the class-only FALLBACK arm of `header.topbar` in the elementFromPoint probe — one topbar, and the probe tries the chrome spelling first" },
 
   // ── GR109 / W18 / W20: the overview's attention rows and cards ──
-  { leg: "GR109-attention-row-dead-rule", selector: ".attention-row .status-pill-detail", reason: "readiness for the pill cells; the measurement below walks every `.attention-row .status-pill-detail` with querySelectorAll" },
-  { leg: "W18-overview-card-pill", selector: ".instance-card-head .status-pill-detail", reason: "readiness only; this leg's cells walk the pills plurally and fail per pill" },
-  { leg: "W20-attention-name-column", selector: ".attention-row .attention-name", reason: "readiness only; the column measurement below is plural over the same class" },
 
   // ── W12: the overview grid and the notification matrix ──
-  { leg: "W12-narrow-viewport-truth", selector: ".instances-grid", reason: "singleton-by-layout: one grid per overview screen, and the cards inside it are walked plurally off THIS element (`g.querySelectorAll('.instance-card')`) rather than off the document" },
   { leg: "W12-narrow-viewport-truth", selector: ".set-matrix", reason: "singleton-by-layout: the notifications screen paints one matrix; the scroll probes drive that element and read `.set-matrix-event` out of it" },
   { leg: "W12-narrow-viewport-truth", selector: ".set-matrix .set-matrix-grid .set-matrix-event", reason: "readiness: waits for the first event cell to prove the matrix rendered; the overflow measurement scrolls the matrix, not a cell" },
 
   // ── W13 / W14 / W21 / W26 / W27: the detail screens ──
   { leg: "W13-detail-route-band", arg: "'${r.ready}') && (function(){var v=document.quer", reason: "readiness built from the route table's own `ready` string — one predicate per route, each asking only whether that screen painted" },
-  { leg: "W13-detail-route-band", selector: ".inst-tab[aria-current=\"page\"]", reason: "`aria-current=\"page\"` is single-valued per tablist by the ARIA contract: a second current tab is a tab-state defect, not a population" },
-  { leg: "W14-site-detail-phone-band", selector: ".detail-head .fleet-url", reason: "singleton-by-layout: one URL line in the site detail head" },
-  { leg: "W21-inst-head-320-copy-reachable", selector: ".detail-head-main", reason: "singleton-by-layout: one head block per detail screen" },
-  { leg: "W21-detail-url-text-page-bound", selector: ".detail-url-text", reason: "singleton-by-layout: one instance URL per detail screen (RESIDUE_REGISTER above carries it for the HIDDEN-view axis, which is a different question)" },
-  { leg: "W21-detail-url-text-page-bound", selector: ".detail-title-row h1", reason: "singleton-by-layout: one page title per detail screen" },
   { leg: "W21-cruel-content-text-bounded", arg: "'${route.ready}') && (function(){var v=document.", reason: "readiness built from the route table's own `ready` string, one per cruel-content route" },
   { leg: "W21-token-reveal-readable", selector: ".token-ab", reason: "one door: the create-token form's single always-on checkbox, ticked before submit" },
-  { leg: "W26-instance-track-min-content", selector: ".detail-main", reason: "singleton-by-layout: one main column per detail grid, measured as the track it is" },
-  { leg: "W26-instance-track-min-content", selector: ".detail-grid--instance", reason: "singleton-by-layout: one instance detail grid per screen, and it is the grid whose track widths this leg measures" },
-  { leg: "W27-failed-retry-reachable-after-flick", selector: ".detail-grid--instance", reason: "readiness: waits for the instance grid before the flick; the same single grid" },
   { leg: "W27-failed-retry-reachable-after-flick", selector: ".bp-timeline", reason: "readiness: one timeline per instance detail screen" },
 
   // ── W29: the deploy rail ──
@@ -419,7 +420,6 @@ export const SINGULAR_REGISTER = [
 
   // ── W22 / W24 / W25 / W26: modals, credential sheets and the launch wizard ──
   { leg: "W22-shared-modal-card-min-content-floor", selector: "#modal-root .modal-card", reason: "one door: the open modal's single card, polled for running animations before it is measured" },
-  { leg: "W22-url-remedy-pricing", selector: ".instance-card-url", reason: "readiness only: waits for the first address node to paint; the sweep itself is plural and scoped to the visible view, and prints every address it measured" },
   { leg: "W24-cred-dialog-button-alive", selector: "#modal-root .launch-connect-provider", reason: "one door: the connect button inside the open modal" },
   { leg: "W24-cred-dialog-button-alive", selector: "#provider-connect [data-connect-submit]", reason: "one door: the providers screen's single connect-submit control, under an id host" },
   { leg: "W25-launch-catalog-after-connect", arg: "${JSON.stringify(scope)}+' .launch-connect-provi", reason: "one door, scope-parameterised: the same connect button reached under whichever host (`#modal-root` / `#view-overview`) the cell drives" },
@@ -519,6 +519,164 @@ export function singularCensus(source, register = SINGULAR_REGISTER) {
   return { sites, tally, unregistered, stale, lines };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE UNRESOLVED HALF — THE WALKS THE BYTES CANNOT ANSWER FOR
+//  (task-995fc7be51dab99e)
+// ─────────────────────────────────────────────────────────────────────────────
+//  `censusWalks` classifies a walk by reading its selector literal. A walk whose
+//  argument is built at runtime — a `${…}` interpolation, a `JSON.stringify(x)`,
+//  a bare variable — has no literal to read, so it comes back `kind:"unresolved"`
+//  and the SCOPE census above simply does not speak for it. That was the honest
+//  thing to do and it is not the finishing move: the leg printed "15 UNRESOLVED
+//  and NAMED" every run, which tells a reader the sites exist and nothing about
+//  whether any of them can reach a view the person is not looking at.
+//
+//  A HUMAN CAN READ WHAT A REGEX CANNOT. Each site below was classified by
+//  following the expression back to the table or the parameter that feeds it and
+//  writing down what the selector can actually BE:
+//
+//    · "id-anchored"       — every value the expression can take begins with a
+//                            literal `#id` host written IN THE EXPRESSION
+//                            (`'#modal-root ' + sel`, `'#provider-connect [...]'`).
+//                            The interpolated part cannot move the walk out of
+//                            that host, so no second view can hold a match.
+//    · "live-view"         — the expression's own prefix is
+//                            `section.view:not([hidden])`.
+//    · "document-wide"     — at least one value the expression takes is a bare
+//                            class/element. This is the class that OWES the
+//                            scoping remedy, exactly like a literal one.
+//    · "table-literal"     — the interpolation is `JSON.stringify(x)` over a
+//                            table of LITERAL selectors declared in this file.
+//                            Each such value is written out in `values` below,
+//                            and `scope` is the WEAKEST of them, so a table that
+//                            grows a bare-class row is a change to this row.
+//    · "caller-classified" — a prologue HELPER whose selector is entirely its
+//                            caller's (`clickOne(sel)`, `shown(sel)`). The
+//                            helper reaches wherever it is handed; the scope
+//                            question belongs to each call site, which the
+//                            SINGULAR_REGISTER above already keys separately.
+//
+//  RATCHETED IN BOTH DIRECTIONS, like every other register in this file: a
+//  runtime-built walk with no row REDS (`UNREGISTERED UNRESOLVED`), and a row no
+//  site in the guard matches REDS (`STALE UNRESOLVED`). Keyed by leg + the same
+//  48-char collapsed argument snippet `censusWalks` already cuts, never by line.
+export const UNRESOLVED_REGISTER = [
+  // ── prologue helpers: the selector is the caller's, not the helper's ──
+  {
+    leg: "(prologue)", arg: "'#modal-root ${sel}')`;", scope: "id-anchored",
+    reason: "`openWith(sel)` writes the literal `#modal-root ` host itself and interpolates only the tail, so every walk it builds is anchored under the one modal root — a second view cannot hold a match unless the id is duplicated",
+  },
+  {
+    leg: "(prologue)", arg: "${JSON.stringify(sel)});if(!e) throw new Error('", scope: "caller-classified",
+    reason: "`clickOne(sel)` reaches wherever its caller points it; the scope question is each call site's, and SINGULAR_REGISTER above keys those separately rather than crediting the helper with one answer",
+  },
+  {
+    leg: "(prologue)", arg: "'${sel}')).some(function(e){var r=e.getBoundingC", scope: "caller-classified",
+    reason: "`shown(sel)` is the paint-check floor's builder — same as `clickOne`: the selector is the caller's, and the floor deliberately requires a LITERAL there so the selector can be derived and paint-checked",
+  },
+
+  // ── readiness strings built from a route table's own `ready` field ──
+  {
+    leg: "W13-detail-route-band", arg: "'${r.ready}') && (function(){var v=document.quer", scope: "document-wide",
+    values: [".detail-grid--instance", "#instance-tabpanel", ".detail-grid", ".fleet-row"],
+    reason: "BAND_ROUTES `ready` is a mix: two id-anchored, two bare classes. Readiness only, and the SAME expression already asserts `section.view:not([hidden])` has the routed id, so a hidden view satisfying the class half cannot make the conjunction true on the wrong screen — but the class half alone is document-wide and the conjunction is what saves it",
+  },
+  {
+    leg: "W21-cruel-content-text-bounded", arg: "'${route.ready}') && (function(){var v=document.", scope: "document-wide",
+    values: [".fleet-row", ".instance-card", ".detail-title-row", "#sites-body .site-row"],
+    reason: "the cruel-content route table's own `ready`, same shape and same saving conjunction as W13's above",
+  },
+  {
+    leg: "W50-site-row-three-hosts-cruel-by-fixture", arg: "'${t.ready}') && (function(){var v=document.quer", scope: "id-anchored",
+    values: ["#sites-body .site-row", "#instance-sites .site-row"],
+    reason: "every host cell's `ready` is anchored under an id (`#sites-body` / `#instance-sites`), so this readiness cannot be satisfied by a second view even without the conjunction it also carries",
+  },
+  {
+    leg: "W20-type-floor-instances", arg: "${JSON.stringify(rt.pop)}).length`)}`);", scope: "id-anchored",
+    values: ["#overview-body .instance-card", "#sites-body .site-row", "section.view:not([hidden]) .fleet-row"],
+    reason: "the POPULATION print, over the route table's `pop`: two id-anchored hosts and one already scoped to the live view — none of the three can count a hidden screen's rows",
+  },
+
+  // ── measurement walks built from a table of literal selectors ──
+  {
+    leg: "W22-2fa-enroll-phone-band", arg: "q));` +", scope: "document-wide",
+    values: [".a2f-qr", "#a2f-secret", "#a2f-copy-secret", "#a2f-confirm"],
+    reason: "A2F_HOSTS is three id-anchored controls and one bare `.a2f-qr`; the enroll sheet is a MODAL, so the four controls only ever exist while it is open and no `section.view` paints them — the bare arm is document-wide by spelling and unreachable by a second view in practice",
+  },
+  {
+    leg: "W29-deploy-rail-live-url-wrap", arg: "sel)).map(function(a){` +", scope: "document-wide",
+    values: [".deploy-rail-live .site-open", ".detail-head .fleet-url .site-open", ".deploy-rail-live .copy-btn"],
+    reason: "`read(sel, boxSel)` is handed bare-class paths inside this leg; two of them already carry RESIDUE_REGISTER rows for their singular twins, and the plural read here inherits the same hidden-detail-view residue",
+  },
+  {
+    leg: "W23-cred-remediation-reachable", arg: "'#provider-connect [data-connect-kind=\"${cell.ki", scope: "id-anchored",
+    reason: "the segment picker inside the providers screen's `#provider-connect` card: the id host is literal and only the `data-connect-kind` value interpolates",
+  },
+  {
+    leg: "W25-launch-catalog-after-connect", arg: "${JSON.stringify(scope)}+' .launch-connect-provi", scope: "id-anchored",
+    values: ["#modal-root .launch-connect-provider", "#view-overview .launch-connect-provider"],
+    reason: "`lccConnect(scope, …)` is called with exactly two scopes and both are literal id hosts; the door is reached under whichever one the cell drives",
+  },
+  {
+    leg: "W21-cruel-content-text-bounded", arg: "${JSON.stringify(route.sel)})).forEach(function(", scope: "document-wide",
+    values: [".fleet-url", ".instance-card-name", ".detail-title-row .status-pill-detail, .bp-tl-fail", ".site-host", ".site-name", ".fleet-name", ".fleet-meta"],
+    reason: "THE MEASUREMENT ITSELF, over bare classes — the largest unresolved exposure in the file. `.site-name` already carries a RESIDUE_REGISTER row for its literal twin, so this table's rows are exposed in the same way and by the same mechanism; the leg enters by full load, so it is latent for the same reason every registered row is",
+  },
+  {
+    leg: "W21-cruel-content-text-bounded", arg: "hsel)).forEach(function(e,i){` +", scope: "document-wide",
+    values: ["(route.heights[] — bare classes drawn from the same rows as route.sel)"],
+    reason: "the line-box half of the same measurement, over the same table's `heights` paths: bare classes, exposed exactly as `route.sel` is",
+  },
+  {
+    leg: "W21-cruel-content-text-bounded", arg: "tsel)).forEach(function(e,i){` +", scope: "document-wide",
+    values: ["(route.tokens[] — bare classes drawn from the same rows as route.sel)"],
+    reason: "the torn-token half of the same measurement, over the same table's `tokens` paths: bare classes, exposed exactly as `route.sel` is",
+  },
+
+  // ── the residue census's own walk ──
+  {
+    leg: "W35-hash-nav-hidden-view-residue", arg: "s).length;}catch(err){e.err=String(err&&err.mess", scope: "document-wide",
+    reason: "DOCUMENT-WIDE ON PURPOSE AND IT IS THE SUBJECT: this is the residue census walking every censused selector against the whole document, then against each hidden `section.view` in turn. Scoping it would delete the measurement",
+  },
+];
+
+/** An unresolved site's stable identity: owning leg + the collapsed argument. */
+export function unresolvedKey(w) {
+  return `${w.leg} :: «${w.arg}»`;
+}
+
+/**
+ * Every runtime-built walk in `source`, matched against UNRESOLVED_REGISTER.
+ * Returns `{ sites, byScope, unregistered, stale, lines }`. Both drift arms are
+ * fatal to `runCensusCli`, in both directions (D180).
+ */
+export function unresolvedCensus(source, register = UNRESOLVED_REGISTER) {
+  const reg = new Map(register.map((r) => [unresolvedKey(r), r]));
+  const sites = censusWalks(source)
+    .filter((w) => w.kind === "unresolved")
+    .map((w) => {
+      const r = reg.get(unresolvedKey(w));
+      return { ...w, scope: r ? r.scope : null, reason: r ? r.reason : null };
+    });
+
+  const byScope = {};
+  for (const s of sites) byScope[s.scope || "UNCLASSIFIED"] = (byScope[s.scope || "UNCLASSIFIED"] || 0) + 1;
+
+  const unregistered = sites
+    .filter((s) => !s.scope)
+    .map((s) => `${unresolvedKey(s)} (line ${s.line}) — a walk whose selector is built at runtime, with no row saying what it can reach`);
+
+  const reached = new Set(sites.map(unresolvedKey));
+  const stale = register
+    .filter((r) => !reached.has(unresolvedKey(r)))
+    .map((r) => `${unresolvedKey(r)} — registered, but no runtime-built walk in the guard matches it`);
+
+  const lines = sites.map(
+    (s) => `  ${String(s.line).padStart(5)}  ${(s.scope || "UNCLASSIFIED").padEnd(17)}  ${s.leg}  «${s.arg}»`,
+  );
+  return { sites, byScope, unregistered, stale, lines };
+}
+
 /**
  * The three numbers overflow-guard.mjs's header used to carry as hand-typed
  * literals (`68 / 55 / 15` against a file that measures 253 / 224 / 98 — every
@@ -564,6 +722,8 @@ export async function runCensusCli(argv = []) {
   }
   const c = singularCensus(src);
   const g = grepCounts(src);
+  const u = unresolvedCensus(src);
+  const rDrift = registerDrift({}, RESIDUE_REGISTER);
   const verbose = argv.includes("--list");
   process.stdout.write(
     `\nSINGULAR-SELECTOR CENSUS — overflow-guard.mjs\n` +
@@ -575,30 +735,67 @@ export async function runCensusCli(argv = []) {
     `  register rows: ${SINGULAR_REGISTER.length}\n`,
   );
   if (verbose) process.stdout.write(c.lines.join("\n") + "\n");
+  // THE RUNTIME-BUILT HALF. These sites are outside the byte census by
+  // construction; printing the count without the classification is what let
+  // "15 UNRESOLVED and NAMED" stand for an answer for a wave.
+  process.stdout.write(
+    `\nRUNTIME-BUILT SELECTOR CENSUS — the walks the bytes cannot classify\n` +
+    `  sites: ${u.sites.length}\n` +
+    Object.entries(u.byScope).sort().map(([k, v]) => `    ${k.padEnd(17)} ${v}\n`).join("") +
+    `  register rows: ${UNRESOLVED_REGISTER.length}\n`,
+  );
+  if (verbose) process.stdout.write(u.lines.join("\n") + "\n");
+  // THE RESIDUE REGISTER'S REASON ARM, checked STATICALLY. The other three arms
+  // need a browser (they compare against a measurement); this one is a property
+  // of the register's own text and belongs in the cheap job.
+  process.stdout.write(
+    `\nRESIDUE REGISTER — ${RESIDUE_REGISTER.length} document-wide walk(s) kept document-wide, ` +
+    `${RESIDUE_REGISTER.length - rDrift.reasonless.length} with a written reason\n`,
+  );
   if (!c.sites.length) {
     process.stdout.write(`view-scope-census: REFUSED — ZERO singular walks in a guard that is ${src.split("\n").length} lines long. The call pattern stopped matching how this file spells its walks; an empty census is not a clean one\n`);
     return 2;
   }
   let bad = 0;
-  for (const u of c.unregistered) {
+  for (const x of c.unregistered) {
     bad++;
-    process.stdout.write(`  UNREGISTERED  ${u}\n`);
+    process.stdout.write(`  UNREGISTERED  ${x}\n`);
   }
   for (const st of c.stale) {
     bad++;
     process.stdout.write(`  STALE         ${st}\n`);
   }
+  for (const x of u.unregistered) {
+    bad++;
+    process.stdout.write(`  UNREGISTERED UNRESOLVED  ${x}\n`);
+  }
+  for (const st of u.stale) {
+    bad++;
+    process.stdout.write(`  STALE UNRESOLVED         ${st}\n`);
+  }
+  for (const x of rDrift.reasonless) {
+    bad++;
+    process.stdout.write(`  REASONLESS RESIDUE ROW   ${x}\n`);
+  }
   if (bad) {
     process.stdout.write(
       `\nview-scope-census: ${c.unregistered.length} unregistered singular walk(s), ${c.stale.length} stale ` +
-      `register row(s). A singular walk owes either a PRINTED POPULATION in its leg's ok-line (walk the same ` +
+      `register row(s), ${u.unregistered.length} unclassified runtime-built walk(s), ${u.stale.length} stale ` +
+      `runtime-built row(s), ${rDrift.reasonless.length} residue row(s) with no written reason. ` +
+      `A runtime-built walk owes a row in UNRESOLVED_REGISTER saying what its selector can BE — follow the ` +
+      `expression back to the table or the parameter that feeds it. A residue row owes one line saying why ` +
+      `the walk stays document-wide; the alternative is to scope it to \`${LIVE_VIEW_SELECTOR}\`. ` +
+      `A singular walk owes either a PRINTED POPULATION in its leg's ok-line (walk the same ` +
       `selector with querySelectorAll, scoped to \`${LIVE_VIEW_SELECTOR}\`) or a one-line reason in ` +
       `SINGULAR_REGISTER. A register row that matches no walk is fatal in the same way and for the same reason ` +
       `(D180): a reason nobody can reach certifies nothing — delete it.\n`,
     );
     return 1;
   }
-  process.stdout.write(`view-scope-census: every singular walk is accounted for, and every register row is reachable\n`);
+  process.stdout.write(
+    `view-scope-census: every singular walk is accounted for, every runtime-built walk is classified, ` +
+    `every document-wide walk kept document-wide carries a written reason, and every register row is reachable\n`,
+  );
   return 0;
 }
 
