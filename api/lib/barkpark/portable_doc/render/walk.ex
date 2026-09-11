@@ -442,6 +442,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       if Map.get(n, "color"),
         do: ["color:#{escape_attr(to_string(Map.get(n, "color")))}" | out],
         else: out
+
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
     out = body_type(n, pal) ++ Enum.reverse(out)
 

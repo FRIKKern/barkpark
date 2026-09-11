@@ -271,7 +271,8 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
   # arithmetic — safe iff both operands are
   defp classify_node({op, _, [l, r]}, ctx) when op in [:+, :-, :*, :/] do
     case {classify(l, bump(ctx)), classify(r, bump(ctx))} do
-      {a, b} when a in [:numeric, :module_attr, :literal] and b in [:numeric, :module_attr, :literal] ->
+      {a, b}
+      when a in [:numeric, :module_attr, :literal] and b in [:numeric, :module_attr, :literal] ->
         :numeric
 
       _ ->
@@ -309,7 +310,9 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
       end)
       |> verdict(:allowlisted)
     else
-      branches |> Enum.map(fn {_k, b} -> classify(last_expr(b), bump(ctx)) end) |> verdict(:branches)
+      branches
+      |> Enum.map(fn {_k, b} -> classify(last_expr(b), bump(ctx)) end)
+      |> verdict(:branches)
     end
   end
 
@@ -367,10 +370,20 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
   defp classify_node({{:., _, [{:__aliases__, _, [:Map]}, f]}, _, [subject | _]}, ctx)
        when f in [:get, :fetch, :fetch!, :get_lazy] do
     case classify(subject, bump(ctx)) do
-      v when v in [:engine_call, :engine_module, :engine_table, :palette, :module_attr,
-              :literal_list, :literal] ->
+      v
+      when v in [
+             :engine_call,
+             :engine_module,
+             :engine_table,
+             :palette,
+             :module_attr,
+             :literal_list,
+             :literal
+           ] ->
         :engine_table
-      _ -> :unproven
+
+      _ ->
+        :unproven
     end
   end
 
@@ -411,7 +424,11 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
       fun in @numeric_fns ->
         :numeric
 
-      name |> String.split(".") |> Enum.drop(-1) |> Enum.join(".") |> Kernel.in(@engine_modules) ->
+      name
+      |> String.split(".")
+      |> Enum.drop(-1)
+      |> Enum.join(".")
+      |> Kernel.in(@engine_modules) ->
         :engine_module
 
       name in @passthrough ->
@@ -491,8 +508,11 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
     collect(clause.body, fn
       {:case, _, [subject, [do: clauses]]} when is_list(clauses) ->
         if Enum.any?(clauses, fn
-             {:->, _, [pattern, _body]} -> MapSet.member?(pattern_vars(pattern), Atom.to_string(var))
-             _ -> false
+             {:->, _, [pattern, _body]} ->
+               MapSet.member?(pattern_vars(pattern), Atom.to_string(var))
+
+             _ ->
+               false
            end),
            do: [subject],
            else: []
@@ -538,7 +558,9 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeScan do
             sites
             |> Enum.map(fn %{args: args, clause: caller} ->
               case Enum.at(args, idx) do
-                nil -> :unproven
+                nil ->
+                  :unproven
+
                 arg ->
                   classify(arg, %{
                     ctx

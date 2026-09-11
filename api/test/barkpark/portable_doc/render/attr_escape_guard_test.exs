@@ -91,8 +91,10 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeGuardTest do
       "\"bp-sheet__td\" joined with sheet_default_align_class/1's literal class or nil",
     {"walk.ex", "data-valueref-state", "state"} =>
       "one of the literals \"resolved\" / \"drift\" / \"dangling\" — valueref/2's case returns it in a tuple with the escaped text",
-    {"walk.ex", "style", "bg"} => "Util.tone_palette/1's {bg, fg} hex pair from the TokensGen callout table",
-    {"walk.ex", "style", "fg"} => "Util.tone_palette/1's {bg, fg} hex pair from the TokensGen callout table",
+    {"walk.ex", "style", "bg"} =>
+      "Util.tone_palette/1's {bg, fg} hex pair from the TokensGen callout table",
+    {"walk.ex", "style", "fg"} =>
+      "Util.tone_palette/1's {bg, fg} hex pair from the TokensGen callout table",
     {"walk.ex", "style", "box_style(Map.get(n, \"style\"))"} =>
       "box_style/1 wraps EVERY value it emits in escape_attr/1 (maybe_flex/maybe_push/maybe_border) — the raw node map never reaches the attribute",
     {"walk.ex", "style", "extra"} =>
