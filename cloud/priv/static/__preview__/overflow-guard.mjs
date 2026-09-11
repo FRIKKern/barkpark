@@ -7053,6 +7053,29 @@ async function main() {
           scens: [
             { scen: "fleet-cruel-content" },
             { scen: "mixed-fleet", hash: "#instance/5b2c1e00-0000-4000-8000-0000000000a1" },
+            // ── THE PROSE CELL, and it is here because WITHOUT IT THE TORN-
+            //    TOKEN BOUND BELOW IS ITSELF GREEN BY CONSTRUCTION — the exact
+            //    fault this row was filed about, reproduced one layer up.
+            //    MEASURED, not feared: with `word-break: break-all` added to
+            //    `.bp-tl-fail` in app.css, the two cells above stayed at
+            //    `3T/0x/1u` at all 11 widths and the whole leg still exited 0.
+            //    The reason is the CRUEL fixture's own shape: `.bp-tl-fail`
+            //    renders `<b>Setup failed.</b> ` + the error, so on the cruel
+            //    screen the only tokens are "Setup", "failed." and one 512-char
+            //    run — and the two short words sit at the START of line 1,
+            //    where they fit whether or not the box breaks at any character.
+            //    A shredding declaration has nothing to shred.
+            //
+            //    `mixed-fleet`'s OTHER failed instance (`…a4`, "Reporting") is
+            //    the population that can lose: its provision_error is ordinary
+            //    PROSE — "verify.login: 500 — Studio never came up" — which
+            //    with the `Setup failed.` prefix wraps on its own at the phone
+            //    widths, so a break-at-any-character rule lands a line boundary
+            //    INSIDE a word that would have fit. This cell is a KIND cell by
+            //    the leg's own naming rule (the scenario is not /cruel/), which
+            //    is correct: the claim it buys is about ORDINARY copy, and the
+            //    kind ceiling keeps it honest.
+            { scen: "mixed-fleet", hash: "#instance/5b2c1e00-0000-4000-8000-0000000000a4" },
           ],
           cap: "provision_jobs.error is UNBOUNDED at every layer — a POSTGRES :text column (the `modify :error, :text` migration under cloud/priv/repo/migrations) and ProvisionJob.changeset (registry/provision_job.ex) casts :error with ZERO validate_length. The row's cruelMin is therefore the smallest MEASURED biting length, not a legal maximum",
           class: "UNCAPPED-DERIVED",
@@ -7095,7 +7118,58 @@ async function main() {
           //    lives in `.status-pill-detail`. A bound on the detail alone
           //    would score clean on a capsule that stacked 24px of its own.
           heights: [".bp-tl-fail", ".detail-title-row .status-pill", ".detail-title-row .status-pill-detail"],
-          predicate: "a person whose instance failed to provision can open its own screen, READ the whole reason, and still use the console — instead of getting an ellipsis in the header and a page dragged 3.7k pixels sideways",
+          // ── THE TORN-TOKEN AXIS (cchi-w25-bl-w21-bp-tl-fail-cell-is-an-
+          //    identity-under-anywhere). READ THIS BEFORE TRUSTING THE WIDTH
+          //    CELL ABOVE IT.
+          //
+          //    THE WIDTH CELL ON `.bp-tl-fail` IS AN IDENTITY, AND IT SAYS SO
+          //    HERE RATHER THAN IN A CHARTER. The per-element assertion this
+          //    leg runs is `scrollWidth > clientWidth`. Under the
+          //    `overflow-wrap: anywhere` wave 24 shipped on this box (app.css,
+          //    the `.bp-tl-fail` block), EVERY unbreakable run is broken at the
+          //    content edge, so `scrollWidth === clientWidth` holds by
+          //    CONSTRUCTION for any string of any length — and the same
+          //    declaration floors the box's min-content at one glyph, so
+          //    `documentElement.scrollWidth` cannot move either. MEASURED, not
+          //    argued: raising `CRUEL_PROVISION_ERROR_LEN` from 512 to 5000 (a
+          //    single unbreakable alnum run, 39132px of ink against 3993px)
+          //    left this leg's WIDTH half BYTE-IDENTICAL — the #instance width
+          //    row, the per-host populations and the "cells clean" line all
+          //    unchanged, exit 0 both runs. (The TIGHT-FIT HEIGHT lines added
+          //    after the original finding DO move — `.bp-tl-fail` 398.88px/20
+          //    line boxes to 3413.88px/180 at 320 — and stay green, because
+          //    that bound is a RATIO by design (D206). The width cell is the
+          //    identity; the height cell is merely length-proportional.)
+          //    `cruelMin: 512` does not save it: that is a `>=` FLOOR, so a 10x
+          //    lengthening sails through. On THIS host the width cell certifies
+          //    that a remedy exists; it certifies NOTHING about length, and a
+          //    green there is not a green anyone paid for.
+          //
+          //    SO THE CELL IS GIVEN A QUESTION IT CAN LOSE, and it is the one
+          //    question `anywhere` can actually get wrong: does the box break a
+          //    word THAT WOULD HAVE FIT? `anywhere` is correct exactly when the
+          //    token it broke could not fit its line whole; a box configured to
+          //    break at any character (`word-break: break-all`, `line-break:
+          //    anywhere`) shreds ordinary prose while scoring perfectly on
+          //    every width, height and page assertion in this file. "Setup
+          //    failed." is 80px against a 226px content box at 320 — app.css's
+          //    own w24-s2 comment CLAIMS it renders on exactly one line box,
+          //    and until now nothing asserted it.
+          //
+          //    THE PREDICATE IS TWO-VALUED, and this is the correction any port
+          //    of the D253 line-box instrument must carry or it reds on every
+          //    CORRECT wrap. A naive per-token rule calls the 512-char run
+          //    "torn across 19 line boxes", which is `anywhere` doing its job.
+          //    So each token's INK is summed from its own client rects and
+          //    compared to the host's CONTENT width:
+          //        ink <= content  and boxes > 1  -> TORN        (asserted)
+          //        ink >  content  and boxes > 1  -> UNFITTABLE  (reported,
+          //                                                       never asserted)
+          //    512ch = ~3993px of ink, 5000ch = ~39132px: both UNFITTABLE at
+          //    every width here, both reported, neither asserted. The short
+          //    prose tokens are the ones the assertion binds.
+          tokens: [".bp-tl-fail"],
+          predicate: "a person whose instance failed to provision can open its own screen, READ the whole reason, and still use the console — instead of getting an ellipsis in the header and a page dragged 3.7k pixels sideways. And the prose around the machine string is not SHREDDED to buy that: no word that would have fit its line is broken anyway",
         },
         // ── cch-w23-bl-site-domains-cruel-family: THE SITE LIST'S TWO CAPS ───
         //    The first families added to this table since the s4 shape landed,
@@ -7357,15 +7431,26 @@ async function main() {
       const CRUEL_SCENS = [...new Set(CRUEL_ROUTES.flatMap((r) => cruelCells(r).map((c) => c.scen)))];
       const cellCount = CRUEL_ROUTES.reduce((n, r) => n + cruelCells(r).length, 0) * CRUEL_WIDTHS.length * 2;
       const HEIGHT_HOSTS = [...new Set(CRUEL_ROUTES.flatMap((r) => r.heights || []))];
+      const TOKEN_HOSTS = [...new Set(CRUEL_ROUTES.flatMap((r) => r.tokens || []))];
       process.stdout.write(
         `\n${D} — ${CRUEL_SCENS.length} scenarios x ${CRUEL_ROUTES.length} routes x ${CRUEL_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells; ${CRUEL_ROUTES.map((r) => r.sel).join(" + ")} scrollWidth vs clientWidth, + documentElement.scrollWidth vs clientWidth` +
-        `${HEIGHT_HOSTS.length ? `, + a TIGHT-FIT HEIGHT bound on ${HEIGHT_HOSTS.join(" / ")}` : ""})\n`,
+        `${HEIGHT_HOSTS.length ? `, + a TIGHT-FIT HEIGHT bound on ${HEIGHT_HOSTS.join(" / ")}` : ""}` +
+        `${TOKEN_HOSTS.length ? `, + a TORN-TOKEN bound on ${TOKEN_HOSTS.join(" / ")} (ink <= content && boxes > 1)` : ""})\n`,
       );
       // A PIXEL, and the comment above the assertion says why it is a pixel.
       const HEIGHT_SLACK = 1;
       let cells = 0, seen = 0, spilled = 0, pageOver = 0, wentKind = 0, wentCruel = 0;
       let heightsSeen = 0, tooTall = 0;
+      // The torn-token population, kept SEPARATE from the width tallies because
+      // the two answer different questions on the same host: `spilled` is "did
+      // the box clip", `tornTokens` is "did the box shred". A run must be able
+      // to print 0/0 on the first and lose on the second.
+      let tokenHostsSeen = 0, tokensSeen = 0, tornTokens = 0, unfittableTokens = 0, maxTokenInk = 0;
+      // Which declared token hosts this run actually PAINTED, counted across
+      // every cell — the population the row-level anti-vacuity refusal below
+      // is scored against.
+      const tokenSeenBySel = new Map();
       // ── PER-HOST POPULATIONS (cchi-w22-bl-cruel-corpus-uncovered-caps-
       //    second-tranche). The aggregate `spilled` is one number over five
       //    families: a new row that measures NOTHING and a new row that
@@ -7400,13 +7485,14 @@ async function main() {
             );
             const row = [];
             const hRow = {};
+            const tkRow = {};
             for (const width of CRUEL_WIDTHS) {
               await setViewport(width);
               const m = await evalJs(
                 `(function(){` +
                 `var v=document.querySelector('section.view:not([hidden])');` +
                 `var d=document.documentElement;` +
-                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0,longest:0,hb:[]};` +
+                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0,longest:0,hb:[],tk:[]};` +
                 `[].slice.call(document.querySelectorAll(${JSON.stringify(route.sel)})).forEach(function(e,i){` +
                 // A node with no text can never clip and must not be counted as
                 // a measured assertion (the vacuous-green vector W20-S3 named on
@@ -7467,6 +7553,54 @@ async function main() {
                 `    var h=e.getBoundingClientRect().height;` +
                 `    var r2=function(x){return Math.round(x*100)/100;};` +
                 `    out.hb.push({sel:hsel,i:i,len:t.length,h:r2(h),lines:lines,lh:r2(lh),lhSrc:lhSrc,pad:r2(pad),bor:r2(bor),need:r2(lines*lh+pad+bor),mh:hs.minHeight});` +
+                `  });` +
+                `});` +
+                // ── THE TORN-TOKEN WALK (two-valued; see `tokens:` on the row)
+                // Same D253 Range mechanism as the height walk above, asked a
+                // different question: not how MANY line boxes the host painted,
+                // but whether any single WHITESPACE TOKEN was split across more
+                // than one of them while its own ink would have fit a line
+                // whole. Range offsets are taken inside ONE text node, so a
+                // token never spans the `<b>`/text-node seam — "failed." and
+                // the machine string are separate tokens, which is what a
+                // reader sees.
+                `[].slice.call(${JSON.stringify(route.tokens || [])}).forEach(function(tsel){` +
+                `  [].slice.call(document.querySelectorAll(tsel)).forEach(function(e,i){` +
+                `    var t=(e.textContent||'').trim(); if(!t) return;` +
+                `    var ts=getComputedStyle(e);` +
+                // CONTENT width, not clientWidth: clientWidth includes padding,
+                // and a token is laid out against the content box. Using the
+                // looser number would call a genuinely-unfittable token TORN by
+                // up to padding-x pixels.
+                `    var content=e.clientWidth-parseFloat(ts.paddingLeft)-parseFloat(ts.paddingRight);` +
+                `    var w2=document.createTreeWalker(e,NodeFilter.SHOW_TEXT,null);` +
+                `    var n2,toks=0,torn=0,unfit=0,bad2=[],maxInk=0;` +
+                `    while((n2=w2.nextNode())){` +
+                `      var s=n2.nodeValue||''; if(!s.trim()) continue;` +
+                `      var re=/\\S+/g,mm;` +
+                `      while((mm=re.exec(s))){` +
+                `        var rg2=document.createRange();` +
+                `        rg2.setStart(n2,mm.index); rg2.setEnd(n2,mm.index+mm[0].length);` +
+                `        var rr=rg2.getClientRects(); var ink=0,tops2={},boxes=0;` +
+                `        for(var q=0;q<rr.length;q++){` +
+                `          if(rr[q].width<=0&&rr[q].height<=0) continue;` +
+                `          ink+=rr[q].width;` +
+                `          var kk=Math.round(rr[q].top*4);` +
+                `          if(!tops2[kk]){tops2[kk]=1;boxes++;}` +
+                `        }` +
+                // A token that painted no rect is not a token this box rendered
+                // (display:none, a collapsed run) — it is not counted, so it can
+                // neither be asserted on nor inflate the population.
+                `        if(boxes===0) continue;` +
+                `        toks++;` +
+                `        if(ink>maxInk) maxInk=ink;` +
+                `        if(boxes>1){` +
+                `          if(ink<=content){torn++;bad2.push({tok:mm[0].slice(0,24),len:mm[0].length,ink:Math.round(ink),boxes:boxes});}` +
+                `          else unfit++;` +
+                `        }` +
+                `      }` +
+                `    }` +
+                `    out.tk.push({sel:tsel,i:i,content:Math.round(content),toks:toks,torn:torn,unfit:unfit,bad:bad2,maxInk:Math.round(maxInk),wb:ts.wordBreak,lb:ts.lineBreak,ow:ts.overflowWrap});` +
                 `  });` +
                 `});` +
                 `return out;})()`,
@@ -7542,6 +7676,41 @@ async function main() {
                   }
                 }
               }
+              // ── THE TORN-TOKEN ASSERTION, one line per host per width ─────
+              if ((route.tokens || []).length) {
+                // ANTI-VACUITY IS A ROW-LEVEL CHECK HERE, NOT A PER-CELL ONE,
+                // and the difference is the whole lesson of the first run of
+                // this block: the per-cell shape the height walk uses fired 22
+                // findings against `mixed-fleet#instance/…a1`, whose LIVE
+                // instance did not fail and therefore renders no `.bp-tl-fail`
+                // at all. An absent host on a screen it does not belong to is
+                // the honest answer, not a defect — the vacuity actually worth
+                // refusing is a declared token host that renders on NO cell of
+                // the whole leg. That is asserted once, after the loop, off
+                // `tokenSeenBySel`. (The height walk can afford the per-cell
+                // shape only because it declares THREE hosts and refuses
+                // against their union; a one-host row has no union to hide in.)
+                for (const b of m.tk) {
+                  tokenSeenBySel.set(b.sel, (tokenSeenBySel.get(b.sel) || 0) + 1);
+                  tokenHostsSeen++;
+                  tokensSeen += b.toks;
+                  unfittableTokens += b.unfit;
+                  if (b.maxInk > maxTokenInk) maxTokenInk = b.maxInk;
+                  tkRow[b.sel] = tkRow[b.sel] || {};
+                  tkRow[b.sel][width] = `${b.toks}T/${b.torn}x/${b.unfit}u`;
+                  // A host whose text painted NO tokens at all cannot lose this
+                  // bound — the same collapse the height walk refuses at
+                  // `lines === 0`, in its own vocabulary.
+                  if (b.toks === 0) {
+                    fail(D, `${scen}/${theme}@${width}${cell.hash} \`${b.sel}\` el${b.i}: the Range walk found ZERO painted whitespace tokens — the torn-token bound below cannot lose on this host, so a clean line here would certify nothing`);
+                    continue;
+                  }
+                  for (const t of b.bad) {
+                    tornTokens++;
+                    fail(D, `${scen}/${theme}@${width}${cell.hash} \`${b.sel}\` el${b.i}: the ${t.len}-character token "${t.tok}" is SPLIT ACROSS ${t.boxes} line boxes while its own ink measures ${t.ink}px against a ${b.content}px content box — it would have fit a line WHOLE and was broken anyway. Computed on the measured element: word-break "${b.wb}", line-break "${b.lb}", overflow-wrap "${b.ow}". This is the one thing \`overflow-wrap: anywhere\` is not allowed to do, and it is invisible to every width, height and page assertion in this leg — all of which score PERFECTLY on shredded prose`);
+                  }
+                }
+              }
             }
             process.stdout.write(`   ${cell.hash} ${scen}/${theme}  ${row.join(" ")}\n`);
             // BOTH NUMBERS PRINTED, per host per width (`height/tight-fit`), so
@@ -7552,6 +7721,14 @@ async function main() {
               const cells2 = CRUEL_WIDTHS.map((w) => `${w}:${(hRow[hsel] || {})[w] || "-"}`).join(" ");
               process.stdout.write(`      H ${hsel}  ${cells2}\n`);
             }
+            // The torn-token numbers, printed the same way and for the same
+            // reason: `tokens/torn/unfittable` per host per width, so a reader
+            // sees the population the verdict was scored over — and a token
+            // count that COLLAPSED to zero is readable, not merely refused.
+            for (const tsel of route.tokens || []) {
+              const cells3 = CRUEL_WIDTHS.map((w) => `${w}:${(tkRow[tsel] || {})[w] || "-"}`).join(" ");
+              process.stdout.write(`      T ${tsel}  ${cells3}\n`);
+            }
           }
         }
       }
@@ -7561,6 +7738,20 @@ async function main() {
       // skipped, a scenario list mutated mid-run, a `continue` that ran early.
       if (cells !== cellCount) {
         fail(D, `run check: drove ${cells} cells, the table declares ${cellCount} — the loop measured a different corpus than the header announced, so a "cells clean" line here would be counted over ${Math.abs(cellCount - cells)} cell(s) nobody drove`);
+      }
+      // ── THE TORN-TOKEN ANTI-VACUITY REFUSAL, scored once over the whole run.
+      // A host declared under `tokens:` that painted on ZERO cells means the
+      // bound above was never evaluated — a selector that went stale, a route
+      // that stopped rendering the box, a fixture that stopped failing. The
+      // ok-line would still print "0 torn", which is the exact green this row
+      // exists to make impossible.
+      for (const tsel of TOKEN_HOSTS) {
+        if (!tokenSeenBySel.get(tsel)) {
+          fail(D, `torn-token anti-vacuity: \`${tsel}\` is declared as a token host and painted on ZERO of the ${cells} cells driven — the torn-token bound was never evaluated, so "0 torn" below would be a green over an empty population, not a measurement`);
+        }
+      }
+      if (TOKEN_HOSTS.length && tokensSeen === 0) {
+        fail(D, `torn-token anti-vacuity: ${tokenHostsSeen} token-host measurement(s) walked ZERO painted whitespace tokens in total — the bound cannot lose over an empty token set`);
       }
       // ── THE PER-HOST POPULATION TABLE, PRINTED UNCONDITIONALLY ────────────
       // Not inside the ok-lines below: those print only when this leg took no
@@ -7603,6 +7794,27 @@ async function main() {
           `could have told 19 line boxes from 220. A LONGER error moves both sides together and stays green (D206: a ` +
           `pixel pin would pin the fixture string); only LAYOUT waste — a min-height, a per-line margin, a second copy ` +
           `of the box — moves the measured side alone`,
+        );
+        okLine(
+          `and the WIDTH CELL ON \`${TOKEN_HOSTS.join(" / ")}\` NOW HAS A QUESTION IT CAN LOSE (cchi-w25-bl-w21-bp-tl-` +
+          `fail-cell-is-an-identity-under-anywhere): under \`overflow-wrap: anywhere\` the per-element ` +
+          `\`scrollWidth > clientWidth\` test on that box is an IDENTITY — raising CRUEL_PROVISION_ERROR_LEN 512 -> 5000 ` +
+          `(3993px of ink -> 39132px) left the WIDTH half BYTE-IDENTICAL, exit 0 both runs, and \`cruelMin\` is a >= ` +
+          `FLOOR that a 10x lengthening sails through. ` +
+          `So a TORN-TOKEN bound is asserted beside it, TWO-VALUED so it does not red on a correct wrap: across ` +
+          `${tokenHostsSeen} host measurements, ${tokensSeen} painted whitespace tokens were walked with a Range and ` +
+          `${tornTokens} were TORN (split across >1 line box while their own ink would have fit the content box whole) ` +
+          `and ${unfittableTokens} were UNFITTABLE (ink > content — reported, NEVER asserted; the widest token measured ` +
+          `${maxTokenInk}px of ink). The unfittable arm is the correction that makes this portable: a naive per-token ` +
+          `rule calls the 512-character run "torn across 19 line boxes", which is \`anywhere\` doing its job. AND THE ` +
+          `ROW CARRIES A PROSE CELL FOR THE SAME REASON THIS BOUND EXISTS — on the CRUEL screen the only tokens are ` +
+          `"Setup", "failed." and one 512-char run, and the two short words sit at the start of line 1 where they fit ` +
+          `whatever the box does, so a shredding declaration has nothing to shred and this bound would have been green ` +
+          `by construction too. Driven with \`word-break: break-all\` on \`.bp-tl-fail\`: the cruel cells held at ` +
+          `3T/0x/1u across all 11 widths and the leg still exited 0, while \`mixed-fleet#instance/…a4\` ("Setup failed. ` +
+          `verify.login: 500 — Studio never came up", 9 tokens) tore "Studio" 40px/224px at 320, "never" 35px/264px at ` +
+          `360, "came" 33px/294px at 390 and "up" 16px/334px at 430 — 8 findings, ALL of them from this bound, with ` +
+          `every width, height and page assertion above scoring perfectly on the shredded prose`,
         );
         okLine(
           `PER HOST, including the zeros (cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche): ` +
