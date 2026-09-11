@@ -426,6 +426,78 @@ defmodule BarkparkWeb.BulldocsIngestWallTest do
     resp = json_response(conn, 422)
     assert resp["error"]["code"] == "invalid_epic_paper_quality"
     assert "top_level_heading_overload" in resp["error"]["details"]["failures"]
+
+    # The failure ATOM names a rule; it names no number. Before
+    # task-4ff0ef8d27e6453b the body stopped here, so an author who tripped the
+    # cap learned that a cap exists and had to read EpicQuality's source to
+    # learn it was 16 and that they were at 17. `details.limits` carries both.
+    assert resp["error"]["details"]["limits"]["top_level_headings"] == %{
+             "max" => 16,
+             "actual" => 17
+           }
+
+    # ONLY the fired budget appears: this paper has 20 top-level blocks, well
+    # under 80, so a `top_level_blocks` key here would be a catalogue of the
+    # module's constants rather than a statement about THIS publish.
+    refute Map.has_key?(resp["error"]["details"]["limits"], "top_level_blocks")
+    refute Content.get_paper(slug, @dataset)
+  end
+
+  test "the 81-block shape: a canonical Paper past @max_top_level_blocks answers 422 with the cap AND the count",
+       %{conn: conn} do
+    slug = "ingest-wall-epic-blocks-#{System.unique_integer([:positive])}"
+    %{"tags" => tags, "description" => description} = epic_tags()
+
+    # An honest opening (h1 + ingress + stats) plus 78 paragraphs = 81
+    # top-level blocks, one past EpicQuality's @max_top_level_blocks (80), and
+    # exactly ONE top-level heading — so the heading cap stays clear and this
+    # test measures the BLOCK budget alone. The live wave-30 Paper sits at
+    # exactly 80 blocks, i.e. one block from this refusal.
+    body =
+      for i <- 1..78 do
+        %{
+          "id" => "p#{i}",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Paragraph #{i} of honest wave prose."}]
+        }
+      end
+
+    blocks =
+      [
+        title_block("Block overload paper #{System.unique_integer([:positive])}"),
+        %{
+          "id" => "ingress",
+          "type" => "ingress",
+          "content" => [%{"type" => "text", "value" => "Why this wave exists, in one breath."}]
+        },
+        %{
+          "id" => "stats",
+          "type" => "stats",
+          "items" => [%{"label" => "blocks", "value" => "81"}]
+        }
+      ] ++ body
+
+    assert length(blocks) == 81
+
+    conn =
+      authed(conn)
+      |> post(@path, %{
+        "slug" => slug,
+        "blocks" => blocks,
+        "tags" => tags,
+        "description" => description
+      })
+
+    resp = json_response(conn, 422)
+    assert resp["error"]["code"] == "invalid_epic_paper_quality"
+    assert "top_level_block_overload" in resp["error"]["details"]["failures"]
+
+    assert resp["error"]["details"]["limits"]["top_level_blocks"] == %{
+             "max" => 80,
+             "actual" => 81
+           }
+
+    refute Map.has_key?(resp["error"]["details"]["limits"], "top_level_headings")
     refute Content.get_paper(slug, @dataset)
   end
 

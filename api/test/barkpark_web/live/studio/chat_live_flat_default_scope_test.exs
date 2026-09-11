@@ -40,6 +40,8 @@ defmodule BarkparkWeb.Studio.ChatLiveFlatDefaultScopeTest do
   alias Barkpark.Auth.ApiToken
   alias Barkpark.ChatHosts
   alias Barkpark.Repo
+  alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.Session, as: StudioChatSession
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -145,6 +147,58 @@ defmodule BarkparkWeb.Studio.ChatLiveFlatDefaultScopeTest do
 
       refute html =~ "WSB-HOST-beta"
     end
+
+    # ── THE CREATE SIDE (task-995f53ef7b7c4471) ──────────────────────────────
+    #
+    # The same principal, the same mount, the WRITE instead of the read.
+    # `ensure_session/1` used to re-derive the seeded Default through
+    # `Tenancy.get_default_workspace()` whenever `:current_workspace` was nil —
+    # i.e. it recovered the exact workspace `default_scope_fallback/1` had just
+    # refused to pin, and stamped it onto a durable `chat_sessions` row.
+    #
+    # RED BEFORE: on the unfixed tree this test FAILS with a created session
+    # whose `owner_workspace_id` is the Default workspace id.
+    test "the first send REFUSES rather than minting a session owned by Default", %{
+      conn: conn,
+      default_ws: default_ws
+    } do
+      {:ok, view, _html} = live(conn, @flat_path)
+
+      # ASSERT THE SUBJECT EXISTS, both halves — a bound boolean assertion, not
+      # a match-assert (ExUnit discards the message on `assert %S{} = x, "msg"`).
+      # If the mount stopped producing a nil scope, or the Default row stopped
+      # existing, this test would be green for a reason that is not the fix.
+      assert is_nil(:sys.get_state(view.pid).socket.assigns[:current_workspace]),
+             "the flat mount no longer leaves :current_workspace nil for a principal " <>
+               "authorized nowhere — the branch under test is unreachable and every " <>
+               "assertion below is vacuous"
+
+      refute is_nil(Tenancy.get_default_workspace()),
+             "no seeded Default workspace exists, so the old fallback had nothing to " <>
+               "stamp and this refusal proves nothing"
+
+      # `ensure_session/1` runs on the {:dispatch_send, …} path, so a real submit
+      # is what exercises the WRITE; `render/1` forces the round-trip.
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello"})
+      html = render(view)
+
+      session_id = :sys.get_state(view.pid).socket.assigns.store_session_id
+
+      if is_binary(session_id) do
+        created = Repo.get!(StudioChatSession, session_id)
+
+        flunk(
+          "the flat send minted chat session #{session_id} owned by " <>
+            "#{inspect(created.owner_workspace_id)} (the seeded Default is " <>
+            "#{inspect(default_ws.id)}) for a principal authorized in NO workspace"
+        )
+      end
+
+      # The refusal must be HONEST, not silent: the operator sees a line and the
+      # composer goes offline rather than pretending a session started.
+      assert html =~ "isn&#39;t authorized in any workspace",
+             "the create was refused without telling the operator why"
+    end
   end
 
   describe "POSITIVE CONTROL — a token that HOLDS a Default membership still sees them" do
@@ -189,6 +243,44 @@ defmodule BarkparkWeb.Studio.ChatLiveFlatDefaultScopeTest do
              "the Default-member operator lost the registered-host picker it is entitled to"
 
       refute html =~ "WSB-HOST-beta"
+    end
+
+    # A refusal-only suite is equally consistent with a create path that now
+    # refuses EVERYONE. It also guards the two D43h/D58h consequences directly:
+    # a non-NULL owner is what keeps the session visible to its creator's
+    # workspace-scoped listing and eligible for a `chat_blocked` fire.
+    test "a send from an AUTHORIZED principal still creates a Default-owned session", %{
+      conn: conn,
+      default_ws: default_ws
+    } do
+      {:ok, view, _html} = live(conn, @flat_path)
+
+      refute is_nil(:sys.get_state(view.pid).socket.assigns[:current_workspace]),
+             "the Default-member operator lost its :current_workspace — this control " <>
+               "would then be testing the refusal branch, not the create branch"
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello"})
+      _ = render(view)
+
+      session_id = :sys.get_state(view.pid).socket.assigns.store_session_id
+
+      assert is_binary(session_id),
+             "an authorized principal's send created no chat session at all"
+
+      created = Repo.get!(StudioChatSession, session_id)
+
+      refute is_nil(created.owner_workspace_id),
+             "the create minted a NULL-owner session — BlockedSweeper filters " <>
+               "`not is_nil(owner_workspace_id)` so it could never fire chat_blocked, " <>
+               "and scope_sessions/2 would hide it from its own creator (D43h/D58h)"
+
+      assert created.owner_workspace_id == default_ws.id,
+             "a Default-member operator's session was stamped " <>
+               "#{inspect(created.owner_workspace_id)} instead of Default " <>
+               "#{inspect(default_ws.id)}"
+
+      assert StudioChat.scope_match?(created.owner_workspace_id, default_ws.id),
+             "the created session is invisible to its own creator's workspace scope"
     end
   end
 

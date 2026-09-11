@@ -1670,6 +1670,74 @@ select.form-input {
 .rail-row .v { font-size: 12px; font-weight: 500; font-family: var(--mono); text-align: right; word-break: break-word; min-width: 0; }
 .rail-row .v.plain { font-family: var(--font); }
 .rail-row .v.copy { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+
+/* cchi-w22-bl-the-pinned-release-badge-does-not-break (task-02a521fea7beeb2f)
+   — THE PILL INSIDE A RAIL VALUE, capped.
+
+   THE HOST. `autoupdatePolicyLabel()` returns "Pinned to " + vRel(
+   bp.pinned_release) and `renderUpdatePanel` paints it through
+   `railRowHtml("Autoupdate", badge(...))` — a `.badge` inside `.rail-row .v`.
+   `pinned_release` is a 255-cap FREE-TEXT field: `validate_length(
+   :pinned_release, max: 255)` in `autoupdate_changeset/2` (registry/
+   barkpark.ex) over a varchar(255) column, with a trim as the changeset's only
+   other clause, written by `PATCH /v1/barkparks/:id/autoupdate` from the
+   console's own `#pin-input` (app.js `openPinModal`) — an input with no
+   `maxlength` and no format check. A team admin can type 255 characters.
+
+   WHAT BROKE. `.rail-row .v` already carries `word-break: break-word` +
+   `min-width: 0`, so the rail VALUE breaks — but the `.badge` inside it
+   carried `white-space: nowrap` with no `max-width`, and an inline-flex box's
+   shrink-to-fit width floors at its min-content. A `nowrap` min-content IS the
+   whole string, so the pill grew past its parent and dragged the PAGE:
+   measured on instance-cruel-detail with the pin at its cap,
+   documentElement.scrollWidth 2054 against a 320 viewport (2294 at 830-1000,
+   2378 at 1440), 24 of 24 cells, both themes.
+
+   WHY ELLIPSIS AND NOT `overflow-wrap: break-word`, CHOSEN BY MEASUREMENT, NOT
+   BY TASTE. Both bound the page — the W21-detail-url-text-page-bound leg reads
+   24/24 clean at every width in both themes either way. They differ in the ROW:
+     · wrap (`white-space: normal; overflow-wrap: break-word; height: auto`)
+       measured a 310px-TALL pill — one rail row grown into a wall that buries
+       "Last checked", "Vs main" and the panel's own action buttons below a
+       phone fold.
+     · this rule measured a 22px pill — the row stays one line, the "Autoupdate"
+       key stays beside its value, and every fact under it keeps its place.
+   `overflow-wrap: break-word` is the right remedy for the PROSE hosts on this
+   track (`.fleet-name`, `.site-name`, and the reason recorded at the D165 note
+   above them: `anywhere` lowers min-content and loses the flex contest). A PILL
+   is not prose — it is a fixed-height status token in a fact rail, and the
+   remedy that keeps it one is the cap, not the break.
+
+   THE CUE PAINTS, AND IT IS MEASURED (charter D253). `text-overflow: ellipsis`
+   alone is a story: it inks nothing when the box does not clip horizontally,
+   when the line can wrap (the overflow is then vertical and `overflow: hidden`
+   eats whole lines silently), or when the line holds only atomic inlines.
+   `display: inline-block` is load-bearing for exactly that last clause — the
+   `.badge` is `inline-flex`, whose text is an ANONYMOUS FLEX ITEM, an atom a
+   single-line ellipsis cannot truncate. As a block container the text is real
+   inline content and the marker has something to cut. The W21 leg asserts the
+   painted result rather than these declarations: ellipsis + a box that clips on
+   the horizontal axis + min-content > clientWidth + a real text run.
+
+   THE COST, STATED: the clipped characters stay in the DOM text node but not on
+   the pixel, and this screen offers no copy affordance for the pin (the Pin
+   modal prefills the RUNNING release, not the pinned one). The same string is
+   painted whole by the fleet row's `.fleet-meta`. A recovery affordance on this
+   badge would be app.js work and is not this rule's fence. */
+.rail-row .v .badge {
+  max-width: 100%;
+  display: inline-block;
+  line-height: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+/* The dot rode the badge's flex `gap`/`align-items`; as a block container it
+   needs its own spacing and centring, so the short policy pills on this rail
+   ("Auto · prod", "Manual", "On") look identical to before. */
+.rail-row .v .badge .dot { display: inline-block; vertical-align: middle; margin-right: 6px; margin-bottom: 1px; }
+
 .copy-btn {
   display: inline-grid; place-items: center;
   width: 20px; height: 20px;
