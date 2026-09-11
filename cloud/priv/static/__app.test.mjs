@@ -13904,6 +13904,78 @@ test("cch-w63-s5: the rail never says 'Checked' about a refusal — six rungs ar
   assert.equal(hooks.lastCheckedText(null, "identity_refused"), "Not yet tried — the instance rejected our access credential");
 });
 
+// ── cch-w65-bl: THE UNCLOCKED MAP IS A RULING, NOT A LEFTOVER ────────────────
+//
+// cch-w65-s2 made `update_checked_at` honest, and the obvious follow-up is to
+// delete `UPDATE_REFUSAL_UNCLOCKED` as the apology it was written as. It is not
+// a deletion, it is a COPY CHANGE, and the warrant for keeping it survived s2:
+// s2 OMITS the stamp on the three rungs (charter D789), it does not CLEAR it, so
+// a box with a real check history carries a TRUE clock under a reason that never
+// built a request. The two tests below are the ruling and its lock.
+test("cch-w65-bl: a TRUE prior clock under an unclocked reason still renders NO clock — the map is what stops the lie moving from the column into the sentence", () => {
+  // THE CASE s2's OWN TESTS DO NOT COVER. registry_update_status_test.exs proves
+  // the three rungs never STAMP, on rows that were never checked (their
+  // update_checked_at is nil throughout). D789 deliberately PRESERVES an earlier
+  // real stamp, so the row this console actually has to render is: a genuine
+  // 45-minutes-ago check, plus a reason produced 0 minutes ago by a code path
+  // that sent no bytes.
+  const trueEarlierCheck = W63S5_45M();
+  const rail = (reason) => hooks.lastCheckedText(trueEarlierCheck, reason);
+  const UNCLOCKED = ["no_admin_token", "decrypt_failed", "not_live"];
+  for (const reason of UNCLOCKED) {
+    // NEITHER ARM. "Tried 45m ago — …" attributes this reason to an attempt that
+    // produced a different reason; "Not yet tried — …" is false about a box we
+    // demonstrably did try 45 minutes ago. Only the bare sentence is true of both
+    // facts at once, which is why the ruling is "bare", not "prefixed".
+    assert.equal(rail(reason).includes("Tried"), false,
+      reason + ": a rung that sent no bytes must not narrate an attempt (this also " +
+      "catches 'Not yet tried', which contains it)");
+    assert.equal(rail(reason).includes("ago"), false, reason + " must carry no clock at all");
+    assert.equal(rail(reason), hooks.lastCheckedText(null, reason),
+      reason + ": the rendered sentence must not depend on update_checked_at — a preserved " +
+      "true stamp and a never-checked NULL are the same sentence on these three rungs");
+  }
+  // THE MIRROR, and it is the half that keeps this from over-firing: the six
+  // rungs that DID reach the wire read that same true clock and must still say so.
+  for (const reason of ["identity_refused", "unreachable", "instance_error", "bad_shape",
+    "forbidden", "no_self_update_route"]) {
+    assert.match(rail(reason), /^Tried 45m ago — /, reason + " asked a real question 45m ago");
+  }
+});
+
+test("cch-w65-bl: the console's unclocked set is LOCKED to registry.ex's @unclocked_reasons — two hand-typed mirrors with a test each is an unlocked mirror", () => {
+  // The same three names live on two runtime surfaces: `@unclocked_reasons` in
+  // registry.ex decides which rungs skip the stamp, `UPDATE_REFUSAL_UNCLOCKED` in
+  // app.js decides which rungs skip the clock in the sentence. They are typed
+  // independently, so a fourth rung added server-side would silently render
+  // "Tried 45m ago — <it sent no bytes>" with every existing test still green.
+  // This decodes BOTH producers and asserts they are term-identical.
+  const registry = fs.readFileSync(path.join(REPO_ROOT, "cloud/lib/barkpark_cloud/registry.ex"), "utf8");
+  const attr = registry.match(/@unclocked_reasons\s+\[([^\]]*)\]/);
+  assert.ok(attr, "@unclocked_reasons is gone from registry.ex — the console's clock rule has lost its producer");
+  const serverSide = attr[1].split(",").map((s) => s.trim().replace(/^:/, "")).filter(Boolean).sort();
+
+  const appSrc = fs.readFileSync(APP_PATH, "utf8");
+  const mapLit = appSrc.match(/var UPDATE_REFUSAL_UNCLOCKED\s*=\s*\{([^}]*)\}/);
+  assert.ok(mapLit, "UPDATE_REFUSAL_UNCLOCKED is gone from app.js — DELETING IT IS A COPY CHANGE: " +
+    "D789 preserves a true earlier update_checked_at, so without this map the three rungs that sent " +
+    "no bytes start rendering 'Tried <rel> — …' on every row with a check history. See the ruling test above.");
+  const clientSide = mapLit[1].split(",").map((s) => s.split(":")[0].trim()).filter(Boolean).sort();
+
+  // THE PARSE SELF-CHECK. A regex that quietly matched nothing would make both
+  // sides [] and this assertion vacuously true; both must find real names first.
+  assert.equal(serverSide.length, 3, "registry.ex parse found " + serverSide.length + " reasons: " + serverSide.join(","));
+  assert.equal(clientSide.length, 3, "app.js parse found " + clientSide.length + " keys: " + clientSide.join(","));
+  assert.deepEqual(clientSide, serverSide,
+    "app.js's UPDATE_REFUSAL_UNCLOCKED and registry.ex's @unclocked_reasons have drifted; " +
+    "the server decides which rungs send no bytes, so move the console to match it");
+  // And every name on both sides must be a rung the copy table can actually render.
+  for (const reason of clientSide) {
+    assert.notEqual(hooks.lastCheckedText(null, reason), "Never checked",
+      reason + " is in the unclocked set but UPDATE_REFUSAL_TEXT has no sentence for it");
+  }
+});
+
 test("cch-w63-s5: the fleet card stops being silent — a refused box no longer renders byte-identically to a never-probed one", () => {
   const at = W63S5_45M();
   const REFUSED = {

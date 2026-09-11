@@ -10567,11 +10567,28 @@
   };
 
   // THE THREE RUNGS THAT NEVER TOUCHED THE BOX. no_admin_token, decrypt_failed and
-  // not_live all return BEFORE persist_update_unknown's single HTTP request site is
-  // even built — yet the control plane stamps update_checked_at on all nine alike.
-  // "Tried 45m ago" on these three would be a SECOND manufactured claim planted
-  // inside the change whose whole purpose is deleting the first: they render their
-  // sentence with no clock at all.
+  // not_live all return BEFORE refresh_update_status's single HTTP request site is
+  // even built, so there is no attempt whose time could be narrated.
+  //
+  // cch-w65-bl — THIS MAP SURVIVES s2, AND ITS WARRANT CHANGED. It shipped as a
+  // client-side apology for a column that stamped update_checked_at on all nine
+  // rungs alike; cch-w65-s2 stopped that, so the apology reading is now stale.
+  // What s2 did NOT do is CLEAR the column: `update_unknown_attrs/1` OMITS
+  // update_checked_at on these three (charter D789) precisely so a box that
+  // answered honestly an hour ago keeps its TRUE last-checked time. That true
+  // stamp is exactly what makes this map load-bearing on the reader side — a row
+  // that was really checked at 12:00 and falls to decrypt_failed at 12:45 carries
+  // a non-NULL clock with a reason that never built a request, and the clocked arm
+  // below would render "Tried 45m ago — <sentence that asked nothing>", welding a
+  // real prior attempt onto a reason produced by no attempt at all. That is the
+  // manufactured claim s2 deleted, relocated from the column into the sentence.
+  //
+  // So: deleting this map is NOT a no-op follow-up to s2. It is a copy change that
+  // re-introduces the lie on every row with a check history. The three rungs
+  // render their sentence with NO clock — not the bare/prefixed choice of the arms
+  // below, neither "Tried <rel> — " nor "Not yet tried — ", because both narrate an
+  // attempt. The key set is locked against registry.ex's `@unclocked_reasons` by a
+  // freshness test in __app.test.mjs; move one side and the gate reds.
   var UPDATE_REFUSAL_UNCLOCKED = { no_admin_token: 1, decrypt_failed: 1, not_live: 1 };
 
   // The reason ONLY when it is both recognised and actually load-bearing: a box
