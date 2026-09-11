@@ -6469,6 +6469,7 @@ defmodule PDS.Census do
       scope_read: :no_body,
       why: "defdelegate — no body to read",
       id: clause_id(d),
+      minted_decided: 0,
       hop: nil
     }
 
@@ -6514,6 +6515,27 @@ defmodule PDS.Census do
       end)
 
     used = for v <- payload_vars, Map.has_key?(oks, v), do: Map.fetch!(oks, v)
+
+    # THE EXACT MINTED-EXPOSURE, MEASURED WHERE BOTH SETS ALREADY EXIST (PDS wave 46).
+    # `subst.minted` counts minted argument positions ANYWHERE in a substitution; that
+    # number OVERSTATES the thing it is named for, because a parameter whose vars never
+    # reach the rendered payload cannot decide anything. The honest count is the one
+    # below: a minted position DECIDES this clause's class when one of its parameter vars
+    # is in `payload_vars` AND the callee does not REBIND that name itself — `oks` is
+    # `Map.merge(s.oks, oks_own)`, so an own binding SHADOWS the mint and the producer
+    # that lands in `used` is the callee's, not the mint's. Both halves are required: the
+    # intersection alone would credit the mint for a producer it never supplied.
+    minted_decided =
+      case subst do
+        nil ->
+          0
+
+        s ->
+          Enum.count(s.minted_pvars, fn pvars ->
+            Enum.any?(pvars, &(MapSet.member?(payload_vars, &1) and not Map.has_key?(oks_own, &1)))
+          end)
+      end
+
     gate = names(discarded)
 
     # WHICH REGION DECIDED THIS CLAUSE IS RECORDED, NOT ASSERTED (PDS wave 40 review).
@@ -6550,7 +6572,12 @@ defmodule PDS.Census do
         true ->
           %{class: :residual_onehop_unattributed, producer: gate_or_dash(gate), why: "bound values trace to neither an {:ok, _} payload nor the head"}
       end
-      |> Map.merge(%{scope_read: scope_read, id: clause_id(d), hop: nil})
+      |> Map.merge(%{
+        scope_read: scope_read,
+        id: clause_id(d),
+        minted_decided: minted_decided,
+        hop: nil
+      })
       |> then(&Map.put(&1, :pre_class, &1.class))
 
     # ONE HOP, AND NEVER TWO: a clause reached AS a hop target carries a subst and is
@@ -6633,7 +6660,8 @@ defmodule PDS.Census do
               target: nil,
               candidates: length(cands),
               minted: minted,
-              minted_decided: 0,
+              minted_on_winner: 0,
+              minted_deciding: 0,
               opaque: opaque,
               field: field
             }
@@ -6641,6 +6669,13 @@ defmodule PDS.Census do
 
       _ ->
         {label, best, best_minted} = Enum.min_by(decided, &derivation_rank(elem(&1, 1).class))
+
+        # TWO NUMBERS, AND THE WEAKER ONE IS KEPT ON PURPOSE (PDS wave 46). `best_minted`
+        # is the PROXY — a mint anywhere in the winning substitution — and `best.minted_decided`
+        # is the exact measure: the minted positions whose parameter vars actually land in
+        # the payload the class was read off. Dropping the proxy would hide the gap the
+        # exact number exists to measure; the two are printed side by side so a reader can
+        # see how far the proxy overstates on this corpus.
 
         %{
           local
@@ -6652,7 +6687,8 @@ defmodule PDS.Census do
               target: label,
               candidates: length(cands),
               minted: minted,
-              minted_decided: best_minted,
+              minted_on_winner: best_minted,
+              minted_deciding: best.minted_decided,
               opaque: opaque,
               field: field
             }
@@ -6789,7 +6825,7 @@ defmodule PDS.Census do
     |> head_params()
     |> Enum.zip(args)
     |> Enum.reduce(
-      %{oks: %{}, head: MapSet.new(), params: MapSet.new(), minted: 0, opaque: 0, field: 0},
+      %{oks: %{}, head: MapSet.new(), params: MapSet.new(), minted: 0, minted_pvars: [], opaque: 0, field: 0},
       fn {param, arg}, acc ->
         hop_subst_arg(acc, param, arg, oks, head)
       end
@@ -6806,10 +6842,13 @@ defmodule PDS.Census do
         %{acc | opaque: acc.opaque + 1}
 
       {:call, producer} ->
+        mint = hop_arg_minted(arg, oks, head)
+
         %{
           acc
           | oks: Enum.reduce(pvars, acc.oks, &Map.put(&2, &1, producer)),
-            minted: acc.minted + hop_arg_minted(arg, oks, head)
+            minted: acc.minted + mint,
+            minted_pvars: if(mint == 1, do: [pvars | acc.minted_pvars], else: acc.minted_pvars)
         }
 
       {:vars, avars} ->
@@ -7169,7 +7208,17 @@ defmodule PDS.Census do
     # (uniq by clause id, so a def reached by two routed quads is counted once).
     hops = rows |> Enum.flat_map(&Map.get(&1, :clause_results, [])) |> Enum.uniq_by(& &1.id)
     minted = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :minted)))
-    minted_deciding = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :minted_decided)))
+    minted_on_winner = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :minted_on_winner)))
+    minted_deciding = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :minted_deciding)))
+
+    # THE VERDICT IS DERIVED FROM THE EXACT NUMBER, NOT FROM THE PROXY, and it is a WORD
+    # rather than a count so the selftest can discriminate the two measures without
+    # pinning a bucket. MINTED-DECIDES-EXACT substitutes the proxy back into the exact
+    # slot and this sentence flips; MINTED-DECIDES-EXACT-CONTROL reads it unmutated.
+    minted_verdict =
+      if minted_deciding == 0,
+        do: "NO mint decides a printed class this run",
+        else: "MINTS DECIDE #{minted_deciding} printed class(es) this run"
     opaque_args = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :opaque)))
     field_args = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :field)))
 
@@ -7243,8 +7292,16 @@ defmodule PDS.Census do
     p("      request_echo on a value that descends from the write. But #{minted} hop argument")
     p("      position(s) are calls whose OWN inputs trace to NEITHER an `{:ok, _}` payload")
     p("      NOR the head: their producer is MINTED from the call name alone, on no")
-    p("      provenance at all. #{minted_deciding} of them sit on the substitution the join CHOSE, so")
-    p("      that many are one parameter away from deciding a printed class. This is a")
+    p("      provenance at all. #{minted_on_winner} of them sit on the substitution the join CHOSE — that")
+    p("      is the PROXY, and it OVERSTATES its own name: it counts a mint anywhere in the")
+    p("      winning substitution, including parameters whose vars never reach the rendered")
+    p("      payload at all. #{minted_deciding} of those positions ACTUALLY DECIDE the printed class: the")
+    p("      minted parameter's vars are intersected with the payload_vars the winning")
+    p("      callee was classified on, and a name the callee REBINDS itself is excluded")
+    p("      because the producer that lands in `used` is then the callee's, not the mint's.")
+    p("      #{minted_verdict}. Both numbers are kept: the proxy is the")
+    p("      guessing SURFACE, the exact one is the guessing EFFECT, and a slice that")
+    p("      printed only the proxy would report an exposure it cannot show. This is a")
     p("      COUNTED exposure rather than a class of its own (PDS-D618): the numbers are")
     p("      printed every run, so the day a mint decides a row it moves in public.")
     p("    · FIELD ACCESS AND SUBSCRIPTS ARE NOT CALLS, and are excluded BY SHAPE rather")
@@ -10474,6 +10531,48 @@ defmodule PDS.Census do
         "AMBIGUOUS — no evidence here selects one of them"
       ],
       proves: "narrowing the writing-caller set back to ONE member silently deletes every ambiguity marker while the census still prints CENSUS OK at exit 0 — so the full-set walk in route/3 is the ONLY thing keeping the attribution sentence falsifiable, and no count, no shape and no other arm notices its loss"
+    },
+    # THE EXACT MINTED-EXPOSURE, AND THE PROXY IT REPLACED, AS A PAIR (PDS wave 46).
+    #
+    # WHY THE REPO CORPUS. The two numbers can only DISAGREE where a hop's winning
+    # substitution holds a minted position whose vars never reach the payload — and the
+    # synthetic tree's six routed write clauses each carry their OWN `json(...)` (read
+    # echo_controller_source/1 below), so they class locally and onehop_join/6 is never
+    # reached over them. A mutant there would substitute one zero for another, which is
+    # PDS-D541's unmutatability wearing this slice's name. Thirteen cases already ride
+    # `corpus: :repo` for the same reason.
+    #
+    # IT ASSERTS A WORD, NOT A COUNT. The blind shape derives a VERDICT from the exact
+    # number — "NO mint decides a printed class this run" versus "MINTS DECIDE n" — so
+    # the pair discriminates the two measures without pinning a bucket, and an honest
+    # corpus change that moves 27, 4 or 0 by one cannot red either case on its own.
+    #
+    # THE CONTROL IS HALF THE EVIDENCE, and it is a case rather than a promise: the
+    # mutant only proves the substitution is VISIBLE if the unmutated run says the other
+    # thing. The day the repo grows a mint that genuinely decides a row, the CONTROL goes
+    # red first and names exactly what changed, which is the correct order — a mutant
+    # that silently starts agreeing with its baseline is the failure this pair refuses.
+    %{
+      name: "MINTED-DECIDES-EXACT-CONTROL",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: ["NO mint decides a printed class this run", "CENSUS OK"],
+      refute: ["MINTS DECIDE"],
+      proves: "the unmutated census says NO mint decides a printed class on this tree, which is the baseline the mutant below has to flip — without it the mutant could pass while both measures agreed"
+    },
+    # THE ANCHOR IS SPLIT so this tuple does not match ITSELF — apply_mutation/2 refuses
+    # an ambiguous anchor, and a mut literal that occurs twice IS one.
+    %{
+      name: "MINTED-DECIDES-EXACT",
+      corpus: :repo,
+      argv: [],
+      mut: {"minted_deciding: best." <> "minted_decided,", "minted_deciding: best_minted,"},
+      exit: 0,
+      expect: ["MINTS DECIDE", "CENSUS OK"],
+      refute: ["NO mint decides a printed class this run"],
+      proves: "the exact measure is the intersection and NOT the proxy: substitute `best_minted` (a mint anywhere in the winning substitution) back into the slot the intersection fills and the derived verdict flips from NO mint decides to MINTS DECIDE, at exit 0 both times — which is precisely how the overstatement shipped unnoticed"
     }
   ]
 
