@@ -89,4 +89,34 @@ defmodule Barkpark.Content.Papers.DocumentBlockOpReceiptIdTest do
     assert is_binary(block_id) and block_id != ""
     assert receipt.position == anchor_idx + 1
   end
+
+  # The filing's LOWER-CONFIDENCE second concern, MEASURED rather than reasoned.
+  # It feared the hoist changes WHEN positional ids are minted, so an id-less
+  # append (minting `block-N`) followed by an append carrying the LITERAL id
+  # `block-N` would newly refuse as duplicate_id where it used to succeed. This
+  # test reads the minted id out of STORAGE, never out of the receipt, so it runs
+  # identically with and without the hoist — and it returns the same
+  # `{:error, {:duplicate_id, ...}}` on both sides. The concern does not apply to
+  # this surface: the document path persists one op at a time through
+  # `upsert_document`, whose own chokepoint had ALREADY minted that positional id
+  # into storage before the second op was lowered. The hoist changes the receipt,
+  # not the stored list the next op is validated against.
+  test "an append of a previously minted literal id refuses identically with and without the hoist",
+       %{doc: doc} do
+    first = %{"op" => "append-block", "block" => %{"type" => "paragraph", "text" => "first"}}
+
+    {:ok, _first_receipt} =
+      Content.apply_document_block_op(doc.doc_id, @doc_type, first, @dataset)
+
+    minted = List.last(stored_block_ids(doc.doc_id))
+    assert is_binary(minted) and minted != ""
+
+    second = %{
+      "op" => "append-block",
+      "block" => %{"id" => minted, "type" => "paragraph", "text" => "second"}
+    }
+
+    result = Content.apply_document_block_op(doc.doc_id, @doc_type, second, @dataset)
+    assert result == {:error, {:duplicate_id, minted, "append-block"}}
+  end
 end
