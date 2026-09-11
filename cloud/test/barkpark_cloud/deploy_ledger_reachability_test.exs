@@ -371,6 +371,8 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "start-vs-poll refusal phase, ROUTED AT LAST — the same closer as delivery/3 above, landed by the same PR. `site_deployment_json/3` reads it off the RAW failure_reason, so start-vs-poll is legible over HTTP instead of living only in this suite."},
     {:no_box_code, 0, :reachable,
      "THE SENTINEL THAT SAYS \"A CODE-AWARE WRITER LOOKED AND THE ENVELOPE CARRIED NO CODE\" (dr-w4-bl-deferral-raw-column-ambiguous). Public for exactly one reason: `Sites.Deploy.box_refusal_code/1` STAMPS it onto `deployments.box_refusal_code` and `DeployLedger.classify/1` READS it back, and a sentinel spelled out twice in two modules is a sentinel that can drift — one owner, one literal, or the writer and the reader eventually disagree about what \"no code\" looks like and the disagreement is silent. Its three external call sites are the three arms of that extractor. It is REACHABLE from the day it lands (D136's shape: the value, its writer and its reader in ONE PR)."},
+    {:agency, 1, :reachable,
+     "WHO a failure class accuses (D148/D242). WAS :internal_only (`class_rows/3` reads it while building the census class table, so the accusation rides the same row as the count and reaches an operator through `Web.Router.deploy_census_json/2`'s existing whole-map serialisation). dr-w15-bl-failure-copy-has-no-agency gives it an EXTERNAL caller: `FailureCopy.fault_line/1` (failure_copy.ex) derives the CUSTOMER's fault sentence from this function and from nothing else — before that seam, no class token crossed into the copy layer at all and an agency ruling could not reach a customer even in principle. This is the row that says the ONE token crosses: if `fault_line/1` ever grows its own regex over `failure_reason`, this row goes back to :internal_only and the move is visible in the diff."},
     {:label, 1, :reachable,
      "class -> human one-liner. WAS :internal_only (used once while building the census class table); dr-w32-bl gives it an external caller: `Notifications.BoxUnreachableEpisodeAlert.body/1` interpolates `DeployLedger.label(@class)` into the episode notice a human reads, so the sentence the alert quotes and the one-liner the census table carries are ONE string and cannot drift."},
 
@@ -381,8 +383,6 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "the deferral predicate, used inside census/3's fold. THE `?`-TRAP ROW: the grep sweep scored this at zero and would have deleted a live function."},
     {:not_attempted?, 1, :internal_only,
      "the never-attempted predicate that keeps rows out of the rate DENOMINATOR. Same `?`-trap as deferred?/1, same false zero."},
-    {:agency, 1, :internal_only,
-     "WHO a failure class accuses (D148/D242). `class_rows/3` reads it while building the census class table, so the accusation rides the same row as the count and reaches an operator through `Web.Router.deploy_census_json/2`'s existing whole-map serialisation — no new route, and no edit to router.ex, which is a sibling fence. Over-public rather than `defp` because the assertion suite calls it directly on named classes."},
     {:encode_cursor, 1, :internal_only,
      "keyset cursor writer, used by list_page/2 when it hands back a next page."},
     {:decode_cursor, 1, :internal_only,
@@ -425,7 +425,7 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   # set-equality assertions red on that same change anyway, so a floor can never
   # be the only thing a change has to satisfy.
   @publics_floor 23
-  @call_sites_floor 22
+  @call_sites_floor 23
 
   # ---------------------------------------------------------------------------
 

@@ -6391,15 +6391,18 @@ test("vercelClaimHtml: configured + undeployed → the one-click deploy button",
   assert.match(html, /every environment variable already set/);
 });
 
-test("vercelClaimHtml: deployed but stale code → a re-mint button, never a dead link", () => {
-  const html = hooks.vercelClaimHtml({ configured: true, deployed: true, claim_url: null }, { id: "b1" });
+test("vercelClaimHtml: deployed, stale code, READ says unclaimed → a re-mint button, never a dead link", () => {
+  // cch-w48: the re-mint arm now requires claimed === false — a POSITIVE read
+  // that the project is still ours. Dropping `claimed` from this fixture is
+  // what the "cannot tell" test below asserts about.
+  const html = hooks.vercelClaimHtml({ configured: true, deployed: true, claim_url: null, claimed: false }, { id: "b1" });
   assert.match(html, /Get your Vercel claim link/);
   assert.doesNotMatch(html, /claim-deployment/);
 });
 
 test("vercelClaimLinkHtml: fresh code → claim link with returnUrl back to the instance", () => {
   const vercel = {
-    configured: true, deployed: true,
+    configured: true, deployed: true, claimed: false,
     claim_url: "https://vercel.com/claim-deployment?code=clm_x",
     deployment_url: "https://my-site-abc.vercel.app",
   };
@@ -6409,6 +6412,91 @@ test("vercelClaimLinkHtml: fresh code → claim link with returnUrl back to the 
   assert.match(html, /href="https:\/\/vercel\.com\/claim-deployment\?code=clm_x&amp;returnUrl=http%3A%2F%2Flocalhost%2F%23instance%2Fbp-9"/);
   assert.match(html, /my-site-abc\.vercel\.app/); // the live-deployment line
   assert.match(html, /target="_blank" rel="noopener"/);
+});
+
+// ── cch-w48: the claim is IRREVERSIBLE, so the CTA reads the completion fact ──
+//
+// Before this, `claimed` did not exist: after the user went through with the
+// transfer the card repainted the IDENTICAL claim link for up to 23h, and once
+// the code went stale it offered "Get your Vercel claim link" — inviting a
+// second irreversible click on a deployment whose ownership had already moved.
+// Each test below drives the state the old code could not represent.
+
+test("vercelClaimHtml: claimed → the copy is true AFTER the transfer; no claim link repaints", () => {
+  const vercel = {
+    configured: true, deployed: true, claimed: true,
+    // A code we still hold is MEANINGLESS once the project left our team.
+    claim_url: "https://vercel.com/claim-deployment?code=clm_x",
+    deployment_url: "https://my-site-abc.vercel.app",
+  };
+  const html = hooks.vercelClaimHtml(vercel, { id: "bp-9" });
+  assert.match(html, /id="new-vercel-claimed"/);
+  assert.match(html, /already in your Vercel account/);
+  assert.match(html, /my-site-abc\.vercel\.app/);
+  // The two pending-shaped CTAs are BOTH absent — the repaint the bug was.
+  assert.doesNotMatch(html, /claim-deployment/);
+  assert.doesNotMatch(html, /id="new-vercel-claim-link"/);
+  assert.doesNotMatch(html, /Claim your deployment on Vercel/);
+  assert.doesNotMatch(html, /id="new-vercel-claim"/);
+});
+
+test("vercelClaimHtml: claimed + stale code → states it is done, never re-mints", () => {
+  const html = hooks.vercelClaimHtml(
+    { configured: true, deployed: true, claimed: true, claim_url: null, deployment_url: "https://x.vercel.app" },
+    { id: "b1" },
+  );
+  assert.match(html, /id="new-vercel-claimed"/);
+  // THE post-TTL failure: offering to re-mint a link for a deployment they own.
+  assert.doesNotMatch(html, /Get your Vercel claim link/);
+  assert.doesNotMatch(html, /type="button"/);
+});
+
+test("vercelClaimHtml: deployed but the read FAILED → says it cannot tell, offers nothing", () => {
+  const html = hooks.vercelClaimHtml(
+    { configured: true, deployed: true, claimed: null, claim_url: null, deployment_url: "https://x.vercel.app" },
+    { id: "b1" },
+  );
+  assert.match(html, /id="new-vercel-claim-unknown"/);
+  assert.match(html, /couldn\u2019t check with Vercel/);
+  assert.match(html, /one-way/);
+  assert.doesNotMatch(html, /Get your Vercel claim link/);
+  assert.doesNotMatch(html, /claim-deployment/);
+});
+
+test("vercelClaimHtml: an ABSENT claimed fact is 'cannot tell', not 'unclaimed'", () => {
+  // A payload from a control plane that predates the read must NOT be treated
+  // as a licence to offer an irreversible transfer.
+  const html = hooks.vercelClaimHtml(
+    { configured: true, deployed: true, claim_url: "https://vercel.com/claim-deployment?code=clm_x" },
+    { id: "b1" },
+  );
+  assert.match(html, /id="new-vercel-claim-unknown"/);
+  assert.doesNotMatch(html, /claim-deployment\?code/);
+});
+
+test("vercelClaimHtml: UNDEPLOYED is unaffected — nothing to be unsure about", () => {
+  const html = hooks.vercelClaimHtml({ configured: true, deployed: false, claimed: false, claim_url: null }, { id: "b1" });
+  assert.match(html, /id="new-vercel-claim"[^>]*>Deploy your site to Vercel</);
+  assert.doesNotMatch(html, /new-vercel-claim-unknown/);
+});
+
+test("vercelClaimInnerHtml: the post-deploy in-place swap runs the SAME ladder", () => {
+  // newVercelDeploy() swaps #new-vercel-area's innerHTML with this; if the POST
+  // re-minted a code for a project that already left our team, the swap must
+  // say so rather than paint a claim link over a completed transfer.
+  const claimed = hooks.vercelClaimInnerHtml(
+    { configured: true, deployed: true, claimed: true, claim_url: "https://vercel.com/claim-deployment?code=c" },
+    { id: "b1" },
+  );
+  assert.match(claimed, /id="new-vercel-claimed"/);
+  assert.doesNotMatch(claimed, /claim-deployment/);
+  assert.doesNotMatch(claimed, /<div id="new-vercel-area">/); // inner only
+
+  const fresh = hooks.vercelClaimInnerHtml(
+    { configured: true, deployed: true, claimed: false, claim_url: "https://vercel.com/claim-deployment?code=c" },
+    { id: "b1" },
+  );
+  assert.match(fresh, /id="new-vercel-claim-link"/);
 });
 
 // ── Guided Vercel fallback (no platform token): per-field copy + Deploy ──────

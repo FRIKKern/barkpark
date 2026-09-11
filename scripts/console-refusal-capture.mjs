@@ -113,7 +113,19 @@ export function captureRefusal(text) {
 // cloud/priv/static/__preview__/*.mjs for exit-2 paths and demands every file it
 // finds be accounted for HERE. A new refusing instrument that nobody taught this
 // reader about fails the test by ARRIVING, not by being noticed.
-export const FENCE_GLOBS = ["cloud/priv/static", "cloud/priv/static/__preview__"];
+// A PREDICATE, NOT A LIST (see the `match` regexes): each entry is a directory
+// plus the rule for which of its files are in this capture's fence, so a file
+// ARRIVING is enough to be scanned. `scripts` is fenced to `console-*` because
+// the rest of scripts/ emits for gates that never route through this capture
+// (studio-desk-*, false-open-sweep, font-zero-advance, boundary-build-cache-
+// tripwire all exit 2 under other lanes' readers); the arm is still scanned on
+// every run, and the test asserts it reached files, so "0 emitters" here is a
+// MEASURED zero and not an enumeration that quietly went empty.
+export const FENCE_GLOBS = [
+  { dir: "cloud/priv/static", match: /\.mjs$/ },
+  { dir: "cloud/priv/static/__preview__", match: /\.mjs$/ },
+  { dir: "scripts", match: /^console-.*\.mjs$/ },
+];
 
 // Emitters normalised by cch-w63-bl: exactly one exit-2 path each, inside their
 // own `refuse2` helper, publishing the shape above on STDERR.
@@ -162,6 +174,35 @@ export const CONFORMING = [
     file: "cloud/priv/static/__preview__/exit-vocabulary.mjs",
     name: "PROOF",
     sample: "!! PROOF (exit 2): REFUSED TO MEASURE — the browser never came up",
+  },
+  // hashchange-wiring.mjs is a `run:` step of the `modal-oracle` job
+  // (console-harness.yml, `node cloud/priv/static/__preview__/hashchange-wiring.mjs`)
+  // and it refuses under THREE names, from three different guards, before and
+  // after Chrome exists. All three already spoke the shape; nothing named them
+  // here, so the DERIVED fence test was red on origin/main.
+  {
+    file: "cloud/priv/static/__preview__/hashchange-wiring.mjs",
+    name: "ROSTER GUARD",
+    sample: "!! ROSTER GUARD (exit 2) — refusing to boot Chrome:",
+  },
+  {
+    file: "cloud/priv/static/__preview__/hashchange-wiring.mjs",
+    name: "GUARD",
+    sample: "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
+  },
+  {
+    file: "cloud/priv/static/__preview__/hashchange-wiring.mjs",
+    name: "HASHCHANGE WIRING",
+    sample: "!! HASHCHANGE WIRING (exit 2): REFUSED TO MEASURE",
+  },
+  // pin-race.mjs is a `run:` step of its own job and refuses through ONE funnel
+  // (`const refuse = async (why)`), which sets `process.exitCode = 2` rather
+  // than calling process.exit(2) — the reason a reader keyed on the call shape
+  // alone would not have found it either.
+  {
+    file: "cloud/priv/static/__preview__/pin-race.mjs",
+    name: "PIN RACE",
+    sample: "!! PIN RACE (exit 2): REFUSED TO MEASURE — no Chrome/Chromium found.",
   },
 ];
 
