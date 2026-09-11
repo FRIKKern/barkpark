@@ -1161,15 +1161,45 @@ echo
 # substituted from the environment so the body can run outside Actions.
 echo "case 10: the dispatcher fails rather than skips when it cannot tell"
 DISP="$TMPROOT/dispatch-step.sh"
-python3 - "$WF" "$DISP" <<'PY'
-import sys, yaml
+
+# THE MUTATION HOOK for every arm in this case. Point CLOUD_DISPATCH_WF at
+# another copy of cloud.yml — `git show origin/main:.github/workflows/cloud.yml
+# > /tmp/main.yml` — and the SAME fixtures below are driven through THAT file's
+# dispatcher. It is how the version-skew arm is quoted red on the pre-fix shape
+# instead of being asserted about.
+DISP_WF="${CLOUD_DISPATCH_WF:-$WF}"
+
+# The `${{ … }}` expressions are substituted from the environment so the body
+# can run outside Actions — and the substitution is CLOSED, not a best effort.
+# An expression this list does not know survives into the body verbatim and
+# bash dies on it with `bad substitution`, which reaches the reader as nine
+# unexplained arm failures rather than as "the extraction is out of date".
+# Measured 2026-09-11: adding `${{ github.event.pull_request.number }}` to the
+# step turned case 10 into `258 passed, 9 failed` with that one bash error as
+# the only clue. So: substitute, then REFUSE any leftover by name.
+if python3 - "$DISP_WF" "$DISP" <<'PY'
+import sys, re, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
 step = [s for s in wf["jobs"]["changes"]["steps"] if s.get("id") == "sets"][0]
 body = (step["run"]
         .replace("${{ github.event_name }}", "${T_EVENT}")
-        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}"))
+        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}")
+        .replace("${{ github.event.pull_request.number }}", "${T_PRNUM}"))
+left = sorted(set(re.findall(r"\$\{\{.*?\}\}", body)))
+if left:
+    sys.stderr.write(
+        "EXTRACTION IS OUT OF DATE: the `sets` step uses Actions expressions this "
+        "harness does not substitute: %s. Add each to the replace() chain above "
+        "(and pass its value from dispatch()), or every arm below measures "
+        "nothing.\n" % ", ".join(left))
+    sys.exit(3)
 open(sys.argv[2], "w").write(body)
 PY
+then
+  ok "extracted the 'sets' step body with every Actions expression substituted"
+else
+  no "could not extract the 'sets' step body from $DISP_WF (see the line above) — every dispatcher arm below measures nothing"
+fi
 
 DR="$TMPROOT/dispatchrepo"
 mkdir -p "$DR/cloud/lib" "$DR/docs" "$DR/api/lib" "$DR/scripts" \
@@ -1195,6 +1225,14 @@ git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
 BASE_SHA="$(git -C "$DR" rev-parse HEAD)"
 
+# THE STAND-IN FOR refs/pull/N/merge. The dispatcher pins the path-set script to
+# the ref the WORKFLOW FILE came from; inside this fixture that ref is a branch
+# of the fixture repo, reached with the remote `.`. Every arm below therefore
+# exercises the PINNED read — the shipped path — and not the fallback. An arm
+# that wants the fallback sets PIN_REF to a ref that does not exist.
+git -C "$DR" branch pinned-merge "$BASE_SHA"
+mkdir -p "$TMPROOT/runner-temp"
+
 # dispatch <label> <expected-rc> <expected-cloud> <event> <base> [expected-census]
 #
 # The census column is OPTIONAL only in the sense that the pre-existing arms
@@ -1204,7 +1242,11 @@ dispatch() {
   local label="$1" want="$2" wc="$3" ev="$4" bs="$5" wcen="${6-}"
   local rc gotc gotcen
   : >"$TMPROOT/gh_output"
-  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" GITHUB_OUTPUT="$TMPROOT/gh_output" \
+  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" T_PRNUM="${PIN_PRNUM:-0}" \
+    DISPATCH_PIN_REMOTE="${PIN_REMOTE:-.}" \
+    DISPATCH_PIN_REF="${PIN_REF:-refs/heads/pinned-merge}" \
+    RUNNER_TEMP="$TMPROOT/runner-temp" \
+    GITHUB_OUTPUT="$TMPROOT/gh_output" \
     bash --noprofile --norc "$DISP") >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     ok "$label -> exit $rc"
@@ -1335,6 +1377,96 @@ git -C "$DR" checkout -q -b renamein "$BASE_SHA"
 git -C "$DR" mv docs/guide.md cloud/lib/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA"
+
+# ── THE WORKFLOW/SCRIPT VERSION SKEW (task-3a81e68f7027ca98) ───────────────
+# Measured 2026-09-11 on PR #17575 (job 103113143741): the required `Cloud gate`
+# was RED with the dispatcher exiting 2 on
+# `cloud-path-escape-check: unknown path set 'census' (want cloud)`.
+# GitHub takes the WORKFLOW FILE for a pull_request run from the MERGE REF while
+# this job checks out the PR HEAD (the D34 note), so main's `--match census`
+# invocation ran against the branch's OLDER script. It is a CLASS: every future
+# flag this step learns reds every PR branched before it, until each is
+# update-branched.
+#
+# The fixture head carries a script with the census set name REMOVED. The pin
+# points at a ref that carries the CURRENT one. The verdict must come from the
+# pinned script.
+git -C "$DR" checkout -q -b oldscript "$BASE_SHA"
+sed 's/^    cloud | census) ;;$/    cloud) ;;/' \
+  "$REAL_ROOT/scripts/cloud-path-escape-check.sh" >"$DR/scripts/cloud-path-escape-check.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm oldscript >/dev/null 2>&1
+
+# THE PRECONDITION, asserted before the verdict — never inferred from the
+# verdict. A sed that matched nothing leaves the CURRENT script on the head and
+# the arm below passes having measured no skew at all: a vacuous green wearing
+# the proof's clothes.
+skew_rc=0
+skew_out="$( (cd "$DR" && bash scripts/cloud-path-escape-check.sh --match census <<<"docs/x.md") 2>&1 )" || skew_rc=$?
+if [ "$skew_rc" -eq 2 ] && has "$skew_out" "unknown path set 'census'"; then
+  ok "the fixture head's script REFUSES --match census (exit 2) — the skew is real"
+else
+  no "the fixture head's script still answers --match census (rc=$skew_rc, '$skew_out') — the arms below cannot fail for the right reason"
+fi
+# …and the pinned ref must carry a script that DOES answer it, or the arm would
+# be measuring two broken copies agreeing.
+if (cd "$DR" && git show pinned-merge:scripts/cloud-path-escape-check.sh | grep -q 'cloud | census'); then
+  ok "the pinned ref carries a script that KNOWS the census set"
+else
+  no "the pinned ref's script does not know the census set either — nothing here discriminates"
+fi
+
+# The changed file is scripts/cloud-path-escape-check.sh: cloud=true (scripts/**
+# is declared, the caller-corpus widening) and census=false (scripts/ is not a
+# census root). The `false` is the load-bearing half — a pin that silently
+# failed would answer census=true through match_set's warning path.
+dispatch "version skew: the head's script predates --match census" 0 true pull_request "$BASE_SHA" false
+gate_says "path-set script: refs/heads/pinned-merge" "  …and says which ref it read the script from"
+if grep -q "could not answer '--match census'" "$GATE_OUT"; then
+  no "  …the census verdict came from the FALLBACK, not from the pinned script"
+else
+  ok "  …and the census verdict came from the pinned script, not from the fallback"
+fi
+
+# THE NEGATIVE CONTROL for the pin itself: an unreadable pin ref (a conflicted
+# PR has no merge ref) must NOT brick the dispatcher. It warns by name, falls
+# back to the head's own copy — which here is the census-less one — and STILL
+# emits both outputs, with the verdict it could not compute set to true.
+PIN_REF=refs/heads/no-such-merge-ref \
+  dispatch "version skew, pin UNREADABLE: warns, falls back, still answers" 0 true pull_request "$BASE_SHA" true
+gate_says "could NOT read scripts/cloud-path-escape-check.sh out of" "  …names the pin read that failed"
+gate_says "could not answer '--match census'" "  …and names the set the fallback could not compute"
+gate_says "Dispatching census=true" "  …and says it is running more, not skipping"
+
+# ── D34, RE-PROVEN, BOTH DIRECTIONS ────────────────────────────────────────
+# The script is pinned to the merge ref; the DIFF must still be the head
+# checkout's three-dot against the PR base. Advance the fixture's main with a
+# cloud/** commit, then send a one-file docs PR branched before it.
+git -C "$DR" checkout -q -b advmain "$BASE_SHA"
+printf 'advanced\n' >"$DR/cloud/lib/advance.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm "main advances with a cloud/** change" >/dev/null 2>&1
+
+git -C "$DR" checkout -q -b onefile "$BASE_SHA"
+printf 'x\n' >"$DR/docs/one-file.md"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm onefile >/dev/null 2>&1
+dispatch "D34: a one-file docs PR still dispatches as ONE FILE after main advanced" 0 false pull_request "$BASE_SHA" false
+gate_says "^docs/one-file.md$" "  …and the changed-file set is that one file"
+if grep -q "^cloud/lib/advance.ex$" "$GATE_OUT"; then
+  no "  …main's advance leaked into the changed-file set"
+else
+  ok "  …and main's advance did NOT leak into the changed-file set"
+fi
+
+# THE CONTROL that makes the arm above mean something: run the SAME PR from a
+# MERGE-REF checkout and main's advance DOES sweep in (cloud flips false->true).
+# That is the checkout D34 refuses, and why the fix pins the SCRIPT and not the
+# CHECKOUT.
+git -C "$DR" checkout -q -b mergeref onefile
+git -C "$DR" -c user.email=t@t -c user.name=t merge -q --no-edit advmain >/dev/null 2>&1
+dispatch "D34 control: the same PR from a MERGE-REF checkout sweeps main's advance in" 0 true pull_request "$BASE_SHA" false
+gate_says "^cloud/lib/advance.ex$" "  …and the control's changed-file set DOES carry main's advance"
 
 # THE FAILURE PATHS — the polarity that makes the shim safe.
 # An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a

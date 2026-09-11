@@ -1947,15 +1947,42 @@ echo
 # substituted from the environment so the body can run outside Actions.
 echo "case 10: the dispatcher fails rather than skips when it cannot tell"
 DISP="$TMPROOT/dispatch-step.sh"
-python3 - "$WF" "$DISP" <<'PY'
-import sys, yaml
+
+# THE MUTATION HOOK for every arm in this case. Point ELIXIR_DISPATCH_WF at another copy
+# of this workflow — `git show origin/main:.github/workflows/<f>.yml > /tmp/f` —
+# and the SAME fixtures below are driven through THAT file's dispatcher. It is
+# how the version-skew arm is quoted red on the pre-fix shape rather than
+# asserted about.
+DISP_WF="${ELIXIR_DISPATCH_WF:-$WF}"
+
+# The `${{ … }}` expressions are substituted from the environment so the body
+# can run outside Actions — and the substitution is CLOSED, not a best effort.
+# An expression this list does not know survives into the body verbatim, bash
+# dies on it with `bad substitution`, and the reader sees every arm below fail
+# with no clue that the EXTRACTION is what went stale.
+if python3 - "$DISP_WF" "$DISP" <<'PY'
+import sys, re, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
 step = [s for s in wf["jobs"]["changes"]["steps"] if s.get("id") == "sets"][0]
 body = (step["run"]
         .replace("${{ github.event_name }}", "${T_EVENT}")
-        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}"))
+        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}")
+        .replace("${{ github.event.pull_request.number }}", "${T_PRNUM}"))
+left = sorted(set(re.findall(r"\$\{\{.*?\}\}", body)))
+if left:
+    sys.stderr.write(
+        "EXTRACTION IS OUT OF DATE: the `sets` step uses Actions expressions this "
+        "harness does not substitute: %s. Add each to the replace() chain above "
+        "(and pass its value from dispatch()), or every arm below measures "
+        "nothing.\n" % ", ".join(left))
+    sys.exit(3)
 open(sys.argv[2], "w").write(body)
 PY
+then
+  ok "extracted the 'sets' step body with every Actions expression substituted"
+else
+  no "could not extract the 'sets' step body from $DISP_WF (see the line above) — every dispatcher arm below measures nothing"
+fi
 
 DR="$TMPROOT/dispatchrepo"
 mkdir -p "$DR/api/lib" "$DR/docs" "$DR/internal/taskboard" "$DR/scripts"
@@ -1971,12 +1998,24 @@ git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
 BASE_SHA="$(git -C "$DR" rev-parse HEAD)"
 
+# THE STAND-IN FOR refs/pull/N/merge. The dispatcher pins the path-set script to
+# the ref the WORKFLOW FILE came from; inside this fixture that ref is a branch
+# of the fixture repo, reached with the remote `.`. Every arm below therefore
+# exercises the PINNED read — the shipped path — not the fallback. An arm that
+# wants the fallback sets PIN_REF to a ref that does not exist.
+git -C "$DR" branch pinned-merge "$BASE_SHA"
+mkdir -p "$TMPROOT/runner-temp"
+
 # dispatch <label> <expected-rc> <expected-compile> <expected-test> <event> <base>
 dispatch() {
   local label="$1" want="$2" wc="$3" wt="$4" ev="$5" bs="$6"
   local rc gotc gott
   : >"$TMPROOT/gh_output"
-  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" GITHUB_OUTPUT="$TMPROOT/gh_output" \
+  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" T_PRNUM="${PIN_PRNUM:-0}" \
+    DISPATCH_PIN_REMOTE="${PIN_REMOTE:-.}" \
+    DISPATCH_PIN_REF="${PIN_REF:-refs/heads/pinned-merge}" \
+    RUNNER_TEMP="$TMPROOT/runner-temp" \
+    GITHUB_OUTPUT="$TMPROOT/gh_output" \
     bash --noprofile --norc "$DISP") >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     ok "$label -> exit $rc"
@@ -2054,6 +2093,46 @@ git -C "$DR" checkout -q -b renamein "$BASE_SHA"
 git -C "$DR" mv docs/guide.md api/lib/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true true pull_request "$BASE_SHA"
+
+# ── THE WORKFLOW/SCRIPT VERSION SKEW (task-3a81e68f7027ca98) ───────────────
+# GitHub takes the WORKFLOW FILE for a pull_request run from the MERGE REF while
+# this job checks out the PR HEAD (D34), so main's invocation used to run against
+# the BRANCH's older script. Measured in cloud.yml's twin on PR #17575
+# (2026-09-11, job 103113143741): exit 2, `unknown path set`, a RED required gate
+# with no defect in the PR. The fixture head below carries a script that does NOT
+# know the `test` set; the pin points at a ref that does.
+git -C "$DR" checkout -q -b oldscript "$BASE_SHA"
+sed 's/^    compile | test) ;;$/    compile) ;;/' \
+  "$REAL_ROOT/scripts/elixir-path-escape-check.sh" >"$DR/scripts/elixir-path-escape-check.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm oldscript >/dev/null 2>&1
+
+# THE PRECONDITION, asserted before the verdict — never inferred from it. A sed
+# that matched nothing leaves the CURRENT script on the head and the arm below
+# passes having measured no skew at all.
+skew_rc=0
+skew_out="$( (cd "$DR" && bash scripts/elixir-path-escape-check.sh --match test <<<"docs/x.md") 2>&1 )" || skew_rc=$?
+if [ "$skew_rc" -eq 2 ] && has "$skew_out" "unknown path set 'test'"; then
+  ok "the fixture head's script REFUSES --match test (exit 2) — the skew is real"
+else
+  no "the fixture head's script still answers --match test (rc=$skew_rc, '$skew_out') — the arm below cannot fail for the right reason"
+fi
+
+# scripts/elixir-path-escape-check.sh is in BOTH sets (measured: --match compile
+# and --match test both answer true for it), so the pinned answer is
+# compile=true test=true. The load-bearing half is the EXIT CODE: without the
+# pin this step dies on the `--match test` refusal under `set -euo pipefail`
+# and emits no verdict at all.
+dispatch "version skew: the head's script predates the test set name" 0 true true pull_request "$BASE_SHA"
+gate_says "path-set script: refs/heads/pinned-merge" "  …and says which ref it read the script from"
+
+# THE NEGATIVE CONTROL for the pin: an unreadable pin ref (a conflicted PR has no
+# merge ref) must NOT be silent. It warns by name and falls back to the head's own
+# copy — which here is the skewed one — so the step still dies rather than
+# emitting a verdict nothing measured.
+PIN_REF=refs/heads/no-such-merge-ref \
+  dispatch "version skew, pin UNREADABLE: warns by name, then refuses" 2 - - pull_request "$BASE_SHA"
+gate_says "could NOT read scripts/elixir-path-escape-check.sh out of" "  …names the pin read that failed"
 
 # THE FAILURE PATHS — the polarity that makes the shim safe.
 # An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a

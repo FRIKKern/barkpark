@@ -280,9 +280,58 @@ jobs:
             exit 0
           fi
 
+          # ── THE SCRIPT MUST MATCH THE WORKFLOW (task-3a81e68f7027ca98) ────
+          # GitHub takes the WORKFLOW FILE for a `pull_request` run from the
+          # MERGE REF; this job checks out the PR HEAD on purpose (D34, on the
+          # checkout above). Two different commits — so the invocation written
+          # HERE used to run against the BRANCH's copy of
+          # scripts/elixir-path-escape-check.sh, and any head branched before a
+          # change to that script's CLI surface answers `unknown path set …`,
+          # exits 2, and reds the required `Elixir gate` with no defect in the
+          # PR. Measured in cloud.yml's twin on PR #17575 (2026-09-11): same
+          # shape, same exit 2. A CLASS, so the sibling gets the same remedy
+          # rather than waiting for its own incident.
+          #
+          # THE SPLIT: the DIFF stays the head checkout's three-dot (D34
+          # intact); the SCRIPT comes from the commit this workflow file came
+          # from. A PIN ROOT, not a loose file — the script resolves its own
+          # root as `dirname($0)/..`.
+          #
+          # DISPATCH_PIN_REMOTE / DISPATCH_PIN_REF are the hooks
+          # scripts/elixir-path-escape-check.test.sh drives this block with
+          # against a fixture repo. Actions sets neither; the defaults are the
+          # real values, so the tested path IS the shipped path.
+          pin_remote="${DISPATCH_PIN_REMOTE:-origin}"
+          pin_ref="${DISPATCH_PIN_REF:-refs/pull/${{ github.event.pull_request.number }}/merge}"
+          pin_script="scripts/elixir-path-escape-check.sh"
+          pin_src="the PR HEAD checkout — NOT the commit this workflow file came from"
+          pinroot="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/elixir-dispatcher-pinroot"
+          rm -rf "$pinroot"
+          mkdir -p "$pinroot/scripts"
+          pinned="$pinroot/scripts/elixir-path-escape-check.sh"
+
+          if git fetch --no-tags --quiet "$pin_remote" "+${pin_ref}:refs/dispatcher/elixir-pinned" 2>/dev/null \
+             && git show refs/dispatcher/elixir-pinned:scripts/elixir-path-escape-check.sh >"$pinned" 2>/dev/null \
+             && [ -s "$pinned" ]; then
+            pin_script="$pinned"
+            pin_src="${pin_ref} ($(git rev-parse refs/dispatcher/elixir-pinned))"
+          else
+            # NAMED, never silent — and NOT fatal. A merge ref is absent for a
+            # conflicted PR, and killing the dispatcher there would leave the
+            # suite with no answer at all, which is the failure this exists to
+            # end. The fallback is the head's own copy; the containment and
+            # interpretability checks below are unchanged.
+            echo "::warning::dispatcher: could NOT read scripts/elixir-path-escape-check.sh out of ${pin_ref} on remote '${pin_remote}' (an absent merge ref — a conflicted PR — is the usual cause). Falling back to the PR HEAD's own copy, which may predate this workflow's CLI surface. Degraded read, not a green."
+          fi
+          echo "path-set script: ${pin_src}"
+
           # The path sets are declared ONCE, in the ratchet that proves them.
-          compile="$(printf '%s\n' "$changed" | bash scripts/elixir-path-escape-check.sh --match compile)"
-          test="$(printf '%s\n' "$changed" | bash scripts/elixir-path-escape-check.sh --match test)"
+          # A HERE-STRING, not a pipe (house D37): `--match` answers through
+          # `grep -Eq`, which exits the instant it matches, and a writer still
+          # holding bytes then takes SIGPIPE that `set -o pipefail` promotes
+          # over the match that DID occur.
+          compile="$(bash "$pin_script" --match compile <<<"$changed")"
+          test="$(bash "$pin_script" --match test <<<"$changed")"
 
           # Containment invariant: compile ⊆ test, by construction of the two
           # path sets — every path that recompiles the app is also a path the

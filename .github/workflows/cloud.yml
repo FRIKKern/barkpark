@@ -188,16 +188,132 @@ jobs:
             exit 0
           fi
 
-          # The path set is declared ONCE, in the ratchet that proves it.
-          cloud="$(printf '%s\n' "$changed" | bash scripts/cloud-path-escape-check.sh --match cloud)"
+          # ── THE SCRIPT MUST MATCH THE WORKFLOW (task-3a81e68f7027ca98) ───
+          # GitHub takes the WORKFLOW FILE for a `pull_request` run from the
+          # MERGE REF, while this job deliberately checks out the PR HEAD (the
+          # D34 note on the checkout above). Those are two different commits, so
+          # the invocation written here used to run against the BRANCH's copy of
+          # scripts/cloud-path-escape-check.sh. Any head branched before a
+          # change to that script's CLI surface then answered
+          # `cloud-path-escape-check: unknown path set 'census' (want cloud)`
+          # and exited 2 — a RED required `Cloud gate` with no defect in the PR.
+          # Measured 2026-09-11 on PR #17575, job 103113143741, `changed files:
+          # scripts/format-check.sh`. It is a CLASS, not a one-off: the same
+          # skew fires for every future flag this step learns, against every PR
+          # branched before it, until each one is update-branched.
+          #
+          # THE SPLIT. The DIFF still comes from the head checkout — D34 intact,
+          # the changed-file set must describe THIS PR and not main's advance.
+          # The SCRIPT is pinned to the commit the workflow file itself came
+          # from, the merge ref, so flag and parser are matched BY CONSTRUCTION
+          # rather than by rebase etiquette. A `git show` off a fetched ref; the
+          # checkout is a blobless partial clone, so this costs one commit, its
+          # trees and one blob, never a second working tree.
+          #
+          # The two DISPATCH_PIN_* hooks are how case 10 of
+          # scripts/cloud-path-escape-check.test.sh drives this exact block
+          # against a local fixture repo (it points them at a ref inside the
+          # fixture). Actions sets neither; the defaults below are the real
+          # values, so the tested path IS the shipped path.
+          pin_remote="${DISPATCH_PIN_REMOTE:-origin}"
+          pin_ref="${DISPATCH_PIN_REF:-refs/pull/${{ github.event.pull_request.number }}/merge}"
+          pin_script="scripts/cloud-path-escape-check.sh"
+          pin_src="the PR HEAD checkout — NOT the commit this workflow file came from"
+          # A PIN *ROOT*, not a loose file. cloud-path-escape-check.sh resolves
+          # its own DECL_ROOT as `dirname($0)/..`, and the census tier derives
+          # its corpus from a declaration FILE under that root. A pinned copy
+          # dropped straight into $RUNNER_TEMP therefore gets
+          # DECL_ROOT=/home/runner/work, finds no declaration, and exits 2 on
+          # EVERY `--match census` — which match_set below turns into a
+          # permanent census=true. Measured 2026-09-11 in case 10 of
+          # scripts/cloud-path-escape-check.test.sh: a docs-only fixture came
+          # back census=true. So the pinned copy lands at <pinroot>/scripts/
+          # and the declaration it NAMES is pinned beside it off the same ref —
+          # parser and corpus move together or not at all.
+          pinroot="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/dispatcher-pinroot"
+          rm -rf "$pinroot"
+          mkdir -p "$pinroot/scripts"
+          pinned="$pinroot/scripts/cloud-path-escape-check.sh"
 
-          # …and the census tier, from the SAME declaration file. A here-string,
-          # not a pipe: `--match` answers through `grep -Eq`, which exits the
-          # instant it matches, and a writer still holding bytes then takes
-          # SIGPIPE that `set -o pipefail` promotes over the match that DID
-          # occur (the house D37 rule). A here-string has no writer process.
-          census="$(bash scripts/cloud-path-escape-check.sh --match census <<<"$changed")"
+          if git fetch --no-tags --quiet "$pin_remote" "+${pin_ref}:refs/dispatcher/pinned" 2>/dev/null \
+             && git show refs/dispatcher/pinned:scripts/cloud-path-escape-check.sh >"$pinned" 2>/dev/null \
+             && [ -s "$pinned" ]; then
+            pin_script="$pinned"
+            pin_src="${pin_ref} ($(git rev-parse refs/dispatcher/pinned))"
+            # The corpus declaration, from the SAME ref. The script names the
+            # file itself (`--census-source`) so this follows a rename of it
+            # instead of hard-coding a path here that goes quietly stale.
+            # A failure here is NAMED and NOT fatal: `--match census` then
+            # exits 2 and match_set dispatches census=true out loud — more
+            # runs, never a silent skip.
+            censrc="$(bash "$pin_script" --census-source 2>/dev/null || true)"
+            case "$censrc" in
+              */*)
+                mkdir -p "$pinroot/$(dirname "$censrc")"
+                git show "refs/dispatcher/pinned:${censrc}" >"$pinroot/$censrc" 2>/dev/null \
+                  || echo "::warning::dispatcher: pinned the script from ${pin_ref} but could NOT pin its census declaration '${censrc}' from the same ref. The census verdict below falls back to true."
+                ;;
+              *)
+                echo "::warning::dispatcher: the pinned script did not name a census declaration source (--census-source printed '${censrc}'). The census verdict below falls back to true."
+                ;;
+            esac
+          else
+            # NAMED, never silent — and deliberately NOT fatal. A merge ref is
+            # absent for a PR with conflicts, and killing the dispatcher there
+            # would leave the gated jobs with no answer at all, which is the
+            # very failure this change exists to end.
+            echo "::warning::dispatcher: could NOT read scripts/cloud-path-escape-check.sh out of ${pin_ref} on remote '${pin_remote}' (an absent merge ref — a conflicted PR — is the usual cause). Falling back to the PR HEAD's own copy, which may predate this workflow's CLI surface. A verdict this fallback cannot compute becomes true (the WHOLE suite runs) and says so by name below. Degraded read, not a green."
+          fi
+          echo "path-set script: ${pin_src}"
 
+          # NEVER exit 2 on skew, and never a silent `false`. A refusal from the
+          # script — exit 2 on an unknown set name, exit 127 on a head that has
+          # no such file — says THIS STEP could not measure the question, not
+          # that the answer is no. So the answer to "could not tell" is the
+          # expensive one: dispatch TRUE, run everything, print a ::warning
+          # naming the skew. Same polarity as the empty-diff branch above and as
+          # the job header: fail, or run everything; never a silent false.
+          # This does NOT hide a genuinely broken script — the `path-escape` job
+          # below is DELIBERATELY UNFILTERED and runs `--selftest` and the
+          # ratchet itself on every PR, off the merge ref, and reds the same
+          # required context.
+          #
+          # A here-string for BOTH sets, never a pipe: `--match` answers through
+          # `grep -Eq`, which exits the instant it matches, and a writer still
+          # holding bytes then takes SIGPIPE that `set -o pipefail` promotes over
+          # the match that DID occur (the house D37 rule). A here-string has no
+          # writer process. The `cloud` call carried that pipe until this change.
+          # THE `--match` STAYS AT THE CALL SITE, spelled out. scripts/which-gates.sh
+          # discovers "which gate will this diff dispatch" by scraping the
+          # dispatch call sites out of these workflows, and it keys on
+          # `--match <set>` at command position. Hiding the flag inside the
+          # helper made that scan find ZERO call sites repo-wide and print its
+          # CANNOT READ (measured 2026-09-11, task-3a81e68f7027ca98) — so the
+          # helper takes the flag verbatim and refuses anything else, and the
+          # two calls below read exactly as the console and elixir ones do.
+          match_set() {
+            local flag="$1" want="$2" out rc=0
+            if [ "$flag" != "--match" ]; then
+              echo "::error::dispatcher: match_set takes '--match <set>' verbatim (got '${flag}')."
+              exit 1
+            fi
+            out="$(bash "$pin_script" --match "$want" <<<"$changed")" || rc=$?
+            case "$out" in
+              true | false)
+                printf '%s' "$out"
+                return 0
+                ;;
+            esac
+            echo "::warning::dispatcher: ${pin_script} could not answer '--match ${want}' (exit ${rc}, printed '${out}'). The script was read from ${pin_src}; a workflow/script VERSION SKEW is the usual cause — this head predates the flag this workflow calls with. Dispatching ${want}=true: running more, never a silent skip." >&2
+            printf 'true'
+          }
+
+          cloud="$(match_set --match cloud)"
+          census="$(match_set --match census)"
+
+          # Belt and braces. `match_set` cannot return anything but true|false,
+          # so this loop is unreachable TODAY — it is kept as the guard on a
+          # future edit that computes a verdict without going through it.
           for pair in "cloud=${cloud}" "census=${census}"; do
             case "${pair#*=}" in
               true | false) ;;

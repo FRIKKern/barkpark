@@ -315,6 +315,52 @@ jobs:
             exit 0
           fi
 
+          # ── THE SCRIPT MUST MATCH THE WORKFLOW (task-3a81e68f7027ca98) ────
+          # GitHub takes the WORKFLOW FILE for a `pull_request` run from the
+          # MERGE REF; this job checks out the PR HEAD on purpose (D34, on the
+          # checkout above). They are two different commits, so the invocation
+          # written HERE used to run against the BRANCH's copy of
+          # scripts/console-path-escape-check.sh — and any head branched before
+          # a change to that script's CLI surface answers `unknown path set …`,
+          # exits 2, and reds the required `Console gate` with no defect in the
+          # PR. Measured in cloud.yml's twin on PR #17575 (2026-09-11): the same
+          # shape, the same exit 2. It is a CLASS, so the sibling gets the same
+          # remedy rather than waiting for its own incident.
+          #
+          # THE SPLIT: the DIFF stays the head checkout's three-dot (D34
+          # intact), the SCRIPT comes from the commit this workflow file came
+          # from. A PIN ROOT rather than a loose file — these scripts resolve
+          # their own root as `dirname($0)/..`.
+          #
+          # DISPATCH_PIN_REMOTE / DISPATCH_PIN_REF are the hooks
+          # scripts/console-path-escape-check.test.sh drives this block with
+          # against a fixture repo. Actions sets neither; the defaults are the
+          # real values, so the tested path IS the shipped path.
+          pin_remote="${DISPATCH_PIN_REMOTE:-origin}"
+          pin_ref="${DISPATCH_PIN_REF:-refs/pull/${{ github.event.pull_request.number }}/merge}"
+          pin_script="scripts/console-path-escape-check.sh"
+          pin_src="the PR HEAD checkout — NOT the commit this workflow file came from"
+          pinroot="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/console-dispatcher-pinroot"
+          rm -rf "$pinroot"
+          mkdir -p "$pinroot/scripts"
+          pinned="$pinroot/scripts/console-path-escape-check.sh"
+
+          if git fetch --no-tags --quiet "$pin_remote" "+${pin_ref}:refs/dispatcher/console-pinned" 2>/dev/null \
+             && git show refs/dispatcher/console-pinned:scripts/console-path-escape-check.sh >"$pinned" 2>/dev/null \
+             && [ -s "$pinned" ]; then
+            pin_script="$pinned"
+            pin_src="${pin_ref} ($(git rev-parse refs/dispatcher/console-pinned))"
+          else
+            # NAMED, never silent — and NOT fatal. A merge ref is absent for a
+            # conflicted PR, and killing the dispatcher there would leave the
+            # harness with no answer at all, which is the failure this exists to
+            # end. The fallback is the head's own copy and the refusal handling
+            # below is unchanged, so a skewed head still reds honestly instead
+            # of skipping silently.
+            echo "::warning::dispatcher: could NOT read scripts/console-path-escape-check.sh out of ${pin_ref} on remote '${pin_remote}' (an absent merge ref — a conflicted PR — is the usual cause). Falling back to the PR HEAD's own copy, which may predate this workflow's CLI surface. Degraded read, not a green."
+          fi
+          echo "path-set script: ${pin_src}"
+
           # The path set is declared ONCE, in the ratchet that proves it.
           #
           # THE EXIT CODE IS CAPTURED, NOT SWALLOWED. `--match` exits 2 when it
@@ -324,14 +370,18 @@ jobs:
           # `set -euo pipefail` that 2 killed this step with no classification,
           # and the merge button read a refusal as an ordinary failure.
           rc=0
-          console="$(printf '%s\n' "$changed" | bash scripts/console-path-escape-check.sh --match console)" || rc=$?
+          # A HERE-STRING, not a pipe (house D37): `--match` answers through
+          # `grep -Eq`, which exits the instant it matches, and a writer still
+          # holding bytes then takes SIGPIPE that `set -o pipefail` promotes
+          # over the match that DID occur.
+          console="$(bash "$pin_script" --match console <<<"$changed")" || rc=$?
           if [ "$rc" -ne 0 ]; then
             case "$rc" in
               2) v=REFUSED ;;
               *) v=UNINTERPRETABLE ;;
             esac
             verdict "$v"
-            echo "::error::dispatcher ${v}: scripts/console-path-escape-check.sh --match console exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause. No path verdict is emitted — the harness runs or the gate reds, never a silent skip."
+            echo "::error::dispatcher ${v}: ${pin_script} --match console exited ${rc} (read from ${pin_src}). It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause. No path verdict is emitted — the harness runs or the gate reds, never a silent skip."
             exit 1
           fi
 
