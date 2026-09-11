@@ -1,6 +1,7 @@
 package pdrender
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -80,7 +81,11 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		return ir.theme.markStyle("strikethrough").Render(inner)
 
 	case "code":
-		return ir.theme.InlineCode.Render(sanitizeText(attrStr(n, "value")))
+		// The chip body is a FLAT STRING, but 66 published paragraphs (the
+		// 2026-07-25 live census) author it as `children` inline nodes with no
+		// `value`; reading `value` only rendered an EMPTY chip for all of them.
+		// See inlineCodeSource below for the contract and its twins.
+		return ir.theme.InlineCode.Render(sanitizeText(inlineCodeSource(n)))
 
 	case "link":
 		// Children are rendered with insideLink=true so a nested link flattens.
@@ -490,4 +495,75 @@ func markHref(m any) string {
 		}
 	}
 	return attrStr(mm, "href")
+}
+
+/* ── THE INLINE `code` node source contract (task-e4833f198e293ed1) ───────────
+ *
+ * An inline code chip's body is `value` when that is a NON-EMPTY string, else
+ * the flattened plain text of `children`.
+ *
+ * FIRST NON-EMPTY, not first-non-blank — a `value` of " " WINS and keeps its
+ * space. That is deliberately the OPPOSITE of the BLOCK-level `code` contract
+ * (code.go `codeSource`, which trims to select among value|code|content|text):
+ * a block's source key is a choice among aliases, an inline chip's `value` is
+ * the authored body verbatim.
+ *
+ * Twins: `Render.Inline.inline_code_source/1`
+ * (api/lib/barkpark/portable_doc/render/inline.ex) and `inlineCodeSource`
+ * (js/packages/react/src/inline.tsx). All three answer to ONE fixture,
+ * api/test/support/fixtures/inline-code-source.json, read here by
+ * inline_code_source_parity_test.go. */
+func inlineCodeSource(n map[string]any) string {
+	if n == nil {
+		return ""
+	}
+	if v := inlineStringish(n["value"]); v != "" {
+		return v
+	}
+	return inlineNodesText(n["children"])
+}
+
+// inlineStringish is the STRICT scalar coercion this contract uses: a string or
+// a number only. Unlike the display-oriented toStr it refuses bools, maps and
+// slices (they read as ""), matching `str` in inline.tsx and
+// `coerce_text_value/1` in inline.ex — a non-stringish `value` must FALL
+// THROUGH to children rather than print its Go representation.
+func inlineStringish(v any) string {
+	switch v.(type) {
+	case string, float64, int, int64, float32, json.Number:
+		return toStr(v)
+	}
+	return ""
+}
+
+// inlineNodesText folds inline nodes to their concatenated plain text; markup
+// is DROPPED. Mirrors `inlineText` in inline.tsx and `flatten_inline_text/1` in
+// inline.ex: a string/number is itself, a map is `value` || legacy `text` ||
+// its own children, a nested array recurses, anything else contributes "".
+func inlineNodesText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []any:
+		var b strings.Builder
+		for _, n := range x {
+			b.WriteString(inlineNodeText(n))
+		}
+		return b.String()
+	}
+	return inlineStringish(v)
+}
+
+func inlineNodeText(n any) string {
+	m, ok := n.(map[string]any)
+	if !ok {
+		return inlineNodesText(n)
+	}
+	if v := inlineStringish(m["value"]); v != "" {
+		return v
+	}
+	if t := inlineStringish(m["text"]); t != "" {
+		return t
+	}
+	return inlineNodesText(m["children"])
 }
