@@ -353,7 +353,23 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 // after a cache-primed start must still be treated as a first snapshot (empty
 // prev-state); otherwise every task would false-flash against the stale cache.
 // Do not populate any such field here.
+// persistEventCursor writes the board's current keyset resume point to its own
+// small file (cache.go). Best-effort: it cannot fail loudly and never blocks.
+// It is a Model method so the one call site that advances the cursor
+// (handleEventsResult) does not have to thread cacheDir/cacheKey by hand.
+func (m *Model) persistEventCursor() {
+	SaveCachedEventCursor(m.cacheDir, m.cacheKey, m.eventCursor)
+}
+
 func (m *Model) primeFromCache() {
+	// The cursor first, and unconditionally: it lives in its OWN file, so a
+	// board whose snapshot cache is missing or older than the last catch-up
+	// still resumes the keyset poll where the last session left it. Both
+	// sources are read and the LARGER wins — the cursor is monotonic, and
+	// neither file can be trusted to be the fresher one.
+	if cur, ok := LoadCachedEventCursor(m.cacheDir, m.cacheKey); ok && cur > m.eventCursor {
+		m.eventCursor = cur
+	}
 	snap, ok := LoadCachedSnapshot(m.cacheDir, m.cacheKey)
 	if !ok {
 		// Dataset joined the cache identity after the board cache had already
@@ -377,7 +393,7 @@ func (m *Model) primeFromCache() {
 	// honest-staleness contract above precisely because a cursor is not truth: a
 	// stale one costs a short catch-up walk, and a wrong one cannot put a wrong
 	// row on screen (only the snapshot refetch ever does that).
-	if snap.EventCursor > 0 {
+	if snap.EventCursor > m.eventCursor {
 		m.eventCursor = snap.EventCursor
 	}
 }

@@ -100,10 +100,19 @@ func SaveCachedSnapshot(dir, key string, s Snapshot) {
 	if err != nil {
 		return
 	}
+	writeFileAtomic(dir, cacheFileName(key), raw)
+}
+
+// writeFileAtomic is the shared best-effort atomic write behind both save paths:
+// marshal into a uniquely-named temp file in the SAME dir (same filesystem →
+// rename is atomic), then rename over the target, removing the temp on any
+// failure so no droppings are left next to the real file. Every error is
+// swallowed: persisting is an optimization and must never interrupt the board.
+func writeFileAtomic(dir, name string, raw []byte) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
-	tmp, err := os.CreateTemp(dir, cacheFileName(key)+".tmp-*")
+	tmp, err := os.CreateTemp(dir, name+".tmp-*")
 	if err != nil {
 		return
 	}
@@ -117,7 +126,86 @@ func SaveCachedSnapshot(dir, key string, s Snapshot) {
 		os.Remove(tmpName)
 		return
 	}
-	if err := os.Rename(tmpName, filepath.Join(dir, cacheFileName(key))); err != nil {
+	if err := os.Rename(tmpName, filepath.Join(dir, name)); err != nil {
 		os.Remove(tmpName)
 	}
+}
+
+// --- the keyset cursor's own file --------------------------------------------
+//
+// The resume cursor used to live ONLY inside the snapshot cache (Snapshot.
+// EventCursor), which is written from exactly one place: applySnapshot, after a
+// re-list lands (live.go). The catch-up loop deliberately does NOT re-list —
+// that is the whole point of the seek/drain path — so a board that walked the
+// feed to the tip and then quit persisted nothing, and the next launch started
+// the catch-up from wherever the last re-list happened to leave it. Measured on
+// this machine 2026-09-09: three of four taskboard-cache-*.json files carried no
+// event_cursor at all and the fourth was 637 pages behind the live tip.
+//
+// So the cursor gets its OWN file, next to the snapshot cache and keyed the same
+// way. Two reasons it is a separate file rather than a rewrite of the snapshot:
+//
+//   - COST. The snapshot is the heavy pair's output (~70 KB of board). Re-
+//     marshalling it on every cursor advance to change one integer is the write
+//     amplification the poll loop exists to avoid; the cursor file is ~30 bytes.
+//   - HONESTY. primeFromCache paints whatever Snapshot it loads. A board that
+//     has never re-listed has no snapshot to write, and writing a task-less one
+//     just to carry a cursor would turn the next launch's honest "syncing…" cold
+//     paint into an empty board. The cursor must not be hostage to the board,
+//     and the board must not be forged to carry the cursor.
+//
+// Both functions keep cache.go's contracts: LOAD is tolerant (any failure is a
+// miss), SAVE is best-effort (every failure swallowed). A lost cursor costs one
+// catch-up walk, never a wrong row — the cursor carries no truth (decision #4).
+
+// cursorFilePrefix namespaces the cursor files inside the shared bp config dir.
+const cursorFilePrefix = "taskboard-cursor-"
+
+// cursorFileName is the on-disk file name for a scope key's resume cursor.
+func cursorFileName(key string) string { return cursorFilePrefix + key + ".json" }
+
+// cachedCursor is the cursor file's shape. A struct, not a bare integer, so a
+// later field (a stamp, a feed identity) can join it without a format break.
+type cachedCursor struct {
+	EventCursor int64 `json:"event_cursor"`
+}
+
+// LoadCachedEventCursor reads the persisted keyset resume cursor for key from
+// dir. TOLERANT by contract: empty dir, missing file, unreadable file, parse
+// error, or a non-positive value all report (0, false) — the caller then starts
+// at 0 and pays one catch-up.
+func LoadCachedEventCursor(dir, key string) (int64, bool) {
+	if dir == "" {
+		return 0, false
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, cursorFileName(key)))
+	if err != nil {
+		return 0, false
+	}
+	var c cachedCursor
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return 0, false
+	}
+	if c.EventCursor <= 0 {
+		return 0, false
+	}
+	return c.EventCursor, true
+}
+
+// SaveCachedEventCursor persists cursor as the resume point for key under dir.
+// BEST-EFFORT and ATOMIC, exactly like SaveCachedSnapshot: temp file in the same
+// dir, then rename, and every failure is swallowed so the live loop is never
+// interrupted by a read-only home.
+//
+// A non-positive cursor is not written: 0 means "no resume point", and the
+// absence of the file says that already.
+func SaveCachedEventCursor(dir, key string, cursor int64) {
+	if dir == "" || cursor <= 0 {
+		return
+	}
+	raw, err := json.Marshal(cachedCursor{EventCursor: cursor})
+	if err != nil {
+		return
+	}
+	writeFileAtomic(dir, cursorFileName(key), raw)
 }

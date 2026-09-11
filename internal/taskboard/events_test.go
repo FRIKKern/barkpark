@@ -635,6 +635,64 @@ func TestEventCursorSurvivesTheSnapshotCache(t *testing.T) {
 	}
 }
 
+// TestEventCursorSurvivesACatchUpWithNoReList is the detector for
+// task-c0843a057e35065e: the cursor used to reach disk ONLY through
+// applySnapshot (live.go), which runs only when a snapshot re-list lands. The
+// catch-up path deliberately never re-lists — that is the whole point of the
+// seek/drain arms — so a board that walked the feed to the tip and then quit
+// persisted nothing and the next launch started the walk over. Measured on this
+// machine 2026-09-09: three of four taskboard-cache-*.json files carried no
+// event_cursor at all, the fourth was at 44593 against a live tip of 363451.
+//
+// The test runs ONE consumed poll result and NOTHING else: no snapshot message
+// is ever applied, and the assertion below proves no snapshot cache was written,
+// so the only thing that can carry the cursor across the relaunch is the cursor
+// file. Without the persist-on-advance change the reloaded board comes back at
+// its launch value (100).
+func TestEventCursorSurvivesACatchUpWithNoReList(t *testing.T) {
+	dir := t.TempDir()
+	cs := newCountingServer(t)
+	m := pollModel(cs, steadyClock())
+	m.cacheDir, m.cacheKey = dir, "k"
+	m.eventCursor = 100
+
+	// A seek landing on the tip: a caught-up page carrying the tip cursor, which
+	// is exactly what seekTipCmd reports. No re-list is owed and none is fired.
+	m, _ = m.handleEventsResult(eventsResultMsg{gen: m.eventsGen, page: TaskEventsPage{OK: true, Cursor: 363451}})
+	if m.eventCursor != 363451 {
+		t.Fatalf("in-memory cursor = %d, want 363451 — the reducer did not consume the page", m.eventCursor)
+	}
+	if _, ok := LoadCachedSnapshot(dir, "k"); ok {
+		t.Fatal("a snapshot cache was written — this test is only valid while NO re-list has landed")
+	}
+
+	next := newModel(cs.client(), "", Config{BaseURL: cs.srv.URL})
+	next.cacheDir, next.cacheKey = dir, "k"
+	next.primeFromCache()
+	if next.eventCursor != 363451 {
+		t.Fatalf("resumed cursor = %d, want 363451 — a catch-up that never re-lists saved nothing, so the next launch walks the whole feed again", next.eventCursor)
+	}
+}
+
+// TestPersistedCursorNeverLosesToAnOlderSnapshotCache pins the tie-break: the
+// two files can disagree (the cursor file is written on every advance, the
+// snapshot's copy only when a re-list lands), and the cursor is monotonic, so
+// the LARGER of the two wins whichever file it came from.
+func TestPersistedCursorNeverLosesToAnOlderSnapshotCache(t *testing.T) {
+	dir := t.TempDir()
+	cs := newCountingServer(t)
+
+	SaveCachedSnapshot(dir, "k", Snapshot{Counts: map[string]int{"open": 1}, FetchedAt: fixedNow, EventCursor: 44593})
+	SaveCachedEventCursor(dir, "k", 363451)
+
+	m := newModel(cs.client(), "", Config{BaseURL: cs.srv.URL})
+	m.cacheDir, m.cacheKey = dir, "k"
+	m.primeFromCache()
+	if m.eventCursor != 363451 {
+		t.Fatalf("resumed cursor = %d, want 363451 — the stale snapshot copy beat the freshly persisted one", m.eventCursor)
+	}
+}
+
 // --- helpers -----------------------------------------------------------------
 
 func firstEventsResult(t *testing.T, msgs []tea.Msg) eventsResultMsg {
