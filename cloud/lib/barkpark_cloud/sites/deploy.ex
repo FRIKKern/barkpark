@@ -751,7 +751,12 @@ defmodule BarkparkCloud.Sites.Deploy do
       # every recovery pass and nothing re-enqueued. It becomes a COUNTED
       # `deferred` row plus a re-fired debounce instead.
       {:ok, 409, body} ->
-        defer(ctx, deployment, box_refusal(409, body, :start))
+        # THE CODE TRAVELS AS DATA, BESIDE THE STRING
+        # (dr-w4-bl-deferral-raw-column-ambiguous). `box_refusal/3` renders the
+        # operator's sentence; `box_refusal_code/1` reads the box's `code` key
+        # off the SAME decoded envelope, before any string exists. Two values,
+        # one body, one call site — they cannot describe different refusals.
+        defer(ctx, deployment, box_refusal(409, body, :start), box_refusal_code(body))
 
       # THE POOL BLIP ON THE TRIGGER (deploy-truth W2). An UNTYPED 5xx is not the
       # box saying no — it is the door's own auth plug dying on a starved
@@ -1677,9 +1682,9 @@ defmodule BarkparkCloud.Sites.Deploy do
   # own row, the debounce path refuses prebuilt sites outright (it would rebuild
   # from source and overwrite bytes this fleet cannot reproduce), so promising a
   # rebuild we will not perform would be a lie. It fails honestly instead.
-  defp defer(ctx, %Deployment{} = deployment, reason) do
+  defp defer(ctx, %Deployment{} = deployment, reason, box_code) do
     site = ctx.site
-    cause = deferral_cause(deployment.stage, reason)
+    cause = deferral_cause(deployment.stage, reason, box_code)
 
     # THE CHAIN ITSELF, not only its length (dr-bl-deferral-scheduled-vs-actual-gap).
     # `consecutive_deferrals/2` already walked these rows to count them; the
@@ -1726,7 +1731,12 @@ defmodule BarkparkCloud.Sites.Deploy do
           Map.merge(pacing, %{
             deferral_depth: prior + 1,
             deferral_bound: max_consecutive_deferrals(cause),
-            deferral_cause: cause
+            deferral_cause: cause,
+            # The terminal round carries the box's code too, for the same reason
+            # it carries the chain columns: it is the row an operator reaches
+            # first, and "which cause did we give up on" must not be a re-read of
+            # the sentence beside it (dr-w4-bl-deferral-raw-column-ambiguous).
+            box_refusal_code: box_code
           })
         )
 
@@ -1817,7 +1827,16 @@ defmodule BarkparkCloud.Sites.Deploy do
                 deferral_bound: bound,
                 deferral_cause: cause,
                 deferral_scheduled_s: pacing.deferral_scheduled_s,
-                deferral_actual_gap_s: pacing.deferral_actual_gap_s
+                deferral_actual_gap_s: pacing.deferral_actual_gap_s,
+                # THE BOX'S OWN CODE WORD (dr-w4-bl-deferral-raw-column-
+                # ambiguous). `deferral_cause` beside it is the LEDGER'S name;
+                # this is what the box said. `DeployLedger.classify/1` reads
+                # THIS, and only falls back to parsing `failure_reason` on rows
+                # that predate the column — because a codeless envelope whose
+                # message is byte-for-byte `box_at_capacity — <prose>` persists
+                # to the same string as a genuine coded refusal, and no rule over
+                # that string can tell them apart.
+                box_refusal_code: box_code
               })
 
             # A COUNTING DEFECT, not merely a narration one (deploy-reliability
@@ -1912,8 +1931,17 @@ defmodule BarkparkCloud.Sites.Deploy do
   # still `queued`/`building`, whose `classify/1` arm answers `nil`. So the
   # status is asserted, not read. Every reader of an ALREADY-WRITTEN row goes
   # through `deferral_cause_of/1` instead.
-  defp deferral_cause(stage, reason) do
-    DeployLedger.classify(%{status: "deferred", stage: stage, failure_reason: reason})
+  defp deferral_cause(stage, reason, box_code) do
+    DeployLedger.classify(%{
+      status: "deferred",
+      stage: stage,
+      failure_reason: reason,
+      # The synthesised map carries the code THIS round is about to write, so
+      # the cause it stamps is column-derived exactly like every later read of
+      # the written row (dr-w4-bl-deferral-raw-column-ambiguous). Omitting it
+      # would make the producer the one reader still classifying off the prose.
+      box_refusal_code: box_code
+    })
   end
 
   @doc """
@@ -2274,6 +2302,34 @@ defmodule BarkparkCloud.Sites.Deploy do
   # route that answers a bare string reason.
   defp refusal_detail(body),
     do: body["error"] || body["detail"] || body["reason"] || body["failure_reason"]
+
+  # THE BOX'S CODE, OFF THE ENVELOPE AND NEVER OFF THE SENTENCE
+  # (dr-w4-bl-deferral-raw-column-ambiguous).
+  #
+  # `refusal_detail/1` above renders `{code, message}` as `"code — message"` and
+  # `{nil, message}` as the bare message, so the two become the same bytes the
+  # moment a codeless message happens to begin with a code word. This reader
+  # never sees a message: it takes `err["code"]` from the decoded map, which
+  # NOTHING a box writes into `message` can reach.
+  #
+  # It always answers a STRING, never nil, and that is the point. `nil` on the
+  # column means "no code-aware writer touched this row" — the whole pre-column
+  # corpus, which must keep its prose fallback (D115). A refusal this function
+  # looked at and found codeless is `DeployLedger.no_box_code()`, a DIFFERENT
+  # fact, read as D7's codeless 409.
+  #
+  # The flat arm takes the bare `error` string as the code: on that shape the
+  # value IS the box's code slot, not a message field, so it carries no forgery
+  # vector. It is deliberately NOT split on `" — "` — a flat error carrying
+  # prose reads as an unnamed cause and rises in the tail, which is stricter
+  # than the prose reader it replaces, never looser.
+  defp box_refusal_code(%{"error" => %{} = err}),
+    do: string_or_nil(err["code"]) || DeployLedger.no_box_code()
+
+  defp box_refusal_code(body) when is_map(body),
+    do: string_or_nil(body["error"]) || DeployLedger.no_box_code()
+
+  defp box_refusal_code(_body), do: DeployLedger.no_box_code()
 
   defp string_or_nil(s) when is_binary(s) do
     case String.trim(s) do
