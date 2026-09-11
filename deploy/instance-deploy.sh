@@ -584,11 +584,61 @@ if [ "$NEW" = "$OLD" ] && [ "$(cat "$STATE" 2>/dev/null)" = "$NEW" ]; then
   exit 0
 fi
 
-# Backfill the prod-required secret keys if absent (each RAISES at boot).
+# ---- The prod-required secret keys (each RAISES at boot) -------------------
+# An ABSENT line is not the only broken state. A line that is PRESENT but empty
+# (`BARKPARK_KEK=`) matches `grep '^VAR='` exactly as a good one does, so the
+# absence-only backfill this loop used to be skipped it — and after the boot
+# refusals such a box fails EVERY deploy until a human edits .env by hand
+# (fail-closed: the old slot keeps serving, but nobody is coming). The KEK has a
+# third broken state on top of that: a non-empty value the app REFUSES.
+#
+# So: absent, empty, and (for the KEK) structurally invalid are ONE case here —
+# mint a fresh secret and APPEND-OR-REPLACE it, naming which case fired. Scope is
+# the four variables this loop already names; nothing else in .env is touched.
+
+secret_value_ok() { # $1=var $2=current value — 1 ⇒ the deploy must mint a fresh one
+  [ -n "$2" ] || return 1
+  if [ "$1" = BARKPARK_KEK ]; then
+    # api/config/runtime.exs (the `case System.get_env("BARKPARK_KEK")` block)
+    # demands Base.decode64/1 yield EXACTLY 32 raw bytes and RAISES otherwise.
+    # Base64 of 32 bytes is exactly 43 standard-alphabet characters plus one
+    # '=' — so this pattern IS that decode, in the shell, with no openssl
+    # round-trip. The shell gate and the app therefore agree on "valid" by
+    # construction; anything the app would refuse, this refuses too.
+    [[ "$2" =~ ^[A-Za-z0-9+/]{43}=$ ]] || return 1
+  fi
+  return 0
+}
+
+env_replace_line() { # $1=var $2=value — drop every existing ^VAR= line, append the new one
+  local v="$1" val="$2" tmp
+  tmp="$(mktemp)" || return 1
+  # Written back THROUGH the existing .env (`cat > .env`, never `mv`) so the
+  # file's mode 0600 and its ownership survive the repair — a mktemp file mv'd
+  # into place would carry the deploy user's, not the box's.
+  { awk -v k="$v" 'index($0, k "=") != 1' .env > "$tmp" &&
+    printf '%s=%s\n' "$v" "$val" >> "$tmp" &&
+    cat "$tmp" > .env; } || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+}
+
 for v in BARKPARK_KEK BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_RELEASE_CAPTURE_HMAC_SECRET; do
   if ! grep -q "^${v}=" .env 2>/dev/null; then
     echo "${v}=$(openssl rand -base64 32)" >> .env
     log "added missing ${v} to .env"
+    continue
+  fi
+  cur="$(awk -v k="$v" 'index($0, k "=") == 1 { sub(/^[^=]*=/, ""); val = $0 } END { print val }' .env 2>/dev/null || true)"
+  secret_value_ok "$v" "$cur" && continue
+  if [ -z "$cur" ]; then
+    reason="the line is PRESENT but EMPTY"
+  else
+    reason="the value is not base64 of 32 bytes (runtime.exs would RAISE at boot)"
+  fi
+  if env_replace_line "$v" "$(openssl rand -base64 32)"; then
+    log "repaired ${v} in .env — ${reason}; a fresh secret REPLACED it"
+  else
+    log "WARN: ${v} in .env is unusable (${reason}) and the in-place repair FAILED — boot will refuse"
   fi
 done
 
