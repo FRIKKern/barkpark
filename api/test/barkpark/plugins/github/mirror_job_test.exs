@@ -53,6 +53,7 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
   use Oban.Testing, repo: Barkpark.Repo
 
   alias Barkpark.{Content, LabelFixtures, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.Content.Lifecycle
   alias Barkpark.Plugins.Github.{Auth, Conflicts, Link, MirrorJob}
   alias Barkpark.Plugins.Github.MirrorJobTest.{ProjectsStub, RelationsStub}
 
@@ -986,6 +987,86 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       end)
 
       assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # UNPUBLISH RETRACTION — the publish gate's other half.
+  #
+  # The gate refuses to MINT an issue for a never-published task. But a task
+  # that WAS published, WAS mirrored, and is later UNPUBLISHED
+  # (`Content.Lifecycle.unpublish_document/4` deletes the published row and
+  # copies its content — `content.github` included — onto the draft) hits that
+  # same gate. Cancelling there would strand a live, OPEN issue with no
+  # published row behind it: exactly the orphan class the gate was written to
+  # prevent, reached by unpublish instead of discard. So: retract the promise
+  # rather than abandon it — CLOSE the issue, then cancel.
+  # ---------------------------------------------------------------------------
+
+  describe "reconcile/2 — unpublish retraction" do
+    test "an unpublished, PREVIOUSLY-SYNCED task CLOSES its issue instead of stranding it open",
+         %{bypass: bypass, scope: scope} do
+      stub_token(bypass)
+      id = uniq("gh")
+      num = 7788
+
+      _task = mk_task!(id, %{"title" => "Published, mirrored, then retracted"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: num, state: "synced"}, scope)
+
+      {:ok, _draft} = Lifecycle.unpublish_document(id, "task", @dataset, scope)
+
+      # PRECONDITIONS — assert the setup, never its exit code. The published row
+      # must be GONE (else the publish gate never fires and this test measures
+      # the ordinary update path), and the issue bookkeeping must have SURVIVED
+      # onto the draft (else there is no issue number to close and the test
+      # would pass for the wrong reason).
+      assert {:error, _} = Content.get_document(id, "task", @dataset, scope)
+      assert Link.get(reload(id, scope))["issue"] == num
+
+      calls = count_creates(bypass)
+      {:ok, body_ref} = Agent.start_link(fn -> nil end)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/#{num}", fn conn ->
+        {json, conn} = read_json_body(conn)
+        Agent.update(body_ref, fn _ -> json end)
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => num, "state" => "closed"}))
+      end)
+
+      result = MirrorJob.reconcile(id, @dataset, fast())
+
+      body = Agent.get(body_ref, & &1)
+
+      assert body["state"] == "closed",
+             "the retracted task's issue ##{num} was left #{inspect(body && body["state"])}"
+
+      assert body["state_reason"] == "not_planned"
+      assert {:cancel, :unpublished_closed} = result
+
+      # A retraction NEVER mints a replacement issue.
+      assert Agent.get(calls, & &1) == 0
+    end
+
+    test "CONTROL: an unpublished task that was NEVER mirrored still {:cancel, :unpublished}",
+         %{bypass: bypass, scope: scope} do
+      # No `content.github.issue` → nothing to close. The retraction arm must
+      # not invent a GitHub call for a task that never had an issue.
+      stub_token(bypass)
+      id = uniq("gh")
+
+      _task = mk_task!(id, %{"title" => "Published then retracted, never mirrored"}, scope)
+      {:ok, _draft} = Lifecycle.unpublish_document(id, "task", @dataset, scope)
+
+      assert {:error, _} = Content.get_document(id, "task", @dataset, scope)
+      assert Link.get(reload(id, scope)) == nil
+
+      calls = count_creates(bypass)
+
+      Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/9001", fn conn ->
+        Plug.Conn.resp(conn, 200, "{}")
+      end)
+
+      assert {:cancel, :unpublished} = MirrorJob.reconcile(id, @dataset, fast())
+      assert Agent.get(calls, & &1) == 0
     end
   end
 
