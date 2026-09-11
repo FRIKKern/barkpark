@@ -1,0 +1,81 @@
+{
+  "_comment": "THE code-block SOURCE-FIELD contract, as ONE file read by BOTH render engines (api/test/barkpark/portable_doc/render/code_source_alias_parity_test.exs and internal/pdrender/code_source_alias_parity_test.go). Not a mirror pair: a single file cannot drift. Accepted keys, in precedence order: value, code, content, text - the same order api/lib/barkpark/portable_doc/bpml/printer.ex has printed since it was written. Precedence is FIRST NON-BLANK (trim-normalized), so a blank leading alias falls through. `content` is an array of inline nodes and is flattened to its text. Regenerate nothing: hand-authored, both engines assert against it.",
+  "accepted_keys": ["value", "code", "content", "text"],
+  "cases": [
+    {
+      "name": "value-only (the canonical shape every first-party producer writes)",
+      "block": { "type": "code", "value": "alpha_only_value()" },
+      "content_present": true,
+      "source": "alpha_only_value()"
+    },
+    {
+      "name": "code-only (Go mdlite + agent-authored corpus shape; 327 live rows)",
+      "block": { "type": "code", "code": "beta_only_code()", "language": "bash" },
+      "content_present": true,
+      "source": "beta_only_code()"
+    },
+    {
+      "name": "text-only (460 live paper rows)",
+      "block": { "type": "code", "text": "gamma_only_text()", "language": "text" },
+      "content_present": true,
+      "source": "gamma_only_text()"
+    },
+    {
+      "name": "content-only (inline-node array; 30 live paper rows)",
+      "block": {
+        "type": "code",
+        "content": [{ "type": "text", "value": "delta_only_content()" }]
+      },
+      "content_present": true,
+      "source": "delta_only_content()"
+    },
+    {
+      "name": "both/conflict: value wins over code",
+      "block": { "type": "code", "value": "winner_value()", "code": "loser_code()" },
+      "content_present": true,
+      "source": "winner_value()"
+    },
+    {
+      "name": "both/conflict: blank value falls through to code",
+      "block": { "type": "code", "value": "   ", "code": "fallthrough_code()" },
+      "content_present": true,
+      "source": "fallthrough_code()"
+    },
+    {
+      "name": "both/conflict: code wins over text",
+      "block": { "type": "code", "code": "winner_code()", "text": "loser_text()" },
+      "content_present": true,
+      "source": "winner_code()"
+    },
+    {
+      "name": "blank: whitespace-only value renders nothing",
+      "block": { "type": "code", "value": "   \n\t " },
+      "content_present": false,
+      "source": ""
+    },
+    {
+      "name": "blank: whitespace-only across every accepted key",
+      "block": { "type": "code", "value": " ", "code": "\t", "text": "\n" },
+      "content_present": false,
+      "source": ""
+    },
+    {
+      "name": "missing: no source key at all renders nothing",
+      "block": { "type": "code", "id": "b1" },
+      "content_present": false,
+      "source": ""
+    },
+    {
+      "name": "non-stringish: a map under value is not a source",
+      "block": { "type": "code", "value": { "nested": "no" } },
+      "content_present": false,
+      "source": ""
+    },
+    {
+      "name": "unaccepted key: `source` is NOT an alias (diagram owns that field)",
+      "block": { "type": "code", "source": "not_accepted()" },
+      "content_present": false,
+      "source": ""
+    }
+  ]
+}
