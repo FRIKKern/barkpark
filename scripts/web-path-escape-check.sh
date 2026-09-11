@@ -89,25 +89,85 @@ REPO_ROOT="${WEB_PATH_ESCAPE_ROOT:-$(cd -- "$SELF_DIR/.." && pwd)}"
 # go-path-escape-check.sh's g2e().
 #
 # Each row carries WHY it is here; a row with no reason is a row nobody can
-# retire. The four cross-tree rows are the census arms above, in order.
+# retire — so the reason is a `#` line directly above its glob, and the SAME
+# comment filter runs over both sources (this heredoc and a WEB_PATH_ESCAPE_SET
+# file). Reasons never reach the matcher; an undocumented row is a review miss,
+# not a silent one.
+strip_set_comments() {
+  grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$'
+}
+
 declared_globs() {
   if [ -n "${WEB_PATH_ESCAPE_SET:-}" ]; then
     if [ ! -r "$WEB_PATH_ESCAPE_SET" ]; then
       echo "web-path-escape-check: REFUSING TO MEASURE — WEB_PATH_ESCAPE_SET=$WEB_PATH_ESCAPE_SET is not readable." >&2
       exit 2
     fi
-    grep -v '^[[:space:]]*#' "$WEB_PATH_ESCAPE_SET" | grep -v '^[[:space:]]*$'
+    strip_set_comments < "$WEB_PATH_ESCAPE_SET"
     return 0
   fi
-  cat <<'SET'
+  strip_set_comments <<'SET'
+# the gate's subject
 web/**
+# lighthouse job config, read by the `lighthouse` job in ci.yml
 lighthouserc.json
+# the workflow that resolves this set
 .github/workflows/ci.yml
+# this file: the set and its ratchet are one declaration
 scripts/web-path-escape-check.sh
-scripts/node-test-floor.mjs
+
+# ---- census arm 1: web/package.json `file:` dependencies --------------------
+# built by web-checks' "Build @barkpark/core (web's linked dependency)" and
+# "Build @barkpark/react (web's linked dependency)" steps before web/ installs.
 js/packages/core/**
 js/packages/react/**
+# ---- census arm 2: `../`-escaping literal in web/package.json scripts -------
+# web/package.json "test": "node ../scripts/node-test-floor.mjs ..." — the
+# harness web-checks' "Unit tests" step (`pnpm run test`) actually executes.
+scripts/node-test-floor.mjs
+# ---- census arm 3: `../`-escaping literals in web/ source -------------------
+# pinned by web/__tests__/template-format-date.test.ts and
+# template-webhook-lazy.test.ts.
 js/packages/create-barkpark-app/templates/**
+
+# ---- the js/ workspace ROOT files the web-checks job reads ------------------
+# NOT surfaced by the census: the census resolves literals written INSIDE web/,
+# and nothing in web/ names these by path. They are read because two web-checks
+# steps run `pnpm` with `working-directory: js`:
+#
+#     - name: Build @barkpark/core (web's linked dependency)
+#       working-directory: js
+#       run: |
+#         pnpm install --frozen-lockfile
+#         pnpm --filter @barkpark/core build
+#
+# so a change to any of them changes what those steps install or emit, and the
+# dist/ that web/'s Typecheck and Unit tests then consume. Without these rows a
+# lockfile bump dispatches NO web job and `Web gate` greens having run nothing.
+#
+# the exact file `pnpm install --frozen-lockfile` (working-directory: js) pins;
+# also web-checks' Setup Node `cache-dependency-path:` first entry.
+js/pnpm-lock.yaml
+# the workspace root manifest that same install resolves: the toolchain pins
+# (turbo, typescript, tsup) and the `pnpm.overrides` block that rewrites
+# transitive versions inside the dist web/ typechecks against.
+js/package.json
+# declares `packages/*`, which is what makes `pnpm --filter @barkpark/core` and
+# `--filter @barkpark/react` resolve to a package at all. Break it and both
+# build steps fail — or worse, filter to nothing and succeed.
+js/pnpm-workspace.yaml
+# js/packages/core/tsconfig.json and js/packages/react/tsconfig.json both
+# `"extends": "../../tsconfig.base.json"`, so it governs the .d.ts those two
+# build steps emit — the types web-checks' "Typecheck" step checks against.
+js/tsconfig.base.json
+# CONSERVATIVE, and NOT read by any web-checks step today: `pnpm --filter
+# @barkpark/core build` runs the package's own script (`tsup && node
+# ../../scripts/post-build-dts.mjs`), never `turbo run build`. Declared so that
+# routing those builds back through turbo (`pnpm build` at js/ root, which IS
+# `turbo run build`) cannot silently un-dispatch the gate.
+# RETIRE THIS ROW if ci.yml's web-checks still calls `pnpm --filter` directly
+# and you are content that turbo's task graph cannot reach web/'s inputs.
+js/turbo.json
 SET
 }
 
