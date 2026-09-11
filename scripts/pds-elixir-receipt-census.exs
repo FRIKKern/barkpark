@@ -9407,6 +9407,60 @@ defmodule PDS.Census do
       expect: ["FAIL  ROUTED-POPULATION-COMPLETE", "ORPHANED DISPOSITION", "/v1/selftest-never-routed"],
       proves: "a committed disposition that names NO live routed member reds too — one direction alone is half an arm, and a row judging nothing is the shape a stale table takes"
     },
+    # THE CLASS ATOM STOPS BEING A DEFAULT (pds-bl-w41-exclusion-class-atom-ungated). The
+    # mutant is the EXACT edit the row was filed on: one committed disposition row
+    # re-labelled to a class nobody declared. Before EXCLUSION-CLASS-DECLARED it gave rc=0,
+    # every arm PASS and `(no prose - see @routed_exclusion_classes)` under its own count.
+    %{
+      name: "EXCLUSION-CLASS-UNDECLARED-REDS",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"\"/v1/selftest-fixture-close\", \"Barkpark.Filler.M1\", :noop, :selftest" <> "_fixture}",
+         "\"/v1/selftest-fixture-close\", \"Barkpark.Filler.M1\", :noop, :liveview_write_population}"},
+      exit: 1,
+      expect: [
+        "FAIL  EXCLUSION-CLASS-DECLARED",
+        "UNDECLARED EXCLUSION CLASS",
+        "liveview_write_population"
+      ],
+      proves: "a committed exclusion row naming a class @routed_exclusion_classes does not declare REDS BY NAME instead of printing a placeholder at exit 0 - and the affordance survives, because declaring the class in the same edit is what makes it green"
+    },
+    # THE UNDECLARED CLASS IS REFUSED, A NEW ONE IS NOT (the third criterion of that row,
+    # as a case rather than as prose). The SAME re-label, plus the one-line declaration a
+    # human owes it, exits 0 with the arm PASSING - so the arm cannot be read as a ban on
+    # new classes, which is the failure mode a hand-typed class allowlist would have had.
+    %{
+      name: "EXCLUSION-CLASS-DECLARED-IS-GREEN",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"    selftest_fixture:\n      \"2026-08-02 (PDS wave 38): a synthetic" <> " member",
+         "    liveview_write_population:\n      \"SELFTEST-ONLY DECLARATION - the mutant's new class, declared.\",\n    selftest_fixture:\n      \"2026-08-02 (PDS wave 38): a synthetic member"},
+      exit: 0,
+      expect: ["CENSUS OK", "PASS  EXCLUSION-CLASS-DECLARED"],
+      proves: "declaring a class in @routed_exclusion_classes keeps the census green - the arm refuses an UNDECLARED class, never a new one"
+    },
+    # THE OPAQUE ROW STOPS BEING UNFALSIFIABLE (pds-bl-w39-opaque-exclusion-row-unfalsifiable).
+    # `"?"` is not a module alias, so no corpus can resolve it and no run can refute the row.
+    # The mutant moves the one committed opaque row OFF the synthetic-fixture class that may
+    # carry it - which is exactly the shape the two retired wave-39 Sheets rows had under
+    # `action_not_in_corpus`, and which before this arm changed no printed number at all.
+    %{
+      name: "EXCLUSION-OPAQUE-MODULE-REDS",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"\"/plugins/var-live\", \"?\", :index, :selftest" <> "_fixture}",
+         "\"/plugins/var-live\", \"?\", :index, :liveview_handle_event}"},
+      exit: 1,
+      expect: [
+        "FAIL  EXCLUSION-MODULE-NAMED",
+        "OPAQUE EXCLUSION MODULE",
+        "/plugins/var-live"
+      ],
+      proves: "a committed disposition row whose module string is not a module alias reds BY NAME on any class but the synthetic-fixture one - a table that can hold an unresolvable key can hold a claim nothing will ever falsify"
+    },
     %{
       name: "LENS-CAN-MISS-ARMED",
       corpus: :full,
