@@ -1453,9 +1453,15 @@ fi
 # (chat-task-hands W1). /usr/local/bin is already on the LIVE BEAM process PATH
 # (/proc-proven on guerrilla), so a Port.open child resolves `bp` with zero PATH
 # injection — no reliance on the stray, off-PATH /opt/barkpark/bp manual build.
-# Build ONCE per deploy (this main flow runs once under flock, not per slot),
-# native arch (guerrilla is ARM64), CGO off to match the barkpark-agent precedent
-# above. Install ATOMICALLY: build to a tmpfile on the SAME filesystem, then
+# Build ONCE per deploy (this main flow runs once under flock, not per slot), for
+# the NATIVE arch of whichever box runs this script — no GOARCH/GOOS is set
+# anywhere in this file, so `go build` targets the host and nothing here depends
+# on knowing which arch that is. Do NOT re-add an arch claim: this line used to
+# read "guerrilla is ARM64" with nothing behind it, and the pds wave-49 filer
+# measured the opposite — `ssh root@157.180.90.121 uname -m` -> `x86_64`
+# (2026-09, the filer's measurement, not re-run here; this campaign has no ssh).
+# CGO off to match the barkpark-agent precedent above. Install ATOMICALLY:
+# build to a tmpfile on the SAME filesystem, then
 # rename over the live binary, so an in-flight `bp` invocation never sees a half-
 # written file. LOUD on failure — a silent skip is exactly the silent-failure bug
 # this epic exists to kill — but NON-FATAL: the app is already live on the new

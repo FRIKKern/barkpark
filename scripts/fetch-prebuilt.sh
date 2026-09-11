@@ -12,8 +12,9 @@
 #           than compiling; it only ever makes the happy path fast.
 # Exit 3  — blue/green slot layout detected; the slot deployer owns all writes.
 #
-# The stamp gate is the safety core: a build compiled on a different Elixir/erts/
-# arch than this box is REFUSED (bytecode/NIF incompatibility), never swapped in.
+# The stamp gate is the safety core: a build compiled on a different Elixir/OTP/
+# erts/arch than this box is REFUSED (bytecode/NIF incompatibility), never
+# swapped in.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
@@ -45,15 +46,19 @@ trap 'rm -rf "$tmp"' EXIT
 curl -fsSL --retry 2 "$BASE/stamp.json" -o "$tmp/stamp.json" 2>/dev/null \
   || fallback "no precompiled artifact for $SHA (404 — api unchanged, or CI not done)"
 
-# 2. Gate on an EXACT runtime match (elixir + erts + arch). A stamp field the box
-# can't read → treat as mismatch (fall back) rather than risk a bad swap.
+# 2. Gate on an EXACT runtime match (elixir + otp + erts + arch). A stamp field
+# the box can't read → treat as mismatch (fall back) rather than risk a bad swap.
+# EVERY field build-prebuilt.sh publishes is gated here — a receipt field nobody
+# reads would assert a check that does not exist.
 stamp_get() { python3 -c "import json;print(json.load(open('$tmp/stamp.json')).get('$1',''))" 2>/dev/null; }
 box_elixir="$(elixir --version 2>/dev/null | sed -n 's/^Elixir \([0-9][0-9.]*\).*/\1/p' | head -1)"
+box_otp="$(erl -noshell -eval 'io:fwrite("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null)"
 box_erts="$(erl -noshell -eval 'io:fwrite("~s",[erlang:system_info(version)]),halt().' 2>/dev/null)"
 box_arch="$(uname -m)"
 
 [ "$(stamp_get sha)" = "$SHA" ] || fallback "stamp sha mismatch"
 [ -n "$box_elixir" ] && [ "$(stamp_get elixir)" = "$box_elixir" ] || fallback "elixir mismatch (artifact '$(stamp_get elixir)' vs box '$box_elixir')"
+[ -n "$box_otp" ] && [ "$(stamp_get otp)" = "$box_otp" ] || fallback "otp mismatch (artifact '$(stamp_get otp)' vs box '$box_otp')"
 [ -n "$box_erts" ] && [ "$(stamp_get erts)" = "$box_erts" ] || fallback "erts mismatch (artifact '$(stamp_get erts)' vs box '$box_erts')"
 [ "$(stamp_get arch)" = "$box_arch" ] || fallback "arch mismatch (artifact '$(stamp_get arch)' vs box '$box_arch')"
 
