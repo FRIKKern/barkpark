@@ -5454,6 +5454,88 @@ else
   fi
 fi
 
+# (h) THE CLAUSE'S OWN VACUOUS EXIT (cchi-w39). Everything above proves the
+#     clause reds on the right sentence. This proves what it does when its
+#     PRE-FILTER hands the attribution scanner NOTHING: `candidates` empty means
+#     the awk never runs, and until this slice the clause returned 0 there with
+#     a printed count as its only disclosure — and a count printed is not a
+#     refusal. It cannot red unconditionally (--selftest's neutral corpus is
+#     built to name no required context, so ~27 probes reach that state
+#     legitimately), so the shape is wave 39's: state the absence always,
+#     REFUSE under a flag a caller who is standing on the clause must pass.
+RC22_NOCAND="$TMP/mt-prose-nocand"
+mkdir -p "$RC22_NOCAND"
+cat > "$RC22_NOCAND/silent.md" <<'MD'
+A corpus that names no required status check at all. Every rule in the
+merge-truth clause is anchored on an occurrence of a required context NAME, so
+the pre-filter selects nothing here and the attribution scanner is handed no
+file whatsoever.
+MD
+
+# (h1) THE PRECONDITION, asserted rather than assumed: this corpus really does
+#      reach zero candidates. A green read off a corpus that quietly DID have a
+#      candidate would make every arm below a statement about the wrong state.
+rc22_run "$RC22_NOCAND" && RC22_RC=0 || RC22_RC=$?
+RC22_H1="$(cat "$RC22_OUT")"
+if [ "$RC22_RC" -eq 0 ] && grep -q '0 naming a required context' <<<"$RC22_H1"; then
+  ok "the zero-candidate corpus reaches the state this arm is about — 0 of the scanned file(s) name any required context, and the run is green"
+else
+  bad "the zero-candidate fixture did not reach zero candidates (exit $RC22_RC) — every arm of (h) would be a statement about the wrong state: $(grep -m2 -e 'ok  *no tracked prose' -e FAIL <<<"$RC22_H1")"
+fi
+
+# (h2) …AND THE GREEN SAYS SO. The absence is STATED on stdout, unconditionally,
+#      so there is a line to quote — and so that quoting it under an
+#      authorization is visibly the wrong thing to paste.
+if grep -q '^NO COVERAGE: the merge-truth pre-filter selected 0 of' <<<"$RC22_H1"; then
+  ok "…and that green PRINTS NO COVERAGE naming what was not examined — the scanner was handed no file, and the run says so instead of reporting a clean corpus"
+else
+  bad "the zero-candidate green disclosed nothing — a clause that examined nothing read as one that found nothing: $(grep -m2 -e 'ok  *no tracked prose' -e 'NO COVERAGE' <<<"$RC22_H1")"
+fi
+
+# (h3) THE REFUSAL. The same corpus, under the flag, is exit 1 through the
+#      file's own `fail()` — not a new word and not a new code.
+rc22_run "$RC22_NOCAND" --require-prose-candidates && RC22_RC=0 || RC22_RC=$?
+RC22_H3="$(cat "$RC22_OUT")"
+if [ "$RC22_RC" -eq 1 ] && grep -q '^FAIL: the merge-truth pre-filter selected 0 of' <<<"$RC22_H3"; then
+  ok "…and under --require-prose-candidates the SAME corpus is FAIL/exit 1 through the existing fail() — a caller standing on this clause cannot be handed a green it never measured"
+else
+  bad "--require-prose-candidates did not refuse the zero-candidate corpus (exit $RC22_RC): $(grep -m2 -e FAIL -e 'NO COVERAGE' <<<"$RC22_H3")"
+fi
+
+# (h4) THE FLAG IS NOT A BLANKET RED, which (h3) alone cannot show: a refusal
+#      that fires on every corpus would satisfy (h3) and mean nothing. The
+#      proximity corpus from (c) NAMES a required context, so the scanner is
+#      handed a file — and the same flag must stay green and print no
+#      NO COVERAGE line.
+rc22_run "$RC22_PROX" --require-prose-candidates && RC22_RC=0 || RC22_RC=$?
+RC22_H4="$(cat "$RC22_OUT")"
+if [ "$RC22_RC" -eq 0 ] && ! grep -q 'NO COVERAGE' <<<"$RC22_H4"; then
+  ok "…while a corpus that DOES name a required context is green under the same flag with no NO COVERAGE line — the refusal is keyed on what was scanned, not on the flag"
+else
+  bad "--require-prose-candidates reds (or disclaims) a corpus it actually scanned (exit $RC22_RC) — the flag is a blanket refusal, which proves nothing in (h3): $(grep -m2 -e FAIL -e 'NO COVERAGE' <<<"$RC22_H4")"
+fi
+
+# (h5) MUTATION CONTROL. Delete the refusal from a copy and (h3) must go GREEN
+#      again. Without this, (h3) passes on any refusal the file happens to raise
+#      for another reason and the clause is unproven.
+RC22_NOREF="$TMP/verify-no-prose-cand-refusal.sh"
+sed -E 's%^( *)if \[ "\$REQUIRE_PROSE_CANDIDATES" -eq 1 \]; then%\1if false; then # ZERO-CANDIDATE REFUSAL DISARMED%' \
+  "$VERIFY" > "$RC22_NOREF"
+RC22_H5N="$(grep -c 'ZERO-CANDIDATE REFUSAL DISARMED' "$RC22_NOREF" || true)"
+if [ "$RC22_H5N" -ne 1 ]; then
+  bad "the zero-candidate mutation applied $RC22_H5N times, not 1 — the refusal's guard moved, so (h3) proves nothing"
+else
+  ok "the mutation applies: the zero-candidate refusal is disarmed in a copy of verify"
+  RC22_H5="$(bash "$RC22_NOREF" --spec "$SPEC" --readback "$TMP/rb.json" --runs "$TMP/runs.json" \
+    --sha probe --prose "$RC22_NOCAND" --workflows "$REPO_ROOT/.github/workflows" \
+    --require-prose-candidates 2>&1)" && RC22_H5_RC=0 || RC22_H5_RC=$?
+  if [ "$RC22_H5_RC" -eq 0 ]; then
+    ok "…and with it disarmed the SAME flagged run sails through green — (h3)'s red is this clause's, and the vacuous exit is reproduced on demand"
+  else
+    bad "the disarmed verify did not reproduce the vacuous green (exit $RC22_H5_RC) — (h3) may be reding for an unrelated reason: $(grep -m2 FAIL <<<"$RC22_H5")"
+  fi
+fi
+
 section "23. --ci reads live protection on enforced=false too — the arm every PR runs"
 
 # THE DEFECT THIS SECTION PINS (cchi-w51). §8b closed this hole in `run_full`
