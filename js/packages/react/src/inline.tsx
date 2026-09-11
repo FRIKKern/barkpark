@@ -452,6 +452,56 @@ export function inlineCodeSource(node: Record<string, unknown>): string {
   return str(node.value) || inlineText(node.children)
 }
 
+/* ── THE BLOCK-WRAPPER-IN-AN-INLINE-ARRAY law (task-3fd604e7c89d6150) ─────────
+ *
+ * A BLOCK-level node sitting inside an INLINE array —
+ * `{"type":"paragraph","content":[…]}` or `{"type":"list-item","content":[…]}`
+ * — carries its text ONE LEVEL DEEPER than this walk looks: `renderInline`
+ * dispatches on `children` throughout, so such a node falls to the unknown-type
+ * arm, finds no children and emits ''. Measured 2026-09-02 on the live corpus:
+ * 75 list items across 4 published papers render as an empty bullet with their
+ * prose intact in storage. Measured HERE by running the shape through
+ * `renderInlines` on 825a432e9: both spellings returned ''.
+ *
+ * THE LAW, set by inline.ex `unwrap_block_wrappers/1` (PR #15701): before
+ * walking a RUN of inline nodes, replace any node carrying a NON-EMPTY LIST
+ * under `content` with that list. ONE level, never recursively — a wrapper with
+ * empty content keeps today's behaviour, and anything nesting deeper is a
+ * separate finding. Keyed on `content` rather than a type allowlist because no
+ * inline node type in this file reads `content` at all (inline nodes carry
+ * `value`, `text`, `children` and marks), so the key cannot shadow a legitimate
+ * inline node while it does catch a block wrapper this corpus has not produced
+ * yet.
+ *
+ * RUN WALK ONLY. `renderInlines` is the block-level run walker (the twin of
+ * `compose_inline_children/1` and `InlineRenderer.Inline`); a mark node's own
+ * children go through `renderInlineChildren`, which does NOT unwrap — the
+ * Elixir twin likewise maps `compose_inline/2` over `strong`/`em`/`link`
+ * children rather than routing them back through `compose_inline_children/1`.
+ *
+ * Twins: `Render.Inline.unwrap_block_wrappers/1`
+ * (api/lib/barkpark/portable_doc/render/inline.ex) and `unwrapBlockWrappers`
+ * (internal/pdrender/inline.go). All three answer to ONE fixture,
+ * `api/test/support/fixtures/inline-block-wrapper.json`, read here by
+ * `tests/inline-block-wrapper.parity.test.ts`. */
+export function unwrapBlockWrappers(nodes: unknown[]): unknown[] {
+  // Pre-scan so the overwhelmingly common wrapper-free run keeps its own array
+  // instead of allocating a copy on every inline run in the document.
+  if (!nodes.some(isBlockWrapper)) return nodes
+  const out: unknown[] = []
+  for (const n of nodes) {
+    if (isBlockWrapper(n)) out.push(...(n.content as unknown[]))
+    else out.push(n)
+  }
+  return out
+}
+
+/** A node is a block wrapper when it carries a NON-EMPTY list under `content` —
+ * the single predicate the unwrap is keyed on. */
+function isBlockWrapper(n: unknown): n is Record<string, unknown> {
+  return isMap(n) && Array.isArray(n.content) && n.content.length > 0
+}
+
 /** Render one inline node to an HTML string. */
 export function renderInline(node: Inline): string {
   if (typeof node === 'string') return escapeHtml(node)
@@ -478,16 +528,16 @@ export function renderInline(node: Inline): string {
     }
     case 'strong':
     case 'bold':
-      return `<span style="font-weight:bold">${renderInlines(node.children)}</span>`
+      return `<span style="font-weight:bold">${renderInlineChildren(node.children)}</span>`
     case 'em':
     case 'italic':
-      return `<span style="font-style:italic">${renderInlines(node.children)}</span>`
+      return `<span style="font-style:italic">${renderInlineChildren(node.children)}</span>`
     case 'underline':
-      return `<span style="text-decoration:underline">${renderInlines(node.children)}</span>`
+      return `<span style="text-decoration:underline">${renderInlineChildren(node.children)}</span>`
     case 'strike':
     case 's':
     case 'strikethrough':
-      return `<span style="text-decoration:line-through">${renderInlines(node.children)}</span>`
+      return `<span style="text-decoration:line-through">${renderInlineChildren(node.children)}</span>`
     case 'code':
       // Swept sibling of the block-level content[] defect, at inline level: an
       // inline code node authored with `children` inline nodes (rather than a
@@ -497,11 +547,11 @@ export function renderInline(node: Inline): string {
       // `<code>` body stays escaped plain text exactly as the `value` path.
       return `<code>${escapeHtml(inlineCodeSource(node))}</code>`
     case 'link':
-      return `<a href="${safeUrl(str(node.href))}" style="${LINK_STYLE}">${renderInlines(node.children)}</a>`
+      return `<a href="${safeUrl(str(node.href))}" style="${LINK_STYLE}">${renderInlineChildren(node.children)}</a>`
     case 'wikilink': {
       const target = escapeHtml(str(node.target))
       const alias = str(node.alias)
-      const kids = renderInlines(node.children)
+      const kids = renderInlineChildren(node.children)
       const label =
         alias !== '' ? escapeHtml(alias) : kids !== '' ? kids : escapeHtml(str(node.target))
       return `<span data-wikilink="${target}" class="bp-wikilink bp-wikilink--unresolved">${label}</span>`
@@ -525,13 +575,30 @@ export function renderInline(node: Inline): string {
     default: {
       // Unknown inline → degrade to its children when present, else nothing.
       const kids = asList(node.children)
-      return kids.length ? renderInlines(kids) : ''
+      return kids.length ? renderInlineChildren(kids) : ''
     }
   }
 }
 
-/** Render an inline-node array (or a scalar cell) to an HTML string. */
+/** Render an inline-node RUN — a block's inline array, or a scalar cell — to an
+ * HTML string. This is the twin of `compose_inline_children/1` and
+ * `InlineRenderer.Inline`, and the ONE place the block-wrapper unwrap above
+ * applies. */
 export function renderInlines(nodes: unknown): string {
+  if (typeof nodes === 'string') return escapeHtml(nodes)
+  if (typeof nodes === 'number') return escapeHtml(String(nodes))
+  if (!Array.isArray(nodes)) return ''
+  return unwrapBlockWrappers(nodes)
+    .map((n) => renderInline(n as Inline))
+    .join('')
+}
+
+/** Render a MARK node's own children (strong/em/underline/strike/link/unknown).
+ * Identical to {@link renderInlines} except that it does NOT unwrap a block
+ * wrapper — the Elixir twin maps `compose_inline/2` over those children rather
+ * than routing them back through `compose_inline_children/1`, and this leg is
+ * bounded exactly as that one. */
+function renderInlineChildren(nodes: unknown): string {
   if (typeof nodes === 'string') return escapeHtml(nodes)
   if (typeof nodes === 'number') return escapeHtml(String(nodes))
   if (!Array.isArray(nodes)) return ''
