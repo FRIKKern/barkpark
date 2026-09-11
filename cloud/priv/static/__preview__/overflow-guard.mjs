@@ -176,18 +176,26 @@
 //  390px passed every required context because nothing measured below 700px and
 //  nothing ran this file. The second half of that has since been fixed.
 //
-//  THE SELECTOR CENSUS OF THIS FILE, with the counting rule beside it, because a
-//  census quoted without its rule is how two irreconcilable numbers get cited as
-//  one pair. The patterns below are written with a bracketed paren ON PURPOSE —
-//  as regexes they match exactly what the bare string does, but they do not
-//  themselves match, so quoting the census here does not move it:
-//    grep -o 'querySelector[(]'    | wc -l  →  68  OCCURRENCES
-//    grep -c 'querySelector[(]'             →  55  LINES carrying at least one
-//    grep -o 'querySelectorAll[(]' | wc -l  →  15  (grep -c agrees: 15)
-//  The two patterns are disjoint — `querySelectorAll[(]` does not match
-//  `querySelector[(]`. Charter D258's "65 / 20 per CALL" is refuted here: 65 is
-//  unreproducible by any rule against these bytes, and 20 is this file's 15
-//  POOLED with breakpoint-sweep.mjs's 5. Quote 68/55/15, never a mixed pair.
+//  THE SELECTOR CENSUS OF THIS FILE IS NOT TYPED HERE ANY MORE
+//  (task-39ebd948f40660e3). It used to be: three literals, with their counting
+//  rule beside them, and by the time anybody read them again the file had grown
+//  past every one by an order of magnitude — the row that sent somebody to check
+//  was CANCELLED because its own quoted numbers were dead. A number in a comment
+//  has no way to notice that the bytes under it moved.
+//
+//  So the numbers come from a command, and the command is the census:
+//      node cloud/priv/static/__preview__/view-scope-census.mjs
+//  which prints the call-site count, the same three grep-rule figures
+//  (`querySelector[(]` occurrences, the lines carrying at least one, and the
+//  disjoint `querySelectorAll[(]` count — the patterns are written bracketed so
+//  quoting them does not move them), and the CARDINALITY census: every singular
+//  walk in this file with its leg, its selector and how its population is
+//  accounted for. It exits 1 on a singular walk that neither prints its
+//  population nor carries a committed reason, and on a register row that matches
+//  no walk. `--list` prints every site.
+//
+//  Charter D258's "65 / 20 per CALL" is refuted by any run of it: neither figure
+//  is reproducible by any rule against these bytes.
 //
 //  Exit codes: 0 = every requested defect measured fixed · 1 = a DEFECT WAS
 //  MEASURED and is still present · 2 = REFUSED to measure (no/unusable Chrome,
@@ -1869,7 +1877,16 @@ async function main() {
     if (requested.includes("GR109-attention-row-dead-rule")) {
       process.stdout.write(`\nGR109-attention-row-dead-rule — overview-past-due attention queue\n`);
       await setViewport(768);
-      await nav(`${BASE}/?scen=overview-past-due&theme=light`, `document.querySelector('.attention-row .attention-acts')`);
+      // D228: THE POPULATION, NOT THE FIRST OF IT (task-39ebd948f40660e3). This
+      // gate read `document.querySelector('.attention-row .attention-acts')`,
+      // i.e. it entered on the FIRST row's button group and said nothing about
+      // how many rows the queue holds — and the measurement immediately below
+      // reads `.attention-row` singular off the same paint. A queue caught one
+      // row in would be measured, and certified, on a screen the fixture never
+      // meant to show. Scoped to the visible view so the count stays out of the
+      // hidden-view residue class the W35 leg polices.
+      await nav(`${BASE}/?scen=overview-past-due&theme=light`, `document.querySelectorAll('section.view:not([hidden]) .attention-row .attention-acts').length > 0`);
+      const attPop = await evalJs(`document.querySelectorAll('section.view:not([hidden]) .attention-row .attention-acts').length`);
       const m = await evalJs(
         `(function(){var row=document.querySelector('.attention-row');var cs=getComputedStyle(row);` +
         `var main=row.querySelector('.attention-main').getBoundingClientRect();` +
@@ -1881,7 +1898,7 @@ async function main() {
       if (m.align !== "flex-start") fail("GR109-attention-row-dead-rule", `@768 align-items is "${m.align}", expected "flex-start" — the authored rule is cascade-dead (row stacks but stays centred)`);
       if (Math.abs(m.actsLeft - m.mainLeft) > 1) fail("GR109-attention-row-dead-rule", `@768 .attention-acts left ${m.actsLeft} != .attention-main left ${m.mainLeft} — buttons are centred, not left-aligned`);
       if (!failures.some((f) => f.defect === "GR109-attention-row-dead-rule")) {
-        okLine(`@768 computed column/flex-start; acts left ${m.actsLeft} == main left ${m.mainLeft}`);
+        okLine(`@768 computed column/flex-start; acts left ${m.actsLeft} == main left ${m.mainLeft} — the readiness gate stood in front of ${attPop} .attention-row .attention-acts group(s) on overview-past-due, counted rather than assumed (D228), and the geometry above is the FIRST row's`);
       }
       // The stack must stay scoped to the tablet block — at 900 it is a row.
       await setViewport(900);
@@ -2132,14 +2149,25 @@ async function main() {
       let wideCards = 0;
       let wideHits = 0;
       const scenCounts = [];
+      const readyPop = [];
       for (const scen of CARD_SCENS) {
         let scenN = null;
         for (const theme of ["light", "dark"]) {
           await setViewport(390);
           await nav(
             `${BASE}/?scen=${scen}&theme=${theme}#overview`,
-            `document.querySelector('.instances-grid .instance-card')`,
+            // D228: THE POPULATION, NOT THE FIRST OF IT (task-39ebd948f40660e3).
+            // This gate read `document.querySelector('.instances-grid
+            // .instance-card')` and entered the moment ONE card existed. The
+            // cells below measure every card in the grid, so a grid caught
+            // mid-paint is measured short and the per-scenario `n` printed
+            // beside it is the number that was there when the FIRST card
+            // arrived, not the fixture's. Scoped to the visible view so the
+            // count stays out of the hidden-view residue class W35 polices.
+            `document.querySelectorAll('section.view:not([hidden]) .instances-grid .instance-card').length > 0`,
           );
+          // The population the gate stood in front of, re-measured per cell.
+          readyPop.push(`${scen}/${theme}:${await evalJs(`document.querySelectorAll('section.view:not([hidden]) .instances-grid .instance-card').length`)}`);
           const row = [];
           for (const width of PHONE_WIDTHS) {
             await setViewport(width);
@@ -2182,7 +2210,7 @@ async function main() {
       // A selector that stops matching must RED, not sail through zero
       // iterations printing a tick.
       if (walked === 0) fail(D, `#overview: .instances-grid .instance-card matched NOTHING across ${CARD_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes — the selector no longer reaches the population it certifies`);
-      else okLine(`instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
+      else okLine(`READINESS STOOD IN FRONT OF ${readyPop.join(", ")} card(s) — the gate counts the population it waits for (D228), so a grid caught one card into its paint cannot pass for a painted grid. instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
 
       // (b) the notifications matrix must ADMIT it is clipped. Two independent
       //     cues, both measured: a label column that stays put while the
@@ -8812,12 +8840,22 @@ async function main() {
       );
       let cells = 0, hostsSeen = 0, torn = 0, pageOver = 0, stressRuns = 0, stressSpill = 0;
       let boxOver = 0, midCells = 0, midBoxOver = 0, midPageOver = 0;
+      const stepPop = [];
       for (const theme of ["light", "dark"]) {
         await setViewport(FAIL_WIDTHS[FAIL_WIDTHS.length - 1]);
         await nav(
           `${BASE}${sc.pathname}${sc.search}&scen=theater-failed&theme=${theme}`,
-          `document.querySelector('.new-failed') && document.querySelector('.new-step-detail') && document.querySelector('.new-console-text')`,
+          // D228 on the STEP CAPTIONS (task-39ebd948f40660e3): this gate read
+          // `document.querySelector('.new-step-detail')` and entered on the
+          // FIRST step's caption, while the cells below measure every rendered
+          // hostname run on the screen. The theater renders its steps into
+          // `#new-body` one list at a time, so a screen caught between steps was
+          // measurable and certifiable. `#new-body` is an id host, not a view —
+          // the /new theater is its own page, outside every `section.view` —
+          // which is also why this count is not spelled with the live-view idiom.
+          `document.querySelector('.new-failed') && document.querySelectorAll('#new-body .new-step-detail').length > 0 && document.querySelector('.new-console-text')`,
         );
+        stepPop.push(`${theme}:${await evalJs(`document.querySelectorAll('#new-body .new-step-detail').length`)}`);
         const row = [];
         for (const width of FAIL_WIDTHS) {
           await setViewport(width);
@@ -9030,7 +9068,9 @@ async function main() {
         okLine(
           `${cells} / ${cells} cells clean (${hostsSeen} rendered "${HOSTNAME}" text runs measured — EVERY one on the ` +
           `screen, not a pinned selector) across ${FAIL_WIDTHS.join("/")} in both themes; ${torn} torn hostnames, ` +
-          `${pageOver} pages scrolling sideways. Cells print hosts-found and, when torn, the count`,
+          `${pageOver} pages scrolling sideways. Cells print hosts-found and, when torn, the count. The readiness ` +
+          `gate stood in front of ${stepPop.join(" / ")} .new-step-detail caption(s) under #new-body — counted, not ` +
+          `assumed (D228), so a theater caught between steps cannot pass for a finished one`,
         );
         okLine(
           `THE CRUEL HALF RAN ${stressRuns} time(s) at ${FAIL_WIDTHS[0]} with ${stressSpill} box spill(s): a ` +
@@ -11114,6 +11154,7 @@ async function main() {
         `${DEPLOY_DETAIL_BUILDER_MAX} — reported, not pinned). lines= is measured height / line-height\n`,
       );
       let cells = 0, seen = 0, cruelSeen = 0, kindSeen = 0;
+      const railPop = [];
       let worstLines = 0, worstAt = "", kindWorstLines = 0, pageOver = 0;
       let capAttrWorst = 0;
       for (const theme of ["light", "dark"]) {
@@ -11131,8 +11172,19 @@ async function main() {
           // deployments fetch having landed. The caption's absence is caught
           // where it belongs — by this leg's own zero-box refusal below, which
           // says which screen was empty instead of blaming a stylesheet.
-          `document.querySelector('.deploy-row') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
+          // D228: THE POPULATION, NOT THE FIRST OF IT (task-39ebd948f40660e3).
+          // This gate read `document.querySelector('.deploy-row')` — one row of
+          // a list whose length it never said. A rail that painted ONE row of a
+          // multi-deployment fixture satisfies a singular probe exactly as well
+          // as a fully painted one, and every cell below would then measure a
+          // half-drawn screen while the ok-line said "clean". The count is
+          // scoped to the visible view so it stays out of the hidden-view
+          // residue class the W35 leg polices.
+          `document.querySelectorAll('section.view:not([hidden]) .deploy-row').length > 0 && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
         );
+        // The population the readiness gate stood in front of, re-measured every
+        // entry and printed in this leg's ok-line — never typed into a comment.
+        railPop.push(`${theme}:${await evalJs(`document.querySelectorAll('section.view:not([hidden]) .deploy-row').length`)}`);
         const row = [];
         for (const width of DD_WIDTHS) {
           await setViewport(width);
@@ -11210,6 +11262,9 @@ async function main() {
         okLine(
           `${cells} / ${cells} cells clean across ${DD_WIDTHS.join("/")} in both themes — ${cruelSeen} cruel and ` +
           `${kindSeen} kind captions measured out of ${seen} .deploy-detail boxes, ${pageOver} page(s) dragging. ` +
+          `The readiness gate stood in front of ${railPop.join(" / ")} .deploy-row(s) in the visible view (D228: the ` +
+          `gate counts the population it waits for, so a rail that painted ONE row of the fixture's list cannot pass ` +
+          `for a rail that painted all of them). ` +
           `The ${DEPLOY_DETAIL_STORE_CAP}-char caption paints at most ${worstLines} line-boxes (worst: ${worstAt}) ` +
           `against a bound of ${DETAIL_MAX_LINES}, and is CLIPPED in every cell — the bound is engaging, not ` +
           `decorative`,
@@ -11673,15 +11728,26 @@ async function main() {
           // is a DOCUMENT-WIDE walk, and W35's census (view-scope-census.mjs, run
           // over this file's own bytes) refuses one that can match inside a hidden
           // view — `.instance-card` matches 5 nodes in a hidden #view-overview.
-          ready: `document.querySelector('#overview-body .instance-card')` },
+          // D228 (task-39ebd948f40660e3): COUNTED, not "at least one". The gate
+          // used to enter on the first card of a five-card fixture while the
+          // cells below walk every text-bearing element on the screen, so a
+          // grid caught mid-paint was measured and certified. `pop` is the same
+          // selector the gate waits on; the leg prints what it stood in front of.
+          pop: "#overview-body .instance-card",
+          ready: `document.querySelectorAll('#overview-body .instance-card').length > 0` },
         { name: "billing", scen: "billing-past-due", hash: "#billing", view: "view-billing",
           ready: `document.querySelector('#billing-plan-section .set-h') && !document.querySelector('#billing-recommended .loading')` },
         { name: "activity", scen: "activity", hash: "#activity", view: "view-activity",
           ready: `document.querySelector('#activity-body .tlv-row')` },
         { name: "sites", scen: "mixed-fleet", hash: "#sites", view: "view-sites",
-          ready: `document.querySelector('#sites-body .site-row')` },
+          pop: "#sites-body .site-row",
+          ready: `document.querySelectorAll('#sites-body .site-row').length > 0` },
         { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet",
-          ready: `document.querySelector('.fleet-row')` },
+          // AND SCOPED WHILE WE ARE HERE: a bare `.fleet-row` is the
+          // document-wide walk the comment on the overview route above refuses,
+          // and this route was spelling it. The live-view idiom is cch-w24-s5's.
+          pop: "section.view:not([hidden]) .fleet-row",
+          ready: `document.querySelectorAll('section.view:not([hidden]) .fleet-row').length > 0` },
       ];
 
       // ANTI-VACUITY 0 — THE INSTRUMENT AND THE FLOOR ARE THE SAME FLOOR.
@@ -11729,6 +11795,7 @@ async function main() {
         `return out;})()`;
 
       let tfCells = 0, tfText = 0, tfBelow = 0, tfAllowed = 0, tfViol = 0;
+      const tfPop = [];
       const tfPerRoute = new Map();
       const tfHist = {};
       for (const rt of TF_ROUTES) {
@@ -11741,6 +11808,9 @@ async function main() {
             `${BASE}/?scen=${rt.scen}&theme=${theme}${rt.hash}`,
             `${rt.ready} && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id===${JSON.stringify(rt.view)};})()`,
           );
+          if (rt.pop && theme === "light") {
+            tfPop.push(`${rt.name}:${await evalJs(`document.querySelectorAll(${JSON.stringify(rt.pop)}).length`)}`);
+          }
           const line = [];
           for (const width of TF_WIDTHS) {
             await setViewport(width);
@@ -11777,7 +11847,8 @@ async function main() {
           `instances, ${tfBelow} of them below ${TF_FLOOR}px — and ALL ${tfAllowed} of those match one of the ` +
           `${TF_ALLOW.length} selectors named in type-floor.mjs's committed literal allowlist, ` +
           `${tfViol} unexplained. Below-floor histogram ${hist || "(empty)"}. Per route (below/text): ` +
-          `${perRoute}. The filing census read 228 of 1560 across the same 30-cell shape`,
+          `${perRoute}. The filing census read 228 of 1560 across the same 30-cell shape. The readiness gates that ` +
+          `count their population (D228) stood in front of ${tfPop.join(", ")} element(s)`,
         );
         okLine(
           `THE TWO HALVES MEASURE DIFFERENT THINGS AND NEITHER IS THE OTHER'S EVIDENCE: the source parse ` +
