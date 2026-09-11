@@ -2481,6 +2481,46 @@ test("gr-backlog-css: the E10 fixture reds --orphan-check and ONLY --orphan-chec
   }
 });
 
+// ── cch-w20-bl · THE TYPE FLOOR, asserted where the unit gate can see it ────
+// app.css publishes its own floor at :root — "Type scale (decision 29)",
+// `--text-xs: 12px` — and then shipped 48 declarations under it (44 spelt
+// `font-size:` plus `.deploy-console-toggle`'s `font:` SHORTHAND, which the
+// filing row's grep census could not see, and three more the row's 10/10.5/11
+// histogram had no bucket for: `.dom-rung-glyph` at 9px). Measured across 30
+// cells that painted 228 of 1560 text-bearing instances below the floor.
+//
+// NOTHING REFUSED IT, proven by mutation rather than grep: `.instance-card-
+// stat-k` 10px -> 6px — the front screen's own CPU/RAM/DISK/DOCS legend, 48
+// instances in 6/6 #overview cells — left __css_check at "0 error(s)" (its R4
+// reports every raw px font-size line and is REPORT-ONLY by construction), left
+// this suite unchanged, and left `overflow-guard --defect W18-overview-card-
+// pill` printing "28 / 28 cells clean" at rc=0 ON THAT VERY CARD.
+//
+// This is the refusal. The audit, the 12px-vs-13px argument, the committed
+// literal allowlist and its FATAL staleness clause (D180) all live in
+// __preview__/type-floor.mjs next to their own unit harness; this test is the
+// one line that puts them in front of the gate console-harness actually runs.
+// Dynamically imported so a broken helper reds HERE as a failed test rather
+// than as a module-load crash that takes the whole 769-test suite with it.
+test("cch-w20-bl type floor: no app.css declaration resolves below 12px outside the literal allowlist", async () => {
+  const { audit, APP_CSS, FLOOR_PX, ALLOWLIST } = await import("./__preview__/type-floor.mjs");
+  const css = fs.readFileSync(APP_CSS, "utf8");
+  const r = audit(css);
+
+  // ANTI-VACUITY FIRST (standing clause: a green with no subject). A parse
+  // defeated by a rename reports zero declarations and passes everything below.
+  assert.ok(r.decls.length > 200,
+    `the type-floor parse read only ${r.decls.length} font-size declarations out of app.css — it is DEFEATED, not clean`);
+  assert.ok(r.decls.some((d) => d.prop === "font"),
+    "the `font:` shorthand arm read nothing — the half the filing row's grep census missed is dark again");
+
+  assert.deepEqual(r.errors, [],
+    `app.css breaks the ${FLOOR_PX}px legibility floor (--text-xs, "Type scale (decision 29)").\n` +
+    `${ALLOWLIST.length} site(s) are exempt by NAME in type-floor.mjs's committed literal; each carries its own\n` +
+    `written reason and a stale entry is fatal. Raise the declaration, or argue it there.\n\n` +
+    r.errors.join("\n"));
+});
+
 // ── cch-w19-s4 · E14 wrap-recipe parity, driven in every direction ──────────
 // Charter D220 REFUSED D210's fourth-host extraction trigger and replaced it
 // with this instrument: the five-declaration recipe does not fix the fourth
@@ -31850,4 +31890,141 @@ test("cch-w43-bl: /v1/sites rows and their last_deployment embed state the full 
         `last_deployment serves no ${k} — last_deployment_json/1 sends it on every row`);
     }
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w39-rv — CHARTER D895: UNDER AN UNKNOWN ROLE, A SURFACE KEEPS THE
+// ROLE-FREE DATA IT ALREADY RECEIVED AND WITHHOLDS ONLY THE ROLE CLAIM.
+//
+// Wave 39 converted five surfaces and two of them answered this question in
+// opposite directions. BILLING kept `readOnlyPlanCardHtml(subCache)` — the
+// plan, the badge, the period line — because that is /v1/subscription's answer,
+// which every role may read, and replaced only the Manage section's owner-gate
+// sentence. NOTIFICATIONS deleted its whole read-only Alert-delivery card,
+// because the admin-only claim happened to live on that card's purpose line. So
+// an outage cost a notifications user their own visible settings and cost a
+// billing user nothing, for a reason nobody decided.
+//
+// The rule is written ONCE, here, and both arms are driven through it from one
+// fixture pair. Two hand-typed expectations would be a mirror with no lock: a
+// mutation pointing one arm the other way has to red THIS function, whichever
+// arm it is pointed at.
+const D895_NOTIF = { alerts_enabled: true, transport: "smtp", from_address: "alerts@acme.com" };
+const D895_NOTIF_CLAIM = "Only team admins can change these settings.";
+const D895_BILLING_CLAIM = "Only the team owner can manage billing.";
+
+// `roleFree` — values the SERVER sent that carry no role in them. `roleClaim` —
+// the one sentence that states a role the read never delivered.
+//
+// The member render is asserted FIRST and it is a PRECONDITION, not decoration:
+// without it "the unknown arm keeps the transport" could pass against a fixture
+// whose transport never rendered anywhere, and "the unknown arm drops the
+// claim" could pass against a build that dropped the claim everywhere.
+function assertD895(name, unknownHtml, memberHtml, roleFree, roleClaim) {
+  for (const v of roleFree) {
+    assert.ok(memberHtml.includes(v),
+      `PRECONDITION: a CONFIRMED member's ${name} must really render ${JSON.stringify(v)} — otherwise the rule below is vacuous`);
+    assert.ok(unknownHtml.includes(v),
+      `D895: ${name} must KEEP the role-free value ${JSON.stringify(v)} under an unknown role — the server sent it and every role may read it`);
+  }
+  assert.ok(memberHtml.includes(roleClaim),
+    `PRECONDITION: a CONFIRMED member's ${name} must really carry the role claim — otherwise its absence below proves nothing`);
+  assert.equal(unknownHtml.indexOf(roleClaim), -1,
+    `D895: ${name} must WITHHOLD the role claim ${JSON.stringify(roleClaim)} — an unread /v1/me is not evidence about anybody's role`);
+}
+
+test("cch-w39-rv D895 · NOTIFICATIONS: the unknown page keeps the alert-delivery card and drops only the admin claim", async () => {
+  hooks.clearMe();
+  await driveMe(500, { error: "server_error" });
+
+  const unknown = hooks.notifPageHtml(D895_NOTIF, { canManage: false, state: "failed" });
+  const member = hooks.notifPageHtml(D895_NOTIF, { canManage: false, state: "loaded" });
+
+  // THE CRITERION, literally: the transport and the from-address render, and
+  // the admin sentence does not.
+  assertD895("the notifications page", unknown, member,
+    ["SMTP", "alerts@acme.com", "All alerts (email and chat)", "Alert delivery"], D895_NOTIF_CLAIM);
+
+  // The card is READ-ONLY on both arms — keeping data is never keeping a write
+  // affordance. Nothing on the unknown page is pressable but the one Retry.
+  assert.equal(unknown.indexOf("notif-email-save"), -1, "no save row on an unproven role");
+  assert.equal(unknown.indexOf("notif-transport-seg"), -1, "no transport picker on an unproven role");
+  assert.equal(unknown.indexOf("notif-smtp"), -1, "no SMTP credential fields on an unproven role");
+  assert.equal(unknown.indexOf("type=\"checkbox\""), -1, "no checkbox on an unproven role");
+  assert.equal((unknown.match(/<button/g) || []).length,
+    (unknown.match(/data-me-retry/g) || []).length + (unknown.match(/actfilter-chip/g) || []).length +
+    (unknown.match(/id="notif-del-load-more"/g) || []).length,
+    "every button on the unknown page belongs to the Retry or to the member's OWN delivery log");
+
+  // The channels notice stays OUT: "managed by team admins" is a role claim
+  // with no server data under it at all, so D895 keeps nothing there.
+  assert.equal(unknown.indexOf("managed by team admins"), -1,
+    "a claim with no data under it is not role-free data");
+  assert.match(unknown, /data-me-retry/, "and the page still carries the one exit");
+  hooks.clearMe();
+});
+
+test("cch-w39-rv D895 · BILLING: the ratified arm, driven through the REAL renderBilling", async () => {
+  // Billing is the arm D895 RATIFIES, so it is measured, not assumed — and it
+  // is measured on rendered bytes through the same realm harness cch-w49-s6
+  // uses, because renderBillingMeUnknown is a DOM writer.
+  const unknownCase = await w49s6Case(null, { error: "server_error" }, { meStatus: 500 });
+  const memberCase = await w49s6Case(null, W49S6_ME_MEMBER, {});
+
+  assert.equal(unknownCase.h.billingOwnerAuthority(), "failed", "the unknown case really took the unknown band");
+  assert.equal(memberCase.h.billingOwnerAuthority(), "refuse", "the control really took the determinate refusal");
+
+  // The plan card (#billing-recommended) carries the role-free data; the role
+  // claim lives in #billing-manage. The rule is applied to the WHOLE screen, so
+  // neither half can be satisfied by the other going missing.
+  const unknown = unknownCase.nodes["#billing-recommended"].innerHTML + unknownCase.nodes["#billing-manage"].innerHTML;
+  const member = memberCase.nodes["#billing-recommended"].innerHTML + memberCase.nodes["#billing-manage"].innerHTML;
+
+  assertD895("the billing screen", unknown, member, ["Supporter"], D895_BILLING_CLAIM);
+  assert.equal(unknown.indexOf('id="plan-portal"'), -1, "…and an unproven role is still handed no Stripe portal");
+  assert.match(unknown, /data-me-retry/, "…and the screen carries the one exit");
+});
+
+test("cch-w39-rv D895 · the two arms now answer with the SAME function — and it is the function a mutation must red", () => {
+  // Non-vacuity on the rule itself: assertD895 really fails when an arm keeps
+  // the claim, and really fails when an arm drops the data. Without this, a
+  // helper that asserted nothing would carry both tests above green.
+  assert.throws(() => assertD895("a fake arm", "kept the claim: " + D895_NOTIF_CLAIM + " smtp",
+    "smtp " + D895_NOTIF_CLAIM, ["smtp"], D895_NOTIF_CLAIM), /must WITHHOLD the role claim/);
+  assert.throws(() => assertD895("a fake arm", "dropped the data",
+    "smtp " + D895_NOTIF_CLAIM, ["smtp"], D895_NOTIF_CLAIM), /must KEEP the role-free value/);
+  assert.throws(() => assertD895("a fake arm", "smtp", "no claim here", ["smtp"], D895_NOTIF_CLAIM),
+    /PRECONDITION/);
+});
+
+test("cch-w39-rv D895 · the other three wave-39 arms: each verdict is measured, not asserted", async () => {
+  hooks.clearMe();
+  await driveMe(500, { error: "server_error" });
+
+  // PROVIDERS — COMPLIES. renderProviderPage paints the roster with
+  // `providerRosterHtml(list, write)` on BOTH arms and swaps only
+  // #provider-connect (a write card) for the honest block. The roster's rows
+  // are GET /v1/providers' answer, role-free, and they survive.
+  const list = [{ kind: "hetzner", inserted_at: "2030-01-01T00:00:00Z" }];
+  const roster = hooks.providerRosterHtml(list, false);
+  assert.ok(roster.includes("Hetzner"), "the provider roster really renders the server's row with write=false");
+  assert.equal(roster.indexOf("data-prov-disconnect"), -1, "…and offers an unproven role no Disconnect");
+  assert.equal(hooks.providerUnknownHtml("failed").indexOf("Connect a provider"), -1,
+    "…while the connect CARD — a write affordance, not data — is what the unknown arm replaces");
+
+  // TOKEN PICKER — COMPLIES VACUOUSLY, and the proof is in the signature: the
+  // field takes NO argument, so there is no server payload it could be
+  // withholding. Its whole content IS the role verdict.
+  assert.equal(hooks.tokenAbilitiesFieldHtml.length, 0,
+    "tokenAbilitiesFieldHtml receives no data — a region with no payload cannot withhold one");
+
+  // TEAM PICKER — COMPLIES VACUOUSLY for the same reason from the other end:
+  // its only data source is meCache.teams, i.e. the very read that failed, so
+  // under an unknown role there is nothing in hand to keep.
+  const flags = hooks.meFlags();
+  assert.deepEqual({ role: flags.role, loaded: flags.loaded, error: flags.error },
+    { role: null, loaded: false, error: true },
+    "after a failed /v1/me the console holds no role AND no teams — the picker has no role-free data to keep");
+  assert.equal(hooks.meState(), "failed", "…and the state really is the unknown band, not cold boot");
+  hooks.clearMe();
 });

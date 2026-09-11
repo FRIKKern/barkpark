@@ -33,8 +33,11 @@ defmodule Barkpark.PdsElixirCensusTest do
 
   Leaf-metered it cost ~210 s USER CPU across 33 port-child invocations on the
   PDS-D633/D625 run -- illustrative, that run only; the census now DERIVES the
-  floor (9 x its own `user cpu`) on its output's one volatile line, so re-read it
-  there rather than quoting this paragraph. Either way `--selftest` is
+  floor on its output's one volatile line -- the MULTIPLIER counted off its own
+  selftest case table (the cases whose corpus is the live tree), not typed, and
+  guarded by SELFTEST-FLOOR-MULTIPLIER -- so re-read it there rather than quoting
+  this paragraph. A `9` sat in this sentence while that count had grown past
+  thirty, which is the drift the counting removes. Either way `--selftest` is
   disqualified on price, not on merit. The arms below buy the same thing the
   selftest's cheap arms buy: the census runs, it can red — twice, on two different
   arms — and it refuses garbage ARGV.

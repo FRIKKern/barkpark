@@ -102,10 +102,14 @@ defmodule PDS.Census do
     "copy has drifted — 8687 / 12615 / 13199 / 15970 / 17640 / 19815 ms across",
     "recorded runs, a 2.3x SPREAD, so the `~15 s` that sat here could not have been",
     "right for more than one of them. The wrapper's figure for all thirty-three",
-    "children came in under HALF the price of ONE of them, and nine of the cases",
-    "census this same corpus, so NINE TIMES this run's own `user cpu` is a FLOOR on",
-    "what those 6.05 s conceal — DERIVED on the `user cpu` line below (kept on that",
-    "one line so the count of volatile lines stays at ONE), never typed here.",
+    "children came in under HALF the price of ONE of them. THE MULTIPLIER IS NOT",
+    "NAMED HERE EITHER, AND FOR THE SAME REASON: the cases that census THIS SAME",
+    "corpus are COUNTED off the selftest case table on every run — a typed `nine`",
+    "sat here while the table grew past it, understating its own floor for waves —",
+    "so THAT MANY TIMES this run's own `user cpu` is a FLOOR on what those 6.05 s",
+    "conceal, DERIVED on the `user cpu` line below (kept on that one line so the",
+    "count of volatile lines stays at ONE) and guarded by SELFTEST-FLOOR-MULTIPLIER,",
+    "never typed here.",
     "DO NOT QUOTE A RATIO: real/user was 113x on that run and 236x on an earlier",
     "one, because `real` counts waiting — the load-independent statement is the",
     "DIRECTION, and it runs the ONE WAY A PRICE COLUMN MUST NOT: it makes an",
@@ -2925,30 +2929,106 @@ defmodule PDS.Census do
   end
 
   defp receipt_sites(:parse_error, _path, src),
-    do: Map.merge(%{json: [], put2xx: [], send2xx: [], literal_arg: []}, grep_receipts(src))
+    do:
+      Map.merge(
+        %{json: [], put2xx: [], send2xx: [], literal_arg: [], flash_redirect: []},
+        grep_receipts(src)
+      )
 
   defp receipt_sites(ast, path, src) do
     {_, acc} =
       ast
       |> unpipe()
-      |> Macro.prewalk(%{json: [], put2xx: [], send2xx: [], literal_arg: []}, fn
-        {:json, m, [conn, _payload]} = node, a ->
-          {node, %{a | json: [{path, m[:line], wears_2xx?(conn)} | a.json]}}
+      |> Macro.prewalk(
+        %{json: [], put2xx: [], send2xx: [], literal_arg: [], flash_redirect: []},
+        fn
+          {:json, m, [conn, _payload]} = node, a ->
+            {node, %{a | json: [{path, m[:line], wears_2xx?(conn)} | a.json]}}
 
-        {:put_status, m, [_conn, status]} = node, a ->
-          {node, if(status_2xx?(status), do: %{a | put2xx: [{path, m[:line]} | a.put2xx]}, else: a)}
+          {:put_status, m, [_conn, status]} = node, a ->
+            {node,
+             if(status_2xx?(status), do: %{a | put2xx: [{path, m[:line]} | a.put2xx]}, else: a)}
 
-        {:send_resp, m, [_conn, status, _body]} = node, a ->
-          {node, if(status_2xx?(status), do: %{a | send2xx: [{path, m[:line]} | a.send2xx]}, else: a)}
+          {:send_resp, m, [_conn, status, _body]} = node, a ->
+            {node,
+             if(status_2xx?(status), do: %{a | send2xx: [{path, m[:line]} | a.send2xx]}, else: a)}
 
-        node, a ->
-          {node, a}
-      end)
+          # THE FIFTH DECLARED BLIND SPOT (PDS wave 36 trailer). A redirect whose OWN conn
+          # expression carries a `put_flash(:info, ...)`. Same containment test as
+          # wears_2xx?/1 one clause up, and a SUBSET by the same construction: a flash set
+          # on an earlier statement in the clause is not counted.
+          {:redirect, m, [conn | _]} = node, a ->
+            {node,
+             if(carries_info_flash?(conn),
+               do: %{a | flash_redirect: [{path, m[:line], flash_message(conn)} | a.flash_redirect]},
+               else: a
+             )}
 
-    acc = %{acc | literal_arg: literal_arg_sites(ast, path)}
+          node, a ->
+            {node, a}
+        end
+      )
+
+    acc = %{
+      acc
+      | literal_arg: literal_arg_sites(ast, path),
+        flash_redirect: Enum.reverse(acc.flash_redirect)
+    }
 
     Map.merge(acc, grep_receipts(src))
   end
+
+  # ------------------------------------- THE FLASH + 302 SHAPE (PDS wave 36 trailer)
+  #
+  # A SUCCESS REPORTED AS A SENTENCE AND A REDIRECT. `put_flash(:info, "Signed out.")
+  # |> redirect(to: "/studio")` tells a person a write took. It answers with NO body, so
+  # the `ok: true` lens misses it; it spells no `json/2`, no `send_resp/3` and no
+  # `put_status(2xx)` — a `redirect/2` sets 302 — so all four declared blind spots above
+  # miss it too, BY CONSTRUCTION rather than by accident. The instrument already reports
+  # what it cannot see; until this line it did not report THIS.
+  #
+  # DECLARED, NEVER A FIFTH CENSUS CLASS. It is a count beside the other four in the
+  # honesty block and nothing else: `emitted` does not move, no bucket moves, and the
+  # register's denominator is untouched. Extending the lens to read a flash string as a
+  # receipt would need the same dataflow this file refuses for a computed `ok:`.
+  #
+  # ITS OWN BLIND SHAPE, STATED WHERE IT IS COUNTED. It is a FLOOR three ways: a flash set
+  # on a separate statement rather than in the redirected conn's own chain is invisible; a
+  # `:info` level bound to a variable is invisible; and a LiveView `push_navigate/2` is a
+  # different call this predicate does not read. It also says NOTHING about lossiness —
+  # a flash+302 over a return value that WAS read is a member of this count and is honest.
+  defp carries_info_flash?(conn_expr) do
+    {_, carries?} =
+      Macro.prewalk(conn_expr, false, fn
+        {:put_flash, _, [_conn, level, _msg]} = node, acc ->
+          {node, acc or info_level?(level)}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    carries?
+  end
+
+  defp flash_message(conn_expr) do
+    {_, msg} =
+      Macro.prewalk(conn_expr, nil, fn
+        {:put_flash, _, [_conn, level, msg]} = node, nil ->
+          {node, if(info_level?(level), do: one_line(Macro.to_string(msg)), else: nil)}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    msg || "?"
+  end
+
+  # `literal_encoder`-WRAPPED, like every other literal this file reads (see
+  # boolean_literal?/1): parse_file/1 hands atoms back as {:__block__, meta, [:info]},
+  # and a guard on the bare atom would read ZERO on a corpus that carries 45 of them.
+  defp info_level?(:info), do: true
+  defp info_level?({:__block__, _, [:info]}), do: true
+  defp info_level?(_), do: false
 
   # ------------------------------------------- THE LITERAL-ARGUMENT SHAPE (PDS-D503)
   #
@@ -8856,6 +8936,7 @@ defmodule PDS.Census do
     put2xx = Enum.flat_map(parsed, & &1.receipts.put2xx)
     send2xx = Enum.flat_map(parsed, & &1.receipts.send2xx)
     literal_arg = Enum.flat_map(parsed, &Map.get(&1.receipts, :literal_arg, []))
+    flash_redirect = Enum.flat_map(parsed, &Map.get(&1.receipts, :flash_redirect, []))
     grep = Enum.flat_map(parsed, fn f -> Enum.map(f.receipts.grep_lines, &{f.path, &1}) end)
 
     ast_lines = MapSet.new(json, fn {path, line, _} -> {path, line} end)
@@ -8866,6 +8947,8 @@ defmodule PDS.Census do
       ast_json_2xx: Enum.count(json, fn {_, _, wears?} -> wears? end),
       ast_literal_arg: length(literal_arg),
       literal_arg_sites: literal_arg,
+      ast_flash_redirect: length(flash_redirect),
+      flash_redirect_sites: flash_redirect,
       ast_put2xx: length(put2xx),
       ast_send2xx: length(send2xx),
       grep_raw: Enum.sum(Enum.map(parsed, & &1.receipts.grep_raw)),
@@ -8908,6 +8991,7 @@ defmodule PDS.Census do
       {"send_resp/3 2xx", blind.send_resp, d.ast_send2xx},
       {"put_status/2 2xx", blind.put2xx, d.ast_put2xx},
       {"literal-argument sites", blind.literal_arg, d.ast_literal_arg},
+      {"flash+302 sites", blind.flash_redirect, d.ast_flash_redirect},
       {"legacy substring lines", blind.legacy, d.grep_lines},
       {"legacy substring occurrences", blind.legacy_raw, d.grep_raw},
       {"false positives", blind.fp, fp},
@@ -8933,7 +9017,7 @@ defmodule PDS.Census do
           "the two lenses do not reconcile: legacy #{d.grep_lines} - FP #{fp} = #{d.grep_lines - fp}, but AST #{d.ast_lines} - FN #{fn_} = #{d.ast_lines - fn_}; the FP/FN split does not describe the gap it claims to"
 
         true ->
-          "all #{length(printed)} printed blind-spot figures re-derived from the same parse · #{d.ast_literal_arg} literal-argument site(s) · #{d.ast_json} json/2 site(s), #{d.ast_json_2xx} wearing a 2xx literal (a SUBSET, #{d.ast_json_2xx} <= #{d.ast_json}), #{d.ast_send2xx} send_resp/3, #{d.ast_put2xx} put_status/2 · the refuted substring reconciles: #{d.grep_lines} - #{fp} FP == #{d.ast_lines} - #{fn_} FN == #{d.ast_lines - fn_} · BLIND SHAPE: both sides read ONE parse, so a mutation inside receipt_sites/3 moves them together and prints PASS through it"
+          "all #{length(printed)} printed blind-spot figures re-derived from the same parse · #{d.ast_literal_arg} literal-argument site(s) · #{d.ast_flash_redirect} flash+302 site(s) · #{d.ast_json} json/2 site(s), #{d.ast_json_2xx} wearing a 2xx literal (a SUBSET, #{d.ast_json_2xx} <= #{d.ast_json}), #{d.ast_send2xx} send_resp/3, #{d.ast_put2xx} put_status/2 · the refuted substring reconciles: #{d.grep_lines} - #{fp} FP == #{d.ast_lines} - #{fn_} FN == #{d.ast_lines - fn_} · BLIND SHAPE: both sides read ONE parse, so a mutation inside receipt_sites/3 moves them together and prints PASS through it"
       end
 
     [{"BLIND-SHAPE-SPLIT", drifted == [] and subset? and reconciles?, why}]
@@ -8952,6 +9036,7 @@ defmodule PDS.Census do
     send_resp = b.ast_send2xx
     put2xx = b.ast_put2xx
     literal_arg = b.ast_literal_arg
+    flash_redirect = b.ast_flash_redirect
     legacy = b.grep_lines
     legacy_raw = b.grep_raw
     fp = MapSet.size(b.false_positive)
@@ -9006,6 +9091,39 @@ defmodule PDS.Census do
       p("          #   scim_users_controller.ex:<line>  render_user(conn, user, false)")
     end
 
+    p("  #{flash_redirect}  A SUCCESS REPORTED AS A FLASH MESSAGE AND A 302 — THE FIFTH DECLARED")
+    p("        BLIND SPOT (PDS wave 36 trailer). A `redirect/2` whose own conn chain carries")
+    p("        `put_flash(:info, ...)` answers with NO body, so the `ok: true` lens misses it;")
+    p("        it spells no json/2, no send_resp/3 and no put_status(2xx) — a redirect sets")
+    p("        302 — so the four figures above miss it BY CONSTRUCTION, not by accident.")
+    p("        AN INSTRUMENT THAT ALREADY REPORTS WHAT IT CANNOT SEE DID NOT REPORT THIS.")
+    p("        SWEPT, NOT GUESSED (api/lib, this tree): 45 put_flash(:info) call(s) across 20")
+    p("        file(s), 7 of them in controllers across exactly 2 files — grant_controller.ex")
+    p("        and session_controller.ex. Re-derive without this script:")
+    p("          git grep -c 'put_flash(:info' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
+    p("        DECLARED, NEVER A FIFTH CENSUS CLASS: `emitted` does not move, no bucket")
+    p("        moves, the register's denominator is untouched. Reading a flash STRING as a")
+    p("        receipt needs the dataflow this build-free lens refuses for a computed `ok:`.")
+    p("        A FLOOR, three ways: a flash set on a SEPARATE statement from the redirected")
+    p("        conn is invisible, an `:info` level bound to a variable is invisible, and a")
+    p("        LiveView push_navigate/2 is a different call this predicate does not read.")
+    p("        IT SAYS NOTHING ABOUT LOSSINESS. A flash+302 over a return value that WAS")
+    p("        read is a member of this count and is honest. The one member wave 36 filed as")
+    p("        lossy — the Studio sign-out saying `Signed out.` over a discarded")
+    p("        revoke_user_session_token/1 — is ALREADY REPAIRED on this tree: session_")
+    p("        controller.ex binds `{:ok, n} = ...` and renders sign_out_flash(revoked)")
+    p("        (PDS-D523), so the lossy count over today's corpus is ZERO and the shape is")
+    p("        what is declared here.")
+    Enum.each(b.flash_redirect_sites, fn {path, line, msg} ->
+      p("        · #{short(path)}:#{line}  #{msg}")
+    end)
+
+    if flash_redirect == 0 do
+      p("        ZERO ON THIS TREE, AND ZERO IS THE READING THAT NEEDS A CONTROL. The")
+      p("        predicate's liveness is proven by the selftest case named below, not by")
+      p("        this 0 — see BLIND-SHAPE-FLASH-REDIRECT-PRINTED-IS-DERIVED.")
+    end
+
     p("  ALSO INVISIBLE: `mix ecto.migrations` reporting `up` (PDS-D311) — it reads a")
     p("  bookkeeping row, never the object the migration claims to have produced.")
     p("  BLIND SHAPE, PRINTED: a status bound to a VARIABLE (`|> put_status(status)`) is")
@@ -9022,7 +9140,7 @@ defmodule PDS.Census do
     p("    'json(' -- 'api/lib/**/*.ex'` BRACKET #{json} (piped-only floor and all-arities ceiling);")
     p("    `git grep -c 'send_resp(' -- 'api/lib/**/*.ex'` brackets #{send_resp} from above. To re-derive")
     p("    EXACTLY, re-run this script — and BLIND-SHAPE-SPLIT below is what makes that")
-    p("    honest: it re-derives all eight from the same parse and reds on any drift.")
+    p("    honest: it re-derives every one of them from the same parse and reds on any drift.")
     p("")
     report_roster(parsed)
 
@@ -9032,6 +9150,7 @@ defmodule PDS.Census do
       send_resp: send_resp,
       put2xx: put2xx,
       literal_arg: literal_arg,
+      flash_redirect: flash_redirect,
       legacy: legacy,
       legacy_raw: legacy_raw,
       fp: fp,
@@ -10064,6 +10183,44 @@ defmodule PDS.Census do
       expect: ["FAIL  BLIND-SHAPE-SPLIT", "literal-argument sites printed 4242", "did not derive"],
       refute: ["PASS  BLIND-SHAPE-SPLIT"],
       proves: "the literal-argument blind-spot figure passes through BLIND-SHAPE-SPLIT like the other eight — invent it at the print site and the arm names it, which is what stops a DECLARED blind spot from becoming a decorative one"
+    },
+    # THE SAME ARM, OVER THE FIGURE ADDED BY WAVE 36'S TRAILER. Carried separately for the
+    # same reason the case above is: this is a DECLARED blind spot, and a declared blind
+    # spot whose number nothing reads is a decorative one. The mutation is at the BINDING
+    # site inside report_blind_spots/1 — a figure that reaches the page without passing an
+    # arm is the failure this block has actually had, twice.
+    #
+    # IT REDS OVER THE SYNTHETIC CORPUS, WHERE THE DERIVED FIGURE IS 0, and the FAIL line
+    # names BOTH halves (printed 3131, derived 0). The predicate's LIVENESS is controlled
+    # by the repo tree, not by this case: the plain census prints 7 flash+302 site(s) over
+    # api/lib, every one of them a controller put_flash(:info) that redirects.
+    %{
+      name: "BLIND-SHAPE-FLASH-REDIRECT-PRINTED-IS-DERIVED",
+      corpus: :full,
+      argv: [],
+      mut: {"    flash_redirect = b." <> "ast_flash_redirect\n", "    flash_redirect = 3131\n"},
+      exit: 1,
+      expect: ["FAIL  BLIND-SHAPE-SPLIT", "flash+302 sites printed 3131", "did not derive"],
+      refute: ["PASS  BLIND-SHAPE-SPLIT"],
+      proves: "the flash+302 blind-spot figure passes through BLIND-SHAPE-SPLIT like every other declared one — invent it at the binding site and the arm names it"
+    },
+    # THE FLOOR MULTIPLIER, AND THE LITERAL IT USED TO BE. Until this commit the
+    # `--selftest` floor printed `9 x <user cpu>` with the 9 hand-typed from a reading of
+    # the case table taken at wave 46 and never re-taken; the table has since grown and no
+    # arm read the figure at all, so the census printed a floor 23 cases short of its own
+    # fan-out and exited 0 with CENSUS OK. THE MUTANT IS THAT EXACT LITERAL: restore the 9
+    # at the binding site and SELFTEST-FLOOR-MULTIPLIER reds BY NAME, printing both halves.
+    %{
+      name: "SELFTEST-FLOOR-MULTIPLIER-IS-COUNTED",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"    floor_mult = Enum.count(@selftest_cases, &(&1." <> "corpus == :repo))\n",
+         "    floor_mult = 9\n"},
+      exit: 1,
+      expect: ["FAIL  SELFTEST-FLOOR-MULTIPLIER", "printed 9, counted", "live tree"],
+      refute: ["PASS  SELFTEST-FLOOR-MULTIPLIER"],
+      proves: "the floor multiplier is COUNTED off the selftest case table and not typed — restore the hand-typed 9 this slice removed and the arm names it, which is what makes a case added or removed move the printed floor instead of silently falsifying it"
     },
     # ROUTED-DISPOSITION-UNSHADOWED, ONE CASE PER BRANCH OF ITS PREDICATE (PDS-D556).
     #
@@ -11377,6 +11534,40 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- integrity
 
+  # ------------------------------------------------- SELFTEST-FLOOR-MULTIPLIER
+  #
+  # THE ARM THE FLOOR NEVER HAD. PDS-D633 made the `--selftest` floor DERIVED rather than
+  # a hand-typed `~15 s`, but its MULTIPLIER stayed a literal 9 — a figure read once off
+  # the case table and never re-read, which is the same defect one level down. No arm read
+  # it: force the printed multiplier to any value and the census exited 0 with CENSUS OK.
+  #
+  # IT ASSERTS A RELATION AND A NON-VACUITY, NEVER A THRESHOLD. The multiplier a run
+  # PRINTS must equal the live-corpus case count the arm counts here, and that count must
+  # be greater than zero — a floor of `0 x ms` is not a floor, it is a sentence. Both
+  # sides move together when a case is added or removed, so it cannot red on churn; it
+  # reds on a multiplier invented at the binding site, which is the failure it had.
+  #
+  # BLIND SHAPE, PRINTED: both sides count the SAME @selftest_cases table, so a case whose
+  # `corpus:` is mistyped moves them together and this arm prints PASS through it. What it
+  # CAN see is the literal — the thing that was actually there for the whole of wave 46.
+  defp selftest_floor_checks(printed) do
+    counted = Enum.count(@selftest_cases, &(&1.corpus == :repo))
+
+    why =
+      cond do
+        printed != counted ->
+          "the `--selftest` floor PRINTED a multiplier this run did not count: printed #{printed}, counted #{counted} case(s) whose corpus is the live tree"
+
+        counted == 0 ->
+          "the live-corpus case count is 0, so the printed floor is `0 x user cpu` — a floor over nothing, which certifies nothing"
+
+        true ->
+          "the floor multiplier is COUNTED, not typed: #{counted} of #{length(@selftest_cases)} selftest case(s) census the LIVE tree (corpus: :repo), so each pays at least this run's own `user cpu` · add or remove one and the printed floor moves · BLIND SHAPE: both sides read ONE case table, so a mistyped `corpus:` moves them together and prints PASS through it"
+      end
+
+    [{"SELFTEST-FLOOR-MULTIPLIER", printed == counted and counted > 0, why}]
+  end
+
   defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed, route_closure, blind) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
@@ -11394,6 +11585,18 @@ defmodule PDS.Census do
     # suppression. An ARRIVAL adds a literal and NO retired row, so it still moves the
     # conserved totals and still reds.
     retired_n = length(retired_rows())
+
+    # THE `--selftest` FLOOR MULTIPLIER, COUNTED (PDS-D633 trailer). It was a hand-typed
+    # 9, read once off the case table and never re-read: the table now holds
+    # #{length(@selftest_cases)} cases and the live-corpus arm of it has grown far past
+    # nine, so the typed figure had been understating its own floor for waves. A case
+    # added or removed now moves the printed floor, exactly the way `~140 s` did not.
+    #
+    # WHY `:repo` IS THE WHOLE PREDICATE: `dirs.repo` is `File.cwd!()` — the live tree,
+    # the SAME corpus the plain census walks — so each of these children pays at least
+    # what this run just paid. The synthetic corpora (`:full`, `:tiny`, `:repaired`) and
+    # the citation corpora hold a handful of files and are NOT a floor on this price.
+    floor_mult = Enum.count(@selftest_cases, &(&1.corpus == :repo))
 
     drift_rows = [
       {"textual", textual + retired_n, :textual},
@@ -11454,7 +11657,7 @@ defmodule PDS.Census do
         roster_freshness_checks(classified, parsed) ++
         falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified) ++
         route_depth_checks(route_closure, classified) ++
-        mount_mirror_checks(parsed)
+        mount_mirror_checks(parsed) ++ selftest_floor_checks(floor_mult)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -11481,12 +11684,14 @@ defmodule PDS.Census do
     # `wall clock` label — which this run no longer prints. The line names ITSELF volatile
     # so the recipe can be re-derived from the output instead of transcribed from D605.
     #
-    # THE `--selftest` FLOOR RIDES THIS SAME LINE ON PURPOSE. It is 9 x `ms`, so it is
+    # THE `--selftest` FLOOR RIDES THIS SAME LINE ON PURPOSE. It is the live-corpus case
+    # COUNT x `ms` — the multiplier is counted off @selftest_cases in integrity/15 above,
+    # never typed — so it is
     # volatile too — and a SECOND volatile line would silently invalidate D605's
     # "byte-identical except the volatile line" recipe. Deriving it here instead of
     # hand-typing it into @blind_spot is the substance of PDS-D633; keeping it on this
     # line is what stops that fix from breaking a neighbouring one.
-    p("user cpu  #{ms} ms  (THE ONE VOLATILE LINE — build-free: no mix project, no compile, no app boot; BEAM-internal, this process only, see `blind spot` above · DERIVED: 9 x #{ms} = #{9 * ms} ms is the FLOOR on the child-BEAM cycles an outer meter around `--selftest` cannot see)")
+    p("user cpu  #{ms} ms  (THE ONE VOLATILE LINE — build-free: no mix project, no compile, no app boot; BEAM-internal, this process only, see `blind spot` above · DERIVED: #{floor_mult} x #{ms} = #{floor_mult * ms} ms is the FLOOR on the child-BEAM cycles an outer meter around `--selftest` cannot see)")
     # THE SENTENCE, BESIDE THE FIGURE, ON A NON-VOLATILE LINE. It is a constant,
     # so D605's "byte-identical except the volatile line" recipe still holds: the
     # volatile line count stays at ONE.
