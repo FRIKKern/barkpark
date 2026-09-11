@@ -197,6 +197,7 @@ import { selectDefects } from "./defect-selection.mjs";
 import { attentionScenarios } from "./attention-scenarios.mjs";
 import { fleetAxis, FLEET_PINNED_REPS, FLEET_SCEN_SKIP } from "./fleet-scenarios.mjs";
 import { stylesheetProbeJs, stylesheetRefusal, stylesheetVerdict } from "./stylesheet-applied.mjs";
+import { ATTACH_CAP, withAttachDeadline } from "./attach-deadline.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -1221,20 +1222,50 @@ async function main() {
   const devPort = brought.devPort;
 
   let sessionId;
+  // THE ONLY STRETCH OF THIS FILE THAT USED TO HAVE NO CLOCK ON IT
+  // (task-3eda8d2ebb0b2327). Everything either side is bounded — SERVER_CAP the
+  // static-server poll, DEVTOOLS_CAP the DevToolsActivePort poll,
+  // BRINGUP_ATTEMPTS the launch loop, the render/eval caps every leg — but the
+  // attach itself awaited three things that can never settle: a `fetch` with no
+  // AbortSignal, a websocket `open` promise that listens for open and error and
+  // NOTHING ELSE, and a `cdp.send` whose resolver is freed only by a reply frame
+  // or by the socket closing. A debugger that ACCEPTS and then answers nothing
+  // settles none of them.
+  //
+  // Measured against a deaf CDP stub on origin/main a2deecc1f: the guard printed
+  // `>> chrome  DeafChrome/0.0` and then sat alive at %CPU 0.0 with empty
+  // stderr, forever. That is the fourth ending an instrument is not allowed to
+  // have — it did not measure, it did not find a defect, and it did not refuse,
+  // so console-refusal-capture.mjs had no sentence to quote and the merge button
+  // got an anonymous red.
+  //
+  // `attach()` names each step so the refusal says WHICH one went deaf.
+  const attach = (step, work) => withAttachDeadline(work, { step });
   try {
-    const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
+    const version = await (await attach(
+      "GET /json/version",
+      // The deadline REJECTS but cannot close an fd, so the fetch carries its
+      // own abort: otherwise the refusal would print over a live socket.
+      fetch(`http://127.0.0.1:${devPort}/json/version`, { signal: AbortSignal.timeout(ATTACH_CAP) }),
+    )).json();
     process.stdout.write(`>> chrome     ${version.Browser} · node ${process.version}\n`);
-    cdp = await Cdp.connect(version.webSocketDebuggerUrl);
-    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
-    ({ sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true }));
-    await cdp.send("Runtime.enable", {}, sessionId);
-    await cdp.send("Page.enable", {}, sessionId);
-    await cdp.send("Network.enable", {}, sessionId);
+    cdp = await attach("websocket open", Cdp.connect(version.webSocketDebuggerUrl));
+    const { targetId } = await attach("Target.createTarget", cdp.send("Target.createTarget", { url: "about:blank" }));
+    ({ sessionId } = await attach("Target.attachToTarget", cdp.send("Target.attachToTarget", { targetId, flatten: true })));
+    await attach("Runtime.enable", cdp.send("Runtime.enable", {}, sessionId));
+    await attach("Page.enable", cdp.send("Page.enable", {}, sessionId));
+    await attach("Network.enable", cdp.send("Network.enable", {}, sessionId));
     // GR125(b): Chrome memory-caches app.css across same-URL navigations —
     // without this, a mutated stylesheet measures as the original.
-    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
+    await attach("Network.setCacheDisabled", cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId));
   } catch (err) {
-    // AUDITED (exit 2): the debugger transport failed before any measurement ran.
+    // AUDITED (exit 2), TWO CLASSES THROUGH ONE DOOR. A transport THROW means
+    // the debugger said no; an `attachTimeout` means it said nothing at all.
+    // Both are environment faults with no measurement behind them, so both are
+    // exit 2 — but they are named apart, because "CDP bring-up failed: The
+    // operation was aborted" over a deaf endpoint is the vaguest true sentence
+    // available and a reviewer would go hunting for a CSS bug nobody measured.
+    if (err && err.attachTimeout) return die(err.message);
     return die(`CDP bring-up failed: ${err.message}`);
   }
 
