@@ -558,19 +558,28 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
              "for it; a state the fold can no longer reach needs its pin deleted in the same " <>
              "commit, deliberately."
 
-    # The label map declares more states than the fold can reach, which is why
-    # the painted set is read by RUNNING. Stated as an assertion so the day the
-    # dead labels are cleaned up, this note is forced to be revisited.
+    # cch-w54-bl REVISITED THIS NOTE, as the previous revision of it demanded.
+    # The label map used to declare two states the fold could not reach
+    # ([adopted, archived]); they had no producer anywhere in the plane and were
+    # deleted rather than made reachable. So the declared domain and the painted
+    # range are now EQUAL, and both directions are asserted — a re-added dead
+    # label reds here just as loudly as a painted state with no label.
+    #
+    # This does NOT make reading the label map an acceptable substitute for
+    # running the fold: equality today is a fact to be re-measured, not an
+    # invariant, which is why `actual` above is still driven, never read.
     declared = dump |> Map.fetch!("declared_labels") |> MapSet.new()
 
     assert MapSet.subset?(actual, declared),
            "the fold painted a state LIFECYCLE_PILL_LABEL does not declare: " <>
              "#{inspect(MapSet.difference(actual, declared) |> MapSet.to_list())}"
 
-    assert MapSet.difference(declared, actual) |> MapSet.to_list() == ["adopted", "archived"],
-           "the set of DECLARED-but-unpaintable labels changed. It was [adopted, archived] — " <>
-             "two words no input can reach, which is the reason this guard calls the fold " <>
-             "instead of reading the label map."
+    assert MapSet.difference(declared, actual) |> MapSet.to_list() == [],
+           "LIFECYCLE_PILL_LABEL declares a state no input can reach: " <>
+             "#{inspect(MapSet.difference(declared, actual) |> MapSet.to_list())}. " <>
+             "cch-w54-bl deleted the last two ([adopted, archived]) because nothing in the " <>
+             "control plane produces them. A new label needs a PRODUCER and a (state, reason) " <>
+             "row in this manifest, in the same commit — not a word in the map."
   end
 
   test "FENCE: the probe proves BY RUNNING that suspension fences the control plane's door, not the host" do

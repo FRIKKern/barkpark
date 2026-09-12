@@ -24,7 +24,13 @@ defmodule BarkparkWeb.QuizHostLive do
       # reconnect-looped with no explanation exactly when the node was already
       # under pressure. Branch it, the way `QuizPlayLive.mount/3` and
       # `QuizChannel.join/3` already branch the same refusal.
-      case Quiz.ensure_room(pin) do
+      #
+      # It now also returns `{:error, :spawn_budget}` — the PER-PRINCIPAL brake
+      # (`Barkpark.Quiz.SpawnBudget`) that stands in FRONT of that global cap,
+      # so one script cannot spend the whole cluster's room allowance. The two
+      # refusals render different copy: a budget refusal is about THIS visitor
+      # and clears on its own; a capacity refusal is about the service.
+      case Quiz.ensure_room(pin, connect_info(socket)) do
         {:ok, _pid} -> mount_room(pin, params, socket)
         {:error, reason} -> {:ok, assign(unavailable_assigns(socket, pin), error: reason)}
       end
@@ -97,6 +103,14 @@ defmodule BarkparkWeb.QuizHostLive do
       </p>
 
       <%= cond do %>
+        <% @error == :spawn_budget -> %>
+          <p class="q-status" role="status">
+            You have opened a lot of quiz rooms in the last hour, so this one is
+            on hold — that limit is what keeps every other host's rooms working.
+            Nothing is lost: your existing rooms are still live, and reopening
+            <a href={"/quiz/host/#{@pin}"}>/quiz/host/{@pin}</a>
+            a little later starts this one.
+          </p>
         <% @error -> %>
           <p class="q-status" role="status">
             This room could not be opened — the quiz service is at room capacity.
@@ -124,6 +138,26 @@ defmodule BarkparkWeb.QuizHostLive do
     </div>
     """
   end
+
+  # THE TRANSPORT CONTEXT THE SPAWN BUDGET BILLS ON.
+  #
+  # `Phoenix.LiveView.get_connect_info/2` is the public reader, but it only
+  # answers for the fixed key set it knows (`:peer_data`, `:x_headers`, `:uri`,
+  # …) — it cannot hand over the map ITSELF, and the map itself is what
+  # `Barkpark.RateLimiter.scoped_key/2` needs to find a test's per-process
+  # bucket scope. Reading `socket.private[:connect_info]` hands the whole
+  # source over, and both shapes it can take are ones the limiter already
+  # understands: a socket `connect_info` map in production, and (under
+  # `Phoenix.LiveViewTest`) the `%Plug.Conn{}` the test mounted with — which is
+  # exactly where `ConnCase.scoped_conn/0` stamps that scope. Without it every
+  # test in the run would bill ONE `127.0.0.1` bucket and the suite would
+  # throttle itself, the failure `ConnCase.refute_rate_limited!/1` exists to
+  # name.
+  #
+  # nil-safe on purpose: `SpawnBudget.principal/1` falls back rather than
+  # raising, so a transport that stops carrying connect_info degrades to the
+  # shared fallback bucket instead of breaking the door.
+  defp connect_info(%{private: private}), do: Map.get(private, :connect_info)
 
   defp pct(_count, 0), do: 0
   defp pct(count, total), do: round(count / total * 100)

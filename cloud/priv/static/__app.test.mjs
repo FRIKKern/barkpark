@@ -226,6 +226,113 @@ test("cch-w36-s1: the /new launch 403 toast BRANCHES ON THE SLUG, never on the s
   assert.equal(odd.billingAction, false);
 });
 
+// ── cch-w48-bl · THE scope:"token" REFUSAL, THROUGH EVERY EMITTER THAT READS
+//    `required` ────────────────────────────────────────────────────────────
+//
+// THE EMITTER SET IS DERIVED, NOT QUOTED. `grep -n '\.required' app.js` on the
+// base commit returns exactly TWO reader sites: the one inside
+// forbiddenEvidenceCopy (friendly()'s 403-evidence fence) and the one inside
+// newLaunchRefusalToast. There is no third; `["required"]` returns none. Both
+// are driven below, with BOTH payload shapes, so "every emitter" is a set this
+// file measured rather than a count the filing asserted.
+//
+// WHAT THE SERVER ACTUALLY SENDS (measured in cloud/lib/barkpark_cloud/web/
+// auth.ex): require_ability/2 answers `{error:"forbidden", required:<ability>,
+// scope:"token"}` — the ONLY emit site of scope:"token" in the tree — and
+// POST /v1/launch reaches it, because go_live/1's PAT branch is
+// `Auth.require_ability(conn, "deploy")`. `deploy` there is a PAT ABILITY, not
+// a team role: the ability list is fixed by POST /v1/tokens at mint and no
+// route in router.ex updates it, so "an admin on this team can grant it" and
+// "Ask a team deploy" are both remedies that cannot be carried out by anyone.
+//
+// THE FILING WAS HALF WRONG ABOUT WHICH EMITTER LIED. It said friendly() "gets
+// it right" on the identical payload. It did not: on the base commit
+// friendly({error:"forbidden", scope:"token", required:"deploy"}) returned
+// 'You need the "deploy" permission on this team — an admin on this team can
+// grant it.' — the SAME fabricated remedy in a quieter register. Both emitters
+// lied; only the sentences differed.
+const TOKEN_403 = { error: "forbidden", scope: "token", required: "deploy" };
+const TEAM_403 = { error: "forbidden", scope: "team", required: "admin" };
+
+test("cch-w48-bl: a scope:token refusal never renders a team role — friendly()", () => {
+  const body = hooks.friendly(TOKEN_403, "We couldn't launch for this team.");
+
+  assert.match(body, /"deploy" ability/,
+    "the refusal names the ability the server asked for, not a humanized guess");
+  assert.doesNotMatch(body, /an admin on this team can grant it/,
+    "no admin can grant a PAT ability — a token's abilities are fixed at mint");
+  assert.doesNotMatch(body, /role on this team/,
+    "an ability does not live on a team; saying it does is half the defect");
+  assert.doesNotMatch(body, /"deploy" permission on this team/,
+    "the exact sentence the base commit shipped for this payload");
+  assert.match(body, /No team role grants it/,
+    "the sentence DELETES the team-role remedy rather than leaving it unsaid");
+  assert.notEqual(body, "We couldn't launch for this team.",
+    "it is evidence copy, not the caller's fallback — the arm must actually fire");
+});
+
+test("cch-w48-bl: a scope:token refusal never renders a team role — newLaunchRefusalToast()", () => {
+  const refusal = hooks.newLaunchRefusalToast(TOKEN_403);
+
+  assert.doesNotMatch(refusal.body, /Ask a team deploy/,
+    "there is no team 'deploy' to ask — this was the shipped sentence on the launch path");
+  assert.doesNotMatch(refusal.body, /deploy role on this team/,
+    "a PAT ability rendered as a team role is the whole defect");
+  assert.doesNotMatch(refusal.body, /an admin on this team can grant it/,
+    "the quieter half of the same lie must not arrive through the delegation either");
+  assert.match(refusal.body, /"deploy" ability/);
+  assert.equal(refusal.billingAction, false);
+
+  // ONE TRUTH, not two sentences to keep in step. The token arm delegates to
+  // friendly() — it does not carry its own copy of the ability vocabulary — so
+  // the two emitters are byte-identical on the same bytes. This is the
+  // assertion that reds if someone "fixes" the toast by writing a second
+  // sentence beside the first.
+  assert.equal(refusal.body, hooks.friendly(TOKEN_403, "We couldn't launch for this team."),
+    "the toast's token arm IS friendly()'s sentence, never a second copy of it");
+});
+
+test("cch-w48-bl: the team and platform arms are byte-for-byte unchanged", () => {
+  // These four strings are the SHIPPED sentences on the base commit, retyped
+  // here on purpose: this arm's whole job is to red if the scope branch leaks
+  // into a payload it was never meant to touch.
+  assert.equal(hooks.friendly(TEAM_403, "FB"),
+    "You need the admin role on this team — an admin on this team can grant it.");
+  assert.equal(hooks.friendly({ error: "forbidden", scope: "team", required: "owner" }, "FB"),
+    "You need the owner role on this team — only the team owner can grant it.");
+  assert.equal(
+    hooks.friendly({ error: "forbidden", scope: "platform", required: "platform_operator" }, "FB"),
+    "That's limited to platform operators — no team role grants it.");
+  // primary_team is the pre-cch-w37-s3 spelling; a payload still carrying it
+  // must take the same path it always did.
+  assert.equal(hooks.friendly({ error: "forbidden", scope: "primary_team", required: "admin" }, "FB"),
+    "You need the admin role on this team — an admin on this team can grant it.");
+
+  assert.equal(hooks.newLaunchRefusalToast(TEAM_403).body, hooks.launchRoleClause("admin"),
+    "the team arm still renders the ONE clause, not the delegation");
+  assert.equal(hooks.newLaunchRefusalToast({ error: "forbidden", required: "admin" }).body,
+    hooks.launchRoleClause("admin"),
+    "a payload with no scope at all is a TEAM refusal by every existing pin — unchanged");
+  // The bare arm's D537 delegation is untouched.
+  assert.equal(hooks.newLaunchRefusalToast({ error: "forbidden" }).body,
+    hooks.friendly({ error: "forbidden" }, "We couldn't launch for this team."));
+});
+
+test("cch-w48-bl: scope:token with an unlabellable `required` renders no sentence at all", () => {
+  // The token arm reuses the same label fence as the role tail: an unbounded
+  // echo of a server string into copy is how a message becomes markup. No
+  // sentence is better than a fabricated one.
+  const body = hooks.friendly(
+    { error: "forbidden", scope: "token", required: "<img src=x onerror=1>" },
+    "FALLBACK");
+  // forbiddenEvidenceCopy returns null, so friendly() falls to its curated
+  // `forbidden` entry — the D447 generic that claims no role and invents no
+  // remedy. NOT the caller's fallback: the curated rung precedes it.
+  assert.equal(body,
+    "You don't have permission to do that, and the refusal didn't say which role would allow it.");
+  assert.doesNotMatch(body, /onerror/, "an unlabellable `required` never reaches copy");
+});
+
 // ── cch-w10-oauth-exchange-code · THE OAUTH LANDING GATE ───────────────────
 // This path had ZERO coverage before this group: `handleOAuthReturn` was not in
 // __bpTestHook, and "oauth" appeared in this file exactly twice, both inside one
@@ -9483,9 +9590,11 @@ test("liveness chip: app.css carries a paint rule for EVERY chip state", () => {
 
 test("liveness chip: every state's .live-dot rule DECLARES a background (per-declaration fence)", () => {
   // D41/D66 — closes the KNOWN GRANULARITY LIMIT the sibling fence above declared.
-  // That fence proves SELECTOR-PREFIX presence: deleting ONLY app.css:3470
-  // (`.live-chip[data-state="stale"] .live-dot { background: … }`) leaves the
-  // same-prefix `.live-chip-label` rule on :3471, so the prefix survives and every
+  // That fence proves SELECTOR-PREFIX presence: deleting ONLY
+  // `.live-chip[data-state="stale"] .live-dot { background: … }` (re-derive with
+  // grep -n '^\.live-chip\[data-state="stale"\] \.live-dot' app.css) leaves the
+  // same-prefix `.live-chip[data-state="stale"] .live-chip-label` rule on the NEXT
+  // line, so the prefix survives and every
   // gate stays green while the state silently loses its dot colour — the one
   // property that carries the severity signal. This probe reads PER DECLARATION:
   // it isolates each state's own `.live-dot {…}` block and asserts the background
@@ -11332,6 +11441,82 @@ test("S11b: lifecyclePillState folds each client state onto a canonical S4 state
   assert.equal(p.state, "live");
   assert.equal(p.label, "Live");
   assert.equal(p.cls, "bp-inst--live");
+});
+
+// ── cch-w54-bl: the label map's DOMAIN is exactly the fold's RANGE ──────────
+// The map once declared seven states while the fold could return five, so
+// `archived` and `adopted` were labels no input reached. They were deleted (no
+// producer exists for either: instanceLifecycle reads four row fields and
+// barkpark_json/5 serializes no archived/adopted fact). This guard keeps the two
+// sets equal by DRIVING the fold — reading the map to learn what the console
+// paints is the exact error the deleted labels embodied.
+test("cch-w54-bl: LIFECYCLE_PILL_LABEL's domain equals lifecyclePillState's range", () => {
+  // The fold's branch precedence, in source order: removing wins, then the two
+  // error branches, then paused, then the two positive ones.
+  const FOLD_ORDER = ["removing", "removeFailed", "failed", "suspended", "provisioning", "live"];
+  const fixtures = [
+    ["removing", { deprovision_status: "pending", host: "h" }],
+    ["removeFailed", { deprovision_status: "failed", host: "h" }],
+    ["failed", { provision_status: "failed" }],
+    ["suspended", { host: "h", suspended: true }],
+    ["provisioning", {}],
+    ["live", { host: "h" }],
+  ];
+
+  // PRECONDITION, not decoration: each fixture must actually SELECT the branch it
+  // is named for and must not be shadowed by an earlier one. Without this, two
+  // fixtures could collapse onto a single branch and the "range" below would be
+  // built from fewer branches than it claims — a set that is right by accident.
+  for (const [branch, bp] of fixtures) {
+    const lc = hooks.instanceLifecycle(bp);
+    assert.ok(lc[branch],
+      branch + " fixture does not select the " + branch + " branch: " + JSON.stringify(lc));
+    for (const earlier of FOLD_ORDER.slice(0, FOLD_ORDER.indexOf(branch))) {
+      if (earlier === "removeFailed" && branch === "failed") continue; // same precedence level
+      assert.ok(!lc[earlier],
+        branch + " fixture is shadowed by the earlier " + earlier + " branch");
+    }
+  }
+
+  // THE RANGE, driven. Every value each of the four fields instanceLifecycle
+  // reads can hold, including the two absent forms — so a new branch inside the
+  // fold shows up here with no edit to this test.
+  const AXES = {
+    deprovision_status: [null, undefined, "pending", "claimed", "failed", "succeeded"],
+    host: ["", null, undefined, "box.barkpark.cloud"],
+    provision_status: [null, undefined, "failed", "succeeded"],
+    suspended: [false, true],
+  };
+  const range = new Set();
+  let combos = 0;
+  for (const deprovision_status of AXES.deprovision_status)
+    for (const host of AXES.host)
+      for (const provision_status of AXES.provision_status)
+        for (const suspended of AXES.suspended) {
+          combos += 1;
+          range.add(hooks.lifecyclePillState({ deprovision_status, host, provision_status, suspended }));
+        }
+  assert.ok(combos > 0, "the matrix drove no inputs at all");
+
+  // Every named branch's state is in the driven range (the two derivations agree).
+  for (const [branch, bp] of fixtures) {
+    assert.ok(range.has(hooks.lifecyclePillState(bp)),
+      "the cartesian matrix never reached the state the " + branch + " fixture folds to");
+  }
+
+  // The seventh branch — the fold's own `return ""` sentinel — has NO witness.
+  // `live`'s last conjunct IS bp.host, so a box with a host that is not
+  // removing / failed / suspended is live, and a box without one is provisioning
+  // or failed. "" is a defensive fallback, not a state, and is rightly unlabelled.
+  assert.ok(!range.has(""),
+    '"" is now reachable: the fold gained a state with no label. Give it a label ' +
+    "and a manifest row, or keep it unreachable.");
+
+  assert.deepEqual([...range].sort(), Object.keys(hooks.LIFECYCLE_PILL_LABEL).sort(),
+    "LIFECYCLE_PILL_LABEL's declared domain drifted from lifecyclePillState's driven range. " +
+    "A label with no fold branch is a state nothing can paint (that was `archived` and " +
+    "`adopted`, deleted by cch-w54-bl); a returned state with no label renders as " +
+    '"Unknown". Both are reds.');
 });
 
 // ── fleetInfraLine: region · size, blank-tolerant (pre-S6 rows) ─────────────
@@ -21327,7 +21512,7 @@ test("cch-w20-s3: BOTH text sites shave the scheme together — the card and the
   const row = hooks.fleetRow(bp);
   assert.match(row, /class="fleet-url">production-5b2c1e\.barkpark\.cloud</);
   assert.ok(row.indexOf('class="fleet-url">https://') === -1,
-    "the fleet row must not keep the scheme while the card drops it — that split is the sin scenarios.mjs:2331 exists to prevent");
+    "the fleet row must not keep the scheme while the card drops it — that split is the sin the fleet-row URL fixture in scenarios.mjs exists to prevent (re-derive: grep -n fleet-url scenarios.mjs)");
   // …while the PAYLOAD keeps the whole address: a person copying it needs the
   // scheme. This is the same guarantee test 658 (GR24) pins on the header.
   const header = hooks.instanceHeaderHtml(bp);
@@ -22878,8 +23063,9 @@ test("cch-w36-s3: the smoke `tokens-member` assertion body can no longer pass ag
 // rc 0. A unification slice could therefore silently DELETE the admin limb and
 // show a perfect board. That green is not general vacuity: the INVERSE
 // mutation (admin-only, dropping the owner limb) reds three of the four by
-// name in smoke. The mechanism is censused — scenarios.mjs:952 defines
-// me(team, onb, role) with `role || "owner"`, and across ~100 me() call sites
+// name in smoke. The mechanism is censused — scenarios.mjs defines
+// me(team, onb, role) with `role || "owner"` (grep -n 'function me(' scenarios.mjs),
+// and across ~100 me() call sites
 // the third argument is "member" 7x, "owner" 3x and "admin" ZERO times, so no
 // fixture in the whole preview corpus has ever been an admin.
 //
@@ -24835,7 +25021,17 @@ test("cch-w35-s4: the no-team arm is MAPPED, never echoed as its slug", () => {
 });
 
 test("cch-w35-s4: an unwritten `required` renders as a bounded label, and junk falls through", () => {
+  // cch-w48-bl AMENDS THIS LINE, and the amendment IS the defect this row
+  // names. It used to expect 'You need the "deploy" permission on this team —
+  // an admin on this team can grant it.' for a scope:"token" payload: a PAT
+  // ability rendered as a team-grantable permission. The label fence is what
+  // this test is actually about and it is unchanged — the bounded-label
+  // property now holds on the token arm instead of the role tail.
   assert.equal(hooks.friendly({ error: "forbidden", required: "deploy", scope: "token" }),
+    'That access token doesn\'t carry the "deploy" ability. No team role grants it — ' +
+    "a token's abilities are fixed when it is created.");
+  // The SAME unwritten label with a TEAM scope keeps the role tail verbatim.
+  assert.equal(hooks.friendly({ error: "forbidden", required: "deploy", scope: "team" }),
     'You need the "deploy" permission on this team — an admin on this team can grant it.');
   // Not a label → no interpolation, no markup, back to the curated entry.
   for (const junk of ["<img src=x onerror=alert(1)>", "Admin", "", "  ", "a".repeat(64), 7, null, {}]) {
@@ -27417,7 +27613,10 @@ test("cch-w67: siteDeleteFailureCopy — SEVEN typed arms, every one a DISTINCT 
   // cch-w67 review wired the shipped reader for those two fields in.
   const other = hooks.siteDeleteFailureCopy(403, { error: "forbidden", scope: "token", required: "write" });
   assert.match(other.body, /still registered/);
-  assert.match(other.body, /"write" permission/);
+  // cch-w48-bl: scope:"token" now renders the ABILITY sentence here too — this
+  // reader delegates to friendly(), so it inherited the fix without an edit.
+  assert.match(other.body, /"write" ability/);
+  assert.doesNotMatch(other.body, /an admin on this team can grant it/);
   assert.doesNotMatch(other.body, /didn't say why/);
   assert.equal(other.recovery, "close", "no second click grants an authority you don't hold");
   // A BARE forbidden carries no evidence, so it keeps the generic relay — the

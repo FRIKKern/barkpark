@@ -29,7 +29,7 @@ defmodule Barkpark.Content.NonMapBlockElementTest do
   author's element was silently dropped behind a success. Both shapes are refused
   at the same door: a crash is a 500, and a silent drop is a lie.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
 

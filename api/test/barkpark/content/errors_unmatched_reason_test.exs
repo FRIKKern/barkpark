@@ -31,6 +31,7 @@ defmodule Barkpark.Content.ErrorsUnmatchedReasonTest do
   call on a literal term. Nothing touches `Repo`, so no other agent's rows can
   reach it and no count here can be luck.
   """
+  # sync: asserts on `capture_log` output from the shared logger backend
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog

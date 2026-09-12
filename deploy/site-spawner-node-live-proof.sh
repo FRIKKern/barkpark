@@ -266,6 +266,41 @@ print(m.group(1).strip() if m else "")
 PY
 }
 
+# fetch_page <dest> <url> — READ A LIVE PAGE AND KEEP THE PRODUCER'S REFUSAL.
+#
+# task-f56d84cf77d93c24 / the #14371 shape. The spelling this replaces sent
+# curl's stdout AND stderr to the bit bucket and then swallowed its status with
+# a trailing always-true, deleting the producer's evidence TWICE: the redirect
+# throws away curl's own message and the always-true arm throws away its exit
+# status. The next line parses a file that was
+# never written, so the headline becomes meta_content's silence about a missing
+# marker and the verdict blames the SITE UNDER PROOF for the INSTRUMENT's
+# failure: a DNS miss, an expired cert, a box that will not answer all read as
+# "the build id did not flip".
+#
+# This is the emit_spec shape: run the producer with its combined output
+# CAPTURED, assert BOTH the exit status and that a non-empty artifact appeared,
+# print the refusal INLINE where it happened, and park a headline in FETCH_WHY
+# that the rung's own fail() prefers over the parser's text. Returns 0 only when
+# a non-empty page really landed in <dest>.
+FETCH_WHY=""
+fetch_page() {
+  local dest="$1" url="$2" out rc=0
+  FETCH_WHY=""
+  rm -f "$dest"
+  out="$(curl -sS -m 30 -o "$dest" -w 'HTTP %{http_code} in %{time_total}s' "$url" 2>&1)" || rc=$?
+  out="$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400)"
+  if [ "$rc" -ne 0 ]; then
+    FETCH_WHY="curl could NOT read $url (exit $rc): ${out:-<curl said nothing>}"
+  elif [ ! -s "$dest" ]; then
+    FETCH_WHY="curl reached $url but wrote an EMPTY $dest ($out)"
+  else
+    return 0
+  fi
+  note "PAGE READ REFUSED — $FETCH_WHY"
+  return 1
+}
+
 # slot_active <slug> <slot> — "true" if the systemd slot process is RUNNING, else
 # "false". This is how a WARM slot is distinguished from a stopped one: the whole
 # premise of a sub-second rollback is that the target process never went away.
@@ -792,10 +827,11 @@ live_proof() {
   # Second request — a DIFFERENT per-request render timestamp is the force-dynamic
   # proof. A static dist/ would return byte-identical markers.
   sleep 1
-  curl -sS -m 30 -o "$TMP/live-b.html" "$url" >/dev/null 2>&1 || true
+  local ssr_why=""
+  fetch_page "$TMP/live-b.html" "$url"; ssr_why="$FETCH_WHY"
   local ts2; ts2="$(meta_content "$TMP/live-b.html" "$SSR_MARKER")"
   judge_ssr "$ts1" "$ts2" ||
-    fail "$E_LIVE_NOT_SSR" "two requests returned the SAME '$SSR_MARKER' ('$ts1' == '$ts2') — the page is served from the BUILD-time render, not per-request SSR. Without \`export const dynamic = 'force-dynamic'\` the markers reflect the build, not the running deploy." \
+    fail "$E_LIVE_NOT_SSR" "${ssr_why:+READING THE SECOND REQUEST FAILED — $ssr_why; the second marker below is ABSENT because the page was never read, not because the render is static. }two requests returned the SAME '$SSR_MARKER' ('$ts1' == '$ts2') — the page is served from the BUILD-time render, not per-request SSR. Without \`export const dynamic = 'force-dynamic'\` the markers reflect the build, not the running deploy." \
       "the next-starter's page must set force-dynamic so every request re-renders against the running process (D71)"
   ok "true SSR — $SSR_MARKER differed per request ($ts1 → $ts2)"
 
@@ -827,8 +863,8 @@ live_proof() {
     note "previous slot barkpark-site@${SLUG}__${slot} is_active=$prev_warm — rollback will be judged NOT_WARM if it cannot flip instantly"
   fi
 
-  local before after t0 t1 elapsed rbx=0
-  curl -sS -m 30 -o "$TMP/live2.html" "$url" >/dev/null 2>&1 || true
+  local before after t0 t1 elapsed rbx=0 rb_why=""
+  fetch_page "$TMP/live2.html" "$url"; rb_why="$FETCH_WHY"
   before="$(meta_content "$TMP/live2.html" bp-build-id)"
 
   t0="$(now_ms)"
@@ -840,11 +876,11 @@ live_proof() {
     fail "$E_ROLLBACK_FAILED" "\`bp cloud site rollback\` exited $rbx after ${elapsed}ms: $(head -c 400 "$TMP/rollback.err")" \
       "if this is a 404, POST /v1/sites/:id/rollback is not wired for the node arm; if 422 non-static, the rollback route still kind-gates on static (D62)"
 
-  curl -sS -m 30 -o "$TMP/live3.html" "$url" >/dev/null 2>&1 || true
+  fetch_page "$TMP/live3.html" "$url" || rb_why="${rb_why:+$rb_why · }$FETCH_WHY"
   after="$(meta_content "$TMP/live3.html" bp-build-id)"
 
   judge_rollback "$elapsed" "$before" "$after" "$ROLLBACK_BUDGET_MS" "$prev_warm" ||
-    fail $? "rollback took ${elapsed}ms (budget ${ROLLBACK_BUDGET_MS}ms), live bp-build-id went '$before' → '$after', previous slot warm=$prev_warm. A warm-standby rollback is a pure Caddy port-flip to a process that is ALREADY running — a number near a second means the target had to cold-boot (\`next start\` is ~1.5s), which is not warm-standby." \
+    fail $? "${rb_why:+READING THE LIVE PAGE FAILED — $rb_why; the bp-build-id values below are ABSENT because the page was never read, not because the port-flip did not happen. }rollback took ${elapsed}ms (budget ${ROLLBACK_BUDGET_MS}ms), live bp-build-id went '$before' → '$after', previous slot warm=$prev_warm. A warm-standby rollback is a pure Caddy port-flip to a process that is ALREADY running — a number near a second means the target had to cold-boot (\`next start\` is ~1.5s), which is not warm-standby." \
       "keep the previous slot RUNNING after SWITCH (D67); rollback re-flips the Caddy upstream port back to it and reloads — no rebuild, no reboot"
   ok "rollback in ${elapsed}ms (budget ${ROLLBACK_BUDGET_MS}ms) — pure Caddy port-flip to the warm slot"
   ok "live bp-build-id flipped $before → $after (back to slot $slot)"
@@ -889,11 +925,12 @@ live_proof() {
   fi
 
   # Containment: the GOOD proof site's live upstream is UNCHANGED.
-  curl -sS -m 30 -o "$TMP/live4.html" "$url" >/dev/null 2>&1 || true
+  local fc_why=""
+  fetch_page "$TMP/live4.html" "$url"; fc_why="$FETCH_WHY"
   local live_after; live_after="$(meta_content "$TMP/live4.html" bp-build-id)"
 
   judge_fail_closed "$bstatus" "$(printf '%s' "${bstage:-}" | tr '[:lower:]' '[:upper:]')" "${bhexit:-}" "$breason" "$live_before" "$live_after" ||
-    fail $? "the broken build: status=$bstatus stage=${bstage:-none} health_exit=${bhexit:-none} reason='${breason:-none}'; the GOOD site's live bp-build-id went '$live_before' → '$live_after'. A broken node slot must fail at HEALTH (exit 14) with a real reason, and it must NEVER take the Caddy upstream from a healthy last-good." \
+    fail $? "${fc_why:+READING THE GOOD SITE LIVE PAGE FAILED — $fc_why; the bp-build-id below is ABSENT because the page was never read, not because the broken slot took the upstream. }the broken build: status=$bstatus stage=${bstage:-none} health_exit=${bhexit:-none} reason='${breason:-none}'; the GOOD site's live bp-build-id went '$live_before' → '$live_after'. A broken node slot must fail at HEALTH (exit 14) with a real reason, and it must NEVER take the Caddy upstream from a healthy last-good." \
       "HEALTH probes the just-booted process and asserts the baked bp-doc-id/bp-content-rev markers BY VALUE before SWITCH — a process that fetched no content must die there and be stopped"
   ok "failed at HEALTH (exit ${bhexit:-14}) — $breason"
   ok "the GOOD site's live bp-build-id UNCHANGED at $live_after"

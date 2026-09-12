@@ -162,7 +162,7 @@ test("app.css's declared axis is exactly the sweep's BREAKPOINTS, with nothing u
 test("the raw grep over-counts @media — comment-stripping is why the parser does not", () => {
   const raw = (APP_CSS.match(/@media/g) || []).length;
   const stripped = parseMediaBreakpoints(APP_CSS).preludes.length;
-  assert.ok(raw > stripped, `raw grep ${raw} must exceed the parsed block count ${stripped} (app.css:2131 names a breakpoint inside a comment)`);
+  assert.ok(raw > stripped, `raw grep ${raw} must exceed the parsed block count ${stripped} (app.css names a breakpoint inside a comment: grep -n 'NOT TOUCHED, DELIBERATELY' app.css)`);
 });
 
 test("index.html's registered screens are exactly the screens CELLS drives", () => {
@@ -821,8 +821,8 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
   // to cover it; the clamp reding IS the guard working. It also reds on a
   // COMMENT that merely mentions 620px — the parser strips comments and this
   // count does not — and that is the one case where the fix is to reword the
-  // comment (app.css:2131 is the standing precedent for a breakpoint named
-  // inside one).
+  // comment (app.css's own `NOT TOUCHED, DELIBERATELY` line is the standing
+  // precedent for a breakpoint named inside one — grep -n it).
   assert.equal((css.match(/740px/g) || []).length, 0,
     "the 740px mutation left a 740px occurrence behind — app.css names 740 in a form " +
     "`max-width: 740px` does not match (range syntax `(width <= 740px)`, a `min-width` " +

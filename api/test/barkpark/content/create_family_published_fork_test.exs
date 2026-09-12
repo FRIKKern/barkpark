@@ -35,6 +35,7 @@ defmodule Barkpark.Content.CreateFamilyPublishedForkTest do
   `createOrReplace` + the full remote document; a refusal there rolls the whole
   batch back with no operator recourse).
   """
+  # sync: swaps node-global Application env (`:barkpark, :task_lease_ttl_seconds`) — one value for the whole node
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}

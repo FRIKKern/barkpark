@@ -23,7 +23,7 @@ defmodule Barkpark.Content.TombstoneFenceTest do
   to enable.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.Document

@@ -773,9 +773,9 @@ defmodule PDS.Census do
   # decision covers, and the quad is what makes an arrival visible.
   @routed_exclusion_classes %{
     liveview_handle_event:
-      "2026-08-02 (PDS wave 38): a LiveView route names {Module, :action-or-nil} and its writes live in handle_event/3, so there is no {Controller, action} pair for the receipt register to key on. EXCLUDED because this lens structurally cannot judge it — printed with its count so the exclusion is a fact and not a silence.",
+      "2026-09-11 (PDS wave 39 material, correcting wave 38): a LiveView route names {Module, :action-or-nil} and its writes live in handle_event/3. WAVE 38 SAID THE BLOCKER IS KEYING (\"there is no {Controller, action} pair for the receipt register to key on\") AND THAT CLAUSE IS RETIRED HERE: a key is trivially available. RE-DERIVED at fe01df112 over api/lib: 355 `def handle_event/3` clauses parse cleanly via Code.string_to_quoted across 23 files, and 342 of them (96.3%) carry a LITERAL string event name — a usable {module, \"event\"} register key; only 13 are non-literal (a var or an interpolation), which is a printable blind shape and not a wall. THE REAL BLOCKER IS DEPTH, and it is STRUCTURALLY worse here than on the controller surface: BarkparkWeb.Studio.StudioLive is a thin routing head BY DESIGN (its own moduledoc, api/lib/barkpark_web/live/studio/studio_live.ex:7-13) and carries 114 of the 355 clauses (32.1%), every one a one-line delegation into the 18 handler modules under live/studio/studio_live/handlers/, NONE of which defines a handle_event at all — so a clause-body lens sees a one-liner with no write and greenly classes all 114 as non-writes. EXCLUDED PENDING A DEPTH-2 RESOLVER, not permanently, and printed with its count so the exclusion is a fact and not a silence. THE MOTIVATING HYPOTHESIS IS REFUTED, which is why this is not urgent: LiveView writes are NOT systematically unreceipted — every genuine writer sampled matches the {:ok, record} RETURNED BY THE WRITE and assigns it into the socket, so the re-render displays the store's row (plugins/tickets/inbox_live.ex, plugins/onixedit/web/staleness_live.ex, live/studio/org_admin_live.ex), satisfying the wave-40 law by construction; of 45 put_flash(:info, ...) sites 15 interpolate and NONE carries a computed count (one of them, live/studio/studio_live/handlers/doc.ex:132, interpolates a value taken from the write's OWN RETURN). A LENS TRAP FOR WHOEVER BUILDS THE POPULATION: the textual grep `def handle_event(` over api/lib sums to 363, not 355, and the entire 8-clause gap is handle_event/4 TELEMETRY callbacks in barkpark_web/request_stats.ex and barkpark/telemetry/handlers.ex — a different arity and a different protocol, never a UI event (there are ZERO `defp handle_event/3` today, so keying on ARITY is the whole defence). And 89 of the 355 clauses live in UNROUTED LiveComponents — live/studio/sheet_grid.ex 81, components/fields/tree_codelist_field.ex 4, live/studio/paper_field_block.ex 4 — which a population must exclude by MOUNT-REACHABILITY, never by filename.",
     status_only_receipt:
-      "2026-08-02 (PDS wave 40, correcting wave 38): the routed action reaches no `ok: true` / `\"ok\" => true` receipt THIS LENS keys on, and carries no roster anchor. THAT IS THE WHOLE CLAIM. Wave 38 also wrote that such a row \"claims success by STATUS alone\", and wave 40 MEASURED that: it is false for most of this class's own members, which do render the stored row and simply do not spell the key the lens greps for. That clause is RETIRED here; what each row's receipt actually does is the DERIVATION PARTITION printed below, class by class, with the producing call named for every row. THIS IS STILL THE POPULATION HOLE wave 38 named: SCIM's three IdP write routes land here. The register's completeness claim never covered these; now they are COUNTED, and now they are PARTITIONED.",
+      "2026-08-02 (PDS wave 40, correcting wave 38): the routed action reaches no `ok: true` / `\"ok\" => true` receipt THIS LENS keys on, and carries no roster anchor. THAT IS THE WHOLE CLAIM. Wave 38 also wrote that such a row \"claims success by STATUS alone\", and wave 40 MEASURED that: it is false for most of this class's own members, which do render the stored row and simply do not spell the key the lens greps for. That clause is RETIRED here; what each row's receipt actually does is the DERIVATION PARTITION printed below, class by class, with the producing call named for every row. THIS IS STILL THE POPULATION HOLE wave 38 named: SCIM's three IdP write routes land here. The register's completeness claim never covered these; now they are COUNTED, and now they are PARTITIONED. THE SPLIT, RE-DERIVED AT fe01df112 over the 149 rows this class now holds (117 distinct {module, action} pairs): 133 render a BOUND value (store_derived 113, reread_receipt 8, request_echo 4, residual_onehop_unattributed 8), 2 render a constant redirect-or-flash, 9 stay residual_helper_assembled and are NOT decided, and only 5 are `literal_only` — of which EXACTLY ONE is a genuine bodiless 204 (BarkparkWeb.ChatController.answer, api/lib/barkpark_web/controllers/chat_controller.ex:411 `send_resp(conn, :no_content, \"\")`); the other four render a body (two 503 `feature_not_configured` JSON errors, two HTML form re-renders). SO A READER MUST NOT INFER \"these answer with an empty 204\": that is true of 1 row in 149, not of the class. THE WAVE-39 FILING'S OWN NUMBERS ARE STALE and are corrected here rather than repeated — it put the render-a-body share at 93% over a 106-pair residue and claimed ZERO members were proven bodiless; the class has since grown to 149 rows and ChatController.answer IS a proven bodiless 204.",
     # `action_not_in_corpus` IS RETIRED (PDS wave 40). It held exactly two rows, both
     # Sheets routes whose module reads `"?"` only because register_routes/1 binds the
     # controller to a LOCAL VARIABLE — the defs were in the corpus the whole time, so the
@@ -7334,7 +7334,16 @@ defmodule PDS.Census do
           clauses: 0,
           scope_read: :no_body,
           why: "the routed action resolves to no def this pass can open",
-          clause_results: []
+          clause_results: [],
+          outcome: :no_body,
+          outcome_why: "the routed action resolves to no def this pass can open",
+          outcome_verdict: %{
+            decided_on: :no_body,
+            others: [],
+            error_branch?: false,
+            masks_success?: false,
+            why: "no def to read — this pass names no outcome for this row"
+          }
         }
 
       defs ->
@@ -7344,8 +7353,64 @@ defmodule PDS.Census do
         winner
         |> Map.put(:clauses, length(defs))
         |> Map.put(:precedence, precedence)
-        |> Map.put(:clause_results, Enum.map(results, &Map.take(&1, [:id, :class, :pre_class, :hop, :why])))
+        |> Map.put(:outcome_verdict, derivation_outcome_verdict(winner, results))
+        |> Map.put(:clause_results, Enum.map(results, &Map.take(&1, [:id, :class, :pre_class, :hop, :why, :outcome, :outcome_why])))
     end
+  end
+
+  # WHICH KIND OF RECEIPT THE ROW'S VERDICT IS ABOUT (pds-bl-w41-error-branch-verdicts).
+  #
+  # The precedence rule picks the most INFORMATIVE clause. It has never picked the
+  # SUCCESSFUL one, and nothing on the page said so. This is the missing half: the winning
+  # clause's derived outcome polarity, the polarities of the clauses it beat, and the two
+  # facts a reader of a class row actually needs —
+  #
+  #   error_branch?   the class printed for this row was earned on a clause that answers a
+  #                   FAILURE. The sentence is still TRUE; it is just not a sentence about
+  #                   the receipt a successful caller reads.
+  #   masks_success?  and a sibling clause of the same action IS a success receipt, so the
+  #                   row is not merely error-shaped — it is error-shaped WITH the success
+  #                   path sitting under it, unprinted.
+  #
+  # NEITHER IS A CLASS CHANGE. No printed class moves and no count moves: re-ranking on
+  # outcome would move rows out of decided classes on the strength of a polarity this pass
+  # sometimes admits it cannot derive (`unmarked`), which is the mask running in the other
+  # direction. The verdict is DISCLOSED, never applied.
+  defp derivation_outcome_verdict(winner, results) do
+    others =
+      results
+      |> Enum.reject(&(&1.id == winner.id))
+      |> Enum.map(& &1.outcome)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    error? = winner.outcome == :error_branch
+    masks? = error? and Enum.any?(others, &(&1 in [:success_receipt, :mixed]))
+
+    why =
+      cond do
+        masks? ->
+          "the clause that earned this row's class answers a FAILURE (#{winner.outcome_why}) " <>
+            "while a sibling clause of the same action IS a success receipt — the printed class " <>
+            "is a true sentence about the ERROR path and says nothing about the receipt a " <>
+            "successful caller reads"
+
+        error? ->
+          "the clause that earned this row's class answers a FAILURE (#{winner.outcome_why}); " <>
+            "no sibling clause of this action derives as a success receipt either, so this row " <>
+            "carries NO verdict about a success receipt at all"
+
+        winner.outcome in [:unmarked, :no_emission, :no_body] ->
+          "this pass STRUCTURALLY CANNOT tell success from error on the deciding clause: " <>
+            "#{winner.outcome_why}. Deriving it from the clause's POSITION or the spelling of " <>
+            "its head would be a guess, and a guess printed beside a derived class is worse " <>
+            "than a printed refusal"
+
+        true ->
+          "the deciding clause derives as a #{winner.outcome} (#{winner.outcome_why})"
+      end
+
+    %{decided_on: winner.outcome, others: others, error_branch?: error?, masks_success?: masks?, why: why}
   end
 
   defp derivation_rank(class), do: Enum.find_index(@derivation_order, &(&1 == class)) || 99
@@ -7427,7 +7492,9 @@ defmodule PDS.Census do
       why: "defdelegate — no body to read",
       id: clause_id(d),
       minted_decided: 0,
-      hop: nil
+      hop: nil,
+      outcome: :no_body,
+      outcome_why: "defdelegate — no body to read"
     }
 
   defp derive_def(d, index, subst) do
@@ -7502,6 +7569,14 @@ defmodule PDS.Census do
     # and the two counts are DERIVED into the printed blind shape instead of described.
     scope_read = if fallback?, do: :whole_body, else: :success_branch
 
+    # THE OUTCOME POLARITY IS DERIVED OVER THE WHOLE CLAUSE, NOT OVER `emits`. `emits` is
+    # already SCOPED to the success branch whenever one exists, so grading it would answer
+    # "is the success branch a success branch" — vacuous by construction. The polarity has
+    # to see every response the clause can build, and `scopes` is passed only so an
+    # unmarked emission INSIDE an `{:ok, _}` gate can be credited as a success receipt.
+    outcome = clause_outcome(body, scopes)
+
+
     local =
       cond do
         emits == [] ->
@@ -7533,7 +7608,9 @@ defmodule PDS.Census do
         scope_read: scope_read,
         id: clause_id(d),
         minted_decided: minted_decided,
-        hop: nil
+        hop: nil,
+        outcome: elem(outcome, 0),
+        outcome_why: elem(outcome, 1)
       })
       |> then(&Map.put(&1, :pre_class, &1.class))
 
@@ -7612,6 +7689,14 @@ defmodule PDS.Census do
         %{
           local
           | why: hop_refusal(emitting, mute),
+            # THE POLARITY FOLLOWS THE RECEIPT, NOT THE CLAUSE (pds-bl-w41-error-branch-verdicts).
+            # This clause emits nothing; whatever status literals its own body carries belong
+            # to a path the class was NOT read off, so claiming an outcome from them would be
+            # the same misattribution this block exists to end.
+            outcome: :no_emission,
+            outcome_why:
+              "no response call in this clause and the hop decided nothing — the receipt is " <>
+                "assembled elsewhere and this pass names no outcome for it",
             hop: %{
               decided: nil,
               target: nil,
@@ -7639,6 +7724,12 @@ defmodule PDS.Census do
           | class: best.class,
             producer: best.producer,
             why: "ONE HOP into #{label} — #{best.why} (this clause's own body has no response call)",
+            # AND WHEN THE HOP DECIDES, THE OUTCOME COMES FROM THE CLAUSE THAT EMITS. `best`
+            # is the hop target read where it stands, so its polarity describes the response
+            # this row's class was actually derived from — the local body's markers describe
+            # a different path and are dropped here on purpose.
+            outcome: best.outcome,
+            outcome_why: "ONE HOP into #{label} — #{best.outcome_why}",
             hop: %{
               decided: best.class,
               target: label,
@@ -8015,6 +8106,198 @@ defmodule PDS.Census do
     acc
   end
 
+  # -- THE OUTCOME POLARITY OF A CLAUSE (pds-bl-w41-error-branch-verdicts) -----
+  #
+  # WHAT WAS MISSING WAS A NOTION, NOT A NUMBER. Up to this commit the derivation
+  # partition had no concept of a SUCCESS receipt versus an ERROR branch: a class was
+  # derived over a clause and the precedence rule picked the most informative clause of
+  # the action, with nothing on the page saying whether the clause that won was the one a
+  # caller reaches when the write SUCCEEDS. `SessionController.account` is the worked
+  # example this row was filed on — its printed `request_echo` is earned by the clause
+  # that re-renders the sign-in form after a failed credential check, which is a true
+  # sentence about a FAILURE path wearing a row that reads as a verdict on the receipt.
+  #
+  # AND IT IS DERIVED BY RUN, NEVER BY A NAME HEURISTIC ON THE CLAUSE HEAD. Nothing below
+  # reads `d.head`. Position ("the last clause is the fallback"), arity, catch-all shape
+  # and parameter spelling are all UNUSED, because every one of them is a guess about
+  # intent that a controller is free to violate. What IS read is the response the clause
+  # actually builds:
+  #
+  #   * an HTTP STATUS LITERAL threaded through `conn` — `put_status/2`, `send_resp/3`,
+  #     or any call whose first argument is `conn` and which carries an integer literal
+  #     in 100..599 (this is what reads `ErrorResponse.emit_custom(conn, 400, ...)`);
+  #   * the FLASH KIND atom — `put_flash(conn, :error, _)` versus `put_flash(conn, :info, _)`;
+  #   * CONTAINMENT in an `{:ok, _}` branch, which is the same `success_scopes/1` region
+  #     the class derivation already reads.
+  #
+  # THE MARKERS ARE READ OFF THE EMISSION NODE ITSELF, which is sound only because
+  # `expand_pipes/1` ran first: `conn |> put_status(422) |> json(body)` arrives as
+  # `json(put_status(conn, 422), body)`, so the status and the flash sit INSIDE the
+  # emission's own subtree and no parent walk is needed to attribute them. A clause with
+  # no emission at all falls back to the same markers over its whole body, which is how a
+  # one-liner delegating to `ErrorResponse` is still read as an error branch.
+  #
+  # WHERE IT STRUCTURALLY CANNOT TELL, IT SAYS SO. A `json(conn, %{"sso" => false})` with
+  # no status, no flash and no `{:ok, _}` gate carries NOTHING this pass can key on, and
+  # the honest answer is `unmarked` with the reason printed — not a guess derived from the
+  # clause being first, or from the word its head happens to spell.
+  @derivation_error_flash [:error, :warn, :warning, :danger]
+  @derivation_success_flash [:info, :success]
+
+  @derivation_outcomes [:success_receipt, :error_branch, :mixed, :unmarked, :no_emission, :no_body]
+
+  # The OUTERMOST response call of each region — never a nested one. `render(put_flash(
+  # conn, :error, msg), :new, assigns)` is ONE emission whose subtree carries the flash,
+  # and returning the inner `put_flash` as a second emission would double-count the very
+  # marker that decides the first.
+  defp emission_nodes(ast) do
+    if emission_node?(ast) do
+      [ast]
+    else
+      cond do
+        is_list(ast) -> Enum.flat_map(ast, &emission_nodes/1)
+        is_tuple(ast) -> ast |> Tuple.to_list() |> Enum.flat_map(&emission_nodes/1)
+        true -> []
+      end
+    end
+  end
+
+  defp emission_node?({f, _, [_c, _p]}) when f in [:json, :text, :html], do: true
+  defp emission_node?({:send_resp, _, [_c, _s, _p]}), do: true
+  defp emission_node?({:redirect, _, [_c, _o]}), do: true
+  defp emission_node?({:put_flash, _, [_c, _k, _m]}), do: true
+  defp emission_node?({:render, _, [_c, _t, _a]}), do: true
+  defp emission_node?({:render, _, [_c, _t]}), do: true
+  defp emission_node?({{:., _, [_m, f]}, _, [_c, _p]}) when f in [:json, :text, :html], do: true
+  defp emission_node?(_), do: false
+
+  # THE FILE ALREADY OWNS `lit/1` (:3235) AND IT RETURNS A TAGGED TUPLE. A second pair of
+  # `lit/1` clauses down here would be APPENDED to that function, not a new one — the
+  # earlier clauses match first, every literal comes back as `{:lit, v, meta}`, and an
+  # `is_atom/1` test on it silently reads FALSE for every flash kind in the tree. That is
+  # not a hypothetical: it shipped in this block's first draft and printed a uniform ZERO
+  # error branches over 138 clauses, which is the signature of a broken instrument rather
+  # than a clean corpus. The shared helper is REUSED here under its own contract.
+  defp derivation_lit(node) do
+    case lit(node) do
+      {:lit, v, _meta} -> v
+      _ -> :__no_literal__
+    end
+  end
+
+  # STATUS LITERALS, THREADED THROUGH `conn`. The `conn`-first condition is what keeps a
+  # page size, a limit or a timeout out of this set: an integer in 100..599 is only read
+  # as a status when it rides a call that is already handed the connection.
+  defp status_literals(ast) do
+    {_, acc} =
+      Macro.prewalk(ast, [], fn
+        {:put_status, _, [_c, s]} = n, acc -> {n, add_status(acc, s)}
+        {:put_status, _, [s]} = n, acc -> {n, add_status(acc, s)}
+        {:send_resp, _, [_c, s, _b]} = n, acc -> {n, add_status(acc, s)}
+        {_f, _, [{:conn, _, ctx} | rest]} = n, acc when is_atom(ctx) and is_list(rest) ->
+          {n, Enum.reduce(rest, acc, &add_status(&2, &1))}
+
+        n, acc -> {n, acc}
+      end)
+
+    Enum.uniq(acc)
+  end
+
+  defp add_status(acc, node) do
+    case derivation_lit(node) do
+      s when is_integer(s) and s >= 100 and s <= 599 -> [s | acc]
+      _ -> acc
+    end
+  end
+
+  defp flash_kinds(ast) do
+    {_, acc} =
+      Macro.prewalk(ast, [], fn
+        {:put_flash, _, [_c, k, _m]} = n, acc ->
+          case derivation_lit(k) do
+            a when is_atom(a) and a != :__no_literal__ -> {n, [a | acc]}
+            _ -> {n, acc}
+          end
+
+        n, acc -> {n, acc}
+      end)
+
+    Enum.uniq(acc)
+  end
+
+  defp outcome_markers(ast) do
+    statuses = status_literals(ast)
+    flashes = flash_kinds(ast)
+
+    err =
+      Enum.map(Enum.filter(statuses, &(&1 >= 400)), &"status #{&1}") ++
+        Enum.map(Enum.filter(flashes, &(&1 in @derivation_error_flash)), &"put_flash(:#{&1})")
+
+    ok =
+      Enum.map(Enum.filter(statuses, &(&1 >= 100 and &1 < 400)), &"status #{&1}") ++
+        Enum.map(Enum.filter(flashes, &(&1 in @derivation_success_flash)), &"put_flash(:#{&1})")
+
+    {Enum.uniq(err), Enum.uniq(ok)}
+  end
+
+  defp emission_polarity(node, ok_scoped?) do
+    {err, ok} = outcome_markers(node)
+
+    cond do
+      err != [] and ok != [] -> {:mixed, "carries #{Enum.join(err ++ ok, " + ")}"}
+      err != [] -> {:error_branch, Enum.join(err, " + ")}
+      ok != [] -> {:success_receipt, Enum.join(ok, " + ")}
+      ok_scoped? -> {:success_receipt, "unmarked, but the emission sits inside an `{:ok, _}` branch"}
+      true -> {:unmarked, "no status literal, no flash kind, no `{:ok, _}` gate"}
+    end
+  end
+
+  # THE CLAUSE'S VERDICT OVER ITS OWN EMISSIONS. A clause that answers 200 on one path and
+  # 422 on another is `mixed` and says so: the class it earned was derived over BOTH, and
+  # calling it either a success receipt or an error branch would be the same silent
+  # collapse this row was filed about.
+  defp clause_outcome(nil, _scopes), do: {:no_body, "defdelegate — no body to read"}
+
+  defp clause_outcome(body, scopes) do
+    nodes = emission_nodes(body)
+    ok_nodes = scopes |> Enum.flat_map(&emission_nodes/1) |> MapSet.new()
+
+    case nodes do
+      [] ->
+        {err, ok} = outcome_markers(body)
+
+        cond do
+          err != [] and ok == [] ->
+            {:error_branch, "no response call; the clause body carries #{Enum.join(err, " + ")}"}
+
+          ok != [] and err == [] ->
+            {:success_receipt, "no response call; the clause body carries #{Enum.join(ok, " + ")}"}
+
+          true ->
+            {:no_emission, "no response call and no status/flash marker in the clause body"}
+        end
+
+      _ ->
+        graded = Enum.map(nodes, &emission_polarity(&1, MapSet.member?(ok_nodes, &1)))
+        kinds = graded |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+        why = graded |> Enum.map(&elem(&1, 1)) |> Enum.uniq() |> Enum.join("; ")
+
+        # `error_branch` MEANS EVERY RESPONSE THIS CLAUSE CAN BUILD IS A FAILURE, and the
+        # bar is that high on purpose. A clause holding a 404 arm beside an unmarked
+        # success arm is `mixed`: its CLASS was derived over the union of both arms
+        # (`emits` falls back to the whole body when no `{:ok, _}` scope exists), so
+        # calling the whole clause an error branch would trade one over-claim for
+        # another. Only an unanimous set earns the flat verdict.
+        cond do
+          length(kinds) == 1 -> {hd(kinds), why}
+          :mixed in kinds -> {:mixed, why}
+          :error_branch in kinds -> {:mixed, why}
+          :success_receipt in kinds -> {:success_receipt, why}
+          true -> {:unmarked, why}
+        end
+    end
+  end
+
   # -- report -----------------------------------------------------------------
 
   # ------------------------------ THE DISPOSITION REGEN AFFORDANCE (`--routed-rows`)
@@ -8314,6 +8597,7 @@ defmodule PDS.Census do
     p("")
 
     report_derivation_precedence(rows)
+    report_derivation_outcome(rows)
     report_derivation_mask(rows)
 
     Enum.each(@derivation_order, fn class ->
@@ -8413,10 +8697,92 @@ defmodule PDS.Census do
         p("      #{String.pad_trailing(to_string(m), 6)} #{path}")
         p("             #{mod}.#{action}  ·  #{r.clauses} clause(s)")
         wrap(r.precedence.why, "             ")
+        wrap("OUTCOME OF THE DECIDING CLAUSE: #{Map.get(r, :outcome_verdict, %{}) |> Map.get(:why, "-")}", "               ")
       end)
     end
 
     p("")
+  end
+
+  # SUCCESS RECEIPT OR ERROR BRANCH — THE DISTINCTION THE PARTITION DID NOT HAVE
+  # (pds-bl-w41-error-branch-verdicts).
+  #
+  # THE FINDING THIS BLOCK EXISTS TO MAKE READABLE. A class row on this page reads as a
+  # verdict about the receipt an endpoint hands back. For some rows it is a verdict about
+  # what the endpoint says when the write did NOT happen, and until this block there was
+  # no way to tell the two apart short of opening the controller. Anything pinned to "the
+  # N rows in class X" — an allowlist, a repair batch, a before/after count — was pinning a
+  # set whose members are not all the same kind of claim.
+  #
+  # AND IT IS PRINTED, NOT GATED. A polarity this pass sometimes cannot derive must never
+  # decide a class, a count, or an exit code; every number below is a disclosure a reader
+  # can check against the source, and `unmarked` is listed with its reason beside the rows
+  # it actually applies to.
+  defp report_derivation_outcome(rows) do
+    verdicts = Enum.map(rows, &Map.get(&1, :outcome_verdict, %{decided_on: :no_body, error_branch?: false, masks_success?: false}))
+    freqs = Enum.frequencies_by(verdicts, & &1.decided_on)
+    error_rows = Enum.filter(rows, &Map.get(Map.get(&1, :outcome_verdict, %{}), :error_branch?, false))
+    masking = Enum.filter(error_rows, &Map.get(&1.outcome_verdict, :masks_success?, false))
+    blind = Enum.filter(rows, &(Map.get(Map.get(&1, :outcome_verdict, %{}), :decided_on, :no_body) in [:unmarked, :no_emission, :no_body]))
+
+    clauses = rows |> Enum.flat_map(&Map.get(&1, :clause_results, [])) |> Enum.uniq_by(& &1.id)
+    cfreqs = Enum.frequencies_by(clauses, &Map.get(&1, :outcome, :no_body))
+
+    p("  SUCCESS RECEIPT vs ERROR BRANCH — the outcome polarity of the clause that")
+    p("  DECIDED each row, DERIVED BY RUN from the response it builds and NEVER from the")
+    p("  clause head's position, arity or spelling")
+    wrap(
+      "WHAT IS READ: an HTTP status literal threaded through `conn` (`put_status/2`, " <>
+        "`send_resp/3`, or any call handed `conn` carrying an integer in 100..599 — this is " <>
+        "what reads `ErrorResponse.emit_custom(conn, 400, ...)`), the flash KIND atom " <>
+        "(`put_flash(conn, :error, _)` vs `:info`), and containment in the same " <>
+        "`{:ok, _}` region success_scopes/1 already derives. WHAT IS NOT READ: the clause's " <>
+        "head, its position in the def, its arity, and every word spelled anywhere in it. " <>
+        "A clause the markers do not reach is `unmarked` WITH ITS REASON, never a guess.",
+      "    "
+    )
+    p("")
+    p("                              DECIDING CLAUSE   ALL CLAUSES")
+
+    Enum.each(@derivation_outcomes, fn o ->
+      p("    #{String.pad_trailing(to_string(o), 26)}#{pad(Map.get(freqs, o, 0))}          #{pad(Map.get(cfreqs, o, 0))}")
+    end)
+
+    p("    #{String.pad_trailing("sum", 26)}#{pad(length(rows))}          #{pad(length(clauses))}")
+    p("")
+    p("    row(s) whose printed class was earned on an ERROR branch   #{pad(length(error_rows))}")
+    p("      of those, with a SUCCESS-receipt sibling clause MASKED   #{pad(length(masking))}")
+    p("    row(s) where the polarity is STRUCTURALLY UNDERIVABLE      #{pad(length(blind))}")
+    p("")
+
+    if error_rows == [] do
+      p("    NO row on this corpus prints a class earned on an error branch — a measured")
+      p("    zero over #{length(rows)} row(s), not a silent one.")
+    else
+      p("    EVERY ONE OF THEM, BY NAME:")
+
+      Enum.each(Enum.sort_by(error_rows, fn %{key: {m, path, mod, a}} -> {mod, a, m, path} end), fn r ->
+        {m, path, mod, action} = r.key
+        p("      #{String.pad_trailing(to_string(m), 6)} #{path}")
+        p("             #{mod}.#{action}  ·  prints #{r.class}  ·  #{r.clauses} clause(s)  ·  sibling outcome(s): #{Enum.join(Enum.map(r.outcome_verdict.others, &to_string/1), ", ")}")
+        wrap(r.outcome_verdict.why, "             ")
+      end)
+    end
+
+    p("")
+
+    if blind != [] do
+      p("    AND THE REFUSALS, ALSO BY NAME — these rows carry NO success-vs-error verdict")
+      p("    and this pass says why rather than inferring one:")
+
+      Enum.each(Enum.sort_by(blind, fn %{key: {m, path, mod, a}} -> {mod, a, m, path} end), fn r ->
+        {m, path, mod, action} = r.key
+        p("      #{String.pad_trailing(to_string(m), 6)} #{path}")
+        p("             #{mod}.#{action}  ·  prints #{r.class}  ·  #{Map.get(r, :outcome_why, "-")}")
+      end)
+
+      p("")
+    end
   end
 
   # THE PRECEDENCE MASK, COUNTED RATHER THAN INFERRED (PDS wave 41).
@@ -10996,6 +11362,49 @@ defmodule PDS.Census do
       exit: 0,
       expect: ["PASS  DERIVATION-CLASS-WITNESS", "store_derived — all 6", "A RELATION, NEVER A COUNT"],
       proves: "the six fixture receipts move request_echo -> store_derived under an honest repair and the witness arm stays green — it asserts a relation between the class and its producer, not a class count, so a repaired controller cannot red it"
+    },
+    # SUCCESS RECEIPT vs ERROR BRANCH, ARMED FROM BOTH SIDES
+    # (pds-bl-w41-error-branch-verdicts).
+    #
+    # Its corpus is the REPO and it has to be: the synthetic fixture carries no controller
+    # whose clauses answer different outcomes, so over the fixture this block prints its
+    # measured zero and the derivation is never exercised.
+    #
+    # THE CONTROL NAMES THE ROW THE FINDING WAS FILED ON. `SessionController.account`
+    # prints `request_echo` — a true sentence about the clause that re-renders the sign-in
+    # form after a failed credential check. The control asserts that the page now says so.
+    #
+    # AND THE MUTANT IS THE EXACT WRONG METHOD THE CRITERION FORBIDS: it replaces the
+    # derivation with a verdict read off the clause's POSITION in the def, which is the
+    # cheapest head-shaped heuristic available and the one a reader would most plausibly
+    # reach for. Under it every row reads success_receipt, all ten error-branch rows
+    # vanish, and the page prints its measured zero — so a green here is a statement that
+    # the ten verdicts came out of the RESPONSES those clauses build.
+    %{
+      name: "OUTCOME-NAMES-THE-ERROR-BRANCH",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "SUCCESS RECEIPT vs ERROR BRANCH",
+        "row(s) whose printed class was earned on an ERROR branch",
+        "BarkparkWeb.SessionController.account  ·  prints request_echo"
+      ],
+      refute: ["NO row on this corpus prints a class earned on an error branch"],
+      proves: "the census now distinguishes a verdict about a SUCCESS receipt from a verdict about an ERROR branch, and names /login/account — whose printed request_echo is earned by the clause that re-renders the form after a failed credential check — as one of the rows decided on a failure path"
+    },
+    %{
+      name: "OUTCOME-DERIVED-BY-RUN-ARMED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"outcome = clause_" <> "outcome(body, scopes)",
+         "outcome = if(d.line > 0, do: {:success_receipt, \"read off the clause's position\"}, else: clause_outcome(body, scopes))"},
+      exit: 0,
+      expect: ["NO row on this corpus prints a class earned on an error branch"],
+      refute: ["BarkparkWeb.SessionController.account  ·  prints request_echo"],
+      proves: "replacing the per-clause derivation with a verdict read off the clause's POSITION in the def erases all ten error-branch rows and prints the measured zero instead — so the shipped verdicts are derived from the response each clause builds, not from a head heuristic that would have printed the same page shape"
     },
     # THE PRECEDENCE RULE IS PRINTED, NOT IMPLIED (pds-bl-w41-clause-precedence-mask).
     # Its corpus is the REPO and it has to be: the synthetic tree carries no action whose

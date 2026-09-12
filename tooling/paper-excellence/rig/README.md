@@ -252,6 +252,73 @@ and blocked-request count — and, per cell, the four **crown measurements**
   that has one at every panel width (11 cells — prime, so no track count
   divides it: 8+3 @1280, 9+2 @1920).
 
+## The editorial measure band — 66-72 CPL (task-21b7dd42b946b64e)
+
+The prose measure is asserted per cell in **characters per line**, and since the
+Linux baselines landed the band is **66-72, inclusive at both ends** (it was
+55-75 while the only numbers available were laptop numbers). Both ends are live
+wherever the 660px column does NOT fill the viewport — every cell in the
+committed panel. Where the column IS viewport-bound (360px), only the ceiling
+applies: the phone sets the measure there, not the type (34.7 CPL).
+
+The band is set against the committed Linux panel, not against a target:
+
+| fixture | prose CPL (1280 / 1920) |
+| --- | --- |
+| `heggemsnes-act` | **66.9** — floor-binding, 0.9 spare |
+| `design-probe` | 68.1 |
+| `mechanical-spacing-doctrine` | 69.2 |
+| `paper-excellence-wave-2026-08-12` | 70.6 |
+| `portabledoc-showcase` | 70.7 / 71.1 |
+| `hobby-hardening-capstone` | 70.8 |
+| `eight-minute-erasure` | 71.1 |
+| `stat-partial-row` | 71.8 |
+| `agent-flight-recorder-charter` | **72.0** — ceiling-binding, **ZERO headroom** |
+
+Proven in the image, not on a laptop: `paper-rig.yml` run
+**34689409744** (`workflow_dispatch`, `check: true`, branch `studio/rig-cpl-band`)
+ran `gate.sh --panel --check` under this band and closed
+`panel: 9 fixtures committed, 9 attempted, 9 passed, 0 failed, 36 shots`, every
+fixture's report-check reporting `0 differences`.
+
+`agent-flight-recorder-charter` passes only because the comparison is `>`, not
+`>=`. A 0.1 CPL font-metric shift in that fixture reds this arm. That cost is
+accepted because the workflow is advisory and `--check` is dispatch-only; the
+answer to a flap is to re-capture and RESTATE this table, never to widen the
+ceiling.
+
+**No allowlist.** The task asked for `portabledoc-showcase` to be allowlisted by
+name as a below-band outlier. On this rig's instrument it measures 70.7/71.1 —
+mid-band. The below-band claim is wave-1's different CPL instrument, which
+disagrees with this one by up to 7.9 on the same paper
+(`tooling/grip/ledger/ingress-ratio-arm-mutation-and-instrument-divergence-2026-08-17.md`).
+An allowlist entry that can never match gates nothing while reading as coverage.
+
+### Judging the band offline — `--band-check`
+
+```bash
+node tooling/paper-excellence/rig/shoot.mjs --band-check tooling/paper-excellence/rig/baselines/*.report.json
+# → rig/shoot: band-check OK — 36 cell(s) in 9 report(s) inside the 66-72 editorial measure band
+```
+
+Same predicate as the live gate (`cplBandFailure`, one function, two callers —
+two copies would drift and the offline arm would then prove nothing about the
+gate a pull request runs). No browser, no renderer, no network: the band is the
+one number here a reviewer edits by hand, and this is how a band edit is shown
+to still be able to LOSE without a twenty-minute headless panel run. The
+viewport width is read from the cell name's trailing `__<width>`; a cell name
+without one is a hard failure, never a skip.
+
+Mutation proof (2026-09-12, against temp copies; `baselines/` untouched):
+
+| mutation | verdict |
+| --- | --- |
+| charter `proseCpl` 72.0 → 75.3 (the 720px-column defect's measured value) | exit 1, names `agent-flight-recorder-charter__light__1280` |
+| charter `proseCpl` 72.0 → 72.4 | exit 1 — and 72.4 was **green** under the old 55-75, so the red belongs to the tightening |
+| `heggemsnes-act` `proseCpl` 66.9 → 64.0 | exit 1 on the floor at a non-column-bound cell |
+| unmutated copies of both | exit 0, "8 cell(s) … inside the band" |
+| a cell renamed `…__light__wide` | exit 1 — "does not end in a viewport width" |
+
 ## The ingress-ratio arm
 
 The opening ingress reads bigger than the body prose, and the relationship is

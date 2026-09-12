@@ -790,6 +790,7 @@ defmodule BarkparkWeb.TasksController.Params do
              count(d.id)}
         )
         |> TaskQuery.collapse_twins()
+        |> collapse_cross_dataset(scope)
         |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
         |> maybe_filter_project(Keyword.get(scope, :project_id))
         |> Repo.all()
@@ -850,6 +851,7 @@ defmodule BarkparkWeb.TasksController.Params do
              count(d.id)}
         )
         |> TaskQuery.collapse_twins()
+        |> collapse_cross_dataset(scope)
         |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
         |> maybe_filter_project(Keyword.get(scope, :project_id))
         |> Repo.all()
@@ -873,6 +875,31 @@ defmodule BarkparkWeb.TasksController.Params do
   # Returns a set-like `%{parent doc_id => true}`; a parent that is terminal
   # is simply ABSENT, and absence is what makes `classify_upstream/3` stay
   # silent rather than guess.
+  # THE DATASET AXIS of the twin rule at the two grouped child counts
+  # (task-49eef068420df918 — `Barkpark.Tasks.TwinResolver` rule 3 at a listing;
+  # that moduledoc holds the rule, this writes no second one).
+  # `TaskQuery.collapse_twins/1` immediately above is the DRAFT axis and
+  # requires `twin.dataset = d.dataset` BY DESIGN, so a child doc_id living in
+  # two datasets of one workspace+project counted TWICE: measured live on
+  # guerrilla 2026-09-06, an epic with nine children in both `production` and
+  # `aker-brygge` reported `child_count: 18`. Applied here as well as in
+  # `TasksController.child_tasks/2` for the reason the draft axis was:
+  # otherwise `bp task get <epic>` and `bp task ls --view=brief` report
+  # DIFFERENT counts for one epic — one number with two meanings.
+  #
+  # `scope` carries no `:dataset` today (`ScopeHelpers.scope_opts/1` emits
+  # workspace/project/caller_context only), so this always collapses — which is
+  # the correct default, because a caller who named no dataset is exactly the
+  # caller rule 3 refuses to pick for. The clause is written against `:dataset`
+  # anyway so that the day the scope carries one, a dataset-scoped count reads
+  # byte-identically instead of silently keeping the collapse.
+  defp collapse_cross_dataset(query, scope) do
+    case Keyword.get(scope, :dataset) do
+      d when is_binary(d) and d != "" -> query
+      _ -> TaskQuery.collapse_cross_dataset_twins(query)
+    end
+  end
+
   def batch_live_parents(docs, scope \\ [])
   def batch_live_parents([], _scope), do: %{}
 

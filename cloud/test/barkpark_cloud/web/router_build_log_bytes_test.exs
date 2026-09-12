@@ -369,6 +369,134 @@ defmodule BarkparkCloud.Web.RouterBuildLogBytesTest do
     end
   end
 
+  ## 3b. The tail guard is ONE choke point, not one branch ---------------------
+
+  describe "no shape relays a tail the record cannot say was folded" do
+    # THE FOUR SHAPES THE ORIGINAL GUARD NEVER REACHED. `decide_bytes`' 422 arm
+    # nilled the tail on its own way out; the relayed box-422, the relayed
+    # box-410 and the `evicted` / `missing` / `never_recorded` arms all built
+    # their bodies through `record/1` and relayed whatever the box sent. Each of
+    # these programs the fake box with a `bppat_` token IN THE TAIL and asserts
+    # against the RAW response body, not a decoded field: a token that reached
+    # the wire under any key at all fails here.
+    #
+    # Not reachable through the box merged alongside this route (it puts
+    # `tail: nil` on every refusal) — which is exactly why it is asserted on this
+    # end. An older or newer box is the case the tail cap ten lines up exists for.
+    test "a relayed box-422 does not relay the box's unscrubbed tail" do
+      operator = operator_fixture()
+      site = site_fixture(live_bp())
+      dep = deployment_fixture(site)
+
+      FakeBoxRelay.program(
+        build_log_bytes:
+          FakeBoxRelay.build_log_bytes_payload(site.slug, dep.build_id, 422, "available",
+            log_scrub: nil,
+            tail: "BARKPARK_TOKEN=bppat_relayed422leak\n",
+            error: {"build_log_unscrubbed", "never folded"}
+          )
+      )
+
+      conn = get_bytes(site.id, dep.id, operator)
+
+      assert conn.status == 422
+      refute conn.resp_body =~ "bppat_"
+      assert body(conn)["tail"] == nil
+      assert body(conn)["tail_bytes"] == 0
+    end
+
+    test "a relayed box-410 does not relay the box's unscrubbed tail" do
+      operator = operator_fixture()
+      site = site_fixture(live_bp())
+      dep = deployment_fixture(site)
+
+      FakeBoxRelay.program(
+        build_log_bytes:
+          FakeBoxRelay.build_log_bytes_payload(site.slug, dep.build_id, 410, "evicted",
+            log_scrub: nil,
+            tail: "BARKPARK_TOKEN=bppat_relayed410leak\n",
+            evicted_at: "2026-08-13T04:00:00Z"
+          )
+      )
+
+      conn = get_bytes(site.id, dep.id, operator)
+
+      assert conn.status == 410
+      refute conn.resp_body =~ "bppat_"
+      assert body(conn)["tail"] == nil
+      # STILL A COMPLETE ANSWER: withholding the bytes does not cost the operator
+      # the fact that retention took them.
+      assert body(conn)["evicted_at"] == "2026-08-13T04:00:00Z"
+    end
+
+    test "a 200 evicted with an unscrubbed tail is 410 with no bytes" do
+      operator = operator_fixture()
+      site = site_fixture(live_bp())
+      dep = deployment_fixture(site)
+
+      FakeBoxRelay.program(
+        build_log_bytes:
+          FakeBoxRelay.build_log_bytes_payload(site.slug, dep.build_id, 200, "evicted",
+            log_scrub: nil,
+            tail: "BARKPARK_TOKEN=bppat_evictedleak\n",
+            evicted_at: "2026-08-13T04:00:00Z"
+          )
+      )
+
+      conn = get_bytes(site.id, dep.id, operator)
+
+      assert conn.status == 410
+      refute conn.resp_body =~ "bppat_"
+      assert body(conn)["tail"] == nil
+    end
+
+    test "a 200 never_recorded with an unscrubbed tail is 200 with no bytes" do
+      operator = operator_fixture()
+      site = site_fixture(live_bp())
+      dep = deployment_fixture(site)
+
+      FakeBoxRelay.program(
+        build_log_bytes:
+          FakeBoxRelay.build_log_bytes_payload(site.slug, dep.build_id, 200, "never_recorded",
+            log_scrub: nil,
+            tail: "BARKPARK_TOKEN=bppat_neverrecordedleak\n"
+          )
+      )
+
+      conn = get_bytes(site.id, dep.id, operator)
+
+      assert conn.status == 200
+      refute conn.resp_body =~ "bppat_"
+      assert body(conn)["available"] == false
+      assert body(conn)["tail"] == nil
+    end
+
+    # THE CONTROL, and it is what makes the four above mean what they say. The
+    # guard keys on `log_scrub`, not on "is this a refusal shape" — so the SAME
+    # 410 shape, with a record that names the fold, still carries its bytes. A
+    # blanket nil-on-every-non-200 would pass all four tests above and fail this
+    # one.
+    test "a FOLDED tail still ships on the same shape that withholds an unfolded one" do
+      operator = operator_fixture()
+      site = site_fixture(live_bp())
+      dep = deployment_fixture(site)
+
+      FakeBoxRelay.program(
+        build_log_bytes:
+          FakeBoxRelay.build_log_bytes_payload(site.slug, dep.build_id, 410, "evicted",
+            log_scrub: 3,
+            tail: "the last folded bytes before retention took the file\n",
+            evicted_at: "2026-08-13T04:00:00Z"
+          )
+      )
+
+      conn = get_bytes(site.id, dep.id, operator)
+
+      assert conn.status == 410
+      assert body(conn)["tail"] =~ "the last folded bytes"
+    end
+  end
+
   ## 4. The gate ---------------------------------------------------------------
 
   describe "operator-gated, and the gate sits IN FRONT OF the relay" do
