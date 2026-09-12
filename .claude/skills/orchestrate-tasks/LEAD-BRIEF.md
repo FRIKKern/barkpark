@@ -43,10 +43,13 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    survives a killed session, an uncommitted worktree does not"**, and "report what the
    filing got WRONG". Five workers at most in flight; parallelise across rows, not inside
    one. A HEADLESS builder (`claude -p`) is launched ONLY through
-   `helpers/launch-headless-builder.sh` (SKILL.md §1b): a hand-composed
+   `helpers/launch-headless-builder.sh` (SKILL.md §1b), which exports
+   `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. Without that env var a hand-composed
    `nohup claude -p … --model opus --dangerously-skip-permissions` terminates its own
    background tasks at 600 s, mid-Elixir-compile, and exits looking like a calm finish —
-   five builders, five deaths, one cause, measured 2026-09-05. When one returns, run
+   five builders, five deaths, one cause, measured 2026-09-05. The whole recipe, if you
+   ever need it without the wrapper, is
+   `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 nohup claude -p "$(cat prompt.md)" --model opus --dangerously-skip-permissions > log 2>&1 &`. When one returns, run
    `launch-headless-builder.sh --check <log> --worktree <wt>` before you believe its report.
 4. **Worker builds** in `git worktree add $ORCH/wt/<lane>-<slug> -b <lane>/<slug> origin/main`.
    IMMEDIATELY record the base: `git -C <wt> merge-base HEAD origin/main > $ORCH/tmp/<lane>-w<N>/base.sha`.
