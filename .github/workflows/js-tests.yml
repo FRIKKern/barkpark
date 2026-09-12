@@ -106,7 +106,7 @@ jobs:
         # turbo 2 replays build/test/lint/typecheck for packages whose inputs did not
         # change; without this cache every PR run started cold. Key on the lockfile +
         # sha, restore the newest prefix match (task-4e377262789d8fd3).
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: js/.turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('js/pnpm-lock.yaml') }}-${{ github.sha }}
@@ -168,7 +168,7 @@ jobs:
       # hydration vertical never gates. Cache keyed on the lockfile so a browser
       # is fetched only when a dependency (hence a pinned Playwright) changes.
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('js/pnpm-lock.yaml') }}
