@@ -19,6 +19,15 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
   @admin_token "barkpark-test-site-deploy-admin"
   @junior_token "barkpark-test-site-deploy-junior"
 
+  # The box status payload's key set, READ from the one shared copy. See the
+  # pin in "the response never leaks the configured command" below.
+  @status_fixture_path Path.expand("../../support/fixtures/box_status_payload.json", __DIR__)
+  @external_resource @status_fixture_path
+  @status_fixture @status_fixture_path |> File.read!() |> Jason.decode!()
+  @status_keys get_in(@status_fixture, ["status", "consumed"]) ++
+                 get_in(@status_fixture, ["status", "producer_only"])
+  @status_conditional get_in(@status_fixture, ["status", "conditional"])
+
   setup do
     base =
       Path.join(System.tmp_dir!(), "bp-site-controller-#{System.unique_integer([:positive])}")
@@ -685,11 +694,15 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       # "nobody measured this" on its face, exactly like `served_slot` does. This
       # run (`echo hi`) emits no ROUTE line at all, so both are null and the key
       # set still carries them.
-      assert Map.keys(done) |> Enum.sort() == ~w(
-               build_id content_rev exit_code failure_reason finished_at log mode
-               route_detail route_status served_port served_slot slug stages
-               started_at state
-             )
+      # THE KEY SET IS READ, NEVER RETYPED. It used to be a closed `~w(...)`
+      # literal here, and cloud/ held two more hand-written snapshots of the
+      # same truth — which is how `route_status`/`route_detail` reached the
+      # record door in #17640 and never reached an operator. The one copy is
+      # api/test/support/fixtures/box_status_payload.json; this pin now derives
+      # from it, and BarkparkWeb.SiteDeployStatusPayloadConformanceTest asserts
+      # that JSON against the real emitter.
+      assert Map.keys(done) |> Enum.sort() ==
+               Enum.sort(@status_keys -- @status_conditional)
 
       assert done["route_status"] == nil
       assert done["route_detail"] == nil

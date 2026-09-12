@@ -370,6 +370,7 @@ internal/provisioner/**
 api/test/support/totp_test_helper.ex
 api/lib/barkpark_web/controllers/site_deploy_controller.ex
 api/test/support/fixtures/box_capacity_refusal.json
+api/test/support/fixtures/box_status_payload.json
 js/packages/create-barkpark-app/templates/**
 scripts/**
 templates/**
