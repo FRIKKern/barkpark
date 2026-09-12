@@ -328,6 +328,10 @@ on:
       # break the emitter's byte-identity claim.
       - "scripts/pds-live-hetzner-placement-group.sh"
       - "scripts/pds-live-hetzner-placement-group_test.sh"
+      # The runner is TWO files since its vocabulary was extracted
+      # (pds-bl-live-runners-duplicated): a lib-only edit changes what the
+      # offline arm runs, so the lib must be able to trigger this lane too.
+      - "scripts/lib/pds-live-lib.sh"
       - "internal/cli/testdata/pds_live_hetzner_*.json"
       # doc-gates-paths-parity-check.sh. Its subject set is exactly one file —
       # doc-gates.yml's two hand-maintained `paths:` lists — so that file must
@@ -758,6 +762,7 @@ on:
       - "cloud/lib/barkpark_cloud/web/router.ex"
       - "scripts/pds-live-hetzner-placement-group.sh"
       - "scripts/pds-live-hetzner-placement-group_test.sh"
+      - "scripts/lib/pds-live-lib.sh"
       - "internal/cli/testdata/pds_live_hetzner_*.json"
       - "scripts/doc-gates-paths-parity-check.sh"
       - ".github/workflows/doc-gates.yml"
@@ -1217,6 +1222,7 @@ jobs:
           cloud-static-gz cloud/lib/barkpark_cloud/web/router.ex
           pds-hetzner-offline scripts/pds-live-hetzner-placement-group.sh
           pds-hetzner-offline scripts/pds-live-hetzner-placement-group_test.sh
+          pds-hetzner-offline scripts/lib/pds-live-lib.sh
           pds-hetzner-offline internal/cli/testdata/pds_live_hetzner_*.json
           task-lease-renew scripts/task-lease-renew.sh
           task-lease-renew scripts/task-lease-renew.test.sh
