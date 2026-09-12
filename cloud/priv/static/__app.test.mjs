@@ -21329,7 +21329,7 @@ test("cch-w20-s3: BOTH text sites shave the scheme together — the card and the
   const row = hooks.fleetRow(bp);
   assert.match(row, /class="fleet-url">production-5b2c1e\.barkpark\.cloud</);
   assert.ok(row.indexOf('class="fleet-url">https://') === -1,
-    "the fleet row must not keep the scheme while the card drops it — that split is the sin the fleet-row URL fixture in scenarios.mjs exists to prevent (grep -n \'class="fleet-url"\' scenarios.mjs)");
+    "the fleet row must not keep the scheme while the card drops it — that split is the sin the fleet-row URL fixture in scenarios.mjs exists to prevent (re-derive: grep -n fleet-url scenarios.mjs)");
   // …while the PAYLOAD keeps the whole address: a person copying it needs the
   // scheme. This is the same guarantee test 658 (GR24) pins on the header.
   const header = hooks.instanceHeaderHtml(bp);
