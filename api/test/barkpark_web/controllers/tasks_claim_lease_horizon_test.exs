@@ -75,7 +75,9 @@ defmodule BarkparkWeb.TasksClaimLeaseHorizonTest do
         scope
       )
 
-    {:ok, claimed} = Tasks.claim("worker-lease-horizon", scope ++ [phase_id: phase_id, dataset: @dataset])
+    {:ok, claimed} =
+      Tasks.claim("worker-lease-horizon", scope ++ [phase_id: phase_id, dataset: @dataset])
+
     claimed
   end
 
@@ -118,7 +120,11 @@ defmodule BarkparkWeb.TasksClaimLeaseHorizonTest do
 
       # It agrees, to the second, with the RECEIPT surface that already existed
       # (Params.claim_lease/1) — one lease, one horizon, two places to read it.
-      receipt = BarkparkWeb.TasksController.Params.claim_lease(Barkpark.Repo.get!(Barkpark.Content.Document, task.id))
+      receipt =
+        BarkparkWeb.TasksController.Params.claim_lease(
+          Barkpark.Repo.get!(Barkpark.Content.Document, task.id)
+        )
+
       assert receipt.expires_at == claim["lease_expires_at"]
       assert receipt.seconds == claim["lease_seconds"]
     end
@@ -130,7 +136,8 @@ defmodule BarkparkWeb.TasksClaimLeaseHorizonTest do
       claim = show(conn, bare(task.doc_id))["doc"]["claim"]
 
       for {k, v} <- stored do
-        assert claim[k] == v, "the read payload changed claim.#{k}: #{inspect(claim[k])} != #{inspect(v)}"
+        assert claim[k] == v,
+               "the read payload changed claim.#{k}: #{inspect(claim[k])} != #{inspect(v)}"
       end
 
       assert MapSet.new(Map.keys(claim)) |> MapSet.difference(MapSet.new(Map.keys(stored))) ==
@@ -153,7 +160,9 @@ defmodule BarkparkWeb.TasksClaimLeaseHorizonTest do
 
       refute is_nil(doc), "the claimed row is absent from GET /v1/tasks"
       assert doc["claim"]["lease_seconds"] == QueueGate.lease_ttl_seconds()
-      assert doc["claim"]["lease_expires_at"] == show(conn, id)["doc"]["claim"]["lease_expires_at"]
+
+      assert doc["claim"]["lease_expires_at"] ==
+               show(conn, id)["doc"]["claim"]["lease_expires_at"]
     end
 
     test "a SWEPT claim gets NO horizon — a reaped residue has no lease left",
@@ -165,9 +174,13 @@ defmodule BarkparkWeb.TasksClaimLeaseHorizonTest do
       claim = show(conn, bare(task.doc_id))["doc"]["claim"]
 
       refute is_nil(claim), "the sweep removed the claim map entirely; this arm assumes a residue"
-      assert is_nil(claim["worker"]), "the sweep did not null the worker; the precondition is wrong"
+
+      assert is_nil(claim["worker"]),
+             "the sweep did not null the worker; the precondition is wrong"
+
       refute Map.has_key?(claim, "lease_seconds"),
              "a swept residue advertised lease_seconds — the opposite lie from the one this row fixes"
+
       refute Map.has_key?(claim, "lease_expires_at")
     end
 
