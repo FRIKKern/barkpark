@@ -30,7 +30,7 @@
 #     on the FULL bundle too — it silently stops being a control.
 #   * secrets / secrets_audit — one row DB-wide with workspace_id IS NULL,
 #     structurally excluded from every workspace-scoped export by the tenant wall.
-#   * api_tokens — RULED OUT as value ammo, PERMANENTLY (PDS-D532). The table
+#   * api_tokens — RULED OUT as value ammo, PERMANENTLY (PDS-D736). The table
 #     stores `token_hash` and no plaintext bearer token, so the plaintext a
 #     reader imagines being searched for DOES NOT EXIST AT REST. A plaintext
 #     token scan therefore scores CLEAN on a full-fidelity bundle that carries
@@ -47,7 +47,7 @@
 #   `api_tokens` has a discriminator too, but a STRUCTURAL one, described next —
 #   the two are different KINDS of evidence and the output never conflates them.
 #
-# THE MEMBER-PRESENCE CHECK — a SECOND, STRUCTURAL discriminator (PDS-D532).
+# THE MEMBER-PRESENCE CHECK — a SECOND, STRUCTURAL discriminator (PDS-D736).
 # `--deny-member tables/api_tokens.copy` asks one question only: is this member
 # in the container? It fires (exit 1) on a bundle that carries the table and is
 # clean (exit 0) on one that does not — the same paired differential the webhook
@@ -191,7 +191,7 @@ ammo_add_from_db() { # conninfo — pull the live discriminators, read-only
 
 ammo_count() { [ -s "$AMMO_FILE" ] && wc -l < "$AMMO_FILE" | tr -d ' ' || echo 0; }
 
-# ── denied members (structural, PDS-D532) ────────────────────────────────────
+# ── denied members (structural, PDS-D736) ────────────────────────────────────
 # One member path per line. These are paths that must be ABSENT from the
 # bundle; presence is a HIT in its own right, independent of any value.
 DENY_MEMBERS_FILE=""
@@ -279,7 +279,7 @@ check_deny_members() {
           say "             It does NOT prove any token value is absent, because no"
           say "             token value was searched for — api_tokens is hashed at"
           say "             rest, so a value scan over it would score exactly this"
-          say "             clean whether the table travelled or not (PDS-D532)."
+          say "             clean whether the table travelled or not (PDS-D736)."
           ;;
       esac
     fi
@@ -369,7 +369,7 @@ mechanism_line() { # profile clean?
       say "  No field-level scrub is configured — @dev_scrub is empty — so nothing here"
       say "  was scrubbed."
       if [ -s "$DENY_MEMBERS_FILE" ]; then
-        say "  api_tokens is proven by MEMBER ABSENCE, not by this value scan (PDS-D532):"
+        say "  api_tokens is proven by MEMBER ABSENCE, not by this value scan (PDS-D736):"
         say "  it is hashed at rest, so no plaintext token value was searched for."
       fi
       ;;
@@ -467,7 +467,7 @@ cmd_scan() {
 # REFUSES on a corpus of zero (a manifest-only bundle and a dead conninfo must
 # both exit 2 — a green over nothing is not a green).
 #
-# Steps 6-8 are the api_tokens legs (PDS-D532). 6 and 7 are the paired
+# Steps 6-8 are the api_tokens legs (PDS-D736). 6 and 7 are the paired
 # differential for the STRUCTURAL discriminator: --deny-member must FIRE on the
 # bundle that carries tables/api_tokens.copy and be CLEAN on the one that does
 # not. Step 8 is the counterfactual that justifies the ruling — it hands the
@@ -658,7 +658,7 @@ JSON
   set -e
   cat "$work/step5.out"
 
-  # ── steps 6-8: the api_tokens legs (PDS-D532) ──────────────────────────────
+  # ── steps 6-8: the api_tokens legs (PDS-D736) ──────────────────────────────
   # 6 and 7 are the paired differential for the STRUCTURAL discriminator. They
   # carry NO value ammo on purpose: the only thing being measured is member
   # presence, so a webhook hit cannot be what moves the exit code.
@@ -749,7 +749,7 @@ JSON
     ok=0
   else
     say "counterfactual confirmed: a plaintext-token value scan reads CLEAN on a bundle carrying the WHOLE"
-    say "  api_tokens table — which is exactly why api_tokens is proven by member absence, never by value (PDS-D532)"
+    say "  api_tokens table — which is exactly why api_tokens is proven by member absence, never by value (PDS-D736)"
   fi
   rule
   if [ "$ok" -eq 1 ]; then
@@ -758,7 +758,7 @@ JSON
     say "COPY (SELECT …) TO STDOUT bytes over local database $db; NO live guerrilla"
     say "export was spent (PDS-D31)."
     say ""
-    say "api_tokens (PDS-D532): proven by MEMBER ABSENCE, in both directions —"
+    say "api_tokens (PDS-D736): proven by MEMBER ABSENCE, in both directions —"
     say "  step 6 fired on the bundle that carried tables/api_tokens.copy, step 7 came"
     say "  back clean on the bundle that did not. No claim was made about any token"
     say "  VALUE, and step 8 showed why one cannot be: a plaintext-token value scan"
