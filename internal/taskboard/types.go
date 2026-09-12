@@ -50,6 +50,13 @@ type Claim struct {
 	// written atomically with the lease renewal by `bp task pulse`. Nil when the
 	// claim carries no pulse (every claim written before the pulse verb shipped).
 	Now *ClaimPulse
+	// LeaseSeconds is the SERVER's claim-lease horizon for this row, read off
+	// the read payload (claim.lease_seconds, minted from
+	// `Barkpark.Tasks.QueueGate.lease_ttl_seconds/0`). 0 means the server did
+	// not send one — an older API, or a claim map the producer left untouched —
+	// and the board falls back to defaultClaimLeaseTTL (2700s), the same server
+	// default, NEVER to a client-invented number (task-f30dab8c54c605e6).
+	LeaseSeconds int
 }
 
 // ClaimPulse is the decoded content.claim.now — {"text","ts","criterion"?}

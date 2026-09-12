@@ -477,6 +477,11 @@ type claimWire struct {
 	// RawMessage + decodePulse's tolerance so a malformed pulse degrades to
 	// no-pulse instead of failing the whole list decode.
 	Now json.RawMessage `json:"now"`
+	// LeaseSeconds is the server-minted claim-lease horizon (claim.lease_seconds).
+	// RawMessage + tolerant coercion, same law as the two fields above: a string,
+	// a float or a null degrades to 0 (= "absent", fall back to the server
+	// default) rather than failing the whole list decode.
+	LeaseSeconds json.RawMessage `json:"lease_seconds"`
 }
 
 // decodeLabels coerces a task's `labels` value into the []string the board
@@ -561,7 +566,7 @@ func (w taskWire) toTask() Task {
 			at = w.Claim.ClaimedAt
 		}
 		t.Claim = &Claim{Worker: w.Claim.Worker, Epoch: w.Claim.Epoch, ClaimedAt: at,
-			Now: decodePulse(w.Claim.Now)}
+			Now: decodePulse(w.Claim.Now), LeaseSeconds: decodeLeaseSeconds(w.Claim.LeaseSeconds)}
 	}
 	// criteria_progress is OMITTED when absent (wire contract), so a nil
 	// pointer stays a nil Criteria — never a misleading 0/0.
@@ -702,6 +707,27 @@ func decodeWithdrawals(v any) []CriterionWithdrawal {
 // names no criterion, so no ladder rung spins); a malformed ts → zero time
 // (which renders as maximally stale — an undatable pulse must never read
 // fresh).
+// decodeLeaseSeconds reads claim.lease_seconds off the wire into whole seconds,
+// tolerantly (the frozen wave-5 field contract): a JSON number decodes, a
+// float truncates, and ANY other shape — a string, null, an object, an absent
+// key — decodes to 0, which claimLeaseTTL reads as "the server sent no
+// horizon" and answers with the 2700s server default. A negative value is
+// clamped to 0 for the same reason: a horizon of zero or less would paint
+// every claim danger the instant it landed (task-f30dab8c54c605e6).
+func decodeLeaseSeconds(raw json.RawMessage) int {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return 0
+	}
+	var n float64
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return 0
+	}
+	if n <= 0 {
+		return 0
+	}
+	return int(n)
+}
+
 func decodePulse(raw json.RawMessage) *ClaimPulse {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil
