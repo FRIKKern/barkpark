@@ -892,8 +892,19 @@ defmodule BarkparkWeb.TasksController do
     base = child_base_query(doc_id, conn)
 
     case conn.params["dataset"] do
-      d when is_binary(d) and d != "" -> Repo.all(base)
-      _ -> base |> Tasks.Query.collapse_cross_dataset_twins() |> Repo.all()
+      # NAMED: the rail is SCOPED to that dataset, not merely un-collapsed.
+      # Lifting the collapse without narrowing would be strictly worse than
+      # doing nothing — `?dataset=production` would hand back BOTH copies of a
+      # twinned child, the very double-listing this fixes, on the one call that
+      # said which dataset it meant. (Caught by the POSITIVE CONTROL below,
+      # which read `[solo, twin, twin]` from the first draft of this function.)
+      # `maybe_filter_dataset/2` is the same narrowing `Queue.ready/1` applies
+      # to a dataset-named ready page.
+      d when is_binary(d) and d != "" ->
+        base |> Tasks.Query.maybe_filter_dataset(d) |> Repo.all()
+
+      _ ->
+        base |> Tasks.Query.collapse_cross_dataset_twins() |> Repo.all()
     end
   end
 

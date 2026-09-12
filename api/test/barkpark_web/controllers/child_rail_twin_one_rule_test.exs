@@ -167,13 +167,18 @@ defmodule BarkparkWeb.ChildRailTwinOneRuleTest do
       assert named == twin_id
 
       # The SAME id, on the by-id door one level down: 409 naming both datasets.
-      refused =
-        build_conn() |> bearer() |> get("/v1/tasks/#{twin_id}") |> json_response(409)
+      # `assert_error_sent/2` (as graph_twin_one_rule_test.exs): the refusal is
+      # a RAISE at the resolver chokepoint, so this measures the whole wire path
+      # — `Plug.Exception`'s 409 AND `BarkparkWeb.ErrorJSON`'s pass-through,
+      # which is what keeps the body off a generic `internal_error`.
+      {409, _headers, raw} =
+        assert_error_sent(409, fn ->
+          build_conn() |> bearer() |> get("/v1/tasks/#{twin_id}")
+        end)
 
-      assert refused["error"]["code"] == "ambiguous_dataset"
-
-      assert Enum.sort(refused["error"]["details"]["datasets"]) ==
-               Enum.sort([@primary, @secondary])
+      assert %{"error" => error} = Jason.decode!(raw)
+      assert error["code"] == "ambiguous_dataset"
+      assert Enum.sort(error["details"]["datasets"]) == Enum.sort([@primary, @secondary])
     end
 
     test "POSITIVE CONTROL: naming ?dataset= resolves the child on this same door", %{
@@ -186,6 +191,12 @@ defmodule BarkparkWeb.ChildRailTwinOneRuleTest do
       # for the subject too — naming the dataset the subject is not in is a
       # 404, which would measure the subject lookup and not the rail.
       body = show(build_conn(), epic_id, "?dataset=#{@primary}")
+
+      # EXACTLY ONE copy of the twinned child. The first draft of
+      # `child_tasks/2` only SKIPPED the collapse when a dataset was named and
+      # read `[solo, twin, twin]` here — lifting the refusal without narrowing
+      # the rail, which is worse than not gating at all. This assertion is why
+      # the named arm now filters by dataset.
 
       assert Enum.sort(Enum.map(body["children"], & &1["doc_id"])) ==
                Enum.sort([twin_id, solo_id])
@@ -236,7 +247,7 @@ defmodule BarkparkWeb.ChildRailTwinOneRuleTest do
         |> bearer()
         |> get("/v1/tasks?limit=1000")
         |> json_response(200)
-        |> Map.fetch!("tasks")
+        |> Map.fetch!("docs")
         |> Enum.map(& &1["doc_id"])
 
       assert Enum.count(ids, &(&1 == twin_id)) == 0
