@@ -1,13 +1,19 @@
 import type { CSSProperties } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ThemePicker } from "@/components/theme-picker";
+import {
+  chromeType,
+  chromeTypeOrder,
+  readingType,
+  readingTypeOrder,
+} from "@/lib/tokens.gen";
 
-/* Unified-aesthetic W1.4 scaffold — the living token spec for the web demo.
- * Every swatch is painted with `var(--color-…)`, resolving live from the
- * GENERATED block in app/globals.css (emitted by design/emit.mjs from
- * design/tokens.json). Retint a token, re-emit, and this page moves with it.
- * Scaffold only: palette + status roles + the UI type ladder. Full content
- * adoption (Tailwind utility migration, wiring emitted --text-* vars) is W3.9. */
+/* The living token spec for the web demo. Every swatch is painted with
+ * `var(--color-…)`, resolving live from the GENERATED block in app/globals.css,
+ * and BOTH type ladders below are read straight out of `lib/tokens.gen.ts` —
+ * the same design/emit.mjs pass, from the same design/tokens.json leaves.
+ * Retune a token, re-emit, and this page moves with it. There is no hand-kept
+ * size table on this page: if a number here is wrong, tokens.json is wrong. */
 
 // The emitted web color roles use the `--color-` prefix (Tailwind v4 @theme).
 const PALETTE = [
@@ -26,18 +32,27 @@ const PALETTE = [
 // The four semantic status voices (no -soft/-hsl on the web prefix).
 const STATUS = ["ok", "warn", "danger", "info"] as const;
 
-// UI type ladder — mirrors tokens.json `type.ui`. NOTE: web emits only colors,
-// not --text-* vars, so these sizes are a preview; W3.9 wires the emitted scale.
-const TYPE_SCALE: Array<{ label: string; size: number; lh: number; weight: number }> = [
-  { label: "2xl", size: 26, lh: 1.2, weight: 700 },
-  { label: "xl", size: 20, lh: 1.3, weight: 700 },
-  { label: "lg", size: 16, lh: 1.4, weight: 600 },
-  { label: "base", size: 14, lh: 1.5, weight: 400 },
-  { label: "sm", size: 13, lh: 1.45, weight: 400 },
-  { label: "xs", size: 12, lh: 1.4, weight: 400 },
-];
+// UI chrome type ladder — the EMITTED `type.chrome` steps (size + line height +
+// weight), in the emitter's own display order. Nothing is restated here.
+const TYPE_SCALE = chromeTypeOrder.map((label) => ({ label, ...chromeType[label] }));
+
+// Reading (prose) type ladder — the EMITTED `type.reading` steps. These are the
+// very leaves paper-surface.css emits as --tok-reading-<step>-size/-lh, which
+// `.bp-paper-surface h1/h2/h3` consume, so what this ladder shows is what
+// @barkpark/react PortableDoc paints on /papers. The rendered h1 clamps
+// responsively (clamp(28px, 8vw, …)); the token is the ceiling, shown here.
+const READING_SCALE = readingTypeOrder.map((label) => ({ label, ...readingType[label] }));
 
 const mono: CSSProperties = { fontFamily: "var(--font-mono, ui-monospace, monospace)" };
+
+/* The page's OWN chrome spends the same emitted ladder it documents. A style
+ * guide that sets its headings by hand while preaching the token is the exact
+ * drift this page exists to catch, so every heading and lede below is a step. */
+const step = (k: (typeof chromeTypeOrder)[number]): CSSProperties => ({
+  fontSize: chromeType[k].size,
+  lineHeight: chromeType[k].lineHeight,
+  fontWeight: chromeType[k].weight,
+});
 
 export function Styleguide() {
   return (
@@ -59,7 +74,7 @@ export function Styleguide() {
           margin: "0 0 .25rem",
         }}
       >
-        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>Web style guide</h1>
+        <h1 style={{ margin: 0, ...step("2xl") }}>Web style guide</h1>
         {/* Two orthogonal switches (theme-system D36): the picker swaps the whole
             palette (data-bp-theme), the toggle flips light/dark (data-theme).
             Every swatch below re-skins live off the emitted vars for both. */}
@@ -77,7 +92,7 @@ export function Styleguide() {
       </p>
 
       <section style={{ margin: "0 0 2.5rem" }}>
-        <h2 style={{ margin: "0 0 .75rem", fontSize: 20, fontWeight: 700 }}>Palette</h2>
+        <h2 style={{ margin: "0 0 .75rem", ...step("xl") }}>Palette</h2>
         <div
           style={{
             display: "grid",
@@ -107,8 +122,8 @@ export function Styleguide() {
       </section>
 
       <section style={{ margin: "0 0 2.5rem" }}>
-        <h2 style={{ margin: "0 0 .25rem", fontSize: 20, fontWeight: 700 }}>Status roles</h2>
-        <p style={{ color: "var(--color-muted-text)", fontSize: 13, margin: "0 0 .75rem" }}>
+        <h2 style={{ margin: "0 0 .25rem", ...step("xl") }}>Status roles</h2>
+        <p style={{ color: "var(--color-muted-text)", ...step("sm"), margin: "0 0 .75rem" }}>
           The four semantic voices — ok / warn / danger / info.
         </p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
@@ -141,22 +156,58 @@ export function Styleguide() {
       </section>
 
       <section>
-        <h2 style={{ margin: "0 0 .25rem", fontSize: 20, fontWeight: 700 }}>
+        <h2 style={{ margin: "0 0 .25rem", ...step("xl") }}>
           Type ladder — UI chrome
         </h2>
-        <p style={{ color: "var(--color-muted-text)", fontSize: 13, margin: "0 0 .75rem" }}>
-          Mirrors <code style={mono}>tokens.json type.ui</code>. Web emits only color vars, so
-          sizes here are a preview — W3.9 wires the emitted scale in.
+        <p style={{ color: "var(--color-muted-text)", ...step("sm"), margin: "0 0 .75rem" }}>
+          Read live from <code style={mono}>tokens.json type.chrome</code> via the emitted{" "}
+          <code style={mono}>lib/tokens.gen.ts</code> — size, line height and weight all come
+          from the token. No copy of this scale lives in this file.
         </p>
-        {TYPE_SCALE.map(({ label, size, lh, weight }) => (
+        {TYPE_SCALE.map(({ label, size, lineHeight, weight }) => (
           <div
             key={label}
             style={{ display: "flex", alignItems: "baseline", gap: 16, marginBottom: 8 }}
           >
             <span style={{ ...mono, fontSize: 11, color: "var(--color-muted-text)", flex: "0 0 140px" }}>
-              {label} · {size}px / {lh}
+              {label} · {size}px / {lineHeight} / {weight}
             </span>
-            <span style={{ fontSize: size, lineHeight: lh, fontWeight: weight }}>
+            <span style={{ fontSize: size, lineHeight, fontWeight: weight }}>
+              Fleet at a glance
+            </span>
+          </div>
+        ))}
+      </section>
+
+      <section style={{ marginTop: "2rem" }}>
+        <h2 style={{ margin: "0 0 .25rem", ...step("xl") }}>
+          Type ladder — reading (paper surface)
+        </h2>
+        <p style={{ color: "var(--color-muted-text)", ...step("sm"), margin: "0 0 .75rem" }}>
+          Read live from <code style={mono}>tokens.json type.reading</code> via the same emitted{" "}
+          <code style={mono}>lib/tokens.gen.ts</code>. These are the leaves{" "}
+          <code style={mono}>paper-surface.css</code> emits as{" "}
+          <code style={mono}>--tok-reading-*</code>, which the{" "}
+          <code style={mono}>.bp-paper-surface</code> heading rules consume — so this ladder and
+          the headings <code style={mono}>PortableDoc</code> paints on <code style={mono}>/papers</code>{" "}
+          move together. The shipped h1 clamps responsively; the token is its ceiling.
+        </p>
+        {READING_SCALE.map(({ label, size, lineHeight, weight }) => (
+          <div
+            key={label}
+            style={{ display: "flex", alignItems: "baseline", gap: 16, marginBottom: 8 }}
+          >
+            <span style={{ ...mono, fontSize: 11, color: "var(--color-muted-text)", flex: "0 0 140px" }}>
+              {label} · {size}px / {lineHeight} / {weight}
+            </span>
+            <span
+              style={{
+                fontSize: size,
+                lineHeight,
+                fontWeight: weight,
+                fontFamily: 'var(--font-reading, "Iowan Old Style", Palatino, Georgia, serif)',
+              }}
+            >
               Fleet at a glance
             </span>
           </div>
