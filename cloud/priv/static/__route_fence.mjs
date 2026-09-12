@@ -160,7 +160,8 @@ export const INLINE_COND_KEYS = new Set(
 // a PIN row that did not exist. Its rows now name `DELETE /v1/barkparks/:*`,
 // the band's one console-executed write, and the label row is gone. The rule
 // that keeps it gone is `pinHatchReport()` below: a PIN-less row must be a
-// READ, and a write that declines to name a PIN key reds on BOTH importers.
+// READ, and a write that declines to name a PIN key reds in the sweep's
+// `pin-hatch` arm (measured: exit 1, one guard failure, by route name).
 // A predicate, not a two-item skip list — a third unbound write cannot appear
 // by being added to an allowlist nobody re-reads.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -288,8 +289,9 @@ export function overlayGapReport() {
 // the band label `POST /v1/instances/:*/lifecycle` had, where the cited PIN row
 // never existed and the citation could not have been checked by anyone.
 //
-// Run by BOTH importers, and losable: set a write row's `pin` to null and this
-// reds by route name, with or without a `why_no_pin` beside it.
+// Run by the sweep's `pin-hatch` arm (the census's own (2n) arm prints the
+// hatch rather than ruling on it), and losable: set a write row's `pin` to
+// null and this reds by route name, with or without a `why_no_pin` beside it.
 export function pinHatchReport() {
   const reads = [];
   const bad = [];
