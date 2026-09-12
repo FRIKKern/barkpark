@@ -10,7 +10,9 @@ defmodule BarkparkCloud.Registry do
   Four moving parts:
 
     * `Barkpark`   — the registry row (one per instance). `register_barkpark/2`
-      / `upsert_barkpark/2` create-or-update it (the warm-pool's write path);
+      creates it (quota-gated), and `register_managed_barkpark/3` (go-live) and
+      `adopt_barkpark/3` (`POST /v1/internal/barkparks`, the off-box warm-pool
+      provisioner's own door) are the two shipped write paths that ride it;
       `upsert_health/2` lands the agent's health report.
     * `Provider`   — a connected cloud account. `connect_provider/3` encrypts the
       account token at rest (`Vault`) before storing it.
@@ -274,9 +276,7 @@ defmodule BarkparkCloud.Registry do
   :limit_reached}` (Coolify's `serverLimitReached`, the API altitude the UI can't
   route around). The friendly HTTP 403 in the router's `go_live/1` is the front
   door; this guard catches the agent/internal register path too.
-  `upsert_barkpark/2` routes EXISTING `(team_id, slug)` rows to update before
-  reaching here, so an idempotent re-register is never blocked — only a genuine
-  new instance. Only a team with an ACTIVE subscription is quota-gated; an
+  Only a team with an ACTIVE subscription is quota-gated; an
   unsubscribed team is `false` here (the go-live 402 is what stops it).
 
   PDF-D86 (the ONE documented exception): a fleet SUPPORT insert does NOT flow
@@ -386,30 +386,22 @@ defmodule BarkparkCloud.Registry do
     |> Repo.insert(mode: :savepoint)
   end
 
-  @doc """
-  Create-or-update a Barkpark for `team`, keyed on `(team_id, slug)`. This is
-  the warm-pool's idempotent write path: registering the same slug twice updates
-  the existing row instead of failing the unique constraint.
-
-  Requires a `:slug` in `attrs`.
-  """
-  @spec upsert_barkpark(Team.t() | binary(), map()) ::
-          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
-  def upsert_barkpark(team, attrs) do
-    attrs = put_team_id(attrs, team)
-    team_id = attrs |> Map.get(:team_id) || Map.get(attrs, "team_id")
-    slug = attrs |> Map.get(:slug) || Map.get(attrs, "slug")
-
-    case team_id && slug && Repo.get_by(Barkpark, team_id: team_id, slug: slug) do
-      %Barkpark{} = existing ->
-        existing
-        |> Barkpark.changeset(attrs)
-        |> Repo.update()
-
-      _ ->
-        register_barkpark(team, attrs)
-    end
-  end
+  # cch-w58 (DELETED): `upsert_barkpark/2` used to live here, documented by both
+  # its own @doc and the moduledoc as "the warm-pool's idempotent write path". It
+  # had ZERO production callers repo-wide — only two tests — and the warm pool has
+  # always written through OTHER functions: a new row via `adopt_barkpark/3`
+  # (`POST /v1/internal/barkparks`, worker token) or `register_managed_barkpark/3`
+  # (go-live), and updates via `succeed_job/3` / `record_agent_report/2`. Two
+  # alternatives were rejected: (ii) marking it test-only in its @doc keeps a
+  # public create-or-update door — one that casts `:url` from arbitrary attrs
+  # (cch-w58-bl-barkparks-url-has-no-scheme-guard) — alive for nothing but its own
+  # tests; (iii) wiring the warm pool to it would REPLACE a shipped, exercised
+  # write path with an unexercised one to justify the function, and the warm pool
+  # needs no create-or-update (its create is a one-shot adopt/go-live). Its only
+  # non-mirror coverage — that a NEW row is quota-blocked while an UPDATE is not —
+  # moved onto the shipped paths in
+  # `test/barkpark_cloud/billing_limits_test.exs` ("the internal/provisioner
+  # NEW-ROW path (adopt_barkpark/3) is also quota-blocked").
 
   @doc """
   EVERY Barkpark row across ALL teams, newest first — the fleet-ops view behind

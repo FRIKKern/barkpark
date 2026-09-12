@@ -106,23 +106,6 @@ defmodule BarkparkCloud.RegistryTest do
     end
   end
 
-  describe "upsert_barkpark/2" do
-    test "creates then updates the same (team, slug) row" do
-      team = team_fixture()
-
-      assert {:ok, created} =
-               Registry.upsert_barkpark(team, %{name: "Prod", slug: "prod", version: "1.0.0"})
-
-      assert {:ok, updated} =
-               Registry.upsert_barkpark(team, %{name: "Prod", slug: "prod", version: "1.1.0"})
-
-      # Same row, updated in place — not a second insert.
-      assert updated.id == created.id
-      assert updated.version == "1.1.0"
-      assert [_only_one] = Registry.list_barkparks(team)
-    end
-  end
-
   describe "provisioning_subdomain / fqdn / url (globally-unique provisioning identity)" do
     test "subdomain is <slug>-<team_short_id>, suffixed with the team short id" do
       team = team_fixture()
