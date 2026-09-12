@@ -3119,3 +3119,10 @@ jobs:
       - name: "both directions on fixtures + the three named mutations (staleness, roster, spec label)"
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/main-workflow-rollup.test.sh
+
+  zz-orphan-probe:
+    name: zz orphan probe (DO NOT MERGE)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/zz_orphan_probe_test.sh
