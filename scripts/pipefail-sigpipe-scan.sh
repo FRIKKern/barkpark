@@ -1029,12 +1029,23 @@ for f in "${files[@]}"; do
 
     # `… || true` / `… || :` swallows the 141.  The status is consumed, but the
     # consequence is nil — reporting it is a pure false positive.
-    # The trailing-`)` alternatives are for `x="$(producer | head -1 || true)"`:
-    # inside a command substitution the swallow is the LAST thing before the
-    # closing paren, so a pattern anchored on the word alone does not match and
-    # a genuinely harmless site would be reported.
-    case "$bare" in
-    *$'\002'*true | *$'\002'*true\ * | *$'\002'*: | *$'\002'*:\ * | *$'\002'*true\) | *$'\002'*:\)) continue ;;
+    # Inside a command substitution the swallow is the LAST thing before the
+    # closing paren — `x="$(producer | head -1 || true)"` — and once the quoted
+    # run is blanked the tail reads `… || true)""`. A pattern anchored on the
+    # word alone matches neither, so a genuinely harmless site gets reported.
+    # Peel the closers off a COPY before testing; `bare` itself is untouched
+    # because the reported text comes from it.  Measured 2026-09-12: without
+    # this, scripts/pds-crown-launch.sh:1886 (a `| head -1 || true)"` line
+    # continuation) is a false positive banked into the enforced ratchet.
+    swallow="$bare"
+    while :; do
+      case "$swallow" in
+      *[\)\"\'\ ]) swallow="${swallow%?}" ;;
+      *) break ;;
+      esac
+    done
+    case "$swallow" in
+    *$'\002'*true | *$'\002'*true\ * | *$'\002'*: | *$'\002'*:\ *) continue ;;
     esac
 
     # `grep` with neither -q nor -m reads to EOF: NOT the hazard.  Re-check that
