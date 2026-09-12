@@ -298,8 +298,10 @@
 //
 //   KNOWN GRANULARITY LIMIT — CLOSED (D41/D66). The original HEAD fence proved
 //   SELECTOR-PREFIX PRESENCE in app.css TEXT, not per-property survival: deleting
-//   ONLY `.live-chip[data-state="stale"] .live-dot { background: … }` (app.css:3470)
-//   while the same-prefix `.live-chip-label` rule on :3471 survived red NEITHER
+//   ONLY `.live-chip[data-state="stale"] .live-dot { background: … }` (re-derive:
+//   grep -n '^\.live-chip\[data-state="stale"\] \.live-dot' app.css)
+//   while the same-prefix `.live-chip[data-state="stale"] .live-chip-label` rule
+//   on the NEXT line survived red NEITHER
 //   check, so a state could lose its DOT colour — its one severity signal —
 //   silently. That gap is now closed by a PER-DECLARATION probe in __app.test.mjs:
 //   the test `every state's .live-dot rule DECLARES a background (per-declaration
@@ -307,7 +309,8 @@
 //   block (first-occurrence indexOf over the ` .live-dot {` marker, which skips the
 //   `.live-dot.is-ping::after` decoy and the @media duplicate), and asserts a
 //   `background:` declaration survives INSIDE it — so a background-ONLY deletion
-//   reds as well as a whole-rule deletion. Mutation-proved: deleting app.css:3470
+//   reds as well as a whole-rule deletion. Mutation-proved: deleting that
+//   `.live-dot` rule
 //   reds it with `no .live-dot paint rule for the "stale" state … falls back to
 //   var(--dim)` while the prefix fence stayed green. __css_check itself is
 //   UNCHANGED and still never reads data-state — that E2 boundary declared above
@@ -1017,27 +1020,72 @@ export function wrapParityErrors(cssRawText, file = "app.css") {
 // full-text scanning is both robust AND false-positive-free today.
 //
 //   COVERAGE BOUNDARY (charter D40 — an enforcement mechanism states its limits):
-//     • CROSS-LANGUAGE `router.ex:<line>` cites are OUT. Re-anchoring a JS
-//       comment that points at Elixir source means grepping the .ex file — a
-//       distinct move filed as cch-bl-citation-drift-cross-language. E11 flags
-//       only the same-repo `app.js:` shape; `router.ex:<line>` stays UNFLAGGED
-//       here by design (live on this tree: __app.test.mjs + two app.js comments).
-//     • SHAPE-SCOPED. Only `app.js:<digits>` (also `app.js ~<n>` / a range) is a
-//       citation to E11. A prose reference like "the app.js file" is untouched;
-//       a NON-numeric anchor (a function name + grep) is exactly what it asks
-//       for. It cannot judge whether a cited function name is itself correct —
-//       that is a semantic claim no regex owns.
+//     • CROSS-LANGUAGE `.ex`/`.exs` cites are OUT. Re-anchoring a JS comment
+//       that points at Elixir source means grepping a file OUTSIDE
+//       cloud/priv/static — a distinct move, owned by
+//       cch-bl-citation-drift-cross-language. E11's alternation names only
+//       same-tree extensions (.js/.mjs/.css/.sh), so `router.ex:<line>` and
+//       friends stay UNFLAGGED here BY DESIGN. The live population is stated as
+//       a DERIVATION, never a count — every figure ever written for it (3, then
+//       5) was false by the next merge. Re-derive it with:
+//         grep -rnE '\.(ex|exs):[0-9]{2,}' cloud/priv/static \
+//           --include='*.mjs' --include='*.js' --include='*.css'
+//     • FOREIGN FROZEN ARTIFACTS ARE OUT. `*.html:<line>` cites point at
+//       design/handover/…/*.dc.html — a frozen handover artifact outside this
+//       directory that does not receive the sibling shifts app.css does. Not in
+//       the alternation; not a citation to E11.
+//     • `.sh` IS A CITATION TARGET BUT NOT A SCANNED FILE. citationScanFiles()
+//       matches /\.(m?js|css)$/ — re-derive with `node __css_check.mjs
+//       --citation-inventory`. So `__preview__/shoot.sh`'s own `mock.js:<n>`
+//       cites are STRUCTURALLY UNREACHABLE at any regex width, even though a
+//       `.sh:<n>` cite written INSIDE a scanned .js/.mjs/.css file now reds.
+//       That asymmetry is deliberate and is the same REACH-not-SHAPE defect
+//       charter D292 fixed for app.css. Filed:
+//       cch-w17-bl-e11-scan-set-app-css-and-shoot-sh.
+//     • app.css's OWN self-citations are DEFERRED, and the deferral is a SHAPE
+//       exemption, not a set exclusion. app.css joined the scan set in D292 so
+//       that `app.js:<n>` inside the stylesheet reds — that stays. The WIDENED
+//       shapes (`app.css:<n>` and `<name>.<ext>:<n>`) are skipped for app.css
+//       itself: re-anchoring them is a comment-only edit to this wave's most
+//       contended file, which would serialize a gate change behind every CSS
+//       slice in flight for zero measurement value. Same owner row as shoot.sh
+//       above. `--citation-inventory`'s `ruled` column still COUNTS them, so
+//       the deferral is visible in a run rather than invisible in a regex.
+//     • SHAPE-SCOPED, AND THE SEPARATOR IS DELIBERATELY ASYMMETRIC. Loose
+//       `[:~ ]+~?` for the `app.js` branch; tight `(?::~?|\s~)` for every
+//       widened target. This is a design choice, not an accident. The loose
+//       form is safe for `app.js` (nobody writes "app.js <n>" as prose) and the
+//       shipped gate already catches the bare-space, the double-space-tilde and
+//       the range forms of `app.js` + a number — a tight-everywhere regex would
+//       DROP all three, a net loss. The three forms are spelled out literally in
+//       __app.test.mjs's E11 probe matrix (a fixture string, not source prose:
+//       grep -n "E11 probe matrix" __app.test.mjs); they cannot be written here,
+//       because this file is inside its own scan set.
+//       Loose for the new targets is toxic: it reds the `app.css <bytes> B`
+//       size records in __preview__/cssom-heads.baseline (count them, never
+//       quote them: `grep -cE 'app\.css [0-9]+ B' __preview__/cssom-heads.baseline`
+//       — the sidecar gains a record on every wave that re-measures) plus
+//       `app.css: 620` INSIDE a scanned file, __preview__/breakpoint-sweep.mjs.
+//       That last one is the decisive argument: it is not a sidecar false
+//       positive, it would red the gate. A prose reference like "the app.js
+//       file" is untouched; a NON-numeric anchor (a function name + grep) is
+//       exactly what E11 asks for. It cannot judge whether a cited function
+//       name is itself correct — that is a semantic claim no regex owns.
 export function bannedSourceCitationErrors(src, file) {
   const errs = [];
-  const CITATION = /\bapp\.js[:~ ]+~?\d{2,}(?:-\d{2,})?/g;
-  for (const m of src.matchAll(CITATION)) {
+  const base = String(file).replace(/\\/g, "/").split("/").pop();
+  for (const m of src.matchAll(CITATION_RULED_ALTERNATION)) {
+    // app.css's own widened-shape cites are deferred (see the boundary above).
+    // `app.js:<n>` inside app.css still reds — that is D292's whole point.
+    if (base === "app.css" && !m[0].startsWith("app.js")) continue;
     const line = src.slice(0, m.index).split("\n").length;
     errs.push(
       `E11 ${file}:${line}  banned source line citation ${JSON.stringify(m[0].trim())} — ` +
         `line numbers rot on any sibling shift (charter D41 / bp-honest-gates D5). ` +
-        `Re-anchor to the enclosing FUNCTION name + a grep that re-derives it ` +
+        `Re-anchor to the enclosing FUNCTION name (or, for a stylesheet, the SELECTOR) ` +
+        `plus a grep that re-derives it ` +
         `(e.g. renderLivenessChip() with grep -n 'function renderLivenessChip'). ` +
-        `Cross-language router.ex cites are OUT (cch-bl-citation-drift-cross-language).`,
+        `Cross-language .ex cites are OUT (cch-bl-citation-drift-cross-language).`,
     );
   }
   return errs;
@@ -1145,15 +1193,20 @@ function citationScanSetRefusals(files, root = dir) {
 }
 
 // THE RULED ALTERNATION — the widened citation shape ruled by charter D201 and
-// carried by cch-w16-s7. IT IS DELIBERATELY NOT WHAT E11 ENFORCES TODAY: E11
-// bans `app.js:<line>` only (see bannedSourceCitationErrors above), and that
-// shape has ZERO live hits on this tree, so the SHIPPED gate currently catches
-// nothing. The ruled alternation is what E11 would ban AFTER the widening —
-// loose separator for the `app.js` branch (the form the shipped gate already
-// catches, and which the "prescribed" tight-everywhere regex would have
-// dropped), tight `(?::~?|\s~)` for every widened target so that prose like
-// "the app.css 273 raw px font-size lines" and the sidecar's `app.css <bytes> B`
-// records stay clean.
+// carried by cch-w16-s7. IT IS WHAT E11 ENFORCES, as of that row's build:
+// bannedSourceCitationErrors above matches against THIS constant, so there is
+// exactly one citation shape in this file and no second copy to drift. Loose
+// separator for the `app.js` branch (the form the shipped gate already caught,
+// and which the "prescribed" tight-everywhere regex would have DROPPED — the
+// bare-space, the double-space-tilde and the range forms alike, a net loss), tight
+// `(?::~?|\s~)` for every widened target so that prose like "the app.css 273 raw
+// px font-size lines" and the sidecar's `app.css <bytes> B` records stay clean.
+//
+// IT IS A `const` DECLARED BELOW ITS ONLY OTHER CONSUMER ON PURPOSE — this file
+// has no main guard, and every call site (the inventory mode, the gate body,
+// external importers) runs after module evaluation reaches this line, so the TDZ
+// window is empty. Keeping the regex beside its ruling prose beats splitting the
+// argument from the pattern.
 //
 // IT LIVES HERE, NOT IN A TASK ROW, BECAUSE EVERY QUOTED FIGURE FOR IT HAS
 // ROTTED. The widening's cost has been recorded as 8, then 14, then 16/18, then
@@ -1278,7 +1331,8 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
 const definedTokens = new Set();
 for (const m of css.matchAll(/(?:^|[{;\s])(--[A-Za-z0-9_-]+)\s*:/g)) definedTokens.add(m[1]);
 // @property --x { … } registers a custom property just as a `--x:` declaration
-// does (the animated conic-ring fill --p at app.css:1717). The name is followed
+// does (the animated conic-ring fill --p; grep -n '^@property --p ' app.css).
+// The name is followed
 // by `{`, not `:`, so the declaration scan above misses it — register it here.
 for (const m of css.matchAll(/@property\s+(--[A-Za-z0-9_-]+)/g)) definedTokens.add(m[1]);
 
