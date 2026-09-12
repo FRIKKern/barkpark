@@ -291,8 +291,17 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # `require_platform_operator`, which delegates to `require_user`, so it lands in
   # the SESSION bucket: `total` and `session` each rise by exactly one; machine and
   # public are untouched.
-  @baseline_total 72
-  @baseline_session 52
+  # 2026-09-11: 73 / 53 / 8 / 12. ONE ROUTE WAS ADDED — `GET /v1/me/security-events`
+  # (cloud-console-user-security-log), the account owner's own trail over the new
+  # user-scoped `user_security_events` table. A bare HEAD of it MUTATES NOTHING:
+  # the body is `Auth.require_user/2` then `Accounts.list_user_security_events/2`,
+  # a `Repo.all` with no write, no token mint and no nonce burn — so it owes no
+  # `side_effecting_get?/1` clause. It is session-gated like its three
+  # self-scoped siblings (`/v1/account/sessions`, `/v1/account/two-factor`,
+  # `/v1/account/security-audit`), so `total` and `session` each rise by exactly
+  # one; machine and public are untouched.
+  @baseline_total 73
+  @baseline_session 53
   @baseline_machine 8
   @baseline_public 12
 

@@ -103,6 +103,30 @@ VERIFY="$REPO_ROOT/scripts/required-checks-verify.sh"
 BUDGET_SECONDS="${BP_MERGE_BUDGET_SECONDS:-1200}"
 POLL_SECONDS="${BP_MERGE_POLL_SECONDS:-30}"
 
+# THE PRE-FLIGHT OPTS IN TO THE SHARED READER'S BOUNDED RETRY (default OFF).
+#
+# Measured 2026-09-11: three of five merges refused at the pre-flight with
+# `BLOCKED: … cannot read check runs for <sha>` and the identical command, run
+# by hand 15-20 s later against the same head with no push between, read the
+# feed and merged. GitHub's check-runs pagination is not a snapshot; the reader
+# refuses a set whose accumulated length disagrees with the `total_count` page
+# one reported, and it is RIGHT to. The defect was that the thing which retried
+# was a human.
+#
+# THIS IS THE ONLY CALLER THAT SHOULD SET IT. scripts/lib/check-runs.sh leaves
+# the ladder off by default because its loop-over-many-heads consumers
+# (registration-sample.sh, required-checks-generate.sh) would pay a sleep per
+# head for a hole they already tolerate. This reads ONE head, and its refusal
+# costs a human a manual rerun — so it is the case the ladder exists for.
+# Exported so it reaches the reader through `bash "$VERIFY"`, a child process.
+#
+# IT BUYS NO GREEN IT DID NOT HAVE. The ladder retries ONLY transient READ
+# classes; a missing required context, a red one, a DIRTY head — every actual
+# refusal — is unreachable from it, and a read that never settles refuses in the
+# incumbent wording. Override it (including back to 1) from the environment.
+export BARKPARK_CHECK_RUNS_RETRIES="${BARKPARK_CHECK_RUNS_RETRIES:-3}"
+export BARKPARK_CHECK_RUNS_RETRY_SLEEP="${BARKPARK_CHECK_RUNS_RETRY_SLEEP:-10}"
+
 PR_NUMBER=""
 PR_URL=""
 HEAD_SHA=""

@@ -1342,6 +1342,16 @@
       "</div>" +
       '<div id="sessions-box" class="sessions-box"><p class="muted">Loading…</p></div>' +
 
+      // The security log sits DIRECTLY under Sessions, deliberately: the two
+      // answer one question in two tenses. Sessions is "who is signed in right
+      // now"; this is "what was changed about my account, and when". Same
+      // .sessions-box shell and the same row grammar, so the pair reads as one
+      // surface rather than as a second widget with its own vocabulary.
+      '<div class="am-head">' +
+        '<h3 class="modal-section">Security log</h3>' +
+      "</div>" +
+      '<div id="security-log-box" class="sessions-box"><p class="muted">Loading…</p></div>' +
+
       '<div class="am-head">' +
         '<h3 class="modal-section">Two-factor authentication</h3>' +
         accountTwoFactorBadgeHtml(a2fBadgeState(a2fPhase)) +
@@ -1743,6 +1753,8 @@
 
     sessionsExpanded = false; // every open starts folded — the tail is opt-in
     loadSessions();
+    securityLogExpanded = false;
+    loadSecurityLog();
 
     // Password on demand — disclosure only. The form and all four of its ids
     // are already mounted; this just reveals them.
@@ -1935,6 +1947,106 @@
     return html;
   }
 
+  // ---------------------------------------------------- the user security log
+  // GET /v1/me/security-events — the account owner's own trail of sensitive
+  // changes (password, two-factor, sessions, email address). Distinct from the
+  // TEAM audit register under Activity: that one is team-keyed and admin-gated,
+  // this one is keyed on the user and every row in it is about the person
+  // reading it.
+  //
+  // The five verbs are the server's closed vocabulary
+  // (BarkparkCloud.Accounts.UserSecurityEvent.actions/0). This map is HAND-KEPT
+  // and deliberately NOT part of the ACTION_LABELS region further down: that
+  // region is EMITTED from cloud/priv/audit-actions.json by design/emit.mjs and
+  // owns the team register's verbs. Putting these five there would file them in
+  // the team vocabulary, which is precisely the model this feature exists
+  // because it could not use.
+  //
+  // An unknown verb falls through to its raw slug rather than to a friendly
+  // guess: a future server verb this console has never heard of must read as
+  // "something I do not recognise happened", never as a confident sentence
+  // about the wrong event.
+  var SECURITY_LOG_LABELS = {
+    password_changed: "Password changed",
+    two_factor_disabled: "Two-factor authentication turned off",
+    session_revoked: "A device was signed out",
+    sessions_revoked_everywhere: "Signed out everywhere",
+    email_changed: "Email address changed"
+  };
+
+  function securityEventLabel(action) {
+    if (!action) return "Unknown change";
+    return SECURITY_LOG_LABELS[action] || String(action);
+  }
+
+  // The second line of a row: the one extra fact the verb cannot carry on its
+  // own. Returns "" when there is nothing honest to add — never filler.
+  // `previous_email` is the fact that makes an email change actionable ("my
+  // account was moved somewhere I do not control"); `revoked` is a count the
+  // user can check against what they expected.
+  function securityEventDetail(x) {
+    var md = (x && x.metadata) || {};
+    if (x && x.action === "email_changed" && md.previous_email) {
+      return "from " + md.previous_email;
+    }
+    if (x && x.action === "sessions_revoked_everywhere" && typeof md.revoked === "number") {
+      return md.revoked === 1 ? "1 other device" : md.revoked + " other devices";
+    }
+    return "";
+  }
+
+  // Pure: one security-log row. Mirrors sessionRowHtml's grammar — the fact on
+  // the first line, the when on the second — with no action button, because
+  // every row here is a thing that already happened and nothing can be done to
+  // it.
+  //
+  // GR81 applies HERE TOO, and for the identical reason it applies to the
+  // session rows above: the row's `ip` is SUPPRESSED, not forgotten. Every
+  // request the control plane sees comes from the Docker bridge gateway
+  // (trust_forwarded_ip honours X-Forwarded-For only from a loopback peer), so
+  // the stored value is uniform garbage — identical for every client — and can
+  // never separate "me, at home" from "a stranger". Showing it on a SECURITY
+  // surface would be worse than showing nothing: it invites a judgement the
+  // value cannot support. The column is written and kept server-side; restore
+  // the lead here (and on the session row) once
+  // task gr-bl-peer-ip-container lands a genuine per-client peer IP.
+  function securityEventRowHtml(x) {
+    x = x || {};
+    var detail = securityEventDetail(x);
+    return '<div class="session-row">' +
+      '<div class="session-main">' +
+        '<div class="session-device">' + esc(securityEventLabel(x.action)) + "</div>" +
+        '<div class="session-meta">' + esc(relTime(x.inserted_at)) +
+          " · " + esc(deviceLabel(x.user_agent)) +
+          (detail ? " · " + esc(detail) : "") + "</div>" +
+      "</div>" +
+    "</div>";
+  }
+
+  // Pure: the whole list, with the same fold the sessions list uses and the same
+  // honest hidden count. An EMPTY trail gets a sentence, not a blank box — and
+  // the sentence says what an empty log MEANS ("nothing sensitive has changed"),
+  // because a bare "No events" reads equally like "we lost your history".
+  var SECURITY_LOG_COLLAPSED_MAX = 5;
+  function securityLogHtml(rows, expanded) {
+    rows = rows || [];
+    if (!rows.length) {
+      return '<p class="muted">No sensitive changes recorded yet. Password, two-factor, ' +
+        "sign-out and email changes appear here.</p>";
+    }
+    var foldable = rows.length > SECURITY_LOG_COLLAPSED_MAX;
+    var visible = foldable && !expanded ? rows.slice(0, SECURITY_LOG_COLLAPSED_MAX) : rows;
+    var html = visible.map(securityEventRowHtml).join("");
+    if (foldable) {
+      var hidden = rows.length - visible.length;
+      html += expanded
+        ? '<button class="session-fold" type="button" id="security-log-fold" aria-expanded="true">Show fewer</button>'
+        : '<button class="session-fold" type="button" id="security-log-fold" aria-expanded="false">Show ' +
+          hidden + " more event" + (hidden === 1 ? "" : "s") + "</button>";
+    }
+    return html;
+  }
+
   // Whether the sessions list is unfolded past the collapse point. Module scope
   // so a revoke's repaint keeps the operator's place in the open list; reset
   // each time the account modal opens.
@@ -1995,6 +2107,35 @@
           });
         });
       });
+      }
+    });
+  }
+
+  // Whether the security log is unfolded past its collapse point. Module scope
+  // for the same reason sessionsExpanded is; reset on every modal open.
+  var securityLogExpanded = false;
+
+  // Fetch + render the user's own security trail into #security-log-box.
+  // A failed read says so and says nothing else — an empty list and a failed
+  // fetch must never paint the same thing on a security surface, because
+  // "nothing has changed on your account" is exactly the reassurance a reader
+  // would take from a silent blank box.
+  function loadSecurityLog() {
+    var box = $("#security-log-box");
+    if (!box) return;
+    api("GET", "/v1/me/security-events").then(function (r) {
+      if (!box.isConnected) return;
+      if (!r.ok) { box.innerHTML = '<p class="muted">Couldn\'t load your security log.</p>'; return; }
+      var rows = (r.data && r.data.events) || [];
+      paint();
+      function paint() {
+        box.innerHTML = securityLogHtml(rows, securityLogExpanded);
+        var fold = box.querySelector("#security-log-fold");
+        if (fold) fold.addEventListener("click", function () {
+          // Pure re-render from the same fetch — folding is a view choice.
+          securityLogExpanded = !securityLogExpanded;
+          paint();
+        });
       }
     });
   }
@@ -9950,7 +10091,30 @@
     var code = data.error;
     if (code && typeof code === "object") code = code.code;
 
-    if (code === "taken") return "That domain is already in use.";
+    // dr-w26-bl-console-relays-the-claim-leg: the 409 `taken` body carries
+    // `claim_leg` — WHICH population holds the hostname (admin_credential,
+    // recent_usage_sample, active_subscription, agent_reporting, active_job,
+    // within_grace) — plus a caller-safe `detail` sentence written for that
+    // leg. This arm used to answer all six with one fixed string, so refusals
+    // with OPPOSITE remedies ("somebody is paying for that name" vs "a job is
+    // mid-flight, wait a minute") rendered identically and the leg reached a
+    // human only through the raw API response. Relay both, exactly the way the
+    // already_attached arm below relays `detail`. Server-derived strings; the
+    // caller renders via textContent, never markup. The fixed sentence stays as
+    // the no-detail fallback: a name held by some OTHER surface (a Site domain,
+    // another instance's custom_host, a lost race on the unique index) merges
+    // no keys at all, and that body must still say something true.
+    // The fixed sentence stays at RETURN POSITION deliberately: __refusal_copy_census.mjs
+    // pins refusal copy by (enclosing fn, sha1 of the literal) and only sees literals
+    // inside a return expression. Hoisting it into a `var` initializer made the pinned
+    // FN|attachDomainFailureCopy row read as a REMOVE — a live sentence that had fallen
+    // out of the census population. Keep the fallback inside the returned expression.
+    if (code === "taken") {
+      var takenLeg = typeof data.claim_leg === "string" && data.claim_leg ? data.claim_leg : "";
+      var takenDetail = typeof data.detail === "string" && data.detail ? data.detail : "";
+      var takenSuffix = takenLeg ? " (" + takenLeg + ")" : "";
+      return (takenDetail || "That domain is already in use.") + takenSuffix;
+    }
     if (code === "already_attaching") return "An attach is already running.";
     // Relay the plane's own sentence — it names the host that is in the way,
     // which is the only actionable part of this refusal. Server-derived string,
@@ -28793,6 +28957,14 @@
       // Sessions fold: the pure list render (current-device-always-visible
       // collapse past SESSIONS_COLLAPSED_MAX, honest hidden count).
       sessionListHtml: sessionListHtml,
+      // cloud-console-user-security-log: the user-scoped security trail's pure
+      // renders. Exported for the same reason the session pair is — the fold,
+      // the empty-state sentence and the unknown-verb fallthrough are all
+      // provable without a browser.
+      securityEventRowHtml: securityEventRowHtml,
+      securityLogHtml: securityLogHtml,
+      securityEventLabel: securityEventLabel,
+      securityEventDetail: securityEventDetail,
       // GR55: the QR encoder + its canonical text form. qrText IS the byte-match
       // oracle against __qr_fixture.json — never a self-written decoder.
       qrMatrix: qrMatrix, qrText: qrText, qrSvg: qrSvg,
