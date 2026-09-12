@@ -90,7 +90,24 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # deleting `line-height: 1.45;` from the root.html.heex mirror reds §2
   # (".bp-figcaption.line-height: View=\"1.45\" Edit=nil"); off the list the same
   # mutation ships GREEN through the whole portable_doc tree.
-  @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols .bp-figcaption)
+  # TYPED-COLUMN MODIFIERS (#17811 shipped the four View rules; task-9092954c12373522
+  # put them on the wire). `cols` tags a column num | delta | spark and walk.ex
+  # `table_col_class/3` stamps `.bp-table__th--num` / `__td--num` (delta shares the
+  # num class), `--spark`, and the `.bp-table__spark` svg + its polyline — on BOTH
+  # surfaces, since the canvas mounts the reader producer. The View rules shipped
+  # inside `:is(...)`, which `declarations_for/3` cannot see (it splits a selector
+  # list on commas and matches `.bp-paper-surface <element>` exactly), so they were
+  # rewritten as an explicit comma-grouped list — specificity-identical, gate-visible.
+  # The nested `.bp-table__spark polyline` rides in its own list entry: `~w()` is
+  # space-split and would shred a descendant selector into two elements.
+  # Red-before (mutation-proven, this task): deleting the two-line
+  # `.bp-paper-editor-body .bp-table__th--num, … .bp-table__td--num { … }` rule from
+  # priv/static/assets/bp-paper-editor-shell.css reds §2 with
+  # ".bp-table__td--num.text-align: View=\"right\" Edit=nil" (plus the th twin and
+  # both parser-sanity guards); off this list the same deletion ships GREEN through
+  # the whole render suite.
+  @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols .bp-figcaption .bp-table__th--num .bp-table__td--num .bp-table__th--spark .bp-table__td--spark .bp-table__spark) ++
+                     [".bp-table__spark polyline"]
 
   @root_heex Path.expand(
                "../../../../lib/barkpark_web/layouts/root.html.heex",
@@ -489,7 +506,11 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # `.bp-figcaption` rides here too: §2 gates it reader↔root only, so WITHOUT this
   # entry a bundle-side drift on the caption would ship green — an embedded editor
   # whose captions read in a different voice from the Studio canvas.
-  @mirror_elements ~w(h1 h2 h3 p li ul ol code img a a:focus-visible blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart .bp-figcaption)
+  # The typed-column modifiers ride here too: §2 gates them reader↔root only, so
+  # WITHOUT these entries a bundle-side drift would ship green and an embedded
+  # editor would left-align a num column the Studio canvas right-aligns.
+  @mirror_elements ~w(h1 h2 h3 p li ul ol code img a a:focus-visible blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart .bp-figcaption .bp-table__th--num .bp-table__td--num .bp-table__th--spark .bp-table__td--spark .bp-table__spark) ++
+                     [".bp-table__spark polyline"]
 
   test "every Studio inline editor (element, property) is byte-identical in the bundle stylesheet" do
     studio = edit_css()

@@ -28,6 +28,15 @@ on:
       - "**/*.go"
       - "**/*.ts"
       - "**/*.tsx"
+      # .mjs/.js added with the §13 @boundary registry: docs-anchors-check.sh's
+      # marker scan has always included them (§8's CANON_INCLUDES), but this
+      # workflow had no **/*.mjs or **/*.js trigger, so a rename inside
+      # cloud/priv/static/*.mjs — the exact surface the Cloud Console
+      # boundaries live on — never re-ran the scan here. The BLOCKING venue for
+      # §13 is elixir.yml's unfiltered path-escape job; this widening only keeps
+      # the advisory copy from going dark on the surface it audits.
+      - "**/*.mjs"
+      - "**/*.js"
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"
@@ -330,6 +339,15 @@ on:
       - "**/*.go"
       - "**/*.ts"
       - "**/*.tsx"
+      # .mjs/.js added with the §13 @boundary registry: docs-anchors-check.sh's
+      # marker scan has always included them (§8's CANON_INCLUDES), but this
+      # workflow had no **/*.mjs or **/*.js trigger, so a rename inside
+      # cloud/priv/static/*.mjs — the exact surface the Cloud Console
+      # boundaries live on — never re-ran the scan here. The BLOCKING venue for
+      # §13 is elixir.yml's unfiltered path-escape job; this widening only keeps
+      # the advisory copy from going dark on the surface it audits.
+      - "**/*.mjs"
+      - "**/*.js"
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"

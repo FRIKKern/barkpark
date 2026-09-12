@@ -12,6 +12,7 @@ import {
 } from "@/lib/find-shape";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { DATASET, SCOPE } from "@/lib/config";
+import { MAX_HITS } from "@/lib/search-limits";
 
 /**
  * Shared upstream search — the one place that talks to the Barkpark search API.
@@ -55,9 +56,6 @@ const ORIGIN = new URL(API_URL).origin;
  * serves both engines.
  */
 const SEARCH_BASE = TOKEN ? `${ORIGIN}${SCOPE}` : ORIGIN;
-
-/** Cap the working set; the client facets + sorts + paginates over it. */
-const MAX_HITS = 100;
 
 /**
  * Upstream column projection: everything `normalizeHit` actually reads —

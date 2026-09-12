@@ -125,6 +125,7 @@
                   "duplicate_of",
                   "duplicate_task",
                   "event_not_found",
+                  "export_already_running",
                   "export_build_failed",
                   "export_transport_failed",
                   "forbidden",
