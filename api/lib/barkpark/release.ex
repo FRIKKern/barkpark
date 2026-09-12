@@ -30,6 +30,30 @@ defmodule Barkpark.Release do
     end
   end
 
+  @doc """
+  Assert the migrate step actually applied the tree: every migration version in
+  the release's `priv/repo/migrations` is present in `schema_migrations`, and no
+  two files claim the same version. Raises, naming the version, otherwise.
+
+  The same `Barkpark.MigrationIntegrity.check/1` the test suite runs — a release
+  has no `mix test` alias to migrate for it, so an operator runs this after
+  `bin/barkpark eval 'Barkpark.Release.migrate()'`. It is NOT wired into boot:
+  a node refusing to start is a worse outcome than a named failure an operator
+  reads. Returns the checked/applied counts so the denominator is visible.
+  """
+  def verify_migrations! do
+    load_app()
+
+    for repo <- repos() do
+      {:ok, counts, _} =
+        Ecto.Migrator.with_repo(repo, fn started ->
+          Barkpark.MigrationIntegrity.check!(repo: started)
+        end)
+
+      counts
+    end
+  end
+
   # `seed_script` is `priv_path_for/2`: the OTP app's own `:code.priv_dir`
   # joined with the compile-time literals "repo" and "seeds.exs". No runtime
   # input reaches `Code.eval_file/1`, and `seed/0` is an operator-invoked
