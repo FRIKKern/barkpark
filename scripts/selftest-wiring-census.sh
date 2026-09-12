@@ -18,8 +18,13 @@
 #
 # So execution is resolved over FOUR routes, and a file is RUN if any holds:
 #
-#   R1 DIRECT   its basename appears in a workflow, on a line that is not a
-#               whole-line comment.
+#   R1 DIRECT   its basename appears in a workflow on an EXECUTION line — one
+#               carrying an invoking verb (bash/sh/node/exec/source), a
+#               `run: <command>`, a backslash continuation of either, or a bare
+#               scripts/… command at the head of a run: block. A basename that
+#               appears only in a `paths:`/`filters:` entry or in the
+#               dispatcher's `<job-id> <path>` roster is a TRIGGER or an INPUT
+#               declaration, never an execution, and does NOT satisfy R1.
 #   R2 GLOB     a workflow names a scripts/… glob that the file matches.
 #   R3 PARENT   a script in scripts/ dispatches to it (a `--selftest` exec, say)
 #               AND that parent's own basename appears in a workflow.
@@ -50,7 +55,7 @@ set -uo pipefail
 ROOT="${CENSUS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 census() {
-  local root="$1" files wf_nc invocations doors globs rc=0 n_run=0 n_exempt=0 n_red=0
+  local root="$1" files wf_nc wf_exec invocations doors globs rc=0 n_run=0 n_exempt=0 n_red=0
   [ -d "$root/scripts" ] || { echo "selftest-wiring-census: REFUSING — no scripts/ under $root" >&2; return 2; }
   [ -d "$root/.github/workflows" ] || { echo "selftest-wiring-census: REFUSING — no .github/workflows/ under $root" >&2; return 2; }
 
@@ -66,6 +71,34 @@ census() {
   wf_nc="$(mktemp "${TMPDIR:-/tmp}/wfnc.XXXXXX")"
   grep -hv '^[[:space:]]*#' "$root"/.github/workflows/*.yml 2>/dev/null \
     | grep -vE '^[[:space:]]*-[[:space:]]*"?'"'"'?[A-Za-z0-9_./*{}-]+"?'"'"'?[[:space:]]*$' > "$wf_nc"
+
+  # R1's corpus: the EXECUTION LINES of that workflow text.
+  #
+  # WHY A SECOND FILTER (task-1484df07d2d226c2). Dropping bare scalar sequence
+  # items is not enough. Measured on 2026-09-11: a harness named ONLY in the
+  # dispatcher's `changes` roster (`<job-id> scripts/foo.test.sh`, two tokens,
+  # no leading `-`) and in a `paths:` entry carrying a trailing `# comment`
+  # (also no longer a BARE scalar) still resolved R1-direct. So a harness that
+  # nothing executes read WIRED, and the ORPHAN verdict — the one that keeps an
+  # unwired harness from shipping — could not fire for it.
+  #
+  # The rule is LINE-level, not block-level. Scoping to `run:` BLOCKS would
+  # readmit the roster, which lives inside a `run: |` heredoc. A line qualifies
+  # only if it carries an invoking verb as a WORD (the same idiom R3 and R2
+  # already use), or is a `run:` with a command on it (`run: |` alone is not),
+  # or continues either across a trailing backslash, or is a bare scripts/…
+  # command at the head of a run: block.
+  #
+  # HONEST LIMIT: a harness invoked inside a `run: |` block by a shape none of
+  # those four cover reads ORPHAN — loud and fixable, never a silent WIRED.
+  wf_exec="$(mktemp "${TMPDIR:-/tmp}/wfexec.XXXXXX")"
+  awk '
+      { verb = ($0 ~ /(^|[[:space:]]|[(;&|])(exec|bash|sh|node|source)[[:space:]]/) \
+               || ($0 ~ /run:[[:space:]]*[^|>[:space:]]/) \
+               || ($0 ~ /^[[:space:]]*\.?\/?scripts\/[A-Za-z0-9_.\/*-]+\.(sh|mjs)/) }
+      (verb || cont) { print }
+      { cont = ($0 ~ /\\[[:space:]]*$/) }
+    ' "$wf_nc" > "$wf_exec"
 
   # R3's INDEX, built once: every INVOCATION line of every scripts/ file whose
   # own basename a workflow names, prefixed with that basename. Built once
@@ -118,7 +151,7 @@ census() {
     | grep -oE "scripts/[A-Za-z0-9_./-]*\*[A-Za-z0-9_./*-]*\.test\.(sh|mjs)" | LC_ALL=C sort -u)"
 
   files="$(find "$root/scripts" -type f \( -name '*.test.sh' -o -name '*.test.mjs' -o -name '*_test.sh' \) 2>/dev/null | LC_ALL=C sort)"
-  [ -n "$files" ] || { echo "selftest-wiring-census: REFUSING — found ZERO self-tests under $root/scripts. Reporting a clean census over an empty corpus is the failure this gate exists to prevent." >&2; rm -f "$wf_nc" "$invocations" "$doors"; return 2; }
+  [ -n "$files" ] || { echo "selftest-wiring-census: REFUSING — found ZERO self-tests under $root/scripts. Reporting a clean census over an empty corpus is the failure this gate exists to prevent." >&2; rm -f "$wf_nc" "$wf_exec" "$invocations" "$doors"; return 2; }
 
   local f base rel route
   while IFS= read -r f; do
@@ -127,8 +160,8 @@ census() {
     rel="${f#"$root"/}"
     route=""
 
-    # R1 DIRECT
-    if grep -qF "$base" "$wf_nc"; then route="R1-direct"; fi
+    # R1 DIRECT — an EXECUTION line names it (never a paths:/roster mention).
+    if grep -qF "$base" "$wf_exec"; then route="R1-direct"; fi
 
     # R2 GLOB — every scripts/…*…test.{sh,mjs} glob any workflow names.
     # `set -f` is load-bearing: without it the unquoted expansion of the
@@ -179,7 +212,7 @@ census() {
 $files
 EOF
 
-  rm -f "$wf_nc" "$invocations" "$doors"
+  rm -f "$wf_nc" "$wf_exec" "$invocations" "$doors"
   if [ "$rc" -ne 0 ]; then
     echo "selftest-wiring-census: FAILED — ${n_red} self-test(s) are neither executed by CI nor exempt."
     echo "  Fix one of two ways: wire it (a tenant of .github/workflows/shell-harnesses.yml, or a"
@@ -227,6 +260,59 @@ selftest() {
   has 'EXEMPT .*__studio-wide-deletion-diff.test.mjs' \
     && ok "a basename that appears only in a workflow COMMENT is not counted as run" \
     || bad "__studio-wide-deletion-diff.test.mjs did not land as EXEMPT — the comment-stripper or the header marker regressed"
+
+  echo "== A TRIGGER IS NOT AN EXECUTION: paths: + roster mention only must ORPHAN =="
+  # task-1484df07d2d226c2. The fixture names the harness three ways a real
+  # workflow names one — an on.*.paths entry, the same entry carrying a trailing
+  # comment (so it is no longer a BARE scalar), and a `<job-id> <path>` row in
+  # the dispatcher's roster inside a `run: |` heredoc — and EXECUTES it nowhere.
+  # Before the R1 exec-line filter this read `RUN … (R1-direct)`.
+  #
+  # The control step below writes its `run:` line through printf rather than a
+  # heredoc ON PURPOSE: this file's own basename is named by a workflow, so any
+  # line HERE holding both an invoking verb and the fixture's basename lands in
+  # R3's invocation index and resolves the fixture as R3-parent — this script
+  # wiring its own fixture through its own source. Measured: it turned this arm
+  # green for the wrong reason.
+  local tfix=__census-trigger-only.test.sh
+  printf '%s\n' '#!/usr/bin/env bash' '# planted: named by triggers, executed by nothing' 'exit 0' \
+    > "$tmp/scripts/$tfix"
+  cat > "$tmp/.github/workflows/__census-fixture.yml" <<'FIXTURE'
+name: Census fixture
+on:
+  pull_request:
+    paths:
+      - "scripts/__census-trigger-only.test.sh"
+      - "scripts/__census-trigger-only.test.sh" # an input, not a runner
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: roster
+        run: |
+          cat <<'ROSTER'
+          census-fixture scripts/__census-trigger-only.test.sh
+          ROSTER
+FIXTURE
+  out="$(CENSUS_ROOT="$tmp" CENSUS_VERBOSE=1 census "$tmp" 2>&1)"; rc=$?
+  has 'ORPHAN .*__census-trigger-only.test.sh' \
+    && ok "a harness named ONLY in paths:/filters:/roster rows is ORPHAN, not RUN" \
+    || bad "a harness that NOTHING executes read as wired — R1 is matching the basename outside an execution line"
+  [ "$rc" -eq 1 ] && ok "the trigger-only fixture reds the census (rc=1)" \
+                  || bad "the trigger-only fixture did not red the census (rc=$rc)"
+
+  echo "== CONTROL: the SAME fixture with a run: step reads RUN (R1-direct) =="
+  {
+    printf '  run-it:\n    runs-on: ubuntu-latest\n    steps:\n'
+    printf '      - run: %s scripts/%s\n' bash "$tfix"
+  } >> "$tmp/.github/workflows/__census-fixture.yml"
+  out="$(CENSUS_ROOT="$tmp" CENSUS_VERBOSE=1 census "$tmp" 2>&1)"; rc=$?
+  has 'RUN .*__census-trigger-only.test.sh  (R1-direct)' \
+    && ok "adding a run: step flips the same file to RUN (R1-direct)" \
+    || bad "a genuine run: step did NOT resolve R1 — the exec-line filter is too narrow"
+  [ "$rc" -eq 0 ] && ok "the executed fixture is green (rc=0)" \
+                  || bad "the executed fixture did not go green (rc=$rc)"
+  rm -f "$tmp/scripts/$tfix" "$tmp/.github/workflows/__census-fixture.yml"
 
   echo "== CAN-LOSE: an unlisted, unexempted harness must RED =="
   cat > "$tmp/scripts/__census-canary.test.sh" <<'CANARY'

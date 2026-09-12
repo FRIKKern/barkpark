@@ -19,7 +19,7 @@
       "cell": "paper-excellence-wave-2026-08-12__light__1280",
       "file": "paper-excellence-wave-2026-08-12__light__1280.jpeg",
       "scale": 2,
-      "bytes": 5986207,
+      "bytes": 6283222,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -126,7 +126,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 70.6,
       "proseCplSamples": 29,
       "captionCpl": null,
       "captionWidth": null,
@@ -197,7 +197,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -277,7 +277,7 @@
           },
           {
             "px": 2,
-            "y": 2115.3,
+            "y": 2172.9,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -287,7 +287,7 @@
           },
           {
             "px": 2,
-            "y": 3202.6,
+            "y": 3260.2,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -297,7 +297,7 @@
           },
           {
             "px": 2,
-            "y": 4064.2,
+            "y": 4121.8,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -307,7 +307,7 @@
           },
           {
             "px": 2,
-            "y": 5456.9,
+            "y": 5514.5,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -317,7 +317,7 @@
           },
           {
             "px": 2,
-            "y": 7863.8,
+            "y": 7921.4,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -327,7 +327,7 @@
           },
           {
             "px": 2,
-            "y": 9100,
+            "y": 9157.6,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -337,7 +337,7 @@
           },
           {
             "px": 2,
-            "y": 10964.5,
+            "y": 11048.1,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -347,7 +347,7 @@
           },
           {
             "px": 2,
-            "y": 12527,
+            "y": 12636.8,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -357,7 +357,7 @@
           },
           {
             "px": 2,
-            "y": 13839.7,
+            "y": 13978.3,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -367,7 +367,7 @@
           },
           {
             "px": 2,
-            "y": 14924.4,
+            "y": 15021.6,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -383,7 +383,7 @@
       "cell": "paper-excellence-wave-2026-08-12__light__1920",
       "file": "paper-excellence-wave-2026-08-12__light__1920.jpeg",
       "scale": 2,
-      "bytes": 6344576,
+      "bytes": 6622330,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -490,7 +490,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 70.6,
       "proseCplSamples": 29,
       "captionCpl": null,
       "captionWidth": null,
@@ -561,7 +561,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -621,7 +621,7 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 779.2,
+            "y": 798.4,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -631,7 +631,7 @@
           },
           {
             "px": 2,
-            "y": 1263.3,
+            "y": 1282.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -641,7 +641,7 @@
           },
           {
             "px": 2,
-            "y": 2096.2,
+            "y": 2172.9,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -651,7 +651,7 @@
           },
           {
             "px": 2,
-            "y": 3183.4,
+            "y": 3260.2,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -661,7 +661,7 @@
           },
           {
             "px": 2,
-            "y": 4045,
+            "y": 4121.8,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -671,7 +671,7 @@
           },
           {
             "px": 2,
-            "y": 5437.7,
+            "y": 5514.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -681,7 +681,7 @@
           },
           {
             "px": 2,
-            "y": 7844.6,
+            "y": 7921.4,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -691,7 +691,7 @@
           },
           {
             "px": 2,
-            "y": 9002.6,
+            "y": 9079.3,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -701,7 +701,7 @@
           },
           {
             "px": 2,
-            "y": 10788.7,
+            "y": 10865.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -711,7 +711,7 @@
           },
           {
             "px": 2,
-            "y": 12299,
+            "y": 12375.8,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -721,7 +721,7 @@
           },
           {
             "px": 2,
-            "y": 13611.8,
+            "y": 13717.4,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -731,7 +731,7 @@
           },
           {
             "px": 2,
-            "y": 14644.3,
+            "y": 14708.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -747,7 +747,7 @@
       "cell": "paper-excellence-wave-2026-08-12__dark__1280",
       "file": "paper-excellence-wave-2026-08-12__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 5928177,
+      "bytes": 6222801,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -854,7 +854,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 70.6,
       "proseCplSamples": 29,
       "captionCpl": null,
       "captionWidth": null,
@@ -925,7 +925,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -1005,7 +1005,7 @@
           },
           {
             "px": 2,
-            "y": 2115.3,
+            "y": 2172.9,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1015,7 +1015,7 @@
           },
           {
             "px": 2,
-            "y": 3202.6,
+            "y": 3260.2,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1025,7 +1025,7 @@
           },
           {
             "px": 2,
-            "y": 4064.2,
+            "y": 4121.8,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1035,7 +1035,7 @@
           },
           {
             "px": 2,
-            "y": 5456.9,
+            "y": 5514.5,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1045,7 +1045,7 @@
           },
           {
             "px": 2,
-            "y": 7863.8,
+            "y": 7921.4,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1055,7 +1055,7 @@
           },
           {
             "px": 2,
-            "y": 9100,
+            "y": 9157.6,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1065,7 +1065,7 @@
           },
           {
             "px": 2,
-            "y": 10964.5,
+            "y": 11048.1,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1075,7 +1075,7 @@
           },
           {
             "px": 2,
-            "y": 12527,
+            "y": 12636.8,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1085,7 +1085,7 @@
           },
           {
             "px": 2,
-            "y": 13839.7,
+            "y": 13978.3,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1095,7 +1095,7 @@
           },
           {
             "px": 2,
-            "y": 14924.4,
+            "y": 15021.6,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1111,7 +1111,7 @@
       "cell": "paper-excellence-wave-2026-08-12__dark__1920",
       "file": "paper-excellence-wave-2026-08-12__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 6286790,
+      "bytes": 6557118,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -1218,7 +1218,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 70.6,
       "proseCplSamples": 29,
       "captionCpl": null,
       "captionWidth": null,
@@ -1289,7 +1289,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -1349,7 +1349,7 @@
         "heavyRules": [
           {
             "px": 2,
-            "y": 779.2,
+            "y": 798.4,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1359,7 +1359,7 @@
           },
           {
             "px": 2,
-            "y": 1263.3,
+            "y": 1282.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1369,7 +1369,7 @@
           },
           {
             "px": 2,
-            "y": 2096.2,
+            "y": 2172.9,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1379,7 +1379,7 @@
           },
           {
             "px": 2,
-            "y": 3183.4,
+            "y": 3260.2,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1389,7 +1389,7 @@
           },
           {
             "px": 2,
-            "y": 4045,
+            "y": 4121.8,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1399,7 +1399,7 @@
           },
           {
             "px": 2,
-            "y": 5437.7,
+            "y": 5514.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1409,7 +1409,7 @@
           },
           {
             "px": 2,
-            "y": 7844.6,
+            "y": 7921.4,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1419,7 +1419,7 @@
           },
           {
             "px": 2,
-            "y": 9002.6,
+            "y": 9079.3,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1429,7 +1429,7 @@
           },
           {
             "px": 2,
-            "y": 10788.7,
+            "y": 10865.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1439,7 +1439,7 @@
           },
           {
             "px": 2,
-            "y": 12299,
+            "y": 12375.8,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1449,7 +1449,7 @@
           },
           {
             "px": 2,
-            "y": 13611.8,
+            "y": 13717.4,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1459,7 +1459,7 @@
           },
           {
             "px": 2,
-            "y": 14644.3,
+            "y": 14708.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
