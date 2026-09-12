@@ -23385,7 +23385,7 @@ test("cch-w38-s1: a MEMBER is offered NONE of the seven elevated verbs live — 
   // `route` is the router's own table (cloud/lib/barkpark_cloud/web/router.ex);
   // every one of them reads `admin`.
   const OFFERS = [
-    { verb: "runDecommission", route: "POST /v1/instances/:id/lifecycle", where: "the CLI rail",
+    { verb: "runDecommission", route: "DELETE /v1/barkparks/:id", where: "the CLI rail",
       render: (a) => hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, a)),
       live: LIVE_DECOMM,
       dead: '<button class="btn btn-sm" type="button" data-life-verb="decommission" disabled title="' + S + '">Decommission</button>' },
