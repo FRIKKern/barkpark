@@ -124,6 +124,12 @@ GUARD = re.compile(r'(^|;|\bthen\b|&&|\|\|)\s*(return|exit|continue|break)\b')
 # A consumer that is ITSELF an existence/size test handles the empty case by
 # design — `[ ! -s "$f" ] && warn` names the failure rather than tripping over it.
 EXISTS_TEST = re.compile(r'\[\s*!?\s*-(s|f|e|r)\s')
+# P5 — a STATUS SURROGATE on the laundered line itself. `curl -w '%{http_code}'`
+# captured into a variable, or `; rc=$?`, means the status was not actually
+# thrown away: a proxy for it survives and some later line can assert it. Four
+# of scripts/pds-pull-proof.sh's curl sites are exactly this shape and are
+# CORRECT — the verdict reads `$code`, and the body read is informational.
+SURROGATE = re.compile(r"-w\s+['\"]?%\{http_code\}|\brc=\$\?|\bcode=\$\?|--write-out")
 
 def files_to_scan():
     if explicit:
@@ -188,15 +194,28 @@ def artifacts(line):
             seen.add(v); uniq.append((v, why))
     return uniq
 
+OPENS = re.compile(r'(^|;|\bdo\b|\bthen\b)\s*(if|case)\b')
+CLOSES = re.compile(r'(^|;)\s*(fi|esac)\b')
+
 def guarded(lines, i, j):
-    """True when an early-exit guard stands between the producer and line j."""
+    """True when the consumer at j is protected from the producer's failure.
+
+    TWO WAYS, and both were found in this repo rather than imagined:
+      (a) an EARLY EXIT between them (`if [ "$code" != 200 ]; then fail; return`);
+      (b) the consumer sits INSIDE a conditional opened after the producer
+          (`if [ "$code" = "200" ]; then version=$(jq … <"$status"); fi`) — a
+          POSITIVE guard, which carries no return and which (a) cannot see.
+    scripts/pds-pull-proof.sh has one of each; neither is the defect.
+    """
+    depth = 0
     for k in range(i + 1, j):
         t = lines[k].strip()
         if not t or t.startswith("#"):
             continue
         if GUARD.search(lines[k]):
             return True
-    return False
+        depth += len(OPENS.findall(lines[k])) - len(CLOSES.findall(lines[k]))
+    return depth > 0
 
 def consumer_for(lines, i, end, art):
     """The first LATER line that READS art. Bare $VAR also matches ${VAR}."""
@@ -252,6 +271,9 @@ for path in files_to_scan():
         if not SILENCE.search(line):
             classified_ok.append((path, i + 1, line.rstrip(), "P2 not met: the message is not sent to /dev/null (a `2>&1` capture keeps it)"))
             continue
+        if SURROGATE.search(line):
+            classified_ok.append((path, i + 1, line.rstrip(), "P5 not met: the line carries a STATUS SURROGATE (-w '%{http_code}' / rc=$?) — the status is captured, not discarded"))
+            continue
         arts = artifacts(line)
         if not arts:
             classified_ok.append((path, i + 1, line.rstrip(), "P3 not met: names no artifact — best-effort teardown, nothing downstream can read it"))
@@ -282,7 +304,9 @@ rel = lambda p: os.path.relpath(p, root)
 print("EXIT-LAUNDERING SWEEP")
 print("  coverage   : %s" % (" ".join(explicit) if explicit else " ".join(dirs)))
 print("  patterns   : P1 `|| true` / `|| :` / `; true`  +  P2 output to /dev/null  +  P3 artifact read")
-print("               downstream  +  P4 NO early-exit guard and no existence-test consumer between them")
+print("               downstream  +  P4 NO early-exit guard and no existence-test consumer between")
+print("               them, and the consumer is not INSIDE a conditional opened after the producer")
+print("               +  P5 NO status surrogate (-w '%{http_code}' / rc=$?) on the line itself")
 print("  file types : %s" % " ".join(EXTS))
 print("  files read : %d" % scanned)
 print("  raw hits   : %d   (P1 alone — the naive-grep number)" % raw)
@@ -386,6 +410,31 @@ step_0a() {
   version="$(jqp 'd["version"]' <"$status")"
 }
 EOF
+  # ── P4b CONTROL: a POSITIVE guard — the consumer sits inside an `if` opened
+  # after the producer, so the failing path never reaches it. Verbatim shape of
+  # scripts/pds-pull-proof.sh:3494. No `return`, so the early-exit arm is blind
+  # to it, which is why P4 counts conditional DEPTH as well.
+  cat > "$tmp/scripts/neg-f.sh" <<'EOF'
+#!/usr/bin/env bash
+step_8() {
+  bp_curl -sS -o "$status" --max-time 30 "$BASE/status.json" >/dev/null 2>&1 || true
+  if [ "$RC" = "200" ]; then
+    uptime_now="$(jqp 'd.get("uptime_seconds","")' <"$status" 2>/dev/null || true)"
+  fi
+}
+EOF
+  # ── P5 CONTROL: a status SURROGATE on the laundered line. The shape of
+  # scripts/pds-pull-proof.sh's curl sites: the exit status is laundered but
+  # `%{http_code}` is captured, and the verdict line reads THAT.
+  cat > "$tmp/scripts/neg-e.sh" <<'EOF'
+#!/usr/bin/env bash
+fetch() {
+  code="$(curl -sS -o "$bundle" -w '%{http_code}' "$URL" 2>/dev/null || true)"
+  bytes="$(wc -c <"$bundle")"
+  info "export HTTP $code · $bytes bytes"
+  if [ "$code" != "200" ]; then bad "export -> $code"; fi
+}
+EOF
   # ── SEVERITY CONTROL: a CAPTURE whose message IS silenced is MEDIUM, not HIGH.
   cat > "$tmp/scripts/plant-d.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -429,6 +478,9 @@ EOF
   chk "the MEDIUM tally is reported separately"             yes "MEDIUM   : 1"
   chk "P4: an early-exit guard between excuses the site"    no  "CONFIRMED[HIGH] scripts/neg-d.sh"
   chk "P4: …and says WHY, rather than dropping it silently" yes "an early-exit guard stands between"
+  chk "P4b: a POSITIVE guard (consumer inside an if) excuses" no "CONFIRMED[HIGH] scripts/neg-f.sh"
+  chk "P5: a %{http_code} surrogate excuses the site"       no  "CONFIRMED[HIGH] scripts/neg-e.sh"
+  chk "P5: …and says WHY"                                   yes "P5 not met: the line carries a STATUS SURROGATE"
 
   # The FALSIFIER the row demands: remove the consumer and the positive must go away.
   perl -0pi -e 's/^\s*if jq -e.*$//m; s/^\s*bad "the emitted spec.*$//m' "$tmp/scripts/plant-a.sh"
