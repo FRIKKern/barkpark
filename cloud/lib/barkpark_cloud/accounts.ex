@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Accounts do
     TeamMembership,
     TwoFactor,
     User,
+    UserSecurityEvent,
     UserToken
   }
 
@@ -408,6 +409,60 @@ defmodule BarkparkCloud.Accounts do
     %AuditEvent{}
     |> AuditEvent.changeset(attrs)
     |> Repo.insert()
+  end
+
+  @doc """
+  Append one row to a USER's own security trail (`user_security_events`).
+
+  `attrs` carries `:user_id` (required) and `:action` (required, one of
+  `UserSecurityEvent.actions/0`), plus optional `:ip`, `:user_agent`,
+  `:metadata`. Returns `{:ok, %UserSecurityEvent{}}` | `{:error, changeset}`.
+
+  This is the SOLE writer. There is no update and no delete counterpart, in this
+  module or anywhere else: the table is append-only in Ecto (`updated_at: false`)
+  and at the DB (a BEFORE UPDATE OR DELETE trigger, see the migration).
+
+  DELIBERATELY NOT `record_audit/1`'s sibling in transaction discipline. The
+  producing call sites are POST-COMMIT and BEST-EFFORT — the password is already
+  rotated, the session already revoked, the email already swapped by the time
+  this runs — so a failed insert must never turn a completed security change
+  into a 500. The router's `record_user_security_event/3` wrapper logs the
+  failure instead of raising. That is the same ruling
+  `Router.audit_account_security/2` already carries, for the same reason.
+  """
+  @spec record_user_security_event(map()) ::
+          {:ok, UserSecurityEvent.t()} | {:error, Ecto.Changeset.t()}
+  def record_user_security_event(attrs) do
+    %UserSecurityEvent{}
+    |> UserSecurityEvent.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  A user's OWN security trail, newest first.
+
+  THE SCOPE IS A COLUMN, NOT A COMPOUND PREDICATE — and that is the whole reason
+  this table exists separately. `list_self_security_audit_events/2` has to prove
+  "self" out of THREE fields (`actor_user_id` AND `target_type` AND `target_id`)
+  because an audit row carries an actor, a target and a team; drop any one of
+  those `where`s and a member reads another member's rows. Here "self" is
+  `user_id`, one column, one `where`, and the query has no other filter that
+  could widen it: no team scope, no target predicate, no caller-supplied
+  parameter beyond `:limit`.
+
+  `:limit` is clamped to 1..200 (default 100) so a query string cannot ask for
+  the whole table.
+  """
+  @spec list_user_security_events(User.t() | binary(), keyword()) :: [UserSecurityEvent.t()]
+  def list_user_security_events(user, opts \\ []) do
+    uid = user_id(user)
+    limit = opts |> Keyword.get(:limit, 100) |> min(200) |> max(1)
+
+    UserSecurityEvent
+    |> where([e], e.user_id == ^uid)
+    |> order_by([e], desc: e.inserted_at, desc: e.id)
+    |> limit(^limit)
+    |> Repo.all()
   end
 
   @doc """
