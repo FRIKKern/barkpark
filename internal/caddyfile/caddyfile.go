@@ -431,6 +431,18 @@ func writeSiteBlock(sb *strings.Builder, s Site, seen map[string]bool) bool {
 		// missing page must surface as a real 404, not get masked into the
 		// "Back in a moment" deploy page that handle_errors would impose.
 		fmt.Fprintf(sb, "  root * %s\n", s.Root)
+		// NO `disable_symlinks` HERE, ON PURPOSE (task-63877435cf4ad70a). It is not a
+		// Caddy construct at any level — measured on caddy 2.11.4, it is rejected as an
+		// unknown file_server subdirective, an unrecognized site directive, an
+		// unrecognized global option, and an unknown http.handlers.file_server JSON
+		// field; it is an NGINX directive. Emitting it would make the SHARED Caddyfile
+		// unparseable, so caddy would refuse the whole file and every site on the box
+		// with it. And even if it existed, the Root above IS the `current` release
+		// symlink the deploy swaps atomically (charter D11), so it would refuse every
+		// request to every static site — file_server has no root-only exemption. The
+		// symlink threat is fenced elsewhere: at the packer (charter D120,
+		// internal/cli/sites_tarball.go) and at the flip (deploy/site-deploy.sh's
+		// do_switch refuses to repoint `current` at a release containing any symlink).
 		sb.WriteString("  file_server\n")
 	} else {
 		fmt.Fprintf(sb, "  reverse_proxy 127.0.0.1:%d\n", s.Port)

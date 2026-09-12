@@ -762,6 +762,98 @@ run_at "$NOUNIQ/scripts/pds-record-parity.sh" 0 \
   "REVERTING the uniqueness leg does NOT disturb the heading lens" -- --axis a --charter "$CH" --commits-file "$CM_HEAD"
 says "unresolved: 0" "the heading-only citation still resolves with the uniqueness leg blinded"
 
+# ── THE D-NUMBER ARBITER (one pointer, two allocators) ──────────────────────
+#
+# THE FIXTURE IS THE COLLISION, NOT A CALL. Two allocations with NO charter edit
+# between them IS the concurrency this defect is made of: the REVIEW author and
+# the DECIDE author both compute the next number from a charter neither has
+# written to yet. Simulating it needs no second process and no clock — it needs
+# the second caller to read the same unchanged charter the first one read, which
+# is exactly what these two lines do.
+#
+# THE FIXTURE CHARTER'S HIGH-WATER IS 404 (`## PDS-D404 …`, the heading form),
+# and it is ASSERTED rather than assumed: if a future edit to $CH adds a higher
+# number, every expectation below shifts by one and would otherwise fail for a
+# reason that has nothing to do with the arbiter.
+echo
+echo "AXIS A — the D-number arbiter (one pointer, two allocators)"
+
+ALLOC_LED="$TMP/alloc-ledger.tsv"
+rm -f "$ALLOC_LED"
+CH_HIGH="$(grep -oE 'PDS-D[0-9]+' "$CH" | sed 's/PDS-D//' | sort -n | tail -1)"
+CHECKS=$((CHECKS + 1))
+if [ "$CH_HIGH" = "999" ]; then
+  # 999 is the PROSE MENTION; the DEFINITION high-water is 404. Both facts are
+  # asserted, because the arbiter's whole correctness rests on not confusing them.
+  echo "ok    the fixture charter MENTIONS PDS-D999 in prose (the lens must not mint 1000)"
+else
+  FAILURES=$((FAILURES + 1)); echo "FAIL  FIXTURE PRECONDITION: expected PDS-D999 to be the highest MENTION in \$CH, got ${CH_HIGH}"
+fi
+
+run 0 "the REVIEW block mints the first number after the charter's DEFINED high-water" \
+  -- --charter "$CH" --alloc-ledger "$ALLOC_LED" --allocate-d 1 --for "wN REVIEW"
+says "PDS-D405" "it mints 405 — one past the HEADING-defined 404, NOT one past the prose-mentioned 999"
+says_not "PDS-D1000" "the prose mention of PDS-D999 does not move the pointer"
+
+# THE WHOLE ROW. The charter is UNCHANGED between these two runs; that is the
+# point. Before the arbiter, the second caller read the same corpus and minted
+# the same number — eighteen times, once per wave, for eighteen waves.
+run 0 "the NEXT block allocates with the charter STILL unwritten" \
+  -- --charter "$CH" --alloc-ledger "$ALLOC_LED" --allocate-d 2 --for "wN DECIDE"
+says "PDS-D406" "the second allocator sees the RESERVATION and moves past it"
+says "PDS-D407" "a multi-number allocation is contiguous"
+says_not "PDS-D405" "it does NOT re-mint the number the REVIEW block already reserved"
+
+# MUTUAL EXCLUSION. A held lock is a REFUSAL (exit 2), never a proceed — an
+# arbiter that shrugs and allocates anyway is the pointer it replaced.
+mkdir -p "$TMP/.d-alloc.lock"
+run 2 "a HELD lock is UNCHECKED, never a silent proceed" \
+  -- --charter "$CH" --alloc-ledger "$ALLOC_LED" --allocate-d 1 --for "wN INTRUDER"
+says "the allocation lock" "the refusal names the lock"
+rmdir "$TMP/.d-alloc.lock"
+
+# --check-alloc: a number DEFINED above the seed that was never RESERVED is the
+# bypass this arbiter exists to make visible after the fact.
+CH_MINTED="$TMP/charter-minted.md"
+cp "$CH" "$CH_MINTED"
+printf '\n- **PDS-D406** minted through the arbiter.\n' >> "$CH_MINTED"
+run 0 "--check-alloc greens when every number above the seed was reserved first" \
+  -- --charter "$CH_MINTED" --alloc-ledger "$ALLOC_LED" --check-alloc
+says "every charter number above the seed was reserved first" "the green says what it measured"
+
+printf '\n- **PDS-D480** minted by reading the charter, not through the arbiter.\n' >> "$CH_MINTED"
+run 1 "--check-alloc REDS on a number minted without a reservation" \
+  -- --charter "$CH_MINTED" --alloc-ledger "$ALLOC_LED" --check-alloc
+says "UNRESERVED-MINT      PDS-D480" "the bypass is named, by number"
+says_not "UNRESERVED-MINT      PDS-D404" "a number at or below the SEED is not scored — it predates the arbiter"
+
+run 2 "--check-alloc over a ledger with no SEED is UNCHECKED, never a green" \
+  -- --charter "$CH" --alloc-ledger "$TMP/absent-ledger.tsv" --check-alloc
+
+run 3 "--allocate-d 0 is a USAGE error" -- --charter "$CH" --alloc-ledger "$ALLOC_LED" --allocate-d 0
+run 3 "--allocate-d with a non-number is a USAGE error" -- --charter "$CH" --alloc-ledger "$ALLOC_LED" --allocate-d two
+
+# REVERT 3 — THE COLLISION MUST COME BACK. Delete the one line that folds the
+# reservation high-water into the pointer and the arbiter IS the pre-arbiter
+# pointer: `max(charter) + 1`, computed twice over one unchanged charter,
+# answering 405 both times. A fix whose removal changes nothing was never the fix.
+NORES="$TMP/mutant-nores"
+mutant "$NORES" '/# revert-marker: arbiter-reserve-arm$/d'
+if grep -q '# revert-marker: arbiter-reserve-arm' "$NORES/scripts/pds-record-parity.sh"; then
+  harness_fail "the NORES mutant still consults the reservation ledger — the revert did not take, so its collision would prove nothing"
+else
+  MUT_LED="$TMP/alloc-ledger-mutant.tsv"
+  rm -f "$MUT_LED"
+  run_at "$NORES/scripts/pds-record-parity.sh" 0 \
+    "REVERTED arbiter, first allocation" -- --charter "$CH" --alloc-ledger "$MUT_LED" --allocate-d 1 --for "wN REVIEW"
+  says "PDS-D405" "the reverted pointer mints 405, same as the repaired one"
+  run_at "$NORES/scripts/pds-record-parity.sh" 0 \
+    "REVERTING the reservation arm MINTS THE SAME NUMBER TWICE (the collision returns)" \
+    -- --charter "$CH" --alloc-ledger "$MUT_LED" --allocate-d 1 --for "wN DECIDE"
+  says "PDS-D405" "the second allocator re-mints 405 — the exact defect that produced the eighteen pairs"
+  says_not "PDS-D406" "the reverted pointer cannot see the reservation, so it cannot move past it"
+fi
+
 # ── the arm's own hygiene ───────────────────────────────────────────────────
 echo
 echo "HYGIENE"
@@ -775,6 +867,13 @@ if [ "$N_TIMEOUT" -eq 0 ]; then
   echo "ok    neither file invokes ${NEEDLE}(1)"
 else
   FAILURES=$((FAILURES + 1)); echo "FAIL  ${NEEDLE}(1) appears ${N_TIMEOUT}x — it does not exist on this host and reported EXIT=0 for a command that never ran"
+fi
+
+CHECKS=$((CHECKS + 1))
+if [ "$(grep -c '# revert-marker: arbiter-reserve-arm$' "$ARM")" = "1" ]; then
+  echo "ok    the arbiter's reservation arm carries exactly one revert-marker"
+else
+  FAILURES=$((FAILURES + 1)); echo "FAIL  the arbiter revert-marker is missing or duplicated — REVERT 3 would mutate nothing and pass"
 fi
 
 CHECKS=$((CHECKS + 1))

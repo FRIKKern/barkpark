@@ -62,7 +62,10 @@ describe('inline `code` source contract (shared fixture)', () => {
   it('the children fall-through is REACHED by at least six cases', () => {
     const reached = fixture.cases.filter((c) => {
       if (c.node.children === undefined || c.source === '') return false
-      const { children: _children, ...withoutChildren } = c.node
+      // Copy-then-delete rather than a discarded rest sibling: the discarded
+      // binding is a no-unused-vars red under this package's eslint config.
+      const withoutChildren = { ...c.node }
+      delete withoutChildren.children
       return inlineCodeSource(withoutChildren) !== c.source
     })
     expect(reached.length).toBeGreaterThanOrEqual(6)

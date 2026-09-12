@@ -19,7 +19,7 @@
       "cell": "eight-minute-erasure__light__1280",
       "file": "eight-minute-erasure__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2338025,
+      "bytes": 2351170,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -86,19 +86,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 71.1,
       "proseCplSamples": 19,
-      "captionCpl": 62.2,
-      "captionWidth": 400.4,
+      "captionCpl": 59,
+      "captionWidth": 400,
       "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 529.8,
+          "width": 532,
           "offCentre": 0,
-          "left": 375.1,
-          "right": 904.9,
-          "inkWidth": 527.8,
+          "left": 374,
+          "right": 906,
+          "inkWidth": 530,
           "inkOffCentre": 0
         },
         {
@@ -166,16 +166,16 @@
         },
         {
           "kind": "bp-table",
-          "width": 641,
+          "width": 644.5,
           "offCentre": 0,
-          "left": 319.5,
-          "right": 960.5,
-          "inkWidth": 639,
+          "left": 317.8,
+          "right": 962.2,
+          "inkWidth": 642.5,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -249,7 +249,7 @@
           },
           {
             "px": 2,
-            "y": 1617.2,
+            "y": 1638.1,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -259,7 +259,7 @@
           },
           {
             "px": 2,
-            "y": 2438.7,
+            "y": 2459.6,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -269,7 +269,7 @@
           },
           {
             "px": 2,
-            "y": 4197.9,
+            "y": 4247.6,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -279,7 +279,7 @@
           },
           {
             "px": 2,
-            "y": 5604.2,
+            "y": 5674.7,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -289,7 +289,7 @@
           },
           {
             "px": 2,
-            "y": 7161,
+            "y": 7231.5,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -299,7 +299,7 @@
           },
           {
             "px": 2,
-            "y": 8072.5,
+            "y": 8143.1,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -315,7 +315,7 @@
       "cell": "eight-minute-erasure__light__1920",
       "file": "eight-minute-erasure__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2524808,
+      "bytes": 2545733,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -382,19 +382,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 71.1,
       "proseCplSamples": 19,
-      "captionCpl": 62.2,
-      "captionWidth": 400.4,
+      "captionCpl": 59,
+      "captionWidth": 400,
       "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 529.8,
+          "width": 532,
           "offCentre": 0,
-          "left": 695.1,
-          "right": 1224.9,
-          "inkWidth": 527.8,
+          "left": 694,
+          "right": 1226,
+          "inkWidth": 530,
           "inkOffCentre": 0
         },
         {
@@ -462,16 +462,16 @@
         },
         {
           "kind": "bp-table",
-          "width": 641,
+          "width": 644.5,
           "offCentre": 0,
-          "left": 639.5,
-          "right": 1280.5,
-          "inkWidth": 639,
+          "left": 637.8,
+          "right": 1282.2,
+          "inkWidth": 642.5,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -545,7 +545,7 @@
           },
           {
             "px": 2,
-            "y": 1617.2,
+            "y": 1638.1,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -555,7 +555,7 @@
           },
           {
             "px": 2,
-            "y": 2438.7,
+            "y": 2459.6,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -565,7 +565,7 @@
           },
           {
             "px": 2,
-            "y": 4173.9,
+            "y": 4223.6,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -575,7 +575,7 @@
           },
           {
             "px": 2,
-            "y": 5580.2,
+            "y": 5650.7,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -585,7 +585,7 @@
           },
           {
             "px": 2,
-            "y": 7137,
+            "y": 7207.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -595,7 +595,7 @@
           },
           {
             "px": 2,
-            "y": 8048.5,
+            "y": 8119.1,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -611,7 +611,7 @@
       "cell": "eight-minute-erasure__dark__1280",
       "file": "eight-minute-erasure__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2328798,
+      "bytes": 2354705,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -678,19 +678,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 71.1,
       "proseCplSamples": 19,
-      "captionCpl": 62.2,
-      "captionWidth": 400.4,
+      "captionCpl": 59,
+      "captionWidth": 400,
       "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 529.8,
+          "width": 532,
           "offCentre": 0,
-          "left": 375.1,
-          "right": 904.9,
-          "inkWidth": 527.8,
+          "left": 374,
+          "right": 906,
+          "inkWidth": 530,
           "inkOffCentre": 0
         },
         {
@@ -758,16 +758,16 @@
         },
         {
           "kind": "bp-table",
-          "width": 641,
+          "width": 644.5,
           "offCentre": 0,
-          "left": 319.5,
-          "right": 960.5,
-          "inkWidth": 639,
+          "left": 317.8,
+          "right": 962.2,
+          "inkWidth": 642.5,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -841,7 +841,7 @@
           },
           {
             "px": 2,
-            "y": 1617.2,
+            "y": 1638.1,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -851,7 +851,7 @@
           },
           {
             "px": 2,
-            "y": 2438.7,
+            "y": 2459.6,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -861,7 +861,7 @@
           },
           {
             "px": 2,
-            "y": 4197.9,
+            "y": 4247.6,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -871,7 +871,7 @@
           },
           {
             "px": 2,
-            "y": 5604.2,
+            "y": 5674.7,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -881,7 +881,7 @@
           },
           {
             "px": 2,
-            "y": 7161,
+            "y": 7231.5,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -891,7 +891,7 @@
           },
           {
             "px": 2,
-            "y": 8072.5,
+            "y": 8143.1,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -907,7 +907,7 @@
       "cell": "eight-minute-erasure__dark__1920",
       "file": "eight-minute-erasure__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2517063,
+      "bytes": 2550563,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -974,19 +974,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 71.1,
       "proseCplSamples": 19,
-      "captionCpl": 62.2,
-      "captionWidth": 400.4,
+      "captionCpl": 59,
+      "captionWidth": 400,
       "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 529.8,
+          "width": 532,
           "offCentre": 0,
-          "left": 695.1,
-          "right": 1224.9,
-          "inkWidth": 527.8,
+          "left": 694,
+          "right": 1226,
+          "inkWidth": 530,
           "inkOffCentre": 0
         },
         {
@@ -1054,16 +1054,16 @@
         },
         {
           "kind": "bp-table",
-          "width": 641,
+          "width": 644.5,
           "offCentre": 0,
-          "left": 639.5,
-          "right": 1280.5,
-          "inkWidth": 639,
+          "left": 637.8,
+          "right": 1282.2,
+          "inkWidth": 642.5,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -1137,7 +1137,7 @@
           },
           {
             "px": 2,
-            "y": 1617.2,
+            "y": 1638.1,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1147,7 +1147,7 @@
           },
           {
             "px": 2,
-            "y": 2438.7,
+            "y": 2459.6,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1157,7 +1157,7 @@
           },
           {
             "px": 2,
-            "y": 4173.9,
+            "y": 4223.6,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1167,7 +1167,7 @@
           },
           {
             "px": 2,
-            "y": 5580.2,
+            "y": 5650.7,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1177,7 +1177,7 @@
           },
           {
             "px": 2,
-            "y": 7137,
+            "y": 7207.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1187,7 +1187,7 @@
           },
           {
             "px": 2,
-            "y": 8048.5,
+            "y": 8119.1,
             "width": 1360,
             "parts": 1,
             "structural": true,

@@ -189,11 +189,19 @@ block, and a plan (paper) embeds live task views that update in realtime as the 
 | block type | what | status |
 |---|---|---|
 | `tasks` / `task-list` | phased, nested, blocker-aware list + momentum header | ✅ built + tested |
-| `task-detail` | conditional "open a task and SEE it" card (§15) | ✅ built + tested |
+| `task-detail` | conditional "open a task and SEE it" card (sections listed in this row's renderer moduledoc) | ✅ built + tested |
 | `task-board` | kanban by lifecycle bucket | ✅ built + tested |
 | `roadmap` | phase/task bars, status-coloured, today-marker (author `left`/`width` %, no `due_at`) | ✅ built + tested |
-| `status-legend` | the glyph/colour vocabulary key (§2 of the artifact) | ▫ next |
+| `status-legend` | the glyph/colour vocabulary key (the §1 status vocabulary above) | ✅ built + tested |
 | — momentum | header (in `tasks`) | ✅ built |
+
+Status evidence for `status-legend` (was `▫ next`, shipped since): renderer
+`Render.Components.status_legend_html/1` (components.ex) + the email twin
+`Render.PanelsEmail.status_legend_email_html/2`, routed from
+`Render.Compose.compose_block/2,3` for both `:article` and the fleet styles;
+locked by `test/barkpark/portable_doc/render/components_test.exs`,
+`render/panels_email_test.exs`, `render/component_golden_parity_test.exs` and the
+`status-legend.golden.json` fixtures under `test/support/fixtures/{,pd-parity/}`.
 
 Pattern (proven): `compose_block(%{"type"=>…}) → %{"kind"=>"_raw","html"=>Components.foo_html(b)}`;
 `Walk` passes `_raw` through; CSS appended to the single-source `paper-surface.css` →

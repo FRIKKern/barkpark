@@ -48,6 +48,7 @@ defmodule Barkpark.Content.Lifecycle do
 
   alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.PortableDoc.Projection
+  alias Barkpark.Tasks.CriteriaContract
   alias Barkpark.Tasks.Transitions
 
   # TIMED: the publish/lifecycle hot path had ZERO telemetry, so "what is p95 of
@@ -913,7 +914,16 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, {:invalid_task_content, stale_claim_error(pub_content)}}
 
       true ->
-        with :ok <- criteria_fence(pub_content, draft_content) do
+        # THE CLAIM-TIME CONTRACT (task-11390a3b900c8a09). `criteria_fence/2`
+        # below is keyed on the PUBLISHED row's proof and falls back to the
+        # POSITIONAL slot, so a write that replaces every criterion text with a
+        # foreign row that also carries met/evidence regresses nothing and
+        # sails through — the exact 2026-07-10 cross-epic substitution. This
+        # gate asks the other question: do ANY of the criterion texts the live
+        # claim was taken against survive this write? See
+        # `Barkpark.Tasks.CriteriaContract` for the predicate and its scope.
+        with :ok <- CriteriaContract.check_substitution(pub_content, draft_content),
+             :ok <- criteria_fence(pub_content, draft_content) do
           task_door_field_fence(pub_content, draft_content)
         end
     end

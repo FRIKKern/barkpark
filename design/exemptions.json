@@ -110,5 +110,41 @@
     "note": "Living styleguide. NOT on MOTION_SURFACES: its generated region is a swatch TABLE (markup), with nowhere to declare a custom property. Its one literal is a 1.4s skeleton shimmer \u2014 a period, not a chrome timing. Ledgered for visibility only, exactly as deploy.sh and bp-graph.js are in the colour ledger."
    }
   ]
+ },
+ "type": {
+  "_rule": "Frozen baseline of hand-stamped TYPE/MEASURE literals — the size twin of the colour ledger in `entries` and the duration ledger in `motion`. design/check.mjs Part O re-counts each file and FAILS on ANY drift from `count`, up OR down: growth means a new hand-stamped size slipped into a font-size/letter-spacing/line-height/max-width declaration, shrink means one was tokenized and the baseline must come down in the SAME diff so the ratchet keeps holding. THE FILE SET IS DERIVED, NOT HAND-LISTED: it is exactly the .css/.heex members of `entries` above, and Part O reds if a row here is missing or orphaned relative to that set. Counting rule lives next to the implementation in design/check.mjs Part O: a literal is a px/rem/em/ch number in the VALUE of one of those four properties, plus a UNITLESS ratio for line-height only (`line-height: 1.45` is that property's ordinary hand-stamped form). `%` is not counted. A var() reference is not a number and so is not counted — that is what lets a literal->token sweep register as a shrink. A FALLBACK literal DOES count: in `max-width: var(--x, 50ch)` the 50ch is a hand-stamped value like any other, and dropping it (the tokenized end state) must register as a shrink. BEGIN/END GENERATED regions and comments are blanked first, and so are `@media` PRELUDES — `@media (max-width: 720px)` is a layout breakpoint, not a stamped measure.",
+  "_note": "Stamped at 999 across 6 surfaces (998 at a333e4b588f1716e9e200cf9967f27f5d3224898; paper-surface.css re-stamped 184 -> 185 against b191e8f31 after #17773 landed .bp-tdetail--empty with one font-size literal, the exact drift this ratchet exists to make visible), COMPUTED by Part O itself against a333e4b588f1716e9e200cf9967f27f5d3224898 (every row seeded 0, then set to the `actual` column the gate printed). Before this ledger, `git grep font-size design/check.mjs` was EMPTY: a hand-stamped `font-size: 13px` appended to paper-surface.css passed every gate in CI. A residual count is NOT automatically debt — an em-relative inline size inside a paper block and a `max-width: 22em` measure are relationships, not chrome steps, and have no token to spend. What the number buys is that they are COUNTED.",
+  "entries": [
+   {
+    "path": "api/lib/barkpark_web/layouts/root.html.heex",
+    "count": 221,
+    "note": "Studio root layout. The largest residue: chrome font sizes and rail/pane measures hand-authored alongside the --text-* scale Part C already pins. Sweeping these onto var(--text-N)/var(--text-N-lh) is the follow-up the count now makes visible."
+   },
+   {
+    "path": "api/priv/static/assets/bp-paper-editor-shell.css",
+    "count": 143,
+    "note": "The Beta paper-editor rule run extracted byte-for-byte from root.html.heex; its type literals are that file's former residue, moved not minted, and sweep on the same schedule."
+   },
+   {
+    "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
+    "count": 64,
+    "note": "Paper reader layout. Reader-only typography layered AFTER paper-surface.css: exactly the surface where an unreviewed size stamp diverges View from Edit, which is why it is ledgered."
+   },
+   {
+    "path": "cloud/priv/static/app.css",
+    "count": 317,
+    "note": "Cloud SPA. Not a paper surface, but on the colour ledger and therefore on the derived set — the same discipline, one census."
+   },
+   {
+    "path": "api/assets/paper-editor/src/styles.css",
+    "count": 69,
+    "note": "Paper-editor Studio bundle (the scoped embedder source), outside its paper-surface mirror block. Its sizes must track the reader's; a silent stamp here IS View/Edit drift."
+   },
+   {
+    "path": "api/assets/paper-surface/paper-surface.css",
+    "count": 185,
+    "note": "The ONE canonical paper-surface source, outside its two GENERATED blocks. This is the file the task was filed about: 184 hand-stamped type/measure literals sat here with nothing in CI able to see one more arrive."
+   }
+  ]
  }
 }

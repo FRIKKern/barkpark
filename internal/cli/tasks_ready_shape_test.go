@@ -16,7 +16,7 @@ import (
 // is a statement about the shape the server actually emits.
 const (
 	readyPageFixture         = "task_ready_page.json"
-	readyPageDriftedFixture  = "task_ready_page_drifted.json"  // docs[0] gains lifecycle_status:"open"
+	readyPageDriftedFixture  = "task_ready_page_drifted.json"        // docs[0] gains lifecycle_status:"open"
 	readyPageEnvelopeFixture = "task_ready_page_wrong_envelope.json" // `docs` renamed to `documents`
 )
 
@@ -154,10 +154,10 @@ func TestTaskReadyPageShapeMatchesDocumentedContract(t *testing.T) {
 	}
 	doc := string(raw)
 	for _, must := range []string{
-		"lifecycle_status",       // the field the contract is about
-		`== "open"`,              // the filter that manufactures the zero
+		"lifecycle_status", // the field the contract is about
+		`== "open"`,        // the filter that manufactures the zero
 		"internal/cli/testdata/task_ready_page.json", // the fixture this test reads
-		"`criterion`",                                // the criteria key, same family
+		"`criterion`", // the criteria key, same family
 	} {
 		if !strings.Contains(doc, must) {
 			t.Fatalf("TASK-SYSTEM.md no longer contains %q; the ready-shape contract this test guards was edited away", must)

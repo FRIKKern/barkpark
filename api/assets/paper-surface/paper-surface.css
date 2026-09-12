@@ -782,6 +782,29 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
 /* Match the empty editable cell's caret line without adding authored text or width. */
 .bp-paper-surface .bp-table :is(.bp-table__th, .bp-table__td):empty::before { content: "\200b"; visibility: hidden; }
+/* TYPED COLUMNS (the `cols` spec — text | num | delta | spark). The modifiers
+   are emitted by walk.ex table_col_class/3 ONLY when the block carries a `cols`
+   spec, so an untyped table never sees them. num and delta right-align so the
+   ones place lines up down the column (tabular figures keep the digits on a
+   fixed advance); the header rides right with its column. spark sizes the ONE
+   sparkline primitive (DataViz.spark_svg/2, shared with the stat block) down to
+   a cell-sized strip; the stroke rules mirror .bp-stat__spark polyline — fill
+   MUST be none or the polyline paints as a filled blob.
+   Written as an explicit comma-grouped selector list, NOT `:is(...)`: the
+   View↔Edit parity parser (view_edit_parity_test.exs `declarations_for/3`)
+   splits a rule's selector list on commas and matches
+   `.bp-paper-surface <element>` exactly, so a modifier hidden inside `:is()`
+   is INVISIBLE to the gate and its editor mirror could drift unseen. The
+   comma form is specificity-identical (`:is()` takes its most specific
+   argument — a class either way) and puts the modifiers on the wire. Keep
+   byte-aligned with priv/static/assets/bp-paper-editor-shell.css +
+   assets/paper-editor/src/styles.css. */
+.bp-paper-surface .bp-table__th--num,
+.bp-paper-surface .bp-table__td--num { text-align: right; font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-table__th--spark,
+.bp-paper-surface .bp-table__td--spark { width: 1%; white-space: nowrap; }
+.bp-paper-surface .bp-table__spark { display: block; width: 96px; height: 20px; }
+.bp-paper-surface .bp-table__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 
 /* Sheet CHROME (band + cell rules). Author DATA — col width, per-cell
    b/i/bg/al, engine-error red/bold — stays INLINE on the <td> (sheets_parity). */
@@ -1389,6 +1412,13 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1.6rem 0;
 }
+/* Unresolved task-detail: the same honest dashed placeholder the sibling
+   live-query widgets use (.bp-tasks--empty), so an empty block keeps its
+   place in the column instead of collapsing to nothing. */
+.bp-paper-surface .bp-tdetail--empty {
+  font-family: var(--paper-font-mono); color: var(--paper-ink-soft); font-size: 0.85rem;
+  border: 1px dashed var(--paper-chrome-border); border-radius: 8px; padding: 14px; text-align: center; margin: 1.4rem 0;
+}
 /* The task title is free-form author text set at 1.15rem bold — the largest
    type inside the detail card, and the only one of the card-title family that
    outgrows prose. Measured at a 320px viewport, a single 30-character compound
@@ -1466,6 +1496,14 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-rm__bar--done { background: var(--st-ok); }
 .bp-paper-surface .bp-rm__bar--cancel { background: var(--paper-ink-faint); }
 .bp-paper-surface .bp-rm__today { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--st-danger); opacity: 0.6; }
+/* roadmap v2 point markers — the HTML twin of the Go reader's diamond glyphs
+   (internal/pdrender/taskblocks.go: note ◇ at the bar's start, milestone ◆ at its
+   end). Both are rotated squares centred on their offset; milestone is filled and
+   note is hollow, so the two read apart with colour stripped. */
+.bp-paper-surface .bp-rm__ms,
+.bp-paper-surface .bp-rm__note { position: absolute; top: 6px; width: 10px; height: 10px; margin-left: -5px; transform: rotate(45deg); }
+.bp-paper-surface .bp-rm__ms { background: var(--paper-ink); }
+.bp-paper-surface .bp-rm__note { border: 1.5px solid var(--paper-ink-soft); background: var(--paper-bg); }
 
 /* ── status legend — the shared vocabulary key ── */
 .bp-paper-surface .bp-legend {

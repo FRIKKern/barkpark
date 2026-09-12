@@ -45,6 +45,8 @@ bp capabilities -o json  # = GET $API/v1/capabilities, bearer
 
 **3. Create tasks.** Standard mutation envelope. Required: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, dossier fields (`brief`, `description`, `acceptance_criteria`, `purpose`, `estimate`, `due_at`, `outcome`, …) — the `task` schema is authoritative. `brief` = the PortableDoc envelope (`{version: 1, blocks: […]}`), `description` its text fallback; author briefs as blocks, not a text wall. `bp task create "<title>" --yes` files a draft; `--publish` also needs `--description` (20+ chars) and 1–12 tags already registered as `type:tag` docs (`bp doc ls tag --all`) — an invented tag is refused before anything is created.
 
+**Adjudication at birth.** `bp task create` takes `--disposition <open|parked|closed>`, `--reopen-trigger <when>` and `--disposition-rerun <cmd>`, screened client-side against the vocabulary the api's birth fence uses, so an off-vocabulary term and a hollow park (parked, no trigger) are refused before the write; `--set disposition=…` now goes through the same screen. The CLI reads the list from `internal/cli/task_adjudication_vocabulary.json`, locked against `Barkpark.Tasks.Stage` by a Go test.
+
 ```bash
 curl -X POST $API/v1/data/mutate/production -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"mutations":[{"create":{"_type":"task","_id":"t1","title":"Ship the docs","content":{"kind":"task","lifecycle_status":"open","priority":1}}}]}'

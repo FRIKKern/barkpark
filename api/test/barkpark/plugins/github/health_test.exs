@@ -60,6 +60,7 @@ defmodule Barkpark.Plugins.Github.HealthTest do
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Plugins.Github.{Conflict, Conflicts, Cursor, Health}
   alias Barkpark.Repo
+  alias Barkpark.TenancyFixtures
 
   @config_key Barkpark.Plugins.Github
 
@@ -588,6 +589,145 @@ defmodule Barkpark.Plugins.Github.HealthTest do
 
       # a blank string trims to "" → whole-fleet, identical to the no-arg call
       assert Health.snapshot("   ") == fleet
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # The workspace membership fence (github-bridge-w9-health-workspace-isolation)
+  # ---------------------------------------------------------------------------
+
+  describe "workspace membership fence" do
+    # THE LEAK, reproduced as a fixture: two DIFFERENT workspaces, ONE dataset
+    # slug. That is legal — a dataset slug is unique per project, not globally —
+    # and it is precisely why the D18 dataset-string pin was never isolation.
+    # Before this slice `Health.snapshot(ds)` returned BOTH rows to BOTH tenants.
+    setup %{ds: ds} do
+      ws_a = TenancyFixtures.create_workspace!()
+      ws_b = TenancyFixtures.create_workspace!()
+
+      a =
+        record_conflict!(%{
+          dataset: ds,
+          kind: "detached",
+          issue: 8001,
+          doc_id: "gh-8001",
+          workspace_id: ws_a.id
+        })
+
+      b =
+        record_conflict!(%{
+          dataset: ds,
+          kind: "detached",
+          issue: 8002,
+          doc_id: "gh-8002",
+          workspace_id: ws_b.id
+        })
+
+      # The unattributable population: a `dedup_refused` row has no doc_id to
+      # trace, so the migration's backfill leaves it NULL by design.
+      unattributed =
+        record_conflict!(%{
+          dataset: ds,
+          kind: "dedup_refused",
+          issue: 8003,
+          doc_id: nil
+        })
+
+      {:ok, ws_a: ws_a, ws_b: ws_b, a: a, b: b, unattributed: unattributed}
+    end
+
+    test "a token in workspace A does not see workspace B's conflicts under the SAME dataset",
+         %{ds: ds, ws_a: ws_a, a: a, b: b} do
+      restore_config(nil)
+
+      ids =
+        [dataset: ds, workspace_ids: [ws_a.id]]
+        |> Health.snapshot()
+        |> then(& &1.conflicts.open)
+        |> Enum.map(& &1.id)
+        |> MapSet.new()
+
+      assert MapSet.member?(ids, a.id)
+      refute MapSet.member?(ids, b.id)
+    end
+
+    test "the fence narrows the COUNTS too, not just the row list", %{
+      ds: ds,
+      ws_a: ws_a
+    } do
+      restore_config(nil)
+
+      c = Health.snapshot(dataset: ds, workspace_ids: [ws_a.id]).conflicts
+
+      # A's detached row + the unattributed dedup_refused row. B's detached row
+      # is absent from the bucket as well as from `open` — a fence applied only
+      # to the capped row list would leave `detached == 2` here.
+      assert c.detached == 1
+      assert c.dedup_refused == 1
+      assert c.total == 2
+    end
+
+    test "an UNATTRIBUTED (NULL workspace_id) row stays visible to both tenants", %{
+      ds: ds,
+      ws_a: ws_a,
+      ws_b: ws_b,
+      unattributed: unattributed
+    } do
+      restore_config(nil)
+
+      for ws <- [ws_a, ws_b] do
+        ids =
+          [dataset: ds, workspace_ids: [ws.id]]
+          |> Health.snapshot()
+          |> then(& &1.conflicts.open)
+          |> Enum.map(& &1.id)
+
+        assert unattributed.id in ids
+      end
+    end
+
+    test "an EMPTY membership list fences — it is not read as 'no fence'", %{
+      ds: ds,
+      a: a,
+      b: b,
+      unattributed: unattributed
+    } do
+      restore_config(nil)
+
+      ids =
+        [dataset: ds, workspace_ids: []]
+        |> Health.snapshot()
+        |> then(& &1.conflicts.open)
+        |> Enum.map(& &1.id)
+        |> MapSet.new()
+
+      # A principal who is a member of nothing sees the unattributed population
+      # and NOTHING attributed. Collapsing `[]` to nil here would hand a
+      # member-of-nothing token the whole fleet — the exact inversion.
+      assert MapSet.member?(ids, unattributed.id)
+      refute MapSet.member?(ids, a.id)
+      refute MapSet.member?(ids, b.id)
+    end
+
+    test "NO :workspace_ids key means NO fence (every legacy caller is unchanged)", %{
+      ds: ds,
+      a: a,
+      b: b
+    } do
+      restore_config(nil)
+
+      ids =
+        ds
+        |> Health.snapshot()
+        |> then(& &1.conflicts.open)
+        |> Enum.map(& &1.id)
+        |> MapSet.new()
+
+      assert MapSet.member?(ids, a.id)
+      assert MapSet.member?(ids, b.id)
+
+      # And the keyword form without the key is byte-identical to the binary one.
+      assert Health.snapshot(dataset: ds) == Health.snapshot(ds)
     end
   end
 end

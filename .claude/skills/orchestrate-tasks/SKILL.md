@@ -215,6 +215,12 @@ campaign is judged on those as much as on closes.
 - Commit only your own paths (`git commit -- <paths>`), then `git log -1 --stat` and read
   the file list. A stray file means another writer; repair before pushing.
 - Every PR carries `Task: <doc_id>` as a trailer and merges through `scripts/bp-merge.sh`.
+- **To hold a PR from the unattended merge sweep, use GitHub's review state — not its title.**
+  Request a review on it (the Reviewers box) or leave a *Changes requested* review, and
+  `helpers/merge-sweep.sh` refuses it and logs `HELD #<pr>: open review — …`. A pending request
+  or an unresolved CHANGES_REQUESTED holds; a later approval or dismissal clears it. The old
+  `DO NOT MERGE`/`WIP`/`HOLD` title words still work but fail OPEN — forget the word and the PR
+  lands. Doing nothing means the sweep may merge, which is the default it has always had.
 - `bp task close <id> <worker> <epoch>` is the LEAD's verb after the merge; a worker
   stamps criteria (`bp task stamp`) and never closes.
 - Skip `drafts.*` rows in `bp task ready` — they are unpublished phantoms.
