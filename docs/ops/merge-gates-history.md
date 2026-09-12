@@ -219,3 +219,13 @@ felix-pristine **D140** measured byte-identical 51-finding sets across
 `Finding.fingerprint/1` is `:erlang.phash2/1` over AST from
 `Code.string_to_quoted`, not compiler output.
 
+## The #16888 sweep that counted its own explanations
+
+#16888 tightened 32 multi-status refusal assertions and gave each site a comment
+quoting the bracket literal it had just deleted. A sweep for that literal over
+`api/test` then returned 80 hits, of which 20 were that PR's own explanations —
+and all 20 sat in the ten files that were already fixed. A sweeper re-deriving
+the remaining population reads the highest apparent density of work precisely
+where there is none. It produced one false reading before it was caught. The
+doctrine this grounds is SELF-CAMOUFLAGING in
+[merge-gates.md](merge-gates.md#self-camouflaging--the-fix-that-narrates-itself-in-the-vocabulary-it-removed).
