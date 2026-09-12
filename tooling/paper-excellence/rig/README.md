@@ -275,6 +275,12 @@ The band is set against the committed Linux panel, not against a target:
 | `stat-partial-row` | 71.8 |
 | `agent-flight-recorder-charter` | **72.0** — ceiling-binding, **ZERO headroom** |
 
+Proven in the image, not on a laptop: `paper-rig.yml` run
+**34689409744** (`workflow_dispatch`, `check: true`, branch `studio/rig-cpl-band`)
+ran `gate.sh --panel --check` under this band and closed
+`panel: 9 fixtures committed, 9 attempted, 9 passed, 0 failed, 36 shots`, every
+fixture's report-check reporting `0 differences`.
+
 `agent-flight-recorder-charter` passes only because the comparison is `>`, not
 `>=`. A 0.1 CPL font-metric shift in that fixture reds this arm. That cost is
 accepted because the workflow is advisory and `--check` is dispatch-only; the
