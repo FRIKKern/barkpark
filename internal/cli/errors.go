@@ -70,7 +70,6 @@ type apiError struct {
 // exit code from the HTTP status. Source: docs/cli/error-exit-table.md.
 var codeExit = map[string]int{
 	"not_found":      exitNotFound,
-	"schema_unknown": exitNotFound,
 	"share_expired":  exitNotFound, // 410, bucketed as gone/not-found
 	"unauthorized":   exitAuth,
 	"forbidden":      exitAuth,
@@ -1282,7 +1281,7 @@ func (e apiError) hint() string {
 		return e.localHint
 	}
 	switch e.code {
-	case "not_found", "schema_unknown":
+	case "not_found":
 		return "check the type/id and --dataset; run `bp schema ls` to list types"
 	case "validation_failed", "invalid_op", "malformed_op", "type_mismatch", "duplicate_id", "block_not_found", "invalid_paper":
 		return "re-run with -v for field errors; check required/pattern fields"
@@ -1438,7 +1437,7 @@ func enumeratingSibling(m *manifest.Manifest, cmd manifest.Command) string {
 // "CLI message guidance" column of the table where a code is known.
 func (e apiError) errorMessage() string {
 	switch e.code {
-	case "not_found", "schema_unknown":
+	case "not_found":
 		if e.message != "" {
 			return "not found: " + e.message
 		}

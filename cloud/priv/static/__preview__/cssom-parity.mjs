@@ -111,19 +111,43 @@
 //  A green run means nothing unless the red is demonstrated.
 //
 //    cp cloud/priv/static/app.css /tmp/app.css.bak
-//    perl -i -pe 's{/\\* REVIEW ADDENDUM}{REVIEW ADDENDUM} if $. == 1029' \
+//    perl -i -pe 's{/\* REVIEW ADDENDUM}{REVIEW ADDENDUM}' \
 //      cloud/priv/static/app.css        # the #4592 defect, byte-for-byte
 //    node cloud/priv/static/__preview__/cssom-parity.mjs   # exit 1, names .modal-root
 //    cp /tmp/app.css.bak cloud/priv/static/app.css         # exit 0 again
 //
+//  THE RECIPE IS CONTENT-KEYED NOW, AND THAT IS THE WHOLE POINT. It read
+//  `s{/\\* REVIEW ADDENDUM}{REVIEW ADDENDUM} if $. == 1029` until cch-w16-s7,
+//  and it was inert TWICE OVER: (1) the `$. == 1029` address had rotted — the
+//  `/* REVIEW ADDENDUM` opener is nowhere near 1029 today; (2) the pattern was
+//  over-escaped (`/\\*` matches a literal backslash plus any char, never `/*`),
+//  so deleting the line address alone STILL edits nothing. Measured on this
+//  tree, md5 of app.css: unedited 2b04636598c3e8331c50a7fb64de0713; after the
+//  verbatim old recipe 2b04636598c3e8331c50a7fb64de0713 (UNCHANGED); after the
+//  old recipe minus `if $.` 2b04636598c3e8331c50a7fb64de0713 (STILL unchanged);
+//  after the form above 748e24aa8207769fb15e3ce88109de05. A mutation proof that
+//  edits zero bytes reports the unmutated file's green as a successful RED.
+//  NO CITATION REGEX COULD EVER HAVE CAUGHT IT: `$. == 1029` is a bare number,
+//  not an `app.css:<n>`-shaped citation, so E11 in __css_check.mjs does not and
+//  cannot see it. This is a HAND repair; the class it belongs to — a line
+//  address inside an executable recipe — has no mechanical detector today.
+//  Re-prove it the way it was caught, never by reading it:
+//    cp cloud/priv/static/app.css /tmp/p.css && md5 -q /tmp/p.css
+//    perl -i -pe 's{/\* REVIEW ADDENDUM}{REVIEW ADDENDUM}' /tmp/p.css
+//    md5 -q /tmp/p.css     # MUST differ; identical means the recipe is inert
+//
 //  Measured: MISSES 0 → 2 (one rule head, two comma fragments of one garbage
-//  run) reporting `app.css:1034  .modal-root   ← SWALLOWED`, then 0 restored.
-//  The same edit at `app.css:3076` (`/* Shown-once`) names `.wh-secret` at
-//  `app.css:3077` — 2047 lines away, and THAT is the whole argument for this
-//  instrument over more photographs: the check is FILE-WIDE, not modal-local.
-//  (GR100 cites 986/3005; #4733's relocation shifted the file. The openers are
-//  unchanged, and GR95 already records this one at :1029. Re-grep before
-//  trusting any line number here — `grep -n 'REVIEW ADDENDUM' app.css`.)
+//  run) reporting `.modal-root   ← SWALLOWED`, then 0 restored.
+//  The same edit at the `/* Shown-once` opener names `.wh-secret` on the line
+//  directly below it — thousands of lines away from the `.modal-root` one, and
+//  THAT is the whole argument for this instrument over more photographs: the
+//  check is FILE-WIDE, not modal-local. Re-derive all three, never quote them:
+//    grep -n 'REVIEW ADDENDUM' app.css
+//    grep -n 'Shown-once' app.css
+//    grep -n '^\.wh-secret [{]' app.css
+//  (GR100 cites 986/3005 and GR95 records 1029; #4733's relocation shifted the
+//  file and every one of those figures is dead. The OPENERS are unchanged — the
+//  anchors above are what survives a relocation, which a line number does not.)
 //
 //  A miss whose text contains `*/` is reported as an ORPHAN-COMMENT SWALLOW
 //  cross-referencing E10 — without that, the miss reads as a nonsense selector

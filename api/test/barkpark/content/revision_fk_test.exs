@@ -23,7 +23,7 @@ defmodule Barkpark.Content.RevisionFkTest do
   sandbox transaction, so nothing may run after it in the same test.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
 

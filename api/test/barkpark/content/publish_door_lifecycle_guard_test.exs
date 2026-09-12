@@ -16,7 +16,7 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
   `:ok` (≈ pre-fix main) turns the refusal tests red in the other direction —
   the resurrection succeeds again.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Tasks, TenancyFixtures}
 
