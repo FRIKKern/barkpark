@@ -137,7 +137,8 @@ while [ $# -gt 0 ]; do
     shift 2
     ;;
   -h | --help)
-    sed -n '2,71p' "$0"
+    # 2,94p — the whole header block; re-measure it when the header grows
+    sed -n '2,94p' "$0"
     exit 0
     ;;
   -*) die "unknown option: $1" ;;
