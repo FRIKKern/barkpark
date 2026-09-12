@@ -19,8 +19,14 @@ import (
 // the prose renderers this goes through chroma DIRECTLY (not glamour) for full
 // control over the chrome.
 //
-// The portable-doc `code` block has NO `lang` field, so we let chroma's
-// lexers.Analyse(source) guess the language; on a miss we fall back to the
+// The portable-doc `code` block MAY carry a `lang` field — the one spelling the
+// BPML/authoring model uses everywhere (from_markdown code fences, the Studio
+// code-block editor's `Map.get(@block, "lang", "")`, and the canvas code node).
+// It is NOT `language`: that key belongs to `code-tabs` tab entries, a different
+// block type, and a standalone `code` block never carries it (the BPML kernel's
+// @block_attrs["code"] is just `id`, so a round-trip cannot introduce it). When
+// `lang` is present it names the chroma lexer directly; absent, we let
+// lexers.Analyse(source) guess the language, and on a miss we fall back to the
 // plaintext lexer (lexers.Get("text")). The chroma style name is theme-driven
 // (Theme.ChromaStyle: "github" light / "monokai"|"dracula" dark). The FORMATTER
 // is chosen by ctx.Profile so the emitted SGR escapes match the terminal's
@@ -77,7 +83,7 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 	// file. Both engines read the same four keys in the same order; the shared
 	// fixture ../../api/test/support/fixtures/code-source-aliases.json is the lock.
 	source := codeSource(b.Attrs)
-	lang := attrStrFirst(b.Attrs, "language", "lang") // usually absent; tolerated.
+	lang := attrStrFirst(b.Attrs, "lang") // the one authored spelling (never `language`); usually absent, tolerated.
 
 	// A blank or whitespace-only source renders NOTHING — no lines, no accent
 	// bar. This mirrors the Elixir composer since #14806 (a sourceless code

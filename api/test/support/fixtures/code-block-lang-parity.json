@@ -1,0 +1,28 @@
+{
+  "_comment": "THE code-block LANGUAGE-FIELD contract, as ONE file read by all three render engines: internal/pdrender/code_block_lang_parity_test.go, api/test/barkpark/portable_doc/render/code_block_lang_parity_test.exs, and js/packages/react/tests/code-block-lang.parity.test.ts. The language field is `lang`. `language` is a RETIRED alias no engine reads for a standalone `code` block: it belongs to `code-tabs` tab entries (a different block type), and the BPML kernel's @block_attrs[\"code\"] is just `id`, so a BPML round-trip never carries it. Only the Go TUI engine (internal/pdrender/code.go) consumes `lang` at render time - it names the chroma lexer and the uppercased lang header line. The Elixir (compose.ex code block) and JS (blocks/core.ts code emitter) engines render the code `value` and are language-AGNOSTIC: they emit identical output for a block whether it carries `lang`, `language`, or neither. Every case shares the SAME value so the agnostic legs compare like for like. This fixture locks BOTH facts: Go reads `lang` and IGNORES `language`; the web engines branch on neither. Hand-authored; regenerate nothing, all three engines assert against it.",
+  "language_field": "lang",
+  "retired_alias": "language",
+  "cases": [
+    {
+      "name": "lang names the lexer (Go emits the ELIXIR header)",
+      "block": { "type": "code", "value": "greeting one\ngreeting two\n", "lang": "elixir" },
+      "source": "greeting one",
+      "lang": "elixir",
+      "lexer_header": "ELIXIR"
+    },
+    {
+      "name": "no language key at all (Go falls back to source analysis, no forced header)",
+      "block": { "type": "code", "value": "greeting one\ngreeting two\n" },
+      "source": "greeting one",
+      "lang": "",
+      "lexer_header": ""
+    },
+    {
+      "name": "the retired `language` key is IGNORED (never read as the lang)",
+      "block": { "type": "code", "value": "greeting one\ngreeting two\n", "language": "elixir" },
+      "source": "greeting one",
+      "lang": "",
+      "lexer_header": ""
+    }
+  ]
+}
