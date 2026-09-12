@@ -45,12 +45,20 @@ defmodule BarkparkWeb.Plugs.RequireMediaProcessingCallbackToken do
   end
 
   # One shared emitter → the 401 carries request_id (+ hint) for log correlation.
+  #
+  # The hint is ROUTE-DERIVED (task-57081836b628df35). This pipeline accepts
+  # ONE instance-wide secret and refuses a workspace api token outright (see
+  # the moduledoc), so the old code-keyed default — "send a valid token …
+  # tokens are dataset-scoped" — named the one credential this route is
+  # guaranteed to refuse.
   defp reject(conn) do
     BarkparkWeb.ErrorResponse.emit_custom(
       conn,
       :unauthorized,
       "unauthorized",
-      "invalid media processing callback token"
+      "invalid media processing callback token",
+      %{},
+      "Send the instance's media processing callback token in the Authorization header; this route accepts no other credential."
     )
   end
 end
