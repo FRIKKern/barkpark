@@ -53,9 +53,17 @@ defmodule Barkpark.PdsCensusMutantGateTest do
             "scripts/pds-ledger-census.sh",
             "scripts/pds-draft-only-task-census.sh"
           ] do
-        assert {:run, line} = decide([path]),
-               "#{path} is in scripts/pds-*census* and must re-arm the mutant arms"
+        # BOUND FIRST, THEN ASSERTED ON A BOOLEAN. `assert pattern = expr, message`
+        # raises MatchError before assert/2 is ever called, so the authored message
+        # is dead on exactly the path it was written for
+        # (scripts/unreachable-assert-message-check.sh).
+        result = decide([path])
 
+        assert match?({:run, _}, result),
+               "#{path} is in scripts/pds-*census* and must re-arm the mutant arms, got " <>
+                 inspect(result)
+
+        {:run, line} = result
         assert line =~ path
       end
     end
