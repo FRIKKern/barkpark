@@ -106,6 +106,12 @@ on:
       # fixture (task-a4d1ae76fdb2a6b0 — one rule per boundary, three engines);
       # same rule.
       - "api/test/support/fixtures/section-boundary-rules.json"
+      # internal/cli/tasks_adjudication_drift_test.go reads this Elixir module
+      # (const serverStagePath) to lock the CLI's adjudication vocabulary fixture
+      # to Stage's @dispositions / @trigger_required / key attrs in BOTH directions
+      # (#17878). An edit to stage.ex with no .go change must dispatch the Go leg
+      # or the lock cannot fire on the PR that breaks it.
+      - "api/lib/barkpark/tasks/stage.ex"
       # Taskboard TUI golden frames (internal/taskboard/testdata/*.txt). The
       # compose/render/glyph-budget suites assert the committed frames byte-for-byte
       # and inventory every glyph in them; a golden REGEN (or a hand-added fixture)
