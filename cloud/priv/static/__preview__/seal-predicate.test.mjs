@@ -1688,7 +1688,8 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
   // a=PASS b=FAIL c=PASS`) for an environment fact, not a defect. The floor this test
   // exists to pin is clause (a)'s, so the token's clause-(a) letters are what we read.
   // The fabrication sentences (`VERDICT: SEAL`, `Sealed 0 children of`) are pushed
-  // INSIDE `if (ok)` at seal-predicate.mjs:1062-1066 — structurally unreachable in ANY
+  // INSIDE `if (ok)` in seal-predicate.mjs (grep -n "L.push('VERDICT: SEAL')"
+  // seal-predicate.mjs) — structurally unreachable in ANY
   // environment where clause (b) fails — so they moved to the fixture-mode sibling
   // below rather than being deleted.
   const sealedToken = token(sealed.out);
@@ -1704,7 +1705,9 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
 
   // …and bucket (c) demonstrably cannot stop it: the three gates resolve for an epic
   // whose roster is empty, and the run says so in its own letters. Bucket (c) is pushed
-  // at seal-predicate.mjs:1047-1049, BEFORE `ok` is computed at :1056, so this line is
+  // in seal-predicate.mjs's bucket-(c) report loop (grep -n 'in-epic-roster='
+  // seal-predicate.mjs), BEFORE `ok` is computed (grep -n 'const ok = aPass'
+  // seal-predicate.mjs), so this line is
   // printed on the NO-SEAL branch too and needs no git history to be reachable.
   assert.match(sealed.out, /in-epic-roster=false/,
     'the gates are fetched by hardcoded id INDEPENDENTLY of --epic, which is why clause (c) is no backstop');

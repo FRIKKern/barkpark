@@ -347,6 +347,12 @@ const ROUND_TRIP = !process.argv.includes('--no-round-trip');
  *  into `run.rows` — a synthetic row in the matrix would be a fabricated desk
  *  fact, which is the one thing this instrument exists to make impossible. */
 const POSITIVE_CONTROL = process.argv.includes('--positive-control');
+/** Opt-IN, because it is a SECOND authenticated navigation at a second viewport
+ *  and up to 120 Tab presses — real seconds on every run that does not want it.
+ *  Its rows are tagged `probe: 'spd-b21 strip-focus'` and live in
+ *  `run.strip_focus_probe.rows`, never in `run.rows`: the matrix is a
+ *  width x face x state grid and a focus reading is not a cell of it. */
+const STRIP_FOCUS_PROBE = process.argv.includes('--strip-focus-probe');
 
 /** Absolute path, with every symlink on it collapsed. `fs.realpathSync` throws
  *  on a path that does not exist, which is a legitimate state for `argv[1]`
@@ -462,6 +468,16 @@ OPTIONS
                       render, so the non-vacuity guard is seen to FIRE in the
                       same run. Without it, "no scrim because the desk was
                       fixed" and "the guard never ran" produce an identical zero.
+  --strip-focus-probe Take the spd-b21 STRIP-FOCUS reading: at 900px (narrow
+                      band, where the collapsed strip renders), Tab to
+                      .pane-column--collapsed and press Enter, then record what
+                      holds focus, whether it is the .pane-column[tabindex=-1]
+                      the DOM patch ADDED, :focus-visible, the computed outline,
+                      the strip's aria-controls resolution and the ordered focus
+                      event sequence. Four rows under strip_focus_probe.rows,
+                      carrying the run's provenance stamp. Diagnostic only (D81);
+                      phx-mounted firing is reported as an INFERENCE with its
+                      chain shown, never as an observation.
   --retries=N         Bounded retries on the NAMED retryable aborts only
                       (default 2, so up to three attempts; 0 disables).
                       Retryable: ${RETRYABLE_ABORTS.map((a) => a.id).join(', ')}.
@@ -3978,6 +3994,289 @@ async function runB29Probes(page, base, docPath) {
   return { c2, c3, probe_note: 'diagnostic only — no gate authority (D81)' };
 }
 
+
+// ── spd-b21: THE STRIP-FOCUS PROBE ───────────────────────────────────────────
+//
+// WHY THIS LIVES IN THE INSTRUMENT AND NOT IN A SCRATCH FILE.
+// spd-b21-strip-focus-browser-proof closed 2026-09-06 on live readings taken by
+// a standalone Playwright script that existed only in one worker's tmp dir. The
+// finding — keyboard Enter on the collapsed strip lands focus on the expanded
+// `.pane-column[tabindex="-1"]`, never on BODY, with a solid 2px -2px ring — was
+// therefore true and UNREPEATABLE: the next person asking "is it still true?"
+// had to rewrite the script. The row is a one-shot reading until the instrument
+// can take it again, which is what this is.
+//
+// WHAT IT OBSERVES, AND WHAT IT ONLY INFERS.
+// Direct observations: the identity of `document.activeElement` after Enter,
+// whether it `===` the node the DOM patch ADDED (live reference comparison, not
+// attribute equality — button->div is a REPLACEMENT, and no attribute can tell
+// a replaced node from an updated one), `:focus-visible`, the computed outline,
+// the strip's `aria-controls` and whether the id it names RESOLVES, and the
+// ordered focus/focusin/focusout/blur sequence.
+// An INFERENCE, labelled as one (main's 2026-09-06 10:21Z ruling): that
+// `phx-mounted` FIRED. There is no event for "a JS command ran". The chain is
+// recorded field by field — focus landed on the added node, the added node
+// carries phx-mounted, and no competing focus event sits between the blur and
+// the focus — so a reader can check the chain rather than take the word.
+//
+// NO GATE AUTHORITY (charter D81). Diagnostic rows, like the b29 probes.
+
+/**
+ * THE ROW SHAPE, DECLARED ONCE.
+ *
+ * Four legs, each a row. The field list is the POINT of the declaration: the
+ * 2026-09-06 reading is only reproducible if every field it rested on is still
+ * recorded, and a probe that quietly stopped recording (say) `outline_offset`
+ * would still emit four plausible rows saying nothing about the ring. So the
+ * list is data, `buildStripFocusRows` refuses a reading missing any of it BY
+ * NAME, and `scripts/studio-desk-strip-focus.test.mjs` pins both without a
+ * browser.
+ */
+export const STRIP_FOCUS_LEGS = [
+  {
+    id: 'active-element',
+    question: 'after Enter on the collapsed strip, WHAT holds focus?',
+    fields: ['active_selector', 'active_id', 'active_classes', 'active_tag', 'active_tabindex',
+             'active_is_BODY', 'active_is_pane_column_focus_target'],
+  },
+  {
+    id: 'focus-ring',
+    question: 'is that focus VISIBLE, and with which outline?',
+    fields: ['active_focus_visible', 'outline_style', 'outline_width', 'outline_color', 'outline_offset'],
+  },
+  {
+    id: 'aria',
+    question: 'what did the strip ADVERTISE, and does the id it names resolve?',
+    fields: ['strip_id', 'strip_tag', 'aria_controls', 'aria_controls_resolves',
+             'aria_expanded', 'aria_expanded_present', 'aria_label'],
+  },
+  {
+    id: 'patch-and-focus-sequence',
+    question: 'did focus land on the node the PATCH added, and did anything else compete for it?',
+    fields: ['focus_event_kinds', 'focus_events', 'added_pane_count', 'added_pane_phx_mounted',
+             'added_pane_tabindex', 'focused_is_added_pane', 'focused_is_old_strip_node',
+             'old_strip_still_connected', 'competing_focus_events'],
+  },
+];
+
+/** Every field any leg records, flattened — the reading's required key set. */
+export const STRIP_FOCUS_FIELDS = STRIP_FOCUS_LEGS.flatMap((l) => l.fields);
+
+/**
+ * The phx-mounted INFERENCE, computed from recorded fields rather than asserted.
+ *
+ * Returns `true` only when all four links hold; otherwise `false` with the
+ * links that failed named. `inferred: true` is on every return value, because
+ * the whole point of the 10:21Z ruling is that this is never an observation.
+ */
+export function inferPhxMountedFired(reading) {
+  const links = [
+    { id: 'focus-landed-on-added-node', held: reading.focused_is_added_pane === true },
+    { id: 'added-node-carries-phx-mounted', held: typeof reading.added_pane_phx_mounted === 'string' && reading.added_pane_phx_mounted.includes('focus') },
+    { id: 'no-competing-focus-event', held: Array.isArray(reading.competing_focus_events) && reading.competing_focus_events.length === 0 },
+    { id: 'focused-node-is-not-the-old-strip', held: reading.focused_is_old_strip_node === false },
+  ];
+  const broken = links.filter((l) => !l.held).map((l) => l.id);
+  return {
+    inferred: true,
+    fired: broken.length === 0,
+    links,
+    broken,
+    note:
+      'INFERENCE, never an observation — there is no DOM event for "a JS command ran" (main 2026-09-06 10:21Z). ' +
+      'Chain: focus landed on the node the patch ADDED, that node carries phx-mounted with a focus command, ' +
+      'nothing else focused anything in between, and the focused node is NOT the old strip button. ' +
+      'A broken link is named rather than swallowed.',
+  };
+}
+
+/**
+ * PURE. Reading (+ stamp) in, probe rows out. Exported so the row shape can be
+ * exercised without a browser, an admin token or an ssh hop — the same reason
+ * `classifyScrimSelectorIdentity` is pure.
+ *
+ * A reading missing ANY declared field is a hard MeasureError naming the field
+ * and its leg. `null` is a legitimate value (an absent attribute reads null);
+ * `undefined` and an absent key are not, and are the same failure — "the probe
+ * did not record it" is exactly what both mean.
+ */
+export function buildStripFocusRows(reading, stamp = {}) {
+  if (!reading || typeof reading !== 'object') {
+    die('strip-focus probe: no reading to build rows from — refusing to emit rows describing nothing');
+  }
+  const missing = [];
+  for (const leg of STRIP_FOCUS_LEGS) {
+    for (const f of leg.fields) {
+      if (!Object.prototype.hasOwnProperty.call(reading, f) || reading[f] === undefined) missing.push(`${leg.id}.${f}`);
+    }
+  }
+  if (missing.length) {
+    die(`strip-focus probe: the reading is missing ${missing.length} declared field(s) — ${missing.join(', ')}. ` +
+        `A probe row that silently drops a field still LOOKS like a reading, which is how the 2026-09-06 ` +
+        `finding would stop being reproducible without anything going red.`);
+  }
+  return STRIP_FOCUS_LEGS.map((leg) => ({
+    probe: 'spd-b21 strip-focus',
+    leg: leg.id,
+    question: leg.question,
+    criterion:
+      'spd-b21 c0/c1 — keyboard Enter on the collapsed strip lands focus on the expanded ' +
+      '.pane-column[tabindex="-1"] (never BODY), with a visible ring, on the node the patch ADDED',
+    viewport_px: stamp.viewport_px ?? null,
+    bucket: stamp.bucket ?? null,
+    measured_at: stamp.measured_at ?? null,
+    served_sha: stamp.served_sha ?? null,
+    slot_active: stamp.slot_active ?? null,
+    keyboard_only: true,
+    reading: Object.fromEntries(leg.fields.map((f) => [f, reading[f]])),
+    probe_note: 'diagnostic only — no gate authority (D81)',
+  }));
+}
+
+/**
+ * THE BROWSER HALF. Narrow bucket (900px), keyboard only: Tab to the collapsed
+ * strip, arm the observers, press Enter, read.
+ *
+ * Armed INSIDE the same evaluate that will be measured against, and BEFORE the
+ * key press — a MutationObserver installed after the patch sees nothing, and an
+ * "armed" flag set in one evaluate and probed in the next is a different
+ * measurement than the one it claims to be.
+ */
+async function runStripFocusProbe(page, base, docPath, stamp) {
+  const PROBE_WIDTH = 900; // narrow band — the strip only renders below `standard`
+  await page.setViewportSize({ width: PROBE_WIDTH, height: 900 });
+  await page.goto(base + docPath, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.pane-column', { timeout: 30_000 });
+  await waitForDeskSettled(page);
+
+  // Keyboard ONLY. A click would focus the strip too, but `:focus-visible` is
+  // the whole question and a mouse-origin focus does not match it — so a
+  // clicked probe would read "no ring" on a desk that rings correctly.
+  let tabs = 0;
+  let onStrip = false;
+  for (; tabs < 120 && !onStrip; tabs++) {
+    await page.keyboard.press('Tab');
+    onStrip = await page.evaluate(() => !!document.activeElement?.classList?.contains('pane-column--collapsed'));
+  }
+  if (!onStrip) {
+    dieRetryable('element-vanished',
+      `strip-focus probe: never reached .pane-column--collapsed in ${tabs} Tab presses at ${PROBE_WIDTH}px. ` +
+      `Either the strip did not render in the narrow bucket or it left the tab order — both are findings, ` +
+      `but this probe cannot tell them apart, so it refuses rather than reporting a focus reading of nothing.`);
+  }
+
+  await page.evaluate(() => {
+    const g = { t0: performance.now(), focus_events: [], added_panes: [], strip_node: document.activeElement };
+    window.__stripFocus = g;
+    const t = () => Math.round((performance.now() - g.t0) * 100) / 100;
+    const d = (el) => {
+      if (!el) return null;
+      if (el === document.body) return { sel: 'BODY', id: null, tag: 'BODY' };
+      if (el.nodeType !== 1) return { sel: `#node(${el.nodeType})`, id: null, tag: null };
+      return { sel: el.tagName.toLowerCase() + (el.id ? '#' + el.id : ''), id: el.id || null, tag: el.tagName };
+    };
+    g.describe = d;
+    const container = document.getElementById('studio-panes') || document.body;
+    g.observer_target = container.id ? '#' + container.id : container.tagName;
+    new MutationObserver((records) => {
+      for (const r of records) {
+        if (r.type !== 'childList') continue;
+        for (const n of r.addedNodes) {
+          if (n.nodeType === 1 && n.classList && n.classList.contains('pane-column')) g.added_panes.push(n);
+        }
+      }
+    }).observe(container, { childList: true, subtree: true });
+    for (const kind of ['focus', 'focusin', 'focusout', 'blur']) {
+      document.addEventListener(kind, (ev) => {
+        g.focus_events.push({ t_ms: t(), kind, target: d(ev.target), related: ev.relatedTarget ? d(ev.relatedTarget) : null });
+      }, true);
+    }
+  });
+
+  const armed_at = new Date().toISOString();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(3000);
+
+  const reading = await page.evaluate(() => {
+    const g = window.__stripFocus;
+    const a = document.activeElement;
+    const target = document.querySelector('.pane-column[tabindex="-1"]');
+    const strip = document.querySelector('.pane-column--collapsed');
+    const cs = a ? getComputedStyle(a) : null;
+    const sel = (el) => {
+      if (!el) return null;
+      if (el === document.body) return 'BODY';
+      return el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') +
+        (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\s+/).join('.') : '');
+    };
+    const added = g.added_panes;
+    const focusedAdded = added.find((n) => n === a) || null;
+    // A COMPETING focus event is a focus/focusin whose target is neither the
+    // strip the run started on nor the node the patch added. Its ABSENCE is the
+    // load-bearing half of the phx-mounted inference, so it is counted here
+    // rather than left for a reader to eyeball out of the sequence.
+    const competing = g.focus_events.filter((e) =>
+      (e.kind === 'focus' || e.kind === 'focusin') &&
+      e.target && e.target.id !== (a ? a.id : null) && e.target.sel !== 'BODY');
+    return {
+      active_selector: sel(a),
+      active_id: a && a.id ? a.id : null,
+      active_classes: a && typeof a.className === 'string' ? a.className : null,
+      active_tag: a ? a.tagName : null,
+      active_tabindex: a && a.getAttribute ? a.getAttribute('tabindex') : null,
+      active_is_BODY: a === document.body,
+      active_is_pane_column_focus_target: !!(target && a === target),
+
+      active_focus_visible: a && a.matches ? a.matches(':focus-visible') : null,
+      outline_style: cs ? cs.outlineStyle : null,
+      outline_width: cs ? cs.outlineWidth : null,
+      outline_color: cs ? cs.outlineColor : null,
+      outline_offset: cs ? cs.outlineOffset : null,
+
+      strip_id: g.strip_node ? g.strip_node.id || null : null,
+      strip_tag: g.strip_node ? g.strip_node.tagName : null,
+      aria_controls: g.strip_node && g.strip_node.getAttribute ? g.strip_node.getAttribute('aria-controls') : null,
+      aria_controls_resolves: !!(g.strip_node && g.strip_node.getAttribute && g.strip_node.getAttribute('aria-controls') &&
+        document.getElementById(g.strip_node.getAttribute('aria-controls'))),
+      aria_expanded: g.strip_node && g.strip_node.getAttribute ? g.strip_node.getAttribute('aria-expanded') : null,
+      aria_expanded_present: !!(g.strip_node && g.strip_node.hasAttribute && g.strip_node.hasAttribute('aria-expanded')),
+      aria_label: g.strip_node && g.strip_node.getAttribute ? g.strip_node.getAttribute('aria-label') : null,
+
+      focus_event_kinds: g.focus_events.map((e) => e.kind),
+      focus_events: g.focus_events,
+      added_pane_count: added.length,
+      added_pane_phx_mounted: focusedAdded && focusedAdded.getAttribute ? focusedAdded.getAttribute('phx-mounted')
+        : (added[0] && added[0].getAttribute ? added[0].getAttribute('phx-mounted') : null),
+      added_pane_tabindex: focusedAdded && focusedAdded.getAttribute ? focusedAdded.getAttribute('tabindex')
+        : (added[0] && added[0].getAttribute ? added[0].getAttribute('tabindex') : null),
+      focused_is_added_pane: added.some((n) => n === a),
+      focused_is_old_strip_node: a === g.strip_node,
+      old_strip_still_connected: g.strip_node ? g.strip_node.isConnected : null,
+      competing_focus_events: competing,
+      // NOT a declared field — context for a reader, never load-bearing.
+      _context: {
+        observer_target: g.observer_target,
+        bucket: document.documentElement.getAttribute('data-width-bucket'),
+        inner_width: window.innerWidth,
+        strip_still_present_selector: sel(strip),
+        target_selector: sel(target),
+      },
+    };
+  });
+
+  const rows = buildStripFocusRows(reading, { ...stamp, viewport_px: PROBE_WIDTH, bucket: reading._context.bucket });
+  return {
+    ran: true,
+    viewport_px: PROBE_WIDTH,
+    tabs_to_strip: tabs,
+    method: 'keyboard ONLY (Tab to .pane-column--collapsed, then Enter); observers armed before the key press',
+    armed_at,
+    context: reading._context,
+    phx_mounted_inference: inferPhxMountedFired(reading),
+    rows,
+    probe_note: 'diagnostic only — no gate authority (D81)',
+  };
+}
 // ── run ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -4531,6 +4830,26 @@ async function main() {
     //    Chromium in the wave, and both are single observations its builder
     //    could not take before merge. Diagnostic output, no gate authority.
     run.b29_probes = await runB29Probes(page, srv.base, docPath);
+
+    // ── spd-b21's strip-focus reading, so the 2026-09-06 finding is
+    //    RE-RUNNABLE rather than a screenshot in a closed row. Opt-in; the
+    //    stamp is the same pre-sweep provenance every matrix row carries.
+    if (STRIP_FOCUS_PROBE) {
+      run.strip_focus_probe = await runStripFocusProbe(page, srv.base, docPath, {
+        measured_at: new Date().toISOString(),
+        served_sha: provenance.served_sha,
+        slot_active: provenance.slot_active,
+      });
+    } else {
+      run.strip_focus_probe = {
+        ran: false,
+        rows: [],
+        skip_reason:
+          '--strip-focus-probe was not passed. It costs a second navigation at 900px and up to 120 ' +
+          'Tab presses, so it is opt-in — but a run without it says NOTHING about strip focus, and ' +
+          'an absent reading must never read like a clean one.',
+      };
+    }
   } finally {
     await browser.close();
   }
@@ -5281,6 +5600,23 @@ export function printTable(run) {
     L('      A NEGATIVE delta means the hit-test found MORE occlusion than the inspector\'s own box');
     L('      accounts for — i.e. something else is also on top there. Read the `edges` field on the');
     L('      scanlines: it names the element on each side of every boundary it bisected.');
+  }
+  if (run.strip_focus_probe?.ran) {
+    const p = run.strip_focus_probe;
+    const r = Object.assign({}, ...p.rows.map((row) => row.reading));
+    L(`    spd-b21 STRIP FOCUS at ${p.viewport_px}px (${p.rows[0]?.bucket ?? '?'}), ${p.tabs_to_strip} Tab(s) then Enter:`);
+    L(`      activeElement ${r.active_selector} · is BODY ${yn(r.active_is_BODY)} · ` +
+      `is .pane-column[tabindex=-1] ${yn(r.active_is_pane_column_focus_target)}`);
+    L(`      :focus-visible ${yn(r.active_focus_visible)} · outline ${r.outline_style} ${r.outline_width} ` +
+      `${r.outline_color} offset ${r.outline_offset}`);
+    L(`      strip ${r.strip_tag}#${r.strip_id} aria-controls=${r.aria_controls} ` +
+      `(resolves ${yn(r.aria_controls_resolves)}) · aria-expanded present ${yn(r.aria_expanded_present)}`);
+    L(`      focus sequence ${r.focus_event_kinds.join(' -> ') || '(none)'} · ` +
+      `competing focus events ${r.competing_focus_events.length}`);
+    L(`      phx-mounted fired: ${p.phx_mounted_inference.fired ? 'INFERRED-YES' : 'INFERRED-NO'} ` +
+      `(INFERENCE${p.phx_mounted_inference.broken.length ? ', broken links: ' + p.phx_mounted_inference.broken.join(', ') : ', all 4 links held'})`);
+  } else if (run.strip_focus_probe) {
+    L(`    spd-b21 STRIP FOCUS  not taken — ${run.strip_focus_probe.skip_reason}`);
   }
   if (run.b29_probes) {
     const { c2, c3 } = run.b29_probes;

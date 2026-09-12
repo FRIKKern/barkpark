@@ -406,6 +406,93 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   def format_duration(_ms), do: "0s"
 
+  # ── the per-TURN files-changed aggregate (task-eb3a6938ecc8576c) ────────────
+  #
+  # U1 folds a settled turn under one header. This is what that header SAYS
+  # about the turn's effect on the tree: the set of files the turn mutated, each
+  # once, with the turn's TOTAL +/- for that path.
+  #
+  # DERIVED, never re-parsed: the fold walks the SAME `classify/1` shape
+  # dispatch and the SAME `build_lines/1` the per-row diff already uses, so a
+  # shape the row renders as a diff is exactly a shape the aggregate counts, and
+  # the counts are the very lines the reader sees. `Barkpark.Papers.TextDiff` is
+  # still the ONE diff engine — adding a second one is capability-dup, banned in
+  # this module's own docs above.
+  #
+  # (Search vocabulary: files changed / per-turn file summary / turn file list /
+  # files_changed / what did this turn touch.)
+
+  @doc """
+  The files one settled turn changed, as `[%{path:, added:, removed:}]` in
+  FIRST-TOUCH order.
+
+  One entry per PATH, not per tool call: a turn that edits the same file three
+  times yields ONE entry whose `added`/`removed` are the SUM across those three
+  edits. A non-mutating call (`classify/1` says `:generic` — Bash, Read, a
+  TodoWrite, an Agent spawn) contributes nothing at all, which is why a turn
+  that only read files renders no summary rather than an empty one.
+
+  Order is the order each path was FIRST touched, so the list reads like the
+  turn did; a later re-touch sums into the entry already standing, it never
+  moves it.
+  """
+  @spec files_changed([map()]) :: [
+          %{path: String.t(), added: non_neg_integer(), removed: non_neg_integer()}
+        ]
+  def files_changed(rows) when is_list(rows) do
+    {order, tally} = Enum.reduce(rows, {[], %{}}, &tally_row/2)
+
+    order
+    |> Enum.reverse()
+    |> Enum.map(fn path ->
+      {added, removed} = Map.fetch!(tally, path)
+      %{path: path, added: added, removed: removed}
+    end)
+  end
+
+  def files_changed(_), do: []
+
+  @doc """
+  The summary text for an aggregate: `"1 file changed"` / `"3 files changed"`.
+  THE one place Studio builds this string; an empty aggregate has no label
+  because it draws no summary at all.
+  """
+  @spec files_changed_label([map()]) :: String.t()
+  def files_changed_label(entries) when is_list(entries) do
+    case length(entries) do
+      1 -> "1 file changed"
+      n -> "#{n} files changed"
+    end
+  end
+
+  # One row's contribution. The `:generic` clause is the whole non-mutating
+  # world: it returns the accumulator UNTOUCHED, so a read-only turn folds to [].
+  defp tally_row(row, {order, tally} = acc) do
+    input = row_input(row)
+
+    case classify(input) do
+      :generic ->
+        acc
+
+      _mutating ->
+        path = input["file_path"]
+        lines = build_lines(input)
+        added = Enum.count(lines, &(&1.op == "+"))
+        removed = Enum.count(lines, &(&1.op == "-"))
+
+        case Map.fetch(tally, path) do
+          {:ok, {a, r}} -> {order, Map.put(tally, path, {a + added, r + removed})}
+          :error -> {[path | order], Map.put(tally, path, {added, removed})}
+        end
+    end
+  end
+
+  # A transcript row carries its tool input under `:input` live and `"input"`
+  # when it came straight off the stored metadata map. Anything else is a row
+  # with no tool call, which `classify/1` answers `:generic` for.
+  defp row_input(row) when is_map(row), do: Map.get(row, :input) || Map.get(row, "input") || %{}
+  defp row_input(_), do: %{}
+
   # ── show-active-only, the RUNNING half (task-b66928b2958c8cfa) ──────────────
   #
   # U1 folded a turn once it SETTLED. This is its counterpart while the turn is

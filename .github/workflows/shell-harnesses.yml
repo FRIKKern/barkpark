@@ -169,6 +169,13 @@ on:
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
       - "scripts/pds-record-parity.test.sh"
+      # THE TWO PURE-TREE INPUTS OF THE D-NUMBER ARBITER (task-6fd11672fdeefd0b).
+      # `--check-alloc` reads the charter AND the reservation ledger; `--axis a`
+      # reads the charter AND this checkout's git log. An edit to either FILE can
+      # flip either verdict without touching a single script, so both are inputs
+      # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
+      - ".claude/workflows/bp-pds-charter.md"
+      - "tooling/pds/d-number-reservations.tsv"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
       - "scripts/pds-read-preflight-audit.sh"
@@ -210,6 +217,12 @@ on:
       # consumer of the BP API sources. Its harness runs a fake loopback server.
       - "scripts/lib/bp-curl.sh"
       - "scripts/lib/bp-curl.test.sh"
+      # MIGRATION VERSION COLLISION (task-ac34d17c2aba4458). Detector A needs no
+      # database, so it rides here; the Cloud gate runs the same script with
+      # --require-db before `mix test`. cloud.yml is already a path entry above
+      # (seal-run), and it is an INPUT here too: the harness's contract is that
+      # the gate step exists, so an edit there must be able to red this lane.
+      - "scripts/migration-version-collision-check.sh"
       # MAIN WORKFLOW ROLL-UP (task-b4aa15924d214156). The roll-up whose roster
       # is the TREE, not a watched set: every .github/workflows/ file, its
       # newest completed conclusion on main, and REQUIRED vs ADVISORY derived
@@ -419,6 +432,18 @@ on:
       - ".github/workflows/task-lease-renew.yml"
       - "scripts/task-lease-sweep.sh"
       - "scripts/task-lease-sweep.test.sh"
+      # ── THE MERGE SWEEP'S REVIEW HOLD (task-435620b0f02720b2) ──────────────
+      # merge-sweep.sh squash-merges campaign PRs UNATTENDED. It had no test of
+      # its merge/refuse loop at all — only a `--selftest` string table that
+      # never executes the arm deciding whether a PR is merged. Its only hold
+      # was a DO NOT MERGE|WIP|HOLD title regex, which fails OPEN. It now also
+      # refuses a PR carrying an open GitHub review, and the harness proves both
+      # directions in ONE run (a refusal alone cannot be told from a sweep that
+      # stopped merging). Per file, D26 — and NOT under scripts/, so
+      # selftest-wiring-census.sh (scripts/-scoped) cannot see it: this entry
+      # and the job below ARE its wiring.
+      - ".claude/skills/orchestrate-tasks/helpers/merge-sweep.sh"
+      - ".claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh"
       # ── ORPHAN SWEEP III (task-8780f3b465edea5b, 2026-09-06) ────────────────
       # Three harnesses that no workflow ran, each adjudicated by an ACTUAL RUN
       # in a scratch worktree at 776c91142 before being wired — all three are
@@ -444,6 +469,16 @@ on:
       # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
       # catches it, and the census resolves that directory correctly either way.
       - "scripts/selftest-wiring-census.sh"
+      # EXIT-LAUNDERING SWEEP (task-20fe68463c87e136). The instrument that
+      # separates `cmd >/dev/null 2>&1 || true` on a PRODUCER whose artifact a
+      # later line CONSUMES (the #14371 shape: seven days of a repo-wide red
+      # read as `jq: error: Could not open file …-spec.json`) from the same
+      # idiom on best-effort teardown, which is correct. Only its --selftest
+      # rides here: 19 assertions over planted positives and negative controls,
+      # hermetic mktemp fixtures, no network. The tree-wide sweep is a REPORT,
+      # not a ratchet, so wiring it as a gate would red on 17 pre-existing
+      # deploy/ sites that belong to other lanes' rows.
+      - "scripts/exit-laundering-sweep.sh"
       # DEPLOY RECEIPT HONESTY (pds-bl-w48-deploy-make-and-rebuild-receipts).
       # The last three are the GUARDED SUBJECTS, not the harness: the fixture
       # runs `make deploy` and scripts/deploy-rebuild.sh with the hook in the
@@ -566,6 +601,13 @@ on:
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
       - "scripts/pds-record-parity.test.sh"
+      # THE TWO PURE-TREE INPUTS OF THE D-NUMBER ARBITER (task-6fd11672fdeefd0b).
+      # `--check-alloc` reads the charter AND the reservation ledger; `--axis a`
+      # reads the charter AND this checkout's git log. An edit to either FILE can
+      # flip either verdict without touching a single script, so both are inputs
+      # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
+      - ".claude/workflows/bp-pds-charter.md"
+      - "tooling/pds/d-number-reservations.tsv"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
       - "scripts/pds-read-preflight-audit.sh"
@@ -607,6 +649,12 @@ on:
       # consumer of the BP API sources. Its harness runs a fake loopback server.
       - "scripts/lib/bp-curl.sh"
       - "scripts/lib/bp-curl.test.sh"
+      # MIGRATION VERSION COLLISION (task-ac34d17c2aba4458). Detector A needs no
+      # database, so it rides here; the Cloud gate runs the same script with
+      # --require-db before `mix test`. cloud.yml is already a path entry above
+      # (seal-run), and it is an INPUT here too: the harness's contract is that
+      # the gate step exists, so an edit there must be able to red this lane.
+      - "scripts/migration-version-collision-check.sh"
       # MAIN WORKFLOW ROLL-UP (task-b4aa15924d214156). The roll-up whose roster
       # is the TREE, not a watched set: every .github/workflows/ file, its
       # newest completed conclusion on main, and REQUIRED vs ADVISORY derived
@@ -778,6 +826,18 @@ on:
       - ".github/workflows/task-lease-renew.yml"
       - "scripts/task-lease-sweep.sh"
       - "scripts/task-lease-sweep.test.sh"
+      # ── THE MERGE SWEEP'S REVIEW HOLD (task-435620b0f02720b2) ──────────────
+      # merge-sweep.sh squash-merges campaign PRs UNATTENDED. It had no test of
+      # its merge/refuse loop at all — only a `--selftest` string table that
+      # never executes the arm deciding whether a PR is merged. Its only hold
+      # was a DO NOT MERGE|WIP|HOLD title regex, which fails OPEN. It now also
+      # refuses a PR carrying an open GitHub review, and the harness proves both
+      # directions in ONE run (a refusal alone cannot be told from a sweep that
+      # stopped merging). Per file, D26 — and NOT under scripts/, so
+      # selftest-wiring-census.sh (scripts/-scoped) cannot see it: this entry
+      # and the job below ARE its wiring.
+      - ".claude/skills/orchestrate-tasks/helpers/merge-sweep.sh"
+      - ".claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh"
 
       # ── ORPHAN SWEEP III (task-8780f3b465edea5b, 2026-09-06) ────────────────
       # Three harnesses that no workflow ran, each adjudicated by an ACTUAL RUN
@@ -804,6 +864,16 @@ on:
       # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
       # catches it, and the census resolves that directory correctly either way.
       - "scripts/selftest-wiring-census.sh"
+      # EXIT-LAUNDERING SWEEP (task-20fe68463c87e136). The instrument that
+      # separates `cmd >/dev/null 2>&1 || true` on a PRODUCER whose artifact a
+      # later line CONSUMES (the #14371 shape: seven days of a repo-wide red
+      # read as `jq: error: Could not open file …-spec.json`) from the same
+      # idiom on best-effort teardown, which is correct. Only its --selftest
+      # rides here: 19 assertions over planted positives and negative controls,
+      # hermetic mktemp fixtures, no network. The tree-wide sweep is a REPORT,
+      # not a ratchet, so wiring it as a gate would red on 17 pre-existing
+      # deploy/ sites that belong to other lanes' rows.
+      - "scripts/exit-laundering-sweep.sh"
       # DEPLOY RECEIPT HONESTY — mirrored from on.pull_request.paths. The twin
       # lists are set-equal by contract (doc-gates-paths-parity-check.sh runs
       # against this file too); a PR-only entry would go dark on the merge.
@@ -953,6 +1023,7 @@ jobs:
       cloud-static-gz: ${{ steps.sets.outputs.cloud-static-gz }}
       pds-hetzner-offline: ${{ steps.sets.outputs.pds-hetzner-offline }}
       task-lease-renew: ${{ steps.sets.outputs.task-lease-renew }}
+      merge-sweep-review-hold: ${{ steps.sets.outputs.merge-sweep-review-hold }}
       landed-mark: ${{ steps.sets.outputs.landed-mark }}
       doc-gates-paths-parity: ${{ steps.sets.outputs.doc-gates-paths-parity }}
       merge-gate-bridge: ${{ steps.sets.outputs.merge-gate-bridge }}
@@ -962,10 +1033,12 @@ jobs:
       workflow-trigger-coverage: ${{ steps.sets.outputs.workflow-trigger-coverage }}
       orphan-harnesses: ${{ steps.sets.outputs.orphan-harnesses }}
       selftest-wiring-census: ${{ steps.sets.outputs.selftest-wiring-census }}
+      exit-laundering-sweep: ${{ steps.sets.outputs.exit-laundering-sweep }}
       dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
       which-gates: ${{ steps.sets.outputs.which-gates }}
       bp-curl: ${{ steps.sets.outputs.bp-curl }}
+      migration-version-collision: ${{ steps.sets.outputs.migration-version-collision }}
       sunset-route-consumers: ${{ steps.sets.outputs.sunset-route-consumers }}
       main-workflow-rollup: ${{ steps.sets.outputs.main-workflow-rollup }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
@@ -1052,6 +1125,8 @@ jobs:
           pds-harnesses scripts/pds-ledger-census_test.sh
           pds-harnesses scripts/pds-record-parity.sh
           pds-harnesses scripts/pds-record-parity.test.sh
+          pds-harnesses .claude/workflows/bp-pds-charter.md
+          pds-harnesses tooling/pds/d-number-reservations.tsv
           pds-harnesses scripts/pds-scratch-target.sh
           pds-harnesses scripts/pds-scratch-target_test.sh
           pds-harnesses scripts/pds-read-preflight-audit.sh
@@ -1130,6 +1205,8 @@ jobs:
           task-lease-renew scripts/task-lease-sweep.test.sh
           task-lease-renew .github/workflows/task-lease-renew.yml
           task-lease-renew scripts/pr-task-gate.sh
+          merge-sweep-review-hold .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh
+          merge-sweep-review-hold .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh
           landed-mark scripts/landed-mark.sh
           landed-mark scripts/landed-mark.test.sh
           landed-mark scripts/fixtures/landed-mark/**
@@ -1180,6 +1257,7 @@ jobs:
           selftest-wiring-census scripts/*.test.mjs
           selftest-wiring-census scripts/*_test.sh
           selftest-wiring-census .github/workflows/*.yml
+          exit-laundering-sweep scripts/exit-laundering-sweep.sh
           which-gates scripts/which-gates.sh
           which-gates scripts/which-gates.test.sh
           which-gates scripts/cloud-path-escape-check.sh
@@ -1192,6 +1270,8 @@ jobs:
           which-gates .github/workflows/go-tests.yml
           bp-curl scripts/lib/bp-curl.sh
           bp-curl scripts/lib/bp-curl.test.sh
+          migration-version-collision scripts/migration-version-collision-check.sh
+          migration-version-collision .github/workflows/cloud.yml
           main-workflow-rollup scripts/main-workflow-rollup.sh
           main-workflow-rollup scripts/main-workflow-rollup.test.sh
           main-workflow-rollup .github/required-checks.json
@@ -1773,6 +1853,15 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, AND IT IS LOAD-BEARING FOR THE ARBITER STEP BELOW.
+          # actions/checkout@v4 is `--depth 1` by default. pds-record-parity.sh's
+          # ruling 4 fails CLOSED on a truncated walk: under depth 1 a graft sits
+          # on HEAD's own history, `--axis a` prints TRUNCATED and exits 2
+          # (UNCHECKED), and the step below treats 2 as RED. So a shallow checkout
+          # here would not publish a vacuous green -- it would red every run.
+          # Full history is what makes the arm able to LOOK.
+          fetch-depth: 0
       - name: jq is present (pds-record-parity.test.sh exits 99 without it)
         id: setup
         # :143 turns a missing jq into exit 99 TEST HARNESS FAIL while building
@@ -1798,6 +1887,100 @@ jobs:
         # the read-back evidence diff: a stub bp that ACKS a met-to-met stamp and
         # drops the evidence must red, the honest stub must stay green.
         run: bash scripts/pds-read-preflight-audit_test.sh
+      - name: "PDS-D allocation arbiter: --check-alloc and --axis a over the merged tree"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # THE NAMED TRIGGER (task-6fd11672fdeefd0b) for two charter rulings that
+        # were, until this step, enforced by nothing at all: `--axis a` reports no
+        # NEW unbaselined DUPLICATE-DEFINITION after each wave, and `--check-alloc`
+        # runs at the end of every wave DECIDE block. Both were written as
+        # obligations in prose. A written finding does not fire by itself.
+        #
+        # ONLY THE TWO PURE-TREE ARMS, AND THAT IS THE WHOLE DESIGN.
+        # scripts/pds-record-parity.sh declares itself, in its own run output,
+        # "REPORTER, never a gate": its AXIS B resolves a few hundred task ids
+        # against the LIVE ledger over `gh` and reds on OTHER epics' open rows --
+        # red by design, which is exactly how scripts/pds-door-census.sh
+        # dispositions it (`pds-record-parity.sh RED-BY-DESIGN-REPORTER ... its
+        # only non-vacuous axis resolves task ids against the LIVE ledger and is
+        # red by design. A reporter must never carry a required check name.`).
+        # `--check-alloc` (charter + tooling/pds/d-number-reservations.tsv) and
+        # `--axis a` (charter + this checkout's git log) touch NO network, NO gh,
+        # NO token and NO ledger: they ask only whether this tree agrees with
+        # itself. Running the bare script -- or `--axis b`, or `--axis both` --
+        # here would import that by-design red. Never widen this step to them.
+        # This job is also NOT a required context (an S4 PATHS-FILTERED exclusion
+        # in .github/required-checks.json), so wiring the arm makes it RUN, not
+        # BLOCK -- the census's "never a required check name" still holds.
+        #
+        # EXIT 2 IS RED, NOT A PASS. Verbatim from the script's own exit table:
+        #   0  PARITY    -- every axis checked, nothing divergent
+        #   1  DIVERGENT -- at least one leaf slice merged over an open row, a
+        #                   cited D that the charter does not define, or a
+        #                   D-number defined twice that the pinned baseline does
+        #                   not already carry (and the mirror: a baselined pair
+        #                   that has vanished)
+        #   2  UNCHECKED -- the arm could not look (no gh, no credentials, ledger
+        #                   down, no charter, a TRUNCATED commit walk) OR it
+        #                   REFUSED to run vacuously (grace >= span)
+        #   3  USAGE     -- bad invocation
+        # and --check-alloc's own tail line: "UNCHECKED -- the allocation ledger
+        # could not be scored. NOT a pass." The loop below fails the step on ANY
+        # non-zero rc and NAMES which of the four it was, so an UNCHECKED can
+        # never read as a green in this log.
+        #
+        # THE POSITIVE CONTROL is the three counts printed first. The script
+        # prints the seed and the reserved count but never the two high-water
+        # marks, and a verdict with no numbers beside it cannot be told from a
+        # verdict over an empty corpus -- so the step derives them, with the
+        # script's own definition lens, and prints them before it runs anything.
+        run: |
+          set -uo pipefail
+
+          CHARTER=.claude/workflows/bp-pds-charter.md
+          ALLOC=tooling/pds/d-number-reservations.tsv
+
+          for f in "$CHARTER" "$ALLOC"; do
+            [ -f "$f" ] || { echo "RED: $f is missing from this tree -- the arbiter has nothing to compare" >&2; exit 1; }
+          done
+
+          # The definition lens, byte-for-byte charter_defined_numbers() from
+          # scripts/pds-record-parity.sh: bold-lead bullet UNION own-line heading.
+          # NOT "any PDS-D anywhere" -- the charter's prose names the synthetic
+          # fixtures PDS-D777/PDS-D999 and a looser lens would read them as a
+          # high-water mark of 999.
+          charter_hw=$( { grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+' "$CHARTER" || true
+                          grep -oE '^#+[[:space:]]+PDS-D[0-9]+([[:space:]]|$)' "$CHARTER" || true
+                        } | grep -oE 'PDS-D[0-9]+' | sed 's/^PDS-D//' | sort -n -u | tail -1 )
+          ledger_hw=$(awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { sub(/^PDS-D/, "", $1); print $1 }' "$ALLOC" | sort -n -u | tail -1)
+          res_count=$(awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { print $1 }' "$ALLOC" | sort -u | wc -l | tr -d ' ')
+          seed=$(awk -F'\t' '$1 == "SEED" { print $2; exit }' "$ALLOC")
+
+          echo "── the three counts this step compares (derived HERE, from this tree) ──"
+          echo "  charter high-water:  PDS-D${charter_hw:-<none>}   (highest number DEFINED in $CHARTER)"
+          echo "  ledger  high-water:  PDS-D${ledger_hw:-<none, only the SEED row>}   (highest number RESERVED in $ALLOC)"
+          echo "  reservations:        ${res_count} number(s) reserved above the seed"
+          echo "  seed:                ${seed:-<none>}   (at or below it predates the arbiter, not scored)"
+          [ -n "${charter_hw:-}" ] || { echo "RED: the charter defines no PDS-D at all -- the lens is measuring itself, not the corpus" >&2; exit 1; }
+
+          rc_total=0
+          for arm in --check-alloc "--axis a"; do
+            echo "── bash scripts/pds-record-parity.sh $arm ──"
+            # `|| rc=$?` and NOT a bare call followed by `rc=$?`: the default
+            # shell for a `run:` block is `bash -e {0}`, which would exit on the
+            # non-zero BEFORE the case below ever classified it -- the step would
+            # still be red, but the log would never say DIVERGENT or UNCHECKED.
+            rc=0
+            # shellcheck disable=SC2086
+            bash scripts/pds-record-parity.sh $arm || rc=$?
+            case "$rc" in
+              0) echo "  rc=0 PARITY" ;;
+              1) echo "  rc=1 DIVERGENT -- RED. The charter, the reservation ledger and the commit corpus disagree; see above." >&2; rc_total=1 ;;
+              2) echo "  rc=2 UNCHECKED -- RED, NOT A PASS. The arm could not look (truncated walk, missing charter, no SEED row)." >&2; rc_total=1 ;;
+              3) echo "  rc=3 USAGE -- RED. This step invoked the script wrongly." >&2; rc_total=1 ;;
+              *) echo "  rc=$rc UNKNOWN -- RED." >&2; rc_total=1 ;;
+            esac
+          done
+          exit "$rc_total"
 
   ci-failure-issue-filer:
     needs: [changes]
@@ -2588,6 +2771,46 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/pdf-kill-listener-proof.sh --selftest
 
+  # ── THE MERGE SWEEP'S REVIEW HOLD (task-435620b0f02720b2) ──────────────────
+  # The subject merges PRs to main with no human in the loop. Two measured
+  # near-misses on 2026-09-06 (#16615 taken two minutes before its author's
+  # follow-up push; a console PR saved only by being converted to draft) came
+  # from the sweep being unable to tell "green and reviewed" from "green and
+  # awaiting review". The hold is now GitHub's own review state, and this job
+  # is the only thing in CI that executes the sweep's merge/refuse loop.
+  merge-sweep-review-hold:
+    needs: [changes]
+    if: needs.changes.outputs.merge-sweep-review-hold == 'true'
+    name: an open review holds a PR from the unattended merge sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: jq and python3 are present (both stubs exit 2 without them)
+        id: setup
+        # The harness's gh stub applies the caller's own --jq filter with real
+        # jq, and merge-sweep.sh parses `gh pr view` with python3. Absence of
+        # either turns this job into a correct but illegible exit 2; naming the
+        # dependency here makes an image change fail BY NAME.
+        run: |
+          command -v jq >/dev/null || { echo "jq missing — the gh stub applies the sweep's own --jq with it" >&2; exit 1; }
+          command -v python3 >/dev/null || { echo "python3 missing — merge-sweep.sh reads title/body with it" >&2; exit 1; }
+          jq --version; python3 --version
+      - name: merge-sweep.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh
+      - name: merge-sweep.test.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh
+      - name: the trailer + review-hold decision table (hermetic, no gh)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # NO `continue-on-error` here or anywhere in this file. It launders a
+        # red into a green job conclusion.
+        run: ORCH="$RUNNER_TEMP" bash .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh --selftest
+      - name: one sweep run REFUSES the reviewed PR and MERGES the identical one
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh
+
   fleet-coordination-harnesses:
     needs: [changes]
     if: needs.changes.outputs.fleet-coordination-harnesses == 'true'
@@ -2840,6 +3063,30 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/selftest-wiring-census.sh --list
 
+  exit-laundering-sweep:
+    needs: [changes]
+    if: needs.changes.outputs.exit-laundering-sweep == 'true'
+    # THE INSTRUMENT, NOT THE CENSUS (task-20fe68463c87e136). What runs here is
+    # `--selftest`: three planted positives (the verbatim #14371 `--out` shape,
+    # the `> file` redirect, a workflow step), five negative controls (docker
+    # teardown, a `2>&1` CAPTURE that keeps the message, an unread artifact, an
+    # early-exit guard, a `%{http_code}` surrogate), and a FALSIFIER that
+    # deletes the consumer and requires the finding to be RETRACTED. A checker
+    # that cannot be shown to fail has not been shown to work, and the
+    # false-positive arms are the whole difficulty: a naive grep answers 1193
+    # on this corpus and 1023 of those are correct best-effort teardown.
+    name: exit-laundering predicate (planted controls, both directions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: exit-laundering-sweep.sh syntax check
+        run: bash -n scripts/exit-laundering-sweep.sh
+      - name: Prove the predicate can lose (--selftest)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/exit-laundering-sweep.sh --selftest
+
   deploy-receipt-honesty:
     needs: [changes]
     if: needs.changes.outputs.deploy-receipt-honesty == 'true'
@@ -3012,3 +3259,64 @@ jobs:
       - name: "both directions on fixtures + the three named mutations (staleness, roster, spec label)"
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/main-workflow-rollup.test.sh
+
+  migration-version-collision:
+    needs: [changes]
+    if: needs.changes.outputs.migration-version-collision == 'true'
+    # A MIGRATION VERSION MUST IDENTIFY ONE FILE (task-ac34d17c2aba4458).
+    # Measured 2026-09-10: a cloud migration minted as 20260910160000 met a
+    # concurrent lane's 20260910160000 already recorded in the SHARED
+    # barkpark_cloud_test schema_migrations. Ecto keys that table on the version
+    # integer alone, so `mix ecto.migrate` printed `Migrations already up`,
+    # applied nothing, exited 0, and the suite was one command away from
+    # measuring a schema the PR never created. Found only by hand-querying
+    # information_schema.
+    #
+    # Hermetic here: mktemp fixture trees, `git init` repos, and a
+    # --db-versions-file standing in for schema_migrations, so detectors B and C
+    # are proven without a database and this lane cannot rot into a skip. The
+    # harness ALSO runs a real `createdb` fixture database when one answers (the
+    # P-arm) and prints its own NOT RUN line when none does — on a runner with no
+    # postgres the P-arm is disclosed, never silently counted as a pass.
+    #
+    # The blocking half lives in cloud.yml's `test` job (a required context),
+    # which runs the same script with --require-db BEFORE `mix test`. That is why
+    # cloud.yml is a path entry for this job: an edit that drops the step must be
+    # able to red here.
+    name: migration version collision matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: migration-version-collision-check.sh syntax check
+        run: bash -n scripts/migration-version-collision-check.sh
+      - name: migration-version-collision-check.test.sh syntax check
+        if: ${{ !cancelled() }}
+        run: bash -n scripts/migration-version-collision-check.test.sh
+      - name: "collision mutation matrix (plant two files on one version, red naming both; remove, green)"
+        if: ${{ !cancelled() }}
+        run: bash scripts/migration-version-collision-check.test.sh
+      - name: the Cloud gate still runs this check BEFORE mix test
+        if: ${{ !cancelled() }}
+        # The wiring assertion. A harness that proves the script and says nothing
+        # about its caller is how a gate gets deleted and stays green. Both
+        # clauses are asserted: the step exists, and it is ORDERED before the
+        # `mix test` step in the same job.
+        run: |
+          set -euo pipefail
+          f=.github/workflows/cloud.yml
+          call=$(grep -n 'migration-version-collision-check.sh' "$f" | cut -d: -f1 | sed -n '1p')
+          if [ -z "$call" ]; then
+            echo "::error::$f no longer invokes scripts/migration-version-collision-check.sh"
+            exit 1
+          fi
+          test_line=$(grep -n '^        run: mix test$' "$f" | cut -d: -f1 | sed -n '1p')
+          if [ -z "$test_line" ]; then
+            echo "::error::$f has no 'run: mix test' step; this assertion cannot bind and refuses rather than passing"
+            exit 1
+          fi
+          if [ "$call" -ge "$test_line" ]; then
+            echo "::error::the collision check (line $call) runs at or AFTER mix test (line $test_line); a silent no-op would reach a green suite"
+            exit 1
+          fi
+          echo "cloud.yml: collision check at line $call, mix test at line $test_line — ordered correctly"

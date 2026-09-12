@@ -982,6 +982,14 @@ func runSitesDeployments(out *writer, args []string) int {
 		} else {
 			payload["next_cursor"] = nil
 		}
+		// requested_limit rides BESIDE next_cursor and under the SAME condition
+		// as the human narrowing clause, so a script sees exactly the narrowing
+		// a human does — never more. null when nothing was narrowed.
+		if n := deploymentsNarrowedBy(q.Limit, len(ds), page.NextCursor); n > 0 {
+			payload["requested_limit"] = n
+		} else {
+			payload["requested_limit"] = nil
+		}
 		out.emitStructured(payload)
 		return exitOK
 	}
@@ -989,7 +997,7 @@ func runSitesDeployments(out *writer, args []string) int {
 		out.outf("no deployments for %q yet — 'cd ~/your-project && bp deploy %s'", site.Name, site.Slug)
 		return exitOK
 	}
-	renderDeploymentSummary(out, summarizeDeployments(ds), page.NextCursor)
+	renderDeploymentSummary(out, summarizeDeployments(ds), page.NextCursor, deploymentsNarrowedBy(q.Limit, len(ds), page.NextCursor))
 	out.outf("")
 	renderDeploymentsTable(out, ds)
 	return exitOK
@@ -1197,7 +1205,34 @@ func summarizeDeployments(ds []Deployment) deploymentSummary {
 // side, one surface later. The clause now names the OUTCOME (never attempted),
 // which is true of every deferral class; the per-row CAUSE column still names
 // which one.
-func renderDeploymentSummary(out *writer, s deploymentSummary, nextCursor string) {
+// deploymentsNarrowedBy reports the limit the CALLER asked for when the server
+// served fewer rows than that AND left a cursor behind — and 0 otherwise, which
+// is the whole point.
+//
+// The two conditions TOGETHER are the truncation case; either one alone is
+// ambiguous with a window that simply ran out of rows:
+//
+//   - rows < limit with NO cursor is a genuinely short window. Nothing was
+//     narrowed; there are no more rows to have.
+//   - rows == limit WITH a cursor is a full window. The caller got exactly what
+//     they asked for; "older rows exist" already says the rest.
+//
+// Only fewer-than-asked plus more-behind means the server capped the request
+// (router.ex parse_limit), which is the one thing the caller cannot see and the
+// CLI knows. A requested limit of 0 means the caller typed no --limit at all and
+// therefore chose no number to be misled about; --all leaves NextCursor empty,
+// so a full walk never reports itself as narrowed.
+func deploymentsNarrowedBy(requestedLimit, served int, nextCursor string) int {
+	if requestedLimit > 0 && served < requestedLimit && nextCursor != "" {
+		return requestedLimit
+	}
+	return 0
+}
+
+// renderDeploymentSummary's requestedLimit is the NARROWING signal from
+// deploymentsNarrowedBy — 0 when nothing was narrowed, in which case the window
+// line is byte-identical to what it printed before.
+func renderDeploymentSummary(out *writer, s deploymentSummary, nextCursor string, requestedLimit int) {
 	counts := fmt.Sprintf("%d live, %d failed, %d deferred", s.Live, s.Failed, s.Deferred)
 	if s.Cancelled > 0 {
 		counts += fmt.Sprintf(", %d cancelled", s.Cancelled)
@@ -1223,6 +1258,13 @@ func renderDeploymentSummary(out *writer, s deploymentSummary, nextCursor string
 	out.outf("%s — %s, %s", counts, failedPart, deferredPart)
 
 	window := fmt.Sprintf("window: %s → %s (%d rows fetched)", dashOr(s.OldestAt), dashOr(s.NewestAt), s.Rows)
+	if requestedLimit > 0 {
+		// BOTH numbers, because the requested one is the number the caller
+		// reasons with and the only one the CLI never printed: a reader holding
+		// 200 rows after typing --limit 250 was computing rates against a
+		// denominator of 250.
+		window += fmt.Sprintf("; NARROWED: you requested %d, the server served %d", requestedLimit, s.Rows)
+	}
 	if nextCursor != "" {
 		window += fmt.Sprintf("; older rows exist — '--before %s' to walk past this window", nextCursor)
 	}

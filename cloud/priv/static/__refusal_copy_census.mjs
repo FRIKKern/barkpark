@@ -758,6 +758,12 @@ const PIN = [
   { key: "MAP|FORBIDDEN_REASON_COPY.cannot_grant_higher_role", verdict: "CONSULTED", copy: "You can't grant a role above your own — that has to come fr..." },
   { key: "FN|forbiddenEvidenceCopy|3fb8e7ae", verdict: "UNREVIEWED", copy: "You need the \"" },
   { key: "FN|forbiddenEvidenceCopy|36412f8e", verdict: "UNREVIEWED", copy: "\" permission on this team — an admin on this team can grant..." },
+  // cch-w48-bl — THE scope:"token" ARM. CONSULTED, and the server emitter is
+  // named: Auth.require_ability/2 sends {error:"forbidden", required:<ability>,
+  // scope:"token"} and it is the ONLY producer of that scope in cloud/lib. The
+  // sentence is reached ONLY on that scope, so it cannot fire on a team refusal.
+  { key: "FN|forbiddenEvidenceCopy|8e4a70b3", verdict: "CONSULTED", copy: "That access token doesn\\'t carry the \"" },
+  { key: "FN|forbiddenEvidenceCopy|89a37a83", verdict: "CONSULTED", copy: "\" ability. No team role grants it — a token\\'s abilities ar..." },
   { key: "FN|friendly|bee54c9c", verdict: "UNREVIEWED", copy: "Something went wrong." },
   { key: "FN|fleetLoadErrorHtml|47aa7e66", verdict: "UNREVIEWED", copy: "<div class=\"empty-state\"><h2>Couldn\\'t load this instance</h2>" },
   { key: "ARG|fleetLoadErrorHtml|faultCopy|a8e3bd83", verdict: "DELEGATED", copy: "Check your connection and retry." },

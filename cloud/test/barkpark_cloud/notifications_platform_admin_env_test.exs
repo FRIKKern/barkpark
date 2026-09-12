@@ -175,6 +175,40 @@ defmodule BarkparkCloud.NotificationsPlatformAdminEnvTest do
     assert operator_call(user).status == 200
   end
 
+  ## 5b. No role axis: a TEAM OWNER is refused by the same empty allowlist
+  ##
+  ##     §5 drives a user who belongs to no team, so on its own it cannot tell
+  ##     "the allowlist is empty" from "this principal simply has no standing".
+  ##     `require_platform_operator/2` (auth.ex) is a flat email membership test
+  ##     with no role arm and no bootstrap escape hatch, so the HIGHEST tenancy
+  ##     role a registered human can hold is refused exactly like a stranger.
+  ##     That is the crown going dark, and until this test nothing said it.
+  ##
+  ##     The CONTROL is the allowlisted call at the end: the same owner, the same
+  ##     route, one config key apart. Without it a 403 here could equally mean the
+  ##     route is broken for everyone.
+
+  test "a TEAM OWNER is 403'd by the empty allowlist, and the body names the platform scope" do
+    assert boot_with_env(nil) == []
+
+    owner = user_fixture()
+    n = System.unique_integer([:positive])
+    {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+    {:ok, _} = Accounts.add_member(team, owner, "owner")
+    assert %{role: "owner"} = Accounts.get_membership(team, owner)
+
+    refused = operator_call(owner)
+    assert refused.status == 403
+
+    assert refused.resp_body ==
+             ~s({"error":"forbidden","scope":"platform","required":"platform_operator"})
+
+    # CONTROL — the only thing that changes is the allowlist.
+    boot_with_env(owner.email)
+    allowed = operator_call(owner)
+    assert allowed.status == 200
+  end
+
   ## 6. The far end of the chain — and where it was CUT (dr-w19-s5)
   ##
   ##    §1-§5 prove the chain fails CLOSED — an unset variable is nobody, and the

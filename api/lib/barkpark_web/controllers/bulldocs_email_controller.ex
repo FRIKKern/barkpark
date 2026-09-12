@@ -146,7 +146,11 @@ defmodule BarkparkWeb.BulldocsEmailController do
           _ -> nil
         end
 
-    [workspace_id: ws_id, project_id: paper && paper.project_id]
+    # Published perspective, hard-coded like the LiveView reader's
+    # `reader_task_scope/1`: `/papers/:slug/email` renders a PUBLISHED paper to
+    # whoever can fetch the URL, so a draft-only task must never ride along in a
+    # task block (task-b10e10b944f6f55b).
+    [workspace_id: ws_id, project_id: paper && paper.project_id, published_only: true]
   end
 
   # The paper's workspace theme identity, defaulting through the seeded Default

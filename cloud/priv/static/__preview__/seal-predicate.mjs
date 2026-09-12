@@ -1255,7 +1255,8 @@ function gitDiffPaths(sha) {
 //   1. REF     `rev-parse --verify --quiet origin/main` — is there a thing to compare to?
 //   2. OBJECT  `cat-file -e <sha>^{commit}` — is the commit itself in this store?
 //   3. WALK    is a graft on HEAD's OWN history? — PORTED from
-//              `scripts/pds-record-parity.sh:261 walk_truncation()`, which is
+//              `walk_truncation()` in `scripts/pds-record-parity.sh` (grep -n
+//              'walk_truncation()' scripts/pds-record-parity.sh), which is
 //              mutation-proven in `scripts/pds-record-parity.test.sh`. That file is
 //              PDS-owned and a concurrent wave is live on it, so the LOGIC is ported
 //              rather than the file imported — and this file's own header law is ZERO
@@ -1278,7 +1279,7 @@ const gitProbe = (args) => {
   return { rc: r.error || r.status === null ? 128 : r.status, out: (r.stdout || '').trim() };
 };
 
-// PORTED from scripts/pds-record-parity.sh:261 `walk_truncation()`, fail-closed in all
+// PORTED from `walk_truncation()` in scripts/pds-record-parity.sh (grep -n it), fail-closed in all
 // four of its own unknown shapes (non-boolean store answer, missing common dir,
 // unreadable graft list, untestable graft). Memoised: it is repository-wide, asked once
 // per registered defect, and cannot change mid-run.

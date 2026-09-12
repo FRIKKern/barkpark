@@ -24,7 +24,7 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
   SCOPE NOTE (shared test database): every row is a pure function call on a
   literal term. Nothing touches `Repo`, so no other agent's rows can reach it.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 

@@ -6542,15 +6542,26 @@ if [ "$RC27_N" -ne 1 ]; then
   bad "the contradiction-refusal mutation applied $RC27_N times, not exactly 1 — its condition moved, so the proof below is vacuous"
 else
   ok "the contradiction-refusal mutation applies exactly once: a copy of the generator no longer refuses"
-  bash "$RC27_MUT_CON" --workflows "$RC27_BOTH" --fixture-dir "$RC27_BOTHF" \
-    --merge-base "$RC27_BASE" --sha btA --sha btB --out "$TMP/rc27-nocontra.json" >/dev/null 2>&1 || true
+  # EXIT-LAUNDERING (task-20fe68463c87e136). This site was the LAST survivor of
+  # the #14371 shape in this file: `>/dev/null 2>&1 || true` on the generator,
+  # then jq on the file it was supposed to write, three lines down. Section 25's
+  # ratchet could not see it — that ratchet counts `bad "$(why_emit` sites, and
+  # this one never went through why_emit at all, so it was invisible to the
+  # guard written for exactly this defect. If the mutant copy refuses (a bad
+  # `sed`, an unreadable fixture dir, a generator that will not start), the
+  # headline is `jq: error: Could not open file …/rc27-nocontra.json` and the
+  # verdict is "the refusal clause above is vacuous" — the wrong diagnosis, in
+  # the file whose seven-day blackout named the class.
+  emit_spec "$TMP/rc27-nocontra.json" \
+    bash "$RC27_MUT_CON" --workflows "$RC27_BOTH" --fixture-dir "$RC27_BOTHF" \
+    --merge-base "$RC27_BASE" --sha btA --sha btB --out "$TMP/rc27-nocontra.json" || true
   RC27_BOTHLIST="$(jq -c '[.protection.required_status_checks.checks[].context] as $r
                           | [.exclusions[].context] as $e
                           | { both: ($r - ($r - $e)) }' "$TMP/rc27-nocontra.json" 2>&1)"
   if [ "$RC27_BOTHLIST" = '{"both":["Both gate"]}' ]; then
     ok "…and WITHOUT it the IDENTICAL run writes $RC27_BOTHLIST at exit 0, silently — the shape cgsiw-s2 measured, reproduced on demand (mutation-proven able to fail)"
   else
-    bad "the unguarded run did not emit one context on both lists (got $RC27_BOTHLIST) — the refusal clause above is vacuous"
+    fail_emit "$(why_emit "the unguarded run did not emit one context on both lists (got $RC27_BOTHLIST) — the refusal clause above is vacuous")"
   fi
 fi
 

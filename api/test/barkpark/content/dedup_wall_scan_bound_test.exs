@@ -32,6 +32,7 @@ defmodule Barkpark.Content.DedupWallScanBoundTest do
   Verified by mutation: each of those three edits reds this file. See the PR for
   the run output.
   """
+  # sync: captures queries off node-global telemetry with no lineage filter on the handler
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content.{DedupWall, Document}

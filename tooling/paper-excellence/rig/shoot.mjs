@@ -80,19 +80,61 @@ const MAX_COLUMN_PX = 820;
 const MAX_DOC_OVERFLOW_PX = 4;
 // Half a device pixel at 2x, plus sub-pixel layout rounding.
 const MAX_BAND_OFFCENTRE_PX = 1.5;
-// The editorial measure band. The wave TARGETS 66-72; the gate floors the wider
-// 55-75 the whole reader is designed against, so a fixture whose paragraphs are
-// unusually short does not red a change that never touched type.
+// The editorial measure band — 66-72 CHARACTERS PER LINE, inclusive at both
+// ends. It shipped as the wider 55-75 because the numbers it would have judged
+// were LAPTOP numbers: on macOS the paper serif resolves to Iowan Old Style, a
+// Linux image falls further down the stack, and the two hosts disagree by
+// enough that a tight band pinned against a laptop capture would have reddened
+// the first CI run with no defect behind it (rig/README.md §Deliberate limits).
 //
-// The CEILING applies at EVERY width — a measure past 75 characters is a defect
-// on any screen, and it is the one the breakout could plausibly cause. The FLOOR
-// applies only where the column reached its designed 660px: at 360 the viewport
-// is narrower than the column, so the measure is set by the phone and not by the
-// type (measured 34.7 CPL there, before this change and after it). Flooring at
-// 360 would red every narrow cell forever and teach the next author to widen the
+// That is no longer the situation. rig/baselines/*.report.json were re-captured
+// INSIDE the CI image (ubuntu24, ImageVersion 20260907.300.1, #17894) and the
+// `check: true` dispatch arm of .github/workflows/paper-rig.yml re-judges them
+// in that same image on demand (#17915). So the band is now set against
+// MEASURED LINUX VALUES, all nine fixtures, both captured widths (36 cells):
+//
+//   heggemsnes-act                   66.9   ← FLOOR-binding fixture (0.9 spare)
+//   design-probe                     68.1
+//   mechanical-spacing-doctrine      69.2
+//   paper-excellence-wave-2026-08-12 70.6
+//   hobby-hardening-capstone         70.8
+//   portabledoc-showcase             70.7 / 71.1
+//   eight-minute-erasure             71.1
+//   stat-partial-row                 71.8
+//   agent-flight-recorder-charter    72.0 ← CEILING-binding, ZERO headroom
+//
+// Every cell in that panel is column-bound-FALSE (the 660px column against a
+// 1280/1920 viewport), so BOTH ends of the band are live over the whole panel,
+// not just the ceiling.
+//
+// READ THE CEILING BIND BEFORE YOU TOUCH THIS. `agent-flight-recorder-charter`
+// measures exactly 72.0 — it passes because the comparison is `> CEILING`, not
+// `>= `, and it has no room at all. A font-metric shift of 0.1 CPL in that
+// fixture reds this gate. That is a deliberate, stated cost of the 66-72 the
+// wave targeted, and it is survivable ONLY because this rig is advisory (the
+// paper-rig workflow is an explicit non-member of .github/required-checks.json)
+// and the numeric --check arm is dispatch-only. If the charter fixture starts
+// flapping, the honest move is to re-capture and RESTATE the panel here — never
+// to widen the ceiling to make a red go away, which is the failure mode the
+// original 55-75 comment was already warning about.
+//
+// The CEILING applies at EVERY width — a measure past the ceiling is a defect
+// on any screen. The FLOOR applies only where the column reached its designed
+// 660px: at 360 the viewport is narrower than the column, so the measure is set
+// by the phone and not by the type (measured 34.7 CPL there). Flooring at 360
+// would red every narrow cell forever and teach the next author to widen the
 // band to escape it — the exact inversion of what the assertion is for.
-const CPL_FLOOR = 55;
-const CPL_CEILING = 75;
+//
+// NO ALLOWLIST. The task this tightening comes from (task-21b7dd42b946b64e)
+// asked for `portabledoc-showcase` to be allowlisted by name as a below-band
+// outlier. On THIS rig's instrument the showcase measures 70.7/71.1 — mid-band,
+// nowhere near a floor — so the entry could never have matched, and an
+// allowlist entry that cannot match gates nothing while reading as coverage.
+// The below-band claim came from wave-1's DIFFERENT CPL instrument, which
+// disagrees with this one by up to 7.9 on the same paper
+// (tooling/grip/ledger/ingress-ratio-arm-mutation-and-instrument-divergence-2026-08-17.md).
+const CPL_FLOOR = 66;
+const CPL_CEILING = 72;
 // The components the wave decided improve with width. Kept in ONE place and
 // reported per cell, so a class that silently stops breaking out shows up as a
 // missing row rather than as a green run.
@@ -266,6 +308,83 @@ const MIME = {
 function fail(msg) {
   console.error(`rig/shoot: FAIL — ${msg}`);
   process.exit(1);
+}
+
+// ── The editorial measure, as ONE predicate ─────────────────────────────────
+//
+// The live per-cell assertion and the offline `--band-check` arm below BOTH
+// call this. Two copies of the band would be free to drift, and the offline arm
+// would then prove nothing about the gate a pull request actually runs.
+//
+// Returns the failure line (naming the cell), or null when the cell is in band.
+function cplBandFailure({ cell, proseCpl, proseCplSamples, columnWidth, width }) {
+  if (proseCpl === null || proseCpl === undefined) {
+    return `${cell}: no paragraph long enough to measure characters-per-line — the prose measure went unproven`;
+  }
+  // The column is VIEWPORT-BOUND when it fills the screen rather than reaching
+  // its own max-width; there the phone sets the measure, so only the ceiling is
+  // meaningful.
+  const columnBound = columnWidth >= width;
+  if (proseCpl > CPL_CEILING || (!columnBound && proseCpl < CPL_FLOOR)) {
+    return (
+      `${cell}: prose measures ${proseCpl} characters per line, outside the ` +
+      `${columnBound ? `≤${CPL_CEILING}` : `${CPL_FLOOR}-${CPL_CEILING}`} editorial band ` +
+      `(${proseCplSamples} paragraphs sampled, column ${columnWidth}px in a ${width}px viewport) — ` +
+      `widening the evidence must never widen the sentences`
+    );
+  }
+  return null;
+}
+
+// ── The band, judged OFFLINE against committed reports ──────────────────────
+//
+//   node shoot.mjs --band-check <report.json> [<report.json> …]
+//
+// The band is the one number in this rig a reviewer edits BY HAND, and until
+// this arm existed the only way to show a band edit could still LOSE was a full
+// headless panel run — twenty minutes and a browser to exercise two constants.
+// This re-judges already-captured measurements with the SAME predicate the live
+// gate uses: no browser, no renderer, no network.
+//
+// The viewport width comes from the cell name's trailing `__<width>` segment,
+// which is where the report records it — the shot record carries no width field
+// of its own. A cell whose name does not end in a width is a HARD FAILURE, not
+// a skip: a silently skipped cell is a green that measured nothing.
+function bandCheck(files) {
+  if (!files.length) fail("usage: shoot.mjs --band-check <report.json> [<report.json> …]");
+  const violations = [];
+  let judged = 0;
+  for (const file of files) {
+    const report = readReport(file, "report");
+    const shots = Array.isArray(report.shots) ? report.shots : null;
+    if (!shots || !shots.length) fail(`${shortPath(file)} has no shots[] to judge`);
+    for (const shot of shots) {
+      const cell = shot.cell ?? "(unnamed cell)";
+      const m = /__(\d+)$/.exec(cell);
+      if (!m) fail(`${shortPath(file)}: cell "${cell}" does not end in a viewport width — cannot judge its band`);
+      judged += 1;
+      const verdict = cplBandFailure({
+        cell,
+        proseCpl: shot.proseCpl,
+        proseCplSamples: shot.proseCplSamples,
+        columnWidth: shot.columnWidth,
+        width: Number(m[1]),
+      });
+      if (verdict) violations.push(verdict);
+    }
+  }
+  if (violations.length) {
+    console.error(
+      `rig/shoot: FAIL — ${violations.length} of ${judged} cell(s) outside the ` +
+        `${CPL_FLOOR}-${CPL_CEILING} editorial measure band:`,
+    );
+    for (const v of violations) console.error(`  ${v}`);
+    process.exit(1);
+  }
+  console.log(
+    `rig/shoot: band-check OK — ${judged} cell(s) in ${files.length} report(s) inside the ` +
+      `${CPL_FLOOR}-${CPL_CEILING} editorial measure band`,
+  );
 }
 
 // ── The committed measurements as an oracle ──────────────────────────────────
@@ -957,17 +1076,14 @@ async function main() {
         // The column is VIEWPORT-BOUND when it fills the screen rather than
         // reaching its own max-width; there the phone sets the measure, so only
         // the ceiling is meaningful.
-        const columnBound = seen.columnWidth >= width;
-        if (seen.proseCpl === null) {
-          fail(`${cell}: no paragraph long enough to measure characters-per-line — the prose measure went unproven`);
-        } else if (seen.proseCpl > CPL_CEILING || (!columnBound && seen.proseCpl < CPL_FLOOR)) {
-          fail(
-            `${cell}: prose measures ${seen.proseCpl} characters per line, outside the ` +
-              `${columnBound ? `≤${CPL_CEILING}` : `${CPL_FLOOR}-${CPL_CEILING}`} editorial band ` +
-              `(${seen.proseCplSamples} paragraphs sampled, column ${seen.columnWidth}px in a ${width}px viewport) — ` +
-              `widening the evidence must never widen the sentences`,
-          );
-        }
+        const cplVerdict = cplBandFailure({
+          cell,
+          proseCpl: seen.proseCpl,
+          proseCplSamples: seen.proseCplSamples,
+          columnWidth: seen.columnWidth,
+          width,
+        });
+        if (cplVerdict) fail(cplVerdict);
         // 4. a caption inside a wide figure is prose too. Only the ceiling
         //    applies: a caption is allowed to be short, never to run long.
         if (seen.captionCpl !== null && seen.captionCpl > CPL_CEILING) {
@@ -1315,7 +1431,9 @@ async function main() {
   );
 }
 
-if (process.argv[2] === "--report-diff") {
+if (process.argv[2] === "--band-check") {
+  bandCheck(process.argv.slice(3));
+} else if (process.argv[2] === "--report-diff") {
   const [baselineFile, freshFile] = process.argv.slice(3);
   if (!baselineFile || !freshFile) fail("usage: shoot.mjs --report-diff <baseline.report.json> <fresh.report.json>");
   reportDiff(baselineFile, freshFile);

@@ -50,7 +50,7 @@ defmodule Barkpark.Content.Papers.ReaderLaggingStampTest do
   reloaded row. A republish-based probe can never prove a cache path, because
   publish regenerates the cache and silently overwrites the fixture.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
 
