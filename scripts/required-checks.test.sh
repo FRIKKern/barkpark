@@ -1608,21 +1608,66 @@ else
   fi
 fi
 
-section "9. verify --selftest is itself green"
+section "9. verify --selftest is itself green — in C AND in a real UTF-8 locale"
 
-RC9_OUT="$(bash "$VERIFY" --selftest 2>&1)" && RC9_RC=0 || RC9_RC=$?
-# The count is READ OFF the selftest's own numbering (`1/29` … `29/29`) rather
-# than typed here. It was typed here, it said 16 against a suite of 23, and a
-# label four clauses behind is the same instrument fault this file exists to
-# hunt: a number nobody re-earns. §9 is also the only home `--selftest` has —
-# drift.yml no longer runs it as a step of its own.
-RC9_N="$(sed -n 's/^  ok   [0-9]*\/\([0-9]*\) .*/\1/p' <<<"$RC9_OUT" | tail -1)"
-if [ "$RC9_RC" -eq 0 ] && [ -n "$RC9_N" ]; then
-  ok "verify --selftest passes ($RC9_N mutation clauses, counted from its own numbering)"
-elif [ "$RC9_RC" -eq 0 ]; then
-  bad "verify --selftest exited 0 but printed no numbered clause — a suite that runs nothing exits 0 too"
+# WHY THE LOCALE IS A PARAMETER OF THIS SECTION AND NOT INHERITED (2026-09-11).
+# This section used to run the selftest exactly once, in whatever locale the
+# caller happened to have. Two gates workers then measured the same clean
+# origin/main tree reading GREEN under LC_ALL=C and RED under en_US.UTF-8: the
+# tracked corpus carries a byte that is not valid UTF-8, BWK awk aborts the
+# whole advisory-prose scan on it with "towc: multibyte conversion failure",
+# and the `sed` that reads the clause count below then died on that error text
+# with "RE error: illegal byte sequence" — so the run did not even reach a
+# `bad`, it died mid-section. required-checks-verify.sh now pins LC_ALL=C for
+# its own text tools (see the locale-pin block at the top of that file, which
+# the merge-truth awk at `env LC_ALL=C awk` has modelled since cch-w34). An
+# INHERITED locale cannot hold that pin honest: CI and this file's own gate run
+# in C, so a regression would surface only in an operator's interactive shell,
+# where it reads as a red on a tree they did not touch. One arm is therefore
+# deliberately hostile, and it is hostile no matter how the suite was invoked.
+
+# The hostile arm needs a locale the system ACTUALLY HAS: an unknown LC_ALL is
+# silently ignored and the tools fall back to C, which would make the arm
+# vacuous — green for having never run in UTF-8 at all. So pick a name and then
+# PROVE it with `locale charmap`, which answers ANSI_X3.4-1968 (not UTF-8) for a
+# name the host does not carry. macOS ships en_US.UTF-8; ubuntu runners ship
+# C.UTF-8.
+RC9_UTF8=""
+for rc9_cand in en_US.UTF-8 C.UTF-8 en_US.utf8 C.utf8; do
+  if [ "$(LC_ALL="$rc9_cand" locale charmap 2>/dev/null || true)" = "UTF-8" ]; then
+    RC9_UTF8="$rc9_cand"; break
+  fi
+done
+
+# One arm, run twice. LANG/LC_CTYPE/LC_COLLATE are UNSET rather than left
+# alone so that LC_ALL is the only locale input the arm has — an inherited
+# LC_CTYPE would make the two arms differ by less than their labels claim.
+rc9_arm() {
+  local label="$1" loc="$2" out rc n
+  out="$(env -u LANG -u LC_CTYPE -u LC_COLLATE LC_ALL="$loc" bash "$VERIFY" --selftest 2>&1)" && rc=0 || rc=$?
+  # The count is READ OFF the selftest's own numbering (`1/29` … `29/29`) rather
+  # than typed here. It was typed here, it said 16 against a suite of 23, and a
+  # label four clauses behind is the same instrument fault this file exists to
+  # hunt: a number nobody re-earns. §9 is also the only home `--selftest` has —
+  # drift.yml no longer runs it as a step of its own.
+  # LC_ALL=C on THIS sed too: when the arm reds, $out is exactly the invalid
+  # byte that killed the scan, and an unpinned sed dies on it under `set -e`
+  # instead of letting the `bad` below name the failure.
+  n="$(LC_ALL=C sed -n 's/^  ok   [0-9]*\/\([0-9]*\) .*/\1/p' <<<"$out" | tail -1)"
+  if [ "$rc" -eq 0 ] && [ -n "$n" ]; then
+    ok "verify --selftest passes under $label ($n mutation clauses, counted from its own numbering)"
+  elif [ "$rc" -eq 0 ]; then
+    bad "verify --selftest exited 0 under $label but printed no numbered clause — a suite that runs nothing exits 0 too"
+  else
+    bad "verify --selftest is red under $label (exit $rc): $(LC_ALL=C grep -m2 -a 'SELFTEST FAIL\|BLOCKED\|towc\|illegal byte' <<<"$out" | tr -d '\200-\377')"
+  fi
+}
+
+rc9_arm "LC_ALL=C" "C"
+if [ -n "$RC9_UTF8" ]; then
+  rc9_arm "LC_ALL=$RC9_UTF8 (LANG unset)" "$RC9_UTF8"
 else
-  bad "verify --selftest is red (exit $RC9_RC): $(grep -m2 'SELFTEST FAIL' <<<"$RC9_OUT")"
+  bad "no UTF-8 locale on this host (tried en_US.UTF-8, C.UTF-8, en_US.utf8, C.utf8 against \`locale charmap\`), so the hostile arm never ran — 'the selftest survives a UTF-8 caller' would be asserted having been measured in C twice"
 fi
 
 section "11 (hermetic half). the section-11 mutation is DERIVED, not typed"
@@ -2524,7 +2569,21 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # the frozen pair (2026-07-31), so this window can never render it.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
         # exactly this one as MISSING ACK_EX before it was typed here.
-        --expect-unrendered "Cloud reader-corpus census")
+        --expect-unrendered "Cloud reader-corpus census"
+        # ── 2026-09-11 (task-140f66187298e9fe): the three ci.yml names
+        # a333e4b58 (#17668) created — the aggregator `web-gate` and its
+        # `changes` / `path-escape` leaves — plus shell-harnesses.yml's
+        # `place-directory-install` (#17665). All four postdate the frozen
+        # pair (2026-07-31), so this window can never render them; the ci.yml
+        # three additionally render on a main head ONLY when the diff touches
+        # a web path (#17668 kept the `push:` arm's paths filter on purpose),
+        # so exactly ONE of the 43 main heads after a333e4b58 carries them.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
+        # exactly these four as MISSING ACK_EX before they were typed here.
+        --expect-unrendered "Web gate"
+        --expect-unrendered "Dispatch (web paths)"
+        --expect-unrendered "Web path-escape ratchet"
+        --expect-unrendered "place-directory install.sh read-back claims")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
@@ -5034,6 +5093,225 @@ else
 fi
 
 
+
+section "21b. the annotation merge-gates.md quotes \`verbatim\` is DERIVED from cloud.yml, and the prose around it is held"
+
+# WHAT §21 LEAVES OPEN (cch-w51-bl-nothing-ran-prose-unguarded). §21 above holds
+# BOTH sides of the roster TABLE and states that window as its own limit. The
+# three PROSE parts of the same page section are unguarded: the taxonomy
+# sentence, the fenced annotation quoted "verbatim from cloud.yml", and the
+# `Where a merger reads it` gh api recipe. Delete any of them and §21 stays
+# green. The quote is the dangerous one — it is a TRANSCRIPTION, so rewording
+# cloud.yml's message leaves the page quoting the old wording under the word
+# "verbatim" and nothing reds. Control, on the tree this file ships in:
+# `git grep -n "no Cloud job" -- scripts/ .github/` returns exactly one hit,
+# .github/workflows/cloud.yml. No guard named that string before this section.
+#
+# MECHANISM, and why it is deliberately NOT an exact-bytes compare. cloud.yml
+# emits the message as ONE line joined by `%0A`; the page renders it hard-wrapped
+# at ~72 columns, and one segment — `Not dispatched:${not_dispatched}` — is
+# shell-interpolated at run time and cannot be known here at all. A byte
+# comparison across that rewrap is a guaranteed false red in a merge-blocking
+# suite, which is worse than the miss it replaces. So: split the workflow message
+# on `%0A`, drop the interpolated segment, collapse whitespace on BOTH sides, and
+# assert SUBSTRING CONTAINMENT of each remaining segment in the
+# whitespace-collapsed fenced block. Re-wrapping the page is free (clause 5
+# proves it at a width the page never uses); rewording either side is not.
+
+RC21B_CLOUD_YML="$REPO_ROOT/.github/workflows/cloud.yml"
+
+# SIDE A. The message cloud.yml actually emits, one quotable segment per line.
+rc21b_segments() { # <cloud.yml>
+  sed -n 's/^.*::notice title=Cloud gate: green — nothing ran:://p' "$1" \
+    | sed 's/"[[:space:]]*$//' \
+    | awk '{ gsub(/%0A/, "\n"); print }' \
+    | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+    | grep -v -e '^Not dispatched:' -e '^$' || true
+}
+
+# SIDE B. The fenced block on the page that carries the annotation body. Keyed on
+# the block's CONTENT, never on a line number and never on "the first fence after
+# some heading": the page has several fenced blocks and they move.
+rc21b_fence() { # <doc>
+  awk '
+    /^```/ {
+      if (inb) { if (hit) { print buf; exit } ; inb = 0; next }
+      inb = 1; buf = ""; hit = 0; next
+    }
+    inb { buf = buf " " $0; if (index($0, "NOTHING CLOUD RAN")) hit = 1 }
+  ' "$1"
+}
+
+rc21b_norm() { tr '\n' ' ' | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'; }
+
+# `DRIFT` = a segment cloud.yml emits that the page's quote no longer contains.
+# `UNRESOLVED` = a side came back empty or short, which must REFUSE rather than
+# pass: a containment check over zero segments is green for any page at all.
+rc21b_report() { # <cloud.yml> <doc>
+  local segs fence flat n seg
+  segs="$(rc21b_segments "$1")"
+  fence="$(rc21b_fence "$2")"
+  n="$(printf '%s\n' "$segs" | { grep -c . || true; } | tr -d ' ')"
+  if [ "$n" -lt 3 ]; then
+    printf 'UNRESOLVED\tside A derived %s quotable segment(s) from %s; the message carries 3 — refusing rather than passing on an empty read\n' "$n" "$1"
+    return
+  fi
+  if [ -z "$fence" ]; then
+    printf 'UNRESOLVED\t%s carries no fenced block holding the annotation body — the page side derived empty\n' "$2"
+    return
+  fi
+  flat="$(printf '%s\n' "$fence" | rc21b_norm)"
+  while IFS= read -r seg; do
+    [ -n "$seg" ] || continue
+    seg="$(printf '%s\n' "$seg" | rc21b_norm)"
+    case "$flat" in
+      *"$seg"*) ;;
+      *) printf 'DRIFT\t%s\n' "$seg" ;;
+    esac
+  done <<EOF
+$segs
+EOF
+}
+
+# The other two prose parts. Presence only — these are the page's OWN sentences,
+# with no second source to derive them from, so a stricter rule here would buy
+# false reds and no truth. `<id>` inside the recipe is a literal placeholder.
+rc21b_prose_report() { # <doc>
+  local flat a
+  flat="$(rc21b_norm < "$1")"
+  while IFS= read -r a; do
+    [ -n "$a" ] || continue
+    case "$flat" in
+      *"$a"*) ;;
+      *) printf 'PROSE-GONE\t%s\n' "$a" ;;
+    esac
+  done <<'EOF'
+### NOT APPLICABLE — the required green that ran nothing
+That green means **NOT APPLICABLE to this diff** — never "the suite passed".
+**Where a merger reads it.**
+gh api repos/FRIKKern/barkpark/check-runs/<id>/annotations
+EOF
+}
+
+# CLAUSE 1 — POSITIVE CONTROL: the guard can SEE. An extraction that came back
+# empty would make every containment below vacuously true, so the segment count
+# is asserted before anything is compared with it.
+RC21B_SEGS="$(rc21b_segments "$RC21B_CLOUD_YML")"
+RC21B_N="$(printf '%s\n' "$RC21B_SEGS" | { grep -c . || true; } | tr -d ' ')"
+if [ "$RC21B_N" -eq 3 ]; then
+  ok "derived $RC21B_N quotable segments from cloud.yml's \`::notice\` body, nothing typed (the interpolated \`Not dispatched:\` segment is excluded by construction — it has no fixed text)"
+else
+  bad "side A derived $RC21B_N segment(s) from cloud.yml, expected 3 — every containment clause below would be vacuous:"
+  printf '%s\n' "$RC21B_SEGS" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 2 — the page side selects the annotation fence and nothing else.
+RC21B_FENCE="$(rc21b_fence "$MERGE_GATES_DOC")"
+RC21B_FLINES="$(printf '%s\n' "$RC21B_FENCE" | { grep -c . || true; } | tr -d ' ')"
+if [ -n "$RC21B_FENCE" ] && [ "$RC21B_FLINES" -eq 1 ]; then
+  ok "…and selected the page's annotation fence by its CONTENT, not by position — one block, $(printf '%s' "$RC21B_FENCE" | wc -c | tr -d ' ') bytes"
+else
+  bad "the fence selector read $RC21B_FLINES block(s) — it is keyed too loosely or found nothing"
+fi
+
+# CLAUSE 3 — THE FALSE-POSITIVE CENSUS, direction one: the live page and the live
+# workflow, both unmodified. This is the clause slice s5 declined to ship without.
+RC21B_OUT="$(rc21b_report "$RC21B_CLOUD_YML" "$MERGE_GATES_DOC")"
+if [ -z "$RC21B_OUT" ]; then
+  ok "every segment cloud.yml emits is present in the page's \`verbatim\` quote — the word is earned, not asserted (0 findings against unmodified in-repo prose)"
+else
+  bad "merge-gates.md's \`verbatim\` quote no longer carries what cloud.yml emits:"
+  printf '%s\n' "$RC21B_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 4 — the two prose parts §21's table window cannot see.
+RC21B_PROSE="$(rc21b_prose_report "$MERGE_GATES_DOC")"
+if [ -z "$RC21B_PROSE" ]; then
+  ok "…and the NOT APPLICABLE heading, the taxonomy sentence and the \`Where a merger reads it\` \`gh api\` recipe are all still on the page"
+else
+  bad "part of the NOT APPLICABLE section's prose is gone while §21's roster table stayed intact — exactly the blind spot this section exists for:"
+  printf '%s\n' "$RC21B_PROSE" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 5 — THE REWRAP CONTROL, and the whole reason this is containment and not
+# a diff. Render the SAME segments folded at 40 columns, a width the page never
+# uses, and the section must stay green. Without this clause nobody can tell a
+# derivation from a byte compare that happens to agree today.
+RC21B_REWRAP="$TMP/rc21b-rewrap.md"
+{ echo '```'; printf '%s\n' "$RC21B_SEGS" | fold -s -w 40; echo '```'; } > "$RC21B_REWRAP"
+if [ -z "$(rc21b_report "$RC21B_CLOUD_YML" "$RC21B_REWRAP")" ]; then
+  ok "…and the same body re-wrapped at 40 columns still passes — the clause compares WORDS, so re-flowing the page is free and cannot manufacture a red in a merge-blocking suite"
+else
+  bad "a pure re-wrap of the annotation body reddened the clause — this is the exact-bytes failure mode the section was built to avoid:"
+  rc21b_report "$RC21B_CLOUD_YML" "$RC21B_REWRAP" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 6 — MUTATION, the defect itself: reword cloud.yml, touch not one byte of
+# the page. Paired with the unmodified-COPY control below, so the red is
+# attributable to the rewording and not to reading a scratch file.
+RC21B_WF_CTL="$TMP/rc21b-cloud-control.yml"
+cp "$RC21B_CLOUD_YML" "$RC21B_WF_CTL"
+if [ -z "$(rc21b_report "$RC21B_WF_CTL" "$MERGE_GATES_DOC")" ]; then
+  ok "…and an unmodified COPY of cloud.yml stays green — the mutation arm below measures the rewording, not the copy"
+else
+  bad "a byte-identical copy of cloud.yml reddened — the mutation arm below would prove nothing"
+fi
+RC21B_WF_MUT="$TMP/rc21b-cloud-reworded.yml"
+sed "s/never as 'the Cloud suite passed'/never as 'the Cloud suite was verified'/" \
+  "$RC21B_CLOUD_YML" > "$RC21B_WF_MUT"
+RC21B_MUT_OUT="$(rc21b_report "$RC21B_WF_MUT" "$MERGE_GATES_DOC")"
+if [ "$(printf '%s\n' "$RC21B_MUT_OUT" | { grep -c '^DRIFT' || true; } | tr -d ' ')" -eq 1 ] \
+   && case "$RC21B_MUT_OUT" in *"the Cloud suite was verified"*) true ;; *) false ;; esac; then
+  ok "…and REWORDING one line of cloud.yml's message (page untouched) reds this section BY THE LINE — exactly one DRIFT, naming the new wording the page does not carry"
+else
+  bad "rewording cloud.yml's message left the page's \`verbatim\` quote unchallenged — the transcription is still a transcription:"
+  printf '%s\n' "$RC21B_MUT_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 7 — MUTATION, direction two: delete the taxonomy sentence from a scratch
+# COPY of the page. §21's roster table is untouched, so §21 stays green; this
+# section must not.
+RC21B_DOC_CUT="$TMP/rc21b-doc-cut.md"
+sed 's/That green means \*\*NOT APPLICABLE to this diff\*\* — never/That green is fine — never/' \
+  "$MERGE_GATES_DOC" > "$RC21B_DOC_CUT"
+RC21B_CUT_OUT="$(rc21b_prose_report "$RC21B_DOC_CUT")"
+if [ "$(printf '%s\n' "$RC21B_CUT_OUT" | { grep -c '^PROSE-GONE' || true; } | tr -d ' ')" -eq 1 ]; then
+  ok "…and rewriting the taxonomy sentence on a scratch page reds it BY NAME while the other three anchors stay green — the roster table being intact buys nothing here"
+else
+  bad "the taxonomy sentence can be rewritten without a red:"
+  printf '%s\n' "$RC21B_CUT_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 8 — THE REFUSAL. Strip the emission from a scratch cloud.yml: side A is
+# now empty, and an empty side must REFUSE, never pass. This is the failure mode
+# that would otherwise make the whole section a green with no subject.
+RC21B_WF_GONE="$TMP/rc21b-cloud-stripped.yml"
+grep -v 'title=Cloud gate: green' "$RC21B_CLOUD_YML" > "$RC21B_WF_GONE"
+RC21B_GONE_OUT="$(rc21b_report "$RC21B_WF_GONE" "$MERGE_GATES_DOC")"
+case "$RC21B_GONE_OUT" in
+  UNRESOLVED*) ok "…and a cloud.yml with the \`::notice\` stripped makes this section REFUSE (UNRESOLVED), never pass — an empty extraction cannot be mistaken for agreement" ;;
+  *) bad "an empty side A did not refuse (got '${RC21B_GONE_OUT:-nothing}') — the section can go green having compared nothing" ;;
+esac
+
+# CLAUSE 9 — the in-repo false-positive census, REPORTED not asserted, on §21
+# clause 4's precedent: the shipped matcher is only ever pointed at
+# merge-gates.md, so another .md growing an annotation fence is a fact worth
+# seeing and never a reason for a merge-blocking suite to red.
+# PRE-FILTERED BY ONE GREP, not a per-file awk over the whole tree: the fence
+# selector only ever takes a block containing `NOTHING CLOUD RAN`, so a file
+# without that string cannot contribute a row, and walking every .md to learn
+# that costs this merge-blocking suite minutes for a figure it only reports.
+RC21B_CORPUS=0
+while IFS= read -r md; do
+  [ -n "$md" ] || continue
+  [ "$md" = "$MERGE_GATES_DOC" ] && continue
+  [ -n "$(rc21b_fence "$md")" ] && RC21B_CORPUS=$((RC21B_CORPUS + 1))
+done <<EOF
+$(grep -rlF --include='*.md' --exclude-dir=.git --exclude-dir=node_modules \
+    --exclude-dir=_build --exclude-dir=deps -- 'NOTHING CLOUD RAN' "$REPO_ROOT" 2>/dev/null || true)
+EOF
+ok "…census: $RC21B_CORPUS other tracked .md file(s) in the repo carry a fence this selector would take (the clause is pointed at merge-gates.md alone; the figure is reported so a second copy of this quote becomes visible)"
+
 section "22. the merge-truth prose clause reads the WHOLE TRACKED corpus, and tells an assertion apart from a record of one"
 
 # THE BLIND SPOT THIS SECTION PINS (cch-w34). `advisory_prose_check` scans
@@ -5232,6 +5510,88 @@ else
     ok "…and WITHOUT it the SAME charter sails through green — the blind spot, reproduced on demand"
   else
     bad "the unguarded verify did not reproduce the blindness (exit $RC22_G_RC) — clause (a) may be reding for an unrelated reason: $(grep -m2 FAIL <<<"$RC22_G")"
+  fi
+fi
+
+# (h) THE CLAUSE'S OWN VACUOUS EXIT (cchi-w39). Everything above proves the
+#     clause reds on the right sentence. This proves what it does when its
+#     PRE-FILTER hands the attribution scanner NOTHING: `candidates` empty means
+#     the awk never runs, and until this slice the clause returned 0 there with
+#     a printed count as its only disclosure — and a count printed is not a
+#     refusal. It cannot red unconditionally (--selftest's neutral corpus is
+#     built to name no required context, so ~27 probes reach that state
+#     legitimately), so the shape is wave 39's: state the absence always,
+#     REFUSE under a flag a caller who is standing on the clause must pass.
+RC22_NOCAND="$TMP/mt-prose-nocand"
+mkdir -p "$RC22_NOCAND"
+cat > "$RC22_NOCAND/silent.md" <<'MD'
+A corpus that names no required status check at all. Every rule in the
+merge-truth clause is anchored on an occurrence of a required context NAME, so
+the pre-filter selects nothing here and the attribution scanner is handed no
+file whatsoever.
+MD
+
+# (h1) THE PRECONDITION, asserted rather than assumed: this corpus really does
+#      reach zero candidates. A green read off a corpus that quietly DID have a
+#      candidate would make every arm below a statement about the wrong state.
+rc22_run "$RC22_NOCAND" && RC22_RC=0 || RC22_RC=$?
+RC22_H1="$(cat "$RC22_OUT")"
+if [ "$RC22_RC" -eq 0 ] && grep -q '0 naming a required context' <<<"$RC22_H1"; then
+  ok "the zero-candidate corpus reaches the state this arm is about — 0 of the scanned file(s) name any required context, and the run is green"
+else
+  bad "the zero-candidate fixture did not reach zero candidates (exit $RC22_RC) — every arm of (h) would be a statement about the wrong state: $(grep -m2 -e 'ok  *no tracked prose' -e FAIL <<<"$RC22_H1")"
+fi
+
+# (h2) …AND THE GREEN SAYS SO. The absence is STATED on stdout, unconditionally,
+#      so there is a line to quote — and so that quoting it under an
+#      authorization is visibly the wrong thing to paste.
+if grep -q '^NO COVERAGE: the merge-truth pre-filter selected 0 of' <<<"$RC22_H1"; then
+  ok "…and that green PRINTS NO COVERAGE naming what was not examined — the scanner was handed no file, and the run says so instead of reporting a clean corpus"
+else
+  bad "the zero-candidate green disclosed nothing — a clause that examined nothing read as one that found nothing: $(grep -m2 -e 'ok  *no tracked prose' -e 'NO COVERAGE' <<<"$RC22_H1")"
+fi
+
+# (h3) THE REFUSAL. The same corpus, under the flag, is exit 1 through the
+#      file's own `fail()` — not a new word and not a new code.
+rc22_run "$RC22_NOCAND" --require-prose-candidates && RC22_RC=0 || RC22_RC=$?
+RC22_H3="$(cat "$RC22_OUT")"
+if [ "$RC22_RC" -eq 1 ] && grep -q '^FAIL: the merge-truth pre-filter selected 0 of' <<<"$RC22_H3"; then
+  ok "…and under --require-prose-candidates the SAME corpus is FAIL/exit 1 through the existing fail() — a caller standing on this clause cannot be handed a green it never measured"
+else
+  bad "--require-prose-candidates did not refuse the zero-candidate corpus (exit $RC22_RC): $(grep -m2 -e FAIL -e 'NO COVERAGE' <<<"$RC22_H3")"
+fi
+
+# (h4) THE FLAG IS NOT A BLANKET RED, which (h3) alone cannot show: a refusal
+#      that fires on every corpus would satisfy (h3) and mean nothing. The
+#      proximity corpus from (c) NAMES a required context, so the scanner is
+#      handed a file — and the same flag must stay green and print no
+#      NO COVERAGE line.
+rc22_run "$RC22_PROX" --require-prose-candidates && RC22_RC=0 || RC22_RC=$?
+RC22_H4="$(cat "$RC22_OUT")"
+if [ "$RC22_RC" -eq 0 ] && ! grep -q 'NO COVERAGE' <<<"$RC22_H4"; then
+  ok "…while a corpus that DOES name a required context is green under the same flag with no NO COVERAGE line — the refusal is keyed on what was scanned, not on the flag"
+else
+  bad "--require-prose-candidates reds (or disclaims) a corpus it actually scanned (exit $RC22_RC) — the flag is a blanket refusal, which proves nothing in (h3): $(grep -m2 -e FAIL -e 'NO COVERAGE' <<<"$RC22_H4")"
+fi
+
+# (h5) MUTATION CONTROL. Delete the refusal from a copy and (h3) must go GREEN
+#      again. Without this, (h3) passes on any refusal the file happens to raise
+#      for another reason and the clause is unproven.
+RC22_NOREF="$TMP/verify-no-prose-cand-refusal.sh"
+sed -E 's%^( *)if \[ "\$REQUIRE_PROSE_CANDIDATES" -eq 1 \]; then%\1if false; then # ZERO-CANDIDATE REFUSAL DISARMED%' \
+  "$VERIFY" > "$RC22_NOREF"
+RC22_H5N="$(grep -c 'ZERO-CANDIDATE REFUSAL DISARMED' "$RC22_NOREF" || true)"
+if [ "$RC22_H5N" -ne 1 ]; then
+  bad "the zero-candidate mutation applied $RC22_H5N times, not 1 — the refusal's guard moved, so (h3) proves nothing"
+else
+  ok "the mutation applies: the zero-candidate refusal is disarmed in a copy of verify"
+  RC22_H5="$(bash "$RC22_NOREF" --spec "$SPEC" --readback "$TMP/rb.json" --runs "$TMP/runs.json" \
+    --sha probe --prose "$RC22_NOCAND" --workflows "$REPO_ROOT/.github/workflows" \
+    --require-prose-candidates 2>&1)" && RC22_H5_RC=0 || RC22_H5_RC=$?
+  if [ "$RC22_H5_RC" -eq 0 ]; then
+    ok "…and with it disarmed the SAME flagged run sails through green — (h3)'s red is this clause's, and the vacuous exit is reproduced on demand"
+  else
+    bad "the disarmed verify did not reproduce the vacuous green (exit $RC22_H5_RC) — (h3) may be reding for an unrelated reason: $(grep -m2 FAIL <<<"$RC22_H5")"
   fi
 fi
 

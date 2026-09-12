@@ -10,7 +10,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (42 today; the three
+    * **E1** — every table carrying a `workspace_id` column (43 today; the three
       epic-cycle ledgers `cycle_waves` / `epic_assignments` /
       `epic_benchmark_experiments` (the 20260715 cycle-fleet schema) ride the
       generic `WHERE workspace_id = $ws` path, the three
@@ -98,7 +98,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     cycle_correction_roots cycle_correction_targets
     cycle_release_gate_admissions cycle_release_gate_challenges cycle_waves
     data_keys documents epic_assignments
-    epic_benchmark_experiments media_files mutation_events paper_access_log
+    epic_benchmark_experiments github_sync_conflicts media_files mutation_events
+    paper_access_log
     paper_events
     projects registered_chat_hosts revisions roles
     schema_definitions search_intel_crystals search_intel_events
@@ -129,8 +130,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   )
 
   # E3 tables that carry a `doc_id` → filtered by a (doc_id, dataset) semi-join.
-  # (`sync_push_conflicts` / `sync_push_doc_revs` moved to E1 — charter D55.)
-  @e3_doc_keyed ~w(authoring_exemptions github_sync_conflicts)
+  # (`sync_push_conflicts` / `sync_push_doc_revs` moved to E1 — charter D55;
+  # `github_sync_conflicts` followed them, for the same reason and by the same
+  # route — it gained a real `workspace_id` column in migration 20260911120000
+  # (github-bridge-w9-health-workspace-isolation), so its rows key on their OWN
+  # tenant instead of a (doc_id, dataset) semi-join whose `dataset` half is a
+  # project-ambiguous slug. That column's mere PRESENCE reclassifies it: `live_e1/1`
+  # reads information_schema, so this pinned list and the E3 list must follow or
+  # `assert_partition!/1` raises E1 drift.)
+  @e3_doc_keyed ~w(authoring_exemptions)
 
   # E3 tables with no `doc_id` → filtered by dataset-slug membership.
   # (`sync_cursors` / `sync_dead_letters` / `sync_push_cursors` moved to E1 — D55.)

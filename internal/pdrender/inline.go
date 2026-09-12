@@ -20,10 +20,74 @@ import (
 // The block renderer then word-wraps the returned string to its known width.
 func (ir InlineRenderer) Inline(nodes []any, ctx RenderCtx) string {
 	var b strings.Builder
-	for _, n := range nodes {
+	for _, n := range unwrapBlockWrappers(nodes) {
 		b.WriteString(ir.node(n, ctx, false))
 	}
 	return b.String()
+}
+
+// unwrapBlockWrappers splices a BLOCK-level node that is sitting inside an
+// INLINE array — `{"type":"paragraph","content":[…]}` or
+// `{"type":"list-item","content":[…]}` — down to its `content`, because such a
+// node carries its text ONE LEVEL DEEPER than the inline walk looks: `typed`'s
+// default arm reads only `children`, finds none, and the whole node composes to
+// "". Measured 2026-09-02 on the live corpus: 75 list items across 4 published
+// papers rendered as an empty bullet with their prose intact in storage.
+//
+// This is the Go leg of the law `Render.Inline.unwrap_block_wrappers/1` set in
+// inline.ex (PR #15701) and `unwrapBlockWrappers` in
+// js/packages/react/src/inline.tsx. All three answer to ONE fixture,
+// api/test/support/fixtures/inline-block-wrapper.json, read here by
+// inline_block_wrapper_parity_test.go.
+//
+// ONE LEVEL, and only when `content` is a NON-EMPTY list — a wrapper with empty
+// content keeps today's behaviour, and anything nesting deeper is a separate
+// finding, not something to recurse into here. Keyed on `content` rather than on
+// a type allowlist because no inline node type in this file reads `content` at
+// all (inline nodes carry `value`, `text`, `children` and marks), so the key
+// cannot shadow a legitimate inline node while it does catch a block wrapper
+// this corpus has not produced yet.
+//
+// It belongs to the RUN walk (Inline) only. `ir.children` — a mark node's own
+// children walk — is deliberately NOT unwrapped, mirroring the Elixir twin,
+// where `strong`/`em`/`link` map `compose_inline/2` over their children rather
+// than routing them back through `compose_inline_children/1`.
+func unwrapBlockWrappers(nodes []any) []any {
+	// Pre-scan so the overwhelmingly common wrapper-free run keeps its backing
+	// array instead of allocating a copy on every inline run in the document.
+	found := false
+	for _, n := range nodes {
+		if blockWrapperContent(n) != nil {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nodes
+	}
+	out := make([]any, 0, len(nodes)+1)
+	for _, n := range nodes {
+		if inner := blockWrapperContent(n); inner != nil {
+			out = append(out, inner...)
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// blockWrapperContent returns a node's `content` when it is a NON-EMPTY list,
+// else nil — the single predicate the unwrap is keyed on.
+func blockWrapperContent(n any) []any {
+	m, ok := n.(map[string]any)
+	if !ok {
+		return nil
+	}
+	inner, ok := m["content"].([]any)
+	if !ok || len(inner) == 0 {
+		return nil
+	}
+	return inner
 }
 
 // node renders a single inline node. insideLink tracks whether we are already
