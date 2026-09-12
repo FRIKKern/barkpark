@@ -559,6 +559,69 @@ print("")
 PY
 }
 
+
+# ---- emit_json / emit_log — producers that surface their OWN refusal ---------
+#
+# task-f56d84cf77d93c24, the verbatim #14371 shape. The spelling these replace
+# sent the producer's stderr to the bit bucket and then swallowed its exit
+# status with a trailing always-true, deleting the evidence TWICE over: the
+# redirect throws away `bp`'s own message (an expired token, a 500, a box that
+# will not answer) and the always-true arm throws away its status. The very next
+# line jget()s a file that was never written, so the rung's headline becomes a
+# judge complaining about an EMPTY field and the verdict blames the SUBJECT
+# UNDER PROOF for the INSTRUMENT's refusal. That cost #14371 seven days of a
+# repo-wide required-check red (2026-08-24T21:59Z → 2026-08-31T20:14Z).
+#
+# The emit_spec shape: run the producer with its message CAPTURED (stderr to a
+# sidecar file, never /dev/null), assert BOTH the exit status and that a
+# non-empty artifact appeared, print the refusal INLINE where it happened, and
+# park a headline in EMIT_WHY that the rung's own fail() prints BEFORE the
+# judge's text. No new typed exit code: the rung still reds with its own code,
+# it just no longer lies about whose fault it is.
+EMIT_WHY=""
+
+# emit_json <artifact> <label> <cmd…> — stdout to <artifact>, stderr captured.
+emit_json() {
+  local artifact="$1" label="$2"; shift 2
+  local errf="$artifact.err" rc=0 msg=""
+  EMIT_WHY=""
+  "$@" >"$artifact" 2>"$errf" || rc=$?
+  msg="$(tr '\n' ' ' < "$errf" 2>/dev/null | cut -c1-400)"
+  if [ "$rc" -ne 0 ]; then
+    EMIT_WHY="$label REFUSED (exit $rc): ${msg:-<it said nothing>}"
+  elif [ ! -s "$artifact" ]; then
+    EMIT_WHY="$label exited 0 but wrote an EMPTY $artifact: ${msg:-<it said nothing>}"
+  else
+    return 0
+  fi
+  note "PRODUCER REFUSED — $EMIT_WHY"
+  return 1
+}
+
+# emit_log <artifact> <label> <cmd…> — APPENDS to <artifact>; the assertion is
+# that the append actually grew the transcript, since a poll loop legitimately
+# runs this many times against a file that is already non-empty.
+emit_log() {
+  local artifact="$1" label="$2"; shift 2
+  local errf="$artifact.err" rc=0 msg="" before=0 after=0
+  EMIT_WHY=""
+  before="$(wc -c < "$artifact" 2>/dev/null | tr -d ' ')"
+  case "$before" in ''|*[!0-9]*) before=0 ;; esac
+  "$@" >>"$artifact" 2>"$errf" || rc=$?
+  after="$(wc -c < "$artifact" 2>/dev/null | tr -d ' ')"
+  case "$after" in ''|*[!0-9]*) after=0 ;; esac
+  msg="$(tr '\n' ' ' < "$errf" 2>/dev/null | cut -c1-400)"
+  if [ "$rc" -ne 0 ]; then
+    EMIT_WHY="$label REFUSED (exit $rc, appended $((after - before)) bytes): ${msg:-<it said nothing>}"
+  elif [ "$after" -le "$before" ]; then
+    EMIT_WHY="$label exited 0 but appended NOTHING to $artifact: ${msg:-<it said nothing>}"
+  else
+    return 0
+  fi
+  note "PRODUCER REFUSED — $EMIT_WHY"
+  return 1
+}
+
 # ---- Cleanup / trap ----------------------------------------------------------
 
 WORKDIR=""
@@ -1251,9 +1314,10 @@ info "box id: ${BOX_ID:-<none>}"
 
 WAITED=0
 BOX_STATUS=""; BOX_HOST=""; BOX_HEALTH=""
+STATUS_WHY=""
 while [ "$WAITED" -lt "$LAUNCH_TIMEOUT_S" ]; do
   ST="$WORKDIR/status.json"
-  "$BP" cloud status -o json > "$ST" 2>/dev/null || true
+  emit_json "$ST" "bp cloud status" "$BP" cloud status -o json; STATUS_WHY="$EMIT_WHY"
   BOX_STATUS="$(row_from_status "$ST" "$BOX_NAME" status)"
   BOX_HOST="$(row_from_status "$ST" "$BOX_NAME" host)"
   BOX_HEALTH="$(row_from_status "$ST" "$BOX_NAME" health_status)"
@@ -1262,7 +1326,7 @@ while [ "$WAITED" -lt "$LAUNCH_TIMEOUT_S" ]; do
 done
 info "after ${WAITED}s: status=${BOX_STATUS:-?} host=${BOX_HOST:-?} health=${BOX_HEALTH:-?}"
 RC=0; judge_launch "$BOX_ID" "$BOX_STATUS" "$BOX_HOST" "$BOX_HEALTH" || RC=$?
-[ "$RC" = 0 ] || fail "$RC" "the box did not come up: id=${BOX_ID:-<none>} status=${BOX_STATUS:-?} host=${BOX_HOST:-?} health=${BOX_HEALTH:-?} after ${WAITED}s" \
+[ "$RC" = 0 ] || fail "$RC" "${STATUS_WHY:+THE STATUS READ ITSELF FAILED — $STATUS_WHY; the fields below are UNKNOWN because bp could not be asked, not because the box is broken. }the box did not come up: id=${BOX_ID:-<none>} status=${BOX_STATUS:-?} host=${BOX_HOST:-?} health=${BOX_HEALTH:-?} after ${WAITED}s" \
   "read \`bp cloud status\` for $BOX_NAME; the trap has already asked for its destruction"
 pass 1 "a fresh box is live and healthy at $BOX_HOST in ${WAITED}s"
 
@@ -1270,17 +1334,19 @@ pass 1 "a fresh box is live and healthy at $BOX_HOST in ${WAITED}s"
 say ""
 say "RUNG 2 — CONNECT THE REPO"
 SITE_OUT="$WORKDIR/site.json"
-"$BP" cloud site create --instance "$BOX_ID" --slug "$SITE_SLUG" -o json > "$SITE_OUT" 2>/dev/null || true
+CONNECT_WHY=""
+emit_json "$SITE_OUT" "bp cloud site create" "$BP" cloud site create --instance "$BOX_ID" --slug "$SITE_SLUG" -o json; CONNECT_WHY="$EMIT_WHY"
 SITE_ID="$(jget "$SITE_OUT" site.id)"; [ -n "$SITE_ID" ] || SITE_ID="$(jget "$SITE_OUT" id)"
 CONN_OUT="$WORKDIR/connect.json"
 say "      \$ $BP sites github connect $SITE_ID --repo $PUSH_REPO --branch $PUSH_BRANCH"
-"$BP" sites github connect "$SITE_ID" --repo "$PUSH_REPO" --branch "$PUSH_BRANCH" -o json > "$CONN_OUT" 2>/dev/null || true
+emit_json "$CONN_OUT" "bp sites github connect" "$BP" sites github connect "$SITE_ID" --repo "$PUSH_REPO" --branch "$PUSH_BRANCH" -o json \
+  || CONNECT_WHY="${CONNECT_WHY:+$CONNECT_WHY · }$EMIT_WHY"
 GOT_REPO="$(jget "$CONN_OUT" repo)"; [ -n "$GOT_REPO" ] || GOT_REPO="$(jget "$CONN_OUT" github.repo)"
 GOT_BR="$(jget "$CONN_OUT" branch)"; [ -n "$GOT_BR" ] || GOT_BR="$(jget "$CONN_OUT" github.branch)"
 HOOK_ID="$(jget "$CONN_OUT" hook_id)"; [ -n "$HOOK_ID" ] || HOOK_ID="$(jget "$CONN_OUT" github.hook_id)"
 info "site=$SITE_ID repo=${GOT_REPO:-?} branch=${GOT_BR:-?} hook=${HOOK_ID:-?}"
 RC=0; judge_connect "$SITE_ID" "$GOT_REPO" "$PUSH_REPO" "$GOT_BR" "$PUSH_BRANCH" "$HOOK_ID" || RC=$?
-[ "$RC" = 0 ] || fail "$RC" "the connect did not bind $PUSH_REPO@$PUSH_BRANCH with a delivery hook (got repo=${GOT_REPO:-<none>} branch=${GOT_BR:-<none>} hook=${HOOK_ID:-<none>})" \
+[ "$RC" = 0 ] || fail "$RC" "${CONNECT_WHY:+A PRODUCER REFUSED — $CONNECT_WHY; the bindings below are EMPTY because bp could not be asked, not because the connect dropped them. }the connect did not bind $PUSH_REPO@$PUSH_BRANCH with a delivery hook (got repo=${GOT_REPO:-<none>} branch=${GOT_BR:-<none>} hook=${HOOK_ID:-<none>})" \
   "check the site's github binding; a push cannot arrive without a hook"
 pass 2 "$SITE_SLUG is bound to $PUSH_REPO@$PUSH_BRANCH with delivery hook $HOOK_ID"
 
@@ -1310,10 +1376,10 @@ pass 3 "$PUSHED_SHA is the head of $PUSH_REPO@$PUSH_BRANCH"
 say ""
 say "RUNG 4 — THE WEBHOOK MINTS A QUEUED ROW"
 note "GitHub delivers this by itself; the run polls for the row rather than forging a delivery."
-WAITED=0; DEP_ID=""; DEP_STATUS=""; DEP_REF=""; WH_CODE=201
+WAITED=0; DEP_ID=""; DEP_STATUS=""; DEP_REF=""; WH_CODE=201; DEPL_WHY=""
 while [ "$WAITED" -lt 300 ]; do
   DL="$WORKDIR/deployments.json"
-  "$BP" sites deployments "$SITE_ID" -o json > "$DL" 2>/dev/null || true
+  emit_json "$DL" "bp sites deployments" "$BP" sites deployments "$SITE_ID" -o json; DEPL_WHY="$EMIT_WHY"
   DEP_ID="$(jget "$DL" deployments.0.id)"
   DEP_STATUS="$(jget "$DL" deployments.0.status)"
   DEP_REF="$(jget "$DL" deployments.0.git_ref)"
@@ -1327,17 +1393,17 @@ info "after ${WAITED}s: deployment=${DEP_ID:-<none>} status=${DEP_STATUS:-?} git
 # observed status only when it is queued, else re-read the row's origin.
 [ "$DEP_STATUS" = "queued" ] || DEP_STATUS="queued"
 RC=0; judge_webhook "$WH_CODE" "$DEP_ID" "$DEP_STATUS" "$DEP_REF" "$PUSHED_SHA" || RC=$?
-[ "$RC" = 0 ] || fail "$RC" "no queued deployment for $PUSHED_SHA appeared within ${WAITED}s (got id=${DEP_ID:-<none>} ref=${DEP_REF:-<none>})" \
+[ "$RC" = 0 ] || fail "$RC" "${DEPL_WHY:+THE DEPLOYMENT LIST READ ITSELF FAILED — $DEPL_WHY; there is no row below because bp could not be asked, not because the push minted nothing. }no queued deployment for $PUSHED_SHA appeared within ${WAITED}s (got id=${DEP_ID:-<none>} ref=${DEP_REF:-<none>})" \
   "check GitHub's recent deliveries for the hook and \`bp cloud deliveries\`"
 pass 4 "the push minted deployment $DEP_ID, queued, git_ref=$PUSHED_SHA"
 
 # ── RUNG 5 — THE BOX'S OWN BUILDER CLAIMS IT ─────────────────────────────────
 say ""
 say "RUNG 5 — THE BOX'S OWN BUILDER CLAIMS IT"
-WAITED=0; CW=""; CE=""; SKIND=""; SREF=""
+WAITED=0; CW=""; CE=""; SKIND=""; SREF=""; CLAIM_WHY=""
 while [ "$WAITED" -lt 300 ]; do
   DD="$WORKDIR/deploy-detail.json"
-  "$BP" cloud site status "$SITE_ID" -o json > "$DD" 2>/dev/null || true
+  emit_json "$DD" "bp cloud site status" "$BP" cloud site status "$SITE_ID" -o json; CLAIM_WHY="$EMIT_WHY"
   CW="$(jget "$DD" deployment.claim_worker)"
   CE="$(jget "$DD" deployment.claim_epoch)"
   SKIND="$(jget "$DD" source.kind)"
@@ -1347,7 +1413,7 @@ while [ "$WAITED" -lt 300 ]; do
 done
 info "claim_worker=${CW:-<none>} claim_epoch=${CE:-?} source=${SKIND:-?}@${SREF:-?}"
 RC=0; judge_claim "$CW" "${CE:-0}" "$SKIND" "$SREF" "$PUSHED_SHA" "$NAME_PREFIX" || RC=$?
-[ "$RC" = 0 ] || fail "$RC" "the box's own builder did not fence-claim the row for $PUSHED_SHA (worker=${CW:-<none>} epoch=${CE:-<none>} source=${SKIND:-?}@${SREF:-?})" \
+[ "$RC" = 0 ] || fail "$RC" "${CLAIM_WHY:+THE SITE-STATUS READ ITSELF FAILED — $CLAIM_WHY; the claim fields below are EMPTY because bp could not be asked, not because no builder claimed. }the box's own builder did not fence-claim the row for $PUSHED_SHA (worker=${CW:-<none>} epoch=${CE:-<none>} source=${SKIND:-?}@${SREF:-?})" \
   "on the box: journalctl -u barkpark-builder; the agent token is what authorises POST /v1/builder/claim"
 pass 5 "$CW claimed $DEP_ID at epoch $CE, cloning $SREF"
 
@@ -1355,8 +1421,9 @@ pass 5 "$CW claimed $DEP_ID at epoch $CE, cloning $SREF"
 say ""
 say "RUNG 6 — CLONE LANE -> NIXPACKS -> SIX STAGES"
 WAITED=0; DEPLOY_LOG="$WORKDIR/deploy.log"; : > "$DEPLOY_LOG"
+LOGS_WHY=""
 while [ "$WAITED" -lt "$DEPLOY_TIMEOUT_S" ]; do
-  "$BP" cloud site status "$SITE_ID" --logs -o text >> "$DEPLOY_LOG" 2>/dev/null || true
+  emit_log "$DEPLOY_LOG" "bp cloud site status --logs" "$BP" cloud site status "$SITE_ID" --logs -o text; LOGS_WHY="$EMIT_WHY"
   DS="$(status_from_transcript "$DEPLOY_LOG")"
   case "$DS" in live|failed) break ;; esac
   sleep "$POLL_EVERY_S"; WAITED=$((WAITED + POLL_EVERY_S))
@@ -1368,7 +1435,7 @@ RC=0
 # shellcheck disable=SC2086  # DELIBERATE, same reason as the --negctl arms:
 # judge_stages takes the observed stage names as separate arguments.
 judge_stages "$DEPLOY_STATUS" $OBSERVED || RC=$?
-[ "$RC" = 0 ] || fail "$RC" "the deployment did not walk all six stages to live: status=${DEPLOY_STATUS:-?} stages=[${OBSERVED:-none}] want [$WANT_STAGES]" \
+[ "$RC" = 0 ] || fail "$RC" "${LOGS_WHY:+THE TRANSCRIPT READ ITSELF FAILED — $LOGS_WHY; the stage list below is EMPTY because bp could not be asked, not because the builder skipped stages. }the deployment did not walk all six stages to live: status=${DEPLOY_STATUS:-?} stages=[${OBSERVED:-none}] want [$WANT_STAGES]" \
   "the transcript is at $DEPLOY_LOG (destroyed by the trap — copy it now if you need it)"
 pass 6 "$WANT_STAGES — all six, in order, live, in ${WAITED}s"
 
@@ -1399,14 +1466,16 @@ note "Mint a DELIBERATELY UNCLAIMABLE deployment: stop the box's builder, then e
 "$BP" cloud instance exec "$BOX_ID" -- systemctl stop barkpark-builder >/dev/null 2>&1 \
   || note "could not stop the builder through bp; the enqueue below uses a suspended site instead"
 STALL_OUT="$WORKDIR/stall.json"
-"$BP" cloud site deploy "$SITE_ID" --git-ref "$PUSHED_SHA" -o json > "$STALL_OUT" 2>/dev/null || true
+WD_WHY=""
+emit_json "$STALL_OUT" "bp cloud site deploy (stall enqueue)" "$BP" cloud site deploy "$SITE_ID" --git-ref "$PUSHED_SHA" -o json; WD_WHY="$EMIT_WHY"
 STALL_DEP="$(jget "$STALL_OUT" deployment_id)"; [ -n "$STALL_DEP" ] || STALL_DEP="$(jget "$STALL_OUT" id)"
 info "unclaimable deployment: ${STALL_DEP:-<none>} — now aging it past ${STALL_HORIZON_S}s"
 WAITED=0; WD_AGE=""; WD_STATUS=""; WD_BUCKET=""
 LIMIT=$((STALL_HORIZON_S + STALL_GRACE_S))
 while [ "$WAITED" -lt "$LIMIT" ]; do
   ST="$WORKDIR/wd-status.json"
-  "$BP" cloud status -o json > "$ST" 2>/dev/null || true
+  emit_json "$ST" "bp cloud status (watchdog poll)" "$BP" cloud status -o json \
+    || WD_WHY="${WD_WHY:+$WD_WHY · }$EMIT_WHY"
   WD_AGE="$(row_from_status "$ST" "$BOX_NAME" queued_deploy_age_seconds)"
   WD_STATUS="$(row_from_status "$ST" "$BOX_NAME" status)"
   WD_BUCKET="$(row_from_status "$ST" "$BOX_NAME" bucket)"
@@ -1415,7 +1484,7 @@ while [ "$WAITED" -lt "$LIMIT" ]; do
 done
 info "after ${WAITED}s: queued_deploy_age_seconds=${WD_AGE:-<ABSENT>} status=${WD_STATUS:-?} bucket=${WD_BUCKET:-?}"
 RC=0; judge_watchdog "$WD_AGE" "$STALL_HORIZON_S" "$WD_STATUS" "$WD_BUCKET" || RC=$?
-[ "$RC" = 0 ] || fail "$RC" "an unclaimable queued row aged ${WD_AGE:-<ABSENT>}s and the status surface reported status=${WD_STATUS:-?} bucket=${WD_BUCKET:-?} — a dead queue that reads fine" \
+[ "$RC" = 0 ] || fail "$RC" "${WD_WHY:+A PRODUCER REFUSED — $WD_WHY; the watchdog fields below are ABSENT because bp could not be asked, not because the watchdog is blind. }an unclaimable queued row aged ${WD_AGE:-<ABSENT>}s and the status surface reported status=${WD_STATUS:-?} bucket=${WD_BUCKET:-?} — a dead queue that reads fine" \
   "deployStalled()/queuedDeployStalledAfterSeconds live in internal/cli/cloud_status_cmd.go; the server twin is registry.ex queued_deploy_alarm_after_seconds"
 pass 8 "deploy_stalled surfaced in the attention bucket at ${WD_AGE}s (horizon ${STALL_HORIZON_S}s)"
 
