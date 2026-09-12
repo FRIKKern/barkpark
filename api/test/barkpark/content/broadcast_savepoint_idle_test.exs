@@ -50,6 +50,7 @@ defmodule Barkpark.Content.BroadcastSavepointIdleTest do
   is deleted in an `after` block, unboxed, by the slug it was created under.
   """
 
+  # sync: runs `Sandbox.unboxed_run/2` in a spawned Task — a real connection outside the sandbox
   use Barkpark.DataCase, async: false
 
   import Ecto.Query, only: [from: 2]

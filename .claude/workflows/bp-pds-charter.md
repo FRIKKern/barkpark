@@ -15226,3 +15226,77 @@ rather than inheriting a hole nobody re-derived. LEDGER NOTE 2026-09-10 (lead-ga
 charter-ledger sweep): `pds-bl-github-linkput-auto-publish-erasure` is `done` on the ledger — closed by the
 lead after #13122 merged with every criterion stamped — so it does NOT stay open; the audit-trail half
 neither closure answers has no open row tracking it and needs one if anyone wants it built.
+
+## LATE ADJUDICATION — THE EXPORT ROUTE'S CONCURRENCY GUARD, RULED (decided 2026-09-12, task `pds-bl-export-single-flight-guard`)
+
+Not a wave. Wave 11 changed the export's DELIVERY shape and deliberately did not settle its ADMISSION
+control; PDS-D105 recorded the absence and `workspace_controller.ex` documented it in-code. The root
+task's criterion 4 asks that concurrency be addressed explicitly. This does it.
+
+### PDS-D719 — THE EXPORT ROUTE TAKES A SINGLE-FLIGHT GUARD, AND IT IS KEYED ON THE FILESYSTEM, NOT THE WORKSPACE.
+
+**THE CHOICE, STATED.** The row offered two closures: (A) land a guard with a stated response for the
+second caller, or (B) record a measured argument that no guard is needed post-streaming. **A is ruled.**
+Shipped as `Barkpark.Tenancy.WorkspaceBundle.SingleFlight` — a permanent GenServer owning one ETS table,
+`acquire/1` after the tenant gate in `WorkspaceController.export/2`, released in an `after` — with a
+second caller receiving **409 `export_already_running`** plus a `Retry-After` header.
+
+**THE MEASURED ARGUMENT, AND IT IS NOT THE OBVIOUS ONE.** The filing frames the hazard as
+"~1.458 GiB per concurrent export against 13.27 GiB free, so three is the first configuration that can
+plausibly exhaust the volume". That arithmetic is real but it is not what decides this, and stated alone
+it argues for a limit of about eight rather than one. **The load-bearing fact is that the SHIPPED
+free-space preflight goes silently vacuous at N = 2.**
+`WorkspaceBundle.require_export_free_space!/2` is documented in its own comment as "THE LAST HONEST
+MOMENT" — the only place an honest refusal can exist, because once `send_file/3` has put 200 +
+Content-Length on the wire no 503 envelope is producible at all and a mid-send ENOSPC can only truncate
+the download. It reads `df` ONCE, before the first spill byte, and asserts `required ≤ free`, where
+`required = Σ pg_total_relation_size + largest` over the in-scope tables. Two exports that start before
+either has written a byte read the SAME `free` and each independently concludes it fits. What the
+preflight can then guarantee is `required_i ≤ free` for every i — **never `Σ required_i ≤ free`.** Its
+whole margin is divided by the number of callers and nothing in the process notices. The guard is
+therefore not a precaution; it is the precondition that makes an already-merged refusal mean what its own
+comment says it means. PDS-D44's "one attempt already costs ~2 GiB so concurrency should not happen" was
+an observation about how the harness is used, and this replaces it with an invariant the code holds.
+
+**WHY THE KEY IS THE NODE AND NOT THE WORKSPACE SLUG.** It follows from the paragraph above rather than
+from taste. The quantity the preflight measures is free bytes on `:bundle_spill_dir` — a per-filesystem
+quantity, and guerrilla carries `/`, `/tmp` AND `/opt/barkpark` on ONE filesystem. Two exports of
+DIFFERENT workspaces consume it exactly as fast as two of the same, so a guard keyed only on the slug
+would leave the hazard it was built for entirely unbounded. The limit is consequently a global slot count
+for the node (`:export_concurrency_limit`, default **1**, non-positive disables), and the slug survives
+only as a better-diagnosed refusal: `workspace_export_in_flight` when the caller's OWN workspace is
+exporting (slug echoed — they just proved `workspace_admin?/2` on it), `export_capacity_reached`
+otherwise, **with the in-flight slug deliberately withheld**, because that caller proved admin on theirs
+and on nothing else and naming another tenant's slug is the cross-tenant existence leak this route's own
+DENIAL SHAPE section exists to prevent.
+
+**409, NOT 429, AND NOT A QUEUE.** Nothing about the caller's RATE is wrong and no budget replenishes on
+a timer: the request conflicts with a specific piece of work running right now. A queue was refused
+because a queued export holds a socket open across the ~130 s server-side phase (wave 7) plus the
+leader's drain, and a client that cannot distinguish "queued" from "hung" retries — manufacturing the
+fan-out the guard exists to prevent. `Retry-After: 120` is derived from that same ~130 s, rounded down to
+the minute so a polling client's first retry lands near the end of a typical export.
+
+**THE JANITOR INTERACTION, RESOLVED HONESTLY — THE GUARD DOES NOT RETIRE THE LIVENESS CHECK.** The row's
+criterion reads "a guard removes the race", and taken literally that is FALSE, so it is answered as it
+actually is. `Janitor`'s moduledoc cites this guard's absence when it justifies the pid-liveness sidecar:
+"the GREEN slot booting could delete files a live BLUE export still owns". That race is between two OS
+PROCESSES sharing one real `/tmp` (`PrivateTmp=no`). `SingleFlight` is an ETS table inside ONE BEAM; it
+cannot be consulted by, and says nothing about, a different OS process. What it removes is the SAME-NODE
+component — a node can no longer have two of its own exports spilling concurrently, so the sweep's worst
+case per node is one live export. **The sidecar therefore remains LOAD-BEARING for the cross-slot case
+and must not be deleted on the strength of this decision.** Both halves are stated in the guard's
+moduledoc so the next reader cannot infer the stronger claim from the weaker fact.
+
+**WHAT IS PROVEN AND WHAT IS NOT.** Proven by test: the same workspace cannot double-book; a different
+workspace is refused on capacity without the in-flight slug reaching the wire; a release frees the slot
+and a non-owner's release does not; **a holder killed outright frees its slot** (the `after` clause cannot
+run for `Process.exit(pid, :kill)`, and a wedged slot would make the route permanently 409 with no
+operator signal — strictly worse than the fan-out it replaced); the limit is real configuration, with two
+different workspaces both admitted at limit 2 while the same one is still refused; and over the wire, the
+409 shape, the `Retry-After` header, a 200 on the very same request once the slot is released, and a 403
+rather than a 409 for a caller the tenant gate refuses. NOT observed live: no concurrent export was run
+against any real box, by instruction — the numbers above are re-read from the shipped preflight and the
+epic's own measurements, not re-measured. Sibling PR #17907 (`pds-bl-export-pool-starvation`) gives each
+export its own one-connection pool and deliberately does not do admission control; the two are disjoint
+and neither depends on the other.

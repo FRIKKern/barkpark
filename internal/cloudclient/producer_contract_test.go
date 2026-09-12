@@ -384,3 +384,154 @@ func contains(hay []string, needle string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// THE SECOND PRODUCER: `BarkparkCloud.Sites.BuildLogBytes` -> SiteBuildLogBytes.
+//
+// Same defect, different pair. #17752 landed the build-log BYTES sub-route and
+// said in its own body that this file was correctly untouched, "no Go decoder
+// learns a key in this PR (c3 is the cli lane and is only REQUESTED below), and
+// when the cli lane builds c3 and declares a struct for this payload, its tags
+// belong in that file's expected-key set in serializer order." This is that.
+//
+// The producer here is NOT the cloud router: `BuildLogBytes` keeps an EXPLICIT
+// field allowlist, `@bytes_keys`, precisely so a box that grows a field cannot
+// have it relayed. That sigil plus the envelope keys the module merges around it
+// is the complete set of keys this route can put on the wire, and it is read
+// from source for the same reason deployment_json/1 is: a hand-typed second copy
+// drifts silently.
+
+// buildLogBytesProducerPath is the module that owns the wire shape.
+func buildLogBytesProducerPath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(repoRoot(t), "cloud", "lib", "barkpark_cloud", "sites", "build_log_bytes.ex")
+}
+
+// reBytesKeysSigil captures the body of `@bytes_keys ~w( … )`, which may span
+// several lines.
+var reBytesKeysSigil = regexp.MustCompile(`(?s)@bytes_keys\s+~w\(([^)]*)\)`)
+
+// buildLogBytesAllowlist returns the words of `@bytes_keys`, i.e. every record
+// field `BuildLogBytes.record/1` can copy off the box's answer.
+func buildLogBytesAllowlist(t *testing.T) map[string]bool {
+	t.Helper()
+	path := buildLogBytesProducerPath(t)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		// Fatal, never skipped: a guard that stands down when it cannot see the
+		// producer is the dark-gate failure this whole file exists to prevent.
+		t.Fatalf("cannot read the bytes producer at %s: %v", path, err)
+	}
+	m := reBytesKeysSigil.FindStringSubmatch(string(raw))
+	if m == nil {
+		t.Fatalf("@bytes_keys ~w(…) not found in %s — the allowlist this guard reads "+
+			"has moved or changed shape; re-establish the pairing before editing this test", path)
+	}
+	keys := map[string]bool{}
+	for _, w := range strings.Fields(m[1]) {
+		keys[w] = true
+	}
+	return keys
+}
+
+// buildLogBytesEnvelopeKeys are the keys `BuildLogBytes` merges AROUND the
+// allowlist — the base every answer carries and the refusal shape the non-200s
+// use. They are not in `@bytes_keys` (that sigil is the box-record allowlist
+// only), so each is anchored individually against the source below rather than
+// taken on trust.
+var buildLogBytesEnvelopeKeys = []string{
+	"deployment_id", "build_id", "available",
+	"error", "detail", "reason", "box_log_state",
+}
+
+// expectedBuildLogBytesTags is the pinned json tag list of SiteBuildLogBytes, IN
+// THE SERIALIZER'S ORDER: `wire/3`'s base (`deployment_id`, `build_id`), then
+// `available`, then `@bytes_keys` in its own declared order, then the refusal
+// envelope. Pinned 2026-09-11 against origin/main 843c22742.
+//
+// A diff of this literal reads like a diff of `BuildLogBytes`. Renaming a struct
+// tag without renaming it here reds TestSiteBuildLogBytesTagsAreLockedInOrder.
+var expectedBuildLogBytesTags = []string{
+	// wire/3 base + the served/withheld flag
+	"deployment_id", "build_id", "available",
+	// @bytes_keys, in its declared order
+	"slug", "record", "log_state", "log_scrub", "log_path", "log_bytes",
+	"tail_bytes", "truncated", "tail", "evicted_at",
+	// the refusal envelope
+	"error", "detail", "reason", "box_log_state",
+}
+
+// THE ORDER LOCK. Not merely a set: the row asks for serializer ORDER, and order
+// is what makes the literal above readable as a diff of the producer.
+func TestSiteBuildLogBytesTagsAreLockedInOrder(t *testing.T) {
+	got := declaredTags(reflect.TypeOf(SiteBuildLogBytes{}))
+	if !reflect.DeepEqual(got, expectedBuildLogBytesTags) {
+		t.Errorf("SiteBuildLogBytes json tags = %v\nwant (serializer order)             = %v\n"+
+			"Either the struct gained/lost/renamed a tag, or the field order moved. If "+
+			"BuildLogBytes really changed, update expectedBuildLogBytesTags in the "+
+			"producer's order and cite the PR; otherwise the decoder just went silently "+
+			"deaf to a key json.Unmarshal will now drop.", got, expectedBuildLogBytesTags)
+	}
+}
+
+// THE PRODUCER LOCK. Every tag the Go struct decodes must be a key
+// `BuildLogBytes` can actually put on the wire — the allowlist sigil for the
+// record fields, an anchored source match for the envelope ones.
+func TestSiteBuildLogBytesDecoderMatchesProducer(t *testing.T) {
+	allowlist := buildLogBytesAllowlist(t)
+	raw, err := os.ReadFile(buildLogBytesProducerPath(t))
+	if err != nil {
+		t.Fatalf("cannot read the bytes producer: %v", err)
+	}
+	src := string(raw)
+
+	envelope := map[string]bool{}
+	for _, k := range buildLogBytesEnvelopeKeys {
+		if !strings.Contains(src, k+":") {
+			t.Errorf("the envelope key %q is not written anywhere in BuildLogBytes — "+
+				"either the producer dropped it (the Go field will read as its zero value "+
+				"forever) or this anchor is stale.", k)
+			continue
+		}
+		envelope[k] = true
+	}
+
+	for _, tag := range declaredTags(reflect.TypeOf(SiteBuildLogBytes{})) {
+		if !allowlist[tag] && !envelope[tag] {
+			t.Errorf("SiteBuildLogBytes declares json:%q but BuildLogBytes neither lists "+
+				"it in @bytes_keys nor writes it into an envelope. json.Unmarshal drops "+
+				"unmodelled keys silently, so this field would read as its zero value "+
+				"forever while looking like a shipped feature.", tag)
+		}
+	}
+}
+
+// NOT-BLIND CONTROL. An extractor that returns an empty (or a wildly wide) set
+// makes the guard above vacuous in one direction and noisy in the other, so the
+// allowlist is pinned as a SET — the same lesson expectedProducerKeys records
+// above, where a cardinality pin fired on every honest addition and named a
+// number instead of a key.
+func TestBuildLogBytesAllowlistExtractorIsNotBlind(t *testing.T) {
+	allowlist := buildLogBytesAllowlist(t)
+
+	want := []string{
+		"slug", "build_id", "record", "log_state", "log_scrub", "log_path",
+		"log_bytes", "tail_bytes", "truncated", "tail", "evicted_at",
+	}
+	for _, k := range want {
+		if !allowlist[k] {
+			t.Errorf("the extractor did not find %q in @bytes_keys, which BuildLogBytes "+
+				"demonstrably lists — the parse is blind and every finding it reports is "+
+				"untrustworthy", k)
+		}
+	}
+	for k := range allowlist {
+		if !contains(want, k) {
+			t.Errorf("the extractor found %q, which this control does not pin. Either the "+
+				"parse went WIDE (matching past the sigil's closing paren) or BuildLogBytes "+
+				"genuinely gained a relayed field — if the latter, add it here AND to "+
+				"expectedBuildLogBytesTags in the serializer's order, and teach the Go "+
+				"struct to decode it.", k)
+		}
+	}
+}

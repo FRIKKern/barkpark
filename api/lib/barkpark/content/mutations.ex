@@ -420,6 +420,8 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- ensure_disposition_via_verb(type, existing, incoming_content(attrs), opts),
          :ok <- ensure_adoption_adjudicated(type, existing, incoming_content(attrs), opts),
+         :ok <-
+           ensure_disposition_owner_registered(type, existing, incoming_content(attrs), opts),
          {:ok, doc} <- Content.create_document(type, attrs, dataset, with_if_rev(opts, expected)) do
       {:ok, doc, "createOrReplace"}
     end
@@ -539,6 +541,8 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- ensure_disposition_via_verb(type, existing, incoming_content(attrs), opts),
          :ok <- ensure_adoption_adjudicated(type, existing, incoming_content(attrs), opts),
+         :ok <-
+           ensure_disposition_owner_registered(type, existing, incoming_content(attrs), opts),
          {:ok, doc} <-
            Content.create_document(type, attrs, dataset, with_if_rev(opts, if_rev(attrs))) do
       {:ok, doc, "replace"}
@@ -597,6 +601,7 @@ defmodule Barkpark.Content.Mutations do
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
            :ok <- ensure_disposition_via_verb(type, existing, merged, opts),
            :ok <- ensure_adoption_adjudicated(type, existing, merged, opts),
+           :ok <- ensure_disposition_owner_registered(type, existing, merged, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
@@ -634,6 +639,7 @@ defmodule Barkpark.Content.Mutations do
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
            :ok <- ensure_disposition_via_verb(type, existing, merged, opts),
            :ok <- ensure_adoption_adjudicated(type, existing, merged, opts),
+           :ok <- ensure_disposition_owner_registered(type, existing, merged, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
@@ -1148,6 +1154,135 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp ensure_adoption_adjudicated(_type, _existing, _merged, _opts), do: :ok
+
+  # ── THE ADJUDICATION OWNER (api half of
+  # pds-bl-disposition-owner-role-registry) ──────────────────────────────────
+  #
+  # `content.disposition_owner` had NO schema declaration, NO validator and NO
+  # code writer anywhere in `api/lib` or `internal/`, so a census over the
+  # ledger could only assert "non-empty and slug-shaped" and green on sixteen
+  # strings nobody had defined — the same shape of nothing the disposition
+  # triple was before wave 24 fenced it. PR #17836 defines the vocabulary:
+  # `tooling/pds/disposition-owner-registry.json` lists the `durable-role`
+  # slugs that ARE owners, plus a `refused[]` census of what was measured in
+  # the slot and why each one is not.
+  #
+  # THE LIST IS NOT RETYPED HERE, for the same reason the disposition
+  # vocabulary is not: `Barkpark.Tasks.Stage` reads the registry at compile
+  # time (`@external_resource`) and this door screens against
+  # `Stage.owner_refusal_code/1` — the registry's OWN order, expiring-shape
+  # before membership. Two spellings of one truth table with nothing that reds
+  # when they diverge is the defect this row exists to remove;
+  # `disposition_owner_registry_lock_test.exs` decodes the JSON and asserts
+  # term identity in BOTH directions.
+  #
+  # IT FENCES THE WRITE, NOT THE ROW. `now == was` is not a change, so the
+  # live rows already carrying a refused owner (the registry counted 8 `wave-N`
+  # violations alone) keep reading and keep accepting patches to every other
+  # field. A row-scoped rule would be RETROACTIVE — it would start refusing
+  # unrelated bookkeeping on rows written before the registry existed, which is
+  # precisely the placement the birth fence's own header measured and refuted.
+  # Clearing the owner (`nil`) is always allowed: removing an unregistered
+  # owner is the remediation, and a fence that forbade it would strand every
+  # bad row.
+  #
+  # IT FENCES A BIRTH TOO, UNLIKE ITS SIBLINGS, and that asymmetry is
+  # deliberate. The siblings head on `("task", nil, …), do: :ok` because a
+  # CHANGE guard has nothing to compare a birth against. This is not a change
+  # guard: it judges the VALUE BEING WRITTEN against a registry, and that
+  # question is answerable at a birth. Letting a `createOrReplace` mint a row
+  # with `disposition_owner: "wave-99"` would leave the fleet's own file-order
+  # shape as the one open door (D53's lesson, re-derived).
+  #
+  # REPLICATION IS EXEMPT, CHECKED FIRST, same concrete reason as every
+  # sibling: `Sync.Applier.apply_upsert` mirrors an upstream row verbatim, and
+  # because `apply_mutations` wraps the batch in one transaction a refusal
+  # would roll back the ENTIRE sync batch and wedge the replica with no
+  # operator recourse. `:source` is server-set, so a request body can never
+  # reach the `:sync` value.
+  #
+  # WHEN THE REGISTRY IS ABSENT THE DOOR FAILS CLOSED. `Stage` compiles an
+  # EMPTY role list and warns; every owner write is then refused and the
+  # message names the missing path. An absent registry must never read as
+  # "every owner is legal" — that is the failure this whole row is about.
+
+  defp ensure_disposition_owner_registered("task", existing, merged, opts) do
+    was = (existing && existing.content) || %{}
+    was_owner = was[Stage.disposition_owner_key()]
+    now_owner = merged[Stage.disposition_owner_key()]
+
+    cond do
+      Keyword.get(opts, :source, :api) != :api ->
+        :ok
+
+      # Not a change — bookkeeping on a row that already carries this owner,
+      # legal or not, passes untouched.
+      now_owner == was_owner ->
+        :ok
+
+      # Clearing the owner is the remediation, never the offence.
+      is_nil(now_owner) ->
+        :ok
+
+      true ->
+        case Stage.owner_refusal_code(now_owner) do
+          nil -> :ok
+          code -> {:error, {:invalid_task_content, owner_registry_error(code, now_owner)}}
+        end
+    end
+  end
+
+  defp ensure_disposition_owner_registered(_type, _existing, _merged, _opts), do: :ok
+
+  defp owner_registry_error(code, owner) do
+    %{
+      Stage.disposition_owner_key() => [
+        "cannot be set to #{inspect(owner)}: " <>
+          owner_refusal_why(code, owner) <>
+          " The legal owners are the `durable-role` entries of " <>
+          "`tooling/pds/disposition-owner-registry.json`" <>
+          owner_registry_state() <>
+          " Adding a role there is pds-owner-onboarding-owner's call; a row with no owner is " <>
+          "honest, so clearing this key is always allowed."
+      ]
+    }
+  end
+
+  defp owner_refusal_why(:expiring_owner, _owner),
+    do:
+      "that is the EXPIRING `wave-N` shape, refused outright by the registry's ruling. A wave " <>
+        "owner self-clears when the wave closes, and `disposition_owner` has no code writer " <>
+        "repo-wide, so there is nothing to hang an auto-reassignment on — the row would " <>
+        "silently become unowned at wave close. Name the durable role that outlives the wave."
+
+  defp owner_refusal_why(:task_id_shape, _owner),
+    do:
+      "that is a ledger TASK ID in the owner slot. A task cannot own its own adjudication (or " <>
+        "another task's): the slot names a standing accountability, not a row."
+
+  defp owner_refusal_why(:not_a_string, _owner),
+    do: "an owner is a lowercase-hyphen role slug, and that is not a string."
+
+  defp owner_refusal_why(:unregistered, owner) do
+    case Stage.refused_owner_entry(owner) do
+      %{reason: reason} when is_binary(reason) ->
+        "the registry lists it under `refused[]`: " <> reason
+
+      _ ->
+        "it is not a registered durable role."
+    end
+  end
+
+  defp owner_registry_state do
+    if Stage.owner_registry_loaded?() do
+      " (#{length(Stage.durable_owner_roles())} today: " <>
+        Enum.join(Stage.durable_owner_roles(), ", ") <> ")."
+    else
+      ", which was ABSENT when this build compiled (#{Stage.owner_registry_path()}) — so this " <>
+        "door is failing CLOSED and refusing every owner. Land PR #17836 (or rebuild with the " <>
+        "registry present) rather than reading this as a rejection of the slug."
+    end
+  end
 
   defp adoption_error(was_parent, now_parent) do
     %{

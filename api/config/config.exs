@@ -26,6 +26,15 @@ config :barkpark,
 # wiring in runtime.exs.
 config :barkpark, :media_storage, backend: :local
 
+# pds-bl-export-pool-starvation: connections in the dedicated, per-export pool
+# that `Tenancy.WorkspaceBundle`'s COPY ... TO STDOUT streams run on, so a 9 s
+# hold cannot make an unrelated checkout (observed: EdgeProjector.ProjectorWorker)
+# queue past its own 15 s budget on the SHARED pool. 1 is the whole demand - the
+# COPY loop is a sequential reduce and never has two streams in flight. `0`
+# disables it (see config/test.exs). Derivation, and why a checkout timeout and a
+# bounded COPY hold are not remedies: `Barkpark.Repo.start_export_pool/1`.
+config :barkpark, :export_pool_size, 1
+
 # Configure the endpoint
 config :barkpark, BarkparkWeb.Endpoint,
   url: [host: "localhost"],

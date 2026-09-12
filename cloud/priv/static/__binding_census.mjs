@@ -383,6 +383,48 @@ const F_LCO = (read) => ({ band: LAUNCH_CHECKOUT_BAND, read: read, decide: "laun
 const LAUNCH_BAND = "launchAuthority";
 const F_LAUNCH = (read, decide) => ({ band: LAUNCH_BAND, read: read, decide: decide });
 
+// ── THE BOOLEAN BANDS (bands 4-7), pinnable only since (2i-3) grew its shape
+// ── arm. Every one of them answers `someState() === "grant"`, so there is no
+// ── vocabulary to derive and nothing for the string arm to compare; what each
+// ── one has is a VALUE, which the row names so (2i-3) can prove the decide
+// ── still binds it and still branches on it. The three cheap ones below have
+// ── exactly ONE live read site each, so their (2i-4) accounting closes with
+// ── READ_EXEMPT EMPTY — no hole is asserted because none exists.
+//
+// providerCanWrite has TWO affordance surfaces and therefore two fences: the
+// providers page threads the answer into renderProviderPage as `canWrite` (the
+// roster's Disconnect wiring and the whole Connect card hang off it), and the
+// GitHub card threads it into githubCardHtml. renderProviderPage is BOTH a
+// decide and a read — its own meState()-unknown Retry closure re-asks the band
+// for the re-render — so it is listed in `read` as well, because the honest
+// alternative is an exemption where a true claim was available.
+const PROVIDER_BAND = "providerCanWrite";
+const F_PROV = (read, decide, value) => ({ band: PROVIDER_BAND, read: read, decide: decide, value: value });
+
+// notifCanManage: read and decide are ONE function on purpose. renderNotifications
+// asks the band, and its own body is what withholds every write on the page —
+// it returns before wiring the email/channel/matrix forms on the member arm and
+// sets `#notif-test`.hidden from the same value. There is no pure helper to name
+// for those five writes (notifPageHtml decides the page BODY, not the wiring),
+// and inventing one would be a D530 split this console does not have.
+const NOTIF_BAND = "notifCanManage";
+const F_NOTIF = () => ({ band: NOTIF_BAND, read: "renderNotifications", decide: "renderNotifications", value: "canManage" });
+
+// canManageOnboarding: the D530 split proper. paintOverviewState reads the band
+// and threads it into overviewStateHtml's opts; runwayCardHtml emits the
+// .runway-dismiss button only when `opts.canManage`, which is the affordance
+// dismissRunway's POST /v1/onboarding hangs off.
+const ONBOARDING_BAND = "canManageOnboarding";
+const F_ONBOARD = () => ({ band: ONBOARDING_BAND, read: "paintOverviewState", decide: "runwayCardHtml", value: "opts.canManage" });
+
+// operatorRouteAllowed: the `value`-less shape. loadOperator both asks and
+// decides, in one `if (!operatorRouteAllowed(meCache))` that empties the body
+// and bounces the hash — there is no threaded identifier to name, so the row
+// omits `value` and (2i-3) consults the band CALL itself. Both operator write
+// rows live behind that one bounce.
+const OPERATOR_BAND = "operatorRouteAllowed";
+const F_OPERATOR = () => ({ band: OPERATOR_BAND, read: "loadOperator", decide: "loadOperator" });
+
 const PIN = [
   // ── account & session self-service — every one of these acts on the caller's
   // ── OWN account, so plain membership is the honest tier.
@@ -400,25 +442,26 @@ const PIN = [
 
   // ── providers — THE DECISIVE PAIR. Same route, opposite verdicts.
   { fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED — but NOT for the reason this row used to give. The old note said the .launch-connect-provider button 'renders unconditionally' and credited a renderLaunchConnect that app.js does not declare; both halves were false (cch-w48-s4). What is true: catalogPanelHtml draws the button, and it is only ever reached inside the launch wizard, which launchFlow withholds unless launchAuthority() === 'grant'. That fence is THREE HOPS away, belongs to the LAUNCH band, and guards POST /v1/launch — not this row's POST /v1/providers, whose own tier is require_team_admin. A predicate this row does not evaluate is not this row's predicate, so it stays null and stays owned" },
-  { fn: "submitInlineProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "renderConnectCard mounts only when providerCanWrite()" },
-  { fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
+  { fn: "submitInlineProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV(["loadProviders", "renderProviderPage"], "renderProviderPage", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "renderConnectCard mounts only when providerCanWrite()" },
+  { fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV(["loadProviders", "renderProviderPage"], "renderProviderPage", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
 
   // ── github (team-level installation)
   // cch-w48-s3, re-pinned here in review: the old note ("wired whenever an
   // installation exists") stopped being true the moment s3 landed —
   // githubCardHtml(g, canWrite) emits #github-disconnect only when
-  // providerCanWrite() is true, and OMITS it otherwise. NOT fence-pinned:
-  // providerCanWrite is a boolean, not a three-valued band, so (2i-3)'s
-  // vocabulary derivation has nothing to read. LIMIT 1, and honest about it.
-  { fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s3: githubCardHtml OMITs #github-disconnect unless providerCanWrite()" },
+  // providerCanWrite() is true, and OMITS it otherwise. FENCE-PINNED since
+  // (2i-3) grew its shape arm: providerCanWrite is a boolean, so there is no
+  // vocabulary to derive — the row names `canWrite`, the value githubCardHtml
+  // is handed, and the arm proves that helper still binds it and still branches.
+  { fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV("renderGithub", "githubCardHtml", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s3: githubCardHtml OMITs #github-disconnect unless providerCanWrite()" },
 
   // ── notifications — every write is wired behind notifCanManage()
-  { fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
-  { fn: "next", verb: "PUT", route: "/v1/notifications/channels", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "chat-channel save; same wiring fence" },
-  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → settings axis" },
-  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/events", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → per-event axis" },
-  { fn: "sendChatTest", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "per-channel test send" },
-  { fn: "sendTestNotification", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "#notif-test is hidden when !canManage" },
+  { fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
+  { fn: "next", verb: "PUT", route: "/v1/notifications/channels", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "chat-channel save; same wiring fence" },
+  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → settings axis" },
+  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/events", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → per-event axis" },
+  { fn: "sendChatTest", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "per-channel test send" },
+  { fn: "sendTestNotification", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "#notif-test is hidden when !canManage" },
 
   // ── tokens — see ruling (c). NOT elevated; the cap is on the ability set.
   { fn: "submitToken", verb: "POST", route: "/v1/tokens", elevated: false, predicate: "canMintAnyAbility", auth_fn: A_USER, context_fn: C_PAT_ABILITIES, note: "any member may mint; the owner/admin cap is on the requested abilities, below the router" },
@@ -432,7 +475,7 @@ const PIN = [
 
   // ── studio / onboarding
   { fn: "openStudio", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: "canManageOnboarding", auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
+  { fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: ONBOARDING_BAND, fence: F_ONBOARD(), auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
 
   // ── instance detail — the console's densest unpredicated cluster
   { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["wireLifecycleActions", "repaintLifecycleAuthority"], "decommissionAction"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: decommissionAction answers mode:\"disabled\" for refuse and for unknown, and the rail emits the LIVE arm's `data-life-name` companion only on that arm — the same disabled-ghost shape rows rollbackInstance/attachDomain are already pinned on (D428). cch-w46-bl RE-POINTED THE HOOK: the refused arm now carries the same `data-life-verb` as the live one (one verb, ONE identity, offered or refused), so bare `data-life-verb` stopped discriminating the two arms and the probe below moved to `data-life-verb=\"decommission\" data-life-name=`, which lifecycleActionHtml writes in the mode===\"live\" branch alone; paintLifecycleActions also binds only a non-disabled control now. Read twice, on purpose: the rail is mounted by wireLifecycleActions and re-offered by repaintLifecycleAuthority when /v1/me answers late" },
@@ -448,8 +491,8 @@ const PIN = [
 
   // ── operator console — the console's highest-privilege writes, and both of
   // ── them build their path from a constant (ruling (b)).
-  { fn: "fleetRolloutAction", verb: "POST", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "the operator route refuses to render at all unless operatorRouteAllowed(meCache)" },
-  { fn: "operatorConfirmBrake", verb: "POST", route: "/v1/operator/autoupdate/halt", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "same route fence" },
+  { fn: "fleetRolloutAction", verb: "POST", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", elevated: true, predicate: OPERATOR_BAND, fence: F_OPERATOR(), auth_fn: A_OPERATOR, context_fn: null, note: "the operator route refuses to render at all unless operatorRouteAllowed(meCache)" },
+  { fn: "operatorConfirmBrake", verb: "POST", route: "/v1/operator/autoupdate/halt", elevated: true, predicate: OPERATOR_BAND, fence: F_OPERATOR(), auth_fn: A_OPERATOR, context_fn: null, note: "same route fence" },
 
   // ── sites
   { fn: "openCreateSiteModal", verb: "POST", route: "/v1/sites", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "any member may create a site" },
@@ -2457,9 +2500,14 @@ if (dupes.length) {
 //        (2i-1) band, every read, and decide are DECLARED in app.js, and the
 //               row's `predicate` names the same band.
 //        (2i-2) each read's body still CALLS the band.
-//        (2i-3) decide's body still BRANCHES on a value the band can return —
-//               where the vocabulary is DERIVED from the band's own returns,
-//               not typed here.
+//        (2i-3) decide's body still CONSULTS what the band answers, where the
+//               band's SHAPE is DERIVED from its own returns, not typed here:
+//               a STRING band must still be compared against one of its derived
+//               values; an ARRAY band must still be asked whether it is EMPTY
+//               (its members are a list, never a branch vocabulary); a BOOLEAN
+//               band — seven of this console's nine — has no vocabulary at all,
+//               so the row names the `value` the decide is given and the arm
+//               proves the decide still BINDS it and still branches on it.
 //        (2i-4) DERIVED ACCOUNTING over every live call site of every pinned
 //               band: each enclosing function must be claimed by some row's
 //               `read`. This is what reds when a row quietly reverts to no
@@ -2562,50 +2610,173 @@ if (dupes.length) {
     }
   }
 
-  // ── (2i-3) DECIDE still BRANCHES on the band's own vocabulary ────────────
-  //     The vocabulary is DERIVED from the band's `return` statements, never
-  //     typed here: a band that stops returning a vocabulary at all (the
-  //     `return true` neutering) leaves nothing to branch on and reds below,
-  //     and a band that gains a value does not need this file edited.
+  // ── (2i-3) DECIDE still CONSULTS WHAT THE BAND ANSWERS ───────────────────
+  //     The band's SHAPE is DERIVED from its own `return` statements, never
+  //     typed here, and the shape picks which of three checks runs.
+  //
+  //       STRING  — some return carries a literal the band ANSWERS with.
+  //                 Literals on the RIGHT of a comparison are blanked first:
+  //                 `meCache.role === "owner"` is an INPUT the band reads, not
+  //                 a value it can answer with, and counting it would widen the
+  //                 vocabulary to the role names. The decide must compare
+  //                 against one of the answered values. This is the shipped
+  //                 arm, unchanged.
+  //       ARRAY   — some return is an array literal. Its member strings are NOT
+  //                 a branch vocabulary: assignableRoles answers
+  //                 ["owner", "admin", "member"] and every consumer branches on
+  //                 `.length`, never on a member, so a decide matching a member
+  //                 literal would have passed BY ACCIDENT. The array arm demands
+  //                 the EMPTINESS consult and accepts nothing else.
+  //       BOOLEAN — no answered literal and no array literal. SEVEN of this
+  //                 console's bands are `return someState() === "grant"`, so the
+  //                 derived vocabulary is EMPTY. That emptiness used to die at
+  //                 band level ("returns no string vocabulary at all"), which is
+  //                 why the shipped arm could pin two bands and not nine: the
+  //                 bands were not unpinnable, the ARM was string-only. A
+  //                 boolean band has no vocabulary to enumerate; what it has is
+  //                 a VALUE, and the decide must still consult it.
+  //
+  //     WHAT A BOOLEAN/ARRAY ROW DECLARES, and why this is still not a call
+  //     graph (D517) or a body scope (D530): the row names `value` — the
+  //     identifier the decide is GIVEN (`canWrite`, `opts.canManage`). No hop
+  //     is walked and no span is contained; two regex teeth over the decide's
+  //     own body, both the SAME mutation direction, "the decide stops
+  //     consulting the value at all":
+  //       · it must still BIND that name — a parameter of the decide, or a
+  //         local it declares; and
+  //       · its body must still use the name in a BRANCH position: `!v`,
+  //         `if (v)`, `v ?`, `v &&`, `v ||`, `v === …`, `v.length`.
+  //     Passing the value onward as a plain call argument is NOT a branch and
+  //     does not satisfy this arm. A row whose decide is ALSO one of its own
+  //     reads may omit `value`; then the consulted expression is the band CALL
+  //     itself, which is the shape loadOperator ships and the only shape where
+  //     there is no threaded identifier to name.
+  //
+  //     THE LIMIT THIS ARM STILL HAS, for the STRING shape, is PRINTED BY NAME
+  //     beside every string band in the accounting below rather than left for
+  //     the next reader to rediscover: it is an EXISTENCE check over the whole
+  //     vocabulary, so neutering ONE arm of a multi-valued decide while another
+  //     comparison survives is invisible here. That was measured, not feared —
+  //     replacing only newLaunchOffer's `=== "grant"` and `=== "refuse"` forks
+  //     left the census at exit 0 because its residual `=== "failed"` arm still
+  //     satisfied "branches on SOME value". The print now names, per band and
+  //     per decide, which values ARE compared and which are not, so the hole is
+  //     stated in the census's own output on every clean run.
   const vocabOf = {};
+  const shapeOf = {};
+  const consultOf = {};   // row key -> what (2i-3) proved a boolean/array decide consults
+  const comparedOf = {};  // string band -> decide -> the values it actually compares
   {
     const bad = [];
     for (const band of BANDS) {
       const body = declsOf(band).map(bodyOf).join("\n");
-      const vocab = new Set();
+      const rets = [];
       const ret = /\breturn\b([^;]*)/g;
       let m;
-      while ((m = ret.exec(body))) {
-        // A literal on the RIGHT of a comparison is an INPUT the band reads
-        // (`meCache.role === "owner"`), not a value it can answer with. Blank
-        // those first or the vocabulary quietly widens to include the role
-        // names, and (2i-3) would accept a decide branching on the wrong thing.
-        const answered = m[1].replace(/(===|!==|==|!=)\s*(?:"[^"\\]*"|'[^'\\]*')/g, "$1 0");
+      while ((m = ret.exec(body))) rets.push(m[1]);
+      const vocab = new Set();
+      for (const raw of rets) {
+        const answered = raw.replace(/(===|!==|==|!=)\s*(?:"[^"\\]*"|'[^'\\]*')/g, "$1 0");
         const lits = answered.match(/"([^"\\]*)"|'([^'\\]*)'/g) || [];
         for (const l of lits) vocab.add(l.slice(1, -1));
       }
       vocabOf[band] = [...vocab];
-      if (!vocabOf[band].length) {
-        bad.push(`  band ${band} returns no string vocabulary at all — there is nothing left for a caller to branch on`);
+      // An array LITERAL in answer position, never an index: `return roles[0]`
+      // has a `[` too, and it answers a member, not a list. The literal is only
+      // recognised where a VALUE may start — at the head of the return, or after
+      // a ternary arm / an opening bracket / a comma / a logical operator.
+      const ARRAY_LITERAL = /(^|[?:(,=]|&&|\|\|)\s*\[/;
+      // SHAPE, in this order and for this reason: an array literal is checked
+      // FIRST because its members survive the comparison blanking and would
+      // otherwise be read as an answered vocabulary; BOOLEAN is the residual,
+      // but a POSITIVE residual — a band that answers nothing, or answers an
+      // object, is not silently treated as a boolean, it dies below.
+      const exprs = rets.map((r) => r.trim()).filter((r) => r.length);
+      if (!exprs.length) {
+        shapeOf[band] = null;
+        bad.push(`  band ${band} has no value-bearing \`return\` at all — it answers nothing, so no decide can be consulting it`);
+      } else if (exprs.some((e) => ARRAY_LITERAL.test(e))) {
+        shapeOf[band] = "array";
+      } else if (vocabOf[band].length) {
+        shapeOf[band] = "string";
+      } else if (exprs.every((e) => !e.startsWith("{"))) {
+        shapeOf[band] = "boolean";
+      } else {
+        shapeOf[band] = null;
+        bad.push(`  band ${band} answers an OBJECT — (2i-3) classifies string, array and boolean bands and refuses to guess at this one`);
       }
     }
+
+    // A dotted `value` is matched as a path with whitespace tolerated around
+    // the dot, so `opts.canManage` and `opts . canManage` are the same claim.
+    const pathRe = (v) => v.split(".").map(esc0).join("\\s*\\.\\s*");
+    const BRANCH = (t) => [
+      ["negation", new RegExp("!\\s*" + t)],
+      ["if-test", new RegExp("\\bif\\s*\\(\\s*" + t + "\\s*\\)")],
+      ["ternary", new RegExp(t + "\\s*\\?")],
+      ["short-circuit", new RegExp(t + "\\s*(&&|\\|\\|)")],
+      ["comparison", new RegExp(t + "\\s*(===|!==|==|!=)")],
+      ["emptiness", new RegExp(t + "\\s*\\.\\s*length")],
+    ];
+
     for (const r of FENCED) {
-      const vocab = vocabOf[r.fence.band] || [];
-      if (!vocab.length) continue;
+      const band = r.fence.band;
+      const shape = shapeOf[band];
+      if (!shape) continue; // the band-level die above already owns every row on it
+
       const body = declsOf(r.fence.decide).map(bodyOf).join("\n");
-      const branches = vocab.some((v) => new RegExp("(===|!==)\\s*[\"']" + esc0(v) + "[\"']").test(body));
-      if (!branches) {
-        bad.push(`  ${keyOf(r)} -> decide ${r.fence.decide} branches on none of ${r.fence.band}'s values [${vocab.join(", ")}]`);
+
+      if (shape === "string") {
+        const vocab = vocabOf[band];
+        const hit = vocab.filter((v) => new RegExp("(===|!==)\\s*[\"']" + esc0(v) + "[\"']").test(body));
+        comparedOf[band] = comparedOf[band] || {};
+        comparedOf[band][r.fence.decide] = hit;
+        if (!hit.length) {
+          bad.push(`  ${keyOf(r)} -> decide ${r.fence.decide} branches on none of ${band}'s values [${vocab.join(", ")}]`);
+        }
+        continue;
+      }
+
+      const named = r.fence.value || null;
+      if (!named && !readsOf(r).includes(r.fence.decide)) {
+        bad.push(`  ${keyOf(r)} -> ${band} is ${shape.toUpperCase()}-valued, so the row must name the \`value\` its decide ${r.fence.decide} is given — only a decide that is ALSO one of its own reads may omit it and consult the band call directly`);
+        continue;
+      }
+      const token = named ? pathRe(named) : esc0(band) + "\\s*\\([^)]*\\)";
+      const label = named || band + "()";
+
+      if (named) {
+        const root = named.split(".")[0];
+        const header = /function\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(([^)]*)\)/.exec(body);
+        const params = header ? header[1].split(",").map((p) => p.trim()) : [];
+        const bound = params.includes(root) || new RegExp("\\b(var|let|const)\\s+" + esc0(root) + "\\b").test(body);
+        if (!bound) {
+          bad.push(`  ${keyOf(r)} -> decide ${r.fence.decide} no longer BINDS ${root}: the value this fence threads into it is neither a parameter nor a local, so whatever it renders, it is not the band's answer`);
+          continue;
+        }
+      }
+
+      const shapes = BRANCH(token).filter(([n]) => shape !== "array" || n === "emptiness");
+      const hit = shapes.filter(([, re]) => re.test(body)).map(([n]) => n);
+      consultOf[keyOf(r)] = { decide: r.fence.decide, label: label, shapes: hit };
+      if (!hit.length) {
+        bad.push(shape === "array"
+          ? `  ${keyOf(r)} -> decide ${r.fence.decide} never asks whether ${label} is EMPTY — ${band} answers a LIST, whose members are not a branch vocabulary, so \`.length\` is the only consult that means anything here`
+          : `  ${keyOf(r)} -> decide ${r.fence.decide} does not consult ${label} in any branch position — ${band} is BOOLEAN-valued, and a decide that never tests the value renders the same offer whatever the band answers`);
       }
     }
+
     if (bad.length) {
       die2([
         "FAIL(2i-3): a fence is still wired and no longer decides anything.",
         "  The read still asks the question and the answer still arrives — and then the decide",
         "  helper renders the same offer whatever it says. That is the NEUTERED fence: every",
         "  other arm of this census goes green over it, and a plain member gets the button back.",
-        "  This check is a ratchet, not a proof: it asserts the comparison is still THERE, not",
-        "  that its two arms are still right.",
+        "  On a STRING band this check is a ratchet, not a proof: it asserts the comparison is",
+        "  still THERE, not that its two arms are still right, and the accounting print names",
+        "  which values each decide compares so the gap is never silent. On a BOOLEAN or ARRAY",
+        "  band there is no vocabulary to compare against, so the claim is narrower and exact:",
+        "  the decide BINDS the value the fence threads into it and still uses it in a branch.",
         "",
         ...bad,
       ]);
@@ -2690,7 +2861,33 @@ if (dupes.length) {
   for (const a of accounting) {
     console.log(`  ${a.band}  —  ${a.sites} live read site(s) in ${a.readers.length} function(s), ${a.claimed.length} claimed by rows` +
       (a.exempt.length ? `, ${a.exempt.length} exempt` : ", READ_EXEMPT empty") + ", 0 orphaned");
-    console.log(`    vocabulary DERIVED from its returns: ${vocabOf[a.band].map((v) => '"' + v + '"').join(" · ")}`);
+    const shape = shapeOf[a.band];
+    if (shape === "string") {
+      console.log(`    STRING-valued; vocabulary DERIVED from its returns: ${vocabOf[a.band].map((v) => '"' + v + '"').join(" · ")}`);
+      // THE (2i-3) HOLE, PRINTED RATHER THAN REMEMBERED. This arm asks whether
+      // SOME value is still compared, so a decide that compares two of five is
+      // a decide whose other three arms can be neutered in silence. Naming the
+      // uncompared values here costs nothing and stops the next reader having
+      // to re-measure it on a mutant, which is how it was found.
+      for (const [decide, hitv] of Object.entries(comparedOf[a.band] || {})) {
+        const missed = vocabOf[a.band].filter((v) => !hitv.includes(v));
+        console.log(`    (2i-3) is an EXISTENCE check: decide ${decide} compares ${hitv.length} of ` +
+          `${vocabOf[a.band].length} — [${hitv.join(", ")}]` +
+          (missed.length
+            ? `; neutering ONLY the arm(s) for [${missed.join(", ")}] is INVISIBLE to this arm`
+            : `; every value the band answers is compared, so no per-arm neuter hides behind this decide`));
+      }
+    } else {
+      console.log(`    ${shape === "array" ? "ARRAY" : "BOOLEAN"}-valued — no branch vocabulary to derive, so (2i-3) checks the SHAPE instead` +
+        (shape === "array" ? `: members [${vocabOf[a.band].join(", ")}] are a LIST, never a vocabulary, and only an emptiness consult counts` : ""));
+      const said = new Set();
+      for (const r of FENCED.filter((x) => x.fence.band === a.band)) {
+        const c = consultOf[keyOf(r)];
+        if (!c) continue;
+        const line = `    (2i-3) decide ${c.decide} BINDS and consults ${c.label} — ${c.shapes.join(", ")}`;
+        if (!said.has(line)) { said.add(line); console.log(line); }
+      }
+    }
     console.log(`    read sites: ${a.readers.join(", ")}`);
   }
   const unfenced = pinnedPredicated.filter((r) => !r.fence);

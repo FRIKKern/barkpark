@@ -7,15 +7,15 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc client — 2026-09-11 pre-gate-badge emitter (docgates-s27): 24630 B -> 24717 B (+87); one <p> emitter + registry entry for the reader-synthesised badge #17199 added to compose.ex; 33 B headroom",
+  "name": "PortableDoc client — 2026-09-12 baseline reland (studio-r14): 24717 B -> 24950 B (+233); diffuse PortableDoc drift across #17684 #17729 #17759 #17966 landed after the #17667 baseline-move without a bump; 300 B headroom",
   "path": "dist/index.mjs",
-  "limit": "24.75 KB",
+  "limit": "25.25 KB",
   "gzip": true
  },
  {
-  "name": "RSC server — 2026-09-11 pre-gate-badge emitter (docgates-s27): 23618 B -> 23702 B (+84); same emitter through the server entry; 28 B headroom",
+  "name": "RSC server — 2026-09-12 baseline reland (studio-r14): 23702 B -> 23940 B (+238); same diffuse PortableDoc drift through the server entry; 260 B headroom",
   "path": "dist/server.mjs",
-  "limit": "23.73 KB",
+  "limit": "24.2 KB",
   "gzip": true
  },
  {
@@ -35,9 +35,9 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc subpath — 2026-09-11 pre-gate-badge emitter (docgates-s27): 20697 B -> 20780 B (+83); same emitter through the PortableDoc subpath; 30 B headroom",
+  "name": "PortableDoc subpath — 2026-09-12 baseline reland (studio-r14): 20780 B -> 21017 B (+237); same diffuse PortableDoc drift through the PortableDoc subpath; 283 B headroom",
   "path": "dist/portable-doc.mjs",
-  "limit": "20.81 KB",
+  "limit": "21.3 KB",
   "gzip": true
  }
 ]

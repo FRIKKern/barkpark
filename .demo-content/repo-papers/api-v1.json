@@ -111,7 +111,6 @@
 [[{"type":"text","value":"not_found","marks":["code"]}],[{"type":"text","value":"404"}],[{"type":"text","value":"Document or schema not found, or unknown "},{"type":"text","value":":workspace_slug","marks":["code"]}]],
 [[{"type":"text","value":"unauthorized","marks":["code"]}],[{"type":"text","value":"401"}],[{"type":"text","value":"Missing or invalid token"}]],
 [[{"type":"text","value":"forbidden","marks":["code"]}],[{"type":"text","value":"403"}],[{"type":"text","value":"Token lacks required permission, OR is not a member of the resolved workspace, OR is read-only on a write endpoint"}]],
-[[{"type":"text","value":"schema_unknown","marks":["code"]}],[{"type":"text","value":"404"}],[{"type":"text","value":"No schema registered for this type"}]],
 [[{"type":"text","value":"rev_mismatch","marks":["code"]}],[{"type":"text","value":"409"}],[{"type":"text","value":"ifRevisionID","marks":["code"]},{"type":"text","value":" did not match current rev"}]],
 [[{"type":"text","value":"conflict","marks":["code"]}],[{"type":"text","value":"409"}],[{"type":"text","value":"Document already exists (on "},{"type":"text","value":"create","marks":["code"]},{"type":"text","value":")"}]],
 [[{"type":"text","value":"malformed","marks":["code"]}],[{"type":"text","value":"400"}],[{"type":"text","value":"Request body is malformed or missing "},{"type":"text","value":"mutations","marks":["code"]},{"type":"text","value":" key"}]],

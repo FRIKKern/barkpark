@@ -1290,12 +1290,13 @@ export const RAIL_FAIL_KIND_DETAIL = railEmitDetail(
 // caught the live divergence it exists to catch. That is standing-test clause 4
 // (a fixture that cannot produce the defect), and this constant is the fix.
 //
-// THE PRODUCER, read-only from here: `build_failure_reason()` —
-// deploy/site-deploy.sh:1939 (and its byte-identical node twin,
-// deploy/site-deploy-node.sh:1372). Its FIRST and highest-priority arm is
-// `grep -a 'FATAL' <build-log> | tail -1`, and the FATAL line the header at
-// site-deploy.sh:57 documents (emitted by the e2e's own npm at :935, asserted
-// onto the stage line at :1062) is this one, verbatim. It reaches the rail as
+// THE PRODUCER, read-only from here: `build_failure_reason()` in
+// deploy/site-deploy.sh and its byte-identical node twin
+// deploy/site-deploy-node.sh — re-derive with
+// grep -n 'build_failure_reason()' deploy/site-deploy*.sh. Its FIRST and
+// highest-priority arm is `grep -a 'FATAL' <build-log> | tail -1`, and the
+// FATAL line the stage-protocol header documents (grep -n 'FATAL: 401
+// Unauthorized' deploy/site-deploy.sh) is this one, verbatim. It reaches the rail as
 // `BPSTAGE name=BUILD status=failed detail="…"`.
 //
 // It classifies on its OWN distinctive phrase — `the site read token is
@@ -1523,7 +1524,7 @@ export const DEPLOY_DETAIL_KIND =
 //     module-resolution failure plus its import trace, which is exactly what
 //     `emit()`'s tab/newline collapse does to a multi-line error one surface
 //     over. Word-broken prose, not one unbreakable token: the token-shape
-//     defect is `.status-pill-detail`'s (app.css:3498) and this caption already
+//     defect is `.status-pill-detail`'s (grep -n '^\.status-pill-detail [{]' app.css) and this caption already
 //     carries `word-break`, so LENGTH is the only thing left to bound and the
 //     fixture must not smuggle in the other defect to make its point.
 const deployDetailCruelFrames = [
@@ -2292,7 +2293,8 @@ const stCrash = deployment({
 // bytes. THE FIXTURE IS THE PRECONDITION OF THE LEG, not an extra.
 //
 // THE PRODUCER CHAIN, read-only from here, one hop LONGER than the rail's:
-//   `build_failure_reason` (deploy/site-deploy-node.sh:1372) — the last
+//   `build_failure_reason` (deploy/site-deploy-node.sh; grep -n
+//     'build_failure_reason()' deploy/site-deploy-node.sh) — the last
 //     `npm ERR!|[Ee]rror:` line of the build log, verbatim and unbounded. On a
 //     Next build that is routinely a module-resolution path: ONE unbreakable
 //     run carrying the person's own slug and the release id.
@@ -2914,7 +2916,8 @@ if (cruelName.length !== BARKPARK_NAME_MAX) {
 //    admin can type 255 characters into that box and have the server keep
 //    them. This one IS a reachability claim.
 //
-//    SINGLE UNBROKEN TOKEN, on purpose: `.fleet-meta` (app.css:1069) declares
+//    SINGLE UNBROKEN TOKEN, on purpose: `.fleet-meta`
+//    (grep -n '^\.fleet-meta [{]' app.css) declares
 //    font-size/colour/font-family/margin and NOTHING about wrapping, so a
 //    string with a hyphen or a dot in it would wrap by itself and the row
 //    would be BREAKABLE rather than cruel.
@@ -5951,7 +5954,7 @@ function githubOf(d, state) {
 //   change something (see sessionsOf). Omitting it keeps every route stateless.
 //   CORRECTED (wave 11 review): this used to say stateless "is what the browser
 //   harness (mock.js) does". It has not been true since
-//   cch-bl-mockjs-revoke-stateless — mock.js:124 passes a `fixtureState` on
+//   cch-bl-mockjs-revoke-stateless — mock.js passes a `fixtureState` on
 //   every call, exactly as smoke.mjs does. NO CALLER OMITS IT TODAY, so the
 //   stateless arm of every `if (state)` is dead code that only a new caller can
 //   revive, and a route added on the assumption that the browser is stateless
@@ -6338,7 +6341,8 @@ export function route(name, method, path, state) {
   // bag was supplied.
   //
   // THIS DOES CHANGE THE BROWSER TWIN, and saying otherwise would be the same
-  // class of lie. mock.js:124 passes a per-boot `fixtureState` on EVERY call
+  // class of lie. mock.js passes a per-boot `fixtureState` on EVERY call
+  // (grep -n 'fixtureState' mock.js)
   // (cch-bl-mockjs-revoke-stateless), so the 4-arg stateful path is the only
   // one either harness takes and the `if (state)` splice always fires. Two
   // consequences, both in the honest direction: the browser preview's token

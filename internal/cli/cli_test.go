@@ -487,7 +487,6 @@ func TestBuildManifestRequestRejectsNonPublishedPerspectiveWithoutToken(t *testi
 func TestExitForCode(t *testing.T) {
 	cases := map[string]int{
 		"not_found":           exitNotFound,
-		"schema_unknown":      exitNotFound,
 		"share_expired":       exitNotFound,
 		"unauthorized":        exitAuth,
 		"forbidden":           exitAuth,
@@ -668,7 +667,7 @@ func TestUsageErrfJSONEnvelope(t *testing.T) {
 // TestExitForCode / TestClassifyError.
 func TestApiErrorHint(t *testing.T) {
 	nonEmpty := []string{
-		"not_found", "schema_unknown",
+		"not_found",
 		"validation_failed", "invalid_op", "type_mismatch", "duplicate_id",
 		"rev_mismatch", "precondition_failed", "conflict",
 		"fenced_off", "stale_claim", "already_claimed", "not_ready", "doc_changed_since_claim",

@@ -83,7 +83,6 @@ export interface ErrorEnvelope {
     | 'not_found'
     | 'unauthorized'
     | 'forbidden'
-    | 'schema_unknown'
     | 'rev_mismatch'
     | 'conflict'
     | 'malformed'

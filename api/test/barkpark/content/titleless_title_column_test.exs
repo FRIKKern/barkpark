@@ -5,7 +5,7 @@ defmodule Barkpark.Content.TitlelessTitleColumnTest do
   is red): a type with no `title` field fills the document title column from
   `list_preview.title`, and its desk rows show that value.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PaneBuilder
