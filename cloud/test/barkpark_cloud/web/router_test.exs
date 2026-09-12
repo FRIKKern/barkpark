@@ -469,6 +469,49 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert row2["last_verified_at"] =~ "2026-07-16"
     end
 
+    # ── DECISION: THE ELIXIR SUITE DELIBERATELY HOLDS NO LOCK ON THE LADDER ──
+    #
+    # A sweep that runs `git grep -l attention_order.json -- cloud/lib cloud/test`
+    # gets an EMPTY result and files "the Elixir suite has no lock on the
+    # attention ladder fixture" (task-e91a510403252c1c). That gap is INTENDED,
+    # and this comment exists so the grep lands here instead of coming back empty
+    # a third time. Determined 2026-09-12 by reading what cloud/ actually emits:
+    #
+    #   * cloud/priv/static/__fixtures__/attention_order.json is the cross-surface
+    #     ATTENTION LADDER (charter D57) — fourteen ranked STATES. It is read by
+    #     Go (internal/cli/table.go, cloud_status_cmd.go and their tests) and by
+    #     node (cloud/priv/static/app.js ATTENTION_LADDER, pinned by the D32 order
+    #     test in cloud/priv/static/__app.test.mjs).
+    #   * cloud/ NEVER COMPUTES AN ATTENTION STATE AND NEVER ORDERS ONE. Seven of
+    #     the fourteen rung names — removal_failed, deploys_failing, strained,
+    #     filling, unreported, deploy_stalled, removing — do not occur AT ALL
+    #     under cloud/lib, in code or in prose. `degraded` and `provisioning`
+    #     occur only in comments and in an unrelated disk-walk status. The rung
+    #     names that DO occur as emitted values there belong to OTHER
+    #     vocabularies with their own orders, not to D57: `behind` / `diverged`
+    #     are commit_ancestry rungs (BarkparkCloud.Github.CommitDistance
+    #     .ancestries/0 — unknown|current|behind|ahead_of_main|diverged, and
+    #     `behind` is separately an update_state), `suspended` is an account/box
+    #     lifecycle status, and BarkparkCloud.Metrics carries its own, different
+    #     @pressure_ladder (calm|watch|struggling). No cloud/lib module maps any
+    #     of them onto a rank, and nothing under cloud/lib sorts a fleet by one.
+    #   * What this router EMITS on /v1/barkparks is the ladder's INPUTS —
+    #     pressure (merge_pressure/2), health_status, agent_status, update_state,
+    #     commit_ancestry, deploy_rate, queued_deploy_age_seconds — as raw facts.
+    #     The client derives the STATE (app.js classifyBp, Go's equivalent).
+    #
+    # So an ExUnit test asserting the fixture's ORDER could not fail for the
+    # reason it would claim: there is no server-side ladder to drift from it. It
+    # would re-typecheck a JSON file against itself — the tautology this campaign
+    # keeps finding — while proving nothing about cloud/.
+    #
+    # The Elixir lock that IS owed is the one below, and it already exists: it
+    # pins the PRODUCER-SIDE INPUT FIELDS against the Go row fixture
+    # (internal/cli/testdata/attention_order_cases.json), which is a different
+    # file — per-barkpark rows with an expected_order — and the only cross-language
+    # contract cloud/ is actually a party to. If cloud/ ever grows an emitted
+    # attention state or an ordering, THAT is when this decision is reopened.
+
     # jpf-w1-queue-age-alarm (charter D6): the fleet row carries the age of the
     # oldest never-claimed queued container deployment — a NUMBER, nil when
     # none — computed by Registry.queued_deploy_age_map/1, ONE GROUP BY for the
