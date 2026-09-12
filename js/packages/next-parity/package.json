@@ -17,11 +17,11 @@
   },
   "devDependencies": {
     "next": "16.2.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "happy-dom": "^20.0.0",
+    "happy-dom": "^20.14.0",
     "vitest": "^4.1.0"
   },
   "engines": {
