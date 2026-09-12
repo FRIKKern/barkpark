@@ -572,6 +572,24 @@ func successClaimRegistry() []claimSite {
 			Backed:       spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.Theme = "ember" }),
 			Contradicted: spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.Theme = "fjord" }),
 		},
+		{
+			// THE SAME RENDER, ON THE AXIS THE ROW ABOVE CANNOT SEE
+			// (ssw10-bl-prebuilt-enabled-no-read-path). The theme pair above
+			// keeps this receipt honest about theme and about NOTHING ELSE: a
+			// render that dropped every other field still prints two different
+			// sentences for it, so the gate stayed blind to the one field
+			// `--prebuilt-enabled` changes. This pair varies ONLY
+			// prebuilt_enabled — hold the theme identical — so a control plane
+			// that ignored the key, or stored the opposite, makes the two runs
+			// byte-identical and this row goes red. That is the whole point: the
+			// axis a claim is probed on is the only axis it is probed on.
+			Name: "renderSiteSettingsUpdated/prebuilt-enabled",
+			Render: func(out *writer, resp any) {
+				renderSiteSettingsUpdated(out, "blog", resp.(cloudclient.SpawnSite))
+			},
+			Backed:       spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.PrebuiltEnabled = true }),
+			Contradicted: spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.PrebuiltEnabled = false }),
+		},
 
 		// ── cloud_site_doctor.go — the per-substrate receipt (ssw8-site-doctor) ──
 		// The doctor is a READ verb, so its "claim" is not "I changed something":
