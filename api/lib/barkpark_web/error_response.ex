@@ -46,13 +46,32 @@ defmodule BarkparkWeb.ErrorResponse do
   auth plug's bespoke "invalid ingest token" message). Still routed through
   `Content.Errors.stamp/2`, so the additive `hint` and the `request_id` are put
   on by the one owner. `status` may be an atom (`:unauthorized`) or integer.
+
+  The optional 6th argument is a ROUTE-DERIVED hint (task-57081836b628df35).
+  Without it this function built `%{code, message, status}` (+ `:details`) and
+  NEVER a `:hint`, so `Errors.put_hint/1`'s "an arm that spoke for itself wins"
+  clause could not match for ANY external emitter — the code-keyed default
+  always applied. For a code whose remedy depends on the ROUTE rather than the
+  code (`"unauthorized"`: eleven emitters, each wanting a different credential)
+  that default can only ever be right for one of them. A plug that knows which
+  credential its own route accepts passes it here; everything else keeps the
+  (now credential-agnostic) table default. This mirrors `emit/4`'s existing
+  `hint_override`, which the reason-tuple path has always had.
   """
-  @spec emit_custom(Plug.Conn.t(), atom() | integer(), String.t(), String.t(), map()) ::
-          Plug.Conn.t()
-  def emit_custom(conn, status, code, message, details \\ %{})
-      when is_binary(code) and is_binary(message) and is_map(details) do
+  @spec emit_custom(
+          Plug.Conn.t(),
+          atom() | integer(),
+          String.t(),
+          String.t(),
+          map(),
+          String.t() | nil
+        ) :: Plug.Conn.t()
+  def emit_custom(conn, status, code, message, details \\ %{}, hint \\ nil)
+      when is_binary(code) and is_binary(message) and is_map(details) and
+             (is_nil(hint) or is_binary(hint)) do
     %{code: code, message: message, status: status}
     |> maybe_put_details(details)
+    |> maybe_override_hint(hint)
     |> Errors.stamp(conn)
     |> write(conn)
   end

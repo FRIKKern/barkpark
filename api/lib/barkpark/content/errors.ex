@@ -11,8 +11,21 @@ defmodule Barkpark.Content.Errors do
   @hints %{
     "not_found" =>
       "Check the document _id, type, and dataset in the URL — the resource does not exist in this scope.",
+    # CREDENTIAL-AGNOSTIC BY CONSTRUCTION (task-57081836b628df35). This entry is
+    # the code-keyed DEFAULT and `put_hint/1` dispatches on the CODE STRING
+    # ALONE — no module, no conn, no route — so it is served verbatim at every
+    # "unauthorized" emitter: the GitHub webhook HMAC gate, the ingest-token
+    # plug, the media-processing callback, the login-session gates, and the
+    # OIDC/SAML/social callbacks. It therefore MUST NOT name a credential kind.
+    # It used to read "Send a valid token via the Authorization: Bearer header;
+    # tokens are dataset-scoped", which named a dataset-scoped API token at
+    # eleven call sites that between them want an HMAC signature, an ingest
+    # token, a callback token, a login session or an IdP assertion — so the
+    # refusal sent the caller to fetch a credential the route would refuse
+    # again. A route that CAN name its own credential now passes one through
+    # `ErrorResponse.emit_custom/6`, which wins over this default.
     "unauthorized" =>
-      "Send a valid token via the Authorization: Bearer header; tokens are dataset-scoped.",
+      "This route refused the credential it was given. The message names what this route accepts — present that and re-send; re-sending the same credential, or one that authenticates on another route, will refuse again.",
     "forbidden" => "Use a token with write/admin permission that is a member of this workspace.",
     "cors_forbidden" =>
       "Add this origin to the dataset's allowed origins, or call from a server-side token instead.",
