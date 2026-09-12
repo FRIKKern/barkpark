@@ -130,6 +130,8 @@ on:
       - "scripts/deploy-concurrency-check.sh"
       - "scripts/deploy-concurrency-check.test.sh"
       - "scripts/main-run-concurrency-check.sh"
+      - "scripts/deploy-supersede-exit.sh"
+      - "scripts/deploy-supersede-exit.test.sh"
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
@@ -557,6 +559,8 @@ on:
       - "scripts/deploy-concurrency-check.sh"
       - "scripts/deploy-concurrency-check.test.sh"
       - "scripts/main-run-concurrency-check.sh"
+      - "scripts/deploy-supersede-exit.sh"
+      - "scripts/deploy-supersede-exit.test.sh"
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
@@ -1104,6 +1108,8 @@ jobs:
           deploy-concurrency scripts/deploy-concurrency-check.sh
           deploy-concurrency scripts/deploy-concurrency-check.test.sh
           deploy-concurrency scripts/main-run-concurrency-check.sh
+          deploy-concurrency scripts/deploy-supersede-exit.sh
+          deploy-concurrency scripts/deploy-supersede-exit.test.sh
           deploy-concurrency .github/workflows/deploy.yml
           deploy-concurrency .github/workflows/*.yml
           console-path-ratchet scripts/console-path-escape-check.sh
@@ -1723,6 +1729,26 @@ jobs:
         # Harness FIRST, subject second — the house selftest-first idiom. A gate
         # that has lost the ability to fail must red before its green is read.
         run: bash scripts/deploy-concurrency-check.sh
+      # ── exit-at-START for a superseded sha (task-01f48337d83a0d15) ──────────
+      # Same family: per-sha groups stop EVICTION, but a merge storm still runs
+      # N full deploys at once. deploy-supersede-exit.sh decides — by main
+      # ANCESTRY, never wall clock — whether THIS run is superseded and must
+      # exit before any scp/ssh. Harness FIRST (its own --selftest matrix), then
+      # the classifier's --selftest, then the wiring harness that EXTRACTS the
+      # changes step from the live deploy.yml. Disarming the exit in a scratch
+      # copy took the harness to 16 passed / 2 FAILED.
+      - name: deploy-supersede-exit.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/deploy-supersede-exit.sh
+      - name: deploy-supersede-exit.test.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/deploy-supersede-exit.test.sh
+      - name: the classifier can still LOSE (11-arm ancestry matrix)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/deploy-supersede-exit.sh --selftest
+      - name: the exit-at-start wiring both directions + the live deploy.yml
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/deploy-supersede-exit.test.sh
       # The same eviction shape on the MAIN runs of the gate workflows
       # (task-b04364c216f877e6): 37 of 40 main elixir runs since 10:27Z on
       # 2026-09-02 were cancelled by the next merge. Per-sha group on main.
