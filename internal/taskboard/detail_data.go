@@ -83,17 +83,17 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 		inflightTasks   []Task
 		inflightDetails DetailIndex
 		inflightErr     error
+		listExhaustive  bool
 		wg              sync.WaitGroup
 	)
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		body, err := getJSONCtx(ctx, c, "/v1/tasks?limit=1000")
-		if err != nil {
-			listErr = err
-			return
-		}
-		tasks, details, listErr = decodeTaskListFull(body)
+		// task-6c59bff7cb6b36ee: the corpus GET is a CURSOR WALK, not one
+		// window. listExhaustive records whether the walk actually reached the
+		// end — the fact mergeForward needs to tell "this row closed" from
+		// "this row rotated out of the window".
+		tasks, details, listExhaustive, listErr = fetchTaskPages(ctx, c, listFetchPath)
 	}()
 	go func() {
 		defer wg.Done()
@@ -105,12 +105,7 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 		// decodeTaskListFull — the filtered response is the same {ok,docs}
 		// envelope, and {"docs":[]} legitimately decodes to zero rows with a
 		// nil error (an empty in-flight population is a fact, not a failure).
-		body, err := getJSONCtx(ctx, c, inflightFetchPath)
-		if err != nil {
-			inflightErr = err
-			return
-		}
-		inflightTasks, inflightDetails, inflightErr = decodeTaskListFull(body)
+		inflightTasks, inflightDetails, _, inflightErr = fetchTaskPages(ctx, c, inflightFetchPath)
 	}()
 	wg.Wait()
 	if listErr != nil {
@@ -136,6 +131,7 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 	}
 	extras.counts[lifeInProgress] = countInProgress(tasks)
 	snap := composeSnapshot(tasks, extras, time.Now().UTC())
+	snap.Exhaustive = listExhaustive
 	syncDetails(details, snap.Tasks)
 	return snap, details, nil
 }

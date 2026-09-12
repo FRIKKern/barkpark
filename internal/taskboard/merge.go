@@ -50,7 +50,8 @@ func taskEpoch(t Task) int {
 //   - a doc only in prev, window NOT truncated (truncated==false): dropped — a
 //     real close/deletion. A snapshot that lists every task is authoritative
 //     about an absence, and the row is never resurrected.
-//   - a doc only in prev, window TRUNCATED (truncated==true): the fetch is
+//   - a doc only in prev, window TRUNCATED (truncated==true): the FALLBACK
+//     path, and since task-6c59bff7cb6b36ee it is ONLY a fallback. The fetch is
 //     desc:updated_at clamped to a fixed row count (tasks_controller.ex), so
 //     over a corpus bigger than the clamp a quiet open/ready/blocked row simply
 //     rotates out of the window — that is NOT the same fact as a close. A
@@ -68,6 +69,29 @@ func taskEpoch(t Task) int {
 //
 // Output order: kept/incoming rows follow next's order (kept-prev rows are
 // substituted in place); aged-out rows are appended after, in prev's order.
+//
+// WHEN truncated IS FALSE, AND WHY THAT IS NOW THE NORMAL CASE
+// (task-6c59bff7cb6b36ee). The board's corpus GET walks the route's keyset
+// cursor to EXHAUSTION (fetchTaskPages, fetch.go), so against a cursor-capable
+// server — every server since PR #16052, bl-api-tasks-stable-cursor, which the
+// capabilities manifest declares as the task.ls `cursor` arg — the incoming
+// snapshot lists every task that exists and truncated is false. A prev-only
+// row is then a REAL close, dropped immediately, and nothing is held on screen
+// behind an "N aged out of the window" notice.
+//
+// The keep-on-absence rule below survives for exactly two cases, both of them
+// "the corpus in hand is not the whole corpus":
+//
+//   - a server that does not offer the cursor (it ignores `?cursor=` and its
+//     `page` block carries no `next_cursor` key), so one desc:updated_at
+//     window is all there is;
+//   - a walk that hit maxTaskPages before the tail.
+//
+// In both, the board cannot DISTINGUISH a rotated-out row from a closed one —
+// it can only guess, and the conservative guess (keep the non-terminal row,
+// count it, say so) is the one that never deletes live work off the screen.
+// That is a defence against a blind spot, not a verdict; the cursor walk is
+// what removes the blind spot.
 //
 // Missing metadata: if EITHER side's UpdatedAt is zero (an older API envelope
 // without the field), the comparison is untrustworthy, so we take the incoming

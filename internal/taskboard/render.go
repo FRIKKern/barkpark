@@ -706,8 +706,12 @@ func windowSpine(lines []string, top, avail, width int) []string {
 //	                              line dim, and an explicit "stale" before the
 //	                              age
 //
-// The grading is claimRole — the same lease arithmetic the claim glyph burns
-// through, so the pulse and its row can never disagree about freshness. The
+// The grading is pulseRole — the same three-band arithmetic the claim glyph
+// burns through, but against pulseTTL (5 min), NOT the claim lease (2700s).
+// task-f30dab8c54c605e6 split the two: a pulse is a statement about NOW, so it
+// must stop spinning minutes after the worker goes quiet; the CLAIM behind it
+// is still live for the rest of the server's 45-minute lease and must not be
+// painted red for it. The
 // spinner rides the board heartbeat frame (0 at rest / reduced-motion / cold
 // paints, so goldens stay deterministic); every glyph is existing vocabulary.
 func pulseLine(t Task, p *ClaimPulse, frame, width int, now time.Time) string {
@@ -716,7 +720,7 @@ func pulseLine(t Task, p *ClaimPulse, frame, width int, now time.Time) string {
 		worker = t.Claim.Worker
 	}
 	age := AgeBadge(p.At, now)
-	role := claimRole(p.At, now)
+	role := pulseRole(p.At, now)
 
 	if role == RoleDanger { // past the lease TTL: visibly stale, never fresh
 		s := "· "

@@ -194,8 +194,9 @@ const ladderMaxRungs = 8
 
 // livePulseCriterion is the acceptance-criteria index a LIVE pulse names on
 // this task's claim, or -1: the claim must be worker-held, carry a now-pulse
-// naming a criterion, and the pulse must still be within the lease TTL
-// (charter D9 — staleness derives from claim.now.ts vs the lease). Exactly ONE
+// naming a criterion, and the pulse must still be within the PULSE horizon
+// (pulseTTL, 5 min — charter D9 staleness, NOT the 2700s claim lease; see
+// theme.go's two-horizon note, task-f30dab8c54c605e6). Exactly ONE
 // rung may spin, and only while the pulse is genuinely live — a stale pulse
 // spins nothing (motion is liveness; a dead pulse must not animate).
 func livePulseCriterion(t Task, now time.Time) int {
@@ -203,7 +204,7 @@ func livePulseCriterion(t Task, now time.Time) int {
 		return -1
 	}
 	p := t.Claim.Now
-	if p.Criterion < 0 || p.At.IsZero() || now.Sub(p.At) >= leaseTTL {
+	if p.Criterion < 0 || p.At.IsZero() || now.Sub(p.At) >= pulseTTL {
 		return -1
 	}
 	return p.Criterion

@@ -527,6 +527,16 @@ func httpStatusLabel(code int) string {
 // prev-only absence means "closed" or "rotated out of the window". A zero
 // fetch (len 0, e.g. an empty corpus) is never truncated.
 func snapshotTruncated(snap Snapshot) bool {
+	// task-6c59bff7cb6b36ee: an EXHAUSTIVE fetch walked the route's keyset
+	// cursor to the end, so it lists every task the server holds and IS
+	// authoritative about an absence — whatever the summed counts say. The
+	// count comparison below cannot be trusted on its own for this: prime's
+	// lifecycle_counts are twin-doubled (D115), so a complete corpus can still
+	// read short against them and would strand rows behind an "aged out"
+	// notice that is not true.
+	if snap.Exhaustive {
+		return false
+	}
 	total := 0
 	for _, v := range snap.Counts {
 		total += v

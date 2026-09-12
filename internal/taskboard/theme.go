@@ -241,23 +241,69 @@ func roleStyle(r Role) lipgloss.Style {
 	}
 }
 
-// leaseTTL is how long a claim is considered live before its lease is spent.
-// Barkpark's claim leases are 5 minutes; the tint escalates as the lease nears
-// expiry so a stalling claim visibly turns amber, then red.
-const leaseTTL = 5 * time.Minute
+// TWO HORIZONS, NOT ONE (task-f30dab8c54c605e6). This package used to grade
+// BOTH the claim tint and the pulse spinner against a single `leaseTTL = 5 *
+// time.Minute`, carrying the comment "Barkpark's claim leases are 5 minutes".
+// That comment was false by a factor of nine: the server's claim lease is
+// `:task_lease_ttl_seconds`, default 2700 (45 min) — one reader,
+// `Barkpark.Tasks.QueueGate.lease_ttl_seconds/0`, and the reaper that acts on
+// it is `Barkpark.Tasks.TtlSweeper`. The board therefore painted a live claim
+// RED at five minutes while the server kept the lease for another forty: a
+// false alarm on every long-running row, and the one tint an operator is meant
+// to act on.
+//
+// The number was never unknowable: the SAME binary already holds it — see
+// `leaseTTLFloor = 2700 * time.Second` in internal/cli/cmux_hook.go. One
+// package in this repo read the server's lease correctly and the board did not.
+//
+//   - pulseTTL (5 min) grades the PULSE — `claim.now`, a statement about NOW.
+//     Motion is liveness, so a five-minute-old pulse SHOULD stop spinning even
+//     though its claim is nowhere near reaped. That horizon was right; it just
+//     was not the lease.
+//   - defaultClaimLeaseTTL (2700s) grades the CLAIM tint when the wire carries
+//     no horizon of its own. It is the server default, not a client guess.
+const (
+	pulseTTL             = 5 * time.Minute
+	defaultClaimLeaseTTL = 2700 * time.Second
+)
+
+// claimLeaseTTL is the horizon THIS task's claim is graded against: the
+// server-sent lease seconds when the read payload carries them
+// (claim.lease_seconds — see api tasks_controller/params.ex), else the server's
+// own default. A zero/negative wire value is treated as absent: a horizon of
+// zero would paint every claim danger the instant it landed.
+func claimLeaseTTL(c *Claim) time.Duration {
+	if c != nil && c.LeaseSeconds > 0 {
+		return time.Duration(c.LeaseSeconds) * time.Second
+	}
+	return defaultClaimLeaseTTL
+}
 
 // claimRole tints a live claim by how much of its lease is burned:
-// info while fresh, warn past ~70%, danger once the lease is spent.
-func claimRole(claimedAt, now time.Time) Role {
+// info while fresh, warn past ~70%, danger once the lease is spent. ttl is the
+// row's own lease horizon (claimLeaseTTL), never a package constant — the
+// grading has to move with the server's configured lease, not with a number
+// this client picked.
+func claimRole(claimedAt, now time.Time, ttl time.Duration) Role {
+	if ttl <= 0 {
+		ttl = defaultClaimLeaseTTL
+	}
 	age := now.Sub(claimedAt)
 	switch {
-	case age >= leaseTTL:
+	case age >= ttl:
 		return RoleDanger
-	case age >= leaseTTL*7/10:
+	case age >= ttl*7/10:
 		return RoleWarn
 	default:
 		return RoleInfo
 	}
+}
+
+// pulseRole grades a PULSE against pulseTTL — the client-side liveness horizon,
+// deliberately NOT the claim lease. Same three bands, different question: "is
+// this worker still saying anything?" rather than "is this lease still held?".
+func pulseRole(at, now time.Time) Role {
+	return claimRole(at, now, pulseTTL)
 }
 
 // Staleness thresholds — day-scale, distinct from the minute-scale claim lease.
@@ -298,7 +344,7 @@ func RoleFor(t Task, now time.Time) Role {
 	switch t.Lifecycle {
 	case "in_progress":
 		if t.Claim != nil && !t.Claim.ClaimedAt.IsZero() {
-			return claimRole(t.Claim.ClaimedAt, now)
+			return claimRole(t.Claim.ClaimedAt, now, claimLeaseTTL(t.Claim))
 		}
 		return RoleInfo
 	case "blocked":
