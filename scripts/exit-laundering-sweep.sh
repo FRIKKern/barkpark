@@ -40,6 +40,27 @@
 # `}`; inside a workflow step, to the next `- name:`/`- uses:` at the same or
 # lower indent; otherwise a window (default 60 lines, --window N).
 #
+# THE CENSUS, measured 2026-09-12 on origin/main f072865bb over the corpus below
+# (422 files). Every number is re-derivable by running this script with no args:
+#
+#   raw P1 hits (the naive-grep number)                      1193
+#   P1+P2 and naming an artifact (producers)                  221
+#   CONFIRMED HIGH  — file artifact parsed downstream          18
+#   CONFIRMED MEDIUM — captured variable branched on          152
+#   classified OK, with a printed reason each                1023
+#
+# So 1023 of 1193 raw hits are CORRECT best-effort teardown or otherwise excused,
+# which is why the naive grep is useless here: it is 98.5% noise by the row's own
+# rule. Of the 18 HIGH sites, 1 was in scripts/ and is fixed in this change
+# (required-checks.test.sh section 27, the last survivor of the #14371 shape in
+# the file whose outage named the class) and 17 are in deploy/, outside the gates
+# lane's fence, filed as task-f56d84cf77d93c24 with every producer and consumer
+# quoted. The three sightings the parent row named were re-checked on the same
+# sha and are CLOSED: required-checks.test.sh routes through emit_spec/why_emit,
+# architecture.yml:433-443 carries `set -euo pipefail` with the comment naming
+# tee's always-0 status, and pds-live-hetzner-placement-group.sh:820-830 reads
+# its delete receipt instead of discarding it.
+#
 # EXIT: 0 no confirmed findings · 1 at least one confirmed · 2 cannot measure.
 #
 # USAGE
