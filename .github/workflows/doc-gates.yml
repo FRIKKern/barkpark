@@ -1213,7 +1213,7 @@ jobs:
       # (anchors_skipped_token), never vacuously passed. Sub-100ms, no test suite.
       - name: Set up Go
         if: ${{ !cancelled() }}
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
