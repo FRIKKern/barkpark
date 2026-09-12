@@ -2804,9 +2804,13 @@ defmodule BarkparkCloud.Web.Router do
   # tear down the developer's home base.
   # Credential-aware, the SAME family as POST /v1/fleet/supports and go-live: a
   # credential that can BIND can UNBIND — a PAT must carry the `deploy` ability;
-  # a session must be team-admin (owner/admin). Anon 401. The no-team case falls
-  # through to the downstream 404 (POST's is 422 — the asymmetry is left for
-  # backlog pdf-bl-cp-no-team-status-mismatch, deliberately not normalized here).
+  # a session must be team-admin (owner/admin). Anon 401. A caller with NO active
+  # team gets the SHARED gate refusal `no_team/1` emits — the same
+  # `403 {"error":"forbidden","reason":"no_team","scope":"team"}` the POST twin
+  # answers (task-3ae0ca3aec358df9). It used to fall through to the downstream
+  # 404: nothing had been looked up, so "not_found" was never a true answer, and
+  # `bp cloud support remove` read that status and told a teamless operator the
+  # row was "already gone" when the truth was `bp team use <team>`.
   #
   # task-688ebffc4b0aa50a — THE LIVE/NON-LIVE DISJUNCTION, the same one
   # `DELETE /v1/barkparks/:id` above already makes, and for the same reason.
@@ -2869,7 +2873,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 404, %{error: "not_found"})
+        no_team(conn)
 
       true ->
         team = conn.assigns.current_team
