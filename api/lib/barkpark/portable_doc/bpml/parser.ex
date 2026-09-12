@@ -14,13 +14,19 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "callout" => ~w(id tone title),
     "diagram" => ~w(id caption),
     "route" => ~w(id sport distance elevation duration caption),
-    "code" => ~w(id),
+    # `lang` (code) and `ordered` (ul) are READ by the render side
+    # (components.ex `code_html/2` reads "lang"; compose.ex reads
+    # `Map.get(b, "ordered") == true`) but had no attribute row, so a pull/push
+    # silently dropped a syntax-highlighting language and turned every ORDERED
+    # list into bullets — a visible rewrite of a paper nobody edited
+    # (task-2957c0caa1ffd1b0: both fire on eight-minute-erasure).
+    "code" => ~w(id lang),
     "eyebrow" => ~w(id),
     "p" => ~w(id),
     "pullquote" => ~w(id),
     "ingress" => ~w(id),
     "byline" => ~w(id),
-    "ul" => ~w(id),
+    "ul" => ~w(id ordered),
     "stats" => ~w(id),
     "steps" => ~w(id),
     "table" => ~w(id),
@@ -69,7 +75,15 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "description" => [],
     "a" => ~w(href),
     "hr" => ~w(id),
-    "expandable" => ~w(id summary)
+    "expandable" => ~w(id summary),
+    # The flagship taste tier (task-2957c0caa1ffd1b0) — the three types the
+    # SEAL papers use that the kernel could not spell. `<column>` is the
+    # positional child of `<columns>` (the `<slot>` precedent, minus the name),
+    # so it carries no attributes of its own.
+    "figure" => ~w(id caption),
+    "asciicast" => ~w(id src caption poster rows),
+    "columns" => ~w(id),
+    "column" => []
   }
 
   @unknown_tag_hints %{
@@ -88,7 +102,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "strong" => "<strong>/<b> are inline — valid only inside a text-bearing element like <p>"
   }
 
-  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards card slot quote terminal action pipeline stat-grid blockquote toc bar-chart lineage chart)
+  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards card slot quote terminal action pipeline stat-grid blockquote toc bar-chart lineage chart figure asciicast columns column)
 
   @inline_marks %{
     "b" => "strong",
@@ -233,7 +247,10 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   defp build_block("code", attrs, sc, cur) do
     with {:ok, text, cur} <- tag_text("code", sc, cur) do
-      {:ok, %{"type" => "code", "value" => text} |> put_attr("id", attrs), cur}
+      {:ok,
+       %{"type" => "code", "value" => text}
+       |> put_attr("id", attrs)
+       |> put_attr("lang", attrs), cur}
     end
   end
 
@@ -298,7 +315,10 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   defp build_block("ul", attrs, sc, cur) do
     with {:ok, items, cur} <-
            child_seq("ul", "li", sc, cur, fn _attrs, sc, cur -> tag_inline("li", sc, cur) end) do
-      {:ok, %{"type" => "list", "items" => items} |> put_attr("id", attrs), cur}
+      {:ok,
+       %{"type" => "list", "items" => items}
+       |> put_attr("id", attrs)
+       |> put_bool_attr("ordered", attrs), cur}
     end
   end
 
@@ -678,6 +698,98 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       end
     end
   end
+
+  # `figure` — caption chrome around exactly ONE child block. The body is a
+  # real block list (`block_seq`, as `section`'s is), then the arity is checked:
+  # the stored shape is a SINGULAR `child` map, so zero or two children have no
+  # home and become a teaching error rather than a silently-dropped block. The
+  # printer never emits either, so this only fires on hand-authored BPML.
+  defp build_block("figure", attrs, sc, cur) do
+    l = line(cur)
+
+    if sc do
+      {:skip, [figure_arity_err(0, l)], cur}
+    else
+      {blocks, errors, cur} = block_seq(cur, "figure")
+      {errors, cur} = expect_close("figure", cur, errors)
+
+      case {errors, blocks} do
+        {[], [child]} ->
+          {:ok,
+           %{"type" => "figure", "child" => child}
+           |> put_attr("id", attrs)
+           |> put_attr("caption", attrs), cur}
+
+        {[], others} ->
+          {:skip, [figure_arity_err(length(others), l)], cur}
+
+        {errors, _} ->
+          {:skip, errors, cur}
+      end
+    end
+  end
+
+  # `asciicast` — a terminal recording; the `action` leaf shape (attributes
+  # only, no body). `rows` is an integer player option in the renderer
+  # (compose.ex `asciicast_rows/1` accepts 6..40), so it re-types through
+  # `put_num_attr` and a pull/push does not turn it into a string.
+  defp build_block("asciicast", attrs, _sc, cur) do
+    block =
+      %{"type" => "asciicast"}
+      |> put_attr("id", attrs)
+      |> put_attr("src", attrs)
+      |> put_attr("caption", attrs)
+      |> put_attr("poster", attrs)
+      |> put_num_attr("rows", attrs)
+
+    {:ok, block, cur}
+  end
+
+  # `columns` — each `<column>` is a block list, read back into the stored list
+  # of lists. `<column>` is also a block tag so a column's children recurse
+  # through the same `block_seq` a `section`'s do (the `<slot>` precedent).
+  defp build_block("columns", attrs, sc, cur) do
+    builder = fn _col_attrs, sc, cur ->
+      if sc do
+        {:ok, [], cur}
+      else
+        {blocks, errors, cur} = block_seq(cur, "column")
+
+        case expect_close("column", cur, errors) do
+          {[], cur} -> {:ok, blocks, cur}
+          {errors, cur} -> {:error, errors, cur}
+        end
+      end
+    end
+
+    with {:ok, cols, cur} <- child_seq("columns", "column", sc, cur, builder) do
+      {:ok, %{"type" => "columns", "columns" => cols} |> put_attr("id", attrs), cur}
+    end
+  end
+
+  # A bare `<column>` outside a `<columns>` is a shape error, not a block — the
+  # `<slot>` rule verbatim: it is in `@known_block_tags` only so a column's own
+  # children parse through `block_seq`.
+  defp build_block("column", _attrs, sc, cur) do
+    {:skip,
+     [
+       err(
+         "orphan-column",
+         "<column> is valid only inside <columns>",
+         line(cur),
+         "wrap it: <columns><column>…</column></columns>"
+       )
+     ], consume_element("column", sc, cur)}
+  end
+
+  defp figure_arity_err(n, l),
+    do:
+      err(
+        "figure-arity",
+        "<figure> holds exactly one child block, found #{n}",
+        l,
+        "wrap one block: <figure caption=\"…\"><diagram>…</diagram></figure>"
+      )
 
   defp build_block("table", attrs, sc, cur) do
     with {:ok, {head, rows}, cur} <- table_rows(sc, cur) do

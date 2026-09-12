@@ -92,15 +92,23 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       inline(Map.get(b, "content", [])) <> "</callout>"
   end
 
+  # `ordered` rides the attribute row: the render side reads it
+  # (compose.ex `Map.get(b, "ordered") == true` -> PdList ordered), so dropping
+  # it turned every numbered list in a pulled paper back into bullets on push.
   defp block(%{"type" => "list"} = b, d) do
     items = Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}<li>#{inline(&1)}</li>")
-    wrap("ul", attr_str(b, ["id"]), items, d)
+    wrap("ul", attr_str(b, ["id", "ordered"]), items, d)
   end
 
+  # `lang` likewise: components.ex `code_html/2` and pdrender's code.go both
+  # read it, and the Studio's code editor renders `Map.get(@block, "lang", "")`.
+  # NOTE the sibling spelling `language` (pdrender prefers it) is NOT read here
+  # — no stored paper in the seal set uses it, and inventing a rekey is a
+  # separate, deliberate decision.
   defp block(%{"type" => "code"} = b, d),
     do:
       pad(d) <>
-        "<code#{attr_str(b, ["id"])}>" <>
+        "<code#{attr_str(b, ["id", "lang"])}>" <>
         "#{esc(plain_alias(b, ["value", "code", "content", "text"]) || "")}</code>"
 
   defp block(%{"type" => "diagram"} = b, d),
@@ -429,6 +437,49 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       end)
 
     wrap("chart", attr_str(head, ["id", "kind", "caption", "min", "max", "xlabels"]), series, d)
+  end
+
+  # ── the flagship taste tier (task-2957c0caa1ffd1b0) ────────────────────────
+  #
+  # `figure`, `asciicast` and `columns` are the three block types the two SEAL
+  # papers use that the kernel could not spell — heggemsnes-act needed none of
+  # them, eight-minute-erasure needs all three (4 figures, 4 asciicasts, 1
+  # columns block). They are worth ~5, ~5 and ~9 papers by frequency; the row
+  # justifies them by WHICH papers, not how many.
+
+  # `figure` — caption chrome around exactly ONE child block (compose.ex
+  # `figure_html/3` composes `child` through the normal path and wraps it). The
+  # child is a real block, so it recurses through `block/2`: a child the kernel
+  # cannot spell still refuses, loudly, rather than printing an empty frame.
+  # A figure with no map `child` has nothing to show and falls through to the
+  # catch-all — the honest typed refusal, not a `<figure/>` that would parse
+  # back without the key it was printed from.
+  defp block(%{"type" => "figure", "child" => child} = b, d) when is_map(child),
+    do: wrap("figure", attr_str(b, ["id", "caption"]), [block(child, d + 1)], d)
+
+  # `asciicast` — a terminal recording. A LEAF (the `action`/`hr` shape): the
+  # payload is a `.cast` file behind `src`, never inline content, so there is
+  # nothing for a body to hold. `poster` and `rows` are player options the
+  # renderer reads (compose.ex `asciicast_rows/1` takes an integer 6..40), so
+  # they ride the attribute row rather than being silently dropped; `rows`
+  # re-parses through `put_num_attr` so an integer stays an integer.
+  defp block(%{"type" => "asciicast"} = b, d),
+    do: pad(d) <> "<asciicast#{attr_str(b, ["id", "src", "caption", "poster", "rows"])}/>"
+
+  # `columns` — a side-by-side grid; the stored shape is a LIST OF LISTS of
+  # blocks (`compose_block(%{"type" => "columns"}, :article)` maps each column
+  # through `render_blocks/2`). BPML needs a positional child element for the
+  # column boundary, so `<column>` wraps each one — the `<card>`/`<slot>`
+  # precedent, minus the name. An empty column self-closes (`<column/>`) and
+  # parses back to `[]`, so the empty grid is symmetric too. A non-list
+  # `columns` value takes the catch-all refusal.
+  defp block(%{"type" => "columns", "columns" => cols} = b, d) when is_list(cols) do
+    columns =
+      Enum.map(cols, fn col ->
+        wrap("column", "", Enum.map(List.wrap(col), &block(&1, d + 2)), d + 1)
+      end)
+
+    wrap("columns", attr_str(b, ["id"]), columns, d)
   end
 
   # THE HEADING-LEVEL DECISION, recorded. A NIL/ABSENT level (20 blocks / 4

@@ -236,6 +236,268 @@ defmodule Barkpark.PortableDoc.BpmlRoundtripPropertyTest do
     end
   end
 
+  # ── the flagship taste tier (task-2957c0caa1ffd1b0) ─────────────────────────
+  #
+  # figure / asciicast / columns carry no ALIAS keys in the corpus (they are
+  # young types, written one way), so the loss table above has nothing to say
+  # about them. The property that DOES bind them is the stronger one the row
+  # states: `parse(print(b)) == b`, exactly, for every shape variant the
+  # renderer will compose — including the empty and boundary forms a hand
+  # edit can produce.
+
+  @flagship_cases [
+    {"figure wrapping a diagram (the erasure twin's own shape)",
+     %{
+       "id" => "f1",
+       "type" => "figure",
+       "caption" => "A caption with an ampersand & a <bracket>.",
+       "child" => %{"type" => "diagram", "source" => "flowchart LR\n  A --> B"}
+     }},
+    {"figure with no caption",
+     %{
+       "id" => "f2",
+       "type" => "figure",
+       "child" => %{"type" => "code", "value" => "IO.puts(:hi)"}
+     }},
+    {"figure with no id",
+     %{
+       "type" => "figure",
+       "caption" => "id-less",
+       "child" => %{"type" => "divider"}
+     }},
+    {"figure nesting a figure (the child recurses through block/2)",
+     %{
+       "id" => "f4",
+       "type" => "figure",
+       "caption" => "outer",
+       "child" => %{
+         "type" => "figure",
+         "caption" => "inner",
+         "child" => %{"type" => "diagram", "source" => "graph TD"}
+       }
+     }},
+    {"asciicast with src + caption (the erasure twin's own shape)",
+     %{
+       "id" => "a1",
+       "type" => "asciicast",
+       "src" => "/media/files/2026/08/race-97b047b6.cast",
+       "caption" => "elixir race.exs — OTP 28, 10 schedulers"
+     }},
+    {"asciicast carrying the player options the renderer reads",
+     %{
+       "id" => "a2",
+       "type" => "asciicast",
+       "src" => "/media/files/x.cast",
+       "poster" => "npt:0:12",
+       "rows" => 24
+     }},
+    {"asciicast with a quote in its caption (attribute escaping)",
+     %{
+       "id" => "a3",
+       "type" => "asciicast",
+       "src" => "/media/files/y.cast",
+       "caption" => ~s(he said "eight minutes" & left)
+     }},
+    {"columns — two columns of callouts (the erasure twin's own shape)",
+     %{
+       "id" => "c1",
+       "type" => "columns",
+       "columns" => [
+         [
+           %{
+             "type" => "callout",
+             "tone" => "success",
+             "title" => "He wrote",
+             "content" => [%{"type" => "text", "value" => "the original"}]
+           }
+         ],
+         [
+           %{
+             "type" => "callout",
+             "tone" => "danger",
+             "title" => "It was replaced with",
+             "content" => [%{"type" => "text", "value" => "the rewrite"}]
+           }
+         ]
+       ]
+     }},
+    {"columns — a column holding SEVERAL blocks",
+     %{
+       "id" => "c2",
+       "type" => "columns",
+       "columns" => [
+         [
+           %{"type" => "heading", "level" => 3, "text" => "Left"},
+           %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "body"}]}
+         ],
+         [%{"type" => "divider"}]
+       ]
+     }},
+    {"columns — an EMPTY column (self-closes, parses back to [])",
+     %{"id" => "c3", "type" => "columns", "columns" => [[], [%{"type" => "divider"}]]}},
+    {"columns — no columns at all (the empty grid)",
+     %{"id" => "c4", "type" => "columns", "columns" => []}},
+    {"columns nesting columns",
+     %{
+       "id" => "c5",
+       "type" => "columns",
+       "columns" => [
+         [%{"type" => "columns", "columns" => [[%{"type" => "divider"}]]}]
+       ]
+     }}
+  ]
+
+  describe "flagship tier: parse(print(b)) == b exactly" do
+    for {label, block} <- @flagship_cases do
+      @block block
+      test label do
+        bpml = print(@block)
+
+        assert {:ok, [parsed]} = Bpml.parse_blocks(bpml),
+               "the printed BPML did not parse:\n#{bpml}"
+
+        assert parsed == @block,
+               """
+               The flagship round trip is not a fixed point.
+
+               bpml:
+               #{bpml}
+               stored: #{inspect(@block, pretty: true)}
+               parsed: #{inspect(parsed, pretty: true)}
+               """
+
+        assert Bpml.print_blocks([parsed]) == bpml
+      end
+    end
+  end
+
+  describe "flagship tier: the shapes that REFUSE rather than drop a payload" do
+    test "a figure with no child raises instead of printing an empty frame" do
+      assert_raise UnprintableError, fn -> print(%{"id" => "x1", "type" => "figure"}) end
+    end
+
+    test "a figure whose child is not a block map raises" do
+      assert_raise UnprintableError, fn ->
+        print(%{"id" => "x2", "type" => "figure", "child" => "just a string"})
+      end
+    end
+
+    test "a figure whose child is itself unspellable raises (the child recurses)" do
+      assert_raise UnprintableError, fn ->
+        print(%{"id" => "x3", "type" => "figure", "child" => %{"type" => "no-such-block"}})
+      end
+    end
+
+    test "a columns block whose columns value is not a list raises" do
+      assert_raise UnprintableError, fn ->
+        print(%{"id" => "x4", "type" => "columns", "columns" => %{"left" => []}})
+      end
+    end
+
+    test "a columns block with no columns key at all raises" do
+      assert_raise UnprintableError, fn -> print(%{"id" => "x5", "type" => "columns"}) end
+    end
+
+    test "an unspellable block inside a column raises (the column recurses)" do
+      assert_raise UnprintableError, fn ->
+        print(%{"type" => "columns", "columns" => [[%{"type" => "no-such-block"}]]})
+      end
+    end
+  end
+
+  describe "flagship tier: hand-authored BPML the printer never emits still teaches" do
+    test "a <figure> holding two blocks is an arity error, not a silent drop" do
+      bpml = "<figure caption=\"two\">\n  <hr/>\n  <hr/>\n</figure>\n"
+      assert {:error, errors} = Bpml.parse_blocks(bpml)
+      assert Enum.any?(errors, &(&1.code == "figure-arity"))
+    end
+
+    test "an empty <figure/> is an arity error" do
+      assert {:error, errors} = Bpml.parse_blocks("<figure/>\n")
+      assert Enum.any?(errors, &(&1.code == "figure-arity"))
+    end
+
+    test "a bare <column> outside <columns> is an orphan error" do
+      assert {:error, errors} = Bpml.parse_blocks("<column>\n  <hr/>\n</column>\n")
+      assert Enum.any?(errors, &(&1.code == "orphan-column"))
+    end
+
+    test "<columns> holding anything but <column> is a wrong-child error" do
+      assert {:error, errors} = Bpml.parse_blocks("<columns>\n  <hr/>\n</columns>\n")
+      assert Enum.any?(errors, &(&1.code == "wrong-child"))
+    end
+  end
+
+  # ── attributes the kernel was DROPPING (task-2957c0caa1ffd1b0) ──────────────
+  #
+  # Found by printing eight-minute-erasure whole rather than one block type at
+  # a time: both of these are read by the render side and neither had an
+  # attribute row, so `bp paper pull` → no edit → `bp paper push` un-numbered
+  # an ordered list and stripped a code block's language.
+
+  describe "dropped-attribute regressions" do
+    test "a code block keeps its lang through the round trip" do
+      block = %{"id" => "L1", "type" => "code", "lang" => "elixir", "value" => "IO.puts(:hi)"}
+      bpml = print(block)
+
+      assert bpml =~ ~s(lang="elixir")
+      assert {:ok, [parsed]} = Bpml.parse_blocks(bpml)
+      assert parsed == block
+    end
+
+    test "an ORDERED list stays ordered through the round trip" do
+      block = %{
+        "id" => "L2",
+        "type" => "list",
+        "ordered" => true,
+        "items" => [[%{"type" => "text", "value" => "one"}]]
+      }
+
+      bpml = print(block)
+
+      assert bpml =~ ~s(ordered="true")
+      assert {:ok, [parsed]} = Bpml.parse_blocks(bpml)
+      assert parsed == block
+    end
+
+    test "an explicitly UNORDERED list keeps the false, it is not silently dropped" do
+      block = %{"id" => "L3", "type" => "list", "ordered" => false, "items" => []}
+      assert {:ok, [parsed]} = block |> print() |> Bpml.parse_blocks()
+      assert parsed == block
+    end
+
+    test "control: a list with no ordered key does not grow one" do
+      block = %{"id" => "L4", "type" => "list", "items" => []}
+      assert {:ok, [parsed]} = block |> print() |> Bpml.parse_blocks()
+      assert parsed == block
+      refute Map.has_key?(parsed, "ordered")
+    end
+
+    test "control: a code block with no lang does not grow one" do
+      block = %{"id" => "L5", "type" => "code", "value" => "x"}
+      assert {:ok, [parsed]} = block |> print() |> Bpml.parse_blocks()
+      assert parsed == block
+      refute Map.has_key?(parsed, "lang")
+    end
+  end
+
+  describe "flagship tier: the /v1/capabilities grammar carries the new tags" do
+    test "figure, asciicast, columns and the positional <column> child all publish" do
+      blocks = Bpml.vocabulary()["blocks"]
+
+      assert blocks["figure"] == ["id", "caption"]
+      assert blocks["asciicast"] == ["id", "src", "caption", "poster", "rows"]
+      assert blocks["columns"] == ["id"]
+
+      # The nested-tag list in bpml.ex is a hand-maintained Map.take; a child
+      # tag missing there drops from the published contract SILENTLY and a
+      # client generating types cannot spell a columns block at all.
+      assert Map.has_key?(blocks, "column"),
+             "the <column> child tag is absent from /v1/capabilities — add it to " <>
+               "the Map.take list in bpml.ex"
+    end
+  end
+
   describe "carve-out: an unspellable body refuses instead of printing empty" do
     test "a MARKED-UP heading content raises rather than flattening away the mark" do
       block = %{
