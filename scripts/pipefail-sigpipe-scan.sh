@@ -486,6 +486,64 @@ strip_quoted() {
   STRIPPED="$out"
 }
 
+# strip_quoted_keep_subst — strip_quoted, except that `$( … )` RESTARTS quoting,
+# which is what real shell does.  strip_quoted blanks every double-quoted run, so
+# a pipeline that lives inside a command substitution inside double quotes —
+# `x="$(producer | head -c 40)"` — arrives at the matcher as `x=""`: no pipe, no
+# reader, nothing to report.  That is the exact shape that let
+# scripts/pds-scratch-target.sh:389 ship `LC_ALL=C tr -dc 'a-f0-9' </dev/urandom
+# | head -c 40` unflagged at EVERY confidence tier until a CI runner printed
+# "tr: write error: Broken pipe" (main run 34685061716; fixed by #17920).
+# Answers in STRIPPED_SUBST.  Used ONLY when the plain strip found no pipe at
+# all, so it is strictly additive — it cannot change any site already reported.
+# The stack is a string of D (was inside a double quote) / N (was unquoted)
+# markers rather than an array index, because macOS ships bash 3.2 and
+# ${a[-1]} is a bash 4.3 feature.
+STRIPPED_SUBST=""
+strip_quoted_keep_subst() {
+  local s="$1" out="" ch nx q="" stack="" i n just_opened_dq=0
+  n=${#s}
+  for ((i = 0; i < n; i++)); do
+    ch="${s:i:1}"
+    nx="${s:i+1:1}"
+    # A `$(` inside '…' is literal — single quotes do not expand — so the
+    # restart is honoured only outside a single-quoted run.
+    if [ "$q" != "'" ] && [ "$ch" = '$' ] && [ "$nx" = '(' ]; then
+      # `x="$(…)"` must come out as `x=$(…)`, not `x=""$(…)`: the boolean-use
+      # test below keys on the `=$(` adjacency, and the placeholder pair emitted
+      # for the opening quote would break it — the site would then be reported
+      # as a bare command under set -e instead of an assignment capture.
+      [ "$just_opened_dq" -eq 1 ] && out="${out%??}"
+      case "$q" in '"') stack="D$stack" ;; *) stack="N$stack" ;; esac
+      q=""
+      out="$out\$("
+      i=$((i + 1))
+      continue
+    fi
+    if [ -z "$q" ] && [ "$ch" = ')' ] && [ -n "$stack" ]; then
+      case "${stack:0:1}" in 'D') q='"' ;; *) q="" ;; esac
+      stack="${stack:1}"
+      out="$out)"
+      continue
+    fi
+    if [ -n "$q" ]; then
+      [ "$ch" = "$q" ] && q=""
+      continue
+    fi
+    case "$ch" in
+    "'" | '"')
+      q="$ch"
+      out="$out$ch$ch"
+      [ "$ch" = '"' ] && just_opened_dq=1 || just_opened_dq=0
+      continue
+      ;;
+    esac
+    out="$out$ch"
+    just_opened_dq=0
+  done
+  STRIPPED_SUBST="$out"
+}
+
 # ── yaml_flatten — render a GitHub Actions workflow as the shell it really is ──
 #
 # WHY THIS IS NOT `find … -o -name '*.yml'` PLUS THE EXISTING LOOP.  The loop
@@ -834,6 +892,23 @@ for f in "${files[@]}"; do
     case "$line" in *'|'*) ;; *) continue ;; esac
     strip_quoted "$line"
     bare="$STRIPPED"
+
+    # ── the substitution-aware re-strip (task-ab1d5320e09c9e72) ───────────
+    # Only when the plain strip left no pipe at all: then the only place a
+    # pipeline can be hiding is inside a `$( … )` within a double-quoted run,
+    # where real shell restarts quoting and this script did not.  Narrowed to
+    # a `head` reader on purpose — that is the class this row was filed for,
+    # and keeping the swap narrow keeps the change strictly additive instead
+    # of re-classifying every already-reported site.
+    case "$bare" in
+    *'|'*) ;;
+    *)
+      strip_quoted_keep_subst "$line"
+      case "$STRIPPED_SUBST" in
+      *'|'*head*) bare="$STRIPPED_SUBST" ;;
+      esac
+      ;;
+    esac
     # `||` and `&&` are NOT pipes.  Fold them out of the way BEFORE anything
     # splits on `|`, or `${bare##*|}` lands inside the `||` of
     # `printf … | grep -q … || fail` and the boolean use goes unseen — which is
@@ -867,8 +942,12 @@ for f in "${files[@]}"; do
 
     # `… || true` / `… || :` swallows the 141.  The status is consumed, but the
     # consequence is nil — reporting it is a pure false positive.
+    # The trailing-`)` alternatives are for `x="$(producer | head -1 || true)"`:
+    # inside a command substitution the swallow is the LAST thing before the
+    # closing paren, so a pattern anchored on the word alone does not match and
+    # a genuinely harmless site would be reported.
     case "$bare" in
-    *$'\002'*true | *$'\002'*true\ * | *$'\002'*: | *$'\002'*:\ *) continue ;;
+    *$'\002'*true | *$'\002'*true\ * | *$'\002'*: | *$'\002'*:\ * | *$'\002'*true\) | *$'\002'*:\)) continue ;;
     esac
 
     # `grep` with neither -q nor -m reads to EOF: NOT the hazard.  Re-check that
@@ -963,6 +1042,38 @@ for f in "${files[@]}"; do
       ;;
     *) conf="medium" why="producer not classified" ;;
     esac
+
+    # ── a TRUNCATING READER forces HIGH (task-ab1d5320e09c9e72) ───────────
+    # `head` does not read to EOF under any flag: bare `head` stops at 10 lines,
+    # `head -N`/`head -n N` at N lines, `head -c N` at N bytes — and then CLOSES
+    # the pipe.  So the question is never "is the producer file-sized"; it is
+    # "can the producer be shown to STOP at or before what head takes".  If it
+    # cannot, the producer is killed the instant it writes past N, and pipefail
+    # hands back 141 — no 64KB buffer required, no tree growth required.
+    #
+    # WHAT THE OLD CLASSIFIER DID.  `LC_ALL=C tr -dc 'a-f0-9' </dev/urandom` is
+    # an INFINITE producer and matched none of the high-confidence names, so it
+    # fell to `producer not classified` → medium, and `--min-confidence high` —
+    # the only tier CI enforces — dropped it.  An unbounded stdin (`</dev/urandom`,
+    # `</dev/zero`, `yes`, `cat /dev/…`) is the worst case in the class and was
+    # the one case the tier could not see.
+    #
+    # THE EXCEPTION IS BOUNDEDNESS, NOT THE WORD `head`: a producer that is
+    # byte/line-capped by its own flags (`od -N<n>`, `dd count=`, a `head` of its
+    # own) cannot outrun the reader, and printf/echo of a LITERAL is already
+    # classified low by the block above and stays there.  The selftest pins both
+    # directions (trunc-unbounded-producer / trunc-bounded-producer).
+    if [ "$reader" = "head" ] && [ "$conf" != "low" ]; then
+      case "$ptrim" in
+      *od\ *-N[0-9]* | *od\ *-N\ [0-9]* | *dd\ *count=* | *head\ -c* | *head\ -n* | *head\ -[0-9]*)
+        why="$why; truncating reader, but the producer is byte/line-BOUNDED"
+        ;;
+      *)
+        conf="high"
+        why="truncating reader (head closes the pipe at N) on a producer not provably bounded — 141 needs no buffer overrun"
+        ;;
+      esac
+    fi
 
     [ "$(rank "$conf")" -ge "$min_rank" ] || continue
 
