@@ -18,7 +18,7 @@ defmodule Barkpark.Content.CodelistsRegisterStatementTimeoutTest do
   and `register/3` returns `{:error, %Postgrex.Error{postgres: %{code:
   :query_canceled}}}` (mutation-proven 2026-09-02 by deleting that one line).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content.Codelists
   alias Barkpark.Content.Codelists.Codelist

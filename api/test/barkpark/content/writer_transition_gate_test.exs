@@ -16,7 +16,7 @@ defmodule Barkpark.Content.WriterTransitionGateTest do
   drafts-exact prev_doc (or skipping the gate call) turns the forgery-door
   test red-in-the-other-direction (the twin is born, the dependent unblocks).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Tasks, TenancyFixtures}
 
