@@ -659,6 +659,23 @@ defmodule BarkparkWeb.TasksController do
         offset: ^offset
       )
       |> Tasks.Query.collapse_twins()
+      # DATASET axis of the SAME rule (task-49eef068420df918,
+      # `Barkpark.Tasks.TwinResolver` rule 3 at a listing). `collapse_twins/1`
+      # above requires `twin.dataset = d.dataset` BY DESIGN, so a doc_id living
+      # in two datasets of one workspace+project contributed TWO rows to this
+      # page — ids `GET /v1/tasks/:doc_id` itself refuses with a 409
+      # `ambiguous_dataset`. Same pagination consequence `collapse_twins/1`
+      # documents — `limit`/`offset` live in this BASE, so suppressed rows shift
+      # which rows land on which page.
+      #
+      # UNCONDITIONAL here, unlike `child_tasks/2`, and that is not an
+      # oversight: this route does not read `?dataset=` as a scope selector at
+      # all (task-8483029782444df4, open — `dataset` is not in its filter
+      # whitelist). Gating on a param the route then IGNORES would be strictly
+      # worse than not gating: naming a dataset would lift the refusal without
+      # narrowing the page, handing the caller back BOTH rows. The gate goes in
+      # beside the filter when that row lands.
+      |> Tasks.Query.collapse_cross_dataset_twins()
 
     query =
       base
@@ -820,12 +837,28 @@ defmodule BarkparkWeb.TasksController do
           Params.strip_draft_prefix(doc.doc_id) => length(sealed_children)
         }
 
-        json(conn, %{
+        body = %{
           ok: true,
           doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts, child_counts),
           children: Enum.map(sealed_children, &Params.child_summary/1),
           child_count: length(sealed_children)
-        })
+        }
+
+        # THE NAMING HALF of rule 3 at this listing. A by-id door answers an
+        # ambiguous id with a 409 naming every dataset; a rail cannot refuse the
+        # whole response over one child, so the refusal is scoped to the ROW —
+        # the child contributes nothing to `children`/`child_count` and is named
+        # exactly ONCE here with the datasets `?dataset=` may choose between.
+        # ADDITIVE and OMITTED WHEN EMPTY, so every ordinary task's `bp task get`
+        # envelope is byte-identical: the key appears only for the pathological
+        # corpus it describes.
+        body =
+          case child_dataset_ambiguous(doc.doc_id, conn) do
+            [] -> body
+            ambiguous -> Map.put(body, :dataset_ambiguous, ambiguous)
+          end
+
+        json(conn, body)
 
       {:error, :not_found} ->
         not_found(conn, "task not found")
@@ -839,7 +872,48 @@ defmodule BarkparkWeb.TasksController do
   # `drafts.` stripped) + the SAME workspace/project filters,
   # over `type == "task"`. No duplicated matching logic — the filter helpers
   # are shared with `index/2`.
+  # THE ONE RULE AT THE CHILD RAIL (task-49eef068420df918). `collapse_twins/1`
+  # below is the DRAFT axis; `child_base_query/2` + `collapse_cross_dataset_twins/1`
+  # is the DATASET axis of the SAME rule (`Barkpark.Tasks.TwinResolver` rule 3 —
+  # read that moduledoc; this function writes no second rule). Measured live on
+  # guerrilla 2026-09-06: an epic whose nine children exist in BOTH `production`
+  # and `aker-brygge` reported `child_count: 18` and listed every child TWICE —
+  # ids this controller's OWN by-id door (`fetch_task_exact/4` → `TwinResolver`)
+  # refuses with a 409 `ambiguous_dataset`. A listing that serves ids its own
+  # by-id reader will not resolve is the ready/claim disagreement one door over,
+  # and it is what made the epic look twice its size.
+  #
+  # Gated on `?dataset=`: naming a dataset IS the disambiguation, so a
+  # dataset-scoped read sees its own dataset's children unchanged. The withheld
+  # ids are NOT hidden — `show/2` names each once in `dataset_ambiguous` via
+  # `child_dataset_ambiguous/2`, the same shape `/v1/tasks/ready` renders in
+  # `page.dataset_ambiguous`.
   defp child_tasks(doc_id, conn) do
+    base = child_base_query(doc_id, conn)
+
+    case conn.params["dataset"] do
+      d when is_binary(d) and d != "" -> Repo.all(base)
+      _ -> base |> Tasks.Query.collapse_cross_dataset_twins() |> Repo.all()
+    end
+  end
+
+  # The doc_ids `child_tasks/2` WITHHELD as cross-dataset ambiguous, each with
+  # the dataset set it spans. Built off the SAME base, so the rail and its
+  # explanation cannot describe different populations. `[]` whenever the caller
+  # named a dataset (nothing is ambiguous then).
+  defp child_dataset_ambiguous(doc_id, conn) do
+    case conn.params["dataset"] do
+      d when is_binary(d) and d != "" ->
+        []
+
+      _ ->
+        doc_id
+        |> child_base_query(conn)
+        |> Tasks.Query.cross_dataset_ambiguous_ids()
+    end
+  end
+
+  defp child_base_query(doc_id, conn) do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
@@ -859,7 +933,6 @@ defmodule BarkparkWeb.TasksController do
     |> Params.maybe_filter_workspace(workspace_id)
     |> Params.maybe_filter_project(project_id)
     |> Params.maybe_filter_parent_id(doc_id)
-    |> Repo.all()
   end
 
   # ─── POST /v1/tasks/:doc_id/claim ───────────────────────────────────────

@@ -153,6 +153,162 @@ defmodule Barkpark.Tasks.Query do
     )
   end
 
+  # The resolver's TIER for a row: published spelling AND `status: published`
+  # = 2, published spelling = 1, `drafts.` twin = 0. The SAME expression
+  # `Barkpark.Tasks.Queue`'s `@twin_tier_sql` carries, INLINED in the
+  # correlated subqueries below (a module attribute cannot be interpolated into
+  # the middle of a heredoc `fragment/1` literal) and pinned to queue.ex's copy
+  # by `query_cross_dataset_equivalence_test.exs`.
+
+  @doc """
+  CROSS-DATASET twin collapse — `Barkpark.Tasks.TwinResolver` rule 3 at a
+  LISTING, for the child-rail readers.
+
+  Not a second rule: `collapse_twins/1` above is the DRAFT axis (it requires
+  `twin.dataset = d.dataset` by design, because a dataset is a real tenant
+  boundary and a same-id row in another dataset is not a shadow of this one).
+  This is the DATASET axis of the same rule, and it is the predicate
+  `Barkpark.Tasks.Queue.maybe_collapse_cross_dataset_twins/2` applies to the
+  ready page — written here in the fragment form because these bases do not
+  bind `as: :doc`, and pinned to that one by
+  `test/barkpark/tasks/query_cross_dataset_equivalence_test.exs`.
+
+  A row is suppressed when a task of the same `drafts.`-stripped doc_id, same
+  workspace+project, in a DIFFERENT dataset, TIES OR BEATS its tier. Both
+  consequences are the rule:
+
+    * a UNIQUE winning tier leaves exactly ONE row (rules 1+2 — no comparison
+      of dataset STRINGS decides which);
+    * a TIE at the winning tier suppresses BOTH (rule 3 — the reader does not
+      pick a dataset the caller did not name). Use
+      `cross_dataset_ambiguous_ids/1` to NAME what was withheld; a listing that
+      silently drops a row is the same dishonesty as one that silently picks.
+
+  Caller-gated: apply it only when the caller named NO dataset. `?dataset=` IS
+  the disambiguation, so a dataset-scoped read has nothing left to be
+  ambiguous about and must read byte-identically.
+
+  WHY THIS EXISTS (task-49eef068420df918, measured live on guerrilla
+  2026-09-06). `documents` is unique on `(doc_id, type, dataset_id)`, so one
+  task doc_id may live in two datasets of one workspace+project — eleven such
+  pairs, ten of them children of ONE epic. `child_tasks/2` and
+  `batch_child_counts/2` collapsed the DRAFT axis and not this one, so
+  `bp task get <epic>` reported `child_count: 18` for nine children and listed
+  each child TWICE — ids its own by-id door (`fetch_task_exact/4` →
+  `TwinResolver`) refuses with a 409. A listing that serves ids its own by-id
+  reader will not resolve is the ready/claim disagreement one door over.
+  """
+  def collapse_cross_dataset_twins(query) do
+    from(d in query,
+      where:
+        fragment(
+          """
+          NOT EXISTS (
+            SELECT 1 FROM documents AS xtwin
+            WHERE xtwin.type = 'task'
+              AND regexp_replace(xtwin.doc_id, '^drafts\\.', '')
+                  = regexp_replace(?, '^drafts\\.', '')
+              AND xtwin.dataset IS DISTINCT FROM ?
+              AND xtwin.workspace_id IS NOT DISTINCT FROM ?
+              AND xtwin.project_id IS NOT DISTINCT FROM ?
+              AND (CASE WHEN xtwin.doc_id NOT LIKE 'drafts.%' AND xtwin.status = 'published' THEN 2
+                        WHEN xtwin.doc_id NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+                  >= (CASE WHEN ? NOT LIKE 'drafts.%' AND ? = 'published' THEN 2
+                           WHEN ? NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+          )
+          """,
+          d.doc_id,
+          d.dataset,
+          d.workspace_id,
+          d.project_id,
+          d.doc_id,
+          d.status,
+          d.doc_id
+        )
+    )
+  end
+
+  @doc """
+  The doc_ids `collapse_cross_dataset_twins/1` WITHHELD from `query`, each with
+  the dataset set it spans — the naming half of rule 3 at a listing, the same
+  shape `GET /v1/tasks/ready` renders in `page.dataset_ambiguous`.
+
+  A by-id door answers rule 3 with a 409 naming every dataset. A listing cannot
+  refuse the whole page over one ambiguous id, so the refusal is scoped to the
+  ROW it is about: the id contributes no row, and appears exactly ONCE here
+  naming the datasets the caller may choose between with `?dataset=`.
+
+  `query` is the SAME base the collapse is applied to (minus the collapse), so
+  the two cannot describe different populations. Returns a doc_id-sorted list
+  of `%{doc_id: String.t(), datasets: [String.t()]}`; `[]` when nothing is
+  ambiguous.
+  """
+  def cross_dataset_ambiguous_ids(query) do
+    from(d in query,
+      where:
+        fragment(
+          """
+          EXISTS (
+            SELECT 1 FROM documents AS xtwin
+            WHERE xtwin.type = 'task'
+              AND regexp_replace(xtwin.doc_id, '^drafts\\.', '')
+                  = regexp_replace(?, '^drafts\\.', '')
+              AND xtwin.dataset IS DISTINCT FROM ?
+              AND xtwin.workspace_id IS NOT DISTINCT FROM ?
+              AND xtwin.project_id IS NOT DISTINCT FROM ?
+              AND (CASE WHEN xtwin.doc_id NOT LIKE 'drafts.%' AND xtwin.status = 'published' THEN 2
+                        WHEN xtwin.doc_id NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+                  = (CASE WHEN ? NOT LIKE 'drafts.%' AND ? = 'published' THEN 2
+                          WHEN ? NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+          )
+          """,
+          d.doc_id,
+          d.dataset,
+          d.workspace_id,
+          d.project_id,
+          d.doc_id,
+          d.status,
+          d.doc_id
+        ),
+      where:
+        fragment(
+          """
+          NOT EXISTS (
+            SELECT 1 FROM documents AS xtwin
+            WHERE xtwin.type = 'task'
+              AND regexp_replace(xtwin.doc_id, '^drafts\\.', '')
+                  = regexp_replace(?, '^drafts\\.', '')
+              AND xtwin.dataset IS DISTINCT FROM ?
+              AND xtwin.workspace_id IS NOT DISTINCT FROM ?
+              AND xtwin.project_id IS NOT DISTINCT FROM ?
+              AND (CASE WHEN xtwin.doc_id NOT LIKE 'drafts.%' AND xtwin.status = 'published' THEN 2
+                        WHEN xtwin.doc_id NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+                  > (CASE WHEN ? NOT LIKE 'drafts.%' AND ? = 'published' THEN 2
+                          WHEN ? NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+          )
+          """,
+          d.doc_id,
+          d.dataset,
+          d.workspace_id,
+          d.project_id,
+          d.doc_id,
+          d.status,
+          d.doc_id
+        ),
+      select: %{
+        doc_id: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+        dataset: d.dataset
+      }
+    )
+    |> Repo.all()
+    |> Enum.group_by(& &1.doc_id, & &1.dataset)
+    |> Enum.map(fn {doc_id, datasets} ->
+      %{doc_id: doc_id, datasets: datasets |> Enum.uniq() |> Enum.sort()}
+    end)
+    |> Enum.filter(&(length(&1.datasets) > 1))
+    |> Enum.sort_by(& &1.doc_id)
+  end
+
   # ── the id-prefix lookup (cchi-bl-task-get-needs-a-server-side-prefix-lookup) ──
 
   @id_prefix_limit 25
