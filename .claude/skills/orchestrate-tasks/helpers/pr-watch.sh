@@ -3,7 +3,8 @@
 #
 # SIBLING CHECK: held-liveness.sh (in this directory) answers the other half of a lead's loop —
 # this file asks "are my PRs moving", held-liveness.sh asks "are my claims still MINE" by reading
-# the ledger's claim.worker + lease-until for every row in the lane's held.txt and comparing the
+# the ledger's claim.worker + lease-until for every row in THIS SESSION's held.<session>.txt
+# (`--session`; `held.txt` is the legacy lane-wide name — task-50d7d1a599dd14dd) and comparing the
 # pulse log's age and pid against the cadence. A watcher that keeps polling PRs whose rows have
 # lapsed back to ready is watching someone else's work. Run both at the top of every loop.
 #
