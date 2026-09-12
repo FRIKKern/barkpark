@@ -1,4 +1,5 @@
 defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
+  # sync: spawns concurrent `Task.async` Repo callers; data_case.ex keys `shared:` on the async tag
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content

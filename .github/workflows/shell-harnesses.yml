@@ -217,6 +217,12 @@ on:
       # consumer of the BP API sources. Its harness runs a fake loopback server.
       - "scripts/lib/bp-curl.sh"
       - "scripts/lib/bp-curl.test.sh"
+      # MIGRATION VERSION COLLISION (task-ac34d17c2aba4458). Detector A needs no
+      # database, so it rides here; the Cloud gate runs the same script with
+      # --require-db before `mix test`. cloud.yml is already a path entry above
+      # (seal-run), and it is an INPUT here too: the harness's contract is that
+      # the gate step exists, so an edit there must be able to red this lane.
+      - "scripts/migration-version-collision-check.sh"
       # MAIN WORKFLOW ROLL-UP (task-b4aa15924d214156). The roll-up whose roster
       # is the TREE, not a watched set: every .github/workflows/ file, its
       # newest completed conclusion on main, and REQUIRED vs ADVISORY derived
@@ -639,6 +645,12 @@ on:
       # consumer of the BP API sources. Its harness runs a fake loopback server.
       - "scripts/lib/bp-curl.sh"
       - "scripts/lib/bp-curl.test.sh"
+      # MIGRATION VERSION COLLISION (task-ac34d17c2aba4458). Detector A needs no
+      # database, so it rides here; the Cloud gate runs the same script with
+      # --require-db before `mix test`. cloud.yml is already a path entry above
+      # (seal-run), and it is an INPUT here too: the harness's contract is that
+      # the gate step exists, so an edit there must be able to red this lane.
+      - "scripts/migration-version-collision-check.sh"
       # MAIN WORKFLOW ROLL-UP (task-b4aa15924d214156). The roll-up whose roster
       # is the TREE, not a watched set: every .github/workflows/ file, its
       # newest completed conclusion on main, and REQUIRED vs ADVISORY derived
@@ -1021,6 +1033,7 @@ jobs:
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
       which-gates: ${{ steps.sets.outputs.which-gates }}
       bp-curl: ${{ steps.sets.outputs.bp-curl }}
+      migration-version-collision: ${{ steps.sets.outputs.migration-version-collision }}
       sunset-route-consumers: ${{ steps.sets.outputs.sunset-route-consumers }}
       main-workflow-rollup: ${{ steps.sets.outputs.main-workflow-rollup }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
@@ -1251,6 +1264,8 @@ jobs:
           which-gates .github/workflows/go-tests.yml
           bp-curl scripts/lib/bp-curl.sh
           bp-curl scripts/lib/bp-curl.test.sh
+          migration-version-collision scripts/migration-version-collision-check.sh
+          migration-version-collision .github/workflows/cloud.yml
           main-workflow-rollup scripts/main-workflow-rollup.sh
           main-workflow-rollup scripts/main-workflow-rollup.test.sh
           main-workflow-rollup .github/required-checks.json
@@ -3238,3 +3253,64 @@ jobs:
       - name: "both directions on fixtures + the three named mutations (staleness, roster, spec label)"
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/main-workflow-rollup.test.sh
+
+  migration-version-collision:
+    needs: [changes]
+    if: needs.changes.outputs.migration-version-collision == 'true'
+    # A MIGRATION VERSION MUST IDENTIFY ONE FILE (task-ac34d17c2aba4458).
+    # Measured 2026-09-10: a cloud migration minted as 20260910160000 met a
+    # concurrent lane's 20260910160000 already recorded in the SHARED
+    # barkpark_cloud_test schema_migrations. Ecto keys that table on the version
+    # integer alone, so `mix ecto.migrate` printed `Migrations already up`,
+    # applied nothing, exited 0, and the suite was one command away from
+    # measuring a schema the PR never created. Found only by hand-querying
+    # information_schema.
+    #
+    # Hermetic here: mktemp fixture trees, `git init` repos, and a
+    # --db-versions-file standing in for schema_migrations, so detectors B and C
+    # are proven without a database and this lane cannot rot into a skip. The
+    # harness ALSO runs a real `createdb` fixture database when one answers (the
+    # P-arm) and prints its own NOT RUN line when none does — on a runner with no
+    # postgres the P-arm is disclosed, never silently counted as a pass.
+    #
+    # The blocking half lives in cloud.yml's `test` job (a required context),
+    # which runs the same script with --require-db BEFORE `mix test`. That is why
+    # cloud.yml is a path entry for this job: an edit that drops the step must be
+    # able to red here.
+    name: migration version collision matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: migration-version-collision-check.sh syntax check
+        run: bash -n scripts/migration-version-collision-check.sh
+      - name: migration-version-collision-check.test.sh syntax check
+        if: ${{ !cancelled() }}
+        run: bash -n scripts/migration-version-collision-check.test.sh
+      - name: "collision mutation matrix (plant two files on one version, red naming both; remove, green)"
+        if: ${{ !cancelled() }}
+        run: bash scripts/migration-version-collision-check.test.sh
+      - name: the Cloud gate still runs this check BEFORE mix test
+        if: ${{ !cancelled() }}
+        # The wiring assertion. A harness that proves the script and says nothing
+        # about its caller is how a gate gets deleted and stays green. Both
+        # clauses are asserted: the step exists, and it is ORDERED before the
+        # `mix test` step in the same job.
+        run: |
+          set -euo pipefail
+          f=.github/workflows/cloud.yml
+          call=$(grep -n 'migration-version-collision-check.sh' "$f" | cut -d: -f1 | sed -n '1p')
+          if [ -z "$call" ]; then
+            echo "::error::$f no longer invokes scripts/migration-version-collision-check.sh"
+            exit 1
+          fi
+          test_line=$(grep -n '^        run: mix test$' "$f" | cut -d: -f1 | sed -n '1p')
+          if [ -z "$test_line" ]; then
+            echo "::error::$f has no 'run: mix test' step; this assertion cannot bind and refuses rather than passing"
+            exit 1
+          fi
+          if [ "$call" -ge "$test_line" ]; then
+            echo "::error::the collision check (line $call) runs at or AFTER mix test (line $test_line); a silent no-op would reach a green suite"
+            exit 1
+          fi
+          echo "cloud.yml: collision check at line $call, mix test at line $test_line — ordered correctly"

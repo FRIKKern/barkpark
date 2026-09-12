@@ -9590,9 +9590,11 @@ test("liveness chip: app.css carries a paint rule for EVERY chip state", () => {
 
 test("liveness chip: every state's .live-dot rule DECLARES a background (per-declaration fence)", () => {
   // D41/D66 — closes the KNOWN GRANULARITY LIMIT the sibling fence above declared.
-  // That fence proves SELECTOR-PREFIX presence: deleting ONLY app.css:3470
-  // (`.live-chip[data-state="stale"] .live-dot { background: … }`) leaves the
-  // same-prefix `.live-chip-label` rule on :3471, so the prefix survives and every
+  // That fence proves SELECTOR-PREFIX presence: deleting ONLY
+  // `.live-chip[data-state="stale"] .live-dot { background: … }` (re-derive with
+  // grep -n '^\.live-chip\[data-state="stale"\] \.live-dot' app.css) leaves the
+  // same-prefix `.live-chip[data-state="stale"] .live-chip-label` rule on the NEXT
+  // line, so the prefix survives and every
   // gate stays green while the state silently loses its dot colour — the one
   // property that carries the severity signal. This probe reads PER DECLARATION:
   // it isolates each state's own `.live-dot {…}` block and asserts the background
@@ -21510,7 +21512,7 @@ test("cch-w20-s3: BOTH text sites shave the scheme together — the card and the
   const row = hooks.fleetRow(bp);
   assert.match(row, /class="fleet-url">production-5b2c1e\.barkpark\.cloud</);
   assert.ok(row.indexOf('class="fleet-url">https://') === -1,
-    "the fleet row must not keep the scheme while the card drops it — that split is the sin scenarios.mjs:2331 exists to prevent");
+    "the fleet row must not keep the scheme while the card drops it — that split is the sin the fleet-row URL fixture in scenarios.mjs exists to prevent (re-derive: grep -n fleet-url scenarios.mjs)");
   // …while the PAYLOAD keeps the whole address: a person copying it needs the
   // scheme. This is the same guarantee test 658 (GR24) pins on the header.
   const header = hooks.instanceHeaderHtml(bp);
@@ -23061,8 +23063,9 @@ test("cch-w36-s3: the smoke `tokens-member` assertion body can no longer pass ag
 // rc 0. A unification slice could therefore silently DELETE the admin limb and
 // show a perfect board. That green is not general vacuity: the INVERSE
 // mutation (admin-only, dropping the owner limb) reds three of the four by
-// name in smoke. The mechanism is censused — scenarios.mjs:952 defines
-// me(team, onb, role) with `role || "owner"`, and across ~100 me() call sites
+// name in smoke. The mechanism is censused — scenarios.mjs defines
+// me(team, onb, role) with `role || "owner"` (grep -n 'function me(' scenarios.mjs),
+// and across ~100 me() call sites
 // the third argument is "member" 7x, "owner" 3x and "admin" ZERO times, so no
 // fixture in the whole preview corpus has ever been an admin.
 //
