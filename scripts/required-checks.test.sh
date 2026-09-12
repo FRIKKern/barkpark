@@ -2623,7 +2623,18 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Astro finder byte-identity"
         --expect-unrendered "Finder unit specs (dep-free, no browser)"
         --expect-unrendered "Journey smoke — self-test (fixtures, no network)"
-        --expect-unrendered "Journey smoke — live demo (report mode, never gates)")
+        --expect-unrendered "Journey smoke — live demo (report mode, never gates)"
+        # ── 2026-09-12 (task-32fe5f327e91f23d), SECOND pass: four more paths-filtered
+        # leaf names the first census pass (25 heads, up to #17963) never sampled —
+        # each renders on 1-2 of the 40 most recent merged PR heads (#17966, #17977,
+        # #17928, #17944). Same mechanism as the block above: paths-filtered or
+        # postdating the frozen fixture pair, so the generator cannot reproduce the
+        # .exclusions row and refuses EXCLUSION LOSS without the ack. DERIVED, not
+        # remembered: scripts/required-checks-ack-derive.sh named exactly these four.
+        --expect-unrendered "make wasm + node smoke"
+        --expect-unrendered "migration version collision matrix"
+        --expect-unrendered "Stale verdict watch read fault"
+        --expect-unrendered "Typecheck + lint + jest")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
