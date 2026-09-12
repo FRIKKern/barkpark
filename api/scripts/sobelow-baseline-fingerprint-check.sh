@@ -63,6 +63,51 @@
 # entering the baseline must be classified by a human, exactly as the staleness
 # ratchet refuses an unknown type rather than waving it through.
 #
+# NO INLINE-ANNOTATION ESCAPE EXISTS FOR Config.* — THE RE-ANCHOR IS THE TAX.
+# When this check reds with DEAD WAIVER on a Config.CSRF row, the repair is to
+# re-anchor the row, and that is the WHOLE menu. Do not go looking for the
+# `@sobelow_skip` trick the Traversal.* / DOS.* / XSS.* / RCE.* families use:
+# those families can be waived with an annotation that rides the source line and
+# therefore MOVES WITH THE CODE, which is exactly why their baseline rows never
+# slide. The Config.* family cannot use it, for three independent reasons in
+# sobelow 0.14.1's own driver — read them before spending an hour on an escape
+# that does not exist (two lanes went hunting on 2026-08-31 alone):
+#
+#   1. ORDERING. lib/sobelow.ex:94 is
+#        `if Enum.member?(allowed, Config), do: Config.fetch(project_root, ...)`
+#      and it runs while Config is still in `allowed`. The annotation reader —
+#      `combine_skips/1`, the function that turns an `@sobelow_skip` attribute
+#      into a per-function skip list (lib/sobelow.ex:425-430) — is not reached
+#      until the per-file pass at lib/sobelow.ex:99-102. Config.fetch/3 has
+#      already emitted every Config finding by then.
+#   2. FILTERING. lib/sobelow.ex:97 is `allowed = allowed -- [Config, Vuln]`, so
+#      the annotation-filtered path (`Enum.each(mods -- skip_mods, ...)` at
+#      lib/sobelow.ex:408) runs over a module list that no longer contains
+#      Config. Even a perfectly placed annotation would have nothing to subtract.
+#   3. NO HOST TO RIDE. `combine_skips/1` walks `meta_file.def_funs`. A
+#      Config.CSRF finding points at a `pipeline` declaration in the router's
+#      module body — lib/sobelow/config/csrf.ex:39-48 sets vuln_source to the
+#      pipeline-name ATOM and vuln_line_no to that declaration's own line — and a
+#      `pipeline` is not a `def`. There is no function for an annotation to sit
+#      above.
+#
+# So for Config.* the LINE-PINNED BASELINE ROW IS THE ONLY WAIVER MECHANISM, and
+# its fingerprint embeds the line (see above). Any insertion ABOVE a `pipeline`
+# in api/lib/barkpark_web/router.ex orphans that row, no matter what the diff was
+# about; the six live Config.CSRF rows are all in that file. Re-anchoring is the
+# PERMANENT COST of holding a reviewed Config.* waiver, not a workaround somebody
+# failed to find. Pay it: correct the line, paste the hash this checker prints,
+# confirm the checker names the SAME pipeline it named before (that is how you
+# know you re-anchored rather than absorbed something new), and never regenerate.
+#
+# WHY THIS PARAGRAPH IS HERE AND NOT IN api/.sobelow-skips: that file has NO
+# comment syntax. Sobelow's reader splits every line on "," and treats a
+# single-field line as an OLD-FORMAT bare fingerprint (lib/sobelow.ex:531-546),
+# so a `# ...` line would be loaded into the ignore set as though it were a hash;
+# and this checker refuses it outright as "a row sobelow's own parser would
+# silently DROP". Measured both directions on the live baseline: unmodified it
+# exits 1, with one `#` line prepended it exits 2.
+#
 # WHY IT NEEDS THE BEAM, AND WHY THAT DOES NOT MAKE IT ADVISORY. phash2 is an
 # ERTS primitive over term structure; there is no faithful shell reimplementation
 # and a lookalike would be a lie. But "needs the BEAM" and "must be advisory"
