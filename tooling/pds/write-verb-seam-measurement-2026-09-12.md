@@ -73,3 +73,28 @@ The narrowing question the row raises — whether `stub_mapping_only`'s falsifie
 a `write-verb-injected` arm that no Repo read can clear — is left OPEN and is recorded as a
 REQUEST in the PR body. The guard makes the day that question becomes urgent impossible to
 miss; it does not answer it.
+
+## Addendum — the guard's own door-census collision (own defect, caught in CI)
+
+The first push bound the census path as `@census_rel "../../../scripts/pds-elixir-receipt-census.exs"`.
+`scripts/pds-door-census.sh`'s leg-A classifier reads **every** quoted `("../")+…pds-…` literal under
+`api/lib` + `api/test` (prefilter at `classify_refs`, grep
+`'"(\.\./)+[^"]*pds-[^"]*"'`) and demands that an attribute-bound one be dereferenced into
+`System.cmd`/`Port.open`. Anything else is `BOUND-UNEXEC` — *"attribute-bound but executed by nothing
+— a door pointed at nothing"*.
+
+This case READS the census as a source file and must never EXECUTE it, so it can never satisfy that
+demand. The binding therefore reclassified `scripts/pds-elixir-receipt-census.exs` from **THROUGH**
+to **ERROR**, which in turn ORPHANED its row in `PDS_DOOR_PRICES` (read at exactly one site, inside
+the THROUGH branch) — **2 error rows from one module attribute**, both own, neither inherited
+(main + charter tree reads `ERROR rows : 0 of 44`).
+
+The repair is the ROOT-ANCHOR idiom that `scripts/elixir-path-escape-check.sh` already documents for
+its `-root` door: `@repo_root Path.expand("../../..", __DIR__)` bound once, then `Path.join` at each
+read site. No `"../"` literal contains `pds-` any more, so the door census has nothing to classify,
+while the escape check still resolves the repo-root read. Both instruments green:
+`ERROR rows : 0 of 44` and `OK: every repo-root read from api/lib + api/test is dispatched on.`
+
+**The transferable rule:** under `api/lib` + `api/test`, a `"../…pds-…"` string literal is a CLAIM
+that the file is a door. A test that reads a pds instrument as DATA must not make that claim — anchor
+the root and join the name.

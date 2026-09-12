@@ -53,12 +53,24 @@ defmodule Barkpark.PdsWriteVerbSeamTest do
 
   @moduletag :tmp_dir
 
-  # The "../../../scripts/…" and "../../../api/…" STRING LITERALS are
-  # load-bearing, not cosmetic: scripts/elixir-path-escape-check.sh resolves
-  # exactly these literals to build the path sets elixir.yml dispatches on.
-  @census_rel "../../../scripts/pds-elixir-receipt-census.exs"
-  @lib_rel "../../../api/lib"
-  @test_rel "../../../api/test"
+  # THE ROOT-ANCHOR IDIOM, AND WHY IT IS NOT A `"../../../scripts/pds-…"`
+  # LITERAL. scripts/pds-door-census.sh's leg-A classifier reads every quoted
+  # `("../")+…pds-…` literal under api/lib + api/test and demands that an
+  # ATTRIBUTE-BOUND one be dereferenced into `System.cmd`/`Port.open`; anything
+  # else is `BOUND-UNEXEC`, an ERROR ("a door pointed at nothing"). This case
+  # READS the census as a source file and must never EXECUTE it, so it cannot
+  # satisfy that demand and must not make the claim: binding the full relative
+  # literal reclassified scripts/pds-elixir-receipt-census.exs from THROUGH to
+  # ERROR and orphaned its price row — 2 error rows from one attribute.
+  #
+  # The root anchor is the shape scripts/elixir-path-escape-check.sh documents
+  # for exactly this (its `-root` door: an anchor bound once, then `Path.join`
+  # at each read site), and it carries no `pds-` inside a `"../"` literal for
+  # the door census to classify.
+  @repo_root Path.expand("../../..", __DIR__)
+  @census_rel "scripts/pds-elixir-receipt-census.exs"
+  @lib_rel "api/lib"
+  @test_rel "api/test"
 
   # Repo functions that WRITE. A seam whose default is one of these replaces the
   # persistence write verb itself, which is the shape `stub_mapping_only`'s
@@ -83,12 +95,12 @@ defmodule Barkpark.PdsWriteVerbSeamTest do
 
   # The three roots, resolved ONCE against this file's own directory. They are
   # resolved here and not in each test because the first draft of this case
-  # joined an already-expanded root to the "../../../" literal a second time and
+  # joined an already-expanded root to a "../../../" literal a second time and
   # every scan silently returned []. The positive controls caught it; that is
   # what they are for.
-  defp census_path, do: Path.expand(@census_rel, __DIR__)
-  defp lib_root, do: Path.expand(@lib_rel, __DIR__)
-  defp test_root, do: Path.expand(@test_rel, __DIR__)
+  defp census_path, do: Path.join(@repo_root, @census_rel)
+  defp lib_root, do: Path.join(@repo_root, @lib_rel)
+  defp test_root, do: Path.join(@repo_root, @test_rel)
 
   describe "positive controls — an empty scan must not look like a clean tree" do
     test "the seam scan finds the committed write-verb seam" do
