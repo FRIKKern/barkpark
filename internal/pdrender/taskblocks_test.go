@@ -325,19 +325,153 @@ func TestTaskBoardThoughtStateLanes(t *testing.T) {
 	}
 }
 
-// TestBoardColumnsMatchManifestLadder pins boardColumns to the manifest ladder
-// minus `cancel` — the SAME set react's BOARD_ROLES and Elixir's board_roles/0
-// carry (open ready progress blocked done considering researching), in the same
-// order. A manifest rung added without widening the board reds here.
+// TestBoardColumnsMatchManifestLadder pins boardColumns to the WHOLE manifest
+// ladder with the terminal `cancel` rung moved LAST — the same order react's
+// BOARD_ROLES, mobile's BOARD_ROLES and Elixir's StatusVocab.board_roles/0 carry.
+// A manifest rung added without widening the board reds here.
+//
+// The expectation is COMPUTED from statusLadder, never retyped: as a literal this
+// test would be a fourth copy of the list and could not catch its own bug class.
 func TestBoardColumnsMatchManifestLadder(t *testing.T) {
 	var want []string
 	for _, role := range statusLadder {
-		if role == "cancel" {
-			continue
+		if role != cancelRole {
+			want = append(want, role)
 		}
-		want = append(want, role)
 	}
+	want = append(want, cancelRole)
 	if strings.Join(boardColumns, ",") != strings.Join(want, ",") {
-		t.Errorf("boardColumns = %v, want the manifest ladder minus cancel: %v", boardColumns, want)
+		t.Errorf("boardColumns = %v, want the manifest ladder with %q last: %v", boardColumns, cancelRole, want)
+	}
+	if boardColumns[len(boardColumns)-1] != cancelRole {
+		t.Errorf("the terminal rung %q must be the LAST lane, got %v", cancelRole, boardColumns)
+	}
+}
+
+// TestBoardColumnsCoverEveryManifestRung is the DROP guard stated as a RULE, not
+// as a list: EVERY rung the manifest ladder declares must be a lane. Render
+// collects lanes by iterating boardColumns alone, so a rung missing here means its
+// rows leave the board with NO symptom — the exact defect that hid cancelled rows
+// until task-881952f8d8417f4b.
+//
+// MUTATION PROOF (c3): replace `var boardColumns = boardLaneOrder(statusLadder)`
+// with the retyped literal {"open","ready","progress","blocked","done",
+// "considering","researching"} and this test reds naming `cancel` as a rung with
+// no lane; restore the derivation and it is GREEN.
+func TestBoardColumnsCoverEveryManifestRung(t *testing.T) {
+	lane := make(map[string]bool, len(boardColumns))
+	for _, role := range boardColumns {
+		lane[role] = true
+	}
+	for _, role := range statusLadder {
+		if !lane[role] {
+			t.Errorf("manifest rung %q has NO board lane, so its rows are silently dropped (boardColumns = %v); boardColumns must be DERIVED from statusLadder, not retyped beside it", role, boardColumns)
+		}
+	}
+	if len(boardColumns) != len(statusLadder) {
+		t.Errorf("boardColumns has %d lanes for %d manifest rungs — a lane was added or lost outside the derivation", len(boardColumns), len(statusLadder))
+	}
+}
+
+// TestTaskBoardCancelLane is the Go leg of the cancel-lane ruling
+// (task-881952f8d8417f4b): a cancelled row must RENDER, in a lane of its own,
+// LAST, de-emphasised, carrying the manifest ✕.
+//
+// FAIL-BEFORE (c1): with boardColumns reverted to origin/main's seven-role
+// literal, "abandoned spike" is absent from the render and this test reds with
+// `row "abandoned spike" was DROPPED from the board`.
+func TestTaskBoardCancelLane(t *testing.T) {
+	reg := testRegistry()
+	b := Block{Type: "task-board", Attrs: map[string]any{"snapshot": []any{
+		map[string]any{"title": "claim me", "status": "ready"},
+		map[string]any{"title": "abandoned spike", "status": "cancelled"},
+		map[string]any{"title": "shipped", "status": "done"},
+	}}}
+
+	// Narrow enough that the lanes STACK, so lane order is line order.
+	// renderBlock already ansi.Strips, so `got` is plain text.
+	got := renderBlock(reg, b, 40)
+
+	if !strings.Contains(got, "abandoned spike") {
+		t.Fatalf("row %q was DROPPED from the board, got:\n%s", "abandoned spike", got)
+	}
+	if !strings.Contains(got, "Cancelled") {
+		t.Errorf("expected a %q lane header, got:\n%s", "Cancelled", got)
+	}
+	if !strings.Contains(got, "✕") {
+		t.Errorf("expected the cancel glyph ✕ on the board, got:\n%s", got)
+	}
+
+	// LAST: the cancel lane's header must follow every other lane's header.
+	cancelAt := strings.Index(got, "Cancelled")
+	for _, other := range []string{"Ready", "Done"} {
+		at := strings.Index(got, other)
+		if at < 0 {
+			t.Fatalf("expected a %q lane header, got:\n%s", other, got)
+		}
+		if at > cancelAt {
+			t.Errorf("the %q lane renders AFTER the cancel lane — cancel must be LAST (Cancelled at %d, %s at %d):\n%s", other, cancelAt, other, at, got)
+		}
+	}
+
+	// NOT IN `open`: the claimable lane must not have absorbed it. The snapshot
+	// carries no open row, so an Open lane appearing at all is the misfile — which
+	// is exactly what the two JS surfaces did before the ruling.
+	if strings.Contains(got, "Open") {
+		t.Errorf("an Open lane appeared for a snapshot with no open row — a cancelled row was misfiled into the claimable lane:\n%s", got)
+	}
+
+	// DE-EMPHASISED: the cancel lane's label rides Dim, not FieldLabel. Compared on
+	// the STYLE — testRegistry pins lipgloss to Ascii, so both render as plain text
+	// and comparing rendered output would measure nothing.
+	th := DarkTheme()
+	if laneLabelStyle(th, cancelRole).GetForeground() != th.Dim.GetForeground() {
+		t.Errorf("the cancel lane label must render de-emphasised (Dim), got foreground %v", laneLabelStyle(th, cancelRole).GetForeground())
+	}
+	// CONTROL: a live lane is NOT de-emphasised. Without it the assertion above
+	// would pass on a theme whose Dim and FieldLabel happened to coincide.
+	if laneLabelStyle(th, "ready").GetForeground() == th.Dim.GetForeground() {
+		t.Errorf("a live lane's label must NOT be de-emphasised — the control failed, so the assertion above measures nothing")
+	}
+}
+
+// TestTaskBoardOpenLaneOnlyClaimable is criterion 3 as a RULE: the `open` lane
+// holds only rows whose own resolved role is `open`. Because every manifest rung
+// now has a lane, no terminal or thought state can fall back into the lane
+// `bp task ready` serves.
+//
+// MUTATION PROOF: drop `cancel` from the lane order and add an `open` fallback in
+// Render, and this test reds on `row-cancelled` appearing under the Open header.
+func TestTaskBoardOpenLaneOnlyClaimable(t *testing.T) {
+	reg := testRegistry()
+	rows := []any{map[string]any{"title": "really open", "status": "open"}}
+	others := []string{"cancelled", "done", "blocked", "considering", "researching", "in_progress"}
+	for _, status := range others {
+		rows = append(rows, map[string]any{"title": "row-" + status, "status": status})
+	}
+	got := renderBlock(reg, Block{Type: "task-board", Attrs: map[string]any{"snapshot": rows}}, 40)
+
+	// Stacked layout: a lane is its header line then its cards, up to the next
+	// lane header. Slice the Open lane out and assert what is inside it.
+	openAt := strings.Index(got, "Open")
+	if openAt < 0 {
+		t.Fatalf("expected an Open lane, got:\n%s", got)
+	}
+	end := len(got)
+	for _, label := range []string{"Ready", "In progress", "Blocked", "Done", "Considering", "Researching", "Cancelled"} {
+		if at := strings.Index(got, label); at > openAt && at < end {
+			end = at
+		}
+	}
+	openLane := got[openAt:end]
+	// PRECONDITION: the slice really is the Open lane. Without this the loop below
+	// could pass on an empty string.
+	if !strings.Contains(openLane, "really open") {
+		t.Fatalf("the Open lane slice lost its own row, so this test measures nothing:\n%s", openLane)
+	}
+	for _, status := range others {
+		if strings.Contains(openLane, "row-"+status) {
+			t.Errorf("a %q row landed in the CLAIMABLE `open` lane — `bp task ready` serves that lane, so this manufactures phantom ready work:\n%s", status, openLane)
+		}
 	}
 }

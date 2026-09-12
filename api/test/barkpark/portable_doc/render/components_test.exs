@@ -260,6 +260,136 @@ end
 defmodule Barkpark.PortableDoc.Render.ComponentsBoardRoadmapTest do
   use ExUnit.Case, async: true
   alias Barkpark.PortableDoc.Render.Components
+  alias Barkpark.PortableDoc.Render.StatusVocab
+
+  # ── the cancel lane (task-881952f8d8417f4b) ─────────────────────────────────
+  #
+  # THE RULING: a cancelled row renders in its OWN lane, LAST and de-emphasised,
+  # carrying the manifest's ✕ — never dropped, never homed in `open`.
+  #
+  # WHAT THIS SURFACE DID BEFORE: it DROPPED the row. `board_roles/0` was a
+  # hand-typed seven-role list with `cancel` subtracted, and `task_board_html/1`
+  # collects columns by iterating that list ALONE — so an abandoned row left the
+  # board with no symptom at all. A reader could not tell "this epic has no
+  # cancelled work" from "this surface does not render cancelled work", and the
+  # second reading was the true one.
+  #
+  # FAIL-BEFORE (c1): with `board_roles/0` reverted to origin/main's
+  # `~w(open ready progress blocked done considering researching)`, the first
+  # assertion below reds — `Assertion with =~ failed ... "bp-board__col--cancel"`.
+  test "task-board renders a cancelled row in its OWN cancel column, last, with the ✕ glyph" do
+    html =
+      Components.task_board_html(%{
+        "snapshot" => [
+          %{"title" => "Claim me", "status" => "ready"},
+          %{"title" => "Abandoned spike", "status" => "cancelled"},
+          %{"title" => "Shipped", "status" => "done"}
+        ]
+      })
+
+    # NEVER DROPPED: the row reaches the board, in a lane of its own.
+    assert html =~ "bp-board__col--cancel"
+    assert html =~ ~s(<span class="bp-board__label">Cancelled</span>)
+    assert html =~ "Abandoned spike"
+
+    # The manifest's ✕, through the shared glyph seam — not a hand-typed mark.
+    assert html =~ ~s(<span class="bp-g bp-g--cancel">✕</span>)
+    assert StatusVocab.glyph_for_role("cancel") == "✕"
+
+    # NEVER HOMED IN `open`: the snapshot carries no open row, so an `open`
+    # column appearing at all would BE the misfile.
+    refute html =~ "bp-board__col--open"
+
+    # LAST: the cancel column follows every live column in the emitted HTML.
+    cancel_at = :binary.match(html, "bp-board__col--cancel") |> elem(0)
+
+    for live <- ["bp-board__col--ready", "bp-board__col--done"] do
+      live_at = :binary.match(html, live) |> elem(0)
+
+      assert live_at < cancel_at,
+             "#{live} renders AFTER the cancel column — cancel must be LAST"
+    end
+  end
+
+  # c2, stated as a RULE rather than as a list: the `open` column holds ONLY rows
+  # whose own resolved role is `open`. Every manifest rung now has a column of its
+  # own, so nothing can fall back into the lane `bp task ready` serves.
+  #
+  # MUTATION: home cancelled rows in `open` (drop `cancel` from the lane order and
+  # add an `open` fallback in `task_board_html/1`) and this reds on "Abandoned
+  # spike" appearing inside the open column's card list.
+  test "task-board's open column holds only claimable rows — no terminal or thought state falls into it" do
+    statuses = [
+      "open",
+      "ready",
+      "in_progress",
+      "blocked",
+      "done",
+      "cancelled",
+      "considering",
+      "researching"
+    ]
+
+    html =
+      Components.task_board_html(%{
+        "snapshot" => Enum.map(statuses, fn s -> %{"title" => "row-" <> s, "status" => s} end)
+      })
+
+    # Slice the open column out: from its class to the start of the next column.
+    [_, after_open] =
+      String.split(html, ~s(<div class="bp-board__col bp-board__col--open">), parts: 2)
+
+    open_col = after_open |> String.split(~s(<div class="bp-board__col), parts: 2) |> hd()
+
+    # PRECONDITION: the slice really is the open column. Without this the loop
+    # below could pass on an empty string and measure nothing.
+    assert open_col =~ "row-open"
+
+    for s <- statuses -- ["open"] do
+      refute open_col =~ "row-" <> s,
+             "a #{s} row landed in the CLAIMABLE open column — `bp task ready` serves that lane"
+    end
+  end
+
+  # c3 — the DERIVATION LOCK. The lane order is computed from
+  # design/status-manifest.json roles[] (via StatusVocab.board_roles/0), so a rung
+  # added to the manifest becomes a column automatically and can never ship another
+  # silent drop. The expectation here is COMPUTED, never retyped: written as a
+  # literal it would be a second copy of the list and could not catch its own bug.
+  #
+  # MUTATION (c3): replace `defp board_roles, do: StatusVocab.board_roles()` with
+  # the retyped literal `~w(open ready progress blocked done considering
+  # researching)` and this reds — `manifest rung "cancel" has NO board column`.
+  test "every manifest rung is a board column, terminal cancel LAST — derived, not retyped" do
+    lanes = StatusVocab.board_roles()
+
+    for rung <- StatusVocab.roles() do
+      assert rung in lanes,
+             "manifest rung #{inspect(rung)} has NO board column, so its rows are silently " <>
+               "dropped; the lane order must be DERIVED from the manifest, not retyped beside it"
+    end
+
+    assert length(lanes) == length(StatusVocab.roles())
+    assert List.last(lanes) == "cancel"
+    assert lanes == Enum.reject(StatusVocab.roles(), &(&1 == "cancel")) ++ ["cancel"]
+
+    # And the emitter really uses it: every rung resolves to a column of its own.
+    html =
+      Components.task_board_html(%{
+        "snapshot" =>
+          Enum.map(lanes, fn r -> %{"title" => "row-" <> r, "status" => board_status(r)} end)
+      })
+
+    for rung <- lanes, do: assert(html =~ "bp-board__col--" <> rung)
+  end
+
+  # The manifest's statuses map, inverted to ONE stored status per role — so the
+  # test above drives the emitter through its real `role_of` seam instead of
+  # assuming a role name is also a status name (`progress` is not; `in_progress` is).
+  defp board_status(role) do
+    StatusVocab.statuses()
+    |> Enum.find_value(fn {status, r} -> if r == role, do: status end)
+  end
 
   test "task-board groups into columns by lifecycle, omits empty ones" do
     html =

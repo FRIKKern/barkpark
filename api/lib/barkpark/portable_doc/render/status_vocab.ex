@@ -63,6 +63,34 @@ defmodule Barkpark.PortableDoc.Render.StatusVocab do
   @spec roles() :: [String.t()]
   def roles, do: @role_names
 
+  # The terminal, non-claimable rung. Named once so the board derivation below
+  # reads as a RULE ("move the terminal rung last") and not as a second list.
+  @cancel_role "cancel"
+
+  # The board's lane roles: EVERY manifest rung, in manifest order, with `cancel`
+  # moved to the END. Derived from @role_names — the manifest's roles[] — so a new
+  # rung added to design/status-manifest.json becomes a lane automatically and can
+  # never be silently DROPPED from a board again (task-881952f8d8417f4b's ruling).
+  @board_roles Enum.reject(@role_names, &(&1 == @cancel_role)) ++
+                 Enum.filter(@role_names, &(&1 == @cancel_role))
+
+  @doc """
+  The board lane roles: the manifest ladder with the terminal `cancel` rung LAST.
+
+  This is the ONE place the board's lane order is computed. Every board surface
+  that renders in Elixir (`Components.task_board_html/1`,
+  `FleetEmail.task_board_email_html/2`, and the golden-parity projection)
+  resolves its columns through here, so no surface holds a retyped copy and no
+  surface can drop a rung.
+
+  `cancel` is a lane, not a drop and not a fold into `open`: dropping it makes an
+  abandoned row vanish with no symptom, and homing it in `open` — the CLAIMABLE
+  lane that `bp task ready` serves — manufactures phantom ready work. It renders
+  last and de-emphasised (`.bp-board__col--cancel`) carrying the manifest's ✕.
+  """
+  @spec board_roles() :: [String.t()]
+  def board_roles, do: @board_roles
+
   @doc "The status→role map (raw manifest section)."
   @spec statuses() :: %{optional(String.t()) => String.t()}
   def statuses, do: @statuses

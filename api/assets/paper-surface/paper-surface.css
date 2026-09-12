@@ -1467,6 +1467,12 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-board__col--progress { border-left-color: var(--st-info); }
 .bp-paper-surface .bp-board__col--blocked { border-left-color: var(--st-warn); }
 .bp-paper-surface .bp-board__col--done { border-left-color: var(--st-ok); }
+/* The terminal lane (task-881952f8d8417f4b): LAST in the column order and visibly
+   quieter than the live lanes, so abandoned work is legible without competing with
+   claimable work. It keeps the faint default border (no `--st-*` tone of its own)
+   and drops back in opacity — the same de-emphasis vocabulary `.bp-g--considering`
+   already uses. Tokens only; no colour literal. */
+.bp-paper-surface .bp-board__col--cancel { opacity: 0.55; }
 .bp-paper-surface .bp-board__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .bp-paper-surface .bp-board__label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
