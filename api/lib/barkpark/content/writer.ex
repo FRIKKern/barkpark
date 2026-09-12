@@ -441,6 +441,27 @@ defmodule Barkpark.Content.Writer do
          # rule; called from here exactly like the fence above.
          :ok <-
            Barkpark.Tasks.DatasetTwinFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE TERMINAL-CRITERIA FENCE (task-3c3094aa8f5f3847). A raw document
+         # publish wrote a 7-entry criteria list with an UNMET entry onto the
+         # already-`done` published row `task-2b7cbaf8265f6b4e` (2026-09-04),
+         # with zero `task.criterion` events in that row's life. The publish
+         # door's `criteria_fence/2` is a REGRESSION fence keyed on the
+         # published row's own proof, so a row carrying no criteria (or one
+         # gaining a NEW unmet entry beside a met one) has nothing to regress
+         # and the write lands. Refuses a document-door write that changes
+         # `acceptance_criteria` on a row that is, and stays, closed-terminal;
+         # `bp task stamp --withdraw` (D745) is the sanctioned way to lower a
+         # lock. Head-matches on the write NAMING the criteria list, so it
+         # costs every other write nothing.
+         :ok <-
+           Barkpark.Tasks.TerminalCriteriaFence.check(
+             type,
+             attrs,
+             dataset,
+             doc_id,
+             prev_doc,
+             opts
+           ),
          # THE CRITERIA-REQUIRED BIRTH FENCE, OPT-IN PER PARENT
          # (dr-w33-bl-task-create-refuses-criteria-less-rows). A criteria-less
          # row is UNFALSIFIABLE, and three censuses + three backfills in 24h
@@ -988,6 +1009,27 @@ defmodule Barkpark.Content.Writer do
          # rule; called from here exactly like the fence above.
          :ok <-
            Barkpark.Tasks.DatasetTwinFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
+         # THE TERMINAL-CRITERIA FENCE (task-3c3094aa8f5f3847). A raw document
+         # publish wrote a 7-entry criteria list with an UNMET entry onto the
+         # already-`done` published row `task-2b7cbaf8265f6b4e` (2026-09-04),
+         # with zero `task.criterion` events in that row's life. The publish
+         # door's `criteria_fence/2` is a REGRESSION fence keyed on the
+         # published row's own proof, so a row carrying no criteria (or one
+         # gaining a NEW unmet entry beside a met one) has nothing to regress
+         # and the write lands. Refuses a document-door write that changes
+         # `acceptance_criteria` on a row that is, and stays, closed-terminal;
+         # `bp task stamp --withdraw` (D745) is the sanctioned way to lower a
+         # lock. Head-matches on the write NAMING the criteria list, so it
+         # costs every other write nothing.
+         :ok <-
+           Barkpark.Tasks.TerminalCriteriaFence.check(
+             type,
+             attrs,
+             dataset,
+             doc_id,
+             prev_doc,
+             opts
+           ),
          # THE CRITERIA-REQUIRED BIRTH FENCE, OPT-IN PER PARENT
          # (dr-w33-bl-task-create-refuses-criteria-less-rows). A criteria-less
          # row is UNFALSIFIABLE, and three censuses + three backfills in 24h
