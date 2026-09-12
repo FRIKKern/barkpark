@@ -9,6 +9,7 @@ import {
 } from "@/lib/find-shape";
 import { DATASET } from "@/lib/config";
 import { SEARCH_FIELDS } from "@/lib/search-fields";
+import { MAX_HITS } from "@/lib/search-limits";
 
 /**
  * Per-keystroke live search over ONE persistent WebSocket, browser → Barkpark
@@ -50,7 +51,6 @@ const LIVE_ENABLED = Boolean(WS_URL && WS_TOKEN);
 const CONTENT_TYPES_CSV = DOC_TYPES.map((t) => t.type).join(",");
 /** Tenancy scope the topic encodes — mirrors find-search's `/w/default/p/default`. */
 const WS_SCOPE = "default:default";
-const MAX_HITS = 100;
 
 export interface LiveSearchArgs {
   q: string;
