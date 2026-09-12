@@ -13,13 +13,12 @@ Barkpark as your AI's task board: agents claim work over HTTP, you steer the que
 | **HTTP API** | Bearer endpoints under `/v1/tasks/*` (read tier): the verbs plus fetch, edges, labels, papers. |
 | **Events** | Each op emits a `mutation_events` row — `task.{claimed,released,criterion,pulse,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}`. **Push** SSE `/v1/data/listen/:dataset`; **pull** keyset feed `GET /v1/tasks/events?since=<id>` (§7). |
 
-Lifecycle: `open · in_progress · blocked · done · cancelled`.
 
 ## Set up from zero
 
 Install and run the wizard per [QUICKSTART](QUICKSTART.md).
 
-The wizard's **clean profile pre-checks `bulldocs` + `tasks`** (server unions `media`); accept and schema, routes and crons go live on first boot. A dev server on `:4000` blocks the local DB reset — stop it or pick **connect**.
+The wizard's **clean profile pre-checks `bulldocs` + `tasks`** (server unions `media`); accept and schema, routes and crons go live on first boot.
 
 **Existing installs** — enable via env and restart:
 
@@ -144,22 +143,12 @@ A scattered board is a defect — make every task fit the structure:
 5. **Real work tasks carry `acceptance_criteria`** — 1–3 checkable conditions. **State a CHECK TO RE-RUN, not a predicted state**: "X is in state Y" has a shelf life and nothing re-checks it. A criterion opening **If / Once / When / Should** names the OBSERVABLE that flips it (a file, a symbol, a PR, a command exiting 0); sweep: `scripts/ledger/conditional-criteria-census.py`. Name REAL test files — `mix test` refuses a missing path. Decisions/goals may omit them; a row with none closes `done` only if `close_reason` names the PR + sha or the run. Merge gates need `merge_gate:true`: a `landed` close flips only the flag, wording alone warns.
 6. **Blockers are explicit** — `blocks` edges keep a gated task out of "ready"; one waiting on a human carries `needs-human`/`decision`.
 
-## Workspaces, projects, datasets — experiment without mess
+## Workspaces, projects, datasets
 
-Any write-tier token spins up an isolated sandbox:
-
-```bash
-bp workspace create Spike  # → workspace + owner + Default project + production dataset
-bp -w spike workspace project-create agents-v2  # member-gated; -w names the workspace
-bp workspace ls  # what your token can reach
-```
-
-Scoped Studio: `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes mirror the prefix; flat `/v1/tasks/*` uses the server's default scope.
+Sandbox scoping (`bp workspace create/ls`, `bp -w <slug> workspace project-create`, `/w/:ws/p/:proj`, flat → `Default`/`Default`): [tenancy](../contracts/tenancy.md) · [api-v1](../api-v1.md) §1a · [HANDBOOK](../cli/HANDBOOK.md).
 
 ## Troubleshooting
 
-| Symptom | Cause → fix |
-|---|---|
-| No **Tasks** pane in Studio, or `404` on `/v1/tasks/*` | Plugin off — pane and routes mount only when `tasks` is on: `BARKPARK_PLUGINS` set without it, or the `task` schema isn't registered. Fix env + restart; the schema auto-registers on boot. |
+No **Tasks** pane in Studio, or `404` on `/v1/tasks/*` — the plugin is off: pane and routes mount only when `tasks` is on (`BARKPARK_PLUGINS` set without it). Fix env + restart.
 
 Cheatsheet: [tasks](../cheatsheets/tasks.md) · CLI canon: [HANDBOOK](../cli/HANDBOOK.md) · HTTP contract: [api-v1](../api-v1.md)
