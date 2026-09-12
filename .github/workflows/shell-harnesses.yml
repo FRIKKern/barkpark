@@ -415,6 +415,18 @@ on:
       - ".github/workflows/task-lease-renew.yml"
       - "scripts/task-lease-sweep.sh"
       - "scripts/task-lease-sweep.test.sh"
+      # ── THE MERGE SWEEP'S REVIEW HOLD (task-435620b0f02720b2) ──────────────
+      # merge-sweep.sh squash-merges campaign PRs UNATTENDED. It had no test of
+      # its merge/refuse loop at all — only a `--selftest` string table that
+      # never executes the arm deciding whether a PR is merged. Its only hold
+      # was a DO NOT MERGE|WIP|HOLD title regex, which fails OPEN. It now also
+      # refuses a PR carrying an open GitHub review, and the harness proves both
+      # directions in ONE run (a refusal alone cannot be told from a sweep that
+      # stopped merging). Per file, D26 — and NOT under scripts/, so
+      # selftest-wiring-census.sh (scripts/-scoped) cannot see it: this entry
+      # and the job below ARE its wiring.
+      - ".claude/skills/orchestrate-tasks/helpers/merge-sweep.sh"
+      - ".claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh"
       # ── ORPHAN SWEEP III (task-8780f3b465edea5b, 2026-09-06) ────────────────
       # Three harnesses that no workflow ran, each adjudicated by an ACTUAL RUN
       # in a scratch worktree at 776c91142 before being wired — all three are
@@ -773,6 +785,18 @@ on:
       - ".github/workflows/task-lease-renew.yml"
       - "scripts/task-lease-sweep.sh"
       - "scripts/task-lease-sweep.test.sh"
+      # ── THE MERGE SWEEP'S REVIEW HOLD (task-435620b0f02720b2) ──────────────
+      # merge-sweep.sh squash-merges campaign PRs UNATTENDED. It had no test of
+      # its merge/refuse loop at all — only a `--selftest` string table that
+      # never executes the arm deciding whether a PR is merged. Its only hold
+      # was a DO NOT MERGE|WIP|HOLD title regex, which fails OPEN. It now also
+      # refuses a PR carrying an open GitHub review, and the harness proves both
+      # directions in ONE run (a refusal alone cannot be told from a sweep that
+      # stopped merging). Per file, D26 — and NOT under scripts/, so
+      # selftest-wiring-census.sh (scripts/-scoped) cannot see it: this entry
+      # and the job below ARE its wiring.
+      - ".claude/skills/orchestrate-tasks/helpers/merge-sweep.sh"
+      - ".claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh"
 
       # ── ORPHAN SWEEP III (task-8780f3b465edea5b, 2026-09-06) ────────────────
       # Three harnesses that no workflow ran, each adjudicated by an ACTUAL RUN
@@ -948,6 +972,7 @@ jobs:
       cloud-static-gz: ${{ steps.sets.outputs.cloud-static-gz }}
       pds-hetzner-offline: ${{ steps.sets.outputs.pds-hetzner-offline }}
       task-lease-renew: ${{ steps.sets.outputs.task-lease-renew }}
+      merge-sweep-review-hold: ${{ steps.sets.outputs.merge-sweep-review-hold }}
       landed-mark: ${{ steps.sets.outputs.landed-mark }}
       doc-gates-paths-parity: ${{ steps.sets.outputs.doc-gates-paths-parity }}
       merge-gate-bridge: ${{ steps.sets.outputs.merge-gate-bridge }}
@@ -1124,6 +1149,8 @@ jobs:
           task-lease-renew scripts/task-lease-sweep.test.sh
           task-lease-renew .github/workflows/task-lease-renew.yml
           task-lease-renew scripts/pr-task-gate.sh
+          merge-sweep-review-hold .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh
+          merge-sweep-review-hold .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh
           landed-mark scripts/landed-mark.sh
           landed-mark scripts/landed-mark.test.sh
           landed-mark scripts/fixtures/landed-mark/**
@@ -2581,6 +2608,46 @@ jobs:
       - name: pdf-kill-listener-proof principal gate (5 arms, no scratch boot)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/pdf-kill-listener-proof.sh --selftest
+
+  # ── THE MERGE SWEEP'S REVIEW HOLD (task-435620b0f02720b2) ──────────────────
+  # The subject merges PRs to main with no human in the loop. Two measured
+  # near-misses on 2026-09-06 (#16615 taken two minutes before its author's
+  # follow-up push; a console PR saved only by being converted to draft) came
+  # from the sweep being unable to tell "green and reviewed" from "green and
+  # awaiting review". The hold is now GitHub's own review state, and this job
+  # is the only thing in CI that executes the sweep's merge/refuse loop.
+  merge-sweep-review-hold:
+    needs: [changes]
+    if: needs.changes.outputs.merge-sweep-review-hold == 'true'
+    name: an open review holds a PR from the unattended merge sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: jq and python3 are present (both stubs exit 2 without them)
+        id: setup
+        # The harness's gh stub applies the caller's own --jq filter with real
+        # jq, and merge-sweep.sh parses `gh pr view` with python3. Absence of
+        # either turns this job into a correct but illegible exit 2; naming the
+        # dependency here makes an image change fail BY NAME.
+        run: |
+          command -v jq >/dev/null || { echo "jq missing — the gh stub applies the sweep's own --jq with it" >&2; exit 1; }
+          command -v python3 >/dev/null || { echo "python3 missing — merge-sweep.sh reads title/body with it" >&2; exit 1; }
+          jq --version; python3 --version
+      - name: merge-sweep.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh
+      - name: merge-sweep.test.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh
+      - name: the trailer + review-hold decision table (hermetic, no gh)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # NO `continue-on-error` here or anywhere in this file. It launders a
+        # red into a green job conclusion.
+        run: ORCH="$RUNNER_TEMP" bash .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh --selftest
+      - name: one sweep run REFUSES the reviewed PR and MERGES the identical one
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh
 
   fleet-coordination-harnesses:
     needs: [changes]
