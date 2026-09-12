@@ -119,7 +119,10 @@ function refuse(msg) {
 
 const RE_PATH = /(?:\.?[A-Za-z0-9_.\-]+\/)+[A-Za-z0-9_.\-]+\.(?:go|ex|exs|heex|sh|mjs|js|ts|tsx|json|yml|yaml|md|sql)\b/g;
 const ARTIFACT_SEGMENTS = new Set(["node_modules", "dist", "_build", "deps", "coverage", "build", ".turbo"]);
-const RETRACTION_MARKERS = ["filing wrong", "does not exist", "correction", "the file is", "wrong path", "retract", "i was wrong", "no such file", "mis-cited", "miscited"];
+const RETRACTION_MARKERS = ["filing wrong", "does not exist", "correction", "the file is", "wrong path", "retract", "i was wrong", "no such file", "mis-cited", "miscited",
+  // CANCEL-SHAPED: a row cancelled BECAUSE the artifact is gone names the absent path as
+  // its whole point. tgw10-bl-stranded-unique-commons-row is the specimen.
+  "premise expired", "no longer holds", "no longer exists", "nothing remains", "is still absent", "returns zero hits"];
 export function retractedNear(text, needle) {
   const i = (text || "").indexOf(needle);
   if (i === -1) return false;
@@ -358,6 +361,9 @@ function selftest() {
   eq("retraction marker demotes a path a closer says DOES NOT EXIST",
      retractedNear("I previously called this row still-live off a grep against cloud/priv/static/__preview__/__css_check.mjs — a path that DOES NOT EXIST on main.",
                    "cloud/priv/static/__preview__/__css_check.mjs"), true);
+  eq("cancel-shaped reason demotes the absent artifact it exists to report",
+     retractedNear("Premise no longer holds: git cat-file -e origin/main:tooling/grip/ledger/w34-chatlive-belt-semantics.recipe.md fails at 3c25e04af9.",
+                   "tooling/grip/ledger/w34-chatlive-belt-semantics.recipe.md"), true);
   eq("a plain citation is NOT demoted",
      retractedNear("the guard lives in scripts/pr-task-gate.sh and is green", "scripts/pr-task-gate.sh"), false);
 
