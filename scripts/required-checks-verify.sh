@@ -117,6 +117,28 @@
 
 set -euo pipefail
 
+# ── THE LOCALE PIN — one line, and it is not a style preference ──────────────
+# Every text tool this script runs (sed, awk, grep, sort, tr, cut, comm) reads
+# the TRACKED CORPUS, and that corpus carries bytes that are not valid UTF-8 (a
+# mojibake'd em dash in one wave ledger; see the long note above the merge-truth
+# awk at the `LC_ALL=C awk` call in merge_truth_prose_check, which has pinned
+# itself since cch-w34). In an ambient UTF-8 locale BWK awk does not skip such a
+# byte — it ABORTS with "towc: multibyte conversion failure", and macOS sed
+# errors "RE error: illegal byte sequence". Left to the caller's environment the
+# SAME tree therefore reads green under LC_ALL=C and red under en_US.UTF-8, so
+# the verdict is about the operator's shell instead of about the repo. Pin it
+# here, once, for the whole process and everything it forks.
+#
+# WHY THIS IS SAFE TO EXPORT PROCESS-WIDE: nothing in this script needs the
+# caller's locale. There is no `date` call (no month/day names are formatted),
+# no `printf "%'d"` (no thousands separators), and no sort whose ORDER a human
+# reads — every `sort`/`sort -u` here feeds a set comparison (comm/diff/dedup),
+# which C collation makes MORE deterministic, not less. Every comparison is a
+# byte comparison and every tolower() runs on ASCII context names. Literal
+# non-ASCII in messages (— – …) is emitted by printf/echo as bytes and is
+# unaffected. jq and gh decode UTF-8 themselves and ignore LC_ALL.
+export LC_ALL=C
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # ── the shared check-runs reader ─────────────────────────────────────────────

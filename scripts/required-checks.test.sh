@@ -1608,21 +1608,66 @@ else
   fi
 fi
 
-section "9. verify --selftest is itself green"
+section "9. verify --selftest is itself green — in C AND in a real UTF-8 locale"
 
-RC9_OUT="$(bash "$VERIFY" --selftest 2>&1)" && RC9_RC=0 || RC9_RC=$?
-# The count is READ OFF the selftest's own numbering (`1/29` … `29/29`) rather
-# than typed here. It was typed here, it said 16 against a suite of 23, and a
-# label four clauses behind is the same instrument fault this file exists to
-# hunt: a number nobody re-earns. §9 is also the only home `--selftest` has —
-# drift.yml no longer runs it as a step of its own.
-RC9_N="$(sed -n 's/^  ok   [0-9]*\/\([0-9]*\) .*/\1/p' <<<"$RC9_OUT" | tail -1)"
-if [ "$RC9_RC" -eq 0 ] && [ -n "$RC9_N" ]; then
-  ok "verify --selftest passes ($RC9_N mutation clauses, counted from its own numbering)"
-elif [ "$RC9_RC" -eq 0 ]; then
-  bad "verify --selftest exited 0 but printed no numbered clause — a suite that runs nothing exits 0 too"
+# WHY THE LOCALE IS A PARAMETER OF THIS SECTION AND NOT INHERITED (2026-09-11).
+# This section used to run the selftest exactly once, in whatever locale the
+# caller happened to have. Two gates workers then measured the same clean
+# origin/main tree reading GREEN under LC_ALL=C and RED under en_US.UTF-8: the
+# tracked corpus carries a byte that is not valid UTF-8, BWK awk aborts the
+# whole advisory-prose scan on it with "towc: multibyte conversion failure",
+# and the `sed` that reads the clause count below then died on that error text
+# with "RE error: illegal byte sequence" — so the run did not even reach a
+# `bad`, it died mid-section. required-checks-verify.sh now pins LC_ALL=C for
+# its own text tools (see the locale-pin block at the top of that file, which
+# the merge-truth awk at `env LC_ALL=C awk` has modelled since cch-w34). An
+# INHERITED locale cannot hold that pin honest: CI and this file's own gate run
+# in C, so a regression would surface only in an operator's interactive shell,
+# where it reads as a red on a tree they did not touch. One arm is therefore
+# deliberately hostile, and it is hostile no matter how the suite was invoked.
+
+# The hostile arm needs a locale the system ACTUALLY HAS: an unknown LC_ALL is
+# silently ignored and the tools fall back to C, which would make the arm
+# vacuous — green for having never run in UTF-8 at all. So pick a name and then
+# PROVE it with `locale charmap`, which answers ANSI_X3.4-1968 (not UTF-8) for a
+# name the host does not carry. macOS ships en_US.UTF-8; ubuntu runners ship
+# C.UTF-8.
+RC9_UTF8=""
+for rc9_cand in en_US.UTF-8 C.UTF-8 en_US.utf8 C.utf8; do
+  if [ "$(LC_ALL="$rc9_cand" locale charmap 2>/dev/null || true)" = "UTF-8" ]; then
+    RC9_UTF8="$rc9_cand"; break
+  fi
+done
+
+# One arm, run twice. LANG/LC_CTYPE/LC_COLLATE are UNSET rather than left
+# alone so that LC_ALL is the only locale input the arm has — an inherited
+# LC_CTYPE would make the two arms differ by less than their labels claim.
+rc9_arm() {
+  local label="$1" loc="$2" out rc n
+  out="$(env -u LANG -u LC_CTYPE -u LC_COLLATE LC_ALL="$loc" bash "$VERIFY" --selftest 2>&1)" && rc=0 || rc=$?
+  # The count is READ OFF the selftest's own numbering (`1/29` … `29/29`) rather
+  # than typed here. It was typed here, it said 16 against a suite of 23, and a
+  # label four clauses behind is the same instrument fault this file exists to
+  # hunt: a number nobody re-earns. §9 is also the only home `--selftest` has —
+  # drift.yml no longer runs it as a step of its own.
+  # LC_ALL=C on THIS sed too: when the arm reds, $out is exactly the invalid
+  # byte that killed the scan, and an unpinned sed dies on it under `set -e`
+  # instead of letting the `bad` below name the failure.
+  n="$(LC_ALL=C sed -n 's/^  ok   [0-9]*\/\([0-9]*\) .*/\1/p' <<<"$out" | tail -1)"
+  if [ "$rc" -eq 0 ] && [ -n "$n" ]; then
+    ok "verify --selftest passes under $label ($n mutation clauses, counted from its own numbering)"
+  elif [ "$rc" -eq 0 ]; then
+    bad "verify --selftest exited 0 under $label but printed no numbered clause — a suite that runs nothing exits 0 too"
+  else
+    bad "verify --selftest is red under $label (exit $rc): $(LC_ALL=C grep -m2 -a 'SELFTEST FAIL\|BLOCKED\|towc\|illegal byte' <<<"$out" | tr -d '\200-\377')"
+  fi
+}
+
+rc9_arm "LC_ALL=C" "C"
+if [ -n "$RC9_UTF8" ]; then
+  rc9_arm "LC_ALL=$RC9_UTF8 (LANG unset)" "$RC9_UTF8"
 else
-  bad "verify --selftest is red (exit $RC9_RC): $(grep -m2 'SELFTEST FAIL' <<<"$RC9_OUT")"
+  bad "no UTF-8 locale on this host (tried en_US.UTF-8, C.UTF-8, en_US.utf8, C.utf8 against \`locale charmap\`), so the hostile arm never ran — 'the selftest survives a UTF-8 caller' would be asserted having been measured in C twice"
 fi
 
 section "11 (hermetic half). the section-11 mutation is DERIVED, not typed"
@@ -2524,7 +2569,21 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # the frozen pair (2026-07-31), so this window can never render it.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
         # exactly this one as MISSING ACK_EX before it was typed here.
-        --expect-unrendered "Cloud reader-corpus census")
+        --expect-unrendered "Cloud reader-corpus census"
+        # ── 2026-09-11 (task-140f66187298e9fe): the three ci.yml names
+        # a333e4b58 (#17668) created — the aggregator `web-gate` and its
+        # `changes` / `path-escape` leaves — plus shell-harnesses.yml's
+        # `place-directory-install` (#17665). All four postdate the frozen
+        # pair (2026-07-31), so this window can never render them; the ci.yml
+        # three additionally render on a main head ONLY when the diff touches
+        # a web path (#17668 kept the `push:` arm's paths filter on purpose),
+        # so exactly ONE of the 43 main heads after a333e4b58 carries them.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
+        # exactly these four as MISSING ACK_EX before they were typed here.
+        --expect-unrendered "Web gate"
+        --expect-unrendered "Dispatch (web paths)"
+        --expect-unrendered "Web path-escape ratchet"
+        --expect-unrendered "place-directory install.sh read-back claims")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

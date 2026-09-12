@@ -19,7 +19,7 @@
       "cell": "portabledoc-showcase__light__1280",
       "file": "portabledoc-showcase__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2428346,
+      "bytes": 2482711,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -134,19 +134,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.8,
+      "proseCpl": 70.7,
       "proseCplSamples": 14,
-      "captionCpl": 62.6,
-      "captionWidth": 400.4,
+      "captionCpl": 58.5,
+      "captionWidth": 400,
       "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 544,
+          "width": 540.3,
           "offCentre": 0,
-          "left": 368,
-          "right": 912,
-          "inkWidth": 542,
+          "left": 369.8,
+          "right": 910.2,
+          "inkWidth": 538.3,
           "inkOffCentre": 0
         },
         {
@@ -241,7 +241,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -302,12 +302,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 208,
+        "total": 210,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 198,
+          "1": 200,
           "2": 10
         },
         "heavyRules": [
@@ -323,7 +323,7 @@
           },
           {
             "px": 2,
-            "y": 1672.8,
+            "y": 1734,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -333,7 +333,7 @@
           },
           {
             "px": 2,
-            "y": 3299.4,
+            "y": 3381.5,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -343,7 +343,7 @@
           },
           {
             "px": 2,
-            "y": 5350.2,
+            "y": 5391.1,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -353,7 +353,7 @@
           },
           {
             "px": 2,
-            "y": 6752.5,
+            "y": 6793.4,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -363,7 +363,7 @@
           },
           {
             "px": 2,
-            "y": 7767.3,
+            "y": 7808.2,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -373,7 +373,7 @@
           },
           {
             "px": 2,
-            "y": 8243.5,
+            "y": 8358.5,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -383,7 +383,7 @@
           },
           {
             "px": 2,
-            "y": 9644.5,
+            "y": 9759.6,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -393,7 +393,7 @@
           },
           {
             "px": 2,
-            "y": 11719.5,
+            "y": 11863.3,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -403,7 +403,7 @@
           },
           {
             "px": 2,
-            "y": 13622,
+            "y": 13765.9,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -419,7 +419,7 @@
       "cell": "portabledoc-showcase__light__1920",
       "file": "portabledoc-showcase__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2664463,
+      "bytes": 2717202,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -534,19 +534,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 72.2,
+      "proseCpl": 71.1,
       "proseCplSamples": 14,
-      "captionCpl": 62.6,
-      "captionWidth": 400.4,
+      "captionCpl": 58.5,
+      "captionWidth": 400,
       "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 544,
+          "width": 540.3,
           "offCentre": 0,
-          "left": 688,
-          "right": 1232,
-          "inkWidth": 542,
+          "left": 689.8,
+          "right": 1230.2,
+          "inkWidth": 538.3,
           "inkOffCentre": 0
         },
         {
@@ -641,7 +641,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -702,12 +702,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 208,
+        "total": 210,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 198,
+          "1": 200,
           "2": 10
         },
         "heavyRules": [
@@ -723,7 +723,7 @@
           },
           {
             "px": 2,
-            "y": 1672.8,
+            "y": 1734,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -733,7 +733,7 @@
           },
           {
             "px": 2,
-            "y": 3299.4,
+            "y": 3381.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -743,7 +743,7 @@
           },
           {
             "px": 2,
-            "y": 5350.2,
+            "y": 5391.1,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -753,7 +753,7 @@
           },
           {
             "px": 2,
-            "y": 6752.5,
+            "y": 6793.4,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -763,7 +763,7 @@
           },
           {
             "px": 2,
-            "y": 7767.3,
+            "y": 7808.2,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -773,7 +773,7 @@
           },
           {
             "px": 2,
-            "y": 8243.5,
+            "y": 8358.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -783,7 +783,7 @@
           },
           {
             "px": 2,
-            "y": 9698,
+            "y": 9813,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -793,7 +793,7 @@
           },
           {
             "px": 2,
-            "y": 11777.8,
+            "y": 11921.6,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -803,7 +803,7 @@
           },
           {
             "px": 2,
-            "y": 13733.7,
+            "y": 13877.6,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -819,7 +819,7 @@
       "cell": "portabledoc-showcase__dark__1280",
       "file": "portabledoc-showcase__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2403963,
+      "bytes": 2456977,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -934,19 +934,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.8,
+      "proseCpl": 70.7,
       "proseCplSamples": 14,
-      "captionCpl": 62.6,
-      "captionWidth": 400.4,
+      "captionCpl": 58.5,
+      "captionWidth": 400,
       "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 544,
+          "width": 540.3,
           "offCentre": 0,
-          "left": 368,
-          "right": 912,
-          "inkWidth": 542,
+          "left": 369.8,
+          "right": 910.2,
+          "inkWidth": 538.3,
           "inkOffCentre": 0
         },
         {
@@ -1041,7 +1041,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -1102,12 +1102,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 208,
+        "total": 210,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 198,
+          "1": 200,
           "2": 10
         },
         "heavyRules": [
@@ -1123,7 +1123,7 @@
           },
           {
             "px": 2,
-            "y": 1672.8,
+            "y": 1734,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1133,7 +1133,7 @@
           },
           {
             "px": 2,
-            "y": 3299.4,
+            "y": 3381.5,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1143,7 +1143,7 @@
           },
           {
             "px": 2,
-            "y": 5350.2,
+            "y": 5391.1,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1153,7 +1153,7 @@
           },
           {
             "px": 2,
-            "y": 6752.5,
+            "y": 6793.4,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1163,7 +1163,7 @@
           },
           {
             "px": 2,
-            "y": 7767.3,
+            "y": 7808.2,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1173,7 +1173,7 @@
           },
           {
             "px": 2,
-            "y": 8243.5,
+            "y": 8358.5,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1183,7 +1183,7 @@
           },
           {
             "px": 2,
-            "y": 9644.5,
+            "y": 9759.6,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1193,7 +1193,7 @@
           },
           {
             "px": 2,
-            "y": 11719.5,
+            "y": 11863.3,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1203,7 +1203,7 @@
           },
           {
             "px": 2,
-            "y": 13622,
+            "y": 13765.9,
             "width": 1180,
             "parts": 1,
             "structural": true,
@@ -1219,7 +1219,7 @@
       "cell": "portabledoc-showcase__dark__1920",
       "file": "portabledoc-showcase__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2641517,
+      "bytes": 2693185,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -1334,19 +1334,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 72.2,
+      "proseCpl": 71.1,
       "proseCplSamples": 14,
-      "captionCpl": 62.6,
-      "captionWidth": 400.4,
+      "captionCpl": 58.5,
+      "captionWidth": 400,
       "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 544,
+          "width": 540.3,
           "offCentre": 0,
-          "left": 688,
-          "right": 1232,
-          "inkWidth": 542,
+          "left": 689.8,
+          "right": 1230.2,
+          "inkWidth": 538.3,
           "inkOffCentre": 0
         },
         {
@@ -1441,7 +1441,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -1502,12 +1502,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 208,
+        "total": 210,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 198,
+          "1": 200,
           "2": 10
         },
         "heavyRules": [
@@ -1523,7 +1523,7 @@
           },
           {
             "px": 2,
-            "y": 1672.8,
+            "y": 1734,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1533,7 +1533,7 @@
           },
           {
             "px": 2,
-            "y": 3299.4,
+            "y": 3381.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1543,7 +1543,7 @@
           },
           {
             "px": 2,
-            "y": 5350.2,
+            "y": 5391.1,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1553,7 +1553,7 @@
           },
           {
             "px": 2,
-            "y": 6752.5,
+            "y": 6793.4,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1563,7 +1563,7 @@
           },
           {
             "px": 2,
-            "y": 7767.3,
+            "y": 7808.2,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1573,7 +1573,7 @@
           },
           {
             "px": 2,
-            "y": 8243.5,
+            "y": 8358.5,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1583,7 +1583,7 @@
           },
           {
             "px": 2,
-            "y": 9698,
+            "y": 9813,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1593,7 +1593,7 @@
           },
           {
             "px": 2,
-            "y": 11777.8,
+            "y": 11921.6,
             "width": 1360,
             "parts": 1,
             "structural": true,
@@ -1603,7 +1603,7 @@
           },
           {
             "px": 2,
-            "y": 13733.7,
+            "y": 13877.6,
             "width": 1360,
             "parts": 1,
             "structural": true,
