@@ -1210,9 +1210,15 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
       end
       """
 
-      assert {:ok, []} = scope_markers_in_source(prose_only),
+      # Bound first, then asserted on a boolean: `assert/2` is a function, so a
+      # `pattern = expr` in arg 1 would raise MatchError before the message
+      # could ever print (scripts/unreachable-assert-message-check.sh).
+      prose_markers = scope_markers_in_source(prose_only)
+
+      assert prose_markers == {:ok, []},
              "a marker that appears only in a comment, a doc attribute or a string " <>
-               "literal satisfied the scan — the census is back to grading prose"
+               "literal satisfied the scan (got #{inspect(prose_markers)}) — the census is " <>
+               "back to grading prose"
 
       # The control for the control: the same three words, in CODE, must all be
       # found. A scanner that finds nothing anywhere proves nothing.
