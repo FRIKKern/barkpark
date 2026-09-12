@@ -49,4 +49,84 @@
 # TO RAISE IT: don't. A rise means a new site was added; fix the site.
 #
 # Filed under task-b090e1c603d686ba.
-16
+#
+# ── RE-MEASURED 2026-09-12 (task-ab1d5320e09c9e72): 16 → 113 ──────────────────
+# THE RISE IS DETECTOR WIDENING, NOT NEW SITES. Not one line of the tree changed
+# in the commit that raises this number; the scanner changed. Proof, on the SAME
+# tree (origin/main 3f38dd0f8), with only scripts/pipefail-sigpipe-scan.sh
+# differing between the two runs:
+#
+#     parent  3f38dd0f8 : 15 finding(s) — high 15 · medium 0 · low 0 — over 378 file(s)
+#     this PR           : 113 finding(s) — high 113 · medium 0 · low 0 — over 378 file(s)
+#     (both: bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only)
+#     at all confidences the same tree reads 121 → 207.
+#
+# Note the parent read 15, not the 16 recorded below: the ratchet had been LOOSE
+# by one since some earlier fix, which is exactly the slack this file's own
+# header warns about. 113 banks it.
+#
+# WHAT THE SCANNER COULD NOT SEE, and now can — two blind spots, one site:
+#   1  a pipeline inside `"$( … )"` was invisible AT EVERY TIER. strip_quoted
+#      blanked every double-quoted run, so `x="$(producer | head -c 40)"` reached
+#      the matcher as `x=""`: no pipe, no reader, nothing to report. That is 98
+#      of the 98 new findings — a very common shell shape, not an exotic one.
+#   2  a `head` reader was classified by its PRODUCER'S NAME, so an INFINITE
+#      producer that matched no name (`LC_ALL=C tr -dc … </dev/urandom`) fell to
+#      medium and --min-confidence high — the only enforced tier — dropped it.
+#
+# THE LIVE INSTANCE that forced this: scripts/pds-scratch-target.sh:389 minted an
+# admin credential with `LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 40`
+# under `set -euo pipefail`. Main run 34685061716 printed "tr: write error:
+# Broken pipe"; a local reproduction under pipefail returned 141 deterministically.
+# The scan reported it at NO confidence, before or after. #17920 fixed the site.
+#
+# COMPOSITION of the 98 NEW findings, by file (all of them `… | head …` inside a
+# command substitution or a boolean, under pipefail). Every one is filed on the
+# ledger under task-ab1d5320e09c9e72 rather than absorbed here silently:
+#     45  scripts/required-checks.test.sh        6  scripts/pds-pull-proof.sh
+#      5  .github/workflows/reland-check.yml     4  scripts/pds-live-hetzner-placement-group.sh
+#      3  scripts/pdf-kill-listener-proof.sh     3  scripts/cloud-path-escape-check.test.sh
+#      3  scripts/bp-merge.sh                    2  scripts/pr-overlap.sh
+#      2  scripts/pds-scratch-target.sh          2  scripts/breakglass-watch.sh
+#     20  one each, across 20 further files in scripts/, .github/workflows/ and deploy/
+#
+# WHY NOT FIX-FIRST, AGAIN. Same answer as 2026-09-09 and for the same reason: 98
+# behaviour changes inside live gates, deploy scripts and CI workflows, landed
+# behind one PR to unblock a scanner, puts more risk into the tree than the
+# scanner removes. The rule below is unchanged — from here the number may FALL
+# and may never RISE, and a rise means a new site.
+#
+# Filed under task-ab1d5320e09c9e72.
+#
+# ── RE-MEASURED 2026-09-12 (task-ab1d5320e09c9e72, rebase onto origin/main 7b3145e1d): 113 ──
+# This PR banked 113 measured on origin/main 3f38dd0f8. Rebasing onto current
+# origin/main 7b3145e1d (which now carries #17920, bfa388097) still measures 113,
+# by exactly:
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
+#     → pipefail-sigpipe-scan: 113 finding(s) — high 113 · medium 0 · low 0 — over 381 file(s)
+#
+# 113 → 113 is a COINCIDENCE of a +1 and a −1, not a no-op. The +1 is #17920's OWN
+# CONTROL SPECIMEN; the −1 is a false positive this rebase also fixes:
+#
+#   +1  #17920 fixed scripts/pds-scratch-target.sh's urandom-cred site
+#       (`tr </dev/urandom | head -c 40` → `od -N20`) but added
+#       scripts/pds-scratch-target_test.sh keeping the OLD form as a deliberate 141
+#       control at :219, which the arm flags HIGH. By design — #17920's own SIGPIPE
+#       demo, not a regression.
+#   −1  scripts/pds-crown-launch.sh:1886 — `i="$(… | head -1 || true)"` split over
+#       two lines. The `|| true` swallows the 141, so it is NOT a hazard, but the
+#       old swallow-suppression pattern was anchored on `true` at end-of-string and
+#       the blanked tail reads `… || true)""`, so it slipped through and was banked.
+#       The suppression now peels trailing `)`/quote/space closers off a copy before
+#       testing. Banking a KNOWN false positive into an enforced ratchet is the
+#       dishonesty this lane exists to prevent, so it is fixed rather than counted.
+#
+# Net across the origin/main drift 3f38dd0f8→7b3145e1d (378→381 files):
+# required-checks.test.sh 45→48, pds-scratch-target.sh 2→1, +1 test.sh:219,
+# −1 crown-launch:1886 = 113.
+#
+# Re-measured AFTER the final rebase, per the regeneration rule (never hand-counted).
+#
+# Filed under task-ab1d5320e09c9e72.
+113

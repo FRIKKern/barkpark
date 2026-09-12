@@ -35,7 +35,8 @@
 #   (d) the producer can plausibly outlive the reader.
 #
 # CONFIDENCE is (d): high  = find/git/curl/cat FILE/loop/ls/jq/a full grep — unbounded
-#                            or file-sized output;
+#                            or file-sized output; OR any `head` reader whose
+#                            producer is not PROVABLY bounded (see below);
 #                   medium = printf/echo of a VARIABLE — the variable usually holds
 #                            captured command output, so its size is unknown.  This is
 #                            the shape of the live bug this scanner was written for;
@@ -45,6 +46,30 @@
 #   1  no pipe at all:  case "$s" in *pat*) ;; esac   /   [[ $s =~ re ]]
 #   2  drop -q, redirect:  printf '%s\n' "$s" | grep -E "$pat" >/dev/null
 #   3  here-string:  grep -Eq "$pat" <<<"$s"    (no producer process to kill)
+#
+# THE TRUNCATING READER (added 2026-09-12, task-ab1d5320e09c9e72).  `head` never
+# reads to EOF: bare `head` stops at 10 lines, `head -N`/`head -n N` at N lines,
+# `head -c N` at N bytes — then it CLOSES the pipe.  So for a head reader the
+# question is not "is the producer file-sized", it is "can the producer be shown
+# to STOP at or before what head takes".  If it cannot, the producer dies the
+# instant it writes past N: no 64KB buffer overrun required, no tree growth
+# required.  A head reader is therefore HIGH unless the producer is provably
+# bounded — `od -N<n>`, `dd count=`, a `head` of its own, or the printf/echo of a
+# LITERAL the classifier already calls low.
+#
+# TWO THINGS SHIPPED THAT BLIND SPOT TOGETHER, both fixed here:
+#   1  `LC_ALL=C tr -dc 'a-f0-9' </dev/urandom` is an INFINITE producer and
+#      matched none of the high-confidence NAMES, so it fell to "producer not
+#      classified" → medium, and --min-confidence high (the only tier CI
+#      enforces) dropped it.  Unbounded stdin — `</dev/urandom`, `</dev/zero`,
+#      `yes`, `cat /dev/…` — was the worst case in the class and the one case
+#      the enforced tier could not see.
+#   2  worse, the site was invisible at EVERY tier: the pipeline lived inside
+#      `"$( … )"`, and strip_quoted blanked every double-quoted run wholesale.
+#      See strip_quoted_keep_subst.
+# Measured on the tree that shipped it: scripts/pds-scratch-target.sh:389 read 0
+# findings at --min-confidence low before this change and is reported at high
+# after it.  #17920 fixed that one site; this change is the scanner's blind spot.
 #
 # INPUTS.  *.sh, *.bash — and, since 2026-09-09, *.yml/*.yaml: a GitHub Actions
 # `run:` body IS shell.  Every `run:` block is a SEPARATE process, so pipefail,
@@ -112,7 +137,8 @@ while [ $# -gt 0 ]; do
     shift 2
     ;;
   -h | --help)
-    sed -n '2,71p' "$0"
+    # 2,94p — the whole header block; re-measure it when the header grows
+    sed -n '2,94p' "$0"
     exit 0
     ;;
   -*) die "unknown option: $1" ;;
@@ -228,6 +254,67 @@ set -uo pipefail
   say miss-capture 'v="$(printf "%s" "$x" | grep -q foo)"' MISS
   say miss-or-true 'printf "%s" "$x" | grep -q foo || true' MISS
   say miss-comment '# if printf "%s" "$x" | grep -q foo; then :; fi' MISS
+
+  # ── the TRUNCATING-READER arm (task-ab1d5320e09c9e72) ─────────────────────
+  # Run at --min-confidence HIGH, because high is the only tier CI enforces and
+  # the whole defect was that the planted shape sat BELOW it.  The two MISS arms
+  # are the discrimination: if the arm were satisfied by the word `head` they
+  # would both report, and a scanner that flags every `head` is a scanner that
+  # gets switched off.  Body on stdin so the fixture can be quoted verbatim.
+  sayhigh() { # sayhigh <name> <HIT|MISS>; BODY on stdin, under `set -euo pipefail`
+    local n
+    {
+      printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+      cat
+    } >"$std/$1.sh"
+    n="$(PIPEFAIL_SCAN_ROOT="$std" bash "${BASH_SOURCE[0]}" --min-confidence high --count-only "$std/$1.sh" 2>/dev/null | sed -E 's/.*: ([0-9]+) finding.*/\1/')"
+    case "$2:$n" in
+    HIT:0) sno "$1: wanted a HIGH finding, got none" ;;
+    MISS:0) sok "$1: correctly silent at --min-confidence high" ;;
+    HIT:*) sok "$1: reported at HIGH ($n)" ;;
+    MISS:*) sno "$1: wanted silence at --min-confidence high, reported $n" ;;
+    esac
+  }
+
+  # POSITIVE — verbatim from scripts/pds-scratch-target.sh:389 as it shipped.
+  # An INFINITE producer (/dev/urandom through tr) into a 40-byte truncating
+  # reader, the pipeline captured into an assignment under set -e.  Before this
+  # arm the scanner reported it at NO confidence at all: the pipeline lives
+  # inside `"$( … )"`, which strip_quoted blanked wholesale.
+  sayhigh trunc-unbounded-producer HIT <<'SH'
+raw="pds-scratch-$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 40)"
+SH
+
+  # NEGATIVE (1) — a BOUNDED producer. `od -N20` stops after 20 bytes on its
+  # own, so it cannot outrun a reader that takes 40; this is the shipped #17920
+  # form with a `head` bolted back on. It contains the word `head`, the reader
+  # IS `head`, pipefail IS on, the status IS consumed — everything the arm keys
+  # on except the one thing that matters. Silence here is the discrimination.
+  sayhigh trunc-bounded-od-producer MISS <<'SH'
+raw="pds-scratch-$(LC_ALL=C od -An -v -tx1 -N20 </dev/urandom | tr -d ' \n' | head -c 40)"
+SH
+
+  # NEGATIVE (2) — printf of a LITERAL: 4 bytes into a 4-byte reader, already
+  # classified `low` by the producer block, and the arm must not promote it.
+  sayhigh trunc-literal-printf MISS <<'SH'
+printf 'abcd' | head -c 4
+SH
+
+  # NEGATIVE (3) — the same planted shape with pipefail OFF. Without pipefail
+  # the substitution's status is the LAST stage's (head, which succeeds), so
+  # there is no hazard and no finding. This is the arm that reds if the new code
+  # ever stops honouring condition (a).
+  sayhigh trunc-no-pipefail MISS <<'SH'
+set +o pipefail
+raw="pds-scratch-$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 40)"
+SH
+
+  # NEGATIVE (4) — `|| true` INSIDE the substitution swallows the 141. The
+  # trailing `)` is why this needs its own arm: a swallow pattern anchored on
+  # the word `true` alone does not match `… | head -1 || true)`.
+  sayhigh trunc-swallowed-by-or-true MISS <<'SH'
+pid="$(lsof -nP -iTCP:4000 -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+SH
 
   # ── the WORKFLOW arm (task-b090e1c603d686ba) ──────────────────────────────
   # `.github` was a default target that could never produce a finding, so these
@@ -484,6 +571,64 @@ strip_quoted() {
     out="$out$ch"
   done
   STRIPPED="$out"
+}
+
+# strip_quoted_keep_subst — strip_quoted, except that `$( … )` RESTARTS quoting,
+# which is what real shell does.  strip_quoted blanks every double-quoted run, so
+# a pipeline that lives inside a command substitution inside double quotes —
+# `x="$(producer | head -c 40)"` — arrives at the matcher as `x=""`: no pipe, no
+# reader, nothing to report.  That is the exact shape that let
+# scripts/pds-scratch-target.sh:389 ship `LC_ALL=C tr -dc 'a-f0-9' </dev/urandom
+# | head -c 40` unflagged at EVERY confidence tier until a CI runner printed
+# "tr: write error: Broken pipe" (main run 34685061716; fixed by #17920).
+# Answers in STRIPPED_SUBST.  Used ONLY when the plain strip found no pipe at
+# all, so it is strictly additive — it cannot change any site already reported.
+# The stack is a string of D (was inside a double quote) / N (was unquoted)
+# markers rather than an array index, because macOS ships bash 3.2 and
+# ${a[-1]} is a bash 4.3 feature.
+STRIPPED_SUBST=""
+strip_quoted_keep_subst() {
+  local s="$1" out="" ch nx q="" stack="" i n just_opened_dq=0
+  n=${#s}
+  for ((i = 0; i < n; i++)); do
+    ch="${s:i:1}"
+    nx="${s:i+1:1}"
+    # A `$(` inside '…' is literal — single quotes do not expand — so the
+    # restart is honoured only outside a single-quoted run.
+    if [ "$q" != "'" ] && [ "$ch" = '$' ] && [ "$nx" = '(' ]; then
+      # `x="$(…)"` must come out as `x=$(…)`, not `x=""$(…)`: the boolean-use
+      # test below keys on the `=$(` adjacency, and the placeholder pair emitted
+      # for the opening quote would break it — the site would then be reported
+      # as a bare command under set -e instead of an assignment capture.
+      [ "$just_opened_dq" -eq 1 ] && out="${out%??}"
+      case "$q" in '"') stack="D$stack" ;; *) stack="N$stack" ;; esac
+      q=""
+      out="$out\$("
+      i=$((i + 1))
+      continue
+    fi
+    if [ -z "$q" ] && [ "$ch" = ')' ] && [ -n "$stack" ]; then
+      case "${stack:0:1}" in 'D') q='"' ;; *) q="" ;; esac
+      stack="${stack:1}"
+      out="$out)"
+      continue
+    fi
+    if [ -n "$q" ]; then
+      [ "$ch" = "$q" ] && q=""
+      continue
+    fi
+    case "$ch" in
+    "'" | '"')
+      q="$ch"
+      out="$out$ch$ch"
+      [ "$ch" = '"' ] && just_opened_dq=1 || just_opened_dq=0
+      continue
+      ;;
+    esac
+    out="$out$ch"
+    just_opened_dq=0
+  done
+  STRIPPED_SUBST="$out"
 }
 
 # ── yaml_flatten — render a GitHub Actions workflow as the shell it really is ──
@@ -834,6 +979,23 @@ for f in "${files[@]}"; do
     case "$line" in *'|'*) ;; *) continue ;; esac
     strip_quoted "$line"
     bare="$STRIPPED"
+
+    # ── the substitution-aware re-strip (task-ab1d5320e09c9e72) ───────────
+    # Only when the plain strip left no pipe at all: then the only place a
+    # pipeline can be hiding is inside a `$( … )` within a double-quoted run,
+    # where real shell restarts quoting and this script did not.  Narrowed to
+    # a `head` reader on purpose — that is the class this row was filed for,
+    # and keeping the swap narrow keeps the change strictly additive instead
+    # of re-classifying every already-reported site.
+    case "$bare" in
+    *'|'*) ;;
+    *)
+      strip_quoted_keep_subst "$line"
+      case "$STRIPPED_SUBST" in
+      *'|'*head*) bare="$STRIPPED_SUBST" ;;
+      esac
+      ;;
+    esac
     # `||` and `&&` are NOT pipes.  Fold them out of the way BEFORE anything
     # splits on `|`, or `${bare##*|}` lands inside the `||` of
     # `printf … | grep -q … || fail` and the boolean use goes unseen — which is
@@ -867,7 +1029,22 @@ for f in "${files[@]}"; do
 
     # `… || true` / `… || :` swallows the 141.  The status is consumed, but the
     # consequence is nil — reporting it is a pure false positive.
-    case "$bare" in
+    # Inside a command substitution the swallow is the LAST thing before the
+    # closing paren — `x="$(producer | head -1 || true)"` — and once the quoted
+    # run is blanked the tail reads `… || true)""`. A pattern anchored on the
+    # word alone matches neither, so a genuinely harmless site gets reported.
+    # Peel the closers off a COPY before testing; `bare` itself is untouched
+    # because the reported text comes from it.  Measured 2026-09-12: without
+    # this, scripts/pds-crown-launch.sh:1886 (a `| head -1 || true)"` line
+    # continuation) is a false positive banked into the enforced ratchet.
+    swallow="$bare"
+    while :; do
+      case "$swallow" in
+      *[\)\"\'\ ]) swallow="${swallow%?}" ;;
+      *) break ;;
+      esac
+    done
+    case "$swallow" in
     *$'\002'*true | *$'\002'*true\ * | *$'\002'*: | *$'\002'*:\ *) continue ;;
     esac
 
@@ -963,6 +1140,38 @@ for f in "${files[@]}"; do
       ;;
     *) conf="medium" why="producer not classified" ;;
     esac
+
+    # ── a TRUNCATING READER forces HIGH (task-ab1d5320e09c9e72) ───────────
+    # `head` does not read to EOF under any flag: bare `head` stops at 10 lines,
+    # `head -N`/`head -n N` at N lines, `head -c N` at N bytes — and then CLOSES
+    # the pipe.  So the question is never "is the producer file-sized"; it is
+    # "can the producer be shown to STOP at or before what head takes".  If it
+    # cannot, the producer is killed the instant it writes past N, and pipefail
+    # hands back 141 — no 64KB buffer required, no tree growth required.
+    #
+    # WHAT THE OLD CLASSIFIER DID.  `LC_ALL=C tr -dc 'a-f0-9' </dev/urandom` is
+    # an INFINITE producer and matched none of the high-confidence names, so it
+    # fell to `producer not classified` → medium, and `--min-confidence high` —
+    # the only tier CI enforces — dropped it.  An unbounded stdin (`</dev/urandom`,
+    # `</dev/zero`, `yes`, `cat /dev/…`) is the worst case in the class and was
+    # the one case the tier could not see.
+    #
+    # THE EXCEPTION IS BOUNDEDNESS, NOT THE WORD `head`: a producer that is
+    # byte/line-capped by its own flags (`od -N<n>`, `dd count=`, a `head` of its
+    # own) cannot outrun the reader, and printf/echo of a LITERAL is already
+    # classified low by the block above and stays there.  The selftest pins both
+    # directions (trunc-unbounded-producer / trunc-bounded-producer).
+    if [ "$reader" = "head" ] && [ "$conf" != "low" ]; then
+      case "$ptrim" in
+      *od\ *-N[0-9]* | *od\ *-N\ [0-9]* | *dd\ *count=* | *head\ -c* | *head\ -n* | *head\ -[0-9]*)
+        why="$why; truncating reader, but the producer is byte/line-BOUNDED"
+        ;;
+      *)
+        conf="high"
+        why="truncating reader (head closes the pipe at N) on a producer not provably bounded — 141 needs no buffer overrun"
+        ;;
+      esac
+    fi
 
     [ "$(rank "$conf")" -ge "$min_rank" ] || continue
 
