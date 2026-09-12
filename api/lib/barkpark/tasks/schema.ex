@@ -10,6 +10,7 @@ defmodule Barkpark.Tasks.Schema do
   """
 
   alias Barkpark.Content.SchemaDefinition
+  alias Barkpark.Tasks.Stage
   alias Barkpark.Tasks.Validation
 
   @doc """
@@ -172,6 +173,33 @@ defmodule Barkpark.Tasks.Schema do
           },
           "level" => "warning",
           "fields" => ["close_reason"]
+        },
+
+        # The birth fence's SECOND refusal branch, mirrored as a Studio nudge
+        # (`Writer.ensure_task_born_adjudicated/5`: `term in
+        # Stage.trigger_required_dispositions() and blank?(trigger)` -> 422).
+        # A nudge, never a block: the API is still the single enforcing writer
+        # and the raw door already 422s a hollow park. The list is DERIVED --
+        # the dispositions that do NOT owe a trigger are
+        # `Stage.dispositions() -- Stage.trigger_required_dispositions()`, so
+        # adding a fourth term to Stage moves this rule with it and there is
+        # no second list to fall out of date.
+        %{
+          "name" => "parked_needs_reopen_trigger",
+          "title" => "A parked task must say what would reopen it",
+          "rule" => %{
+            "any" => [
+              %{
+                "field" => Stage.disposition_key(),
+                "operator" => "in",
+                "value" => Stage.dispositions() -- Stage.trigger_required_dispositions()
+              },
+              %{"field" => Stage.disposition_key(), "operator" => "empty"},
+              %{"field" => Stage.reopen_trigger_key(), "operator" => "non_empty"}
+            ]
+          },
+          "level" => "warning",
+          "fields" => [Stage.reopen_trigger_key()]
         }
       ],
 
@@ -557,6 +585,112 @@ defmodule Barkpark.Tasks.Schema do
           "group" => "work",
           "description" =>
             "Worker id holding the claim. Engine-written on claim, cleared on lease reap. Close does NOT clear it (last worker stays attributed)."
+        },
+
+        # -- THE ADJUDICATION KEYS (PDS waves 23/24/28; DECLARED by wave 29) --
+        # All three keys have PERSISTED since wave 24 and are fenced at birth
+        # by `Content.Writer.ensure_task_born_adjudicated/5` -- but they were
+        # never DECLARED, so every schema-derived surface (the Studio form,
+        # the export shape, the SDK types, `bp schema get task`) was blind to
+        # three live keys. Measured on this repo: `task_schema/1` returned 30
+        # field names and none of them was `disposition`, while a create
+        # carrying all three read every one of them back.
+        #
+        # THE VOCABULARY IS NOT RETYPED HERE. The field NAMES are
+        # `Stage.disposition_key/0`, `Stage.reopen_trigger_key/0` and
+        # `Stage.disposition_rerun_key/0`, and `options` IS
+        # `Stage.dispositions/0` -- the very list the birth fence screens a
+        # birth against (`term not in Stage.dispositions()` -> 422). There is
+        # no hand-copied mirror to unlock, for the same reason
+        # `lifecycle_status` reads `Validation.lifecycle_statuses/0` rather
+        # than restating seven words. `tasks_schema_adjudication_triple_test.exs`
+        # decodes both sides and asserts the identity, so replacing either
+        # call with a literal reds.
+        #
+        # DECLARING IS NOT ENFORCING, and that is deliberate (this row's c2).
+        # `select` is a v1 leaf -- `SchemaDefinition.parse_field_type/3` parses
+        # any other binary type-tag permissively and preserves it verbatim --
+        # so no options check is added to the write path. That matters because
+        # a content-only rule here would be RETROACTIVE (the birth fence's own
+        # header measured and refuted exactly that placement), and live rows
+        # carry the raw-door `OPEN`/`open` case split a retroactive rule would
+        # start refusing on their next patch. `Writer` stays the one enforcing
+        # validator; this declaration only stops the read surfaces lying.
+        #
+        # GROUP `work`, not `close`: a `parked` row is NOT terminal, so the
+        # close group's `visibleWhen lifecycle_status in [done, cancelled]`
+        # would hide the adjudication on precisely the rows that carry it.
+        %{
+          "name" => Stage.disposition_key(),
+          "title" => "Disposition",
+          "type" => "select",
+          "options" => Stage.dispositions(),
+          "group" => "work",
+          "description" =>
+            "Adjudication term: open | parked | closed. Lowercase-canonical -- the birth fence refuses an off-vocabulary or mis-cased term with 422. Written by `bp task stage <id> <state> --disposition <term> --note <why>`; the raw mutate door refuses a direct change on a live task."
+        },
+
+        # THE FOURTH DURABLE KEY (PDS wave 23), declared here for the same
+        # reason and by the same rule as the three above: it PERSISTS and it
+        # was INVISIBLE. Measured on this repo by a throwaway case before this
+        # hunk existed: `task_schema/1` returned 33 field names, none of them
+        # `disposition_reason`, while a create carrying
+        # `content.disposition_reason` read it straight back off the row.
+        #
+        # NAME READ, NOT RETYPED: `Stage.durable_reason_key/0` is the one
+        # place the string "disposition_reason" is written, and it is the same
+        # constant `Stage.apply_durable_reason/2` writes and
+        # `TtlSweeper.apply_lapse/1` deliberately does NOT delete (the durable
+        # half of the durable/ephemeral split). A literal here would be an
+        # unlocked mirror; `schema_adjudication_triple_test.exs` decodes both
+        # sides and reds if this declaration is removed or the key diverges.
+        #
+        # NO `visibleWhen`, UNLIKE THE RERUN, and that asymmetry is the point.
+        # `Stage.stage/3` routes `:note` on EVERY stageable target -- including
+        # `-> open`, where the reason for resolving the thought is exactly the
+        # thing worth keeping -- so a row can carry a reason with no
+        # `disposition` term at all. Gating this field on
+        # `disposition non_empty` (what `disposition_rerun` does, correctly,
+        # because a rerun with no term is meaningless) would hide it on
+        # precisely those rows. `work`, not `close`, for the reason stated
+        # above the triple.
+        #
+        # DECLARING IS STILL NOT ENFORCING: the raw mutate door's
+        # `ensure_disposition_via_verb/4` refuses a raw change of the TERM and
+        # of the RERUN, and refuses trigger erasure -- it does not fence this
+        # key, and this declaration does not add a fence. `Stage` stays the
+        # sanctioned writer; the read surfaces just stop lying about the row.
+        %{
+          "name" => Stage.durable_reason_key(),
+          "title" => "Disposition reason",
+          "type" => "text",
+          "rows" => 3,
+          "group" => "work",
+          "description" =>
+            "The durable WHY behind the adjudication -- free text, written by `--note` on `bp task stage`. Durable on purpose: the TTL sweeper reaps the ephemeral `engagement` lease by name and never touches this key. Recorded on every stage, including `-> open`, so it can be present with no disposition term. Replacing a different non-blank reason is REFUSED unless the stage call carries `supersede: true` (the wire param `supersede`)."
+        },
+        %{
+          "name" => Stage.reopen_trigger_key(),
+          "title" => "Reopen trigger",
+          "type" => "text",
+          "rows" => 2,
+          "group" => "work",
+          "visibleWhen" => %{
+            "field" => Stage.disposition_key(),
+            "operator" => "in",
+            "value" => Stage.trigger_required_dispositions()
+          },
+          "description" =>
+            "The durable WHEN-RECONSIDERED. REQUIRED for a parked row: a birth carrying disposition=parked with no trigger is a hollow park and is refused 422. Supply it with `--reopen-trigger` on the same stage."
+        },
+        %{
+          "name" => Stage.disposition_rerun_key(),
+          "title" => "Disposition rerun",
+          "type" => "string",
+          "group" => "work",
+          "visibleWhen" => %{"field" => Stage.disposition_key(), "operator" => "non_empty"},
+          "description" =>
+            "One command an auditor can run to try to prove the disposition reason WRONG (PDS wave 28). OPTIONAL -- an absent rerun is an honest \"this cannot be checked\". Screened by Stage: no `git -C`, no `$( )`, no `test`/`[` predicate, no output-formatting tail that would mask the probe's exit code."
         },
 
         # Fleet handoff memory. Append-only by convention via the generic

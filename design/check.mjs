@@ -8,7 +8,7 @@
 // Dependency-free (Node built-ins only). Pairs with design/validate.mjs (shape)
 // and design/emit.mjs (the single source of the emitted bytes).
 import {
-  evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, AIR_STEPS, EVIDENCE_KEYS, EVIDENCE_UNITS, SECTION_KEYS, SECTION_UNITS, RULE_KEYS, RULE_UNITS, MOTION_STEPS, MOTION_SURFACES, glyphOf, ARTIFACTS, repoRoot,
+  evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, READING_STEPS, AIR_STEPS, EVIDENCE_KEYS, EVIDENCE_UNITS, SECTION_KEYS, SECTION_UNITS, RULE_KEYS, RULE_UNITS, MOTION_STEPS, MOTION_SURFACES, glyphOf, ARTIFACTS, repoRoot,
   INST_ORDER, PROVIDERS, INST_ROLE_CSS, instRoleChannels, hslToHex,
   readManifest, attribute, lostLines, regionDigest, MANIFEST_PATH,
   auditActions, AUDIT_ACTIONS_PATH,
@@ -252,6 +252,60 @@ for (const step of TYPE_STEPS) {
 }
 if (typeOk)
   console.log(`  ok   ${TYPE_STEPS.length} chrome type steps emit --text-* vars matching tokens.type.chrome (size + line-height)`);
+
+// ── Part C2: the WEB type ladder has exactly one source ──────────────────────
+// Studio reads the scale through emitted CSS vars (Part C). The web demo cannot:
+// its styleguide renders inline `style` objects, which need NUMBERS. For months
+// that meant web/components/styleguide.tsx hand-kept its own six-step
+// {size,lh,weight} array beside a comment promising a later wave would wire the
+// emitted scale in — a promise that outlived the wave (au-r4-web-type-ladder).
+//
+// The fix was to emit the numbers (web/lib/tokens.gen.ts `chromeType` /
+// `readingType`, both {size,lineHeight,weight}). This part is the gate that keeps
+// it fixed, and it has TWO arms because either alone is defeatable: arm 1 asserts
+// the emitted ladders equal tokens.json, arm 2 asserts the consumer restates
+// nothing. A page that re-typed the same numbers would pass arm 1 forever.
+console.log("\ndesign/check.mjs — Part C2: web type-ladder single source");
+let webTypeOk = true;
+const webTokensPath = "web/lib/tokens.gen.ts";
+const styleguidePath = "web/components/styleguide.tsx";
+const webTokensText = readFileSync(join(repoRoot, webTokensPath), "utf8");
+const styleguideText = readFileSync(join(repoRoot, styleguidePath), "utf8");
+const webTypeFail = (m) => { fail(m); webTypeOk = false; };
+// arm 1 — every emitted step carries tokens.json's three numbers, verbatim.
+const emittedStep = (family, step) => {
+  const re = new RegExp(`^  (?:"${step}"|${step}): \\{ size: (\\d+(?:\\.\\d+)?), lineHeight: (\\d+(?:\\.\\d+)?), weight: (\\d+) \\},$`, "m");
+  const block = webTokensText.split(`export const ${family} = {`)[1];
+  const m = block === undefined ? null : block.split("} as const")[0].match(re);
+  return m && { size: Number(m[1]), lineHeight: Number(m[2]), weight: Number(m[3]) };
+};
+for (const step of TYPE_STEPS) {
+  const spec = tokens.type.chrome[step];
+  const got = emittedStep("chromeType", step);
+  if (!got) { webTypeFail(`  Part C2 FAIL: ${webTokensPath} chromeType.${step} is MISSING`); continue; }
+  if (got.size !== spec.size || got.lineHeight !== spec.lineHeight || got.weight !== spec.weight)
+    webTypeFail(`  Part C2 FAIL: chromeType.${step} ${JSON.stringify(got)} ≠ tokens.type.chrome.${step} {size:${spec.size},lineHeight:${spec.lineHeight},weight:${spec.weight}}`);
+}
+for (const step of READING_STEPS) {
+  const spec = tokens.type.reading[step];
+  const wantWeight = spec.weight ?? (step === "body" ? 400 : tokens.type.reading.headingWeight);
+  const got = emittedStep("readingType", step);
+  if (!got) { webTypeFail(`  Part C2 FAIL: ${webTokensPath} readingType.${step} is MISSING`); continue; }
+  if (got.size !== spec.size || got.lineHeight !== spec.lineHeight || got.weight !== wantWeight)
+    webTypeFail(`  Part C2 FAIL: readingType.${step} ${JSON.stringify(got)} ≠ tokens.type.reading.${step} {size:${spec.size},lineHeight:${spec.lineHeight},weight:${wantWeight}}`);
+}
+// arm 2 — the consumer READS the ladder and restates no step of its own. A
+// literal `size: 20` or `lh: 1.3` in this file is the defect returning.
+for (const sym of ["chromeType", "chromeTypeOrder", "readingType", "readingTypeOrder"])
+  if (!styleguideText.includes(sym))
+    webTypeFail(`  Part C2 FAIL: ${styleguidePath} does not consume the emitted ${sym}`);
+if (!/from "@\/lib\/tokens\.gen"/.test(styleguideText))
+  webTypeFail(`  Part C2 FAIL: ${styleguidePath} does not import the emitted token module`);
+for (const [re, what] of [[/\bsize:\s*\d/, "a literal type size"], [/\blh:\s*\d/, "a literal line height"], [/\bfontWeight:\s*\d{3}\b/, "a literal font weight"]])
+  if (re.test(styleguideText))
+    webTypeFail(`  Part C2 FAIL: ${styleguidePath} declares ${what} — the hand-kept ladder is back beside the emitted one`);
+if (webTypeOk)
+  console.log(`  ok   ${TYPE_STEPS.length} chrome + ${READING_STEPS.length} reading steps emit typed {size,lineHeight,weight} into ${webTokensPath}, and ${styleguidePath} consumes them without restating a step`);
 
 // ── Part D: cloud-console family parity (charter azure-hetzner Decision 7) ────
 // The instanceLifecycle + provider-identity families are DUAL-emitted: the SPA

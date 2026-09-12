@@ -11,6 +11,16 @@
 #   barkpark stop      stop the server and the managed Postgres — killing only a
 #                      process it can identify as ours, never a stranger that
 #                      happens to hold the port.
+#   barkpark stop --force <pid>
+#                      the owner's explicit way out of a WEDGED server: a process
+#                      that holds $PORT but does not answer /api/schemas, with a
+#                      pidfile that does not name it. Plain `stop` refuses it
+#                      (rightly — it cannot tell it from a stranger on 4000) and
+#                      `up` then dies on the held port, so `reload` dead-ends.
+#                      --force takes the pid EXPLICITLY, refuses any pid that
+#                      does not currently hold $PORT, and names what it kills.
+#                      There is no silent fallback: nothing is ever killed on an
+#                      uncorroborated claim, only on one the owner typed.
 #   barkpark status    report Postgres + the OBSERVED server state — one of
 #                      ANSWERING / PROCESS-ALIVE-NOT-ANSWERING / STOPPED /
 #                      UNKNOWN, decided from the port and an HTTP answer,
@@ -172,7 +182,7 @@ start_server() {
       report_credential
       return 0
     fi
-    die "port $PORT is held by pid $lpid but http://$PHX_HOST:$PORT/api/schemas does not answer — a wedged server, one still booting, or something else entirely. Run 'barkpark status', then stop it (kill $lpid) or set PORT=<other>; see $SERVER_LOG"
+    die "port $PORT is held by pid $lpid but http://$PHX_HOST:$PORT/api/schemas does not answer — a wedged server, one still booting, or something else entirely. Run 'barkpark status' first; if it is still wedged, the way out is 'barkpark stop --force $lpid' (it kills that pid and only that pid, and refuses if $lpid is not the one holding port $PORT), or set PORT=<other>; see $SERVER_LOG"
   fi
 
   # Nothing is listening, so ANY pidfile here is a claim we cannot corroborate:
@@ -257,6 +267,10 @@ wait_server() {
 # Barkpark API. Anything else we refuse to kill, and we say why.
 stop_server() {
   local claim lpid pid why
+  # Set when we refuse an unidentified port holder, so a CALLER (cmd_reload) can
+  # tell "stopped" from "refused" without re-deriving the state. Cleared on
+  # every call so a second stop in one process cannot inherit a stale verdict.
+  STOP_REFUSED_PID=""
   claim="$(cat "$SERVER_PID_FILE" 2>/dev/null || true)"
   lpid="$(listener_pid || true)"
   pid=""
@@ -272,7 +286,9 @@ stop_server() {
 
   if [ -z "$pid" ]; then
     if [ -n "$lpid" ]; then
-      log "refusing to stop pid $lpid — it holds port $PORT but does not answer http://$PHX_HOST:$PORT/api/schemas and $SERVER_PID_FILE does not name it, so it is not identifiably Barkpark. Nothing was killed (run 'kill $lpid' yourself if it is yours)."
+      STOP_REFUSED_PID="$lpid"
+      log "refusing to stop pid $lpid — it holds port $PORT but does not answer http://$PHX_HOST:$PORT/api/schemas and $SERVER_PID_FILE does not name it, so it is not identifiably Barkpark. Nothing was killed."
+      log "  if that pid IS your wedged Barkpark, the way out is: barkpark stop --force $lpid"
     elif [ -n "$claim" ] && kill -0 "$claim" 2>/dev/null; then
       log "not stopping pid $claim — $SERVER_PID_FILE claims it, but nothing is listening on port $PORT. Stale pidfile: discarding it without killing anything."
     else
@@ -296,6 +312,60 @@ stop_server() {
     log "server not running"
   fi
   rm -f "$SERVER_PID_FILE"
+}
+
+# ── the explicit way out of a wedged server ──────────────────────────────────
+#
+# `stop` refuses a port holder it cannot identify as Barkpark, and `up` then
+# dies because the port is held — two correct refusals that compose into a dead
+# end for one real state (wedged/half-booted server, pidfile that does not name
+# it). This is the way out, and it is deliberately NOT a fallback inside
+# stop_server: the pid is not inferred, it is TYPED BY THE OWNER, which is the
+# only corroboration a process that answers nothing can have.
+#
+# Two refusals guard it, and both come BEFORE any signal is sent:
+#   * no pid, or a non-numeric one — there is nothing to name, so nothing dies;
+#   * a pid that is not the one currently holding $PORT — that is the stranger
+#     case wave 24 exists to prevent, and typing --force does not license it.
+# Only a pid that IS the current port holder is killed, and it is named in the
+# line printed before the kill.
+force_stop_pid() { # <pid>
+  local pid="${1:-}" lpid i
+
+  case "$pid" in
+    "")            die "stop --force needs the pid it may kill: barkpark stop --force <pid>. Run 'barkpark status' to see which pid holds port $PORT. Nothing was killed." ;;
+    *[!0-9]*)      die "stop --force takes a pid, not '$pid'. Nothing was killed." ;;
+  esac
+
+  lpid="$(listener_pid || true)"
+  if [ -z "$lpid" ]; then
+    die "refusing to force-kill pid $pid — nothing is listening on port $PORT, so that pid is not a wedged Barkpark server on this port. Nothing was killed."
+  fi
+  if [ "$pid" != "$lpid" ]; then
+    die "refusing to force-kill pid $pid — port $PORT is held by pid $lpid, not $pid. --force only ever kills the pid that holds the port. Nothing was killed."
+  fi
+
+  log "force-stopping pid $pid — it holds port $PORT and you named it explicitly (it is NOT corroborated as Barkpark; nothing else will be signalled)"
+  kill "$pid" 2>/dev/null || true
+  for i in $(seq 1 15); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  rm -f "$SERVER_PID_FILE"
+  log "port $PORT released — 'barkpark up' can boot now"
+}
+
+# `reload` is stop+start, so it inherits stop's refusal. Without this it would
+# refuse, then walk into a start_server that CANNOT succeed (the port is still
+# held) and report a second, differently-worded failure. Stop at the refusal and
+# print the one-line recovery instead — the owner is told at the moment of the
+# refusal, not left to infer it from a boot error.
+reload_stop_or_explain() {
+  stop_server
+  if [ -n "${STOP_REFUSED_PID:-}" ]; then
+    die "reload stopped: port $PORT is still held by pid $STOP_REFUSED_PID, which is not identifiably Barkpark, so nothing was killed and nothing can boot on that port. Your way out, in one line: barkpark stop --force $STOP_REFUSED_PID && barkpark up   (or re-run with PORT=<other> to leave that process alone)"
+  fi
 }
 
 # ── migrations ───────────────────────────────────────────────────────────────
@@ -355,14 +425,24 @@ cmd_token() {
 # server boots in :prod and tries to connect to the managed DB.
 cmd_reload() {
   log "reload: restarting server so config changes take effect"
-  stop_server
+  reload_stop_or_explain
   "$PG" start >/dev/null
   load_env
   start_server
 }
 
-cmd_stop() {
-  stop_server
+cmd_stop() { # [--force <pid>]
+  case "${1:-}" in
+    --force)
+      force_stop_pid "${2:-}"
+      ;;
+    "")
+      stop_server
+      ;;
+    *)
+      die "unknown argument '$1' — usage: barkpark stop [--force <pid>]"
+      ;;
+  esac
   "$PG" stop
 }
 
@@ -444,12 +524,12 @@ cmd_status() {
 case "${1:-up}" in
   up)     cmd_up ;;
   reload) cmd_reload ;;
-  stop)   cmd_stop ;;
+  stop)   shift || true; cmd_stop "$@" ;;
   status) cmd_status ;;
   token)  cmd_token ;;
   psql)   shift || true; exec "$PG" psql "$@" ;;
   *)
-    echo "usage: barkpark {up|reload|stop|status|token|psql}" >&2
+    echo "usage: barkpark {up|reload|stop [--force <pid>]|status|token|psql}" >&2
     exit 2
     ;;
 esac

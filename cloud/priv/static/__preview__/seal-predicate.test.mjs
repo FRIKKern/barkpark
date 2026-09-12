@@ -1445,16 +1445,16 @@ test('wave 11: --ladder-only does NOT swallow an INFRA FAULT into a clean read',
 // HERMETIC HERE SCOPES TO THE NETWORK AND NOTHING WIDER. This run still reads real git
 // history through `--repo REPO` (filed as cch-w28-followup-seal-suite-depth1-coupling).
 const stubbedLiveRoster = (src) => {
-  const from = 'const children = fixture ? fixture.children : fetchRoster(EPIC);';
+  const from = 'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;';
   // ASSERTED PRESENT BEFORE IT IS REPLACED. `String.prototype.replace` on an anchor that
   // has drifted is a SILENT no-op, and `mutatedRun`'s own `assert.notEqual(out, src)`
   // only proves SOMETHING changed — which the day this line is reworded would leave the
   // test back on the network with nothing saying so.
   assert.ok(src.includes(from), `mutation anchor has drifted out of the predicate: ${from}`);
-  return src.replace(from,
-    'const children = fixture ? fixture.children : ['
-    + '{ _id: "stub-open-row", lifecycle_status: "open", parent_id: EPIC }, '
-    + '{ _id: "stub-done-row", lifecycle_status: "done", parent_id: EPIC }];');
+  // The canned rows are LEAVES: the walk is transitive since wave 26, so the stand-in
+  // must answer for the epic AND for every row under it, or the walk leaves the fixture
+  // and goes back on the network for their children.
+  return src.replace(from, 'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : ((id) => (id === EPIC ? [{ _id: "stub-open-row", lifecycle_status: "open", parent_id: EPIC }, { _id: "stub-done-row", lifecycle_status: "done", parent_id: EPIC }] : []));');
 };
 
 test('wave 11: --ladder-only reaches the ladder the live refusals never can', () => {
@@ -1643,8 +1643,7 @@ test('wave 27: the root guard reads a LINKED WORKTREE, where `.git` is a FILE, n
 // cloud-console-hardening-epicc". Reproduced here WITHOUT the network by standing an
 // empty array in for the live roster fetch — the same population that typo produced.
 const emptyLiveRoster = (src) => {
-  const out = src.replace('const children = fixture ? fixture.children : fetchRoster(EPIC);',
-    'const children = fixture ? fixture.children : [];');
+  const out = src.replace('const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;', 'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : ((id) => (id === EPIC ? [] : []));');
   assert.notEqual(out, src, 'the empty-live-roster mutation must actually apply');
   return out;
 };
@@ -1674,7 +1673,7 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
   const sealed = mutatedRun(
     (src) => mustReplace(
       mustReplace(emptyLiveRoster(src),
-        'if (!fixture && children.length === 0)', 'if (false && children.length === 0)'),
+        'if (!fixture && direct.length === 0)', 'if (false && direct.length === 0)'),
       'const fetchById = (id) => {',
       'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {'),
     ['--repo', REPO, '--successor', 'TERMINAL']);
@@ -1721,7 +1720,8 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
 // THE FABRICATION SENTENCES, RELOCATED — reachable WITHOUT git history.
 // `Sealed 0 children of …` is the sentence the empty-roster floor exists to prevent, so
 // it must stay pinned somewhere a depth-1 CI clone can reach. The floor is live-only
-// (`if (!fixture && children.length === 0)`), so a ledger fixture with an EMPTY
+// (`if (!fixture && direct.length === 0)` — the floor is on the DIRECT level, so an
+// epic whose direct roster is empty is refused whatever hangs below), so a fixture with an EMPTY
 // `children` array walks straight into it — and the fixture path stands `landed` in for
 // ancestry, so clause (b) never touches git at all. The one thing this demonstration
 // does NOT carry, relative to the live control above, is `mode=live`: it proves the
@@ -1750,11 +1750,17 @@ test('wave 28: the fabrication sentence is reachable over an empty FIXTURE roste
 // its tree is unquotable.
 test('wave 27: the verdict token names the roster it counted and the tree it read', () => {
   // The LIVE verdict path, reached hermetically through the control mutation above.
+  // ASSERTED PRESENT BEFORE REPLACED. A bare `.replace` on a drifted anchor is a SILENT
+  // no-op, and this chain's own `assert.notEqual(out, src)` is satisfied by the roster
+  // mutation alone — measured at wave 26, when the floor's anchor moved from `children`
+  // to `direct` and this test redded on a token it could not explain.
+  const must26 = (src, from, to) => { assert.ok(src.includes(from), `anchor drifted: ${from}`); return src.replace(from, to); };
   const live = mutatedRun(
-    (src) => emptyLiveRoster(src)
-      .replace('if (!fixture && children.length === 0)', 'if (false && children.length === 0)')
-      .replace('const fetchById = (id) => {',
-        'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {'),
+    (src) => must26(
+      must26(emptyLiveRoster(src),
+        'if (!fixture && direct.length === 0)', 'if (false && direct.length === 0)'),
+      'const fetchById = (id) => {',
+      'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {'),
     ['--repo', REPO, '--successor', 'TERMINAL']);
   assert.match(token(live.out), /roster=0 repo=\S+ head=[0-9a-f]{7,}/,
     'a live verdict states its population AND the tree it was taken from');
@@ -1928,8 +1934,8 @@ test('wave 29 THE VERDICT PATH: HISTORY-UNAVAILABLE is a LETTER at exit 1, never
   const { root } = synthGitRepo({});
   const must = (s, from, to) => { assert.ok(s.includes(from), `anchor drifted: ${from}`); return s.replace(from, to); };
   const mut = (src) => must(
-    must(src, 'const children = fixture ? fixture.children : fetchRoster(EPIC);',
-      'const children = fixture ? fixture.children : [{ _id: "x", lifecycle_status: "done" }];'),
+    must(src, 'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;',
+      'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : ((id) => (id === EPIC ? [{ _id: "x", lifecycle_status: "done" }] : []));'),
     'const fetchById = (id) => {',
     'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {');
   const { status, out } = mutatedRun(mut, ['--repo', root, '--successor', 'TERMINAL']);
@@ -1952,8 +1958,8 @@ test('wave 29: a checkout with WHOLE history is BYTE-IDENTICAL to the undiscrimi
   // ancestry leg. `b-unavailable=` is appended ONLY when non-zero for exactly this
   // reason — a new field on every green would make every previously-quoted token
   // unmatchable for a condition that did not occur.
-  const roster = (src) => src.replace('const children = fixture ? fixture.children : fetchRoster(EPIC);',
-    'const children = fixture ? fixture.children : [{ _id: "x", lifecycle_status: "done" }];');
+  const roster = (src) => src.replace('const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;',
+    'const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : ((id) => (id === EPIC ? [{ _id: "x", lifecycle_status: "done" }] : []));');
   const stubGate = (src) => src.replace('const fetchById = (id) => {',
     'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {');
   const now = mutatedRun((s) => stubGate(roster(s)), ['--repo', REPO, '--successor', 'TERMINAL']);
@@ -2017,6 +2023,16 @@ const cannedLedger = (o) => 'function q(params) {\n'
   + '    }\n'
   + '    return { result: { documents: [], count: 0, offset: 0, limit: n, total: 0 } };\n'
   + '  }\n'
+  // THE CANNED LEDGER IS A TREE, AND IT HAS EXACTLY ONE PARENT. Wave 26 made clause (a)
+  // TRANSITIVE, so `fetchRoster` is now called once per NODE, not once per run. A stub
+  // that ignores `filter[parent_id]` and serves `row-0…row-N` to every question makes
+  // `row-0` its own child's parent, and the walk answers `code=ROSTER-CYCLE` — measured,
+  // 15 of these tests at once. The generator's rows already declare
+  // `parent_id: "cloud-console-hardening-epic"`, so serving them under any OTHER parent
+  // was always a stub answering a question it was not asked; it simply had no reader
+  // until the walk could descend. Every canned row is therefore a LEAF.
+  + '  if (p.get("filter[parent_id]") !== "cloud-console-hardening-epic")\n'
+  + '    return { result: { documents: [], count: 0, offset: 0, limit: Number(p.get("limit") || 0), total: 0 } };\n'
   + '  const ROWS = ' + (o.rows === Infinity ? 'Infinity' : String(o.rows))
   + ', TOTAL = ' + (o.total === undefined || o.total === null ? 'null' : String(o.total))
   + ', DESC = ' + Boolean(o.descending)
@@ -2048,16 +2064,29 @@ const cannedTasks = (o) => {
   const rows = o.rows === Infinity ? 0 : Number(o.rows || 0);
   const served = o.total === undefined || o.total === null ? rows : Number(o.total);
   const n = o.childCount === undefined ? served : Number(o.childCount);
+  // LEAVES HAVE NO CHILDREN HERE EITHER. The transitive walk cross-checks EVERY node it
+  // visits, and a canned `child_count` of N for a leaf whose published roster is empty is
+  // a gap — `ROSTER-DRAFT-BLIND` on a parent the test never meant to describe. The count
+  // belongs to the one parent the canned roster actually serves.
   return 'function qTasks(id) {\n'
-    + '  return { doc: { child_count: ' + n + ' } };\n'
+    + '  return { doc: { child_count: id === "cloud-console-hardening-epic" ? ' + n + ' : 0 } };\n'
     + '}\n'
     + 'function _unused_real_qTasks(id) {';
 };
 const must = (s, from, to) => { assert.ok(s.includes(from), `anchor drifted: ${from}`); return s.replace(from, to); };
 const chain = (...fns) => (s) => fns.reduce((acc, f) => f(acc), s);
+// A CANNED LEDGER HOLDS NO PRIOR CENSUS. The committed census for this epic
+// (fixtures/seal-predicate/census/cloud-console-hardening-epic.json) describes 94 real
+// rows; a stub that serves `row-0…row-N` never served one of them, so leaving the census
+// armed would print 94 synthetic filing events and spend 94 by-id lookups per test on a
+// comparison that means nothing. Stubbing the ledger stubs its census too.
+const cannedCensusDefault = 'function censusDefaultPath() {\n  return null;\n}\n'
+  + 'function _unused_real_censusDefaultPath() {';
 const withLedger = (o) => (s) => must(
-  must(s, 'function q(params) {', cannedLedger(o)),
-  'function qTasks(id) {', cannedTasks(o));
+  must(
+    must(s, 'function q(params) {', cannedLedger(o)),
+    'function qTasks(id) {', cannedTasks(o)),
+  'function censusDefaultPath() {', cannedCensusDefault);
 const withPageLimit = (n) => (s) => must(s, 'const ROSTER_PAGE_LIMIT = 500;', `const ROSTER_PAGE_LIMIT = ${n};`);
 const withMaxPages = (n) => (s) => must(s, 'const ROSTER_MAX_PAGES = 40;', `const ROSTER_MAX_PAGES = ${n};`);
 // READ ON THE CLAUSE-(a) LETTERS, NEVER ON THE EXIT CODE, in every control below. The
@@ -2484,7 +2513,8 @@ test('wave 66: a cross-check that CANNOT BE READ refuses — an unverified popul
   const unreadable = rosterRun(chain(
     withLedger({ rows: 7, total: 7 }),
     withPageLimit(3),
-    (s) => must(s, 'return { doc: { child_count: 7 } };', 'return { doc: {} };')));
+    (s) => must(s, 'return { doc: { child_count: id === "cloud-console-hardening-epic" ? 7 : 0 } };',
+      'return { doc: {} };')));
   assert.equal(unreadable.status, INFRA, 'a cross-check that produced no number certifies nothing');
   assert.match(token(unreadable.out), /code=DRAFT-CROSSCHECK-UNREADABLE/);
   assert.match(unreadable.out, /no numeric child_count/);
@@ -3069,4 +3099,327 @@ test('wave 25: an inherited property name is NOT a registered epic', () => {
     assert.equal(status, REFUSED, `--epic ${name} must be refused, not resolved off the prototype`);
     assert.match(out, /reason=UNREGISTERED-EPIC/, `--epic ${name} refuses with the register code, not a downstream one`);
   }
+});
+
+// ═══ WAVE 26 — CLAUSE (a) IS A SUBTREE, AND A POPULATION CAN SHRINK BY FILING ═══
+//
+// THE DEFECT, IN ONE SENTENCE: `fetchRoster` reads ONE `filter[parent_id]` level, and
+// clause (a) was scored over that level alone — so reparenting live rows one step down,
+// under a sibling that is already `done`, emptied the counted population without
+// finishing a single row. A filing act, printed as `VERDICT: SEAL a=PASS orphans=0`.
+//
+// THE SAME BLINDNESS RAN THE OTHER WAY and produced a FALSE FAIL beside the false pass:
+// a row correctly forwarded to a GRANDCHILD of the successor — the ordinary shape once a
+// successor epic has waves — was absent from the successor's DIRECT roster and got
+// printed under UNNAMED RESIDUE. Both halves are driven below, in both directions.
+//
+// THE MUTATION IS ONE LINE AND IT RECONSTRUCTS THE ONE-LEVEL READER EXACTLY: blind
+// `subtreeOf` to a fixture's `subtrees` map and every walk collapses to its seed — the
+// epic's direct `children`, the successor's direct `forwarded`. That is the pre-fix
+// program, and the two fixtures are graded against it and against the committed file.
+const oneLevel = (src) => {
+  const out = src.replace('const map = (fixture && fixture.subtrees) || {};', 'const map = {};');
+  assert.notEqual(out, src, 'the one-level mutation must actually apply');
+  return out;
+};
+// A ledger fixture written on the fly, for shapes no committed fixture should carry (a
+// parent CYCLE is not a tree and has no business sitting in the fixture directory).
+const adHocLedger = (obj) => {
+  const p = join(tmp('seal-pred-adhoc-'), 'ledger.json');
+  writeFileSync(p, JSON.stringify({ requiredContexts: [AGG], ...obj }));
+  return p;
+};
+const adHocRun = (obj, extra = []) =>
+  run(['--ledger', adHocLedger(obj), '--repo', REPO, '--guard-cmd', 'true', ...extra]);
+const SEALABLE = JSON.parse(readFileSync(FIX('sealable.json'), 'utf8'));
+
+// c0 — THE FILING ACT SEALS THE ONE-LEVEL READER AND IS REFUSED BY THIS FILE.
+test('wave 26: MUTATION — 69 rows reparented under a done sibling SEAL the one-level reader', () => {
+  const ledger = withRequired('filing-act-reparent.json');
+  const args = ['--ledger', ledger, '--repo', REPO, '--guard-cmd', 'true'];
+  const pre = mutatedRun(oneLevel, args);
+  // THE OLD TOKEN. Exit 0, over a population of ONE done row, with 69 open rows one
+  // level below it that this reading never asked about.
+  assert.equal(pre.status, SEAL, `the mutation must reproduce the defect, or this proves nothing: ${pre.out}`);
+  assert.match(pre.out, /^VERDICT: SEAL$/m);
+  assert.match(token(pre.out), /SEAL a=PASS b=PASS c=PASS orphans=0 /);
+  assert.match(token(pre.out), /\broster=1\b/, 'the whole certified population was the done sink');
+
+  // THE NEW TOKEN, same fixture, same flags.
+  const now = run(args);
+  assert.equal(now.status, NO_SEAL, 'a filing act must not seal');
+  assert.match(now.out, /^VERDICT: NO SEAL$/m);
+  assert.match(token(now.out), /NO-SEAL a=FAIL /);
+  assert.match(token(now.out), /\borphans=69\b/, 'all 69 reparented rows are residue');
+  assert.match(token(now.out), /\broster=70\b/, 'the population is the SUBTREE, not the level');
+  assert.match(token(now.out), /\bdirect=1\b/, 'and the direct level is printed beside it');
+  assert.match(token(now.out), /\bdepth=2 subtree-unread=0\b/);
+  assert.match(now.out, /^depth: 2 level\(s\) walked \(cap 8\)  direct 1 \+ below 69 = 70  subtree-unread 0$/m,
+    'the RELATION is printed as a relation — both numbers, of this run');
+  assert.match(now.out, /✗ gr-fixture-reparented-01/, 'and the residue is named, not merely counted');
+});
+
+// c0 — THE WALK IS BOUNDED, AND A BOUND IT HIT IS A REFUSAL, NEVER A CLEAN READ.
+test('wave 26: a subtree the walk could not descend REFUSES and names the nodes', () => {
+  const capOne = (src) => {
+    const out = src.replace('const ROSTER_MAX_DEPTH = 8;', 'const ROSTER_MAX_DEPTH = 1;');
+    assert.notEqual(out, src, 'the depth-cap mutation must actually apply');
+    return out;
+  };
+  const capped = mutatedRun(capOne,
+    ['--ledger', withRequired('filing-act-reparent.json'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(capped.status, INFRA, 'a subtree it could not read is not a subtree it read and found clean');
+  assert.match(capped.out, /could not be descended to the end/);
+  assert.match(capped.out, /1 node\(s\) whose children were NEVER READ \[gr-fixture-done-sink\]/);
+  assert.match(token(capped.out), /INFRA-FAULT .*code=SUBTREE-UNREAD/);
+  // AND THE CONTROL: the very same fixture, at the committed cap, is READ — so the
+  // refusal above is the cap firing and not the fixture being unreadable.
+  const read = run(['--ledger', withRequired('filing-act-reparent.json'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(read.status, NO_SEAL);
+  assert.match(token(read.out), /\bsubtree-unread=0\b/);
+});
+
+test('wave 26: a parent CYCLE is named where it happens, not blamed on the depth cap', () => {
+  const { status, out } = adHocRun({
+    successor: SEALABLE.successor, tasks: SEALABLE.tasks, gates: SEALABLE.gates,
+    landed: SEALABLE.landed, unmeasuredWaivers: SEALABLE.unmeasuredWaivers, defectCommits: {},
+    children: [{ _id: 'cyc-a', lifecycle_status: 'done' }],
+    forwarded: [],
+    subtrees: { 'cyc-a': [{ _id: 'cyc-b', lifecycle_status: 'done' }], 'cyc-b': [{ _id: 'cyc-a', lifecycle_status: 'done' }] },
+  });
+  assert.equal(status, INFRA);
+  assert.match(out, /is NOT A TREE: cyc-a was reached twice, the second time under cyc-b at depth 3/);
+  assert.match(token(out), /INFRA-FAULT .*code=ROSTER-CYCLE/);
+});
+
+// c1 — FORWARDING RECURSES, AND THE FALSE FAIL IS DRIVEN IN BOTH DIRECTIONS.
+test('wave 26: MUTATION — a row forwarded to a GRANDCHILD read as an orphan', () => {
+  const args = ['--ledger', withRequired('forward-to-grandchild.json'), '--repo', REPO, '--guard-cmd', 'true'];
+  const pre = mutatedRun(oneLevel, args);
+  assert.equal(pre.status, NO_SEAL, `the mutation must reproduce the false FAIL: ${pre.out}`);
+  assert.match(token(pre.out), /NO-SEAL a=FAIL /);
+  assert.match(token(pre.out), /\borphans=1\b/);
+  assert.match(pre.out, /✗ gr-fixture-forwarded-deep/,
+    'the pre-fix reader prints a row that HAS a forwarding address as UNNAMED RESIDUE');
+
+  const now = run(args);
+  assert.equal(now.status, SEAL, 'a row forwarded one level deeper is still forwarded');
+  assert.match(token(now.out), /SEAL a=PASS /);
+  assert.match(token(now.out), /\borphans=0\b/);
+  assert.doesNotMatch(now.out, /✗ gr-fixture-forwarded-deep/);
+  assert.match(now.out, /^forwarding: successor subtree 2 row\(s\) over 2 level\(s\)$/m,
+    'and the successor subtree it consulted is printed, so the PASS names its own evidence');
+  // The forwarded row is counted on the forwarding line, not exempted.
+  assert.match(now.out, /^ {2}forwarded under successor : 1$/m);
+});
+
+// c2 — THE ANTI-FILING ARM. Recursion does NOT subsume it: this compares against what
+// was COUNTED BEFORE, and the mutation pair is the whole proof that it can lose.
+test('wave 26: a census row that LEFT the population without a transition blocks the seal', () => {
+  const red = fixtureRun('census-departure.json');
+  assert.equal(red.status, NO_SEAL, 'a population that shrank by filing is not one that was swept');
+  assert.match(token(red.out), /\bcensus=fixture filing-events=1\b/);
+  assert.match(red.out, /✗ gr-fixture-departed-1  was=open now=open/, 'the row is named, not counted');
+  assert.match(red.out, /LEFT the counted population without a transition to done or cancelled/);
+  // Clause (a) itself is CLEAN on this fixture — so the red is the arm's, and only the
+  // arm's. Without this line the test could pass on an orphan nobody intended.
+  assert.match(token(red.out), /a=PASS b=PASS c=PASS orphans=0 /);
+
+  // THE OTHER DIRECTION, one field apart: the same departure, EARNED.
+  const green = fixtureRun('census-departure-transitioned.json');
+  assert.equal(green.status, SEAL);
+  assert.match(token(green.out), /\bcensus=fixture filing-events=0\b/);
+  assert.match(green.out, /✓ 0 filing event\(s\)/);
+});
+
+test('wave 26: MUTATION — dropping the arm from `ok` re-seals the filed row', () => {
+  const drop = (src) => {
+    const out = src.replace('&& defectUnread.length === 0 && filingEvents.length === 0;',
+                            '&& defectUnread.length === 0;');
+    assert.notEqual(out, src, 'the arm mutation must actually apply');
+    return out;
+  };
+  const pre = mutatedRun(drop,
+    ['--ledger', withRequired('census-departure.json'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(pre.status, SEAL, 'without the arm the filed row seals — which is what the arm is for');
+  assert.match(token(pre.out), /SEAL a=PASS/);
+  // …and it STILL prints filing-events=1. A field a verdict ignores is the shape this
+  // row was filed against: the number was legible and nothing acted on it.
+  assert.match(token(pre.out), /\bfiling-events=1\b/);
+});
+
+test('wave 26: with NO census the arm is NOT RUN, and no green claims it passed', () => {
+  const { status, out } = fixtureRun('sealable.json');
+  assert.equal(status, SEAL);
+  assert.match(token(out), /\bcensus=NONE filing-events=0\b/);
+  assert.match(out, /NOT RUN — no census\. A population can shrink by filing and this run cannot tell\./,
+    'an arm that did not run says so IN the output, not only in a field');
+});
+
+test('wave 26: a census file with no `rows` object is refused, never read as empty', () => {
+  const p = join(tmp('seal-pred-census-'), 'census.json');
+  writeFileSync(p, JSON.stringify({ epic: 'cloud-console-hardening-epic' }));
+  const { status, out } = fixtureRun('sealable.json', ['--census', p]);
+  assert.equal(status, INFRA, 'a census this run could not read is not a census it read and found clean');
+  assert.match(out, /carries no `rows` object/);
+  assert.match(token(out), /code=CENSUS-UNREADABLE/);
+  // The positive control: the SAME flag with a real census is read and scored.
+  const ok = join(tmp('seal-pred-census-'), 'census.json');
+  writeFileSync(ok, JSON.stringify({ epic: 'cloud-console-hardening-epic', captured_at: '2026-09-11', rows: { 'gr-fixture-gone': 'open' } }));
+  const scored = fixtureRun('sealable.json', ['--census', ok]);
+  assert.equal(scored.status, NO_SEAL);
+  assert.match(token(scored.out), /\bfiling-events=1\b/);
+  assert.match(scored.out, /✗ gr-fixture-gone  was=open now=UNREADABLE/,
+    'a row that left and cannot be resolved is not a proven transition');
+});
+
+// c3 — PAID BY #17798 (R8 UNREGISTERED-EPIC), PINNED HERE ON THE LADDER-ONLY PATH.
+// Wave 25 pinned the refusal on the FIXTURE path and pinned `registers=` on a
+// ladder-only reading of a REGISTERED epic. Neither run is this one: `--ladder-only`
+// with an UNREGISTERED `--epic` is the invocation the row named, and nothing held it.
+test('wave 26: --ladder-only with an unregistered --epic is REFUSED, not read', () => {
+  const { status, out } = run(['--ladder-only', '--repo', REPO, '--epic', 'totally-fake-epic-xyz']);
+  assert.equal(status, REFUSED, 'exit 3 — nothing was measured, so nothing may be quoted');
+  assert.match(token(out), /REFUSED reason=UNREGISTERED-EPIC a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED epic=totally-fake-epic-xyz registers=NONE /);
+  assert.doesNotMatch(out, /LADDER-ONLY/, 'no reading may be printed off a register this run never held');
+  assert.doesNotMatch(out, /b-clean=/, 'the six Cloud Console rungs may not be scored under another epic\'s label');
+  for (const id of CCH_DEFECT_IDS) assert.doesNotMatch(out, new RegExp(id), `${id} belongs to another epic`);
+  // AND THE CONTROL, one flag value apart: the registered epic DOES get a reading.
+  const read = run(['--ladder-only', '--repo', REPO, '--epic', EPIC]);
+  assert.equal(read.status, SEAL);
+  assert.match(token(read.out), /LADDER-ONLY .* registers=cloud-console-hardening-epic /);
+});
+
+// c2 — THE COMMITTED CENSUS IS THE REGISTER, AND IT IS READ BY THE PROGRAM, NOT BY EYE.
+test('wave 26: the committed census for this epic parses and the predicate can load it', () => {
+  const path = join(HERE, 'fixtures', 'seal-predicate', 'census', `${EPIC}.json`);
+  const c = JSON.parse(readFileSync(path, 'utf8'));
+  assert.equal(c.epic, EPIC, 'the census names the epic it was captured for');
+  assert.match(c.captured_at, /^\d{4}-\d{2}-\d{2}/, 'a census with no capture date dates nothing');
+  const ids = Object.keys(c.rows);
+  assert.ok(ids.length > 0, 'an empty census would pass by construction');
+  for (const id of ids) {
+    assert.equal(typeof c.rows[id], 'string', `${id} carries no lifecycle_status`);
+    assert.ok(!['done', 'cancelled'].includes(c.rows[id]),
+      `${id} was already closed at capture — a closed row can never be a filing event, so recording it only grows the file`);
+  }
+  // AND THE PROGRAM READS IT. Pointed at a fixture whose population is three rows, every
+  // census id is a departure — which is the loud proof that the file is loadable, keyed
+  // by _id, and scored, rather than merely well-formed JSON sitting in the tree.
+  const { status, out } = fixtureRun('sealable.json', ['--census', path]);
+  assert.equal(status, NO_SEAL);
+  assert.match(token(out), new RegExp(`census=${EPIC} filing-events=${ids.length}\\b`));
+  assert.match(out, new RegExp(`✗ ${ids[0]}  was=${c.rows[ids[0]]} now=`));
+});
+
+// ═══ WAVE 69 — A STALE TREE IS A TREE THIS PROGRAM DID NOT READ ═══════════════════════
+//
+// THE THIRD SIGHTING OF ONE DISEASE. Wave 27 gave the predicate a root guard because five
+// clause-(b) legs resolve under `--repo` and each reports its own miss as a DEFECT
+// sentence, so a wrong DIRECTORY printed six false claims about the PRODUCT. The ancestry
+// legs read `origin/main`; the guard files, the workflow file and every `measured_by`
+// path are read off the WORKING TREE. A tree that is merely BEHIND therefore scores
+// today's frozen register against an older tree — the identical failure one fact over,
+// and it is the DATE rather than the path.
+//
+// MEASURED BEFORE THIS LEG EXISTED, by the row that filed it: the same binary in one
+// session printed `b=FAIL` with four failing register entries from a 678-commit-stale
+// primary checkout and `b=PASS` from a tree at `origin/main`. It is SYMMETRIC — a stale
+// tree can also carry a guard whose register entry was since rewritten and read a false
+// `b=PASS` — so this is not a fail-closed accident that could be left alone.
+//
+// THE FIXTURE IS A REAL GIT REPOSITORY, built here, with a real `refs/remotes/origin/main`
+// written by `update-ref`. No network, no second clone, no dependence on where THIS
+// checkout happens to sit — a test whose N came from the tree it runs in would measure the
+// campaign's merge rate rather than the leg.
+function synthRepoBehind(n) {
+  const root = synthRepo({});
+  const g = (...a) => {
+    const r = spawnSync('git', ['-C', root, ...a], { encoding: 'utf8' });
+    assert.equal(r.status, 0, `git ${a.join(' ')} failed, so this fixture measured nothing: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  g('init', '--quiet', '-b', 'main');
+  g('config', 'user.email', 'seal-predicate-test@invalid');
+  g('config', 'user.name', 'seal predicate test');
+  g('add', '-A');
+  g('commit', '--quiet', '--no-gpg-sign', '-m', 'base');
+  const base = g('rev-parse', 'HEAD');
+  for (let i = 0; i < n; i += 1) {
+    writeFileSync(join(root, 'moved-ahead.txt'), `${i}\n`);
+    g('add', 'moved-ahead.txt');
+    g('commit', '--quiet', '--no-gpg-sign', '-m', `ahead ${i}`);
+  }
+  if (n) g('update-ref', 'refs/remotes/origin/main', g('rev-parse', 'HEAD'));
+  else g('update-ref', 'refs/remotes/origin/main', base);
+  g('checkout', '--quiet', '--detach', base);
+  // THE PRECONDITION OF THE CONTROL, asserted rather than assumed: a `git init` that
+  // half-worked, or an `update-ref` that wrote nothing, would leave a tree that is 0
+  // behind, and every assertion below would then pass for the WRONG reason.
+  const behind = g('rev-list', '--count', 'HEAD..origin/main');
+  assert.equal(behind, String(n), `the fixture is ${behind} behind, not the ${n} this case is about`);
+  return root;
+}
+
+test('wave 69: a --repo BEHIND origin/main is an INFRA FAULT that NAMES THE COUNT, never a b letter', () => {
+  const root = synthRepoBehind(7);
+  const { status, out } = run(['--ladder-only', '--repo', root]);
+  assert.equal(status, INFRA, 'a stale tree is an environment fact, so it may not travel in a verdict code');
+  assert.match(out, /INFRA FAULT at /);
+  assert.match(out, /is 7 commit\(s\) BEHIND origin\/main \(`git rev-list --count HEAD\.\.origin\/main` = 7\)/,
+    'the count is the whole finding: "stale" without a number is unactionable and unreproducible');
+  assert.match(token(out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=REPO-BEHIND-ORIGIN-MAIN/,
+    'the code is APPENDED AFTER epic=, exactly as UNREADABLE-REPO-ROOT is, so the clause letters keep their run');
+  assert.match(out, /does NOT fetch/, 'the leg states its own ceiling: a stale origin/main ref reads 0 and is invisible');
+  // NOT ONE clause-(b) row may be rendered off a tree whose date makes every one of them
+  // a claim about yesterday. Counted over RENDERED rows, never over vocabulary — the
+  // refusal deliberately QUOTES the sentence it prevents.
+  assert.doesNotMatch(out, /^ {2}[✗◐✓·] CCH-D/m, 'no register entry may be scored against a tree this program declined to read');
+  assert.doesNotMatch(out, /LADDER-ONLY/, 'no reading may be printed off a read that never happened');
+  assert.doesNotMatch(out, /VERDICT: NO SEAL/, 'an infra fault is never a verdict');
+
+  // MUTATION CONTROL — remove ONLY this leg and the IDENTICAL run over the IDENTICAL
+  // stale tree walks straight into the ladder, which is the pre-fix behaviour the filing
+  // measured at 678 commits behind. Without this the case above would be green for any
+  // reason at all, including a fixture the predicate refused one leg earlier.
+  const unguarded = mutatedRun(
+    (src) => src.replace('  assertRepoNotBehindOriginMain();\n', ''),
+    ['--ladder-only', '--repo', root]);
+  assert.notEqual(unguarded.status, INFRA, 'with the leg gone the stale tree is no longer refused');
+  assert.doesNotMatch(unguarded.out, /REPO-BEHIND-ORIGIN-MAIN/);
+  assert.match(token(unguarded.out), /LADDER-ONLY b-rungs=/,
+    'and it scores a b reading off a tree 7 commits out of date — the defect, reproduced');
+});
+
+test('wave 69: 0 behind PROCEEDS, and an UNREADABLE comparison is not a stale tree', () => {
+  // (a) THE NEGATIVE CONTROL. A leg that refuses every tree measures nothing, so the same
+  // fixture builder at n=0 must reach the ladder.
+  const current = run(['--ladder-only', '--repo', synthRepoBehind(0)]);
+  assert.notEqual(current.status, INFRA, 'a tree AT origin/main is exactly the tree this program wants');
+  assert.doesNotMatch(current.out, /REPO-BEHIND-ORIGIN-MAIN/);
+  assert.match(token(current.out), /LADDER-ONLY b-rungs=/, 'and it reaches the reading');
+
+  // (b) NO `origin/main` AT ALL — actions/checkout@v4's depth-1 default, which is what
+  // `console-unit` runs on every push. `rev-list` cannot answer, so this leg says NOTHING
+  // and clause (b) keeps its own, far more precise discrimination (MISSING-REF /
+  // HISTORY-UNAVAILABLE / `b-unavailable=N/M`). Refusing here would red the BLOCKING
+  // Console gate for an environment fact, which is the trap charter D335 already names.
+  const noRef = synthRepoBehind(3);
+  const del = spawnSync('git', ['-C', noRef, 'update-ref', '-d', 'refs/remotes/origin/main'], { encoding: 'utf8' });
+  assert.equal(del.status, 0, `update-ref -d failed, so this control measured nothing: ${del.stderr}`);
+  const probe = spawnSync('git', ['-C', noRef, 'rev-list', '--count', 'HEAD..origin/main'], { encoding: 'utf8' });
+  assert.notEqual(probe.status, 0, 'the precondition: with the ref gone the comparison CANNOT be made');
+  const unreadable = run(['--ladder-only', '--repo', noRef]);
+  assert.notEqual(unreadable.status, INFRA, 'an unanswerable comparison is not a finding about the tree');
+  assert.doesNotMatch(unreadable.out, /REPO-BEHIND-ORIGIN-MAIN/,
+    'silence, not a blunter sentence over the top of clause (b)\'s precise one');
+  assert.match(token(unreadable.out), /LADDER-ONLY b-rungs=.* b-unavailable=[1-9]/,
+    'and the condition is carried where it already was: in b-unavailable, in letters, at exit 0');
+
+  // (c) THE FIXTURE PATH IS NOT SUBJECT TO IT, for the same reason Leg 2 is not: `--ledger`
+  // stands `landed` in for every ancestry read, and twelve rung-2 leg cases drive a
+  // deliberately synthetic root. A staleness leg on both paths would red them for
+  // measuring something else entirely.
+  const fixtured = run(['--ledger', FIX('sealable.json'), '--repo', synthRepoBehind(9)]);
+  assert.doesNotMatch(fixtured.out, /REPO-BEHIND-ORIGIN-MAIN/, 'a ledger fixture reads no tree date');
 });

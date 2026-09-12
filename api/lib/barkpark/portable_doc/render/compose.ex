@@ -770,7 +770,20 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdEmbed", "target" => stringish(Map.get(b, "target", ""))}
   end
 
-  def compose_block(%{"type" => "table"} = b, _style) do
+  # TYPED COLUMNS (opt-in, CONTENT ONLY, `:article` only) — the Elixir mirror of
+  # internal/pdrender/richblocks.go tableRenderer. An optional `cols` attr, an
+  # index-aligned array of {type} maps, tags each column text | num | delta |
+  # spark. It changes only the CELL BODY (delta/spark) plus a per-column
+  # alignment CLASS for num/delta (emitted in Walk.table); it never touches the
+  # head band, the row/column shape, or any width math. `cols` ABSENT ⇒ every
+  # column is text ⇒ the render is byte-identical to a table carrying no spec.
+  # The key is `cols`, NOT `columns` (an overloaded layout attr, already read
+  # above for the implicit header). Non-`:article` styles never see the spec:
+  # the email emitters are byte-locked and a classed inline SVG paints as a
+  # black blob in a stylesheet-less mail client.
+  def compose_block(%{"type" => "table"} = b, style) do
+    col_types = table_col_types(b, style)
+
     compose_cell = fn cell ->
       cell
       |> table_cell_content()
@@ -778,7 +791,24 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.map(&to_pd_node_from_inline_child/1)
     end
 
-    compose_row = fn row -> row |> table_row_cells() |> Enum.map(compose_cell) end
+    compose_typed_cell = fn cell, index ->
+      case Enum.at(col_types, index) do
+        "delta" -> table_delta_cell(cell, compose_cell)
+        "spark" -> table_spark_cell(cell, compose_cell)
+        _ -> compose_cell.(cell)
+      end
+    end
+
+    # Head cells stay on the legacy body in EVERY column type (mirrors the Go
+    # renderer, which types only body cells); the head only inherits alignment.
+    compose_head_row = fn row -> row |> table_row_cells() |> Enum.map(compose_cell) end
+
+    compose_row = fn row ->
+      row
+      |> table_row_cells()
+      |> Enum.with_index()
+      |> Enum.map(fn {cell, index} -> compose_typed_cell.(cell, index) end)
+    end
 
     {column_head, record_keys} = table_column_head(b)
     raw_rows = Map.get(b, "rows", []) |> List.wrap()
@@ -823,7 +853,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       body_rows
       |> Enum.map(compose_row)
 
-    pd = %{"kind" => "PdTable", "rows" => rows}
+    pd = %{"kind" => "PdTable", "rows" => rows} |> table_put_col_types(col_types)
 
     head =
       if is_list(declared_head) and declared_head != [],
@@ -833,7 +863,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     case head do
       nil -> pd
       [] -> pd
-      head_row -> Map.put(pd, "head", compose_row.(head_row))
+      head_row -> Map.put(pd, "head", compose_head_row.(head_row))
     end
   end
 
@@ -2325,6 +2355,82 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp normalize_list_item(%{} = item), do: paragraph_inline(item)
   defp normalize_list_item(item), do: item
+
+  # `cols` → an index-aligned list of type names. An unknown/missing `type`
+  # degrades to "text" (the legacy path), exactly like parseColTypes in Go.
+  # An absent spec yields [] — and [] is what keeps the node shape, and so the
+  # rendered bytes, identical to the pre-typed-columns render.
+  defp table_col_types(b, :article) do
+    case Map.get(b, "cols") do
+      cols when is_list(cols) and cols != [] ->
+        # NOT a `when t in [...]` guard on purpose: tiers_test.exs extracts the
+        # renderable BLOCK-type surface out of this file with a regex that reads
+        # every such guard as a list of block types, so a guard here would
+        # inflate the canonical block-type count by four COLUMN types.
+        Enum.map(cols, fn
+          %{"type" => "num"} -> "num"
+          %{"type" => "delta"} -> "delta"
+          %{"type" => "spark"} -> "spark"
+          _ -> "text"
+        end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp table_col_types(_b, _style), do: []
+
+  defp table_put_col_types(pd, []), do: pd
+  defp table_put_col_types(pd, types), do: Map.put(pd, "cols", types)
+
+  # delta: the direction glyph FIRST (▲ up / ▼ down / - flat), then the
+  # magnitude — so the sign survives with zero colour (colour would be
+  # reinforcement only, and mail/monochrome sinks have none). A cell that does
+  # not coerce to a number falls back to the legacy text body, no glyph.
+  defp table_delta_cell(cell, compose_cell) do
+    case table_cell_number(cell) do
+      nil ->
+        compose_cell.(cell)
+
+      n ->
+        text = table_delta_glyph(n) <> " " <> format_field_number(abs(n))
+        [%{"kind" => "PdText", "children" => [text]}]
+    end
+  end
+
+  defp table_delta_glyph(n) when n > 0, do: "▲"
+  defp table_delta_glyph(n) when n < 0, do: "▼"
+  defp table_delta_glyph(_n), do: "-"
+
+  # spark: a numeric series cell becomes the canonical stat sparkline
+  # (DataViz.spark_svg/2 — the ONE primitive), carried as a `_raw` node so the
+  # SVG reaches the walk unescaped. The TUI mirror renders the same series as
+  # the block-glyph sparkline; the SVG is the web projection of that value, not
+  # a second ladder. A non-series cell, or one with no coercible numbers, falls
+  # back to the legacy text body.
+  defp table_spark_cell(cell, compose_cell) when is_list(cell) do
+    values = cell |> Enum.map(&table_cell_number/1) |> Enum.reject(&is_nil/1)
+
+    if values == [] do
+      compose_cell.(cell)
+    else
+      %{
+        "kind" => "_raw",
+        "html" => Barkpark.PortableDoc.Render.DataViz.spark_svg(values, "bp-table__spark")
+      }
+      |> List.wrap()
+    end
+  end
+
+  defp table_spark_cell(cell, compose_cell), do: compose_cell.(cell)
+
+  # Only a scalar cell coerces to a number (mirrors Go's toFloat, which sees the
+  # raw cell); a {content:…} / node-array cell is prose and stays prose.
+  defp table_cell_number(cell) when is_number(cell) or is_binary(cell),
+    do: field_number_value(cell)
+
+  defp table_cell_number(_cell), do: nil
 
   defp table_row_cells(%{"cells" => cells}) when is_list(cells), do: cells
   defp table_row_cells(row), do: List.wrap(row)

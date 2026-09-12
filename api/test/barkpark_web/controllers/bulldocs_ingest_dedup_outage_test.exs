@@ -23,22 +23,33 @@ defmodule BarkparkWeb.BulldocsIngestDedupOutageTest do
   |---|---|---|
   | `POST /bulldocs/papers` (blocks) | `ingest_blocks/4` | **503, arm reached** |
   | `POST /bulldocs/papers` (body_html) | `ingest_html_write/2` | **503, arm reached** |
-  | `POST /bulldocs/papers/:slug/sync` (create-on-push) | `sync_create_persist/6` | 422 `create_wall` — arm UNREACHABLE |
+  | `POST /bulldocs/papers/:slug/sync` (create-on-push) | `sync_create/5` | **503, outage lifted out of the wall fold** |
   | `POST /bulldocs/sessions` | `ingest_session/2` | 200 — arm UNREACHABLE (dead code) |
 
-  Both unreachable arms are pinned here by the behaviour that PREEMPTS them, so
-  the day either precondition changes this file reds instead of going quiet:
+  ## What changed on the sync door, and why this file's own pin was replaced
 
-    * **sync create-on-push.** `sync_create/5` is validate-FIRST: it calls
-      `AuthoringWall.validate_all/5` through `paper_wall_violations/2` and
-      refuses with a 422 `create_wall` carrying every violation, BEFORE
-      `sync_create_persist/6` (and so before `Content.upsert_paper/1`) is
-      reached. `validate_all/5` collects the dedup gate's tuple like any other,
-      so under an outage the create door answers 422 with a
-      `storage_unavailable` violation in its list. That is an OUTAGE described
-      as an author-fixable wall refusal — a real mis-classification, but one
-      that belongs to the create-door envelope, not to this row's fence, so it
-      is PINNED here rather than changed.
+  #17688 (this file's first version) PINNED the sync door's 422: `sync_create/5`
+  is validate-FIRST, `AuthoringWall.validate_all/5` collects the dedup gate's
+  tuple like any other, and the fold turned a transient OUTAGE into an
+  author-fixable `create_wall` refusal. That pin recorded a defect it did not
+  own. It is now superseded IN PLACE (task-1f147feee2f5f43a) rather than
+  duplicated: `sync_create/5` lifts `{:dedup_unavailable, reason}` out of the
+  tuple list BEFORE the violation fold and answers through the same
+  `dedup_unavailable_error/2` builder the blocks and body_html legs use. One
+  envelope, one owner, three live doors.
+
+  The persist arm's own `{:error, {:dedup_unavailable, _}}` (in
+  `sync_create_persist/6`) stays: it is the RACE path — an outage that begins
+  after the precheck passed and before `upsert_paper/1`'s authoritative
+  recheck — which no deterministic request-level override can stage, so it is
+  not asserted here.
+
+  The validate DRY-RUN (`POST /bulldocs/papers/validate`) is deliberately NOT
+  changed: it always answers 200 `{valid, violations}` and renders verdicts as
+  data, never transport positions.
+
+  The remaining unreachable arm is pinned by the behaviour that PREEMPTS it, so
+  the day that precondition changes this file reds instead of going quiet:
 
     * **sessions.** `AuthoringWall`'s `@walled_types` is `~w(paper task)`, so a
       `session` write never runs the dedup gate at all. Its arm is deliberate
@@ -200,7 +211,7 @@ defmodule BarkparkWeb.BulldocsIngestDedupOutageTest do
     end
   end
 
-  describe "the create-on-push leg (sync_create_persist/6) — arm documented UNREACHABLE" do
+  describe "the create-on-push leg (sync_create/5)" do
     defp sync_conn(conn, s, bpml) do
       conn
       |> put_req_header("authorization", "Bearer #{@token}")
@@ -232,7 +243,7 @@ defmodule BarkparkWeb.BulldocsIngestDedupOutageTest do
       """
     end
 
-    test "the outage surfaces as the 422 create_wall envelope — the persist arm is never reached",
+    test "a dedup outage answers the SAME 503 envelope as the ingest legs, never 422 create_wall",
          %{conn: conn} do
       s = slug("dedup-outage-sync")
       bpml = create_bpml(s)
@@ -240,17 +251,31 @@ defmodule BarkparkWeb.BulldocsIngestDedupOutageTest do
 
       conn = sync_conn(conn, s, bpml)
 
-      # NOT 503. `sync_create/5` refuses on `validate_all/5`'s collected
-      # violations before `sync_create_persist/6` exists to answer, so the
-      # dedup_unavailable arm at that call site cannot fire from this door.
-      assert %{"error" => err} = json_response(conn, 422)
-      assert err["code"] == "create_wall"
-      assert err["message"] =~ "nothing was written"
+      # NOT 422. `sync_create/5` lifts `{:dedup_unavailable, _}` out of
+      # `validate_all/5`'s tuple list before the violation fold, so the outage
+      # wears its own transport status instead of the create door's.
+      assert %{"error" => err} = json_response(conn, 503)
+      assert err["code"] == @code
+      assert err["reason"] == @reason
 
-      # The outage IS in the reply, wearing the create door's violation shape
-      # rather than its own status — the mis-classification this test pins.
-      assert Enum.any?(err["errors"], &(&1["code"] == @code))
+      # BYTE-FOR-BYTE the ingest legs' envelope, because it is literally the
+      # same builder (`dedup_unavailable_error/2`). If these drift, two doors
+      # are describing one outage two ways.
+      assert err["message"] =~ "publish dedup wall could not complete"
+      assert err["message"] =~ "no time to run (0ms budget)"
+      assert err["message"] =~ "REFUSED"
+      assert err["hint"] =~ "Transient"
+      assert err["hint"] =~ "Resend the identical request"
+      assert err["hint"] =~ "this paper was neither written nor refused"
+      assert err["hint"] =~ "outage to report, not a document to fix"
+      assert get_resp_header(conn, "retry-after") == ["5"]
 
+      # The 422 is GONE, not merely deprioritised — asserted on the negative
+      # so a future re-fold cannot pass this test by answering both shapes.
+      refute err["code"] == "create_wall"
+      refute Map.has_key?(err, "errors")
+
+      # Fail-CLOSED and validate-FIRST: nothing written, no draft row either.
       refute Content.get_paper(s, @dataset)
       refute Content.get_paper("drafts.#{s}", @dataset)
     end

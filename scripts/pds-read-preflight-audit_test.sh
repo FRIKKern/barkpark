@@ -182,5 +182,107 @@ else
 fi
 
 echo
+echo "=== arm 5: pds-crown-stamp.sh read-back catches a DROPPED met->met evidence write ==="
+# THE DEFECT THIS ARM EXISTS FOR (pds-crown-stamp-readback-evidence-diff): the
+# read-back used to assert `met == true`. On the crown's nine already-met
+# criteria that predicate was TRUE BEFORE THE WRITE, so it printed CONFIRMED
+# whether the new evidence landed or vanished. A confirmation incapable of
+# failing is not a confirmation.
+#
+# THE STUB IS STATEFUL, because the defect is about a value CHANGING. It stores
+# one evidence string in a file, serves it back on `task get`, and on
+# `task stamp` either applies the new evidence (honest) or ACKS IT AND DROPS IT
+# (dropping) -- exit 0 either way, met true either way. The two modes differ in
+# exactly one thing: whether the write is applied. That is the whole discriminator.
+mk_readback_stub() {
+  local dir="$1" mode="$2"
+  mkdir -p "$dir"
+  printf '%s' "$mode" >"$dir/mode"
+  printf '%s' 'STALE-EVIDENCE-ORIGINAL-do-not-keep' >"$dir/evidence.txt"
+  cat >"$dir/bp" <<'EOS'
+#!/usr/bin/env bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+MODE="$(cat "$DIR/mode")"
+case "$1" in
+  whoami) printf '{"auth_tier":"admin","token_present":true}\n'; exit 0 ;;
+  task)
+    case "$2" in
+      get)
+        python3 - "$DIR/evidence.txt" <<'PYEOF'
+import json, sys
+ev = open(sys.argv[1], encoding="utf-8").read()
+print(json.dumps({"doc": {"content": {"acceptance_criteria": [
+    {"criterion": "a criterion", "met": True, "evidence": ev}]},
+    "criteria_progress": {"met": 1, "total": 1}}}))
+PYEOF
+        exit 0 ;;
+      stamp)
+        ev=""; dry=0
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --evidence) ev="${2:-}"; shift 2 ;;
+            --dry-run) dry=1; shift ;;
+            *) shift ;;
+          esac
+        done
+        printf 'POST http://stub/v1/tasks/x/stamp?criterion=0 HTTP/1.1\n'
+        if [ "$dry" -eq 0 ]; then
+          printf 'STAMP %s\n' "$ev" >>"$DIR/stamp.log"
+          # HONEST applies the write. DROPPING acks it and applies nothing --
+          # met stays true on both, which is precisely why met cannot tell them apart.
+          [ "$MODE" = honest ] && printf '%s' "$ev" >"$DIR/evidence.txt"
+        fi
+        exit 0 ;;
+    esac ;;
+esac
+exit 0
+EOS
+  chmod +x "$dir/bp"
+}
+
+NEWEV='CASE2-NEW-EVIDENCE-should-replace-the-stale-one'
+
+# MUTATION: the server acks and drops. The read-back must go RED.
+D="$TMP/readback-drop"; mk_readback_stub "$D" dropping
+BP="$D/bp" bash "$STAMP" stamp some-task 0 worker 1 --evidence "$NEWEV" >"$TMP/out-drop" 2>&1
+RC=$?
+STORED="$(cat "$D/evidence.txt")"
+if [ "$RC" -ne 0 ] \
+   && grep -q 'READ-BACK FAILED' "$TMP/out-drop" \
+   && grep -q 'STORED EVIDENCE is not the text this run sent' "$TMP/out-drop" \
+   && [ "$STORED" = 'STALE-EVIDENCE-ORIGINAL-do-not-keep' ]; then
+  ok "a met->met stamp whose evidence write was DROPPED is caught (rc=$RC), not confirmed"
+else
+  bad "a dropped met->met evidence write still read as success (rc=$RC) — the read-back cannot see the write it confirms"
+  sed -n '1,30p' "$TMP/out-drop"
+fi
+
+# CONTROL A: the same script, the same shape, an HONEST server. It must go GREEN.
+# Without this, a read-back that refused everything would score the arm above.
+D="$TMP/readback-honest"; mk_readback_stub "$D" honest
+BP="$D/bp" bash "$STAMP" stamp some-task 0 worker 1 --evidence "$NEWEV" >"$TMP/out-honest" 2>&1
+RC=$?
+if [ "$RC" -eq 0 ] \
+   && grep -q 'CONFIRMED' "$TMP/out-honest" \
+   && ! grep -q 'READ-BACK FAILED' "$TMP/out-honest" \
+   && [ "$(cat "$D/evidence.txt")" = "$NEWEV" ]; then
+  ok "control: an honest met->met evidence write CONFIRMS (rc=$RC) — the check discriminates"
+else
+  bad "control: an honest met->met write was rejected (rc=$RC) — the new read-back refuses everything, so the mutation above proves nothing"
+  sed -n '1,30p' "$TMP/out-honest"
+fi
+
+# CONTROL B: the OLD predicate is still satisfied in the dropping case. This is
+# the arm that names the defect rather than merely fixing it: `met` reads true in
+# the very run the new check reds, so the pre-change script would have printed
+# CONFIRMED. Without this the mutation above could be explained by anything.
+if grep -q 'still reads met=' "$TMP/out-drop"; then
+  bad "control: the dropping stub failed the MET check too — this arm is not exercising the met->met case the defect is about"
+  sed -n '1,30p' "$TMP/out-drop"
+else
+  ok "control: in the dropping run met still reads true — the old met-only assertion would have printed CONFIRMED"
+fi
+
+echo
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

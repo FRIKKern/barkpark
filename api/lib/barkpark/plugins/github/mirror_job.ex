@@ -21,7 +21,9 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
        bookkeeping is written to the DRAFT row by `Link.put`, so reading the
        published perspective would miss `github.issue` and CREATE a duplicate
        issue. Absent task → `{:cancel, :task_gone}`. Absent PUBLISHED row →
-       `{:cancel, :unpublished}` (the publish gate below).
+       the publish gate below: `{:cancel, :unpublished_closed}` when the task
+       was previously mirrored (its issue is CLOSED first — the retraction),
+       `{:cancel, :unpublished}` when it never was.
     2. `Link.get/1`. A `state: "detached"` link → `{:cancel, :detached}`: the
        issue was deleted/transferred out-of-band and we NEVER recreate it (D7).
        A `state: "intake"` link → `{:cancel, :intake}` (D13, the PRE-ADOPTION
@@ -66,9 +68,23 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   no ledger row behind it (measured on issues 8425/8426).
 
   So reconcile asks a second question of the PUBLISHED id after the draft-first
-  load: no published row → `{:cancel, :unpublished}`, before any GitHub call.
-  The draft-first load itself is unchanged (contract #2: the `content.github`
+  load: no published row → the gate fires before any GitHub *create*. The
+  draft-first load itself is unchanged (contract #2: the `content.github`
   bookkeeping of a never-published task lives on its draft row).
+
+  The gate has TWO arms, split on whether an issue already exists for the task
+  (`retract/4`):
+
+    * never mirrored (no `content.github.issue`) → `{:cancel, :unpublished}`.
+      Nothing exists on GitHub, so nothing is stranded.
+    * PREVIOUSLY MIRRORED, now unpublished → close the issue `not_planned`,
+      then `{:cancel, :unpublished_closed}`. `Content.Lifecycle.unpublish_document/4`
+      deletes the published row and copies its content onto the draft, so a
+      task that was published-and-synced and is then unpublished reaches this
+      gate holding a LIVE issue number. Cancelling flat would leave that issue
+      OPEN with no published row behind it — the same orphan the gate exists to
+      prevent, reached by unpublish instead of discard. A withdrawn promise is
+      withdrawn out loud.
 
   Nothing is lost, only deferred: publishing emits its own `mutation_events` row
   (`Content.Lifecycle` → `Broadcast.tap_broadcast(…, "publish", …, source: :api)`)
@@ -77,10 +93,11 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   task that IS published keeps mirroring even while a draft twin is live — the
   gate asks only whether a published row EXISTS.
 
-  `:unpublished` is a new CANCEL reason. It is NOT a fifth entry in D8's fixed
-  four-type ERROR set below: no exception type is added, and the classification
-  of a GitHub failure is untouched. This is a pre-flight refusal to call GitHub
-  at all, a sibling of `:task_gone` / `:detached` / `:intake` / `:repo_unconfigured`.
+  `:unpublished` / `:unpublished_closed` are CANCEL reasons. Neither is an entry
+  in D8's fixed four-type ERROR set below: no exception type is added, and the
+  classification of a GitHub failure is untouched (the retraction's close routes
+  through the SAME `classify/7` as an update PATCH). They are gate outcomes,
+  siblings of `:task_gone` / `:detached` / `:intake` / `:repo_unconfigured`.
 
   ## Error classification (contract #3, D8's fixed 4-type set, D9)
 
@@ -248,7 +265,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
           # re-enqueues and a draft that is LATER published mirrors then —
           # nothing is lost, it is only deferred to the promise.
           not published?(doc_id, dataset, opts) ->
-            {:cancel, :unpublished}
+            retract(doc_id, dataset, link, opts)
 
           # A `relink: true` job (D11-retry) BYPASSES the synced coalesce guard so
           # a child that is already synced still re-runs to link its now-mirrored
@@ -275,6 +292,15 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         # are read ONLY by the projection body render, never persisted, and must
         # not shadow the row's `_rev`.
         rev = rev_of(task_doc)
+        # Resolve the TENANT ATTRIBUTION once and thread it on `opts`, so every
+        # `Conflicts.record` below this point stamps `github_sync_conflicts.
+        # workspace_id` (migration 20260911120000) without each recorder site
+        # growing its own lookup. The job's carried scope (`args["workspace_id"]`
+        # → `scope_opts/1`) wins; absent, the LOADED task document's own
+        # `workspace_id` answers — it is the same tenant by construction, since
+        # `load_task/3` found the doc under that scope. Both nil (a pre-tenancy
+        # row) leaves the column NULL rather than guessing a workspace.
+        opts = put_conflict_workspace(opts, task_doc)
         # Hydrate the relations markers onto the in-memory doc so the projected
         # BODY carries the `blocks` (and, when a prior pass cap-flattened, the
         # `parent`) marker. Pure in-memory decoration — NO GitHub call here (D11).
@@ -294,6 +320,49 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         # on a nil repo and Oban would retry the crash forever. Dead-letter it
         # until config is fixed (slice 2 centralises the env→DB resolution).
         {:cancel, :repo_unconfigured}
+    end
+  end
+
+  # THE RETRACTION (the publish gate's other half). The gate above refuses to
+  # MINT an issue for a task that was never published. This arm handles the
+  # OPPOSITE history: a task that WAS published, WAS mirrored, and has since
+  # been UNPUBLISHED — `Content.Lifecycle.unpublish_document/4` deletes the
+  # published row and copies its content (`content.github` INCLUDED) onto the
+  # draft, so `load_task/3` still finds the doc and `Link.get/1` still yields a
+  # live issue number, while `published?/3` is now false.
+  #
+  # Cancelling there would leave that issue OPEN with no published row behind
+  # it — the very orphan class the gate exists to prevent (D86 /
+  # spd-b45-deleted-task-orphans-github-mirror), reached by unpublish rather
+  # than discard. A public promise that is withdrawn must be withdrawn OUT
+  # LOUD: close the issue `not_planned` (the same reason `cancelled` projects
+  # to), then cancel the job.
+  #
+  # No pre-PATCH drift GET, deliberately: the body is state-only, so it cannot
+  # clobber a human's title/label edit, and there is no `synced_rev` to stamp
+  # for a row that is no longer published. The close is an idempotent PATCH —
+  # a later draft edit that drains here re-closes an already-closed issue, which
+  # GitHub treats as a no-op. Republishing re-opens it: the unpublish moved the
+  # draft's rev, so `Link.synced?/1` is false and the next reconcile converges
+  # the issue back to `state: "open"` through the ordinary update path.
+  defp retract(doc_id, dataset, link, opts) do
+    case {repo(), issue_number(link)} do
+      {repo, num} when is_binary(repo) and repo != "" and is_integer(num) ->
+        case Client.close_issue(repo, num, :not_planned, opts) do
+          {:ok, _issue} ->
+            {:cancel, :unpublished_closed}
+
+          {:error, err} ->
+            # Same error map as the update path: 404 → record + detach (the
+            # issue is already gone, nothing is stranded), 4xx → dead-letter,
+            # 5xx/transport → retry.
+            classify(err, :update, repo, num, doc_id, dataset, opts)
+        end
+
+      _ ->
+        # Never mirrored (no issue number), or no mirror repo configured —
+        # nothing is stranded, so the original cancel stands.
+        {:cancel, :unpublished}
     end
   end
 
@@ -351,7 +420,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   defp update(doc_id, dataset, repo, num, desired, rev, link, opts, task_doc) do
     case Client.get_issue(repo, num, opts) do
       {:ok, issue} ->
-        maybe_record_drift(repo, num, doc_id, dataset, issue, stored_fingerprint(link))
+        maybe_record_drift(repo, num, doc_id, dataset, issue, stored_fingerprint(link), opts)
         patch(doc_id, dataset, repo, num, desired, rev, link, opts, task_doc)
 
       {:error, err} ->
@@ -404,7 +473,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # fingerprint (first-ever mirror, or a task mirrored before this slice) → there
   # is nothing to compare against, so record nothing and let the PATCH+stamp roll
   # the feature forward with no backfill.
-  defp maybe_record_drift(repo, num, doc_id, dataset, issue, stored)
+  defp maybe_record_drift(repo, num, doc_id, dataset, issue, stored, opts)
        when is_integer(stored) do
     current = issue_fingerprint(issue)
 
@@ -415,6 +484,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
           issue: num,
           doc_id: doc_id,
           dataset: dataset,
+          workspace_id: conflict_workspace(opts),
           kind: "out_of_band_edit",
           detail: %{
             "github_fields" => %{
@@ -430,7 +500,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
     :ok
   end
 
-  defp maybe_record_drift(_repo, _num, _doc_id, _dataset, _issue, _stored), do: :ok
+  defp maybe_record_drift(_repo, _num, _doc_id, _dataset, _issue, _stored, _opts), do: :ok
 
   defp stored_fingerprint(link) when is_map(link) do
     case Map.get(link, "synced_fingerprint") do
@@ -523,7 +593,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
          num,
          doc_id,
          dataset,
-         _opts
+         opts
        )
        when status in 400..499 do
     # A permanent client error (422 validation, 400 bad request). Retrying it
@@ -542,6 +612,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
           issue: num,
           doc_id: doc_id,
           dataset: dataset,
+          workspace_id: conflict_workspace(opts),
           kind: "out_of_band_edit",
           detail: %{"source" => "client_error", "status" => status}
         })
@@ -567,6 +638,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         issue: num,
         doc_id: doc_id,
         dataset: dataset,
+        workspace_id: conflict_workspace(opts),
         kind: "detached",
         detail: %{"reason" => "issue deleted or transferred; not recreated"}
       })
@@ -692,6 +764,18 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
   defp rev_of(%Document{rev: rev}), do: rev
 
+  # Stamp the resolved tenant onto `opts` for the conflict recorders. Never
+  # overwrites an explicitly carried scope, and never invents one: a doc with no
+  # `workspace_id` leaves the key absent, which the recorder reads as nil.
+  defp put_conflict_workspace(opts, %Document{workspace_id: ws}) when is_binary(ws) do
+    Keyword.put_new(opts, :workspace_id, ws)
+  end
+
+  defp put_conflict_workspace(opts, _task_doc), do: opts
+
+  # The conflict attribution for a recorder site: whatever `converge/5` resolved.
+  defp conflict_workspace(opts), do: Keyword.get(opts, :workspace_id)
+
   defp put_non_nil(map, _key, nil), do: map
   defp put_non_nil(map, key, value), do: Map.put(map, key, value)
 
@@ -769,7 +853,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
             :ok
 
           {:error, reason} ->
-            projection_error(:projects, repo, num, doc_id, dataset, reason)
+            projection_error(:projects, repo, num, doc_id, dataset, reason, opts)
         end
       else
         :ok
@@ -798,7 +882,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
             handle_defer(doc_id, dataset, task_doc, opts)
 
           {:error, reason} ->
-            projection_error(:relations, repo, num, doc_id, dataset, reason)
+            projection_error(:relations, repo, num, doc_id, dataset, reason, opts)
         end
       else
         :ok
@@ -812,7 +896,15 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   #
   # A REST 403/429 surfaces as `%RateLimitError{}` and still snoozes — this
   # branch is byte-identical to before.
-  defp projection_error(_which, _repo, _num, _doc_id, _dataset, %RateLimitError{retry_after: s}) do
+  defp projection_error(
+         _which,
+         _repo,
+         _num,
+         _doc_id,
+         _dataset,
+         %RateLimitError{retry_after: s},
+         _opts
+       ) do
     {:snooze, max(s || 0, 1)}
   end
 
@@ -832,9 +924,10 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
          num,
          doc_id,
          dataset,
-         %NetworkError{reason: {:graphql, errors}}
+         %NetworkError{reason: {:graphql, errors}},
+         opts
        ) do
-    record_projection_conflict(repo, num, doc_id, dataset, %{
+    record_projection_conflict(repo, num, doc_id, dataset, opts, %{
       "source" => "graphql",
       "errors" => errors
     })
@@ -853,9 +946,10 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
          num,
          doc_id,
          dataset,
-         {:sub_issue_rejected, parent_num, child_db_id, detail}
+         {:sub_issue_rejected, parent_num, child_db_id, detail},
+         opts
        ) do
-    record_projection_conflict(repo, num, doc_id, dataset, %{
+    record_projection_conflict(repo, num, doc_id, dataset, opts, %{
       "source" => "sub_issue_rejected",
       "parent_issue" => parent_num,
       "child_db_id" => child_db_id,
@@ -865,7 +959,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
     :ok
   end
 
-  defp projection_error(which, _repo, _num, doc_id, _dataset, reason) do
+  defp projection_error(which, _repo, _num, doc_id, _dataset, reason, _opts) do
     Logger.warning("github #{which} sync failed for #{doc_id}: #{inspect(reason)}")
     :ok
   end
@@ -875,13 +969,14 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # Content/mutation_events — no loop surface, D4/D7). Best-effort: a record
   # failure is ignored (the issue is already mirrored) and any raise is caught by
   # the enclosing `isolate/3`, so the reconcile still returns the mirror's `:ok`.
-  defp record_projection_conflict(repo, num, doc_id, dataset, detail) do
+  defp record_projection_conflict(repo, num, doc_id, dataset, opts, detail) do
     _ =
       Conflicts.record(%{
         repo: repo,
         issue: num,
         doc_id: doc_id,
         dataset: dataset,
+        workspace_id: conflict_workspace(opts),
         kind: "out_of_band_edit",
         detail: detail
       })
