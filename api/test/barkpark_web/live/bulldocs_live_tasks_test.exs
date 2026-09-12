@@ -44,11 +44,11 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
         %{
           "doc_id" => doc_id,
           "title" => title,
+          # The authoring wall's label spine refuses to PUBLISH a document
+          # with no description / weighted tags, and these fixtures now get
+          # published (`with_labels/1` supplies the spine, the same way
+          # bulldocs_live_test.exs's published task fixture does).
           "content" =>
-            # The authoring wall's label spine refuses to PUBLISH a document
-            # with no description / weighted tags, and these fixtures now get
-            # published (`with_labels/1` supplies the spine, the same way
-            # bulldocs_live_test.exs's published task fixture does).
             Barkpark.LabelFixtures.with_labels(%{
               "kind" => "task",
               "lifecycle_status" => lifecycle,
@@ -179,6 +179,7 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     {:ok, _view, html} = live(conn, "/papers/#{slug}")
     assert html =~ "hand-written"
   end
+
   describe "D5 published-perspective gate on the reader's task blocks" do
     # THE LEAK (task-b10e10b944f6f55b). `reader_task_scope/1` omitted
     # `published_only`, so `Tasks.Query.docs_for_query/2` applied twin-collapse
