@@ -378,7 +378,7 @@ jobs:
 
       - name: Setup Node
         if: ${{ !cancelled() && steps.aesthetics_scope.outputs.run == '1' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
 

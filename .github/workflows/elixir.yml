@@ -1089,7 +1089,7 @@ jobs:
       # node; a required gate must not depend on the runner image's luck. Same
       # pinned action + major cloud.yml uses for its console plan-catalog mirror.
       - name: Setup Node (js_harness_test.exs shells node over api/assets/sheet-grid)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
 
