@@ -250,6 +250,34 @@
 //                      successor refusals, no clause (a), no bucket (c), and NO
 //                      VERDICT — never SEAL, never NO-SEAL. Exit 0 on a clean read;
 //                      non-zero ONLY on an INFRA FAULT.
+//
+// ---------------------------------------------------------------------------
+// HOW TO TAKE A READING: THROUGH `scripts/seal-run.sh`, NEVER BY INVOKING THIS FILE
+//
+// This program will answer for ANY `--repo` you point it at, and its answer is
+// quotable-looking no matter how bad the tree is. Wave 28's `a=FAIL b=FAIL` came
+// out of exactly that: a hand-typed `node <this file> --repo <sibling worktree>`
+// over a SHALLOW clone parked 100-odd commits behind origin/main. This program
+// was not wrong — it printed the tree's condition in its own `head=` and
+// `b-unavailable=` fields the whole time. Nobody read them, because nothing made
+// them impossible to skip.
+//
+// `scripts/seal-run.sh` is what makes them impossible to skip. It runs this file
+// unmodified, adds NO judgement about any epic, and REFUSES to hand over the
+// quotable form when the tree cannot support one: shallow repository, HEAD off
+// origin/main's tip, a drifted copy of this file, or a token reporting
+// `b-unavailable>0`. A reading taken WITHOUT it is not quotable — not because a
+// rule says so, but because nothing checked the four things that made wave 28's
+// letters false, and a reader of the letters alone cannot tell the difference.
+//
+//   bash scripts/seal-run.sh --repo <full-history worktree at origin/main>
+//
+// A MACHINE TAKES ONE TOO. `.github/workflows/seal-reading.yml` runs that command
+// on every push to main and daily, over a `fetch-depth: 0` checkout detached at
+// origin/main, and publishes the token with `head=` and `b-unavailable=` beside
+// it. It is ADVISORY — a measurement, not a merge gate — and it is `--ladder-only`
+// there, because a full verdict needs the ledger and a `--successor` claim, and
+// manufacturing a successor to force a verdict is what charter D83 forbids.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';

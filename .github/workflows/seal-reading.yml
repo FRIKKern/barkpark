@@ -1,0 +1,227 @@
+# SEAL READING — the one MACHINE-TAKEN reading of the seal predicate.
+#
+# WHY THIS FILE EXISTS (dr-w28-bl-seal-run-is-available-but-not-enforced)
+#
+#   Wave 28 shipped `scripts/seal-run.sh`: the read-only wrapper that refuses a
+#   reading taken over a shallow clone, a tree off origin/main's tip, a drifted
+#   predicate copy, or a token carrying `b-unavailable>0`. It works and it is
+#   mutation-proved (scripts/seal-run.test.sh, 52 assertions, wired into
+#   shell-harnesses.yml as `seal-run.sh probe matrix`).
+#
+#   What it did NOT do is make itself the only way to take a reading. Anyone can
+#   still run `node cloud/priv/static/__preview__/seal-predicate.mjs --repo
+#   <anything>` by hand, get a quotable `VERDICT-TOKEN:` line out of the wrong
+#   tree, and paste it into a wave paper — which is precisely how wave 28's false
+#   `a=FAIL b=FAIL` was produced. The runner was an affordance, not a fence, and
+#   nobody who did not know it existed lost anything they had.
+#
+#   This job closes the half of that hole a workflow CAN close: the epic now has a
+#   reading a MACHINE took, over a checkout whose properties are asserted rather
+#   than assumed, through the runner. A hand-typed token now has a published
+#   machine-taken one standing beside it.
+#
+# THE VENUE, AND WHY IT IS NOT `pull_request`
+#
+#   A seal reading answers a question about THE REPOSITORY'S STATE, not about a
+#   PR's diff. On a PR head the reading would describe a tree that does not exist
+#   anywhere but in that PR, and `seal-run.sh` would refuse it (exit 5, HEAD is
+#   not origin/main's tip) — correctly, and on every PR forever. So the triggers
+#   are `push:` to main (a reading per merged state), `schedule:` (a reading even
+#   on a quiet day, because the register's rungs can rot without a commit), and
+#   `workflow_dispatch:` (so the reading can be demanded, and so this job can be
+#   exercised from a branch before it is merged — the checkout below pins
+#   `ref: main` regardless of which ref dispatched it).
+#
+# THIS JOB IS ADVISORY. It is a MEASUREMENT, not a merge gate.
+#
+#   It is deliberately absent from `.github/required-checks.json`'s required set
+#   and carries an S7 exclusion row there instead. Two reasons, and the second is
+#   the load-bearing one:
+#
+#     1. It renders no check run on a PR head at all (no `pull_request:` arm), and
+#        a required context that is ABSENT reports "expected" forever (D18).
+#     2. Charter D335: an instrument that READS and then exits 1 gets wired into
+#        CI as a gate, and a gate is a verdict again. The clause-(b) ladder exits 0
+#        on a clean read EVEN WITH rung-3 entries, on purpose, and this job
+#        preserves that: a reading's CONTENT never reds this job. What reds it is
+#        a refusal (the checkout could not support a reading) or an infra fault
+#        (nothing was read). Those are facts about the RUNNER, never about the epic.
+#
+# WHY THIS IS THE EXCEPTION TO console-harness.yml's "never a live seal run"
+#
+#   `console-harness.yml`'s seal-predicate step says outright that it runs the
+#   predicate's TESTS and never a live seal run, and it is right to: it checks out
+#   at actions/checkout@v4's depth-1 default, clause (b) decides ancestry with
+#   `git merge-base --is-ancestor`, and under a shallow clone that exits 128 —
+#   which the predicate catches as "not an ancestor" and would publish as a false
+#   NO SEAL manufactured out of a checkout. That is a statement about DEPTH-1
+#   CHECKOUTS, not about live runs.
+#
+#   This job is the exception because it removes the premise: `fetch-depth: 0`, a
+#   tree detached exactly at origin/main, and `seal-run.sh` in front of the
+#   predicate REFUSING to hand over a reading if either of those is untrue. The
+#   two jobs are not in tension — console-harness declines a reading its checkout
+#   cannot support, and this one builds the checkout that can.
+#
+# WHY THE READING IS `--ladder-only`, AND WHY THAT IS NOT A DODGE
+#
+#   A FULL verdict needs two things a workflow must not supply unattended:
+#
+#     * THE LEDGER. Clause (a) fetches the epic's child roster and bucket (c)
+#       resolves gate rows over HTTP against ${BP_SERVER}. Unauthenticated, that
+#       is an availability dependency on a host this repo does not own; the
+#       predicate's own answer to an unreachable ledger is exit 2 INFRA FAULT.
+#     * A SUCCESSOR. Clause (a) refuses without `--successor` (NO-SUCCESSOR,
+#       predicate exit 3), and naming one from a YAML file is exactly the
+#       "manufacture a forwarding address so the run can print SEAL" that charter
+#       D83 forbids. A successor is a human claim about where residue goes.
+#
+#   `--ladder-only` manufactures neither: it names no successor, fetches no
+#   roster, makes NO network call, and evaluates neither clause (a) nor bucket
+#   (c) — its token says so in its own letters (`a=NOT-READ c=NOT-READ`), and
+#   `seal-run.sh` prints `NOT A VERDICT — this is a PARTIAL READING` rather than
+#   the word SEAL, so nothing here can be quoted as the seal.
+#
+#   And it is the reading the full-history checkout actually BUYS. `b-unavailable`
+#   is the field wave 28 had in front of it and did not read, it is emitted on the
+#   LADDER-ONLY token, and it is non-zero exactly when the checkout is the problem.
+#   A depth-1 runner reads `b-unavailable=M/M`; this one is asked to read `0/M`.
+#
+# THE EVIDENCE THIS JOB PUBLISHES is the token line plus `seal-run.sh`'s own
+# closing line, which quotes `head=` and `b-unavailable=` beside the verdict. Both
+# go to the step summary so the reading is citable without opening the log.
+#
+# Related: scripts/seal-run.sh (the runner and its four refusals),
+# scripts/seal-run.test.sh (52 mutation proofs, run by shell-harnesses.yml).
+
+name: Seal reading
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 06:20 UTC daily. Off the hour on purpose — the top of the hour is the
+    # busiest slot on GitHub's shared cron pool and the most likely to be delayed.
+    - cron: '20 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One reading at a time. A queued second reading of the SAME main tip adds
+  # nothing; cancel-in-progress is false so a reading already under way is never
+  # replaced by one of a newer tip mid-flight — a half-taken reading is not a
+  # reading, and the newer tip gets its own run.
+  group: seal-reading
+  cancel-in-progress: false
+
+jobs:
+  reading:
+    name: Seal reading (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # `ref: main` and NOT the dispatching ref: this job reads the repository's
+      # state, so a dispatch from a branch must still read main. `fetch-depth: 0`
+      # is the whole point — a shallow clone is refusal 8 and clause (b) cannot
+      # evaluate ancestry over one.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: node is present (the predicate is a node program)
+        run: |
+          set -uo pipefail
+          if ! command -v node >/dev/null 2>&1; then
+            echo "CANNOT READ: node is not on this runner. seal-predicate.mjs is a node program, so no reading was taken and none is being reported as clean." >&2
+            echo "::error title=Seal reading CANNOT READ::node missing on the runner image"
+            exit 1
+          fi
+          node --version
+
+      # Park the tree EXACTLY at origin/main's tip and prove it here, before
+      # seal-run.sh is asked to. actions/checkout leaves HEAD at whatever main was
+      # when it fetched; a merge landing in that window would make HEAD stale
+      # against a re-fetched origin/main and seal-run would refuse (exit 5) for a
+      # reason that is this job's fault and not the repository's. So: fetch the
+      # remote-tracking ref, detach onto it, and let the reading describe that.
+      # Every failure here is a loud CANNOT READ, never a quiet green.
+      - name: park at origin/main tip
+        id: park
+        run: |
+          set -uo pipefail
+          if ! git fetch --no-tags --quiet origin +refs/heads/main:refs/remotes/origin/main; then
+            echo "CANNOT READ: could not fetch origin/main. No reading was taken." >&2
+            echo "::error title=Seal reading CANNOT READ::git fetch of origin/main failed"
+            exit 1
+          fi
+          sha="$(git rev-parse --verify --quiet origin/main || true)"
+          if [ -z "$sha" ]; then
+            echo "CANNOT READ: origin/main does not resolve in this checkout. No reading was taken." >&2
+            echo "::error title=Seal reading CANNOT READ::origin/main unresolvable"
+            exit 1
+          fi
+          git checkout --quiet --detach "$sha"
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            echo "CANNOT READ: this checkout is SHALLOW despite fetch-depth: 0. Clause (b) ancestry is unaskable here." >&2
+            echo "::error title=Seal reading CANNOT READ::shallow checkout"
+            exit 1
+          fi
+          echo "origin_main=$sha" >> "$GITHUB_OUTPUT"
+          echo "parked at $sha"
+
+      # THE READING. `set -uo pipefail` WITHOUT `-e` so the case below gets to
+      # read `rc` — the same reason console-harness.yml's verdict wrappers give.
+      # The output is NOT piped: a pipe would publish the exit code of `tee`'s
+      # partner and a gate piped to `tail` reports tail's exit code. It is
+      # redirected to a file, the file is `cat`ted, and `rc` is the runner's own.
+      - name: take ONE seal reading through scripts/seal-run.sh
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/seal-reading.txt"
+          rc=0
+          bash scripts/seal-run.sh --repo . -- --ladder-only >"$out" 2>&1 || rc=$?
+          cat "$out"
+
+          token="$(grep -m1 '^VERDICT-TOKEN: SEAL-PREDICATE' "$out" || true)"
+          closing="$(grep -m1 '^seal-run: read over ' "$out" || true)"
+          verdict="$(grep -m1 -E '^seal-run: (VOUCHED|NOT A VERDICT|REFUSED|the )' "$out" || true)"
+
+          # The exit vocabulary is PRESERVED, not collapsed into "the job failed".
+          # 0-3 are the PREDICATE's (a reading happened); 4-8 are the RUNNER's
+          # refusals (no reading happened, and the cause is the checkout). Only
+          # the second kind, plus an infra fault, reds this advisory job — a
+          # reading's CONTENT never does (charter D335).
+          case "$rc" in
+            0) status="READING COMPLETE"; red=0 ;;
+            1) status="NO SEAL (measured by the predicate — a reading, not a job failure)"; red=0 ;;
+            3) status="PREDICATE REFUSED — it measured nothing"; red=0 ;;
+            2) status="INFRA FAULT — nothing was read"; red=1 ;;
+            4|5|6|7|8) status="RUNNER REFUSED (exit $rc) — the checkout could not support a quotable reading"; red=1 ;;
+            *) status="UNINTERPRETABLE seal-run exit $rc"; red=1 ;;
+          esac
+
+          {
+            echo "## Seal reading — advisory"
+            echo
+            echo "- runner exit: \`$rc\` — $status"
+            echo "- taken at origin/main tip: \`${{ steps.park.outputs.origin_main }}\`"
+            echo
+            echo '```'
+            [ -n "$token" ] && echo "$token"
+            [ -n "$verdict" ] && echo "$verdict"
+            [ -n "$closing" ] && echo "$closing"
+            [ -z "$token$closing" ] && echo "(no VERDICT-TOKEN and no closing line — see the step log)"
+            echo '```'
+            echo
+            echo "This job is ADVISORY and this reading is \`--ladder-only\`: clause (a) and bucket (c)"
+            echo "were NOT read, so nothing here is a seal verdict. See the header of this workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$red" -eq 1 ]; then
+            echo "::error title=Seal reading — $status::seal-run.sh exited $rc; this is a fact about the RUNNER or the checkout, never a finding about the epic."
+            exit 1
+          fi
+          echo "::notice title=Seal reading — $status::${closing:-no closing line}"

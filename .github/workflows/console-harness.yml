@@ -669,7 +669,14 @@ jobs:
           echo "::error title=console-unit ${v} — member-authority-sweep.mjs::member-authority-sweep.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
           exit 1
 
-      # The seal predicate's OWN TESTS — never a live seal run. `seal-predicate.mjs`
+      # The seal predicate's OWN TESTS — never a live seal run HERE. That clause is
+      # about THIS JOB'S CHECKOUT, not about live runs in general: the one live
+      # machine-taken reading lives in .github/workflows/seal-reading.yml, which
+      # checks out at `fetch-depth: 0` detached at origin/main and puts
+      # `scripts/seal-run.sh` in front of the predicate so a tree that cannot
+      # support a quotable reading is REFUSED rather than published. It is
+      # advisory and carries an S7 exclusion row in .github/required-checks.json.
+      # The paragraph below is why THIS job must not do that. `seal-predicate.mjs`
       # decides clause (b) with `git merge-base --is-ancestor`, and under
       # actions/checkout@v4's depth-1 default (what both jobs here use) that exits
       # 128 `Not a valid object name`; the predicate catches ANY non-zero as "not an
@@ -677,7 +684,11 @@ jobs:
       # NO SEAL out of a shallow clone. What runs here instead is the predicate's
       # test file, which drives it against COMMITTED FIXTURES through `--ledger`:
       # a fixture's own `landed`/`diffs` entries stand in for those git reads
-      # (seal-predicate.mjs:441-450), so the fixture-driven tests never ask a
+      # (`grep -n 'Fixture mode is a MUTATION CONTROL' seal-predicate.mjs` — that
+      # block is where `landed` stands in for the ancestry read; the line number
+      # this comment used to carry, 441-450, had rotted onto unrelated code by the
+      # time anyone re-derived it, which is why it is a grep now), so the
+      # fixture-driven tests never ask a
       # shallow clone a question it cannot answer.
       #
       # TWO THINGS THE OLD TEXT HERE ASSERTED AND THE BYTES REFUSE, both re-measured
@@ -686,7 +697,7 @@ jobs:
       #   * NOT every spawn is `--guard-cmd true`. Most are — that stub is how the
       #     fixture tests isolate clause (b) from the guard arm — but the clause-(b)
       #     ladder section runs WITHOUT it on purpose (its own words, at
-      #     seal-predicate.test.mjs:546: "Run WITHOUT --guard-cmd, so the two
+      #     `grep -n 'Run WITHOUT --guard-cmd' seal-predicate.test.mjs`: "Run WITHOUT --guard-cmd, so the two
       #     committed guards actually execute"), so the two registered rung-1
       #     guards — cloud/priv/static/__app.test.mjs and design/emit-fence.test.mjs
       #     — really spawn and their stdout is really matched against `guardExpect`.
