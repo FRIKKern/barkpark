@@ -1,0 +1,63 @@
+{
+  "paper": "eight-minute-erasure",
+  "type": "columns",
+  "blocks": [
+    {
+      "columns": [
+        [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "The obvious fix — prune unconditionally on a timer — would steal samples from a real Prometheus between its scrapes, quietly lowering the counts it sees. So "
+              },
+              {
+                "type": "code",
+                "value": "MetricsController.scrape/2"
+              },
+              {
+                "type": "text",
+                "value": " now reports each external scrape via "
+              },
+              {
+                "type": "code",
+                "value": "note_scrape/0"
+              },
+              {
+                "type": "text",
+                "value": "… "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "An instance with Prometheus attached never sees this process do anything."
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            "title": "He wrote",
+            "tone": "success",
+            "type": "callout"
+          }
+        ],
+        [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Core folds raw rows into cumulative histogram buckets, so an internal scrape does not steal already-counted samples. The idle window instead avoids redundant exposition work while a real Prometheus is attached…"
+              }
+            ],
+            "title": "It was replaced with",
+            "tone": "danger",
+            "type": "callout"
+          }
+        ]
+      ],
+      "id": "em8-swap",
+      "type": "columns"
+    }
+  ]
+}
