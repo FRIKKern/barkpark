@@ -23,6 +23,7 @@ defmodule Barkpark.Tasks.Query do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Content.DraftId
   alias Barkpark.PortableDoc.TaskResolver
 
   @rows_default_limit 500
@@ -331,6 +332,7 @@ defmodule Barkpark.Tasks.Query do
 
     from(d in Document, where: d.type == "task", limit: ^limit)
     |> collapse_twins()
+    |> maybe_published_only(scope)
     |> Scope.scope_to_workspace(ws_id, project_id)
     |> maybe_filter_dataset(Map.get(query, "dataset"))
     |> maybe_filter_kind(Map.get(query, "kind"))
@@ -339,6 +341,38 @@ defmodule Barkpark.Tasks.Query do
     |> apply_statuses(Map.get(query, "status"))
     |> apply_index_order(parent)
     |> Repo.all()
+  end
+
+  # D5 published-perspective gate for the LIVE-plan task fetcher — the twin of
+  # `Barkpark.Content.Query.maybe_published_only/2` (wikilinks/values/labels),
+  # keyed off the SCOPE keyword list because that is what every task-block
+  # resolver already threads (`Papers.resolve_tasks_in_blocks/3` takes a scope,
+  # not an opts bag).
+  #
+  # Why it is needed at all: `collapse_twins/1` suppresses a `drafts.<id>`
+  # shadow ONLY when a distinct PUBLISHED twin exists in the same scope — by
+  # its own documented design an UNPAIRED shadow survives. Every task written
+  # through `/v1/data/mutate` (i.e. every `bp task create`) lives at
+  # `drafts.<id>` with no twin, so without this conjunct a task block on a
+  # PUBLISHED paper handed an ANONYMOUS reader the titles/statuses of tasks that
+  # were never published (task-b10e10b944f6f55b).
+  #
+  # `published_only: true` ⇒ published rows only; absent/false ⇒ query untouched,
+  # which is what keeps the AUTHORISED paths (Studio's session-scoped preview,
+  # a preview-JWT / edit-share source read) showing draft tasks exactly as
+  # before. The `drafts.` prefix conjunct mirrors `apply_perspective(:published)`
+  # belt-and-braces: a `drafts.`-prefixed row is never published even if its
+  # status column reads "published".
+  defp maybe_published_only(query, scope) do
+    if Keyword.get(scope, :published_only, false) do
+      prefix = DraftId.drafts_prefix() <> "%"
+
+      from(d in query,
+        where: d.status == "published" and not like(d.doc_id, ^prefix)
+      )
+    else
+      query
+    end
   end
 
   # ── the aggregate/rollup fetcher (v1 = COUNT-ONLY) ──────────────────────────
