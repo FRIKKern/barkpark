@@ -1,8 +1,10 @@
 agent-backup-state	NewBackupProbe
 audit-emit	emit
+build-log-write-scrub	raw
 chat-stable-boundary	advance
 chat-stable-segments	advance
 cloud-provider-seam	DetectCapabilities
+cloudclient-backpressure-retry	newRetryTransport
 codelist-lookup	lookup
 concept-token-fold	conceptTokenRe
 connector-credential-sealing	createCredentialCipher
@@ -40,8 +42,10 @@ pull-provenance-schema-guard	pulled_schema_row
 rate-limit-client-ip	client_ip
 read-perspective-parse	parse
 read-perspective-validate	unsupported
+reference-title-resolution	reference_title
 release-boot-plugin-census	take
 schema-resolution-for-redaction	get_schema_for_redaction
+schema-resolution-tenant-scoped	get_schema
 scope-project-resolution	scope_project_id
 search-crystal-period-key	period_start_for
 secret-redaction	redact
@@ -50,9 +54,11 @@ share-scope-tenancy	declarable_scope?
 sheets-bg-sanitizer	sanitize_bg
 slug-resolve	resolve_doc
 status-vocabulary	role_for_status
+studio-grant-write-target-gate	grant_target_denied?
 studio-nav-model	default_top_menu_entries
 studio-scope-resolution	resolve_scope
 studio-shell-page-scroller	studio_page_scroll
+task-acceptance-criteria-shape	criteria_violation
 task-brief-mirror-resync	maybe_resync_task_brief
 task-chip-resolve	resolve_wikilink
 task-claimable-statuses	claimable_statuses

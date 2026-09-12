@@ -154,6 +154,73 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsStructureFormTest do
     assert appended["id"] == "new:right"
   end
 
+  test "Columns appends empty tracks and removes only the empty right edge without rewriting source" do
+    left = paragraph("left", "Left", %{"unknown" => %{"keep" => true}})
+
+    zero = %{"id" => "zero", "type" => "columns", "columns" => [], "meta" => [1, 2]}
+
+    assert Blocks.validate_block_patch(zero, columns_params(zero, "unused", "add-column")) ==
+             {:ok, %{"columns" => [[]]}}
+
+    block = %{
+      "id" => "columns",
+      "type" => "columns",
+      "columns" => [[left], []],
+      "gap" => "wide",
+      "unknown" => %{"keep" => true}
+    }
+
+    assert {:ok, %{"columns" => [[^left], [], []]}} =
+             Blocks.validate_block_patch(block, columns_params(block, "unused", "add-column"))
+
+    assert {:ok, %{"columns" => [[^left]]}} =
+             Blocks.validate_block_patch(
+               block,
+               columns_params(block, "unused", "remove-column:1")
+             )
+
+    assert Blocks.validate_block_patch(zero, columns_params(zero, "unused")) == {:ok, %{}}
+  end
+
+  test "Columns track removal fails closed for minimum, middle, nonempty, locked, and noncanonical indexes" do
+    unlocked = paragraph("unlocked", "Keep")
+    locked = paragraph("locked", "Locked", %{"locked" => true})
+    malformed = {:error, {:malformed_collection, "columns"}}
+
+    single = %{"id" => "single", "type" => "columns", "columns" => [[]]}
+
+    assert Blocks.validate_block_patch(
+             single,
+             columns_params(single, "unused", "remove-column:0")
+           ) == {:error, {:minimum_column_count, 1}}
+
+    middle = %{"id" => "middle", "type" => "columns", "columns" => [[], []]}
+
+    assert Blocks.validate_block_patch(
+             middle,
+             columns_params(middle, "unused", "remove-column:0")
+           ) == {:error, {:column_not_rightmost, 0}}
+
+    nonempty = %{"id" => "nonempty", "type" => "columns", "columns" => [[], [unlocked]]}
+
+    assert Blocks.validate_block_patch(
+             nonempty,
+             columns_params(nonempty, "unused", "remove-column:1")
+           ) == {:error, {:column_not_empty, 1}}
+
+    protected = %{"id" => "protected", "type" => "columns", "columns" => [[], [locked]]}
+
+    assert Blocks.validate_block_patch(
+             protected,
+             columns_params(protected, "unused", "remove-column:1")
+           ) == {:error, {:locked_block, "locked", "remove-column"}}
+
+    for action <- ["remove-column:01", "remove-column:+1", "remove-column:-1", "remove-column:2"] do
+      assert Blocks.validate_block_patch(middle, columns_params(middle, "unused", action)) ==
+               malformed
+    end
+  end
+
   test "Columns reorders and removes exact children while preserving every other column" do
     first = paragraph("first", "First", %{"span" => 2, "order" => 4})
     second = paragraph("child:with:colons", "Second", %{"unknown" => true})

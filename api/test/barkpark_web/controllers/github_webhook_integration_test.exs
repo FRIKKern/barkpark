@@ -394,9 +394,10 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
   # and then assert the STORE — because every one of these tags is a claim about
   # the store ("no write happened"), which a mapping proof cannot see.
 
-  test "a merged PR on an UNMARKED but WORDED gate → reconciled: unflagged_merge_gates, NAMED, and NOT ONE byte written", %{
-    scope: scope
-  } do
+  test "a merged PR on an UNMARKED but WORDED gate → reconciled: unflagged_merge_gates, NAMED, and NOT ONE byte written",
+       %{
+         scope: scope
+       } do
     doc_id = "pds-w37-nomarker-#{System.unique_integer([:positive])}"
 
     # Same wording as a real gate, but no `merge_gate:true` — a text heuristic
@@ -454,11 +455,30 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
     # Marked `merge_gate:true` and UNMET, but with no wording to CAS against
     # (D56). The honest answer is to leave it for a human, never to stamp
     # through the hole.
+    #
+    # A BLANK `criterion` is refused at both write doors now
+    # (cdd-criteria-shape-gate), so the row is seeded well-formed and the
+    # textless gate is installed with a raw store write. That is not a
+    # workaround: rows in this shape were written BEFORE the gate and are still
+    # in the store, and `no_guardable_marker` exists precisely to meet them
+    # without stamping through the hole. Seeding through the front door would
+    # only prove the front door works.
     task =
       mk_task_with_criteria!(scope, doc_id, [
         %{"criterion" => "feature built", "met" => true, "evidence" => "PR #1"},
-        %{"criterion" => "", "met" => false, "merge_gate" => true}
+        %{"criterion" => "placeholder, replaced below", "met" => false, "merge_gate" => true}
       ])
+
+    textless = [
+      %{"criterion" => "feature built", "met" => true, "evidence" => "PR #1"},
+      %{"criterion" => "", "met" => false, "merge_gate" => true}
+    ]
+
+    {1, _} =
+      from(d in Document, where: d.id == ^task.id)
+      |> Repo.update_all(set: [content: Map.put(task.content, "acceptance_criteria", textless)])
+
+    task = Repo.get!(Document, task.id)
 
     body = merged_pr_body(doc_id, 4632, "d0d0beef02")
     sig = Signature.sign(body, @secret)

@@ -117,3 +117,41 @@ export function withinSleepBudget(
 ): boolean {
   return sleptMs + delayMs <= budgetMs;
 }
+
+/**
+ * Pull the rate limiter's own `retry_after` out of a non-2xx BODY.
+ *
+ * WHY THE BODY AND NOT ONLY THE HEADER. Barkpark's three limiters
+ * (`api/lib/barkpark_web/plugs/{rate_limit,auth_write_rate_limit,ticket_rate_limit}.ex`)
+ * emit the hold in TWO carriers: a `retry-after` response header AND
+ * `details.retry_after` (seconds) inside the `{error:{code,message,details}}`
+ * envelope. Reading only the header makes this reader hostage to a proxy that
+ * strips it — and the SDK this pair forks from (`js/packages/core`
+ * `transport.ts`) already prefers the body for exactly that reason. Same
+ * precedence here so the three readers cannot disagree about how long to wait.
+ *
+ * Clamped to `MAX_RETRY_AFTER_MS` like the header form: a body value is no more
+ * trustworthy than a header one. Anything that is not a finite, non-negative
+ * number degrades to `undefined` — "no advice" — and the caller falls back to
+ * the header, then to its own ladder.
+ */
+export function envelopeRetryAfterMs(body: string): number | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || !("error" in parsed)) {
+    return undefined;
+  }
+  const e = (parsed as { error: unknown }).error;
+  if (!e || typeof e !== "object") return undefined;
+  const details = (e as { details?: unknown }).details;
+  if (!details || typeof details !== "object") return undefined;
+  const seconds = (details as { retry_after?: unknown }).retry_after;
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
+    return undefined;
+  }
+  return Math.min(seconds * 1_000, MAX_RETRY_AFTER_MS);
+}

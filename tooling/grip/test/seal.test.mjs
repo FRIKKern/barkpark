@@ -28,6 +28,7 @@ import {
   RUN_CLASS,
   ROOT_ID,
   FROZEN_CRITERIA,
+  CEILING_PROBES,
   CHARTER_GREP_SPECIMEN,
   classifyRun,
   classifyJson,
@@ -229,8 +230,50 @@ test("the frozen root criteria declare a polarity or say WHY they cannot, and cr
     if (c.polarity) assert.ok(["pass", "absence"].includes(c.polarity));
   }
   const unmeasured = FROZEN_CRITERIA[1];
-  assert.equal(unmeasured.polarity, null, "criterion 2 has no storable rerun until grip CI exists");
+  assert.equal(unmeasured.polarity, null, "criterion 2 has no storable rerun: `node` is a REFUSED head, and grip CI's run status is not the per-class mutation demonstration");
   assert.equal(adjudicateCriterion(unmeasured, REPO).ok, false);
+});
+
+// --- citations: SYMBOLS, never line numbers ---------------------------------
+//
+// The defect this pair exists to refuse: seal.mjs prints an HONEST CEILING
+// block that advertises where each refusal is WRITTEN, and every one of its
+// three citations had rotted to a line that no longer held the rule
+// (`screen.mjs:1096` was a go-flag comment; `:129` a blank line; `:490` a `*`).
+// A citation nobody can check is worse than none, because the reader trusts it.
+// So the citations are re-derived here against screen.mjs's real source, by
+// SYMBOL — a name survives an insertion, a line number does not.
+
+const SCREEN_SRC = readFileSync(resolve(REPO, "tooling/grip/screen.mjs"), "utf8");
+const SEAL_SRC = readFileSync(resolve(REPO, "tooling/grip/seal.mjs"), "utf8");
+const CITED_SYMBOLS = [...CEILING_PROBES.map(([, , why]) => why).join("\n").matchAll(/screen\.mjs ([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]);
+
+test("every screen.mjs symbol the HONEST CEILING cites is really in screen.mjs", () => {
+  // NON-VACUITY FIRST: a regex that matched nothing would pass the loop below
+  // silently, which is the same shape of green this whole file exists to refuse.
+  assert.ok(CITED_SYMBOLS.length >= 3, `expected >=3 cited symbols, extracted ${CITED_SYMBOLS.length}`);
+  for (const sym of CITED_SYMBOLS) {
+    assert.ok(new RegExp(`\\b${sym}\\b`).test(SCREEN_SRC), `seal.mjs cites screen.mjs ${sym}, which is not in screen.mjs`);
+  }
+  // CONTROL, and it must fail DIFFERENTLY from the query: a name of the same
+  // shape that screen.mjs does not define is absent, so the assertion above is
+  // discriminating and not just matching any identifier-looking token.
+  assert.equal(/\bREFUSED_HEADS_THAT_DO_NOT_EXIST\b/.test(SCREEN_SRC), false);
+});
+
+test("seal.mjs cites no screen.mjs LINE NUMBER — those are what rotted", () => {
+  const lineAnchored = [...SEAL_SRC.matchAll(/screen\.mjs:\d+/g)].map((m) => m[0]);
+  assert.deepEqual(lineAnchored, [], `line-anchored citations rot; use a symbol: ${lineAnchored.join(", ")}`);
+});
+
+test("criterion 1's reason names the rule that is STILL true, not the retired blocker", () => {
+  const why = FROZEN_CRITERIA[1].why;
+  // tgw6-bl-grip-suite-has-no-ci is DONE 11/11 and .github/workflows/grip-suite.yml
+  // is on main. A reason that still calls grip CI's absence the cause is a false
+  // impossibility, and a stamper quoting this run copies it into evidence that
+  // is PERMANENT at close.
+  assert.ok(!/no storable rerun at all until grip CI exists/.test(why), "the retired reason is still printed");
+  assert.ok(/REFUSED_HEADS/.test(why), "the reason must name the rule that still refuses it");
 });
 
 // --- end to end, on the COMMITTED fixtures ----------------------------------
@@ -389,7 +432,7 @@ test("MUTATION PROOF: a well-formed fixture still exits 0 with the unchanged ver
 // The merged gate asserted `allUnique === allCount` and so faulted on a
 // duplicate doc_id in the SERVER's own listing. That is a real live condition —
 // `akbr-feedback-2026-08-epic` is served twice by `bp task ready --all`, filed
-// as the still-open `tgw12-bl-seal-infra-fault-ready-pool-ghost` — and it made
+// as `tgw12-bl-seal-infra-fault-ready-pool-ghost` (since closed) — and it made
 // every live run exit 2 with a=UNKNOWN, so no clause was ever evaluated. These
 // controls pin BOTH halves: the live shape must reconcile, and a genuinely
 // partial read must still fault.

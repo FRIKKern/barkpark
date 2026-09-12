@@ -141,6 +141,47 @@ HEALTH_FAIL_MARK=".bp-health-failed"
 # template (that rebuild passes HEALTH on genuine markers and goes live with the
 # WRONG bytes), and purge_failed_release refuses to delete it into one.
 PREBUILT_MARK=".bp-prebuilt-sha256"
+# Dropped inside EVERY release dir this engine stages, box-build and prebuilt
+# alike: the sha256 of the staged tree itself (charter D188).  It is a RECEIPT of
+# WHICH BYTES this release carries, never an identity key — one content_rev has
+# produced four distinct artifacts, so the build is not reproducible and no
+# digest here is a content address.  It is deliberately NOT $PREBUILT_MARK:
+# that file's recorded meaning is "these bytes arrived from an UPLOAD, and this
+# is the digest the CP verified for the tarball", and two decisions read its mere
+# PRESENCE (PLAN refuses to rebuild such a release from the provisioned template;
+# purge_failed_release refuses to delete it).  Writing a box-build digest there
+# would silently reclassify every box-build release as un-rebuildable, and would
+# put a TARBALL digest and a TREE digest in one filename.
+BUILD_MARK=".bp-build-sha256"
+# The digest stage_dir_into_release measured for THIS run's staged tree, "" when
+# it could not be taken.  Narrated on STAGE; re-measured independently at SWITCH.
+STAGED_SHA=""
+# THE file_server HIDE LIST — ONE definition, read by the fresh arm AND by the
+# in-place upgrade, so the two can never drift (a value on two surfaces needs one
+# lock). Caddy matches each pattern with path.Match against the request path and,
+# for a pattern carrying no separator, against the BASE NAME — so `._*` catches
+# an AppleDouble sidecar at any depth and `.DS_Store` catches it in any directory.
+#
+# Why this list and not a blanket `.*`: `/.well-known/` is a REAL path a static
+# site is asked for (apple-app-site-association, assetlinks.json, security.txt),
+# and Caddy's hide has no "except" — a blanket dotfile rule would 404 it with no
+# way back. Named classes only, and the reason for each:
+#
+#   .bp-prebuilt-sha256 / .bp-build-sha256 / .bp-health-failed — this engine's own
+#                release markers.
+#   .DS_Store  — the packing machine's directory listing, INCLUDING the names of
+#                files that were never shipped.
+#   ._*        — a macOS AppleDouble sidecar: the file's resource fork and its
+#                extended attributes, served verbatim.
+#   PaxHeader  — a tar extension-header pseudo-directory that reached disk.
+#   .git       — a repo staged whole is the entire history, remotes included.
+#   .env       — the shape every "static" bundle eventually smuggles a key in.
+#
+# The extractor now REFUSES the junk classes outright (E_JUNK_ENTRY,
+# Barkpark.Sites.PrebuiltArtifact), so nothing NEW stages them. This hide is for
+# what is ALREADY on disk: a refusal is not retroactive, and every release staged
+# before that change is still live and still fetchable.
+HIDE_LIST="$PREBUILT_MARK $BUILD_MARK $HEALTH_FAIL_MARK .DS_Store ._* PaxHeader .git .env"
 # log() and emit() (the BPSTAGE machine protocol) live in the common lib.
 
 # ---- Mode dispatch ---------------------------------------------------------
@@ -214,10 +255,61 @@ has_site_route_marker() { grep -qE "$(site_route_marker_re)" "$1"; }
 # runs (no fixture fork — the test proves the real primitives).
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# FENCE TWO — A RELEASE THAT CONTAINS ANY SYMLINK NEVER GOES LIVE (task-63877435cf4ad70a).
+#
+# WHY IT IS HERE AND NOT IN THE CADDYFILE. A staged symlink is a SERVED file:
+# `root * $ROOT/current` + `file_server` dereferences it, so `leak.txt ->
+# /opt/barkpark/.env` is an HTTP-reachable secret (site-spawner charter D90).
+# The web-server-side defence everyone reaches for -- `disable_symlinks` -- is
+# DECLINED ON PURPOSE, and the reason is not taste:
+#
+#   1. IT IS NOT A CADDY DIRECTIVE AT ALL. Measured on caddy v2.11.4
+#      (2026-09-11, transcript in the PR): `disable_symlinks` is rejected as an
+#      unknown file_server SUBDIRECTIVE, as an unrecognized SITE directive, as
+#      an unrecognized GLOBAL option, and as an unknown field on the
+#      `http.handlers.file_server` JSON module. It is an NGINX directive. So
+#      emitting it does not weaken or harden serving -- it makes the Caddyfile
+#      UNPARSEABLE, and this Caddyfile is SHARED: one bad block and `caddy run`
+#      refuses the whole file, taking every other site AND the slot
+#      reverse_proxy down with it.
+#   2. EVEN IF IT EXISTED, the served root IS the `current` symlink this very
+#      function repoints (D11). A "refuse anything reached through a symlink"
+#      rule refuses the root itself, so it would refuse EVERY request to EVERY
+#      static site. Caddy's file_server has no root-only exemption.
+#
+# So the second layer lives at the FLIP, where the tree is on disk, fully
+# staged, and still not reachable: walk the candidate release and refuse to
+# repoint `current` at it if it contains any symlink. Fence one is the packer's
+# client-side refusal (charter D120, internal/cli/sites_tarball.go); fence two
+# is this. `find -type l` LSTATS, so it sees the link itself and never follows
+# it, and it is scoped to the candidate dir, so a symlink elsewhere on the box
+# is none of its business. A refusal leaves the live symlink UNMOVED -- the old
+# release keeps serving, which is the safe direction.
+#
+# NOT COVERED, on purpose: --rollback (do_rollback) repoints at a release that
+# already passed THIS fence on the run that first published it, and re-walking
+# it would turn a recovery path into a second place to fail.
+# ---------------------------------------------------------------------------
+SWITCH_REFUSED_LINKS=""
+release_symlinks() { # <release-dir> -> prints each symlink found, one per line
+  [ -d "$1" ] || return 0
+  find "$1" -type l 2>/dev/null
+}
+
 # SWITCH: atomic current -> releases/<BUILD_ID>.  Records the build we flip away
 # from in .previous so --rollback (and a forward re-rollback) is a pure pointer.
+#
+# Returns 2 (not 1) when the symlink fence above bites, so the caller can tell
+# "the rename failed" from "we refused to publish these bytes" and word it
+# honestly to the operator.
 do_switch() {
   local prev=""
+  local links; links="$(release_symlinks "$RELEASES/$BUILD_ID")"
+  if [ -n "$links" ]; then
+    SWITCH_REFUSED_LINKS="$(printf '%s\n' "$links" | head -5 | tr '\n' ' ')"
+    return 2
+  fi
   [ -L "$CURRENT" ] && prev="$(basename "$(readlink "$CURRENT")")"
   ln -sfn "releases/$BUILD_ID" "$CURRENT.tmp" || return 1
   atomic_symlink_swap "$CURRENT.tmp" "$CURRENT" || { rm -f "$CURRENT.tmp"; return 1; }
@@ -233,21 +325,17 @@ RETIRED=0
 do_retire() {
   RETIRED=0
   [ -d "$RELEASES" ] || return 0
-  local livecur="" prev="" d id i=0
+  local livecur="" prev=""
   [ -L "$CURRENT" ] && livecur="$(basename "$(readlink "$CURRENT")")"
   [ -f "$ROOT/.previous" ] && prev="$(cat "$ROOT/.previous")"
-  # ls -1dt: newest-first by mtime.  Trailing slash restricts to directories.
-  # A process substitution (never a pipe) — the loop must run in THIS shell or
-  # the RETIRED count would die with a subshell.
-  while IFS= read -r d; do
-    [ -n "$d" ] || continue
-    id="$(basename "$d")"
-    i=$((i + 1))
-    [ "$i" -le "$RETAIN" ] && continue
-    [ "$id" = "$livecur" ] && continue
-    [ "$id" = "$prev" ] && continue
-    if rm -rf "$d"; then RETIRED=$((RETIRED + 1)); log "RETIRE: removed old release $id"; fi
-  done < <(ls -1dt "$RELEASES"/*/ 2>/dev/null)
+  # THE SORT KEY IS THE STAGING TIME, not the release dir mtime (see
+  # releases_newest_first in the common lib). `ls -1dt` sorted by mtime, and
+  # STAGE's `cp -a "$SRC/dist/."` PRESERVES the builder's dist timestamps — so
+  # the old key was "when the builder last wrote dist/", and a re-staged
+  # pre-existing dist silently inverted the retire order. Ties made it worse
+  # than arbitrary: GNU `ls -t` falls back to NAME ASCENDING on equal mtimes.
+  prune_release_dirs "$RELEASES" "$RETAIN" "$livecur" "$prev"
+  RETIRED="$PRUNED"
 }
 
 # The ONE place that decides whether a candidate rollback target is servable,
@@ -604,6 +692,71 @@ purge_failed_release() {
   log "HEALTH: purged releases/$BUILD_ID — a redeploy of this build_id rebuilds from source instead of re-gating broken bytes"
 }
 
+# ---------------------------------------------------------------------------
+# THE RELEASE RECEIPT (charter D188).  Every release this engine stages records
+# the sha256 of its own served tree, so "which bytes went live" is answerable
+# from the box AND comparable against the control-plane row.  Before this, only
+# the PREBUILT arm kept any receipt at all and it recorded the UPLOADED TARBALL,
+# not the tree — so for a box build (30,627 of 30,633 rows) a wrong artifact
+# could be served and no instrument anywhere would disagree with itself.
+#
+# NOT an identity key, and never to be used as one: one content_rev has produced
+# four distinct artifacts on this fleet.  This digest answers "are the bytes I
+# staged the bytes that are live", nothing more.
+#
+# sha256_stdin: the box is Linux (coreutils sha256sum), the SELF-TEST runs on
+# stock macOS bash 3.2 (shasum).  Both, or the digest is empty and every caller
+# degrades to "not measured" rather than to a wrong answer.
+sha256_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | cut -d' ' -f1
+  else
+    printf ''
+  fi
+}
+
+# release_tree_digest <dir> — 64 hex over the tree's FILES, names included, or ""
+# when the dir is gone or no sha256 tool exists.  The engine's OWN markers are
+# excluded: they are written INTO the tree after it is measured (and $BUILD_MARK
+# would otherwise hash itself), so excluding them is what makes the STAGE-time
+# read and the SWITCH-time re-read the same quantity.
+#
+# `-exec … +` then a text sort (rather than find -print0 | sort -z | xargs -0):
+# BSD sort has no -z on the macOS the self-test runs on, and sha256sum/shasum both
+# escape a newline-bearing name rather than emitting a raw newline.
+release_tree_digest() { # <dir>
+  local dir="$1"
+  [ -d "$dir" ] || { printf ''; return 0; }
+  ( cd "$dir" 2>/dev/null || exit 0
+    find . -type f \
+      ! -name "$PREBUILT_MARK" ! -name "$BUILD_MARK" ! -name "$HEALTH_FAIL_MARK" \
+      -exec "$SHA_CMD" {} + 2>/dev/null \
+    | LC_ALL=C sort \
+    | sha256_stdin )
+}
+
+# The per-file digest command release_tree_digest hands to find(1).  Resolved
+# once, because `find -exec` needs a program name, not a shell function.
+if command -v sha256sum >/dev/null 2>&1; then SHA_CMD=sha256sum
+elif command -v shasum >/dev/null 2>&1; then SHA_CMD="shasum"
+else SHA_CMD=""
+fi
+
+# write_release_receipt <reldir> — measure the staged tree and drop $BUILD_MARK
+# in it.  Best-effort in BOTH directions: a box with no sha256 tool, or a
+# read-only release dir, costs the receipt and never the deploy.  Echoes the
+# digest (empty when it could not be taken) so the caller can narrate it.
+write_release_receipt() { # <reldir>
+  local reldir="$1" sha=""
+  [ -n "$SHA_CMD" ] || { printf ''; return 0; }
+  sha="$(release_tree_digest "$reldir")"
+  printf '%s' "$sha" | grep -qE '^[0-9a-f]{64}$' || { printf ''; return 0; }
+  printf '%s\n' "$sha" > "$reldir/$BUILD_MARK" 2>/dev/null || true
+  printf '%s' "$sha"
+}
+
 # STAGE's one copy idiom, shared by the two arms that produce bytes (a local
 # build's dist/, and an uploaded prebuilt tree).  Stage into a .partial dir, then
 # swap it in, so a crash mid-copy never leaves a half-populated
@@ -654,6 +807,16 @@ stage_dir_into_release() { # <srcdir> <what> [prebuilt_sha256]
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   [ -n "$aside" ] && rm -rf "$aside"
+  # The release is staged AS OF NOW — stamp it, because its own mtime says when
+  # the BUILDER last wrote dist/ (cp -a preserves source timestamps) and RETIRE
+  # must not sort on the builder's clock. Best-effort: a stamp that cannot be
+  # written costs the ordering precision, never the deploy.
+  stamp_release_staged "$RELEASES" "$BUILD_ID"
+  # THE RECEIPT (D188).  Taken AFTER the rename, over the tree that is now the
+  # release, and for BOTH arms — a prebuilt release's $PREBUILT_MARK names the
+  # uploaded TARBALL, which is not the quantity a "did the live tree change"
+  # comparison needs.  STAGED_SHA is read by the STAGE narration below.
+  STAGED_SHA="$(write_release_receipt "$RELDIR")"
   return 0
 }
 
@@ -698,8 +861,16 @@ if [ "$MODE" = selftest ]; then
   #
   # ADD rows -> raise the literal in the SAME commit. Remove rows -> lower it in
   # the same commit. A red here is either a missing block or an unraised floor.
-  SELFTEST_FLOOR_MIN=76
-  SELFTEST_FLOOR_FULL=458
+  # 2026-09-09: +44 (76->112 MIN, 458->502 FULL) for the bare-path upgrade (D79)
+  # and the staging-time RETIRE key (D80). 36 of the 44 are unit rows outside
+  # every optional block, so BOTH floors move by those; the remaining 8 need a
+  # real caddy(1) and land in FULL only.
+  # 2026-09-11: +27 (112->123, 502->529) for the symlink flip fence
+  # (task-63877435cf4ad70a) — 11 primitive rows on do_switch (always run, so BOTH
+  # floors move) and 16 e2e rows driving the real engine with a staged
+  # `leak.txt -> /opt/barkpark/.env` plus its clean-release control (FULL only).
+  SELFTEST_FLOOR_MIN=123
+  SELFTEST_FLOOR_FULL=529
   TESTS=0; FAILS=0
   check() { # <label> <cond-cmd...>
     local label="$1"; shift
@@ -727,6 +898,42 @@ if [ "$MODE" = selftest ]; then
   check ".previous records b1"          [ "$(cat "$ROOT/.previous")" = b1 ]
   check "no current.tmp residue"        [ ! -e "$CURRENT.tmp" ]
 
+  # -------------------------------------------------------------------------
+  # FENCE TWO, AT THE PRIMITIVE (task-63877435cf4ad70a). The e2e block below
+  # proves this end to end through the real engine, but e2e is OPTIONAL (it needs
+  # the fake-bin fixtures), so the fence is ALSO pinned here, in the always-run
+  # tier, on the same do_switch the deploy path calls. Its own tmp site keeps the
+  # b1..b7 fixture state below untouched.
+  # -------------------------------------------------------------------------
+  echo "[selftest] SWITCH refuses a release containing a symlink (disable_symlinks is declined; this is the fence)"
+  SLS="$TD/symlink-fence"
+  mkdir -p "$SLS/releases/leak" "$SLS/releases/clean" "$SLS/releases/deep/assets"
+  printf 'x' > "$SLS/releases/leak/index.html"
+  printf 'x' > "$SLS/releases/clean/index.html"
+  printf 'x' > "$SLS/releases/deep/index.html"
+  ln -sfn /opt/barkpark/.env "$SLS/releases/leak/leak.txt"
+  ln -sfn ../../../../etc/passwd "$SLS/releases/deep/assets/pw"
+  sl_save_root="$ROOT"; sl_save_rel="$RELEASES"; sl_save_cur="$CURRENT"; sl_save_bid="${BUILD_ID:-}"
+  ROOT="$SLS"; RELEASES="$SLS/releases"; CURRENT="$SLS/current"
+  # A clean release goes live first, so "the live link never moved" has a subject.
+  BUILD_ID=clean; do_switch; sl_clean_rc=$?
+  check "a CLEAN release flips (rc 0)"              [ "$sl_clean_rc" = 0 ]
+  check "…and current really points at it"          [ "$(readlink "$CURRENT")" = releases/clean ]
+  check "precondition: the leak fixture really holds a symlink (non-vacuous)" \
+    [ -L "$SLS/releases/leak/leak.txt" ]
+  BUILD_ID=leak; do_switch; sl_leak_rc=$?
+  check "a release with a ROOT symlink is REFUSED (rc 2, not 0 and not 1)" [ "$sl_leak_rc" = 2 ]
+  refused_names() { case "$SWITCH_REFUSED_LINKS" in *"$1"*) return 0;; *) return 1;; esac; }
+  check "…the refusal NAMES the link"               refused_names leak.txt
+  check "…the LIVE symlink never moved"             [ "$(readlink "$CURRENT")" = releases/clean ]
+  check "…and no current.tmp residue was left"      [ ! -e "$CURRENT.tmp" ]
+  BUILD_ID=deep; do_switch; sl_deep_rc=$?
+  check "a NESTED symlink is refused too (the walk is not root-only)" [ "$sl_deep_rc" = 2 ]
+  check "…and that refusal names the nested path"   refused_names assets/pw
+  check "…live still on clean after the nested refusal" [ "$(readlink "$CURRENT")" = releases/clean ]
+  ROOT="$sl_save_root"; RELEASES="$sl_save_rel"; CURRENT="$sl_save_cur"; BUILD_ID="$sl_save_bid"
+  check "the fence block restored the fixture globals" [ "$(live_build)" = b2 ]
+
   echo "[selftest] ROLLBACK repoints to the previous release, forward-rollable"
   do_rollback
   check "rollback: current -> b1"       [ "$(live_build)" = b1 ]
@@ -747,6 +954,196 @@ if [ "$MODE" = selftest ]; then
   # shellcheck disable=SC2012  # counting fixture release dirs (known-clean names) in the self-test
   remaining="$(ls -1d "$RELEASES"/*/ 2>/dev/null | wc -l | tr -d ' ')"
   check "6 dirs remain (5 newest + protected previous)" [ "$remaining" = 6 ]
+
+  # -------------------------------------------------------------------------
+  # RETIRE ORDERS BY STAGING TIME, NOT THE BUILDER'S CLOCK (D80).
+  #
+  # The seven fixtures above use STRICTLY INCREASING `touch -t` stamps — which
+  # is the only reason the block above is green. It never asked what the sort
+  # key MEANS. STAGE copies with `cp -a "$SRC/dist/."`, and `cp -a` PRESERVES the
+  # source timestamps (proven on GNU and BSD cp with a 2020-stamped source), so
+  # a release dir's mtime is "when the BUILDER last wrote dist/", not "when this
+  # release was staged". Stage seven releases from one unchanging dist and every
+  # release dir carries the SAME mtime — and on ties `ls -t` falls back to NAME
+  # ASCENDING (measured: GNU coreutils 9.4 AND BSD ls both give t1..t7, the
+  # exact reverse of newest-first). The pre-fix engine therefore deletes t6 and
+  # t7, the two NEWEST releases, and calls t1 and t2 the rollback window.
+  #
+  # The fix is a stamp written by STAGE at <releases>/.staged/<build_id>, and
+  # the ordering below is the thing that reads it. Revert the key to `ls -1dt`
+  # and the four rows naming t7/t6/t1/t2 go red BY NAME.
+  # -------------------------------------------------------------------------
+  echo "[selftest] RETIRE sorts by STAGING time, not the builder's dist mtime (TIED mtimes)"
+  sv_ROOT="$ROOT"; sv_RELEASES="$RELEASES"; sv_CURRENT="$CURRENT"; sv_RETAIN="$RETAIN"; sv_BUILD_ID="$BUILD_ID"
+  TR="$TD/tied"; TRR="$TR/releases"
+  mkdir -p "$TRR"
+  for n in 1 2 3 4 5 6 7; do
+    mkdir -p "$TRR/t$n"
+    printf '<meta name="bp-build-id" content="t%s">' "$n" > "$TRR/t$n/index.html"
+    touch -t 202607130900 "$TRR/t$n"     # ALL TIED — one builder dist, seven stagings
+    stamp_release_staged "$TRR" "t$n"    # …staged in order t1 (oldest) .. t7 (newest)
+  done
+  tied_distinct="$(for n in 1 2 3 4 5 6 7; do dir_mtime_epoch "$TRR/t$n"; echo; done | sort -u | wc -l | tr -d ' ')"
+  check "the fixture really is TIED (one distinct mtime across all seven dirs)" \
+    [ "$tied_distinct" = 1 ]
+  check "…and every release really carries a staging stamp (the fixture is not vacuous)" \
+    sh -c "[ \"\$(ls -1 '$TRR/.staged' 2>/dev/null | grep -c '^t[1-7]$' | tr -d ' ')\" = 7 ]"
+  # THE PRE-FIX KEY, measured on this box rather than asserted from memory.
+  # shellcheck disable=SC2012  # the OLD key IS `ls -t` — measuring it is the point
+  prefix_order="$(ls -1dt "$TRR"/*/ 2>/dev/null | sed 's:.*/\([^/]*\)/$:\1:' | tr '\n' ' ')"
+  fixed_order="$(releases_newest_first "$TRR" | sed 's:.*/\([^/]*\)/$:\1:' | tr '\n' ' ')"
+  check "PRE-FIX KEY: 'ls -1dt' on tied mtimes is NAME-ASCENDING, i.e. oldest-staged first" \
+    [ "$prefix_order" = "t1 t2 t3 t4 t5 t6 t7 " ]
+  check "THE FIX: releases_newest_first orders them newest-STAGED first" \
+    [ "$fixed_order" = "t7 t6 t5 t4 t3 t2 t1 " ]
+  ROOT="$TR"; RELEASES="$TRR"; CURRENT="$TR/current"; RETAIN=5
+  BUILD_ID=t7; do_switch
+  do_retire
+  check "tied RETIRE: kept t7 (newest staged, and current)"  [ -d "$TRR/t7" ]
+  check "tied RETIRE: kept t6 — the SECOND-NEWEST, which the pre-fix engine deleted" \
+    [ -d "$TRR/t6" ]
+  check "tied RETIRE: kept t3 (still inside the newest five)" [ -d "$TRR/t3" ]
+  check "tied RETIRE: removed t1 (oldest staged, which the pre-fix engine KEPT)" \
+    [ ! -d "$TRR/t1" ]
+  check "tied RETIRE: removed t2 (second-oldest, likewise kept by the pre-fix engine)" \
+    [ ! -d "$TRR/t2" ]
+  check "tied RETIRE: it removed exactly two"                 [ "$RETIRED" = 2 ]
+  # shellcheck disable=SC2012  # counting fixture release dirs (known-clean names)
+  tied_remaining="$(ls -1d "$TRR"/*/ 2>/dev/null | wc -l | tr -d ' ')"
+  check "tied RETIRE: five release dirs remain"               [ "$tied_remaining" = 5 ]
+  check "tied RETIRE: a removed release's staging stamp is cleaned up with it" \
+    [ ! -f "$TRR/.staged/t1" ]
+  check "tied RETIRE: a KEPT release's staging stamp survives" [ -f "$TRR/.staged/t7" ]
+  # The stamp dir is dot-prefixed, so it can never be mistaken for a release by
+  # the `*/` glob every reader here uses — assert that rather than assume it.
+  check "the stamp store is invisible to the release glob (it is a dot-dir)" \
+    sh -c "! ls -1d '$TRR'/*/ 2>/dev/null | grep -q '\.staged'"
+  ROOT="$sv_ROOT"; RELEASES="$sv_RELEASES"; CURRENT="$sv_CURRENT"; RETAIN="$sv_RETAIN"; BUILD_ID="$sv_BUILD_ID"
+
+  # -------------------------------------------------------------------------
+  # THE BARE-PATH UPGRADE PREDICATE (D79) — read from the BLOCK'S OWN BYTES.
+  #
+  # `handle_path /sites/<slug>/*` does NOT match the bare `/sites/<slug>`, so on
+  # the pre-fix engine that request falls through the whole site block to the
+  # slot `reverse_proxy localhost:4000` and is answered by Barkpark's OWN API
+  # with its document-not-found JSON. Four live sites, three of them static.
+  #
+  # The guard is deliberately NOT "is the marker present" — that would freeze
+  # the first shape forever (the defect the hide upgrade already had to fix) AND
+  # it cannot see the trap: a basePath block canonicalizes slash -> bare, so a
+  # Caddy bare -> slash redir composed with it is an unbounded 308 cycle. So
+  # every verdict below is read out of the block's bytes, and the two "left
+  # alone" rows are the ones that matter most.
+  # -------------------------------------------------------------------------
+  echo "[selftest] the bare-path upgrade is guarded by the BLOCK'S OWN BYTES (D79)"
+  BPU="$TD/barepath"; mkdir -p "$BPU"
+  bp_rw() { # <slug> <src> <dst> -> the rewrite verdict as an exit code
+    local __save="${SITE_SLUG:-}" __rc=0
+    SITE_SLUG="$1"; caddy_bare_path_rewrite "$2" "$3" || __rc=$?
+    SITE_SLUG="$__save"; return "$__rc"
+  }
+  bp_verdict() { bp_rw "$1" "$2" "$3"; echo $?; }
+  # (1) THE PRE-FIX STATIC SHAPE, byte for byte as guerrilla carries it. Like
+  #     every emitted block it carries NO `disable_symlinks` — declined, see
+  #     release_symlinks/do_switch; the fixtures mirror what the arm emits.
+  { printf 'example.com {\n'
+    printf "\t# BARKPARK_SITE_ROUTE:bare1 — static site 'bare1' served from its immutable current release.\n"
+    printf '\thandle_path /sites/bare1/* {\n'
+    printf '\t\troot * /opt/barkpark/sites/bare1/current\n'
+    printf '\t\tfile_server\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$BPU/pre.cf"
+  check "the pre-fix fixture really has NO bare-path route (non-vacuous)" \
+    sh -c "! grep -qE 'redir @|@bare_' '$BPU/pre.cf'"
+  check "a pre-fix handle_path block is UPGRADABLE (verdict 0)" \
+    [ "$(bp_verdict bare1 "$BPU/pre.cf" "$BPU/up1.cf")" = 0 ]
+  check "…the upgrade wrote an EXACT path matcher for the bare path" \
+    grep -qx "$(printf '\t@bare_bare1 path /sites/bare1')" "$BPU/up1.cf"
+  check "…and a 308 to the canonical slashed form" \
+    grep -qx "$(printf '\tredir @bare_bare1 /sites/bare1/ 308')" "$BPU/up1.cf"
+  check "…without re-arming: the marker still appears exactly once" \
+    sh -c "[ \"\$(grep -c 'BARKPARK_SITE_ROUTE:bare1' '$BPU/up1.cf')\" = 1 ]"
+  check "…and the handle_path is still there exactly once (no duplicate route)" \
+    sh -c "[ \"\$(grep -c 'handle_path /sites/bare1/\\*' '$BPU/up1.cf')\" = 1 ]"
+  check "…and it is REAL-caddy valid" \
+    sh -c "! command -v caddy >/dev/null 2>&1 || caddy validate --adapter caddyfile --config '$BPU/up1.cf'"
+  # (2) IDEMPOTENT — the upgrade self-disarms, because the predicate now sees
+  #     its own redir. Running it twice must change nothing.
+  check "a SECOND pass reads the block as already covered (verdict 10)" \
+    [ "$(bp_verdict bare1 "$BPU/up1.cf" "$BPU/up2.cf")" = 10 ]
+  check "…and rewrote nothing (byte-identical)" cmp -s "$BPU/up1.cf" "$BPU/up2.cf"
+  # (3) THE reverse_proxy PORT LINE IS NEVER TOUCHED. The upgrade INSERTS only,
+  #     so it can never race the per-site port flip that owns that line.
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:portsafe — node SSR site, pre-#3382 shape.\n'
+    printf '\thandle_path /sites/portsafe/* {\n'
+    printf '\t\treverse_proxy localhost:5317\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$BPU/port.cf"
+  check "a pre-#3382 node block is upgradable too (verdict 0)" \
+    [ "$(bp_verdict portsafe "$BPU/port.cf" "$BPU/port.out")" = 0 ]
+  check "…and the upstream port line came through UNTOUCHED" \
+    grep -qx "$(printf '\t\treverse_proxy localhost:5317')" "$BPU/port.out"
+  check "…exactly once (nothing duplicated it)" \
+    sh -c "[ \"\$(grep -c 'localhost:5317' '$BPU/port.out')\" = 1 ]"
+  # (4) THE TRAP. A basePath-shaped block already covers the bare path with its
+  #     own matcher and deliberately carries NO redir — the app 308s the other
+  #     way, so the pair would loop forever. It must be left ALONE.
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:bpath — node SSR site (basePath), reverse-proxied un-stripped.\n'
+    printf '\t@bare_bpath path /sites/bpath /sites/bpath/*\n'
+    printf '\thandle @bare_bpath {\n'
+    printf '\t\treverse_proxy localhost:5401\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$BPU/bpath.cf"
+  check "a basePath-shaped block reads as ALREADY COVERED-without-redir (verdict 11)" \
+    [ "$(bp_verdict bpath "$BPU/bpath.cf" "$BPU/bpath.out")" = 11 ]
+  check "…and is left byte-identical: NO bare->slash redir is added (it would 308-loop)" \
+    cmp -s "$BPU/bpath.cf" "$BPU/bpath.out"
+  check "…the output still carries no redir at all" \
+    sh -c "! grep -q 'redir' '$BPU/bpath.out'"
+  # (5) AN UNRECOGNISED SHAPE IS LEFT ALONE, NOT GUESSED AT. A non-stripping
+  #     `handle` means the app keeps the prefix and may canonicalize itself —
+  #     exactly the direction that loops — so this engine declines to touch it.
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:odd — hand-edited, non-stripping handle.\n'
+    printf '\thandle /sites/odd/* {\n'
+    printf '\t\treverse_proxy localhost:5507\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$BPU/odd.cf"
+  check "an UNRECOGNISED block shape reads as unrecognised (verdict 12)" \
+    [ "$(bp_verdict odd "$BPU/odd.cf" "$BPU/odd.out")" = 12 ]
+  check "…and is left byte-identical (not guessed at)" cmp -s "$BPU/odd.cf" "$BPU/odd.out"
+  # (6) NO BLOCK AT ALL for this slug — a distinct verdict, and still a no-op.
+  check "a slug with no block of its own is verdict 13" \
+    [ "$(bp_verdict absent "$BPU/odd.cf" "$BPU/absent.out")" = 13 ]
+  check "…and the file is untouched" cmp -s "$BPU/odd.cf" "$BPU/absent.out"
+  # (7) THE PREFIX SIBLING (D345) again, on THIS predicate: the upgrade is
+  #     marker-anchored, so a strict-prefix slug must upgrade its OWN block and
+  #     leave the longer sibling's alone.
+  { printf 'example.com {\n'
+    printf '\t# BARKPARK_SITE_ROUTE:sib-capstone — static site.\n'
+    printf '\thandle_path /sites/sib-capstone/* {\n'
+    printf '\t\troot * /opt/c\n'
+    printf '\t\tfile_server\n'
+    printf '\t}\n'
+    printf '\t# BARKPARK_SITE_ROUTE:sib — static site.\n'
+    printf '\thandle_path /sites/sib/* {\n'
+    printf '\t\troot * /opt/s\n'
+    printf '\t\tfile_server\n'
+    printf '\t}\n'
+    printf '\treverse_proxy localhost:4000\n'
+    printf '}\n'; } > "$BPU/sib.cf"
+  check "the PREFIX slug upgrades its own block (verdict 0)" \
+    [ "$(bp_verdict sib "$BPU/sib.cf" "$BPU/sib.out")" = 0 ]
+  check "…it added exactly one redir, and it is the prefix slug's own" \
+    sh -c "[ \"\$(grep -c 'redir @' '$BPU/sib.out')\" = 1 ] && grep -q 'redir @bare_sib /sites/sib/ 308' '$BPU/sib.out'"
+  check "…and the LONGER sibling's block got no bare-path route" \
+    sh -c "! grep -q 'bare_sibcapstone' '$BPU/sib.out'"
 
   echo "[selftest] no-op rollback when previous == current is safe"
   echo b7 > "$ROOT/.previous"; do_rollback
@@ -1291,6 +1688,11 @@ mkdir -p dist
   [ -n "$corpus" ] && printf '<meta name="bp-corpus-status" content="%s">\n' "$corpus"
   printf '</head><body><h1>hello</h1></body></html>\n'
 } > dist/index.html
+# THE SYMLINK-LEAK FIXTURE (task-63877435cf4ad70a). A build that drops a symlink
+# into dist/ — the charter-D90 shape verbatim. STAGE's `cp -a` preserves it, so
+# the release tree really carries a link pointing outside itself and the flip
+# fence is measured on the genuine article, not on a mock.
+[ -f ./.leak-symlink ] && ln -sfn /opt/barkpark/.env dist/leak.txt
 exit 0
 FAKENPM
     chmod +x "$FAKEBIN"/*
@@ -1331,6 +1733,91 @@ FAKENPM
     check "RETIRE ok (a retire that removes NOTHING still speaks)" saw RETIRE ok e1
     check "current -> releases/e1"             [ "$(livenow)" = releases/e1 ]
     check "npm really ran"                     grep -q 'npm run build' "$SRC/.npm-calls"
+
+    echo "[selftest] e2e: a BOX-BUILD release records WHICH bytes it carries (D188)"
+    # Before this, only the PREBUILT arm kept a receipt, and it recorded the
+    # uploaded TARBALL — so for a box build (30,627 of 30,633 prod rows) nothing
+    # on the box or on the row could name the served bytes, and a wrong artifact
+    # could be served with no instrument anywhere disagreeing with itself.
+    E1_SHA="$(cat "$E2E_SITE/releases/e1/.bp-build-sha256" 2>/dev/null || true)"
+    check "the box-build release wrote .bp-build-sha256" \
+      sh -c "printf '%s' '$E1_SHA' | grep -qE '^[0-9a-f]{64}$'"
+    check "STAGE narrates the digest on stdout" \
+      grep -q "BPSTAGE name=STAGE status=ok build_id=e1 .*bp-build-sha256=$E1_SHA" "$E2E/out.log"
+    check "SWITCH narrates an INDEPENDENT re-read of the LIVE tree" \
+      grep -q "BPSTAGE name=SWITCH status=ok build_id=e1 .*bp-served-sha256=$E1_SHA" "$E2E/out.log"
+    # The receipt is a receipt, not an identity key: it must be a function of the
+    # BYTES, and the two readings agree only because nothing moved between them.
+    check "the digest is REPRODUCIBLE over the same tree" \
+      sh -c "[ \"\$(cd '$E2E_SITE/releases/e1' && find . -type f ! -name '.bp-build-sha256' ! -name '.bp-prebuilt-sha256' ! -name '.bp-health-failed' -exec $SHA_CMD {} + | LC_ALL=C sort | $SHA_CMD | cut -d' ' -f1)\" = '$E1_SHA' ]"
+    # MUTATION, in the direction that matters: change one served byte and the
+    # digest must MOVE.  A digest that survives an edit certifies nothing.
+    cp "$E2E_SITE/releases/e1/index.html" "$E2E/e1-index.bak"
+    printf '<!--tamper-->' >> "$E2E_SITE/releases/e1/index.html"
+    E1_SHA_AFTER="$(cd "$E2E_SITE/releases/e1" && find . -type f ! -name '.bp-build-sha256' ! -name '.bp-prebuilt-sha256' ! -name '.bp-health-failed' -exec $SHA_CMD {} + | LC_ALL=C sort | $SHA_CMD | cut -d' ' -f1)"
+    check "one tampered byte MOVES the digest"  [ "$E1_SHA_AFTER" != "$E1_SHA" ]
+    check "the RECORDED receipt still names the ORIGINAL bytes — i.e. the tamper is DETECTABLE" \
+      [ "$(cat "$E2E_SITE/releases/e1/.bp-build-sha256" 2>/dev/null)" != "$E1_SHA_AFTER" ]
+    cp "$E2E/e1-index.bak" "$E2E_SITE/releases/e1/index.html"
+    check "the tree is restored (the digest comes back)" \
+      sh -c "[ \"\$(cd '$E2E_SITE/releases/e1' && find . -type f ! -name '.bp-build-sha256' ! -name '.bp-prebuilt-sha256' ! -name '.bp-health-failed' -exec $SHA_CMD {} + | LC_ALL=C sort | $SHA_CMD | cut -d' ' -f1)\" = '$E1_SHA' ]"
+
+    # -----------------------------------------------------------------------
+    # FENCE TWO, E2E (task-63877435cf4ad70a): A RELEASE CARRYING A SYMLINK IS
+    # REFUSED AT THE FLIP, AND A CLEAN ONE STILL FLIPS.
+    #
+    # `disable_symlinks` is DECLINED (it is not a Caddy directive at any level —
+    # measured on caddy 2.11.4 — and the served root IS the current symlink), so
+    # this is the ONLY server-side layer behind the packer's refusal. It is
+    # driven through the REAL engine end to end: the fake npm stages
+    # `dist/leak.txt -> /opt/barkpark/.env`, STAGE's `cp -a` preserves it, and
+    # SWITCH must refuse rather than publish an HTTP-reachable secret.
+    #
+    # BOTH directions are asserted, and the CLEAN arm is the control: delete the
+    # `find -type l` refusal in do_switch and the leak rows go red BY NAME while
+    # the clean rows stay green — which is what separates "the fence works" from
+    # "the deploy happens to fail here".
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: SWITCH REFUSES a release containing a symlink; a clean release still flips"
+    E2E_LIVE_BEFORE="$(livenow)"
+    check "precondition: a previous release IS live before the refusal (non-vacuous)" \
+      [ "$E2E_LIVE_BEFORE" = releases/e1 ]
+    : > "$SRC/.leak-symlink"
+    rc="$(e2e_deploy sl1)"
+    check "the fixture really staged a symlink (control on the FIXTURE, not the verdict)" \
+      [ -L "$E2E_SITE/releases/sl1/leak.txt" ]
+    check "…and it really points outside the release" \
+      [ "$(readlink "$E2E_SITE/releases/sl1/leak.txt")" = /opt/barkpark/.env ]
+    check "leak release: the deploy exits 16 (SWITCH failed)"  [ "$rc" = 16 ]
+    check "leak release: SWITCH is narrated as FAILED"         saw SWITCH failed sl1
+    check "leak release: the refusal NAMES the offending link" \
+      grep -q 'leak.txt' "$E2E/out.log"
+    check "leak release: the refusal says the release contains symlink(s)" \
+      grep -q 'the staged release contains symlink(s)' "$E2E/out.log"
+    check "leak release: it is NOT reported as a swap/permissions failure" \
+      no_log_match 'atomic swap of current -> releases/sl1 failed'
+    check "leak release: the LIVE symlink never moved"         [ "$(livenow)" = "$E2E_LIVE_BEFORE" ]
+    # `-e` is FALSE for a DANGLING link, so it would pass even after a bad flip
+    # on a box with no /opt/barkpark/.env — measured: it stayed green under the
+    # mutation. Test for the LINK itself.
+    check "leak release: leak.txt is NOT present under the served root at all" \
+      sh -c "[ ! -L '$E2E_SITE/current/leak.txt' ] && [ ! -e '$E2E_SITE/current/leak.txt' ]"
+    check "leak release: RETIRE never ran (the run stopped at the flip)" \
+      no_log_match '^BPSTAGE name=RETIRE .*build_id=sl1'
+    # THE CONTROL ARM — the fence must not be a blanket "SWITCH now fails".
+    # `npm run build` never cleans dist/, so the staged link survives the
+    # sentinel — remove both, or every LATER deploy inherits it.
+    rm -f "$SRC/.leak-symlink" "$SRC/dist/leak.txt"
+    rc="$(e2e_deploy cl1)"
+    check "clean release: the deploy still exits 0"            [ "$rc" = 0 ]
+    check "clean release: SWITCH ok"                           saw SWITCH ok cl1
+    check "clean release: the flip really happened"            [ "$(livenow)" = releases/cl1 ]
+    check "clean release: it carries NO symlink (control)" \
+      sh -c "[ -z \"\$(find '$E2E_SITE/releases/cl1' -type l)\" ]"
+    # Restore the state the following blocks were written against: e1 live.
+    E2E_REV=rev-1 rc="$(e2e_deploy e1)"
+    check "state restored for the blocks below: e1 is live again" \
+      [ "$(livenow)" = releases/e1 ]
 
     echo "[selftest] e2e: a no-op redeploy of the live build speaks on every stage"
     : > "$SRC/.npm-calls"
@@ -1611,7 +2098,7 @@ FAKENPM
       grep -qE '^BPSTAGE name=BUILD status=skipped build_id=pb1 detail="prebuilt bytes \(.*, sha256 0123456789ab\) - no build ran on this box"' "$E2E/pb.out"
     check "STAGE genuinely RAN (started)"             pb_saw STAGE started pb1
     check "STAGE ok names the prebuilt digest" \
-      grep -qE '^BPSTAGE name=STAGE status=ok build_id=pb1 detail="prebuilt bytes -> releases/pb1 \(.*sha256 0123456789ab\)"' "$E2E/pb.out"
+      grep -qE '^BPSTAGE name=STAGE status=ok build_id=pb1 detail="prebuilt bytes -> releases/pb1 \(.*sha256 0123456789ab\) bp-build-sha256=[0-9a-f]{64}"' "$E2E/pb.out"
     check "HEALTH ok"                                 pb_saw HEALTH ok pb1
     check "SWITCH ok"                                 pb_saw SWITCH ok pb1
     check "current -> releases/pb1"                   [ "$(pb_livenow)" = releases/pb1 ]
@@ -2026,6 +2513,20 @@ FAKECP
       grep -qE 'hide .*\.bp-health-failed' "$RF/Caddyfile.ok"
     check "the hide rides INSIDE a file_server block, not loose in the site" \
       grep -qE 'file_server \{' "$RF/Caddyfile.ok"
+    # PACKAGING JUNK, charter D121. A release staged before the extractor learned
+    # to refuse `._*`/`.DS_Store`/`PaxHeader` still carries them, and a staged
+    # file is a SERVED file: `._index.html` is the resource fork plus every
+    # extended attribute, `.DS_Store` is the packing machine's directory listing.
+    # Pinned by NAME so dropping one from $HIDE_LIST reds that one row.
+    for hidden in .DS_Store '._\*' PaxHeader .git .env; do
+      check "the armed file_server HIDES $hidden" \
+        grep -qE "hide .* $hidden( |$)" "$RF/Caddyfile.ok"
+    done
+    # The carve-out is a DECISION, not an omission: `/.well-known/` is a real
+    # path a static site is asked for and Caddy's hide has no "except", so a
+    # blanket `.*` would 404 it irreversibly. This row reds if someone adds one.
+    check "the hide is NOT a blanket dotfile rule (it would 404 /.well-known/)" \
+      sh -c "! grep -qE 'hide .*(^| )[.][*]( |\$)' '$RF/Caddyfile.ok'"
     check "the armed Caddyfile is still brace-balanced with the nested block" \
       bash -c "[ \$(grep -c '{' '$RF/Caddyfile.ok') = \$(grep -c '}' '$RF/Caddyfile.ok') ]"
     check "armed run emits NO ROUTE failure"             absent '^BPSTAGE name=ROUTE status=failed' "$RF/ok.out"
@@ -2269,6 +2770,25 @@ FAKECP
       ms_code /sites/routefail/nope-missing/ >/dev/null
       check "real caddy: the miss body is not the branded maintenance page" \
         sh -c "! grep -q 'Back in a moment' '$MS/body.out'"
+      # THE BARE PATH (D79), on the SAME box shape and the SAME real caddy. This
+      # fixture is the exact composition that made the live defect visible: the
+      # engine's armed site block, then the app fallback, then the maintenance
+      # handler. On the PRE-FIX engine `/sites/routefail` (no trailing slash)
+      # matches nothing in the site block, falls THROUGH to the fallback and is
+      # answered by whatever sits behind it — measured 503 here, and on guerrilla
+      # Barkpark's own API error JSON, i.e. the platform's internals served to a
+      # site visitor. With the arm's bare-path matcher it is a 308 to the
+      # canonical slashed form, which then serves the site.
+      check "real caddy: the BARE path (no trailing slash) is a 308, NOT a fall-through to the app fallback (D79)" \
+        [ "$(ms_code /sites/routefail)" = 308 ]
+      check "…and the redirect points at the canonical slashed path" \
+        sh -c "curl -s -o /dev/null --max-time 5 -w '%{redirect_url}' 'http://127.0.0.1:$MS_PORT/sites/routefail' | grep -q '/sites/routefail/\$'"
+      check "…so FOLLOWING the bare path SERVES the site (200), instead of the app fallback's page" \
+        [ "$(curl -sL -o "$MS/bare.out" --max-time 5 -w '%{http_code}' "http://127.0.0.1:$MS_PORT/sites/routefail")" = 200 ]
+      check "…and the followed body is the SITE's index, not the branded maintenance page" \
+        sh -c "grep -q '<title>index</title>' '$MS/bare.out' && ! grep -q 'Back in a moment' '$MS/bare.out'"
+      check "the bare-path matcher is EXACT, so a deeper path is still served by the handle, never redirected" \
+        [ "$(ms_code /sites/routefail/index.html)" = 200 ]
       check "real caddy: a DEAD app upstream STILL gets the maintenance 503 (the scoping did not disarm it)" \
         [ "$(ms_code /anything-the-app-owns)" = 503 ]
       check "…and THAT body really is the branded maintenance page" \
@@ -2448,6 +2968,8 @@ FAKECP
       HUROOT="$HU/sites/hideup/current"
       # THE PRE-HIDE SHAPE, byte for byte as guerrilla carries it: this engine's
       # own marker comment, the handle_path, the root, and a BARE file_server.
+      # (Bare of `hide`, not of `disable_symlinks` — that one is declined on
+      # every site; the flip fence release_symlinks/do_switch covers it.)
       { printf 'example.com {\n'
         printf "\t# BARKPARK_SITE_ROUTE:hideup — static site 'hideup' served from its immutable current release.\n"
         printf '\t# handle_path strips the /sites/hideup prefix; root follows the symlink.\n'
@@ -2459,6 +2981,7 @@ FAKECP
         printf '}\n'; } > "$HU/Caddyfile"
       check "the pre-hide fixture really is the un-hidden shape (no hide anywhere)" \
         sh -c "! grep -q 'hide ' '$HU/Caddyfile'"
+      cp "$HU/Caddyfile" "$HU/Caddyfile.prehide"
       check "the pre-hide fixture validates on a REAL caddy (it is a shape the box runs)" \
         caddy validate --adapter caddyfile --config "$HU/Caddyfile"
       # A deploy of the SAME slug: the marker is present, so this run takes the
@@ -2482,6 +3005,16 @@ FAKECP
         sh -c "[ \"\$(grep -c 'BARKPARK_SITE_ROUTE:hideup' '$HU/Caddyfile')\" = 1 ]"
       check "…and the handle_path is still there exactly once (no duplicate route)" \
         sh -c "[ \"\$(grep -c 'handle_path /sites/hideup/\\*' '$HU/Caddyfile')\" = 1 ]"
+      # THE SAME already-armed branch now carries a SECOND, independent upgrade:
+      # the bare path (D79). The hideup fixture is pre-hide AND pre-bare-path —
+      # the shape every live static block on guerrilla is in — so one re-deploy
+      # must close both, in place, without re-arming.
+      check "…and the SAME in-place upgrade added the bare-path matcher (D79)" \
+        grep -qx "$(printf '\t@bare_hideup path /sites/hideup')" "$HU/Caddyfile"
+      check "…and its 308 to the canonical slashed form" \
+        grep -qx "$(printf '\tredir @bare_hideup /sites/hideup/ 308')" "$HU/Caddyfile"
+      check "…exactly one redir was added (not one per re-deploy)" \
+        sh -c "[ \"\$(grep -c 'redir @bare_hideup' '$HU/Caddyfile')\" = 1 ]"
       check "the upgraded Caddyfile is brace-balanced and REAL-caddy valid" \
         caddy validate --adapter caddyfile --config "$HU/Caddyfile"
       check "the upgrade is announced on the DURABLE machine channel, naming the outcome" \
@@ -2502,32 +3035,101 @@ FAKECP
         cmp -s "$HU/Caddyfile.after1" "$HU/Caddyfile"
       check "…and it reports the plain already-armed detail, not another upgrade" \
         grep -q '^BPSTAGE name=ROUTE status=ok build_id=hu2 detail="already armed: ' "$HU/up2.out"
+      # ---- THE SECOND UPGRADE ARM: a SHORT hide list is grown, not frozen ----
+      # A block armed AFTER the marker hide landed but BEFORE the junk classes
+      # joined $HIDE_LIST already has `file_server { hide … }`, so the
+      # bare-file_server arm above can NEVER see it — it would keep the two-item
+      # list forever and go on serving `._*` and `.DS_Store`. Shrink the hide
+      # line to exactly that historical shape and re-deploy.
+      sed -i.bak2 "s|^\(\t*\)hide .*|\1hide $PREBUILT_MARK $HEALTH_FAIL_MARK|" "$HU/Caddyfile"
+      rm -f "$HU/Caddyfile.bak2"
+      check "the SHORT-hide fixture really is the historical shape (hide, but no junk in it)" \
+        sh -c "grep -q 'hide ' '$HU/Caddyfile' && ! grep -q 'DS_Store' '$HU/Caddyfile'"
+      env PATH="$HU/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG=hideup BUILD_ID=hu3 CONTENT_REV=rev-1 SITE_SRC="$HUSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$HU/sites" BARKPARK_CADDYFILE="$HU/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$HU/deploy.lock" BARKPARK_CADDYFILE_LOCK="$HU/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$HU/up3.out" 2> "$HU/up3.err" || true
+      check "an already-hidden block with a STALE hide list is grown to the full one" \
+        grep -qE "hide .* .DS_Store .* PaxHeader" "$HU/Caddyfile"
+      check "…and it did NOT nest a second file_server block to do it" \
+        sh -c "[ \"\$(grep -c 'file_server {' '$HU/Caddyfile')\" = 1 ]"
+      check "…and exactly one hide line survives" \
+        sh -c "[ \"\$(grep -c 'hide ' '$HU/Caddyfile')\" = 1 ]"
+      check "…and the grown Caddyfile is still REAL-caddy valid" \
+        caddy validate --adapter caddyfile --config "$HU/Caddyfile"
+      cp "$HU/Caddyfile" "$HU/Caddyfile.after3"
+      env PATH="$HU/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG=hideup BUILD_ID=hu4 CONTENT_REV=rev-1 SITE_SRC="$HUSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$HU/sites" BARKPARK_CADDYFILE="$HU/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$HU/deploy.lock" BARKPARK_CADDYFILE_LOCK="$HU/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$HU/up4.out" 2> "$HU/up4.err" || true
+      check "the GROWN list is idempotent too (a matching hide line is left alone)" \
+        cmp -s "$HU/Caddyfile.after3" "$HU/Caddyfile"
       # ---- THE OUTCOME, through a real caddy on a real port -----------------
       # The engine's own markers live INSIDE the served tree. .bp-prebuilt-sha256
       # is written by the prebuilt path; .bp-health-failed by a failed gate. Put
       # both in the LIVE release the way the box has them, then ask for them.
       printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n' > "$HUROOT/.bp-prebuilt-sha256"
       printf 'hu1\n' > "$HUROOT/.bp-health-failed"
+      # PACKAGING JUNK (D121). The extractor now REFUSES these, but a refusal is
+      # not retroactive: every release staged before it is still live and still
+      # carries them, which is precisely the tree this fixture is.
+      printf 'Bud1\n' > "$HUROOT/.DS_Store"
+      printf 'AppleDouble-resource-fork\n' > "$HUROOT/._index.html"
+      mkdir -p "$HUROOT/PaxHeader"
+      printf '30 mtime=1754000000.0\n' > "$HUROOT/PaxHeader/index.html"
       check "both release markers really are inside the served tree (the fixture is non-vacuous)" \
         sh -c "[ -f '$HUROOT/.bp-prebuilt-sha256' ] && [ -f '$HUROOT/.bp-health-failed' ] && [ -f '$HUROOT/index.html' ]"
-      HU_PORT=0; HU_PID=""
-      for HU_TRY in 38211 38307 38419 38523 38631; do
-        { printf '{\n\tadmin off\n\tauto_https off\n}\n'
-          printf ':%s {\n' "$HU_TRY"
-          sed -n '/BARKPARK_SITE_ROUTE:hideup/,/^\t}$/p' "$HU/Caddyfile"
-          printf '}\n'; } > "$HU/serve.caddy"
-        caddy run --config "$HU/serve.caddy" --adapter caddyfile >"$HU/caddy.log" 2>&1 &
-        HU_PID=$!
-        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-          if [ "$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:$HU_TRY/sites/hideup/" 2>/dev/null)" = 200 ]; then
-            HU_PORT="$HU_TRY"; break
-          fi
-          sleep 0.25
+      check "the junk files really are inside the served tree too (the BEFORE rows are non-vacuous)" \
+        sh -c "[ -f '$HUROOT/.DS_Store' ] && [ -f '$HUROOT/._index.html' ] && [ -f '$HUROOT/PaxHeader/index.html' ]"
+      # Serve a GIVEN Caddyfile's hideup block on a real caddy and a real port.
+      # Factored out because the junk-hide proof needs the SAME tree served
+      # TWICE — once through the PRE-HIDE block (the BEFORE) and once through the
+      # upgraded one (the AFTER). A hide row that only ever runs against the
+      # upgraded config cannot tell "hidden" from "never there".
+      hu_serve() {
+        HU_PORT=0; HU_PID=""
+        for HU_TRY in 38211 38307 38419 38523 38631 38747 38851; do
+          { printf '{\n\tadmin off\n\tauto_https off\n}\n'
+            printf ':%s {\n' "$HU_TRY"
+            sed -n '/BARKPARK_SITE_ROUTE:hideup/,/^\t}$/p' "$1"
+            printf '}\n'; } > "$HU/serve.caddy"
+          caddy run --config "$HU/serve.caddy" --adapter caddyfile >"$HU/caddy.log" 2>&1 &
+          HU_PID=$!
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+            if [ "$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:$HU_TRY/sites/hideup/" 2>/dev/null)" = 200 ]; then
+              HU_PORT="$HU_TRY"; break
+            fi
+            sleep 0.25
+          done
+          [ "$HU_PORT" != 0 ] && break
+          kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; HU_PID=""
         done
-        [ "$HU_PORT" != 0 ] && break
-        kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; HU_PID=""
-      done
+      }
+      hu_stop() { [ -n "$HU_PID" ] && { kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; }; HU_PID=""; }
       hu_code() { curl -s -o /dev/null --max-time 5 -w '%{http_code}' "http://127.0.0.1:$HU_PORT$1"; }
+
+      # ---- BEFORE: the same tree, served through the PRE-HIDE block ---------
+      hu_serve "$HU/Caddyfile.prehide"
+      check "the PRE-HIDE block came up on a REAL caddy (this suite owns the port)" \
+        [ "$HU_PORT" != 0 ]
+      check "BEFORE: .DS_Store is FETCHABLE through the pre-hide file_server (200)" \
+        [ "$(hu_code /sites/hideup/.DS_Store)" = 200 ]
+      check "BEFORE: the AppleDouble sidecar ._index.html is FETCHABLE too (200)" \
+        [ "$(hu_code /sites/hideup/._index.html)" = 200 ]
+      check "BEFORE: PaxHeader/index.html is FETCHABLE too (200)" \
+        [ "$(hu_code /sites/hideup/PaxHeader/index.html)" = 200 ]
+      check "BEFORE: .bp-prebuilt-sha256 is FETCHABLE (this is the shape guerrilla runs)" \
+        [ "$(hu_code /sites/hideup/.bp-prebuilt-sha256)" = 200 ]
+      hu_stop
+
+      # ---- AFTER: the SAME tree, served through the UPGRADED block ----------
+      hu_serve "$HU/Caddyfile"
       # A false 200/404 off a port a PEER holds is the trap here: assert the
       # fixture itself came up before believing any status code below.
       check "the upgraded block came up on a REAL caddy (this suite owns the port)" \
@@ -2538,7 +3140,13 @@ FAKECP
         [ "$(hu_code /sites/hideup/.bp-prebuilt-sha256)" = 404 ]
       check "real caddy: .bp-health-failed returns 404 too — the failed-gate state is no longer disclosed" \
         [ "$(hu_code /sites/hideup/.bp-health-failed)" = 404 ]
-      [ -n "$HU_PID" ] && { kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; }
+      check "AFTER: .DS_Store returns 404 — the packing machine's listing is gone" \
+        [ "$(hu_code /sites/hideup/.DS_Store)" = 404 ]
+      check "AFTER: ._index.html returns 404 — the resource fork is gone" \
+        [ "$(hu_code /sites/hideup/._index.html)" = 404 ]
+      check "AFTER: PaxHeader/index.html returns 404 — the tar pseudo-directory is gone" \
+        [ "$(hu_code /sites/hideup/PaxHeader/index.html)" = 404 ]
+      hu_stop
     fi
   fi
 
@@ -3255,7 +3863,7 @@ if [ "$PLAN_MODE" = build ]; then
   stage_dir_into_release "$SITE_SRC/dist" "dist/"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: dist/ -> releases/$BUILD_ID/ ($staged_size)"
-  emit STAGE ok "dist/ -> releases/$BUILD_ID ($staged_size)"
+  emit STAGE ok "dist/ -> releases/$BUILD_ID ($staged_size) bp-build-sha256=${STAGED_SHA:-none}"
 elif [ "$PLAN_MODE" = prebuilt ]; then
   # THE BUILD LEFT THE BOX (D88).  No npm, no node_modules, no CPU contention
   # with the API that serves this site — just the shippable output, staged.
@@ -3265,7 +3873,7 @@ elif [ "$PLAN_MODE" = prebuilt ]; then
   stage_dir_into_release "$PREBUILT_DIR" "prebuilt bytes" "$PREBUILT_SHA256"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: prebuilt bytes -> releases/$BUILD_ID/ ($staged_size, sha256 $PREBUILT_SHORT)"
-  emit STAGE ok "prebuilt bytes -> releases/$BUILD_ID ($staged_size, sha256 $PREBUILT_SHORT)"
+  emit STAGE ok "prebuilt bytes -> releases/$BUILD_ID ($staged_size, sha256 $PREBUILT_SHORT) bp-build-sha256=${STAGED_SHA:-none}"
 else
   # An already-staged redeploy used to emit NEITHER a BUILD nor a STAGE line — the
   # second path that hung a stage-watching orchestrator forever.
@@ -3358,10 +3966,14 @@ arm_caddy_site_route() {
     # Idempotent by construction: the awk demands EXACTLY ONE bare `file_server`
     # inside this site's block, so an already-hidden block (and every node-route
     # block, which has no file_server at all) rewrites nothing.
+    # The upgrade adds `hide` and NOTHING ELSE — no `disable_symlinks`, on
+    # purpose (task-63877435cf4ad70a): it is not a Caddy directive at any level
+    # and the served root IS the current symlink; the fence is at the flip, in
+    # release_symlinks/do_switch above.
     # ---------------------------------------------------------------------
     local upgraded=0
     local utmp; utmp="$(mktemp)"
-    if BP_MARK="$(site_route_marker_re)" BP_HIDE="$PREBUILT_MARK $HEALTH_FAIL_MARK" awk '
+    if BP_MARK="$(site_route_marker_re)" BP_HIDE="$HIDE_LIST" awk '
       BEGIN { m = ENVIRON["BP_MARK"]; hide = ENVIRON["BP_HIDE"]; n = 0 }
       !inb && $0 ~ m { inb = 1; depth = 0; opened = 0; print; next }
       inb {
@@ -3369,6 +3981,17 @@ arm_caddy_site_route() {
           match($0, /^[ \t]*/); ind = substr($0, 1, RLENGTH)
           printf "%sfile_server {\n%s\thide %s\n%s}\n", ind, ind, hide, ind
           n++
+        } else if ($0 ~ /^[ \t]*hide[ \t]/) {
+          # A block armed AFTER the marker hide landed but BEFORE the junk
+          # classes joined the list: it already has `file_server { hide … }`, so
+          # the bare-file_server arm above can never see it and it would keep the
+          # SHORT list forever. Rewrite the hide line itself — but only when it
+          # actually differs, or every deploy would rewrite, validate and reload
+          # Caddy for no change (the idempotence row pins this).
+          match($0, /^[ \t]*/); ind = substr($0, 1, RLENGTH)
+          cur = $0; sub(/^[ \t]*hide[ \t]+/, "", cur)
+          if (cur == hide) print
+          else { printf "%shide %s\n", ind, hide; n++ }
         } else print
         o = gsub(/[{]/, "&"); c = gsub(/[}]/, "&"); depth += o - c
         if (o > 0) opened = 1
@@ -3387,7 +4010,7 @@ arm_caddy_site_route() {
           rm -f "$ubak"
           upgraded=1
           systemctl reload caddy 2>/dev/null || true
-          log "upgraded the already-armed /sites/$SITE_SLUG file_server to hide $PREBUILT_MARK $HEALTH_FAIL_MARK"
+          log "upgraded the already-armed /sites/$SITE_SLUG file_server to hide $HIDE_LIST"
         else
           cp -a "$ubak" "$CADDYFILE" && rm -f "$ubak"
           log "caddy validate rejected the /sites/$SITE_SLUG hide upgrade — reverted, Caddy untouched"
@@ -3398,10 +4021,25 @@ arm_caddy_site_route() {
       fi
     fi
     rm -f "$utmp"
-    if [ "$upgraded" = 1 ]; then
-      ROUTE_DETAIL="already armed, UPGRADED: $CADDYFILE carried this site's own $marker block with a bare file_server (armed before the hide landed), so this run rewrote that one block in place to hide $PREBUILT_MARK and $HEALTH_FAIL_MARK, validated it and reloaded Caddy — those markers are no longer fetchable over /sites/$SITE_SLUG/"
+    # SECOND, INDEPENDENT UPGRADE: the bare path (D79). A block armed before the
+    # bare-path branch landed carries no `redir @bare_…`, so /sites/$SITE_SLUG
+    # (no trailing slash) still falls through to the slot reverse_proxy. Same
+    # contract as the hide upgrade — block-scoped, guarded by a predicate read
+    # from the BLOCK'S OWN BYTES (not "is the marker present"), backup +
+    # validate + revert, non-fatal, and it inserts ONLY: the reverse_proxy port
+    # line is copied through untouched, so it can never race the port flip.
+    local bare_upgraded=0
+    upgrade_caddy_bare_path && bare_upgraded=1
+    if [ "$upgraded" = 1 ] || [ "$bare_upgraded" = 1 ]; then
+      local what=""
+      [ "$upgraded" = 1 ] && what="hide $HIDE_LIST"
+      if [ "$bare_upgraded" = 1 ]; then
+        [ -n "$what" ] && what="$what, and "
+        what="${what}add the bare-path 308 redir (/sites/$SITE_SLUG -> /sites/$SITE_SLUG/, which used to fall through to the slot reverse_proxy)"
+      fi
+      ROUTE_DETAIL="already armed, UPGRADED: $CADDYFILE carried this site's own $marker block in a pre-fix shape, so this run rewrote that one block in place to $what, validated it and reloaded Caddy"
     else
-      ROUTE_DETAIL="already armed: $CADDYFILE carries this site's own $marker block, so this deploy left Caddy untouched (the symlink flip is what goes live)"
+      ROUTE_DETAIL="already armed: $CADDYFILE carries this site's own $marker block, so this deploy left Caddy untouched (the symlink flip is what goes live; the bare-path check said ${BARE_UPGRADE_VERDICT:-unknown})"
     fi
     log "caddy /sites/$SITE_SLUG route already armed"
     return 0
@@ -3414,17 +4052,35 @@ arm_caddy_site_route() {
     log "no slot 'reverse_proxy localhost:...' site in $CADDYFILE — leaving Caddy untouched (/sites/$SITE_SLUG not armed)"
     return 0
   fi
+  local mname; mname="$(caddy_bare_matcher_name)"
   local block; block="$(cat <<SITEROUTE
 	# $marker — static site '$SITE_SLUG' served from its immutable current release.
 	# handle_path strips the /sites/$SITE_SLUG prefix; root follows the symlink.
+	# THE BARE PATH (D79). handle_path matches /sites/$SITE_SLUG/* and NOT the bare
+	# /sites/$SITE_SLUG, so without the redir below that request falls through this
+	# whole block to the slot reverse_proxy and is answered by Barkpark own API with
+	# its document-not-found JSON — the platform internals, served to a site visitor.
+	# The matcher is an EXACT path, never a prefix, so it can never swallow the asset
+	# requests the handle serves. A static site is always the STRIPPING shape (this
+	# engine has no basePath mode), so the bare -> slash direction cannot loop with
+	# an app that canonicalizes the other way — the trap the node engine documents.
+	@$mname path /sites/$SITE_SLUG
+	redir @$mname /sites/$SITE_SLUG/ 308
 	handle_path /sites/$SITE_SLUG/* {
 		root * $ROOT/current
 		# The release-root markers ($PREBUILT_MARK / $HEALTH_FAIL_MARK) live INSIDE
 		# the served tree. Un-hidden, a plain GET discloses the artifact digest
 		# and — worse — that the LIVE release is one the engine already knows
-		# failed its health gate. hide keeps them internal.
+		# failed its health gate. hide keeps them internal. The rest of \$HIDE_LIST
+		# is packaging junk and repo/secret shapes: a staged file is a SERVED file,
+		# and a release staged before the extractor learned to refuse junk still
+		# has \`.DS_Store\` and \`._*\` sidecars sitting in its root.
+		# NO \`disable_symlinks\` HERE, ON PURPOSE (task-63877435cf4ad70a): it is not a
+		# Caddy directive at any level (measured, caddy 2.11.4) and even if it were,
+		# \`root\` above IS the current symlink, so it would refuse every request. The
+		# symlink threat is fenced at the FLIP instead — see release_symlinks/do_switch.
 		file_server {
-			hide $PREBUILT_MARK $HEALTH_FAIL_MARK
+			hide $HIDE_LIST
 		}
 	}
 SITEROUTE
@@ -3507,14 +4163,32 @@ fi
 
 # ---- SWITCH (D11) — atomic symlink flip, no Caddy reload -------------------
 emit SWITCH started
-if ! do_switch; then
+do_switch; switch_rc=$?
+if [ "$switch_rc" = 2 ]; then
+  # FENCE TWO bit (see release_symlinks above): the staged tree contains a
+  # symlink, and a staged symlink is a SERVED file. Refuse the flip rather than
+  # publish it — `disable_symlinks` is not available to us (it is not a Caddy
+  # directive at any level), so this is where that threat is closed.
+  DETAIL="refusing to publish releases/$BUILD_ID — the staged release contains symlink(s): ${SWITCH_REFUSED_LINKS}— a symlink under the served root is dereferenced by file_server, so it would be an HTTP-reachable file outside the release (charter D90). The live release is UNTOUCHED and still serving. Re-pack without symlinks (the packer refuses them too, charter D120) and re-deploy"
+  log "SWITCH REFUSED for build $BUILD_ID — symlink in the staged release, live release untouched: $DETAIL"
+  emit SWITCH failed "$DETAIL"
+  exit 16
+elif [ "$switch_rc" != 0 ]; then
   DETAIL="atomic swap of current -> releases/$BUILD_ID failed — healthy but couldn't go live; check $ROOT is writable and 'current' isn't a dir or an immutable file"
   log "SWITCH failed for build $BUILD_ID — live release untouched (fail closed): $DETAIL"
   emit SWITCH failed "$DETAIL"
   exit 16
 fi
 log "SWITCH: '$SITE_SLUG' current -> releases/$BUILD_ID (atomic)"
-emit SWITCH ok "current -> releases/$BUILD_ID"
+# THE SERVED RECEIPT (D188).  An INDEPENDENT re-measurement, taken through the
+# `current` symlink AFTER the flip committed — not a re-print of STAGED_SHA.  It
+# is the only reading in this script taken over the tree Caddy is actually
+# serving, and the control plane compares the two: a SWITCH digest that differs
+# from the STAGE digest means the bytes that went live are not the bytes this run
+# staged, which is precisely the disagreement no instrument could raise before.
+SERVED_SHA="$(release_tree_digest "$CURRENT")"
+log "SWITCH: serving bp-served-sha256=${SERVED_SHA:-none} (staged ${STAGED_SHA:-none})"
+emit SWITCH ok "current -> releases/$BUILD_ID bp-served-sha256=${SERVED_SHA:-none}"
 
 # ---- RETIRE (D8) — keep newest N=5 ----------------------------------------
 # Emits even when it removes nothing — measured SILENT on 3 of 6 live deploys,

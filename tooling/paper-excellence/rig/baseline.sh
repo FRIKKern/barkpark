@@ -36,9 +36,17 @@ if [ ${#SLUGS[@]} -eq 0 ]; then
   # count, so the last row is partial at every band width — 8+3 @1280, 9+2
   # @1920) and the `statRemainder` probe has an empty track to stand on. No
   # published paper leaves a partial row, which is why the slab shipped unseen.
-  SLUGS=(design-probe eight-minute-erasure heggemsnes-act hobby-hardening-capstone \
-         mechanical-spacing-doctrine paper-excellence-wave-2026-08-12 \
-         portabledoc-showcase stat-partial-row)
+  # The default list IS `fixtures/*.json` — derived, never curated. A fixture
+  # added without a baseline is not a quiet gap: `gate.sh --panel --check`
+  # hard-fails on it ("has no committed baseline report"), and because the
+  # panel walks the fixtures in sorted order one such fixture stops the check
+  # before it reaches the eight that DO have baselines
+  # (agent-flight-recorder-charter, added 2026-09-10 by #17199, did exactly
+  # that). Deriving the list means `baseline.sh` with no arguments always
+  # covers whatever the panel is about to check.
+  for f in "$RIG_DIR"/fixtures/*.json; do
+    SLUGS+=("$(basename "$f" .json)")
+  done
 fi
 
 mkdir -p "$OUT_DIR" "$WORK"

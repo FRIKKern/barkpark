@@ -4,7 +4,7 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedNonWallRejectionTest do
   shapes that reach `Shared.do_action/3` each render their own reason, instead
   of the content-free "Action failed".
 
-  Wave-11's census (charter D83a) proved these four are the whole set beyond the
+  Wave-11's census (authoring-excellence charter D83a) proved these four are the whole set beyond the
   wall tuples. Every fixture below is taken from the EMITTER, not invented:
 
     1. `{:error, :not_found}` — `lifecycle.ex:96-97`, the TOCTOU where the draft

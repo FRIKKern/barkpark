@@ -22,8 +22,10 @@ import {
   meaningForRole,
   LEGEND_ROLES,
   textLeafValue,
+  codeSource,
 } from '../inline'
 import { renderBlock, renderBlocks } from './registry'
+import { listChildren } from '../list-children'
 import { CHAT_DIFF_BUDGET, diffRowsHtml, splitLines, type DiffLine } from './chat'
 
 type Emit = (block: Block) => string
@@ -479,6 +481,23 @@ const byline: Emit = (b) => {
 
 const ingress: Emit = (b) => `<p class="bp-role-ingress">${renderInlines(paragraphInline(b))}</p>`
 
+// The reader-synthesised pre-gate badge (#17199). It is NEVER stored: Elixir's
+// `Content.Papers.PreGateRegister.annotate/3` mints it into the block stream a
+// reader receives, so the JS renderer meets it in `value` like any other block
+// and must emit the same mark as compose.ex's `pre-gate-badge` clause +
+// walk.ex's `pre_gate_class/1`: one `<p>`, the `bp-pregate` family root, a tone
+// modifier from a two-value WHITELIST (anything but "warning" is "neutral", so a
+// stray value can never mint a class), the `--tucked` modifier only under a
+// byline anchor, and the register's reader_behaviour as `title=` — omitted
+// entirely when empty, matching walk.ex's title_attr.
+const preGateBadge: Emit = (b) => {
+  const tone = str(b.tone) === 'warning' ? 'warning' : 'neutral'
+  const tucked = str(b.anchor) === 'byline' ? ' bp-pregate--tucked' : ''
+  const title = str(b.title)
+  const titleAttr = title === '' ? '' : ` title="${escapeAttr(title)}"`
+  return `<p class="bp-pregate bp-pregate--${tone}${tucked}"${titleAttr}>${escapeHtml(str(b.label))}</p>`
+}
+
 // Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
 // 2026-07-31): published readers emit only visible semantic groups — an empty
 // paragraph scaffold (Enter, Enter) is editable authoring state, NEVER published
@@ -521,9 +540,12 @@ const pullquote: Emit = (b) =>
 
 const list: Emit = (b) => {
   const tag = b.ordered === true ? 'ol' : 'ul'
-  const items = asList(b.items)
-  const inner = items.map((item) => `<li><span>${renderInlines(itemInlines(item))}</span></li>`).join('')
-  return `<${tag}>${inner}</${tag}>`
+  return `<${tag}>${asList(b.items)
+    .map(
+      (item) =>
+        `<li><span>${renderInlines(itemInlines(item))}</span>${renderBlocks(listChildren(item))}</li>`,
+    )
+    .join('')}</${tag}>`
 }
 
 // The inline content of ONE list item, whatever authored shape it took. The RN
@@ -626,7 +648,15 @@ function codeBlockHtml(value: string): string {
   )
 }
 
-const code: Emit = (b) => codeBlockHtml(str(b.value))
+// The FOUR accepted source keys, first non-blank wins — `codeSource` in
+// ../inline.tsx carries the contract and the corpus counts. A blank/whitespace
+// source renders NOTHING (no empty `<pre>` slab), matching compose.ex's
+// `blank_code_source?/1` arm and pdrender's blank guard; the `image` emitter
+// below takes the same "sourceless block is editor scaffolding" exit.
+const code: Emit = (b) => {
+  const source = codeSource(b)
+  return source.trim() === '' ? '' : codeBlockHtml(source)
+}
 
 // The `bp-section-divider` classes carry no styling (every value is inline, the
 // same bytes figures.ex emits) — they are the handle the reader shell needs to
@@ -720,7 +750,7 @@ const asciicast: Emit = (b) => {
   const rowsAttr = rows !== undefined && rows >= 6 && rows <= 40 ? ` data-cast-rows="${rows}"` : ''
   return (
     `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
-    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
+    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid var(--paper-rule, #dde7e2);border-radius:6px;overflow:hidden"></div>` +
     articleFigcaption(caption) +
     `</figure>`
   )
@@ -912,6 +942,29 @@ function cellLayoutAttr(child: unknown): string {
 const HR = '<hr class="bp-hr">'
 const HR_STACK = '<hr class="bp-hr" style="border-top-width:1px">'
 
+/** ONE RULE PER BOUNDARY (task-a4d1ae76fdb2a6b0) — the mirror of compose.ex's
+ * `SectionLayout.stack_rules?/2` and of blocks.go `sectionStackRules`. Returns
+ * true (draw the boundary rule pair) unless ALL of:
+ *
+ *   - the section carries NO title. Elixir gates on `is_nil`, so an
+ *     empty-STRING title is still a title and keeps the pair — hence `!= null`
+ *     (which also covers `undefined`) rather than a truthiness check.
+ *   - the section is NOT declared grid mode. A grid section is a layout box,
+ *     not a chapter: `section_grid_html` keeps its pair unconditionally.
+ *   - its FIRST child is a heading of any level.
+ *
+ * The heading IS the boundary in that one shape — paper-surface.css gives a
+ * container head the same beat/rule/gap a top-level `h2` gets (#15806), so a
+ * rule pair around it stacks three lines for one boundary. The Elixir engine
+ * settled this in #16233 and this SDK kept drawing both rules on the same
+ * published papers. Locked across all three engines by the shared fixture
+ * api/test/support/fixtures/section-boundary-rules.json.
+ *
+ * `blocks` and `isGrid` are passed in rather than re-derived: the caller has
+ * already computed both, and this subpath is at its size-limit ceiling. */
+const sectionStackRules = (b: Block, blocks: Block[], isGrid: boolean): boolean =>
+  b.title != null || isGrid || !(isMap(blocks[0]) && blocks[0].type === 'heading')
+
 const section: Emit = (b) => {
   const layout = b.layout
   const isGrid = isMap(layout) && layout.mode === 'grid'
@@ -942,17 +995,15 @@ const section: Emit = (b) => {
     )
   }
 
-  // Stack section: PdHr, [bold title span], inner blocks, PdHr.
+  // Stack section: [PdHr], [bold title span], inner blocks, [PdHr] — the pair is
+  // present only when `sectionStackRules` says this section's boundary is not
+  // already carried by its own opening heading.
+  const rule = sectionStackRules(b, blocks, isGrid) ? HR_STACK : ''
   const titleSpan =
     b.title != null ? `<span style="font-weight:bold">${escapeHtml(str(b.title))}</span>` : ''
   const inner = blocks.map((child) => renderBlock(child)).join('')
   return (
-    `<div style="display:flex;flex-direction:column">` +
-    HR_STACK +
-    titleSpan +
-    inner +
-    HR_STACK +
-    `</div>`
+    `<div style="display:flex;flex-direction:column">` + rule + titleSpan + inner + rule + `</div>`
   )
 }
 
@@ -1162,7 +1213,10 @@ function priorityLabel(p: unknown): string | null {
 function taskDetail(b: Block): string {
   const t = isMap(b.task) ? b.task : b
   const title = str(t.title).trim()
-  if (title === '') return ''
+  // Mirrors Render.Components.task_detail_html/1: an unresolved task-detail is
+  // still a block, so it keeps its place with the same placeholder the sibling
+  // live-query widgets use instead of collapsing to nothing.
+  if (title === '') return `<div class="bp-tdetail bp-tdetail--empty">No matching tasks.</div>`
   const role = roleOf(t.status)
 
   const sections: string[] = []
@@ -1349,6 +1403,7 @@ export const coreEmitters: Record<string, Emit> = {
   h3: headingAtLevel(3),
   eyebrow,
   byline,
+  'pre-gate-badge': preGateBadge,
   ingress,
   paragraph,
   pullquote,

@@ -27,6 +27,12 @@ defmodule Rig.Render do
   # place and cross-checked against the LiveView below.
   @wrapper_classes ["bp-paper-shell", "bp-paper-surface", "bp-paper-article"]
 
+  # The assigns the hand-added wrapper stands for: the ARTICLE reader, not wide.
+  # Every conditional entry in the LiveView's `<main>` class list is resolved
+  # against this map by the guard's source text; see
+  # `assert_wrapper_matches_live_view!/0`.
+  @wrapper_guards %{"@article?" => true, "@wide?" => false}
+
   # Theme pin. `Layouts.bp_theme_attr/1` emits `data-bp-theme` only when the
   # theme differs from the default, so pinning the default reproduces the
   # default page BYTE-IDENTICALLY (attribute absent). We assert the pin equals
@@ -52,17 +58,30 @@ defmodule Rig.Render do
         fixtures = Path.wildcard(Path.join(fixture_dir, "*.json")) |> Enum.sort()
         fixtures == [] && die("batch directory has no JSON fixtures: #{fixture_dir}")
 
-        Enum.each(fixtures, fn fixture_path ->
-          slug = fixture_path |> Path.basename() |> Path.rootname()
-          render_one!(fixture_path, Path.join([site_dir, "papers", slug, "index.html"]))
-        end)
+        slugs =
+          Enum.map(fixtures, fn fixture_path ->
+            slug = fixture_path |> Path.basename() |> Path.rootname()
+            render_one!(fixture_path, Path.join([site_dir, "papers", slug, "index.html"]))
+            slug
+          end)
+
+        # The site's landing page is a COPY of one rendered paper, and which one
+        # is chosen from what this run actually rendered — never from a name.
+        # `barkpark-chronicle` was hardcoded here by #13364 and has never been a
+        # committed fixture, so every --batch over `rig/fixtures/` rendered all of
+        # them and then died on `File.cp!` with `no such file or directory`. A
+        # landing page picked from the batch cannot miss its own source.
+        landing = if "barkpark-chronicle" in slugs, do: "barkpark-chronicle", else: hd(slugs)
 
         File.cp!(
-          Path.join([site_dir, "papers", "barkpark-chronicle", "index.html"]),
+          Path.join([site_dir, "papers", landing, "index.html"]),
           Path.join(site_dir, "index.html")
         )
 
-        IO.puts("rig/render: batch rendered #{length(fixtures)} papers -> #{site_dir}")
+        IO.puts(
+          "rig/render: batch rendered #{length(fixtures)} papers -> #{site_dir} " <>
+            "(index.html <- papers/#{landing})"
+        )
 
       _ ->
         die("usage: render.exs <fixture.json> <out.html> | --batch <fixture-dir> <site-dir>")
@@ -139,38 +158,109 @@ defmodule Rig.Render do
   end
 
   # Drift tripwire: the wrapper string we hand-add must be exactly the class
-  # set the reader LiveView renders. The LiveView writes it as a HEEx list
-  # (`class={["bp-paper-shell", @article? && "bp-paper-surface", …]}`), so we
-  # match the `<main class={[...]}>` CONSTRUCT and compare the quoted tokens.
+  # set the reader LiveView renders for the page this rig photographs.
   #
-  # ACROSS NEWLINES, and that is the whole point of this shape. The finder used
-  # to require `<main class={[` and `bp-paper-` on the SAME source line. #14141
-  # reformatted the list onto four lines and the finder stopped matching — so
-  # every rig run since has died with `no <main class={[…bp-paper-…]}> line …
-  # LiveView drift`, a tripwire firing on its own blind spot rather than on any
-  # drift. A formatting change must never be able to speak as a class-set
-  # change: the construct is read whole, from `<main class={[` to its first
-  # closing `]}`, and only the quoted `bp-paper-*` tokens inside it are compared.
+  # TWO false-red generations, both from matching SOURCE BYTES instead of the
+  # thing the check is about:
+  #
+  #   1. #14141 reformatted the HEEx list onto four lines; the finder required
+  #      `<main class={[` and `bp-paper-` on the SAME line and stopped matching.
+  #      Fixed by reading the construct whole, across newlines.
+  #   2. The LiveView then grew an attribute BEFORE the class list —
+  #      `<main data-paper-palette={…} class={[` — and `<main class={[` was no
+  #      longer the tag's byte-prefix, so EVERY rig run died with `no <main
+  #      class={[…]}> construct … LiveView drift`, including runs against the
+  #      rig's own committed fixture (task-4c1373e0ce7af67c). A tripwire firing
+  #      on its own blind spot again.
+  #
+  # So the tag is read by its ATTRIBUTE SET, not its prefix: find `<main`, skip
+  # whatever attributes precede `class=`, and take the class LIST. The list is
+  # real Elixir source, so it is PARSED (`Code.string_to_quoted/1`) rather than
+  # regex-scanned for quoted tokens: each entry is either a bare literal or a
+  # `<guard> && "class"`, and each guard is resolved against @wrapper_guards —
+  # the assigns the rig's hand-added wrapper stands for. An unknown guard DIES
+  # rather than being guessed, so a new condition on the wrapper is a deliberate
+  # rig update and never a silent pass. Consequences, both wanted: inserting an
+  # attribute before `class=` cannot red this, and removing (or renaming) a
+  # class the rig depends on still does.
   defp assert_wrapper_matches_live_view!() do
     src = File.read!(@live_view_path)
-
-    construct =
-      case Regex.run(~r/<main class=\{\[(.*?)\]\}/s, src, capture: :all_but_first) do
-        [body] -> body
-        _ -> die("no `<main class={[…]}>` construct in #{@live_view_path} — LiveView drift")
-      end
-
-    found = Regex.scan(~r/"(bp-paper-[a-z-]+)"/, construct) |> Enum.map(&List.last/1)
+    {attrs, list_src} = main_class_list!(src)
+    found = list_src |> parse_class_list!() |> Enum.flat_map(&resolve_class_entry!/1)
 
     if found != @wrapper_classes do
       die("""
-      wrapper drift: #{@live_view_path} now renders #{inspect(found)}
+      wrapper drift: #{@live_view_path} renders <main #{attr_names(attrs)}> whose class list
+      resolves to #{inspect(found)} for #{inspect(@wrapper_guards)},
       but the rig hand-adds #{inspect(@wrapper_classes)}.
       Update @wrapper_classes (and re-baseline) — do NOT ignore this.
       """)
     end
 
     :ok
+  end
+
+  # `<main` … (any attributes) … `class={[` … `]}`. The lazy attribute span is
+  # bounded by a `<` check: if the first `<main` carried no class list we would
+  # otherwise capture a LATER element's list and compare the wrong tag.
+  defp main_class_list!(src) do
+    case Regex.run(~r/<main\b(.*?)class=\{\[(.*?)\]\}/s, src, capture: :all_but_first) do
+      [attrs, list_src] ->
+        String.contains?(attrs, "<") &&
+          die("the first `<main …>` in #{@live_view_path} carries no `class={[…]}` list — LiveView drift")
+
+        {attrs, list_src}
+
+      _ ->
+        die("no `<main …class={[…]}>` construct in #{@live_view_path} — LiveView drift")
+    end
+  end
+
+  defp parse_class_list!(list_src) do
+    case Code.string_to_quoted("[" <> list_src <> "]") do
+      {:ok, entries} when is_list(entries) ->
+        entries
+
+      _ ->
+        die("could not parse the <main> class list in #{@live_view_path}: #{inspect(list_src)}")
+    end
+  end
+
+  defp resolve_class_entry!(cls) when is_binary(cls), do: [cls]
+
+  defp resolve_class_entry!({:&&, _, [guard, cls]}) when is_binary(cls) do
+    if guard_value!(guard), do: [cls], else: []
+  end
+
+  defp resolve_class_entry!(other) do
+    die(
+      "unsupported entry in the <main> class list in #{@live_view_path}: " <>
+        "#{Macro.to_string(other)} — the rig cannot tell which classes the reader gets"
+    )
+  end
+
+  defp guard_value!(guard) do
+    text = guard |> Macro.to_string() |> String.trim()
+
+    case Map.fetch(@wrapper_guards, text) do
+      {:ok, value} ->
+        value
+
+      :error ->
+        die(
+          "unknown guard `#{text}` on the <main> class list in #{@live_view_path} — the rig " <>
+            "cannot tell whether the page it photographs gets that class. Add it to " <>
+            "@wrapper_guards deliberately (and re-baseline)."
+        )
+    end
+  end
+
+  defp attr_names(attrs) do
+    ~r/([a-zA-Z_:@-][a-zA-Z0-9_:.@-]*)=/
+    |> Regex.scan(attrs, capture: :all_but_first)
+    |> Enum.map(&List.first/1)
+    |> Enum.concat(["class"])
+    |> Enum.join(" ")
   end
 
   # The block's own id, else a positional fallback — byte-for-byte the LiveView's

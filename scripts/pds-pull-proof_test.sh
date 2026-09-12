@@ -51,7 +51,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 fails=0
-ok()  { printf '  ok   %s\n' "$1"; }
+arms=0
+ok()  { arms=$((arms + 1)); printf '  ok   %s\n' "$1"; }
 bad() { printf '  FAIL %s\n     %s\n' "$1" "$2"; fails=$((fails + 1)); }
 
 [ -f "$PROOF" ] || { printf 'pds-pull-proof_test: the gate is pointed at nothing — %s does not exist\n' "$PROOF" >&2; exit 1; }
@@ -251,9 +252,308 @@ else
   bad "reason-discrimination" "expected 4 distinct reasons across 4 distinct failure modes, got $n_uniq distinct out of $n_distinct"
 fi
 
+# ── step 1's TARGET LIFECYCLE-CHECK precondition ────────────────────────────
+# (pds-bl-lifecycle-check-precondition)
+#
+# `grep -c lifecycle_status scripts/pds-pull-proof.sh` returned 0 on origin/main:
+# nothing in the ladder asserted that the target's
+# documents_task_lifecycle_status_check had been widened from 5 values to 7 by
+# PDS-D32's migrations. A pre-widening target therefore died mid-import on a raw
+# Postgrex CHECK violation that reads like an import-engine defect.
+#
+# THE FIXTURES ARE REAL pg_get_constraintdef OUTPUT, not the migration's source.
+# Postgres does not echo the DDL back: the migration writes `IN ('open', …)` and
+# the catalog prints `= ANY (ARRAY['open'::text, …])`. A matcher written against
+# the migration file would look right and match nothing. Both strings below were
+# taken verbatim from PostgreSQL 17 after applying the migration's up/0 and
+# down/0 bodies to a throwaway database.
+LC_WIDE="CHECK (((type <> 'task'::text) OR (NOT (content ? 'lifecycle_status'::text)) OR ((content ->> 'lifecycle_status'::text) = ANY (ARRAY['open'::text, 'in_progress'::text, 'blocked'::text, 'done'::text, 'cancelled'::text, 'considering'::text, 'researching'::text])))) NOT VALID"
+LC_NARROW="CHECK (((type <> 'task'::text) OR (NOT (content ? 'lifecycle_status'::text)) OR ((content ->> 'lifecycle_status'::text) = ANY (ARRAY['open'::text, 'in_progress'::text, 'blocked'::text, 'done'::text, 'cancelled'::text]))))"
+
+lc() { # <arm> <constraintdef> <expected missing list>
+  local arm="$1" def="$2" want="$3" got
+  got="$(lifecycle_missing_values "$def")"
+  if [ "$got" = "$want" ]; then ok "$arm  (missing: '${got:-<none>}')"
+  else bad "$arm" "lifecycle_missing_values printed '$got', expected '$want'"; fi
+}
+
+printf 'pds-pull-proof_test: lifecycle_missing_values — the step-1 precondition (fixtures are real pg_get_constraintdef output)\n'
+if ! declare -f lifecycle_missing_values >/dev/null 2>&1; then
+  bad 'lifecycle_missing_values is defined' "the sourced harness has no lifecycle_missing_values — step 1 cannot be asserting the target's lifecycle CHECK"
+else
+  lc 'WIDENED 7-value constraint (NOT VALID, as the migration leaves it) -> nothing missing' "$LC_WIDE"   ''
+  lc 'PRE-WIDENING 5-value constraint                -> names BOTH thought states' "$LC_NARROW" 'considering researching'
+  lc 'no lifecycle constraint text at all            -> names all seven'           'CHECK (true)' 'open in_progress blocked done cancelled considering researching'
+  # THE QUOTES ARE LOAD-BEARING, and this arm is what proves it: an unquoted
+  # substring search finds `open` inside `reopened_at` and reports a constraint
+  # that does NOT accept 'open' as though it did. Mutating the matcher from
+  # *"'$v'"* to *"$v"* reds exactly this arm and nothing else.
+  lc 'substring trap: reopened_at must not read as open' \
+     "CHECK ((NOT (content ? 'reopened_at'::text)) AND (content ->> 'lifecycle_status'::text) = ANY (ARRAY['in_progress'::text, 'blocked'::text, 'done'::text, 'cancelled'::text, 'considering'::text, 'researching'::text]))" \
+     'open'
+fi
+
+# ── step 4's maintenance-PG discovery verdict ───────────────────────────────
+# (pds-b-proof-instrument-control-auto)
+#
+# Step 4's positive control used to run only when an operator had exported
+# PDS_CONTROL_PG, so the default transcript printed `instrument control: NOT RUN`
+# beside a clean scan — the vacuous green PDS-D20 exists to refuse. Discovery
+# accepts a candidate on the SERVER's answers, never on the conninfo string, and
+# control_pg_verdict is that decision, isolated so every refusal can be driven
+# here without a PostgreSQL (this harness stays hermetic: no network, no DB).
+cpv() { # <arm> <probe line> <expected rc> <phrase the reason must contain, or '' on accept>
+  local arm="$1" line="$2" want_rc="$3" phrase="$4" rc
+  CONTROL_PG_WHY="__unset__"
+  control_pg_verdict "$line"; rc=$?
+  if [ "$rc" != "$want_rc" ]; then
+    bad "$arm" "control_pg_verdict returned $rc, expected $want_rc (reason: ${CONTROL_PG_WHY})"
+    return
+  fi
+  if [ "$want_rc" = 0 ]; then
+    if [ -n "${CONTROL_PG_WHY//__unset__/}" ]; then
+      bad "$arm" "accepted while holding a complaint (\$CONTROL_PG_WHY='$CONTROL_PG_WHY')"
+    else ok "$arm"; fi
+    return
+  fi
+  case "$CONTROL_PG_WHY" in
+    __unset__|"") bad "$arm" "refused and named nothing — a silent refusal is the NOT RUN this task exists to remove" ;;
+    *"$phrase"*)  ok "$arm  — $CONTROL_PG_WHY" ;;
+    *) bad "$arm" "refused for the WRONG reason: expected a message containing '$phrase', got: $CONTROL_PG_WHY" ;;
+  esac
+}
+
+printf 'pds-pull-proof_test: control_pg_verdict — discovery is local-or-nothing, and every refusal is named\n'
+if ! declare -f control_pg_verdict >/dev/null 2>&1; then
+  bad 'control_pg_verdict is defined' "the sourced harness has no control_pg_verdict — step 4's control is still gated on a hand-set PDS_CONTROL_PG"
+else
+  SOURCE_PG_DB="${SOURCE_PG_DB:-barkpark_prod}"
+  # THE REAL-SHAPE ARM. Every fixture below was hand-written as `t`/`f`, and the
+  # verdict passed all of them while REFUSING the only server anyone would point
+  # it at: psql prints `boolean::text` as `true`, not `t`. This line is the
+  # verbatim output of the shipped probe SQL against PostgreSQL 17 over a unix
+  # socket. A fixture set that cannot say what the system actually emits is a
+  # green with no subject.
+  cpv 'REAL probe output, PostgreSQL 17 over a unix socket -> ACCEPT' 'unix 5432 true postgres' 0 ''
+  cpv 'unix socket, may CREATE DATABASE, maintenance db  -> ACCEPT' 'unix 5432 t postgres'      0 ''
+  cpv 'the server says false, spelled out                -> refuse' 'unix 5432 false postgres'  1 'cannot CREATE DATABASE'
+  cpv 'loopback 127.0.0.1, same otherwise               -> ACCEPT' '127.0.0.1 5432 t postgres' 0 ''
+  cpv 'a REMOTE server                                  -> refuse' '10.0.0.5 5432 t postgres'  1 'neither a unix socket nor loopback'
+  cpv 'role cannot CREATE DATABASE                      -> refuse' 'unix 5432 f postgres'      1 'cannot CREATE DATABASE'
+  cpv 'it landed in the SOURCE PRODUCTION database      -> refuse' "unix 5432 t $SOURCE_PG_DB" 1 'production'
+  cpv 'a database merely NAMED like production          -> refuse' 'unix 5432 t app_production' 1 'production'
+  cpv 'the probe answered in an unexpected shape        -> refuse' 'unix 5432 t'               1 '4-field shape'
+  cpv 'the probe answered nothing at all                -> refuse' ''                          1 '4-field shape'
+fi
+
+# ── STEP 8'S CROSS-INVOCATION PIN TRIPLE ────────────────────────────────────
+# (pds-bl-step8-cross-invocation-gap)
+#
+# Step 8's guarantee is PROCESS-LOCAL: DEPLOYED_SHA and DEPLOYED_UPTIME_0A are
+# set only by an in-process step 0a, so a run can compare only its OWN 0a
+# against its OWN 8. PDS-D101 makes a deferred 3/4 a SECOND full --all
+# invocation, so a real transcript can span several, and contiguity ACROSS them
+# was a check nothing emitted the inputs for. `pin_triple_line` emits them on
+# ONE grep-able line.
+#
+# THE ARMS MEASURE THE CHAIN, NOT THE FORMAT. A line that prints the right seven
+# keys with the WRONG sha bound to sha_8 would pass a field-presence check and
+# still make a contiguous pair read as a break — so the last two arms build TWO
+# invocations' lines and assert the contiguity verdict both directions.
+printf 'pds-pull-proof_test: pin_triple_line — the (0a sha, 8 sha, run tag) triple step 8 emits\n'
+if ! declare -f pin_triple_line >/dev/null 2>&1; then
+  bad 'pin_triple_line is defined' "the sourced harness has no pin_triple_line — step 8 emits nothing a reader can chain across invocations"
+else
+  # field extractor over the emitted line, by key — never by position
+  ptf() { printf '%s' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p"; }
+
+  RUN_ID='20260911T000000Z-1111'; RUN_TAG='aaaa1111'
+  DEPLOYED_SHA='1111111111111111111111111111111111111111'
+  DEPLOYED_SHA_SOURCE='ssh'; DEPLOYED_UPTIME_0A='100'
+  line_a="$(pin_triple_line "$DEPLOYED_SHA" '420')"
+
+  case "$line_a" in
+    PDS-PIN-TRIPLE\ *) ok 'the line carries the PDS-PIN-TRIPLE prefix, so a reader can grep it out of a transcript' ;;
+    *) bad 'the line carries the PDS-PIN-TRIPLE prefix' "got: $line_a" ;;
+  esac
+
+  missing=''
+  for k in run_tag run_id sha_0a sha_8 uptime_0a uptime_8 pin_source; do
+    [ -n "$(ptf "$line_a" "$k")" ] || missing="$missing $k"
+  done
+  if [ -z "$missing" ]; then ok 'all seven keys are present and non-empty'
+  else bad 'all seven keys are present' "empty or absent:$missing — in: $line_a"; fi
+
+  # THE TWO SHAS MUST DIVERGE IN THE FIXTURE, or the arm cannot tell them apart.
+  # Every line above passes the SAME sha as both the 0a pin and the re-pin, so a
+  # `pin_triple_line` that printed $1 twice would satisfy all of them. This arm
+  # is the redeploy shape — step 8's own fail path — where they genuinely differ.
+  line_moved="$(pin_triple_line '3333333333333333333333333333333333333333' '')"
+  if [ "$(ptf "$line_moved" sha_0a)" = "$DEPLOYED_SHA" ] &&
+     [ "$(ptf "$line_moved" sha_8)" = '3333333333333333333333333333333333333333' ]; then
+    ok 'when the box redeployed mid-run the line keeps BOTH shas apart: sha_0a is the pin, sha_8 the re-pin'
+  else bad 'sha_0a is step 0a'"'"'s pin and sha_8 the re-pin' "sha_0a=$(ptf "$line_moved" sha_0a) (expected $DEPLOYED_SHA), sha_8=$(ptf "$line_moved" sha_8) (expected 3333…)"; fi
+  if [ "$(ptf "$line_a" run_tag)" = "$RUN_TAG" ]; then
+    ok 'run_tag names the invocation, so the RSS artifact directory is addressable from the same line'
+  else bad 'run_tag names the invocation' "run_tag=$(ptf "$line_a" run_tag), RUN_TAG=$RUN_TAG"; fi
+
+  # UNRESOLVED, NOT EMPTY. A step 8 whose SSH re-pin failed must still emit a
+  # chainable line; an empty value would collapse the field and shift every
+  # later key if a reader ever split on position.
+  if [ "$(ptf "$(pin_triple_line '' '')" sha_8)" = 'unresolved' ]; then
+    ok 'an unread re-pin prints sha_8=unresolved rather than collapsing the field'
+  else bad 'an unread re-pin prints sha_8=unresolved' "got: $(pin_triple_line '' '')"; fi
+
+  # ── THE CONTIGUITY VERDICT, BOTH DIRECTIONS ───────────────────────────────
+  # Invocation B starts where A closed: A.sha_8 == B.sha_0a is CONTIGUOUS.
+  RUN_ID='20260911T001000Z-2222'; RUN_TAG='bbbb2222'
+  DEPLOYED_SHA="$(ptf "$line_a" sha_8)"; DEPLOYED_UPTIME_0A='900'
+  line_b="$(pin_triple_line "$DEPLOYED_SHA" '1200')"
+  if [ "$(ptf "$line_a" sha_8)" = "$(ptf "$line_b" sha_0a)" ]; then
+    ok 'two invocations off the same build chain: A.sha_8 == B.sha_0a'
+  else bad 'two invocations off the same build chain' "A.sha_8=$(ptf "$line_a" sha_8) B.sha_0a=$(ptf "$line_b" sha_0a)"; fi
+
+  # THE NEGATIVE CONTROL. A deploy landing in the gap BETWEEN invocations is
+  # invisible to both runs' step 8 — and this is the comparison that sees it.
+  DEPLOYED_SHA='2222222222222222222222222222222222222222'
+  line_c="$(pin_triple_line "$DEPLOYED_SHA" '1200')"
+  if [ "$(ptf "$line_a" sha_8)" != "$(ptf "$line_c" sha_0a)" ]; then
+    ok 'a deploy in the gap between invocations SHOWS: A.sha_8 != C.sha_0a'
+  else bad 'a deploy in the gap between invocations shows' "the chain read as contiguous across two different builds — A.sha_8=$(ptf "$line_a" sha_8) C.sha_0a=$(ptf "$line_c" sha_0a)"; fi
+fi
+
+# ── THE RSS PEAK BELONGS TO THE INVOCATION THAT MEASURED IT ─────────────────
+# (pds-bl-step8-cross-invocation-gap, criterion 2)
+#
+# The peak lives in a per-invocation RUN_TAG-keyed artifact directory, so a
+# REUSE invocation — 0 attempts, parked bundle — measured nothing at all. It
+# used to print the parked .meta verbatim and set no RSS line, which lets a
+# reader take the previous run's figure as this run's.
+printf 'pds-pull-proof_test: rss_reuse_attribution — a reuse invocation has no RSS of its own\n'
+if ! declare -f rss_reuse_attribution >/dev/null 2>&1; then
+  bad 'rss_reuse_attribution is defined' "the sourced harness has no rss_reuse_attribution — a reusing invocation says nothing about whose RSS peak the transcript is showing"
+else
+  FULL_META="$TMP/reuse.meta"
+  cat >"$FULL_META" <<'META'
+served_sha:     1111111111111111111111111111111111111111
+rss_peak_kb:    1638400
+run_id:         20260911T000000Z-1111
+META
+  RUN_ID='20260911T001000Z-2222'; RUN_TAG='bbbb2222'
+  att="$(rss_reuse_attribution)"
+  case "$att" in
+    *'measured NO RSS of its own'*) ok 'a reuse invocation says it measured none' ;;
+    *) bad 'a reuse invocation says it measured none' "got: $att" ;;
+  esac
+  case "$att" in
+    *'20260911T000000Z-1111'*) ok 'the sentence names the run that DID measure the peak' ;;
+    *) bad 'the sentence names the measuring run' "the parked run_id is absent from: $att" ;;
+  esac
+  case "$att" in
+    *'1638400 KB'*) ok 'the sentence carries the parked peak, so no reader has to open the sidecar' ;;
+    *) bad 'the sentence carries the parked peak' "got: $att" ;;
+  esac
+  # THE ATTRIBUTION IS THE POINT: naming the peak is worthless if the sentence
+  # also reads as though THIS run produced it.
+  case "$att" in
+    *"never to run $RUN_ID"*) ok 'it denies the peak to THIS run by name' ;;
+    *) bad 'it denies the peak to this run by name' "got: $att" ;;
+  esac
+  # An absent sidecar must not print a bare empty figure that reads as 0 MB.
+  FULL_META="$TMP/does-not-exist.meta"
+  case "$(rss_reuse_attribution)" in
+    *'(unknown KB)'*'by run unknown'*) ok 'an unreadable sidecar prints unknown, never an empty figure that reads as zero' ;;
+    *) bad 'an unreadable sidecar prints unknown' "got: $(rss_reuse_attribution)" ;;
+  esac
+fi
+
+# ── THE PROSE THE TRANSCRIPT IS JUDGED ON ───────────────────────────────────
+# Three sentences the crown proof's honesty law requires, each pinned by the
+# phrase a rewrite would have to keep. A grep, because the claim IS the wording.
+printf 'pds-pull-proof_test: the honesty wording these tasks landed\n'
+# pds-bl-rss-ambient-caveat: whole-process RSS, banner AND sidecar
+if grep -q 'RSS scope — that peak is WHOLE-PROCESS beam.smp RSS over the export' "$PROOF"; then
+  ok 'the honesty banner labels the peak WHOLE-PROCESS, not export-exclusive'
+else
+  bad 'the banner labels the peak WHOLE-PROCESS' "the same beam.smp serves the live content API throughout the export window; a peak printed without that caveat reads as the export's own cost"
+fi
+if grep -q '^rss_scope: .*WHOLE-PROCESS beam.smp RSS over the export window' "$PROOF"; then
+  ok 'the .meta sidecar carries the same scope, so a parked bundle outlives the transcript that explained it'
+else
+  bad 'the .meta sidecar carries rss_scope' "the sidecar is what the NEXT run reads; a caveat that lives only in this run's banner does not travel with the figure"
+fi
+# pds-bl-step6-tag-exclusion-stale-comment: tag IS guarded, excluded for scope
+if grep -q 'outside the guard$' "$PROOF" || grep -q 'outside the guard entirely' "$PROOF"; then
+  bad 'the THE 34 block no longer says `tag` is outside the guard' "PDS-D125/D126 put TagRegistry behind the SAME Tenancy.pulled_schema_row/2 predicate (api/lib/barkpark/content/tag_registry.ex:101); the exclusion is a SCOPING decision and the comment must say so"
+else
+  ok 'the THE 34 block no longer claims `tag` is written outside the guard'
+fi
+if grep -q 'It is excluded for SCOPING reasons, not for' "$PROOF"; then
+  ok 'the THE 34 block states the real reason `tag` is excluded from the sentinel scope'
+else
+  bad 'the THE 34 block states why `tag` is excluded' "excluding a now-guarded row is still correct, but the stated reasoning must be the true one"
+fi
+# pds-bl-step8-cross-invocation-gap: step 8 names the gap it cannot vouch for
+if grep -q 'THIS RUNG IS PROCESS-LOCAL and does not claim otherwise' "$PROOF"; then
+  ok 'step 8 names the cross-invocation gap it does not vouch for'
+else
+  bad 'step 8 names the cross-invocation gap' "step 8 has no baseline from any earlier invocation; a PASS that does not say so reads as a whole-transcript guarantee"
+fi
+
+# ── the harness is NOT RELOCATABLE, and says so ─────────────────────────────
+# (pds-bl-harness-not-relocatable)
+#
+# The published rehearsal recipe used to be "extract the one file and run it".
+# It cannot work: SCRIPT_DIR/REPO_ROOT derive from the invoked path, and
+# scripts/lib/bp-curl.sh is SOURCED at load — before argument parsing, before any
+# --only gating. This arm RUNS the relocation rather than quoting a remembered
+# error, so the header's claim is re-derived on every run instead of ageing.
+printf 'pds-pull-proof_test: a bare copy of the harness cannot run, and the header says so\n'
+RELOC="$TMP/reloc"; mkdir -p "$RELOC"
+cp "$PROOF" "$RELOC/pds-pull-proof.sh"
+reloc_out="$(bash "$RELOC/pds-pull-proof.sh" --plan 2>&1)"; reloc_rc=$?
+if [ "$reloc_rc" -eq 0 ]; then
+  bad 'a relocated copy still fails' "a bare copy at $RELOC/pds-pull-proof.sh exited 0 — if the harness became relocatable the header's recipe is now the wrong one and must be rewritten deliberately, not silently"
+else
+  case "$reloc_out" in
+    *bp-curl.sh*) ok "a relocated copy dies at load (rc=$reloc_rc) — $(printf '%s' "$reloc_out" | head -1)" ;;
+    *) bad 'a relocated copy dies at load' "it failed (rc=$reloc_rc) but not at the sourced sibling this header documents. Got: $(printf '%s' "$reloc_out" | head -1)" ;;
+  esac
+fi
+if grep -q 'IT IS NOT RELOCATABLE' "$PROOF"; then
+  ok 'the header states the harness is not relocatable'
+else
+  bad 'the header states the harness is not relocatable' "the file documents a recipe an operator cannot run: nothing in it says the whole scripts/ trio plus a real checkout is required"
+fi
+if grep -q 'git rev-parse HEAD:scripts/pds-pull-proof.sh' "$PROOF"; then
+  ok 'the header verifies the freeze with git rev-parse, by name'
+else
+  bad 'the header verifies the freeze with git rev-parse' "PDS-D159: the freeze is a recorded BLOB, and only git rev-parse proves the file is it"
+fi
+
 printf '\n'
+
+# ── the receipt's own arithmetic is an arm ──────────────────────────────────
+# The headline total used to be hand-typed beside a hand-typed breakdown, and a
+# wave that added 17 arms typed 58 over a breakdown summing to 57. Nothing local
+# caught it: the harness printed a tidy PASS, and the arm-count door in
+# api/test/barkpark/pds_pull_proof_test.exs — which counts the REAL `ok` lines —
+# was the first reader to notice, in CI, one push later. So the receipt now
+# checks itself three ways before it is printed: the breakdown must SUM to the
+# declared total, and the declared total must equal the arms this run actually
+# printed. A miscount now reds here, in the second it is typed.
+ARMS_DECLARED=57
+ARMS_BREAKDOWN='13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording'
+breakdown_sum="$(printf '%s' "$ARMS_BREAKDOWN" | tr ',' '\n' | awk '{s += $1} END {print s + 0}')"
+if [ "$breakdown_sum" -ne "$ARMS_DECLARED" ]; then
+  bad 'the receipt adds up' "the declared total is $ARMS_DECLARED but the breakdown sums to $breakdown_sum — one of the two was typed and not counted"
+fi
+if [ "$arms" -ne "$ARMS_DECLARED" ]; then
+  bad 'the receipt counts the arms this run printed' "the receipt declares $ARMS_DECLARED arms; this run printed $arms ok line(s). Update BOTH the total and the breakdown category you changed, in the same commit as the arm."
+fi
+
 if [ "$fails" -eq 0 ]; then
-  printf 'pds-pull-proof_test: PASS (23 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination)\n'
+  printf 'pds-pull-proof_test: PASS (%s arms: %s)\n' "$ARMS_DECLARED" "$ARMS_BREAKDOWN"
   exit 0
 fi
 printf 'pds-pull-proof_test: FAIL — %s arm(s)\n' "$fails"

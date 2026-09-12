@@ -70,6 +70,16 @@ defmodule Barkpark.Idempotency do
   end
 
   @doc """
+  Reads one recent completed exact-operation receipt inside the caller's
+  transaction and within an explicit scope-prefix allowlist.
+  """
+  defdelegate lookup_completed_exact(hash, allowed_scope_prefixes, max_age_seconds),
+    to: IdempotencyStore
+
+  defdelegate lookup_completed_exact(hash, allowed_scope_prefixes, max_age_seconds, now),
+    to: IdempotencyStore
+
+  @doc """
   Look up a COMPLETED cached response. A pending reservation (no response yet)
   returns `:miss` — there is nothing to replay.
   """

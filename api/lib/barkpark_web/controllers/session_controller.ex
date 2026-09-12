@@ -167,7 +167,7 @@ defmodule BarkparkWeb.SessionController do
         |> render(:new, new_assigns(return_to))
 
       user ->
-        complete_sign_in(conn, user, return_to)
+        complete_sign_in(conn, user, return_to, "password")
     end
   end
 
@@ -183,8 +183,19 @@ defmodule BarkparkWeb.SessionController do
   # user is routed to the second step (`mfa/2`); a governed factor-less user is
   # blocked with enrolment guidance (era-w2-org-require-mfa); otherwise the
   # session is minted directly.
-  defp complete_sign_in(conn, user, return_to) do
+  #
+  # `method` names the door the user came through ("password" / "magic_link")
+  # so the org allowed-auth-methods policy (era-bl-allowed-auth-methods) can
+  # refuse it FIRST — before TOTP, before org-MFA, before any session token
+  # exists. A refused method is a policy decision, not a credential failure,
+  # so the flash says so instead of "email or password is incorrect".
+  defp complete_sign_in(conn, user, return_to, method) do
     cond do
+      BarkparkWeb.SessionIssuer.auth_method_blocked?(user, method) ->
+        conn
+        |> put_flash(:error, BarkparkWeb.SessionIssuer.auth_method_message(method))
+        |> render(:new, new_assigns(return_to))
+
       user.totp_enabled ->
         conn
         |> put_session("studio_mfa_user", user.id)
@@ -257,7 +268,7 @@ defmodule BarkparkWeb.SessionController do
 
     case Barkpark.Accounts.consume_login_token(token) do
       {:ok, user} ->
-        complete_sign_in(conn, user, @default_return_to)
+        complete_sign_in(conn, user, @default_return_to, "magic_link")
 
       :error ->
         conn

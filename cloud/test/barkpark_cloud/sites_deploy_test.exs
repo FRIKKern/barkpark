@@ -33,6 +33,7 @@ defmodule BarkparkCloud.SitesDeployTest do
   use BarkparkCloud.DataCase, async: true
 
   alias BarkparkCloud.{Accounts, DeployLedger, Registry}
+  alias BarkparkCloud.BoxCapacityRefusalFixture
   alias BarkparkCloud.Registry.{Deployment, Site, Vault}
   alias BarkparkCloud.Sites.Deploy
   alias BarkparkCloud.Sites.FakeBoxRelay
@@ -257,8 +258,8 @@ defmodule BarkparkCloud.SitesDeployTest do
     end
   end
 
-  # ssw8 — WHAT the content revision is derived from, and what it says when it
-  # could not be read.
+  # ssw8 / charter D162 — WHAT the content revision is derived from, and what it
+  # says when it could not be read.
   #
   # The revision used to be sha256 of the WHOLE analytics body, whose
   # `recent_activity` is the last 50 mutation events for the entire dataset —
@@ -268,9 +269,54 @@ defmodule BarkparkCloud.SitesDeployTest do
   # FAILED it minted a random `"u" <> hex` marker that was shipped to the box,
   # baked into `<meta name="bp-content-rev">` and then asserted EQUAL by HEALTH —
   # a green certified by comparing an invented value to itself.
+  #
+  # The FIRST fix filtered that window down to the bound type. It could not work,
+  # and the docstring that said it did was false: the box truncates to 50 events
+  # BEFORE the cloud filters, so another type's churn EVICTS the bound type out of
+  # the window and moves the hash with zero publishes of that type (D162: ≈19
+  # minutes of history on the live fleet, a real publish demonstrated evicted to
+  # EMPTY inside 20 minutes, ≥24 % of a day's distinct revisions eviction
+  # artefacts). The probe now asks the box a TYPE-SCOPED published question
+  # instead of filtering a fleet-shared firehose, so there is no window to evict.
   describe "content_rev — published + type-scoped, honest when unreadable" do
+    @query_path "/w/acme/p/blog/v1/data/query/production/post"
     @analytics_path "/w/acme/p/blog/v1/data/analytics/production"
 
+    # The box's answer to the type-scoped published query: this type's published
+    # `total` plus the newest published document of the type.
+    defp query(opts) do
+      docs =
+        case Keyword.get(opts, :head, {"hello", "r1", "2026-07-28T10:00:00Z"}) do
+          nil -> []
+          {id, rev, updated} -> [%{"_id" => id, "_rev" => rev, "_updatedAt" => updated}]
+        end
+
+      body = %{
+        "result" => %{
+          "perspective" => "published",
+          "documents" => docs,
+          "count" => length(docs),
+          "limit" => 1,
+          "offset" => 0,
+          "hasMore" => false,
+          "total" => Keyword.get(opts, :total, 2)
+        },
+        "syncTags" => [],
+        "ms" => 1,
+        "etag" => "e",
+        "schemaHash" => "s"
+      }
+
+      {:ok, %{status: 200, body: Jason.encode!(body)}}
+    end
+
+    defp event(id, type, doc_id, mutation, ts) do
+      %{"id" => id, "type" => type, "doc_id" => doc_id, "mutation" => mutation, "timestamp" => ts}
+    end
+
+    # The DATASET-WIDE analytics body — the fleet-shared 50-event firehose the
+    # projection used to hash. Programmed alongside the query path so a test can
+    # churn it and prove the revision does NOT follow.
     defp analytics(fields) do
       body =
         %{
@@ -284,17 +330,27 @@ defmodule BarkparkCloud.SitesDeployTest do
       {:ok, %{status: 200, body: Jason.encode!(body)}}
     end
 
-    defp event(id, type, doc_id, mutation, ts) do
-      %{"id" => id, "type" => type, "doc_id" => doc_id, "mutation" => mutation, "timestamp" => ts}
+    defp program_box(query_response, analytics_response \\ analytics([])) do
+      StudioLinkFakeHttpClient.program(%{
+        @query_path => query_response,
+        @analytics_path => analytics_response
+      })
     end
 
-    defp program_analytics(response),
-      do: StudioLinkFakeHttpClient.program(%{@analytics_path => response})
-
-    test "draft churn and other types do NOT move the revision — the no-op survives a live dataset" do
+    # THE EVICTION PIN (task dr-w11-bl-content-rev-projection-evicts, charter
+    # D162). RED before the fix, and red for the exact reason the row names: the
+    # bound type's published event starts inside the dataset-wide window, another
+    # type's churn fills all 50 slots, and the old projection's post-hoc filter
+    # returns [] where it returned [e1] — a moved revision, a fresh build_id and a
+    # rebuild of byte-identical output, with ZERO publishes of the bound type in
+    # between. The site's own published content — the count and the newest
+    # published document — is held BYTE-IDENTICAL across the two reads, so the
+    # only thing that changed is other types' churn.
+    test "another type's churn EVICTING the bound type from the activity window does NOT move the revision" do
       {bp, site} = setup_site()
 
-      program_analytics(
+      program_box(
+        query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}),
         analytics(
           recent_activity: [
             event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
@@ -303,11 +359,102 @@ defmodule BarkparkCloud.SitesDeployTest do
       )
 
       assert {:ok, d1} = Deploy.enqueue(site, bp)
+      assert is_binary(d1.content_rev) and d1.content_rev != ""
+
+      # SETTLE FIRST — otherwise this test has no subject. `recover_conflict/3`
+      # answers `{:duplicate, active}` for the still-`queued` d1 whenever the
+      # re-keyed `(site_id, environment)` index refuses the insert, and it does
+      # that for a DIFFERENT build_id too. Left in flight, the assertion below
+      # passes on the defective code for a reason that has nothing to do with the
+      # revision: it measures the one-active-build guard, not the projection.
+      # With d1 settled, only a repeat `build_id` can produce `:duplicate`.
+      settle(d1)
+
+      # 50 slots of `task` churn later, the bound type's only published event has
+      # been truncated off the end of the window. Nothing this site publishes
+      # changed: same published total, same newest published document.
+      program_box(
+        query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}),
+        analytics(
+          total_documents: 53,
+          types: [
+            %{"type" => "post", "total" => 3, "published" => 2, "drafts" => 1},
+            %{"type" => "task", "total" => 50, "published" => 50, "drafts" => 0}
+          ],
+          recent_activity:
+            for i <- 50..1//-1 do
+              minute = String.pad_leading(Integer.to_string(i), 2, "0")
+              event("t#{i}", "task", "t-#{i}", "patch", "2026-07-28T11:#{minute}:00Z")
+            end
+        )
+      )
+
+      assert {:duplicate, dup} = Deploy.enqueue(site, bp),
+             "an evicted activity window must not mint a new build of byte-identical output"
+
+      assert dup.id == d1.id and dup.build_id == d1.build_id
+      assert dup.content_rev == d1.content_rev
+      assert length(Registry.list_deployments(site, 10)) == 1
+    end
+
+    # The same eviction, one rung below `enqueue/5` — the revision itself, with no
+    # deployment row and therefore no index in the way. This is the assertion the
+    # row's invariant is literally about: the projection's answer must not move
+    # when only ANOTHER TYPE churns.
+    test "the revision itself is unmoved by another type's churn filling the activity window" do
+      {bp, site} = setup_site()
+
+      program_box(
+        query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}),
+        analytics(
+          recent_activity: [
+            event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
+          ]
+        )
+      )
+
+      assert {:ok, rev_before} = Deploy.content_rev_probe(site, bp)
+
+      program_box(
+        query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}),
+        analytics(
+          total_documents: 53,
+          types: [
+            %{"type" => "post", "total" => 3, "published" => 2, "drafts" => 1},
+            %{"type" => "task", "total" => 50, "published" => 50, "drafts" => 0}
+          ],
+          recent_activity:
+            for i <- 50..1//-1 do
+              minute = String.pad_leading(Integer.to_string(i), 2, "0")
+              event("t#{i}", "task", "t-#{i}", "patch", "2026-07-28T11:#{minute}:00Z")
+            end
+        )
+      )
+
+      assert {:ok, rev_after} = Deploy.content_rev_probe(site, bp)
+
+      assert rev_after == rev_before,
+             "the bound type published nothing between these two reads — only `task` churn " <>
+               "evicted its event out of the dataset-wide window"
+    end
+
+    test "draft churn and other types do NOT move the revision — the no-op survives a live dataset" do
+      {bp, site} = setup_site()
+
+      program_box(query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}))
+
+      assert {:ok, d1} = Deploy.enqueue(site, bp)
+      # Settle it: an in-flight d1 makes `:duplicate` the answer to EVERY second
+      # enqueue (see the eviction pin above), which would make this test green
+      # over a projection that had moved.
+      settle(d1)
 
       # The SAME published content, on a dataset that has since churned: a draft
       # of the bound type was saved, an unrelated `task` was closed, the totals
-      # and the draft counts moved with them. Nothing the site PUBLISHES changed.
-      program_analytics(
+      # and the draft counts moved with them. Nothing the site PUBLISHES changed —
+      # so the type-scoped published answer is unchanged too.
+      program_box(
+        query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}),
         analytics(
           total_documents: 5,
           types: [
@@ -322,35 +469,24 @@ defmodule BarkparkCloud.SitesDeployTest do
         )
       )
 
-      assert {:duplicate, ^d1} = Deploy.enqueue(site, bp),
+      assert {:duplicate, dup} = Deploy.enqueue(site, bp),
              "a draft-only / other-type mutation must not mint a new build of byte-identical output"
 
+      assert dup.id == d1.id and dup.build_id == d1.build_id
       assert length(Registry.list_deployments(site, 10)) == 1
     end
 
     test "a real PUBLISHED change to the bound type DOES move the revision — the fix is not a constant" do
       {bp, site} = setup_site()
 
-      program_analytics(
-        analytics(
-          recent_activity: [
-            event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
-          ]
-        )
-      )
+      program_box(query(total: 2, head: {"hello", "r1", "2026-07-28T10:00:00Z"}))
 
       assert {:ok, d1} = Deploy.enqueue(site, bp)
 
-      # A published post is edited: same count, a new published event of the bound
-      # type. The site's output really does change, so the build must.
-      program_analytics(
-        analytics(
-          recent_activity: [
-            event("e2", "post", "hello", "createOrReplace", "2026-07-28T10:05:00Z"),
-            event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
-          ]
-        )
-      )
+      # A published post is edited: same count, but the edit sets its
+      # `updated_at`, so it is the head of the `_updatedAt:desc` order with a new
+      # `_rev`. The site's output really does change, so the build must.
+      program_box(query(total: 2, head: {"hello", "r2", "2026-07-28T10:05:00Z"}))
 
       # (deploy-truth W1: one active build per site, so each mint settles before
       # the next — three builds in flight at once is exactly what the re-keyed
@@ -361,14 +497,8 @@ defmodule BarkparkCloud.SitesDeployTest do
       refute d2.build_id == d1.build_id
       settle(d2)
 
-      # …and so does a brand-new published document of the bound type, even if the
-      # activity window has rolled past every event.
-      program_analytics(
-        analytics(
-          types: [%{"type" => "post", "total" => 4, "published" => 3, "drafts" => 1}],
-          recent_activity: []
-        )
-      )
+      # …and so does a brand-new published document of the bound type.
+      program_box(query(total: 3, head: {"world", "r3", "2026-07-28T10:09:00Z"}))
 
       assert {:ok, d3} = Deploy.enqueue(site, bp)
       refute d3.content_rev in [d1.content_rev, d2.content_rev]
@@ -377,7 +507,7 @@ defmodule BarkparkCloud.SitesDeployTest do
     test "an UNREADABLE box ships an EMPTY content_rev — never a fabricated one — and still rebuilds" do
       {bp, site} = setup_site()
 
-      program_analytics({:ok, %{status: 502, body: "upstream down"}})
+      program_box({:ok, %{status: 502, body: "upstream down"}})
 
       assert {:ok, d1} = Deploy.enqueue(site, bp)
 
@@ -410,12 +540,37 @@ defmodule BarkparkCloud.SitesDeployTest do
     test "the probe reports :error (not a value) when the box cannot be read" do
       {bp, site} = setup_site()
 
-      program_analytics({:ok, %{status: 502, body: "upstream down"}})
+      program_box({:ok, %{status: 502, body: "upstream down"}})
       assert Deploy.content_rev_probe(site, bp) == :error
 
-      program_analytics(analytics([]))
+      program_box(query([]))
       assert {:ok, rev} = Deploy.content_rev_probe(site, bp)
       assert byte_size(rev) == 12
+    end
+
+    # The read is TYPE-SCOPED at the door, not filtered after the fact — the
+    # difference the row is about. Asserted against the URL the fake actually
+    # saw, so a projection that quietly went back to the dataset-wide firehose
+    # reds here even if its hash happened to agree.
+    test "the probe reads the type-scoped PUBLISHED query, never the dataset-wide activity window" do
+      {bp, site} = setup_site()
+
+      program_box(query([]))
+      assert {:ok, _rev} = Deploy.content_rev_probe(site, bp)
+
+      urls = Enum.map(StudioLinkFakeHttpClient.requests(), & &1.url)
+
+      assert Enum.any?(urls, &String.contains?(&1, "/v1/data/query/production/post")),
+             "expected a type-scoped published read, saw #{inspect(urls)}"
+
+      assert Enum.any?(urls, &String.contains?(&1, "perspective=published")),
+             "the admin token sees drafts too — the perspective must be pinned: #{inspect(urls)}"
+
+      assert Enum.any?(urls, &String.contains?(&1, "count=true")),
+             "the published TOTAL is half the projection: #{inspect(urls)}"
+
+      refute Enum.any?(urls, &String.contains?(&1, "/v1/data/analytics/")),
+             "the dataset-wide 50-event window is the defect — it must not be read at all"
     end
   end
 
@@ -1010,6 +1165,89 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert Repo.get(Deployment, clean.id).deferral_depth == nil
     end
 
+    # dr-bl-deferral-scheduled-vs-actual-gap. The chain's SHAPE is data (above);
+    # its PACE was not. Nobody could tell whether a retry waited because the box
+    # was busy or because our OWN ladder told it to — the question the
+    # concurrency-cap experiment turns on — without hand SQL over `inserted_at`.
+    #
+    # The two columns describe THE SAME interval (previous round → this round),
+    # so this test backdates the first deferral by a known 61 seconds and reads
+    # BOTH numbers off the second row: 61 actual against the 60s window the
+    # ladder asked for. A ratio, from one row, with no self-join.
+    #
+    # IT CAN LOSE, twice over: delete `deferral_actual_gap_s:` from the
+    # transition in `Deploy.defer/3` and the 61 assertion reds on nil; delete
+    # `deferral_scheduled_s:` and the ladder assertion reds on nil. Neither
+    # deletion touches a single assertion in the two tests around it.
+    test "the chain's PACE is data too — the scheduled window and the actual gap, on the same row" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{"error" => %{"code" => "box_at_capacity", "message" => "1 of 1 build slots in use"}}}
+      )
+
+      {:ok, first} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(first.id)
+      first_row = Repo.get(Deployment, first.id)
+
+      # ROUND 1 RECORDS NOTHING, and that is the honest reading: there is no
+      # previous round, so no interval elapsed. A 0 here would say the rebuild
+      # fired instantly.
+      assert first_row.deferral_depth == 1
+      assert first_row.deferral_scheduled_s == nil
+      assert first_row.deferral_actual_gap_s == nil
+
+      # Age the first round by a KNOWN gap, so the second row's measurement is
+      # a number this test chose rather than whatever the suite's clock did.
+      backdated = DateTime.add(first_row.inserted_at, -61, :second)
+
+      {1, _} =
+        Repo.update_all(
+          from(d in Deployment, where: d.id == ^first.id),
+          set: [inserted_at: backdated]
+        )
+
+      {:ok, second} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(second.id)
+      second_row = Repo.get(Deployment, second.id)
+
+      assert second_row.deferral_depth == 2
+
+      # ACTUAL: the difference of the two rows' `inserted_at` — the SAME column
+      # and the same arithmetic the 2,262-deferral hand measurement used.
+      #
+      # DERIVED, NEVER A LITERAL. A literal 61 here asserts that ZERO wall-clock
+      # time passed between the backdate and the second enqueue, which is false
+      # the moment the suite crosses a second boundary in between — under CI
+      # load it reds with `left: 62, right: 61` on PRs that touch nothing near
+      # this file (run 34555593107, 2026-09-11). The expected value is read off
+      # the two rows' OWN stamps, so the assertion measures what the column
+      # recorded against what the rows say, and the floor below is what proves
+      # the 61s backdate actually took.
+      assert second_row.deferral_actual_gap_s ==
+               DateTime.diff(second_row.inserted_at, backdated)
+
+      assert second_row.deferral_actual_gap_s >= 61
+
+      # SCHEDULED: the window the ladder asked for when round 1 re-queued. Read
+      # off `deferral_backoff_seconds/1` and never a literal, so an operator who
+      # stretched `AUTODEPLOY_DEBOUNCE_S` does not red this test with a config.
+      assert second_row.deferral_scheduled_s == Deploy.deferral_backoff_seconds(1)
+
+      # Round 3 climbs the ladder with the chain: depth 3's scheduled window is
+      # the one depth 2 asked for, which is a longer window than depth 1's.
+      {:ok, third} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(third.id)
+      third_row = Repo.get(Deployment, third.id)
+
+      assert third_row.deferral_depth == 3
+      assert third_row.deferral_scheduled_s == Deploy.deferral_backoff_seconds(2)
+      assert third_row.deferral_scheduled_s > second_row.deferral_scheduled_s
+      assert is_integer(third_row.deferral_actual_gap_s)
+    end
+
     # dr-w28 S6. The previous test makes every DEFERRED round queryable — and
     # left the one row that matters most out of it. The terminal round is the
     # publish the fleet GAVE UP ON, and `fail/2` wrote only status /
@@ -1136,22 +1374,87 @@ defmodule BarkparkCloud.SitesDeployTest do
     # literal: a capacity chain gets 12 and a busy/stuck chain gets 6, so a
     # sentence that hardcoded either would misstate the other cause's whole
     # budget to the operator reading it.
+    # dr-w4-bl-deferral-raw-column-ambiguous — THE SPOOF, DRIVEN END TO END.
+    #
+    # Both runs below go through the REAL `start_on_box` → `box_refusal/3` →
+    # `defer/4` path. The only difference between the two 409 bodies is the
+    # presence of the `code` key: the codeless one's `message` is
+    # `"box_at_capacity — " <> <the verbatim capacity prose>`, so
+    # `refusal_detail/1` renders it to THE SAME BYTES the coded one renders to,
+    # and the test asserts that byte-identity rather than assuming it.
+    #
+    # Before the column, both rows classified BOX_AT_CAPACITY_DEFERRED and took
+    # the capacity leash of 12 — a forged cause with no code involved anywhere.
+    test "a CODELESS 409 forging the capacity bytes is deferred as BUSY, not as capacity" do
+      {bp, site} = setup_site()
+
+      # The verbatim body, READ from the fixture the api-side conformance test
+      # pins — never retyped here (#16598).
+      forged_message = "box_at_capacity — " <> BoxCapacityRefusalFixture.message()
+
+      # NO `code` KEY. This is the whole specimen.
+      FakeBoxRelay.program(start: {:ok, 409, %{"error" => %{"message" => forged_message}}})
+
+      {:ok, spoof} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(spoof.id)
+      spoof_row = Repo.get(Deployment, spoof.id)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "box_at_capacity",
+               "message" => BoxCapacityRefusalFixture.message()
+             }
+           }}
+      )
+
+      {:ok, coded} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(coded.id)
+      coded_row = Repo.get(Deployment, coded.id)
+
+      # THE PRECONDITION: the box's half of the two reasons is byte-identical.
+      # (`defer/3` appends its own `" — deferred: refusal N of B …"` clause,
+      # which is DOWNSTREAM of the classification and therefore differs — that
+      # divergence is the finding, not a flaw in the comparison.)
+      box_words = fn reason -> reason |> String.split(" — deferred: ") |> hd() end
+      assert box_words.(spoof_row.failure_reason) === box_words.(coded_row.failure_reason)
+
+      # THE COLUMN IS WHERE THEY DIFFER, and it was written at refusal time.
+      assert spoof_row.box_refusal_code == DeployLedger.no_box_code()
+      assert coded_row.box_refusal_code == "box_at_capacity"
+
+      # THE CRITERION, on the persisted rows.
+      refute DeployLedger.classify(spoof_row) == "BOX_AT_CAPACITY_DEFERRED"
+      assert DeployLedger.classify(spoof_row) == "BOX_BUSY_DEFERRED"
+      assert DeployLedger.classify(coded_row) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # …and the producer's OWN stamped cause agrees with the ledger, because it
+      # is computed through the same column-first reader. A forged capacity
+      # refusal takes the BUSY leash of 6, not the capacity leash of 12.
+      assert spoof_row.deferral_cause == "BOX_BUSY_DEFERRED"
+      assert spoof_row.deferral_bound == 6
+      assert coded_row.deferral_cause == "BOX_AT_CAPACITY_DEFERRED"
+      assert coded_row.deferral_bound == 12
+    end
+
     test "the rendered bound is the CAUSE's own bound — 12 for capacity, 6 for a busy box" do
       {bp, site} = setup_site()
 
-      # THE BOX'S VERBATIM BODY (dr-w3-s3-followup-capacity-code-handshake), not
-      # an invented one: `BarkparkWeb.SiteDeployController.capacity_message/3`
-      # renders "the box is at its build capacity (N of N build slots in use) — "
-      # plus the holder tail, N = DeployRunner.build_slot_capacity() (1 today).
-      # The shape assertion below is what makes this fixture unable to drift
-      # back to the invented "4 of 4 build slots are in use" that sat here and
-      # in deploy_ledger_test.exs while the real emitter said something else.
-      capacity_body =
-        "the box is at its build capacity (1 of 1 build slots in use) — " <>
-          "site 'other-site' is building; retry when it finishes"
-
-      assert capacity_body =~
-               ~r/^the box is at its build capacity \(\d+ of \d+ build slots in use\) — /
+      # THE BOX'S VERBATIM BODY — READ, not retyped. The one copy lives in
+      # api/test/support/fixtures/box_capacity_refusal.json, and
+      # BarkparkWeb.SiteDeployCapacityBodyConformanceTest drives the REAL
+      # controller to a 409 and asserts `capacity_message/3 <> peer_tail/1`
+      # still emits exactly that. A reword there reds THERE, on the api diff.
+      #
+      # What stood here was a hand-typed copy under a "VERBATIM" comment, plus
+      # a shape assertion that checked a literal in this file against a regex
+      # in this file — it could not fail, and it did not stop the invented
+      # "4 of 4 build slots are in use" from sitting here and in
+      # deploy_ledger_test.exs for a day (#16598) while the emitter said
+      # something else.
+      capacity_body = BoxCapacityRefusalFixture.message()
 
       FakeBoxRelay.program(
         start:
@@ -1821,6 +2124,196 @@ defmodule BarkparkCloud.SitesDeployTest do
     end
   end
 
+  # dr-bl-w8-graced-deploys-are-uncounted. THE SAVES WERE THE UNCOUNTED HALF.
+  #
+  # Grace has always been able to say what it could not save: `with_graced_note/2`
+  # puts "after tolerating 3 transient box 5xx" into the `failure_reason` of a row
+  # that failed anyway, and four tests above assert exactly that. Nothing said
+  # what grace DID save, in any outcome — because `forget_graced_refusals/1`
+  # `Map.drop`s the ctx tally on every poll that reached the box, and a poll that
+  # reached the box is what a working grace LOOKS LIKE. The start-retry arm
+  # recorded nothing at all, win or lose.
+  #
+  # Charter D114 is the bill for that: one wire literal falling out of
+  # `transient_refusal?/1` deletes 3 start retries and 45 poll-grace beats per
+  # deploy, and with no counter the loss reads only as a higher failure rate with
+  # nothing naming the cause.
+  #
+  # THE MUTATION THESE TESTS ANSWER TO: reinstate the silent drop — delete the
+  # `record_grace(...)` call from `record_graced_refusal/2` and from the start
+  # `>= 500` arm of `start_on_box/6` — and every test in this block goes red.
+  describe "the grace that WORKED is counted (dr-bl-w8)" do
+    setup do
+      ref = make_ref()
+      test = self()
+
+      :telemetry.attach(
+        "grace-#{inspect(ref)}",
+        [:barkpark_cloud, :sites, :deploy, :grace],
+        fn event, measurements, metadata, _ ->
+          send(test, {:grace_telemetry, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("grace-#{inspect(ref)}") end)
+      :ok
+    end
+
+    test "graced poll refusals are counted on the row and SURVIVE the reaching poll that clears the caption tally" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # Two blips, then the box comes back and the build finishes. This is the
+      # save: the deploy goes LIVE, so `with_graced_note/2` never runs and the
+      # ctx tally is dropped by the very poll that made the run a success.
+      FakeBoxRelay.program(
+        polls: [
+          crash_500(),
+          crash_500(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "live"
+      # The pre-W8 record of those two saves, in full:
+      assert is_nil(row.failure_reason)
+
+      # The post-W8 record: a NUMBER on the row the grace saved.
+      assert row.graced_poll_refusals == 2
+      assert row.graced_start_retries == 0
+      assert %DateTime{} = row.last_graced_at
+
+      # …and the in-process signal, carrying the box's own caption so a reader
+      # can tell WHICH refusal was swallowed, not merely how many.
+      assert_received {:grace_telemetry, [:barkpark_cloud, :sites, :deploy, :grace], %{count: 1},
+                       %{
+                         kind: :poll_refusal,
+                         deployment_id: id,
+                         site_slug: slug,
+                         caption: caption
+                       }}
+
+      assert id == d.id
+      assert slug == site.slug
+      assert caption =~ "internal_error"
+      assert_received {:grace_telemetry, _, %{count: 1}, %{kind: :poll_refusal}}
+    end
+
+    test "a start retry that then succeeds is counted — the arm that recorded nothing in any outcome" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # The blip ate the response and the box did NOT take the job; the retry
+      # lands and the build runs to live. Nothing about this row used to say a
+      # retry had happened.
+      FakeBoxRelay.program(
+        start: [crash_500(), {:ok, 202, %{"status" => "started"}}],
+        polls: [FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "live"
+      assert row.graced_start_retries == 1
+      assert row.graced_poll_refusals == 0
+      assert %DateTime{} = row.last_graced_at
+
+      assert_received {:grace_telemetry, _, %{count: 1},
+                       %{kind: :start_retry, deployment_id: id, caption: caption}}
+
+      assert id == d.id
+      assert caption =~ "refused the deploy"
+
+      # Two triggers, one build — the retry is a retry (the D9 guarantee the
+      # count now has a number behind it).
+      assert Enum.count(FakeBoxRelay.calls(), &match?({:start_deploy, _}, &1)) == 2
+    end
+
+    test "a wedged-Runner save is counted too — the exact literal charter D114 shows a rename deletes" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          runner_unavailable_503(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "live"
+      # Drop `"deploy_runner_unavailable"` from `transient_refusal?/1` and this
+      # deploy stops going live at all — but BEFORE this column, the only visible
+      # difference between the two worlds was a failure rate.
+      assert row.graced_poll_refusals == 1
+    end
+
+    test "the counter also survives the FAILING path, alongside the caption it does not replace" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(polls: [crash_500()])
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      # The prose is the operator's and is untouched; the column is the
+      # aggregate's. Both, never one instead of the other.
+      assert row.failure_reason =~ "3 transient box 5xx"
+      assert row.graced_poll_refusals == 3
+    end
+
+    test "the count is reachable from a NAMED QUERY over a pinned window, not only from one row" do
+      {bp, site} = setup_site()
+
+      {:ok, saved} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          crash_500(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(saved.id)
+
+      from_at = DateTime.add(DateTime.utc_now(), -3600, :second)
+      to_at = DateTime.add(DateTime.utc_now(), 3600, :second)
+
+      census = Registry.deploy_grace_census(from_at, to_at, site_ids: [site.id])
+
+      assert census.deployments == 1
+      assert census.graced_poll_refusals == 1
+      assert census.graced_start_retries == 0
+      assert census.deployments_graced == 1
+      # THE NUMBER THE TASK EXISTS FOR: deploys that reached `live` only because
+      # grace held. Kill grace and this goes to zero while failures climb.
+      assert census.saved == 1
+      # A zero that means "nobody was counting" is kept apart from a zero that
+      # means "no saves" — a census that summed them could not be read.
+      assert census.unmeasured == 0
+
+      # The window is PINNED, so a census that excludes the row reports zero
+      # rather than silently reusing the fleet's answer.
+      past =
+        Registry.deploy_grace_census(
+          DateTime.add(from_at, -7200, :second),
+          from_at,
+          site_ids: [site.id]
+        )
+
+      assert past.deployments == 0
+      assert past.saved == 0
+    end
+  end
+
   # dr-w8-s2 (D). `stage_caption/2`'s non-failed arm was a bare `scrub/1`, and a
   # scrub alone is not a boundary on build-log bytes: a build tool colourises its
   # own output, so the ESC runs land INSIDE the shape the scrubber matches and the
@@ -1874,6 +2367,62 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert [{:rollback, payload}] = FakeBoxRelay.calls()
       assert payload.mode == "rollback"
       assert payload.slug == site.slug
+    end
+
+    # deploy-reliability W12 — WHICH KEY NAMES THE TARGET. `rollback/2` used to
+    # read `body["build_id"] || body["target_build"] || body["current_build"]`,
+    # which reads as "whichever key the box happened to send wins" — a live
+    # identity divergence, since the three keys could name different builds.
+    # They cannot: the box's raw body never reaches `rollback/2`. The only
+    # producer of a 2xx rollback reply is `BoxRelay.HTTP.rollback/2`, which
+    # CONSTRUCTS `%{"status" => "rolled_back", "build_id" => target_build(body)}`
+    # from the box's `TARGET_BUILD=<id>` stdout line, so the other two keys could
+    # never fire. These two tests pin the collapsed contract in both directions.
+    test "the target is read from `build_id` ALONE — the retired fallback keys are not read" do
+      {bp, site} = setup_site()
+
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "live"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      # A body shaped like the retired second and third arms. No transport in
+      # this repo can produce it, so it must NOT move the live pointer — reading
+      # it would mean the plane trusts a key its own relay never sends.
+      FakeBoxRelay.program(
+        rollback:
+          {:ok, 200,
+           %{
+             "status" => "rolled_back",
+             "target_build" => "prevbuild0000001",
+             "current_build" => "prevbuild0000001"
+           }}
+      )
+
+      assert {:ok, result} = Deploy.rollback(site, bp)
+      assert result.deployment_id == nil
+      assert result.previous_deployment_id == live.id
+      assert Repo.get(Site, site.id).current_deployment_id == live.id
+      refute prev.id == Repo.get(Site, site.id).current_deployment_id
+    end
+
+    test "a 2xx rollback body with NO build_id skips the pointer write and still answers ok" do
+      {bp, site} = setup_site()
+
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000002"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      # The REAL nil case: `BoxRelay.HTTP` puts the "build_id" key in every 2xx
+      # reply, but its value is nil when the box printed no `TARGET_BUILD=` line.
+      # The route answers 200 and the CLI gates on status alone — so the recorded
+      # truth is that the pointer still names the build we rolled AWAY from.
+      FakeBoxRelay.program(rollback: {:ok, 200, %{"status" => "rolled_back"}})
+
+      assert {:ok, result} = Deploy.rollback(site, bp)
+      assert result.deployment_id == nil
+      assert Repo.get(Site, site.id).current_deployment_id == live.id
     end
 
     test "a box with no previous release is a FAILURE, not a cheerful no-op" do

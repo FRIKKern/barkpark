@@ -23,6 +23,13 @@ api/priv/static/cache_manifest.json
 js
 web
 cloud
+# api/Dockerfile COPYs cloud/priv/secret-scrub.exs — the ONE secret-pattern set
+# both apps compile (Sites.BuildLogScrub / BarkparkCloud.FailureCopy). Same trap
+# as tooling/pds below: the blanket `cloud` hides it from the context and the
+# COPY fails with '"/cloud/priv/secret-scrub.exs": not found'. The negation must
+# follow the exclusion.
+!cloud/priv
+!cloud/priv/secret-scrub.exs
 tooling
 # api/Dockerfile COPYs tooling/pds (e0280b12f, 2026-09-02): the blanket `tooling`
 # above hid it from the context and every compose-smoke build failed with

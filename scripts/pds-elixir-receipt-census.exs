@@ -66,9 +66,13 @@
 #   elixir scripts/pds-elixir-receipt-census.exs            # full corpus census
 #   elixir scripts/pds-elixir-receipt-census.exs --sites    # + every emitted site, one per line
 #   elixir scripts/pds-elixir-receipt-census.exs --files-from FILE   # corpus-refusal rehearsal
+#        FILE must BE the api/lib population, file for file (tree_population/0 minus the
+#        announced @files_from_allowlist). A strict subset is REFUSED at exit 2 by name —
+#        it is not a smaller corpus, it is a census of a population nobody chose.
 #   elixir scripts/pds-elixir-receipt-census.exs --keys     # STDOUT: the register key, TSV, one line per emitted site
 #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys # STDOUT: the EXCLUSION anchor, TSV, one line per @routed_excluded row
 #   elixir scripts/pds-elixir-receipt-census.exs --citations # STDOUT: every evidence citation RESOLVED BY CONTENT, TSV: path, line, block fingerprint, marker
+#   elixir scripts/pds-elixir-receipt-census.exs --routed-rows # PROPOSE paste-ready @routed_excluded rows for every undisposed member; NEVER writes
 #   elixir scripts/pds-elixir-receipt-census.exs --selftest # mutate this file over a synthetic corpus; prove the arms can go RED
 #
 # EXIT: 0 all integrity checks pass · 1 an integrity check failed · 2 corpus refused OR
@@ -99,10 +103,14 @@ defmodule PDS.Census do
     "copy has drifted — 8687 / 12615 / 13199 / 15970 / 17640 / 19815 ms across",
     "recorded runs, a 2.3x SPREAD, so the `~15 s` that sat here could not have been",
     "right for more than one of them. The wrapper's figure for all thirty-three",
-    "children came in under HALF the price of ONE of them, and nine of the cases",
-    "census this same corpus, so NINE TIMES this run's own `user cpu` is a FLOOR on",
-    "what those 6.05 s conceal — DERIVED on the `user cpu` line below (kept on that",
-    "one line so the count of volatile lines stays at ONE), never typed here.",
+    "children came in under HALF the price of ONE of them. THE MULTIPLIER IS NOT",
+    "NAMED HERE EITHER, AND FOR THE SAME REASON: the cases that census THIS SAME",
+    "corpus are COUNTED off the selftest case table on every run — a typed `nine`",
+    "sat here while the table grew past it, understating its own floor for waves —",
+    "so THAT MANY TIMES this run's own `user cpu` is a FLOOR on what those 6.05 s",
+    "conceal, DERIVED on the `user cpu` line below (kept on that one line so the",
+    "count of volatile lines stays at ONE) and guarded by SELFTEST-FLOOR-MULTIPLIER,",
+    "never typed here.",
     "DO NOT QUOTE A RATIO: real/user was 113x on that run and 236x on an earlier",
     "one, because `real` counts waiting — the load-independent statement is the",
     "DIRECTION, and it runs the ONE WAY A PRICE COLUMN MUST NOT: it makes an",
@@ -489,12 +497,40 @@ defmodule PDS.Census do
   # Lens: build-free AST, substring counts, route depth 6, `transaction` NOT a write verb.
   # Engine printed live by that run:
   #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the four moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, :binary.matches/2 substring counts, route depth 6,
+  # @write_verbs without `transaction`, corpus api/lib/**/*.ex, CORPUS-INTACT this run);
+  # engine of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) ·
+  # aarch64-apple-darwin24.6.0, printed live by report_engine/0, 2026-09-07, rc=0
+  # `CENSUS OK`.
+  #
+  # WHAT MOVED IT: task-29781d0921e5a885 added ONE routed-write receipt —
+  # TasksController.discharges/2's `ok: true` success arm, the emission that makes the
+  # back-link mark auditable instead of an UNDISPOSED ARRIVAL. The same four rows the
+  # `landed` and `renew` arrivals each moved by one, moving by one a third time:
+  #
+  #   textual   110 -> 111  the new `ok: true` occurrence
+  #                         (111 == ast 102 + phantom 9).
+  #   ast       101 -> 102  the same one, as an AST-literal pair.
+  #   emitted    97 ->  98  the site emits on the wire.
+  #   write      59 ->  60  post /v1/tasks/:doc_id/discharges joins the routed-write set;
+  #                         the depth-6 relation reaches Tasks.record_discharge/2's Repo
+  #                         write through the Tasks facade. Disposed by the register row
+  #                         authored for it, not by an @routed_excluded entry.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 26, unrouted 12 read `==` in the
+  # same run. `read` holding at 26 is the tell that this arrival is a POST only — the
+  # verb adds no sibling GET — and `phantom` holding at 9 is the tell that the receipt's
+  # own comments do not spell the needle, so an explanation cannot inflate the population
+  # it explains.
   @rederived %{
-    textual: 110,
-    ast: 101,
+    textual: 111,
+    ast: 102,
     phantom: 9,
     consumer: 4,
-    emitted: 97,
+    emitted: 98,
     # RE-DERIVED BY RUN AT PDS-D480/D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -542,8 +578,61 @@ defmodule PDS.Census do
     # reaches the fenced write. Conserved rows unmoved (textual 109 / ast 100 / phantom 9 /
     # consumer 4 / emitted 96 / unrouted 12); the route closes at 10 as before. Reverting the
     # three adopt files alone returns all eight rows to == (proven in the PR).
-    write: 59,
-    read: 26,
+    # RE-DERIVED AGAIN 2026-09-10 at acrc-dedup-toctou-serialize (PR #17321, the
+    # publish/dedup cross-doc_id scope lock): 60 -> 57 and 26 -> 29. Wrapping the
+    # paper-birth row write in `Broadcast.write_atomically/1` inserted ONE closure hop
+    # between `BlockOps.persist_blocks_doc`'s callers and the `Repo.insert`/`Repo.update`
+    # that used to sit in the same def — `persist_blocks_doc_serialized/9` ->
+    # write_atomically's `fn` -> `write_blocks_doc_row/7`. THREE receipts downstream of
+    # that write can no longer reach a write verb inside the depth-6 budget and land in
+    # the READ class; `emitted` (98), `phantom` (9), `consumer` (4) and `unrouted` (12)
+    # all read `==` in the same run, so the three did NOT fall out of the route relation
+    # — exactly the shape task-a0ce4e18f6776400 and #16147 recorded above, and a row that
+    # did not move is evidence too.
+    #
+    # THE THREE, NAMED — from `--sites` diffed against origin/main (603a0531e), not from
+    # reading the patch:
+    #   barkpark_web/controllers/bulldocs_ingest_controller.ex:492
+    #       BulldocsIngestController.sync_create_persist/6   [WRITE d6] -> [READ]
+    #   barkpark_web/controllers/bulldocs_ingest_controller.ex:783
+    #       BulldocsIngestController.ingest_blocks/4         [WRITE d6] -> [READ]
+    #   barkpark_web/controllers/bulldocs_ingest_controller.ex:925
+    #       BulldocsIngestController.ingest_html_write/2     [WRITE d6] -> [READ]
+    #
+    # THE FOURTH SITE IS THE CONTROL, and it is why the cause is ONE HOP and not three
+    # broken routes: `bulldocs_ingest_controller.ex:1013`
+    # (`BulldocsIngestController.ingest_session/2`) moved [WRITE d5] -> [WRITE d6]. It had
+    # one depth of slack, spent it, and stayed in the write class. The census's own depth
+    # table says the same thing from the other side: write-routed reads 57 @6 here against
+    # 60 @6 on main, and 62 @7 here — the budget, not the code.
+    #
+    # ISOLATED BY RUN, never by reading the diff: reverting ONLY
+    # api/lib/barkpark/content/papers/block_ops.ex to its origin/main bytes and re-running
+    # the census printed all eight rows `==` and CENSUS OK at rc 0. The PR's other three
+    # lib files move NOTHING — lifecycle.ex, dedup_wall.ex and authoring_wall.ex each add
+    # code that holds no `ok: true` literal and sits on no receipt's route to a Repo verb;
+    # its test file is outside the corpus (api/lib/**/*.ex) entirely.
+    #
+    # WHAT WAS *NOT* DONE, DELIBERATELY — the same ruling task-a0ce4e18f6776400 wrote
+    # above. The hop is removable: inlining the row write back into
+    # `persist_blocks_doc_serialized/9` would keep the baseline at 60/26. But the closure
+    # is not decoration — `write_atomically/1` owns the deferred-broadcast queue and the
+    # commit shape, and the split is what keeps the paper-birth broadcast tail AFTER
+    # commit (the defect independent review caught on this same PR). Restructuring the FIX
+    # to flatter the LENS is editing the literal blind wearing better clothes. The three
+    # receipts still reach the same write; only this census's depth budget stopped seeing
+    # it, and PDS-D480 already ruled the depth is a compliance dial, not a claim about the
+    # code.
+    #
+    # DERIVED BY THE INSTRUMENT ITSELF, not typed from memory: these two numbers are the
+    # `derived` half of this census's own D448-DRIFT-REFUSES line, run from the repo root
+    # on the tree this commit ships, amended in the SAME commit as the change that moved
+    # them (PDS-D448a). Lens unchanged (build-free AST, :binary.matches/2 substring
+    # counts, route depth 6, @write_verbs without `transaction`, corpus api/lib/**/*.ex).
+    # Engine printed live by that run:
+    #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
+    write: 57,
+    read: 29,
     unrouted: 12
   }
 
@@ -684,9 +773,9 @@ defmodule PDS.Census do
   # decision covers, and the quad is what makes an arrival visible.
   @routed_exclusion_classes %{
     liveview_handle_event:
-      "2026-08-02 (PDS wave 38): a LiveView route names {Module, :action-or-nil} and its writes live in handle_event/3, so there is no {Controller, action} pair for the receipt register to key on. EXCLUDED because this lens structurally cannot judge it — printed with its count so the exclusion is a fact and not a silence.",
+      "2026-09-11 (PDS wave 39 material, correcting wave 38): a LiveView route names {Module, :action-or-nil} and its writes live in handle_event/3. WAVE 38 SAID THE BLOCKER IS KEYING (\"there is no {Controller, action} pair for the receipt register to key on\") AND THAT CLAUSE IS RETIRED HERE: a key is trivially available. RE-DERIVED at fe01df112 over api/lib: 355 `def handle_event/3` clauses parse cleanly via Code.string_to_quoted across 23 files, and 342 of them (96.3%) carry a LITERAL string event name — a usable {module, \"event\"} register key; only 13 are non-literal (a var or an interpolation), which is a printable blind shape and not a wall. THE REAL BLOCKER IS DEPTH, and it is STRUCTURALLY worse here than on the controller surface: BarkparkWeb.Studio.StudioLive is a thin routing head BY DESIGN (its own moduledoc, api/lib/barkpark_web/live/studio/studio_live.ex:7-13) and carries 114 of the 355 clauses (32.1%), every one a one-line delegation into the 18 handler modules under live/studio/studio_live/handlers/, NONE of which defines a handle_event at all — so a clause-body lens sees a one-liner with no write and greenly classes all 114 as non-writes. EXCLUDED PENDING A DEPTH-2 RESOLVER, not permanently, and printed with its count so the exclusion is a fact and not a silence. THE MOTIVATING HYPOTHESIS IS REFUTED, which is why this is not urgent: LiveView writes are NOT systematically unreceipted — every genuine writer sampled matches the {:ok, record} RETURNED BY THE WRITE and assigns it into the socket, so the re-render displays the store's row (plugins/tickets/inbox_live.ex, plugins/onixedit/web/staleness_live.ex, live/studio/org_admin_live.ex), satisfying the wave-40 law by construction; of 45 put_flash(:info, ...) sites 15 interpolate and NONE carries a computed count (one of them, live/studio/studio_live/handlers/doc.ex:132, interpolates a value taken from the write's OWN RETURN). A LENS TRAP FOR WHOEVER BUILDS THE POPULATION: the textual grep `def handle_event(` over api/lib sums to 363, not 355, and the entire 8-clause gap is handle_event/4 TELEMETRY callbacks in barkpark_web/request_stats.ex and barkpark/telemetry/handlers.ex — a different arity and a different protocol, never a UI event (there are ZERO `defp handle_event/3` today, so keying on ARITY is the whole defence). And 89 of the 355 clauses live in UNROUTED LiveComponents — live/studio/sheet_grid.ex 81, components/fields/tree_codelist_field.ex 4, live/studio/paper_field_block.ex 4 — which a population must exclude by MOUNT-REACHABILITY, never by filename.",
     status_only_receipt:
-      "2026-08-02 (PDS wave 40, correcting wave 38): the routed action reaches no `ok: true` / `\"ok\" => true` receipt THIS LENS keys on, and carries no roster anchor. THAT IS THE WHOLE CLAIM. Wave 38 also wrote that such a row \"claims success by STATUS alone\", and wave 40 MEASURED that: it is false for most of this class's own members, which do render the stored row and simply do not spell the key the lens greps for. That clause is RETIRED here; what each row's receipt actually does is the DERIVATION PARTITION printed below, class by class, with the producing call named for every row. THIS IS STILL THE POPULATION HOLE wave 38 named: SCIM's three IdP write routes land here. The register's completeness claim never covered these; now they are COUNTED, and now they are PARTITIONED.",
+      "2026-08-02 (PDS wave 40, correcting wave 38): the routed action reaches no `ok: true` / `\"ok\" => true` receipt THIS LENS keys on, and carries no roster anchor. THAT IS THE WHOLE CLAIM. Wave 38 also wrote that such a row \"claims success by STATUS alone\", and wave 40 MEASURED that: it is false for most of this class's own members, which do render the stored row and simply do not spell the key the lens greps for. That clause is RETIRED here; what each row's receipt actually does is the DERIVATION PARTITION printed below, class by class, with the producing call named for every row. THIS IS STILL THE POPULATION HOLE wave 38 named: SCIM's three IdP write routes land here. The register's completeness claim never covered these; now they are COUNTED, and now they are PARTITIONED. THE SPLIT, RE-DERIVED AT fe01df112 over the 149 rows this class now holds (117 distinct {module, action} pairs): 133 render a BOUND value (store_derived 113, reread_receipt 8, request_echo 4, residual_onehop_unattributed 8), 2 render a constant redirect-or-flash, 9 stay residual_helper_assembled and are NOT decided, and only 5 are `literal_only` — of which EXACTLY ONE is a genuine bodiless 204 (BarkparkWeb.ChatController.answer, api/lib/barkpark_web/controllers/chat_controller.ex:411 `send_resp(conn, :no_content, \"\")`); the other four render a body (two 503 `feature_not_configured` JSON errors, two HTML form re-renders). SO A READER MUST NOT INFER \"these answer with an empty 204\": that is true of 1 row in 149, not of the class. THE WAVE-39 FILING'S OWN NUMBERS ARE STALE and are corrected here rather than repeated — it put the render-a-body share at 93% over a 106-pair residue and claimed ZERO members were proven bodiless; the class has since grown to 149 rows and ChatController.answer IS a proven bodiless 204.",
     # `action_not_in_corpus` IS RETIRED (PDS wave 40). It held exactly two rows, both
     # Sheets routes whose module reads `"?"` only because register_routes/1 binds the
     # controller to a LOCAL VARIABLE — the defs were in the corpus the whole time, so the
@@ -728,7 +817,7 @@ defmodule PDS.Census do
     # THE LIVE ROUTE THE WAVE-42 FIXTURE ADDS. MANDATORY, not decorative: `live` is a
     # ROUTED-WRITE method, so without this row every --selftest run exits 1 on
     # `FAIL ROUTED-POPULATION-COMPLETE … UNDISPOSED ARRIVAL live /studio/fixture`. That
-    # is the disposition table refusing an arrival, NOT guard_corpus!/1 (which never
+    # is the disposition table refusing an arrival, NOT guard_corpus!/3 (which never
     # refuses on this), and it fires whether or not the named module is written.
     {:live, "/studio/fixture", "Barkpark.Filler.FixtureLive", nil, :selftest_fixture},
     # THE FOUR PLUGIN-MOUNT ARRIVALS THE WAVE-43 FIXTURE ADDS. Three are MOUNTED (the
@@ -817,8 +906,6 @@ defmodule PDS.Census do
     {:live, "/w/:workspace_slug/p/:project_slug/studio/onixedit/ping", "Barkpark.Plugins.OnixEdit.PingLive", :index, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/studio/settings", "BarkparkWeb.Studio.SettingsLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/studio/tickets", "Barkpark.Plugins.Tickets.InboxLive", :index, :liveview_handle_event},
-    {:patch, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :update, :status_only_receipt},
-    {:patch, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :update, :status_only_receipt},
     {:patch, "/v1/chat/sessions/:id", "BarkparkWeb.ChatController", :update, :status_only_receipt},
     {:patch, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update, :status_only_receipt},
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update, :status_only_receipt},
@@ -854,8 +941,6 @@ defmodule PDS.Census do
     {:post, "/login/mfa", "BarkparkWeb.SessionController", :mfa, :status_only_receipt},
     {:post, "/login/reset", "BarkparkWeb.SessionController", :reset_request, :status_only_receipt},
     {:post, "/media/upload", "BarkparkWeb.MediaController", :upload, :status_only_receipt},
-    {:post, "/scim/v2/Groups", "BarkparkWeb.ScimGroupsController", :create, :status_only_receipt},
-    {:post, "/scim/v2/Users", "BarkparkWeb.ScimUsersController", :create, :status_only_receipt},
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
@@ -937,7 +1022,6 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
-    {:post, "/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym, :status_only_receipt},
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create, :status_only_receipt},
@@ -978,7 +1062,6 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
-    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},
@@ -999,8 +1082,6 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send, :status_only_receipt},
     {:post, "/w/:workspace_slug/v1/chat-hosts/enrollments", "BarkparkWeb.ChatHostController", :create_enrollment, :status_only_receipt},
     {:put, "/api/workspaces/:workspace_slug/media/blob/*path", "BarkparkWeb.MediaController", :put_blob, :status_only_receipt},
-    {:put, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :replace, :status_only_receipt},
-    {:put, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :replace, :status_only_receipt},
     {:put, "/v1/data/search/:dataset/settings", "BarkparkWeb.SearchController", :update_search_settings, :status_only_receipt},
     {:put, "/v1/media/:dataset/search/settings", "BarkparkWeb.V1.MediaController", :update_search_settings, :status_only_receipt},
     # THE THREE WAVE-39-RESIDUE ARRIVALS, 2026-09-02 (pds-w39-literal-receipt-residue).
@@ -1047,12 +1128,12 @@ defmodule PDS.Census do
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token} => {"BarkparkWeb.MemberController.revoke_token/2", 1, "53244686"},
     {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete} => {"BarkparkWeb.LegacyController.delete/2", 1, "95326188"},
     {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete} => {"BarkparkWeb.WorkspaceController.delete/2", 1, "96936068"},
-    {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete} => {"BarkparkWeb.MediaController.delete/2", 1, "15541809"},
+    {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete} => {"BarkparkWeb.MediaController.delete/2", 1, "17508246"},
     {:delete, "/v1/access/:id", "BarkparkWeb.AccessController", :revoke} => {"BarkparkWeb.AccessController.revoke/2", 1, "9419452"},
     {:delete, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :delete} => {"BarkparkWeb.AppTokenController.delete/2", 1, "54697721"},
     {:delete, "/v1/auth/app-tokens/current", "BarkparkWeb.AppTokenController", :delete_current} => {"BarkparkWeb.AppTokenController.delete_current/2", 1, "41987025"},
     {:delete, "/v1/fleet/support-tokens/:token_id", "BarkparkWeb.FleetSupportTokenController", :delete} => {"BarkparkWeb.FleetSupportTokenController.delete/2", 1, "31540449"},
-    {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "45826087"},
+    {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "98736159"},
     {:delete, "/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
     {:delete, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
     {:delete, "/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
@@ -1061,15 +1142,13 @@ defmodule PDS.Census do
     {:delete, "/v1/shares/links/:id", "BarkparkWeb.ShareLinkController", :revoke} => {"BarkparkWeb.ShareLinkController.revoke/2", 1, "57504485"},
     {:delete, "/v1/shares/tokens/:token_id", "BarkparkWeb.ShareController", :revoke_token} => {"BarkparkWeb.ShareController.revoke_token/2", 1, "13923101"},
     {:delete, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
-    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "45826087"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "98736159"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete} => {"BarkparkWeb.SchemaController.delete/2", 1, "108524343"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
     {:delete, "/w/:workspace_slug/v1/chat-hosts/:id", "BarkparkWeb.ChatHostController", :revoke} => {"BarkparkWeb.ChatHostController.revoke/2", 1, "131654882"},
-    {:patch, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :update} => {"BarkparkWeb.ScimGroupsController.update/2", 1, "36940354"},
-    {:patch, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :update} => {"BarkparkWeb.ScimUsersController.update/2", 1, "39755110"},
     {:patch, "/v1/chat/sessions/:id", "BarkparkWeb.ChatController", :update} => {"BarkparkWeb.ChatController.update/2", 1, "57469860"},
     {:patch, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update} => {"BarkparkWeb.V1.MediaController.update/2", 1, "92180591"},
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update} => {"BarkparkWeb.V1.MediaController.update/2", 1, "92180591"},
@@ -1086,8 +1165,6 @@ defmodule PDS.Census do
     {:post, "/login/mfa", "BarkparkWeb.SessionController", :mfa} => {"BarkparkWeb.SessionController.mfa/2", 1, "126433771"},
     {:post, "/login/reset", "BarkparkWeb.SessionController", :reset_request} => {"BarkparkWeb.SessionController.reset_request/2", 2, "114539261"},
     {:post, "/media/upload", "BarkparkWeb.MediaController", :upload} => {"BarkparkWeb.MediaController.upload/2", 2, "101512734"},
-    {:post, "/scim/v2/Groups", "BarkparkWeb.ScimGroupsController", :create} => {"BarkparkWeb.ScimGroupsController.create/2", 1, "126989276"},
-    {:post, "/scim/v2/Users", "BarkparkWeb.ScimUsersController", :create} => {"BarkparkWeb.ScimUsersController.create/2", 1, "114979114"},
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint} => {"BarkparkWeb.AccessController.mint/2", 1, "83944541"},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim} => {"BarkparkWeb.AccessController.claim/2", 2, "9774625"},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
@@ -1121,7 +1198,6 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
-    {:post, "/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction} => {"BarkparkWeb.SearchController.correction/2", 1, "19866096"},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
     {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym} => {"BarkparkWeb.SearchController.promote_search_synonym/2", 1, "49650472"},
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create} => {"BarkparkWeb.FleetSupportTokenController.create/2", 1, "10356438"},
@@ -1162,7 +1238,6 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
-    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction} => {"BarkparkWeb.SearchController.correction/2", 1, "19866096"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout} => {"BarkparkWeb.V1.MediaController.checkout/2", 1, "12930699"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout} => {"BarkparkWeb.V1.MediaController.undo_checkout/2", 1, "124774745"},
@@ -1183,8 +1258,6 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send} => {"BarkparkWeb.WebhookController.test_send/2", 1, "64939389"},
     {:post, "/w/:workspace_slug/v1/chat-hosts/enrollments", "BarkparkWeb.ChatHostController", :create_enrollment} => {"BarkparkWeb.ChatHostController.create_enrollment/2", 1, "99965870"},
     {:put, "/api/workspaces/:workspace_slug/media/blob/*path", "BarkparkWeb.MediaController", :put_blob} => {"BarkparkWeb.MediaController.put_blob/2", 1, "79434187"},
-    {:put, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :replace} => {"BarkparkWeb.ScimGroupsController.replace/2", 1, "41824804"},
-    {:put, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :replace} => {"BarkparkWeb.ScimUsersController.replace/2", 1, "43223419"},
     {:put, "/v1/data/search/:dataset/settings", "BarkparkWeb.SearchController", :update_search_settings} => {"BarkparkWeb.SearchController.update_search_settings/2", 1, "27744156"},
     {:put, "/v1/media/:dataset/search/settings", "BarkparkWeb.V1.MediaController", :update_search_settings} => {"BarkparkWeb.V1.MediaController.update_search_settings/2", 1, "91283761"},
     {:put, "/v1/plugins/settings/:plugin_name", "BarkparkWeb.PluginSettingsController", :update} => {"BarkparkWeb.PluginSettingsController.update/2", 2, "131262955"},
@@ -1216,7 +1289,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{512, 512}],
+      basis_spans: [{522, 522}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1229,7 +1302,10 @@ defmodule PDS.Census do
           "this def grew by 18 lines — +18, the comment still sits on the def's first body line. " <>
           "RE-ANCHORED again off :501 on pds-w37-api-logout-unread-revoke: logout/2, above this " <>
           "def, grew by 11 lines when it started carrying its revoke count — +11, the comment " <>
-          "still sits on the def's first body line.",
+          "still sits on the def's first body line. RE-ANCHORED again off :512 on " <>
+          "era-bl-allowed-auth-methods: login/2, above this def, grew by 10 lines when it took " <>
+          "the org allowed-auth-methods guard — +10, the comment still sits on the def's first " <>
+          "body line.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -1238,7 +1314,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{527, 532}],
+      basis_spans: [{537, 542}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1252,7 +1328,10 @@ defmodule PDS.Census do
           "RE-ANCHORED again off :498-503 on the PAT admin-mint cap lane (PR #14933): +18 lines " <>
           "inserted above (the token `anti-enumeration` now on :519). RE-ANCHORED again off " <>
           ":516-521 on pds-w37-api-logout-unread-revoke: +11 lines inserted above by logout/2 " <>
-          "carrying its revoke count (the token `anti-enumeration` now on :530).",
+          "carrying its revoke count (the token `anti-enumeration` now on :530). RE-ANCHORED " <>
+          "again off :527-532 on era-bl-allowed-auth-methods: +10 lines inserted above by " <>
+          "login/2 taking the org allowed-auth-methods guard (the token `anti-enumeration` now " <>
+          "on :540).",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
@@ -1477,16 +1556,34 @@ defmodule PDS.Census do
       {"UNJUDGED", "the cited test has no injection seam, or DOES read Repo", :reds},
     context_differential_only:
       {"UNJUDGED", "the cited test builds a conn", :reds},
+    # THE TEXT SAYS WHAT judge_citation/4 DECIDES, NOT WHAT THE NAME SUGGESTS
+    # (pds-w39-vocab-text-overclaim). It READ "the Repo read compares a printed field, not
+    # existence" — a field-comparison predicate this arm has never implemented and which is
+    # undecidable on substrings. The arm fires on `not repo?`: the cited block carries NO
+    # named persistence token at all, which this file's own demotion note below already
+    # states in those words ("reads nothing back at all, so it cannot even assert that").
+    # A TEXT REPAIR, NOT A PROMOTION: the tier stays :advisory and the verdict of all
+    # five rows is unchanged — arming a real field comparison is a different slice.
     side_effect_existence_only:
-      {"UNJUDGED", "the Repo read compares a printed field, not existence", :advisory},
+      {"UNJUDGED",
+       "the cited block carries NO named persistence-read token at all (@repo_tokens), so it cannot even assert existence",
+       :advisory},
     shape_assertion_only:
       {"UNJUDGED", "the assertion can fail on a wrong payload (implementable ONLY as a denylist of weak predicates — is_list/is_map/is_binary/bare truthiness — so it is advisory, and this name promises more than its code delivers)", :advisory},
     payload_is_the_postcondition:
       {"UNJUDGED", "any emitted value traces to params[...] or a fn head", :advisory},
     request_param_echo:
       {"UNJUDGED", "no emitted value traces to a request parameter", :advisory},
+    # THE MODULE HALF ONLY, SAID IN THE VOCABULARY AND NOT ONLY AT THE PREDICATE
+    # (pds-w39-vocab-text-overclaim). It READ "any test references the site's module OR its
+    # route path"; no_observer_findings/1 is one String.contains? on the module name and
+    # carries no route index at all — its own head already says THE MODULE HALF ONLY.
+    # STILL INERT, NOT ARMED: no_observer carries ZERO top-level @register rows, so it
+    # prints under TIERED :reds BUT INERT. This edit moves no verdict.
     no_observer:
-      {"UNJUDGED", "any test references the site's module OR its route path", :reds},
+      {"UNJUDGED",
+       "any test FILE contains the site's module name as a substring (the module half only — no route index)",
+       :reds},
     basis_stale:
       {"UNJUDGED", "the current head_hash+expr_fp equal the recorded pair", :reds},
     partial_tag_coverage:
@@ -1569,6 +1666,60 @@ defmodule PDS.Census do
       anchor_mfa: "BarkparkWeb.ScimUsersController.delete/2", def_fp: "19495067",
       verdict: "PROVEN", basis: :end_to_end_unmutated,
       note: "the match is `{:ok, _} =` over a raising Repo.delete! inside a transaction, so a failed deprovision cannot reach the 204."},
+    # ------------------------------------------------------------------ THE SIX SCIM
+    # WRITE ROUTES (pds-w39-status-only-receipts). They sat in @routed_excluded as
+    # :status_only_receipt — the wave-38 population hole, named by the wish as "the
+    # sharpest six": a real NON-ADMIN IdP write path behind `pipeline :scim` ->
+    # RequireScimToken whose success nobody in this lens had judged. THE LENS WAS NEVER
+    # WIDENED TO SWALLOW THEM. Not one of these actions spells `ok: true`, and none is
+    # made to: SCIM's receipt is the RESOURCE ITSELF (RFC 7644 §3.3/§3.5.2 — a 201 or 200
+    # carrying the created/updated resource representation), which no `ok: true` grep can
+    # ever key on. So they are disposed the way @roster exists to dispose things: by NAME,
+    # with a verdict and a basis from the SAME vocabulary the register uses, each attached
+    # to the DEF. The six @routed_excluded tuples and their six @exclusion_anchors entries
+    # are REMOVED in this same commit — ROUTED-DISPOSITION-UNSHADOWED reds on a committed
+    # exclusion row naming a member this run disposes ROSTERED (the precedent is the
+    # search_controller.ex correction/2 row above, which removed two).
+    %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
+      literal: "case Scim.provision_user(org, params) do",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.create/2", def_fp: "70214860",
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: {"api/test/barkpark_web/controllers/scim_users_controller_test.exs",
+                 "test \"provisions a confirmed user who can then log in (via magic-link)\" do"},
+      note: "THE RECEIPT IS THE RESOURCE, AND IT IS STORE-DERIVED. `render_user(conn, user)` renders the `user` bound out of `{:ok, user} <- Scim.provision_user(org, params)` — the row the write returned, never a literal and never a request echo; the ETag is `ScimResponse.version(user.updated_at)`, a stored column. Every non-ok arm of the same `case` renders a SCIM error (400 invalidValue), so the 201 is unreachable without a provisioned row."},
+    %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
+      literal: "with {:ok, patch} <- ScimPatch.classify(params) do",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.update/2", def_fp: "49888131",
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: {"api/test/barkpark_web/controllers/scim_users_controller_test.exs",
+                 "test \"PATCH active:false deprovisions (soft: revokes access, keeps the row)\" do"},
+      note: "THE ONE CLAUSE THAT COULD LIE IS THE ONE ALREADY REPAIRED. The deprovision arm's `active` used to be a literal `false` chosen by the clause, so the body was byte-identical whether the deprovision took or matched nothing; 501fb9670 (#8952, PDS-D503) replaced it with `Scim.org_user_active?(org, user)`, read back off the stored rows, and this file's own WORKED EXAMPLE block cites that repair. The other arm renders the resource fetched by `Scim.get_org_user(org, id)`. Body shape is judged by `ScimPatch.classify/1` BEFORE the resource is touched, so a refused PATCH cannot have half-applied."},
+    %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
+      literal: "def replace(conn, params), do: update(conn, params)",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.replace/2", def_fp: "1429186",
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note: "A PURE DELEGATE, AND THAT IS THE WHOLE ROW. `def replace(conn, params), do: update(conn, params)` renders nothing of its own: PUT /scim/v2/Users/:id reaches the receipt the row above judges. IT IS STILL CARRIED SEPARATELY rather than folded into that row, because @roster disposes BY DEF and the routed member is keyed on the :replace action — folding it would leave the PUT arrival undisposed. WHY UNJUDGED AND NOT PROVEN: the committed PUT cases (`a stale If-Match on PUT -> 412`, `a matching If-Match on PUT proceeds -> 200`) drive the route and assert the STATUS and the precondition, and neither reads a stored row back, so the end_to_end falsifier would refuse this row on its own citation. The delegate is judged as far as it goes and no further, and the gap is this sentence rather than a silence."},
+    %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
+      literal: "case Scim.create_group(org, params) do",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.create/2", def_fp: "9423216",
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+                 "test \"cross-org: a token for org A cannot grant membership to a user in org B\" do"},
+      note: "THE 201 ANSWERS OVER THE RECONCILIATION IT PERFORMED, NOT OVER THE REQUEST. `render_group(conn, group, Scim.group_member_ids(org, group), unmatched)` takes the group from `{:ok, group} <- Scim.create_group(org, params)` and the member list from a STORED read, and the `unmatched` set names the member ids the write refused — so a request member that matched nobody comes back as `unmatchedMembers`, never as a granted member. The cited case drives the cross-org shape where that distinction is load-bearing and asserts BOTH the receipt and the untouched stored rows."},
+    %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
+      literal: "with {:ok, patch} <- ScimPatch.classify(params) do",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.update/2", def_fp: "83845777",
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+                 "test \"membership changes are audited\" do"},
+      note: "RE-READ AFTER THE WRITES, BY CONSTRUCTION. `apply_patch/5` fetches the group BEFORE the member ops and then re-reads it — `group = Scim.get_org_group(org, id) || group` — with the comment PDS-D551 left there saying why: rendering the pre-fetched struct would answer for the PRE-mutation resource. Members come from `Scim.group_member_ids(org, group)`, a stored read, and ops that matched nobody are reported as `unmatchedMembers` rather than folded into a bare 200."},
+    %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
+      literal: "def replace(conn, %{\"id\" => id} = params) do",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.replace/2", def_fp: "28821606",
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+                 "test \"membership changes are audited\" do"},
+      note: "PUT is a REAL def here, not a delegate: it reads the group, guards the precondition, calls `Scim.update_group/3` then `Scim.replace_group_members/3`, and renders `updated` — the struct update_group RETURNED — beside `Scim.group_member_ids(org, updated)`, a stored read, and the `unmatched` set the reconciliation refused. The `{:error, :invalid_role}` arm cannot reach a 2xx. CITATION NOTE, SAID PLAINLY: the sharpest PUT witness is `PUT: full-replace answers over the reconciliation it actually performed`, which asserts the receipt AND `stored_roles/1` on both the granted and the reverted user; it reads the store through a same-file helper rather than a `Repo.` token in its own block, so this row cites the case whose read-back token is IN the block and the sharper case is named here instead of being claimed by a citation the falsifier could not open."},
     %{path: "api/lib/barkpark_web/controllers/session_controller.ex",
       literal: "Barkpark.Accounts.revoke_user_session_token(token)",
       anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "94722031",
@@ -1594,6 +1745,11 @@ defmodule PDS.Census do
       anchor_mfa: "BarkparkWeb.ChatHostController.event/2", def_fp: "62380347",
       verdict: "UNJUDGED", basis: :stub_mapping_only,
       note: "re-renders the callee's :accepted tag faithfully; the tag's truth against any stored row is a separate question this row does not answer."},
+    %{path: "api/lib/barkpark_web/controllers/search_controller.ex",
+      literal: "recorded: status == :recorded,",
+      anchor_mfa: "BarkparkWeb.SearchController.correction/2", def_fp: "94313079",
+      verdict: "PROVEN", basis: :end_to_end,
+      note: "ARRIVES AS A ROSTER ROW BECAUSE THE EVIDENCE ARRIVED FIRST, NOT AS BOOKKEEPING. correction/2 left this lens's literal population at #9600 — it stopped spelling `ok: true` and now renders `ok: status != :error` beside a `status:` discriminator for the five causally different outcomes record_correction/3 answers — so no register row can name it and BOTH of its routed arrivals (`post /v1/data/search/:dataset/correction` and `post /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction`) sat in @routed_excluded as :status_only_receipt. A roster row attaches to the DEF, so ONE row disposes both, which is why the two exclusion tuples and their two @exclusion_anchors entries are REMOVED in the same commit — ROUTED-DISPOSITION-UNSHADOWED would otherwise red on a committed row naming a member this run disposes ROSTERED. WHY PROVEN, AND WHY NOT SOONER: the earlier proposal to write this row was refused precisely because it would have counted the SCOPED MIRROR as proven on a suite that never dispatched to it — correction_receipt_test.exs drives the flat route only and its own moduledoc says so. #16521 removed that objection by running the mirror: scoped_search_intel_receipt_test.exs `the five-way correction receipt is identical on the scoped and flat paths` posts all five inputs through :scoped_api under a member token and asserts five DISTINCT receipts on the SCOPED path, `a scoped correction writes a row carrying the URL's workspace_id` reads the written row back, and the C0 cases pin that the mirror fails closed for an anonymous caller and for a member of another workspace. end_to_end is earned on both legs: each case asserts the receipt AND the `search_intel_events` correction row count behind it. MUTATION-EXERCISED at 2e3ee4f6c — re-laundering correction/2 (destructure `status` away, render `ok: true` again) reds `the five-way correction receipt is identical on the scoped and flat paths` with `five causally different outcomes collapsed on the SCOPED path` and `a scoped correction writes a row carrying the URL's workspace_id` on `body[\"status\"]` nil, alongside 6 flat-route cases: 14 tests, 8 failures. Restored: 14 tests, 0 failures. def_fp DERIVED, never typed — a planted def_fp: \"PROBE\" row made ROSTER-VERDICT-FRESH print `def_fp moved PROBE -> 94313079`, and any further edit to correction/2, `mix format` included, moves it again and demotes this row to UNJUDGED."},
     %{path: "api/lib/barkpark_web/controllers/pulse_controller.ex",
       literal: "def preflight(conn, _params), do: send_resp(conn, 204,",
       anchor_mfa: "BarkparkWeb.PulseController.preflight/2", def_fp: "131930615",
@@ -1730,9 +1886,22 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs `a valid block paper (locked title at index 0) still saves — positive control`) reads nothing back at all, so it cannot even assert that."},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:244
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex, ingest_html_write/2 — the
+    # html receipt. Cited by DEF, not by line: this row exists BECAUSE a def moved and
+    # a line-keyed reference went stale, so citing a line here would reproduce the bug.
+    # Mixed-write wave (pe-w2-verbatim-html-overwrite-hazard): ingest_html/4 grew
+    # a refusal in front of the write and the writing tail split out as
+    # ingest_html_write/2 — the SAME receipt at a new def, so this row re-keys
+    # exactly as apply_op_batch/4 did below; verdict, basis and evidence carry
+    # over unchanged. The receipt hash is IDENTICAL (124223564) because the
+    # emitted body did not change; only the site key did (19560303 -> 78800622).
+    # The cited upsert test still reaches it end-to-end: it POSTs body_html twice
+    # on one slug, an HTML-only row both times, so the new guard returns :ok and
+    # the write emits as before. One site in, one site out — this is a re-key,
+    # NOT a split into two emitting sites: ingest_html/4 now emits no receipt of
+    # its own, it either delegates or returns the 422 refusal envelope.
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
-            "BarkparkWeb.BulldocsIngestController.ingest_html/4", "19560303", "124223564"},
+            "BarkparkWeb.BulldocsIngestController.ingest_html_write/2", "78800622", "124223564"},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs",
          ~S|test "a second POST with the same slug updates in place (upsert)", %{conn: conn} do|}},
@@ -1924,7 +2093,17 @@ defmodule PDS.Census do
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "22543410"},
       verdict: "PROVEN", basis: :end_to_end, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
-         ~S|test "a merged PR on an UNMARKED but WORDED gate → reconciled: unflagged_merge_gates, NAMED, and NOT ONE byte written", %{|},
+         # THE ONLY BASIS TOKEN IN THIS REGISTER THAT CANNOT CARRY THE `, %{`
+         # SUFFIX ITS FIVE SIBLINGS USE. This test's title is long enough that
+         # `test "<title>", %{` exceeds the formatter's 98-column line_length, so
+         # `mix format` splits the context param onto its own line and no line in
+         # the file can ever read the suffixed form. The five siblings keep the
+         # suffix only because their titles are short enough to stay joined.
+         # Trimmed to the part that survives formatting — still a real line, still
+         # unique in that file, still the SAME test. This is a re-cite, not a
+         # re-point: no line number is recorded here and the cited evidence is
+         # unchanged. Do not add `, %{` back; the formatter will delete it again.
+         ~S|test "a merged PR on an UNMARKED but WORDED gate → reconciled: unflagged_merge_gates, NAMED, and NOT ONE byte written",|},
       attestation:
         "mutation: route BOTH close.ex filters through Criteria.merge_gated?/1 — the remedy the filing asked for — and the receipt becomes `stamped` while the criterion flips met; `mix test api/test/barkpark/tasks/merge_gate_unflagged_test.exs` reds 3 of 6, including `a criterion that merely TALKS about merge gating is NOT flipped on merge`",
     },
@@ -2175,6 +2354,28 @@ defmodule PDS.Census do
       evidence:
         {"api/test/barkpark_web/controllers/tasks_renew_test.exs",
          ~S|test "200 ok:true, and the STORED row carries the window the receipt reports",|}},
+    # barkpark_web/controllers/tasks_controller.ex — the BACK-LINK MARK
+    # (task-29781d0921e5a885). discharges/2 emits `ok: true`, so it is JUDGED
+    # rather than excluded, and this one row clears BOTH arms it arrived red on:
+    # ROUTED-POPULATION-COMPLETE (the UNDISPOSED ARRIVAL of
+    # post /v1/tasks/:doc_id/discharges) and REGISTER-COMPLETE (the unjudged site).
+    #
+    # THE BASIS IS EARNED, NOT ASSERTED. Both halves of end_to_end's falsifier
+    # hold on the citation itself: the cited block drives the ROUTE (post/1
+    # through the authed conn) and then reads the STORED rows back
+    # (`marks_at/2` -> `content_of/1` -> `Repo.get!(Document, task.id)`),
+    # asserting that the pr / commit / primary the WIRE receipt claims are the
+    # ones the store actually holds on BOTH cited rows. Not `_unmutated`: the
+    # receipt's own counters are what the mutation moves. Appending
+    # `|> Enum.take(1)` to `Barkpark.Tasks.Citations.discharges/1` reds this exact
+    # block on the emission — `body["marked"] == 2` reads `left: 1 / right: 2` —
+    # so a receipt that over-reports what it marked cannot pass this citation.
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.discharges/2", "120540474", "111124755"},
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence:
+        {"api/test/barkpark_web/controllers/tasks_discharges_test.exs",
+         ~S|test "a PR citing TWO rows marks BOTH", %{conn: conn, scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:961
     # RE-KEYED, NOT RE-JUDGED. edges/2 now parses `kind` and delegates the
     # unchanged success body to edges_for_kind/3, so the emitting def moved and
@@ -2377,6 +2578,7 @@ defmodule PDS.Census do
           exclusion_keys?: false,
           selftest?: false,
           citations?: false,
+          routed_rows?: false,
           files_from: nil
         },
         []
@@ -2394,6 +2596,13 @@ defmodule PDS.Census do
   defp parse_args(["--citations" | rest], o, bad),
     do: parse_args(rest, %{o | citations?: true}, bad)
 
+  # ON THE STRICT LIST BY NAME, like every other flag: `--routed-row`, `--routed_rows`
+  # and every other near-miss fall to the catch-all clause below and exit 2 (PDS-D493).
+  # A swallowed near-miss would print the ordinary census and read as "the affordance
+  # found nothing", which is the worst answer this flag could give.
+  defp parse_args(["--routed-rows" | rest], o, bad),
+    do: parse_args(rest, %{o | routed_rows?: true}, bad)
+
   defp parse_args(["--files-from", path | rest], o, bad),
     do: parse_args(rest, %{o | files_from: path}, bad)
 
@@ -2408,7 +2617,7 @@ defmodule PDS.Census do
     p("REFUSED: UNKNOWN ARGUMENT")
     Enum.each(msgs, &p("  " <> &1))
     p("")
-    p("  accepted: --sites · --files-from FILE · --keys · --exclusion-keys · --citations · --selftest")
+    p("  accepted: --sites · --files-from FILE · --keys · --exclusion-keys · --citations · --routed-rows · --selftest")
     p("  A swallowed flag is a census measuring a lens nobody asked for. Exit 2.")
     System.halt(2)
   end
@@ -2439,7 +2648,7 @@ defmodule PDS.Census do
     files = corpus(opts)
 
     banner()
-    guard_corpus!(files)
+    guard_corpus!(files, opts)
 
     parsed = Enum.map(files, &parse_file/1)
     index = build_index(parsed)
@@ -2457,32 +2666,51 @@ defmodule PDS.Census do
     report_split(classified, index)
     route_closure = report_depth_sweep(emitted, index)
     report_shapes(classified)
+    report_select_evidence(index)
     report_declared_register(classified)
     report_judgment_register(classified)
     falsifiers = if register_scope(classified) == :real, do: report_basis_falsifiers(classified), else: :skipped
     if show_sites?, do: report_each_site(classified)
-    routed = report_routed_population(routed_derivation(parsed), classified, parsed, index)
+
+    # THE HYPOTHESIS COLUMN, COMPUTED ONCE AND READ TWICE — by the printer and by its own
+    # two arms. It is handed NOTHING but `classified` and `index` and returns a map of its
+    # own, so there is no path from here to a verdict (see response_carries_read/2).
+    rcr = response_carries_read(classified, index)
+    report_response_carries_read(rcr)
+    routed = report_routed_population(routed_derivation(parsed), classified, parsed, index, opts)
     report_lens_can_miss(routed)
-    report_blind_spots(parsed)
+    blind = report_blind_spots(parsed)
     delegate = report_delegate_probe(index)
 
     {cpu1, _since_last} = :erlang.statistics(:runtime)
     ms = cpu1 - cpu0
 
     integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms,
-      parsed, falsifiers, routed, route_closure)
+      parsed, falsifiers, routed, route_closure, blind, rcr)
   end
 
   # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
   # running this same file with `cd:` set to a tmp dir — the sentinels at the top of this
-  # module are relative literals for the same reason. (The `--files-from` seam does NOT
-  # work for fixtures: guard_corpus!/1 runs before parse_file/1 and ORs the corpus floor
-  # with the sentinel check on one cond arm, so no fixture list is both small enough to
-  # mutate and large enough to pass.)
-  defp corpus(%{files_from: nil}), do: Path.wildcard("api/lib/**/*.ex") |> Enum.sort()
+  # module are relative literals for the same reason. (The `--files-from` seam still does
+  # NOT work for fixtures, and now for a stronger reason than the floor: the list must BE
+  # the tree population, so no fixture list is both small enough to mutate and equal to a
+  # tree the fixture does not have.)
+  defp corpus(%{files_from: nil}), do: tree_population()
 
   defp corpus(%{files_from: path}),
-    do: path |> File.read!() |> String.split("\n", trim: true)
+    do:
+      path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.sort()
+
+  # ONE EXPRESSION, TWO SEAMS. The flagless corpus IS this, and the `--files-from` guard
+  # compares against this, so a supplied list is measured against the very population the
+  # unflagged run would have censused. Two spellings of "the corpus" could drift apart;
+  # one cannot, and the drift is the whole defect.
+  defp tree_population, do: Path.wildcard("api/lib/**/*.ex") |> Enum.sort()
 
   defp banner do
     {otp, erts} = {System.otp_release(), :erlang.system_info(:version)}
@@ -2507,11 +2735,84 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- corpus guard
 
+  # ------------------------------------------- the --files-from population guard
+  #
+  # A FLOOR AND THREE SENTINELS ARE NOT A POPULATION. Before this arm, guard_corpus!
+  # refused an EMPTY list, a list missing a sentinel, and a list under @corpus_floor — and
+  # nothing else, so any list that cleared 600 and carried the three sentinels BECAME "the
+  # corpus". MEASURED on origin/main f14dd319f: a `--files-from` list of 891 of the 892
+  # files under api/lib, dropping only api/lib/barkpark_web/gettext.ex, printed CENSUS OK
+  # at exit 0 — the census certifying, in full voice, a population nobody chose.
+  #
+  # THE ROW'S OWN RECIPE IS NOT THE PROOF, AND SAYING SO IS THE POINT. Dropping
+  # tasks_controller.ex exits 1 today on ROUTED-POPULATION-COMPLETE, REGISTER-COMPLETE and
+  # D448-DRIFT-REFUSES — because those arms happen to SEE that file. That is luck, not a
+  # guard: the truncation the arms cannot see is the one that greens, which is exactly the
+  # corpus above.
+  #
+  # SO THE LIST IS MEASURED AGAINST THE TREE, NEVER AGAINST A THRESHOLD. Expected is
+  # tree_population/0 — the same expression the flagless corpus uses — minus
+  # @files_from_allowlist, which is EMPTY and is PRINTED on every run that has one, because
+  # an unannounced exemption is how a subset becomes a population again. A file the tree
+  # holds and the list omits, a path the list holds and the tree does not, and a line the
+  # list repeats (a duplicate double-counts every site in it) are each NAMED and refused at
+  # exit 2.
+  @files_from_allowlist []
+  @files_from_named 12
+
+  defp files_from_divergence(_files, %{files_from: nil}), do: :none
+
+  defp files_from_divergence(files, %{files_from: _path}) do
+    expected = tree_population() -- @files_from_allowlist
+    listed = MapSet.new(files)
+    missing = Enum.reject(expected, &MapSet.member?(listed, &1))
+    extra = Enum.reject(files, &(&1 in expected))
+    dupes = Enum.uniq(files -- Enum.uniq(files))
+
+    if missing == [] and extra == [] and dupes == [],
+      do: :none,
+      else: {missing, extra, dupes, length(expected)}
+  end
+
+  defp files_from_refusal({missing, extra, dupes, expected_n}, opts) do
+    [
+      "--files-from #{opts.files_from} is NOT the api/lib population: #{length(missing)} file(s) MISSING from the list, #{length(extra)} path(s) the tree does not hold, #{length(dupes)} duplicated line(s) — against an expected #{expected_n}#{allowlist_note()}"
+    ] ++
+      named_paths("MISSING from the list", missing) ++
+      named_paths("NOT IN THE TREE", extra) ++
+      named_paths("DUPLICATED in the list", dupes) ++
+      [
+        "A list can clear the #{@corpus_floor}-file floor and carry every sentinel and STILL be truncated:",
+        "drop one file the arms cannot see and every check prints its green over a population",
+        "nobody chose. The census takes its population from the tree, never from the caller's word."
+      ]
+  end
+
+  defp named_paths(_label, []), do: []
+
+  defp named_paths(label, paths) do
+    shown = Enum.map(Enum.take(paths, @files_from_named), &"#{label}: #{&1}")
+    rest = length(paths) - @files_from_named
+
+    if rest > 0, do: shown ++ ["#{label}: … and #{rest} more"], else: shown
+  end
+
+  # THE EXEMPTION IS ALWAYS SPOKEN. An allowlist that only lived in the source would let a
+  # reader of the run believe the list equalled the tree when it equalled the tree minus
+  # whatever a previous author found inconvenient.
+  defp allowlist_note do
+    case @files_from_allowlist do
+      [] -> ""
+      l -> " · announced allowlist (#{length(l)}): #{Enum.join(l, ", ")}"
+    end
+  end
+
   # `announce?` is false for --keys ONLY, whose stdout is machine-read TSV and must carry
   # nothing else. The REFUSAL is never quiet: a truncated corpus still exits 2 and says so.
-  defp guard_corpus!(files, announce? \\ true) do
+  defp guard_corpus!(files, opts, announce? \\ true) do
     set = MapSet.new(files)
     missing = Enum.reject(@sentinels, &MapSet.member?(set, &1))
+    divergence = files_from_divergence(files, opts)
 
     cond do
       files == [] ->
@@ -2530,8 +2831,16 @@ defmodule PDS.Census do
             ]
         )
 
+      divergence != :none ->
+        refuse(files_from_refusal(divergence, opts))
+
       announce? ->
         p("corpus      #{length(files)} .ex files under api/lib · sentinels present: #{Enum.join(@sentinels, ", ")}")
+
+        if opts.files_from,
+          do:
+            p("            --files-from #{opts.files_from} · IS the api/lib population, file for file#{allowlist_note()}")
+
         p("")
 
       true ->
@@ -2590,8 +2899,297 @@ defmodule PDS.Census do
       parse_error?: ast == :parse_error,
       imports: imports,
       defs: attribute(defs, sites) |> elem(0),
-      sites: attribute(defs, sites) |> elem(1)
+      sites: attribute(defs, sites) |> elem(1),
+      # THE RECEIPT SHAPES, TAKEN OFF THE AST THIS FUNCTION ALREADY HAS (PDS wave 40
+      # blind-shape repair). Computed HERE and nowhere else so the blind-spot block and
+      # the arm that guards it read ONE parse: a second `Code.string_to_quoted` over 880
+      # files would be a second lens wearing one name, which is the defect this file
+      # exists to refuse. The substring lines are carried beside them so the FP/FN split
+      # is a set difference over the SAME corpus, never two runs compared by eye.
+      receipts: receipt_sites(ast, path, src)
     }
+  end
+
+  # ------------------------------------------------------- AST receipt shapes
+  #
+  # WHY THIS EXISTS AT ALL. The blind-spot block used to count `json(conn,` with
+  # `:binary.matches` over `f.src` — on a corpus it had ALREADY parsed to AST, under a
+  # banner declaring the lens "AST … no regex". CLOSED task pds-w34-status-only-lens
+  # (merged #8857) refuted that substring, and the block kept printing it for a month.
+  # Measured on this tree at the commit that added this function: 237 substring lines vs
+  # 503 AST json/2 sites — 28 of the 237 are FALSE POSITIVES (`error_json(conn, …` and
+  # friends: the substring matches the TAIL of a longer function name) and the substring
+  # MISSES 294 AST lines, almost all of them the dominant piped form `|> json(`.
+  #
+  # PIPES ARE NORMALISED FIRST, BOTTOM-UP. `conn |> put_status(:created) |> json(body)`
+  # is `json/1` in the raw AST and `json/2` after unpiping; counting the raw tree would
+  # reproduce the very blindness this replaces. `Macro.postwalk` rewrites the innermost
+  # pipe first, so a chain of any length collapses to nested calls exactly once — a
+  # `prewalk` that emitted a chain per `|>` node double-counts every chain longer than
+  # two (measured: 505 instead of 503 on this tree).
+  #
+  # THE 2xx SUBSET IS A CONTAINMENT, NOT A SECOND POPULATION. After unpiping, the conn
+  # a `json/2` answers on is its FIRST ARGUMENT, so "wears an explicit 2xx" is decidable
+  # as: does that subtree contain a `put_status/2` with a 2xx literal. That is why the
+  # block can print ONE population with a subset instead of three addends that were never
+  # additive (ZERO of the put_status sites are textually visible to `json(conn,`).
+  #
+  # BLIND SHAPE, PRINTED: a status bound to a VARIABLE (`|> put_status(status)`) is NOT
+  # 2xx here and cannot be — a build-free lens does not know the binding. The subset is
+  # therefore a FLOOR on the 2xx-wearing sites, never the count, and it says so where it
+  # is printed.
+  @receipt_2xx_atoms [
+    :ok,
+    :created,
+    :accepted,
+    :non_authoritative_information,
+    :no_content,
+    :reset_content,
+    :partial_content,
+    :multi_status,
+    :already_reported,
+    :im_used
+  ]
+
+  # THE VOCABULARY IS THE WHOLE 2xx RANGE, NOT FIVE HAND-WRITTEN SUBSTRINGS. The block
+  # this replaces asked for `put_status(:ok` / `:created` / `:accepted` / `:no_content` /
+  # `20`, so `:multi_status`, `:reset_content`, `:partial_content`,
+  # `:non_authoritative_information`, `:already_reported` and `:im_used` were silently
+  # uncounted. On this tree the two agree at 69 — which is exactly what made the omission
+  # invisible: agreement at a number is not coverage of a vocabulary.
+  defp status_2xx?({:__block__, _, [a]}) when is_atom(a), do: a in @receipt_2xx_atoms
+  defp status_2xx?({:__block__, _, [n]}) when is_integer(n), do: n >= 200 and n < 300
+  defp status_2xx?(_), do: false
+
+  # THE CONTAINMENT TEST. After unpiping, the conn a `json/2` answers on is its FIRST
+  # ARGUMENT, so the whole `conn |> put_status(:created) |> json(body)` chain is visible
+  # from the json node without leaving it. A `put_status` set on a DIFFERENT statement
+  # earlier in the same clause is NOT counted — this is a subset by construction, and a
+  # floor.
+  defp wears_2xx?(conn_expr) do
+    {_, wears?} =
+      Macro.prewalk(conn_expr, false, fn
+        {:put_status, _, [_conn, status]} = node, acc -> {node, acc or status_2xx?(status)}
+        node, acc -> {node, acc}
+      end)
+
+    wears?
+  end
+
+  defp unpipe(ast) do
+    Macro.postwalk(ast, fn
+      {:|>, _m, [left, {fun, fmeta, args}]} when is_atom(fun) and is_list(args) ->
+        {fun, fmeta, [left | args]}
+
+      other ->
+        other
+    end)
+  end
+
+  defp receipt_sites(:parse_error, _path, src),
+    do:
+      Map.merge(
+        %{json: [], put2xx: [], send2xx: [], literal_arg: [], flash_redirect: []},
+        grep_receipts(src)
+      )
+
+  defp receipt_sites(ast, path, src) do
+    {_, acc} =
+      ast
+      |> unpipe()
+      |> Macro.prewalk(
+        %{json: [], put2xx: [], send2xx: [], literal_arg: [], flash_redirect: []},
+        fn
+          {:json, m, [conn, _payload]} = node, a ->
+            {node, %{a | json: [{path, m[:line], wears_2xx?(conn)} | a.json]}}
+
+          {:put_status, m, [_conn, status]} = node, a ->
+            {node,
+             if(status_2xx?(status), do: %{a | put2xx: [{path, m[:line]} | a.put2xx]}, else: a)}
+
+          {:send_resp, m, [_conn, status, _body]} = node, a ->
+            {node,
+             if(status_2xx?(status), do: %{a | send2xx: [{path, m[:line]} | a.send2xx]}, else: a)}
+
+          # THE FIFTH DECLARED BLIND SPOT (PDS wave 36 trailer). A redirect whose OWN conn
+          # expression carries a `put_flash(:info, ...)`. Same containment test as
+          # wears_2xx?/1 one clause up, and a SUBSET by the same construction: a flash set
+          # on an earlier statement in the clause is not counted.
+          {:redirect, m, [conn | _]} = node, a ->
+            {node,
+             if(carries_info_flash?(conn),
+               do: %{a | flash_redirect: [{path, m[:line], flash_message(conn)} | a.flash_redirect]},
+               else: a
+             )}
+
+          node, a ->
+            {node, a}
+        end
+      )
+
+    acc = %{
+      acc
+      | literal_arg: literal_arg_sites(ast, path),
+        flash_redirect: Enum.reverse(acc.flash_redirect)
+    }
+
+    Map.merge(acc, grep_receipts(src))
+  end
+
+  # ------------------------------------- THE FLASH + 302 SHAPE (PDS wave 36 trailer)
+  #
+  # A SUCCESS REPORTED AS A SENTENCE AND A REDIRECT. `put_flash(:info, "Signed out.")
+  # |> redirect(to: "/studio")` tells a person a write took. It answers with NO body, so
+  # the `ok: true` lens misses it; it spells no `json/2`, no `send_resp/3` and no
+  # `put_status(2xx)` — a `redirect/2` sets 302 — so all four declared blind spots above
+  # miss it too, BY CONSTRUCTION rather than by accident. The instrument already reports
+  # what it cannot see; until this line it did not report THIS.
+  #
+  # DECLARED, NEVER A FIFTH CENSUS CLASS. It is a count beside the other four in the
+  # honesty block and nothing else: `emitted` does not move, no bucket moves, and the
+  # register's denominator is untouched. Extending the lens to read a flash string as a
+  # receipt would need the same dataflow this file refuses for a computed `ok:`.
+  #
+  # ITS OWN BLIND SHAPE, STATED WHERE IT IS COUNTED. It is a FLOOR three ways: a flash set
+  # on a separate statement rather than in the redirected conn's own chain is invisible; a
+  # `:info` level bound to a variable is invisible; and a LiveView `push_navigate/2` is a
+  # different call this predicate does not read. It also says NOTHING about lossiness —
+  # a flash+302 over a return value that WAS read is a member of this count and is honest.
+  defp carries_info_flash?(conn_expr) do
+    {_, carries?} =
+      Macro.prewalk(conn_expr, false, fn
+        {:put_flash, _, [_conn, level, _msg]} = node, acc ->
+          {node, acc or info_level?(level)}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    carries?
+  end
+
+  defp flash_message(conn_expr) do
+    {_, msg} =
+      Macro.prewalk(conn_expr, nil, fn
+        {:put_flash, _, [_conn, level, msg]} = node, nil ->
+          {node, if(info_level?(level), do: one_line(Macro.to_string(msg)), else: nil)}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    msg || "?"
+  end
+
+  # `literal_encoder`-WRAPPED, like every other literal this file reads (see
+  # boolean_literal?/1): parse_file/1 hands atoms back as {:__block__, meta, [:info]},
+  # and a guard on the bare atom would read ZERO on a corpus that carries 45 of them.
+  defp info_level?(:info), do: true
+  defp info_level?({:__block__, _, [:info]}), do: true
+  defp info_level?(_), do: false
+
+  # ------------------------------------------- THE LITERAL-ARGUMENT SHAPE (PDS-D503)
+  #
+  # A SUCCESS VALUE CARRIED BY A LITERAL ARGUMENT, NOT BY A LITERAL KEY. The `ok: true`
+  # lens keys on a literal PAIR inside the payload. `json(conn, render_user(conn, user,
+  # false))` after `{:ok, _} = Scim.deprovision_user(org, user)` claims the deprovision
+  # took, in a body byte-identical to the one it would render if the write had matched
+  # nothing — and it spells no `ok` key at all, so the census's whole population misses
+  # it BY CONSTRUCTION, and so does every declared blind spot above (`send_resp(conn, 2`
+  # covers the bodyless 204 beside it, never this).
+  #
+  # THE WORKED EXAMPLE IS REPAIRED, AND THE SHAPE IS NOT. The site this was derived from
+  # -- `api/lib/barkpark_web/controllers/scim_users_controller.ex` at :77-:78, the SCIM
+  # deprovision PATCH -- was fixed by 501fb9670 (#8952, PDS-D503) to render
+  # `Scim.org_user_active?(org, user)`, read back off the stored rows. So the count over
+  # today's tree is expected to be SMALL, and a small number here is the reason the
+  # predicate needs a control: re-run it against `501fb9670^` and it finds that site
+  # (the command is printed in the block below). An absence nobody controlled is not a
+  # measurement.
+  #
+  # THE PREDICATE, NARROW ON PURPOSE. A payload that is a CALL receiving a BOOLEAN
+  # literal argument. Not integers (`ScimResponse.list_response(resources, total, 1)` is
+  # paging, not a claim), not atoms (a bucket name), not strings. Booleans are the shape
+  # that carries a yes/no CLAIM about a write, which is the thing this epic is about,
+  # and widening past them is how the first draft of this predicate returned 8 rows of
+  # `offset`/`limit`/`:members` and measured nothing.
+  #
+  # ITS OWN BLIND SHAPE, STATED WHERE IT IS COUNTED: this is a SHAPE test, never a
+  # dataflow test. It does not know that the callee renders the argument as a field, and
+  # it cannot see a boolean bound to a variable one line earlier (`active = false` then
+  # `render_user(conn, user, active)`), which is the same build-free limit that makes
+  # `|> put_status(status)` uncountable above. It is a FLOOR.
+  defp literal_arg_sites(ast, path) do
+    {_, acc} =
+      ast
+      |> unpipe()
+      |> Macro.prewalk([], fn
+        {f, m, [_conn, payload]} = node, a when f in [:json, :text, :html] ->
+          {node, collect_literal_arg(a, path, m, payload)}
+
+        {:send_resp, m, [_conn, _status, payload]} = node, a ->
+          {node, collect_literal_arg(a, path, m, payload)}
+
+        {:render, m, [_conn, _template, assigns]} = node, a ->
+          {node, collect_literal_arg(a, path, m, assigns)}
+
+        {{:., _, [_mod, f]}, m, [_conn, payload]} = node, a when f in [:json, :text, :html] ->
+          {node, collect_literal_arg(a, path, m, payload)}
+
+        node, a ->
+          {node, a}
+      end)
+
+    Enum.reverse(acc)
+  end
+
+  defp collect_literal_arg(acc, path, meta, payload) do
+    if boolean_literal_arg_call?(payload),
+      do: [{path, meta[:line], one_line(Macro.to_string(payload))} | acc],
+      else: acc
+  end
+
+  # A CALL, AND NOT A CONTAINER. `%{}`, `%`, `{}`, `<<>>` and `__block__` are literal
+  # containers wearing the {form, meta, args} shape; counting them would fold the
+  # literal-KEY population this census already measures into the literal-ARGUMENT one it
+  # does not, and the whole point of this figure is that the two are disjoint.
+  defp boolean_literal_arg_call?({form, _m, args})
+       when is_atom(form) and is_list(args) and args != [] do
+    form not in [:%{}, :%, :{}, :<<>>, :__block__, :., :__aliases__] and
+      Enum.any?(args, &boolean_literal?/1)
+  end
+
+  defp boolean_literal_arg_call?({{:., _, _}, _m, args}) when is_list(args) and args != [],
+    do: Enum.any?(args, &boolean_literal?/1)
+
+  defp boolean_literal_arg_call?(_), do: false
+
+  # THE PARSE IS `literal_encoder`-WRAPPED AND A NAIVE `is_boolean/1` READS ZERO THROUGH
+  # IT. parse_file/1 passes `literal_encoder`, so `false` arrives as
+  # `{:__block__, meta, [false]}` and a guard on the bare value matches NOTHING — which
+  # is not a hypothetical: the first cut of this predicate printed 0 on a corpus that
+  # CONTAINED the worked example, and only the pre-repair control caught it. Both forms
+  # are accepted here so the figure cannot silently become a zero about the encoder.
+  defp boolean_literal?(v) when is_boolean(v), do: true
+  defp boolean_literal?({:__block__, _, [v]}) when is_boolean(v), do: true
+  defp boolean_literal?(_), do: false
+
+  defp one_line(s), do: s |> String.replace(~r/\s+/, " ") |> String.slice(0, 90)
+
+  # THE REFUTED SUBSTRING, STILL TAKEN, ON PURPOSE. Retiring a number silently is the
+  # same overstatement this census hunts: 237 stays printed and RELABELLED with its own
+  # split. It is taken per LINE (not per occurrence) because the split against the AST is
+  # a set difference and a set needs a key; the raw occurrence total is carried beside it
+  # so the two can be seen to agree — or not.
+  defp grep_receipts(src) do
+    lines =
+      src
+      |> String.split("\n")
+      |> Enum.with_index(1)
+      |> Enum.filter(fn {l, _} -> String.contains?(l, "json(conn,") end)
+      |> Enum.map(fn {_, n} -> n end)
+
+    %{grep_lines: lines, grep_raw: count(src, "json(conn,")}
   end
 
   defp count(hay, needle), do: length(:binary.matches(hay, needle))
@@ -2994,16 +3592,36 @@ defmodule PDS.Census do
     # write (tasks_controller.ex:587 lives in close_response/3, which touches no Repo
     # verb — the write is Tasks.close/3 in close/2, one frame up). One hop up only:
     # expanding callers transitively would reach the whole tree and mean nothing.
-    {via, via_verbs} =
+    #
+    # NO HALT — THE WHOLE SET, OR THE SENTENCE IS UNFALSIFIABLE (PDS wave 35). This used
+    # to be `Enum.reduce_while(... :halt ...)` and route_tag/1 then printed the FIRST
+    # writing caller as if it were THE caller. tickets_controller.ex:263's render_ticket/3
+    # has SIX call sites (:64 :110 :133 :175 :195 :222) and several of those enclosing defs
+    # genuinely write, so the printed name was one arbitrary member of a set — stable
+    # today only because `callers/2`'s order is, which nothing specifies and no
+    # Elixir/OTP upgrade or corpus reorder promises. NO ARITY KEY REPAIRS THIS: keying on
+    # a scalar arity merely FLIPS which member is printed (it drops every arity-2 caller),
+    # which is the right SHAPE of answer off a wrongly-narrowed candidate set. The repair
+    # is to stop claiming a singular caller: walk every candidate and carry the SET.
+    # `via_verbs` is still the FIRST writer's verb map, so every count downstream —
+    # write?/read?/the sweep — is bit-for-bit what the halting version produced.
+    {vias, via_cands, via_verbs} =
       if start && not Map.has_key?(verbs, :write) do
-        start
-        |> callers(index)
-        |> Enum.reduce_while({nil, %{}}, fn c, acc ->
-          {v, _, _} = bfs([{c, 1, [label(c)]}], index, MapSet.new(), %{}, nil, [], max)
-          if Map.has_key?(v, :write), do: {:halt, {label(c), v}}, else: {:cont, acc}
-        end)
+        cands = callers(start, index)
+
+        writers =
+          Enum.flat_map(cands, fn c ->
+            {v, _, _} = bfs([{c, 1, [label(c)]}], index, MapSet.new(), %{}, nil, [], max)
+            if Map.has_key?(v, :write), do: [{label(c), v}], else: []
+          end)
+
+        {Enum.map(writers, &elem(&1, 0)), length(cands),
+         case writers do
+           [{_, v} | _] -> v
+           [] -> %{}
+         end}
       else
-        {nil, %{}}
+        {[], 0, %{}}
       end
 
     verbs =
@@ -3017,7 +3635,9 @@ defmodule PDS.Census do
       write?: Map.has_key?(verbs, :write),
       read?: Map.has_key?(verbs, :read),
       depth: depth,
-      via_caller: via,
+      via_caller: List.first(vias),
+      via_callers: vias,
+      via_candidates: via_cands,
       chain: chain,
       owner: start
     })
@@ -3498,7 +4118,7 @@ defmodule PDS.Census do
     cond do
       site.write? and selecting ->
         {"POST-READ",
-         "ARM 1 ADMISSIBLE (not proven): #{label(selecting)} writes with `select:` INSIDE the update query — the row is measured after the change (`returning:` is silently ignored by update_all, auth.ex:139-141, and is NOT this). This does NOT prove the selected row reaches the printed value"}
+         "ARM 1 ADMISSIBLE (not proven): #{label(selecting)} writes with `select:` SCOPED TO the updated query — the row is measured after the change (`returning:` is silently ignored by update_all, auth.ex:139-141, and is NOT this). This does NOT prove the selected row REACHES the printed value, nor that this caller takes the branch the `select:` sits on — both are derived per frame in `THE `select:` EVIDENCE, TAKEN APART`"}
 
       site.write? and reading_after ->
         {"POST-READ",
@@ -3527,7 +4147,17 @@ defmodule PDS.Census do
   defp evidence(site, writes, reads) do
     parts =
       [
-        if(site.write?, do: "write-routed at depth #{site.depth}", else: nil),
+        # A CALLER-CREDITED SITE HAS NO OWN DEPTH, and printing "at depth " with nothing
+        # after it was the tell nobody read. Say what actually happened instead.
+        if(site.write? and site.depth,
+          do: "write-routed at depth #{site.depth}",
+          else: nil
+        ),
+        if(site.write? and is_nil(site.depth),
+          do:
+            "write-routed ONLY through its callers — its own body reaches no Repo write within depth #{@evidence_depth}",
+          else: nil
+        ),
         if(site.read? and not site.write?, do: "read-routed only", else: nil),
         if(!site.write? and !site.read?, do: "no Repo verb within depth #{@evidence_depth}", else: nil),
         if(writes != [], do: "local writes: #{Enum.map_join(writes, ",", &elem(&1, 0))}", else: nil),
@@ -3550,15 +4180,41 @@ defmodule PDS.Census do
   # `returning:` is a BLIND lens — Ecto silently ignores it on update_all (auth.ex:consume_login_ticket/1).
   # The honest idiom is `select:` INSIDE the update query.
   #
-  # KNOWN RESIDUAL UNSOUNDNESS, NAMED AND NOT FIXED HERE (PDS wave 34). This prewalks the
-  # WHOLE function body for ANY `from(..., select: ...)`; it does not require the `select:`
-  # to be on the query that is UPDATED. move.ex:230 is a plain READ query carrying a
-  # `select:` inside a non-writing function, so it costs nothing today — but the predicate
-  # is unsound by construction, which is exactly why every POST-READ it admits is printed
-  # as ADMISSIBLE and never as proven. Filed as its own row.
+  # THE UNSOUNDNESS WAVE 34 NAMED AND DID NOT FIX, FIXED HERE
+  # (pds-bl-has-select-in-update-unsound). Until this commit this predicate prewalked the
+  # WHOLE function body for ANY `from(..., select: ...)` and did not require the `select:`
+  # to sit on the query that is UPDATED. It cost nothing on the tree of the day — the one
+  # stray specimen (a plain READ query carrying `select:`) sat in a NON-writing function,
+  # so the arm never fired on it — and that was exactly the problem: unsound BY
+  # CONSTRUCTION rather than by accident, one writing function with a side read away from
+  # manufacturing a fake TRUE POSITIVE on the census's own strongest evidence arm.
+  #
+  # THE SCOPE IS NOW THE UPDATED QUERY AND NOTHING ELSE. expand_pipes/1 has already
+  # rewritten `q |> Repo.update_all(set: …)` into `Repo.update_all(q, set: …)`, so the
+  # query is argument 0 in both spellings; a query handed over as a VARIABLE is followed
+  # back to its binding in the same body (bounded, so a self-referential rebind cannot
+  # spin). select_anywhere?/1 below keeps the OLD relation — it is what the census prints
+  # STRAY specimens from, and what --selftest's SELECT-SCOPE-UNSOUND-ARMED mutates back
+  # in, so the repair is falsifiable rather than asserted.
   defp has_select_in_update?(nil), do: false
+  defp has_select_in_update?(body), do: select_in_updated_query?(body)
 
-  defp has_select_in_update?(body) do
+  defp select_in_updated_query?(body) do
+    scoped = expand_pipes(body)
+    bound = query_bindings(scoped)
+
+    scoped
+    |> updated_queries()
+    |> Enum.any?(&query_selects?(&1, bound, 0))
+  end
+
+  # THE OLD, UNSCOPED RELATION, KEPT AS A NAMED LENS. It is not dead code and it is not
+  # the classifier: the census reads it to NAME the specimens where the two predicates
+  # DISAGREE — a writing function carrying a `select:` on a query nothing updates — which
+  # is the population the fix exists for and the only honest way to print its size.
+  defp select_anywhere?(nil), do: false
+
+  defp select_anywhere?(body) do
     {_, found} =
       Macro.prewalk(body, false, fn
         {:from, _, args} = n, acc when is_list(args) ->
@@ -3569,6 +4225,449 @@ defmodule PDS.Census do
       end)
 
     found
+  end
+
+  # Every expression handed to a Repo update AS ITS QUERY. The bare-call clause is
+  # deliberate: `update_all(q, …)` reaches here imported as well as through `Repo.`.
+  defp updated_queries(body) do
+    {_, qs} =
+      Macro.prewalk(body, [], fn
+        {{:., _, [_owner, f]}, _, [q | _]} = n, acc when f in [:update_all, :update] ->
+          {n, [q | acc]}
+
+        {f, _, [q | _]} = n, acc when f in [:update_all, :update] ->
+          {n, [q | acc]}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    qs
+  end
+
+  # `var = from(...)` bindings in the same body, first binding wins.
+  defp query_bindings(body) do
+    {_, m} =
+      Macro.prewalk(body, %{}, fn
+        {:=, _, [{v, _, ctx}, rhs]} = n, acc when is_atom(v) and is_atom(ctx) ->
+          {n, Map.put_new(acc, v, rhs)}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    m
+  end
+
+  # THE FOLLOW IS BOUNDED AT THREE REBINDS, and the binding is dropped as it is followed,
+  # so `q = q |> where(...)` cannot walk forever.
+  defp query_selects?(_expr, _bound, depth) when depth > 3, do: false
+
+  defp query_selects?({v, _, ctx}, bound, depth) when is_atom(v) and is_atom(ctx) do
+    case Map.fetch(bound, v) do
+      {:ok, rhs} -> query_selects?(rhs, Map.delete(bound, v), depth + 1)
+      :error -> false
+    end
+  end
+
+  defp query_selects?(expr, _bound, _depth), do: select_anywhere?(expr)
+
+  # ---------------------------------------------- the `select:` evidence, taken apart
+  #
+  # WHAT THIS BLOCK EXISTS TO REFUSE (pds-bl-has-select-in-update-unsound). ARM 1 of
+  # shape_of/3 is the census's STRONGEST evidence: a write whose update query carries a
+  # `select:` measures the row AFTER the change. Since the wave-34 lens correction it is
+  # the only arm producing POST-READ, so a fake positive there is a fake compliance
+  # certificate on this epic's own instrument. Three things have to hold and only the
+  # first was ever checked:
+  #
+  #   (A) SCOPE      the `select:` must sit on the query THAT IS UPDATED, not merely
+  #                  somewhere in the same function body. Fixed in has_select_in_update?/1
+  #                  above; the specimens where the two predicates disagree are printed
+  #                  below as STRAY, so the repair has a population and not just a claim.
+  #   (B) REACH      a correctly-scoped `select:` proves the QUERY carries it. It does NOT
+  #                  prove the CALLER spends the selected row on the receipt it prints.
+  #   (C) CONDITION  evidence taken on ONE branch may not certify callers that never take
+  #                  that branch. A helper that fences only when `opts[:if_rev]` is present
+  #                  hands out a static certificate to every caller, including the ones
+  #                  that omit it and get a plain last-write-wins `Repo.update/1`.
+  #
+  # IT PRINTS, IT DOES NOT GATE. A wrong verdict here must not red a build on a receipt
+  # nobody has repaired yet — D454 stands. What it must do is make the three refusals
+  # READABLE and FALSIFIABLE, so no reader takes ARM 1 for proof again.
+  @select_evidence_cap 8
+
+  defp report_select_evidence(index) do
+    bodied = Enum.filter(index.defs, &(&1[:body] != nil))
+    writers = Enum.filter(bodied, &has_select_in_update?(&1.body))
+
+    stray =
+      Enum.filter(bodied, fn d ->
+        select_anywhere?(d.body) and not has_select_in_update?(d.body) and updated_queries(expand_pipes(d.body)) != []
+      end)
+
+    p("")
+    p("  THE `select:` EVIDENCE, TAKEN APART — what ARM 1 proves and what it does not")
+    p("  ------------------------------------------------------------------------")
+    p("    (A) SCOPE      #{length(writers)} function(s) carry a `select:` ON THE QUERY THEY UPDATE")
+    p("        STRAY      #{length(stray)} writing function(s) carry a `select:` on a query NOTHING updates —")
+    p("                   the OLD unscoped predicate would have certified every one of them")
+
+    Enum.each(Enum.take(Enum.sort_by(stray, &label/1), @select_evidence_cap), fn d ->
+      p("          STRAY `select:`  #{label(d)}  ·  #{short(d.path)}:#{d.line}")
+    end)
+
+    p("")
+
+    if writers == [] do
+      p("    no function on this corpus updates a query carrying `select:` — (B) and (C) have")
+      p("    nothing to judge this run, and that is a measured zero, not a silent one.")
+      p("")
+    else
+      Enum.each(Enum.sort_by(writers, &label/1), &report_select_writer(&1, index))
+    end
+  end
+
+  defp report_select_writer(writer, index) do
+    p("    WRITER  #{label(writer)}  ·  #{short(writer.path)}:#{writer.line}")
+
+    callers =
+      index.callers_by_name
+      |> Map.get(writer.name, [])
+      |> Enum.reject(&(&1.name == writer.name and &1.module == writer.module))
+      |> Enum.uniq_by(&{&1.module, &1.name, &1.arity, &1.line})
+      |> Enum.sort_by(&label/1)
+
+    if callers == [] do
+      p("      no caller in this corpus — nothing is certified off this write")
+    else
+      Enum.each(Enum.take(callers, @select_evidence_cap), fn c ->
+        report_select_frame(c, writer.name, index, 1)
+      end)
+    end
+
+    p("")
+  end
+
+  # ONE FRAME, BOTH PREDICATES, AND THEN ONE HOP OUT. A frame that only RELAYS the write
+  # (it returns the callee's result untouched) certifies nothing by itself, so the reach
+  # question moves out to ITS callers — bounded at depth 2, because past that the join is
+  # the guesswork this census refuses everywhere else.
+  defp report_select_frame(caller, callee_name, index, depth) do
+    pad_s = String.duplicate("  ", depth)
+    gate = conditional_gate(caller.body, callee_name)
+
+    if gate do
+      {key, taken, total} = gate
+
+      p("      #{pad_s}REFUSED (C)  #{label(caller)}  ·  #{short(caller.path)}:#{caller.line}")
+
+      # THE MACHINE-READABLE LINE IS NOT WRAPPED, ON PURPOSE. wrap/2 rebreaks on the
+      # column, so any string a --selftest case asserts has to live on a line of its own
+      # or the case is pinned to the indent rather than to the finding.
+      p("      #{pad_s}    CONDITIONAL ON opts[#{inspect(key)}] — reached on #{taken} of #{total} arm(s)")
+
+      wrap(
+        "reaches this write on #{taken} of #{total} arm(s) of a `case Keyword.get(opts, #{inspect(key)})`. " <>
+          "The evidence is CONDITIONAL and the static route hands it out UNCONDITIONALLY: a call that omits " <>
+          "`#{inspect(key)}` takes a plain `Repo.update/1` with NO `select:` at all and would still be certified. " <>
+          "Every caller below passes an opaque options term, so no call site in this corpus can be shown to supply it.",
+        "      #{pad_s}    "
+      )
+    end
+
+    reach = select_reach(caller, callee_name)
+
+    case reach do
+      {:certified, var, n} ->
+        p("      #{pad_s}CERTIFIED (B)  #{label(caller)} binds `#{var}` out of the write and renders it in #{n} receipt expression(s)")
+
+      {:refused, var, rendered, spends} ->
+        p("      #{pad_s}REFUSED (B)  #{label(caller)}  ·  #{short(caller.path)}:#{caller.line}")
+        p("      #{pad_s}    BINDS `#{var}` AND RENDERS NONE OF IT — #{spends} side-effect call(s), receipt renders #{rendered}")
+
+        wrap(
+          "binds `#{var}` out of the write, spends it on #{spends} side-effect call(s), and renders NONE of it: " <>
+            "the receipt renders #{rendered}. Same call frame, opposite directions — a correctly-scoped `select:` " <>
+            "proves the QUERY carried it, never that the selected row reached the printed value.",
+          "      #{pad_s}    "
+        )
+
+      :relay when depth < 2 ->
+        p("      #{pad_s}RELAY  #{label(caller)} returns the write's result untouched — the reach question moves OUT")
+
+        index.callers_by_name
+        |> Map.get(caller.name, [])
+        |> Enum.reject(&(&1.name == caller.name and &1.module == caller.module))
+        |> Enum.uniq_by(&{&1.module, &1.name, &1.arity, &1.line})
+        |> Enum.sort_by(&label/1)
+        |> Enum.take(@select_evidence_cap)
+        |> Enum.each(&report_select_frame(&1, caller.name, index, depth + 1))
+
+      :relay ->
+        p("      #{pad_s}RELAY  #{label(caller)} — depth 2 reached, this pass declines to follow further")
+
+      :no_binding ->
+        p("      #{pad_s}REFUSED (B)  #{label(caller)} binds NOTHING out of the write — the selected row is discarded at the call")
+    end
+  end
+
+  # (C) THE CONDITIONAL GATE. A `case Keyword.get(opts, KEY) do` whose arms DISAGREE about
+  # whether they reach `name`. Returns {key, arms_that_reach, arms_total}; nil when the
+  # call is unconditional, when every arm reaches it, or when the scrutinee is not an
+  # options lookup this pass can name.
+  defp conditional_gate(nil, _name), do: nil
+
+  defp conditional_gate(body, name) do
+    {_, found} =
+      Macro.prewalk(expand_pipes(body), nil, fn
+        {:case, _, [scrutinee, [{{:__block__, _, [:do]}, clauses}]]} = n, acc ->
+          {n, acc || gate_verdict(scrutinee, clauses, name)}
+
+        {:case, _, [scrutinee, [do: clauses]]} = n, acc ->
+          {n, acc || gate_verdict(scrutinee, clauses, name)}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    found
+  end
+
+  defp gate_verdict(scrutinee, clauses, name) when is_list(clauses) do
+    with key when key != nil <- keyword_get_key(scrutinee) do
+      reaching = Enum.count(clauses, fn {:->, _, [_head, arm]} -> calls_name?(arm, name) end)
+
+      if reaching > 0 and reaching < length(clauses), do: {key, reaching, length(clauses)}, else: nil
+    else
+      _ -> nil
+    end
+  end
+
+  defp gate_verdict(_, _, _), do: nil
+
+  defp keyword_get_key({{:., _, [{:__aliases__, _, [:Keyword]}, :get]}, _, [_opts, key | _]}) do
+    case lit(key) do
+      {:lit, k, _} when is_atom(k) -> k
+      _ -> nil
+    end
+  end
+
+  defp keyword_get_key(_), do: nil
+
+  defp calls_name?(node, name) do
+    {_, hit} =
+      Macro.prewalk(node, false, fn
+        {{:., _, [_, ^name]}, _, _} = n, _acc -> {n, true}
+        {^name, _, args} = n, _acc when is_list(args) -> {n, true}
+        n, acc -> {n, acc}
+      end)
+
+    hit
+  end
+
+  # (B) THE SELECTED ROW'S REACH. Find where the caller binds the write's `{:ok, _}`
+  # payload, then ask whether that variable appears in what the frame actually RETURNS or
+  # RENDERS. A frame whose success arm is the bare bound variable is a RELAY, not a
+  # receipt, and is reported as such rather than certified.
+  defp select_reach(%{body: nil}, _name), do: :no_binding
+
+  defp select_reach(caller, name) do
+    case ok_bindings(expand_pipes(caller.body), name) do
+      # NOTHING IS BOUND — AND THE TWO REASONS FOR THAT ARE OPPOSITE. A frame that RETURNS
+      # the call is a relay and has nothing to spend the row on; a frame that calls it and
+      # carries on is discarding the selected row outright. Collapsing them would have
+      # printed `fenced_or_plain_paper_update/3` as the discarder and stopped the walk one
+      # frame short of the caller that actually prints a receipt.
+      [] -> if tail_call?(caller.body, name), do: :relay, else: :no_binding
+      bindings -> Enum.reduce_while(bindings, :no_binding, &reach_verdict(&1, &2))
+    end
+  end
+
+  defp tail_call?(nil, _name), do: false
+
+  defp tail_call?(body, name),
+    do: body |> expand_pipes() |> tails() |> Enum.any?(&direct_call?(&1, name))
+
+  # The expressions a body can RETURN. Enough shapes to tell a relay from a discard;
+  # anything else is its own tail, which is the conservative direction.
+  defp tails({:__block__, _, exprs}) when is_list(exprs) and exprs != [], do: tails(List.last(exprs))
+
+  defp tails({:case, _, [_scrutinee, kw]}), do: clause_tails(kw)
+  defp tails({:cond, _, [kw]}), do: clause_tails(kw)
+  defp tails({:with, _, args}) when is_list(args) and args != [], do: clause_tails(List.last(args))
+  defp tails({:if, _, [_c, kw]}), do: branch_tails(kw)
+  defp tails({:unless, _, [_c, kw]}), do: branch_tails(kw)
+
+  # A DEF'S `body` IS THE do-KEYWORD LIST, NOT THE EXPRESSION. collect_defs/2 stores
+  # `List.first(rest)` — `[{{:__block__, _, [:do]}, expr}]` — and every other lens here
+  # prewalks it, which hides the difference. This one does not prewalk: it asks what the
+  # frame RETURNS, so it has to open the do-block first. Without this clause every frame
+  # read as its own tail and no relay was ever found.
+  defp tails(kw) when is_list(kw) do
+    case do_block(kw) do
+      nil -> []
+      b -> tails(b)
+    end
+  end
+
+  defp tails(other), do: [other]
+
+  defp clause_tails(kw) do
+    case do_block(kw) do
+      clauses when is_list(clauses) ->
+        Enum.flat_map(clauses, fn
+          {:->, _, [_head, arm]} -> tails(arm)
+          _ -> []
+        end)
+
+      nil ->
+        []
+
+      # A `with` do-block is an EXPRESSION, not a clause list — clause_tails/1 is reached
+      # for both shapes and must not assume the one it was written for.
+      other ->
+        tails(other)
+    end
+  end
+
+  defp branch_tails(kw) do
+    case do_block(kw) do
+      nil -> []
+      body when is_list(body) -> Enum.flat_map(body, &tails/1)
+      body -> tails(body)
+    end
+  end
+
+  defp do_block(kw) when is_list(kw) do
+    Enum.find_value(kw, fn
+      {{:__block__, _, [:do]}, v} -> v
+      {:do, v} -> v
+      _ -> nil
+    end)
+  end
+
+  defp do_block(_), do: nil
+
+  defp direct_call?({{:., _, [_owner, name]}, _, args}, name) when is_list(args), do: true
+  defp direct_call?({name, _, args}, name) when is_list(args), do: true
+  defp direct_call?(_, _), do: false
+
+  defp reach_verdict({var, arm}, _acc) do
+    receipts = receipt_exprs(arm)
+    rendered = receipts |> Enum.flat_map(&MapSet.to_list(dvars(&1))) |> Enum.uniq() |> Enum.sort()
+
+    cond do
+      relay_arm?(arm, var) ->
+        {:halt, :relay}
+
+      receipts == [] ->
+        {:halt, :relay}
+
+      var in rendered ->
+        {:halt, {:certified, var, length(receipts)}}
+
+      true ->
+        spends = Enum.count(arm_calls_using(arm, var))
+        names = if rendered == [], do: "no bound value at all", else: Enum.map_join(Enum.take(rendered, 8), ", ", &"`#{&1}`")
+        {:halt, {:refused, var, names, spends}}
+    end
+  end
+
+  # `{:ok, var}` bound out of a call to `name` — as a case clause head, a match, or a
+  # `with` arrow. The arm is the expression that runs WITH that binding in scope.
+  defp ok_bindings(body, name) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {:case, _, [scrutinee, [{{:__block__, _, [:do]}, clauses}]]} = n, acc ->
+          {n, acc ++ ok_case_bindings(scrutinee, clauses, name)}
+
+        {:case, _, [scrutinee, [do: clauses]]} = n, acc ->
+          {n, acc ++ ok_case_bindings(scrutinee, clauses, name)}
+
+        {op, _, [lhs, rhs]} = n, acc when op in [:=, :<-] ->
+          case {ok_pattern_var(lhs), calls_name?(rhs, name)} do
+            {v, true} when v != nil -> {n, acc ++ [{v, body}]}
+            _ -> {n, acc}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    Enum.uniq_by(acc, &elem(&1, 0))
+  end
+
+  defp ok_case_bindings(scrutinee, clauses, name) when is_list(clauses) do
+    if calls_name?(scrutinee, name) do
+      for {:->, _, [[head], arm]} <- clauses,
+          v = ok_pattern_var(head),
+          v != nil,
+          do: {v, arm}
+    else
+      []
+    end
+  end
+
+  defp ok_case_bindings(_, _, _), do: []
+
+  # A 2-TUPLE IS A LITERAL, SO parse_file/1's literal_encoder WRAPS IT. `{:ok, saved}`
+  # arrives as {:__block__, meta, [{ok_node, saved_node}]}, not as the bare pair — which is
+  # why the first cut of this predicate found NO binding in a function that plainly binds
+  # one, and printed `binds NOTHING out of the write` about the very caller this row was
+  # filed to name. Unwrap first, ask second.
+  defp ok_pattern_var({:__block__, _, [inner]}), do: ok_pattern_var(inner)
+
+  defp ok_pattern_var({a, {v, _, ctx}}) when is_atom(v) and is_atom(ctx) do
+    case lit(a) do
+      {:lit, :ok, _} -> v
+      _ -> if a == :ok, do: v, else: nil
+    end
+  end
+
+  defp ok_pattern_var(_), do: nil
+
+  # WHAT A FRAME HANDS BACK. A literal `{:ok, <expr>}` whose payload is not a bare
+  # variable, plus every response emission — the same emitters the derivation partition
+  # reads, so the two blocks agree on what "the printed value" means.
+  defp receipt_exprs(arm) do
+    {_, oks} =
+      Macro.prewalk(arm, [], fn
+        {a, payload} = n, acc ->
+          case {lit(a), payload} do
+            {{:lit, :ok, _}, {v, _, ctx}} when is_atom(v) and is_atom(ctx) -> {n, acc}
+            {{:lit, :ok, _}, _} -> {n, [payload | acc]}
+            _ -> {n, acc}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    oks ++ (arm |> response_emissions() |> Enum.map(&elem(&1, 1)) |> Enum.reject(&is_nil/1))
+  end
+
+  defp relay_arm?({:__block__, _, [inner]}, var), do: relay_arm?(inner, var)
+
+  defp relay_arm?(arm, var) do
+    case arm do
+      {^var, _, ctx} when is_atom(ctx) -> true
+      {a, {^var, _, ctx}} when is_atom(ctx) -> match?({:lit, :ok, _}, lit(a))
+      _ -> false
+    end
+  end
+
+  defp arm_calls_using(arm, var) do
+    {_, acc} =
+      Macro.prewalk(arm, [], fn
+        {_f, _, args} = n, acc when is_list(args) ->
+          if Enum.any?(args, fn a -> MapSet.member?(dvars(a), var) end), do: {n, [n | acc]}, else: {n, acc}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    acc
   end
 
   defp kw_present?(args, key) do
@@ -3778,7 +4877,7 @@ defmodule PDS.Census do
   # STDERR for the same reason.
   defp keys_run(opts) do
     files = corpus(opts)
-    guard_corpus!(files, false)
+    guard_corpus!(files, opts, false)
 
     parsed = Enum.map(files, &parse_file/1)
     index = build_index(parsed)
@@ -4304,11 +5403,15 @@ defmodule PDS.Census do
     p("  was written. `select:` inside the update query is the one spelling it CAN prove.")
     p("  Wave 34 confirms each one by hand; a POST-READ here is a candidate, not a verdict.")
     p("")
-    p("  EVERY POST-READ BELOW IS ADMISSIBLE, NONE IS PROVEN HONEST. Even ARM 1")
-    p("  (has_select_in_update?/1) only proves the update query CARRIES a `select:`; it does")
-    p("  NOT prove the caller SPENDS the selected row on the value it prints. That exact")
-    p("  failure mode is live in this corpus — BlockOps.fenced_paper_update/4 selects the")
-    p("  saved row and its caller prints a PRE-WRITE rev. Nothing here excludes it.")
+    p("  EVERY POST-READ BELOW IS ADMISSIBLE, NONE IS PROVEN HONEST. ARM 1")
+    p("  (has_select_in_update?/1) now proves the `select:` sits ON THE QUERY THAT IS")
+    p("  UPDATED — it did not before, and any writing function that also ran a read query")
+    p("  with `select:` manufactured a true positive. It still does NOT prove the caller")
+    p("  SPENDS the selected row on the value it prints, nor that the caller even takes the")
+    p("  branch the evidence was read on. Both refusals are DERIVED and NAMED in `THE")
+    p("  `select:` EVIDENCE, TAKEN APART` above, over this corpus, rather than conceded")
+    p("  here in prose: BlockOps.fenced_paper_update/4 selects the saved row and its caller")
+    p("  binds it, spends it on side effects, and prints a PRE-WRITE rev.")
     p("")
 
     Enum.each(@shapes, fn sh ->
@@ -4323,6 +5426,52 @@ defmodule PDS.Census do
     p("")
     post_read_roll(classified)
     catch_all_findings(classified)
+    caller_credit_findings(classified)
+  end
+
+  # THE CALLER-CREDIT AUDIT (PDS wave 35). When a site's own function reaches no Repo
+  # write, route/3 walks one hop UP and credits a CALLER's write to the site — and leaves
+  # `depth` nil while doing it. AN EMPTY DEPTH ON A write?=true ROW IS THEREFORE THE
+  # MACHINE-READABLE TELL FOR CALLER-CREDIT, and this block is the audit of it: cheap,
+  # total over the emitted population, and printed on every run with its count, so the
+  # class stops being something a reader has to notice one row at a time. A row naming
+  # MORE THAN ONE writing caller is the unfalsifiable-sentence case the old printer hid;
+  # a row naming exactly one is still a credit the site did not earn in its own body.
+  defp caller_credit_findings(classified) do
+    credited =
+      classified
+      |> Enum.filter(&(&1.write? and is_nil(&1.depth)))
+      |> Enum.sort_by(&{&1.path, &1.line})
+
+    ambiguous = Enum.count(credited, &(length(Map.get(&1, :via_callers, [])) > 1))
+
+    p("  CALLER-CREDIT AUDIT  #{length(credited)} write-routed site(s) carry NO OWN DEPTH — " <>
+        "the write belongs to a CALLER; #{ambiguous} of them name MORE THAN ONE writing caller")
+
+    if credited == [] do
+      p("      none — every write-routed site reaches its own write, at its own depth")
+    else
+      Enum.each(credited, fn s ->
+        vias = Map.get(s, :via_callers, [])
+
+        p("      FINDING  #{short(s.path)}:#{s.line}  fn #{s.owner && label(s.owner) || "?"}")
+
+        p("               #{length(vias)} of #{Map.get(s, :via_candidates, 0)} caller(s) reach a write: " <>
+            Enum.join(vias, ", "))
+
+        p(
+          if length(vias) > 1 do
+            "               AMBIGUOUS — no evidence here selects one of them, so any single " <>
+              "name printed for this site would be unfalsifiable by construction."
+          else
+            "               SOLE WRITER of the candidates, but the write is still the caller's, " <>
+              "not this site's own."
+          end
+        )
+      end)
+    end
+
+    p("")
   end
 
   # THE FINDINGS BLOCK. A shape count is not a finding — a NAMED site with no written basis
@@ -4562,6 +5711,7 @@ defmodule PDS.Census do
       report_register_stale(stale)
       report_register_tags(rows)
       report_register_prose(rows)
+      report_register_callee_split(classified)
     end
   end
 
@@ -4635,6 +5785,190 @@ defmodule PDS.Census do
     end)
   end
 
+
+  # ------------------------------------- THE CALLEE-DERIVED RECEIPT (PDS-D448a lens)
+  #
+  # THE FIFTH DECLARED BLIND SPOT, AND THE ONE THAT COVERS THE WHOLE REGISTER. Every
+  # field of the register key — {path, module.name/arity, head_hash, expr_fp} — is read
+  # off the JUDGED def and off nothing else. head_hash fingerprints that def's head,
+  # expr_fp the receipt container inside its body. So a regression that stays ONE HOP
+  # AWAY, inside a function the def CALLS, moves no field of the key, moves no verdict,
+  # and this whole apparatus prints PASS through it.
+  #
+  # PROVEN BY MUTATION, NOT ARGUED (the wave-47 finding this block answers): rewriting
+  # `Barkpark.Content.SearchIntelligence.record_interaction/3` to discard its real result
+  # and return `{:ok, Ecto.UUID.generate()}` restores the exact pre-repair defect at the
+  # two interaction receipts — every failure renders `ok: true, recorded: true` with a
+  # FABRICATED event id — and the census exits 0 with CENSUS OK, because not one byte
+  # inside either controller def moved.
+  #
+  # THE POPULATION IS THEREFORE MEASURED, NOT GUESSED. `callee_split/1` classifies every
+  # register row that resolved to a live site into exactly three states, and the counts
+  # below are re-derived every run from the same parse the register resolves against:
+  #
+  #   CALLEE-TRUTH  the receipt renders ONLY literals (`ok: true`), and the def's body
+  #                 calls into another module. Everything the receipt asserts happens
+  #                 in the callee. TOTALLY blind: no field of the key can move.
+  #   CALLEE-VALUE  the receipt renders at least one non-literal, and the def's body
+  #                 calls out. expr_fp pins the CALL SITE — the spelling of the call —
+  #                 and says nothing about the callee's body. Blind to the same hop.
+  #   SELF-CONTAINED  the def's body reaches no other module at all. Here, and only
+  #                 here, a behaviour change must move head_hash or expr_fp.
+  #
+  # WHY DECLARED AND NOT CLOSED. Closing it means a BEHAVIOURAL pin per row: a test that
+  # drives the route and reads the stored row back. That is what `basis: :end_to_end`
+  # already means, and the register's own distribution says how far it reaches — the
+  # counts are printed side by side below so the two are read together rather than one
+  # standing in for the other. A DECLARED blind spot with a printed count is not a
+  # repair; it is the refusal to let this instrument's green be quoted as covering a
+  # class it has never issued a request about.
+  #
+  # THE LENS, NAMED WITH THE NUMBER (PDS-D448a). Build-free AST over ONE checkout.
+  # `raw_calls/1` — the same edge extractor the route resolver uses — over the enclosing
+  # def's body, kept to `:remote` edges. Its own blind shapes, stated where they are
+  # counted: a call reached through a runtime-computed module, a call inside a macro this
+  # lens does not expand, and a callee in the SAME module (a local `defp` IS inside this
+  # file but NOT inside the fingerprinted def, so a local-only def counts SELF-CONTAINED
+  # and is a FLOOR, never a ceiling). Every one of those errs toward SELF-CONTAINED, so
+  # the callee-derived figure is a LOWER BOUND on the blind population.
+  defp callee_split(classified) do
+    rows =
+      for {r, status, site} <- resolve_register(classified),
+          status in [:live, :stale, :resurrected],
+          not is_nil(site) do
+        {r, site, callee_state(site)}
+      end
+
+    %{
+      rows: rows,
+      resolved: length(rows),
+      callee_truth: Enum.count(rows, fn {_, _, st} -> st == :callee_truth end),
+      callee_value: Enum.count(rows, fn {_, _, st} -> st == :callee_value end),
+      self_contained: Enum.count(rows, fn {_, _, st} -> st == :self_contained end)
+    }
+  end
+
+  defp callee_state(%{owner: owner, expr: expr}) when not is_nil(owner) do
+    remote? = Enum.any?(raw_calls(owner), &match?({:remote, _, _, _}, &1))
+
+    cond do
+      not remote? -> :self_contained
+      literal_term?(expr) -> :callee_truth
+      true -> :callee_value
+    end
+  end
+
+  defp callee_state(_), do: :self_contained
+
+  defp rows_in_state(s, state) do
+    s.rows |> Enum.filter(fn {_, _, st} -> st == state end) |> Enum.sort_by(fn {_, site, _} -> {site.path, site.line} end)
+  end
+
+  # A TERM WITH NO VARIABLE AND NO CALL IN IT. parse_file/1 parses with a
+  # `literal_encoder`, so every literal arrives wrapped as `{:__block__, meta, [value]}`
+  # and a naive `is_boolean/1`-style guard on the bare value reads ZERO through it — the
+  # same encoder trap the literal-argument predicate documents. Both spellings are taken.
+  # A VARIABLE `{:name, meta, nil}` and a CALL `{f, meta, args}` are both three-tuples
+  # this falls through to `false` on, which is the whole discrimination.
+  defp literal_term?({:__block__, _, [v]}), do: literal_term?(v)
+  defp literal_term?({:%{}, _, kvs}), do: Enum.all?(kvs, &literal_term?/1)
+  defp literal_term?({:{}, _, els}), do: Enum.all?(els, &literal_term?/1)
+  defp literal_term?({:__aliases__, _, _}), do: true
+  defp literal_term?({a, b}), do: literal_term?(a) and literal_term?(b)
+  defp literal_term?(l) when is_list(l), do: Enum.all?(l, &literal_term?/1)
+  defp literal_term?(v) when is_atom(v) or is_number(v) or is_binary(v), do: true
+  defp literal_term?(_), do: false
+
+  defp report_register_callee_split(classified) do
+    s = callee_split(classified)
+    derived = s.callee_truth + s.callee_value
+
+    p("  CALLEE-DERIVED RECEIPTS — THE BLIND SPOT THAT COVERS THIS WHOLE REGISTER")
+    p("  #{derived} of #{s.resolved} resolved row(s) derive what their receipt asserts from a CALLEE, so")
+    p("  no field of the four-field key can move when the regression is one hop away.")
+    p("      CALLEE-TRUTH    #{pad(s.callee_truth)}  receipt is ALL LITERAL and the def calls out — nothing")
+    p("                          the receipt says is computed where the key can see it")
+    p("      CALLEE-VALUE    #{pad(s.callee_value)}  receipt renders a non-literal and the def calls out —")
+    p("                          expr_fp pins the CALL SITE, never the callee's body")
+    p("      SELF-CONTAINED  #{pad(s.self_contained)}  the def reaches no other module; only here must a")
+    p("                          behaviour change move head_hash or expr_fp")
+
+    # THE SMALL SIDE IS ROLLED, AND THAT IS THE CONTROL. 3 of 98 is exactly the figure a
+    # broken predicate produces by accident, and a reader cannot check a bare 3. Naming
+    # the rows makes the lens falsifiable by inspection: open the def, and either it
+    # reaches no other module or this figure is wrong. The 95 is not rolled for the
+    # mirror-image reason — a 95-line roll is a wall nobody reads, and its members are
+    # every OTHER row in the register block above.
+    Enum.each(rows_in_state(s, :self_contained), fn {_r, site, _} ->
+      p("        · #{short(site.path)}:#{site.line}  fn #{label(site.owner)}")
+    end)
+    p("  MUTATION-EXERCISED OUTSIDE THE INTERACTION TWINS, so the class is proven and not")
+    p("  extrapolated from its one worked example. Rewriting Barkpark.Plugins.Settings")
+    p("  .delete/2 so the transaction reads `case {:ok, rec} do` instead of `case Repo")
+    p("  .delete(rec, stale_error_field: :plugin_name) do` leaves the row IN THE TABLE, still")
+    p("  logs the audit, and still renders `%{ok: true}` at plugin_settings_controller.ex:83")
+    p("  — a CALLEE-TRUTH row of this register. `elixir scripts/pds-elixir-receipt-census.exs`")
+    p("  exits 0 with CENSUS OK, PASS REGISTER-COMPLETE and PASS REGISTER-CALLEE-SPLIT, every")
+    p("  verdict and every four-field key unmoved.")
+    p("  AND THE HALF THAT IS NOT THIS CENSUS'S: that mutant DOES red ExUnit —")
+    p("  plugin_settings_controller_test.exs `admin lifecycle PUT then DELETE -> subsequent")
+    p("  GET returns 404`, 12 tests / 1 failure, left 200 right 404. The row IS behaviourally")
+    p("  pinned; what is blind is this instrument. The distinction is the whole point: the")
+    p("  census's green costs nothing for this class, and a reader must not read it as the")
+    p("  thing standing behind those receipts.")
+    p("  THE BOUNDARY, FOUND BY A CONTROL RATHER THAN ASSUMED. Two further mutants that")
+    p("  REMOVED a call edge (Github.InboundEvents.handle/2's `route(payload, opts)` replaced")
+    p("  by a fabricated `{:ok, :detached, ...}`) DID red this census, at exit 1 — on")
+    p("  ROUTE-DEPTH-IS-CLOSURE, a call-GRAPH-SHAPE arm, never on a receipt verdict. The")
+    p("  census can see a callee APPEAR or VANISH from the graph. It cannot see a callee that")
+    p("  is still called and now lies. That, exactly, is the population counted above.")
+    p("  DECLARED, NEVER CLOSED, AND THE COUNTS SIT SIDE BY SIDE ON PURPOSE. The register's")
+    p("  own distribution above says how many rows carry a BEHAVIOURAL pin (basis")
+    p("  :end_to_end); this figure says how many carry the hole a pin would close. A")
+    p("  DECLARED blind spot is not a repair — it is the refusal to let this census's green")
+    p("  be quoted as covering a class it never issues a request about.")
+    p("  A LOWER BOUND, not a count: a local `defp` callee, a runtime-computed module head")
+    p("  and an unexpanded macro all read SELF-CONTAINED here, so every error in this lens")
+    p("  moves rows OUT of the blind figure and never into it (PDS-D448a).")
+    p("  AND THE ROLL ABOVE IS THAT FLOOR FIRING, NOT A COUNTEREXAMPLE TO IT: all #{s.self_contained}")
+    p("  SELF-CONTAINED row(s) hand their work to a LOCAL defp in the same module that does")
+    p("  call out. They are not rows a regression cannot reach; they are rows this lens")
+    p("  DECLINES to claim, which is why the blind figure is a lower bound and says so.")
+    p("")
+  end
+
+  # -- REGISTER-CALLEE-SPLIT --------------------------------------------------
+  #
+  # THE ARM EXISTS SO THE FIGURE ABOVE CANNOT BE INVENTED AT THE PRINT SITE. It is the
+  # same shape BLIND-SHAPE-SPLIT gives the four blind-spot figures: re-derive, reconcile,
+  # and REFUSE a total that does not account for every resolved row. It asserts NOTHING
+  # about how the split falls — a row moving from CALLEE-TRUTH to SELF-CONTAINED by an
+  # honest repair must not red anybody's build — only that the three states partition the
+  # resolved population exactly once and that the arm is not certifying an empty set.
+  defp register_callee_split_check(classified) do
+    s = callee_split(classified)
+    total = s.callee_truth + s.callee_value + s.self_contained
+    derived = s.callee_truth + s.callee_value
+
+    # 0-OF-N IS NOT A PASS, the same refusal ROSTER-VERDICT-FRESH makes: a resolver that
+    # classifies nothing partitions nothing, and would print a serene `0 of 0`.
+    vacuous? = s.resolved == 0
+
+    why =
+      cond do
+        vacuous? ->
+          "NOT ONE of #{length(@register)} register row(s) resolved to a live site, so this arm partitioned an EMPTY SET — the resolver, not the register, is what failed"
+
+        total != s.resolved ->
+          "the callee split does not partition its own population: #{s.callee_truth} CALLEE-TRUTH + #{s.callee_value} CALLEE-VALUE + #{s.self_contained} SELF-CONTAINED = #{total}, but #{s.resolved} row(s) resolved to a live site — a row is counted twice or not at all"
+
+        true ->
+          "#{derived} of #{s.resolved} resolved register row(s) derive their receipt from a CALLEE (#{s.callee_truth} CALLEE-TRUTH + #{s.callee_value} CALLEE-VALUE), #{s.self_contained} SELF-CONTAINED, and the three partition the population exactly once · DECLARED, NOT COVERED: this arm proves the FIGURE is derived, never that the class is pinned — a regression inside any of those callees still moves no field of the key and still prints PASS here"
+      end
+
+    {"REGISTER-CALLEE-SPLIT", not vacuous? and total == s.resolved, why}
+  end
+
   # THE SCOPE PREDICATE. The selftest's synthetic fixture holds none of these paths, so an
   # unconditional arm would red the selftest on its own commit. A corpus holding SOME of
   # them is the real corpus with a file missing — that is an orphan, and it reds.
@@ -4699,10 +6033,25 @@ defmodule PDS.Census do
   # printed a bare `[WRITE d5]` because its ENCLOSING function routes to a write on the
   # success path. A declared row carrying `route_claim` marks the bracket disputed at the
   # one place that prints it.
+  # THE ATTRIBUTION PRINTER, AND THE ONE PLACE THE SET IS SPELT. A caller-credited row
+  # names EVERY caller that reaches a write, and when there is more than one it says
+  # AMBIGUOUS out loud — that is what makes the sentence falsifiable: point at the row,
+  # read the named callers, and the claim can be checked against the tree. A one-writer
+  # set still prints the name, but qualified by the candidate count it was chosen from,
+  # so "sole" is a measured word rather than an artefact of where the walk stopped.
   defp route_tag(s) do
+    vias = Map.get(s, :via_callers, [])
+    cands = Map.get(s, :via_candidates, 0)
+
     base =
       cond do
-        s.write? and s.via_caller -> "WRITE via caller #{s.via_caller}"
+        s.write? and length(vias) > 1 ->
+          "WRITE via AMBIGUOUS CALLER SET — #{length(vias)} of #{cands} callers reach a write: " <>
+            Enum.join(vias, ", ")
+
+        s.write? and vias != [] ->
+          "WRITE via caller #{hd(vias)} (sole writer of #{cands} callers)"
+
         s.write? -> "WRITE d#{s.depth}"
         s.read? -> "READ"
         true -> "UNROUTED"
@@ -4713,6 +6062,323 @@ defmodule PDS.Census do
       _ -> base
     end
   end
+
+
+  # --------------------------- RESPONSE-CARRIES-THE-READ (PDS-D490) — A HYPOTHESIS ONLY
+  #
+  # THE SHAPE, AND WHY IT NEEDS NO DATAFLOW. `json(conn, %{ok: true, <key>: <call>(...)})`
+  # — the payload key's value IS the call, a DIRECT SIBLING of the `ok: true` pair inside
+  # the SAME map literal. `expr` (PDS-D498) already retains that `%{}` node, so the whole
+  # question is in-AST and structural: does the `ok: true` pair have a sibling pair whose
+  # value is a call this file's own route lens resolves to a Repo READ verb? No dataflow
+  # is asked for and none is used — the sibling relation is read off the container, and
+  # the read is read off `bfs/7`, the same walker `route/3` takes.
+  #
+  # AN ARM MAY WRITE THE HYPOTHESIS COLUMN AND MAY NEVER WRITE A VERDICT (PDS-D469, and
+  # it is the reason this shape was FILED rather than folded into the lens). Wave 34
+  # measured static shapes manufacturing false compliance AND false accusation in the
+  # same instrument in the same week, so the number that matters — UNJUDGED — may be
+  # moved only by a ruling with a reason attached. THE STRUCTURAL GUARANTEE, AND IT IS
+  # STRUCTURAL RATHER THAN PROMISED: `response_carries_read/2` takes `classified` and
+  # `index` and returns a FRESH map of its own; it never returns a site, never merges a
+  # field into one, and its result is read at exactly TWO places — the printer below and
+  # `response_carries_read_checks/1`. `classify/2`, `dispose_routed/4`, `@register`,
+  # `@roster` and every verdict-bearing function are downstream of neither. There is no
+  # code path from this block to a verdict to delete, which is why the claim is checkable
+  # by grepping `response_carries_read(` rather than by trusting this paragraph.
+  #
+  # WHAT IT BUYS. Without it every future arrival of this shape costs another hand ruling
+  # — the ~2/day treadmill the arrival tripwire exists to escape. The hypothesis does not
+  # discharge the ruling; it tells the ruler what the shape already says.
+
+  # THE PRE-REGISTERED FIRE SET. Keyed on {short path, def label, payload key} and NEVER
+  # on a LINE — and the row this arm was filed under is its own proof. It pre-registered
+  # SEVEN sites as bare line anchors, five in tasks_controller.ex and two in
+  # tickets_controller.ex, and ALL SEVEN had rotted by the time a builder read them: the
+  # five tasks anchors land on comment lines today, and both tickets anchors render a
+  # VARIABLE (`tickets: rows`), not a call, which is not this shape at all. A committed
+  # line number in this file is a snapshot that goes stale in days; {path, def, key}
+  # survives every edit that does not move the receipt out of its def or rename the
+  # payload key. (The rotted anchors themselves are NOT reprinted here: a dead line
+  # number in a comment is the exact thing this paragraph argues against.)
+  #
+  # IT REDS ON AN ARRIVAL, AND THAT COSTS NOTHING NEW. A site of this shape arriving is
+  # a new `ok: true` literal, which ALREADY reds REGISTER-COMPLETE and already forces a
+  # register row in the same commit. Appending one line here is a strictly smaller edit
+  # than the one the arrival already demands, so this arm adds no tax to honest change —
+  # it only refuses a SILENT change to what the hypothesis column claims.
+  # RE-DERIVED AT THE PR BASE, AND THE FILED SET WAS NOT THIS ONE. The row pre-registered
+  # SEVEN sites in tasks_controller.ex and tickets_controller.ex; measured on this tree the
+  # arm fires on SIX, and not one of them is a filed anchor. The set below is what the
+  # predicate ACTUALLY fires on, printed by the run that derived it, not transcribed from
+  # the filing — which is why it is keyed on {path, def, payload key} and not on a line.
+  @response_carries_read_expected [
+    {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
+     "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "scoped_liveview_path"},
+    {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
+     "BarkparkWeb.BulldocsIngestController.ingest_html_write/2", "scoped_liveview_path"},
+    {"barkpark_web/controllers/query_controller.ex", "BarkparkWeb.QueryController.counts/2",
+     "counts"},
+    {"barkpark_web/controllers/tasks_controller.ex", "BarkparkWeb.TasksController.fleet_roster/2",
+     "documents"},
+    {"barkpark_web/controllers/tasks_controller.ex", "BarkparkWeb.TasksController.prime/2",
+     "rails"},
+    {"barkpark_web/controllers/tasks_controller.ex",
+     "BarkparkWeb.TasksController.task_list_response/4", "docs"}
+  ]
+
+  # THE ARM'S OWN TRIPWIRE, AND IT IS WHAT MAKES THIS FALSIFIABLE RATHER THAN FLATTERING.
+  # `github_status_controller.ex` `status/2` renders `health: status_fun().(...)` — the
+  # SAME syntactic shape, dispatching through a runtime-configured capture
+  # (`Application.get_env(:barkpark, :github_status_fun) || (&default_status/1)`) that no
+  # build-free lens can resolve to a def. THE ARM MUST REFUSE IT and the site must stay
+  # UNJUDGED. An arm that fires here is matching SYNTAX rather than evidence and must not
+  # ship. Both halves are asserted below: the site must be SEEN (precondition — a control
+  # over an absent site proves nothing) and it must be in the refused roll, not the fired
+  # one.
+  @response_carries_read_tripwire {"barkpark_web/controllers/github_status_controller.ex",
+                                   "BarkparkWeb.GithubStatusController.status/2"}
+
+  defp response_carries_read(classified, index) do
+    rows = Enum.flat_map(classified, &rcr_site(&1, index))
+
+    %{
+      fired: rows |> Enum.filter(&(&1.verdict == :fires)) |> Enum.sort_by(& &1.id),
+      refused: rows |> Enum.filter(&(&1.verdict != :fires)) |> Enum.sort_by(& &1.id),
+      scope: register_scope(classified)
+    }
+  end
+
+  # THE CONTAINER, OR NOTHING. A site whose retained `expr` is not a map literal cannot
+  # have a SIBLING pair by construction, so it contributes no row at all rather than a
+  # refusal — a refusal over a site the shape does not describe would inflate the refused
+  # roll with the whole population and make the tripwire unreadable inside it.
+  defp rcr_site(%{expr: {:%{}, _, pairs}} = s, index) when is_list(pairs) do
+    if rcr_ok_true?(pairs), do: Enum.flat_map(pairs, &rcr_pair(&1, s, index)), else: []
+  end
+
+  defp rcr_site(_s, _index), do: []
+
+  defp rcr_ok_true?(pairs) do
+    Enum.any?(pairs, fn
+      {l, r} -> rcr_ok_key?(lit(l)) and match?({:lit, true, _}, lit(r))
+      _ -> false
+    end)
+  end
+
+  defp rcr_ok_key?({:lit, k, _}) when k in [:ok, "ok"], do: true
+  defp rcr_ok_key?(_), do: false
+
+  defp rcr_pair({l, r}, s, index) do
+    with {:lit, key, meta} <- lit(l),
+         false <- key in [:ok, "ok"],
+         true <- meta[:format] == :keyword or match?([_ | _], meta[:assoc]),
+         {:call, target, text} <- rcr_call(r) do
+      [rcr_row(s, key, target, text, index)]
+    else
+      _ -> []
+    end
+  end
+
+  defp rcr_pair(_pair, _s, _index), do: []
+
+  # THE VALUE MUST *BE* THE CALL, NOT MERELY CONTAIN ONE. `health: status_fun().(
+  # effective_dataset(conn, requested))` CONTAINS a resolvable local call in an ARGUMENT;
+  # what PRODUCES the rendered value is the capture dispatch. Reading "contains a call"
+  # instead of "is a call" would fire this arm on the tripwire through the argument — the
+  # exact false positive the tripwire exists to catch — so only the OUTERMOST form is read.
+  defp rcr_call({{:., _, [{:__aliases__, _, segs}, f]}, _, args}) when is_atom(f) and is_list(args),
+    do: {:call, {:remote, segs, f, length(args)}, "#{Enum.join(segs, ".")}.#{f}/#{length(args)}"}
+
+  # FIELD ACCESS IS NOT A CALL, AND CONFLATING THE TWO DROWNS THE TRIPWIRE. `doc.doc_id`
+  # quotes as `{{:., _, [var, :doc_id]}, meta, []}` — the SAME outer shape as a dispatch,
+  # separated only by `meta[:no_parens]`. The first cut of this predicate read all 45 of
+  # them as runtime captures, which buried the ONE capture the tripwire is about inside a
+  # class of things that are not calls at all. A field read renders a value the map
+  # already held; it names no callee, so the shape this arm describes simply does not
+  # apply and the site contributes NO row.
+  defp rcr_call({{:., _, [_head, f]}, meta, []}) when is_atom(f) do
+    if meta[:no_parens], do: :no, else: {:call, {:capture, "#{f}()"}, "#{f}()"}
+  end
+
+  # A DOT-CALL WHOSE HEAD IS NOT A MODULE ALIAS — `fun.(args)` (a capture held in a
+  # variable or returned by a call), `var.fun(args)` on a runtime module. Named, refused,
+  # and NEVER resolved: there is no def to name.
+  defp rcr_call({{:., _, [head]}, _, args}) when is_list(args),
+    do: {:call, {:capture, one_line(Macro.to_string(head))}, one_line(Macro.to_string(head)) <> ".()"}
+
+  defp rcr_call({{:., _, _}, _, args} = node) when is_list(args),
+    do: {:call, {:capture, one_line(Macro.to_string(node))}, one_line(Macro.to_string(node))}
+
+  defp rcr_call({f, _, args}) when is_atom(f) and is_list(args) do
+    if rcr_local_name?(f),
+      do: {:call, {:local, f, length(args)}, "#{f}/#{length(args)}"},
+      else: :no
+  end
+
+  defp rcr_call(_), do: :no
+
+  # CONTAINERS AND CONTROL FORMS WEAR THE {form, meta, args} SHAPE. `%{}`, `{}`, `<<>>`,
+  # `__block__` and every operator are not calls to a def; `if`/`case`/`cond`/`with`/`fn`
+  # are control forms whose VALUE is whichever branch ran, which is a dataflow question
+  # this file refuses. Both sets are excluded by name and by spelling, not by one or the
+  # other: `:__block__` passes a leading-underscore identifier test, and `:%{}` fails a
+  # name list that forgot it.
+  @rcr_not_a_call ~w(fn if unless case cond with try for receive quote unquote do)a
+
+  defp rcr_local_name?(f) do
+    f not in @rcr_not_a_call and Regex.match?(~r/^[a-z][A-Za-z0-9_]*[?!]?$/, Atom.to_string(f))
+  end
+
+  defp rcr_row(s, key, target, text, index) do
+    {verdict, why} = rcr_verdict(target, s, index)
+
+    %{
+      id: {short(s.path), (s.owner && label(s.owner)) || "?", to_string(key)},
+      line: s.line,
+      call: text,
+      verdict: verdict,
+      why: why
+    }
+  end
+
+  defp rcr_verdict({:capture, what}, _s, _index),
+    do:
+      {:refused_capture,
+       "REFUSED: the value dispatches through a runtime capture (#{what}). No def is named, " <>
+         "so the route lens resolves nothing and this site stays UNJUDGED — matching the syntax here would be matching syntax INSTEAD OF evidence"}
+
+  defp rcr_verdict({:remote, segs, f, arity}, _s, index),
+    do: rcr_resolved(resolve(index, segs, f, arity), index, "#{Enum.join(segs, ".")}.#{f}/#{arity}")
+
+  defp rcr_verdict({:local, f, arity}, s, index) do
+    case s.owner do
+      nil ->
+        {:refused_unresolved,
+         "REFUSED: #{f}/#{arity} is a LOCAL call and this site has no owning def, so there is no module to resolve it in"}
+
+      d ->
+        rcr_resolved(resolve(index, d.module, f, arity), index, "#{f}/#{arity}")
+    end
+  end
+
+  defp rcr_resolved([], _index, text),
+    do: {:refused_unresolved, "REFUSED: #{text} resolves to NO def in this corpus"}
+
+  defp rcr_resolved(ds, index, text) do
+    case Enum.find(ds, &rcr_def_reads?(index, &1)) do
+      nil ->
+        {:refused_no_read,
+         "REFUSED: #{text} resolves to #{length(ds)} def(s), NONE of which reaches a Repo read verb at depth <= #{@evidence_depth}"}
+
+      d ->
+        {:fires,
+         "#{text} reaches a Repo READ verb at depth <= #{@evidence_depth} through #{label(d)}"}
+    end
+  end
+
+  defp rcr_def_reads?(index, d) do
+    {verbs, _, _} = bfs([{d, 0, [label(d)]}], index, MapSet.new(), %{}, nil, [], @evidence_depth)
+    Map.has_key?(verbs, :read)
+  end
+
+  defp report_response_carries_read(%{scope: :scoped_out}), do: :ok
+
+  defp report_response_carries_read(h) do
+    p("RESPONSE-CARRIES-THE-READ — A HYPOTHESIS COLUMN, NEVER A VERDICT (PDS-D490/D469)")
+    p(String.duplicate("-", 78))
+
+    wrap(
+      "IN-AST, SIBLING-PAIR, NO DATAFLOW: the question is whether the `ok: true` pair has " <>
+        "a sibling pair inside the SAME map literal whose value IS a call this file's own " <>
+        "route lens resolves to a Repo READ verb. NOTHING HERE MOVES A VERDICT. Every site " <>
+        "below still carries its own judgment-register row and its own reason; UNJUDGED is " <>
+        "not reduced by one, because a hypothesis is not a ruling (PDS-D469).",
+      "  "
+    )
+
+    p("")
+    p("  FIRED #{pad(length(h.fired))} site(s) — HYPOTHESIS: the payload key's value is the read")
+
+    Enum.each(h.fired, fn r ->
+      {path, fun, key} = r.id
+      p("      HYPOTHESIS  #{path}:#{r.line}  #{key}: #{r.call}")
+      p("                  fn #{fun}")
+      wrap(r.why, "                  ")
+    end)
+
+    if h.fired == [], do: p("      none")
+
+    caps = Enum.filter(h.refused, &(&1.verdict == :refused_capture))
+
+    p("")
+
+    p(
+      "  REFUSED #{pad(length(h.refused))} site(s) of the SAME syntactic shape — " <>
+        Enum.map_join(Enum.sort(Enum.frequencies_by(h.refused, & &1.verdict)), " · ", fn {v, n} ->
+          "#{v} #{n}"
+        end)
+    )
+
+    p("      THE CAPTURE REFUSALS, NAMED IN FULL — this is the class the tripwire lives in:")
+
+    Enum.each(caps, fn r ->
+      {path, fun, key} = r.id
+      p("      REFUSED  #{path}:#{r.line}  #{key}: #{r.call}")
+      p("               fn #{fun}")
+      wrap(r.why, "               ")
+    end)
+
+    if caps == [], do: p("      none — and that is itself a FINDING about this arm: the tripwire is gone")
+
+    p("")
+  end
+
+  # THE TWO ARMS. Both are SCOPED exactly as the register arms are: over a synthetic or
+  # truncated corpus `register_scope/1` returns `:scoped_out`, no arm is contributed, and
+  # nothing certifies an empty set at exit 0 (PDS-D541).
+  defp response_carries_read_checks(%{scope: :scoped_out}), do: []
+
+  defp response_carries_read_checks(h) do
+    fired = Enum.map(h.fired, & &1.id)
+    expected = @response_carries_read_expected
+    extra = fired -- expected
+    missing = expected -- fired
+
+    pinned_why =
+      if extra == [] and missing == [] do
+        "the hypothesis fires on EXACTLY the #{length(expected)} pre-registered site(s) and no others — keyed on {path, def, payload key}, never on a line, so an edit that shifts the receipt does not red this and an edit that MOVES it does"
+      else
+        Enum.join(
+          ["the fired set is not the pre-registered set — anything else firing is a FINDING ABOUT THE ARM, not about the corpus"] ++
+            Enum.map(extra, fn {p, f, k} -> "UNREGISTERED FIRE #{p} #{f} #{k}" end) ++
+            Enum.map(missing, fn {p, f, k} -> "PRE-REGISTERED SITE NO LONGER FIRES #{p} #{f} #{k}" end),
+          " · "
+        )
+      end
+
+    seen = Enum.filter(h.fired ++ h.refused, &(rcr_site_id(&1) == @response_carries_read_tripwire))
+    trip_fired = Enum.filter(h.fired, &(rcr_site_id(&1) == @response_carries_read_tripwire))
+
+    trip_why =
+      cond do
+        seen == [] ->
+          "THE TRIPWIRE IS NOT IN THIS RUN AT ALL — #{elem(@response_carries_read_tripwire, 0)} #{elem(@response_carries_read_tripwire, 1)} produced neither a fire nor a refusal, so the refusal below would be a control over an absent site and would prove nothing (a control says nothing about the precondition)"
+
+        trip_fired != [] ->
+          "THE ARM FIRED ON THE TRIPWIRE. #{elem(@response_carries_read_tripwire, 1)} dispatches through a runtime capture the route lens cannot resolve; an arm that fires here is matching SYNTAX rather than evidence and must not ship"
+
+        true ->
+          "#{elem(@response_carries_read_tripwire, 1)} wears the SAME syntactic shape and is REFUSED, not judged — #{length(seen)} row(s) seen, #{length(trip_fired)} fired. The site stays UNJUDGED, which is the only thing that makes this arm falsifiable rather than flattering"
+      end
+
+    [
+      {"RESPONSE-CARRIES-THE-READ-PINNED", extra == [] and missing == [], pinned_why},
+      {"RESPONSE-CARRIES-READ-REFUSES-CAPTURE", seen != [] and trip_fired == [], trip_why}
+    ]
+  end
+
+  defp rcr_site_id(%{id: {path, fun, _key}}), do: {path, fun}
 
   # ----------------------------------------------------- routed population (L4a-d)
 
@@ -5089,6 +6755,8 @@ defmodule PDS.Census do
   # `:public` is the CALLSITE name and `:none` the SPEC-SIDE spelling of the same bucket
   # (BarkparkWeb.Router.Plugins.auth_matches_scope?/2). Missing it drops every public
   # plugin route silently.
+  # GATED, NOT MERELY DOCUMENTED (PDS wave 48): MOUNT-MACRO-MIRRORED re-derives the
+  # macro's own mapping every run and reds when these two clauses stop agreeing with it.
   defp auth_in_scope?(:none, :public), do: true
   defp auth_in_scope?(auth, scope), do: auth == scope
 
@@ -5187,6 +6855,17 @@ defmodule PDS.Census do
     fresh_only_defs = receipt_functions(classified, :proven, [:live])
     proven_defs = receipt_functions(classified, :proven, [:live, :stale])
 
+    # THE FRESHNESS ARM'S OWN SPECIMEN, DERIVED HERE SO AN ARM CAN READ IT
+    # (task-ac55ff2388510d67). `stale_only_defs` is the set of PROVEN register defs that
+    # ONLY the `:stale` half of leg A's status filter admits — delete that `:stale` and
+    # every member reaching one of these leaves leg A. Wave 45 measured this set EMPTY and
+    # printed the zero honestly; it is NOT empty on today's tree, so the half that moved
+    # nothing now moves members and LADDER-STALE-ARM-EXERCISED below asserts that it does.
+    # DERIVED FROM THE TWO SETS ALREADY IN SCOPE — no new committed data, nothing to rot.
+    stale_only_defs = MapSet.difference(proven_defs, fresh_only_defs)
+    stale_only_members = members_reaching(population, index, stale_only_defs)
+    leg_a_live_only = members_reaching(population, index, fresh_only_defs)
+
     ladder = %{
       # COUNTED, NOT ADDED, even here where the cond guarantees disjointness — one
       # traversal over the labels asks nothing of the reader.
@@ -5203,6 +6882,18 @@ defmodule PDS.Census do
       suppressed_judged: MapSet.size(loose_judged) - Enum.count(disposed, &(elem(&1, 1) == :judged)),
       proven_defs: MapSet.size(proven_defs),
       proven_defs_live_only: MapSet.size(fresh_only_defs),
+      # THE :stale ARM, MEASURED RATHER THAN ASSUMED. `stale_arm_dropped` is the arm's
+      # predicate and it is a REACH RELATION, never a count: a member reached by a def
+      # that only the :stale admission carries MUST be in leg A. Both sides move together
+      # on any honest register edit or controller repair, so an honest edit cannot red it.
+      stale_only_defs: Enum.sort(MapSet.to_list(stale_only_defs)),
+      stale_only_members: MapSet.size(stale_only_members),
+      stale_arm_dropped: Enum.sort(MapSet.to_list(MapSet.difference(stale_only_members, leg_a))),
+      leg_a_live_only: MapSet.size(leg_a_live_only),
+      # Carried so the arm can scope itself exactly as the register and roster arms do:
+      # over the synthetic tree the register resolves nothing and an unconditional arm
+      # there would certify an empty set at exit 0.
+      register_scope: register_scope(classified),
       # THE WRONG ANSWER THAT SHARES THE RIGHT ANSWER'S VALUE, derived rather than
       # asserted — and derived as a UNION here too, because a plus is what got this
       # slice written.
@@ -5377,7 +7068,7 @@ defmodule PDS.Census do
   # what they say and the one-line summary goes to STDERR.
   defp exclusion_keys_run(opts) do
     files = corpus(opts)
-    guard_corpus!(files, false)
+    guard_corpus!(files, opts, false)
 
     parsed = Enum.map(files, &parse_file/1)
     index = build_index(parsed)
@@ -5463,6 +7154,36 @@ defmodule PDS.Census do
   # table is now freshness-checked" without printing the rows it CANNOT key commits this
   # epic's exact over-claim one lens down, so the breakdown and the fraction are OUTPUT,
   # never PR prose.
+  # THE FRESHNESS ARM SAYS WHICH OF ITS TWO STATES IT IS IN, AND IT USED TO SAY ONLY ONE
+  # (task-ac55ff2388510d67). The shipped line was a CONSTANT sentence — "the freshness arm
+  # is a NO-OP ... the same set, because no PROVEN register row is stale right now" —
+  # printed beside two numbers it derived. Wave 45 wrote it when both numbers were 15. By
+  # the time this slice read it the two numbers were 17 and 20 and the prose still said
+  # "the same set": a sentence contradicted by its own arguments, on the one line in the
+  # file whose whole job is to admit what is not exercised. THE SENTENCE IS NOW DERIVED
+  # FROM THE SPECIMEN SET, so it cannot disagree with the figures beside it, and the
+  # MOVES branch names every specimen — a def admitted to leg A by the :stale arm and by
+  # nothing else — so a reader can check the claim against the demotion block above.
+  defp report_stale_arm(lad) do
+    if lad.stale_only_defs == [] do
+      p("      the freshness arm is a NO-OP ON THIS TREE: #{lad.proven_defs_live_only} proven register def(s) at")
+      p("        status :live and #{lad.proven_defs} at :live+:stale — the same set, because no PROVEN register")
+      p("        row is stale right now. NOTHING HERE IS EVIDENCE THAT THE :stale ARM WORKS; the")
+      p("        evidence is the selftest case LADDER-STALE-ARM-SPECIMEN, which MANUFACTURES a")
+      p("        stale PROVEN row and requires it to appear as a STALE SPECIMEN on this line.")
+    else
+      p("      the freshness arm MOVES ON THIS TREE: #{lad.proven_defs_live_only} proven register def(s) at status")
+      p("        :live and #{lad.proven_defs} at :live+:stale, so the :stale half admits #{length(lad.stale_only_defs)} def(s)")
+      p("        and #{lad.stale_only_members} member(s) (leg A #{lad.leg_a_live_only} -> #{lad.leg_a}) that a :live-only leg A would DROP.")
+      p("        Delete the `:stale` from leg A and LADDER-STALE-ARM-EXERCISED reds by name.")
+
+      Enum.each(lad.stale_only_defs, fn {mod, name} ->
+        p("        STALE SPECIMEN  #{mod}.#{name} — a PROVEN register row demoted to")
+        p("                        basis_stale, admitted to leg A by the :stale arm and by nothing else")
+      end)
+    end
+  end
+
   defp report_exclusion_freshness(rows) do
     by = Enum.group_by(rows, &exclusion_tag/1)
     n = fn t -> length(Map.get(by, t, [])) end
@@ -5638,10 +7359,14 @@ defmodule PDS.Census do
   # THE ROW IS A MIN OVER ITS CLAUSES, AND THAT MIN IS A MASK (PDS wave 41). Any decided
   # class outranks any residual one, so a two-clause action with one store_derived clause
   # and one helper-assembled clause PRINTS store_derived and its residual clause is
-  # invisible in every count on the page. The min_by below is UNCHANGED — the precedence
-  # FIX is filed separately (pds-bl-w41-clause-precedence-mask) because it moves printed
-  # classes. What changes here is that the row now CARRIES its clause verdicts, both the
-  # local one and the post-hop one, so the mask can be COUNTED instead of inferred.
+  # invisible in every ROW count on the page. Wave 41 made the mask COUNTABLE by carrying
+  # every clause's verdict on the row (both the local one and the post-hop one).
+  #
+  # AND THE MIN IS NO LONGER IMPLICIT (pds-bl-w41-clause-precedence-mask). The inline
+  # `Enum.min_by/2` is now derivation_precedence/1: the same order, applied by a named
+  # rule that RETURNS what it did — winner, outranked class(es), masked residual class(es)
+  # — so the page can print the rule and the per-row receipt instead of leaving the reader
+  # to infer both from a class name and a clause count. No printed class moves.
   defp derive_row(mod, action, index) do
     case action_defs(index, mod, action) do
       [] ->
@@ -5651,20 +7376,152 @@ defmodule PDS.Census do
           clauses: 0,
           scope_read: :no_body,
           why: "the routed action resolves to no def this pass can open",
-          clause_results: []
+          clause_results: [],
+          outcome: :no_body,
+          outcome_why: "the routed action resolves to no def this pass can open",
+          outcome_verdict: %{
+            decided_on: :no_body,
+            others: [],
+            error_branch?: false,
+            masks_success?: false,
+            why: "no def to read — this pass names no outcome for this row"
+          }
         }
 
       defs ->
         results = Enum.map(defs, &derive_def(&1, index))
+        {winner, precedence} = derivation_precedence(results)
 
-        results
-        |> Enum.min_by(&derivation_rank(&1.class))
+        winner
         |> Map.put(:clauses, length(defs))
-        |> Map.put(:clause_results, Enum.map(results, &Map.take(&1, [:id, :class, :pre_class, :hop, :why])))
+        |> Map.put(:precedence, precedence)
+        |> Map.put(:outcome_verdict, derivation_outcome_verdict(winner, results))
+        |> Map.put(:clause_results, Enum.map(results, &Map.take(&1, [:id, :class, :pre_class, :hop, :why, :outcome, :outcome_why])))
     end
   end
 
+  # WHICH KIND OF RECEIPT THE ROW'S VERDICT IS ABOUT (pds-bl-w41-error-branch-verdicts).
+  #
+  # The precedence rule picks the most INFORMATIVE clause. It has never picked the
+  # SUCCESSFUL one, and nothing on the page said so. This is the missing half: the winning
+  # clause's derived outcome polarity, the polarities of the clauses it beat, and the two
+  # facts a reader of a class row actually needs —
+  #
+  #   error_branch?   the class printed for this row was earned on a clause that answers a
+  #                   FAILURE. The sentence is still TRUE; it is just not a sentence about
+  #                   the receipt a successful caller reads.
+  #   masks_success?  and a sibling clause of the same action IS a success receipt, so the
+  #                   row is not merely error-shaped — it is error-shaped WITH the success
+  #                   path sitting under it, unprinted.
+  #
+  # NEITHER IS A CLASS CHANGE. No printed class moves and no count moves: re-ranking on
+  # outcome would move rows out of decided classes on the strength of a polarity this pass
+  # sometimes admits it cannot derive (`unmarked`), which is the mask running in the other
+  # direction. The verdict is DISCLOSED, never applied.
+  defp derivation_outcome_verdict(winner, results) do
+    others =
+      results
+      |> Enum.reject(&(&1.id == winner.id))
+      |> Enum.map(& &1.outcome)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    error? = winner.outcome == :error_branch
+    masks? = error? and Enum.any?(others, &(&1 in [:success_receipt, :mixed]))
+
+    why =
+      cond do
+        masks? ->
+          "the clause that earned this row's class answers a FAILURE (#{winner.outcome_why}) " <>
+            "while a sibling clause of the same action IS a success receipt — the printed class " <>
+            "is a true sentence about the ERROR path and says nothing about the receipt a " <>
+            "successful caller reads"
+
+        error? ->
+          "the clause that earned this row's class answers a FAILURE (#{winner.outcome_why}); " <>
+            "no sibling clause of this action derives as a success receipt either, so this row " <>
+            "carries NO verdict about a success receipt at all"
+
+        winner.outcome in [:unmarked, :no_emission, :no_body] ->
+          "this pass STRUCTURALLY CANNOT tell success from error on the deciding clause: " <>
+            "#{winner.outcome_why}. Deriving it from the clause's POSITION or the spelling of " <>
+            "its head would be a guess, and a guess printed beside a derived class is worse " <>
+            "than a printed refusal"
+
+        true ->
+          "the deciding clause derives as a #{winner.outcome} (#{winner.outcome_why})"
+      end
+
+    %{decided_on: winner.outcome, others: others, error_branch?: error?, masks_success?: masks?, why: why}
+  end
+
   defp derivation_rank(class), do: Enum.find_index(@derivation_order, &(&1 == class)) || 99
+
+  # THE PRECEDENCE RULE, STATED AS A RULE AND PRINTED AS ONE
+  # (pds-bl-w41-clause-precedence-mask).
+  #
+  # WHAT WAS WRONG WAS THE SILENCE, NOT THE ORDER. Up to this commit the row's class was
+  # `Enum.min_by(&derivation_rank(&1.class))` inline, and NOTHING on the page said which
+  # clause had won or what it had outranked: a two-clause action with one store_derived
+  # clause and one helper-assembled clause printed `store_derived · 2 clause(s)` and the
+  # reader had no way to know a residual clause was sitting under it. The aggregate mask
+  # table below counted that population, but no ROW disclosed its own.
+  #
+  # AND THE REPAIR IS NOT A RE-RANK. Ranking the residual first would print an action
+  # that DOES describe the store somewhere as undecided — a mask in the other direction,
+  # and a strictly worse one, because it would move rows OUT of the decided classes on
+  # the strength of a clause this pass already admits it cannot read. So the order stands,
+  # it is written down as a RULE with its own consequence stated, and every row it
+  # actually decided prints the winner, the class(es) it outranked, and the residual
+  # class(es) it masks. An implicit min_by became a printed rule plus a per-row receipt.
+  @derivation_precedence_rule "RULE — MOST INFORMATIVE CLAUSE WINS: over a multi-clause action the row's class is the @derivation_order-MINIMUM of its clause classes, so any DECIDED class (ranks 0-4) outranks any RESIDUAL one (ranks 5-7). ITS CONSEQUENCE, STATED RATHER THAN DISCOVERED: the rule is a MASK by construction — the residual clause it outranks is still there, and is still counted in the clause-keyed RESIDUAL totals below, which is why those totals are clause-keyed and not row-keyed. Each row the rule actually decided is printed with its winner and what it outranked, so the mask is readable per row and not only as an aggregate."
+
+  defp derivation_precedence(results) do
+    winner = Enum.min_by(results, &derivation_rank(&1.class))
+    classes = Enum.map(results, & &1.class)
+
+    outranked =
+      classes
+      |> Enum.reject(&(&1 == winner.class))
+      |> Enum.uniq()
+      |> Enum.sort_by(&derivation_rank/1)
+
+    # A RESIDUAL WINNER MASKS NOTHING. When the rule's winner is itself residual the row
+    # already PRINTS residual and no reader is misled about it; the outranked residual
+    # classes are a taxonomy detail, not a mask. Counting them here would inflate the
+    # number this row exists to disclose.
+    masked =
+      if winner.class in @derivation_residual,
+        do: [],
+        else: Enum.filter(outranked, &(&1 in @derivation_residual))
+
+    if outranked == [] do
+      {winner,
+       %{
+         applied: false,
+         winner: winner.class,
+         outranked: [],
+         masked: [],
+         why: "all #{length(results)} clause(s) class #{winner.class} — UNANIMOUS, the rule decided nothing here"
+       }}
+    else
+      why =
+        "#{winner.class} (rank #{derivation_rank(winner.class)}) WINS over " <>
+          Enum.map_join(outranked, ", ", &"#{&1} (rank #{derivation_rank(&1)})") <>
+          if masked == [],
+            do:
+              if(winner.class in @derivation_residual,
+                do: " — the winner is itself RESIDUAL, so this row masks nothing: it prints residual",
+                else: " — the rule MASKS no residual clause on this row"
+              ),
+            else:
+              " — and it MASKS #{length(masked)} residual class(es): " <>
+                Enum.map_join(masked, ", ", &to_string/1) <>
+                ", which stay counted in the clause-keyed RESIDUAL totals below and are invisible in every ROW count on this page"
+
+      {winner, %{applied: true, winner: winner.class, outranked: outranked, masked: masked, why: why}}
+    end
+  end
 
   defp derive_def(d, index), do: derive_def(d, index, nil)
 
@@ -5676,7 +7533,10 @@ defmodule PDS.Census do
       scope_read: :no_body,
       why: "defdelegate — no body to read",
       id: clause_id(d),
-      hop: nil
+      minted_decided: 0,
+      hop: nil,
+      outcome: :no_body,
+      outcome_why: "defdelegate — no body to read"
     }
 
   defp derive_def(d, index, subst) do
@@ -5721,6 +7581,27 @@ defmodule PDS.Census do
       end)
 
     used = for v <- payload_vars, Map.has_key?(oks, v), do: Map.fetch!(oks, v)
+
+    # THE EXACT MINTED-EXPOSURE, MEASURED WHERE BOTH SETS ALREADY EXIST (PDS wave 46).
+    # `subst.minted` counts minted argument positions ANYWHERE in a substitution; that
+    # number OVERSTATES the thing it is named for, because a parameter whose vars never
+    # reach the rendered payload cannot decide anything. The honest count is the one
+    # below: a minted position DECIDES this clause's class when one of its parameter vars
+    # is in `payload_vars` AND the callee does not REBIND that name itself — `oks` is
+    # `Map.merge(s.oks, oks_own)`, so an own binding SHADOWS the mint and the producer
+    # that lands in `used` is the callee's, not the mint's. Both halves are required: the
+    # intersection alone would credit the mint for a producer it never supplied.
+    minted_decided =
+      case subst do
+        nil ->
+          0
+
+        s ->
+          Enum.count(s.minted_pvars, fn pvars ->
+            Enum.any?(pvars, &(MapSet.member?(payload_vars, &1) and not Map.has_key?(oks_own, &1)))
+          end)
+      end
+
     gate = names(discarded)
 
     # WHICH REGION DECIDED THIS CLAUSE IS RECORDED, NOT ASSERTED (PDS wave 40 review).
@@ -5729,6 +7610,14 @@ defmodule PDS.Census do
     # code is the exact species this epic hunts, so the region is stamped per clause here
     # and the two counts are DERIVED into the printed blind shape instead of described.
     scope_read = if fallback?, do: :whole_body, else: :success_branch
+
+    # THE OUTCOME POLARITY IS DERIVED OVER THE WHOLE CLAUSE, NOT OVER `emits`. `emits` is
+    # already SCOPED to the success branch whenever one exists, so grading it would answer
+    # "is the success branch a success branch" — vacuous by construction. The polarity has
+    # to see every response the clause can build, and `scopes` is passed only so an
+    # unmarked emission INSIDE an `{:ok, _}` gate can be credited as a success receipt.
+    outcome = clause_outcome(body, scopes)
+
 
     local =
       cond do
@@ -5757,7 +7646,14 @@ defmodule PDS.Census do
         true ->
           %{class: :residual_onehop_unattributed, producer: gate_or_dash(gate), why: "bound values trace to neither an {:ok, _} payload nor the head"}
       end
-      |> Map.merge(%{scope_read: scope_read, id: clause_id(d), hop: nil})
+      |> Map.merge(%{
+        scope_read: scope_read,
+        id: clause_id(d),
+        minted_decided: minted_decided,
+        hop: nil,
+        outcome: elem(outcome, 0),
+        outcome_why: elem(outcome, 1)
+      })
       |> then(&Map.put(&1, :pre_class, &1.class))
 
     # ONE HOP, AND NEVER TWO: a clause reached AS a hop target carries a subst and is
@@ -5835,12 +7731,21 @@ defmodule PDS.Census do
         %{
           local
           | why: hop_refusal(emitting, mute),
+            # THE POLARITY FOLLOWS THE RECEIPT, NOT THE CLAUSE (pds-bl-w41-error-branch-verdicts).
+            # This clause emits nothing; whatever status literals its own body carries belong
+            # to a path the class was NOT read off, so claiming an outcome from them would be
+            # the same misattribution this block exists to end.
+            outcome: :no_emission,
+            outcome_why:
+              "no response call in this clause and the hop decided nothing — the receipt is " <>
+                "assembled elsewhere and this pass names no outcome for it",
             hop: %{
               decided: nil,
               target: nil,
               candidates: length(cands),
               minted: minted,
-              minted_decided: 0,
+              minted_on_winner: 0,
+              minted_deciding: 0,
               opaque: opaque,
               field: field
             }
@@ -5849,17 +7754,31 @@ defmodule PDS.Census do
       _ ->
         {label, best, best_minted} = Enum.min_by(decided, &derivation_rank(elem(&1, 1).class))
 
+        # TWO NUMBERS, AND THE WEAKER ONE IS KEPT ON PURPOSE (PDS wave 46). `best_minted`
+        # is the PROXY — a mint anywhere in the winning substitution — and `best.minted_decided`
+        # is the exact measure: the minted positions whose parameter vars actually land in
+        # the payload the class was read off. Dropping the proxy would hide the gap the
+        # exact number exists to measure; the two are printed side by side so a reader can
+        # see how far the proxy overstates on this corpus.
+
         %{
           local
           | class: best.class,
             producer: best.producer,
             why: "ONE HOP into #{label} — #{best.why} (this clause's own body has no response call)",
+            # AND WHEN THE HOP DECIDES, THE OUTCOME COMES FROM THE CLAUSE THAT EMITS. `best`
+            # is the hop target read where it stands, so its polarity describes the response
+            # this row's class was actually derived from — the local body's markers describe
+            # a different path and are dropped here on purpose.
+            outcome: best.outcome,
+            outcome_why: "ONE HOP into #{label} — #{best.outcome_why}",
             hop: %{
               decided: best.class,
               target: label,
               candidates: length(cands),
               minted: minted,
-              minted_decided: best_minted,
+              minted_on_winner: best_minted,
+              minted_deciding: best.minted_decided,
               opaque: opaque,
               field: field
             }
@@ -5996,7 +7915,7 @@ defmodule PDS.Census do
     |> head_params()
     |> Enum.zip(args)
     |> Enum.reduce(
-      %{oks: %{}, head: MapSet.new(), params: MapSet.new(), minted: 0, opaque: 0, field: 0},
+      %{oks: %{}, head: MapSet.new(), params: MapSet.new(), minted: 0, minted_pvars: [], opaque: 0, field: 0},
       fn {param, arg}, acc ->
         hop_subst_arg(acc, param, arg, oks, head)
       end
@@ -6013,10 +7932,13 @@ defmodule PDS.Census do
         %{acc | opaque: acc.opaque + 1}
 
       {:call, producer} ->
+        mint = hop_arg_minted(arg, oks, head)
+
         %{
           acc
           | oks: Enum.reduce(pvars, acc.oks, &Map.put(&2, &1, producer)),
-            minted: acc.minted + hop_arg_minted(arg, oks, head)
+            minted: acc.minted + mint,
+            minted_pvars: if(mint == 1, do: [pvars | acc.minted_pvars], else: acc.minted_pvars)
         }
 
       {:vars, avars} ->
@@ -6226,9 +8148,313 @@ defmodule PDS.Census do
     acc
   end
 
+  # -- THE OUTCOME POLARITY OF A CLAUSE (pds-bl-w41-error-branch-verdicts) -----
+  #
+  # WHAT WAS MISSING WAS A NOTION, NOT A NUMBER. Up to this commit the derivation
+  # partition had no concept of a SUCCESS receipt versus an ERROR branch: a class was
+  # derived over a clause and the precedence rule picked the most informative clause of
+  # the action, with nothing on the page saying whether the clause that won was the one a
+  # caller reaches when the write SUCCEEDS. `SessionController.account` is the worked
+  # example this row was filed on — its printed `request_echo` is earned by the clause
+  # that re-renders the sign-in form after a failed credential check, which is a true
+  # sentence about a FAILURE path wearing a row that reads as a verdict on the receipt.
+  #
+  # AND IT IS DERIVED BY RUN, NEVER BY A NAME HEURISTIC ON THE CLAUSE HEAD. Nothing below
+  # reads `d.head`. Position ("the last clause is the fallback"), arity, catch-all shape
+  # and parameter spelling are all UNUSED, because every one of them is a guess about
+  # intent that a controller is free to violate. What IS read is the response the clause
+  # actually builds:
+  #
+  #   * an HTTP STATUS LITERAL threaded through `conn` — `put_status/2`, `send_resp/3`,
+  #     or any call whose first argument is `conn` and which carries an integer literal
+  #     in 100..599 (this is what reads `ErrorResponse.emit_custom(conn, 400, ...)`);
+  #   * the FLASH KIND atom — `put_flash(conn, :error, _)` versus `put_flash(conn, :info, _)`;
+  #   * CONTAINMENT in an `{:ok, _}` branch, which is the same `success_scopes/1` region
+  #     the class derivation already reads.
+  #
+  # THE MARKERS ARE READ OFF THE EMISSION NODE ITSELF, which is sound only because
+  # `expand_pipes/1` ran first: `conn |> put_status(422) |> json(body)` arrives as
+  # `json(put_status(conn, 422), body)`, so the status and the flash sit INSIDE the
+  # emission's own subtree and no parent walk is needed to attribute them. A clause with
+  # no emission at all falls back to the same markers over its whole body, which is how a
+  # one-liner delegating to `ErrorResponse` is still read as an error branch.
+  #
+  # WHERE IT STRUCTURALLY CANNOT TELL, IT SAYS SO. A `json(conn, %{"sso" => false})` with
+  # no status, no flash and no `{:ok, _}` gate carries NOTHING this pass can key on, and
+  # the honest answer is `unmarked` with the reason printed — not a guess derived from the
+  # clause being first, or from the word its head happens to spell.
+  @derivation_error_flash [:error, :warn, :warning, :danger]
+  @derivation_success_flash [:info, :success]
+
+  @derivation_outcomes [:success_receipt, :error_branch, :mixed, :unmarked, :no_emission, :no_body]
+
+  # The OUTERMOST response call of each region — never a nested one. `render(put_flash(
+  # conn, :error, msg), :new, assigns)` is ONE emission whose subtree carries the flash,
+  # and returning the inner `put_flash` as a second emission would double-count the very
+  # marker that decides the first.
+  defp emission_nodes(ast) do
+    if emission_node?(ast) do
+      [ast]
+    else
+      cond do
+        is_list(ast) -> Enum.flat_map(ast, &emission_nodes/1)
+        is_tuple(ast) -> ast |> Tuple.to_list() |> Enum.flat_map(&emission_nodes/1)
+        true -> []
+      end
+    end
+  end
+
+  defp emission_node?({f, _, [_c, _p]}) when f in [:json, :text, :html], do: true
+  defp emission_node?({:send_resp, _, [_c, _s, _p]}), do: true
+  defp emission_node?({:redirect, _, [_c, _o]}), do: true
+  defp emission_node?({:put_flash, _, [_c, _k, _m]}), do: true
+  defp emission_node?({:render, _, [_c, _t, _a]}), do: true
+  defp emission_node?({:render, _, [_c, _t]}), do: true
+  defp emission_node?({{:., _, [_m, f]}, _, [_c, _p]}) when f in [:json, :text, :html], do: true
+  defp emission_node?(_), do: false
+
+  # THE FILE ALREADY OWNS `lit/1` (:3235) AND IT RETURNS A TAGGED TUPLE. A second pair of
+  # `lit/1` clauses down here would be APPENDED to that function, not a new one — the
+  # earlier clauses match first, every literal comes back as `{:lit, v, meta}`, and an
+  # `is_atom/1` test on it silently reads FALSE for every flash kind in the tree. That is
+  # not a hypothetical: it shipped in this block's first draft and printed a uniform ZERO
+  # error branches over 138 clauses, which is the signature of a broken instrument rather
+  # than a clean corpus. The shared helper is REUSED here under its own contract.
+  defp derivation_lit(node) do
+    case lit(node) do
+      {:lit, v, _meta} -> v
+      _ -> :__no_literal__
+    end
+  end
+
+  # STATUS LITERALS, THREADED THROUGH `conn`. The `conn`-first condition is what keeps a
+  # page size, a limit or a timeout out of this set: an integer in 100..599 is only read
+  # as a status when it rides a call that is already handed the connection.
+  defp status_literals(ast) do
+    {_, acc} =
+      Macro.prewalk(ast, [], fn
+        {:put_status, _, [_c, s]} = n, acc -> {n, add_status(acc, s)}
+        {:put_status, _, [s]} = n, acc -> {n, add_status(acc, s)}
+        {:send_resp, _, [_c, s, _b]} = n, acc -> {n, add_status(acc, s)}
+        {_f, _, [{:conn, _, ctx} | rest]} = n, acc when is_atom(ctx) and is_list(rest) ->
+          {n, Enum.reduce(rest, acc, &add_status(&2, &1))}
+
+        n, acc -> {n, acc}
+      end)
+
+    Enum.uniq(acc)
+  end
+
+  defp add_status(acc, node) do
+    case derivation_lit(node) do
+      s when is_integer(s) and s >= 100 and s <= 599 -> [s | acc]
+      _ -> acc
+    end
+  end
+
+  defp flash_kinds(ast) do
+    {_, acc} =
+      Macro.prewalk(ast, [], fn
+        {:put_flash, _, [_c, k, _m]} = n, acc ->
+          case derivation_lit(k) do
+            a when is_atom(a) and a != :__no_literal__ -> {n, [a | acc]}
+            _ -> {n, acc}
+          end
+
+        n, acc -> {n, acc}
+      end)
+
+    Enum.uniq(acc)
+  end
+
+  defp outcome_markers(ast) do
+    statuses = status_literals(ast)
+    flashes = flash_kinds(ast)
+
+    err =
+      Enum.map(Enum.filter(statuses, &(&1 >= 400)), &"status #{&1}") ++
+        Enum.map(Enum.filter(flashes, &(&1 in @derivation_error_flash)), &"put_flash(:#{&1})")
+
+    ok =
+      Enum.map(Enum.filter(statuses, &(&1 >= 100 and &1 < 400)), &"status #{&1}") ++
+        Enum.map(Enum.filter(flashes, &(&1 in @derivation_success_flash)), &"put_flash(:#{&1})")
+
+    {Enum.uniq(err), Enum.uniq(ok)}
+  end
+
+  defp emission_polarity(node, ok_scoped?) do
+    {err, ok} = outcome_markers(node)
+
+    cond do
+      err != [] and ok != [] -> {:mixed, "carries #{Enum.join(err ++ ok, " + ")}"}
+      err != [] -> {:error_branch, Enum.join(err, " + ")}
+      ok != [] -> {:success_receipt, Enum.join(ok, " + ")}
+      ok_scoped? -> {:success_receipt, "unmarked, but the emission sits inside an `{:ok, _}` branch"}
+      true -> {:unmarked, "no status literal, no flash kind, no `{:ok, _}` gate"}
+    end
+  end
+
+  # THE CLAUSE'S VERDICT OVER ITS OWN EMISSIONS. A clause that answers 200 on one path and
+  # 422 on another is `mixed` and says so: the class it earned was derived over BOTH, and
+  # calling it either a success receipt or an error branch would be the same silent
+  # collapse this row was filed about.
+  defp clause_outcome(nil, _scopes), do: {:no_body, "defdelegate — no body to read"}
+
+  defp clause_outcome(body, scopes) do
+    nodes = emission_nodes(body)
+    ok_nodes = scopes |> Enum.flat_map(&emission_nodes/1) |> MapSet.new()
+
+    case nodes do
+      [] ->
+        {err, ok} = outcome_markers(body)
+
+        cond do
+          err != [] and ok == [] ->
+            {:error_branch, "no response call; the clause body carries #{Enum.join(err, " + ")}"}
+
+          ok != [] and err == [] ->
+            {:success_receipt, "no response call; the clause body carries #{Enum.join(ok, " + ")}"}
+
+          true ->
+            {:no_emission, "no response call and no status/flash marker in the clause body"}
+        end
+
+      _ ->
+        graded = Enum.map(nodes, &emission_polarity(&1, MapSet.member?(ok_nodes, &1)))
+        kinds = graded |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+        why = graded |> Enum.map(&elem(&1, 1)) |> Enum.uniq() |> Enum.join("; ")
+
+        # `error_branch` MEANS EVERY RESPONSE THIS CLAUSE CAN BUILD IS A FAILURE, and the
+        # bar is that high on purpose. A clause holding a 404 arm beside an unmarked
+        # success arm is `mixed`: its CLASS was derived over the union of both arms
+        # (`emits` falls back to the whole body when no `{:ok, _}` scope exists), so
+        # calling the whole clause an error branch would trade one over-claim for
+        # another. Only an unanimous set earns the flat verdict.
+        cond do
+          length(kinds) == 1 -> {hd(kinds), why}
+          :mixed in kinds -> {:mixed, why}
+          :error_branch in kinds -> {:mixed, why}
+          :success_receipt in kinds -> {:success_receipt, why}
+          true -> {:unmarked, why}
+        end
+    end
+  end
+
   # -- report -----------------------------------------------------------------
 
-  defp report_routed_population(:no_router, _classified, _parsed, _index) do
+  # ------------------------------ THE DISPOSITION REGEN AFFORDANCE (`--routed-rows`)
+  #
+  # THE TAX THIS PAYS. ROUTED-POPULATION-COMPLETE keys #{length(@routed_excluded)}
+  # committed rows on {method, path, module, action}, which is what makes an ARRIVING
+  # write route visible — and it also means EVERY honest route change (a new endpoint, a
+  # renamed path, a controller move) reds the census with no mechanical way to repair the
+  # table. The FAIL line names at most FOUR offenders and the rest had to be re-derived by
+  # hand, or by re-adding the temporary dump block that generated the table in the first
+  # place. That is a recurring tax, not a one-off.
+  #
+  # A PROPOSAL, NEVER A `--fix`. Nothing here writes a file, and that is the whole design:
+  # the arm exists because a HUMAN decides the class. A flag that edited
+  # @routed_excluded in place would launder an arrival into an exclusion with no ruling
+  # attached, which is exactly the false compliance PDS-D469 demoted static shapes for.
+  # It prints Elixir a reviewer pastes, reads and signs.
+  #
+  # THE CLASS IS DERIVED BY THE RULE THAT GENERATED THE SHIPPED TABLE, and only among
+  # DECLARED classes. `:live` is a routed method whose writes live in handle_event/3 with
+  # no {Controller, action} pair for the register to key on -> :liveview_handle_event;
+  # everything else reaching no `ok: true` receipt this lens keys on ->
+  # :status_only_receipt. `action_not_in_corpus` IS RETIRED (PDS wave 40, it held exactly
+  # two rows and both were a local-variable controller binding) and is NOT resurrected
+  # here: a member whose module this corpus does not carry gets `:NEEDS_CLASS`, which is
+  # UNDECLARED on purpose — pasted unedited it reds EXCLUSION-CLASS-DECLARED instead of
+  # entering the table as a guess.
+  #
+  # THE THIRD DIRECTION (the row asked for it to be considered, and it is cheap here):
+  # a committed row whose class no longer matches the shape it describes. Compared ONLY
+  # over the two DERIVABLE classes — `:repaired_computed_receipt` and `:selftest_fixture`
+  # are human rulings and synthetic fixtures that no rule can re-derive, so including
+  # them would print a "mismatch" on every row of them, every run, forever.
+  @routed_rows_derivable [:liveview_handle_event, :status_only_receipt]
+
+  defp routed_rows_proposal(disp, parsed) do
+    mods = module_file_index(parsed)
+
+    reclass =
+      for {m, path, mod, a, c} <- @routed_excluded,
+          c in @routed_rows_derivable,
+          {derived, _note} = routed_row_class({m, path, mod, a}, mods),
+          derived in @routed_rows_derivable,
+          derived != c,
+          do: {{m, path, mod, a}, c, derived}
+
+    p("")
+    p("  PASTE-READY @routed_excluded PROPOSAL (--routed-rows) — A PROPOSAL, NEVER A WRITE")
+
+    wrap(
+      "Nothing below is written to any file. The class on each ADD line is DERIVED by the " <>
+        "same rule that generated the shipped table (`:live` -> :liveview_handle_event, " <>
+        "otherwise :status_only_receipt); a member whose module this corpus does not carry " <>
+        "gets :NEEDS_CLASS, which is UNDECLARED and reds EXCLUSION-CLASS-DECLARED if it is " <>
+        "pasted without a human ruling. A DELETE line names a committed row that judges no " <>
+        "live member. A RE-CLASS line names a row whose committed class no longer matches " <>
+        "the shape it describes. THE HUMAN DECIDES THE CLASS — this only spares the typing.",
+      "      "
+    )
+
+    p("")
+    p("      ADD #{pad(length(disp.undisposed))} row(s) — every UNDISPOSED routed-write member:")
+
+    if disp.undisposed == [] do
+      p("        (none — every routed-write member carries a disposition)")
+    else
+      disp.undisposed
+      |> Enum.sort()
+      |> Enum.each(fn {m, path, mod, a} = key ->
+        {class, note} = routed_row_class(key, mods)
+        p("    {#{inspect(m)}, #{inspect(path)}, #{inspect(mod)}, #{inspect(a)}, #{inspect(class)}},")
+        if note != "", do: p("    #{note}")
+      end)
+    end
+
+    p("")
+    p("      DELETE #{pad(length(disp.orphans))} row(s) — committed, naming NO live routed member:")
+
+    if disp.orphans == [] do
+      p("        (none)")
+    else
+      Enum.each(Enum.sort(disp.orphans), fn {{m, path, mod, a}, c} ->
+        p("    {#{inspect(m)}, #{inspect(path)}, #{inspect(mod)}, #{inspect(a)}, #{inspect(c)}},   # DELETE: judges no live routed member")
+      end)
+    end
+
+    p("")
+    p("      RE-CLASS #{pad(length(reclass))} row(s) — committed class != the class the rule derives today:")
+
+    if reclass == [] do
+      p("        (none — every derivable committed class still matches its shape)")
+    else
+      Enum.each(reclass, fn {{m, path, mod, a}, was, now} ->
+        p("    {#{inspect(m)}, #{inspect(path)}, #{inspect(mod)}, #{inspect(a)}, #{inspect(now)}},   # RE-CLASS: committed #{inspect(was)}")
+      end)
+    end
+
+    p("")
+  end
+
+  defp routed_row_class({method, _path, _mod, _action}, _mods) when method == @routed_live_method,
+    do: {:liveview_handle_event, ""}
+
+  defp routed_row_class({_method, _path, mod, _action}, mods) do
+    if Map.has_key?(mods, mod) do
+      {:status_only_receipt, ""}
+    else
+      {:NEEDS_CLASS,
+       "# CLASS NOT DERIVED: this corpus carries no module #{inspect(mod)}, so the rule " <>
+         "cannot be evaluated. `action_not_in_corpus` is RETIRED (PDS wave 40) and must NOT " <>
+         "be resurrected — a HUMAN decides. Pasted unedited this row reds EXCLUSION-CLASS-DECLARED."}
+    end
+  end
+
+  defp report_routed_population(:no_router, _classified, _parsed, _index, _opts) do
     p("ROUTED-WRITE POPULATION — SKIPPED (this corpus carries no #{@router_path})")
     p(String.duplicate("-", 78))
     p("  NOT A PASS. Without the router there is no population to dispose, so the two")
@@ -6237,7 +8463,8 @@ defmodule PDS.Census do
     :no_router
   end
 
-  defp report_routed_population(d, classified, parsed, index) do
+
+  defp report_routed_population(d, classified, parsed, index, opts) do
     disp = dispose_routed(d.population, classified, parsed, index)
     lives = Enum.filter(d.population, fn {m, _, _, _} -> m == @routed_live_method end)
     live_mods = lives |> Enum.map(fn {_, _, mod, _} -> mod end) |> Enum.uniq() |> length()
@@ -6270,6 +8497,8 @@ defmodule PDS.Census do
     p("                  exclusion row — rows the precedence SWALLOWS, which is why every")
     p("                  number on this page can be identical with the table one row larger.")
     p("    sum       #{pad(disp.judged + disp.rostered + disp.excluded + length(disp.undisposed))}  == population #{length(d.population)}")
+
+    if opts.routed_rows?, do: routed_rows_proposal(disp, parsed)
 
     p("")
     p("  JUDGED FRACTION #{disp.ladder.judged_coverage}/#{length(d.population)} — the share of the routed write")
@@ -6328,14 +8557,12 @@ defmodule PDS.Census do
       "      "
     )
 
-    p("    THE ZEROES, PRINTED RATHER THAN IMPLIED — two arms that are NOT exercised today:")
+    p("    THE SIDE ARMS, PRINTED RATHER THAN IMPLIED — each says whether it is exercised:")
     p("      precedence suppression removes #{lad.suppressed_rostered} member(s) from ROSTERED and")
     p("        #{lad.suppressed_judged} from JUDGED — the loose roster-reaching and receipt-reaching sets")
     p("        equal the printed counts, so the cond's JUDGED > ROSTERED order hides nothing")
     p("        on this tree and the ladder's legs are unaffected by it either way.")
-    p("      the freshness arm is a NO-OP: #{lad.proven_defs_live_only} proven register def(s) at status :live and")
-    p("        #{lad.proven_defs} at :live+:stale — the same set, because no PROVEN register row is stale")
-    p("        right now. NOTHING BELOW IS EVIDENCE THAT THE :stale ARM WORKS.")
+    report_stale_arm(lad)
 
     p("")
     exfresh = exclusion_freshness(parsed, index)
@@ -6378,7 +8605,17 @@ defmodule PDS.Census do
     # (uniq by clause id, so a def reached by two routed quads is counted once).
     hops = rows |> Enum.flat_map(&Map.get(&1, :clause_results, [])) |> Enum.uniq_by(& &1.id)
     minted = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :minted)))
-    minted_deciding = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :minted_decided)))
+    minted_on_winner = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :minted_on_winner)))
+    minted_deciding = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :minted_deciding)))
+
+    # THE VERDICT IS DERIVED FROM THE EXACT NUMBER, NOT FROM THE PROXY, and it is a WORD
+    # rather than a count so the selftest can discriminate the two measures without
+    # pinning a bucket. MINTED-DECIDES-EXACT substitutes the proxy back into the exact
+    # slot and this sentence flips; MINTED-DECIDES-EXACT-CONTROL reads it unmutated.
+    minted_verdict =
+      if minted_deciding == 0,
+        do: "NO mint decides a printed class this run",
+        else: "MINTS DECIDE #{minted_deciding} printed class(es) this run"
     opaque_args = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :opaque)))
     field_args = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :field)))
 
@@ -6401,6 +8638,8 @@ defmodule PDS.Census do
     p("    RESIDUAL (never folded into a decided class) #{pad(residual)}")
     p("")
 
+    report_derivation_precedence(rows)
+    report_derivation_outcome(rows)
     report_derivation_mask(rows)
 
     Enum.each(@derivation_order, fn class ->
@@ -6452,8 +8691,16 @@ defmodule PDS.Census do
     p("      request_echo on a value that descends from the write. But #{minted} hop argument")
     p("      position(s) are calls whose OWN inputs trace to NEITHER an `{:ok, _}` payload")
     p("      NOR the head: their producer is MINTED from the call name alone, on no")
-    p("      provenance at all. #{minted_deciding} of them sit on the substitution the join CHOSE, so")
-    p("      that many are one parameter away from deciding a printed class. This is a")
+    p("      provenance at all. #{minted_on_winner} of them sit on the substitution the join CHOSE — that")
+    p("      is the PROXY, and it OVERSTATES its own name: it counts a mint anywhere in the")
+    p("      winning substitution, including parameters whose vars never reach the rendered")
+    p("      payload at all. #{minted_deciding} of those positions ACTUALLY DECIDE the printed class: the")
+    p("      minted parameter's vars are intersected with the payload_vars the winning")
+    p("      callee was classified on, and a name the callee REBINDS itself is excluded")
+    p("      because the producer that lands in `used` is then the callee's, not the mint's.")
+    p("      #{minted_verdict}. Both numbers are kept: the proxy is the")
+    p("      guessing SURFACE, the exact one is the guessing EFFECT, and a slice that")
+    p("      printed only the proxy would report an exposure it cannot show. This is a")
     p("      COUNTED exposure rather than a class of its own (PDS-D618): the numbers are")
     p("      printed every run, so the day a mint decides a row it moves in public.")
     p("    · FIELD ACCESS AND SUBSCRIPTS ARE NOT CALLS, and are excluded BY SHAPE rather")
@@ -6468,6 +8715,116 @@ defmodule PDS.Census do
     p("      helper stays residual by design, and its target is NAMED above as `emits")
     p("      nothing — a SECOND hop`, so the refusal can be checked instead of assumed.")
     p("")
+  end
+
+  # THE RULE, AND EVERY ROW IT ACTUALLY DECIDED (pds-bl-w41-clause-precedence-mask).
+  # A row whose clauses all agree is NOT listed: the rule decided nothing there, and
+  # printing it would bury the rows where a class really was chosen over another.
+  defp report_derivation_precedence(rows) do
+    multi = Enum.filter(rows, &(Map.get(&1, :clauses, 0) > 1))
+    applied = Enum.filter(rows, &Map.get(Map.get(&1, :precedence, %{}), :applied, false))
+    masking = Enum.filter(applied, &(Map.get(&1.precedence, :masked, []) != []))
+
+    p("  THE PRECEDENCE RULE, PRINTED — #{length(applied)} row(s) had clauses that DISAGREE,")
+    p("  of #{length(multi)} multi-clause row(s); #{length(masking)} of those outranked a RESIDUAL clause")
+    wrap(@derivation_precedence_rule, "    ")
+    p("")
+
+    if applied == [] do
+      p("    NO row on this corpus carries clauses of more than one class — the rule was")
+      p("    never reached this run, and that is a measured zero, not a silent one.")
+    else
+      Enum.each(Enum.sort_by(applied, fn %{key: {m, path, mod, a}} -> {mod, a, m, path} end), fn r ->
+        {m, path, mod, action} = r.key
+        p("      #{String.pad_trailing(to_string(m), 6)} #{path}")
+        p("             #{mod}.#{action}  ·  #{r.clauses} clause(s)")
+        wrap(r.precedence.why, "             ")
+        wrap("OUTCOME OF THE DECIDING CLAUSE: #{Map.get(r, :outcome_verdict, %{}) |> Map.get(:why, "-")}", "               ")
+      end)
+    end
+
+    p("")
+  end
+
+  # SUCCESS RECEIPT OR ERROR BRANCH — THE DISTINCTION THE PARTITION DID NOT HAVE
+  # (pds-bl-w41-error-branch-verdicts).
+  #
+  # THE FINDING THIS BLOCK EXISTS TO MAKE READABLE. A class row on this page reads as a
+  # verdict about the receipt an endpoint hands back. For some rows it is a verdict about
+  # what the endpoint says when the write did NOT happen, and until this block there was
+  # no way to tell the two apart short of opening the controller. Anything pinned to "the
+  # N rows in class X" — an allowlist, a repair batch, a before/after count — was pinning a
+  # set whose members are not all the same kind of claim.
+  #
+  # AND IT IS PRINTED, NOT GATED. A polarity this pass sometimes cannot derive must never
+  # decide a class, a count, or an exit code; every number below is a disclosure a reader
+  # can check against the source, and `unmarked` is listed with its reason beside the rows
+  # it actually applies to.
+  defp report_derivation_outcome(rows) do
+    verdicts = Enum.map(rows, &Map.get(&1, :outcome_verdict, %{decided_on: :no_body, error_branch?: false, masks_success?: false}))
+    freqs = Enum.frequencies_by(verdicts, & &1.decided_on)
+    error_rows = Enum.filter(rows, &Map.get(Map.get(&1, :outcome_verdict, %{}), :error_branch?, false))
+    masking = Enum.filter(error_rows, &Map.get(&1.outcome_verdict, :masks_success?, false))
+    blind = Enum.filter(rows, &(Map.get(Map.get(&1, :outcome_verdict, %{}), :decided_on, :no_body) in [:unmarked, :no_emission, :no_body]))
+
+    clauses = rows |> Enum.flat_map(&Map.get(&1, :clause_results, [])) |> Enum.uniq_by(& &1.id)
+    cfreqs = Enum.frequencies_by(clauses, &Map.get(&1, :outcome, :no_body))
+
+    p("  SUCCESS RECEIPT vs ERROR BRANCH — the outcome polarity of the clause that")
+    p("  DECIDED each row, DERIVED BY RUN from the response it builds and NEVER from the")
+    p("  clause head's position, arity or spelling")
+    wrap(
+      "WHAT IS READ: an HTTP status literal threaded through `conn` (`put_status/2`, " <>
+        "`send_resp/3`, or any call handed `conn` carrying an integer in 100..599 — this is " <>
+        "what reads `ErrorResponse.emit_custom(conn, 400, ...)`), the flash KIND atom " <>
+        "(`put_flash(conn, :error, _)` vs `:info`), and containment in the same " <>
+        "`{:ok, _}` region success_scopes/1 already derives. WHAT IS NOT READ: the clause's " <>
+        "head, its position in the def, its arity, and every word spelled anywhere in it. " <>
+        "A clause the markers do not reach is `unmarked` WITH ITS REASON, never a guess.",
+      "    "
+    )
+    p("")
+    p("                              DECIDING CLAUSE   ALL CLAUSES")
+
+    Enum.each(@derivation_outcomes, fn o ->
+      p("    #{String.pad_trailing(to_string(o), 26)}#{pad(Map.get(freqs, o, 0))}          #{pad(Map.get(cfreqs, o, 0))}")
+    end)
+
+    p("    #{String.pad_trailing("sum", 26)}#{pad(length(rows))}          #{pad(length(clauses))}")
+    p("")
+    p("    row(s) whose printed class was earned on an ERROR branch   #{pad(length(error_rows))}")
+    p("      of those, with a SUCCESS-receipt sibling clause MASKED   #{pad(length(masking))}")
+    p("    row(s) where the polarity is STRUCTURALLY UNDERIVABLE      #{pad(length(blind))}")
+    p("")
+
+    if error_rows == [] do
+      p("    NO row on this corpus prints a class earned on an error branch — a measured")
+      p("    zero over #{length(rows)} row(s), not a silent one.")
+    else
+      p("    EVERY ONE OF THEM, BY NAME:")
+
+      Enum.each(Enum.sort_by(error_rows, fn %{key: {m, path, mod, a}} -> {mod, a, m, path} end), fn r ->
+        {m, path, mod, action} = r.key
+        p("      #{String.pad_trailing(to_string(m), 6)} #{path}")
+        p("             #{mod}.#{action}  ·  prints #{r.class}  ·  #{r.clauses} clause(s)  ·  sibling outcome(s): #{Enum.join(Enum.map(r.outcome_verdict.others, &to_string/1), ", ")}")
+        wrap(r.outcome_verdict.why, "             ")
+      end)
+    end
+
+    p("")
+
+    if blind != [] do
+      p("    AND THE REFUSALS, ALSO BY NAME — these rows carry NO success-vs-error verdict")
+      p("    and this pass says why rather than inferring one:")
+
+      Enum.each(Enum.sort_by(blind, fn %{key: {m, path, mod, a}} -> {mod, a, m, path} end), fn r ->
+        {m, path, mod, action} = r.key
+        p("      #{String.pad_trailing(to_string(m), 6)} #{path}")
+        p("             #{mod}.#{action}  ·  prints #{r.class}  ·  #{Map.get(r, :outcome_why, "-")}")
+      end)
+
+      p("")
+    end
   end
 
   # THE PRECEDENCE MASK, COUNTED RATHER THAN INFERRED (PDS wave 41).
@@ -7029,6 +9386,9 @@ defmodule PDS.Census do
   # DECLARED HERE, WITH THE OTHER REACH ATTRIBUTES, BECAUSE A MODULE ATTRIBUTE IS READ AT
   # DEFINITION TIME: declared next to its user it read `nil` in lv_print_reach/6 above it
   # and printed `auth: nil` in a line whose whole job is to name the bucket.
+  # GATED, NOT MERELY DOCUMENTED (PDS wave 48): MOUNT-MACRO-MIRRORED re-derives the wrap
+  # set from emit_route_ast/1 every run, so "the day the macro gains a second wrapping
+  # bucket" below is now a RED rather than a silent widening of the residual.
   @lvs_macro_wrapped_auth :public_root
 
   defp lv_verdict(pop, comp, route_mods, parsed, index) do
@@ -7805,8 +10165,153 @@ defmodule PDS.Census do
       {"ROUTED-POPULATION-COMPLETE", ok?, complete_why},
       {"LENS-CAN-MISS", resolved != [], lens_why},
       {"ROUTED-DISPOSITION-UNSHADOWED", disp.shadowed == [], shadow_why}
-    ] ++ exclusion_freshness_checks(d) ++ derivation_checks(d) ++ liveview_checks(d)
+    ] ++
+      exclusion_table_checks(d) ++
+      exclusion_freshness_checks(d) ++
+      derivation_checks(d) ++ derivation_witness_checks(d) ++ liveview_checks(d) ++ stale_arm_checks(d)
   end
+
+  # ------------------------------------------ THE COMMITTED TABLE'S OWN TWO ARMS
+  #
+  # (A) EXCLUSION-CLASS-DECLARED (pds-bl-w41-exclusion-class-atom-ungated). Until this
+  # commit @routed_exclusion_classes was read at EXACTLY ONE site, and read as a
+  # `Map.get/3` DEFAULT. A DEFAULT IS NOT A CHECK: a committed row naming a class nobody
+  # declared printed `(no prose - see @routed_exclusion_classes)` under its own count and
+  # the run still exited 0 with CENSUS OK. MEASURED at origin/main 20d61d187 - re-labelling
+  # one row to a brand-new `:liveview_write_population` gave rc=0, every arm PASS, and a
+  # placeholder line. THE AFFORDANCE FOR A NEW CLASS IS PRESERVED ON PURPOSE: declaring the
+  # class in @routed_exclusion_classes in the SAME edit is what makes it green again, so
+  # this arm refuses an UNDECLARED class and never a new one.
+  #
+  # (B) EXCLUSION-MODULE-NAMED (pds-bl-w39-opaque-exclusion-row-unfalsifiable). A row whose
+  # module this corpus does not carry is OUT OF SCOPE by design - which is exactly why such
+  # a row is UNFALSIFIABLE: deleting it leaves the output byte-identical, so nothing forces
+  # a stale one out and nothing will ever notice if one is forgotten. Two halves, both here:
+  #   NAMED WITH A COUNT - every out-of-scope row is printed BY QUAD in this arm's sentence
+  #     (the freshness block prints only their COUNT), so a forgotten row is visible on
+  #     every run rather than silent.
+  #   REFUSED - a module string that is not a module ALIAS at all (the literal `"?"`) is
+  #     admissible ONLY on @routed_exclusion_opaque_class, the synthetic-fixture class whose
+  #     own prose says its members exist only in the --selftest corpus. THE ROWS THAT
+  #     MOTIVATED THIS ARE ALREADY GONE: the two wave-39 Sheets rows carried `"?"` under
+  #     `action_not_in_corpus`, a class wave 40 RETIRED once inline_alias_bindings/1 resolved
+  #     both modules. The arm is what stops the shape returning under a class that cannot
+  #     own it, on a table that could hold an unresolvable key with nothing to say about it.
+  #
+  # IT IS A PREDICATE OVER THE TABLE, NOT A LIST OF KNOWN-BAD ROWS: both halves move with
+  # the table, so an honest edit - a class declared, a fixture row added - cannot red them.
+  @routed_exclusion_opaque_class :selftest_fixture
+  @routed_exclusion_name_cap 24
+
+  # NO REGEX ENGINE, LIKE EVERY OTHER PREDICATE IN THIS FILE. An alias starts with an
+  # uppercase letter and carries only alias characters; `"?"` fails on the first clause.
+  defp module_alias?(<<c, _::binary>> = s) when c >= ?A and c <= ?Z do
+    s
+    |> String.to_charlist()
+    |> Enum.all?(&(&1 in ?A..?Z or &1 in ?a..?z or &1 in ?0..?9 or &1 in [?_, ?.]))
+  end
+
+  defp module_alias?(_), do: false
+
+  defp exclusion_table_checks(d) do
+    undeclared =
+      Enum.reject(@routed_excluded, fn {_m, _p, _mod, _a, c} ->
+        Map.has_key?(@routed_exclusion_classes, c)
+      end)
+
+    class_why =
+      if undeclared == [] do
+        "every one of the #{length(@routed_excluded)} committed disposition row(s) names a class DECLARED in the #{map_size(@routed_exclusion_classes)}-key @routed_exclusion_classes map - the class atom is CHECKED here, never defaulted (its one read site renders prose through Map.get/3, and a default prints a placeholder at exit 0)"
+      else
+        Enum.map_join(Enum.take(undeclared, 6), " · ", fn {m, p, mod, a, c} ->
+          "UNDECLARED EXCLUSION CLASS #{m} #{p} -> #{mod}.#{inspect(a)} [#{c}] - no prose in @routed_exclusion_classes decides anything about this row"
+        end) <>
+          " · #{length(undeclared)} row(s) in total; a class nobody declared disposes nothing, and the one read site would print a placeholder under its count"
+      end
+
+    out =
+      d
+      |> Map.get(:exclusion, %{})
+      |> Map.get(:rows, [])
+      |> Enum.filter(&(not &1.in_corpus?))
+
+    opaque =
+      Enum.reject(@routed_excluded, fn {_m, _p, mod, _a, c} ->
+        module_alias?(mod) or c == @routed_exclusion_opaque_class
+      end)
+
+    named =
+      cond do
+        out == [] -> "none"
+        length(out) > @routed_exclusion_name_cap ->
+          Enum.map_join(Enum.take(out, @routed_exclusion_name_cap), " · ", &exclusion_quad_label/1) <>
+            " · and #{length(out) - @routed_exclusion_name_cap} more (this corpus carries almost none of the real controllers)"
+
+        true -> Enum.map_join(out, " · ", &exclusion_quad_label/1)
+      end
+
+    module_why =
+      if opaque == [] do
+        "#{length(out)} row(s) name a module THIS corpus does not carry - judged neither way, and NAMED here rather than counted, so a stale row cannot sit unfalsifiable: #{named} · 0 row(s) carry a module string that is not an alias at all outside `#{@routed_exclusion_opaque_class}`"
+      else
+        Enum.map_join(Enum.take(opaque, 6), " · ", fn {m, p, mod, a, c} ->
+          "OPAQUE EXCLUSION MODULE #{m} #{p} -> #{inspect(mod)}.#{inspect(a)} [#{c}] - that string is not a module alias, so NO corpus can ever resolve it and no run can ever falsify this row; only `#{@routed_exclusion_opaque_class}` may carry one, because its members exist only in the --selftest corpus"
+        end)
+      end
+
+    [
+      {"EXCLUSION-CLASS-DECLARED", undeclared == [], class_why},
+      {"EXCLUSION-MODULE-NAMED", opaque == [], module_why}
+    ]
+  end
+
+  # THE LADDER'S :stale FRESHNESS ARM STOPS BEING UNGUARDED (task-ac55ff2388510d67).
+  #
+  # WHAT WAS WRONG. Leg A of the PROVEN-BACKED rung admits register rows at status in
+  # [:live, :stale]. Wave 45 measured ZERO PROVEN rows stale, so the `:stale` half moved
+  # no member and deleting it would have changed no printed number — a live branch with
+  # no mutant on it, which is the exact defect this epic exists to file. It printed the
+  # zero, which is the honest minimum, and stopped there.
+  #
+  # WHAT THIS ARM ASSERTS, AND WHY IT IS A RELATION AND NEVER A COUNT. Every member that
+  # reaches a PROVEN register def carried ONLY by the `:stale` admission must be IN leg A.
+  # Both sides are re-derived from the same run, so an honest register edit, a controller
+  # repair, or a re-key moves them TOGETHER and cannot red this. Dropping the `:stale`
+  # from leg A moves exactly one side, and that is the failure it exists for — proven by
+  # the selftest case LADDER-STALE-ARM-REDS-WHEN-DROPPED, which does precisely that.
+  #
+  # NOT EXERCISED IS SAID OUT LOUD RATHER THAN PASSED SILENTLY. If a future tree carries
+  # no stale PROVEN row the predicate is vacuously true, and the PASS sentence says the
+  # arm certified NOTHING — the failure mode a green with no subject has. Its mutant does
+  # not depend on that luck either: LADDER-STALE-ARM-SPECIMEN MANUFACTURES the specimen by
+  # demoting one PROVEN row's expression fingerprint, which is the demotion path
+  # resolve_register/1 owns.
+  #
+  # SCOPED LIKE ITS SIBLINGS. Over the synthetic selftest tree the register resolves zero
+  # rows, so an unconditional arm there would certify an empty set at exit 0 — PDS-D541's
+  # unmutatability. Both mutants therefore census the REPO.
+  defp stale_arm_checks(%{disposition: %{ladder: %{register_scope: :real} = lad}}) do
+    why =
+      cond do
+        lad.stale_arm_dropped != [] ->
+          "#{length(lad.stale_arm_dropped)} member(s) reach a PROVEN register def carried ONLY by the :stale admission and are NOT in leg A — the freshness arm has been dropped from the ladder, so leg A now under-counts PROVEN-BACKED by every one of them: " <>
+            Enum.map_join(Enum.take(lad.stale_arm_dropped, 6), " · ", fn {m, p, mod, a} ->
+              "STALE-ONLY MEMBER #{m} #{p} -> #{mod}.#{a}"
+            end)
+
+        lad.stale_only_defs == [] ->
+          "NOT EXERCISED — no PROVEN register row resolves :stale on this corpus, so the predicate is vacuously true and this PASS certifies NOTHING about the :stale arm. Its evidence is the selftest case LADDER-STALE-ARM-SPECIMEN, which manufactures a stale PROVEN row rather than waiting for the tree to grow one"
+
+        true ->
+          "#{length(lad.stale_only_defs)} PROVEN register def(s) reach leg A through the :stale admission ALONE (" <>
+            Enum.map_join(lad.stale_only_defs, ", ", fn {mod, name} -> "#{mod}.#{name}" end) <>
+            "), and all #{lad.stale_only_members} member(s) they reach are IN leg A · leg A #{lad.leg_a_live_only} -> #{lad.leg_a} · delete the :stale and this arm reds naming the members that fell out"
+      end
+
+    [{"LADDER-STALE-ARM-EXERCISED", lad.stale_arm_dropped == [], why}]
+  end
+
+  defp stale_arm_checks(_), do: []
 
   # SCOPED OUT ON THE SYNTHETIC TREE, exactly like the register and roster arms — see
   # the comment on exclusion_freshness/2 for why an unconditional arm would red the
@@ -7846,35 +10351,340 @@ defmodule PDS.Census do
     [{"DERIVATION-PARTITION-TOTAL", sum == total and stray == [], why}]
   end
 
+  # THE CLASS'S OWN WITNESS, RE-DERIVED AND REQUIRED TO AGREE
+  # (pds-bl-w41-partition-arm-class-blind).
+  #
+  # WHY A SECOND ARM AT ALL. DERIVATION-PARTITION-TOTAL above is a CONSERVATION law and
+  # nothing more: it asserts every row of the class is disposed EXACTLY ONCE. A wholesale
+  # reclassification satisfies conservation perfectly — forcing every row to
+  # `:store_derived` keeps the sum, empties the stray set, and ships GREEN. That is the
+  # most consequential lie this partition can tell, and it rode no arm at all.
+  #
+  # AND WHY THIS ONE IS A RELATION, NOT A CLASS-COUNT THRESHOLD. Pinning
+  # `store_derived == 60` would red the build every time a controller was REPAIRED, which
+  # is the defect this epic files, not the guard. So this arm asserts a relation between
+  # two things the SAME run derived separately: the row's CLASS, and the PRODUCING CALL
+  # NAME printed beside it. Three classes are DEFINED by that name and are re-derived
+  # from it here, independently of the cond in derive_def/3 that assigned them:
+  #
+  #   store_derived / reread_receipt  need a producing call to exist at all (both are read
+  #                                   off `used`, the `{:ok, _}` producers in the payload),
+  #                                   and they are separated from each other by exactly one
+  #                                   predicate — @derivation_reread_stems over that name.
+  #   control_flow_gated_literal      needs a NAMED discarded `{:ok, _}` gate; that is what
+  #                                   distinguishes it from literal_only, which has none.
+  #
+  # A class that moves without its witness moving reds BY NAME. An honest lens correction
+  # moves BOTH together — the repaired receipt renders the write's return, so the producer
+  # appears in the same edit that changes the class — and stays green. Proven both ways in
+  # --selftest: CLASS-WITNESS-ARMED (a class-moving mutation that leaves the row count
+  # intact) and CLASS-WITNESS-HONEST-CORRECTION-GREEN (the repaired fixture corpus).
+  #
+  # THE CLASSES IT SAYS NOTHING ABOUT ARE SAID SO OUT LOUD: request_echo, literal_only and
+  # the three residual classes carry no producing call by construction, so no witness of
+  # this shape exists for them and this arm does not pretend to have one.
+  #
+  # THE LOCAL BELOW IS NOT NAMED AFTER THE ONE IN derivation_checks/1, DELIBERATELY.
+  # PARTITION-TOTAL-ARMED anchors its mutation on that binding's exact text and the
+  # harness REFUSES an anchor occurring more than once — including as a SUBSTRING. A
+  # same-named local here (or a comment quoting it) silently disarms a committed case,
+  # which is how this file's own selftest caught this function the first time it landed.
+  defp derivation_witness_checks(d) do
+    partition = Map.get(d, :derivation, [])
+    violations = partition |> Enum.map(&derivation_witness/1) |> Enum.reject(&is_nil/1)
+    witnessed = Enum.count(partition, &derivation_witness_class?(&1.class))
+
+    why =
+      if violations == [] do
+        "#{witnessed} of #{length(partition)} row(s) carry a class DEFINED by its producing call " <>
+          "(store_derived, reread_receipt, control_flow_gated_literal) and every one of them agrees with " <>
+          "its own printed witness · A RELATION, NEVER A COUNT: no class count is pinned, so a repaired " <>
+          "controller moves its class and its producer together and this stays green · BLIND SHAPE, PRINTED: " <>
+          "request_echo, literal_only and the three residual classes carry no producing call and are NOT witnessed here"
+      else
+        "#{length(violations)} row(s) print a class their own producing call refutes: " <>
+          Enum.join(Enum.take(violations, 6), " · ") <>
+          if(length(violations) > 6, do: " · (#{length(violations) - 6} more)", else: "")
+      end
+
+    [{"DERIVATION-CLASS-WITNESS", violations == [], why}]
+  end
+
+  defp derivation_witness_class?(class),
+    do: class in [:store_derived, :reread_receipt, :control_flow_gated_literal]
+
+  # THE PRODUCER STRING IS PARSED BACK THE WAY IT WAS WRITTEN. derive_def/3 spends
+  # `Enum.join(producers, "+")` for the two producer classes and gate_or_dash/1 elsewhere,
+  # so "-" is NO producing call and a "(gate ...)" string is a NAMED GATE and not one
+  # either. Reading both shapes here is what keeps the arm from accusing literal_only of
+  # owning a producer it never claimed.
+  defp derivation_witness(row) do
+    producer = Map.get(row, :producer, "-")
+    class = row.class
+
+    label =
+      case Map.get(row, :key) do
+        {_m, _p, mod, a} -> "#{mod}.#{a}"
+        _ -> "(unkeyed row)"
+      end
+
+    gate? = String.starts_with?(producer, "(gate ")
+
+    producing =
+      if producer == "-" or gate?, do: [], else: String.split(producer, "+", trim: true)
+
+    cond do
+      class in [:store_derived, :reread_receipt] and producing == [] ->
+        "#{label} classes #{class} — a class DEFINED by the `{:ok, _}` producer it renders — while printing NO producing call (`#{producer}`)"
+
+      class == :reread_receipt and not Enum.all?(producing, &derivation_reread_name?/1) ->
+        "#{label} classes reread_receipt over producer(s) `#{producer}`, which are NOT all read-shaped by @derivation_reread_stems — that is the store_derived predicate"
+
+      class == :store_derived and Enum.all?(producing, &derivation_reread_name?/1) ->
+        "#{label} classes store_derived over producer(s) `#{producer}`, every one of which IS read-shaped by @derivation_reread_stems — that is the reread_receipt predicate"
+
+      class == :control_flow_gated_literal and not gate? and producing == [] ->
+        "#{label} classes control_flow_gated_literal — a class DEFINED by a discarded `{:ok, _}` gate — while naming no gate (`#{producer}`)"
+
+      true ->
+        nil
+    end
+  end
+
   # ---------------------------------------------------------------- blind spots
 
-  defp report_blind_spots(parsed) do
-    json = sum_occ(parsed, "json(conn,")
-    send_resp = sum_occ(parsed, "send_resp(conn, 2")
+  # THE AGGREGATE, DERIVED FROM parse_file/1's PER-FILE RECEIPTS AND FROM NOTHING ELSE.
+  # It is called TWICE on every run — once by the block that prints and once by the arm
+  # that guards the printed numbers — which is only sound because it re-reads the SAME
+  # parse rather than re-parsing. Its blind shape is stated where the arm prints: a
+  # mutation to receipt_sites/3 itself moves both sides together and this arm cannot see
+  # it; what it CAN see is a number invented, dropped or transcribed at the print site,
+  # which is the failure this block actually had.
+  defp blind_shape(parsed) do
+    json = Enum.flat_map(parsed, & &1.receipts.json)
+    put2xx = Enum.flat_map(parsed, & &1.receipts.put2xx)
+    send2xx = Enum.flat_map(parsed, & &1.receipts.send2xx)
+    literal_arg = Enum.flat_map(parsed, &Map.get(&1.receipts, :literal_arg, []))
+    flash_redirect = Enum.flat_map(parsed, &Map.get(&1.receipts, :flash_redirect, []))
+    grep = Enum.flat_map(parsed, fn f -> Enum.map(f.receipts.grep_lines, &{f.path, &1}) end)
 
-    put2xx =
-      Enum.sum(
-        for f <- parsed do
-          Enum.sum(
-            for pat <- ["put_status(:ok", "put_status(:created", "put_status(:accepted",
-                        "put_status(:no_content", "put_status(20"],
-                do: count(f.src, pat)
-          )
-        end
-      )
+    ast_lines = MapSet.new(json, fn {path, line, _} -> {path, line} end)
+    grep_lines = MapSet.new(grep)
+
+    %{
+      ast_json: length(json),
+      ast_json_2xx: Enum.count(json, fn {_, _, wears?} -> wears? end),
+      ast_literal_arg: length(literal_arg),
+      literal_arg_sites: literal_arg,
+      ast_flash_redirect: length(flash_redirect),
+      flash_redirect_sites: flash_redirect,
+      ast_put2xx: length(put2xx),
+      ast_send2xx: length(send2xx),
+      grep_raw: Enum.sum(Enum.map(parsed, & &1.receipts.grep_raw)),
+      grep_lines: MapSet.size(grep_lines),
+      ast_lines: MapSet.size(ast_lines),
+      # THE SPLIT, AS TWO SETS AND NOT AS A DIFFERENCE OF TWO TOTALS. `ast_json >=
+      # grep_raw` would have passed on this tree for a year while the substring was
+      # matching the tail of `error_json(conn,`; a set difference names WHICH lines.
+      false_positive: MapSet.difference(grep_lines, ast_lines),
+      false_negative: MapSet.difference(ast_lines, grep_lines)
+    }
+  end
+
+  # ------------------------------------------------- BLIND-SHAPE-SPLIT
+  #
+  # THE ARM THE BLOCK NEVER HAD. Until this commit the three blind-spot numbers were the
+  # only figures in the report with NO arm over them: forcing `json = 9999`, `put2xx =
+  # 8888`, `send_resp = 7777` on this file left rc=0, 20 arms PASS and `CENSUS OK`, with
+  # the whole diff those three lines plus the wall clock (measured, tree fd6e9ddff).
+  #
+  # IT ASSERTS A RELATION AND A SPLIT, NEVER A THRESHOLD. Both sides move together on any
+  # honest corpus change — a controller repaired, a route added — so it cannot red on
+  # churn. It reds on exactly two things: a printed number that is not the derived one,
+  # and a FP/FN split that does not reconcile the two lenses. `ast_json >= grep_raw`
+  # would have been the cheap version and it is WORTHLESS: it passed on this tree for a
+  # month while 28 of the substring's lines were matching the tail of `error_json(conn,`.
+  #
+  # BLIND SHAPE, PRINTED: both sides read parse_file/1's `receipts` field, so a mutation
+  # INSIDE receipt_sites/3 moves them together and this arm prints PASS through it. What
+  # it catches is the failure the block actually had — a number invented, transcribed or
+  # dropped between the derivation and the page.
+  defp blind_shape_checks(blind, parsed) do
+    d = blind_shape(parsed)
+    fp = MapSet.size(d.false_positive)
+    fn_ = MapSet.size(d.false_negative)
+
+    printed = [
+      {"json/2 sites", blind.json, d.ast_json},
+      {"2xx subset", blind.json_2xx, d.ast_json_2xx},
+      {"send_resp/3 2xx", blind.send_resp, d.ast_send2xx},
+      {"put_status/2 2xx", blind.put2xx, d.ast_put2xx},
+      {"literal-argument sites", blind.literal_arg, d.ast_literal_arg},
+      {"flash+302 sites", blind.flash_redirect, d.ast_flash_redirect},
+      {"legacy substring lines", blind.legacy, d.grep_lines},
+      {"legacy substring occurrences", blind.legacy_raw, d.grep_raw},
+      {"false positives", blind.fp, fp},
+      {"false negatives", blind.fn_, fn_}
+    ]
+
+    drifted = Enum.reject(printed, fn {_, got, want} -> got == want end)
+    subset? = d.ast_json_2xx <= d.ast_json
+    reconciles? = d.grep_lines - fp == d.ast_lines - fn_
+
+    why =
+      cond do
+        drifted != [] ->
+          "the blind-spot block PRINTED a number this run did not derive: " <>
+            Enum.map_join(drifted, " · ", fn {label, got, want} ->
+              "#{label} printed #{got}, derived #{want}"
+            end)
+
+        not subset? ->
+          "the 2xx figure #{d.ast_json_2xx} EXCEEDS the json/2 population #{d.ast_json} — it is being printed as an addend, not a subset"
+
+        not reconciles? ->
+          "the two lenses do not reconcile: legacy #{d.grep_lines} - FP #{fp} = #{d.grep_lines - fp}, but AST #{d.ast_lines} - FN #{fn_} = #{d.ast_lines - fn_}; the FP/FN split does not describe the gap it claims to"
+
+        true ->
+          "all #{length(printed)} printed blind-spot figures re-derived from the same parse · #{d.ast_literal_arg} literal-argument site(s) · #{d.ast_flash_redirect} flash+302 site(s) · #{d.ast_json} json/2 site(s), #{d.ast_json_2xx} wearing a 2xx literal (a SUBSET, #{d.ast_json_2xx} <= #{d.ast_json}), #{d.ast_send2xx} send_resp/3, #{d.ast_put2xx} put_status/2 · the refuted substring reconciles: #{d.grep_lines} - #{fp} FP == #{d.ast_lines} - #{fn_} FN == #{d.ast_lines - fn_} · BLIND SHAPE: both sides read ONE parse, so a mutation inside receipt_sites/3 moves them together and prints PASS through it"
+      end
+
+    [{"BLIND-SHAPE-SPLIT", drifted == [] and subset? and reconciles?, why}]
+  end
+
+  defp report_blind_spots(parsed) do
+    b = blind_shape(parsed)
+
+    # THE PRINTED BINDINGS, TAKEN OFF `b` ONE LINE EACH AND ON PURPOSE. Every number in
+    # this block passes through a named binding here and is returned to integrity/15 in
+    # the map below, so BLIND-SHAPE-SPLIT compares WHAT WAS PRINTED against a fresh
+    # derivation. Before this, forcing `json = 9999` printed 9999, left rc=0, 20 arms
+    # PASS and `CENSUS OK`: no arm read these numbers at all.
+    json = b.ast_json
+    json_2xx = b.ast_json_2xx
+    send_resp = b.ast_send2xx
+    put2xx = b.ast_put2xx
+    literal_arg = b.ast_literal_arg
+    flash_redirect = b.ast_flash_redirect
+    legacy = b.grep_lines
+    legacy_raw = b.grep_raw
+    fp = MapSet.size(b.false_positive)
+    fn_ = MapSet.size(b.false_negative)
 
     p("WHAT THIS LENS CANNOT SEE (a census that hides its blind spots is propaganda)")
     p(String.duplicate("-", 78))
-    p("  #{json}  json(conn, ...) responses — a 200 with no `ok` key claims success by STATUS alone")
-    p("  #{put2xx}  put_status(2xx) sites — same claim, wearing a status code")
-    p("  #{send_resp}  send_resp(conn, 2xx) sites — same again, with no body to inspect")
+    p("  #{json}  json/2 receipt sites (AST, pipes normalised) — a 200 with no `ok` key claims")
+    p("        success by STATUS alone. ONE population with SUBSETS, never three addends:")
+    p("        #{json_2xx} of these #{json} wear an explicit put_status(2xx) on the conn they answer on,")
+    p("        and #{send_resp} send_resp/3 site(s) carry a 2xx literal with no body to inspect.")
+    p("        #{put2xx} put_status/2 call(s) carry a 2xx literal anywhere in this corpus.")
+    p("  #{legacy}  json(conn, — THE REFUTED LEGACY SUBSTRING, KEPT AND RELABELLED, NOT DELETED.")
+    p("        (#{legacy_raw} raw occurrence(s) on #{legacy} line(s)#{if legacy_raw == legacy, do: " — one per line", else: " — some line carries more than one"}.)")
+    p("        pds-w34-status-only-lens (merged #8857) refuted it and this block printed it")
+    p("        anyway. Measured this run: #{fp} of its #{legacy} line(s) are FALSE POSITIVES (the")
+    p("        substring matches the TAIL of a longer name, e.g. `error_json(conn,`) and it")
+    p("        MISSES #{fn_} AST line(s) — almost all the piped form `|> json(`, which it cannot")
+    p("        see at all. #{legacy} - #{fp} = #{legacy - fp} = #{b.ast_lines} - #{fn_}. The two numbers are")
+    p("        INCOMPATIBLE LENSES over one population, never two populations to add.")
+    p("  #{literal_arg}  A SUCCESS VALUE RENDERED FROM A LITERAL ARGUMENT — THE FOURTH DECLARED")
+    p("        BLIND SPOT, AND A DECLARED ONE, NOT A LENS EXTENSION (PDS wave 36 lens half).")
+    p("        The three figures above key on a literal KEY (`ok: true`) or on a bodyless")
+    p("        2xx. NEITHER covers a claim carried in an ARGUMENT: `json(conn,")
+    p("        render_user(conn, user, false))` after `{:ok, _} = Scim.deprovision_user/2`")
+    p("        asserts the deprovision took, spells no `ok` key, and renders a body")
+    p("        byte-identical to the one a no-op write would produce.")
+    p("        THE WORKED EXAMPLE, AND IT IS REPAIRED: scim_users_controller.ex:77-:78 (the")
+    p("        SCIM deprovision PATCH) held exactly that until 501fb9670 (#8952, PDS-D503)")
+    p("        replaced the literal with `Scim.org_user_active?(org, user)`. The bare 204 at")
+    p("        the DELETE beside it was always inside the send_resp(conn, 2xx) figure above;")
+    p("        this render was inside NOTHING until this line existed.")
+    p("        WHY DECLARED AND NOT EXTENDED: reading a literal argument as a RECEIPT needs")
+    p("        the callee's parameter-to-field binding — dataflow this build-free lens")
+    p("        refuses on the same grounds it refuses a computed `ok:` (`ok: not is_nil(id)`")
+    p("        and `ok: user.is_admin` are indistinguishable to an AST lens). Extending would")
+    p("        move `emitted`, and with it the register's denominator, on a GUESS. So the")
+    p("        shape is COUNTED and EXCLUDED: `emitted` does not move, and the register's")
+    p("        completeness claim now names what it is a denominator OVER.")
+    p("        A FLOOR, not a count: a boolean bound to a variable one line earlier is")
+    p("        invisible here, exactly as `|> put_status(status)` is above.")
+    Enum.each(b.literal_arg_sites, fn {path, line, snippet} ->
+      p("        · #{short(path)}:#{line}  #{snippet}")
+    end)
+
+    if literal_arg == 0 do
+      p("        ZERO ON THIS TREE, AND ZERO IS THE READING THAT NEEDS A CONTROL. Re-run the")
+      p("        SAME predicate against the pre-repair blob and it finds the site — that, not")
+      p("        this 0, is what says the predicate is live:")
+      p("          git show 501fb9670^:api/lib/barkpark_web/controllers/scim_users_controller.ex")
+      p("          # then census that one file: literal_arg_sites/2 returns")
+      p("          #   scim_users_controller.ex:<line>  render_user(conn, user, false)")
+    end
+
+    p("  #{flash_redirect}  A SUCCESS REPORTED AS A FLASH MESSAGE AND A 302 — THE FIFTH DECLARED")
+    p("        BLIND SPOT (PDS wave 36 trailer). A `redirect/2` whose own conn chain carries")
+    p("        `put_flash(:info, ...)` answers with NO body, so the `ok: true` lens misses it;")
+    p("        it spells no json/2, no send_resp/3 and no put_status(2xx) — a redirect sets")
+    p("        302 — so the four figures above miss it BY CONSTRUCTION, not by accident.")
+    p("        AN INSTRUMENT THAT ALREADY REPORTS WHAT IT CANNOT SEE DID NOT REPORT THIS.")
+    p("        SWEPT, NOT GUESSED (api/lib, this tree): 45 put_flash(:info) call(s) across 20")
+    p("        file(s), 7 of them in controllers across exactly 2 files — grant_controller.ex")
+    p("        and session_controller.ex. Re-derive without this script:")
+    p("          git grep -c 'put_flash(:info' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
+    p("        DECLARED, NEVER A FIFTH CENSUS CLASS: `emitted` does not move, no bucket")
+    p("        moves, the register's denominator is untouched. Reading a flash STRING as a")
+    p("        receipt needs the dataflow this build-free lens refuses for a computed `ok:`.")
+    p("        A FLOOR, three ways: a flash set on a SEPARATE statement from the redirected")
+    p("        conn is invisible, an `:info` level bound to a variable is invisible, and a")
+    p("        LiveView push_navigate/2 is a different call this predicate does not read.")
+    p("        IT SAYS NOTHING ABOUT LOSSINESS. A flash+302 over a return value that WAS")
+    p("        read is a member of this count and is honest. The one member wave 36 filed as")
+    p("        lossy — the Studio sign-out saying `Signed out.` over a discarded")
+    p("        revoke_user_session_token/1 — is ALREADY REPAIRED on this tree: session_")
+    p("        controller.ex binds `{:ok, n} = ...` and renders sign_out_flash(revoked)")
+    p("        (PDS-D523), so the lossy count over today's corpus is ZERO and the shape is")
+    p("        what is declared here.")
+    Enum.each(b.flash_redirect_sites, fn {path, line, msg} ->
+      p("        · #{short(path)}:#{line}  #{msg}")
+    end)
+
+    if flash_redirect == 0 do
+      p("        ZERO ON THIS TREE, AND ZERO IS THE READING THAT NEEDS A CONTROL. The")
+      p("        predicate's liveness is proven by the selftest case named below, not by")
+      p("        this 0 — see BLIND-SHAPE-FLASH-REDIRECT-PRINTED-IS-DERIVED.")
+    end
+
     p("  ALSO INVISIBLE: `mix ecto.migrations` reporting `up` (PDS-D311) — it reads a")
     p("  bookkeeping row, never the object the migration claims to have produced.")
-    p("  Re-derive these three without this script (plain substrings, no \\b needed):")
-    p("    git grep -c 'json(conn,' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
-    p("    git grep -c 'send_resp(conn, 2' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
+    p("  BLIND SHAPE, PRINTED: a status bound to a VARIABLE (`|> put_status(status)`) is")
+    p("  counted in NEITHER 2xx figure — a build-free lens does not know the binding — so")
+    p("  #{json_2xx} and #{put2xx} are FLOORS, not counts. The block this replaced asked for FIVE")
+    p("  hand-written substrings (:ok :created :accepted :no_content 20) and silently lost")
+    p("  :multi_status, :reset_content, :partial_content, :non_authoritative_information,")
+    p("  :already_reported and :im_used; the vocabulary is now the whole 2xx range, taken")
+    p("  off the AST. Agreement at a number is not coverage of a vocabulary.")
+    p("  Re-derive EVERY number above without this script:")
+    p("    #{legacy} legacy line(s) / #{legacy_raw} raw occurrence(s) · git grep -c 'json(conn,' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
+    p("    #{json} / #{json_2xx} / #{send_resp} / #{put2xx} / #{fp} / #{fn_} are AST call-node counts: NO substring")
+    p("    re-derives them. `git grep -c '|> json(' -- 'api/lib/**/*.ex'` and `git grep -c")
+    p("    'json(' -- 'api/lib/**/*.ex'` BRACKET #{json} (piped-only floor and all-arities ceiling);")
+    p("    `git grep -c 'send_resp(' -- 'api/lib/**/*.ex'` brackets #{send_resp} from above. To re-derive")
+    p("    EXACTLY, re-run this script — and BLIND-SHAPE-SPLIT below is what makes that")
+    p("    honest: it re-derives every one of them from the same parse and reds on any drift.")
     p("")
     report_roster(parsed)
+
+    %{
+      json: json,
+      json_2xx: json_2xx,
+      send_resp: send_resp,
+      put2xx: put2xx,
+      literal_arg: literal_arg,
+      flash_redirect: flash_redirect,
+      legacy: legacy,
+      legacy_raw: legacy_raw,
+      fp: fp,
+      fn_: fn_
+    }
   end
 
   # THE ROSTER, PRINTED WITH ITS ANCHORS RESOLVED LIVE. The line beside each row is
@@ -8054,13 +10864,11 @@ defmodule PDS.Census do
         true ->
           "#{fresh} roster verdict(s) still name the def they were derived against — anchor_mfa AND def_fp both re-derived this run, never transcribed" <>
             if(absent > 0, do: " (#{absent} row(s) absent from this corpus — ROSTER-ANCHORS-EXIST owns those)", else: "") <>
-            ". BLIND SHAPE, STATED: both granularities are SAME-FILE. `git show --stat fbc6b80a1` — the repair that made two of these rows stale — also touched scim.ex and accounts.ex, and a future repair confined to a CALLEE moves no byte inside the roster row's own def, so this arm would print PASS through it"
+            ". BLIND SHAPE, STATED: both granularities are SAME-FILE. `git show --stat fbc6b80a1` — the repair that made two of these rows stale — also touched scim.ex and accounts.ex, and a future repair confined to a CALLEE moves no byte inside the roster row's own def, so this arm would print PASS through it — the SAME hop the register's CALLEE-DERIVED figure now counts (see the JUDGMENT REGISTER block: it is DECLARED and COUNTED there, and it is not covered there either)"
       end
 
     {"ROSTER-VERDICT-FRESH", not vacuous? and stale == [] and unresolved == [], why}
   end
-
-  defp sum_occ(parsed, needle), do: Enum.sum(Enum.map(parsed, &count(&1.src, needle)))
 
   # ---------------------------------------------------------------- delegate probe
 
@@ -8119,7 +10927,7 @@ defmodule PDS.Census do
   # THE SEAM IS CWD INJECTION. corpus/1 globs `api/lib/**/*.ex` relative to the working
   # directory and @sentinels are relative literals, so a synthetic tree in a tmp dir is
   # censused verbatim by running this same file with `cd:` set to it. The `--files-from`
-  # seam does NOT work for fixtures: guard_corpus!/1 runs before parse_file/1 and ORs the
+  # seam does NOT work for fixtures: guard_corpus!/3 runs before parse_file/1 and ORs the
   # corpus floor with the sentinel check on ONE cond arm, so no fixture list is both small
   # enough to mutate and large enough to pass.
   #
@@ -8133,7 +10941,7 @@ defmodule PDS.Census do
   # RELATION (keys lines == emitted, both read off the same invocation). A selftest that
   # pinned POST-READ or the unclassified denominator would red the build on every honest
   # lens correction, which is the defect this epic keeps filing, not the guard. PDS-D467b:
-  # CORPUS-INTACT is structurally unreachable in normal operation — guard_corpus!/1 exits 2
+  # CORPUS-INTACT is structurally unreachable in normal operation — guard_corpus!/3 exits 2
   # on exactly the condition that arm tests — so it is proven by BYPASSING the guard.
   @self_source Path.expand(__ENV__.file)
   @pair_atom "ok:" <> " true"
@@ -8271,6 +11079,121 @@ defmodule PDS.Census do
       expect: {:keys, {:reds, "does not DISCRIMINATE"}},
       proves: "dropping expr_fp from the key collapses two sites in one clause to one row — the register would silently lose a site"
     },
+    # ---- RESPONSE-CARRIES-THE-READ (PDS-D490), THREE CASES ON THE REPO CORPUS -------
+    #
+    # WHY `corpus: :repo` FOR ALL THREE (PDS-D541). Both arms scope themselves through
+    # register_scope/1, which is :scoped_out over the synthetic tree — an arm proven only
+    # where it is switched off is proven nowhere, and a mutant there would print
+    # SELFTEST OK having run no predicate at all. Nothing below writes to api/lib: each
+    # case runs a MUTATED COPY of this file with cwd at the repo, read-only.
+    #
+    # THE FIRST IS THE PRECONDITION, NOT A CONTROL. A control over an absent site proves
+    # nothing, and this exact arm is about a REFUSAL — "the tripwire did not fire" reads
+    # identically whether the tripwire was refused or was never in the corpus at all. So
+    # the pristine run must first be seen to REACH the `status/2` receipt in
+    # github_status_controller.ex and name it in the capture roll.
+    %{
+      name: "RCR-TRIPWIRE-IS-REACHED",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "RESPONSE-CARRIES-THE-READ — A HYPOTHESIS COLUMN, NEVER A VERDICT",
+        # RE-DERIVED, NEVER RE-TYPED (pds-w39-status-only-receipts). This read `:65` and
+        # the site has been at `:92` for some time: MEASURED on origin/main at 93672ef92,
+        # BEFORE this wave touched the file, a plain `elixir scripts/pds-elixir-receipt-
+        # census.exs` prints `REFUSED  barkpark_web/controllers/github_status_controller
+        # .ex:92  health: status_fun().()`, and the identical line comes back after. So
+        # this case was the ONLY red in `--selftest` on a clean checkout, and it was red
+        # for a LINE, not for a behaviour — the arm it guards (RCR-CAPTURE-FIRE-REDS,
+        # RCR-FIRE-SET-PINNED) passed throughout. IT IS THIS FILE'S OWN NAMED DEFECT
+        # WEARING THE SELFTEST'S COAT: a {path,line} key that rots silently while the
+        # thing it names is fine, which is exactly why the register's citations were
+        # migrated to CONTENT keys. The expectation is left line-anchored rather than
+        # migrated here because the string it matches is the census's OWN PRINTED OUTPUT,
+        # where the line is part of the claim being asserted.
+        "barkpark_web/controllers/github_status_controller.ex:92  health: status_fun().()",
+        "PASS  RESPONSE-CARRIES-READ-REFUSES-CAPTURE",
+        "PASS  RESPONSE-CARRIES-THE-READ-PINNED"
+      ],
+      proves: "the repo corpus DOES carry the tripwire — the same syntactic shape dispatching through a runtime capture — and the arm names it in the REFUSED roll, so the two mutants below have something real to destroy"
+    },
+    %{
+      name: "RCR-CAPTURE-FIRE-REDS",
+      corpus: :repo,
+      argv: [],
+      # PROMOTE THE CAPTURE REFUSAL TO A FIRE. This is the failure the row was filed
+      # against, spelt in one atom: an arm that answers on SYNTAX rather than on evidence.
+      # THE ANCHOR IS SPLIT BECAUSE THIS CASE TABLE IS IN THE SAME FILE. A contiguous
+      # "{:refused_capture," here occurs TWICE — once in the predicate and once in this
+      # literal — and apply_mutation/2 refuses an ambiguous anchor (it did, on the first
+      # run of this case). The `<>` keeps the source spelling unique.
+      mut: {"      {:refused" <> "_capture,", "      {:fires,"},
+      exit: 1,
+      expect: ["FAIL  RESPONSE-CARRIES-READ-REFUSES-CAPTURE", "THE ARM FIRED ON THE TRIPWIRE"],
+      proves: "an arm that fires on a runtime-configured capture — the same syntax, no resolvable callee — reds by name instead of adding an unfalsifiable hypothesis to a site that must stay UNJUDGED"
+    },
+    %{
+      name: "RCR-FIRE-SET-PINNED",
+      corpus: :repo,
+      argv: [],
+      # STOP READING LOCAL HELPER CALLS — the shape a narrowing to remote calls only
+      # takes. Five of the six pre-registered sites render a LOCAL helper
+      # (`scoped_liveview_path/1`, `published_type_counts/2`, `prime_rails/2`,
+      # `render_task_list/3`), so the fired set collapses 6 -> 1 and the arm must name
+      # every site that fell out.
+      #
+      # WHY A NARROWING AND NOT A WIDENING, MEASURED RATHER THAN PREFERRED. Two widenings
+      # were tried first and BOTH left the fired set at exactly 6: admitting `:write`
+      # beside `:read` in rcr_def_reads?/2, and raising its budget from @evidence_depth 6
+      # to @route_depth 12. Every call this arm already resolves that touches the store at
+      # all touches it with a read, and no further depth reaches one. A mutant that moves
+      # nothing proves nothing, so the shipped mutant is the one that was SEEN to move the
+      # set.
+      mut: {"if rcr_local" <> "_name?(f),", "if false,"},
+      exit: 1,
+      expect: [
+        "FAIL  RESPONSE-CARRIES-THE-READ-PINNED",
+        "PRE-REGISTERED SITE NO LONGER FIRES"
+      ],
+      proves: "a predicate that stops resolving local helper calls drops five of the six pre-registered sites and the arm reds NAMING each one — the fire set is pinned to what the predicate actually does, not to a count that agrees with itself"
+    },
+    # ---- THE DISPOSITION REGEN AFFORDANCE (`--routed-rows`), TWO CASES ---------------
+    #
+    # THE ROUTE IS PLANTED IN THE DERIVATION, NOT IN THE FIXTURE ROUTER — same reason as
+    # ROUTED-ARRIVAL-REDS below: the corpora are written ONCE with the UNMUTATED
+    # write_corpus!/2, so a mutation to the fixture heredoc changes a function the mutant
+    # never calls and the case passes vacuously.
+    #
+    # THE SECOND HALF OF THIS CASE IS THE ONE THAT MATTERS. It requires the proposal AND
+    # `FAIL ROUTED-POPULATION-COMPLETE` in the SAME run: the affordance printed the row
+    # the human must sign and the census still went RED on the undisposed arrival. That is
+    # "a proposal, never a --fix", asserted mechanically rather than promised in prose.
+    %{
+      name: "ROUTED-ROWS-PROPOSES-NEVER-FIXES",
+      corpus: :full,
+      argv: ["--routed-rows"],
+      mut:
+        {"(literal ++ mounted)" <> "\n        |> Enum.map",
+         "(literal ++ mounted ++ [{:post, \"/v1/selftest-planted\", \"Barkpark.Filler.M1\", :noop}])\n        |> Enum.map"},
+      exit: 1,
+      expect: [
+        "PASTE-READY @routed_excluded PROPOSAL (--routed-rows) — A PROPOSAL, NEVER A WRITE",
+        "{:post, \"/v1/selftest-planted\", \"Barkpark.Filler.M1\", :noop, :status_only_receipt},",
+        "FAIL  ROUTED-POPULATION-COMPLETE"
+      ],
+      proves: "a planted arrival is emitted as a paste-ready @routed_excluded row with its class DERIVED by the table's own rule, and the census still reds on the same run — the affordance spares the typing and never launders the arrival"
+    },
+    %{
+      name: "ROUTED-ROWS-ARGV-STRICT",
+      corpus: :full,
+      argv: ["--routed-row"],
+      mut: nil,
+      exit: 2,
+      expect: ["REFUSED: UNKNOWN ARGUMENT", "unknown argument \"--routed-row\"", "--routed-rows"],
+      proves: "the affordance is on the STRICT ARGV list by name — an adjacent misspelling exits 2 instead of running the ordinary census and reading as 'the affordance found nothing'"
+    },
     # THE ROUTED-POPULATION ARMS (PDS wave 38). Both directions, plus the blind-shape
     # detector.
     #
@@ -8303,6 +11226,60 @@ defmodule PDS.Census do
       exit: 1,
       expect: ["FAIL  ROUTED-POPULATION-COMPLETE", "ORPHANED DISPOSITION", "/v1/selftest-never-routed"],
       proves: "a committed disposition that names NO live routed member reds too — one direction alone is half an arm, and a row judging nothing is the shape a stale table takes"
+    },
+    # THE CLASS ATOM STOPS BEING A DEFAULT (pds-bl-w41-exclusion-class-atom-ungated). The
+    # mutant is the EXACT edit the row was filed on: one committed disposition row
+    # re-labelled to a class nobody declared. Before EXCLUSION-CLASS-DECLARED it gave rc=0,
+    # every arm PASS and `(no prose - see @routed_exclusion_classes)` under its own count.
+    %{
+      name: "EXCLUSION-CLASS-UNDECLARED-REDS",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"\"/v1/selftest-fixture-close\", \"Barkpark.Filler.M1\", :noop, :selftest" <> "_fixture}",
+         "\"/v1/selftest-fixture-close\", \"Barkpark.Filler.M1\", :noop, :liveview_write_population}"},
+      exit: 1,
+      expect: [
+        "FAIL  EXCLUSION-CLASS-DECLARED",
+        "UNDECLARED EXCLUSION CLASS",
+        "liveview_write_population"
+      ],
+      proves: "a committed exclusion row naming a class @routed_exclusion_classes does not declare REDS BY NAME instead of printing a placeholder at exit 0 - and the affordance survives, because declaring the class in the same edit is what makes it green"
+    },
+    # THE UNDECLARED CLASS IS REFUSED, A NEW ONE IS NOT (the third criterion of that row,
+    # as a case rather than as prose). The SAME re-label, plus the one-line declaration a
+    # human owes it, exits 0 with the arm PASSING - so the arm cannot be read as a ban on
+    # new classes, which is the failure mode a hand-typed class allowlist would have had.
+    %{
+      name: "EXCLUSION-CLASS-DECLARED-IS-GREEN",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"    selftest_fixture:\n      \"2026-08-02 (PDS wave 38): a synthetic" <> " member",
+         "    liveview_write_population:\n      \"SELFTEST-ONLY DECLARATION - the mutant's new class, declared.\",\n    selftest_fixture:\n      \"2026-08-02 (PDS wave 38): a synthetic member"},
+      exit: 0,
+      expect: ["CENSUS OK", "PASS  EXCLUSION-CLASS-DECLARED"],
+      proves: "declaring a class in @routed_exclusion_classes keeps the census green - the arm refuses an UNDECLARED class, never a new one"
+    },
+    # THE OPAQUE ROW STOPS BEING UNFALSIFIABLE (pds-bl-w39-opaque-exclusion-row-unfalsifiable).
+    # `"?"` is not a module alias, so no corpus can resolve it and no run can refute the row.
+    # The mutant moves the one committed opaque row OFF the synthetic-fixture class that may
+    # carry it - which is exactly the shape the two retired wave-39 Sheets rows had under
+    # `action_not_in_corpus`, and which before this arm changed no printed number at all.
+    %{
+      name: "EXCLUSION-OPAQUE-MODULE-REDS",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"\"/plugins/var-live\", \"?\", :index, :selftest" <> "_fixture}",
+         "\"/plugins/var-live\", \"?\", :index, :liveview_handle_event}"},
+      exit: 1,
+      expect: [
+        "FAIL  EXCLUSION-MODULE-NAMED",
+        "OPAQUE EXCLUSION MODULE",
+        "/plugins/var-live"
+      ],
+      proves: "a committed disposition row whose module string is not a module alias reds BY NAME on any class but the synthetic-fixture one - a table that can hold an unresolvable key can hold a claim nothing will ever falsify"
     },
     %{
       name: "LENS-CAN-MISS-ARMED",
@@ -8401,6 +11378,172 @@ defmodule PDS.Census do
       expect: ["FAIL  DERIVATION-PARTITION-TOTAL", "the partition sums to"],
       proves: "a row that falls out of the partition reds BY NAME instead of shrinking a denominator — the arm asserts a RELATION (sum == the class it partitions), never a class count, so an honest reclassification can never red it"
     },
+    # THE CLASS-BLIND HOLE IN THE ARM ABOVE, ARMED FROM BOTH SIDES
+    # (pds-bl-w41-partition-arm-class-blind).
+    #
+    # The mutation is the exact lie the conservation arm cannot see: every row of the
+    # partition is FORCED to `:store_derived`, which leaves the ROW COUNT intact, keeps
+    # the sum equal to the class it partitions, and used to ship at exit 0. Both arms are
+    # asserted in one output — PARTITION-TOTAL still PASSES on the mutant, which is the
+    # whole finding, and CLASS-WITNESS reds by name beside it. Asserting only the red
+    # would leave the reader to take the blindness on trust.
+    %{
+      name: "CLASS-WITNESS-ARMED",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"do: Map.put(derive_" <> "row(mod, action, index), :key, key)",
+         "do: Map.put(Map.put(derive_row(mod, action, index), :class, :store_derived), :key, key)"},
+      exit: 1,
+      expect: [
+        "FAIL  DERIVATION-CLASS-WITNESS",
+        "PASS  DERIVATION-PARTITION-TOTAL",
+        "print a class their own producing call refutes"
+      ],
+      proves: "a wholesale reclassification that leaves every row count intact reds on the WITNESS arm while the conservation arm PASSES in the same output — so the arm catches a wrong class, which is precisely what DERIVATION-PARTITION-TOTAL cannot do"
+    },
+    # THE OTHER HALF, AND THE ONE THAT MATTERS MORE. An arm that reds on a class move is
+    # worthless if it also reds when the class moves for an HONEST reason. The `:repaired`
+    # corpus IS an honest lens correction, already committed and already proven to move
+    # the class by PARTITION-ECHO-REPAIRED-CLEAN above: the same six actions, repaired to
+    # render the stored row, leave request_echo for store_derived. This case watches the
+    # witness arm stay GREEN across exactly that move — because the repair puts the
+    # producing call (`delete`) into the receipt in the same edit that changes the class.
+    %{
+      name: "CLASS-WITNESS-HONEST-CORRECTION-GREEN",
+      corpus: :repaired,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: ["PASS  DERIVATION-CLASS-WITNESS", "store_derived — all 6", "A RELATION, NEVER A COUNT"],
+      proves: "the six fixture receipts move request_echo -> store_derived under an honest repair and the witness arm stays green — it asserts a relation between the class and its producer, not a class count, so a repaired controller cannot red it"
+    },
+    # SUCCESS RECEIPT vs ERROR BRANCH, ARMED FROM BOTH SIDES
+    # (pds-bl-w41-error-branch-verdicts).
+    #
+    # Its corpus is the REPO and it has to be: the synthetic fixture carries no controller
+    # whose clauses answer different outcomes, so over the fixture this block prints its
+    # measured zero and the derivation is never exercised.
+    #
+    # THE CONTROL NAMES THE ROW THE FINDING WAS FILED ON. `SessionController.account`
+    # prints `request_echo` — a true sentence about the clause that re-renders the sign-in
+    # form after a failed credential check. The control asserts that the page now says so.
+    #
+    # AND THE MUTANT IS THE EXACT WRONG METHOD THE CRITERION FORBIDS: it replaces the
+    # derivation with a verdict read off the clause's POSITION in the def, which is the
+    # cheapest head-shaped heuristic available and the one a reader would most plausibly
+    # reach for. Under it every row reads success_receipt, all ten error-branch rows
+    # vanish, and the page prints its measured zero — so a green here is a statement that
+    # the ten verdicts came out of the RESPONSES those clauses build.
+    %{
+      name: "OUTCOME-NAMES-THE-ERROR-BRANCH",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "SUCCESS RECEIPT vs ERROR BRANCH",
+        "row(s) whose printed class was earned on an ERROR branch",
+        "BarkparkWeb.SessionController.account  ·  prints request_echo"
+      ],
+      refute: ["NO row on this corpus prints a class earned on an error branch"],
+      proves: "the census now distinguishes a verdict about a SUCCESS receipt from a verdict about an ERROR branch, and names /login/account — whose printed request_echo is earned by the clause that re-renders the form after a failed credential check — as one of the rows decided on a failure path"
+    },
+    %{
+      name: "OUTCOME-DERIVED-BY-RUN-ARMED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"outcome = clause_" <> "outcome(body, scopes)",
+         "outcome = if(d.line > 0, do: {:success_receipt, \"read off the clause's position\"}, else: clause_outcome(body, scopes))"},
+      exit: 0,
+      expect: ["NO row on this corpus prints a class earned on an error branch"],
+      refute: ["BarkparkWeb.SessionController.account  ·  prints request_echo"],
+      proves: "replacing the per-clause derivation with a verdict read off the clause's POSITION in the def erases all ten error-branch rows and prints the measured zero instead — so the shipped verdicts are derived from the response each clause builds, not from a head heuristic that would have printed the same page shape"
+    },
+    # THE PRECEDENCE RULE IS PRINTED, NOT IMPLIED (pds-bl-w41-clause-precedence-mask).
+    # Its corpus is the REPO and it has to be: the synthetic tree carries no action whose
+    # clauses disagree, so over the fixture this block prints its measured zero and the
+    # rule itself is never exercised. Over the repo the rule decides real rows and names
+    # what each winner outranked.
+    # THE `select:` SCOPE, ARMED BOTH WAYS (pds-bl-has-select-in-update-unsound).
+    #
+    # The first case is the REPAIR: over a fixture that carries a writing function whose
+    # only `select:` sits on a plain read query, the census names it STRAY and does NOT
+    # list it as a WRITER. The second mutates has_select_in_update?/1 back to the old
+    # whole-body prewalk and watches that same function become a WRITER — which is the
+    # fake true positive the row was filed for. Presence alone would pass for a predicate
+    # that certified nothing at all, so the sound specimen is asserted in BOTH cases.
+    %{
+      name: "SELECT-SCOPE-REFUSES-STRAY-READ",
+      corpus: :full,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "WRITER  Barkpark.Filler.StraySelect.scoped_select_write/1",
+        "STRAY `select:`  Barkpark.Filler.StraySelect.stray_select_write/1"
+      ],
+      refute: ["WRITER  Barkpark.Filler.StraySelect.stray_select_write/1"],
+      proves: "a writing function that also runs a plain READ query carrying `select:` is NOT certified — the arm requires the select: to sit on the query that is updated, and the sound sibling in the same fixture file is still named, so the predicate discriminates rather than declining"
+    },
+    %{
+      name: "SELECT-SCOPE-UNSOUND-ARMED",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"defp has_select_in_update?(body), do: select_in_updated_" <> "query?(body)",
+         "defp has_select_in_update?(body), do: select_anywhere?(body)"},
+      exit: 0,
+      expect: [
+        "WRITER  Barkpark.Filler.StraySelect.stray_select_write/1",
+        "WRITER  Barkpark.Filler.StraySelect.scoped_select_write/1"
+      ],
+      proves: "reverting the predicate to the whole-body prewalk restores the fake true positive — the stray read query becomes a WRITER — so the scoping is what refuses it and not the corpus happening to hold no specimen"
+    },
+    # (B) AND (C), OVER THE REPO, BECAUSE THAT IS WHERE THE SPECIMENS LIVE. The two
+    # refusals this row names are properties of api/lib code — BlockOps — and no synthetic
+    # heredoc can carry them honestly: a fixture written to be refused proves the printer
+    # works, not that the predicate found anything.
+    %{
+      name: "SELECT-REACH-REFUSES-BLOCK-OPS",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "WRITER  Barkpark.Content.Papers.BlockOps.fenced_paper_update/4",
+        "REFUSED (B)  Barkpark.Content.Papers.BlockOps.apply_paper_block_op/4",
+        "BINDS `saved` AND RENDERS NONE OF IT"
+      ],
+      proves: "the reach predicate REFUSES to certify the one caller this row names: it binds `saved` out of the select:-carrying write, spends it on side effects, and renders a pre-write rev instead — a correctly-scoped select: proves the query carried it, never that the row reached the printed value"
+    },
+    %{
+      name: "SELECT-CONDITIONAL-REFUSES-BLOCK-OPS",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "REFUSED (C)  Barkpark.Content.Papers.BlockOps.fenced_or_plain_paper_update/3",
+        "CONDITIONAL ON opts[:if_rev] — reached on 1 of 3 arm(s)"
+      ],
+      proves: "conditionally-taken evidence no longer certifies unconditionally: the fenced write is reached on one arm of a `case Keyword.get(opts, :if_rev)` and a call that omits :if_rev takes a plain Repo.update/1 with no select: at all, so the static route's certificate is refused by name"
+    },
+    %{
+      name: "PRECEDENCE-RULE-PRINTED",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "THE PRECEDENCE RULE, PRINTED",
+        "RULE — MOST INFORMATIVE CLAUSE WINS",
+        "WINS over",
+        "row(s) had clauses that DISAGREE"
+      ],
+      proves: "the row's class over a multi-clause action is decided by a NAMED rule that prints which class won and what it outranked — an implicit Enum.min_by disclosed nothing and this is the repair"
+    },
     # THE FRESHNESS ARM (PDS wave 39), AND WHY ITS CORPUS IS THE REPO ITSELF.
     #
     # ROSTER-VERDICT-FRESH is scoped to the real corpus by register_scope/1 — the roster
@@ -8421,8 +11564,53 @@ defmodule PDS.Census do
       argv: [],
       mut: nil,
       exit: 0,
-      expect: ["CENSUS OK", "PASS  ROSTER-VERDICT-FRESH", "PASS  D448-DRIFT-REFUSES"],
+      expect: ["CENSUS OK", "PASS  ROSTER-VERDICT-FRESH", "PASS  D448-DRIFT-REFUSES", "PASS  REGISTER-CALLEE-SPLIT"],
       proves: "the arm is GREEN on the unmodified repo, so each red below is its mutation and not a tree that was already failing (the population baseline rides this same case: it is in scope over the repo corpus and nowhere else)"
+    },
+    # REGISTER-CALLEE-SPLIT, ONE CASE PER BRANCH OF ITS PREDICATE.
+    #
+    # WHAT THIS ARM CAN AND CANNOT BUY, STATED WHERE IT IS PROVEN. The printed block and
+    # this arm read ONE call to `callee_split/1`, so a mutation INSIDE that function moves
+    # both together — the same blind shape BLIND-SHAPE-SPLIT declares about itself, and
+    # the reason the printed figure carries no second number to invent: every line of the
+    # block interpolates a field of that one struct. What the two cases below buy is that
+    # the COUNTING cannot be quietly falsified: perturb a bucket and the partition breaks;
+    # perturb the resolver and the arm refuses to certify an empty set.
+    %{
+      name: "REGISTER-CALLEE-SPLIT-PARTITIONS",
+      corpus: :repo,
+      argv: [],
+      # THE FIGURE, INVENTED. A bucket set to a literal is the cheapest way a blind-spot
+      # count becomes decorative: the block still prints a serene three-line split and the
+      # total no longer accounts for every resolved row.
+      mut:
+        {"      self_contained: Enum.count(rows, fn {_, _, st} -> st " <> "== :self_contained end)",
+         "      self_contained: 0"},
+      exit: 1,
+      expect: [
+        "FAIL  REGISTER-CALLEE-SPLIT",
+        "does not partition its own population",
+        "a row is counted twice or not at all"
+      ],
+      refute: ["PASS  REGISTER-CALLEE-SPLIT"],
+      proves: "a callee-derived bucket invented rather than counted reds BY NAME — without this arm the same mutation prints a three-line split that sums to less than its own population and exits 0 with CENSUS OK"
+    },
+    %{
+      name: "REGISTER-CALLEE-SPLIT-NOT-VACUOUS",
+      corpus: :repo,
+      argv: [],
+      # THE 0-OF-N SHAPE, and it is the shape a REPAIR to resolve_register/1 could produce
+      # by accident: classify nothing, partition nothing, and 0 == 0 passes forever.
+      mut:
+        {"          status in [:live, :stale, " <> ":resurrected],", "          status in [],"},
+      exit: 1,
+      expect: [
+        "FAIL  REGISTER-CALLEE-SPLIT",
+        "partitioned an EMPTY SET",
+        "the resolver, not the register, is what failed"
+      ],
+      refute: ["PASS  REGISTER-CALLEE-SPLIT"],
+      proves: "an arm that classifies nothing REFUSES instead of certifying, so the blind-spot figure cannot become a vacuous 0 of 0 the way a freshness arm did in wave 44"
     },
     %{
       name: "ROSTER-DEF-FP-MOVED",
@@ -8456,14 +11644,24 @@ defmodule PDS.Census do
       name: "ROSTER-FRESH-NOT-VACUOUS",
       corpus: :repo,
       argv: [],
-      # THE 0-OF-8 SHAPE. A resolver that finds no def makes every comparison unreachable,
+      # THE 0-OF-ALL SHAPE. A resolver that finds no def makes every comparison unreachable,
       # which is how a freshness arm certifies an empty set at exit 0 — the LENS-CAN-MISS
       # -ARMED failure mode, wearing this arm's name.
+      #
+      # THE COUNT IS DERIVED FROM @roster, NEVER TYPED. It was the literal "0 stale + 8
+      # unresolved of 8" until the correction-receipt roster row made it 9, and a case
+      # that reds because the roster HONESTLY GREW is a false accusation the next author
+      # would be tempted to answer by weakening the expectation. The discriminator is
+      # unchanged and is still a count: EVERY row unresolved and NONE stale.
       mut:
         {"|> Enum.min_by(&(&1.last - &1.line)" <> ", fn -> nil end)", "|> then(fn _ -> nil end)"},
       exit: 1,
-      expect: ["FAIL  ROSTER-VERDICT-FRESH", "0 stale + 8 unresolved of 8", "UNRESOLVED ANCHOR"],
-      proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-8 — an arm that certifies an empty set is the vacuous green this epic refuses"
+      expect: [
+        "FAIL  ROSTER-VERDICT-FRESH",
+        "0 stale + #{length(@roster)} unresolved of #{length(@roster)}",
+        "UNRESOLVED ANCHOR"
+      ],
+      proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-#{length(@roster)} — an arm that certifies an empty set is the vacuous green this epic refuses"
     },
     # THE EXCLUSION ANCHOR (PDS-D585), AND WHY ALL THREE CASES CENSUS THE REPO. The arm
     # is scoped to the real corpus by the same predicate the register and roster arms
@@ -8757,6 +11955,83 @@ defmodule PDS.Census do
       refute: ["PASS  ROUTED-POPULATION-COMPLETE"],
       proves: "a route module bound to a LOCAL VARIABLE is resolved to its fully-qualified alias before route_specs/1 reads the tuple: retire the substitution and the same route arrives as `?.index` while the committed row naming Barkpark.Filler.PluginOpsLive.index is orphaned — the two halves name the resolved module and the unresolved one in the SAME run"
     },
+    # THE MUTANT THE BLIND-SPOT BLOCK NEVER HAD (PDS wave 40). Measured at tree fd6e9ddff,
+    # BEFORE this repair: the identical perturbation — force the printed json figure to a
+    # nonsense value — left rc=0, 20 arms PASS and `CENSUS OK`, and the entire diff of the
+    # report was that one number plus the wall clock. The mutation is at the PRINT SITE,
+    # not inside receipt_sites/3, because that is the failure the block actually had: a
+    # figure that reaches the page without passing an arm.
+    #
+    # IT REDS OVER THE SYNTHETIC CORPUS, WHERE THE DERIVED FIGURE IS 0. That is not a
+    # vacuous floor dressed up: the arm compares PRINTED against DERIVED, so 9999 vs 0
+    # names both halves in its FAIL line — and the case asserts the printed number by
+    # value, so a mutant whose anchor silently stopped applying could not pass.
+    %{
+      name: "BLIND-SHAPE-PRINTED-IS-DERIVED",
+      corpus: :full,
+      argv: [],
+      mut: {"    json = b." <> "ast_json\n", "    json = 9999\n"},
+      exit: 1,
+      expect: ["FAIL  BLIND-SHAPE-SPLIT", "json/2 sites printed 9999", "did not derive"],
+      refute: ["PASS  BLIND-SHAPE-SPLIT"],
+      proves: "a blind-spot figure invented at the print site reds BY NAME — before this arm the same mutation printed 9999 and exited 0 with CENSUS OK"
+    },
+    # THE SAME ARM, OVER THE FIGURE ADDED IN WAVE 36'S LENS HALF. It is carried
+    # SEPARATELY from the case above and not folded into it, because this figure is 0 on
+    # every corpus this selftest builds and on today's real tree: a figure whose derived
+    # value is 0 is exactly the one where a print-site invention is cheapest to miss, and
+    # the FAIL line names BOTH halves (printed 4242, derived 0) rather than a bare
+    # mismatch. The predicate's own liveness is controlled elsewhere and on purpose —
+    # `501fb9670^`'s scim_users_controller.ex, the pre-repair blob, which this predicate
+    # finds at :78 (printed in the blind-spot block with the command).
+    %{
+      name: "BLIND-SHAPE-LITERAL-ARG-PRINTED-IS-DERIVED",
+      corpus: :full,
+      argv: [],
+      mut: {"    literal_arg = b." <> "ast_literal_arg\n", "    literal_arg = 4242\n"},
+      exit: 1,
+      expect: ["FAIL  BLIND-SHAPE-SPLIT", "literal-argument sites printed 4242", "did not derive"],
+      refute: ["PASS  BLIND-SHAPE-SPLIT"],
+      proves: "the literal-argument blind-spot figure passes through BLIND-SHAPE-SPLIT like the other eight — invent it at the print site and the arm names it, which is what stops a DECLARED blind spot from becoming a decorative one"
+    },
+    # THE SAME ARM, OVER THE FIGURE ADDED BY WAVE 36'S TRAILER. Carried separately for the
+    # same reason the case above is: this is a DECLARED blind spot, and a declared blind
+    # spot whose number nothing reads is a decorative one. The mutation is at the BINDING
+    # site inside report_blind_spots/1 — a figure that reaches the page without passing an
+    # arm is the failure this block has actually had, twice.
+    #
+    # IT REDS OVER THE SYNTHETIC CORPUS, WHERE THE DERIVED FIGURE IS 0, and the FAIL line
+    # names BOTH halves (printed 3131, derived 0). The predicate's LIVENESS is controlled
+    # by the repo tree, not by this case: the plain census prints 7 flash+302 site(s) over
+    # api/lib, every one of them a controller put_flash(:info) that redirects.
+    %{
+      name: "BLIND-SHAPE-FLASH-REDIRECT-PRINTED-IS-DERIVED",
+      corpus: :full,
+      argv: [],
+      mut: {"    flash_redirect = b." <> "ast_flash_redirect\n", "    flash_redirect = 3131\n"},
+      exit: 1,
+      expect: ["FAIL  BLIND-SHAPE-SPLIT", "flash+302 sites printed 3131", "did not derive"],
+      refute: ["PASS  BLIND-SHAPE-SPLIT"],
+      proves: "the flash+302 blind-spot figure passes through BLIND-SHAPE-SPLIT like every other declared one — invent it at the binding site and the arm names it"
+    },
+    # THE FLOOR MULTIPLIER, AND THE LITERAL IT USED TO BE. Until this commit the
+    # `--selftest` floor printed `9 x <user cpu>` with the 9 hand-typed from a reading of
+    # the case table taken at wave 46 and never re-taken; the table has since grown and no
+    # arm read the figure at all, so the census printed a floor 23 cases short of its own
+    # fan-out and exited 0 with CENSUS OK. THE MUTANT IS THAT EXACT LITERAL: restore the 9
+    # at the binding site and SELFTEST-FLOOR-MULTIPLIER reds BY NAME, printing both halves.
+    %{
+      name: "SELFTEST-FLOOR-MULTIPLIER-IS-COUNTED",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"    floor_mult = Enum.count(@selftest_cases, &(&1." <> "corpus == :repo))\n",
+         "    floor_mult = 9\n"},
+      exit: 1,
+      expect: ["FAIL  SELFTEST-FLOOR-MULTIPLIER", "printed 9, counted", "live tree"],
+      refute: ["PASS  SELFTEST-FLOOR-MULTIPLIER"],
+      proves: "the floor multiplier is COUNTED off the selftest case table and not typed — restore the hand-typed 9 this slice removed and the arm names it, which is what makes a case added or removed move the printed floor instead of silently falsifying it"
+    },
     # ROUTED-DISPOSITION-UNSHADOWED, ONE CASE PER BRANCH OF ITS PREDICATE (PDS-D556).
     #
     # THE CORPUS IS THE REPO, AND THAT IS THE WHOLE COST STORY. The arm's predicate reads
@@ -8848,6 +12123,67 @@ defmodule PDS.Census do
       refute: ["[naive == UNION"],
       proves: "PROVEN-BACKED is ONE Enum.count over ONE MapSet.union and not leg_a + leg_b: a def already carried by leg B is injected into leg A, so the legs now share member(s), the naive addition rises above the union and the union HOLDS. Replace that union with an addition and this case reds, because the addition can only ever print `naive == UNION`"
     },
+    # THE FRESHNESS ARM'S FIRST MUTANT, AND THE FIRST THING THAT CAN EVER RED WHEN IT IS
+    # DELETED (task-ac55ff2388510d67). Wave 45 printed that the `:stale` half of leg A's
+    # status filter moved nothing; on this tree it moves defs and members, and NOTHING
+    # noticed either way, because no arm read the difference. This case deletes the
+    # `:stale` and requires LADDER-STALE-ARM-EXERCISED to red BY NAME with the members
+    # that fell out of leg A. THE ANCHOR IS SPLIT so the tuple does not match ITSELF —
+    # apply_mutation/2 refuses an ambiguous anchor, and this is the same line
+    # LADDER-UNION-NOT-SUM anchors on, split the same way for the same reason.
+    #
+    # NO NUMBER IS ASSERTED. The expectation is the arm's NAME, its sentence, and the
+    # STALE-ONLY MEMBER token — an honest register edit that changes how many defs are
+    # demoted cannot red it, and a tree that carries no stale PROVEN row at all makes the
+    # arm print NOT EXERCISED, which its sibling case below covers on manufactured data.
+    %{
+      name: "LADDER-STALE-ARM-REDS-WHEN-DROPPED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"leg_a = members_reaching(population, index, " <>
+           "receipt_functions(classified, :proven, [:live, :stale]))",
+         "leg_a = members_reaching(population, index, " <>
+           "receipt_functions(classified, :proven, [:live]))"},
+      exit: 1,
+      expect: [
+        "FAIL  LADDER-STALE-ARM-EXERCISED",
+        "the freshness arm has been dropped from the ladder",
+        "STALE-ONLY MEMBER "
+      ],
+      refute: ["PASS  LADDER-STALE-ARM-EXERCISED"],
+      proves: "the `:stale` in leg A's status filter is LOAD-BEARING and is now guarded: delete it and LADDER-STALE-ARM-EXERCISED reds by name, naming the member(s) that reach a PROVEN register def only the :stale admission carries. On origin/main that same deletion moved PROVEN-BACKED and every check still printed PASS at exit 0"
+    },
+    # THE SPECIMEN IS MANUFACTURED RATHER THAN BORROWED FROM TODAY'S LUCK. The arm above
+    # is exercised only while some PROVEN register row happens to be demoted; a tree where
+    # every row is fresh makes it print NOT EXERCISED and its mutant go quiet. This case
+    # DEMOTES ONE PROVEN ROW'S EXPRESSION FINGERPRINT — the fourth field of the four-field
+    # key, the only field a re-key moves — so resolve_register/1 must take its {path, mfa}
+    # fallback and resolve the row :stale rather than :live. SecretController.delete/2 is
+    # the chosen row because its {path, mfa} group holds exactly ONE register row, so the
+    # neighbour fence (PDS-D706) cannot orphan it instead.
+    #
+    # IT ASSERTS A NAME, NOT A COUNT. The unmutated run does not print this module as a
+    # STALE SPECIMEN; the mutated one must. That is a discriminator no honest register
+    # edit can flip, and it proves the whole path end to end: demotion -> specimen ->
+    # printed sentence -> the arm's PASS.
+    %{
+      name: "LADDER-STALE-ARM-SPECIMEN",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"17468236\"},",
+         "\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"999999999\"},"},
+      exit: 0,
+      expect: [
+        "the freshness arm MOVES ON THIS TREE",
+        "STALE SPECIMEN  BarkparkWeb.SecretController.delete",
+        "PASS  LADDER-STALE-ARM-EXERCISED",
+        "CENSUS OK"
+      ],
+      refute: ["the freshness arm is a NO-OP ON THIS TREE"],
+      proves: "the :stale arm can be MADE to fire from committed data alone: demoting one PROVEN register row's expression fingerprint sends resolve_register/1 down its {path, mfa} fallback, the row resolves :stale, and that row's def appears as a NAMED STALE SPECIMEN admitted to leg A by the :stale arm and by nothing else — which is what the printed zero of wave 45 could not show"
+    },
     # THE POPULATION BASELINE STOPS BEING ADVISORY (PDS-D678, wave 47), AND THE CORPUS IS
     # THE REPO FOR THE SAME REASON THE ROSTER CASES USE IT: baseline_checks/2 is scoped by
     # register_scope/1, so over the synthetic tree the arm is not in the checks list at all
@@ -8871,11 +12207,30 @@ defmodule PDS.Census do
     # THE TWO SEAM REPAIRS, EACH WITH ITS OWN MUTANT ON ITS OWN CLAUSE (PDS-D480).
     #
     # THE ASSERTION IS THE ARTEFACT ITSELF, WHICH IS WHY IT IS WORTH MAKING. Disable
-    # either resolution and the route relation goes flat at 6 again — ROUTE-DEPTH-IS-CLOSURE
-    # reds with "the route relation closes at 6 on this run", which is wave 35's shipped
-    # sentence, reproduced on demand. That is the claim this slice refutes, restored by a
-    # one-clause mutation and named in the output. A drift row rides along as the second
-    # half: killing a live edge cannot leave the population untouched.
+    # either resolution and the route relation COLLAPSES — ROUTE-DEPTH-IS-CLOSURE reds
+    # with "@route_depth is typed <N> but the route relation closes at <M> on this run",
+    # the closure sentence reproduced on demand. That is the claim this slice refutes,
+    # restored by a one-clause mutation and named in the output. A drift row rides along
+    # as the second half: killing a live edge cannot leave the population untouched.
+    #
+    # THE COLLAPSED DEPTH IS NO LONGER PINNED, AND THAT IS THE REPAIR THIS FILE ALREADY
+    # PRESCRIBES ONE CASE UP. Both expectations carried the literal "the route relation
+    # closes at 6 on this run" — wave 35's shipped sentence — and it stopped being true
+    # without anyone touching these cases: the seams the tree grew since move the
+    # collapsed closure to 8, so BOTH cases sat dead-red, exit 1 as required and the
+    # pinned digit never printed. That is exactly the failure the D448 banner above names
+    # ("THE DERIVED SIDE IS THE TREE'S AND IS DELIBERATELY LEFT UNPINNED ... pinning it is
+    # what left the sibling arm below dead-red for two waves"), and the sibling it names
+    # IS this pair. So the expectation now stops one word before the tree's digit, and the
+    # TYPED side derives from @route_depth. RE-TYPING THE 6 AS AN 8 WAS THE OTHER OPTION
+    # AND IT IS THE ONE THIS INSTRUMENT EXISTS TO REFUSE: it would buy a green until the
+    # next seam lands and re-arm the same dead red.
+    #
+    # WHAT IS LEFT IS STILL A DISCRIMINATOR, NOT A TAUTOLOGY. The unmutated run PASSES
+    # ROUTE-DEPTH-IS-CLOSURE, so this sentence cannot appear at all unless the closure
+    # MOVED off the typed literal — which is the whole claim — and `refute` holds the
+    # other side. That the arm reds on a wrong TYPED side too, not only on a collapsed
+    # tree, is proven separately by ROUTE-DEPTH-TYPED-SIDE-REDS below.
     #
     # WHY THE REPO CORPUS. Both seams are api/lib shapes (`&default_ingest/2`,
     # `mod = Module.concat(...)` then `mod.ingest(...)`). The synthetic tree carries
@@ -8894,11 +12249,11 @@ defmodule PDS.Census do
       exit: 1,
       expect: [
         "FAIL  ROUTE-DEPTH-IS-CLOSURE",
-        "the route relation closes at 6 on this run",
+        "@route_depth is typed #{@route_depth} but the route relation closes at",
         "FAIL  D448-DRIFT-REFUSES"
       ],
       refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
-      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table goes flat at 6. The census then prints wave 35's own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
+      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table closes SHALLOWER than the typed @route_depth. The census then prints its own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
     },
     %{
       name: "CONCAT-BINDS-THE-VARIABLE",
@@ -8910,11 +12265,42 @@ defmodule PDS.Census do
       exit: 1,
       expect: [
         "FAIL  ROUTE-DEPTH-IS-CLOSURE",
-        "the route relation closes at 6 on this run",
+        "@route_depth is typed #{@route_depth} but the route relation closes at",
         "FAIL  D448-DRIFT-REFUSES"
       ],
       refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
-      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table goes flat at 6 again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table closes SHALLOWER than the typed @route_depth again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+    },
+    # THE OTHER DIRECTION, SO THE DERIVATION ABOVE IS NOT A TAUTOLOGY. The two seam cases
+    # stopped pinning the collapsed depth, which leaves a fair question: does the arm red
+    # because the TREE moved, or would it print that sentence over anything? This case
+    # moves the TYPED side and nothing else — the budget attribute one lower, against an
+    # untouched corpus — and the arm reds naming both numbers. The comparison is therefore
+    # live on both of its operands, and the seam cases' shortened expectation is a real
+    # read. THE PROSE HERE MUST NOT SPELL THE ATTRIBUTE AND ITS VALUE side by side: the
+    # anchor is the file's own text, apply_mutation/2 refuses an ambiguous one, and this
+    # comment saying the digit out loud made its own case red MUTATION ANCHOR AMBIGUOUS.
+    #
+    # THE DERIVED SIDE IS UNPINNED HERE TOO, for the reason the banner above gives: the
+    # typed side is @route_depth - 1 because this case injected it, and what follows
+    # "closes at" is the tree's and belongs to nobody's literal. D448-DRIFT-REFUSES is NOT
+    # in the expectation and that is measured, not assumed: the population rows are
+    # derived from the swept closure rather than from the typed budget, so this mutation
+    # leaves them untouched and that arm stays PASS.
+    %{
+      name: "ROUTE-DEPTH-TYPED-SIDE-REDS",
+      corpus: :repo,
+      argv: [],
+      mut: {"@route_depth " <> Integer.to_string(@route_depth),
+            "@route_depth " <> Integer.to_string(@route_depth - 1)},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTE-DEPTH-IS-CLOSURE",
+        "@route_depth is typed #{@route_depth - 1} but the route relation closes at",
+        "RE-DERIVE the literal, never re-type it"
+      ],
+      refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
+      proves: "ROUTE-DEPTH-IS-CLOSURE compares a TYPED literal against a LIVE sweep and reds when either side moves — mistyping the budget alone, with the corpus untouched, reds by name. Without this case the two seam cases' expectation could not tell a live comparison from a sentence the run always prints"
     },
     %{
       name: "D448-BASELINE-REFUSES",
@@ -8995,6 +12381,165 @@ defmodule PDS.Census do
       exit: 0,
       expect: {:citation_drift, :invariant},
       proves: "inserting #{@cite_pad_lines} lines above a cited test moves every citation's resolved LINE and NOTHING else — the resolved blocks are identical, so no line insertion can change a verdict. MEASURED on origin/main before this wave: four citations into #{@cite_pad_file} resolved to a blank line, a comment and a bare assert, and BASIS-FALSIFIERS passed all four"
+    },
+    # THE TWO MOUNT-MACRO MIRROR MUTANTS. Both census the REPO, because the synthetic tree
+    # carries no api/lib/barkpark_web/router/plugins.ex and MOUNT-MACRO-MIRRORED scopes
+    # itself out where the macro is absent — an arm proven only where it is scoped out is
+    # proven nowhere (PDS-D541). Each moves the CENSUS side of the comparison, which is the
+    # only side a selftest may edit; the macro-side directions (a second wrapping bucket, a
+    # remapped exception pair) were proven by hand against a scratch edit of plugins.ex and
+    # are not committed here, because a selftest that edits api/lib is not read-only.
+    %{
+      name: "MOUNT-MIRROR-MAPPING",
+      corpus: :repo,
+      argv: [],
+      mut: {"defp auth_in_scope?(:none, :pub" <> "lic), do: true",
+            "defp auth_in_scope?(:none, :ops), do: true"},
+      exit: 1,
+      expect: [
+        "FAIL  MOUNT-MACRO-MIRRORED",
+        "the macro maps it true, auth_in_scope?/2 says false",
+        "REPAIR THE CENSUS COPY"
+      ],
+      proves: "the census's retyped copy of BarkparkWeb.Router.Plugins.auth_matches_scope?/2 is GATED: move one bucket in it and the auth x scope cross-product re-derived from the macro's own AST names the disagreeing pair and exits 1, instead of the copy quietly selecting the wrong callsite for every :none route"
+    },
+    %{
+      name: "MOUNT-MIRROR-WRAP",
+      corpus: :repo,
+      argv: [],
+      mut: {"@lvs_macro_wrapped_auth :public" <> "_root",
+            "@lvs_macro_wrapped_auth :public_api"},
+      exit: 1,
+      expect: [
+        "FAIL  MOUNT-MACRO-MIRRORED",
+        "wraps and is NOT mirrored",
+        "is mirrored and NO LONGER wraps"
+      ],
+      proves: "the census's retyped copy of the ONE bucket emit_route_ast/1 wraps in its own live_session is GATED: rename it and the wrap set re-derived from the macro's own conditional reds by name, instead of lv_session_index/1 crediting a live_session the macro does not emit"
+    },
+    # THE POPULATION GUARD, BOTH DIRECTIONS. Both census the REPO because the guard compares
+    # the supplied list against the api/lib tree, and the synthetic corpus holds no api/lib
+    # at all — over there `expected` is EMPTY and a mutant would be proven exactly where the
+    # arm is switched off (PDS-D541). Neither case writes to api/lib: each writes a file
+    # LIST into the selftest root and hands it to `--files-from`.
+    %{
+      name: "FILES-FROM-SUBSET-REFUSED",
+      corpus: :repo,
+      argv: [],
+      files_from: "api/lib/barkpark_web/controllers/tasks_controller.ex",
+      mut: nil,
+      exit: 2,
+      expect: [
+        "REFUSED: TRUNCATED CORPUS",
+        "is NOT the api/lib population",
+        "MISSING from the list: api/lib/barkpark_web/controllers/tasks_controller.ex"
+      ],
+      proves: "the filed recipe — every api/lib file but ONE non-sentinel controller — is refused AT THE GUARD, by name, at exit 2, instead of being adopted as 'the corpus' for clearing a 600-file floor while carrying three sentinels"
+    },
+    %{
+      name: "FILES-FROM-GUARD-IS-LIVE",
+      corpus: :repo,
+      argv: [],
+      # THE FILE THE ARMS CANNOT SEE, which is what makes this the load-bearing half.
+      # gettext.ex carries no `ok: true`, no Repo call, no route and no register row, so
+      # with the comparison dead EVERY integrity check certifies the truncated corpus —
+      # MEASURED on origin/main f14dd319f: CENSUS OK, rc 0, 891 of 892 files. Dropping
+      # tasks_controller.ex instead would prove nothing here: three arms red on it anyway,
+      # so the case would pass with the guard removed. If a future tree grows a receipt into
+      # gettext.ex this case reds HERE, loudly, and the repair is to re-pick a file the arms
+      # still cannot see — never to weaken the expectation.
+      files_from: "api/lib/barkpark_web/gettext.ex",
+      mut:
+        {"missing = Enum.reject(expec" <> "ted, &MapSet.member?(listed, &1))",
+         "missing = []"},
+      exit: 0,
+      expect: ["CENSUS OK"],
+      refute: ["REFUSED: TRUNCATED CORPUS"],
+      proves: "with the missing-file comparison dead, a 891-of-892 corpus is certified CENSUS OK at exit 0 — so the population guard is the ONLY thing standing between that truncation and a full-voice green, and no other arm catches it"
+    },
+    # THE CALLER-CREDIT PAIR, AND WHY BOTH HALVES ARE HERE. Both census the REPO: the
+    # synthetic corpus holds no api/lib and emits no caller-credited site at all, so the
+    # audit block would be EMPTY over there and a mutant would be proven exactly where
+    # the arm is switched off (PDS-D541). Neither writes to api/lib — each runs a mutated
+    # copy of THIS file with cwd at the repo, read-only.
+    #
+    # The FIRST case is the PRECONDITION, not a control: it asserts the pristine repo run
+    # actually reaches a multi-caller attribution and names it. Without it the second case
+    # passes vacuously the day the corpus stops holding one, refuting nothing while
+    # reading as a green.
+    %{
+      name: "CALLER-SET-IS-PRINTED",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "CALLER-CREDIT AUDIT",
+        "barkpark_web/controllers/tickets_controller.ex:263",
+        "caller(s) reach a write: BarkparkWeb.TicketsController.",
+        "AMBIGUOUS — no evidence here selects one of them"
+      ],
+      proves: "the repo corpus DOES carry a caller-credited site whose writing-caller set has more than one member, and the census names every member of it — so the mutant below has something real to destroy"
+    },
+    %{
+      name: "CALLER-SET-NOT-NARROWED",
+      corpus: :repo,
+      argv: [],
+      # NARROW THE CANDIDATE SET BACK TO ONE CALLER — the shipped-before behaviour, and
+      # the exact shape a scalar arity key produces: the right SHAPE of answer off a
+      # wrongly-narrowed set. The walk, the counts and the verbs are untouched; only the
+      # SET the printer is handed shrinks to its first member.
+      mut: {"{Enum.map(writers, &elem" <> "(&1, 0)), length(cands),",
+            "{Enum.map(Enum.take(writers, 1), &elem(&1, 0)), length(cands),"},
+      exit: 0,
+      expect: ["CENSUS OK", "CALLER-CREDIT AUDIT"],
+      refute: [
+        "AMBIGUOUS CALLER SET",
+        "AMBIGUOUS — no evidence here selects one of them"
+      ],
+      proves: "narrowing the writing-caller set back to ONE member silently deletes every ambiguity marker while the census still prints CENSUS OK at exit 0 — so the full-set walk in route/3 is the ONLY thing keeping the attribution sentence falsifiable, and no count, no shape and no other arm notices its loss"
+    },
+    # THE EXACT MINTED-EXPOSURE, AND THE PROXY IT REPLACED, AS A PAIR (PDS wave 46).
+    #
+    # WHY THE REPO CORPUS. The two numbers can only DISAGREE where a hop's winning
+    # substitution holds a minted position whose vars never reach the payload — and the
+    # synthetic tree's six routed write clauses each carry their OWN `json(...)` (read
+    # echo_controller_source/1 below), so they class locally and onehop_join/6 is never
+    # reached over them. A mutant there would substitute one zero for another, which is
+    # PDS-D541's unmutatability wearing this slice's name. Thirteen cases already ride
+    # `corpus: :repo` for the same reason.
+    #
+    # IT ASSERTS A WORD, NOT A COUNT. The blind shape derives a VERDICT from the exact
+    # number — "NO mint decides a printed class this run" versus "MINTS DECIDE n" — so
+    # the pair discriminates the two measures without pinning a bucket, and an honest
+    # corpus change that moves 27, 4 or 0 by one cannot red either case on its own.
+    #
+    # THE CONTROL IS HALF THE EVIDENCE, and it is a case rather than a promise: the
+    # mutant only proves the substitution is VISIBLE if the unmutated run says the other
+    # thing. The day the repo grows a mint that genuinely decides a row, the CONTROL goes
+    # red first and names exactly what changed, which is the correct order — a mutant
+    # that silently starts agreeing with its baseline is the failure this pair refuses.
+    %{
+      name: "MINTED-DECIDES-EXACT-CONTROL",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: ["NO mint decides a printed class this run", "CENSUS OK"],
+      refute: ["MINTS DECIDE"],
+      proves: "the unmutated census says NO mint decides a printed class on this tree, which is the baseline the mutant below has to flip — without it the mutant could pass while both measures agreed"
+    },
+    # THE ANCHOR IS SPLIT so this tuple does not match ITSELF — apply_mutation/2 refuses
+    # an ambiguous anchor, and a mut literal that occurs twice IS one.
+    %{
+      name: "MINTED-DECIDES-EXACT",
+      corpus: :repo,
+      argv: [],
+      mut: {"minted_deciding: best." <> "minted_decided,", "minted_deciding: best_minted,"},
+      exit: 0,
+      expect: ["MINTS DECIDE", "CENSUS OK"],
+      refute: ["NO mint decides a printed class this run"],
+      proves: "the exact measure is the intersection and NOT the proxy: substitute `best_minted` (a mint anywhere in the winning substitution) back into the slot the intersection fills and the derived verdict flips from NO mint decides to MINTS DECIDE, at exit 0 both times — which is precisely how the overstatement shipped unnoticed"
     }
   ]
 
@@ -9071,16 +12616,49 @@ defmodule PDS.Census do
       script = Path.join(root, "case-#{:erlang.phash2(c.name)}.exs")
       File.write!(script, mutated)
       dir = Map.fetch!(dirs, c.corpus)
+      argv = case_argv(c, root, dir)
 
       # NEVER PIPED: System.cmd hands back the child's own status, which is the whole
       # point — `cmd | tail` reports tail's status and once logged an exit-2 refusal as 0.
-      {out, code} = System.cmd("elixir", [script | c.argv], cd: dir, stderr_to_stdout: true)
+      {out, code} = System.cmd("elixir", [script | argv], cd: dir, stderr_to_stdout: true)
 
       judge_selftest_case(base, c, out, code, {script, dir, dirs})
     else
       {:error, why} -> Map.merge(base, %{ok?: false, why: why})
     end
   end
+
+  # THE TRUNCATED LIST IS DERIVED FROM THE TREE ON EVERY RUN, NEVER COMMITTED. A committed
+  # list is a snapshot: the day a file is added it stops being "the population minus one"
+  # and becomes "the population minus one, and minus everything written since", and the
+  # case would then be measuring its own staleness instead of the guard. Both refusals
+  # below are raises, not skips — a case that hands the guard the FULL population passes
+  # while proving nothing, and a case that drops a SENTINEL is caught by the older arm and
+  # never reaches the population comparison at all.
+  defp case_argv(%{files_from: drop} = c, root, dir) when is_binary(drop) do
+    all =
+      dir
+      |> Path.join("api/lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.map(&Path.relative_to(&1, dir))
+      |> Enum.sort()
+
+    unless drop in all do
+      raise "selftest case #{c.name} drops #{drop}, which this tree does not hold — the list " <>
+              "would BE the population and the case would pass while proving nothing"
+    end
+
+    if drop in @sentinels do
+      raise "selftest case #{c.name} drops the sentinel #{drop} — the sentinel arm refuses it " <>
+              "first and the population guard is never reached"
+    end
+
+    path = Path.join(root, "files-from-#{:erlang.phash2(c.name)}.txt")
+    File.write!(path, Enum.join(all -- [drop], "\n") <> "\n")
+    c.argv ++ ["--files-from", path]
+  end
+
+  defp case_argv(c, _root, _dir), do: c.argv
 
   # ------------------------------------------------------- the citation report
   #
@@ -9577,6 +13155,29 @@ defmodule PDS.Census do
 
     w.("api/lib/barkpark/filler/echo_controller.ex", echo_controller_source(echo))
 
+    # THE `select:` SCOPE FIXTURE (pds-bl-has-select-in-update-unsound). BOTH SHAPES IN
+    # ONE FILE, because the repair is a DISCRIMINATION and a fixture carrying only the
+    # sound one proves nothing: `stray_select_write/1` is a WRITING function whose only
+    # `select:` sits on a plain READ query nothing updates — the exact species the old
+    # whole-body prewalk would have certified — and `scoped_select_write/1` puts the
+    # `select:` on the query that IS updated. The census must name the second and refuse
+    # the first; SELECT-SCOPE-UNSOUND-ARMED mutates the predicate back and watches the
+    # first become a WRITER again.
+    w.("api/lib/barkpark/filler/stray_select.ex", """
+    defmodule Barkpark.Filler.StraySelect do
+      def stray_select_write(id) do
+        probe = Repo.all(from(d in Doc, where: d.id == ^id, select: %{id: d.id}))
+        {n, _} = Repo.update_all(id, set: [touched: true])
+        {n, probe}
+      end
+
+      def scoped_select_write(id) do
+        query = from(d in Doc, where: d.id == ^id, select: d)
+        Repo.update_all(query, set: [touched: true])
+      end
+    end
+    """)
+
     # THE LIVEVIEW FIXTURE (PDS wave 42), IN THREE COUPLED FILES. The routed LiveView's
     # write sits EXACTLY ONE HOP BEYOND the census budget — handle_event is depth 0 and
     # hop7/2 is depth 7, one past @evidence_depth — so the depth sweep prints a FALSE cell and a
@@ -9766,7 +13367,41 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- integrity
 
-  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed, route_closure) do
+  # ------------------------------------------------- SELFTEST-FLOOR-MULTIPLIER
+  #
+  # THE ARM THE FLOOR NEVER HAD. PDS-D633 made the `--selftest` floor DERIVED rather than
+  # a hand-typed `~15 s`, but its MULTIPLIER stayed a literal 9 — a figure read once off
+  # the case table and never re-read, which is the same defect one level down. No arm read
+  # it: force the printed multiplier to any value and the census exited 0 with CENSUS OK.
+  #
+  # IT ASSERTS A RELATION AND A NON-VACUITY, NEVER A THRESHOLD. The multiplier a run
+  # PRINTS must equal the live-corpus case count the arm counts here, and that count must
+  # be greater than zero — a floor of `0 x ms` is not a floor, it is a sentence. Both
+  # sides move together when a case is added or removed, so it cannot red on churn; it
+  # reds on a multiplier invented at the binding site, which is the failure it had.
+  #
+  # BLIND SHAPE, PRINTED: both sides count the SAME @selftest_cases table, so a case whose
+  # `corpus:` is mistyped moves them together and this arm prints PASS through it. What it
+  # CAN see is the literal — the thing that was actually there for the whole of wave 46.
+  defp selftest_floor_checks(printed) do
+    counted = Enum.count(@selftest_cases, &(&1.corpus == :repo))
+
+    why =
+      cond do
+        printed != counted ->
+          "the `--selftest` floor PRINTED a multiplier this run did not count: printed #{printed}, counted #{counted} case(s) whose corpus is the live tree"
+
+        counted == 0 ->
+          "the live-corpus case count is 0, so the printed floor is `0 x user cpu` — a floor over nothing, which certifies nothing"
+
+        true ->
+          "the floor multiplier is COUNTED, not typed: #{counted} of #{length(@selftest_cases)} selftest case(s) census the LIVE tree (corpus: :repo), so each pays at least this run's own `user cpu` · add or remove one and the printed floor moves · BLIND SHAPE: both sides read ONE case table, so a mistyped `corpus:` moves them together and prints PASS through it"
+      end
+
+    [{"SELFTEST-FLOOR-MULTIPLIER", printed == counted and counted > 0, why}]
+  end
+
+  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed, route_closure, blind, rcr) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
@@ -9783,6 +13418,18 @@ defmodule PDS.Census do
     # suppression. An ARRIVAL adds a literal and NO retired row, so it still moves the
     # conserved totals and still reds.
     retired_n = length(retired_rows())
+
+    # THE `--selftest` FLOOR MULTIPLIER, COUNTED (PDS-D633 trailer). It was a hand-typed
+    # 9, read once off the case table and never re-read: the table now holds
+    # #{length(@selftest_cases)} cases and the live-corpus arm of it has grown far past
+    # nine, so the typed figure had been understating its own floor for waves. A case
+    # added or removed now moves the printed floor, exactly the way `~140 s` did not.
+    #
+    # WHY `:repo` IS THE WHOLE PREDICATE: `dirs.repo` is `File.cwd!()` — the live tree,
+    # the SAME corpus the plain census walks — so each of these children pays at least
+    # what this run just paid. The synthetic corpora (`:full`, `:tiny`, `:repaired`) and
+    # the citation corpora hold a handful of files and are NOT a floor on this price.
+    floor_mult = Enum.count(@selftest_cases, &(&1.corpus == :repo))
 
     drift_rows = [
       {"textual", textual + retired_n, :textual},
@@ -9808,7 +13455,7 @@ defmodule PDS.Census do
        if length(files) >= @corpus_floor do
          "#{length(files)} files >= #{@corpus_floor}"
        else
-         "#{length(files)} files is BELOW the #{@corpus_floor} floor — the corpus is truncated and every zero below it is unearned (normally unreachable: guard_corpus!/1 exits 2 on this same condition first)"
+         "#{length(files)} files is BELOW the #{@corpus_floor} floor — the corpus is truncated and every zero below it is unearned (normally unreachable: guard_corpus!/3 exits 2 on this same condition first)"
        end},
       {"LENS-LOSES-NOTHING", textual == length(ast_sites) + length(phantoms),
        if textual == length(ast_sites) + length(phantoms) do
@@ -9838,10 +13485,13 @@ defmodule PDS.Census do
        end}
     ] ++
         routed_checks(routed) ++
+        blind_shape_checks(blind, parsed) ++
         register_checks(classified, parsed) ++
         roster_freshness_checks(classified, parsed) ++
         falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified) ++
-        route_depth_checks(route_closure, classified)
+        route_depth_checks(route_closure, classified) ++
+        mount_mirror_checks(parsed) ++ selftest_floor_checks(floor_mult) ++
+        response_carries_read_checks(rcr)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -9868,12 +13518,14 @@ defmodule PDS.Census do
     # `wall clock` label — which this run no longer prints. The line names ITSELF volatile
     # so the recipe can be re-derived from the output instead of transcribed from D605.
     #
-    # THE `--selftest` FLOOR RIDES THIS SAME LINE ON PURPOSE. It is 9 x `ms`, so it is
+    # THE `--selftest` FLOOR RIDES THIS SAME LINE ON PURPOSE. It is the live-corpus case
+    # COUNT x `ms` — the multiplier is counted off @selftest_cases in integrity/15 above,
+    # never typed — so it is
     # volatile too — and a SECOND volatile line would silently invalidate D605's
     # "byte-identical except the volatile line" recipe. Deriving it here instead of
     # hand-typing it into @blind_spot is the substance of PDS-D633; keeping it on this
     # line is what stops that fix from breaking a neighbouring one.
-    p("user cpu  #{ms} ms  (THE ONE VOLATILE LINE — build-free: no mix project, no compile, no app boot; BEAM-internal, this process only, see `blind spot` above · DERIVED: 9 x #{ms} = #{9 * ms} ms is the FLOOR on the child-BEAM cycles an outer meter around `--selftest` cannot see)")
+    p("user cpu  #{ms} ms  (THE ONE VOLATILE LINE — build-free: no mix project, no compile, no app boot; BEAM-internal, this process only, see `blind spot` above · DERIVED: #{floor_mult} x #{ms} = #{floor_mult * ms} ms is the FLOOR on the child-BEAM cycles an outer meter around `--selftest` cannot see)")
     # THE SENTENCE, BESIDE THE FIGURE, ON A NON-VOLATILE LINE. It is a constant,
     # so D605's "byte-identical except the volatile line" recipe still holds: the
     # volatile line count stays at ONE.
@@ -9976,7 +13628,7 @@ defmodule PDS.Census do
     if File.dir?(@test_root) do
       cache = %{}
 
-      {findings, _cache} =
+      {findings, cache} =
         classified
         |> resolve_register()
         |> Enum.reduce({[], cache}, fn {r, status, _site}, {acc, c} ->
@@ -9989,7 +13641,30 @@ defmodule PDS.Census do
           end
         end)
 
-      {:ran, findings}
+      # THE ROSTER LEG (pds-w39-status-only-receipts). Until this wave this arm walked
+      # @register ONLY, and @roster — the very list a routed member is disposed ROSTERED
+      # by — was never handed to a falsifier at all. A verdict nothing can refuse is the
+      # shape this epic exists to refuse, so a roster row that carries a `{path, marker}`
+      # citation is now judged by the SAME check_row_basis/2, with the same tiers and the
+      # same refusals. THIS IS NOT A WIDENING THAT HIDES ANYTHING: it can only ADD
+      # refusals, it touches no disposition, and it cannot move a member out of
+      # :status_only_receipt.
+      #
+      # WHY `evidence`-BEARING ROWS ONLY, AND WHY THE REST ARE PRINTED RATHER THAN
+      # SWALLOWED: the committed roster predates the citation vocabulary and four of its
+      # rows carry a cited basis with the witness named in PROSE, in `note:`. Redding them
+      # here would refuse GENUINE judgments for a bookkeeping reason and the cheapest
+      # repair a reader would reach for is to weaken the basis — the demotion this file
+      # names as the defect. They are instead COUNTED AND NAMED by roster_uncited/0 in the
+      # BASIS FALSIFIERS block, so the gap is a printed fact with a worklist attached.
+      {roster_findings, _cache} =
+        roster_cited_rows()
+        |> Enum.reduce({[], cache}, fn r, {acc, c} ->
+          {f, c} = check_row_basis(r, c)
+          {acc ++ f, c}
+        end)
+
+      {:ran, findings ++ roster_findings}
     else
       :no_test_tree
     end
@@ -10197,6 +13872,20 @@ defmodule PDS.Census do
 
   defp finding(r, tier, why), do: %{key: r.key, basis: r.basis, tier: tier, why: why}
 
+  # A ROSTER ROW HAS NO `key`. It is keyed by {file, anchor_mfa}, which is what the
+  # refusal lines print, so a refusal names the def and not a register coordinate.
+  defp roster_key(r), do: Map.put(r, :key, {r.path, r.anchor_mfa})
+
+  defp roster_cited_rows do
+    for r <- @roster, r.basis in @cited_bases, Map.has_key?(r, :evidence), do: roster_key(r)
+  end
+
+  # NAMED, NEVER TOTALLED. A roster row whose basis dispatches through the citation arm
+  # but which carries no `{path, marker}` — its witness lives in `note:` prose only.
+  defp roster_uncited do
+    for r <- @roster, r.basis in @cited_bases, not Map.has_key?(r, :evidence), do: r
+  end
+
   # THE CITED BLOCK PLUS ITS HELPERS, ONE LEVEL DEEP. The block runs from the cited line to
   # the `end` at its own indentation (capped, because a runaway scan would swallow the file
   # and green everything).
@@ -10317,6 +14006,22 @@ defmodule PDS.Census do
           p("      CONTRADICTION  #{short(elem(f.key, 0))} #{elem(f.key, 1)}  [#{f.basis}] #{f.why}")
         end)
 
+        uncited = roster_uncited()
+        walked = length(roster_cited_rows())
+
+        p("      ROSTER LEG: #{walked} of #{Enum.count(@roster)} roster row(s) walked by this arm —")
+        p("      a row is walked when its basis dispatches through the citation arm AND it")
+        p("      carries a `{path, marker}` citation the arm can open.")
+
+        if uncited != [] do
+          p("      ROSTER ROWS WITH A CITED BASIS AND NO CITATION, NAMED rather than counted")
+          p("      (their witness is named in `note:` prose, which no script can open):")
+
+          Enum.each(uncited, fn r ->
+            p("        #{short(r.path)} #{r.anchor_mfa}  [#{r.basis}]")
+          end)
+        end
+
         if findings == [], do: p("      none — every decidable falsifier holds")
         p("")
         {:ran, red}
@@ -10352,7 +14057,8 @@ defmodule PDS.Census do
           register_retired_intact(classified),
           declared_rows_resolve(classified),
           declared_basis_intact(parsed),
-          roster_check(parsed)
+          roster_check(parsed),
+          register_callee_split_check(classified)
         ]
     end
   end
@@ -10575,6 +14281,266 @@ defmodule PDS.Census do
       end
 
     {"D448-DRIFT-REFUSES", drifted == [], why}
+  end
+
+  # ------------------------------------------------- the mount-macro mirror gate
+  #
+  # THE CENSUS HAND-MIRRORS THE PLUGIN MOUNT MACRO TWICE, AND UNTIL THIS ARM NOTHING
+  # CHECKED EITHER COPY (PDS wave 48). `auth_in_scope?/2` above is a retyped copy of
+  # `BarkparkWeb.Router.Plugins.auth_matches_scope?/2`, and `@lvs_macro_wrapped_auth` is a
+  # retyped copy of the ONE bucket whose route `emit_route_ast/1` wraps in a live_session
+  # of its own. Both feed lv_session_index/1, which turns them into a DECIDED reach class
+  # — so a copy that stops descending from the macro does not print a smaller claim, it
+  # prints a class the tree does not have.
+  #
+  # ONE SOURCE, BOTH SIDES READ IT — never a third hand-written list. This arm RE-DERIVES
+  # from the macro's own AST, on every run, three things it never types:
+  #
+  #   the bucket universe   the `scope in [...]` literal `plugin_routes/1` guards on
+  #   the mapping           every `auth_matches_scope?/2` clause: the atom-pair
+  #                         exceptions (`:none` -> `:public`) AND the identity catch-all
+  #   the wrap set          every bucket atom compared in a conditional whose branch
+  #                         emits a `live_session` inside `emit_route_ast/1`
+  #
+  # and then compares the mapping BEHAVIOURALLY — the full auth x scope cross-product run
+  # through both predicates — rather than by text. A textual diff of two clause lists reds
+  # on a reformat and greens on a semantically different rewrite; the cross-product reds
+  # on exactly the disagreements that would move a route between buckets.
+  #
+  # A DERIVATION THAT FAILS IS A RED, NEVER A PASS. If the macro is renamed, reshaped, or
+  # grows a `live_session` this walk cannot attribute to a bucket, the arm says so and
+  # exits 1. The alternative — skipping quietly — is the exact state this arm replaces:
+  # a mirror nobody checks, believed because it was once true.
+  #
+  # SCOPED BY CORPUS MEMBERSHIP, AND THE SELFTEST MUTANTS RUN OVER THE REPO. The synthetic
+  # `--selftest` tree carries no router/plugins.ex, so this arm scopes OUT there exactly
+  # as ROSTER-VERDICT-FRESH does — which is why its two mutants declare `corpus: :repo`
+  # (PDS-D541: an arm proven only where it is scoped out is proven nowhere).
+  @plugins_macro_path "api/lib/barkpark_web/router/plugins.ex"
+
+  defp mount_mirror_checks(parsed) do
+    case Enum.find(parsed, &(&1.path == @plugins_macro_path)) do
+      nil -> []
+      %{src: src} -> [mount_mirror_check(src)]
+    end
+  end
+
+  defp mount_mirror_check(src) do
+    case derive_mount_macro(src) do
+      {:error, why} ->
+        {"MOUNT-MACRO-MIRRORED", false,
+         "the mount macro could NOT be re-derived from #{short(@plugins_macro_path)}: #{why} — the census's two hand-mirrors (auth_in_scope?/2 and @lvs_macro_wrapped_auth) are therefore unchecked this run, and a mirror nobody can check is the state this arm exists to refuse. Teach the derivation the macro's new shape; do not delete the arm"}
+
+      {:ok, d} ->
+        drift = mirror_mapping_drift(d) ++ mirror_wrap_drift(d)
+
+        why =
+          if drift == [] do
+            "both hand-mirrors of #{short(@plugins_macro_path)} still descend from it — the auth->scope mapping agrees with auth_in_scope?/2 across all #{mirror_pair_count(d)} auth x scope pair(s) re-derived from the macro's own #{length(d.buckets)}-bucket list, and the wrap set #{inspect(MapSet.to_list(d.wrapped))} (buckets emit_route_ast/1 wraps in a live_session of its own) equals @lvs_macro_wrapped_auth. NOTHING TRANSCRIBED: bucket list, mapping clauses and wrap set all come out of the macro's AST on this run"
+          else
+            "#{length(drift)} mirror disagreement(s) with #{short(@plugins_macro_path)}: " <>
+              Enum.join(drift, " · ") <>
+              " — the census's copy no longer descends from the macro it mirrors, so every DECIDED reach class lv_session_index/1 derives through it names a chain the tree does not have. REPAIR THE CENSUS COPY (auth_in_scope?/2 · @lvs_macro_wrapped_auth) against the macro, never the other way round"
+          end
+
+        {"MOUNT-MACRO-MIRRORED", drift == [], why}
+    end
+  end
+
+  # THE CROSS-PRODUCT, NOT A TEXT DIFF. The auth universe is the macro's bucket list plus
+  # every atom its clause heads name (that is how `:none`, which is spec-side only and in
+  # no bucket list, enters) plus the census's own wrap atom — so a bucket the census still
+  # believes in but the macro dropped is in the product and reds.
+  defp mirror_mapping_drift(d) do
+    for a <- mirror_auths(d), s <- mirror_scopes(d), macro_matches?(d, a, s) != auth_in_scope?(a, s) do
+      "{#{inspect(a)}, #{inspect(s)}} — the macro maps it #{macro_matches?(d, a, s)}, auth_in_scope?/2 says #{auth_in_scope?(a, s)}"
+    end
+  end
+
+  defp mirror_auths(d) do
+    Enum.uniq(d.buckets ++ Enum.map(d.exceptions, &elem(&1, 0)) ++ [@lvs_macro_wrapped_auth])
+  end
+
+  defp mirror_scopes(d), do: Enum.uniq(d.buckets ++ Enum.map(d.exceptions, &elem(&1, 1)))
+
+  defp mirror_pair_count(d), do: length(mirror_auths(d)) * length(mirror_scopes(d))
+
+  defp macro_matches?(d, auth, scope) do
+    MapSet.member?(d.exceptions, {auth, scope}) or (d.identity? and auth == scope)
+  end
+
+  defp mirror_wrap_drift(d) do
+    mirrored = MapSet.new([@lvs_macro_wrapped_auth])
+
+    if MapSet.equal?(d.wrapped, mirrored) do
+      []
+    else
+      unmirrored = d.wrapped |> MapSet.difference(mirrored) |> MapSet.to_list()
+      stale = mirrored |> MapSet.difference(d.wrapped) |> MapSet.to_list()
+
+      [
+        "the wrap set — emit_route_ast/1 wraps #{inspect(MapSet.to_list(d.wrapped))} in a live_session of its own, @lvs_macro_wrapped_auth mirrors #{inspect(MapSet.to_list(mirrored))}" <>
+          if(unmirrored != [], do: "; #{inspect(unmirrored)} wraps and is NOT mirrored, so its routes read sessionless and fall back into the residual", else: "") <>
+          if(stale != [], do: "; #{inspect(stale)} is mirrored and NO LONGER wraps, so lv_session_index/1 credits those routes a live_session the macro does not emit", else: "")
+      ]
+    end
+  end
+
+  # -- the derivation, out of the macro's own AST ------------------------------
+
+  defp derive_mount_macro(src) do
+    case Code.string_to_quoted(src) do
+      {:ok, ast} ->
+        with {:ok, buckets} <- derive_macro_buckets(ast),
+             {:ok, exceptions, identity?} <- derive_macro_mapping(ast),
+             {:ok, wrapped} <- derive_macro_wraps(ast) do
+          {:ok, %{buckets: buckets, exceptions: exceptions, identity?: identity?, wrapped: wrapped}}
+        end
+
+      {:error, _} ->
+        {:error, "the file does not parse as Elixir"}
+    end
+  end
+
+  # The bucket universe is the `scope in [...]` guard `plugin_routes/1` raises on — the
+  # macro's own enumeration of every legal callsite scope. Anchored on the VARIABLE named
+  # `scope`, because the same file also holds `verb in [:get, :post, ...]`.
+  defp derive_macro_buckets(ast) do
+    lists =
+      ast
+      |> Macro.prewalk([], fn
+        {:in, _, [{:scope, _, ctx}, list]} = n, acc when is_atom(ctx) and is_list(list) ->
+          if list != [] and Enum.all?(list, &is_atom/1), do: {n, [list | acc]}, else: {n, acc}
+
+        n, acc ->
+          {n, acc}
+      end)
+      |> elem(1)
+      |> Enum.uniq()
+
+    case lists do
+      [one] -> {:ok, one}
+      [] -> {:error, "no `scope in [...]` bucket list found — the macro's scope guard was renamed or reshaped"}
+      many -> {:error, "#{length(many)} different `scope in [...]` bucket lists found; the derivation cannot pick one"}
+    end
+  end
+
+  # Every `auth_matches_scope?/2` clause, classified. Two shapes are understood and
+  # NOTHING ELSE IS GUESSED: an atom-pair clause returning `true` (an exception, e.g.
+  # `:none` -> `:public`) and the var/var identity catch-all. A `when` guard, a third
+  # shape, or a vanished function all return an error, which reds.
+  defp derive_macro_mapping(ast) do
+    clauses =
+      ast
+      |> Macro.prewalk([], fn
+        {:defp, _, [head, body]} = n, acc ->
+          case mapping_clause_head(head) do
+            nil -> {n, acc}
+            args -> {n, [{args, Keyword.get(body, :do)} | acc]}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+      |> elem(1)
+
+    classified = Enum.map(clauses, &classify_mapping_clause/1)
+
+    cond do
+      clauses == [] ->
+        {:error, "BarkparkWeb.Router.Plugins.auth_matches_scope?/2 no longer exists under that name — the census mirror has nothing left to descend from"}
+
+      Enum.any?(classified, &(&1 == :unknown)) ->
+        {:error,
+         "#{Enum.count(classified, &(&1 == :unknown))} of #{length(clauses)} auth_matches_scope?/2 clause(s) are in a shape this derivation does not model (a guard, or a body that is neither `true` nor `auth == scope`)"}
+
+      not Enum.any?(classified, &(&1 == :identity)) ->
+        {:error, "auth_matches_scope?/2 carries no identity catch-all clause any more, so the mapping is no longer `auth == scope` plus exceptions"}
+
+      true ->
+        {:ok, MapSet.new(for {:exception, pair} <- classified, do: pair), true}
+    end
+  end
+
+  defp mapping_clause_head({:auth_matches_scope?, _, args}) when is_list(args), do: args
+  defp mapping_clause_head({:when, _, [inner | _]}), do: guarded_mapping_head(inner)
+  defp mapping_clause_head(_), do: nil
+
+  # A guarded clause is REPORTED, not skipped: `mapping_clause_head/1` hands it back with a
+  # sentinel arg list that classify_mapping_clause/1 can only call :unknown.
+  defp guarded_mapping_head({:auth_matches_scope?, _, args}) when is_list(args), do: [:__guarded__ | args]
+  defp guarded_mapping_head(_), do: nil
+
+  defp classify_mapping_clause({[a, s], true}) when is_atom(a) and is_atom(s), do: {:exception, {a, s}}
+  defp classify_mapping_clause({[a, s], false}) when is_atom(a) and is_atom(s), do: :ignored
+
+  defp classify_mapping_clause({[{va, _, ca}, {vs, _, cs}], {:==, _, [{va2, _, _}, {vs2, _, _}]}})
+       when is_atom(ca) and is_atom(cs) and va == va2 and vs == vs2,
+       do: :identity
+
+  defp classify_mapping_clause(_), do: :unknown
+
+  # The wrap set: every bucket atom compared inside a conditional whose do-branch emits a
+  # `live_session`. TOTALITY IS ASSERTED — a `live_session` this walk cannot attribute to
+  # a compared atom (an else-branch, a `case`, a clause head) makes the derivation fail
+  # rather than under-report, because an under-reported wrap set greens the arm.
+  defp derive_macro_wraps(ast) do
+    attributed =
+      ast
+      |> Macro.prewalk([], fn
+        {:if, _, [cond_ast, kw]} = n, acc when is_list(kw) ->
+          body = Keyword.get(kw, :do)
+
+          if live_session_count(body) > 0 do
+            {n, [{compared_atoms(cond_ast), live_session_count(body)} | acc]}
+          else
+            {n, acc}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+      |> elem(1)
+
+    total = live_session_count(ast)
+    covered = attributed |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+    atoms = attributed |> Enum.flat_map(&elem(&1, 0)) |> Enum.uniq()
+
+    cond do
+      total == 0 ->
+        {:error, "emit_route_ast/1 emits NO live_session at all any more — the macro stopped wrapping, and the census still credits a wrapped session to every #{inspect(@lvs_macro_wrapped_auth)} route"}
+
+      covered != total ->
+        {:error, "#{total - covered} of #{total} live_session emission(s) sit outside any `if` this walk can attribute to a bucket atom, so the wrap set would be UNDER-reported"}
+
+      Enum.any?(attributed, &(elem(&1, 0) == [])) ->
+        {:error, "a live_session-emitting branch is selected by a condition that compares NO bucket atom, so the bucket it wraps cannot be named"}
+
+      true ->
+        {:ok, MapSet.new(atoms)}
+    end
+  end
+
+  defp compared_atoms(ast) do
+    ast
+    |> Macro.prewalk([], fn
+      {op, _, [l, r]} = n, acc when op in [:==, :===] ->
+        {n, Enum.filter([l, r], &is_atom/1) ++ acc}
+
+      n, acc ->
+        {n, acc}
+    end)
+    |> elem(1)
+    |> Enum.uniq()
+  end
+
+  defp live_session_count(ast) do
+    ast
+    |> Macro.prewalk(0, fn
+      {:live_session, _, args} = n, acc when is_list(args) -> {n, acc + 1}
+      n, acc -> {n, acc}
+    end)
+    |> elem(1)
   end
 
   defp row(label, got, _raw, key) do

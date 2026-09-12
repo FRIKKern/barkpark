@@ -845,6 +845,142 @@ else
   bad "6.3 expected exit 2 on an unmappable absent context; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
 
+# ═══ 6b. THE LIVE CHECK-RUN READ IS PAGED, AND PROVES ITS OWN COMPLETENESS ═══
+#
+# Every probe above runs in --fixtures mode with `gh` off PATH, so the LIVE arm
+# — the one that runs in production every 30 minutes — had no test at all. It
+# used to read `?per_page=100` through gh_api's `--paginate`, which walks pages
+# but has NO notion of "did I get everything": a page that fails mid-walk and a
+# feed that genuinely ended are the same short answer.
+#
+# WHY THAT MATTERS HERE AND NOT SOMEWHERE ELSE. This census's whole population
+# is "required contexts that render NOWHERE on this head". A name it cannot see
+# is a name that renders nowhere as far as it can tell, so truncation does not
+# make it quieter — it makes it CONFIDENTLY WRONG in the loud direction, and a
+# false ABSENT is the shape that routes a genuinely-rendered required context to
+# "expected" forever.
+#
+# BOTH DIRECTIONS, one variable. The two fixtures below differ in exactly one
+# byte-range: `total_count`. Same rows, same names, same everything else.
+section "6b. the LIVE check-run read refuses a set it cannot vouch for"
+
+LIVEBIN="$TMP/livebin"; mkdir -p "$LIVEBIN"
+LIVEFX="$TMP/livefx"; mkdir -p "$LIVEFX"
+
+# A fake `gh` that is PAGE-AWARE — the point of the exercise. Page 1 comes from
+# check-runs.json; page N from check-runs-pN.json, and an ABSENT page file is an
+# EMPTY page, which is precisely what the API hands back past the end of a feed
+# whose total_count was a lie (or whose rows moved mid-walk).
+cat >"$LIVEBIN/gh" <<'FAKEGH'
+#!/usr/bin/env bash
+set -uo pipefail
+[ "${1:-}" = "api" ] || { echo "fake gh: only \`gh api\` is emulated: $*" >&2; exit 1; }
+path="$2"; shift 2
+filter=""
+while [ $# -gt 0 ]; do
+  case "$1" in --jq) filter="${2:-}"; shift 2 ;; *) shift ;; esac
+done
+tmpf="$(mktemp)"
+case "$path" in
+  */check-runs*)
+    # `per_page=100` CONTAINS `page=`, so the page number must be taken off a
+    # `?`/`&` boundary. A `*page=` glob here reads the PER-PAGE value as the
+    # page number, serves an empty page for every request, and every clause
+    # below then passes or fails for a reason that has nothing to do with the
+    # reader under test.
+    page=1
+    case "$path" in *[?\&]page=*) page="${path##*[?&]page=}"; page="${page%%&*}" ;; esac
+    case "$page" in *[!0-9]*|'') page=1 ;; esac
+    if [ "$page" = "1" ]; then
+      cat "$LIVE_FIXTURE_DIR/check-runs.json" > "$tmpf"
+    elif [ -f "$LIVE_FIXTURE_DIR/check-runs-p$page.json" ]; then
+      cat "$LIVE_FIXTURE_DIR/check-runs-p$page.json" > "$tmpf"
+    else
+      printf '{"total_count":0,"check_runs":[]}' > "$tmpf"
+    fi ;;
+  *actions/runs\?head_sha=*|*actions/runs\?status=queued*|*/actions/runs)
+    printf '{"total_count":0,"workflow_runs":[]}' > "$tmpf" ;;
+  *) echo "fake gh: unrouted path: $path" >&2; rm -f "$tmpf"; exit 1 ;;
+esac
+# COMPACT + raw, because that is what `gh api --jq` emits. A pretty-printer
+# here would be a fake that differs from the real client in a way the reader
+# under test can see.
+if [ -n "$filter" ]; then jq -rc "$filter" <"$tmpf"; else cat "$tmpf"; fi
+rm -f "$tmpf"
+FAKEGH
+chmod +x "$LIVEBIN/gh"
+
+# The rows are the REAL required contexts out of the committed spec, so a clean
+# verdict here means the same thing it means in production.
+jq -n --slurpfile spec "$SPEC" '
+  [$spec[0].protection.required_status_checks.checks[].context]
+  | {total_count: length,
+     check_runs: (to_entries | map({name: .value, status: "completed", conclusion: "success",
+                                    started_at: "2026-08-06T00:00:00Z", app: {id: 15368}}))}' \
+  > "$LIVEFX/check-runs.json"
+# The truncated twin: identical rows, a total_count the page cannot account for.
+jq '.total_count = 122' "$LIVEFX/check-runs.json" > "$LIVEFX/check-runs-truncated.json"
+
+run_live() { # <check-runs.json to serve>
+  local dir="$TMP/livefx-run"
+  rm -rf "$dir"; mkdir -p "$dir"
+  cp "$1" "$dir/check-runs.json"
+  env PATH="$LIVEBIN:/usr/bin:/bin:/usr/sbin:/sbin" LIVE_FIXTURE_DIR="$dir" \
+    bash "$CENSUS" --sha "$SHA" --now "$NOW" --spec "$SPEC" --workflows "$WORKFLOWS" \
+      --repo FRIKKern/barkpark
+}
+
+# 6b.0 THE FIXTURE ASSERTS ITSELF. A fake gh nobody reached would let every
+# clause below pass over a census that never made a live call.
+LIVE_N="$(jq -r '.check_runs | length' "$LIVEFX/check-runs.json")"
+if [ "$LIVE_N" -ge 1 ] && [ "$LIVE_N" = "$(jq -r '.total_count' "$LIVEFX/check-runs.json")" ]; then
+  ok "6b.0 the live fixture is real: $LIVE_N required contexts, total_count agrees"
+else
+  bad "6b.0 the live fixture is not usable (rows=$LIVE_N)"
+fi
+
+# 6b.1 DIRECTION ONE — the complete feed. total_count == rows, so the read is
+# vouched for and the census renders its ordinary verdict.
+OUT_OK="$(run_live "$LIVEFX/check-runs.json" 2>"$TMP/live-ok.err")"; RC_OK=$?
+if [ "$RC_OK" = "0" ] && grep -q 'heads examined: 1' <<<"$OUT_OK" \
+   && ! grep -q 'NOT certified clean' "$TMP/live-ok.err"; then
+  ok "6b.1 a COMPLETE live feed (total_count == rows) censuses normally — exit 0, one head examined"
+else
+  bad "6b.1 expected exit 0 on a complete live feed; got $RC_OK"
+  sed 's/^/       /' "$TMP/live-ok.err" >&2
+fi
+
+# 6b.2 DIRECTION TWO — one byte-range different. The feed says 122 runs exist
+# and page two adds none, so the set cannot be vouched for. It must REFUSE.
+OUT_TR="$(run_live "$LIVEFX/check-runs-truncated.json" 2>"$TMP/live-tr.err")"; RC_TR=$?
+if [ "$RC_TR" = "2" ] && grep -q 'NOT certified clean' "$TMP/live-tr.err"; then
+  ok "6b.2 …and the SAME rows with an unaccountable total_count exit 2 with a distinct refusal, never a short list"
+else
+  bad "6b.2 expected exit 2 + a refusal on a truncated live feed; got $RC_TR"
+  sed 's/^/       /' "$TMP/live-tr.err" >&2
+fi
+
+# 6b.3 THE REFUSAL NAMES THE MECHANISM. "could not read" is not enough — a
+# reader that says the feed was unreachable when it was merely INCOMPLETE sends
+# the fleet to look at credentials.
+if grep -qE '[0-9]+ of 122' "$TMP/live-tr.err" && grep -qi 'refus' "$TMP/live-tr.err"; then
+  ok "6b.3 …and the refusal states BOTH what it read and what the feed claimed (N of 122), so the reader is not blamed for a network fault"
+else
+  bad "6b.3 the truncation refusal does not name total_count"
+  sed 's/^/       /' "$TMP/live-tr.err" >&2
+fi
+
+# 6b.4 A TRUNCATED READ EMITS NO VERDICT ON STDOUT. This is the clause that
+# makes the other three mean something: the failure mode being abolished is a
+# short list that READS like a census, so the refusal must leave nothing on
+# stdout a consumer could mistake for one.
+if ! grep -qE 'renders nowhere on this head|ABSENT' <<<"$OUT_TR"; then
+  ok "6b.4 …and stdout carries NO absence verdict for the head it refused (the refusal is on stderr, where it cannot be parsed as a result)"
+else
+  bad "6b.4 the refused head still produced an absence verdict on stdout"
+  printf '%s\n' "$OUT_TR" | sed 's/^/       /' >&2
+fi
+
 # ═══ 7. the workflow shape ═══════════════════════════════════════════════════
 section "7. the workflow is schedule-only with a static job name"
 

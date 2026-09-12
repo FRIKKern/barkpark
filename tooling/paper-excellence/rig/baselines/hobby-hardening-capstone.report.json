@@ -19,7 +19,7 @@
       "cell": "hobby-hardening-capstone__light__1280",
       "file": "hobby-hardening-capstone__light__1280.jpeg",
       "scale": 2,
-      "bytes": 9959371,
+      "bytes": 10810790,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -118,10 +118,10 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.6,
+      "proseCpl": 70.8,
       "proseCplSamples": 19,
-      "captionCpl": 68.4,
-      "captionWidth": 453.5,
+      "captionCpl": 58.8,
+      "captionWidth": 400,
       "evidenceBand": 1180,
       "bandRows": [
         {
@@ -148,7 +148,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -157,7 +157,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -184,7 +184,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -193,7 +193,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -202,7 +202,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -211,7 +211,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -220,7 +220,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -229,12 +229,12 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -277,12 +277,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 4,
           "emptyTracks": 0,
           "probe": null
@@ -291,19 +291,19 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 148,
+        "total": 153,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 137,
+          "1": 142,
           "2": 11
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 2098.9,
-            "width": 580,
+            "y": 2089.9,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -312,8 +312,8 @@
           },
           {
             "px": 2,
-            "y": 4207.8,
-            "width": 580,
+            "y": 4242,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -322,8 +322,8 @@
           },
           {
             "px": 2,
-            "y": 6416.7,
-            "width": 580,
+            "y": 6506.9,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -332,8 +332,8 @@
           },
           {
             "px": 2,
-            "y": 15456.1,
-            "width": 580,
+            "y": 15718.4,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -342,8 +342,8 @@
           },
           {
             "px": 2,
-            "y": 18743,
-            "width": 580,
+            "y": 18963,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -352,8 +352,8 @@
           },
           {
             "px": 2,
-            "y": 21616.5,
-            "width": 580,
+            "y": 21817.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -362,8 +362,8 @@
           },
           {
             "px": 2,
-            "y": 23464.7,
-            "width": 580,
+            "y": 23626.8,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -372,8 +372,8 @@
           },
           {
             "px": 2,
-            "y": 24825.8,
-            "width": 580,
+            "y": 25040,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -382,8 +382,8 @@
           },
           {
             "px": 2,
-            "y": 26279.3,
-            "width": 580,
+            "y": 26424.3,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -392,8 +392,8 @@
           },
           {
             "px": 2,
-            "y": 28630.9,
-            "width": 580,
+            "y": 28821.5,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -402,8 +402,8 @@
           },
           {
             "px": 2,
-            "y": 30199.9,
-            "width": 580,
+            "y": 30390.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -412,13 +412,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "hobby-hardening-capstone__light__1920",
       "file": "hobby-hardening-capstone__light__1920.jpeg",
       "scale": 2,
-      "bytes": 10690966,
+      "bytes": 11398654,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -517,10 +517,10 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.6,
+      "proseCpl": 70.8,
       "proseCplSamples": 19,
-      "captionCpl": 68.4,
-      "captionWidth": 453.5,
+      "captionCpl": 58.8,
+      "captionWidth": 400,
       "evidenceBand": 1360,
       "bandRows": [
         {
@@ -547,7 +547,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -556,7 +556,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -583,7 +583,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -592,7 +592,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -601,7 +601,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -610,7 +610,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -619,7 +619,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -628,12 +628,12 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -690,19 +690,19 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 148,
+        "total": 153,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 137,
+          "1": 142,
           "2": 11
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 2098.9,
-            "width": 580,
+            "y": 2070.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -711,8 +711,8 @@
           },
           {
             "px": 2,
-            "y": 4207.8,
-            "width": 580,
+            "y": 4222.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -721,8 +721,8 @@
           },
           {
             "px": 2,
-            "y": 6359.1,
-            "width": 580,
+            "y": 6331.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -731,8 +731,8 @@
           },
           {
             "px": 2,
-            "y": 15289.8,
-            "width": 580,
+            "y": 15470.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -741,8 +741,8 @@
           },
           {
             "px": 2,
-            "y": 18263.1,
-            "width": 580,
+            "y": 18483.7,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -751,8 +751,8 @@
           },
           {
             "px": 2,
-            "y": 20733.5,
-            "width": 580,
+            "y": 20920.9,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -761,8 +761,8 @@
           },
           {
             "px": 2,
-            "y": 22408.8,
-            "width": 580,
+            "y": 22625.7,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -771,8 +771,8 @@
           },
           {
             "px": 2,
-            "y": 23626,
-            "width": 580,
+            "y": 23856.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -781,8 +781,8 @@
           },
           {
             "px": 2,
-            "y": 24964.3,
-            "width": 580,
+            "y": 25110.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -791,8 +791,8 @@
           },
           {
             "px": 2,
-            "y": 27315.9,
-            "width": 580,
+            "y": 27507.3,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -801,8 +801,8 @@
           },
           {
             "px": 2,
-            "y": 28884.9,
-            "width": 580,
+            "y": 29076.4,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -811,13 +811,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "hobby-hardening-capstone__dark__1280",
       "file": "hobby-hardening-capstone__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 9877908,
+      "bytes": 10743447,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -916,10 +916,10 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.6,
+      "proseCpl": 70.8,
       "proseCplSamples": 19,
-      "captionCpl": 68.4,
-      "captionWidth": 453.5,
+      "captionCpl": 58.8,
+      "captionWidth": 400,
       "evidenceBand": 1180,
       "bandRows": [
         {
@@ -946,7 +946,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -955,7 +955,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -982,7 +982,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -991,7 +991,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -1000,7 +1000,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -1009,7 +1009,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -1018,7 +1018,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -1027,12 +1027,12 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -1075,12 +1075,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 4,
           "emptyTracks": 0,
           "probe": null
@@ -1089,19 +1089,19 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 148,
+        "total": 153,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 137,
+          "1": 142,
           "2": 11
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 2098.9,
-            "width": 580,
+            "y": 2089.9,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1110,8 +1110,8 @@
           },
           {
             "px": 2,
-            "y": 4207.8,
-            "width": 580,
+            "y": 4242,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1120,8 +1120,8 @@
           },
           {
             "px": 2,
-            "y": 6416.7,
-            "width": 580,
+            "y": 6506.9,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1130,8 +1130,8 @@
           },
           {
             "px": 2,
-            "y": 15456.1,
-            "width": 580,
+            "y": 15718.4,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1140,8 +1140,8 @@
           },
           {
             "px": 2,
-            "y": 18743,
-            "width": 580,
+            "y": 18963,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1150,8 +1150,8 @@
           },
           {
             "px": 2,
-            "y": 21616.5,
-            "width": 580,
+            "y": 21817.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1160,8 +1160,8 @@
           },
           {
             "px": 2,
-            "y": 23464.7,
-            "width": 580,
+            "y": 23626.8,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1170,8 +1170,8 @@
           },
           {
             "px": 2,
-            "y": 24825.8,
-            "width": 580,
+            "y": 25040,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1180,8 +1180,8 @@
           },
           {
             "px": 2,
-            "y": 26279.3,
-            "width": 580,
+            "y": 26424.3,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1190,8 +1190,8 @@
           },
           {
             "px": 2,
-            "y": 28630.9,
-            "width": 580,
+            "y": 28821.5,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1200,8 +1200,8 @@
           },
           {
             "px": 2,
-            "y": 30199.9,
-            "width": 580,
+            "y": 30390.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1210,13 +1210,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "hobby-hardening-capstone__dark__1920",
       "file": "hobby-hardening-capstone__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 10752767,
+      "bytes": 11326399,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -1315,10 +1315,10 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.6,
+      "proseCpl": 70.8,
       "proseCplSamples": 19,
-      "captionCpl": 68.4,
-      "captionWidth": 453.5,
+      "captionCpl": 58.8,
+      "captionWidth": 400,
       "evidenceBand": 1360,
       "bandRows": [
         {
@@ -1345,7 +1345,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1354,7 +1354,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1381,7 +1381,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1390,7 +1390,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1399,7 +1399,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1408,7 +1408,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1417,7 +1417,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1426,12 +1426,12 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -1488,19 +1488,19 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 148,
+        "total": 153,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 137,
+          "1": 142,
           "2": 11
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 2098.9,
-            "width": 580,
+            "y": 2070.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1509,8 +1509,8 @@
           },
           {
             "px": 2,
-            "y": 4207.8,
-            "width": 580,
+            "y": 4222.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1519,8 +1519,8 @@
           },
           {
             "px": 2,
-            "y": 6359.1,
-            "width": 580,
+            "y": 6331.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1529,8 +1529,8 @@
           },
           {
             "px": 2,
-            "y": 15289.8,
-            "width": 580,
+            "y": 15470.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1539,8 +1539,8 @@
           },
           {
             "px": 2,
-            "y": 18263.1,
-            "width": 580,
+            "y": 18483.7,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1549,8 +1549,8 @@
           },
           {
             "px": 2,
-            "y": 20733.5,
-            "width": 580,
+            "y": 20920.9,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1559,8 +1559,8 @@
           },
           {
             "px": 2,
-            "y": 22408.8,
-            "width": 580,
+            "y": 22625.7,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1569,8 +1569,8 @@
           },
           {
             "px": 2,
-            "y": 23626,
-            "width": 580,
+            "y": 23856.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1579,8 +1579,8 @@
           },
           {
             "px": 2,
-            "y": 24964.3,
-            "width": 580,
+            "y": 25110.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1589,8 +1589,8 @@
           },
           {
             "px": 2,
-            "y": 27315.9,
-            "width": 580,
+            "y": 27507.3,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1599,8 +1599,8 @@
           },
           {
             "px": 2,
-            "y": 28884.9,
-            "width": 580,
+            "y": 29076.4,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1609,7 +1609,7 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     }
   ]
 }

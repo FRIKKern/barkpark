@@ -189,6 +189,14 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     {"* * * * *", BarkparkCloud.Workers.SseTicketReaper},
     {"* * * * *", BarkparkCloud.Workers.OAuthExchangeReaper},
     {"* * * * *", BarkparkCloud.Workers.StaleDeploymentReaper},
+    # ssw9-bl-artifact-retention-quota (19 -> 20 rows): the per-minute sweep that
+    # deletes `site_artifacts` bytes whose deployment has reached a terminal
+    # status. UNRELATED to every `:crontab_absent` verdict in this register — no
+    # row here promises an artifact reap, and this actor touches no billing
+    # promise, no team suspension and no box: it deletes build bytes. Pinned in
+    # the same commit that adds it, per the classification rule in
+    # `crontab_agrees/0`.
+    {"* * * * *", BarkparkCloud.Sites.ArtifactReaper},
     {"* * * * *", BarkparkCloud.Workers.StaleWarmClaimReaper},
     {"* * * * *", BarkparkCloud.Health.StalenessWorker},
     {"0 * * * *", BarkparkCloud.Workers.TrialExpiryWorker},
@@ -240,9 +248,14 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
       effect: {:flag_only, :suspend_update_all}
     },
 
-    # Immediate self-serve cancel. A REAL non-admin write path: POST
-    # /v1/billing/cancel with at_period_end: false → request_cancel/2 →
-    # cancel_subscription/1, gated by team ownership + password only.
+    # Immediate cancel. NO LONGER A SELF-SERVE PATH: until
+    # task-527f2a101b99ebf9 (ruled 2026-09-07) POST /v1/billing/cancel with
+    # at_period_end: false reached this, gated by team ownership + a password
+    # re-confirm only; the route now refuses that body 422 and the arm is
+    # request_cancel/2 → cancel_subscription/1 reached from Elixir alone. The
+    # row stays because the PROMISE ("your instances are paused") is still kept
+    # by this actor wherever it is called from — the resolvers below drive the
+    # context directly and never touched the route.
     {"billing_lapsed", :cancel_immediate} => %{
       clock: {:in_band, :cancel_immediate_suspends},
       actor: {:synchronous_call, :request_cancel_immediate},
@@ -1638,7 +1651,8 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     assert {:ok, detail} = crontab_agrees()
     # dr-w11: 17 -> 18 (ContentWebhookReconciler).
     # dr-bl-rate-notice: 18 -> 19 (DeployRateAlertWorker).
-    assert detail =~ "19 rows"
+    # ssw9-bl-artifact-retention-quota: 19 -> 20 (Sites.ArtifactReaper).
+    assert detail =~ "20 rows"
     assert length(configured_crontab()) == length(@scheduled_crontab)
   end
 

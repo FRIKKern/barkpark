@@ -20,6 +20,8 @@ package cli
 //   bp sites github connect <site> --repo owner/r   — link GitHub for auto-deploy (P7)
 //                          [--branch main] [--secret <s>]
 //   bp sites logs <site>                            — print last deploy's log URL
+//   bp sites logs <site> <deployment-id>            — the recorder's build-log
+//                                                     RECORD for ONE deployment
 //
 // All commands require a Cloud session token (gated by requireCloud). The
 // `<site>` argument accepts either the site's UUID or its slug; when it doesn't
@@ -980,6 +982,14 @@ func runSitesDeployments(out *writer, args []string) int {
 		} else {
 			payload["next_cursor"] = nil
 		}
+		// requested_limit rides BESIDE next_cursor and under the SAME condition
+		// as the human narrowing clause, so a script sees exactly the narrowing
+		// a human does — never more. null when nothing was narrowed.
+		if n := deploymentsNarrowedBy(q.Limit, len(ds), page.NextCursor); n > 0 {
+			payload["requested_limit"] = n
+		} else {
+			payload["requested_limit"] = nil
+		}
 		out.emitStructured(payload)
 		return exitOK
 	}
@@ -987,7 +997,7 @@ func runSitesDeployments(out *writer, args []string) int {
 		out.outf("no deployments for %q yet — 'cd ~/your-project && bp deploy %s'", site.Name, site.Slug)
 		return exitOK
 	}
-	renderDeploymentSummary(out, summarizeDeployments(ds), page.NextCursor)
+	renderDeploymentSummary(out, summarizeDeployments(ds), page.NextCursor, deploymentsNarrowedBy(q.Limit, len(ds), page.NextCursor))
 	out.outf("")
 	renderDeploymentsTable(out, ds)
 	return exitOK
@@ -1195,7 +1205,34 @@ func summarizeDeployments(ds []Deployment) deploymentSummary {
 // side, one surface later. The clause now names the OUTCOME (never attempted),
 // which is true of every deferral class; the per-row CAUSE column still names
 // which one.
-func renderDeploymentSummary(out *writer, s deploymentSummary, nextCursor string) {
+// deploymentsNarrowedBy reports the limit the CALLER asked for when the server
+// served fewer rows than that AND left a cursor behind — and 0 otherwise, which
+// is the whole point.
+//
+// The two conditions TOGETHER are the truncation case; either one alone is
+// ambiguous with a window that simply ran out of rows:
+//
+//   - rows < limit with NO cursor is a genuinely short window. Nothing was
+//     narrowed; there are no more rows to have.
+//   - rows == limit WITH a cursor is a full window. The caller got exactly what
+//     they asked for; "older rows exist" already says the rest.
+//
+// Only fewer-than-asked plus more-behind means the server capped the request
+// (router.ex parse_limit), which is the one thing the caller cannot see and the
+// CLI knows. A requested limit of 0 means the caller typed no --limit at all and
+// therefore chose no number to be misled about; --all leaves NextCursor empty,
+// so a full walk never reports itself as narrowed.
+func deploymentsNarrowedBy(requestedLimit, served int, nextCursor string) int {
+	if requestedLimit > 0 && served < requestedLimit && nextCursor != "" {
+		return requestedLimit
+	}
+	return 0
+}
+
+// renderDeploymentSummary's requestedLimit is the NARROWING signal from
+// deploymentsNarrowedBy — 0 when nothing was narrowed, in which case the window
+// line is byte-identical to what it printed before.
+func renderDeploymentSummary(out *writer, s deploymentSummary, nextCursor string, requestedLimit int) {
 	counts := fmt.Sprintf("%d live, %d failed, %d deferred", s.Live, s.Failed, s.Deferred)
 	if s.Cancelled > 0 {
 		counts += fmt.Sprintf(", %d cancelled", s.Cancelled)
@@ -1221,6 +1258,13 @@ func renderDeploymentSummary(out *writer, s deploymentSummary, nextCursor string
 	out.outf("%s — %s, %s", counts, failedPart, deferredPart)
 
 	window := fmt.Sprintf("window: %s → %s (%d rows fetched)", dashOr(s.OldestAt), dashOr(s.NewestAt), s.Rows)
+	if requestedLimit > 0 {
+		// BOTH numbers, because the requested one is the number the caller
+		// reasons with and the only one the CLI never printed: a reader holding
+		// 200 rows after typing --limit 250 was computing rates against a
+		// denominator of 250.
+		window += fmt.Sprintf("; NARROWED: you requested %d, the server served %d", requestedLimit, s.Rows)
+	}
 	if nextCursor != "" {
 		window += fmt.Sprintf("; older rows exist — '--before %s' to walk past this window", nextCursor)
 	}
@@ -1395,11 +1439,28 @@ func runSitesDomain(out *writer, args []string) int {
 	return exitOK
 }
 
-// runSitesLogs is the best-effort `bp sites logs <site>`. Today the control
-// plane does not stream logs — the builder writes a log somewhere (blob
-// storage / Loki) and stamps build_log_url on the Deployment row. This command
-// fetches the latest deployment and prints the URL so the user can open it
-// directly; real log streaming is deferred.
+// runSitesLogs is `bp sites logs <site> [<deployment-id>]`, and the two forms
+// answer two DIFFERENT questions.
+//
+// WITH a deployment id it is the DEPLOYMENT-KEYED read of the black box
+// recorder's durable record — GET /v1/sites/:id/deployments/:dep_id/build-log,
+// operator-gated (dr-bl-recorder-http-read-path). That is the honest key: the
+// question "why did deployment <uuid> fail?" is about ONE deployment, and a site
+// that has deployed since has moved every latest-pointer off it.
+//
+// WITHOUT one it stays the best-effort pointer view it has always been: the
+// LATEST deployment's `build_log_url`, the URL an out-of-band builder stamped on
+// the Deployment row. That column is not the recorder and says nothing about it,
+// so the pointer view now names the deployment-keyed form rather than pretending
+// to be it.
+//
+// NEITHER FORM SERVES THE RECORDED BYTES, and that is inherited, not chosen: the
+// box's own door refuses them (the build env file carries BARKPARK_TOKEN= in
+// plaintext, so the recorded log is the least-scrubbed artifact in the system),
+// so the control plane has no bytes to hand over and this command must not read
+// as though it does. What it prints is the RECORD — log_state, exit code, stages,
+// the honest failure reason, and the on-box path/journal command NAMING where the
+// bytes live. `log_state` is relayed verbatim, never mapped onto a CLI word.
 func runSitesLogs(out *writer, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
@@ -1408,11 +1469,18 @@ func runSitesLogs(out *writer, args []string) int {
 		}
 	}
 	if len(args) == 0 {
-		return useError(out, "usage", "missing <site> — bp sites logs <site>", exitUsage)
+		return useError(out, "usage", "missing <site> — bp sites logs <site> [<deployment-id>]", exitUsage)
 	}
 	handle := args[0]
-	if len(args) > 1 {
-		return useError(out, "usage", "too many arguments — bp sites logs <site>", exitUsage)
+	deploymentID := ""
+	if len(args) == 2 {
+		deploymentID = strings.TrimSpace(args[1])
+		if deploymentID == "" {
+			return useError(out, "usage", "empty <deployment-id> — bp sites logs <site> [<deployment-id>]", exitUsage)
+		}
+	}
+	if len(args) > 2 {
+		return useError(out, "usage", "too many arguments — bp sites logs <site> [<deployment-id>]", exitUsage)
 	}
 
 	cfg, ok := requireCloud(out)
@@ -1423,6 +1491,9 @@ func runSitesLogs(out *writer, args []string) int {
 	site, err := resolveSite(client, handle)
 	if err != nil {
 		return useError(out, "failed", "resolve site: "+err.Error(), exitGeneric)
+	}
+	if deploymentID != "" {
+		return runSitesBuildLogRecord(out, client, site, deploymentID)
 	}
 	dep, ok := latestDeployment(client, site.ID)
 	if !ok {
@@ -1443,10 +1514,178 @@ func runSitesLogs(out *writer, args []string) int {
 	out.outf("deployment %s (%s)", dep.ID, dep.Status)
 	if dep.BuildLogURL == "" {
 		out.outf("  no build log URL yet — the builder writes it once the build starts")
+	} else {
+		out.outf("  log: %s", dep.BuildLogURL)
+	}
+	// The pointer view is LATEST-keyed, which is the wrong key for "why did THIS
+	// deployment fail?". Name the deployment-keyed verb rather than leaving the
+	// user to discover it.
+	out.outf("  for one deployment's recorded build record: bp sites logs %s %s", site.Slug, dep.ID)
+	return exitOK
+}
+
+// siteBuildLogBytesNotice is the ONE sentence every deployment-keyed render
+// ends on, and it exists to keep this command from over-claiming. The control
+// plane serves the recorder's structured RECORD and cannot serve the recorded
+// bytes — the box refuses them. A surface that printed a record without saying
+// so would read exactly like a log viewer that happened to be empty.
+const siteBuildLogBytesNotice = "this is the recorded build RECORD, not the build log bytes — the control plane does not serve them (they are unscrubbed on the box)"
+
+// runSitesBuildLogRecord renders GET /v1/sites/:id/deployments/:dep_id/build-log
+// for ONE deployment. The control plane separates its answers BY STATUS CODE on
+// purpose, so this renders five distinguishable cases and never collapses them:
+//
+//	200 + build_id      the box answered definitively; log_state VERBATIM
+//	200 + no build_id   this deployment predates build-keyed recording
+//	410                 the bytes existed and retention reclaimed them
+//	404                 no such deployment under this site
+//	409 / 502           we could not ask (no box bound / box unreachable, which
+//	                    includes a box log_state the plane does not understand —
+//	                    `unknown` reaches the operator as itself, via box_log_state)
+//
+// EXIT CONTRACT: 0 when the plane gave a DEFINITE answer about the record (200
+// and 410 both do — "it is gone" is an answer), non-zero when it could not.
+func runSitesBuildLogRecord(out *writer, client *cloudclient.Client, site cloudclient.Site, deploymentID string) int {
+	rec, err := client.SiteBuildLog(cloudCtx(), site.ID, deploymentID)
+	if err != nil {
+		return cloudFail(out, "read build log record", err)
+	}
+
+	payload := map[string]any{
+		"ok":            rec.HTTPStatus == 200 || rec.HTTPStatus == 410,
+		"http_status":   rec.HTTPStatus,
+		"site":          site.Slug,
+		"deployment_id": firstNonEmpty(rec.DeploymentID, deploymentID),
+		"build_id":      nilIfEmpty(rec.BuildID),
+		"log_state":     nilIfEmpty(rec.LogState),
+		"available":     rec.Available,
+		// The machine-readable half of the negative arm: a script never has to
+		// infer from prose that the bytes are absent.
+		"log_bytes_served": false,
+		"pre_recorder":     rec.PreRecorder(),
+		"error":            nilIfEmpty(rec.Error),
+		"detail":           nilIfEmpty(rec.Detail),
+		"box_log_state":    nilIfEmpty(rec.BoxLogState),
+		"log_path":         nilIfEmpty(rec.LogPath),
+		"log_bytes":        rec.LogBytes,
+		"exit_code":        rec.ExitCode,
+		"failure_reason":   nilIfEmpty(rec.FailureReason),
+		"journal_command":  nilIfEmpty(rec.JournalCommand),
+		"started_at":       nilIfEmpty(rec.StartedAt),
+		"finished_at":      nilIfEmpty(rec.FinishedAt),
+		"evicted_at":       nilIfEmpty(rec.EvictedAt),
+		"stages":           buildLogStagePayload(rec.Stages),
+	}
+	if out.emitStructured(payload) {
+		if payload["ok"] == true {
+			return exitOK
+		}
+		return exitGeneric
+	}
+
+	switch rec.HTTPStatus {
+	case 404:
+		return useError(out, "not_found",
+			fmt.Sprintf("no deployment %s under site %q — 'bp sites deployments %s' lists the ones there are", deploymentID, site.Slug, site.Slug),
+			exitGeneric)
+	case 409:
+		return useError(out, "box_unbound",
+			fmt.Sprintf("deployment %s: %s", deploymentID, dashOr(firstNonEmpty(rec.Detail, "this site is not bound to a live instance, so no box can be asked"))),
+			exitGeneric)
+	case 502:
+		msg := fmt.Sprintf("deployment %s: %s", deploymentID, firstNonEmpty(rec.Detail, "could not reach the box that recorded this build"))
+		// `unknown` is one of the recorder's own five states and the plane
+		// relays the word it got. Print it VERBATIM: an operator seeing
+		// "unknown" is seeing the recorder's own answer, not our guess at it.
+		if rec.BoxLogState != "" {
+			msg += fmt.Sprintf(" (the box reported log_state %q)", rec.BoxLogState)
+		}
+		if rec.Reason != "" {
+			msg += " — " + rec.Reason
+		}
+		return useError(out, "box_unreachable", msg, exitGeneric)
+	}
+
+	out.outf("deployment %s (site %s)", firstNonEmpty(rec.DeploymentID, deploymentID), site.Slug)
+
+	if rec.PreRecorder() {
+		out.outf("  this deployment predates build-keyed recording — it carries no build_id,")
+		out.outf("  so nothing was ever recorded under it. That is not a missing log and not an error.")
+		out.outf("  log_state: %s", rec.LogState)
+		out.outf("  %s", siteBuildLogBytesNotice)
 		return exitOK
 	}
-	out.outf("  log: %s", dep.BuildLogURL)
+
+	out.outf("  build id: %s", dashOr(rec.BuildID))
+	out.outf("  log_state: %s", dashOr(rec.LogState))
+	if rec.HTTPStatus == 410 {
+		out.outf("  the recorded bytes were reclaimed by retention%s — they are not coming back", evictedWhen(rec.EvictedAt))
+	}
+	if rec.ExitCode != nil {
+		out.outf("  exit code: %d", *rec.ExitCode)
+	}
+	if rec.FailureReason != "" {
+		out.outf("  failure: %s", rec.FailureReason)
+	}
+	for _, st := range rec.Stages {
+		if st.Name == "" && st.Status == "" {
+			continue
+		}
+		out.outf("  stage %s: %s", dashOr(st.Name), dashOr(st.Status))
+	}
+	if rec.StartedAt != "" || rec.FinishedAt != "" {
+		out.outf("  ran: %s → %s", dashOr(rec.StartedAt), dashOr(rec.FinishedAt))
+	}
+	if rec.LogPath != "" {
+		out.outf("  recorded on the box at %s%s (not fetched by this command)", rec.LogPath, logBytesSuffix(rec.LogBytes))
+	}
+	if rec.JournalCommand != "" {
+		out.outf("  read it there with: %s", rec.JournalCommand)
+	}
+	out.outf("  %s", siteBuildLogBytesNotice)
 	return exitOK
+}
+
+// buildLogStagePayload renders the stage ladder for the machine envelope. nil
+// (never an empty list invented for an absent one) when the record carried none.
+func buildLogStagePayload(stages []cloudclient.SiteBuildLogStage) any {
+	if len(stages) == 0 {
+		return nil
+	}
+	rows := make([]map[string]any, 0, len(stages))
+	for _, st := range stages {
+		rows = append(rows, map[string]any{"name": st.Name, "status": st.Status})
+	}
+	return rows
+}
+
+// evictedWhen renders the eviction timestamp when the tombstone named one, and
+// nothing at all when it did not — never an invented "recently".
+func evictedWhen(at string) string {
+	if strings.TrimSpace(at) == "" {
+		return ""
+	}
+	return " at " + at
+}
+
+// logBytesSuffix names how large the recorded log was when the record says so.
+// A nil LogBytes is "the record did not say", which prints as nothing rather
+// than as a zero-byte log.
+func logBytesSuffix(n *int64) string {
+	if n == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (%d bytes)", *n)
+}
+
+// nilIfEmpty maps "" to a JSON null. Absent and empty are different facts on a
+// machine surface: a null says the server did not send the key, an empty string
+// would claim it sent a blank one.
+func nilIfEmpty(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
 }
 
 // --- flag parsers (dependency-free, mirroring cloud12_cmd.go) ----------------
@@ -1597,6 +1836,8 @@ USAGE
   bp sites github connect <site> --repo owner/repo  link a GitHub repo + branch
                                   [--branch main]   so pushes trigger auto-deploy
   bp sites logs <site>                              print latest deployment's build log URL
+  bp sites logs <site> <deployment-id>              the recorder's build RECORD for ONE deployment
+                                                    (operator-gated; the record, never the log bytes)
 
 WHAT IT DOES
   drives the Barkpark Cloud control plane's hosted-site surface — a site is a
@@ -1635,6 +1876,20 @@ WHAT 'bp sites' PRINTS
   paste into GitHub's "Add webhook" form (Settings → Webhooks → Add webhook,
   content type "application/json"). After that, every push to the branch fires
   a Deployment for the pushed commit sha — HMAC-verified by the control plane.
+
+  'bp sites logs <site> <deployment-id>' reads the black box recorder's durable
+  record for THAT deployment (operator-gated). It prints the RECORD — log_state,
+  exit code, stages, the honest failure reason, and the on-box path / journal
+  command naming where the bytes live. IT DOES NOT PRINT THE BUILD LOG BYTES and
+  cannot: the control plane does not serve them (they are unscrubbed on the box).
+  'log_state' is relayed exactly as the recorder worded it, never mapped onto a
+  CLI vocabulary. Five distinguishable answers: the record (log_state
+  available/missing/never_recorded), a deployment that predates build-keyed
+  recording, an evicted log (the bytes existed and retention reclaimed them), no
+  such deployment, and 'we could not ask' (no box bound, or the box unreachable
+  or answering with a log_state this control plane does not understand). Exit is
+  0 when the plane gave a definite answer about the record — including 'it was
+  evicted' — and non-zero when it could not answer.
 
 FLAGS
   -o json   emit one machine-readable JSON object on stdout`

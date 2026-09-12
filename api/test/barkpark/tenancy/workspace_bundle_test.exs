@@ -20,9 +20,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
   describe "Catalog live enumerations (charter D4)" do
-    test "E1 = the 42 workspace_id tables including correction and release authority" do
+    test "E1 = the 43 workspace_id tables including correction and release authority" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 42
+      assert length(e1) == 43
+      # github_sync_conflicts joined in migration 20260911120000
+      # (github-bridge-w9-health-workspace-isolation): the GitHub conflict
+      # quarantine gained a real workspace_id, so it exports by
+      # `WHERE workspace_id = $ws` and tears down on the FK cascade instead of a
+      # (doc_id, dataset) semi-join keyed on a project-ambiguous dataset slug.
+      assert "github_sync_conflicts" in e1
       assert "roles" in e1
       # The paper view/edit trail (edit-on-the-link slice 4) carries a
       # workspace_id with no FK, exactly like audit_events.
@@ -79,10 +85,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
                   webhook_deliveries)
     end
 
-    test "E3 = the 4 dataset-column tables; the scope allowlist is EMPTY; data_keys, search_surface_config and the 5 sync_* tables all rode into E1" do
+    test "E3 = the 3 dataset-column tables; the scope allowlist is EMPTY; data_keys, search_surface_config, the 5 sync_* tables and github_sync_conflicts all rode into E1" do
       e3 = Catalog.live_e3(Repo)
-      assert length(e3) == 4
+      assert length(e3) == 3
       assert "authoring_exemptions" in e3
+      # github_sync_conflicts left E3 for E1 the same way the sync_* family did
+      # — it carries workspace_id now (20260911120000).
+      refute "github_sync_conflicts" in e3
       # The scope-column allowlist is now EMPTY — both former members gained a
       # real workspace_id column and moved to E1.
       assert Catalog.allowlist() == %{}
@@ -489,6 +498,142 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
       # And the sweep is still fail-CLOSED across the tenant boundary.
       assert scalar("SELECT count(*) FROM shares WHERE id::text = $1", [f.b_shared_share_id]) == 1
+    end
+  end
+
+  # ── the GENERAL lockstep (pds-bl-export-teardown-lockstep-untested) ──────────
+  #
+  # The block above binds ONE table (`shares`) by example. This one binds EVERY
+  # table in `Catalog.e3_doc_keyed/0`, `Catalog.e3_dataset_keyed/0` and
+  # `Catalog.allowlist/0` — including tables that do not exist yet, because both
+  # arms iterate the catalog rather than a hand-written list. The defect it
+  # closes: the exporter and the teardown used to BUILD the same SQL twice, with
+  # a comment asserting they matched; a prototype split `shares` and 98 tests
+  # stayed green while a row the bundle carried survived the teardown.
+
+  describe "export and teardown derive every string-keyed predicate from ONE source" do
+    test "STRUCTURAL: each class's teardown DELETE carries the exporter's own WHERE verbatim" do
+      f = seed_lockstep_fixture!()
+
+      # Read BEFORE the teardown: `slugs` is derived from projects+datasets that
+      # only leave at `Repo.delete(workspace)`.
+      scope = tenant_scope_for(f.ws_a)
+      classes = lockstep_classes()
+
+      # POSITIVE CONTROL. Every assertion below is quantified over a catalog
+      # class; an empty class makes its arm vacuously true. The two live classes
+      # must be non-empty or this test measured nothing. (`allowlist` is
+      # legitimately `%{}` as of Wave 5 — its arm is allowed to be empty, which
+      # is precisely why the control cannot be "the union is non-empty".)
+      assert Keyword.fetch!(classes, :e3_doc) != [],
+             "Catalog.e3_doc_keyed/0 is EMPTY — the e3_doc arm of this test measured nothing"
+
+      assert Keyword.fetch!(classes, :e3_dataset) != [],
+             "Catalog.e3_dataset_keyed/0 is EMPTY — the e3_dataset arm measured nothing"
+
+      sqls = trace_repo_query(fn -> assert {:ok, _} = Tenancy.delete_workspace(f.ws_a) end)
+
+      for {kind, tables} <- classes, table <- tables do
+        expected = WorkspaceBundle.tenant_scope_where(table, kind, scope)
+        prefix = "DELETE FROM #{quote_ident(table)} t "
+        delete = Enum.find(sqls, &String.starts_with?(&1, prefix))
+
+        assert delete,
+               "the teardown issued NO sweep for #{table} (#{kind}) — a table the exporter " <>
+                 "carries but `delete_workspace/1` never touches orphans on every teardown"
+
+        assert String.contains?(delete, expected),
+               """
+               #{table} (#{kind}): the teardown predicate is NOT the extraction predicate.
+
+               exporter (WorkspaceBundle.tenant_scope_where/4):
+                 #{expected}
+
+               teardown DELETE actually issued:
+                 #{delete}
+
+               These must be ONE string, not two that happen to agree — see
+               pds-bl-export-teardown-lockstep-untested.
+               """
+      end
+    end
+
+    test "BEHAVIOURAL: the teardown sweeps exactly the rows A's bundle carries, sparing co-owned" do
+      f = seed_lockstep_fixture!()
+      scope_a = tenant_scope_for(f.ws_a)
+      scope_b = tenant_scope_for(f.ws_b)
+      classes = lockstep_classes()
+
+      assert Keyword.fetch!(classes, :e3_doc) != [] and
+               Keyword.fetch!(classes, :e3_dataset) != [],
+             "a catalog class is empty — this behavioural arm measured nothing"
+
+      {:ok, bundle} = WorkspaceBundle.export(f.ws_a.id)
+      {manifest, _dumps} = Archive.unpack(bundle)
+      index = table_index(manifest)
+
+      # For each table: the rows the bundle carries for A, and the subset a
+      # SIBLING also owns. `t::text` is a whole-row identity that needs no
+      # per-table primary key, so this is uniform across every class.
+      measured =
+        for {kind, tables} <- classes, table <- tables do
+          where_a = WorkspaceBundle.tenant_scope_where(table, kind, scope_a)
+          where_b = WorkspaceBundle.tenant_scope_where(table, kind, scope_b)
+
+          carried = member_rows(table, where_a)
+          sibling = member_rows(table, where_b)
+          co_owned = Enum.filter(carried, &(&1 in sibling))
+
+          # CONTROLS: a table with no A row, or nothing the sweep must actually
+          # remove, cannot fail the post-teardown assertion.
+          assert carried != [],
+                 "fixture regression: the bundle carries no #{table} row for A"
+
+          assert sibling != [],
+                 "fixture regression: the co-tenant owns no #{table} row"
+
+          assert carried -- co_owned != [],
+                 "fixture regression: every #{table} row A carries is ALSO the sibling's, so " <>
+                   "the sweep has nothing it is obliged to delete"
+
+          # Binds the shared predicate to what the EXPORT actually emitted: if
+          # `tenant_scope_where/4` were not the function the dump is built from,
+          # these two counts would part company.
+          assert index[table]["row_count"] == length(carried),
+                 "#{table}: the bundle's member row_count (#{index[table]["row_count"]}) does " <>
+                   "not match the shared extraction predicate's count (#{length(carried)})"
+
+          {kind, table, carried, sibling, co_owned}
+        end
+
+      # The D7 asymmetry must be EXERCISED, not merely tolerated: at least one
+      # doc-keyed table has a row a second workspace also owns, so the
+      # sibling-guard arm below is a real assertion.
+      assert Enum.any?(measured, fn {kind, _t, _c, _s, co} -> kind == :e3_doc and co != [] end),
+             "fixture regression: no co-owned (doc_id, dataset) row — the sibling-guard is untested"
+
+      assert {:ok, _} = Tenancy.delete_workspace(f.ws_a)
+
+      for {kind, table, carried, sibling, co_owned} <- measured do
+        survivors = Enum.sort(rows_still_present(table, carried))
+
+        assert survivors == Enum.sort(co_owned),
+               """
+               #{table} (#{kind}): export and teardown disagree.
+
+               carried by A's bundle: #{length(carried)}
+               still present after delete_workspace(A): #{length(survivors)}
+               legitimately spared (a sibling owns them too, charter D7): #{length(co_owned)}
+
+               A row the bundle claimed as A's that survives A's teardown is an
+               orphan the backup said was owned; a row deleted that a sibling
+               owns is a cross-tenant delete. Both are this assertion failing.
+               """
+
+        # Fail-CLOSED across the tenant boundary: nothing of B's leaves.
+        assert length(rows_still_present(table, sibling)) == length(sibling),
+               "#{table} (#{kind}): delete_workspace(A) removed rows the co-tenant B owns"
+      end
     end
   end
 
@@ -1996,6 +2141,345 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── DDL lock contention (pds-bl-import-ddl-deadlock-flake) ───────────────────
+  #
+  # Three tests, one axis: what the import does when another session holds a
+  # conflicting lock on a member table.
+  #
+  #   1. no retry budget (attempts: 1) — the refusal is bounded and NAMED.
+  #   2. holder lets go inside the backoff — the import RETRIES and completes.
+  #   3. holder never lets go — the refusal names how many attempts were spent.
+  #
+  # Every one drives the engine through the real `ALTER TABLE` against a real
+  # second backend; none of them stubs Postgrex.
+
+  describe "the import's DDL passes refuse fast and by name under lock contention" do
+    @tag timeout: 60_000
+    test "a foreign session holding AccessShareLock on a member table turns the import's " <>
+           "ALTER TABLE into a named ImportLockError instead of an unbounded wait" do
+      # attempts: 1 — the retry is OFF here on purpose, so this test measures
+      # exactly one thing: the translation of 55P03 into a named, bounded
+      # refusal. The retry itself is measured by the two tests below.
+      put_import_lock_config!(
+        bundle_import_ddl_lock_timeout: "300ms",
+        bundle_import_ddl_lock_attempts: 1
+      )
+
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+
+      # The stand-in for the background GenServer that merely READS a member
+      # table on its own pooled checkout (Barkpark.Pulse.Metrics was the one
+      # caught doing it in the wild): a SECOND, non-sandbox connection holding
+      # AccessShareLock, which conflicts with the AccessExclusiveLock every
+      # ALTER TABLE in the import's DDL passes needs.
+      conn = hold_access_share_lock!("documents")
+
+      {elapsed_us, error} =
+        try do
+          :timer.tc(fn ->
+            assert_raise WorkspaceBundle.ImportLockError, fn ->
+              WorkspaceBundle.import_bundle(bundle)
+            end
+          end)
+        after
+          # RELEASED HERE, not by the supervisor at test teardown. An open
+          # transaction on a supervised Postgrex pool outlives the test body by
+          # however long shutdown takes, and this lock is on a table EVERY
+          # bundle test's import must ALTER — an earlier draft of this test let
+          # it leak and reddened an unrelated merge-import test at seed 741453.
+          release_access_share_lock!(conn)
+        end
+
+      assert error.phase == :drop_member_fks
+      assert error.code == "ddl_lock_not_available"
+      assert error.attempts == 1
+      assert error.retried?
+      assert error.message =~ "another session holds a conflicting lock"
+      assert error.message =~ "Nothing was committed"
+
+      # THE POINT, and the half a raw Postgrex.Error would not give: BOUNDED.
+      # The import opts out of statement_timeout entirely, so without the
+      # lock_timeout this call simply never returns — and the observed flake
+      # (seed 162213) was that same wait closing into a 40P01 deadlock.
+      assert elapsed_us < 30_000_000,
+             "the import waited #{div(elapsed_us, 1000)}ms for a lock it should have " <>
+               "refused inside its configured lock_timeout"
+
+      # The refusal took the whole transaction with it — no partial import.
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) == 1
+    end
+
+    # THE FIX FOR THE CI RED AT f2c6845d1b. Bounding the lock wait made the
+    # import honest; it did not make it SUCCEED. A background reader that holds
+    # AccessShareLock for longer than the bound now turns a rare 40P01 into a
+    # frequent named refusal — which is what reddened this very module's Elixir
+    # gate (run 34554873798, `merge import mode (PDS-D8) … converges
+    # media_files.size`, at max_cases: 1, so no other TEST held the lock).
+    # Nothing is committed on a refusal, so the whole transaction re-runs.
+    @tag timeout: 60_000
+    test "a holder that lets go inside the backoff window is out-waited: the second attempt " <>
+           "takes the lock and the import completes" do
+      put_import_lock_config!(
+        bundle_import_ddl_lock_timeout: "300ms",
+        bundle_import_ddl_lock_attempts: 3,
+        # NOT load-bearing, and deliberately short. The release is sequenced on
+        # the refusal event that fires BEFORE this sleep (see below), so the
+        # lock is already free whatever the backoff is; a long one only made
+        # the test slower and invited the reader to believe the release was
+        # racing it. The earlier fixture used 1_500ms for exactly that reason
+        # and lost the race anyway.
+        bundle_import_ddl_lock_backoff_ms: [250]
+      )
+
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+
+      docs_before =
+        scalar("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [ws_a.id])
+
+      assert docs_before > 0
+
+      conn = hold_access_share_lock!("documents")
+      test_pid = self()
+
+      # ── THE SEQUENCING, and why it is an ORDER rather than a duration ──────
+      #
+      # The holder lets go ON THE IMPORT'S FIRST REFUSAL, observed through the
+      # `[:barkpark, :workspace_bundle, :import, :lock_refused]` event the
+      # retry emits AFTER a refusal is final for that attempt and BEFORE its
+      # backoff sleep. Telemetry handlers run synchronously in the emitting
+      # process, so the `ROLLBACK` below — the statement that actually frees
+      # the lock, server-side and synchronously — has completed before attempt
+      # 2 is so much as scheduled. "Refused once, then the lock is free" is
+      # PROGRAM ORDER here. No scheduling gap can invert it.
+      #
+      # This replaced a releaser Task that polled pg_locks until the import was
+      # parked on `documents` and then slept a flat 600ms. Both halves were
+      # load-sensitive. The park it watched for lasts exactly `lock_timeout`
+      # (300ms), so a poller the runner does not schedule inside that window
+      # misses it and catches a LATER attempt's park instead; and the 600ms was
+      # a bare constant standing beside three independent timings (the 300ms
+      # lock_timeout, the 1.5s backoff, the 3-attempt budget). On run
+      # 34584565394 the release landed after the THIRD refusal — the import
+      # reported `... within 300ms after 3 attempt(s)` and gave up exactly as
+      # designed, with the fixture, not the engine, in the wrong.
+      handler_id = "out-waited-holder-#{inspect(self())}"
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:barkpark, :workspace_bundle, :import, :lock_refused],
+          fn _event, %{attempt: attempt}, _meta, _config ->
+            # The FIRST refusal and only the first: idempotent if a later
+            # attempt were somehow refused too, and it pins on the record WHICH
+            # refusal freed the lock.
+            if attempt == 1 do
+              {:ok, _} = Postgrex.query(conn, "ROLLBACK", [])
+              send(test_pid, {:holder_released_on_attempt, attempt})
+            end
+          end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      {elapsed_us, result} =
+        try do
+          :timer.tc(fn -> WorkspaceBundle.import_bundle(bundle, mode: :merge) end)
+        after
+          # Unconditional, and from the test process (the only one holding the
+          # sandbox): the ROLLBACK above frees the lock but leaves the pooled
+          # backend, and if the import raised the handler may never have run at
+          # all. This lock sits on a table EVERY bundle test's import must
+          # ALTER — leaking it reddens whichever unrelated test runs next.
+          release_access_share_lock!(conn)
+        end
+
+      # THE FIXTURE'S OWN INVARIANT, asserted rather than assumed: the release
+      # was triggered by the import's first refusal. Without this, a fixture
+      # whose holder quietly let go early (or never) could still satisfy
+      # everything below by accident.
+      assert_received {:holder_released_on_attempt, 1}
+
+      assert {:ok, stats} = result
+      assert stats.total_rows > 0
+      assert stats.tables["workspaces"] == 1
+
+      # THE INVARIANT, and the reason `stats.attempts` exists at all: the import
+      # was refused ONCE on lock_timeout and the SECOND attempt is the one that
+      # took the lock. Observed attempts and their ORDER — not elapsed time.
+      #
+      # This assertion replaced an elapsed FLOOR (>= 1_800ms: the 300ms
+      # lock_timeout plus the 1.5s backoff). The floor was sound arithmetic and
+      # a wall-clock flake all the same: main run 34564685349 measured 4263ms on
+      # a loaded runner, and a floor can only ever be undercut by a machine that
+      # ran FASTER than the configured waits — which is not a thing a busy CI
+      # box does. `attempts == 2` says the same thing the floor was reaching
+      # for, and says it off a counter rather than a clock.
+      assert stats.attempts == 2,
+             "the import reported #{stats.attempts} attempt(s) — it was expected to be " <>
+               "refused once on lock_timeout and to take the lock on the second"
+
+      # ROWS READ BACK, not merely {:ok, _}: the retried transaction is the one
+      # that actually landed the members.
+      assert scalar("SELECT name FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) ==
+               ws_a.name
+
+      assert scalar("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [
+               ws_a.id
+             ]) == docs_before
+
+      # The only surviving clock assertion is an UPPER bound, and a generous one:
+      # it exists to catch an unbounded wait (the whole point of lock_timeout),
+      # not to time the retry. A loaded runner makes a test SLOWER, so a ceiling
+      # this far above the ~0.55s of configured waiting cannot be tripped by
+      # load — which is exactly the property the removed floor lacked. The
+      # @tag timeout above would eventually fire too; this names the reason.
+      assert div(elapsed_us, 1000) < 30_000,
+             "the import took #{div(elapsed_us, 1000)}ms — that is an unbounded wait, not a " <>
+               "bounded refusal followed by a retry"
+    end
+
+    @tag timeout: 60_000
+    test "a holder kept for the whole budget exhausts it: ImportLockError names the attempt " <>
+           "count and the import is still bounded" do
+      put_import_lock_config!(
+        bundle_import_ddl_lock_timeout: "250ms",
+        bundle_import_ddl_lock_attempts: 3,
+        bundle_import_ddl_lock_backoff_ms: [100, 100]
+      )
+
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+
+      conn = hold_access_share_lock!("documents")
+
+      {elapsed_us, error} =
+        try do
+          :timer.tc(fn ->
+            assert_raise WorkspaceBundle.ImportLockError, fn ->
+              WorkspaceBundle.import_bundle(bundle)
+            end
+          end)
+        after
+          release_access_share_lock!(conn)
+        end
+
+      assert error.attempts == 3
+      assert error.code == "ddl_lock_not_available"
+      assert error.phase == :drop_member_fks
+      assert error.message =~ "after 3 attempt(s)"
+
+      # THE LOWER BOUND IS THE PROOF THAT IT RETRIED: three 250ms lock waits
+      # plus two 100ms backoffs cannot be spent by a single attempt.
+      assert div(elapsed_us, 1000) >= 950,
+             "gave up in #{div(elapsed_us, 1000)}ms — that is one attempt, not three"
+
+      # BOUNDED all the same: a budget is not a licence to hang.
+      assert elapsed_us < 30_000_000
+
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) == 1
+    end
+  end
+
+  # Application env for the lock/retry knobs, restored on exit whether the key
+  # was set before or absent entirely — `Application.put_env` has no "unset"
+  # twin, so the absent case must delete rather than write back a nil.
+  defp put_import_lock_config!(opts) do
+    for {key, value} <- opts do
+      previous = Application.fetch_env(:barkpark, key)
+      Application.put_env(:barkpark, key, value)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, prior} -> Application.put_env(:barkpark, key, prior)
+          :error -> Application.delete_env(:barkpark, key)
+        end
+      end)
+    end
+
+    :ok
+  end
+
+  # A real second backend, OUTSIDE the ExUnit sandbox, parked in an open
+  # transaction holding AccessShareLock on `table`. Linked to the test process,
+  # so a crash frees it; the caller MUST still release it explicitly.
+  defp hold_access_share_lock!(table) do
+    conn_opts =
+      Repo.config()
+      |> Keyword.take([:hostname, :port, :username, :password, :database, :socket_dir, :ssl])
+      |> Keyword.put(:pool_size, 1)
+
+    {:ok, conn} = Postgrex.start_link(conn_opts)
+
+    {:ok, _} = Postgrex.query(conn, "BEGIN", [])
+
+    {:ok, _} =
+      Postgrex.query(conn, "LOCK TABLE public.#{quote_ident(table)} IN ACCESS SHARE MODE", [])
+
+    conn
+  end
+
+  # ROLLBACK is what actually frees the lock, server-side and synchronously;
+  # stopping the pool afterwards just reclaims the backend.
+  defp release_access_share_lock_raw!(conn) do
+    _ = Postgrex.query(conn, "ROLLBACK", [])
+    _ = GenServer.stop(conn, :normal, 5_000)
+    :ok
+  end
+
+  # Both matter: this lock sits on a table EVERY bundle test's import must
+  # ALTER, so leaving it to process teardown reddens whichever unrelated test
+  # runs next (an earlier draft of this test did exactly that at seed 741453).
+  # Callable only from the sandbox-owning test process — await_no_foreign_lock!
+  # reads through the Repo.
+  defp release_access_share_lock!(conn) do
+    release_access_share_lock_raw!(conn)
+    await_no_foreign_lock!("documents", 5_000)
+  end
+
+  # PROVE the release rather than assume it. Stopping the pool does not by
+  # itself guarantee the backend is gone, and a surviving AccessShareLock on a
+  # table every bundle import must ALTER reappears as an ImportLockError in
+  # whichever unrelated test runs next — a leak that reads as a defect in the
+  # fix under test. Read from the sandbox connection, which is a DIFFERENT
+  # backend, so `pid <> pg_backend_pid()` isolates the holder we planted.
+  defp await_no_foreign_lock!(table, budget_ms) do
+    held? = fn ->
+      scalar(
+        """
+        SELECT count(*)
+        FROM pg_locks l
+        JOIN pg_class c ON c.oid = l.relation
+        WHERE l.locktype = 'relation'
+          AND l.granted
+          AND l.pid <> pg_backend_pid()
+          AND c.relname = $1
+        """,
+        [table]
+      ) > 0
+    end
+
+    deadline = System.monotonic_time(:millisecond) + budget_ms
+
+    Stream.repeatedly(fn ->
+      if held?.() and System.monotonic_time(:millisecond) < deadline do
+        Process.sleep(25)
+        :retry
+      else
+        :done
+      end
+    end)
+    |> Enum.find(&(&1 == :done))
+
+    refute held?.(),
+           "the planted AccessShareLock on #{table} survived its release — the next test's " <>
+             "import would fail on it"
+
+    :ok
+  end
+
   # ── seed + helpers ────────────────────────────────────────────────────────────
 
   # Workspace A: full spread across every extraction path. Workspace B: the leak
@@ -2491,4 +2975,155 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   defp quote_ident(ident), do: ~s("#{String.replace(ident, "\"", "\"\"")}")
 
   defp unique(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  # ── the general export/teardown lockstep (pds-bl-export-teardown-lockstep-untested) ──
+
+  # The three string-keyed catalog classes, each paired with the predicate KIND
+  # `WorkspaceBundle.tenant_scope_where/4` builds for it. Derived, never listed:
+  # a new table in any class is covered the moment it is pinned.
+  defp lockstep_classes do
+    [
+      {:e3_doc, Catalog.e3_doc_keyed()},
+      {:e3_dataset, Catalog.e3_dataset_keyed()},
+      {:allowlist, Map.keys(Catalog.allowlist())}
+    ]
+  end
+
+  # The tenant literals both halves of the lockstep read — the same three keys
+  # `Tenancy.delete_workspace/1` builds and the export ctx carries.
+  defp tenant_scope_for(ws) do
+    %{
+      ws_lit: Catalog.uuid_literal!(ws.id),
+      ws_slug_lit: Catalog.text_literal(ws.slug),
+      slugs: WorkspaceBundle.dataset_slugs_for(ws.id)
+    }
+  end
+
+  # Whole-row identities for the rows a predicate selects. `t::text` needs no
+  # per-table primary key, so one helper serves every class — including a future
+  # table whose key shape nobody here anticipated.
+  defp member_rows(table, where) do
+    Repo.query!("SELECT t::text FROM #{quote_ident(table)} t #{where}", []).rows
+    |> List.flatten()
+  end
+
+  defp rows_still_present(table, rows) do
+    Repo.query!(
+      "SELECT t::text FROM #{quote_ident(table)} t WHERE t::text = ANY($1::text[])",
+      [rows]
+    ).rows
+    |> List.flatten()
+  end
+
+  # Call-trace `Repo.query!` for the duration of `fun`, returning every SQL
+  # string in call order. The teardown's sweeps are raw `Repo.query!/2` strings
+  # built at run time, so the emitted SQL is the only place the teardown's
+  # ACTUAL predicate can be read — a source grep would assert about the file,
+  # not about what ran. Same seam (and same separate-tracer-process
+  # requirement) as `trace_repo_transaction/1` above.
+  defp trace_repo_query(fun) do
+    me = self()
+    tracer = spawn_link(fn -> trace_collector([], me) end)
+
+    :erlang.trace_pattern({Repo, :query!, :_}, true, [:local])
+    :erlang.trace(self(), true, [:call, {:tracer, tracer}])
+
+    try do
+      fun.()
+    after
+      :erlang.trace(self(), false, [:call])
+      :erlang.trace_pattern({Repo, :query!, :_}, false, [:local])
+    end
+
+    send(tracer, {:dump, me})
+
+    receive do
+      {:traced, msgs} ->
+        for {:trace, _pid, :call, {_m, :query!, [sql | _]}} <- msgs, is_binary(sql), do: sql
+    after
+      5_000 -> flunk("the trace collector never answered")
+    end
+  end
+
+  # Two workspaces sharing a dataset slug, with a row in EVERY live string-keyed
+  # table for each — plus one `(doc_id, dataset)` pair both workspaces own, which
+  # is what makes the teardown's sibling-guard (charter D7) a live arm rather
+  # than dead code.
+  defp seed_lockstep_fixture! do
+    ws_a = create_workspace!(unique("wsa"))
+    proj_a = create_project!(ws_a, unique("proja"))
+    ws_b = create_workspace!(unique("wsb"))
+    proj_b = create_project!(ws_b, unique("projb"))
+
+    tag = System.unique_integer([:positive])
+    excl_a = "excl-a-#{tag}"
+    excl_b = "excl-b-#{tag}"
+    shared = "shared-prod-#{tag}"
+
+    seed_dataset!(proj_a.id, excl_a)
+    seed_dataset!(proj_a.id, shared)
+    seed_dataset!(proj_b.id, excl_b)
+    seed_dataset!(proj_b.id, shared)
+
+    {:ok, a_only} =
+      create_document_in!(ws_a, proj_a, "post", %{"doc_id" => "only-a-#{tag}"}, excl_a)
+
+    # The co-owned anchor pair rides the SHARED slug on purpose: `create_document`
+    # materialises a `datasets` row for the project it writes under, so anchoring
+    # B's twin on A's exclusive slug would silently make that slug shared and
+    # empty A's own exclusive set.
+    {:ok, a_co} = create_document_in!(ws_a, proj_a, "post", %{"doc_id" => "co-#{tag}"}, shared)
+    {:ok, b_co} = create_document_in!(ws_b, proj_b, "post", %{"doc_id" => "co-#{tag}"}, shared)
+
+    {:ok, b_only} =
+      create_document_in!(ws_b, proj_b, "post", %{"doc_id" => "only-b-#{tag}"}, excl_b)
+
+    assert a_co.doc_id == b_co.doc_id,
+           "fixture regression: the co-owned anchor documents must share a doc_id"
+
+    # E3 doc-keyed — every table in the class, on the same three anchors:
+    # A-exclusive, co-owned, B-exclusive.
+    for {doc_id, dataset, ws} <- [
+          {a_only.doc_id, excl_a, ws_a},
+          {a_co.doc_id, shared, ws_a},
+          {b_only.doc_id, excl_b, ws_b}
+        ] do
+      seed_exemption!(doc_id, dataset, "post")
+      insert_sync_conflict!(doc_id, dataset, tag, ws.id)
+    end
+
+    # E3 dataset-keyed, ATTRIBUTED (`shares` carries workspace_slug): A under its
+    # exclusive slug AND under the shared one — the shared-slug row is the whole
+    # reason the attributed arm exists.
+    insert_share!(ws_a.slug, proj_a.slug, excl_a)
+    insert_share!(ws_a.slug, proj_a.slug, shared)
+    insert_share!(ws_b.slug, proj_b.slug, shared)
+
+    # E3 dataset-keyed, UNATTRIBUTABLE (`preview_token_jti` has only a slug): the
+    # shared-slug row attributes to neither workspace and is DECLARED as loss, so
+    # it is in nobody's carried set.
+    insert_preview_jti!("A-JTI-#{tag}", excl_a)
+    insert_preview_jti!("B-JTI-#{tag}", excl_b)
+    insert_preview_jti!("SHARED-JTI-#{tag}", shared)
+
+    %{ws_a: ws_a, ws_b: ws_b, proj_a: proj_a, proj_b: proj_b, tag: tag}
+  end
+
+  # E1 since 20260911120000 — the row keys on its OWN workspace_id, so the
+  # fixture must stamp one or the table exports empty for every workspace and the
+  # lockstep assertion below measures nothing.
+  defp insert_sync_conflict!(doc_id, dataset, tag, workspace_id) do
+    Repo.query!(
+      "INSERT INTO github_sync_conflicts " <>
+        "(repo, issue, doc_id, dataset, workspace_id, kind, detail, inserted_at, updated_at) " <>
+        "VALUES ($1, $2, $3, $4, $5, 'out_of_band_edit', '{}'::jsonb, now(), now())",
+      [
+        "acme/lockstep-#{tag}",
+        System.unique_integer([:positive]),
+        doc_id,
+        dataset,
+        Ecto.UUID.dump!(workspace_id)
+      ]
+    )
+  end
 end

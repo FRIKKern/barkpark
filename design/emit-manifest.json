@@ -3,12 +3,12 @@
   "regions": {
     "api/assets/paper-editor/src/styles.css#paper-editor mirror": "cbe815b84fefa7a3c265ca7b168c76662a52579f12fb8d28f39af9d77e5ce388",
     "api/assets/paper-surface/paper-surface.css#paper-surface": "f5e0bbe045db11397206c455194b089bfa80f217990f1c6f77ca4263ace26f92",
-    "api/lib/barkpark/portable_doc/render/tokens_gen.ex#Elixir render tokens": "e241f3e1e2e6fd192271f2799ec2e5dda72aeabf6da88b105fe963b955cc64bb",
+    "api/lib/barkpark/portable_doc/render/tokens_gen.ex#Elixir render tokens": "0cbb499fbbad4c63cc4edfe857b9e560460c73011c12d80c0e2e10bb7e63f9a4",
     "api/lib/barkpark_web/controllers/error_html.ex#error page (error_html)": "273bab84282aa408b38a0bd7cedd244a37766e23df3c0d8f094ec3c1258fbd07",
     "api/lib/barkpark_web/controllers/session_html.ex#login (session_html)": "31667638d81efd9762630e7e8f79bd038c70c91c777ac612fdc45ffaf76e8e11",
     "api/lib/barkpark_web/controllers/status_controller.ex#status page chrome": "64ed2df4c3c3bb389c37ea147d0a02042787e568a15d1440484fc2fe9331c6f2",
     "api/lib/barkpark_web/layouts/bulldocs.html.heex#/papers reader skin": "c577c4c7b13eae3798f14b9fb1b7dd8ee89e4e60002a07839f98665cbb18fd59",
-    "api/lib/barkpark_web/layouts/root.html.heex#Studio": "c2a134147d2f94a331c1d6581926de46ccee66b639c0a374c084b62a979292e8",
+    "api/lib/barkpark_web/layouts/root.html.heex#Studio": "95c6d6480645587882e2cd4f6f276592223b75bb0889e9b9ded1f5e2940189ce",
     "api/lib/barkpark_web/layouts/sheets.html.heex#/sheets reader": "114d6051da4bcfd6bfcab5c24e792dc24091df0c3379755669a95da1a740e461",
     "api/lib/barkpark_web/studio/tokens_gen.ex#Elixir Studio categorical tokens": "6e0823043f4b24abb043e8434f23aafa56cf1e60c11a54d16050a3e3428039c0",
     "cloud/priv/static/app.css#cloud SPA": "9d1b45919b6c70f0d0567d3de72611d4d55df397b790c4aeb75307847e4e7472",
@@ -20,6 +20,6 @@
     "internal/semrole/tokens_gen.go#Go semrole": "e15a4495b1f473b8465bffc84c9dca5621e03aba8a42bb0577f03f400629c5bf",
     "internal/taskboard/tokens_gen.go#Go board": "9215c045732c56f88ced73d318b154a15e94724a369cdfe6a2d6417e7c9c9852",
     "web/app/globals.css#web demo": "db891fc852d8b37af88bba52186a9acae034fd7fa952761f2e3950ed35763497",
-    "web/lib/tokens.gen.ts#web TS tokens": "66a0ed2b6c9a12ef4233fd7208c5ef7f9fad9d1a4597c30e42fa66eef3e466d8"
+    "web/lib/tokens.gen.ts#web TS tokens": "c7fa28ce4e534f7358e192ad937d8f6a00aef2c94852c2825e78fdce0edbdfa5"
   }
 }

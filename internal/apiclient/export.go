@@ -64,7 +64,7 @@ func (c *Client) Export(ctx context.Context, opts ExportOpts, onDoc func(line st
 	req.Header.Set("Accept", "application/x-ndjson, application/json")
 
 	// No client timeout — a full-dataset export is long; ctx cancellation ends it.
-	resp, err := (&http.Client{Timeout: 0}).Do(req)
+	resp, err := streamClient().Do(req)
 	if err != nil {
 		return err
 	}

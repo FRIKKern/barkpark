@@ -20,12 +20,13 @@ defmodule Barkpark.Media.Storage.Checkout do
   Release the checkout lock.
 
   `admin?` is the caller's force-release privilege as decided by the controller
-  (`BarkparkWeb.MediaController.admin?/1`), which folds write==admin: on the API
-  path any write token force-releases ANY actor's lock — see `ensure_can_release/3`.
-  The holder-only branch (`holder == actor`) is reached only when the caller is
-  neither write nor admin, which the `require_write` gate on `undo_checkout`
-  makes unreachable via the API. A force-release (actor -> nil) also drops the
-  file's renditions — see `patch_checkout/5`.
+  (`BarkparkWeb.V1.MediaController.admin?/1`), which is TRUE ADMIN ONLY as of
+  felix-w28-bl-checkout-tighten-adjudication (ruled 2026-09-09). A write token
+  arrives here with `admin? == false`, so the holder-only branch
+  (`holder == actor`) of `ensure_can_release/3` is the LIVE API path for it — a
+  write token releases only its own lock; releasing another actor's lock is an
+  admin privilege. A force-release (actor -> nil) also drops the file's
+  renditions — see `patch_checkout/5`.
   """
   @spec undo_checkout(%MediaFile{}, String.t(), String.t(), boolean()) ::
           {:ok, Document.t()} | {:error, term()}

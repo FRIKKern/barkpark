@@ -1,6 +1,10 @@
 CONTRIBUTION HEATMAPS                   
 ─────────────────────                   
                                         
+A shade grid, an auto-degrading         
+truecolor grid, and a degraded          
+placeholder.                            
+                                        
      Jan Feb Mar Apr May Jun Jul Aug Sep
 Mon      ··· ··· ··· ░░░ ░░░ ░░░ ▒▒▒ ▒▒▒
 Tue  ··· ··· ··· ░░░ ░░░ ░░░ ▒▒▒ ▒▒▒ ▒▒▒

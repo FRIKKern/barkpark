@@ -39,6 +39,8 @@
 #
 # Templated on scripts/install-cli.test.sh.
 set -uo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
@@ -82,7 +84,11 @@ slice() {
 
   # Fail-closed: a renamed section header must red HERE, not quietly test air.
   case "$health" in
-    *"/api/schemas"*) : ;;
+    # Route-AGNOSTIC on purpose: (a)'s control slices a historical deploy.sh
+    # that probed the now-sunset /api/schemas, so the sentinel cannot name a
+    # route. `>> Waiting for API` is the section's own banner and is present in
+    # every revision this harness slices.
+    *'>> Waiting for API'*) : ;;
     *) echo "FATAL: health section not found in $src (section header moved?)"; exit 1 ;;
   esac
   case "$done_sec" in
@@ -130,8 +136,14 @@ run_slice() {
     bash "$1" > "$3" 2>&1
 }
 
-mkdir -p "$TMP/app"
+mkdir -p "$TMP/app/scripts/lib"
 printf 'PORT=4000\n' > "$TMP/app/.env"
+# The health section sources $APP_DIR/scripts/lib/bp-curl.sh (429 backoff,
+# task-90059c5c680f6665) and $TMP/app IS the $APP_DIR the slice sees. Carry the
+# helper in, or every case below silently takes deploy.sh's named degrade branch
+# and this harness proves nothing about the real helper (the #17562
+# deploy-receipt-failure.test.sh trap).
+cp "$ROOT/scripts/lib/bp-curl.sh" "$TMP/app/scripts/lib/bp-curl.sh"
 
 DEAD_PORT="$(free_port)"   # nothing bound: free_port closed the socket
 
@@ -168,7 +180,7 @@ b_rc=$?
 check "(b) no '   Ready!' line" '! grep -q "Ready!" "$TMP/b.out"'
 check "(b) does NOT claim Barkpark is running" '! grep -q "Barkpark is running!" "$TMP/b.out"'
 check "(b) says it is not answering" 'grep -q "NOT ANSWERING" "$TMP/b.out"'
-check "(b) names the port it probed" 'grep -q "localhost:$DEAD_PORT/api/schemas" "$TMP/b.out"'
+check "(b) names the port it probed" 'grep -q "localhost:$DEAD_PORT/status.json" "$TMP/b.out"'
 check "(b) offers journalctl as the next step" 'grep -q "journalctl -u barkpark" "$TMP/b.out"'
 check "(b) still prints the once-only admin token" 'grep -q "bp_admin_HARNESS" "$TMP/b.out"'
 check "(b) exits non-zero" "[ $b_rc -ne 0 ]"
@@ -192,7 +204,7 @@ PY
 SERVER_PID=$!
 disown $SERVER_PID 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  curl -fs "http://localhost:$OK_PORT/api/schemas" >/dev/null 2>&1 && break
+  bp_curl_body -s "http://localhost:$OK_PORT/status.json" >/dev/null 2>&1 && break
   sleep 0.3
 done
 run_slice "$TMP/cur.sh" "$OK_PORT" "$TMP/c.out"
@@ -234,7 +246,7 @@ echo "== (e) static: no hardcoded probe port =="
 check "(e) no 'localhost:4000' anywhere in deploy.sh" \
   '! grep -n "localhost:4000" "$DEPLOY"'
 check "(e) the probe URL is built from \$APP_PORT" \
-  'grep -q "localhost:\$APP_PORT/api/schemas" "$DEPLOY"'
+  'grep -q "localhost:\$APP_PORT/status.json" "$DEPLOY"'
 check "(e) APP_PORT is re-read from the .env the service sources" \
   'grep -q "sed -n .s/\^PORT=//p" "$DEPLOY"'
 

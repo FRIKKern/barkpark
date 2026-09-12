@@ -33,8 +33,11 @@ defmodule Barkpark.PdsElixirCensusTest do
 
   Leaf-metered it cost ~210 s USER CPU across 33 port-child invocations on the
   PDS-D633/D625 run -- illustrative, that run only; the census now DERIVES the
-  floor (9 x its own `user cpu`) on its output's one volatile line, so re-read it
-  there rather than quoting this paragraph. Either way `--selftest` is
+  floor on its output's one volatile line -- the MULTIPLIER counted off its own
+  selftest case table (the cases whose corpus is the live tree), not typed, and
+  guarded by SELFTEST-FLOOR-MULTIPLIER -- so re-read it there rather than quoting
+  this paragraph. A `9` sat in this sentence while that count had grown past
+  thirty, which is the drift the counting removes. Either way `--selftest` is
   disqualified on price, not on merit. The arms below buy the same thing the
   selftest's cheap arms buy: the census runs, it can red — twice, on two different
   arms — and it refuses garbage ARGV.
@@ -47,10 +50,13 @@ defmodule Barkpark.PdsElixirCensusTest do
   Re-meter before quoting either number for anything else.
 
   AND BOTH FIGURES DESCRIBE ARMS RUN ONE AFTER ANOTHER, which stopped being how
-  this case runs: the four arms are now spawned CONCURRENTLY from `setup_all`
-  (see the comment there), so the module costs roughly ONE arm's wall clock, not
-  four. The two figures above are kept because they are what the serial shape
-  actually cost and they are the baseline this change is measured against — they
+  this case runs. NOR IS "four arms, all of them, concurrently" a description of
+  today's run either, which is what this sentence said until the gate below
+  landed: the case now declares SIX arms, spawns them from `setup_all` together,
+  and spawns only FOUR of the six on a pull request whose diff does not reach the
+  census (see "## THE TWO MUTANT ARMS ARE GATED" below). The two figures above
+  are kept because they are what the serial three- and four-arm shapes actually
+  cost and they are the baseline the later changes are measured against — they
   are not a description of today's run.
 
   ## CONCURRENCY WAS NOT THE LEVER, AND SAYING SO IS THE POINT
@@ -101,6 +107,22 @@ defmodule Barkpark.PdsElixirCensusTest do
   be read off a main run's Test log; a local box cannot produce it. The command is
   `bash scripts/ci-log-gap-census.sh <Test job log>` against the first green main
   run after this merges.
+
+  ## THE TWO MUTANT ARMS ARE GATED ON THE MERGE-BASE DIFF
+
+  The plain census arm reads the LIVE corpus, so any PR can move it and it runs
+  on every PR. The two one-token MUTANT arms (`FAIL  CLASSIFICATION-TOTAL`,
+  `FAIL  D448-DRIFT-REFUSES`) read only the census's own logic: they prove the
+  instrument CAN red, and that proof is re-earned exactly when the instrument
+  moves. So on a `pull_request` whose changed set against the merge-base touches
+  none of `scripts/pds-*census*`, this file, or
+  `api/test/support/pds_census_mutant_gate.ex`, those two arms are NOT spawned —
+  and `setup_all` PRINTS one line naming the rule and the merge-base sha, and
+  each gated test prints its own NOT RUN line and asserts that line's shape. A
+  skip that printed nothing would be the silent green this whole case exists to
+  refuse. Every other state RUNS: push to main, an unreadable `HEAD^1`, a failed
+  `git diff`, an empty changed set. `Barkpark.PdsCensusMutantGate` holds the
+  decision and its own test file proves both directions.
 
   ## Why the assertions are on prose, never on numbers
 
@@ -176,7 +198,7 @@ defmodule Barkpark.PdsElixirCensusTest do
   # perturbs it by one, so the arm is always exactly one off whatever the tree
   # currently says and can only ever red for the reason it was written for.
 
-  # ## Why the four arms run in setup_all, CONCURRENTLY
+  # ## Why the arms run in setup_all, CONCURRENTLY (and why two may not run)
   #
   # Each arm is one `elixir` subprocess walking the whole `api/lib` corpus, and
   # nothing about any arm depends on another. Run one after another they cost
@@ -202,8 +224,14 @@ defmodule Barkpark.PdsElixirCensusTest do
   # drifts still names the arm it broke rather than collapsing all four into one
   # setup_all error.
   #
-  # `async: false` still holds: four concurrent corpus walks have no business
-  # racing the async lane either.
+  # AND TWO OF THEM ARE GATED. `Barkpark.PdsCensusMutantGate.decide/1` answers
+  # whether this diff reaches the census; on `:skip` the `classification` and
+  # `baseline` arms are never spawned and the reason line — which carries the
+  # merge-base sha — is printed here and re-printed, and asserted on, by each
+  # gated test. The gate fails toward RUN on every unreadable git state.
+  #
+  # `async: false` still holds: concurrent corpus walks have no business racing
+  # the async lane either.
   setup_all do
     census = Path.expand(@census_rel, __DIR__)
 
@@ -241,11 +269,27 @@ defmodule Barkpark.PdsElixirCensusTest do
     # mutant written outside the tree and executed FROM THE ROOT (`cd: root` is
     # load-bearing — the corpus glob is CWD-relative and a tmp-dir mutant
     # censuses an empty tree, exiting 2 REFUSED: TRUNCATED CORPUS).
-    arms = [
+    always = [
       plain: fn -> System.cmd(elixir, [census], cd: root, stderr_to_stdout: true) end,
       unknown_flag: fn ->
         System.cmd(elixir, [census, "--not-a-real-flag"], cd: root, stderr_to_stdout: true)
       end,
+      # THE DISPOSITION REGEN AFFORDANCE, ON THE SAME REQUIRED GATE. `--routed-rows`
+      # prints paste-ready @routed_excluded rows for every undisposed member and NEVER
+      # writes a file. Two arms, and only one of them is a full corpus walk: the typo arm
+      # refuses in parse_args/3 and exits before the glob, so it costs milliseconds.
+      routed_rows: fn ->
+        System.cmd(elixir, [census, "--routed-rows"], cd: root, stderr_to_stdout: true)
+      end,
+      routed_rows_typo: fn ->
+        System.cmd(elixir, [census, "--routed-row"], cd: root, stderr_to_stdout: true)
+      end
+    ]
+
+    # THE TWO EXPENSIVE MUTANT ARMS. Each is a second full `api/lib` AST walk and
+    # each proves only that the census CAN red, so they are spawned only when the
+    # diff reaches the instrument.
+    mutants = [
       classification: fn ->
         mutant = write_mutant(dir, "classification", source, @mutant_from, @mutant_to)
         System.cmd(elixir, [mutant], cd: root, stderr_to_stdout: true)
@@ -256,22 +300,38 @@ defmodule Barkpark.PdsElixirCensusTest do
       end
     ]
 
+    gate = Barkpark.PdsCensusMutantGate.decide(root: root)
+    {gate_decision, gate_line} = gate
+
+    # PRINTED, ALWAYS, ON BOTH BRANCHES. A gate whose skip is inferable only from
+    # a wall-clock difference is a gate nobody can audit.
+    IO.puts("\n[PdsElixirCensusTest] " <> gate_line)
+
+    arms = if gate_decision == :skip, do: always, else: always ++ mutants
+
     results =
       arms
       |> Enum.map(fn {name, fun} -> {name, Task.async(fun)} end)
       |> Enum.map(fn {name, task} -> {name, Task.await(task, 540_000)} end)
       |> Map.new()
 
-    {:ok,
-     census: census,
-     elixir: elixir,
-     root: root,
-     runs: results,
-     anchors: %{
-       classification: occurrences(source, @mutant_from),
-       baseline: occurrences(source, baseline_from)
-     },
-     baseline: %{from: baseline_from, derived: derived, mutated: mutated}}
+    {
+      :ok,
+      # THE BYTES AS THEY WERE BEFORE ANY ARM RAN. Read above, at the top of setup_all,
+      # strictly before the four arms are spawned — which is what lets the --routed-rows
+      # test compare the file against its own pre-run state and call the flag write-free.
+      census: census,
+      source: source,
+      elixir: elixir,
+      root: root,
+      runs: results,
+      mutant_gate: gate,
+      anchors: %{
+        classification: occurrences(source, @mutant_from),
+        baseline: occurrences(source, baseline_from)
+      },
+      baseline: %{from: baseline_from, derived: derived, mutated: mutated}
+    }
   end
 
   test "the receipt census runs GREEN over the live corpus", ctx do
@@ -284,7 +344,96 @@ defmodule Barkpark.PdsElixirCensusTest do
              "not a receipt (the epic's law since wave 22). Output:\n#{out}"
   end
 
+  # THE HYPOTHESIS COLUMN'S TWO ARMS, READ OFF THE PLAIN RUN — no new subprocess, so this
+  # door is free. It asserts the PASS lines AND the tripwire's refusal by name: the arm
+  # that matters here is a REFUSAL, and "the tripwire did not fire" reads identically
+  # whether it was refused or was never reached at all (a control says nothing about the
+  # precondition). Both sentences are required, so the precondition is asserted too.
+  test "RESPONSE-CARRIES-THE-READ is armed and REFUSES its own tripwire", ctx do
+    {out, rc} = ctx.runs.plain
+
+    assert rc == 0, out
+
+    assert out =~ "PASS  RESPONSE-CARRIES-THE-READ-PINNED",
+           "the hypothesis arm is not in the integrity block at all, or it went red. A " <>
+             "hypothesis column nobody can see arm is a column nobody knows is asleep.\n#{out}"
+
+    assert out =~ "PASS  RESPONSE-CARRIES-READ-REFUSES-CAPTURE",
+           "the tripwire arm is missing or red. An arm that fires on a runtime-configured " <>
+             "capture is matching SYNTAX rather than evidence and must not ship.\n#{out}"
+
+    # THE ANCHOR CARRIES A LINE, SO A MOVE OF THE SITE IS A CHANGE HERE. It moved
+    # 65 -> 92 when `status/2` grew the workspace-membership fence: the call is now
+    # `status_fun().(filter)` over a `filter` keyword list built above it, which is
+    # more lines before the same call. The census still PRINTS `status_fun().()` —
+    # it names the runtime capture it refuses to resolve, not the argument list — so
+    # only the line number moved. RE-DERIVED, not guessed: `elixir
+    # scripts/pds-elixir-receipt-census.exs` from the repo root, read off its
+    # "THE CAPTURE REFUSALS, NAMED IN FULL" block.
+    assert out =~
+             "barkpark_web/controllers/github_status_controller.ex:92  health: status_fun().()",
+           "the tripwire site was never REACHED by this run, so the refusal above is a control " <>
+             "over an absent site and proves nothing. Re-derive the anchor before editing " <>
+             "this assertion away.\n#{out}"
+
+    refute out =~ "HYPOTHESIS  barkpark_web/controllers/github_status_controller.ex",
+           "the arm emitted a HYPOTHESIS for the tripwire — the one site it must leave " <>
+             "UNJUDGED.\n#{out}"
+  end
+
+  # THE AFFORDANCE IS A PROPOSAL, AND THE NEGATIVE HALF IS THE ONE THAT MATTERS. The run
+  # must print the three proposal sections and must NOT print any sentence claiming it
+  # edited the census — the point of the flag is that a HUMAN decides the class.
+  test "--routed-rows emits a PASTE-READY proposal and never writes the file", ctx do
+    {out, rc} = ctx.runs.routed_rows
+
+    assert rc == 0, "expected `--routed-rows` over a green tree to exit 0, got #{rc}:\n#{out}"
+
+    assert out =~
+             "PASTE-READY @routed_excluded PROPOSAL (--routed-rows) — A PROPOSAL, NEVER A WRITE",
+           out
+
+    for section <- ["ADD ", "DELETE ", "RE-CLASS "] do
+      assert out =~ section,
+             "the proposal is missing its #{section}section — all three directions are " <>
+               "emitted on every run, including the zeroes, so a reader never has to " <>
+               "wonder whether a direction was checked.\n#{out}"
+    end
+
+    assert File.read!(ctx.census) == ctx.source,
+           "the census script CHANGED while `--routed-rows` ran. The flag emits a PROPOSAL " <>
+             "and must never write @routed_excluded: a flag that edits the table in place " <>
+             "launders an arrival into an exclusion with no human ruling attached, which is " <>
+             "the false compliance PDS-D469 demoted static shapes for. (`ctx.source` was read " <>
+             "in setup_all BEFORE any arm was spawned, so this comparison is against the " <>
+             "pre-run bytes, not against itself.)"
+
+    assert out =~ "CENSUS OK", out
+  end
+
+  test "--routed-rows is on the STRICT ARGV list: an adjacent misspelling exits 2", ctx do
+    {out, rc} = ctx.runs.routed_rows_typo
+
+    assert rc == 2,
+           "expected `--routed-row` (one character short of the real flag) to REFUSE at exit " <>
+             "2, got #{rc}. A swallowed near-miss prints the ordinary census and reads as " <>
+             "'the affordance found nothing', which is the worst answer this flag could " <>
+             "give.\n#{out}"
+
+    assert out =~ "REFUSED: UNKNOWN ARGUMENT", out
+    assert out =~ ~s(unknown argument "--routed-row"), out
+    assert out =~ "--routed-rows", out
+  end
+
   test "the gate CAN red: a one-token mutant exits 1 with FAIL  CLASSIFICATION-TOTAL", ctx do
+    if skipped?(ctx, "classification") do
+      :ok
+    else
+      classification_mutant_reds(ctx)
+    end
+  end
+
+  defp classification_mutant_reds(ctx) do
     assert_single_anchor(ctx.anchors.classification, @mutant_from)
 
     {out, rc} = ctx.runs.classification
@@ -304,6 +453,14 @@ defmodule Barkpark.PdsElixirCensusTest do
 
   test "the population baseline REFUSES: a perturbed literal exits 1 with FAIL  D448-DRIFT-REFUSES",
        ctx do
+    if skipped?(ctx, "baseline") do
+      :ok
+    else
+      baseline_mutant_refuses(ctx)
+    end
+  end
+
+  defp baseline_mutant_refuses(ctx) do
     assert_single_anchor(ctx.anchors.baseline, ctx.baseline.from)
 
     {out, rc} = ctx.runs.baseline
@@ -338,6 +495,38 @@ defmodule Barkpark.PdsElixirCensusTest do
 
     assert out =~ "REFUSED: UNKNOWN ARGUMENT", out
     assert out =~ "unknown argument", out
+  end
+
+  # THE SKIP, MADE LOUD AND CHECKED. Returns true when this arm was gated out,
+  # and on that branch it still ASSERTS: the reason line must carry the gate's own
+  # prefix and a merge-base sha, so a reader can re-derive the verdict with one
+  # `git diff` instead of trusting a green. A `true` returned without those two
+  # assertions would be the silent green this case refuses.
+  defp skipped?(ctx, arm) do
+    case ctx.mutant_gate do
+      {:skip, line} ->
+        IO.puts("[PdsElixirCensusTest] #{arm} mutant arm NOT RUN — #{line}")
+
+        assert String.starts_with?(line, Barkpark.PdsCensusMutantGate.skip_prefix()),
+               "the gate skipped an arm with a line that does not announce itself as a skip: " <>
+                 inspect(line)
+
+        assert line =~ ~r/merge-base [0-9a-f]{7,40}\b/,
+               "the skip line names no merge-base sha, so the verdict is unattributable and " <>
+                 "cannot be reproduced: " <> inspect(line)
+
+        refute Map.has_key?(ctx.runs, String.to_atom(arm)),
+               "the gate said SKIP but the #{arm} arm was spawned anyway — the printed reason " <>
+                 "and the work done disagree, and the printed one is the lie."
+
+        true
+
+      {:run, _line} ->
+        assert Map.has_key?(ctx.runs, String.to_atom(arm)),
+               "the gate said RUN but the #{arm} arm is absent from the results."
+
+        false
+    end
   end
 
   # THE EXACTLY-ONCE GUARD, unchanged in force and moved in place. It is the same

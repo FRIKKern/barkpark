@@ -1,15 +1,18 @@
 defmodule Barkpark.Media.Storage.CheckoutTest do
-  # PIN TEST — locks the CURRENT force-release contract so a future tightening
-  # reds here instead of silently shipping.
+  # PIN TEST — locks the force-release contract AT THE SUBSTRATE, where it is a
+  # plain `admin?` boolean and says nothing about who gets handed `true`.
   #
-  # `Checkout.undo_checkout/4` takes an `admin?` boolean the controller computes
-  # as write-OR-admin (`MediaController.admin?/1`), so on the API path any write
-  # token force-releases ANY actor's lock — the @doc and the controller intent
-  # comment both name this. These tests hold that behavior at the substrate
-  # boundary: `admin? == true` releases a non-holder's checkout {:ok};
-  # `admin? == false` from a non-holder is refused {:error, :forbidden}. If the
-  # posture is ever tightened to true-admin
-  # (felix-w28-bl-checkout-tighten-adjudication), the first assertion flips red.
+  # That second question was adjudicated in
+  # felix-w28-bl-checkout-tighten-adjudication (ruled 2026-09-09): the caller is
+  # `BarkparkWeb.V1.MediaController.admin?/1`, which is now TRUE ADMIN ONLY. A
+  # write token reaches `undo_checkout/4` with `admin? == false`, so the
+  # holder-only branch below is its live path. The conn-level proof of that
+  # mapping lives in `v1_media_governance_test.exs` ("force-release privilege").
+  #
+  # These three hold the substrate contract itself, which did NOT change:
+  # `admin? == true` releases a non-holder's checkout {:ok}; `admin? == false`
+  # from a non-holder is refused {:error, :forbidden}; the holder always
+  # releases its own.
   #
   # A force-release also drops the file's cached renditions
   # (`patch_checkout/5`: actor == nil -> Renditions.delete_for_file) — named
@@ -45,7 +48,7 @@ defmodule Barkpark.Media.Storage.CheckoutTest do
     file
   end
 
-  test "a write-only token (admin? == true) force-releases another actor's checkout" do
+  test "an admin caller (admin? == true) force-releases another actor's checkout" do
     file = file_locked_by("someone-else")
 
     assert {:ok, doc} = Checkout.undo_checkout(file, "not-the-holder", @dataset, true)

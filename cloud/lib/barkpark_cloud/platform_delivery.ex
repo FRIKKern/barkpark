@@ -129,6 +129,26 @@ defmodule BarkparkCloud.PlatformDelivery do
   @transitions ~w(forward rollback diverged noop unknown)
   @unknown_transition "unknown"
 
+  # The `serving_since_basis` vocabulary (W29). WHICH CLOCK produced this row's
+  # `serving_since` — a fact the recorder has always known and never written.
+  #
+  #   * "process_start"     — the cp leg. /health's `serving_since` is the BEAM's
+  #     own start instant (BarkparkCloud.Health says so in words, and ships a
+  #     `serving_since_basis` sentence beside it on that payload). A bare restart
+  #     that deploys nothing moves it FORWARD, so a lag measured against it is an
+  #     UPPER BOUND that reads SMALLER than the truth.
+  #   * "deploy_flip_mtime" — the instance leg. The mtime of
+  #     `/opt/barkpark/.instance-deploy-last`, which IS the flip instant.
+  #
+  # Both words are taken from what the two producers already SAY (deploy.yml:
+  # "(basis: process start, not the flip instant)" and "(basis: mtime of
+  # .instance-deploy-last, the flip instant)"), not invented here.
+  #
+  # NO DEFAULT, EVER. NULL means "the recorder did not write a basis" — every
+  # row older than this column — and is NOT a third basis. Defaulting would mint
+  # a derivation nobody measured for the whole history of the table.
+  @serving_since_bases ~w(process_start deploy_flip_mtime)
+
   # The write columns, in the order the wire carries them. `insert_all/3` takes a
   # bare map, so this list is what turns a validated changeset back into a row.
   @columns [
@@ -139,6 +159,7 @@ defmodule BarkparkCloud.PlatformDelivery do
     :queued_seconds,
     :build_seconds,
     :serving_since,
+    :serving_since_basis,
     :target,
     :carried,
     :queued_self_seconds,
@@ -176,6 +197,11 @@ defmodule BarkparkCloud.PlatformDelivery do
 
     field :build_seconds, :integer
     field :serving_since, :utc_datetime_usec
+
+    # WHICH derivation produced `serving_since` on this row (W29). Nullable with
+    # NO default: a NULL says the recorder wrote no basis, never a third one.
+    field :serving_since_basis, :string
+
     field :target, :string, default: @default_target
 
     # NO DEFAULT (D422). An omitted `carried` must read `nil` — "nobody measured
@@ -198,6 +224,19 @@ defmodule BarkparkCloud.PlatformDelivery do
   @doc "The `target` vocabulary: which leg delivered this sha."
   @spec targets() :: [binary()]
   def targets, do: @targets
+
+  @doc """
+  The `serving_since_basis` vocabulary: WHICH CLOCK produced this row's
+  `serving_since`.
+
+  `"process_start"` (cp) is the BEAM's own start instant — an UPPER BOUND that a
+  bare restart moves forward — and `"deploy_flip_mtime"` (instance) is the mtime
+  of `/opt/barkpark/.instance-deploy-last`, the flip instant itself. A NULL is
+  neither: it says no basis was recorded, which is every row older than the
+  column.
+  """
+  @spec serving_since_bases() :: [binary()]
+  def serving_since_bases, do: @serving_since_bases
 
   @doc """
   The `transition` vocabulary: how `previous_sha` relates to `sha`.
@@ -243,7 +282,10 @@ defmodule BarkparkCloud.PlatformDelivery do
     |> validate_format(:previous_sha, ~r/^[0-9a-f]{7,64}$/,
       message: "must be a lowercase hex commit sha (7-64 chars)"
     )
+    |> reject_null_sha(:sha)
+    |> reject_null_sha(:previous_sha)
     |> validate_inclusion(:target, @targets)
+    |> validate_inclusion(:serving_since_basis, @serving_since_bases)
     |> validate_number(:queued_seconds, greater_than_or_equal_to: 0)
     |> validate_number(:build_seconds, greater_than_or_equal_to: 0)
     |> validate_number(:queued_self_seconds, greater_than_or_equal_to: 0)
@@ -264,9 +306,31 @@ defmodule BarkparkCloud.PlatformDelivery do
     |> Map.update("sha", nil, &downcase/1)
     |> Map.update("previous_sha", nil, &downcase/1)
     |> Map.update("transition", nil, &downcase/1)
+    |> Map.update("serving_since_basis", nil, &downcase/1)
   end
 
   defp normalize(_other), do: %{}
+
+  # THE NULL SHA. `~r/^[0-9a-f]{7,64}$/` admits
+  # `0000000000000000000000000000000000000000` — git's own "no object" sentinel,
+  # and the shape a shell script writes when `git rev-parse` produced nothing.
+  # A verifier posted exactly that row and it became, for a while, the platform's
+  # second-ever durable memory of its own deploys: a commit that does not exist.
+  #
+  # The check is deliberately NARROW: not-all-zeros, no egress. A resolvability
+  # check would need to reach a git remote and would refuse legitimate rows for a
+  # fork or a `gc`'d object; a "no repeated character" rule would refuse
+  # `bbbb…` shas that are merely improbable, not impossible. Only the all-zeros
+  # sentinel is IMPOSSIBLE as a real commit, and it is the observed pollution.
+  defp reject_null_sha(changeset, field) do
+    validate_change(changeset, field, fn ^field, value ->
+      if is_binary(value) and value =~ ~r/^0+$/ do
+        [{field, "must not be the all-zeros null sha"}]
+      else
+        []
+      end
+    end)
+  end
 
   defp stringify(v) when is_integer(v), do: Integer.to_string(v)
   defp stringify(v), do: v
@@ -454,6 +518,7 @@ defmodule BarkparkCloud.PlatformDelivery do
       queued_stall_seconds: d.queued_stall_seconds,
       build_seconds: d.build_seconds,
       serving_since: iso(d.serving_since),
+      serving_since_basis: d.serving_since_basis,
       target: d.target,
       carried: d.carried,
       previous_sha: d.previous_sha,

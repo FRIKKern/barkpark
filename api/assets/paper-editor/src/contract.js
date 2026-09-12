@@ -9,6 +9,11 @@ export const DEBOUNCE_MS = 300;
 export const PLACEHOLDER = {
   paragraph: "Start typing, or press / for blocks…",
   heading: (level) => `Heading ${level || 1}`,
+  eyebrow: "Add a kicker…",
+  byline: "Add names, separated by · …",
+  ingress: "Write the introduction…",
+  pullquote: "Write the highlighted quote…",
+  blockquote: "Write the quote…",
 };
 
 // ── pdd-t18b: the atomic-contract resting-chrome rule (doctrine rule 6 / D13) ──

@@ -86,6 +86,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     socket =
       socket
       |> Mount.init()
+      |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       |> Caps.attach()
       |> load_access_grants()
       |> schedule_access_expiry()
@@ -531,6 +532,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
   def handle_event("paper-op", params, socket), do: Paper.paper_op(params, socket)
   def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
+
+  def handle_event("paper-history-step", params, socket),
+    do: Paper.paper_history_step(params, socket)
 
   # Gyldendal parity E1 — a block-configured richText FIELD's canvas ops.
   def handle_event("field-block-ops", params, socket),

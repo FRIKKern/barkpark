@@ -2780,10 +2780,14 @@ func restAfterFields(line string, n int) string {
 //   - Result= separates a crash from a deliberate stop that systemd mislabels.
 //     Measured 2026-09-01: barkpark-site@search__b is `failed` with
 //     Result=exit-code, ExecMainStatus=143 — 128+15, i.e. Next.js exiting on the
-//     SIGTERM of its own retire. PR #14863 adds SuccessExitStatus=143 to the unit
-//     file for exactly this. Until it lands, a reader that treats `failed` as a
-//     crash is reading a clean shutdown as an outage, so the exit status rides
-//     WITH the result and neither is dropped.
+//     SIGTERM of its own retire. PR #14863 LANDED (merged 2026-09-02): the unit
+//     file now declares SuccessExitStatus=143 and deploy/site-deploy-node.sh
+//     preflight-refuses a unit that does not, so a slot retired on a box
+//     deployed SINCE stops clean and never produces this row. LEGACY BOXES —
+//     provisioned before that unit shipped and not yet redeployed — still emit
+//     the 143, and a reader that treats their `failed` as a crash is reading a
+//     clean shutdown as an outage. So the exit status rides WITH the result and
+//     neither is dropped.
 //   - MainPID separates "the unit says active" from "a process is actually
 //     there". An `active`/`exited` oneshot has MainPID 0.
 //   - StateSince is systemd's own timestamp string, carried VERBATIM. An

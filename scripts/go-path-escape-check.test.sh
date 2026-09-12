@@ -103,7 +103,7 @@ printf 'unrelated\n' >"$STALE/scripts/other.sh"
 
 STEP="$TMPROOT/step.sh"
 
-echo "case 0/5: the step is extractable from the live workflow"
+echo "case 0/6: the step is extractable from the live workflow"
 if ! extract_step "$WF" "$STEP"; then
   no "could not extract the step named '$STEP_NAME' — every case below is vacuous"
   echo; echo "passed: $PASS   failed: $FAIL"; exit 1
@@ -111,7 +111,7 @@ fi
 ok "extracted '$STEP_NAME' ($(wc -l <"$STEP" | tr -d ' ') lines) from go-tests.yml"
 
 echo
-echo "case 1/5: the step declares the env the guard's message is built from"
+echo "case 1/6: the step declares the env the guard's message is built from"
 envkeys="$(python3 - "$WF" "$STEP_NAME" <<'PY'
 import sys, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
@@ -127,7 +127,7 @@ else
 fi
 
 echo
-echo "case 2/5: a head WITHOUT the ratchet — dispatch continues and the absence is NAMED"
+echo "case 2/6: a head WITHOUT the ratchet — dispatch continues and the absence is NAMED"
 rc=0; run_step "$STEP" "$STALE" || rc=$?
 if [ "$rc" -ne 0 ]; then
   no "the step exited $rc on a head without the ratchet — 'Compute the changed-path set' would be SKIPPED again"
@@ -162,7 +162,7 @@ else
 fi
 
 echo
-echo "case 3/5: a head WITH the ratchet — unchanged, and it PRINTS its selftest count"
+echo "case 3/6: a head WITH the ratchet — unchanged, and it PRINTS its selftest count"
 rc=0; run_step "$STEP" "$REPO_ROOT" || rc=$?
 if [ "$rc" -ne 0 ]; then
   no "the step exited $rc against this tree, which carries the ratchet"
@@ -187,7 +187,7 @@ else
 fi
 
 echo
-echo "case 4/5: RED-WITHOUT — the pre-fix step body dies 127 on the same stale head"
+echo "case 4/6: RED-WITHOUT — the pre-fix step body dies 127 on the same stale head"
 MUT="$TMPROOT/go-tests-prefix.yml"
 python3 - "$WF" "$MUT" <<'PY'
 import sys
@@ -231,7 +231,7 @@ else
 fi
 
 echo
-echo "case 5/5: NON-VACUITY — the extracted body produced real output in both directions"
+echo "case 5/6: NON-VACUITY — the extracted body produced real output in both directions"
 rc=0; run_step "$STEP" "$STALE" || rc=$?
 stale_bytes=$(wc -c <"$OUT" | tr -d ' ')
 rc=0; run_step "$STEP" "$REPO_ROOT" || rc=$?
@@ -240,6 +240,191 @@ if [ "$stale_bytes" -gt 0 ] && [ "$present_bytes" -gt 0 ]; then
   ok "both runs produced output (${stale_bytes}B absent-head, ${present_bytes}B present-head), so the cases above judged something"
 else
   no "a run produced NO output at all — the harness is vacuous"
+fi
+
+# ── case 6: the `sets` step's DECLARATION pin (task-a1d681421c82e995) ────────
+# A DIFFERENT skew from cases 1-5. Those are about the SCRIPT the ratchet step
+# shells (head) going missing. This one is about the `sets` step, which has no
+# script at all: its parser, its two sentinels and its `-lt 30` floor are TEXT
+# IN THE WORKFLOW FILE — merge ref — while the `on.push.paths` list they judge
+# was read off the HEAD checkout's copy of that same file. Two commits of one
+# file. #17622 (45c98ae0e) fixed this class for cloud/console/elixir and left
+# go-tests.yml out, on the ratchet comment's argument that "both inputs come
+# from the head" — true of the ratchet step, false of this one.
+#
+# The fixture is the REAL historical window: a head whose declaration is the
+# 15-glob list (#15007 .. task-bb930319aeac0266, which grew it to 46) judged by
+# a merge-ref workflow whose floor is 30. Both sentinels survive the truncation
+# on purpose, so the arm measures the FLOOR and not a sentinel.
+#
+# Both directions in one run: the shipped body (pinned) must answer, and a copy
+# MUTATED back to the pre-pin `wf=` one-liner must exit 1 on the same fixture.
+echo
+echo "case 6/6: the 'sets' step pins its path-set declaration to the merge ref"
+
+DISP_WF="${GO_DISPATCH_WF:-$WF}"
+
+extract_sets() { # extract_sets <workflow.yml> <dest.sh>
+  python3 - "$1" "$2" <<'PY2'
+import sys, re, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+step = [s for s in wf["jobs"]["changes"]["steps"] if s.get("id") == "sets"]
+if len(step) != 1:
+    sys.exit("expected exactly 1 step with id 'sets', found %d" % len(step))
+body = (step[0]["run"]
+        .replace("${{ github.event_name }}", "${T_EVENT}")
+        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}")
+        .replace("${{ github.event.pull_request.number }}", "${T_PRNUM}"))
+left = sorted(set(re.findall(r"\$\{\{.*?\}\}", body)))
+if left:
+    sys.stderr.write(
+        "EXTRACTION IS OUT OF DATE: the 'sets' step uses Actions expressions this "
+        "harness does not substitute: %s. Add each to the replace() chain (and pass "
+        "its value from run_sets()), or every arm below measures nothing.\n"
+        % ", ".join(left))
+    sys.exit(3)
+open(sys.argv[2], "w").write(body)
+PY2
+}
+
+SETS="$TMPROOT/sets.sh"
+if extract_sets "$DISP_WF" "$SETS"; then
+  ok "extracted the 'sets' step body from $DISP_WF with every Actions expression substituted"
+else
+  no "could not extract the 'sets' step body (see the line above) — every arm in case 6 measures nothing"
+fi
+
+# The fixture repo. base commit carries the CURRENT (46-glob) declaration and is
+# what `pinned-merge` points at — the stand-in for refs/pull/N/merge. The head
+# commit carries the TRUNCATED 15-glob declaration: a branch cut before the list
+# grew.
+DR="$TMPROOT/dispatchrepo"
+mkdir -p "$DR/.github/workflows" "$DR/internal/cli"
+cp "$WF" "$DR/.github/workflows/go-tests.yml"
+: >"$DR/internal/cli/a.go"
+git -C "$DR" init -q
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
+DR_BASE="$(git -C "$DR" rev-parse HEAD)"
+git -C "$DR" branch pinned-merge "$DR_BASE"
+
+# Truncate on.push.paths to its first 15 entries, textually — the parser under
+# test reads TEXT, so a yaml round-trip would change what it sees.
+python3 - "$WF" "$DR/.github/workflows/go-tests.yml" <<'PY2'
+import sys
+lines = open(sys.argv[1]).read().split("\n")
+out, inon, inpush, inp, kept = [], False, False, False, 0
+for ln in lines:
+    if ln.startswith("on:"): inon = True; out.append(ln); continue
+    if inon and ln and not ln[0] in " \t#": inon = inpush = inp = False
+    if inon and ln.startswith("  push:"): inpush = True; out.append(ln); continue
+    if inon and ln.startswith("    paths:"): inp = True; out.append(ln); continue
+    if inp and ln.startswith("    ") and not ln.startswith("      "): inp = False
+    if inp and ln.lstrip().startswith("- "):
+        kept += 1
+        if kept > 15: continue
+    out.append(ln)
+open(sys.argv[2], "w").write("\n".join(out))
+PY2
+TRUNC_N="$(python3 -c "
+import yaml,sys; print(len(yaml.safe_load(open(sys.argv[1]))[True]['push']['paths']))" "$DR/.github/workflows/go-tests.yml")"
+FULL_N="$(python3 -c "
+import yaml,sys; print(len(yaml.safe_load(open(sys.argv[1]))[True]['push']['paths']))" "$WF")"
+if [ "$TRUNC_N" = "15" ] && [ "$FULL_N" -ge 30 ]; then
+  ok "fixture built: stale head declares $TRUNC_N globs, the pinned ref declares $FULL_N (floor is 30)"
+else
+  no "fixture is WRONG (head=$TRUNC_N pinned=$FULL_N) — the floor arm below measures nothing"
+fi
+printf 'package cli\n' >"$DR/internal/cli/a.go"
+git -C "$DR" checkout -q -b stale-head
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm stale >/dev/null 2>&1
+
+SOUT="$TMPROOT/sets-out.txt"
+SGH="$TMPROOT/sets-gh-output"
+run_sets() { # run_sets <sets.sh> [pin_ref] -> rc in $SRC
+  : >"$SGH"; : >"$SOUT"
+  ( cd "$DR" && env T_EVENT=pull_request T_BASE="$DR_BASE" T_PRNUM=0 \
+      DISPATCH_PIN_REMOTE=. DISPATCH_PIN_REF="${2:-refs/heads/pinned-merge}" \
+      RUNNER_TEMP="$TMPROOT/runner-temp" GITHUB_OUTPUT="$SGH" \
+      bash --noprofile --norc "$1" ) >"$SOUT" 2>&1 && SRC=0 || SRC=$?
+}
+mkdir -p "$TMPROOT/runner-temp"
+
+echo "  arm A — the SHIPPED body, pin reachable"
+run_sets "$SETS"
+if [ "$SRC" -eq 0 ]; then
+  ok "shipped body exits 0 on a head whose own declaration is below the floor"
+else
+  no "shipped body exited $SRC — the pin did not rescue the stale head"
+  sed 's/^/        /' "$SOUT" >&2
+fi
+if grep -q '^path-set declaration: refs/heads/pinned-merge ' "$SOUT"; then
+  ok "  …and says by name which ref the declaration came from"
+else
+  no "  …but never named the declaration's source (the pinned read did not happen)"
+fi
+if grep -q "path set parsed from .*on.push.paths:" "$SOUT" && \
+   [ "$(grep -c '^go=' "$SGH")" -eq 1 ]; then
+  ok "  …and emits exactly one go= verdict"
+else
+  no "  …emitted $(grep -c '^go=' "$SGH") go= line(s) — the gated job has no defined answer"
+fi
+
+echo "  arm B — MUTATED back to the pre-pin shape, same fixture"
+MUTWF="$TMPROOT/go-tests-prepin.yml"
+python3 - "$DISP_WF" "$MUTWF" <<'PY2'
+import sys
+s = open(sys.argv[1]).read()
+i = s.index("          # ── THE DECLARATION MUST MATCH THE PARSER")
+anchor = '          echo "path-set declaration: ${pin_src}"\n\n'
+j = s.index(anchor, i) + len(anchor)
+out = s[:i] + '          wf=".github/workflows/go-tests.yml"\n' + s[j:]
+if out == s:
+    sys.exit("MUTATION produced an IDENTICAL file — it did not apply")
+open(sys.argv[2], "w").write(out)
+PY2
+if [ $? -ne 0 ]; then
+  no "could not build the pre-pin mutant — arm B proves nothing"
+else
+  ok "mutation applied (the pin block replaced by the pre-pin wf= one-liner)"
+  MSETS="$TMPROOT/sets-prepin.sh"
+  if ! extract_sets "$MUTWF" "$MSETS"; then
+    no "could not extract 'sets' from the mutant"
+  else
+    run_sets "$MSETS"
+    if [ "$SRC" -eq 1 ]; then
+      ok "pre-pin: the stale head exits 1 — the skew reproduced"
+    else
+      no "pre-pin body exited $SRC on the stale head — this harness cannot detect the skew"
+      sed 's/^/        /' "$SOUT" >&2
+    fi
+    if grep -q "parsed only ${TRUNC_N} path glob(s)" "$SOUT"; then
+      ok "pre-pin: the red is the FLOOR, quoting the head's own ${TRUNC_N}-glob count"
+    else
+      no "pre-pin: exited non-zero for some other reason — arm B is not measuring the floor"
+      sed 's/^/        /' "$SOUT" >&2
+    fi
+  fi
+fi
+
+echo "  arm C — NEGATIVE CONTROL: an unreadable pin ref must warn by name, never die silently"
+run_sets "$SETS" refs/heads/no-such-merge-ref
+if grep -q '^::warning::dispatcher: could NOT read .github/workflows/go-tests.yml out of refs/heads/no-such-merge-ref' "$SOUT"; then
+  ok "an unreadable pin is NAMED as a degraded read"
+else
+  no "an unreadable pin produced no named warning — a silent fallback"
+  sed 's/^/        /' "$SOUT" >&2
+fi
+if grep -q '^path-set declaration: the PR HEAD checkout' "$SOUT"; then
+  ok "  …and the fallback source is stated, not implied"
+else
+  no "  …and never said which declaration it fell back to"
+fi
+if [ "$SRC" -ne 0 ] || [ "$(grep -c '^go=' "$SGH")" -eq 1 ]; then
+  ok "  …and the step still either answers or refuses out loud (exit $SRC)"
+else
+  no "  …and exited 0 with NO go= line — the gated job would read an empty output"
 fi
 
 echo

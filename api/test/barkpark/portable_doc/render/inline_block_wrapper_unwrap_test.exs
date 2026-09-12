@@ -17,10 +17,18 @@ defmodule Barkpark.PortableDoc.Render.InlineBlockWrapperUnwrapTest do
   #   19 items  "list-item"  — search-template-wave-2026-08-18-audit (13),
   #                            cloud-console-hardening-wave-75-2026-08-18 (6)
   #
-  # The bodies below are the real stored text of two of those items.
+  # The bodies below are the real stored text of two of those items, each paired
+  # with the wrapper it ACTUALLY carries on disk — re-verified against the
+  # stored documents 2026-09-10, because the pair was originally attached to the
+  # wrong wrappers here (the `list-item` sample was labelled `paragraph` and vice
+  # versa). Both wrappers behave identically, so the swap could never red a
+  # test; it only misdescribed the corpus to the next reader.
 
-  @paragraph_wrapped_text "Denominator, re-derived from live L1: 72 done, 38 open, 6 considering, 1 cancelled (NOT child_count 117)."
-  @list_item_wrapped_text "The blind window is 8 days 17 hours, not 5."
+  # felix-pristine-wave-23-2026-07-28, one of its 32 `paragraph`-wrapped items.
+  @paragraph_wrapped_text "The blind window is 8 days 17 hours, not 5."
+
+  # search-template-wave-2026-08-18-audit, one of its 13 `list-item`-wrapped items.
+  @list_item_wrapped_text "Denominator, re-derived from live L1: 72 done, 38 open, 6 considering, 1 cancelled (NOT child_count 117)."
 
   defp paragraph_wrapper(text) do
     %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}

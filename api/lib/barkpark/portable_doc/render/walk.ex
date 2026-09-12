@@ -330,7 +330,15 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         out
       end
 
-    out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
+    # The author's colour is the ONE leaf on this path that reaches an
+    # attribute, so it is escaped like every other: an unescaped `"` here would
+    # close `style="` and let the next token land as a new attribute
+    # (`red" onmouseover="…`). `escape_attr/1` is a no-op for every legitimate
+    # colour value, so the byte-locked email golden is unmoved.
+    out =
+      if Map.get(n, "color"),
+        do: ["color:#{escape_attr(to_string(Map.get(n, "color")))}" | out],
+        else: out
 
     # Article-only typographic roles. These now carry a `bp-role-*` CLASS (the
     # role typography lives in `.bp-paper-surface`); author marks in `out` are
@@ -425,13 +433,31 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         out
       end
 
-    out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
+    # The author's colour is the ONE leaf on this path that reaches an
+    # attribute, so it is escaped like every other: an unescaped `"` here would
+    # close `style="` and let the next token land as a new attribute
+    # (`red" onmouseover="…`). `escape_attr/1` is a no-op for every legitimate
+    # colour value, so the byte-locked email golden is unmoved.
+    out =
+      if Map.get(n, "color"),
+        do: ["color:#{escape_attr(to_string(Map.get(n, "color")))}" | out],
+        else: out
+
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
     out = body_type(n, pal) ++ Enum.reverse(out)
 
     style_attr = if out == [], do: "", else: ~s( style="#{Enum.join(out, ";")}")
     class_attr = if role_class, do: ~s( class="#{role_class}"), else: ""
-    "<p#{class_attr}#{style_attr}>#{inner}</p>"
+
+    # A composed hint, not author data: today only the pre-gate badge sets it
+    # (the register's reader_behaviour as the hover explanation).
+    title_attr =
+      case Map.get(n, "_title") do
+        title when is_binary(title) and title != "" -> ~s( title="#{escape_attr(title)}")
+        _ -> ""
+      end
+
+    "<p#{class_attr}#{title_attr}#{style_attr}>#{inner}</p>"
   end
 
   # Body-copy type for the ordinary paragraph under a STYLESHEET-LESS palette
@@ -531,6 +557,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       "byline" -> {out, inner, "bp-role-byline"}
       "ingress" -> {out, inner, "bp-role-ingress"}
       "pullquote" -> {out, inner, "bp-role-pullquote"}
+      "pre-gate" -> {out, inner, pre_gate_class(n)}
       _ -> {out, inner, nil}
     end
   end
@@ -574,9 +601,31 @@ defmodule Barkpark.PortableDoc.Render.Walk do
              "margin:22px 0"
            ], inner, nil}
 
+      # The pre-gate badge off-surface (a legacy non-article Paper streamed
+      # through the reader): the same quiet mark, inline.
+      "pre-gate" ->
+        {out ++
+           [
+             "font-family:ui-monospace,Menlo,monospace",
+             "font-size:11px",
+             "letter-spacing:0.08em",
+             "text-transform:uppercase",
+             "color:#{pal.muted}",
+             "margin:0 0 20px"
+           ], inner, nil}
+
       _ ->
         {out, inner, nil}
     end
+  end
+
+  # The pre-gate badge (compose.ex `pre-gate-badge`): family root `bp-pregate`,
+  # a tone modifier from the whitelisted `_tone`, and `--tucked` only when the
+  # badge sits directly under a byline rule (paper-surface.css owns the pull-up).
+  defp pre_gate_class(n) do
+    tone = if Map.get(n, "_tone") == "warning", do: "warning", else: "neutral"
+    tucked = if Map.get(n, "_tucked") == true, do: " bp-pregate--tucked", else: ""
+    "bp-pregate bp-pregate--#{tone}#{tucked}"
   end
 
   # Heading declarations by clamped level — the NON-ARTICLE fallback only
@@ -1116,6 +1165,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # set `head` explicitly.
     head = Map.get(n, "head", []) |> List.wrap()
     body = Map.get(n, "rows", []) |> List.wrap()
+    # Typed columns (Compose.table_col_types) — an index-aligned list of
+    # text|num|delta|spark. ABSENT ⇒ [] ⇒ table_col_class/3 returns "" for every
+    # column, so the emitted bytes are identical to the untyped render.
+    cols = Map.get(n, "cols", []) |> List.wrap()
 
     thead =
       if head == [] do
@@ -1123,9 +1176,11 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       else
         cells =
           head
-          |> Enum.map(fn cell ->
+          |> Enum.with_index()
+          |> Enum.map(fn {cell, index} ->
             inner = render_children(cell, width, pal)
-            ~s(<th class="bp-table__th">#{inner}</th>)
+
+            ~s(<th class="bp-table__th#{table_col_class(cols, index, "bp-table__th")}">#{inner}</th>)
           end)
           |> Enum.join("")
 
@@ -1137,9 +1192,11 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       |> Enum.map(fn row ->
         cells =
           row
-          |> Enum.map(fn cell ->
+          |> Enum.with_index()
+          |> Enum.map(fn {cell, index} ->
             inner = render_children(cell, width, pal)
-            ~s(<td class="bp-table__td">#{inner}</td>)
+
+            ~s(<td class="bp-table__td#{table_col_class(cols, index, "bp-table__td")}">#{inner}</td>)
           end)
           |> Enum.join("")
 
@@ -1190,6 +1247,20 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       |> Enum.join("")
 
     ~s(<table role="presentation" style="border-collapse:collapse;width:100%;margin:18px 0">#{thead}<tbody>#{rows}</tbody></table>)
+  end
+
+  # num and delta both RIGHT-ALIGN (digits and deltas line up on their ones
+  # place), the head riding right with its column — the same colRightAlign rule
+  # the Go renderer applies through lipgloss's StyleFunc. spark gets its own
+  # modifier so the inline SVG can be sized by the stylesheet. Alignment is the
+  # ONLY thing num changes: a num cell's body is the legacy text body.
+  defp table_col_class(cols, index, base) do
+    case Enum.at(cols, index) do
+      "num" -> " #{base}--num"
+      "delta" -> " #{base}--num"
+      "spark" -> " #{base}--spark"
+      _ -> ""
+    end
   end
 
   # PdSheet — dense spreadsheet value grid; the same node shape the TUI's

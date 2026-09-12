@@ -51,6 +51,17 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCAN="$HERE/release-scan.sh"
+LIB="$HERE/lib/check-runs.sh"
+# The scan now READS through scripts/lib/check-runs.sh (the paged reader that
+# proves its own completeness), so every synthetic repo below must carry the lib
+# beside the script. `install_scan <root>` is the one place that knows this: a
+# copy of release-scan.sh alone is a broken installation and the script says so
+# and exits — which is the intended behaviour, not something to work around.
+install_scan() { # <repo root>
+  mkdir -p "$1/scripts/lib"
+  cp "$SCAN" "$1/scripts/release-scan.sh"
+  cp "$LIB" "$1/scripts/lib/check-runs.sh"
+}
 SHA_GREEN_SUITES="025c249717a40f1a9ca6741fb6eafaab83ef3a92"
 SHA_RED_SUITE="2c8fe0da467cd3772e250655352a25f7c5b68ee4"
 
@@ -92,7 +103,24 @@ while [ $# -gt 0 ]; do
 done
 file=""
 case "$path" in
-  */check-runs*)             file="check-runs.json" ;;
+  */check-runs*)
+    # PAGE-AWARE. The scan reads through scripts/lib/check-runs.sh, which walks
+    # `&page=N` until what it holds equals the feed's own total_count. Serving
+    # page one for every page would make a truncated feed grow past its total
+    # and refuse for the WRONG reason, and would hide a genuine short read.
+    #
+    # `per_page=100` CONTAINS `page=`, so the number must come off a `?`/`&`
+    # boundary — a `*page=` glob reads 100 as the page number.
+    page=1
+    case "$path" in *[?\&]page=*) page="${path##*[?&]page=}"; page="${page%%&*}" ;; esac
+    case "$page" in *[!0-9]*|'') page=1 ;; esac
+    if [ "$page" = "1" ]; then file="check-runs.json"; else file="check-runs-p$page.json"; fi
+    if [ ! -f "${GH_FIXTURE_DIR:-}/$file" ] && [ "$page" != "1" ]; then
+      # Past the end of the feed the API hands back an empty page, not a 404.
+      out='{"total_count":0,"check_runs":[]}'
+      if [ -n "${filter:-}" ]; then printf '%s' "$out" | jq "$filter"; else printf '%s' "$out"; fi
+      exit 0
+    fi ;;
   */check-suites*)           file="check-suites.json" ;;
   */actions/runs\?head_sha=*) file="runs-head-sha.json" ;;
   */actions/runs\?branch=*)  file="runs-branch.json" ;;
@@ -209,6 +237,87 @@ assert_eq "B3 the Format red in the GREEN suite is still advisory" \
   "advisory" "$(jq_of "$out_b" '.ci.failures[] | select(.name | startswith("Format")) | .advisory')"
 assert_eq "B4 certainty stays 'known' — every red here is decidable" \
   "known" "$(jq_of "$out_b" '.ci.advisory_certainty')"
+
+# ── T. A TRUNCATED CHECK-RUN READ CANNOT MASQUERADE AS A COMPLETE ONE ────────
+#
+# `?per_page=100` alone caps a page at 100 and says NOTHING about the remainder
+# — no error, no flag, just a short array (measured 2026-09-07 on head
+# 33799f6d8: total_count 122, 100 rows returned, 22 distinct names invisible).
+#
+# THE DIRECTION OF HARM HERE IS THE OPPOSITE OF THE CENSUS'S, and that is why
+# this file needs its own proof rather than the sibling's. `$refids` is the set
+# of suite ids REFERENCED by a check run, and ci.status is derived from those
+# suites ALONE. A suite whose runs all sit past the page boundary is never
+# referenced, so its conclusion never reaches the rollup: a RED suite goes
+# MISSING and the scan reports success on a head that is failing. This reader
+# fails PERMISSIVE — it hands the release curator a green light for a broken
+# candidate — where the census fails alarmist.
+#
+# ONE VARIABLE. Both fixtures below carry fixture B's suites unchanged,
+# including the genuinely red 81971901242. They differ only in whether the run
+# that references it made it into the page the reader was handed.
+FT="$TMP/fixture-truncated"; mkdir -p "$FT"
+cp "$FB/check-suites.json" "$FT/check-suites.json"
+# COMPLETE: all 12 rows, and the feed's own total_count agrees.
+cp "$FB/check-runs.json" "$FT/check-runs-complete.json"
+# TRUNCATED: the red suite's only run did not fit. The feed still says 12.
+jq -c '.check_runs |= map(select(.name != "Full production Paper reader audit"))' \
+  "$FB/check-runs.json" > "$FT/check-runs-short.json"
+
+serve_runs() { # <file> — install it as page one of $FT and scan
+  cp "$1" "$FT/check-runs.json"
+  run_scan "$FT" "$SHA_RED_SUITE"
+}
+
+echo "── T. a check-run read that cannot be vouched for refuses instead of reading green ──"
+
+# T0 THE FIXTURE ASSERTS ITSELF. If the short feed still carried the red run,
+# every clause below would pass for the wrong reason.
+assert_eq "T0a the short feed really is one row shorter (11 of a claimed 12)" \
+  "11" "$(jq -r '.check_runs | length' "$FT/check-runs-short.json")"
+assert_eq "T0b …and it still CLAIMS 12, which is the whole lie under test" \
+  "12" "$(jq -r '.total_count' "$FT/check-runs-short.json")"
+assert_eq "T0c …and the red suite it drops is still in the suites feed" \
+  "failure" "$(jq -r '.check_suites[] | select(.id == 81971901242) | .conclusion' "$FT/check-suites.json")"
+
+# T1 DIRECTION ONE — the complete feed. Nothing changes: this is fixture B's
+# verdict, reached through the paged reader.
+out_t1="$(serve_runs "$FT/check-runs-complete.json")"
+assert_eq "T1 a COMPLETE feed (total_count == rows) still derives the ordinary verdict" \
+  "failure" "$(jq_of "$out_t1" '.ci.status')"
+assert_eq "T1b …with the blocking red still named" \
+  "blocking" "$(jq_of "$out_t1" '.ci.failures[] | select(.name == "Full production Paper reader audit") | .advisory')"
+
+# T2 DIRECTION TWO — one row short of what the feed says exists. Before this
+# change the scan answered "success" here: the red suite was simply never
+# referenced. It must now refuse.
+out_t2="$(serve_runs "$FT/check-runs-short.json")"
+assert_eq "T2 a SHORT feed is refused, not rolled up — never 'success' off a set nobody can vouch for" \
+  "unknown" "$(jq_of "$out_t2" '.ci.status')"
+assert_eq "T2b …and it is emphatically not the old permissive answer" \
+  "false" "$([ "$(jq_of "$out_t2" '.ci.status')" = "success" ] && echo true || echo false)"
+
+# T3 THE REFUSAL SAYS WHICH FAILURE IT WAS. "gh unavailable or no check data"
+# sends a reader to look at credentials; the feed here answered fine and was
+# merely INCOMPLETE, and a truncated rollup would have looked green.
+assert_eq "T3 the status_reason names an INCOMPLETE read, not an unreachable one" \
+  "true" "$(jq_of "$out_t2" '.ci.status_reason | test("COMPLETELY|complete") and (test("gh unavailable") | not)')"
+assert_eq "T3b …and it carries the reader's own refusal line (the counts it could not reconcile)" \
+  "true" "$(jq_of "$out_t2" '.ci.status_reason | test("total_count|of 12")')"
+
+# T4 NO PARTIAL ROLLUP LEAKS OUT. The failure mode is a short list that reads
+# like a complete one, so the refusal must not also publish half a verdict.
+assert_eq "T4a checks_total is 0, not the 11 it happened to see" \
+  "0" "$(jq_of "$out_t2" '.ci.checks_total')"
+assert_eq "T4b no failures[] entries are published off the partial set" \
+  "0" "$(jq_of "$out_t2" '.ci.failures | length')"
+assert_eq "T4c certainty is the explicit cannot_tell" \
+  "cannot_tell" "$(jq_of "$out_t2" '.ci.advisory_certainty')"
+
+# T5 STILL BEST-EFFORT. A CI read it cannot vouch for must not fail the scan —
+# the curator still needs the commit range and the suggested bump.
+serve_runs "$FT/check-runs-short.json" >/dev/null; rc_t5=$?
+assert_eq "T5 exit 0 — an unvouchable CI read degrades the verdict, never the scan" "0" "$rc_t5"
 
 # ── C. the honest blind spot: two reds in one red suite ──────────────────────
 # GitHub does not say which of them was continue-on-error, and neither may we.
@@ -349,11 +458,11 @@ git init -q -b main "$SEED" >>"$GITLOG" 2>&1
 
 DEEP="$TMP/deep"
 git clone -q "$ORIGIN" "$DEEP" >>"$GITLOG" 2>&1
-mkdir -p "$DEEP/scripts"; cp "$SCAN" "$DEEP/scripts/release-scan.sh"
+install_scan "$DEEP"
 
 SHALLOW="$TMP/shallow"
 git clone -q --depth 1 "file://$ORIGIN" "$SHALLOW" >>"$GITLOG" 2>&1
-mkdir -p "$SHALLOW/scripts"; cp "$SCAN" "$SHALLOW/scripts/release-scan.sh"
+install_scan "$SHALLOW"
 
 # ── G0. is the fixture even real? ────────────────────────────────────────────
 g0_fails_before=$fails
@@ -424,7 +533,7 @@ git init -q -b main "$BIG" >>"$GITLOG" 2>&1
     git commit -q --allow-empty -m "feat: commit $i $pad"
   done
 ) >>"$GITLOG" 2>&1
-mkdir -p "$BIG/scripts"; cp "$SCAN" "$BIG/scripts/release-scan.sh"
+install_scan "$BIG"
 
 # The exact bytes the pre-fix script handed to execve as ONE argv word.
 argv_bytes="$(git -C "$BIG" log --format='%H%x09%s' v0.1.0..main 2>/dev/null \
@@ -442,6 +551,143 @@ assert_eq "H4 …with commits[] a FLAT array of objects (--slurpfile needs \$com
   "object" "$(jq_of "$out_h" '.commits[0] | type')"
 assert_eq "H5 …and commits[] length matches commit_count (no silent truncation)" \
   "$COMMITS" "$(jq_of "$out_h" '.commits | length')"
+
+# ── J. the WALK, not the store flag: an off-HEAD graft is NOT truncation ─────
+# G above proves the guard still fires on a real `--depth 1` clone. THIS block
+# pins the other direction, the one the store-level flag got WRONG.
+#
+# `git rev-parse --is-shallow-repository` answers about the OBJECT STORE, which
+# is repository-wide. One off-HEAD `--depth` fetch sets it for a checkout whose
+# HEAD history reaches the root — measured on /Volumes/SATECHI/github/barkpark
+# (5132 commits from HEAD, one root, the sole .git/shallow graft not an ancestor
+# of HEAD), where release-scan FATALed at exit 3 on a history it was holding in
+# full and advertised `git fetch --unshallow`, a remedy describing nothing that
+# was wrong.
+#
+# THE FIXTURE BUILDS THAT SHAPE, it does not simulate it: a full clone, then a
+# real commit object written with `git commit-tree` and left UNREFERENCED, and
+# that sha alone in `.git/shallow`. J0 asserts the fixture is the shape it
+# claims (store-shallow TRUE, graft NOT an ancestor of HEAD, history still
+# reaching the root) before any behavioural J result is read — a fixture whose
+# graft accidentally landed on HEAD's history would make J1-J3 pass by testing
+# the G case again.
+#
+# J5 is the MUTATION: a copy of the script with the walk predicate swapped back
+# for the store-level flag must FATAL on this same fixture. Without it, J1-J3
+# would still pass against a release-scan.sh that never looked at a graft, which
+# is precisely the simplification this block exists to red.
+echo "── J. store-shallow but the graft is OFF HEAD: a complete walk, scanned ──"
+OFFHEAD="$TMP/offhead"
+git clone -q "$ORIGIN" "$OFFHEAD" >>"$GITLOG" 2>&1
+install_scan "$OFFHEAD"
+OFF_SHA="$(git -C "$OFFHEAD" commit-tree -m "off-head graft specimen" "$(git -C "$OFFHEAD" rev-parse 'HEAD^{tree}')" 2>>"$GITLOG")"
+printf '%s\n' "$OFF_SHA" > "$OFFHEAD/.git/shallow"
+
+j0_fails_before=$fails
+assert_eq "J0a the fixture's object store now reports SHALLOW" \
+  "true" "$(git -C "$OFFHEAD" rev-parse --is-shallow-repository 2>/dev/null)"
+assert_eq "J0b …the graft is a real object" \
+  "commit" "$(git -C "$OFFHEAD" cat-file -t "$OFF_SHA" 2>/dev/null)"
+assert_eq "J0c …and it is NOT an ancestor of HEAD (else this is just the G case)" \
+  "no" "$(git -C "$OFFHEAD" merge-base --is-ancestor "$OFF_SHA" HEAD >/dev/null 2>&1 && echo yes || echo no)"
+assert_eq "J0d …while HEAD's own history is still whole (3 commits, as seeded)" \
+  "3" "$(git -C "$OFFHEAD" rev-list --count HEAD 2>/dev/null)"
+if [ "$fails" -ne "$j0_fails_before" ]; then
+  echo "  !! J FIXTURE IS BROKEN — read every J1-J5 result below as 'fixture broken',"
+  echo "     not as a release-scan.sh defect. git construction log:"
+  sed 's/^/       /' "$GITLOG"
+fi
+
+out_j="$(GH_FIXTURE_DIR="$FE" bash "$OFFHEAD/scripts/release-scan.sh" origin/main 2>/dev/null)"; rc_j=$?
+assert_eq "J1 an off-HEAD graft does NOT truncate the walk: exit 0, not the FATAL 3" "0" "$rc_j"
+assert_eq "J2 …and the output does not stamp a complete read as shallow:true" \
+  "false" "$(jq_of "$out_j" '.shallow')"
+assert_eq "J3 …and the range it reports is the real one (2 commits since v0.1.0)" \
+  "2" "$(jq_of "$out_j" '.commit_count')"
+
+# J4-J6. FAIL CLOSED, driven through a `git` shim.
+#
+# WHY A SHIM AND NOT chmod 000 ON THE GRAFT LIST: measured here, git reads an
+# unreadable `.git/shallow` as ABSENT and answers `--is-shallow-repository`
+# FALSE, so the walk predicate returns "complete" and never reaches its
+# fail-closed arms — a chmod fixture passes at exit 0 while testing nothing.
+# The arms are reachable when the store flag says `true` and the graft list then
+# cannot be located or read (a permission or GC race between the two calls, or a
+# git that answers differently), so the fixture makes the flag say `true`
+# directly. Everything else passes through to the real git: the shim forges one
+# answer, not a repository.
+GITSHIM="$TMP/gitshim"
+mkdir -p "$GITSHIM"
+REAL_GIT="$(command -v git)"
+cat >"$GITSHIM/git" <<SHIM
+#!/usr/bin/env bash
+set -uo pipefail
+case "\$*" in
+  "rev-parse --is-shallow-repository")
+    if [ -n "\${FAKE_IS_SHALLOW:-}" ]; then printf '%s\n' "\$FAKE_IS_SHALLOW"; exit 0; fi ;;
+  "rev-parse --git-common-dir")
+    if [ -n "\${FAKE_NO_COMMON_DIR:-}" ]; then exit 0; fi ;;
+esac
+exec "$REAL_GIT" "\$@"
+SHIM
+chmod +x "$GITSHIM/git"
+
+# The deep clone from G is a full, un-grafted repo with NO .git/shallow: with
+# the flag forced true, the graft list is missing and nothing can be tested.
+j4_rc=0
+PATH="$GITSHIM:$PATH" FAKE_IS_SHALLOW=true GH_FIXTURE_DIR="$FE" \
+  bash "$DEEP/scripts/release-scan.sh" origin/main >/dev/null 2>"$TMP/j4.err" || j4_rc=$?
+assert_eq "J4a store-shallow with an unreadable/missing graft list FAILS CLOSED (exit 3)" "3" "$j4_rc"
+if grep -qF "fails CLOSED" <"$TMP/j4.err"; then
+  pass "J4b …and the refusal says it is failing closed, not that HEAD is grafted"
+else
+  fail "J4b the refusal does not name the fail-closed reason"; sed 's/^/    stderr: /' "$TMP/j4.err"
+fi
+
+j5_rc=0
+PATH="$GITSHIM:$PATH" FAKE_IS_SHALLOW=maybe GH_FIXTURE_DIR="$FE" \
+  bash "$DEEP/scripts/release-scan.sh" origin/main >/dev/null 2>"$TMP/j5.err" || j5_rc=$?
+assert_eq "J4c a non-true/false answer from git is not read as 'not shallow' (exit 3)" "3" "$j5_rc"
+
+j6_rc=0
+PATH="$GITSHIM:$PATH" FAKE_IS_SHALLOW=true FAKE_NO_COMMON_DIR=1 GH_FIXTURE_DIR="$FE" \
+  bash "$DEEP/scripts/release-scan.sh" origin/main >/dev/null 2>"$TMP/j6.err" || j6_rc=$?
+assert_eq "J4d a missing --git-common-dir cannot locate the graft list either (exit 3)" "3" "$j6_rc"
+
+# …and the documented escape still works on every fail-closed arm, because
+# release-scan's truncated commits[] is still draft material (that is why this
+# script has an override and pds-record-parity.sh does not).
+j7_rc=0
+out_j7="$(PATH="$GITSHIM:$PATH" FAKE_IS_SHALLOW=true RELEASE_SCAN_ALLOW_SHALLOW=1 GH_FIXTURE_DIR="$FE" \
+  bash "$DEEP/scripts/release-scan.sh" origin/main 2>/dev/null)" || j7_rc=$?
+assert_eq "J4e RELEASE_SCAN_ALLOW_SHALLOW=1 still downgrades a fail-closed verdict (exit 0)" "0" "$j7_rc"
+assert_eq "J4f …and that output declares shallow:true, never a silent green" \
+  "true" "$(jq_of "$out_j7" '.shallow')"
+
+# J5. MUTATION. Swap the walk predicate for the store-level flag — the exact
+# simplification a future reader might call a cleanup — and J1 must red.
+MUTANT="$TMP/mutant"
+git clone -q "$ORIGIN" "$MUTANT" >>"$GITLOG" 2>&1
+install_scan "$MUTANT"
+printf '%s\n' "$(git -C "$MUTANT" commit-tree -m "off-head graft specimen" "$(git -C "$MUTANT" rev-parse 'HEAD^{tree}')" 2>>"$GITLOG")" > "$MUTANT/.git/shallow"
+python3 - "$MUTANT/scripts/release-scan.sh" <<'MUTATE'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+# The store-level predicate, as it stood before this fix: the walk is "complete"
+# iff the object store is not shallow. Nothing else about the mutant changes.
+s = s.replace('walk_truncation\nif [ "$WALK_STATE" != "complete" ]; then',
+              'WALK_STATE="$( [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = false ] '
+              '&& echo complete || echo truncated )"\nif [ "$WALK_STATE" != "complete" ]; then', 1)
+open(p, "w").write(s)
+MUTATE
+mut_rc=0
+GH_FIXTURE_DIR="$FE" bash "$MUTANT/scripts/release-scan.sh" origin/main >/dev/null 2>&1 || mut_rc=$?
+if [ "$mut_rc" = "3" ]; then
+  pass "J5 MUTATION: keying on the store flag alone FATALs this fixture (exit 3) — J1 is load-bearing"
+else
+  fail "J5 MUTATION did not red: the store-flag predicate exits $mut_rc on the off-HEAD fixture, so J1 proves nothing"
+fi
 
 # ── I. optional live re-record check (anti-rot for the recorded payloads) ────
 if [ "${RELEASE_SCAN_TEST_LIVE:-0}" = "1" ]; then

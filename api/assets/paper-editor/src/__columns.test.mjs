@@ -12,6 +12,7 @@
 // Run: node src/__columns.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   runToTiptap,
   runToOps,
@@ -32,6 +33,14 @@ function check(name, fn) {
 }
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
+
+check("nested tables use their column width, not the page evidence band", () => {
+  for (const path of ["../../paper-surface/paper-surface.css", "./styles.css"]) {
+    const css = readFileSync(new URL(path, import.meta.url), "utf8");
+    assert.match(css, /\.bp-cols__c \.bp-table\s*\{[^}]*--bp-evidence-width:\s*100%;[^}]*--bp-evidence-pull:\s*0px;/,
+      `${path}: a nested table must not inherit the page-wide breakout`);
+  }
+});
 
 // ── fixtures (the READER shape: columns is a LIST OF COLUMNS, each a LIST OF
 //    BLOCKS — a list-of-lists; children are id-less) ──────────────────────────

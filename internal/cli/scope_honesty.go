@@ -21,7 +21,58 @@ import (
 // It returns an empty string when there is nothing to refuse — including for
 // every invocation that leaves the scope at the baked floor, which is why no
 // existing command line changes behaviour.
+//
+// TWO AXES, ONE SEAM. The -w/-p block below is the original. The dataset block
+// after it is the same contract for -d (internal/manifest/dataset_scope.go),
+// which was split out of the first change on purpose and is now built. When
+// BOTH apply the -w/-p refusal is the one reported, because it is the more
+// severe failure: a dropped -w answers about another TENANT, a dropped -d about
+// another dataset inside the workspace the operator already named. Reporting one
+// at a time also keeps the message a single actionable sentence — fixing the
+// workspace re-runs the command, and the dataset refusal is then right there.
 func refuseUnrepresentableScope(cmd manifest.Command, ctx manifest.Context) string {
+	if msg := refuseUnrepresentableWorkspaceScope(cmd, ctx); msg != "" {
+		return msg
+	}
+	return refuseUnrepresentableDataset(cmd, ctx)
+}
+
+// refuseUnrepresentableDataset is the -d half. It fires ONLY when the operator
+// TYPED a dataset that diverges from the baked floor (manifest.StatedDataset
+// ANDs provenance with divergence — see its doc comment for the three conjuncts
+// and the door each one closes) and the command can neither put it in its path
+// nor forward it as a declared `dataset` flag.
+//
+// It returns an empty string for every ambient dataset — BARKPARK_DATASET, a
+// repo .barkpark.json, the saved active config, a `-s <entry>`'s saved dataset —
+// and for every typed -d that names the floor. Those are the cases that are
+// CORRECT today, and they keep byte-identical behaviour.
+func refuseUnrepresentableDataset(cmd manifest.Command, ctx manifest.Context) string {
+	if !manifest.StatedDataset(ctx) {
+		return ""
+	}
+	if manifest.DatasetFateFor(cmd) != manifest.DatasetRefused {
+		return ""
+	}
+
+	verb := strings.TrimSpace(cmd.Noun + " " + cmd.Verb)
+	why := "no dataset-scoped route or `dataset` parameter is declared for it"
+	if d, ok := manifest.DatasetDispositionFor(cmd); ok && d.Reason != "" {
+		why = d.Reason
+	}
+
+	return fmt.Sprintf(
+		"`bp %s` cannot carry -d %s — %s. Sending it anyway would answer about "+
+			"%q while you asked about %q, and exit 0. Drop the flag to accept the "+
+			"server's default dataset, or use a command whose route carries the "+
+			"dataset (`bp capabilities` marks them).",
+		verb, ctx.Dataset, why,
+		manifest.DefaultDefaults().Dataset, ctx.Dataset,
+	)
+}
+
+// refuseUnrepresentableWorkspaceScope is the original -w/-p half, unchanged.
+func refuseUnrepresentableWorkspaceScope(cmd manifest.Command, ctx manifest.Context) string {
 	stated := manifest.StatedScope(ctx)
 	if len(stated) == 0 {
 		return ""

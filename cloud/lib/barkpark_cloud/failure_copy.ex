@@ -195,10 +195,24 @@ defmodule BarkparkCloud.FailureCopy do
   "raw-log order: strip_ansi BEFORE scrub…" AND by a `humanize/1` assertion on a
   colourised non-prefixed key, in `failure_copy_test.exs`.
 
-  RESIDUAL, stated rather than hidden: the OSC shape
-  `"\\e]0;t\\ainapi_key=<secret>"` leaks under BOTH orders — stripping the OSC
-  leaves the `n` of `in` flush against the key, which re-blocks the same
-  lookbehind. Not closed here.
+  THE WELD, closed by dr-osc-residual-strip-fuses-tokens. The order fix above
+  only reaches a capture whose byte LEFT of the escape is not alphanumeric. When
+  it is — `"run\\e[0mapi_key=<secret>"` — stripping the run to nothing welds
+  `run` onto `api_key`, and the welded `n` re-blocks the very lookbehind the
+  order fix was protecting, so the value shipped in cleartext under the FIXED
+  order too. `strip_ansi/1` now replaces a run that sits BETWEEN two
+  alphanumerics with a single space (`@ansi_runs`), so the boundary survives
+  the strip. Justified on the 2,752 CSI adjacencies dr-w22-bl measured on
+  cloud-db-1, not on a fixture: the same scan found ZERO `ESC ]` bytes in
+  154,931 real captured lines, so the OSC shape this was first noticed in is
+  synthetic.
+
+  WHAT IS STILL NOT REDACTED, and is not a strip defect: `"inapi_key=<secret>"`
+  — a plain word ending in an alphanumeric, flush against the key, with no
+  escape anywhere. `scrub/1` leaves it, by the same deliberate decision that
+  leaves `xtoken=` (see the key clause above); `FailureCopy.raw/1` and a bare
+  `scrub/1` return it byte-identically, which is the control proving the strip
+  has nothing to do with it. `failure_copy_test.exs` pins that pair.
 
   Provider-prefixed credentials (including our own `bppat_`/`bpcs_`) are
   order-INDEPENDENT — that clause matches the token itself — so the order only
@@ -342,141 +356,42 @@ defmodule BarkparkCloud.FailureCopy do
   @spec typed_refusal_message(term()) :: String.t() | nil
   def typed_refusal_message(reason), do: reason |> typed_refusal_fields() |> elem(1)
 
-  @redaction "[redacted]"
+  # THE SECRET TABLE IS NOT IN THIS FILE ANY MORE — it is `priv/secret-scrub.exs`.
+  #
+  # It moved for ONE reason: a second app has to scrub with the SAME set. The
+  # box (`api/`) writes a recorded build log to disk and that WRITE boundary has
+  # to redact before the bytes are durable (dr-bl-recorder-http-read-path, c2);
+  # `api/` and `cloud/` are separate OTP apps with no dependency either way, so
+  # the only alternatives were ONE file read by both or a hand-copied table in
+  # the box. A copied redaction table drifts in silence — a redacted token and a
+  # leaked one look identical until someone reads the bytes — so the set moved
+  # out and BOTH modules read the same file:
+  #
+  #   * this module (the control plane's DISPLAY boundary), and
+  #   * `Barkpark.Sites.BuildLogScrub` (the box's recorded-log WRITE boundary).
+  #
+  # Every clause, its order and every comment explaining WHY a guard is shaped
+  # the way it is went with it, verbatim. Read them there before editing one.
+  #
+  # `@external_resource` is what keeps this honest: editing the fixture
+  # recompiles this module, and `failure_copy_scrub_lock_test.exs` re-reads the
+  # file at TEST time and fails if the compiled set has drifted from it (the
+  # same test exists on the api side, against the same file).
+  @secret_scrub_fixture Path.expand("../../priv/secret-scrub.exs", __DIR__)
+  @external_resource @secret_scrub_fixture
+  @secret_scrub @secret_scrub_fixture |> Code.eval_file() |> elem(0)
 
-  # STATUS PROSE in a value position — never a credential. A remote capture says
-  # "no bearer token found", "token: expired", "api_key: not set" far more often
-  # than it says "token: <a live token>", and redacting the word `expired` tells
-  # a person a secret leaked when none did. Every entry is an ordinary English
-  # word that no generated credential can be, so this guard costs the scrub no
-  # coverage; it is anchored with `\b` so it can only skip the WHOLE value.
-  @prose_value "(?:token|tokens|credential|credentials|value|header|auth|expired|missing|invalid|unset|unknown|empty|none|null|nil|set|required|absent|not)\\b"
+  @redaction @secret_scrub.redaction
+  @secret_patterns @secret_scrub.patterns
+  @ansi_run @secret_scrub.ansi_run
 
-  # The secret shapes a remote capture can carry, most specific first. Each entry
-  # is `{pattern, replacement}` and every one carries POSITIVE and NEGATIVE rows
-  # in `failure_copy_test.exs`'s table — a pattern without both is not shippable,
-  # because the failure mode here is silent COPY LOSS (a redacted git SHA reads
-  # exactly like a redacted token) rather than a crash.
-  @secret_patterns [
-    # `Authorization: Bearer sk-live-…`. The scheme word is kept so the line
-    # still says what KIND of credential was refused; everything after it goes.
-    #
-    # The `@prose_value` guard is why this does not maul English: "no bearer
-    # token found in the request" is a COMMON failure string and an unguarded
-    # `bearer\s+\S+` rendered it "no bearer [redacted] found" — a redaction
-    # where no secret ever was, which is its own small lie on the person's
-    # screen. The guard is a stop-list of words no credential can be, so it
-    # weakens the redaction for nothing.
-    {~r/\b(bearer\s+)(?!#{@prose_value})\S+/i, "\\1#{@redaction}"},
+  @doc false
+  @spec compiled_secret_patterns() :: [{Regex.t(), String.t()}]
+  def compiled_secret_patterns, do: @secret_patterns
 
-    # A DB URL's USERINFO — `ecto://user:PASS@host/db`. The SCHEME and everything
-    # from the `@` on are kept (they name the host that refused); only the
-    # `user:pass` is redacted.
-    #
-    # This clause is the one the Go runner has carried all along
-    # (`ectoUserinfoRe`, `internal/cli/cloud/warmpool.go`) and this boundary never
-    # grew. It is NOT reachable by any clause above it: `DATABASE_URL` is not one
-    # of the key clause's key words, so a `DATABASE_URL=ecto://…` env fold never
-    # matched there, and the password sits behind a `//` that the bare-token
-    # clause cannot see (a real DB password usually carries a `-`/`_`/symbol, so
-    # it is not a contiguous 32+ alnum run either). A migrate failure is the most
-    # common way this capture is produced, and it shipped in cleartext.
-    #
-    # `postgres`/`postgresql` ride along because `deploy.sh` writes the `ecto://`
-    # spelling but Ecto/psql errors echo the other two back.
-    {~r{\b(ecto|postgres|postgresql)://[^\s:/@]+:[^\s@]+@}, "\\1://#{@redaction}@"},
-
-    # `client_secret=…`, `token: …`, `api-key=…`. The KEY and its separator are
-    # kept (they name what leaked); the value is redacted up to the next
-    # delimiter. `authorization` is deliberately absent — the Bearer clause above
-    # already owns that line and keeps the scheme word.
-    #
-    # Same `@prose_value` guard, same reason: "token: expired" and
-    # "no api_key: set in the config file" are status prose, not credentials.
-    #
-    # The left edge is `(?<![A-Za-z0-9])`, NOT `\b`. `_` is a word character, so
-    # `\b` cannot fire between the `_` and the `TOKEN` in `BARKPARK_TOKEN=…` —
-    # which made every `[A-Z_]*TOKEN=` env fold invisible to this clause, and an
-    # env fold is the single most common way a provisioner capture carries a
-    # live credential. The lookbehind excludes only alphanumerics, so
-    # `BARKPARK_TOKEN=`, `MY_SECRET=` and `DEPLOY_TOKEN=` all match while
-    # `xtoken=` (a longer word merely ENDING in `token`) still does not.
-    #
-    # `(?![=:])` in the value position is the price of that widening. Reaching
-    # past `_` puts every `*_token`/`*_password` identifier in a captured stack
-    # trace or source echo inside this clause's reach, and `=` is not in the
-    # value's stop set — so `hashed_password == before` would render
-    # "hashed_password =[redacted] before", copy loss where no secret ever was.
-    # A COMPARISON is not an assignment. A real value never STARTS with `=` or
-    # `:`, so the guard costs no redaction (`token=abc==` still redacts whole).
-    # `<` joins `=`/`:` in the value-position stop set for the same reason they
-    # are there: it marks copy that is NOT a credential. The provisioner
-    # deliberately narrates the provider-key hand-off as
-    # `printf 'ANTHROPIC_API_KEY=<your-key>\n' >> …` — the agent key is the one
-    # secret Barkpark never copies, so the developer pastes it themselves — and
-    # that line reaches the console fold like any other capture. Redacting
-    # `<your-key>` into `[redacted]` destroyed the only copy telling the person
-    # what to type, which is the same class of copy loss as the `hashed_password
-    # == before` case the `(?![=:])` guard already fixes. A real credential never
-    # STARTS with `<`, so this costs the redaction nothing.
-    {~r/(?<![A-Za-z0-9])((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?![=:<])(?!#{@prose_value})[^\s"',;)]+/i,
-     "\\1#{@redaction}"},
-
-    # Provider-prefixed credentials: Stripe/OpenAI `sk-`/`pk-`, GitHub `ghp_`/
-    # `github_pat_`, Slack `xoxb-`, AWS `AKIA…`, Hetzner `hcloud_`, and — since
-    # deploy-reliability W2 S4 — BARKPARK'S OWN `bppat_` (PAT, `auth.ex`) and
-    # `bpcs_` (scoped chat/MCP session token, `auth.ex`). These carry hyphens and
-    # underscores, so the bare-token clause below (which is `[A-Za-z0-9]` only)
-    # cannot see them.
-    #
-    # Our own prefixes are the load-bearing addition, not a tidy-up. A minted PAT
-    # is `bppat_` + `Base.url_encode64(32 bytes, padding: false)`, and ~94% of
-    # those 43-char bodies contain a `-` or `_` that breaks the bare-token
-    # clause's contiguous-alnum run — so before this clause knew the prefix, a
-    # real token measured 94.3% LEAKED through `scrub/1` in four of six shapes
-    # (`BARKPARK_TOKEN=…`, `export BARKPARK_TOKEN=…`, bare in prose, and a
-    # colourised `token=…`), and the ~6% that redacted did so by accident of the
-    # alphabet. Matching the TOKEN — not the syntax around it — is what makes
-    # this hole close independently of env-var spelling, prose and colour codes.
-    #
-    # Our prefixes require `_` specifically (the vendor arm keeps `[-_]`): every
-    # Barkpark credential is minted with an underscore, and `bpcs-mint-refused`
-    # — a real sentinel in `api/lib/barkpark_web/studio/claude_chat.ex` — is
-    # copy a person needs to read, not a secret. `bp-` alone is deliberately
-    # absent: every provisioned site is named `bp-<slug>-<hash>`.
-    # `bp_<kind>_` is the MINTED BOX CREDENTIAL family — `bp_admin_…` (every
-    # provisioned site's per-instance admin token, `setup.GenerateAdminToken`),
-    # `bp_read_…`, and any sibling kind minted later. It was the conspicuous gap
-    # in this arm: `bppat_`/`bpcs_` are the tokens a PERSON mints, while
-    # `bp_<kind>_` is the one the CONTROL PLANE mints for every box it builds —
-    # the credential most likely to be in a provisioner capture in the first
-    # place. The Go side has never been blind to it (`adminTokenRe` in
-    # `internal/provisioner/console.go`, `builderTokenRe` in
-    # `internal/builder/console.go` — the latter is exactly `bp_[a-z]+_`), so
-    # this clause brings the display boundary level with the two worker-side
-    # scrubs rather than trusting them to have caught it upstream.
-    #
-    # `_` after `bp` is load-bearing and NOT a tidy-up: `bp-` is the site-name
-    # prefix (`bp-<slug>-<hash>.barkpark.cloud`), pinned as a negative below. The
-    # `[a-z]+` kind keeps that separation exact — a hostname can never enter this
-    # clause, because a hostname's separator is a hyphen.
-    {~r/\b(?:(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[baprs]|hcloud)[-_]|(?:bppat|bpcs)_|bp_[a-z]+_)[A-Za-z0-9\-_]{8,}/,
-     @redaction},
-
-    # An AWS access key id: `AKIA` + 16 uppercase alphanumerics, no separator, so
-    # it needs its own clause (the prefixed clause above requires a `-`/`_`, and
-    # the bare-token clause below requires a lowercase letter).
-    {~r/\bAKIA[0-9A-Z]{16}\b/, @redaction},
-
-    # A bare high-entropy token. NARROW ON PURPOSE: 32+ alphanumerics that mix
-    # lower, upper AND digits, and never a 40-char lowercase-hex git SHA. The
-    # naive `\b[A-Za-z0-9]{40,}\b` passes the whole cloud suite while silently
-    # eating the commit a person deployed; the mixed-case requirement alone also
-    # spares a UUID segment, a lowercase `sha256:` digest, a hostname and a
-    # semver, all of which are negatives in the table.
-    {~r/\b(?![a-f0-9]{40}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{32,}\b/,
-     @redaction}
-  ]
+  @doc false
+  @spec compiled_ansi_run() :: String.t()
+  def compiled_ansi_run, do: @ansi_run
 
   @doc """
   Redact secret-shaped SUBSTRINGS from a string bound for a person's screen or
@@ -498,16 +413,52 @@ defmodule BarkparkCloud.FailureCopy do
   end
 
   def scrub(other), do: other
+  # The ANSI run source is `priv/secret-scrub.exs`'s `ansi_run` — read there for
+  # why it is held as a SOURCE STRING and why the arms are ordered OSC-first.
+  # It is bound to `@ansi_run` beside the secret table above.
 
-  # A terminal control sequence: ESC (0x1B) followed by either a CSI parameter
-  # run terminated by a final byte (`\e[31m`, `\e[22m`, `\e[2K`), an OSC string
-  # terminated by BEL or ST, or a bare two-byte escape. Anchored on the REAL
-  # 0x1B byte — the literal four-character text `\x1B` appears in zero rows; the
-  # bytes appear in 1,366.
-  # Ordered: OSC first (it swallows a payload), then CSI, then a bare two-byte
-  # escape as the fallback — PCRE alternation is ordered, so the specific arms
-  # always win over the catch-all.
-  @ansi ~r/\x1B(?:\][^\x07\x1B]*(?:\x07|\x1B\\)|\[[0-?]*[ -\/]*[@-~]|[ -~])/
+  # THE FUSING RUN (dr-osc-residual-strip-fuses-tokens, dr-w22-bl): one or more
+  # escape runs sitting BETWEEN two alphanumerics. Replacing that with the empty
+  # string welds two tokens into one word, and `scrub/1`'s key clause opens with
+  # `(?<![A-Za-z0-9])` — so the weld puts an alphanumeric immediately left of the
+  # key and the scrub never fires:
+  #
+  #     "run\e[0mapi_key=<secret>"  --strip-->  "runapi_key=<secret>"  --scrub-->  UNCHANGED
+  #
+  # dr-w22-s1 fixed the ORDER (strip before scrub), which closes the case where
+  # the byte left of the escape is NOT alphanumeric (`"[INFO]\e[0mapi_key=…"`
+  # strips to `"[INFO]api_key=…"` and redacts). It cannot close this one, because
+  # after the strip there is no boundary left to find. THE POPULATION IS LIVE and
+  # is not OSC-specific: dr-w22-bl measured `[A-Za-z0-9]` immediately followed by
+  # ESC in 2,752 of the ESC-carrying lines on cloud-db-1 — every one a CSI, since
+  # the same scan found ZERO `ESC ]` bytes in 154,931 real captured lines. This
+  # clause is justified on those 2,752 CSI adjacencies, never on an OSC fixture.
+  #
+  # A SPACE, and only where two alphanumerics would otherwise weld. The rule is
+  # deliberately narrower than "replace every stripped run with a space": an
+  # escape that abuts whitespace, a bracket, a quote or the end of the line
+  # already leaves a boundary behind it, so widening the rule would buy no
+  # redaction and would cost a spurious space on the overwhelming majority of
+  # stripped lines (`"\e[31m\e[1m04:34:24\e[22m [ERROR] …"` — every run in it is
+  # at the start or beside a space). Under this clause that line is byte-identical
+  # to what it stripped to before. What changes is exactly the shape that was
+  # being welded, and joining two tokens across a colour change was never the
+  # right rendering of it anyway.
+  # A MAXIMAL run of adjacent escapes, matched as one unit. `strip_ansi/1` splits
+  # on this rather than replacing with a lookbehind/lookahead pair, and the
+  # reason is a trap worth naming: A CSI RUN ENDS IN AN ALPHANUMERIC ITSELF
+  # (`\e[31m` ends in `m`). A `(?<=[A-Za-z0-9])` lookbehind therefore fires on the
+  # SECOND escape of `"\e[31m\e[1m04:34:24"` — it reads the previous run's own
+  # final byte as if it were text — and quietly prepends a space to a line where
+  # nothing was ever welded. Splitting on the maximal run makes the question the
+  # right one: what sits either side of the WHOLE run, in the text.
+  @ansi_runs ~r/(?:#{@ansi_run})+/
+
+  # What a welding run leaves behind. A single space: it is what a terminal
+  # renders for the escape anyway (nothing visible), it restores `scrub/1`'s
+  # lookbehind, and it is idempotent under a second `strip_ansi/1` — no escape
+  # byte survives the first pass, so the split finds one chunk and returns it.
+  @escape_delimiter " "
 
   @doc """
   Strip terminal control sequences from a string bound for a person's screen, an
@@ -524,11 +475,45 @@ defmodule BarkparkCloud.FailureCopy do
   Applied at the display boundary only, beside `scrub/1`: the stored row keeps
   the raw bytes so ops recovery from the DB and the logs is unaffected.
   Non-binaries pass through unchanged. Idempotent.
+
+  IT NEVER WELDS TWO TOKENS. A run that sits between two alphanumerics is
+  replaced by a single space, not by nothing — see `@ansi_runs` for why: an
+  empty replacement puts an alphanumeric flush against the next word, which is
+  precisely what `scrub/1`'s `(?<![A-Za-z0-9])` lookbehind reads as "not a key",
+  so `"run\e[0mapi_key=…"` used to ship its value in cleartext under the FIXED
+  order. Every other run — at the start of the line, beside a space, a bracket, a
+  quote, the end of the line — is still replaced by nothing, so an ordinary
+  colourised capture strips to exactly the bytes it stripped to before.
   """
   @spec strip_ansi(term()) :: term()
-  def strip_ansi(text) when is_binary(text), do: Regex.replace(@ansi, text, "")
+  def strip_ansi(text) when is_binary(text) do
+    case Regex.split(@ansi_runs, text) do
+      [whole] -> whole
+      [first | rest] -> Enum.reduce(rest, first, &rejoin_across_run/2)
+    end
+  end
 
   def strip_ansi(other), do: other
+
+  # Rejoin two text chunks that had an escape run between them. The delimiter
+  # goes in ONLY when both sides would otherwise weld into one word — see
+  # `@ansi_runs`. Every other seam closes up exactly as it did before this
+  # existed, which is what keeps the copy change bounded to the leaking shape.
+  defp rejoin_across_run(next, acc) do
+    if welds?(String.last(acc), String.first(next)) do
+      acc <> @escape_delimiter <> next
+    else
+      acc <> next
+    end
+  end
+
+  defp welds?(left, right) when is_binary(left) and is_binary(right),
+    do: alnum?(left) and alnum?(right)
+
+  defp welds?(_left, _right), do: false
+
+  defp alnum?(<<c>>) when c in ?0..?9 or c in ?A..?Z or c in ?a..?z, do: true
+  defp alnum?(_other), do: false
 
   @doc """
   Fold a RAW remote capture — a console line, an ssh stderr fold, a provider
@@ -606,6 +591,75 @@ defmodule BarkparkCloud.FailureCopy do
     do: reason |> classify() |> strip_ansi() |> scrub()
 
   def humanize(other), do: other
+
+  # ── THE AGENCY SEAM (dr-w15-bl-failure-copy-has-no-agency) ──────────────────
+  #
+  # ONE TOKEN CROSSES: the deploy ledger's CLASS. Everything else in this module
+  # reads the raw `failure_reason` string with its own substring clauses, and
+  # that is exactly the hazard this seam refuses to repeat — two independent
+  # taxonomies over one string, drifting separately. `DeployLedger`'s `@agency`
+  # map already answers WHO a class accuses, off its CLOSED class enum; a second
+  # regex here would be a second opinion with no way to notice it had diverged.
+  # `DeployLedger.agency/1` is the ONLY source of fault below — this function
+  # does not look at `failure_reason` at all, and must not start.
+  #
+  # Direction of the dependency is deliberate: the customer copy layer READS the
+  # operator taxonomy. The reverse (a ledger that mints prose) would put customer
+  # sentences inside the module that counts numerators.
+  #
+  # NO CATCH-ALL CLAUSE on `fault_sentence/1`. An agency value this module has no
+  # sentence for must RAISE, not fall into a soothing default: the exhaustiveness
+  # test walks the ledger's whole class enum, so a fourth agency added upstream
+  # reds here instead of silently rendering the `:ambiguous` line for it.
+  #
+  # An unknown class is `:ambiguous` (that is `agency/1`'s own contract), which
+  # is the safe direction for copy for the same reason it is for a numerator: a
+  # class nobody mapped must not read as an accusation of the customer.
+
+  @doc """
+  What to tell the CUSTOMER about fault for a deploy failure CLASS.
+
+  Takes a `DeployLedger` class token — the operator taxonomy's own string, e.g.
+  `"BUILD_FAILED"` — and answers the one sentence that names WHO. The fault is
+  derived from `DeployLedger.agency/1` and from nothing else, so a class whose
+  agency changes in the ledger changes what this says on the same commit.
+
+  A class the ledger does not know (and `nil`) is `:ambiguous`: honest about not
+  knowing, never an accusation.
+
+  This is the ONLY function in this module that takes a class rather than a raw
+  reason string. `humanize/1` remains `String.t() -> String.t()` and is
+  unchanged: the two answer different questions (WHAT happened vs WHOSE it was)
+  and a caller that wants both renders both.
+  """
+  @spec fault_line(String.t() | nil) :: String.t()
+  # NOT A PIPE, deliberately: the reachability census reads the AST, and a piped
+  # `|> DeployLedger.agency()` parses as `agency/0` — the call site would be
+  # counted at the wrong arity and `agency/1` would keep reading :internal_only
+  # while this file calls it. (Measured: it did, on the first run of this slice.)
+  def fault_line(class) do
+    fault_sentence(BarkparkCloud.DeployLedger.agency(class))
+  end
+
+  # `:box` — our hosting side. Says so plainly, and says the person has nothing
+  # to fix, because the most expensive wrong move here is a customer rewriting a
+  # build that was never the problem.
+  defp fault_sentence(:box),
+    do:
+      "This one is on our side — the hosting platform, not your site. Nothing to change in your project; deploying again is the right next step."
+
+  # `:site` — the site's own build or payload. Names the project without naming a
+  # specific mistake: the class knows the SIDE, not the line.
+  defp fault_sentence(:site),
+    do:
+      "This one came from your project — the build or the files it sent, not the hosting platform. Deploying again without a change will hit the same thing."
+
+  # `:ambiguous` — the honest third bucket. It exists so neither side is accused
+  # on a guess (charter D148); the copy has to be equally honest or the bucket is
+  # laundered back into one of the other two at the surface.
+  defp fault_sentence(:ambiguous),
+    do:
+      "We can't tell yet which side this started on. Deploying again is worth one try; if it repeats, send us the deploy and we'll look."
 
   # Every DNS-step error shape the tree can emit, VERB-ANCHORED. The producers
   # are READ-ONLY (`internal/**`) and are exactly two `fmt.Errorf` prefixes:
@@ -750,18 +804,44 @@ defmodule BarkparkCloud.FailureCopy do
       typed_refusal?(reason) ->
         reason
 
+      # THE NO-LINKED-REPO ARM, checked BEFORE the legacy arm below because its
+      # token is a STRICT REFINEMENT of that arm's `"github push builds"` — the
+      # broad token would swallow it.
+      #
+      # Two conditions share the GITHUB_PUSH_UNBUILDABLE family and need OPPOSITE
+      # remedies, which is why one sentence cannot serve both: (a) LEGACY rows,
+      # born failed before `github_build_available?/1` became a repo-present
+      # predicate — nothing retro-builds them, so "push again" is their only way
+      # forward; (b) a push TODAY on a site with NO linked repo — pushing again
+      # changes nothing, the cure is to LINK A REPO. This arm speaks for (b),
+      # matching the raw reason the router mints today
+      # (`@github_push_build_reason`); the arm below keeps speaking for (a),
+      # whose rows are already written and unrewritable. Blocked-tone.
+      #
+      # The output carries none of the tokens any clause here (or the client's
+      # `isGithubPushBlocked`) matches, so a second `failureCopy()` pass is
+      # idempotent — it passes this string through verbatim.
+      String.contains?(down, "require a linked github repo") ->
+        "This site has no GitHub repo linked, so a push has nothing to build from — link a repo to this site, or deploy this commit with bp deploy."
+
       # dwb-webhook fail-fast: a GitHub push was recorded as a born-`failed`
       # deployment. Source builds have since ARRIVED — the router's
       # `github_build_available?/1` is a real repo-present predicate, so a push
       # on a repo-backed site now mints a queued row the builder claims. The
-      # rows this clause speaks for are LEGACY: they were born failed before
+      # rows this clause speaks for are LEGACY ONLY: they were born failed before
       # that flip, and no retro-build moves them. So the copy explains what
       # happened and names the two ways forward (push again, or `bp deploy`) —
       # it must never promise the capability as future, which it has not been
       # since the predicate flip. Blocked-tone.
-      # Checked FIRST — the raw reason is a known exact string; its output does
-      # not re-match any clause (no "github push builds" token), so a second
-      # client-side `failureCopy()` pass is idempotent.
+      #
+      # It no longer speaks for a push on a repo-less site: that condition mints
+      # a reason carrying the narrower `"require a linked github repo"` token and
+      # is caught by the arm ABOVE. "Predates GitHub source builds" would be a
+      # lie about a push made today, and "push again" would be a lie about its
+      # cure.
+      #
+      # Its output does not re-match any clause (no "github push builds" token),
+      # so a second client-side `failureCopy()` pass is idempotent.
       String.contains?(down, "github push builds") ->
         "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy."
 

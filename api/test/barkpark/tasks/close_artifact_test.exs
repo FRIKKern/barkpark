@@ -36,7 +36,6 @@ defmodule Barkpark.Tasks.CloseArtifactTest do
   @artifact "landed #14383 @ 63b89bef30 — one envelope reader"
 
   setup do
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
 
@@ -338,6 +337,74 @@ defmodule Barkpark.Tasks.CloseArtifactTest do
       # about the fixture — the same row, one fact different, opposite verdict.
       Repo.delete!(Repo.get!(Document, child.id))
       assert {:error, :close_reason_needs_artifact} = close(parent, reason: "every rail landed")
+    end
+  end
+
+  # ─── THE STORED STRUCTURED FIELD (cch-w63) ──────────────────────────────
+  #
+  # THE DETECTOR. On origin/main every `lands the close` test in this describe
+  # returns `{:error, :close_reason_needs_artifact}` — the row's OWN
+  # `content.landed`, written at merge time by `POST /v1/tasks/:id/landed`
+  # (landed-mark.yml, on every push to main), was invisible to the gate. Only
+  # the digest the CLOSER passed counted, so a machine-recorded merge sha had to
+  # be RETYPED INTO PROSE before the row could close done, and the `@pr_number`
+  # + `@hex_sha` regexes accepted the retyping. That is the prose reconstruction
+  # the structured field exists to end.
+  #
+  # The reasons below are deliberately artifact-FREE prose: no `#`, no hex sha,
+  # no run block. If the close lands, the stored digest is the only thing that
+  # could have landed it.
+  describe "a done close reads the row's STORED content.landed" do
+    test "a stored digest naming both a PR and a commit lands the close on bare prose",
+         %{scope: scope} do
+      doc =
+        mk_task!(scope, %{
+          "landed" => %{"prs" => ["17092"], "commits" => ["3aea6e99a4ef1b0c5"]}
+        })
+
+      assert {:ok, %Document{content: %{"lifecycle_status" => "done"}}} =
+               close(doc, reason: "sealed on the merge CI already recorded")
+    end
+
+    test "the PAIRED landings entry carries the same two facts and lands it too",
+         %{scope: scope} do
+      doc =
+        mk_task!(scope, %{
+          "landed" => %{
+            "prs" => ["17092"],
+            "commits" => ["3aea6e99a4ef1b0c5"],
+            "landings" => [%{"pr" => "17092", "commit" => "3aea6e99a4ef1b0c5"}]
+          }
+        })
+
+      assert {:ok, %Document{content: %{"lifecycle_status" => "done"}}} =
+               close(doc, reason: "sealed on the merge CI already recorded")
+    end
+
+    # THE CONTROL FOR THE CONTROL. Same fixture, same reason, ONE fact removed —
+    # opposite verdict. Without this the test above proves only that the reason
+    # was acceptable, which is what it was written to rule out.
+    test "the SAME bare prose is refused on a row with no stored digest", %{scope: scope} do
+      doc = mk_task!(scope)
+
+      assert {:error, :close_reason_needs_artifact} =
+               close(doc, reason: "sealed on the merge CI already recorded")
+    end
+
+    # THE GATE IS NOT WEAKENED. `landed_artifact?/1` is unchanged and judges the
+    # stored digest by the same bar as a caller-supplied one: a PR AND a sha.
+    test "a stored digest with a PR but NO commit does not land it", %{scope: scope} do
+      doc = mk_task!(scope, %{"landed" => %{"prs" => ["17092"]}})
+
+      assert {:error, :close_reason_needs_artifact} =
+               close(doc, reason: "sealed on the merge CI already recorded")
+    end
+
+    test "a stored digest with a commit but NO PR does not land it", %{scope: scope} do
+      doc = mk_task!(scope, %{"landed" => %{"commits" => ["3aea6e99a4ef1b0c5"]}})
+
+      assert {:error, :close_reason_needs_artifact} =
+               close(doc, reason: "sealed on the merge CI already recorded")
     end
   end
 

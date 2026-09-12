@@ -461,6 +461,72 @@ defmodule Barkpark.Tenancy.WorkspacePullProvenanceTest do
     end
   end
 
+  describe "set_pull_provenance/3 is AUDIT-VISIBLE (pds-bl-clear-pull-provenance c2)" do
+    @describetag :audit
+
+    test "a SET and a CLEAR each append one plugin_settings row naming the dataset" do
+      ws = TenancyFixtures.create_workspace!()
+
+      # Precondition, asserted rather than assumed: the fixture itself audits
+      # nothing, so every row below was written by the call under test.
+      assert audit_rows(ws.id) == []
+
+      assert {:ok, _} = Tenancy.set_pull_provenance(ws, "production", @stamp)
+
+      assert [set_row] = audit_rows(ws.id)
+      assert set_row.category == "plugin_settings"
+      assert set_row.action == "pull_provenance_set"
+      assert set_row.subject == ws.id
+      assert set_row.workspace_id == ws.id
+      assert set_row.metadata["workspace_slug"] == ws.slug
+      assert set_row.metadata["dataset"] == "production"
+      assert set_row.metadata["cleared"] == false
+      assert set_row.metadata["provenance_keys"] == Enum.sort(Map.keys(@stamp))
+
+      # ...and the CLEAR — the mutation that hands plugin authority back — is a
+      # DISTINCT verb, not an indistinguishable second "set".
+      assert {:ok, _} = Tenancy.set_pull_provenance(ws.id, "production", %{})
+
+      assert [_set, clear_row] = audit_rows(ws.id)
+      assert clear_row.category == "plugin_settings"
+      assert clear_row.action == "pull_provenance_cleared"
+      assert clear_row.subject == ws.id
+      assert clear_row.workspace_id == ws.id
+      assert clear_row.metadata["dataset"] == "production"
+      assert clear_row.metadata["cleared"] == true
+      assert clear_row.metadata["provenance_keys"] == []
+
+      # The stamp really is gone — the audit row is not describing a no-op.
+      assert Tenancy.pull_provenance(Tenancy.get_workspace_by_id(ws.id), "production") == %{}
+    end
+
+    test "a REFUSED write audits NOTHING (the negative control)" do
+      ws = TenancyFixtures.create_workspace!()
+
+      assert {:error, :invalid_provenance} =
+               Tenancy.set_pull_provenance(ws, "production", "not-a-map")
+
+      assert {:error, :not_found} =
+               Tenancy.set_pull_provenance(Ecto.UUID.generate(), "production", @stamp)
+
+      assert audit_rows(ws.id) == []
+    end
+
+    test "sibling datasets get their OWN rows — the slug is in the trail, not just the workspace" do
+      ws = TenancyFixtures.create_workspace!()
+
+      assert {:ok, _} = Tenancy.set_pull_provenance(ws.id, "production", @stamp)
+      assert {:ok, _} = Tenancy.set_pull_provenance(ws.id, "staging", @stamp)
+      assert {:ok, _} = Tenancy.set_pull_provenance(ws.id, "staging", %{})
+
+      assert Enum.map(audit_rows(ws.id), &{&1.action, &1.metadata["dataset"]}) == [
+               {"pull_provenance_set", "production"},
+               {"pull_provenance_set", "staging"},
+               {"pull_provenance_cleared", "staging"}
+             ]
+    end
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────
 
   defp import_body(%{raw_admin: raw_admin}, body, query) do
@@ -485,6 +551,18 @@ defmodule Barkpark.Tenancy.WorkspacePullProvenanceTest do
       )
 
     Enum.map(rows, fn [slug] -> slug end)
+  end
+
+  # Every audit row on this workspace's chain, oldest first.
+  defp audit_rows(workspace_id) do
+    import Ecto.Query, only: [from: 2]
+
+    Repo.all(
+      from(e in Barkpark.Audit.Event,
+        where: e.workspace_id == ^workspace_id,
+        order_by: [asc: e.id]
+      )
+    )
   end
 
   defp admin_token(raw) do

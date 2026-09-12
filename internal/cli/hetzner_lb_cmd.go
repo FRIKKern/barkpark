@@ -304,6 +304,21 @@ func hzObserveLBType(token string) hzResObserveFn[hcloud.LoadBalancer] {
 //	  so `--type 1` would advise `you asked for 1, the server reports lb11` on a
 //	  correct create.
 //
+// hzResSetIfNamed enrols a receipt key ONLY when the observed value is
+// non-empty. It exists because hcloud-go's schema types make blank observations
+// a CLASS, not an accident: schema.PrimaryIP.Location, schema.LoadBalancer.
+// Location, schema.LoadBalancer.LoadBalancerType and schema.FloatingIP.
+// HomeLocation are all VALUE types, so the converter always returns a non-nil
+// pointer — with an EMPTY Name when the response omitted the object. A `!= nil`
+// guard therefore passes and the receipt prints `  location: ` with nothing
+// behind it, which tells an operator the field was observed and is blank rather
+// than that it was never sent.
+func hzResSetIfNamed(extra map[string]any, key, value string) {
+	if value != "" {
+		extra[key] = value
+	}
+}
+
 // hzObserveLBCreated reads a create receipt off the create RESPONSE object,
 // which for a create IS server truth (the addresses and the settled algorithm
 // are things nobody typed). It takes the asked values as constructor arguments
@@ -321,12 +336,17 @@ func hzObserveLBCreated(askedType, askedLocation, askedAlgorithm string) hzResOb
 		typeName, locName := "", ""
 		if lb.LoadBalancerType != nil {
 			typeName = lb.LoadBalancerType.Name
-			extra["load_balancer_type"] = typeName
 		}
+		// NOT `!= nil`: schema.LoadBalancer.LoadBalancerType and .Location are
+		// VALUE types, so the converter hands back a non-nil pointer with an
+		// EMPTY Name whenever the create response omits the object. Enrolling
+		// the key on the pointer printed `  load_balancer_type: ` with nothing
+		// behind it — a key with no value is not an honest empty state.
+		hzResSetIfNamed(extra, "load_balancer_type", typeName)
 		if lb.Location != nil {
 			locName = lb.Location.Name
-			extra["location"] = locName
 		}
+		hzResSetIfNamed(extra, "location", locName)
 		if lb.Algorithm.Type != "" {
 			extra["algorithm"] = string(lb.Algorithm.Type)
 		}
@@ -343,15 +363,17 @@ func hzObserveLBCreated(askedType, askedLocation, askedAlgorithm string) hzResOb
 // one the API reports back, not the one the flag carried.
 func hzObserveFloatingIPCreated(askedType, askedHomeLocation string) hzResObserveFn[hcloud.FloatingIP] {
 	return func(fip *hcloud.FloatingIP) hzResObservation {
-		extra := map[string]any{"type": string(fip.Type)}
+		extra := map[string]any{}
+		hzResSetIfNamed(extra, "type", string(fip.Type))
 		if fip.IP != nil {
 			extra["ip"] = fip.IP.String()
 		}
 		homeLoc := ""
 		if fip.HomeLocation != nil {
 			homeLoc = fip.HomeLocation.Name
-			extra["home_location"] = homeLoc
 		}
+		// schema.FloatingIP.HomeLocation is a VALUE type — see hzResSetIfNamed.
+		hzResSetIfNamed(extra, "home_location", homeLoc)
 		return hzResAgreesWith(extra, hzResDivergence(
 			hzResAsked{"type", askedType, string(fip.Type)},
 			hzResAsked{"home_location", askedHomeLocation, homeLoc},
@@ -387,15 +409,20 @@ func hzObserveFloatingIPUnassigned(fip *hcloud.FloatingIP) hzResObservation {
 // datacenter token with its LOCATION, so the pair is not token-identical.
 func hzObservePrimaryIPCreated(askedType, askedLocation string) hzResObserveFn[hcloud.PrimaryIP] {
 	return func(pip *hcloud.PrimaryIP) hzResObservation {
-		extra := map[string]any{"type": string(pip.Type)}
+		extra := map[string]any{}
+		hzResSetIfNamed(extra, "type", string(pip.Type))
 		if pip.IP != nil {
 			extra["ip"] = pip.IP.String()
 		}
 		locName := ""
 		if pip.Location != nil {
 			locName = pip.Location.Name
-			extra["location"] = locName
 		}
+		// THE MEASURED SPECIMEN (PDS-D432): schema.PrimaryIP.Location is a
+		// VALUE type, so a create response that omits the top-level `location`
+		// still yields a non-nil *Location with an empty Name, and the receipt
+		// printed `  location: ` at exit 0.
+		hzResSetIfNamed(extra, "location", locName)
 		return hzResAgreesWith(extra, hzResDivergence(
 			hzResAsked{"type", askedType, string(pip.Type)},
 			hzResAsked{"location", askedLocation, locName},
@@ -430,17 +457,17 @@ func hzObservePrimaryIPUnassigned(pip *hcloud.PrimaryIP) hzResObservation {
 // hzObservePlacementGroupCreated prints the type the API assigned, not the one
 // the flag defaulted to.
 func hzObservePlacementGroupCreated(pg *hcloud.PlacementGroup) hzResObservation {
-	return hzResAgrees(map[string]any{
-		"type":    string(pg.Type),
-		"servers": len(pg.Servers),
-	})
+	extra := map[string]any{"servers": len(pg.Servers)}
+	hzResSetIfNamed(extra, "type", string(pg.Type))
+	return hzResAgrees(extra)
 }
 
 // hzObserveCertificateUploaded reads the fingerprint and the validity window off
 // the response — facts about the PEM that was uploaded, none of which the
 // operator could have typed.
 func hzObserveCertificateUploaded(cert *hcloud.Certificate) hzResObservation {
-	extra := map[string]any{"type": string(cert.Type)}
+	extra := map[string]any{}
+	hzResSetIfNamed(extra, "type", string(cert.Type))
 	if cert.Fingerprint != "" {
 		extra["fingerprint"] = cert.Fingerprint
 	}
@@ -469,11 +496,11 @@ func hzObserveCertificateManaged(cert *hcloud.Certificate) hzResObservation {
 		issuance = string(cert.Status.Issuance)
 	}
 	extra := map[string]any{
-		"type":     string(cert.Type),
 		"issuance": issuance,
 		hzKeyConfirmation: "declared — managed issuance is asynchronous, so this is the state the create " +
 			"response reported, not a confirmed certificate (poll `bp cloud hetzner certificate get`)",
 	}
+	hzResSetIfNamed(extra, "type", string(cert.Type))
 	if len(cert.DomainNames) > 0 {
 		extra["domain_names"] = cert.DomainNames
 	}

@@ -132,25 +132,35 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
      therefore sit BESIDE the hand-typed `@register` and can NEVER subsume it:
      derivation alone would drop three instruments this census is watching.
 
-  The derived arm itself is DEFERRED out of this slice — see the task, and PR
-  #11169, which owns this file's tail.
+  THE DERIVED ARM NOW EXISTS. It was deferred out of the slice that wrote this
+  section while a foreign PR (11169, head b730fbe7a) held this file's tail; that
+  PR reached a terminal state on 2026-08-09 without landing, and the arm was
+  built on top of what actually shipped. It lives in
+  `BarkparkCloud.ReaderLessInstrumentCensus.SchemaCorpus` and in the
+  DERIVED ADMISSION block of the test module below, and it inherited both
+  corrections above — plus a third the filing could not have known: the DARK
+  control it named (`update_unavailable_reason`) gained readers before the arm
+  was written, so the arm re-derives its controls rather than inheriting them.
   """
 
-  # The repo root, walked with `Path.dirname/1` rather than a parent-relative
-  # path literal. THIS IS NOT COSMETIC AND IT IS NOT FREE — read the DISPATCH
-  # BLINDNESS paragraph in the census's own moduledoc.
-  # `scripts/cloud-path-escape-check.sh` resolves every parent-relative string
-  # literal in `cloud/**` against `CLOUD_PATHS`; `internal`, `web`, `js` and
-  # `api` are not declared there, and the declaration lives in a file this slice
-  # does not own (dr-w26-s4-census-scores-a-caller-less-producer). A parent-relative literal naming those trees fails
-  # that gate on arrival — measured, not assumed: writing one here reds it with
-  # `UNCOVERED repo-root read: internal`, which is exactly the honest complaint
-  # the moduledoc records and files rather than silences.
+  # The repo root, in the house form every other census here uses
+  # (`Path.expand("../..", __DIR__)` and friends). Two facts, both MEASURED on
+  # 2026-09-11 (lead-deploy-r8), so the next reader does not re-derive them:
   #
-  # Walking with `Path.dirname/1` does not BUY dispatch coverage — it only stops
-  # a gate from failing over a declaration this slice cannot make. The gap is
-  # real and is written down where a reader will find it.
-  @repo_root __DIR__ |> Path.dirname() |> Path.dirname() |> Path.dirname()
+  #   * `scripts/cloud-path-escape-check.sh` does NOT see this literal. Its
+  #     resolver normalises `cloud/test/barkpark_cloud/../../..` to the EMPTY
+  #     path and `continue`s past it, so `--list-escapes` lists nothing for this
+  #     file (the earlier claim that a parent-relative literal here "reds the
+  #     gate on arrival" was true only of a literal NAMING a tree, e.g.
+  #     `"../../../internal"`; a root-resolving one is skipped). The previous
+  #     `Path.dirname/1` walk therefore bought nothing and hid nothing.
+  #   * Dispatch coverage for `internal`, `web`, `js` and `api` comes from
+  #     `@roots` below, not from any literal: since #17522 the Cloud gate's
+  #     census tier DERIVES its path set from this file's `@roots` line
+  #     (`cloud-path-escape-check.sh --census-source` names this file, and its
+  #     harness proves a synthetic `@roots` takes). Edit `@roots` and the
+  #     dispatch condition follows; that is the seam, and it is the only one.
+  @repo_root Path.expand("../../..", __DIR__)
 
   # THE READER CORPUS. Positively declared; five trees.
   @roots ~w(internal cloud/priv/static web js api)
@@ -423,6 +433,246 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.Stay do
   def refusals(f), do: for({leg, false} <- clauses(f), do: leg)
 end
 
+defmodule BarkparkCloud.ReaderLessInstrumentCensus.SchemaCorpus do
+  @moduledoc """
+  SIDE A, DERIVED — the admission the hand-typed `@register` could never make.
+
+  The register is a DECLARATION: a key is examined only because a human typed a
+  row for it, so an instrument nobody registered is invisible (the FAILING OPEN
+  bullet in the census's own moduledoc). This module derives the other half: the
+  set of persisted field names the control plane actually has, straight off the
+  Ecto schemas, and hands it to the same `ReaderScan` the register uses.
+
+  ## The derivation, and what it is NOT
+
+  `modules/0` reflects over `Application.spec(:barkpark_cloud, :modules)` and
+  keeps every `BarkparkCloud.*` module that exports `__schema__/1`.
+  `field_names/1` unions their `__schema__(:fields)`. Both are computed AT BUILD
+  TIME, every run, from the compiled application — never transcribed. That is
+  the whole point: a transcribed corpus is a snapshot that silently stops
+  matching the tree, which is the defect this epic exists to end.
+
+  It does NOT subsume the register and must never be made to. Three of the
+  register's keys — `publish_clock`, `failure_class`, `request_stats` — are not
+  schema fields at all; they are envelope nodes. A schema-derived admission
+  therefore sits BESIDE the hand-typed register, and swapping one for the other
+  would drop instruments this census is watching.
+
+  ## THE EXEMPTION PATTERN, STATED VERBATIM
+
+  Some persisted fields are reader-less BY DESIGN and a "give it a reader"
+  disposition would be actively wrong for them: secret material whose entire
+  purpose is that no consumer tree ever names it. Until now that class was
+  invoked and never written down — a prior brief spoke of "a DERIVED
+  secret-class exemption (19 rows by pattern)" without anywhere stating the
+  pattern, which makes the number unreproducible and the split unauditable.
+
+  So here is the pattern, and it is the code below, not a paraphrase of it:
+
+      A field is SECRET-CLASS iff its name contains the substring "encrypted",
+      OR ends with "_hash", OR ends with "_secret", OR ends with
+      "_recovery_codes".
+
+  Nothing else. It is deliberately narrow and deliberately DUMB: it keys on the
+  name, so a reviewer can apply it by eye, and it cannot be tuned to hit a
+  target count because the count is never asserted anywhere. THE MEMBERSHIP IS
+  THE EVIDENCE AND THE COUNT IS A CONSEQUENCE — `partition/2` returns all three
+  sets and the census PRINTS them, so a pattern that starts swallowing
+  non-secrets is visible in the printed list on the very next run.
+
+  ## The three sets
+
+    * DARK      — a schema field name no code path in the five reader trees names.
+    * EXEMPT    — the secret-class subset of DARK, by the pattern above.
+    * RESIDUAL  — DARK minus EXEMPT: the fields that owe an explanation.
+
+  A residual field is NOT a defect. It is a QUESTION, and the census's answer is
+  that every one of them must carry a stated, individual disposition in the test
+  module's `@residual_dispositions`. `faults/1` refuses three ways at once: a
+  residual field with no disposition, a disposition for a field that stopped
+  being residual, and two dispositions with identical text — the last being the
+  only mechanical defence against 50 placeholder sentences wearing the costume
+  of an audit.
+  """
+
+  @type partition :: %{dark: [binary()], exempt: [binary()], residual: [binary()]}
+
+  @doc """
+  Every loaded `BarkparkCloud.*` Ecto schema module, sorted.
+
+  Reflected, never listed. A hand-listed corpus is how a derivation quietly
+  stops covering a schema somebody added last week.
+  """
+  @spec modules() :: [module()]
+  def modules do
+    :barkpark_cloud
+    |> Application.spec(:modules)
+    |> Kernel.||([])
+    |> Enum.filter(fn mod ->
+      Code.ensure_loaded?(mod) and function_exported?(mod, :__schema__, 1) and
+        match?(["BarkparkCloud" | _], Module.split(mod))
+    end)
+    |> Enum.sort()
+  end
+
+  @doc "The distinct field NAMES across the given schema modules, sorted."
+  @spec field_names([module()]) :: [binary()]
+  def field_names(mods) do
+    mods
+    |> Enum.flat_map(fn mod -> mod |> apply(:__schema__, [:fields]) |> Enum.map(&to_string/1) end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  @doc """
+  The exemption pattern, as the single function that implements it. See the
+  moduledoc for the sentence this is the code of.
+
+      iex> secret_class?("smtp_password_encrypted")
+      true
+      iex> secret_class?("device_code_hash")
+      true
+      iex> secret_class?("cf_key_path")
+      false
+  """
+  @spec secret_class?(binary()) :: boolean()
+  def secret_class?(name) when is_binary(name) do
+    String.contains?(name, "encrypted") or
+      String.ends_with?(name, "_hash") or
+      String.ends_with?(name, "_secret") or
+      String.ends_with?(name, "_recovery_codes")
+  end
+
+  @doc """
+  `%{dark: …, exempt: …, residual: …}` for a field set and a `ReaderScan.hits/2`
+  map. A field absent from `hits` is treated as dark, so a scan that skipped a
+  key errs toward reporting MORE work, never less.
+  """
+  @spec partition([binary()], %{binary() => list()}) :: partition()
+  def partition(fields, hits) do
+    dark = fields |> Enum.filter(&(Map.get(hits, &1, []) == [])) |> Enum.sort()
+    {exempt, residual} = Enum.split_with(dark, &secret_class?/1)
+
+    %{dark: dark, exempt: exempt, residual: residual}
+  end
+
+  @doc """
+  Every way the derived admission can be WRONG, as `{kind, detail}` data so the
+  mutation arms can drive it with mutated inputs instead of asserting on a
+  message string.
+
+  `input` carries `:modules`, `:fields`, `:hits`, `:dispositions`, `:floors`
+  (`%{modules: n, fields: n, disposition_bytes: n}`) and `:controls`
+  (`%{module: Mod, lit: name, dark: name}`).
+
+  THE FLOORS ARE ON THE INPUTS, BY NAME. A reflection that silently returned
+  three modules would produce a tiny dark set, a tiny residual set, and a green
+  run — "fewer keys examined" reads identically to "fewer keys in trouble". So
+  the control module and both control FIELDS are required to be present by
+  their own names, and the counts carry a floor underneath them.
+  """
+  @spec faults(map()) :: [{atom(), binary()}]
+  def faults(input) do
+    %{
+      modules: mods,
+      fields: fields,
+      hits: hits,
+      dispositions: dispositions,
+      floors: floors,
+      controls: controls
+    } = input
+
+    %{residual: residual} = partition(fields, hits)
+    lit_hits = Map.get(hits, controls.lit, [])
+    dark_hits = Map.get(hits, controls.dark, [])
+
+    disposed = dispositions |> Map.keys() |> Enum.sort()
+    texts = Map.values(dispositions)
+
+    List.flatten([
+      if(length(mods) >= floors.modules,
+        do: [],
+        else: [
+          {:module_corpus_too_small,
+           "the reflection returned #{length(mods)} schema modules, floor #{floors.modules}. " <>
+             "A shrunken reflection examines fewer keys and reports fewer problems."}
+        ]
+      ),
+      if(controls.module in mods,
+        do: [],
+        else: [
+          {:module_control_missing,
+           "#{inspect(controls.module)} is not among the reflected schema modules. It owns " <>
+             "the dark control field, so without it the dark half of this arm measures nothing."}
+        ]
+      ),
+      if(length(fields) >= floors.fields,
+        do: [],
+        else: [
+          {:field_corpus_too_small,
+           "the reflection returned #{length(fields)} distinct field names, floor " <>
+             "#{floors.fields}."}
+        ]
+      ),
+      if(controls.lit in fields,
+        do: [],
+        else: [{:lit_control_absent, "#{controls.lit} is not a schema field any more"}]
+      ),
+      if(controls.dark in fields,
+        do: [],
+        else: [{:dark_control_absent, "#{controls.dark} is not a schema field any more"}]
+      ),
+      if(lit_hits != [],
+        do: [],
+        else: [
+          {:lit_control_went_dark,
+           "#{controls.lit} derived ZERO readers. It has real ones, so this is the SCANNER " <>
+             "failing, and every zero in the dark set below is a grep artefact."}
+        ]
+      ),
+      if(dark_hits == [],
+        do: [],
+        else: [
+          {:dark_control_went_lit,
+           "#{controls.dark} derived #{length(dark_hits)} reader(s): " <>
+             inspect(Enum.take(dark_hits, 3)) <>
+             ". Either the scanner now matches everything, or a secret-class column really is " <>
+             "named in a consumer tree — and the second reading is a finding, not a green."}
+        ]
+      ),
+      for name <- residual -- disposed do
+        {:undisposed,
+         "#{name} is reader-less and carries no disposition. Say what it is and why nothing " <>
+           "reads it, or delete the column."}
+      end,
+      for name <- disposed -- residual do
+        {:stale_disposition,
+         "#{name} carries a disposition but is no longer residual — it gained a reader, became " <>
+           "secret-class, or left the schema. Delete the entry; a disposition for a field that " <>
+           "no longer owes one is the allowlist rot this census exists to catch."}
+      end,
+      for {name, text} <- dispositions,
+          byte_size(String.trim(text)) < floors.disposition_bytes do
+        {:thin_disposition,
+         "#{name}: its disposition is #{byte_size(String.trim(text))} bytes, floor " <>
+           "#{floors.disposition_bytes}. A disposition names the reader it has instead, or the " <>
+           "reason it must not have one."}
+      end,
+      texts
+      |> Enum.frequencies()
+      |> Enum.filter(fn {_text, n} -> n > 1 end)
+      |> Enum.map(fn {text, n} ->
+        keys = for {k, v} <- dispositions, v == text, do: k
+
+        {:boilerplate_disposition,
+         "#{n} fields share one disposition verbatim (#{Enum.join(Enum.sort(keys), ", ")}): " <>
+           String.slice(text, 0, 60) <>
+           "… An allowlist with the same sentence pasted beside every row is still an allowlist."}
+      end)
+    ])
+  end
+end
+
 defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
   @moduledoc """
   THE READER-LESS INSTRUMENT CENSUS — the deletion law, as code that can lose
@@ -496,13 +746,25 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
 
   Two further limits, stated rather than discovered later:
 
-    * DISPATCH. `.github/workflows/cloud.yml` dispatches this suite on
-      `cloud/**` and the paths declared in `scripts/cloud-path-escape-check.sh`.
-      `internal/`, `web/`, `js/` and `api/` are NOT declared there, so a commit
-      that adds a reader ONLY in those trees does not re-run this census; the
-      ROT is caught on the next cloud-touching commit, not on the commit that
-      caused it. That declaration lives in a file dr-w26-s4-census-scores-a-caller-less-producer owns, so it is filed
-      (`dr-w26-followup-reader-corpus-dispatch`), not smuggled into this slice.
+    * DISPATCH — STILL OPEN, and now routed rather than merely filed.
+      `.github/workflows/cloud.yml` dispatches this suite on `cloud/**` and the
+      paths declared in `scripts/cloud-path-escape-check.sh`. `internal/` IS
+      declared there; `web/`, `js/` and `api/` are NOT, so a commit that adds a
+      reader ONLY in those three trees does not re-run this census, and the ROT
+      is caught on the next cloud-touching commit rather than on the commit that
+      caused it. The direction is safe — a LATE red, never a false green.
+
+      THE OBVIOUS FIX WAS MEASURED AND REFUSED, which is why this paragraph is
+      still here. Declaring `api/**`, `web/**` and `js/**` was built and costed
+      on this tree: over 60 days / 5008 commits on main it moves dispatch from
+      1641 to 3874 commits, i.e. 33% -> 77% of all commits running the
+      Postgres-backed Cloud `test` job, with `api/**` alone accounting for 1438.
+      Paying that to re-run ONE census file is the wrong shape: the census does
+      not need the whole Cloud suite dispatched, it needs ITSELF dispatched. So
+      the remedy moved to a job-level path condition on this test plus a
+      census-only tier in the ratchet, re-filed for the gates lane 2026-09-10.
+      The number is recorded here so the next reader does not re-derive it and
+      reach the same dead end.
     * FAILING OPEN. An instrument nobody registered is invisible here, exactly
       as `deploy_signal_audience_census_test.exs` admits of its own registry.
       Nothing syntactic closes that hole. `queued_seconds` WAS the honest
@@ -519,6 +781,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
 
   alias BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan
   alias BarkparkCloud.ReaderLessInstrumentCensus.Stay
+  alias BarkparkCloud.ReaderLessInstrumentCensus.SchemaCorpus
 
   @cloud_lib Path.join([ReaderScan.repo_root(), "cloud", "lib"])
 
@@ -685,13 +948,50 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
         "REGISTERED AT BIRTH, in the same commit as the key (dr-w34-s1-coverage-envelope-window-and-sites) — the doctrine `coverage_cohorts` established one wave earlier. The count it names shipped ANONYMOUS for two waves: `coverage_cohorts/2` already SELECTED site_id and discarded it in the merge, so the never-covered split could be built by environment and never by site. A naming that shipped without a reader would be the same defect one level down — a list nobody can see is not an improvement on a number nobody can act on.",
       disposition: :has_reader,
       stay: nil
+    },
+    %{
+      key: "claim_leg",
+      what:
+        "WHICH population holds a hostname another tenant just asked for — the leg `Registry.claim_leg/2` returns (`admin_credential`, `recent_usage_sample`, `active_subscription`, `agent_reporting`, `active_job`, `within_grace`), i.e. whether a refusal means `somebody is paying for that name` or `a job is mid-flight, wait a minute`",
+      surface:
+        "POST /v1/barkparks/:id/domain, on the 409 body beside `error: \"taken\"` — merged in by persist_and_enqueue_domain/4 from Registry.provisioning_fqdn_claim_disclosure/2. Its SECOND surface is the one it has always had: the Logger.info line in provisioning_fqdn_taken?/2, which carries the fuller sentence",
+      audience:
+        "the team admin who typed the hostname, in their own browser — POST /v1/barkparks/:id/domain is require_current_team_admin, so the population is the asking team\'s own owners and admins, the only people who can act on the refusal. NOT the holder, who is routinely a different team and is told nothing: the operator sentence that names the holding row stays in the log, and the wire carries a coarse category plus a caller-safe remedy. The console IS in that audience as of dr-w26-bl-console-relays-the-claim-leg: cloud/priv/static/app.js attachDomainFailureCopy reads `data.claim_leg` on the `taken` arm and relays the body\'s caller-safe `detail` beside the leg, rendered through the existing textContent write on the inline domain error (never markup), with the old fixed string kept as the fallback for a body that carries no keys at all",
+      reason:
+        "REGISTERED AT BIRTH, in the same commit as the key (dr-w26-bl-claim-leg-refusal-reaches-no-human), by the doctrine `coverage_cohorts` established. The defect this key closes is the one this whole register exists to name: `claim_leg/2` wrote a careful per-leg sentence and the only path it had to a human was a server log with no UI, no alert and no CLI surface, while the API rendered six distinct refusals as one word. Registering it at birth is also the honest way to record what did NOT ship — the console render — as a register row rather than as a promise in a comment. RE-DECLARED 2026-09-11 (was `:stay`): the named closer dr-w26-bl-console-relays-the-claim-leg LANDED, so this row now derives readers (7 non-comment hits across the five roots — the `data.claim_leg` read in attachDomainFailureCopy plus the six in the console harness arm that drives all six legs) and would correctly red as :rot under `:stay`. The reader is a RENDER, not a pipe: the leg changes what the person is shown, so deleting the key reds the harness — `f(409, {error: \"taken\", claim_leg: \"active_job\", ...})` and the `active_subscription` body must not render the same sentence. The stay below is KEPT AS THE RECORD of what the gap was.",
+      disposition: :has_reader,
+      stay:
+        {:slice, ["dr-w26-bl-console-relays-the-claim-leg"],
+         "KEPT AS THE RECORD, not as a live stay (this row is now `:has_reader`, so the stay-validity test no longer reads it). WHAT THE GAP WAS: READER-LESS ACROSS THE FIVE ROOTS, and the register says exactly where the gap is rather than dressing the API response up as readership. The key is emitted and a person CAN see it (curl, or any direct API client), but no code path in internal/, cloud/priv/static, web, js or api names it: the console\'s attachDomainFailureCopy branches on `error` and returns a fixed sentence for `taken`, so it neither decodes nor renders the leg, and there is no Go cloudclient verb for POST /v1/barkparks/:id/domain at all. The named closer relays the leg in the console the way the already_attached arm one line above it already relays `detail`. That edit was in cloud/priv/static/app.js, outside that slice\'s fence, which is why it was a stay and not a co-merged half — and it is the edit dr-w26-bl-console-relays-the-claim-leg made."}
     }
   ]
 
   # THE ANTI-VACUITY FLOOR. A deleted register row would otherwise be a silent
   # green — zero instruments examined is zero reader-less instruments found.
-  # Lowered only in the same commit as the instrument that went away.
-  @register_floor 9
+  # Moved only in the same commit as the instrument that arrived or went away.
+  #
+  # RE-DERIVED 2026-09-10 (dr-w27-bl-register-floor-lags-the-register). It stood
+  # at 9 while `@register` carried 10 rows, so the floor had a row of SLACK:
+  # deleting any single row — including `queued_seconds`, the row the wave
+  # before it had just added — still satisfied `>=` and the register shrank
+  # silently. That is precisely the deletion the floor exists to refuse.
+  #
+  # HAND-TYPED, and compared with `==`, for two reasons:
+  #
+  #   * `@register_floor length(@register)` would read the expected value off
+  #     the very thing it guards. That assertion can never fail, in either
+  #     direction, and a guard that cannot lose measures nothing.
+  #   * `>=` is how the slack got here in the first place: it is silent when the
+  #     register GROWS, so the floor lags every addition until somebody notices.
+  #     Under `==` an addition reds too, and the co-edit is forced at the moment
+  #     the row lands rather than a wave later. (Same lesson as the payload
+  #     census's `@go_tag_pinned`, which shipped one tag of slack under `>=`.)
+  #
+  # RAISED 10 -> 11 in the commit that added `claim_leg`
+  # (dr-w26-bl-claim-leg-refusal-reaches-no-human). That co-edit is the `==`
+  # comparison doing the work it was tightened for: under `>=` the addition
+  # would have been silent and the floor would have lagged by one again.
+  @register_floor 11
 
   # The corpus floor, per root. A `find` that silently returns nothing (a moved
   # tree, a refused-dirs change that eats a whole root) reports every instrument
@@ -741,7 +1041,19 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
 
   setup_all do
     keys = Enum.map(@register, & &1.key)
-    {:ok, hits: ReaderScan.hits(keys), keys: keys}
+
+    # The DERIVED corpus, reflected once for the whole file. Both sides are
+    # computed here and never transcribed: the module list, the field list and
+    # the reader scan over all of them.
+    schema_modules = SchemaCorpus.modules()
+    schema_fields = SchemaCorpus.field_names(schema_modules)
+
+    {:ok,
+     hits: ReaderScan.hits(keys),
+     keys: keys,
+     schema_modules: schema_modules,
+     schema_fields: schema_fields,
+     schema_hits: ReaderScan.hits(schema_fields)}
   end
 
   # ---------------------------------------------------------------------------
@@ -749,9 +1061,12 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
   # ---------------------------------------------------------------------------
 
   test "every row carries a REQUIRED reason and names both its SURFACE and its AUDIENCE" do
-    assert length(@register) >= @register_floor,
-           "the register shrank to #{length(@register)} rows (floor #{@register_floor}). " <>
-             "Lower the floor in the same commit as the instrument that went away, or restore the row."
+    assert length(@register) == @register_floor,
+           "the register carries #{length(@register)} rows, the PIN is EXACTLY " <>
+             "#{@register_floor}. FEWER: an instrument left the register — restore the row, or " <>
+             "lower the pin in the same commit as the instrument that went away. MORE: an " <>
+             "instrument arrived — raise the pin in the same commit, so the floor can never " <>
+             "again lag the register it guards."
 
     for row <- @register do
       for field <- [:key, :what, :surface, :audience, :reason] do
@@ -1228,6 +1543,349 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
         true -> []
       end
     end)
+  end
+
+  # ---------------------------------------------------------------------------
+  # THE DERIVED ADMISSION — the third column
+  #
+  # The register above is a DECLARATION and admits a key only because a human
+  # typed a row. This arm derives the persisted field set from the compiled
+  # schemas and asks the same question of every one of them at once. It sits
+  # BESIDE the register, never in place of it: `publish_clock`, `failure_class`
+  # and `request_stats` are envelope nodes, not schema fields, so derivation
+  # alone would drop three instruments this census is watching.
+  #
+  # NOTHING HERE IS TRANSCRIBED. The module set, the field set, the dark set,
+  # the exempt set and the residual set are all computed on every run, and the
+  # test PRINTS their membership. No count is asserted as an equality anywhere:
+  # earlier drafts of this arm carried "49 dark" and "30 residual" from a brief,
+  # and by the time the arm was built the true figures were different in three
+  # places at once — so a count pinned here would be measuring the calendar.
+  # The floors below are FLOORS, and they are on the INPUTS.
+  # ---------------------------------------------------------------------------
+
+  # THE TWO CONTROLS, RE-DERIVED 2026-09-11 AGAINST ORIGIN/MAIN — NOT INHERITED.
+  #
+  # The brief that filed this arm named `update_unavailable_reason` as the free
+  # DARK control and warned, correctly, that a sibling slice was about to give
+  # it a reader and move the control. IT MOVED. Re-derived on this tree the key
+  # is read by `cloud/priv/static/__app.test.mjs` (`hooks.updateBadge` and
+  # `hooks.updateRefusalReason` both take it), so it is no longer dark — and it
+  # is exactly the right LIT control instead: a schema field with real readers,
+  # whose zero would mean the scanner had stopped finding anything at all.
+  #
+  # The DARK control is `smtp_password_encrypted`. It is chosen for a structural
+  # reason rather than a measured one, because a control picked only for being
+  # dark today is a control with an expiry date: an SMTP password is secret
+  # material, so its name appearing in `internal/`, `cloud/priv/static`, `web`,
+  # `js` or `api` would be a FINDING and not a maintenance chore. It is dark
+  # today, it is dark by design, and the day it goes lit somebody needs to know.
+  #
+  # The two together pin BOTH directions: a scanner that finds nothing reds on
+  # the lit control, a scanner that finds everything reds on the dark one.
+  @schema_module_control BarkparkCloud.Notifications.EmailSettings
+  @schema_lit_control "update_unavailable_reason"
+  @schema_dark_control "smtp_password_encrypted"
+
+  # Floors, not pins. The reflection returned 30 modules / 265 distinct field
+  # names on 2026-09-11; a corpus that halves is a broken reflection, and a
+  # corpus that grows is Tuesday.
+  @schema_module_floor 20
+  @schema_field_floor 180
+
+  # A disposition shorter than this is a placeholder. 60 bytes is roughly one
+  # clause — enough to be a sentence about THIS field, not enough to be "n/a".
+  @disposition_floor 60
+
+  # THE RESIDUAL DISPOSITIONS. One entry per reader-less, non-secret-class
+  # schema field, and each one says WHAT the field is and WHY no consumer tree
+  # names it. They are asserted DISTINCT (see `:boilerplate_disposition`),
+  # because the only failure mode a floor cannot catch is fifty copies of the
+  # same sentence. Every claim below is anchored at file+function or file:line
+  # in `cloud/lib`.
+  @residual_dispositions %{
+    "alerted_at" =>
+      "the deploy-rate episode LATCH: notifications.ex:769 refuses a second notice while it is non-nil, and every non-red reading clears it (notifications.ex:845). Its audience is the suppressor itself — a human sees the mail, not the latch that rationed it.",
+    "apply_arming_checked_at" =>
+      "the staleness stamp for the apply-arming probe, written at registry.ex:4786 and :5259. barkpark.ex:330 says it plainly: it records HOW STALE the arming reading is, and only the arming decision in cloud/lib consults it. No envelope carries it.",
+    "autoupdate_halted" =>
+      "the fleet-wide autoupdate kill switch, read by Registry.autoupdate_halted?/0 (registry.ex:5405) and flipped by set_autoupdate_halted/1. It gates a worker and has no wire surface at all — an operator throws it by function call, which is why nothing in five trees names it.",
+    "box_refusal_code" =>
+      "the BOX's own code word for a refusal (sites/deploy.ex:1750). It is TRANSLATED, not dark: deploy_ledger.ex:1202 buckets it into the ledger's named cause, and that cause is `failure_class` — a registered row with real readers. The raw code word reaching a terminal would add vocabulary nobody outside the box owns.",
+    "build_sha256" =>
+      "the digest of what is actually BEING SERVED, stamped from report.served_sha256 (sites/deploy.ex:1356) rather than from the staged artifact, per charter D188. It is compared server-side to detect drift; a rendered hex digest tells a human nothing the drift verdict does not.",
+    "cf_cert_path" =>
+      "the on-disk path of the Cloudflare Origin-CA certificate, written by cloudflare/origin_ca.ex:87 and declared at site.ex:247. A filesystem path ON THE CONTROL-PLANE BOX: relaying it to any consumer tree discloses the control plane's own layout, so darkness is the correct state and not a gap.",
+    "cf_key_path" =>
+      "the PRIVATE-KEY half of the Origin-CA pair (origin_ca.ex:88). Same class as its cert sibling and one degree worse: the string names where a private key sits on disk. The exemption pattern does not catch it — the name says `path`, not `secret` — which is precisely why it needs a stated disposition rather than a silent pass.",
+    "cf_domain" =>
+      "the zone-side hostname the A record was created under (web/router.ex:14581). The human-facing name is the site's own domain; this is Cloudflare-side bookkeeping, and the only path that reads it back is teardown (web/router.ex:15224), which reports the failure in an operator sentence, not a field.",
+    "cf_record_id" =>
+      "the opaque Cloudflare record handle, kept for exactly one purpose: DELETE the A record at teardown (web/router.ex:8672 pairs it with cf_zone_id). A vendor handle no caller outside cloud/lib could act on if it had it.",
+    "cf_zone_id" =>
+      "the Cloudflare zone handle. Its absence from the consumer trees is a DECLARED refusal rather than an oversight: web/router.ex:5381 states that vendor error bodies can carry account/zone internals and that they are not relayed to callers. A render here would reopen what that code deliberately closes.",
+    "coalesced_last_at" =>
+      "the timestamp half of the coalescing pair whose COUNT is registered and rendered above. auto_deploy_worker.ex:498 writes it inside an update_all and deployment.ex:688 keeps both out of the changeset on purpose. The count is what the census basis line needs; the last-at is a write-side breadcrumb for a query, not a number for a person.",
+    "consecutive_red" =>
+      "the tick counter that decides WHEN to alert: notifications.ex:763 compares it with DeployRateAlert.consecutive_ticks() and notifications.ex:840 increments it. It is an input to a threshold whose OUTPUT is the mail; rendering the counter would publish the threshold's internals without telling anyone anything new.",
+    "content_binding_checked_at" =>
+      "EMITTED AND UNDECODED, which makes it the most interesting row here: web/router.ex:13854 puts it on the sites envelope, so the bytes leave the building, and no code path in five trees names it. Unlike its neighbours this one is a candidate for a console render, not for a deletion.",
+    "content_binding_verdict" =>
+      "the raw verdict string, translated at web/router.ex:13852 by content_bound_from_verdict/1 into the boolean `content_bound` that consumers DO read. site.ex:211 defaults it to \"never_checked\". The coarse boolean is the read surface; this is its input, in the same shape as box_refusal_code.",
+    "deferral_actual_gap_s" =>
+      "the gap that ACTUALLY elapsed between a deferred deployment and its predecessor (sites/deploy.ex:2080). deferral_pacing.ex:183 SELECTs it into the pacing aggregate, so its audience reads the aggregate and never the per-row leg.",
+    "deferral_scheduled_s" =>
+      "the window the backoff ladder ASKED for (sites/deploy.ex:2079). The PAIR is the instrument — scheduled against actual is the whole question of whether the ladder is obeyed — and deferral_pacing.ex:181 requires both non-nil before either counts, which is why neither is read alone.",
+    "demand_class" =>
+      "the only residual field with TWO owners: Registry.Site carries the operator's classification (registry.ex:8376 is its sole writer and says so) and Registry.Deployment carries a copy stamped at insert by stamp_demand_class/2 (registry.ex:8386) so the class is recomputed rather than remembered. Two columns, one vocabulary, zero consumer readers — the fix would be one render, not two deletions.",
+    "expiry_warned_at" =>
+      "the send-once claim for PAT expiry mail: accounts.ex:1251 stamps it inside `UPDATE … WHERE expiry_warned_at IS NULL`, and accounts.ex:1235 documents that the update's own row count is what decides who won. A field whose entire meaning is that exactly one writer wins has nothing to say to a reader.",
+    "failed_attempts" =>
+      "the wrong-code lockout counter on a login token (accounts.ex:1918 increments it, accounts.ex:109 calls it a hard cap rather than a rate limiter). It is withheld deliberately: telling a caller how many guesses remain is a gift to the party doing the guessing.",
+    "grace_ends_at" =>
+      "the past-due grace anchor. billing.ex:909 states it is written here and nowhere else, and entitlement is computed FROM it server-side; billing.ex:900 records that anchoring on it rather than on current_period_end was itself the fix. The customer is shown the entitlement decision, not the clock behind it.",
+    "graced_poll_refusals" =>
+      "transient box 5xx swallowed by the poll loop (registry.ex:9152), bumped by the fragment at registry.ex:9115. It is FOLDED, not dark: registry.ex:9176 reports it as the `polls:` leg of a grace summary, and the summary is the surface.",
+    "graced_start_retries" =>
+      "the sibling leg — START triggers retried across an UNTYPED 5xx (registry.ex:9153, bumped at registry.ex:9130) — folded as `starts:` at registry.ex:9177. Same fold as the poll counter, different cause, and they are kept apart because a swallowed poll and a retried start fail for different reasons.",
+    "invited_by_id" =>
+      "a foreign key to the inviting user, set at accounts.ex:1421. An identifier, not an instrument: the invitation mail carries the inviter's NAME, and a bare user id on the wire is a disclosure with no use to the recipient.",
+    "last_graced_at" =>
+      "the moment either grace counter was last bumped (registry.ex:9116 and :9131 stamp the same `now`). deployment.ex:694 keeps it out of the changeset alongside the two counters. Shape-wise it is coalesced_last_at's twin — a write-side breadcrumb — but for the grace ladder rather than for coalescing.",
+    "last_pct" =>
+      "the failure PERCENTAGE the stored verdict was taken from (notifications.ex:852). It is kept so a later reading can be compared with the one that actually fired; deploy_rate_alert_state.ex:34 says exactly that. The number a human sees is in the mail.",
+    "last_sample" =>
+      "the SAMPLE SIZE behind last_pct (notifications.ex:853). The pair is the honesty of the instrument: 100% failure over two deploys is not the finding that 100% over two hundred is, and the row stores both so that distinction survives to the next tick.",
+    "onboarding_completed_at" =>
+      "the source of a boolean. accounts.ex:3171 derives `completed?: not is_nil(...)` and puts THAT on the envelope, beside the timestamp under a different key. The column is the authority; the boolean is the surface, and the surface is what consumers named.",
+    "onboarding_state" =>
+      "a free-form map holding `last_step` and `acked` (accounts.ex:3182, :3192). Nothing validates its shape, so a consumer naming the column would be depending on a structure no changeset defends. Its readers are the accounts.ex helpers that own the shape.",
+    "pending_email" =>
+      "the STAGED new address during a verified email change (accounts.ex:1836). Deliberately not echoed anywhere: the staged address is disclosed only TO ITSELF, in the confirmation code mail at accounts.ex:1854. Putting it on a body would let a hijacked session read the address it is being moved to.",
+    "provider_uid" =>
+      "the OAuth provider's durable subject id, the JOIN KEY for external identities (accounts.ex:145 calls it the durable key, accounts.ex:192 matches on it). Publishing it would let any caller correlate one person's accounts across providers, which is a privacy loss with no product gain.",
+    "refreshed_at" =>
+      "the warm-pool staleness stamp that ORDERS refresh eligibility: registry.ex:3377 filters on it and registry.ex:3380 orders `asc_nulls_first` so the stalest box refreshes first. Its consumer is the ORDER BY clause; there is no seat where a human wants this timestamp.",
+    "refunded_at" =>
+      "RESERVED, and the schema says so verbatim at subscription.ex:47 — a column standing ahead of the deferred refund seam. The honest disposition is that it is not an instrument yet: it is not emitted, nothing computes it, and giving it a reader before it has a writer would manufacture an audience for a hole.",
+    "result_ip" =>
+      "the box IP the provision worker ECHOED BACK (registry.ex:2081). registry.ex:2809 is explicit that it is stamped only when the worker echoed the ip it was told to configure, so the column is a CONSISTENCY check between two halves of a provision, not an address anyone is meant to dial.",
+    "session_token_id" =>
+      "the parentage of a derived token: accounts.ex:1572 scopes the sweep by it rather than by user_id + context, so revoking one browser session takes its own \"sse\" children and nobody else's. The client holds the token; the row id is the server's bookkeeping.",
+    "trial_ends_at" =>
+      "the durable team-ledger end of trial, read at billing.ex:1370 to anchor a subscription's current_period_end. What reaches the customer is the anchored period on the subscription; this is the team-side stamp the anchor was computed from.",
+    "trial_notice_1d_sent_at" =>
+      "the one-day trial notice claim, taken through claim_notice/3 at trial_expiry_worker.ex:223. Like every other claim column here its value is the RACE it wins, not the timestamp it holds: two workers on the same minute is exactly what it refuses.",
+    "trial_notice_3d_sent_at" =>
+      "the three-day sibling, and it encodes a SUPPRESSION RULE rather than just a send: trial_expiry_worker.ex:224 burns this claim when the one-day notice goes out, so a team that hit 1-day first can never be mailed the 3-day copy afterwards.",
+    "trial_started_at" =>
+      "the atomic trial claim — billing.ex:1384 matches `WHERE trial_started_at IS NULL` so Postgres serializes two concurrent starts and exactly one wins (billing.ex:1330). Downstream needs the END of the trial, which is a different column; this one exists to be contended over.",
+    "two_factor_confirmed_at" =>
+      "the ONLY \"is 2FA on?\" check in the system — accounts.ex:2526, :2593 and :2624 all branch on it being nil. It stays server-side because it is the AUTHORITY, and an authority copied to a client stops being one; what a client may know is the boolean the session already implies.",
+    "two_factor_last_step" =>
+      "the OTP replay guard: accounts.ex:2607 refuses any step not strictly greater than the stored one, inside the update_all that makes the refusal atomic. Publishing the last accepted step would hand an attacker the exact window to aim the next guess at.",
+    "unreachable_alerted_at" =>
+      "the unreachable-episode latch, and the one whose value DOES reach a human — indirectly: notifications.ex:1236 measures the episode's LENGTH from it when the verdict clears, and the length goes in the recovery mail. The latch is server state; the duration is the product.",
+    "unreachable_observed_at" =>
+      "when the unreachable sweep last actually RAN (notifications.ex:1324). It is what separates \"clear\" from \"unmeasured\" in the three-way vocabulary at deploy_rate_alert_state.ex:58 — freshness OF the measurement rather than the measurement, and a consumer that rendered it would be reporting on the sweeper.",
+    "unreachable_peak_rows" =>
+      "the high-water ROW count across the episode: notifications.ex:1299 keeps `max(reading, existing)`. A peak is only meaningful over a whole episode, so it is stored rather than recomputed from a window that may no longer contain its own maximum.",
+    "unreachable_peak_sites" =>
+      "the high-water count of distinct SITES, kept beside the row peak at notifications.ex:1300. The two diverge on purpose — one site flapping forty times is not forty sites down — and keeping both is what lets the recovery mail say which of the two happened.",
+    "unreachable_verdict" =>
+      "the stored state of the unreachable machine, one of episode/clear/unmeasured (deploy_rate_alert_state.ex:58, written at notifications.ex:1296/:1306/:1314). A human is sent the TRANSITION, never the state: the mail fires on the edge, so the resting value has no audience.",
+    "vercel_claim_minted_at" =>
+      "the TTL anchor for a Vercel claim, read at vercel.ex:150 to decide whether the minted claim is still fresh and re-stamped at vercel.ex:201. The caller already holds the claim; the freshness decision is the control plane's to make.",
+    "vercel_project_id" =>
+      "the vendor project handle, turned into the boolean `deployed:` on the status node at vercel.ex:124 and used as the claim test at vercel.ex:134. The id is the EVIDENCE and the boolean is the ANSWER; handing out the handle would expose a vendor-side object no caller can act on.",
+    "waiting_alerted_at" =>
+      "the waiting-episode latch. notifications.ex:901 names removing its nil check as the mutation that breaks the sweep, and notifications.ex:953 measures the episode from it. Same shape as its unreachable twin, on the other of the two independent sweeps this row carries.",
+    "waiting_longest_seconds" =>
+      "the DEEPEST wait seen during the episode, handed straight to send_waiting_recovery/3 at notifications.ex:954. notifications.ex:909 explains why it lives on the row: the deepest wait may have drained away before the episode ended, so recomputing it at recovery time would under-report the worst moment.",
+    "waiting_observed_at" =>
+      "when the WAITING sweep last ran (notifications.ex:1032). It draws the same clear-versus-unmeasured line its unreachable counterpart draws and is kept separately because the two sweeps run independently: one can be fresh while the other is stale, and a single shared stamp would hide that.",
+    "waiting_verdict" =>
+      "the waiting machine's stored state — waiting/clear/unmeasured (deploy_rate_alert_state.ex:50). Its vocabulary is deliberately NOT the unreachable one: \"waiting\" describes a queue that is moving too slowly, \"episode\" describes an outage, and collapsing the two would lose the distinction the two sweeps exist to keep."
+  }
+
+  defp derived_input(ctx, overrides) do
+    Map.merge(
+      %{
+        modules: ctx.schema_modules,
+        fields: ctx.schema_fields,
+        hits: ctx.schema_hits,
+        dispositions: @residual_dispositions,
+        floors: %{
+          modules: @schema_module_floor,
+          fields: @schema_field_floor,
+          disposition_bytes: @disposition_floor
+        },
+        controls: %{
+          module: @schema_module_control,
+          lit: @schema_lit_control,
+          dark: @schema_dark_control
+        }
+      },
+      overrides
+    )
+  end
+
+  defp fmt_faults([]), do: "(none)"
+
+  defp fmt_faults(faults),
+    do: Enum.map_join(faults, "\n", fn {kind, detail} -> "  [#{kind}] #{detail}" end)
+
+  test "DERIVED ADMISSION: every reader-less schema field is exempt by the STATED pattern or carries its own disposition",
+       ctx do
+    part = SchemaCorpus.partition(ctx.schema_fields, ctx.schema_hits)
+
+    # THE MEMBERSHIP IS THE EVIDENCE. Printed every run, so a pattern that
+    # starts swallowing non-secrets, or a reflection that starts missing a
+    # schema, is visible in the output of the run that caused it — not in a
+    # number somebody has to remember the previous value of.
+    IO.puts("""
+
+    DERIVED ADMISSION (reflected #{length(ctx.schema_modules)} BarkparkCloud.* Ecto schemas, \
+    #{length(ctx.schema_fields)} distinct field names)
+
+      DARK (#{length(part.dark)}): #{Enum.join(part.dark, " ")}
+
+      EXEMPT — secret-class by the stated pattern (#{length(part.exempt)}): \
+    #{Enum.join(part.exempt, " ")}
+
+      RESIDUAL — owes a disposition (#{length(part.residual)}): #{Enum.join(part.residual, " ")}
+    """)
+
+    faults = SchemaCorpus.faults(derived_input(ctx, %{}))
+
+    assert faults == [],
+           """
+           THE DERIVED ADMISSION REFUSES.
+
+           #{fmt_faults(faults)}
+
+           dark #{length(part.dark)} / exempt #{length(part.exempt)} / residual #{length(part.residual)};
+           #{length(ctx.schema_modules)} schema modules, #{length(ctx.schema_fields)} field names.
+           """
+  end
+
+  test "MUTATION: a reflection that silently returns FEWER modules cannot go green", ctx do
+    # The failure this guards is not "zero modules" — that would be loud. It is
+    # a reflection that drops SOME modules and hands back a smaller, plausible
+    # corpus: fewer keys examined, fewer residual fields, and a green run.
+    shrunk = Enum.reject(ctx.schema_modules, &(&1 == @schema_module_control))
+    fields = SchemaCorpus.field_names(shrunk)
+
+    refute @schema_dark_control in fields,
+           "this mutation's premise is that dropping #{inspect(@schema_module_control)} takes " <>
+             "#{@schema_dark_control} with it — re-derive which module owns the dark control."
+
+    faults = SchemaCorpus.faults(derived_input(ctx, %{modules: shrunk, fields: fields}))
+
+    assert Enum.any?(faults, &match?({:module_control_missing, _}, &1)),
+           "a corpus missing #{inspect(@schema_module_control)} went green:\n#{fmt_faults(faults)}"
+
+    assert Enum.any?(faults, &match?({:dark_control_absent, _}, &1)),
+           "the dark control vanished from the field set and nothing said so:\n#{fmt_faults(faults)}"
+
+    # And the floor underneath the controls bites too, on a corpus small enough
+    # to be obviously broken rather than merely incomplete.
+    tiny = Enum.take(ctx.schema_modules, 3)
+
+    tiny_faults =
+      SchemaCorpus.faults(
+        derived_input(ctx, %{modules: tiny, fields: SchemaCorpus.field_names(tiny)})
+      )
+
+    assert Enum.any?(tiny_faults, &match?({:module_corpus_too_small, _}, &1))
+    assert Enum.any?(tiny_faults, &match?({:field_corpus_too_small, _}, &1))
+  end
+
+  test "MUTATION: the DARK control gaining a reader reds — a scanner that finds everything loses too",
+       ctx do
+    assert ctx.schema_hits[@schema_dark_control] == [],
+           "#{@schema_dark_control} is no longer dark on this tree. Either a secret-class column " <>
+             "is now named in a consumer tree — a finding — or the control must be re-derived."
+
+    lit =
+      Map.put(ctx.schema_hits, @schema_dark_control, [
+        %{file: "internal/cli/invented.go", line: 1, text: "smtpPasswordEncrypted := cfg.Get()"}
+      ])
+
+    faults = SchemaCorpus.faults(derived_input(ctx, %{hits: lit}))
+
+    assert Enum.any?(faults, &match?({:dark_control_went_lit, _}, &1)),
+           "the dark control went lit and the admission stayed green:\n#{fmt_faults(faults)}"
+  end
+
+  test "MUTATION: the LIT control going dark reds — a scanner that finds nothing loses", ctx do
+    assert ctx.schema_hits[@schema_lit_control] != [],
+           "#{@schema_lit_control} derives no readers, so it cannot serve as the lit control. " <>
+             "RE-DERIVE: this key was the DARK control when this arm was filed and it moved."
+
+    blinded = Map.put(ctx.schema_hits, @schema_lit_control, [])
+    faults = SchemaCorpus.faults(derived_input(ctx, %{hits: blinded}))
+
+    assert Enum.any?(faults, &match?({:lit_control_went_dark, _}, &1)),
+           "a scanner that found nothing for #{@schema_lit_control} went green:\n#{fmt_faults(faults)}"
+  end
+
+  test "MUTATION: an undisposed residual field, a stale disposition and a boilerplate one all red",
+       ctx do
+    part = SchemaCorpus.partition(ctx.schema_fields, ctx.schema_hits)
+    [victim | _] = part.residual
+
+    dropped = Map.delete(@residual_dispositions, victim)
+
+    assert Enum.any?(
+             SchemaCorpus.faults(derived_input(ctx, %{dispositions: dropped})),
+             &match?({:undisposed, _}, &1)
+           ),
+           "dropping #{victim}'s disposition left the admission green"
+
+    # A disposition for a field that is not residual: the allowlist-rot
+    # direction, and the one a `residual ⊆ disposed` check alone would miss.
+    stale = Map.put(@residual_dispositions, @schema_lit_control, String.duplicate("x", 80))
+
+    assert Enum.any?(
+             SchemaCorpus.faults(derived_input(ctx, %{dispositions: stale})),
+             &match?({:stale_disposition, _}, &1)
+           ),
+           "a disposition for #{@schema_lit_control}, which has readers, was accepted"
+
+    # Two fields, one sentence — the failure nothing but distinctness catches.
+    [a, b | _] = part.residual
+    pasted = Map.put(@residual_dispositions, b, Map.fetch!(@residual_dispositions, a))
+
+    assert Enum.any?(
+             SchemaCorpus.faults(derived_input(ctx, %{dispositions: pasted})),
+             &match?({:boilerplate_disposition, _}, &1)
+           ),
+           "#{b} copied #{a}'s disposition verbatim and the admission stayed green"
+
+    # And a placeholder short enough to be no explanation at all.
+    thin = Map.put(@residual_dispositions, victim, "n/a")
+
+    assert Enum.any?(
+             SchemaCorpus.faults(derived_input(ctx, %{dispositions: thin})),
+             &match?({:thin_disposition, _}, &1)
+           )
+  end
+
+  test "the derived admission does NOT subsume the hand-typed register", ctx do
+    register_keys = Enum.map(@register, & &1.key)
+    missing = register_keys -- ctx.schema_fields
+
+    assert "publish_clock" in missing and "failure_class" in missing and
+             "request_stats" in missing,
+           """
+           at least one of the three envelope-only register keys turned up in the schema
+           field set. That would be a real change — but it must NOT be read as licence to
+           replace the register with the derivation: the register's reason for existing is
+           that a key can be an instrument without ever being a column.
+
+           register keys absent from the schema corpus: #{inspect(missing)}
+           """
   end
 
   # ── THE TWO OFFLINE GUARDS (dr-w27-s3-census-arms-survive-their-own-success) ──────────────────────────────────────

@@ -143,14 +143,26 @@ defmodule BarkparkWeb.TasksIndexCursorTest do
   # new, and a subset assertion would let a stray key through. Captured from
   # the pre-change response (`{ok, docs, page{limit, offset, returned,
   # has_more}}`) before the cursor existed.
+  #
+  # `next_offset` JOINED THAT SET, deliberately, and it is the ONE key added
+  # since. It is not a cursor and it is not opt-in: a caller reading
+  # `has_more: true` off a plain `?limit=` walk previously had NOTHING to page
+  # with — `offset` echoes where this page BEGAN, so echoing it back re-reads
+  # the page in hand. The additive-envelope promise this describe block guards
+  # is about not BREAKING a reader; it was never a promise to keep a broken
+  # promise. `next_cursor` stays opt-in and is still refuted below.
   describe "additive: no ?cursor= means no change" do
-    test "a bare GET carries exactly the pre-cursor envelope keys", %{conn: conn, scope: scope} do
+    test "a bare GET carries exactly the pre-cursor envelope keys plus next_offset",
+         %{conn: conn, scope: scope} do
       for i <- 1..3, do: mk_task!("cursor-stable-#{i}", scope, %{})
 
       {200, body} = get_json(conn, "/v1/tasks")
 
       assert Map.keys(body) |> Enum.sort() == ["docs", "ok", "page"]
-      assert Map.keys(body["page"]) |> Enum.sort() == ["has_more", "limit", "offset", "returned"]
+
+      assert Map.keys(body["page"]) |> Enum.sort() ==
+               ["has_more", "limit", "next_offset", "offset", "returned"]
+
       refute Map.has_key?(body["page"], "next_cursor")
       assert body["ok"] == true
     end
@@ -164,7 +176,8 @@ defmodule BarkparkWeb.TasksIndexCursorTest do
                "limit" => 2,
                "offset" => 2,
                "returned" => 2,
-               "has_more" => true
+               "has_more" => true,
+               "next_offset" => 4
              }
     end
   end

@@ -732,11 +732,26 @@ out = open(sys.argv[2], "w")
 on = wf.get(True, wf.get("on"))            # PyYAML parses bare `on:` as True
 jobs = wf["jobs"]
 def emit(k, v): out.write(f"{k}={v}\n")
-# D18: a workflow-level paths filter emits NO check run — the required name then
-# sits "is expected." forever and the PR is BLOCKED with nothing to fix.
+# D18: a paths filter on the PULL_REQUEST arm emits NO check run — the required
+# name `Console gate` then sits "is expected." forever and the PR is BLOCKED with
+# nothing to fix. NARROWED TO THAT ARM 2026-09-10 (task-7ef9d81ed33d2b9c), from
+# `any arm`: D18's reason is about a REQUIRED CONTEXT ON A PULL REQUEST, and
+# branch protection never evaluates a push-to-main run — it gates merges INTO
+# main, and the push arm fires after the merge. It is the same predicate
+# scripts/shim-trigger-filter-check.sh has always used. The mutant below plants
+# its filter on `pull_request`, so this fact still FIRES.
 emit("workflow_paths", any(
-    isinstance(v, dict) and ("paths" in v or "paths-ignore" in v)
-    for v in (on or {}).values()))
+    isinstance((on or {}).get(arm), dict)
+    and ("paths" in on[arm] or "paths-ignore" in on[arm])
+    for arm in ("pull_request", "pull_request_target")))
+# THE VENUE PIN (task-7ef9d81ed33d2b9c). The push:main arm IS paths-filtered on
+# purpose — measured 2026-09-10T11:30Z, 16 of the day's 122 stacked push:main
+# runs were this workflow, every one for a superseded sha, and it is per-sha
+# grouped so it never collapses. Asserted TRUE below, with its own negative
+# mutation, so deleting that filter REDS here instead of quietly restoring a
+# full harness run per merge.
+push = (on or {}).get("push")
+emit("push_paths", isinstance(push, dict) and "paths" in push)
 agg = jobs.get("console-gate", {})
 emit("agg_present", bool(agg))
 emit("agg_matrix", "strategy" in agg and "matrix" in agg.get("strategy", {}))
@@ -857,7 +872,15 @@ def job_can_exit_2(j):
     bodies = "\n".join(str(s.get("run", "")) for s in j.get("steps", []))
     if re.search(r"(^|\n)\s*exit 2\b", bodies):
         return True
-    refs = re.findall(r"(?:bash|sh)\s+(scripts/[\w./-]+\.sh)", bodies)
+    # ANY scripts/*.sh TOKEN, not only one at a call site. A dispatcher that
+    # pins its path-set script to the merge ref shells `bash "$pin_script"`, so
+    # the literal name lives in the ASSIGNMENT — and matching `bash scripts/…`
+    # alone made this detector go BLIND the day cloud/console/elixir pinned
+    # theirs (task-3a81e68f7027ca98): `changes` dropped out of `exit2_jobs` and
+    # the drop-dispatcher-channel mutant below stopped being named at all. The
+    # broader token can only ADD jobs to the exit-2 set — the direction that
+    # demands a verdict channel rather than excusing one.
+    refs = re.findall(r"scripts/[\w./-]+\.sh", bodies)
     refs += re.findall(r"node\s+([\w./-]+\.mjs)", bodies)
     return any(file_can_exit_2(r) for r in refs)
 
@@ -873,14 +896,20 @@ for m in re.finditer(
 
 exit2 = sorted(n for n, j in jobs.items() if n != "console-gate" and job_can_exit_2(j))
 emit("exit2_jobs", ",".join(exit2))
-# THE NAMED EXEMPTION, and there is exactly one. `changes` reaches an exit 2
-# through the ratchet's `--match` mode, but it is the DISPATCHER: it publishes
-# path outputs, not a verdict, and its own fail-closed contract already forbids
-# it to emit a path answer it could not measure. Giving it a channel is real
-# work in its own right and is filed, not smuggled in here
-# (cch-w64-bl-dispatcher-has-no-verdict-channel). It is written out as a fact so
-# extending the exemption costs a human an edit in this file.
-EXEMPT = {"changes"}
+# THE EXEMPTION SET, NOW EMPTY — and that emptiness is the proof, not a
+# formality. `changes` was the one name in it: the DISPATCHER reaches an exit 2
+# through the ratchet's `--match` mode, published path outputs and no verdict,
+# and was carried here while a channel for it was filed as its own work
+# (cch-w64-bl-dispatcher-has-no-verdict-channel). That channel has landed, so
+# the name is deleted. Nothing else changed in this emitter: it already reds on
+# any exit-2-capable job with no `outputs.verdict` or no 4th `decide` argument,
+# so DELETING THE NAME IS THE WHOLE PROOF — put the dispatcher back without a
+# channel and `exit2_without_verdict_output` names it (driven below by the
+# `drop-dispatcher-channel` mutant).
+#
+# It stays a written-out fact, and stays a SET rather than a deleted concept, so
+# that re-granting an exemption to a future job costs a human an edit here.
+EXEMPT = set()
 emit("exit2_exempt", ",".join(sorted(EXEMPT)))
 emit("exit2_without_verdict_output",
      ",".join(n for n in exit2
@@ -916,6 +945,7 @@ PY
     esac
   }
   assert_fact workflow_paths False
+  assert_fact push_paths True
   assert_fact agg_present True
   assert_fact agg_matrix False
   assert_fact agg_if "always()"
@@ -934,7 +964,7 @@ PY
   assert_fact exit2_without_verdict_output ""
   assert_fact exit2_without_decide_verdict ""
   # The exemption is pinned, not open-ended: extending it must cost an edit here.
-  assert_fact exit2_exempt "changes"
+  assert_fact exit2_exempt ""
   # …and the population it was computed from is real. "" over an empty set is
   # the shape a neutered parser returns.
   assert_fact_min exit2_jobs_count 5
@@ -981,7 +1011,10 @@ PY
   assert_fact_min decide_consumes_count 4
   assert_fact dispatcher_if ""
   assert_fact dispatcher_matrix False
-  assert_fact dispatcher_outputs "console"
+  # `console` AND `verdict`, sorted. The dispatcher got its verdict channel in
+  # wave 64 (cch-w64-bl-dispatcher-has-no-verdict-channel); `console` alone here
+  # means the channel was taken back out.
+  assert_fact dispatcher_outputs "console,verdict"
   assert_fact escape_if ""
   assert_fact escape_needs ""
   assert_fact "if::console-unit" "needs.changes.outputs.console == 'true'"
@@ -1054,7 +1087,25 @@ PY
   if [ "$(sed -n 's|^workflow_paths=||p' "$TMPROOT/paths.facts")" = "True" ]; then
     ok "  mutation[paths]: re-adding on:pull_request:paths is DETECTED"
   else
-    no "  mutation[paths]: a workflow-level paths key was NOT detected — the D18 fact is decorative"
+    no "  mutation[paths]: a pull_request paths key was NOT detected — the D18 fact is decorative"
+  fi
+
+  # ...and the venue pin's NEGATIVE half. Strip the push arm's paths filter and
+  # push_paths must go False, or the True above is an emitter that never looked.
+  QMUT="$TMPROOT/pushpaths-mutant.yml"
+  python3 - "$WF" "$QMUT" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+on = wf.pop(True, None) or wf.pop("on", None)
+on["push"].pop("paths", None)
+wf["on"] = on
+yaml.safe_dump(wf, open(sys.argv[2], "w"))
+PY
+  python3 "$EMIT" "$QMUT" "$TMPROOT/pushpaths.facts"
+  if [ "$(sed -n 's|^push_paths=||p' "$TMPROOT/pushpaths.facts")" = "False" ]; then
+    ok "  mutation[pushpaths]: deleting the push:main paths filter is DETECTED"
+  else
+    no "  mutation[pushpaths]: the push arm's paths key was NOT read — the venue pin is decorative"
   fi
 
   # ── post-verdict mutation matrix ──────────────────────────────────────────
@@ -1175,7 +1226,8 @@ import sys, yaml
 src, dst, mode = sys.argv[1], sys.argv[2], sys.argv[3]
 wf = yaml.safe_load(open(src))
 jobs = wf["jobs"]
-assert mode in ("clean", "drop-outputs", "drop-decide-arg", "fake-exit2"), mode
+assert mode in ("clean", "drop-outputs", "drop-decide-arg",
+                "drop-dispatcher-channel", "fake-exit2"), mode
 if mode == "drop-outputs":
     # The `outputs:` block this slice added, taken back out — the state
     # path-escape shipped in until D776.
@@ -1187,6 +1239,17 @@ elif mode == "drop-decide-arg":
     step["run"] = step["run"].replace(
         'decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"          "${V_ESCAPE:-}"',
         'decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"', 1)
+elif mode == "drop-dispatcher-channel":
+    # THE DISPATCHER'S CHANNEL, TAKEN BACK OUT — the state `changes` shipped in
+    # until wave 64, when it was the emitter's single NAMED exemption. With
+    # EXEMPT now empty this mutant must be named by BOTH facts; if it is not,
+    # the exemption was deleted into an emitter that cannot see the dispatcher
+    # at all, and `exit2_exempt = ""` proves nothing.
+    jobs["changes"].pop("outputs", None)
+    step = next(s for s in jobs["console-gate"]["steps"] if "run" in s)
+    step["run"] = step["run"].replace(
+        'decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"          "${V_CHANGES:-}"',
+        'decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"', 1)
 elif mode == "fake-exit2":
     # A NEW blocking job that can refuse to measure, wired in the ordinary way
     # and carrying no channel at all — the exact arrival this fact exists to
@@ -1226,6 +1289,12 @@ PY
   vc drop-outputs    "path-escape"  ""
   vc drop-decide-arg ""             "path-escape"
   vc fake-exit2      "a11y-ceiling" "a11y-ceiling"
+  # The exemption's replacement. `exit2_exempt = ""` above is an ABSENCE, and an
+  # absence is never caught by inspection: this is the control that proves the
+  # emitter still SEES `changes` and still reds when its channel is gone. Both
+  # facts, because the mutant removes both halves — the `outputs:` block and the
+  # 4th `decide` argument — exactly as main carried them before wave 64.
+  vc drop-dispatcher-channel "changes" "changes"
   # …and the fake job must be invisible to the OTHER structural facts, so the
   # red above is this fact's and not a neighbour's borrowed alarm.
   if [ "$(sed -n 's|^blocking_not_in_needs=||p' "$TMPROOT/vc-fake-exit2.facts")" = "" ] \
@@ -1471,6 +1540,26 @@ gate_says "path-escape ratchet: failure" "…and names the ratchet"
 gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal, not a measured coverage defect"
 gate_says "(exit 2): path-escape ratchet" "…and carries it into the refusals tally by name"
 
+# (m3) THE DISPATCHER'S OWN REFUSAL (cch-w64-bl-dispatcher-has-no-verdict-channel).
+#      `changes` runs the same ratchet in `--match` mode, whose `exit 2` sites
+#      are an unknown path-set name and a set name that resolved to an EMPTY
+#      pattern. Until this slice the dispatcher had `outputs: {console}` only and
+#      its `decide` line took three arguments, so that refusal reached the merge
+#      button as a bare `FAIL changes (dispatcher): failure` — indistinguishable
+#      from a dispatcher that MEASURED an unresolvable base. It was the emitter's
+#      single named exemption in case 8; `exit2_exempt = ""` above is the
+#      structural half, this is the behavioural one.
+#
+#      NOTE THE GATE VALUE: the dispatcher is a NEVER-gated job, so this run also
+#      exercises the refusal arm on a job that can never legitimately skip.
+gate "changes (dispatcher) REFUSED (the exemption this slice deleted)" 1 \
+  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  O_CONSOLE= V_CHANGES=REFUSED
+gate_says "changes (dispatcher): failure" "…and names the dispatcher"
+gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal, not a bare dispatcher death"
+gate_says "(exit 2): changes (dispatcher)" "…and carries it into the refusals tally by name"
+gate_names "changes (dispatcher)" "path-escape ratchet"
+
 # (n) …and BOTH refusals in one run are both named, in decide order.
 gate "console-unit and cssom-parity both REFUSED" 1 \
   R_CHANGES=success R_UNIT=failure R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
@@ -1545,15 +1634,42 @@ echo
 # substituted from the environment so the body can run outside Actions.
 echo "case 10: the dispatcher fails rather than skips when it cannot tell"
 DISP="$TMPROOT/dispatch-step.sh"
-python3 - "$WF" "$DISP" <<'PY'
-import sys, yaml
+
+# THE MUTATION HOOK for every arm in this case. Point CONSOLE_DISPATCH_WF at another copy
+# of this workflow — `git show origin/main:.github/workflows/<f>.yml > /tmp/f` —
+# and the SAME fixtures below are driven through THAT file's dispatcher. It is
+# how the version-skew arm is quoted red on the pre-fix shape rather than
+# asserted about.
+DISP_WF="${CONSOLE_DISPATCH_WF:-$WF}"
+
+# The `${{ … }}` expressions are substituted from the environment so the body
+# can run outside Actions — and the substitution is CLOSED, not a best effort.
+# An expression this list does not know survives into the body verbatim, bash
+# dies on it with `bad substitution`, and the reader sees every arm below fail
+# with no clue that the EXTRACTION is what went stale.
+if python3 - "$DISP_WF" "$DISP" <<'PY'
+import sys, re, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
 step = [s for s in wf["jobs"]["changes"]["steps"] if s.get("id") == "sets"][0]
 body = (step["run"]
         .replace("${{ github.event_name }}", "${T_EVENT}")
-        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}"))
+        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}")
+        .replace("${{ github.event.pull_request.number }}", "${T_PRNUM}"))
+left = sorted(set(re.findall(r"\$\{\{.*?\}\}", body)))
+if left:
+    sys.stderr.write(
+        "EXTRACTION IS OUT OF DATE: the `sets` step uses Actions expressions this "
+        "harness does not substitute: %s. Add each to the replace() chain above "
+        "(and pass its value from dispatch()), or every arm below measures "
+        "nothing.\n" % ", ".join(left))
+    sys.exit(3)
 open(sys.argv[2], "w").write(body)
 PY
+then
+  ok "extracted the 'sets' step body with every Actions expression substituted"
+else
+  no "could not extract the 'sets' step body from $DISP_WF (see the line above) — every dispatcher arm below measures nothing"
+fi
 
 DR="$TMPROOT/dispatchrepo"
 mkdir -p "$DR/cloud/priv/static" "$DR/docs" "$DR/.github/workflows" "$DR/scripts"
@@ -1569,12 +1685,24 @@ git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
 BASE_SHA="$(git -C "$DR" rev-parse HEAD)"
 
+# THE STAND-IN FOR refs/pull/N/merge. The dispatcher pins the path-set script to
+# the ref the WORKFLOW FILE came from; inside this fixture that ref is a branch
+# of the fixture repo, reached with the remote `.`. Every arm below therefore
+# exercises the PINNED read — the shipped path — not the fallback. An arm that
+# wants the fallback sets PIN_REF to a ref that does not exist.
+git -C "$DR" branch pinned-merge "$BASE_SHA"
+mkdir -p "$TMPROOT/runner-temp"
+
 # dispatch <label> <expected-rc> <expected-console> <event> <base>
 dispatch() {
   local label="$1" want="$2" wc="$3" ev="$4" bs="$5"
   local rc gotc
   : >"$TMPROOT/gh_output"
-  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" GITHUB_OUTPUT="$TMPROOT/gh_output" \
+  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" T_PRNUM="${PIN_PRNUM:-0}" \
+    DISPATCH_PIN_REMOTE="${PIN_REMOTE:-.}" \
+    DISPATCH_PIN_REF="${PIN_REF:-refs/heads/pinned-merge}" \
+    RUNNER_TEMP="$TMPROOT/runner-temp" \
+    GITHUB_OUTPUT="$TMPROOT/gh_output" \
     bash --noprofile --norc "$DISP") >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     ok "$label -> exit $rc"
@@ -1651,6 +1779,46 @@ git -C "$DR" checkout -q -b renamein "$BASE_SHA"
 git -C "$DR" mv docs/guide.md cloud/priv/static/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA"
+
+# ── THE WORKFLOW/SCRIPT VERSION SKEW (task-3a81e68f7027ca98) ───────────────
+# GitHub takes the WORKFLOW FILE for a pull_request run from the MERGE REF while
+# this job checks out the PR HEAD (D34), so main's invocation used to run against
+# the BRANCH's older script. Measured in cloud.yml's twin on PR #17575
+# (2026-09-11, job 103113143741): exit 2, `unknown path set`, a RED required gate
+# with no defect in the PR. The fixture head below carries a script that does NOT
+# know the `console` set; the pin points at a ref that does.
+git -C "$DR" checkout -q -b oldscript "$BASE_SHA"
+sed 's/^    console) ;;$/    xconsole) ;;/' \
+  "$HERE/console-path-escape-check.sh" >"$DR/scripts/console-path-escape-check.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm oldscript >/dev/null 2>&1
+
+# THE PRECONDITION, asserted before the verdict — never inferred from it. A sed
+# that matched nothing leaves the CURRENT script on the head and the arm below
+# passes having measured no skew at all.
+skew_rc=0
+skew_out="$( (cd "$DR" && bash scripts/console-path-escape-check.sh --match console <<<"docs/x.md") 2>&1 )" || skew_rc=$?
+if [ "$skew_rc" -eq 2 ] && has "$skew_out" "unknown path set 'console'"; then
+  ok "the fixture head's script REFUSES --match console (exit 2) — the skew is real"
+else
+  no "the fixture head's script still answers --match console (rc=$skew_rc, '$skew_out') — the arm below cannot fail for the right reason"
+fi
+
+# The changed file is scripts/console-path-escape-check.sh, which IS in the
+# console set, so the pinned answer is console=true. The load-bearing half is
+# the EXIT CODE: without the pin this dispatcher exits 1 on the refusal and
+# emits no verdict at all.
+dispatch "version skew: the head's script predates the console set name" 0 true pull_request "$BASE_SHA"
+gate_says "path-set script: refs/heads/pinned-merge" "  …and says which ref it read the script from"
+
+# THE NEGATIVE CONTROL for the pin: an unreadable pin ref (a conflicted PR has no
+# merge ref) must NOT be silent. It warns by name and falls back to the head's own
+# copy — which here is the skewed one — so this dispatcher still REFUSES out loud
+# (exit 1, the console polarity) instead of emitting a verdict nothing measured.
+PIN_REF=refs/heads/no-such-merge-ref \
+  dispatch "version skew, pin UNREADABLE: warns, falls back, refuses out loud" 1 - pull_request "$BASE_SHA"
+gate_says "could NOT read scripts/console-path-escape-check.sh out of" "  …names the pin read that failed"
+gate_says "dispatcher REFUSED" "  …and still classifies the refusal rather than dying bare"
 
 # THE FAILURE PATHS — the polarity that makes the shim safe.
 # An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a

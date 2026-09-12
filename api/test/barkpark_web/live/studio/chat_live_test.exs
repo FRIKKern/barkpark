@@ -60,19 +60,27 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   end
 
   setup %{conn: conn} do
-    # Wave-26 leaked-session pollution guard (felix-w27, third victim — same
-    # class the felix-w27-s6 slice guarded in studio_chat_test.exs and
-    # chat_render_golden_test.exs): a Recorder that outlived a prior test's
-    # sandbox owner can COMMIT chat_sessions rows that escape rollback and ride
-    # list_sessions' recency-desc ordering ahead of seeded rows — reddening the
-    # sidebar/empty-state assertions here on a shifting set. At setup no test
-    # in this file has created a session yet, so every visible row is such a
-    # leak; purge for a clean baseline. Restrict-FK children first; deleting
-    # sessions cascades the delete_all children. Runs inside this test's
-    # sandbox transaction and rolls back with it — test-infra hygiene only.
-    Barkpark.Repo.query!("DELETE FROM chat_runtime_usage_receipts")
-    Barkpark.Repo.query!("DELETE FROM epic_assignment_runtime_attempts")
-    Barkpark.Repo.delete_all(Barkpark.StudioChat.Session)
+    # ── Committed-session residue guard (`Barkpark.ChatSessionResidue`) ─────────
+    #
+    # The leak is NOT the Recorder, as this comment asserted for three waves — it
+    # is `Sandbox.unboxed_run/2`. The runtime-usage lock-ordering drive needs two
+    # real Postgres connections that block each other, so it COMMITS, and
+    # `CycleFleet.prepare_runtime_attempt/3` mints a `chat_sessions` row that
+    # `Tenancy.delete_workspace/1` never reaches (`owner_workspace_id` carries no
+    # FK). One committed session per run of that file, cleaned by nothing. Such a
+    # row escapes every later test's sandbox rollback and rides `list_sessions/*`'s
+    # recency-desc ordering ahead of the rows seeded here.
+    #
+    # THE SOURCE IS CLOSED: `runtime_usage_test.exs` now purges its own committed
+    # residue after the workspace teardown. This call is the belt for residue
+    # ALREADY committed on a long-lived box, which no fix can un-commit.
+    #
+    # It issues NO DELETE against either append-only ledger. The two unqualified
+    # table-wide DELETEs that used to stand here passed SILENTLY only while both
+    # tables were empty — a FOR EACH ROW trigger cannot fire on zero rows — and
+    # raised the moment either held one. Runs inside this test's sandbox
+    # transaction and rolls back with it.
+    Barkpark.ChatSessionResidue.purge!()
 
     {:ok, _} =
       Auth.create_token(@admin_token, "chat admin", "production", ["read", "write", "admin"])
@@ -3016,6 +3024,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "the empty archived shelf teaches instead of showing nothing", %{conn: conn} do
+      # This test's whole subject is an EMPTY archived shelf, so it is the one
+      # assertion committed residue can never coexist with: `purge!/0` archives
+      # every pinned row it cannot delete, straight onto this shelf. Name that
+      # cause rather than reding on a 40KB `=~` diff.
+      Barkpark.ChatSessionResidue.assert_archived_shelf_clean!()
+
       {:ok, view, _html} = live(conn, "/studio/chat")
       html = render_click(element(view, ~s([data-test-id="chat-archived-toggle"])))
       assert html =~ "No archived chats"
@@ -5405,6 +5419,54 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert live_chip != ""
       assert replay_chip == live_chip
       assert replay_chip =~ "/admin/projects?task=task-d76fa14f63626556"
+    end
+
+    # task-5a49dc55626ea80d (scc-w12-chip-replay-cap). The test ABOVE hand-writes
+    # the replayed row's `output`, so it never meets the Recorder's 4,000-char
+    # raw-text cap; this one drives the REAL recorder with a >100 KB result and
+    # reopens the same session, which is the path a large MCP read actually
+    # takes. The raw text in the row is truncated mid-JSON and cannot decode —
+    # the persisted chip envelope is what keeps the chip a chip.
+    test "a >4 KB result recorded for real still renders its chip when the session reopens",
+         %{conn: conn} do
+      output =
+        Jason.encode!(%{
+          "ok" => true,
+          "docs" =>
+            for i <- 1..700 do
+              %{
+                "doc_id" => "task-cap#{i}",
+                "title" => "Capped result #{i} #{String.duplicate("x", 120)}",
+                "type" => "task"
+              }
+            end
+        })
+
+      assert byte_size(output) > 100_000
+
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, live_view, _} = live(conn, "/studio/chat")
+      render_submit(element(live_view, "form[phx-submit=send]"), %{"message" => "go"})
+      sid = store_id(live_view)
+      send_tool_use(sid, "mcp__barkpark__task_ready", %{})
+      send_frame(sid, tool_result_frame("toolu_x", output))
+
+      live_html = render(live_view)
+      assert live_html =~ "700 results"
+      assert live_html =~ "/admin/projects?task=task-cap1"
+
+      # the store never holds the 100 KB body — the cap is untouched
+      row =
+        StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["tool_use_id"] == "toolu_x"))
+
+      assert String.length(row.metadata["output"]) == 4_000
+      refute match?({:ok, _}, Jason.decode(row.metadata["output"]))
+
+      {:ok, _replay_view, replay_html} = live(conn, "/studio/chat/#{sid}")
+
+      assert replay_html =~ "700 results"
+      assert chip_fragment(replay_html) == chip_fragment(live_html)
     end
   end
 

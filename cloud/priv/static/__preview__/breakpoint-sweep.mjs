@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  124 scenarios, 24 rendered, 100 in a COMMITTED residue literal.
+//   SCENARIO  125 scenarios, 24 rendered, 101 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -87,8 +87,10 @@
 //  declaration instead of the sweep, and shrinking the real width loop would
 //  leave it green. Shrink WIDTHS and this leg exits 2 — that is the test.
 //
-//  COMMENT-STRIPPING IS LOAD-BEARING, NOT HYGIENE. app.css:2131 contains the
-//  string "@media (max-width: 720px) shell fold" INSIDE a CSS comment.
+//  COMMENT-STRIPPING IS LOAD-BEARING, NOT HYGIENE. app.css names
+//  `@media (max-width: 720px)` INSIDE a CSS comment — re-derive the specimen with
+//  grep -n 'NOT TOUCHED, DELIBERATELY' app.css (a bare `grep -n 'shell fold'`
+//  is NOT unique: it returns several, two of which also carry the breakpoint).
 //  MEASURED ON THIS TREE (cch-w16-s2 corrected these — the previous three
 //  numbers had rotted to 21/20/20 while the file was edited around them):
 //  `grep -c '@media' app.css` says 23; comment-stripped it is 21; the CSSOM
@@ -198,7 +200,9 @@
 //      SHELL_CHROME_SELECTORS below (cch-w24-bl-q3-fold-budget-is-a-shell-
 //      property-at-320).
 //
-//  DO NOT RAISE app.css:4241. Wave 13 measured that raising the shell fold
+//  DO NOT RAISE THE SHELL FOLD's `.sidebar` cap — the `max-height: calc(40vh -
+//  60px)` declaration inside `@media (max-width: 720px)`; re-derive with
+//  grep -n 'max-height: calc(40vh - 60px);' app.css. Wave 13 measured that raising it
 //  RELOCATES the cliff and exports a 746px nav wall to every tablet.
 //
 // ─────────────────────────────────────────────────────────────────────────────
@@ -264,7 +268,8 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { IDS, SCENARIOS } from "./scenarios.mjs";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
-import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr, formatStderrTail } from "./bringup-retry.mjs";
+import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(process.env.BREAKPOINT_SWEEP_ROOT || path.resolve(HERE, ".."));
@@ -275,6 +280,45 @@ const CSS_PATH = process.env.BREAKPOINT_SWEEP_CSS || path.join(ROOT, "app.css");
 // only ever be proven for the CSS-side member. Parsing-only, like its twin:
 // Leg B still serves and drives the real tree.
 const HTML_PATH = process.env.BREAKPOINT_SWEEP_HTML || path.join(ROOT, "index.html");
+
+// ── THE REPO-RELATIVE LITERALS ARE LOAD-BEARING, NOT DECORATION ──────────────
+// tooling/gate-map composes a slice's gate by extracting each instrument's SCAN
+// SITES from its source text. It can see a readdir, a glob, a `find`, a
+// `git ls-files`, and a repo-relative literal path. It cannot see
+// `path.join(ROOT, "app.css")`, where ROOT is an env-overridable `path.resolve`
+// — and until this block landed, nothing in this file spelled the stylesheet's
+// repo-relative path at all. MEASURED on origin/main a917280fb:
+//
+//   node tooling/gate-map/gate-map.mjs --for cloud/priv/static/app.css
+//   → GATE 16 instrument(s) … and NOT breakpoint-sweep.mjs
+//
+// So the one instrument that DERIVES its width axis from app.css was the one
+// instrument a CSS slice's composed gate never named. That is the wave-17 red
+// (cch-w17-bl-css-slice-gate-must-include-leg-a) at its source: cch-w16-s6 added
+// `@media (max-width: 830px)` behind a fully green gate, and Leg A — wired in
+// console-harness.yml — exited 2 with "UNCOVERED breakpoint 830px" on arrival.
+//
+// The refusal underneath is what keeps these constants from rotting into an
+// advertisement: if the default read ever stops being these two files, the sweep
+// refuses by name instead of carrying a literal that lies to the composer.
+export const CSS_SOURCE = "cloud/priv/static/app.css";
+export const HTML_SOURCE = "cloud/priv/static/index.html";
+
+for (const [declared, resolved, override] of [
+  [CSS_SOURCE, CSS_PATH, "BREAKPOINT_SWEEP_CSS"],
+  [HTML_SOURCE, HTML_PATH, "BREAKPOINT_SWEEP_HTML"],
+]) {
+  // An explicit override (or a relocated ROOT) means the operator is deliberately
+  // parsing another tree — a mutation seam, not a drift. Only the DEFAULT read is
+  // what the composer is being told about, so only the default read is asserted.
+  if (process.env[override] || process.env.BREAKPOINT_SWEEP_ROOT) continue;
+  if (!resolved.split(path.sep).join("/").endsWith(declared)) {
+    throw new Error(
+      `breakpoint-sweep REFUSES: it advertises ${declared} to tooling/gate-map but its default read is ${resolved}. ` +
+        `A composed gate would omit this instrument for the file it actually parses. Fix the constant and the read together.`,
+    );
+  }
+}
 const PORT = Number(process.env.BREAKPOINT_SWEEP_PORT || 4207);
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -329,6 +373,23 @@ export function boundaryWalk(breakpoints) {
 // Leg A refusing here is the design working: a breakpoint the stylesheet
 // declares and this list does not is a set of widths nothing drives.
 export const BREAKPOINTS = [620, 720, 740, 768, 830, 899, 904];
+// THIS AXIS' FLOOR IS 619 AND THAT IS DERIVED, NOT A CHOICE
+// (cch-w24-bl-phone-band-unreachable-by-the-width-sweep). `boundaryWalk` emits
+// b-1/b/b+1, the lowest declared boundary is 620, so the narrowest width this
+// sweep drives is 619 — and app.css carries NO `@media` boundary below 620, so
+// there is nothing lower for Leg A's census to derive. Reaching 320 through
+// `BREAKPOINTS` would mean declaring a boundary the stylesheet does not have,
+// which is exactly the phantom Leg A refuses in the other direction (cch-w15).
+//
+// SO THE PHONE BAND 320-618 IS REACHED BY A DIFFERENT INSTRUMENT, AND THE SEAM
+// IS ASSERTED RATHER THAN ASSUMED: overflow-guard.mjs's
+// `W24-activity-feed-phone-band` leg IMPORTS this `WIDTHS` export, takes its
+// minimum, and REFUSES unless it drives `min - 1`. Lower a boundary here — or
+// let that leg's band be trimmed — and the gap reds in that file instead of
+// re-opening in silence in both. `#sites` is covered the same way, by
+// `W21-cruel-content-text-bounded`'s `#sites` rows and
+// `W50-site-row-three-hosts-cruel-by-fixture` (#16318 / #16137), whose axes
+// start at 320.
 export const WIDTHS = boundaryWalk(BREAKPOINTS);
 
 const INST = IDS.liveInstance;
@@ -463,8 +524,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 120 scenarios · 25 cells over 24 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 96 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 125 scenarios · 25 cells over 24 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 101 · 13 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -605,18 +666,36 @@ export const RESIDUE_FAMILY_REASONS = {
 // breakpoint-sweep.mjs` on this branch, never by adding one — and the family
 // stays at 13 because `hash:#billing` already had seven members.
 //
-// WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527). The old header here read
-// "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed numerals
-// spanning SEVEN lines, and three of the numbers under it were owned by
-// nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
-// that reads these bytes. Every numeral in this block is now named by the arm
-// that reds when it drifts, all in breakpoint-sweep.test.mjs:
-//   * 120 / 25 / 24 / 96 / 13 — "the census reconciles: …", whose TITLE is now
-//     built from `scenarioReport` by template literal rather than typed, so the
-//     printed line has no second copy left to rot.
+// WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527; recut by
+// cch-w48-bl-the-scenario-census-five-numerals-cannot-lose). The old header here
+// read "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed
+// numerals spanning SEVEN lines, and three of the numbers under it were owned
+// by nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
+// that reads these bytes. The wave-47 recut then wrote "Every numeral in this
+// block is now named by the arm that reds when it drifts" over a census five
+// that was named by NOTHING — and those five proved it by rotting: this block
+// and "THE CENSUS THIS RECONCILES AGAINST:" above both drifted from the
+// measured census by five scenarios and five residue entries while this file's
+// OWN `>> scenarios` line printed the true five, and the bare sweep and
+// breakpoint-sweep.test.mjs both exited clean over the gap. An
+// unowned numeral inside the sentence that claims ownership is the whole shape
+// this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
+// below is now recounted, either from `scenarioReport` or from these same
+// committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
+//   * 125 / 25 / 24 / 101 / 13 — "the census five in breakpoint-sweep.mjs's
+//     prose are recounted from the derived report", which reads BOTH typed
+//     copies out of the committed bytes (this bullet and "THE CENSUS THIS
+//     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
+//     site. The census test's own TITLE is built from `scenarioReport` by
+//     template literal rather than typed, so the printed line has no second
+//     copy left to rot.
 //   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
 //     "the two ZERO-residue families are named, and 15 families over all
-//     scenarios is not 13".
+//     scenarios is not 13", which owns those numbers as VALUES, plus "the
+//     ownership map's own family numerals are recounted from the literal",
+//     which owns THESE BYTES: the family total this bullet leads with, the
+//     residue-family count it says that total is NOT, and the span the header
+//     arm claims two bullets below — all three recounted from the literal.
 //   * each `// <family> — N` group header below, their SUM against the literal,
 //     and the header COUNT against the family count (the reformat tripwire) —
 //     "every `// <family> — N` header inside SCENARIO_RESIDUE is recounted from
@@ -630,15 +709,35 @@ export const RESIDUE_FAMILY_REASONS = {
 //     in this file and the bare sweep", which reads THESE bytes and reds on a
 //     duplicate landing slot, an out-of-order block, or an ordinal past the
 //     measured census. It cannot recount which fixture landed where — that
-//     stays prose — but a repeat of the 104/79 double-claim now fails by name.
-// THE PRECEDENT THIS EXISTS FOR: the prose here once said 99/74 while the
-// literal below already held 75 — #8849's `sites-on-instance` moved the census
-// and only the TEST literals were updated. A census that two files spell
-// differently is the staleness this file exists to make fatal, and until
-// cch-w47-s4 this file was carrying two of them: `hash:#billing — 3` over four
-// entries, and a `These 9` over ten.
+//     stays prose — but a repeat of the double-claim quoted under HISTORICAL
+//     below now fails by name.
 // STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
-// longer exists, or one that has since gained a cell, exits 2.
+// longer exists, or one that has since gained a cell, exits 2 — and that code
+// is read back out of this file's own `refuse` helper by "the ownership map's
+// `exits N` claim is read from the sweep's refusal helper", so a change of
+// refusal code cannot leave this sentence behind.
+// AND THE COVERAGE CLAIM ITSELF IS COUNTED, NOT ASSERTED. "every numeral in the
+// ownership-map block is owned by a named arm, or sits below the HISTORICAL
+// rule" walks EVERY integer between "WHICH ARM OWNS WHICH NUMERAL" and the
+// SCENARIO_RESIDUE literal's own export line, and reds on any one above that
+// rule which no owning regex consumed — so a new number typed into this block
+// is UNOWNED until an arm claims it, instead of quietly inheriting the coverage
+// this block claims for itself. (That range terminator must never be SPELLED in
+// prose here: two parsers in breakpoint-sweep.test.mjs take the first literal
+// occurrence as their end marker, and a comment copy silently truncates both.)
+// 7 numerals sit below the rule; that count is derived by the same walk, so the
+// uncovered set is stated rather than implied.
+// ── HISTORICAL — FROZEN QUOTES OF PAST STATES, OWNED BY NOTHING BY DESIGN ────
+// The numerals below record what this file ONCE said. They are deliberately not
+// recounted: tracking today's census would destroy the record.
+//   * the 104/79 double-claim — two chronicle blocks claiming one landing slot,
+//     one true and one an ort-resolution artifact, green under every harness.
+//   * THE PRECEDENT THIS EXISTS FOR: the prose here once said 99/74 while the
+//     literal below already held 75 — #8849's `sites-on-instance` moved the
+//     census and only the TEST literals were updated. A census that two files
+//     spell differently is the staleness this file exists to make fatal, and
+//     until cch-w47-s4 this file was carrying two of them: `hash:#billing — 3`
+//     over four entries, and a `These 9` over ten.
 export const SCENARIO_RESIDUE = {
   // hash:#instance — 26
   "sites-on-instance": "hash:#instance",
@@ -734,13 +833,19 @@ export const SCENARIO_RESIDUE = {
   "invite-already-member": "hash:#",
   "invite-invalid": "hash:#",
   "loggedout-reset": "hash:#",
-  // no-deeplink — 6
+  // no-deeplink — 7
   "account-modal": "no-deeplink",
   "account-modal-tall": "no-deeplink",
   "account-modal-revoke": "no-deeplink",
   "account-modal-cruel-identity": "no-deeplink",
   "account-modal-2fa-badcode": "no-deeplink",
   "account-modal-2fa-on": "no-deeplink",
+  // cch-w39-s2-fu — the unknown two-factor arm, over a /v1/me that never lands.
+  // Same residue reason as its six siblings and for the same owner: the state's
+  // whole subject is a MODAL control's reachability (#a2f-retry), and that is
+  // modal-oracle's question, not this sweep's. modal-oracle drives it as a
+  // first-class state, so this is a reason, not a gap.
+  "account-modal-me-unreadable": "no-deeplink",
   // path:/activate — 5
   "activate-entry": "path:/activate",
   "activate-confirm": "path:/activate",
@@ -1763,7 +1868,7 @@ function legA() {
 
   const rawMedia = (css.match(/@media/g) || []).length;
   out(`>> source     ${rel(CSS_PATH)} · ${rel(HTML_PATH)}\n`);
-  out(`>> @media     ${rep.preludes.length} preludes (comment-stripped; the raw grep counts ${rawMedia} — app.css:2131 names a breakpoint INSIDE a comment)\n`);
+  out(`>> @media     ${rep.preludes.length} preludes (comment-stripped; the raw grep counts ${rawMedia} — app.css names a breakpoint INSIDE a comment: grep -n 'NOT TOUCHED, DELIBERATELY' app.css)\n`);
   out(`>> axis       ${rep.breakpoints.length} breakpoints [${rep.breakpoints.join(",")}] -> ${rep.widths.length} boundary widths [${rep.widths.join(",")}]\n`);
   out(`>> screens    ${rep.views.length} registered views · ${rep.cells} scenario x route cells covering ${COVERED_VIEWS.length}\n`);
   out(`>> themes     derived [${rep.themes.derived.join(",")}] vs declared [${rep.themes.declared.join(",")}] — COVERAGE, NOT YIELD: ` +
@@ -1820,7 +1925,11 @@ async function withBrowser(fn) {
   // THE EXPORT'S OWN serve.mjs. serve.mjs roots itself at its own parent
   // directory, so measuring an exported origin/main tree means running THAT
   // tree's server — not this worktree's server pointed elsewhere.
-  const serveChild = spawn("node", [path.join(ROOT, "__preview__", "serve.mjs"), "--port", String(PORT)], { stdio: "ignore" });
+  // STDERR IS PIPED, NOT DISCARDED: without it the refusal below can only say
+  // "nothing answered", never why. captureStderr drains continuously (an
+  // unread pipe fills and blocks the child) and keeps a bounded tail.
+  const serveChild = spawn("node", [path.join(ROOT, "__preview__", "serve.mjs"), "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] });
+  const readServeStderr = captureStderr(serveChild);
   let chrome = null, cdp = null, profile = null;
   const alive = (p) => { if (!p || p.pid == null) return false; try { process.kill(p.pid, 0); return true; } catch { return false; } };
   const reap = async (p) => {
@@ -1848,7 +1957,17 @@ async function withBrowser(fn) {
     try { const r = await fetch(`${BASE}/app.css`, { cache: "no-store" }); if (r.ok) { up = true; break; } } catch { /* not yet */ }
     await sleep(100);
   }
-  if (!up) return die(`no server answered on :${PORT} within ${SERVER_CAP}ms`);
+  // The refusal names a CAUSE: our serve.mjs's own stderr tail rides along.
+  // An empty tail is reported as empty — silence is itself a finding.
+  // NO RETRY on this bring-up: no per-attempt failure rate has been measured
+  // for serve.mjs (unlike Chrome's, in bringup-retry.mjs), and a retry with no
+  // measurement behind it is theatre.
+  if (!up) {
+    return die(
+      `no server answered on :${PORT} within ${SERVER_CAP}ms\n` +
+      formatStderrTail(readServeStderr(), { who: "serve.mjs" }).replace(/\n$/, ""),
+    );
+  }
 
   // SERVED BYTES == DISK BYTES. 20 worktrees share this checkout and a foreign
   // preview server has squatted this port class before, making a patched run
@@ -1944,7 +2063,18 @@ async function withBrowser(fn) {
   // A FRESH TARGET PER CELL is what buys liveness: Page.navigate to a URL that
   // differs only in its hash is a SAME-DOCUMENT navigation, so a previous
   // cell's stylesheet state and injected rules survive into the next one.
+  // The SAME-DOCUMENT GUARD (cch-w24-bl-hash-only-nav-is-same-document). This
+  // leg's fresh-target-per-cell discipline above already makes every navigation
+  // cross-document, so this guard is expected to catch ZERO — and it says zero
+  // out loud on every run, which is the only thing that distinguishes "the
+  // discipline holds" from "nobody is checking". It is wired anyway because the
+  // discipline is a CONVENTION: the day a cell reuses a session (or openCell
+  // stops parking on about:blank), this is what refuses to let the next cell
+  // inherit its predecessor's stylesheets. openCell resets it, because a NEW
+  // target's blank page shares no URL with the old target's last one.
+  const crossDoc = createCrossDocumentNavigator("breakpoint-sweep");
   const openCell = async () => {
+    crossDoc.reset();
     const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
     await cdp.send("Runtime.enable", {}, sessionId);
@@ -1969,7 +2099,7 @@ async function withBrowser(fn) {
   // refusal below owns the verdict, and its message carries the `present:`
   // diagnostic a bare timeout does not.
   const navSettle = async (sessionId, url, readyExpr, cap = SETTLE_CAP) => {
-    await cdp.send("Page.navigate", { url }, sessionId);
+    await cdp.send("Page.navigate", { url: crossDoc.next(url) }, sessionId);
     for (let w = 0; w < cap; w += 50) {
       let ready = false;
       // Pinned OUTSIDE the catch: a swallowed refusal would burn the whole cap
@@ -2038,6 +2168,7 @@ async function withBrowser(fn) {
   try {
     return await fn({ cdp, evalJs, navSettle, openCell, closeCell, die, teardown });
   } finally {
+    out(crossDoc.line());
     await teardown();
   }
 }

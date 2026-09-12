@@ -1,6 +1,10 @@
 53-WEEK CONTRIBUTION CALENDAR           
 ─────────────────────────────           
                                         
+A full 53-week year. At ≥110 cols every 
+week-column renders; narrower widths    
+drop the oldest (leftmost) whole weeks. 
+                                        
     Sep       Oct     Nov       Dec     
 M   · · ▒▒▓▓░░▒▒██▓▓· ░░· ██· · · ░░· · 
     ██▓▓░░██░░▓▓░░▒▒▒▒██· ██· ░░· ██· ▓▓

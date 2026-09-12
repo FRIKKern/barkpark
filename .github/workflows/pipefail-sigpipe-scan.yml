@@ -1,0 +1,124 @@
+name: pipefail SIGPIPE scan
+
+# scripts/pipefail-sigpipe-scan.sh hunts pipelines that can return 141 instead of
+# a verdict: under `set -o pipefail`, `producer | grep -q` returns the PRODUCER's
+# status when the reader exits first, so a TRUE assertion reports FAIL. It is
+# output-length dependent, which is what makes it vicious — it ships green and
+# reds months later, on someone else's PR, on a site that PR did not touch.
+#
+# UNTIL 2026-09-09 THIS SCANNER RAN NOWHERE. `git grep -rn pipefail-sigpipe-scan
+# .github/ scripts/` returned the script itself and one comment. It shipped a
+# PASSING `--selftest`, so this was not an abandoned broken tool — it was a
+# working tool nobody connected. This file connects it. (task-b090e1c603d686ba)
+#
+# ── VENUE, AND WHY IT IS ITS OWN FILE ─────────────────────────────────────────
+# This gate asks a question about the REPO STATE, not about a diff, so its
+# primary venue is push-to-main plus a schedule; the pull_request arm exists so a
+# PR that adds a new site hears about it on the PR that adds it.
+#
+# It is NOT a job bolted onto shell-harnesses.yml or doc-gates.yml, and that is a
+# choice, not an oversight. Both of those key their venue on a WORKFLOW-LEVEL
+# `paths:` list, and neither has a push-to-main or schedule arm. Adding a job
+# there would give this scan the wrong venue by inheritance and would put its
+# trigger set inside a list forty entries long that nobody edits for it. A
+# workflow-level `paths:` is also how a check-run goes ABSENT rather than
+# skipped, and absent is the failure mode that leaves a context "expected"
+# forever. So the PR filter lives on the JOB, as an `if:` over an output the
+# `changes` job computes from git — visible, testable, and skip-not-absent.
+#
+# ── WHAT REDS AND WHAT DOES NOT ───────────────────────────────────────────────
+# THIS WORKFLOW IS ADVISORY. It publishes no context in
+# .github/required-checks.json's required set (which is exactly: Cloud gate,
+# Console gate, Elixir gate, PR references an active task) and nothing here can
+# stop a merge. Wiring makes the scan RUN, not BLOCK.
+#
+#   1. the selftest              — fails this job. 22 arms, including a
+#                                  non-vacuity arm that RUNS the defect and
+#                                  requires the shell to hand a FAILURE back.
+#   2. the HIGH-confidence ratchet — fails this job when the count RISES above
+#                                  scripts/pipefail-sigpipe-baseline.txt. That
+#                                  file carries the number, the command that
+#                                  produced it, its date, its composition, and
+#                                  the reason it is a baseline and not a zero.
+#   3. the full inventory        — never fails. medium/low are printed so the
+#                                  debt is visible, and enforced at neither.
+#
+# Runtime: ~25s of CPU over 336 files on this corpus (measured 2026-09-09).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly. A latent class does not need a fast loop; it needs a loop that
+    # never stops. Offset off the hour because GitHub queues cron under load —
+    # read this as "some time Monday", never "at 05:41".
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipefail-sigpipe-scan-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the scan dark
+  # exactly when main is moving fastest.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  changes:
+    name: pipefail scan — did the scanner's inputs move?
+    runs-on: ubuntu-latest
+    outputs:
+      hit: ${{ steps.f.outputs.hit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: f
+        name: compare the PR against the scanner's own targets
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull_request (${{ github.event_name }}) — the scan always runs"
+            echo "hit=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          changed="$(git diff --name-only "$base" HEAD)"
+          # A here-string, never `printf … | grep -q`: this file is scanned by the
+          # very gate it wires, and a gate that hosts the defect it hunts is the
+          # loudest way to lose an argument.
+          if grep -Eq '^(scripts/|\.github/workflows/|deploy/)' <<<"$changed"; then
+            echo "hit=true" >>"$GITHUB_OUTPUT"
+            echo "the PR touches the scanner's targets — running the scan:"
+            grep -E '^(scripts/|\.github/workflows/|deploy/)' <<<"$changed"
+          else
+            echo "hit=false" >>"$GITHUB_OUTPUT"
+            echo "the PR touches none of scripts/ .github/workflows/ deploy/ — skipping."
+            echo "This SKIPS the scan job; it does not make its context absent."
+          fi
+
+  scan:
+    name: pipefail SIGPIPE scan
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The scanner's own discrimination matrix. It must pass BEFORE its verdict
+      # over the tree means anything: arm (0) runs the defect and requires 141,
+      # so a shell that stopped SIGPIPE-ing reds here instead of letting every
+      # later assertion pass over a ghost.
+      - name: scanner selftest (fails this job)
+        run: bash scripts/pipefail-sigpipe-scan.sh --selftest
+
+      # The enforced tier. Reasons, date and derivation live in the baseline file.
+      - name: high-confidence ratchet (fails this job)
+        run: bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --baseline scripts/pipefail-sigpipe-baseline.txt
+
+      # Advisory: the whole inventory, so medium/low debt is visible in the log
+      # rather than only in someone's memory. Never fails.
+      - name: full inventory at every confidence (advisory, never fails)
+        run: bash scripts/pipefail-sigpipe-scan.sh

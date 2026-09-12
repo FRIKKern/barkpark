@@ -227,6 +227,29 @@ func runCloudDeploy(out *writer, g globals, args []string) int {
 			return cloudFail(out, "resolve deploy target", lerr)
 		}
 	}
+
+	// THE STRANDED-MANAGED REFUSAL, decided BEFORE host resolution because host
+	// resolution is exactly what goes wrong. A fleet row can be mode "managed"
+	// with an EMPTY Host — the plane provisioned the box and it never went live,
+	// the same state the cloud router names as (mode == "managed" and host in
+	// (nil, "")). resolveDeployHost only reports via == "control-plane" when the
+	// row HAS a host, so such a row would skip the managed fork, fall past the
+	// control-plane arm, and land on BARKPARK_STAGING_HOST — ssh-deploying the
+	// STAGING box while healthHost points at the stranded box's URL. The
+	// read-back would then witness the mismatch AFTER the wrong box moved, and a
+	// witness cannot un-deploy. So this refuses here: no relay call, no ssh, no
+	// read, nothing on the network at all.
+	//
+	// --host is untouched (hostFlag != "" skips the fleet lookup entirely), so
+	// the deliberate escape hatch still reaches any box an operator can name.
+	if hostFlag == "" && cpFound &&
+		strings.TrimSpace(cpRow.Mode) == deployModeManaged &&
+		strings.TrimSpace(cpRow.Host) == "" {
+		return useError(out, "not_live", fmt.Sprintf(
+			"%q is a MANAGED box that NEVER WENT LIVE — the fleet row carries mode %q with no host, which is the control plane's not_live state. There is nothing to deploy to: the relay would refuse it and the ssh path has no address, so `bp cloud deploy` will not guess one (with BARKPARK_STAGING_HOST set, guessing would deploy the STAGING box under this name). Bring the box up first — `bp cloud status %s` says where it stopped — or pass --host <ip> if you know the address and mean the ssh path.",
+			target, deployModeManaged, target), exitConflict)
+	}
+
 	envHost := strings.TrimSpace(os.Getenv("BARKPARK_STAGING_HOST"))
 	host, healthHost, via, herr := resolveDeployHost(target, hostFlag, envHost, cpRow.Host, cpRow.URL, cpFound)
 	if herr != nil {
@@ -851,10 +874,15 @@ func shSingleQuote(s string) string {
 
 // deploySmokeURLs is the three golden-path checks printed on success — the SAME
 // trio the router card documents (API answers · Studio gated · documents query).
+//
+// The first URL is /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, so from 2027-01-01 every successful
+// deploy would hand the operator a smoke command that 404s on a healthy box.
 func deploySmokeURLs(fqdn string) []string {
 	base := "https://" + fqdn
 	return []string{
-		base + "/api/schemas",
+		base + "/status.json",
 		base + "/studio",
 		base + "/v1/data/query/production/post",
 	}

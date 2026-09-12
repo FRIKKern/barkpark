@@ -243,8 +243,65 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # `side_effecting_get?/1` clause is owed. It is session-gated like every other
   # `/v1/operator/*` route, so `total` and `session` each rise by exactly one;
   # machine and public are untouched.
-  @baseline_total 70
-  @baseline_session 50
+  # 2026-09-07: 71 / 51 / 8 / 12. ONE ROUTE WAS ADDED — `GET /v1/sites/:id/doctor`,
+  # the per-substrate site census (ssw8-site-doctor): every substrate a site
+  # occupies that the control plane can genuinely reach, three-valued, each
+  # absence naming its repair. RULED NOT SIDE-EFFECTING: the handler is
+  # `Auth.require_user/2` + `Registry.get_team_site/2` + `Repo.preload(site,
+  # :barkpark)` + `Sites.Doctor.check/1`, and `check/1` performs only READS — the
+  # row, a `DeployLedger.list_page` query, `Registry.get_deployment/1`, and three
+  # OUTBOUND box GETs (the read-token liveness probe, the admin webhook LIST, and
+  # a plain fetch of the site's live URL). It mints nothing, burns nothing and
+  # spends no nonce, so no `side_effecting_get?/1` clause is owed; a behavioural
+  # arm pins the read-only-ness (`router_site_doctor_test.exs`, "it is read-only:
+  # the site row is byte-identical after the report"). The outbound GETs are the
+  # one thing worth naming: a bare HEAD of this route DOES cost three cross-host
+  # calls, which is a COST, not a mutation, and the fence rules on mutation. It is
+  # session-gated like every other `/v1/sites/:id/*` read, so `total` and
+  # `session` each rise by exactly one; machine and public are untouched. (It also
+  # adds the SECOND `Repo.preload(site, :barkpark)` to the router — a READ, the
+  # same shape as the one the moduledoc above enumerates.)
+  # 2026-09-08: 72 / 52 / 8 / 12. ONE ROUTE WAS ADDED —
+  # `GET /v1/sites/:id/deployments/:dep_id/build-log`, the black box recorder's
+  # durable per-build record read by DEPLOYMENT ID (dr-bl-recorder-http-read-path).
+  # RULED NOT SIDE-EFFECTING: the handler is `Auth.require_platform_operator/2` +
+  # `Sites.BuildLog.for_deployment/2`, which performs only READS — `get_site/1`,
+  # `get_deployment/1`, `get_barkpark/1`, and one OUTBOUND box GET
+  # (`/v1/admin/site-deploy?…&record=1`, which reads a terminal.json off the box's
+  # disk). It mints nothing, burns nothing and spends no nonce, so no
+  # `side_effecting_get?/1` clause is owed. A bare HEAD costs one cross-host GET —
+  # a COST, not a mutation, and the fence rules on mutation. `require_platform_operator`
+  # delegates to `require_user`, so it lands in the SESSION bucket: `total` and
+  # `session` each rise by exactly one; machine and public are untouched.
+  # 2026-09-10: 71 / 51 / 8 / 12. ONE ROUTE WAS REMOVED —
+  # `GET /v1/barkparks/:id/telemetry`, dropped by
+  # cch-w51-bl-metrics-latest-block-is-produced-and-rendered-by-nothing: it had
+  # ZERO callers (no console fetch, no `internal/cli` or `internal/cloudclient`
+  # client, no docs entry) while re-serving the full normalized envelope behind
+  # `Auth.require_user/2`. It was a SESSION route, so `total` and `session` each
+  # fall by exactly one; machine and public are untouched. A removal owes no
+  # `side_effecting_get?/1` ruling — the fence rules on routes that exist.
+  # 2026-09-11: 72 / 52 / 8 / 12. ONE ROUTE WAS ADDED —
+  # `GET /v1/sites/:id/deployments/:dep_id/build-log/bytes`
+  # (dr-bl-recorder-http-read-path c1), the operator read for the recorded build
+  # log's BYTES. A pure READ of a box's durable artifact, like the `build-log`
+  # route above it: it mints nothing, burns nothing and spends no nonce, so no
+  # `side_effecting_get?/1` clause is owed. A bare HEAD costs one cross-host GET —
+  # a COST, not a mutation, and the fence rules on mutation. It is behind
+  # `require_platform_operator`, which delegates to `require_user`, so it lands in
+  # the SESSION bucket: `total` and `session` each rise by exactly one; machine and
+  # public are untouched.
+  # 2026-09-11: 73 / 53 / 8 / 12. ONE ROUTE WAS ADDED — `GET /v1/me/security-events`
+  # (cloud-console-user-security-log), the account owner's own trail over the new
+  # user-scoped `user_security_events` table. A bare HEAD of it MUTATES NOTHING:
+  # the body is `Auth.require_user/2` then `Accounts.list_user_security_events/2`,
+  # a `Repo.all` with no write, no token mint and no nonce burn — so it owes no
+  # `side_effecting_get?/1` clause. It is session-gated like its three
+  # self-scoped siblings (`/v1/account/sessions`, `/v1/account/two-factor`,
+  # `/v1/account/security-audit`), so `total` and `session` each rise by exactly
+  # one; machine and public are untouched.
+  @baseline_total 73
+  @baseline_session 53
   @baseline_machine 8
   @baseline_public 12
 

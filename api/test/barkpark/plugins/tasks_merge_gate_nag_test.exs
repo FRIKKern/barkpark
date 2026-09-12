@@ -162,9 +162,31 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
       refute log_for([%{"criterion" => "the suite is green", "met" => false}]) =~ "merge_gate"
     end
 
-    test "a non-binary or absent criterion does not crash the gate" do
-      assert :ok = save([%{"met" => false}])
-      assert :ok = save([%{"criterion" => 42, "met" => false}])
+    # WHAT THIS ARM GUARDS CHANGED, AND THE GUARANTEE GOT STRONGER
+    # (cdd-criteria-shape-gate). It used to assert the nag TOLERATES a criterion
+    # it cannot read — `save/1` returned :ok and the nag simply skipped the
+    # entry. The shared shape predicate now refuses those two shapes at the
+    # write door, BEFORE `warn_unflagged_merge_gates/1` is ever called, so the
+    # nag can no longer be handed one: its crash-safety is held by construction
+    # rather than by tolerance.
+    #
+    # Asserting the old `:ok` would now be asserting the hole. Asserting the
+    # halt is what keeps the guarantee measurable — if a future change lets a
+    # criterion-less entry past the shape gate, this arm reds and tells you the
+    # nag is being handed input it was never proven against.
+    test "a criterion the nag cannot read never REACHES the nag — the shape gate halts first" do
+      for {label, entry} <- [
+            {"absent criterion", %{"met" => false}},
+            {"non-binary criterion", %{"criterion" => 42, "met" => false}}
+          ] do
+        result = save([entry])
+
+        assert match?({:halt, _}, result),
+               "#{label}: expected the shape gate to halt before the nag ran, got #{inspect(result)}"
+
+        {:halt, message} = result
+        assert message =~ "no usable `criterion` string", label
+      end
     end
   end
 

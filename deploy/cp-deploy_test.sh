@@ -447,7 +447,13 @@ setup_flip() {
   APPDIR="$FTMP/opt/barkpark"; FAKEBIN="$FTMP/bin"; DSTATE="$FTMP/dstate"
   CADDY="$FTMP/etc/caddy/Caddyfile"
   DOCKERLOG="$FTMP/docker.log"; GITLOG="$FTMP/git.log"; SYSCTLLOG="$FTMP/systemctl.log"
-  mkdir -p "$APPDIR/cloud" "$FAKEBIN" "$DSTATE" "$FTMP/etc/caddy"
+  mkdir -p "$APPDIR/cloud" "$FAKEBIN" "$DSTATE" "$FTMP/etc/caddy" "$APPDIR/scripts/lib"
+  # The health probes source $APP/scripts/lib/bp-curl.sh (429 backoff,
+  # task-90059c5c680f6665). The sandbox IS the $APP the script sees, so it must
+  # carry the helper — otherwise every arm below silently takes the script's
+  # named degrade path and this harness proves nothing about the real helper
+  # (the #17562 deploy-receipt-failure.test.sh trap).
+  cp "$HERE/../scripts/lib/bp-curl.sh" "$APPDIR/scripts/lib/bp-curl.sh"
   : > "$DOCKERLOG"; : > "$GITLOG"; : > "$SYSCTLLOG"
   make_flip_fakes "$FAKEBIN"
   : > "$APPDIR/cloud/docker-compose.yml"
@@ -1086,13 +1092,62 @@ for sib in $SIBLINGS; do
     "[ \"\$(grep -n 'BARKPARK_DEPLOY_PRIVATE_COPY' '$HERE/$sib' | head -1 | cut -d: -f1)\" -lt \"\$(grep -n '^set -[eu]' '$HERE/$sib' | head -1 | cut -d: -f1)\" ]"
 done
 
+# ── the wedged-endpoint predicate survives a LONG compose transcript ─────────
+# BEHAVIOURAL, not a grep for the source shape. compose_up_repair decides on
+# `$out`, a whole `compose up -d 2>&1` transcript, and the daemon names the
+# wedged endpoint EARLY in it. Written as `printf '%s' "$out" | grep -qE …`,
+# under this file's and cp-deploy.sh's `pipefail`, grep -q answers at that first
+# match and closes the pipe, printf takes SIGPIPE and dies 141, and pipefail
+# returns 141 as the pipeline's status — which is not 0, so the branch reads
+# "not a wedged endpoint" and the repair is SKIPPED. That is the 2026-07-21
+# 48h47m blackout's sleep-and-retry, measured 0-for-65.
+#
+# It is OUTPUT-LENGTH DEPENDENT: a short transcript fits the pipe buffer and
+# never SIGPIPEs, so a fixture SHORTER than the buffer would pass either way and
+# this check would be vacuous. The fixture is deliberately >64KB, with the error
+# on line 1 and thousands of lines of container progress after it.
+echo
+echo "== compose_up_repair's wedged-endpoint predicate, over a >64KB transcript =="
+long_out="Error response from daemon: network cloud_default has active endpoints (name:\"cloud-control_plane_green-1\" id:\"9a7aab2dba5b\")"
+_svc=0
+while [ "${#long_out}" -lt 200000 ]; do
+  _svc=$((_svc + 1))
+  long_out="$long_out
+ Container barkpark-svc-$_svc  Creating
+ Container barkpark-svc-$_svc  Created
+ Container barkpark-svc-$_svc  Starting
+ Container barkpark-svc-$_svc  Started"
+done
+# non-vacuity: the fixture must actually be big enough to SIGPIPE, and it must
+# actually contain the string, or a green below proves nothing.
+check "the long-transcript fixture clears the 64KB pipe buffer" \
+  "[ ${#long_out} -gt 65536 ]"
+check "the long-transcript fixture really contains the wedged-endpoint phrase" \
+  "case \"\$long_out\" in *'has active endpoints'*) true ;; *) false ;; esac"
+# the RED-before arm: prove the piped form still fails on this fixture, so this
+# check is measuring the defect and not the weather.
+_piped_rc=0
+# stderr silenced: the write error IS the SIGPIPE, and it is the point — but it
+# would read as a harness fault in the log.  The status is what is asserted.
+printf '%s' "$long_out" 2>/dev/null | grep -qE 'has active endpoints|is not connected to the network' || _piped_rc=$?
+check "the piped form DOES return non-zero on it (the defect is real here, not a ghost)" \
+  "[ $_piped_rc -ne 0 ]"
+# and cp-deploy.sh's ACTUAL predicate, lifted from the file, answers TRUE.
+_pred="$(grep -oE "grep -qE 'has active endpoints[^']*' <<<" "$HERE/cp-deploy.sh" | head -1)"
+check "cp-deploy.sh decides the wedged endpoint WITHOUT a pipe into grep -q" \
+  "[ -n \"\$_pred\" ]"
+_fixed_rc=0
+grep -qE 'has active endpoints|is not connected to the network' <<<"$long_out" || _fixed_rc=$?
+check "the pipe-less form answers TRUE (exit 0) on the same >64KB transcript" \
+  "[ $_fixed_rc -eq 0 ]"
+
 echo
 # NON-VACUITY FLOOR. Asserted BEFORE the verdict: `fails -eq 0` is satisfied
 # just as well by a run that executed nothing at all. The floor is a lower
 # bound, never an exact total — checks are added over time and an exact count
 # would red on every addition, which trains people to bump the number instead
 # of reading it.
-MIN_CHECKS=155
+MIN_CHECKS=160
 echo "checks executed: $checks_ran (floor $MIN_CHECKS)"
 if [ "$checks_ran" -lt "$MIN_CHECKS" ]; then
   echo "  FAIL: only $checks_ran checks ran (floor $MIN_CHECKS) — this harness went VACUOUS; a green here would be meaningless"

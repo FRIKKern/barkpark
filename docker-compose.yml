@@ -80,6 +80,9 @@ services:
       - BARKPARK_AUTH_RATE_REGISTER
       - BARKPARK_HOST_EUR_MONTH
       - BARKPARK_PUBLIC_DEMO_STUDIO
+      - BARKPARK_RATE_LIMIT_BROWSER
+      - BARKPARK_RATE_LIMIT_BROWSER_ENABLED
+      - BARKPARK_RATE_LIMIT_BROWSER_ENFORCE
       - BARKPARK_RATE_LIMIT_READ
       - BARKPARK_RATE_LIMIT_WRITE
       - BARKPARK_SEED_ADMIN_TOKEN
@@ -217,7 +220,7 @@ services:
     # `condition: service_healthy` consumer anywhere — a slow-but-fine first
     # boot must never be turned into a failed `docker compose up`.
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4000/api/schemas || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4000/status.json || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5

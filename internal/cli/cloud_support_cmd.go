@@ -207,6 +207,15 @@ type supportAddRun struct {
 	tokenID     string
 	cpRowID     string // the CP support row id the register leg returned
 	maxClass    string // measured on the box; "" when the measure degraded
+
+	// What the MAIN observed, captured at the instant stepOnline accepted the
+	// box as online-with-capacity. These are the strongest post-conditions the
+	// add verb has — they are the main's own reading of the listener, not what
+	// this verb asked for — and until now they died inside stepOnline. Both are
+	// zero when the poll never reached a good row, which success() states as
+	// degraded rather than printing as a measured fact.
+	rosterStatus   string         // the roster row's status the poll accepted on
+	rosterCapacity map[string]any // the capacity the main reported for that row
 }
 
 func runCloudSupportAdd(out *writer, g globals, args []string) int {
@@ -445,6 +454,34 @@ func supportCapacityNarration(maxClass string) string {
 		return "not measured (degraded) — the listener measures itself at each beat"
 	}
 	return maxClass + " (measured on the box by fleet-run.sh capacity)"
+}
+
+// supportRosterFactNarration renders the MAIN'S OWN READING of the listener for
+// the final receipt: the roster status the poll accepted on and the capacity the
+// main reported alongside it. It is PURE — it composes from the two measured
+// values and nothing else — so both surfaces print the same fact from one place.
+//
+// A poll that never reached a good row leaves both zero, and that is STATED as
+// unread. success() is only reached on the happy path today, so the degraded
+// branch is defensive rather than live; it exists because the day a caller
+// reaches success() without a poll (a --skip-online, a resumed add) the receipt
+// must not print "reads  with capacity null" and let an operator read it as a
+// measurement the main made.
+func supportRosterFactNarration(status string, capacity map[string]any) string {
+	if strings.TrimSpace(status) == "" && len(capacity) == 0 {
+		return "not read (degraded) — the poll never returned a roster row; `bp fleet roster` is the live reading"
+	}
+	return fmt.Sprintf("reads %s with capacity %s (the MAIN's reading, not this verb's)",
+		supportOr(status, "unknown"), supportCompactJSON(capacity))
+}
+
+// observeRoster records the roster row the online poll accepted, taking the
+// main's answer WHOLE and doing its own status/capacity extraction (PDS-D431) —
+// so a production edit that stops carrying either fact is visible here rather
+// than one frame up in a caller that quietly stops passing an argument.
+func (r *supportAddRun) observeRoster(row map[string]any) {
+	r.rosterStatus, _ = row["status"].(string)
+	r.rosterCapacity, _ = row["capacity"].(map[string]any)
 }
 
 func (r *supportAddRun) state(step, msg string) { r.out.progressf("→ %s: %s", step, msg) }
@@ -853,6 +890,7 @@ func (r *supportAddRun) stepOnline() (int, bool) {
 			lastStatus = st
 			capMap, hasCap := row["capacity"].(map[string]any)
 			if (st == "idle" || st == "working" || st == "blocked") && hasCap && len(capMap) > 0 {
+				r.observeRoster(row)
 				r.done("online", supportOnlineNarration(r.name, row))
 				return exitOK, false
 			}
@@ -883,6 +921,15 @@ func (r *supportAddRun) success() int {
 			"cp_row_id": r.cpRowID,
 			"max_class": r.maxClass,
 			"unit":      "barkpark-fleet-listener",
+			"roster": map[string]any{
+				// `read` is the machine surface's honest degraded state: a status of
+				// "" with a null capacity is indistinguishable from a main that
+				// answered with an empty row, so the receipt says whether the poll
+				// ever got a reading at all.
+				"read":     r.rosterStatus != "" || len(r.rosterCapacity) > 0,
+				"status":   r.rosterStatus,
+				"capacity": r.rosterCapacity,
+			},
 		},
 		"main":    map[string]any{"url": r.base, "workspace": r.ws, "dataset": r.dataset},
 		"key_var": spec.keyVar,
@@ -896,6 +943,7 @@ func (r *supportAddRun) success() int {
 	r.out.outf("  box:    %s at %s (hetzner, label %s=%s)", r.host.Name, r.host.IP, cloud.FleetSupportLabelKey, r.name)
 	r.out.outf("  agent:  %s (hand it %s via the ssh one-liner above)", r.agent, spec.keyVar)
 	r.out.outf("  size:   max class %s", supportCapacityNarration(r.maxClass))
+	r.out.outf("  roster: %s", supportRosterFactNarration(r.rosterStatus, r.rosterCapacity))
 	r.out.outf("  next:   `bp fleet roster` shows it; route an order by naming assignee=%s", r.name)
 	return exitOK
 }
@@ -1195,6 +1243,14 @@ func (r *supportRemoveRun) stepToken() (int, bool) {
 		case status == http.StatusNotFound:
 			r.revoked[id] = "already gone (404)"
 			r.done("token", id+" already gone (404)")
+		// DELIBERATELY STATUS-ONLY (cch-w40-fu, re-derived). This request goes to
+		// the MAIN (r.base, r.token), not the control plane: `grep -rn no_team
+		// api/lib` is EMPTY — the instance API has no team concept at all, so no
+		// refusal it can emit carries a `reason` this arm could read. The 403 here
+		// is the admin gate on POST/DELETE /v1/fleet/support-tokens and nothing
+		// else, and exitAuth is the honest code for it. Routing it through
+		// supportCPNoTeam would add a permanently-false branch on a host that
+		// cannot speak the shape.
 		case status == http.StatusUnauthorized || status == http.StatusForbidden:
 			return r.fail("token", fmt.Sprintf("the main answered %d — the revoke route is admin-gated; use an admin token against the main", status),
 				fmt.Sprintf("token %s NOT revoked; the control-plane row still holds its id", id), exitAuth)
@@ -1359,6 +1415,19 @@ func (r *supportRemoveRun) stepCPRow() (int, bool) {
 			// A re-run cannot converge on a dead session — name the fix (the
 			// same credential contract add narrates, PDF-D69/D71).
 			r.out.errf("⚠ cp-row: the control plane answered 401: %s — the Cloud session is missing or dead; run `bp login`, then re-run. Continuing; the census below is the truth", supportTrim(resp))
+		// cch-w40-fu: the CAUSE decides, not the status — the same predicate the
+		// add/bind arm reads (supportCPNoTeam, which covers 422 {"error":"no_team"}
+		// and 403 {"error":"forbidden","reason":"no_team"} alike). A login with NO
+		// TEAM cannot be repaired by a role grant, so the role sentence below would
+		// point at re-authenticating a credential that is fine. TODAY'''s control
+		// plane never reaches this arm on THIS route: `delete "/v1/fleet/supports/:id"`
+		// answers a teamless caller `404 {"error":"not_found"}` (its `is_nil(current_team)`
+		// arm), not the gate'''s 403 — but this CLI talks to control planes it does not
+		// version, and the route'''s declared credential family (PDF-D69, shape parity
+		// with POST /v1/fleet/supports) is the one that DOES emit no_team. Keying on
+		// the cause is what makes the two narrations unable to drift.
+		case supportCPNoTeam(status, resp):
+			r.out.errf("⚠ cp-row: the control plane answered %d: %s — your Cloud login has no active team; run `bp team use <team>`, then re-run. Continuing; the census below is the truth", status, supportTrim(resp))
 		case status == http.StatusForbidden:
 			r.out.errf("⚠ cp-row: the control plane answered 403: %s — a session needs team-admin, a PAT needs the deploy ability; fix the credential, then re-run. Continuing; the census below is the truth", supportTrim(resp))
 		default:
@@ -1426,6 +1495,10 @@ func (r *supportRemoveRun) census() int {
 				before = fmt.Sprintf("%d before, ", r.probeBefore)
 			}
 			r.out.progressf("  · token: DEAD — the admin-gated mint endpoint read %s401 after revoke", before)
+		// DELIBERATELY STATUS-ONLY (cch-w40-fu): here the status IS the
+		// measurement, not a narration choice — 403 means the MAIN authenticated
+		// the support'''s own bearer (token ALIVE), 401 means it did not (DEAD).
+		// Reading a `reason` would answer a different question than the probe asks.
 		case st == http.StatusForbidden:
 			residue = append(residue, "support token STILL VALID — the admin-gated mint endpoint answered 403 (authenticated), not 401, to the support's own bearer")
 		default:
@@ -1507,6 +1580,15 @@ type supportCPRow struct {
 
 // supportCPBarkparks lists the caller's fleet from the control plane. Non-2xx
 // is returned as a status, not an error — callers own the honest narration.
+//
+// The non-2xx BODY is deliberately dropped, so every caller's refusal arm
+// (resolveParent, stepCPRead) is status-only BY CONSTRUCTION (cch-w40-fu,
+// re-derived). That is sound for this route and only this route: `get
+// "/v1/barkparks"` gates with require_user_or_pat + require_ability("read") —
+// neither emits no_team — and then answers a TEAMLESS caller `200 {"barkparks":
+// []}` (its `case current_team do nil -> [] end` arm). There is no no_team shape
+// for these callers to miss. Teaching them the cause would mean returning the
+// body from here; do that only when the control plane starts refusing this list.
 func supportCPBarkparks(cpBase, cpToken string) ([]supportCPRow, int, error) {
 	status, body, err := supportMainJSON(http.MethodGet, cpBase+"/v1/barkparks", cpToken, nil)
 	if err != nil {
@@ -1627,6 +1709,12 @@ func supportLastLine(s string) string {
 // supportEnableImportStep flips the box's fail-closed bundle-import switch and
 // restarts Barkpark, then waits for the loopback API to answer again. The .env
 // edit is idempotent (strip + append, the secretsInstallStep idiom).
+//
+// The wait polls /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, and `curl -fsS` turns its eventual
+// 404 into a non-zero exit — so on 2027-01-01 this step would burn all 60
+// attempts and fail the import on a box that came back fine.
 func supportEnableImportStep() cloud.CaddyStep {
 	script := `set -e
 touch /opt/barkpark/.env
@@ -1634,7 +1722,7 @@ grep -v '^BARKPARK_ALLOW_BUNDLE_IMPORT=' /opt/barkpark/.env > /opt/barkpark/.env
 printf 'BARKPARK_ALLOW_BUNDLE_IMPORT=1\n' >> /opt/barkpark/.env.bpnew
 mv /opt/barkpark/.env.bpnew /opt/barkpark/.env
 systemctl restart barkpark
-for i in $(seq 1 60); do curl -fsS http://localhost:4000/api/schemas >/dev/null 2>&1 && exit 0; sleep 2; done
+for i in $(seq 1 60); do curl -fsS http://localhost:4000/status.json >/dev/null 2>&1 && exit 0; sleep 2; done
 echo 'barkpark did not come back after restart' >&2; exit 1`
 	return cloud.CaddyStep{
 		Title: "enable workspace bundle import (BARKPARK_ALLOW_BUNDLE_IMPORT=1) + restart",

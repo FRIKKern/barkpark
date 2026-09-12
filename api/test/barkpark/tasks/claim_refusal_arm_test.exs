@@ -99,6 +99,37 @@ defmodule Barkpark.Tasks.ClaimRefusalArmTest do
     end
   end
 
+  # Lives HERE and not in queue_gate_test.exs because it mutates GLOBAL
+  # application env, and that file is `async: true` — a config flip there would
+  # race every other async test that reads the same key.
+  describe "the lease TTL has ONE reader" do
+    test "moving :task_lease_ttl_seconds moves QueueGate's liveness boundary" do
+      previous = Application.get_env(:barkpark, :task_lease_ttl_seconds)
+
+      on_exit(fn ->
+        if is_nil(previous),
+          do: Application.delete_env(:barkpark, :task_lease_ttl_seconds),
+          else: Application.put_env(:barkpark, :task_lease_ttl_seconds, previous)
+      end)
+
+      ts = DateTime.utc_now() |> DateTime.add(-600, :second) |> DateTime.to_iso8601()
+
+      content = %{
+        "kind" => "task",
+        "lifecycle_status" => "open",
+        "claim" => %{"worker" => "worker-a", "ts_iso" => ts}
+      }
+
+      Application.put_env(:barkpark, :task_lease_ttl_seconds, 3600)
+      assert Barkpark.Tasks.QueueGate.lease_ttl_seconds() == 3600
+      assert Tasks.execution_class(content, "worker-b") == "foreign_claimed"
+
+      Application.put_env(:barkpark, :task_lease_ttl_seconds, 60)
+      assert Barkpark.Tasks.QueueGate.lease_ttl_seconds() == 60
+      assert Tasks.execution_class(content, "worker-b") == "executable"
+    end
+  end
+
   describe "not_ready_arm/2 names WHICH arm refused" do
     test "queue_gated: an author-set human_gated row (the real task-ed7ae8110c7c8b41 cause)",
          %{scope: scope} do
@@ -157,6 +188,71 @@ defmodule Barkpark.Tasks.ClaimRefusalArmTest do
       assert arm.arm == "not_claimable_status"
       assert arm.lifecycle_status == "considering"
       assert arm.message =~ "bp task stage"
+    end
+
+    test "queue_gated: an in_progress row + a STALE claim map + a gate tells ONE story",
+         %{scope: scope} do
+      # THE EXACT CASE #16933 LEFT OPEN. Arm 1 declines (in_progress is not
+      # terminal), arm 2 declines correctly (the lease is dead — that is
+      # #16933's fix working), and ARM 3 fires. It used to fire carrying
+      # `execution_class: "foreign_claimed"` DERIVED FROM THE SAME DEAD CLAIM
+      # the message beside it called residue: the prose said nobody holds this
+      # row, the structured field said somebody does, and the CLI reads the
+      # field.
+      stale_ts =
+        DateTime.utc_now()
+        |> DateTime.add(-(Barkpark.Tasks.QueueGate.lease_ttl_seconds() + 86_400), :second)
+        |> DateTime.to_iso8601()
+
+      gate = %{"version" => 1, "state" => "parked", "reason" => "waiting on the vendor"}
+
+      doc =
+        task!(scope, %{
+          "lifecycle_status" => "in_progress",
+          "claim" => %{"worker" => "w-long-gone", "epoch" => 2, "ts_iso" => stale_ts},
+          "queue_gate" => gate
+        })
+
+      arm = TasksController.not_ready_arm(reread(doc), "w-newcomer")
+
+      assert arm.arm == "queue_gated"
+      assert arm.stale_claim_map
+
+      # RED BEFORE THE FIX: this read "foreign_claimed".
+      assert arm.execution_class == "parked"
+
+      # The message and the field now say the same thing, both of them naming
+      # the AUTHOR's gate as the blocker and the claim map as residue.
+      assert arm.message =~ ~s(queue_gate state is "parked")
+      assert arm.message =~ "gated by its AUTHOR"
+      assert arm.message =~ "STALE claim map naming w-long-gone"
+      assert arm.execution_class_note =~ "EXCLUDED"
+      refute arm.execution_class_note =~ "foreign_claimed"
+    end
+
+    test "a LIVE foreign claim still classifies as foreign_claimed", %{scope: scope} do
+      # THE COUNTER-DIRECTION. Without this the fix could satisfy the case
+      # above by never reporting `foreign_claimed` at all.
+      gate = %{"version" => 1, "state" => "parked", "reason" => "waiting on the vendor"}
+
+      doc =
+        task!(scope, %{
+          "lifecycle_status" => "in_progress",
+          "claim" => %{
+            "worker" => "w-holder",
+            "epoch" => 2,
+            "ts_iso" => DateTime.utc_now() |> DateTime.to_iso8601()
+          },
+          "queue_gate" => gate
+        })
+
+      arm = TasksController.not_ready_arm(reread(doc), "w-newcomer")
+
+      assert arm.arm == "held_by_other"
+      assert arm.held_by == "w-holder"
+
+      assert Barkpark.Tasks.execution_class(reread(doc).content, "w-newcomer") ==
+               "foreign_claimed"
     end
 
     test "an absent pre-claim snapshot degrades to unknown, never a crash" do

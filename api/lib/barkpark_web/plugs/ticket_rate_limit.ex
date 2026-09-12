@@ -24,8 +24,8 @@ defmodule BarkparkWeb.Plugs.TicketRateLimit do
   attachments can't starve a submitter's ability to open a fresh ticket, and one
   key's abuse never touches another key's budget.
 
-  Budgets come from `config :barkpark, :ticket_rate_limits` (per-hour), defaults
-  `create: 10`, `message: 60`, `attachment: 30`. In prod they are env-tunable
+  Budgets come from `config :barkpark, :ticket_rate_limits` (per hour-long refill
+  window), defaults `create: 10`, `message: 60`, `attachment: 30`. In prod they are env-tunable
   without a rebuild — `BARKPARK_TICKET_RATE_CREATE` / `_MESSAGE` / `_ATTACHMENT`
   (runtime.exs), mirroring `BARKPARK_RATE_LIMIT_READ`/`_WRITE`.
 
@@ -33,14 +33,23 @@ defmodule BarkparkWeb.Plugs.TicketRateLimit do
   strictest budget — so a future write route added without a class rule here is
   over-throttled, never unmetered.
 
-  ## Hourly budgets on a per-second token bucket
+  ## Hour-long refill windows on a per-second token bucket
 
   `Barkpark.RateLimiter.check/2` is a generic token bucket parameterised by
-  `capacity` + `refill_per_sec` (no notion of a fixed window). An hourly budget
-  of `N` maps to `capacity: N, refill_per_sec: N / 3600` — burst up to the whole
-  hourly allowance, then a steady drip that fully refills the budget over one
-  hour. `Retry-After` is the seconds to earn one token back from empty,
+  `capacity` + `refill_per_sec` (no notion of a fixed window). A budget of `N`
+  per hour maps to `capacity: N, refill_per_sec: N / 3600` — burst up to the
+  whole window's allowance, then a steady drip that fully refills the budget over
+  one hour. `Retry-After` is the seconds to earn one token back from empty,
   `ceil(3600 / N)`.
+
+  NOT A WALL-CLOCK HOURLY CEILING. The bucket is ETS in process memory with no
+  persistence and no cross-restart handoff, so ANY restart — deploy, crash, OOM,
+  blue/green cutover — resets every key's bucket and hands every ticket key a
+  fresh allowance. The window is the process's lifetime, not the wall clock: the
+  effective ceiling is `N x (1 + restarts per hour)`, and the restart count is a
+  property of the host's deploy cadence, to be READ off the host rather than
+  assumed to be zero. See the dated decision block in `Barkpark.RateLimiter` for
+  why durable cross-slot state was rejected.
 
   ## 429 shape
 

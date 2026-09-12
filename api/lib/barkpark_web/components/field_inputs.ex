@@ -296,9 +296,15 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # "open-ref-picker"/"clear-ref" modal flow is bypassed. The hidden
   # input persists the ref doc id as a string, matching the v1
   # reference-field persistence model exactly.
-  def input(%{field: %{"type" => "reference", "name" => name, "refType" => ref_type}} = assigns) do
+  #
+  # Gyldendal parity E1.6 (task-cd8e10ca44ccb932 criterion 0): the field may
+  # name SEVERAL target types — Sanity's `to: [{type: "publication"}, …]` (also
+  # accepted as `refTypes: [...]`). `ref-type` then carries them comma-joined;
+  # the picker searches across the set (`types=`) and shows the type on every
+  # hit and on the selected pill. A single `refType` renders byte-identically.
+  def input(%{field: %{"type" => "reference", "name" => name} = f} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, v: val, ref_type: ref_type)
+    assigns = assign(assigns, n: name, v: val, ref_type: Enum.join(reference_types(f), ","))
 
     ~H"""
     <div id={"bp-ref-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
@@ -355,14 +361,15 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # through the normal autosave path, so it lands in editor_form + the draft
   # exactly like a typed value. The input itself stays the standard text
   # input (hand-editing always wins).
-  def input(%{field: %{"type" => "slug", "name" => name}} = assigns) do
+  def input(%{field: %{"type" => "slug", "name" => name} = f} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, v: val)
+    source = slug_source_of(f)
+    assigns = assign(assigns, n: name, v: val, source: source)
 
     ~H"""
     <div style="display:flex;gap:6px;align-items:center;">
       <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" />
-      <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} title="Generate from title">Generate</button>
+      <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} data-slug-source={@source} title={"Generate from #{@source}"}>Generate</button>
     </div>
     """
   end
@@ -476,6 +483,61 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # The picker's wire value is a STRING (a bare URL or a JSON object). A value
   # that was decoded into a map at the save boundary (Forms.coerce_field_value)
   # is re-encoded here so the same picker reads both.
+  @doc """
+  The field a slug is generated from — Sanity's `options.source` (also
+  accepted flat as `"source"`), defaulting to `"title"` (Gyldendal parity
+  E1.6). Only a non-empty string source counts; Sanity's function-valued
+  sources have no declarative form here.
+  """
+  @spec slug_source_of(map()) :: String.t()
+  def slug_source_of(field) when is_map(field) do
+    case get_in(field, ["options", "source"]) || Map.get(field, "source") do
+      s when is_binary(s) and s != "" -> s
+      _ -> "title"
+    end
+  end
+
+  def slug_source_of(_), do: "title"
+
+  @doc "The slug source for the schema field named `name` (default `\"title\"`)."
+  @spec slug_source(map() | nil, String.t()) :: String.t()
+  def slug_source(%{fields: fields}, name) when is_list(fields) do
+    fields
+    |> Enum.find(%{}, &(is_map(&1) and &1["name"] == name))
+    |> slug_source_of()
+  end
+
+  def slug_source(_, _), do: "title"
+
+  @doc """
+  Every target type a reference field may point at, in declaration order and
+  deduplicated: `refType` (v1, one type), Sanity's `to: [{"type": t}, …]`, and
+  the flat `refTypes: [t, …]`. `[]` when the field declares none.
+  """
+  @spec reference_types(map()) :: [String.t()]
+  def reference_types(field) when is_map(field) do
+    ref_type = Map.get(field, "refType") || Map.get(field, :refType)
+    to = Map.get(field, "to") || Map.get(field, :to) || []
+    ref_types = Map.get(field, "refTypes") || Map.get(field, :refTypes) || []
+
+    ([ref_type] ++ to_types(to) ++ to_types(ref_types))
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.uniq()
+  end
+
+  def reference_types(_), do: []
+
+  defp to_types(list) when is_list(list) do
+    Enum.map(list, fn
+      %{"type" => t} -> t
+      %{type: t} -> t
+      t when is_binary(t) -> t
+      _ -> nil
+    end)
+  end
+
+  defp to_types(_), do: []
+
   defp image_form_value(%{} = map), do: Jason.encode!(map)
   defp image_form_value(v) when is_binary(v), do: v
   defp image_form_value(_), do: ""

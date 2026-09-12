@@ -186,8 +186,125 @@ defmodule Barkpark.Tasks.ValidationTest do
     end
   end
 
+  describe "acceptance_criteria — the criterion wording is a CAS key" do
+    # pds-bl-stamp-trailing-newline-deadend. A criterion's stored text is what
+    # every met-flip is CAS'd against (`Tasks.Internal` compares with `==`), and
+    # the shells that carry that text drop trailing newlines, so a criterion
+    # authored with one can be refused forever and stamped never. These arms pin
+    # the refusal at the authoring door. They do NOT relax the `==` match, and
+    # `Tasks.Internal` is deliberately untouched by this change.
+
+    test "a criterion ending in a newline is refused" do
+      assert {:error, %{"acceptance_criteria" => [msg]}} =
+               task_with_criteria([%{"criterion" => "ships the thing\n"}])
+
+      assert msg =~ "criterion 0 begins or ends with whitespace"
+      # The message QUOTES the offending text: an author who cannot see the
+      # character in their editor can see it in `inspect/1`'s escaping.
+      assert msg =~ ~S("ships the thing\n")
+      assert msg =~ "never stamped"
+    end
+
+    test "a criterion ending in a space is refused" do
+      assert {:error, %{"acceptance_criteria" => [msg]}} =
+               task_with_criteria([%{"criterion" => "ships the thing "}])
+
+      assert msg =~ "criterion 0 begins or ends with whitespace"
+    end
+
+    test "a criterion BEGINNING with whitespace is refused too" do
+      assert {:error, %{"acceptance_criteria" => [msg]}} =
+               task_with_criteria([%{"criterion" => "\n ships the thing"}])
+
+      assert msg =~ "criterion 0 begins or ends with whitespace"
+    end
+
+    # THE NON-VACUITY ARM, and the reason the rule is spelled with
+    # `String.trim/1` rather than "no newlines". 4 of the 37,543 criteria
+    # strings in the live corpus carry an INTERNAL newline and stamp fine; a
+    # rule that banned newlines outright would refuse four honest rows to catch
+    # a shape nobody has written. If this test ever goes red, the rule got
+    # wider than its evidence.
+    test "a criterion with an INTERNAL newline is accepted" do
+      assert task_with_criteria([
+               %{"criterion" => "ships the thing\nand proves it\n\nwith a run"}
+             ]) == :ok
+    end
+
+    test "a clean criterion is accepted (the control)" do
+      assert task_with_criteria([%{"criterion" => "ships the thing"}]) == :ok
+    end
+
+    # The reported index must be the OFFENDING row, not a constant. A message
+    # that always said "criterion 0" would pass every arm above while sending
+    # an author to the wrong line.
+    test "the message names the offending index, not the first one" do
+      assert {:error, %{"acceptance_criteria" => [msg]}} =
+               task_with_criteria([
+                 %{"criterion" => "clean"},
+                 %{"criterion" => "clean too"},
+                 %{"criterion" => "dirty\n"}
+               ])
+
+      assert msg =~ "criterion 2 begins or ends with whitespace"
+      refute msg =~ "criterion 0"
+    end
+
+    # THIS TEST ASSERTED THE DEFECT (cdd-criteria-shape-gate). Until the shared
+    # shape predicate landed, both write doors accepted an entry with no usable
+    # `criterion`, and this arm pinned that acceptance in place under the
+    # trim rule's honest scope note ("not this rule's business"). The scope
+    # note was correct and the ACCEPTANCE was the hole: nothing else owned the
+    # key, so `%{"text" => "..."}` saved clean six times and produced rows no
+    # `bp task stamp --criterion-text` could ever address. The rule that owns
+    # it now is `Validation.criteria_violation/1`, called by BOTH doors, and it
+    # runs BEFORE the trim rule — so these shapes are refused here and the
+    # whitespace message is not what refuses them.
+    test "an entry with no usable criterion is refused by the SHAPE rule, not this one" do
+      assert {:error, %{"acceptance_criteria" => [msg]}} = task_with_criteria([%{"met" => false}])
+      assert msg =~ "criterion 0 has no usable `criterion` string"
+      assert msg =~ ~s(keys received: "met")
+      refute msg =~ "begins or ends with whitespace"
+
+      assert {:error, %{"acceptance_criteria" => [msg]}} =
+               task_with_criteria([%{"criterion" => 42}])
+
+      assert msg =~ "criterion 0 has no usable `criterion` string"
+      refute msg =~ "begins or ends with whitespace"
+    end
+
+    # Regression guard for the check this rule REPLACED: the list-of-maps and
+    # is-a-list shapes must still refuse. A new rule that dropped an old one
+    # would be a silent widening.
+    test "the pre-existing shape rules still fire" do
+      # The non-map arm now reports the INDEX and the value rather than
+      # dumping the whole list — same refusal, a message an author can act on.
+      assert {:error, %{"acceptance_criteria" => [msg]}} = task_with_criteria(["not a map"])
+      assert msg =~ "criterion 0 is not an object"
+      assert msg =~ ~s("not a map")
+
+      assert {:error, %{"acceptance_criteria" => [msg]}} = task_with_criteria("nope")
+      assert msg =~ "must be a list when set"
+    end
+
+    test "absent acceptance_criteria is still fine" do
+      assert Validation.validate_task_content(%{
+               "kind" => "task",
+               "lifecycle_status" => "open"
+             }) == :ok
+    end
+  end
+
   # Helper for the outcome.resolution describe — ExUnit forbids defp inside
   # describe blocks, so it lives at module level.
+  defp task_with_criteria(criteria) do
+    Validation.validate_task_content(%{
+      "kind" => "task",
+      "lifecycle_status" => "open",
+      "acceptance_criteria" => criteria
+    })
+  end
+
   defp task_with_outcome(outcome) do
     Validation.validate_task_content(%{
       "kind" => "task",

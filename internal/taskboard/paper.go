@@ -58,7 +58,9 @@ func paperMeasure(width int) int {
 
 // FetchPaper is the frame's single IO edge: one scoped read of the paper's
 // fail-closed source projection. An HTML source sets HTMLOnly so the frame can
-// honestly hand the reader off to a browser instead of rendering a blank.
+// honestly hand the reader off to a browser instead of rendering a blank. A
+// source that DECLARES blocks and carries an empty array is refused here rather
+// than hydrated (see the fence below): it is a broken answer, not a miss.
 // Every failure lands as a
 // one-line Err on a still-usable PaperState (never a panic, never a bare error
 // screen) AND is returned so the shell can log it. Loading is left false — the
@@ -83,6 +85,25 @@ func FetchPaper(c *apiclient.Client, dataset, slug string) (PaperState, error) {
 	ps.Rev = strings.TrimSpace(source.Rev)
 	switch source.Kind {
 	case "blocks":
+		// THE BOARD'S OWN FENCE ON THE WELL-FORMED-EMPTY ENVELOPE. Every
+		// apiclient check upstream of here passes on `"blocks":[]` — the bytes
+		// are non-empty, the JSON is valid, and the kind is KNOWN, so neither
+		// read arm (PaperSource's `case "blocks"`, PaperReleaseSource's
+		// envelope predicate) refuses it. It arrived as err=nil with a
+		// two-byte body, renderPaperBody's !blocksNonEmpty arm rendered the dim
+		// line "not found", and a reader was told a paper is MISSING by an
+		// envelope that answered with nothing. A source that declares blocks
+		// and carries none is a broken answer, not a miss: refuse it here, at
+		// the frame's single IO edge, so it lands as the honest
+		// "could not load paper — …" state on both arms at once.
+		//
+		// The !blocksNonEmpty render arm stays: it still covers the zero-value
+		// PaperState the shell holds before any fetch has run.
+		if !blocksNonEmpty(source.Blocks) {
+			err = fmt.Errorf("paper %s source: kind blocks carried no blocks", slug)
+			ps.Err = err.Error()
+			return ps, err
+		}
 		ps.BlocksRaw = source.Blocks
 	case "html":
 		ps.HTMLOnly = true
@@ -92,7 +113,8 @@ func FetchPaper(c *apiclient.Client, dataset, slug string) (PaperState, error) {
 
 // blocksNonEmpty reports whether raw is a JSON array with at least one element.
 // null / absent / "[]" / a non-array all count as empty — the HTMLOnly and
-// not-found branches key off this.
+// not-found render branches key off this, and so does FetchPaper's blocks
+// fence.
 func blocksNonEmpty(raw json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || string(trimmed) == "null" {

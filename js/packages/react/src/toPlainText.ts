@@ -2,7 +2,8 @@
 // Copyright 2026 Barkpark contributors
 
 import type { PortableTextBlock, PortableTextNode } from './PortableText'
-import { type Block, str, isMap, asList } from './inline'
+import { type Block, str, isMap, asList, codeSource } from './inline'
+import { listChildren } from './list-children'
 
 /**
  * Extracts the plain text from a PortableDocument value — the utility behind
@@ -175,15 +176,13 @@ function childrenText(list: unknown): string {
  * extracted as label-only. */
 function noteText(m: unknown): string {
   const rec = isMap(m) ? m : {}
-  const body = [str(rec.lead).trim(), proseContent(rec as Block)]
-    .filter((s) => s !== '')
-    .join(' ')
+  const body = [str(rec.lead).trim(), proseContent(rec as Block)].filter((s) => s !== '').join(' ')
   return [str(rec.label), body].filter((s) => s !== '').join(' ')
 }
 
 function listText(b: Block): string {
   return asList(b.items)
-    .map((it) => listItemText(it))
+    .flatMap((it) => [listItemText(it), ...listChildren(it).map(listText)])
     .filter((s) => s !== '')
     .join('\n')
 }
@@ -252,8 +251,12 @@ function blockText(b: Block): string {
       return listText(b)
     case 'callout':
       return joinBlocks([str(b.title), proseContent(b)])
+    // The FOUR accepted source keys, first non-blank wins (`codeSource`) — the
+    // same list blocks/core.ts renders from, so an excerpt can never be empty
+    // for a block the renderer paints (or vice versa). Reading `value` alone
+    // dropped every `code`/`text`/`content`-keyed block: 817 live rows.
     case 'code':
-      return str(b.value)
+      return codeSource(b)
     // ── code-story blocks (W7 grow: `diff` carries the verbatim unified-diff
     //    text in its `diff` attr (D75); `filetree` keeps the tree lines in
     //    `text` (D78) — both read as authored text, the `code` precedent) ─────

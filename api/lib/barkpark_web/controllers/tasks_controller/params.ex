@@ -13,7 +13,8 @@ defmodule BarkparkWeb.TasksController.Params do
   alias Barkpark.Repo
   alias Barkpark.Content.{CallerContext, Document, DraftId, Envelope}
   alias Barkpark.Content.Scope
-  alias Barkpark.Tasks.{Close, Criteria, QueueGate}
+  alias Barkpark.Tasks.{Close, Criteria, Dispatchability, QueueGate}
+  alias Barkpark.Tasks.Landed
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Query, as: TaskQuery
 
@@ -322,18 +323,40 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # Brief claim v2 = {worker, epoch, now} only — the identity + fencing +
   # now-line a board or resuming agent needs. work_digest / work_field_digests /
-  # ts_iso / execution_policy are full-view (and `task get`) detail. A claim
-  # with NEITHER a worker NOR a now-line carries no signal a list reader acts
-  # on (cut c) → nil, which prune_nils/1 then omits from the card.
+  # ts_iso / execution_policy are full-view (and `task get`) detail.
+  #
+  # cut (c), TIGHTENED (task-7385811ef5120f3a): the card carries a claim only
+  # when it names a WORKER. The old rule kept the block whenever a worker OR a
+  # now-line survived, which let LAPSED RESIDUE ride: when a lease is swept the
+  # server nulls `claim.worker` and leaves `epoch` + the last `now` line behind,
+  # so a row that is back on the ready queue — claimable by anyone — still
+  # rendered a claim object. Measured 2026-09-07 on a live `bp task ready
+  # --limit 50`: 16 of 50 cards carried a claim, 7 of them worker-less.
+  #
+  # WHY WORKER AND NOT `expired_at`: ownership on this card IS `claim.worker`.
+  # Every reader that asks "who holds this row" already reads that field and
+  # treats a blank as unheld — `taskScanRowMatcher` (internal/cli/tasks_scan.go)
+  # trims worker to decide `--claimed`, and `peek_claim/1`
+  # (plugins/tasks/web/board_live.ex) requires a non-empty binary worker. A
+  # `ready` row cannot hold a live claim by construction, so nothing that
+  # survives here is an ownership signal being withheld.
+  #
+  # NOTHING IS LOST, ONLY MOVED: this is the brief LIST card. `render_doc/2`
+  # :full — the shape `bp task get <doc_id>` and `?view=full` return — still
+  # emits `content.claim` verbatim, history and all. A live claim (worker
+  # present, as every `in_progress` row on `/v1/tasks/prime` has) is untouched.
   defp brief_claim(%{} = claim) do
-    worker = Map.get(claim, "worker")
-    now = Map.get(claim, "now")
+    case Map.get(claim, "worker") do
+      nil ->
+        nil
 
-    if is_nil(worker) and is_nil(now) do
-      nil
-    else
-      %{"worker" => worker, "epoch" => Map.get(claim, "epoch"), "now" => brief_now(now)}
-      |> prune_nils()
+      worker ->
+        %{
+          "worker" => worker,
+          "epoch" => Map.get(claim, "epoch"),
+          "now" => brief_now(Map.get(claim, "now"))
+        }
+        |> prune_nils()
     end
   end
 
@@ -447,10 +470,91 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # axi-s1: the brief LIST card = brief render_doc + `child_count` from
   # one batched grouped query (`batch_child_counts/2`) — never per-row.
-  def render_brief(%Document{} = doc, child_counts) do
+  def render_brief(%Document{} = doc, child_counts, live_child_counts \\ nil, live_parents \\ nil) do
+    key = strip_draft_prefix(doc.doc_id)
+    total = Map.get(child_counts, key, 0)
+    content = doc.content || %{}
+
     doc
     |> render_doc(:brief)
-    |> Map.put(:child_count, Map.get(child_counts, strip_draft_prefix(doc.doc_id), 0))
+    |> Map.put(:child_count, total)
+    |> put_brief_dispatch(total, live_child_counts, key)
+    |> put_brief_upstream(content, live_parents)
+  end
+
+  # THE UMBRELLA MARKER (task-52f4f3aff99c64d5), additive and pruned, same law
+  # as put_brief_labels/2 and put_brief_disposition/2 above.
+  #
+  # WHY A NEW KEY WHEN `child_count` IS ALREADY ON THE CARD: child_count is an
+  # INPUT the reader must interpret; this is the VERDICT. The row this fixes
+  # rendered `child_count: 359` on a P0 card and was still claimed as a slice,
+  # because a number among thirteen fields is not a refusal and the reader who
+  # misses it is the tired one the failure mode is about. `Dispatchability`
+  # owns the rule; this function only decides whether the key rides.
+  #
+  # ADDITIVE BY CONSTRUCTION, and that IS the negative arm: `classify/2`
+  # answers nil for every zero-child row, so all 979 of the 1,000 measured
+  # leaves emit a byte-identical card. A page of pure leaves is unchanged on
+  # the wire — including the hostile 50-card byte tripwire below, whose ~2,080
+  # B of headroom this cannot touch. Worst case is 50 delegated cards at
+  # `,"dispatch":"delegated"` = 24 B each = 1,200 B, inside that headroom; the
+  # measured page carries 13.
+  #
+  # `live_child_counts` DEFAULTS TO nil, NOT %{}: an empty map would read as
+  # "zero live children" and stamp `undecided` on every parent a caller could
+  # not measure. nil means UNMEASURED and omits the key entirely — a caller
+  # that has not paid for the live query says nothing rather than something
+  # false.
+  defp put_brief_dispatch(map, _total, nil, _key), do: map
+
+  defp put_brief_dispatch(map, total, live_child_counts, key) do
+    case Dispatchability.classify(total, Map.get(live_child_counts, key, 0)) do
+      nil -> map
+      class -> Map.put(map, :dispatch, class)
+    end
+  end
+
+  # ── THE CHILDLESS HALF OF THE SAME TRAP (task-e8d0fe00383f8499) ──────────
+  #
+  # `put_brief_dispatch/4` above reads the OUTBOUND edge and is structurally
+  # blind to a seal row whose children hang off a DIFFERENT root: it carries
+  # `child_count: 0` and renders as an ordinary leaf. THAT IS THE ROW THE
+  # WHOLE THING WAS FILED FOR — `task-08b05ad1e792a850`, "GOAL: drive the
+  # mobile epic to the seal", PRIORITY 0 — and #16762 walks straight past it.
+  #
+  # This reads the INBOUND edge: an UNMET criterion naming the row's own
+  # still-LIVE parent. `Dispatchability.classify_upstream/3` owns the rule and
+  # its moduledoc carries the hand-labelled precision (2/9 strict, 5/9 broad —
+  # the LEAST accurate of the three classes, which is why `upstream` is worded
+  # as a look-here and not a refusal) and the recall (1 of the 5 known misses,
+  # not 5).
+  #
+  # ONE KEY, AND `classify/2` OUTRANKS IT: a card already marked `delegated`
+  # or `undecided` keeps that. The parent edge is the stronger measurement
+  # (precision 11/15) and two dispatch values on one card would be two
+  # verdicts. Because the classes share the key, the hostile 50-card byte
+  # tripwire's WORST CASE is unchanged: 50 cards can still carry only one
+  # dispatch value each, and `,"dispatch":"upstream"` (22 B) is SHORTER than
+  # `,"dispatch":"delegated"` (23 B), which that tripwire already priced.
+  # MEASURED, not estimated, on the live 1,000-row page 2026-09-07: 8 cards
+  # gain the key (+176 B over 1,000); on its FIRST 50 CARDS — a real page,
+  # 17,908 B compact and thus already over the 15,360 B bound, a live defect
+  # this slice does not create and does not fix — exactly 2 cards gain it,
+  # +44 B (0.25%).
+  #
+  # `live_parents` DEFAULTS TO nil for the same reason `live_child_counts`
+  # does — an empty map would read as "no parent is live" and silently answer
+  # a question nobody measured.
+  defp put_brief_upstream(%{dispatch: _} = map, _content, _live_parents), do: map
+
+  defp put_brief_upstream(map, content, live_parents) do
+    parent_id = strip_draft_prefix(Map.get(content, "parent_id"))
+    criteria = Map.get(content, "acceptance_criteria")
+
+    case Dispatchability.classify_upstream(parent_id, live_parents, criteria) do
+      nil -> map
+      class -> Map.put(map, :dispatch, class)
+    end
   end
 
   # ─── Brief truncation honesty (axi-w2-s2, charter law 2) ─────────────────
@@ -477,16 +581,43 @@ defmodule BarkparkWeb.TasksController.Params do
   `limit` is the EFFECTIVE limit after clamping, so `?limit=5000` reports 1000:
   the number the caller asked for is not the number they got, and this field is
   about what they got.
+
+  ## `next_offset` — the continuation, minted WHERE `has_more` IS
+
+  `has_more: true` with nothing to pass back is a dead end dressed as a
+  promise. `offset` states where THIS page started; it is not a continuation,
+  because a caller that echoes it re-reads the page it already holds. So the
+  same expression that decides `has_more` also mints the token that acts on
+  it: `next_offset` is `offset + returned` exactly when `has_more` is true, and
+  `nil` otherwise.
+
+  OFFSET, NOT KEYSET, ON PURPOSE. `GET /v1/tasks/ready` is served by
+  `Tasks.ready/1`, whose ordering has no keyset axis to seek on, so an
+  offset-shaped continuation is the only one that route can honestly mint. The
+  index has BOTH: it keeps the keyset `next_cursor` for the caller who opted
+  in, and `page_block/2` in `TasksController` nils `next_offset` in that branch
+  — offset and cursor are two paging models the index already refuses to mix
+  (a `?cursor=` with a non-zero `?offset=` is a 400), and emitting both would
+  hand the caller two tokens that disagree about where page two begins.
+
+  DERIVED FROM `has_more`, NOT FROM A SECOND PREDICATE. Because it rides the
+  same cheap `returned == limit`, it inherits that predicate's one over-report:
+  an exactly-full last page mints a `next_offset` that returns zero rows. That
+  costs one empty round-trip and is the safe direction — the failure this
+  block exists to prevent is a continuation WITHHELD, never one too many.
   """
   def page_meta(docs, page_opts) when is_list(docs) do
     limit = Keyword.fetch!(page_opts, :limit)
+    offset = Keyword.fetch!(page_opts, :offset)
     returned = length(docs)
+    has_more = returned == limit
 
     %{
       limit: limit,
-      offset: Keyword.fetch!(page_opts, :offset),
+      offset: offset,
       returned: returned,
-      has_more: returned == limit
+      has_more: has_more,
+      next_offset: if(has_more, do: offset + returned, else: nil)
     }
   end
 
@@ -498,9 +629,22 @@ defmodule BarkparkWeb.TasksController.Params do
       else: base
   end
 
+  # MIRRORS THE EMISSION RULE, not just the caps: a now-line only counts as
+  # truncated when it actually RIDES the card. Since brief_claim/1 drops a
+  # worker-less claim whole (task-7385811ef5120f3a), a lapsed residue with a
+  # long now-line no longer ships a … anywhere, and counting it here would put
+  # the honesty banner on a page that cut nothing visible — charter law 2's
+  # line pointing at a truncation the reader cannot find.
   defp brief_truncated?(%Document{} = doc) do
+    content = doc.content || %{}
+    claim = Map.get(content, "claim")
+
+    now_text =
+      if is_map(claim) and not is_nil(Map.get(claim, "worker")),
+        do: get_in(claim, ["now", "text"])
+
     over_limit?(doc.title, @brief_title_limit) or
-      over_limit?(get_in(doc.content || %{}, ["claim", "now", "text"]), @brief_now_text_limit)
+      over_limit?(now_text, @brief_now_text_limit)
   end
 
   defp over_limit?(s, limit) when is_binary(s), do: String.length(s) > limit
@@ -600,10 +744,144 @@ defmodule BarkparkWeb.TasksController.Params do
              count(d.id)}
         )
         |> TaskQuery.collapse_twins()
+        |> collapse_cross_dataset(scope)
         |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
         |> maybe_filter_project(Keyword.get(scope, :project_id))
         |> Repo.all()
         |> Map.new()
+    end
+  end
+
+  # axi-s1 sibling (task-52f4f3aff99c64d5): the LIVE half of the child count.
+  #
+  # Identical query to batch_child_counts/2 above — same drafts-stripped
+  # parent key, same twin collapse, same tenancy filters, so it rides the same
+  # `children_parent_index` and can never disagree with the total about WHICH
+  # rows are children. The only difference is the lifecycle predicate.
+  #
+  # A SEPARATE query rather than a `count(...) FILTER (WHERE …)` on the
+  # existing one: batch_child_counts/2 returns a bare `%{key => integer}` that
+  # render_doc_with_counts/3, the prime path and three test modules read
+  # positionally, and widening it to a tuple would rewrite every one of those
+  # for a second grouped scan over the same index. One extra indexed grouped
+  # query per LIST PAGE (never per row) is the cheaper trade.
+  #
+  # `coalesce(…, 'open')` is load-bearing: bare SQL `NOT IN` against a NULL
+  # yields NULL, so a child with no lifecycle_status would drop out of the
+  # LIVE count and its parent would classify `undecided` — the rule would call
+  # an epic seal-ready on the strength of a missing field. Coalescing to
+  # 'open' makes an unresolved child count as live, which is the conservative
+  # reading. (Measured 2026-09-07: 0 of the 460 children under the 21 parents
+  # on a live ready page carried a null status.)
+  #
+  # Returns %{drafts-stripped parent doc_id => live child count}; a parent
+  # whose children are ALL terminal is simply absent and defaults to 0, which
+  # is exactly the `undecided` case.
+  def batch_live_child_counts(docs, scope \\ [])
+  def batch_live_child_counts([], _scope), do: %{}
+
+  def batch_live_child_counts(docs, scope) do
+    parent_keys =
+      docs
+      |> Enum.map(&strip_draft_prefix(&1.doc_id))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    terminal = Dispatchability.terminal_statuses()
+
+    case parent_keys do
+      [] ->
+        %{}
+
+      keys ->
+        from(d in Document,
+          where: d.type == "task",
+          where:
+            fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) in ^keys,
+          where: fragment("coalesce(?->>'lifecycle_status', 'open')", d.content) not in ^terminal,
+          group_by: fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
+          select:
+            {fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
+             count(d.id)}
+        )
+        |> TaskQuery.collapse_twins()
+        |> collapse_cross_dataset(scope)
+        |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
+        |> maybe_filter_project(Keyword.get(scope, :project_id))
+        |> Repo.all()
+        |> Map.new()
+    end
+  end
+
+  # task-e8d0fe00383f8499: the LIVE set of the page's PARENTS — the inbound
+  # half of the same edge `batch_live_child_counts/2` reads outbound.
+  #
+  # One extra indexed query per LIST PAGE, keyed on the page's distinct
+  # drafts-stripped `parent_id`s (measured: 1,000 ready rows carried 815
+  # parent_ids, far fewer distinct), never per row. Same twin collapse and
+  # same tenancy filters as the two grouped queries above, so it can never
+  # disagree with them about WHICH row a parent is.
+  #
+  # `coalesce(…, 'open')` is load-bearing in the same direction as its
+  # sibling: a parent with no lifecycle_status reads LIVE, because an
+  # unresolved parent is one the tree above has not stopped at.
+  #
+  # Returns a set-like `%{parent doc_id => true}`; a parent that is terminal
+  # is simply ABSENT, and absence is what makes `classify_upstream/3` stay
+  # silent rather than guess.
+  # THE DATASET AXIS of the twin rule at the two grouped child counts
+  # (task-49eef068420df918 — `Barkpark.Tasks.TwinResolver` rule 3 at a listing;
+  # that moduledoc holds the rule, this writes no second one).
+  # `TaskQuery.collapse_twins/1` immediately above is the DRAFT axis and
+  # requires `twin.dataset = d.dataset` BY DESIGN, so a child doc_id living in
+  # two datasets of one workspace+project counted TWICE: measured live on
+  # guerrilla 2026-09-06, an epic with nine children in both `production` and
+  # `aker-brygge` reported `child_count: 18`. Applied here as well as in
+  # `TasksController.child_tasks/2` for the reason the draft axis was:
+  # otherwise `bp task get <epic>` and `bp task ls --view=brief` report
+  # DIFFERENT counts for one epic — one number with two meanings.
+  #
+  # `scope` carries no `:dataset` today (`ScopeHelpers.scope_opts/1` emits
+  # workspace/project/caller_context only), so this always collapses — which is
+  # the correct default, because a caller who named no dataset is exactly the
+  # caller rule 3 refuses to pick for. The clause is written against `:dataset`
+  # anyway so that the day the scope carries one, a dataset-scoped count reads
+  # byte-identically instead of silently keeping the collapse.
+  defp collapse_cross_dataset(query, scope) do
+    case Keyword.get(scope, :dataset) do
+      d when is_binary(d) and d != "" -> query
+      _ -> TaskQuery.collapse_cross_dataset_twins(query)
+    end
+  end
+
+  def batch_live_parents(docs, scope \\ [])
+  def batch_live_parents([], _scope), do: %{}
+
+  def batch_live_parents(docs, scope) do
+    parent_keys =
+      docs
+      |> Enum.map(&strip_draft_prefix(Map.get(&1.content || %{}, "parent_id")))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    terminal = Dispatchability.terminal_statuses()
+
+    case parent_keys do
+      [] ->
+        %{}
+
+      keys ->
+        from(d in Document,
+          where: d.type == "task",
+          where: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id) in ^keys,
+          where: fragment("coalesce(?->>'lifecycle_status', 'open')", d.content) not in ^terminal,
+          select: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)
+        )
+        |> TaskQuery.collapse_twins()
+        |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
+        |> maybe_filter_project(Keyword.get(scope, :project_id))
+        |> Repo.all()
+        |> Map.new(&{&1, true})
     end
   end
 
@@ -659,6 +937,31 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # C2: a lightweight child summary — just enough to render the rail without
   # the full render_doc payload or a recursive child fetch (one level only).
+  #
+  # `updated_at` IS THE CLOSE-TIME FIELD (gr-bl-close-time-audit-vacuous-green).
+  # The rail used to carry `inserted_at` and nothing else, which made the
+  # obvious close-window audit — "which children of this epic closed between T1
+  # and T2?" — return ZERO ROWS over a payload that simply had no such field.
+  # Not an error: a silent wrong answer that reads exactly like "nothing closed
+  # in that window", on the one audit that catches false-done closes. The
+  # alternative route was fetching every done child INDIVIDUALLY (80 requests
+  # for one question), and that cost is what makes an agent reach for the
+  # broken shortcut in the first place.
+  #
+  # WHY updated_at AND NOT closed_at. A task RELEASES `content.claim` when it
+  # closes, so there is no per-row close stamp to surface — `closed_at` would be
+  # null on every closed row, which is the same silent zero wearing a better
+  # name. `documents.updated_at` is re-stamped by every write including the
+  # close, so for a row now in a terminal lifecycle_status it IS the close time,
+  # and it is a column already on the row this query loaded: no join, no second
+  # source of truth, no extra query. A caller that needs the transition itself
+  # (not its timestamp) reads `GET /v1/tasks/events`, which is the only surface
+  # that owns "what changed when".
+  #
+  # It is the SAME field `render_doc/2` puts on the full doc and on the brief
+  # card, so the rail and the list now answer the close-time question with one
+  # vocabulary. Pinned by `tasks_controller_test.exs`, "C2: the rail carries
+  # updated_at — the close-time field a window audit needs".
   def child_summary(%Document{} = doc) do
     content = doc.content || %{}
 
@@ -667,11 +970,39 @@ defmodule BarkparkWeb.TasksController.Params do
       title: doc.title,
       lifecycle_status: Map.get(content, "lifecycle_status"),
       execution_class: QueueGate.execution_class(content),
-      inserted_at: doc.inserted_at
+      inserted_at: doc.inserted_at,
+      updated_at: doc.updated_at
     }
     # Same omit-when-absent contract as render_doc — a parent's rail shows
     # each child's criteria progress without a per-child fetch.
     |> put_criteria_progress(content)
+    # dr-bl-w6 — THE RAIL MUST NAME A NEVER-PUBLISHED CHILD.
+    #
+    # `documents.status` is the draft/published column, and an UNPAIRED
+    # `drafts.<id>` row (a task that was created and never published — the
+    # majority shape: `bp task create` lands a draft by default) is admitted to
+    # this rail ON PURPOSE. `Tasks.Query.collapse_twins/1` suppresses only a
+    # shadow whose DISTINCT published twin exists in scope, and the ruling that
+    # an unpaired shadow SURVIVES is pinned by
+    # `tasks_controller_test.exs`'s "an UNPAIRED drafts.<id> child is still
+    # counted" (excluding them would trade a documented over-count for an
+    # undocumented under-count of real, claimable work — `Tasks.Queue`'s
+    # moduledoc, "WHAT IS NOT AN AXIS — documents.status").
+    #
+    # What was NOT honest is that the summary said nothing about it. The parent
+    # renders `status` (render_doc/:full, line ~219) and every brief LIST card
+    # renders it under the same omit-when-"published" law
+    # (render_doc/:brief, cut (h)) — only the RAIL dropped the field, so a
+    # never-published child was indistinguishable from a published one in the
+    # very payload whose `children` array feeds `child_count` and every
+    # criteria_progress denominator derived from it. A consumer that wants to
+    # discount never-published rows could not: the discriminator was not on the
+    # wire.
+    #
+    # Additive by construction, and the omit law is the negative arm: a
+    # published child emits a BYTE-IDENTICAL summary (`put_unless` drops the
+    # steady state), so only the draft rows grow `"status":"draft"`.
+    |> put_unless(:status, doc.status, "published")
   end
 
   # ─── Opt building / int parsing / validation ────────────────────────────
@@ -1028,7 +1359,7 @@ defmodule BarkparkWeb.TasksController.Params do
   @index_flat_keys ~w(view limit offset cursor type kind lifecycle_status parent parent_id phase_id label id_prefix)
   @ready_flat_keys ~w(view limit offset phase_id order worker)
   @prime_flat_keys ~w(view limit offset worker order)
-  @events_flat_keys ~w(since limit)
+  @events_flat_keys ~w(since limit doc_id payload)
 
   @route_filters %{
     index: %{
@@ -1095,7 +1426,8 @@ defmodule BarkparkWeb.TasksController.Params do
       ~s|  bp task claim #{doc_id} #{worker_id} --yes\n| <>
       ~s|Containers are exempt already (a decision/goal label, a non-task kind, or a row with | <>
       ~s|children), so if this IS a container, label it rather than overriding. To claim anyway, | <>
-      ~s|on the record: --set criteria_unstated_override="<why this row needs none>".|
+      ~s|on the record: --set criteria_unstated_override="<why this row needs none>" — the reason | <>
+      ~s|is stored as claim.criteria_unstated_override on the claim itself and survives the close.|
   end
 
   @doc """
@@ -1312,6 +1644,9 @@ defmodule BarkparkWeb.TasksController.Params do
   def reason_to_string({:criteria_unmet, indices}) when is_list(indices),
     do: "criteria_unmet:#{Enum.join(indices, ",")}"
 
+  def reason_to_string({:criteria_raised_on_abandon, indices}) when is_list(indices),
+    do: "criteria_raised_on_abandon:#{Enum.join(indices, ",")}"
+
   def reason_to_string({:acknowledgement_unposted, issue}),
     do: "acknowledgement_unposted:#{issue || "?"}"
 
@@ -1330,10 +1665,14 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def criteria_hint(:criterion_text_required, :stamp),
     do:
-      ~s|--met requires --criterion-text "<the criterion's exact stored wording>". | <>
-        ~s|--criterion N is a 0-BASED index — the FIRST criterion is 0 — and is unverifiable on its own: | <>
-        ~s|an unguarded index silently flips whatever row it lands on. Read the wording from | <>
-        ~s|`bp task get <id>` at acceptance_criteria[N].criterion and pass it verbatim. --miss needs no text.|
+      ~s|--met requires the criterion's EXACT stored wording alongside --criterion N. Pass it from a FILE — | <>
+        ~s|--criterion-text-file <path>, or `-` to read it from stdin — and NEVER by retyping the wording as an | <>
+        ~s|inline shell argument: criterion wording is MARKDOWN, and a `backticked code span` inside a double-quoted | <>
+        ~s|argument is COMMAND SUBSTITUTION, so bash/zsh EXECUTE it and bp is handed text that is not the stored | <>
+        ~s|wording. --criterion N is a 0-BASED index — the FIRST criterion is 0 — and is unverifiable on its own: | <>
+        ~s|an unguarded index silently flips whatever row it lands on. Recipe: | <>
+        ~s|bp task get <id> -o json \| jq -r '.doc.content.acceptance_criteria[N].criterion' > crit.txt, then | <>
+        ~s|--criterion N --criterion-text-file crit.txt. --miss needs no text.|
 
   def criteria_hint(:criterion_text_required, :close),
     do:
@@ -1358,7 +1697,9 @@ defmodule BarkparkWeb.TasksController.Params do
     do:
       ~s|this criterion is a MERGE GATE — the LEAD closes it when the PR merges, and a builder flipping it | <>
         ~s|fabricates a done before the PR exists. Nothing was written. If you ARE the lead closing the gate, | <>
-        ~s|re-run with --merge-gated. | <>
+        ~s|re-run with --merge-gated — which RECORDS your assertion, marked verified:false and | <>
+        ~s|stamped with the api_token you authenticated with, rather than checking your role: the | <>
+        ~s|server does not verify that you are a lead and cannot. | <>
         ~s|IF THIS ROW IS NOT A GATE, THE MATCH WAS ON ITS PROSE AND IS A FALSE POSITIVE: with no explicit | <>
         ~s|"merge_gate" key on the criterion the guard falls back to matching the MERGE-GATED / MERGE GATE | <>
         ~s|wording anywhere in the text, which over the live corpus (2026-08-22) is a mention rather than a | <>
@@ -1435,7 +1776,9 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|That row is not: it carries no "merge_gate": true, and its wording says nothing about being merge-gated | <>
         ~s|or about a PR being merged to main. Nothing was written (the flip and the landing sentence ride one CAS). | <>
         ~s|A criterion proven by WORK is stamped by whoever did the work — `bp task stamp <id> <worker> <epoch> | <>
-        ~s|--criterion N --criterion-text "…" --met --evidence "…"`. If this row really is the lead's merge gate, | <>
+        ~s|--criterion N --criterion-text-file <file holding the exact wording> --met --evidence "…"` | <>
+        ~s|(the wording rides a FILE, never an inline shell argument — a `backticked code span` in it would be | <>
+        ~s|COMMAND SUBSTITUTION). If this row really is the lead's merge gate, | <>
         ~s|mark it "merge_gate": true on the criterion and the landing mark will seal it. | <>
         ~s|Re-run without --criterion to record the landing sentence alone.|
 
@@ -1457,7 +1800,9 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|row, not the builder"; it never meant "a merge closes it", and a landing notice flipping this one | <>
         ~s|would stamp your --note as proof of a run nobody made. Nothing was written (the flip and the landing | <>
         ~s|sentence ride one CAS). Whoever DID the demo stamps it: `bp task stamp <id> <worker> <epoch> | <>
-        ~s|--criterion N --criterion-text "…" --met --evidence "…"`. If a merge really does discharge this row, | <>
+        ~s|--criterion N --criterion-text-file <file holding the exact wording> --met --evidence "…"` | <>
+        ~s|(the wording rides a FILE, never an inline shell argument — a `backticked code span` in it would be | <>
+        ~s|COMMAND SUBSTITUTION). If a merge really does discharge this row, | <>
         ~s|say so on the criterion — "merge_discharges": true — and the landing mark will seal it from then on. | <>
         ~s|Re-run without --criterion to record the landing sentence alone.|
 
@@ -1506,8 +1851,29 @@ defmodule BarkparkWeb.TasksController.Params do
     do:
       ~s|acceptance criteria #{Enum.join(indices, ", ")} (0-BASED) are not met on the task AS STORED, and criteria | <>
         ~s|flipped in this very close command do not count — that would be the closer grading its own homework. | <>
-        ~s|Stamp them as you prove them (`bp task stamp <id> <worker> <epoch> --criterion N --criterion-text "…" | <>
-        ~s|--met --evidence "…"`), or close over them on the record: --set criteria_override="<why it is done anyway>".|
+        ~s|Stamp them as you prove them (`bp task stamp <id> <worker> <epoch> --criterion N | <>
+        ~s|--criterion-text-file <file holding the exact wording> --met --evidence "…"` — the wording rides a FILE, | <>
+        ~s|never an inline shell argument, because a `backticked code span` in it would be COMMAND SUBSTITUTION), | <>
+        ~s|or close over them on the record: --set criteria_override="<why it is done anyway>".|
+
+  # THE RAISE GATE (task-8ca0bd7a8ed50f14). The refusal has to say the thing the
+  # caller is about to get wrong: it is NOT "you may not cancel this row" — the
+  # cancel is fine and every other gate still waves it through — it is "this
+  # cancel is also asserting something". So the hint names the honest cancel
+  # FIRST (drop the met flips, keep the reason), and offers the stamp only as
+  # the other honest route, because reaching for a stamp you cannot prove is the
+  # same lie one command later. There is deliberately NO override to name.
+  def criteria_hint({:criteria_raised_on_abandon, indices}, :close) when is_list(indices),
+    do:
+      ~s|acceptance criteria #{Enum.join(indices, ", ")} (0-BASED) would be RAISED to met=true by this close, | <>
+        ~s|and its lifecycle abandons the work — a cancel may abandon acceptance criteria, it may never assert | <>
+        ~s|them. Nothing was written. The cancel itself is fine and no other gate is in your way: re-run it | <>
+        ~s|WITHOUT the met flips and put what you learned in the reason. Lowering met, clearing evidence and | <>
+        ~s|editing criterion text all still land on this close — only raising is refused. If a criterion really | <>
+        ~s|IS proven, prove it before you abandon the row: bp task stamp <id> <worker> <epoch> --criterion N | <>
+        ~s|--criterion-text-file <file holding the verbatim wording> --met --evidence "…", then close | <>
+        ~s|(a FILE, not an inline argument — a `backticked code span` in the wording would be COMMAND SUBSTITUTION). | <>
+        ~s|There is no override, on purpose.|
 
   # The reporter loop (`Github.Acknowledgement`). This refusal must carry three
   # things the caller cannot get anywhere else: WHO is waiting (someone outside
@@ -1625,6 +1991,48 @@ defmodule BarkparkWeb.TasksController.Params do
   def fence_hint(_reason, _surface, _current_epoch), do: nil
 
   @doc """
+  The rev-CAS 409's remedy sentence (task-8ca0bd7a8ed50f14).
+
+  There are TWO 409s on the close path and only one of them was worded for what
+  actually happened.
+
+    1. `doc_changed_since_claim` — the work-digest fence. Correct today: it names
+       the BRIEF fields that drifted, supplies `current_rev` in the refusal body,
+       and prescribes a re-read or an explicit `observed_rev` pin.
+    2. `stale_claim` — minted when `fenced_content_write/4` matches 0 rows on
+       `d.rev == observed_rev`. The REV moved; the epoch never did. The token
+       says "claim", so a caller reads it as a lapsed lease and RE-CLAIMS — which
+       is the one wrong move: it bumps the epoch, invalidates the epoch they were
+       holding, and does nothing about the rev that actually moved.
+
+  The two are distinguishable by whether the message names the BRIEF or the
+  EPOCH, and this hint exists so the second one names NEITHER — it names the REV.
+  The reason token itself is unchanged: `internal/cli/errors.go` and the pr-task
+  gate both string-match it, and renaming a wire token to fix a sentence is the
+  wrong trade.
+  """
+  @spec stale_rev_hint(atom() | tuple(), atom(), String.t() | nil) :: String.t() | nil
+  def stale_rev_hint(:stale_claim, surface, current_rev)
+      when is_binary(current_rev) and surface in [:close, :stamp] do
+    ~s|despite the name, your CLAIM is fine — nothing happened to the lease and the epoch you passed is | <>
+      ~s|still the one this row carries. What moved is the row's `rev`: this write is fenced on the rev you | <>
+      ~s|read, another writer committed first, and the row is at #{current_rev} now. Nothing was written. | <>
+      ~s|Do NOT re-claim — that advances the epoch and throws away the one you are holding without touching | <>
+      ~s|the rev. Re-read the row, confirm your close still describes it, and re-run the SAME command on the | <>
+      ~s|SAME epoch: bp task #{surface} <id> <worker> <your epoch> --set observed_rev=#{current_rev}|
+  end
+
+  def stale_rev_hint(:stale_claim, surface, _current_rev) when surface in [:close, :stamp] do
+    ~s|despite the name, your CLAIM is fine — the epoch you passed is still the one this row carries. What | <>
+      ~s|moved is the row's `rev`: this write is fenced on the rev you read and another writer committed | <>
+      ~s|first. Nothing was written. Do NOT re-claim — that advances the epoch and leaves the rev exactly | <>
+      ~s|as stale. Re-read the row and re-run the SAME command on the SAME epoch: | <>
+      ~s|bp task get <id> -o json -> .doc.rev, then bp task #{surface} <id> <worker> <your epoch>|
+  end
+
+  def stale_rev_hint(_reason, _surface, _current_rev), do: nil
+
+  @doc """
   The edited-under-you 409's remedy sentence
   (pds-bl-close-409-hint-promises-absent-fields).
 
@@ -1666,7 +2074,6 @@ defmodule BarkparkWeb.TasksController.Params do
   # sync by the conn test that asserts the claim receipt's `seconds` equals the
   # configured value — a drift between the number the sweeper enforces and the
   # number the receipt promises is the whole defect this closes.
-  @default_lease_ttl_seconds 2700
 
   # ─── The lease a claim/pulse just granted (claim-lease, wave 27) ─────────
   #
@@ -1691,7 +2098,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # RENEWAL: claim (renewal path), re-claim and pulse all refresh `ts_iso`, so
   # the same function describes the lease after a heartbeat with no special case.
   def claim_lease(%Document{} = doc) do
-    ttl = Application.get_env(:barkpark, :task_lease_ttl_seconds, @default_lease_ttl_seconds)
+    ttl = QueueGate.lease_ttl_seconds()
 
     with ts when is_binary(ts) <- get_in(doc.content || %{}, ["claim", "ts_iso"]),
          {:ok, granted, _} <- DateTime.from_iso8601(ts) do
@@ -1737,7 +2144,7 @@ defmodule BarkparkWeb.TasksController.Params do
 
   defp stamp_template(id, worker, epoch, index) do
     ~s|bp task stamp #{id} #{worker} #{epoch} --criterion #{index} --met --evidence "..." | <>
-      ~s|--criterion-text "<acceptance_criteria[#{index}].criterion, verbatim>"|
+      ~s|--criterion-text-file <file holding acceptance_criteria[#{index}].criterion, verbatim>|
   end
 
   defp close_template(id, worker, epoch) do
@@ -1988,6 +2395,35 @@ defmodule BarkparkWeb.TasksController.Params do
   def parse_landed_criterion(_), do: {:error, :invalid_landed, @landed_criterion_msg}
 
   @doc """
+  Parses the OPTIONAL `landed` digest off a CLOSE body.
+
+  THE UNLOCKED DOOR (task-4ab4a5b58bce97a6). Every other opt on close/2's
+  pipeline gets a `parse_*`; `landed` alone went through `put_opt/3` raw, so a
+  caller could post any JSON shape and `Tasks.Internal.merge_landed/2` would
+  normalise what it recognised and silently drop the rest — a 2xx asserting a
+  landing the ledger does not hold.
+
+  The check is NOT written here. It is `Tasks.Landed.check_digest/1`, the same
+  module (and, for `files`, the same `check_files/1`) the `/landed` route
+  already runs, so the close door and the landing door cannot drift into
+  disagreeing about what a storable digest is. This function only translates
+  that module's verdict into the door's tagged tuple.
+
+  SHAPE only (→ 422 `invalid_landed_digest`, naming the field). Whether the PR
+  it names actually merged for THIS task is not a shape question: it is
+  answered by the server's own observation in
+  `Tasks.Close.reconcile_merge_gate/3`, never by the caller's bytes.
+  """
+  @spec parse_landed_digest(term()) ::
+          {:ok, map() | nil} | {:error, :invalid_landed_digest, String.t()}
+  def parse_landed_digest(raw) do
+    case Landed.check_digest(raw) do
+      {:ok, digest} -> {:ok, digest}
+      {:error, message} -> {:error, :invalid_landed_digest, message}
+    end
+  end
+
+  @doc """
   The two SHAPE rules a landing mark must satisfy before any DB work:
 
     * at least one of `commit` / `pr` / `note` carries something — a landing
@@ -2036,15 +2472,58 @@ defmodule BarkparkWeb.TasksController.Params do
   defp landed_present(_), do: nil
 
   @doc """
-  Reads the LEAD-ONLY `--merge-gated` override off a stamp request, from the
-  kebab manifest flag (query key `merge-gated`) or the snake JSON body key.
-  Absent / anything but a truthy scalar → `false`: the override must be ASKED
-  FOR, never inferred, because it is the one flag that lets a caller flip a
-  row the lead owns.
+  Reads the LEAD-OWNED, UNENFORCED `--merge-gated` override off a stamp
+  request, from the kebab manifest flag (query key `merge-gated`) or the snake
+  JSON body key. It is no longer a boolean: THE OVERRIDE CARRIES ITS REASON.
+
+  Returns `{:ok, reason}` for a non-blank string, `{:ok, nil}` when the override
+  was not asked for (absent, blank, or an explicitly falsy scalar — the override
+  must be ASKED FOR, never inferred, because it is the one flag that lets a
+  caller flip a row the lead owns), and `{:error, :invalid_stamp, msg}` for the
+  LEGACY BARE-BOOLEAN spelling (`merge-gated=true`, `1`, `yes`, `on`).
+
+  THE BARE BOOLEAN IS REFUSED, NOT SILENTLY ACCEPTED. While it was a boolean the
+  override cost one word and recorded nothing, so a reflex override and a
+  deliberate one were byte-identical on the record. Accepting `true` here as "an
+  override with no reason" would keep exactly that hole open for every direct
+  POST and every unupgraded client — and the merge-gate verdict itself was moved
+  server-side precisely because a CLI-only guard is bypassed by a direct POST.
+  This REFUSES more than before and permits nothing new: no criterion becomes
+  stampable that was not stampable already.
   """
-  @spec stamp_merge_gated(map()) :: boolean()
+  @spec stamp_merge_gated(map()) ::
+          {:ok, String.t() | nil} | {:error, :invalid_stamp, String.t()}
   def stamp_merge_gated(params) do
-    stamp_flag?(Map.get(params, "merge_gated") || Map.get(params, "merge-gated"))
+    merge_gated_reason(Map.get(params, "merge_gated") || Map.get(params, "merge-gated"))
+  end
+
+  @merge_gated_bare_truthy [true, 1, "true", "1", "yes", "on", "TRUE", "True", "Yes", "On"]
+
+  # The falsy spellings a boolean flag used to accept. They are NOT a reason —
+  # a caller spelling the override off asked for no override, and reading
+  # "false" as a signed sentence would let the word `false` release a gate.
+  @merge_gated_bare_falsy ["false", "0", "no", "off", "FALSE", "False", "No", "Off"]
+
+  defp merge_gated_reason(v) when v in @merge_gated_bare_truthy,
+    do: {:error, :invalid_stamp, merge_gated_reason_message()}
+
+  defp merge_gated_reason(v) when is_binary(v) do
+    case String.trim(v) do
+      "" -> {:ok, nil}
+      reason -> if reason in @merge_gated_bare_falsy, do: {:ok, nil}, else: {:ok, reason}
+    end
+  end
+
+  defp merge_gated_reason(_), do: {:ok, nil}
+
+  defp merge_gated_reason_message do
+    "merge-gated now takes a REASON, not a boolean: you sent the bare truthy spelling. " <>
+      "The override is the ONE way a --met flips a row the lead closes on merge, and while it was " <>
+      "a bare boolean it recorded nothing — a reflex override and a deliberate one were identical " <>
+      "on the record. Send merge-gated=<why this stamp is the lead's to make> (bp: " <>
+      "--merge-gated \"PR #17107 merged to main as <sha>\"). The reason is persisted beside the stamp " <>
+      "at content.merge_gate_autostamp.stamp_overrides[].reason, on the same write as the flip — " <>
+      "the shape close_override.* already uses. It is still an ASSERTION and not a permission."
   end
 
   @doc """

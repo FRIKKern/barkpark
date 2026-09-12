@@ -11,10 +11,24 @@
 #   barkpark stop      stop the server and the managed Postgres — killing only a
 #                      process it can identify as ours, never a stranger that
 #                      happens to hold the port.
+#   barkpark stop --force <pid>
+#                      the owner's explicit way out of a WEDGED server: a process
+#                      that holds $PORT but does not answer /status.json, with a
+#                      pidfile that does not name it. Plain `stop` refuses it
+#                      (rightly — it cannot tell it from a stranger on 4000) and
+#                      `up` then dies on the held port, so `reload` dead-ends.
+#                      --force takes the pid EXPLICITLY, refuses any pid that
+#                      does not currently hold $PORT, and names what it kills.
+#                      There is no silent fallback: nothing is ever killed on an
+#                      uncorroborated claim, only on one the owner typed.
 #   barkpark status    report Postgres + the OBSERVED server state — one of
 #                      ANSWERING / PROCESS-ALIVE-NOT-ANSWERING / STOPPED /
 #                      UNKNOWN, decided from the port and an HTTP answer,
 #                      never from a pidfile alone.
+#   barkpark token     mint the box's admin credential (idempotent — it refuses
+#                      to mint a second while an unrevoked one is present) and
+#                      print it ONCE. This is the key to /studio and to every
+#                      admin-gated route; `up` never mints on its own.
 #   barkpark psql ...  open a psql shell on the managed Postgres.
 #
 # ── CONFIG-RELOAD FOOTGUN ─────────────────────────────────────────────────────
@@ -165,9 +179,10 @@ start_server() {
         echo "$lpid" >"$SERVER_PID_FILE"
       fi
       log "server already running (pid $lpid) — ANSWERING on http://$PHX_HOST:$PORT/studio"
+      report_credential
       return 0
     fi
-    die "port $PORT is held by pid $lpid but http://$PHX_HOST:$PORT/api/schemas does not answer — a wedged server, one still booting, or something else entirely. Run 'barkpark status', then stop it (kill $lpid) or set PORT=<other>; see $SERVER_LOG"
+    die "port $PORT is held by pid $lpid but http://$PHX_HOST:$PORT/status.json does not answer — a wedged server, one still booting, or something else entirely. Run 'barkpark status' first; if it is still wedged, the way out is 'barkpark stop --force $lpid' (it kills that pid and only that pid, and refuses if $lpid is not the one holding port $PORT), or set PORT=<other>; see $SERVER_LOG"
   fi
 
   # Nothing is listening, so ANY pidfile here is a claim we cannot corroborate:
@@ -196,12 +211,54 @@ start_server() {
   fi
   echo "$pid" >"$SERVER_PID_FILE"
   log "server up (pid $pid) — http://$PHX_HOST:$PORT/studio"
+  report_credential
 }
 
+# ── the credential the printed /studio URL needs ─────────────────────────────
+#
+# A boot line naming a URL is a CLAIM that the URL is usable. On a fresh box it
+# is not: users 0, api_tokens 0, and /studio 302s to a /login that offers
+# Email+Password against no users and API token against no tokens (/register and
+# /signup are 404). So say which of the two worlds this box is in, and when it is
+# the empty one, name the command that fixes it.
+#
+# The probe is the managed Postgres, because that is the only place the answer
+# lives — /status.json is public and tells us nothing about credentials.
+# `permissions` is a text[] (Barkpark.Auth.ApiToken: {:array, :string}), hence
+# `= ANY(...)`; `kind='api'` is what Auth.verify_token/1 filters on; an unrevoked
+# token is `revoked_at IS NULL` — the same three predicates
+# Seeds.Clean.admin_token_present?/1 applies.
+admin_token_count() {
+  "$PG" psql --quiet --tuples-only --no-align --command \
+    "SELECT count(*) FROM api_tokens WHERE revoked_at IS NULL AND kind = 'api' AND 'admin' = ANY(permissions)" \
+    2>/dev/null | tr -dc '0-9'
+}
+
+# Anything we cannot READ as a positive count is reported as "no credential".
+# The failure directions here are a missing psql, an unmigrated DB and a
+# Postgres that is down, and in every one of them the honest answer is "I cannot
+# show you a key", never a silent claim that one exists.
+report_credential() {
+  local n
+  n="$(admin_token_count || true)"
+  if [ -n "$n" ] && [ "$n" -gt 0 ] 2>/dev/null; then
+    log "admin credential: present ($n) — sign in at http://$PHX_HOST:$PORT/login"
+  else
+    log "admin credential: NONE — http://$PHX_HOST:$PORT/studio has no key yet. Mint one: bin/barkpark token"
+  fi
+}
+
+# The path is /status.json, NOT the legacy /api/schemas: that route pipes
+# through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+# `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, and this loop gates on `curl -sf`
+# (2xx only), so after removal `barkpark up` would `die` on every healthy boot.
+# No older-build fallback is needed HERE: wait_server only ever waits on the
+# server this script just started out of THIS checkout, which carries
+# /status.json (router.ex, :api pipeline, no deprecation scope, no token).
 wait_server() {
   local i
   for i in $(seq 1 60); do
-    if curl -sf "http://$PHX_HOST:$PORT/api/schemas" >/dev/null 2>&1; then
+    if curl -sf "http://$PHX_HOST:$PORT/status.json" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -217,6 +274,10 @@ wait_server() {
 # Barkpark API. Anything else we refuse to kill, and we say why.
 stop_server() {
   local claim lpid pid why
+  # Set when we refuse an unidentified port holder, so a CALLER (cmd_reload) can
+  # tell "stopped" from "refused" without re-deriving the state. Cleared on
+  # every call so a second stop in one process cannot inherit a stale verdict.
+  STOP_REFUSED_PID=""
   claim="$(cat "$SERVER_PID_FILE" 2>/dev/null || true)"
   lpid="$(listener_pid || true)"
   pid=""
@@ -227,12 +288,14 @@ stop_server() {
     why="$SERVER_PID_FILE names the pid holding port $PORT"
   elif [ -n "$lpid" ] && server_answering; then
     pid="$lpid"
-    why="it answers http://$PHX_HOST:$PORT/api/schemas"
+    why="it answers http://$PHX_HOST:$PORT/status.json (or, on an older build, /api/schemas)"
   fi
 
   if [ -z "$pid" ]; then
     if [ -n "$lpid" ]; then
-      log "refusing to stop pid $lpid — it holds port $PORT but does not answer http://$PHX_HOST:$PORT/api/schemas and $SERVER_PID_FILE does not name it, so it is not identifiably Barkpark. Nothing was killed (run 'kill $lpid' yourself if it is yours)."
+      STOP_REFUSED_PID="$lpid"
+      log "refusing to stop pid $lpid — it holds port $PORT but answers neither http://$PHX_HOST:$PORT/status.json nor the legacy /api/schemas, and $SERVER_PID_FILE does not name it, so it is not identifiably Barkpark. Nothing was killed."
+      log "  if that pid IS your wedged Barkpark, the way out is: barkpark stop --force $lpid"
     elif [ -n "$claim" ] && kill -0 "$claim" 2>/dev/null; then
       log "not stopping pid $claim — $SERVER_PID_FILE claims it, but nothing is listening on port $PORT. Stale pidfile: discarding it without killing anything."
     else
@@ -258,6 +321,60 @@ stop_server() {
   rm -f "$SERVER_PID_FILE"
 }
 
+# ── the explicit way out of a wedged server ──────────────────────────────────
+#
+# `stop` refuses a port holder it cannot identify as Barkpark, and `up` then
+# dies because the port is held — two correct refusals that compose into a dead
+# end for one real state (wedged/half-booted server, pidfile that does not name
+# it). This is the way out, and it is deliberately NOT a fallback inside
+# stop_server: the pid is not inferred, it is TYPED BY THE OWNER, which is the
+# only corroboration a process that answers nothing can have.
+#
+# Two refusals guard it, and both come BEFORE any signal is sent:
+#   * no pid, or a non-numeric one — there is nothing to name, so nothing dies;
+#   * a pid that is not the one currently holding $PORT — that is the stranger
+#     case wave 24 exists to prevent, and typing --force does not license it.
+# Only a pid that IS the current port holder is killed, and it is named in the
+# line printed before the kill.
+force_stop_pid() { # <pid>
+  local pid="${1:-}" lpid i
+
+  case "$pid" in
+    "")            die "stop --force needs the pid it may kill: barkpark stop --force <pid>. Run 'barkpark status' to see which pid holds port $PORT. Nothing was killed." ;;
+    *[!0-9]*)      die "stop --force takes a pid, not '$pid'. Nothing was killed." ;;
+  esac
+
+  lpid="$(listener_pid || true)"
+  if [ -z "$lpid" ]; then
+    die "refusing to force-kill pid $pid — nothing is listening on port $PORT, so that pid is not a wedged Barkpark server on this port. Nothing was killed."
+  fi
+  if [ "$pid" != "$lpid" ]; then
+    die "refusing to force-kill pid $pid — port $PORT is held by pid $lpid, not $pid. --force only ever kills the pid that holds the port. Nothing was killed."
+  fi
+
+  log "force-stopping pid $pid — it holds port $PORT and you named it explicitly (it is NOT corroborated as Barkpark; nothing else will be signalled)"
+  kill "$pid" 2>/dev/null || true
+  for i in $(seq 1 15); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  rm -f "$SERVER_PID_FILE"
+  log "port $PORT released — 'barkpark up' can boot now"
+}
+
+# `reload` is stop+start, so it inherits stop's refusal. Without this it would
+# refuse, then walk into a start_server that CANNOT succeed (the port is still
+# held) and report a second, differently-worded failure. Stop at the refusal and
+# print the one-line recovery instead — the owner is told at the moment of the
+# refusal, not left to infer it from a boot error.
+reload_stop_or_explain() {
+  stop_server
+  if [ -n "${STOP_REFUSED_PID:-}" ]; then
+    die "reload stopped: port $PORT is still held by pid $STOP_REFUSED_PID, which is not identifiably Barkpark, so nothing was killed and nothing can boot on that port. Your way out, in one line: barkpark stop --force $STOP_REFUSED_PID && barkpark up   (or re-run with PORT=<other> to leave that process alone)"
+  fi
+}
+
 # ── migrations ───────────────────────────────────────────────────────────────
 
 migrate() {
@@ -277,6 +394,37 @@ cmd_up() {
   start_server          # T5.3 — boot + wait + print URL
 }
 
+# Mint the box's admin credential by reaching the mint that already exists:
+# Barkpark.Seeds.Clean.bootstrap_admin_token/1, via the ordinary seed entrypoint.
+# That function is idempotent at the seed level — it skips when an unrevoked
+# admin token is already present, so this verb is safe to re-run and cannot mint
+# a second key alongside a live one.
+#
+# WHY THIS IS ITS OWN VERB AND NOT A STEP IN `up`. Seeding on every boot changes
+# two things a boot verb must not decide by side effect: it re-mints after a
+# deliberate revoke (admin_token_present?/1 requires revoked_at IS NULL, so the
+# bootstrap gate never closes), and with a FIXED BARKPARK_SEED_ADMIN_TOKEN that
+# was later revoked it hits the unique index on token_hash, MatchErrors inside
+# mint_admin_token!, and takes the boot down with it under `set -euo pipefail`.
+# Both are tracked on pds-bl-up-seed-remint-crash-after-revoke. An explicit verb
+# is the owner asking for a key, not the box deciding to make one.
+#
+# BARKPARK_SEED_PROFILE=clean IS PINNED, and pinned AFTER load_env so a value in
+# ~/.barkpark/.env cannot win. The default profile is `demo`, which installs the
+# SHARED, PLAINTEXT `barkpark-dev-token` with read/write/admin — inheriting that
+# default would turn a missing-credential bug into a shipped-shared-credential
+# bug on every personal box.
+cmd_token() {
+  command -v mix >/dev/null 2>&1 || die "mix not found on PATH — install Elixir"
+  ensure_secrets
+  ensure_bundle_import_flag
+  "$PG" start >/dev/null
+  load_env
+  migrate
+  log "minting the admin credential (seed profile: clean — pinned, never the demo default)"
+  ( cd "$API_DIR" && exec env BARKPARK_SEED_PROFILE=clean mix run priv/repo/seeds.exs )
+}
+
 # T5.6 — restart the server so a changed ~/.barkpark/.env takes effect.
 # Postgres is normally left running; only the BEAM is recycled. We still call
 # `barkpark-pg start` (idempotent — a no-op if already up) so a reload after a
@@ -284,20 +432,48 @@ cmd_up() {
 # server boots in :prod and tries to connect to the managed DB.
 cmd_reload() {
   log "reload: restarting server so config changes take effect"
-  stop_server
+  reload_stop_or_explain
   "$PG" start >/dev/null
   load_env
   start_server
 }
 
-cmd_stop() {
-  stop_server
+cmd_stop() { # [--force <pid>]
+  case "${1:-}" in
+    --force)
+      force_stop_pid "${2:-}"
+      ;;
+    "")
+      stop_server
+      ;;
+    *)
+      die "unknown argument '$1' — usage: barkpark stop [--force <pid>]"
+      ;;
+  esac
   "$PG" stop
 }
 
-# Does the server ANSWER? The same probe wait_server uses to decide the boot
-# succeeded — liveness is "it serves HTTP", never "a pid exists".
+# Does the server ANSWER? Liveness is "it serves HTTP", never "a pid exists".
+#
+# TWO paths, in this order, and the SECOND one is deliberate. /status.json is
+# the primary: /api/schemas pipes through BarkparkWeb.Plugs.LegacyDeprecation
+# and carries a published `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, so a probe
+# that gates on it alone is red on a healthy box the day it is removed.
+#
+# But this function is not only a health check — `stop` and `status` use it to
+# decide whether the process holding $PORT is IDENTIFIABLY Barkpark, and the
+# thing holding the port may be an OLDER build than this checkout. /status.json
+# only exists from d40092ab9 (2026-07-05); the same caveat is stated at
+# running_version() below. A pre-July-2026 server answers /api/schemas and not
+# /status.json — and it keeps answering it after the sunset, because the removal
+# lands in NEW builds, not in a binary already running. Dropping the legacy path
+# would make `stop` refuse to kill such a server ("not identifiably Barkpark")
+# and `up` then die on the held port, with `reload` dead-ending — the exact
+# WEDGED state `stop --force` exists to escape. So the fallback stays, second,
+# and documented: /status.json decides the answer for every current build.
 server_answering() {
+  curl -sf "http://$PHX_HOST:$PORT/status.json" >/dev/null 2>&1 && return 0
+  # Legacy fallback — an older build (pre-d40092ab9) that has no /status.json.
   curl -sf "http://$PHX_HOST:$PORT/api/schemas" >/dev/null 2>&1
 }
 
@@ -327,10 +503,10 @@ running_version() {
 # is a claim; the port and an HTTP answer are the state. Both failure directions
 # were observed on a dev box before this: a pidfile pointing at an unrelated
 # `sleep` printed "server running", and with no pidfile at all it printed
-# "server stopped" while beam.smp held :4000 and /api/schemas returned 200.
+# "server stopped" while beam.smp held :4000 and /status.json returned 200.
 #
 # FOUR OUTCOMES — there is no bare "running":
-#   ANSWERING                    port held AND /api/schemas answers (+ version/commit)
+#   ANSWERING                    port held AND /status.json answers (+ version/commit)
 #   PROCESS-ALIVE-NOT-ANSWERING  port held, HTTP does not answer (booting or wedged)
 #   STOPPED                      nothing holds the port
 #   UNKNOWN                      pidfile claims a live pid that does NOT hold the port
@@ -352,7 +528,7 @@ cmd_status() {
         log "server ANSWERING (pid $lpid) — http://$PHX_HOST:$PORT — version unknown (/status.json not served)"
       fi
     else
-      log "server PROCESS-ALIVE-NOT-ANSWERING — pid $lpid holds port $PORT but http://$PHX_HOST:$PORT/api/schemas did not answer — see $SERVER_LOG"
+      log "server PROCESS-ALIVE-NOT-ANSWERING — pid $lpid holds port $PORT but http://$PHX_HOST:$PORT/status.json did not answer — see $SERVER_LOG"
     fi
     if [ -n "$ppid_claim" ] && [ "$ppid_claim" != "$lpid" ]; then
       log "note: $SERVER_PID_FILE claims pid $ppid_claim, which is NOT the process holding port $PORT"
@@ -373,11 +549,12 @@ cmd_status() {
 case "${1:-up}" in
   up)     cmd_up ;;
   reload) cmd_reload ;;
-  stop)   cmd_stop ;;
+  stop)   shift || true; cmd_stop "$@" ;;
   status) cmd_status ;;
+  token)  cmd_token ;;
   psql)   shift || true; exec "$PG" psql "$@" ;;
   *)
-    echo "usage: barkpark {up|reload|stop|status|psql}" >&2
+    echo "usage: barkpark {up|reload|stop [--force <pid>]|status|token|psql}" >&2
     exit 2
     ;;
 esac

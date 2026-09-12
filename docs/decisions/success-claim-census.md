@@ -79,7 +79,7 @@ glyph occurrences across 13 files**, bucketed:
 | proof harnesses | 13 | `deploy/site-spawner-live-proof.sh` 5, `-node-live-` 4, `-autorebuild-` 4 — a proof harness asserting its own findings is not a product success claim |
 | `ok()` helper DEFINITIONS inside smoke/doctor scripts | 7 | `scripts/{create-quickstart,media,cmux,onramp-live-client}-smoke.sh`, `scripts/{doctor,bp-vercel-quick-setup,local-update}.sh` — one definition each; the claim lives at every call site, which the glyph never reaches |
 | comments | 2 | `scripts/{demo-living-values.sh,taskboard-drive/drive.sh}` |
-| **real product success claims** | **3** | `templates/place-directory/install.sh:29,33,49` |
+| **real product success claims** | **3** | `templates/place-directory/install.sh` — all three A1 since `2b99269f9`, below |
 
 Of those three: line 49 is gated on a genuine read-back (step 3 re-queries the public
 API, counts `_id`s, and prints an honest `⚠ 0 published places` instead of Done) —
@@ -92,9 +92,21 @@ if the server 200'd without persisting.
 **Ruling: no shell gate.** Two sites, in one optional template installer, is not a
 population a repo-wide guard can be calibrated against — a guard over 25 occurrences
 of which 22 are harness plumbing greens on the plumbing and teaches the reader that
-shell is covered. **It is not covered.** The two sites are filed as
-`pds-bl-place-directory-install-echoes-transport`, to be fixed by read-back
-(re-`GET` the schema / count the seeded docs) rather than by a lint.
+shell is covered. **It is not covered.**
+
+**FIXED at the two sites, as ruled — no shell gate ships. 2026-09-11, `2b99269f9`,
+`pds-bl-place-directory-install-echoes-transport`.**
+Each step now POSTs and then reads the state back: step 1 `GET`s
+`/v1/schemas/:dataset/place` and ticks only on a type named `place`; step 2 `GET`s
+`/v1/data/query/:dataset/place?perspective=raw` (raw because `createOrReplace` writes
+the DRAFT row, so a `published` read legitimately returns 0) and ticks only if the docs
+read back are at least the mutations sent. A 2xx over an empty store is a named `✗` and
+a non-zero exit; an unperformable read-back prints `CANNOT READ`, so a failed read is
+never byte-identical to a zero. `scripts/place-directory-install.test.sh` pins it with a fake `curl` that 2xxes every POST: 27 assertions over empty state (red),
+present state (green), unreadable read-back, and a MUTATION arm requiring the pre-fix
+`post … && printf ✓` shape to exit 0 with both ticks on the SAME empty fixture.
+Reverting the installer reds 14 of 27. Wired as job `place-directory-install`
+in `.github/workflows/shell-harnesses.yml` — RUN, not BLOCK.
 
 ## Elixir — NOT ENFORCED. No gate ships. And the glyph census is structurally blind here.
 

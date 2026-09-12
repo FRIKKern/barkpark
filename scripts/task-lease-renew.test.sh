@@ -365,6 +365,38 @@ else
 fi
 
 echo
+# ── 429 is BACKPRESSURE (task-ca8fffa7ca885413): scripts/lib/bp-curl.sh sleeps the
+# retry_after the RESPONSE names, bounded, and the ladder above never re-sleeps
+# a 429 on its fixed delays. RED on origin/main f0b9e2b6a: the old script fed a
+# 429 to the 5xx ladder — 3 calls, "did not answer after 3 attempts" — and read
+# no retry_after at all, so a 3600s quota cost three blind retries.
+reset_stub
+OUT="$(PR_BODY="$BODY_OK" PR_NUMBER=15234 PR_ACTION=opened LEDGER_TOKEN=t \
+       TASK_LEASE_RENEW_RETRY_DELAY=0 TASK_LEASE_RENEW_RETRIES=3 \
+       FAKE_CURL_CODES=429 FAKE_CURL_RESPONSE='{"error":{"code":"rate_limited","details":{"retry_after":3600}}}' run)"; RC=$?
+check "40. a 429 carrying retry_after=3600 (a quota) exits 0" "$RC" "0"
+check "40b. …after exactly ONE call: the response's 3600s is read and NOT slept, and the 5xx ladder does not re-try it" "$(calls)" "1"
+has "$OUT" "rate limiting this run (HTTP 429)" "40c. …naming the 429 arm, not the 5xx outage sentence"
+has "$OUT" "BP-CURL-RATE-LIMITED" "40d. …with the helper's own give-up line on stderr"
+case "$OUT" in *"did not answer after"*) bad "40e. the 5xx outage sentence must NOT fire on a 429" ;; *) ok "40e. the 5xx outage sentence stays silent on a 429" ;; esac
+
+reset_stub
+OUT="$(PR_BODY="$BODY_OK" PR_NUMBER=15234 PR_ACTION=opened LEDGER_TOKEN=t \
+       TASK_LEASE_RENEW_RETRY_DELAY=0 TASK_LEASE_RENEW_RETRIES=3 \
+       FAKE_CURL_CODES=429,429,429,429,429,429 FAKE_CURL_RESPONSE='{"error":{"details":{"retry_after":0}}}' run)"; RC=$?
+check "41. a persistent 429 with retry_after=0 exits 0" "$RC" "0"
+check "41b. …after exactly BP_CURL_ATTEMPTS=4 calls (the helper's cap, not the ladder's 3)" "$(calls)" "4"
+has "$OUT" "attempt cap of 4 is spent" "41c. …and the give-up names the attempt cap"
+
+reset_stub
+OUT="$(PR_BODY="$BODY_OK" PR_NUMBER=15234 PR_ACTION=opened LEDGER_TOKEN=t \
+       TASK_LEASE_RENEW_RETRY_DELAY=0 TASK_LEASE_RENEW_RETRIES=3 \
+       FAKE_CURL_CODES=429,200 FAKE_CURL_RESPONSE="$RENEW_200" run)"; RC=$?
+check "42. a 429 that clears on the retry still renews (exit 0)" "$RC" "0"
+check "42b. …in exactly 2 calls" "$(calls)" "2"
+has "$OUT" "2026-09-02T13:45:00Z" "42c. …and reports the window the second attempt bought"
+
+echo
 # ── claim shape: the reader accepts doc.claim (live server) AND doc.content.claim (legacy) ──
 reset_stub
 out="$(PR_BODY=$'Fix\n\nTask: task-aaaaaaaaaaaaaaaa' PR_NUMBER=15234 PR_ACTION=synchronize LEDGER_TOKEN=tok FAKE_CURL_CODES=200 FAKE_CURL_RESPONSE="$RENEW_200_LEGACY" run)"

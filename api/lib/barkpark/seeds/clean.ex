@@ -15,6 +15,7 @@ defmodule Barkpark.Seeds.Clean do
 
   alias Barkpark.Auth
   alias Barkpark.Content
+  alias Barkpark.Seeds.AdminTokenMintError
 
   @welcome_slug "welcome"
 
@@ -131,15 +132,69 @@ defmodule Barkpark.Seeds.Clean do
     |> Enum.any?(fn t -> is_nil(t.revoked_at) and Auth.has_permission?(t, "admin") end)
   end
 
+  # NOT a hard `{:ok, _} =` match. `api_tokens.token_hash` is unique-indexed and
+  # `admin_token_present?/1` above requires `revoked_at IS NULL`, so a FIXED
+  # BARKPARK_SEED_ADMIN_TOKEN that was later REVOKED arrives here with a hash
+  # that is already on a row: `create_token/5` declares
+  # `unique_constraint(:token_hash)`, hands back `{:error, %Ecto.Changeset{}}`,
+  # and the old match raised `MatchError` out of a private function — a stack
+  # trace that named neither the revoked token nor a way forward, taking the
+  # seed's caller down with it under `set -euo pipefail`.
+  #
+  # The refusal itself is CORRECT and stays (the gate is closed by decision:
+  # pds-bl-up-seed-remint-crash-after-revoke). Only the SHAPE changes — a named
+  # error that says what collided and what to do.
   defp mint_admin_token!(raw, scope) do
-    {:ok, _token} =
-      Auth.create_token(
-        raw,
-        "admin (bp setup)",
-        scope.dataset,
-        ["read", "write", "admin"],
-        scope.workspace_id
-      )
+    case Auth.create_token(
+           raw,
+           "admin (bp setup)",
+           scope.dataset,
+           ["read", "write", "admin"],
+           scope.workspace_id
+         ) do
+      {:ok, token} ->
+        token
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        raise AdminTokenMintError, message: mint_failure_message(changeset)
+    end
+  end
+
+  # The collision is the expected failure and gets the operator instructions;
+  # anything else is reported verbatim rather than mislabelled as a revoke.
+  defp mint_failure_message(changeset) do
+    if duplicate_token_hash?(changeset) do
+      """
+      Admin token mint REFUSED: BARKPARK_SEED_ADMIN_TOKEN names a credential
+      this box has already minted and then REVOKED.
+
+      api_tokens.token_hash is unique, and the revoked row still holds this
+      token's hash. A revoked credential is never re-minted — that is the
+      bootstrap gate closing, by decision, not a bug.
+
+      Do ONE of these, then re-run the mint:
+        * unset BARKPARK_SEED_ADMIN_TOKEN (check ~/.barkpark/.env — it is
+          sourced wholesale) and let a fresh token be generated and printed
+          once; or
+        * set BARKPARK_SEED_ADMIN_TOKEN to a DIFFERENT value.
+
+      The raw token is NOT echoed here, on purpose.
+      """
+    else
+      """
+      Admin token mint FAILED — #{inspect(changeset.errors)}.
+
+      This is NOT the revoked-token collision; the seed refused before writing
+      any credential.
+      """
+    end
+  end
+
+  defp duplicate_token_hash?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:token_hash, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _ -> false
+    end)
   end
 
   defp print_token_banner(raw) do
@@ -150,8 +205,32 @@ defmodule Barkpark.Seeds.Clean do
           #{raw}
 
       Connect with:  bp setup --target connect \\
-                       --server http://localhost:4000 --token <token>
+                       --server #{connect_url()} --token <token>
     ==========================================================\
     """)
+  end
+
+  @doc """
+  The box's ACTUAL base URL — what the store-it-now banner tells the owner to
+  point `bp setup --target connect` at.
+
+  A hardcoded `http://localhost:4000` is a copy-pasteable instruction that
+  cannot work on any box not on the default port (observed against a `:47016`
+  personal box) — the same defect class as a vacuous green.
+
+  NOT `Endpoint.url/0`: `config/runtime.exs` pins the PUBLIC `url:` port to
+  80/443 because every prod box is proxy-fronted, so `url/0` renders
+  "http://localhost" on a personal box. The port a client must actually dial is
+  the LISTEN port in the `:http` config, which `runtime.exs` sets from `PORT` in
+  every env — the same `PORT` `bin/barkpark` exports.
+
+  Public (not `defp`) so the URL can be read back WITHOUT minting a token:
+  `PORT=47016 mix run -e 'IO.puts(Barkpark.Seeds.Clean.connect_url())'` is the
+  whole non-default-port proof.
+  """
+  def connect_url do
+    url = BarkparkWeb.Endpoint.config(:url) || []
+    http = BarkparkWeb.Endpoint.config(:http) || []
+    "#{url[:scheme] || "http"}://#{url[:host] || "localhost"}:#{http[:port] || 4000}"
   end
 end

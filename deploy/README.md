@@ -26,7 +26,7 @@ skipped), while a docs-only stretch still resolves to a no-op.
 | Target | Trigger paths | Script | Mechanism |
 |---|---|---|---|
 | Control plane | `cloud/**` | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → headroom guard (refuses to build below a 5G floor, `BARKPARK_MIN_FREE_GB` — 2026-08-31: never-pruned images filled the box to 100% and Postgres 500'd the fleet list) → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for instant `docker start` rollback) → prune unreferenced images + build cache (only on a PROVEN flip; the kept slot's stopped container anchors the rollback image through the prune). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
-| Content instance | `api/**`, `internal/**`, `connectors/**` | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/api/schemas` → flip Caddy → retire old slot + legacy `barkpark` unit. |
+| Content instance | `api/**`, `internal/**`, `connectors/**` | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/status.json` → flip Caddy → retire old slot + legacy `barkpark` unit. |
 
 Both hosts overlap old+new code on the new schema for the swap window, so
 migrations must be expand/contract (backward-compatible).
@@ -89,7 +89,7 @@ migration; write a compensating one.
 (Astro adapter × static symlink-swap target, Site-Spawner W1) builds and serves
 NEXT TO Phoenix on a content box, at `https://<instance>/sites/<slug>/`. It is a
 NEW state machine — deliberately not a parameterization of `instance-deploy.sh`
-(that one is Phoenix-specific: mix/ecto, port-pair slots, `/api/schemas` gate,
+(that one is Phoenix-specific: mix/ecto, port-pair slots, `/status.json` gate,
 git-reset rollback) — but it mirrors the same proven skeleton: per-slug `flock`
 serialize (queue depth 1 *per site*; the fleet-wide build gate below is what keeps
 N sites from compiling at once), typed exit codes, Caddy backup+`validate`+reload-or-
@@ -342,7 +342,7 @@ staging; staging content ops use an **ephemeral** target instead
 ```
 1. worktree branch     git worktree add ../wt -b fix/x
 2. deploy to staging   bp cloud deploy staging --branch fix/x
-3. smoke the box       curl -s  https://staging.barkpark.cloud/api/schemas | head
+3. smoke the box       curl -s  https://staging.barkpark.cloud/status.json | jq -r .commit
                        curl -sL https://staging.barkpark.cloud/studio | grep -E 'pane-layout|Sign in'
                        curl -s  https://staging.barkpark.cloud/v1/data/query/production/post | grep count
 4. merge the PR        green smokes → merge to main
@@ -524,6 +524,52 @@ transit** — the box serves the bytes you packed. It says nothing about who bui
 them or from what content. HEALTH is unchanged and still certifies integrity and
 identity only; provenance (`source=prebuilt`, the digest, the uploading
 principal) lives on the deployment record.
+
+**A prebuilt release cannot be rebuilt from the box — keep the artifact.** This
+is a property of the lane, not a bug: the whole point is that no source travels,
+so the release dir holds the OUTPUT and nothing to regenerate it from. Its `src/`
+carries no provenance, and `site-deploy.sh` refuses to rebuild a prebuilt release
+outright — a template rebuild would pass HEALTH on genuine markers and go live
+with the WRONG bytes, so it fails closed instead and says `re-upload required`.
+Practical consequences, for a site with no template binding:
+
+* **The only recovery is RE-UPLOAD.** A failed HEALTH gate, a lost release dir, a
+  restore onto a fresh box — all of them need the artifact again. The box cannot
+  produce it.
+* **A rollback ONTO a prebuilt release still works** (it is a symlink flip over
+  bytes that are already there), but a rollback onto one whose health gate FAILED
+  is refused with `no_previous`, naming re-upload as the move.
+* **So the artifact is the backup.** Keep the `dist/` you shipped — in CI
+  artifacts, an object store, anywhere but only the laptop that built it. If that
+  laptop is the sole copy, the site is one disk failure from unrecoverable.
+
+The box says this too, in the build log the deployment names: a prebuilt deploy
+runs no build, so `DeployRunner` writes the run's provenance there itself —
+the digest, the staged path, and this unreproducible-release warning — instead of
+leaving the deployment pointing at an empty file.
+
+### The fresh-box push-to-live acceptance run
+
+`deploy/site-spawner-live-proof.sh` and its siblings all start from a box that
+already exists. `deploy/site-push-live-proof.sh` starts from nothing:
+
+    bash deploy/site-push-live-proof.sh --plan        # every rung; no side effects
+    bash deploy/site-push-live-proof.sh --self-check  # offline; every judge, good AND bad input
+    bash deploy/site-push-live-proof.sh --negctl      # offline; wrong fixtures must be judged red
+    bash deploy/site-push-live-proof.sh               # THE LIVE RUN (real box, real money)
+
+The live run launches a Hetzner box, connects a public repo to a site on it,
+pushes a known sha, and asserts that exact sha reaches the site host with **zero
+manual steps** — then mints a deliberately unclaimable deployment and asserts
+`deploy_stalled` surfaces in `bp cloud status` inside the 300 s horizon, then
+destroys the box (census delta zero on three surfaces, also from the trap).
+
+It needs credentials that are not in CI: `HCLOUD_TOKEN` (or a selected `hcloud`
+context) for provisioning **and teardown**, a `bp login` cloud session, and
+`PUSH_REPO` / `PUSH_REPO_TOKEN`. Rung 0 refuses to create anything it cannot
+prove it can destroy. Only the three offline modes are registered in
+`.github/workflows/deploy-harnesses.yml`. Scan the transcript before committing
+it: `--scan-transcript <file>` must print zero hits.
 
 ### The proof script
 

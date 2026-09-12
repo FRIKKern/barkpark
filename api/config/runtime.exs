@@ -1158,8 +1158,57 @@ if config_env() == :prod do
           Integer.to_string(Keyword.get(base_rate_limits, :write_per_minute, 60))
       )
     )
+    # Browser class (charter D2/D4 Gate A) — SHADOW-FIRST. `_BROWSER` is the
+    # budget, `_BROWSER_ENABLED=false` is the kill switch, and
+    # `_BROWSER_ENFORCE=true` is the explicit human promotion to refusing. With
+    # ENFORCE unset the plug serves 200 and only counts, which is the point.
+    |> Keyword.put(
+      :browser_per_minute,
+      String.to_integer(
+        System.get_env("BARKPARK_RATE_LIMIT_BROWSER") ||
+          Integer.to_string(Keyword.get(base_rate_limits, :browser_per_minute, 600))
+      )
+    )
+    |> Keyword.put(
+      :browser_enabled,
+      System.get_env("BARKPARK_RATE_LIMIT_BROWSER_ENABLED") not in ["false", "0"]
+    )
+    |> Keyword.put(
+      :browser_enforce,
+      System.get_env("BARKPARK_RATE_LIMIT_BROWSER_ENFORCE") in ["true", "1"]
+    )
 
   config :barkpark, :rate_limits, rate_limits
+
+  # Quiz room-spawn rails (Barkpark.Quiz.SpawnBudget) — per-hour, per-principal
+  # budget on the anonymous host door that starts a GenServer per visitor-
+  # supplied pin. Operator-tunable without a rebuild, same pattern as
+  # BARKPARK_TICKET_RATE_* below. MODE is the kill switch AND the shadow
+  # setting: "enforce" (default) refuses, "shadow" only counts the would-be
+  # refusal, "off" consults no bucket at all.
+  base_quiz_room_spawn = Application.get_env(:barkpark, :quiz_room_spawn, [])
+
+  quiz_room_spawn =
+    base_quiz_room_spawn
+    |> then(fn opts ->
+      case System.get_env("BARKPARK_QUIZ_ROOM_SPAWN_PER_HOUR") do
+        nil -> opts
+        raw -> Keyword.put(opts, :per_hour, String.to_integer(raw))
+      end
+    end)
+    |> then(fn opts ->
+      # Literal atoms, not String.to_existing_atom/1: runtime.exs is evaluated
+      # before the release's own modules are loaded, so the atom this needs may
+      # not exist yet.
+      case System.get_env("BARKPARK_QUIZ_ROOM_SPAWN_MODE") do
+        "enforce" -> Keyword.put(opts, :mode, :enforce)
+        "shadow" -> Keyword.put(opts, :mode, :shadow)
+        "off" -> Keyword.put(opts, :mode, :off)
+        _ -> opts
+      end
+    end)
+
+  config :barkpark, :quiz_room_spawn, quiz_room_spawn
 
   # Ticket-key abuse rails (BarkparkWeb.Plugs.TicketRateLimit) — per-hour
   # budgets per key + write class, operator-tunable without a rebuild, same

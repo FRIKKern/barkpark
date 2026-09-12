@@ -54,19 +54,30 @@ defmodule BarkparkWeb.SocialController do
             # time — a governed factor-less user (via existing workspace
             # memberships; social login is app-level, no org of its own) is
             # refused HERE (audited), never landed in Studio.
-            if SessionIssuer.org_mfa_enrolment_blocked?(user) do
-              SessionIssuer.deny_org_mfa_enrolment(conn, user, "social:#{name}")
-            else
-              Sso.record_login(user, "social:#{name}", nil)
+            # era-bl-allowed-auth-methods: consumer OAuth answers to the
+            # "social" term, NOT "sso". `handle_callback/3` find-or-LINKS by
+            # email against a consumer provider with no org binding, so
+            # counting it as enterprise SSO would let a personal Google
+            # account satisfy an `["sso"]` policy — the exact bypass this
+            # feature closes. The precise provider rides the audit trail.
+            cond do
+              SessionIssuer.org_mfa_enrolment_blocked?(user) ->
+                SessionIssuer.deny_org_mfa_enrolment(conn, user, "social:#{name}")
 
-              {:ok, token} =
-                Accounts.create_user_session_token(user, SessionIssuer.actor_opts(conn))
+              SessionIssuer.auth_method_blocked?(user, "social") ->
+                SessionIssuer.deny_auth_method(conn, user, "social", "social:#{name}")
 
-              conn
-              |> configure_session(renew: true)
-              |> put_session("user_session", token)
-              |> put_status(:created)
-              |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+              true ->
+                Sso.record_login(user, "social:#{name}", nil)
+
+                {:ok, token} =
+                  Accounts.create_user_session_token(user, SessionIssuer.actor_opts(conn))
+
+                conn
+                |> configure_session(renew: true)
+                |> put_session("user_session", token)
+                |> put_status(:created)
+                |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
             end
 
           {:error, reason} ->

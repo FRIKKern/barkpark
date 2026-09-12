@@ -409,25 +409,56 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Go do
   """
   @spec struct_fields(binary, binary) :: MapSet.t() | nil
   def struct_fields(src, name) do
-    case Regex.run(~r/^type #{name} struct \{\n(.*?)\n\}$/ms, src, capture: :all_but_first) do
-      [body] ->
+    case struct_body(src, name) do
+      nil ->
+        nil
+
+      body ->
         ~r/^\s*([A-Z][A-Za-z0-9_]*)\s+[^\s]+\s+`json:"([^",]*)/m
         |> Regex.scan(body, capture: :all_but_first)
         |> Enum.reject(fn [_f, tag] -> tag in ["", "-"] end)
         |> Enum.map(fn [f, _tag] -> f end)
         |> MapSet.new()
-
-      _ ->
-        nil
     end
   end
 
   @doc "The json tag names of one struct, or nil when the struct does not exist."
   @spec struct_tags(binary, binary) :: MapSet.t() | nil
   def struct_tags(src, name) do
-    case Regex.run(~r/^type #{name} struct \{\n(.*?)\n\}$/ms, src, capture: :all_but_first) do
-      [body] -> tags(body)
-      _ -> nil
+    case struct_body(src, name) do
+      nil -> nil
+      body -> tags(body)
+    end
+  end
+
+  # The BODY of one struct — the text between its own braces and NOTHING past
+  # them — or nil when the struct does not exist.
+  #
+  # MEASURED FALLTHROUGH (dr-w34-followup-struct-tags-fallthrough). The previous
+  # regex was `^type NAME struct \{\n(.*?)\n\}$/ms`. A FIELDLESS struct writes
+  # its closing brace on the line straight after the opening one, so the `\n`
+  # that `(.*?)` needs before `\}` had already been consumed by `\{\n` — the
+  # lazy body therefore ran on to the closing brace of the NEXT struct in the
+  # file and swallowed its fields whole. Emptying `type DeployCoverageSite
+  # struct` made the PHANTOM arm report nine tags of `DeployCoverageCohorts` as
+  # phantoms OF DeployCoverageSite: red for the right reason by accident, and
+  # naming the wrong struct. The same fallthrough attributes a NEIGHBOUR's tags
+  # to a struct that has some of its own, which is a red nobody can act on.
+  #
+  # The replacement refuses to cross a column-0 `}`: a body is the run of lines
+  # that are NOT a bare closing brace. Nested anonymous structs are unaffected —
+  # gofmt indents their braces, so only the struct's own terminator sits at
+  # column 0. The second clause is the one-line form gofmt writes for a struct
+  # with no fields at all (`type X struct{}`), whose body is empty by definition.
+  @spec struct_body(binary, binary) :: binary | nil
+  defp struct_body(src, name) do
+    multiline = ~r/^type #{name} struct \{\n((?:(?!^\}$).)*)^\}$/ms
+    oneline = ~r/^type #{name} struct\s*\{\s*\}$/m
+
+    cond do
+      match = Regex.run(multiline, src, capture: :all_but_first) -> hd(match)
+      Regex.match?(oneline, src) -> ""
+      true -> nil
     end
   end
 
@@ -1030,10 +1061,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — gh-6 preview identity. SiteDeployment decodes Branch and Environment but neither preview key, so a CLI preview deploy cannot name the surface it just built."},
     {"site_deployment_json/3", :unread, "preview_url",
      "dr-w11-payload-divergence-close — the click-through target, same gap as preview_host."},
-    {"site_deployment_json/3", :unread, "slot",
-     "site-spawner node slot truth — the PRODUCER half only. The blue/green slot the box MEASURED Caddy to be serving; `deploy/site-spawner-node-live-proof.sh:731,:803` reads it off the wire today, and `internal/cloudclient.SiteDeployment` declares no Slot at all. The Go reader is the CLI half of this split row (which also turns HealthExitCode into a *int); the producer half is PR #15095, whose body names the split and this remainder, and it is fenced out of internal/."},
-    {"site_deployment_json/3", :unread, "health_exit_code",
-     "site-spawner node slot truth — the PRODUCER half only. 0 (HEALTH passed) | 14 (failed) | null (never measured); `deploy/site-spawner-node-live-proof.sh:872` reads it. It MUST land in Go as a `*int` — a plain int decodes the null to 0, which is the SUCCESS code, and that is exactly the zero-value success this pair exists to forbid (the same reason SiteDeployment's DeferralDepth/Bound are pointers). CLI half of the same split row; the producer half is PR #15095, whose body names this remainder."},
+    # DELETED (task-62ed247e1dd0b960's sibling, the CLI half of the node-slot row —
+    # site-spawner-backlog-node-deployment-slot-surfacing): the two `:unread` rows for
+    # `slot` / `health_exit_code`. Both said "the PRODUCER half only … declares no Slot
+    # at all", and both are now false: `internal/cloudclient.SiteDeployment` declares
+    # `Slot string json:"slot,omitempty"` and `HealthExitCode *int
+    # json:"health_exit_code"`, so the "no longer unread" arm reds on an allowlist row
+    # whose key IS decoded — the rows must go. The `*int` the deleted row DEMANDED is
+    # what landed: 0 is the SUCCESS code, so an `int` (or an `omitempty`) would erase
+    # every passing health check. Edited from the CLI lane under the same fence
+    # exception the failure_code/failure_message deletion above took: the REQUIRED
+    # Cloud gate couples this register to the Go json tags, so the edit cannot ride a
+    # follow-up PR.
     # DELETED (site-spawner node slot truth): `{"site_deployment_json/3", :phantom,
     # "port"}`. `SiteDeployment.Port` decoded to 0 forever because `deployments`
     # had no `port` column at all — the one router.ex emitted was the SITE
@@ -1044,6 +1083,19 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
     {"site_deployment_json/3", :unread, "refusal_phase",
      "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
+    # dr-w21-bl-route-decision-reaches-no-plane (charter D608): the two ROUTE
+    # keys. `deployment_json/1` emits them in the same commit that declares the
+    # columns — the whole finding is that the arm decision was durable and
+    # unreadable, so leaving the columns off the wire would have moved the
+    # silence one layer along rather than ending it. The Go reader is NOT in this
+    # PR: `internal/cloudclient` is a different fence, and `bp cloud site status`
+    # gaining a route line is its own slice. These rows carry that debt, and the
+    # "no longer unread" arm will demand their deletion the day
+    # `SiteDeployment.RouteStatus` is declared.
+    {"site_deployment_json/3", :unread, "route_status",
+     "dr-w21-bl-route-decision-reaches-no-plane emits it (charter D608: ROUTE is a SIBLING channel, never a stage). No Go reader yet — internal/cloudclient is outside this PR's fence; the follow-up declares SiteDeployment.RouteStatus as *string and DELETES this row."},
+    {"site_deployment_json/3", :unread, "route_detail",
+     "dr-w21-bl-route-decision-reaches-no-plane emits it alongside route_status. Box-authored free text (same class as a stage's `detail`). No Go reader yet, same fence, same follow-up."},
     # DELETED (task-62ed247e1dd0b960, the CLI half of task-f156b5e43bfbfe91): the two
     # `:unread` rows for `failure_code` / `failure_message`. `internal/cloudclient.
     # SiteDeployment` now declares both as `*string`, so the "no longer unread" arm
@@ -1408,20 +1460,33 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MERGE HAZARD, restated because it has already fired on this branch twice:
   # these are `==` pins. Any PR that also moves them must RE-MEASURE after this
   # one lands, never sum with it.
-  # 162 -> 165 (site-spawner node slot truth): `deployment_json/1` — which
-  # `site_deployment_json/3` pipes, so the walker follows it — gains `slot`,
-  # `port` and `health_exit_code`. `@go_tag_pinned` does NOT move, and the reason
-  # is structural rather than lucky: this slice writes no Go at all (the reader is
-  # the CLI half of a split row, fenced out of `internal/`), and `Go.all_tags/1`
-  # counts names in that SOURCE. The three keys land on the wire in three
-  # different states, which is why one of them deletes an allowlist row and two
-  # of them add one: `port` was already declared by `SiteDeployment.Port` and
-  # decoded to 0 forever (a PHANTOM — row deleted below), while `slot` and
-  # `health_exit_code` are declared nowhere in the package (`grep -rn 'json:"slot'
-  # internal/cloudclient` is empty) and are therefore new :unread rows.
-  # MEASURED by the PIN CO-EDIT arm on this branch, which printed `162 -> 165` after the rebase onto the slot_units pin above;
+  # 162 -> 165 (site-spawner node slot truth, PRODUCER half, PR #15095):
+  # `deployment_json/1` — which `site_deployment_json/3` pipes, so the walker
+  # follows it — gains `slot`, `port` and `health_exit_code`. `@go_tag_pinned` did
+  # not move IN THAT SLICE, and the reason was structural rather than lucky: it
+  # wrote no Go at all (the reader was the CLI half of a split row, fenced out of
+  # `internal/`), and `Go.all_tags/1` counts names in that SOURCE. The three keys
+  # landed on the wire in three different states, which is why one of them deleted
+  # an allowlist row and two of them added one: `port` was already declared by
+  # `SiteDeployment.Port` and decoded to 0 forever (a PHANTOM — row deleted
+  # below), while `slot` and `health_exit_code` were declared nowhere in the
+  # package and were therefore new :unread rows.
+  # MEASURED by the PIN CO-EDIT arm on that branch, which printed `162 -> 165` after the rebase onto the slot_units pin above;
   # that the arithmetic happens to agree is the coincidence the comment above
   # warns about, not the method.
+  #
+  # THAT PARAGRAPH IS HISTORY NOW, AND THE SENTENCE IT USED TO END ON WAS FALSE
+  # WITHIN A DAY. It read "`slot` and `health_exit_code` are declared nowhere in
+  # the package (`grep -rn 'json:\"slot' internal/cloudclient` is empty)" in the
+  # PRESENT tense, and the CLI half
+  # (site-spawner-backlog-node-deployment-slot-surfacing) declared both:
+  # `SiteDeployment.Slot` (`json:"slot,omitempty"`) and
+  # `SiteDeployment.HealthExitCode` (`*int`, `json:"health_exit_code"`). The two
+  # `:unread` allowlist rows are DELETED above, and that grep now returns a hit.
+  # Corrected rather than left standing, because a census file's whole value is
+  # that its prose can be believed: a comment asserting a guarantee that no longer
+  # holds is the same defect #16647 landed to kill.
+  # `@emitted_pinned` does NOT move for the CLI half — it writes no serializer.
   # 165 -> 166 (dr-w10-s1, the deploy verdict): `barkpark_json/6` gains ONE key,
   # `deploy_rate` — the per-box deploy vital `DeployLedger.box_rates/3` puts on
   # the fleet row so `bp cloud status` can stop printing `ok` for a box failing
@@ -1430,7 +1495,47 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # walker counts the map key, not the node's interior. The serializer's arity
   # moved 5 -> 6 in the same change (the fifth prefetch argument), which is why
   # every `barkpark_json/5` name in this file is now `/6`.
-  @emitted_pinned 168
+  # 168 -> 169 (dr-w22-s5): `census/3` gains ONE top-level key, `box_door`. The
+  # node's seven inner keys live in `box_door/1`, which is not a censused
+  # serializer entry point, so they do not move this pin — they move
+  # `@ast_blind_paths` instead. MEASURED by the PIN CO-EDIT arm on this tree
+  # ("@emitted_pinned 168 -> 169"), never summed with an earlier delta.
+  # 169 -> 170 (dr-w16-s3-followup-class-vocabulary-unreachable): `census/3`'s
+  # top-level map gains ONE key, `vocabulary`. The node's three inner keys are
+  # written by the `vocabulary/0` helper and are invisible to this source-reading
+  # census — they are named by the EVALUATED register below and counted in
+  # `@ast_blind_paths`. MEASURED by the PIN CO-EDIT arm on this tree
+  # ("@emitted_pinned 169 -> 170"), never summed with an earlier delta.
+  # 170 -> 171 (dr-w33-bl): `census/3` gains ONE top-level key,
+  # `abandoned_basis` — the three labels (which basis measured it, how much is
+  # historical, how much the backfill wrote) that `abandoned`, an integer, cannot
+  # carry. ONE key, not four: `abandoned_basis/1` returns a single flat STRING,
+  # so the walker counts one map key and there is no interior to move
+  # `@ast_blind_paths` (which is why the vocabulary delta above moved it and this
+  # one does not). RE-MEASURED by the PIN CO-EDIT arm on the tree REBASED onto
+  # #17317 ("@emitted_pinned 170 -> 171") — never summed with the pre-rebase
+  # delta, which was measured against a main that had not yet grown `vocabulary`.
+  # 171 -> 172 (dr-w29-bl-serving-since-has-no-basis-column): `to_json/1` on
+  # PlatformDelivery gains ONE key, `serving_since_basis` — WHICH CLOCK produced
+  # that row's `serving_since` (process_start on the cp leg, an upper bound a
+  # bare restart moves forward; deploy_flip_mtime on the instance leg, the flip
+  # instant). This branch's own +1, and ONLY +1: `to_json/1` gains a single flat
+  # STRING key, no interior node.
+  # RE-MEASURED 2026-09-10 by the PIN CO-EDIT arm on THIS tree merged with
+  # origin/main at ff214d4faabd74d14e20ff3efc75419625f1a151
+  # ("@emitted_pinned 171 -> 172"). The pre-merge
+  # measurement said 170 -> 171 and is VOID: it was taken against a main that had
+  # not yet grown `abandoned_basis` (#17352). Never summed with that delta.
+  # 172 -> 174 (dr-w21-bl-route-decision-reaches-no-plane, charter D608):
+  # `deployment_json/1` — which `site_deployment_json/3` pipes, so the walker
+  # follows it — gains `route_status` and `route_detail`, the box's ROUTE arm
+  # decision. TWO keys, not one: they are independently nullable (a status with
+  # no sentence is a real shape), exactly as `port` can stand while `slot` is
+  # nil. `@go_tag_pinned` does NOT move — this PR writes no Go at all, which is
+  # why both keys land as new `:unread` allowlist rows above rather than riding
+  # free on the file-global NAME union. MEASURED by the PIN CO-EDIT arm on this
+  # tree ("@emitted_pinned 172 -> 174"), never summed with an earlier delta.
+  @emitted_pinned 174
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1584,7 +1689,85 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # all" verdict. It is a NEW name in the package (no other struct declares it),
   # so the floor moves and the multiplicity register does not. Measured by this
   # file's own arm's printed right-hand column, never summed.
-  @go_tag_pinned 338
+  # 338 -> 340 (site-spawner-backlog-node-deployment-slot-surfacing, the CLI half of
+  # the node-slot row): `internal/cloudclient.SiteDeployment` declares `Slot`
+  # (`json:"slot,omitempty"`) and `HealthExitCode` (`*int`,
+  # `json:"health_exit_code"`), closing the two `:unread` rows deleted from the
+  # allowlist above. MEASURED by the 999-technique on THIS tree — the pin set to 999
+  # and the refusal read back verbatim, "340 json tag(s) found in
+  # internal/cloudclient, the PIN is EXACTLY 999" — never as 338 + 2. That the
+  # arithmetic agrees here is a property of both names being new PACKAGE-WIDE
+  # (`Go.all_tags/1` is a file-GLOBAL union of NAMES, so a name already declared by
+  # any struct in the package rides free, as `team` and `scope` did in W19 S1 and
+  # `sha`/`count`/`limit` did in W26 S3), not evidence that summing is the method.
+  # `@go_tag_sites` does NOT move and that is MEASURED, not assumed: the SITE
+  # register arm (`actual == @go_tag_sites`) stayed GREEN across this change, which
+  # is the arm saying no name's multiplicity moved — both new names land at exactly
+  # one declaration site. The partition arm's own count on this tree is 626 sites,
+  # which 340 - 114 + 400 reproduces.
+  # MERGE HAZARD, unchanged: these are `==` pins. Any other PR that also moves them
+  # must RE-MEASURE after this one lands, never sum with it.
+  # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds 12 tag names (340 -> 352) with
+  # `SiteBuildLogRecord` — available, box_error, box_log_state, box_status,
+  # evicted_at, exit_code, journal_command, log_bytes, log_path, log_state,
+  # record, unit_name. The struct's other 14 tags already existed as names
+  # package-wide and land entirely in the SITE register below.
+  # 352 -> 359 (dr-w22-s5): `DeployBoxDoor` and `DeployBoxDoorStatus` declare
+  # NINE json tag lines and the NAME union grows by SEVEN — `box_door`,
+  # `refusals`, `cause_keyed`, `unkeyed`, `by_status`, `predicate` and
+  # `cause_predicate`. `basis`, `status` and `count` were already declared
+  # elsewhere in the package, so they ride free on the name union and move the
+  # SITE register below instead. MEASURED by the PIN CO-EDIT arm on this tree
+  # ("@go_tag_pinned 352 -> 359"), never derived from the diff.
+  # 359 -> 362 (dr-w16-s3-followup-class-vocabulary-unreachable):
+  # `DeployVocabulary` declares four tags and THREE of them are new NAMES
+  # (`deferred_classes`, `not_attempted_classes`) plus the field that carries
+  # the node (`vocabulary`). The fourth, `classes`, already existed on
+  # `DeployCensus`, so it rides free on the NAME union and moves the SITE
+  # register instead. MEASURED by the PIN CO-EDIT arm ("@go_tag_pinned 359 ->
+  # 362"), never derived from the diff.
+  # 362 -> 363 (dr-w33-bl): `DeployCensus` declares ONE new json tag line,
+  # `abandoned_basis`, and the name is new package-wide, so it lands on the NAME
+  # union rather than on the SITE register (`@go_tag_sites` does NOT move).
+  # RE-MEASURED by the PIN CO-EDIT arm on the tree REBASED onto #17317
+  # ("@go_tag_pinned 362 -> 363") — the pre-rebase measurement said 359 -> 360
+  # and is void: it was taken against a main without `DeployVocabulary`.
+  # 363 -> 364 (dr-w29-bl-serving-since-has-no-basis-column):
+  # `cloudclient.PlatformDelivery` declares ONE new tag, `serving_since_basis`,
+  # and the name is new to the whole union — no other struct in the tree carries
+  # it, so it moves BOTH this pin and one site. This branch's own +1.
+  # RE-MEASURED 2026-09-10 by the PIN CO-EDIT arm on THIS tree merged with
+  # origin/main at ff214d4faabd74d14e20ff3efc75419625f1a151
+  # ("@go_tag_pinned 363 -> 364"). The pre-merge
+  # measurement said 362 -> 363 and is VOID: it was taken against a main without
+  # `abandoned_basis` (#17352). Never summed with that delta.
+  # 364 -> 368 (ssw8-site-doctor, MEASURED 2026-09-10 against origin/main at
+  # e741c9a92255adc48cc423f54573f8b82b5c9d9d): `internal/cloudclient/site_doctor.go`
+  # declares `SiteDoctorReport` / `SiteDoctorSubstrate`, whose vocabulary is
+  # already almost entirely package-wide. FOUR names are new to the whole union
+  # — `absent_count`, `repair`, `substrates`, `unknown_count` — so those four move
+  # this pin. The other thirteen (`ok`, `checked_at`, `site`, `id`, `slug`, `name`,
+  # `kind`, `framework`, `instance`, `key`, `state`, `detail`, `unreadable`) already
+  # existed, so they ride free on the NAME union and move the SITE register instead
+  # (`@go_tag_sites` below: eleven bumps, plus `checked_at` and `key` BORN into the
+  # map at 2 — a name declared once is not in the map at all).
+  # RE-MEASURED by the scanner itself, with a CONTROL: the same scan over
+  # origin/main alone returns 364, byte-equal to the value this line replaces, so
+  # the instrument is known to reproduce the census before it is used to change it.
+  # An earlier measurement said 363 -> 367 and is VOID: it was taken against a main
+  # 20 commits older, without `serving_since_basis`. Never summed with that delta.
+  # 368 -> 369 (#17479 cli/cloudclient-429, MEASURED 2026-09-10T21:35Z against
+  # origin/main at a0552783c, i.e. AFTER #17490 landed site_doctor.go): retry.go
+  # is the SIXTH non-test source (the 429/Retry-After backoff the control
+  # plane's throttle needs). It declares 5 tag sites and exactly ONE new NAME —
+  # `retry_after`, at two sites. `error`, `code` and `details` were already in
+  # the package vocabulary, so those three sites ride free on the NAME union and
+  # land in the SITE register below. CONTROL: the same scan over origin/main
+  # alone returns 368, byte-equal to the value this line replaces. Two earlier
+  # measurements (363 -> 364, then 368 -> 369 pre-computed at 20:00Z) were
+  # re-run, not summed; had #17479 landed BEFORE site_doctor.go the value would
+  # have been 365, which is why order-flipped deltas are never added.
+  @go_tag_pinned 369
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1646,8 +1829,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "as_of" => 5,
     "at" => 2,
     "barkpark_id" => 4,
-    "basis" => 6,
+    # 6 -> 7 (dr-w22-s5): `DeployBoxDoor.Basis`.
+    "basis" => 7,
     "became_live_at" => 2,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.BuildID` joins
+    # the single existing declaration — the recorder's key, echoed on EVERY
+    # answer including the refusals. It rides free on the NAME union.
+    "build_id" => 2,
     "build_log_url" => 2,
     # MetricsSpaceSites.Bytes joined the two existing `bytes` declarations
     # with the deployed-sites directory total (host-space report, W6 S4).
@@ -1664,8 +1852,20 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # (`@go_tag_pinned` does not move) and this row is born at 3.
     "cancelled" => 3,
     "censored" => 3,
+    # cli/site-doctor-verb (ssw8-site-doctor): NEWLY DUPLICATED, 1 -> 2.
+    # `SiteDoctorReport.CheckedAt` joins the single existing declaration.
+    "checked_at" => 2,
+    # dr-w16-s3-followup-class-vocabulary-unreachable: NEWLY DUPLICATED, 1 -> 2.
+    # `classes` was declared once (DeployCensus.Classes — the classes THIS
+    # WINDOW observed). `DeployVocabulary.Classes` is the ledger's whole class
+    # ENUM, a different quantity under the same name, which is exactly the
+    # collision this register exists to keep visible. It rides free on the NAME
+    # union (`@go_tag_pinned` does not move for it) and this row is born at 2.
+    "classes" => 2,
     "clock" => 3,
-    "code" => 3,
+    # 2026-09-10 #17479: 3 -> 4, retry.go added. The throttle envelope's
+    # `details.code` — an existing name at a new site.
+    "code" => 4,
     "content_rev" => 2,
     # MetricsSpaceSites.Count joined the five existing `count` declarations
     # — the deployed-sites walk (host-space report, W6 S4). ssw8 (PR #14610)
@@ -1676,7 +1876,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # carries the same ONE tag site an `int` would.
     # dr-bl-w7: 7 -> 8. MetricsSpaceConsumerRoot.Count — how many children the
     # walk FOUND, so a capped `top` list can say it is capped.
-    "count" => 8,
+    # 8 -> 9 (dr-w22-s5): `DeployBoxDoorStatus.Count`.
+    "count" => 9,
     # Pressure's HOST cpu busy-percent and RunawayProc's PER-PROCESS lifetime
     # average share one name and are different measurements — exactly the
     # collision this register exists to keep visible.
@@ -1693,11 +1894,20 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "deferred" => 3,
     "delivered" => 2,
     "deployment" => 3,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.DeploymentID`
+    # joins the single existing declaration — the build-log route is
+    # DEPLOYMENT-KEYED, so it echoes the id on every answer.
+    "deployment_id" => 2,
     "deployments" => 2,
     # ssw8 (PR #14610): ContentBinding.Detail is the ninth — WHY an `unverified`
     # create-time binding read could not be confirmed. The name already existed
     # package-wide, so `@go_tag_pinned` structurally cannot see this site.
-    "detail" => 9,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 9 -> 10. `SiteBuildLogRecord.Detail` — the plane's human
+    # sentence on a 409/410/502 build-log refusal.
+    "detail" => 11,
+    # 2026-09-10 #17479: ADD => 2, retry.go added. NEWLY DUPLICATED, 1 -> 2: the
+    # retry envelope's `details` object joins the single declaration in client.go.
+    "details" => 2,
     # ssw8 (PR #14610): ContentBinding.DocType is the third — the type the
     # control plane actually READ at create, as against the type the site ROW
     # stores. Same name, different measurement: exactly the collision this
@@ -1707,26 +1917,37 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "email" => 3,
     "environment" => 4,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — the refusal envelope `decodeSelfUpdatePin/1` reads.
-    "error" => 9,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 9 -> 10. `SiteBuildLogRecord.Error` — the build-log
+    # refusal slug (not_found / box_unbound / build_log_evicted / box_unreachable).
+    # 2026-09-10 #17479: 10 -> 11, retry.go added. The 429 envelope's `error`.
+    "error" => 11,
     "evidence" => 2,
     "failed" => 2,
     # deploy/sites-embed-failure-cause: `SiteDeploymentEmbed` (internal/cloudclient) is a THIRD declaration — the fleet list embed learned to name the cause.
     "failure_class" => 3,
     "failure_rate" => 2,
     # deploy/sites-embed-failure-cause: same third declaration on `SiteDeploymentEmbed` — the humanized reason rides beside the class.
-    "failure_reason" => 3,
-    "framework" => 4,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 3 -> 4. `SiteBuildLogRecord.FailureReason` — the recorder's
+    # own honest reason, capped at 4000 bytes by the serializer.
+    "failure_reason" => 4,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.FinishedAt`
+    # joins the single existing declaration.
+    "finished_at" => 2,
+    "framework" => 5,
     "from" => 2,
     "git_ref" => 2,
     "headroom" => 2,
     "host" => 6,
-    "id" => 13,
+    "id" => 14,
     "image_tag" => 2,
     "in_flight" => 2,
     "inserted_at" => 8,
-    "instance" => 3,
+    "instance" => 4,
     "instances" => 2,
-    "kind" => 4,
+    # cli/site-doctor-verb (ssw8-site-doctor): NEWLY DUPLICATED, 1 -> 2.
+    # `SiteDoctorSubstrate.Key` joins the single existing declaration.
+    "key" => 2,
+    "kind" => 5,
     "label" => 6,
     "last_seen_at" => 2,
     "live" => 2,
@@ -1737,11 +1958,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # labels sharing one name, kept visible here.
     "method" => 2,
     "min_sample" => 6,
-    "name" => 11,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.Mode` —
+    # deploy/rollback/teardown, as the record captured it.
+    "mode" => 2,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one name site (11 -> 12). `SiteBuildLogStage.Name` — one stage of the
+    # recorded build ladder.
+    "name" => 13,
     "never_covered" => 3,
     "next_cursor" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.OK` — the 202 relay envelope's own flag.
-    "ok" => 9,
+    "ok" => 10,
     "oldest_pending_seconds" => 2,
     "p50" => 2,
     "p95" => 2,
@@ -1758,12 +1984,19 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # dr-bl-w7: 9 -> 10. MetricsSpaceResidual.Reason — the machine-readable slug
     # a surface branches on to word a refusal ("roots-overlap-or-cross-a-mount"),
     # never prose parsed back into a decision.
-    "reason" => 10,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one reason site (10 -> 11). `SiteBuildLogRecord.Reason` — the CLOSED relay
+    # vocabulary `BuildLog.relay_reason/1` emits instead of an inspected term.
+    "reason" => 11,
     "refused" => 4,
     # W6 S4: MetricsSpace.ReportedAt — the space report stamps its own cadence,
     # which is why it is not the health beat's `as_of`.
     "reported_at" => 2,
     "required" => 2,
+    # 2026-09-10 #17479: ADD => 2, retry.go added. NEWLY DUPLICATED and the only
+    # NEW NAME on this branch (the sole reason `@go_tag_pinned` moved at all):
+    # `retry_after` is declared at BOTH levels of the throttle envelope — top and
+    # inside `details` — so it is born at 2.
+    "retry_after" => 2,
     # dr-bl-w7: `residual` crossed INTO this register. It was declared ONCE
     # (DeployCensus, the attempted-rows remainder) and is now declared on
     # MetricsSpace too — the space reading's own remainder, the bytes no
@@ -1772,14 +2005,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # the only guard that can notice it being deleted.
     "residual" => 2,
     "role" => 4,
-    "runtime_target" => 3,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 3 -> 4. `SiteBuildLogRecord.RuntimeTarget` — static/node,
+    # as the record captured it.
+    "runtime_target" => 4,
     "sample" => 6,
     "scale_mode" => 2,
     "scope" => 4,
     "seconds" => 2,
     "series" => 2,
     "sha" => 2,
-    "site" => 7,
+    "site" => 8,
     "site_id" => 5,
     # MetricsSpace.Sites joined the three existing `sites` declarations —
     # the deployed-sites section of the host-space report (W6 S4).
@@ -1787,10 +2022,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # the package already had — it rides free on the NAME union, so
     # `@go_tag_pinned` does not move for it and this row does.
     "sites" => 5,
-    "slug" => 7,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 7 -> 8. `SiteBuildLogRecord.Slug` — the site slug the box
+    # recorded the build under, echoed from the record.
+    "slug" => 9,
     "source" => 3,
     "stage" => 3,
-    "stages" => 2,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 2 -> 3. `SiteBuildLogRecord.Stages` — the recorded stage
+    # ladder, capped at 32 entries by the serializer.
+    "stages" => 3,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.StartedAt`
+    # joins the single existing declaration. `@go_tag_pinned` cannot see it.
+    "started_at" => 2,
     # ssw8 (PR #14610): ContentBinding.Status is the fourteenth — "bound" or
     # "unverified", the create-time verdict itself. Rides free on the NAME
     # union, so only this row can notice the site being deleted.
@@ -1798,9 +2040,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # unmeasured — the field that stops an absent root rendering as 0 bytes) and
     # MetricsSpaceResidual.Status (computed/undefined/unmeasured). Both are the
     # field a reader BRANCHES on, so only this row can notice a site dying.
-    "state" => 2,
+    "state" => 3,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.Status` — the run state the CLI verdict QUOTES rather than inventing.
-    "status" => 17,
+    # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one status site (17 -> 18). `SiteBuildLogStage.Status` — one stage's verdict.
+    # 18 -> 19 (dr-w22-s5): `DeployBoxDoorStatus.Status`.
+    "status" => 19,
     "team" => 4,
     "team_id" => 6,
     "template" => 2,
@@ -1828,7 +2072,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "trigger" => 3,
     "unit" => 2,
     "unmetered" => 2,
-    "unreadable" => 2,
+    "unreadable" => 3,
     "unresolved" => 2,
     "updated_at" => 5,
     "url" => 5,
@@ -1857,7 +2101,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # declarations ride free on the name union and land entirely in the SITE arm —
   # which is the exact class of change `@go_tag_pinned` structurally cannot see,
   # and the reason this register exists.
-  @cloudclient_sources ~w(client.go deliveries.go selfupdate.go)
+  # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go is the FOURTH non-test source — the client half of the
+  # operator build-log read path (GET /v1/sites/:id/deployments/:dep_id/build-log,
+  # dr-bl-recorder-http-read-path). It declares 26 json tags across two structs,
+  # 12 of them NEW NAMES (so `@go_tag_pinned` moves 340 -> 352) and 14 of them
+  # names the package already had — 9 that bump an existing register row and 5
+  # that were declared exactly once and are now duplicated. That split is the
+  # register's whole reason to exist: the 14 ride free on the NAME union and
+  # `@go_tag_pinned` structurally cannot see any of them.
+  # 2026-09-10 #17479: retry.go added — the SIXTH non-test source, the client-side
+  # 429/Retry-After backoff. All three registers were re-measured against
+  # origin/main on the rebased tree (after #17490), not derived from the diff.
+  @cloudclient_sources ~w(client.go deliveries.go retry.go selfupdate.go site_build_log.go site_doctor.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
@@ -2382,6 +2637,59 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
              "re-derive its premise before believing its green."
   end
 
+  # A FIELDLESS struct is the shape that made the scanner read past its own
+  # closing brace and report the NEXT struct's tags under the empty struct's
+  # name (dr-w34-followup-struct-tags-fallthrough, MEASURED not predicted). The
+  # fixture puts the fieldless struct BETWEEN two tagged ones on purpose: the
+  # `before` struct proves the scanner is not simply returning empty for
+  # everything, and the `after` struct is the one whose tags used to be stolen.
+  test "SCANNER: a fieldless struct is EMPTY, and its neighbours' tags are not attributed to it" do
+    fixture = """
+    type FixtureBefore struct {
+    \tAlpha string `json:"alpha"`
+    }
+
+    type FixtureEmptyBraces struct {
+    }
+
+    type FixtureEmptyOneLine struct{}
+
+    type FixtureAfter struct {
+    \tOmega string `json:"omega"`
+    }
+
+    type FixtureNested struct {
+    \tInner struct {
+    \t\tDeep string `json:"deep"`
+    \t} `json:"inner"`
+    }
+    """
+
+    # The neighbours are read correctly — without this the empties below would
+    # be a green with no subject.
+    assert Go.struct_tags(fixture, "FixtureBefore") == MapSet.new(["alpha"])
+    assert Go.struct_tags(fixture, "FixtureAfter") == MapSet.new(["omega"])
+
+    # THE FINDING. Both spellings gofmt can produce for a fieldless struct.
+    assert Go.struct_tags(fixture, "FixtureEmptyBraces") == MapSet.new(),
+           "a fieldless struct reported tags — the scanner ran past its own closing brace and " <>
+             "attributed a NEIGHBOUR's tags to it, which is how a PHANTOM red names the wrong struct."
+
+    assert Go.struct_tags(fixture, "FixtureEmptyOneLine") == MapSet.new()
+
+    # The stolen set was specifically the NEXT struct's, so name it.
+    refute "omega" in Go.struct_tags(fixture, "FixtureEmptyBraces")
+    assert Go.struct_fields(fixture, "FixtureEmptyBraces") == MapSet.new()
+
+    # A struct's own body still reaches its NESTED braces: only a column-0 `}`
+    # terminates it, so the guard above did not buy emptiness with blindness.
+    assert Go.struct_tags(fixture, "FixtureNested") == MapSet.new(["inner", "deep"])
+
+    # An absent struct is still nil, not empty — the pair arms above tell those
+    # two apart and refuse the first.
+    assert Go.struct_tags(fixture, "FixtureNotThere") == nil
+  end
+
   # ---------------------------------------------------------------------------
   # THE SITE ARM: the census can lose a SITE, not only the LAST site of a name
   # ---------------------------------------------------------------------------
@@ -2613,6 +2921,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w24-s4 KNOWN OPEN — the freshness stamp of apply_arming, same custody and same measurement as its twin above. Without it an `unarmed` verdict cannot be told from one taken a month ago, which is the whole reason the column exists beside the verdict."},
     {"barkpark_json/6", "updated_at",
      "RULED — deliberately off the wire: it moves on every hourly status poll, so a renderer diffing it would report 'something changed' about a box nothing happened to. `inserted_at` IS emitted, under its wire name created_at."},
+    {"site_deployment_json/3", "build_sha256",
+     "dr-w12-bl-box-build-writes-no-digest KNOWN OPEN (charter D188) — the sha256 of the release tree the box measured through `current` AFTER SWITCH committed. Its reader THIS wave is server-side and per-row: `Sites.Deploy.artifact_receipt/1` compares it against the box's independent STAGE-time reading and refuses to record the deployment live when the two disagree. `site_deployment_json/3` lives in router.ex, a 15k-line shared registry file outside this task's fence, and emitting it also needs a `SiteDeployment` Go struct field (internal/cloudclient) or `json.Unmarshal` silently drops it — both are the follow-up, and this row is where that is written down."},
     {"site_deployment_json/3", "claim_worker",
      "dr-w24-s4 KNOWN OPEN — which builder claimed this deployment. Lease bookkeeping today; it becomes a wire vital the moment two builders can race, which is the failure mode this epic exists for."},
     {"site_deployment_json/3", "claimed_at",
@@ -2623,6 +2933,20 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w18-s5 KNOWN OPEN, ONE ROW DOWN. The census AGGREGATE of this column is already an @known_open :unread row; the per-deployment COLUMN is unserialized as well, so a single site's row cannot show how many publishes joined the build it is looking at."},
     {"site_deployment_json/3", "coalesced_last_at",
      "dr-w18-s5 KNOWN OPEN — the last coalesced attempt's stamp, twin of coalesced_attempts."},
+    {"site_deployment_json/3", "graced_poll_refusals",
+     "dr-bl-w8-graced-deploys-are-uncounted KNOWN OPEN — how many transient box 5xx this run's poll loop swallowed. The column exists so the SAVES stop being invisible (`forget_graced_refusals/1` drops the in-memory tally on every reaching poll, i.e. on every grace that worked), and its reachable surface this wave is the NAMED QUERY `Registry.deploy_grace_census/3`, not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence. Emitting it is the follow-up, and this row is where that is written down."},
+    {"site_deployment_json/3", "graced_start_retries",
+     "dr-bl-w8-graced-deploys-are-uncounted KNOWN OPEN — how many START triggers were retried across an untyped 5xx, twin of graced_poll_refusals and the arm that recorded NOTHING in any outcome before this wave. Same custody, same fence, same follow-up."},
+    {"site_deployment_json/3", "last_graced_at",
+     "dr-bl-w8-graced-deploys-are-uncounted KNOWN OPEN — when the most recent grace of either kind happened. Without it a nonzero count cannot be told from one taken weeks ago; same reason `apply_arming_checked_at` sits beside its verdict two arms up."},
+    {"site_deployment_json/3", "deferral_scheduled_s",
+     "dr-bl-deferral-scheduled-vs-actual-gap KNOWN OPEN — the window the backoff ladder ASKED for on the interval this deferral closes. Its reachable surface this wave is the NAMED READER `DeployLedger.DeferralPacing.report/1`, not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence, exactly as `graced_poll_refusals` records three rows up. Emitting it is the named follow-up (server key + `cloudclient.Deployment` field + rendered line, the D136 rule), and this row is where that is written down."},
+    {"site_deployment_json/3", "deferral_actual_gap_s",
+     "dr-bl-deferral-scheduled-vs-actual-gap KNOWN OPEN — the gap that ACTUALLY elapsed on that same interval, twin of deferral_scheduled_s. The two are only useful as a PAIR (their ratio is the measurement), so they share one custody and one follow-up; shipping one to the wire without the other would put a numerator on a page with no denominator."},
+    {"site_deployment_json/3", "box_refusal_code",
+     "dr-w4-bl-deferral-raw-column-ambiguous KNOWN OPEN — the box's OWN refusal code word, recorded off the decoded 409 envelope so a deferral's class stops being read out of forgeable bytes. Its reachable surface this wave is `DeployLedger.classify/1` itself (the deferred arm prefers this column over the prose), not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence, exactly as `deferral_scheduled_s` and the grace trio record above. Emitting it is the named follow-up (server key + `cloudclient.Deployment` field + rendered line, the D136 rule), and this row is where that is written down. It is worth emitting: it is the ONE field that says whether the box named the cause of a deferral or the ledger inferred it."},
+    {"site_deployment_json/3", "demand_class",
+     "dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206) KNOWN OPEN — WHOSE DEMAND this build served (customer | platform | unclassified), stamped at create from the site's own class. Its reachable surface this wave is the NAMED READER `Registry.DemandCensus.census/1`, not the per-deployment wire: `site_deployment_json/3` lives in router.ex, outside this task's fence, exactly as `deferral_scheduled_s` and the grace trio record above. Emitting it is the named follow-up (server key + `cloudclient.Deployment` field + rendered line, the D136 rule), and this row is where that is written down."},
     {"site_deployment_json/3", "delivery_id",
      "RULED — GitHub's X-GitHub-Delivery header (dwb-18). A webhook idempotency key, never a fact about the build; it exists so a redelivered push mints at most one Deployment."},
     {"site_deployment_json/3", "preview_slug",
@@ -2682,8 +3006,71 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # move — all three are serialized in the same commit, which is the point.
   # MEASURED: the SERIALIZER-SIDE arm's neutered-walker assertion printed
   # `left: 106`, which IS the full schema population by construction.
-  @schema_field_floor 107
-  @schema_unserialized_floor 24
+  # 107 -> 110 (dr-bl-w8-graced-deploys-are-uncounted): the `deployments` schema
+  # gains `graced_poll_refusals`, `graced_start_retries` and `last_graced_at`.
+  # `@schema_unserialized_floor` DOES move this time, 24 -> 27, and that is the
+  # honest record: unlike the node-slot trio, these three are NOT serialized in
+  # the same commit — `site_deployment_json/3` lives in router.ex, outside that
+  # task's fence, so the emit is a named follow-up and the three allowlist rows
+  # above carry the tracker. A floor that stayed at 24 would have required
+  # pretending they were emitted.
+  # MEASURED, not derived: the SERIALIZER-SIDE arm's un-allowlisted run printed
+  # `27 unserialized column(s)` and the SCHEMA-SIDE arm printed
+  # `110 schema column(s) collected`.
+  # 110 -> 112 (dr-bl-deferral-scheduled-vs-actual-gap): the `deployments` schema
+  # gains `deferral_scheduled_s` and `deferral_actual_gap_s`.
+  # `@schema_unserialized_floor` moves 27 -> 29 for the SAME reason the grace
+  # trio moved it — `site_deployment_json/3` lives in router.ex, outside that
+  # task's fence, so the emit is a named follow-up and the two allowlist rows
+  # above carry the tracker. The columns DO have a reader this wave
+  # (`DeployLedger.DeferralPacing.report/1`); this arm measures the WIRE, and a
+  # floor that stayed at 27 would have claimed a wire key that does not exist.
+  # MEASURED, not derived: the SERIALIZER-SIDE arm's un-allowlisted run printed
+  # `29 unserialized column(s)` and the SCHEMA-SIDE arm printed
+  # `112 schema column(s) collected`.
+  # 112 -> 113 (dr-w29-bl-serving-since-has-no-basis-column, #17401, now ON
+  # MAIN): the `platform_deliveries` schema gains `serving_since_basis`.
+  # `@schema_unserialized_floor` did NOT move off 29: the column is emitted by
+  # `PlatformDelivery.to_json/1` in the same commit that declares it.
+  # 113 -> 114 (dr-w13-bl-demand-needs-a-label-before-a-cut): the `deployments`
+  # schema gains `demand_class`. `@schema_unserialized_floor` moves 29 -> 30 for
+  # the SAME reason the deferral pair and the grace trio moved it —
+  # `site_deployment_json/3` lives in router.ex, outside that task's fence, so
+  # the emit is a named follow-up and the allowlist row above carries the
+  # tracker. The column DOES have a reader this wave
+  # (`Registry.DemandCensus.census/1`); this arm measures the WIRE, and a floor
+  # that stayed at 29 would have claimed a wire key that does not exist.
+  # `sites.demand_class` lands in the same commit and moves NEITHER pin: `sites`
+  # is not one of the three censused schema pairs, so no arm in this file can
+  # see it.
+  # RE-MEASURED 2026-09-10 on THIS tree merged with origin/main at
+  # 265876e74 (which already carries #17401's +1): the SCHEMA-SIDE arm printed
+  # `114 schema column(s) collected` and the SERIALIZER-SIDE arm printed
+  # `30 unserialized column(s)`. The pre-merge measurement said 113/30 and is
+  # VOID — it was taken against a main without `serving_since_basis`.
+  # dr-w12-bl-box-build-writes-no-digest (charter D188) moves BOTH pins by
+  # exactly one: `deployments.build_sha256` joins the schema side (114 -> 115)
+  # and, being deliberately off the wire, the unserialized side too (30 -> 31).
+  # Its @schema_allowlist row below carries the reason.
+  # dr-w4-bl-deferral-raw-column-ambiguous moves BOTH pins by exactly one:
+  # `deployments.box_refusal_code` joins the schema side (115 -> 116) and, being
+  # deliberately off the wire this wave (`site_deployment_json/3` is in
+  # router.ex, outside the fence), the unserialized side too (31 -> 32). Its
+  # @schema_allowlist row below carries the reason and names the follow-up.
+  # MEASURED on this tree with the 999-technique, never derived: both floors set
+  # to 999 and the refusals printed `116 schema column(s) collected` and
+  # `32 unserialized column(s)`.
+  # 116 -> 118 (dr-w21-bl-route-decision-reaches-no-plane, charter D608): the
+  # `deployments` schema gains `route_status` and `route_detail`.
+  # `@schema_unserialized_floor` does NOT move, and that is the point of landing
+  # them together — `deployment_json/1` emits both in the SAME commit that
+  # declares them, so neither is ever a hole. A serializer-less version of this
+  # change would have moved that floor 32 -> 34, which is the arm doing its job.
+  # MEASURED on this tree by the PIN CO-EDIT / SCHEMA-SIDE arms, which printed
+  # `118 schema column(s) collected` while the unserialized arm stayed at 32 —
+  # never derived by adding two to the old number.
+  @schema_field_floor 118
+  @schema_unserialized_floor 32
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
   # `delivery_json/1` (router.ex:9809) is the NOTIFICATIONS delivery serializer,
@@ -2938,7 +3325,21 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       assert is_binary(key) and key != ""
       assert byte_size(reason) > 40, "#{payload}/#{key}: a reason this short is not a ruling"
 
-      assert reason =~ ~r/dr-w\d+-[a-z0-9-]+|task-[0-9a-f]+|RULED/,
+      # `dr-bl-…` is the SAME ledger's backlog prefix, not a second scheme: a row
+      # adopted by `dr-backlog-never-started` keeps its wave in the id and gains
+      # a `bl-` segment (`dr-bl-w8-graced-deploys-are-uncounted`). Without this
+      # alternative the guard forces such a row to cite an id that does not
+      # exist, which is worse than no citation.
+      #
+      # THE WAVE SEGMENT IS OPTIONAL ON A `bl-` ID, and that is a MEASURED
+      # correction rather than a loosening: `dr-bl-deferral-scheduled-vs-actual-gap`
+      # is a real ledger row (filed out of dr-w23-s7, adopted by
+      # `dr-backlog-never-started`) whose id carries NO wave at all, so the
+      # `w\d+` this pattern required would have forced a TRUE citation to be
+      # rewritten into a false one. The guard's job is "name a tracker"; a wave
+      # number was an accident of the four ids that happened to exist when it
+      # was written.
+      assert reason =~ ~r/dr-w\d+-[a-z0-9-]+|dr-bl-(w\d+-)?[a-z0-9-]+|task-[0-9a-f]+|RULED/,
              "#{payload}/#{key}: a row must name its tracker, or say RULED and why"
 
       # THE CLASS RULE IS ONE RULE. An explicit row for an `*_encrypted` column
@@ -3656,13 +4057,27 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
                "a PR editing it would SKIP the Cloud gate that runs this census"
     end
 
-    # The four entries dr-w26-s4 added, by name. `.github/workflows/deploy.yml`
-    # is the one that matters most: before it, a deploy.yml-only PR dispatched
-    # NOTHING in this set, so the recorder could land — or vanish — with no code
-    # gate at all.
-    for entry <- ["cloud/lib/**", "deploy/**", "internal/**", ".github/workflows/deploy.yml"] do
+    # The four entries dr-w26-s4 added, by name — the workflow one now as the
+    # DIRECTORY it became. `.github/workflows/deploy.yml` is the entry that
+    # mattered most: before it, a deploy.yml-only PR dispatched NOTHING in this
+    # set, so the recorder could land — or vanish — with no code gate at all. It
+    # was folded into `.github/workflows/**` by
+    # dr-w26-s4-followup-widen-escape-harness, because this arm walks the WHOLE
+    # `.github/workflows` directory and an exact-file pin rots the moment a
+    # caller moves one file over. The glob is strictly stronger here: it still
+    # covers deploy.yml, and it also covers the next workflow the corpus reads.
+    for entry <- ["cloud/lib/**", "deploy/**", "internal/**", ".github/workflows/**"] do
       assert entry in declared, "CLOUD_PATHS lost #{entry} — dr-w26-s4's declaration"
     end
+
+    # …and the ruling the fold must not have thrown away: whatever shape the
+    # entry takes, a deploy.yml-only PR still dispatches this suite.
+    assert Enum.any?(
+             declared,
+             &(&1 == ".github/workflows/deploy.yml" or &1 == ".github/workflows/**")
+           ),
+           "nothing in CLOUD_PATHS dispatches on .github/workflows/deploy.yml — the recorder " <>
+             "seam this arm scores can land, or vanish, with no code gate at all"
   end
 
   defp fmt_routes(set) do
@@ -3739,7 +4154,7 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # Verbatim corpus samples, same provenance as DeployLedgerTest's.
   @r409_coded "the instance refused the deploy (HTTP 409): already_running — a deploy is already in flight"
   @r500 "the instance refused the deploy (HTTP 500)"
-  @gh_push "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
+  @gh_push "github push builds require a linked GitHub repo on this site — link a repo to this site, or deploy an artifact via bp deploy"
 
   # ── SIDE A: the register, one row per key PATH the wire carries ──────────
   #
@@ -3752,6 +4167,7 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # walk over a real `census/3` return, never transcribed from the source.
   @emitted_paths [
     "abandoned",
+    "abandoned_basis",
     "abandoned_unreadable",
     "boundaries",
     "boundaries[].instant",
@@ -3759,6 +4175,22 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
     "boundaries[].source",
     "boundaries[].subject",
     "boundaries[].voids",
+    # dr-w22-s5. The box door's OWN denominator, keyed on the capacity-409 prose
+    # marker across ALL statuses rather than on `deferral_cause` — a column
+    # written in exactly one code path, so a capacity refusal that settled
+    # `failed` carries a NULL cause and no cause-keyed reader can see it. Every
+    # path here is decoded by `cloudclient.DeployBoxDoor` in the same commit.
+    # `by_status[]`'s own two keys (`status`, `count`) are NOT registered: the
+    # evaluated payload this census walks carries an EMPTY list for it, so those
+    # paths are not on this wire to be named. They ride `DeployBoxDoorStatus`.
+    "box_door",
+    "box_door.basis",
+    "box_door.by_status",
+    "box_door.cause_keyed",
+    "box_door.cause_predicate",
+    "box_door.predicate",
+    "box_door.refusals",
+    "box_door.unkeyed",
     "cancelled",
     "classes",
     "classes[].agency",
@@ -3948,6 +4380,16 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
     "terminal_failure_rate.sample",
     "total_sites",
     "truncated",
+    # dr-w16-s3-followup-class-vocabulary-unreachable. The class ENUM, as
+    # against `classes[]` above, which is what the WINDOW observed. Its three
+    # values are LISTS OF STRINGS, so the walk records the node and its three
+    # keys and NOTHING below them — a class name is data, not a wire key, and
+    # adding a class must not red a key-set register. Decoded by
+    # `cloudclient.DeployVocabulary` in the same commit.
+    "vocabulary",
+    "vocabulary.classes",
+    "vocabulary.deferred_classes",
+    "vocabulary.not_attempted_classes",
     "volume",
     "window",
     "window.from",
@@ -3962,8 +4404,8 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # that NO other producer in the payload writes it. A blind walk loses these
   # together, and the control reds before the register can go quiet.
   #
-  # THIS LIST IS THE c0 ENUMERATION. Twelve producers reach `census/3`'s wire;
-  # eleven of them write at least one key of their own (`site_rows/1` writes
+  # THIS LIST IS THE c0 ENUMERATION. Thirteen producers reach `census/3`'s wire;
+  # twelve of them write at least one key of their own (`site_rows/1` writes
   # none — it delegates every key to `site_row/2` — and `top_class/1` returns a
   # scalar, so neither can be named here), and `refuse_across_boundary/2`,
   # `refuse_class_rows/2` and `straddled_boundary/2` rewrite values in place
@@ -3980,7 +4422,8 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
     {"never_covered_by_environment/1",
      "coverage_cohorts.cohorts[].never_covered_by_environment[].environment"},
     {"coverage_site_row/1", "coverage_cohorts.never_covered_sites[].slug"},
-    {"completeness/3", "completeness.unaccounted"}
+    {"completeness/3", "completeness.unaccounted"},
+    {"vocabulary/0", "vocabulary.classes"}
   ]
 
   # ── c0: how much of the wire the AST census cannot see ───────────────────
@@ -3999,7 +4442,17 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # PINNED, and the direction of travel is DOWN. Narrow the AST census's blind
   # spot and this number falls; it must never rise without a reason written
   # beside it.
-  @ast_blind_paths 161
+  # 161 -> 168 (dr-w22-s5): `box_door/1` is a private helper, so the AST census
+  # sees only the top-level `box_door` key its call site writes and is blind to
+  # all SEVEN of the node's inner paths. UP, and the reason is the same shape
+  # dr-w32 filed — a helper writing to the wire — which is exactly why the
+  # EVALUATED census above exists and names all eight.
+  # 168 -> 171 (dr-w16-s3-followup-class-vocabulary-unreachable): `vocabulary/0`
+  # is a private helper, so the AST census sees only the top-level `vocabulary`
+  # key its call site writes and is blind to all THREE of the node's inner
+  # paths. UP, and the reason is the same shape as `box_door/1` above — a helper
+  # writing to the wire — which is why the EVALUATED census names all four.
+  @ast_blind_paths 171
 
   @ledger Path.expand("../../lib/barkpark_cloud/deploy_ledger.ex", __DIR__)
 

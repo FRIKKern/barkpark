@@ -87,6 +87,8 @@
 #   BP_DRIVE_BIN=/path/to/bp bash .../drive.sh       # skip the build step
 #   BP_DRIVE_KEEP=1 bash .../drive.sh                # keep tmux server for inspection
 set -u -o pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 MODE="${DRIVE_MODE:-live}"
 case "$MODE" in
@@ -162,6 +164,15 @@ bad() { FAIL=$((FAIL+1)); echo "FAIL  $1"; echo "- **FAIL** — $1" >>"$REPORT";
 note(){ echo "        $1"; echo "  - $1" >>"$REPORT"; }
 
 snap()  { TMX capture-pane -t "$1" -p -J; }
+# NEVER `snap … | grep -q`.  Under this script's `set -o pipefail` a matching
+# `grep -q` exits on the FIRST hit, capture-pane takes SIGPIPE, and pipefail
+# hands the pipeline 141 — so a pane that DOES show the thing reads as "not
+# there".  A full pane capture is 20-60 lines with the match usually near the
+# top, which is exactly the many-lines/early-match shape that fires it (a
+# ~512 B pipe on darwin, 64 KB on the Linux runners).  Capture first, then
+# match a here-string: no producer process is left to kill.
+snap_has()  { grep -q  "$2" <<<"$(snap "$1")"; }
+snap_hasE() { grep -qE "$2" <<<"$(snap "$1")"; }
 snape() { TMX capture-pane -t "$1" -e -p -J; }
 sgr()   { TMX send-keys -t "$1" -l "$2"; }
 
@@ -289,7 +300,7 @@ line_tail() {
 wait_ready() {
   local s=$1 tries=0
   while [ "$tries" -lt 60 ]; do
-    if snap "$s" | grep -q -E '⇄|barkpark · tasks' && snap "$s" | grep -q '^ *[├└]─'; then
+    if snap_hasE "$s" '⇄|barkpark · tasks' && snap_has "$s" '^ *[├└]─'; then
       return 0
     fi
     sleep 0.5; tries=$((tries+1))
@@ -310,7 +321,7 @@ rm -f "$EVID"/*.txt "$REPORT"
   echo
 } >"$REPORT"
 
-if ! tmux -V | grep -Eq 'tmux (3\.[4-9]|[4-9])'; then
+if ! grep -qE 'tmux (3\.[4-9]|[4-9])' <<<"$(tmux -V 2>&1)"; then
   echo "WARN: tmux >= 3.4 expected ($(tmux -V)) — detached -x/-y geometry may not stick" >&2
 fi
 
@@ -336,7 +347,7 @@ if [ "$MODE" = hermetic ]; then
   # byte-determinism proof's transcript diff.
   disown "$FIXTURE_PID"
   tries=0
-  until curl -fsS "http://127.0.0.1:$FIXTURE_PORT/v1/tasks?limit=1" >/dev/null 2>&1; do
+  until bp_curl_body -sS "http://127.0.0.1:$FIXTURE_PORT/v1/tasks?limit=1" >/dev/null 2>&1; do
     tries=$((tries+1))
     if [ "$tries" -ge 50 ]; then
       echo "FATAL: fixture never answered on 127.0.0.1:$FIXTURE_PORT (log: $(cat "$TMPD/fixture.log" 2>/dev/null))" >&2
@@ -378,10 +389,10 @@ wait_ready "$NARROW" || bad "narrow board never painted task rows"
 # class now reds deterministically instead of hiding behind the CONN mask.
 if [ "$MODE" = hermetic ]; then
   tries=0
-  while [ "$tries" -lt 30 ] && ! snap "$WIDE" | grep -q '● live'; do
+  while [ "$tries" -lt 30 ] && ! snap_has "$WIDE" '● live'; do
     sleep 0.5; tries=$((tries+1))
   done
-  if snap "$WIDE" | grep -q '● live'; then
+  if snap_has "$WIDE" '● live'; then
     ok "hermetic header pins the literal '● live' glyph (welcome frame upgraded polling->live; CONN mask dropped)"
   else
     bad "hermetic header never showed '● live' within 15s (header: '$(snap "$WIDE" | sed -n "1p")')"
@@ -495,7 +506,9 @@ fi
 if live_mode; then
   RP1=$(line_tail "$WIDE" "$((HL+1))" "$((GUTL+2))")
   RP2=$(line_tail "$WIDE" "$((HL+2))" "$((GUTL+2))")
-  if printf '%s\n%s\n' "$RP1" "$RP2" | grep -qF "$TITLE"; then
+  # A builtin `case` over the two captured lines — a pipe into `grep -qF`
+  # would return 141 whenever the heading is long enough to fill the buffer.
+  if case "$RP1"$'\n'"$RP2" in *"$TITLE"*) true ;; *) false ;; esac; then
     ok "G4 reading pane heading (right of the gutter) shows the clicked task (\"$TITLE\")"
   else
     bad "G4 reading pane heading does not show \"$TITLE\""
@@ -503,7 +516,7 @@ if live_mode; then
 fi
 TMX send-keys -t "$WIDE" Escape
 sleep 0.5
-if snap "$WIDE" | grep -q 'esc back'; then
+if snap_has "$WIDE" 'esc back'; then
   ok "esc after descend: board footer still present (ascended cleanly)"
 else
   bad "esc after descend: board footer missing"
@@ -522,7 +535,7 @@ board_region() {
   snap "$WIDE" | sed -n "$1,$2p" | normalize | perl -CSD -Mutf8 -ne \
     'print substr($_, 0, '"$((GUTL-1))"'), "\n"'
 }
-was_child() { printf '%s' "$1" | grep -q '^ *[├└]─'; }
+was_child() { grep -q '^ *[├└]─' <<<"$1"; }
 # Re-locate the SAME epic root by its title (never the first "··· n/m" badge via
 # head -1 — every root paints one, so head -1 is order-dependent and the board
 # reorders between clicks). Fall back to the first root only if that title has
@@ -604,7 +617,7 @@ printf '%s\n' "$MID" >"$EVID/g6-drag-mid-header.txt"
 printf -v seq '\033[<0;%d;12m' "$TARGET";    sgr "$WIDE" "$seq"; sleep 0.6
 A1=$(arrow_col "$WIDE")
 save_row "$WIDE" "$HL" g6-drag-after-header.txt
-if printf '%s' "$MID" | grep -q '↔↔'; then
+if case "$MID" in *'↔↔'*) true ;; *) false ;; esac; then
   ok "G6 drag-in-progress paints the ↔↔ grabbed affordance"
 else
   bad "G6 no ↔↔ during drag (header: '$MID')"
@@ -686,7 +699,7 @@ if live_mode; then
   fi
 fi
 save_frame "$NARROW" n-narrow-board.txt
-if snap "$NARROW" | grep -q 'M mouse'; then
+if snap_has "$NARROW" 'M mouse'; then
   bad "narrow BOARD footer already shows 'M mouse' (expected shed below 102-col inner)"
 else
   ok "narrow board footer sheds the M note (shed-ladder design, <102-col inner)"
@@ -696,14 +709,14 @@ fi
 NL=$(line_of_ident "$NARROW" "$NLTITLE"); [ -n "$NL" ] || NL=$(leaf_line "$NARROW")
 click "$NARROW" 6 "$NL"
 save_frame "$NARROW" n-narrow-reading.txt
-if snap "$NARROW" | grep -q 'M mouse'; then
+if snap_has "$NARROW" 'M mouse'; then
   ok "narrow first-click descend reached the reading frame (footer shows the M mouse note)"
 else
   bad "narrow reading footer does not show 'M mouse' after leaf click"
 fi
 TMX send-keys -t "$NARROW" Escape
 sleep 0.5
-if snap "$NARROW" | grep -q '^ *[├└]─'; then
+if snap_has "$NARROW" '^ *[├└]─'; then
   ok "narrow esc ascended back to the board"
 else
   bad "narrow esc did not return to the board"
@@ -716,10 +729,10 @@ fi
 # endpoint exists on the fixture, so any silent fallback to polling reds here.)
 if [ "$MODE" = hermetic ]; then
   tries=0
-  while [ "$tries" -lt 10 ] && ! snap "$WIDE" | grep -q '● live'; do
+  while [ "$tries" -lt 10 ] && ! snap_has "$WIDE" '● live'; do
     sleep 0.5; tries=$((tries+1))
   done
-  if snap "$WIDE" | grep -q '● live'; then
+  if snap_has "$WIDE" '● live'; then
     ok "hermetic '● live' still pinned at run end (held-open stream survived the G6 relaunch; no polling fallback)"
   else
     bad "hermetic '● live' lost by run end (header: '$(snap "$WIDE" | sed -n "1p")')"

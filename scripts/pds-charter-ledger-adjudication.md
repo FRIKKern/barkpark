@@ -266,7 +266,6 @@ TWO ADJUDICATIONS WORTH ARGUING WITH, STATED SO THEY CAN BE.
 
 | fingerprint | line | slug | asserted | note |
 |---|---|---|---|---|
-| f25e8768c137 | 1208 | pds-pull-proof.sh | non-task | pds-pull-proof.sh:113 is a script filename inside PDS-D148's quoted export line; RETROACTIVE - the line predates this table and became a candidate only when `export` entered the mined vocabulary |
 | cde5746adc2d | 2586 | pds-w45-lega-argument-list | terminal | wave-45 shipped-slice table row with its branch and PR #9434 |
 | df67c6c4906d | 2629 | pds-w44-grant-door-narrowing | terminal | wave-44 shipped-slice table row with its branch and PR #9377 |
 | fcdd795e0555 | 2630 | pds-w44-census-fold-and-blindspot | terminal | wave-44 shipped-slice table row with its branch and PR #9378 |
@@ -282,10 +281,8 @@ TWO ADJUDICATIONS WORTH ARGUING WITH, STATED SO THEY CAN BE.
 | cf00a3c053ef | 3365 | pds-w42-paper-op-principal-gate | non-disposition | wave-41 dispatch table row |
 | 3b759ed866f5 | 3369 | pds-w40-judgment-coverage-ladder | non-disposition | wave-41 dispatch table row |
 | a290d5ef038f | 3370 | pds-w42-caps-prop-is-a-mount-snapshot | non-disposition | wave-41 dispatch table row |
-| 3af3cf7874b8 | 3409 | pds-w40-scim-groups-list-members | historical | '8/9. Their merge halves are SATISFIED' - a criteria-count observation at that wave, not a standing claim |
 | 8c88e89a2755 | 3434 | pds-w41-caps-component-gate | terminal | wave-41 shipped-slice table row with its PR #9230 |
 | ed52e7d13ec6 | 3435 | pds-w40-liveview-write-population | terminal | wave-41 shipped-slice table row with its PR #9231 |
-| 0c65003b0534 | 3739 | pds-w35-elixir-census-gate | non-disposition | 'stay CUT behind the .github/workflows/** fence - as POLICY' is a DISPATCH fence, not a lifecycle claim |
 | bd4c547f9151 | 3778 | pds-w40-judgment-coverage-ladder | non-disposition | wave-40 dispatch table row |
 | 508e4670f05e | 3807 | pds-w40-request-echo-repairs | terminal | wave-40 shipped-slice table row with branch and PR #9164 |
 | 75b5e8108000 | 3808 | pds-w40-derivation-partition | terminal | wave-40 shipped-slice table row with branch and PR #9165 |
@@ -293,41 +290,22 @@ TWO ADJUDICATIONS WORTH ARGUING WITH, STATED SO THEY CAN BE.
 | 101291a98b8b | 3882 | pds-w35-elixir-census-gate | non-disposition | 'stay behind the .github/workflows/** POLICY fence (D583)' - the same dispatch fence, restated |
 | adca5b24b820 | 3894 | pds-w38-verdict-freshness-arm | terminal | wave-39 shipped-slice table row with branch and PR #9112; the ledger row is the stale half, so this scores DISAGREES by design |
 | 45e2edb93e9d | 3896 | pds-bl-status-only-residue-payment | terminal | wave-39 shipped-slice table row with branch and PR #9114; ledger stale half, DISAGREES by design |
-| 1c039a1f5c33 | 3897 | pds-w39-record-parity-shallow-guard | terminal | wave-39 shipped-slice table row with branch and PR #9115; ledger stale half, DISAGREES by design |
-| 211d9cd25100 | 3899 | pds-w39-r-owning-doc | non-task | pds-w39-r-owning-doc is the BRANCH name in a shipped-slice row, not a task; `bp task get` returns not_found. The row's task is pds-w34-owning-doc-amendment, which the lens did not attribute |
-| 018e43da760e | 4028 | pds-w38-routed-population | non-disposition | wave-38 dispatch table row (slice + round + task + what it does); RETROACTIVE - fired only once `router` entered the mined vocabulary |
-| 7cc895ffd52c | 4054 | pds-w34-hand-bucket-register | terminal | wave-34 shipped-slice table row with its PR #8989; RETROACTIVE on the idiom `five`; ledger stale half, DISAGREES by design |
-| 6c9569488b2c | 4198 | pds-w34-ledger-background-write-arms | terminal | wave-34 shipped-slice table row with its PR #8886; RETROACTIVE on the idiom `five` |
-| 98fef89f0730 | 4375 | pds-w33-elixir-receipt-census | terminal | wave-33 shipped-slice table row; RETROACTIVE on the idiom `five` |
-| 7d3b54d3be6a | 4511 | pds-w31-census-shrinkage-ratchet | terminal | wave-31 shipped-slice table row with its PR #8686; RETROACTIVE on the idiom `satisfied` |
-| b30ee7a58719 | 4587 | pds-w29-registry-postcondition-invariant | terminal | wave-29 shipped-slice table row with its PR #8645; RETROACTIVE on the idiom `byte-identical` |
-| 17ca934705f7 | 6986 | pds-w23-cold-owner-verb-honesty | non-disposition | wave-23 dispatch table row (round + task + surface); RETROACTIVE on the idioms `export` and `router` |
-| ef5d72c9e9ae | 7915 | pds-w26-export-atomic-out | terminal | wave-26 shipped-slice gate table row (task + what + gate command); RETROACTIVE on the idiom `export` |
-| 1c3f7e4aa768 | 7916 | pds-w26-workspace-export-declared-size | terminal | wave-26 shipped-slice gate table row; RETROACTIVE on the idiom `export` |
-| db5911789a17 | 8251 | pds-w27-certify-the-round | non-disposition | wave-27 dispatch table row (task + round + what + gate); RETROACTIVE on the idiom `itself` |
-| cd31e189f6b9 | 8281 | pds-w27-reader-transport-honesty | terminal | wave-27 shipped-slice table row with its PR #8410; RETROACTIVE on the idiom `guarded` |
-| 77e4ccc36e5f | 10818 | pds-w35-background-write-arms | non-task | pds-w35-background-write-arms is a planned slug in a wave-35 dispatch table that was never filed - `bp task get` returns not_found; RETROACTIVE on the idiom `five` |
-| 52e8aeef5276 | 11592 | pds-w35-elixir-census-gate | non-disposition | wave-35 dispatch table row, 'CUT from this wave's dispatch' - dispatch scope, not lifecycle; RETROACTIVE on the idiom `cut` |
 | 41572551093f | 11940 | pds-w38-verdict-freshness-arm | non-disposition | PDS-D559 calls THREE CRITERIA defective - a criterion claim, the same reading the wave-39 reviewer gave this decision |
 | 828bfe96a836 | 12051 | pds-bl-spill-dir-path-drift | non-disposition | the charter QUOTING this sweep's own finding ('charter is paid vs live open 0/4'), not asserting a disposition |
 | 35da4917f854 | 12052 | pds-w20-crown-fire | non-disposition | same shape - the charter quoting the finding about pds-w20-crown-fire |
 | edd0ae40ece1 | 12053 | pds-w34-census-cas-shadow | non-disposition | same shape - the charter quoting the self-contradiction it found at :9820 |
-| 255737af37d5 | 12093 | pds-census | non-task | pds-census is a `needs:` CI job name, the same reading already given to pds-receipt-census |
 | ed5cc3fcb7fa | 12323 | pds-w35-elixir-census-gate | non-disposition | 'criterion 8 is satisfiable only by a duration from an Actions run' - a criterion claim |
 | 22e5602f0426 | 12373 | pds-w29-pay-lb | historical | 'is open at 12/14 with #8644 merged' - a ledger-state observation at that wave |
 | b4201b2f3e72 | 12378 | pds-w25-round-open | non-terminal | 'are CLOSABLE TODAY' - the row is not closed and still carries the close act |
 | 3959aa87618d | 12380 | pds-w25-round-bare | non-disposition | 'its own criterion 3 is stamped met claiming it is PARKED' - a criterion stamp claim |
-| 6545ce378942 | 12382 | pds-bl-stale-open-rows-with-merged-prs | historical | 'is itself open at 0/4 since yesterday' - a dated ledger-state observation |
 | 415ea6339d25 | 12407 | pds-w40-shares-remove-postread | non-disposition | wave-40 dispatch table row |
 | d16a425432e4 | 12409 | pds-w40-residue-lens-can-fail | non-disposition | wave-40 dispatch table row |
 | 1aff03d82cc6 | 12596 | pds-ledger-census.sh | non-task | pds-ledger-census.sh is a script filename; the sentence corrects an attribution to that FILE |
 | 5d4150ca9d68 | 12714 | pds-record-parity.sh | non-task | pds-record-parity.sh is a script filename |
-| 7919a4be61d2 | 12716 | pds-record-parity.test | non-task | pds-record-parity.test.sh is a script filename; the slug regex stops at the dot-segment |
 | 1cc5e59de35d | 12723 | pds-w44-grant-door-narrowing | non-disposition | wave-44 dispatch table row |
 | 6fc8f9cf1b66 | 12725 | pds-w44-door-census-instrument | non-disposition | wave-44 dispatch table row |
 | 84185aad20b9 | 12726 | pds-w44-palette-harness-repair | non-disposition | wave-44 dispatch table row |
 | 76f93bf48938 | 12729 | pds-w44-charter-sweep-adjudication | non-disposition | wave-44 dispatch table row; the row itself is now cancelled and superseded by pds-w45-bl-sweep-adjudication-frozen-blob, which does not change what this LINE asserts |
-| 78aed6d46907 | 12747 | pds-door-census.sh | non-task | scripts/pds-door-census.sh is a script filename |
 | 4ff5314b78b9 | 12921 | pds-scratch-target | non-task | pds-scratch-target_test.sh is a script filename; the slug regex stops before the underscore |
 | 40cca8eef7a2 | 13114 | pds-scratch-target | non-task | pds-scratch-target_test.sh is a script filename |
 | 4db5525ed73b | 13193 | pds-ledger-census | non-task | pds-ledger-census_test.sh is a script filename |
@@ -336,4 +314,195 @@ TWO ADJUDICATIONS WORTH ARGUING WITH, STATED SO THEY CAN BE.
 | c9beed77cb07 | 13213 | pds-w44-judgment-coverage-ladder | non-disposition | wave-45 dispatch table row |
 | 0964270bfa1c | 13214 | pds-w45-sweep-failopen | non-disposition | wave-45 dispatch table row |
 | 1be9d39387f2 | 13216 | pds-w45-census-ledger-integrity | non-disposition | wave-45 dispatch table row |
-| aaae540d6898 | 13218 | pds-w44-hetzner-offline-door | non-disposition | wave-45 dispatch table row |
+
+
+## THE WAVE-49 BLOCK — 47 arrivals, adjudicated 2026-09-10 at `origin/main` 7c084103c
+
+The 176 rows above resolved; the charter had since grown to 15,222 lines and the sweep
+printed `unresolved-claim arrivals : 47`. These are those 47, one entry each, at that
+frozen tree. Split by class: 21 terminal, 15 non-disposition, 6 non-task, 4 historical, 1 non-terminal.
+
+THE PREMISE THE ROW THAT ORDERED THIS WORK CARRIED IS STALE, AND IT IS RECORDED HERE
+RATHER THAN QUIETLY FIXED. `pds-w43-bl-charter-ledger-sweep-content-red` says
+`--selftest` exits 1. It does not: from a clean `git archive origin/main` root the
+selftest is `rc=0`, `=== SELFTEST OK: 3 of 3 ===`, because the plant assertion was
+decoupled from the corpus into a DELTA. The CONTENT-RED was real and lived on `--check`
+— which is what this block pays.
+
+WHAT WAS NOT DONE, DELIBERATELY. No allowlist was widened, no arm silenced, and
+`scripts/pds-charter-ledger-sweep.sh` is UNTOUCHED by the change that adds this block —
+the same separation the wave-45 block above insists on, for the same reason: a lens edit
+and an adjudication landing together let the two effects mask each other.
+
+THE THREE READINGS WORTH ARGUING WITH.
+
+  - A WAVE **PLAN** TABLE IS `non-disposition`; A WAVE **SHIPPED-SLICE** TABLE IS
+    `terminal`. Both are `| ... slug ... |` rows and the lens cannot tell them apart.
+    The separator used here is what the table's OWN COLUMNS carry: a shipped table
+    carries a PR number and what the merged commit did (charter:2591, :2666, :2720 and
+    kin); a plan table carries a round, a surface and a gate (charter:8454, :12635,
+    :13846, :14229, :14516, :15062). A plan row asserts intent, never a disposition.
+  - `pds-correction-receipt-surfaces-status` (charter:2592) IS NOT THE ID ON THAT LINE.
+    The cell reads `task-pds-correction-receipt-surfaces-status`; the SLUG regex has no
+    `task-` prefix, so it matched a SUFFIX of a real id. Both reads were taken: the bare
+    string answers `rc=4 ok:false not_found`, the prefixed one answers `rc=0 ok:true`
+    lifecycle `done`. `non-task` is the honest class for the STRING the lens produced,
+    and the note carries the real id so no reader concludes the work is unfiled. Same
+    LENS ATTRIBUTION LIMIT already recorded at fingerprint 6526839f4d30.
+  - TWO ROWS ARE ADJUDICATED INTO A `DISAGREES`, NOT AWAY FROM ONE. charter:14484 rules
+    `pds-w46-load-stamp-provenance-doubt` REFUTED (terminal) while the ledger row reads
+    `open`; charter:15219 says `pds-bl-github-linkput-auto-publish-erasure` "stays open"
+    (non-terminal) while the ledger row reads `done`. A class that produced AGREES was
+    available for each by calling it `historical`. It was not taken: a disagreement is a
+    FINDING for the lead, and manufacturing agreement is the disease this file treats.
+    RECONCILED 2026-09-10 (lead-gates-r4, task-651da856c5d4e560), on the side that was wrong
+    each time: the pds-w46 ledger row was closed `cancelled` citing PDS-D698 (the charter was
+    right; the row was stale-open), and the charter's "stays open" sentence at :15219 was
+    replaced by a dated LEDGER NOTE saying the row is `done` (the ledger was right; the prose
+    was stale). Both lines now read AGREES; the old :15219 row above is superseded by the
+    :15220 row.
+
+| fingerprint | line | slug | asserted | note |
+|---|---|---|---|---|
+| 52450d341314 | 2591 | pds-bl-w47-find-event-launders-the-honest-status | terminal | wave-48 shipped-slice table row with its PR (#9599) - asserts the work landed |
+| a46f5694a64c | 2592 | pds-correction-receipt-surfaces-status | non-task | NOT the id in the cell: the cell reads `task-pds-correction-receipt-surfaces-status` and the SLUG regex carries no `task-` prefix, so it matched a SUFFIX of a real id. `bp task get pds-correction-receipt-surfaces-status` -> rc=4 ok:false not_found; `bp task get task-pds-correction-receipt-surfaces-status` -> rc=0 ok:true lifecycle done. This bare string is not a task |
+| da43003b73de | 2593 | pds-w48-react-reference-error-collapse | terminal | wave-48 shipped-slice table row with its PR (#9601) |
+| 30425fd1a380 | 2594 | pds-w48-cli-count-and-birth-receipts | terminal | wave-48 shipped-slice table row with its PR (#9602) |
+| 89997fadfd3a | 2595 | pds-w48-deploy-banner-descends-from-health | terminal | wave-48 shipped-slice table row with its PR (#9603) |
+| 3384ab4785d2 | 2596 | pds-w48-meter-rot-and-duplicate-rate-table | terminal | wave-48 shipped-slice table row with its PR (#9604) |
+| 5d05c298f4bb | 2633 | pds-w49-meter-ci-decision | historical | the wave-48 review's residual-follow-up accounting - "two are now filed and published" records what the LEDGER held at that review, a timestamped observation, not a standing claim about this row's work |
+| 38f4a5010e15 | 2666 | pds-w47-door-census-silences | terminal | wave-47 shipped-slice table row with its PR (#9524) |
+| 642b35fa5743 | 2667 | pds-w47-d448-drift-refuses | terminal | wave-47 shipped-slice table row with its PR (#9525) |
+| a12b446c28dc | 2668 | pds-w47-citation-resolver-repair | terminal | wave-47 shipped-slice table row with its PR (#9526) |
+| b047d307dfbc | 2669 | pds-w47-ledger-denominator-and-blind-spots | terminal | wave-47 shipped-slice table row with its PR (#9527) |
+| b833c3512c5b | 2670 | pds-w47-n1-adjudication | terminal | wave-47 shipped-slice table row with its PR (#9528) |
+| 421f2ee53822 | 2671 | pds-w47-interaction-receipt-pin | terminal | wave-47 shipped-slice table row with its PR (#9529) |
+| 67d7d44c848f | 2682 | pds-w47-measure-and-host-axis | non-disposition | a REVIEW precondition - "a second reviewer is warranted ... when it is dispatched"; `dispatched` is predicated of a FUTURE dispatch, and a dispatch precondition is not a lifecycle claim |
+| a0bc075d5fbe | 2720 | pds-w45-census-ledger-integrity | terminal | wave-46 shipped-slice table row with its PR (#9475) |
+| 7582c858f8c6 | 2721 | pds-w45-bl-sweep-adjudication-frozen-blob | terminal | wave-46 shipped-slice table row with its PR (#9476) |
+| 24f9d35900bf | 2722 | pds-w45-bl-receipt-census-self-claims | terminal | wave-46 shipped-slice table row with its PR (#9477) |
+| 30fa0806cdaa | 2770 | pds-w46-price-ledger-orphan-direction | non-disposition | the slug is a PARENTHETICAL naming the hole wave 46 left; `implausible` is predicated of four shipped load1 STAMPS on the next clause, never of this row |
+| d466ac83035f | 4253 | pds-w36-help-seal-fix | terminal | wave-37 shipped-slice table row with its PR (#8992) |
+| 78af669f8fc6 | 4480 | pds-w33-ledger-postread-remainder | terminal | wave-34 shipped-slice table row with its PR (#8855) |
+| c81fd8cd28c1 | 4572 | pds-w33-ledger-postread-core | terminal | wave-33 shipped-slice table row |
+| 1908f4b59314 | 4574 | pds-bl-record-update-basis-overclaims | terminal | wave-33 shipped-slice table row ("the shipped receipt lie ... replaces the false GET on the resolved id") |
+| c8e14951eb4f | 4654 | pds-bl-support-capacity-degraded-unpinned | terminal | wave-32 shipped-slice table row with its PR (#8752) |
+| 09f9cc731620 | 8454 | pds-w27-round-contradiction-13 | non-disposition | WAVE 27 PLAN dispatch table row (task / round / surface / gate) - a planned slice and its oracle, the same shape already adjudicated non-disposition at fingerprint 3bf877ee312c |
+| 4a0cdf931f3a | 12635 | pds-w40-request-echo-repairs | non-disposition | WAVE 40 PLAN dispatch table row (round / what / slice / surface) |
+| 1ea1c4dabecf | 12636 | pds-w40-derivation-partition | non-disposition | WAVE 40 PLAN dispatch table row |
+| a2fc9690cf9f | 13489 | pds-charter-ledger-sweep.sh | non-task | pds-charter-ledger-sweep.sh is a script filename - THIS instrument's own source file. `class` here is the DOOR CENSUS class (CONTENT-RED), not a task lifecycle. bp task get -> rc=4 ok:false not_found |
+| 807f258d548f | 13625 | pds-ledger-census | non-task | the match is a PREFIX of the two script filenames in the fork-closure key on this line, `{pds-ledger-census_test.sh, pds-ledger-census.sh}`; `free` is predicated of the shasum COST. bp task get pds-ledger-census -> rc=4 ok:false not_found |
+| 9aaad80e1159 | 13846 | pds-w45-census-ledger-integrity | non-disposition | WAVE 46 PLAN dispatch table row (slice / round / slug / surface) |
+| dddaa5e9ab6d | 13848 | pds-w45-bl-receipt-census-self-claims | non-disposition | WAVE 46 PLAN dispatch table row |
+| ebcd15c64559 | 13849 | pds-w45-price-provenance | non-disposition | WAVE 46 PLAN dispatch table row; `class` is predicated of the price COLUMN's refusal to state one |
+| 3fe381c1eff4 | 13910 | pds-w33-bl-catchall-success-clauses | terminal | "IS repaired on main" - a standing claim about the WORK, in the present tense, used as the premise of D677's oracle argument; scored against the live row by the separating rule |
+| ba165eaa393e | 14099 | pds-ledger-census.sh | non-task | pds-ledger-census.sh is a script filename - here the NON-VACUOUS CONTROL of an elixir-path-escape-check run. bp task get -> rc=4 ok:false not_found |
+| 9b92a996d36c | 14113 | pds-bl-w47-measure-all-content-key-price-stale | non-disposition | the slug is a PARENTHETICAL label for the deferred axis; `decisive` is predicated of D664 section 4, not of this row |
+| 8ec67b022352 | 14135 | pds-bl-merge-gated-criteria-carry-the-flag | historical | "is OPEN, PDS-slugged, and parented to task-lifecycle-visibility-epic" records the row's LEDGER STATE at D685's moment, and the load-bearing half of the sentence is the PARENTAGE - a timestamped observation, not a standing claim |
+| 3e3bd058a35e | 14229 | pds-w47-door-census-silences | non-disposition | wave-47 plan dispatch table row; `merged` says why D681 and D682 were folded into ONE slice, not that anything merged to main |
+| 73c7f1c7b3c1 | 14484 | pds-w46-load-stamp-provenance-doubt | terminal | a D-number HEADING ruling the row REFUTED on both legs - a refutation is a terminal disposition by this table's own class text ("paid, CLOSED, MOOT, REFUTED") |
+| 540a1b542b1a | 14516 | pds-w47-measure-and-host-axis | non-disposition | wave-48 plan dispatch table row; `rewritten` is predicated of CRITERION 7, and a criterion edit is not a lifecycle claim |
+| 91e7346b4cd8 | 14520 | pds-w48-react-reference-error-collapse | non-disposition | wave-48 plan dispatch table row; `published` is predicated of the npm PACKAGE that renders nothing on a 500 |
+| 882255fded1f | 14548 | pds-d-number-allocation-arbiter | historical | "remains published, unclaimed, 0/4" is a three-field LEDGER-STATE reading taken at wave 49's decision, the archetype of the historical class |
+| 485f72d4dd6a | 14900 | pds-w49-meter-ci-decision | non-disposition | a CRITERION claim - "CRITERION 2 IS UNSOUND" - the same reading already given to a criterion rewrite at fingerprint 0491b85db045 |
+| 75c3d27fc252 | 14981 | pds-bl-w47-duplicate-d-allocation-pointer | non-disposition | `titled` is predicated of the row's TITLE TEXT ("Nineteen D-numbers name two findings each"), which D714 is refuting as a COUNT; nothing here says what the row's lifecycle is |
+| c6864cbedfc2 | 14988 | pds-record-parity | non-task | pds-record-parity is a DOOR basename (scripts/pds-record-parity.sh, a PDS_DOOR_DISPOSITIONS row); THROUGH is a door-census class, never a task lifecycle. bp task get -> rc=4 ok:false not_found |
+| 1e3b0a498e23 | 15052 | pds-elixir-receipt-census.exs | non-task | scripts/pds-elixir-receipt-census.exs is a script filename; `owned` is predicated of ELIXIR_TEST_ONLY_PATHS. bp task get -> rc=4 ok:false not_found |
+| 4bd90e476ab1 | 15062 | pds-bl-w48-web-sibling-launders | non-disposition | wave-49 plan dispatch table row (slice / round / slug / surface / why) |
+| 913e5714ff20 | 15147 | pds-w1-crown-proof | historical | a LIFECYCLE QUOTE at D717's moment, and a cross-line one: the line ends "is **lifecycle" with "done, 12/12" on the NEXT line, so the same-line lens sees the ASSERTION and never the VALUE - the exact shape this instrument's header documents at charter:6293-6294. Same reading as this slug's other lifecycle quotes (c9cebb359a4d, cd915f1f2a1c) |
+| 338138d091e2 | 15220 | pds-bl-github-linkput-auto-publish-erasure | terminal | the dated LEDGER NOTE that replaced the "stays open" sentence on 2026-09-10 (charter reconciled with the ledger, task-651da856c5d4e560): it states the row is `done` on the ledger, closed after #13122 - a terminal claim, and the ledger agrees |
+
+## THE LENS REPAIR THE WAVE-46 BLOCK DEFERRED — 23 ROWS RETIRED, AND THE "14" WAS A SNAPSHOT
+
+THE PIN, TAKEN WITH `git rev-parse` AT THE BUILD BASE. Both sides of the delta below
+were run at THIS blob and at ONE cached ledger snapshot, so exactly one thing varies:
+
+    git rev-parse HEAD                                       13c5cf13bd1ef3258f94471b675bba6337e31d89
+    git rev-parse HEAD:.claude/workflows/bp-pds-charter.md   c11075b6266772e10cda472964b728e46243051e
+
+WHAT CHANGED IN THE LENS. `scripts/pds-charter-ledger-sweep.sh` now carries a SECOND
+idiom exclusion, `IDIOM_TOKENS`: eight single engineering words the charter predicates
+of a slug in a table cell — `export`, `router`, `five`, `satisfied`, `byte-identical`,
+`itself`, `guarded`, `cut`. They are struck from the MINED vocabulary only. CORE is
+untouched, and a line carrying both an excluded token and a real disposition still
+fires on the disposition: the `fails CLOSED` arm drops LINES, this arm drops WORDS.
+
+THE DELTA, MEASURED AT THAT BLOB — and re-measured by the run itself, every run, in
+section 3b, which re-runs the lens with the exclusion OFF and differences the two
+candidate sets rather than reading line numbers off the predication fold:
+
+    candidates  223 -> 200        arrivals 0 -> 0        misclassified 0 -> 0
+    tally  AGREES 85 -> 76 · NOT-A-DISPOSITION-ASSERTION 90 -> 82 · NOT-A-TASK 33 -> 27
+    DISAGREES  15 -> 15           rc 0 -> 0
+
+**DISAGREES IS UNMOVED, AND THAT IS THE LOAD-BEARING NUMBER.** A DISAGREEMENT is this
+instrument's only actual FINDING; everything else is bookkeeping. The exclusion
+destroys zero findings. The nine AGREES it removes were AGREES on lines that became
+candidates by accident — the lens fired on an engineering word and then a human,
+reading the line properly, recorded what the line is. Keeping a lucky accident because
+its verdict happened to be comfortable is the disease, not the cure.
+
+THE FILING SAID 14. AT THIS BLOB IT IS 23, AND THE NINE EXTRA ARE THE SAME CLASS. The
+wave-46 block's "14 RETROACTIVE" was an ENUMERATION of that wave's own 71 arrivals, so
+it could only ever name rows that arrived in wave 46. Nine more rows — six from the
+original 105-row table, three from the wave-49 block — fire on the same eight tokens
+and were simply never in that wave's arrival list. An enumeration is a snapshot; the
+exclusion is a predicate, and the predicate is what section 3b prints.
+
+THE 23 RETIRED ROWS. Removed from the table above because they are no longer
+candidates; kept here, in full, because a row deleted without its record is the
+laundering this epic files. Not in pipe-table form: the sweep parses ANY line starting
+with `|` as an adjudication, so a "retired" row written as a table row would simply be
+re-adopted by the next run.
+
+  fingerprint   line   slug                                     struck on       committed class  last verdict  named in W46?
+  f25e8768c137  1208   pds-pull-proof.sh                        export          non-task         NOT-A-TASK    yes
+  3af3cf7874b8  3607   pds-w40-scim-groups-list-members         satisfied       historical       NOT-A-DISP    NO - see below
+  0c65003b0534  3937   pds-w35-elixir-census-gate               cut             non-disposition  NOT-A-DISP    NO - see below
+  1c039a1f5c33  4095   pds-w39-record-parity-shallow-guard      itself          terminal         AGREES        NO - see below
+  211d9cd25100  4097   pds-w39-r-owning-doc                     router          non-task         NOT-A-TASK    NO - see below
+  018e43da760e  4226   pds-w38-routed-population                router          non-disposition  NOT-A-DISP    yes
+  7cc895ffd52c  4252   pds-w34-hand-bucket-register             five            terminal         AGREES        yes
+  6c9569488b2c  4396   pds-w34-ledger-background-write-arms     five            terminal         AGREES        yes
+  98fef89f0730  4573   pds-w33-elixir-receipt-census            five            terminal         AGREES        yes
+  7d3b54d3be6a  4719   pds-w31-census-shrinkage-ratchet         satisfied       terminal         AGREES        yes
+  b30ee7a58719  4795   pds-w29-registry-postcondition-invariant byte-identical  terminal         AGREES        yes
+  17ca934705f7  7194   pds-w23-cold-owner-verb-honesty          export,router   non-disposition  NOT-A-DISP    yes
+  ef5d72c9e9ae  8123   pds-w26-export-atomic-out                export          terminal         AGREES        yes
+  1c3f7e4aa768  8124   pds-w26-workspace-export-declared-size   export          terminal         AGREES        yes
+  db5911789a17  8459   pds-w27-certify-the-round                itself          non-disposition  NOT-A-DISP    yes
+  cd31e189f6b9  8489   pds-w27-reader-transport-honesty         guarded         terminal         AGREES        yes
+  77e4ccc36e5f  11052  pds-w35-background-write-arms            five            non-task         NOT-A-TASK    yes
+  52e8aeef5276  11826  pds-w35-elixir-census-gate               cut             non-disposition  NOT-A-DISP    yes
+  255737af37d5  12327  pds-census                               guarded         non-task         NOT-A-TASK    NO - see below
+  6545ce378942  12616  pds-bl-stale-open-rows-with-merged-prs   itself          historical       NOT-A-DISP    NO - see below
+  7919a4be61d2  12950  pds-record-parity.test                   five            non-task         NOT-A-TASK    NO - see below
+  78aed6d46907  12981  pds-door-census.sh                       byte-identical  non-task         NOT-A-TASK    NO - see below
+  aaae540d6898  13455  pds-w44-hetzner-offline-door             five            non-disposition  NOT-A-DISP    NO - see below
+
+  THE ONE WORTH ARGUING WITH: `1c039a1f5c33` (charter:4095,
+  `pds-w39-record-parity-shallow-guard`) is the only retired row adjudicated
+  `terminal`, i.e. the only one whose class could ever have produced a DISAGREES. It
+  reads AGREES at this base (the ledger row is `done`), so nothing is lost today — but
+  it is the row to watch: if that ledger row ever regresses to open, the sweep will no
+  longer see the charter's terminal claim about it. The claim is not thereby
+  unguarded — the stale-open-with-merged-PR class has its own row,
+  `pds-bl-stale-open-rows-with-merged-prs`, which is itself one of the 23 retired here.
+
+WHY THE TABLE ROWS WERE REMOVED RATHER THAN LEFT TO GO STALE. With them in place the
+run prints `stale adjudication rows : 23` forever. That number is ADVISORY — it does
+not red — which is precisely why leaving it nonzero is the wrong answer: a permanent
+advisory 23 is a number nobody reads, and the next genuine dropped claim hides inside
+it. With them retired the run is `stale adjudication rows : 0` and the next drop is
+visible on sight.
+
+`CORE` IS RULED ON, AND THE RULING IS: NOT PINNED, ACCEPTED AS A LIVE-DRIFT CHANNEL.
+The wave-46 block named `CORE` as the second unpinned channel — derived from the LIVE
+ledger's distinct `pds-*` lifecycle values, drifted 5 -> 6 over an identical charter
+blob. It stays unpinned, and the run now PRINTS the argument in section 1 rather than
+leaving it in a brief: (a) pinning it is the transcription this instrument exists to
+refuse — a status the ledger newly holds would become a word the lens cannot read;
+(b) it is bounded by the lifecycle enum, a small closed set, not by prose anyone may
+append; (c) its drift is ADDITIVE and LOUD — a new CORE value can only ADD candidates,
+and an unadjudicated candidate is an ARRIVAL that reds and is NAMED. The idiom half had
+neither property, which is exactly why that half is excluded and this half is not.

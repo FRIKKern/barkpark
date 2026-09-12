@@ -160,7 +160,8 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
 
     test "the minted chat token cannot mint another token (no self-escalation)", %{
       conn: conn,
-      admin_raw: raw
+      admin_raw: raw,
+      ws_a: ws_a
     } do
       minted = mint_token!(conn, raw, "install")
 
@@ -172,7 +173,49 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
           Jason.encode!(%{"label" => "escalate"})
         )
 
-      assert resp.status in [401, 403, 404]
+      # WHICH GATE ANSWERED, and it is NOT the one the pipeline reads like.
+      #
+      # `:scoped_api` runs `ResolveWorkspace`; `:scoped_admin` then runs
+      # `RequireToken` + `RequireWorkspaceRole`. BOTH refusals are 403 with code
+      # "forbidden", so status alone cannot say which fired, and `reason` is the
+      # only discriminator: `ResolveWorkspace` halts with
+      # `:forbidden_membership` (reason "not_a_member") for an outsider and
+      # `:forbidden_capability` (reason "missing_capability") for an
+      # under-scoped insider, while `RequireWorkspaceRole` halts with plain
+      # `:forbidden` (NO reason at all).
+      #
+      # OBSERVED: `ResolveWorkspace` answers, reason "missing_capability" — and
+      # that reason is the accurate one, which is the whole point of this
+      # assertion. The minted token IS a member: `Auth.create_token/5` inserts a
+      # `workspace_memberships` row for it (role `member`, because
+      # `role_for_permissions/1` grants `admin` only on an `admin` permission),
+      # and the assertion below proves that row exists. What fails is the
+      # CAPABILITY half — the permission set is `["chat"]`, which does not
+      # satisfy `:read`.
+      #
+      # This line used to read "not_a_member" and was a change-detector on a
+      # KNOWN-INACCURATE envelope: `ResolveWorkspace` called
+      # `TenancyAuth.authorize/3` (which is `authorize_with_reason/3` collapsed
+      # to `{:error, :forbidden}`), so the insider arm was rendered as a
+      # membership refusal. task-d63f91a7f817b4a3 routed the plug through
+      # `authorize_with_reason/3` and this line was corrected, NOT loosened:
+      # re-widening it to a status-or-code disjunction is refused (that is the
+      # defect task-140f050736f4aa08 exists to remove), because the exact
+      # `reason` string is the ONLY thing that discriminates this gate from
+      # `RequireWorkspaceRole`.
+      assert resp.status == 403
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "forbidden"
+      assert body["error"]["reason"] == "missing_capability"
+
+      # The membership row really is there — it is what makes the reason above
+      # CORRECT rather than merely different, and what makes the escalation
+      # refusal interesting: the minted token is INSIDE the workspace and still
+      # cannot mint. Without this pair of assertions in one test, nothing here
+      # would notice the envelope going back to calling an insider a stranger.
+      {:ok, minted_tok} = Auth.verify_token(minted)
+      assert TenancyAuth.membership_role(minted_tok, ws_a.id) == "member"
+      assert minted_tok.permissions == ["chat"]
     end
   end
 
@@ -189,13 +232,25 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
     end
 
-    test "anonymous → 401/403/404 (no token)", %{conn: conn} do
+    test "anonymous → 403 not_a_member (the MEMBERSHIP gate, before the role gate)",
+         %{conn: conn} do
       resp =
         conn
         |> put_req_header("content-type", "application/json")
         |> post("/w/chat-mint-a/p/default/v1/chat/tokens", Jason.encode!(%{"label" => "nope"}))
 
-      assert resp.status in [401, 403, 404]
+      # Same mechanism as `token_controller_test.exs`: `:scoped_api` runs
+      # `ResolveWorkspace` before any authentication/authorisation plug, so an
+      # anonymous caller on an existing non-Default workspace is refused by the
+      # MEMBERSHIP gate — 403 / "forbidden" / reason "not_a_member"
+      # (`resolve_workspace.ex` final `true ->` arm; `errors.ex`
+      # `build({:error, :forbidden_membership})`). Asserting the reason is what
+      # discriminates: a plain 403 with no `reason` is a different gate, 401 is
+      # authentication running first, 404 is a route that no longer exists.
+      assert resp.status == 403
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "forbidden"
+      assert body["error"]["reason"] == "not_a_member"
     end
   end
 

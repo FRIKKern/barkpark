@@ -16,9 +16,25 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   `attach_gate/1` attaches a `:handle_event` lifecycle hook that HALTS every
   event in `@edit_events` unless `socket.assigns[:can_edit?] == true`, flashing
-  the same refusal for all of them. The reader's own events (`paper-action`,
-  `simplify-*`, `rail-select`, `open-diff`, `close-diff`) are not in that list
-  and pass through untouched.
+  the same refusal for all of them. `rail-select`, `open-diff` and `close-diff`
+  are pure socket-local reads and pass through untouched.
+
+  The SAME hook carries a second, weaker gate: `@reader_write_events` —
+  `paper-action`, `simplify-request`, `simplify-accept`, `simplify-reject`.
+  These are the reader's own controls; they do not edit the document, but each
+  one PERSISTS a `paper_events` row (`Events.create_event/1`, stamped with the
+  paper's own scope). On the flat public `/papers/:slug` surface there is no
+  auth `on_mount`, so before this gate an anonymous visitor could push them and
+  mutate the paper's event history. Ruling (task
+  `arpss-bulldocs-anon-paper-event-write-ruling`, 2026-09-10): anonymous
+  visitors are READ ONLY on the public reader. These four now REQUIRE a
+  principal — `principal?/1` — and fail closed on an anonymous socket.
+
+  The two gates are deliberately different strengths. `@edit_events` needs
+  `:can_edit?` (write authority on the paper's OWN workspace); the reader
+  controls need only that SOMEONE identifiable is behind the socket, because
+  the row they write is an expression of reader intent, not a document write.
+  A read-only api token may therefore request a Simplify and may not edit.
 
   The gate is keyed on `:can_edit?` and NOTHING ELSE. In particular it does not
   reuse `BarkparkWeb.Studio.Caps.write_capable?/2`: that predicate deliberately
@@ -81,6 +97,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     paper-toggle-edit
     paper-op
     paper-ops
+    paper-history-step
     paper-edit-block
     paper-block-autosave
     paper-add-block
@@ -99,8 +116,25 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     paper-publish
   )
 
+  # The reader's OWN controls: they persist a `paper_events` row rather than
+  # editing the document, so they need a principal but not write authority.
+  # Derived from the code, not from a filing: `grep -n 'Events.create_event'
+  # bulldocs_live.ex` has exactly three call sites, reachable from exactly
+  # these four `handle_event/3` clauses (`simplify-accept` / `simplify-reject`
+  # share one through `record_simplify_decision/3`). There is no fifth writer.
+  @reader_write_events ~w(
+    paper-action
+    simplify-request
+    simplify-accept
+    simplify-reject
+  )
+
   # One vocabulary for every refusal, whichever event asked.
   @denial "You don't have access to do that."
+
+  # The anonymous refusal for the reader controls. Distinct copy: the visitor
+  # is not denied on authority, she is simply not identified yet.
+  @anon_denial "Sign in to act on this paper."
 
   @doc "The event names the gate refuses without `:can_edit?`."
   @spec edit_events() :: [String.t()]
@@ -111,6 +145,37 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   def denial, do: @denial
 
   @doc """
+  The reader-control events that PERSIST a `paper_events` row and therefore
+  require a principal.
+  """
+  @spec reader_write_events() :: [String.t()]
+  def reader_write_events, do: @reader_write_events
+
+  @doc "The refusal copy an anonymous socket gets for a reader-control event."
+  @spec anon_denial() :: String.t()
+  def anon_denial, do: @anon_denial
+
+  @doc """
+  Whether SOMEONE identifiable is behind this socket.
+
+  `BarkparkWeb.PaperViewer.on_mount(:viewer, …)` resolves every credential a
+  browser can arrive with and summarises it as `:viewer`; `:anonymous` is what
+  a mount with no credential at all gets, and it is also what
+  `BulldocsLive.mount/3` falls back to when the hook never ran. Fail-closed on
+  every other shape: a missing, nil, or unrecognised `:viewer` is NOT a
+  principal.
+  """
+  @spec principal?(map()) :: boolean()
+  def principal?(assigns) when is_map(assigns) do
+    case Map.get(assigns, :viewer) do
+      %{kind: kind} when kind in [:user, :token, :share] -> true
+      _ -> false
+    end
+  end
+
+  def principal?(_assigns), do: false
+
+  @doc """
   Seed the edit-mode assigns from the mounted paper. Always called, for every
   viewer: the anonymous render never reads them, but a nil assign would crash a
   later `@editing?` check.
@@ -118,6 +183,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   def defaults(socket, paper) do
     socket
     |> assign(:editing?, false)
+    |> assign(:paper_canvas_retained, nil)
     |> assign(:edit_blocks, blocks_of(paper))
     |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
@@ -129,18 +195,24 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   end
 
   @doc """
-  Attach the edit-event gate. Halts every `@edit_events` member for a socket
-  whose `:can_edit?` is not exactly `true`; passes everything else through.
+  Attach the reader event gate. Halts every `@edit_events` member for a socket
+  whose `:can_edit?` is not exactly `true`, and every `@reader_write_events`
+  member for a socket with no principal; passes everything else through.
   """
   def attach_gate(socket) do
     attach_hook(socket, :paper_edit_gate, :handle_event, &gate/3)
   end
 
   defp gate(event, _params, socket) when is_binary(event) do
-    if event in @edit_events and socket.assigns[:can_edit?] != true do
-      {:halt, put_flash(socket, :error, @denial)}
-    else
-      {:cont, socket}
+    cond do
+      event in @edit_events and socket.assigns[:can_edit?] != true ->
+        {:halt, put_flash(socket, :error, @denial)}
+
+      event in @reader_write_events and not principal?(socket.assigns) ->
+        {:halt, put_flash(socket, :error, @anon_denial)}
+
+      true ->
+        {:cont, socket}
     end
   end
 
@@ -167,6 +239,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         socket =
           socket
           |> assign(:editing?, editing?)
+          |> BarkparkWeb.PaperCanvasLease.reset_socket()
           # Slice 4: tell the room. The presence meta's `editing?` is what puts
           # the dot next to a name in `#paper-presence`, so it must flip on the
           # SAME event that flips the mode — not on the first op, which may never
@@ -211,12 +284,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
            form_source
          ) do
       {:ok, socket, receipt, outcome} ->
-        result = %{
-          saved: true,
-          request_id: request_id,
-          replayed: outcome == :replayed,
-          rev: receipt.rev
-        }
+        result = receipt_result(receipt, request_id, outcome)
 
         assign(
           socket,
@@ -322,7 +390,8 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
         opts =
           write_opts(socket) ++
-            [if_rev: if_rev] ++ if(context, do: [canvas_run_context: context], else: [])
+            [if_rev: if_rev, contextual_history: true] ++
+            if(context, do: [canvas_run_context: context], else: [])
 
         # Slice 4: the exactly-once seam is the one the SHIPPED editor drives —
         # `bp-paper-editor-hooks.js` stamps a `request_id` on every mutation — so
@@ -333,28 +402,16 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
         # would leave every real reader edit unattributed while the tests that
         # drive the legacy seam stayed green.
         result =
-          if is_map(form_source) do
-            resolver = fn blocks ->
-              with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
-            end
-
-            Content.apply_paper_block_form_once(
+          if is_map(form_source) and BarkparkWeb.PaperCanvasLease.pending?(socket) do
+            {:error, :idempotency_replay_required}
+          else
+            apply_paper_ops_once(
+              assigns,
               slug,
-              "block_form:v1",
+              ops,
               form_source,
               socket.assigns[:dataset],
               request_id,
-              replay_principal_key(assigns),
-              resolver,
-              opts
-            )
-          else
-            Content.apply_paper_block_ops_once(
-              slug,
-              ops,
-              socket.assigns[:dataset],
-              request_id,
-              replay_principal_key(assigns),
               opts
             )
           end
@@ -370,6 +427,13 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
             socket =
               socket
               |> sync()
+              |> SharedPaper.retain_canvas_insertions(
+                slug,
+                doc_field(paper, :content),
+                context,
+                ops,
+                outcome
+              )
               |> reconcile_canvas(request_id)
               |> assign(:save_status, "Auto-saved")
               |> assign(:last_save_ok?, true)
@@ -383,6 +447,81 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
           {:error, reason} ->
             {:error, handle_result({:error, reason}, socket, request_id)}
         end
+    end
+  end
+
+  defp apply_paper_ops_once(assigns, slug, ops, form_source, dataset, request_id, opts) do
+    if is_map(form_source) do
+      resolver = fn blocks ->
+        with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
+      end
+
+      Content.apply_paper_block_form_once(
+        slug,
+        "block_form:v1",
+        form_source,
+        dataset,
+        request_id,
+        replay_principal_key(assigns),
+        resolver,
+        opts
+      )
+    else
+      Content.apply_paper_block_ops_once(
+        slug,
+        ops,
+        dataset,
+        request_id,
+        replay_principal_key(assigns),
+        opts
+      )
+    end
+  end
+
+  @doc "Apply one opaque, request-identified contextual history step."
+  def apply_history_step(socket, params) do
+    request_id = is_map(params) && Map.get(params, "request_id")
+
+    with :ok <- validate_history_step_params(params),
+         assigns <- fresh_authorization_assigns(socket.assigns),
+         paper <- socket.assigns[:paper_doc],
+         workspace_id <- doc_field(paper, :workspace_id),
+         slug when is_binary(slug) <- socket.assigns[:slug],
+         :ok <- authorize_history_step(assigns, workspace_id, slug),
+         {:ok, if_rev} <- revision(params["if_rev"]),
+         principal when is_binary(principal) <- replay_principal_key(assigns),
+         {:ok, receipt, outcome} <-
+           Content.apply_paper_contextual_history_once(
+             slug,
+             params["history_ref"],
+             params["action"],
+             socket.assigns[:dataset],
+             request_id,
+             principal,
+             write_opts_from_assigns(assigns) ++ [if_rev: if_rev]
+           ) do
+      if outcome != :replayed, do: record_edit(socket)
+
+      socket =
+        if outcome == :replayed do
+          socket
+        else
+          socket
+          |> sync()
+          |> reconcile_canvas(request_id)
+          |> assign(:paper_halt, nil)
+        end
+
+      socket
+      |> assign(:save_status, "Auto-saved")
+      |> assign(:last_save_ok?, true)
+      |> assign(:last_save_result, history_receipt_result(receipt, request_id, outcome))
+    else
+      {:error, :denied} -> failed_history_step(socket, request_id, :history_unavailable, true)
+      nil -> failed_history_step(socket, request_id, :invalid_history_request)
+      :error -> failed_history_step(socket, request_id, :invalid_history_request)
+      {:error, reason} -> failed_history_step(socket, request_id, history_error_code(reason))
+      _invalid -> failed_history_step(socket, request_id, :invalid_history_request)
     end
   end
 
@@ -584,6 +723,14 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   @doc "Re-derive the editor buffer from an already-loaded paper document."
   def sync(socket, paper) do
     socket
+    |> assign(
+      :paper_canvas_retained,
+      BarkparkWeb.Studio.StudioLive.PaperCanvas.refresh_retained(
+        socket.assigns[:paper_canvas_retained],
+        doc_field(paper, :doc_id),
+        blocks_of(paper)
+      )
+    )
     |> assign(:edit_blocks, blocks_of(paper))
     |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
@@ -645,8 +792,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   Public so a test can assert the shape without driving a whole LiveView.
   """
   def write_opts(socket) do
-    scope = ScopeHelpers.scope_opts(socket)
-    ctx = PaperActor.caller_context(scope, socket.assigns)
+    write_opts_from_assigns(socket.assigns)
+  end
+
+  defp write_opts_from_assigns(assigns) do
+    scope = ScopeHelpers.scope_opts_from_assigns(assigns)
+    ctx = PaperActor.caller_context(scope, assigns)
 
     scope
     |> Keyword.put(:caller_context, ctx)
@@ -662,7 +813,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   defp refuse_save(socket, request_id), do: socket |> refuse() |> failed_save(request_id)
 
   defp failed_save(socket, request_id, rejection \\ nil) do
-    result = %{saved: false, request_id: request_id}
+    result = %{saved: false, request_id: request_id, changed: false, history_step: nil}
 
     result =
       if rejection == :validation,
@@ -674,6 +825,128 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> assign(:last_save_ok?, false)
     |> assign(:last_save_result, result)
   end
+
+  defp validate_history_step_params(params) when is_map(params) do
+    if Enum.sort(Map.keys(params)) == Enum.sort(~w(history_ref action request_id if_rev)),
+      do: :ok,
+      else: {:error, :invalid_history_step}
+  end
+
+  defp validate_history_step_params(_params), do: {:error, :invalid_history_step}
+
+  defp authorize_history_step(assigns, workspace_id, slug) do
+    if PaperViewer.can_edit?(assigns, workspace_id, slug),
+      do: :ok,
+      else: {:error, :denied}
+  end
+
+  defp failed_history_step(socket, request_id, code, denied? \\ false) do
+    socket = if denied?, do: put_flash(socket, :error, @denial), else: socket
+
+    result = %{
+      saved: false,
+      request_id: request_id,
+      changed: false,
+      history_step: nil,
+      rejected: Atom.to_string(code)
+    }
+
+    result =
+      if code == :history_conflict do
+        Map.merge(result, %{conflict: true, current_rev: current_history_rev(socket)})
+      else
+        result
+      end
+
+    socket
+    |> assign(:save_status, "Save failed")
+    |> assign(:last_save_ok?, false)
+    |> assign(:last_save_result, result)
+  end
+
+  defp history_error_code(:history_ref_consumed), do: :history_ref_consumed
+
+  defp history_error_code(reason)
+       when reason in [:history_conflict, :precondition_failed, :block_not_found, :duplicate_id],
+       do: :history_conflict
+
+  defp history_error_code(:idempotency_receipt_expired), do: :history_expired
+
+  defp history_error_code(reason)
+       when reason in [
+              :idempotency_receipt_missing,
+              :idempotency_receipt_pending,
+              :idempotency_receipt_wrong_scope,
+              :idempotency_receipt_malformed,
+              :idempotency_receipt_invalid,
+              :invalid_history
+            ],
+       do: :history_unavailable
+
+  defp history_error_code(reason)
+       when reason in [
+              :invalid_request_id,
+              :invalid_history_step,
+              :invalid_history_action,
+              :history_action_mismatch,
+              :invalid_paper_contextual_history_request,
+              :invalid_canvas_run_context
+            ],
+       do: :invalid_history_request
+
+  # Unknown authority/storage failures are deliberately not classified as a
+  # terminal refusal. The coordinator may retry the same immutable request ID;
+  # only the explicit cases above are safe to discard from its history queue.
+  defp history_error_code(_reason), do: :history_step_failed
+
+  defp current_history_rev(socket) do
+    assigns = fresh_authorization_assigns(socket.assigns)
+    paper = socket.assigns[:paper_doc]
+    workspace_id = doc_field(paper, :workspace_id)
+    slug = socket.assigns[:slug]
+
+    if is_binary(slug) and PaperViewer.can_edit?(assigns, workspace_id, slug) do
+      case Content.get_paper(
+             slug,
+             socket.assigns[:dataset],
+             ScopeHelpers.scope_opts_from_assigns(assigns)
+           ) do
+        %{content: content} when is_map(content) -> Map.get(content, "rev") || 0
+        _missing -> socket.assigns[:paper_rev]
+      end
+    else
+      socket.assigns[:paper_rev]
+    end
+  end
+
+  @doc "Build a public exact-write receipt without exposing private history values."
+  def receipt_result(receipt, request_id, outcome) do
+    %{
+      saved: true,
+      request_id: request_id,
+      replayed: outcome == :replayed,
+      rev: receipt.rev,
+      changed: receipt.op_count > 0,
+      history_step: opaque_history_step(receipt, request_id)
+    }
+  end
+
+  defp history_receipt_result(receipt, request_id, outcome) do
+    %{
+      saved: true,
+      request_id: request_id,
+      replayed: outcome == :replayed,
+      rev: receipt.rev,
+      history_step: opaque_history_step(receipt, request_id)
+    }
+  end
+
+  defp opaque_history_step(%{contextual_history: %{"action" => action}}, request_id)
+       when action in ["undo", "redo"] and is_binary(request_id) do
+    %{version: 1, ref: request_id, action: action}
+  end
+
+  defp opaque_history_step(_receipt, _request_id), do: nil
 
   # Connected item-share readers retain the signed mount session in the
   # PluginScopeSession liveness assign. Resolve its raw link again for EVERY
@@ -736,7 +1009,14 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> reconcile_canvas(request_id)
     |> assign(:save_status, "Auto-saved")
     |> assign(:last_save_ok?, true)
-    |> assign(:last_save_result, %{saved: true, request_id: request_id, rev: result.rev})
+    |> assign(:last_save_result, %{
+      saved: true,
+      request_id: request_id,
+      replayed: false,
+      rev: result.rev,
+      changed: true,
+      history_step: nil
+    })
     # A prior halt cleared: the next accepted edit dismisses the banner.
     |> assign(:paper_halt, nil)
   end
@@ -752,6 +1032,8 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> assign(:last_save_result, %{
       saved: false,
       request_id: request_id,
+      changed: false,
+      history_step: nil,
       conflict: true,
       current_rev: socket.assigns[:paper_rev]
     })
@@ -762,7 +1044,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> put_flash(:error, constraint_flash(message))
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
-    |> assign(:last_save_result, %{saved: false, request_id: request_id})
+    |> assign(:last_save_result, %{
+      saved: false,
+      request_id: request_id,
+      changed: false,
+      history_step: nil
+    })
   end
 
   # A lifecycle-hook HALT. MIRROR the server truth verbatim; the reader authors
@@ -775,7 +1062,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> put_flash(:error, message)
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
-    |> assign(:last_save_result, %{saved: false, request_id: request_id})
+    |> assign(:last_save_result, %{
+      saved: false,
+      request_id: request_id,
+      changed: false,
+      history_step: nil
+    })
   end
 
   defp handle_result({:error, _reason}, socket, request_id) do
@@ -783,7 +1075,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> put_flash(:error, "Edit failed")
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
-    |> assign(:last_save_result, %{saved: false, request_id: request_id})
+    |> assign(:last_save_result, %{
+      saved: false,
+      request_id: request_id,
+      changed: false,
+      history_step: nil
+    })
   end
 
   defp revision(n) when is_integer(n) and n >= 0, do: {:ok, n}

@@ -28,6 +28,15 @@ defmodule BarkparkCloud.CloudflareTest do
     Cloudflare.put_process_config(Keyword.merge(base, kw))
   end
 
+  # The value of one header on a built request, or nil — so an assertion says
+  # "this request carries EXACTLY this scheme and not the other one".
+  defp auth_header(req, name) do
+    Enum.find_value(req.headers, fn
+      {^name, value} -> value
+      _ -> nil
+    end)
+  end
+
   ## Context — client selection, configured?, capabilities
 
   describe "client selection + configured?" do
@@ -262,7 +271,7 @@ defmodule BarkparkCloud.CloudflareTest do
     end
 
     test "create_origin_ca_cert_request POSTs /certificates with hostnames + csr" do
-      req = Real.create_origin_ca_cert_request("cf_x", ["example.com"], "CSRDATA")
+      req = Real.create_origin_ca_cert_request("v1.0-origin-key", ["example.com"], "CSRDATA")
       assert req.method == :post
       assert req.url == "https://api.cloudflare.com/client/v4/certificates"
 
@@ -277,6 +286,71 @@ defmodule BarkparkCloud.CloudflareTest do
       assert {"Authorization", "Bearer cf_x"} in req.headers
       assert {"User-Agent", "barkpark-cloud"} in req.headers
       assert {"Content-Type", "application/json"} in req.headers
+    end
+
+    test "build_request/5 takes an explicit auth term for either scheme" do
+      bearer = Real.build_request(:get, "/x", {:bearer, "cf_x"}, "", "application/json")
+      assert {"Authorization", "Bearer cf_x"} in bearer.headers
+      refute Enum.any?(bearer.headers, &match?({"X-Auth-User-Service-Key", _}, &1))
+
+      origin =
+        Real.build_request(:post, "/x", {:origin_ca_key, "v1.0-key"}, "", "application/json")
+
+      assert {"X-Auth-User-Service-Key", "v1.0-key"} in origin.headers
+      refute Enum.any?(origin.headers, &match?({"Authorization", _}, &1))
+    end
+  end
+
+  ## THE header scheme, asserted PER CALL (cf-origin-ca-wire-and-provision)
+  ##
+  ## Cloudflare's Origin CA endpoint does not accept a Bearer API token: it
+  ## authenticates with the account's Origin CA Key in X-Auth-User-Service-Key.
+  ## Every OTHER call here must keep Bearer. This describe block is the mutation
+  ## detector for both directions — switch create_origin_ca_cert_request back to
+  ## Bearer and it reds; "fix" a DNS call to the Origin CA header and it reds.
+
+  describe "Real per-call auth scheme" do
+    test "the THREE DNS calls + verify all authenticate with Bearer, never the CA key" do
+      reqs = [
+        Real.verify_token_request("cf_x"),
+        Real.upsert_dns_record_request("cf_x", "zone1", %{
+          type: "A",
+          name: "a.example.com",
+          content: "1.2.3.4"
+        }),
+        Real.delete_dns_record_request("cf_x", "zone1", "rec_9"),
+        Real.ensure_zone_proxied_request("cf_x", "zone1", "rec_9")
+      ]
+
+      for req <- reqs do
+        assert auth_header(req, "Authorization") == "Bearer cf_x"
+        assert auth_header(req, "X-Auth-User-Service-Key") == nil
+      end
+    end
+
+    test "create_origin_ca_cert_request sends X-Auth-User-Service-Key and NO Bearer" do
+      req = Real.create_origin_ca_cert_request("v1.0-origin-key", ["example.com"], "CSR")
+
+      assert auth_header(req, "X-Auth-User-Service-Key") == "v1.0-origin-key"
+      assert auth_header(req, "Authorization") == nil
+      # The credential must not leak into the body either.
+      refute req.body =~ "v1.0-origin-key"
+    end
+
+    test "the Origin CA key and the API token are DIFFERENT config slots" do
+      # A wired API token does not make the certificate call reachable: its
+      # credential is :origin_ca_key, and with only :token set it still fails
+      # closed BEFORE any request is built.
+      put_cf_config(token: "cf_api_token")
+      assert Cloudflare.configured?()
+      assert {:error, :not_configured} = Real.create_origin_ca_cert(["example.com"], "CSR")
+
+      # With the Origin CA key wired it gets PAST the credential gate and fails
+      # on the absent transport instead — proof the gate reads the new slot.
+      put_cf_config(origin_ca_key: "v1.0-origin-key")
+
+      assert {:error, :http_client_not_configured} =
+               Real.create_origin_ca_cert(["example.com"], "CSR")
     end
   end
 
@@ -296,9 +370,9 @@ defmodule BarkparkCloud.CloudflareTest do
       assert {:error, :not_configured} = Real.delete_dns_record(nil, "zone1", "rec_1")
     end
 
-    test "create_origin_ca_cert still fails closed on an unset config token" do
-      # create_origin_ca_cert keeps the config-token path (the TLS slice threads
-      # its own credential later) — no config token → :not_configured.
+    test "create_origin_ca_cert fails closed on an unset ORIGIN CA KEY" do
+      # create_origin_ca_cert resolves the SEPARATE :origin_ca_key config slot
+      # (never the API token) — unset → :not_configured before the wire.
       assert {:error, :not_configured} = Real.create_origin_ca_cert(["example.com"], "CSR")
     end
 

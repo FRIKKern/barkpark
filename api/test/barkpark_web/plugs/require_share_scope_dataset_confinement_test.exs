@@ -111,8 +111,19 @@ defmodule BarkparkWeb.Plugs.RequireShareScopeDatasetConfinementTest do
   # asserts the SHAPE (never a 2xx) rather than pinning one status code, so it
   # stays true for both the 403 and 404 arms of that gate.
   defp assert_refused(conn) do
-    assert conn.status in [401, 403, 404],
+    # WHICH GATE: `ResolveWorkspace` halts `{:error, :forbidden_membership}` here.
+    # Both it and the permission-tier gates answer 403 with code "forbidden", so
+    # `reason` is the ONLY discriminator: the membership arm carries
+    # "not_a_member", the tier arm (`{:error, :forbidden}`) carries none. The
+    # old assertion accepted any of three statuses — unauthorized, forbidden or
+    # not-found — so it was green on a deleted route and on a lost
+    # authentication too.
+    assert conn.status == 403,
            "expected the share gate to refuse, got #{conn.status}"
+
+    err = Jason.decode!(conn.resp_body)["error"]
+    assert err["code"] == "forbidden"
+    assert err["reason"] == "not_a_member"
 
     conn
   end

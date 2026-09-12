@@ -2,6 +2,7 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.Render.Compose
 
   @block %{
     "id" => "related",
@@ -125,5 +126,117 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
     refute html =~ "Generic live title"
     refute html =~ "Generic live description"
     refute html =~ "rev 12"
+  end
+
+  test "heading presentation preserves authored whitespace and keeps absent copy reader-only" do
+    block = %{
+      "type" => "paper-links",
+      "title" => "  Authored heading  ",
+      "description" => "  Authored description  ",
+      "refs" => ["next-paper"]
+    }
+
+    html = Render.render_block(block, %{style: :article})
+
+    assert html =~ ">  Authored heading  </h2>"
+    assert html =~ ">  Authored description  </p>"
+
+    default_html =
+      Render.render_block(%{"type" => "paper-links", "refs" => ["next-paper"]}, %{
+        style: :article
+      })
+
+    assert default_html =~ ">Explore the work</h2>"
+    refute default_html =~ "<p style="
+    assert Render.render_block(%{"type" => "paper-links", "refs" => []}, %{style: :article}) == ""
+  end
+
+  test "shared presentation keeps the reader's default, chapters, and timeline geometry" do
+    default = Compose.paper_links_presentation(%{"refs" => ["next"]}, :article)
+
+    assert default.title == "Explore the work"
+    assert default.title_source == ""
+    assert default.title_default?
+
+    assert default.section_style ==
+             "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
+
+    whitespace =
+      Compose.paper_links_presentation(
+        %{"title" => "   ", "description" => "\n ", "refs" => ["next"]},
+        :article
+      )
+
+    assert whitespace.title == "Explore the work"
+    assert whitespace.title_source == "   "
+    assert whitespace.description == nil
+    assert whitespace.description_source == "\n "
+
+    chapters =
+      Compose.paper_links_presentation(%{"layout" => "chapters", "refs" => ["next"]}, :article)
+
+    assert chapters.header_style == "margin:0 0 2.15rem"
+    assert chapters.title_style =~ "font-size:clamp(1.8rem,4vw,2.65rem)"
+    assert chapters.grid_style =~ "minmax(min(100%,25rem),1fr)"
+
+    timeline =
+      Compose.paper_links_presentation(%{"layout" => "timeline", "refs" => ["next"]}, :article)
+
+    assert timeline.section_style =~ "border-top:3px double"
+    assert timeline.grid_style =~ "minmax(min(100%,13rem),1fr)"
+
+    assert timeline.description_style ==
+             "margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6"
+  end
+
+  test "shared card presentation exposes source ownership without changing reader HTML" do
+    block = %{
+      "type" => "paper-links",
+      "layout" => "chapters",
+      "refs" => [
+        %{
+          "slug" => "next",
+          "title" => "  Authored title  ",
+          "description" => "Authored description",
+          "prefer_authored_copy" => true,
+          "eyebrow" => "Chapter one"
+        },
+        %{"slug" => "live", "prefer_authored_copy" => true}
+      ],
+      "_paper_links" => %{
+        "next" => %{title: "Live title", description: "Live description"},
+        "live" => %{title: "Live-only title", description: "Live-only description"}
+      }
+    }
+
+    presentation = Compose.paper_links_presentation(block, :article)
+    [authored, fallback] = presentation.cards
+
+    assert authored.index == 0
+    assert authored.kind == :chapters
+    assert authored.title == "Authored title"
+    assert authored.title_source == "  Authored title  "
+    assert authored.title_authored?
+    assert authored.description_authored?
+    assert authored.before_title_html =~ "Chapter one"
+    assert authored.card_style =~ "min-height:13rem"
+    assert authored.html =~ ~s(<a data-paper-link-card data-chapter)
+
+    assert fallback.index == 1
+    assert fallback.title == "Live-only title"
+    assert fallback.title_source == ""
+    refute fallback.title_authored?
+    assert fallback.description == "Live-only description"
+    refute fallback.description_authored?
+
+    assert presentation.cards_html == Enum.map_join(presentation.cards, & &1.html)
+
+    assert Render.render_block(Map.delete(block, "_paper_links"), %{
+             style: :article,
+             paper_links: block["_paper_links"]
+           }) ==
+             "<section data-paper-links data-layout=\"chapters\" aria-label=\"Explore the work\" style=\"#{presentation.section_style}\">" <>
+               "<header style=\"#{presentation.header_style}\"><h2 style=\"#{presentation.title_style}\">Explore the work</h2></header>" <>
+               "<div style=\"#{presentation.grid_style}\">#{presentation.cards_html}</div></section>"
   end
 end

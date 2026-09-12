@@ -56,7 +56,7 @@ defmodule Barkpark.StudioChat do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
-  alias Barkpark.StudioChat.{Message, Session}
+  alias Barkpark.StudioChat.{McpChip, Message, Session}
   alias Barkpark.StudioChat.Runtime
 
   # Longest sidebar preview we keep denormalised on the session row.
@@ -833,10 +833,23 @@ defmodule Barkpark.StudioChat do
   (`ChatToolRenderer.settle_state/1`, mirrored by the Go TUI's `toolRowGlyph`).
   A non-error result never writes the key, so an untouched row's metadata is
   byte-identical to what it was before this seam existed.
-  """
-  def attach_tool_result(session_id, tool_use_id, output, error? \\ false)
 
-  def attach_tool_result(session_id, tool_use_id, output, error?)
+  `chip_source` is the FULL, uncapped result text (`output` is the capped text
+  the row stores). For an MCP-tagged row (`metadata.mcp`, charter D64) it is
+  reduced to a compact versioned chip envelope in `metadata.mcp_chip`
+  (`Barkpark.StudioChat.McpChip`) so a result past the raw-text cap still
+  replays as a chip instead of a generic row (task-5a49dc55626ea80d). The gate
+  lives HERE rather than in the Recorder because the row itself is the only
+  place that knows whether the tool was ours — the Recorder learns the tool
+  NAME one frame earlier and would have to carry it across a restart.
+
+  Defaults to `output`, so an existing `/4` caller behaves exactly as before
+  (a small result IS its own full text). An error result writes no envelope:
+  `is_error` output is a plain string, never a chip.
+  """
+  def attach_tool_result(session_id, tool_use_id, output, error? \\ false, chip_source \\ nil)
+
+  def attach_tool_result(session_id, tool_use_id, output, error?, chip_source)
       when is_binary(session_id) and is_binary(tool_use_id) and is_binary(output) and
              is_boolean(error?) do
     row =
@@ -856,12 +869,30 @@ defmodule Barkpark.StudioChat do
       %Message{} = m ->
         meta = Map.put(m.metadata || %{}, "output", output)
         meta = if error?, do: Map.put(meta, "tool_error", true), else: meta
+        meta = put_mcp_chip(meta, error?, chip_source || output)
 
         m
         |> Ecto.Changeset.change(metadata: meta)
         |> Repo.update()
     end
   end
+
+  # The D64 replay envelope, written ONLY for a row the Recorder tagged as ours
+  # and only for a non-error result. `McpChip.summarize/1` answers nil for
+  # anything that would not chip anyway, and the key is then never written — so
+  # a host tool row's metadata stays byte-identical to what it was before.
+  defp put_mcp_chip(meta, false, source) when is_binary(source) do
+    if meta["mcp"] == true do
+      case McpChip.summarize(source) do
+        %{} = envelope -> Map.put(meta, "mcp_chip", envelope)
+        _ -> meta
+      end
+    else
+      meta
+    end
+  end
+
+  defp put_mcp_chip(meta, _error?, _source), do: meta
 
   @doc """
   SETTLE every unsettled tool row of a session — the durable half of the

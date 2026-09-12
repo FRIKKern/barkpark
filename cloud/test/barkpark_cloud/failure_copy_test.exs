@@ -221,7 +221,11 @@ defmodule BarkparkCloud.FailureCopyTest do
     end
   end
 
-  test "dwb-webhook fail-fast: github-push born-failed reason → blocked-tone human copy naming the workaround" do
+  test "LEGACY github-push born-failed reason → blocked-tone copy naming the push-again workaround" do
+    # A row written BEFORE `github_build_available?/1` became a repo-present
+    # predicate. Nothing retro-builds it, so "push again" really is its cure.
+    # This literal is not minted by any producer today — it is DB state, which is
+    # exactly why the arm may not be deleted.
     raw =
       "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
 
@@ -231,6 +235,34 @@ defmodule BarkparkCloud.FailureCopyTest do
     assert FailureCopy.humanize(raw) == human
     # Idempotent under the client failureCopy() second pass (its output does not
     # re-match the "github push builds" token or any other class).
+    assert FailureCopy.humanize(human) == human
+  end
+
+  test "NO-LINKED-REPO github-push reason → copy naming the missing repo, NOT the legacy 'predates' story" do
+    # The reason the router mints TODAY (`@github_push_build_reason`). It shares
+    # the classifier prefix with the legacy string above — same
+    # GITHUB_PUSH_UNBUILDABLE class, same denominator treatment — but needs the
+    # OPPOSITE remedy, so it must NOT collapse into the legacy arm.
+    raw =
+      "github push builds require a linked GitHub repo on this site — link a repo to this site, or deploy an artifact via bp deploy"
+
+    human =
+      "This site has no GitHub repo linked, so a push has nothing to build from — link a repo to this site, or deploy this commit with bp deploy."
+
+    assert FailureCopy.humanize(raw) == human
+
+    # BOTH DIRECTIONS. The refinement arm must win over the broad
+    # `"github push builds"` arm it sits above — a reordering (or a deletion of
+    # the narrower token) would silently serve the legacy sentence here.
+    legacy =
+      "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy."
+
+    refute FailureCopy.humanize(raw) == legacy
+    refute FailureCopy.humanize(raw) == raw
+
+    # Idempotent under the client failureCopy() second pass: the output carries
+    # none of the tokens any clause here, or the client's isGithubPushBlocked,
+    # matches.
     assert FailureCopy.humanize(human) == human
   end
 
@@ -1119,15 +1151,52 @@ defmodule BarkparkCloud.FailureCopyTest do
       assert humanized == "api_key=[redacted] fetching graph corpus"
     end
 
-    # The residual, asserted rather than described, so the day someone closes it
-    # this file tells them which guard to move. An OSC leaves a non-delimiter
-    # byte flush against the key AFTER stripping, which re-blocks the lookbehind.
-    test "RESIDUAL (open): an OSC that abuts the key still leaks under the fixed order" do
+    # THE RESIDUAL, CLOSED (dr-osc-residual-strip-fuses-tokens). This test used to
+    # assert the leak. What it asserted was real; the STORY on it was not, and the
+    # two tests below split them apart.
+    #
+    # The live shape: an escape run between an alphanumeric and the key. Stripping
+    # it to nothing welds `run` onto `api_key`, and the welded `n` is exactly what
+    # `scrub/1`'s `(?<![A-Za-z0-9])` lookbehind reads as "not a key" — so the value
+    # shipped in cleartext under the FIXED order that dr-w22-s1 had just installed.
+    # dr-w22-bl measured this population on cloud-db-1: 2,752 ESC-carrying lines
+    # have `[A-Za-z0-9]` immediately before an ESC, every one of them a CSI.
+    test "a stripped escape between two alphanumerics no longer welds them onto the key" do
       secret = "Ab3xQ9zK1mP7vT"
-      line = "\e]0;t\ainapi_key=#{secret}"
 
-      assert FailureCopy.raw(line) == "inapi_key=#{secret}",
-             "the OSC residual closed — delete this test and claim it in the epic"
+      # RED before the fix: `"runapi_key=Ab3xQ9zK1mP7vT"`, verbatim.
+      assert FailureCopy.raw("run\e[0mapi_key=#{secret}") == "run api_key=[redacted]"
+
+      # Several adjacent runs are one weld, not several spaces.
+      assert FailureCopy.raw("run\e[0m\e[1mapi_key=#{secret}") == "run api_key=[redacted]"
+
+      # And the delimiter goes in ONLY at a weld. An escape beside a space, a
+      # bracket, or the start of the line strips to exactly what it stripped to
+      # before — this is the bound on the copy change.
+      assert FailureCopy.strip_ansi("\e[31m\e[1m04:34:24\e[22m [ERROR] build failed\e[0m") ==
+               "04:34:24 [ERROR] build failed"
+
+      assert FailureCopy.strip_ansi("BUILD failed (exit 12): \e[22m") ==
+               "BUILD failed (exit 12): "
+    end
+
+    # NOT A STRIP RESIDUAL, and the control is the whole point of the test. The
+    # shape this hole was originally filed under — `"\e]0;t\ainapi_key=<secret>"`
+    # — still ships its value, and no delimiter rule can change that: the `in` is
+    # PLAIN TEXT sitting after the OSC, not two tokens welded by the strip. The
+    # escape-free twin leaks byte-identically, which proves the strip is not
+    # involved. What is left is `scrub/1`'s deliberate `xtoken=` exclusion (see the
+    # key clause's own comment), a copy-loss decision, not an escape-handling one.
+    # dr-w22-bl also measured the shape unreachable: 0 `ESC ]` bytes in 154,931
+    # real captured lines.
+    test "a word flush against the key is a scrub decision, not a strip weld" do
+      secret = "Ab3xQ9zK1mP7vT"
+      osc = "\e]0;t\ainapi_key=#{secret}"
+      twin = "inapi_key=#{secret}"
+
+      assert FailureCopy.raw(osc) == twin
+      assert FailureCopy.scrub(twin) == twin, "CONTROL: no escape anywhere, same leak"
+      assert FailureCopy.scrub(osc) == osc, "CONTROL: bare scrub leaks it too"
     end
 
     # Order-INDEPENDENCE of the prefix clause, stated as a test so the claim in
@@ -1227,7 +1296,17 @@ defmodule BarkparkCloud.FailureCopyTest do
     test "strips CSI, OSC and bare two-byte escapes; leaves ordinary brackets alone" do
       assert FailureCopy.strip_ansi("\e[2Kclearing") == "clearing"
       assert FailureCopy.strip_ansi("\e]0;title\atext") == "text"
-      assert FailureCopy.strip_ansi("a\e=b") == "ab"
+      # CHANGED BY dr-osc-residual-strip-fuses-tokens, deliberately: this pinned
+      # `"ab"`, which is the weld itself — two tokens joined into one word by
+      # removing the escape between them. That weld is what re-blocked
+      # `scrub/1`'s `(?<![A-Za-z0-9])` lookbehind and shipped `run\e[0mapi_key=…`
+      # in cleartext. A run between two alphanumerics now leaves a single space.
+      assert FailureCopy.strip_ansi("a\e=b") == "a b"
+
+      # …and ONLY there. The same bare escape beside a non-alphanumeric still
+      # strips to nothing, which is what keeps the change bounded.
+      assert FailureCopy.strip_ansi("a\e=]b") == "a]b"
+      assert FailureCopy.strip_ansi("a \e=b") == "a b"
 
       # A square bracket is not an escape. Build logs are full of them.
       assert FailureCopy.strip_ansi("[ERROR] [build] step [3/7] failed") ==
@@ -1578,6 +1657,108 @@ defmodule BarkparkCloud.FailureCopyDeploymentDetailTest do
 
     test "the site-token copy is idempotent under a second pass" do
       assert FailureCopy.humanize(@site_token_copy) == @site_token_copy
+    end
+  end
+
+  ## ── THE AGENCY SEAM (dr-w15-bl-failure-copy-has-no-agency) ────────────────
+  #
+  # Before this slice, NO class token crossed into this module at all: `classify/1`
+  # is private and returns a SENTENCE, `humanize/1` is String -> String, and
+  # `grep -cEw "agency|fault|blame"` over failure_copy.ex returned 0. So a class
+  # gaining an `@agency` key in `deploy_ledger.ex` could not reach a customer even
+  # in principle.
+  #
+  # `fault_line/1` is that seam, and these tests are what stops it becoming a
+  # SECOND taxonomy: every fault sentence must be derivable from the ledger's own
+  # `agency/1`, and the walk below is keyed off the ledger's CLASS ENUMS rather
+  # than a hand-listed set — a hand-list is a second place to forget, which is
+  # exactly how an 18-class taxonomy and a 17-key map merged past each other.
+  describe "fault_line/1 — the ledger's agency, said to the customer" do
+    alias BarkparkCloud.DeployLedger
+
+    # THE PARITY ASSERTION. It reds if the two taxonomies disagree in either
+    # direction: a class whose agency moved gets a different sentence here (so an
+    # anchored expectation below reds), and an agency value this module has no
+    # sentence for RAISES out of `fault_sentence/1`'s no-catch-all clause list.
+    test "every class the ledger can name gets the sentence its OWN agency earns" do
+      classes = DeployLedger.classes() ++ DeployLedger.not_attempted_classes()
+      assert length(classes) > 0, "the class enum is empty — this walk would be vacuous"
+
+      by_agency =
+        Map.new([:box, :site, :ambiguous], fn agency ->
+          {agency, FailureCopy.fault_line(sentinel_class(agency))}
+        end)
+
+      for class <- classes do
+        agency = DeployLedger.agency(class)
+
+        assert agency in [:box, :site, :ambiguous],
+               "#{class}: agency #{inspect(agency)} has no customer sentence — add one to fault_sentence/1"
+
+        assert FailureCopy.fault_line(class) == by_agency[agency],
+               "#{class} (agency #{inspect(agency)}) does not say what its agency says"
+      end
+    end
+
+    # ANTI-VACUITY: three agencies, three DISTINCT sentences. If they collapsed to
+    # one string the walk above would pass while saying nothing about fault, and
+    # the mutation witness below would stop being able to move.
+    test "the three agencies say three DIFFERENT things about fault" do
+      lines =
+        Enum.map([:box, :site, :ambiguous], fn a -> FailureCopy.fault_line(sentinel_class(a)) end)
+
+      assert length(Enum.uniq(lines)) == 3, "two agencies share a sentence: #{inspect(lines)}"
+    end
+
+    # THE MUTATION WITNESSES. Each names a class whose agency is ruled in
+    # `deploy_ledger.ex`; flip that class's `@agency` value and the matching
+    # assertion reds, which is the whole point of the seam — the customer's copy
+    # moves when the ledger's ruling moves.
+    test "BUILD_FAILED is the site's own build, and says so" do
+      assert DeployLedger.agency("BUILD_FAILED") == :site
+      assert FailureCopy.fault_line("BUILD_FAILED") =~ "came from your project"
+      refute FailureCopy.fault_line("BUILD_FAILED") =~ "on our side"
+    end
+
+    test "BOX_500 is ours, and the copy does not make the customer look for a fix" do
+      assert DeployLedger.agency("BOX_500") == :box
+      assert FailureCopy.fault_line("BOX_500") =~ "on our side"
+      refute FailureCopy.fault_line("BOX_500") =~ "came from your project"
+    end
+
+    test "CONTENT_API_403 is genuinely ambiguous, and the copy stays honest about it" do
+      assert DeployLedger.agency("CONTENT_API_403") == :ambiguous
+      assert FailureCopy.fault_line("CONTENT_API_403") =~ "can't tell yet"
+    end
+
+    # D148's forbidden direction, at the copy surface: an unknown class must never
+    # read as an accusation of the customer.
+    test "an unknown class and nil are ambiguous — never an accusation" do
+      for class <- ["A_CLASS_NOBODY_MAPPED", nil] do
+        assert FailureCopy.fault_line(class) == FailureCopy.fault_line("UNCLASSIFIED")
+        refute FailureCopy.fault_line(class) =~ "came from your project"
+      end
+    end
+
+    # NO INDEPENDENT REGEX: `fault_line/1` reads the CLASS, never the reason. A raw
+    # failure_reason string handed to it is just an unknown class, and it must not
+    # start pattern-matching its way to an opinion.
+    test "it does not classify raw reason strings — that is humanize/1's job" do
+      assert FailureCopy.fault_line("BUILD failed (exit 12): npm ERR!") ==
+               FailureCopy.fault_line("A_CLASS_NOBODY_MAPPED")
+    end
+  end
+
+  # One class known to carry each agency, read OFF the ledger's map rather than
+  # hand-picked, so this helper cannot itself go stale against a renamed class.
+  # Module level, not inside the describe: a `defp` in a describe block is a
+  # module definition wearing a scope it does not have.
+  defp sentinel_class(agency) do
+    BarkparkCloud.DeployLedger.agency_map()
+    |> Enum.find(fn {_class, a} -> a == agency end)
+    |> case do
+      {class, _} -> class
+      nil -> flunk("the ledger's agency map has no class with agency #{inspect(agency)}")
     end
   end
 end

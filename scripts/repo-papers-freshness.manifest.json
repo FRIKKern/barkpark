@@ -1,0 +1,262 @@
+{
+  "_note": [
+    "Freshness map for .demo-content/repo-papers/*.json, read by scripts/repo-papers-freshness.mjs.",
+    "source   = the docs/ file the snapshot is a copy OF. Both directions are enforced: a snapshot with no row here, or a row whose source is gone, REFUSES (exit 2) rather than passing.",
+    "baseline = how many hard terms in that snapshot the checker could not find in its source ON THE DAY THIS FILE WAS SEEDED (2026-09-10, origin/main 3fc9bb07f). It is a DEBT NUMBER, not a permission: the gate reds when it grows, never when it shrinks. Some of it is real staleness and some is transcription noise the mirroring introduced; the checker names every term either way, and shrinking a baseline is the only way to retire it.",
+    "exempt   = a divergence someone DELIBERATELY decided to keep, one entry per term, each with a written reason of at least 20 characters. The gate fails closed on an entry with no justification AND on an entry whose term stopped diverging, so this list cannot grow silently and cannot rot. It is empty today because nobody has yet justified one; a growing list of unexplained entries is a failure of this mechanism, not a use of it.",
+    "2026-09-11 re-pin: cheatsheets-bp 5->0, setup-task-system 55->0, studio-user-guide 1->0. Those three snapshots went OVER baseline when #17198 (bp.md), #17268 (studio/user-guide.md) and #17272/#17320 (setup/TASK-SYSTEM.md) rewrote their source docs, so the snapshots were REGENERATED from the current docs rather than the baselines raised; the pre-existing debt went out with the regenerated blocks, so the baselines follow it down. No exemption was added."
+  ],
+  "snapshot_dir": ".demo-content/repo-papers",
+  "papers": {
+    "adr-0002-npm-dist-tag-publish": {
+      "source": "docs/adr/0002-npm-dist-tag-publish.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "api-error-envelope-migration": {
+      "source": "docs/api/error-envelope-migration.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "api-v1": {
+      "source": "docs/api-v1.md",
+      "baseline": 76,
+      "exempt": []
+    },
+    "auth": {
+      "source": "docs/auth.md",
+      "baseline": 20,
+      "exempt": []
+    },
+    "cards-cli": {
+      "source": "docs/cards/cli.md",
+      "baseline": 4,
+      "exempt": []
+    },
+    "cards-js-sdk": {
+      "source": "docs/cards/js-sdk.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "cards-onix-bokbasen": {
+      "source": "docs/cards/onix-bokbasen.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "cards-plugins": {
+      "source": "docs/cards/plugins.md",
+      "baseline": 6,
+      "exempt": []
+    },
+    "cards-search-media": {
+      "source": "docs/cards/search-media.md",
+      "baseline": 1,
+      "exempt": []
+    },
+    "cards-studio": {
+      "source": "docs/cards/studio.md",
+      "baseline": 20,
+      "exempt": []
+    },
+    "cards-tui": {
+      "source": "docs/cards/tui.md",
+      "baseline": 14,
+      "exempt": []
+    },
+    "cheatsheets-bp": {
+      "source": "docs/cheatsheets/bp.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "cheatsheets-http-api": {
+      "source": "docs/cheatsheets/http-api.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "cheatsheets-papers": {
+      "source": "docs/cheatsheets/papers.md",
+      "baseline": 2,
+      "exempt": []
+    },
+    "cheatsheets-tasks": {
+      "source": "docs/cheatsheets/tasks.md",
+      "baseline": 1,
+      "exempt": []
+    },
+    "cheatsheets-tui": {
+      "source": "docs/cheatsheets/tui.md",
+      "baseline": 2,
+      "exempt": []
+    },
+    "cli-error-exit-table": {
+      "source": "docs/cli/error-exit-table.md",
+      "baseline": 1,
+      "exempt": []
+    },
+    "cli-handbook": {
+      "source": "docs/cli/HANDBOOK.md",
+      "baseline": 9,
+      "exempt": []
+    },
+    "cli-m0-decisions": {
+      "source": "docs/cli/m0-decisions.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "contracts-bokbasen": {
+      "source": "docs/contracts/bokbasen.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "contracts-onix-field-map": {
+      "source": "docs/contracts/onix-field-map.md",
+      "baseline": 7,
+      "exempt": []
+    },
+    "contracts-schema-v2": {
+      "source": "docs/contracts/schema-v2.md",
+      "baseline": 3,
+      "exempt": []
+    },
+    "contracts-webhook-realtime": {
+      "source": "docs/contracts/webhook-realtime.md",
+      "baseline": 11,
+      "exempt": []
+    },
+    "decisions-0001-sdk-envelope": {
+      "source": "docs/decisions/0001-sdk-envelope.md",
+      "baseline": 4,
+      "exempt": []
+    },
+    "decisions-0002-npm-dist-tag": {
+      "source": "docs/decisions/0002-npm-dist-tag.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "decisions-0003-sync-tags": {
+      "source": "docs/decisions/0003-sync-tags.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "decisions-deferred": {
+      "source": "docs/decisions/deferred.md",
+      "baseline": 7,
+      "exempt": []
+    },
+    "index": {
+      "source": "docs/INDEX.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "media-discovery": {
+      "source": "docs/media/DISCOVERY.md",
+      "baseline": 1,
+      "exempt": []
+    },
+    "ops-adding-a-domain": {
+      "source": "docs/ops/adding-a-domain.md",
+      "baseline": 10,
+      "exempt": []
+    },
+    "ops-bokbasen-go-live": {
+      "source": "docs/ops/bokbasen-go-live.md",
+      "baseline": 3,
+      "exempt": []
+    },
+    "ops-merge-gates": {
+      "source": "docs/ops/merge-gates.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "ops-npm-rollback-playbook": {
+      "source": "docs/ops/npm-rollback-playbook.md",
+      "baseline": 5,
+      "exempt": []
+    },
+    "ops-prod-ops": {
+      "source": "docs/ops/PROD_OPS.md",
+      "baseline": 12,
+      "exempt": []
+    },
+    "ops-realtime-webhook-setup": {
+      "source": "docs/ops/realtime-webhook-setup.md",
+      "baseline": 1,
+      "exempt": []
+    },
+    "ops-studio-nav-bug-2026-04-19": {
+      "source": "docs/ops/studio-nav-bug-2026-04-19.md",
+      "baseline": 6,
+      "exempt": []
+    },
+    "ops-vercel-dns-connect": {
+      "source": "docs/ops/vercel-dns-connect.md",
+      "baseline": 7,
+      "exempt": []
+    },
+    "plugins-codelists-byo": {
+      "source": "docs/plugins/codelists-byo.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "readme": {
+      "source": "README.md",
+      "baseline": 50,
+      "exempt": []
+    },
+    "search-intelligence": {
+      "source": "docs/search/INTELLIGENCE.md",
+      "baseline": 5,
+      "exempt": []
+    },
+    "search-roadmap": {
+      "source": "docs/search/ROADMAP.md",
+      "baseline": 2,
+      "exempt": []
+    },
+    "setup-personal-local": {
+      "source": "docs/setup/personal-local.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "setup-quickstart": {
+      "source": "docs/setup/QUICKSTART.md",
+      "baseline": 1,
+      "exempt": []
+    },
+    "setup-setup": {
+      "source": "docs/setup/SETUP.md",
+      "baseline": 3,
+      "exempt": []
+    },
+    "setup-task-system": {
+      "source": "docs/setup/TASK-SYSTEM.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "setup-windows": {
+      "source": "docs/setup/WINDOWS.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "snippets-readme": {
+      "source": "docs/snippets/README.md",
+      "baseline": 2,
+      "exempt": []
+    },
+    "spec-bokbasen-api-contract": {
+      "source": "docs/spec/bokbasen-api-contract.md",
+      "baseline": 35,
+      "exempt": []
+    },
+    "studio-user-guide": {
+      "source": "docs/studio/user-guide.md",
+      "baseline": 0,
+      "exempt": []
+    },
+    "studio-web-components": {
+      "source": "docs/studio/web-components.md",
+      "baseline": 2,
+      "exempt": []
+    }
+  }
+}

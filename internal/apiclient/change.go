@@ -99,7 +99,7 @@ func (c *Client) listenSSE(ctx context.Context, token string) error {
 
 	// No client timeout — the stream is long-lived; ctx cancellation (via the
 	// request built above) is what ends it, exactly like Listen in listen.go.
-	sseClient := &http.Client{Timeout: 0}
+	sseClient := streamClient()
 	resp, err := sseClient.Do(req)
 	if err != nil {
 		return err

@@ -31,6 +31,32 @@ defmodule BarkparkWeb.SecretControllerTest do
       |> put_req_header("authorization", "Bearer " <> @junior_token)
       |> put_req_header("content-type", "application/json")
 
+  # Mirrors `@max_audit_offset` in BarkparkWeb.SecretController. Written out
+  # rather than read off the module attribute on purpose: a test that derives
+  # its expectation from the code under test cannot detect the code changing.
+  @max_audit_offset 100_000
+
+  defp audit_page(conn, name, limit, offset) do
+    resp =
+      conn
+      |> admin_conn()
+      |> get("/v1/secrets/#{name}/audit?limit=#{limit}&offset=#{offset}")
+
+    assert resp.status == 200,
+           "a legitimate page of the walk was refused with #{resp.status}: #{resp.resp_body}"
+
+    Jason.decode!(resp.resp_body)["audit"]
+  end
+
+  # Walk forward until a page comes back empty — the ONLY termination condition
+  # a caller has on this route, and the property a silent offset clamp destroys.
+  defp walk_audit(conn, name, limit, offset, acc) do
+    case audit_page(conn, name, limit, offset) do
+      [] -> acc
+      rows -> walk_audit(conn, name, limit, offset + limit, acc ++ rows)
+    end
+  end
+
   describe "auth gating" do
     test "GET list returns 401 without a token", %{conn: conn} do
       assert get(conn, "/v1/secrets").status == 401
@@ -182,6 +208,131 @@ defmodule BarkparkWeb.SecretControllerTest do
       payload = Jason.decode!(resp.resp_body)
       assert payload["limit"] == 2
       assert length(payload["audit"]) == 2
+    end
+  end
+
+  # ── the offset ceiling (task-2fd4f84fb06c96bf) ─────────────────────────────
+  # `limit` was clamped at both ends while `offset` was only floored, so an
+  # absurd `?offset` reached Postgres as a real OFFSET. The chosen behaviour is
+  # a 400 above the ceiling and a clamp below zero — see the controller's
+  # `@max_audit_offset` comment for why the two ends differ.
+  describe "audit read surface — the offset bound" do
+    test "an offset above the ceiling is REFUSED with a 400 naming the parameter", %{conn: conn} do
+      body = Jason.encode!(%{value: "offset-bound-value"})
+
+      assert conn |> admin_conn() |> put("/v1/secrets/offset_bound_key", body) |> Map.get(:status) ==
+               200
+
+      resp = conn |> admin_conn() |> get("/v1/secrets/offset_bound_key/audit?offset=5000000")
+      payload = Jason.decode!(resp.resp_body)
+
+      # A GUARD AHEAD OF THE CONTRACT would make this test unable to fail
+      # honestly: the suite's own limiter answers 429 with a body that says
+      # `rate_limited` while this test's NAME says "offset". Read the body
+      # before naming a cause.
+      refute resp.status == 429,
+             "a rate limiter answered ahead of the paging contract: #{resp.resp_body}"
+
+      refute get_in(payload, ["error", "code"]) == "rate_limited"
+
+      # THE ASSERTION THAT REDS ON UNMODIFIED main: today the offset is only
+      # floored, so this request is served as a 200 with an empty page.
+      assert resp.status == 400,
+             "an absurd ?offset was SERVED (status #{resp.status}) instead of refused — " <>
+               "it reaches Postgres as a real OFFSET: #{resp.resp_body}"
+
+      assert payload["error"]["code"] == "malformed"
+      assert payload["error"]["message"] =~ "offset"
+      assert payload["error"]["details"]["parameter"] == "offset"
+      assert payload["error"]["details"]["requested"] == 5_000_000
+      assert payload["error"]["details"]["max"] == @max_audit_offset
+    end
+
+    test "the ceiling refuses ABOVE it and SERVES at it — not a blanket refusal", %{conn: conn} do
+      body = Jason.encode!(%{value: "offset-edge-value"})
+
+      assert conn |> admin_conn() |> put("/v1/secrets/offset_edge_key", body) |> Map.get(:status) ==
+               200
+
+      at =
+        conn
+        |> admin_conn()
+        |> get("/v1/secrets/offset_edge_key/audit?offset=#{@max_audit_offset}")
+
+      assert at.status == 200,
+             "offset == the ceiling was refused; the bound is off by one: #{at.resp_body}"
+
+      assert Jason.decode!(at.resp_body)["offset"] == @max_audit_offset
+
+      over =
+        conn
+        |> admin_conn()
+        |> get("/v1/secrets/offset_edge_key/audit?offset=#{@max_audit_offset + 1}")
+
+      assert over.status == 400
+    end
+
+    test "the FLOOR is still a clamp, not a 400 — a negative offset serves page 0", %{conn: conn} do
+      body = Jason.encode!(%{value: "offset-floor-value"})
+
+      assert conn |> admin_conn() |> put("/v1/secrets/offset_floor_key", body) |> Map.get(:status) ==
+               200
+
+      resp = conn |> admin_conn() |> get("/v1/secrets/offset_floor_key/audit?offset=-5")
+
+      assert resp.status == 200,
+             "the negative-offset floor was turned into a refusal; only the CEILING is a 400"
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["offset"] == 0
+      assert length(payload["audit"]) == 1
+    end
+
+    test "an ordinary multi-page walk returns every row exactly once, in order", %{conn: conn} do
+      name = "walked_key"
+      body = Jason.encode!(%{value: "walked-value"})
+
+      assert conn |> admin_conn() |> put("/v1/secrets/#{name}", body) |> Map.get(:status) == 200
+
+      # set + 6 reveals = 7 rows, so a page size of 2 needs four pages.
+      for _ <- 1..6 do
+        assert conn |> admin_conn() |> get("/v1/secrets/#{name}") |> Map.get(:status) == 200
+      end
+
+      page_size = 2
+      one_shot = audit_page(conn, name, 200, 0)
+      total = length(one_shot)
+
+      # NON-VACUITY, this test's own positive control: a corpus that fits in one
+      # page has nothing to page, and a shrinking fixture must fail LOUDLY here
+      # rather than pass by walking a single page.
+      assert total > page_size,
+             "the audit corpus is #{total} rows against a page size of #{page_size} — " <>
+               "this walk fits in one page and proves nothing about paging"
+
+      pages = div(total - 1, page_size) + 1
+
+      assert pages >= 3,
+             "the walk covers only #{pages} page(s); a two-page walk cannot distinguish " <>
+               "a correct OFFSET from one that repeats the first window"
+
+      # Row identity: `inserted_at` is :utc_datetime_usec, so every row is
+      # distinguishable. Proven here, because the exactly-once claim below is
+      # meaningless if the rows are indistinguishable.
+      stamps = Enum.map(one_shot, & &1["inserted_at"])
+
+      assert length(Enum.uniq(stamps)) == total,
+             "audit rows are not distinguishable by inserted_at; exactly-once is unprovable"
+
+      walked = walk_audit(conn, name, page_size, 0, [])
+
+      assert length(walked) == total,
+             "the walk returned #{length(walked)} rows for a #{total}-row corpus"
+
+      walked_stamps = Enum.map(walked, & &1["inserted_at"])
+
+      assert Enum.uniq(walked_stamps) == walked_stamps, "the paged walk REPEATED a row"
+      assert walked == one_shot, "the paged walk skipped or reordered rows"
     end
   end
 

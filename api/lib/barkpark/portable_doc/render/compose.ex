@@ -263,6 +263,31 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdParagraph", "_role" => "byline", "children" => [text]}
   end
 
+  def compose_block(%{"type" => "pre-gate-badge"} = b, style) do
+    # READER-SYNTHESISED, NEVER STORED. `Content.Papers.PreGateRegister.annotate/3`
+    # inserts this block below the masthead byline of a grandfathered Paper
+    # (the 2026-09-02 ruling: published before the block gate, still refused by
+    # it) on the way into the reader / Studio block streams. It is one quiet
+    # `<p>` — eyebrow-weight caps-mono, one line, tone from the existing
+    # `--bp-tone-*` pair — with the register's `reader_behaviour` as the title
+    # so the mark explains itself on hover and in print stays a plain line.
+    # `_tone` is whitelisted here so a stray value can never mint a class;
+    # `_tucked` tells the walker the badge sits under a byline rule (the CSS
+    # pull-up applies only then, so it never fights a heading's margin).
+    tone = if Map.get(b, "tone") == "warning", do: "warning", else: "neutral"
+
+    _ = style
+
+    %{
+      "kind" => "PdParagraph",
+      "_role" => "pre-gate",
+      "_tone" => tone,
+      "_tucked" => Map.get(b, "anchor") == "byline",
+      "_title" => stringish(Map.get(b, "title", "")),
+      "children" => [stringish(Map.get(b, "label", ""))]
+    }
+  end
+
   def compose_block(%{"type" => "ingress"} = b, style) do
     # Lead paragraph — heavier weight + larger size in article mode.
     # EVERY style emits a real `<p>` (see the eyebrow clause — the email
@@ -328,7 +353,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     do: compose_block(Map.put(b, "type", "blockquote"), style)
 
   # Pullquote — italic serif, larger, muted, with a 3px terracotta left-border
-  # (mirrors doc.css `.pullquote`) in article mode. The clause is style-INVARIANT:
+  # (mirrors `.bp-paper-surface .bp-role-pullquote` in
+  # api/assets/paper-surface/paper-surface.css — `border-left: 3px solid
+  # var(--paper-reading-accent)`) in article mode. The clause is style-INVARIANT:
   # it emits the same PdParagraph with `_role: "pullquote"` in every style, and
   # walk.ex paints the full role treatment (terracotta left-border + sizing) at
   # BOTH `:article` (via the `.bp-role-pullquote` class) and email/default (via
@@ -348,7 +375,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # Lists stay semantic in every style. Article mode leaves the resulting
   # PdList/PdListItem frame bare for the paper stylesheet; email/default mode
   # applies its Outlook-safe spacing inline in Walk.
-  def compose_block(%{"type" => "list"} = b, _style) do
+  def compose_block(%{"type" => "list"} = b, style) do
     ordered = Map.get(b, "ordered") == true
 
     items =
@@ -357,12 +384,13 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.map(fn item ->
         %{
           "kind" => "PdListItem",
-          "children" => [
-            %{
-              "kind" => "PdText",
-              "children" => compose_inline_children(normalize_list_item(item))
-            }
-          ]
+          "children" =>
+            [
+              %{
+                "kind" => "PdText",
+                "children" => compose_inline_children(normalize_list_item(item))
+              }
+            ] ++ compose_list_children(item, style)
         }
       end)
 
@@ -472,9 +500,15 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  # Article mode: the doc.css `hr.section` look — a centered "§" glyph
+  # Article mode: the `.bp-section-divider` look — a centered "§" glyph
   # straddling a hairline rule (the glyph sits on the warm parchment, masking
-  # the rule behind it). Email/default mode: a plain `PdHr`, unchanged.
+  # the rule behind it). There is no `hr.section` selector anywhere in this repo:
+  # the divider's visual declarations are INLINE in
+  # `Figures.section_divider_html/0`, and the only stylesheet that restates them
+  # is the edit mirror `.bp-paper-editor-body .bp-section-divider{,__mark}`
+  # (api/assets/paper-editor/src/styles.css). paper-surface.css mentions
+  # `.bp-section-divider` only in the divider-before-h2 dedup rule, never for the
+  # glyph's own look. Email/default mode: a plain `PdHr`, unchanged.
   def compose_block(%{"type" => "divider"}, :article) do
     %{"kind" => "_raw", "html" => Figures.section_divider_html()}
   end
@@ -490,10 +524,13 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # it. The mermaid source is entity-encoded (& < >) so it round-trips through
   # the extractor and Mermaid decodes it at runtime.
   #
-  # In article mode: a bordered, parchment, inset figure card (mirrors doc.css
-  # `figure`); the figcaption carries a bold "Figure N." run-in and is styled by
-  # the ONE `.bp-figcaption` class (paper-surface.css) the diagram/asciicast
-  # emitters in figures.ex share.
+  # In article mode: a bordered, parchment, inset figure card whose frame is
+  # INLINE on the `<figure>` in `Figures.diagram_html/3` — paper-surface.css
+  # carries no `figure` selector, so the card has no stylesheet counterpart. The
+  # figcaption carries a bold "Figure N." run-in and is the part that DOES: the
+  # ONE `.bp-figcaption` class (`.bp-paper-surface .bp-figcaption`,
+  # api/assets/paper-surface/paper-surface.css) the diagram/asciicast emitters in
+  # figures.ex share.
   # In email/default mode: degrade gracefully — Mermaid never runs in email, so
   # we render the caption then the source as a plain code block.
   # CONTENTLESS DIAGRAM (the empty-chrome invariant — see `blank_field?/2`): a
@@ -609,8 +646,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     if blank_code_source?(b) do
       %{"kind" => "_raw", "html" => ""}
     else
-      value = stringish(Map.get(b, "value", ""))
-      %{"kind" => "_raw", "html" => Figures.code_block_html(value)}
+      %{"kind" => "_raw", "html" => Figures.code_block_html(code_source(b))}
     end
   end
 
@@ -619,7 +655,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       %{"kind" => "_raw", "html" => ""}
     else
       children =
-        Map.get(b, "value", "")
+        b
+        |> code_source()
         |> String.split("\n")
         |> Enum.map(fn line ->
           %{"kind" => "PdText", "children" => [%{"kind" => "PdInlineCode", "value" => line}]}
@@ -733,7 +770,20 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdEmbed", "target" => stringish(Map.get(b, "target", ""))}
   end
 
-  def compose_block(%{"type" => "table"} = b, _style) do
+  # TYPED COLUMNS (opt-in, CONTENT ONLY, `:article` only) — the Elixir mirror of
+  # internal/pdrender/richblocks.go tableRenderer. An optional `cols` attr, an
+  # index-aligned array of {type} maps, tags each column text | num | delta |
+  # spark. It changes only the CELL BODY (delta/spark) plus a per-column
+  # alignment CLASS for num/delta (emitted in Walk.table); it never touches the
+  # head band, the row/column shape, or any width math. `cols` ABSENT ⇒ every
+  # column is text ⇒ the render is byte-identical to a table carrying no spec.
+  # The key is `cols`, NOT `columns` (an overloaded layout attr, already read
+  # above for the implicit header). Non-`:article` styles never see the spec:
+  # the email emitters are byte-locked and a classed inline SVG paints as a
+  # black blob in a stylesheet-less mail client.
+  def compose_block(%{"type" => "table"} = b, style) do
+    col_types = table_col_types(b, style)
+
     compose_cell = fn cell ->
       cell
       |> table_cell_content()
@@ -741,7 +791,24 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.map(&to_pd_node_from_inline_child/1)
     end
 
-    compose_row = fn row -> row |> table_row_cells() |> Enum.map(compose_cell) end
+    compose_typed_cell = fn cell, index ->
+      case Enum.at(col_types, index) do
+        "delta" -> table_delta_cell(cell, compose_cell)
+        "spark" -> table_spark_cell(cell, compose_cell)
+        _ -> compose_cell.(cell)
+      end
+    end
+
+    # Head cells stay on the legacy body in EVERY column type (mirrors the Go
+    # renderer, which types only body cells); the head only inherits alignment.
+    compose_head_row = fn row -> row |> table_row_cells() |> Enum.map(compose_cell) end
+
+    compose_row = fn row ->
+      row
+      |> table_row_cells()
+      |> Enum.with_index()
+      |> Enum.map(fn {cell, index} -> compose_typed_cell.(cell, index) end)
+    end
 
     {column_head, record_keys} = table_column_head(b)
     raw_rows = Map.get(b, "rows", []) |> List.wrap()
@@ -786,7 +853,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       body_rows
       |> Enum.map(compose_row)
 
-    pd = %{"kind" => "PdTable", "rows" => rows}
+    pd = %{"kind" => "PdTable", "rows" => rows} |> table_put_col_types(col_types)
 
     head =
       if is_list(declared_head) and declared_head != [],
@@ -796,7 +863,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     case head do
       nil -> pd
       [] -> pd
-      head_row -> Map.put(pd, "head", compose_row.(head_row))
+      head_row -> Map.put(pd, "head", compose_head_row.(head_row))
     end
   end
 
@@ -1975,7 +2042,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # the non-binary fail-soft already sealed in `Render.Util.escape_html/1`.
   # The ONE blank check both `code` compose arms share, so the two styles can
   # never disagree about what "sourceless" means. It reads the SAME key the
-  # emitters read (`value` — the standalone code block's source field),
+  # emitters read (`code_source/1` below — the four accepted source keys),
   # normalizes through `stringish/1` (so a missing key, an explicit nil, or a
   # non-stringish value is blank) and trims: `String.trim/1` strips the whole
   # Unicode White_Space set — NBSP U+00A0, the U+2000–200A quads, IDEOGRAPHIC
@@ -1984,10 +2051,88 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # characters (U+200B, U+FEFF) are NOT White_Space and stay content — they are
   # typed glyphs, not layout.
   #
-  # SCOPE: source-field ALIASES (`code` / `content` / `text`) are a separate
-  # contract owned elsewhere; when they normalize into `value` upstream this
-  # check sees them for free, with no second definition of "blank".
-  defp blank_code_source?(b), do: blank_field?(b, "value")
+  # SCOPE: the source-field ALIASES are read by `code_source/1` below, so this
+  # guard and the two compose arms answer to ONE key list — no shape can be
+  # blank to the guard and non-blank to the emitter (or vice versa).
+  defp blank_code_source?(b), do: code_source(b) == ""
+
+  # ── THE code-block source-field contract (task-e9af9f95d290307d) ───────────
+  #
+  # A standalone `code` block carries its source under one of FOUR keys. This is
+  # not a design; it is the corpus. Measured 2026-09-11 against
+  # https://guerrilla.barkpark.cloud, dataset `production`, over all 1050 `paper`
+  # and 8671 `task` documents (10,608 block-level `code` nodes):
+  #
+  #     value    9711   the canonical shape; every first-party producer writes it
+  #                     (from_markdown.ex, bpml/parser.ex, the Studio editor,
+  #                     paper-editor/src/canvas, the seeds)
+  #     code      327   Go's mdlite adapter (internal/taskboard/mdlite.go) and
+  #                     agent-authored JSON; ALL 219 task-side code blocks
+  #     text      460   agent-authored paper JSON
+  #     content    30   agent-authored paper JSON, an inline-node ARRAY
+  #     both        0   no live row carries two non-blank source keys
+  #
+  # Before this function, `compose_block/2` read `value` ONLY, so 817 authored
+  # blocks composed to NOTHING on every web/email surface while the Go TUI (which
+  # already read `code`||`value`) showed 327 of them — the same document full in
+  # one reader and hollow in another. internal/pdrender/code.go now reads THIS
+  # list in THIS order, and api/test/support/fixtures/code-source-aliases.json is
+  # the single file both engines' tests assert against.
+  #
+  # PRECEDENCE is FIRST NON-BLANK, not first-present: a leading key holding "" or
+  # whitespace falls through, so a Studio-seeded `"value" => ""` (blocks.ex:3899
+  # mints one on every new code block) cannot mask a real `code`. With `both` = 0
+  # in the corpus the order is unobservable today; `value` leads because it is the
+  # canonical field and because bpml/printer.ex has printed exactly
+  # `["value", "code", "content", "text"]` since it was written — this reuses that
+  # order rather than inventing a second one.
+  #
+  # `content` is an array of inline nodes; it flattens to its concatenated text.
+  # Anything non-stringish (a map, a number-free struct) normalizes to "" through
+  # `stringish/1` and falls through, exactly as the old single-key guard did.
+  #
+  # The winning key is returned VERBATIM (untrimmed): trimming is the selection
+  # rule, never a transform on the source — a `<pre>` shows leading indentation
+  # and trailing newlines exactly as authored, so every one of the 9711
+  # `value`-shaped rows composes byte-identically to before this change.
+  @code_source_keys ~w(value code content text)
+
+  defp code_source(b) do
+    Enum.find_value(@code_source_keys, "", fn key ->
+      source = b |> Map.get(key) |> code_source_text()
+      if String.trim(source) == "", do: nil, else: source
+    end)
+  end
+
+  # The `content` shape flattens an inline-node ARRAY. Each node contributes the
+  # FIRST NON-EMPTY of its `"value"` then its `"text"` — the same dual-read every
+  # text leaf gets (`compose_inline/1`, pdrender `inline.go`), and byte-for-byte
+  # the rule the two sibling readers apply: code.go `codeSourceText` does
+  # `if s := stringishAttr(v, "value"); s != "" { … } else { stringishAttr(v, "text") }`
+  # and inline.tsx `textLeafValue` does `str(n.value) || str(n.text)` — Go and JS
+  # agree with each other exactly, including that the test is NON-EMPTY, not
+  # non-blank: a node whose `value` is `" "` keeps the space rather than falling
+  # through to `text` (only the OUTER key precedence in `code_source/1` trims).
+  # Matching on `%{"value" => v}` first — which this did — yielded "" for a
+  # `{"value" => "", "text" => "x"}` node while both siblings yielded "x": a
+  # code block full in the TUI and in the SDK, hollow on web and email. The
+  # fixture's "content node: blank value falls back to text" case is the lock.
+  defp code_source_text(nodes) when is_list(nodes) do
+    Enum.map_join(nodes, "", fn
+      s when is_binary(s) -> s
+      node when is_map(node) -> inline_leaf_source(node)
+      _ -> ""
+    end)
+  end
+
+  defp code_source_text(v), do: stringish(v)
+
+  defp inline_leaf_source(node) do
+    case stringish(Map.get(node, "value")) do
+      "" -> node |> Map.get("text") |> stringish()
+      value -> value
+    end
+  end
 
   # THE ONE blank-field reader every empty-chrome guard in this module shares, so
   # no two block types (and no two style arms of one type) can ever disagree about
@@ -2188,6 +2333,19 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # verbatim (a plain-text item stays plain text). Backward-compatible: non-binary
   # items and non-JSON strings are returned unchanged, so canonical lists (and
   # the golden fixture) are byte-identical.
+  defp compose_list_children(%{"children" => children}, style) when is_list(children) do
+    Enum.flat_map(children, fn
+      %{"type" => type, "items" => items} = child
+      when type in ["list", "ordered-list", "numbered_list"] or type in @unordered_list_aliases ->
+        if is_list(items), do: [compose_block(child, style)], else: []
+
+      _ ->
+        []
+    end)
+  end
+
+  defp compose_list_children(_, _), do: []
+
   defp normalize_list_item(item) when is_binary(item) do
     case Jason.decode(item) do
       {:ok, [%{} | _] = nodes} -> nodes
@@ -2197,6 +2355,82 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp normalize_list_item(%{} = item), do: paragraph_inline(item)
   defp normalize_list_item(item), do: item
+
+  # `cols` → an index-aligned list of type names. An unknown/missing `type`
+  # degrades to "text" (the legacy path), exactly like parseColTypes in Go.
+  # An absent spec yields [] — and [] is what keeps the node shape, and so the
+  # rendered bytes, identical to the pre-typed-columns render.
+  defp table_col_types(b, :article) do
+    case Map.get(b, "cols") do
+      cols when is_list(cols) and cols != [] ->
+        # NOT a `when t in [...]` guard on purpose: tiers_test.exs extracts the
+        # renderable BLOCK-type surface out of this file with a regex that reads
+        # every such guard as a list of block types, so a guard here would
+        # inflate the canonical block-type count by four COLUMN types.
+        Enum.map(cols, fn
+          %{"type" => "num"} -> "num"
+          %{"type" => "delta"} -> "delta"
+          %{"type" => "spark"} -> "spark"
+          _ -> "text"
+        end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp table_col_types(_b, _style), do: []
+
+  defp table_put_col_types(pd, []), do: pd
+  defp table_put_col_types(pd, types), do: Map.put(pd, "cols", types)
+
+  # delta: the direction glyph FIRST (▲ up / ▼ down / - flat), then the
+  # magnitude — so the sign survives with zero colour (colour would be
+  # reinforcement only, and mail/monochrome sinks have none). A cell that does
+  # not coerce to a number falls back to the legacy text body, no glyph.
+  defp table_delta_cell(cell, compose_cell) do
+    case table_cell_number(cell) do
+      nil ->
+        compose_cell.(cell)
+
+      n ->
+        text = table_delta_glyph(n) <> " " <> format_field_number(abs(n))
+        [%{"kind" => "PdText", "children" => [text]}]
+    end
+  end
+
+  defp table_delta_glyph(n) when n > 0, do: "▲"
+  defp table_delta_glyph(n) when n < 0, do: "▼"
+  defp table_delta_glyph(_n), do: "-"
+
+  # spark: a numeric series cell becomes the canonical stat sparkline
+  # (DataViz.spark_svg/2 — the ONE primitive), carried as a `_raw` node so the
+  # SVG reaches the walk unescaped. The TUI mirror renders the same series as
+  # the block-glyph sparkline; the SVG is the web projection of that value, not
+  # a second ladder. A non-series cell, or one with no coercible numbers, falls
+  # back to the legacy text body.
+  defp table_spark_cell(cell, compose_cell) when is_list(cell) do
+    values = cell |> Enum.map(&table_cell_number/1) |> Enum.reject(&is_nil/1)
+
+    if values == [] do
+      compose_cell.(cell)
+    else
+      %{
+        "kind" => "_raw",
+        "html" => Barkpark.PortableDoc.Render.DataViz.spark_svg(values, "bp-table__spark")
+      }
+      |> List.wrap()
+    end
+  end
+
+  defp table_spark_cell(cell, compose_cell), do: compose_cell.(cell)
+
+  # Only a scalar cell coerces to a number (mirrors Go's toFloat, which sees the
+  # raw cell); a {content:…} / node-array cell is prose and stays prose.
+  defp table_cell_number(cell) when is_number(cell) or is_binary(cell),
+    do: field_number_value(cell)
+
+  defp table_cell_number(_cell), do: nil
 
   defp table_row_cells(%{"cells" => cells}) when is_list(cells), do: cells
   defp table_row_cells(row), do: List.wrap(row)
@@ -2655,7 +2889,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp block_to_html(_, _), do: ""
 
-  defp paper_links_html(block, style) do
+  @doc false
+  def paper_links_presentation(block, style) do
     resolved = Map.get(block, "_paper_links", %{})
     reasons = Map.get(block, "reasons", %{})
     layout = nonblank(Map.get(block, "layout"))
@@ -2664,65 +2899,104 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       block
       |> Map.get("refs", [])
       |> List.wrap()
-      |> Enum.map(&paper_link_ref(&1, resolved, reasons))
+      |> Enum.with_index()
+      |> Enum.map(fn {ref, index} -> paper_link_ref(ref, resolved, reasons, index) end)
       |> Enum.reject(&is_nil/1)
-      |> Enum.map_join(fn ref -> paper_link_card(ref, style, layout) end)
+      |> Enum.map(fn ref -> paper_link_card_presentation(ref, style, layout) end)
 
-    if cards == "" do
+    cards_html = Enum.map_join(cards, & &1.html)
+
+    title_source = paper_links_form_text(Map.get(block, "title"))
+    description_source = paper_links_form_text(Map.get(block, "description"))
+    title = paper_links_display_text(Map.get(block, "title"))
+    description = paper_links_display_text(Map.get(block, "description"))
+
+    %{
+      cards: cards,
+      cards_html: cards_html,
+      empty?: cards_html == "",
+      layout: layout,
+      title: title || "Explore the work",
+      title_source: title_source,
+      title_default?: is_nil(title),
+      description: description,
+      description_source: description_source || "",
+      section_style: paper_links_section_style(layout),
+      header_style: "margin:0 0 #{if layout == "chapters", do: "2.15rem", else: "1.15rem"}",
+      title_style: paper_links_title_style(layout),
+      description_style:
+        "margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6",
+      grid_style: paper_links_grid_style(layout)
+    }
+  end
+
+  defp paper_links_html(block, style) do
+    presentation = paper_links_presentation(block, style)
+
+    if presentation.empty? do
       ""
     else
-      title = nonblank(Map.get(block, "title")) || "Explore the work"
-      description = nonblank(Map.get(block, "description"))
-
       intro =
-        if description,
+        if presentation.description,
           do:
-            ~s|<p style="margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6">#{Util.escape_html(description)}</p>|,
+            ~s|<p style="#{presentation.description_style}">#{Util.escape_html(presentation.description)}</p>|,
           else: ""
 
-      section_style =
-        case layout do
-          "chapters" ->
-            "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:1px solid var(--paper-ink, #17332d)"
+      layout_attr =
+        if presentation.layout,
+          do: ~s| data-layout="#{Util.escape_attr(presentation.layout)}"|,
+          else: ""
 
-          "timeline" ->
-            "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:3px double var(--paper-ink, #17332d)"
-
-          _ ->
-            "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
-        end
-
-      title_style =
-        if layout in ["chapters", "timeline"],
-          do:
-            "margin:0;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.8rem,4vw,2.65rem);line-height:1.08;letter-spacing:-0.025em;color:var(--paper-ink, #17332d)",
-          else: "margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)"
-
-      grid_style =
-        case layout do
-          "chapters" ->
-            "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr));gap:0;border-bottom:1px solid var(--paper-rule, #dde7e2)"
-
-          "timeline" ->
-            "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:0;border-top:1px solid var(--paper-rule, #dde7e2);border-bottom:1px solid var(--paper-rule, #dde7e2)"
-
-          _ ->
-            "display:grid;gap:0.85rem"
-        end
-
-      layout_attr = if layout, do: ~s| data-layout="#{Util.escape_attr(layout)}"|, else: ""
-
-      ~s|<section data-paper-links#{layout_attr} aria-label="#{Util.escape_attr(title)}" style="#{section_style}">| <>
-        ~s|<header style="margin:0 0 #{if layout == "chapters", do: "2.15rem", else: "1.15rem"}"><h2 style="#{title_style}">#{Util.escape_html(title)}</h2>#{intro}</header>| <>
-        ~s(<div style="#{grid_style}">#{cards}</div></section>)
+      ~s|<section data-paper-links#{layout_attr} aria-label="#{Util.escape_attr(presentation.title)}" style="#{presentation.section_style}">| <>
+        ~s|<header style="#{presentation.header_style}"><h2 style="#{presentation.title_style}">#{Util.escape_html(presentation.title)}</h2>#{intro}</header>| <>
+        ~s(<div style="#{presentation.grid_style}">#{presentation.cards_html}</div></section>)
     end
   end
 
-  defp paper_link_ref(slug, resolved, reasons) when is_binary(slug) do
-    paper_link_ref(%{"slug" => slug}, resolved, reasons)
+  defp paper_links_display_text(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: value
   end
 
-  defp paper_link_ref(ref, resolved, reasons) when is_map(ref) do
+  defp paper_links_display_text(value) when is_integer(value), do: Integer.to_string(value)
+  defp paper_links_display_text(_value), do: nil
+
+  defp paper_links_form_text(value) when is_binary(value), do: value
+  defp paper_links_form_text(value) when is_integer(value), do: Integer.to_string(value)
+  defp paper_links_form_text(_value), do: ""
+
+  defp paper_links_section_style("chapters"),
+    do:
+      "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:1px solid var(--paper-ink, #17332d)"
+
+  defp paper_links_section_style("timeline"),
+    do:
+      "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:3px double var(--paper-ink, #17332d)"
+
+  defp paper_links_section_style(_layout),
+    do: "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
+
+  defp paper_links_title_style(layout) when layout in ["chapters", "timeline"],
+    do:
+      "margin:0;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.8rem,4vw,2.65rem);line-height:1.08;letter-spacing:-0.025em;color:var(--paper-ink, #17332d)"
+
+  defp paper_links_title_style(_layout),
+    do: "margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)"
+
+  defp paper_links_grid_style("chapters"),
+    do:
+      "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr));gap:0;border-bottom:1px solid var(--paper-rule, #dde7e2)"
+
+  defp paper_links_grid_style("timeline"),
+    do:
+      "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:0;border-top:1px solid var(--paper-rule, #dde7e2);border-bottom:1px solid var(--paper-rule, #dde7e2)"
+
+  defp paper_links_grid_style(_layout), do: "display:grid;gap:0.85rem"
+
+  defp paper_link_ref(slug, resolved, reasons, index) when is_binary(slug) do
+    paper_link_ref(%{"slug" => slug}, resolved, reasons, index)
+  end
+
+  defp paper_link_ref(ref, resolved, reasons, index) when is_map(ref) do
     slug = nonblank(Map.get(ref, "slug") || Map.get(ref, :slug))
 
     if slug do
@@ -2732,12 +3006,17 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       authored_description = nonblank(Map.get(ref, "description"))
 
       %{
+        index: index,
         slug: slug,
+        title_source: paper_links_form_text(Map.get(ref, "title")),
+        title_authored?: not is_nil(authored_title),
         title:
           if(prefer_authored_copy,
             do: authored_title || live_value(live, :title) || slug,
             else: live_value(live, :title) || authored_title || slug
           ),
+        description_source: paper_links_form_text(Map.get(ref, "description")),
+        description_authored?: not is_nil(authored_description),
         description:
           if(prefer_authored_copy,
             do: authored_description || live_value(live, :description),
@@ -2757,10 +3036,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  defp paper_link_ref(_, _, _), do: nil
+  defp paper_link_ref(_, _, _, _), do: nil
 
-  defp paper_link_card(ref, _style, "chapters") do
-    href = Util.escape_attr("/papers/" <> ref.slug)
+  defp paper_link_card_presentation(ref, _style, "chapters") do
+    href = "/papers/" <> ref.slug
     featured = if ref.featured, do: "grid-column:1/-1;", else: ""
 
     eyebrow =
@@ -2773,16 +3052,36 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     live_label = if ref.live, do: "Live edition", else: "Edition"
     meta = [live_label, ref.meta] |> Enum.reject(&is_nil/1) |> Enum.join(" · ")
 
-    ~s|<a data-paper-link-card data-chapter href="#{href}" style="#{featured}display:flex;min-height:13rem;flex-direction:column;padding:1.75rem 1.65rem 1.8rem;border-top:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none">| <>
-      eyebrow <>
-      ~s|<strong style="display:block;max-width:22ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:650;line-height:1.18;letter-spacing:-0.018em;color:var(--paper-ink, #17332d)">#{Util.escape_html(ref.title)}</strong>| <>
-      description <>
-      ~s|<span style="display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(meta)} &nbsp;→</span>| <>
-      ~s(</a>)
+    card =
+      Map.merge(ref, %{
+        kind: :chapters,
+        href: href,
+        card_style:
+          "#{featured}display:flex;min-height:13rem;flex-direction:column;padding:1.75rem 1.65rem 1.8rem;border-top:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none",
+        before_title_html: eyebrow,
+        title_style:
+          "display:block;max-width:22ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:650;line-height:1.18;letter-spacing:-0.018em;color:var(--paper-ink, #17332d)",
+        description_style:
+          "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
+        after_copy_html: "",
+        footer_text: meta,
+        footer_style:
+          "display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)"
+      })
+
+    html =
+      ~s|<a data-paper-link-card data-chapter href="#{Util.escape_attr(href)}" style="#{card.card_style}">| <>
+        eyebrow <>
+        ~s|<strong style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
+        description <>
+        ~s|<span style="#{card.footer_style}">#{Util.escape_html(meta)} &nbsp;→</span>| <>
+        ~s(</a>)
+
+    Map.put(card, :html, html)
   end
 
-  defp paper_link_card(ref, _style, "timeline") do
-    href = Util.escape_attr("/papers/" <> ref.slug)
+  defp paper_link_card_presentation(ref, _style, "timeline") do
+    href = "/papers/" <> ref.slug
     eyebrow = ref.eyebrow || "Edition"
     description = paper_link_description(ref.description)
 
@@ -2791,16 +3090,37 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.reject(&is_nil/1)
       |> Enum.join(" · ")
 
-    ~s|<a data-paper-link-card data-timeline-stop href="#{href}" style="display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none">| <>
-      ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>| <>
-      ~s|<strong style="display:block;max-width:18ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:1.14rem;font-weight:650;line-height:1.2;color:var(--paper-ink, #17332d)">#{Util.escape_html(ref.title)}</strong>| <>
-      description <>
-      ~s|<span style="display:block;margin-top:auto;padding-top:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(status)} &nbsp;→</span>| <>
-      ~s(</a>)
+    card =
+      Map.merge(ref, %{
+        kind: :timeline,
+        href: href,
+        card_style:
+          "display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none",
+        before_title_html:
+          ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>|,
+        title_style:
+          "display:block;max-width:18ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:1.14rem;font-weight:650;line-height:1.2;color:var(--paper-ink, #17332d)",
+        description_style:
+          "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
+        after_copy_html: "",
+        footer_text: status,
+        footer_style:
+          "display:block;margin-top:auto;padding-top:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;color:var(--paper-ink-soft, #55635e)"
+      })
+
+    html =
+      ~s|<a data-paper-link-card data-timeline-stop href="#{Util.escape_attr(href)}" style="#{card.card_style}">| <>
+        ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>| <>
+        ~s|<strong style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
+        description <>
+        ~s|<span style="#{card.footer_style}">#{Util.escape_html(status)} &nbsp;→</span>| <>
+        ~s(</a>)
+
+    Map.put(card, :html, html)
   end
 
-  defp paper_link_card(ref, style, _layout) do
-    href = Util.escape_attr("/papers/" <> ref.slug)
+  defp paper_link_card_presentation(ref, style, _layout) do
+    href = "/papers/" <> ref.slug
     description = paper_link_description(ref.description)
     reason = paper_link_reason(ref.reason, ref.description)
     metadata = paper_link_metadata(ref)
@@ -2814,12 +3134,30 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           "display:block;padding:14px 16px;border:1px solid #dde7e2;border-radius:8px;color:#17332d;text-decoration:none"
       end
 
-    ~s(<a data-paper-link-card href="#{href}" style="#{card_style}">) <>
-      ~s|<strong style="display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)">#{Util.escape_html(ref.title)}</strong>| <>
-      description <>
-      reason <>
-      metadata <>
-      ~s(</a>)
+    card =
+      Map.merge(ref, %{
+        kind: :default,
+        href: href,
+        card_style: card_style,
+        before_title_html: "",
+        title_style:
+          "display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)",
+        description_style:
+          "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
+        after_copy_html: reason <> metadata,
+        footer_text: nil,
+        footer_style: nil
+      })
+
+    html =
+      ~s(<a data-paper-link-card href="#{Util.escape_attr(href)}" style="#{card_style}">) <>
+        ~s|<strong style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
+        description <>
+        reason <>
+        metadata <>
+        ~s(</a>)
+
+    Map.put(card, :html, html)
   end
 
   defp paper_link_description(copy) do

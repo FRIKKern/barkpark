@@ -594,7 +594,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
            ) do
         {:ok, {raw, token}} ->
           worker_id = "codex-chat-#{session_id}"
-          api_url = BarkparkWeb.Studio.ClaudeChat.mcp_api_url()
+          api_url = Barkpark.StudioChat.Provider.Claude.mcp_api_url()
 
           %{
             status: :minted,

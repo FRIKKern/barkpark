@@ -46,12 +46,21 @@
 # narrow is the disease. Junk that survives is not hidden — it is adjudicated
 # NOT-A-DISPOSITION-ASSERTION in the committed table, in the open.
 #
-# TWO MEASURED FALSE-POSITIVE SOURCES, BOTH HANDLED IN THE OPEN:
+# THREE MEASURED FALSE-POSITIVE SOURCES, ALL HANDLED IN THE OPEN:
 #   (1) `fails CLOSED` is an ENGINEERING idiom, not a disposition. Excluded
 #       explicitly, and the exclusion COUNT AND LINE NUMBERS are printed, so the
 #       exclusion is auditable rather than silent.
 #   (2) A slug can fire the lens on its OWN NAME (`pds-w29-s3-fake-fails-closed`).
 #       Every slug is STRIPPED from the line before any token matching.
+#   (3) Eight single ENGINEERING WORDS (`export`, `router`, `five`, `satisfied`,
+#       `byte-identical`, `itself`, `guarded`, `cut`) that the charter predicates of
+#       a slug in a table cell. Section 3b, and see IDIOM_TOKENS below for the
+#       measurement that produced the list. Because IDIOM_VOCAB is mined from the
+#       corpus it measures, these RETRO-FIRE: appending prose moves the stopword
+#       frontier and turns a byte-identical old line into a new "arrival". Struck
+#       from the VOCABULARY, never from the LINE, and section 3b prints the delta
+#       by re-running the lens with the exclusion OFF — so the exclusion's own
+#       line numbers and fingerprints are MEASURED every run, not transcribed.
 #
 # HOW IT REDS. On an UNRESOLVED-CLAIM ARRIVAL — a candidate line whose
 # (slug, normalized line) fingerprint is not in the committed adjudication table
@@ -99,6 +108,14 @@
 # `--check` is a real invocation as of this commit and is byte-identical to the
 # bare default run.
 #
+# THAT CORRECTION HAS SINCE BEEN PAID, AND NOT AS WRITTEN ABOVE. `pds-door-census.sh`
+# now disposes this instrument ENVIRONMENT, not CONTENT-RED: the wave-49 adjudication
+# block cleared the last 47 arrivals and `--check` is rc=0 from a clean archive root,
+# so what remains is that the ledger side needs a bp-resolvable server and no required
+# gate can run it. The paragraph above is kept as the RECORD of what was owed, not as
+# a live instruction — a recorded correction that outlives its payment is exactly the
+# stale claim this instrument exists to find.
+#
 # USAGE
 #   bash scripts/pds-charter-ledger-sweep.sh            # the report
 #   bash scripts/pds-charter-ledger-sweep.sh --check     # the same run, NAMED
@@ -124,7 +141,7 @@ while [ $# -gt 0 ]; do
     --emit-template)  MODE="template"; shift ;;
     --residue-slugs)  MODE="residue"; shift ;;
     --selftest)       SELFTEST=1; shift ;;
-    -h|--help)        sed -n '2,106p' "$0"; exit 0 ;;   # through the USAGE block
+    -h|--help)        sed -n '2,123p' "$0"; exit 0 ;;   # through the USAGE block
     *) echo "pds-charter-ledger-sweep: UNCHECKED: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
@@ -216,10 +233,28 @@ def load_ledger():
                       % (limit, offset, r["limit"], r["offset"]))
         if not isinstance(r["documents"], list):
             unchecked("ledger page at offset %d has a non-list 'documents'" % offset)
+        # count is the terminator below, so it is scored against what actually
+        # arrived. A page whose count and documents disagree is a TRANSPORT
+        # FAILURE; read as a short page it ends the walk and hands back a
+        # SMALLER BOARD with no error.
+        if r["count"] != len(r["documents"]):
+            unchecked("ledger page at offset %d says count=%s and delivered %d documents"
+                      % (offset, r["count"], len(r["documents"])))
+        # `hasMore` is EXACT (the server reads limit+1). When it is present it
+        # decides; a short page only ends the walk when nothing contradicts it.
+        has_more = r.get("hasMore")
+        if has_more is not None and not isinstance(has_more, bool):
+            unchecked("ledger page at offset %d has a non-boolean hasMore=%r" % (offset, has_more))
+        if has_more is True and r["count"] < limit:
+            unchecked("ledger page at offset %d delivered %d of %d rows and the server "
+                      "says hasMore=true -- a TRUNCATED page is not the end of the board"
+                      % (offset, r["count"], limit))
         for doc in r["documents"]:
             status[doc["_id"]] = doc.get("lifecycle_status")
         pages.append((offset, r["count"]))
-        if r["count"] < limit:
+        if has_more is False:
+            break
+        if has_more is None and r["count"] < limit:
             break
         offset += limit
         time.sleep(0.4)
@@ -283,6 +318,45 @@ SLUG  = re.compile(r"pds-[a-z0-9][a-z0-9-]{3,}(?:\.[a-z]+)?")
 COP   = re.compile(r"\b(?:is|was|are|were|been|stays?|stayed|remains?|remained|reads?|becomes?|became)\b", re.I)
 TOKEN = re.compile(r"\*{0,2}`?([A-Za-z][A-Za-z_-]{2,})`?\*{0,2}")
 IDIOM = re.compile(r"fail(?:s|ed|ing)?[ -]closed|fail-closed", re.I)
+
+# THE SECOND IDIOM EXCLUSION, AND IT IS A TOKEN LIST BECAUSE THE EVIDENCE IS A
+# TOKEN LIST. `fails CLOSED` is a PHRASE, so it is excluded as a phrase and it
+# drops the whole line. These eight are single ENGINEERING words — the charter
+# predicates them of a slug in a table cell ("`export` is atomic", "the router
+# is five rounds") and the mined vocabulary then reads them as dispositions.
+#
+# EVERY ENTRY IS MEASURED, NOT GUESSED, AND THE MEASUREMENT IS NAMED: the wave-46
+# adjudication block (scripts/pds-charter-ledger-adjudication.md, "THE VINTAGE
+# SPLIT") took each of that wave's 71 arrivals, asked whether the identical
+# whitespace-normalised line ALREADY EXISTED at aa81a9b6e — the commit that
+# authored the then-105-row table — and found 14 that did. All 14 fired on one of
+# these eight tokens and on nothing else. They were RETROACTIVE arrivals: the
+# charter line never changed, the LENS changed under it, because IDIOM_VOCAB is
+# mined from the corpus it measures and RANK is recomputed over the whole file,
+# so appending prose moves the stopword frontier and admits vocabulary that
+# retro-fires on byte-identical old lines.
+#
+# WHAT THIS IS NOT. It is not an allowlist widened until the run goes green: the
+# run is ALREADY rc=0 with 0 arrivals before this exclusion exists, so nothing
+# here buys a green. It removes 14 adjudications that were lens repair wearing
+# an adjudication's clothes, and it removes nothing else — proven by fingerprint
+# diff at a pinned charter blob, not asserted.
+#
+# AND IT IS NARROWER THAN THE PHRASE EXCLUSION ON PURPOSE. A token here is struck
+# from the VOCABULARY, never from the LINE: a line that predicates both `export`
+# and `CLOSED` of a slug still fires on `CLOSED`. The phrase arm drops lines; this
+# arm drops words, so it cannot hide a real disposition riding the same line.
+IDIOM_TOKENS = {
+    "export",         # charter:1208, :6986, :7915, :7916 — the workspace-export verb
+    "router",         # charter:4028, :6986 — a dispatch-table column
+    "five",           # charter:4054, :4198, :4375, :10818 — a count of rounds/sites
+    "satisfied",      # charter:4511 — a criterion/ratchet predicate, not a lifecycle
+    "byte-identical", # charter:4587 — an equality claim about output
+    "itself",         # charter:8251 — a reflexive pronoun the DET list does not carry
+    "guarded",        # charter:8281 — describes the ARM, never the row
+    "cut",            # charter:11592 — dispatch scope ("CUT from this wave")
+}
+
 DET   = {"a", "an", "the", "its", "it", "this", "that", "these", "those", "his", "her",
          "their", "our", "one", "two", "three", "not", "no", "only", "still", "also",
          "what", "why", "how", "all"}
@@ -325,17 +399,26 @@ for _l in lines:
         continue
     for _s, _t in predications(_l):
         _pred[_t.lower()].add(_s)
-IDIOM_VOCAB = {t: s for t, s in _pred.items()
-               if RANK.get(t, 10 ** 9) >= STOP_RANK and not t.endswith("-") and "_" not in t}
-VOCAB = set(IDIOM_VOCAB) | set(CORE)
-VRE = re.compile(r"(?<![A-Za-z-])(" +
-                 "|".join(sorted((re.escape(t) for t in VOCAB), key=len, reverse=True)) +
-                 r")(?![A-Za-z])", re.I)
+
+def build_vocab(excluded):
+    """(idiom_vocab, vocab, vre) with `excluded` struck from the MINED half only.
+    CORE is never touched: it is the ledger's own status values, and a token
+    excluded from CORE would make the lens unable to read a real lifecycle."""
+    iv = {t: s for t, s in _pred.items()
+          if RANK.get(t, 10 ** 9) >= STOP_RANK and not t.endswith("-") and "_" not in t
+          and t not in excluded}
+    vc = set(iv) | set(CORE)
+    vre = re.compile(r"(?<![A-Za-z-])(" +
+                     "|".join(sorted((re.escape(t) for t in vc), key=len, reverse=True)) +
+                     r")(?![A-Za-z])", re.I)
+    return iv, vc, vre
+
+IDIOM_VOCAB, VOCAB, VRE = build_vocab(IDIOM_TOKENS)
 
 TERMINAL_LIVE = {"done", "cancelled"}
 LIVE_STATES   = set(CORE) | {"researching"}
 
-def candidates():
+def candidates(VOCAB, VRE):
     """Same-line claims, in three shapes: PREDICATION, TABLE row, LIFECYCLE quote."""
     out, idiom_hits = [], []
     for i, l in enumerate(lines):
@@ -375,10 +458,31 @@ def candidates():
                     "tokens": sorted({t.lower() for _, t in hits}), "text": norm})
     return out, idiom_hits
 
-CANDS, IDIOM_LINES = candidates()
+CANDS, IDIOM_LINES = candidates(VOCAB, VRE)
 CAND_LINE_IDX = {c["line"] - 1 for c in CANDS}
 
-def residue():
+# THE EXCLUSION'S OWN DELTA, MEASURED EVERY RUN, NEVER TRANSCRIBED. The lens is
+# run a SECOND time with the token exclusion OFF and the two candidate sets are
+# differenced. This is the only honest way to print the exclusion's line numbers:
+# a token reaches the candidate set down two independent paths (PREDICATION and
+# TABLE-cell), so reading the line numbers off the predication fold alone reports
+# a TRUE number attached to a FALSE story — `export` would print one line when it
+# strikes four. The second pass is pure text over the same `lines`; it costs no
+# ledger read and no network.
+_IV0, _V0, _VRE0 = build_vocab(set())
+CANDS_UNEXCLUDED, _ = candidates(_V0, _VRE0)
+_kept = {c["fp"] for c in CANDS}
+STRUCK = [c for c in CANDS_UNEXCLUDED if c["fp"] not in _kept]
+STRUCK_BY = collections.defaultdict(list)
+for _c in STRUCK:
+    for _t in _c["tokens"]:
+        if _t in IDIOM_TOKENS:
+            STRUCK_BY[_t].append(_c)
+# A named token that strikes NOTHING is an INERT entry. Printed, never dropped:
+# a hand list whose dead entries read as silence is a hand list that rots.
+INERT_TOKENS = sorted(t for t in IDIOM_TOKENS if not STRUCK_BY.get(t))
+
+def residue(VRE, CAND_LINE_IDX):
     """Lines carrying a disposition token with a slug WITHIN ±2 LINES but never on
     the same line. This is the FLOOR of what the same-line lens cannot reach —
     not a total: a claim four lines from its slug is in neither number."""
@@ -399,7 +503,7 @@ def residue():
             rslugs[s].append(i + 1)
     return rlines, rslugs
 
-RES_LINES, RES_SLUGS = residue()
+RES_LINES, RES_SLUGS = residue(VRE, CAND_LINE_IDX)
 
 if MODE == "residue":
     for s in sorted(RES_SLUGS):
@@ -466,6 +570,15 @@ for off, n in PAGES:
 pdsn = collections.Counter(v for k, v in STATUS.items() if k.startswith("pds-"))
 print("  pds- population: %d rows  %s" % (sum(pdsn.values()), dict(pdsn)))
 print("  CORE (live distinct lifecycle_status over pds-): %s" % ", ".join(CORE))
+print("  CORE IS AN ACCEPTED LIVE-DRIFT CHANNEL, RULED ON, NOT OVERLOOKED. It has moved")
+print("  5 -> 6 over an identical charter blob, so a charter that never changes can still")
+print("  change this lens. It is NOT pinned, for three reasons: (a) pinning it is the very")
+print("  transcription this instrument exists to refuse — a status the ledger newly holds")
+print("  would become a word the lens cannot read; (b) it is bounded by the lifecycle enum,")
+print("  a small closed set, not by prose anyone may append; (c) its drift is ADDITIVE and")
+print("  LOUD — a new CORE token can only ADD candidates, and an unadjudicated candidate is")
+print("  an ARRIVAL that reds and is NAMED. The idiom half had neither property, which is")
+print("  why that half is excluded above and this half is not.")
 
 rule("2. DERIVED DISPOSITION VOCABULARY — %d tokens (%d CORE + %d charter idiom)"
      % (len(VOCAB), len(CORE), len(IDIOM_VOCAB)))
@@ -494,6 +607,42 @@ for label, pat in (("done", r"(?<![A-Za-z-])done(?![A-Za-z])"),
 rule("3. `fails CLOSED` IDIOM EXCLUSION — %d slug-bearing lines excluded" % len(IDIOM_LINES))
 print("  lines: %s" % ", ".join(str(n) for n in IDIOM_LINES))
 print("  (an engineering idiom, not a disposition — the largest measured FP source)")
+
+rule("3b. ENGINEERING-IDIOM TOKEN EXCLUSION — %d of %d named tokens strike %d lines"
+     % (len(IDIOM_TOKENS) - len(INERT_TOKENS), len(IDIOM_TOKENS), len(STRUCK)))
+print("  Struck from the VOCABULARY, never from the LINE: a line carrying both an excluded")
+print("  token and a real disposition still fires on the disposition. The phrase arm above")
+print("  drops LINES; this arm drops WORDS, so it cannot hide a disposition riding along.")
+print("  DELTA MEASURED, NOT TRANSCRIBED — the lens is re-run with the exclusion OFF and")
+print("  the candidate sets differenced. %d candidates without it, %d with."
+      % (len(CANDS_UNEXCLUDED), len(CANDS)))
+for t in sorted(STRUCK_BY):
+    cs = sorted(STRUCK_BY[t], key=lambda c: c["line"])
+    print("  %-16s %d line%s: %s" % (t, len(cs), "" if len(cs) == 1 else "s",
+                                     ", ".join(str(c["line"]) for c in cs)))
+if INERT_TOKENS:
+    print("  INERT ENTRIES — named in the exclusion and striking NOTHING at this charter blob.")
+    print("  Printed rather than dropped: a hand list whose dead entries read as silence rots")
+    print("  unobserved. %s" % ", ".join(INERT_TOKENS))
+print("  EVERY STRUCK CANDIDATE, BY FINGERPRINT — so a committed adjudication that stops")
+print("  being a candidate is NAMED here, not merely counted as a stale row in section 7:")
+print("  %-13s %-6s %-46s %-13s %s" % ("fingerprint", "line", "slug", "committed", "tokens"))
+_struck_committed = 0
+for c in sorted(STRUCK, key=lambda c: c["line"]):
+    _a = adj.get(c["fp"], {}).get("asserted", "-")
+    if c["fp"] in adj:
+        _struck_committed += 1
+    print("  %-13s %-6d %-46s %-13s %s"
+          % (c["fp"], c["line"], c["slug"][:46], _a, ",".join(c["tokens"])))
+if _struck_committed:
+    print("  %d of the %d STILL CARRY A COMMITTED ADJUDICATION. Those rows, and only those,"
+          % (_struck_committed, len(STRUCK)))
+    print("  are the `stale adjudication rows` in section 7 — retire them there, or the number")
+    print("  becomes a permanent advisory that the next genuine dropped claim can hide inside.")
+else:
+    print("  None of the %d still carries a committed adjudication: every one was retired from"
+          % len(STRUCK))
+    print("  the table, which is why `stale adjudication rows` in section 7 reads 0.")
 
 rule("4. ADJUDICATION — %d candidate lines / %d slugs, ALL adjudicated" %
      (len(CANDS), len({c["slug"] for c in CANDS})))
@@ -660,7 +809,51 @@ if [ "$SELFTEST" = "1" ]; then
   fi
   echo "PROVEN: an unadjudicated same-line claim reds with rc=1, is NAMED, and moves arrivals $base_n -> $arr_n (delta 1)."
 
-  echo "=== SELFTEST OK: 3 of 3 ==="
+  # (3) THE ENGINEERING-IDIOM EXCLUSION, PROVEN BESIDE ITS OWN CONTROL. Leg 2 above
+  #     is the control and it has just run: a plant whose predicate is a REAL
+  #     disposition (`is CLOSED`) moves arrivals by exactly +1. This leg varies ONE
+  #     thing — the predicate becomes an ENGINEERING word from IDIOM_TOKENS — over
+  #     the SAME sentence shape, the SAME slug, the SAME ledger snapshot, and demands
+  #     exactly +0. Without the exclusion this leg FAILS: `guarded` is predicated of a
+  #     pds- slug elsewhere in the charter and sits above the stopword frontier, so it
+  #     is in the mined vocabulary and the plant is a candidate. That is the mutation
+  #     proof, and it lives here rather than in a report so it re-runs forever.
+  MUT3="$CACHE/charter-mutant-idiom.md"
+  cp "$CHARTER" "$MUT3" || { echo "SELFTEST UNCHECKED: cannot copy the charter" >&2; exit 2; }
+  {
+    echo ""
+    echo "- **PDS-SELFTEST — the planted engineering-idiom claim.** \`$SENTINEL\` is guarded by the arm."
+  } >> "$MUT3"
+  echo "--- same-line lens over a planted ENGINEERING-IDIOM claim (must NOT fire) ---"
+  idi_out="$(run_lens "$MUT3" "$TABLE" "report" 2>&1)"; idi_rc=$?
+  idi_n="$(arrivals_of "$idi_out")"
+  # A bare containment test over the WHOLE report is wrong here and was measured
+  # wrong: section 3b NAMES every struck candidate, so the sentinel appears in a
+  # PASSING run. The two assertions are (a) it is named there, as STRUCK — positive
+  # evidence the exclusion acted on this very line, not merely that nothing happened
+  # — and (b) it is absent from the ARRIVALS block, which is the section that reds.
+  idi_struck="$(printf '%s\n' "$idi_out" | sed -n '/^3b\./,/^4\./p')"
+  idi_arr="$(printf '%s\n' "$idi_out" | sed -n '/unresolved-claim arrivals/,/misclassified arrivals/p')"
+  case "$idi_struck" in
+    *"$SENTINEL"*) : ;;
+    *) echo "SELFTEST FAIL: section 3b does not name '$SENTINEL' as struck — the plant never"  >&2
+       echo "               reached the exclusion, so a delta of 0 proves nothing" >&2
+       exit 1 ;;
+  esac
+  case "$idi_arr" in
+    *"$SENTINEL"*)
+      echo "SELFTEST FAIL: an ENGINEERING-IDIOM predicate (\`is guarded\`) still fires the lens" >&2
+      printf '%s\n' "$idi_arr" >&2
+      exit 1 ;;
+  esac
+  if [ -z "$idi_n" ] || [ "$idi_n" != "$base_n" ]; then
+    echo "SELFTEST FAIL: the ENGINEERING-IDIOM plant moved arrivals $base_n -> '$idi_n' (delta must be 0, rc=$idi_rc)" >&2
+    exit 1
+  fi
+  echo "PROVEN: \`is guarded\` moves arrivals $base_n -> $idi_n (delta 0) while \`is CLOSED\`, the"
+  echo "        same sentence with a real disposition, moved $base_n -> $arr_n (delta 1)."
+
+  echo "=== SELFTEST OK: 4 of 4 ==="
   exit 0
 fi
 

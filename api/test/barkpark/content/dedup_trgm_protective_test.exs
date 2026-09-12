@@ -1,9 +1,27 @@
 defmodule Barkpark.Content.DedupTrgmProtectiveTest do
   @moduledoc """
-  Protective proof for `DedupWall` candidate fetch (authoring-excellence D46).
+  Protective proof for the trgm PREDICATE FORM (authoring-excellence D46).
+
+  ## HISTORICAL SCOPE NOTE (2026-09-10) — read before trusting the name below
+
+  `DedupWall` no longer takes this path. Its candidate scan now orders by the
+  KNN distance `title <-> $1` over `documents_title_trgm_gist_idx`, because a
+  `%` net plus `ORDER BY similarity()` bounded the RESULT and never the SORT
+  INPUT (task `pds-bl-dedup-wall-scan-budget-blows-at-corpus-scale`). What this
+  file still proves is the general, and still true, PREDICATE fact: the `%`
+  operator is index-eligible and `similarity(?, ?) > x` is index-OPAQUE. That
+  keeps guarding every other `%` caller (`tag_registry`, the retrievers). It is
+  NOT a statement about the dedup wall's plan any more — for that, see
+  `dedup_wall_scan_bound_test.exs`.
+
+  Consequently the plan assertion below matches ANY trgm index by name pattern:
+  with `enable_seqscan = off` on a small corpus the planner may pick either the
+  GIN `documents_title_trgm_idx` or the GiST `documents_title_trgm_gist_idx`
+  for `%` — both are trgm indexes, and INDEX-ELIGIBILITY is the claim, not which
+  index wins a cost tie.
 
   The fetch's coarse trgm pre-filter was rewritten from `similarity(?, ?) > x`
-  to the `?  % ?` operator so it can ENGAGE the GIN `documents_title_trgm_idx`
+  to the `?  % ?` operator so it can ENGAGE a GIN/GiST trgm index on `title`
   before any type holds thousands of published docs. Two guarantees are pinned:
 
     * PLAN — on the ISOLATED barest `title % ?` arm the planner rides
@@ -28,6 +46,7 @@ defmodule Barkpark.Content.DedupTrgmProtectiveTest do
   value is making the index REACHABLE (correctness/preparedness). The 15
   behavioral tests in `dedup_wall_test.exs` stay green under the same rewrite.
   """
+  # sync: runs `ANALYZE documents` in setup — a ShareUpdateExclusiveLock on the shared `documents` table; deadlocked (40P01) against a concurrent AccessExclusiveLock under `--max-cases 16`
   use Barkpark.DataCase, async: false
 
   import Ecto.Query, only: [from: 2]
@@ -97,7 +116,7 @@ defmodule Barkpark.Content.DedupTrgmProtectiveTest do
     )
   end
 
-  test "the `%` arm rides documents_title_trgm_idx; the old similarity() arm seq-scans" do
+  test "the `%` arm rides a title trgm index; the old similarity() arm seq-scans" do
     # Force the planner to reveal index ELIGIBILITY. At sandbox scale the GIN
     # trgm start-up cost makes a seq-scan cheaper, so the DEFAULT plan seq-scans
     # both arms (the win is scale-gated). With seqscan penalized the difference
@@ -107,14 +126,14 @@ defmodule Barkpark.Content.DedupTrgmProtectiveTest do
     new_plan = Repo.explain(:all, new_arm())
     old_plan = Repo.explain(:all, old_arm())
 
-    assert new_plan =~ "documents_title_trgm_idx",
-           "expected the `%` predicate to engage the GIN trgm index, got:\n#{new_plan}"
+    assert new_plan =~ ~r/documents_title_trgm(_gist)?_idx/,
+           "expected the `%` predicate to engage a title trgm index, got:\n#{new_plan}"
 
     assert new_plan =~ ~r/Bitmap Index Scan|Index Scan/,
            "expected an (Bitmap) Index Scan for the `%` arm, got:\n#{new_plan}"
 
-    refute old_plan =~ "documents_title_trgm_idx",
-           "the old `similarity() > x` arm must NOT reach the trgm index, got:\n#{old_plan}"
+    refute old_plan =~ ~r/documents_title_trgm(_gist)?_idx/,
+           "the old `similarity() > x` arm must NOT reach any trgm index, got:\n#{old_plan}"
 
     assert old_plan =~ "Seq Scan",
            "expected the old `similarity() > x` arm to Seq-Scan, got:\n#{old_plan}"

@@ -51,13 +51,18 @@ set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REAL_ROOT="$(cd -- "$HERE/.." && pwd)"
 
-# The four aggregators, as `<workflow-file>:<job-key>`. The gate NAME and the
+# The gate aggregators, as `<workflow-file>:<job-key>`. The gate NAME and the
 # expected sentence are derived from the YAML, not from this list; this list
-# only says WHICH files must carry the shape.
+# only says WHICH files must carry the shape. ci.yml joined on 2026-09-11
+# (pds-bl-w48-web-gate-cannot-block-and-greens-vacuously): it gained the shim
+# when its `pull_request` paths filter was deleted, and `Web gate` is the name
+# proposed for registration, so it must carry the disclosure from day one
+# rather than after the fact.
 GATES='elixir.yml:elixir-gate
 cloud.yml:cloud-gate
 console-harness.yml:console-gate
-security.yml:security-gate'
+security.yml:security-gate
+ci.yml:web-gate'
 
 pass=0
 fail=0
@@ -196,6 +201,12 @@ emit("notice_after_exit", ei != -1 and ni != -1 and ni > ei)
 # was computed from was actually read: a parser that stopped matching would
 # report a serene "0" forever.
 emit("decide_consumes_count", len(re.findall(r'^\s*decide\s+"', run, re.M)))
+# …against the SIZE OF THE NEEDS SET, which is what the count must equal. A
+# bare constant floor could only catch a neutered reader; equality also catches
+# an upstream sitting in `needs` that nothing judges — the `blocking_not_in_needs`
+# defect from scripts/security-gate-shape.test.sh, read from the other side.
+needs = agg.get("needs") or []
+emit("needs_count", len(needs) if isinstance(needs, list) else 1)
 out.close()
 PY
 
@@ -259,14 +270,19 @@ for spec in $GATES; do
     no "$file: the notice is not guarded by 'if [ \"\$dispatched\" -eq 0 ]'"
   [ "$(fact notice_after_exit)" = "True" ] && ok "$file: notice sits after the fail-closed exit" ||
     no "$file: the notice can be reached on a RED run"
-  # Populated-parser floor: 0 here means the reader stopped matching, not that
-  # the workflow got simpler.
+  # Populated-parser floor AND the coverage equality. 0 means the reader stopped
+  # matching; anything less than the needs set means an upstream nothing judges.
+  # DERIVED from the YAML, never a constant: a constant of 4 would have barred
+  # an honest three-upstream aggregator while saying nothing about a seven-job
+  # one that judges six.
   case "$(fact decide_consumes_count)" in
     '' | *[!0-9]*) no "$file: decide_consumes_count = '$(fact decide_consumes_count)' — the emitter is broken" ;;
-    *) if [ "$(fact decide_consumes_count)" -ge 4 ]; then
-         ok "$file: decide calls read = $(fact decide_consumes_count) (>= 4)"
+    *) if [ "$(fact decide_consumes_count)" -lt 3 ]; then
+         no "$file: decide calls read = $(fact decide_consumes_count), under the parser floor of 3 — the reader is neutered, not the workflow clean"
+       elif [ "$(fact decide_consumes_count)" = "$(fact needs_count)" ]; then
+         ok "$file: decide calls read = $(fact decide_consumes_count), one per job in needs ($(fact needs_count))"
        else
-         no "$file: decide calls read = $(fact decide_consumes_count), wanted >= 4 — the reader is neutered, not the workflow clean"
+         no "$file: decide calls read = $(fact decide_consumes_count) but needs holds $(fact needs_count) job(s) — every upstream in needs must be judged, or the aggregator greens while one of them reds"
        fi ;;
   esac
 done
@@ -491,12 +507,50 @@ run_gate "Elixir gate: RED — no reassuring notice on a failure" "$elixir_step"
 
 cloud_step="$TMPROOT/step-cloud.sh"
 python3 "$EXTRACT" "$REAL_ROOT/.github/workflows/cloud.yml" cloud-gate "$cloud_step"
-run_gate "Cloud gate: api-only, nothing dispatched" "$cloud_step" yes 0 \
-  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_ESCAPE=success O_CLOUD=false
+# ── THE CENSUS TIER (dr-w26-followup-reader-corpus-dispatch) ──────────────
+# cloud.yml's aggregator reads TWO dispatcher outputs and FOUR upstream
+# results. Its Decide body runs under `set -euo pipefail`, and it deliberately
+# gives O_CENSUS no default — 'false' is the one value that would license a
+# silent skip, so the step must see the real one or abort. Leaving it unset
+# here is therefore the HARNESS's defect (`O_CENSUS: unbound variable`), never
+# the workflow's: every cloud case below sets BOTH outputs and BOTH gated
+# results, consistent with the derived `census_gate` in cloud.yml.
+#   docs-only          O_CLOUD=false O_CENSUS=false  R_CENSUS=skipped
+#   api/web/js-only    O_CLOUD=false O_CENSUS=true   R_CENSUS=success
+#                      (the census runs ALONE — that is the whole tier)
+#   cloud/** touched   O_CLOUD=true  O_CENSUS=<any>  R_CENSUS=skipped
+#                      (the `test` job already ran that file inside mix test)
+run_gate "Cloud gate: docs-only, nothing dispatched" "$cloud_step" yes 0 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=false O_CENSUS=false
+# PARTIAL dispatch is not "nothing ran". An api-only diff runs the census and
+# only the census, so the reassuring "NOTHING CLOUD RAN" notice must NOT fire —
+# something WAS measured on this head.
+run_gate "Cloud gate: api-only, the census ran and nothing else" "$cloud_step" no 0 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=success R_ESCAPE=success \
+  O_CLOUD=false O_CENSUS=true
 run_gate "Cloud gate: cloud/** touched, mix test really ran" "$cloud_step" no 0 \
-  R_CHANGES=success R_COMPILE=success R_TEST=success R_ESCAPE=success O_CLOUD=true
+  R_CHANGES=success R_COMPILE=success R_TEST=success R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=true O_CENSUS=true
 run_gate "Cloud gate: RED — no reassuring notice on a failure" "$cloud_step" no 1 \
-  R_CHANGES=success R_COMPILE=success R_TEST=failure R_ESCAPE=success O_CLOUD=true
+  R_CHANGES=success R_COMPILE=success R_TEST=failure R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=true O_CENSUS=true
+# ── the two census REDS ───────────────────────────────────────────────────
+# Without these the census tier could be deleted, or its skip quietly
+# allow-listed, and this ratchet would stay at N passed / 0 failed.
+# (a) THE SKIP THAT MUST NOT BE ACCEPTED: the dispatcher selected a reader tree
+#     (census=true) and the cloud suite did NOT run (cloud=false), so NOTHING
+#     measured the reader corpus on this head. `census_gate` derives to 'true'
+#     and `decide` reds the skip exactly as it does for compile/test. If this
+#     case ever passes, a stale census is greening a required context.
+run_gate "Cloud gate: RED — census skipped while census=true and cloud=false" "$cloud_step" no 1 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=false O_CENSUS=true
+# (b) …and a census FAILURE reds the gate, on the api-only path where it is the
+#     only substantive job that ran.
+run_gate "Cloud gate: RED — the census failed" "$cloud_step" no 1 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=failure R_ESCAPE=success \
+  O_CLOUD=false O_CENSUS=true
 
 console_step="$TMPROOT/step-console.sh"
 python3 "$EXTRACT" "$REAL_ROOT/.github/workflows/console-harness.yml" console-gate "$console_step"
@@ -545,8 +599,9 @@ else
   ok "Elixir gate …the skip list is expanded, not literal"
 fi
 
-run_gate "Cloud gate: api-only" "$cloud_step" yes 0 \
-  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_ESCAPE=success O_CLOUD=false
+run_gate "Cloud gate: docs-only" "$cloud_step" yes 0 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=false O_CENSUS=false
 body_says "Cloud gate" - "NOTHING CLOUD RAN"
 run_gate "Console gate: api-only" "$console_step" yes 0 \
   R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped \
@@ -651,9 +706,16 @@ red_names "Elixir gate: mix-prod-compile failed" "$elixir_step" "mix-prod-compil
   O_COMPILE=true O_TEST=true
 
 red_names "Cloud gate: test failed" "$cloud_step" "test" "compile" \
-  R_CHANGES=success R_COMPILE=success R_TEST=failure R_ESCAPE=success O_CLOUD=true
+  R_CHANGES=success R_COMPILE=success R_TEST=failure R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=true O_CENSUS=true
 red_names "Cloud gate: compile failed" "$cloud_step" "compile" "test" \
-  R_CHANGES=success R_COMPILE=failure R_TEST=success R_ESCAPE=success O_CLOUD=true
+  R_CHANGES=success R_COMPILE=failure R_TEST=success R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=true O_CENSUS=true
+# …and the census is named the same way, on the api-only path where compile and
+# test are LEGITIMATELY skipped and must therefore NOT appear in the set.
+red_names "Cloud gate: census failed" "$cloud_step" "census (reader corpus)" "compile" \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=failure R_ESCAPE=success \
+  O_CLOUD=false O_CENSUS=true
 
 red_names "Console gate: cssom-parity failed" "$console_step" "cssom-parity" "tier-floor-render" \
   R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success \
@@ -672,11 +734,24 @@ red_names "Security gate: sobelow-inline-overlap failed" "$security_step" "sobel
 # the annotation used to describe as "at least one upstream job" and nothing
 # more.
 red_names "Cloud gate: test skipped against a true gate" "$cloud_step" "test" "compile" \
-  R_CHANGES=success R_COMPILE=success R_TEST=skipped R_ESCAPE=success O_CLOUD=true
+  R_CHANGES=success R_COMPILE=success R_TEST=skipped R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=true O_CENSUS=true
 red_names "Cloud gate: test result EMPTY (not in the needs set)" "$cloud_step" "test" "compile" \
-  R_CHANGES=success R_COMPILE=success R_TEST= R_ESCAPE=success O_CLOUD=true
+  R_CHANGES=success R_COMPILE=success R_TEST= R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=true O_CENSUS=true
 red_names "Cloud gate: unrecognised result" "$cloud_step" "test" "compile" \
-  R_CHANGES=success R_COMPILE=success R_TEST=neither R_ESCAPE=success O_CLOUD=true
+  R_CHANGES=success R_COMPILE=success R_TEST=neither R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=true O_CENSUS=true
+# The census's own skip-against-a-live-gate red, named. Nothing measured the
+# reader corpus here and the annotation must say so by name.
+red_names "Cloud gate: census skipped against a true gate" "$cloud_step" "census (reader corpus)" "compile" \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=false O_CENSUS=true
+# …and an EMPTY dispatcher output may not license the skip either: `census_gate`
+# falls through UNCHANGED (never defaulted to 'false'), so the skip reds.
+red_names "Cloud gate: census skipped against an EMPTY dispatcher output" "$cloud_step" "census (reader corpus)" "compile" \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=skipped R_ESCAPE=success \
+  O_CLOUD=false O_CENSUS=
 echo
 
 # ── case 7b: the corrections the named set may not run over ────────────────

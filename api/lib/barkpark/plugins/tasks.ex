@@ -245,14 +245,23 @@ defmodule Barkpark.Plugins.Tasks do
   defp eval_criteria(:absent, prev), do: warn_if_create_zero(prev)
   defp eval_criteria([], prev), do: warn_if_create_zero(prev)
 
+  # ONE PREDICATE, BOTH DOORS (cdd-criteria-shape-gate). This clause used to
+  # carry its own `Enum.all?(list, &is_map/1)` under a message promising a
+  # `{criterion, met, evidence}` contract it did not check — and
+  # `Tasks.Validation` carried the identical blind spot on the document-write
+  # path. Two doors, one hole, which is how `%{"text" => "..."}` got into
+  # production six times. The rule now lives in ONE place
+  # (`Barkpark.Tasks.Validation.criteria_violation/1`) and both doors call it,
+  # so the two cannot drift: well-tested duplicate predicates still disagree
+  # eventually, and nothing goes red when they do.
   defp eval_criteria(list, _prev) when is_list(list) do
-    if Enum.all?(list, &is_map/1) do
-      warn_unflagged_merge_gates(list)
-      :ok
-    else
-      {:halt,
-       "acceptance_criteria entries must be {criterion, met, evidence} maps — " <>
-         "got a non-object entry"}
+    case Barkpark.Tasks.Validation.criteria_violation(list) do
+      nil ->
+        warn_unflagged_merge_gates(list)
+        :ok
+
+      message ->
+        {:halt, "acceptance_criteria: " <> message}
     end
   end
 
@@ -542,6 +551,12 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
       {:post, "/tasks/:doc_id/landed", BarkparkWeb.TasksController, :landed, auth: :token_root},
+      # THE BACK-LINK MARK (task-29781d0921e5a885): :doc_id is the PRIMARY row
+      # the PR's one `Task:` trailer credited; the body's `Discharges:` lines
+      # name the SIBLING rows the same merge may also have satisfied, and each
+      # gets a readable mark that CANNOT set met. See Tasks.Discharge.
+      {:post, "/tasks/:doc_id/discharges", BarkparkWeb.TasksController, :discharges,
+       auth: :token_root},
       # The NON-HOLDER lease extension: CI buys grace for a row its open PR
       # names, without holding (or disturbing) the claim. See Tasks.Renew.
       {:post, "/tasks/:doc_id/renew", BarkparkWeb.TasksController, :renew, auth: :token_root},
@@ -625,7 +640,9 @@ defmodule Barkpark.Plugins.Tasks do
     * `ready` — `GET /v1/tasks/ready` (paginated). READ, table.
     * `events` — `GET /v1/tasks/events?since=<id>` (keyset replay over
       `mutation_events`, id-ASC; the response carries the next `cursor` +
-      `has_more`). READ, json.
+      `has_more`). Takes an OPTIONAL positional `<doc_id>` that rides as
+      `?doc_id=` and narrows the replay to ONE task's history — the per-row
+      audit view. READ, json.
     * `get` — `GET /v1/tasks/:doc_id`. READ, table.
     * `claim` — `POST /v1/tasks/:doc_id/claim`. WRITES, minimal receipt.
     * `close` — `POST /v1/tasks/:doc_id/close`. WRITES, minimal receipt.
@@ -700,6 +717,35 @@ defmodule Barkpark.Plugins.Tasks do
               "Keyset page cursor over (updated_at, id) — pass empty for page 1, " <>
                 "then echo page.next_cursor. Walks past the 1000-row limit cap, " <>
                 "so a missing task means closed/absent, not rotated out. Not with offset."
+          },
+          # gr-bl-close-time-audit-vacuous-green. THE PARENT-SCOPED LISTING,
+          # DECLARED. The route has honoured a flat `?parent=` (and its
+          # `parent_id` alias) since task-233cb8a1d033c738 — but the CLI
+          # declared only limit/offset/cursor, so `bp task ls --parent <epic>`
+          # answered `unknown flag --parent for task ls` and the ONLY
+          # discoverable parent-scoped read was `bp task get <epic>`, whose
+          # `children[]` rail carried no close-time field at all. An operator
+          # asking "which children closed in this window?" therefore ran the
+          # discoverable command and got a silent zero.
+          #
+          # Nothing in Go changes: `applyQuery` forwards one query key per
+          # DECLARED string flag, so declaring it here IS the wiring, and the
+          # rows come back through the index renderer that already carries
+          # `updated_at` on both the full and the brief card. That is the whole
+          # point of naming it — the answerable route is now the one the help
+          # text shows, and `--view=brief` makes it {doc_id, title, priority,
+          # assignee, parent_id, updated_at} per row.
+          %{
+            name: "parent",
+            type: "string",
+            summary:
+              "Narrow the page to the DIRECT children of this parent task id " <>
+                "(`parent_id` is an accepted alias server-side). This is the " <>
+                "parent-scoped read that carries updated_at per row — the " <>
+                "close-time field a \"which children closed between T1 and T2\" " <>
+                "audit needs. `bp task get <parent>` renders the same rail but " <>
+                "its child summaries are a lighter card; use this verb when you " <>
+                "are querying by time rather than reading one task."
           }
         ],
         writes: false,
@@ -824,7 +870,21 @@ defmodule Barkpark.Plugins.Tasks do
           "Replay task events since a cursor — a keyset stream over mutation_events, id-ASC. Pass --since <id> (the last event id you saw); the response carries the next `cursor` + `has_more`. The one poll feed every surface reads; omit --since to replay from the start.",
         http: %{method: "GET", path_template: "/v1/tasks/events"},
         auth_tier: "read",
-        args: [],
+        # OPTIONAL positional (tlv-bl-events-actor-attribution). The template
+        # has no `:doc_id` placeholder, so the CLI's arg binder routes it to the
+        # query string on this read — `bp task events <id>` IS
+        # `GET /v1/tasks/events?doc_id=<id>`. Before it, the command declared
+        # ZERO args and any positional was refused ("too many arguments for
+        # task events"), so a per-row audit had to replay the whole backlog.
+        args: [
+          %{
+            name: "doc_id",
+            required: false,
+            type: "string",
+            summary:
+              "Narrow the replay to ONE task's events, oldest-first. Optional — omit for the global feed. This is the per-row audit view: `bp task events <id> --payload` answers 'who claimed and closed this row, on which epoch, when' from `payload.actor` without reading the (mutable) live claim map off the document. Composes with --since, so `--since <cursor> <id>` is a per-row tail."
+          }
+        ],
         flags: [
           %{
             name: "since",
@@ -848,7 +908,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "payload",
             type: "bool",
             summary:
-              "Carry each event's typed payload under `payload`. THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got."
+              "Carry each event's typed payload under `payload`. THE ATTRIBUTION CHANNEL: a `task.claimed` / `task.closed` event's `payload.actor` is `{worker, epoch}` — the identity the CAS fenced on — so close provenance is reconstructable from the feed alone (`task.closed` also carries `payload.closed_by`). THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got."
           }
         ],
         writes: false,
@@ -909,6 +969,25 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary:
               "The rail_rev (rail ETag) you last observed for this task's parent rail. When it differs from the current rail_rev the response carries a rail_changed notice — advisory, never a gate."
+          },
+          %{
+            name: "set",
+            type: "string",
+            repeatable: true,
+            summary:
+              "Extra claim-body fields as key=value (key:=json for typed). THE CRITERIA GATE " <>
+                "(task-9554c64bf51a0f81): a claim of a kind:task row stating ZERO acceptance " <>
+                "criteria is REFUSED — criteria_unstated — because a row with none can only ever " <>
+                "be attested by artifact, and criteria written after the work describe it instead " <>
+                "of shaping it. Containers (a decision/goal label, a non-task kind, a row WITH " <>
+                "children) are EXEMPT by name, so label a container rather than overriding it. The " <>
+                "way through is --set criteria_unstated_override=\"<why this row needs none>\", " <>
+                "which lands on the record: the trimmed reason is STORED as " <>
+                "claim.criteria_unstated_override on the claimed row and survives pulse and " <>
+                "close, while a claim that did not need the override carries no such key. A " <>
+                "blank or whitespace-only reason is NOT an override. " <>
+                "This is the flag the refusal's own remedy line names, so that remedy is runnable " <>
+                "as printed."
           }
         ],
         writes: true,
@@ -1089,7 +1168,7 @@ defmodule Barkpark.Plugins.Tasks do
           "Record that this task's work LANDED — a commit, a PR number, a sentence — WITHOUT holding its claim. " <>
             "This is the verb CI can actually call: there is no worker_id and no observed_epoch, because a " <>
             "push-to-main workflow holds neither, which is exactly why `bp task stamp` refuses it (409 not_holder) " <>
-            "and why `bp task close` is not CI's to call. --commit/--pr/--note are UNIONED into content.landed, so " <>
+            "and why `bp task close` is not CI's to call. --commit/--pr/--note/--files are UNIONED into content.landed, so " <>
             "a second landing accumulates a second commit instead of replacing the first, and a close's own land " <>
             "digest is never clobbered (one merge rule, shared with close). " <>
             "--criterion N (ZERO-BASED — the first criterion is 0) additionally flips ONE acceptance criterion to " <>
@@ -1130,6 +1209,13 @@ defmodule Barkpark.Plugins.Tasks do
               "The landing sentence. Unioned into content.landed.notes, and REQUIRED with --criterion because it is the evidence written onto that criterion."
           },
           %{
+            name: "files",
+            type: "string",
+            repeatable: true,
+            summary:
+              "ONE changed path per occurrence — `--files api/lib/x.ex --files api/test/x_test.exs` — stored at content.landed.files as a LIST, which is the half a landing could not carry until this flag existed: the sha said a merge happened and only the --note PROSE said what it touched, and prose is not queryable. Rides the request BODY as a JSON array (never the query string), so one path and forty arrive in the same shape and a 40-path manifest never reaches the request-line wall. Up to 40 paths are kept verbatim; past that the server stores the count plus the sorted top-level dirs under `file_digests` instead. It is ALSO the overlap guard's only input: with files present the server refuses (409 landing_files_outside_row) a landing whose every path misses every path the row's own text names — a merge sealing work that was not this row's work. Omit it and that check is unmeasurable, and the response says so rather than letting silence read as a pass."
+          },
+          %{
             name: "criterion",
             type: "int",
             summary:
@@ -1148,7 +1234,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "stamp",
         summary:
-          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated; a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done.",
+          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES the criterion's exact stored wording, and it must ride a FILE: --criterion-text-file <path> (or `-` for stdin) reads the bytes without a shell ever touching them. Do NOT retype it inline as --criterion-text \"…\" — criterion wording is MARKDOWN, and a backticked code span inside a double-quoted shell argument is COMMAND SUBSTITUTION, so bash/zsh EXECUTE it and bp is handed text that is not the stored wording. The index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated \"<why this stamp is yours to make>\" (the override takes a REASON, and a bare --merge-gated is refused; the reason lands at content.merge_gate_autostamp.stamp_overrides[].reason); a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text-file) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stamp"},
         auth_tier: "write",
         args: [
@@ -1183,7 +1269,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "criterion-text",
             type: "string",
             summary:
-              "REQUIRED with --met (optional with --miss): the criterion's exact stored wording, copied verbatim from acceptance_criteria[N].criterion. It is the off-by-one guard — a --met stamp with NO text is REJECTED (409 criterion_text_required), and one whose text does not match the row at --criterion N is REJECTED (409 criteria_mismatch), instead of silently flipping a neighbour."
+              "REQUIRED with --met (optional with --miss): the criterion's exact stored wording, copied verbatim from acceptance_criteria[N].criterion. Do not retype it as an inline shell argument — bp reads it from a FILE with --criterion-text-file <path> (or `-` for stdin), because criterion wording is MARKDOWN and a backticked code span inside a double-quoted shell argument is COMMAND SUBSTITUTION. It is the off-by-one guard — a --met stamp with NO text is REJECTED (409 criterion_text_required), and one whose text does not match the row at --criterion N is REJECTED (409 criteria_mismatch), instead of silently flipping a neighbour."
           },
           %{
             name: "met",
@@ -1212,7 +1298,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "withdraw",
             type: "bool",
             summary:
-              "WITHDRAW a met criterion that review refuted: met goes to FALSE (criteria_progress drops), the original evidence is LEFT IN PLACE, and a {note,ts,worker,superseded_evidence} record is appended to the criterion's withdrawals list — so the board stops lying without the proof being erased. Requires --note (why) and --criterion-text (the same off-by-one guard --met carries: lowering the wrong neighbour is as much a lie as raising it). Unlike --met/--miss this is allowed on a SEALED row (done/cancelled/released), because a review that refutes a proof normally lands after the close — on an in_progress row it is holder-only + epoch-fenced as usual, and on any other row it requires --observed-rev. Refused with 409 criterion_not_met if the criterion is already met=false."
+              "WITHDRAW a met criterion that review refuted: met goes to FALSE (criteria_progress drops), the original evidence is LEFT IN PLACE, and a {note,ts,worker,superseded_evidence} record is appended to the criterion's withdrawals list — so the board stops lying without the proof being erased. Requires --note (why) and the criterion's stored wording via --criterion-text-file <path> (or `-` for stdin, so no shell evaluates a backticked code span in it) — the same off-by-one guard --met carries: lowering the wrong neighbour is as much a lie as raising it. Unlike --met/--miss this is allowed on a SEALED row (done/cancelled/released), because a review that refutes a proof normally lands after the close — on an in_progress row it is holder-only + epoch-fenced as usual, and on any other row it requires --observed-rev. Refused with 409 criterion_not_met if the criterion is already met=false."
           },
           %{
             name: "observed-rev",
@@ -1222,9 +1308,9 @@ defmodule Barkpark.Plugins.Tasks do
           },
           %{
             name: "merge-gated",
-            type: "bool",
+            type: "string",
             summary:
-              "LEAD ONLY — the override that lets a --met flip a MERGE GATE (a criterion the lead closes when the PR merges). Builders must NOT pass it: without it such a stamp is refused (409 merge_gated_criterion), which is the point — flipping a gate before the PR exists fabricates a done. A criterion counts as a gate if it carries \"merge_gate\": true, or (when it carries no explicit \"merge_gate\" key) if its wording mentions MERGE-GATED / MERGE GATE. That prose fallback is deliberately wide and mis-fires on ~3.5% of marker-bearing rows that merely DISCUSS merge-gating; the fix for those is to set \"merge_gate\": false on the criterion, not to reach for this flag."
+              "TAKES A REASON, NOT A BARE FLAG: --merge-gated \"<why this stamp is the lead's to make, e.g. PR #17107 merged to main as 2ee884f75>\". A bare --merge-gated is refused (bp: merge_gated_reason_required; a direct POST of merge-gated=true: 400 with the same ruling) — while it was a boolean the override cost one word and recorded nothing, so a reflex override and a deliberate one were byte-identical on the record. The reason is PERSISTED on the same write as the flip, at content.merge_gate_autostamp.stamp_overrides[].reason, beside the asserted_worker and the ts — the shape close_override.* already uses. LEAD-OWNED, ON YOUR HONOUR — the server does NOT check that you are a lead, and CANNOT: it authenticates your api_token, not the worker_id you typed. Passing this flag is an ASSERTION, not a permission, and it is RECORDED as one — a record is appended to content.merge_gate_autostamp.stamp_overrides carrying \"verified\": false, your asserted_worker, and the authenticated_token_id the server actually authenticated. The override lets a --met flip a MERGE GATE (a criterion the lead closes when the PR merges). Without it such a stamp is refused (409 merge_gated_criterion), which is the point — flipping a gate before the PR exists fabricates a done. A criterion counts as a gate if it carries \"merge_gate\": true, or (when it carries no explicit \"merge_gate\" key) if its wording mentions MERGE-GATED / MERGE GATE. That prose fallback is deliberately wide and mis-fires on ~3.5% of marker-bearing rows that merely DISCUSS merge-gating; the fix for those is to set \"merge_gate\": false on the criterion, not to reach for this flag."
           }
         ],
         writes: true,
@@ -1281,7 +1367,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "move",
         summary:
-          "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. Emits a task.reparented event; the response carries the destination rail_rev + the source from_rail_rev.",
+          "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. The response carries the destination rail_rev + the source from_rail_rev. EVENT SEMANTICS: a task.reparented event is emitted ONLY when the parent actually CHANGES. A same-parent call is an idempotent no-op — the server returns the row unchanged, writes nothing, and emits NO event and NO broadcast (Barkpark.Tasks.Move: the `same_parent?` arm returns `{:noop, doc}` and never reaches the mutation-event/broadcast path that do_move/4 owns). Do NOT build de-duplication or audit logic around phantom no-op events; they have never existed. The no-op is NOT free, though: BarkparkWeb.Plugs.RateLimit runs as pipeline middleware BEFORE the controller and bills purely by HTTP method class, so a same-parent move still CONSUMES one write-bucket slot.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/move"},
         auth_tier: "write",
         args: [
@@ -1456,6 +1542,59 @@ defmodule Barkpark.Plugins.Tasks do
             name: "reason",
             type: "string",
             summary: "Free-text label stored on the record; defaults to open_pr."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.discharges",
+        noun: "task",
+        verb: "discharges",
+        summary:
+          "Post a merged PR's `Discharges:` citations so every SIBLING row the merge also satisfied learns about it. " <>
+            "doc_id is the PRIMARY row — the one the PR's single `Task:` trailer credited; --body is the PR body, " <>
+            "and the server parses every column-0 `Discharges: <doc_id> [c<N>]` line out of it (the grammar lives " <>
+            "server-side in Barkpark.Tasks.Citations, so there is exactly ONE implementation and no client can " <>
+            "drift from it). Each cited row gets a readable discharge_marks note beside the criterion it names, " <>
+            "carrying --pr, --commit and the primary row id. NON-HOLDER, like `landed` and `renew`: a push-to-main " <>
+            "workflow holds no claim, so there is no worker_id and no observed_epoch. It NEVER sets met=true and " <>
+            "never touches lifecycle, the claim or evidence — a back-link may ROUTE a reader, never close a row; " <>
+            "only the row's holder decides. A citation naming the primary row itself is skipped (status self), and " <>
+            "an unknown id is reported (status not_found) rather than failing the call, because one bad line in a " <>
+            "PR body must not swallow the good ones. CI calls this from scripts/landed-mark.sh after a merge; " <>
+            "an operator calls it by hand to repair a merge whose citations were never posted.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/discharges"},
+        auth_tier: "write",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary:
+              "The PRIMARY task document id — the row the PR's one `Task:` trailer credited. Cited rows come from --body, never from here."
+          }
+        ],
+        flags: [
+          %{
+            name: "body",
+            type: "string",
+            summary:
+              "The pull request body. Every column-0 `Discharges: <doc_id> [c<N>]` line in it is a citation; c<N> is the ZERO-BASED criterion index, and omitting it marks the row rather than one criterion. A body with no such line cites nothing and is not an error."
+          },
+          %{
+            name: "pr",
+            type: "string",
+            summary: "The pull request number recorded in every mark this call writes."
+          },
+          %{
+            name: "commit",
+            type: "string",
+            summary: "The merge sha recorded in every mark this call writes."
           }
         ],
         writes: true,

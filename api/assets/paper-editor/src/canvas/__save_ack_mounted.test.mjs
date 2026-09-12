@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { closeHistory, undoDepth } from "@tiptap/pm/history";
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   pretendToBeVisual: true,
@@ -50,7 +51,9 @@ Object.defineProperty(window, "navigation", {
   },
 });
 
-const { BpPaperCanvas, DEBOUNCE_MS } = await import("./index.js");
+const { BpPaperCanvas } = await import("./index.js");
+const { DEBOUNCE_MS } = await import("../contract.js");
+const { slashTypeToNode } = await import("./slash-insert.js");
 assert.equal(customElements.get("bp-paper-canvas"), BpPaperCanvas);
 
 const hooksSource = readFileSync(
@@ -111,9 +114,14 @@ const hooks = window.BarkparkPaperEditorHooks;
 const paragraph = (id, value) => ({id, type: "paragraph", content: [{type: "text", value}]});
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
-async function mount() {
+async function mount({ revision, blocks = [paragraph("original", "Original")] } = {}) {
   const main = document.createElement("main");
-  main.innerHTML = `<button data-editing="true">View</button>
+  main.className = "bp-paper-editor";
+  if (revision != null) {
+    main.dataset.paperDocKey = "paper-overlap-probe";
+    main.dataset.paperRev = String(revision);
+  }
+  main.innerHTML = `<button id="paper-edit-toggle" data-editing="true">View</button>
     <a href="/studio/papers/b" data-phx-link="patch">Paper B</a>
     <button type="button" phx-click="paper-delete-block">Delete</button>
     <button type="button" phx-click="paper-move-block">Move</button>
@@ -123,7 +131,11 @@ async function mount() {
     <form phx-submit="paper-add-block"><select name="block-type"><option>paragraph</option></select></form>
     <div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas"><bp-paper-canvas></bp-paper-canvas></div>`;
   const wrapper = main.querySelector("[phx-hook]");
-  wrapper.dataset.canvasBlocks = JSON.stringify([paragraph("original", "Original")]);
+  if (revision != null) {
+    wrapper.dataset.paperDocKey = main.dataset.paperDocKey;
+    wrapper.dataset.paperRev = String(revision);
+  }
+  wrapper.dataset.canvasBlocks = JSON.stringify(blocks);
   wrapper.dataset.canvasDataset = "production";
   document.body.appendChild(main);
   const canvas = wrapper.querySelector("bp-paper-canvas");
@@ -166,12 +178,21 @@ async function mount() {
   toggle.mounted();
   await new Promise(resolve => setTimeout(resolve, 350));
   assert.equal(requests.length, 0);
-  return {canvas, requests, main, navigation, deleteButton, moveButton,
+  return {canvas, requests, main, hook, navigation, deleteButton, moveButton,
     materializeButton, unbindButton, arrayButton, addForm, actions,
     click: () => toggle.el.dispatchEvent(new window.MouseEvent("click", {bubbles:true, cancelable:true})),
     toggles: () => toggles,
     navigations: () => navigations,
-    echo: blocks => handlers.get("bp:canvas-update")({runs:[{run_id:"probe-run-0", blocks}]}),
+    echo: (blocks, { retained_leases, retained_lease_overflow, ...meta } = {}) => handlers.get("bp:canvas-update")({
+      ...meta,
+      runs: [{
+        run_id: "probe-run-0",
+        blocks,
+        ...(retained_leases === undefined ? {} : { retained_leases }),
+        ...(retained_lease_overflow === undefined ? {} : { retained_lease_overflow }),
+      }],
+    }),
+    update: () => hook.updated(),
     close: () => { toggle.destroyed(); hook.destroyed(); main.remove(); },
   };
 }
@@ -230,6 +251,10 @@ try {
   assert.equal(refusedNavigation.requests.length, 1);
   resolveSaved(refusedNavigation.requests[0], false);
   await tick();
+  refusedNavigation.hook.reconnected();
+  await tick();
+  assert.equal(refusedNavigation.requests.length, 1,
+    "reconnect never replays an application-level save refusal");
   assert.equal(refusedNavigation.navigations(), 0, "a failed save never replays navigation");
   assert.match(textOf(refusedNavigation.canvas), /must remain local/,
     "failed navigation preserves the exact mounted editor text");
@@ -598,6 +623,1155 @@ try {
   assert.equal(retry.toggles(), 1);
   assert.match(textOf(retry.canvas), /Second source change/);
   retry.close();
+  for (const choice of ["latest", "keep"]) {
+    const survivor = paragraph("survivor", "Retained paragraph");
+    const deleting = await mount({ revision: 1, blocks: [paragraph("original", "Original"), survivor] });
+    deleting.canvas._editor.commands.focus("start");
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const remote = [paragraph("original", "Other author changed this paragraph"), survivor];
+    deleting.echo(remote, { rev: 2 });
+    deleting.canvas._editor.view.dispatch(deleting.canvas._editor.state.tr.delete(
+      0, deleting.canvas._editor.state.doc.firstChild.nodeSize));
+    deleting.canvas.flushPendingChanges();
+    await tick();
+    assert.equal(deleting.requests.length, 0,
+      "deleting an unseen remotely changed paragraph requires review before sending");
+    assert.equal(textOf(deleting.canvas), "Retained paragraph", "the local deletion remains visible");
+    deleting.main.querySelector(`[data-action="${choice}"]`).click();
+    await tick();
+    if (choice === "keep") {
+      assert.equal(deleting.requests.length, 1);
+      const request = deleting.requests[0];
+      assert.deepEqual(request.payload.ops, [{ op: "remove-block", id: "original" }]);
+      assert.equal(request.payload.if_rev, 2);
+      deleting.echo([survivor], { rev: 3, request_id: request.payload.request_id });
+      request.resolve({ saved: true, rev: 3, request_id: request.payload.request_id });
+      await tick();
+    } else {
+      assert.equal(deleting.requests.length, 0, "Use latest never sends the discarded deletion");
+      assert.deepEqual(deleting.canvas._blocks, remote);
+    }
+    assert.equal(deleting.canvas.hasPendingChanges(), false);
+    assert.equal(beforeUnloadPrevented(), false);
+    deleting.close();
+  }
+  for (const choice of ["latest", "latest-newer", "keep", "keep-ack-first", "keep-typing", "keep-typing-echo-first"]) {
+    const continuedTyping = choice.startsWith("keep-typing");
+    const overlap = await mount({ revision: 1 });
+    overlap.canvas._editor.commands.focus("end");
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const remote = [{ ...paragraph("original", "Other author text"), audit: { author: "other" } },
+      paragraph("remote-sibling", "Remote sibling")];
+    overlap.echo(remote, { rev: 2 });
+    assert.equal(textOf(overlap.canvas), "Original", "remote text is deferred while focused");
+    append(overlap.canvas, " local draft");
+    overlap.canvas.flushPendingChanges();
+    await tick();
+    assert.equal(overlap.requests.length, 0,
+      "overlapping text must request review before sending a silent overwrite");
+    assert.ok(overlap.main.querySelector("[data-bp-paper-conflict]"));
+    assert.equal(beforeUnloadPrevented(), true);
+    overlap.click();
+    await tick();
+    assert.equal(overlap.toggles(), 0, "View retains an unresolved overlapping draft");
+    if (choice === "latest-newer") {
+      overlap.echo([{ ...remote[0], content: paragraph("original", "Newest remote text").content }, remote[1]], { rev: 4 });
+    }
+    if (continuedTyping) {
+      append(overlap.canvas, " continued");
+      overlap.canvas.flushPendingChanges();
+    }
+    overlap.main.querySelector(`[data-action="${choice.startsWith("latest") ? "latest" : "keep"}"]`).click();
+    await tick();
+    if (choice.startsWith("latest")) {
+      assert.equal(overlap.requests.length, 0, "Use latest never writes the discarded draft");
+      assert.equal(overlap.canvas._editor.state.doc.firstChild.textContent,
+        choice === "latest-newer" ? "Newest remote text" : "Other author text");
+    } else {
+      assert.equal(overlap.requests.length, 1, "Keep mine explicitly authorizes one write");
+      const request = overlap.requests[0];
+      assert.equal(request.payload.if_rev, 2);
+      assert.equal(request.payload.reviewRequired, undefined, "review state is never server payload");
+      const accepted = [{ ...remote[0], content: paragraph("original", "Original local draft").content }, remote[1]];
+      if (choice !== "keep-ack-first" && choice !== "keep-typing") {
+        overlap.echo(accepted, { rev: 3, request_id: request.payload.request_id });
+      }
+      request.resolve({ saved: true, rev: 3, request_id: request.payload.request_id });
+      await tick();
+      if (choice === "keep-ack-first" || choice === "keep-typing") {
+        overlap.echo(accepted, { rev: 3, request_id: request.payload.request_id });
+        await tick();
+      }
+      if (continuedTyping) {
+        assert.equal(overlap.main.querySelector("[data-bp-paper-conflict]"), null,
+          "continued typing must not reopen a resolved overlap against stale remote text");
+        assert.equal(overlap.requests.length, 2, "the continued draft saves after the chosen snapshot");
+        const continued = overlap.requests[1];
+        assert.equal(continued.payload.if_rev, 3);
+        overlap.echo([{ ...accepted[0], content: paragraph("original", "Original local draft continued").content }, remote[1]],
+          { rev: 4, request_id: continued.payload.request_id });
+        continued.resolve({ saved: true, rev: 4, request_id: continued.payload.request_id });
+        await tick();
+      }
+      overlap.canvas._editor.commands.blur();
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert.equal(overlap.canvas._editor.state.doc.firstChild.textContent,
+        continuedTyping ? "Original local draft continued" : "Original local draft");
+    }
+    assert.equal(overlap.canvas._editor.state.doc.childCount, 2, `${choice}: the remote sibling survives`);
+    assert.deepEqual(overlap.canvas._blocks[0].audit, { author: "other" });
+    assert.equal(overlap.canvas.hasPendingChanges(), false, `${choice}: the canvas settles`);
+    assert.equal(beforeUnloadPrevented(), false, `${choice}: unload protection releases only after resolution`);
+    overlap.close();
+  }
+
+  // The server pins a slash-inserted boundary to its originating run for the
+  // current editing session. A full-run acknowledgement must therefore be a
+  // history-neutral echo: the ignored canvas remains the sole mounted owner and
+  // native undo still removes only the insertion.
+  for (const type of ["table", "section"]) {
+    const handoff = await mount({ revision: 1 });
+    handoff.canvas._editor.view.dispatch(
+      handoff.canvas._editor.state.tr.insertText(" kept", 9),
+    );
+    handoff.canvas._editor.view.dispatch(closeHistory(handoff.canvas._editor.state.tr));
+    handoff.canvas._editor.commands.insertContentAt(
+      handoff.canvas._editor.state.doc.content.size,
+      slashTypeToNode(type),
+    );
+    handoff.canvas.flushPendingChanges();
+    assert.equal(handoff.requests.length, 1, `${type}: slash boundary saves once`);
+    const request = handoff.requests[0];
+    const boundary = inserted(request);
+    handoff.canvas._editor.commands.setTextSelection(2);
+    handoff.canvas._editor.commands.focus();
+    const selectionBefore = handoff.canvas._editor.state.selection.from;
+    const historyBefore = undoDepth(handoff.canvas._editor.state);
+
+    const acknowledgedRun = [paragraph("original", "Original kept"), boundary];
+    handoff.echo(acknowledgedRun, {
+      rev: 2,
+      request_id: request.payload.request_id,
+    });
+    request.resolve({ saved: true, rev: 2, request_id: request.payload.request_id });
+    await tick();
+
+    const pinnedNodes = handoff.canvas._editor.getJSON().content.filter(
+      node => node.attrs?.bpId === boundary.id,
+    );
+    assert.equal(pinnedNodes.length, 1,
+      `${type}: acknowledged boundary has exactly one node in its pinned canvas`);
+    let pinnedDom = null;
+    handoff.canvas._editor.state.doc.forEach((node, offset) => {
+      if (node.attrs?.bpId === boundary.id) pinnedDom = handoff.canvas._editor.view.nodeDOM(offset);
+    });
+    assert.ok(pinnedDom && !pinnedDom.hidden,
+      `${type}: the pinned originating owner remains visibly mounted`);
+    assert.equal(handoff.canvas._editor.state.selection.from, selectionBefore,
+      `${type}: a prose selection survives the ownership handoff`);
+    assert.equal(undoDepth(handoff.canvas._editor.state), historyBefore,
+      `${type}: a full-run acknowledgement neither consumes nor adds canvas history`);
+    assert.equal(handoff.canvas._editor.commands.undo(), true,
+      `${type}: native undo remains available after acknowledgement`);
+    assert.equal(
+      handoff.canvas._editor.getJSON().content.some(node => node.attrs?.bpId === boundary.id),
+      false,
+      `${type}: native undo removes the acknowledged insertion`,
+    );
+    assert.equal(handoff.canvas._editor.state.doc.firstChild.textContent, "Original kept",
+      `${type}: undo preserves the unrelated earlier prose history step`);
+    handoff.canvas.flushPendingChanges();
+    assert.equal(handoff.requests.length, 2,
+      `${type}: undo emits one follow-up persistence request`);
+    assert.deepEqual(handoff.requests[1].payload.ops, [
+      { op: "remove-block", id: boundary.id },
+    ], `${type}: native undo persists as removal of the retained boundary only`);
+    handoff.close();
+  }
+
+  // A LiveView reconnect creates a fresh server process while the browser keeps
+  // the phx-update=ignore canvas mounted. Until the new process learns which
+  // accepted boundary that canvas still owns, its first render must not add a
+  // second contextual owner for the same stored block.
+  const reconnectOwnership = await mount({ revision: 1 });
+  reconnectOwnership.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
+  reconnectOwnership.canvas._editor.view.dispatch(
+    closeHistory(reconnectOwnership.canvas._editor.state.tr),
+  );
+  reconnectOwnership.canvas._editor.commands.insertContentAt(
+    reconnectOwnership.canvas._editor.state.doc.content.size,
+    slashTypeToNode("table"),
+  );
+  reconnectOwnership.canvas.flushPendingChanges();
+  const reconnectSave = reconnectOwnership.requests[0];
+  const reconnectTable = inserted(reconnectSave);
+  const reconnectLease = "signed-opaque-table-lease";
+  document.body.prepend(reconnectOwnership.main);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_lease_pending: true,
+    },
+    "a join during an unacknowledged boundary insertion freezes ownership without exposing its draft",
+  );
+  reconnectOwnership.echo([paragraph("original", "Original"), reconnectTable], {
+    rev: 2,
+    request_id: reconnectSave.payload.request_id,
+  });
+  reconnectSave.resolve({
+    saved: true,
+    rev: 2,
+    request_id: reconnectSave.payload.request_id,
+    retained_leases: [reconnectLease],
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_leases: [reconnectLease],
+    },
+    "the successful reply installs its signed lease before the save queue settles even if its echo was lost",
+  );
+  reconnectOwnership.echo([paragraph("original", "Original"), reconnectTable], {
+    rev: 2,
+    request_id: reconnectSave.payload.request_id,
+    retained_leases: [reconnectLease],
+  });
+  await tick();
+  const retainedCanvas = reconnectOwnership.canvas;
+  const retainedEditor = retainedCanvas._editor;
+
+  const reconnectParams = JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams()));
+  assert.deepEqual(reconnectParams, {
+    paper_editing_key: "paper-overlap-probe",
+    paper_canvas_lease_key: "paper-overlap-probe",
+    paper_canvas_leases: [reconnectLease],
+  }, "the next join carries only the opaque lease for the current acknowledged canvas owner");
+
+  // Model the fresh server's first render: without the lease it would partition
+  // the stored Table back to its contextual editor while the ignored canvas is
+  // still alive. A resumed lease keeps that second owner out of the HTML.
+  if (!reconnectParams.paper_canvas_leases?.includes(reconnectLease)) {
+    const freshContextualOwner = document.createElement("div");
+    freshContextualOwner.dataset.testId = "paper-table-contextual-editor";
+    freshContextualOwner.dataset.blockId = reconnectTable.id;
+    reconnectOwnership.main.appendChild(freshContextualOwner);
+  }
+  assert.equal(reconnectOwnership.main.outerHTML.includes(reconnectLease), false,
+    "opaque reconnect leases never enter rendered attributes or persisted source data");
+  retainedEditor.view.dispatch(closeHistory(retainedEditor.state.tr));
+  retainedEditor.view.dispatch(retainedEditor.state.tr.insertText(" newer", 9));
+  const retainedHistory = undoDepth(retainedEditor.state);
+  reconnectOwnership.update();
+
+  assert.equal(reconnectOwnership.canvas, retainedCanvas,
+    "LiveView reconnect preserves the ignored canvas element");
+  assert.equal(reconnectOwnership.canvas._editor, retainedEditor,
+    "LiveView reconnect preserves the ignored canvas editor and its history");
+  assert.equal(retainedEditor.state.doc.firstChild.textContent, "Original newer",
+    "newer prose typed after the ownership acknowledgement survives reconnect update");
+  assert.equal(undoDepth(retainedEditor.state), retainedHistory,
+    "reconnect update preserves insertion and newer-prose history");
+  const canvasOwners = retainedEditor.getJSON().content.filter(
+    node => node.attrs?.bpId === reconnectTable.id,
+  ).length;
+  const contextualOwners = reconnectOwnership.main.querySelectorAll(
+    `[data-test-id="paper-table-contextual-editor"][data-block-id="${reconnectTable.id}"]`,
+  ).length;
+  assert.equal(canvasOwners + contextualOwners, 1,
+    "a fresh LiveView cannot add a contextual owner while the ignored canvas retains the acknowledged Table");
+  assert.equal(retainedEditor.commands.undo(), true,
+    "native undo remains available for typing after reconnect");
+  assert.equal(retainedEditor.state.doc.firstChild.textContent, "Original",
+    "the first native undo removes only the newer prose");
+  assert.equal(retainedEditor.commands.undo(), true,
+    "the acknowledged insertion remains in native history after reconnect");
+  assert.equal(retainedEditor.getJSON().content.some(
+    node => node.attrs?.bpId === reconnectTable.id,
+  ), false, "the second native undo removes the retained Table insertion");
+  reconnectOwnership.close();
+
+  // A transport loss can settle the original push before or after LiveView's
+  // reconnect callback. The preserved ignored canvas must replay the exact
+  // queued boundary batch after the pending recovery render, without creating
+  // a new request identity or unfreezing its live draft locally.
+  for (const reconnectBeforeFailure of [false, true]) {
+    const pendingReconnect = await mount({ revision: 3 });
+    const pendingWrapper = pendingReconnect.main.querySelector("[phx-hook]");
+    pendingWrapper.dataset.paperContainerKind = "document";
+    document.body.prepend(pendingReconnect.main);
+    pendingReconnect.canvas._editor.commands.insertContentAt(
+      pendingReconnect.canvas._editor.state.doc.content.size,
+      slashTypeToNode("section"),
+    );
+    pendingReconnect.canvas._editor.view.dispatch(
+      pendingReconnect.canvas._editor.state.tr.insertText(" offline newer text", 9),
+    );
+    pendingReconnect.canvas.flushPendingChanges();
+    const firstAttempt = pendingReconnect.requests[0];
+    const exactPayload = JSON.stringify(firstAttempt.payload);
+    const pendingSection = inserted(firstAttempt);
+    pendingReconnect.main.inert = true;
+    pendingReconnect.main.dataset.paperCanvasResumeHalt = "true";
+    pendingReconnect.main.dataset.paperCanvasResumeState = "pending";
+    const editorBeforeReconnect = pendingReconnect.canvas._editor;
+    const historyBeforeReconnect = undoDepth(editorBeforeReconnect.state);
+
+    if (reconnectBeforeFailure) pendingReconnect.hook.reconnected();
+    firstAttempt.reject(new Error("transport disconnected"));
+    await tick();
+    if (!reconnectBeforeFailure) pendingReconnect.hook.reconnected();
+    await waitFor(() => pendingReconnect.requests.length === 2,
+      "a reconnect should replay the transport-paused canvas mutation");
+
+    const retried = pendingReconnect.requests[1];
+    assert.equal(JSON.stringify(retried.payload), exactPayload,
+      "reconnect retries the exact request id, revision, context, and ops");
+    assert.equal(pendingReconnect.main.inert, true,
+      "the client retry never unfreezes the pending recovery root");
+    assert.equal(pendingReconnect.canvas._editor, editorBeforeReconnect,
+      "the pending reconnect keeps the live editor instance");
+    assert.equal(undoDepth(editorBeforeReconnect.state), historyBeforeReconnect,
+      "the pending reconnect keeps native insertion history");
+
+    retried.resolve({
+      saved: true,
+      rev: 4,
+      request_id: retried.payload.request_id,
+      retained_leases: ["signed-reconnect-retry-lease"],
+    });
+    pendingReconnect.echo([paragraph("original", "Original offline newer text"), pendingSection], {
+      rev: 4,
+      request_id: retried.payload.request_id,
+      retained_leases: ["signed-reconnect-retry-lease"],
+    });
+    await tick();
+    assert.match(textOf(pendingReconnect.canvas), /offline newer text/,
+      "newer text in the boundary batch remains mounted through retry acknowledgement");
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+      {
+        paper_editing_key: "paper-overlap-probe",
+        paper_canvas_lease_key: "paper-overlap-probe",
+        paper_canvas_leases: ["signed-reconnect-retry-lease"],
+      },
+      "retry acknowledgement replaces pending recovery with its signed owner lease",
+    );
+    assert.equal(pendingReconnect.main.inert, true,
+      "only a subsequent authoritative LiveView render may unhalt recovery");
+    pendingReconnect.close();
+  }
+
+  const studioFocus = await mount({ revision: 7 });
+  const originalStudioMain = studioFocus.main;
+  originalStudioMain.id = "paper-editor-studio-focus";
+  const originalStudioShell = document.createElement("section");
+  originalStudioShell.id = "studio-responsive-pane";
+  originalStudioMain.parentElement.insertBefore(originalStudioShell, originalStudioMain);
+  originalStudioShell.appendChild(originalStudioMain);
+  const studioWrapper = originalStudioMain.querySelector("[phx-hook]");
+  studioFocus.hook.disconnected();
+  studioFocus.canvas._editor.view.dispatch(
+    studioFocus.canvas._editor.state.tr.insertText(" focused draft", 9),
+  );
+  const studioEditor = studioFocus.canvas._editor;
+  studioEditor.commands.setTextSelection("end");
+  studioEditor.view.focus();
+  assert.equal(studioEditor.view.hasFocus(), true,
+    "offline Studio editing has rich focus before the reconnect join morph");
+  const studioSelection = studioEditor.state.selection.from;
+  const studioHistory = undoDepth(studioEditor.state);
+
+  const replacementStudioMain = document.createElement("main");
+  const replacementStudioRoot = document.createElement("div");
+  replacementStudioRoot.id = originalStudioMain.id;
+  replacementStudioRoot.className = "bp-paper-editor";
+  replacementStudioRoot.dataset.paperDocKey = originalStudioMain.dataset.paperDocKey;
+  replacementStudioRoot.dataset.paperCanvasResumeHalt = "true";
+  replacementStudioRoot.dataset.paperCanvasResumeState = "pending";
+  replacementStudioRoot.setAttribute("inert", "");
+  const incomingStudioShell = document.createElement("section");
+  incomingStudioShell.id = originalStudioShell.id;
+  incomingStudioShell.appendChild(replacementStudioRoot.cloneNode(false));
+  window.BarkparkPaperEditorBeforeElUpdated(originalStudioShell, incomingStudioShell);
+  assert.equal(studioFocus.canvas._resumeFocusState, "armed",
+    "the Studio ancestor join morph captures the canvas focused after disconnect");
+  studioEditor.view.dom.blur();
+  replacementStudioRoot.appendChild(studioWrapper);
+  replacementStudioMain.appendChild(replacementStudioRoot);
+  document.body.appendChild(replacementStudioMain);
+  studioFocus.hook.reconnected();
+  await tick();
+  assert.equal(studioFocus.canvas._editor, studioEditor,
+    "Studio reconnect keeps the ignored editor while replacing its outer root and main");
+  assert.equal(studioEditor.view.hasFocus(), false,
+    "the pending inert render cannot restore focus before retry acknowledgement");
+
+  const resumedStudioMain = document.createElement("main");
+  const resumedStudioRoot = replacementStudioRoot.cloneNode(false);
+  delete resumedStudioRoot.dataset.paperCanvasResumeHalt;
+  delete resumedStudioRoot.dataset.paperCanvasResumeState;
+  resumedStudioRoot.removeAttribute("inert");
+  resumedStudioMain.appendChild(resumedStudioRoot);
+  window.BarkparkPaperEditorBeforeElUpdated(replacementStudioMain, resumedStudioMain);
+  delete replacementStudioRoot.dataset.paperCanvasResumeHalt;
+  delete replacementStudioRoot.dataset.paperCanvasResumeState;
+  replacementStudioRoot.removeAttribute("inert");
+  await tick();
+  assert.equal(studioEditor.view.hasFocus(), true,
+    "Studio restores focus after the acknowledged retry removes the halt");
+  assert.equal(studioEditor.state.selection.from, studioSelection,
+    "Studio reconnect restores the exact rich-editor selection");
+  assert.equal(undoDepth(studioEditor.state), studioHistory,
+    "Studio reconnect focus restoration does not alter native history");
+  studioFocus.close();
+  replacementStudioMain.remove();
+  originalStudioShell.remove();
+
+  const leaseControls = await mount({ revision: 8, blocks: [paragraph("private-draft", "Private draft")] });
+  document.body.prepend(leaseControls.main);
+  const boundedLeases = ["lease-0", "lease-0", ...Array.from(
+    { length: 64 },
+    (_unused, index) => `lease-${index}`,
+  )];
+  leaseControls.echo([paragraph("private-draft", "Private draft")], {
+    rev: 8,
+    retained_leases: boundedLeases,
+  });
+  await tick();
+  const boundedParams = JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams()));
+  assert.equal(boundedParams.paper_canvas_leases.length, 64,
+    "reconnect lease count is strictly bounded");
+  assert.equal(new Set(boundedParams.paper_canvas_leases).size, 64,
+    "reconnect leases are deduplicated");
+  assert.equal(boundedParams.paper_canvas_leases.some((lease) => lease.length > 2048), false,
+    "oversized reconnect leases are omitted");
+  assert.equal(JSON.stringify(boundedParams).includes("Private draft"), false,
+    "reconnect params never contain canvas blocks or draft text");
+
+  leaseControls.echo([paragraph("private-draft", "Private draft")], {
+    rev: 8,
+    retained_leases: Array.from({ length: 65 }, (_unused, index) => `overflow-${index}`),
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_lease_overflow: true,
+    },
+    "a per-wrapper lease overflow halts reconnect without sending a dangerous partial owner set",
+  );
+  leaseControls.echo([paragraph("private-draft", "Private draft")], {
+    rev: 8,
+    retained_leases: boundedLeases,
+  });
+  await tick();
+  leaseControls.echo([paragraph("private-draft", "Private draft")], {
+    rev: 8,
+    retained_leases: ["x".repeat(2049)],
+  });
+  await tick();
+  assert.equal(window.BarkparkPaperEditorConnectParams().paper_canvas_lease_overflow, true,
+    "an oversized opaque token halts reconnect instead of being silently omitted");
+  leaseControls.echo([paragraph("private-draft", "Private draft")], {
+    rev: 8,
+    retained_leases: Array.from({ length: 40 }, (_unused, index) => `shared-a-${index}`),
+  });
+  await tick();
+
+  const extraWrapper = document.createElement("div");
+  extraWrapper.id = "paper-canvas-extra-run";
+  extraWrapper.setAttribute("phx-hook", "BarkparkPaperCanvas");
+  extraWrapper.dataset.canvasBlocks = JSON.stringify([paragraph("extra", "Extra")]);
+  extraWrapper.innerHTML = "<bp-paper-canvas></bp-paper-canvas>";
+  leaseControls.main.appendChild(extraWrapper);
+  const extraHandlers = new Map();
+  const extraHook = {
+    ...hooks.BarkparkPaperCanvas,
+    el: extraWrapper,
+    handleEvent: (name, handler) => extraHandlers.set(name, handler),
+    pushEvent: () => Promise.resolve({ saved: true }),
+  };
+  extraHook.mounted();
+  extraHandlers.get("bp:canvas-update")({
+    rev: 8,
+    runs: [{
+      run_id: "extra-run",
+      blocks: [paragraph("extra", "Extra")],
+      retained_leases: Array.from({ length: 30 }, (_unused, index) => `shared-b-${index}`),
+    }],
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_lease_overflow: true,
+    },
+    "aggregate leases across current-document wrappers are all-or-nothing when the document bound is exceeded",
+  );
+  extraHook.destroyed();
+  extraWrapper.remove();
+  leaseControls.echo([paragraph("private-draft", "Private draft")], {
+    rev: 8,
+    retained_leases: boundedLeases,
+  });
+  await tick();
+
+  const wrongDocument = await mount({ revision: 4 });
+  wrongDocument.main.dataset.paperDocKey = "production:paper:other";
+  wrongDocument.echo([paragraph("original", "Original")], {
+    rev: 4,
+    retained_leases: ["wrong-document-lease"],
+  });
+  await tick();
+  document.body.prepend(leaseControls.main);
+  assert.equal(
+    window.BarkparkPaperEditorConnectParams().paper_canvas_leases.includes("wrong-document-lease"),
+    false,
+    "a live wrapper belonging to another document cannot contribute a reconnect lease",
+  );
+
+  leaseControls.echo([paragraph("private-draft", "Private draft")], {
+    rev: 8,
+    retained_leases: [],
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    { paper_editing_key: "paper-overlap-probe" },
+    "an authoritative matching-run echo clears leases removed by the server",
+  );
+  wrongDocument.close();
+  leaseControls.close();
+
+  const replacementPending = await mount({ revision: 11 });
+  replacementPending.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
+  document.body.prepend(replacementPending.main);
+  replacementPending.main.querySelector("[phx-hook]").dispatchEvent(new window.CustomEvent(
+    "bp-canvas-ops",
+    {
+      bubbles: true,
+      detail: {
+        seq: 1,
+        ops: [{
+          op: "replace-block",
+          id: "original",
+          block: {
+            id: "replacement-section",
+            type: "section",
+            title: "New section",
+            blocks: [paragraph("replacement-child", "")],
+          },
+        }],
+      },
+    },
+  ));
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_lease_pending: true,
+    },
+    "slash replacement is lease-pending before its server acknowledgement",
+  );
+  replacementPending.requests[0].resolve({
+    saved: true,
+    rev: 12,
+    request_id: replacementPending.requests[0].payload.request_id,
+    retained_leases: [],
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    { paper_editing_key: "paper-overlap-probe" },
+    "an authoritative successful reply with no retained owner clears replacement pending state",
+  );
+  replacementPending.close();
+
+  const overflowReply = await mount({ revision: 13 });
+  overflowReply.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
+  document.body.prepend(overflowReply.main);
+  overflowReply.canvas._editor.commands.insertContentAt(
+    overflowReply.canvas._editor.state.doc.content.size,
+    slashTypeToNode("table"),
+  );
+  overflowReply.canvas.flushPendingChanges();
+  overflowReply.requests[0].resolve({
+    saved: true,
+    rev: 14,
+    request_id: overflowReply.requests[0].payload.request_id,
+    retained_leases: [],
+    retained_lease_overflow: true,
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_lease_overflow: true,
+    },
+    "a successful issuance-overflow reply cannot clear recovery with an empty lease list",
+  );
+  overflowReply.close();
+
+  const replyBeforeLeaseEcho = await mount({ revision: 15 });
+  replyBeforeLeaseEcho.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
+  document.body.prepend(replyBeforeLeaseEcho.main);
+  replyBeforeLeaseEcho.canvas._editor.commands.insertContentAt(
+    replyBeforeLeaseEcho.canvas._editor.state.doc.content.size,
+    slashTypeToNode("table"),
+  );
+  replyBeforeLeaseEcho.canvas.flushPendingChanges();
+  const replyBeforeLeaseSave = replyBeforeLeaseEcho.requests[0];
+  const replyBeforeLeaseTable = inserted(replyBeforeLeaseSave);
+  replyBeforeLeaseSave.resolve({
+    saved: true,
+    rev: 16,
+    request_id: replyBeforeLeaseSave.payload.request_id,
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_lease_overflow: true,
+    },
+    "a saved boundary reply missing lease authority fails closed after leaving the queue",
+  );
+  replyBeforeLeaseEcho.echo([paragraph("original", "Original"), replyBeforeLeaseTable], {
+    rev: 16,
+    request_id: replyBeforeLeaseSave.payload.request_id,
+    retained_leases: ["reply-before-echo-lease"],
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_leases: ["reply-before-echo-lease"],
+    },
+    "a later authoritative lease echo recovers a reply-first fail-closed owner",
+  );
+  replyBeforeLeaseEcho.close();
+
+  const leaseEchoBeforeReply = await mount({ revision: 17 });
+  leaseEchoBeforeReply.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
+  document.body.prepend(leaseEchoBeforeReply.main);
+  leaseEchoBeforeReply.canvas._editor.commands.insertContentAt(
+    leaseEchoBeforeReply.canvas._editor.state.doc.content.size,
+    slashTypeToNode("section"),
+  );
+  leaseEchoBeforeReply.canvas.flushPendingChanges();
+  const leaseEchoBeforeSave = leaseEchoBeforeReply.requests[0];
+  const leaseEchoBeforeSection = inserted(leaseEchoBeforeSave);
+  leaseEchoBeforeReply.echo([paragraph("original", "Original"), leaseEchoBeforeSection], {
+    rev: 18,
+    request_id: leaseEchoBeforeSave.payload.request_id,
+    retained_leases: ["echo-before-reply-lease"],
+  });
+  leaseEchoBeforeSave.resolve({
+    saved: true,
+    rev: 18,
+    request_id: leaseEchoBeforeSave.payload.request_id,
+  });
+  await tick();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_leases: ["echo-before-reply-lease"],
+    },
+    "an authoritative echo arriving first prevents a later legacy reply from re-blocking reconnect",
+  );
+  leaseEchoBeforeReply.close();
+
+  const recovery = await mount({ revision: 19 });
+  const recoveryMain = recovery.main;
+  const recoveryRoot = document.createElement("div");
+  recoveryRoot.id = "paper-editor-recovery-probe";
+  recoveryRoot.className = "bp-paper-editor";
+  recoveryRoot.dataset.paperDocKey = recoveryMain.dataset.paperDocKey;
+  recoveryRoot.dataset.paperCanvasResumeHalt = "true";
+  recoveryRoot.dataset.paperCanvasResumeState = "blocked";
+  recoveryRoot.setAttribute("inert", "");
+  const recoveryWrapper = recoveryMain.querySelector("[phx-hook]");
+  recoveryWrapper.dataset.paperContainerKind = "document";
+  recoveryRoot.appendChild(recoveryWrapper);
+  recoveryMain.className = "";
+  delete recoveryMain.dataset.paperDocKey;
+  delete recoveryMain.dataset.paperRev;
+  recoveryMain.appendChild(recoveryRoot);
+
+  const nestedWrapper = document.createElement("div");
+  nestedWrapper.id = "paper-canvas-probe-nested-run";
+  nestedWrapper.setAttribute("phx-hook", "BarkparkPaperCanvas");
+  nestedWrapper.dataset.paperDocKey = recoveryRoot.dataset.paperDocKey;
+  nestedWrapper.dataset.paperRev = recoveryRoot.dataset.paperRev;
+  nestedWrapper.dataset.canvasBlocks = JSON.stringify([paragraph("nested", "Nested baseline")]);
+  nestedWrapper.dataset.canvasDataset = "production";
+  nestedWrapper.dataset.paperContainerId = "section-7";
+  nestedWrapper.dataset.paperContainerKind = "section";
+  nestedWrapper.dataset.paperContainerRun = "1";
+  nestedWrapper.innerHTML = "<bp-paper-canvas></bp-paper-canvas>";
+  recoveryRoot.appendChild(nestedWrapper);
+  const nestedHandlers = new Map();
+  const nestedHook = {
+    ...hooks.BarkparkPaperCanvas,
+    el: nestedWrapper,
+    handleEvent: (name, handler) => nestedHandlers.set(name, handler),
+    pushEvent: () => Promise.resolve({ saved: true }),
+  };
+  nestedHook.mounted();
+  const nestedCanvas = nestedWrapper.querySelector("bp-paper-canvas");
+  nestedCanvas.toggleSourceMode();
+  const malformedRawSource = "# Newest source draft\n\n[[[ malformed **";
+  nestedCanvas.querySelector("textarea").value = malformedRawSource;
+
+  const wrongDocumentRoot = document.createElement("div");
+  wrongDocumentRoot.className = "bp-paper-editor";
+  wrongDocumentRoot.dataset.paperDocKey = "production:paper:wrong-document";
+  wrongDocumentRoot.innerHTML = `<div id="paper-canvas-wrong-run" phx-hook="BarkparkPaperCanvas"
+    data-canvas-blocks='[{"id":"wrong","type":"paragraph","content":[{"type":"text","value":"Wrong document secret"}]}]'>
+    <bp-paper-canvas></bp-paper-canvas></div>`;
+  recoveryRoot.appendChild(wrongDocumentRoot);
+  const warning = document.createElement("div");
+  warning.dataset.testId = "paper-canvas-resume-warning";
+  warning.innerHTML = `<button type="button" data-paper-canvas-export-draft
+    data-paper-editor-target="${recoveryRoot.id}">Download preserved canvas draft</button>
+    <button type="button" data-test-id="paper-canvas-reload-server">
+      Discard local edits and reload the server version
+    </button>`;
+  recoveryRoot.parentElement.insertBefore(warning, recoveryRoot);
+
+  let downloadedText = null;
+  let downloadedName = null;
+  let downloadClicks = 0;
+  let revokedHref = null;
+  const OriginalBlob = window.Blob;
+  const originalCreateObjectURL = window.URL.createObjectURL;
+  const originalRevokeObjectURL = window.URL.revokeObjectURL;
+  const originalAnchorClick = window.HTMLAnchorElement.prototype.click;
+  window.Blob = class RecoveryBlob {
+    constructor(parts, options) {
+      downloadedText = parts.join("");
+      this.type = options?.type;
+    }
+  };
+  window.URL.createObjectURL = () => "blob:paper-canvas-recovery";
+  window.URL.revokeObjectURL = (href) => { revokedHref = href; };
+  window.HTMLAnchorElement.prototype.click = function clickRecoveryDownload() {
+    downloadClicks += 1;
+    downloadedName = this.download;
+  };
+  assert.equal(recovery.requests.length, 0,
+    "recovery export starts without an existing persistence request");
+  append(recovery.canvas, " newest pending prose");
+  const recoveryEditor = recovery.canvas._editor;
+  const recoveryInnerHTML = recoveryRoot.innerHTML;
+  warning.querySelector("button").click();
+  assert.equal(recovery.requests.length, 0,
+    "downloading performs no persistence or network mutation");
+  await tick();
+  const wrongWarning = document.createElement("div");
+  wrongWarning.dataset.testId = "paper-canvas-resume-warning";
+  wrongWarning.innerHTML = `<button type="button" data-paper-canvas-export-draft
+    data-paper-editor-target="${recoveryRoot.id}">Wrong recovery scope</button>
+    <button type="button" data-test-id="paper-canvas-reload-server">Wrong reload scope</button>`;
+  document.body.appendChild(wrongWarning);
+  wrongWarning.querySelector("button").click();
+  await tick();
+  let wrongScopeReloads = 0;
+  const wrongReloadButton = wrongWarning.querySelector(
+    '[data-test-id="paper-canvas-reload-server"]',
+  );
+  assert.equal(window.BarkparkPaperEditorReloadCanvasRecovery({
+    button: 0,
+    defaultPrevented: false,
+    target: wrongReloadButton,
+    preventDefault() {},
+  }, () => { wrongScopeReloads += 1; }), false,
+  "a recovery warning outside the exact editor sibling scope cannot hard reload");
+  assert.equal(wrongScopeReloads, 0);
+  wrongWarning.remove();
+  window.Blob = OriginalBlob;
+  window.URL.createObjectURL = originalCreateObjectURL;
+  window.URL.revokeObjectURL = originalRevokeObjectURL;
+  window.HTMLAnchorElement.prototype.click = originalAnchorClick;
+
+  const recoveryBundle = JSON.parse(downloadedText);
+  assert.deepEqual(
+    {
+      format: recoveryBundle.format,
+      version: recoveryBundle.version,
+      scope: recoveryBundle.scope,
+      document: recoveryBundle.document,
+      fragmentCount: recoveryBundle.fragments.length,
+    },
+    {
+      format: "barkpark-paper-canvas-recovery",
+      version: 1,
+      scope: "canvas-fragments",
+      document: { key: "paper-overlap-probe" },
+      fragmentCount: 2,
+    },
+    "the recovery download is explicitly a current-document canvas-fragment bundle",
+  );
+  assert.match(recoveryBundle.notice, /not a complete Paper document export/);
+  assert.equal(downloadedName, "paper-overlap-probe-canvas-recovery.json");
+  assert.equal(downloadClicks, 1,
+    "a recovery button outside the exact warning/editor sibling scope cannot export another root");
+  assert.equal(revokedHref, "blob:paper-canvas-recovery");
+  assert.deepEqual(recoveryBundle.fragments[0], {
+    wrapper_id: "paper-canvas-probe-run-0",
+    run_id: "probe-run-0",
+    context: { container_kind: "document", container_run_ids: ["original"] },
+    source: {
+      dataset: "production",
+      confirmed_blocks_json: JSON.stringify([paragraph("original", "Original")]),
+      paper_revision: "19",
+    },
+    draft: {
+      mode: "rich",
+      blocks: [paragraph("original", "Original newest pending prose")],
+    },
+  }, "the export projects newest debounced rich text without flushing or saving it");
+  assert.deepEqual(recoveryBundle.fragments[1].context, {
+    container_id: "section-7",
+    container_kind: "section",
+    container_run: "1",
+    container_run_ids: ["nested"],
+  }, "a nested run keeps its exact server container context");
+  assert.equal(recoveryBundle.fragments[1].draft.mode, "markdown");
+  assert.equal(recoveryBundle.fragments[1].draft.raw_source, malformedRawSource,
+    "raw source text is preserved even when its intermediate syntax is malformed");
+  assert.equal(downloadedText.includes("Wrong document secret"), false,
+    "a nested wrapper belonging to another document is excluded");
+  assert.equal(downloadedText.includes("signed-opaque"), false,
+    "recovery files contain no reconnect leases or credentials");
+  assert.equal(recoveryRoot.hasAttribute("inert"), true,
+    "downloading leaves the blocked editor inert");
+  assert.equal(recoveryRoot.innerHTML, recoveryInnerHTML,
+    "downloading does not mutate the frozen editor DOM");
+  assert.equal(recovery.canvas._editor, recoveryEditor,
+    "downloading does not replace or reconcile the live editor");
+  const replacementMain = document.createElement("main");
+  replacementMain.dataset.testId = "studio-paper-shell-reconnected";
+  replacementMain.append(warning, recoveryRoot);
+  document.body.appendChild(replacementMain);
+  recovery.hook.reconnected();
+  await tick();
+  assert.equal(recoveryWrapper.closest("main"), replacementMain,
+    "the ignored canvas can survive a Studio shell replacement");
+  const reloadButton = warning.querySelector('[data-test-id="paper-canvas-reload-server"]');
+  const reloadEvent = () => ({
+    button: 0,
+    defaultPrevented: false,
+    target: reloadButton,
+    preventDefault() { this.defaultPrevented = true; },
+  });
+  assert.equal(beforeUnloadPrevented(), true,
+    "the frozen unsaved draft is protected before explicit discard");
+  assert.throws(
+    () => window.BarkparkPaperEditorReloadCanvasRecovery(
+      reloadEvent(),
+      () => { throw new Error("reload refused"); },
+    ),
+    /reload refused/,
+    "a failed hard reload reports its failure",
+  );
+  assert.equal(beforeUnloadPrevented(), true,
+    "a failed hard reload restores this document's unload guard");
+  let hardReloads = 0;
+  let hardReloadWasBlocked = null;
+  const acceptedReload = reloadEvent();
+  assert.equal(
+    window.BarkparkPaperEditorReloadCanvasRecovery(
+      acceptedReload,
+      () => {
+        hardReloads += 1;
+        hardReloadWasBlocked = beforeUnloadPrevented();
+      },
+    ),
+    true,
+    "the exact adjacent recovery warning can explicitly request a hard reload",
+  );
+  assert.equal(acceptedReload.defaultPrevented, true);
+  assert.equal(hardReloads, 1);
+  assert.equal(hardReloadWasBlocked, false,
+    "explicit discard bypasses only this document's unload guard during hard reload");
+  assert.equal(beforeUnloadPrevented(), true,
+    "the explicit bypass is consumed once and the next ordinary unload remains guarded");
+  assert.equal(recoveryRoot.innerHTML, recoveryInnerHTML,
+    "explicit reload performs no eager frozen-DOM mutation");
+  assert.equal(recovery.canvas._editor, recoveryEditor,
+    "explicit reload leaves the live editor intact until navigation starts");
+  assert.equal(recovery.requests.length, 0,
+    "explicit reload never clears or submits the local queue");
+  warning.remove();
+  nestedHook.destroyed();
+  recovery.close();
+  replacementMain.remove();
+
+  const queuedBoundaries = await mount({ revision: 20 });
+  queuedBoundaries.main.querySelector("[phx-hook]").dataset.paperContainerKind = "document";
+  document.body.prepend(queuedBoundaries.main);
+  queuedBoundaries.canvas._editor.commands.insertContentAt(
+    queuedBoundaries.canvas._editor.state.doc.content.size,
+    slashTypeToNode("table"),
+  );
+  queuedBoundaries.canvas.flushPendingChanges();
+  const firstBoundarySave = queuedBoundaries.requests[0];
+  const firstQueuedBoundary = inserted(firstBoundarySave);
+  queuedBoundaries.canvas._editor.commands.insertContentAt(
+    queuedBoundaries.canvas._editor.state.doc.content.size,
+    slashTypeToNode("section"),
+  );
+  queuedBoundaries.canvas.flushPendingChanges();
+  assert.equal(queuedBoundaries.requests.length, 1,
+    "the second boundary batch waits behind the active request");
+  queuedBoundaries.echo([paragraph("original", "Original"), firstQueuedBoundary], {
+    rev: 21,
+    request_id: firstBoundarySave.payload.request_id,
+    retained_leases: ["first-boundary-lease"],
+  });
+  firstBoundarySave.resolve({
+    saved: true,
+    rev: 21,
+    request_id: firstBoundarySave.payload.request_id,
+    retained_leases: ["first-boundary-lease"],
+  });
+  await tick();
+  assert.equal(queuedBoundaries.requests.length, 2,
+    "the queued boundary begins saving after the first acknowledgement");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_editing_key: "paper-overlap-probe",
+      paper_canvas_lease_key: "paper-overlap-probe",
+      paper_canvas_leases: ["first-boundary-lease"],
+      paper_canvas_lease_pending: true,
+    },
+    "the first reply and echo cannot clear reconnect pending while a later boundary batch is unacknowledged",
+  );
+  const secondBoundarySave = queuedBoundaries.requests[1];
+  secondBoundarySave.resolve({
+    saved: true,
+    rev: 22,
+    request_id: secondBoundarySave.payload.request_id,
+    retained_leases: ["first-boundary-lease", "second-boundary-lease"],
+  });
+  await tick();
+  assert.equal(window.BarkparkPaperEditorConnectParams().paper_canvas_lease_pending, undefined,
+    "pending clears only after every queued boundary receives an authoritative lease reply");
+  queuedBoundaries.close();
+
+  const slashSection = await mount({ revision: 5 });
+  slashSection.canvas._editor.commands.insertContentAt(
+    slashSection.canvas._editor.state.doc.content.size,
+    {
+      type: "paragraph",
+      attrs: { bpId: null, bpType: "paragraph" },
+      content: [{ type: "text", text: "draft" }],
+    },
+  );
+  slashSection.canvas._editor.commands.setTextSelection(
+    slashSection.canvas._editor.state.doc.content.size - 1,
+  );
+  const { insertSlashTypeAtSelection } = await import("./command-palette.js");
+  assert.equal(insertSlashTypeAtSelection(slashSection.canvas._editor, "section"), true);
+  slashSection.canvas.flushPendingChanges();
+  const slashSectionSave = slashSection.requests[0];
+  const slashSectionBlock = inserted(slashSectionSave);
+  assert.deepEqual(slashSectionBlock.blocks[0].content, [
+    { type: "text", value: "" },
+  ], "the faithful slash-section request carries the server-stored empty text leaf");
+  slashSection.echo([paragraph("original", "Original"), slashSectionBlock], {
+    rev: 6,
+    request_id: slashSectionSave.payload.request_id,
+  });
+  slashSectionSave.resolve({
+    saved: true,
+    rev: 6,
+    request_id: slashSectionSave.payload.request_id,
+  });
+  await tick();
+  assert.equal(slashSection.canvas._editor.commands.undo(), true,
+    "a real slash-section replacement remains undoable after its full-run acknowledgement");
+  assert.equal(
+    slashSection.canvas._editor.getJSON().content.some(
+      node => node.attrs?.bpId === slashSectionBlock.id,
+    ),
+    false,
+    "slash-section undo removes the acknowledged inserted section",
+  );
+  assert.equal(slashSection.canvas._editor.state.doc.lastChild.textContent, "draft",
+    "slash-section undo restores the trigger paragraph as a separate history event");
+  slashSection.canvas.flushPendingChanges();
+  assert.deepEqual(slashSection.requests[1].payload.ops.map(op => op.op), [
+    "remove-block",
+    "insert-after",
+  ], "slash-section undo persists the replacement reversal");
+  assert.equal(slashSection.requests[1].payload.ops[0].id, slashSectionBlock.id);
+  assert.deepEqual(slashSection.requests[1].payload.ops[1].block.content, [
+    { type: "text", value: "draft" },
+  ]);
+  slashSection.close();
+
+  const tableRedo = await mount({
+    revision: 10,
+    blocks: [paragraph("original", "Original"), paragraph("target", "draft")],
+  });
+  tableRedo.canvas._editor.commands.setTextSelection(
+    tableRedo.canvas._editor.state.doc.content.size - 1,
+  );
+  assert.equal(insertSlashTypeAtSelection(tableRedo.canvas._editor, "table"), true);
+  tableRedo.canvas.flushPendingChanges();
+  const tableInsertSave = tableRedo.requests[0];
+  const insertedTable = inserted(tableInsertSave);
+  tableRedo.echo([paragraph("original", "Original"), insertedTable], {
+    rev: 11,
+    request_id: tableInsertSave.payload.request_id,
+  });
+  tableInsertSave.resolve({
+    saved: true,
+    rev: 11,
+    request_id: tableInsertSave.payload.request_id,
+  });
+  await tick();
+
+  assert.equal(tableRedo.canvas._editor.commands.undo(), true,
+    "the acknowledged slash-table insertion can be undone");
+  tableRedo.canvas.flushPendingChanges();
+  const tableUndoSave = tableRedo.requests[1];
+  const restoredParagraph = inserted(tableUndoSave);
+  tableRedo.echo([paragraph("original", "Original"), restoredParagraph], {
+    rev: 12,
+    request_id: tableUndoSave.payload.request_id,
+  });
+  tableUndoSave.resolve({
+    saved: true,
+    rev: 12,
+    request_id: tableUndoSave.payload.request_id,
+  });
+  await tick();
+  assert.equal(tableRedo.canvas._inflightOps, null,
+    "the undo acknowledgement releases the canvas before redo");
+
+  assert.equal(tableRedo.canvas._editor.commands.redo(), true,
+    "the table insertion remains redoable after its undo acknowledgement");
+  let bodyCellPosition = null;
+  tableRedo.canvas._editor.state.doc.descendants((node, pos) => {
+    if (bodyCellPosition == null && node.type.name === "bpTableCell") {
+      bodyCellPosition = pos + 1;
+    }
+  });
+  assert.ok(bodyCellPosition != null, "redo restores an editable body cell");
+  tableRedo.canvas._editor.commands.setTextSelection(bodyCellPosition);
+  tableRedo.canvas._editor.commands.insertContent("Studio mobile");
+  assert.match(tableRedo.canvas._editor.state.doc.textContent, /Studio mobile/,
+    "the immediate cell edit lands in the redone PM table before Studio reparenting");
+  assert.equal(tableRedo.canvas.hasPendingChanges(), true,
+    "redo plus immediate cell typing arms the canvas debounce");
+  const movedStudioColumn = document.createElement("section");
+  tableRedo.main.parentNode.appendChild(movedStudioColumn);
+  movedStudioColumn.appendChild(tableRedo.main.querySelector("[phx-hook]"));
+  assert.equal(tableRedo.canvas.hasPendingChanges(), true,
+    "a connected-to-connected Studio column move preserves the redone table debounce");
+  await new Promise(resolve => setTimeout(resolve, DEBOUNCE_MS * 4));
+  assert.equal(tableRedo.requests.length, 3,
+    "redo plus immediate cell typing survives Studio reparenting and debounces one save");
+  const redoneTable = inserted(tableRedo.requests[2]);
+  assert.equal(redoneTable.id, insertedTable.id,
+    "redo preserves the acknowledged table identity");
+  assert.equal(redoneTable.rows[0][0][0].value, "Studio mobile",
+    "the immediate cell draft rides the redone table persistence batch");
+  movedStudioColumn.remove();
+  tableRedo.close();
+
+  const responsiveProse = await mount({ revision: 13 });
+  append(responsiveProse.canvas, " responsive draft");
+  const responsiveEditor = responsiveProse.canvas._editor;
+  assert.equal(responsiveProse.canvas.hasPendingChanges(), true,
+    "ordinary prose arms the debounce before a responsive Studio move");
+  const responsiveColumn = document.createElement("section");
+  responsiveProse.main.parentNode.appendChild(responsiveColumn);
+  responsiveColumn.appendChild(responsiveProse.main.querySelector("[phx-hook]"));
+  assert.equal(responsiveProse.canvas._editor, responsiveEditor,
+    "responsive reparenting preserves the mounted editor and its history");
+  assert.equal(responsiveProse.canvas.hasPendingChanges(), true,
+    "responsive reparenting preserves an ordinary prose debounce");
+  await new Promise(resolve => setTimeout(resolve, DEBOUNCE_MS * 4));
+  assert.equal(responsiveProse.requests.length, 1,
+    "ordinary prose survives Studio reparenting and reaches persistence");
+  assert.equal(
+    responsiveProse.requests[0].payload.ops[0].patch.content[0].value,
+    "Original responsive draft",
+  );
+  responsiveColumn.remove();
+  responsiveProse.close();
+
+  const removedCanvas = document.createElement("bp-paper-canvas");
+  removedCanvas.blocks = [paragraph("removed", "Removed")];
+  document.body.appendChild(removedCanvas);
+  assert.ok(removedCanvas._editor, "a genuinely connected canvas mounts its editor");
+  removedCanvas.remove();
+  await tick();
+  assert.equal(removedCanvas._editor, null,
+    "a genuine removal still destroys the editor after the reparent grace microtask");
+
+  const newerBoundaryDraft = await mount({ revision: 20 });
+  newerBoundaryDraft.canvas._editor.commands.insertContentAt(
+    newerBoundaryDraft.canvas._editor.state.doc.content.size,
+    slashTypeToNode("table"),
+  );
+  newerBoundaryDraft.canvas.flushPendingChanges();
+  const firstTableSave = newerBoundaryDraft.requests[0];
+  const draftedTable = inserted(firstTableSave);
+  const addRow = newerBoundaryDraft.canvas.querySelector('button[title="Add row"]');
+  assert.ok(addRow, "the newly inserted table exposes its native structure control");
+  addRow.click();
+  newerBoundaryDraft.canvas.flushPendingChanges();
+  newerBoundaryDraft.echo([paragraph("original", "Original"), draftedTable], {
+    rev: 21,
+    request_id: firstTableSave.payload.request_id,
+  });
+  firstTableSave.resolve({ saved: true, rev: 21, request_id: firstTableSave.payload.request_id });
+  await tick();
+  assert.equal(newerBoundaryDraft.requests.length, 2,
+    "a newer table draft remains in its originating canvas long enough to save");
+  const currentTableNode = () => newerBoundaryDraft.canvas._editor.getJSON().content.find(
+    node => node.attrs?.bpId === draftedTable.id,
+  );
+  assert.equal(currentTableNode()?.content?.length, 3,
+    "an older full-run acknowledgement cannot discard the newer table row");
+  const secondTableSave = newerBoundaryDraft.requests[1];
+  assert.deepEqual(secondTableSave.payload.ops.map(op => op.id), [draftedTable.id]);
+  const latestTable = { ...draftedTable, ...secondTableSave.payload.ops[0].patch };
+  newerBoundaryDraft.echo([paragraph("original", "Original"), latestTable], {
+    rev: 22,
+    request_id: secondTableSave.payload.request_id,
+  });
+  secondTableSave.resolve({ saved: true, rev: 22, request_id: secondTableSave.payload.request_id });
+  await tick();
+  assert.equal(currentTableNode()?.content?.length, 3,
+    "the newest table acknowledgement preserves the edited pinned boundary");
+  assert.equal(newerBoundaryDraft.canvas.hasPendingChanges(), false,
+    "the newer boundary draft settles after its exact full-run acknowledgement");
+  newerBoundaryDraft.close();
+
   const standalone = document.createElement("bp-paper-canvas");
   standalone.blocks = [paragraph("standalone", "Legacy host")];
   document.body.appendChild(standalone);

@@ -72,6 +72,10 @@
 # bash 3.2 compatible (macOS system bash).
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/principal-gate.sh"  # writing-tier + declared-host (task-b512e2d54791f042)
 # set -m FIRST (PDF-D28): job control gives each backgrounded stub listener its
 # OWN process group — the reap in teardown is group-wide and straggler-proof.
 set -m
@@ -118,6 +122,7 @@ MODE="run"
 case "${1:-}" in
   "")            MODE="run" ;;
   --plan)        MODE="plan" ;;
+  --selftest)    MODE="selftest" ;;
   --negctl)      MODE="negctl" ;;
   -h|--help)     sed -n '3,68p' "$0"; exit 0 ;;
   *) printf '%s: unknown argument %s (try --help)\n' "$SELF" "$1" >&2; exit 3 ;;
@@ -162,16 +167,191 @@ canon_json() { # compact, key-sorted JSON of the argument (for map equality)
 TARGET_BASE=""; TARGET_TOKEN=""
 
 curl_beat() { # worker status ttl_s capacity_json -> response body on stdout
-  curl -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
+  bp_curl_body -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
     -H "Authorization: Bearer $TARGET_TOKEN" \
     -H 'Content-Type: application/json' \
     -d "{\"worker\":\"$1\",\"status\":\"$2\",\"ttl_s\":$3,\"capacity\":$4}"
 }
 
 curl_roster() { # -> body on stdout
-  curl -sS --max-time 10 -H "Authorization: Bearer $TARGET_TOKEN" \
+  bp_curl_body -sS --max-time 10 -H "Authorization: Bearer $TARGET_TOKEN" \
     "$TARGET_BASE/v1/fleet/roster"
 }
+
+# ═════════════════════════════════════════════════════════════════════════════
+# THE PRINCIPAL GATE (task-b512e2d54791f042, 2026-09-11) — sibling of the
+# cmux-smoke gate landed by PR #17717.
+#
+# Everything this harness writes rides `curl_beat` / the mutate POST with
+# $TARGET_TOKEN attached, and until this slice the FIRST judgement the run made
+# about that credential was a POST's own status: no read established WHO the
+# bearer was, and nothing asserted that $TARGET_BASE is the disposable scratch
+# instance this proof is supposed to drive. A scratch.env carrying a real
+# server's base+token — a stale pointer, a hand-edited env, a pointer inherited
+# from another harness — pushed fleet heartbeats and createOrReplace drafts
+# into THAT box, successfully and silently.
+#
+# So before the first POST the run asserts, in this order:
+#   1. the PARSED host of $TARGET_BASE is one this proof DECLARES
+#      ($PDF_EXPECT_HOSTS, default "localhost 127.0.0.1" — the two spellings
+#      pds-scratch-target.sh's own PHX_HOST default resolves to). Asserted
+#      BEFORE any request, so an undeclared host is never probed. Never a
+#      substring: `*localhost*` accepts http://localhost.evil.example.
+#   2. the bearer's auth_tier, read off GET $TARGET_BASE/v1/capabilities, is a
+#      WRITING tier. /v1/capabilities answers a read-only caller perfectly well,
+#      so the refusal is made on the receipt's SHAPE, not on its status.
+# EXIT 5 = REFUSED · 6 = CANNOT READ (distinct from this harness's 1/2/3).
+# ═════════════════════════════════════════════════════════════════════════════
+
+PDF_EXPECT_HOSTS="${PDF_EXPECT_HOSTS:-localhost 127.0.0.1}"
+
+pg_refuse()      { printf 'REFUSED: %s\n' "$*" >&2; exit 5; }
+pg_cannot_read() { printf 'CANNOT READ: %s\n' "$*" >&2; exit 6; }
+
+principal_gate() {  # BASE TOKEN — refuses, or returns having written nothing
+  local base="$1" token="$2" tier
+  pg_host_in_set "$PDF_EXPECT_HOSTS" "$base" || pg_refuse "the resolved target is '$base' (host '$(pg_url_host "$base")'), but this proof declares host(s) '$PDF_EXPECT_HOSTS'. It POSTs fleet heartbeats and createOrReplace drafts — it will not post them to a box it was not pointed at. Re-point PDS_SCRATCH_POINTER at a scratch target, or set PDF_EXPECT_HOSTS deliberately. Nothing has been written."
+  tier="$(pg_capabilities_tier "$base" "$token")" || pg_cannot_read "GET $base/v1/capabilities did not answer with a parseable receipt, so this run cannot know whose ledger it is about to write. Nothing has been written."
+  pg_writer_tier "$tier" || pg_refuse "the bearer from scratch.env resolves to auth_tier=\"${tier:-<absent>}\" on $base, which is not a writing tier. Nothing has been written."
+  printf '      principal gate: auth_tier=%s (writing) · host=%s ∈ declared {%s}\n' \
+    "$tier" "$(pg_url_host "$base")" "$PDF_EXPECT_HOSTS"
+}
+
+# ── PDF_PRINCIPAL_GATE_PROBE — the --selftest's re-entry, and ONLY that ──────
+# The shortest honest path from a pointer to this harness's FIRST write: source
+# scratch.env, run the gate, and on a pass issue exactly one beat POST. It
+# exists because the normal path reaches its first POST only AFTER booting a
+# real scratch instance (minutes, a postgres, a port) — a price no offline
+# mutation matrix can pay, and a boot is not what the gate is about. The gate
+# called here is the SAME function the run path calls, on the same inputs.
+if [ "${PDF_PRINCIPAL_GATE_PROBE:-0}" = "1" ]; then
+  [ -f "${PDS_SCRATCH_POINTER:-}" ] || { printf 'CANNOT READ: PDF_PRINCIPAL_GATE_PROBE needs PDS_SCRATCH_POINTER to name an existing pointer file\n' >&2; exit 6; }
+  # shellcheck disable=SC1090
+  . "$(cat "$PDS_SCRATCH_POINTER")/scratch.env"
+  TARGET_BASE="$PDS_SCRATCH_BASE"
+  TARGET_TOKEN="$PDS_SCRATCH_TOKEN"
+  principal_gate "$TARGET_BASE" "$TARGET_TOKEN"
+  curl_beat "pg-probe-worker" "idle" 1 '{"size_class":"standard","slots_total":1,"slots_free":1}' >/dev/null 2>&1 || true
+  exit 0
+fi
+
+# ═════════════════════════════════════════════════════════════════════════════
+# --selftest — the principal gate, proven OFFLINE (task-b512e2d54791f042).
+#
+# Each arm is a re-exec of THIS file (through PDF_PRINCIPAL_GATE_PROBE, above)
+# against a FAKE curl that records every request it is handed to a log. The
+# assertion that matters is never the exit code alone: it is the exit code
+# BESIDE the recorded argv — a gate that refused AFTER the beat would show
+# rc!=0 and a POST in the log, which is exactly the failure this matrix exists
+# to catch. So the refusing arms assert ZERO recorded POSTs and the POSITIVE
+# CONTROL asserts the opposite; without it, a harness that refused
+# unconditionally would pass every refusing arm and prove nothing.
+#
+# Each arm asserts its own PRECONDITION (was the capabilities probe argv
+# recorded?), so a child that died before reaching the gate cannot pass as a
+# vacuous zero. A fifth, STATIC arm reads this file and asserts the run path's
+# own `principal_gate` call sits ABOVE its first write — that is what binds the
+# probe mode's verdict to the path an operator actually runs.
+# ═════════════════════════════════════════════════════════════════════════════
+pg_selftest() {
+  local self st_pass=0 st_fail=0
+  self="$(cd -P -- "$(dirname -- "$0")" && pwd)/$(basename "$0")"
+  st_ok()  { echo "  ✓ $1"; st_pass=$((st_pass + 1)); }
+  st_bad() { echo "  ✗ $1"; st_fail=$((st_fail + 1)); }
+
+  # arm LABEL TIER BASE EXPECT_WRITES(yes|no) EXPECT_RC(zero|nonzero) PROBE_REACHED(yes|no)
+  arm() {
+    local label="$1" tier="$2" base="$3" want_writes="$4" want_rc="$5" probe="$6"
+    local bin log out rc=0 n
+    bin="$(mktemp -d "${TMPDIR:-/tmp}/pdf-gate-selftest.XXXXXX")"
+    log="$bin/argv.log"; out="$bin/run.out"
+    : >"$log"
+    mkdir -p "$bin/target"
+    printf 'export PDS_SCRATCH_BASE="%s"\nexport PDS_SCRATCH_TOKEN="selftest-token"\n' "$base" >"$bin/target/scratch.env"
+    printf '%s\n' "$bin/target" >"$bin/pointer"
+
+    # THE FAKE curl: records FIRST, answers second, so a request that reaches it
+    # is logged even when the answer fails. Speaks bp-curl's contract (body to
+    # the -o file, http_code on stdout); lib/bp-curl.sh invokes `curl` BY NAME,
+    # which is what makes the stub reachable. No network, no token.
+    cat >"$bin/curl" <<FAKE
+#!/usr/bin/env bash
+dest=""; url=""; method="GET"; prev=""
+for a in "\$@"; do
+  case "\$prev" in -o|--output) dest="\$a" ;; -X|--request) method="\$a" ;; esac
+  case "\$a" in http://*|https://*) url="\$a" ;; esac
+  prev="\$a"
+done
+printf '%s %s\n' "\$method" "\$url" >> "$log"
+case "\$url" in
+  */v1/capabilities) body='{"auth_tier":"$tier"}' ;;
+  *) body='{"doc":{"last_seen":"2026-09-11T00:00:00Z"},"documents":[]}' ;;
+esac
+[ -n "\$dest" ] && printf '%s' "\$body" > "\$dest"
+printf '200'
+exit 0
+FAKE
+    chmod +x "$bin/curl"
+
+    env -i PATH="$bin:/usr/bin:/bin" HOME="$bin" TMPDIR="$bin" \
+        PDF_PRINCIPAL_GATE_PROBE=1 PDS_SCRATCH_POINTER="$bin/pointer" \
+        PDF_EXPECT_HOSTS="localhost 127.0.0.1" \
+        bash "$self" >"$out" 2>&1 || rc=$?
+
+    n="$(/usr/bin/grep -c '^POST ' "$log" 2>/dev/null || true)"
+    case "$want_rc" in
+      nonzero) if [ "$rc" -ne 0 ]; then st_ok "$label: exit $rc (non-zero)"; else st_bad "$label: exit 0 — the gate did NOT refuse"; fi ;;
+      zero)    if [ "$rc" -eq 0 ]; then st_ok "$label: exit 0"; else st_bad "$label: exit $rc — a good principal must NOT be refused"; fi ;;
+    esac
+    case "$want_writes" in
+      no)  if [ "$n" -eq 0 ]; then st_ok "$label: ZERO write requests recorded (read back from the fixture's own log)"; else st_bad "$label: $n POST(s) recorded — the refusal came TOO LATE"; fi ;;
+      yes) if [ "$n" -gt 0 ]; then st_ok "$label: $n write request(s) recorded — the first POST IS reached on a good principal"; else st_bad "$label: ZERO writes recorded — the gate refuses unconditionally, so the refusing arms prove nothing"; fi ;;
+    esac
+    if [ "$want_rc" = nonzero ]; then
+      if /usr/bin/grep -q '^REFUSED: ' "$out"; then st_ok "$label: the refusal NAMES itself on stderr (REFUSED:)"; else st_bad "$label: exited non-zero with no REFUSED: line"; fi
+    fi
+    case "$probe" in
+      yes) if /usr/bin/grep -q '^GET .*/v1/capabilities$' "$log"; then st_ok "$label: the capabilities receipt WAS taken (probe argv recorded) — this arm reached the gate"; else st_bad "$label: no capabilities probe in the log — the child died earlier, so this arm measured nothing"; fi ;;
+      no)  if /usr/bin/grep -q '^GET .*/v1/capabilities$' "$log"; then st_bad "$label: the capabilities probe ran — this arm must refuse on the HOST, before any request"; else st_ok "$label: refused on the declared host before ANY request (no probe argv at all)"; fi ;;
+    esac
+    rm -rf "$bin"
+  }
+
+  echo "=== $(basename "$0") --selftest: the principal gate, offline ==="
+  echo ""
+  echo "--- arm 1: WRONG TIER (auth_tier=none, declared host) ---"
+  arm "wrong-tier"      "none"  "http://localhost:4999"              no  nonzero yes
+  echo ""
+  echo "--- arm 2: UNDECLARED HOST (writing tier, scratch.env points elsewhere) ---"
+  arm "wrong-host"      "admin" "http://evil.example:4000"           no  nonzero no
+  echo ""
+  echo "--- arm 3: SUBSTRING LOOKALIKE (a *host* match would accept this one) ---"
+  arm "host-lookalike"  "admin" "http://localhost.evil.example:4000" no  nonzero no
+  echo ""
+  echo "--- arm 4: POSITIVE CONTROL (auth_tier=admin, declared host) ---"
+  arm "good-principal"  "admin" "http://127.0.0.1:4999"              yes zero   yes
+  echo ""
+  echo "--- arm 5: STATIC — the RUN PATH's gate call sits above its first write ---"
+  local gate_line write_line
+  # awk, never `| head -1`: under `set -o pipefail` head's early exit SIGPIPEs
+  # the grep and the pipeline returns 141 — a line number that reads as absent.
+  gate_line="$(/usr/bin/grep -n '^principal_gate "\$TARGET_BASE" "\$TARGET_TOKEN"' "$self" | /usr/bin/awk -F: 'NR==1{print $1}')"
+  write_line="$(/usr/bin/grep -n 'curl_beat "' "$self" | /usr/bin/grep -v 'pg-probe-worker' | /usr/bin/awk -F: 'NR==1{print $1}')"
+  if [ -n "$gate_line" ] && [ -n "$write_line" ] && [ "$gate_line" -lt "$write_line" ]; then
+    st_ok "run-path-order: principal_gate at line $gate_line precedes the first curl_beat at line $write_line"
+  else
+    st_bad "run-path-order: gate line '${gate_line:-none}' does not precede the first write line '${write_line:-none}' — the probe mode's verdict would not bind the path operators run"
+  fi
+
+  echo ""
+  echo "=== SELFTEST: $st_pass passed, $st_fail failed ==="
+  [ "$st_fail" -eq 0 ]
+}
+
+if [ "$MODE" = "selftest" ]; then
+  pg_selftest
+  exit $?
+fi
 
 beat_last_seen() { # beat-response JSON on stdin -> doc.last_seen, or ""
   python3 -c '
@@ -279,14 +459,14 @@ census_page() { # offset -> raw page body on stdout
   if [ -n "$CENSUS_ID_PREFIX" ]; then
     url="$url&filter%5B_id%5D%5Bcontains%5D=$CENSUS_ID_PREFIX"
   fi
-  curl -sS --max-time 60 -H "Authorization: Bearer $TARGET_TOKEN" "$url"
+  bp_curl_body -sS --max-time 60 -H "Authorization: Bearer $TARGET_TOKEN" "$url"
 }
 
 census_fetch_page() { # offset — sets CENSUS_PARSED/CENSUS_HDR, or refuses
   local off="$1" attempt=0 body
   while :; do
     attempt=$((attempt + 1))
-    body="$(census_page "$off")"
+    body="$(census_page "$off" || true)"   # rc 22 on non-2xx: the guards below decide
     # ONE python pass per page: a header line `OK<TAB>n<TAB>total`, then one
     # `M|X<TAB>id` line per returned row (M = matches the prefix).
     CENSUS_PARSED="$(printf '%s' "$body" | P="$CENSUS_ID_PREFIX" python3 -c '
@@ -345,7 +525,7 @@ census_ours() { # sets CENSUS to the count of raw task rows carrying the prefix
 # <<< CENSUS-WALK END
 
 delete_doc() { # id type — dataset-in-path delete (PDF-D44d); body swallowed
-  curl -sS --max-time 10 -X POST "$TARGET_BASE/v1/data/mutate/production" \
+  bp_curl_body -sS --max-time 10 -X POST "$TARGET_BASE/v1/data/mutate/production" \
     -H "Authorization: Bearer $TARGET_TOKEN" -H 'Content-Type: application/json' \
     -d "{\"mutations\":[{\"delete\":{\"id\":\"$1\",\"type\":\"$2\"}}]}" >/dev/null 2>&1 || true
 }
@@ -394,7 +574,7 @@ show_ledger() {
 }
 
 pull_roster() { # dest — one LIVE roster snapshot for a dispatch run
-  curl_roster > "$1"
+  curl_roster > "$1" || true   # rc 22 on non-2xx: the -s guard below decides
   [ -s "$1" ] || { efail "live roster pull returned an empty body"; return 0; }
 }
 
@@ -424,7 +604,7 @@ run_stub_loop() { # worker profile_file logfile
   local worker="$1" pf="$2" log="$3" cap
   while true; do
     cap="$(cat "$pf" 2>/dev/null || printf 'null')"
-    curl -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
+    bp_curl_body -sS --max-time 5 -X POST "$TARGET_BASE/v1/fleet/beat" \
       -H "Authorization: Bearer $TARGET_TOKEN" \
       -H 'Content-Type: application/json' \
       -d "{\"worker\":\"$worker\",\"status\":\"idle\",\"ttl_s\":$TTL_S,\"capacity\":$cap}" >>"$log" 2>/dev/null || true
@@ -596,9 +776,10 @@ TARGET_BASE="$PDS_SCRATCH_BASE"
 TARGET_TOKEN="$PDS_SCRATCH_TOKEN"
 [ -n "$TARGET_BASE" ] && [ -n "$TARGET_TOKEN" ] || { abort 0 "env:scratch-env-incomplete" "scratch.env lacks PDS_SCRATCH_BASE/PDS_SCRATCH_TOKEN"; exit 2; }
 info "target $TARGET_BASE (token from scratch.env — never printed)"
+principal_gate "$TARGET_BASE" "$TARGET_TOKEN"
 
 ROSTER_TMP="$WORKDIR/roster-r0.json"
-PRECODE="$(curl -sS -o "$ROSTER_TMP" -w '%{http_code}' --max-time 10 \
+PRECODE="$(bp_curl_code -sS -o "$ROSTER_TMP" --max-time 10 \
   -H "Authorization: Bearer $TARGET_TOKEN" "$TARGET_BASE/v1/fleet/roster" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
 ENVELOPE_OK="$(python3 -c '
 import json, sys
@@ -760,6 +941,8 @@ cat > "$FILER" <<'FILER_EOF'
 # pdf-filer.sh — proof stub for FLEET_FILE_ORDER_BIN (PDF-D54 pin 3).
 # 5 positional args: id title assignee brief criterion. ALWAYS exits 0.
 set -u
+# shellcheck disable=SC1090
+. "$PDF_BP_CURL"   # 429 backoff, shared (task-c2f96f8121c64601)
 ID="${1:?id}"; TITLE="${2:?title}"; WHO="${3:?assignee}"; BRIEF="${4:?brief}"; CRIT="${5:?criterion}"
 BODY=$(python3 - "$ID" "$TITLE" "$WHO" "$BRIEF" "$CRIT" <<'PY'
 import json, sys
@@ -771,7 +954,7 @@ doc = {"_id": i, "_type": "task", "title": t, "kind": "task",
 print(json.dumps({"mutations": [{"createOrReplace": doc}]}))
 PY
 )
-RESP=$(curl -sS --max-time 10 -X POST "$PDF_TARGET_BASE/v1/data/mutate/production" \
+RESP=$(bp_curl_body -sS --max-time 10 -X POST "$PDF_TARGET_BASE/v1/data/mutate/production" \
   -H "Authorization: Bearer $PDF_TARGET_TOKEN" -H 'Content-Type: application/json' \
   -d "$BODY" 2>&1 || true)
 case "$RESP" in
@@ -781,6 +964,7 @@ esac
 exit 0
 FILER_EOF
 chmod +x "$FILER"
+export PDF_BP_CURL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"
 export PDF_TARGET_BASE="$TARGET_BASE"
 export PDF_TARGET_TOKEN="$TARGET_TOKEN"
 export PDF_FILER_LOG="$FILER_LOG"

@@ -123,8 +123,16 @@ defmodule BarkparkWeb.MediaShareDatasetConfinementTest do
   # Assert the SHAPE (never a 2xx) rather than pinning a code, so this stays
   # true across the 403 and 404 arms of the gate.
   defp assert_refused(conn) do
-    assert conn.status in [401, 403, 404],
+    # WHICH GATE: the NOT-FOUND oracle — 404 `not_found`, not a 403. A
+    # cross-tenant caller must not learn the resource exists, so the refusal is
+    # indistinguishable from a route miss BY DESIGN. Pinning it is what stops
+    # the assertion from also passing on a genuine 403 (which would leak
+    # existence) or on an authentication failure.
+    assert conn.status == 404,
            "expected the share's dataset fence to refuse, got #{conn.status}"
+
+    err = Jason.decode!(conn.resp_body)["error"]
+    assert err["code"] == "not_found"
 
     conn
   end

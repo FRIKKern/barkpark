@@ -146,14 +146,46 @@ try {
     '[data-test-id="paper-featured-image-placeholder"]'
   );
   assert.ok(placeholder, "the empty field-image offers its real canvas affordance");
+  placeholder.focus();
   placeholder.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   await settle();
 
   const browser = document.querySelector("bp-asset-browser");
   assert.ok(browser && !browser.hidden, "the placeholder opens the real asset browser");
+  assert.equal(document.activeElement, browser.querySelector(".bp-ab-search"),
+    "opening the library moves focus into its search field");
+  document.activeElement.dispatchEvent(new window.KeyboardEvent("keydown", {
+    key: "Escape", bubbles: true, cancelable: true,
+  }));
+  assert.equal(browser.hidden, true, "Escape closes the media library");
+  assert.equal(document.activeElement, placeholder,
+    "Escape returns focus to the rendered image affordance");
+
+  placeholder.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  await settle();
   const firstCard = browser.querySelector(".bp-ab-card");
   assert.ok(firstCard, "the scoped media result renders as a selectable card");
+  const search = browser.querySelector(".bp-ab-search");
+  placeholder.focus();
+  placeholder.dispatchEvent(new window.KeyboardEvent("keydown", {
+    key: "Tab", bubbles: true, cancelable: true,
+  }));
+  assert.equal(document.activeElement, search,
+    "Tab cannot leave an open library for an external control");
+  search.focus();
+  search.dispatchEvent(new window.KeyboardEvent("keydown", {
+    key: "Tab", shiftKey: true, bubbles: true, cancelable: true,
+  }));
+  assert.equal(document.activeElement, firstCard,
+    "Shift+Tab at the first control wraps to the last library control");
+  firstCard.dispatchEvent(new window.KeyboardEvent("keydown", {
+    key: "Tab", bubbles: true, cancelable: true,
+  }));
+  assert.equal(document.activeElement, search,
+    "Tab at the last control remains trapped inside the modal");
   firstCard.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  assert.equal(document.activeElement, placeholder,
+    "choosing an asset returns focus to the invoking image affordance");
   first.canvas.flushPendingChanges();
 
   assert.deepEqual(first.batches, [
@@ -164,7 +196,11 @@ try {
         patch: {
           value: JSON.stringify({
             url: "/media/first.png",
-            assetId: "asset-first",
+            // Gyldendal friction 78: the picker stores the CANONICAL bare blob id —
+            // the asset browser hands over the document id ("asset-first") and the
+            // picker strips the prefix so a fresh pick spells assetId like the
+            // migration did (bpCanonicalAssetId).
+            assetId: "first",
             alt: "first.png",
           }),
         },
@@ -278,7 +314,7 @@ try {
         patch: {
           value: JSON.stringify({
             url: "/media/fast.png",
-            assetId: "asset-fast",
+            assetId: "fast",
             alt: "fast.png",
           }),
         },
@@ -327,7 +363,7 @@ try {
         patch: {
           value: JSON.stringify({
             url: "/media/uploaded.png",
-            assetId: "asset-uploaded",
+            assetId: "uploaded",
           }),
         },
       },

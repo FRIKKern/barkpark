@@ -125,6 +125,7 @@
                   "duplicate_of",
                   "duplicate_task",
                   "event_not_found",
+                  "export_already_running",
                   "export_build_failed",
                   "export_transport_failed",
                   "forbidden",
@@ -175,6 +176,7 @@
                   "runtime_unavailable",
                   "schema_has_documents",
                   "schema_unknown",
+                  "searchable_text_too_large",
                   "session_restarting",
                   "session_start_failed",
                   "share_expired",
@@ -280,6 +282,15 @@
             "description": "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello); or 'field in a,b,c' / 'field not in a,b,c'; or 'field is null' / 'field is not null'; or 'field hasStrong tag:min' (weighted-tag strength floor, e.g. tags hasStrong epic:50). Repeatable — every --filter is ANDed (two clauses on one field must use different operators). An unparseable filter is a 400 invalid_filter, never silently ignored.",
             "in": "query",
             "name": "filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable-document-id prefix: exactly filter[_id][startsWith], and a spelling of that already-allowlisted operator rather than new query semantics. LITERAL — % and _ are characters here, not wildcards. Blank, non-string, or colliding with an _id/doc_id filter clause is a 400 invalid_filter NAMING id_prefix; it is never a silent unfiltered 200. Also honoured by GET /api/documents/:type.",
+            "in": "query",
+            "name": "id_prefix",
             "required": false,
             "schema": {
               "type": "string"
@@ -3339,6 +3350,15 @@
             "description": "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello); or 'field in a,b,c' / 'field not in a,b,c'; or 'field is null' / 'field is not null'; or 'field hasStrong tag:min' (weighted-tag strength floor, e.g. tags hasStrong epic:50). Repeatable — every --filter is ANDed (two clauses on one field must use different operators). An unparseable filter is a 400 invalid_filter, never silently ignored.",
             "in": "query",
             "name": "filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable-document-id prefix: exactly filter[_id][startsWith], and a spelling of that already-allowlisted operator rather than new query semantics. LITERAL — % and _ are characters here, not wildcards. Blank, non-string, or colliding with an _id/doc_id filter clause is a 400 invalid_filter NAMING id_prefix; it is never a silent unfiltered 200. Also honoured by GET /api/documents/:type.",
+            "in": "query",
+            "name": "id_prefix",
             "required": false,
             "schema": {
               "type": "string"
@@ -6745,6 +6765,15 @@
         "operationId": "task.events",
         "parameters": [
           {
+            "description": "Narrow the replay to ONE task's events, oldest-first. Optional — omit for the global feed. This is the per-row audit view: `bp task events <id> --payload` answers 'who claimed and closed this row, on which epoch, when' from `payload.actor` without reading the (mutable) live claim map off the document. Composes with --since, so `--since <cursor> <id>` is a per-row tail.",
+            "in": "query",
+            "name": "doc_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Resume cursor: return only events whose id is greater than this (the last event id you saw). Omit to replay from the start of the backlog.",
             "in": "query",
             "name": "since",
@@ -6772,7 +6801,7 @@
             }
           },
           {
-            "description": "Carry each event's typed payload under `payload`. THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got.",
+            "description": "Carry each event's typed payload under `payload`. THE ATTRIBUTION CHANNEL: a `task.claimed` / `task.closed` event's `payload.actor` is `{worker, epoch}` — the identity the CAS fenced on — so close provenance is reconstructable from the feed alone (`task.closed` also carries `payload.closed_by`). THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got.",
             "in": "query",
             "name": "payload",
             "required": false,
@@ -8180,6 +8209,75 @@
           "github"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/tasks/{doc_id}/discharges": {
+      "post": {
+        "operationId": "task.discharges",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Post a merged PR's `Discharges:` citations so every SIBLING row the merge also satisfied learns about it. doc_id is the PRIMARY row — the one the PR's single `Task:` trailer credited; --body is the PR body, and the server parses every column-0 `Discharges: <doc_id> [c<N>]` line out of it (the grammar lives server-side in Barkpark.Tasks.Citations, so there is exactly ONE implementation and no client can drift from it). Each cited row gets a readable discharge_marks note beside the criterion it names, carrying --pr, --commit and the primary row id. NON-HOLDER, like `landed` and `renew`: a push-to-main workflow holds no claim, so there is no worker_id and no observed_epoch. It NEVER sets met=true and never touches lifecycle, the claim or evidence — a back-link may ROUTE a reader, never close a row; only the row's holder decides. A citation naming the primary row itself is skipped (status self), and an unknown id is reported (status not_found) rather than failing the call, because one bad line in a PR body must not swallow the good ones. CI calls this from scripts/landed-mark.sh after a merge; an operator calls it by hand to repair a merge whose citations were never posted.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/schemas/{dataset}/{name}": {
@@ -9823,7 +9921,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Record that this task's work LANDED — a commit, a PR number, a sentence — WITHOUT holding its claim. This is the verb CI can actually call: there is no worker_id and no observed_epoch, because a push-to-main workflow holds neither, which is exactly why `bp task stamp` refuses it (409 not_holder) and why `bp task close` is not CI's to call. --commit/--pr/--note are UNIONED into content.landed, so a second landing accumulates a second commit instead of replacing the first, and a close's own land digest is never clobbered (one merge rule, shared with close). --criterion N (ZERO-BASED — the first criterion is 0) additionally flips ONE acceptance criterion to met=true with --note as its evidence, and ONLY when that row is MERGE-SHAPED: it carries \"merge_gate\": true, or its wording says MERGE-GATED / MERGE GATE / PR merged / merged to main. Any other index is refused (409 criterion_not_merge_shaped) and so is a row that is already met (409 criterion_already_met — a landing notice never overwrites somebody's proof). There is no override flag: unlike stamp's --merge-gated, here the predicate gates a PERMIT rather than a refusal, so a false positive would be a SILENT fabricated done and an explicit \"merge_gate\": false on the criterion VETOES the wording. --note is REQUIRED with --criterion (the note IS the evidence). Emits a task.landed event carrying the calling token id. Nothing else is writable through this verb: not lifecycle_status, not the claim, not a second criterion.",
+        "summary": "Record that this task's work LANDED — a commit, a PR number, a sentence — WITHOUT holding its claim. This is the verb CI can actually call: there is no worker_id and no observed_epoch, because a push-to-main workflow holds neither, which is exactly why `bp task stamp` refuses it (409 not_holder) and why `bp task close` is not CI's to call. --commit/--pr/--note/--files are UNIONED into content.landed, so a second landing accumulates a second commit instead of replacing the first, and a close's own land digest is never clobbered (one merge rule, shared with close). --criterion N (ZERO-BASED — the first criterion is 0) additionally flips ONE acceptance criterion to met=true with --note as its evidence, and ONLY when that row is MERGE-SHAPED: it carries \"merge_gate\": true, or its wording says MERGE-GATED / MERGE GATE / PR merged / merged to main. Any other index is refused (409 criterion_not_merge_shaped) and so is a row that is already met (409 criterion_already_met — a landing notice never overwrites somebody's proof). There is no override flag: unlike stamp's --merge-gated, here the predicate gates a PERMIT rather than a refusal, so a false positive would be a SILENT fabricated done and an explicit \"merge_gate\": false on the criterion VETOES the wording. --note is REQUIRED with --criterion (the note IS the evidence). Emits a task.landed event carrying the calling token id. Nothing else is writable through this verb: not lifecycle_status, not the claim, not a second criterion.",
         "tags": [
           "task"
         ],
@@ -11267,6 +11365,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Narrow the page to the DIRECT children of this parent task id (`parent_id` is an accepted alias server-side). This is the parent-scoped read that carries updated_at per row — the close-time field a \"which children closed between T1 and T2\" audit needs. `bp task get <parent>` renders the same rail but its child summaries are a lighter card; use this verb when you are querying by time rather than reading one task.",
+            "in": "query",
+            "name": "parent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -12101,7 +12208,7 @@
               }
             }
           },
-          "description": "Request body fields: url.",
+          "description": "Request body fields: url, name.",
           "required": true
         },
         "responses": {
@@ -12391,7 +12498,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. Emits a task.reparented event; the response carries the destination rail_rev + the source from_rail_rev.",
+        "summary": "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. The response carries the destination rail_rev + the source from_rail_rev. EVENT SEMANTICS: a task.reparented event is emitted ONLY when the parent actually CHANGES. A same-parent call is an idempotent no-op — the server returns the row unchanged, writes nothing, and emits NO event and NO broadcast (Barkpark.Tasks.Move: the `same_parent?` arm returns `{:noop, doc}` and never reaches the mutation-event/broadcast path that do_move/4 owns). Do NOT build de-duplication or audit logic around phantom no-op events; they have never existed. The no-op is NOT free, though: BarkparkWeb.Plugs.RateLimit runs as pipeline middleware BEFORE the controller and bills purely by HTTP method class, so a same-parent move still CONSUMES one write-bucket slot.",
         "tags": [
           "task"
         ],
@@ -14145,7 +14252,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Publish (upsert) a paper from a portable-doc block payload. blocks[] is the door: 56 renderer block types (chart, diagram, asciicast, diff, filetree, pipeline, …) with value-keyed inline leaves — items and cells are objects carrying a value key, never bare strings (a bare string publishes clean and renders blank). Guide: /papers/paper-authoring-excellence. body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables in the terminal reader. Reader spacing law: empty paragraph blocks are editor scaffolds, not published layout — remove them from ingest payloads; shared reader tokens own section rhythm.",
+        "summary": "Publish (upsert) a paper from a portable-doc block payload. blocks[] is the door: 56 renderer block types (chart, diagram, asciicast, diff, filetree, pipeline, …) with value-keyed inline leaves — items and cells are objects carrying a value key, never bare strings (a bare string publishes clean and renders blank). Guide: /papers/paper-authoring-excellence. body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables in the terminal reader. Reader spacing law: empty paragraph blocks are editor scaffolds, not published layout — remove them from ingest payloads; shared reader tokens own section rhythm. Composition caps, scoped to papers tagged epic-cycle-wave-paper: at most 80 top-level blocks and at most 16 top-level headings. Past either, the publish is refused 422 invalid_epic_paper_quality with details.failures naming top_level_block_overload / top_level_heading_overload and details.limits carrying that cap's max and your actual count. Untagged papers are unaffected. No if-rev on this verb: it is an unfenced create-or-replace, and a body carrying ifRev/if_rev is refused 400. The fenced path is POST /v1/plugins/bulldocs/papers/:slug/ops (bp bulldocs patch --if-rev), which rejects a stale rev with 412 precondition_failed.",
         "tags": [
           "bulldocs"
         ],
@@ -16490,7 +16597,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated; a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done.",
+        "summary": "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES the criterion's exact stored wording, and it must ride a FILE: --criterion-text-file <path> (or `-` for stdin) reads the bytes without a shell ever touching them. Do NOT retype it inline as --criterion-text \"…\" — criterion wording is MARKDOWN, and a backticked code span inside a double-quoted shell argument is COMMAND SUBSTITUTION, so bash/zsh EXECUTE it and bp is handed text that is not the stored wording. The index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated \"<why this stamp is yours to make>\" (the override takes a REASON, and a bare --merge-gated is refused; the reason lands at content.merge_gate_autostamp.stamp_overrides[].reason); a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text-file) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done.",
         "tags": [
           "task"
         ],

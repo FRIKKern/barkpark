@@ -5,8 +5,8 @@ defmodule Barkpark.Tasks.Queue do
   # definition is what makes "claim returns exactly what ready would have picked"
   # a property of the code, not a documentation promise.
   #
-  # Readiness gating happens on FOUR independent axes, all folded into the base
-  # `WHERE` so ready/1 and the atomic claim can never disagree:
+  # Readiness gating happens on FOUR independent axes (axis 4 is a PAIR), all
+  # folded into the base `WHERE` so ready/1 and the atomic claim can never disagree:
   #
   #   1. `blocks`-edge gate (task_edges rows) — the authoritative graph store.
   #   2. `content.dependencies` gate — the doc_id list on the task itself. A dep
@@ -17,8 +17,19 @@ defmodule Barkpark.Tasks.Queue do
   #      published-task mutate leaves behind) is suppressed while its published
   #      twin exists in scope, so a twinned task yields exactly ONE ready/claimable
   #      row (published-wins, matching `Tasks.Board`/`Content.published_id`).
-  #   4. queue_gate — only a missing/null legacy gate or the exact executable-v1
-  #      shape is admitted. Non-executable and malformed persisted gates fail closed.
+  #   4. `QueueGate.executable_query/0` — TWO conjuncts under one name, and the
+  #      second is the one this list used to hide (task-2df8d2db70e2070d):
+  #        4a. the CLAIM LEASE. A row whose `content.claim` names a worker is
+  #            ready on exactly three arms — `claim.closed_at` non-blank,
+  #            `claim.closed_by` non-blank, or `claim.ts_iso` well-formed AND
+  #            older than `QueueGate.lease_ttl_seconds/0` — and fails CLOSED
+  #            otherwise, live stamp and unparseable stamp alike. So a claim
+  #            does NOT take a row off the queue; a LIVE LEASE does, and a
+  #            closed or lapsed one leaves the worker's name on the ready card
+  #            (17 of 300 live cards on 2026-09-10: 16 closed, 1 lapsed).
+  #        4b. queue_gate — only a missing/null legacy gate or the exact
+  #            executable-v1 shape is admitted. Non-executable and malformed
+  #            persisted gates fail closed.
   #
   # WHAT IS **NOT** AN AXIS — `documents.status` (tgw10-bl-drafts-in-ready-pool).
   # There is no `d.status == "published"` predicate anywhere below, and that is a

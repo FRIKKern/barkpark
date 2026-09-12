@@ -1,6 +1,7 @@
 package pdrender
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -19,10 +20,74 @@ import (
 // The block renderer then word-wraps the returned string to its known width.
 func (ir InlineRenderer) Inline(nodes []any, ctx RenderCtx) string {
 	var b strings.Builder
-	for _, n := range nodes {
+	for _, n := range unwrapBlockWrappers(nodes) {
 		b.WriteString(ir.node(n, ctx, false))
 	}
 	return b.String()
+}
+
+// unwrapBlockWrappers splices a BLOCK-level node that is sitting inside an
+// INLINE array — `{"type":"paragraph","content":[…]}` or
+// `{"type":"list-item","content":[…]}` — down to its `content`, because such a
+// node carries its text ONE LEVEL DEEPER than the inline walk looks: `typed`'s
+// default arm reads only `children`, finds none, and the whole node composes to
+// "". Measured 2026-09-02 on the live corpus: 75 list items across 4 published
+// papers rendered as an empty bullet with their prose intact in storage.
+//
+// This is the Go leg of the law `Render.Inline.unwrap_block_wrappers/1` set in
+// inline.ex (PR #15701) and `unwrapBlockWrappers` in
+// js/packages/react/src/inline.tsx. All three answer to ONE fixture,
+// api/test/support/fixtures/inline-block-wrapper.json, read here by
+// inline_block_wrapper_parity_test.go.
+//
+// ONE LEVEL, and only when `content` is a NON-EMPTY list — a wrapper with empty
+// content keeps today's behaviour, and anything nesting deeper is a separate
+// finding, not something to recurse into here. Keyed on `content` rather than on
+// a type allowlist because no inline node type in this file reads `content` at
+// all (inline nodes carry `value`, `text`, `children` and marks), so the key
+// cannot shadow a legitimate inline node while it does catch a block wrapper
+// this corpus has not produced yet.
+//
+// It belongs to the RUN walk (Inline) only. `ir.children` — a mark node's own
+// children walk — is deliberately NOT unwrapped, mirroring the Elixir twin,
+// where `strong`/`em`/`link` map `compose_inline/2` over their children rather
+// than routing them back through `compose_inline_children/1`.
+func unwrapBlockWrappers(nodes []any) []any {
+	// Pre-scan so the overwhelmingly common wrapper-free run keeps its backing
+	// array instead of allocating a copy on every inline run in the document.
+	found := false
+	for _, n := range nodes {
+		if blockWrapperContent(n) != nil {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nodes
+	}
+	out := make([]any, 0, len(nodes)+1)
+	for _, n := range nodes {
+		if inner := blockWrapperContent(n); inner != nil {
+			out = append(out, inner...)
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// blockWrapperContent returns a node's `content` when it is a NON-EMPTY list,
+// else nil — the single predicate the unwrap is keyed on.
+func blockWrapperContent(n any) []any {
+	m, ok := n.(map[string]any)
+	if !ok {
+		return nil
+	}
+	inner, ok := m["content"].([]any)
+	if !ok || len(inner) == 0 {
+		return nil
+	}
+	return inner
 }
 
 // node renders a single inline node. insideLink tracks whether we are already
@@ -37,6 +102,19 @@ func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool) string {
 		return toStr(v)
 	case fmt.Stringer:
 		return v.String()
+	case []any:
+		// A bare ARRAY where an inline node was expected (`content: [[{text…}]]`
+		// — flattened one level too shallow by an upstream author path). Both
+		// twins already survive it and this reader alone returned "" (the text
+		// VANISHED in the TUI): inline.ex `compose_inline(l) when is_list(l)`
+		// wraps the composed children in a PdText, and inline.tsx renderInline
+		// does `if (Array.isArray(node)) return \`<span>${renderInlines(node)}</span>\``.
+		// The TUI has no wrapper element, so the children render in place.
+		var b strings.Builder
+		for _, child := range v {
+			b.WriteString(ir.node(child, ctx, insideLink))
+		}
+		return b.String()
 	case map[string]any:
 		return ir.typed(v, ctx, insideLink)
 	default:
@@ -80,7 +158,11 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		return ir.theme.markStyle("strikethrough").Render(inner)
 
 	case "code":
-		return ir.theme.InlineCode.Render(sanitizeText(attrStr(n, "value")))
+		// The chip body is a FLAT STRING, but 66 published paragraphs (the
+		// 2026-07-25 live census) author it as `children` inline nodes with no
+		// `value`; reading `value` only rendered an EMPTY chip for all of them.
+		// See inlineCodeSource below for the contract and its twins.
+		return ir.theme.InlineCode.Render(sanitizeText(inlineCodeSource(n)))
 
 	case "link":
 		// Children are rendered with insideLink=true so a nested link flattens.
@@ -490,4 +572,75 @@ func markHref(m any) string {
 		}
 	}
 	return attrStr(mm, "href")
+}
+
+/* ── THE INLINE `code` node source contract (task-e4833f198e293ed1) ───────────
+ *
+ * An inline code chip's body is `value` when that is a NON-EMPTY string, else
+ * the flattened plain text of `children`.
+ *
+ * FIRST NON-EMPTY, not first-non-blank — a `value` of " " WINS and keeps its
+ * space. That is deliberately the OPPOSITE of the BLOCK-level `code` contract
+ * (code.go `codeSource`, which trims to select among value|code|content|text):
+ * a block's source key is a choice among aliases, an inline chip's `value` is
+ * the authored body verbatim.
+ *
+ * Twins: `Render.Inline.inline_code_source/1`
+ * (api/lib/barkpark/portable_doc/render/inline.ex) and `inlineCodeSource`
+ * (js/packages/react/src/inline.tsx). All three answer to ONE fixture,
+ * api/test/support/fixtures/inline-code-source.json, read here by
+ * inline_code_source_parity_test.go. */
+func inlineCodeSource(n map[string]any) string {
+	if n == nil {
+		return ""
+	}
+	if v := inlineStringish(n["value"]); v != "" {
+		return v
+	}
+	return inlineNodesText(n["children"])
+}
+
+// inlineStringish is the STRICT scalar coercion this contract uses: a string or
+// a number only. Unlike the display-oriented toStr it refuses bools, maps and
+// slices (they read as ""), matching `str` in inline.tsx and
+// `coerce_text_value/1` in inline.ex — a non-stringish `value` must FALL
+// THROUGH to children rather than print its Go representation.
+func inlineStringish(v any) string {
+	switch v.(type) {
+	case string, float64, int, int64, float32, json.Number:
+		return toStr(v)
+	}
+	return ""
+}
+
+// inlineNodesText folds inline nodes to their concatenated plain text; markup
+// is DROPPED. Mirrors `inlineText` in inline.tsx and `flatten_inline_text/1` in
+// inline.ex: a string/number is itself, a map is `value` || legacy `text` ||
+// its own children, a nested array recurses, anything else contributes "".
+func inlineNodesText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []any:
+		var b strings.Builder
+		for _, n := range x {
+			b.WriteString(inlineNodeText(n))
+		}
+		return b.String()
+	}
+	return inlineStringish(v)
+}
+
+func inlineNodeText(n any) string {
+	m, ok := n.(map[string]any)
+	if !ok {
+		return inlineNodesText(n)
+	}
+	if v := inlineStringish(m["value"]); v != "" {
+		return v
+	}
+	if t := inlineStringish(m["text"]); t != "" {
+		return t
+	}
+	return inlineNodesText(m["children"])
 }

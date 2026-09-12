@@ -33,6 +33,14 @@ import (
 // lipgloss/table auto-sizer stays the sole width authority. `cols` ABSENT ⇒ every
 // column is text ⇒ the render is byte-identical to a table with no spec. The key
 // is `cols`, NOT `columns` (an overloaded layout block name + layout attr).
+//
+// CROSS-RUNTIME: the web projection of this same spec lives in
+// api/lib/barkpark/portable_doc/render/compose.ex (table_col_types /
+// table_delta_cell / table_spark_cell) + walk.ex table_col_class. The type set
+// and the delta glyphs below are recorded once, for both, in
+// api/test/support/fixtures/table-col-types.json — the Elixir suite reads that
+// file; the literals here do NOT yet (a Go-side read is follow-up work). Change
+// a glyph or a type name in one place and you must change all three.
 type tableRenderer struct{ ir InlineRenderer }
 
 func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -617,4 +625,32 @@ func bylineText(m map[string]any) string {
 		return strings.Join(parts, " · ")
 	}
 	return attrStr(m, "text")
+}
+
+// ── pre-gate badge ─────────────────────────────────────────────────────────
+// Mirrors compose_block("pre-gate-badge") + walk.ex's `pre-gate` role: the
+// quiet mark a Paper wears when it is named in the 2026-09-02 grandfather
+// register AND its stored blocks are still refused by the block gate
+// (Barkpark.Content.Papers.PreGateRegister.annotate/3 synthesises it below the
+// masthead byline; it is never stored, so a fixture only carries it if it came
+// off the reader stream).
+//
+// The reader draws it in caps-mono at 0.72rem in the callout tone foreground,
+// under the byline rule. The terminal stand-in for that is the eyebrow
+// treatment — upper-cased, letter-spaced — in the DIM weight rather than the
+// accent, because the whole point of the mark is that it must not compete with
+// the title block. `title` (the register's reader_behaviour) has no terminal
+// home and is deliberately dropped: a hover explanation is a GUI affordance.
+type preGateBadgeRenderer struct{}
+
+func (preGateBadgeRenderer) Render(b Block, ctx RenderCtx) []string {
+	text := strings.ToUpper(sanitizeText(attrStr(b.Attrs, "label")))
+	if text == "" {
+		return nil
+	}
+	spaced := letterSpace(text)
+	if lipgloss.Width(spaced) > ctx.Width {
+		spaced = text
+	}
+	return wrapLines(ctx.Theme.Byline.Render(spaced), ctx.Width)
 }

@@ -676,10 +676,23 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       # here and this pin is the proof: `echo hi` reports no HEALTH stage, and an
       # unmeasured health code is OMITTED rather than defaulted to 0 (0 is the
       # SUCCESS code, so a default would certify a gate that never ran).
+      #
+      # deploy-reliability W21 (charter D608): +route_status +route_detail, and
+      # they are PRESENT-AND-NULL here rather than absent — the opposite of
+      # `health_exit_code` one line up, because the value a default would invent
+      # differs. An invented health code is 0, which IS the success code, so only
+      # absence is honest there. `route_status` is a string; `null` reads as
+      # "nobody measured this" on its face, exactly like `served_slot` does. This
+      # run (`echo hi`) emits no ROUTE line at all, so both are null and the key
+      # set still carries them.
       assert Map.keys(done) |> Enum.sort() == ~w(
                build_id content_rev exit_code failure_reason finished_at log mode
-               served_port served_slot slug stages started_at state
+               route_detail route_status served_port served_slot slug stages
+               started_at state
              )
+
+      assert done["route_status"] == nil
+      assert done["route_detail"] == nil
     end
 
     test "a non-empty build_id that does not match the served run is 404", %{conn: conn} do
@@ -895,13 +908,27 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       assert body["unit_name"] == "bp-site-build-boom.service"
       assert body["journal_command"]
       assert body["log_state"] == "available"
-      assert body["log_bytes"] == 64
+
+      # THE HEAL, observed through the door (dr-bl-recorder-http-read-path c2).
+      # This fixture is a PRE-SCRUB record on purpose: raw bytes on disk, no
+      # `log_scrub` stamp, and a `log_bytes` that was never true of the file
+      # (64 against a 52-byte log). Reading it folds the log and re-measures, so
+      # the answer now describes the bytes that are actually there.
+      assert body["log_bytes"] == File.stat!(log).size
+      refute body["log_bytes"] == 64
+
+      # …and the STORED ARTIFACT — not the response — is what changed.
+      on_disk = File.read!(log)
+      refute on_disk =~ "bppat_"
+      assert on_disk =~ "BARKPARK_TOKEN=[redacted]"
+      assert on_disk =~ "npm ERR! 401 Unauthorized"
 
       # THE SECURITY BOUNDARY, asserted POSITIVELY against the exact bytes on
       # disk rather than by hoping no field carries them. The build env file
-      # carries BARKPARK_TOKEN in plaintext and the shared scrubber's measured
-      # leak rate against this token shape is 95.1%, which is why the bytes are
-      # refused rather than scrubbed.
+      # carries BARKPARK_TOKEN in plaintext; the bytes on disk are now folded at
+      # write (and healed on read, above), but THIS DOOR still does not serve
+      # them — serving them is c1, and it needs a cap, a tail rule and a refusal
+      # for an unstamped record.
       encoded = Jason.encode!(body)
       refute encoded =~ "bppat_"
       refute encoded =~ "BARKPARK_TOKEN"

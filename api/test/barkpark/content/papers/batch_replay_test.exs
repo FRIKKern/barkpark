@@ -1,4 +1,5 @@
 defmodule Barkpark.Content.Papers.BatchReplayTest do
+  # sync: spawns concurrent `Task.async` Repo callers; data_case.ex keys `shared:` on the async tag
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content
@@ -9,6 +10,63 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
   alias Barkpark.TenancyFixtures
 
   @dataset "production"
+
+  test "a document run's front replacement stays after an opaque sibling and replays exactly once" do
+    slug = "paper-document-run-#{System.unique_integer([:positive])}"
+
+    prefix = %{
+      "id" => "quote",
+      "type" => "blockquote",
+      "content" => [],
+      "qa" => %{"keep" => true}
+    }
+
+    trigger = %{"id" => "trigger", "type" => "paragraph", "text" => ""}
+    tail = %{"id" => "tail", "type" => "paragraph", "text" => "Unchanged"}
+    attrs = Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: [prefix, trigger, tail]})
+    assert {:ok, paper} = Content.upsert_paper(attrs)
+    context = %{container_kind: "document", container_run_ids: ["trigger", "tail"]}
+
+    callout = %{
+      "id" => "new",
+      "type" => "callout",
+      "tone" => "info",
+      "content" => [%{"type" => "text", "value" => "Keep the body"}]
+    }
+
+    ops = [
+      %{"op" => "remove-block", "id" => "trigger"},
+      %{"op" => "insert-after", "afterId" => "tail", "block" => callout},
+      %{"op" => "move-block", "id" => "new", "after" => nil}
+    ]
+
+    request_id = Ecto.UUID.generate()
+    opts = [if_rev: paper_rev(paper), canvas_run_context: context]
+
+    assert {:ok, receipt, :applied} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               ops,
+               @dataset,
+               request_id,
+               "user:document-run",
+               opts
+             )
+
+    assert Content.get_paper(slug).content["blocks"] == [prefix, callout, tail]
+
+    assert {:ok, ^receipt, :replayed} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               ops,
+               @dataset,
+               request_id,
+               "user:document-run",
+               opts
+             )
+
+    assert Content.get_paper(slug).content["blocks"] == [prefix, callout, tail]
+  end
 
   test "a retried structural batch replays its receipt without another write or broadcast" do
     {slug, paper} = seed_paper!()

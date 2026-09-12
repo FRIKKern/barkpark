@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor reap-test-dbs test clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
+.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor reap-test-dbs test clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots cloud-format-check wasm
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -268,6 +268,15 @@ deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean re
 	@# outcome gets its own receipt and its own exit code. `@sleep 8` + a
 	@# `|| echo ">> Warming up"` curl is gone: that curl was TAKEN, FAILED, and
 	@# laundered into a reassurance.
+	@#
+	@# THE POLL BELOW PROBES /status.json, NOT /api/schemas. That legacy route is
+	@# mounted through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+	@# `sunset: Wed, 31 Dec 2026 23:59:59 GMT`. This poll gates on the STATUS CODE
+	@# and `exit 1`s when it is not 200, so on removal day a perfectly healthy box
+	@# would fail EVERY deploy closed. /status.json (router.ex
+	@# `get "/status.json", StatusController, :show_json`, :api pipeline only, no
+	@# deprecation scope, no token) has no removal date and is a strictly stronger
+	@# signal: Status.health/0 runs a bare Repo.all/1, so a dead DB is a 500.
 	-@git checkout -- bin/barkpark bin/barkpark-pg go.sum 2>/dev/null
 	@rm -f "$$(git rev-parse --git-dir 2>/dev/null || echo .git)/barkpark-deploy-outcome"
 	git pull
@@ -296,15 +305,15 @@ deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean re
 	echo ">> Pulled. The post-merge hook cleaned _build/prod, recompiled and restarted (recorded outcome: $$outcome)."; \
 	code=000; i=0; \
 	while [ "$$i" -lt "$(BP_DEPLOY_POLL_ATTEMPTS)" ]; do \
-	  code="$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:4000/api/schemas 2>/dev/null || echo 000)"; \
+	  code="$$(bash -c '. scripts/lib/bp-curl.sh; bp_curl_code -s -o /dev/null --max-time 5 http://localhost:4000/status.json' 2>/dev/null || echo 000)"; \
 	  if [ "$$code" = "200" ]; then break; fi; \
 	  i=$$((i + 1)); \
 	  sleep "$(BP_DEPLOY_POLL_SLEEP)"; \
 	done; \
 	if [ "$$code" = "200" ]; then \
-	  echo ">> API is live (/api/schemas -> HTTP 200)."; \
+	  echo ">> API is live (/status.json -> HTTP 200)."; \
 	else \
-	  echo ">> DEPLOY UNVERIFIED — the rebuild reported success but http://localhost:4000/api/schemas never answered 200 in $(BP_DEPLOY_POLL_ATTEMPTS) attempts (last: '$$code'). Check: make logs"; \
+	  echo ">> DEPLOY UNVERIFIED — the rebuild reported success but http://localhost:4000/status.json never answered 200 in $(BP_DEPLOY_POLL_ATTEMPTS) attempts (last: '$$code'). Check: make logs"; \
 	  exit 1; \
 	fi
 
@@ -357,6 +366,15 @@ format: ## Run mix format on api/ (writes changes)
 
 format-check: ## Run mix format --check-formatted on api/ (read-only, mirrors CI gate)
 	cd api && mix format --check-formatted
+
+# cloud/ IS NOT api/. The Cloud gate (.github/workflows/cloud.yml, compile job)
+# pins Elixir 1.18.1 while this fleet's Macs run 1.19.x, and the two formatters
+# DISAGREE — so `cd cloud && mix format --check-formatted` can exit 0 on bytes
+# the gate reds (task-417026dfc4826971, PR #17482). The target below reads the
+# pin out of cloud.yml, OBTAINS that Elixir, and runs the gate's own command
+# under it. Never restate the version here — one declaration, in the workflow.
+cloud-format-check: ## Run cloud/'s format gate under the Elixir cloud.yml pins (NOT your PATH's)
+	bash scripts/cloud-format-check.sh
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 

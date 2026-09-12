@@ -29,7 +29,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
   under 8 siblings)."
 
   BUILT-IN-ROLE ONLY — WHAT THE ASSERTED NUMBERS ACTUALLY COVER (arpss-w10).
-  The 2.000 / 1.000 / 4.000 figures are true for a BUILT-IN role and ONLY for a
+  The 2.000 / 2.000 / 4.000 figures are true for a BUILT-IN role and ONLY for a
   built-in role, and so is `Caps.derive/1`'s own docstring ("a USER-principal
   derive is 2 queries (was 4)"). `Tenancy.Auth.granted_actions/2` resolves
   owner/admin/member from the compiled-in `@builtin_role_actions` map BEFORE
@@ -39,9 +39,20 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
 
                                         built-in role      custom role
       Caps.derive/1, USER principal          2.0 q/op          3.0 q/op
+      Caps.derive/1, API-TOKEN principal     2.0 q/op          (not metered)
       EVENT path (two derives)               4.0 q/op          6.0 q/op
       Tenancy.Auth.role_permits?/3           0.0 q/op          1.0 q/op
       Caps.admin?/1, user socket             1.0 q/op          2.0 q/op
+
+  THE API-TOKEN ROW MOVED 1.0 -> 2.0 ON 2026-09-07 (task-02925b8af783e517).
+  Principal freshness added ONE `Repo.one` per derive that reloads the
+  `%ApiToken{}` — the mount-time struct is now used only as an id — so a token
+  revoked, expired, disabled or permission-downgraded in the database denies
+  within ONE EVENT rather than one MOUNT. It is the token-principal twin of the
+  unconditional grant `Repo.all` this file already refuses to let anyone
+  memoize away: freshness is what the query buys, and the ratchet exists to make
+  that trade visible rather than to drive the number down. Every USER row above
+  is unmoved (no token principal is present in any of them).
 
   THE CUSTOM-ROLE ROWS MOVED, 5 -> 3 AND 10 -> 6
   (arpss-w10-bl-collapse-the-caps-fork-into-tenancy-auth). What pds-w43
@@ -104,7 +115,22 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
   # THESE names — so a number can no longer move in one place and stand still in
   # the other (arpss-w10-caps-docstring-builtin-only).
   @builtin_user_q 2
-  @builtin_token_q 1
+  # MOVED 1 -> 2 on 2026-09-07 (task-02925b8af783e517, PRINCIPAL FRESHNESS).
+  # `Caps.derive_from_assigns/1` now RELOADS the `%ApiToken{}` per derive —
+  # `fresh_api_token/1`, one `Repo.one` through `Auth.verify_token/1`'s own
+  # liveness predicate — so a token revoked, expired, disabled or downgraded in
+  # the DB denies within ONE EVENT instead of one MOUNT. The row is therefore
+  # 1 membership `Repo.one` + 1 principal reload = 2.
+  #
+  # WHY ONLY THIS ROW MOVED, AND IT IS NOT AN OVERSIGHT: every other asserted
+  # row in this file carries a USER principal (`user_principal/1` /
+  # `custom_user_principal/2`), and users are re-read nowhere here — their
+  # freshness has always come from the membership `Repo.one`. So
+  # @builtin_user_q, @builtin_event_q, @custom_user_q, @custom_event_q, both
+  # `role_permits?/3` rows and both `admin?/1` USER rows are UNMOVED, measured,
+  # not assumed. The token-carrying rows that DID move and are asserted
+  # elsewhere are the four in `caps_authorization_parity_test.exs`.
+  @builtin_token_q 2
   @builtin_event_q 4
   @custom_user_q 3
   @custom_event_q 6
@@ -283,7 +309,10 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
       assert queries == @builtin_user_q * @ops
     end
 
-    test "API-TOKEN principal: exactly 1 query per derive (was 2)", %{ws: ws, proj: proj} do
+    test "API-TOKEN principal: exactly 2 queries per derive (reload + membership)", %{
+      ws: ws,
+      proj: proj
+    } do
       token = token_principal()
       sock = socket(ws, proj, %{api_token: token})
 
@@ -291,9 +320,10 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
 
       queries = meter("API-TOKEN principal — Caps.derive/1", @ops, fn -> Caps.derive(sock) end)
 
-      # 1 membership Repo.one. No grant load at all: grants are bound to a
-      # grantee USER, and `active_grants/1` returns [] without querying when the
-      # socket carries no `current_user`.
+      # 1 principal reload (`fresh_api_token/1`, 2026-09-07) + 1 membership
+      # Repo.one. No grant load at all: grants are bound to a grantee USER, and
+      # `active_grants/1` returns [] without querying when the socket carries no
+      # `current_user`.
       assert queries == @builtin_token_q * @ops
     end
 

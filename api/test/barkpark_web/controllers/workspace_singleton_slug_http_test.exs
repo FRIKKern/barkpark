@@ -24,6 +24,8 @@ defmodule BarkparkWeb.WorkspaceSingletonSlugHttpTest do
 
   use BarkparkWeb.ConnCase, async: true
 
+  import Barkpark.TenancyFixtures, only: [vacate_default_seat!: 0]
+
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.{Auth, Repo, Tenancy}
@@ -37,6 +39,11 @@ defmodule BarkparkWeb.WorkspaceSingletonSlugHttpTest do
         from(w in Workspace, where: w.slug == ^"default"),
         set: [slug: "vacated-for-http-test"]
       )
+
+    # The seat is `workspaces.is_default` since task-566dc5be4871353b, so the
+    # rename above frees the SLUG and vacates nothing. One shared definition of
+    # "vacate", so the next identity change moves one line, not thirteen.
+    vacate_default_seat!()
 
     refute Tenancy.get_default_workspace()
 

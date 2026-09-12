@@ -1,6 +1,9 @@
 HEAT FAMILY V2 — CALENDAR + MATRIX                                              
 ──────────────────────────────────                                              
                                                                                 
+A quantile dual-encoded contribution calendar and a rows×cols matrix with Σ     
+marginals and exact values.                                                     
+                                                                                
     Jan     Feb     Mar     Apr     May     Jun     Jul     Aug     Sep         
 M   ░░▓▓· ▓▓░░▒▒▒▒· ░░▒▒· ░░▒▒· ▓▓██· ░░· · ██▒▒████░░▒▒· · · ░░· ▒▒██░░· · · · 
     · ░░· · ░░░░░░▓▓· ██░░░░▒▒· ▒▒░░· ▓▓▓▓░░██████· ░░· ▓▓▒▒· ▒▒· ░░· · · ░░▓▓▒▒

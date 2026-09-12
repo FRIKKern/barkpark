@@ -86,6 +86,10 @@ defmodule Barkpark.Content.Errors do
     # The PRODUCER half of the same rule — `Barkpark.Tasks.DatasetTwinFence`.
     "dataset_twin" =>
       "A task with this _id already exists in another dataset of this workspace/project, and a second copy would make the id ambiguous for every by-id reader. Write to the dataset that already holds it (details.datasets), use a different _id, or — if a genuinely separate copy is intended — resend with content.dataset_twin_intended: true.",
+    # Postgres' per-tsvector 1 048 575-byte cap, hit by the generated
+    # `documents.search_vector` column (task-655f368ae5c72120). Was a bare 500.
+    "searchable_text_too_large" =>
+      "This document's searchable text (its title plus every string in content) exceeds Postgres' 1048575-byte full-text index limit. Shorten or split the document — details.field names the longest string in your payload, which is the likely culprit. Note the limit is on the derived index, not the request: a long, repetitive body can pass where a shorter, high-entropy one fails.",
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
@@ -274,6 +278,21 @@ defmodule Barkpark.Content.Errors do
                          # …while the sheets xlsx build failure is 422 and
                          # PERMANENT (plugins/sheets/web/export_controller.ex).
                          "export_build_failed",
+                         # Workspace bundle EXPORT admission control (PDS-D719) —
+                         # workspace_controller.ex `export_in_flight_conflict/2`:
+                         # 409 + `Retry-After` when the node's single export slot
+                         # is already taken. RETRYABLE, and distinct from the 503
+                         # above in what the caller should do: nothing failed, the
+                         # request was never started. The envelope's `reason`
+                         # narrows it further — `workspace_export_in_flight` (the
+                         # caller's OWN workspace is exporting; the slug is echoed)
+                         # vs `export_capacity_reached` (another workspace holds
+                         # the slot; its slug is deliberately withheld, because
+                         # this caller proved workspace_admin?/2 on theirs and on
+                         # nothing else). Those two are `reason` values, NOT
+                         # Error.code values, so they are correctly absent here —
+                         # the wire `code` is this one string for both.
+                         "export_already_running",
                          # Chat transport send/create failures (chat_controller.ex,
                          # charter D26 reason split — mobile/TUI clients branch on
                          # these: 5xx → transient retry, 4xx → refused/permanent).
@@ -394,6 +413,28 @@ defmodule Barkpark.Content.Errors do
         "This is a MEMBERSHIP check, not a permission tier: sign in as — or send a token belonging to — a member of this workspace. A browser session authenticates on any route that reads the session cookie, including the scoped media writes — no data-token is required for those."
     }
 
+  # The OTHER arm of the same two-arm predicate, split out by
+  # task-d63f91a7f817b4a3. `ResolveWorkspace` used to render EVERY refusal as
+  # `:forbidden_membership`, so a caller that holds a seat in the workspace but
+  # whose token permissions / membership role do not satisfy `:read` was told
+  # it was not a member. That is false in the direction that misleads hardest —
+  # the two arms have OPPOSITE remedies (invite the principal vs. re-mint the
+  # credential with the right permissions), and "not a member" points the
+  # operator at WIDENING workspace membership, the more dangerous fix.
+  #
+  # `code` stays "forbidden" and the status stays 403 — byte-identical to the
+  # membership arm for any client keying on those. `reason` is the only
+  # discriminator, exactly as `:forbidden_membership` intends it to be.
+  defp build({:error, :forbidden_capability}),
+    do: %{
+      code: "forbidden",
+      message: "caller is a member of this workspace but lacks the required capability",
+      status: 403,
+      reason: "missing_capability",
+      hint:
+        "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. What is missing is the capability: an API token needs `read` (or `admin`) in its permissions, and a user account needs a membership role that grants read. Re-mint the token with the right permissions, or raise the role."
+    }
+
   # Per-workspace quota gate (perfect-plan-build W1, D11). Suspended = a hard
   # 403 write-block; over-quota = 402 Payment Required (the honest "you hit your
   # plan's write cap" semantic, distinct from a 429 rate limit that clears on
@@ -448,6 +489,43 @@ defmodule Barkpark.Content.Errors do
       details: %{workspaces: workspaces}
     }
 
+  # The generated `documents.search_vector` column overflowed Postgres' single
+  # tsvector cap (SQLSTATE 54000, `:program_limit_exceeded`), translated by
+  # `Content.Mutations.classify_search_vector_overflow/2`. 422 — the request is
+  # well-formed and the cap is on the DERIVED index, not on the body, so
+  # `payload_too_large` (413) would tell the caller to shrink the wrong thing:
+  # a 2 MB low-entropy body indexes fine while an 800 KB high-entropy one does
+  # not. `details.limit_bytes` names the limit; `details.field` names the
+  # longest string in the submitted payload (with its document id and byte
+  # size) so the caller knows WHERE to cut.
+  defp build({:error, {:searchable_text_too_large, limit_bytes, %{} = field}})
+       when is_integer(limit_bytes) do
+    %{document: doc_id, field: path, bytes: bytes} = field
+
+    %{
+      code: "searchable_text_too_large",
+      message:
+        "the document's searchable text exceeds the #{limit_bytes}-byte full-text index limit; " <>
+          "the largest field in this write is #{path} (#{bytes} bytes)",
+      status: 422,
+      details: %{limit_bytes: limit_bytes, document: doc_id, field: path, field_bytes: bytes}
+    }
+  end
+
+  # The batch carried no string worth naming (a delete/publish op, or a payload
+  # whose text all lives somewhere the locator does not walk). The limit is still
+  # named; only the WHERE is absent — and it is absent rather than guessed.
+  defp build({:error, {:searchable_text_too_large, limit_bytes, _field}})
+       when is_integer(limit_bytes) do
+    %{
+      code: "searchable_text_too_large",
+      message:
+        "the document's searchable text exceeds the #{limit_bytes}-byte full-text index limit",
+      status: 422,
+      details: %{limit_bytes: limit_bytes}
+    }
+  end
+
   defp build({:error, :quota_exceeded}),
     do: %{code: "quota_exceeded", message: "workspace write quota exceeded", status: 402}
 
@@ -501,6 +579,23 @@ defmodule Barkpark.Content.Errors do
 
   defp build({:error, :malformed}),
     do: %{code: "malformed", message: "request body is malformed", status: 400}
+
+  # [mutation-shape-422] A mutate verb that requires `{id, type}` was sent
+  # without one of them (Content.Mutations `missing_id_type/1`). REUSES the
+  # already-registered `validation_failed` code on purpose: the meaning is the
+  # canonical one ("well-formed, but it does not validate — here is the field"),
+  # and a new token would have grown known_codes/0, the OpenAPI `Error.code`
+  # enum and docs/api-v1.md §9 for zero client-visible gain. The message names
+  # the verb and the field so the caller never has to read content/mutations.ex
+  # to find the shape; `details` carries the same facts machine-readably.
+  defp build({:error, {:missing_mutation_fields, verb, missing}})
+       when is_binary(verb) and is_list(missing),
+       do: %{
+         code: "validation_failed",
+         message: "#{verb} requires both id and type; missing: #{Enum.join(missing, ", ")}",
+         status: 422,
+         details: %{mutation: verb, missing: missing}
+       }
 
   # A block list carrying an element that is not an object. `render_blocks/2`
   # guards the LIST (`is_list`) but `render_block/2` guards the ELEMENT
@@ -738,6 +833,42 @@ defmodule Barkpark.Content.Errors do
   # rides through verbatim, because telling a caller to "resend the identical
   # request" without telling them to CHECK FIRST walks them into the dedup wall
   # and a duplicate-of-your-own-first-attempt refusal.
+  # THE READ TWIN (task-5a7f007878b56e6a). Same fault, same code, same status,
+  # same `reason` — and a DIFFERENT hint, because the two-element arm below
+  # tells the caller to CHECK WHETHER THE WRITE LANDED and a read wrote
+  # nothing. Handing an SSR build "`bp doc ls task --perspective drafts`" for a
+  # dropped SELECT is advice it cannot act on, and the whole point of naming
+  # this fault was to stop mis-captioning it.
+  #
+  # THE SENTENCE THIS ARM EXISTS TO SAY: an empty answer is not an answer. The
+  # deploy failures that produced this row were captioned "bp-doc-id marker is
+  # empty" — a build that read zero documents, rendered an empty page and got
+  # refused at the HEALTH gate after paying for the whole build. So the hint
+  # tells the renderer to RETRY THE RENDER, never to publish what it managed to
+  # read. A 503 here is a refusal the caller must not round down to "no rows".
+  #
+  # `code` stays "storage_unavailable" and `status` stays 503 for the reason the
+  # sibling arm argues at length: `internal/cli/errors.go` keys the CLI exit on
+  # `code`, and `errors_api_parity_test.go` refuses one code at two statuses.
+  # This arm adds NO code to the §9 vocabulary and needs no CLI change.
+  defp build({:error, {:connection_unavailable, :read, reason}}),
+    do: %{
+      code: "storage_unavailable",
+      message: halt_message(reason),
+      status: 503,
+      reason: "connection_unavailable",
+      hint:
+        "Transient: the database connection dropped mid-READ. This request " <>
+          "read nothing and CHANGED nothing — there is no partial write to " <>
+          "reconcile, so the correct move is simply to resend the identical " <>
+          "request. IF A BUILD OR SSR RENDER HIT THIS, RETRY THE RENDER — do " <>
+          "not publish the page it produced. This 503 is a REFUSAL, not an " <>
+          "empty result set: treating it as \"no documents\" is what turns a " <>
+          "transient pool fault into a deploy that ships an empty page. If it " <>
+          "keeps failing the database is degraded: an outage to report, not a " <>
+          "document to fix."
+    }
+
   defp build({:error, {:connection_unavailable, reason}}),
     do: %{
       code: "storage_unavailable",

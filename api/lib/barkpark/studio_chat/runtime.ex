@@ -634,7 +634,7 @@ defmodule Barkpark.StudioChat.Runtime do
   defp remote_mcp_api_url do
     studio_config = Application.get_env(:barkpark, :studio_chat, [])
 
-    Keyword.get(studio_config, :remote_mcp_api_url) || BarkparkWeb.Endpoint.url()
+    Keyword.get(studio_config, :remote_mcp_api_url) || Barkpark.StudioChat.Endpoints.url()
   end
 
   defp remote_decision(:allow), do: "allow"

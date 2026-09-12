@@ -190,6 +190,12 @@ var codeExit = map[string]int{
 	"invalid_lifecycle":     exitValidation,
 	"sentinel_worker_id":    exitValidation,
 	"merge_gated_criterion": exitValidation,
+	// The override's own reason gate. A `--merge-gated` passed bare — no reason
+	// — is refused, by the CLI before it sends and by the server for anyone who
+	// POSTs directly. It buckets with the family above for the same reason they
+	// all do: nothing moved under the caller and re-sending the identical
+	// command can never succeed; the fix is to type the reason.
+	"merge_gated_reason_required": exitValidation,
 	// The close-artifact gate (PDS-D291). A `done` close of a kind:task row with
 	// ZERO acceptance criteria whose reason names no PR+sha and pastes no run
 	// output. It buckets with `criteria_unmet` and NOT with the conflict family
@@ -287,6 +293,7 @@ var codeExit = map[string]int{
 	"source_not_found":           exitValidation, // 422, bulldocs_ingest_controller.ex:1478
 	"payload_too_large":          exitValidation, // 413, errors.ex:736
 	"import_body_too_large":      exitValidation, // 413, workspace_controller.ex:992
+	"searchable_text_too_large":  exitValidation, // 422, content/mutations.ex:216 (tsvector cap)
 	// 402. There is no payment/quota bucket in the 0-8 scheme, and inventing
 	// one would redefine the published table. 5 is the honest neighbour: it
 	// says "not retryable as sent", which is the fact a wrapper needs.
@@ -647,21 +654,68 @@ func statusExit(status int) int {
 	}
 }
 
+// maxOpaqueRunes is this file's ONE budget for server-controlled opaque bytes
+// printed to a human stderr: an un-decodable error body (capBody) and a single
+// `details` line (capDetailLine). It was already capBody's local `maxRunes`;
+// hoisting it makes the two paths one policy rather than two coincidences.
+const maxOpaqueRunes = 200
+
 // capBody trims an opaque (non-envelope) error body to a short, single-flavour
 // message. A gateway 502/503/504 often returns a multi-KB HTML page or proxy
-// banner; dumping it verbatim to stderr is noise. Keep the first ~200 runes
-// (rune-safe, so a multibyte char is never split) and append an ellipsis. An
-// empty body becomes "request failed".
+// banner; dumping it verbatim to stderr is noise. Keep the first maxOpaqueRunes
+// runes (rune-safe, so a multibyte char is never split) and append an ellipsis.
+// An empty body becomes "request failed".
 func capBody(body []byte) string {
 	msg := strings.TrimSpace(string(body))
 	if msg == "" {
 		return "request failed"
 	}
-	const maxRunes = 200
-	if r := []rune(msg); len(r) > maxRunes {
-		return strings.TrimSpace(string(r[:maxRunes])) + "…"
+	if r := []rune(msg); len(r) > maxOpaqueRunes {
+		return strings.TrimSpace(string(r[:maxOpaqueRunes])) + "…"
 	}
 	return msg
+}
+
+// capDetailLine bounds ONE human `details` line to maxOpaqueRunes runes.
+//
+// WHY, MEASURED — not a number from the air. `details` is server-controlled and
+// two of its emitters are unbounded by construction:
+//
+//   - api/lib/barkpark/content/errors.ex:672 and :701 answer a bad filter with
+//     `details: %{filter: raw}` — the caller's filter string echoed VERBATIM.
+//     Driven against guerrilla.barkpark.cloud on 2026-09-11, a 9,000-byte
+//     filter produced a 9,010-byte `filter: …` line on stderr, while the
+//     message line beside it stopped at 4,271 bytes because Elixir's inspect/1
+//     caps at its 4,096-rune :printable_limit. The server caps its prose and
+//     not its details; the CLI capped neither.
+//   - api/lib/barkpark/content/papers/block_ops.ex structure_refusal_details
+//     answers `invalid_paper_structure` with one message per offending block
+//     under a single "blocks" key — its own comment cites a 105-block Paper —
+//     so the generic renderer prints that whole compact-JSON array on ONE line.
+//
+// Either buries the message the reader actually needs. The elision names the
+// byte count it dropped and the shape that still has all of it, so the cap
+// redirects rather than hides: -o json/-o yaml carry `details` byte-verbatim
+// and never route through here.
+func capDetailLine(line string) string {
+	r := []rune(line)
+	if len(r) <= maxOpaqueRunes {
+		return line
+	}
+	kept := strings.TrimSpace(string(r[:maxOpaqueRunes]))
+	return fmt.Sprintf("%s… (+%d more bytes; -o json for the full details)",
+		kept, len(line)-len(kept))
+}
+
+// capDetailLines applies capDetailLine to every line of a human details
+// rendering. Returns its argument untouched when nothing is over budget, so the
+// overwhelming majority of payloads (a field name, a rule, an id) are
+// byte-identical to before.
+func capDetailLines(lines []string) []string {
+	for i, line := range lines {
+		lines[i] = capDetailLine(line)
+	}
+	return lines
 }
 
 // renderErrorEnvelope emits the canonical {ok:false, error:{code, message,
@@ -710,6 +764,45 @@ func renderErrorEnvelopeDetailed(out *writer, code, msg, requestID, hint string,
 	return false
 }
 
+// humanErrorCode writes the machine-readable error `code` as the LAST
+// continuation line of a refusal on the HUMAN shapes (table/minimal).
+//
+// THE DECISION (task pds-w28-named-codes-invisible-in-human-shapes). The named
+// code reached only -o json and -o yaml: renderErrorEnvelopeDetailed switches on
+// out.output and returns false for table/minimal, and every caller then printed
+// the human message alone. So of 27 measured default-read refusals only the 9
+// machine-shaped ones carried the literal `unreadable_list_page`; the other 18
+// red correctly at rc=1 while a grep for the code found silence. Same for
+// pagination_stalled, request_failed and usage. -o minimal is what --quiet and
+// every write receipt resolve to — the shape an agent gets — so "the code exists
+// but you cannot see it" is a half-honest refusal.
+//
+// Two alternatives were rejected, and the tests in errors_named_code_test.go
+// fail under BOTH:
+//
+//  1. "minimal joins the machine shapes" — emit the JSON envelope on stdout for
+//     -o minimal too. Rejected: minimal's SUCCESS output is a terse receipt
+//     line, not JSON (resolveOutputForCommand :140), and --quiet resolves to it
+//     (:146). A shape whose success is one bare id and whose failure is a JSON
+//     document is a worse contract than either half, and it would move bytes
+//     from stderr to stdout for every quiet write in every existing script.
+//  2. "record that codes are json/yaml-only" — document the gap and stop
+//     implying otherwise. Rejected: docs/cli/error-exit-table.md is the
+//     canonical map from code to exit status and is written for whoever reads
+//     the refusal; a code a reader cannot read is not a map.
+//
+// So: the human line names the code. It costs one short stderr line, keeps the
+// machine envelope exactly where it was (stdout, json/yaml only), and leaves the
+// exit ladder untouched. Empty code prints nothing, so a code-less refusal is
+// byte-identical to before. Placed LAST, after message/details/hint, because it
+// is the support token, not the fact or the advice.
+func humanErrorCode(out *writer, code string) {
+	if code == "" {
+		return
+	}
+	out.errf("  code: %s", code)
+}
+
 // useErrorDetailed is useError plus the envelope `details` payload — the same
 // two-channel contract (machine envelope on stdout for -o json/yaml, human line
 // on stderr otherwise) with a per-error `details` object routed through
@@ -722,6 +815,7 @@ func useErrorDetailed(out *writer, code, msg string, exit int, details json.RawM
 		return exit
 	}
 	out.userErr("%s", msg)
+	humanErrorCode(out, code)
 	return exit
 }
 
@@ -787,6 +881,11 @@ func detailLines(raw json.RawMessage) []string {
 // back to the generic sorted key:value lines (detailLines), so no payload is
 // ever silently dropped. The machine channel (-o json/yaml) never routes
 // through here — it carries `details` verbatim.
+//
+// EVERY line this returns is bounded by capDetailLine, whatever produced it:
+// `details` is server-controlled and at least two emitters are unbounded (see
+// capDetailLine for the measurement). This is the LAST stop before the human
+// printer, so capping here is what makes the bound total.
 func detailLinesForCode(code string, raw json.RawMessage) []string {
 	d := normalizeDetails(raw)
 	if d == nil {
@@ -795,18 +894,80 @@ func detailLinesForCode(code string, raw json.RawMessage) []string {
 	switch code {
 	case "unknown_tag":
 		if lines := unknownTagLines(d); lines != nil {
-			return lines
+			return capDetailLines(lines)
 		}
 	case "duplicate_of":
 		if lines := duplicateOfLines(d); lines != nil {
-			return lines
+			return capDetailLines(lines)
 		}
 	case "resource_conflict":
 		if lines := resourceConflictLines(d); lines != nil {
-			return lines
+			return capDetailLines(lines)
+		}
+	case "validation_failed":
+		if lines := validationFailedLines(d); lines != nil {
+			return capDetailLines(lines)
 		}
 	}
-	return detailLines(raw)
+	return capDetailLines(detailLines(raw))
+}
+
+// validationFailedLines renders the CHANGESET shape of a `validation_failed`
+// payload — Ecto's and Barkpark.Tasks.Validation's `{field: [reason, ...]}` map
+// — as one readable `field: reason` line per field.
+//
+// WHY THIS CODE NEEDS ITS OWN RENDERING. The generic detailValue prints a
+// non-string value as compact JSON, which for a reason LIST means the reader
+// gets the brackets and, worse, a second round of escaping on every quote the
+// reason itself contains. Measured against guerrilla on 2026-09-10,
+// `bp doc patch task <id> --set lifecycle_status=...` printed
+//
+//	lifecycle_status: ["must be one of [\"open\", \"done\", ...], got \"\\\"bogus\\\"\""]
+//
+// The rule IS in that line; a human cannot read it out of it, and the row this
+// closes (pds-bl-task-criteria-publish-label-spine-opacity) is exactly the
+// complaint that a refusal a reader cannot act on is unactionable even when the
+// bytes are present. Joining with "; " and dropping the quotes is not a new
+// invention: it is apierr.DetailParts's algorithm, already canonical for the
+// ONE-LINE surfaces (the TUI status bar, wrapped error values), so this makes
+// the two presentations agree instead of drift.
+//
+// THE ADMISSION TEST IS TOTAL, ON PURPOSE: every value must be a NON-EMPTY JSON
+// array of strings. `validation_failed` is the CLI's most overloaded code — the
+// same token carries the changeset map, `invalid_schema_fields`'s
+// `{reason: "..."}`, and label-spine-shaped `{field, rule, index, similar}`
+// payloads whose `similar` array is a LIST OF IDS the reader copies, not a
+// sentence. Joining per-VALUE would quietly reshape those ids; requiring the
+// WHOLE payload to be the changeset shape means this arm fires only where the
+// join is right, and every other payload keeps the generic rendering byte for
+// byte. Returns nil otherwise, so the caller falls back to detailLines — the
+// same contract the three sibling per-code renderers keep.
+func validationFailedLines(d json.RawMessage) []string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(d, &obj); err != nil || len(obj) == 0 {
+		return nil
+	}
+	joined := make(map[string]string, len(obj))
+	for k, raw := range obj {
+		var reasons []string
+		// `null` and `[]` both decode into an empty slice with NO error, so the
+		// length check is load-bearing: without it a null value would render as
+		// a bare `field: ` line, trading an unreadable line for an empty one.
+		if err := json.Unmarshal(raw, &reasons); err != nil || len(reasons) == 0 {
+			return nil
+		}
+		joined[k] = strings.Join(reasons, "; ")
+	}
+	keys := make([]string, 0, len(joined))
+	for k := range joined {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		lines = append(lines, k+": "+joined[k])
+	}
+	return lines
 }
 
 // maxConflictHolders bounds how many holders a resource_conflict prints, for the
@@ -963,6 +1124,7 @@ func usageErrHintf(out *writer, usageHelp func(), hint, format string, args ...a
 	msg := fmt.Sprintf(format, args...)
 	if !renderErrorEnvelope(out, "usage", msg, "", hint) {
 		out.userErr("%s", msg)
+		humanErrorCode(out, "usage")
 		if usageHelp != nil {
 			usageHelp()
 		}
@@ -990,6 +1152,7 @@ func fetchSnapshotErr(out *writer, verb string, err error) int {
 	msg := fmt.Sprintf("%s: %v", verb, err)
 	if !renderErrorEnvelope(out, "fetch_failed", msg, "", "") {
 		out.userErr("%s", msg)
+		humanErrorCode(out, "fetch_failed")
 	}
 	return exitGeneric
 }

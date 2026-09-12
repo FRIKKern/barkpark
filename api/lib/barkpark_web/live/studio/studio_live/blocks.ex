@@ -16,15 +16,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   @card_action_priorities ["primary", "secondary"]
   @action_form_fields ~w(action-label action-href action-priority)
   @action_priorities ["primary", "secondary"]
+  @paper_link_ref_form_keys ~w(block_id paper-link-ref-field paper-link-ref-guard paper-link-ref-index paper-link-ref-slug paper-link-ref-value)
+  @paper_link_ref_guard_max_bytes 16 * 1024
 
   @doc false
   def block_form_source(params), do: Map.drop(params, ["if_rev", "request_id"])
 
   @doc false
   def resolve_block_form(blocks, %{"block_id" => id} = source) when is_binary(id) do
+    cond do
+      exact_card_title_form?(source) ->
+        resolve_card_title_form(blocks, id, source["card-title"])
+
+      malformed_card_title_form?(source) ->
+        {:error, {:source_validation, :invalid_card_title}}
+
+      true ->
+        resolve_general_block_form(blocks, id, source)
+    end
+  end
+
+  def resolve_block_form(_blocks, _source), do: {:error, :invalid_block_form}
+
+  defp resolve_general_block_form(blocks, id, source) do
     case find_paper_block(blocks, id) do
       %{} = block ->
-        case validate_block_patch(block, source) do
+        resolver =
+          if paper_link_ref_form?(source),
+            do: resolve_paper_link_ref_form(block, source),
+            else: validate_block_patch(block, source)
+
+        case resolver do
           {:ok, patch} -> {:ok, %{"op" => "patch-block", "id" => id, "patch" => patch}}
           {:error, reason} -> {:error, {:source_validation, reason}}
         end
@@ -34,10 +56,237 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
-  def resolve_block_form(_blocks, _source), do: {:error, :invalid_block_form}
+  defp exact_card_title_form?(source),
+    do: MapSet.new(Map.keys(source)) == MapSet.new(["block_id", "card-title"])
+
+  defp malformed_card_title_form?(source) do
+    Map.has_key?(source, "card-title") and
+      not Enum.any?(@card_form_fields -- ["card-title"], &Map.has_key?(source, &1))
+  end
+
+  defp resolve_card_title_form(blocks, id, submitted) when is_binary(submitted) do
+    case paper_blocks_with_id(blocks, id) do
+      [%{"type" => "card", "slots" => slots}]
+      when is_map(slots) and not is_struct(slots) ->
+        case Map.get(slots, "title") do
+          [%{} = title] ->
+            if direct_card_title?(title) do
+              patch =
+                if title["text"] === submitted,
+                  do: %{},
+                  else: %{"slots" => Map.put(slots, "title", [Map.put(title, "text", submitted)])}
+
+              {:ok, %{"op" => "patch-block", "id" => id, "patch" => patch}}
+            else
+              {:error, {:source_validation, :invalid_card_title}}
+            end
+
+          _missing_or_malformed ->
+            {:error, {:source_validation, :invalid_card_title}}
+        end
+
+      [] ->
+        {:error, :block_not_found}
+
+      _duplicate_or_malformed ->
+        {:error, {:source_validation, :invalid_card_title}}
+    end
+  end
+
+  defp resolve_card_title_form(_blocks, _id, _submitted),
+    do: {:error, {:source_validation, :invalid_card_title}}
+
+  defp direct_card_title?(title) do
+    is_map(title) and not is_struct(title) and Map.get(title, "type") === "heading" and
+      Map.has_key?(title, "text") and
+      is_binary(title["text"]) and direct_card_title_content?(title) and
+      direct_card_title_level?(title)
+  end
+
+  defp direct_card_title_content?(title) do
+    case Map.fetch(title, "content") do
+      :error -> true
+      {:ok, value} -> value in [nil, []]
+    end
+  end
+
+  defp direct_card_title_level?(title) do
+    case Map.fetch(title, "level") do
+      :error -> true
+      {:ok, nil} -> true
+      {:ok, level} -> level in [1, 2, 3, "1", "2", "3"]
+    end
+  end
+
+  @doc false
+  def paper_link_reference_copy_admission(%{"type" => "paper-links", "refs" => refs}, index)
+      when is_list(refs) and is_integer(index) and index >= 0 do
+    with ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index),
+         true <- Map.get(ref, "prefer_authored_copy") === true,
+         slug when is_binary(slug) <- Map.get(ref, "slug"),
+         trimmed_slug when trimmed_slug != "" <- String.trim(slug),
+         1 <- Enum.count(refs, &(paper_link_ref_trimmed_slug(&1) == trimmed_slug)),
+         guard when is_binary(guard) <- paper_link_ref_guard(ref) do
+      {:ok, %{slug: slug, guard: guard}}
+    else
+      _ -> {:error, :paper_link_reference_copy_unavailable}
+    end
+  end
+
+  def paper_link_reference_copy_admission(_block, _index),
+    do: {:error, :paper_link_reference_copy_unavailable}
+
+  @doc false
+  def paper_link_reference_copy_admission(
+        %{"refs" => refs} = block,
+        index,
+        field
+      )
+      when is_list(refs) and is_integer(index) and index >= 0 and
+             field in ["title", "description"] do
+    with {:ok, admission} <- paper_link_reference_copy_admission(block, index),
+         ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index),
+         true <- paper_link_ref_copy_field_representable?(ref, field) do
+      {:ok, admission}
+    else
+      _ -> {:error, :paper_link_reference_copy_unavailable}
+    end
+  end
+
+  def paper_link_reference_copy_admission(_block, _index, _field),
+    do: {:error, :paper_link_reference_copy_unavailable}
+
+  @doc false
+  def paper_link_ref_guard(ref) when is_map(ref) and not is_struct(ref) do
+    identity = Map.drop(ref, ["title", "description"])
+
+    with {:ok, encoded} <- Jason.encode(identity),
+         true <- byte_size(encoded) <= @paper_link_ref_guard_max_bytes,
+         {:ok, decoded} <- Jason.decode(encoded),
+         true <- decoded === identity do
+      digest = :crypto.hash(:sha256, encoded)
+      Base.url_encode64(digest, padding: false)
+    else
+      _ -> nil
+    end
+  end
+
+  def paper_link_ref_guard(_ref), do: nil
+
+  defp paper_link_ref_form?(source) do
+    Enum.any?(Map.keys(source), fn
+      key when is_binary(key) -> String.starts_with?(key, "paper-link-ref-")
+      _key -> false
+    end)
+  end
+
+  defp resolve_paper_link_ref_form(%{"type" => "paper-links"} = block, source) do
+    with true <- Enum.sort(Map.keys(source)) == @paper_link_ref_form_keys,
+         {:ok, index} <- canonical_paper_link_ref_index(source["paper-link-ref-index"]),
+         field when field in ["title", "description"] <- source["paper-link-ref-field"],
+         {:ok, %{slug: slug, guard: expected_guard}} <-
+           paper_link_reference_copy_admission(block, index, field),
+         true <- source["paper-link-ref-slug"] === slug,
+         value when is_binary(value) <- source["paper-link-ref-value"],
+         true <- valid_paper_link_ref_guard?(source["paper-link-ref-guard"], expected_guard),
+         refs when is_list(refs) <- block["refs"],
+         ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index) do
+      updated =
+        cond do
+          paper_link_ref_copy_form_value(ref, field) === value -> ref
+          String.trim(value) == "" -> Map.delete(ref, field)
+          true -> Map.put(ref, field, value)
+        end
+
+      patch =
+        if updated === ref, do: %{}, else: %{"refs" => List.replace_at(refs, index, updated)}
+
+      {:ok, patch}
+    else
+      _ -> {:error, :invalid_paper_link_reference_copy}
+    end
+  end
+
+  defp resolve_paper_link_ref_form(_block, _source),
+    do: {:error, :invalid_paper_link_reference_copy}
+
+  defp canonical_paper_link_ref_index(index) when is_binary(index) do
+    case Integer.parse(index) do
+      {parsed, ""} when parsed >= 0 ->
+        if Integer.to_string(parsed) == index, do: {:ok, parsed}, else: :error
+
+      _ ->
+        :error
+    end
+  end
+
+  defp canonical_paper_link_ref_index(_index), do: :error
+
+  defp valid_paper_link_ref_guard?(guard, expected_guard)
+       when is_binary(guard) and is_binary(expected_guard) do
+    byte_size(guard) <= div((@paper_link_ref_guard_max_bytes + 2) * 4, 3) and
+      guard === expected_guard
+  end
+
+  defp valid_paper_link_ref_guard?(_guard, _expected_guard), do: false
+
+  defp paper_link_ref_trimmed_slug(ref) when is_binary(ref), do: String.trim(ref)
+
+  defp paper_link_ref_trimmed_slug(ref) when is_map(ref) and not is_struct(ref) do
+    case Map.get(ref, "slug") do
+      slug when is_binary(slug) -> String.trim(slug)
+      _ -> nil
+    end
+  end
+
+  defp paper_link_ref_trimmed_slug(_ref), do: nil
+
+  defp paper_link_ref_copy_field_representable?(ref, field) do
+    case Map.fetch(ref, field) do
+      :error -> true
+      {:ok, value} -> is_nil(value) or is_binary(value) or is_integer(value)
+    end
+  end
+
+  defp paper_link_ref_copy_form_value(ref, field) do
+    case Map.fetch(ref, field) do
+      :error -> ""
+      {:ok, nil} -> ""
+      {:ok, value} when is_binary(value) -> value
+      {:ok, value} when is_integer(value) -> Integer.to_string(value)
+    end
+  end
 
   @doc false
   def structure_child_locked?(child), do: not is_nil(locked_visible_block_id(child))
+
+  @doc false
+  def column_track_removal(columns, column_index)
+      when is_list(columns) and is_integer(column_index) do
+    column_count = length(columns)
+
+    cond do
+      column_index < 0 or column_index >= column_count ->
+        malformed_structure("columns")
+
+      column_count < 2 ->
+        {:error, {:minimum_column_count, 1}}
+
+      column_index != column_count - 1 ->
+        {:error, {:column_not_rightmost, column_index}}
+
+      locked_id = locked_visible_block_id(Enum.at(columns, column_index)) ->
+        {:error, {:locked_block, locked_id, "remove-column"}}
+
+      Enum.at(columns, column_index) != [] ->
+        {:error, {:column_not_empty, column_index}}
+
+      true ->
+        :ok
+    end
+  end
+
+  def column_track_removal(_columns, _column_index), do: malformed_structure("columns")
 
   @doc false
   def card_form_state(%{"type" => "card"} = block) do
@@ -323,16 +572,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def build_block_patch(%{"type" => "paper-links"} = block, params) do
     %{}
-    |> put_optional_patch(params, "title")
-    |> put_optional_patch(params, "description")
+    |> put_paper_links_text(params, "title")
+    |> put_paper_links_text(params, "description")
     |> put_optional_patch(params, "layout")
     |> put_paper_link_refs(block, params)
   end
 
   def build_block_patch(%{"type" => "expandable"}, params) do
-    %{}
-    |> put_param(params, "summary", "")
-    |> Map.put("open", parse_bool(params["open"]))
+    patch = put_param(%{}, params, "summary", "")
+
+    if Map.has_key?(params, "open"),
+      do: Map.put(patch, "open", parse_bool(params["open"])),
+      else: patch
   end
 
   def build_block_patch(%{"type" => "bar-chart"} = block, params) do
@@ -403,6 +654,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def validate_block_patch(%{"type" => "figure"} = block, params) do
     with :ok <- validate_text_form_fields(params, ~w(caption), "caption") do
+      {:ok, build_block_patch(block, params)}
+    end
+  end
+
+  def validate_block_patch(%{"type" => "paper-links"} = block, params) do
+    with :ok <- validate_text_form_fields(params, ~w(title description), "paper-links header") do
       {:ok, build_block_patch(block, params)}
     end
   end
@@ -881,7 +1138,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp card_chrome_patch(block, params) do
     with {:ok, state} <- card_form_state(block),
-         :ok <- validate_card_form_params(params, state) do
+         :ok <- validate_card_form_params(params, state, block) do
       patch = put_card_tone_patch(%{}, state, params)
       slots = if is_map(block["slots"]), do: block["slots"], else: %{}
 
@@ -1153,7 +1410,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
-  defp validate_card_form_params(params, state) do
+  defp validate_card_form_params(params, state, block) do
     known = MapSet.new(@card_form_fields)
     known_present? = Enum.any?(@card_form_fields, &Map.has_key?(params, &1))
 
@@ -1176,10 +1433,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
         params["card-action-priority"] == state.action_priority or
         params["card-action-priority"] in @card_action_priorities
 
-    if known_present? and not unexpected? and binary_values? and tone_valid? and priority_valid?,
-      do: :ok,
-      else: {:error, :invalid_card_form}
+    if known_present? and not unexpected? and binary_values? and tone_valid? and priority_valid? and
+         generic_card_title_allowed?(block, params),
+       do: :ok,
+       else: {:error, :invalid_card_form}
   end
+
+  defp generic_card_title_allowed?(_block, params) when not is_map_key(params, "card-title"),
+    do: true
+
+  defp generic_card_title_allowed?(%{"slots" => slots}, _params)
+       when is_map(slots) and not is_struct(slots) do
+    case Map.get(slots, "title") do
+      [%{} = title] -> direct_card_title_content?(title)
+      _missing_or_malformed -> true
+    end
+  end
+
+  defp generic_card_title_allowed?(_block, _params), do: true
 
   defp put_card_tone_patch(patch, state, params) do
     case Map.fetch(params, "card-tone") do
@@ -1514,6 +1785,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
        when action in [nil, ""],
        do: {:ok, nil}
 
+  defp validate_column_child_action("add-column", _columns, _params),
+    do: {:ok, :add_column}
+
+  defp validate_column_child_action("remove-column:" <> _index = action, columns, _params) do
+    columns
+    |> Enum.with_index()
+    |> Enum.find_value(fn {_children, column_index} ->
+      if action == "remove-column:#{column_index}",
+        do: column_track_removal(columns, column_index)
+    end)
+    |> case do
+      :ok -> {:ok, {:remove_column, length(columns) - 1}}
+      nil -> malformed_structure("columns")
+      {:error, _reason} = error -> error
+    end
+  end
+
   defp validate_column_child_action(action, columns, params) when is_binary(action) do
     Enum.with_index(columns)
     |> Enum.find_value(fn {children, column_index} ->
@@ -1552,6 +1840,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     do: malformed_structure("columns")
 
   defp apply_column_child_action(columns, nil, _params), do: columns
+
+  defp apply_column_child_action(columns, :add_column, _params), do: columns ++ [[]]
+
+  defp apply_column_child_action(columns, {:remove_column, column_index}, _params),
+    do: List.delete_at(columns, column_index)
 
   defp apply_column_child_action(columns, {:add, column_index}, params) do
     children = Enum.at(columns, column_index)
@@ -3088,8 +3381,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp put_section_title(map, params) do
     case Map.fetch(params, "title") do
-      {:ok, title} when is_binary(title) -> Map.put(map, "title", optional_string(title))
+      {:ok, title} when is_binary(title) -> Map.put(map, "title", section_title_value(title))
       _ -> map
+    end
+  end
+
+  defp section_title_value(title) do
+    if String.trim(title) == "", do: nil, else: title
+  end
+
+  defp put_paper_links_text(map, params, key) do
+    case Map.fetch(params, key) do
+      {:ok, value} when is_binary(value) ->
+        Map.put(map, key, if(String.trim(value) == "", do: nil, else: value))
+
+      {:ok, _value} ->
+        map
+
+      :error ->
+        map
     end
   end
 
@@ -3240,6 +3550,48 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   def find_paper_block(_blocks, _id), do: nil
+
+  defp paper_blocks_with_id(blocks, id) when is_list(blocks) do
+    Enum.flat_map(blocks, fn
+      block when is_map(block) ->
+        own = if Map.get(block, "id") === id, do: [block], else: []
+
+        nested =
+          cond do
+            Map.get(block, "type") in ["section", "expandable", "terminal"] ->
+              container_children(block)
+
+            Map.get(block, "type") === "steps" and is_list(block["steps"]) ->
+              Enum.flat_map(block["steps"], fn
+                row when is_map(row) -> visible_body_children(row)
+                _row -> []
+              end)
+
+            Map.get(block, "type") === "tabs" and is_list(block["tabs"]) ->
+              Enum.flat_map(block["tabs"], fn
+                %{"blocks" => children} when is_list(children) -> children
+                _row -> []
+              end)
+
+            Map.get(block, "type") === "figure" and is_map(block["child"]) ->
+              [block["child"]]
+
+            Map.get(block, "type") === "columns" and is_list(block["columns"]) ->
+              Enum.flat_map(block["columns"], fn
+                column when is_list(column) -> column
+                _opaque -> []
+              end)
+
+            true ->
+              []
+          end
+
+        own ++ paper_blocks_with_id(nested, id)
+
+      _opaque ->
+        []
+    end)
+  end
 
   @doc false
   def container_children(%{"type" => "expandable"} = block), do: visible_body_children(block)

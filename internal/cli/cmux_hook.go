@@ -25,6 +25,48 @@ package cli
 // silent. The breadcrumb write is best-effort and panic-guarded — it can never
 // change the exit code, touch stdout, or re-panic out of the top-level recover.
 //
+// THE EXTERNAL-GATE POLICY (pds-bl-merge-gate-key-unimplemented). Of the three
+// candidate policies the filing named — (a) an explicit external-gate field the
+// hook must respect, (b) the hook sniffing for unmerged-PR criteria, (c) no
+// unattended close at all — barkpark shipped (a), and it is the policy this hook
+// implements: a criterion the AUTHOR declared `"merge_gate": true` is EXCLUDED
+// FROM AUTOMATIC COMPLETION. It is not a criterion this pane can satisfy; it is
+// the record of an event outside the pane, and only that event may flip it.
+//
+// The hook enforces it WITHOUT naming merge_gate, and deliberately so. The flag
+// is honoured at the doors that can actually judge it, all server-side:
+//
+//	stamp door   — `Tasks.Stamp` refuses a builder `--met` on a merge-gated
+//	               criterion with `merge_gated_criterion` unless `--merge-gated
+//	               <reason>` is typed, which records an override receipt. The
+//	               predicate `Criteria.merge_gated?/1` is flag-OR-PROSE, so a
+//	               criterion that merely READS as a merge gate is refused too
+//	               (#13006 keyed the guard on the STORED flag and declared the
+//	               `--merge-gated` escape hatch).
+//	merge door   — `Tasks.Close.autostamp_merge_gate/6` flips the gate at
+//	               close time on a real land digest (#3039, #11531), and
+//	               `reconcile_merge_gate/3` flips it from a merge webhook with
+//	               no claim, worker or epoch (#5742); `bp task landed` is the
+//	               non-holder door CI can call (#15090).
+//	withdraw door— `--withdraw` is the only verb that LOWERS a met flag (#14825).
+//
+// So by the time a merge_gate criterion reads `met:true`, the merge HAPPENED.
+// The hook's whole contribution is that it never treats an unmet criterion as
+// met — `acceptanceAllMet` requires the JSON literal true on EVERY entry, gated
+// or not — so a declared-but-unmerged gate keeps the row nonterminal through
+// Stop after Stop. Policy (a)'s wording "skip merge_gate criteria when computing
+// completion" must NOT be read as `continue`: skipping a gate would close an
+// unmerged task SOONER. Pinned by cmux_hook_merge_gate_test.go, which reds under
+// exactly that mutation.
+//
+// COMPATIBILITY / MIGRATION. Zero wire change and zero behaviour change: the
+// flag is opt-in, absent on most criteria, and a row that never declares one is
+// judged exactly as before. The migration is EDITORIAL — a criterion fenced by
+// prose alone ("MERGE-GATED — DO NOT STAMP EARLY") is fenced at the stamp door
+// but is indistinguishable from any other met criterion HERE once something has
+// stamped it, so authors must declare the flag. `bp task create` already warns
+// on the under-declared shape (`merge_gate_unflagged`, tasks_create_cmd.go).
+//
 // CARDINAL fail-safe contract (design §7): a hook must NEVER break the agent.
 // EVERY path exits 0 (incl a panic → recover → 0); NOTHING is written to stdout
 // (diagnostics go to stderr, and only under --dry-run or BP_CMUX_DEBUG); the
@@ -461,6 +503,29 @@ func hookCloseAtEpoch(c *apiclient.Client, task, worker string, epoch int, dbg, 
 	rev := ""
 	if fresh, gotFresh := c.GetPerspective("task", task, "drafts"); gotFresh {
 		rev = docRev(fresh)
+
+		// RE-PROVE ACCEPTANCE ON THE ROW THE BYPASS WILL CAS AGAINST.
+		//
+		// hookStopClose proved acceptance on ITS read, and that verdict was
+		// good enough for a close with the work-digest fence ARMED — the fence
+		// is exactly what catches a criterion rewritten under the claim. But we
+		// only get here BECAUSE the fence refused, and D82's observed_rev CAS
+		// SKIPS the fence (close.ex short-circuits check_work_digest the moment
+		// observed_rev is non-nil). So on this arm the pre-amendment verdict is
+		// the only thing standing between an out-of-band criterion rewrite and
+		// a silent unattended close, and it is not enough: `doc_changed_since_
+		// claim:acceptance_criteria` is precisely the refusal that says the
+		// criteria we judged are not the criteria on the row.
+		//
+		// The fresh read is already in hand for the rev. Judging it costs
+		// nothing and makes the bypass a CAS against a row we have actually
+		// proven, rather than a CAS against a rev whose content we never
+		// looked at. When the drift really was the agent ticking its own boxes
+		// the fresh row is still all-met and this changes nothing.
+		if total, allMet := acceptanceAllMet(fresh); total == 0 || !allMet {
+			fail("Stop: the brief changed under this claim and the fresh row's acceptance is NOT proven (%d criteria, all met=%v) — not closing; the observed_rev bypass skips the work-digest fence, so it must not carry a verdict from the pre-amendment read", total, allMet)
+			return false, false
+		}
 	}
 	if rev == "" {
 		// Without a current rev there is no sanctioned bypass, and a rev-less

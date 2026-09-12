@@ -72,6 +72,8 @@ on:
     paths:
       - "scripts/stale-verdict-watch.sh"
       - "scripts/stale-verdict-watch.test.sh"
+      - "scripts/stale-verdict-watch-route.sh"
+      - "scripts/stale-verdict-watch.baseline"
       - ".github/workflows/stale-verdict-watch.yml"
       - ".github/required-checks.json"
       - "docs/ops/merge-gates.md"
@@ -89,12 +91,45 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  stale-verdict-watch:
-    name: Stale verdict watch
+  # ══ TWO JOBS, BECAUSE THERE ARE TWO FAILURE CLASSES ════════════════════════
+  #
+  # task-bc902e08cdfd2ee7. Until this split, ONE step of ONE job named `Stale
+  # verdict watch` mapped EIGHT of this script's outcomes to `exit 1`: rc 1 ("a
+  # conflicted PR is asserting a stale green — go rebase or close #N") and the
+  # read faults 3/4/5/6/7/9 ("this run could not look, and names no pull
+  # request"). MEASURED: run 34589487018 (2026-09-11T10:29:43Z, main) exited 6
+  # UNREACHABLE and rendered in `gh run list` as the name `Stale verdict watch`,
+  # conclusion `failure` — character for character what an rc-1 verdict renders.
+  # Opposite remedies, one name, and a fleet that sees the second often enough
+  # learns to read the first as noise.
+  #
+  # Now: `stale-verdict-watch-fault` runs the watch and owns 3/4/5/6/7/9 (and any
+  # rc the script does not define). `stale-verdict-watch` owns 0/1/2/8 and is
+  # SKIPPED on a read fault — skipped, never green, because "this run has no
+  # population" must not render as "nothing is asserting a stale green". The
+  # workflow RUN still fails on a fault (the fault job carries the red), so
+  # nothing here is a `|| true`: the split changes WHICH NAME screams, never
+  # WHETHER one does.
+  #
+  # The rc→outcome table is scripts/stale-verdict-watch-route.sh, not a `case`
+  # inline here, for one reason: a routing table living in a `run:` block cannot
+  # be driven offline. scripts/stale-verdict-watch.test.sh section (m) runs that
+  # script once per (role, rc) pair and asserts exactly which role reds — the
+  # forced-both-ways proof, with no GitHub in the loop.
+  #
+  # The trend store rides THIS job because this job is the one that runs the
+  # watch; the sibling only interprets the rc it published.
+  stale-verdict-watch-fault:
+    name: Stale verdict watch read fault
     # Never on pull_request: a name that never renders on a PR head can never be
     # sampled into the required-check spec.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    outputs:
+      # The sibling job below reads this instead of re-running the watch: a
+      # second read is a second API round-trip that can disagree with the
+      # first, and then the two check runs would be judging different moments.
+      rc: ${{ steps.watch.outputs.rc }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -126,6 +161,7 @@ jobs:
             svw-state-
 
       - name: Is a conflicted PR still asserting a green it cannot earn?
+        id: watch
         env:
           GH_TOKEN: ${{ github.token }}
           SVW_STATE_FILE: ${{ runner.temp }}/svw-state.txt
@@ -133,32 +169,10 @@ jobs:
           set -uo pipefail
           rc=0
           bash scripts/stale-verdict-watch.sh --repo "${{ github.repository }}" || rc=$?
-          case "$rc" in
-            0) exit 0 ;;
-            1) echo "::error::A CONFLICTING pull request is asserting a green required verdict main has moved past. It re-dispatches nothing, so this cannot clear itself: rebase or close the PRs named above. This run fails, and it will keep failing every 30 minutes."; exit 1 ;;
-            2) echo "::warning::rows were still mergeable=UNKNOWN after re-polling. That is a SILENCE, not a green — those rows are named in the log above and will be re-read on the next run."; exit 0 ;;
-            3) echo "::error::CONFIGURATION FAULT — this run's credential cannot read the pull-request list, or the required-check spec is unreadable. A watch that cannot read what it watches must not report success."; exit 1 ;;
-            # 4 is a SEPARATE code on purpose. For one release the size fault
-            # returned 3 and this step blamed the credential for it — the
-            # payload had been read perfectly, all 380 KB of it, and the
-            # sentence printed here was simply false. Whatever fails next, it
-            # will not be described as something the token did.
-            4) echo "::error::COMPUTE FAULT — the pull-request list WAS read and the verdict could not be computed from it (malformed payload, or jq could not run). This is not a credential fault: the read succeeded. See the byte count in the log above."; exit 1 ;;
-            # 5 is the arm that had to exist. The ONLY push run of this
-            # workflow that ever concluded success — 31311358759 — classified
-            # 0 of 39 rows and printed the clean sentence, 68 seconds before a
-            # 23-row RED run on the same tree. Every green a human has ever
-            # been shown here was produced by a run that could not look.
-            5) echo "::error::BLIND RUN — the pull-request list WAS read and NOT ONE row could be classified: every open row's mergeability was still UNKNOWN after re-polling, so this verdict covers zero pull requests. It is not a green, and this run fails rather than reporting one. GitHub computes mergeability lazily and invalidates it behind a merge, so this is usually TRANSIENT: the next scheduled run re-reads the population and clears this by itself, with nobody touching anything. A 5 that PERSISTS across runs means the read itself is broken — look at the poll budget and the token, not at the pull requests."; exit 1 ;;
-            # 6 and 7 are the two runs that used to leave through the rc=2
-            # warning arm above and conclude SUCCESS. Neither had a population
-            # to be warned about: 6 never read the pull requests at all, and 7
-            # read them but could not measure the distance. The warning arm's
-            # sentence described neither, and it still concluded green.
-            6) echo "::error::UNREACHABLE — the pull-request list could not be read after every attempt, so this run classified ZERO rows and does not know how many pull requests exist. This is not a green: no population was ever read. It is usually TRANSIENT (rate limit, or Actions transport) and the next scheduled run clears it by itself. A 6 that PERSISTS is the token or the poll budget, not the pull requests."; exit 1 ;;
-            7) echo "::error::DISTANCE UNREADABLE — the pull requests WERE read and main's commit history was NOT, so no staleness distance exists this run and no row can be called stale or clean. This is not a credential fault on the pull-request read: that read worked. Look at the commits API for ${{ github.repository }}, not at the PR list."; exit 1 ;;
-            *) echo "::error::stale-verdict-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
-          esac
+          # Published BEFORE the routing call: the sibling job must learn the rc
+          # even when this step is about to red on it.
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          bash scripts/stale-verdict-watch-route.sh fault "$rc"
 
       # always(): the save must run on the red paths above (a red IS the run
       # whose START/READ the next trend needs) and on most cancellations.
@@ -168,6 +182,41 @@ jobs:
         with:
           path: ${{ runner.temp }}/svw-state.txt
           key: svw-state-${{ github.run_id }}
+  stale-verdict-watch:
+    name: Stale verdict watch
+    needs: stale-verdict-watch-fault
+    # `always()` so a red on the sibling does not silently skip this job as
+    # "dependency failed" without saying why. The rc tests below are the real
+    # fence:
+    #   rc == ''            -> the upstream died before publishing one. Unknown,
+    #                          not green.
+    #   rc in 3 4 5 6 7 9   -> a READ FAULT. The sibling carries that scream under
+    #                          its own name; this job must not render a verdict
+    #                          about pull requests it never adjudicated.
+    # Never a workflow-level `paths:` and never a rename: `Stale verdict watch`
+    # keeps the name it has always published, and the fault name is NEW.
+    if: >-
+      always()
+      && github.event_name != 'pull_request'
+      && needs.stale-verdict-watch-fault.outputs.rc != ''
+      && needs.stale-verdict-watch-fault.outputs.rc != '3'
+      && needs.stale-verdict-watch-fault.outputs.rc != '4'
+      && needs.stale-verdict-watch-fault.outputs.rc != '5'
+      && needs.stale-verdict-watch-fault.outputs.rc != '6'
+      && needs.stale-verdict-watch-fault.outputs.rc != '7'
+      && needs.stale-verdict-watch-fault.outputs.rc != '9'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Interpretation only — the read itself happened once, in the sibling job.
+      # rc 0 clean, rc 1 scream, rc 2 PARTIAL warning, rc 8 BASELINE DRIFT. A
+      # read-fault rc cannot arrive here — the job `if:` above excludes every one
+      # — and the router reds as a ROUTING ERROR if the wiring ever drifts.
+      - name: Does the population carry a stale green?
+        run: bash scripts/stale-verdict-watch-route.sh verdict "${{ needs.stale-verdict-watch-fault.outputs.rc }}"
+
 
   stale-verdict-harness:
     name: Stale verdict harness
@@ -178,5 +227,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Shell syntax
         run: bash -n scripts/stale-verdict-watch.sh
+      - name: Shell syntax (stale-verdict-watch-route.sh)
+        run: bash -n scripts/stale-verdict-watch-route.sh
       - name: Mutation proofs (stale-verdict-watch.test.sh)
         run: bash scripts/stale-verdict-watch.test.sh

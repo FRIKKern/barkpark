@@ -29,9 +29,9 @@ type headingRenderer struct{ ir InlineRenderer }
 
 func (h headingRenderer) Render(b Block, ctx RenderCtx) []string {
 	level := headingLevel(b.Attrs)
-	text := sanitizeDisplayText(attrStr(b.Attrs, "text"))
-	if text == "" {
-		text = h.ir.Inline(attrSlice(b.Attrs, "content"), ctx)
+	text := sanitizeDisplayText(stringishAttr(b.Attrs, "text"))
+	if content := attrSlice(b.Attrs, "content"); len(content) > 0 {
+		text = h.ir.Inline(content, ctx)
 	}
 	style := ctx.Theme.Heading[level-1]
 
@@ -73,7 +73,13 @@ func headingLevel(m map[string]any) int {
 type paragraphRenderer struct{ ir InlineRenderer }
 
 func (p paragraphRenderer) Render(b Block, ctx RenderCtx) []string {
-	inline := p.ir.Inline(attrSlice(b.Attrs, "content"), ctx)
+	content := attrSlice(b.Attrs, "content")
+	if len(content) == 0 {
+		if text, ok := b.Attrs["text"].(string); ok {
+			content = []any{text}
+		}
+	}
+	inline := p.ir.Inline(content, ctx)
 	if inline == "" {
 		return nil
 	}
@@ -87,7 +93,7 @@ func (p paragraphRenderer) Render(b Block, ctx RenderCtx) []string {
 type listRenderer struct{ ir InlineRenderer }
 
 func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
-	ordered := attrBool(b.Attrs, "ordered")
+	ordered := attrBool(b.Attrs, "ordered") || b.Type == "ordered-list" || b.Type == "numbered_list"
 	items := attrSlice(b.Attrs, "items")
 	var out []string
 	for i, item := range items {
@@ -107,6 +113,29 @@ func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
 				out = append(out, ctx.Theme.Dim.Render(prefix)+line)
 			} else {
 				out = append(out, strings.Repeat(" ", indent)+line)
+			}
+		}
+		if record, ok := item.(map[string]any); ok {
+			for _, value := range attrSlice(record, "children") {
+				child, ok := value.(map[string]any)
+				if !ok {
+					continue
+				}
+				kind := attrStr(child, "type")
+				switch kind {
+				case "list", "bulletList", "bullet_list", "bulleted-list", "bulleted_list", "ordered-list", "numbered_list":
+				default:
+					continue
+				}
+				if _, ok := child["items"].([]any); !ok {
+					continue
+				}
+				childCtx := ctx
+				childCtx.Width = bodyWidth
+				childCtx.Depth++
+				for _, line := range lr.Render(Block{Type: kind, Attrs: child}, childCtx) {
+					out = append(out, strings.Repeat(" ", indent)+line)
+				}
 			}
 		}
 	}
@@ -309,6 +338,17 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 		return strings.Split(frame.Render(strings.Join(body, "\n")), "\n")
 	}
 
+	// ONE RULE PER BOUNDARY (task-a4d1ae76fdb2a6b0). An UNTITLED stack-mode
+	// section whose first child is a heading draws NO rule pair: the heading IS
+	// the boundary, and drawing a band around it stacks a hairline, the head's
+	// own rule, and a trailing hairline the NEXT section's head duplicates —
+	// three lines for one boundary. The Elixir engine settled that grammar in
+	// #16233 (SectionLayout.stack_rules?/2) and this reader kept drawing both
+	// rules on the same published papers; sectionStackRules below is the mirror.
+	if !sectionStackRules(b) {
+		return sr.body(b, ctx)
+	}
+
 	w := clampWidth(ctx.Width)
 	rule := ctx.Theme.Rule.Render(strings.Repeat("─", w))
 
@@ -316,6 +356,38 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 	out = append(out, sr.body(b, ctx)...)
 	out = append(out, rule)
 	return out
+}
+
+// sectionStackRules mirrors compose.ex's SectionLayout.stack_rules?/2 — the ONE
+// predicate that decides whether a section container draws its boundary rule
+// pair. It reports true (draw the pair) unless ALL of:
+//
+//   - the section carries NO title. Elixir gates on `is_nil`, so an
+//     empty-STRING title still counts as a title and keeps the pair; the key
+//     must be absent or JSON null for the suppression to apply. That is why
+//     this reads the map directly instead of going through attrStr, which
+//     cannot tell "" from missing.
+//   - the section is NOT declared grid mode. A grid section is a layout box,
+//     not a chapter (compose.ex routes it to section_grid_html, which keeps its
+//     pair unconditionally). The gate is the DECLARED mode, never the runtime
+//     degrade verdict — a grid that falls back to the stack loop because the
+//     terminal is narrow must not silently change its boundary grammar.
+//   - its FIRST child is a heading of any level.
+//
+// The shared fixture api/test/support/fixtures/section-boundary-rules.json is
+// read by all three engines' parity tests; the framed variant returns before
+// this call and is out of scope (the frame REPLACES the band by design).
+func sectionStackRules(b Block) bool {
+	if title, ok := b.Attrs["title"]; ok && title != nil {
+		return true
+	}
+	if layout, ok := b.Attrs["layout"].(map[string]any); ok && attrStr(layout, "mode") == "grid" {
+		return true
+	}
+	if len(b.Children) == 0 {
+		return true
+	}
+	return b.Children[0].Type != "heading"
 }
 
 // body renders the section's interior — optional bold title + child blocks

@@ -30,7 +30,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     1. **Inventory tripwire.** The set of `position: fixed` surfaces that
        genuinely render *inside* an `.editor-panel` root is small and known.
        Everything else either portals to `document.body` or is a SIBLING of the
-       panel inside `.pane-layout`. If a future slice adds a fourth one, the
+       panel inside `.pane-layout`. If a future slice adds another one, the
        verdict "containment is harmless here" silently stops being audited —
        so a new one fails this test until it is classified.
 
@@ -82,6 +82,10 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
                     "../../../priv/static/assets/bp-paper-editor-shell.css",
                     __DIR__
                   )
+  @root_media_picker_css Path.expand(
+                           "../../../priv/static/assets/bp-media-picker.css",
+                           __DIR__
+                         )
   @lib Path.expand("../../../lib/barkpark_web", __DIR__)
   @static_js Path.expand("../../../priv/static/assets", __DIR__)
 
@@ -137,7 +141,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # with its placement relative to the panel roots above.
   #
   #   :under_panel     — renders as a DESCENDANT of an `.editor-panel` root.
-  #                      This is the set containment would affect. Keep it at 3.
+  #                      This is the set containment would affect. Audit additions.
   #   :body_portal     — JS moves the node to `document.body` before showing it.
   #   :layout_sibling  — server-rendered inside `.pane-layout` but AFTER
   #                      `</.studio_editor_shell>` (components.ex:913), so it is
@@ -150,6 +154,11 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # sheet_grid.ex:3030, a sibling of the grid-wrap inside the sheet panel
     # (sheet_grid.ex:2478) — the one surface the carve-out insures.
     ".sheet-context-menu" => :under_panel,
+    # paper_editor.ex renders this inside each block, hence inside the Paper
+    # panel in Studio (and main on the public reader). At <=720px it becomes
+    # a viewport-bottom strip; the editor reserves footer space for it. It is
+    # deliberately NOT classified as a portal. Desktop stays an absolute rail.
+    ".bp-paper-edit-toolbar" => :under_panel,
     ".bp-slash-menu" => :body_portal,
     ".bp-paper-format" => :body_portal,
     ".bp-paper-context-menu" => :body_portal,
@@ -159,6 +168,13 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     ".image-picker" => :layout_sibling,
     ".history-modal" => :layout_sibling,
     ".delete-modal" => :layout_sibling,
+    # spd-w5f — the schema-action confirm scrim. It used to carry `position:
+    # fixed` in an inline `style=` (it was the third @inline_fixed_inventory
+    # entry below); hoisting it to a root.html.heex rule moved it from that
+    # census into this one, same placement either way. components.ex renders
+    # ConfirmModal AFTER `</.studio_editor_shell>`, so it is a SIBLING of the
+    # panel, never a descendant.
+    ".bp-modal-overlay" => :layout_sibling,
     ".profile-modal" => :layout_sibling,
     # spd-w19 — `#bp-press-answer`, the press-answer live region. Rendered in
     # root.html.heex as a DIRECT SIBLING of `{@inner_content}`, i.e. outside the
@@ -190,9 +206,6 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # ConnectorsLive is its own full-page route (router.ex:1259) — it renders no
     # `.pane-layout` and no `.editor-panel`, so containment cannot reach it.
     "live/studio/connectors_live.ex" => 2,
-    # ConfirmModal is invoked at components.ex:940 — after the editor shell
-    # closes (:913) and before `</.pane_layout>` (:1143): a layout sibling.
-    "components/confirm_modal.ex" => 1,
     # The Cmd/Ctrl+K session palette overlay. ChatLive is its own full-page
     # route (router.ex "/chat" and "/chat/:session_id") and renders NEITHER
     # `.pane-layout` NOR `.editor-panel` — grep both in chat_live.ex for zero
@@ -247,9 +260,14 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     "modal-backdrop" => :css_rule,
     # modals.ex image picker — `position: fixed; inset: 0`, :layout_sibling above.
     "image-picker-overlay" => :css_rule,
-    # confirm_modal.ex renders its own `style="position: fixed; inset: 0; …"`;
-    # there is no `.bp-modal-overlay` rule and none is needed.
-    "bp-modal-overlay" => :inline_style
+    # confirm_modal.ex — `.bp-modal-overlay` is a root.html.heex rule as of
+    # spd-w5f (`position: fixed; inset: 0; z-index: 51`, scrim ink from
+    # `--bp-scrim-hsl`). It USED to be the one :inline_style entry here, and
+    # that is exactly why the inline reader's own control below is now a
+    # synthetic source rather than this class: a control that reads a real file
+    # dies with the file's next cleanup, and a dead control is a green with no
+    # subject.
+    "bp-modal-overlay" => :css_rule
   }
 
   # What counts as "backdrop-shaped": a class token whose name says it exists to
@@ -257,11 +275,14 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # ExUnit has no layout engine to recognise one any other way (see @moduledoc).
   @backdrop_name_shapes ~w(backdrop overlay scrim)
 
-  # The Studio root layout's CSS is two files since edit-on-the-link: the
-  # remaining inline <style> plus the editor shell stylesheet it links
-  # (/assets/bp-paper-editor-shell.css, which the public paper reader links
-  # too). The census is over what the Studio page LOADS, so it reads both.
-  defp root_css, do: File.read!(@root) <> "\n" <> File.read!(@root_shell_css)
+  # The Studio root layout's CSS is three files since edit-on-the-link: the
+  # remaining inline <style>, the editor shell stylesheet and the shared media
+  # picker stylesheet it links. The census is over what the Studio page LOADS,
+  # so it reads all three rather than losing fixed overlays when CSS is moved.
+  defp root_css do
+    [@root, @root_shell_css, @root_media_picker_css]
+    |> Enum.map_join("\n", &File.read!/1)
+  end
 
   # Strip CSS comments so prose about `position: fixed` is never censused.
   defp decommented(css), do: Regex.replace(~r|/\*.*?\*/|s, css, "")
@@ -596,10 +617,20 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # The `position` values declared in an inline `style="…"` on an element that
   # also carries `class="<class>"`, across the Studio sources.
   defp inline_positions_for_class(class) do
-    for path <- studio_sources(),
-        src = File.read!(path),
-        # The attributes of one element: from the class attr to the tag close.
-        [element] <- Regex.scan(~r/class="[^"]*\b#{Regex.escape(class)}\b[^"]*".*?>/s, src),
+    studio_sources()
+    |> Enum.map(&File.read!/1)
+    |> Enum.reduce(MapSet.new(), &MapSet.union(inline_positions_in(&1, class), &2))
+  end
+
+  # The reader itself, over ONE source string. Split out (spd-w5f) so the
+  # non-vacuity control can feed it a synthetic element: until spd-w5f,
+  # `.bp-modal-overlay` was the only :inline_style backdrop in the tree and the
+  # control read it out of confirm_modal.ex — so hoisting that scrim to a CSS
+  # rule, which is a fix, would have left the inline path with no subject at all
+  # and the control passing on a file it no longer describes.
+  defp inline_positions_in(src, class) do
+    # The attributes of one element: from the class attr to the tag close.
+    for [element] <- Regex.scan(~r/class="[^"]*\b#{Regex.escape(class)}\b[^"]*".*?>/s, src),
         [_, value] <- Regex.scan(~r/position:\s*([a-z-]+)/, element),
         into: MapSet.new(),
         do: value
@@ -795,14 +826,20 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
       end
     end
 
-    test "exactly three fixed-position selectors render under a panel root" do
+    test "exactly four fixed-position selectors render under a panel root" do
       under_panel =
         @fixed_css_inventory
         |> Enum.filter(fn {_sel, placement} -> placement == :under_panel end)
         |> Enum.map(&elem(&1, 0))
         |> MapSet.new()
 
-      assert under_panel == MapSet.new([".bp-ae-toast", ".bp-ae-modal", ".sheet-context-menu"])
+      assert under_panel ==
+               MapSet.new([
+                 ".bp-ae-toast",
+                 ".bp-ae-modal",
+                 ".sheet-context-menu",
+                 ".bp-paper-edit-toolbar"
+               ])
     end
 
     test "root.html.heex declares position:fixed for exactly the inventoried selectors" do
@@ -988,7 +1025,7 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
              That is a real finding, not a test bug — the paper editor mounts
              inside an `.editor-panel` root, so this surface is now subject to any
              containing block the panel grows. Add it to the hand-verified
-             under-panel set (the "exactly three" test above) with a rationale,
+             under-panel set (the "exactly four" test above) with a rationale,
              then update this expectation. Do not just delete the classification.
              """
     end
@@ -1133,16 +1170,31 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
              "the census cannot see a `position: static` backdrop — the wrong " <>
                "direction is exactly what @fixed_css_inventory already missed"
 
-      # And the inline path has its own non-vacuity: confirm_modal really does
-      # carry a non-static inline position, read from the source, not assumed.
-      inline = inline_positions_for_class("bp-modal-overlay")
+      # And the inline path has its own non-vacuity. It is exercised against a
+      # SYNTHETIC element, not against whichever file happens to be classified
+      # :inline_style today: that classification is a thing this repo is
+      # actively working OFF (spd-w5f hoisted the last one, `.bp-modal-overlay`,
+      # into root.html.heex), and a control pinned to a real file goes silently
+      # subject-less the moment the file is cleaned up. The reader still has to
+      # work then — the next component to carry an inline `position:` must be
+      # caught on the day it lands, not on the day someone re-writes this test.
+      planted = ~s(<div class="bp-planted-inline-overlay" style="position: fixed; inset: 0;">)
 
-      assert MapSet.member?(inline, "fixed"),
-             "the inline reader cannot see confirm_modal's `position: fixed` — " <>
-               "the :inline_style classification is unaudited"
+      assert inline_positions_in(planted, "bp-planted-inline-overlay") ==
+               MapSet.new(["fixed"]),
+             "the inline reader cannot read `position: fixed` off an element's " <>
+               "own style= attribute — every :inline_style classification is unaudited"
 
-      refute MapSet.member?(inline_positions_for_class("bp-planted-absent-overlay"), "fixed"),
-             "the inline reader reports a position for a class that does not exist"
+      assert inline_positions_in(planted, "bp-planted-absent-overlay") == MapSet.new([]),
+             "the inline reader reports a position for a class the element does not carry"
+
+      # And it really is reading the SOURCES in the non-synthetic path: every
+      # class this census classifies :inline_style must be visible to it.
+      for {class, :inline_style} <-
+            Enum.filter(@backdrop_class_inventory, &(elem(&1, 1) == :inline_style)) do
+        refute MapSet.size(inline_positions_for_class(class)) == 0,
+               "`.#{class}` is classified :inline_style but the source reader finds no position"
+      end
     end
   end
 

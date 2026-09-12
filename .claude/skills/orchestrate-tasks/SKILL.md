@@ -81,6 +81,19 @@ Six leads run concurrently. Do not do lane work yourself while they run.
 - **A lead returns → same turn: read its report, relaunch a successor `lead-<lane>-2`
   on the lane's next slice.** Landing and relaunching are one motion. The pipeline never
   idles while there is ready work and quota.
+- **Round start, step (1), before ANY dispatch: DERIVE the lane's open-PR set.**
+  `bash .claude/skills/orchestrate-tasks/helpers/lane-open-prs.sh <branch-prefix>[,<p2>] [held-rows-file]`
+  prints every open PR on the lane's branch prefixes (number, draft flag, head sha, created_at,
+  the `Task:` trailer) and, per held row, the ledger's own `claim.lease_extension.pr` — then a
+  DISPATCH BLOCK naming the rows that already have a PR. Give the successor prompt this output,
+  not the predecessor's table. **A handoff table is a SNAPSHOT**: 2026-09-11, lead-api-r9 wrote
+  status.md at 06:35Z calling two rows untriaged, its workers opened #17709 (06:55Z) and #17706
+  (06:51Z) for exactly those rows, and r9 died on the Fable cap before amending the table. The
+  successor dispatched two duplicate workers off that table; one shipped #17716, which
+  contradicted the correct PR and had to be closed. Both facts were readable the whole time —
+  from GitHub and from the claim lease. Derive the set every round; never inherit it. (A failed
+  read prints `CANNOT READ` and exits 3, so an unreadable lane is never mistaken for an idle one;
+  `--selftest` runs the parse against a fixture and refuses on an empty one.)
 - **Fable death.** A lead that dies on the Fable cap is relaunched on `opus` with the
   same prompt; its workers were already Opus.
 
@@ -202,6 +215,12 @@ campaign is judged on those as much as on closes.
 - Commit only your own paths (`git commit -- <paths>`), then `git log -1 --stat` and read
   the file list. A stray file means another writer; repair before pushing.
 - Every PR carries `Task: <doc_id>` as a trailer and merges through `scripts/bp-merge.sh`.
+- **To hold a PR from the unattended merge sweep, use GitHub's review state — not its title.**
+  Request a review on it (the Reviewers box) or leave a *Changes requested* review, and
+  `helpers/merge-sweep.sh` refuses it and logs `HELD #<pr>: open review — …`. A pending request
+  or an unresolved CHANGES_REQUESTED holds; a later approval or dismissal clears it. The old
+  `DO NOT MERGE`/`WIP`/`HOLD` title words still work but fail OPEN — forget the word and the PR
+  lands. Doing nothing means the sweep may merge, which is the default it has always had.
 - `bp task close <id> <worker> <epoch>` is the LEAD's verb after the merge; a worker
   stamps criteria (`bp task stamp`) and never closes.
 - Skip `drafts.*` rows in `bp task ready` — they are unpublished phantoms.
@@ -217,8 +236,12 @@ Measured 2026-09-02 02:10Z: all 17 leads hit the Opus 5-hour limit within one mi
   advisory sweep (`helpers/ci-advisory-sweep.sh`), and the merge sweep (`helpers/merge-sweep.sh`) —
   squash-merges any campaign PR whose FOUR required checks are green **by head sha and whose base is
   main** (a stacked PR merges into its parent otherwise), never closes ledger rows. Its first pass
-  landed 31 reviewed PRs while every lead was down. Read required checks with `helpers/pr-required.sh`;
-  `gh pr checks` renders cancelled/queued as fail.
+  landed 31 reviewed PRs while every lead was down. Read required checks with
+  `helpers/pr-required.sh <pr> FRIKKern/barkpark` — **always pass owner/repo as arg 2**; the
+  cwd-derived default goes empty whenever the cwd is not the repo (it resets between tool calls),
+  and an empty repo made this script print `0/4` at exit 0 for PRs that were at 3/4 (2026-09-02).
+  `gh pr checks` renders cancelled/queued as fail. A `CANNOT READ` last line is a REFUSAL, not a
+  verdict and not a zero — never fold it into a not-yet count.
 - **Write `$ORCH/RESUME.md`** the moment the fleet drops: per lane, the live concerns and the relaunch
   prompt (`lead-<lane>-r`: read brief → status → decisions → merge-sweep.log; RE-CLAIM rows first, the
   leases lapsed; stamp + close what the sweep merged; continue).

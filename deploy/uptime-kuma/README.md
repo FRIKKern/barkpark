@@ -33,16 +33,22 @@ docker compose -f /opt/barkpark/deploy/uptime-kuma/docker-compose.yml config
 
 Both monitors use the default **60 s interval**. Both target public routes — no token header is needed.
 
-### 1. Liveness — `/api/schemas`
+### 1. Liveness — `/status.json`
 
-There is no dedicated `/healthz` route. The public, unauthenticated
-`/api/schemas` endpoint is the always-200 liveness check — it returns
-JSON without a token.
+The public, unauthenticated `/status.json` endpoint is the liveness check — it
+returns JSON without a token. It is STRICTLY STRONGER than a bare route probe:
+`StatusController.show_json/2` -> `Barkpark.Status.health/0` runs bare
+`Repo.all/1`, so an unreachable database answers 500, never 200.
+
+Do NOT monitor `/api/schemas`. That route pipes through
+`BarkparkWeb.Plugs.LegacyDeprecation` and carries a published
+`sunset: Wed, 31 Dec 2026 23:59:59 GMT` — on removal day a monitor pointed at
+it pages for a healthy box.
 
 | Field                 | Value                                  |
 |-----------------------|----------------------------------------|
 | Monitor Type          | HTTP(s)                                |
-| URL                   | `http://127.0.0.1:4000/api/schemas`    |
+| URL                   | `http://127.0.0.1:4000/status.json`    |
 | Interval              | 60 s                                   |
 | Accepted status codes | `200-299`                              |
 
@@ -50,7 +56,7 @@ Equivalent curl:
 
 ```bash
 curl -sS -o /dev/null -w "%{http_code}\n" \
-  http://127.0.0.1:4000/api/schemas
+  http://127.0.0.1:4000/status.json
 # expect: 200
 ```
 

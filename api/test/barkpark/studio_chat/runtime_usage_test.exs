@@ -218,6 +218,109 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
     end
   end
 
+  # ── POSITIVE CONTROL — both append-only guards, on NON-EMPTY tables ─────────
+  #
+  # This file just stopped archiving its committed residue and started deleting
+  # it, and five studio-chat setups just dropped TEN unqualified table-wide
+  # DELETEs against these two ledgers. The entire claim of that change is that
+  # THE GUARDS ARE UNTOUCHED: no migration shipped, no sandbox exemption carved,
+  # nothing prod-deploying. This test is what makes that claim falsifiable — a
+  # fix that silences the guards is worse than the tax it removed.
+  #
+  # NON-VACUITY IS THE LOAD-BEARING PART, and it is this row's own lesson. A
+  # `FOR EACH ROW` trigger cannot fire on zero rows, so an `assert_raise` over an
+  # EMPTY table is a control that can only ever FAIL — and the mirror image, a
+  # DELETE that passes silently because the table happens to be empty, is exactly
+  # the latent trap that produced this whole class. So each arm proves its table
+  # is NON-EMPTY at the moment of the write, off a bound integer (`assert
+  # pattern = expr, "msg"` raises MatchError before `assert/2` ever reaches the
+  # message).
+  #
+  # `chat_runtime_usage_receipts` is here on purpose, not for symmetry. Its guard
+  # `barkpark_runtime_usage_receipts_immutable` carries NEITHER a
+  # `pg_trigger_depth` arm NOR a teardown GUC — no exemption path of any kind —
+  # so it is precisely the guard a fix aimed only at the epic ledger opens
+  # silently. It is dormant today only because the table holds zero rows on most
+  # boxes; a table that is empty is not a guard that is safe.
+  test "both append-only guards still refuse a direct DELETE and UPDATE, tables NON-EMPTY", ctx do
+    assert {:ok, :recorded} =
+             RuntimeUsage.observe(
+               ctx.attribution,
+               :baseline,
+               event(ctx.session_id, "turn-guard-control", 100)
+             )
+
+    attempts = Repo.aggregate(RuntimeAttempt, :count)
+    receipts = Repo.aggregate(Receipt, :count)
+
+    assert attempts > 0,
+           "VACUOUS CONTROL: epic_assignment_runtime_attempts holds #{attempts} rows; " <>
+             "a FOR EACH ROW trigger cannot fire on an empty table"
+
+    assert receipts > 0,
+           "VACUOUS CONTROL: chat_runtime_usage_receipts holds #{receipts} rows; " <>
+             "a FOR EACH ROW trigger cannot fire on an empty table"
+
+    assert_raise Postgrex.Error, ~r/append-only \(DELETE forbidden\)/, fn ->
+      Repo.delete_all(RuntimeAttempt)
+    end
+
+    assert_raise Postgrex.Error, ~r/append-only \(UPDATE forbidden\)/, fn ->
+      Repo.update_all(RuntimeAttempt, set: [provider: "claude"])
+    end
+
+    assert_raise Postgrex.Error, ~r/append-only \(DELETE forbidden\)/, fn ->
+      Repo.delete_all(Receipt)
+    end
+
+    assert_raise Postgrex.Error, ~r/append-only \(UPDATE forbidden\)/, fn ->
+      Repo.update_all(Receipt, set: [turn_id: "rewritten"])
+    end
+
+    # The guards refused, so nothing left: the rows the control asserted present
+    # are still present. A guard that raised AND deleted would be worse than one
+    # that never fired.
+    assert Repo.aggregate(RuntimeAttempt, :count) == attempts
+    assert Repo.aggregate(Receipt, :count) == receipts
+  end
+
+  # The five studio-chat setups replaced their table-wide ledger DELETEs with
+  # `ChatSessionResidue.purge!/0`. This is that helper's own control, and it
+  # exercises BOTH pin types — an `epic_assignment_runtime_attempts` row and a
+  # `chat_runtime_usage_receipts` row — because a helper that handled only the
+  # ledger with an exemption hatch is the exact shape that opens the one without.
+  test "residue purge deletes unpinned sessions, archives ledger-pinned ones, deletes no ledger row",
+       ctx do
+    {:ok, loose} =
+      StudioChat.create_session(%{id: Ecto.UUID.generate(), cwd: "/tmp/loose", mode: "plan"})
+
+    assert {:ok, :recorded} =
+             RuntimeUsage.observe(
+               ctx.attribution,
+               :baseline,
+               event(ctx.session_id, "turn-residue-control", 100)
+             )
+
+    attempts = Repo.aggregate(RuntimeAttempt, :count)
+    receipts = Repo.aggregate(Receipt, :count)
+
+    assert attempts > 0, "VACUOUS: no attempt row pins ctx.session_id"
+    assert receipts > 0, "VACUOUS: no receipt row pins ctx.session_id"
+
+    assert :ok = Barkpark.ChatSessionResidue.purge!()
+
+    assert Repo.get(Session, loose.id) == nil
+
+    pinned = Repo.get(Session, ctx.session_id)
+    refute is_nil(pinned)
+    refute is_nil(pinned.archived_at)
+
+    # No DELETE ever reached either append-only ledger — the guards were not
+    # invoked, let alone weakened.
+    assert Repo.aggregate(RuntimeAttempt, :count) == attempts
+    assert Repo.aggregate(Receipt, :count) == receipts
+  end
+
   test "attempt authority rejects cross-Task claims and unsupported runtimes", ctx do
     assert {:error, :runtime_attempt_conflict} =
              CycleFleet.prepare_runtime_attempt(ctx.assignment, %{
@@ -1070,44 +1173,63 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
           Task.await(holder, 10_000)
         end
       after
-        park_unboxed_sessions!(workspace)
+        # ORDER IS LOAD-BEARING, and it is the whole fix. `delete_workspace/1`
+        # calls `barkpark_prepare_workspace_cycle_teardown` and then cascades
+        # `epic_assignments` away — which carries this drive's RuntimeAttempt row
+        # off with it at trigger depth 2 WITH the teardown GUC set, i.e. the
+        # append-only guard's OWN designed exemption, with no guard change
+        # anywhere. Only once that `ON DELETE RESTRICT` pin is gone can the
+        # committed session be deleted at all. Purging before the teardown (or
+        # merely archiving, as this file did until now) leaves the row forever.
         assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+        purge_unboxed_sessions!(workspace)
       end
     end)
   end
 
-  # ── the unboxed drive's committed residue (wave-26 pollution class) ─────────
+  # ── the unboxed drive's committed residue: DELETED, not parked ─────────────
   #
   # `unboxed_run` COMMITS — that is the point (two real connections have to block
   # each other), but it also means every row the drive writes OUTLIVES the test.
-  # `prepare_runtime_attempt/2` mints a chat_sessions row for the attempt, and
-  # the teardown above does NOT reach it: `Tenancy.delete_workspace/1` returns
-  # `{:ok, _}` and leaves the session behind. Measured on main (2026-09-01):
-  # running this file against an empty `chat_sessions` leaves exactly ONE
-  # committed row, cleaned by nothing, forever.
+  # `prepare_runtime_attempt/3` mints a `chat_sessions` row for the attempt, and
+  # `Tenancy.delete_workspace/1` does NOT reach it: `owner_workspace_id` carries
+  # no foreign key, so the teardown returns `{:ok, _}` and leaves the session
+  # behind. Measured on main (2026-09-01): running this file against an empty
+  # `chat_sessions` leaves exactly ONE committed row, cleaned by nothing, ever.
+  # THIS FILE IS THE SOURCE of the residue every studio-chat suite has been
+  # working around: 86 such rows on one long-lived box, all carrying this
+  # drive's fingerprint (`provider: "codex"`, `mode: "plan"`, empty `cwd`).
   #
   # A committed session escapes every LATER test's sandbox rollback and rides
   # `list_sessions/2`'s recency-desc ordering ahead of that test's own pinned
   # fixtures — the class #12041 named: an extra row reddens `StudioChatTest`'s
   # list_sessions recency/cap tests and (for a NULL-owner row) the sidebar
   # byte-lock in `ChatRenderGoldenTest`, which renders it as an EXTRA session
-  # card (region 7783 vs golden 6554 — no render change at all). Those two files
-  # answer it with a setup-time purge of their own; a victim-side belt protects
-  # only its own file, and only against rows committed BEFORE its setup ran.
+  # card (region 7783 vs golden 6554 — no render change at all).
   #
-  # DELETING the residue is not available: `epic_assignment_runtime_attempts` is
-  # an append-only ledger (a DELETE raises `barkpark_epic_ledger_immutable`) and
-  # it carries an ON DELETE RESTRICT FK to `chat_sessions`, so the attempt row
-  # pins the session row in place. Archive it instead — `list_sessions/2` filters
-  # `archived_at IS NULL` on every default listing, so the parked residue can
-  # never reach a later test's sidebar again while the ledger stays intact.
-  defp park_unboxed_sessions!(workspace) do
-    Repo.update_all(
-      from(s in Session,
-        where: s.owner_workspace_id == ^workspace.id and is_nil(s.archived_at)
-      ),
-      set: [archived_at: DateTime.utc_now() |> DateTime.truncate(:second)]
-    )
+  # THIS FILE USED TO ARCHIVE THE ROW INSTEAD OF DELETING IT, on the reasoning
+  # that `epic_assignment_runtime_attempts` is append-only and `ON DELETE
+  # RESTRICT`-pins the session, so a DELETE is unavailable. The reasoning was
+  # right about the pin and wrong about the order: run the purge AFTER
+  # `Tenancy.delete_workspace/1` and the pin is already gone, because the
+  # workspace teardown cascades `epic_assignments` with the teardown GUC set and
+  # the attempt row leaves at trigger depth 2 through the guard's own exemption.
+  # Archiving hid the row from `list_sessions/2` but left the five victim suites
+  # each carrying two unqualified table-wide DELETEs against append-only ledgers,
+  # which pass SILENTLY on an empty table and red the day it holds one row.
+  #
+  # The assertion is the proof the purge WORKS rather than merely runs — a
+  # cleanup that quietly no-ops is exactly how this residue accumulated.
+  defp purge_unboxed_sessions!(workspace) do
+    {_deleted, _} =
+      Repo.delete_all(from(s in Session, where: s.owner_workspace_id == ^workspace.id))
+
+    remaining =
+      Repo.aggregate(from(s in Session, where: s.owner_workspace_id == ^workspace.id), :count)
+
+    assert remaining == 0,
+           "the unboxed drive left #{remaining} committed chat_sessions row(s) behind; " <>
+             "an append-only child still pins them"
 
     :ok
   end

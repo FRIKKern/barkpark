@@ -411,7 +411,7 @@ html[data-theme="dark"] .bp-paper-body {
    the SAME spacing: with zero bottom margins, additive==collapsed. This single
    source feeds both surfaces; the first heading is clamped to 0 by each surface's
    :first-child rule. */
-.bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
+.bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 0.8em 0 0; }
 /* ── THE DISPLAY VOICE (device 3, charter D29/D36) ────────────────────────────
    A section head is the one place the paper speaks in its display voice, and
    that voice is BIG AND LIGHT: ~2.0x the body (36px over 18px), weight 400, a
@@ -475,6 +475,10 @@ html[data-theme="dark"] .bp-paper-body {
   margin-top: var(--bp-section-beat);
   border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
   padding-top: var(--bp-section-gap);
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+  padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
 }
 /* The SAME device for a level-2 heading that OPENS a `section` container. The
    container is one box deeper than a bare block (stream item, then the box div
@@ -491,6 +495,10 @@ html[data-theme="dark"] .bp-paper-body {
   margin-top: var(--bp-section-beat);
   border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
   padding-top: var(--bp-section-gap);
+  margin-inline: var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%);
+  box-sizing: border-box;
+  padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
 }
 /* `hyphens: manual` — the explicit OFF, not the absence of a rule. Automatic
    hyphenation earns its keep in JUSTIFIED text, where the alternative is rivers
@@ -542,8 +550,8 @@ html[data-theme="dark"] .bp-paper-body {
 /* `margin: 0 0 24px` bottom-gap is VIEW-ONLY (Edit omits it — see token block). */
 .bp-paper-surface ul, .bp-paper-surface ol { margin: 0 0 24px; padding-left: var(--bp-list-indent); }
 .bp-paper-surface li { margin: var(--bp-li-gap) 0 0; }
-.bp-paper-surface ul li { list-style: disc; }
-.bp-paper-surface ol li { list-style: decimal; }
+.bp-paper-surface ul > li { list-style: disc; }
+.bp-paper-surface ol > li { list-style: decimal; }
 .bp-paper-surface code {
   font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
   background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
@@ -663,11 +671,12 @@ html[data-theme="dark"] .bp-paper-body {
   overflow-wrap: break-word;
 }
 .bp-paper-surface .bp-role-byline {
-  border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem;
+  border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0.75rem 0 2rem;
   color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em;
 }
 .bp-paper-surface .bp-role-ingress {
   color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em;
+  margin-top: 20px;
 }
 .bp-paper-surface .bp-role-pullquote {
   display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
@@ -739,6 +748,10 @@ html[data-theme="dark"] .bp-paper-body {
    and a wide table returns to scrolling inside it — the doc-overflow contract is
    unchanged at every width (measured: 360/768/1280/1920, all seven fixtures). */
 .bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
+/* A column is an authored boundary. Its table may scroll inside that slot,
+   but must not borrow the page-wide evidence band and cover the next column.
+   Set the tokens on the table itself so nested editor hosts cannot reset them. */
+.bp-paper-surface .bp-cols__c .bp-table { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
 /* A table with no rows paints NOTHING and still spent `--bp-air-table` doing it.
    Found by the divider dedup below: `portabledoc-showcase` renders a `sheet`
    whose cells resolve through a caller-supplied map, so without one it falls back
@@ -769,6 +782,29 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
 /* Match the empty editable cell's caret line without adding authored text or width. */
 .bp-paper-surface .bp-table :is(.bp-table__th, .bp-table__td):empty::before { content: "\200b"; visibility: hidden; }
+/* TYPED COLUMNS (the `cols` spec — text | num | delta | spark). The modifiers
+   are emitted by walk.ex table_col_class/3 ONLY when the block carries a `cols`
+   spec, so an untyped table never sees them. num and delta right-align so the
+   ones place lines up down the column (tabular figures keep the digits on a
+   fixed advance); the header rides right with its column. spark sizes the ONE
+   sparkline primitive (DataViz.spark_svg/2, shared with the stat block) down to
+   a cell-sized strip; the stroke rules mirror .bp-stat__spark polyline — fill
+   MUST be none or the polyline paints as a filled blob.
+   Written as an explicit comma-grouped selector list, NOT `:is(...)`: the
+   View↔Edit parity parser (view_edit_parity_test.exs `declarations_for/3`)
+   splits a rule's selector list on commas and matches
+   `.bp-paper-surface <element>` exactly, so a modifier hidden inside `:is()`
+   is INVISIBLE to the gate and its editor mirror could drift unseen. The
+   comma form is specificity-identical (`:is()` takes its most specific
+   argument — a class either way) and puts the modifiers on the wire. Keep
+   byte-aligned with priv/static/assets/bp-paper-editor-shell.css +
+   assets/paper-editor/src/styles.css. */
+.bp-paper-surface .bp-table__th--num,
+.bp-paper-surface .bp-table__td--num { text-align: right; font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-table__th--spark,
+.bp-paper-surface .bp-table__td--spark { width: 1%; white-space: nowrap; }
+.bp-paper-surface .bp-table__spark { display: block; width: 96px; height: 20px; }
+.bp-paper-surface .bp-table__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 
 /* Sheet CHROME (band + cell rules). Author DATA — col width, per-cell
    b/i/bg/al, engine-error red/bold — stays INLINE on the <td> (sheets_parity). */
@@ -865,9 +901,10 @@ html[data-theme="dark"] .bp-paper-body {
    claim about a position belongs. The block stays in the document, keeps
    round-tripping through every engine, and stops painting a second boundary.
 
-   VIEW ONLY, on the precedent of `p:empty` above (Reader-Owned Spacing
-   Doctrine): in the editor an invisible block is one the author cannot select or
-   delete, so `.bp-paper-editor-body` deliberately keeps drawing it.
+   Reader-only selectors, on the precedent of `p:empty` above. The editor's
+   resting-scaffolds extension mirrors suppression with a labelled gutter
+   control: selection restores the native divider for editing/deletion. The
+   document and its undo history retain the original block throughout.
 
    TWO LEGS, the same two the section head has: the flat body (legacy reader and
    the render rig) and the block-backed reader, where every top-level block is
@@ -1375,6 +1412,13 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1.6rem 0;
 }
+/* Unresolved task-detail: the same honest dashed placeholder the sibling
+   live-query widgets use (.bp-tasks--empty), so an empty block keeps its
+   place in the column instead of collapsing to nothing. */
+.bp-paper-surface .bp-tdetail--empty {
+  font-family: var(--paper-font-mono); color: var(--paper-ink-soft); font-size: 0.85rem;
+  border: 1px dashed var(--paper-chrome-border); border-radius: 8px; padding: 14px; text-align: center; margin: 1.4rem 0;
+}
 /* The task title is free-form author text set at 1.15rem bold — the largest
    type inside the detail card, and the only one of the card-title family that
    outgrows prose. Measured at a 320px viewport, a single 30-character compound
@@ -1452,6 +1496,14 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-rm__bar--done { background: var(--st-ok); }
 .bp-paper-surface .bp-rm__bar--cancel { background: var(--paper-ink-faint); }
 .bp-paper-surface .bp-rm__today { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--st-danger); opacity: 0.6; }
+/* roadmap v2 point markers — the HTML twin of the Go reader's diamond glyphs
+   (internal/pdrender/taskblocks.go: note ◇ at the bar's start, milestone ◆ at its
+   end). Both are rotated squares centred on their offset; milestone is filled and
+   note is hollow, so the two read apart with colour stripped. */
+.bp-paper-surface .bp-rm__ms,
+.bp-paper-surface .bp-rm__note { position: absolute; top: 6px; width: 10px; height: 10px; margin-left: -5px; transform: rotate(45deg); }
+.bp-paper-surface .bp-rm__ms { background: var(--paper-ink); }
+.bp-paper-surface .bp-rm__note { border: 1.5px solid var(--paper-ink-soft); background: var(--paper-bg); }
 
 /* ── status legend — the shared vocabulary key ── */
 .bp-paper-surface .bp-legend {
@@ -1504,6 +1556,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    mirrors (the .bp-cols trio precedent). */
 .bp-paper-surface .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
 @media (max-width: 720px) { .bp-paper-surface .bp-section__grid { grid-template-columns: 1fr; } }
+/* Authored desktop spans must not create implicit tracks in the one-column reader. */
+@media (max-width: 720px) { .bp-paper-surface .bp-section__cell { grid-column: 1 / -1 !important; } }
 .bp-paper-surface .bp-section__cell { min-width: 0; }
 .bp-paper-surface .bp-section__cell > :first-child { margin-top: 0; }
 .bp-paper-surface .bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
@@ -2087,3 +2141,25 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 /* valueref-accept: the inline baseline-accept affordance (walk.ex). */
 .bp-paper-surface .bp-valueref-accept { appearance: none; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg-deep); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.75rem; padding: 1px 7px; margin-left: 6px; cursor: pointer; vertical-align: 1px; }
 .bp-paper-surface .bp-valueref-accept:hover { border-color: var(--paper-accent); }
+
+/* pre-gate badge (compose.ex `pre-gate-badge`, inserted by
+   Content.Papers.PreGateRegister.annotate/3): the 2026-09-02 grandfather ruling
+   made visible. One line under the byline rule, in the SYSTEM's voice — the
+   masthead roles are the author's serif, this is caps-mono — sized below the
+   byline (0.9em of the body) so it annotates the title block and never competes
+   with it. Colour is the existing callout tone FOREGROUND only (no pill, no
+   rule, no motion): neutral for the 37 papers whose reader is unaffected, the
+   warn tone for the one whose table header renders empty. The browser title
+   attribute carries the register's reader_behaviour. `--tucked` is set only
+   when the badge sits directly under a byline: its negative top margin
+   collapses against the byline's 1.4rem bottom margin to a 0.5rem seat under
+   the rule; without a byline the 0.6rem top margin seats it under the title
+   like a dateline (reader-owned spacing — no spacer block). Prints as plain
+   text. */
+.bp-paper-surface .bp-pregate {
+  margin: 0.6rem 0 1.4rem; font-family: var(--paper-font-mono); font-size: 0.72rem;
+  font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1.4;
+  color: var(--bp-tone-neutral-fg); hyphens: none; overflow-wrap: break-word;
+}
+.bp-paper-surface .bp-pregate--warning { color: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-pregate--tucked { margin-top: -0.9rem; }

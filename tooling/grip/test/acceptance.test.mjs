@@ -448,7 +448,7 @@ test("the three refusals are NOT one class — specimen 6 is HEAD-ALLOWLIST, spe
   const localNode = screenCommand("node tooling/grip/cli.mjs --selftest");
   assert.equal(localNode.ok, false);
   assert.equal(localNode.reason, reasonOf(6),
-    "grip refuses to screen its own execution under exactly the rule that refuses specimen 6 (screen.mjs:1096)");
+    "grip refuses to screen its own execution under exactly the rule that refuses specimen 6 (screen.mjs REFUSED_HEADS)");
 });
 
 test("TIGHTENING, MEASURED: classifySafety admits all six specimens; screenCommand refuses three", () => {

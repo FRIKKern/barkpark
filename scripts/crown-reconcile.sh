@@ -81,6 +81,55 @@
 # fallback for a row that carries no `delivering_run_id` at all, which is how rows
 # written before that field existed are still judged rather than waved through.
 #
+# THE ALIBI IS SELF-REPORTED, SO IT NEEDS A SECOND, INDEPENDENT CONSTRAINT
+# (dr-w29-s1-followup-run-id-alibi-is-self-reported).
+#
+# `delivering_run_id` is written by the recorder ABOUT ITSELF (`GITHUB_RUN_ID`),
+# so membership in the delivering set asks only "does the run this row names
+# exist and deliver?" — never "could THAT run have written THIS row?". A
+# plausible-but-wrong id — a run that delivered something else, a retry's id, a
+# transposed digit that happens to land on a real deploy — is waved through: the
+# row exists, the run exists, and nothing compares them. One field cannot check
+# itself.
+#
+# So a run id that is in the delivering set must ALSO survive an interval test:
+# the row's own `first_seen_at` must fall inside the named run's
+# `created_at`..`updated_at` span, widened by ALIBI_SKEW_SECONDS at each end.
+# That pair is independent by construction — the row states the instant, the
+# Actions run listing states the span, and neither is derived from the other.
+# `first_seen_at` is the runner's own clock at the instant record-delivery ran
+# (deploy.yml `FIRST_SEEN=$(date -u ...)`), and record-delivery is a JOB OF THAT
+# RUN, so a truthful pair is inside the span by construction; only a mis-stamped
+# id lands outside it. The row's identity is `(sha, delivering_run_id, target)`,
+# so a second run re-delivering the same sha writes its OWN row with its OWN
+# `first_seen_at` — the instant never outlives the run it names.
+#
+# COST: ZERO EXTRA API CALLS. `created_at` is already projected out of the SAME
+# run listing this axis already fetches, and `updated_at` rides the same page
+# rows; nothing is asked per-sha and nothing is asked per-run. The sibling rule
+# that forbids a per-sha API call in the deploy recorder is respected because no
+# call is added anywhere.
+#
+# WHAT IT DOES NOT CATCH, STATED RATHER THAN LEFT TO BE DISCOVERED. The spans of
+# two deploys triggered seconds apart OVERLAP almost entirely — measured live on
+# 2026-09-10, runs 34462907759 (09:51:04Z..10:29:56Z) and 34462929474
+# (09:51:19Z..10:28:13Z), 15s apart and 2214s/2332s long. A row that names its
+# CONCURRENT SIBLING therefore still clears, and no interval test can separate
+# those two: they were both running when the row was written. This constraint
+# closes the id that comes from a DIFFERENT TIME — an older run, a stale retry,
+# a digit transposed onto a run hours away — which is every shape the filing
+# named. Separating concurrent siblings needs a different handle entirely (the
+# row's sha against the run's own commit range), and that is deliberately NOT
+# attempted here: it would cost a per-sha API call, which the deploy recorder's
+# own rule forbids.
+#
+# AND IT REFUSES RATHER THAN CLEARS. A run whose page row carries no readable
+# `updated_at`, or a row whose `first_seen_at` did not parse, has no interval to
+# be judged against — that is ALIBI-INTERVAL-UNREADABLE: deferred by name, in
+# neither direction, subtracted from the WRONG denominator, exit 2. The failure
+# of the second constraint must never be a green, and must never be a red
+# either: an absent field is a fact about the READ, not about the deploy.
+#
 # PREDATES-WRITER IS A NAMED CLASS, NOT A NARROWED WINDOW (charter D496).
 #
 # `record-delivery` — the only thing that writes `platform_deliveries` from inside
@@ -469,6 +518,8 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/bp-curl.sh"   # 429 backoff for every LOCAL curl below, shared (task-ca8fffa7ca885413)
 
 REPO="${GITHUB_REPOSITORY:-FRIKKern/barkpark}"
 WINDOW_HOURS=24
@@ -505,6 +556,15 @@ SERVING_SKEW_EPSILON_SECONDS=15
 # observed maximum. Past it, the run stops being an alibi: the sha is accused
 # (SERVING-INFLIGHT-EXPIRED + SERVING-UNRECORDED, exit 1), naming the hung run.
 SERVING_INFLIGHT_CAP_SECONDS=10800
+# THE TOLERANCE ON THE RUN-INTERVAL ALIBI, stated beside the check it widens
+# (dr-w29-s1-followup). The two instants being compared are a GitHub-hosted
+# runner's `date -u` (the row's `first_seen_at`) and GitHub's own API timestamps
+# for the same run — two clocks inside one provider, so the expected skew is
+# sub-second and this is pure headroom, not a measurement. It is deliberately
+# SMALL: the whole point of the second constraint is that a plausible-but-wrong
+# run id lands OUTSIDE the span, and a tolerance wide enough to be comfortable
+# is a tolerance wide enough to re-admit the neighbouring run. 60s.
+ALIBI_SKEW_SECONDS=60
 # How long a graced sha stays on the RE-ASK LIST. It is accused on every run in
 # between, so this bounds the LIST, not the accusation. See the boundary above.
 REASK_MAX_SECONDS=86400
@@ -548,6 +608,23 @@ NOW_OVERRIDE=""
 # that excuses rows by hand, which is the tolerance this fix exists to refuse.
 # Live runs always take the watermark from the real clock, at the real instant.
 RUNLIST_AT_OVERRIDE=""
+# THE SERVING ARM'S OWN CLOCK, PINNED — FIXTURES ONLY, AND REFUSED LIVE.
+# Sibling of --runlist-at, for the OTHER gap in this script. `--now` is the
+# instant the window was cut; the serving arm runs after every API read this
+# script performs, so on a live run the two are minutes apart. A harness has to
+# be able to set them INDEPENDENTLY or it cannot express the case at all: with
+# `--now` alone the gap is zero by construction and the defect is unreachable.
+# Like --runlist-at this is a TEST handle and nothing else — a live run takes
+# the serving arm's clock from the real clock at the real instant.
+SERVING_AT_OVERRIDE=""
+# THE ROWS ARM'S OWN CLOCK, PINNED — FIXTURES ONLY, AND REFUSED LIVE.
+# The third of the same family. `--now` is the instant the window was cut; the
+# crown row page is read after the run-list paging and every per-run jobs call,
+# so on a live run those two instants are minutes apart. A harness has to be
+# able to set them INDEPENDENTLY or the case is unreachable: with `--now` alone
+# the gap is zero by construction, which is exactly why every existing rows
+# probe is blind to it. A live run reads the real clock at the real instant.
+ROWS_AT_OVERRIDE=""
 
 WORK="$(mktemp -d 2>/dev/null || mktemp -d -t crown-reconcile)"
 cleanup() { rm -rf "$WORK"; }
@@ -571,6 +648,8 @@ while [ $# -gt 0 ]; do
     --commits-fixture) COMMITS_FIXTURE="${2:-}"; shift 2 ;;
     --now) NOW_OVERRIDE="${2:-}"; shift 2 ;;
     --runlist-at) RUNLIST_AT_OVERRIDE="${2:-}"; shift 2 ;;
+    --serving-at) SERVING_AT_OVERRIDE="${2:-}"; shift 2 ;;
+    --rows-at) ROWS_AT_OVERRIDE="${2:-}"; shift 2 ;;
     --state-file) STATE_FILE="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "unknown flag: $1"; exit 3 ;;
@@ -588,6 +667,16 @@ FIXTURE_MODE=0
 
 if [ -n "$RUNLIST_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]; then
   warn "CONFIG: --runlist-at is a FIXTURE-ONLY handle for widening the gap between the run-list sample and the crown sample. A live run takes its watermark from the real clock at the real instant, and must not be handed one; pinning it by hand would be a tolerance, not a consistent read."
+  exit 3
+fi
+
+if [ -n "$SERVING_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]; then
+  warn "CONFIG: --serving-at is a FIXTURE-ONLY handle for widening the gap between the window cut and the serving read. A live run reads the real clock at the serving arm, and must not be handed one; pinning it by hand would let an operator dial a serving_since into or out of the future, which is the exact tolerance this arm exists to refuse."
+  exit 3
+fi
+
+if [ -n "$ROWS_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]; then
+  warn "CONFIG: --rows-at is a FIXTURE-ONLY handle for widening the gap between the window cut and the crown row read. A live run reads the real clock at the row read, and must not be handed one; pinning it by hand would let an operator dial a row into or out of the in-flight cap, which is the exact leniency this arm exists to bound."
   exit 3
 fi
 
@@ -964,7 +1053,7 @@ crown_read() {
       return 0
       ;;
     pat)
-      http="$(curl -s -o "$WORK/body.json" -w '%{http_code}' --max-time 30 \
+      http="$(bp_curl_code -s -o "$WORK/body.json" --max-time 30 \
         -H "authorization: Bearer $CROWN_API_TOKEN" "$API_BASE/v1/deliveries?$qs")"
       if [ "$http" != "200" ]; then
         READS_FAILED=$((READS_FAILED + 1))
@@ -1235,6 +1324,7 @@ jq --argjson cut "$CUTOFF_EPOCH" --argjson wide "$WIDE_EPOCH" \
   '[.workflow_runs[]
     | select(.status == "completed")
     | {id: (.id | tostring), sha: .head_sha, created: .created_at, at: (.created_at | fromdateiso8601),
+       ended: (try ((.updated_at // .completed_at // "") | sub("\\.[0-9]+"; "") | sub("Z?$"; "Z") | fromdateiso8601) catch 0),
        concl: (.conclusion // "none")}]
    | {examined: [.[] | select(.at >= $cut)], wide: [.[] | select(.at >= $wide)]}' \
   "$WORK/runs-raw.json" > "$WORK/runs.json" 2>/dev/null
@@ -1324,18 +1414,28 @@ DELIVERING="$(awk 'NF' "$WORK/delivering.txt" | wc -l | tr -d ' ')"
 # row that names it as WRONG. An unreadable alibi is now its own set, counted and
 # named, and a row it covers is DEFERRED rather than accused.
 : > "$WORK/wide-unreadable.txt"
+# The SPAN of each delivering run, written beside its id in the same pass and off
+# the same page rows: `<id> <created-epoch> <updated-epoch>`. This is the second,
+# independent constraint's only data source, and it costs ZERO extra API calls —
+# both instants are fields of the run listing already in hand. A run whose
+# `updated_at` did not parse is written with an END of 0, which the classifier
+# reads as UNREADABLE and refuses on, never as a span that clears.
+: > "$WORK/wide-intervals.txt"
 WIDE_UNREADABLE=0
-while IFS=' ' read -r id sha; do
+while IFS=' ' read -r id sha at ended; do
   [ -n "$id" ] || continue
+  case "${at:-}" in ''|*[!0-9]*) at=0 ;; esac
+  case "${ended:-}" in ''|*[!0-9]*) ended=0 ;; esac
   run_delivers_cached "$id"
   case $? in
     0) printf '%s\n' "$sha" >> "$WORK/wide-shas.txt"
-       printf '%s\n' "$id" >> "$WORK/wide-runs.txt" ;;
+       printf '%s\n' "$id" >> "$WORK/wide-runs.txt"
+       printf '%s %s %s\n' "$id" "$at" "$ended" >> "$WORK/wide-intervals.txt" ;;
     1) ;;
     *) WIDE_UNREADABLE=$((WIDE_UNREADABLE + 1))
        printf '%s %s\n' "$id" "$sha" >> "$WORK/wide-unreadable.txt" ;;
   esac
-done < <(jq -r '.wide[] | "\(.id) \(.sha)"' "$WORK/runs.json")
+done < <(jq -r '.wide[] | "\(.id) \(.sha) \(.at) \(.ended)"' "$WORK/runs.json")
 sort -u -k1,1 "$WORK/wide-unreadable.txt" > "$WORK/wide-unreadable-sorted.txt"
 awk 'NF {print $1}' "$WORK/wide-unreadable-sorted.txt" | sort -u > "$WORK/wide-unreadable-runs.txt"
 awk 'NF {print $2}' "$WORK/wide-unreadable-sorted.txt" | sort -u > "$WORK/wide-unreadable-shas.txt"
@@ -1343,6 +1443,22 @@ awk 'NF {print $2}' "$WORK/wide-unreadable-sorted.txt" | sort -u > "$WORK/wide-u
 say ""
 say "POPULATION: ${COMPLETED_COUNT}${FLOOR} completed deploy.yml run(s) on main in the window — a run DELIVERED when its control-plane OR instance job concluded success, WHATEVER the run's overall conclusion, because a run whose only failing job is the other leg still put code on a box; ${DELIVERING} of them DELIVERED, ${MIXED_LEG} of those delivered with the OTHER leg FAILED, ${NONDELIVERING} delivered nothing (no leg concluded success — a docs-only merge skips both), ${JOBS_UNREADABLE} unreadable."
 say "  CANCELLED, NAMED IN BOTH DIRECTIONS: of the ${NONDELIVERING} that delivered nothing, ${CANCELLED_NONDELIVERING} were CANCELLED_NONDELIVERING — a superseded push, not a docs-only merge, and the parenthetical above is wrong about them; and ${CANCELLED_DELIVERING} of the ${DELIVERING} that DELIVERED are CANCELLED_DELIVERING — a leg concluded success and the run was cancelled anyway, so those runs put code on a box while their record-delivery job died with the cancel, and the crown may hold no row for a delivery that happened."
+# CANCEL RATE, printed rather than quoted. .github/workflows/deploy.yml keeps its
+# `report-deploy-failure` guard at bare `failure()` — which is FALSE for
+# `cancelled` — on the strength of a cancel rate written into a comment as
+# "344 of the window's 1,378 runs". Nothing re-derived it and nothing went red
+# when it drifted, so the guard's own evidence aged in silence. The two class
+# counts above already name every cancelled run; one more line states the SUM
+# over the population it was measured on, so the number a reader acts on is
+# always the one this run just computed. `pct` is defined further down the file,
+# so the ratio is formatted inline here (task-d37e762904be6571).
+CANCELLED_TOTAL=$((CANCELLED_NONDELIVERING + CANCELLED_DELIVERING))
+if [ "${COMPLETED_COUNT:-0}" -gt 0 ]; then
+  CANCEL_RATE="$(awk -v n="$CANCELLED_TOTAL" -v d="$COMPLETED_COUNT" 'BEGIN { printf "%.1f%%", (n * 100) / d }')"
+else
+  CANCEL_RATE="n/a"
+fi
+say "  CANCEL RATE, LIVE: ${CANCELLED_TOTAL} of the ${COMPLETED_COUNT}${FLOOR} completed run(s) in this window were CANCELLED (${CANCEL_RATE}) — re-derived every run, with its denominator beside it, so no comment anywhere has to quote a frozen one."
 say "WATERMARK: the run list was sampled at ${RUNLIST_ISO} and the crown is read after it — ${NONTERMINAL_RUNS} run(s) on the page were NON-TERMINAL at that instant, page run ids span ${MIN_RUN_ID}..${MAX_RUN_ID}. A row written by a run that was not terminal then is excluded from BOTH sides as WRITTEN-IN-FLIGHT rather than accused, and is judged normally by the next run."
 if [ "$FLOOR" = "+" ]; then
   say "  TRUNCATION RESIDUAL, stated rather than left to the plus sign: the run listing was paged ${RUNS_PAGES_READ} time(s) and still stopped short of the window start, so runs older than id ${MIN_RUN_ID} were never examined. A delivering run that fell off the page CANNOT be counted BEHIND by this run — the BEHIND denominator above is a floor, and its silence is a blind spot, not a clean reading."
@@ -1402,6 +1518,19 @@ TRUNC_UNJUDGED=0
 # by name with the run it names, subtracted from the WRONG denominator, and put
 # through reason() so the run lands in rc 2 (SILENCE) and still pages.
 UNREADABLE_ALIBI=0
+# Rows whose stated deliverer IS a real delivering run, but whose own
+# `first_seen_at` falls OUTSIDE that run's created..updated span — the shape a
+# self-reported id cannot rule out on its own
+# (dr-w29-s1-followup-run-id-alibi-is-self-reported). Counted INTO WRONG, because
+# it is a positive statement about the pair — this run could not have written
+# this row — and printed in its own block with both instants, so a reader can
+# check the arithmetic rather than take the verdict's word for it.
+ALIBI_WINDOW_WRONG=0
+# …and the refusal beside it: a named run with no readable span, or a row whose
+# own instant did not parse. There is nothing to compare, so this is neither a
+# clear nor an accusation — DEFERRED by name, subtracted from the WRONG
+# denominator, rc 2.
+ALIBI_INTERVAL_UNREADABLE=0
 # The quiescence count, for the QUIET WINDOW arm below (charter D597). Distinct
 # from ROWS_EXAMINED on purpose: an in-window row seen down the no-alibi branch
 # was COUNTED but never CLASSIFIED — there is no alibi source to judge it
@@ -1414,6 +1543,7 @@ QUIET_ROWS_READ=0
 NOALIBI_REASON="no delivering run in the widened window — the reverse direction has no alibi source and was NOT checked"
 : > "$WORK/wrong.txt"
 : > "$WORK/unreadable-alibi.txt"
+: > "$WORK/alibi-window.txt"
 : > "$WORK/inflight.txt"
 : > "$WORK/inflight-expired.txt"
 sort -u "$WORK/wide-shas.txt" > "$WORK/wide-shas-sorted.txt"
@@ -1438,6 +1568,26 @@ if [ "$WIDE_SHAS" -eq 0 ]; then
     case "${QUIET_ROWS:-}" in ''|*[!0-9]*) QUIET_ROWS=0 ;; *) QUIET_ROWS_READ=1 ;; esac
   fi
 elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
+  # ── THE ROWS ARM'S CLOCK, TAKEN HERE ────────────────────────────────────
+  # One statement after the row page landed, because that is the instant these
+  # rows were frozen and the instant their ages are being judged at. `NOW_EPOCH`
+  # was read before the run-list paging, before every per-run jobs call and
+  # before this read; crown-reconcile's median body is 556s (task-b0c12a9316203c0f),
+  # so `NOW_EPOCH - rowat` understates every row's age by the script's own
+  # runtime. On the in-flight CAP below that error points ONE WAY: a row that has
+  # genuinely been waiting longer than the cap at the moment it is read is still
+  # scored as inside it, and keeps an alibi it has already outlived. Same family
+  # as RUNLIST_EPOCH and SERVING_NOW_EPOCH; same dividing line — the WINDOW
+  # arithmetic (CUTOFF_EPOCH, WIDE_EPOCH, the watermark's own comparison) stays
+  # on NOW_EPOCH, because it must match the run-list sample; a DURATION that ends
+  # at "now" must use a live now.
+  if [ -n "$ROWS_AT_OVERRIDE" ]; then
+    ROWS_NOW_EPOCH="$(epoch_of "$ROWS_AT_OVERRIDE")" || { warn "CONFIG: --rows-at is not an ISO-8601 instant: $ROWS_AT_OVERRIDE"; exit 3; }
+  elif [ -n "$NOW_OVERRIDE" ]; then
+    ROWS_NOW_EPOCH="$NOW_EPOCH"
+  else
+    ROWS_NOW_EPOCH="$(date -u +%s)"
+  fi
   jq --argjson cut "$CUTOFF_EPOCH" \
     '[.deliveries[]
       | select((.first_seen_at // "") != "")
@@ -1462,7 +1612,41 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
       # run at all, because a served sha legitimately differs from every run's
       # head sha whenever a deploy's pull races past its trigger.
       if [ "$run" != "-" ]; then
-        grep -qx "$run" "$WORK/wide-runs-sorted.txt" && continue
+        if grep -qx "$run" "$WORK/wide-runs-sorted.txt"; then
+          # ── THE SECOND CONSTRAINT: A SELF-REPORTED ID MUST STILL FIT THE RUN ──
+          # Membership alone answers "does that run exist and deliver?". It does
+          # NOT answer "could that run have written THIS row?", and one field
+          # written by the recorder about itself cannot answer that about itself.
+          # The independent half is the run's own span, read off the SAME page
+          # this axis already fetched: no extra API call, per-run or per-sha.
+          _iv="$(awk -v r="$run" '$1 == r { print $2 " " $3; exit }' "$WORK/wide-intervals.txt")"
+          _iv_start="${_iv%% *}"
+          _iv_end="${_iv##* }"
+          case "${_iv_start:-}" in ''|*[!0-9]*) _iv_start=0 ;; esac
+          case "${_iv_end:-}" in ''|*[!0-9]*) _iv_end=0 ;; esac
+          if [ "$_iv_start" -le 0 ] || [ "$_iv_end" -le 0 ] || [ "$rowat" -le 0 ]; then
+            # NO SPAN, NO VERDICT. An absent `updated_at`, or an unparsable
+            # `first_seen_at`, is a fact about the READ. Clearing on it would
+            # restore exactly the hole this constraint closes; accusing on it
+            # would page over a missing field. Refuse, by name, at rc 2.
+            ALIBI_INTERVAL_UNREADABLE=$((ALIBI_INTERVAL_UNREADABLE + 1))
+            reason "row $sha: its delivering run $run is real, but the pair could not be checked — the run's created..updated span or the row's own first_seen_at was absent or unparsable. The self-reported id is NOT accepted on its own and the row is NOT counted clean."
+            continue
+          fi
+          _iv_lo=$((_iv_start - ALIBI_SKEW_SECONDS))
+          _iv_hi=$((_iv_end + ALIBI_SKEW_SECONDS))
+          if [ "$rowat" -ge "$_iv_lo" ] && [ "$rowat" -le "$_iv_hi" ]; then
+            continue
+          fi
+          # THE ALIBI FAILS. The run is real and it delivered — and it was not
+          # running when this row was written, so it is not this row's deliverer
+          # whatever the row says. A plausible-but-wrong id loses here.
+          ALIBI_WINDOW_WRONG=$((ALIBI_WINDOW_WRONG + 1))
+          WRONG=$((WRONG + 1))
+          printf '%s %s alibi-window\n' "$sha" "$run" >> "$WORK/wrong.txt"
+          printf '%s %s %s %s %s\n' "$sha" "$run" "$_iv_start" "$_iv_end" "$rowat" >> "$WORK/alibi-window.txt"
+          continue
+        fi
       else
         grep -qx "$sha" "$WORK/wide-shas-sorted.txt" && continue
       fi
@@ -1481,7 +1665,7 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
         # deferring the accusation with no end to the deferral. Charged against
         # the ROW's own first-seen instant, so one row gets one window and never
         # a fresh one per run, exactly as the serving grace is charged.
-        _inflight_age=$((NOW_EPOCH - rowat))
+        _inflight_age=$((ROWS_NOW_EPOCH - rowat))
         if [ "$_inflight_age" -gt "$SERVING_INFLIGHT_CAP_SECONDS" ]; then
           INFLIGHT_EXPIRED=$((INFLIGHT_EXPIRED + 1))
           printf '%s %s %s\n' "$sha" "$run" "$_inflight_age" >> "$WORK/inflight-expired.txt"
@@ -1567,6 +1751,32 @@ else
 fi
 
 # ── SERVING: what the box says it is running, versus the crown ───────────────
+#
+# THE CLOCK THIS ARM SUBTRACTS WITH IS SAMPLED HERE, NOT AT THE TOP OF THE FILE.
+# `NOW_EPOCH` was read before the run-list paging, the per-run jobs reads and the
+# crown read; on run 34573248644 those took 550s. The arm below asks "is the box's
+# serving_since ahead of NOW?" — a question whose answer is meaningless against a
+# clock that is minutes stale. That run reported
+#   SERVING-CLOCK-SKEW: ... serving_since 2026-09-11T07:20:55Z ... 488s in the FUTURE
+# and 07:20:55 minus the 07:12:47 banner instant is 488s TO THE SECOND: the number
+# WAS the script's own runtime. The control plane's clock was correct (a probe two
+# hours later had its `checked_at` agreeing with an independent clock to
+# sub-second, and health.ex's vm_started_at is `utc_now - uptime`, which can never
+# exceed the plane's own now). With a live clock the arm would have computed
+# age=+62s, taken the SERVING GRACE arm, and exited 0; instead the SKEW arm won,
+# SERVING_RED went to 1 and the gate paged at a deploy one minute old.
+#
+# Same shape and same remedy as RUNLIST_EPOCH above. A pinned `--now` run keeps
+# the old behaviour exactly — the gap is zero by construction there — so every
+# existing probe measures what it always measured; `--serving-at` is the handle
+# that lets a probe widen the gap on purpose.
+if [ -n "$SERVING_AT_OVERRIDE" ]; then
+  SERVING_NOW_EPOCH="$(epoch_of "$SERVING_AT_OVERRIDE")" || { warn "CONFIG: --serving-at is not an ISO-8601 instant: $SERVING_AT_OVERRIDE"; exit 3; }
+elif [ -n "$NOW_OVERRIDE" ]; then
+  SERVING_NOW_EPOCH="$NOW_EPOCH"
+else
+  SERVING_NOW_EPOCH="$(date -u +%s)"
+fi
 SERVING_RED=0
 # 1 ONLY when the serving check RAN end-to-end and the served sha HAS its cp
 # row. Condition (1) of the QUIET WINDOW arm (charter D597): a check that was
@@ -1585,7 +1795,7 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
   if [ -n "$HEALTH_FIXTURE" ]; then
     if [ -f "$HEALTH_FIXTURE" ]; then cp "$HEALTH_FIXTURE" "$WORK/health.json"; else : > "$WORK/health.json"; fi
   else
-    curl -s --max-time 20 "$HEALTH_URL" > "$WORK/health.json" 2>/dev/null
+    bp_curl_code -s --max-time 20 -o "$WORK/health.json" "$HEALTH_URL" >/dev/null 2>&1 || : > "$WORK/health.json"
   fi
   SERVING_SHA="$(jq -r '.serving_sha // .git_sha // empty' "$WORK/health.json" 2>/dev/null)"
   if [ -z "$SERVING_SHA" ]; then
@@ -1594,7 +1804,7 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
     since="$(jq -r '.serving_since // empty' "$WORK/health.json" 2>/dev/null)"
     SERVING_SINCE="$since"
     since_epoch="$(epoch_of "$since" 2>/dev/null || echo 0)"
-    age=$((NOW_EPOCH - ${since_epoch:-0}))
+    age=$((SERVING_NOW_EPOCH - ${since_epoch:-0}))
     if crown_read "sha=$SERVING_SHA" "$WORK/rows-serving.json"; then
       cp_rows="$(jq --arg sha "$SERVING_SHA" '[.deliveries[] | select(.sha == $sha and .target == "cp")] | length' "$WORK/rows-serving.json" 2>/dev/null)"
       [ -n "$cp_rows" ] || cp_rows=0
@@ -1610,8 +1820,8 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
         # past the cap stops being an alibi and the accusation fires below as
         # SERVING-INFLIGHT-EXPIRED, naming the hung run.
         first_seen="$(state_first_seen "$SERVING_SHA")"
-        [ -n "$first_seen" ] || first_seen="$NOW_EPOCH"
-        graced_age=$((NOW_EPOCH - first_seen))
+        [ -n "$first_seen" ] || first_seen="$SERVING_NOW_EPOCH"
+        graced_age=$((SERVING_NOW_EPOCH - first_seen))
         # THE ORDER OF THESE ARMS IS THE BEHAVIOUR: IN-FLIGHT, then EPSILON,
         # then SKEW, then GRACE, then RED. The negative-age skew guard is right
         # about a real clock fault and WRONG about a deploy that is still
@@ -1684,7 +1894,7 @@ WAIVED_COUNT=0
 : > "$WORK/reask-keep.txt"
 while IFS=' ' read -r gsha gts; do
   [ -n "$gsha" ] || continue
-  gage=$((NOW_EPOCH - gts))
+  gage=$((SERVING_NOW_EPOCH - gts))
   if [ "$gsha" = "$GRACED_THIS_RUN" ]; then
     # Its grace window is still open and this run already said so by name.
     printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
@@ -1742,7 +1952,7 @@ while IFS=' ' read -r gsha gts; do
 done < "$WORK/reask.txt"
 
 if [ -n "$GRACED_THIS_RUN" ] && ! grep -q "^$GRACED_THIS_RUN " "$WORK/reask-keep.txt"; then
-  printf '%s %s\n' "$GRACED_THIS_RUN" "$NOW_EPOCH" >> "$WORK/reask-keep.txt"
+  printf '%s %s\n' "$GRACED_THIS_RUN" "$SERVING_NOW_EPOCH" >> "$WORK/reask-keep.txt"
 fi
 state_save "$WORK/reask-keep.txt"
 
@@ -1805,6 +2015,19 @@ if [ "$UNREADABLE_ALIBI" -gt 0 ]; then
   done < "$WORK/unreadable-alibi.txt"
   say ""
 fi
+if [ "$ALIBI_INTERVAL_UNREADABLE" -gt 0 ]; then
+  say "ALIBI-INTERVAL-UNREADABLE: ${ALIBI_INTERVAL_UNREADABLE} of ${ROWS_EXAMINED} crown row(s) name a REAL delivering run whose created..updated span could not be read, or state a first_seen_at that did not parse. The self-reported run id is NOT accepted on its own, so these are DEFERRED rather than cleared — counted in neither direction, never counted clean, and this run exits 2."
+  say ""
+fi
+if [ "$ALIBI_WINDOW_WRONG" -gt 0 ]; then
+  say "ALIBI-WINDOW: ${ALIBI_WINDOW_WRONG} crown row(s) name a run that IS a real delivering run and could NOT have written them — the row's own first_seen_at falls outside that run's created..updated span, widened ${ALIBI_SKEW_SECONDS}s at each end for clock skew. \`delivering_run_id\` is written by the recorder about ITSELF, so existence of the run it names proves nothing about the pair; this is the independent half. Both instants are printed so the arithmetic can be checked:"
+  while IFS=' ' read -r awsha awrun awstart awend awat; do
+    [ -n "$awsha" ] || continue
+    if [ "$awat" -lt "$awstart" ]; then _aw_by=$((awstart - awat)); _aw_side="BEFORE it started"; else _aw_by=$((awat - awend)); _aw_side="AFTER it ended"; fi
+    say "    ${awsha}  (run ${awrun}) — that run ran $(iso_of "$awstart")..$(iso_of "$awend"), and this row was first seen $(iso_of "$awat"): ${_aw_by}s ${_aw_side}, past the ${ALIBI_SKEW_SECONDS}s skew allowance"
+  done < "$WORK/alibi-window.txt"
+  say ""
+fi
 if [ "$BEHIND" -gt 0 ]; then
   say "BEHIND: ${BEHIND} of ${RECONCILABLE} delivering run(s) examined ($(pct "$BEHIND" "$RECONCILABLE")) delivered a sha the crown has NO row for:"
   while IFS=' ' read -r sha id; do
@@ -1815,12 +2038,14 @@ fi
 # watermark excluded, and rows a truncated page made unjudgeable, are printed
 # above with their own counts — an exemption has to be a denominator a reader
 # can subtract, never a quieter one.
-JUDGED_ROWS=$((ROWS_EXAMINED - INFLIGHT_ROWS - TRUNC_UNJUDGED - UNREADABLE_ALIBI))
+JUDGED_ROWS=$((ROWS_EXAMINED - INFLIGHT_ROWS - TRUNC_UNJUDGED - UNREADABLE_ALIBI - ALIBI_INTERVAL_UNREADABLE))
 [ "$JUDGED_ROWS" -lt 0 ] && JUDGED_ROWS=0
 if [ "$WRONG" -gt 0 ]; then
   say "WRONG: ${WRONG} of ${JUDGED_ROWS} crown row(s) examined ($(pct "$WRONG" "$JUDGED_ROWS")) were written by no delivering run:"
-  while IFS=' ' read -r sha run; do
-    if [ "${run:--}" = "-" ]; then
+  while IFS=' ' read -r sha run why; do
+    if [ "${why:-}" = "alibi-window" ]; then
+      say "    ${sha} — recorded as delivered by run ${run}, which IS a delivering run but was not running when this row was first seen (see ALIBI-WINDOW above)"
+    elif [ "${run:--}" = "-" ]; then
       say "    ${sha} — recorded with no delivering run id, and no delivering run has that head sha"
     else
       say "    ${sha} — recorded as delivered by run ${run}, which is not a delivering run in the window"
@@ -1842,13 +2067,13 @@ fi
 if [ "$GRACED_RED" -gt 0 ]; then
   say "GRACED-UNRECORDED: ${GRACED_RED} sha(s) were granted the serving grace on an earlier run and STILL have no cp row. The grace was a DEFERRAL, and this is the deferred accusation — it fires whether or not the box still serves them:"
   while IFS=' ' read -r gsha gts; do
-    say "    ${gsha}  (first seen $(iso_of "$gts"), $((NOW_EPOCH - gts))s ago) — graced, then never recorded"
+    say "    ${gsha}  (first seen $(iso_of "$gts"), $((SERVING_NOW_EPOCH - gts))s ago) — graced, then never recorded"
   done < "$WORK/graced.txt"
 fi
 
 if [ "$BEHIND" -gt 0 ] || [ "$WRONG" -gt 0 ] || [ "$SERVING_RED" -gt 0 ] || [ "$GRACED_RED" -gt 0 ]; then
   say ""
-  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${JUDGED_ROWS} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, written-in-flight=${INFLIGHT_ROWS}/${ROWS_EXAMINED}, written-in-flight-expired=${INFLIGHT_EXPIRED}, truncated-unjudgeable=${TRUNC_UNJUDGED}, unreadable-alibi=${UNREADABLE_ALIBI}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
+  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${JUDGED_ROWS} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, written-in-flight=${INFLIGHT_ROWS}/${ROWS_EXAMINED}, written-in-flight-expired=${INFLIGHT_EXPIRED}, truncated-unjudgeable=${TRUNC_UNJUDGED}, unreadable-alibi=${UNREADABLE_ALIBI}, alibi-window=${ALIBI_WINDOW_WRONG}, alibi-interval-unreadable=${ALIBI_INTERVAL_UNREADABLE}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
   exit 1
 fi
 

@@ -172,6 +172,27 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   @spec enqueue(binary(), pos_integer()) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue(site_id, schedule_in)
       when is_binary(site_id) and is_integer(schedule_in) and schedule_in > 0 do
+    # THE ENQUEUE SEAM (dr-bl-deferral-requeue-failure-untested), mirroring
+    # `Sites.Deploy`'s `:site_deploy_starter` / `:site_deploy_requeue` exactly.
+    # Under `Oban testing: :manual` an insert ALWAYS succeeds, so BOTH re-queue
+    # failure arms — `Deploy.defer/3`'s (which reaches Oban through this
+    # function) and `defer_behind_running_build/2`'s below — were unreachable in
+    # a test. Those two arms are the ones that decide whether a lost publish is
+    # counted; a branch that cannot be made to fire proves nothing by being read.
+    #
+    # INERT IN PRODUCTION, structurally rather than by convention: the override
+    # lives in the CALLING PROCESS's dictionary, which starts empty on every
+    # process the BEAM spawns. No non-test module writes this key (`git grep
+    # auto_deploy_enqueue -- cloud/lib` is this line alone), so the default arm
+    # is the only one production can take. Process-locality is also what keeps
+    # `async: true` honest: one test's stub can never be seen by another's.
+    case Process.get(:auto_deploy_enqueue) do
+      fun when is_function(fun, 2) -> fun.(site_id, schedule_in)
+      _ -> insert_debounced(site_id, schedule_in)
+    end
+  end
+
+  defp insert_debounced(site_id, schedule_in) do
     %{site_id: site_id}
     |> new(schedule_in: schedule_in, unique: @unique)
     |> Oban.insert()

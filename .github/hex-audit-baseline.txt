@@ -1,0 +1,57 @@
+# .github/hex-audit-baseline.txt — the RECORDED advisory set the second CVE
+# oracle (scripts/hex-audit-oracle.sh, `mix hex.audit`) already knows about.
+#
+# WHY IT EXISTS. api/mix.lock and cloud/mix.lock ALREADY carry these advisories
+# today, several with no upstream fix (esaml, cowlib, bandit). A rule of "any
+# HIGH reds" would therefore red on the untouched, clean lock every single run
+# — a gate red before anyone touches it teaches people to ignore it, and it
+# could never show the one thing cch-w12-bl-cve-gate-is-oracle-blind criterion
+# 2 asks for: clean lock green, hand-reverted lock red.
+#
+# HOW IT READS. One record per line: `<lock>:<advisory-id>` in field 1; the
+# rest of the line is human commentary. `#` starts a comment.
+#   an id NOT in this file      -> NEW, the oracle exits 1 (the red that means something)
+#   a file id NOT reported      -> CLEARED, printed as a notice, exit stays 0
+# A ratchet has two failure directions. This one refuses to red when the world
+# got BETTER; it prints the cleared ids and asks you to trim them.
+#
+# KEYED BY LOCK, NOT BARE. bandit's two HIGHs sit in BOTH locks; a bare-id
+# baseline would let an advisory already recorded against api/ arrive in cloud/
+# and never read as NEW.
+#
+# DERIVATION. `bash scripts/hex-audit-oracle.sh`, run 2026-09-09 against
+# origin/main 851021379 on Elixir 1.19.5 / OTP 27 (local). 30 records: api 17
+# (4 HIGH), cloud 13 (5 HIGH). Both figures reproduced at CI's pinned Elixir
+# 1.18.1 / OTP 27.0 in security.yml run 34410161152, which matched all 30 ids.
+# Regenerate the same way; never hand-add an id
+# without saying which run produced it.
+api:EEF-CVE-2026-66838  postgrex 0.22.3  MEDIUM
+api:EEF-CVE-2026-47079  xml_builder 2.4.0  LOW
+api:EEF-CVE-2026-47080  xml_builder 2.4.0  LOW
+api:EEF-CVE-2026-48590  xml_builder 2.4.0  LOW
+api:EEF-CVE-2026-54893  swoosh 1.26.2  LOW
+api:EEF-CVE-2026-43971  cowlib 2.18.0  MEDIUM
+api:EEF-CVE-2026-43966  cowlib 2.18.0  MEDIUM
+api:EEF-CVE-2026-43969  cowlib 2.18.0  LOW
+api:EEF-CVE-2026-59248  cowlib 2.18.0  HIGH
+api:EEF-CVE-2026-74836  bandit 1.12.0  HIGH
+api:EEF-CVE-2026-65623  bandit 1.12.0  HIGH
+api:EEF-CVE-2026-75484  bandit 1.12.0  MEDIUM
+api:EEF-CVE-2026-65624  cowboy 2.17.0  MEDIUM
+api:EEF-CVE-2026-82729  mint 1.9.3  MEDIUM
+api:EEF-CVE-2026-82728  mint 1.9.3  HIGH
+api:EEF-CVE-2026-64941  phoenix_live_view 1.1.28  LOW
+api:EEF-CVE-2026-28809  esaml 4.6.0  MEDIUM
+cloud:EEF-CVE-2026-66838  postgrex 0.22.2  MEDIUM
+cloud:EEF-CVE-2026-58225  postgrex 0.22.2  LOW
+cloud:EEF-CVE-2026-56813  plug 1.20.1  LOW
+cloud:EEF-CVE-2026-56814  plug 1.20.1  MEDIUM
+cloud:EEF-CVE-2026-74836  bandit 1.12.0  HIGH
+cloud:EEF-CVE-2026-65623  bandit 1.12.0  HIGH
+cloud:EEF-CVE-2026-75484  bandit 1.12.0  MEDIUM
+cloud:EEF-CVE-2026-82728  mint 1.9.1  HIGH
+cloud:EEF-CVE-2026-59246  mint 1.9.1  MEDIUM
+cloud:EEF-CVE-2026-59249  mint 1.9.1  MEDIUM
+cloud:EEF-CVE-2026-58229  mint 1.9.1  HIGH
+cloud:EEF-CVE-2026-54893  swoosh 1.26.2  LOW
+cloud:EEF-CVE-2026-58226  hpax 1.0.3  HIGH

@@ -8,6 +8,17 @@ defmodule Barkpark.Tasks.QueueGateTest do
 
   @base %{"kind" => "task", "lifecycle_status" => "open"}
 
+  # A lease granted just now, and one granted an hour before the TTL boundary.
+  # Both COMPUTED — a frozen literal in a liveness fixture is a fixture with an
+  # expiry date on it.
+  defp fresh_ts, do: DateTime.utc_now() |> DateTime.to_iso8601()
+
+  defp expired_ts do
+    DateTime.utc_now()
+    |> DateTime.add(-(QueueGate.lease_ttl_seconds() + 3600), :second)
+    |> DateTime.to_iso8601()
+  end
+
   test "schema exposes only persistable version-1 states" do
     field = Enum.find(Tasks.task_schema().fields, &(&1["name"] == "queue_gate"))
 
@@ -133,10 +144,16 @@ defmodule Barkpark.Tasks.QueueGateTest do
   test "a LIVE claim still derives foreign_claimed for other workers" do
     # Guard against over-widening: no close stamp, blank close stamps, and the
     # in_progress lease all stay foreign to a contender.
+    #
+    # `ts_iso` is COMPUTED, not the frozen "2026-07-26T18:00:00Z" this fixture
+    # used to carry. That literal was already ~6 weeks in the past when
+    # `live_claim_worker/1` learned about lease expiry, so a fixture named LIVE
+    # was describing a corpse — and this whole test would have gone vacuous the
+    # other way (foreign_claimed for a dead lease) had it been left alone.
     live = %{
       "kind" => "task",
       "lifecycle_status" => "in_progress",
-      "claim" => %{"worker" => "worker-a", "epoch" => 1, "ts_iso" => "2026-07-26T18:00:00Z"}
+      "claim" => %{"worker" => "worker-a", "epoch" => 1, "ts_iso" => fresh_ts()}
     }
 
     assert Tasks.execution_class(live, "worker-b") == "foreign_claimed"
@@ -154,6 +171,54 @@ defmodule Barkpark.Tasks.QueueGateTest do
 
     nils = update_in(live["claim"], &Map.merge(&1, %{"closed_at" => nil, "closed_by" => nil}))
     assert Tasks.execution_class(nils, "worker-b") == "foreign_claimed"
+  end
+
+  test "an EXPIRED lease is not a live claim — residue never reads foreign_claimed" do
+    # The population this exists for: `bp task stage <id> open` moves a row out
+    # of `in_progress` WITHOUT touching `content.claim`, and `TtlSweeper` only
+    # ever selects `in_progress` rows — so this map is never blanked by anybody
+    # and its holder's name outlives the lease permanently.
+    residue = %{
+      "kind" => "task",
+      "lifecycle_status" => "open",
+      "claim" => %{"worker" => "worker-a", "epoch" => 3, "ts_iso" => expired_ts()}
+    }
+
+    # RED BEFORE THE FIX: "foreign_claimed" / false. A six-day-dead claim was
+    # LIVE, and the module's own @doc said liveness was checked.
+    assert Tasks.execution_class(residue, "worker-b") == "executable"
+    assert QueueGate.executable?(residue, "worker-b")
+    refute QueueGate.claim_lease_live?(residue)
+
+    # The arity-1 meaning is UNCHANGED and deliberate — "from no particular
+    # worker's perspective, somebody else holds this". A dead lease is nobody.
+    assert Tasks.execution_class(residue) == "executable"
+
+    # An author's gate is still honoured once the dead claim stops shadowing it,
+    # and it is the gate state — not `foreign_claimed` — that a reader is told.
+    gated = put_in(residue["queue_gate"], %{"version" => 1, "state" => "parked", "reason" => "l"})
+    assert Tasks.execution_class(gated, "worker-b") == "parked"
+    refute QueueGate.executable?(gated, "worker-b")
+  end
+
+  test "the lease predicate FAILS CLOSED on an absent or unparseable ts_iso" do
+    # It can only ever DOWNGRADE a holder to residue, so an unprovable case
+    # keeps the protective answer. A parse bug that failed OPEN would hand one
+    # lane another lane's row — worse than the bug being fixed.
+    for ts <- [nil, "", "not-a-timestamp", "2026-13-45T99:99:99Z", 1_234_567] do
+      claim = %{"worker" => "worker-a", "epoch" => 1}
+      claim = if is_nil(ts), do: claim, else: Map.put(claim, "ts_iso", ts)
+      content = Map.put(@base, "claim", claim)
+
+      assert QueueGate.claim_lease_live?(content),
+             "ts_iso #{inspect(ts)} must fail CLOSED (live), it did not"
+
+      assert Tasks.execution_class(content, "worker-b") == "foreign_claimed"
+    end
+
+    # And a claim map that is not a map at all cannot crash the predicate.
+    assert QueueGate.claim_lease_live?(%{"claim" => "worker-a"})
+    assert QueueGate.claim_lease_live?(nil)
   end
 
   test "executable predicate admits only absent, null, or exact executable v1 gates" do

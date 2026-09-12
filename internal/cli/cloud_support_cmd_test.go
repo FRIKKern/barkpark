@@ -207,6 +207,7 @@ type supportMainRecorder struct {
 	// remove-side knobs.
 	log                *supportCallLog // optional cross-host order log
 	revokeStatus       int             // 0 => 200 {revoked:true}
+	revokeBody         string          // non-2xx revoke body override (cch-w40-fu)
 	revoked            bool            // set once the revoke DELETE lands — drives the 403→401 probe
 	probeBearer        string          // the support's own raw token; the mint route answers 403/401 to it
 	probeStuckValid    bool            // planted survivor: the probe stays 403 after revoke
@@ -294,11 +295,15 @@ func (m *supportMainRecorder) serve(t *testing.T) *httptest.Server {
 			if status < 300 {
 				m.revoked = true
 			}
+			rbody := m.revokeBody
 			m.mu.Unlock()
 			w.WriteHeader(status)
-			if status < 300 {
+			switch {
+			case status < 300:
 				_ = json.NewEncoder(w).Encode(map[string]any{"token_id": id, "revoked": true})
-			} else {
+			case rbody != "":
+				_, _ = w.Write([]byte(rbody))
+			default:
 				_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"no token with that id"}}`))
 			}
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/workspaces/") && strings.HasSuffix(r.URL.Path, "/export"):
@@ -334,6 +339,7 @@ type supportCPRecorder struct {
 	registerStatus int              // 0 => 201
 	registerBody   string           // non-2xx body override (e.g. `{"error":"no_team"}`)
 	deleteStatus   int              // 0 => 200
+	deleteBody     string           // non-2xx body override (e.g. `{"error":"forbidden","reason":"no_team"}`)
 	honestDelete   bool             // DELETE /v1/fleet/supports/:id actually drops the row
 	deleteQueries  []string         // the RAW query string of every DELETE /v1/fleet/supports/:id
 	log            *supportCallLog
@@ -427,6 +433,8 @@ func (c *supportCPRecorder) serve(t *testing.T) *httptest.Server {
 				_, _ = w.Write([]byte(`{"ok":true,"status":"deprovisioning"}`))
 			case status < 300:
 				_, _ = w.Write([]byte(`{"ok":true,"status":"removed"}`))
+			case c.deleteBody != "":
+				_, _ = w.Write([]byte(c.deleteBody))
 			default:
 				_, _ = w.Write([]byte(`{"error":"not_found"}`))
 			}
@@ -1631,6 +1639,124 @@ func TestCloudSupportRemoveCPRowForbiddenNarration(t *testing.T) {
 	}
 }
 
+// TestCloudSupportRemoveCPRowNoTeamNarration (cch-w40-fu) is the cp-row twin of
+// TestCloudSupportAddNoTeamFlipParity: the CP-row DELETE warn must read the
+// CAUSE the control plane named, not the bare status. A login that holds NO TEAM
+// cannot be repaired by a role grant, so "a session needs team-admin, a PAT needs
+// the deploy ability" is a confidently-wrong sentence for it — it points at
+// re-authenticating a credential that is fine.
+//
+// Both no_team shapes are driven (the 422 the team gate emitted before #9956 and
+// the 403 {"error":"forbidden","reason":"no_team","scope":"team"} it emits after,
+// plus the flat cause-as-code 403), each beside a COUNTER-ROW: a genuine role
+// 403 must keep the role sentence and must NOT gain the `bp team use` hint. The
+// counter-row is what makes the no_team rows mean anything — without it a test
+// that printed the team hint on every 403 would pass.
+//
+// EXIT CODE, measured not assumed: this arm is warn-and-CONTINUE, so the run's
+// code comes from the census (exitGeneric, the surviving CP row), not from the
+// arm — it is exitGeneric on every row here, including the role counter-row. The
+// SENTENCE is the whole difference, which is why each row asserts both halves.
+func TestCloudSupportRemoveCPRowNoTeamNarration(t *testing.T) {
+	const roleSentence = "a session needs team-admin, a PAT needs the deploy ability"
+	const teamHint = "run `bp team use <team>`"
+
+	for _, tc := range []struct {
+		name     string
+		status   int
+		body     string
+		wantHint bool
+	}{
+		{"pre-flip 422 no_team", http.StatusUnprocessableEntity, `{"error":"no_team"}`, true},
+		{"post-flip 403 no_team", http.StatusForbidden, `{"error":"forbidden","reason":"no_team","scope":"team"}`, true},
+		{"post-flip 403, cause as code", http.StatusForbidden, `{"error":"no_team"}`, true},
+		// COUNTER-ROWS: a real authority refusal keeps the role narration.
+		{"403 role refusal", http.StatusForbidden, `{"error":"forbidden","required":"admin","scope":"team"}`, false},
+		{"403 bare forbidden", http.StatusForbidden, `{"error":"forbidden"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			main, srv, cp, _, _, _ := supportRemoveWiring(t)
+			cp.deleteStatus = tc.status
+			cp.deleteBody = tc.body
+			cp.honestDelete = false
+
+			stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+			if code != exitGeneric {
+				t.Fatalf("a surviving CP row must exit exitGeneric=%d, got %d\nstdout:\n%s\nstderr:\n%s",
+					exitGeneric, code, stdout, stderr)
+			}
+			// Precondition: the run really reached the cp-row arm under test.
+			if cp.count("DELETE /v1/fleet/supports/") != 1 {
+				t.Fatalf("precondition: the cp-row DELETE must have run: %v", cp.requests)
+			}
+			if main.count("DELETE /v1/fleet/support-tokens/tid-42") != 1 {
+				t.Fatalf("precondition: the token revoke runs before the cp row: %v", main.requests)
+			}
+			gotHint := strings.Contains(stderr, teamHint)
+			gotRole := strings.Contains(stderr, roleSentence)
+			if tc.wantHint {
+				if !gotHint {
+					t.Fatalf("a no_team refusal must name the team fix (%q)\nstderr:\n%s", teamHint, stderr)
+				}
+				if gotRole {
+					t.Fatalf("a no_team refusal was narrated as a ROLE problem — the role cannot be "+
+						"granted without a team\nstderr:\n%s", stderr)
+				}
+			} else {
+				if !gotRole {
+					t.Fatalf("a genuine authority refusal must keep the role sentence\nstderr:\n%s", stderr)
+				}
+				if gotHint {
+					t.Fatalf("a role refusal must NOT gain the team hint — the caller HAS a team\nstderr:\n%s", stderr)
+				}
+			}
+			// The census is still the truth on every row.
+			if !strings.Contains(stdout+stderr, "control-plane row support-row-1 still registered") {
+				t.Fatalf("the census must still name the survivor\noutput:\n%s", stdout+stderr)
+			}
+		})
+	}
+}
+
+// TestCloudSupportRemoveTokenRevokeStaysStatusKeyed (cch-w40-fu) pins the
+// DELIBERATE non-conversion of the token-revoke arm. That request goes to the
+// MAIN, not the control plane, and the instance API has no team concept at all
+// (zero `no_team` emitters in api/lib), so its 403 is the admin gate and nothing
+// else: the narration must stay the admin-token sentence and the exit must stay
+// exitAuth even when a no_team-SHAPED body is forced onto it. If a future change
+// routes this arm through supportCPNoTeam, this test reds and the reason above
+// has to be re-argued rather than silently lost.
+func TestCloudSupportRemoveTokenRevokeStaysStatusKeyed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+	}{
+		{"401", http.StatusUnauthorized},
+		{"403", http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			main, srv, _, _, _, _ := supportRemoveWiring(t)
+			main.revokeStatus = tc.status
+			main.revokeBody = `{"error":"forbidden","reason":"no_team","scope":"team"}`
+
+			stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+			if code != exitAuth {
+				t.Fatalf("the admin-gated revoke refusal must exit exitAuth=%d, got %d\nstdout:\n%s\nstderr:\n%s",
+					exitAuth, code, stdout, stderr)
+			}
+			if main.count("DELETE /v1/fleet/support-tokens/tid-42") != 1 {
+				t.Fatalf("precondition: the revoke must have been attempted: %v", main.requests)
+			}
+			if !strings.Contains(stderr, "the revoke route is admin-gated; use an admin token against the main") {
+				t.Fatalf("the revoke refusal must keep the admin-token sentence\nstderr:\n%s", stderr)
+			}
+			if strings.Contains(stderr, "bp team use") {
+				t.Fatalf("the MAIN has no team concept — a team hint here would be invented\nstderr:\n%s", stderr)
+			}
+		})
+	}
+}
+
 // TestCloudSupportRemoveDNSSweepByValue: the A-record teardown is BY VALUE
 // (PDF-D101) — the zone holds the support's own record AND the go-live sibling
 // <name>-<teamid>, BOTH at the box IP, and BOTH are deleted (a by-name delete
@@ -2087,5 +2213,152 @@ func TestCloudSupportAddNoTeamFlipParity(t *testing.T) {
 			t.Fatalf("the status flip changed the FIX HINT:\n  %q: %s\n  %q: %s",
 				arms[0].name, base.next, arm.name, other.next)
 		}
+	}
+}
+
+// TestCloudSupportAddSuccessCarriesTheMainsRosterReading is the DETECTOR for the
+// other half of the supportAddRun.success gap (the max-class half shipped first).
+//
+// THE GAP: stepOnline polls the main until the roster row truthfully reads
+// online-with-capacity — the strongest post-condition `support add` has, because
+// it is what the MAIN observed rather than what this verb asked for — and then
+// threw both facts away. supportAddRun carried no field for them, so the final
+// receipt could not name them on either surface.
+//
+// WHY THIS IS NOT VACUOUS. The roster status and capacity DO appear earlier in
+// the human stream: stepOnline's own "✓ online — hex reads …" progress line
+// carries them, and a bare strings.Contains(stdout, …) would pass on origin/main
+// on that line alone. So the human arm slices stdout at the success banner and
+// asserts on the TAIL only — and asserts the banner is present first, or the
+// slice would be empty and every arm vacuous. The json arm has the mirror
+// property for free: under -o json the progress narration goes to STDERR and
+// stdout is the one final document, so a parsed support.roster is the receipt's
+// own field and nothing else's.
+//
+// RED ON origin/main: both subtests fail there — the success receipt's tail
+// carries neither the status nor the capacity, and support.roster is absent from
+// the machine document.
+func TestCloudSupportAddSuccessCarriesTheMainsRosterReading(t *testing.T) {
+	// Deliberately NOT the statuses the earlier narration would print for a
+	// default fixture: "blocked" plus a capacity value ("xl-42") that exists
+	// nowhere else in the run, so a match can only come from a carried fact.
+	const wantStatus = "blocked"
+	const wantClass = "xl-42"
+	rosterRow := func() map[string]any {
+		return map[string]any{
+			"worker": "hex", "status": wantStatus,
+			"capacity": map[string]any{"max_class": wantClass, "slots_free": 1},
+		}
+	}
+
+	t.Run("table", func(t *testing.T) {
+		supportEnvIsolate(t)
+		runner := newFakeSupportRunner()
+		supportHappyWiring(t, runner)
+		main := newSupportMainRecorder()
+		main.rosterRow = rosterRow()
+		srv := main.serve(t)
+		supportSeedCP(t, srv.URL)
+
+		stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
+		if code != exitOK {
+			t.Fatalf("want exit %d, got %d\nstdout:\n%s\nstderr:\n%s", exitOK, code, stdout, stderr)
+		}
+		const banner = "✓ support hex is ONLINE"
+		idx := strings.Index(stdout, banner)
+		if idx < 0 {
+			t.Fatalf("the success banner %q is missing — every arm below would slice an empty tail "+
+				"and pass vacuously\nstdout:\n%s", banner, stdout)
+		}
+		receipt := stdout[idx:]
+		// The control: the tail really is the receipt (it carries a line the
+		// success summary owns and the progress narration never prints).
+		if !strings.Contains(receipt, "  main:") {
+			t.Fatalf("fixture drift: the slice after %q does not look like the success summary\ntail:\n%s", banner, receipt)
+		}
+		for _, want := range []string{wantStatus, wantClass} {
+			if !strings.Contains(receipt, want) {
+				t.Errorf("the success receipt never names %q — the roster reading the poll ACCEPTED ON "+
+					"(the main's own observation of the listener) died inside stepOnline instead of reaching "+
+					"the operator's summary.\nreceipt:\n%s", want, receipt)
+			}
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		supportEnvIsolate(t)
+		runner := newFakeSupportRunner()
+		supportHappyWiring(t, runner)
+		main := newSupportMainRecorder()
+		main.rosterRow = rosterRow()
+		srv := main.serve(t)
+		supportSeedCP(t, srv.URL)
+
+		stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok", output: "json"}, "add", "hex")
+		if code != exitOK {
+			t.Fatalf("want exit %d, got %d\nstdout:\n%s\nstderr:\n%s", exitOK, code, stdout, stderr)
+		}
+		var doc struct {
+			Support struct {
+				Roster struct {
+					Read     bool           `json:"read"`
+					Status   string         `json:"status"`
+					Capacity map[string]any `json:"capacity"`
+				} `json:"roster"`
+			} `json:"support"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+			t.Fatalf("stdout is not one JSON document under -o json: %v\nstdout:\n%s", err, stdout)
+		}
+		if !doc.Support.Roster.Read {
+			t.Errorf("support.roster.read is false after a poll that DID read the main's row — "+
+				"the machine receipt reports the measurement as never taken.\nstdout:\n%s", stdout)
+		}
+		if doc.Support.Roster.Status != wantStatus {
+			t.Errorf("support.roster.status = %q, want %q — the machine receipt does not carry the status "+
+				"the online poll accepted on.\nstdout:\n%s", doc.Support.Roster.Status, wantStatus, stdout)
+		}
+		if got, _ := doc.Support.Roster.Capacity["max_class"].(string); got != wantClass {
+			t.Errorf("support.roster.capacity.max_class = %q, want %q — the capacity the MAIN reported is "+
+				"not in the machine receipt.\nstdout:\n%s", got, wantClass, stdout)
+		}
+	})
+}
+
+// TestSupportRosterFactNarrationStatesTheUnreadPoll pins the composer's degraded
+// fork, which the pair property alone cannot reach: an unread poll must be SAID
+// to be unread, never printed as an empty tail an operator reads as a measured
+// fact. Same shape as TestSupportCapacityNarrationStatesTheDegradedMeasure.
+//
+// MUTATION-PROVEN: making the degraded branch return "" fails the non-empty arm;
+// making it return the measured wording fails the names-the-degradation arm.
+func TestSupportRosterFactNarrationStatesTheUnreadPoll(t *testing.T) {
+	unread := supportRosterFactNarration("", nil)
+	if strings.TrimSpace(unread) == "" {
+		t.Fatalf("supportRosterFactNarration(\"\", nil) = %q — a poll that never read the main's row must be "+
+			"STATED, never printed as an empty tail", unread)
+	}
+	low := strings.ToLower(unread)
+	for _, want := range []string{"not read", "degraded"} {
+		if !strings.Contains(low, want) {
+			t.Errorf("supportRosterFactNarration(\"\", nil) = %q, want it to name the degradation (%q)", unread, want)
+		}
+	}
+	measured := supportRosterFactNarration("idle", map[string]any{"max_class": "medium"})
+	if unread == measured {
+		t.Errorf("the unread sentence is byte-identical to a MEASURED one — the receipt cannot tell the "+
+			"operator which happened.\nboth: %q", unread)
+	}
+	for _, leak := range []string{"idle", "medium"} {
+		if strings.Contains(unread, leak) {
+			t.Errorf("supportRosterFactNarration(\"\", nil) = %q names %q — a reading that never happened must "+
+				"not read like one that did", unread, leak)
+		}
+	}
+	// An empty status with a real capacity is NOT the degraded case: something
+	// was read, so the receipt must print it rather than claim nothing arrived.
+	if half := supportRosterFactNarration("", map[string]any{"max_class": "medium"}); half == unread {
+		t.Errorf("a row that carried a capacity but no status prints the unread sentence — the receipt "+
+			"discards a reading the main really did make.\nboth: %q", unread)
 	}
 }

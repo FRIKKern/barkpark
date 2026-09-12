@@ -58,8 +58,9 @@ function liveViewMorph(window, from, to) {
   return morphdom(from, to, {
     getNodeKey: (node) => node?.getAttribute?.("id") || node?.id,
     onBeforeElUpdated: (fromEl, toEl) => {
+      const ignored = fromEl.getAttribute("phx-update") === "ignore";
       window.BarkparkPaperEditorBeforeElUpdated(fromEl, toEl);
-      if (fromEl.getAttribute("phx-update") === "ignore") return false;
+      if (ignored) return false;
     },
   });
 }
@@ -404,6 +405,193 @@ for (const type of ["terminal", "stage"]) {
   assert.match(window.document.querySelector('[role="status"]').textContent, /paused/i);
   assert.equal(bridge._opsQueue.length, 1, "the refused draft remains available until Use latest");
   bridge.destroyed();
+}
+
+{
+  const { window } = environment(`
+    <main>
+      <div id="paper-editor-reconnect" class="bp-paper-editor" data-paper-doc-key="production:paper:reconnect">
+        <div id="paper-canvas-reconnect-run-0" phx-update="ignore" phx-hook="BarkparkPaperCanvas"
+             data-paper-doc-key="production:paper:reconnect">
+          <bp-paper-canvas><div id="live-caret" contenteditable="true">Local canvas draft</div></bp-paper-canvas>
+        </div>
+        <form id="live-form"><input id="live-field" value="Server baseline"></form>
+      </div>
+    </main>
+  `);
+  const root = window.document.querySelector("#paper-editor-reconnect");
+  const wrapper = window.document.querySelector("#paper-canvas-reconnect-run-0");
+  const editor = wrapper.querySelector("bp-paper-canvas");
+  const editable = editor.querySelector("#live-caret");
+  const form = window.document.querySelector("#live-form");
+  const field = window.document.querySelector("#live-field");
+  editor.historySentinel = { undoDepth: 3 };
+  editor.pendingSentinel = { requestId: "local-only-request" };
+  let resumeFocusRange = null;
+  let resumeFocusCaptures = 0;
+  let resumeFocusRestores = 0;
+  editor.captureResumeFocus = () => {
+    if (resumeFocusRange || !editor.contains(window.document.activeElement)) return false;
+    resumeFocusRange = window.getSelection().rangeCount
+      ? window.getSelection().getRangeAt(0).cloneRange()
+      : null;
+    resumeFocusCaptures += 1;
+    return resumeFocusRange != null;
+  };
+  editor.restoreResumeFocus = () => {
+    const savedRange = resumeFocusRange;
+    resumeFocusRange = null;
+    if (!savedRange || root.hasAttribute("inert") ||
+        ![window.document.body, window.document.documentElement].includes(
+          window.document.activeElement,
+        )) return false;
+    editable.focus();
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(savedRange);
+    resumeFocusRestores += 1;
+    return true;
+  };
+  field.value = "Unsaved native form value";
+  editable.focus();
+  const range = window.document.createRange();
+  range.setStart(editable.firstChild, 6);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+
+  const halted = window.document.createElement("div");
+  halted.id = root.id;
+  halted.className = root.className;
+  halted.dataset.paperDocKey = root.dataset.paperDocKey;
+  halted.dataset.paperCanvasResumeHalt = "true";
+  halted.dataset.paperCanvasResumeState = "pending";
+  halted.setAttribute("inert", "");
+  halted.innerHTML = '<div data-test-id="paper-table-contextual-editor">Server owner</div>';
+
+  liveViewMorph(window, root, halted);
+  assert.equal(window.document.querySelector("#paper-canvas-reconnect-run-0"), wrapper,
+    "the first halt morph preserves the live ignored canvas wrapper");
+  assert.equal(wrapper.querySelector("bp-paper-canvas"), editor,
+    "the first halt morph preserves the mounted editor instance");
+  assert.deepEqual(editor.historySentinel, { undoDepth: 3 },
+    "the frozen editor retains native history state");
+  assert.deepEqual(editor.pendingSentinel, { requestId: "local-only-request" },
+    "the frozen editor retains its pending save state");
+  assert.equal(window.document.querySelector("#live-form"), form,
+    "a keyed native form remains the live form instance");
+  assert.equal(window.document.querySelector("#live-field"), field);
+  assert.equal(field.value, "Unsaved native form value",
+    "the first halt morph preserves unsaved native form values");
+  assert.equal(window.document.activeElement, editable,
+    "the frozen editor retains its focused editing surface");
+  assert.equal(window.getSelection().anchorNode, editable.firstChild);
+  assert.equal(window.getSelection().anchorOffset, 6,
+    "the frozen editor retains its exact caret");
+  assert.equal(window.document.querySelector('[data-test-id="paper-table-contextual-editor"]'), null,
+    "the halt patch cannot introduce a second contextual owner");
+  assert.equal(root.dataset.paperCanvasResumeHalt, "true");
+  assert.equal(resumeFocusCaptures, 1,
+    "normal to halted reconnect captures the live canvas focus before inert morphing");
+  editable.blur();
+
+  const repeatedHalt = halted.cloneNode(false);
+  repeatedHalt.innerHTML = '<div data-test-id="paper-section-editor">Newer server owner</div>';
+  liveViewMorph(window, root, repeatedHalt);
+  assert.equal(window.document.querySelector("#paper-canvas-reconnect-run-0"), wrapper,
+    "every repeated halt patch preserves the same live canvas wrapper");
+  assert.equal(wrapper.querySelector("bp-paper-canvas"), editor);
+  assert.equal(window.document.querySelector('[data-test-id="paper-section-editor"]'), null,
+    "a repeated halt cannot introduce another contextual owner");
+  assert.equal(field.value, "Unsaved native form value");
+  assert.equal(resumeFocusCaptures, 1,
+    "a repeated halt never overwrites or recreates the one-shot focus intent");
+
+  const resumed = window.document.createElement("div");
+  resumed.id = root.id;
+  resumed.className = root.className;
+  resumed.dataset.paperDocKey = root.dataset.paperDocKey;
+  resumed.innerHTML = `
+    <div id="paper-canvas-reconnect-run-0" phx-update="ignore" phx-hook="BarkparkPaperCanvas">
+      <bp-paper-canvas><div id="live-caret" contenteditable="true">Server acknowledgement</div></bp-paper-canvas>
+    </div>
+    <form id="live-form"><input id="live-field" value="Server baseline"></form>
+  `;
+  liveViewMorph(window, root, resumed);
+  await tick();
+  assert.equal(window.document.querySelector("#paper-canvas-reconnect-run-0"), wrapper,
+    "a successful retry unhalts onto the matching retained server run without remounting it");
+  assert.equal(wrapper.querySelector("bp-paper-canvas"), editor);
+  assert.deepEqual(editor.historySentinel, { undoDepth: 3 });
+  assert.deepEqual(editor.pendingSentinel, { requestId: "local-only-request" });
+  assert.equal(resumeFocusRestores, 1,
+    "halt to normal queues one focus restoration after the morph removes inert");
+  assert.equal(window.document.activeElement, editable,
+    "the acknowledged retry restores the previously focused rich canvas");
+  assert.equal(window.getSelection().anchorNode, editable.firstChild);
+  assert.equal(window.getSelection().anchorOffset, 6,
+    "the acknowledged retry restores the exact pre-halt caret");
+
+  const discarded = window.document.createElement("div");
+  discarded.id = root.id;
+  discarded.className = root.className;
+  discarded.dataset.paperDocKey = root.dataset.paperDocKey;
+  discarded.innerHTML = '<div id="authoritative-unhalted-child">Authoritative server editor</div>';
+  liveViewMorph(window, root, discarded);
+  assert.equal(wrapper.isConnected, false,
+    "an explicit discard patch resumes morphing instead of leaving a sticky frozen root");
+  assert.ok(window.document.querySelector("#authoritative-unhalted-child"));
+}
+
+{
+  const { window } = environment(`
+    <main><div id="paper-editor-reconnect" class="bp-paper-editor" data-paper-doc-key="production:paper:first">
+      <div id="old-paper-child">First paper</div>
+    </div></main>
+  `);
+  const root = window.document.querySelector("#paper-editor-reconnect");
+  const oldChild = window.document.querySelector("#old-paper-child");
+  const wrongDocument = window.document.createElement("div");
+  wrongDocument.id = root.id;
+  wrongDocument.className = root.className;
+  wrongDocument.dataset.paperDocKey = "production:paper:second";
+  wrongDocument.dataset.paperCanvasResumeHalt = "true";
+  wrongDocument.dataset.paperCanvasResumeState = "pending";
+  wrongDocument.innerHTML = '<div id="second-paper-child">Second paper</div>';
+  liveViewMorph(window, root, wrongDocument);
+  assert.equal(oldChild.isConnected, false,
+    "a halt marker for another document cannot freeze the previous paper DOM");
+  assert.ok(window.document.querySelector("#second-paper-child"));
+}
+
+{
+  const { window } = environment(`
+    <main><div id="paper-editor-blocked" class="bp-paper-editor" data-paper-doc-key="production:paper:blocked">
+      <div id="paper-canvas-blocked-run-0" phx-update="ignore" phx-hook="BarkparkPaperCanvas"
+           data-paper-doc-key="production:paper:blocked">
+        <bp-paper-canvas><div contenteditable="true">Recoverable local text</div></bp-paper-canvas>
+      </div>
+    </div></main>
+  `);
+  const root = window.document.querySelector("#paper-editor-blocked");
+  const wrapper = window.document.querySelector("#paper-canvas-blocked-run-0");
+  const blocked = window.document.createElement("div");
+  blocked.id = root.id;
+  blocked.className = root.className;
+  blocked.dataset.paperDocKey = root.dataset.paperDocKey;
+  blocked.dataset.paperCanvasResumeHalt = "true";
+  blocked.dataset.paperCanvasResumeState = "blocked";
+  blocked.innerHTML = '<div data-test-id="paper-table-contextual-editor">Unsafe duplicate</div>';
+  liveViewMorph(window, root, blocked);
+  assert.equal(window.document.querySelector("#paper-canvas-blocked-run-0"), wrapper);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.BarkparkPaperEditorConnectParams())),
+    {
+      paper_canvas_lease_key: "production:paper:blocked",
+      paper_canvas_lease_overflow: true,
+    },
+    "a blocked halt persists a scoped recovery attempt without exposing partial leases",
+  );
 }
 
 console.log("terminal external echo boundary: ok");

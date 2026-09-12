@@ -19,7 +19,7 @@
       "cell": "paper-excellence-wave-2026-08-12__light__1280",
       "file": "paper-excellence-wave-2026-08-12__light__1280.jpeg",
       "scale": 2,
-      "bytes": 5812695,
+      "bytes": 6283222,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -126,7 +126,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 70.6,
       "proseCplSamples": 29,
       "captionCpl": null,
       "captionWidth": null,
@@ -147,7 +147,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -156,7 +156,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -165,7 +165,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -174,7 +174,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -183,7 +183,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -192,12 +192,12 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -232,12 +232,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 4,
           "emptyTracks": 0,
           "probe": null
@@ -246,19 +246,19 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 77,
+        "total": 91,
         "heavy": 12,
         "structuralHeavy": 12,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 65,
+          "1": 79,
           "2": 12
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 771.6,
-            "width": 580,
+            "y": 798.4,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -267,8 +267,8 @@
           },
           {
             "px": 2,
-            "y": 1255.8,
-            "width": 580,
+            "y": 1282.5,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -277,8 +277,8 @@
           },
           {
             "px": 2,
-            "y": 2088.6,
-            "width": 580,
+            "y": 2172.9,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -287,8 +287,8 @@
           },
           {
             "px": 2,
-            "y": 3175.8,
-            "width": 580,
+            "y": 3260.2,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -297,8 +297,8 @@
           },
           {
             "px": 2,
-            "y": 4037.5,
-            "width": 580,
+            "y": 4121.8,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -307,8 +307,8 @@
           },
           {
             "px": 2,
-            "y": 5449.2,
-            "width": 580,
+            "y": 5514.5,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -317,8 +317,8 @@
           },
           {
             "px": 2,
-            "y": 7856.1,
-            "width": 580,
+            "y": 7921.4,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -327,8 +327,8 @@
           },
           {
             "px": 2,
-            "y": 9096.3,
-            "width": 580,
+            "y": 9157.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -337,8 +337,8 @@
           },
           {
             "px": 2,
-            "y": 10990.2,
-            "width": 580,
+            "y": 11048.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -347,8 +347,8 @@
           },
           {
             "px": 2,
-            "y": 12566.7,
-            "width": 580,
+            "y": 12636.8,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -357,8 +357,8 @@
           },
           {
             "px": 2,
-            "y": 13879.5,
-            "width": 580,
+            "y": 13978.3,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -367,8 +367,8 @@
           },
           {
             "px": 2,
-            "y": 14973,
-            "width": 580,
+            "y": 15021.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -377,13 +377,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "paper-excellence-wave-2026-08-12__light__1920",
       "file": "paper-excellence-wave-2026-08-12__light__1920.jpeg",
       "scale": 2,
-      "bytes": 6151994,
+      "bytes": 6622330,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -490,7 +490,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 70.6,
       "proseCplSamples": 29,
       "captionCpl": null,
       "captionWidth": null,
@@ -511,7 +511,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -520,7 +520,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -529,7 +529,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -538,7 +538,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -547,7 +547,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -556,12 +556,12 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -610,19 +610,19 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 77,
+        "total": 91,
         "heavy": 12,
         "structuralHeavy": 12,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 65,
+          "1": 79,
           "2": 12
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 771.6,
-            "width": 580,
+            "y": 798.4,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -631,8 +631,8 @@
           },
           {
             "px": 2,
-            "y": 1255.8,
-            "width": 580,
+            "y": 1282.5,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -641,8 +641,8 @@
           },
           {
             "px": 2,
-            "y": 2088.6,
-            "width": 580,
+            "y": 2172.9,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -651,8 +651,8 @@
           },
           {
             "px": 2,
-            "y": 3175.8,
-            "width": 580,
+            "y": 3260.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -661,8 +661,8 @@
           },
           {
             "px": 2,
-            "y": 4037.5,
-            "width": 580,
+            "y": 4121.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -671,8 +671,8 @@
           },
           {
             "px": 2,
-            "y": 5449.2,
-            "width": 580,
+            "y": 5514.5,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -681,8 +681,8 @@
           },
           {
             "px": 2,
-            "y": 7856.1,
-            "width": 580,
+            "y": 7921.4,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -691,8 +691,8 @@
           },
           {
             "px": 2,
-            "y": 9009.9,
-            "width": 580,
+            "y": 9079.3,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -701,8 +701,8 @@
           },
           {
             "px": 2,
-            "y": 10817.4,
-            "width": 580,
+            "y": 10865.5,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -711,8 +711,8 @@
           },
           {
             "px": 2,
-            "y": 12365.2,
-            "width": 580,
+            "y": 12375.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -721,8 +721,8 @@
           },
           {
             "px": 2,
-            "y": 13677.9,
-            "width": 580,
+            "y": 13717.4,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -731,8 +731,8 @@
           },
           {
             "px": 2,
-            "y": 14713.9,
-            "width": 580,
+            "y": 14708.5,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -741,13 +741,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "paper-excellence-wave-2026-08-12__dark__1280",
       "file": "paper-excellence-wave-2026-08-12__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 5823697,
+      "bytes": 6222801,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -854,7 +854,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 70.6,
       "proseCplSamples": 29,
       "captionCpl": null,
       "captionWidth": null,
@@ -875,7 +875,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -884,7 +884,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -893,7 +893,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -902,7 +902,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -911,7 +911,7 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         },
         {
@@ -920,12 +920,12 @@
           "offCentre": 0,
           "left": 50,
           "right": 1230,
-          "inkWidth": 1180,
+          "inkWidth": 1178,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -960,12 +960,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 4,
           "emptyTracks": 0,
           "probe": null
@@ -974,19 +974,19 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 77,
+        "total": 91,
         "heavy": 12,
         "structuralHeavy": 12,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 65,
+          "1": 79,
           "2": 12
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 771.6,
-            "width": 580,
+            "y": 798.4,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -995,8 +995,8 @@
           },
           {
             "px": 2,
-            "y": 1255.8,
-            "width": 580,
+            "y": 1282.5,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1005,8 +1005,8 @@
           },
           {
             "px": 2,
-            "y": 2088.6,
-            "width": 580,
+            "y": 2172.9,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1015,8 +1015,8 @@
           },
           {
             "px": 2,
-            "y": 3175.8,
-            "width": 580,
+            "y": 3260.2,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1025,8 +1025,8 @@
           },
           {
             "px": 2,
-            "y": 4037.5,
-            "width": 580,
+            "y": 4121.8,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1035,8 +1035,8 @@
           },
           {
             "px": 2,
-            "y": 5449.2,
-            "width": 580,
+            "y": 5514.5,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1045,8 +1045,8 @@
           },
           {
             "px": 2,
-            "y": 7856.1,
-            "width": 580,
+            "y": 7921.4,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1055,8 +1055,8 @@
           },
           {
             "px": 2,
-            "y": 9096.3,
-            "width": 580,
+            "y": 9157.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1065,8 +1065,8 @@
           },
           {
             "px": 2,
-            "y": 10990.2,
-            "width": 580,
+            "y": 11048.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1075,8 +1075,8 @@
           },
           {
             "px": 2,
-            "y": 12566.7,
-            "width": 580,
+            "y": 12636.8,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1085,8 +1085,8 @@
           },
           {
             "px": 2,
-            "y": 13879.5,
-            "width": 580,
+            "y": 13978.3,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1095,8 +1095,8 @@
           },
           {
             "px": 2,
-            "y": 14973,
-            "width": 580,
+            "y": 15021.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1105,13 +1105,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "paper-excellence-wave-2026-08-12__dark__1920",
       "file": "paper-excellence-wave-2026-08-12__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 6167002,
+      "bytes": 6557118,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -1218,7 +1218,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.7,
+      "proseCpl": 70.6,
       "proseCplSamples": 29,
       "captionCpl": null,
       "captionWidth": null,
@@ -1239,7 +1239,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1248,7 +1248,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1257,7 +1257,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1266,7 +1266,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1275,7 +1275,7 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         },
         {
@@ -1284,12 +1284,12 @@
           "offCentre": 0,
           "left": 280,
           "right": 1640,
-          "inkWidth": 1360,
+          "inkWidth": 1358,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -1338,19 +1338,19 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 77,
+        "total": 91,
         "heavy": 12,
         "structuralHeavy": 12,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 65,
+          "1": 79,
           "2": 12
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 771.6,
-            "width": 580,
+            "y": 798.4,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1359,8 +1359,8 @@
           },
           {
             "px": 2,
-            "y": 1255.8,
-            "width": 580,
+            "y": 1282.5,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1369,8 +1369,8 @@
           },
           {
             "px": 2,
-            "y": 2088.6,
-            "width": 580,
+            "y": 2172.9,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1379,8 +1379,8 @@
           },
           {
             "px": 2,
-            "y": 3175.8,
-            "width": 580,
+            "y": 3260.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1389,8 +1389,8 @@
           },
           {
             "px": 2,
-            "y": 4037.5,
-            "width": 580,
+            "y": 4121.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1399,8 +1399,8 @@
           },
           {
             "px": 2,
-            "y": 5449.2,
-            "width": 580,
+            "y": 5514.5,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1409,8 +1409,8 @@
           },
           {
             "px": 2,
-            "y": 7856.1,
-            "width": 580,
+            "y": 7921.4,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1419,8 +1419,8 @@
           },
           {
             "px": 2,
-            "y": 9009.9,
-            "width": 580,
+            "y": 9079.3,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1429,8 +1429,8 @@
           },
           {
             "px": 2,
-            "y": 10817.4,
-            "width": 580,
+            "y": 10865.5,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1439,8 +1439,8 @@
           },
           {
             "px": 2,
-            "y": 12365.2,
-            "width": 580,
+            "y": 12375.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1449,8 +1449,8 @@
           },
           {
             "px": 2,
-            "y": 13677.9,
-            "width": 580,
+            "y": 13717.4,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1459,8 +1459,8 @@
           },
           {
             "px": 2,
-            "y": 14713.9,
-            "width": 580,
+            "y": 14708.5,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1469,7 +1469,7 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     }
   ]
 }

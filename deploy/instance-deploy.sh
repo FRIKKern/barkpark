@@ -100,7 +100,83 @@ set -uo pipefail
 APP="${BARKPARK_APP_DIR:-/opt/barkpark}"
 LOCK="${BARKPARK_DEPLOY_LOCK:-/var/lock/barkpark-instance-deploy.lock}"
 CADDYFILE="${BARKPARK_CADDYFILE:-/etc/caddy/Caddyfile}"
+
+# ---- 429 backoff, shared (task-90059c5c680f6665) ---------------------------
+# This script is SHIPPED STANDALONE: .github/workflows/deploy.yml scps it ALONE
+# to /tmp/<name>.$R.sh on the box, and the private-copy preamble above then
+# re-execs it out of TMPDIR. So NO path relative to the running file reaches
+# scripts/lib/bp-curl.sh — not $0, not BASH_SOURCE. The one place the helper
+# does exist on the box is the checkout this script deploys: $APP.
+#
+# Guarded, and the degrade is NAMED rather than silent. A box whose checkout
+# predates the helper must still deploy, and sourcing a missing file to take a
+# deploy down over a health PROBE would be a worse outage than an unhandled 429.
+# The shim reproduces bp_curl_code's contract exactly, including the part that
+# bites: on a transport failure it must print NOTHING (bare `curl -w` prints
+# 000 AND fails, so a naive `|| echo 000` shim would print 000000 — the latent
+# double named in scripts/lib/bp-curl.sh's header).
+if [ -r "$APP/scripts/lib/bp-curl.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$APP/scripts/lib/bp-curl.sh"
+else
+  echo "[instance-deploy] WARNING: $APP/scripts/lib/bp-curl.sh absent — the health probes below run WITHOUT the shared 429 backoff" >&2
+  bp_curl_code() { local __c; __c="$(curl -w '%{http_code}' "$@")" || return $?; printf '%s' "$__c"; }
+fi
+
 HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
+# THE LIVENESS PATH every health gate below probes. NOT `/api/schemas`.
+#
+# `/api/schemas` is the LAST surviving legacy route (router.ex, the final
+# `scope "/api"`), and it pipes through `BarkparkWeb.Plugs.LegacyDeprecation`,
+# which stamps every response with
+#
+#     sunset: Wed, 31 Dec 2026 23:59:59 GMT
+#
+# That is a PUBLISHED removal date, not a hint. THE FAILURE MODE ON THAT DATE IS
+# FAIL-CLOSED, NOT QUIET: every probe below captures the status with
+# `-o /dev/null -w '%{http_code}'` (via bp_curl_code) and GATES on `= 200`, and
+# curl's own exit status is deliberately discarded (`|| echo 000`) because the
+# STATUS CODE is the signal. So a 404 from a retired route does not "go quiet" —
+# it disables the freshly-booted slot, resets the checkout to the live sha and
+# exits 24/14, or (post-flip) flips Caddy back. A healthy build on a healthy box
+# would stop deploying everywhere, and the log would blame the slot.
+#
+# `/status.json` (router.ex: `get("/status.json", StatusController, :show_json)`)
+# is the replacement: `pipe_through(:api)` only — no LegacyDeprecation, no
+# deprecation/sunset header, no token (the `:api` pipeline runs `OptionalToken`),
+# and not part of any versioned content contract. It is a STRICTLY STRONGER
+# liveness signal than the route it replaces: `StatusController.show_json/2` ->
+# `Barkpark.Status.health/0` -> `open_incidents/0` and `recent_incidents/1` are
+# bare `Repo.all/1` calls (NOT wrapped in `Status.safe/2`), so an unreachable
+# database raises and the probe sees 500, never 200. 200 means the endpoint is
+# up AND the database answers. `curl -s <box>/status.json | jq -r .commit` is
+# already the documented box smoke (CLAUDE.md).
+#
+# CONSUMERS OF THE SUNSET ROUTE, re-derived from origin/main on 2026-09-11 by
+# `git grep -n 'api/schemas' -- . ':!api/'`. The list this block used to carry
+# was the set PR #17745 CHECKED, not the set that exists: `cloud/support.go`
+# does not exist (the Go consumer is `internal/cli/cloud/support.go`), the
+# compose healthcheck is in the ROOT `docker-compose.yml` (not `cloud/`), and
+# seven further code consumers were never listed at all.
+#
+# RETARGETED to /status.json in PR "every remaining health consumer leaves the
+# sunset /api/schemas route" (task-539f1deeec25a8e7):
+#   docker-compose.yml (api healthcheck)      scripts/deploy-rebuild.sh (BP_HEALTH_URL)
+#   scripts/compose-smoke.sh (green arm)      scripts/create-quickstart-smoke.sh (boot poll)
+#   scripts/pds-scratch-target.sh (probe)     internal/cli/cloud/support.go (SupportLocalHealthProbe)
+#   deploy/uptime-kuma/README.md (monitor)    deploy/README.md (prose)
+#
+# STILL ON THE SUNSET ROUTE — out of that PR's fence, each still fails closed on
+# 2027-01-01 unless repointed (file:line on origin/main 2b1fcaef7):
+#   deploy.sh:356,419,427,434                 run.sh:18
+#   Makefile:299,305,307                      bin/barkpark:175,244,270,275,372,404,426
+#   deploy/site-deploy.sh:8 (comment only)    scripts/setup-windows.ps1:184,199,211
+#   internal/cli/setup/assets/deploy.sh       internal/provisioner/support.go:1076
+#   internal/cli/cloud/restore_driver.go:108,431   internal/cli/cloud_support_cmd.go:1685
+#   internal/cli/hetzner_instance_cmd.go:706-1858  internal/cli/hetzner_instance_transfer_cmd.go:145
+#   internal/cli/cloud_deploy_cmd.go:880           internal/cli/setup/local.go:461 (fallback, /v1/capabilities first)
+# This script honours \$BARKPARK_HEALTH_PATH and needs no change either way.
+HEALTH_PATH="${BARKPARK_HEALTH_PATH:-/status.json}"
 BLUE_PORT="${BARKPARK_PORT_BLUE:-4000}"
 GREEN_PORT="${BARKPARK_PORT_GREEN:-4001}"
 # Remote MCP endpoint (viable-everywhere D19). MUST stay outside the blue/green
@@ -441,7 +517,7 @@ if [ "$MODE" != "deploy" ]; then
   systemctl restart "barkpark-slot@$TARGET_SLOT"
   ok=0
   for _ in $(seq 1 40); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || true)"
+    code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}${HEALTH_PATH}" || echo 000)"
     if [ "$code" = "200" ]; then ok=1; log "slot $TARGET_SLOT healthy ($code)"; break; fi
     sleep 5
   done
@@ -493,8 +569,8 @@ if [ "$MODE" != "deploy" ]; then
     git reset --hard "$OLD"; exit 24
   fi
   exec 8>&-   # leaf lock: released the moment the file is written + reloaded
-  code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || true)"
-  log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
+  code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}${HEALTH_PATH}" || echo 000)"
+  log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}${HEALTH_PATH} = $code)"
 
   # Drain, retire the rolled-away slot, and rewrite STATE to the rolled-back
   # sha (W6 D21) — keeps coalesce, the agent's git_commit, and the next
@@ -561,11 +637,136 @@ if [ "$NEW" = "$OLD" ] && [ "$(cat "$STATE" 2>/dev/null)" = "$NEW" ]; then
   exit 0
 fi
 
-# Backfill the prod-required secret keys if absent (each RAISES at boot).
+# ---- The prod-required secret keys (each RAISES at boot) -------------------
+# An ABSENT line is not the only broken state. A line that is PRESENT but empty
+# (`BARKPARK_KEK=`) matches `grep '^VAR='` exactly as a good one does, so the
+# absence-only backfill this loop used to be skipped it — and after the boot
+# refusals such a box fails EVERY deploy until a human edits .env by hand
+# (fail-closed: the old slot keeps serving, but nobody is coming). The KEK has a
+# third broken state on top of that: a non-empty value the app REFUSES.
+#
+# So: absent, empty, and (for the KEK) structurally invalid are ONE case here —
+# mint a fresh secret and APPEND-OR-REPLACE it, naming which case fired. Scope is
+# the four variables this loop already names; nothing else in .env is touched.
+# A non-empty value that is REJECTED is never destroyed: it is parked in .env
+# under a name nothing reads (see env_park_rejected) BEFORE the mint is written.
+
+# HOW THE CURRENT VALUE IS READ (task-0fdde2a930463e93). The CONSUMERS of .env
+# are the SHELL: this very script sources it a few hundred lines down
+# (`set -a; . ./.env; set +a`) and api/start.sh does `source ../.env` at every
+# boot. So the value the app actually holds is whatever the shell ASSIGNS —
+# which accepts `VAR="…"`, `VAR='…'`, `export VAR=…`, a leading-whitespace
+# line, and strips trailing blanks as token separators. An awk of the raw text
+# after '=' sees the QUOTES, the `export`, the indentation and the blanks, and
+# calls a WORKING KEK invalid — and the arm below would then REPLACE the key
+# every existing ciphertext on that box is sealed under (there is no
+# BARKPARK_KEK_PREVIOUS handoff yet). Irreversible data loss on a healthy box.
+# So read it the way the consumers do: source .env in a subshell and print the
+# expanded value. This is NOT a new trust boundary — the same file is sourced
+# by this script and by start.sh anyway; reading it 150 lines earlier changes
+# nothing about what can execute.
+env_shell_read() { # $1=var; stdout = the value the shell would see, "" when unset
+  # The subshell is made immune to this script's `set -u`/pipefail: a .env that
+  # expands an unset variable must not abort the read (it does not abort the
+  # real `. ./.env` later either, which runs with -u off for the same reason).
+  ( set +u +o pipefail; unset "$1"; . ./.env >/dev/null 2>&1 || true; printf '%s' "${!1-}" )
+}
+env_shell_is_set() { # $1=var; 0 when the shell sees an ASSIGNMENT (even an empty one)
+  ( set +u +o pipefail; unset "$1"; . ./.env >/dev/null 2>&1 || true; [ -n "${!1+set}" ] )
+}
+
+env_assign_line() { # $1=var; stdout = the LAST raw line that assigns it, "" if none
+  awk -v k="$1" '{ l = $0; sub(/^[ \t]+/, "", l); sub(/^export[ \t]+/, "", l)
+                   if (index(l, k "=") == 1) last = $0 } END { print last }' .env 2>/dev/null || true
+}
+
+# Park a REJECTED but non-empty value before a fresh mint overwrites it. The
+# parked name is one NOTHING reads (runtime.exs reads BARKPARK_KEK and
+# BARKPARK_KEK_PREVIOUS, never *_REJECTED_*), so the box boots on the mint while
+# the operator keeps the bytes needed to recover ciphertext sealed under the old
+# key. Single-quoted (with the '\'' escape) so a value with spaces or quotes
+# cannot break the sourcing of .env it now rides in.
+env_park_rejected() { # $1=var $2=value the shell saw
+  local v="$1" val="$2" ts esc raw
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  esc="${val//\'/\'\\\'\'}"
+  raw="$(env_assign_line "$v")"
+  { printf '# %s was REJECTED by the deploy at %s and a fresh secret minted; original line: %s\n' "$v" "$ts" "$raw"
+    printf "%s_REJECTED_%s='%s'\n" "$v" "$ts" "$esc"; } >> .env || return 1
+  log "PRESERVED the rejected ${v} in .env as ${v}_REJECTED_${ts} — nothing reads that name; recover any ciphertext sealed under it BEFORE deleting the line"
+}
+
+secret_value_ok() { # $1=var $2=current value — 1 ⇒ the deploy must mint a fresh one
+  [ -n "$2" ] || return 1
+  if [ "$1" = BARKPARK_KEK ]; then
+    # api/config/runtime.exs (the `case System.get_env("BARKPARK_KEK")` block)
+    # demands Base.decode64/1 yield EXACTLY 32 raw bytes and RAISES otherwise.
+    # Base64 of 32 bytes is exactly 43 standard-alphabet characters plus one
+    # '=' — so this pattern IS that decode, in the shell, with no openssl
+    # round-trip. The shell gate and the app therefore agree on "valid" by
+    # construction; anything the app would refuse, this refuses too.
+    [[ "$2" =~ ^[A-Za-z0-9+/]{43}=$ ]] || return 1
+  fi
+  return 0
+}
+
+env_replace_line() { # $1=var $2=value — drop every line that ASSIGNS var, append the new one
+  local v="$1" val="$2" tmp
+  tmp="$(mktemp)" || return 1
+  # Written back THROUGH the existing .env (`cat > .env`, never `mv`) so the
+  # file's mode 0600 and its ownership survive the repair — a mktemp file mv'd
+  # into place would carry the deploy user's, not the box's.
+  # The drop matches what the SHELL calls an assignment (optional indentation,
+  # optional `export `), not `^VAR=`: an `export VAR=…` line left behind would
+  # otherwise survive the replace and, being sourced after nothing, leave TWO
+  # assignments in the file whose order decides which key the app boots on.
+  { awk -v k="$v" '{ l = $0; sub(/^[ \t]+/, "", l); sub(/^export[ \t]+/, "", l)
+                     if (index(l, k "=") != 1) print }' .env > "$tmp" &&
+    printf '%s=%s\n' "$v" "$val" >> "$tmp" &&
+    cat "$tmp" > .env; } || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+}
+
 for v in BARKPARK_KEK BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_RELEASE_CAPTURE_HMAC_SECRET; do
-  if ! grep -q "^${v}=" .env 2>/dev/null; then
+  # "Absent" means the SHELL sees no assignment — not that `grep '^VAR='` misses.
+  # The old grep missed `export VAR=…` and indented lines and appended a SECOND
+  # assignment; last-wins then booted the box on the fresh mint while the real
+  # key sat two lines above.
+  if ! env_shell_is_set "$v"; then
     echo "${v}=$(openssl rand -base64 32)" >> .env
     log "added missing ${v} to .env"
+    continue
+  fi
+  cur="$(env_shell_read "$v")"
+  # A value the shell and the app both accept is LEFT ALONE — byte for byte. The
+  # line is never normalised, re-quoted or rewritten: there is nothing to fix.
+  secret_value_ok "$v" "$cur" && continue
+  # A value whose ONLY defect is a stray line terminator (a .env edited on
+  # Windows: `VAR=<key>\r`) is a REAL key — the bytes before the CR are the
+  # secret the box's ciphertext is sealed under. runtime.exs still RAISES on it
+  # (Base.decode64 refuses the \r), so it cannot be left untouched either. Drop
+  # the terminator, KEEP the key: the only edit is the artifact.
+  trimmed="$cur"
+  while [ -n "$trimmed" ] && [ "${trimmed: -1}" = $'\r' ]; do trimmed="${trimmed%$'\r'}"; done
+  if [ -n "$trimmed" ] && [ "$trimmed" != "$cur" ] && secret_value_ok "$v" "$trimmed"; then
+    if env_replace_line "$v" "$trimmed"; then
+      log "normalised ${v} in .env — the value carried trailing whitespace/CR (runtime.exs would RAISE); the KEY ITSELF is unchanged, only the stray terminator was dropped"
+    else
+      log "WARN: ${v} in .env carries a trailing CR and the in-place normalise FAILED — boot will refuse; strip the CR by hand, do NOT re-mint (that destroys the key)"
+    fi
+    continue
+  fi
+  if [ -z "$cur" ]; then
+    reason="the line is PRESENT but EMPTY"
+  else
+    reason="the value is not base64 of 32 bytes (runtime.exs would RAISE at boot)"
+    # NEVER silently destroy a non-empty secret: park it first, then mint.
+    env_park_rejected "$v" "$cur" || log "WARN: could not preserve the rejected ${v} before replacing it"
+  fi
+  if env_replace_line "$v" "$(openssl rand -base64 32)"; then
+    log "repaired ${v} in .env — ${reason}; a fresh secret REPLACED it"
+  else
+    log "WARN: ${v} in .env is unusable (${reason}) and the in-place repair FAILED — boot will refuse"
   fi
 done
 
@@ -1088,7 +1289,7 @@ systemctl restart "barkpark-slot@$TARGET"
 
 ok=0
 for _ in $(seq 1 40); do
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || true)"
+  code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://localhost:${TARGET_PORT}${HEALTH_PATH}" || echo 000)"
   if [ "$code" = "200" ]; then ok=1; log "slot $TARGET healthy ($code)"; break; fi
   sleep 5
 done
@@ -1126,7 +1327,7 @@ cp -a "$CADDYFILE" "$CADDYFILE.pre-deploy"
 sed -i "s/localhost:${FLIP_FROM}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
 # Did the rewrite actually MOVE the upstream? The post-flip PUBLIC gate below
 # claims to catch "a sed that missed the live upstream line". It cannot: BOTH
-# slots serve /api/schemas, so when the flip is a no-op the OLD slot answers
+# slots serve the health path, so when the flip is a no-op the OLD slot answers
 # that probe 200 through the UNCHANGED Caddyfile, the gate passes, and the
 # script then disables the old slot — leaving Caddy proxying a dead port, exit
 # 0, "healthy" in every log line. A Caddyfile whose upstream is written some
@@ -1157,8 +1358,8 @@ if ! systemctl reload caddy; then
 fi
 exec 8>&-   # leaf lock: released the moment the flip is written + reloaded, so
             # the long non-Caddy tail below (go builds, npm ci) never holds it
-code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || true)"
-log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
+code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}${HEALTH_PATH}" || echo 000)"
+log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}${HEALTH_PATH} = $code)"
 # GATE, not just log (pds-bl-w49): the pre-flip loop above only proves the app
 # boots on its OWN port (localhost:$TARGET_PORT) — it cannot catch a flip that
 # landed wrong (a sed that missed the live upstream line, a Caddy reload that
@@ -1170,7 +1371,7 @@ log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
 # flip Caddy back and walk away clean instead of shipping a silently-broken
 # deploy.
 if [ "$code" != "200" ]; then
-  log "post-flip public health check FAILED (https://${HEALTH_HOST}/api/schemas = $code) — flipping back to :$ACTIVE_PORT; it was never retired"
+  log "post-flip public health check FAILED (https://${HEALTH_HOST}${HEALTH_PATH} = $code) — flipping back to :$ACTIVE_PORT; it was never retired"
   revert_post_flip_health_fail() {
     cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"
     if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
@@ -1362,6 +1563,27 @@ else
       # token would serve EVERY tenant — the exact multi-tenant hole this wave
       # closes. Each install authenticates with its own workspace-bound token,
       # ciphered at rest under CONNECTORS_CREDENTIAL_KEY.
+      # ROTATION, NOT A FLAG DAY. The cipher opens a sealed row under the
+      # CURRENT key or any key in CONNECTORS_CREDENTIAL_KEY_PREVIOUS
+      # (connectors/src/config.ts `splitKeys` → crypto/credential-cipher.ts), and
+      # the unit reads ONLY this file (EnvironmentFile=/etc/barkpark/connectors.env).
+      # Until this writer emitted the key, setting _PREVIOUS in /opt/barkpark/.env
+      # reached nothing and the rotation documented directly above had to be
+      # completed by hand-editing the box's connectors.env.
+      #
+      # UNSET IS NOT EMPTY. `splitKeys` reads an absent value and an empty string
+      # the same way (an empty list either way), so emitting an empty line would
+      # not MISLEAD the bridge — but it would stop this file from being able to
+      # say "no rotation is in flight", and, once the operator deletes the line
+      # from .env after `npm run rewrap`, the line must DISAPPEAR here on the next
+      # deploy rather than linger as an empty claim. So: emitted only when there
+      # is a key to carry. Whitespace-only counts as unset, for the same reason
+      # loadConfig() trims CONNECTORS_CONNECT_SECRET before deciding.
+      CONNECTORS_PREV_KEY="${CONNECTORS_CREDENTIAL_KEY_PREVIOUS:-}"
+      case "$CONNECTORS_PREV_KEY" in
+        *[![:space:]]*) ;;
+        *) CONNECTORS_PREV_KEY="" ;;
+      esac
       mkdir -p "$(dirname "$CONNECTORS_ENV_FILE")"
       ( umask 077; : > "$CONNECTORS_ENV_FILE" )
       chmod 0600 "$CONNECTORS_ENV_FILE"
@@ -1374,7 +1596,14 @@ else
         # The SAME value Barkpark.Connectors signs tickets with (D50). If these
         # two ever disagree, every connect 401s and nothing else would catch it.
         printf 'CONNECTORS_CONNECT_SECRET=%s\n' "${CONNECTORS_CONNECT_SECRET:-}"
+        # Present ONLY during a rotation window — see the UNSET-IS-NOT-EMPTY note above.
+        if [ -n "$CONNECTORS_PREV_KEY" ]; then
+          printf 'CONNECTORS_CREDENTIAL_KEY_PREVIOUS=%s\n' "$CONNECTORS_PREV_KEY"
+        fi
       } > "$CONNECTORS_ENV_FILE"
+      if [ -n "$CONNECTORS_PREV_KEY" ]; then
+        log "connectors.env carries CONNECTORS_CREDENTIAL_KEY_PREVIOUS — a rotation window is OPEN; run \`npm run rewrap\` then delete the line from /opt/barkpark/.env"
+      fi
       install -m 0644 "$APP/deploy/systemd/barkpark-connectors.service" /etc/systemd/system/barkpark-connectors.service
       systemctl daemon-reload
       if systemctl enable barkpark-connectors >/dev/null 2>&1 && systemctl restart barkpark-connectors; then
@@ -1387,7 +1616,7 @@ else
           log "barkpark-connectors up (https://$HEALTH_HOST$CONNECTORS_PATH_PREFIX -> 127.0.0.1:$CONNECTORS_PORT)"
           # LOG-ONLY probe (never a gate — a polling-only bridge legitimately
           # serves no HTTP): does the path route actually reach the bridge?
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${CONNECTORS_PORT}${CONNECTORS_PATH_PREFIX}/health" || true)"
+          code="$(bp_curl_code -s -o /dev/null --max-time 5 "http://127.0.0.1:${CONNECTORS_PORT}${CONNECTORS_PATH_PREFIX}/health" || echo 000)"
           log "connectors health probe: 127.0.0.1:${CONNECTORS_PORT}${CONNECTORS_PATH_PREFIX}/health = ${code:-000} (000 = no HTTP surface yet; provider webhooks would land on the maintenance 503 — see docs/ops/connectors-deploy.md)"
 
           # INSURANCE, NOT A GATE (connectors D54). The BRIDGE creates chat_bridge
@@ -1430,9 +1659,15 @@ fi
 # (chat-task-hands W1). /usr/local/bin is already on the LIVE BEAM process PATH
 # (/proc-proven on guerrilla), so a Port.open child resolves `bp` with zero PATH
 # injection — no reliance on the stray, off-PATH /opt/barkpark/bp manual build.
-# Build ONCE per deploy (this main flow runs once under flock, not per slot),
-# native arch (guerrilla is ARM64), CGO off to match the barkpark-agent precedent
-# above. Install ATOMICALLY: build to a tmpfile on the SAME filesystem, then
+# Build ONCE per deploy (this main flow runs once under flock, not per slot), for
+# the NATIVE arch of whichever box runs this script — no GOARCH/GOOS is set
+# anywhere in this file, so `go build` targets the host and nothing here depends
+# on knowing which arch that is. Do NOT re-add an arch claim: this line used to
+# read "guerrilla is ARM64" with nothing behind it, and the pds wave-49 filer
+# measured the opposite — `ssh root@157.180.90.121 uname -m` -> `x86_64`
+# (2026-09, the filer's measurement, not re-run here; this campaign has no ssh).
+# CGO off to match the barkpark-agent precedent above. Install ATOMICALLY:
+# build to a tmpfile on the SAME filesystem, then
 # rename over the live binary, so an in-flight `bp` invocation never sees a half-
 # written file. LOUD on failure — a silent skip is exactly the silent-failure bug
 # this epic exists to kill — but NON-FATAL: the app is already live on the new

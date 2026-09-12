@@ -24,7 +24,7 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
   SCOPE NOTE (shared test database): every row is a pure function call on a
   literal term. Nothing touches `Repo`, so no other agent's rows can reach it.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 
@@ -59,6 +59,13 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"replay", {:error, :replay}, "unauthorized", 401, [:reason]},
       {"forbidden", {:error, :forbidden}, "forbidden", 403, []},
       {"forbidden_membership", {:error, :forbidden_membership}, "forbidden", 403, [:reason]},
+      # The membership arm SIBLING (task-d63f91a7f817b4a3): same `forbidden`
+      # code and same 403 - deliberately, so no client keying on either moves -
+      # with `reason` the only discriminator between "you hold no seat here" and
+      # "you hold a seat but not this capability". The two have OPPOSITE
+      # remedies, so if this row ever collapses into the one above, the envelope
+      # has gone back to telling an insider it is a stranger.
+      {"forbidden_capability", {:error, :forbidden_capability}, "forbidden", 403, [:reason]},
       {"workspace_suspended", {:error, :workspace_suspended}, "workspace_suspended", 403, []},
       {"workspace_suspended/reason", {:error, {:workspace_suspended, "abuse"}},
        "workspace_suspended", 403, [:details]},
@@ -68,6 +75,18 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        "workspace_scope_required", 422, []},
       {"workspace_scope_required/workspaces", {:error, {:workspace_scope_required, ["a", "b"]}},
        "workspace_scope_required", 422, [:details]},
+      # The generated documents.search_vector column overflowed Postgres' single
+      # tsvector cap (SQLSTATE 54000). 422, NOT the 413 payload_too_large the
+      # request-body bound emits: the cap is on the derived index, so the two must
+      # never collapse into one code.
+      {"searchable_text_too_large/located",
+       {:error,
+        {:searchable_text_too_large, 1_048_575,
+         %{document: "doc-1", field: "/body", bytes: 1_700_000}}}, "searchable_text_too_large",
+       422, [:details]},
+      {"searchable_text_too_large/unlocated",
+       {:error, {:searchable_text_too_large, 1_048_575, nil}}, "searchable_text_too_large", 422,
+       [:details]},
       {"quota_exceeded", {:error, :quota_exceeded}, "quota_exceeded", 402, []},
       {"quota_exceeded/quota", {:error, {:quota_exceeded, %{writes: 10}}}, "quota_exceeded", 402,
        [:details]},
@@ -80,6 +99,13 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"rev_mismatch/expected-actual", {:error, {:rev_mismatch, %{expected: "a", actual: "b"}}},
        "precondition_failed", 412, [:details]},
       {"malformed", {:error, :malformed}, "malformed", 400, []},
+      # [mutation-shape-422] The catch-all's NARROWER sibling: a known {id,type}
+      # mutate verb sent without one of the two keys. It leaves the 400 above
+      # for the already-registered `validation_failed` 422 and names the verb
+      # and the missing key(s) in `details`, so the caller never has to read
+      # content/mutations.ex to find the shape.
+      {"missing_mutation_fields", {:error, {:missing_mutation_fields, "publish", ["type"]}},
+       "validation_failed", 422, [:details]},
       # Same registered `malformed` code, one step narrower: a block list whose
       # element is not an object. It rides `malformed` on purpose (a request-body
       # SHAPE error, not a schema validation failure), so known_codes/0 and the
@@ -121,6 +147,15 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # arm cannot move the other one silently.
       {"connection_unavailable", {:error, {:connection_unavailable, "tcp recv: closed"}},
        "storage_unavailable", 503, [:reason]},
+      # The READ twin (task-5a7f007878b56e6a). Same public code, same 503, same
+      # `reason` — a DIFFERENT hint, because the write arm above tells the
+      # caller to check whether the write LANDED and a read wrote nothing.
+      # Pinned here so a later edit cannot silently collapse the two arms back
+      # into one and hand an SSR build check-the-drafts advice for a dropped
+      # SELECT.
+      {"connection_unavailable_read",
+       {:error, {:connection_unavailable, :read, "tcp recv: closed"}}, "storage_unavailable", 503,
+       [:reason]},
       {"label_spine", {:error, {:label_spine, %{"tags" => ["required"]}}}, "label_spine", 422,
        [:details]},
       {"invalid_paper_structure", {:error, {:invalid_paper_structure, %{"blocks" => []}}},

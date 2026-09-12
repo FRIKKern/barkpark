@@ -101,8 +101,33 @@ set -euo pipefail
 #   required gate compiles against a restored dependency tree or rebuilds from
 #   scratch. A PR that edited only the guard would otherwise change what the
 #   prod-compile gate does while skipping the prod-compile gate.
+#   tooling/pds/pre-gate-papers.json is the SECOND @external_resource that
+#   escapes api/, and it is here for the same reason design/** is: it is read at
+#   COMPILE time by api/lib/barkpark/content/papers/pre_gate_register.ex (the
+#   2026-09-02 grandfather register — a runtime read would miss in every release,
+#   which is why it is embedded), so editing it recompiles that module and
+#   changes what the reader renders. Declared as an EXACT FILE, never
+#   `tooling/**`: that tree is the repo's largest and churns constantly, and the
+#   over-inclusion would cost the shim exactly what it exists to save (the same
+#   judgement the templates/** note below records). The register is edited only
+#   when a Paper heals, so the full-suite cost is rare and bounded.
+#   cloud/priv/secret-scrub.exs is the THIRD @external_resource that escapes
+#   api/, and the first one read from BOTH trees: it is the single
+#   secret-pattern set, compiled by api/lib/barkpark/sites/build_log_scrub.ex
+#   (the box's recorded-build-log WRITE boundary) AND by
+#   cloud/lib/barkpark_cloud/failure_copy.ex (the control plane's display
+#   boundary), because two OTP apps that cannot depend on each other may not each
+#   carry their own copy of a redaction table — a copy drifts in SILENCE, a
+#   redacted token and a leaked one being indistinguishable until someone reads
+#   the bytes. Editing it changes what BOTH scrubbers redact, so a PR touching it
+#   must compile and test this tree rather than skip it. Declared as an EXACT
+#   FILE, never `cloud/**`: that tree has its own gate (cloud.yml, via
+#   scripts/cloud-path-escape-check.sh), and dispatching the whole Elixir suite
+#   on it would be the over-inclusion the tooling/** note above refuses.
 ELIXIR_COMPILE_PATHS='api/**
+cloud/priv/secret-scrub.exs
 design/**
+tooling/pds/pre-gate-papers.json
 .github/workflows/elixir.yml
 scripts/elixir-path-escape-check.sh
 scripts/elixir-path-escape-check.test.sh
@@ -117,9 +142,10 @@ scripts/prod-build-cache-guard.sh'
 # Each entry is a MEASURED read, not a guess; see --list-escapes for the census.
 #
 # Deliberately NOT here, both measured over-inclusions (charter D31):
-#   * repo-root templates/**  — no Elixir test reads it. That entry is a
-#     copy-paste from go-tests.yml, where it IS load-bearing. The only
-#     "templates" the suite reads is internal/provisioner/catalog/templates/**.
+#   * repo-root templates/**  — the bare TREE stays out. A copy-paste of
+#     go-tests.yml's entry, where it IS load-bearing, would run the full Elixir
+#     suite on every template edit. ONE exact file under it is now declared
+#     (the search-starter isBarkparkError stub, below); the tree is not.
 #   * scripts/claude-pinned-version.txt — reachable only from
 #     api/test/barkpark_web/studio/claude_chat_real_binary_test.exs, whose
 #     :real_binary tag is excluded in api/test/test_helper.exs. See EXEMPT below.
@@ -213,9 +239,63 @@ scripts/prod-build-cache-guard.sh'
 #   web/node_modules/**   TypeScript and renderToStaticMarkup's it (#15435). Declared as the
 #                         three EXACT subdirs the test names, never the bare `web` tree: a
 #                         change to web/app/** cannot break it, so it must not run the suite.
-#                         node_modules is gitignored and can never be a changed path — it is
-#                         declared because the test PROBES it (react-dom, typescript) and an
-#                         undeclared existing read reds this gate on any tree that installed it.
+#
+#   THE TWO isBarkparkError MIRROR ENTRIES, both read by
+#   api/test/barkpark/js_core_error_predicate_mirror_test.exs:
+#     js/packages/core/src/errors.ts
+#     templates/search-starter/lib/__test-stub-barkpark-core.mjs
+#   Declared for BOTH of this list's effects, and the second is the point. The
+#   stub is a hand-copied port of core's runtime predicate; the template's own
+#   node --test runs under search-starter-smoke (never fires on a js/ PR) and
+#   core's vitest runs under js-tests (never fires on a templates/ PR), so
+#   neither venue can see the mirror move. Declaring BOTH exact files puts them
+#   in the DISPATCH set, so a PR editing EITHER side runs this required suite —
+#   one door watched and the other open is not a lock. Two exact files, never
+#   `js/**` or `templates/**`: the trees would be far more CI than this buys.
+#   THE THREE bp-graph.js MIRROR ENTRIES, read by
+#   api/test/barkpark_web/static/bp_graph_escape_lock_test.exs (task-e3cf9937e4762bb0):
+#     web/public/bp-graph.js
+#     templates/search-starter/public/bp-graph.js
+#     templates/astro-search-starter/public/bp-graph.js
+#   The graph widget ships as FOUR byte-identical copies; api/priv/static/assets
+#   holds the canonical one and the other three are what actually serve the
+#   page. The test asserts the four-copy identity AND that every innerHTML sink
+#   in the canonical copy escapes its server strings. Its only prior locks —
+#   web/__tests__/graph-xss.test.ts and scripts/check-bp-graph-drift.sh via
+#   bp-graph-drift.yml — are both ADVISORY, so the escape could be stripped and
+#   merged past the required set.
+#   Declared for BOTH of this list's effects, and the second is again the point:
+#   without these three rows a PR that edits ONLY a mirror skips the Elixir
+#   suite, and the identity assertion never runs on the one PR that breaks it.
+#   Three EXACT files, never `web/**` or `templates/**` (see the note above on
+#   why the bare templates tree stays out). The widget is a generated artifact
+#   touched only when the graph is rebuilt, so the full-suite cost is rare.
+#   The reads are written INLINE at the read site — `Path.join(@repo_root,
+#   "web/public/bp-graph.js")` — precisely so THIS census can see them: with the
+#   same three paths held in a module attribute and joined from it, the census
+#   resolved 50 reads, printed OK, and dispatched on none of them. A path
+#   constant one binding away from its `Path.join` is a blind spot of every
+#   door below; the test carries a comment saying so.
+#   THE scaffy-duels METER ENTRIES (2026-09-11, pds-w49-meter-ci-decision) are
+#   the wiring half of METER.md §6's decision. `tooling/scaffy-duels/meter.py` is
+#   the executable half of the cost standard; it was fast, self-proving and
+#   CORRECT, and it still drifted 24 -> 34 envelopes unnoticed because ZERO of 43
+#   workflow files ever called it. The blocking route is this list plus
+#   api/test/barkpark/pds_meter_rider_test.exs, which shells the instrument and
+#   rides the already-required `Elixir gate`; a workflow with a workflow-level
+#   `on: paths:` filter is REFUSED as the venue (required-checks.json S4 — such a
+#   workflow can never be required, so it would be an advisory lane wearing a
+#   gate's name).
+#   THREE EXACT FILES AND ONE TREE, never `tooling/**` or `tooling/scaffy-duels/**`:
+#   METER.md carries the population marker and the §3 literals `verify` asserts,
+#   meter.py is the instrument, tally_wf.py is the mirrored rate table
+#   `--self-test` proves identical. `results/**` is the ONE tree, and it is a
+#   tree on purpose: it is the corpus the assertions are taken over, its own
+#   .gitignore calls the registered results "the benchmark's data of record", and
+#   an ADDED envelope — the exact change that rotted the doc — has no filename
+#   this list could have named in advance. It is 34 committed envelopes / ~255 KB
+#   that move only when a duel is recorded, so the full-suite cost is rare and
+#   bounded, which is the same judgement the templates/** note above records.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
@@ -232,6 +312,7 @@ internal/chat/testdata/**
 internal/pdrender/testdata/**
 internal/provisioner/catalog/templates/**
 internal/taskboard/**
+js/packages/core/src/errors.ts
 js/packages/react/src/blocks/sheet.ts
 js/packages/react/tests/fixtures/**
 scripts/async_env_seam_scan.exs
@@ -248,11 +329,19 @@ scripts/test-env-leak-allowlist.txt
 scripts/test-env-leak-gate.sh
 scripts/test-env-leak-gate.test.sh
 scripts/unreachable-assert-message-check.sh
+templates/astro-search-starter/public/bp-graph.js
+templates/search-starter/lib/__test-stub-barkpark-core.mjs
+templates/search-starter/public/bp-graph.js
+tooling/scaffy-duels/METER.md
+tooling/scaffy-duels/meter.py
+tooling/scaffy-duels/results/**
+tooling/scaffy-duels/tally_wf.py
 web/__tests__/**
 web/components/**
 web/lib/**
 web/node_modules/**
 web/public/assets/bp-paper-editor.css
+web/public/bp-graph.js
 web/public/bp-paper-editor.bundle.js'
 
 # EXEMPT — escapes that resolve to a real file but are NOT reachable from the

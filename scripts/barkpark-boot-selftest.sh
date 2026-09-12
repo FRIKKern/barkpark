@@ -50,6 +50,21 @@ REFERENCE_REV="0bff57e4f500e9c9fc99424fa2635ca9988be725"
 # quietly comparing the fix against itself.
 REFERENCE_MARKERS=('server_running() {' 'pid="$(listener_pid)"')
 
+# ── the SECOND reference: pre-wave-25 ────────────────────────────────────────
+#
+# REFERENCE_REV above is pre-wave-24. Every fixture in W25_DIFFERENTIAL would
+# fail against it too — but for the WRONG reason (that launcher is missing the
+# wave-24 identity proofs as well), so it would prove nothing about wave 25. The
+# honest reference for the wedged-server route-out is the launcher as it stood
+# immediately BEFORE that change: it already refuses to kill an unidentified
+# port holder (wave 24) and simply offers the owner no way through.
+#
+# Same rule as above: pinned to a revision, and asserted to really be pre-fix.
+# Both markers are text this change REMOVES from bin/barkpark, so if a later
+# edit makes them vanish from that blob the pin is wrong and the gate says so.
+REFERENCE_W25_REV="18a5be9f30fbc7fa4cb08e4307384dc7321fadcd"
+REFERENCE_W25_MARKERS=('{up|reload|stop|status|token|psql}' 'yourself if it is yours)')
+
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/barkpark-boot-selftest.XXXXXX")"
 SPAWNED=()
 FAILURES=0
@@ -109,8 +124,20 @@ for marker in "${REFERENCE_MARKERS[@]}"; do
     exit 2
   }
 done
+git -C "$REPO_ROOT" show "$REFERENCE_W25_REV:bin/barkpark" >"$TMP/prew25-barkpark" 2>/dev/null || {
+  say "barkpark-boot-selftest: could not read $REFERENCE_W25_REV:bin/barkpark — the pre-fix half of every wave-25 proof is unavailable."
+  say "  (a shallow clone will not have it: git fetch --depth=... origin $REFERENCE_W25_REV, or clone with full history)"
+  exit 2
+}
+for marker in "${REFERENCE_W25_MARKERS[@]}"; do
+  grep -q -F "$marker" "$TMP/prew25-barkpark" || {
+    say "barkpark-boot-selftest: reference $REFERENCE_W25_REV does not contain the pre-wave-25 marker '$marker' — it is NOT the pre-fix launcher for these fixtures. Re-pin REFERENCE_W25_REV."
+    exit 2
+  }
+done
 extract_lib "$LAUNCHER" "$TMP/fixed.sh"
 extract_lib "$TMP/prefix-barkpark" "$TMP/prefix.sh"
+extract_lib "$TMP/prew25-barkpark" "$TMP/prew25.sh"
 
 # ── harness stubs ────────────────────────────────────────────────────────────
 #
@@ -212,15 +239,20 @@ alive() { kill -0 "$1" 2>/dev/null; }
 # it says. It is also the more faithful model — a user runs `bin/barkpark stop`
 # as a process, not as a subshell of something that is testing it. The canary
 # below asserts this isolation still holds.
-run_fn() { # <lib> <fn>   (BARKPARK_HOME/PORT/HARNESS_CURL_RC come from the env)
+run_fn() { # <lib> <fn> [args...]   (BARKPARK_HOME/PORT/HARNESS_CURL_RC come from the env)
   # $0 is passed through so the launcher's BIN_DIR/REPO_ROOT/API_DIR resolve to
-  # the real repo exactly as they did under the old subshell.
+  # the real repo exactly as they did under the old subshell. Trailing args are
+  # forwarded to the function under test — `stop --force <pid>` takes the pid as
+  # an argument, and a fixture that could not pass one could not test it.
+  local lib="$1" fn="$2"
+  shift 2
   PATH="$TMP/bin:$PATH" bash -c '
+    lib="$1"; fn="$2"; shift 2
     # shellcheck disable=SC1090
-    . "$1"
+    . "$lib"
     wait_server() { printf "HARNESS: boot path entered\n"; exit 43; }
-    "$2"
-  ' "$0" "$1" "$2" 2>&1
+    "$fn" "$@"
+  ' "$0" "$lib" "$fn" "$@" 2>&1
 }
 
 new_home() {
@@ -361,7 +393,117 @@ fx_stop_clean_slate_says_so() {
   expect_contains "$out" "server not running"
 }
 
-DIFFERENTIAL="fx_up_stale_pidfile fx_up_adopts_answering_listener fx_up_listener_not_answering fx_stop_refuses_uncorroborated_pidfile fx_stop_refuses_unidentified_port_holder fx_stop_clean_slate_says_so"
+# D7  Every branch of `up` that prints the /studio URL also reports whether the
+#     box HAS the credential that URL needs. Pre-fix: the boot line names
+#     /studio and stops there — a success claim about a door the box may have no
+#     key to. Post-fix: the same line is followed by an explicit credential
+#     verdict, and when there is none it names the verb that mints one.
+#
+#     The probe is deterministic under this harness WITHOUT a database: $PG
+#     resolves from $0, which run_fn sets to the harness, so it is
+#     <repo>/scripts/barkpark-pg — a path that does not exist. admin_token_count
+#     therefore fails (127), report_credential reads that as "cannot show you a
+#     key", and the NONE branch is the one under test. That is the branch that
+#     matters: it is the fresh-box state this row exists to fix.
+fx_up_reports_missing_credential() {
+  local lib="$1" lpid out rc
+  new_home
+  export BARKPARK_HOME="$HOME_DIR" PORT HARNESS_CURL_RC=0
+  lpid="$(spawn_listener "$PORT")"
+  printf '%s\n' "$lpid" >"$PIDFILE"
+  out="$(run_fn "$lib" start_server)"; rc=$?
+  expect_rc "$rc" 0
+  expect_contains "$out" "admin credential: NONE"
+  expect_contains "$out" "bin/barkpark token"
+}
+
+# ── WAVE-25 DIFFERENTIAL fixtures — the wedged-server dead end ───────────────
+#
+# These run against REFERENCE_W25_REV (the launcher AFTER wave 24, BEFORE this
+# change), not the ancient pre-wave-24 pin: the claim under test is "the owner
+# is offered a way through", and only a reference that already refuses correctly
+# can prove it.
+#
+# THE STATE, built exactly as D5 builds it: something holds $PORT, it does not
+# answer /status.json, nor the legacy /api/schemas fallback (HARNESS_CURL_RC=1
+# applies to every path the stub is asked for), and the pidfile does not name it.
+
+# W1  The refusal itself now names the route out, at the moment of refusing.
+#     Pre-w25: the refusal ends at "run 'kill <pid>' yourself" — a manual kill,
+#     not a product verb.
+fx_stop_refusal_names_the_force_route() {
+  local lib="$1" lpid out rc
+  new_home
+  export BARKPARK_HOME="$HOME_DIR" PORT HARNESS_CURL_RC=1
+  lpid="$(spawn_listener "$PORT")"
+  out="$(run_fn "$lib" stop_server)"; rc=$?
+  expect_rc "$rc" 0
+  expect_alive "$lpid"
+  expect_contains "$out" "barkpark stop --force $lpid"
+}
+
+# W2  `reload` stops AT the refusal with the one-line recovery, instead of
+#     walking into a start_server that cannot succeed on a held port.
+#     Pre-w25: reload_stop_or_explain does not exist at all.
+fx_reload_explains_instead_of_deadending() {
+  local lib="$1" lpid out rc
+  new_home
+  export BARKPARK_HOME="$HOME_DIR" PORT HARNESS_CURL_RC=1
+  lpid="$(spawn_listener "$PORT")"
+  out="$(run_fn "$lib" reload_stop_or_explain)"; rc=$?
+  expect_rc_nonzero "$rc"
+  expect_alive "$lpid"
+  expect_contains "$out" "barkpark stop --force $lpid"
+  expect_not_contains "$out" "HARNESS: boot path entered"
+}
+
+# W3  --force refuses a pid that does not hold the port. This is the wave-24
+#     guarantee restated for the new verb: typing --force does not license
+#     killing a stranger, it only supplies the corroboration a silent fallback
+#     never had. The port holder is alive too — nothing at all was signalled.
+fx_force_refuses_pid_not_holding_port() {
+  local lib="$1" lpid sleeper out rc
+  new_home
+  export BARKPARK_HOME="$HOME_DIR" PORT HARNESS_CURL_RC=1
+  lpid="$(spawn_listener "$PORT")"
+  sleeper="$(spawn_sleep)"
+  out="$(run_fn "$lib" force_stop_pid "$sleeper")"; rc=$?
+  expect_rc_nonzero "$rc"
+  expect_alive "$sleeper"
+  expect_alive "$lpid"
+  expect_contains "$out" "refusing to force-kill pid $sleeper"
+  expect_contains "$out" "held by pid $lpid"
+}
+
+# W4  --force with no pid names nothing, so it kills nothing.
+fx_force_requires_an_explicit_pid() {
+  local lib="$1" lpid out rc
+  new_home
+  export BARKPARK_HOME="$HOME_DIR" PORT HARNESS_CURL_RC=1
+  lpid="$(spawn_listener "$PORT")"
+  out="$(run_fn "$lib" force_stop_pid "")"; rc=$?
+  expect_rc_nonzero "$rc"
+  expect_alive "$lpid"
+  expect_contains "$out" "needs the pid it may kill"
+}
+
+# W5  The route out actually works: the named port holder — wedged, answering
+#     nothing, unnamed by the pidfile — dies, and it is NAMED in the line
+#     printed before the kill. This is the fixture that makes W1's advice true
+#     rather than merely printed.
+fx_force_kills_the_named_port_holder() {
+  local lib="$1" lpid out rc
+  new_home
+  export BARKPARK_HOME="$HOME_DIR" PORT HARNESS_CURL_RC=1
+  lpid="$(spawn_listener "$PORT")"
+  out="$(run_fn "$lib" force_stop_pid "$lpid")"; rc=$?
+  expect_rc "$rc" 0
+  expect_contains "$out" "force-stopping pid $lpid"
+  expect_dead "$lpid"
+}
+
+DIFFERENTIAL="fx_up_stale_pidfile fx_up_adopts_answering_listener fx_up_listener_not_answering fx_stop_refuses_uncorroborated_pidfile fx_stop_refuses_unidentified_port_holder fx_stop_clean_slate_says_so fx_up_reports_missing_credential"
+W25_DIFFERENTIAL="fx_stop_refusal_names_the_force_route fx_reload_explains_instead_of_deadending fx_force_refuses_pid_not_holding_port fx_force_requires_an_explicit_pid fx_force_kills_the_named_port_holder"
 CONTROL="fx_ctl_up_noop_when_running fx_ctl_stop_kills_corroborated"
 
 # Run one fixture against one tree in isolation and report only whether all its
@@ -415,7 +557,8 @@ fi
 
 say "barkpark boot selftest — bin/barkpark start/stop decisions"
 say "  tree under test : $LAUNCHER"
-say "  reference tree  : git show $REFERENCE_REV:bin/barkpark (pre-fix, pinned)"
+say "  reference tree  : git show $REFERENCE_REV:bin/barkpark (pre-wave-24, pinned)"
+say "  reference tree  : git show $REFERENCE_W25_REV:bin/barkpark (pre-wave-25, pinned)"
 say "  listener helper : $LISTENER_KIND"
 say "  errexit canary  : armed (a set -e launcher can still die inside run_fn)"
 say ""
@@ -441,6 +584,27 @@ for fx in $DIFFERENTIAL; do
   say ""
 done
 
+for fx in $W25_DIFFERENTIAL; do
+  PORT="$(pick_free_port)"
+  say "DIFFERENTIAL/w25 $fx (port $PORT)"
+
+  if probe "$fx" "$TMP/fixed.sh"; then
+    say "  fixed tree      : PASS"
+  else
+    fail "$fx does not hold on the working tree"
+    printf '%s\n' "$PROBE_OUTPUT" | sed 's/^/    /'
+  fi
+
+  PORT="$(pick_free_port)"
+  if probe "$fx" "$TMP/prew25.sh"; then
+    fail "$fx ALSO passes against the pre-wave-25 reference — it does not discriminate, so it proves nothing"
+  else
+    say "  pre-w25 ref     : FAILS as required —"
+    printf '%s\n' "$PROBE_OUTPUT" | sed 's/^/    /'
+  fi
+  say ""
+done
+
 for fx in $CONTROL; do
   PORT="$(pick_free_port)"
   say "CONTROL $fx (port $PORT)"
@@ -457,11 +621,21 @@ for fx in $CONTROL; do
     fail "control $fx does not hold on the pre-fix reference either — it is a differential fixture in disguise, not a control"
     printf '%s\n' "$PROBE_OUTPUT" | sed 's/^/    /'
   fi
+  PORT="$(pick_free_port)"
+  if probe "$fx" "$TMP/prew25.sh"; then
+    say "  pre-w25 ref     : PASS (as expected — this behaviour was never broken)"
+  else
+    fail "control $fx does not hold on the pre-wave-25 reference either — it is a differential fixture in disguise, not a control"
+    printf '%s\n' "$PROBE_OUTPUT" | sed 's/^/    /'
+  fi
   say ""
 done
 
 if [ "$FAILURES" -eq 0 ]; then
-  say "barkpark-boot-selftest: OK — 6 differential fixtures pass on the fix and fail on the pinned pre-fix launcher, 2 controls pass on both."
+  # Counts are COMPUTED from the fixture lists, never typed: a hardcoded tally
+  # goes stale the moment a fixture is added and then reports a number the run
+  # did not measure.
+  say "barkpark-boot-selftest: OK — $(printf '%s' "$DIFFERENTIAL" | wc -w | tr -d ' ') differential fixtures pass on the fix and fail on the pinned pre-wave-24 launcher, $(printf '%s' "$W25_DIFFERENTIAL" | wc -w | tr -d ' ') pass on the fix and fail on the pinned pre-wave-25 launcher, $(printf '%s' "$CONTROL" | wc -w | tr -d ' ') controls pass on all three."
   exit 0
 fi
 say "barkpark-boot-selftest: $FAILURES failure(s)."

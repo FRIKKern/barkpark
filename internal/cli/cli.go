@@ -427,6 +427,17 @@ func Execute(args []string) int {
 			return exitOK
 		}
 		return runDoctor(out, rest[1:])
+	case "latency":
+		// `bp latency [--name <handle>] [--url <url>] [--token <tok>]` — name
+		// WHICH route is slow, from the per-route dispatch histogram the box
+		// already serves at GET /v1/instance/metrics and nothing read. Its own
+		// flags are not globals, so they arrive in rest. Refuses (non-zero, no
+		// figure) when the slot is too young for a since-boot cumulative read.
+		if g.help {
+			printRouteLatencyHelp(out)
+			return exitOK
+		}
+		return runRouteLatency(out, g, rest[1:])
 	case "server":
 		// `bp server ls` is an alias for `bp servers`; it dispatches from the
 		// nounBuiltins registry above. `server` is NOT a manifest noun, so no
@@ -655,6 +666,17 @@ func Execute(args []string) int {
 		return runTaskPulse(out, g, ctx, m, *cmd, tail)
 	}
 
+	// `bp task landed` — client-side ergonomic wrapper: `--pr N` with no
+	// `--commit` resolves N to `mergeCommit.oid`, never the branch tip. This
+	// repo squash-merges, so a branch tip is `diverged` from main forever and a
+	// landing recorded against it is a merge record no reader can
+	// ancestor-check. The POST is unchanged; the wrapper only fills in the sha
+	// it resolved, or REFUSES (it never falls back to headRefOid). See
+	// tasks_landed_cmd.go.
+	if noun == "task" && verb == "landed" {
+		return runTaskLanded(out, g, ctx, m, *cmd, tail)
+	}
+
 	return runCommand(out, g, ctx, m, *cmd, tail)
 }
 
@@ -757,7 +779,16 @@ func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 	// the honest ANSWER to "where did this credential come from" is the saved
 	// server — not the flag, which only named which saved server to use. Only an
 	// explicit --token is labelled "flag".
+	// scopeFromSavedEntry: the same problem, one layer down, for the SCOPE. The
+	// three keys injected below sit at flag precedence but were never typed on
+	// this command line, and internal/manifest/scope.go's StatedScope asks
+	// precisely "did the operator state this scope?" to decide whether to REFUSE a
+	// command whose URL cannot carry it. Left unmarked, `bp -s gyldendal task
+	// ready` — no -w anywhere — refuses, and the only cure is deleting the saved
+	// entry. So this block records WHICH keys it injected and hands that set to
+	// manifest.AttributeServerEntry after the fold; the precedence is untouched.
 	tokenFromSavedEntry := false
+	scopeFromSavedEntry := map[string]bool{}
 	if g.server != "" {
 		if entry, ok := cfg.FindServer(g.server); ok {
 			flags[manifest.FlagServer] = entry.Server
@@ -767,12 +798,15 @@ func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 			}
 			if _, set := flags[manifest.FlagWorkspace]; !set && entry.Workspace != "" {
 				flags[manifest.FlagWorkspace] = entry.Workspace
+				scopeFromSavedEntry[manifest.FlagWorkspace] = true
 			}
 			if _, set := flags[manifest.FlagProject]; !set && entry.Project != "" {
 				flags[manifest.FlagProject] = entry.Project
+				scopeFromSavedEntry[manifest.FlagProject] = true
 			}
 			if _, set := flags[manifest.FlagDataset]; !set && entry.Dataset != "" {
 				flags[manifest.FlagDataset] = entry.Dataset
+				scopeFromSavedEntry[manifest.FlagDataset] = true
 			}
 		} else {
 			// Unknown name → raw URL, as before.
@@ -782,6 +816,7 @@ func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 
 	env := envContext()
 	ctx, srcs := manifest.ResolveWithSources(flags, env, active, bakedDefaults())
+	ctx, srcs = manifest.AttributeServerEntry(ctx, srcs, scopeFromSavedEntry)
 
 	prov := tokenProvenance{Tail: tokenTail(ctx.Token)}
 	switch srcs.Token {

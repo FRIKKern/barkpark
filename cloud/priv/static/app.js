@@ -419,13 +419,28 @@
   // Returns a sentence ONLY when the 403 carried evidence; otherwise null, so
   // every caller falls through to exactly what it renders today. Deliberately
   // NOT composed from two other keys the payload also carries:
-  //   • `scope` is NEVER interpolated. It is evidence for a log, not copy.
-  //     require_current_team_admin reads conn.assigns[:current_team], which
-  //     resolve_team fills from the x-barkpark-team header — so the label used
-  //     to say "primary_team" even when a SECOND team refused an owner of their
-  //     primary team. cch-w37-s3 renamed it to `scope: "team"`, which is what
-  //     the gate actually consulted; "this team" is what the sentence says
+  //   • `scope` is NEVER INTERPOLATED — but cch-w48-bl CORRECTS the half of this
+  //     bullet that said it is "evidence for a log, not copy", a claim that only
+  //     ever covered the TEAM scopes. The original reasoning still stands for
+  //     those: require_current_team_admin reads conn.assigns[:current_team],
+  //     which resolve_team fills from the x-barkpark-team header — so the label
+  //     used to say "primary_team" even when a SECOND team refused an owner of
+  //     their primary team. cch-w37-s3 renamed it to `scope: "team"`, which is
+  //     what the gate actually consulted; "this team" is what the sentence says
   //     either way, and it stays true under the team switcher.
+  //
+  //     Auth.require_ability/2 sends a FOURTH value the bullet never covered:
+  //     `scope: "token"`, with `required` set to a PAT ABILITY (read/write/
+  //     deploy/root), not a team role. On that payload the role sentence below
+  //     is false TWICE — the ability does not live "on this team", and NO admin
+  //     can grant it: there is no PATCH over a token's abilities anywhere in the
+  //     router, they are fixed by POST /v1/tokens at mint. So `scope` is READ —
+  //     it BRANCHES, it is still never interpolated into a sentence — and the
+  //     token arm below states the ability, deletes the fabricated remedy, and
+  //     names the one mechanism that is true (mint-time). MEASURED on the launch
+  //     path: POST /v1/launch's PAT branch is `Auth.require_ability(conn,
+  //     "deploy")` (router.ex go_live/1), so `{error:"forbidden", scope:"token",
+  //     required:"deploy"}` is a shape this function really receives.
   //   • `reason` is a SLUG ("no_team"). It is MAPPED through a written arm,
   //     never echoed — echoing it renders the literal string "no team" at a
   //     human.
@@ -435,6 +450,15 @@
     if (typeof reason === "string" && FORBIDDEN_REASON_COPY[reason]) return FORBIDDEN_REASON_COPY[reason];
     var required = data.required;
     if (typeof required !== "string" || !required) return null;
+    // THE SCOPE BRANCH COMES FIRST, ahead of every team-role rung: `required`
+    // alone cannot tell a team role from a token ability, and both maps below
+    // (plus the generic tail) end in "on this team". A token refusal that fell
+    // through to them would read as a role an admin could grant.
+    if (data.scope === "token") {
+      if (!FORBIDDEN_LABEL_RE.test(required)) return null;
+      return 'That access token doesn\'t carry the "' + required.replace(/_/g, " ") +
+        '" ability. No team role grants it — a token\'s abilities are fixed when it is created.';
+    }
     if (FORBIDDEN_ROLE_COPY[required]) return FORBIDDEN_ROLE_COPY[required];
     if (!FORBIDDEN_LABEL_RE.test(required)) return null;
     return 'You need the "' + required.replace(/_/g, " ") +
@@ -1342,6 +1366,16 @@
       "</div>" +
       '<div id="sessions-box" class="sessions-box"><p class="muted">Loading…</p></div>' +
 
+      // The security log sits DIRECTLY under Sessions, deliberately: the two
+      // answer one question in two tenses. Sessions is "who is signed in right
+      // now"; this is "what was changed about my account, and when". Same
+      // .sessions-box shell and the same row grammar, so the pair reads as one
+      // surface rather than as a second widget with its own vocabulary.
+      '<div class="am-head">' +
+        '<h3 class="modal-section">Security log</h3>' +
+      "</div>" +
+      '<div id="security-log-box" class="sessions-box"><p class="muted">Loading…</p></div>' +
+
       '<div class="am-head">' +
         '<h3 class="modal-section">Two-factor authentication</h3>' +
         accountTwoFactorBadgeHtml(a2fBadgeState(a2fPhase)) +
@@ -1743,6 +1777,8 @@
 
     sessionsExpanded = false; // every open starts folded — the tail is opt-in
     loadSessions();
+    securityLogExpanded = false;
+    loadSecurityLog();
 
     // Password on demand — disclosure only. The form and all four of its ids
     // are already mounted; this just reveals them.
@@ -1935,6 +1971,106 @@
     return html;
   }
 
+  // ---------------------------------------------------- the user security log
+  // GET /v1/me/security-events — the account owner's own trail of sensitive
+  // changes (password, two-factor, sessions, email address). Distinct from the
+  // TEAM audit register under Activity: that one is team-keyed and admin-gated,
+  // this one is keyed on the user and every row in it is about the person
+  // reading it.
+  //
+  // The five verbs are the server's closed vocabulary
+  // (BarkparkCloud.Accounts.UserSecurityEvent.actions/0). This map is HAND-KEPT
+  // and deliberately NOT part of the ACTION_LABELS region further down: that
+  // region is EMITTED from cloud/priv/audit-actions.json by design/emit.mjs and
+  // owns the team register's verbs. Putting these five there would file them in
+  // the team vocabulary, which is precisely the model this feature exists
+  // because it could not use.
+  //
+  // An unknown verb falls through to its raw slug rather than to a friendly
+  // guess: a future server verb this console has never heard of must read as
+  // "something I do not recognise happened", never as a confident sentence
+  // about the wrong event.
+  var SECURITY_LOG_LABELS = {
+    password_changed: "Password changed",
+    two_factor_disabled: "Two-factor authentication turned off",
+    session_revoked: "A device was signed out",
+    sessions_revoked_everywhere: "Signed out everywhere",
+    email_changed: "Email address changed"
+  };
+
+  function securityEventLabel(action) {
+    if (!action) return "Unknown change";
+    return SECURITY_LOG_LABELS[action] || String(action);
+  }
+
+  // The second line of a row: the one extra fact the verb cannot carry on its
+  // own. Returns "" when there is nothing honest to add — never filler.
+  // `previous_email` is the fact that makes an email change actionable ("my
+  // account was moved somewhere I do not control"); `revoked` is a count the
+  // user can check against what they expected.
+  function securityEventDetail(x) {
+    var md = (x && x.metadata) || {};
+    if (x && x.action === "email_changed" && md.previous_email) {
+      return "from " + md.previous_email;
+    }
+    if (x && x.action === "sessions_revoked_everywhere" && typeof md.revoked === "number") {
+      return md.revoked === 1 ? "1 other device" : md.revoked + " other devices";
+    }
+    return "";
+  }
+
+  // Pure: one security-log row. Mirrors sessionRowHtml's grammar — the fact on
+  // the first line, the when on the second — with no action button, because
+  // every row here is a thing that already happened and nothing can be done to
+  // it.
+  //
+  // GR81 applies HERE TOO, and for the identical reason it applies to the
+  // session rows above: the row's `ip` is SUPPRESSED, not forgotten. Every
+  // request the control plane sees comes from the Docker bridge gateway
+  // (trust_forwarded_ip honours X-Forwarded-For only from a loopback peer), so
+  // the stored value is uniform garbage — identical for every client — and can
+  // never separate "me, at home" from "a stranger". Showing it on a SECURITY
+  // surface would be worse than showing nothing: it invites a judgement the
+  // value cannot support. The column is written and kept server-side; restore
+  // the lead here (and on the session row) once
+  // task gr-bl-peer-ip-container lands a genuine per-client peer IP.
+  function securityEventRowHtml(x) {
+    x = x || {};
+    var detail = securityEventDetail(x);
+    return '<div class="session-row">' +
+      '<div class="session-main">' +
+        '<div class="session-device">' + esc(securityEventLabel(x.action)) + "</div>" +
+        '<div class="session-meta">' + esc(relTime(x.inserted_at)) +
+          " · " + esc(deviceLabel(x.user_agent)) +
+          (detail ? " · " + esc(detail) : "") + "</div>" +
+      "</div>" +
+    "</div>";
+  }
+
+  // Pure: the whole list, with the same fold the sessions list uses and the same
+  // honest hidden count. An EMPTY trail gets a sentence, not a blank box — and
+  // the sentence says what an empty log MEANS ("nothing sensitive has changed"),
+  // because a bare "No events" reads equally like "we lost your history".
+  var SECURITY_LOG_COLLAPSED_MAX = 5;
+  function securityLogHtml(rows, expanded) {
+    rows = rows || [];
+    if (!rows.length) {
+      return '<p class="muted">No sensitive changes recorded yet. Password, two-factor, ' +
+        "sign-out and email changes appear here.</p>";
+    }
+    var foldable = rows.length > SECURITY_LOG_COLLAPSED_MAX;
+    var visible = foldable && !expanded ? rows.slice(0, SECURITY_LOG_COLLAPSED_MAX) : rows;
+    var html = visible.map(securityEventRowHtml).join("");
+    if (foldable) {
+      var hidden = rows.length - visible.length;
+      html += expanded
+        ? '<button class="session-fold" type="button" id="security-log-fold" aria-expanded="true">Show fewer</button>'
+        : '<button class="session-fold" type="button" id="security-log-fold" aria-expanded="false">Show ' +
+          hidden + " more event" + (hidden === 1 ? "" : "s") + "</button>";
+    }
+    return html;
+  }
+
   // Whether the sessions list is unfolded past the collapse point. Module scope
   // so a revoke's repaint keeps the operator's place in the open list; reset
   // each time the account modal opens.
@@ -1995,6 +2131,35 @@
           });
         });
       });
+      }
+    });
+  }
+
+  // Whether the security log is unfolded past its collapse point. Module scope
+  // for the same reason sessionsExpanded is; reset on every modal open.
+  var securityLogExpanded = false;
+
+  // Fetch + render the user's own security trail into #security-log-box.
+  // A failed read says so and says nothing else — an empty list and a failed
+  // fetch must never paint the same thing on a security surface, because
+  // "nothing has changed on your account" is exactly the reassurance a reader
+  // would take from a silent blank box.
+  function loadSecurityLog() {
+    var box = $("#security-log-box");
+    if (!box) return;
+    api("GET", "/v1/me/security-events").then(function (r) {
+      if (!box.isConnected) return;
+      if (!r.ok) { box.innerHTML = '<p class="muted">Couldn\'t load your security log.</p>'; return; }
+      var rows = (r.data && r.data.events) || [];
+      paint();
+      function paint() {
+        box.innerHTML = securityLogHtml(rows, securityLogExpanded);
+        var fold = box.querySelector("#security-log-fold");
+        if (fold) fold.addEventListener("click", function () {
+          // Pure re-render from the same fetch — folding is a view choice.
+          securityLogExpanded = !securityLogExpanded;
+          paint();
+        });
       }
     });
   }
@@ -2135,10 +2300,29 @@
   // control plane actually did. The (state, reason) manifest —
   // cloud/test/barkpark_cloud/lifecycle_state_manifest_test.exs — reds if this
   // label starts claiming a halt again.
+  //
+  // cch-w54-bl (D-r12-w54) — THE MAP DECLARES EXACTLY WHAT THE FOLD CAN RETURN.
+  // It used to declare seven, of which `archived` and `adopted` were labels no
+  // input could reach: `lifecyclePillState` folds `instanceLifecycle(bp)`, whose
+  // whole vocabulary is removing / removeFailed / failed / provisioning /
+  // suspended / live, derived from four row fields (deprovision_status, host,
+  // provision_status, suspended). There is no `lifecycle_state` column and
+  // `barkpark_json/5` serializes no archived/adopted fact, so no producer exists
+  // to feed either word. DECISION: DELETE, not make-reachable — adding a state
+  // with no producer would be exactly the "label-map domain mistaken for the
+  // fold's range" error this rail already pays a guard to prevent. ("Archived"
+  // as a word survives elsewhere and means something else: GET /v1/archives and
+  // ArchiveStore list a team's torn-down instance BUNDLES, which is an object,
+  // not a state a live box wears.) The set-equality guard in __app.test.mjs
+  // ("cch-w54-bl: LIFECYCLE_PILL_LABEL's domain equals lifecyclePillState's
+  // range") DERIVES the range by driving one fixture per fold branch, so it reds
+  // in both directions: a re-added dead label, and a returned state with no
+  // label. `INSTANCE_LIFECYCLE` (the CSS-class vocabulary above) deliberately
+  // keeps all seven tokens — it is the S4 token/hue register and the styleguide
+  // paints all seven — so this delete is scoped to the LABELS.
   var LIFECYCLE_PILL_LABEL = {
     provisioning: "Provisioning", live: "Live", degraded: "Degraded",
-    stopped: "Suspended", archived: "Archived", decommissioned: "Decommissioning",
-    adopted: "Adopted",
+    stopped: "Suspended", decommissioned: "Decommissioning",
   };
 
   // Map the client-derived instance state (instanceLifecycle booleans, the same
@@ -3179,7 +3363,7 @@
   //
   // So the BOX's top is what is scrolled to, not the button's. `block:"start"`
   // aligns it to the start edge of every scroll ancestor; on the page path the
-  // sticky `.topbar` (56px, app.css:794) then covers that edge, so the occluded
+  // sticky `.topbar` (56px; grep -n '^\.topbar [{]' app.css) then covers that edge, so the occluded
   // strip is given back with one `scrollBy`. Inside the dialog nothing overlays
   // it and no compensation is applied. #cred-submit stays reachable for free:
   // it renders BELOW the box, so a viewport that holds the box's top holds the
@@ -4028,12 +4212,20 @@
   // fires it from the fenced writer AND from the `with_site_update` writer
   // `settle_live/2` drives, EDGE-TRIGGERED on the prior status so a live → live
   // re-report sends nothing. Arm (b) of the census reds until this row exists.
+  // dr-w13-bl-abandonment-splits-off-the-flood — NINE. `deployment_abandoned` is
+  // the census working in the same direction cch-w29-bl did: its producer
+  // (Registry.dispatch_deployment_abandoned/1, branched off the one
+  // deployment_failed funnel) lands in the same change, and arm (b) reds until
+  // this row names it. It is the chain the fleet GAVE UP ON — the row a person
+  // scanning "Deployment failed" could not pick out, which is why it is worth a
+  // name of its own rather than a severity word inside the old one.
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
     ["deployment_failed", "Deployment failed"],
     ["deployment_succeeded", "Deployment live"],
     ["deployment_refused", "Deployment refused"],
+    ["deployment_abandoned", "Rebuild chain given up on"],
     ["agent_unreachable", "Instance unreachable"],
     ["agent_reachable", "Instance reachable again"],
     ["subscription_past_due", "Subscription past due"]
@@ -4389,13 +4581,38 @@
   // switch for the whole rail, so both copies now name the whole rail. (The
   // surface already contained the honest word once, in the always-send row's
   // "master … switch"; that row now agrees with these two.)
+  // cch-w39-rv (charter D895 — KEEP ROLE-FREE DATA) — THE THIRD ARM, and it is a
+  // SPLIT of the shipped member sentence, not a newly authored one. `canManage`
+  // takes a third value, the string "unknown", for a /v1/me that is in flight,
+  // failed or stale: the read-only card renders exactly as it does for a
+  // confirmed member — same heading, same `<dl>`, same alerts/transport/from
+  // values, all of it /v1/notifications/settings' own answer and role-free —
+  // and the ONLY thing withheld is the role CLAIM, the trailing sentence "Only
+  // team admins can change these settings." That sentence is a fact about a
+  // role nobody read; the two before it are facts about the team's settings,
+  // which the server did send. Before this, the whole section was deleted under
+  // an unknown role because the claim happened to live inside it, so an outage
+  // cost a notifications user their own visible settings while a billing user
+  // kept the plan card — a difference nobody decided. The copy fence (D438)
+  // is honoured by CONSTRUCTION: no string is authored here, one shipped
+  // sentence is simply not appended.
+  var NOTIF_EMAIL_READONLY_PURPOSE =
+    "The master switch for every alert Barkpark sends &mdash; email and chat channels alike &mdash; and your team's alert email.";
+  var NOTIF_EMAIL_ADMIN_ONLY_CLAIM = " Only team admins can change these settings.";
+
   function notifEmailSectionHtml(s, canManage) {
     s = s || {};
     var transport = s.transport || "instance";
-    if (!canManage) {
+    if (canManage !== true) {
+      // The role claim is appended ONLY on a determinate refusal. Anything that
+      // is not a proven `true` and not a proven `false` (the "unknown" band)
+      // gets the data without the claim; a proven member keeps both, byte-for-
+      // byte, which is what the positive control in __app.test.mjs pins.
+      var roleKnown = canManage === false;
       return '<section class="set-section">' +
         '<h3 class="set-h">Alert delivery</h3>' +
-        '<p class="set-purpose">The master switch for every alert Barkpark sends &mdash; email and chat channels alike &mdash; and your team\'s alert email. Only team admins can change these settings.</p>' +
+        '<p class="set-purpose">' + NOTIF_EMAIL_READONLY_PURPOSE +
+          (roleKnown ? NOTIF_EMAIL_ADMIN_ONLY_CLAIM : "") + "</p>" +
         '<dl class="set-readonly">' +
           "<div><dt>All alerts (email and chat)</dt><dd>" + (s.alerts_enabled === false ? "Off" : "On") + "</dd></div>" +
           "<div><dt>Transport</dt><dd>" + esc(notifTransportLabel(transport)) + "</dd></div>" +
@@ -4722,8 +4939,16 @@
 
   function notifPageHtml(s, opts) {
     opts = opts || {};
+    // cch-w39-rv (D895) — the unknown page KEEPS the read-only alert-delivery
+    // card. It is /v1/notifications/settings' answer, which this page already
+    // has in hand and which every role may read; only the role claim on its
+    // purpose line is withheld (see notifEmailSectionHtml's third arm). The
+    // channels notice stays out — "managed by team admins" is a role claim with
+    // no data under it — and channels/matrix stay out because they are WRITE
+    // forms, which no unproven role may be handed (fail-closed, unchanged).
     if (opts.state && opts.state !== "loaded") {
-      return notifMeUnknownHtml(opts.state) + notifDeliveriesShellHtml(true);
+      return notifMeUnknownHtml(opts.state) + notifEmailSectionHtml(s, "unknown") +
+        notifDeliveriesShellHtml(true);
     }
     if (!opts.canManage) {
       return notifEmailSectionHtml(s, false) + notifMemberAdminNoticeHtml() + notifDeliveriesShellHtml(true);
@@ -6628,10 +6853,10 @@
   // classifyBp collapses the fleet fields GET /v1/barkparks already returns
   // (provision/deprovision status, suspended, health_status, agent_status,
   // update_state, last_seen_at, queued_deploy_age_seconds, commit_ancestry,
-  // deploy_rate) into exactly ONE of the TWELVE ranked states this console
-  // classifies (of the decision-32 fixture's fourteen — see the ladder's
-  // ORDER-ONLY note) of charter
-  // decision 15 — the single attention-order spec. Both statusOf (the pill) and
+  // deploy_rate, pressure) into exactly ONE of the FOURTEEN ranked states of
+  // charter decision 15 — the single attention-order spec. Fourteen is the
+  // decision-32 fixture's whole vocabulary: since dr-w5-followup the console
+  // can PRODUCE every rung it orders, and the named classifier gap is empty. Both statusOf (the pill) and
   // attentionRank/bucketOf (the queue + rollup) derive from it, so the pill's
   // colour and the queue's order can never disagree. This is the JS twin of
   // slice 9's Go statusRole/attention order; they MUST agree on ordering.
@@ -6658,7 +6883,7 @@
     // last_seen_at null they were never measured, so they cannot rank this box.
     // This arm is checked BEFORE degraded because unknown is a different state,
     // not a lesser one; the ladder below is where its urgency is expressed.
-    if (live && bp.last_seen_at == null) return "unreported";      // 7
+    if (live && bp.last_seen_at == null) return "unreported";      // 9
     if (live && !healthy) return "degraded";                       // 4
     // dr-w10-s1: THE DEPLOY VERDICT, the Go twin's arm verbatim
     // (cloud_status_cmd.go attentionStatus `case live && deploysFailing(b)`).
@@ -6674,6 +6899,22 @@
     // slice it was rendered by commitBehindCell and ranked by nothing, so a
     // diverged box classified `ok` and sat in HEALTHY.
     if (live && divergedByCommits(bp)) return "diverged";          // 6
+    // dr-w5-followup: THE VITALS RUNGS, and they mirror the Go twin's arms in
+    // the same place in the same order (cloud_status_cmd.go attentionStatus,
+    // `case live && strained(b)` then `case live && filling(b)`) — after the
+    // deploy verdict, before the queue. A confirmed failure outranks a capacity
+    // signal; a box's own capacity outranks its stuck queue.
+    //
+    // THE INPUTS WERE ALREADY ON THIS ROW. router.ex merge_pressure/2 puts
+    // cpu_cores, load15/load1 and disk_used_percent on EVERY fleet row, and
+    // this file has read bp.pressure since the slot-pair work — so these arms
+    // widened no payload and touched no second surface.
+    //
+    // D42's factual arm lives inside the predicates, never here: an absent
+    // pressure block, an all-null one, and a quiet metered box are SILENCES and
+    // stay `ok`. Only a POSITIVE measured reading at or over the fence fires.
+    if (live && strainedBox(bp)) return "strained";                // 7
+    if (live && fillingBox(bp)) return "filling";                  // 8
     // jpf-w1 D7: a queued deployment no builder has claimed for 5 minutes.
     // AFTER degraded/unreported — a sick box's stuck queue is a SYMPTOM, so
     // the box's own condition outranks it — and BEFORE behind. The threshold
@@ -6681,7 +6922,7 @@
     // raw age, nil when nothing is queued, and nil NEVER alarms (an absent
     // field on an older CP must not read as stalled).
     if (live && typeof bp.queued_deploy_age_seconds === "number" &&
-        bp.queued_deploy_age_seconds >= 300) return "deploy_stalled"; // 8
+        bp.queued_deploy_age_seconds >= 300) return "deploy_stalled"; // 10
     // dr-w25: TWO independent sources can say `behind`, and until this slice the
     // console read only the weaker one. `update_state` is the box's RELEASE-TAG
     // self-grade; `commit_ancestry` is the control plane's own compare of the
@@ -6693,10 +6934,10 @@
     // attentionStatus: `live && (b.UpdateState == "behind" || behindByCommits(b))`)
     // — same rung, same label, same bucket; it simply stops missing the boxes
     // whose release-tag grade cannot express the gap.
-    if (live && (bp.update_state === "behind" || behindByCommits(bp))) return "behind"; // 9
-    if (removing) return "removing";                              // 10
-    if (!host) return "provisioning";                            // 11 (rank-2 already excluded)
-    return "ok";                                                // 12
+    if (live && (bp.update_state === "behind" || behindByCommits(bp))) return "behind"; // 11
+    if (removing) return "removing";                              // 12
+    if (!host) return "provisioning";                            // 13 (rank-2 already excluded)
+    return "ok";                                                // 14
   }
 
   // ── THE LADDER IS AN ORDER, NOT A HAND-TYPED NUMBERING (dr-w10 ruling A) ──
@@ -6739,23 +6980,26 @@
     { state: "ok",              bucket: "healthy" },
   ];
 
-  // THE NAMED GAP, and it is a gap in the CLASSIFIER, not in the ladder.
-  // These rungs are ORDERED here (so every other state sits on its true rung)
-  // and are not yet PRODUCED by classifyBp, because their inputs are not on the
-  // fleet payload this console reads: `strained` and `filling` need the load and
-  // disk vitals, and no fleet row carries them. Naming them HERE is what keeps
-  // the closed-enum guard honest: a rung added to the ladder that is NOT named
-  // here must have a classifyBp arm and a statusOf arm, or the enum test reds.
-  // (The name says what these rungs ARE — ORDERED ONLY. It deliberately
-  // avoids the word the dr-w1-s2 guard forbids in this file: that token is a
+  // THE NAMED GAP — rungs this file ORDERS but cannot PRODUCE. IT IS EMPTY, and
+  // that is the point of keeping it: a rung added to the ladder with no
+  // classifyBp arm and no statusOf arm must be listed here or the enum test
+  // reds, so "ordered" and "classified" can never be silently conflated.
+  // (The name says what such rungs ARE — ORDERED ONLY. It deliberately avoids
+  // the word the dr-w1-s2 guard forbids in this file: that token is a
   // deploy-LEDGER failure class, and app.js must never name one.)
   //
-  // `deploys_failing` and `diverged` were ORDER-ONLY for exactly one commit —
-  // the mirror carried the ladder before the classifier could produce either —
-  // and are now CLASSIFIED (see the two arms in classifyBp). A gap list is a
-  // confession, not a lever: the way out of it is a classifyBp arm, never a
-  // longer list.
-  var ATTENTION_ORDER_ONLY = ["strained", "filling"];
+  // EVERY ENTRY THIS LIST EVER HELD LEFT IT THE SAME WAY — through an arm.
+  // `deploys_failing` and `diverged` were ORDER-ONLY for exactly one commit
+  // (the mirror carried the ladder before the classifier could produce either).
+  // `strained` and `filling` were listed here far longer, on a REASON THAT WAS
+  // WRONG: the note said they "need the load and disk vitals, and no fleet row
+  // carries them". Measured on origin/main, every fleet row already carried
+  // them — router.ex merge_pressure/2 emits cpu_cores, load15/load1 and
+  // disk_used_percent on the row this console fetches, and this file already
+  // read bp.pressure for the slot pair. The inputs were never missing; only the
+  // arms were. A gap list is a confession, not a lever: the way out of it is a
+  // classifyBp arm, never a longer list.
+  var ATTENTION_ORDER_ONLY = [];
 
   // Derived, never hand-maintained: rank = 1-based position; bucket = the rung's.
   var ATTENTION_RANK = {};
@@ -6790,15 +7034,24 @@
   // #fleet/inflight deep-link segment keeps its old spelling — that is a URL,
   // not vocabulary — and parseFleetFilter maps it to the canonical bucket).
   //
-  // NO FALLBACK ARM ON PURPOSE: a rank outside the ladder is not a bucket this
-  // function may guess at, and `|| "attention"` would file an unknown state
-  // under a real bucket and scan green. classifyBp is total over ATTENTION_KINDS,
-  // so every rank reaching here is a ladder position by construction.
+  // bucketOfRank IS THE RAW LOOKUP AND STAYS UNGUESSED: a rank outside the
+  // ladder is `undefined`, never a real bucket name that would scan green. That
+  // is what lets a test tell "off the ladder" from "in attention".
   function bucketOfRank(r) {
     return ATTENTION_BUCKET_BY_RANK[r];
   }
+  // bucketOf is the CONSUMER-FACING answer and it is TOTAL, with an EXPLICIT
+  // unknown arm that surfaces in ATTENTION — the Go twin's attentionBucket
+  // default, verbatim (cloud_status_cmd.go: "any unknown label defensively
+  // surfaces in the attention bucket rather than hiding"). classifyBp is total
+  // over the ladder today, so this arm is unreachable by construction; it exists
+  // for the day it is not. THE INVERSION IT KILLS: without it an unranked state
+  // makes attentionRank undefined, bucketOfRank undefined, and fleetSummary
+  // increments `out[undefined]` — the box vanishes from all three counts and the
+  // screen reads calm. Failing INTO attention is the only safe direction here.
   function bucketOf(bp) {
-    return bucketOfRank(attentionRank(bp));
+    var bucket = bucketOfRank(attentionRank(bp));
+    return bucket === undefined ? "attention" : bucket;
   }
 
   // Pure rollup of a fleet list into the three bucket counts + total.
@@ -6904,6 +7157,14 @@
     // dr-w24-followup: warn, and the detail says the thing the BEHIND column
     // cannot — WHY a diverged box is worth looking at. Never a distance.
     if (kind === "diverged") return { role: "warn", label: "Diverged", detail: divergedDetail(bp) };
+    // dr-w5-followup: the vitals rungs. WARN, not danger — a box over the fence
+    // is news, not a failure — matching attention_order.json's tone for both.
+    // The labels are the fixture's own words ("under load" / "disk filling"),
+    // Title-cased like every other label here. Each detail names the MEASURED
+    // number AND the fence it crossed, so the verdict is arguable rather than
+    // asserted; neither says CPU (see strainedReason) and neither advises.
+    if (kind === "strained") return { role: "warn", label: "Under load", detail: strainedReason(bp) };
+    if (kind === "filling") return { role: "warn", label: "Disk filling", detail: fillingReason(bp) };
     // jpf-w1 D7: warn, never the info/blue tone "queued" would get — waiting
     // is news, waiting five minutes with no builder is an alarm. The detail
     // NAMES THE AGE off the payload's own number (the criterion's "queued 7m"),
@@ -7148,6 +7409,141 @@
     return s;
   }
 
+  // ── THE VITALS FENCES (charter D67) — `strained` and `filling` ─────────────
+  //
+  // Byte-equal to the Go twin's constants (internal/cli/cloud_status_cmd.go
+  // strainedLoad15PerCore / strainedLoad1PerCore / fillingDiskPercent), owned on
+  // the client like DEPLOYS_FAILING_PCT above and for the same reason: the
+  // payload carries the raw vitals, the surface owns the verdict.
+  //
+  // 1.75 is deliberately above 1.0 — one runnable task per core is busy, not in
+  // trouble — and the 15-minute window means a burst cannot trip it. The load1
+  // FALLBACK sits HIGHER at 2.0 because the same box reads noisier over a
+  // 1-minute window, so the coarser predicate can only UNDER-report strain,
+  // never over-report it. Both arms divide by the box's OWN reported cpu_cores
+  // or do not fire at all: charter D52 refused a hardcoded core count, which is
+  // a fabricated denominator, not a fence.
+  //
+  // 90 is the SAME ceiling the usage meter already ships as its disk over_limit
+  // (cloud/lib/barkpark_cloud/usage.ex, meter(value, @src_disk, at, 100, 70, 90)),
+  // and that duplication IS the rung's purpose: the verdict surface must stop
+  // saying HEALTHY about a box the usage surface already calls over_limit.
+  var STRAINED_LOAD15_PER_CORE = 1.75;
+  var STRAINED_LOAD1_PER_CORE = 2.0;
+  var FILLING_DISK_PCT = 90.0;
+
+  // A vital is a NUMBER or it is a SILENCE. merge_pressure/2 renders an absent
+  // key and the agent's -1 sentinel alike as null, and the key is ALWAYS present
+  // (an all-null block when the box has never beaten), so a consumer must branch
+  // on the values and never on the key. A null vital never fires a rung.
+  function vitalNum(n) {
+    return (typeof n === "number" && isFinite(n)) ? n : null;
+  }
+  function pressureOf(bp) {
+    return (bp && bp.pressure && typeof bp.pressure === "object") ? bp.pressure : null;
+  }
+
+  // The sustained load-per-core reading the strained fence judges, WITH the
+  // fence it must clear and a human name for the window it came from. `ok` is
+  // false whenever the box did not give us enough to judge — D42's factual arm,
+  // verbatim. Mirrors the Go twin's loadPerCore, preference and all: load15
+  // first (the honest sustained signal); load1 only for an agent that predates
+  // it, and then against the higher fence.
+  function loadPerCore(bp) {
+    var none = { perCore: 0, fence: 0, window: "", ok: false };
+    var p = pressureOf(bp);
+    var cores = p ? vitalNum(p.cpu_cores) : null;
+    if (cores == null || cores <= 0) return none;
+    var l15 = p ? vitalNum(p.load15) : null;
+    if (l15 != null) return { perCore: l15 / cores, fence: STRAINED_LOAD15_PER_CORE, window: "15m avg", ok: true };
+    var l1 = p ? vitalNum(p.load1) : null;
+    if (l1 != null) return { perCore: l1 / cores, fence: STRAINED_LOAD1_PER_CORE, window: "1m avg", ok: true };
+    return none;
+  }
+
+  // The rung predicates. Named *Box so neither shadows the state string it
+  // produces. Swap NEVER triggers strain — it only enriches the reason — and an
+  // unmeasured box is NEVER strained or filling.
+  function strainedBox(bp) {
+    var r = loadPerCore(bp);
+    return r.ok && r.perCore >= r.fence;
+  }
+  function fillingBox(bp) {
+    var p = pressureOf(bp);
+    var disk = p ? vitalNum(p.disk_used_percent) : null;
+    return disk != null && disk >= FILLING_DISK_PCT;
+  }
+
+  // Go's trimFloat(round1(x)): one decimal, trailing zero trimmed.
+  function vital1(n) {
+    return String(Math.round(n * 10) / 10);
+  }
+
+  // The WHY for a strained row. It says LOAD and never CPU: load1/load15 count
+  // uninterruptible sleep, so a box stalled on I/O is honestly under load while
+  // its CPU sits idle, and naming it "CPU" would send an operator to the wrong
+  // instrument. It also names WHICH average it used, so a reading taken through
+  // the less-sensitive fallback is legible as such. Verbatim the Go twin's
+  // strainedReason, minus the swap clause: this file has no byte formatter and
+  // inventing one for a detail string is not worth a second rounding rule.
+  function strainedReason(bp) {
+    var r = loadPerCore(bp);
+    if (!r.ok) return "";
+    var p = pressureOf(bp);
+    var l15 = vitalNum(p.load15);
+    var load = l15 != null ? l15 : vitalNum(p.load1);
+    return "load " + vital1(load) + " on " + vital1(vitalNum(p.cpu_cores)) +
+      " cores (" + r.perCore.toFixed(1) + "x, " + r.window + ")";
+  }
+
+  // The WHY for a filling row, naming the fence it crossed so the number is not
+  // just an assertion. Verbatim the Go twin's fillingReason.
+  function fillingReason(bp) {
+    var p = pressureOf(bp);
+    var disk = p ? vitalNum(p.disk_used_percent) : null;
+    if (disk == null) return "";
+    return "disk " + vital1(disk) + "% used (fills at " + vital1(FILLING_DISK_PCT) + "%)";
+  }
+
+  // ── THE UNMETERED MARKER (charter D69) — A DETAIL LINE, NEVER A RUNG ───────
+  //
+  // Ported verbatim from the Go twin (internal/cli/cloud_status_cmd.go
+  // `unmeteredMarker`), and it exists because THREE VERY DIFFERENT BOXES were
+  // rendering as one green row on this surface:
+  //
+  //   never-reported  — the CP has never heard a byte. Already its own rung
+  //                     (`unreported`, "Never reported") with its own evidence.
+  //   UNREADABLE      — the box IS beating (`reported_at` is set) and not one
+  //                     vital can be read off it (`cpu_cores` null): it runs an
+  //                     agent that predates the vitals beat. Until this marker
+  //                     it rendered "Healthy", byte-identical to —
+  //   measured-quiet  — every vital present, every one calm. A box we looked at.
+  //
+  // Folding the middle one into the last is how the fleet list answered "which
+  // of my boxes is under pressure right now" with a green that had NO
+  // measurement behind it. An operator should SEE the rollout gap rather than
+  // infer it from an absence.
+  //
+  // NOT A RUNG, deliberately, and this is the Go twin's ruling kept: a rung for
+  // it would be vocabulary for what is really a rollout gap, and a status minted
+  // in the SPA alone is exactly the drift decision 32 exists to prevent
+  // (`unmetered` is absent from __fixtures__/attention_order.json ON PURPOSE).
+  // It rides in the meta line on top of whatever the pill already said — the
+  // same place, and the same rule, as fleetSlotUnitsText.
+  //
+  // Keyed on the PRESENCE of reported_at, NOT on its age: nothing measured here
+  // justifies a staleness window, and inventing one would be the fabricated
+  // number the honesty law refuses.
+  function unmeteredMarker(bp) {
+    var p = pressureOf(bp);
+    // Never beat at all — that is `unreported`, a DIFFERENT fact with its own
+    // rung and its own words. Saying "unreadable" over it would claim we heard
+    // something from a box we have never heard from.
+    if (!p || typeof p.reported_at !== "string" || p.reported_at.trim() === "") return "";
+    if (vitalNum(p.cpu_cores) != null) return "";  // vitals readable — nothing to say
+    return "vitals unreadable — agent predates the vitals beat";
+  }
+
   // ── slot_units (#14886): IS THE BLUE/GREEN DEPLOY PAIR INTACT ───────────────
   //
   // The one fact on a fleet row that is not about the host at all, and the one
@@ -7193,9 +7589,11 @@
   // WHY systemd calls a unit failed: Result and ExecMainStatus read TOGETHER or
   // not at all. Measured on guerrilla 2026-09-01: barkpark-site@search__b reads
   // result "exit-code" with exec_main_status 143 — 128+15, i.e. Next.js exiting
-  // on the SIGTERM of its own retire, filed as an exit code only because the
-  // unit lacks SuccessExitStatus=143 (PR #14863). `result` alone reports that
-  // deliberate stop as a crash.
+  // on the SIGTERM of its own retire, filed as an exit code only because that
+  // box's unit file predates SuccessExitStatus=143. PR #14863 landed that line
+  // (merged 2026-09-02) and deploy/site-deploy-node.sh preflight-enforces it, so
+  // this is the LEGACY-BOX path — boxes not yet redeployed. On those, `result`
+  // alone reports a deliberate stop as a crash.
   function slotUnitReason(u) {
     var result = u.result === null ? "" : String(u.result);
     if (u.execMainStatus === null) return result;
@@ -7352,6 +7750,13 @@
     // person scans first. Silent on every other state — see fleetSlotUnitsText.
     var su = fleetSlotUnitsText(bp);
     if (su) parts.push(esc(su));
+    // The unmetered marker sits HERE — after the slot-unit clause and before
+    // nothing, the same position the Go table gives it in its detail chain
+    // (reason · queuedDeployAge · slotUnit · runaway · err5xx · UNMETERED ·
+    // boxDeployRate). It is the segment that stops a box we CANNOT measure from
+    // passing for a box we measured and found calm.
+    var um = unmeteredMarker(bp);
+    if (um) parts.push(esc(um));
     return parts.length ? '<div class="fleet-meta">' + parts.join(" · ") + "</div>" : "";
   }
 
@@ -9350,6 +9755,43 @@
     return /(^|\.)barkpark\.cloud$/.test(h) ? null : h;
   }
 
+  // cch-w57-bl — THE FLEET CHILD IS THE FOURTH RESIDUE, and the only one that
+  // is a BILLED MACHINE the operator never named in the confirm. Of the seven
+  // FK columns referencing `barkparks`, exactly one is `on_delete: :nilify_all`
+  // — barkparks.fleet_parent_id (20260723000000_add_fleet_group_to_barkparks.exs
+  // lines 15-17), and it is DELIBERATE: "deleting a main orphans (does not
+  // cascade-delete) its supports; they become ungrouped rather than silently
+  // vanishing". So DELETE /v1/barkparks/:id on a MAIN returns 200 and every
+  // support box SURVIVES with fleet_parent_id = nil — still running, still
+  // billed, no longer in a fleet. The sheet named the DNS, archive and billing
+  // residues and omitted the one that is an actual server.
+  //
+  // DERIVED, NEVER BLANKET, and off data the client ALREADY holds at the click:
+  // fleet_role/fleet_parent_id ride EVERY GET /v1/barkparks row (pinned over
+  // HTTP by terminal_act_residue_manifest_test.exs ROW 2 LEG 1), and supportsOf/2
+  // is the same filter the Overview's fleet card renders off — no new payload
+  // key, no second source of truth. Three arms, and only the first speaks: a
+  // main WITH supports names them; a main WITHOUT gets nothing; a SUPPORT box
+  // itself gets nothing (nothing is parented to a support, so supportsOf
+  // returns []). Pure and hooked, so all three are asserted without a browser.
+  function fleetChildResidueLines(supports) {
+    var kids = supports || [];
+    if (!kids.length) return [];
+    var names = kids.map(function (s) {
+      var n = String((s && (s.name || s.slug)) || "").trim();
+      var h = String((s && s.host) || "").trim();
+      if (n && h) return n + " (" + h + ")";
+      return n || h || "an unnamed support box";
+    });
+    var one = kids.length === 1;
+    return [
+      (one ? "Support box " : "Support boxes ") + names.join(", ") +
+      (one
+        ? " is grouped under this main. It stays running and keeps billing — tearing this main down only ungroups it, it is not torn down with it. Decommission it separately if you are done with it."
+        : " are grouped under this main. They stay running and keep billing — tearing this main down only ungroups them, they are not torn down with it. Decommission them separately if you are done with them."),
+    ];
+  }
+
   // The destroy-tier typed-confirm for Decommission (charter decision 21). Reuses
   // the EXACT deprovision request path the old Remove drove; the typed name echo
   // is the proof-of-attention gate (confirmModal DESTROY tier).
@@ -9398,6 +9840,12 @@
     // from this very box. An unread or failed read keeps the blanket sentence
     // verbatim: see archiveResidueLines.
     archiveResidueLines(archiveStoreSnapshot(), bp).forEach(function (l) { lines.push(l); });
+    // cch-w57-bl: the support boxes this main's delete ORPHANS, named before
+    // the button. fleetCache is the list loadInstance already awaited before it
+    // painted this page (ensureFleet().then(...)), so this is the same data the
+    // fleet card above the button is rendering; a null cache yields [] and the
+    // sentence simply does not fire.
+    fleetChildResidueLines(supportsOf(fleetCache, bp.id)).forEach(function (l) { lines.push(l); });
     lines.push("Billing does not stop here. The subscription belongs to the team; cancel it on Billing if this was " +
       "your last instance.");
     lines.push(live
@@ -9686,7 +10134,30 @@
     var code = data.error;
     if (code && typeof code === "object") code = code.code;
 
-    if (code === "taken") return "That domain is already in use.";
+    // dr-w26-bl-console-relays-the-claim-leg: the 409 `taken` body carries
+    // `claim_leg` — WHICH population holds the hostname (admin_credential,
+    // recent_usage_sample, active_subscription, agent_reporting, active_job,
+    // within_grace) — plus a caller-safe `detail` sentence written for that
+    // leg. This arm used to answer all six with one fixed string, so refusals
+    // with OPPOSITE remedies ("somebody is paying for that name" vs "a job is
+    // mid-flight, wait a minute") rendered identically and the leg reached a
+    // human only through the raw API response. Relay both, exactly the way the
+    // already_attached arm below relays `detail`. Server-derived strings; the
+    // caller renders via textContent, never markup. The fixed sentence stays as
+    // the no-detail fallback: a name held by some OTHER surface (a Site domain,
+    // another instance's custom_host, a lost race on the unique index) merges
+    // no keys at all, and that body must still say something true.
+    // The fixed sentence stays at RETURN POSITION deliberately: __refusal_copy_census.mjs
+    // pins refusal copy by (enclosing fn, sha1 of the literal) and only sees literals
+    // inside a return expression. Hoisting it into a `var` initializer made the pinned
+    // FN|attachDomainFailureCopy row read as a REMOVE — a live sentence that had fallen
+    // out of the census population. Keep the fallback inside the returned expression.
+    if (code === "taken") {
+      var takenLeg = typeof data.claim_leg === "string" && data.claim_leg ? data.claim_leg : "";
+      var takenDetail = typeof data.detail === "string" && data.detail ? data.detail : "";
+      var takenSuffix = takenLeg ? " (" + takenLeg + ")" : "";
+      return (takenDetail || "That domain is already in use.") + takenSuffix;
+    }
     if (code === "already_attaching") return "An attach is already running.";
     // Relay the plane's own sentence — it names the host that is in the way,
     // which is the only actionable part of this refusal. Server-derived string,
@@ -10425,11 +10896,28 @@
   };
 
   // THE THREE RUNGS THAT NEVER TOUCHED THE BOX. no_admin_token, decrypt_failed and
-  // not_live all return BEFORE persist_update_unknown's single HTTP request site is
-  // even built — yet the control plane stamps update_checked_at on all nine alike.
-  // "Tried 45m ago" on these three would be a SECOND manufactured claim planted
-  // inside the change whose whole purpose is deleting the first: they render their
-  // sentence with no clock at all.
+  // not_live all return BEFORE refresh_update_status's single HTTP request site is
+  // even built, so there is no attempt whose time could be narrated.
+  //
+  // cch-w65-bl — THIS MAP SURVIVES s2, AND ITS WARRANT CHANGED. It shipped as a
+  // client-side apology for a column that stamped update_checked_at on all nine
+  // rungs alike; cch-w65-s2 stopped that, so the apology reading is now stale.
+  // What s2 did NOT do is CLEAR the column: `update_unknown_attrs/1` OMITS
+  // update_checked_at on these three (charter D789) precisely so a box that
+  // answered honestly an hour ago keeps its TRUE last-checked time. That true
+  // stamp is exactly what makes this map load-bearing on the reader side — a row
+  // that was really checked at 12:00 and falls to decrypt_failed at 12:45 carries
+  // a non-NULL clock with a reason that never built a request, and the clocked arm
+  // below would render "Tried 45m ago — <sentence that asked nothing>", welding a
+  // real prior attempt onto a reason produced by no attempt at all. That is the
+  // manufactured claim s2 deleted, relocated from the column into the sentence.
+  //
+  // So: deleting this map is NOT a no-op follow-up to s2. It is a copy change that
+  // re-introduces the lie on every row with a check history. The three rungs
+  // render their sentence with NO clock — not the bare/prefixed choice of the arms
+  // below, neither "Tried <rel> — " nor "Not yet tried — ", because both narrate an
+  // attempt. The key set is locked against registry.ex's `@unclocked_reasons` by a
+  // freshness test in __app.test.mjs; move one side and the gate reds.
   var UPDATE_REFUSAL_UNCLOCKED = { no_admin_token: 1, decrypt_failed: 1, not_live: 1 };
 
   // The reason ONLY when it is both recognised and actually load-bearing: a box
@@ -11171,7 +11659,31 @@
     if (st === "current") return { role: "ok", label: "Current", note: "" };
     if (st === "behind") return { role: "warn", label: "Behind", note: "Eligible for the next advance." };
     if (st === "disabled") return { role: "neutral", label: "Autoupdate off", note: "This instance opted out; the rollout skips it." };
-    if (st === "unknown") return { role: "neutral", label: "Unknown", note: "No update state reported yet." };
+    // cch-w63-bl — THE OPERATOR HALF OF THE unknown ARM. This line used to read
+    // "No update state reported yet." unconditionally: a POSITIVE claim about an
+    // absence, asserted over a box whose probe the plane HAD measured and stored
+    // (`persist_update_unknown/2` in registry.ex writes one of nine named causes
+    // into `update_unavailable_reason`). A box that answered our credential with a
+    // 401 rendered as a box nobody had ever asked. Nothing pinned the string.
+    //
+    // The reason is ECHOED, NOT MINTED: `updateRefusalReason` is the same console
+    // whitelist the member surface uses (cch-w63-s5) and UPDATE_REFUSAL_TEXT the
+    // same sentences, so the two readers of one column now agree. "Could not check"
+    // is updateBadge's own label for this case, not a new phrase.
+    //
+    // When no reason is present the note claims NO mechanism: "Update state not
+    // reported." says what the console can see and stops — it does not assert the
+    // plane never asked, which is exactly the claim that was false before.
+    if (st === "unknown") {
+      var refusal = updateRefusalReason(bp);
+      return {
+        role: "neutral",
+        label: "Unknown",
+        note: refusal
+          ? "Could not check — " + UPDATE_REFUSAL_TEXT[refusal]
+          : "Update state not reported.",
+      };
+    }
     return { role: "neutral", label: cap(st), note: "" };
   }
 
@@ -15339,10 +15851,40 @@
   // and human→human land on one output. Matched case-insensitively with the
   // apostrophe normalized (U+2019 → ') so a byte-level drift in the server copy
   // degrades only the re-mapping (their words show), never the classification.
+  // THE NO-LINKED-REPO REFINEMENT — the browser twin of the arm
+  // `FailureCopy.classify_atomic/1` checks ABOVE its own broad
+  // `"github push builds"` arm. The born-failed github-push family carries two
+  // conditions with OPPOSITE remedies: (a) LEGACY rows born failed before
+  // `github_build_available?/1` became a repo-present predicate — nothing
+  // retro-builds them, so "push again" is their cure; (b) a push TODAY on a
+  // site with NO linked repo — pushing again changes nothing, the cure is to
+  // LINK A REPO. Broad-token-only, the client could have the right words XOR
+  // the calm tone: the raw (b) reason carries `"github push builds"`, so
+  // failureCopy rewrote the server's correct sentence back to the LEGACY one,
+  // while the server-humanized (b) sentence carries NEITHER broad token, so
+  // failureTone fell through to `crashed` red.
+  //
+  // Two tokens, one per direction, so the pass is IDEMPOTENT the way the broad
+  // predicate is: `"require a linked github repo"` is present in the RAW reason
+  // the router mints (`@github_push_build_reason`) and `"no github repo linked"`
+  // in the HUMANIZED sentence the server sends — raw→human and human→human land
+  // on ONE output. Same normalization as below (lowercased, U+2019 → ') so a
+  // byte-level drift in the server copy degrades only the re-mapping, never the
+  // classification.
+  function isGithubPushNoRepo(reason) {
+    if (!reason || typeof reason !== "string") return false;
+    var lc = reason.toLowerCase().replace(/\u2019/g, "'");
+    return lc.indexOf("require a linked github repo") !== -1 ||
+      lc.indexOf("no github repo linked") !== -1;
+  }
+
   function isGithubPushBlocked(reason) {
     if (!reason || typeof reason !== "string") return false;
     var lc = reason.toLowerCase().replace(/\u2019/g, "'");
-    return lc.indexOf("github push builds") !== -1 ||
+    // The (b) family is blocked too — and its HUMANIZED sentence carries none
+    // of the three broad tokens, which is exactly how it used to tone crashed.
+    return isGithubPushNoRepo(reason) ||
+      lc.indexOf("github push builds") !== -1 ||
       lc.indexOf("can't be built yet") !== -1 ||
       lc.indexOf("cannot be built yet") !== -1;
   }
@@ -15384,6 +15926,11 @@
     // words, what it refused and why. Canned copy can only replace a true
     // statement with a false one.
     if (typedRefusal(reason)) return reason;
+    // CHECKED BEFORE THE BROAD ARM, or its token swallows this one: the raw
+    // no-linked-repo reason carries "github push builds" as well. Same ordering
+    // as the Elixir twin, and the sentence is the same sentence.
+    if (isGithubPushNoRepo(reason))
+      return "This site has no GitHub repo linked, so a push has nothing to build from — link a repo to this site, or deploy this commit with bp deploy.";
     if (isGithubPushBlocked(reason))
       return "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
     if (reason.indexOf("no build source") !== -1)
@@ -18934,6 +19481,17 @@
     // this one line routes all three not-an-answer states to the same fail-
     // closed unknown surface, and only a DETERMINATE refuse reaches the member
     // surface below.
+    // cch-w49-bl — THE CALL THIS SCREEN NEVER MADE. Before this line the only
+    // GET /v1/usage/summary in the console was loadOverview's, landing in
+    // module-scoped overviewData.usage, which is null on a #billing deep-link.
+    // It is fired AFTER the subscription guard (a screen that cannot say which
+    // plan you are on has no active tier to put a ceiling on) and it does NOT
+    // gate the paint: the plan card is the answer people came for, the ceiling
+    // is one line under it, and holding the card behind a second read would
+    // trade a real absence for a spinner. The repaint is once — the loaded flag
+    // makes the recursion terminal.
+    if (!billingQuotaLoaded) { loadBillingCeiling().then(function () { renderBilling(); }); }
+
     var band = billingOwnerAuthority();
     if (band !== "grant" && band !== "refuse") { renderBillingMeUnknown(box, band); return; }
 
@@ -19044,6 +19602,7 @@
         planFeatsHtml(planDisplay(plan)) +
         (sub ? '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) + "</p>" : "") +
         (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
+        planCeilingHtml(billingQuota) +
       "</div>";
   }
 
@@ -19331,6 +19890,7 @@
         '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) +
           (sub.started_at ? " &middot; since " + esc(fmtWhen(sub.started_at)) : "") + "</p>" +
         (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
+        planCeilingHtml(billingQuota) +
         // GR33: this card is STATE only — the Manage-billing (portal) action and
         // the invoice-less portal copy live in their own .set-section below, so
         // an ACTION section carries the action (never a save-row, never a button
@@ -19594,6 +20154,17 @@
       // carried by the button itself. Measured in a browser before and after —
       // dropping the <p> alone moved this card's button 36px up.
       (t.note ? '<p class="tier-note">' + esc(t.note) + "</p>" : "") +
+      // cch-w49-bl — AND NO CEILING HERE, on ANY of the three cards. The server
+      // exposes no per-plan limits map on any route (Billing.limits/0 is
+      // reachable only through barkpark_limit/1, i.e. for the team's OWN plan),
+      // so two of the three tiers have no signal at all. The third — the team's
+      // current tier — DOES, but its ceiling is already stated one card up, on
+      // the plan-state card that names the active plan, and that card is the
+      // one every #billing actor paints. Rendering it a second time HERE would
+      // add an arm the corpus never opens: this grid stays hidden for every
+      // paid actor until somebody clicks "See all plans", which the absent-arm
+      // guard deliberately does not do — an unreachable branch under a guard
+      // that cannot reach it is a green with no subject, not coverage.
       disclosure +
       btn +
     "</div>";
@@ -19786,6 +20357,61 @@
   // band that cries wolf on every cold boot is a band nobody can act on.
   function meTeamPinMoved() {
     return localStorage.getItem("bp.active-team") !== meTeamPin;
+  }
+
+  // cch-w42-bl — THE CROSS-TAB PIN, AND WHY THE ANSWER IS ONE LISTENER RATHER
+  // THAN N GUARDED BANDS.
+  //
+  // The reproduction (cloud/priv/static/__preview__/pin-race.mjs, two real
+  // Chrome tabs on one localStorage) showed a tab that never switched teams
+  // painting the OTHER team's audit rows under its own team's heading. The
+  // mechanism is not a missing guard on one band; it is that the pin is
+  // GLOBAL to the tab and nothing told the tab it moved:
+  //
+  // Re-derive the counts below. The needle is written ESCAPED on purpose: the
+  // per-GET-call-site census in __app.test.mjs parses this file for the literal
+  // call form, so a comment quoting it verbatim is counted as two more call
+  // sites whose "path" is this prose (measured — it reds that census by name).
+  //
+  //   grep -cE 'api\("GET"' cloud/priv/static/app.js             # 66 GET sites
+  //   grep -nE 'api\("GET"' cloud/priv/static/app.js | grep -c noAuth   # 5
+  //
+  // api() hangs `x-barkpark-team` on EVERY request that is not `noAuth`, so 61
+  // of those 66 GETs — and 135 of the 147 api() call sites overall — change
+  // their answer the instant another tab writes the key. The bands they paint,
+  // derived from those call sites rather than from any filing, are: activity /
+  // audit, fleet (barkparks + their credentials, events, usage, usage history,
+  // metrics, domain status, bootstrap, agent-key), sites (list, detail,
+  // deployments, previews, domain status), archives, webhooks and their
+  // deliveries, tokens, notification settings and deliveries, members and
+  // invitations, subscription, usage summary, onboarding, providers and
+  // provider catalogs/overviews/capabilities, the GitHub installation and repo
+  // list, and /v1/me itself. Teaching each of those to ask meTeamPinMoved()
+  // would be sixty-one edits that leave the SIXTY-SECOND band — the one a
+  // later wave adds — open by default, and would leave every WRITE (POST,
+  // PATCH, DELETE) unguarded besides. A rendered lie is the loud half of the
+  // defect; a write landing on a team the person is not looking at is the
+  // quiet half, and only the reload closes both.
+  //
+  // WHAT IT COSTS, STATED RATHER THAN LEFT TO BE DISCOVERED: a tab reloads
+  // under the person without being asked, and anything unsubmitted in that tab
+  // (a half-filled invite, a modal's form state, a scroll position) is lost.
+  // That is the price of the honest alternative — showing team X's name over
+  // team Y's data is not a smaller harm, it is a tenancy lie — and it is paid
+  // only in the tab that is ALREADY stale, only at the moment another tab
+  // moved the pin, which is a deliberate act the person just performed.
+  //
+  // The DECISION is pure and node-pinned (`pinStorageMovesTeam`) so a unit test
+  // can hold it without a DOM; the listener in init() is the two-line mount.
+  // The event's own oldValue/newValue are read rather than localStorage,
+  // because the reload must be driven by WHAT CHANGED, not by a re-read that
+  // races a third tab. A same-value write is not a move: the storage event does
+  // not fire for one per spec, and if a browser fired it anyway a reload would
+  // be pure cost. `key === null` (a whole-store clear) is likewise not a move
+  // of THIS key.
+  function pinStorageMovesTeam(key, oldValue, newValue) {
+    if (key !== "bp.active-team") return false;
+    return oldValue !== newValue;
   }
 
   // The team authority the SERVER states, as a five-valued band — never a
@@ -20155,6 +20781,65 @@
   // Subscribe button, which is safe because the SERVER is the gate — POST
   // checkout refuses :test_mode itself (422 billing_test_mode).
   var capCache = null;
+
+  // ── cch-w49-bl · THE DERIVED INSTANCE CEILING ────────────────────────────
+  // cch-w49-s1 OMITTED the hand-typed 1/3/10 from every money surface, because
+  // nothing on that screen ever ASKED for a ceiling and no server value backed
+  // the numerals. This is the additive half: the screen asks.
+  //
+  // GET /v1/usage/summary carries `usage.team.instances.quota`, which
+  // Usage.instance_quota/1 derives from Billing.barkpark_limit/1 — the SAME
+  // function the create-time 402 enforces. The Overview's slots meter has read
+  // it honestly since OC16 (overviewSlotsModel, "NEVER hardcoded"); billing
+  // simply never issued the call, so it had nothing to state but a constant.
+  //
+  // THE NIL ARM IS THE POINT, and it is not an error state. The server answers
+  // nil for a team with NO ACTIVE subscription — and, measurably, for a
+  // past_due one too: instance_quota/1 reaches through
+  // Billing.active_subscription/1 (`status == "active"` only) while
+  // /v1/subscription reads live_subscription/1 (active OR past_due), so a
+  // dunning team is told its paid plan name with no derivable ceiling behind
+  // it. Both halves are run-proven together in
+  // cloud/test/barkpark_cloud/web/usage_summary_route_test.exs. Nil OMITS the
+  // line; it never falls back to a catalog numeral, because falling back is
+  // exactly the defect wave 49 removed.
+  var billingQuota = null;        // the ceiling the server derived, or null
+  var billingQuotaLoaded = false; // we have the server's real answer at least once
+
+  // Pure over the envelope so a node test drives every arm without a fetch.
+  // Anything that is not a finite positive integer is NOT a ceiling: the
+  // sampler writes "unmetered" strings into meter values, and Usage clamps the
+  // forever-tier placeholder to nil rather than drawing a bar to a million.
+  function usageInstanceCeiling(usage) {
+    var meter = usage && usage.team && usage.team.instances;
+    var q = meter ? meter.quota : null;
+    return typeof q === "number" && isFinite(q) && q > 0 && q === Math.floor(q) ? q : null;
+  }
+
+  // The rendered ceiling line. "" for nil — OMIT, never invent. Shared by all
+  // three surfaces that name the active plan (the owner plan card, its GR36
+  // member twin, and the current tier card) so a fix scoped to the owner card
+  // can never leave the member reading a different fact — the cch-w55-s3
+  // asymmetry, refused up front.
+  function planCeilingHtml(quota) {
+    if (quota === null || quota === undefined) return "";
+    return '<p class="plan-meta dim">' +
+      esc(quota + (quota === 1 ? " managed instance" : " managed instances")) +
+      " on this plan</p>";
+  }
+
+  // A cold read, once per session. A FAILED read leaves the cache alone and
+  // leaves `billingQuotaLoaded` false — an unanswered ceiling must never render
+  // as an absent one and must never render as a number either, and both of
+  // those are the same OMIT, so there is no error surface here to build.
+  function loadBillingCeiling() {
+    return api("GET", "/v1/usage/summary").then(function (r) {
+      if (!r.ok) return billingQuota;
+      billingQuotaLoaded = true;
+      billingQuota = usageInstanceCeiling(r.data && r.data.usage);
+      return billingQuota;
+    });
+  }
 
   // The declared checkout capability, or "" when the server has not told us.
   // Pure over the cache so the tier renderer takes it as an argument and a node
@@ -22855,7 +23540,24 @@
       // The evidenced arm still names exactly what the server asked for; the
       // bare arm delegates to friendly(), which already owns the honest generic
       // for an unevidenced refusal (D447: no role claimed, no remedy invented).
-      var role = data && typeof data.required === "string" && data.required ? data.required : null;
+      // cch-w48-bl — SCOPE DECIDES, NOT `required` ALONE. This was the SECOND
+      // emitter of the same lie, and its sentence was the louder one: fed
+      // `{error:"forbidden", scope:"token", required:"deploy"}` — the exact body
+      // POST /v1/launch's PAT branch sends (router.ex go_live/1 ->
+      // Auth.require_ability(conn, "deploy")) — launchRoleClause interpolated
+      // `deploy` into BOTH of its role slots, telling the person to ask a team
+      // "deploy" to grant them the "deploy" role. `deploy` is a PAT ABILITY:
+      // there is no such team member to ask and no admin who can grant it. The
+      // clause itself is NOT quoted here — cch-w47-s1 counts its literal in this
+      // file and requires exactly one, in launchRoleClause.
+      //
+      // The token arm DELEGATES to friendly(), exactly like the bare arm (D537),
+      // rather than growing a second copy of the ability vocabulary here: the
+      // sentence has ONE owner, forbiddenEvidenceCopy's token branch. The
+      // team/primary_team and platform arms are untouched — they still name the
+      // role through launchRoleClause, and their pins assert that verbatim.
+      var scoped = data && data.scope === "token";
+      var role = !scoped && data && typeof data.required === "string" && data.required ? data.required : null;
       return {
         title: LAUNCH_REFUSAL_TITLE,
         body: role ? launchRoleClause(role) : friendly(data, "We couldn't launch for this team."),
@@ -23632,20 +24334,54 @@
         : "");
   }
 
+  // cch-w48: the claim is IRREVERSIBLE and happens entirely inside Vercel's UI,
+  // so the card may never infer "still unclaimed" from its own state. The
+  // payload's `claimed` fact is the control plane's READ of the platform
+  // (Vercel.Client.claimed?/1) and is three-valued: true / false / null-or-
+  // absent = we could not tell. These two arms render the two non-`false`
+  // answers, neither of which offers a transfer.
+
+  // Already transferred: the deployment is theirs. Nothing left to claim — and
+  // a claim code we happen to still hold is meaningless, so it is NOT rendered.
+  function vercelClaimedHtml(vercel) {
+    return '<p class="new-fineprint dim" id="new-vercel-claimed">This deployment is already in your Vercel account' +
+      (vercel.deployment_url
+        ? ' — <a class="mono" href="' + esc(vercel.deployment_url) + '" target="_blank" rel="noopener">' + esc(vercel.deployment_url) + "</a>"
+        : "") +
+      ". Claiming moved it once and for good, so there is nothing left to claim here.</p>";
+  }
+
+  // We could not read the platform. Say exactly that: re-offering a claim link
+  // for a deployment they may ALREADY own is the failure this arm exists to
+  // prevent, so no button is rendered at all.
+  function vercelClaimUnknownHtml(vercel) {
+    return '<p class="new-fineprint dim" id="new-vercel-claim-unknown">We couldn\u2019t check with Vercel whether this deployment has already been claimed' +
+      (vercel.deployment_url
+        ? ' (<a class="mono" href="' + esc(vercel.deployment_url) + '" target="_blank" rel="noopener">' + esc(vercel.deployment_url) + "</a>)"
+        : "") +
+      ". Claiming is one-way, so we won\u2019t offer a new claim link until we can tell \u2014 reload once Vercel answers again.</p>";
+  }
+
   // The whole one-click area: "" when the feature is off (caller falls back to
-  // the clone-URL flow); a claim link when a fresh code exists; else the deploy
-  // button (which also RE-MINTS a stale code — same POST).
+  // the clone-URL flow). Then, in order: an already-claimed deployment (no CTA
+  // — the copy is true both before and after the transfer because the fact is
+  // read, not assumed); a claim link when a fresh code exists AND the platform
+  // says the project is still ours; an honest "cannot tell" when the read
+  // failed on a deployed project; else the deploy button (which also RE-MINTS
+  // a stale code — same POST).
+  function vercelClaimInnerHtml(vercel, bp) {
+    if (vercel.claimed === true) return vercelClaimedHtml(vercel);
+    // deployed + unknown: never a claim link, never a re-mint button.
+    if (vercel.deployed && vercel.claimed !== false) return vercelClaimUnknownHtml(vercel);
+    if (vercel.claim_url) return vercelClaimLinkHtml(vercel, bp);
+    var label = vercel.deployed ? "Get your Vercel claim link" : "Deploy your site to Vercel";
+    return '<button class="btn btn-block btn-vercel" id="new-vercel-claim" type="button">' + esc(label) + "</button>" +
+      '<p class="new-fineprint dim">One click — we deploy it with every environment variable already set; you just claim it into your Vercel account.</p>';
+  }
+
   function vercelClaimHtml(vercel, bp) {
     if (!vercel || !vercel.configured) return "";
-    var inner;
-    if (vercel.claim_url) {
-      inner = vercelClaimLinkHtml(vercel, bp);
-    } else {
-      var label = vercel.deployed ? "Get your Vercel claim link" : "Deploy your site to Vercel";
-      inner = '<button class="btn btn-block btn-vercel" id="new-vercel-claim" type="button">' + esc(label) + "</button>" +
-        '<p class="new-fineprint dim">One click — we deploy it with every environment variable already set; you just claim it into your Vercel account.</p>';
-    }
-    return '<div id="new-vercel-area">' + inner + "</div>";
+    return '<div id="new-vercel-area">' + vercelClaimInnerHtml(vercel, bp) + "</div>";
   }
 
   // cch-w67-s4: the two optional fault arguments are the FAILED reads kept
@@ -23738,7 +24474,10 @@
     api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/vercel-deploy", {}).then(function (r) {
       if (r.ok && r.data && r.data.vercel && r.data.vercel.claim_url) {
         var area = $("#new-vercel-area");
-        if (area) area.innerHTML = vercelClaimLinkHtml(r.data.vercel, bp);
+        // Through the SAME ladder as the first render (cch-w48): if the read
+        // says the project already left our team, the swap says so instead of
+        // painting a claim link over a transfer that already happened.
+        if (area) area.innerHTML = vercelClaimInnerHtml(r.data.vercel, bp);
         toast({ kind: "success", title: "Deployed to Vercel", body: "Claim it to move it into your account." });
         return;
       }
@@ -25203,13 +25942,25 @@
   // — an OWNER ESCAPE HATCH that the role-change law does NOT have, so an owner
   // MAY remove a peer owner even though they may not re-role them. The tier gate
   // is the route's `with_team_role(conn, "admin")`, modelled by assignableRoles.
-  // The server has no self? branch on this verb; the self row is withheld here
-  // by console ruling (D492 variant B) because the merge-blocking members smoke
-  // pins removes.length === 2 over a 3-row roster whose row 0 IS the actor. That
-  // withheld owner-self Remove is an UNDER-offer, pre-existing on main, filed
-  // separately — it is not this slice's class.
+  // THE SERVER HAS NO self? BRANCH ON THIS VERB, so neither does this predicate
+  // (cch-w44-bl). `isSelf` is kept in the signature for symmetry with
+  // canChangeMemberRole's self? bypass and is DELIBERATELY unread: the general
+  // law already answers the self row correctly, because on your own row the
+  // target role IS ctx.role —
+  //   owner-self  -> the `actor_role == "owner"` hatch fires  -> {:ok, :removed}
+  //   admin-self  -> outranks?("admin","admin") is strict `>` -> {:error, :forbidden}
+  //   member-self -> assignableRoles("member") is empty       -> {:error, :forbidden}
+  // A blanket `if (isSelf) return false` used to sit here (D492 variant B), which
+  // withheld the one server-legal cell of the three: an owner who is NOT the last
+  // owner could not leave their own team from the roster. That is an UNDER-offer,
+  // the mirror image of this epic's usual lie, and it is gone.
+  //
+  // The remaining refusal on the self row is a STATE one, not an authority one:
+  // do_remove rolls back :last_owner (409) for the SOLE owner. That is
+  // isSoleOwnerSelf's question, answered at the call site in memberRowHtml —
+  // exactly as it already is for Change role — never here.
   function canRemoveMember(actorRole, targetRole, isSelf) {
-    if (isSelf) return false;
+    void isSelf;
     if (!assignableRoles(actorRole).length) return false;
     return actorRole === "owner" || memberRoleRank(actorRole) > memberRoleRank(targetRole);
   }
@@ -25279,7 +26030,10 @@
       actions += '<button class="btn btn-ghost btn-sm" data-member-role="' + esc(m.user_id) +
         '" data-role="' + esc(targetRole) + '" data-email="' + esc(m.email) + '" type="button">Change role</button>';
     }
-    if (canRemoveMember(ctx.role, targetRole, isSelf)) {
+    // `lastOwnerSelf` gates BOTH verbs: do_update_role and do_remove roll back
+    // the same :last_owner (409) for the sole owner, so offering either on that
+    // row is a control the server refuses.
+    if (!lastOwnerSelf && canRemoveMember(ctx.role, targetRole, isSelf)) {
       actions += '<button class="btn btn-ghost btn-sm" data-member-remove="' + esc(m.user_id) +
         '" data-email="' + esc(m.email) + '" type="button">Remove</button>';
     }
@@ -25332,7 +26086,12 @@
         members.map(function (m) { return memberRowHtml(m, rowCtx); }).join("") +
       "</div>" +
       (soleOwnerSelf
-        ? '<p class="set-empty">You\'re the only owner, so you can\'t change your own role — ' +
+        // cch-w44-bl: the sole owner's own row now withholds TWO controls, not
+        // one — do_update_role and do_remove roll back the SAME :last_owner —
+        // so the sentence names both. A withheld control with no sentence is a
+        // silently missing control.
+        ? '<p class="set-empty">You\'re the only owner, so you can\'t change your own role ' +
+            "or leave the team &mdash; " +
             "promote another member to owner first.</p>"
         : "") +
       "</section>";
@@ -26104,6 +26863,10 @@
       // session that fetched it — a cold paint reads "" (unknown) and the
       // server stays the gate until the next GET answers.
       capCache = null;
+      // cch-w49-bl: the derived ceiling is per-TEAM. Cleared on the same seam,
+      // so the next account can never read the previous team's ceiling.
+      billingQuota = null;
+      billingQuotaLoaded = false;
       // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
       // standing, a scoped tick racing the next sign-in could repaint the new
       // account's Overview from the previous one's fleet/usage/fold. Cleared
@@ -26669,6 +27432,18 @@
       // thing we tear back down.
       if (eff.close) closeModal();
       if (eff.route) applyRoute();
+    });
+
+    // cch-w42-bl — THE CROSS-TAB PIN. Another tab moved `bp.active-team`; every
+    // request this tab makes from here on carries the NEW team while every
+    // pixel on screen describes the OLD one. The decision is the pure
+    // pinStorageMovesTeam() above (which spells out the derivation and the
+    // cost); this is its only mount. `storage` never fires in the tab that did
+    // the write, so the switcher's own location.reload() is not doubled.
+    window.addEventListener("storage", function (e) {
+      if (!e) return;
+      if (!pinStorageMovesTeam(e.key, e.oldValue, e.newValue)) return;
+      location.reload();
     });
 
     // Cmd/Ctrl+K — the global command palette. preventDefault is UNCONDITIONAL for
@@ -27564,6 +28339,14 @@
       siteCreateBody: siteCreateBody,
       // cch-w37-s1 — the create-site error line (was a RAW `r.data.error` render).
       siteCreateFailureCopy: siteCreateFailureCopy,
+      // stw2-c1/c2 — THE MODAL ITSELF, not just its pure helpers. The three
+      // helpers above are the payload's SHAPE; every property the row's c1 asks
+      // about (focus, the rendered refusal, the in-flight guard, where the
+      // refreshed list's bytes come from) lives in the DOM wiring around them
+      // and is unreachable from a pure call. `wireModal` rides along because
+      // Escape-to-dismiss is registered there, on the document — a create-site
+      // modal cannot be proven dismissible without it.
+      openCreateSiteModal: openCreateSiteModal, wireModal: wireModal,
       // search-template W8: site theme-edit pure helpers.
       siteThemeOptionsHtml: siteThemeOptionsHtml, siteThemePatchBody: siteThemePatchBody,
       // cch-w48-s2: the theme PATCH's refusal copy — pinned so the raw
@@ -27659,6 +28442,8 @@
       overallSummaryText: overallSummaryText, patchProvisionOverall: patchProvisionOverall,
       // Zero-paste Vercel handoff (task-4e4a53b101a97051): the claim-area builders.
       vercelClaimHtml: vercelClaimHtml, vercelClaimLinkHtml: vercelClaimLinkHtml,
+      vercelClaimedHtml: vercelClaimedHtml, vercelClaimUnknownHtml: vercelClaimUnknownHtml,
+      vercelClaimInnerHtml: vercelClaimInnerHtml,
       vercelCloneUrl: vercelCloneUrl,
       // Guided fallback (no platform token): per-field copy + Deploy.
       vercelFallbackHtml: vercelFallbackHtml, vercelEnvRows: vercelEnvRows,
@@ -27715,8 +28500,11 @@
       // The DOM mount (wireLifecycleActions/runDecommission) is browser-verified.
       lifecyclePillState: lifecyclePillState, lifecyclePill: lifecyclePill,
       // cch-w54-s1 — the DECLARED label map, exported so the manifest dump can
-      // report the two labels no input can reach (archived / adopted). The
-      // painted set itself is always read by RUNNING the fold, never from here.
+      // compare the declared domain against the painted range. cch-w54-bl
+      // deleted the two labels no input could reach (archived / adopted), so
+      // the two sets are equal today; the export stays because the painted set
+      // must keep being read by RUNNING the fold, never from here, and because
+      // both guards (node set-equality, Elixir manifest) need the domain.
       LIFECYCLE_PILL_LABEL: LIFECYCLE_PILL_LABEL,
       fleetInfraLine: fleetInfraLine, showLifecycleRow: showLifecycleRow,
       lifecycleActionsModel: lifecycleActionsModel, lifecycleActionRowHtml: lifecycleActionRowHtml,
@@ -27803,7 +28591,8 @@
       rollbackInstance: rollbackInstance, updateInstance: updateInstance,
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
-      classifyBp: classifyBp, statusOf: statusOf, suspendedReasonText: suspendedReasonText,
+      classifyBp: classifyBp, statusOf: statusOf, statusPill: statusPill,
+      suspendedReasonText: suspendedReasonText,
       // cch-w34-s6: the never-reported renderers + the closed state enum the
       // harness asserts statusOf is total over.
       lastSeenText: lastSeenText, missedChecksText: missedChecksText,
@@ -27820,6 +28609,17 @@
       deploysFailingReason: deploysFailingReason,
       divergedByCommits: divergedByCommits, divergedDetail: divergedDetail,
       DEPLOYS_FAILING_PCT: DEPLOYS_FAILING_PCT,
+      // dr-w5-followup: the VITALS seams, exported so the harness can probe the
+      // fences directly — through loadPerCore's window/fence choice, not only
+      // through classifyBp's one-word answer.
+      loadPerCore: loadPerCore, strainedBox: strainedBox, fillingBox: fillingBox,
+      strainedReason: strainedReason, fillingReason: fillingReason,
+      // The DETAIL MARKER, exported beside the rungs it is deliberately not one
+      // of, so the harness can probe the unreadable/quiet split directly.
+      unmeteredMarker: unmeteredMarker,
+      STRAINED_LOAD15_PER_CORE: STRAINED_LOAD15_PER_CORE,
+      STRAINED_LOAD1_PER_CORE: STRAINED_LOAD1_PER_CORE,
+      FILLING_DISK_PCT: FILLING_DISK_PCT,
       attentionRank: attentionRank, attentionCompare: attentionCompare,
       bucketOf: bucketOf, bucketOfRank: bucketOfRank, ATTENTION_RANK: ATTENTION_RANK,
       fleetSummary: fleetSummary, filterFleet: filterFleet,
@@ -28099,6 +28899,7 @@
       archiveStoreSnapshot: archiveStoreSnapshot,
       archiveVisibilityNote: archiveVisibilityNote,
       archiveResidueLines: archiveResidueLines,
+      fleetChildResidueLines: fleetChildResidueLines,
       // cch-w36-bl / cch-w77-bl (console-3-w26) — the copy seam this slice
       // fixed, exported so each arm is pinned DIRECTLY rather than through a
       // screen that happens to call it. metricsFailureCopy had no export at all,
@@ -28131,6 +28932,8 @@
       // them. (repaintLaunchAuthority wraps this one and three more surfaces;
       // the offer claim is about these two buttons alone.)
       meTeamPinMoved: meTeamPinMoved,
+      // cch-w42-bl — the cross-tab reload decision, pinned without a DOM.
+      pinStorageMovesTeam: pinStorageMovesTeam,
       refreshLaunchOffers: refreshLaunchOffers,
       // cch-w43-bl — the invite landing's membership set, node-pinned on its
       // own rather than only through the state machine that consumes it.
@@ -28217,6 +29020,14 @@
       // Sessions fold: the pure list render (current-device-always-visible
       // collapse past SESSIONS_COLLAPSED_MAX, honest hidden count).
       sessionListHtml: sessionListHtml,
+      // cloud-console-user-security-log: the user-scoped security trail's pure
+      // renders. Exported for the same reason the session pair is — the fold,
+      // the empty-state sentence and the unknown-verb fallthrough are all
+      // provable without a browser.
+      securityEventRowHtml: securityEventRowHtml,
+      securityLogHtml: securityLogHtml,
+      securityEventLabel: securityEventLabel,
+      securityEventDetail: securityEventDetail,
       // GR55: the QR encoder + its canonical text form. qrText IS the byte-match
       // oracle against __qr_fixture.json — never a self-written decoder.
       qrMatrix: qrMatrix, qrText: qrText, qrSvg: qrSvg,
@@ -28386,6 +29197,15 @@
       canManageOnboarding: canManageOnboarding,
       billingHasPaidPlan: billingHasPaidPlan,
       billingIsComp: billingIsComp,
+      // cch-w49-bl — the two pure halves of the derived ceiling. The WIRING is
+      // proven by the corpus (billing-portal-return carries the only
+      // usageSummary fixture on the #billing slice and renders 3; the other ten
+      // actors carry none and render nothing), so what these pins add is the
+      // arms the corpus has no fixture for: the "unmetered" string the sampler
+      // writes, the forever-tier placeholder Usage clamps to nil, and the
+      // singular/plural split.
+      usageInstanceCeiling: usageInstanceCeiling,
+      planCeilingHtml: planCeilingHtml,
       planNames: PLAN_NAMES.slice(),
       planDisplay: planDisplay,
       planName: planName,

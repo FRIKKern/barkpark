@@ -3,6 +3,219 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualFormTest do
 
   alias BarkparkWeb.Studio.StudioLive.Blocks
 
+  test "media source-only replacement preserves exact existing carrier metadata" do
+    for type <- [:absent, nil, "image"], src <- [:absent, nil, "", "/before.png"] do
+      media = %{
+        "id" => "media-owner",
+        "alt" => nil,
+        "width" => 640,
+        "height" => 320,
+        "future" => %{"keep" => [true, nil, 3]}
+      }
+
+      media = if type == :absent, do: media, else: Map.put(media, "type", type)
+      media = if src == :absent, do: media, else: Map.put(media, "src", src)
+
+      block =
+        card(%{
+          "qa" => "unchanged",
+          "slots" => %{
+            "media" => [media],
+            "future" => %{"opaque" => true},
+            "action" => [%{"type" => "action", "label" => "Read", "href" => "/keep"}]
+          }
+        })
+
+      assert {:ok, op} =
+               Blocks.resolve_block_form([block], %{
+                 "block_id" => block["id"],
+                 "card-media-src" => "/after.png"
+               })
+
+      assert Map.merge(block, op["patch"]) ==
+               put_in(block, ["slots", "media"], [Map.put(media, "src", "/after.png")])
+
+      assert {:ok, %{}} =
+               Blocks.validate_block_patch(block, %{
+                 "card-media-src" => if(src in [:absent, nil], do: "", else: src)
+               })
+    end
+  end
+
+  test "label-only source changes exactly one field in an existing action" do
+    for priority <- [nil, "secondary", "primary", "quiet"],
+        label <- [nil, "", "  Read  "] do
+      action = %{
+        "id" => "action-owner",
+        "type" => "action",
+        "label" => label,
+        "href" => nil,
+        "priority" => priority,
+        "future" => %{"keep" => [1, true]}
+      }
+
+      block =
+        card(%{
+          "unknown" => true,
+          "slots" => %{
+            "action" => [action],
+            "future" => %{"opaque" => true},
+            "body" => [%{"type" => "paragraph", "content" => inline("Body")}]
+          }
+        })
+
+      assert {:ok, op} =
+               Blocks.resolve_block_form([block], %{
+                 "block_id" => block["id"],
+                 "card-action-label" => "  New <literal>  "
+               })
+
+      changed = Map.merge(block, op["patch"])
+
+      assert changed ==
+               put_in(block, ["slots", "action"], [Map.put(action, "label", "  New <literal>  ")])
+
+      assert {:ok, %{}} =
+               Blocks.validate_block_patch(block, %{"card-action-label" => label || ""})
+    end
+
+    missing_label = card(%{"slots" => %{"action" => [%{"type" => "action", "href" => "/go"}]}})
+    assert {:ok, %{}} = Blocks.validate_block_patch(missing_label, %{"card-action-label" => ""})
+
+    for action <- [
+          [%{"type" => "action", "label" => 12}],
+          [%{"type" => "action"}, %{"type" => "action"}],
+          [%{"type" => "button", "label" => "Other carrier"}]
+        ] do
+      assert {:error, _} =
+               Blocks.resolve_block_form([card(%{"slots" => %{"action" => action}})], %{
+                 "block_id" => "card",
+                 "card-action-label" => "Refused"
+               })
+    end
+  end
+
+  test "title-only source changes exactly one field in an existing plain heading" do
+    for content <- [:absent, nil, []], level <- [:absent, nil, 1, 2, 3, "1", "2", "3"] do
+      title =
+        %{
+          "type" => "heading",
+          "text" => "Before",
+          "id" => "title-owner",
+          "opaque" => %{"keep" => [true, nil, 1, 1.0]}
+        }
+        |> then(fn value ->
+          if content === :absent, do: value, else: Map.put(value, "content", content)
+        end)
+        |> then(fn value ->
+          if level === :absent, do: value, else: Map.put(value, "level", level)
+        end)
+
+      block =
+        card(%{
+          "tone" => "calm",
+          "slots" => %{
+            "title" => [title],
+            "body" => [%{"type" => "paragraph", "content" => inline("Body")}],
+            "future" => %{"keep" => true}
+          },
+          "unknown" => [1, 2]
+        })
+
+      assert {:ok, op} =
+               Blocks.resolve_block_form([block], %{
+                 "block_id" => "card",
+                 "card-title" => "  After <literal>  "
+               })
+
+      assert Map.merge(block, op["patch"]) ==
+               put_in(block, ["slots", "title"], [
+                 Map.put(title, "text", "  After <literal>  ")
+               ])
+
+      assert {:ok, %{"patch" => %{}}} =
+               Blocks.resolve_block_form([block], %{
+                 "block_id" => "card",
+                 "card-title" => "Before"
+               })
+    end
+  end
+
+  test "title-only source fails closed for ambiguous or non-plain title carriers" do
+    valid = %{"type" => "heading", "text" => "Before"}
+
+    invalid_titles = [
+      :absent,
+      nil,
+      [],
+      [valid, valid],
+      [Map.delete(valid, "type")],
+      [Map.put(valid, "type", nil)],
+      [Map.put(valid, "type", "paragraph")],
+      [Map.delete(valid, "text")],
+      [Map.put(valid, "text", nil)],
+      [Map.put(valid, "text", 42)],
+      [Map.put(valid, "content", [%{"type" => "text", "value" => "Rich"}])],
+      [Map.put(valid, "content", "Rich")],
+      [Map.put(valid, "level", 4)],
+      [Map.put(valid, "level", "4")]
+    ]
+
+    for title <- invalid_titles do
+      slots =
+        case title do
+          :absent -> %{}
+          value -> %{"title" => value}
+        end
+
+      assert {:error, {:source_validation, :invalid_card_title}} =
+               Blocks.resolve_block_form([card(%{"slots" => slots})], %{
+                 "block_id" => "card",
+                 "card-title" => "After"
+               })
+    end
+
+    assert {:error, {:source_validation, :invalid_card_title}} =
+             Blocks.resolve_block_form(
+               [
+                 card(%{"slots" => %{"title" => [valid]}}),
+                 card(%{"slots" => %{"title" => [valid]}})
+               ],
+               %{"block_id" => "card", "card-title" => "After"}
+             )
+
+    assert {:error, :block_not_found} =
+             Blocks.resolve_block_form([], %{"block_id" => "card", "card-title" => "After"})
+
+    assert {:error, {:source_validation, :invalid_card_title}} =
+             Blocks.resolve_block_form([card(%{"slots" => %{"title" => [valid]}})], %{
+               "block_id" => "card",
+               "card-title" => 42
+             })
+
+    assert {:error, {:source_validation, :invalid_card_title}} =
+             Blocks.resolve_block_form([card(%{"slots" => %{"title" => [valid]}})], %{
+               "block_id" => "card",
+               "card-title" => "After",
+               "foreign" => "refused"
+             })
+
+    nested_duplicate = [
+      card(%{"slots" => %{"title" => [valid]}}),
+      %{
+        "id" => "section",
+        "type" => "section",
+        "blocks" => [card(%{"slots" => %{"title" => [valid]}})]
+      }
+    ]
+
+    assert {:error, {:source_validation, :invalid_card_title}} =
+             Blocks.resolve_block_form(nested_duplicate, %{
+               "block_id" => "card",
+               "card-title" => "After"
+             })
+  end
+
   test "card form state projects strict singleton chrome without normalizing source" do
     assert Blocks.card_form_state(%{"id" => "bare", "type" => "card"}) ==
              {:ok,
@@ -149,6 +362,38 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualFormTest do
              Blocks.validate_block_patch(card(%{}), %{"card-title" => "New"})
 
     assert created == %{"title" => [%{"type" => "heading", "text" => "New"}]}
+  end
+
+  test "generic Card forms refuse title writes to content-authoritative headings only" do
+    rich_title = %{
+      "type" => "heading",
+      "text" => "Projected text",
+      "content" => [%{"type" => "text", "value" => "Authoritative"}],
+      "opaque" => %{"keep" => true}
+    }
+
+    block =
+      card(%{
+        "slots" => %{
+          "title" => [rich_title],
+          "media" => [%{"type" => "image", "src" => "/before.png"}]
+        }
+      })
+
+    assert {:error, :invalid_card_form} =
+             Blocks.validate_block_patch(block, %{"card-title" => "Overwrite"})
+
+    assert {:error, :invalid_card_form} =
+             Blocks.validate_block_patch(block, %{
+               "card-title" => "Projected text",
+               "card-media-src" => "/after.png"
+             })
+
+    assert {:ok, %{"slots" => slots}} =
+             Blocks.validate_block_patch(block, %{"card-media-src" => "/after.png"})
+
+    assert slots["title"] == [rich_title]
+    assert get_in(slots, ["media", Access.at(0), "src"]) == "/after.png"
   end
 
   test "media edits preserve typeless legacy metadata and blank clear never drops its slot" do

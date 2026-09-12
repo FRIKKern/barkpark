@@ -33,6 +33,8 @@
 # 0 failures.
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 # Hand bp a CLOSED stdin, not the pipe a CI runner gives a `run:` step.
 #
@@ -153,7 +155,7 @@ BP="$BP_BIN"
 # =================================================================================
 # 3. Boot the ephemeral clean-profile server: create + migrate the throwaway DB,
 #    run the clean seed (mints the admin token from BARKPARK_SEED_ADMIN_TOKEN),
-#    then start phx.server on the throwaway port and health-poll /api/schemas.
+#    then start phx.server on the throwaway port and health-poll /status.json.
 # =================================================================================
 echo ""
 echo "--- boot ephemeral clean-profile instance ---"
@@ -169,10 +171,11 @@ PHX_SERVER=true mix phx.server >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 cd "$REPO_ROOT"
 
-# Health-poll: /api/schemas returns 200 once the endpoint is up.
+# Health-poll: /status.json returns 200 once the endpoint is up. NOT /api/schemas —
+# that route is sunset 2026-12-31 (LegacyDeprecation), and this poll gates on it.
 booted=0
 for _ in $(seq 1 90); do
-  if curl -fsS "$API_URL/api/schemas" >/dev/null 2>&1; then booted=1; break; fi
+  if bp_curl_body -sS "$API_URL/status.json" >/dev/null 2>&1; then booted=1; break; fi
   # Fail fast if the server process died during boot.
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
     cat "$SERVER_LOG" >&2
@@ -181,10 +184,10 @@ for _ in $(seq 1 90); do
   sleep 1
 done
 if [ "$booted" = "1" ]; then
-  ok "phx.server up — GET /api/schemas 200 on $API_URL"
+  ok "phx.server up — GET /status.json 200 on $API_URL"
 else
   cat "$SERVER_LOG" >&2
-  die "server never became healthy on $API_URL/api/schemas."
+  die "server never became healthy on $API_URL/status.json."
 fi
 
 # =================================================================================

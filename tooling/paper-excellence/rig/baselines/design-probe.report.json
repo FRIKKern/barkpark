@@ -19,7 +19,7 @@
       "cell": "design-probe__light__1280",
       "file": "design-probe__light__1280.jpeg",
       "scale": 2,
-      "bytes": 305792,
+      "bytes": 328426,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -63,7 +63,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 68.5,
+      "proseCpl": 68.1,
       "proseCplSamples": 3,
       "captionCpl": null,
       "captionWidth": null,
@@ -71,11 +71,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 290.6,
+          "width": 298.5,
           "offCentre": 0,
-          "left": 494.7,
-          "right": 785.3,
-          "inkWidth": 290.6,
+          "left": 490.8,
+          "right": 789.2,
+          "inkWidth": 296.5,
           "inkOffCentre": 0
         },
         {
@@ -89,7 +89,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -124,12 +124,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 4,
           "emptyTracks": 0,
           "probe": null
@@ -138,22 +138,22 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 9,
+        "total": 18,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 18
         },
         "heavyRules": []
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "design-probe__light__1920",
       "file": "design-probe__light__1920.jpeg",
       "scale": 2,
-      "bytes": 334122,
+      "bytes": 358002,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -197,7 +197,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 68.5,
+      "proseCpl": 68.1,
       "proseCplSamples": 3,
       "captionCpl": null,
       "captionWidth": null,
@@ -205,11 +205,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 290.6,
+          "width": 298.5,
           "offCentre": 0,
-          "left": 814.7,
-          "right": 1105.3,
-          "inkWidth": 290.6,
+          "left": 810.8,
+          "right": 1109.2,
+          "inkWidth": 296.5,
           "inkOffCentre": 0
         },
         {
@@ -223,7 +223,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -272,22 +272,22 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 9,
+        "total": 18,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 18
         },
         "heavyRules": []
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "design-probe__dark__1280",
       "file": "design-probe__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 306787,
+      "bytes": 325615,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -331,7 +331,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 68.5,
+      "proseCpl": 68.1,
       "proseCplSamples": 3,
       "captionCpl": null,
       "captionWidth": null,
@@ -339,11 +339,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 290.6,
+          "width": 298.5,
           "offCentre": 0,
-          "left": 494.7,
-          "right": 785.3,
-          "inkWidth": 290.6,
+          "left": 490.8,
+          "right": 789.2,
+          "inkWidth": 296.5,
           "inkOffCentre": 0
         },
         {
@@ -357,7 +357,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -392,12 +392,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 4,
           "emptyTracks": 0,
           "probe": null
@@ -406,22 +406,22 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 9,
+        "total": 18,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 18
         },
         "heavyRules": []
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "design-probe__dark__1920",
       "file": "design-probe__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 335095,
+      "bytes": 354836,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -465,7 +465,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 68.5,
+      "proseCpl": 68.1,
       "proseCplSamples": 3,
       "captionCpl": null,
       "captionWidth": null,
@@ -473,11 +473,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 290.6,
+          "width": 298.5,
           "offCentre": 0,
-          "left": 814.7,
-          "right": 1105.3,
-          "inkWidth": 290.6,
+          "left": 810.8,
+          "right": 1109.2,
+          "inkWidth": 296.5,
           "inkOffCentre": 0
         },
         {
@@ -491,7 +491,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -540,16 +540,16 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 9,
+        "total": 18,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 18
         },
         "heavyRules": []
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     }
   ]
 }

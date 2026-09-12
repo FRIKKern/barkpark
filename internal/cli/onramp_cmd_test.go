@@ -454,6 +454,32 @@ func TestOnrampAgentsMdWrapperParity(t *testing.T) {
 	}
 }
 
+// TestOnrampSpanGoldenContainsCanonicalBody closes the re-pin residual left by
+// cgsi-s6. check-doc-budgets.sh pins CODEX.md's budget-exempt onramp span
+// byte-identically to scripts/onramp-span.golden and caps the span at 4000B —
+// but the golden is REGENERABLE (--regen-onramp-golden blesses whatever sits
+// between the markers), so the headroom under the cap, and substitution inside
+// the existing span, are both unguarded by that script alone. This assertion is
+// the honest closer and lives here because the shell gate's fence forbids
+// internal/: whatever the golden is regenerated to, it must still CONTAIN the
+// canonical AGENTS.md body the CLI emits. Mutate a line of the golden inside the
+// body and this REDs.
+func TestOnrampSpanGoldenContainsCanonicalBody(t *testing.T) {
+	const path = "../../scripts/onramp-span.golden"
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v — the golden this assertion locks must exist", path, err)
+	}
+	// Refuse an empty read outright: a Contains against an empty-but-readable
+	// golden would pass silently for the empty string and go vacuous.
+	if len(bytes.TrimSpace(raw)) == 0 {
+		t.Fatalf("%s is empty — the lock would be vacuous", path)
+	}
+	if !strings.Contains(string(raw), agentsMDCanonicalBody) {
+		t.Errorf("%s no longer contains agentsMDCanonicalBody — the pinned onramp span drifted from what `bp onramp agents-md` emits.\nExpected body:\n%s", path, agentsMDCanonicalBody)
+	}
+}
+
 // TestOnrampRejectRemote proves chatgpt/claude-ai are rejected (exit 2) with a
 // pointer to REMOTE.md and no config block.
 func TestOnrampRejectRemote(t *testing.T) {

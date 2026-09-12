@@ -10,6 +10,7 @@ defmodule Barkpark.Status do
   """
   import Ecto.Query, warn: false
 
+  alias Barkpark.Content.CodelistHealth
   alias Barkpark.Repo
   alias Barkpark.Status.Incident
 
@@ -28,7 +29,8 @@ defmodule Barkpark.Status do
       check(:database, &database_ok?/0),
       check(:migrations, &migrations_current?/0),
       check(:plugins, &plugins_ok?/0),
-      check(:mail, &mail_deliverable?/0)
+      check(:mail, &mail_deliverable?/0),
+      codelists_component()
     ]
 
     incidents = open_incidents()
@@ -47,7 +49,56 @@ defmodule Barkpark.Status do
 
   defp check(name, probe) do
     status = if safe(probe, false), do: :operational, else: :degraded
-    %{component: name, status: status}
+    %{component: name, status: status, detail: nil}
+  end
+
+  @doc """
+  The `:codelists` component: does the box actually hold the codelists its
+  plugins declare?
+
+  A boot seed that times out is rescued at three levels, so a node with no Thema
+  codes at all still answers 200 and still reports every other component green.
+  This is the one probe that says otherwise, and its `detail` NAMES the lists —
+  `"codelist onixedit:thema is empty or stale: …"` — because "codelists:
+  degraded" is not something an operator can act on.
+
+  Skipped (reported `:operational`, no detail) on a node configured not to run
+  the boot codelist seeders — `config :barkpark, run_boot_codelist_seeders:
+  false`, which is the test env. Such a node never promised to hold codelist
+  DATA, so dyeing it degraded would be noise, not signal.
+
+  `opts` are passed through to `CodelistHealth.audit/1` (`:requirements`), so a
+  caller can probe an arbitrary roster.
+  """
+  @spec codelists_component(keyword()) :: %{
+          component: :codelists,
+          status: :operational | :degraded,
+          detail: String.t() | nil
+        }
+  def codelists_component(opts \\ []) do
+    cond do
+      not boot_codelist_seeders_enabled?() ->
+        component(:codelists, :operational, nil)
+
+      true ->
+        case safe(fn -> CodelistHealth.audit(opts) end, :probe_failed) do
+          %{status: :ok} ->
+            component(:codelists, :operational, nil)
+
+          %{status: :degraded} = audit ->
+            component(:codelists, :degraded, CodelistHealth.summary(audit))
+
+          _ ->
+            component(:codelists, :degraded, "codelist audit could not be run")
+        end
+    end
+  end
+
+  defp component(name, status, detail),
+    do: %{component: name, status: status, detail: detail}
+
+  defp boot_codelist_seeders_enabled? do
+    Application.get_env(:barkpark, :run_boot_codelist_seeders, true)
   end
 
   defp database_ok? do

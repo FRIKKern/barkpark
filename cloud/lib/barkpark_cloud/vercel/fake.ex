@@ -16,11 +16,22 @@ defmodule BarkparkCloud.Vercel.Fake do
   `{:error, :deploy_failed}`; the project id `invalid_project_id/0` makes
   `create_transfer_code/1` return `{:error, :not_found}` — a known-bad path for
   every context branch without fixtures or a token.
+
+  ## Driving the claim-completion read (cch-w48)
+
+  `claimed?/1` answers `{:ok, false}` by default — a project we just deployed
+  is still ours. `mark_claimed/1` makes it answer `{:ok, true}` (the user
+  completed the irreversible transfer), and `mark_unreadable/1` makes it answer
+  `{:error, :read_failed}` (we cannot tell). Both are per-PROCESS, like the
+  other fake state, so the claimed state is reachable from a test without a
+  token, a network, or a local column.
   """
   @behaviour BarkparkCloud.Vercel.Client
 
   @deploys_key :vercel_fake_deploys
   @codes_key :vercel_fake_codes
+  @claimed_key :vercel_fake_claimed
+  @unreadable_key :vercel_fake_unreadable
 
   @doc "A sentinel project id the fake ALWAYS rejects as `:not_found`. For tests."
   @spec invalid_project_id() :: String.t()
@@ -60,6 +71,29 @@ defmodule BarkparkCloud.Vercel.Fake do
       record(@codes_key, %{project_id: project_id, code: code})
       {:ok, code}
     end
+  end
+
+  @impl true
+  def claimed?(project_id) when is_binary(project_id) do
+    cond do
+      project_id in Process.get(@unreadable_key, []) -> {:error, :read_failed}
+      project_id in Process.get(@claimed_key, []) -> {:ok, true}
+      true -> {:ok, false}
+    end
+  end
+
+  @doc "Make `claimed?/1` report `project_id` as already transferred, in THIS process."
+  @spec mark_claimed(String.t()) :: :ok
+  def mark_claimed(project_id) when is_binary(project_id) do
+    Process.put(@claimed_key, [project_id | Process.get(@claimed_key, [])])
+    :ok
+  end
+
+  @doc "Make `claimed?/1` fail for `project_id` — the \"cannot tell\" arm, in THIS process."
+  @spec mark_unreadable(String.t()) :: :ok
+  def mark_unreadable(project_id) when is_binary(project_id) do
+    Process.put(@unreadable_key, [project_id | Process.get(@unreadable_key, [])])
+    :ok
   end
 
   @doc "The deploys recorded in THIS process (for test assertions)."

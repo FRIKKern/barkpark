@@ -72,19 +72,27 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
   end
 
   setup %{conn: conn} do
-    # ── Wave-26 leaked-session pollution guard (felix-w27-s6) ─────────────────
-    # The StudioChat Recorder is an app-tree GenServer (RuntimeSupervisor) that
-    # can outlive a prior test's sandbox owner and COMMIT chat_sessions rows that
-    # escape rollback. Such a leaked row renders as an EXTRA sidebar session card,
-    # so the scoped SIDEBAR byte-lock below (D11) diverges from its pinned golden
-    # — NOT a render change (the golden bytes are unmoved), just suite pollution.
-    # At setup — before this test seeds its own sessions — every visible
-    # chat_sessions row is such a leak, so purge them (restrict-FK children first,
-    # then the sessions, which cascades messages / telemetry / leases). Rolls back
-    # with the test transaction; test-infra hygiene only, ZERO prod code touched.
-    Barkpark.Repo.query!("DELETE FROM chat_runtime_usage_receipts")
-    Barkpark.Repo.query!("DELETE FROM epic_assignment_runtime_attempts")
-    Barkpark.Repo.delete_all(Barkpark.StudioChat.Session)
+    # ── Committed-session residue guard (`Barkpark.ChatSessionResidue`) ─────────
+    #
+    # The leak is NOT the Recorder, as this comment asserted for three waves — it
+    # is `Sandbox.unboxed_run/2`. The runtime-usage lock-ordering drive needs two
+    # real Postgres connections that block each other, so it COMMITS, and
+    # `CycleFleet.prepare_runtime_attempt/3` mints a `chat_sessions` row that
+    # `Tenancy.delete_workspace/1` never reaches (`owner_workspace_id` carries no
+    # FK). One committed session per run of that file, cleaned by nothing. Such a
+    # row escapes every later test's sandbox rollback and rides `list_sessions/*`'s
+    # recency-desc ordering ahead of the rows seeded here.
+    #
+    # THE SOURCE IS CLOSED: `runtime_usage_test.exs` now purges its own committed
+    # residue after the workspace teardown. This call is the belt for residue
+    # ALREADY committed on a long-lived box, which no fix can un-commit.
+    #
+    # It issues NO DELETE against either append-only ledger. The two unqualified
+    # table-wide DELETEs that used to stand here passed SILENTLY only while both
+    # tables were empty — a FOR EACH ROW trigger cannot fire on zero rows — and
+    # raised the moment either held one. Runs inside this test's sandbox
+    # transaction and rolls back with it.
+    Barkpark.ChatSessionResidue.purge!()
 
     {:ok, _} =
       Auth.create_token(@admin_token, "chat golden admin", "production", [

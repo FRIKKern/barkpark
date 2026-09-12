@@ -16,11 +16,19 @@ on:
   pull_request:
     paths:
       - "api/priv/plugins/**"
+      # The matrix builder and its smoke harness gate this workflow's own
+      # discover step, so a change to either must run it. Without these two
+      # globs the harness added below would be unreachable on the PR that
+      # breaks the builder.
+      - "api/test/scripts/build-plugin-node-matrix.sh"
+      - "api/test/scripts/test-plugin-node-matrix.sh"
       - ".github/workflows/plugin-node.yml"
   push:
     branches: [main]
     paths:
       - "api/priv/plugins/**"
+      - "api/test/scripts/build-plugin-node-matrix.sh"
+      - "api/test/scripts/test-plugin-node-matrix.sh"
       - ".github/workflows/plugin-node.yml"
 
 concurrency:
@@ -39,6 +47,17 @@ jobs:
       empty: ${{ steps.build.outputs.empty }}
     steps:
       - uses: actions/checkout@v4
+
+      # BEFORE the builder is trusted. api/test/scripts/test-plugin-node-matrix.sh
+      # is a smoke harness for the very script the next step reads its matrix
+      # from, and until now NO workflow invoked it — a whole-repo grep found it
+      # only in the script itself, a doc, a fixture and a ledger row. Its
+      # load-bearing case is that a MISSING plugins root exits 4 rather than
+      # emitting empty=true: an empty matrix makes the per-plugin job skip and this
+      # workflow end green over zero plugins. A step, not a job, so no new
+      # check-run name is rendered and the required-set floor is untouched.
+      - name: Matrix-builder smoke harness
+        run: bash api/test/scripts/test-plugin-node-matrix.sh
 
       - name: Build matrix from plugin manifests
         id: build

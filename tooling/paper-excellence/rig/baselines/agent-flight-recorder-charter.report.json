@@ -1,0 +1,791 @@
+{
+  "label": "agent-flight-recorder-charter",
+  "deviceScaleFactor": 2,
+  "fullPage": true,
+  "format": "jpeg",
+  "jpegQuality": 72,
+  "allowedHost": "127.0.0.1",
+  "blocked": [
+    "cdn.jsdelivr.net (mermaid, asciinema-player)",
+    "all non-loopback hosts"
+  ],
+  "excludedFromAssertions": [
+    "diagram/mermaid",
+    "asciicast",
+    "remote images"
+  ],
+  "shots": [
+    {
+      "cell": "agent-flight-recorder-charter__light__1280",
+      "file": "agent-flight-recorder-charter__light__1280.jpeg",
+      "scale": 2,
+      "bytes": 1081331,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 6,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "Pillar 1 — priming visibility (start + done)",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Pillar 2 — crash recovery",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Pillar 3 — signatures: who did what, not 'ag",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Decisions to make (the epic's Decide phase)",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Measured costs (from the flight-recorder cos",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 72,
+      "proseCplSamples": 5,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1180,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1178,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1178,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1178,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(45, 94, 143)",
+          "background": "rgb(233, 239, 247)",
+          "accent": "rgb(45, 94, 143)"
+        },
+        ".bp-callout--success": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--warning": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "36px",
+        "fontWeight": "400"
+      },
+      "statTracks": null,
+      "statTracksNote": "no .bp-stats in this fixture",
+      "statRemainder": [],
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 25,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 20,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 728,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1511.9,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2169.5,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2707.4,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3358.8,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 1
+    },
+    {
+      "cell": "agent-flight-recorder-charter__light__1920",
+      "file": "agent-flight-recorder-charter__light__1920.jpeg",
+      "scale": 2,
+      "bytes": 1162719,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 6,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "Pillar 1 — priming visibility (start + done)",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Pillar 2 — crash recovery",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Pillar 3 — signatures: who did what, not 'ag",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Decisions to make (the epic's Decide phase)",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Measured costs (from the flight-recorder cos",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 72,
+      "proseCplSamples": 5,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1360,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1358,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1358,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1219.4,
+          "offCentre": 0,
+          "left": 350.3,
+          "right": 1569.7,
+          "inkWidth": 1217.4,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(45, 94, 143)",
+          "background": "rgb(233, 239, 247)",
+          "accent": "rgb(45, 94, 143)"
+        },
+        ".bp-callout--success": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--warning": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "36px",
+        "fontWeight": "400"
+      },
+      "statTracks": null,
+      "statTracksNote": "no .bp-stats in this fixture",
+      "statRemainder": [],
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 25,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 20,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 728,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1459.8,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2117.3,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2655.3,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3306.6,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 1
+    },
+    {
+      "cell": "agent-flight-recorder-charter__dark__1280",
+      "file": "agent-flight-recorder-charter__dark__1280.jpeg",
+      "scale": 2,
+      "bytes": 1076316,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 6,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "Pillar 1 — priming visibility (start + done)",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Pillar 2 — crash recovery",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Pillar 3 — signatures: who did what, not 'ag",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Decisions to make (the epic's Decide phase)",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Measured costs (from the flight-recorder cos",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 72,
+      "proseCplSamples": 5,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1180,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1178,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1178,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1178,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(157, 184, 255)",
+          "background": "rgb(23, 32, 50)",
+          "accent": "rgb(157, 184, 255)"
+        },
+        ".bp-callout--success": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--warning": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "36px",
+        "fontWeight": "400"
+      },
+      "statTracks": null,
+      "statTracksNote": "no .bp-stats in this fixture",
+      "statRemainder": [],
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 25,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 20,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 728,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1511.9,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2169.5,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2707.4,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3358.8,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 1
+    },
+    {
+      "cell": "agent-flight-recorder-charter__dark__1920",
+      "file": "agent-flight-recorder-charter__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 1157346,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 6,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "Pillar 1 — priming visibility (start + done)",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Pillar 2 — crash recovery",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Pillar 3 — signatures: who did what, not 'ag",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Decisions to make (the epic's Decide phase)",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Measured costs (from the flight-recorder cos",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 72,
+      "proseCplSamples": 5,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1360,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1358,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1358,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1219.4,
+          "offCentre": 0,
+          "left": 350.3,
+          "right": 1569.7,
+          "inkWidth": 1217.4,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(157, 184, 255)",
+          "background": "rgb(23, 32, 50)",
+          "accent": "rgb(157, 184, 255)"
+        },
+        ".bp-callout--success": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--warning": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "36px",
+        "fontWeight": "400"
+      },
+      "statTracks": null,
+      "statTracksNote": "no .bp-stats in this fixture",
+      "statRemainder": [],
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 25,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 20,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 728,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1459.8,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2117.3,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2655.3,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3306.6,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 1
+    }
+  ]
+}

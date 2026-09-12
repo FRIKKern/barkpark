@@ -6,12 +6,18 @@ defmodule Barkpark.Tasks.QueueGate do
   claim owned by another worker is intentionally not persisted as a gate:
   `execution_class/2` derives `foreign_claimed` from authoritative claim state.
   Legacy Tasks without `queue_gate` remain executable.
+
+  A claim map OUTLIVES its lease, so "is there a `claim.worker`" is not the
+  same question as "does anybody hold this row". `claim_lease_live?/1` is the
+  one place that answers the second one, and `live_claim_worker/1` and
+  `executable_query/0` — the Elixir predicate and its SQL twin — both call it.
   """
 
   @version 1
   @persisted_states ~w(executable human_gated parked evidence_stalled)
   @derived_states ["foreign_claimed" | @persisted_states]
   @allowed_fields ~w(version state reason evidence)
+  @default_lease_ttl_seconds 2700
   @reason_max_bytes 500
   @evidence_max_bytes 1_000
 
@@ -60,7 +66,10 @@ defmodule Barkpark.Tasks.QueueGate do
   The current holder sees the persisted class. Missing gates and legacy content
   default to `executable`.
 
-  "Live" is `live_claim_worker/1` below: a worker name AND no close stamp.
+  "Live" is `live_claim_worker/1` below, and it is live in three parts: a
+  worker name, no close stamp, AND a lease that has not lapsed
+  (`claim_lease_live?/1`, measured against `:task_lease_ttl_seconds` — the
+  same TTL `TtlSweeper` reaps on).
   """
   @spec execution_class(map() | nil, String.t() | nil) :: String.t()
   def execution_class(content, worker_id \\ nil)
@@ -79,6 +88,41 @@ defmodule Barkpark.Tasks.QueueGate do
   end
 
   def execution_class(_content, _worker_id), do: "executable"
+
+  @doc """
+  Is this content's `claim` a LEASE, or RESIDUE a lease left behind?
+
+  Compares `claim.ts_iso` against the SAME `:task_lease_ttl_seconds` the
+  `TtlSweeper` reaps on, read from config rather than hardcoded, so the two
+  cannot drift apart.
+
+  FAILS CLOSED ON PURPOSE: no timestamp, or one that will not parse, counts as
+  LIVE. This predicate can only ever DOWNGRADE somebody from holder to residue,
+  so an unprovable case must keep the protective answer — a parse bug here
+  would hand one lane another lane's row, which is worse than the bug it fixes.
+
+  WHY IT IS NEEDED AT ALL, given the sweeper: `TtlSweeper.expired_candidates/2`
+  selects only rows whose `lifecycle_status` is `in_progress`. `bp task stage
+  <id> open` moves a row OUT of `in_progress` without touching `content.claim`
+  (Stage "never reads or writes `content.claim`"), so a staged-open row keeps
+  its dead holder's name FOREVER and no sweep will ever blank it.
+  """
+  @spec claim_lease_live?(map() | nil) :: boolean()
+  def claim_lease_live?(content) when is_map(content),
+    do: content |> fetch("claim") |> lease_live?()
+
+  def claim_lease_live?(_content), do: true
+
+  @doc """
+  The claim lease TTL in seconds — `:task_lease_ttl_seconds`, default 2700.
+
+  ONE reader for a number that had grown three private copies (this module,
+  `TasksController`, `TasksController.Params`). `TtlSweeper` keeps its own
+  because it is the writer of the reap boundary, not a reader of it.
+  """
+  @spec lease_ttl_seconds() :: non_neg_integer()
+  def lease_ttl_seconds,
+    do: Application.get_env(:barkpark, :task_lease_ttl_seconds, @default_lease_ttl_seconds)
 
   @doc "True only when persisted gate state is valid and executable for the worker."
   @spec executable?(map() | nil, String.t() | nil) :: boolean()
@@ -105,9 +149,47 @@ defmodule Barkpark.Tasks.QueueGate do
       # one gates the ready queue that `bp task ready` / `bp task next` read.
       # Fixing only one leaves a reopened row claimable-by-name but invisible
       # on the board — the SAME bug wearing the other half of its face.
+      # The SQL half of `lease_live?/1`. CASE, not `AND`, because Postgres is
+      # free to reorder the arms of an AND — the CASE pins the order so the
+      # shape guard always runs first.
+      #
+      # THERE IS NO CAST, AND THAT IS THE POINT. A `::timestamptz` cast RAISES
+      # on a malformed string rather than returning NULL, and this query gates
+      # the READY QUEUE: one bad `ts_iso` anywhere in the ready population would
+      # break `bp task ready` and `bp task next` for everyone — strictly worse
+      # than the defect this predicate exists to fix. Found by lead-ledger-c5's
+      # fence review, which measured it: the earlier prefix regex admitted
+      # anything with a well-formed first 19 characters straight into the cast.
+      #
+      # ANCHORING ALONE WOULD NOT HAVE FIXED IT — a regex cannot validate
+      # CALENDAR semantics. '2026-13-45T99:99:99Z' and '2026-02-30T12:00:00Z'
+      # both match a fully anchored pattern and both still raise. So the shape
+      # guard and the comparison each do the job the other cannot: the anchored
+      # pattern (T and Z REQUIRED, which is what every writer emits —
+      # `Claim.do_claim_resolved`, `Claim.do_renew` and `Pulse.pulse/3` are all
+      # `DateTime.utc_now() |> DateTime.to_iso8601()`) makes LEXICOGRAPHIC
+      # ordering well-defined, and the text comparison cannot raise whatever
+      # the tail says.
+      #
+      # Requiring `T` and `Z` is load-bearing, not tidiness: a space separator
+      # sorts BELOW 'T', and a '-05:00' offset compares by its literal local
+      # digits — either would let a live claim read as expired, which is the one
+      # direction that must never fail. Anything not matching falls to `false`,
+      # i.e. NOT expired, i.e. still claim-held: the same FAIL-CLOSED direction
+      # the Elixir arm takes.
+      #
+      # The cutoff carries no trailing `Z` so a fractional stamp at the exact
+      # boundary second sorts GREATER than it — erring toward LIVE by under a
+      # second against a 2700-second lease.
       (fragment("COALESCE(btrim(?->'claim'->>'worker'), '') = ''", d.content) or
          fragment("COALESCE(btrim(?->'claim'->>'closed_at'), '') <> ''", d.content) or
-         fragment("COALESCE(btrim(?->'claim'->>'closed_by'), '') <> ''", d.content)) and
+         fragment("COALESCE(btrim(?->'claim'->>'closed_by'), '') <> ''", d.content) or
+         fragment(
+           "CASE WHEN ?->'claim'->>'ts_iso' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.0-9]*Z$' THEN ?->'claim'->>'ts_iso' < to_char((now() at time zone 'UTC') - (? * interval '1 second'), 'YYYY-MM-DD\"T\"HH24:MI:SS') ELSE false END",
+           d.content,
+           d.content,
+           ^lease_ttl_seconds()
+         )) and
         (not fragment("jsonb_exists(?, 'queue_gate')", d.content) or
            fragment("?->'queue_gate'", d.content) == fragment("'null'::jsonb") or
            fragment("?->'queue_gate'", d.content) ==
@@ -295,16 +377,45 @@ defmodule Barkpark.Tasks.QueueGate do
   # `lifecycle_status == "in_progress"`, which a closed-then-reopened row is
   # not — so neither predicate calls a closed claim live, and the holder cannot
   # renew a lease a contender may now take.
+  #
+  # THE THIRD PART, and the one the docstring above used to promise without
+  # checking (task-f48b0d7c943fc3a5): A LEASE THAT HAS NOT LAPSED. Without it
+  # "live" meant "has a worker name and was never closed", under which a claim
+  # that expired SIX DAYS AGO is LIVE — and every reader of `execution_class/2`
+  # was told `foreign_claimed` about a row nobody holds. `TtlSweeper` does NOT
+  # cover this: it only reaps `in_progress` rows, so a row staged back to `open`
+  # keeps its dead holder's name permanently. See `claim_lease_live?/1`, which
+  # fails CLOSED so this arm can only ever release a row, never take one.
   defp live_claim_worker(claim) when is_map(claim) do
     worker = fetch(claim, "worker")
 
-    if non_blank?(worker) and not closed_claim?(claim), do: worker, else: nil
+    if non_blank?(worker) and not closed_claim?(claim) and lease_live?(claim),
+      do: worker,
+      else: nil
   end
 
   defp live_claim_worker(_claim), do: nil
 
   defp closed_claim?(claim),
     do: non_blank?(fetch(claim, "closed_at")) or non_blank?(fetch(claim, "closed_by"))
+
+  defp lease_live?(claim) when is_map(claim) do
+    case fetch(claim, "ts_iso") do
+      ts when is_binary(ts) ->
+        case DateTime.from_iso8601(ts) do
+          {:ok, claimed_at, _} ->
+            DateTime.diff(DateTime.utc_now(), claimed_at) < lease_ttl_seconds()
+
+          _ ->
+            true
+        end
+
+      _ ->
+        true
+    end
+  end
+
+  defp lease_live?(_claim), do: true
 
   defp non_blank?(value), do: is_binary(value) and String.trim(value) != ""
 end

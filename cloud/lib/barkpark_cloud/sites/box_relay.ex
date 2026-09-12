@@ -54,15 +54,54 @@ defmodule BarkparkCloud.Sites.BoxRelay do
   @callback rollback(Barkpark.t(), map()) :: reply()
   @callback teardown(Barkpark.t(), map()) :: reply()
 
+  @doc """
+  Read the DURABLE per-build record for a finished deploy — the black box
+  recorder's terminal record, keyed on `{slug, build_id}`
+  (`dr-bl-recorder-http-read-path`).
+
+  This is NOT `poll_deploy/3` with a different name. `poll_deploy/3` asks about
+  the run the box is holding IN MEMORY, and its 404 means KEEP WAITING (charter
+  D34); once the slug goes idle that door can say nothing at all about a build
+  that finished last week. This one asks the same route for `record=1`, which the
+  box answers from `<slug>-<tag>.terminal.json` on disk — including for a log its
+  retention has already evicted, because an eviction leaves a tombstone behind.
+
+  A READ, so it stays open for a box whose credential was refused: telling a human
+  why a build failed is exactly what must survive an unreachable-for-writes box.
+  """
+  @callback build_record(Barkpark.t(), String.t(), String.t()) :: reply()
+
+  @doc """
+  Read the recorded build log's BYTES for a finished deploy — a BOUNDED TAIL, or
+  the box's refusal (`dr-bl-recorder-http-read-path` c1).
+
+  A strictly larger surface than `build_record/3`, so it is a separate verb with a
+  separate opt-in on the wire (`record=1&bytes=1`). The box refuses with 422
+  `build_log_unscrubbed` for a record whose `log_scrub` is nil — bytes that were
+  never folded through the secret scrubber — and that refusal is relayed, never
+  reinterpreted: this end invents nothing about bytes it did not receive.
+
+  A READ, for the same reason `build_record/3` is: a box whose credential was
+  refused is exactly the box whose last failed build a human needs to read.
+  """
+  @callback build_log_bytes(Barkpark.t(), String.t(), String.t()) :: reply()
+
   # The verbs that only READ the box. Everything else is a WRITE and is fenced
   # below for a box that has already refused our stored admin credential.
-  @reads [:poll_deploy]
+  @reads [:poll_deploy, :build_record, :build_log_bytes]
 
   @spec start_deploy(Barkpark.t(), map()) :: reply()
   def start_deploy(bp, payload), do: dispatch(bp, :start_deploy, [bp, payload])
 
   @spec poll_deploy(Barkpark.t(), String.t(), String.t()) :: reply()
   def poll_deploy(bp, slug, build_id), do: dispatch(bp, :poll_deploy, [bp, slug, build_id])
+
+  @spec build_record(Barkpark.t(), String.t(), String.t()) :: reply()
+  def build_record(bp, slug, build_id), do: dispatch(bp, :build_record, [bp, slug, build_id])
+
+  @spec build_log_bytes(Barkpark.t(), String.t(), String.t()) :: reply()
+  def build_log_bytes(bp, slug, build_id),
+    do: dispatch(bp, :build_log_bytes, [bp, slug, build_id])
 
   @spec rollback(Barkpark.t(), map()) :: reply()
   def rollback(bp, payload), do: dispatch(bp, :rollback, [bp, payload])
@@ -128,6 +167,37 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
   @impl true
   def poll_deploy(bp, slug, build_id) do
     query = URI.encode_query(%{"slug" => slug, "build_id" => build_id})
+    Registry.relay_admin(bp, :get, @path <> "?" <> query, nil)
+  end
+
+  # `record=1` is the box door's OPT-IN for the durable terminal record
+  # (`SiteDeployController.record_requested?/1`). The opt-in is the design: the
+  # poll above rides the same route and its 404-means-keep-waiting contract is
+  # load-bearing, so the record must never arrive by changing what the poll
+  # receives. A box too old to know the flag ignores it and answers the live
+  # status, whose `log_state` is absent — which `Sites.BuildLog` reports as
+  # "we do not know", never as "nothing was recorded".
+  @impl true
+  def build_record(bp, slug, build_id) do
+    query = URI.encode_query(%{"slug" => slug, "build_id" => build_id, "record" => "1"})
+    Registry.relay_admin(bp, :get, @path <> "?" <> query, nil)
+  end
+
+  # `bytes=1` rides ON TOP of `record=1` — the box's `bytes_requested?/1` only
+  # means anything alongside the record flag. A box too old to know it answers the
+  # RECORD, which carries no `tail` key at all; `Sites.BuildLogBytes` reads that as
+  # a shape it does not understand rather than as an empty log, so an old box can
+  # never be mistaken for one reporting no bytes.
+  @impl true
+  def build_log_bytes(bp, slug, build_id) do
+    query =
+      URI.encode_query(%{
+        "slug" => slug,
+        "build_id" => build_id,
+        "record" => "1",
+        "bytes" => "1"
+      })
+
     Registry.relay_admin(bp, :get, @path <> "?" <> query, nil)
   end
 

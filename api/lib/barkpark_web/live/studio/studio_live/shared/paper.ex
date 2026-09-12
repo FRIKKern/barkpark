@@ -21,6 +21,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias Barkpark.Access
   alias Barkpark.Content
   alias Barkpark.Content.Labels
+  alias Barkpark.Content.Papers.CanvasRunContext
+  alias Barkpark.Content.Papers.PreGateRegister
   alias Barkpark.PortableDoc.Render.SectionLayout
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
@@ -28,6 +30,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias BarkparkWeb.Studio.StudioLive.Shared
+  alias BarkparkWeb.PaperCanvasLease
 
   @server_minted_block :__server_minted_block__
   @server_form_source :__server_block_form_source__
@@ -199,61 +202,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   hook-invisible door — must ask it too, and must ask THIS copy. Do not
   re-derive it; a fork here is a fork in the authorization answer.
 
-  Inert (`false`, no query) unless `grant_graded?/1`; fail-closed on an
+  Inert (`false`, no query) unless the socket is grant-graded; fail-closed on an
   unresolvable target for a socket that IS grant-graded.
+
+  THE LADDER ITSELF LIVES IN `Caps.grant_target_denied?/4` — one owner, shared
+  with the SheetGrid route (`Shared.sheet_grant_target_denied?/1`), which used
+  to restate it. What stays HERE is the PAPER surface's one deliberate
+  difference: the grant list is RELOADED FRESH per op, because this runs in
+  `handle_info` where a revocation must stop admitting immediately. The owner
+  takes that list as an argument and never chooses a load strategy.
   """
   def grant_target_denied?(socket, type, doc_id) do
-    grant_graded?(socket.assigns) and not grant_admits_target?(socket, type, doc_id)
+    Caps.grant_target_denied?(socket.assigns, active_grants(socket), type, doc_id)
   end
 
   # The doc's `type` / `doc_id`, read TOTALLY: a pane doc is a `%Content.Document{}`
   # in the live path but a bare map in the unit fixtures, so `doc.type` would
   # raise a KeyError on a shape that has always been legal here. A missing key
-  # yields nil, which `write_target_scope/3` treats as an unresolvable target
-  # (fail-closed for a grant-graded socket, inert for every other one).
+  # yields nil, which `Caps.grant_target_denied?/4` treats as an unresolvable
+  # target (fail-closed for a grant-graded socket, inert for every other one).
   defp doc_field(doc, key) when is_map(doc), do: Map.get(doc, key)
   defp doc_field(_doc, _key), do: nil
-
-  # The two assigns that mean "this socket's write descends from a GRANT":
-  # `LiveScope.assign_grant_scope/2` sets `caller_context`, and
-  # `attach_write_gate/2` sets `write_gate?`.
-  defp grant_graded?(assigns) do
-    not is_nil(Map.get(assigns, :caller_context)) or Map.get(assigns, :write_gate?) == true
-  end
-
-  defp grant_admits_target?(socket, type, doc_id) do
-    case write_target_scope(socket, type, doc_id) do
-      %{} = target ->
-        socket
-        |> active_grants()
-        |> Enum.any?(&(Access.validate(&1, :write, target) == :ok))
-
-      nil ->
-        false
-    end
-  end
-
-  # The desk levels come from the MOUNT and the leaf levels from the DOC being
-  # written — the same broad→narrow ladder `LiveScope.write_target/3` feeds
-  # `Access.validate/3`, including its `Content.published_id/1` normalisation so
-  # a draft id is matched against the grant by its published identity.
-  defp write_target_scope(socket, type, doc_id) do
-    ws = socket.assigns[:current_workspace]
-    proj = socket.assigns[:current_project]
-    dataset = socket.assigns[:dataset]
-
-    if is_map(ws) and is_binary(Map.get(ws, :id)) and is_map(proj) and
-         is_binary(Map.get(proj, :id)) and is_binary(dataset) and is_binary(type) and
-         is_binary(doc_id) do
-      %{
-        workspace_id: ws.id,
-        project_id: proj.id,
-        dataset: dataset,
-        type: type,
-        doc_id: Content.published_id(doc_id)
-      }
-    end
-  end
 
   # Grants bind to a grantee USER; only a `current_user` can hold any. Fresh,
   # active-filtered load — the same call `Caps.derive/1` makes for expiry truth.
@@ -301,9 +270,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       {:ok, socket, receipt, outcome} ->
         result = %{
           saved: true,
+          changed: receipt_changed?(receipt),
           request_id: request_id,
           replayed: outcome == :replayed,
-          rev: receipt.rev
+          rev: receipt.rev,
+          history_step: receipt_history_step(receipt, request_id)
         }
 
         assign(socket,
@@ -482,31 +453,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
         opts =
           BarkparkWeb.ScopeHelpers.scope_opts(socket) ++
-            [if_rev: if_rev] ++ if(context, do: [canvas_run_context: context], else: [])
+            [if_rev: if_rev] ++
+            if(context, do: [canvas_run_context: context], else: []) ++
+            if(is_binary(request_id), do: [contextual_history: true], else: [])
 
         result =
-          if is_map(form_source) do
-            resolver = fn blocks ->
-              with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
-            end
-
-            Content.apply_paper_block_form_once(
+          if is_map(form_source) and PaperCanvasLease.pending?(socket) do
+            {:error, :idempotency_replay_required}
+          else
+            apply_paper_ops_once(
+              socket,
               slug,
-              "block_form:v1",
+              ops,
               form_source,
               dataset,
               request_id,
-              replay_principal_key(socket),
-              resolver,
-              opts
-            )
-          else
-            Content.apply_paper_block_ops_once(
-              slug,
-              ops,
-              dataset,
-              request_id,
-              replay_principal_key(socket),
               opts
             )
           end
@@ -516,6 +477,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket =
               socket
               |> sync_paper_edit_doc()
+              |> retain_canvas_insertions(
+                slug,
+                doc_field(paper, :content),
+                context,
+                ops,
+                outcome
+              )
               |> push_canvas_echo(request_id)
               |> push_task_previews()
               |> push_block_renders()
@@ -560,6 +528,228 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         end
     end
   end
+
+  defp apply_paper_ops_once(socket, slug, ops, form_source, dataset, request_id, opts) do
+    if is_map(form_source) do
+      resolver = fn blocks ->
+        with {:ok, op} <- Blocks.resolve_block_form(blocks, form_source), do: {:ok, [op]}
+      end
+
+      Content.apply_paper_block_form_once(
+        slug,
+        "block_form:v1",
+        form_source,
+        dataset,
+        request_id,
+        replay_principal_key(socket),
+        resolver,
+        opts
+      )
+    else
+      Content.apply_paper_block_ops_once(
+        slug,
+        ops,
+        dataset,
+        request_id,
+        replay_principal_key(socket),
+        opts
+      )
+    end
+  end
+
+  @doc false
+  def paper_history_step(socket, params) do
+    request_id = params["request_id"]
+    socket = failed_result(socket, %{"request_id" => request_id})
+    {socket, revoked_token?} = refresh_replay_token(socket)
+    paper = socket.assigns[:paper_doc]
+    slug = paper && doc_field(paper, :doc_id)
+    dataset = socket.assigns.dataset
+
+    invalid_credential? =
+      socket.assigns[:api_token_credential_present?] == true and
+        is_nil(socket.assigns[:api_token]) and is_nil(socket.assigns[:current_user])
+
+    cond do
+      invalid_credential? ->
+        {:error,
+         socket
+         |> refuse_write_denied()
+         |> history_step_refused(request_id, "history_unavailable")}
+
+      revoked_token? and is_nil(socket.assigns[:current_user]) ->
+        {:error,
+         socket
+         |> refuse_write_denied()
+         |> history_step_refused(request_id, "history_unavailable")}
+
+      write_denied?(socket) ->
+        {:error,
+         socket
+         |> refuse_write_denied()
+         |> history_step_refused(request_id, "history_unavailable")}
+
+      grant_target_denied?(socket, doc_field(paper, :type), slug) ->
+        {:error,
+         socket
+         |> refuse_outside_grant()
+         |> history_step_refused(request_id, "history_unavailable")}
+
+      read_only_pane?(socket) ->
+        {:error,
+         socket
+         |> refuse_read_only_pane()
+         |> history_step_refused(request_id, "history_unavailable")}
+
+      socket.assigns[:editor_view] != :paper ->
+        {:error, history_step_refused(socket, request_id, "invalid_history_request")}
+
+      not is_binary(slug) or paper_revision(params["if_rev"]) == :error ->
+        {:error, history_step_refused(socket, request_id, "invalid_history_request")}
+
+      true ->
+        {:ok, if_rev} = paper_revision(params["if_rev"])
+
+        case Content.apply_paper_contextual_history_once(
+               slug,
+               params["history_ref"],
+               params["action"],
+               dataset,
+               request_id,
+               replay_principal_key(socket),
+               ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
+             ) do
+          {:ok, receipt, outcome} ->
+            socket =
+              socket
+              |> reconcile_history_step(request_id, outcome)
+              |> assign(save_status: "Auto-saved")
+              |> assign(last_paper_save_ok?: true)
+              |> clear_history_halt(outcome)
+
+            {:ok, socket, receipt, outcome}
+
+          {:error, reason}
+          when reason in [
+                 :precondition_failed,
+                 :history_conflict,
+                 :block_not_found,
+                 :duplicate_id
+               ] ->
+            current_rev = current_history_rev(socket, slug, dataset)
+
+            {:error,
+             socket
+             |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+             |> assign(
+               last_paper_save_result: %{
+                 saved: false,
+                 request_id: request_id,
+                 rejected: "history_conflict",
+                 conflict: true,
+                 current_rev: current_rev
+               }
+             )}
+
+          {:error, reason} ->
+            {:error, history_step_failed(socket, request_id, reason)}
+        end
+    end
+  end
+
+  defp reconcile_history_step(socket, request_id, :applied) do
+    socket
+    |> sync_paper_edit_doc()
+    |> push_canvas_echo(request_id)
+    |> push_task_previews()
+    |> push_block_renders()
+  end
+
+  # The original applied request already performed every source and host
+  # effect. An exact replay returns only its stored acknowledgement.
+  defp reconcile_history_step(socket, _request_id, :replayed), do: socket
+
+  defp clear_history_halt(socket, :applied), do: assign(socket, paper_halt: nil)
+  defp clear_history_halt(socket, :replayed), do: socket
+
+  defp history_step_failed(socket, request_id, reason) do
+    rejected = history_step_rejection(reason)
+
+    socket
+    |> put_flash(:error, "History step failed")
+    |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+    |> assign(
+      last_paper_save_result: %{
+        saved: false,
+        request_id: request_id,
+        rejected: rejected
+      }
+    )
+  end
+
+  defp history_step_refused(socket, request_id, rejected) do
+    assign(socket,
+      last_paper_save_result: %{
+        saved: false,
+        request_id: request_id,
+        rejected: rejected
+      }
+    )
+  end
+
+  defp history_step_rejection(:history_ref_consumed), do: "history_ref_consumed"
+  defp history_step_rejection(:idempotency_receipt_expired), do: "history_expired"
+
+  defp history_step_rejection(reason)
+       when reason in [
+              :idempotency_receipt_missing,
+              :idempotency_receipt_pending,
+              :idempotency_receipt_wrong_scope,
+              :idempotency_receipt_malformed,
+              :idempotency_receipt_invalid,
+              :invalid_history
+            ],
+       do: "history_unavailable"
+
+  defp history_step_rejection(reason)
+       when reason in [:block_not_found, :duplicate_id],
+       do: "history_conflict"
+
+  defp history_step_rejection(reason)
+       when reason in [
+              :invalid_history_action,
+              :history_action_mismatch,
+              :invalid_paper_contextual_history_request,
+              :invalid_request_id,
+              :invalid_canvas_run_context,
+              :idempotency_payload_mismatch
+            ],
+       do: "invalid_history_request"
+
+  defp history_step_rejection(_reason), do: "history_step_failed"
+
+  defp current_history_rev(socket, slug, dataset) do
+    case Content.get_paper(slug, dataset, ScopeHelpers.scope_opts(socket)) do
+      %{content: content} when is_map(content) -> Map.get(content, "rev") || 0
+      _missing -> socket.assigns[:paper_rev]
+    end
+  end
+
+  @doc false
+  def receipt_changed?(receipt), do: Map.get(receipt, :op_count, 0) > 0
+
+  @doc false
+  def receipt_history_step(receipt, request_id) when is_binary(request_id) do
+    case Map.get(receipt, :contextual_history) do
+      %{"action" => action} when action in ["undo", "redo"] ->
+        %{version: 1, ref: request_id, action: action}
+
+      _unsupported ->
+        nil
+    end
+  end
+
+  def receipt_history_step(_receipt, _request_id), do: nil
 
   defp refresh_replay_token(socket) do
     current_user = socket.assigns[:current_user]
@@ -963,9 +1153,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       fleet_renders =
         render_blocks
         |> Enum.filter(&fleet_block?/1)
-        |> Enum.map(fn block ->
-          %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
-        end)
+        |> Enum.map(&fleet_render(&1, previews))
 
       # editable-figure: the CHILD-only render for every top-level figure, on the SAME
       # bp:block-html channel, keyed by the FIGURE id (so the bpFigure atom's paint
@@ -1030,6 +1218,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # every other fleet block renders directly from its carried snapshot/data. An
   # error preview falls back to the unresolved block so the emitter degrades
   # gracefully rather than crashing the push.
+  @doc false
+  def fleet_render(block, previews) do
+    render = %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
+
+    # Bind native Stats/Cards fields to the authored source of this exact paint,
+    # not a later local value or a display-only query result.
+    if block["type"] in ~w(stat stats stat-grid cards),
+      do: Map.put(render, "source_block", block),
+      else: render
+  end
+
   defp fleet_block_html(block, previews) do
     resolved =
       case Map.get(previews, Map.get(block, "id")) do
@@ -1110,12 +1309,94 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             {nil, []}
         end
 
-      runs = canvas_echo_runs(slug, blocks)
-
       rev = doc_field(socket.assigns[:paper_doc], :content) |> then(&get_in(&1 || %{}, ["rev"]))
-      push_event(socket, "bp:canvas-update", %{runs: runs, rev: rev, request_id: request_id})
+
+      lease_tokens = socket.assigns[:paper_canvas_lease_tokens] || %{}
+
+      runs =
+        slug
+        |> canvas_echo_runs(blocks, socket.assigns[:paper_canvas_retained])
+        |> Enum.map(fn run ->
+          run
+          |> Map.put(:retained_leases, PaperCanvasLease.for_run(lease_tokens, run.blocks))
+          |> Map.put(:retained_lease_overflow, PaperCanvasLease.blocked?(socket))
+        end)
+
+      push_event(
+        socket,
+        "bp:canvas-update",
+        %{runs: runs, rev: rev, request_id: request_id}
+      )
     else
       socket
+    end
+  end
+
+  @doc false
+  # Retention belongs to this mounted editor, never the stored document.
+  def retain_canvas_insertions(socket, slug, before_content, context, ops, outcome \\ :applied) do
+    after_content = doc_field(socket.assigns[:paper_doc], :content) || %{}
+    prior = PaperCanvas.retained_owners(socket.assigns[:paper_canvas_retained], slug)
+
+    owners =
+      PaperCanvas.retain_insertions(prior, before_content, after_content, context, ops, outcome)
+
+    socket
+    |> assign(:paper_canvas_retained, %{slug: slug, owners: owners})
+    |> PaperCanvasLease.issue_socket(
+      socket.assigns[:paper_doc],
+      owners,
+      after_content["blocks"] || [],
+      after_content["rev"]
+    )
+  end
+
+  @doc false
+  def canvas_reply_leases(socket, {:ok, %{} = context}, ops) when is_list(ops) do
+    blocks = paper_top_level_blocks(socket)
+
+    with {:ok, normalized} <- CanvasRunContext.normalize(context),
+         post_ids <- postwrite_context_ids(normalized.container_run_ids, ops),
+         post_context <- Map.put(normalized, :container_run_ids, post_ids),
+         {:ok, _blocks, leases} <-
+           CanvasRunContext.map_run(blocks, post_context, fn run ->
+             {:ok, run,
+              PaperCanvasLease.for_run(socket.assigns[:paper_canvas_lease_tokens] || %{}, run)}
+           end) do
+      leases
+    else
+      _ -> []
+    end
+  end
+
+  def canvas_reply_leases(_socket, _context, _ops), do: []
+
+  defp postwrite_context_ids(ids, ops) do
+    Enum.reduce(ops, ids, fn
+      %{"op" => "append-block", "block" => %{"id" => id}}, current when is_binary(id) ->
+        current ++ [id]
+
+      %{"op" => "insert-after", "afterId" => after_id, "block" => %{"id" => id}}, current
+      when is_binary(id) ->
+        insert_context_id(current, after_id, id, :after)
+
+      %{"op" => "insert-before", "beforeId" => before_id, "block" => %{"id" => id}}, current
+      when is_binary(id) ->
+        insert_context_id(current, before_id, id, :before)
+
+      %{"op" => "replace-block", "id" => old_id, "block" => %{"id" => id}}, current
+      when is_binary(id) ->
+        Enum.map(current, &if(&1 == old_id, do: id, else: &1))
+
+      _op, current ->
+        current
+    end)
+  end
+
+  defp insert_context_id(ids, anchor, id, side) do
+    case Enum.find_index(ids, &(&1 == anchor)) do
+      nil -> ids
+      index -> List.insert_at(ids, index + if(side == :after, do: 1, else: 0), id)
     end
   end
 
@@ -1147,36 +1428,51 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   def table_confirmation(result, _op, _blocks, _rev), do: result
 
   @doc false
-  def canvas_echo_runs(slug, blocks) when is_binary(slug) and is_list(blocks) do
+  def canvas_echo_runs(slug, blocks, retained \\ nil)
+
+  def canvas_echo_runs(slug, blocks, retained) when is_binary(slug) and is_list(blocks) do
     blocks = Content.ensure_block_ids(blocks)
-    run_entries(slug, blocks) ++ nested_canvas_echo_runs(slug, blocks)
+    retained = normalize_echo_retained(retained, slug)
+    owner_run_entries(slug, slug, blocks, retained, :document)
   end
 
-  def canvas_echo_runs(_slug, _blocks), do: []
+  def canvas_echo_runs(_slug, _blocks, _retained), do: []
 
-  defp run_entries(slug, blocks) do
+  defp normalize_echo_retained(%MapSet{} = ids, slug),
+    do: %{slug: slug, owners: %{document: ids}}
+
+  defp normalize_echo_retained(retained, _slug), do: retained
+
+  defp owner_run_entries(root_slug, run_slug, blocks, retained, owner) do
+    retained_ids = PaperCanvas.retained_ids(retained, root_slug, owner)
+
     blocks
-    |> PaperCanvas.partition_runs()
+    |> PaperCanvas.partition_runs(retained_ids)
     |> PaperCanvas.with_run_ordinals()
     |> Enum.flat_map(fn
       {:run, run_blocks, ordinal} ->
-        [%{run_id: PaperCanvas.run_id(slug, ordinal), blocks: run_blocks}]
+        [%{run_id: PaperCanvas.run_id(run_slug, ordinal), blocks: run_blocks}]
 
-      {:block, _block} ->
-        []
+      {:block, block} ->
+        boundary_echo_runs(root_slug, block, retained)
     end)
   end
 
-  defp nested_canvas_echo_runs(root_slug, blocks) do
-    Enum.flat_map(blocks, fn
+  defp boundary_echo_runs(root_slug, block, retained) do
+    case block do
       %{"type" => "tabs", "id" => id, "tabs" => rows}
       when is_binary(id) and is_list(rows) ->
         Enum.flat_map(rows, fn
           %{"id" => row_id} = row when is_binary(row_id) and row_id != "" ->
             children = tab_children(row)
 
-            run_entries(PaperCanvas.tabs_run_slug(root_slug, id, row_id), children) ++
-              nested_canvas_echo_runs(root_slug, children)
+            owner_run_entries(
+              root_slug,
+              PaperCanvas.tabs_run_slug(root_slug, id, row_id),
+              children,
+              retained,
+              nil
+            )
 
           _ ->
             []
@@ -1185,8 +1481,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       %{"type" => "expandable", "id" => id} = block when is_binary(id) ->
         children = expandable_children(block)
 
-        run_entries(PaperCanvas.expandable_run_slug(root_slug, id), children) ++
-          nested_canvas_echo_runs(root_slug, children)
+        owner_run_entries(
+          root_slug,
+          PaperCanvas.expandable_run_slug(root_slug, id),
+          children,
+          retained,
+          nil
+        )
 
       %{"type" => "steps", "id" => id, "steps" => rows}
       when is_binary(id) and is_list(rows) ->
@@ -1194,8 +1495,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           %{"id" => row_id} = row when is_binary(row_id) and row_id != "" ->
             children = expandable_children(row)
 
-            run_entries(PaperCanvas.steps_run_slug(root_slug, id, row_id), children) ++
-              nested_canvas_echo_runs(root_slug, children)
+            owner_run_entries(
+              root_slug,
+              PaperCanvas.steps_run_slug(root_slug, id, row_id),
+              children,
+              retained,
+              nil
+            )
 
           _ ->
             []
@@ -1205,14 +1511,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       when is_binary(id) and id != "" and is_map(child) ->
         children = [child]
 
-        run_entries(PaperCanvas.figure_run_slug(root_slug, id), children) ++
-          nested_canvas_echo_runs(root_slug, children)
+        owner_run_entries(
+          root_slug,
+          PaperCanvas.figure_run_slug(root_slug, id),
+          children,
+          retained,
+          nil
+        )
 
       %{"type" => "terminal", "id" => id} = block when is_binary(id) and id != "" ->
         case terminal_children(block) do
           {:ok, children} ->
-            run_entries(PaperCanvas.terminal_run_slug(root_slug, id), children) ++
-              nested_canvas_echo_runs(root_slug, children)
+            owner_run_entries(
+              root_slug,
+              PaperCanvas.terminal_run_slug(root_slug, id),
+              children,
+              retained,
+              nil
+            )
 
           :error ->
             []
@@ -1222,12 +1538,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       when is_binary(id) and id != "" and is_list(children) ->
         own_runs =
           if SectionLayout.grid(block) do
-            []
+            Enum.flat_map(children, &boundary_echo_runs(root_slug, &1, retained))
           else
-            run_entries(PaperCanvas.section_run_slug(root_slug, id), children)
+            owner_run_entries(
+              root_slug,
+              PaperCanvas.section_run_slug(root_slug, id),
+              children,
+              retained,
+              {:section, id}
+            )
           end
 
-        own_runs ++ nested_canvas_echo_runs(root_slug, children)
+        own_runs
 
       %{"type" => "columns", "id" => id, "columns" => columns}
       when is_binary(id) and id != "" and is_list(columns) ->
@@ -1235,8 +1557,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> Enum.with_index()
         |> Enum.flat_map(fn
           {children, index} when is_list(children) ->
-            run_entries(PaperCanvas.columns_run_slug(root_slug, id, index), children) ++
-              nested_canvas_echo_runs(root_slug, children)
+            owner_run_entries(
+              root_slug,
+              PaperCanvas.columns_run_slug(root_slug, id, index),
+              children,
+              retained,
+              {:columns, id, index}
+            )
 
           {_opaque, _index} ->
             []
@@ -1244,7 +1571,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       _ ->
         []
-    end)
+    end
   end
 
   @doc false
@@ -1697,6 +2024,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
         assign(socket,
           paper_doc: fresh,
+          paper_canvas_retained:
+            PaperCanvas.refresh_retained(socket.assigns[:paper_canvas_retained], slug, blocks),
           paper_rev: Map.get(content, "rev") || 0,
           paper_link_details: paper_link_details(socket, fresh, blocks)
         )
@@ -1930,6 +2259,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   def setup_paper_view(socket, %{content: content} = paper) when is_map(content) do
+    retained =
+      PaperCanvas.refresh_retained(
+        socket.assigns[:paper_canvas_retained],
+        paper.doc_id,
+        content["blocks"] || []
+      )
+
     blocks = reader_paper_blocks(socket, paper)
     rev = Map.get(content, "rev") || 0
     html = reader_paper_html(socket, paper)
@@ -1944,10 +2280,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: html,
         paper_block_mode: true,
         paper_edit_mode: false,
+        paper_canvas_retained: retained,
         paper_link_details: paper_link_details(socket, paper, blocks),
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
+      )
+      |> PaperCanvasLease.resume_socket(
+        paper,
+        content["blocks"] || [],
+        canvas_resume_authorized?(socket, paper)
       )
       |> assign(sidebar_assigns(paper))
       # pdd-t12b: with the canvas ON (the mainline default) a block paper opens
@@ -1963,7 +2305,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         if(PaperCanvas.paper_canvas_enabled?(),
           do: [],
           else:
-            paper_stream_items(blocks, socket.assigns.dataset, ScopeHelpers.scope_opts(socket))
+            paper_stream_items(
+              blocks,
+              socket.assigns.dataset,
+              ScopeHelpers.scope_opts(socket),
+              paper_doc_id(paper)
+            )
         ),
         reset: true
       )
@@ -1983,6 +2330,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_html: html,
         paper_block_mode: false,
         paper_edit_mode: false,
+        paper_canvas_retained: nil,
         paper_link_details: %{},
         backlinks_used_by: used_by,
         backlinks_linked: linked,
@@ -1994,6 +2342,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   def setup_paper_view(socket, _paper), do: clear_paper_view(socket)
+
+  @doc false
+  def canvas_resume_authorized?(socket, paper) do
+    doc_field(paper, :type) == Content.paper_type() and
+      not write_denied?(socket) and
+      not grant_target_denied?(socket, doc_field(paper, :type), doc_field(paper, :doc_id)) and
+      not read_only_pane?(socket)
+  end
 
   # Default t6 sidebar assigns when a paper opens: panel + every section open,
   # slug draft seeded from the paper's own id with its live format verdict.
@@ -2088,6 +2444,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       socket
       |> assign(
         editor_view: :form,
+        paper_canvas_retained: nil,
         paper_doc: nil,
         paper_rev: 0,
         paper_html: "",
@@ -2099,20 +2456,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_linked: [],
         backlinks_unlinked: []
       )
+      |> PaperCanvasLease.reset_socket()
       |> assign(sidebar_assigns(nil))
     else
-      assign(socket,
+      socket
+      |> assign(
         editor_view: :form,
+        paper_canvas_retained: nil,
         paper_link_details: %{},
         backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: []
       )
+      |> PaperCanvasLease.reset_socket()
     end
   end
 
   @doc false
-  def paper_stream_items(blocks, dataset, scope) do
+  def paper_stream_items(blocks, dataset, scope, paper_id \\ nil) do
+    # Grandfather badge (task-597ea451072da061): the SAME seam the /papers
+    # reader uses — `PreGateRegister.annotate/3` on the stored (unresolved)
+    # blocks, before any resolution. Register membership AND a still-refused
+    # gate recheck insert ONE synthesised badge block under the byline; the
+    # stored `blocks` (the save baseline) are never touched, so the badge can
+    # not be saved back into the Paper.
+    stored = blocks
+    blocks = PreGateRegister.annotate(blocks, paper_id, stored)
+
     # pdd-t11 debt fix (2): resolve LIVE task/query blocks the SAME way the
     # /papers reader does — `Content.Papers.resolve_tasks_in_blocks/2`, the ONE
     # producer (doctrine rule 3). Without this, the Studio read-only VIEW render
@@ -2171,6 +2541,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       %{id: paper_stream_block_id(block, index), html: Render.render_block(block, opts)}
     end)
   end
+
+  # The pane doc's id for the pre-gate register lookup (a `%Content.Document{}`
+  # or a plain map); nil when there is no paper — the register answers nil too.
+  @doc false
+  def paper_doc_id(%{doc_id: doc_id}) when is_binary(doc_id), do: doc_id
+  def paper_doc_id(%{"doc_id" => doc_id}) when is_binary(doc_id), do: doc_id
+  def paper_doc_id(_), do: nil
 
   @doc false
   def paper_stream_block_id(block, index) do
@@ -2266,7 +2643,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> stream(
               :paper_blocks,
-              paper_stream_items(blocks, dataset, ScopeHelpers.scope_opts(socket)),
+              paper_stream_items(
+                blocks,
+                dataset,
+                ScopeHelpers.scope_opts(socket),
+                paper_doc_id(paper)
+              ),
               reset: true
             )
             |> assign(:paper_doc, paper)

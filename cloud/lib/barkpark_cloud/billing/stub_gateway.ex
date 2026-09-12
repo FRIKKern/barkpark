@@ -91,6 +91,18 @@ defmodule BarkparkCloud.Billing.StubGateway do
   end
 
   @impl true
+  def retrieve_subscription(subscription_id) when is_binary(subscription_id) do
+    # THE STUB'S WORLD IS A PAID WORLD. There is no store here to hold a lapsed
+    # subscription, so this answers `"active"` for every id — which is the right
+    # default for the dev/test happy path but is NOT a fixture for the refusal
+    # side. A test that needs the gateway to say "unpaid" swaps in its own
+    # `Gateway` module via `config :barkpark_cloud, BarkparkCloud.Billing,
+    # gateway: MyGateway` (the same call-time `Billing.gateway/0` seam prod uses),
+    # rather than teaching this module a state machine it has no state for.
+    {:ok, %{"id" => subscription_id, "status" => "active"}}
+  end
+
+  @impl true
   def verify_webhook(payload, signature) when is_binary(payload) and is_binary(signature) do
     if signature == @test_signature do
       {:ok, %{"verified" => true, "payload" => payload}}

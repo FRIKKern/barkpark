@@ -1,0 +1,68 @@
+# .silencer-counts — the committed count roster read by
+# scripts/silencer-growth-ratchet.sh (task cgsi-bl-baseline-laundering-estate).
+#
+# One line per SILENCER: "<name> <count>". The ratchet REDS when a silencer holds
+# MORE than the number here and stays green when it holds fewer — shrink-only, so
+# paying a baseline down is free and adding to one costs a visible bump in this
+# file, in the same commit, with a reason in the pull request.
+#
+# RAISING A NUMBER HERE IS THE POINT, not a workaround. The defect this closes is
+# that these files could be regenerated in one command with nothing comparing the
+# result to the previous revision. Making the increase land HERE, in a file whose
+# whole content is "how much are we currently silencing", is what turns a silent
+# regeneration into a reviewable diff.
+#
+# NOT ON THIS ROSTER, deliberately: .go-format-drift-ceiling. It is already
+# ratcheted by a BLOCKING job (.github/workflows/go-format.yml ->
+# scripts/go-format-drift-ceiling.sh). Two gates on one number would make a
+# legitimate prune red one of them.
+#
+# The names, and what each count measures, are defined in the table at the top of
+# scripts/silencer-growth-ratchet.sh. Every number below was measured off this
+# tree, not transcribed.
+#
+# CROSS-CHECK EVERY NUMBER HERE WITH `awk 'END{print NR}'`. Two different tools
+# undercounted api/.sobelow-skips by one while this roster was being written,
+# and an off-by-one LOW is not a harmless typo: it reds the gate on the very
+# next honest edit, and the obvious cure for a red nobody believes is to stop
+# believing the gate. The file has 37 lines, 1 blank, 0 comments, 36 entries —
+# and its last line carries NO TRAILING NEWLINE, which is what both tools trip
+# over:
+#
+#   1. `wc -l` counts NEWLINES, not lines. It reports 36 for a 37-line file
+#      whose last line is unterminated, and any "lines minus blanks" derivation
+#      inherits the undercount (36 - 1 = 35, wrong).
+#   2. A `grep` that is not the system grep. On the machine this was derived on,
+#      `grep` was a shell function shimming ugrep; ugrep DROPS a final
+#      unterminated line from an INVERTED count. Minimal repro on a 3-line file
+#      whose last line is unterminated: `grep -c ''` returns 3 under both, and
+#      `grep -v <nomatch>` PRINTS all 3 under both, but `grep -vc <nomatch>`
+#      returns 2 under ugrep and 3 under /usr/bin/grep. Only the counting
+#      inverted form diverges, which is precisely the form a roster derivation
+#      reaches for. Use `command grep` if you must grep, or better, use awk.
+#
+# The gate itself measures under bash with whatever `grep` CI's runner provides,
+# so a number derived through a local shim can disagree with the gate that reads
+# it. awk has no such shim in this repo and agrees with /usr/bin/grep. Derive
+# with awk. (This is NOT a zsh-vs-bash difference: `zsh -f` and bash both
+# return 36. The shell was innocent; the `grep` on its PATH was not.)
+
+# fail-open tenant reads grandfathered by scripts/tenant-scope-check.sh --baseline
+# (non-comment lines). This is the strongest instance: the gate's own FAILED
+# message advertises the command that regenerates this file.
+tenant-scope-baseline 44
+
+# Sobelow findings skipped by the api security scan (non-comment lines).
+sobelow-skips 36
+
+# design/status-manifest.json — the hand-edited spec status-manifest-check.sh
+# compares against. Total lines: a JSON manifest has no comment syntax, so every
+# line is content.
+status-manifest 45
+
+# inline "lit-allow" literal-color waivers, counted as OCCURRENCES (a line may
+# carry more than one). Three populations because three different checkers read
+# them: scripts/go-literal-check.sh, web-literal-check.sh, studio-literal-check.sh.
+lit-allow-go 3
+lit-allow-web 0
+lit-allow-api 8

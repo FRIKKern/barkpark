@@ -1,6 +1,8 @@
 KPI / STAT CELLS                                                                                                        
 ────────────────                                                                                                        
                                                                                                                         
+A big-number cell, a bullet-bar cell, a full eighth-block sparkline, a 4-up KPI grid, and a degraded placeholder.       
+                                                                                                                        
 1.24M                                                                                                                   
 Tokens this month                                                                                                       
 ▁▂▃▃▅▆█                                                                                                                 

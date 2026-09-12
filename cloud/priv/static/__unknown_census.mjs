@@ -83,6 +83,9 @@ const EXPECT = [
   { f: "loadSessions", p: '"/v1/account/sessions"', v: "guarded",
     proof: [/!r\.ok/],
     why: "failure paints its own line — distinct from 'No active sessions.'" },
+  { f: "loadSecurityLog", p: '"/v1/me/security-events"', v: "guarded",
+    proof: [/!r\.ok/, /load your security log/],
+    why: "cloud-console-user-security-log: a failed read says so — it must NEVER paint the empty-trail sentence, which reads as 'nothing has changed on your account'" },
   { f: "loadProviders", p: '"/v1/providers"', v: "guarded",
     proof: [/data-providers-retry/],
     why: "cch-w67-s4: !ok arm speaks + Retry; the roster/empty state renders only from a 200" },
@@ -142,6 +145,11 @@ const EXPECT = [
   { f: "loadOverview", p: '"/v1/barkparks"', v: "guarded",
     proof: [/markRefreshStale\(\)/],
     why: "full-load failure paints the error state; a background failure marks staleness, never blanks" },
+  // cch-w49-bl: the SECOND reader of this envelope. The billing screen asks for
+  // the ceiling it used to state from a client constant.
+  { f: "loadBillingCeiling", p: '"/v1/usage/summary"', v: "sanctioned",
+    proof: [/if \(!r\.ok\) return billingQuota;/],
+    why: "a failed read leaves the cache and the loaded flag alone, so the ceiling line stays OMITTED — an unanswered ceiling and an absent one are the same silence, never a number" },
   { f: "loadOverview", p: '"/v1/usage/summary"', v: "sanctioned",
     proof: [/res\[0\]\.ok && res\[0\]\.data && res\[0\]\.data\.usage\) \? res\[0\]\.data\.usage : null/],
     why: "null usage renders the slots meter's unknown state — never a fabricated quota" },
@@ -486,22 +494,40 @@ for (const { row } of foundKeyed) {
 }
 
 // ── refusals: a broken instrument never reports a clean tree ────────────────
-if (overruns.length) {
-  console.error("FAIL(2): the function walk is corrupted — overlapping top-level extents: " + overruns.join(", "));
+
+// ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
+// EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
+//
+//     !! UNKNOWN CENSUS (exit 2): REFUSED TO MEASURE — <reason>
+//
+// It is the same shape __preview__/exit-vocabulary.mjs already emits for the
+// browser instruments, so ONE reader covers the whole console fence. Before
+// this, six of console-unit's nine exit-2 sites spoke a private vocabulary
+// (BARE `FAIL(2):` lines with no prefix at all) that no `!!`-anchored capture could see — a gate that CAPTURES the
+// refusing instrument's own summary line would have replaced a wrong sentence
+// with NO sentence, in the wave about silence.
+//
+// THE READER IS scripts/console-refusal-capture.mjs, and its unit test
+// ENUMERATES this file from source: a new exit-2 path that does not go through
+// `refuse2` reds that test. Do not add one.
+const REFUSAL_NAME = "UNKNOWN CENSUS";
+const refuse2 = (reason) => {
+  process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\n`);
   process.exit(2);
+};
+
+if (overruns.length) {
+  refuse2("the function walk is corrupted — overlapping top-level extents: " + overruns.join(", "));
 }
 if (!found.length) {
-  console.error("FAIL(2): zero api(\"GET\") call sites found — the extractor is broken, not the tree clean.");
-  process.exit(2);
+  refuse2("zero api(\"GET\") call sites found — the extractor is broken, not the tree clean.");
 }
 if (controlsMissing.length) {
-  console.error("FAIL(2): a positive control is missing from the source: " + controlsMissing.join(" "));
-  process.exit(2);
+  refuse2("a positive control is missing from the source: " + controlsMissing.join(" "));
 }
 if (controlBreaches.length) {
-  console.error("FAIL(2): a positive control now holds a GET call site: " + controlBreaches.join(" ") +
+  refuse2("a positive control now holds a GET call site: " + controlBreaches.join(" ") +
     " — the census can no longer prove it discriminates.");
-  process.exit(2);
 }
 
 // ── THE SET DIFF. Never a count. ────────────────────────────────────────────

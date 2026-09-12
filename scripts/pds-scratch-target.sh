@@ -4,7 +4,8 @@
 # Barkpark (the PDS pull TARGET) on this host, from any checkout or worktree.
 #
 #   scripts/pds-scratch-target.sh up          boot a scratch instance, mint an
-#                                             admin token, write scratch.env
+#                                             admin token AND the tenancy rows
+#                                             it needs (TRAP 7), write scratch.env
 #   scripts/pds-scratch-target.sh up --verify boot, then run the verify suite
 #   scripts/pds-scratch-target.sh verify      prove the isolation is REAL
 #   scripts/pds-scratch-target.sh status      where is it, is it up
@@ -96,6 +97,8 @@
 # change a verb's output. Filed as a follow-up task.
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -107,6 +110,12 @@ API_DIR="$REPO_ROOT/api"
 # it; `up`'s executability check still runs against whatever it resolves to.
 BARKPARK_BIN="${PDS_SCRATCH_BARKPARK_BIN:-$REPO_ROOT/bin/barkpark}"
 PG_BIN_SCRIPT="$REPO_ROOT/bin/barkpark-pg"
+
+# The workspace slug the blob-push probe addresses, and the slug `mint_admin_token`
+# creates + grants the scratch token an `admin` membership in (TRAP 7 below).
+# ONE constant so the two can never drift apart — a probe addressing a slug the
+# mint never created is indistinguishable, at the HTTP layer, from a route bug.
+PDS_SCRATCH_WS_SLUG="${PDS_SCRATCH_WS_SLUG:-default}"
 
 # Pointer to the most recent scratch root, so `verify`/`teardown`/`env` work in
 # a later shell without the caller having to remember the mktemp path.
@@ -370,22 +379,130 @@ load_scratch_env() {
 
 # ── TRAP 6 — mint an admin token ─────────────────────────────────────────────
 #
-# A fresh box 401s the blob-push route and there is NO mix task that mints a
-# token (33 tasks, none auth). api_tokens stores only sha256(raw) hex
-# (Barkpark.Auth.ApiToken.hash_token/1), and BarkparkWeb.Plugs.RequireAdmin
-# demands the "admin" permission, so insert the row directly and print the raw
-# token. kind='api' is what Auth.verify_token/1 filters on.
+# A fresh box 401s the blob-push route. A FIRST-PARTY MINT DOES EXIST —
+# Barkpark.Seeds.Clean.bootstrap_admin_token/1, reached as `bin/barkpark token`
+# or `BARKPARK_SEED_PROFILE=clean mix run priv/repo/seeds.exs`. What does not
+# exist is a mix TASK that mints one (33 tasks, none auth); the earlier wording
+# here ("there is NO mix task") read as "no path exists" and is the origin of an
+# oversized backlog premise. This harness still inserts the row directly on
+# purpose: it wants a LABELLED, disposable scratch credential ('pds-scratch') it
+# can grep for, minted before the seed path is itself under test. That is a
+# harness choice, not the absence of a path — do not cite it as one.
+# api_tokens stores only sha256(raw) hex (Barkpark.Auth.ApiToken.hash_token/1),
+# and BarkparkWeb.Plugs.RequireAdmin demands the "admin" permission.
+# kind='api' is what Auth.verify_token/1 filters on.
+#
+# ── TRAP 7 — a token alone is NOT enough: the route is TENANCY-gated ─────────
+#
+# `MediaController.put_blob/2` (api/lib/barkpark_web/controllers/media_controller.ex)
+# resolves the path's slug with `Tenancy.get_workspace_by_slug/1` and THEN
+# demands `Tenancy.Auth.workspace_admin?(token, workspace.id)` — a
+# `workspace_memberships` row for THIS token with role owner|admin. Its `else`
+# folds BOTH misses into the same `not_found(conn, "workspace not found")`, on
+# purpose (a caller must not learn whether a slug exists), so the 404 says
+# NOTHING about which half is missing and cannot be read as a route bug.
+#
+# `bin/barkpark up` runs `migrate` and nothing else — it never runs
+# priv/repo/seeds.exs (only `bin/barkpark token` does). So a FRESH scratch box
+# has ZERO workspaces and ZERO memberships, and the section-3 probe got exactly
+# that 404: CI run 34685061716 (2026-09-12, first main dispatch of
+# .github/workflows/pds-scratch-round-trip.yml), `PUT
+# /api/workspaces/default/media/blob/... -> 404 {"code":"not_found","message":
+# "workspace not found"}`. This never fired for a human running the harness from
+# a checkout whose scratch DB had been seeded by hand at some point — a fresh
+# Postgres is the honest input, and CI is the first place it was ever used.
+#
+# The first-party rows this mirrors: `Seeds.Shared.ensure_default_scope/0` ->
+# `Tenancy.establish_default_workspace!/0` (slug "default"), and
+# `Auth.create_token/5` -> `insert_token_with_membership/3`, which is precisely
+# the membership the direct INSERT above skipped. We create the SAME two rows by
+# the same shapes rather than adopting the seed path, for the reason TRAP 6
+# already states: a labelled, disposable credential minted before the seed path
+# is itself under test. Deliberately NOT set: `workspaces.is_default` — the blob
+# route reads the slug, never the flag, and claiming the instance-default seat
+# would make this harness a third writer of it.
 mint_admin_token() {
-  local raw hash
-  raw="pds-scratch-$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 40)"
+  local raw hash rows
+
+  # 20 random bytes -> exactly 40 hex chars. `od -N20` reads a BOUNDED amount
+  # and ends on its own, so no reader ever closes the pipe early.
+  #
+  # WHAT THIS REPLACED, and why it was not cosmetic:
+  # `tr -dc 'a-f0-9' </dev/urandom | head -c 40` — `head` closes the pipe the
+  # moment it has 40 bytes, `tr` takes SIGPIPE, and under this script's
+  # `set -o pipefail` the command substitution's status is 141, which `set -e`
+  # turns into an abort of `up` BEFORE a token exists. It is a race, so it is
+  # intermittent: CI run 34685061716 printed the loud half ("tr: write error:
+  # Broken pipe") and survived; the quiet half kills the boot.
+  raw="pds-scratch-$(LC_ALL=C od -An -v -tx1 -N20 </dev/urandom | tr -d ' \n')"
+
+  # 'pds-scratch-' (12) + 40 hex = 52. A short raw token still INSERTs happily
+  # and then 401s forever with no hint why, so refuse here instead of shipping a
+  # credential nobody can use.
+  case "${#raw}" in
+    52) : ;;
+    *)  die "CANNOT READ /dev/urandom through od: minted token is ${#raw} chars, expected 52 (pds-scratch- + 40 hex)" ;;
+  esac
+
   hash="$(printf '%s' "$raw" | shasum -a 256 | awk '{print $1}')"
 
   "$PG_BIN_SCRIPT" psql --quiet --tuples-only --no-align --command \
     "INSERT INTO api_tokens (id, token_hash, label, name, dataset, permissions, kind, inserted_at, updated_at)
      VALUES (gen_random_uuid(), '$hash', 'pds-scratch', 'pds-scratch admin', 'production',
-             ARRAY['read','write','admin'], 'api', now(), now())" >/dev/null
+             ARRAY['read','write','admin'], 'api', now(), now());
+     INSERT INTO workspaces (id, slug, name, inserted_at, updated_at)
+     VALUES (gen_random_uuid(), '$PDS_SCRATCH_WS_SLUG', 'PDS scratch workspace', now(), now())
+     ON CONFLICT (slug) DO NOTHING;
+     INSERT INTO workspace_memberships (id, workspace_id, principal_type, principal_id, role, inserted_at, updated_at)
+     SELECT gen_random_uuid(), w.id, 'api_token', t.id, 'admin', now(), now()
+       FROM workspaces w, api_tokens t
+      WHERE w.slug = '$PDS_SCRATCH_WS_SLUG' AND t.token_hash = '$hash'
+     ON CONFLICT DO NOTHING" >/dev/null
+
+  # READ THE ROWS BACK. `psql -c` without ON_ERROR_STOP exits 0 on a failed
+  # statement, and an `ON CONFLICT DO NOTHING` that swallowed a real collision is
+  # byte-identical to success from here. The only honest evidence that the
+  # tenancy precondition holds is the joined row itself.
+  rows="$(scratch_membership_count "$hash")"
+  case "$rows" in
+    1) : ;;
+    "") die "CANNOT READ workspace_memberships back from the scratch DB (empty result, not a zero) — the blob push would 404 'workspace not found' with no way to tell a missing row from a route bug" ;;
+    *)  die "expected exactly 1 owner|admin api_token membership for the scratch token in workspace '$PDS_SCRATCH_WS_SLUG', got $rows — TRAP 7" ;;
+  esac
 
   printf '%s\n' "$raw"
+}
+
+# Count the joined tenancy rows the blob-push route actually reads: a workspace
+# slugged $PDS_SCRATCH_WS_SLUG, an api_token membership in it at owner|admin, and
+# the api_tokens row carrying $1 (a sha256 hex). Prints a bare integer, or
+# NOTHING when the read itself failed — the caller must treat those differently.
+scratch_membership_count() { # $1 = token_hash
+  "$PG_BIN_SCRIPT" psql --quiet --tuples-only --no-align --command \
+    "SELECT count(*) FROM workspace_memberships m
+       JOIN workspaces w ON w.id = m.workspace_id
+       JOIN api_tokens t ON t.id = m.principal_id
+      WHERE w.slug = '$PDS_SCRATCH_WS_SLUG'
+        AND m.principal_type = 'api_token'
+        AND m.role IN ('owner', 'admin')
+        AND t.token_hash = '$1'" 2>/dev/null | tr -d '[:space:]'
+}
+
+# A one-line diagnosis for a 404 on the blob push: how many workspaces exist at
+# all, whether THIS slug is one of them, and how many owner|admin api_token
+# memberships it carries. Prints nothing when the DB read failed — the caller
+# renders that as CANNOT READ, never as a zero.
+scratch_tenancy_census() {
+  "$PG_BIN_SCRIPT" psql --quiet --tuples-only --no-align --command \
+    "SELECT 'workspaces=' || (SELECT count(*) FROM workspaces)
+         || ' slug_' || '$PDS_SCRATCH_WS_SLUG' || '_exists='
+         || (SELECT count(*) FROM workspaces WHERE slug = '$PDS_SCRATCH_WS_SLUG')
+         || ' admin_memberships_there='
+         || (SELECT count(*) FROM workspace_memberships m
+               JOIN workspaces w ON w.id = m.workspace_id
+              WHERE w.slug = '$PDS_SCRATCH_WS_SLUG'
+                AND m.principal_type = 'api_token'
+                AND m.role IN ('owner', 'admin'))" 2>/dev/null | tr -d '\n'
 }
 
 # ── up ───────────────────────────────────────────────────────────────────────
@@ -544,11 +661,12 @@ cmd_verify() {
 
   hr "2. the scratch server answers, and it is not on 4000"
   local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' "$PDS_SCRATCH_BASE/api/schemas" || true)"
+  # /status.json, not the sunset /api/schemas (removal 2026-12-31).
+  code="$(bp_curl_code -s -o /dev/null "$PDS_SCRATCH_BASE/status.json" || true)"
   if [ "$code" = "200" ]; then
-    ok "GET $PDS_SCRATCH_BASE/api/schemas -> 200"
+    ok "GET $PDS_SCRATCH_BASE/status.json -> 200"
   else
-    bad "GET $PDS_SCRATCH_BASE/api/schemas -> $code"
+    bad "GET $PDS_SCRATCH_BASE/status.json -> $code"
   fi
   # Report what (if anything) holds 4000 — someone else's dev server is fine,
   # OURS would mean the scratch target is not isolated at all.
@@ -570,15 +688,23 @@ cmd_verify() {
     | base64 -d >"$tmp_png" 2>/dev/null || printf 'PDS-SCRATCH-PROBE' >"$tmp_png"
 
   resp="$(curl -s -w '\n%{http_code}' -X PUT \
-    "$PDS_SCRATCH_BASE/api/workspaces/default/media/blob/$blob_path" \
+    "$PDS_SCRATCH_BASE/api/workspaces/$PDS_SCRATCH_WS_SLUG/media/blob/$blob_path" \
     -H "Authorization: Bearer $PDS_SCRATCH_TOKEN" \
     -H 'Content-Type: application/octet-stream' \
     --data-binary "@$tmp_png" || true)"
   code="$(printf '%s' "$resp" | tail -1)"
-  printf '  PUT /api/workspaces/default/media/blob/%s -> %s %s\n' \
-    "$blob_path" "$code" "$(printf '%s' "$resp" | sed '$d')"
+  printf '  PUT /api/workspaces/%s/media/blob/%s -> %s %s\n' \
+    "$PDS_SCRATCH_WS_SLUG" "$blob_path" "$code" "$(printf '%s' "$resp" | sed '$d')"
   if [ "$code" = "200" ]; then
     ok "blob push accepted with the minted admin token"
+  elif [ "$code" = "404" ]; then
+    # NAME THE CAUSE. The route folds "no such slug" and "this token holds no
+    # owner|admin membership there" into one 404 (TRAP 7), so the status alone
+    # cannot say which — print the rows it reads, and say so when the DB read
+    # itself failed rather than letting that look like a zero.
+    local census
+    census="$(scratch_tenancy_census || true)"
+    bad "blob push returned 404 (expected 200) — that is the TENANCY precondition, not the route: MediaController.put_blob/2 folds 'no workspace slugged $PDS_SCRATCH_WS_SLUG' and 'the scratch token holds no owner|admin membership there' into one 404. Rows the route reads: ${census:-CANNOT READ the scratch DB}"
   else
     bad "blob push returned $code (expected 200)"
   fi

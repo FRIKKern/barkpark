@@ -78,6 +78,20 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # editor still open — the #1851 never-unreachable guarantee.
     {tree, segments} = resolve(nav_path, gated, dataset, opts)
 
+    # DEAD-HEAD ALIAS (Gyldendal friction 67, E3.5). A deep link minted while
+    # the DEFAULT desk was showing carries the display group's id as its head —
+    # `/studio/content-types/publication/<id>` — and the row path of a DECLARED
+    # desk carries the declared section's id instead. Once a `deskStructure`
+    # document is published the old head names nothing anywhere, `resolve/4`
+    # hands the raw path back untouched, the walk finds no child for it, and
+    # the shell renders «This desk has no section named content-types» for a
+    # document that is one click away. When the head is dead but the tail is
+    # `<type>/<id>` for a type the desk lists, the link means the same thing
+    # `/studio/<type>/<id>` means (PR 16122): drop the head and normalize the
+    # tail to that type's node path. `aliased?` lets the LiveView rewrite the
+    # URL to the canonical path so the address bar stops lying.
+    {tree, segments, aliased?} = alias_dead_head(nav_path, tree, segments, gated)
+
     {panes, editor} = walk_and_stamp(segments, gated, tree, dataset, opts)
 
     # LAST-CHANCE NORMALIZATION (#35a, S9 crit 1a). `resolve/4` hands the walk
@@ -96,11 +110,51 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # shadowing group keeps its own address (`/studio/publication` still opens
     # the group) and only the path that opened nothing is rescued. This is the
     # #1851 never-unreachable guarantee applied to a declared desk.
-    case {editor, retry_segments(nav_path, segments, tree)} do
-      {nil, retry} when is_list(retry) -> walk_and_stamp(retry, gated, tree, dataset, opts)
-      _ -> {panes, editor}
+    {panes, editor} =
+      case {editor, retry_segments(nav_path, segments, tree)} do
+        {nil, retry} when is_list(retry) -> walk_and_stamp(retry, gated, tree, dataset, opts)
+        _ -> {panes, editor}
+      end
+
+    # Only an ALIASED walk that actually opened a document earns a canonical
+    # path: every other normalization keeps the URL it was given (the
+    # demoted-type and shadowed-group rescues above are deliberate no-rewrites).
+    editor =
+      if aliased? and is_map(editor),
+        do: Map.put(editor, :canonical_path, segments),
+        else: editor
+
+    {panes, editor}
+  end
+
+  # `{tree, segments, aliased?}` — see the DEAD-HEAD ALIAS note in `build/3`.
+  # The head is dead when `resolve/4` returned the raw path (no root item, no
+  # node anywhere in the tree it chose) — reserved heads and single-segment
+  # paths are never aliased. The alias resolves the tail's TYPE the way
+  # `resolve/4` resolves a head: the gated desk first, then the tree resolve
+  # chose (the ungated fallback), a singleton by type name with the id dropped.
+  defp alias_dead_head([head, type | rest] = nav_path, tree, segments, gated)
+       when segments == nav_path and head not in ["graph", "open"] do
+    if root_has_segment?(tree, head) or find_type_node(tree.items || [], head, []) != nil do
+      {tree, segments, false}
+    else
+      case find_type_node(gated.items || [], type, []) ||
+             find_type_node(tree.items || [], type, []) do
+        {node_path, %{type: :document}} -> {gated_or(tree, gated, node_path), node_path, true}
+        {node_path, _node} -> {gated_or(tree, gated, node_path), node_path ++ rest, true}
+        nil -> {tree, segments, false}
+      end
     end
   end
+
+  defp alias_dead_head(_nav_path, tree, segments, _gated), do: {tree, segments, false}
+
+  # Walk the gated desk when it lists the aliased type (the common case);
+  # otherwise the tree `resolve/4` already chose.
+  defp gated_or(tree, gated, [root_id | _]),
+    do: if(root_has_segment?(gated, root_id), do: gated, else: tree)
+
+  defp gated_or(tree, _gated, _), do: tree
 
   # Walk `segments` against `tree` and stamp every pane with its own address.
   #
@@ -458,9 +512,26 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           selected: Enum.at(rest, 0)
         }
 
-        editor = build_editor(type_name, schema, rest, dataset, opts, active_group)
+        # Gyldendal parity E3.3 — a tree root: the next segment names a row
+        # to DRILL, not a document to open (see `walk_tree/8`).
+        case Map.get(node, :tree) do
+          %{"parent" => parent} when is_binary(parent) and rest != [] ->
+            walk_tree(
+              rest,
+              1,
+              panes ++ [doc_pane],
+              type_name,
+              schema,
+              parent,
+              node,
+              dataset,
+              opts
+            )
 
-        {panes ++ [doc_pane], editor}
+          _ ->
+            editor = build_editor(type_name, schema, rest, dataset, opts, active_group)
+            {panes ++ [doc_pane], editor}
+        end
 
       %{type: :document, type_name: type_name} = node ->
         schema =
@@ -496,6 +567,90 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       _ ->
         {panes, nil}
+    end
+  end
+
+  # ── Gyldendal parity E3.3 — the hierarchy walk ─────────────────────────────
+  #
+  # Sanity's `buildCategoryTree`: opening a row of a tree list yields a pane
+  # with THAT document on top (openable), a divider carrying the child count
+  # and the level, then its children — each drillable the same way. Row ids
+  # are PUBLISHED ids and the children are read under the `:drafts`
+  # perspective, so a child with unpublished edits renders once (the
+  # published/draft pair collapses at SQL level). The pane's own address is
+  # stamped by `walk_and_stamp/5` like every other pane, so a row click
+  # appends the row id: clicking the parent row on top (`[…, id, id]`) opens
+  # the editor; clicking a child (`[…, id, child]`) drills one level deeper.
+  # A segment that is neither still opens as a document (a re-parented deep
+  # link) — the #1851 never-unreachable guarantee.
+  defp walk_tree([id | rest], level, panes, type_name, schema, parent, node, dataset, opts) do
+    pub_id = Content.published_id(id)
+
+    case Content.fetch_doc_with_draft(type_name, pub_id, dataset, scope(opts)) do
+      {nil, _, _} ->
+        {panes, nil}
+
+      {doc, _is_draft, _has_pub} ->
+        list_opts =
+          [perspective: :drafts, filter_map: %{parent => %{"eq" => pub_id}}] ++ scope(opts)
+
+        list_opts =
+          case desk_order(nil, schema, Map.get(node, :orderings)) do
+            [] -> list_opts
+            order -> Keyword.put(list_opts, :order, order)
+          end
+
+        {children, filter_error} = list_documents_preflighted(type_name, dataset, list_opts)
+
+        divider = %{
+          type: :divider,
+          id: "#{pub_id}-children",
+          label:
+            if(children == [],
+              do: "Ingen underkategorier",
+              else: "Underkategorier (#{length(children)}) — Nivå #{level}"
+            )
+        }
+
+        pane = %{
+          title: doc.title || (schema && schema.title) || type_name,
+          icon: node.icon || (schema && schema.icon),
+          type_name: type_name,
+          role: :list,
+          priority: :active,
+          desk_groups: [],
+          active_desk: nil,
+          filter_error: filter_error,
+          tree_level: level,
+          items: doc_items([doc], schema) ++ [divider] ++ doc_items(children, schema),
+          selected: rest |> Enum.at(0) |> then(&(&1 && Content.published_id(&1)))
+        }
+
+        child_ids = MapSet.new(children, &Content.published_id(&1.doc_id))
+
+        case rest do
+          [] ->
+            {panes ++ [pane], nil}
+
+          [next | _] = rest ->
+            next_pub = Content.published_id(next)
+
+            if next_pub != pub_id and MapSet.member?(child_ids, next_pub) do
+              walk_tree(
+                rest,
+                level + 1,
+                panes ++ [pane],
+                type_name,
+                schema,
+                parent,
+                node,
+                dataset,
+                opts
+              )
+            else
+              {panes ++ [pane], build_editor(type_name, schema, rest, dataset, opts, nil)}
+            end
+        end
     end
   end
 
@@ -649,10 +804,26 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # gravitational sun and bands dependents into BFS blast-rings. Dropping it
     # would silently re-center the graph on an arbitrary serialization-order
     # node. Fall back to the queried id (a real node id) when traverse omits it.
-    %{nodes: result.nodes, edges: result.edges, root: result.root || id}
+    # Thread the CORPUS truncation through. `Graph.traverse/2` reads the drafts
+    # corpus behind a document ceiling; over it the graph is PARTIAL and its
+    # unread targets render as phantom/dangling edges. Dropping the field here
+    # would let the Studio pane present that truncation as phantom references.
+    #
+    # `corpus_truncation` (nil | %{truncated: true, limit: _, read: _}) is the
+    # ONLY field that means the corpus specifically — the sibling `truncated`
+    # boolean is also true for BFS node-budget/fan-out/depth clamps, and
+    # `truncation_reason` lets a BFS bound win the tie and mask a real corpus
+    # cap. Carried verbatim; GraphView.corpus_truncation/1 does the validating.
+    %{
+      nodes: result.nodes,
+      edges: result.edges,
+      root: result.root || id,
+      corpus_truncation: Map.get(result, :corpus_truncation)
+    }
   end
 
-  defp graph_payload(_doc, _dataset, _scope_kw), do: %{nodes: [], edges: []}
+  defp graph_payload(_doc, _dataset, _scope_kw),
+    do: %{nodes: [], edges: [], corpus_truncation: nil}
 
   # Resolve a doc_id to its `%Document{}` WITHOUT knowing its schema type — the
   # blast-radius pane roots on ANY content doc, so type-agnostic resolution is
@@ -719,6 +890,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   defp doc_items(docs, schema) do
     preview = schema_list_preview(schema)
+    media_field = preview_field(Map.get(preview, "media"))
 
     Enum.map(docs, fn doc ->
       pub_id = Content.published_id(doc.doc_id)
@@ -726,7 +898,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       %{
         type: :doc,
         id: pub_id,
-        title: doc.title || "Untitled",
+        # Gyldendal parity E3.3 — `list_preview.media` names an image field;
+        # the row carries its url (nil when the document has none) and every
+        # row of a media-declaring type reserves the slot so titles align.
+        media: media_field && media_url(content_value(doc, media_field)),
+        media_slot: media_field != nil,
+        title: row_title(doc, schema),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
         badge: preview_value(doc, Map.get(preview, "badge")),
@@ -740,6 +917,79 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       }
     end)
   end
+
+  # [an-orphan-must-be-nameable] spd-w18-plus-creates-without-navigating,
+  # criterion 2. A "+" press whose navigation never reaches the browser still
+  # leaves a REAL row on the desk: the create succeeded server-side, only the
+  # answer was lost (D242/D265 — `new_document/2` ends in a `push_patch` whose
+  # reply rides the event's own ref, so a frame the browser drops leaves the
+  # server believing it navigated). Three such rows survived on guerrilla
+  # production. Every one of them rendered the same two words: "Untitled".
+  #
+  # THE ROW WAS PRESENT AND NOT IDENTIFIABLE, WHICH IS THE SAME AS UNREACHABLE.
+  # A human looking at three identical "Untitled" rows cannot tell which one
+  # their press made, which are older accidents, or which is safe to delete —
+  # and the desk offers no other handle, because the row's only visible text IS
+  # its title (`components.ex` passes `item.title` straight through to
+  # `pane_doc_item`, with `item[:meta] || item[:updated]` under it, and all
+  # three orphans shared "Updated 2m ago" too).
+  #
+  # So an unnamed row is named out of what the row already carries: its schema
+  # TYPE, and the entropy tail of its `doc_id`. That tail is not decoration —
+  # it is the `id` in the rendered `doc-<id>`, the value `phx-value-id` sends
+  # on select, and the last URL segment that opens the document. The name IS
+  # the path back to it, and two orphans minted in the same second still read
+  # differently.
+  #
+  # THE LITERAL "Untitled" IS MATCHED TOO, not just nil. A paper is born with a
+  # nil title, but `Fields.new_document_attrs/1` STORES the literal "Untitled"
+  # for every fieldful type (task/note/post) — so treating only nil as unnamed
+  # would leave exactly the collision this criterion is about standing on the
+  # non-paper half of the desk. The cost is that a human who deliberately
+  # titles a document "Untitled" sees a type-and-id suffix appended on the desk
+  # row; that is the trade, taken knowingly.
+  #
+  # DERIVED, NEVER STORED. Nothing here writes to the document, which is the
+  # standing [untitled-is-a-fallback-not-a-seed] contract in
+  # `StudioLive.Handlers.Fields`: seeding a title wrote CONTENT into the block
+  # the author was about to type in, and the first keystroke appended to it.
+  # The moment the author types, the real title lands and this fallback is gone.
+  # Gyldendal parity E1.8 — a type without a `title` field (author) names its
+  # row title in `list_preview.title`; when the column is blank the row shows
+  # that field's value (the same rule the write path uses to fill the column),
+  # and only a document with neither falls back to the unnamed-row spelling.
+  defp row_title(doc, schema) do
+    case doc.title && String.trim(doc.title) do
+      nil -> preview_title(doc, schema) || unnamed_row_title(doc)
+      "" -> preview_title(doc, schema) || unnamed_row_title(doc)
+      "Untitled" -> preview_title(doc, schema) || unnamed_row_title(doc)
+      title -> title
+    end
+  end
+
+  defp preview_title(doc, schema),
+    do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
+
+  defp unnamed_row_title(doc) do
+    "Untitled #{row_type_word(doc)} · #{doc_id_tail(doc)}"
+  end
+
+  defp row_type_word(%{type: type}) when is_binary(type) and type != "", do: type
+  defp row_type_word(_), do: "document"
+
+  # The entropy half of `<type>-<64 bits>` (`Content.generate_id/1`). Split from
+  # the RIGHT so a type containing a hyphen cannot eat the tail, and fall back
+  # to the whole id for a hand-written `doc_id` that carries no hyphen at all.
+  defp doc_id_tail(%{doc_id: doc_id}) when is_binary(doc_id) and doc_id != "" do
+    pub = Content.published_id(doc_id)
+
+    case String.split(pub, "-") do
+      [only] -> only
+      parts -> List.last(parts)
+    end
+  end
+
+  defp doc_id_tail(_), do: "no id"
 
   # Humanized "Updated N ago" subtitle fallback. The timestamp is already on
   # every Document struct (`content/query.ex` orders by updated_at_desc); this
@@ -779,6 +1029,21 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       _ -> nil
     end
   end
+
+  # A list_preview spec is a content-field name or `%{"field" => f, …}`.
+  defp preview_field(field) when is_binary(field) and field != "", do: field
+
+  defp preview_field(%{} = spec),
+    do: preview_field(Map.get(spec, "field") || Map.get(spec, :field))
+
+  defp preview_field(_), do: nil
+
+  # The url off a stored image value: the E1 `image` object and the twin's
+  # denormalised composite both carry `url`; a bare string is a url already.
+  # Anything else (an asset id alone, a malformed value) renders no thumbnail.
+  defp media_url(%{"url" => url}) when is_binary(url) and url != "", do: url
+  defp media_url(url) when is_binary(url) and url != "", do: url
+  defp media_url(_), do: nil
 
   defp schema_list_preview(nil), do: %{}
 
@@ -1115,16 +1380,55 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # -> the Papers list; ["open", "paper", slug] -> {0, "Structure"} -> the desk
   # root. No off-by-one to fix.
   #
-  # SCOPE, STATED HONESTLY RATHER THAN GENERALISED: every figure above comes
-  # from a 2-SEGMENT paper path (panes = [Structure, Papers]). A deeper nav
-  # path would make the surviving strip an INTERMEDIATE pane, where `take/2`
-  # lands on a list instead of closing the document. That case is NOT measured
-  # here — it is filed as `b47-strip-behaviour-unmeasured-beyond-two-panes`.
-  # This ruling claims the 2-segment topology only.
+  # SCOPE — WIDENED BY MEASUREMENT (b47), NOT BY ARGUMENT. The figures above
+  # were first taken on a 2-SEGMENT paper path (panes = [Structure, Papers]),
+  # and this comment used to claim that topology ONLY, because b47 predicted
+  # that a DEEPER path would make the surviving strip an INTERMEDIATE pane
+  # where `take/2` lands on a list with the document still open.
   #
-  # Locked by `studio_live_navigational_truth_test.exs`, which pins the pane
-  # ids AND editor-open false AND `sidebar_user_opened == false` — pane ids
-  # alone would stay green if the reset chain above were refactored away.
+  # THAT PREDICTION IS REFUTED BY EXECUTION. The clause below hands `:strip`
+  # to `idx == num_panes - 1` and `:hidden` to every other index, so the
+  # surviving strip is the LAST pane at EVERY depth — it is never an
+  # intermediate one, and the ladder cannot produce the case b47 feared.
+  # Driven live on a DECLARED desk that nests a `documentTypeList` of papers
+  # inside a `list` group, giving three panes:
+  #
+  #   nav_path BEFORE:  ["library", "papers", <slug>]
+  #   panes BEFORE:     ["pane-structure", "pane-library", "pane-papers"]
+  #   editor open:      true
+  #   strips SUMMONED:  ["pane-papers"]       # the LAST pane, not intermediate
+  #   nav_path AFTER:   ["library", "papers"]
+  #   panes AFTER:      ["pane-structure", "pane-library", "pane-papers"]
+  #   editor open:      false
+  #
+  # So the ruling now reads: FOR AN ORDINARY PAPER PATH AT ANY DEPTH, the
+  # surviving strip is the last pane and its click closes the document,
+  # because the last pane is addressed by `Enum.take(nav_path, num_panes - 1)`
+  # and that drops exactly the one segment the editor consumed — the doc id.
+  #
+  # THE RESERVED `["open", "paper", id]` HEAD, NO LONGER INFERRED. This
+  # comment previously named that route from source. It is now driven
+  # END-TO-END: a materialised inbound edge renders a real Relations
+  # backlink row, the row's `open-backlink` click is dispatched, and the head
+  # is read off the live socket. The reserved head contributes NO pane, so
+  # the root pane IS the last pane, `Enum.take(nav_path, 0) == []`, and the
+  # exit lands on the desk root — one level deeper than the ordinary path's
+  # exit, and still a document-close:
+  #
+  #   nav_path AFTER the backlink click: ["open", "paper", <slug>]
+  #   panes:                             ["pane-structure"]
+  #   nav_path AFTER the strip click:    []
+  #   editor open AFTER:                 false
+  #
+  # STILL NOT MEASURED, AND THIS RULING DOES NOT CLAIM IT: the `["graph", id]`
+  # head, which cannot reach the ladder at all (the graph view renders no
+  # inspector, so `inspector_open?` never becomes true there).
+  #
+  # Locked by `studio_live_navigational_truth_test.exs` (depth 2) and
+  # `studio_live_strip_topology_test.exs` (depth 3 + the backlink route),
+  # which pin the pane ids AND editor-open false AND
+  # `sidebar_user_opened == false` — pane ids alone would stay green if the
+  # reset chain above were refactored away.
   def display_state(idx, num_panes, true, "standard", true) do
     if idx == num_panes - 1, do: :strip, else: :hidden
   end

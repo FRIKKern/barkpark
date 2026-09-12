@@ -15,6 +15,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   """
   use ExUnit.Case, async: true
 
+  alias Barkpark.Content.Papers.EpicQuality
   alias Barkpark.Plugins.{Bulldocs, Capabilities, OnixEdit, Tasks}
   alias Barkpark.Tasks.Validation
 
@@ -61,6 +62,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id/landed",
                  "/v1/tasks/:doc_id/pulse",
                  "/v1/tasks/:doc_id/renew",
+                 "/v1/tasks/:doc_id/discharges",
                  "/v1/tasks/:doc_id/move",
                  "/v1/tasks/:doc_id/stage",
                  # #5627 listener presence — the fleet pair rides the Tasks plugin.
@@ -213,10 +215,135 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       refute view.writes
       assert Enum.all?([open, log, publish, link_task, touch], & &1.writes)
     end
+
+    test "bulldocs.publish's summary names the if-rev fence and the ops route that carries it" do
+      # WORDING PIN (task dr-w32-bl-post-papers-silently-ignores-ifrev).
+      # `POST /v1/plugins/bulldocs/papers` is an UNFENCED create-or-replace; it
+      # now REFUSES a body carrying `ifRev`/`if_rev` with a 400 naming the
+      # sibling ops route (BulldocsIngestController.refuse_unfenced_if_rev/2).
+      # That refusal is honest but invisible until you trip it: the asymmetry
+      # between `bulldocs publish` (no fence) and `bulldocs patch --if-rev`
+      # (fenced, 412 on a stale rev) was discoverable ONLY by reading the
+      # controller. The manifest summary is where a reader meets a verb —
+      # it flows to `bp bulldocs publish --help` and to docs/openapi.json —
+      # so the fence has to be stated there. This test reds if the sentence
+      # goes away.
+      publish = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.publish"))
+      summary = publish.summary
+
+      assert summary =~ "if-rev",
+             "bulldocs.publish's summary must name the if-rev fence, or the " <>
+               "asymmetry with bulldocs.patch is invisible. Got: #{summary}"
+
+      assert summary =~ "ifRev/if_rev is refused 400",
+             "bulldocs.publish's summary must say the key is REFUSED (not " <>
+               "honoured, not ignored) — that is the behaviour the route ships. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "/v1/plugins/bulldocs/papers/:slug/ops",
+             "bulldocs.publish's summary must name the route that actually " <>
+               "carries the fence. Got: #{summary}"
+
+      assert summary =~ "bp bulldocs patch --if-rev",
+             "bulldocs.publish's summary must name the CLI verb a fenced caller " <>
+               "should use instead. Got: #{summary}"
+
+      # Non-vacuity: the route the sentence points at is the one bulldocs.patch
+      # is actually grounded in, so this pin cannot drift away from the manifest.
+      patch = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.patch"))
+      assert patch.http.path_template == "/v1/plugins/bulldocs/papers/:slug/ops"
+      assert patch.verb == "patch"
+    end
+
+    test "bulldocs.publish's summary names both composition caps and their tag scope" do
+      # WORDING PIN (task-4ff0ef8d27e6453b). EpicQuality refuses a canonical
+      # Epic Paper past 80 top-level blocks or 16 top-level headings. Both caps
+      # were enforced and documented NOWHERE a publisher looks: the manifest
+      # summary carried the reader spacing law and neither number, so the first
+      # a wave author heard of an 81st block was a 422. The numbers here are
+      # read from the module, so a cap that MOVES reds this test by name rather
+      # than leaving a stale number in the help text.
+      publish = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.publish"))
+      summary = publish.summary
+
+      assert summary =~ EpicQuality.canonical_tag(),
+             "bulldocs.publish's summary must name the tag the caps are scoped " <>
+               "to, or a publisher of an untagged paper reads them as universal. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "80 top-level blocks",
+             "bulldocs.publish's summary must state the top-level BLOCK cap " <>
+               "(EpicQuality @max_top_level_blocks). Got: #{summary}"
+
+      assert summary =~ "16 top-level headings",
+             "bulldocs.publish's summary must state the top-level HEADING cap " <>
+               "(EpicQuality @max_top_level_headings). Got: #{summary}"
+
+      assert summary =~ "top_level_block_overload",
+             "bulldocs.publish's summary must name the failure atom the 422 " <>
+               "carries, so a reader can match help text to a refusal body. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "top_level_heading_overload",
+             "bulldocs.publish's summary must name the heading failure atom. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "details.limits",
+             "bulldocs.publish's summary must point at the field carrying the " <>
+               "cap and the count, or the help text documents a number the " <>
+               "caller still cannot read back off the wire. Got: #{summary}"
+
+      # NON-VACUITY: the two numbers in the sentence are the module's live
+      # constants, proven by making EpicQuality itself state them. A cap bump
+      # that forgets the summary reds HERE, not in a reader's 422.
+      over_blocks = for i <- 1..81, do: %{"type" => "paragraph", "text" => "b#{i}"}
+      over_headings = for i <- 1..17, do: %{"type" => "heading", "level" => 2, "text" => "h#{i}"}
+
+      assert :top_level_block_overload in EpicQuality.failures(%{"blocks" => over_blocks})
+      assert :top_level_heading_overload in EpicQuality.failures(%{"blocks" => over_headings})
+
+      refute :top_level_block_overload in EpicQuality.failures(%{
+               "blocks" => Enum.take(over_blocks, 80)
+             })
+
+      refute :top_level_heading_overload in EpicQuality.failures(%{
+               "blocks" => Enum.take(over_headings, 16)
+             })
+    end
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the fourteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
+    # THE FILES MANIFEST IS DECLARED, OR NO CALLER CAN SEND ONE
+    # (task-074f50e46e4c926c). The server has stored `content.landed.files`
+    # since PR #17475 and every landing still recorded the sha alone, because
+    # the ONLY thing standing between the two was this declaration: `bp`'s
+    # splitArgs refuses an undeclared `--files` as an unknown flag and sends
+    # NOTHING, so the field was reachable by curl and by nothing a human types.
+    #
+    # `repeatable: true` is load-bearing twice over. Without it a SECOND
+    # `--files` is a usage error (refuseRepeatedFlag: bp will not silently keep
+    # one of two paths), so a manifest is capped at one path; and the Go client
+    # keys the JSON-array body encoding off the same flag, so dropping it turns
+    # `"files": ["a"]` into `"files": "a"` and the server's Landed.check_files/1
+    # 400s the request.
+    test "task.landed declares a repeatable --files flag, the only door to content.landed.files" do
+      landed = Enum.find(Tasks.cli_commands(), &(&1.id == "task.landed"))
+      files = Enum.find(landed.flags, &(&1.name == "files"))
+
+      assert files,
+             "task.landed declares no --files flag, so `bp task landed … --files x` is an " <>
+               "unknown-flag usage error and content.landed.files is unreachable from the CLI"
+
+      assert files.type == "string"
+      assert files[:repeatable] == true
+
+      # The summary is what `bp task landed --help` prints; it has to say the
+      # unit, because "files" plural invites a caller to pass a comma-joined
+      # list as ONE path.
+      assert files.summary =~ "ONE changed path per occurrence"
+    end
+
+    test "declares the sixteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -238,16 +365,27 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       # task-16e56d05b809dd39 — the NON-HOLDER lease extension a CI job calls so
       # a claim does not lapse underneath its own open PR (Tasks.Renew).
       assert "task.renew" in ids
+      # task-29781d0921e5a885 — the back-link mark. A merged PR's `Discharges:`
+      # citations, posted so every SIBLING row the merge also satisfied learns
+      # about it. Non-holder like landed/renew, and it never sets `met`.
+      assert "task.discharges" in ids
       # The content-graph read verbs are NOT on the Tasks plugin — they moved
       # to CORE (Goal ges/graph-edge-seam) so the kill switch can't drop them.
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
       # #5627 (listener presence) added the two fleet verbs to this plugin —
-      # 15 task.* (13 + task.landed + task.renew) + fleet.roster/fleet.beat = 17.
+      # 16 task.* (13 + task.landed + task.renew + task.discharges)
+      # + fleet.roster/fleet.beat = 18.
+      #
+      # THIS INTEGER IS A REGISTRY. A route's declaration surface is not
+      # enumerable by reading the failures it produces: the manifest drift
+      # test, the flat-alias tenancy census, the pds receipt census,
+      # docs/openapi.json and THIS COUNT each announce themselves only once
+      # the previous one is satisfied. Adding a verb means paying all five.
       assert "fleet.roster" in ids
       assert "fleet.beat" in ids
-      assert length(cmds) == 17
+      assert length(cmds) == 18
 
       {fleet_cmds, task_cmds} = Enum.split_with(cmds, &(&1.noun == "fleet"))
 
@@ -534,6 +672,56 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       ls = Enum.find(Tasks.cli_commands(), &(&1.id == "task.ls"))
       limit = Enum.find(ls.flags, &(&1.name == "limit"))
       assert limit.default == 100
+    end
+
+    # gr-bl-close-time-audit-vacuous-green. `GET /v1/tasks` has honoured a flat
+    # `?parent=` since task-233cb8a1d033c738, but the manifest declared only
+    # limit/offset/cursor — so `bp task ls --parent <epic>` answered
+    # `unknown flag --parent for task ls` and the parent-scoped listing was
+    # UNDISCOVERABLE from the CLI. The discoverable alternative,
+    # `bp task get <epic>`, rendered a rail with no close-time field, so an
+    # operator auditing "which children closed in this window?" ran the
+    # reachable command and read a silent zero as a clean pass.
+    #
+    # The manifest IS the wiring: run.go's applyQuery forwards one query key
+    # per DECLARED flag, so this declaration is what puts `?parent=` on the
+    # wire. The route's flat allowlist is pinned separately by
+    # tasks_controller_test.exs ("every param the shipped consumers send is
+    # still accepted", which now lists `parent=`).
+    test "task.ls declares the parent filter, so the parent-scoped listing is discoverable" do
+      ls = Enum.find(Tasks.cli_commands(), &(&1.id == "task.ls"))
+      parent = Enum.find(ls.flags, &(&1.name == "parent"))
+
+      assert parent,
+             "task.ls declares no parent flag — `bp task ls --parent <epic>` is a usage error " <>
+               "and the only discoverable parent-scoped read is the rail, which is not a listing"
+
+      assert parent.type == "string"
+
+      # The help text has to say WHY this route rather than the rail: it is the
+      # one that answers a close-time question. A summary that merely said
+      # "filter by parent" would leave the audit ergonomics exactly where the
+      # trap found them.
+      assert parent.summary =~ "updated_at"
+      assert parent.summary =~ "close-time"
+    end
+
+    # The other half of the same fix: the parent rail on `GET /v1/tasks/:id`
+    # carries a close-time field. Pinned here too because the CLI's `task get`
+    # help points readers at that rail — the two surfaces have to agree that a
+    # close-window question is answerable.
+    test "the child rail carries updated_at, the close-time field" do
+      doc = %Barkpark.Content.Document{
+        doc_id: "kid-1",
+        title: "kid",
+        content: %{"kind" => "task", "lifecycle_status" => "done"},
+        inserted_at: ~U[2026-01-01 00:00:00Z],
+        updated_at: ~U[2026-02-02 03:04:05Z]
+      }
+
+      summary = BarkparkWeb.TasksController.Params.child_summary(doc)
+
+      assert summary.updated_at == ~U[2026-02-02 03:04:05Z]
     end
 
     # Third and fourth instances from the same sweep: doc.ls and doc.query both

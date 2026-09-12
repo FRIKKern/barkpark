@@ -380,7 +380,16 @@ defmodule Barkpark.Plugins.Bulldocs do
             "body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables " <>
             "in the terminal reader. " <>
             "Reader spacing law: empty paragraph blocks are editor scaffolds, not published " <>
-            "layout — remove them from ingest payloads; shared reader tokens own section rhythm.",
+            "layout — remove them from ingest payloads; shared reader tokens own section rhythm. " <>
+            "Composition caps, scoped to papers tagged epic-cycle-wave-paper: at most " <>
+            "80 top-level blocks and at most 16 top-level headings. Past either, the publish " <>
+            "is refused 422 invalid_epic_paper_quality with details.failures naming " <>
+            "top_level_block_overload / top_level_heading_overload and details.limits " <>
+            "carrying that cap's max and your actual count. Untagged papers are unaffected. " <>
+            "No if-rev on this verb: it is an unfenced create-or-replace, and a body carrying " <>
+            "ifRev/if_rev is refused 400. The fenced path is " <>
+            "POST /v1/plugins/bulldocs/papers/:slug/ops (bp bulldocs patch --if-rev), " <>
+            "which rejects a stale rev with 412 precondition_failed.",
         http: %{method: "POST", path_template: "/v1/plugins/bulldocs/papers"},
         auth_tier: "ingest",
         args: [

@@ -107,17 +107,14 @@ check("list with FLAT-STRING items projects WITHOUT throwing (defensive coercion
     ],
   };
   assert.deepEqual(
-    blockToTiptap(stringList),
-    blockToTiptap(inlineList),
-    "string-item projection === inline-item projection (byte-identical)",
+    blockToTiptap(stringList).content[0].content.map(li => li.content),
+    blockToTiptap(inlineList).content[0].content.map(li => li.content),
+    "visible projection matches while opaque source attributes retain the carrier",
   );
 });
 
-// 4b) ROUND-TRIP — a flat-string-item list reconstructs to the CANONICAL inline-
-//     array shape (what `normalize_list_items` writes to the stored data). This is
-//     why the data normalize is needed: the editor's round-trip already canonicalizes
-//     string→inline, so pre-normalizing the stored data makes that flip a no-op.
-check("list with FLAT-STRING items round-trips to canonical inline arrays", () => {
+// Source-aware list conversion keeps old string carriers without a migration.
+check("list with FLAT-STRING items round-trips without migrating carriers", () => {
   const stringList = {
     id: "l-str2",
     type: "list",
@@ -129,10 +126,7 @@ check("list with FLAT-STRING items round-trips to canonical inline arrays", () =
     id: "l-str2",
     type: "list",
     ordered: false,
-    items: [
-      [{ type: "text", value: "alpha" }],
-      [{ type: "text", value: "beta" }],
-    ],
+    items: ["alpha", "beta"],
   });
 });
 
@@ -828,14 +822,9 @@ check("S0 runToTiptap: a FLAT-STRING-item list projects WITHOUT throwing", () =>
   assert.equal(doc.content[0].attrs.bpId, "l-s");
   assert.equal(doc.content[0].content.length, 2, "two list items projected");
 
-  // docToBlocks (the live-doc → blocks reconstruction every save runs through)
-  // canonicalizes the string items to inline arrays — the persist-time shape flip
-  // the data normalize pre-empts.
+  // Saving retains the original string carriers instead of silently migrating.
   const back = docToBlocks(doc);
-  assert.deepEqual(back[0].items, [
-    [{ type: "text", value: "one" }],
-    [{ type: "text", value: "two" }],
-  ]);
+  assert.deepEqual(back[0].items, ["one", "two"]);
 });
 
 check("S0 runToOps: a NORMALIZED inline-array list round-trips with ZERO ops (no churn)", () => {

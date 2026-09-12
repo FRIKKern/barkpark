@@ -90,6 +90,32 @@ const byline: Render = (b, ctx, key) => {
   )
 }
 
+// The reader-synthesised pre-gate badge (#17199). Elixir's
+// `Content.Papers.PreGateRegister.annotate/3` mints it into the block stream of a
+// grandfathered Paper — never authored, never stored — so it arrives here like any
+// other block and must not unknown-box. The web mark is a quiet caps-mono line
+// under the byline rule; the native equivalent is the same eyebrow measure in the
+// muted colour, switching to this file's existing warning hue (via calloutTone,
+// so the badge introduces no new colour) on the ONE warning tone the register
+// mints (`blank_header_cell`). Any other tone is neutral — the same two-value
+// whitelist compose.ex applies, so a stray value can never pick a colour.
+// `title` is a hover explanation the web has and a phone does not, so it is
+// deliberately not rendered here.
+const preGateBadge: Render = (b, ctx, key) => (
+  <Text
+    key={key}
+    style={{
+      ...scale.xs,
+      letterSpacing: 1.2,
+      textTransform: 'uppercase',
+      color: str(b.tone) === 'warning' ? calloutTone(ctx.theme, 'warning') : ctx.theme.textMuted,
+      marginBottom: 10,
+    }}
+  >
+    {str(b.label)}
+  </Text>
+)
+
 /* ── the two serif outliers, made register-aware (D50) ─────────────────────────
  * The paperIngress and paperPullquote tokens carry `fontFamily: 'serif'` ON THE
  * TOKEN. Reaching for either unconditionally painted a serif lede and a serif
@@ -134,14 +160,57 @@ const list: Render = (b, ctx, key) => {
   const items = asList(b.items)
   return (
     <View key={key} style={{ marginVertical: 6, gap: 4 }}>
-      {items.map((item, i) => (
-        <View key={i} style={{ flexDirection: 'row', paddingLeft: 8 }}>
-          <Text style={[bodyText(ctx), { width: 24 }]}>{ordered ? `${i + 1}.` : '•'}</Text>
+      {items.map((item, i) => {
+        const children = isMap(item)
+          ? asList(item.children).filter(
+              (child) =>
+                isMap(child) &&
+                typeof child.type === 'string' &&
+                [
+                  'list',
+                  'bulletList',
+                  'bullet_list',
+                  'bulleted-list',
+                  'bulleted_list',
+                  'ordered-list',
+                  'numbered_list',
+                ].includes(child.type) &&
+                Array.isArray(child.items),
+            )
+          : []
+        const body = (
           <Text style={[bodyText(ctx), { flex: 1 }]}>
             {renderInlineNodes(itemInlines(item), ctx)}
           </Text>
-        </View>
-      ))}
+        )
+        return (
+          <View key={i} style={{ flexDirection: 'row', paddingLeft: 8 }}>
+            <Text style={[bodyText(ctx), { width: 24 }]}>{ordered ? `${i + 1}.` : '•'}</Text>
+            {children.length === 0 ? (
+              body
+            ) : (
+              <View style={{ flex: 1 }}>
+                {body}
+                {children.map((child, j) => {
+                  const nested = child as Record<string, unknown>
+                  return list(
+                    {
+                      ...nested,
+                      type: 'list',
+                      ordered:
+                        nested.ordered === true ||
+                        nested.type === 'ordered-list' ||
+                        nested.type === 'numbered_list',
+                    },
+                    ctx,
+                    j,
+                  )
+                })}
+              </View>
+            )}
+          </View>
+        )
+      })}
     </View>
   )
 }
@@ -250,6 +319,7 @@ export const coreProseRenderers: Record<string, Render> = {
   paragraph,
   eyebrow,
   byline,
+  'pre-gate-badge': preGateBadge,
   ingress,
   pullquote,
   list,

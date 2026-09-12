@@ -5,14 +5,36 @@ cd "$(dirname "$0")"
 API_DIR="$(cd "$(dirname "$0")/api" 2>/dev/null && pwd || echo "")"
 API_URL="${SANITY_API_URL:-http://localhost:4000}"
 
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/lib/bp-curl.sh"   # 429 backoff, shared (task-90059c5c680f6665)
+
+# api_answers: 0 when the API answers AT ALL — any status, a 429 included.
+# That is exactly what the bare `curl -s` this replaced measured (no -f), and
+# the distinction matters: a rate-limited Phoenix is RUNNING, so starting a
+# second `mix phx.server` on top of it would be the wrong remedy. bp_curl_code
+# prints nothing and returns curl's rc on a transport failure, so `|| echo 000`
+# is what turns "nobody is listening" into a value this test can read.
+#
+# The path is /status.json, NOT the legacy /api/schemas: that route pipes
+# through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+# `sunset: Wed, 31 Dec 2026 23:59:59 GMT`. This probe reads a TRANSPORT failure,
+# so a 404 would still say "running" — but after the route is REMOVED the
+# router 404s it from the same live server, and the next reader of this function
+# who tightens it to a status check would inherit a probe that is red on a
+# healthy box. /status.json (router.ex `get "/status.json"`, :api pipeline, no
+# deprecation scope, no token) has no removal date.
+api_answers() {
+  [ "$(bp_curl_code -s -o /dev/null "$API_URL/status.json" 2>/dev/null || echo 000)" != "000" ]
+}
+
 # Check if Phoenix is running
-if ! curl -s "$API_URL/api/schemas" > /dev/null 2>&1; then
+if ! api_answers; then
   if [ -n "$API_DIR" ]; then
     echo "Starting Phoenix API..."
     (cd "$API_DIR" && mix phx.server &) 2>/dev/null
     # Wait for it to be ready
     for i in $(seq 1 15); do
-      if curl -s "$API_URL/api/schemas" > /dev/null 2>&1; then
+      if api_answers; then
         break
       fi
       sleep 1

@@ -135,9 +135,13 @@ statement that `add_btn` rows exist and were not measured. The kinds censused
 whole are printed beside it. Raising the default instead would have bought
 coverage by removing the bound; that is a different thing.
 
-Bounded by a hard `LEG_C_BUDGET` (default 150 s, `LEG_C_BUDGET_MS`); per-row
+Bounded by a hard `LEG_C_BUDGET` (default 90 s, `LEG_C_BUDGET_MS`); per-row
 `LEG_C_ROW_CAP_MS` (default 3 s) and `LEG_C_MAX_ROWS` (default 40, **per row
-kind**). Anything the
+kind**). An unanswered row costs a measured 6.09–6.10 s — the nominal
+2 x 3.0 s cap plus ~90 ms, of which 99.6 % is the witness loop's own
+`pause(POLL_TICK)` sleeps; `page.click` is 1–3 ms and all 42 witness
+evaluates together are 9–16 ms, and neither moves under host load. Run
+`LEG_C_TRACE=1` for the per-phase breakdown. Anything the
 budget does not reach is reported **`UNMEASURED, which is not the same as
 working`** — never FAIL. Turning an exhausted runner budget into a dead row would
 fabricate a defect, which is the failure this epic exists to stop.

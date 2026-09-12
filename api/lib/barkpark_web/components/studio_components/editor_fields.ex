@@ -15,6 +15,8 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   """
   use Phoenix.Component
 
+  alias BarkparkWeb.ScopeHelpers
+
   # ── Document actions chrome (Task barkpark-3yq) ───────────────────────────
   # Three small components for the Sanity-style document actions: bulk
   # publish floating action bar, read-only secondary editor card, and the
@@ -28,8 +30,20 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   Buttons emit `phx-click="bulk-publish"` / `"bulk-unpublish"` /
   `"bulk-clear"` against the parent LV. The "Selected" count comes from
   `MapSet.size(@selected_doc_ids)`.
+
+  `bulk-publish` / `bulk-unpublish` render ONLY when `@admin?` — both are
+  `:admin`-tier in `BarkparkWeb.Studio.Caps.classify/1`, so the server halts
+  them for a write-tier member and the bar must not advertise them.
   """
   attr :selected_doc_ids, :any, required: true
+  # THE ADMIN-TIER AFFORDANCE ANSWER, THREADED IN — NEVER RE-DERIVED HERE
+  # (task-ea341f86571c5981). `bulk-publish` and `bulk-unpublish` are
+  # :admin-tier in `BarkparkWeb.Studio.Caps.classify/1`, so a write-tier member
+  # is server-HALTED on both; the bar used to offer them anyway. The value comes
+  # from `Caps.admin_affordance?/1` at the StudioLive call site. `bulk-clear` is
+  # :none-tier and stays for everyone, so a non-admin can still drop a
+  # selection. Default FALSE fails closed.
+  attr :admin?, :boolean, default: false
 
   def bulk_action_bar(assigns) do
     count = MapSet.size(assigns.selected_doc_ids)
@@ -43,12 +57,14 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
         </span>
         <div class="bp-bulk-action-buttons">
           <button
+            :if={@admin?}
             type="button"
             class="btn btn-primary btn-sm"
             phx-click="bulk-publish"
             data-test-id="bulk-publish"
           >Publish selected</button>
           <button
+            :if={@admin?}
             type="button"
             class="btn btn-sm"
             phx-click="bulk-unpublish"
@@ -73,14 +89,42 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   autosave never collides with a secondary edit (decision in task brief).
   The Close button reveals the floating "Open another" button again via
   the `close-secondary` event.
+
+  ## The bucket yield (spd-b39 successor, charter D36)
+
+  D36 hides this card at `narrow`/`phone` with a bucket-scoped
+  `display: none` (root.html.heex) because a 360px rigid flex child beside
+  a 560px protected document annihilates the document below 1024px. That
+  CSS is correct for the CRUSH and dishonest about the STATE: the server
+  kept emitting the whole `<aside>` — every field value of the referenced
+  document — into a box no reader can see, no pointer can reach, and no
+  `aria-hidden` excludes. A screen reader still walked it; `Tab` still
+  stopped on its close button (`display: none` removes it from the tab
+  order, but only once the CSS has actually loaded and applied — the
+  markup is authoritative, the stylesheet is not).
+
+  So the card now YIELDS SERVER-SIDE at the two buckets whose CSS hides it:
+  the same two names, in the same order, decided in the same direction.
+  `@secondary_doc` deliberately STAYS assigned — widening the window back
+  out restores the card, and silently clearing a user's reference on a
+  resize would destroy context the user chose. The honesty the yield owes
+  is paid in the editor header instead: `DocActions.default_doc_actions/2`
+  adds a bucket-aware "Close reference: <title>" action at exactly these
+  two buckets, because this card's own ✕ is the ONLY close control the
+  desk has and yielding the card takes it away with it.
+
+  The D36 CSS rule is untouched — it is the defence for any surface that
+  renders this class without passing a bucket (and for the instant between
+  a resize and the `width-bucket` round trip).
   """
   attr :secondary_doc, :map, default: nil
   attr :secondary_schema, :map, default: nil
   attr :secondary_type, :string, default: nil
+  attr :width_bucket, :string, default: "wide"
 
   def secondary_editor_card(assigns) do
     ~H"""
-    <%= if @secondary_doc do %>
+    <%= if @secondary_doc && secondary_pane_bucket?(@width_bucket) do %>
       <aside class="bp-secondary-pane" data-test-id="secondary-pane">
         <header class="bp-secondary-pane-header">
           <div class="bp-secondary-pane-title">
@@ -115,6 +159,23 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
     <% end %>
     """
   end
+
+  @doc """
+  Does this width bucket render `.bp-secondary-pane` at all?
+
+  ONE predicate, two callers: this module's `secondary_editor_card/1` (which
+  emits the markup) and `StudioLive.DocActions.default_doc_actions/2` (which
+  emits the header replacement for the close control the card takes with it).
+  Two hand-written bucket lists would be free to drift into the state this
+  task exists to abolish — a desk that renders no pane AND offers no close,
+  or one that renders both.
+
+  ENUMERATION, never `!= "wide"` (charter D169): `standard` renders the card
+  and must keep rendering it — it is 1024px and up, where a 360px reference
+  beside the document still fits.
+  """
+  @spec secondary_pane_bucket?(String.t() | nil) :: boolean()
+  def secondary_pane_bucket?(bucket), do: bucket not in ["narrow", "phone"]
 
   defp secondary_visible_fields(nil), do: []
 
@@ -242,14 +303,24 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   attr :user_color, :string, required: true
   attr :presences, :list, default: []
   attr :editor_doc, :map, default: nil
+  # Gyldendal parity E1.8 — a titleless type names its document through
+  # list_preview.title; the "me" location reads it the way the header does.
+  attr :editor_schema, :map, default: nil
   attr :dataset, :string, required: true
   attr :current_workspace, :map, default: nil
   attr :current_project, :map, default: nil
+  # task-be3b3aa6da5df3a2 (instance 4) — the grant-narrowing flag, threaded so
+  # `ScopeHelpers.scope_opts_from_assigns/1` can read it out of THESE assigns.
+  # A function component is handed only its DECLARED attrs, so without this
+  # declaration the helper's `maybe_grant_scoped/2` clause could never match
+  # and a `:share_read` viewer's presence tooltip would keep resolving titles
+  # un-narrowed — the exact narrowing the hand-rolled copy dropped.
+  attr :grant_scoped_read, :boolean, default: false
 
   def presence_nav(assigns) do
     ~H"""
     <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
-      <% scope_opts = build_scope_opts(@current_workspace, @current_project) %>
+      <% scope_opts = ScopeHelpers.scope_opts_from_assigns(assigns) %>
       <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
       <%= for p <- others do %>
         <% p_doc_title = resolve_presence_doc_title(p, @dataset, scope_opts) %>
@@ -282,7 +353,7 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
               title={"#{@user_name} — profile"} aria-label={@user_name <> " — open your profile"}>
         <div class="presence-me-info">
           <span class="presence-me-name"><%= @user_name %></span>
-          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || "Untitled", else: "browsing"), 24) %></span>
+          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || Barkpark.Content.TitleDerivation.preview_title(@editor_doc, @editor_schema) || "Untitled", else: "browsing"), 24) %></span>
         </div>
         <div class="presence-me" style={"background: #{@user_color}"} aria-hidden="true">
           <%= String.first(@user_name) %>
@@ -296,19 +367,18 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   defp truncate_text(text, max) when byte_size(text) <= max, do: text
   defp truncate_text(text, max), do: String.slice(text, 0, max - 1) <> "..."
 
-  # Build scope opts from the workspace/project assigns the parent LV holds.
-  # Mirrors `BarkparkWeb.ScopeHelpers.scope_opts(%Socket{})` for the Socket
-  # variant — no `memoize: true` (LV processes are long-lived; see sknf).
-  # Nil-safe: an absent workspace or project drops its key entirely.
-  defp build_scope_opts(workspace, project) do
-    []
-    |> put_scope_key(:workspace_id, workspace)
-    |> put_scope_key(:project_id, project)
-  end
-
-  defp put_scope_key(opts, _key, nil), do: opts
-  defp put_scope_key(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
-  defp put_scope_key(opts, _key, _other), do: opts
+  # task-be3b3aa6da5df3a2 (instance 4) — `build_scope_opts/2` LIVED HERE, and
+  # its own comment said it "mirrors" `ScopeHelpers.scope_opts(%Socket{})`. It
+  # did not: it emitted `workspace_id` and `project_id` ONLY, while the real
+  # helper ALSO puts `caller_context` unconditionally and `grant_scoped` for a
+  # grant-derived caller. `<.presence_nav>` renders on EVERY Studio surface
+  # (layouts/studio.html.heex), and `resolve_presence_doc_title/3` below prints
+  # `doc.title` for any `p.doc_id` in the presence list, so the dropped
+  # `grant_scoped` voided the grant narrowing on the one read a `:share_read`
+  # viewer sees in the chrome. The copy is GONE — this component now calls the
+  # seam, `ScopeHelpers.scope_opts_from_assigns/1`, which is the clause
+  # `scope_opts(%Phoenix.LiveView.Socket{})` itself delegates to, so the two
+  # can never drift again.
 
   defp resolve_presence_doc_title(presence, dataset, scope_opts) do
     type = presence.type

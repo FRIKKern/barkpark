@@ -18,6 +18,11 @@
 #      --deadlock (it does NOT reimplement it — D14) before spending a single
 #      minute waiting. A head that can never satisfy the required set is named
 #      up front instead of after twenty minutes of polling.
+#   1b. A mergeable_state PRE-FLIGHT (one REST read, the same one pr-required.sh
+#      makes). A 4/4-green PR goes CONFLICTING the moment a sibling lands on a
+#      file it touches, and on this fleet that happens several times an hour.
+#      Reading it here names DIRTY before the merge call is spent, and treats
+#      `unknown` as "GitHub has not computed it yet", never as clean.
 #   2. A bounded wait, then a merge on green.
 #   3. Over budget: it prints the PR URL and the re-run command and exits
 #      non-zero. It does NOT hand off to auto-merge. `allow_auto_merge` stays
@@ -49,6 +54,14 @@
 #      … checked out at …"                LOCAL_POST_MERGE  NOT a merge refusal at all: gh's own local
 #                                                       branch-delete, which runs only AFTER the merge
 #                                                       call returned. See merged_despite_error.
+#     "is not mergeable: the merge
+#      commit cannot be cleanly created"  DIRTY         MEASURED 2026-09-11 on PR #17612: pr-required.sh
+#                                                       printed 4/4 at 03:56Z, a sibling merged, and by
+#                                                       04:05Z the head CONFLICTED with main. Nothing is
+#                                                       wrong with the checks; the branch needs a rebase.
+#                                                       BOTH needles are required — "is not mergeable:"
+#                                                       ALSO prefixes the CLIENT_BLOCK message, so the
+#                                                       first needle alone would swallow that arm.
 #     anything else                       UNRECOGNISED  refuse loudly — NEVER assume green
 #
 #   The `is failing.` row advises a re-run before any code investigation because
@@ -64,6 +77,13 @@
 #     post-merge step after the server-side merge landed — the state is read
 #     back from the API, never inferred from the exit code; see merge_loop)
 #   1 refused (see the quoted message) · 2 over budget
+#   4 CONFLICTING/DIRTY: the head cannot be merged into the base without a
+#     conflict. Either the mergeable_state pre-flight read `dirty` (and the
+#     merge call was never spent) or gh's own refusal carried the DIRTY string.
+#     Distinct from 1 on purpose: 1 says "the checks are not right yet" and a
+#     caller may sensibly wait; 4 says WAITING WILL NEVER HELP — a human or an
+#     agent must rebase the branch. Distinct from 3, which is the DETECTOR's
+#     verdict about the required-context set, not about the diff.
 #   3 the PRE-FLIGHT or the set-difference detector refused: this head can never
 #     go green as it stands (DEADLOCK, or a required context concluded in a
 #     state nothing re-reports). Precise scope, stated because it is easy to
@@ -82,6 +102,30 @@ VERIFY="$REPO_ROOT/scripts/required-checks-verify.sh"
 
 BUDGET_SECONDS="${BP_MERGE_BUDGET_SECONDS:-1200}"
 POLL_SECONDS="${BP_MERGE_POLL_SECONDS:-30}"
+
+# THE PRE-FLIGHT OPTS IN TO THE SHARED READER'S BOUNDED RETRY (default OFF).
+#
+# Measured 2026-09-11: three of five merges refused at the pre-flight with
+# `BLOCKED: … cannot read check runs for <sha>` and the identical command, run
+# by hand 15-20 s later against the same head with no push between, read the
+# feed and merged. GitHub's check-runs pagination is not a snapshot; the reader
+# refuses a set whose accumulated length disagrees with the `total_count` page
+# one reported, and it is RIGHT to. The defect was that the thing which retried
+# was a human.
+#
+# THIS IS THE ONLY CALLER THAT SHOULD SET IT. scripts/lib/check-runs.sh leaves
+# the ladder off by default because its loop-over-many-heads consumers
+# (registration-sample.sh, required-checks-generate.sh) would pay a sleep per
+# head for a hole they already tolerate. This reads ONE head, and its refusal
+# costs a human a manual rerun — so it is the case the ladder exists for.
+# Exported so it reaches the reader through `bash "$VERIFY"`, a child process.
+#
+# IT BUYS NO GREEN IT DID NOT HAVE. The ladder retries ONLY transient READ
+# classes; a missing required context, a red one, a DIRTY head — every actual
+# refusal — is unreachable from it, and a read that never settles refuses in the
+# incumbent wording. Override it (including back to 1) from the environment.
+export BARKPARK_CHECK_RUNS_RETRIES="${BARKPARK_CHECK_RUNS_RETRIES:-3}"
+export BARKPARK_CHECK_RUNS_RETRY_SLEEP="${BARKPARK_CHECK_RUNS_RETRY_SLEEP:-10}"
 
 PR_NUMBER=""
 PR_URL=""
@@ -123,6 +167,14 @@ classify_refusal() {
     # whether a merge landed is the vacuous pass in the other direction.
     *"failed to delete local branch"*"checked out at "*)
                                       printf 'LOCAL_POST_MERGE\n' ;;
+    # PLACED BELOW ALL SEVEN ARMS ABOVE so it cannot change what any of them
+    # means, and keyed on BOTH needles. The first needle alone is a trap: the
+    # CLIENT_BLOCK message is "… is not mergeable: the base branch policy
+    # prohibits the merge.", so a bare *"not mergeable"* arm placed anywhere
+    # above it would relabel every client-side block as a conflict. The second
+    # needle is GitHub's own conflict sentence and appears nowhere else.
+    *"is not mergeable"*"the merge commit cannot be cleanly created"*)
+                                      printf 'DIRTY\n' ;;
     *)                                printf 'UNRECOGNISED\n' ;;
   esac
 }
@@ -193,6 +245,23 @@ refusal_advice() {
       printf '         delete that ref in the BASE repo only when isCrossRepository is false (a fork PR\n'
       printf '         head name resolves to a DIFFERENT branch here).\n'
       ;;
+    DIRTY)
+      printf 'CONFLICTING. GitHub cannot create the merge commit: this head and the base touch the same\n'
+      printf 'lines. This is NOT a finding about the required contexts — they can be 4/4 green and this\n'
+      printf 'still refuses (measured 2026-09-11 on #17612: green at 03:56Z, a sibling landed, dirty by\n'
+      printf '04:05Z). Waiting will never clear it; only a rebase will.\n'
+      printf 'RESOLVE: rebase the PR BRANCH onto origin/main IN ITS OWN WORKTREE, then re-push:\n'
+      printf '           git -C <the branch'"'"'s worktree> fetch origin main\n'
+      printf '           git -C <the branch'"'"'s worktree> rebase origin/main       # resolve, then --continue\n'
+      printf '           git -C <the branch'"'"'s worktree> push --force-with-lease\n'
+      printf 'THEN:    wait for the required contexts to re-render on the NEW head, and run this again.\n'
+      printf 'NOT:     gh will have offered to queue the merge for later instead. Do not take it — this\n'
+      printf '         repo keeps unattended merging switched OFF (D53), so the queue never fires, and\n'
+      printf '         queueing a conflict does not resolve the conflict either way.\n'
+      printf 'NOT:     gh also prints a local "git merge origin/main" recipe. It works, and it puts a\n'
+      printf '         MERGE commit on a branch this repo squash-merges; the rebase above is the form\n'
+      printf '         that leaves the same one-commit shape the base expects.\n'
+      ;;
     UNRECOGNISED)
       printf 'UNRECOGNISED REFUSAL. This shape is not in the measured table, so this script refuses to guess —\n'
       printf 'a parser that assumes green on an unknown string is exactly the vacuous pass this epic exists\n'
@@ -225,6 +294,17 @@ resolve_pr() {
 # Pre-flight. Never reimplemented here — this shells out to the one detector
 # that already exists, whose exit codes are its contract (D14).
 #   0 = every required context rendered · 3 = DEADLOCK · 4 = RE-RUN (cancelled)
+#   5 = BLOCKED (an input could not be read / a producer refused)
+#
+# 5 IS NAMED HERE RATHER THAN LEFT TO THE `*)` CATCH-ALL, AND IT CHANGES NO
+# BEHAVIOUR ON PURPOSE. The catch-all already refuses, which is the only correct
+# answer: an unreadable pre-flight is a refusal, never a skip, and this is the
+# merge verb — every lane merges through it. What the named arm buys is the
+# OPERATOR'S next move. `exit $rc` in a catch-all sends a human to read code to
+# learn whether the detector found something or could not look; the detector now
+# says which, so this says which too. Note the collision the verifier's header
+# documents: 4 here is RE-RUN, and 4 in scripts/required-checks.test.sh is that
+# suite's HOLD. They are different claims and they stay on different arms.
 preflight() {
   echo "bp-merge: pre-flight — required-checks-verify.sh --deadlock"
   local rc=0
@@ -236,9 +316,100 @@ preflight() {
     4) echo "bp-merge: REFUSED before waiting — a required context concluded CANCELLED (named above)." >&2
        echo "          Nothing will re-report it on its own. Re-run it, then run this again." >&2
        exit 3 ;;
-    *) echo "bp-merge: REFUSED — the deadlock detector could not read its inputs (exit $rc)." >&2
+    5) echo "bp-merge: REFUSED — the pre-flight is BLOCKED: it could not READ an input (named above)." >&2
+       echo "          This is NOT a finding about your PR. Nothing was measured about the required set," >&2
+       echo "          so the refusal carries no claim that this head is missing or red." >&2
        echo "          An unreadable pre-flight is a refusal, never a skip." >&2
        exit 1 ;;
+    *) echo "bp-merge: REFUSED — the deadlock detector exited $rc, which is not a code it documents." >&2
+       echo "          An unrecognised pre-flight is a refusal, never a skip." >&2
+       exit 1 ;;
+  esac
+}
+
+# ── pre-flight 2: mergeable_state, read BEFORE the merge call is spent ───────
+# ONE REST read — literally the same one scripts/pr-required-style callers make.
+# It exists because the required-context verdict and the MERGEABILITY verdict
+# are different questions with different clocks: measured 2026-09-11 on #17612,
+# the four required contexts were green at 03:56Z, a sibling PR touching the
+# same file merged, and by 04:05Z this head conflicted with the base. Pre-flight
+# 1 (the deadlock detector) is blind to that by construction — it reads check
+# runs, not the diff.
+#
+# `unknown` IS NOT CLEAN. GitHub computes mergeability asynchronously and serves
+# `unknown` until it finishes; a reader that folds unknown into "not dirty" is
+# the vacuous pass, just quieter. So unknown re-reads a bounded number of times
+# and then REFUSES, which is self-healing (re-running the script re-reads).
+#
+# The states seen on this repo (REST .mergeable_state):
+#   clean, has_hooks   no conflict, and the checks are satisfied
+#   unstable           a NON-required check is red; the merge is still allowed
+#   blocked            a required context is missing or red — pre-flight 1 names it
+#   behind             the base moved; strict:false here, so not a blocker
+#   dirty              THE CONFLICT this arm exists for
+#   unknown            not computed yet — NEVER a green
+#
+# ONLY `dirty` refuses here. Everything else falls through to the merge call,
+# whose own refusal string stays the authority (D54) — this pre-flight adds a
+# name, it does not take over the classification.
+MERGEABLE_POLLS="${BP_MERGE_MERGEABLE_POLLS:-4}"
+MERGEABLE_POLL_SECONDS="${BP_MERGE_MERGEABLE_POLL_SECONDS:-3}"
+
+# IMPURE (it calls gh) and kept as its own one-line function so the harness can
+# stub `gh` around it and drive the real reader rather than a re-implementation.
+read_mergeable_state() {
+  gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER" --jq '.mergeable_state' 2>&1
+}
+
+preflight_mergeable() {
+  echo "bp-merge: pre-flight — mergeable_state (one REST read, before the merge call)"
+  local state="" rc=0 i=1
+  while [ "$i" -le "$MERGEABLE_POLLS" ]; do
+    rc=0
+    state="$(read_mergeable_state)" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      {
+        echo "bp-merge: REFUSED — could not READ mergeable_state. The API answered:"
+        printf '%s\n' "$state" | sed 's/^/            /'
+        echo "          An unreadable pre-flight is a refusal, never a skip. NOTHING was measured"
+        echo "          about this head, so this refusal carries no claim that it conflicts."
+        echo "          RESOLVE: scripts/bp-merge.sh        # run it again once the API answers"
+      } >&2
+      exit 1
+    fi
+    if [ "$state" != "unknown" ] && [ -n "$state" ]; then
+      break
+    fi
+    echo "bp-merge: mergeable_state is 'unknown' — GitHub has not computed it yet (read $i/$MERGEABLE_POLLS)"
+    i=$(( i + 1 ))
+    if [ "$i" -le "$MERGEABLE_POLLS" ]; then
+      sleep "$MERGEABLE_POLL_SECONDS"
+    fi
+  done
+  case "$state" in
+    dirty)
+      {
+        echo
+        echo "bp-merge: REFUSED — DIRTY (mergeable_state: dirty), read BEFORE the merge call."
+        echo "  The merge call was NOT spent: GitHub already says this head cannot be merged into"
+        echo "  the base without a conflict. The required contexts are a SEPARATE question and may"
+        echo "  well be green — that is exactly the shape this arm exists for."
+        echo
+        refusal_advice DIRTY "$PR_NUMBER" "$HEAD_SHA" | sed 's/^/  /'
+        echo
+        echo "  PR: $PR_URL"
+      } >&2
+      exit 4 ;;
+    unknown|"")
+      {
+        echo "bp-merge: REFUSED — mergeable_state is STILL 'unknown' after $MERGEABLE_POLLS reads."
+        echo "          'unknown' means GitHub has not computed mergeability yet. It is NEVER a green,"
+        echo "          and this script will not spend a merge call on a state nobody has looked at."
+        echo "          RESOLVE: scripts/bp-merge.sh        # run it again in a few seconds"
+      } >&2
+      exit 1 ;;
+    *)
+      echo "bp-merge: pre-flight ok — mergeable_state: $state (not a conflict)." ;;
   esac
 }
 
@@ -251,7 +422,10 @@ resolve_plural() {
     3) echo "bp-merge: DEADLOCK (named above) — this head can never go green." >&2; exit 3 ;;
     4) echo "bp-merge: RE-RUN (a required context is CANCELLED, named above)." >&2; exit 3 ;;
     0) return 0 ;;
-    *) echo "bp-merge: the detector could not read its inputs (exit $rc) — refusing." >&2; exit 1 ;;
+    5) echo "bp-merge: BLOCKED — the detector could not READ an input (named above), so it never" >&2
+       echo "          got to the set difference and this plural refusal is still unexplained. Refusing." >&2
+       exit 1 ;;
+    *) echo "bp-merge: the detector exited $rc, a code it does not document — refusing." >&2; exit 1 ;;
   esac
 }
 
@@ -269,6 +443,19 @@ resolve_plural() {
 # to print a string to argue against printing it has lost the argument.
 counter_line() {
   local msg="$1"
+  # The SECOND suggestion gh appends, measured 2026-09-11 on the DIRTY refusal:
+  # it offers to queue the merge for after the requirements are met. Matched on
+  # gh's own SENTENCE rather than on the flag it names, because the flag is one
+  # of the two strings bp-merge.test.sh ratchets out of every executable line
+  # here — a wrapper that has to print a string to argue against printing it has
+  # lost the argument (the same reason the admin arm below does not spell its).
+  case "$msg" in
+    *"To have the pull request merged after all the requirements have been met"*)
+      printf 'NOTE: gh offered to QUEUE this merge for later above. It is DEAD — this repo keeps\n'
+      printf '      allow_auto_merge FALSE (D53), so nothing lands unattended, and queueing a\n'
+      printf '      conflicting head would not resolve the conflict in any case.\n'
+      ;;
+  esac
   case "$msg" in
     *admin*|*override*)
       printf 'NOTE: gh suggested an admin override above. It is DEAD — under enforce_admins:true the server\n'
@@ -336,6 +523,10 @@ refuse() {
     echo
     echo "  PR: $PR_URL"
   } >&2
+  # DIRTY gets its OWN code (4): every other refusal here means "not yet", and a
+  # caller may sensibly re-run or wait. A conflict never clears by waiting, so a
+  # caller that retries on 1 must NOT retry on this.
+  [ "$state" != "DIRTY" ] || exit 4
   exit 1
 }
 
@@ -488,6 +679,7 @@ main() {
   [ -x "$VERIFY" ] || [ -f "$VERIFY" ] || die "missing $VERIFY — the pre-flight cannot run."
   resolve_pr
   preflight
+  preflight_mergeable
   merge_loop
 }
 

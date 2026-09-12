@@ -124,6 +124,32 @@ function isCanvasTableType(t) {
   return CANVAS_TABLE_TYPES.has(t);
 }
 
+// Match the writer's saveable table boundary. Legacy header aliases are normalized at
+// the server write boundary; numeric/null/unknown cell carriers and malformed grids
+// are not publishable. If any reaches the canvas directly, keep the entire block opaque
+// rather than offering an edit that cannot save or risking deletion on first change.
+// The stricter contextual table admission keeps its existing independent guard.
+function tableCellCarrierSupported(cell) {
+  return Array.isArray(cell) || typeof cell === "string" ||
+    (cell && typeof cell === "object" && !Array.isArray(cell) &&
+      Array.isArray(cell.content));
+}
+
+function tableBlockEditable(block) {
+  if (["content", "header", "headers", "columns"].some((key) =>
+    Object.hasOwn(block || {}, key))) return false;
+  const rows = block?.rows;
+  if (!Array.isArray(rows) || !rows.length || !Array.isArray(rows[0]) ||
+      !rows[0].length) return false;
+  const width = rows[0].length;
+  if (!rows.every((row) => Array.isArray(row) && row.length === width &&
+      row.every(tableCellCarrierSupported))) return false;
+  if (!Object.hasOwn(block, "head") || block.head == null ||
+      (Array.isArray(block.head) && block.head.length === 0)) return true;
+  return Array.isArray(block.head) && block.head.length === width &&
+    block.head.every(tableCellCarrierSupported);
+}
+
 // True when a TipTap NODE type is the canvas table container. runToOps/classifyNode
 // read node.type off a getJSON node (the NODE name, not the bpType).
 function isCanvasTableNode(nodeType) {
@@ -817,7 +843,11 @@ function blockToNode(block) {
       // what earns free inline-mark editing. table-node.js declares the four nodes so
       // getJSON() round-trips the whole grid. node.type is the NODE name (bpTable),
       // not the bpType (table).
-      return tableBlockToNode(block, bpId, bpType);
+      if (tableBlockEditable(block)) return tableBlockToNode(block, bpId, bpType);
+      return {
+        type: "bpOpaque",
+        attrs: { bpId, bpType, bpBlock: deepClone(block) },
+      };
     }
 
     // Opaque carry-through: the original block JSON, deep-cloned (no shared refs).
@@ -1497,7 +1527,7 @@ function cardBlockEditable(block) {
       return cardBodyContentSupported(block, content);
     }) &&
     cardSlotSupported(slots, "media", (element) =>
-      (element.type == null || element.type === "image") &&
+      (!Object.hasOwn(element, "type") || element.type === "image") &&
       optionalCardText(element, "src") && optionalCardText(element, "alt")) &&
     cardSlotSupported(slots, "action", (element) =>
       element.type === "action" && optionalCardText(element, "label") &&
@@ -1787,13 +1817,16 @@ function stableStageKey(node) {
 // modeled as a bpTableRow of bpTableHeaderCell; body rows are bpTableRow of bpTableCell.
 // The bpTable node carries bpId/bpType; rows/cells carry NO bpId (one id per table).
 
-// Normalize a cell to an inline array before the shared serializer. A scalar cell
-// (string/number — upstream paper_to_blocks.py emits text-only cells as plain strings;
-// inline.ex:25-27 tolerates them) becomes a single text run; an inline array passes
-// through; anything else → empty (defensive; renders an empty cell).
+// Project an admitted cell to an inline array before the shared serializer. A scalar
+// string becomes a text run; inline arrays and content-map arrays pass through. The
+// number/null branches remain defensive for already-mounted historical source nodes,
+// but tableBlockEditable keeps those unsaveable storage shapes opaque on fresh load.
 function cellToInline(cell) {
   if (Array.isArray(cell)) return cell;
   if (cell == null) return [];
+  if (cell && typeof cell === "object" && Array.isArray(cell.content)) {
+    return cell.content;
+  }
   if (typeof cell === "string" || typeof cell === "number")
     return [{ type: "text", value: String(cell) }];
   return [];
@@ -1802,7 +1835,10 @@ function cellToInline(cell) {
 // One cell block → a bpTableHeaderCell|bpTableCell node. Omit the `content` key when
 // the inline array is empty (empty-body fidelity, callout precedent).
 function cellToNode(nodeName, cell) {
-  const node = { type: nodeName };
+  const node = {
+    type: nodeName,
+    attrs: { bpTableCellSource: { cell: deepClone(cell) } },
+  };
   const inline = inlineArrayToTiptap(cellToInline(cell));
   if (inline.length) node.content = inline;
   return node;
@@ -1834,7 +1870,73 @@ function tableBlockToNode(block, bpId, bpType) {
     content.push({ type: "bpTableRow", content: [{ type: "bpTableCell" }] });
   }
 
-  return { type: "bpTable", attrs: { bpId, bpType: bpType || "table" }, content };
+  return {
+    type: "bpTable",
+    attrs: {
+      bpId,
+      bpType: bpType || "table",
+      bpTableSource: { block: deepClone(block) },
+    },
+    content,
+  };
+}
+
+function sourceCellFromNode(cell) {
+  const source = cell?.attrs?.bpTableCellSource;
+  return source && typeof source === "object" && Object.hasOwn(source, "cell")
+    ? source.cell
+    : undefined;
+}
+
+function cellNodeInline(cell) {
+  return tiptapInlineToPd((cell && cell.content) || []);
+}
+
+function sourceCellInline(cell) {
+  return inlineArrayToTiptap(cellToInline(cell));
+}
+
+function comparableTableInline(content) {
+  const normalized = inlineArrayToTiptap(tiptapInlineToPd(content || []));
+  const out = [];
+  for (const value of normalized) {
+    const next = deepClone(value);
+    if (!next.marks?.length) delete next.marks;
+    const previous = out[out.length - 1];
+    if (previous?.type === "text" && next.type === "text" &&
+        canonicalJSON(previous.marks || null) === canonicalJSON(next.marks || null)) {
+      previous.text += next.text;
+    } else {
+      out.push(next);
+    }
+  }
+  return out;
+}
+
+function cellNodeMatchesSource(cell, source) {
+  // Schema mounting may merge adjacent text nodes and add default link attrs
+  // (target/rel/class). Compare through the shared portable-inline lens so those
+  // presentation-only defaults never make an untouched cell look edited.
+  return canonicalJSON(comparableTableInline(sourceCellInline(source))) ===
+    canonicalJSON(comparableTableInline((cell && cell.content) || []));
+}
+
+// Preserve the exact carrier while its visible inline projection is untouched.
+// Once edited, retain a supported content-map's opaque sibling metadata and replace
+// only its content. Other edited carriers become the canonical inline-array shape.
+function cellNodeToSource(cell) {
+  const source = sourceCellFromNode(cell);
+  const inline = cellNodeInline(cell);
+  if (source !== undefined && cellNodeMatchesSource(cell, source)) {
+    return deepClone(source);
+  }
+  if (source && typeof source === "object" && !Array.isArray(source) &&
+      Array.isArray(source.content)) {
+    const next = deepClone(source);
+    next.content = inline;
+    return next;
+  }
+  return inline;
 }
 
 // tableNodeToBlock(node, id) → { id, type:"table", rows:[…], head?:[…] }. Walk the row
@@ -1850,12 +1952,20 @@ function tableNodeToBlock(node, id) {
     const cells = (rowNode && rowNode.content) || [];
     const isHeaderRow =
       cells.length > 0 && cells.every((c) => c.type === "bpTableHeaderCell");
-    const mapped = cells.map((c) => tiptapInlineToPd((c && c.content) || []));
+    const mapped = cells.map(cellNodeToSource);
     if (i === 0 && isHeaderRow) head = mapped;
     else rows.push(mapped);
   });
-  const block = { id, type: "table", rows };
+  const source = node?.attrs?.bpTableSource?.block;
+  const block = source && typeof source === "object" && !Array.isArray(source)
+    ? deepClone(source)
+    : {};
+  block.id = id;
+  block.type = "table";
+  block.rows = rows;
   if (head) block.head = head;
+  else if (Array.isArray(source?.head) && source.head.length) block.head = [];
+  else if (!source || !Object.hasOwn(source, "head")) delete block.head;
   return block;
 }
 
@@ -1868,10 +1978,11 @@ function tableNodeToBlock(node, id) {
 // edit re-emits the entire rows/head, the v1 greenlit coarse round-trip).
 function tableNodeToPatch(node) {
   const block = tableNodeToBlock(node, null);
-  return {
-    rows: block.rows,
-    head: block.head ? block.head : [],
-  };
+  const patch = { rows: block.rows };
+  if (Object.hasOwn(block, "head")) patch.head = block.head;
+  // Source-free/pasted table nodes retain the historical removal-safe fallback.
+  if (!node?.attrs?.bpTableSource && !Object.hasOwn(patch, "head")) patch.head = [];
+  return patch;
 }
 
 // True when a table's grid/content changed. Canonical (key-order-insensitive) compare
@@ -3071,6 +3182,26 @@ function canonicalJSON(value) {
     );
   }
   return JSON.stringify(value);
+}
+
+// A deferred remote edit is not part of the author's visible baseline. Allow
+// independent fields (and convergent values), but never silently patch over a
+// different remote value or remove a remotely changed block. The host owns review.
+export function hasOverlappingOps(ops, baseline, remote) {
+  if (!Array.isArray(remote)) return false;
+  const beforeById = new Map(baseline.map((block) => [block.id, block]));
+  const remoteById = new Map(remote.map((block) => [block.id, block]));
+  return ops.some((op) => {
+    if (op.op !== "patch-block" && op.op !== "remove-block") return false;
+    const before = beforeById.get(op.id);
+    const latest = remoteById.get(op.id);
+    if (!before || !latest) return false;
+    if (op.op === "remove-block") return canonicalJSON(before) !== canonicalJSON(latest);
+    if (before.type !== latest.type) return true;
+    return Object.entries(op.patch || {}).some(([key, value]) =>
+      canonicalJSON(before[key]) !== canonicalJSON(latest[key]) &&
+      canonicalJSON(value) !== canonicalJSON(latest[key]));
+  });
 }
 
 // The byte-significant projection of a prose node for change detection: its

@@ -130,6 +130,39 @@ defmodule Barkpark.Tasks.Dedup do
   # exactly the state the truncation tripwire should be reporting.
   @candidate_limit 500
 
+  # THE FALLBACK SHAPES DO NOT GET THE KNN CAP, BECAUSE THEY DO NOT GET THE KNN
+  # ORDERING. `@candidate_limit` is 500 ONLY because `fetch_rows/6`'s probe
+  # clause hands the scorer the 500 MOST TITLE-SIMILAR rows: the cut is made by
+  # dissimilarity, so what falls off the end is what was least likely to be a
+  # duplicate. Both unfiltered clauses — the blank probe and the pg_trgm rescue —
+  # have no `<->` term at all; they are `DISTINCT ON (canonical doc_id)` in
+  # ASCENDING id order, so their cut is made by ALPHABET, exactly the blind spot
+  # the KNN change retired on the working path.
+  #
+  # Letting them inherit 500 would therefore not preserve the old fallback, it
+  # would shrink it 10x: this module's pre-#14061 unfiltered scan ran at 5,000
+  # (`git show 2403c0c28b^:api/lib/barkpark/tasks/dedup.ex`, `@candidate_limit
+  # 5000`). So the safety net keeps the number the safety net always had, and the
+  # ordering-justified cut applies only where the ordering exists.
+  #
+  # RE-MEASURED 2026-09-12 (`bp task ls --all`, guerrilla `production`, the
+  # scan's own non-cancelled predicate): 9,160 task rows, 991 cancelled, 410
+  # `drafts.` twins -> 8,169 eligible rows -> **8,159 distinct canonical ids**.
+  # So on the unfiltered shape the cap reaches 61.3% of the corpus at 5,000 and
+  # would have reached 6.1% at 500 — the 10x is real and current, not inherited
+  # from the 7,064-id figure above.
+  #
+  # AND THE HONEST HALF: 5,000 does NOT buy back the `task-*` family here. The
+  # 2,386 `task-*` canonical ids start at ASC index 5,363 of 8,159, so the
+  # alphabetic fallback misses 100% of them at BOTH caps. Only the KNN path
+  # reaches them. This constant restores the pre-#14061 safety net's SIZE; it
+  # does not pretend to restore its coverage, which it never had.
+  #
+  # The scorer cost is the documented one (6,217 ms at 5,000 vs 89 ms at 500) and
+  # it is the price of the fallback being a fallback: both clauses are off the
+  # hot path by construction.
+  @unfiltered_candidate_limit 5_000
+
   # Trgm net for the candidate FETCH only: over-fetch here, then let the precise
   # token-Jaccard in `Similarity.assess/3` score it down.
   #
@@ -156,8 +189,18 @@ defmodule Barkpark.Tasks.Dedup do
   # reading zero is not a warning sign: these probes have no duplicate in the
   # corpus, and answering "no candidates" is the correct result for them.
   #
-  # It is still BELOW pg_trgm's 0.3 default, so the fetch must run inside a
-  # transaction that sets the threshold first (see `fetch_rows/6`).
+  # IT IS NOT A SCAN PREDICATE. As `WHERE title % $1` it bounded NOTHING: GIN
+  # cannot order, so every row surviving the net was fetched, scored by
+  # `similarity()` and top-N heapsorted, and that sort INPUT grew linearly with
+  # the corpus while the `LIMIT` capped only the output. The scan now rides the
+  # KNN distance `title <-> $1` over `documents_title_trgm_gist_idx` (migration
+  # 20260910100000), which RETURNS rows already ordered, so the LIMIT stops the
+  # scan — and this floor is applied in Elixir to the @candidate_limit rows that
+  # come back. Same predicate, same admitted set: `%` admitted exactly
+  # `similarity >= @candidate_trgm_floor`, and filtering an already
+  # similarity-ordered list at the same number can only drop its tail. The
+  # pg_trgm `similarity_threshold` GUC no longer participates — `<->` is not
+  # threshold-gated, so `SET LOCAL` here would be decoration.
   @candidate_trgm_floor 0.2
 
   # The truncation tripwire: ask for ONE row more than the cap. If that extra row
@@ -389,7 +432,9 @@ defmodule Barkpark.Tasks.Dedup do
   #     still has exactly one row and is still detected.
   #   * **NEW: a trgm pre-filter on the title, so the scorer sees hundreds of
   #     candidates instead of thousands.** This one DOES narrow, and the
-  #     narrowing is stated below rather than left to be discovered.
+  #     narrowing is stated below rather than left to be discovered. It is a
+  #     KNN-ORDERED index scan (`ORDER BY title <-> $1 LIMIT N`), so the cap
+  #     bounds the rows Postgres READS, not merely the rows it returns.
   #
   # ## Why the pre-filter had to exist (the cost was never in the query)
   #
@@ -417,9 +462,10 @@ defmodule Barkpark.Tasks.Dedup do
   #
   # ## What the trgm net can now MISS, said plainly
   #
-  # The `%` operator matches on the TITLE only, because `documents_title_trgm_idx`
-  # (GIN, migration 20260526181000) is a title index — the same index and the
-  # same operator `Content.DedupWall` runs on this table. But `Similarity` scores
+  # The `<->` distance ranks on the TITLE only, because
+  # `documents_title_trgm_gist_idx` (GiST, migration 20260910100000) is a title
+  # index — the same index and the same operator `Content.DedupWall` runs on this
+  # table. But `Similarity` scores
   # title AND description as one combined token bag. So a candidate whose title
   # is trigram-dissimilar to the new title, yet whose DESCRIPTION overlaps enough
   # to have crossed 0.55, is no longer fetched and no longer refused.
@@ -434,6 +480,11 @@ defmodule Barkpark.Tasks.Dedup do
   # a duplicate — and every id in the corpus is now reachable, because the index
   # is consulted over all of it instead of a sorted prefix.
   #
+  # THAT LAST SENTENCE IS TRUE OF THIS CLAUSE ONLY. The two UNFILTERED shapes
+  # below (blank probe title, missing pg_trgm) still read a sorted prefix, and
+  # they always did; see `@unfiltered_candidate_limit` for what they actually
+  # scan today and for why they do not inherit `@candidate_limit`.
+  #
   # An empty probe title cannot be allowed to silently match nothing (that would
   # be a fail-OPEN gate wearing a green light), so it falls back to the
   # unfiltered scan — see `fetch_rows/6`.
@@ -441,10 +492,24 @@ defmodule Barkpark.Tasks.Dedup do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
     timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
-    limit = Keyword.get(opts, :dedup_candidate_limit, @candidate_limit)
+    # TWO CAPS, TWO OVERRIDES, BECAUSE THEY ARE TWO DIFFERENT NUMBERS.
+    # `:dedup_candidate_limit` bounds the KNN shape ONLY — a test that shrinks it
+    # to prove the truncation tripwire must not also, silently, shrink the
+    # unfiltered fallback, because "the fallback inherits the KNN cap" is exactly
+    # the defect this pair exists to stop (task-4671d136b2c568b4).
+    limits = {
+      Keyword.get(opts, :dedup_candidate_limit, @candidate_limit),
+      Keyword.get(opts, :dedup_unfiltered_candidate_limit, @unfiltered_candidate_limit)
+    }
+
     probe_title = Keyword.get(opts, :probe_title) || ""
 
-    rows = fetch_rows(dataset, workspace_id, project_id, timeout, limit, probe_title)
+    # The cap that BOUND the scan is whatever the clause that actually ran
+    # applied — the pg_trgm rescue switches shapes mid-call, so this cannot be
+    # read off `limits` at the call site. Truncation maths and every honesty
+    # channel below use the returned one.
+    {shape, limit, rows} =
+      fetch_rows(dataset, workspace_id, project_id, timeout, limits, probe_title)
 
     # The probe row is the ONLY thing that distinguishes "the backlog happens to
     # be exactly `limit` rows" from "the backlog is larger than this scan saw".
@@ -453,7 +518,7 @@ defmodule Barkpark.Tasks.Dedup do
     {kept, truncated?} =
       if length(rows) > limit, do: {Enum.take(rows, limit), true}, else: {rows, false}
 
-    report_scan(truncated?, length(kept), limit, dataset)
+    report_scan(truncated?, length(kept), limit, dataset, shape)
 
     {:ok, to_tasks(kept), scan_report(truncated?, length(kept), limit)}
   rescue
@@ -496,51 +561,63 @@ defmodule Barkpark.Tasks.Dedup do
   # empty case keeps the old whole-corpus behaviour (slow, but honest) instead.
   # `check_new_task/5` already short-circuits when title AND description are both
   # blank; this covers the title-blank-description-present remainder.
-  defp fetch_rows(dataset, workspace_id, project_id, timeout, limit, "") do
-    base_query(dataset, workspace_id, project_id)
-    |> limited(limit)
-    |> Repo.all(timeout: timeout)
+  #
+  # SAID PLAINLY, BECAUSE THE OLD WORDING HERE WAS FALSE: this is NOT the
+  # "whole-corpus behaviour". It is `DISTINCT ON (canonical doc_id)` ASCENDING
+  # under a LIMIT, i.e. the alphabetically-first `@unfiltered_candidate_limit`
+  # rows and nothing after them — the alphabetic truncation the trgm change
+  # retired on the probe path, still present here. What it keeps is the old
+  # fallback's SIZE (5,000, see `@unfiltered_candidate_limit`), not a full scan:
+  # against the 8,159 canonical ids measured 2026-09-12 it reads 61.3% of them,
+  # and none of the 2,386 `task-*` ids, which sort past index 5,363.
+  # It is kept because a partial honest scan is still a scan, where
+  # `similarity(x, '')` would have been a gate that matched nothing and reported
+  # success.
+  defp fetch_rows(dataset, workspace_id, project_id, timeout, {_knn, unfiltered}, "") do
+    rows =
+      base_query(dataset, workspace_id, project_id)
+      |> twin_collapsed()
+      |> limited(unfiltered)
+      |> Repo.all(timeout: timeout)
+
+    {:unfiltered, unfiltered, rows}
   end
 
-  defp fetch_rows(dataset, workspace_id, project_id, timeout, limit, probe_title) do
-    inner =
+  defp fetch_rows(dataset, workspace_id, project_id, timeout, {limit, _un} = limits, probe_title) do
+    # ONE QUERY, AND IT MUST STAY ONE. The old shape was a `DISTINCT ON`
+    # subquery under an outer `ORDER BY similarity(...) DESC, doc_id`: two
+    # stages, because `DISTINCT ON` requires its expression to lead the
+    # `ORDER BY`, so a single query could be ordered by canonical id OR by
+    # similarity, never both. That outer sort had no ordered index path at any
+    # cost, so Postgres materialized every trgm-matched row and heapsorted it —
+    # the LIMIT trimmed the OUTPUT while the sort INPUT grew with the corpus.
+    #
+    # `ORDER BY title <-> $1 LIMIT N` is the shape `documents_title_trgm_gist_idx`
+    # (migration 20260910100000) can SERVE, so the scan stops at N rows at every
+    # corpus size. The coupling is load-bearing and silent when broken: adding a
+    # second sort key, or putting `similarity()` back in the ORDER BY, makes the
+    # ordered path unreachable and the query falls back to seq-scan + sort with
+    # no error and no warning. That is why the trgm floor AND the draft/published
+    # twin collapse both happen in Elixir below, on the bounded rows, instead of
+    # as SQL that would cost the ordered path.
+    query =
       dataset
       |> base_query(workspace_id, project_id)
-      |> trgm_filtered(probe_title)
+      |> knn_ordered(probe_title, limit + @candidate_probe)
 
-    # TWO STAGES, and they cannot collapse into one. `DISTINCT ON` requires its
-    # expression to lead the `ORDER BY`, so a single query can be ordered by
-    # canonical id (to collapse twins) or by similarity (to make the cap keep the
-    # right rows) — never both. The subquery collapses twins over the whole
-    # trgm-matched set; the outer query then ranks the survivors by similarity
-    # and applies the cap. Ordering the cap is the entire reason the cap is now
-    # safe to lower.
-    query =
-      from(c in Ecto.Query.subquery(inner),
-        order_by: [desc: c.sim, asc: c.doc_id],
-        limit: ^(limit + @candidate_probe)
-      )
-
-    # `SET LOCAL` is a no-op outside a transaction, and @candidate_trgm_floor
-    # (0.2) sits below pg_trgm's 0.3 default — so without the txn the `%` net
-    # would silently TIGHTEN to 0.3 and drop exactly the gray-zone near-duplicates
-    # the advise band exists to catch. Same cliff, same remedy, as
-    # Content.DedupWall. SET takes no bind params, so the floor is interpolated;
-    # the module attribute stays the single source of truth.
-    case Repo.transaction(
-           fn ->
-             Repo.query!(
-               "SET LOCAL pg_trgm.similarity_threshold = #{@candidate_trgm_floor}",
-               [],
-               timeout: timeout
-             )
-
-             Repo.all(query, timeout: timeout)
-           end,
-           timeout: timeout
-         ) do
+    # The txn no longer carries session state (`SET LOCAL
+    # pg_trgm.similarity_threshold` is gone with the `%` operator it configured;
+    # `<->` is not threshold-gated). It stays because it is what carries ONE
+    # budget over the connection checkout AND the scan, and what turns a
+    # pool-checkout death into `{:error, reason}` instead of an escaped exit.
+    case Repo.transaction(fn -> Repo.all(query, timeout: timeout) end, timeout: timeout) do
       {:ok, rows} ->
-        rows
+        kept =
+          rows
+          |> Enum.filter(&(&1.sim >= @candidate_trgm_floor))
+          |> collapse_twins()
+
+        {:knn, limit, kept}
 
       # A rolled-back txn is a DEGRADED scan, not an empty corpus. Raising here
       # routes it into the `rescue` in `fetch_candidates/2`, which is what turns
@@ -552,11 +629,11 @@ defmodule Barkpark.Tasks.Dedup do
   rescue
     # FRESH-INSTALL FALLBACK, and ONLY this error. `pg_trgm` is optional —
     # `Application.check_pg_trgm/0` warns rather than crashes when it is absent,
-    # so a legitimate Barkpark can be running without the `%` operator or
-    # `similarity()`. On such a box every statement here fails with SQLSTATE
-    # 42883, and without this clause that would turn into `{:degraded, …}` and
-    # REFUSE every single task create — a fresh install unable to file its first
-    # task, caused by a performance fix.
+    # so a legitimate Barkpark can be running without the `<->` operator. On such
+    # a box every statement here fails with SQLSTATE 42883, and without this
+    # clause that would turn into `{:degraded, …}` and REFUSE every single task
+    # create — a fresh install unable to file its first task, caused by a
+    # performance fix.
     #
     # The fallback is narrow on purpose. It matches the missing-function code and
     # nothing else, so a timeout, a pool death or any other Postgres error still
@@ -567,16 +644,51 @@ defmodule Barkpark.Tasks.Dedup do
       if trgm_unavailable?(e) do
         Logger.warning(
           "Tasks.Dedup: pg_trgm is unavailable, falling back to the UNFILTERED backlog " <>
-            "scan. Detection is unaffected; the scan is slow and the candidate cap is " <>
-            "alphabetical again. Run `CREATE EXTENSION IF NOT EXISTS pg_trgm;` to restore " <>
-            "the pre-filter."
+            "scan. The scan is slow, its candidate cap is ALPHABETICAL again (DISTINCT ON " <>
+            "canonical doc_id ASCENDING), and detection is therefore NOT unaffected: rows " <>
+            "sorting after the first #{elem(limits, 1)} canonical ids are invisible to this " <>
+            "check, including every `task-*` id if the corpus is larger than that. Run " <>
+            "`CREATE EXTENSION IF NOT EXISTS pg_trgm;` to restore the pre-filter."
         )
 
-        fetch_rows(dataset, workspace_id, project_id, timeout, limit, "")
+        # The rescue re-enters through the unfiltered clause, which applies the
+        # UNFILTERED cap — it must not inherit `limit`, which is sized for an
+        # ordering this shape does not have.
+        fetch_rows(dataset, workspace_id, project_id, timeout, limits, "")
       else
         reraise e, __STACKTRACE__
       end
   end
+
+  # THE TWIN COLLAPSE MOVED OUT OF SQL, NOT OUT OF EXISTENCE. `DISTINCT ON` on
+  # the canonical (drafts-stripped) id used to fold a draft/published pair to one
+  # row, preferring the published one; it cannot coexist with the KNN `ORDER BY`
+  # (see above). This is the same rule over the bounded rows: one row per
+  # canonical id, published beating `drafts.`, input order preserved (which is
+  # KNN order, i.e. descending similarity).
+  #
+  # Twins carry the SAME title, so they carry the same `<->` distance and sit
+  # adjacent in the scan — the only cost of collapsing late is that a twin pair
+  # occupies two of the @candidate_limit slots instead of one. Detection is
+  # unchanged: both rows normalize to the same id and score identically, so the
+  # extra row only ever bought a duplicate entry in `similar`.
+  defp collapse_twins(rows) do
+    winners =
+      rows
+      |> Enum.group_by(&canonical_doc_id(&1.doc_id))
+      |> Map.new(fn {canon, group} -> {canon, Enum.min_by(group, &draft_rank/1).doc_id} end)
+
+    Enum.filter(rows, fn row ->
+      Map.get(winners, canonical_doc_id(row.doc_id)) == row.doc_id
+    end)
+  end
+
+  defp canonical_doc_id(doc_id), do: String.replace_prefix(doc_id, "drafts.", "")
+
+  # `false` sorted before `true` in the old SQL `ORDER BY ? LIKE 'drafts.%'`;
+  # 0 sorts before 1 here. Same preference: the PUBLISHED row of a twin wins.
+  defp draft_rank(%{doc_id: doc_id}),
+    do: if(String.starts_with?(doc_id, "drafts."), do: 1, else: 0)
 
   defp trgm_unavailable?(%Postgrex.Error{postgres: %{code: code}}),
     do: code in [:undefined_function, :undefined_object, :undefined_table]
@@ -592,10 +704,6 @@ defmodule Barkpark.Tasks.Dedup do
       # (acceptance criterion 4). Done tasks stay in — a match against a done
       # task is a real "already landed" signal.
       where: fragment("COALESCE(?->>'lifecycle_status', '')", d.content) != "cancelled",
-      distinct: [asc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)],
-      # Second key: `false` sorts before `true`, so the PUBLISHED row of a twin
-      # pair wins the DISTINCT ON.
-      order_by: [asc: fragment("? LIKE 'drafts.%'", d.doc_id)],
       select: %{
         doc_id: d.doc_id,
         title: d.title,
@@ -609,48 +717,79 @@ defmodule Barkpark.Tasks.Dedup do
     |> Scope.scope_to_workspace(workspace_id, project_id)
   end
 
-  # `? % ?` (not `similarity(?, ?) > x`) is the form that CAN use the GIN
-  # `documents_title_trgm_idx`; the `similarity()` form can only seq-scan. Said
-  # honestly, though: at this table size the planner still picks a seq scan, and
-  # measured on the real corpus the pre-filtered query is not cheaper than the
-  # unfiltered one — both make one pass over the same rows. THE SQL IS NOT WHERE
-  # THE WIN IS, and this comment used to imply otherwise.
+  # THE SHAPE IS THE BOUND. `ORDER BY title <-> $1 LIMIT N` is the only form a
+  # `gist_trgm_ops` index can answer as an ORDERED index scan, and an ordered
+  # index scan is what makes the LIMIT stop the SCAN rather than trim its
+  # output. `<->` is `1 - similarity`, so ascending distance IS descending
+  # similarity — same ranking as the `ORDER BY similarity(...) DESC` it
+  # replaces, with the sort input capped at N instead of growing with the
+  # corpus.
   #
-  # The win is that the scorer's input shrinks. `Similarity.assess/3` is linear in
-  # the candidate count and unbounded by any timeout: 6,217 ms at 5,000 rows,
-  # 89 ms at 500. Bounding what reaches it is the whole fix; the operator choice
-  # only keeps the index reachable for when the corpus makes it worth planning.
-  # The score is also SELECTed so the outer query can rank by it without
-  # recomputing.
-  defp trgm_filtered(query, probe_title) do
+  # DO NOT add a second `order_by` key and do not put `similarity()` back: either
+  # edit makes the ordered path unreachable, and the planner falls back to a full
+  # scan plus a top-N heapsort with no error to notice. `sim` is SELECTed off the
+  # same `<->` the index just computed (free) so `@candidate_trgm_floor` can be
+  # applied to the bounded rows in Elixir.
+  #
+  # Said honestly about the WIN: the scorer's input shrinking is still the bigger
+  # half. `Similarity.assess/3` is linear in the candidate count and unbounded by
+  # any timeout — 6,217 ms at 5,000 rows, 89 ms at 500. This shape is what stops
+  # the QUERY half from growing into the same problem as the corpus does.
+  defp knn_ordered(query, probe_title, limit) do
     from([doc: d] in query,
-      where: fragment("? % ?", d.title, ^probe_title),
-      select_merge: %{sim: fragment("similarity(?, ?)", d.title, ^probe_title)}
+      order_by: [asc: fragment("? <-> ?", d.title, ^probe_title)],
+      select_merge: %{sim: fragment("1 - (? <-> ?)", d.title, ^probe_title)},
+      limit: ^limit
+    )
+  end
+
+  # The draft/published twin collapse, as SQL. Used ONLY by the blank-probe
+  # fallback, which has no `<->` ordering to protect.
+  defp twin_collapsed(query) do
+    from([doc: d] in query,
+      distinct: [asc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)],
+      # Second key: `false` sorts before `true`, so the PUBLISHED row of a twin
+      # pair wins the DISTINCT ON.
+      order_by: [asc: fragment("? LIKE 'drafts.%'", d.doc_id)]
     )
   end
 
   defp limited(query, limit), do: from(d in query, limit: ^(limit + @candidate_probe))
 
-  defp report_scan(false, _returned, _limit, _dataset), do: :ok
+  defp report_scan(false, _returned, _limit, _dataset, _shape), do: :ok
 
-  defp report_scan(true, returned, limit, dataset) do
+  defp report_scan(true, returned, limit, dataset, shape) do
     Logger.warning(
       "Tasks.Dedup scan TRUNCATED: returned #{returned} of a larger candidate set at " <>
         "limit #{limit} (dataset=#{inspect(dataset)}). The duplicate check ran over a " <>
         "PARTIAL candidate set — an :ok from this scan means 'no duplicate among the " <>
-        "#{returned} rows scanned', not 'no duplicate'. This now means something " <>
-        "DIFFERENT and much rarer than it used to: the rows kept are the #{limit} MOST " <>
-        "TITLE-SIMILAR, not the alphabetically-first, so a bind here says the new title " <>
-        "trigram-matches more than #{limit} existing tasks — a generic title, or a " <>
-        "corpus that has outgrown the floor. Tighten @candidate_trgm_floor before you " <>
-        "raise the limit."
+        "#{returned} rows scanned', not 'no duplicate'. " <> truncation_shape_note(shape, limit)
     )
 
     :telemetry.execute(
       [:barkpark, :tasks, :dedup, :scan_truncated],
       %{returned: returned, limit: limit},
-      %{dataset: dataset}
+      %{dataset: dataset, shape: shape}
     )
+  end
+
+  # THE SAME BIND MEANS TWO DIFFERENT THINGS, so it must not be reported in one
+  # sentence. On the KNN path a bind is rare and benign-ish; on the unfiltered
+  # fallback it is the alphabetic blind spot, and saying "the MOST TITLE-SIMILAR"
+  # there would be the module vouching for a property that branch does not have.
+  defp truncation_shape_note(:knn, limit) do
+    "This now means something DIFFERENT and much rarer than it used to: the rows kept " <>
+      "are the #{limit} MOST TITLE-SIMILAR, not the alphabetically-first, so a bind here " <>
+      "says the new title trigram-matches more than #{limit} existing tasks — a generic " <>
+      "title, or a corpus that has outgrown the floor. Tighten @candidate_trgm_floor " <>
+      "before you raise the limit."
+  end
+
+  defp truncation_shape_note(:unfiltered, limit) do
+    "This is the UNFILTERED fallback (blank probe title, or pg_trgm missing), which has " <>
+      "no similarity ordering at all: the rows kept are the ALPHABETICALLY-FIRST #{limit} " <>
+      "canonical ids, so every id sorting after them was never compared. Restore pg_trgm " <>
+      "(or a non-blank probe title) rather than raising this limit."
   end
 
   defp scan_report(truncated?, returned, limit) do

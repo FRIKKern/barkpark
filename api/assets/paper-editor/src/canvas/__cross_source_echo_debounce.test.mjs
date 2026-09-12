@@ -26,6 +26,7 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 
 await import("./index.js");
 const { DEBOUNCE_MS } = await import("../contract.js");
+const { hasOverlappingOps } = await import("./run-convert.js");
 
 const paragraph = (id, value) => ({
   id,
@@ -34,6 +35,28 @@ const paragraph = (id, value) => ({
 });
 
 const original = paragraph("left-column", "Old left text");
+const localPatch = { op: "patch-block", id: original.id,
+  patch: { content: paragraph(original.id, "Local text").content } };
+assert.equal(hasOverlappingOps([localPatch], [original], null), false);
+assert.equal(hasOverlappingOps([localPatch], [original], [paragraph(original.id, "Other text")]), true);
+assert.equal(hasOverlappingOps([localPatch], [original], [paragraph(original.id, "Local text")]), false,
+  "converging on the same value is not a conflict");
+assert.equal(hasOverlappingOps([localPatch], [original], [{ ...original, audit: { author: "other" } }]), false,
+  "independent metadata does not turn a text edit into a conflict");
+assert.equal(hasOverlappingOps([localPatch], [original], [{ ...original,
+  content: [{ value: "Old left text", type: "text" }] }]), false,
+  "object key order is immaterial");
+assert.equal(hasOverlappingOps([{ ...localPatch, patch: { content: [] } }], [original],
+  [paragraph(original.id, "Other text")]), true, "clearing text also requires overlap review");
+const localRemoval = { op: "remove-block", id: original.id };
+assert.equal(hasOverlappingOps([localRemoval], [original], [original]), false,
+  "deleting unchanged content needs no review");
+assert.equal(hasOverlappingOps([localRemoval], [original], []), false,
+  "convergent deletions add no overlap");
+assert.equal(hasOverlappingOps([localRemoval], [original], [paragraph(original.id, "Other text")]), true,
+  "deletion must not discard an unseen remote text edit");
+assert.equal(hasOverlappingOps([localRemoval], [original], [{ ...original, audit: { author: "other" } }]), true,
+  "deletion must not discard unseen remote metadata either");
 const canvas = document.createElement("bp-paper-canvas");
 canvas.acknowledgedSaves = true;
 canvas.blocks = [original];
@@ -105,6 +128,9 @@ try {
   assert.equal(batches[0].ops[0].op, "patch-block");
   assert.match(batches[0].ops[0].patch.content[0].value, /unsent local draft/);
   assert.equal(canvas.identifyOpsRequest(batches[0].seq, "request-main"), true);
+  assert.equal(canvas.identifyOpsRequest(batches[0].seq, "unrelated-request"), false);
+  assert.equal(canvas.identifyOpsRequest(batches[0].seq, "unrelated-request", "wrong-old-request"), false);
+  assert.equal(canvas.identifyOpsRequest(batches[0].seq + 1, "unrelated-request", "request-main"), false);
 
   canvas.applyServerBlocks(olderAuthority);
   assert.match(
@@ -272,6 +298,162 @@ try {
   assert.match(stalePendingCanvas._editor.state.doc.textContent, /Newer current authority/);
   assert.match(stalePendingCanvas._editor.state.doc.textContent, /Must survive stale receipt/);
   assert.equal(stalePendingCanvas._pendingServerBlocks, null);
+
+  // Chronicle browser regression: a focused but clean editor defers a remote
+  // title change. Its NEXT introduction edit must not revert that unseen title.
+  const focused = document.createElement("bp-paper-canvas");
+  focused.acknowledgedSaves = true;
+  focused.blocks = [paragraph("title", "Original title"), paragraph("lead", "Original lead")];
+  const focusedBatches = [];
+  focused.addEventListener("bp-canvas-ops", (event) => focusedBatches.push(event.detail));
+  document.body.appendChild(focused);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 50));
+    focused._editor.commands.focus("end");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(focused._editor.isFocused, true);
+    const remote = [paragraph("title", "Title from another tab"), paragraph("lead", "Original lead")];
+    focused.applyServerBlocks(remote, { mode: "external", requestId: null });
+    assert.equal(focused._editor.state.doc.firstChild.textContent, "Original title");
+    focused._editor.view.dispatch(focused._editor.state.tr.insertText(" local", focused._editor.state.doc.content.size - 1));
+    assert.equal(focused.flushPendingChanges(), true);
+    assert.deepEqual(focusedBatches[0].ops, [{
+      op: "patch-block", id: "lead", patch: { content: [{ type: "text", value: "Original lead local" }] },
+    }], "a deferred remote title is not a local edit to revert");
+    focused.identifyOpsRequest(focusedBatches[0].seq, "request-focused");
+    focused.acknowledgeOps(focusedBatches[0].seq, true);
+    const merged = [remote[0], paragraph("lead", "Original lead local")];
+    focused.applyServerBlocks(merged, { mode: "own", requestId: "request-focused" });
+    // Stay focused and edit again AFTER the own receipt, without a pre-existing
+    // debounce snapshot to protect the displayed baseline.
+    focused._editor.view.dispatch(focused._editor.state.tr.insertText(" again", focused._editor.state.doc.content.size - 1));
+    focused.flushPendingChanges();
+    assert.deepEqual(focusedBatches[1].ops.map((op) => op.id), ["lead"]);
+    focused.identifyOpsRequest(focusedBatches[1].seq, "request-focused-2");
+    const final = [remote[0], paragraph("lead", "Original lead local again")];
+    focused.applyServerBlocks(final, { mode: "own", requestId: "request-focused-2" });
+    focused.acknowledgeOps(focusedBatches[1].seq, true);
+    focused._editor.view.dispatch(focused._editor.state.tr.insertText(" third", focused._editor.state.doc.content.size - 1));
+    focused.flushPendingChanges();
+    assert.deepEqual(focusedBatches[2].ops.map((op) => op.id), ["lead"],
+      "an echo-before-ack reply also keeps unseen remote content out of the local diff");
+    focused.identifyOpsRequest(focusedBatches[2].seq, "request-focused-3");
+    focused.acknowledgeOps(focusedBatches[2].seq, true);
+    const finalThird = [remote[0], paragraph("lead", "Original lead local again third")];
+    focused.applyServerBlocks(finalThird, { mode: "own", requestId: "request-focused-3" });
+    focused._editor.commands.blur();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(focused._blocks, finalThird);
+    assert.equal(focused._editor.state.doc.firstChild.textContent, "Title from another tab");
+    assert.equal(focused.hasPendingChanges(), false);
+    const leadBeforeUndo = focused._editor.state.doc.child(1).textContent;
+    assert.equal(focused._editor.commands.undo(), true, "a remote sibling update retains local undo history");
+    assert.notEqual(focused._editor.state.doc.child(1).textContent, leadBeforeUndo,
+      "undo changes the local introduction after the remote title becomes visible");
+    assert.equal(focused._editor.state.doc.firstChild.textContent, "Title from another tab",
+      "undo never reverses another author's title edit");
+    focused.flushPendingChanges();
+    assert.deepEqual(focusedBatches.at(-1).ops.map((op) => op.id), ["lead"]);
+  } finally {
+    focused.remove();
+  }
+
+  // Save receipts refresh carrier attributes, including listItem descendants.
+  // An unrelated remote edit must not map away the local text's undo steps.
+  for (const [kind, makeBlock] of Object.entries({
+    heading: (text) => ({ id: "local", type: "heading", level: 2, text }),
+    paragraph: (text) => paragraph("local", text),
+    paragraphText: (text) => ({ id: "local", type: "paragraph", content: [], text }),
+    list: (text) => ({ id: "local", type: "list", items: [{ id: "item", text, audit: "keep" }] }),
+    nestedList: (text) => ({ id: "local", type: "list", items: [{ id: "parent", text: "", children: [
+      { id: "frame", type: "list", ordered: true, audit: "keep frame", items: [{ id: "child", text }] },
+    ] }] }),
+  })) {
+    const carrierCanvas = document.createElement("bp-paper-canvas");
+    carrierCanvas.blocks = [paragraph("remote", "Original remote"), makeBlock("Original local")];
+    document.body.appendChild(carrierCanvas);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 50));
+      const editor = carrierCanvas._editor;
+      let textEnd;
+      editor.state.doc.descendants((node, position) => {
+        if (node.isText && node.text === "Original local") textEnd = position + node.nodeSize;
+      });
+      assert.equal(typeof textEnd, "number", kind);
+      editor.view.dispatch(editor.state.tr.insertText(" edited", textEnd));
+      carrierCanvas._applyExternalContent([
+        paragraph("remote", "Remote change"), makeBlock("Original local edited"),
+      ]);
+      assert.equal(editor.commands.undo(), true, `${kind}: local undo survives carrier refresh`);
+      assert.equal(editor.state.doc.child(1).textContent, "Original local", kind);
+      assert.equal(editor.state.doc.firstChild.textContent, "Remote change", kind);
+      assert.equal(editor.commands.redo(), true, kind);
+      assert.equal(editor.state.doc.child(1).textContent, "Original local edited", kind);
+    } finally {
+      carrierCanvas.remove();
+    }
+  }
+
+  const lead = paragraph("lead", "Lead");
+  const sibling = paragraph("sibling", "Sibling");
+  for (const [kind, remote] of Object.entries({
+    insertion: [lead, sibling, paragraph("new", "Remote addition")],
+    insertionBefore: [paragraph("new", "Remote addition"), lead, sibling],
+    insertionBetween: [lead, paragraph("new", "Remote addition"), sibling],
+    removal: [lead],
+    removalBefore: [lead],
+    mixed: [paragraph("new", "Remote addition"), lead, paragraph("new-tail", "Another addition")],
+    reorder: [sibling, lead],
+  })) {
+    const structure = document.createElement("bp-paper-canvas");
+    structure.acknowledgedSaves = true;
+    const initial = kind === "removalBefore" || kind === "mixed" ? [sibling, lead] : [lead, sibling];
+    structure.blocks = initial;
+    const emitted = [];
+    structure.addEventListener("bp-canvas-ops", (event) => emitted.push(event.detail));
+    document.body.appendChild(structure);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 50));
+      structure._editor.commands.focus("start");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      structure.applyServerBlocks(remote);
+      const leadPosition = initial[0].id === "lead" ? 1 : structure._editor.state.doc.firstChild.nodeSize + 1;
+      structure._editor.view.dispatch(structure._editor.state.tr.insertText("Local ", leadPosition));
+      structure.flushPendingChanges();
+      assert.deepEqual(emitted[0].ops, [{ op: "patch-block", id: "lead",
+        patch: { content: [{ type: "text", value: "Local Lead" }] } }],
+      `${kind}: a local text edit cannot reverse a deferred remote structure change`);
+      structure.identifyOpsRequest(emitted[0].seq, `request-${kind}`);
+      const merged = remote.map((block) => block.id === "lead" ? paragraph("lead", "Local Lead") : block);
+      structure.applyServerBlocks(merged, { mode: "own", requestId: `request-${kind}` });
+      structure.acknowledgeOps(emitted[0].seq, true);
+      structure._editor.commands.blur();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(structure._blocks, merged);
+      assert.equal(structure.hasPendingChanges(), false);
+      assert.equal(structure._pendingServerBlocks, null);
+      if (kind !== "reorder") {
+        assert.equal(structure._editor.commands.undo(), true, `${kind}: local undo remains available`);
+        const textById = {};
+        structure._editor.state.doc.forEach((node) => { textById[node.attrs.bpId] = node.textContent; });
+        assert.equal(textById.lead, "Lead", `${kind}: undo restores the locally edited text`);
+        assert.deepEqual(Object.keys(textById), remote.map((block) => block.id),
+          `${kind}: undo retains the remote block structure`);
+        structure.flushPendingChanges();
+        assert.deepEqual(emitted.at(-1).ops.map((op) => op.id), ["lead"]);
+        assert.equal(structure._editor.commands.redo(), true, `${kind}: local redo remains available`);
+        const afterRedo = {};
+        structure._editor.state.doc.forEach((node) => { afterRedo[node.attrs.bpId] = node.textContent; });
+        assert.equal(afterRedo.lead, "Local Lead");
+        assert.deepEqual(Object.keys(afterRedo), remote.map((block) => block.id));
+        for (const block of remote.filter((block) => block.id !== "lead")) {
+          assert.equal(afterRedo[block.id], block.content[0].value, `${kind}: remote sibling text survives redo`);
+        }
+      }
+    } finally {
+      structure.remove();
+    }
+  }
 } finally {
   canvas.remove();
   idleCanvas.remove();

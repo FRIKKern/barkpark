@@ -94,6 +94,23 @@ const DefaultSupportRosterPollInterval = 5 * time.Second
 const supportHealthPollInterval = 10 * time.Second
 const supportHealthPollDeadline = 4 * time.Minute
 
+// DefaultSupportSecureStepBudget bounds EACH call in the secure leg — the DNS
+// upsert and every individual Caddy/TLS step. It exists because the chain-wide
+// DefaultSupportProvisionTimeout is NOT sufficient for terminality: a ctx
+// deadline only ends a call the callee actually honors, and the secure leg's
+// two callees are seams that shell out (cloud.CloudDNS and *SSHStepRunner both
+// land on exec.CommandContext with pipe-backed stdout, whose Wait can outlive
+// the killed child while a grandchild still holds the pipe). A live P1 refire
+// (job 4d7be1c2, 2026-07-28) stalled at secure:started and produced NO terminal
+// state inside a 1800s watch — the exact shape of a callee that never returns.
+// runSecureStep therefore stops WAITING at this budget whether or not the call
+// comes back, so the chain always reaches a terminal state.
+//
+// Sized for the slowest honest secure step: apt-get install caddy on a cold box
+// plus the Caddyfile write and reload. It is deliberately WIDER than the sshd
+// wait (3m) and the public health gate (4m) and well under the chain budget.
+const DefaultSupportSecureStepBudget = 6 * time.Minute
+
 // supportRecordTTLSeconds is the TTL the secure step pins on the support's A
 // record. The zone default (300s positive; SOA minimum 3600s for negative
 // answers) burned two live chains on 2026-07-26: a failed chain's deleted
@@ -267,6 +284,10 @@ type SupportSeams struct {
 	// 0 → the defaults above. Tests set tiny values so no real sleeps run.
 	RosterPollInterval time.Duration
 	RosterPollBudget   time.Duration
+	// SecureStepBudget bounds EACH secure-leg call (the DNS upsert, then every
+	// Caddy/TLS step) and is enforced by WAITING, not by ctx alone — see
+	// runSecureStep. 0 → DefaultSupportSecureStepBudget. Tests set tiny values.
+	SecureStepBudget time.Duration
 }
 
 // supportAgentPackages maps the agent choice to the npm package + binary the
@@ -382,12 +403,23 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 	// TTL pinned low (supportRecordTTLSeconds) so a failed-then-retried or
 	// repointed slug is never hostage to a resolver's cache of this record;
 	// CloudDNS issues the follow-up change-ttl (set-records has no --ttl flag).
-	if err := seams.DNS.UpsertRecord(ctx, cloud.Record{Zone: Zone, Name: label, Type: "A", Value: host.IP, TTL: supportRecordTTLSeconds}); err != nil {
+	// EVERY call below is wrapped in runSecureStep: the leg must reach a terminal
+	// state even when a seam never returns (the D-stall shape). The DNS upsert is
+	// wrapped FIRST because it is the call that writes the A record — a stall
+	// after it leaks a record the by-value census cannot see (no IP is on the CP
+	// row), and only a terminal return reaches failStep, whose fresh-context
+	// teardown deletes that record.
+	if err := runSecureStep(ctx, seams.SecureStepBudget, fmt.Sprintf("the DNS upsert for %s", fqdn), func(sctx context.Context) error {
+		return seams.DNS.UpsertRecord(sctx, cloud.Record{Zone: Zone, Name: label, Type: "A", Value: host.IP, TTL: supportRecordTTLSeconds})
+	}); err != nil {
 		return r.failStep(ctx, "secure", fmt.Errorf("dns: upsert %s: %w", fqdn, err))
 	}
 	report("secure", "progress", "requesting the TLS certificate")
 	for _, s := range seams.Caddy.Steps(label, Zone, AppPort) {
-		if err := r.runner.Run(ctx, s); err != nil {
+		step := s
+		if err := runSecureStep(ctx, seams.SecureStepBudget, fmt.Sprintf("caddy step %q", step.Title), func(sctx context.Context) error {
+			return r.runner.Run(sctx, step)
+		}); err != nil {
 			return r.failStep(ctx, "secure", fmt.Errorf("caddy: %w", err))
 		}
 	}
@@ -517,6 +549,34 @@ func (r *supportRun) failStep(_ context.Context, step string, cause error) (stri
 		return "", "", "", nil, fmt.Errorf("support %s: %s: %s (AND box %s teardown failed: %s — reclaim it manually)", r.name, step, causeText, r.host.Name, r.console.redact(derr.Error()))
 	}
 	return "", "", "", nil, fmt.Errorf("support %s: %s: %s (box torn down; the roster row ages to offline honestly)", r.name, step, causeText)
+}
+
+// runSecureStep runs one secure-leg call under budget and RETURNS EVEN WHEN fn
+// NEVER DOES. That is the whole point, and it is why a plain
+// context.WithTimeout would not discharge this contract: a ctx deadline is a
+// REQUEST to the callee, and the secure leg's callees are exec-backed seams
+// that can outlive their own ctx (exec.Cmd.Wait blocks on the output-copy
+// goroutine while a grandchild still holds the pipe). The observed live stall
+// sat at secure:started with no terminal state for 1800s — a chain ctx alone
+// had already been in force there and did not end it.
+//
+// So: run fn on its own goroutine with a derived (still-cancelled) ctx, and
+// select. On expiry we abandon the goroutine and return a terminal error. The
+// abandoned goroutine leaks by design — the channel is BUFFERED so it can
+// always deliver and exit if fn ever finishes, and one leaked goroutine on a
+// worker that is about to fail the job is strictly cheaper than a hung chain
+// and a billed, unrenderable box.
+func runSecureStep(ctx context.Context, budget time.Duration, what string, fn func(context.Context) error) error {
+	sctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	done := make(chan error, 1) // buffered: an abandoned fn still delivers and exits.
+	go func() { done <- fn(sctx) }()
+	select {
+	case err := <-done:
+		return err
+	case <-sctx.Done():
+		return fmt.Errorf("%s did not return within the %s secure-step budget: %w", what, budget, sctx.Err())
+	}
 }
 
 // dnsTeardownBestEffort deletes the support's A record — FAIL-OPEN with a loud
@@ -962,6 +1022,9 @@ func (s SupportSeams) withSupportDefaults() SupportSeams {
 	if s.RosterPollBudget <= 0 {
 		s.RosterPollBudget = DefaultSupportRosterPollBudget
 	}
+	if s.SecureStepBudget <= 0 {
+		s.SecureStepBudget = DefaultSupportSecureStepBudget
+	}
 	return s
 }
 
@@ -1003,6 +1066,12 @@ func validateSupportSpec(spec SupportJobSpec) error {
 
 // supportEnableImportStep flips the box's fail-closed bundle-import switch and
 // restarts Barkpark, then waits for the loopback API to answer again.
+//
+// The wait polls /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, and `curl -fsS` turns its eventual
+// 404 into a non-zero exit — so on 2027-01-01 this step would burn all 60
+// attempts and fail the import on a box that came back fine.
 func supportEnableImportStep() cloud.CaddyStep {
 	script := `set -e
 touch /opt/barkpark/.env
@@ -1010,7 +1079,7 @@ grep -v '^BARKPARK_ALLOW_BUNDLE_IMPORT=' /opt/barkpark/.env > /opt/barkpark/.env
 printf 'BARKPARK_ALLOW_BUNDLE_IMPORT=1\n' >> /opt/barkpark/.env.bpnew
 mv /opt/barkpark/.env.bpnew /opt/barkpark/.env
 systemctl restart barkpark
-for i in $(seq 1 60); do curl -fsS http://localhost:4000/api/schemas >/dev/null 2>&1 && exit 0; sleep 2; done
+for i in $(seq 1 60); do curl -fsS http://localhost:4000/status.json >/dev/null 2>&1 && exit 0; sleep 2; done
 echo 'barkpark did not come back after restart' >&2; exit 1`
 	return cloud.CaddyStep{
 		Title: "enable workspace bundle import (BARKPARK_ALLOW_BUNDLE_IMPORT=1) + restart",

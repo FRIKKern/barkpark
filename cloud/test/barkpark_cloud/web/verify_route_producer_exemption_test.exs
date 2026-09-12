@@ -124,6 +124,14 @@ defmodule BarkparkCloud.Web.VerifyRouteProducerExemptionTest do
       in `run_verify/3`; the route block's anchor is its delegation to
       `run_verify(conn, team, bp)`, which is what makes the pair the whole
       surface.
+    * COMMENT-AWARENESS (task-bb7e9bcdeb5cea85). Every textual match here runs
+      over the CODE half of a line. Matching raw source was wrong in BOTH
+      directions: a comment NAMING a forbidden symbol reddened the census (a
+      cch-w58 route comment had to be reworded into vaguer prose), and — the
+      half worth having — a comment QUOTING `Verify.run(bp)` satisfied the
+      non-vacuity anchor after the real call was deleted, holding the guard
+      green by prose. See the `## Comment-awareness` section below the
+      derivation helpers for the scanner and its conservative failure mode.
   """
   use ExUnit.Case, async: true
 
@@ -234,13 +242,172 @@ defmodule BarkparkCloud.Web.VerifyRouteProducerExemptionTest do
     end
   end
 
+  ## Comment-awareness (task-bb7e9bcdeb5cea85)
+  #
+  # EVERY textual match in this file runs over the CODE part of a line, never
+  # the raw line. Matching raw lines could not tell a comment from a call, and
+  # it was wrong in BOTH directions:
+  #
+  #   * a comment that merely NAMED a `@forbidden_reads` symbol reddened the
+  #     census — cch-w58 (#16611) had to reword an accurate route comment into
+  #     vaguer prose to get past it; and
+  #   * the dangerous half: a comment QUOTING `Verify.run(bp)` satisfied the
+  #     non-vacuity anchor after the real call was deleted. The guard could be
+  #     held GREEN by prose while the call it exists to pin was gone.
+  #
+  # The moduledoc already knew the distinction in ONE place — it names a
+  # verify.ex hit as "@moduledoc prose, NOT a call site" — and never
+  # generalised it to the matcher. This is that generalisation.
+  #
+  # Elixir has no block comments, so a comment is `#` to end of line — but only
+  # a `#` that is outside a string, a charlist, a sigil, a heredoc, or a `?#`
+  # character literal. The scanner below tracks exactly those. It is
+  # CONSERVATIVE BY CONSTRUCTION: any line it cannot scan to a clean end (an
+  # unterminated quote, a triple-quote opened mid-line) is returned WHOLE, so
+  # an ambiguous `#` counts as CODE and that line keeps the old behaviour
+  # rather than a guess silently blinding the guard.
+
+  defp code_lines(lines) do
+    {out, _state} =
+      Enum.reduce(lines, {[], :code}, fn line, {acc, state} ->
+        {code, next} = strip_comment(line, state)
+        {[code | acc], next}
+      end)
+
+    Enum.reverse(out)
+  end
+
+  defp contains_code?(lines, needle),
+    do: Enum.any?(code_lines(lines), &String.contains?(&1, needle))
+
+  defp count_code(lines, needle),
+    do: Enum.count(code_lines(lines), &String.contains?(&1, needle))
+
+  # Inside a heredoc body nothing is a comment; the closing delimiter on its own
+  # line returns us to code.
+  defp strip_comment(line, {:heredoc, delim}) do
+    if String.trim(line) == delim, do: {line, :code}, else: {line, {:heredoc, delim}}
+  end
+
+  defp strip_comment(line, :code) do
+    case scan(String.graphemes(line), []) do
+      {:ok, code} -> {code, :code}
+      {:heredoc, delim} -> {line, {:heredoc, delim}}
+      :unscannable -> {line, :code}
+    end
+  end
+
+  # Walks a line in CODE context. Returns {:ok, code_before_any_comment},
+  # {:heredoc, delim} when the line opens one, or :unscannable when a quote
+  # never closes — in which case the caller keeps the raw line.
+  defp scan([], acc), do: {:ok, emit(acc)}
+
+  # THE WHOLE POINT: a `#` reached in code context starts a comment.
+  defp scan(["#" | _rest], acc), do: {:ok, emit(acc)}
+
+  # `?x` is a character literal — `?#` very much included, and it must not be
+  # mistaken for a comment.
+  defp scan(["?", c | rest], acc), do: scan(rest, [c, "?" | acc])
+
+  defp scan(["\"", "\"", "\"" | rest], _acc) do
+    if blank?(rest), do: {:heredoc, "\"\"\""}, else: :unscannable
+  end
+
+  defp scan(["'", "'", "'" | rest], _acc) do
+    if blank?(rest), do: {:heredoc, "'''"}, else: :unscannable
+  end
+
+  defp scan(["\"" | rest], acc), do: skip_quoted(rest, ["\"" | acc], "\"", true)
+  defp scan(["'" | rest], acc), do: skip_quoted(rest, ["'" | acc], "'", true)
+
+  # Sigils: ~s(...), ~S"...", ~r/.../ and friends. An UPPERCASE sigil takes no
+  # escapes and no interpolation; a lowercase one takes both.
+  defp scan(["~", letter, delim | rest], acc) do
+    closer = sigil_closer(delim)
+
+    cond do
+      not sigil_letter?(letter) -> scan([letter, delim | rest], ["~" | acc])
+      sigil_heredoc?(delim, rest) -> {:heredoc, String.duplicate(delim, 3)}
+      closer -> skip_quoted(rest, [delim, letter, "~" | acc], closer, lower?(letter))
+      true -> scan([letter, delim | rest], ["~" | acc])
+    end
+  end
+
+  defp scan([c | rest], acc), do: scan(rest, [c | acc])
+
+  defp skip_quoted([], _acc, _closer, _interp), do: :unscannable
+
+  defp skip_quoted([c | rest], acc, closer, interp) do
+    cond do
+      c == closer ->
+        scan(rest, [c | acc])
+
+      interp and c == "\\" ->
+        case rest do
+          [n | tail] -> skip_quoted(tail, [n, c | acc], closer, interp)
+          [] -> :unscannable
+        end
+
+      interp and c == "#" and match?(["{" | _], rest) ->
+        ["{" | tail] = rest
+
+        case skip_interp(tail, 1, ["{", "#" | acc]) do
+          {:ok, remaining, acc2} -> skip_quoted(remaining, acc2, closer, interp)
+          :unscannable -> :unscannable
+        end
+
+      true ->
+        skip_quoted(rest, [c | acc], closer, interp)
+    end
+  end
+
+  # `#{...}` is CODE inside a string, so its contents are KEPT: a real
+  # `"#{bp.verify_reachable}"` read must still be visible to the vocabulary.
+  defp skip_interp([], _depth, _acc), do: :unscannable
+  defp skip_interp(["}" | rest], 1, acc), do: {:ok, rest, ["}" | acc]}
+  defp skip_interp(["}" | rest], depth, acc), do: skip_interp(rest, depth - 1, ["}" | acc])
+  defp skip_interp(["{" | rest], depth, acc), do: skip_interp(rest, depth + 1, ["{" | acc])
+
+  defp skip_interp(["\"" | rest], depth, acc) do
+    case skip_plain_string(rest, ["\"" | acc]) do
+      {:ok, remaining, acc2} -> skip_interp(remaining, depth, acc2)
+      :unscannable -> :unscannable
+    end
+  end
+
+  defp skip_interp([c | rest], depth, acc), do: skip_interp(rest, depth, [c | acc])
+
+  defp skip_plain_string([], _acc), do: :unscannable
+  defp skip_plain_string(["\\", n | rest], acc), do: skip_plain_string(rest, [n, "\\" | acc])
+  defp skip_plain_string(["\"" | rest], acc), do: {:ok, rest, ["\"" | acc]}
+  defp skip_plain_string([c | rest], acc), do: skip_plain_string(rest, [c | acc])
+
+  defp emit(acc), do: acc |> Enum.reverse() |> Enum.join()
+  defp blank?(chars), do: chars |> Enum.join() |> String.trim() == ""
+  defp sigil_letter?(l), do: l =~ ~r/^[a-zA-Z]$/
+  defp lower?(l), do: l =~ ~r/^[a-z]$/
+
+  defp sigil_heredoc?(d, [d, d | tail]) when d in ["\"", "'"], do: blank?(tail)
+  defp sigil_heredoc?(_d, _rest), do: false
+
+  defp sigil_closer("("), do: ")"
+  defp sigil_closer("["), do: "]"
+  defp sigil_closer("{"), do: "}"
+  defp sigil_closer("<"), do: ">"
+  defp sigil_closer("/"), do: "/"
+  defp sigil_closer("|"), do: "|"
+  defp sigil_closer("\""), do: "\""
+  defp sigil_closer("'"), do: "'"
+  defp sigil_closer(_other), do: nil
+
   defp offending_lines(lines, vocabulary \\ @forbidden_reads) do
     lines
-    |> Enum.reject(&String.contains?(&1, @allowed_producer))
-    |> Enum.flat_map(fn line ->
-      case Enum.filter(vocabulary, &String.contains?(line, &1)) do
+    |> Enum.zip(code_lines(lines))
+    |> Enum.reject(fn {_raw, code} -> String.contains?(code, @allowed_producer) end)
+    |> Enum.flat_map(fn {raw, code} ->
+      case Enum.filter(vocabulary, &String.contains?(code, &1)) do
         [] -> []
-        hits -> [{String.trim(line), hits}]
+        hits -> [{String.trim(raw), hits}]
       end
     end)
   end
@@ -262,15 +429,15 @@ defmodule BarkparkCloud.Web.VerifyRouteProducerExemptionTest do
     # Per-block anchors: the route delegates to run_verify/3, and run_verify/3 is
     # where the suite actually runs. If either anchor disappears, the pair below
     # is no longer scanning the surface this file claims to cover.
-    assert Enum.any?(route, &String.contains?(&1, "run_verify(conn, team, bp)")),
+    assert contains_code?(route, "run_verify(conn, team, bp)"),
            "the verify route no longer delegates to run_verify/3 — re-derive this census"
 
-    assert Enum.any?(run_verify, &String.contains?(&1, "Verify.run(bp)")),
+    assert contains_code?(run_verify, "Verify.run(bp)"),
            "run_verify/3 no longer calls Verify.run(bp) — re-derive this census"
 
     # The producer line must actually be present, or the allow-list below is
     # exempting nothing and the whole file is scanning a surface it misunderstands.
-    assert Enum.count(run_verify, &String.contains?(&1, @allowed_producer)) == 1,
+    assert count_code(run_verify, @allowed_producer) == 1,
            "expected exactly one #{@allowed_producer} line inside run_verify/3"
   end
 
@@ -318,7 +485,7 @@ defmodule BarkparkCloud.Web.VerifyRouteProducerExemptionTest do
            "extracted #{heads} clause head(s) for reveal_admin_token/1; " <>
              "@reveal_def_re or @next_toplevel_re has stopped matching registry.ex"
 
-    assert Enum.any?(group, &String.contains?(&1, "Vault.decrypt(ciphertext)")),
+    assert contains_code?(group, "Vault.decrypt(ciphertext)"),
            "reveal_admin_token/1 no longer decrypts the stored ciphertext — re-derive this census"
 
     # The directness this file's exemption rests on. If Verify.run/1 stops
@@ -330,7 +497,7 @@ defmodule BarkparkCloud.Web.VerifyRouteProducerExemptionTest do
            "Verify.run/1's live-url clause extracted #{length(run_clause)} lines; " <>
              "@verify_run_re or @block_end_re has stopped matching verify.ex"
 
-    assert Enum.any?(run_clause, &String.contains?(&1, "Registry.reveal_admin_token(bp)")),
+    assert contains_code?(run_clause, "Registry.reveal_admin_token(bp)"),
            "Verify.run/1 no longer calls Registry.reveal_admin_token/1 directly — " <>
              "the producer exemption now depends on whatever it calls instead"
 
@@ -351,5 +518,51 @@ defmodule BarkparkCloud.Web.VerifyRouteProducerExemptionTest do
 
            Refuse at the CALLER that should be refused, not in the shared decrypt.
            """
+  end
+
+  # The stripper's own pins. Without these, the comment-awareness above is an
+  # unmeasured claim — and a stripper that is too EAGER is the worse failure:
+  # it deletes code and blinds every match in this file at once.
+  test "the matcher reads code, not comments — and a `#` inside a literal is code" do
+    # A comment is stripped; the identical text as a call is not.
+    assert contains_code?(["    run_verify(conn, team, bp)"], "run_verify(conn, team, bp)")
+
+    refute contains_code?(
+             ["    # run_verify(conn, team, bp) — prose, deliberately not a call"],
+             "run_verify(conn, team, bp)"
+           )
+
+    refute contains_code?(["    # Verify.run(bp) is called below"], "Verify.run(bp)")
+
+    # POSITIVE CONTROL ON THE STRIPPER: a `#` inside a string literal does NOT
+    # start a comment, so everything after it stays visible to the vocabulary.
+    # If this ever refutes, the stripper has started eating live code.
+    assert contains_code?(
+             [~S|    detail: "tag #1 for verify_reachable boxes"|],
+             "verify_reachable"
+           )
+
+    # `#{...}` is code inside a string: a real read there must stay visible.
+    assert contains_code?(
+             [~S|    Logger.info("state: #{bp.verify_reachable}")|],
+             "verify_reachable"
+           )
+
+    # `?#` is a character literal, not the start of a comment.
+    assert contains_code?(["    hash = ?#, and bp.verify_reachable"], "verify_reachable")
+
+    # A heredoc body carries no comments: a `#` inside one strips nothing.
+    assert contains_code?(
+             [
+               ~S|    @doc """|,
+               ~S|    # verify_reachable inside a heredoc is not a comment|,
+               ~S|    """|
+             ],
+             "verify_reachable"
+           )
+
+    # And the two directions this row exists for, on offending_lines/2 itself.
+    assert offending_lines(["    # names verify_reachable in prose"]) == []
+    assert [{_line, ["verify_reachable"]}] = offending_lines(["    if bp.verify_reachable do"])
   end
 end

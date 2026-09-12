@@ -244,7 +244,13 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
   end
 
   test "authored heading suppresses fallback h1 and supplies an escaped title", %{conn: conn} do
+    # `title => nil` drops the fixture's top-level title for THIS test: since
+    # task-4b8770c64ccac487 the publish route HONOURS a caller-supplied title
+    # (it used to be silently discarded), and this test's subject is the
+    # heading-derived <title> and its escaping — so the caller title must be
+    # absent for the heading to be the one under test.
     ingest!(conn, "email-authored-heading", %{
+      "title" => nil,
       "blocks" => [
         %{"type" => "heading", "level" => 2, "text" => ~s(Quarterly <&> "Report")},
         %{"type" => "paragraph", "content" => ["Body."]}
