@@ -135,18 +135,24 @@ defmodule BarkparkCloud.BillingLimitsTest do
                Registry.register_barkpark(team, %{name: "b", slug: "b"})
     end
 
-    test "the internal/agent upsert_barkpark NEW-ROW path is also quota-blocked" do
+    # cch-w58: this arm used to drive `upsert_barkpark/2`, a function with zero
+    # production callers. It is now pinned on the SHIPPED internal/provisioner
+    # door — `adopt_barkpark/3`, what `POST /v1/internal/barkparks` calls — which
+    # rides `register_barkpark/2` from inside its own transaction, so the
+    # `{:error, :limit_reached}` has to survive the `Repo.rollback/1` to reach the
+    # router's `with/else`.
+    test "the internal/provisioner NEW-ROW path (adopt_barkpark/3) is also quota-blocked" do
       team = team_on("free")
       {:ok, bp} = Registry.register_barkpark(team, %{name: "a", slug: "a"})
 
-      # A NEW slug through upsert routes to register_barkpark → blocked at ceiling.
       assert {:error, :limit_reached} =
-               Registry.upsert_barkpark(team, %{name: "b", slug: "b-new"})
+               Registry.adopt_barkpark(team, %{name: "b", slug: "b-new", host: "1.2.3.4"})
 
-      # But an upsert of the EXISTING slug is an UPDATE, never a new instance → OK.
-      assert {:ok, bp2} = Registry.upsert_barkpark(team, %{name: "a renamed", slug: "a"})
+      # ...and an UPDATE of an existing row is never a new instance, so the
+      # ceiling does not block it (the shipped agent write path).
+      assert {:ok, bp2} = Registry.record_agent_report(bp, %{version: "9.9.9"})
       assert bp2.id == bp.id
-      assert bp2.name == "a renamed"
+      assert length(Registry.list_barkparks(team)) == 1
     end
   end
 
