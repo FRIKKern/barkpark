@@ -108,10 +108,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundleExportPoolTest do
 
     test "does not starve that client once the COPY runs on the dedicated export pool",
          %{shared: shared} do
-      {:ok, export_name, export_pid} = Repo.start_export_pool(pool_size: 1)
+      {:ok, export_pid} = Repo.start_export_pool(pool_size: 1)
       on_exit(fn -> Repo.stop_export_pool(export_pid) end)
 
-      %{probe: probe, copy_ms: copy_ms, log: log} = run_starvation_probe(shared, export_name)
+      %{probe: probe, copy_ms: copy_ms, log: log} = run_starvation_probe(shared, export_pid)
 
       IO.puts("""
 

@@ -1196,10 +1196,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     # export must never FAIL because it could not get its own pool. Full
     # derivation (and why a checkout timeout / a bounded COPY hold are not
     # remedies) in `Barkpark.Repo.start_export_pool/1`.
-    {export_repo, export_pool_pid} =
+    export_pool_pid =
       case Repo.start_export_pool() do
-        {:ok, name, pid} ->
-          {name, pid}
+        {:ok, pid} ->
+          pid
 
         other ->
           if match?({:error, _}, other) do
@@ -1209,7 +1209,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             )
           end
 
-          {nil, nil}
+          nil
       end
 
     try do
@@ -1219,7 +1219,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           order_cols = Catalog.order_columns(Repo, table)
           sql = copy_out_sql(table, kind, cols, order_cols, ctx)
           spill = Map.fetch!(spills, table)
-          {row_count, md5} = run_copy_out(sql, spill, export_repo)
+          {row_count, md5} = run_copy_out(sql, spill, export_pool_pid)
 
           member = %{
             "name" => table,
@@ -1943,7 +1943,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # ships, so the seam is here instead of in the test. `export_repo` defaults to
   # `nil`, which is byte-for-byte the pre-fix behaviour.
   @doc false
-  @spec run_copy_out(String.t(), Path.t(), atom() | nil) :: {non_neg_integer(), String.t()}
+  @spec run_copy_out(String.t(), Path.t(), pid() | nil) :: {non_neg_integer(), String.t()}
   # sobelow_skip ["Traversal.FileModule", "SQL.Stream"]
   def run_copy_out(sql, spill_path, export_repo \\ nil) do
     inject_copy_fault!()
