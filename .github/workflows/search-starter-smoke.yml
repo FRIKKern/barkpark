@@ -63,7 +63,7 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Node 22: the harness speaks CDP over a bare global WebSocket, which is
       # stable-by-default only from 22. Under 20 it refuses on the GUARD path
@@ -94,7 +94,7 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Node 22 strips TypeScript types natively — no npm ci, no build step, so
       # this job stays seconds-fast and cannot be broken by a dependency.
@@ -128,7 +128,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v4

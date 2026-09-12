@@ -1063,7 +1063,7 @@ jobs:
       main-workflow-rollup: ${{ steps.sets.outputs.main-workflow-rollup }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref. Without `ref:` checkout lands on
           # refs/pull/N/merge, which already contains main's advance, while
@@ -1424,7 +1424,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Node
         id: setup
         # fs.globSync needs node >= 22; the runner refuses BY NAME below that
@@ -1458,7 +1458,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
         with:
           # The harness builds fixture repos and diffs merge-base(bp, origin/main);
@@ -1477,7 +1477,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: bp-merge.sh syntax check
         run: bash -n scripts/bp-merge.sh
@@ -1506,7 +1506,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
         with:
           # MUST be a full clone: the harness proves release-scan.sh's own
@@ -1531,7 +1531,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: python3 is present (the classifier is python3; absence would be exit 2)
         id: setup
         # The census turns a missing python3 into exit 2 UNKNOWN — correctly red,
@@ -1563,7 +1563,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: jq is present (the row parser is jq; absence would be exit 3)
         id: setup
         # The watch turns a missing jq into exit 3 CONFIGURATION FAULT — correctly
@@ -1606,7 +1606,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # FULL checkout, not a sparse one: with only scripts/ present the harness
         # drops to 63 passed / 2 FAILED — its e2e fixture copies the real seal
         # predicate and .github/workflows/cloud.yml into a temp repo. It does NOT
@@ -1643,7 +1643,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: registration-sample.sh syntax check
         run: bash -n scripts/registration-sample.sh
@@ -1668,7 +1668,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: deploy-convergence-check.sh syntax check
         run: bash -n scripts/deploy-convergence-check.sh
@@ -1714,7 +1714,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # DEFAULT depth. Every git object this harness needs it creates itself,
         # in a throwaway repo under mktemp.
       - name: python3 + PyYAML are present (both subjects are yaml-PARSED, not grepped)
@@ -1774,7 +1774,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: console-path-escape-check.sh syntax check
         run: bash -n scripts/console-path-escape-check.sh
@@ -1828,7 +1828,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: the capture module parses
         run: node --check scripts/console-refusal-capture.mjs
@@ -1843,7 +1843,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: python3 + PyYAML is present (the harness parses the workflow with it)
         id: setup
         # The harness reads .github/workflows/weekly-changelog.yml through
@@ -1873,7 +1873,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # FULL HISTORY, AND IT IS LOAD-BEARING FOR THE ARBITER STEP BELOW.
           # actions/checkout@v4 is `--depth 1` by default. pds-record-parity.sh's
@@ -2010,7 +2010,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: file-ci-failure-issue.sh syntax check
         run: bash -n scripts/file-ci-failure-issue.sh
@@ -2025,7 +2025,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: install-cli.sh syntax check
         run: bash -n scripts/install-cli.sh
@@ -2063,7 +2063,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: python3 is present (reland_check.py is the classifier)
         id: setup
         run: |
@@ -2205,7 +2205,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # MANDATORY. The selftest is DIFFERENTIAL against a PINNED pre-fix
           # blob (0bff57e4f500e9c9fc99424fa2635ca9988be725:bin/barkpark, an
@@ -2232,7 +2232,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # The DEFAULT depth is correct here. Clause G asks `git cat-file -e
         # HEAD:<path>`, which needs HEAD's tree and nothing older, and the
         # harness builds its own fixture repos from mktemp. No history required.
@@ -2347,7 +2347,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # The DEFAULT depth is correct here. The harness builds every fixture with
         # `git init` in mktemp (and its shallow case from a `--depth 1` file://
         # clone), so it needs no history of this repository. The single probe that
@@ -2406,7 +2406,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
         # The DEFAULT depth is correct. Check 1 asks `git ls-files`, which reads
         # the index, and the selftest builds its own `git init` repo in mktemp.
@@ -2433,7 +2433,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: python3 is present (the manifest emitter and its validators are python3)
         id: setup
         # Matching the python3/jq/node name-checks above: an image change that
@@ -2495,7 +2495,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: python3 is present (the response reader is python3)
         id: setup
         # The subject turns a missing python3 into exit 2 CANNOT MEASURE —
@@ -2527,7 +2527,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # DEFAULT depth is enough and is deliberate: every git repo the selftest
         # walks is built with `git init` under mktemp. Nothing here reads this
         # repo's history, so a shallow checkout cannot make it lie.
@@ -2630,7 +2630,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # DEFAULT depth. The guard reads one file out of the working tree and
         # builds every fixture under mktemp.
       - name: python3 + PyYAML are present (the workflow is yaml-PARSED, not grepped)
@@ -2700,7 +2700,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: subscription-parity syntax check
         run: bash -n scripts/github-webhook-subscription-parity.sh
@@ -2756,7 +2756,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: python3 is present (the gate parses the receipt with it)
         id: setup
         # pg_url_host and pg_capabilities_tier are python3 one-liners. Without
@@ -2806,7 +2806,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: jq and python3 are present (both stubs exit 2 without them)
         id: setup
         # The harness's gh stub applies the caller's own --jq filter with real
@@ -2839,7 +2839,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: python3 is present (two subjects exit 2 without it)
         id: setup
         # pr-overlap.sh:105 hard-refuses without python3, and branch-owner.sh
@@ -2899,7 +2899,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: harness syntax check
         run: bash -n scripts/compose-smoke-dispatch.test.sh
@@ -2933,7 +2933,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: subject syntax check
         run: bash -n scripts/workflow-trigger-coverage.sh
@@ -2965,7 +2965,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.dispatch-selftest == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # DEFAULT depth. The harness reads this file from the working tree and
         # builds every git fixture under mktemp.
       - name: python3 + PyYAML are present (the workflow is yaml-PARSED, not grepped)
@@ -3006,7 +3006,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
 
       - name: "local-update.test.sh (measured 0 s / 18 assertions)"
@@ -3031,7 +3031,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: mix-test-strict.sh syntax check
         run: bash -n scripts/mix-test-strict.sh
@@ -3067,7 +3067,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
 
       - name: which-gates.sh syntax check
@@ -3092,7 +3092,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
 
       # The selftest FIRST: it plants an unlisted, unexempted harness in a
@@ -3122,7 +3122,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: exit-laundering-sweep.sh syntax check
         run: bash -n scripts/exit-laundering-sweep.sh
@@ -3137,7 +3137,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: the three subjects parse
         run: |
@@ -3194,7 +3194,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: python3 is present (the fake server is python3; absence would be exit 2)
         id: setup
         run: |
@@ -3228,7 +3228,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: install.sh syntax check (POSIX sh)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
@@ -3262,7 +3262,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: harness syntax check
         run: bash -n scripts/sunset-route-consumers.test.sh
@@ -3290,7 +3290,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
         # DEFAULT depth. Every fixture is built under mktemp; the only tree the
         # harness reads is the working copy of .github/workflows.
@@ -3330,7 +3330,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: migration-version-collision-check.sh syntax check
         run: bash -n scripts/migration-version-collision-check.sh
       - name: migration-version-collision-check.test.sh syntax check

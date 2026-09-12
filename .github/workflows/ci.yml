@@ -108,7 +108,7 @@ jobs:
     outputs:
       web: ${{ steps.sets.outputs.web }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
           # `refs/pull/N/merge` — a commit that already contains main's advance
@@ -294,7 +294,7 @@ jobs:
     name: Web path-escape ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
 
       # Harness FIRST, subject second — the house selftest-first idiom. A gate
@@ -328,7 +328,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Detect web app presence
         id: detect
@@ -451,7 +451,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Detect web app presence
         id: detect

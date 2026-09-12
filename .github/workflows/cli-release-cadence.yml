@@ -76,7 +76,7 @@ jobs:
     outputs:
       hit: ${{ steps.f.outputs.hit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: f
@@ -117,7 +117,7 @@ jobs:
       # nothing to compare against. The script refuses (exit 2) rather than
       # greening in that state — see its ANTI-VACUITY 1 — so a regression here
       # surfaces as a named instrument fault, not as a silent pass.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

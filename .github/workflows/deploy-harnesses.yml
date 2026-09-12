@@ -81,7 +81,7 @@ jobs:
   offline-deploy-harnesses:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install and assert Caddy
         # From the OFFICIAL Caddy repo, never Ubuntu's — universe ships 2.6.2,
         # which predates Caddy's heredoc syntax (>= 2.7). The maintenance block
@@ -343,7 +343,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: cp-deploy.sh still carries the protocol pin
         run: grep -nE 'git .*-c protocol\.version=0 .*pull --ff-only origin main' deploy/cp-deploy.sh
       - name: In ubuntu:22.04 with apt git — the pinned pull form succeeds; the v2 form is recorded, not gated
@@ -379,7 +379,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: File (or update) the CI failure issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

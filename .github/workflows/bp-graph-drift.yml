@@ -51,7 +51,7 @@ jobs:
     name: bp-graph.js mirror identity (advisory)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Prove the tripwire can fail before trusting that it passed: the selftest
       # asserts the REASON STRINGS (DRIFTED / MISSING MIRROR / MISSING

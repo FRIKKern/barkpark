@@ -55,7 +55,7 @@ jobs:
       # Still advisory today — it becomes a BLOCKING false red the moment any
       # name from this workflow is pinned into .github/required-checks.json.
       - name: Checkout (PR head, full history for the base diff)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0

@@ -46,7 +46,7 @@ jobs:
     name: make wasm + node smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pinned to match WASM_GO_VERSION in the Makefile and the committed
       # bp-wasm-exec.js loader (a version-matched pair). GOTOOLCHAIN=go1.25.8 in

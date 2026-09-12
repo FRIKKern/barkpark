@@ -146,7 +146,7 @@ jobs:
       # before this fold.
       - name: Checkout (merge ref; full history for the pinned worktrees)
         id: setup
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -348,7 +348,7 @@ jobs:
     steps:
       - name: Checkout (full history for the pinned worktrees)
         id: setup
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -480,7 +480,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: File (or update) the CI failure issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
