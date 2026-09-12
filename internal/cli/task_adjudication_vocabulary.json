@@ -1,0 +1,8 @@
+{
+  "_source": "api/lib/barkpark/tasks/stage.ex — Barkpark.Tasks.Stage (@disposition_key, @reopen_trigger_key, @disposition_rerun_key, @dispositions, @trigger_required). DERIVED, never opinionated: this file is the Go-readable copy of the vocabulary the task birth fence (Content.Writer.ensure_task_born_adjudicated/5) screens a create against and PR #17843 declared in the task schema. Edit the Elixir and this file in the SAME commit — tasks_adjudication_drift_test.go parses stage.ex and reds in BOTH directions.",
+  "disposition_key": "disposition",
+  "reopen_trigger_key": "reopen_trigger",
+  "disposition_rerun_key": "disposition_rerun",
+  "dispositions": ["open", "parked", "closed"],
+  "trigger_required_dispositions": ["parked"]
+}

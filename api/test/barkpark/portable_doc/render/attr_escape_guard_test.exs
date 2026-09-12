@@ -54,6 +54,10 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeGuardTest do
       "the @filetree_markers module attribute's literal token colour (split_filetree_note/1 returns the marker, not the line)",
     {"components.ex", "style", "pad"} =>
       "pad = 14 + depth * 18 and row_html/1 int-guards depth (is_integer, 0 < d < 6, else 0)",
+    {"components.ex", "style", "left"} =>
+      "roadmap_left_width/2 returns clampf/1 output: a number clamped to 0..100 (non-numbers become 0) — never author text (#17806)",
+    {"components.ex", "style", "width"} =>
+      "roadmap_left_width/2's second element is clampf_width/2 output: a number clamped to 1..(100-left) — never author text (#17806)",
 
     # ── cards_email.ex / figures.ex / fleet_email.ex ──────────────────────────
     {"cards_email.ex", "style", "border"} =>
@@ -72,6 +76,8 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeGuardTest do
     {"data_viz.ex", "class", "cls"} =>
       "tone_class/2 allowlists the tone in its case-clause guard (~w(info ok warn danger)) and otherwise returns the literal base class",
     {"data_viz.ex", "class", "k"} => "Enum.map_join(0..3, …)'s integer bin index",
+    {"data_viz.ex", "class", "class"} =>
+      "spark_svg/2's class parameter is a caller literal: the default \"bp-stat__spark\" or compose.ex's \"bp-table__spark\" — no author path reaches it (#17811)",
     {"data_viz.ex", "cx", "sx"} => "route coordinate — a float off the computed coords list",
     {"data_viz.ex", "cy", "sy"} => "route coordinate — a float off the computed coords list",
     {"data_viz.ex", "cx", "fx"} => "route coordinate — a float off the computed coords list",

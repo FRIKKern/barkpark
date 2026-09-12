@@ -981,6 +981,28 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 			}
 			body["execution_policy"] = policy
 			i = ni
+		case key == "--disposition" || key == "--reopen-trigger" || key == "--disposition-rerun":
+			// The adjudication triple as FIRST-CLASS flags. The three content
+			// keys are read from the shared vocabulary fixture, never spelled
+			// here — see tasks_adjudication.go. An unreadable fixture refuses
+			// the flag rather than writing a key it cannot name.
+			v, ni, err := takeValue(i, key, inline, hasInline)
+			if err != nil {
+				return nil, false, err
+			}
+			vocab, verr := loadTaskAdjudicationVocabulary()
+			if verr != nil {
+				return nil, false, fmt.Errorf("%s: %w", key, verr)
+			}
+			switch key {
+			case "--disposition":
+				body[vocab.DispositionKey] = v
+			case "--reopen-trigger":
+				body[vocab.ReopenTriggerKey] = v
+			default:
+				body[vocab.DispositionRerunKey] = v
+			}
+			i = ni
 		case key == "--set":
 			v, ni, err := takeValue(i, "--set", inline, hasInline)
 			if err != nil {
@@ -1000,8 +1022,15 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 			}
 			body["title"] = a
 		default:
-			return nil, false, fmt.Errorf("unknown flag %q (task create accepts --title, --description, --execution-policy JSON, --set k=v, --publish)", a)
+			return nil, false, fmt.Errorf("unknown flag %q (task create accepts --title, --description, --execution-policy JSON, --disposition, --reopen-trigger, --disposition-rerun, --set k=v, --publish)", a)
 		}
+	}
+
+	// The adjudication screen runs on the FINISHED body, so it covers the
+	// legacy `--set disposition=…` spelling too — the door this row exists to
+	// close — and not only the flags above.
+	if err := screenTaskAdjudication(body); err != nil {
+		return nil, false, err
 	}
 	return body, publish, nil
 }
@@ -1168,6 +1197,19 @@ flags:
                    does both — it writes the array AND generates the brief's
                    Criteria section from it, e.g.
                      --set 'acceptance_criteria:=[{"criterion":"gates green","met":false,"evidence":""}]'
+  --disposition <term>
+                   Adjudication term for the row being filed: open | parked |
+                   closed (the vocabulary the api's Barkpark.Tasks.Stage
+                   screens against; an off-vocabulary or mis-cased term is
+                   refused here, before the write).
+  --reopen-trigger <when>
+                   The durable when-reconsidered. REQUIRED alongside
+                   --disposition parked — a parked row with no trigger is a
+                   hollow park and the api refuses it 422.
+  --disposition-rerun <cmd>
+                   One command an auditor can run to try to prove the
+                   disposition wrong. Optional; an absent rerun is an honest
+                   "this cannot be checked".
   --publish        Publish the new task immediately (draft → published).
                    A PUBLISHED row must clear the publish wall, so --publish
                    also requires --description (20+ chars) and 1-12 weighted

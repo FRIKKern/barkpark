@@ -172,3 +172,29 @@ rule is enforced rather than intended.
 
 The remainder — every reason with no rerun attached — is printed **by name**, not
 summarised. A remainder that is only counted is still unauditable.
+
+## Who owns a row? `disposition-owner-registry.json`
+
+`disposition_owner` has no schema field, no validator and no code writer
+anywhere in `api/lib` or `internal/`, so for 25 waves the only assertion about
+it was "non-empty and not the row itself" — a check that greens on any string a
+shard invents, and did: prose with parentheses (26 rows), a *different* epic's
+lead (24), `wave-N` owners that self-clear at wave close (8), and three literal
+task ids, one of which owned itself.
+
+`disposition-owner-registry.json` names the vocabulary: 15 durable roles, each
+with a one-line definition and a resolution rule, plus every refused slug with
+its reason and remedy. The slug list is **derived from a full ledger walk**, not
+quoted from the task that asked for it — re-derive it, never retype it.
+
+```
+python3 tooling/grip/ledger/disposition_owner_registry.py --selftest  # 17 arms, 9 mutations, offline
+python3 tooling/grip/ledger/disposition_owner_registry.py --derive    # re-derive the tally from the board
+python3 tooling/grip/ledger/disposition_owner_registry.py --check     # the verdict; exits 1 on any refusal
+```
+
+The reader lives beside `census_walk.py` because it drives that walker — the one
+pager that refuses instead of reading a failed page as the end of the board.
+`wave-N` is **refused as an owner**: the ruling is enforced before registry
+membership, so it holds even if someone lists one, and the registry lint reds on
+a registry that tries.
