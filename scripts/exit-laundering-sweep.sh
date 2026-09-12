@@ -340,7 +340,7 @@ PY
 }
 
 selftest() {
-  local tmp rc=0 pass=0 fail=0
+  local tmp pass=0 fail=0
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/elsweep.XXXXXX")" || { echo "CANNOT READ — mktemp failed" >&2; exit 2; }
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" EXIT
@@ -453,7 +453,7 @@ warm() {
 EOF
 
   local out
-  out="$(SWEEP_MEDIUM_ARG=1 classify "$tmp" "scripts" 1 60 "" 2>&1)"; rc=$?
+  out="$(SWEEP_MEDIUM_ARG=1 classify "$tmp" "scripts" 1 60 "" 2>&1)"
 
   chk() { # chk NAME EXPECT-PRESENT PATTERN
     case "$out" in
