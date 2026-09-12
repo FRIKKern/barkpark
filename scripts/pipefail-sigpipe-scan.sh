@@ -35,7 +35,8 @@
 #   (d) the producer can plausibly outlive the reader.
 #
 # CONFIDENCE is (d): high  = find/git/curl/cat FILE/loop/ls/jq/a full grep — unbounded
-#                            or file-sized output;
+#                            or file-sized output; OR any `head` reader whose
+#                            producer is not PROVABLY bounded (see below);
 #                   medium = printf/echo of a VARIABLE — the variable usually holds
 #                            captured command output, so its size is unknown.  This is
 #                            the shape of the live bug this scanner was written for;
@@ -45,6 +46,30 @@
 #   1  no pipe at all:  case "$s" in *pat*) ;; esac   /   [[ $s =~ re ]]
 #   2  drop -q, redirect:  printf '%s\n' "$s" | grep -E "$pat" >/dev/null
 #   3  here-string:  grep -Eq "$pat" <<<"$s"    (no producer process to kill)
+#
+# THE TRUNCATING READER (added 2026-09-12, task-ab1d5320e09c9e72).  `head` never
+# reads to EOF: bare `head` stops at 10 lines, `head -N`/`head -n N` at N lines,
+# `head -c N` at N bytes — then it CLOSES the pipe.  So for a head reader the
+# question is not "is the producer file-sized", it is "can the producer be shown
+# to STOP at or before what head takes".  If it cannot, the producer dies the
+# instant it writes past N: no 64KB buffer overrun required, no tree growth
+# required.  A head reader is therefore HIGH unless the producer is provably
+# bounded — `od -N<n>`, `dd count=`, a `head` of its own, or the printf/echo of a
+# LITERAL the classifier already calls low.
+#
+# TWO THINGS SHIPPED THAT BLIND SPOT TOGETHER, both fixed here:
+#   1  `LC_ALL=C tr -dc 'a-f0-9' </dev/urandom` is an INFINITE producer and
+#      matched none of the high-confidence NAMES, so it fell to "producer not
+#      classified" → medium, and --min-confidence high (the only tier CI
+#      enforces) dropped it.  Unbounded stdin — `</dev/urandom`, `</dev/zero`,
+#      `yes`, `cat /dev/…` — was the worst case in the class and the one case
+#      the enforced tier could not see.
+#   2  worse, the site was invisible at EVERY tier: the pipeline lived inside
+#      `"$( … )"`, and strip_quoted blanked every double-quoted run wholesale.
+#      See strip_quoted_keep_subst.
+# Measured on the tree that shipped it: scripts/pds-scratch-target.sh:389 read 0
+# findings at --min-confidence low before this change and is reported at high
+# after it.  #17920 fixed that one site; this change is the scanner's blind spot.
 #
 # INPUTS.  *.sh, *.bash — and, since 2026-09-09, *.yml/*.yaml: a GitHub Actions
 # `run:` body IS shell.  Every `run:` block is a SEPARATE process, so pipefail,
@@ -228,6 +253,67 @@ set -uo pipefail
   say miss-capture 'v="$(printf "%s" "$x" | grep -q foo)"' MISS
   say miss-or-true 'printf "%s" "$x" | grep -q foo || true' MISS
   say miss-comment '# if printf "%s" "$x" | grep -q foo; then :; fi' MISS
+
+  # ── the TRUNCATING-READER arm (task-ab1d5320e09c9e72) ─────────────────────
+  # Run at --min-confidence HIGH, because high is the only tier CI enforces and
+  # the whole defect was that the planted shape sat BELOW it.  The two MISS arms
+  # are the discrimination: if the arm were satisfied by the word `head` they
+  # would both report, and a scanner that flags every `head` is a scanner that
+  # gets switched off.  Body on stdin so the fixture can be quoted verbatim.
+  sayhigh() { # sayhigh <name> <HIT|MISS>; BODY on stdin, under `set -euo pipefail`
+    local n
+    {
+      printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+      cat
+    } >"$std/$1.sh"
+    n="$(PIPEFAIL_SCAN_ROOT="$std" bash "${BASH_SOURCE[0]}" --min-confidence high --count-only "$std/$1.sh" 2>/dev/null | sed -E 's/.*: ([0-9]+) finding.*/\1/')"
+    case "$2:$n" in
+    HIT:0) sno "$1: wanted a HIGH finding, got none" ;;
+    MISS:0) sok "$1: correctly silent at --min-confidence high" ;;
+    HIT:*) sok "$1: reported at HIGH ($n)" ;;
+    MISS:*) sno "$1: wanted silence at --min-confidence high, reported $n" ;;
+    esac
+  }
+
+  # POSITIVE — verbatim from scripts/pds-scratch-target.sh:389 as it shipped.
+  # An INFINITE producer (/dev/urandom through tr) into a 40-byte truncating
+  # reader, the pipeline captured into an assignment under set -e.  Before this
+  # arm the scanner reported it at NO confidence at all: the pipeline lives
+  # inside `"$( … )"`, which strip_quoted blanked wholesale.
+  sayhigh trunc-unbounded-producer HIT <<'SH'
+raw="pds-scratch-$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 40)"
+SH
+
+  # NEGATIVE (1) — a BOUNDED producer. `od -N20` stops after 20 bytes on its
+  # own, so it cannot outrun a reader that takes 40; this is the shipped #17920
+  # form with a `head` bolted back on. It contains the word `head`, the reader
+  # IS `head`, pipefail IS on, the status IS consumed — everything the arm keys
+  # on except the one thing that matters. Silence here is the discrimination.
+  sayhigh trunc-bounded-od-producer MISS <<'SH'
+raw="pds-scratch-$(LC_ALL=C od -An -v -tx1 -N20 </dev/urandom | tr -d ' \n' | head -c 40)"
+SH
+
+  # NEGATIVE (2) — printf of a LITERAL: 4 bytes into a 4-byte reader, already
+  # classified `low` by the producer block, and the arm must not promote it.
+  sayhigh trunc-literal-printf MISS <<'SH'
+printf 'abcd' | head -c 4
+SH
+
+  # NEGATIVE (3) — the same planted shape with pipefail OFF. Without pipefail
+  # the substitution's status is the LAST stage's (head, which succeeds), so
+  # there is no hazard and no finding. This is the arm that reds if the new code
+  # ever stops honouring condition (a).
+  sayhigh trunc-no-pipefail MISS <<'SH'
+set +o pipefail
+raw="pds-scratch-$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 40)"
+SH
+
+  # NEGATIVE (4) — `|| true` INSIDE the substitution swallows the 141. The
+  # trailing `)` is why this needs its own arm: a swallow pattern anchored on
+  # the word `true` alone does not match `… | head -1 || true)`.
+  sayhigh trunc-swallowed-by-or-true MISS <<'SH'
+pid="$(lsof -nP -iTCP:4000 -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+SH
 
   # ── the WORKFLOW arm (task-b090e1c603d686ba) ──────────────────────────────
   # `.github` was a default target that could never produce a finding, so these
