@@ -1947,6 +1947,20 @@
       .pane-column, .pane-column--collapsed { transition: background var(--dur-1); }
       .pane-column--collapsed > * { animation: none; }
     }
+    /* The collapsed strip's two children are <span>s, NOT <div>s: their
+       parent is a <button>, whose HTML5 content model admits phrasing content
+       only. A <span> takes `display:inline` from the UA sheet, so the flex box
+       both boxes rely on has to be ASSERTED by class, never inherited from the
+       tag. `.pane-header` above already declares `display: flex` and
+       `.pane-column-collapsed-label` below already declares `display: flex`, so
+       the computed display is `flex` in both cases exactly as it was while they
+       were divs, and NO rule had to be added here to keep it that way.
+       Consequence to respect: `display: flex` on `.pane-header` is now
+       LOAD-BEARING for the collapsed strip, not merely a restatement of what
+       a <div> already was. Deleting it would drop this box to an inline one.
+       It is deliberately NOT re-stated inside this rule: `display` counts as
+       box geometry to wide_geometry_lock_test's census, and an unscoped
+       geometry declaration on a pane family reds that lock. */
     .pane-column--collapsed .pane-header {
       justify-content: center;
       padding: 0;

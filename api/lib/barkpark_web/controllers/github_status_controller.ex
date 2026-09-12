@@ -25,10 +25,31 @@ defmodule BarkparkWeb.GithubStatusController do
       blank OR a foreign dataset can NOT widen the read past the bearer's scope.
       (A token owns exactly one dataset, so there is nothing narrower to select.)
 
-  True per-workspace isolation (a workspace_id column on the conflict/cursor
-  state) is a net-new schema change tracked separately as
-  `github-bridge-w9-health-workspace-isolation`; this endpoint closes the
-  whole-fleet dataset leak with a string-scope constraint only.
+  ## Membership fence (github-bridge-w9-health-workspace-isolation)
+
+  The token dataset string alone was never isolation: a dataset slug is unique
+  per PROJECT, so every workspace gets a `"production"` and two of them shared
+  one another's open-conflict backlog under that name. On top of the D18 dataset
+  pin, `status/2` now also passes the bearer's OWN membership set —
+  `Tenancy.list_workspaces_for/1`, the fail-closed membership primitive
+  `WorkspaceController` uses — down to `Health.snapshot/1`, which admits only
+  conflict rows owned by one of those workspaces (or unattributed, see
+  `Health`'s moduledoc).
+
+  `list_workspaces_for/1` INNER-JOINs `workspace_memberships`, so it is
+  fail-CLOSED in shape: a token with no membership row yields `[]` and the fence
+  is an empty set, never "all workspaces". That empty answer is passed through
+  as an empty LIST — deliberately not as `nil`, which is `Health`'s "no fence"
+  sentinel; collapsing the two would turn a member-of-nothing token into a
+  whole-fleet reader, the exact inversion this slice exists to prevent.
+
+  The outbound CURSOR half of the snapshot is NOT membership-fenced, and that is
+  a property of the cursor, not an omission: `Github.Cursor` stores ONE
+  `sync_push_cursors` row per `{source, dataset}` with a deliberately NULL
+  `workspace_id` (charter D55), because the drain it tracks reads
+  `mutation_events` by dataset across every workspace sharing the slug. There is
+  no per-workspace cursor to isolate; making one is a re-keying of the mirror
+  drain, not a read filter.
 
   ## Status mapping
 
@@ -62,7 +83,24 @@ defmodule BarkparkWeb.GithubStatusController do
   """
   def status(conn, params) do
     requested = blank_to_nil(Map.get(params, "dataset"))
-    json(conn, %{ok: true, health: status_fun().(effective_dataset(conn, requested))})
+
+    filter = [
+      dataset: effective_dataset(conn, requested),
+      workspace_ids: member_workspace_ids(conn)
+    ]
+
+    json(conn, %{ok: true, health: status_fun().(filter)})
+  end
+
+  # The bearer's OWN workspace memberships, as ids. Resolved through
+  # `Tenancy.list_workspaces_for/1` (an INNER JOIN on `workspace_memberships`),
+  # so a workspace the token holds no membership row for is UNREACHABLE rather
+  # than merely filtered out. No token in the conn (a direct controller unit call
+  # outside the pipeline) → `[]`, the fail-closed answer, not `nil`.
+  defp member_workspace_ids(conn) do
+    conn.assigns[:api_token]
+    |> Barkpark.Tenancy.list_workspaces_for()
+    |> Enum.map(& &1.id)
   end
 
   # Constrain the effective dataset to the bearer's OWN token dataset (D18) so a
