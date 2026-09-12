@@ -412,6 +412,30 @@ full check list and treat any red whose workflow has a `push:` arm as a red you
 are about to move onto main. It is not blocked, and it will not be caught
 afterwards either.
 
+#### Changing branch protection taxes the watcher — read this first
+
+`main-gate-watch.yml` derives its watched set **live from branch protection**,
+never from the committed spec, so it cannot go stale against the live rule. The
+price: **adding a required context reds the watcher until a human classifies
+it** by name in `scripts/main-gate-watch.sh` (`WATCHED_CONTEXTS` /
+`EXCLUDED_CONTEXTS`). One that is neither is a CONFIGURATION FAULT; guessing is
+refused, because a PR-scoped context guessed as watched false-reds forever and a
+post-merge one guessed as excluded is silently unwatched. **If you add a
+required context, classify it in the same change.**
+
+Two check-run names, two owners — they are split so a broken watcher does not
+read like a red main (`cch-w59-bl-main-gate-watch-has-no-notification-egress`):
+
+| Red check run | What it means | Who acts |
+|---|---|---|
+| **Main gate watch** | main's tip is genuinely not green on a watched required context (RED, or never judged) | whoever owns the red context; re-run or fix main |
+| **Main gate watch configuration fault** | the watcher has no authority — `BREAKGLASS_TOKEN` rotated/removed, or protection names a context nobody classified | whoever changed protection or the secret. **Main gate watch is SKIPPED for that run — main's state is UNKNOWN, not green.** |
+
+Neither is softened with `|| true`; neither is a required context. Getting a red
+here *to a human* is a separate concern, owned by
+`cch-w42-s4-main-push-gate-failures-find-a-human` — this split only makes the
+two facts distinguishable once someone looks.
+
 ### A green gate does not prove the branch was rebased
 
 `pull_request` gate runs test the **ephemeral merge commit** (`refs/pull/N/merge`
@@ -644,8 +668,10 @@ Elixir security gates, path-triggered on `api/**`:
    baseline holding **ONLY entries that provably cannot carry an inline
    `# sobelow_skip` annotation**, enumerated by type and count. The floor is a
    property of sobelow 0.14.1's architecture, not of the baseline's size: it is
-   **9** today, out of a baseline of 41 rows
-   (`grep -c '^[A-Za-z]' api/.sobelow-skips`), in two mechanical classes.
+   **9** today, out of the baseline that
+   `grep -c '^[A-Za-z]' api/.sobelow-skips` prints — **35** rows read at
+   a333e4b58 on 2026-09-11, a dated snapshot and not a live fact — in two
+   mechanical classes.
    Derive both numbers rather than quoting this paragraph — it said **10** and
    **8** until 2026-09-01, having predicted its own decay two paragraphs down
    and never been re-derived after the fix landed:

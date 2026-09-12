@@ -107,8 +107,37 @@
 #                                                     moved past (see
 #                                                     spec_freshness_check)
 #   scripts/required-checks-verify.sh --selftest      # mutation-prove the clauses
+#   scripts/required-checks-verify.sh --require-prose-candidates
+#                                                     # the merge-truth clause's
+#                                                     zero-candidate green
+#                                                     becomes exit 1; for a
+#                                                     caller about to stand on
+#                                                     that clause (see
+#                                                     REQUIRE_PROSE_CANDIDATES)
 
 set -euo pipefail
+
+# ── THE LOCALE PIN — one line, and it is not a style preference ──────────────
+# Every text tool this script runs (sed, awk, grep, sort, tr, cut, comm) reads
+# the TRACKED CORPUS, and that corpus carries bytes that are not valid UTF-8 (a
+# mojibake'd em dash in one wave ledger; see the long note above the merge-truth
+# awk at the `LC_ALL=C awk` call in merge_truth_prose_check, which has pinned
+# itself since cch-w34). In an ambient UTF-8 locale BWK awk does not skip such a
+# byte — it ABORTS with "towc: multibyte conversion failure", and macOS sed
+# errors "RE error: illegal byte sequence". Left to the caller's environment the
+# SAME tree therefore reads green under LC_ALL=C and red under en_US.UTF-8, so
+# the verdict is about the operator's shell instead of about the repo. Pin it
+# here, once, for the whole process and everything it forks.
+#
+# WHY THIS IS SAFE TO EXPORT PROCESS-WIDE: nothing in this script needs the
+# caller's locale. There is no `date` call (no month/day names are formatted),
+# no `printf "%'d"` (no thousands separators), and no sort whose ORDER a human
+# reads — every `sort`/`sort -u` here feeds a set comparison (comm/diff/dedup),
+# which C collation makes MORE deterministic, not less. Every comparison is a
+# byte comparison and every tolower() runs on ASCII context names. Literal
+# non-ASCII in messages (— – …) is emitted by printf/echo as bytes and is
+# unaffected. jq and gh decode UTF-8 themselves and ignore LC_ALL.
+export LC_ALL=C
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -965,6 +994,22 @@ advisory_prose_check() {
 # dated record reds and needs a pin. It is a tripwire on the phrasing that
 # actually rotted here twice, not a proof that every charter sentence is true.
 PROSE_ROOT_OVERRIDE=""
+# THE PRE-FILTER'S OWN VACUOUS EXIT (cchi-w39). `candidates` below is the set of
+# files the attribution scanner is actually handed, and when it is EMPTY the awk
+# never runs at all: the clause returns 0 having examined, with its detector,
+# nothing. Until this flag existed the only thing standing between that and a
+# false green was a PRINTED count — and a count printed is not a refusal. Worse,
+# the pre-filter's exit status is deliberately discarded (`|| true`, because
+# grep/git-grep exit 1 on no-match), so a pre-filter that ERRORED and a corpus
+# that is genuinely clean arrive here byte-identical.
+#
+# It cannot red unconditionally, and that is measured, not assumed: --selftest's
+# neutral corpus is built to name no required context (see `neutral_prose`), so
+# ~27 probes legitimately reach ncand=0. So the run always STATES the absence
+# (NO COVERAGE, below), and a caller who is about to stand on this clause —
+# anyone authorizing a protection flip on it — passes
+# --require-prose-candidates to make the same state exit 1 instead.
+REQUIRE_PROSE_CANDIDATES=0
 # Rule 2. Anchored at the head of the attributed span, so it is the CONTEXT the
 # disclaimer is predicated of and never the next noun along.
 PROSE_COPULA='^[^a-z]*(is|are|was|were|remains|stays|reads|counts as|has been|have been)[^a-z]'
@@ -1080,6 +1125,24 @@ merge_truth_prose_check() {
       | while IFS= read -r f; do printf '%s/%s\n' "$REPO_ROOT" "$f"; done || true)"
   fi
   ncand="$(printf '%s\n' "$candidates" | grep -c . || true)"
+
+  # ZERO CANDIDATES — the clause's own vacuous exit, named. See
+  # REQUIRE_PROSE_CANDIDATES above for why this is flag-gated and not a plain
+  # refusal. The order is deliberate: the refusal first, so a caller that asked
+  # for it never sees a NO COVERAGE line it is supposed to be unable to proceed
+  # past.
+  if [ "$ncand" -eq 0 ]; then
+    if [ "$REQUIRE_PROSE_CANDIDATES" -eq 1 ]; then
+      rm -rf "$tmp"
+      fail "the merge-truth pre-filter selected 0 of $nfiles scanned file(s), so the attribution scanner read NO file and this clause reached its green having examined nothing with its detector. Under --require-prose-candidates that is exit 1 and not a pass: 'no tracked prose disclaims a required context' is a statement this run did not measure, and a pre-filter that ERRORED is byte-identical here to a corpus that is clean. Point --prose at a corpus that names a required context, or authorize on evidence gathered another way and say in writing that this clause did NOT support it."
+    fi
+    # THE COPY FENCE: this line STATES the absence and stops. It does not tell
+    # the operator to re-run or to pass the flag — advice attached to a
+    # diagnosis nobody asked for is what gets skimmed past. The sentence exists
+    # so that there IS a line to quote, and so that quoting it is visibly the
+    # wrong thing to paste under an authorization.
+    echo "NO COVERAGE: the merge-truth pre-filter selected 0 of $nfiles scanned file(s), so the attribution scanner was handed no file and read nothing — whether any tracked prose disclaims one of the $nctx required context(s) was never asked."
+  fi
 
   # LC_ALL=C, and it is not a style preference. The tracked corpus carries bytes
   # that are not valid in the ambient UTF-8 locale (a mojibake'd em dash in one
@@ -2197,6 +2260,9 @@ main() {
       # override exists ONLY so the suite can point the identical clause at a
       # fixture tree; every real invocation reads the committed corpus.
       --prose) PROSE_ROOT_OVERRIDE="$2"; shift 2 ;;
+      # Turn the merge-truth clause's zero-candidate green into a refusal. For
+      # a caller about to STAND on this clause; see REQUIRE_PROSE_CANDIDATES.
+      --require-prose-candidates) REQUIRE_PROSE_CANDIDATES=1; shift ;;
       --deadlock) MODE="deadlock"; shift ;;
       --ci) MODE="ci"; shift ;;
       --selftest) MODE="selftest"; shift ;;

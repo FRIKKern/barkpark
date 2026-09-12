@@ -22,6 +22,7 @@ import {
   meaningForRole,
   LEGEND_ROLES,
   textLeafValue,
+  codeSource,
 } from '../inline'
 import { renderBlock, renderBlocks } from './registry'
 import { listChildren } from '../list-children'
@@ -647,7 +648,15 @@ function codeBlockHtml(value: string): string {
   )
 }
 
-const code: Emit = (b) => codeBlockHtml(str(b.value))
+// The FOUR accepted source keys, first non-blank wins — `codeSource` in
+// ../inline.tsx carries the contract and the corpus counts. A blank/whitespace
+// source renders NOTHING (no empty `<pre>` slab), matching compose.ex's
+// `blank_code_source?/1` arm and pdrender's blank guard; the `image` emitter
+// below takes the same "sourceless block is editor scaffolding" exit.
+const code: Emit = (b) => {
+  const source = codeSource(b)
+  return source.trim() === '' ? '' : codeBlockHtml(source)
+}
 
 // The `bp-section-divider` classes carry no styling (every value is inline, the
 // same bytes figures.ex emits) — they are the handle the reader shell needs to
@@ -1183,7 +1192,10 @@ function priorityLabel(p: unknown): string | null {
 function taskDetail(b: Block): string {
   const t = isMap(b.task) ? b.task : b
   const title = str(t.title).trim()
-  if (title === '') return ''
+  // Mirrors Render.Components.task_detail_html/1: an unresolved task-detail is
+  // still a block, so it keeps its place with the same placeholder the sibling
+  // live-query widgets use instead of collapsing to nothing.
+  if (title === '') return `<div class="bp-tdetail bp-tdetail--empty">No matching tasks.</div>`
   const role = roleOf(t.status)
 
   const sections: string[] = []

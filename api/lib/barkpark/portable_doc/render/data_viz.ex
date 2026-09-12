@@ -1295,9 +1295,17 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
   # ── the sparkline primitive (stat) ───────────────────────────────────────────
 
-  defp spark_svg([]), do: ""
+  # The ONE sparkline primitive. Public (2-arity, class-parameterised) so the
+  # table typed-`spark` column composes THIS svg instead of minting a second
+  # ladder — the class is the only thing that differs (`bp-stat__spark` inside a
+  # stat cell, `bp-table__spark` inside a table cell), and the default keeps
+  # every existing stat call byte-identical.
+  @doc false
+  def spark_svg(values, class \\ "bp-stat__spark")
 
-  defp spark_svg(values) do
+  def spark_svg([], _class), do: ""
+
+  def spark_svg(values, class) do
     n = length(values)
     min_v = Enum.min(values)
     max_v = Enum.max(values)
@@ -1314,7 +1322,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         "#{fmt(x)},#{fmt(y)}"
       end)
 
-    ~s|<svg class="bp-stat__spark" viewBox="0 0 #{w} #{h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="#{pts}"/></svg>|
+    ~s|<svg class="#{class}" viewBox="0 0 #{w} #{h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="#{pts}"/></svg>|
   end
 
   # ── email variants (gp-w3 email view) ────────────────────────────────────────

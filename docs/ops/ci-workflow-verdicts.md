@@ -70,19 +70,22 @@ skips often. `push` counts live with the census in `ci-cost-baseline.md`.
 | `vendored-assets.yml` | 0 | 0.28 | KEEP-CHEAP |
 | `windows-smoke.yml` | 0 | 0.33 | KEEP-CHEAP |
 
+## DISCHARGED 2026-09-11 (task-004328587a739530) — the four standing reds
+
+Re-derived against `origin/main` `4a315265b`; commands and output are quoted in that PR.
+
+| workflow | verdict | anchor |
+|---|---|---|
+| `doc-gates.yml` | FIXED 2026-09-03 | `e1e970346` (#15483): `check-doc-budgets.sh:767` asserts `-ne 0`, not the bash-3.2-only `70` |
+| `go-format.yml` | fixed 2026-09-02 by `e0f420ea7` (#15479, an EMPTY merge); **RED AGAIN 2026-09-11** | `scripts/go-format-drift-ceiling.sh` exits 1 at `4a315265b`, 3 off-roster files |
+| `security.yml` | FIXED — main's pending run is no longer evicted | `security.yml:152`, per-SHA concurrency group |
+| `deploy.yml` | FIXED 2026-09-06 — cannot succeed while `converged=false` | `deploy.yml:1932` `exit "$verdict_rc"`; set false at `:1849`/`:1873` |
+
 ## CORRECTED 2026-09-06 — the five DORMANT rows were a FOUR-DAY artifact
 
-Those five zeros are true for `2026-08-30..09-02` and are **not** evidence of dormancy: four days
-cannot establish it for a workflow firing a few times a month. Over 30 days (runs API, twice,
-independently) all five fired — `hundesteder` **14 runs / 4 reds**, `vendored-assets` **6 / 2** (the
-family whose blind spot shipped a stale tarball at #16174), `main-gate-watch` 7/0, `windows-smoke`
-3/0, `studio-journey-smoke` 2/0. **Retire none: a retire on the old label would have deleted two
-gates that demonstrably refused.**
-
-The durable half is in the tool. `ci-measure.sh --census` no longer drops zero-run workflows from its
-table; it adjudicates each against a 90-day lookback and **refuses** DORMANT unless the window is at
-least `3x` the observed firing period, naming the window it would need. Every verdict carries its
-window inline, so none is quotable bare. On the original 4-day window it refuses all five (`d1`-`d3`).
+Four days cannot establish dormancy; over 30 days all five fired, two with reds. **Retire none.**
+`ci-measure.sh --census` now refuses DORMANT under a window below `3x` the observed firing period and
+carries that window inline. Full correction: [history](ci-workflow-verdicts-history.md).
 
 ## CORRECTED 2026-09-03 — `architecture` was GREEN AND BLIND
 
@@ -107,14 +110,11 @@ Venue now **push:main (path-UNFILTERED) + the unchanged PR arm**, owner lead-gat
 merged while `Vendored SDK freshness` was red, shipping a stale vendored `barkpark-core.tgz` to every
 scaffolded user. It stays ADVISORY. **If promoted to required, register an AGGREGATOR context, never
 a paths-filtered leaf job name** — one that emits no check run on a filtered-out PR waits forever.
-Why the main arm is path-unfiltered is in
-[ci-workflow-verdicts-history.md](ci-workflow-verdicts-history.md).
 
 **Fence collision — trigger and remedy live in different trees.** `Vendored SDK freshness` fires on
 `js/packages/{core,react}/**`, but its only remedy writes to `templates/**`:
 `bash scripts/recut-vendor-tarballs.sh`, then commit the re-cut `templates/*/vendor/*.tgz` and
-`templates/VENDOR-STAMP.json` **in the same PR**. A lane fenced out of `templates/**` cannot green
-this gate and will wrongly conclude it is broken.
+`templates/VENDOR-STAMP.json` **in the same PR**. A lane fenced out of `templates/**` cannot green it.
 
 ## The three that need words
 

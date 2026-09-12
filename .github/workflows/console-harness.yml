@@ -747,17 +747,34 @@ jobs:
           # wrapper for this, needs node >= 22 (fs.globSync) and this job is
           # pinned to node 20 by cloud/priv/static/__node-version.
           #
-          # FLOOR 106 — derived 2026-09-11 at 628b88afe from this file's own
-          # registrations, and the derivation is BOTH counts because they differ:
-          #   grep -c '^test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 106
-          #   grep -c  'test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 119
-          # 106 is the floor. The 13-line gap is NOT nested or loop-generated
+          # FLOOR 131 — RE-DERIVED 2026-09-11 in #17906 (which adds two staleness arms; #17828 had added ten
+          # transitive-roster arms) from this file's own registrations, and the
+          # derivation is BOTH counts because they differ:
+          #   grep -c '^test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 131
+          #   grep -c  'test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 147
+          # 131 is the floor. The 16-line gap is NOT nested or loop-generated
           # registrations: every extra line is a `RegExp.prototype.test(` call
-          # inside an assertion (lines 149, 261, 1030, 1219, 1258, 1562, 1587,
-          # 1590, 1614, 1834, 1836, 1957, 2699 — 2699 carries two, so `grep -o`
-          # counts 120 occurrences against 119 lines). List them with
+          # inside an assertion or a comment quoting one (lines 149, 261, 1045,
+          # 1234, 1273, 1577, 1602, 1605, 1629, 1855, 1857, 1978, 2744, 2806,
+          # 2842, 3011 — 2744 carries two, so `grep -o` counts 148 occurrences
+          # against 147 lines). List them with
           # `grep -n 'test(' <file> | grep -v '^[0-9]*:test('` before trusting
           # either number.
+          #
+          # WHY IT MOVED, and why a `-lt` floor needs re-earning by hand: the
+          # committed literal was 106 while the suite registered 113 and the
+          # run tallied 113 (`seal predicate tests: 113 tests, floor 106 — the
+          # pin re-earned`, run 34589153152, job "Console client unit harness").
+          # `-lt` never reds on GROWTH, so seven added arms — wave 28's among
+          # them — bought no coverage: the whole wave could be deleted again
+          # and 106 would still be met. AND IT HAPPENED AGAIN INSIDE THIS PR:
+          # #17798 merged six more arms while this branch was open, taking the
+          # anchored count 113 -> 119 without reddening anything, and the 113
+          # written here a day earlier was already stale before it could merge.
+          # That is the whole failure mode, twice in one week. Re-derive and
+          # bump this literal in the SAME PR that grows the suite, or the
+          # ratchet silently stops ratcheting. Deletion is what this must
+          # catch, and now does.
           #
           # THE OLD COMMENT HERE WAS FALSE, and it is corrected rather than
           # deleted: it read "an unanchored grep for `test(` finds the same 101",
@@ -766,20 +783,23 @@ jobs:
           # 3cb5f7f18:cloud/priv/static/__preview__/seal-predicate.test.mjs |
           # grep -c 'test('`). The two counts have always disagreed; the prose
           # asserted agreement and nothing measured it. Five precondition
-          # controls landed since, taking the anchored count 101 -> 106.
+          # controls landed since, taking the anchored count 101 -> 106, and
+          # wave 28's arms took it 106 -> 113, #17798's took it 113 -> 119, and
+          # #17828's took it 119 -> 129 (#17884, filed the same hour it merged), and
+          # #17906's own two arms take it 129 -> 131 IN THE SAME PR, as the rule says.
           # Exact: growth never reds (`-lt`), deletion does.
           # Same self-test as the console harness step above: the parser must still
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 106 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 106 — this floor can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -lt 131 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against floor 131 — this floor can no longer lose"; exit 1; }
           PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
-          if [ "${tally:-0}" -lt 106 ]; then
-            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed floor is 106 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
+          if [ "${tally:-0}" -lt 131 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed floor is 131 — a test file that still LOADS but registers nothing exits 0 as one passing test, so this is what a gutted harness looks like. Restore the tests, or lower this literal deliberately."
             exit 1
           fi
-          echo "seal predicate tests: ${tally} tests, floor 106 — the pin re-earned"
+          echo "seal predicate tests: ${tally} tests, floor 131 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"
@@ -1047,6 +1067,24 @@ jobs:
       # the token ramps, and the cloudChrome bridge have landed and it exits 0.
       - name: CSS/token drift gate
         run: node cloud/priv/static/__css_check.mjs
+
+      # ── THE SINGULAR-SELECTOR CENSUS (task-39ebd948f40660e3) ───────────────
+      # view-scope-census.mjs classifies every `document.querySelector(All)?(`
+      # site in overflow-guard.mjs. Its SCOPE half (which walks are
+      # document-wide) is driven in a browser by the guard's own W35 leg; this
+      # CARDINALITY half is pure and browserless, so it belongs here rather than
+      # behind a Chrome bring-up: a singular walk reads ONE element of a
+      # population and the leg never says whether the population was 1, 3 or 40.
+      # It reds on a singular walk that neither prints its population nor carries
+      # a committed one-line reason, and — symmetrically, D180 — on a register
+      # row that matches no walk in the guard.
+      #
+      # Its OWN unit tests run in the derived-selection step at the end of this
+      # job (this command line is not a `node --test`, so the selection predicate
+      # there still picks up view-scope-census.test.mjs). This step is the arm
+      # that runs the census against the SHIPPED guard and prints it.
+      - name: Singular-selector population census (overflow-guard.mjs)
+        run: node cloud/priv/static/__preview__/view-scope-census.mjs --list
 
       # ── STEP ORDER IS PART OF THE INSTRUMENT (cch-w45, wave 45) ────────────
       #

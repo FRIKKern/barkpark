@@ -3012,6 +3012,48 @@ test("gr-p5: operatorRowState renders ALL FOUR update_state values, unknown read
   assert.equal(hooks.operatorRowState(null).label, "Unknown");
 });
 
+test("cch-w63-bl: operatorRowState's unknown NOTE never asserts an absence the plane did not measure", () => {
+  // BEFORE this row the arm returned a single frozen note, "No update state
+  // reported yet.", for EVERY unknown box — and nothing in this file pinned that
+  // string (only role and label were asserted, two tests up). A box that answered
+  // our stored credential with a 401 had been measured: registry.ex's
+  // persist_update_unknown/2 stored `identity_refused`, and router.ex's
+  // operator_fleet_json/1 now serializes it.
+  const refused = hooks.operatorRowState({
+    update_state: "unknown",
+    update_unavailable_reason: "identity_refused",
+  });
+  assert.equal(refused.label, "Unknown", "the pill label is unchanged — only the note learned the cause");
+  assert.equal(refused.role, "neutral");
+  assert.equal(refused.note, "Could not check — the instance rejected our access credential");
+  assert.doesNotMatch(refused.note, /reported yet/,
+    "a measured cause must never be narrated as nothing having been reported");
+
+  // The sentence is ECHOED from the shared whitelist, not retyped here: the same
+  // reason through the member-facing reader yields the same words, so the two
+  // readers of one column cannot drift apart silently.
+  assert.equal(hooks.updateRefusalReason({ update_state: "unknown", update_unavailable_reason: "identity_refused" }), "identity_refused");
+
+  // A second rung, one that never built a request, to prove the arm is keyed on
+  // the reason and not hard-coded to the 401 case.
+  assert.match(
+    hooks.operatorRowState({ update_state: "unknown", update_unavailable_reason: "no_self_update_route" }).note,
+    /^Could not check — this release has no update-check route yet$/,
+  );
+
+  // NO reason measured → a neutral note that claims NO mechanism. It says what
+  // the console can see and stops; it does not assert that the plane never asked.
+  const bare = hooks.operatorRowState({ update_state: "unknown" });
+  assert.equal(bare.note, "Update state not reported.");
+  assert.equal(hooks.operatorRowState({}).note, "Update state not reported.");
+  assert.equal(hooks.operatorRowState(null).note, "Update state not reported.");
+  // A reason word this console does not recognise is NOT invented into copy.
+  assert.equal(
+    hooks.operatorRowState({ update_state: "unknown", update_unavailable_reason: "banana" }).note,
+    "Update state not reported.",
+  );
+});
+
 test("gr-p5: operatorRowState settle math — null-guarded, 20m grace, overdue is pause-not-retry", () => {
   const now = Date.parse("2026-07-19T18:00:00.000000Z");
   // GR48: autoupdate_triggered_at is NULL for a freshly-registered box.
@@ -24171,6 +24213,112 @@ test("cch-w54-bl: already_attached relays the plane's sentence — the host in t
     "already_attached must not be confused with `taken` — taken is ANOTHER surface holding the host");
 });
 
+// ── dr-w26-bl: the 409 `taken` refusal names WHICH population holds the host ──
+//
+// POST /v1/barkparks/:id/domain merges `claim_leg` + a caller-safe `detail`
+// onto the 409 taken body (registry.ex provisioning_fqdn_claim_disclosure/2,
+// TOTAL over claim_leg/2's six legs). The console answered every one of them
+// with the fixed string "That domain is already in use.", so a refusal whose
+// remedy is "pick another hostname, that name is billed" and one whose remedy
+// is "wait a minute, a job is in flight" rendered IDENTICALLY and the leg
+// reached a human only through the raw API response.
+//
+// Driven per LEG, all six, because the leg is the axis that used to collapse.
+test("dr-w26-bl: the taken 409 relays the claim leg and its caller-safe detail — six refusals, six sentences", () => {
+  const f = hooks.attachDomainFailureCopy;
+
+  // The six legs claim_leg/2 can return, each with the caller-facing sentence
+  // caller_claim_detail/1 writes for it (registry.ex), trimmed to its remedy.
+  const legs = {
+    admin_credential:
+      "That hostname still belongs to an instance the platform holds a live credential for, " +
+      "so the name is not free to re-attach. Decommission that instance first, or pick another hostname.",
+    recent_usage_sample:
+      "That hostname was still being reached by the platform within the last 24 hours, " +
+      "so the name is not free to re-attach.",
+    active_subscription:
+      "That hostname belongs to an instance on a live, still-entitled subscription. " +
+      "A billed name is never released — pick another hostname.",
+    agent_reporting:
+      "An agent on that hostname has phoned home recently, so the instance answering on it " +
+      "is live and the name is not free to re-attach.",
+    active_job:
+      "A provisioning job for that hostname is still in flight. Wait for it to finish and " +
+      "try again, or pick another hostname.",
+    within_grace:
+      "That hostname belongs to an instance younger than the 30-day abandonment window, " +
+      "so it is not yet releasable. Decommission it first, or pick another hostname.",
+  };
+
+  const rendered = {};
+  for (const [leg, detail] of Object.entries(legs)) {
+    const out = f(409, { error: "taken", claim_leg: leg, detail });
+    rendered[leg] = out;
+    assert.ok(out.indexOf(detail) === 0,
+      leg + ": the plane's caller-safe sentence must be relayed, not replaced — got " + JSON.stringify(out));
+    assert.ok(out.indexOf(leg) !== -1,
+      leg + ": the LEG itself must reach the person — it is the category that says which remedy applies");
+    assert.equal(out.indexOf("That domain is already in use."), -1,
+      leg + ": the fixed string must not survive a body that carried a detail");
+  }
+
+  // THE MUTATION, ON THE AXIS THAT COLLAPSED: six legs, six DISTINCT sentences.
+  // Pre-fix this set had size 1 for every leg.
+  assert.equal(new Set(Object.values(rendered)).size, 6,
+    "six legs must render six distinct sentences — a collapsed set is the pre-fix defect");
+
+  // MUTATING THE LEG ALONE (same detail) changes the rendered sentence.
+  const sameDetail = "That hostname is held by another instance and is not free to re-attach.";
+  assert.notEqual(
+    f(409, { error: "taken", claim_leg: "active_job", detail: sameDetail }),
+    f(409, { error: "taken", claim_leg: "active_subscription", detail: sameDetail }),
+    "the leg is READ: swapping only claim_leg must change what the person is shown");
+
+  // THE FALLBACK: no detail on the body (a name held by some OTHER surface — a
+  // Site domain, another instance's custom_host, a lost race on the unique
+  // index — merges no keys at all) keeps the fixed sentence.
+  assert.equal(f(409, { error: "taken" }), "That domain is already in use.",
+    "a keyless taken body still says something true");
+  assert.equal(f(409, { error: "taken", claim_leg: "active_job" }),
+    "That domain is already in use. (active_job)",
+    "a leg with no detail still reaches the person, on top of the fixed fallback");
+  assert.equal(f(409, { error: "taken", detail: "" }), "That domain is already in use.",
+    "an empty detail is not a sentence");
+
+  // The neighbouring arms are UNTOUCHED by this change.
+  assert.equal(f(409, { error: "already_attaching" }), "An attach is already running.");
+  assert.equal(
+    f(409, { error: "already_attached", custom_host: "host-a.barkpark.cloud" }),
+    "This instance already answers on host-a.barkpark.cloud.",
+    "already_attached still relays its own host — it is a DIFFERENT refusal from taken");
+});
+
+test("dr-w26-bl: the relayed taken detail is RENDERED via textContent (a server sentence never becomes markup)", async () => {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document };
+  const dom = recordingDom(["domain-input", "domain-error", "domain-go"]);
+  dom.els["domain-input"].value = "taken.barkpark.cloud";
+  sandbox.fetch = fetchStub(409, {
+    error: "taken",
+    claim_leg: "active_subscription",
+    detail:
+      "That hostname belongs to an instance on a live, still-entitled subscription. " +
+      "A billed name is never released — pick another hostname.",
+  });
+  sandbox.document = dom.document;
+  try {
+    hooks.attachDomain({ id: "bp1", name: "Production" });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally { Object.assign(sandbox, saved); }
+  const errEl = dom.els["domain-error"];
+  assert.equal(errEl.hidden, false, "the inline error shows");
+  assert.match(errEl.textContent, /still-entitled subscription/,
+    "the plane's caller-safe sentence reaches the user through the DOM");
+  assert.match(errEl.textContent, /active_subscription/,
+    "…and so does the leg that says WHICH remedy applies");
+  assert.deepEqual(errEl.writes, [],
+    "the arm writes textContent only — the recording DOM records every innerHTML write and saw none");
+});
+
 test("cch-w40-bl: domain_not_pointed is RENDERED via textContent on the live arm (server IPs never become markup)", async () => {
   // The impure drive proves the wire → DOM path: the measured IP reaches the
   // inline error through textContent, not the false sentence. This is the leg that
@@ -32074,4 +32222,136 @@ test("cchi-w61-bl: the console harness runs on the Node cloud/priv/static/__node
     `through scripts/console-harness.sh, which resolves the declared major, or ` +
     `change the declaration deliberately (console-runtime-pin-check.sh will then ` +
     `require console-harness.yml's console-unit job to follow).`);
+});
+
+// ── cloud-console-user-security-log: the account modal's Security log ────────
+// The user-scoped trail (GET /v1/me/security-events) rendered beside Sessions.
+// Everything asserted here is a property the render could plausibly get wrong:
+// a verb the console has never heard of painted as a confident sentence, an
+// empty trail and a FAILED fetch painting the same reassuring blank, the IP
+// column leaking onto a security surface where it is uniform garbage (GR81),
+// and a fold whose count is retyped rather than derived.
+test("security log: the five verbs read as sentences and an unknown verb falls through to its slug", () => {
+  assert.equal(hooks.securityEventLabel("password_changed"), "Password changed");
+  assert.equal(hooks.securityEventLabel("two_factor_disabled"),
+    "Two-factor authentication turned off");
+  assert.equal(hooks.securityEventLabel("session_revoked"), "A device was signed out");
+  assert.equal(hooks.securityEventLabel("sessions_revoked_everywhere"), "Signed out everywhere");
+  assert.equal(hooks.securityEventLabel("email_changed"), "Email address changed");
+
+  // A verb this console has never heard of must read as "something I do not
+  // recognise happened" — never as the nearest friendly sentence.
+  assert.equal(hooks.securityEventLabel("account_deleted"), "account_deleted");
+  assert.equal(hooks.securityEventLabel(""), "Unknown change");
+  assert.equal(hooks.securityEventLabel(undefined), "Unknown change");
+});
+
+test("security log: the detail line carries the former email and the revoked count, and nothing else", () => {
+  assert.equal(
+    hooks.securityEventDetail({ action: "email_changed", metadata: { previous_email: "old@x.io" } }),
+    "from old@x.io");
+  assert.equal(
+    hooks.securityEventDetail({ action: "sessions_revoked_everywhere", metadata: { revoked: 3 } }),
+    "3 other devices");
+  assert.equal(
+    hooks.securityEventDetail({ action: "sessions_revoked_everywhere", metadata: { revoked: 1 } }),
+    "1 other device");
+  // Zero is a number, and "0 other devices" is the honest answer — not "".
+  assert.equal(
+    hooks.securityEventDetail({ action: "sessions_revoked_everywhere", metadata: { revoked: 0 } }),
+    "0 other devices");
+  // No filler: a verb with nothing extra to say says nothing extra.
+  assert.equal(hooks.securityEventDetail({ action: "password_changed", metadata: {} }), "");
+  assert.equal(hooks.securityEventDetail({}), "");
+  assert.equal(hooks.securityEventDetail(null), "");
+});
+
+test("security log: GR81 — the row never paints the stored ip, and hostile fields are escaped", () => {
+  const row = hooks.securityEventRowHtml({
+    id: "ev_1",
+    action: "password_changed",
+    ip: "172.18.0.1",
+    user_agent: "Mozilla/5.0 (Macintosh) Chrome/120",
+    metadata: {},
+    inserted_at: new Date().toISOString(),
+  });
+
+  // The IP is stored server-side and deliberately suppressed here: every
+  // control-plane request arrives from the Docker bridge gateway, so the value
+  // is identical for every client and can never separate "me" from "a stranger".
+  assert.ok(!row.includes("172.18.0.1"),
+    "GR81: the uniform bridge IP must not appear on a security surface: " + row);
+  assert.ok(row.includes("Password changed"));
+  assert.ok(row.includes("Chrome"), "the device label is the recognisable fact that survives");
+  // No control on a row that records something already done.
+  assert.ok(!row.includes("<button"), "a past event offers no action");
+
+  const nasty = hooks.securityEventRowHtml({
+    action: "email_changed",
+    metadata: { previous_email: "<script>alert(1)</script>@x.io" },
+    user_agent: "<img src=x onerror=1>",
+    inserted_at: new Date().toISOString(),
+  });
+  assert.ok(!nasty.includes("<script>"), "the former address is escaped: " + nasty);
+  assert.ok(!nasty.includes("<img"), "the user agent is escaped: " + nasty);
+});
+
+test("security log: an empty trail says what empty MEANS, and the fold count is derived", () => {
+  const empty = hooks.securityLogHtml([], false);
+  assert.ok(empty.includes("No sensitive changes recorded yet"),
+    "an empty log must state what empty means, not render a blank box: " + empty);
+  assert.ok(!empty.includes("session-row"));
+
+  const mk = (n) => Array.from({ length: n }, (_, i) => ({
+    id: "ev_" + i, action: "password_changed", user_agent: "barkpark-cli/0.9",
+    metadata: {}, inserted_at: new Date().toISOString(),
+  }));
+
+  const five = hooks.securityLogHtml(mk(5), false);
+  assert.equal((five.match(/class="session-row"/g) || []).length, 5);
+  assert.ok(!five.includes("security-log-fold"), "five rows must not grow a fold button");
+
+  const nine = hooks.securityLogHtml(mk(9), false);
+  assert.equal((nine.match(/class="session-row"/g) || []).length, 5);
+  assert.ok(nine.includes(">Show 4 more events<"), "the count must match the hidden tail: " + nine);
+  assert.ok(nine.includes('aria-expanded="false"'));
+  assert.ok(hooks.securityLogHtml(mk(6), false).includes(">Show 1 more event<"),
+    "one hidden row is an event, not events");
+
+  const open = hooks.securityLogHtml(mk(9), true);
+  assert.equal((open.match(/class="session-row"/g) || []).length, 9);
+  assert.ok(open.includes(">Show fewer<") && open.includes('aria-expanded="true"'));
+});
+
+test("security log: the modal mounts it, and a failed read never paints as an empty trail", () => {
+  // The section exists in the modal body, with the box the loader writes into.
+  const modal = hooks.accountModalHtml({ name: "Ada", email: "ada@x.io" }, "loaded");
+  assert.ok(modal.includes('id="security-log-box"'),
+    "the account modal must mount the security log box");
+  assert.ok(modal.includes(">Security log<"), "the section needs its heading");
+  // It sits beside Sessions, not somewhere else in the modal.
+  assert.ok(modal.indexOf('id="sessions-box"') < modal.indexOf('id="security-log-box"'),
+    "the security log belongs directly under Sessions");
+
+  // The DOM mount has no pure seam, so this arm reads source (same technique the
+  // sessions-fold arm above uses).
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function loadSecurityLog("));
+  const body = fn.slice(0, fn.indexOf("\n  // PUT /v1/account/password"));
+  assert.ok(body.includes('api("GET", "/v1/me/security-events")'),
+    "loadSecurityLog must read the user-scoped route");
+  assert.ok(body.includes('querySelector("#security-log-fold")'),
+    "loadSecurityLog must delegate the fold toggle through #security-log-fold");
+  // THE LOAD-BEARING ARM: a failed fetch and an empty trail must not paint the
+  // same thing. "Nothing has changed on your account" is exactly the
+  // reassurance a reader would wrongly take from a silent blank box.
+  assert.ok(body.includes("load your security log"),
+    "a failed read must say so: " + body);
+  assert.ok(!body.includes("No sensitive changes recorded yet"),
+    "the failure arm must not borrow the empty-state sentence");
+
+  // And the modal opener actually calls it — a render nothing invokes is dead.
+  const opener = src.slice(src.indexOf("function openAccountModal("));
+  assert.ok(opener.slice(0, 2000).includes("loadSecurityLog()"),
+    "openAccountModal must load the security log");
 });

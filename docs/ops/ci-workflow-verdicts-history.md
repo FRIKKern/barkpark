@@ -78,3 +78,17 @@ fires on `js/packages/{core,react}/**`, but its only remedy writes to `templates
 `templates/VENDOR-STAMP.json`. The SDK lane must run that script **in the same PR** as the
 js/packages change; a lane fenced out of `templates/**` cannot green this gate and will wrongly
 conclude the gate is broken.
+
+## CORRECTED 2026-09-06 — the five DORMANT rows were a FOUR-DAY artifact
+
+Those five zeros are true for `2026-08-30..09-02` and are **not** evidence of dormancy: four days
+cannot establish it for a workflow firing a few times a month. Over 30 days (runs API, twice,
+independently) all five fired — `hundesteder` **14 runs / 4 reds**, `vendored-assets` **6 / 2** (the
+family whose blind spot shipped a stale tarball at #16174), `main-gate-watch` 7/0, `windows-smoke`
+3/0, `studio-journey-smoke` 2/0. **Retire none: a retire on the old label would have deleted two
+gates that demonstrably refused.**
+
+The durable half is in the tool. `ci-measure.sh --census` no longer drops zero-run workflows from its
+table; it adjudicates each against a 90-day lookback and **refuses** DORMANT unless the window is at
+least `3x` the observed firing period, naming the window it would need. Every verdict carries its
+window inline, so none is quotable bare. On the original 4-day window it refuses all five (`d1`-`d3`).

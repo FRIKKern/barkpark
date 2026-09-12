@@ -703,9 +703,16 @@ func instLookupA(ctx context.Context, dns *hcloud.Client, zone, label string) ([
 // it off so their instHTTP stub sees the probe.
 var instHealthPin = true
 
-// instHealth polls https://fqdn/api/schemas until it answers 200 — the same
+// instHealth polls https://fqdn/status.json until it answers 200 — the same
 // smoke the deploy runbook mandates. Bounded by instPoll × instPollMax. When
 // ip is known the connection is pinned to it (see instHealthPin).
+//
+// The path is /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`. This loop gates on the STATUS CODE,
+// so on 2027-01-01 every resurrect/adopt/eject would fail its health gate on a
+// healthy box. /status.json needs no token and is strictly stronger:
+// Barkpark.Status.health/0 runs a bare Repo.all/1, so a dead DB is a 500.
 func instHealth(fqdn, ip string) error {
 	client := instHTTP
 	if ip != "" && instHealthPin {
@@ -722,7 +729,7 @@ func instHealth(fqdn, ip string) error {
 			},
 		}
 	}
-	url := "https://" + fqdn + "/api/schemas"
+	url := "https://" + fqdn + "/status.json"
 	var last error
 	for i := 0; i < instPollMax; i++ {
 		resp, err := client.Get(url)
@@ -1341,7 +1348,7 @@ func runInstanceResurrect(out *writer, g globals, args []string) int {
 		// receipt says that in its own words and stays a ✓ for what it did do.
 		extra["health"] = "skipped (--no-health)"
 	} else {
-		out.info("waiting for https://%s/api/schemas …", fqdn)
+		out.info("waiting for https://%s/status.json …", fqdn)
 		if herr := instHealth(fqdn, ip); herr != nil {
 			extra["health"] = "FAILED: " + herr.Error()
 			payload := map[string]any{"ok": false, "action": "resurrect", "server": map[string]any{"id": srv.ID, "name": srv.Name}}
@@ -1390,7 +1397,7 @@ func instCloneSwap(ctx context.Context, out *writer, hc *hcloud.Client, dns *hcl
 	if err := instUpsertA(ctx, dns, fzone, label, hzIPv4(clone)); err != nil {
 		return clone, obs, fmt.Errorf("clone %s is up at %s but DNS failed: %w", clone.Name, hzIPv4(clone), err)
 	}
-	out.info("waiting for https://%s/api/schemas on the clone…", fqdn)
+	out.info("waiting for https://%s/status.json on the clone…", fqdn)
 	if err := instHealth(fqdn, hzIPv4(clone)); err != nil {
 		return clone, obs, fmt.Errorf("clone %s is up but the health gate failed: %w (old box %s left untouched)", clone.Name, err, srv.Name)
 	}
@@ -1855,7 +1862,7 @@ VERBS
                 --yes skips the typed-name confirm; --force overrides the
                 fqdn-label ownership check on the server delete.
   resurrect     newest archive (or --image) → new server → DNS → health gate on
-                https://<fqdn>/api/schemas. Infra-level: the registry row is
+                https://<fqdn>/status.json. Infra-level: the registry row is
                 not recreated (use adopt for that).
   adopt         standalone → SaaS tenant: archive, boot a clone, repoint DNS,
                 health-gate, register the row, destroy the old box (--keep-old
