@@ -238,6 +238,30 @@ EOF
     _want "arm8 does not call it lapsing" 0 '^task-bbb .*LAPSING'
   fi
 
+  echo "== arm 9 (task-50d7d1a599dd14dd): --session reads THIS session's list, never the lane-wide one"
+  # Two sessions of one lane. s1 holds task-aaa; s2 holds task-ccc. The legacy
+  # lane-wide held.txt still lists task-bbb, and neither session may read it.
+  printf '%s\n' task-aaa > "$d/lane/held.s1.txt"
+  printf '%s\n' task-ccc > "$d/lane/held.s2.txt"
+  _row task-aaa lead-x "$(_ago 2)" in_progress
+  _row task-ccc lead-x "$(_ago 2)" in_progress
+  printf '%s ok task-aaa\n%s ok task-ccc\n' "$(_ago 4)" "$(_ago 4)" > "$d/lane/pulse.log"
+  if _run "arm9 s1 runs" 0 -- "$d/lane" --session s1 --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log"; then
+    _want "arm9 s1 sees its own row"      1 '^task-aaa '
+    _want "arm9 s1 cannot see s2's row"   0 '^task-ccc '
+    _want "arm9 s1 cannot see held.txt's" 0 '^task-bbb '
+  fi
+  if _run "arm9 s2 runs" 0 -- "$d/lane" --session s2 --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log"; then
+    _want "arm9 s2 sees its own row"    1 '^task-ccc '
+    _want "arm9 s2 cannot see s1's row" 0 '^task-aaa '
+  fi
+
+  echo "== arm 10: a NAMED list that is absent REFUSES (exit 2) — it never falls back to the lane-wide file"
+  if _run "arm10 runs" 2 -- "$d/lane" --session s99 --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log"; then
+    _want "arm10 names the missing per-session file" 1 'held\.s99\.txt does not exist'
+    _want "arm10 did NOT read the lane-wide list"    0 '^task-bbb '
+  fi
+
   rm -rf "$d"
   if [ "$fails" -gt 0 ]; then echo "held-liveness.sh selftest: $fails FAILED"; return 1; fi
   echo "held-liveness.sh selftest: all arms passed"; return 0
@@ -246,10 +270,16 @@ EOF
 
 # ------------------------------------------------------------------ ARGUMENTS ----------------
 EXPECT=""; PIDFILE=""; PULSELOG=""; WARN=15; INTERVAL=18; LEASE=45; BP="bp"; GRACE=3
-LANE=""
+LANE=""; HELDARG=""; SESSION=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --expect-worker)  EXPECT="${2:-}"; shift 2;;
+    # PER-SESSION PULSE LISTS (task-50d7d1a599dd14dd). Two sessions of one lane
+    # each own a held.<session>.txt; naming the file (or the session) is how a
+    # session reads ITS OWN list instead of a peer's. Bare held.txt stays the
+    # default so a pre-session lane dir keeps working unchanged.
+    --held)           HELDARG="${2:-}"; shift 2;;
+    --session)        SESSION="${2:-}"; shift 2;;
     --pid-file)       PIDFILE="${2:-}"; shift 2;;
     --log)            PULSELOG="${2:-}"; shift 2;;
     --warn-minutes)   WARN="${2:-}"; shift 2;;
@@ -269,7 +299,17 @@ done
 if [ -z "$LANE" ]; then
   echo "held-liveness.sh: no lane dir. usage: held-liveness.sh <lane-dir> [--expect-worker W] [--pid-file F] [--log F] [--warn-minutes N]" >&2; exit 2
 fi
-HELDFILE="$LANE/held.txt"
+# THE LIST THIS SESSION OWNS. Precedence: an explicit --held file, else the
+# per-session name from --session, else the legacy lane-wide held.txt. Naming
+# a file that is not there is a REFUSAL below, never a silent fallback to the
+# lane-wide list: reading a peer's list would attribute its rows to you.
+if [ -n "$HELDARG" ]; then
+  HELDFILE="$HELDARG"
+elif [ -n "$SESSION" ]; then
+  HELDFILE="$LANE/held.$SESSION.txt"
+else
+  HELDFILE="$LANE/held.txt"
+fi
 if [ ! -f "$HELDFILE" ]; then
   say "liveness: NO LIST — $HELDFILE does not exist. Nothing was checked; this is NOT 'no rows to keep alive'."
   exit 2

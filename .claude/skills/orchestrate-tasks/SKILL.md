@@ -57,10 +57,54 @@ Your lane: <one sentence>.
 Your fence (paths you may edit): <list>.
 Seed rows (verify before trusting): <ids + one-line titles>.
 Repo root (read-only reference, on origin/main): <path>. Your worktrees go under $ORCH/wt/.
-$ORCH = <absolute path>. Status file: $ORCH/lead-<lane>/status.md.
+$ORCH = <absolute path>. Your SESSION id: <lane>-s<N> — it is yours alone, never
+another session's of this lane. Open your files FIRST and use only what it prints:
+  bash .claude/skills/orchestrate-tasks/helpers/session-files.sh open $ORCH/lead-<lane> s<N>
 ```
 
 Six leads run concurrently. Do not do lane work yourself while they run.
+
+**Session ids are per SESSION, never per lane** (task-50d7d1a599dd14dd). Mint a fresh
+`s<N>` for every launch AND every relaunch — `lead-<lane>-2` is a NEW session, so it gets
+`s2`, not `s1`. Two sessions of one lane sharing one set of filenames removed a live row
+from a pulse list at 00:35:35Z and rewrote `status.md` wholesale (149 lines -> 94) at
+~00:5xZ on 2026-09-07; nothing errored, because every write was legitimate. `session-files.sh
+open` hands out `status.<session>.md`, `held.<session>.txt`, `pulse.<session>.log/.pid`,
+refuses a path another session's header owns, records every predecessor file's size and
+digest, and `session-files.sh verify` reds when one of them moves. `DECISIONS-FROM-MAIN.md`
+stays LANE-wide on purpose: you are its only writer and you only ever append.
+
+## 1b. Launching a HEADLESS builder (`claude -p`) — the three lines, never by hand
+
+An in-process `Agent` worker is the default. When a lane instead launches a headless builder,
+use the wrapper — never a hand-composed `claude -p` line:
+
+    bash .claude/skills/orchestrate-tasks/helpers/launch-headless-builder.sh \
+      --prompt $ORCH/tmp/<lane>-<w>/prompt.md --log $ORCH/tmp/<lane>-<w>/build.log \
+      --model opus --worktree $ORCH/wt/<lane>-<slug>
+    # when it exits, ALWAYS:
+    bash .claude/skills/orchestrate-tasks/helpers/launch-headless-builder.sh \
+      --check $ORCH/tmp/<lane>-<w>/build.log --worktree $ORCH/wt/<lane>-<slug>
+
+It exports `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. Without that, `nohup claude -p "<prompt>"
+--model opus --dangerously-skip-permissions` **terminates its own background tasks after
+600 s**, and on this repo an Elixir gate cannot beat that ceiling under load (`mix test` in a
+fresh worktree compiles ~75 deps; the campaign puts the box at load 80-100). MEASURED
+2026-09-05: five headless builders, five deaths, one cause.
+
+**The signature of a ceiling-kill, because it does not look like one.** The exit is CLEAN —
+a calm final line about waiting for a compile, SessionEnd hooks firing normally — so it reads
+as a model that ran out of things to say. The tells are: a calm last line, a DIRTY worktree,
+and only sometimes the `Background tasks still running after 600s; terminating.` line.
+`--check` decides it mechanically and exits 1; an unreadable log or missing worktree is exit 2,
+never folded into a green.
+
+**Every builder prompt, headless or in-process, must say:** *COMMIT AND PUSH BEFORE REPORTING
+— a pushed branch survives a killed session, an uncommitted worktree does not.* Two of the
+five 2026-09-05 deaths reported real progress in their last line and left 14 modified files
+uncommitted. And gates run in the FOREGROUND through the machine-wide slot
+(`helpers/with-slot.sh`, or the `mix`/`go` PATH wrappers of §2b) — never `&`, never
+`run_in_background`: backgrounding a compile is what exposes it to the ceiling at all.
 
 ## 2. Coordinate
 
@@ -230,7 +274,7 @@ campaign is judged on those as much as on closes.
 
 Measured 2026-09-02 02:10Z: all 17 leads hit the Opus 5-hour limit within one minute. Design for it:
 
-- **State lives in files, not in agents.** Each lane's `status.md`, `DECISIONS-FROM-MAIN.md`, `handoff.md`;
+- **State lives in files, not in agents.** Each lane's `status.<session>.md`, `DECISIONS-FROM-MAIN.md`, `handoff.md`;
   every branch pushed; every PR with its `Task:` trailer. A lead is a cursor over those files.
 - **Loops outlive leads.** Keep running from the orchestrator: the campaign-row pulse (18 min), the CI
   advisory sweep (`helpers/ci-advisory-sweep.sh`), and the merge sweep (`helpers/merge-sweep.sh`) —
@@ -244,11 +288,15 @@ Measured 2026-09-02 02:10Z: all 17 leads hit the Opus 5-hour limit within one mi
   verdict and not a zero — never fold it into a not-yet count.
 - **Write `$ORCH/RESUME.md`** the moment the fleet drops: per lane, the live concerns and the relaunch
   prompt (`lead-<lane>-r`: read brief → status → decisions → merge-sweep.log; RE-CLAIM rows first, the
-  leases lapsed; stamp + close what the sweep merged; continue).
+  leases lapsed; stamp + close what the sweep merged; continue). A relaunch gets a NEW session id and
+  its OWN files: it READS its predecessor's `status.<session>.md` and APPENDS its own, never rewrites
+  one. Quiet is not dead — on 2026-09-07 the death inference was wrong three times out of three, every
+  relaunch resting on an inference from SILENCE, and one of those "dead" leads was alive and mid-work.
 - **Notify the owner once** (PushNotification): quota is theirs (`cswap`); relaunch on their word or at
   the reset time. Do not spend the outage idle: sweeps, triage reads, and the resume plan are free.
 - **Stand the originals down when you relaunch.** A lead that died on quota is only *paused*: when the
   limit resets, its queued inbox messages and its own background loops wake it, and now two leads
   drive one lane (measured 2026-09-02: the original deploy lead re-instructed a worker 90 min after its
   successor took over). At relaunch, send every original a one-line stand-down (stop loops, no ledger
-  writes, no worker instructions, note it in status.md, end turn) in the same message as the launches.
+  writes, no worker instructions, note it in its OWN status file, end turn) in the same message as the
+  launches.

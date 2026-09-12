@@ -548,6 +548,17 @@ on:
       # other jobs, so naming it here is what reaches THIS one.
       - "scripts/mix-test-strict.sh"
       - "scripts/mix-test-strict.test.sh"
+      # ── ORCHESTRATE-TASKS LAUNCH RECIPE (task-018fc84f61c33923,
+      # task-50d7d1a599dd14dd). The harness DERIVES its recipe set by grepping
+      # the skill, so the two docs and the helpers dir are INPUTS, not
+      # neighbours: an edit to SKILL.md can invalidate the matrix without
+      # touching the harness. Per file for the docs; one glob for the helpers,
+      # because the PR that adds a NEW helper composing a `claude -p` line is
+      # exactly the PR this control exists to red on.
+      - "scripts/orchestrate-launch-recipe.test.sh"
+      - ".claude/skills/orchestrate-tasks/SKILL.md"
+      - ".claude/skills/orchestrate-tasks/LEAD-BRIEF.md"
+      - ".claude/skills/orchestrate-tasks/helpers/*.sh"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -944,6 +955,17 @@ on:
       # other jobs, so naming it here is what reaches THIS one.
       - "scripts/mix-test-strict.sh"
       - "scripts/mix-test-strict.test.sh"
+      # ── ORCHESTRATE-TASKS LAUNCH RECIPE (task-018fc84f61c33923,
+      # task-50d7d1a599dd14dd). The harness DERIVES its recipe set by grepping
+      # the skill, so the two docs and the helpers dir are INPUTS, not
+      # neighbours: an edit to SKILL.md can invalidate the matrix without
+      # touching the harness. Per file for the docs; one glob for the helpers,
+      # because the PR that adds a NEW helper composing a `claude -p` line is
+      # exactly the PR this control exists to red on.
+      - "scripts/orchestrate-launch-recipe.test.sh"
+      - ".claude/skills/orchestrate-tasks/SKILL.md"
+      - ".claude/skills/orchestrate-tasks/LEAD-BRIEF.md"
+      - ".claude/skills/orchestrate-tasks/helpers/*.sh"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -1058,6 +1080,7 @@ jobs:
       which-gates: ${{ steps.sets.outputs.which-gates }}
       bp-curl: ${{ steps.sets.outputs.bp-curl }}
       migration-version-collision: ${{ steps.sets.outputs.migration-version-collision }}
+      orchestrate-launch-recipe: ${{ steps.sets.outputs.orchestrate-launch-recipe }}
       sunset-route-consumers: ${{ steps.sets.outputs.sunset-route-consumers }}
       mix-test-strict: ${{ steps.sets.outputs.mix-test-strict }}
       main-workflow-rollup: ${{ steps.sets.outputs.main-workflow-rollup }}
@@ -1287,6 +1310,10 @@ jobs:
           which-gates .github/workflows/cloud.yml
           which-gates .github/workflows/console-harness.yml
           which-gates .github/workflows/go-tests.yml
+          orchestrate-launch-recipe scripts/orchestrate-launch-recipe.test.sh
+          orchestrate-launch-recipe .claude/skills/orchestrate-tasks/SKILL.md
+          orchestrate-launch-recipe .claude/skills/orchestrate-tasks/LEAD-BRIEF.md
+          orchestrate-launch-recipe .claude/skills/orchestrate-tasks/helpers/*.sh
           bp-curl scripts/lib/bp-curl.sh
           bp-curl scripts/lib/bp-curl.test.sh
           migration-version-collision scripts/migration-version-collision-check.sh
@@ -3363,3 +3390,34 @@ jobs:
             exit 1
           fi
           echo "cloud.yml: collision check at line $call, mix test at line $test_line — ordered correctly"
+
+  orchestrate-launch-recipe:
+    needs: [changes]
+    if: needs.changes.outputs.orchestrate-launch-recipe == 'true'
+    # THE LAUNCH-RECIPE CONTROL (task-018fc84f61c33923, task-50d7d1a599dd14dd).
+    # Two findings that prose alone cannot hold. A headless builder launched as
+    # `nohup claude -p … --model opus --dangerously-skip-permissions` terminates
+    # its own background tasks at 600 s, mid-Elixir-compile, and exits looking
+    # like a calm finish (five builders, five deaths, 2026-09-05); the fix is one
+    # env var in a line people retype from memory. And two sessions of ONE lane
+    # sharing one set of filenames removed a live row from a pulse list and
+    # rewrote a status file 149 lines -> 94 (2026-09-07); the fix is per-SESSION
+    # names, which rot the moment a doc or a reader goes back to `status.md`.
+    #
+    # The harness DERIVES the recipe set by grepping the skill rather than
+    # listing it, refuses (exit 2) when it finds ZERO recipes instead of passing
+    # vacuously, and arm 9 mutates a scratch copy with the env var deleted and
+    # asserts the harness reds on it. Hermetic: no bp, no network, no claude
+    # binary — it reads files and runs two helper selftests.
+    name: orchestrate-tasks launch recipe + per-session lane files
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: harness + helper syntax check
+        run: |
+          bash -n scripts/orchestrate-launch-recipe.test.sh
+          bash -n .claude/skills/orchestrate-tasks/helpers/session-files.sh
+          bash -n .claude/skills/orchestrate-tasks/helpers/launch-headless-builder.sh
+      - name: "orchestrate-launch-recipe.test.sh (21 assertions incl. the env-var mutation)"
+        run: bash scripts/orchestrate-launch-recipe.test.sh
