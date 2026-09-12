@@ -457,6 +457,58 @@ test("the SHIPPED accepted-until-fixed.json satisfies its own loader", () => {
   for (const e of entries) assert.match(e.row, /^task-[0-9a-f]+$/);
 });
 
+test("the two residue portable_doc edges are wired and DECAY — both arms in one run", () => {
+  // The residue of the content-kernel concept-edge audit (task-1e93b1d801ff4696):
+  // capabilities>portable_doc and tenancy>portable_doc, disposed ACCEPT by
+  // task-c7d1f0ad06c51d62, each owned by an OPEN inversion row. This pins the
+  // wiring to the SHIPPED file and proves the two decay arms fire for THESE
+  // identities — not fixtures — so the acceptance cannot silently become
+  // permanent debt.
+  const shipped = loadAcceptedEntries(_read(ACCEPTED_PATH, "utf8"));
+  const mine = shipped.filter(
+    (e) => e.identity === "capabilities>portable_doc" || e.identity === "tenancy>portable_doc"
+  );
+  assert.equal(mine.length, 2, "both residue portable_doc edges must be entered, once each");
+  const rowOf = (id) => mine.find((e) => e.identity === id).row;
+
+  // GREEN shape: both edges present in the graph AND their owing rows open.
+  const present = new Set(["capabilities>portable_doc", "tenancy>portable_doc"]);
+  const openLc = new Map(mine.map((e) => [e.row, "open"]));
+  assert.equal(
+    auditAccepted({ entries: mine, present, lifecycle: openLc }).failed,
+    false,
+    "present edges with open owing rows is the state the entries exist to describe"
+  );
+
+  // ARM (un-owed): a mutation adding an entry with NO owing row is REFUSED by
+  // the loader — an acceptance with nobody on the hook is an allowlist.
+  assert.throws(
+    () => loadAcceptedEntries({ entries: [{ identity: "capabilities>portable_doc" }] }),
+    /carries no bp task row id/
+  );
+
+  // ARM (c) HEALED: drop tenancy>portable_doc from the graph — its entry now
+  // accepts nothing and must be deleted, naming the identity.
+  const healed = auditAccepted({
+    entries: mine,
+    present: new Set(["capabilities>portable_doc"]),
+    lifecycle: openLc,
+  });
+  assert.ok(healed.failed, "a healed edge whose entry still stands must red");
+  assert.equal(healed.failures[0].arm, "healed");
+  assert.match(healed.failures[0].reason, /HEALED: delete entry tenancy>portable_doc/);
+
+  // ARM (b) ROW-CLOSED: close capabilities' owing row while its edge is STILL
+  // present — the acceptance outlived its justification and reds, naming the row.
+  const capRow = rowOf("capabilities>portable_doc");
+  const closedLc = new Map(openLc);
+  closedLc.set(capRow, "done");
+  const closed = auditAccepted({ entries: mine, present, lifecycle: closedLc });
+  assert.ok(closed.failed, "a done owing row with the edge still present must red");
+  assert.equal(closed.failures[0].arm, "row-closed");
+  assert.match(closed.failures[0].reason, new RegExp(capRow));
+});
+
 // ── ARM (a): never-worse, with the accepted set subtracted ──────────────────
 
 test("ARM (a): an ACCEPTED edge is waved through; an UNACCEPTED one still reds", () => {

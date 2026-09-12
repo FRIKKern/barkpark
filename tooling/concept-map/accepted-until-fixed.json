@@ -1,4 +1,24 @@
 {
-  "note": "ACCEPTED-UNTIL-FIXED \u2014 a TRIPWIRE, not an allowlist. Each entry names ONE boundary identity that ci-boundary.mjs would otherwise red, and the bp task row that owes the fix. The entries exist so the gate can be BLOCKING today without pretending the debt is gone. Three arms make the list decay rather than accumulate: (a) any identity NOT listed still reds \u2014 the never-worse arm; (b) a listed row that is done/cancelled while its identity is STILL present reds, naming the row (someone closed the row without paying the debt); (c) a listed identity that has DISAPPEARED reds with 'HEALED: delete entry X' \u2014 the entry must be deleted in the same PR that pays the edge down. An entry without a `row` is REFUSED by the loader: an acceptance with nobody on the hook is an allowlist. Adding an entry is a review decision, and the durable fix is a SHORTER list, never a longer one.",
-  "entries": []
+  "note": "ACCEPTED-UNTIL-FIXED — a TRIPWIRE, not an allowlist. Each entry names ONE boundary identity that ci-boundary.mjs would otherwise red, and the bp task row that owes the fix. The entries exist so the gate can be BLOCKING today without pretending the debt is gone. Three arms make the list decay rather than accumulate: (a) any identity NOT listed still reds — the never-worse arm; (b) a listed row that is done/cancelled while its identity is STILL present reds, naming the row (someone closed the row without paying the debt); (c) a listed identity that has DISAPPEARED reds with 'HEALED: delete entry X' — the entry must be deleted in the same PR that pays the edge down. An entry without a `row` is REFUSED by the loader: an acceptance with nobody on the hook is an allowlist. Adding an entry is a review decision, and the durable fix is a SHORTER list, never a longer one.",
+  "entries": [
+    {
+      "identity": "capabilities>portable_doc",
+      "row": "task-09a53e83cc7afc6a",
+      "disposition": "ACCEPT",
+      "reason": "plugins/capabilities.ex maybe_gate_bpml/3 calls Barkpark.PortableDoc.Bpml.vocabulary/0 to embed the BPML paper-format grammar into the /v1/capabilities manifest — a legitimate content-describing dependency (the manifest surfaces the public paper format, not an instance capability). The clean shape is registry-driven (PortableDoc registers its vocabulary provider, capabilities pulls it via Plugins.Registry); that inversion is deferred and owned by the row.",
+      "adjudicated_by": "task-c7d1f0ad06c51d62",
+      "kernel": "{content, tenancy}",
+      "since": "2026-09-12"
+    },
+    {
+      "identity": "tenancy>portable_doc",
+      "row": "task-16ad2e7e9d75e4ab",
+      "disposition": "ACCEPT",
+      "reason": "Tenancy.known_themes/0 delegates to Barkpark.PortableDoc.Render.TokensGen.themes/0, the single generated theme allowlist, per bp-theme-system-charter D33 (the hand @known_themes allowlist was deliberately killed so adding a theme is one JSON file + emit --write across all surfaces). The delegation is correct by design; the gate reds it only because the generated TokensGen artifact lives under the portable_doc render tree. The deferred fix relocates that codegen to a kernel-owned/shared path, owned by the row.",
+      "charter": "bp-theme-system-charter D33",
+      "adjudicated_by": "task-c7d1f0ad06c51d62",
+      "kernel": "{content, tenancy}",
+      "since": "2026-09-12"
+    }
+  ]
 }
