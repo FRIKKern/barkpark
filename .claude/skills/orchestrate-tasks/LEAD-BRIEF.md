@@ -39,8 +39,15 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 3. **Dispatch** an Opus worker: `Agent(subagent_type: "general-purpose", model: "opus",
    name: "<lane>-w<N>")`. The worker prompt must contain: the task id, "the task row IS
    the spec — do not trust my paraphrase", the worktree command below, the fence, the
-   gate to run, the commit rules, and "report what the filing got WRONG". Five workers
-   at most in flight; parallelise across rows, not inside one.
+   gate to run, the commit rules, **"COMMIT AND PUSH BEFORE REPORTING — a pushed branch
+   survives a killed session, an uncommitted worktree does not"**, and "report what the
+   filing got WRONG". Five workers at most in flight; parallelise across rows, not inside
+   one. A HEADLESS builder (`claude -p`) is launched ONLY through
+   `helpers/launch-headless-builder.sh` (SKILL.md §1b): a hand-composed
+   `nohup claude -p … --model opus --dangerously-skip-permissions` terminates its own
+   background tasks at 600 s, mid-Elixir-compile, and exits looking like a calm finish —
+   five builders, five deaths, one cause, measured 2026-09-05. When one returns, run
+   `launch-headless-builder.sh --check <log> --worktree <wt>` before you believe its report.
 4. **Worker builds** in `git worktree add $ORCH/wt/<lane>-<slug> -b <lane>/<slug> origin/main`.
    IMMEDIATELY record the base: `git -C <wt> merge-base HEAD origin/main > $ORCH/tmp/<lane>-w<N>/base.sha`.
    That file is the only reset target rule 5 allows; `origin/main` moves while the worker works.
@@ -165,15 +172,46 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 - Never edit `.claude/worktrees/*` dirs, never `git stash` (shared stack), never touch
   the main checkout, never push to a branch you did not create.
 
+## Your SESSION — every file you write is yours alone
+
+Your prompt names a SESSION id (`s<N>`). It is not the lane: a relaunched `lead-<lane>-2`
+is a DIFFERENT session of the SAME lane, and on 2026-09-07 two such sessions sharing one
+set of filenames removed a live row from a pulse list and rewrote a `status.md` from 149
+lines to 94. Nothing errored; every write was legitimate. Open your files first and use
+ONLY what this prints:
+
+    bash .claude/skills/orchestrate-tasks/helpers/session-files.sh open $ORCH/lead-<lane> s<N>
+    # STATUS=…/status.s<N>.md  HELD=…/held.s<N>.txt  PULSE_LOG=…  PULSE_PID=…
+
+- **A peer's file is not yours to touch.** Per-session names make a removal from another
+  session's pulse list IMPOSSIBLE BY CONSTRUCTION rather than merely reported — which is the
+  remedy this brief chose, because an audit log of a silent removal is read only by someone
+  who already suspects it happened.
+- **If you believe you INHERITED this lane, APPEND.** `open` prints an `INHERITED:` banner
+  naming every predecessor file. Read them; write your own. NEVER rewrite one — a filename
+  stops a name collision, it does not stop a successor that correctly believes itself the
+  sole owner. **Quiet is not dead:** that inference was wrong three times out of three on the
+  night this rule was written, each relaunch resting on silence, and one "dead" predecessor
+  was alive and mid-work.
+- **Prove you did not clobber one.** `session-files.sh verify $ORCH/lead-<lane> s<N>` re-reads
+  every predecessor's size and digest and REDS when one moved. All three collisions that night
+  were caught by a size that moved — by accident. This makes it a check.
+- **`DECISIONS-FROM-MAIN.md` stays LANE-wide** and append-only: main is its only writer.
+- **The ledger is unchanged.** You still claim, pulse, stamp and close as `lead-<lane>`; the
+  per-session discriminator on a claim is the SERVER's (`claim.session` / `claim.session_origin`,
+  PR #17293), not this filename. A claim taken under the old lane-scoped id keeps renewing,
+  pulsing and closing exactly as before — the CAS fences on `worker + epoch` and never on a
+  session — so nothing held mid-campaign is orphaned by this change.
+
 ## Communication protocol
 
 - **Cadence is a hard rule.** ONE background loop pulses your held rows every 18 min (`sleep 1080`); ONE
   monitor watches your PRs and prints only when `pr-required.sh` changes verdict; message `main` only on
   a merge, a close, or a ruling — never an idle note. A lead whose loop fired every 40 s sent six idle
   notes in three minutes and 39 pulses in ten minutes into a box on a diet (2026-09-02); it was stopped.
-  Do not hand-write that loop: run `.claude/skills/orchestrate-tasks/helpers/pulse-loop.sh <worker> <held-file> <log>`, which drops a closed row from the round instead of striking the whole list for it.
+  Do not hand-write that loop: run `.claude/skills/orchestrate-tasks/helpers/pulse-loop.sh lead-<lane> $ORCH/lead-<lane>/held.s<N>.txt $ORCH/lead-<lane>/pulse.s<N>.log`, which drops a closed row from the round instead of striking the whole list for it. The held file and the log are YOUR SESSION's, from `session-files.sh open` — never the lane-wide `held.txt`.
   And running is not held: at the TOP OF EVERY LOOP, and again after ANY peer stand-down, run
-  `.claude/skills/orchestrate-tasks/helpers/held-liveness.sh $ORCH/lead-<lane> --expect-worker lead-<lane> --pid-file $ORCH/lead-<lane>/pulse.pid --log $ORCH/lead-<lane>/pulse.log`
+  `.claude/skills/orchestrate-tasks/helpers/held-liveness.sh $ORCH/lead-<lane> --session s<N> --expect-worker lead-<lane> --pid-file $ORCH/lead-<lane>/pulse.s<N>.pid --log $ORCH/lead-<lane>/pulse.s<N>.log` (`--session` names YOUR list; a named list that is absent is exit 2, never a silent fallback to a peer's)
   and read its exit code (0 held, 1 a NAMED violation, 2 an empty/missing list, 3 a ledger read refused). It reads the LEDGER's `claim.worker` and lease-until for every row in your held file and compares your pulse log's age and pid against the cadence — a loop that STOPS RUNNING prints nothing, so nothing else in this campaign can tell you. Quote its last line in your status file.
 
 - **Decisions file — read it at the top of EVERY loop.** The orchestrator writes rulings, approvals and
@@ -181,8 +219,11 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
   messages can lag behind a long turn; the file never does. A row you marked BLOCKED that appears
   in that file is unblocked — update your table the same loop.
 
-- **Status file** `$ORCH/lead-<lane>/status.md` — rewrite it (whole file) at every
-  milestone. Format, one row per task you have touched:
+- **Status file** `$ORCH/lead-<lane>/status.<session>.md` (the `STATUS=` line from
+  `session-files.sh open`) — rewrite YOUR OWN file (whole file) at every milestone, and never
+  any other session's. Keep its first line, the `<!-- bp-lane-session: … -->` header: it is
+  what makes a peer's `open` refuse the file instead of truncating it. Format, one row per
+  task you have touched:
   ```
   # lead-<lane> — <ISO time>
   workers: <n in flight>/5
@@ -246,7 +287,7 @@ next slice for a successor lead: <ids>
 - **"Release everything else" is safe only when ONE session holds the worker id.** Two sessions behind one id: the stand-down's release silently un-claimed the survivor's row, nothing errored (a release by the id holder is legitimate), and the victim's next stamp would fail `not_holder` an hour later. After any peer hands over or stands down on a shared id, re-read the STATUS of every row you believe you hold; do not trust the epoch you were given. Hand over by naming ids, never by "everything else".
 - **A rerun of a cancelled PR run sticks only once the PR is out of draft.** While the PR is a draft the rerun is cancelled again as attempt 2; undraft, then rerun.
 - **"Touches the same file as your incident" is not a reason to suspect a PR.** Ask whether its defect has the same failure MODE: a false-green (control plane silently does not roll) cannot appear in forty loudly failing runs.
-- **Pulse lists are per-session files, never shared.** A peer rewrote a shared held.txt twice and another lead's live rows fell out both times; a missing line errors nowhere and the claim lapses 40 min later. One file per session, append-only on any legacy shared file, over-pulse rather than tidy.
+- **Pulse lists are per-session files, never shared.** A peer rewrote a shared held.txt twice and another lead's live rows fell out both times; a missing line errors nowhere and the claim lapses 40 min later. One file per session (`held.<session>.txt`, from `session-files.sh open`), append-only on any legacy shared file, over-pulse rather than tidy. The same is true of EVERY session-owned file under `lead-<lane>/`: status, held lists, notes, pulse log and pid. `status.md` was the second instance, not a different bug — a wholesale rewrite, 149 lines to 94, three sections gone.
 - **A mutation harness needs assertions on its FIXTURE, not just its subject.** A first run reported the mutant "losing" the release on all four arms while the fixture deploys had silently failed with exit 14: a textbook vacuous green, caught only by exit-code checks on the setup deploys. Assert the fixture reached the state the mutation is supposed to break.
 - **"shellcheck clean" is unmeetable if main is not clean.** Quote both exit codes (main and head); word the criterion "no new findings vs main" or fix the pre-existing one in the same PR.
 - **Put the budget warning and "commit as soon as anything is coherent" at the TOP of every worker prompt.** A worker killed by the session limit left one WIP commit and a clean tree; the lead pushed the ref and finished verification itself. Without it, two worktrees were lost an hour earlier.
