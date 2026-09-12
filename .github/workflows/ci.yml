@@ -354,7 +354,7 @@ jobs:
       # step aborts the job, so the refusal above is the only guard needed — and
       # a guard that cannot be silently satisfied by a missing tree.
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 9
 
@@ -485,7 +485,7 @@ jobs:
       # run. A `present == 'true'` guard on each step is what made the whole job
       # skippable into a green.
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 9
 
