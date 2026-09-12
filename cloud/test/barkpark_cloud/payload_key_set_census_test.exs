@@ -1976,6 +1976,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "pinned_release" => 5,
     "population" => 2,
     "port" => 4,
+    # cli/prebuilt-optin-read-path (ssw10-bl-prebuilt-enabled-no-read-path),
+    # MEASURED 2026-09-12 on this branch rebased onto origin/main: NEWLY
+    # DUPLICATED, 1 -> 2. `SpawnSite.PrebuiltEnabled` in
+    # internal/cloudclient/client.go joins the single existing `Site.PrebuiltEnabled`
+    # declaration — the read path this PR exists to add, so the flag the control
+    # plane has serialized on every site-shaped route since W9 stops being
+    # dropped by json.Unmarshal. The NAME was already in the package union, so
+    # `@go_tag_pinned` does NOT move (the PIN CO-EDIT arm printed "0 of 4 scalar
+    # pin(s) no longer match this tree, and the SITE register moved too") and
+    # this row is the only pin that does. The partition total follows it:
+    # 690 -> 691 accounted, which is what the tree measures.
+    "prebuilt_enabled" => 2,
     "pressure" => 2,
     "project" => 2,
     "provider" => 3,

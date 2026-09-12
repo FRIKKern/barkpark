@@ -669,6 +669,14 @@ func warnPrebuiltAmbientToken(out *writer, ref, dir string, lookup func(string) 
 // refusal names the deployment it minted, and the second run passes it back with
 // `--deployment <id>`: no new mint, the same build id, the upload lands.
 func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deploymentID string, force, follow bool) int {
+	// THE OPT-IN IS READ FIRST, BEFORE ANY WRITE. One GET of the site row, and
+	// it is the SAME read prebuiltSiteBase already did (its result is threaded
+	// down rather than fetched twice), so on the mismatch path this costs no
+	// extra round trip at all.
+	site, siteRead := prebuiltSiteRow(cfg, id)
+	if code := prebuiltOptInRefusal(out, ref, id, site, siteRead); code != exitOK {
+		return code
+	}
 	warnPrebuiltAmbientToken(out, ref, dir, os.LookupEnv)
 	dep, code := resolvePrebuiltDeployment(out, cfg, ref, id, deploymentID, force)
 	if code != exitOK {
@@ -688,7 +696,7 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 		if cr := strings.TrimSpace(dep.ContentRev); cr != "" {
 			out.progressf("  export BARKPARK_CONTENT_REV=%s", cr)
 		}
-		base, exact := prebuiltSiteBase(cfg, id, ref)
+		base, exact := prebuiltSiteBase(site, siteRead, ref)
 		out.progressf("  export BARKPARK_SITE_BASE=%s", base)
 		if !exact {
 			out.progressf(
@@ -729,6 +737,100 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 	return streamCode
 }
 
+// prebuiltSiteRow is the ONE read of the site row the `--prebuilt` lane makes.
+// Its result feeds two consumers that both used to fetch it (or fail to): the
+// opt-in preflight below, and prebuiltSiteBase's slug. The second return value is
+// whether the read SUCCEEDED — never merged into the zero value, because a
+// zero-valued SpawnSite is indistinguishable from a real site that builds on its
+// box, and those two states must produce opposite behaviour here.
+func prebuiltSiteRow(cfg *Config, id string) (cloudclient.SpawnSite, bool) {
+	site, err := cfg.CloudClient().GetSpawnSite(cloudCtx(), id)
+	if err != nil {
+		return cloudclient.SpawnSite{}, false
+	}
+	return site, true
+}
+
+// prebuiltOptInRefusal is the preflight for `bp cloud site deploy <site>
+// --prebuilt <dir>` (ssw10-prebuilt-preflight-opt-in).
+//
+// WHY IT EXISTS. Prebuilt is a per-site opt-in (charter D87): the control plane
+// refuses `{"source":"prebuilt"}` with a 422 `prebuilt_not_enabled` until the site
+// says yes. Before this guard `bp` learned that answer from the WIRE — after the
+// ambient-token warning, after the mint, after the pack. And the mint is the
+// expensive half: a prebuilt mint is NONCED on purpose, so the row it burns is not
+// resumable by re-running the same command (it needs `--deployment <id>`), and a
+// user who simply forgot the opt-in was left holding an orphan queued deployment
+// and a command that would never converge.
+//
+// THE WORDING IS THE CONTROL PLANE'S, NOT A SECOND SENTENCE. router.ex's
+// deploy_static_site refuses with "this site builds on its box — enable off-box
+// builds first (PATCH /v1/sites/<id> {"prebuilt_enabled": true})". That sentence is
+// reproduced here with the site handle THE USER TYPED in front of it, so the local
+// refusal and the remote one cannot drift into two different instructions for the
+// same fault. The `bp` equivalent of the PATCH is appended because the user is in
+// a CLI, not a curl.
+//
+// A FAILED READ IS NOT A REFUSAL. The guard fires only on a DEFINITE false. If the
+// site row could not be read at all, this is a saved round trip we did not get —
+// not evidence about the opt-in — so the deploy proceeds and the control plane's
+// own 422 remains the backstop, with the un-run check said out loud rather than
+// implied to have passed.
+func prebuiltOptInRefusal(out *writer, ref, id string, site cloudclient.SpawnSite, siteRead bool) int {
+	if !siteRead {
+		out.errf("could not read %s's prebuilt opt-in before minting — proceeding; if this site has not opted in, the control plane will refuse the mint and the deployment id it prints is the one to re-ship to", hzCell(ref))
+		return exitOK
+	}
+	if site.PrebuiltEnabled {
+		return exitOK
+	}
+	return useError(out, "failed", fmt.Sprintf(
+		"%s builds on its box — enable off-box builds first (PATCH /v1/sites/%s {\"prebuilt_enabled\": true}), or from here: bp cloud site settings %s --prebuilt-enabled true\n\n(nothing was packed and no deployment was minted: a prebuilt mint is nonced, so a burned row could not be re-used by re-running this command.)",
+		hzCell(ref), sanitizeCell(id), hzCell(ref)), exitGeneric)
+}
+
+// mintedSourceClause is the "no build started on the box" half of the mint
+// receipt, READ BACK from the deployment the control plane returned rather than
+// asserted from the verb the user typed.
+//
+// It used to be printed unconditionally by the `--prebuilt` branch, which made it
+// a claim about the LOCAL flag: a control plane that ignored `source=prebuilt` and
+// queued a real box build returned a row saying so, and this line said the
+// opposite. The resume path already checked `dep.Source`; the mint did not. Same
+// check, same place.
+//
+// Three cases, three sentences, and the empty one matters: a control plane that
+// predates the `source` key sends nothing, and inventing either answer for it
+// would be the same fabrication in the other direction.
+func mintedSourceClause(source string) string {
+	switch strings.TrimSpace(source) {
+	case "prebuilt":
+		return " — no build started on the box"
+	case "":
+		return " (this control plane does not report the deploy's source, so whether a box build started is unknown here)"
+	default:
+		return fmt.Sprintf(" — the control plane made it a %s deploy, NOT a prebuilt one: a build is running on the box and your bytes are not what will serve", sanitizeCell(source))
+	}
+}
+
+// sitePrebuiltWord / sitePrebuiltLine render the off-box-build opt-in. Two shapes
+// because the two surfaces answer different questions: the settings receipt is
+// echoing a field you just set (one word), while `status` is the read verb where a
+// site owner learns the answer for the first time and needs to know what it MEANS.
+func sitePrebuiltWord(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+func sitePrebuiltLine(enabled bool) string {
+	if enabled {
+		return "enabled — this site accepts `bp cloud site deploy <site> --prebuilt <dir>`"
+	}
+	return "disabled — this site builds on its box; enable off-box builds with `bp cloud site settings <site> --prebuilt-enabled true`"
+}
+
 // prebuiltSiteBase is the value BARKPARK_SITE_BASE must carry: the PATH the site
 // is served under, `/sites/<slug>/` — byte-for-byte what the deploy engine exports
 // for an on-box build (deploy/site-deploy.sh: BARKPARK_SITE_BASE="/sites/$SITE_SLUG/").
@@ -758,8 +860,8 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 // of silent breakage this function was written to end, and which HEALTH cannot see
 // (it asserts bp-build-id/bp-content-rev/bp-doc-id, never bp-site-base). So that
 // case prints a PLACEHOLDER the caller flags rather than a plausible wrong value.
-func prebuiltSiteBase(cfg *Config, id, ref string) (string, bool) {
-	if site, err := cfg.CloudClient().GetSpawnSite(cloudCtx(), id); err == nil {
+func prebuiltSiteBase(site cloudclient.SpawnSite, siteRead bool, ref string) (string, bool) {
+	if siteRead {
 		if slug := strings.TrimSpace(site.Slug); slug != "" {
 			return "/sites/" + slug + "/", true
 		}
@@ -788,7 +890,7 @@ func resolvePrebuiltDeployment(out *writer, cfg *Config, ref, id, deploymentID s
 		if derr != nil {
 			return dep, siteRefusalFail(out, siteRefusedMint, ref, derr)
 		}
-		out.progressf("→ minted prebuilt deployment %s (build %s) — no build started on the box", sanitizeCell(dep.ID), sanitizeCell(dep.BuildID))
+		out.progressf("→ minted deployment %s (build %s)%s", sanitizeCell(dep.ID), sanitizeCell(dep.BuildID), mintedSourceClause(dep.Source))
 		return dep, exitOK
 	}
 
@@ -2142,6 +2244,14 @@ func renderSiteSettingsUpdated(out *writer, ref string, site cloudclient.SpawnSi
 	if site.DocType != "" {
 		out.outf("  content: %s", hzCell(site.DocType))
 	}
+	// W10 (ssw10-bl-prebuilt-enabled-no-read-path): the opt-in `--prebuilt-enabled`
+	// changes, echoed FROM THE STORED ROW. It was the one field this receipt could
+	// set and never show — and because it is a bool it is printed
+	// UNCONDITIONALLY, unlike the three strings above: a guard on "false" would
+	// reprint the exact silence this line exists to end, and a control plane that
+	// stored `false` when you sent `true` has to make this receipt read
+	// differently or the closing sentence below is a claim about a row nobody read.
+	out.outf("  prebuilt: %s", sitePrebuiltWord(site.PrebuiltEnabled))
 	out.outf("  (the values above are the row the control plane stored; they take effect on the next deploy — run `bp cloud site deploy %s`)", ref)
 }
 
@@ -2572,6 +2682,11 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 		"workspace": s.Workspace,
 		"project":   s.Project,
 		"dataset":   s.Dataset,
+		// W10: the off-box-build opt-in. A bool, so it is ALWAYS emitted — the
+		// guarded-on-empty treatment the string fields above get would make
+		// "this site builds on its box" indistinguishable from "this bp cannot
+		// read the flag", which is the state this key exists to end.
+		"prebuilt_enabled": s.PrebuiltEnabled,
 	}
 	// dr-w11: echoed only when the control plane sent it — an empty string means
 	// a CP that predates the field, and inventing "absent" for it would
@@ -2700,6 +2815,12 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 	if line := sitePublishTriggerLine(s.PublishTrigger); line != "" {
 		m["publish trigger"] = line
 	}
+	// W10: THE OFF-BOX-BUILD OPT-IN, on the read verb a site owner actually runs.
+	// Before this row the only way to learn the answer was to attempt a
+	// `--prebuilt` deploy and read the control plane's 422 — a read path whose
+	// price was a nonced, unusable deployment row. Unconditional for the bool
+	// reason stated on spawnSiteMap.
+	m["prebuilt"] = sitePrebuiltLine(s.PrebuiltEnabled)
 	// Runtime target + slot port (charter D62): a node site advertises the node-slot
 	// SSR runtime and the port its live process is bound to, so a user reading
 	// `status` sees it runs a process, not files. Shown for node sites only — a
