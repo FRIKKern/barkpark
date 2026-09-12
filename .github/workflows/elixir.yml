@@ -896,7 +896,7 @@ jobs:
           elixir-version: ${{ matrix.elixir }}
 
       - name: Cache deps (formatter only needs deps for import_deps)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: api/deps
           key: ${{ runner.os }}-mix-format-deps-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
@@ -1225,7 +1225,7 @@ jobs:
         run: bash scripts/test-env-leak-gate.sh
 
       - name: Cache deps
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             api/deps
@@ -1628,7 +1628,7 @@ jobs:
           elixir-version: ${{ matrix.elixir }}
 
       - name: Cache deps (dependency SOURCES)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: api/deps
           key: ${{ runner.os }}-mix-prod-deps-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
@@ -1667,7 +1667,7 @@ jobs:
       # and `mix deps.compile` would trust the manifests. Exact key or nothing.
       - name: Restore compiled dependency artifacts (prod)
         id: prod_dep_build
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: api/_build/prod/lib
           key: ${{ runner.os }}-mix-prod-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
@@ -1811,7 +1811,7 @@ jobs:
 
       - name: Save compiled dependency artifacts (prod)
         if: steps.depbuild_audit.outputs.mode == 'rebuild'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: api/_build/prod/lib
           key: ${{ runner.os }}-mix-prod-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
@@ -1860,7 +1860,7 @@ jobs:
           elixir-version: ${{ matrix.elixir }}
 
       - name: Cache deps
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             api/deps
