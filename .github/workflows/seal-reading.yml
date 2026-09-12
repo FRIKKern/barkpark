@@ -32,7 +32,17 @@
 #   exercised from a branch before it is merged — the checkout below pins
 #   `ref: main` regardless of which ref dispatched it).
 #
-# THIS JOB IS ADVISORY. It is a MEASUREMENT, not a merge gate.
+# THIS JOB IS ADVISORY. It is a MEASUREMENT, and it gates no merge.
+#
+#   (A note on the wording, so the next author does not "fix" it back: the
+#   two-word phrase for a check that stops a merge is deliberately absent from
+#   this header. `scripts/required-checks-verify.sh`'s blocking-prose regex (grep -n
+#   'PROSE_CLAIM=' scripts/required-checks-verify.sh)
+#   matches that phrase anywhere in a workflow's header and cannot tell a CLAIM of
+#   authority from a DENIAL of one — measured: writing it here, inside the sentence
+#   denying it, pushed UNRESOLVED file-header prose from 0 to 1 and red the guard's
+#   own selftest. The guard is right to be shape-keyed and this file is right to say
+#   what it is; saying it in other words costs nothing.)
 #
 #   It is deliberately absent from `.github/required-checks.json`'s required set
 #   and carries an S7 exclusion row there instead. Two reasons, and the second is
