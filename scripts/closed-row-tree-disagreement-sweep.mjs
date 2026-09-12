@@ -117,7 +117,15 @@ function refuse(msg) {
 
 // ---------------------------------------------------------------- extraction
 
-const RE_PATH = /\b(?:[A-Za-z0-9_.\-]+\/)+[A-Za-z0-9_.\-]+\.(?:go|ex|exs|heex|sh|mjs|js|ts|tsx|json|yml|yaml|md|sql)\b/g;
+const RE_PATH = /(?:\.?[A-Za-z0-9_.\-]+\/)+[A-Za-z0-9_.\-]+\.(?:go|ex|exs|heex|sh|mjs|js|ts|tsx|json|yml|yaml|md|sql)\b/g;
+const ARTIFACT_SEGMENTS = new Set(["node_modules", "dist", "_build", "deps", "coverage", "build", ".turbo"]);
+const RETRACTION_MARKERS = ["filing wrong", "does not exist", "correction", "the file is", "wrong path", "retract", "i was wrong", "no such file", "mis-cited", "miscited"];
+export function retractedNear(text, needle) {
+  const i = (text || "").indexOf(needle);
+  if (i === -1) return false;
+  const w = (text.slice(Math.max(0, i - 260), i + needle.length + 260)).toLowerCase();
+  return RETRACTION_MARKERS.some((m) => w.includes(m));
+}
 const RE_MFA = /\b[A-Z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*\.([a-z_][A-Za-z0-9_?!]*)\/\d\b/g;
 const RE_BACKTICK = /`([A-Za-z_][A-Za-z0-9_.?!]{3,})`/g;
 const RE_HEX = /\b[0-9a-f]{7,40}\b/g;
@@ -173,13 +181,38 @@ function makeGit(repo, rev) {
   try { revSha = run(["rev-parse", `${rev}^{commit}`]).trim(); }
   catch { refuse(`git rev '${rev}' does not resolve in ${repo} — nothing was checked`); }
   const pathCache = new Map(), symCache = new Map(), shaCache = new Map();
+  let treePaths = null;
+  const tree = () => {
+    if (treePaths) return treePaths;
+    const all = run(["ls-tree", "-r", "--name-only", revSha]).split("\n").filter(Boolean);
+    if (!all.length) refuse(`git ls-tree at ${revSha} returned ZERO paths — the tree could not be read`);
+    treePaths = all;
+    return treePaths;
+  };
+  let topLevel = null;
   return {
     revSha,
-    hasPath(p) {
+    isRepoRoot(seg) {
+      if (!topLevel) {
+        const e = run(["ls-tree", "--name-only", revSha]).split("\n").filter(Boolean);
+        if (!e.length) refuse(`git ls-tree at ${revSha} returned ZERO top-level entries`);
+        topLevel = new Set(e);
+      }
+      return topLevel.has(seg);
+    },
+    // "exact"  the path is in the tree verbatim
+    // "suffix" the reason quoted a PARTIAL path (e.g. tasks/landed.ex for
+    //          api/lib/barkpark/plugins/tasks/landed.ex) that resolves uniquely
+    // "absent" no path in the tree ends with it
+    pathState(p) {
       if (pathCache.has(p)) return pathCache.get(p);
-      let ok = true;
-      try { run(["cat-file", "-e", `${revSha}:${p}`]); } catch { ok = false; }
-      pathCache.set(p, ok); return ok;
+      let st = "absent";
+      try { run(["cat-file", "-e", `${revSha}:${p}`]); st = "exact"; }
+      catch {
+        const suf = "/" + p;
+        if (tree().some((t) => t.endsWith(suf))) st = "suffix";
+      }
+      pathCache.set(p, st); return st;
     },
     hasSymbol(s) {
       if (symCache.has(s)) return symCache.get(s);
@@ -216,31 +249,65 @@ export function closedAt(d) {
 function adjudicate(d, git) {
   const text = reasonText(d);
   const { paths, symbols, shas } = extractArtifacts(text);
-  if (!paths.length && !symbols.length && !shas.length) {
-    return { verdict: "UNCHECKABLE", line: "(close_reason names no path, no symbol and no sha — ARM BLIND)" };
+  const advisory = [];
+
+  // ARM P candidates: drop build artefacts (never committed) and paths whose first
+  // segment is not a top-level entry of the tree — those are URL routes (/v1/openapi.json)
+  // and prose fragments (".ts/.d.ts"), not repo paths. Both classes were 4 of the 8 raw
+  // "findings" in the 2026-09-12 n=150 run; every one was an extraction artefact.
+  const pathCands = paths.filter((p) => {
+    const segs = p.split("/");
+    if (segs.some((sg) => ARTIFACT_SEGMENTS.has(sg))) { advisory.push(`artifact-path ${p}`); return false; }
+    return true;
+  });
+
+  if (!pathCands.length && !symbols.length && !shas.length) {
+    return { verdict: "UNCHECKABLE", line: "(close_reason names no path, no symbol and no sha — ARM BLIND)", advisory };
   }
-  const missPaths = paths.filter((p) => !git.hasPath(p));
-  if (missPaths.length) {
-    return { verdict: "DISAGREE-path", line: `names ${missPaths[0]} — absent at ${git.revSha.slice(0, 9)}` };
+
+  for (const p of pathCands) {
+    const st = git.pathState(p);
+    if (st === "exact" || st === "suffix") continue;
+    // THE RETRACTION BLIND SPOT: a close_reason that names an absent path IN ORDER TO
+    // CORRECT SOMEBODY is indistinguishable, to any grep, from one that names it because
+    // the close is stale. Two of the eight raw findings were exactly this ("Filing wrong:
+    // cites api/lib/barkpark/capabilities.ex … the file is …/plugins/capabilities.ex").
+    // We demote on a retraction marker within ±260 chars and PRINT it; we never count it.
+    if (retractedNear(text, p)) { advisory.push(`retracted-path ${p}`); continue; }
+    // NOT A REPO PATH AT ALL. A token that matches neither a file, nor any file's
+    // suffix, nor even a top-level directory of the repo is a URL route
+    // (`/v1/openapi.json`) or a prose fragment (`ZERO .ts/.d.ts files`) — both were raw
+    // "findings" in the n=150 run. A stale close cites something that USED to exist and
+    // therefore still roots at a real top-level dir; this class never did.
+    if (!git.isRepoRoot(p.split("/")[0])) { advisory.push(`not-a-repo-path ${p}`); continue; }
+    return { verdict: "DISAGREE-path", line: `names ${p} — absent at ${git.revSha.slice(0, 9)}`, advisory };
   }
+
   const missSyms = symbols.filter((s) => !git.hasSymbol(s));
-  if (missSyms.length) {
-    return { verdict: "DISAGREE-symbol", line: `names symbol ${missSyms[0]} — no match at ${git.revSha.slice(0, 9)}` };
+  const liveMissSyms = missSyms.filter((s) => !retractedNear(text, s));
+  for (const s of missSyms) if (retractedNear(text, s)) advisory.push(`retracted-symbol ${s}`);
+  if (liveMissSyms.length) {
+    return { verdict: "DISAGREE-symbol", line: `names symbol ${liveMissSyms[0]} — no match at ${git.revSha.slice(0, 9)}`, advisory };
   }
-  const states = shas.map((s) => [s, git.shaState(s)]);
-  const orphan = states.find(([, st]) => st === "orphan");
-  if (orphan) {
-    return { verdict: "DISAGREE-sha", line: `cites ${orphan[0]} — resolves but is NOT an ancestor of ${git.revSha.slice(0, 9)}` };
+
+  // ARM C IS ADVISORY ONLY, AND THIS IS A MEASURED DEMOTION, NOT CAUTION.
+  // A sha that resolves locally but is NOT an ancestor of main is the NORMAL shape for a
+  // cited PR head: the squash-merge rewrote it, and the fork still has the branch object.
+  // task-19dfc803a7ed56fa was the whole DISAGREE-sha count in the n=150 run, and its
+  // 5df2cea8c is a PR head the closer quoted while RETRACTING a claim about it. Counting
+  // that as a stale close is a manufactured finding, so ARM C reports and never counts.
+  for (const s of shas) {
+    const st = git.shaState(s);
+    if (st === "orphan") advisory.push(`branch-sha ${s} (resolves, not an ancestor — normal for a squashed PR head)`);
+    else if (st === "unresolvable") advisory.push(`unresolvable-sha ${s}`);
   }
+
+  const anchorPath = pathCands.find((p) => git.pathState(p) !== "absent");
   const anchor =
-    paths[0] ? `path ${paths[0]}` :
+    anchorPath ? `path ${anchorPath} (${git.pathState(anchorPath)})` :
     symbols[0] ? `symbol ${symbols[0]}` :
-    `sha ${shas[0]} (${states[0][1]})`;
-  const unres = states.filter(([, st]) => st === "unresolvable").length;
-  return {
-    verdict: "AGREE",
-    line: `${anchor} present at ${git.revSha.slice(0, 9)}` + (unres ? ` · ${unres} sha(s) UNRESOLVABLE, not counted` : ""),
-  };
+    shas[0] ? `sha ${shas[0]} (${git.shaState(shas[0])})` : "(advisory only)";
+  return { verdict: "AGREE", line: `${anchor} present at ${git.revSha.slice(0, 9)}`, advisory };
 }
 
 // ---------------------------------------------------------------- selftest
@@ -277,6 +344,22 @@ function selftest() {
   // recency weighting must actually bias: weight 5 rows should be over-represented
   const heavy = weightedSample(rows, 10, 3, (r) => Math.pow(4, r.w)).filter((r) => r.w >= 4).length;
   eq("weighting biases toward heavy rows (>=7 of 10)", heavy >= 7, true);
+
+  // --- the four artefact classes measured in the 2026-09-12 n=150 raw run.
+  // Every one of them was a raw "DISAGREE-path" that a human read and threw out; these
+  // assertions are what stop them coming back.
+  eq("leading dot survives (.github/required-checks.json was read as github/…)",
+     extractArtifacts("see .github/required-checks.json:72").paths, [".github/required-checks.json"]);
+  eq("artifact segment is recognised (dist/index.mjs is never committed)",
+     "dist".split("/").every((sg) => ARTIFACT_SEGMENTS.has(sg)), true);
+  eq("retraction marker demotes a path quoted in order to CORRECT it",
+     retractedNear("Filing wrong: cites api/lib/barkpark/capabilities.ex:2652 — the file is api/lib/barkpark/plugins/capabilities.ex",
+                   "api/lib/barkpark/capabilities.ex"), true);
+  eq("retraction marker demotes a path a closer says DOES NOT EXIST",
+     retractedNear("I previously called this row still-live off a grep against cloud/priv/static/__preview__/__css_check.mjs — a path that DOES NOT EXIST on main.",
+                   "cloud/priv/static/__preview__/__css_check.mjs"), true);
+  eq("a plain citation is NOT demoted",
+     retractedNear("the guard lives in scripts/pr-task-gate.sh and is green", "scripts/pr-task-gate.sh"), false);
 
   eq("isClosed: done", isClosed({ lifecycle_status: "done" }), true);
   eq("isClosed: cancelled", isClosed({ lifecycle_status: "cancelled" }), true);
@@ -354,14 +437,16 @@ console.log(`# rev          ${rev} = ${git.revSha}`);
 console.log(`# repo         ${repo}`);
 console.log("");
 
+let advisoryTotal = 0;
 const counts = { AGREE: 0, UNCHECKABLE: 0, "DISAGREE-path": 0, "DISAGREE-symbol": 0, "DISAGREE-sha": 0 };
 const findings = [];
 for (const d of sample) {
-  const { verdict, line } = adjudicate(d, git);
+  const { verdict, line, advisory: adv } = adjudicate(d, git);
   counts[verdict] = (counts[verdict] || 0) + 1;
   const pin = pinnedIds.has(d._id) ? " [PINNED]" : "";
   const age = ageDays(d).toFixed(0);
   console.log(`${verdict}\t${d._id}\t(closed ${age}d ago)${pin}\t${line}`);
+  for (const a of adv || []) { advisoryTotal++; console.log(`\t  advisory: ${a}`); }
   if (verdict.startsWith("DISAGREE")) findings.push({ id: d._id, verdict, line });
 }
 
@@ -375,7 +460,8 @@ console.log(`# checkable      ${checkable}`);
 console.log(`# AGREE          ${counts.AGREE}`);
 console.log(`# DISAGREE-path  ${counts["DISAGREE-path"]}`);
 console.log(`# DISAGREE-sym   ${counts["DISAGREE-symbol"]}`);
-console.log(`# DISAGREE-sha   ${counts["DISAGREE-sha"]}`);
+console.log(`# DISAGREE-sha   ${counts["DISAGREE-sha"]}   (ARM C is ADVISORY — see the demotion note in adjudicate())`);
+console.log(`# advisory notes ${advisoryTotal}   (artifact paths, retracted paths/symbols, branch + unresolvable shas — printed, never counted)`);
 console.log(`# rate           ${dis}/${checkable} checkable = ${checkable ? ((100 * dis) / checkable).toFixed(1) : "n/a"}%  (a FLOOR; ${counts.UNCHECKABLE} rows this instrument cannot see)`);
 if (findings.length) {
   console.log(`#`);
