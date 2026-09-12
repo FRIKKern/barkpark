@@ -236,21 +236,40 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
 
     for title <-
           Enum.map(0..1, fn n -> "#{Enum.at(list_titles, title_offset + n)} #{uniq}" end) do
+      task_id = "rqb-lt-#{System.unique_integer([:positive])}"
+
       {:ok, _} =
         Content.create_document(
           "task",
           %{
-            "doc_id" => "rqb-lt-#{System.unique_integer([:positive])}",
+            "doc_id" => task_id,
             "title" => title,
-            "content" => %{
-              "kind" => "task",
-              "lifecycle_status" => "open",
-              "parent_id" => epic
-            }
+            "content" =>
+              Barkpark.LabelFixtures.with_labels(%{
+                "kind" => "task",
+                "lifecycle_status" => "open",
+                "parent_id" => epic,
+                # The `label_spine` publish gate requires a >=20-char
+                # `description` (and `with_labels` supplies the required weighted
+                # `tags`), exactly as the driven rows below satisfy it.
+                "description" => "Anonymous reader census task-list fixture row."
+              })
           },
           @dataset,
           scope
         )
+
+      # PUBLISH the task-list rows. The anonymous `/papers/:slug` reader resolves
+      # a live task-list under the PUBLISHED perspective — `reader_task_scope/1`
+      # hard-codes `published_only: true` (#17964, D5), so `docs_for_query/2`'s
+      # `maybe_published_only/2` conjunct drops every unpublished `drafts.<id>`
+      # row. This block is embedded in a PUBLISHED paper and the census below
+      # asserts an anonymous view renders "Collect crawler samples", so the two
+      # rows the block matches must themselves be published — a draft-only row is
+      # correctly invisible to an anonymous reader. #17964 applied exactly this
+      # fixture remedy to every other reader lock it touched but missed this file,
+      # leaving the task-list block resolving to zero rows here.
+      {:ok, _} = Content.publish_document(task_id, "task", @dataset, scope)
     end
 
     # The target: heading + paragraph + one query-carrying task-list block.

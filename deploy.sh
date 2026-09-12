@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# task-466aef17f2085404: this runs UNATTENDED over `ssh … 'bash -s'` with no tty.
+# Without GIT_TERMINAL_PROMPT=0 a git that wants a username (a private $REPO, an
+# expired token, git 2.34's protocol-v2 refusal — task-8a523f080fa406d2) HANGS on
+# a prompt nobody can answer until the ssh session dies, and the only trace is a
+# bare non-zero exit. Fail, never hang — and say WHICH call failed and why it
+# probably did. Every git network call below goes through bp_git; a test scans
+# this file for clone/pull/fetch and reds on one that does not.
+export GIT_TERMINAL_PROMPT=0
+# bp_git BEGIN
+bp_git() {
+  if ! git "$@"; then
+    echo "!! git $1 failed (GIT_TERMINAL_PROMPT=0, so no credentials were asked for): $*" >&2
+    echo "   likely cause: credentials (a private remote or an expired token) or the remote is unreachable." >&2
+    return 1
+  fi
+}
+# bp_git END
+
 # Barkpark — Server deployment
 #
 # Installs Erlang, Elixir (via ASDF), Go, and PostgreSQL directly on the server.
@@ -96,7 +114,7 @@ echo "   Database: $DB_NAME (user: $DB_USER)"
 # ── 3. ASDF + Erlang + Elixir ───────────────────────────────────────────────
 echo ">> Erlang + Elixir (via ASDF)..."
 if [ ! -d /root/.asdf ]; then
-  git clone https://github.com/asdf-vm/asdf.git /root/.asdf --branch v0.14.0
+  bp_git clone https://github.com/asdf-vm/asdf.git /root/.asdf --branch v0.14.0
   echo '. /root/.asdf/asdf.sh' >> /root/.bashrc
 fi
 export PATH="/root/.asdf/bin:/root/.asdf/shims:$PATH"
@@ -140,9 +158,9 @@ echo "   $(go version)"
 # ── 5. Clone repo ────────────────────────────────────────────────────────────
 echo ">> Cloning repo..."
 if [ -d "$APP_DIR" ]; then
-  cd "$APP_DIR" && git pull
+  cd "$APP_DIR" && bp_git pull
 else
-  git clone "$REPO" "$APP_DIR"
+  bp_git clone "$REPO" "$APP_DIR"
   cd "$APP_DIR"
 fi
 
@@ -325,34 +343,80 @@ ufw --force enable
 # It used to be taken and discarded: 30 failed probes fell through silently and
 # the "Barkpark is running!" banner printed unconditionally, exit 0. Never let
 # the banner outrun the probe again.
-# ---- 429 backoff, shared (task-90059c5c680f6665) ---------------------------
-# This script arrives over STDIN (`ssh root@VPS 'bash -s' < deploy.sh`, the usage
-# at the top), so $0 is `bash` and BASH_SOURCE names no file — there is no
-# sibling path to scripts/lib/bp-curl.sh. What DOES exist by now is the checkout
-# step 1 made: $APP_DIR, which this script cd'd into above.
+# ---- 429 backoff, INLINED (task-4526610517915589) ---------------------------
+# WHY THE SHARED HELPER scripts/lib/bp-curl.sh IS NOT SOURCED HERE.
+# BOTH copies of this file — the repo-root deploy.sh and the byte-identical
+# go:embedded copy at internal/cli/setup/assets/deploy.sh that the `bp` binary
+# streams into `ssh <host> '<env> bash -s'` (internal/cli/setup/deploy.go, fed
+# from assets.DeployScript) — arrive on the REMOTE over STDIN. The root copy's
+# own documented usage is `ssh root@VPS 'bash -s' < deploy.sh` (line 10). So in
+# both cases $0 is `bash`, BASH_SOURCE names no file, and there is no sibling
+# path to lib/ to source from. The only bp-curl.sh that can exist on the box is
+# whichever one step 1's clone of $REPO happened to bring — a version neither
+# this script nor the binary shipping it ever chose — and a bare `.` on a
+# missing file under `set -euo pipefail` would abort a PROVISIONING run at step
+# 11, a far worse outcome than an unhandled 429 on a localhost boot probe. So
+# the bounded loop is inlined here instead, keeping bp_curl_body's two
+# load-bearing properties: the status is captured BEFORE any branch, and the
+# wait comes FROM THE RESPONSE rather than a hardcoded sleep.
 #
-# Guarded, and the degrade is NAMED rather than silent: `.` on a missing file
-# under `set -euo pipefail` would abort a PROVISIONING run at step 11, which is a
-# far worse outcome than an unhandled 429 on a localhost boot probe. The shim
-# keeps -f's semantics, which is what this probe deliberately relies on (see the
-# comment on the probe itself).
-if [ -r "$APP_DIR/scripts/lib/bp-curl.sh" ]; then
-  # shellcheck disable=SC1091
-  . "$APP_DIR/scripts/lib/bp-curl.sh"
-else
-  echo ">> WARNING: $APP_DIR/scripts/lib/bp-curl.sh absent — the health probe below runs WITHOUT the shared 429 backoff" >&2
-  bp_curl_body() { curl -fsS "$@"; }
-fi
+# SUPERSEDES the guarded `. "$APP_DIR/scripts/lib/bp-curl.sh"` + no-backoff
+# `bp_curl_body() { curl -fsS "$@"; }` degrade shim that PR 17592
+# (task-90059c5c680f6665) put in the ROOT copy only. That arm is deliberately
+# NOT carried forward: its fallback silently ran the probe with NO backoff at
+# all, and it could only ever have reached the shared helper on a box whose
+# $REPO clone happened to carry it. The inline loop is unconditional and has
+# no external dependency, so the two copies can be byte-identical — which is
+# what `make cli-assets-check` and scripts/doctor.sh require. scripts/lib/bp-curl.sh
+# remains canonical for scripts that genuinely run FROM a checkout.
+HEALTH_429_ATTEMPTS="${HEALTH_429_ATTEMPTS:-4}"       # tries within ONE probe, first included
+HEALTH_429_MAX_WAIT_S="${HEALTH_429_MAX_WAIT_S:-5}"   # a longer ask is a quota, not a blip
+
+# bp_health_probe <url> — one health measurement, with 429 backed off INSIDE it
+# so backpressure is never counted as one of the $HEALTH_ATTEMPTS failed probes.
+# Exit semantics are `curl -fs`'s, so the caller below converts 1:1: 0 only on a
+# 2xx, 22 on any other status, curl's own rc on a transport failure, and nothing
+# on stdout. That -f semantics is the point of the probe — a booting or crashed
+# endpoint answering 500 is NOT read as healthy; the measurement is a good
+# answer, not merely an open socket.
+bp_health_probe() {
+  local url="$1" hdr attempt=1 code rc wait
+  hdr="$(mktemp "${TMPDIR:-/tmp}/bp-health.XXXXXX")" || return 1
+  while :; do
+    rc=0
+    # -w/-D, not -f: -f collapses every status into exit 22, which would make a
+    # 429 branch unreachable. Capture first, branch second.
+    code="$(curl -sS -D "$hdr" -w '%{http_code}' -o /dev/null "$url" 2>/dev/null)" || rc=$?
+    if [ "$rc" != 0 ]; then rm -f "$hdr"; return "$rc"; fi
+    case "$code" in
+      429) : ;;
+      2??) rm -f "$hdr"; return 0 ;;
+      *)   rm -f "$hdr"; return 22 ;;
+    esac
+    # Retry-After as the server sent it; absent or unparseable falls back to 1s.
+    # (Header only — this probe discards the body, so the envelope's nested
+    # error.details.retry_after that bp-curl.sh also reads is not available.)
+    wait="$(awk 'tolower($1)=="retry-after:"{x=$2;gsub(/\r/,"",x);v=x} END{if(v!="")print v}' "$hdr" 2>/dev/null)"
+    case "$wait" in ''|*[!0-9]*) wait=1 ;; esac
+    if [ "$wait" -gt "$HEALTH_429_MAX_WAIT_S" ]; then
+      echo "   rate limited (429): the server asked for ${wait}s, longer than this probe will ever wait (${HEALTH_429_MAX_WAIT_S}s) — reported unslept" >&2
+      rm -f "$hdr"; return 22
+    fi
+    if [ "$attempt" -ge "$HEALTH_429_ATTEMPTS" ]; then
+      echo "   rate limited (429): the ${HEALTH_429_ATTEMPTS}-attempt cap for one probe is spent" >&2
+      rm -f "$hdr"; return 22
+    fi
+    echo "   rate limited (429) — BACKPRESSURE, not a fault; waiting ${wait}s and retrying (attempt ${attempt} of ${HEALTH_429_ATTEMPTS})" >&2
+    sleep "$wait"
+    attempt=$((attempt + 1))
+  done
+}
 
 echo ">> Waiting for API on localhost:$APP_PORT..."
 HEALTHY=0
 for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
-  # bp_curl_body is the exact drop-in for the `curl -fs` this replaced: it
-  # captures the status FIRST and returns 22 — curl -f's own code — on any
-  # non-2xx. That -f semantics is the point of the probe: a booting or crashed
-  # endpoint answering 500 is NOT read as healthy; the measurement is a good
-  # answer, not merely an open socket. A 429 is now backed off rather than
-  # counted as one of the failed attempts.
+  # No 2>&1 here: the 429 backoff lines above are the only stderr this can
+  # produce, and swallowing them is how a rate limit became invisible.
   #
   # /status.json, NOT /api/schemas: the legacy route is mounted through
   # BarkparkWeb.Plugs.LegacyDeprecation and carries a published
@@ -361,7 +425,9 @@ for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
   # ANSWERING" at the end of every provisioning run. /status.json is
   # `pipe_through(:api)` only, needs no token, and is strictly stronger:
   # Status.health/0 runs a bare Repo.all/1, so a dead DB is a 500, not a 200.
-  if bp_curl_body -s "http://localhost:$APP_PORT/status.json" > /dev/null 2>&1; then
+  # The repo-root deploy.sh and the VENDORED copy bp ships to every provisioned
+  # box are byte-identical, so this retarget (PR 17819) is live in both.
+  if bp_health_probe "http://localhost:$APP_PORT/status.json" > /dev/null; then
     echo "   Ready! (probe $i/$HEALTH_ATTEMPTS)"
     HEALTHY=1
     break
