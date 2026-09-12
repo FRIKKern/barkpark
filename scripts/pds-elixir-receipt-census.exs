@@ -906,8 +906,6 @@ defmodule PDS.Census do
     {:live, "/w/:workspace_slug/p/:project_slug/studio/onixedit/ping", "Barkpark.Plugins.OnixEdit.PingLive", :index, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/studio/settings", "BarkparkWeb.Studio.SettingsLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/studio/tickets", "Barkpark.Plugins.Tickets.InboxLive", :index, :liveview_handle_event},
-    {:patch, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :update, :status_only_receipt},
-    {:patch, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :update, :status_only_receipt},
     {:patch, "/v1/chat/sessions/:id", "BarkparkWeb.ChatController", :update, :status_only_receipt},
     {:patch, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update, :status_only_receipt},
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update, :status_only_receipt},
@@ -943,8 +941,6 @@ defmodule PDS.Census do
     {:post, "/login/mfa", "BarkparkWeb.SessionController", :mfa, :status_only_receipt},
     {:post, "/login/reset", "BarkparkWeb.SessionController", :reset_request, :status_only_receipt},
     {:post, "/media/upload", "BarkparkWeb.MediaController", :upload, :status_only_receipt},
-    {:post, "/scim/v2/Groups", "BarkparkWeb.ScimGroupsController", :create, :status_only_receipt},
-    {:post, "/scim/v2/Users", "BarkparkWeb.ScimUsersController", :create, :status_only_receipt},
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
@@ -1086,8 +1082,6 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send, :status_only_receipt},
     {:post, "/w/:workspace_slug/v1/chat-hosts/enrollments", "BarkparkWeb.ChatHostController", :create_enrollment, :status_only_receipt},
     {:put, "/api/workspaces/:workspace_slug/media/blob/*path", "BarkparkWeb.MediaController", :put_blob, :status_only_receipt},
-    {:put, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :replace, :status_only_receipt},
-    {:put, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :replace, :status_only_receipt},
     {:put, "/v1/data/search/:dataset/settings", "BarkparkWeb.SearchController", :update_search_settings, :status_only_receipt},
     {:put, "/v1/media/:dataset/search/settings", "BarkparkWeb.V1.MediaController", :update_search_settings, :status_only_receipt},
     # THE THREE WAVE-39-RESIDUE ARRIVALS, 2026-09-02 (pds-w39-literal-receipt-residue).
@@ -1155,8 +1149,6 @@ defmodule PDS.Census do
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete} => {"BarkparkWeb.SchemaController.delete/2", 1, "108524343"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
     {:delete, "/w/:workspace_slug/v1/chat-hosts/:id", "BarkparkWeb.ChatHostController", :revoke} => {"BarkparkWeb.ChatHostController.revoke/2", 1, "131654882"},
-    {:patch, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :update} => {"BarkparkWeb.ScimGroupsController.update/2", 1, "36940354"},
-    {:patch, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :update} => {"BarkparkWeb.ScimUsersController.update/2", 1, "39755110"},
     {:patch, "/v1/chat/sessions/:id", "BarkparkWeb.ChatController", :update} => {"BarkparkWeb.ChatController.update/2", 1, "57469860"},
     {:patch, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update} => {"BarkparkWeb.V1.MediaController.update/2", 1, "92180591"},
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update} => {"BarkparkWeb.V1.MediaController.update/2", 1, "92180591"},
@@ -1173,8 +1165,6 @@ defmodule PDS.Census do
     {:post, "/login/mfa", "BarkparkWeb.SessionController", :mfa} => {"BarkparkWeb.SessionController.mfa/2", 1, "126433771"},
     {:post, "/login/reset", "BarkparkWeb.SessionController", :reset_request} => {"BarkparkWeb.SessionController.reset_request/2", 2, "114539261"},
     {:post, "/media/upload", "BarkparkWeb.MediaController", :upload} => {"BarkparkWeb.MediaController.upload/2", 2, "101512734"},
-    {:post, "/scim/v2/Groups", "BarkparkWeb.ScimGroupsController", :create} => {"BarkparkWeb.ScimGroupsController.create/2", 1, "126989276"},
-    {:post, "/scim/v2/Users", "BarkparkWeb.ScimUsersController", :create} => {"BarkparkWeb.ScimUsersController.create/2", 1, "114979114"},
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint} => {"BarkparkWeb.AccessController.mint/2", 1, "83944541"},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim} => {"BarkparkWeb.AccessController.claim/2", 2, "9774625"},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
@@ -1268,8 +1258,6 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send} => {"BarkparkWeb.WebhookController.test_send/2", 1, "64939389"},
     {:post, "/w/:workspace_slug/v1/chat-hosts/enrollments", "BarkparkWeb.ChatHostController", :create_enrollment} => {"BarkparkWeb.ChatHostController.create_enrollment/2", 1, "99965870"},
     {:put, "/api/workspaces/:workspace_slug/media/blob/*path", "BarkparkWeb.MediaController", :put_blob} => {"BarkparkWeb.MediaController.put_blob/2", 1, "79434187"},
-    {:put, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :replace} => {"BarkparkWeb.ScimGroupsController.replace/2", 1, "41824804"},
-    {:put, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :replace} => {"BarkparkWeb.ScimUsersController.replace/2", 1, "43223419"},
     {:put, "/v1/data/search/:dataset/settings", "BarkparkWeb.SearchController", :update_search_settings} => {"BarkparkWeb.SearchController.update_search_settings/2", 1, "27744156"},
     {:put, "/v1/media/:dataset/search/settings", "BarkparkWeb.V1.MediaController", :update_search_settings} => {"BarkparkWeb.V1.MediaController.update_search_settings/2", 1, "91283761"},
     {:put, "/v1/plugins/settings/:plugin_name", "BarkparkWeb.PluginSettingsController", :update} => {"BarkparkWeb.PluginSettingsController.update/2", 2, "131262955"},
@@ -1678,6 +1666,60 @@ defmodule PDS.Census do
       anchor_mfa: "BarkparkWeb.ScimUsersController.delete/2", def_fp: "19495067",
       verdict: "PROVEN", basis: :end_to_end_unmutated,
       note: "the match is `{:ok, _} =` over a raising Repo.delete! inside a transaction, so a failed deprovision cannot reach the 204."},
+    # ------------------------------------------------------------------ THE SIX SCIM
+    # WRITE ROUTES (pds-w39-status-only-receipts). They sat in @routed_excluded as
+    # :status_only_receipt — the wave-38 population hole, named by the wish as "the
+    # sharpest six": a real NON-ADMIN IdP write path behind `pipeline :scim` ->
+    # RequireScimToken whose success nobody in this lens had judged. THE LENS WAS NEVER
+    # WIDENED TO SWALLOW THEM. Not one of these actions spells `ok: true`, and none is
+    # made to: SCIM's receipt is the RESOURCE ITSELF (RFC 7644 §3.3/§3.5.2 — a 201 or 200
+    # carrying the created/updated resource representation), which no `ok: true` grep can
+    # ever key on. So they are disposed the way @roster exists to dispose things: by NAME,
+    # with a verdict and a basis from the SAME vocabulary the register uses, each attached
+    # to the DEF. The six @routed_excluded tuples and their six @exclusion_anchors entries
+    # are REMOVED in this same commit — ROUTED-DISPOSITION-UNSHADOWED reds on a committed
+    # exclusion row naming a member this run disposes ROSTERED (the precedent is the
+    # search_controller.ex correction/2 row above, which removed two).
+    %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
+      literal: "case Scim.provision_user(org, params) do",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.create/2", def_fp: "70214860",
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: {"api/test/barkpark_web/controllers/scim_users_controller_test.exs",
+                 "test \"provisions a confirmed user who can then log in (via magic-link)\" do"},
+      note: "THE RECEIPT IS THE RESOURCE, AND IT IS STORE-DERIVED. `render_user(conn, user)` renders the `user` bound out of `{:ok, user} <- Scim.provision_user(org, params)` — the row the write returned, never a literal and never a request echo; the ETag is `ScimResponse.version(user.updated_at)`, a stored column. Every non-ok arm of the same `case` renders a SCIM error (400 invalidValue), so the 201 is unreachable without a provisioned row."},
+    %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
+      literal: "with {:ok, patch} <- ScimPatch.classify(params) do",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.update/2", def_fp: "49888131",
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: {"api/test/barkpark_web/controllers/scim_users_controller_test.exs",
+                 "test \"PATCH active:false deprovisions (soft: revokes access, keeps the row)\" do"},
+      note: "THE ONE CLAUSE THAT COULD LIE IS THE ONE ALREADY REPAIRED. The deprovision arm's `active` used to be a literal `false` chosen by the clause, so the body was byte-identical whether the deprovision took or matched nothing; 501fb9670 (#8952, PDS-D503) replaced it with `Scim.org_user_active?(org, user)`, read back off the stored rows, and this file's own WORKED EXAMPLE block cites that repair. The other arm renders the resource fetched by `Scim.get_org_user(org, id)`. Body shape is judged by `ScimPatch.classify/1` BEFORE the resource is touched, so a refused PATCH cannot have half-applied."},
+    %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
+      literal: "def replace(conn, params), do: update(conn, params)",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.replace/2", def_fp: "1429186",
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note: "A PURE DELEGATE, AND THAT IS THE WHOLE ROW. `def replace(conn, params), do: update(conn, params)` renders nothing of its own: PUT /scim/v2/Users/:id reaches the receipt the row above judges. IT IS STILL CARRIED SEPARATELY rather than folded into that row, because @roster disposes BY DEF and the routed member is keyed on the :replace action — folding it would leave the PUT arrival undisposed. WHY UNJUDGED AND NOT PROVEN: the committed PUT cases (`a stale If-Match on PUT -> 412`, `a matching If-Match on PUT proceeds -> 200`) drive the route and assert the STATUS and the precondition, and neither reads a stored row back, so the end_to_end falsifier would refuse this row on its own citation. The delegate is judged as far as it goes and no further, and the gap is this sentence rather than a silence."},
+    %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
+      literal: "case Scim.create_group(org, params) do",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.create/2", def_fp: "9423216",
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+                 "test \"cross-org: a token for org A cannot grant membership to a user in org B\" do"},
+      note: "THE 201 ANSWERS OVER THE RECONCILIATION IT PERFORMED, NOT OVER THE REQUEST. `render_group(conn, group, Scim.group_member_ids(org, group), unmatched)` takes the group from `{:ok, group} <- Scim.create_group(org, params)` and the member list from a STORED read, and the `unmatched` set names the member ids the write refused — so a request member that matched nobody comes back as `unmatchedMembers`, never as a granted member. The cited case drives the cross-org shape where that distinction is load-bearing and asserts BOTH the receipt and the untouched stored rows."},
+    %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
+      literal: "with {:ok, patch} <- ScimPatch.classify(params) do",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.update/2", def_fp: "83845777",
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+                 "test \"membership changes are audited\" do"},
+      note: "RE-READ AFTER THE WRITES, BY CONSTRUCTION. `apply_patch/5` fetches the group BEFORE the member ops and then re-reads it — `group = Scim.get_org_group(org, id) || group` — with the comment PDS-D551 left there saying why: rendering the pre-fetched struct would answer for the PRE-mutation resource. Members come from `Scim.group_member_ids(org, group)`, a stored read, and ops that matched nobody are reported as `unmatchedMembers` rather than folded into a bare 200."},
+    %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
+      literal: "def replace(conn, %{\"id\" => id} = params) do",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.replace/2", def_fp: "28821606",
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+                 "test \"membership changes are audited\" do"},
+      note: "PUT is a REAL def here, not a delegate: it reads the group, guards the precondition, calls `Scim.update_group/3` then `Scim.replace_group_members/3`, and renders `updated` — the struct update_group RETURNED — beside `Scim.group_member_ids(org, updated)`, a stored read, and the `unmatched` set the reconciliation refused. The `{:error, :invalid_role}` arm cannot reach a 2xx. CITATION NOTE, SAID PLAINLY: the sharpest PUT witness is `PUT: full-replace answers over the reconciliation it actually performed`, which asserts the receipt AND `stored_roles/1` on both the granted and the reverted user; it reads the store through a same-file helper rather than a `Repo.` token in its own block, so this row cites the case whose read-back token is IN the block and the sharper case is named here instead of being claimed by a citation the falsifier could not open."},
     %{path: "api/lib/barkpark_web/controllers/session_controller.ex",
       literal: "Barkpark.Accounts.revoke_user_session_token(token)",
       anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "94722031",
@@ -11058,7 +11100,20 @@ defmodule PDS.Census do
       exit: 0,
       expect: [
         "RESPONSE-CARRIES-THE-READ — A HYPOTHESIS COLUMN, NEVER A VERDICT",
-        "barkpark_web/controllers/github_status_controller.ex:65  health: status_fun().()",
+        # RE-DERIVED, NEVER RE-TYPED (pds-w39-status-only-receipts). This read `:65` and
+        # the site has been at `:92` for some time: MEASURED on origin/main at 93672ef92,
+        # BEFORE this wave touched the file, a plain `elixir scripts/pds-elixir-receipt-
+        # census.exs` prints `REFUSED  barkpark_web/controllers/github_status_controller
+        # .ex:92  health: status_fun().()`, and the identical line comes back after. So
+        # this case was the ONLY red in `--selftest` on a clean checkout, and it was red
+        # for a LINE, not for a behaviour — the arm it guards (RCR-CAPTURE-FIRE-REDS,
+        # RCR-FIRE-SET-PINNED) passed throughout. IT IS THIS FILE'S OWN NAMED DEFECT
+        # WEARING THE SELFTEST'S COAT: a {path,line} key that rots silently while the
+        # thing it names is fine, which is exactly why the register's citations were
+        # migrated to CONTENT keys. The expectation is left line-anchored rather than
+        # migrated here because the string it matches is the census's OWN PRINTED OUTPUT,
+        # where the line is part of the claim being asserted.
+        "barkpark_web/controllers/github_status_controller.ex:92  health: status_fun().()",
         "PASS  RESPONSE-CARRIES-READ-REFUSES-CAPTURE",
         "PASS  RESPONSE-CARRIES-THE-READ-PINNED"
       ],
@@ -13573,7 +13628,7 @@ defmodule PDS.Census do
     if File.dir?(@test_root) do
       cache = %{}
 
-      {findings, _cache} =
+      {findings, cache} =
         classified
         |> resolve_register()
         |> Enum.reduce({[], cache}, fn {r, status, _site}, {acc, c} ->
@@ -13586,7 +13641,30 @@ defmodule PDS.Census do
           end
         end)
 
-      {:ran, findings}
+      # THE ROSTER LEG (pds-w39-status-only-receipts). Until this wave this arm walked
+      # @register ONLY, and @roster — the very list a routed member is disposed ROSTERED
+      # by — was never handed to a falsifier at all. A verdict nothing can refuse is the
+      # shape this epic exists to refuse, so a roster row that carries a `{path, marker}`
+      # citation is now judged by the SAME check_row_basis/2, with the same tiers and the
+      # same refusals. THIS IS NOT A WIDENING THAT HIDES ANYTHING: it can only ADD
+      # refusals, it touches no disposition, and it cannot move a member out of
+      # :status_only_receipt.
+      #
+      # WHY `evidence`-BEARING ROWS ONLY, AND WHY THE REST ARE PRINTED RATHER THAN
+      # SWALLOWED: the committed roster predates the citation vocabulary and four of its
+      # rows carry a cited basis with the witness named in PROSE, in `note:`. Redding them
+      # here would refuse GENUINE judgments for a bookkeeping reason and the cheapest
+      # repair a reader would reach for is to weaken the basis — the demotion this file
+      # names as the defect. They are instead COUNTED AND NAMED by roster_uncited/0 in the
+      # BASIS FALSIFIERS block, so the gap is a printed fact with a worklist attached.
+      {roster_findings, _cache} =
+        roster_cited_rows()
+        |> Enum.reduce({[], cache}, fn r, {acc, c} ->
+          {f, c} = check_row_basis(r, c)
+          {acc ++ f, c}
+        end)
+
+      {:ran, findings ++ roster_findings}
     else
       :no_test_tree
     end
@@ -13794,6 +13872,20 @@ defmodule PDS.Census do
 
   defp finding(r, tier, why), do: %{key: r.key, basis: r.basis, tier: tier, why: why}
 
+  # A ROSTER ROW HAS NO `key`. It is keyed by {file, anchor_mfa}, which is what the
+  # refusal lines print, so a refusal names the def and not a register coordinate.
+  defp roster_key(r), do: Map.put(r, :key, {r.path, r.anchor_mfa})
+
+  defp roster_cited_rows do
+    for r <- @roster, r.basis in @cited_bases, Map.has_key?(r, :evidence), do: roster_key(r)
+  end
+
+  # NAMED, NEVER TOTALLED. A roster row whose basis dispatches through the citation arm
+  # but which carries no `{path, marker}` — its witness lives in `note:` prose only.
+  defp roster_uncited do
+    for r <- @roster, r.basis in @cited_bases, not Map.has_key?(r, :evidence), do: r
+  end
+
   # THE CITED BLOCK PLUS ITS HELPERS, ONE LEVEL DEEP. The block runs from the cited line to
   # the `end` at its own indentation (capped, because a runaway scan would swallow the file
   # and green everything).
@@ -13913,6 +14005,22 @@ defmodule PDS.Census do
         Enum.each(advisory, fn f ->
           p("      CONTRADICTION  #{short(elem(f.key, 0))} #{elem(f.key, 1)}  [#{f.basis}] #{f.why}")
         end)
+
+        uncited = roster_uncited()
+        walked = length(roster_cited_rows())
+
+        p("      ROSTER LEG: #{walked} of #{Enum.count(@roster)} roster row(s) walked by this arm —")
+        p("      a row is walked when its basis dispatches through the citation arm AND it")
+        p("      carries a `{path, marker}` citation the arm can open.")
+
+        if uncited != [] do
+          p("      ROSTER ROWS WITH A CITED BASIS AND NO CITATION, NAMED rather than counted")
+          p("      (their witness is named in `note:` prose, which no script can open):")
+
+          Enum.each(uncited, fn r ->
+            p("        #{short(r.path)} #{r.anchor_mfa}  [#{r.basis}]")
+          end)
+        end
 
         if findings == [], do: p("      none — every decidable falsifier holds")
         p("")
