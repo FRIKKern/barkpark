@@ -17,8 +17,6 @@ defmodule Barkpark.Content.Errors do
     "cors_forbidden" =>
       "Add this origin to the dataset's allowed origins, or call from a server-side token instead.",
     "csrf_required" => "Add the x-requested-with header to cookie-authenticated mutations.",
-    "schema_unknown" =>
-      "Register a schema for this type via POST /v1/schemas/:dataset before writing documents of it.",
     "rev_mismatch" => "Re-fetch the document, then retry with its current _rev in ifRevisionID.",
     "precondition_failed" =>
       "Re-fetch the document and retry with the current revision — it changed under you.",
@@ -562,9 +560,6 @@ defmodule Barkpark.Content.Errors do
       message: "cookie-authenticated mutation requires the x-requested-with header",
       status: 403
     }
-
-  defp build({:error, :schema_unknown}),
-    do: %{code: "schema_unknown", message: "no schema for type", status: 404}
 
   defp build({:error, :rev_mismatch}),
     do: %{code: "rev_mismatch", message: "document was modified by another writer", status: 409}
