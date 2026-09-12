@@ -2583,7 +2583,47 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Web gate"
         --expect-unrendered "Dispatch (web paths)"
         --expect-unrendered "Web path-escape ratchet"
-        --expect-unrendered "place-directory install.sh read-back claims")
+        --expect-unrendered "place-directory install.sh read-back claims"
+        # ── 2026-09-12 (task-32fe5f327e91f23d): the FULL unaccounted set, derived
+        # over the 25 most recent merged PR heads rather than the ONE head
+        # `--ci` samples. `Required-check spec drift (advisory)` was red on main
+        # and on every head naming a DIFFERENT five-to-seven of these per run,
+        # because census_check reads a single head and each of these workflows
+        # renders on a different slice of the population — so "six names" was
+        # never the size of the gap, it was the size of one sample. Causes are
+        # the three the blocks above enumerate: nine paths-filtered workflows
+        # (shell-harnesses, astro-search-finder-test, vendored-assets, paper-rig,
+        # hundesteder, research-coverage-suite, web-fork-drift), two workflows
+        # that are UNFILTERED but skip their product job behind a job-level `if:`
+        # (cli-release-cadence, posix-vacuous-green-census), and one SKIPPED-SHAPE
+        # twin (cloud.yml `census` renders a matrix-suffixed second name).
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
+        # exactly these eighteen as MISSING ACK_EX before they were typed here.
+        --expect-unrendered "an open review holds a PR from the unattended merge sweep"
+        --expect-unrendered "bp CLI release cadence"
+        --expect-unrendered "Browser-token build guard (both editions)"
+        --expect-unrendered "cadence — did the CLI's shipped surface move?"
+        --expect-unrendered "census — did the population's inputs move?"
+        --expect-unrendered "Cloud reader-corpus census (27.0, 1.18.1)"
+        --expect-unrendered "deploy.sh ↔ embedded asset in sync"
+        --expect-unrendered "every workflow's main verdict (roll-up denominator + grace window)"
+        --expect-unrendered "exit-laundering predicate (planted controls, both directions)"
+        --expect-unrendered "Finder seed-shape contract"
+        --expect-unrendered "media-smoke / pdf-proof principal-gate matrices"
+        --expect-unrendered "POSIX vacuous-green census"
+        --expect-unrendered "Render rig (gate.sh)"
+        --expect-unrendered "sunset-route health consumers survive 2027-01-01"
+        --expect-unrendered "Test + typecheck + build"
+        --expect-unrendered "tooling/{aesthetics,ergonomics,risk} node --test suite + tooling/pds gate"
+        --expect-unrendered "tooling/research-coverage node --test suite"
+        --expect-unrendered "web <-> search-starter named invariants (advisory)"
+        # Four more, same day and the same mechanism: they render on ONE of
+        # the 30 sampled heads (#17963), which is why the first pass of this
+        # census over 25 heads did not see them at all.
+        --expect-unrendered "Astro finder byte-identity"
+        --expect-unrendered "Finder unit specs (dep-free, no browser)"
+        --expect-unrendered "Journey smoke — self-test (fixtures, no network)"
+        --expect-unrendered "Journey smoke — live demo (report mode, never gates)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
