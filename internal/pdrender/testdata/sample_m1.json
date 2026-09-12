@@ -21,7 +21,7 @@
     {
       "id": "code1",
       "type": "code",
-      "language": "go",
+      "lang": "go",
       "code": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello, bulldocs\")\n}"
     },
     {
