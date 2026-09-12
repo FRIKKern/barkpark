@@ -345,12 +345,16 @@ ufw --force enable
 # the banner outrun the probe again.
 # ---- 429 backoff, INLINED (task-4526610517915589) ---------------------------
 # WHY THE SHARED HELPER scripts/lib/bp-curl.sh IS NOT SOURCED HERE.
-# This file is the go:embedded copy that the `bp` binary streams into
-# `ssh <host> '<env> bash -s'` (internal/cli/setup/deploy.go:78, fed from
-# assets.DeployScript). It arrives on the REMOTE over STDIN, so $0 is `bash`,
-# BASH_SOURCE names no file, and there is no sibling path to lib/ to source
-# from. The only bp-curl.sh that can exist on the box is whichever one step 1's
-# clone of $REPO happened to bring — a version this binary never chose — and a
+# This script exists as two byte-identical copies — this repo-root canonical one
+# and its go:embedded twin at internal/cli/setup/assets/deploy.sh (`make
+# cli-assets-sync`, guarded by the single `cmp` in `make cli-assets-check`) — and
+# BOTH are streamed into `ssh <host> '<env> bash -s'` over STDIN: by hand from a
+# checkout (the usage at the top of this file) and by the `bp` binary from the
+# embedded twin (internal/cli/setup/deploy.go:78, fed from assets.DeployScript).
+# Either way it arrives on the REMOTE over STDIN, so $0 is `bash`, BASH_SOURCE
+# names no file, and there is no sibling path to lib/ to source from. The only
+# bp-curl.sh that can exist on the box is whichever one step 1's clone of $REPO
+# happened to bring — a version neither copy of this script chose — and a
 # bare `.` on a missing file under `set -euo pipefail` would abort a
 # PROVISIONING run at step 11, a far worse outcome than an unhandled 429 on a
 # localhost boot probe. So the bounded loop is inlined here instead, keeping
@@ -412,8 +416,9 @@ for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
   # ANSWERING" at the end of every provisioning run. /status.json is
   # `pipe_through(:api)` only, needs no token, and is strictly stronger:
   # Status.health/0 runs a bare Repo.all/1, so a dead DB is a 500, not a 200.
-  # This file is the VENDORED copy bp ships to every provisioned box; the root
-  # deploy.sh carries the same retarget (PR 17819).
+  # Both copies of this script carry the same retarget (PR 17819): this
+  # repo-root canonical one, and the vendored twin bp ships to every
+  # provisioned box.
   if bp_health_probe "http://localhost:$APP_PORT/status.json" > /dev/null; then
     echo "   Ready! (probe $i/$HEALTH_ATTEMPTS)"
     HEALTHY=1
