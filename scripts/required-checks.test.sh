@@ -2616,7 +2616,14 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Test + typecheck + build"
         --expect-unrendered "tooling/{aesthetics,ergonomics,risk} node --test suite + tooling/pds gate"
         --expect-unrendered "tooling/research-coverage node --test suite"
-        --expect-unrendered "web <-> search-starter named invariants (advisory)")
+        --expect-unrendered "web <-> search-starter named invariants (advisory)"
+        # Four more, same day and the same mechanism: they render on ONE of
+        # the 30 sampled heads (#17963), which is why the first pass of this
+        # census over 25 heads did not see them at all.
+        --expect-unrendered "Astro finder byte-identity"
+        --expect-unrendered "Finder unit specs (dep-free, no browser)"
+        --expect-unrendered "Journey smoke — self-test (fixtures, no network)"
+        --expect-unrendered "Journey smoke — live demo (report mode, never gates)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
