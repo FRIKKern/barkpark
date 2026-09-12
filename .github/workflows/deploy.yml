@@ -1799,13 +1799,26 @@ jobs:
     # `api/**`, so judging it against the union would file a fabricated outage
     # every time an api-only merge lands.
     #
-    # THE CONTROL PLANE IS CHECKED EVEN WHEN ITS LEG SKIPPED, and that is the
-    # widening that catches the original incident. `/health` is public and
-    # anonymous, so the read costs nothing and needs no credential — and a box
-    # that nothing deployed is precisely the box this row is about. The content
-    # instance cannot be checked that way (its served sha is read over the SSH
-    # the instance job holds), so when that leg did not run this job says
-    # UNCHECKED out loud rather than counting silence as green.
+    # BOTH BOXES ARE CHECKED EVEN WHEN THEIR LEG SKIPPED, and that is the
+    # widening that catches the original incident. A box that nothing deployed
+    # is precisely the box this row is about, so a job that declines to look at
+    # it is blind in the one scenario it was built for. Both reads are public
+    # and anonymous and cost no credential: the control plane answers GET
+    # /health `git_sha`, and the content instance answers GET /status.json
+    # `commit` — public since #6422 and already the reader #13829 put on the
+    # instance job's own served-commit assertion.
+    #
+    # This job USED to read the instance's served sha from the instance leg's
+    # `served_sha` job output, which that job produces over the SSH it holds.
+    # That value exists only when the leg RAN, so the job printed UNCHECKED for
+    # the content box in exactly the strand case. The public endpoint removes
+    # that hole and deletes the second reader of the same fact. The `served_sha`
+    # output itself STAYS — record-delivery still anchors its row on it, and is
+    # now the ONLY consumer of it in this workflow; what is gone is this job's
+    # duplicate read.
+    #
+    # Silence is still never green: unreachable, or an answer carrying no
+    # commit, is UNCHECKED, which the adjudicator treats as a withheld verdict.
     #
     # IT CAN FAIL, AND THAT IS THE POINT (task-103b5cc5ec4a8ccd). Until
     # 2026-09-06 this job printed `converged=false` and exited 0 unconditionally,
@@ -1863,7 +1876,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CP_RESULT: ${{ needs.control-plane.result }}
           INSTANCE_RESULT: ${{ needs.instance.result }}
-          INSTANCE_SERVED_SHA: ${{ needs.instance.outputs.served_sha }}
         run: |
           # shellcheck disable=SC1091
           . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
@@ -1925,24 +1937,36 @@ jobs:
           fi
           echo "::endgroup::"
 
-          # ── THE CONTENT INSTANCE: only when its leg reported a served sha ──
+          # ── THE CONTENT INSTANCE: always, because /status.json is public ──
+          # The leg result is PRINTED, never branched on. A skipped instance leg
+          # is the strand case, not a reason to stop looking.
+          #
+          # `jq -er '.commit // empty'` is #13829's idiom, for its reason: plain
+          # `jq -r '.commit'` prints the literal four-character string `null`
+          # for an absent or null key, and that string would reach resolve() as
+          # if it were a sha. `// empty` makes the miss empty, and the empty
+          # string is what the UNCHECKED arm below is keyed on.
+          #
+          # `commit` is a NINE-character short sha. deploy-convergence-check.sh
+          # resolve() accepts 7-64 hex and this job checks out with
+          # fetch-depth 0, so it resolves.
           echo "::group::content instance"
-          if [ "$INSTANCE_RESULT" != "success" ]; then
-            echo "the instance leg did not run in this deploy (result=${INSTANCE_RESULT}) — UNCHECKED."
-            echo "Its served sha is readable only over the SSH that job holds, so silence here is"
-            echo "an absence of evidence and is reported as one, never as a green."
-            detail="${detail}instance: UNCHECKED (leg ${INSTANCE_RESULT}). "
-          elif [ -z "$INSTANCE_SERVED_SHA" ]; then
-            echo "::warning::the instance leg succeeded but reported no served sha — UNCHECKED, not green"
-            detail="${detail}instance: UNCHECKED (no served sha). "
+          echo "instance leg result=${INSTANCE_RESULT} — the served commit is read from the public endpoint either way"
+          inst_sha=""
+          if body="$(bp_curl_body -s --max-time 15 https://guerrilla.barkpark.cloud/status.json)"; then
+            inst_sha="$(printf '%s' "$body" | jq -er '.commit // empty' 2>/dev/null)" || inst_sha=""
+          fi
+          if [ -z "$inst_sha" ]; then
+            echo "::warning::the content instance did not say what it serves — UNCHECKED, not green"
+            detail="${detail}instance: UNCHECKED (/status.json gave no commit). "
           else
             bash scripts/deploy-convergence-check.sh converged \
               --label "content instance (guerrilla)" --target instance \
-              --served "$INSTANCE_SERVED_SHA" --tip "$TIP" $OWED_ARGS
+              --served "$inst_sha" --tip "$TIP" $OWED_ARGS
             case $? in
               0) detail="${detail}instance: converged. " ;;
               1) converged=false
-                 detail="${detail}instance: STRANDED (serving ${INSTANCE_SERVED_SHA}). " ;;
+                 detail="${detail}instance: STRANDED (serving ${inst_sha}). " ;;
               *) echo "::warning::the instance comparison could not be made — UNCHECKED, not green"
                  detail="${detail}instance: UNCHECKED (the comparison refused). " ;;
             esac
