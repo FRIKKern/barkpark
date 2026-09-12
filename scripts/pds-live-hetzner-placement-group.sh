@@ -112,6 +112,9 @@ SELF="$(basename "$0")"
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(cd -P -- "$SCRIPT_DIR/.." && pwd)"
 
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/pds-live-lib.sh"   # the vocabulary both pds-live L1 runners share (pds-bl-live-runners-duplicated)
+
 HZ_API="${PDS_LIVE_HZ_API:-https://api.hetzner.cloud/v1}"
 PG_PREFIX="${PDS_LIVE_PG_PREFIX:-pds-live-w30-}"
 ART="${PDS_LIVE_ART:-/tmp/pds-live-w30.$$}"
@@ -143,18 +146,6 @@ mkdir -p "$ART"
 HZ_LIST_ART="$ART/list.$$.json"
 HZ_COUNT_ART="$ART/count.$$.json"
 
-# ── vocabulary ───────────────────────────────────────────────────────────────
-#
-# Three outcomes, and the refusal is a first-class one. "REFUSE" is the word; a
-# quiet no-op has no spelling in this script on purpose.
-
-say()    { printf '%s\n' "$*"; }
-step()   { printf '\n== %s\n' "$*"; }
-ok()     { printf '  PASS    %s\n' "$*"; }
-refuse() { printf '\n%s: REFUSE — %s\n' "$SELF" "$*" >&2; exit 3; }
-failed() { printf '\n%s: FAIL — %s\n' "$SELF" "$*" >&2; exit 1; }
-usage()  { printf '%s: %s\n' "$SELF" "$*" >&2; exit 2; }
-
 # art_reap RC — the artifact-dir rule above, applied once, by the owner only.
 # It is armed as an EXIT trap immediately below so it covers refuse/failed/usage
 # too. run() and --selftest-probe REPLACE that trap with `cleanup`, which calls
@@ -180,21 +171,6 @@ stub_server_reap() {
   art_reap "$rc"
 }
 
-# jsonq FILE EXPR — evaluate a python expression over the parsed body `d`.
-# Exits non-zero if the body is not JSON at all, which is itself an assertion.
-jsonq() {
-  python3 -c '
-import sys, json
-try:
-    d = json.load(open(sys.argv[1]))
-except Exception as e:
-    sys.stderr.write("not JSON: %s\n" % e)
-    sys.exit(9)
-v = eval(sys.argv[2])
-print("" if v is None else v)
-' "$1" "$2"
-}
-
 # ── the bp under proof ───────────────────────────────────────────────────────
 #
 # BUILT FROM THIS WORKTREE, never the installed binary. /Users/pelle/.local/bin/bp
@@ -203,7 +179,6 @@ print("" if v is None else v)
 # prove nothing about the apparatus this epic built. So the runner refuses a tree
 # that predates the apparatus rather than measuring the wrong program.
 
-BP=""
 
 # The check is on the SYMBOLS, searched across internal/cli — never on one file
 # path holding one spelling. The first draft grepped the literal `func
@@ -224,18 +199,6 @@ apparatus_or_refuse() {
   [ -z "$missing" ] || refuse "this tree predates the destroy apparatus (missing:$missing). A live run through pre-fence code proves nothing about the receipt under test."
 }
 
-build_bp() {
-  if [ -n "${PDS_LIVE_BP:-}" ]; then
-    BP="$PDS_LIVE_BP"
-    [ -x "$BP" ] || refuse "PDS_LIVE_BP=$BP is not executable"
-    return 0
-  fi
-  apparatus_or_refuse
-  [ -d "$REPO_ROOT/cmd/barkpark" ] || refuse "no $REPO_ROOT/cmd/barkpark — note ./cmd/bp DOES NOT EXIST; the binary's package is cmd/barkpark"
-  BP="$ART/bp"
-  ( cd "$REPO_ROOT" && CC="${CC:-/usr/bin/clang}" "$GO_BIN" build -o "$BP" ./cmd/barkpark ) \
-    || refuse "go build ./cmd/barkpark failed — refusing to prove anything with a binary this worktree could not produce"
-}
 
 # ── PREFLIGHT: gate on bp's OWN resolution, never on an env-var name ──────────
 #
@@ -1153,21 +1116,6 @@ dr_case() {
   return 0
 }
 
-st_case() { # label expect-rc env… -- (runs $0 --preflight)
-  local label="$1" want="$2"; shift 2
-  local out="$ART/selftest.$$.out" rc=0
-  set +e
-  env "$@" "$0" --preflight >"$out" 2>&1
-  rc=$?
-  set -e
-  local verdict="PASS"
-  [ "$rc" = "$want" ] || { verdict="FAIL"; ST_FAIL=1; }
-  printf '  %-6s %-58s rc=%s (want %s)\n' "$verdict" "$label" "$rc" "$want"
-  printf '         %s\n' "$(grep -Eo 'REFUSE — [^.]*\.|CREDENTIAL RUNG THAT PAID: .*' "$out" | head -1 | cut -c1-120)"
-  ST_LAST_OUT="$out"
-  return 0
-}
-
 # the four mutation blocks - SHARED by --selftest and --selftest-offline.
 #
 # They need no credential and no network, which is exactly why PDS-D439 could
@@ -1217,8 +1165,13 @@ mutation_blocks() {
   # command file but no apparatus, and the runner must refuse to build from it.
   local pre="$ART/pre-apparatus"
   rm -rf "$pre"
-  mkdir -p "$pre/scripts" "$pre/internal/cli" "$pre/cmd/barkpark"
+  mkdir -p "$pre/scripts/lib" "$pre/internal/cli" "$pre/cmd/barkpark"
   cp "$0" "$pre/scripts/$SELF"
+  # The runner is TWO files since the vocabulary was extracted: it sources
+  # scripts/lib/pds-live-lib.sh relative to itself. A staged tree holding only
+  # the runner would fail to source and exit 1 — which would look like "the
+  # apparatus check did not refuse" when the check never ran at all.
+  cp "$SCRIPT_DIR/lib/pds-live-lib.sh" "$pre/scripts/lib/pds-live-lib.sh"
   printf 'package cli\n\n// pre-apparatus stand-in: a hetzner command file with no post-read.\n' \
     >"$pre/internal/cli/hetzner_lb_cmd.go"
   printf 'package main\n\nfunc main() {}\n' >"$pre/cmd/barkpark/main.go"
