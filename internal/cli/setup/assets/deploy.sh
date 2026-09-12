@@ -413,7 +413,7 @@ for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
   # `pipe_through(:api)` only, needs no token, and is strictly stronger:
   # Status.health/0 runs a bare Repo.all/1, so a dead DB is a 500, not a 200.
   # This file is the VENDORED copy bp ships to every provisioned box; the root
-  # deploy.sh carries the same retarget (PR #17819).
+  # deploy.sh carries the same retarget (PR 17819).
   if bp_health_probe "http://localhost:$APP_PORT/status.json" > /dev/null; then
     echo "   Ready! (probe $i/$HEALTH_ATTEMPTS)"
     HEALTHY=1
