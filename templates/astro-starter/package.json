@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@barkpark/core": "1.0.0-preview.3",
-    "astro": "^7.0.0"
+    "astro": "^7.3.1"
   },
   "engines": {
     "node": ">=20"
