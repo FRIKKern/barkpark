@@ -87,8 +87,10 @@
 //  declaration instead of the sweep, and shrinking the real width loop would
 //  leave it green. Shrink WIDTHS and this leg exits 2 — that is the test.
 //
-//  COMMENT-STRIPPING IS LOAD-BEARING, NOT HYGIENE. app.css:2131 contains the
-//  string "@media (max-width: 720px) shell fold" INSIDE a CSS comment.
+//  COMMENT-STRIPPING IS LOAD-BEARING, NOT HYGIENE. app.css names
+//  `@media (max-width: 720px)` INSIDE a CSS comment — re-derive the specimen with
+//  grep -n 'NOT TOUCHED, DELIBERATELY' app.css (a bare `grep -n 'shell fold'`
+//  is NOT unique: it returns several, two of which also carry the breakpoint).
 //  MEASURED ON THIS TREE (cch-w16-s2 corrected these — the previous three
 //  numbers had rotted to 21/20/20 while the file was edited around them):
 //  `grep -c '@media' app.css` says 23; comment-stripped it is 21; the CSSOM
@@ -198,7 +200,9 @@
 //      SHELL_CHROME_SELECTORS below (cch-w24-bl-q3-fold-budget-is-a-shell-
 //      property-at-320).
 //
-//  DO NOT RAISE app.css:4241. Wave 13 measured that raising the shell fold
+//  DO NOT RAISE THE SHELL FOLD's `.sidebar` cap — the `max-height: calc(40vh -
+//  60px)` declaration inside `@media (max-width: 720px)`; re-derive with
+//  grep -n 'max-height: calc(40vh - 60px);' app.css. Wave 13 measured that raising it
 //  RELOCATES the cliff and exports a 746px nav wall to every tablet.
 //
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1864,7 +1868,7 @@ function legA() {
 
   const rawMedia = (css.match(/@media/g) || []).length;
   out(`>> source     ${rel(CSS_PATH)} · ${rel(HTML_PATH)}\n`);
-  out(`>> @media     ${rep.preludes.length} preludes (comment-stripped; the raw grep counts ${rawMedia} — app.css:2131 names a breakpoint INSIDE a comment)\n`);
+  out(`>> @media     ${rep.preludes.length} preludes (comment-stripped; the raw grep counts ${rawMedia} — app.css names a breakpoint INSIDE a comment: grep -n 'NOT TOUCHED, DELIBERATELY' app.css)\n`);
   out(`>> axis       ${rep.breakpoints.length} breakpoints [${rep.breakpoints.join(",")}] -> ${rep.widths.length} boundary widths [${rep.widths.join(",")}]\n`);
   out(`>> screens    ${rep.views.length} registered views · ${rep.cells} scenario x route cells covering ${COVERED_VIEWS.length}\n`);
   out(`>> themes     derived [${rep.themes.derived.join(",")}] vs declared [${rep.themes.declared.join(",")}] — COVERAGE, NOT YIELD: ` +
