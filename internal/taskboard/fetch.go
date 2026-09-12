@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,7 +88,140 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 // lifecycle_counts do not, D115). The filter param is read optionally by the
 // controller — an older server ignores it and answers the full window, which
 // the union dedup (mergeInflight) degrades to window-truth, never garbage.
-const inflightFetchPath = "/v1/tasks?lifecycle_status=in_progress&limit=1000"
+const inflightFetchPath = "/v1/tasks?lifecycle_status=in_progress&limit=" + taskListLimitToken
+
+// ─── exhaustive keyset paging (task-6c59bff7cb6b36ee) ────────────────────
+//
+// listFetchPath is the board's corpus GET. It is the ONE place the window
+// limit is spelled, so the paging walk below and the limit can never disagree.
+const (
+	taskListLimit      = 1000
+	taskListLimitToken = "1000"
+	listFetchPath      = "/v1/tasks?limit=" + taskListLimitToken
+)
+
+// maxTaskPages bounds the walk. A cursor walk is skip-free over a stable
+// corpus, but the key it seeks on (updated_at) is MUTABLE: a row written
+// mid-walk re-stamps updated_at and rotates ahead of the cursor, so a server
+// under continuous write load could in principle hand out tokens forever.
+// 64 pages x 1000 rows is ~64k tasks — two orders of magnitude above the live
+// corpus — and hitting it does NOT truncate silently: the walk reports
+// exhaustive=false, which keeps mergeForward's conservative absence heuristic
+// armed for exactly the rows the walk may have missed.
+const maxTaskPages = 64
+
+// fetchTaskPages walks GET /v1/tasks to EXHAUSTION over the route's keyset
+// cursor, and reports whether the corpus it returns is complete.
+//
+// WHY (task-6c59bff7cb6b36ee). The board used to issue ONE `?limit=1000` GET
+// and take the answer as the whole world. Over a corpus bigger than the clamp
+// the fetch is desc:updated_at truncated, so a quiet open/ready/blocked row
+// simply ROTATES OUT of the window — indistinguishable, from this side, from a
+// close. main's merge.go already refuses to call that a close (it KEEPS the
+// non-terminal row and counts it as aged-out), so the board has not been
+// lying; what it has been is BLIND — it could not tell "rotated out" from
+// "closed", only guess conservatively, and every guess costs a stale row on
+// screen and an "N aged out of the window" notice nobody can act on.
+//
+// The api half (PR #16052, bl-api-tasks-stable-cursor) removed the need to
+// guess: `?cursor=` opts the response into a `page.next_cursor` keyset token
+// that walks PAST the 1000-row cap. The manifest declares it as the task.ls
+// `cursor` arg (api/lib/barkpark/plugins/tasks.ex). This walks it.
+//
+// CAPABILITY DETECTION IS THE RESPONSE ITSELF, not a separate manifest fetch.
+// The server adds the `next_cursor` KEY to `page` if and only if the caller
+// spelled `?cursor=` and the route honours it (tasks_controller.ex page_block/2
+// — presence, not truthiness: the value is legitimately null on the last
+// page). A server predating the cursor ignores the unknown param and answers
+// the pre-cursor envelope, which has no such key. So the first page's own
+// envelope answers "does this server page?" at the moment of use, with no
+// staleness window and no fourth round-trip — and a server that does not, or
+// one whose walk we had to cut short, comes back exhaustive=false and keeps
+// the heuristic.
+//
+// Ordering: pages are appended in walk order, so the returned slice keeps the
+// route's own desc:updated_at ordering across the seam.
+func fetchTaskPages(ctx context.Context, c *apiclient.Client, base string) ([]Task, DetailIndex, bool, error) {
+	var (
+		all     []Task
+		details DetailIndex
+		cursor  string
+	)
+	for page := 0; page < maxTaskPages; page++ {
+		body, err := getJSONCtx(ctx, c, base+"&cursor="+url.QueryEscape(cursor))
+		if err != nil {
+			return nil, nil, false, err
+		}
+		tasks, idx, err := decodeTaskListFull(body)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		all = append(all, tasks...)
+		if details == nil {
+			details = idx
+		} else {
+			for id, d := range idx {
+				if _, ok := details[id]; !ok {
+					details[id] = d
+				}
+			}
+		}
+		next, capable := decodeNextCursor(body)
+		if !capable {
+			// Pre-cursor server: this one window is all there is, and we cannot
+			// tell a rotated-out row from a closed one. Say so honestly.
+			return all, details, false, nil
+		}
+		if next == "" {
+			// A null token on a cursor-capable server PROVES the walk finished
+			// (the server mints one only while has_more).
+			return all, details, true, nil
+		}
+		cursor = next
+	}
+	// Cap hit. The corpus we hold is real but possibly short of the tail, so it
+	// is NOT authoritative about an absence.
+	return all, details, false, nil
+}
+
+// decodeNextCursor reads `page.next_cursor` off a task-list body. The second
+// return is the CAPABILITY signal — whether the key was present at all — and
+// it is deliberately separate from the token: a cursor-capable server sends
+// `"next_cursor": null` on the last page, which is "the walk is done", not
+// "this server cannot page". A body whose `page` block is missing or malformed
+// reads as NOT capable, which is the conservative answer (the heuristic stays
+// armed) rather than an error that would blank the whole board.
+func decodeNextCursor(body []byte) (string, bool) {
+	var env struct {
+		Page *struct {
+			NextCursor *string `json:"next_cursor"`
+		} `json:"page"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil || env.Page == nil {
+		return "", false
+	}
+	if env.Page.NextCursor == nil {
+		// The key is absent OR explicitly null. Both decode to nil here, so this
+		// alone cannot separate "finished" from "not capable" — the raw-key probe
+		// below does.
+		return "", pageHasCursorKey(body)
+	}
+	return *env.Page.NextCursor, true
+}
+
+// pageHasCursorKey answers the one question the typed decode above cannot: was
+// `next_cursor` SPELLED inside `page`, even as null? Presence is the server's
+// opt-in acknowledgement; absence is a pre-cursor server.
+func pageHasCursorKey(body []byte) bool {
+	var env struct {
+		Page map[string]json.RawMessage `json:"page"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return false
+	}
+	_, ok := env.Page["next_cursor"]
+	return ok
+}
 
 // mergeInflight unions the in-flight fetch's rows into the window list, deduped
 // by doc_id with the LIST (window) copy winning on overlap — two copies of one

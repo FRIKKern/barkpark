@@ -145,7 +145,15 @@ type Snapshot struct {
 	// clamp maximum (limit=100): the readiness overlay is then honest-but-partial
 	// beyond the top of the queue, so the ready count renders with a "+" suffix.
 	ReadyHeadClamped bool
-	FetchedAt        time.Time
+	// Exhaustive is true when the corpus below was walked to the END of the
+	// route's keyset cursor — every task the server holds, not one
+	// desc:updated_at window of them (task-6c59bff7cb6b36ee). It is false on a
+	// server that does not offer the cursor, on a walk that hit the page cap,
+	// and on any snapshot restored from an older cache file. False is the
+	// CONSERVATIVE value: it keeps mergeForward's absence heuristic armed, so a
+	// row missing from a partial corpus is never mistaken for a closed one.
+	Exhaustive bool
+	FetchedAt  time.Time
 	// EventCursor is the last /v1/tasks/events id the board had accounted for
 	// when this snapshot was cached — the resume point for the cheap keyset poll
 	// (events.go), NOT board data. It rides the snapshot only because the cache
