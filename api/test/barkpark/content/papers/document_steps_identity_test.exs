@@ -1,4 +1,5 @@
 defmodule Barkpark.Content.Papers.DocumentStepsIdentityTest do
+  # sync: swaps node-global Application env (`:barkpark, :after_write_listeners`) — one value for the whole node
   use Barkpark.DataCase, async: false
 
   import Ecto.Query
