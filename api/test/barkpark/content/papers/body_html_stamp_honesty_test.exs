@@ -19,7 +19,7 @@ defmodule Barkpark.Content.Papers.BodyHtmlStampHonestyTest do
   return value; never via republish (publish regenerates the cache and would
   silently overwrite the probe).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.PortableDoc.Render

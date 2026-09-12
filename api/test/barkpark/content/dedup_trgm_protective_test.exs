@@ -46,6 +46,7 @@ defmodule Barkpark.Content.DedupTrgmProtectiveTest do
   value is making the index REACHABLE (correctness/preparedness). The 15
   behavioral tests in `dedup_wall_test.exs` stay green under the same rewrite.
   """
+  # sync: runs `ANALYZE documents` in setup — a ShareUpdateExclusiveLock on the shared `documents` table; deadlocked (40P01) against a concurrent AccessExclusiveLock under `--max-cases 16`
   use Barkpark.DataCase, async: false
 
   import Ecto.Query, only: [from: 2]

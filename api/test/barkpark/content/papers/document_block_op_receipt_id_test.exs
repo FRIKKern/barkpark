@@ -1,5 +1,5 @@
 defmodule Barkpark.Content.Papers.DocumentBlockOpReceiptIdTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
 
