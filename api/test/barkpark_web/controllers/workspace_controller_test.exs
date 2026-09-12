@@ -68,7 +68,35 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       end)
 
     assert_receive {:slot, ^pid, :ok}, 2_000
+
+    # BELT AND BRACES, and it earns its keep: when an assertion between the
+    # acquire and `release_export_slot/1` fails, that release never runs and the
+    # holder strands the only slot for every LATER test in the file — turning
+    # one honest red into a cascade that hides which test actually broke.
+    # (Observed exactly once, while mutation-proving this guard.)
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+      wait_for_free_export_slot()
+    end)
+
     pid
+  end
+
+  # The guard reclaims a killed holder's slot on a `:DOWN` inside its GenServer,
+  # which the test process cannot observe synchronously. Bounded poll, not a
+  # sleep.
+  defp wait_for_free_export_slot(deadline \\ 2_000) do
+    cond do
+      Barkpark.Tenancy.WorkspaceBundle.SingleFlight.in_flight() == [] ->
+        :ok
+
+      deadline <= 0 ->
+        :ok
+
+      true ->
+        Process.sleep(10)
+        wait_for_free_export_slot(deadline - 10)
+    end
   end
 
   defp release_export_slot(pid) do
