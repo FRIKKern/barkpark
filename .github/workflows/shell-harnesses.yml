@@ -169,6 +169,13 @@ on:
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
       - "scripts/pds-record-parity.test.sh"
+      # THE TWO PURE-TREE INPUTS OF THE D-NUMBER ARBITER (task-6fd11672fdeefd0b).
+      # `--check-alloc` reads the charter AND the reservation ledger; `--axis a`
+      # reads the charter AND this checkout's git log. An edit to either FILE can
+      # flip either verdict without touching a single script, so both are inputs
+      # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
+      - ".claude/workflows/bp-pds-charter.md"
+      - "tooling/pds/d-number-reservations.tsv"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
       - "scripts/pds-read-preflight-audit.sh"
@@ -584,6 +591,13 @@ on:
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
       - "scripts/pds-record-parity.test.sh"
+      # THE TWO PURE-TREE INPUTS OF THE D-NUMBER ARBITER (task-6fd11672fdeefd0b).
+      # `--check-alloc` reads the charter AND the reservation ledger; `--axis a`
+      # reads the charter AND this checkout's git log. An edit to either FILE can
+      # flip either verdict without touching a single script, so both are inputs
+      # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
+      - ".claude/workflows/bp-pds-charter.md"
+      - "tooling/pds/d-number-reservations.tsv"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
       - "scripts/pds-read-preflight-audit.sh"
@@ -1093,6 +1107,8 @@ jobs:
           pds-harnesses scripts/pds-ledger-census_test.sh
           pds-harnesses scripts/pds-record-parity.sh
           pds-harnesses scripts/pds-record-parity.test.sh
+          pds-harnesses .claude/workflows/bp-pds-charter.md
+          pds-harnesses tooling/pds/d-number-reservations.tsv
           pds-harnesses scripts/pds-scratch-target.sh
           pds-harnesses scripts/pds-scratch-target_test.sh
           pds-harnesses scripts/pds-read-preflight-audit.sh
@@ -1816,6 +1832,15 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, AND IT IS LOAD-BEARING FOR THE ARBITER STEP BELOW.
+          # actions/checkout@v4 is `--depth 1` by default. pds-record-parity.sh's
+          # ruling 4 fails CLOSED on a truncated walk: under depth 1 a graft sits
+          # on HEAD's own history, `--axis a` prints TRUNCATED and exits 2
+          # (UNCHECKED), and the step below treats 2 as RED. So a shallow checkout
+          # here would not publish a vacuous green -- it would red every run.
+          # Full history is what makes the arm able to LOOK.
+          fetch-depth: 0
       - name: jq is present (pds-record-parity.test.sh exits 99 without it)
         id: setup
         # :143 turns a missing jq into exit 99 TEST HARNESS FAIL while building
@@ -1841,6 +1866,100 @@ jobs:
         # the read-back evidence diff: a stub bp that ACKS a met-to-met stamp and
         # drops the evidence must red, the honest stub must stay green.
         run: bash scripts/pds-read-preflight-audit_test.sh
+      - name: "PDS-D allocation arbiter: --check-alloc and --axis a over the merged tree"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # THE NAMED TRIGGER (task-6fd11672fdeefd0b) for two charter rulings that
+        # were, until this step, enforced by nothing at all: `--axis a` reports no
+        # NEW unbaselined DUPLICATE-DEFINITION after each wave, and `--check-alloc`
+        # runs at the end of every wave DECIDE block. Both were written as
+        # obligations in prose. A written finding does not fire by itself.
+        #
+        # ONLY THE TWO PURE-TREE ARMS, AND THAT IS THE WHOLE DESIGN.
+        # scripts/pds-record-parity.sh declares itself, in its own run output,
+        # "REPORTER, never a gate": its AXIS B resolves a few hundred task ids
+        # against the LIVE ledger over `gh` and reds on OTHER epics' open rows --
+        # red by design, which is exactly how scripts/pds-door-census.sh
+        # dispositions it (`pds-record-parity.sh RED-BY-DESIGN-REPORTER ... its
+        # only non-vacuous axis resolves task ids against the LIVE ledger and is
+        # red by design. A reporter must never carry a required check name.`).
+        # `--check-alloc` (charter + tooling/pds/d-number-reservations.tsv) and
+        # `--axis a` (charter + this checkout's git log) touch NO network, NO gh,
+        # NO token and NO ledger: they ask only whether this tree agrees with
+        # itself. Running the bare script -- or `--axis b`, or `--axis both` --
+        # here would import that by-design red. Never widen this step to them.
+        # This job is also NOT a required context (an S4 PATHS-FILTERED exclusion
+        # in .github/required-checks.json), so wiring the arm makes it RUN, not
+        # BLOCK -- the census's "never a required check name" still holds.
+        #
+        # EXIT 2 IS RED, NOT A PASS. Verbatim from the script's own exit table:
+        #   0  PARITY    -- every axis checked, nothing divergent
+        #   1  DIVERGENT -- at least one leaf slice merged over an open row, a
+        #                   cited D that the charter does not define, or a
+        #                   D-number defined twice that the pinned baseline does
+        #                   not already carry (and the mirror: a baselined pair
+        #                   that has vanished)
+        #   2  UNCHECKED -- the arm could not look (no gh, no credentials, ledger
+        #                   down, no charter, a TRUNCATED commit walk) OR it
+        #                   REFUSED to run vacuously (grace >= span)
+        #   3  USAGE     -- bad invocation
+        # and --check-alloc's own tail line: "UNCHECKED -- the allocation ledger
+        # could not be scored. NOT a pass." The loop below fails the step on ANY
+        # non-zero rc and NAMES which of the four it was, so an UNCHECKED can
+        # never read as a green in this log.
+        #
+        # THE POSITIVE CONTROL is the three counts printed first. The script
+        # prints the seed and the reserved count but never the two high-water
+        # marks, and a verdict with no numbers beside it cannot be told from a
+        # verdict over an empty corpus -- so the step derives them, with the
+        # script's own definition lens, and prints them before it runs anything.
+        run: |
+          set -uo pipefail
+
+          CHARTER=.claude/workflows/bp-pds-charter.md
+          ALLOC=tooling/pds/d-number-reservations.tsv
+
+          for f in "$CHARTER" "$ALLOC"; do
+            [ -f "$f" ] || { echo "RED: $f is missing from this tree -- the arbiter has nothing to compare" >&2; exit 1; }
+          done
+
+          # The definition lens, byte-for-byte charter_defined_numbers() from
+          # scripts/pds-record-parity.sh: bold-lead bullet UNION own-line heading.
+          # NOT "any PDS-D anywhere" -- the charter's prose names the synthetic
+          # fixtures PDS-D777/PDS-D999 and a looser lens would read them as a
+          # high-water mark of 999.
+          charter_hw=$( { grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+' "$CHARTER" || true
+                          grep -oE '^#+[[:space:]]+PDS-D[0-9]+([[:space:]]|$)' "$CHARTER" || true
+                        } | grep -oE 'PDS-D[0-9]+' | sed 's/^PDS-D//' | sort -n -u | tail -1 )
+          ledger_hw=$(awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { sub(/^PDS-D/, "", $1); print $1 }' "$ALLOC" | sort -n -u | tail -1)
+          res_count=$(awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { print $1 }' "$ALLOC" | sort -u | wc -l | tr -d ' ')
+          seed=$(awk -F'\t' '$1 == "SEED" { print $2; exit }' "$ALLOC")
+
+          echo "── the three counts this step compares (derived HERE, from this tree) ──"
+          echo "  charter high-water:  PDS-D${charter_hw:-<none>}   (highest number DEFINED in $CHARTER)"
+          echo "  ledger  high-water:  PDS-D${ledger_hw:-<none, only the SEED row>}   (highest number RESERVED in $ALLOC)"
+          echo "  reservations:        ${res_count} number(s) reserved above the seed"
+          echo "  seed:                ${seed:-<none>}   (at or below it predates the arbiter, not scored)"
+          [ -n "${charter_hw:-}" ] || { echo "RED: the charter defines no PDS-D at all -- the lens is measuring itself, not the corpus" >&2; exit 1; }
+
+          rc_total=0
+          for arm in --check-alloc "--axis a"; do
+            echo "── bash scripts/pds-record-parity.sh $arm ──"
+            # `|| rc=$?` and NOT a bare call followed by `rc=$?`: the default
+            # shell for a `run:` block is `bash -e {0}`, which would exit on the
+            # non-zero BEFORE the case below ever classified it -- the step would
+            # still be red, but the log would never say DIVERGENT or UNCHECKED.
+            rc=0
+            # shellcheck disable=SC2086
+            bash scripts/pds-record-parity.sh $arm || rc=$?
+            case "$rc" in
+              0) echo "  rc=0 PARITY" ;;
+              1) echo "  rc=1 DIVERGENT -- RED. The charter, the reservation ledger and the commit corpus disagree; see above." >&2; rc_total=1 ;;
+              2) echo "  rc=2 UNCHECKED -- RED, NOT A PASS. The arm could not look (truncated walk, missing charter, no SEED row)." >&2; rc_total=1 ;;
+              3) echo "  rc=3 USAGE -- RED. This step invoked the script wrongly." >&2; rc_total=1 ;;
+              *) echo "  rc=$rc UNKNOWN -- RED." >&2; rc_total=1 ;;
+            esac
+          done
+          exit "$rc_total"
 
   ci-failure-issue-filer:
     needs: [changes]
