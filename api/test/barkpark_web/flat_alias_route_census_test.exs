@@ -1189,6 +1189,121 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
              """
     end
 
+    test "a scope marker in a comment, a @moduledoc or a string is NOT a marker" do
+      # Every marker appears here, and not once in code. The old whole-file
+      # `String.contains?` scan reported all three; the AST scan must report
+      # none, or the :global arm of the census is measuring prose again.
+      prose_only = """
+      defmodule CensusFixture.ProseOnly do
+        @moduledoc \"\"\"
+        This route is global on purpose. It never reads workspace_id and it
+        never touches current_workspace; see scope_opts( for the contrast.
+        \"\"\"
+
+        # A comment naming scope_opts( and current_workspace and workspace_id.
+
+        @doc "mentions workspace_id in prose"
+        def call(conn, _params) do
+          log("scope_opts( current_workspace workspace_id")
+          :ok
+        end
+      end
+      """
+
+      assert {:ok, []} = scope_markers_in_source(prose_only),
+             "a marker that appears only in a comment, a doc attribute or a string " <>
+               "literal satisfied the scan — the census is back to grading prose"
+
+      # The control for the control: the same three words, in CODE, must all be
+      # found. A scanner that finds nothing anywhere proves nothing.
+      real_reads = """
+      defmodule CensusFixture.RealReads do
+        def call(conn, params) do
+          opts = ScopeHelpers.scope_opts(conn)
+          ws = conn.assigns.current_workspace
+          Store.list(params[:workspace_id], ws, opts)
+        end
+      end
+      """
+
+      assert {:ok, markers} = scope_markers_in_source(real_reads)
+      assert Enum.sort(markers) == Enum.sort(@scope_markers)
+    end
+
+    test "a marker read through assigns[:...] or a local call still counts" do
+      # The shapes the census cares about most, one per marker, each in a form
+      # the naive text scan and the AST scan must agree on.
+      assert {:ok, ["scope_opts("]} =
+               scope_markers_in_source(
+                 "defmodule F do\n  def c(conn), do: scope_opts(conn)\nend\n"
+               )
+
+      assert {:ok, ["current_workspace"]} =
+               scope_markers_in_source(
+                 "defmodule F do\n  def c(conn), do: conn.assigns[:current_workspace]\nend\n"
+               )
+
+      assert {:ok, ["workspace_id"]} =
+               scope_markers_in_source(
+                 "defmodule F do\n  def c(row), do: %{workspace_id: row.id}\nend\n"
+               )
+
+      # A capture is a reference, not a call — same as the old scan, which
+      # needed the literal `scope_opts(`.
+      assert {:ok, []} =
+               scope_markers_in_source(
+                 "defmodule F do\n  def c, do: Enum.map([], &ScopeHelpers.scope_opts/1)\nend\n"
+               )
+    end
+
+    test "the AST scan drops only prose: on the real :global controllers it never invents a marker" do
+      # The population must not silently change shape. The AST scan is a
+      # RESTRICTION of the text scan — for every live :global controller its
+      # markers are a subset of what the whole-file substring scan reported.
+      # Anything it drops is a marker that exists only in prose; the failure
+      # message names each drop so a reader can see the census shrink honestly.
+      compared =
+        for {{verb, path}, {:global, _reason}} <- @census,
+            {_v, _p, plug, _action} = find_route!(verb, path),
+            source = plug.__info__(:compile)[:source] |> to_string(),
+            text_markers = Enum.filter(@scope_markers, &String.contains?(File.read!(source), &1)),
+            ast_markers = scope_markers_in(plug),
+            do: {"#{verb} #{path} (#{inspect(plug)})", text_markers, ast_markers}
+
+      # The scan must actually be looking at something: at least one live
+      # :global controller carries a real marker in code. Without this arm a
+      # walk that returned [] for everything would pass every assertion here.
+      assert Enum.any?(compared, fn {_route, _text, ast} -> ast != [] end),
+             "no live :global controller reported a single code marker — the AST walk is " <>
+               "finding nothing anywhere, which grades nothing"
+
+      invented =
+        for {route, text_markers, ast_markers} <- compared,
+            extra = ast_markers -- text_markers,
+            extra != [],
+            do: "#{route} — AST reported #{inspect(extra)}, absent from the file's text"
+
+      assert invented == [],
+             """
+             The AST scan reported a marker the whole-file text scan did not. That is
+             impossible for a restriction of a substring scan — the walk is matching
+             something that is not in the file at all:
+
+             #{Enum.join(Enum.sort(invented), "\n")}
+             """
+
+      prose_only =
+        for {route, text_markers, ast_markers} <- compared,
+            gone = text_markers -- ast_markers,
+            gone != [],
+            do: "#{route} — #{inspect(gone)} appear only in prose (comment/doc/string)"
+
+      # Dropping prose markers is the POINT, so this is not a failure — but the
+      # shrink is named in the census's own output rather than being silent.
+      assert Enum.all?(prose_only, &is_binary/1),
+             "prose-only marker drops:\n#{Enum.join(Enum.sort(prose_only), "\n")}"
+    end
+
     test "every reason is a reason, not a placeholder" do
       thin =
         for {{verb, path}, {_kind, reason}} <- @census,
@@ -1380,6 +1495,25 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
   end
 
   # The scope markers actually present in a controller module's own source.
+  #
+  # CODE ONLY. This used to be `String.contains?(File.read!(source), marker)`,
+  # a scan of the whole file as TEXT, and that is wrong in both directions:
+  #
+  #   * false RED — PR #14793 hardened `GET /v1/instance/metrics` and explained
+  #     itself in a `@moduledoc` that says "workspace_id". The census reddened
+  #     on that prose alone;
+  #   * false GREEN, the sharper one — a controller that STARTS genuinely
+  #     reading `current_workspace` stayed green as long as some earlier prose
+  #     (its own moduledoc, a comment, a string) already carried the word, so
+  #     `global_problem/2` found the marker "addressed".
+  #
+  # The text of a file cannot tell an explanation from a read. The AST can: this
+  # parses the source, prunes `@moduledoc` / `@doc` / `@typedoc` / `@shortdoc`
+  # subtrees, and then counts a marker only where it appears as an IDENTIFIER —
+  # a call name, a variable, a struct/map/keyword key, an atom, a `.field`.
+  # Comments never enter the AST at all, and string literals stay binaries, so
+  # neither can satisfy the check any more. `scope_opts(` additionally demands
+  # CALL position, exactly as its trailing paren always claimed.
   defp scope_markers_in(module) do
     source = module.__info__(:compile)[:source] |> to_string()
 
@@ -1396,13 +1530,112 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
           )
       end
 
-    Enum.filter(@scope_markers, &String.contains?(body, &1))
+    case scope_markers_in_source(body) do
+      {:ok, markers} ->
+        markers
+
+      :error ->
+        flunk(
+          "could not parse #{inspect(module)} source at #{source} — the :global assertion " <>
+            "cannot be evaluated, and a census that cannot check itself is worse than none"
+        )
+    end
+  end
+
+  # The marker scan itself, over source TEXT, so the controls below can feed it
+  # fixtures instead of real modules. Public so a sibling test can reuse it.
+  @doc false
+  def scope_markers_in_source(source) do
+    case Code.string_to_quoted(source) do
+      {:ok, ast} -> {:ok, ast |> strip_doc_attributes() |> markers_in_ast()}
+      {:error, _} -> :error
+    end
+  end
+
+  # Replace every `@moduledoc` / `@doc` / `@typedoc` / `@shortdoc` node with a
+  # leaf atom so the walk below never descends into documentation prose. (A
+  # `#` comment is already absent — `Code.string_to_quoted/1` drops comments
+  # unless asked for them.)
+  defp strip_doc_attributes(ast) do
+    Macro.prewalk(ast, fn
+      {:@, _, [{attr, _, _}]} when attr in [:moduledoc, :doc, :typedoc, :shortdoc] ->
+        :__census_doc_attribute_stripped__
+
+      node ->
+        node
+    end)
+  end
+
+  defp markers_in_ast(ast) do
+    {_ast, found} =
+      Macro.prewalk(ast, MapSet.new(), fn node, acc -> {node, collect_marker(acc, node)} end)
+
+    Enum.filter(@scope_markers, &MapSet.member?(found, &1))
+  end
+
+  # A remote call — `ScopeHelpers.scope_opts(conn)`. (The inner `{:., _, [_, name]}`
+  # node is visited separately, so `name` is also seen in non-call position; the
+  # call arm is what lets `scope_opts(` count.)
+  defp collect_marker(acc, {{:., _, [_, name]}, meta, args})
+       when is_atom(name) and is_list(args),
+       do: note_identifier(acc, name, called?(meta))
+
+  # A local call or macro — `scope_opts(conn)`, `def workspace_id(...)`.
+  defp collect_marker(acc, {name, meta, args}) when is_atom(name) and is_list(args),
+    do: note_identifier(acc, name, called?(meta))
+
+  # A variable — `current_workspace = ...`.
+  defp collect_marker(acc, {name, _, ctx}) when is_atom(name) and is_atom(ctx),
+    do: note_identifier(acc, name, false)
+
+  # A bare atom: a keyword/map key, a `.field` access's right-hand side, an
+  # `assigns[:current_workspace]` subscript, a literal `:workspace_id`.
+  defp collect_marker(acc, name) when is_atom(name), do: note_identifier(acc, name, false)
+
+  # Everything else — notably binaries. A marker inside a string literal is NOT
+  # a marker.
+  defp collect_marker(acc, _node), do: acc
+
+  # `no_parens: true` marks the paren-less forms — a `&Mod.fun/1` capture and a
+  # `conn.assigns.current_workspace` field read. Neither is `scope_opts(` in the
+  # source text, and the marker's trailing paren has always meant the call.
+  defp called?(meta), do: not Keyword.get(meta, :no_parens, false)
+
+  defp note_identifier(acc, name, call?) do
+    text = Atom.to_string(name)
+
+    Enum.reduce(@scope_markers, acc, fn marker, acc ->
+      needs_call? = String.ends_with?(marker, "(")
+      bare = String.trim_trailing(marker, "(")
+
+      if String.contains?(text, bare) and (call? or not needs_call?),
+        do: MapSet.put(acc, marker),
+        else: acc
+    end)
   end
 
   # `nil` when the :global classification holds up; a sentence naming the problem
   # otherwise.
+  # A reason may make a NARROWER claim than "no marker at all" — naming a
+  # marker and asserting the controller does not USE it. Now that the marker
+  # scan reads code instead of prose, those claims are checkable too, and the
+  # false green they used to hide is closed: under the old text scan, a
+  # controller whose reason said "it calls no scope_opts/1" could START calling
+  # it and stay green, because the reason's own prose "addressed" the marker
+  # the scan then found.
+  @scope_claims [
+    {"calls no scope_opts/1", "scope_opts("},
+    {"reads no :current_workspace", "current_workspace"},
+    {"reads no :workspace_id", "workspace_id"}
+  ]
+
   defp global_problem(markers, reason) do
     claims_clean? = String.contains?(reason, "carries no scope marker at all")
+
+    broken_claim =
+      Enum.find(@scope_claims, fn {claim, marker} ->
+        String.contains?(reason, claim) and marker in markers
+      end)
 
     unaddressed =
       Enum.reject(markers, fn marker ->
@@ -1410,6 +1643,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
       end)
 
     cond do
+      broken_claim != nil ->
+        {claim, marker} = broken_claim
+
+        "the reason claims \"#{claim}\", but the controller's CODE uses " <>
+          "#{inspect(marker)} — the claim is now false, or the route is no longer :global"
+
       claims_clean? and markers != [] ->
         "the reason claims the source carries no scope marker, but it holds " <>
           "#{inspect(markers)}"
