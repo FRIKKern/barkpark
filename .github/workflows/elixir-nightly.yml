@@ -67,7 +67,7 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # fetch-depth: 0 — REQUIRED, do not drop it, and the same shape elixir.yml's
         # mix-test job uses (no `filter:`, because that job does not use one either).
         # The default depth-1 checkout is what made run 33717527961 red:

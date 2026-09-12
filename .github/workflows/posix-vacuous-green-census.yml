@@ -66,7 +66,7 @@ jobs:
     outputs:
       hit: ${{ steps.f.outputs.hit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: f
@@ -99,7 +99,7 @@ jobs:
     if: github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: census syntax check
         run: bash -n scripts/posix-vacuous-green-census.sh

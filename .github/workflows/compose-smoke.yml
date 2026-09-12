@@ -80,7 +80,7 @@ jobs:
     outputs:
       smoke: ${{ steps.sets.outputs.smoke }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref: with no `ref:` the three-dot diff
           # below sweeps in every commit main gained since the PR's stale base
@@ -218,7 +218,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # ── RUNNER HARDWARE CENSUS (task-f21e6a627ca13ef8) ─────────────────────
       # The green and refusal arms die intermittently at BEAM boot with
       # `sys_sigaltstack(): Failed to set alternate signal stack` (musl runtime

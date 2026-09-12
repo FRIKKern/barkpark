@@ -660,7 +660,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Full history so the NEW-lineref gate below can reach the PR base and
           # diff against the MERGE BASE. At the default depth of 1 there is no

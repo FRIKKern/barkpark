@@ -153,7 +153,7 @@ jobs:
     name: PR task gate self-test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Hermetic fixtures for the gate predicate and its step bodies
         run: bash scripts/pr-task-gate.test.sh
 
@@ -162,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (full history to reach the base ref)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

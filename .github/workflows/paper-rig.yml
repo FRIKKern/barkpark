@@ -118,7 +118,7 @@ jobs:
       BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
       PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The image string is EVIDENCE, not decoration: the baselines are only
       # meaningful next to the image that produced them, and rig/README.md

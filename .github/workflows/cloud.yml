@@ -66,7 +66,7 @@ jobs:
       # string and the job silently never runs.
       census: ${{ steps.sets.outputs.census }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
           # `refs/pull/N/merge` — a commit that already contains main's advance
@@ -337,7 +337,7 @@ jobs:
     name: Cloud path-escape ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
 
       - name: Harness (the ratchet must be able to fail)
@@ -426,7 +426,7 @@ jobs:
         otp: ["27.0"]
         elixir: ["1.18.1"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
@@ -499,7 +499,7 @@ jobs:
         otp: ["27.0"]
         elixir: ["1.18.1"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
@@ -640,7 +640,7 @@ jobs:
         otp: ["27.0"]
         elixir: ["1.18.1"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
@@ -887,7 +887,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:

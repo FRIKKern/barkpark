@@ -107,7 +107,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The probe's own tripwire, first. If it stops being able to red on a
       # faked six-hour gap, everything below is decoration — and this run says
@@ -168,7 +168,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Shell syntax
         run: bash -n scripts/cron-overdue-probe.sh
       - name: Mutation proofs (--selftest)

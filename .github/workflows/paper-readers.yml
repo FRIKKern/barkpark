@@ -89,7 +89,7 @@ jobs:
     # above when the corpus or the runner changes; never round either one.
     timeout-minutes: 94
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
         uses: actions/setup-go@v5

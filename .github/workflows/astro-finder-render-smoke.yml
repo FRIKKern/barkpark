@@ -46,7 +46,7 @@ jobs:
     outputs:
       touched: ${{ steps.decide.outputs.touched }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The full history a three-dot diff against the base needs. A shallow
           # clone makes `merge-base` unresolvable and the decision below would
@@ -112,7 +112,7 @@ jobs:
     if: needs.surface.outputs.touched == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Node 22: the template's own `engines` field says ">=22.12.0", and Astro 7
       # refuses below it.

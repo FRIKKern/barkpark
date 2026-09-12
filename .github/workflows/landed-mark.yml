@@ -77,7 +77,7 @@ jobs:
       # — a push can carry more than one commit, and each may name its own task.
       # A shallow checkout cannot resolve `before`, and the script degrades to
       # marking only the tip with a ::warning rather than inventing a range.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

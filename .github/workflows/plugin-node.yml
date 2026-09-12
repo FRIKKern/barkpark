@@ -46,7 +46,7 @@ jobs:
       matrix: ${{ steps.build.outputs.matrix }}
       empty: ${{ steps.build.outputs.empty }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # BEFORE the builder is trusted. api/test/scripts/test-plugin-node-matrix.sh
       # is a smoke harness for the very script the next step reads its matrix
@@ -73,7 +73,7 @@ jobs:
       matrix:
         entry: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node ${{ matrix.entry.node }}
         uses: actions/setup-node@v4
