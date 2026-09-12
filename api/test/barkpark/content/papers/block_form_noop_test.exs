@@ -1,5 +1,5 @@
 defmodule Barkpark.Content.Papers.BlockFormNoopTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.StudioLive.Blocks

@@ -128,6 +128,7 @@ ELIXIR_COMPILE_PATHS='api/**
 cloud/priv/secret-scrub.exs
 design/**
 tooling/pds/pre-gate-papers.json
+tooling/pds/disposition-owner-registry.json
 .github/workflows/elixir.yml
 scripts/elixir-path-escape-check.sh
 scripts/elixir-path-escape-check.test.sh

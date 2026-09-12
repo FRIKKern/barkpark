@@ -44,8 +44,13 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 4. **Worker builds** in `git worktree add $ORCH/wt/<lane>-<slug> -b <lane>/<slug> origin/main`.
    IMMEDIATELY record the base: `git -C <wt> merge-base HEAD origin/main > $ORCH/tmp/<lane>-w<N>/base.sha`.
    That file is the only reset target rule 5 allows; `origin/main` moves while the worker works.
-   Elixir gates run inside that worktree (`cd api && mix test <files>`; never borrow
-   `_build` from another tree). Go: `go build ./... && go test ./internal/cli/...`.
+   Elixir gates run inside that worktree, through the STRICT entry point —
+   `cd api && ../scripts/mix-test-strict.sh <files>` (or `cd cloud && ../scripts/…`);
+   never borrow `_build` from another tree. NOT bare `mix test <files>`: mix refuses
+   only when EVERY named path is unmatched, so one real path makes a renamed or
+   mistyped sibling vanish and the run still prints `N tests, 0 failures` and exits 0
+   (task-1d5bf80f8f4de47a). The strict runner refuses first, exit 2, naming the
+   offending argument, and forwards every argument unchanged otherwise. Go: `go build ./... && go test ./internal/cli/...`.
    `cc` on this Mac is a Claude Code shim: cgo/NIF builds die on a fake "unknown option" — use
    `CGO_ENABLED=0` for Go (as the Makefile does) and `CC=/usr/bin/clang` for mix when a NIF compiles.
    A change with a test proves red-without / green-with (mutation-prove it).

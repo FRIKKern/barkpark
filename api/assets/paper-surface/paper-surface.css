@@ -789,9 +789,20 @@ html[data-theme="dark"] .bp-paper-body {
    fixed advance); the header rides right with its column. spark sizes the ONE
    sparkline primitive (DataViz.spark_svg/2, shared with the stat block) down to
    a cell-sized strip; the stroke rules mirror .bp-stat__spark polyline — fill
-   MUST be none or the polyline paints as a filled blob. */
-.bp-paper-surface :is(.bp-table__th--num, .bp-table__td--num) { text-align: right; font-variant-numeric: tabular-nums; }
-.bp-paper-surface :is(.bp-table__th--spark, .bp-table__td--spark) { width: 1%; white-space: nowrap; }
+   MUST be none or the polyline paints as a filled blob.
+   Written as an explicit comma-grouped selector list, NOT `:is(...)`: the
+   View↔Edit parity parser (view_edit_parity_test.exs `declarations_for/3`)
+   splits a rule's selector list on commas and matches
+   `.bp-paper-surface <element>` exactly, so a modifier hidden inside `:is()`
+   is INVISIBLE to the gate and its editor mirror could drift unseen. The
+   comma form is specificity-identical (`:is()` takes its most specific
+   argument — a class either way) and puts the modifiers on the wire. Keep
+   byte-aligned with priv/static/assets/bp-paper-editor-shell.css +
+   assets/paper-editor/src/styles.css. */
+.bp-paper-surface .bp-table__th--num,
+.bp-paper-surface .bp-table__td--num { text-align: right; font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-table__th--spark,
+.bp-paper-surface .bp-table__td--spark { width: 1%; white-space: nowrap; }
 .bp-paper-surface .bp-table__spark { display: block; width: 96px; height: 20px; }
 .bp-paper-surface .bp-table__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 

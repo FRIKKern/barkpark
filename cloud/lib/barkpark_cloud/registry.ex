@@ -5836,24 +5836,30 @@ defmodule BarkparkCloud.Registry do
     # so fixing `add_site_domain/2` alone would be theatre — an attacker would
     # simply CREATE the site with the stolen hostname instead of attaching it
     # afterwards. Same leaf, same verdict, before any row exists.
-    case first_claimed_domain(prepared, barkpark) do
-      nil ->
-        case %Site{} |> Site.changeset(prepared) |> Repo.insert() do
-          {:ok, site} ->
-            # Best-effort: register the dataset-scoped webhook on the box so a publish
-            # fires the CP receiver. NEVER fails the create — the site row is the truth;
-            # a box that is not yet live (or refuses) just means auto-rebuild is wired
-            # on the next successful registration path. Fires only for a live static
-            # site with a bootstrap_dataset (charter D42/D47).
-            _ = maybe_register_content_webhook(barkpark, site, content_secret)
-            {:ok, site}
-
-          {:error, _cs} = error ->
-            error
+    # ONE transaction over the claim check AND the insert, holding the per-hostname
+    # advisory lock for every domain this create claims. Without it two concurrent
+    # creates of the same hostname both read a free namespace and both insert.
+    result =
+      serialize_hostname_claim(normalized_attr_domains(prepared), fn ->
+        case first_claimed_domain(prepared, barkpark) do
+          nil -> %Site{} |> Site.changeset(prepared) |> Repo.insert()
+          _taken -> {:error, :domain_taken}
         end
+      end)
 
-      _taken ->
-        {:error, :domain_taken}
+    case result do
+      {:ok, site} ->
+        # Best-effort: register the dataset-scoped webhook on the box so a publish
+        # fires the CP receiver. NEVER fails the create — the site row is the truth;
+        # a box that is not yet live (or refuses) just means auto-rebuild is wired
+        # on the next successful registration path. Fires only for a live static
+        # site with a bootstrap_dataset (charter D42/D47). Deliberately OUTSIDE the
+        # claim transaction: a network round trip must not hold a hostname lock.
+        _ = maybe_register_content_webhook(barkpark, site, content_secret)
+        {:ok, site}
+
+      other ->
+        other
     end
   end
 
@@ -5867,11 +5873,20 @@ defmodule BarkparkCloud.Registry do
   # ask-gate share, so `Example.com` in a create body collides just as it does on
   # attach.
   defp first_claimed_domain(attrs, %Barkpark{team_id: team_id}) do
+    attrs
+    |> normalized_attr_domains()
+    |> Enum.find(&hostname_claimed?(&1, team_id: team_id))
+  end
+
+  # The normalized domains a create's attrs claim. Split out of
+  # `first_claimed_domain/2` so `create_site/2` can LOCK the whole set before the
+  # check — `Enum.find/2` short-circuits, so locking lazily inside the walk would
+  # leave every domain past the first collision unprotected for the insert.
+  defp normalized_attr_domains(attrs) do
     (Map.get(attrs, :domains) || Map.get(attrs, "domains") || [])
     |> List.wrap()
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&normalize_domain/1)
-    |> Enum.find(&hostname_claimed?(&1, team_id: team_id))
   end
 
   # Mint + Vault-encrypt the content-publish secret when this is a content-bound
@@ -7590,39 +7605,58 @@ defmodule BarkparkCloud.Registry do
   def add_site_domain(%Site{domains: existing} = site, domain) when is_binary(domain) do
     norm = normalize_domain(domain)
 
-    cond do
-      # Idempotent: this site already owns the normalized domain.
-      norm in existing ->
-        {:ok, site}
+    # Idempotent: this site already owns the normalized domain. Answered BEFORE
+    # the claim transaction on purpose — it claims nothing, so it must not queue
+    # behind a racer holding this hostname's lock.
+    if norm in existing do
+      {:ok, site}
+    else
+      # ONE transaction for the check AND the write, so the per-hostname advisory
+      # lock `hostname_claimed?/2` takes is still held when the row lands. See
+      # `serialize_hostname_claim/2`.
+      serialize_hostname_claim([norm], fn ->
+        # Claimed anywhere else in the ONE hostname namespace — another site
+        # (any team), a barkpark's `custom_host`, a foreign team's parent domain,
+        # or a live provisioning FQDN. Reject before the ask-gate can answer 200
+        # for two owners. Until this called `hostname_claimed?/2` it tested SITES
+        # ONLY, so a site could take a hostname another team already served as its
+        # `custom_host` — and no route existed to take it back.
+        if hostname_claimed?(norm, except_site_id: site.id, team_id: site.team_id) do
+          {:error, :domain_taken}
+        else
+          new_domains = Enum.uniq(existing ++ [norm])
 
-      # Claimed anywhere else in the ONE hostname namespace — another site
-      # (any team), a barkpark's `custom_host`, a foreign team's parent domain,
-      # or a live provisioning FQDN. Reject before the ask-gate can answer 200
-      # for two owners. Until this called `hostname_claimed?/2` it tested SITES
-      # ONLY, so a site could take a hostname another team already served as its
-      # `custom_host` — and no route existed to take it back.
-      hostname_claimed?(norm, except_site_id: site.id, team_id: site.team_id) ->
-        {:error, :domain_taken}
-
-      true ->
-        new_domains = Enum.uniq(existing ++ [norm])
-
-        # The DB-level uniqueness trigger (add_domain_cross_site_uniqueness
-        # migration) is the race backstop between the check above and this write;
-        # it raises a unique_violation, which we translate to the same friendly
-        # {:error, :domain_taken} rather than a 500.
-        try do
-          site
-          |> Site.changeset(%{domains: new_domains})
-          |> Repo.update()
-        rescue
-          e in Postgrex.Error ->
-            if e.postgres[:code] == :unique_violation do
-              {:error, :domain_taken}
-            else
-              reraise e, __STACKTRACE__
-            end
+          # WHAT THE DB-LEVEL UNIQUENESS TRIGGER (add_domain_cross_site_uniqueness
+          # migration) ACTUALLY DOES — it is NOT the race backstop, and this
+          # comment said it was. Its body is a plpgsql
+          # `IF EXISTS (SELECT 1 FROM sites s WHERE s.id <> NEW.id AND d = ANY(s.domains))`
+          # inside a BEFORE ROW trigger. That EXISTS runs under the SAME READ
+          # COMMITTED snapshot rules as any other statement, so it CANNOT see a
+          # concurrent uncommitted `sites` row. Because its snapshot is taken later
+          # than the application check above, it NARROWS the window from
+          # milliseconds to microseconds — it does not close it. Only a UNIQUE
+          # INDEX, an EXCLUDE constraint, explicit locking, or SERIALIZABLE gives
+          # mutual exclusion; what serialises this door is the per-hostname
+          # `pg_advisory_xact_lock` taken in `hostname_claimed?/2` and held by the
+          # transaction `serialize_hostname_claim/2` opened around this whole body.
+          #
+          # The trigger is still worth rescuing: it fires for writers that bypass
+          # this door, raising a unique_violation we translate to the same friendly
+          # {:error, :domain_taken} rather than a 500.
+          try do
+            site
+            |> Site.changeset(%{domains: new_domains})
+            |> Repo.update()
+          rescue
+            e in Postgrex.Error ->
+              if e.postgres[:code] == :unique_violation do
+                {:error, :domain_taken}
+              else
+                reraise e, __STACKTRACE__
+              end
+          end
         end
+      end)
     end
   end
 
@@ -7643,6 +7677,81 @@ defmodule BarkparkCloud.Registry do
   # and `example.com` collide. Mirrors Site.normalize_domain/1 (the stored form).
   defp normalize_domain(d) when is_binary(d) do
     d |> String.downcase() |> String.trim() |> String.trim_trailing(".")
+  end
+
+  # ── Mutual exclusion for the hostname claim doors ──────────────────────
+  #
+  # The three claim doors (`add_site_domain/2`, `create_site/2`,
+  # `set_custom_host/2`) are check-then-write. `BarkparkCloud.Repo` sets no
+  # isolation level, so they run at stock READ COMMITTED: two concurrent claims
+  # of one hostname each take their own snapshot, each sees the namespace free,
+  # and BOTH commit. Being inside a `Repo.transaction` is NOT mutual exclusion —
+  # it is what makes the window durable, not what closes it.
+  #
+  # Only four mechanisms actually serialise a check-then-write: a UNIQUE INDEX,
+  # an EXCLUDE constraint, explicit locking, or SERIALIZABLE. We take the third.
+  # Why not the others, priced:
+  #
+  #   * UNIQUE INDEX — `sites.domains` is an ARRAY column (`d = ANY(s.domains)`),
+  #     so a plain unique index does not apply, and the namespace spans TWO
+  #     tables (`sites.domains` and `barkparks.custom_host`) which one index
+  #     cannot cover. `barkparks_custom_host_unique_idx` already covers exactly
+  #     the one pair an index CAN cover.
+  #   * EXCLUDE — single-table by construction, so it cannot span the two tables
+  #     either; on `sites` alone it needs ACCESS EXCLUSIVE plus a validating scan
+  #     and fails outright if prod already holds a duplicate.
+  #   * SERIALIZABLE — a repo-wide isolation change with serialization-failure
+  #     retries on every caller, for one narrow invariant.
+  #
+  # A per-hostname advisory transaction lock costs one round trip, needs NO
+  # migration and NO new lock on a live table, and is the repo's own pattern
+  # (20+ call sites in api/; `lock_team_for_quota/1` at the top of this module is
+  # the same argument in `FOR UPDATE` form).
+  #
+  # STATED WEAKNESS: this is conventional, not structural. It serialises writers
+  # that go through these doors; a writer that reaches `sites.domains` without
+  # calling `hostname_claimed?/2` is not excluded. Putting the lock inside the
+  # shared predicate — not at the three call sites — is what mitigates that.
+  defp lock_hostname!(norm) do
+    Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["hostname:" <> norm])
+    :ok
+  end
+
+  # Run `fun` with the whole check-then-write inside ONE transaction, so the
+  # advisory lock `hostname_claimed?/2` takes is still held when the row lands.
+  # `pg_advisory_xact_lock` is released at COMMIT, so a lock taken OUTSIDE a
+  # transaction is released at the end of its own implicit statement and
+  # serialises nothing — that is the residue this wrapper removes. The doors do
+  # already run inside a transaction incidentally (via `Accounts.audit/3`), but
+  # incidentally is not a guarantee, and a door that lost its audit wrapper would
+  # silently lose its mutual exclusion.
+  #
+  # `hostnames` are locked UP FRONT and SORTED. Sorted because a multi-domain
+  # create that locked in caller order could deadlock against a racer claiming
+  # the same set in the other order; up front because a lock taken lazily (as
+  # `Enum.find/2` short-circuits) leaves the domains past the first collision
+  # unprotected for the write that follows.
+  #
+  # Joins an enclosing transaction when there is one; `fun`'s own return value is
+  # passed through unchanged, so each door keeps its own error vocabulary
+  # (`{:error, :domain_taken}` here, `{:error, :taken}` there).
+  defp serialize_hostname_claim(hostnames, fun) do
+    take_locks = fn ->
+      hostnames |> Enum.uniq() |> Enum.sort() |> Enum.each(&lock_hostname!/1)
+    end
+
+    if Repo.in_transaction?() do
+      take_locks.()
+      fun.()
+    else
+      {:ok, result} =
+        Repo.transaction(fn ->
+          take_locks.()
+          fun.()
+        end)
+
+      result
+    end
   end
 
   # ── ONE hostname namespace, ONE predicate ──────────────────────────────
@@ -7680,6 +7789,12 @@ defmodule BarkparkCloud.Registry do
     except_site_id = Keyword.get(opts, :except_site_id)
     except_barkpark_id = Keyword.get(opts, :except_barkpark_id)
     team_id = Keyword.fetch!(opts, :team_id)
+
+    # THE MUTUAL EXCLUSION, taken BEFORE the first SELECT. Locking after reading
+    # serialises nothing — the stale verdict is already in hand. Living in the
+    # shared predicate rather than at the three call sites is deliberate: every
+    # claim door inherits it, and a FOURTH door cannot forget it.
+    lock_hostname!(norm)
 
     site_domain_claimed?(norm, except_site_id) or
       barkpark_custom_host_claimed?(norm, except_barkpark_id) or
@@ -7808,11 +7923,22 @@ defmodule BarkparkCloud.Registry do
       reattach_of_different_host?(barkpark, changeset) ->
         {:error, {:already_attached, barkpark.custom_host}}
 
-      custom_host_taken?(Ecto.Changeset.fetch_field!(changeset, :custom_host), barkpark) ->
-        {:error, :taken}
-
       true ->
-        changeset |> Repo.update() |> translate_custom_host_conflict()
+        norm = Ecto.Changeset.fetch_field!(changeset, :custom_host)
+
+        # ONE transaction over the taken-walk AND the write, holding this
+        # hostname's advisory lock. `barkparks_custom_host_unique_idx` already
+        # makes the custom_host<->custom_host pair atomic (which is why the
+        # unique_violation rescue below is honest), but it covers ONE of the four
+        # legs `custom_host_taken?/2` walks — a racing SITE claim of the same
+        # hostname is not an index collision at all. The lock covers all four.
+        serialize_hostname_claim([norm], fn ->
+          if custom_host_taken?(norm, barkpark) do
+            {:error, :taken}
+          else
+            changeset |> Repo.update() |> translate_custom_host_conflict()
+          end
+        end)
     end
   end
 

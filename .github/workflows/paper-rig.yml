@@ -22,7 +22,10 @@ name: paper-rig
 #
 # TWO MODES:
 #
-#   push / pull_request  →  `gate.sh` on the default fixture. Renders through
+#   push / pull_request  →  `fixture-list-check.sh` (hermetic, ~1s: is
+#                           fetch-fixtures.sh's no-argument slug list still
+#                           the whole published panel?) and then `gate.sh` on
+#                           the default fixture. Renders through
 #                           the real PortableDoc.Render + the real bulldocs
 #                           layout, photographs 8 cells (2 schemes x 4 widths)
 #                           and asserts on DOM CONTENT, never on an HTTP
@@ -42,6 +45,15 @@ name: paper-rig
 #                           them the CI numbers is the guess this task exists
 #                           to stop. The runner image string is printed and
 #                           recorded in the README beside the numbers.
+#
+#                           `check: true` runs `gate.sh --panel --check` IN
+#                           THIS IMAGE — the numeric oracle against the whole
+#                           panel. Dispatch-only on purpose: it is the arm that
+#                           answers "are the committed Linux baselines still
+#                           the truth?" on demand, without making a
+#                           host-dependent number a thing every pull request
+#                           has to survive (see WHY NOT --check YET below,
+#                           which is about the PR arm and stays true of it).
 #
 # WHY NOT --check YET. On macOS the paper serif stack resolves to Iowan Old
 # Style; a Linux image has neither Iowan nor Source Serif 4 and falls further
@@ -81,6 +93,10 @@ on:
     inputs:
       recapture:
         description: "Re-capture rig/baselines/ inside this runner image and upload the panel as an artifact"
+        type: boolean
+        default: false
+      check:
+        description: "Run gate.sh --panel --check in this image: diff every fixture's measurements against the committed baselines"
         type: boolean
         default: false
 
@@ -164,8 +180,16 @@ jobs:
       # THE GATE. Nonzero on any content assertion failure. Not piped to
       # anything: a gate piped to `tail` reports tail's exit code.
       - name: Render rig gate
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.recapture }}
+        if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.recapture && !inputs.check) }}
         run: bash tooling/paper-excellence/rig/gate.sh
+
+      # THE NUMERIC ORACLE, on demand. --panel --check re-shoots every fixture
+      # under the baseline capture env and diffs the measurements against the
+      # committed report.json. Only meaningful inside the image that produced
+      # them, which is why it has no laptop and no pull_request route.
+      - name: Report check against the committed baselines
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.check }}
+        run: bash tooling/paper-excellence/rig/gate.sh --panel --check
 
       # THE RE-CAPTURE. Writes into rig/baselines/ in the checkout, prints the
       # diff against the committed panel, and uploads the result. The workflow

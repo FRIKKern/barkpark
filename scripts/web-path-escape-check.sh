@@ -168,6 +168,21 @@ js/tsconfig.base.json
 # RETIRE THIS ROW if ci.yml's web-checks still calls `pnpm --filter` directly
 # and you are content that turbo's task graph cannot reach web/'s inputs.
 js/turbo.json
+
+# ---- the MAX_HITS lock's own scan roots (task-19107773e2c41c5d) -------------
+# web/__tests__/max-hits-lock.test.ts DERIVES the MAX_HITS declaration set by
+# WALKING web/, templates/ and js/ — it refuses to trust a path list, because
+# the row that first noticed the mirrored constant counted two sites when there
+# were six. The census below cannot surface those two reads: the test composes
+# its roots from `new URL("../../", import.meta.url)` + path.join, not from a
+# `../`-escaping string literal, and EXISTENCE-of-literal is what arm 3 keys on.
+# So they are declared by hand. Without these rows a seventh `const MAX_HITS`
+# landing in templates/ or js/ dispatches NO web job at all and the lock is
+# blind on the exact PR it exists to red — the vacuous green this whole file
+# was written to refuse.
+# RETIRE THESE ROWS only together with that test.
+templates/**
+js/**
 SET
 }
 
