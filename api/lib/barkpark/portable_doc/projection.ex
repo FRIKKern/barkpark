@@ -180,19 +180,48 @@ defmodule Barkpark.PortableDoc.Projection do
     # so its coverage + no-drift profile are identical to body's. Pure: the ONE
     # media lookup a rich image needs is an injected closure in
     # `render_opts[:preview]` (callers that hold Repo + scope build it via
-    # `Barkpark.Preview.media_resolver/1`). GATED on that key: projection callers
+    # `Barkpark.Preview.media_resolver/1`, or declared as `:media_scope` and bound
+    # here by `bind_media_resolver/1` — the content>preview inversion seam).
+    # GATED on that key: projection callers
     # that don't opt in (sheets/forms/proposals scaffolds, doctrine backfill)
     # must NOT stamp — a resolver-less re-save would overwrite a rich card AND
     # shadow the reader's read-time fallback, which only recomputes when
     # content["preview"] is absent. `Render.render_blocks/2` ignores the key.
     case Map.get(render_opts, :preview) do
       opts when is_map(opts) ->
-        Map.put(projected, "preview", Preview.project(projected, blocks, opts))
+        Map.put(
+          projected,
+          "preview",
+          Preview.project(projected, blocks, bind_media_resolver(opts))
+        )
 
       _ ->
         projected
     end
   end
+
+  # INVERSION SEAM for the content>preview boundary edge (task-1e93b1d801ff4696,
+  # edge 1). The kernel (`Barkpark.Content.Writer`, `Content.Papers.BlockOps`)
+  # used to NAME `Barkpark.Preview` solely to build the resolver closure — a
+  # kernel→feature edge whose only content was "bind this scope". It now declares
+  # the thing it actually owns, the write's TENANCY SCOPE, as `:media_scope`, and
+  # this module — which already owns the `Preview.project/3` call and is already
+  # the sole projection entry point — binds the closure. No new concept edge:
+  # portable_doc already names Preview (alias above); content no longer does.
+  #
+  # An explicit `:media_resolver` still WINS and suppresses the scope (test
+  # fixtures and the mix backfill inject their own stub/closure); a bare map with
+  # neither key is untouched, so a resolver-less caller still degrades media
+  # images to nil exactly as before.
+  defp bind_media_resolver(%{media_resolver: _} = opts), do: Map.delete(opts, :media_scope)
+
+  defp bind_media_resolver(%{media_scope: scope} = opts) when is_list(scope) do
+    opts
+    |> Map.delete(:media_scope)
+    |> Map.put(:media_resolver, Preview.media_resolver(scope))
+  end
+
+  defp bind_media_resolver(opts), do: Map.delete(opts, :media_scope)
 
   # Drop the field names that were bound in the prior block list but are no
   # longer bound (unbind orphans / the old name of a rename), THEN fold each
