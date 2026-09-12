@@ -313,6 +313,8 @@
 //   UNCHANGED and still never reads data-state — that E2 boundary declared above
 //   stands; the closure lives in the app.js/app.css-paired test, not here.
 //
+//   @boundary capability:css-check-e2-attribute-blindness test:cloud/priv/static/__app.test.mjs#liveness chip: every state's .live-dot rule DECLARES a background (per-declaration fence)
+//
 // Zero dependencies. Run: node __css_check.mjs
 
 import fs from "node:fs";

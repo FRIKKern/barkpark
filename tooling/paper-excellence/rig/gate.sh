@@ -19,6 +19,13 @@
 #             panel only: abandon the census at the first failing fixture
 #             (the pre-2026-09-11 behaviour; see §Census below)
 #
+# EVERY run first runs `fixture-list-check.sh` (no network, no browser): it
+# reds if `fetch-fixtures.sh`'s no-argument slug list has stopped covering
+# every published `fixtures/*.json`, or if a fixture landed without the
+# `source_rev` / `_source` provenance key that derivation reads. That is how
+# the advisory paper-rig workflow now answers the question on every pull
+# request touching rig/**.
+#
 # §Census — a panel run is a CENSUS, not a build gate. Until 2026-09-11 the
 # fixture loop ran under `set -e`, so ONE failing fixture aborted the whole
 # command and the run never reached — or mentioned — the fixtures behind it. A
@@ -103,7 +110,7 @@ while [ $# -gt 0 ]; do
     --check) CHECK=1 ;;
     --stop-on-first-failure) KEEP_GOING=0 ;;
     -h | --help)
-      sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     -*) die "unknown flag $1 (see --help)" ;;
@@ -135,6 +142,12 @@ OUT_DIR="${OUT_DIR_ARG:-${TMPDIR:-/tmp}/bp-paper-rig}"
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 SHOTS_DIR="$OUT_DIR/shots"
+
+# The panel is a set of FILES; the refresh tool has to be able to name the same
+# set. `fixture-list-check.sh` asserts that it does — cheap, hermetic, and
+# before the first render so a red is the first thing the log says. See its
+# header for the two assertions and their mutation proofs.
+bash "$RIG_DIR/fixture-list-check.sh" || die "fixture-list-check.sh failed (see above)"
 
 FIXTURES=()
 if [ "$PANEL" = 1 ]; then

@@ -12,6 +12,8 @@ bash tooling/paper-excellence/rig/gate.sh --panel      # every committed fixture
 bash tooling/paper-excellence/rig/gate.sh --panel --check   # …and diff the committed numbers
 bash tooling/paper-excellence/rig/baseline.sh          # re-capture the committed panel
 bash tooling/paper-excellence/rig/fetch-fixtures.sh    # the ONE networked step: refresh fixtures
+bash tooling/paper-excellence/rig/fetch-fixtures.sh --list   # …which slugs that would touch, no network
+bash tooling/paper-excellence/rig/fixture-list-check.sh      # does that list still cover the panel?
 ```
 
 Any path the shell accepts works: `gate.sh` resolves the fixture and the out-dir
@@ -27,9 +29,21 @@ so the natural repo-relative invocation
 | `census.mjs` | the heavy-rule census — one measurement function, run on the artifact AND on a rendered paper |
 | `gate.sh` | render + shoot a committed fixture (`heggemsnes-act` by default, `--panel` for all 9); nonzero on any content failure |
 | `baseline.sh` | the same path, writing into `baselines/` so a refresh is a reviewable diff; its no-argument slug list is DERIVED from `fixtures/*.json`, so a new fixture cannot be added without the default re-baseline covering it |
-| `fetch-fixtures.sh` | pulls paper blocks from Barkpark via `bp` and rewrites `fixtures/*.json`; its default slug list is every **published** fixture (`design-probe` is authored and has no live doc — `eight-minute-erasure` once drifted purely by being absent from this list) |
-| `fixtures/` | 9 papers, each stamped with the `source_rev` it was taken from (`design-probe` and `stat-partial-row` are authored, not published) |
+| `fetch-fixtures.sh` | pulls paper blocks from Barkpark via `bp` and rewrites `fixtures/*.json`; its no-argument slug list is **DERIVED** from `fixtures/*.json` — every fixture carrying a `source_rev` (published, so a live document stands behind it), never one carrying `_source` (authored, `bp doc get` would 404). `--list` prints that set without touching the network |
+| `fixture-list-check.sh` | asserts the two facts the derivation rests on, hermetically, and is run by `gate.sh` on every run: every fixture carries exactly one of `source_rev` / `_source`, and `fetch-fixtures.sh --list` equals a second derivation of the published set written in node rather than python |
+| `fixtures/` | every committed fixture is either **published** (stamped with the `source_rev` it was taken from) or **authored** (carries `_source`: hand-written, no live paper). `bash fixture-list-check.sh` prints the split — 7 published, 2 authored, 9 fixtures on 2026-09-12 |
 | `baselines/` | the committed panel (see below) |
+
+**Why the fetch list is derived and not typed** (task-15d30569241d3542). It was
+a hand-written array of slugs until 2026-09-12, and a typed list is a snapshot
+of the panel on the day someone typed it. `eight-minute-erasure` drifted in
+2026-08-17 purely by being absent from that array; `agent-flight-recorder-charter`
+(added 2026-09-10 by #17199) was absent from it again three weeks later, so a
+bare refresh would have silently skipped it — the same failure, twice, from the
+same cause. `baseline.sh` and `gate.sh --panel` had already stopped curating;
+this one now does too, and `fixture-list-check.sh` reds if it is ever typed
+back. The exclusion is a PREDICATE (`_source` present) and not a skip list, so
+a third authored fixture needs no edit here.
 
 ## How it stays hermetic
 
@@ -114,8 +128,9 @@ renderer or paper-CSS change reached `main` having been photographed by nobody.
 
 | trigger | what runs |
 |---|---|
-| `push` to main / `pull_request` touching the renderer, `api/assets/paper-surface/**`, `bulldocs_live.ex` or `rig/**` | `gate.sh` on the default fixture — 8 cells, 5 DOM-content assertions each |
-| `workflow_dispatch` with `recapture: true`, or a `rig-recapture` LABEL on a pull request | `baseline.sh` over all 8 fixtures **inside the runner image**, then `git diff --stat` and an upload of `baselines/` as an artifact |
+| `push` to main / `pull_request` touching the renderer, `api/assets/paper-surface/**`, `bulldocs_live.ex` or `rig/**` | `fixture-list-check.sh`, then `gate.sh` on the default fixture — 8 cells, 5 DOM-content assertions each |
+| `workflow_dispatch` with `check: true` | `gate.sh --panel --check` **inside the runner image** — the numeric oracle over the whole panel, diffed against the committed `baselines/*.report.json` |
+| `workflow_dispatch` with `recapture: true`, or a `rig-recapture` LABEL on a pull request | `baseline.sh` over **every** committed fixture (its no-argument list is derived from `fixtures/*.json`, so this arm cannot fall behind the panel) **inside the runner image**, then `git diff --stat` and an upload of `baselines/` as an artifact |
 
 The label route is not a convenience. `workflow_dispatch` is only dispatchable
 once the workflow file is on the **default** branch, so the very capture that has
@@ -140,7 +155,18 @@ that job: the rig needs a browser, not the SDK monorepo.
 The PR arm does **not** pass `--check`. The committed `report.json` oracle is a
 numeric diff, and until the baselines were re-captured in this image (see
 below) a `--check` there would have compared a Linux run against macOS numbers
-and reddened on font fallback rather than on a layout regression.
+and reddened on font fallback rather than on a layout regression. It stays off
+the PR arm even now that the baselines ARE Linux: `--check` re-shoots the whole
+panel, and a host-dependent number is a thing to ASK about on demand, not a
+thing every pull request must survive. The `check: true` dispatch input is that
+question — `gate.sh --panel --check` in the same image the baselines came from,
+which is the only host where a red there means a layout regression rather than
+a font stack.
+
+The PR arm does, however, run `fixture-list-check.sh` first (it is the first
+thing `gate.sh` does). That one IS hermetic — no browser, no network, no
+host-dependent number — so a pull request that lets `fetch-fixtures.sh`'s
+default list fall behind `fixtures/*.json` reds a visible check.
 
 ### Which image produced the committed baselines
 
@@ -176,7 +202,12 @@ nobody can reproduce.
 
 ## Baselines
 
-`baselines/` holds the 9-paper panel: `agent-flight-recorder-charter`,
+`baselines/` holds one panel per committed fixture — **45 files on 2026-09-12**,
+and that number is derived, not decreed: `2 schemes x 2 widths x 9 fixtures = 36`
+JPEGs plus one `report.json` each. Re-derive it rather than trusting this
+sentence — `ls tooling/paper-excellence/rig/baselines | wc -l`, and
+`bash tooling/paper-excellence/rig/fixture-list-check.sh` for the fixture count
+it is a function of. Today the nine are: `agent-flight-recorder-charter`,
 `design-probe`, `eight-minute-erasure`,
 `heggemsnes-act`, `hobby-hardening-capstone`, `mechanical-spacing-doctrine`,
 `paper-excellence-wave-2026-08-12`, `portabledoc-showcase`, `stat-partial-row`
