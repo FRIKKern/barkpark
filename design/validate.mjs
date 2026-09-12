@@ -282,9 +282,31 @@ for (const f of ["chrome", "mono", "reading"]) {
 
 // --- type scales -----------------------------------------------------------
 const type = tokens.type || {};
-for (const step of ["xs", "sm", "base", "lg", "xl", "2xl"]) {
+// Every chrome step carries size + lineHeight + WEIGHT. The weight is required
+// (not optional like type.reading's per-step override): the chrome ladder is a
+// UI voice ladder, and a step whose size is emitted while its weight is not is
+// exactly the hole that let web/components/styleguide.tsx hand-keep a parallel
+// 700/700/600/400/400/400 column beside this file (au-r4-web-type-ladder).
+const CHROME_WEIGHT_RANGE = (tokens.font && tokens.font.chrome && tokens.font.chrome.weightRange) || [100, 900];
+const CHROME_ORDER = ["xs", "sm", "base", "lg", "xl", "2xl"];
+for (const step of CHROME_ORDER) {
   const s = (type.chrome || {})[step];
   ok(s && typeof s.size === "number" && typeof s.lineHeight === "number", `type.chrome.${step} needs {size,lineHeight}`);
+  ok(
+    s && Number.isInteger(s.weight) && s.weight >= CHROME_WEIGHT_RANGE[0] && s.weight <= CHROME_WEIGHT_RANGE[1],
+    `type.chrome.${step}.weight must be an integer inside font.chrome.weightRange [${CHROME_WEIGHT_RANGE.join(", ")}]`,
+  );
+}
+// The chrome ladder must never get LIGHTER as it gets larger. A 26px step set
+// below the 14px body weight is not a scale, it is a typo — and because the
+// styleguide renders straight off these numbers, the typo would ship as the spec.
+for (let i = 1; i < CHROME_ORDER.length; i++) {
+  const prev = (type.chrome || {})[CHROME_ORDER[i - 1]] || {};
+  const cur = (type.chrome || {})[CHROME_ORDER[i]] || {};
+  ok(
+    cur.weight >= prev.weight,
+    `type.chrome.${CHROME_ORDER[i]}.weight (${cur.weight}) is lighter than the smaller step ${CHROME_ORDER[i - 1]} (${prev.weight}); the chrome ladder is monotonic in weight`,
+  );
 }
 for (const step of ["body", "h1", "h2", "h3"]) {
   const s = (type.reading || {})[step];
