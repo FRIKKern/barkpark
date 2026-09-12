@@ -253,6 +253,110 @@ defmodule Barkpark.Tasks.Stage do
   # OPTIONAL, because a reason is allowed to say it cannot be checked.
   @disposition_rerun_key "disposition_rerun"
 
+  # ── THE FIFTH DURABLE KEY: WHO OWNS THE ADJUDICATION ──────────────────────
+  # (api half of pds-bl-disposition-owner-role-registry)
+  #
+  # `content.disposition_owner` has ridden PDS ledger rows since the epic
+  # began and had, before this hunk, NO schema declaration, NO validator and
+  # NO code writer anywhere in `api/lib` or `internal/` — so a census could
+  # only ever assert "non-empty and slug-shaped" and green on sixteen strings
+  # nobody had defined. PR #17836 defines them:
+  # `tooling/pds/disposition-owner-registry.json` is THE registry of legal
+  # owners, derived from an 8,710-row ledger walk, and it RULES the `wave-N`
+  # shape refused outright — an expiring owner self-clears when the wave
+  # closes, and with no writer repo-wide there is nothing to hang an
+  # auto-reassignment on, so the honest option is to fail LOUDLY at assignment
+  # time instead of silently at wave close.
+  #
+  # THE ROLE LIST IS NOT RETYPED HERE. It is read from that JSON at COMPILE
+  # time through `@external_resource` — the same loader
+  # `Content.Papers.PreGateRegister` uses for its sibling register under
+  # `tooling/pds/`, and for the same release-shaped reason: the release the
+  # server runs is built from `api/` and ships no `tooling/` directory, so a
+  # RUNTIME read would ALWAYS miss in a release while passing every
+  # `mix test`. A hand-copied Elixir list is the exact defect this row exists
+  # to remove; `@external_resource` also recompiles this module when the
+  # registry changes, which is the cadence a registry changes at (a PR).
+  #
+  # IT FAILS CLOSED, NOT OPEN — the one place this loader deliberately differs
+  # from its sibling. `PreGateRegister` compiles to an empty register and
+  # disables a cosmetic badge; an absent OWNER registry must never mean "every
+  # owner is legal". Absent → `@durable_owner_roles` is `[]` → every
+  # `disposition_owner` WRITE is refused, and the refusal names the missing
+  # path. Until #17836 merges, that is the state on `main`.
+  @disposition_owner_key "disposition_owner"
+
+  @owner_registry_path Path.expand(
+                         "../../../../tooling/pds/disposition-owner-registry.json",
+                         __DIR__
+                       )
+  @external_resource @owner_registry_path
+
+  @owner_registry (if File.exists?(@owner_registry_path) do
+                     Jason.decode!(File.read!(@owner_registry_path))
+                   else
+                     # `IO.puts(:stderr, …)`, NOT `IO.warn`, and the difference
+                     # is load-bearing: `mix compile --warnings-as-errors` is a
+                     # merge gate, so an `IO.warn` here would turn "the registry
+                     # has not merged yet" into a BUILD failure — which reads as
+                     # a broken tree, not as a closed door. The door closes at
+                     # RUNTIME (the role set is empty, every owner write is
+                     # refused, and the 422 names this path); the build stays
+                     # green and says why on stderr.
+                     IO.puts(
+                       :stderr,
+                       "disposition-owner registry absent at #{@owner_registry_path} — " <>
+                         "FAILING CLOSED: every disposition_owner write is refused until " <>
+                         "tooling/pds/disposition-owner-registry.json (PR #17836) is present"
+                     )
+
+                     %{}
+                   end)
+
+  # Only `durable-role` entries are legal owners. The registry's `refused[]`
+  # list is carried too, but ONLY to make a refusal teach — membership is
+  # decided by `roles[]`, never by absence from `refused[]`.
+  @durable_owner_roles @owner_registry
+                       |> Map.get("roles", [])
+                       |> Enum.filter(&(Map.get(&1, "class") == "durable-role"))
+                       |> Enum.map(&Map.get(&1, "slug"))
+                       |> Enum.reject(&is_nil/1)
+                       |> Enum.sort()
+
+  # Held as a set as well as a list. The membership test reads the SET on
+  # purpose: in a fail-closed build the list is `[]`, and `owner in []` is a
+  # literal-false the compiler reports as a typing violation — which would turn
+  # an absent registry into a BUILD failure under `--warnings-as-errors`
+  # instead of the loud runtime refusal it is supposed to be.
+  @durable_owner_role_set MapSet.new(@durable_owner_roles)
+
+  @refused_owners @owner_registry
+                  |> Map.get("refused", [])
+                  |> Enum.reject(&is_nil(Map.get(&1, "slug")))
+                  |> Map.new(
+                    &{Map.get(&1, "slug"),
+                     %{
+                       class: Map.get(&1, "class"),
+                       reason: Map.get(&1, "reason"),
+                       remedy: Map.get(&1, "remedy")
+                     }}
+                  )
+
+  # The expiring-owner pattern is the REGISTRY's, not a retyped one; the
+  # fallback only ever applies in the fail-closed (registry absent) build,
+  # where every owner is refused anyway. Kept as a STRING and compiled per
+  # call on purpose: a compiled `Regex` cannot be escaped into a module
+  # attribute on every Elixir this repo builds under.
+  @expiring_owner_pattern get_in(@owner_registry, ["expiring_owner_ruling", "pattern"]) ||
+                            "^wave-[0-9]+$"
+
+  # A ledger task id written into the owner slot. `pds-w25-round-terminal` and
+  # `pds-w25-round-parked` are the measured specimens — those are caught by the
+  # membership arm (they are slug-shaped and simply not roles), so this arm
+  # carries the one shape a membership check cannot TEACH about: the canonical
+  # `task-<hex>` doc id.
+  @task_id_owner_pattern ~r/^task-[0-9a-f]{8,}$/
+
   # What a refused rerun is told to write instead. Each of these reports the
   # PROBE's own failure as a non-zero exit, which is the whole property the
   # screen exists to preserve.
@@ -340,6 +444,70 @@ defmodule Barkpark.Tasks.Stage do
   """
   @spec disposition_rerun_key() :: String.t()
   def disposition_rerun_key, do: @disposition_rerun_key
+
+  @doc """
+  The content key the ADJUDICATION OWNER is written to — who is accountable
+  for the verdict on this row (api half of
+  pds-bl-disposition-owner-role-registry).
+  """
+  @spec disposition_owner_key() :: String.t()
+  def disposition_owner_key, do: @disposition_owner_key
+
+  @doc """
+  Every legal `disposition_owner`, read from
+  `tooling/pds/disposition-owner-registry.json` at compile time — the
+  `durable-role` entries of `roles[]`, sorted. `[]` means the registry was
+  absent when this module compiled, and the door then refuses EVERY owner
+  write (fail closed).
+  """
+  @spec durable_owner_roles() :: [String.t()]
+  def durable_owner_roles, do: @durable_owner_roles
+
+  @doc "Absolute path of the owner registry this module compiled against."
+  @spec owner_registry_path() :: String.t()
+  def owner_registry_path, do: @owner_registry_path
+
+  @doc "True when the owner registry was present at compile time."
+  @spec owner_registry_loaded?() :: boolean()
+  def owner_registry_loaded?, do: @durable_owner_roles != []
+
+  @doc "The registry's own `wave-N` pattern, as the string it is stored as."
+  @spec expiring_owner_pattern() :: String.t()
+  def expiring_owner_pattern, do: @expiring_owner_pattern
+
+  @doc """
+  The registry's `refused[]` entry for a slug, or `nil`. Carried ONLY so a
+  refusal can quote the registry's own reason — membership is decided by
+  `roles[]`, never by absence from this map.
+  """
+  @spec refused_owner_entry(term()) :: map() | nil
+  def refused_owner_entry(slug) when is_binary(slug), do: Map.get(@refused_owners, slug)
+  def refused_owner_entry(_), do: nil
+
+  @doc """
+  THE OWNER SCREEN AS A PURE FUNCTION — `nil` when the value is a legal
+  owner, otherwise the refusal code.
+
+  ORDER IS PART OF THE ANSWER, and it is the REGISTRY's order:
+  `is_expiring_owner()` is checked BEFORE membership there, so a `wave-N` slug
+  is refused even if someone adds it to `roles[]`. This mirrors that.
+
+    * `:expiring_owner`   — matches the registry's `wave-N` pattern
+    * `:task_id_shape`    — a ledger task id in the owner slot
+    * `:not_a_string`     — anything that is not a binary
+    * `:unregistered`     — well-shaped, not a `durable-role` of the registry
+  """
+  @spec owner_refusal_code(term()) :: atom() | nil
+  def owner_refusal_code(owner) when is_binary(owner) do
+    cond do
+      Regex.match?(Regex.compile!(@expiring_owner_pattern), owner) -> :expiring_owner
+      Regex.match?(@task_id_owner_pattern, owner) -> :task_id_shape
+      MapSet.member?(@durable_owner_role_set, owner) -> nil
+      true -> :unregistered
+    end
+  end
+
+  def owner_refusal_code(_owner), do: :not_a_string
 
   @doc """
   The rerun shapes a refusal names as the legal substitute — each reports the

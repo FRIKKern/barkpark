@@ -194,4 +194,49 @@ defmodule Barkpark.Tasks.SchemaAdjudicationTripleTest do
       assert length(Enum.uniq(declared)) == 4
     end
   end
+
+  # ── THE FIFTH KEY: THE ADJUDICATION OWNER ─────────────────────────────────
+  # (api half of pds-bl-disposition-owner-role-registry)
+  #
+  # Same rule, same lock: the NAME is `Stage.disposition_owner_key/0` and the
+  # `options` list IS `Stage.durable_owner_roles/0` — which Stage reads from
+  # `tooling/pds/disposition-owner-registry.json` (PR #17836) at compile time,
+  # never retypes. Removing the declaration or diverging the key reds here;
+  # diverging the ROLE LIST from the JSON reds in
+  # `test/barkpark/tasks/disposition_owner_registry_lock_test.exs`.
+  #
+  # UNLIKE THE FOUR ABOVE, this one IS enforced on the write path:
+  # `Mutations.ensure_disposition_owner_registered/4` refuses an unregistered
+  # owner, the `wave-N` shape and a task id, proven by
+  # `test/barkpark/content/disposition_owner_gate_test.exs`.
+  describe "the adjudication OWNER is declared and locked to Stage" do
+    test "disposition_owner appears as a task schema field, named by Stage's accessor" do
+      names = Tasks.task_schema().fields |> Enum.map(& &1["name"])
+
+      assert Stage.disposition_owner_key() in names,
+             "disposition_owner is undeclared — a schema-derived surface cannot see it " <>
+               "(#{inspect(names)})"
+    end
+
+    test "its `options` IS Stage.durable_owner_roles/0, not a hand-copied list" do
+      field = fields_by_name()[Stage.disposition_owner_key()]
+
+      assert field["options"] == Stage.durable_owner_roles(),
+             "the declaration's options have drifted from the registry-backed list"
+    end
+
+    test "it sits in `work`, beside the rest of the adjudication family" do
+      field = fields_by_name()[Stage.disposition_owner_key()]
+      group_names = Tasks.task_schema().groups |> Enum.map(& &1["name"])
+
+      assert field["group"] == "work"
+      assert field["group"] in group_names
+    end
+
+    test "the description points at the registry, so a reader can find the vocabulary" do
+      field = fields_by_name()[Stage.disposition_owner_key()]
+
+      assert field["description"] =~ "tooling/pds/disposition-owner-registry.json"
+    end
+  end
 end
