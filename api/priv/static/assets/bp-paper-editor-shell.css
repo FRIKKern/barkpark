@@ -799,6 +799,19 @@
     .bp-paper-editor-body .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
     .bp-paper-editor-body .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
     .bp-paper-editor-body .bp-table :is(.bp-table__th, .bp-table__td):empty::before { content: "\200b"; visibility: hidden; }
+    /* TYPED COLUMNS (the `cols` spec — text | num | delta | spark), mirrored
+       byte-for-byte from paper-surface.css `.bp-paper-surface .bp-table__*--num /
+       --spark / __spark`. walk.ex table_col_class/3 emits these modifiers on the
+       canvas cells too (the canvas mounts the reader producer), so without the
+       mirror a typed num column right-aligns in the reader and not in the editor.
+       view_edit_parity_test.exs §2/§5 guard the drift. Keep byte-aligned with the
+       other two copies. */
+    .bp-paper-editor-body .bp-table__th--num,
+    .bp-paper-editor-body .bp-table__td--num { text-align: right; font-variant-numeric: tabular-nums; }
+    .bp-paper-editor-body .bp-table__th--spark,
+    .bp-paper-editor-body .bp-table__td--spark { width: 1%; white-space: nowrap; }
+    .bp-paper-editor-body .bp-table__spark { display: block; width: 96px; height: 20px; }
+    .bp-paper-editor-body .bp-table__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
     /* evidence-band breakout mirrors: .bp-stats / .bp-chart step out of the prose
        column exactly like .bp-table (the reader's three breakout classes). Values
        byte-copied from paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart`
