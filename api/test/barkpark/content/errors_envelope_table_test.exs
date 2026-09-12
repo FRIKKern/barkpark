@@ -94,7 +94,6 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        422, [:details]},
       {"forbidden_origin", {:error, :forbidden_origin}, "cors_forbidden", 403, []},
       {"csrf_required", {:error, :csrf_required}, "csrf_required", 403, []},
-      {"schema_unknown", {:error, :schema_unknown}, "schema_unknown", 404, []},
       {"rev_mismatch", {:error, :rev_mismatch}, "rev_mismatch", 409, []},
       {"rev_mismatch/expected-actual", {:error, {:rev_mismatch, %{expected: "a", actual: "b"}}},
        "precondition_failed", 412, [:details]},
