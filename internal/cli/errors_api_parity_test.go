@@ -235,7 +235,6 @@ func TestUnmappedAndAmbiguousCodesStillFallToGeneric(t *testing.T) {
 func TestBackfillDidNotMoveExistingBuckets(t *testing.T) {
 	for code, want := range map[string]int{
 		"not_found":         exitNotFound,
-		"schema_unknown":    exitNotFound,
 		"share_expired":     exitNotFound,
 		"unauthorized":      exitAuth,
 		"forbidden":         exitAuth,

@@ -129,7 +129,7 @@ import { fileURLToPath } from "node:url";
 import { bootScenario, makeDom, flush } from "./smoke.mjs";
 import { SCENARIOS, SCENARIO_NAMES, route } from "./scenarios.mjs";
 import { parseStaticControlIds } from "./breakpoint-sweep.mjs";
-import { F_CLIENT, F_UNKNOWN, ELEVATED, fenceForRoute, overlayGapReport } from "../__route_fence.mjs";
+import { F_CLIENT, F_UNKNOWN, ELEVATED, fenceForRoute, overlayGapReport, pinHatchReport } from "../__route_fence.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = path.join(HERE, "..", "index.html");
@@ -267,7 +267,19 @@ const HOOKS = [
   // conditional on being enabled — and their fence is recorded as elevated so
   // that the day one of them renders ENABLED to a member, it is a FINDING and
   // not a silent new key.
-  { key: "button.btn.btn-ghost.btn-sm", route: "POST /v1/instances/:*/lifecycle", what: "instance lifecycle verb, drawn disabled-and-explained for a member (D428)", source: "census: the lifecycle band is team_admin; a member gets the disabled ghost with the grant sentence" },
+  // ROUTE RE-POINTED (this row and the one below). Both used to type
+  // `POST /v1/instances/:*/lifecycle`, which is a BAND LABEL and not a router
+  // route: the census PIN has never carried a row on it, so the "census:" prose
+  // each row cited could not have been checked by anyone, and the shared table
+  // had to record the pair as pin:null. This key is adminWriteControlHtml's
+  // disabled arm, whose grant arm mounts the instance-admin band's writes; of
+  // those, DELETE /v1/barkparks/:* is the one the shared table carries and the
+  // PIN pins twice (runDecommission, removeInstance — the header's Retry
+  // removal is drawn by THIS arm). Every write in the band is
+  // require_current_team_admin, so the fence ANSWER is unchanged
+  // (elevated:team_admin, before and after) — what changed is that the answer
+  // is now derived from a route the census re-reads.
+  { key: "button.btn.btn-ghost.btn-sm", route: "DELETE /v1/barkparks/:*", what: "instance-admin write, drawn disabled-and-explained for a member (D428) — adminWriteControlHtml's hookless disabled arm", source: "census PIN: removeInstance / runDecommission, both require_current_team_admin; re-read by the shared table's PIN cross-arm" },
   // cch-w46-bl RE-KEYED THIS ROW, and the re-key IS the fix landing. `button.btn.btn-sm`
   // was the GENERIC COLLIDING KEY this row's filing names as the harm: the CLI rail's
   // refused arm emitted a bare `<button class="btn btn-sm" type="button" disabled>` with
@@ -287,7 +299,19 @@ const HOOKS = [
   // The row ABOVE keeps its class-only key on purpose: `button.btn.btn-ghost.btn-sm` is
   // adminWriteControlHtml's disabled arm, which is still hookless and belongs to a later
   // PR. The two rows differing is the honest state of the tree today, not an oversight.
-  { key: "button.btn.btn-sm[data-life-verb]", route: "POST /v1/instances/:*/lifecycle", what: "the CLI rail's lifecycle verb, drawn disabled for a member — one identity whether offered or refused (cch-w46-bl)", source: "same band as the row above" },
+  //
+  // ROUTE RE-POINTED for the same reason as the row above, and read off the
+  // rail's own model: lifecycleActionsModel gives every verb but decommission a
+  // CLI chip (capability true) or a server-gap disabled control (capability
+  // false), neither of which calls anything; decommissionAction is the ONE verb
+  // the authority answer decides, and its live arm's click runs
+  // confirmDecommission -> runDecommission, which issues DELETE
+  // /v1/barkparks/:<id>. So the write this row watches for is that route, not a
+  // lifecycle endpoint the console never calls. The row is KEPT rather than
+  // deleted: the affordance is not a routeless CLI chip, it is the refused arm
+  // of a real console write, and the day it renders ENABLED to a member it must
+  // still be a finding.
+  { key: "button.btn.btn-sm[data-life-verb]", route: "DELETE /v1/barkparks/:*", what: "the CLI rail's lifecycle verb, drawn disabled for a member — one identity whether offered or refused (cch-w46-bl); decommission is the one verb on this arm with a route", source: "census PIN: runDecommission — api(\"DELETE\", \"/v1/barkparks/\" + id), require_current_team_admin" },
 ];
 // THE DERIVATION, applied once to every row that names a route (cch-w50-bl).
 // A client-only row (route null) is `client`; a routed row gets the shared
@@ -824,6 +848,17 @@ async function main() {
     fenceGap.lines.length + " route(s); the shared inline-cond overlay catches them" +
     (fenceGap.lines.length ? ":\n" + fenceGap.lines.map((l) => "                    " + l).join("\n") : "") + "\n");
   for (const b of fenceGap.bad) broken.push("SHARED FENCE TABLE: " + b);
+
+  // 3b — THE PIN HATCH. Every routed hook row above resolves through the shared
+  // table, so a table row that names no census PIN key is a hook fence nothing
+  // re-reads. The hatch is legal for READS alone (the PIN is a write call-site
+  // census), and this arm is the predicate that says so — it is what replaced
+  // the two lifecycle rows' band label with a route the census pins.
+  const hatch = pinHatchReport();
+  out("  " + (hatch.ok ? "ok  " : "FAIL") + " pin-hatch       — " + hatch.reads.length +
+    " PIN-less route(s) in the shared table, all reads" +
+    (hatch.reads.length ? " (" + hatch.reads.map((r) => r.key).join(", ") + ")" : "") + "\n");
+  for (const b of hatch.bad) broken.push("SHARED FENCE TABLE: " + b);
 
   // 4 — the floor. The only remaining defence against a corpus that renders
   // nothing and passes.

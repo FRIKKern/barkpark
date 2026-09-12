@@ -63,6 +63,7 @@ defmodule BarkparkWeb.WorkspaceController do
   alias Barkpark.Tenancy.WorkspaceBundle.Archive
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
+  alias Barkpark.Tenancy.WorkspaceBundle.SingleFlight
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -283,7 +284,80 @@ defmodule BarkparkWeb.WorkspaceController do
   Any OTHER engine error answers a logged 500 `internal_error`, never 404. A
   404 on this route means the workspace is genuinely absent — an unknown slug,
   or a row deleted between the slug lookup and the export — and nothing else.
+
+  ## SINGLE-FLIGHT (PDS-D719)
+
+  This route used to have NO concurrency guard: `:require_admin` is an AUTH
+  gate, and N concurrent admin requests each paid the peak independently. It
+  now takes a slot from `WorkspaceBundle.SingleFlight` after the tenant gate
+  and releases it in an `after`; a refused second caller gets **409
+  `export_already_running`** with a `Retry-After` header and a `reason` that
+  distinguishes "your own workspace is already exporting"
+  (`workspace_export_in_flight`, slug echoed) from "some other workspace holds
+  the only slot" (`export_capacity_reached`, slug deliberately withheld — the
+  caller proved admin on theirs and on nothing else).
+
+  The guard is keyed on the NODE, not the workspace, and the reason is the
+  free-space preflight documented above: it reads `df` once before the first
+  spill byte and can only ever guarantee `required ≤ free` per caller, never
+  `Σ required ≤ free` — so its margin is divided by the number of concurrent
+  exports and the check goes vacuous at two. Full derivation, and what this
+  does NOT fix about the janitor's cross-slot race, in `SingleFlight`.
   """
+  # THE `send_file` / `File.rm` SOBELOW ANNOTATION MOVED WITH THE CODE, to
+  # `stream_bundle/3` below. `export/2` no longer contains either call, and an
+  # annotation left on a function that does not raise the finding is a skip
+  # that silently stops covering anything.
+  def export(conn, %{"workspace_slug" => slug} = params) do
+    token = conn.assigns[:api_token]
+
+    # ADMISSION CONTROL (PDS-D719), ordered AFTER both halves of the tenant
+    # gate and before any bundle work. A denial must not spend a slot, and a
+    # caller who is about to get 404/403 must never learn from a 409 that an
+    # export is running — the whole reason `SingleFlight` withholds the other
+    # tenant's slug is undone if the gate order lets an unauthorized caller
+    # probe it.
+    #
+    # The slot is released in the `after` below, which covers the raising
+    # paths too (a socket killed mid-`send_file` raises a CATCHABLE
+    # `Bandit.TransportError`). The path `after` CANNOT cover — the holder
+    # killed outright — is covered by the guard's own monitor, not by this
+    # clause; see `SingleFlight`'s moduledoc.
+    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         true <- TenancyAuth.workspace_admin?(token, workspace.id),
+         :ok <- SingleFlight.acquire(workspace.slug) do
+      try do
+        stream_bundle(conn, workspace, params)
+      after
+        SingleFlight.release(workspace.slug)
+      end
+    else
+      nil ->
+        {:error, :not_found}
+
+      # The tenant boundary (task-f416f96ef0860f47). Needs its own arm: `false`
+      # matches none of the tuple clauses, so without it a denial is a
+      # WithClauseError (500) rather than a 403.
+      false ->
+        {:error, :forbidden}
+
+      # 409, not 429 and not a queue. Nothing about the caller's RATE is wrong
+      # and no budget replenishes on a timer: the request conflicts with a
+      # specific export running right now, which is exactly what 409 means. A
+      # queue would hold the socket open across the ~130 s server-side phase
+      # plus the leader's drain, and a client that cannot tell "queued" from
+      # "hung" retries — the fan-out the guard exists to prevent.
+      {:error, {:export_in_flight, info}} ->
+        export_in_flight_conflict(conn, info)
+    end
+  end
+
+  # The admitted half of `export/2`. Split out of the action ONLY so the
+  # single-flight slot can be released in one `after` that covers every exit
+  # from it — the error arms below all used to be `export/2`'s own `else`, and
+  # an arm that returned before the release would strand the slot until the
+  # request process died.
+  #
   # @sobelow_skip — Traversal.SendFile is an accepted false positive here, on a
   # stronger argument than the three media_controller sites: `path` is a
   # freshly-created per-request temp tar whose name the ENGINE chose
@@ -293,12 +367,8 @@ defmodule BarkparkWeb.WorkspaceController do
   # The `after File.rm(path)` deletes that same engine-chosen temp tar; no
   # request input reaches the path, so it shares the SendFile argument above.
   # sobelow_skip ["Traversal.SendFile", "Traversal.FileModule"]
-  def export(conn, %{"workspace_slug" => slug} = params) do
-    token = conn.assigns[:api_token]
-
-    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
-         true <- TenancyAuth.workspace_admin?(token, workspace.id),
-         {:ok, path} <- export_bundle(workspace, params) do
+  defp stream_bundle(conn, %Tenancy.Workspace{} = workspace, params) do
+    with {:ok, path} <- export_bundle(workspace, params) do
       # The engine hands ownership of the tar to us. `send_file/3` has finished
       # writing to the socket by the time it returns, so deleting here is safe —
       # and a socket killed mid-send raises a CATCHABLE Bandit.TransportError,
@@ -321,16 +391,6 @@ defmodule BarkparkWeb.WorkspaceController do
         Janitor.disown(path)
       end
     else
-      nil ->
-        {:error, :not_found}
-
-      # The tenant boundary (task-f416f96ef0860f47). Needs its own arm: `false`
-      # matches none of the tuple clauses below, so without it a denial is a
-      # WithClauseError (500) rather than a 403. Ordered before every
-      # `{:error, _}` arm for the same reason.
-      false ->
-        {:error, :forbidden}
-
       {:error, {:export_scope, reason, message}} ->
         conn
         |> put_status(:unprocessable_entity)
@@ -392,6 +452,50 @@ defmodule BarkparkWeb.WorkspaceController do
         error
     end
   end
+
+  # The 409 a refused second caller gets (PDS-D719). Two reasons, because they
+  # are different facts and a client branches differently on them:
+  #
+  #   * `workspace_export_in_flight` — the caller's OWN workspace is exporting.
+  #     The slug is echoed: the caller just proved `workspace_admin?/2` on it,
+  #     so naming it back leaks nothing, and a client polling for its own
+  #     bundle wants to see WHICH one it collided with.
+  #   * `export_capacity_reached` — every slot is held, by an export of some
+  #     other workspace. `info.workspace_slug` is `nil` here BY CONSTRUCTION
+  #     (the guard never puts it in the term) and must stay out of the
+  #     envelope: this caller proved admin on their workspace and on nothing
+  #     else, so naming the in-flight tenant would be exactly the
+  #     cross-tenant existence leak the route's own DENIAL SHAPE section is
+  #     about. `running_for_seconds` is not that — the caller could have
+  #     measured it from the outside.
+  #
+  # `Retry-After` is a real header, not just prose in the body, so a proxy or a
+  # generic HTTP client backs off correctly without parsing the envelope.
+  defp export_in_flight_conflict(conn, info) do
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(info.retry_after_seconds))
+    |> put_status(:conflict)
+    |> json(%{
+      error: %{
+        code: "export_already_running",
+        reason: Atom.to_string(info.reason),
+        message: export_in_flight_message(info),
+        running_for_seconds: info.running_for_seconds,
+        limit: info.limit,
+        hint:
+          "one workspace export runs at a time on this instance, because the " <>
+            "free-space preflight that refuses an export before its first spill " <>
+            "byte measures a single shared filesystem. Retry in " <>
+            "#{info.retry_after_seconds}s."
+      }
+    })
+  end
+
+  defp export_in_flight_message(%{reason: :workspace_export_in_flight, workspace_slug: slug}),
+    do: "an export of workspace #{slug} is already in flight on this instance"
+
+  defp export_in_flight_message(%{reason: :export_capacity_reached}),
+    do: "another workspace export is already in flight on this instance"
 
   # The engine RAISES on an unresolvable scope opt (a scope mistake must never
   # resolve silently into a wrong bundle); the HTTP edge turns that into an

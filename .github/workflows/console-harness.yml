@@ -577,15 +577,20 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
-      # PIN 1431 — re-derived 2026-09-11 on node 20.20.2 (`node --test
-      # cloud/priv/static/__app.test.mjs` -> `# pass 1431`), corroborated by main
-      # run 34647939447 (`console harness: 1431 tests`). It was 1333, a FLOOR,
+      # PIN 1436 — bumped 2026-09-12 from 1431. #17919 (E11 widen, dcbd22469)
+      # grew __app.test.mjs by +5 arms and did NOT bump this literal in the same
+      # diff, so every console PR (and main) reddened here at 1436-vs-1431. Re-derived
+      # on origin/main 7b3145e1d: the CI console-unit run for #17982 reported
+      # `console harness: 1436 test(s)` on the declared node 20; a local node 22 run
+      # shows 1436 tests / 1 fail (only the __node-version self-guard, tally is
+      # node-independent). The prior 1431 was re-derived 2026-09-11 (main run
+      # 34647939447). It was 1333, a FLOOR,
       # and the suite had grown 98 arms past it unnoticed. The comparison is now
       # `-ne` — two-sided and exact — so both DELETION and GROWTH red, and the PR
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1431-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1436-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -601,14 +606,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1431 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1431 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1436 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1436 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1431 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1431 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1431 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1436 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1436 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1436 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1431 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1436 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It

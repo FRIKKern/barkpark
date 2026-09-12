@@ -1767,7 +1767,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # measurements (363 -> 364, then 368 -> 369 pre-computed at 20:00Z) were
   # re-run, not summed; had #17479 landed BEFORE site_doctor.go the value would
   # have been 365, which is why order-flipped deltas are never added.
-  @go_tag_pinned 369
+  # 369 -> 372 (cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main): site_build_log_bytes.go
+  # brings exactly three names the package did not have — `log_scrub` (the
+  # scrub generation the recorder stamped), `tail` and `tail_bytes` (the
+  # bounded tail the reader may print, and its measured size). The other
+  # seventeen tag sites in that file are names already in the union and move
+  # the SITE register below instead. CONTROL: the same scan over origin/main
+  # alone returns 369, byte-equal to the value this line replaces.
+  @go_tag_pinned 372
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1828,14 +1835,19 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "artifact_url" => 2,
     "as_of" => 5,
     "at" => 2,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.Available` joins the single existing declaration — whether the box still holds the bytes at all.
+    "available" => 2,
     "barkpark_id" => 4,
     # 6 -> 7 (dr-w22-s5): `DeployBoxDoor.Basis`.
     "basis" => 7,
     "became_live_at" => 2,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytesRefusal.BoxLogState` joins the single existing declaration — the box-side state the refusal reports verbatim.
+    "box_log_state" => 2,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.BuildID` joins
     # the single existing declaration — the recorder's key, echoed on EVERY
     # answer including the refusals. It rides free on the NAME union.
-    "build_id" => 2,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 2 -> 3. `SiteBuildLogBytes.BuildID` — the same recorder key, now echoed by the BYTES answer too.
+    "build_id" => 3,
     "build_log_url" => 2,
     # MetricsSpaceSites.Bytes joined the two existing `bytes` declarations
     # with the deployed-sites directory total (host-space report, W6 S4).
@@ -1897,14 +1909,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.DeploymentID`
     # joins the single existing declaration — the build-log route is
     # DEPLOYMENT-KEYED, so it echoes the id on every answer.
-    "deployment_id" => 2,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 2 -> 3. `SiteBuildLogBytes.DeploymentID` — the deployment the bytes belong to.
+    "deployment_id" => 3,
     "deployments" => 2,
     # ssw8 (PR #14610): ContentBinding.Detail is the ninth — WHY an `unverified`
     # create-time binding read could not be confirmed. The name already existed
     # package-wide, so `@go_tag_pinned` structurally cannot see this site.
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 9 -> 10. `SiteBuildLogRecord.Detail` — the plane's human
     # sentence on a 409/410/502 build-log refusal.
-    "detail" => 11,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 11 -> 12. `SiteBuildLogBytesRefusal.Detail`.
+    "detail" => 12,
     # 2026-09-10 #17479: ADD => 2, retry.go added. NEWLY DUPLICATED, 1 -> 2: the
     # retry envelope's `details` object joins the single declaration in client.go.
     "details" => 2,
@@ -1920,7 +1934,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 9 -> 10. `SiteBuildLogRecord.Error` — the build-log
     # refusal slug (not_found / box_unbound / build_log_evicted / box_unreachable).
     # 2026-09-10 #17479: 10 -> 11, retry.go added. The 429 envelope's `error`.
-    "error" => 11,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 11 -> 12. `SiteBuildLogBytesRefusal.Error`.
+    "error" => 12,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.EvictedAt` joins the single existing declaration — when the recorder dropped the log.
+    "evicted_at" => 2,
     "evidence" => 2,
     "failed" => 2,
     # deploy/sites-embed-failure-cause: `SiteDeploymentEmbed` (internal/cloudclient) is a THIRD declaration — the fleet list embed learned to name the cause.
@@ -1951,6 +1968,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "label" => 6,
     "last_seen_at" => 2,
     "live" => 2,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.LogBytes` joins the single existing declaration — the recorded size, nil when never measured.
+    "log_bytes" => 2,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.LogPath` joins the single existing declaration.
+    "log_path" => 2,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.LogState` joins the single existing declaration.
+    "log_state" => 2,
     "max" => 2,
     "measured_at" => 2,
     "meters" => 2,
@@ -1981,12 +2004,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "provider" => 3,
     "quantile" => 2,
     "reachable" => 3,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.Record` joins the single existing declaration — which recorder row answered.
+    "record" => 2,
     # dr-bl-w7: 9 -> 10. MetricsSpaceResidual.Reason — the machine-readable slug
     # a surface branches on to word a refusal ("roots-overlap-or-cross-a-mount"),
     # never prose parsed back into a decision.
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one reason site (10 -> 11). `SiteBuildLogRecord.Reason` — the CLOSED relay
     # vocabulary `BuildLog.relay_reason/1` emits instead of an inspected term.
-    "reason" => 11,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 11 -> 12. `SiteBuildLogBytesRefusal.Reason` — the closed refusal vocabulary the bytes reader names instead of inspecting a term.
+    "reason" => 12,
     "refused" => 4,
     # W6 S4: MetricsSpace.ReportedAt — the space report stamps its own cadence,
     # which is why it is not the health beat's `as_of`.
@@ -2024,7 +2050,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "sites" => 5,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 7 -> 8. `SiteBuildLogRecord.Slug` — the site slug the box
     # recorded the build under, echoed from the record.
-    "slug" => 9,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 9 -> 10. `SiteBuildLogBytes.Slug`.
+    "slug" => 10,
     "source" => 3,
     "stage" => 3,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 2 -> 3. `SiteBuildLogRecord.Stages` — the recorded stage
@@ -2070,6 +2097,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # W6 S4: MetricsSpaceRoot.TotalBytes joined MetricsSwap.TotalBytes.
     "total_bytes" => 2,
     "trigger" => 3,
+    # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.Truncated` joins the single existing declaration — whether the tail is a prefix of the log.
+    "truncated" => 2,
     "unit" => 2,
     "unmetered" => 2,
     "unreadable" => 3,
@@ -2112,7 +2141,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 2026-09-10 #17479: retry.go added — the SIXTH non-test source, the client-side
   # 429/Retry-After backoff. All three registers were re-measured against
   # origin/main on the rebased tree (after #17490), not derived from the diff.
-  @cloudclient_sources ~w(client.go deliveries.go retry.go selfupdate.go site_build_log.go site_doctor.go)
+  # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go added — the SEVENTH non-test source, the client
+  # half of the recorded build-BYTES read path (SiteBuildLogBytes /
+  # SiteBuildLogBytesRefusal). It declares 20 json tags: 3 NEW NAMES
+  # (`log_scrub`, `tail`, `tail_bytes`) which move `@go_tag_pinned` 369 -> 372,
+  # 6 that bump an existing register row, and 8 that were declared exactly once
+  # and are now duplicated. The 14 ride free on the NAME union — the class
+  # `@go_tag_pinned` structurally cannot see, which is why the register moves.
+  @cloudclient_sources ~w(client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was

@@ -329,8 +329,8 @@ async function decodeErrorAndThrow(
     throw new BarkparkConflictError(message, base)
   }
 
-  // 404 not_found / schema_unknown
-  if (status === 404 || code === 'not_found' || code === 'schema_unknown') {
+  // 404 not_found
+  if (status === 404 || code === 'not_found') {
     throw new BarkparkNotFoundError(message, base)
   }
 

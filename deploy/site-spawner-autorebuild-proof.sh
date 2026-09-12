@@ -240,6 +240,41 @@ print(m.group(1).strip() if m else "")
 PY
 }
 
+# fetch_page <dest> <url> — READ A LIVE PAGE AND KEEP THE PRODUCER'S REFUSAL.
+#
+# task-f56d84cf77d93c24 / the #14371 shape. The spelling this replaces sent
+# curl's stdout AND stderr to the bit bucket and then swallowed its status with
+# a trailing always-true, deleting the producer's evidence TWICE: the redirect
+# throws away curl's own message and the always-true arm throws away its exit
+# status. The next line parses a file that was
+# never written, so the headline becomes meta_content's silence about a missing
+# marker and the verdict blames the SITE UNDER PROOF for the INSTRUMENT's
+# failure: a DNS miss, an expired cert, a box that will not answer all read as
+# "the build id did not flip".
+#
+# This is the emit_spec shape: run the producer with its combined output
+# CAPTURED, assert BOTH the exit status and that a non-empty artifact appeared,
+# print the refusal INLINE where it happened, and park a headline in FETCH_WHY
+# that the rung's own fail() prefers over the parser's text. Returns 0 only when
+# a non-empty page really landed in <dest>.
+FETCH_WHY=""
+fetch_page() {
+  local dest="$1" url="$2" out rc=0
+  FETCH_WHY=""
+  rm -f "$dest"
+  out="$(curl -sS -m 30 -o "$dest" -w 'HTTP %{http_code} in %{time_total}s' "$url" 2>&1)" || rc=$?
+  out="$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400)"
+  if [ "$rc" -ne 0 ]; then
+    FETCH_WHY="curl could NOT read $url (exit $rc): ${out:-<curl said nothing>}"
+  elif [ ! -s "$dest" ]; then
+    FETCH_WHY="curl reached $url but wrote an EMPTY $dest ($out)"
+  else
+    return 0
+  fi
+  note "PAGE READ REFUSED — $FETCH_WHY"
+  return 1
+}
+
 # count_content_auto_since <deployments-json-file> <baseline-deploy-id>
 # Counts DISTINCT deployments in the newest-first list whose trigger is
 # `content-auto` and that are NOT the baseline (i.e. minted by a publish). This
@@ -664,11 +699,12 @@ live_proof() {
   BASELINE_DEP_ID="$(jget "$TMP/deploy0.json" deployment.id)"
 
   local url="https://$LIVE_HOST/sites/$SLUG/"
-  curl -sS -m 30 -o "$TMP/base-live.html" "$url" >/dev/null 2>&1 || true
+  local base_why=""
+  fetch_page "$TMP/base-live.html" "$url"; base_why="$FETCH_WHY"
   local base_doc; base_doc="$(meta_content "$TMP/base-live.html" bp-doc-id)"
 
   judge_baseline "$base_status" "$base_build" "$base_doc" ||
-    fail $? "the baseline deploy: status=$base_status build_id='${base_build:-none}', live bp-doc-id='${base_doc:-none}'. The baseline must be LIVE with real content — there must be a 'before' to change FROM." \
+    fail $? "${base_why:+READING THE BASELINE PAGE FAILED — $base_why; every marker below is therefore ABSENT because the page was never read, not because the deploy is wrong. }the baseline deploy: status=$base_status build_id='${base_build:-none}', live bp-doc-id='${base_doc:-none}'. The baseline must be LIVE with real content — there must be a 'before' to change FROM." \
       "walk the manual proof first (deploy/site-spawner-live-proof.sh) — the baseline is exactly its create→deploy→live path"
   ok "baseline live — build_id=$base_build, bp-doc-id=$base_doc"
 
@@ -703,14 +739,15 @@ live_proof() {
   elapsed=$(( $(now_ms) - t0 ))
 
   # Read the live page's content markers for the auto rebuild (content-truth).
-  curl -sS -m 30 -o "$TMP/auto-live.html" "$url" >/dev/null 2>&1 || true
+  local auto_why=""
+  fetch_page "$TMP/auto-live.html" "$url"; auto_why="$FETCH_WHY"
   local served_doc served_rev
   served_doc="$(meta_content "$TMP/auto-live.html" bp-doc-id)"
   served_rev="$(meta_content "$TMP/auto-live.html" bp-content-rev)"
 
   judge_autorebuild "$MANUAL_DEPLOYS_IN_AUTO_PATH" "$base_build" "$new_build" "$new_trigger" \
     "$elapsed" "$AUTOREBUILD_BUDGET_MS" "$served_doc" "$new_doc" "$served_rev" ||
-    fail $? "auto-rebuild: after publishing '$new_doc' (and calling NO deploy), the newest content-auto deployment was id='${new_dep_id:-none}' build_id='${new_build:-none}' trigger='${new_trigger:-none}' status='${new_status:-none}' after ${elapsed}ms; the live page serves bp-doc-id='${served_doc:-none}' (want '$new_doc'), bp-content-rev='${served_rev:-none}'. The publish must NOTIFY the box → the box's Dispatcher fires the CP webhook → the CP debounces and enqueues a content-auto deploy." \
+    fail $? "${auto_why:+READING THE LIVE PAGE FAILED — $auto_why; the served-marker values below are ABSENT because the page was never read, not because the rebuild did not happen. }auto-rebuild: after publishing '$new_doc' (and calling NO deploy), the newest content-auto deployment was id='${new_dep_id:-none}' build_id='${new_build:-none}' trigger='${new_trigger:-none}' status='${new_status:-none}' after ${elapsed}ms; the live page serves bp-doc-id='${served_doc:-none}' (want '$new_doc'), bp-content-rev='${served_rev:-none}'. The publish must NOTIFY the box → the box's Dispatcher fires the CP webhook → the CP debounces and enqueues a content-auto deploy." \
       "check: the site's content-publish webhook is registered on the box (D42/D47); the CP receiver /v1/sites/webhooks/content-publish/:site_id is wired (D45); the Oban debounce enqueues with trigger=content-auto (D48)"
   ok "content-auto rebuild in ${elapsed}ms — build_id=$new_build (!= baseline $base_build)"
   ok "trigger = $new_trigger  (the CP stamped it — provenance is observable)"

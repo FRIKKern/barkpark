@@ -151,9 +151,19 @@ export const INLINE_COND_KEYS = new Set(
 // `pin` is the census PIN key this row is PROVEN against — the census's (2n)
 // arm re-reads the PIN and reds if the tier or the elevated verdict disagrees.
 // A row may set `pin: null`, but then it MUST say `why_no_pin`, and (2n) prints
-// it: the PIN covers WRITE call sites made by app.js, so a read route or a band
-// label has nothing there to bind to. That is a hole with a stated reason, and
-// the rule — bind, or say why — is what stops a third one appearing silently.
+// it: the PIN covers WRITE call sites made by app.js, so a READ route has
+// nothing there to bind to.
+//
+// AND THAT IS NOW THE WHOLE OF THE HATCH. It used to hold a second kind of
+// occupant — a BAND LABEL (`POST /v1/instances/:*/lifecycle`), a string no
+// router ever served, typed onto the sweep's two lifecycle hook rows and citing
+// a PIN row that did not exist. Its rows now name `DELETE /v1/barkparks/:*`,
+// the band's one console-executed write, and the label row is gone. The rule
+// that keeps it gone is `pinHatchReport()` below: a PIN-less row must be a
+// READ, and a write that declines to name a PIN key reds in the sweep's
+// `pin-hatch` arm (measured: exit 1, one guard failure, by route name).
+// A predicate, not a two-item skip list — a third unbound write cannot appear
+// by being added to an allowlist nobody re-reads.
 // ═══════════════════════════════════════════════════════════════════════════
 export const ROUTE_TIERS = [
   // ── reads ──
@@ -174,12 +184,16 @@ export const ROUTE_TIERS = [
 
   // ── instance / barkpark writes ──
   { key: "POST /v1/barkparks/:*/verify", auth_fn: A_USER, pin: "POST /v1/barkparks/:*/verify", why: "team-scoped member action" },
-  { key: "DELETE /v1/barkparks/:*", auth_fn: A_PTADMIN, pin: "DELETE /v1/barkparks/:*", why: "the lifecycle band's ONE console-executed write (decommission)" },
+  // THE INSTANCE-ADMIN BAND'S PIN-BOUND ROUTE. Two call sites ride it —
+  // runDecommission (the CLI rail's live Decommission) and removeInstance (the
+  // header's Retry removal) — and the census PIN carries a row for each, both
+  // auth_fn require_current_team_admin. The sweep's two lifecycle hook rows now
+  // name THIS route rather than the band label that used to sit below: the band
+  // label was not a router route, nothing could re-read it, and its fence answer
+  // was this route's tier copied by hand.
+  { key: "DELETE /v1/barkparks/:*", auth_fn: A_PTADMIN, pin: "DELETE /v1/barkparks/:*", why: "the lifecycle band's ONE console-executed write (decommission); the header's Retry removal is the second call site on it" },
   { key: "POST /v1/barkparks/:*/agent-key", auth_fn: A_USER_OR_PAT, pin: "POST /v1/barkparks/:*/agent-key", overlay_required: true,
     why: "require_user_or_pat at the router; the non-admin SESSION is refused inside a cond (PDF-D94)" },
-  { key: "POST /v1/instances/:*/lifecycle", auth_fn: A_PTADMIN, pin: null,
-    why_no_pin: "A BAND LABEL, NOT A ROUTER ROUTE — and saying so is the finding this extraction turned up. The sweep types this string on its two lifecycle rows; `grep -n 'route: \"/v1/instances' __binding_census.mjs` returns NOTHING, so the citation those rows carried could never have been checked. The band's one console-executed write is DELETE /v1/barkparks/:* (runDecommission, require_current_team_admin) and every other verb degrades to a CLI chip with no route at all, so the tier recorded here is that write's. Re-pointing the sweep's rows is a separate change with its own verdict risk; naming the hole is this slice's honest half",
-    why: "instance-admin band — require_current_team_admin" },
 
   // ── the launch / fleet band: elevated ONLY by the inline-cond overlay ──
   { key: "POST /v1/launch", auth_fn: A_USER_OR_PAT, pin: "POST /v1/launch", overlay_required: true,
@@ -266,4 +280,32 @@ export function overlayGapReport() {
       "outgrown. If the router really did lower every cond-fenced route, delete the overlay AND this guard together.");
   }
   return { ok: bad.length === 0, lines, bad };
+}
+
+// ── THE PIN HATCH, AS A PREDICATE ───────────────────────────────────────────
+// `pin: null` is legal for exactly one reason: the census PIN is a WRITE call
+// site census (zero GET rows), so a read route has nothing there to bind to.
+// Any other PIN-less row is a route whose fence nothing re-reads — the shape
+// the band label `POST /v1/instances/:*/lifecycle` had, where the cited PIN row
+// never existed and the citation could not have been checked by anyone.
+//
+// Run by the sweep's `pin-hatch` arm (the census's own (2n) arm prints the
+// hatch rather than ruling on it), and losable: set a write row's `pin` to
+// null and this reds by route name, with or without a `why_no_pin` beside it.
+export function pinHatchReport() {
+  const reads = [];
+  const bad = [];
+  for (const entry of ROUTE_TIERS) {
+    if (entry.pin) continue;
+    if (/^GET\b/i.test(entry.key.trim())) {
+      reads.push(entry);
+      continue;
+    }
+    bad.push(entry.key + " names no PIN key and is NOT a read. The hatch exists for reads alone — the census PIN " +
+      "is a WRITE call-site census, so a read has nothing to bind to and a WRITE always does. A write route with no " +
+      "PIN key is a fence nothing re-reads: the band label `POST /v1/instances/:*/lifecycle` was exactly that shape, " +
+      "cited a PIN row that never existed, and its verdict could not be lost by anyone. Bind it to a PIN row, or " +
+      "take the route out of this table.");
+  }
+  return { ok: bad.length === 0, reads, bad };
 }

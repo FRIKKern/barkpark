@@ -772,6 +772,51 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && steps.ack-ex-scope.outputs.decision != 'skip' }}
         run: bash scripts/required-checks-ack-derive.sh --selftest
 
+      # ── the selftest-wiring census, riding this job (task-47448b5c7eb29e54) ─
+      # VENUE, and the venue is the entire point of this step.
+      # scripts/selftest-wiring-census.sh already ran — as the job
+      # `selftest-wiring-census` in .github/workflows/shell-harnesses.yml, which
+      # carries a workflow-level `on: pull_request: paths:` filter and is
+      # therefore filed S4 PATHS-FILTERED in .github/required-checks.json. Its
+      # verdict could not stop a merge, and that is not a hypothetical:
+      # MEASURED on #17772 (run 34590077182, 2026-09-11) the census concluded
+      # FAILURE naming `ORPHAN scripts/sunset-route-consumers.test.sh`, the PR
+      # merged anyway as 8970ea272, and main then carried that red from ~15:2xZ
+      # to ~19:2xZ while the merge sweep HELD five PRs that inherited it
+      # (#17651 #17711 #17710 #17687 #17778) until #17830 (70d8d275a) wired the
+      # file. An advisory red cost four hours of a blocked queue because the one
+      # thing it could not do was refuse the head that created it.
+      #
+      # HERE, for the reason every step above it is here: this job carries no
+      # `if:`, no continue-on-error and no `needs`, and the aggregator judges it
+      # with the gate value NEVER — so it runs on EVERY PR head, cannot be
+      # skipped into a green, and a red here reds `Elixir gate`, one of the four
+      # REQUIRED contexts. The venue rule in docs/ops/merge-gates.md
+      # ("Where a guard that must BLOCK lives"): the decision is a JOB-level
+      # shape, never a workflow-level `paths:` key — a job-level skip publishes
+      # a verdict, an absent workflow publishes nothing and reads `expected`
+      # forever.
+      #
+      # A STEP and not a job, for the two reasons written above the
+      # skip-disclosure ratchet: a new job here reds the sibling path-escape
+      # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
+      # name — so the required set is NOT widened by one name and
+      # required-checks-verify.sh's roster is unchanged.
+      #
+      # shell-harnesses.yml's own tenant is deliberately LEFT IN PLACE: it is
+      # where the census's `--selftest` (the proof the census can fail) lives,
+      # and this step is the merge-authority half, not a replacement.
+      #
+      # UNFILTERED AND PRICED. No scope step, because the census is a whole-tree
+      # question — any new `scripts/*_test.sh` OR any workflow edit can change
+      # its answer, which is nearly every diff that could break it. Measured
+      # 2026-09-12 on this tree: `bash scripts/selftest-wiring-census.sh` is
+      # 6.6 s wall (92 run, 4 exempt, 0 orphaned over 96 self-tests) on a loaded
+      # laptop, against this job's 2m35s average — off the critical path.
+      - name: Every self-test under scripts/ is executed by CI or declares an exemption
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/selftest-wiring-census.sh
+
   format:
     # ADVISORY format signal — NOT a merge gate. This job pins THE FORMATTER
     # DEVELOPERS RUN, not the Elixir production compiles with. `mix format`

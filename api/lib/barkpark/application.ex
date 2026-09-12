@@ -316,6 +316,16 @@ defmodule Barkpark.Application do
       # `:temporary` Task: it runs once, never restarts, and its own moduledoc
       # explains why the sweep is boot-only rather than periodic.
       Barkpark.Tenancy.WorkspaceBundle.Janitor,
+      # Admission control for the export route (PDS-D719). A permanent
+      # GenServer owning one small ETS table — it holds no connections, no
+      # files and no timers, so an idle instance is free. Placed immediately
+      # after the Janitor (its moduledoc cites this guard's ABSENCE when it
+      # justifies the pid-liveness sidecar, and the two are read together) and
+      # BEFORE the Endpoint, because the first request this node serves must
+      # already find the guard alive: `acquire/1` degrades to "admit
+      # unguarded" when it is not, which is the correct posture for a
+      # contention remedy and the wrong one to rely on at boot.
+      Barkpark.Tenancy.WorkspaceBundle.SingleFlight,
       # Dedicated supervisor for outbound webhook/media deliveries. The
       # generic TaskSupervisor has max_children: :infinity, so a webhook
       # storm or a slow endpoint (each child sleeps in-task on retry

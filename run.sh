@@ -14,8 +14,17 @@ API_URL="${SANITY_API_URL:-http://localhost:4000}"
 # second `mix phx.server` on top of it would be the wrong remedy. bp_curl_code
 # prints nothing and returns curl's rc on a transport failure, so `|| echo 000`
 # is what turns "nobody is listening" into a value this test can read.
+#
+# The path is /status.json, NOT the legacy /api/schemas: that route pipes
+# through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+# `sunset: Wed, 31 Dec 2026 23:59:59 GMT`. This probe reads a TRANSPORT failure,
+# so a 404 would still say "running" — but after the route is REMOVED the
+# router 404s it from the same live server, and the next reader of this function
+# who tightens it to a status check would inherit a probe that is red on a
+# healthy box. /status.json (router.ex `get "/status.json"`, :api pipeline, no
+# deprecation scope, no token) has no removal date.
 api_answers() {
-  [ "$(bp_curl_code -s -o /dev/null "$API_URL/api/schemas" 2>/dev/null || echo 000)" != "000" ]
+  [ "$(bp_curl_code -s -o /dev/null "$API_URL/status.json" 2>/dev/null || echo 000)" != "000" ]
 }
 
 # Check if Phoenix is running
