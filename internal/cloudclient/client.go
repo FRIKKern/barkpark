@@ -3367,9 +3367,16 @@ type DeployDeferralWaitQuantile struct {
 //
 // OldestPendingSeconds is a LOWER BOUND on a wait still running, and it is a
 // pointer: no pending rows means there is no bound to state, which is not zero.
+//
+// CoveringBound is the SAME token DeployCoverageCohorts carries, for the same
+// reason and off the same fold: both nodes are computed against one covering
+// query (DeployLedger's live_marks/1) that is bounded on the LEFT only, so a
+// live build minted AFTER the window's `to` still resolves a row here. The
+// basis paragraph says it in English; this is the form a reader can branch on.
 type DeployDeferralWait struct {
 	Clock                string                       `json:"clock"`
 	Basis                string                       `json:"basis"`
+	CoveringBound        string                       `json:"covering_bound"`
 	AsOf                 string                       `json:"as_of"`
 	Population           DeployDeferralWaitPopulation `json:"population"`
 	Outcomes             []DeployDeferralWaitOutcome  `json:"outcomes"`

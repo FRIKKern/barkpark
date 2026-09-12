@@ -1894,6 +1894,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # average share one name and are different measurements — exactly the
     # collision this register exists to keep visible.
     "cpu_percent" => 2,
+    # CROSSED INTO this register with the deferral-wait bound: `covering_bound`
+    # was declared ONCE (DeployCoverageCohorts) and is now declared twice —
+    # DeployDeferralWait carries the SAME token because both nodes are folded
+    # from the same left-bounded covering query. A new DECLARATION of an
+    # existing name, so it rides free on `@go_tag_pinned` (which counts names)
+    # and is registered here at its exact multiplicity instead.
+    "covering_bound" => 2,
     "covered" => 2,
     "current_deployment_id" => 2,
     "dataset" => 2,
@@ -4286,6 +4293,7 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
     "deferral_wait.as_of",
     "deferral_wait.basis",
     "deferral_wait.clock",
+    "deferral_wait.covering_bound",
     "deferral_wait.max",
     "deferral_wait.max.basis",
     "deferral_wait.max.headroom",
@@ -4488,7 +4496,13 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # key its call site writes and is blind to all THREE of the node's inner
   # paths. UP, and the reason is the same shape as `box_door/1` above — a helper
   # writing to the wire — which is why the EVALUATED census names all four.
-  @ast_blind_paths 171
+  # 171 -> 172 (the deferral-wait node inherits the open right edge and now says
+  # so): `deferral_wait/2` is a private helper, so the AST census sees only the
+  # top-level `deferral_wait` key its call site writes and is blind to the
+  # `covering_bound` path added inside it. UP by one, same shape as `box_door/1`
+  # and `vocabulary/0` above — a helper writing to the wire — and the EVALUATED
+  # census names it.
+  @ast_blind_paths 172
 
   @ledger Path.expand("../../lib/barkpark_cloud/deploy_ledger.ex", __DIR__)
 

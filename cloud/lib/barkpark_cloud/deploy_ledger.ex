@@ -494,7 +494,7 @@ defmodule BarkparkCloud.DeployLedger do
   # which is the same lie as a vacuous green with the sign flipped.
   @deferral_wait_clock "deferred row `inserted_at` → the FIRST later `inserted_at` of a live row on the same site and environment. Keyed on when the covering build was MINTED, never on `content_rev` (D170(a)/D162: it is not a revision, it is not injective, and it recurs) and never on `became_live_at` (a live row with a NULL mark would drop coverage the site really got)"
 
-  @deferral_wait_basis "deferred rows in this window whose site has since rebuilt (COVERED). PENDING and UNREADABLE rows are counted beside the sample, never inside it"
+  @deferral_wait_basis "deferred rows in this window whose site has since rebuilt (COVERED). PENDING and UNREADABLE rows are counted beside the sample, never inside it. The covering query that decides COVERED is bounded on the LEFT only — a live build minted AFTER the window's `to` still covers a row — and the machine-readable form of that fact is the `covering_bound` key beside this basis, not this paragraph"
 
   # THE OUTCOME VOCABULARY, THREE TERMS, AND NO FOURTH.
   #
@@ -551,11 +551,18 @@ defmodule BarkparkCloud.DeployLedger do
   # right-bounded window has to parse an English paragraph to find out. This is
   # the same fact, as one token a decoder can branch on.
   #
-  # It lives HERE, on `coverage_cohorts`, and deliberately NOT on `census/3`'s
-  # `window` map: THAT map is genuinely half-open `[from, to)` and bounded on
-  # BOTH sides, so a bound key there would be a machine-readable falsehood. The
-  # open-right property belongs to the covering query alone (`live_marks/1`).
-  @coverage_covering_bound "left_only"
+  # THE PROPERTY IS `live_marks/1`'s, SO IT RIDES ON EVERY NODE `live_marks/1`
+  # PRODUCED — which is exactly TWO: `coverage_cohorts/2` and `deferral_wait/2`.
+  # Both fold the SAME right-unbounded covering query, so both inherit the same
+  # caveat; emitting the word on one of them and leaving the other with prose
+  # alone is the prose-is-not-a-key defect reproduced one node over. ONE
+  # attribute, read by both — never a second literal, which could drift.
+  #
+  # It deliberately does NOT go on `census/3`'s `window` map: THAT map is
+  # genuinely half-open `[from, to)` and bounded on BOTH sides, so a bound key
+  # there would be a machine-readable falsehood. The open-right property belongs
+  # to the covering query alone (`live_marks/1`), and this key follows it.
+  @live_marks_covering_bound "left_only"
 
   # HOW MANY NAMED SITES THE NEVER-COVERED LIST CARRIES. The list is a tail, and
   # a tail has no natural size — so it is bounded, and the bound is reported
@@ -2008,6 +2015,14 @@ defmodule BarkparkCloud.DeployLedger do
     %{
       clock: @deferral_wait_clock,
       basis: @deferral_wait_basis,
+      # The covering query's bound, as a token rather than as a paragraph — the
+      # SAME attribute `coverage_cohorts/2` emits, because it is the SAME
+      # `live_marks/1` fold underneath both nodes. Every number below (the
+      # counts AND the quantiles computed off them, since `deferral_outcome/3`
+      # measures to a covering mark that may post-date `as_of`) inherits the
+      # open right edge, which is why the word sits at the NODE root and is not
+      # repeated per quantile: it qualifies all of them at once.
+      covering_bound: @live_marks_covering_bound,
       as_of: as_of,
       population: %{
         deferred: length(deferrals),
@@ -2188,7 +2203,7 @@ defmodule BarkparkCloud.DeployLedger do
       as_of: as_of,
       maturity_seconds: @coverage_maturity_seconds,
       # The covering query's bound, as a token rather than as a paragraph.
-      covering_bound: @coverage_covering_bound,
+      covering_bound: @live_marks_covering_bound,
       cohorts:
         Enum.map(@coverage_cohort_statuses, fn status ->
           coverage_cohort(status, Map.get(by_status, status, []))
