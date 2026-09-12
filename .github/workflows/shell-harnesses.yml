@@ -452,6 +452,16 @@ on:
       # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
       # catches it, and the census resolves that directory correctly either way.
       - "scripts/selftest-wiring-census.sh"
+      # EXIT-LAUNDERING SWEEP (task-20fe68463c87e136). The instrument that
+      # separates `cmd >/dev/null 2>&1 || true` on a PRODUCER whose artifact a
+      # later line CONSUMES (the #14371 shape: seven days of a repo-wide red
+      # read as `jq: error: Could not open file …-spec.json`) from the same
+      # idiom on best-effort teardown, which is correct. Only its --selftest
+      # rides here: 19 assertions over planted positives and negative controls,
+      # hermetic mktemp fixtures, no network. The tree-wide sweep is a REPORT,
+      # not a ratchet, so wiring it as a gate would red on 17 pre-existing
+      # deploy/ sites that belong to other lanes' rows.
+      - "scripts/exit-laundering-sweep.sh"
       # DEPLOY RECEIPT HONESTY (pds-bl-w48-deploy-make-and-rebuild-receipts).
       # The last three are the GUARDED SUBJECTS, not the harness: the fixture
       # runs `make deploy` and scripts/deploy-rebuild.sh with the hook in the
@@ -823,6 +833,16 @@ on:
       # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
       # catches it, and the census resolves that directory correctly either way.
       - "scripts/selftest-wiring-census.sh"
+      # EXIT-LAUNDERING SWEEP (task-20fe68463c87e136). The instrument that
+      # separates `cmd >/dev/null 2>&1 || true` on a PRODUCER whose artifact a
+      # later line CONSUMES (the #14371 shape: seven days of a repo-wide red
+      # read as `jq: error: Could not open file …-spec.json`) from the same
+      # idiom on best-effort teardown, which is correct. Only its --selftest
+      # rides here: 19 assertions over planted positives and negative controls,
+      # hermetic mktemp fixtures, no network. The tree-wide sweep is a REPORT,
+      # not a ratchet, so wiring it as a gate would red on 17 pre-existing
+      # deploy/ sites that belong to other lanes' rows.
+      - "scripts/exit-laundering-sweep.sh"
       # DEPLOY RECEIPT HONESTY — mirrored from on.pull_request.paths. The twin
       # lists are set-equal by contract (doc-gates-paths-parity-check.sh runs
       # against this file too); a PR-only entry would go dark on the merge.
@@ -982,6 +1002,7 @@ jobs:
       workflow-trigger-coverage: ${{ steps.sets.outputs.workflow-trigger-coverage }}
       orphan-harnesses: ${{ steps.sets.outputs.orphan-harnesses }}
       selftest-wiring-census: ${{ steps.sets.outputs.selftest-wiring-census }}
+      exit-laundering-sweep: ${{ steps.sets.outputs.exit-laundering-sweep }}
       dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
       which-gates: ${{ steps.sets.outputs.which-gates }}
@@ -1201,6 +1222,7 @@ jobs:
           selftest-wiring-census scripts/*.test.mjs
           selftest-wiring-census scripts/*_test.sh
           selftest-wiring-census .github/workflows/*.yml
+          exit-laundering-sweep scripts/exit-laundering-sweep.sh
           which-gates scripts/which-gates.sh
           which-gates scripts/which-gates.test.sh
           which-gates scripts/cloud-path-escape-check.sh
@@ -2900,6 +2922,30 @@ jobs:
       - name: The census over this tree
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/selftest-wiring-census.sh --list
+
+  exit-laundering-sweep:
+    needs: [changes]
+    if: needs.changes.outputs.exit-laundering-sweep == 'true'
+    # THE INSTRUMENT, NOT THE CENSUS (task-20fe68463c87e136). What runs here is
+    # `--selftest`: three planted positives (the verbatim #14371 `--out` shape,
+    # the `> file` redirect, a workflow step), five negative controls (docker
+    # teardown, a `2>&1` CAPTURE that keeps the message, an unread artifact, an
+    # early-exit guard, a `%{http_code}` surrogate), and a FALSIFIER that
+    # deletes the consumer and requires the finding to be RETRACTED. A checker
+    # that cannot be shown to fail has not been shown to work, and the
+    # false-positive arms are the whole difficulty: a naive grep answers 1193
+    # on this corpus and 1023 of those are correct best-effort teardown.
+    name: exit-laundering predicate (planted controls, both directions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: exit-laundering-sweep.sh syntax check
+        run: bash -n scripts/exit-laundering-sweep.sh
+      - name: Prove the predicate can lose (--selftest)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/exit-laundering-sweep.sh --selftest
 
   deploy-receipt-honesty:
     needs: [changes]
