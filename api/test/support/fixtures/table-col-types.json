@@ -1,0 +1,10 @@
+{
+  "_source": "internal/pdrender/richblocks.go — parseColTypes / colRightAlign / deltaCell. The ONE record of the table `cols` contract, shared by every render surface.",
+  "_readers": [
+    "api/test/barkpark/portable_doc/render/table_typed_cols_test.exs (Elixir :article projection)"
+  ],
+  "_not_read_by": "internal/pdrender (Go) — richblocks.go still hardcodes these literals; a Go-side read is follow-up work, the file is named in its comment so the two cannot drift silently.",
+  "types": ["text", "num", "delta", "spark"],
+  "right_aligned": ["num", "delta"],
+  "delta_glyphs": { "up": "▲", "down": "▼", "flat": "-" }
+}

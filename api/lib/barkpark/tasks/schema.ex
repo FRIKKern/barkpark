@@ -587,7 +587,7 @@ defmodule Barkpark.Tasks.Schema do
             "Worker id holding the claim. Engine-written on claim, cleared on lease reap. Close does NOT clear it (last worker stays attributed)."
         },
 
-        # -- THE ADJUDICATION TRIPLE (PDS waves 24/28; DECLARED by wave 29) --
+        # -- THE ADJUDICATION KEYS (PDS waves 23/24/28; DECLARED by wave 29) --
         # All three keys have PERSISTED since wave 24 and are fenced at birth
         # by `Content.Writer.ensure_task_born_adjudicated/5` -- but they were
         # never DECLARED, so every schema-derived surface (the Studio form,
@@ -628,6 +628,46 @@ defmodule Barkpark.Tasks.Schema do
           "group" => "work",
           "description" =>
             "Adjudication term: open | parked | closed. Lowercase-canonical -- the birth fence refuses an off-vocabulary or mis-cased term with 422. Written by `bp task stage <id> <state> --disposition <term> --note <why>`; the raw mutate door refuses a direct change on a live task."
+        },
+
+        # THE FOURTH DURABLE KEY (PDS wave 23), declared here for the same
+        # reason and by the same rule as the three above: it PERSISTS and it
+        # was INVISIBLE. Measured on this repo by a throwaway case before this
+        # hunk existed: `task_schema/1` returned 33 field names, none of them
+        # `disposition_reason`, while a create carrying
+        # `content.disposition_reason` read it straight back off the row.
+        #
+        # NAME READ, NOT RETYPED: `Stage.durable_reason_key/0` is the one
+        # place the string "disposition_reason" is written, and it is the same
+        # constant `Stage.apply_durable_reason/2` writes and
+        # `TtlSweeper.apply_lapse/1` deliberately does NOT delete (the durable
+        # half of the durable/ephemeral split). A literal here would be an
+        # unlocked mirror; `schema_adjudication_triple_test.exs` decodes both
+        # sides and reds if this declaration is removed or the key diverges.
+        #
+        # NO `visibleWhen`, UNLIKE THE RERUN, and that asymmetry is the point.
+        # `Stage.stage/3` routes `:note` on EVERY stageable target -- including
+        # `-> open`, where the reason for resolving the thought is exactly the
+        # thing worth keeping -- so a row can carry a reason with no
+        # `disposition` term at all. Gating this field on
+        # `disposition non_empty` (what `disposition_rerun` does, correctly,
+        # because a rerun with no term is meaningless) would hide it on
+        # precisely those rows. `work`, not `close`, for the reason stated
+        # above the triple.
+        #
+        # DECLARING IS STILL NOT ENFORCING: the raw mutate door's
+        # `ensure_disposition_via_verb/4` refuses a raw change of the TERM and
+        # of the RERUN, and refuses trigger erasure -- it does not fence this
+        # key, and this declaration does not add a fence. `Stage` stays the
+        # sanctioned writer; the read surfaces just stop lying about the row.
+        %{
+          "name" => Stage.durable_reason_key(),
+          "title" => "Disposition reason",
+          "type" => "text",
+          "rows" => 3,
+          "group" => "work",
+          "description" =>
+            "The durable WHY behind the adjudication -- free text, written by `--note` on `bp task stage`. Durable on purpose: the TTL sweeper reaps the ephemeral `engagement` lease by name and never touches this key. Recorded on every stage, including `-> open`, so it can be present with no disposition term. Replacing a different non-blank reason is REFUSED unless the stage call carries `supersede: true` (the wire param `supersede`)."
         },
         %{
           "name" => Stage.reopen_trigger_key(),

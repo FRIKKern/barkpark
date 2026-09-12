@@ -404,7 +404,17 @@ HEALTHY=0
 for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
   # No 2>&1 here: the 429 backoff lines above are the only stderr this can
   # produce, and swallowing them is how a rate limit became invisible.
-  if bp_health_probe "http://localhost:$APP_PORT/api/schemas" > /dev/null; then
+  #
+  # /status.json, NOT /api/schemas: the legacy route is mounted through
+  # BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+  # `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, and this loop gates on the STATUS
+  # CODE, so on removal day a healthy box would report "INSTALLED but NOT
+  # ANSWERING" at the end of every provisioning run. /status.json is
+  # `pipe_through(:api)` only, needs no token, and is strictly stronger:
+  # Status.health/0 runs a bare Repo.all/1, so a dead DB is a 500, not a 200.
+  # This file is the VENDORED copy bp ships to every provisioned box; the root
+  # deploy.sh carries the same retarget (PR #17819).
+  if bp_health_probe "http://localhost:$APP_PORT/status.json" > /dev/null; then
     echo "   Ready! (probe $i/$HEALTH_ATTEMPTS)"
     HEALTHY=1
     break
@@ -467,7 +477,7 @@ fi
 echo "============================================"
 echo ""
 if [ "$HEALTHY" != "1" ]; then
-  echo "  The API never answered http://localhost:$APP_PORT/api/schemas —"
+  echo "  The API never answered http://localhost:$APP_PORT/status.json —"
   echo "  $HEALTH_ATTEMPTS probes over ~$((HEALTH_ATTEMPTS * HEALTH_INTERVAL))s, every one failed."
   echo "  Packages, database, secrets and the systemd unit ARE installed; the"
   echo "  URLs below are where Barkpark will answer once the service comes up."
@@ -475,7 +485,7 @@ if [ "$HEALTHY" != "1" ]; then
   echo "  Diagnose on this box:"
   echo "    journalctl -u barkpark -n 200 --no-pager"
   echo "    systemctl status barkpark"
-  echo "    curl -v http://localhost:$APP_PORT/api/schemas"
+  echo "    curl -v http://localhost:$APP_PORT/status.json"
   echo ""
   echo "  Port checked: $APP_PORT (from PORT= in $APP_DIR/.env)"
   echo ""

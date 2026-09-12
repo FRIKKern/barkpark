@@ -10,8 +10,11 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
   callout tone tints (callout/2 — util.ex tone_palette/1), the semantic
   status tones, and the tokenized reading accent + reading type. The email
   brand/rule are the verbatim email_* hex, NOT color.primary/border (those
-  HSL-derived slots are drifted from the byte-locked email golden; w3
-  reconciles the two).
+  HSL-derived slots are drifted from the byte-locked email golden). That
+  divergence is a RATIFIED decision dated 2026-09-11 in tokens.json
+  paperEmail._note — read it there; it is not pending reconciliation, and
+  moving these bytes is an approved visual migration that owns the email
+  golden, never a token cleanup.
 
   ## Theme-keying (charter D28)
 

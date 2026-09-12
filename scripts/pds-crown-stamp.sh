@@ -224,6 +224,33 @@ with open(out, "w", encoding="utf-8", newline="") as fh:
 PY
 }
 
+# ── write criterion N's STORED EVIDENCE to a file, byte-for-byte ─────
+# The read-back's instrument. Same JSON-field-to-file discipline as the
+# criterion text above, and for the same reason: the bytes must arrive on disk
+# unmangled, or the comparison downstream compares the shell's opinion of the
+# evidence rather than the evidence.
+#
+# Exit 3 means the field is ABSENT or null -- which is NOT an empty string, and
+# is not a shape a landed `--met` stamp can leave behind (the server refuses a
+# met flip with no evidence). The caller treats it as a failed write.
+criterion_evidence_to_file() {
+  local json="$1" idx="$2" out="$3"
+  need_python
+  : >"$out"
+  python3 - "$json" "$idx" "$out" <<'PY'
+import json, sys
+src, idx, out = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+doc = json.load(open(src))["doc"]
+ac = doc.get("content", {}).get("acceptance_criteria") or []
+if not 0 <= idx < len(ac):
+    sys.exit(1)
+ev = ac[idx].get("evidence")
+with open(out, "w", encoding="utf-8", newline="") as fh:
+    fh.write(ev if isinstance(ev, str) else "")
+sys.exit(0 if isinstance(ev, str) else 3)
+PY
+}
+
 # ── ask the CLI for the exact request target it WOULD send ───────────────────
 # The budget oracle. We do not model the encoder, we measure it: --dry-run
 # prints the literal request line, and we count the bytes of its target.
@@ -406,6 +433,14 @@ cmd_stamp() {
   say "fetched criterion $idx to file: $(wc -c <"$tmp/criterion.txt" | tr -d ' ') bytes, exact stored wording"
   say ""
 
+  # THE BEFORE-READ. On a met -> met re-stamp the flag reads the same on both
+  # sides of the write, so the flag cannot witness the write. The evidence TEXT
+  # can -- but only against a BEFORE value: a single after-read tells you what is
+  # stored, never that this run is what put it there.
+  criterion_evidence_to_file "$tmp/task.json" "$idx" "$tmp/evidence.before"
+  printf '%s' "$evidence" >"$tmp/evidence.sent"
+
+
   report_budget "$task_id" "$idx" "$worker" "$epoch" "$tmp/criterion.txt" "$evidence" \
     || exit "$EX_REFUSED"
   say ""
@@ -449,8 +484,19 @@ cmd_stamp() {
   fi
 
   # ── READ BACK. A quiet shell is not proof; the stored row is. ──────────────
+  #
+  # AND THE FLAG IS NOT THE PROOF EITHER. This block used to assert `met ==
+  # true` and stop there. For every criterion that ALREADY read met -- the whole
+  # met -> met re-evidencing case the crown runs nine times -- that predicate was
+  # satisfied BEFORE the write, so `CONFIRMED: criterion N reads met` printed
+  # identically whether the new evidence landed or was dropped on the floor. A
+  # true statement answering the wrong question is not a confirmation.
+  #
+  # What a stamp WRITES is the evidence text, so that is what gets read back and
+  # compared, byte for byte, against the exact bytes this run sent. Nobody is
+  # asked to diff two strings by eye any more (PDS-D226).
   say ""
-  say "reading back to confirm the flip…"
+  say "reading back to confirm the write…"
   task_json "$task_id" "$tmp/after.json"
   local met
   met=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["doc"]["content"]["acceptance_criteria"][int(sys.argv[2])].get("met"))' \
@@ -461,9 +507,38 @@ cmd_stamp() {
     exit "$EX_FAILED"
   fi
 
+  criterion_evidence_to_file "$tmp/after.json" "$idx" "$tmp/evidence.after" \
+    || die "READ-BACK FAILED: criterion $idx carries no evidence field at all after an exit-0 stamp. A met flip with no evidence is a shape the server refuses to write, so this row did not take the write."
+
+  local sent_bytes stored_bytes
+  sent_bytes=$(wc -c <"$tmp/evidence.sent" | tr -d ' ')
+  stored_bytes=$(wc -c <"$tmp/evidence.after" | tr -d ' ')
+
+  if ! cmp -s "$tmp/evidence.sent" "$tmp/evidence.after"; then
+    warn ""
+    warn "READ-BACK FAILED: criterion $idx reads met=true, but the STORED EVIDENCE is not the text this run sent."
+    warn "  bytes sent   : ${sent_bytes}"
+    warn "  bytes stored : ${stored_bytes}"
+    warn "  first difference: $(cmp "$tmp/evidence.sent" "$tmp/evidence.after" 2>&1 | head -1)"
+    if cmp -s "$tmp/evidence.before" "$tmp/evidence.after"; then
+      warn "  The stored evidence is BYTE-IDENTICAL to what it was before this run. The stamp"
+      warn "  exited 0 and changed nothing — an acked write that did not apply. The met flag"
+      warn "  witnesses nothing here: it read true on both sides of the write."
+    else
+      warn "  The stored evidence DID change, but not to what this run sent — another writer"
+      warn "  reached this criterion between the stamp and this read. Re-read before re-sending."
+    fi
+    warn "  Do NOT record the exit-0 stamp above as a landed write."
+    exit "$EX_FAILED"
+  fi
+
   local progress
   progress=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["doc"].get("criteria_progress",{}); print("%s/%s"%(p.get("met"),p.get("total")))' "$tmp/after.json")
-  say "CONFIRMED: criterion $idx reads met — $task_id is now at ${progress}."
+  if cmp -s "$tmp/evidence.before" "$tmp/evidence.after"; then
+    say "CONFIRMED: criterion $idx reads met and its stored evidence is byte-identical to the ${sent_bytes} bytes sent — but it already read that exact text before this run, so this stamp moved nothing. $task_id is now at ${progress}."
+  else
+    say "CONFIRMED: criterion $idx reads met and its stored evidence CHANGED to the exact ${sent_bytes} bytes this run sent — $task_id is now at ${progress}."
+  fi
 }
 
 main() {

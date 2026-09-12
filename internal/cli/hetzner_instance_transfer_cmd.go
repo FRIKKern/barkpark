@@ -142,7 +142,7 @@ if [ -d "$STAGE/uploads" ]; then cp -R "$STAGE/uploads" /opt/barkpark/api/upload
 (set +e; set -a; . /opt/barkpark/.env; set +a; cd /opt/barkpark/api && bash -lc 'mix ecto.migrate' >/dev/null 2>&1; true)
 systemctl start barkpark
 PORT=$(grep '^PORT=' /opt/barkpark/.env | cut -d= -f2)
-curl -sf -m 60 --retry 30 --retry-delay 3 --retry-connrefused "http://localhost:${PORT:-4000}/api/schemas" > /dev/null
+curl -sf -m 60 --retry 30 --retry-delay 3 --retry-connrefused "http://localhost:${PORT:-4000}/status.json" > /dev/null
 echo BP_IMPORT_HEALTH_OK`
 }
 
