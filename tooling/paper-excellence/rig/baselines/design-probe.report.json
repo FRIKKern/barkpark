@@ -19,7 +19,7 @@
       "cell": "design-probe__light__1280",
       "file": "design-probe__light__1280.jpeg",
       "scale": 2,
-      "bytes": 318086,
+      "bytes": 328426,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -63,7 +63,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 68.5,
+      "proseCpl": 68.1,
       "proseCplSamples": 3,
       "captionCpl": null,
       "captionWidth": null,
@@ -71,11 +71,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 293.6,
+          "width": 298.5,
           "offCentre": 0,
-          "left": 493.2,
-          "right": 786.8,
-          "inkWidth": 291.6,
+          "left": 490.8,
+          "right": 789.2,
+          "inkWidth": 296.5,
           "inkOffCentre": 0
         },
         {
@@ -89,7 +89,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -153,7 +153,7 @@
       "cell": "design-probe__light__1920",
       "file": "design-probe__light__1920.jpeg",
       "scale": 2,
-      "bytes": 347852,
+      "bytes": 358002,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -197,7 +197,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 68.5,
+      "proseCpl": 68.1,
       "proseCplSamples": 3,
       "captionCpl": null,
       "captionWidth": null,
@@ -205,11 +205,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 293.6,
+          "width": 298.5,
           "offCentre": 0,
-          "left": 813.2,
-          "right": 1106.8,
-          "inkWidth": 291.6,
+          "left": 810.8,
+          "right": 1109.2,
+          "inkWidth": 296.5,
           "inkOffCentre": 0
         },
         {
@@ -223,7 +223,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -287,7 +287,7 @@
       "cell": "design-probe__dark__1280",
       "file": "design-probe__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 314770,
+      "bytes": 325615,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -331,7 +331,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 68.5,
+      "proseCpl": 68.1,
       "proseCplSamples": 3,
       "captionCpl": null,
       "captionWidth": null,
@@ -339,11 +339,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 293.6,
+          "width": 298.5,
           "offCentre": 0,
-          "left": 493.2,
-          "right": 786.8,
-          "inkWidth": 291.6,
+          "left": 490.8,
+          "right": 789.2,
+          "inkWidth": 296.5,
           "inkOffCentre": 0
         },
         {
@@ -357,7 +357,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -421,7 +421,7 @@
       "cell": "design-probe__dark__1920",
       "file": "design-probe__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 344402,
+      "bytes": 354836,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -465,7 +465,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 68.5,
+      "proseCpl": 68.1,
       "proseCplSamples": 3,
       "captionCpl": null,
       "captionWidth": null,
@@ -473,11 +473,11 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 293.6,
+          "width": 298.5,
           "offCentre": 0,
-          "left": 813.2,
-          "right": 1106.8,
-          "inkWidth": 291.6,
+          "left": 810.8,
+          "right": 1109.2,
+          "inkWidth": 296.5,
           "inkOffCentre": 0
         },
         {
@@ -491,7 +491,7 @@
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {

@@ -575,6 +575,33 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/vips-hedge-tripwire.sh
 
+      # ── the D41 @boundary marker registry, riding this job ───────────────
+      # VENUE IS THE POINT. The registry's natural home is doc-gates.yml, next
+      # to docs-anchors-check.sh §8 — and doc-gates publishes exactly ONE
+      # context, `Doc budgets + anchors`, which carries an S4 paths-filtered
+      # exclusion row in .github/required-checks.json and therefore stops no
+      # merge. A guard wired only there is mutation-proven and merge-toothless.
+      # This job is DELIBERATELY UNFILTERED (see its header) and feeds the
+      # REQUIRED `Elixir gate`, so a boundary comment whose enforcing test was
+      # renamed reds on the PR that renames it, on every PR, blockingly.
+      #
+      # A STEP of this job, not a job of its own — same two reasons as the vips
+      # hedge above: a new job reds the sibling harnesses via
+      # `blocking_not_in_needs`, and a step adds no rendered check name, so
+      # required-checks-verify.sh's roster is unchanged.
+      #
+      # Harness FIRST, subject second — the house selftest-first idiom. It takes
+      # ~2s over the whole tree.
+      - name: The @boundary marker registry must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/boundary-marker-check.sh --selftest
+
+      # STATIC PAIRING ONLY. A green here says every @boundary comment names a
+      # test that EXISTS — never that the test would fail if the boundary broke.
+      - name: Every @boundary comment names a test that still exists
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/boundary-marker-check.sh
+
       # ── the diff-scoped format verdict, end to end ───────────────────────
       # It rides HERE and not in the `format` job, deliberately: `format`
       # carries `if: needs.changes.outputs.compile == 'true'`, so on a docs-only

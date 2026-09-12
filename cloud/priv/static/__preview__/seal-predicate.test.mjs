@@ -1688,7 +1688,8 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
   // a=PASS b=FAIL c=PASS`) for an environment fact, not a defect. The floor this test
   // exists to pin is clause (a)'s, so the token's clause-(a) letters are what we read.
   // The fabrication sentences (`VERDICT: SEAL`, `Sealed 0 children of`) are pushed
-  // INSIDE `if (ok)` at seal-predicate.mjs:1062-1066 — structurally unreachable in ANY
+  // INSIDE `if (ok)` in seal-predicate.mjs (grep -n "L.push('VERDICT: SEAL')"
+  // seal-predicate.mjs) — structurally unreachable in ANY
   // environment where clause (b) fails — so they moved to the fixture-mode sibling
   // below rather than being deleted.
   const sealedToken = token(sealed.out);
@@ -1704,7 +1705,9 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
 
   // …and bucket (c) demonstrably cannot stop it: the three gates resolve for an epic
   // whose roster is empty, and the run says so in its own letters. Bucket (c) is pushed
-  // at seal-predicate.mjs:1047-1049, BEFORE `ok` is computed at :1056, so this line is
+  // in seal-predicate.mjs's bucket-(c) report loop (grep -n 'in-epic-roster='
+  // seal-predicate.mjs), BEFORE `ok` is computed (grep -n 'const ok = aPass'
+  // seal-predicate.mjs), so this line is
   // printed on the NO-SEAL branch too and needs no git history to be reachable.
   assert.match(sealed.out, /in-epic-roster=false/,
     'the gates are fetched by hardcoded id INDEPENDENTLY of --epic, which is why clause (c) is no backstop');
@@ -3310,4 +3313,116 @@ test('wave 26: the committed census for this epic parses and the predicate can l
   assert.equal(status, NO_SEAL);
   assert.match(token(out), new RegExp(`census=${EPIC} filing-events=${ids.length}\\b`));
   assert.match(out, new RegExp(`✗ ${ids[0]}  was=${c.rows[ids[0]]} now=`));
+});
+
+// ═══ WAVE 69 — A STALE TREE IS A TREE THIS PROGRAM DID NOT READ ═══════════════════════
+//
+// THE THIRD SIGHTING OF ONE DISEASE. Wave 27 gave the predicate a root guard because five
+// clause-(b) legs resolve under `--repo` and each reports its own miss as a DEFECT
+// sentence, so a wrong DIRECTORY printed six false claims about the PRODUCT. The ancestry
+// legs read `origin/main`; the guard files, the workflow file and every `measured_by`
+// path are read off the WORKING TREE. A tree that is merely BEHIND therefore scores
+// today's frozen register against an older tree — the identical failure one fact over,
+// and it is the DATE rather than the path.
+//
+// MEASURED BEFORE THIS LEG EXISTED, by the row that filed it: the same binary in one
+// session printed `b=FAIL` with four failing register entries from a 678-commit-stale
+// primary checkout and `b=PASS` from a tree at `origin/main`. It is SYMMETRIC — a stale
+// tree can also carry a guard whose register entry was since rewritten and read a false
+// `b=PASS` — so this is not a fail-closed accident that could be left alone.
+//
+// THE FIXTURE IS A REAL GIT REPOSITORY, built here, with a real `refs/remotes/origin/main`
+// written by `update-ref`. No network, no second clone, no dependence on where THIS
+// checkout happens to sit — a test whose N came from the tree it runs in would measure the
+// campaign's merge rate rather than the leg.
+function synthRepoBehind(n) {
+  const root = synthRepo({});
+  const g = (...a) => {
+    const r = spawnSync('git', ['-C', root, ...a], { encoding: 'utf8' });
+    assert.equal(r.status, 0, `git ${a.join(' ')} failed, so this fixture measured nothing: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  g('init', '--quiet', '-b', 'main');
+  g('config', 'user.email', 'seal-predicate-test@invalid');
+  g('config', 'user.name', 'seal predicate test');
+  g('add', '-A');
+  g('commit', '--quiet', '--no-gpg-sign', '-m', 'base');
+  const base = g('rev-parse', 'HEAD');
+  for (let i = 0; i < n; i += 1) {
+    writeFileSync(join(root, 'moved-ahead.txt'), `${i}\n`);
+    g('add', 'moved-ahead.txt');
+    g('commit', '--quiet', '--no-gpg-sign', '-m', `ahead ${i}`);
+  }
+  if (n) g('update-ref', 'refs/remotes/origin/main', g('rev-parse', 'HEAD'));
+  else g('update-ref', 'refs/remotes/origin/main', base);
+  g('checkout', '--quiet', '--detach', base);
+  // THE PRECONDITION OF THE CONTROL, asserted rather than assumed: a `git init` that
+  // half-worked, or an `update-ref` that wrote nothing, would leave a tree that is 0
+  // behind, and every assertion below would then pass for the WRONG reason.
+  const behind = g('rev-list', '--count', 'HEAD..origin/main');
+  assert.equal(behind, String(n), `the fixture is ${behind} behind, not the ${n} this case is about`);
+  return root;
+}
+
+test('wave 69: a --repo BEHIND origin/main is an INFRA FAULT that NAMES THE COUNT, never a b letter', () => {
+  const root = synthRepoBehind(7);
+  const { status, out } = run(['--ladder-only', '--repo', root]);
+  assert.equal(status, INFRA, 'a stale tree is an environment fact, so it may not travel in a verdict code');
+  assert.match(out, /INFRA FAULT at /);
+  assert.match(out, /is 7 commit\(s\) BEHIND origin\/main \(`git rev-list --count HEAD\.\.origin\/main` = 7\)/,
+    'the count is the whole finding: "stale" without a number is unactionable and unreproducible');
+  assert.match(token(out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=REPO-BEHIND-ORIGIN-MAIN/,
+    'the code is APPENDED AFTER epic=, exactly as UNREADABLE-REPO-ROOT is, so the clause letters keep their run');
+  assert.match(out, /does NOT fetch/, 'the leg states its own ceiling: a stale origin/main ref reads 0 and is invisible');
+  // NOT ONE clause-(b) row may be rendered off a tree whose date makes every one of them
+  // a claim about yesterday. Counted over RENDERED rows, never over vocabulary — the
+  // refusal deliberately QUOTES the sentence it prevents.
+  assert.doesNotMatch(out, /^ {2}[✗◐✓·] CCH-D/m, 'no register entry may be scored against a tree this program declined to read');
+  assert.doesNotMatch(out, /LADDER-ONLY/, 'no reading may be printed off a read that never happened');
+  assert.doesNotMatch(out, /VERDICT: NO SEAL/, 'an infra fault is never a verdict');
+
+  // MUTATION CONTROL — remove ONLY this leg and the IDENTICAL run over the IDENTICAL
+  // stale tree walks straight into the ladder, which is the pre-fix behaviour the filing
+  // measured at 678 commits behind. Without this the case above would be green for any
+  // reason at all, including a fixture the predicate refused one leg earlier.
+  const unguarded = mutatedRun(
+    (src) => src.replace('  assertRepoNotBehindOriginMain();\n', ''),
+    ['--ladder-only', '--repo', root]);
+  assert.notEqual(unguarded.status, INFRA, 'with the leg gone the stale tree is no longer refused');
+  assert.doesNotMatch(unguarded.out, /REPO-BEHIND-ORIGIN-MAIN/);
+  assert.match(token(unguarded.out), /LADDER-ONLY b-rungs=/,
+    'and it scores a b reading off a tree 7 commits out of date — the defect, reproduced');
+});
+
+test('wave 69: 0 behind PROCEEDS, and an UNREADABLE comparison is not a stale tree', () => {
+  // (a) THE NEGATIVE CONTROL. A leg that refuses every tree measures nothing, so the same
+  // fixture builder at n=0 must reach the ladder.
+  const current = run(['--ladder-only', '--repo', synthRepoBehind(0)]);
+  assert.notEqual(current.status, INFRA, 'a tree AT origin/main is exactly the tree this program wants');
+  assert.doesNotMatch(current.out, /REPO-BEHIND-ORIGIN-MAIN/);
+  assert.match(token(current.out), /LADDER-ONLY b-rungs=/, 'and it reaches the reading');
+
+  // (b) NO `origin/main` AT ALL — actions/checkout@v4's depth-1 default, which is what
+  // `console-unit` runs on every push. `rev-list` cannot answer, so this leg says NOTHING
+  // and clause (b) keeps its own, far more precise discrimination (MISSING-REF /
+  // HISTORY-UNAVAILABLE / `b-unavailable=N/M`). Refusing here would red the BLOCKING
+  // Console gate for an environment fact, which is the trap charter D335 already names.
+  const noRef = synthRepoBehind(3);
+  const del = spawnSync('git', ['-C', noRef, 'update-ref', '-d', 'refs/remotes/origin/main'], { encoding: 'utf8' });
+  assert.equal(del.status, 0, `update-ref -d failed, so this control measured nothing: ${del.stderr}`);
+  const probe = spawnSync('git', ['-C', noRef, 'rev-list', '--count', 'HEAD..origin/main'], { encoding: 'utf8' });
+  assert.notEqual(probe.status, 0, 'the precondition: with the ref gone the comparison CANNOT be made');
+  const unreadable = run(['--ladder-only', '--repo', noRef]);
+  assert.notEqual(unreadable.status, INFRA, 'an unanswerable comparison is not a finding about the tree');
+  assert.doesNotMatch(unreadable.out, /REPO-BEHIND-ORIGIN-MAIN/,
+    'silence, not a blunter sentence over the top of clause (b)\'s precise one');
+  assert.match(token(unreadable.out), /LADDER-ONLY b-rungs=.* b-unavailable=[1-9]/,
+    'and the condition is carried where it already was: in b-unavailable, in letters, at exit 0');
+
+  // (c) THE FIXTURE PATH IS NOT SUBJECT TO IT, for the same reason Leg 2 is not: `--ledger`
+  // stands `landed` in for every ancestry read, and twelve rung-2 leg cases drive a
+  // deliberately synthetic root. A staleness leg on both paths would red them for
+  // measuring something else entirely.
+  const fixtured = run(['--ledger', FIX('sealable.json'), '--repo', synthRepoBehind(9)]);
+  assert.doesNotMatch(fixtured.out, /REPO-BEHIND-ORIGIN-MAIN/, 'a ledger fixture reads no tree date');
 });

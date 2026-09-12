@@ -942,6 +942,29 @@ function cellLayoutAttr(child: unknown): string {
 const HR = '<hr class="bp-hr">'
 const HR_STACK = '<hr class="bp-hr" style="border-top-width:1px">'
 
+/** ONE RULE PER BOUNDARY (task-a4d1ae76fdb2a6b0) — the mirror of compose.ex's
+ * `SectionLayout.stack_rules?/2` and of blocks.go `sectionStackRules`. Returns
+ * true (draw the boundary rule pair) unless ALL of:
+ *
+ *   - the section carries NO title. Elixir gates on `is_nil`, so an
+ *     empty-STRING title is still a title and keeps the pair — hence `!= null`
+ *     (which also covers `undefined`) rather than a truthiness check.
+ *   - the section is NOT declared grid mode. A grid section is a layout box,
+ *     not a chapter: `section_grid_html` keeps its pair unconditionally.
+ *   - its FIRST child is a heading of any level.
+ *
+ * The heading IS the boundary in that one shape — paper-surface.css gives a
+ * container head the same beat/rule/gap a top-level `h2` gets (#15806), so a
+ * rule pair around it stacks three lines for one boundary. The Elixir engine
+ * settled this in #16233 and this SDK kept drawing both rules on the same
+ * published papers. Locked across all three engines by the shared fixture
+ * api/test/support/fixtures/section-boundary-rules.json.
+ *
+ * `blocks` and `isGrid` are passed in rather than re-derived: the caller has
+ * already computed both, and this subpath is at its size-limit ceiling. */
+const sectionStackRules = (b: Block, blocks: Block[], isGrid: boolean): boolean =>
+  b.title != null || isGrid || !(isMap(blocks[0]) && blocks[0].type === 'heading')
+
 const section: Emit = (b) => {
   const layout = b.layout
   const isGrid = isMap(layout) && layout.mode === 'grid'
@@ -972,17 +995,15 @@ const section: Emit = (b) => {
     )
   }
 
-  // Stack section: PdHr, [bold title span], inner blocks, PdHr.
+  // Stack section: [PdHr], [bold title span], inner blocks, [PdHr] — the pair is
+  // present only when `sectionStackRules` says this section's boundary is not
+  // already carried by its own opening heading.
+  const rule = sectionStackRules(b, blocks, isGrid) ? HR_STACK : ''
   const titleSpan =
     b.title != null ? `<span style="font-weight:bold">${escapeHtml(str(b.title))}</span>` : ''
   const inner = blocks.map((child) => renderBlock(child)).join('')
   return (
-    `<div style="display:flex;flex-direction:column">` +
-    HR_STACK +
-    titleSpan +
-    inner +
-    HR_STACK +
-    `</div>`
+    `<div style="display:flex;flex-direction:column">` + rule + titleSpan + inner + rule + `</div>`
   )
 }
 

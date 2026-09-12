@@ -680,9 +680,9 @@ defmodule BarkparkWeb.QueryController do
   # /papers reader already exposes on the same paper. Underneath, the fetcher
   # (Tasks.Query.rows_for_query → Scope.scope_to_workspace) stays fail-closed:
   # a nil workspace resolves to zero rows, never to a cross-tenant leak.
-  defp maybe_resolve_tasks(rendered, conn, %{"resolve" => "tasks", "dataset" => dataset})
+  defp maybe_resolve_tasks(rendered, conn, %{"resolve" => "tasks", "dataset" => dataset} = params)
        when is_list(rendered) do
-    scope = api_task_scope(conn)
+    scope = api_task_scope(conn, params)
 
     Enum.map(rendered, fn doc ->
       case doc do
@@ -701,8 +701,15 @@ defmodule BarkparkWeb.QueryController do
 
   defp maybe_resolve_tasks(rendered, _conn, _params), do: rendered
 
-  defp api_task_scope(conn) do
+  # Perspective-threaded exactly like the resolved DOCUMENTS around it: the
+  # caller's `AnonPerspective.resolve/2` verdict (a plain anonymous or
+  # public-read caller is pinned to `:published`) decides whether the embedded
+  # task rows may include unpublished ones. Without this an anonymous
+  # `?resolve=tasks` read returned draft-only task titles that the very same
+  # response's document perspective would have hidden (task-b10e10b944f6f55b).
+  defp api_task_scope(conn, params) do
     opts = scope_opts(conn)
+    perspective = AnonPerspective.resolve(conn, params)
 
     ws_id =
       Keyword.get(opts, :workspace_id) ||
@@ -711,7 +718,11 @@ defmodule BarkparkWeb.QueryController do
           _ -> nil
         end
 
-    [workspace_id: ws_id, project_id: Keyword.get(opts, :project_id)]
+    [
+      workspace_id: ws_id,
+      project_id: Keyword.get(opts, :project_id),
+      published_only: perspective == :published
+    ]
   end
 
   # Query params that RESHAPE the body without moving the `(dataset, type,

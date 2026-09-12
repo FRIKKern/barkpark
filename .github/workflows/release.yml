@@ -7,6 +7,17 @@ name: release
 # path. The operator must explicitly flip `dry_run=false` via workflow_dispatch
 # to produce a real npm publish.
 #
+# DIST-TAG OWNERSHIP. Two steps decide where a publish lands, and between them
+# they cover both modes:
+#   * NOT in pre-mode — `--tag "<dist_tag>"` is passed to the publish CLI, so the
+#     `dist_tag` input below decides the channel directly.
+#   * IN pre-mode — the publish CLI REFUSES --tag, and changesets' getReleaseTag
+#     silently routes every "only-pre" package to `latest` instead of the
+#     pre-tag. So `Point the channel dist-tag at the published versions` runs an
+#     explicit `npm dist-tag add` afterwards, derived from the publish output.
+# Before both existed, `dist_tag` decided nothing at all and the `preview`
+# channel was maintained by no mechanism — see those steps for the measurement.
+#
 # Reference: .doey/plans/masterplan-phase8-20260418-190403-refined.v2.md §8.0
 # (deliverable 3 — wire release.yml default tag to `preview`) and §13.C B4
 # (OIDC provenance + unscoped `create-barkpark-app` compatibility concern).
@@ -15,7 +26,11 @@ on:
   workflow_dispatch:
     inputs:
       dist_tag:
-        description: "npm dist-tag to publish under"
+        # Consumed, not decorative: passed as `--tag` to the publish CLI outside
+        # pre-mode, and reconciled against .changeset/pre.json inside it (a
+        # disagreement is a hard failure, never a silent publish under another
+        # name). See "Resolve the channel dist-tag" below.
+        description: "npm dist-tag to publish under (in pre-mode must equal .changeset/pre.json tag)"
         required: true
         default: "preview"
         type: choice
@@ -113,6 +128,51 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Resolve the channel dist-tag (pre.json is the authority in pre-mode)
+        id: channel
+        # THE CHANNEL THE `preview` TAG NEVER HAD. In pre-mode, changesets'
+        # getReleaseTag (@changesets/cli 2.31.0, changesets-cli.cjs.js:1002-1007)
+        # returns preState.tag ONLY when the package has already published
+        # something that is not a prerelease. Every @barkpark package has
+        # published nothing but prereleases ("only-pre"), so `changeset publish`
+        # sends them to `latest` and NOTHING ever moves `preview`. Measured on
+        # the live registry 2026-09-11: `npm view @barkpark/core dist-tags`
+        # -> {latest: 1.0.0-preview.3, preview: 1.0.0-preview.2}; identical for
+        # @barkpark/nextjs. Both preview.3 versions were published by run
+        # 25019649888 (2026-04-27T21:09:39Z) whose own summary says
+        # "dist-tag: `preview`" — the input asserted a choice nothing consumed.
+        # This step decides the channel; the "Point the channel dist-tag at the
+        # published versions" step at the end of the job applies it.
+        run: |
+          set -euo pipefail
+          PRE_MODE=none
+          PRE_TAG=""
+          if [ -f .changeset/pre.json ]; then
+            PRE_MODE="$(node -p 'JSON.parse(require("fs").readFileSync(".changeset/pre.json","utf8")).mode || "none"')"
+            PRE_TAG="$(node -p 'JSON.parse(require("fs").readFileSync(".changeset/pre.json","utf8")).tag || ""')"
+          fi
+          CHANNEL="${DIST_TAG_INPUT}"
+          if [ "${PRE_MODE}" = "pre" ]; then
+            if [ "${CHANNEL}" != "${PRE_TAG}" ]; then
+              # A dispatch is an operator ASSERTING a channel. In pre-mode the
+              # publish CLI cannot honour it (--tag is rejected outright), so
+              # the only honest outcomes are: refuse, or — on the tag-push leg,
+              # where nobody chose anything — say out loud that pre.json wins.
+              if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+                echo "::error title=dist_tag disagrees with pre.json::dispatch asked for '${CHANNEL}' but .changeset/pre.json tag is '${PRE_TAG}'. Pre-mode forbids --tag, so pre.json is the channel: dispatch with dist_tag=${PRE_TAG}, or run 'changeset pre exit' first."
+                exit 1
+              fi
+              echo "::warning title=Channel overridden by pre-mode::pre.json tag '${PRE_TAG}' overrides the '${CHANNEL}' default on this ${EVENT_NAME} trigger"
+            fi
+            CHANNEL="${PRE_TAG}"
+          fi
+          echo "pre_mode=${PRE_MODE}" >> "$GITHUB_OUTPUT"
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+          echo "pre_mode=${PRE_MODE} pre_tag=${PRE_TAG:-(none)} dist_tag input=${DIST_TAG_INPUT} -> channel=${CHANNEL}"
+        env:
+          DIST_TAG_INPUT: ${{ steps.mode.outputs.dist_tag }}
+          EVENT_NAME: ${{ github.event_name }}
 
       - name: npm identity preflight (MEASURES the token)
         # WHY THIS EXISTS. Until this step landed, both of the workflow's green
@@ -239,6 +299,8 @@ jobs:
           # measured).
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
+          PRE_MODE: ${{ steps.channel.outputs.pre_mode }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
         run: |
           set -euo pipefail
           echo "::notice title=Dry-run mode::no npm writes will occur"
@@ -247,12 +309,17 @@ jobs:
           # the published tarball and walks each publishable package exactly
           # as the real publish would. --no-git-checks skips the "must be on
           # clean main" gate (we're on a feature branch by design).
-          # NOTE: no --tag here. In pre-mode, .changeset/pre.json auto-applies
-          # the pre-tag ("preview"); both `changeset publish` and the pnpm
-          # dry-run equivalent must not pass an explicit --tag or pre-mode
-          # rejects with "Releasing under custom tag is not allowed in pre
-          # mode". The dist_tag workflow input is reserved for post-pre-exit.
-          pnpm publish -r --dry-run --access public --no-git-checks 2>&1 | tee "${RUNNER_TEMP}/publish.log"
+          # --tag ONLY outside pre-mode: pre-mode rejects an explicit tag with
+          # "Releasing under custom tag is not allowed in pre mode". Inside
+          # pre-mode the channel is applied afterwards by the explicit
+          # `npm dist-tag add` step, because changesets routes "only-pre"
+          # packages to `latest` and would otherwise leave the channel frozen.
+          TAG_ARGS=()
+          if [ "${PRE_MODE}" != "pre" ]; then
+            TAG_ARGS=(--tag "${CHANNEL}")
+          fi
+          echo "publish argv tail: ${TAG_ARGS[*]:-(no --tag; pre-mode)}"
+          pnpm publish -r --dry-run --access public --no-git-checks "${TAG_ARGS[@]}" 2>&1 | tee "${RUNNER_TEMP}/publish.log"
 
       - name: Publish (REAL — emits to npm)
         if: steps.mode.outputs.dry_run != 'true'
@@ -262,6 +329,8 @@ jobs:
           # `npm publish` invoked by changesets. Equivalent to passing
           # --provenance as a flag; per npm docs both forms are accepted.
           NPM_CONFIG_PROVENANCE: "true"
+          PRE_MODE: ${{ steps.channel.outputs.pre_mode }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
         run: |
           # `set -euo pipefail` is LOAD-BEARING, not decoration, and matches the
           # dry-run sibling above. Actions' unspecified-shell default is
@@ -273,18 +342,23 @@ jobs:
           # pnpm's actual refusal. Keep this line: an npm refusal must red the
           # step that caused it.
           set -euo pipefail
-          echo "::warning title=Real publish::dist-tag=${{ steps.mode.outputs.dist_tag }} — writes to npm"
+          echo "::warning title=Real publish::channel=${CHANNEL} (pre_mode=${PRE_MODE}) — writes to npm"
           # TODO(B4): npm provenance for unscoped `create-barkpark-app` has
           # historically been less well-tested than for scoped packages.
           # If this step fails specifically on `create-barkpark-app` while
           # `@barkpark/*` packages succeed, fall back to publishing that one
           # package without provenance (documented rescue path in
           # .doey/plans/masterplan-phase8-20260418-190403-refined.v2.md §13.C B4).
-          # NOTE: no --tag here. Pre-mode (.changeset/pre.json tag="preview")
-          # auto-applies the dist-tag; passing --tag explicitly fails with
-          # "Releasing under custom tag is not allowed in pre mode". When
-          # pre-mode is exited, restore --tag "${{ steps.mode.outputs.dist_tag }}".
-          pnpm changeset publish 2>&1 | tee "${RUNNER_TEMP}/publish.log"
+          # --tag ONLY outside pre-mode (pre-mode fails with "Releasing under
+          # custom tag is not allowed in pre mode"). In pre-mode the channel is
+          # applied by the explicit `npm dist-tag add` step below — pre.json's
+          # tag does NOT reach the registry on its own for "only-pre" packages.
+          TAG_ARGS=()
+          if [ "${PRE_MODE}" != "pre" ]; then
+            TAG_ARGS=(--tag "${CHANNEL}")
+          fi
+          echo "publish argv tail: ${TAG_ARGS[*]:-(no --tag; pre-mode)}"
+          pnpm changeset publish "${TAG_ARGS[@]}" 2>&1 | tee "${RUNNER_TEMP}/publish.log"
 
       - name: Assert the published set equals the release plan
         # WHY THIS EXISTS. `changeset publish` SKIPS a package whose version is
@@ -315,6 +389,9 @@ jobs:
               if (m) published.add(m[1] + "@" + m[2]);
             }
             const planned = new Set(Object.entries(plan).map(([n, v]) => n + "@" + v));
+            // The published set is also the input to the channel dist-tag step
+            // below: the versions npm actually took, never a hand-typed list.
+            fs.writeFileSync(tmp + "/published.json", JSON.stringify([...published].sort(), null, 2));
             const missing = [...planned].filter((x) => !published.has(x)).sort();
             const extra = [...published].filter((x) => !planned.has(x)).sort();
             console.log("planned:   " + ([...planned].sort().join(", ") || "(none)"));
@@ -332,6 +409,54 @@ jobs:
             process.exit(1);
           '
 
+      - name: Point the channel dist-tag at the published versions
+        # THE MECHANISM. Outside pre-mode `--tag` on the publish itself already
+        # placed the channel, so this step is pre-mode only — which is exactly
+        # the case changesets does not handle: getReleaseTag returns `latest`
+        # for every "only-pre" package, so without this step `preview` moves
+        # only when a human runs `npm dist-tag add` by hand, and re-freezes one
+        # version later. That is the state this repo shipped for three months.
+        #
+        # It is not a one-off: it reads ${RUNNER_TEMP}/published.json — written
+        # by the publish-set assertion above from the `+ pkg@ver` (pnpm) and
+        # `🦋  pkg@ver` (changesets) lines of the publish output that just ran —
+        # so the argv is derived from what npm actually took. On the dry-run leg
+        # the argv is PRINTED and nothing is executed, which makes every dry run
+        # a rehearsal of the next real publish's tag.
+        if: steps.channel.outputs.pre_mode == 'pre'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          DRY_RUN: ${{ steps.mode.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const specs = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/published.json", "utf8"));
+            process.stdout.write(specs.join("\n") + (specs.length ? "\n" : ""));
+          ' > "${RUNNER_TEMP}/channel-specs.txt"
+          if [ ! -s "${RUNNER_TEMP}/channel-specs.txt" ]; then
+            echo "::notice title=Nothing published::no package to point '${CHANNEL}' at"
+            exit 0
+          fi
+          RC=0
+          while read -r SPEC; do
+            [ -n "${SPEC}" ] || continue
+            echo "npm dist-tag add ${SPEC} ${CHANNEL}"
+            if [ "${DRY_RUN}" != "true" ]; then
+              npm dist-tag add "${SPEC}" "${CHANNEL}" || RC=1
+            fi
+          done < "${RUNNER_TEMP}/channel-specs.txt"
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "::notice title=Dry run::the argv above was printed, not executed"
+            exit 0
+          fi
+          if [ "${RC}" -ne 0 ]; then
+            echo "::error title=dist-tag add failed::'${CHANNEL}' does not point at everything this run published — the channel is now split. Re-run, or remediate with the retag workflow."
+            exit 1
+          fi
+          echo "'${CHANNEL}' now points at every package this run published"
+
       - name: Summary
         if: always()
         working-directory: ${{ github.workspace }}
@@ -340,7 +465,8 @@ jobs:
             echo "## Release run summary"
             echo ""
             echo "- trigger: \`${{ github.event_name }}\`"
-            echo "- dist-tag: \`${{ steps.mode.outputs.dist_tag }}\`"
+            echo "- dist_tag input: \`${{ steps.mode.outputs.dist_tag }}\`"
+            echo "- effective channel: \`${{ steps.channel.outputs.channel }}\` (pre_mode: \`${{ steps.channel.outputs.pre_mode }}\`)"
             echo "- dry_run: \`${{ steps.mode.outputs.dry_run }}\`"
             echo "- commit: \`${{ github.sha }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

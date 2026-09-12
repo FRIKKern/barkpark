@@ -226,6 +226,113 @@ test("cch-w36-s1: the /new launch 403 toast BRANCHES ON THE SLUG, never on the s
   assert.equal(odd.billingAction, false);
 });
 
+// ── cch-w48-bl · THE scope:"token" REFUSAL, THROUGH EVERY EMITTER THAT READS
+//    `required` ────────────────────────────────────────────────────────────
+//
+// THE EMITTER SET IS DERIVED, NOT QUOTED. `grep -n '\.required' app.js` on the
+// base commit returns exactly TWO reader sites: the one inside
+// forbiddenEvidenceCopy (friendly()'s 403-evidence fence) and the one inside
+// newLaunchRefusalToast. There is no third; `["required"]` returns none. Both
+// are driven below, with BOTH payload shapes, so "every emitter" is a set this
+// file measured rather than a count the filing asserted.
+//
+// WHAT THE SERVER ACTUALLY SENDS (measured in cloud/lib/barkpark_cloud/web/
+// auth.ex): require_ability/2 answers `{error:"forbidden", required:<ability>,
+// scope:"token"}` — the ONLY emit site of scope:"token" in the tree — and
+// POST /v1/launch reaches it, because go_live/1's PAT branch is
+// `Auth.require_ability(conn, "deploy")`. `deploy` there is a PAT ABILITY, not
+// a team role: the ability list is fixed by POST /v1/tokens at mint and no
+// route in router.ex updates it, so "an admin on this team can grant it" and
+// "Ask a team deploy" are both remedies that cannot be carried out by anyone.
+//
+// THE FILING WAS HALF WRONG ABOUT WHICH EMITTER LIED. It said friendly() "gets
+// it right" on the identical payload. It did not: on the base commit
+// friendly({error:"forbidden", scope:"token", required:"deploy"}) returned
+// 'You need the "deploy" permission on this team — an admin on this team can
+// grant it.' — the SAME fabricated remedy in a quieter register. Both emitters
+// lied; only the sentences differed.
+const TOKEN_403 = { error: "forbidden", scope: "token", required: "deploy" };
+const TEAM_403 = { error: "forbidden", scope: "team", required: "admin" };
+
+test("cch-w48-bl: a scope:token refusal never renders a team role — friendly()", () => {
+  const body = hooks.friendly(TOKEN_403, "We couldn't launch for this team.");
+
+  assert.match(body, /"deploy" ability/,
+    "the refusal names the ability the server asked for, not a humanized guess");
+  assert.doesNotMatch(body, /an admin on this team can grant it/,
+    "no admin can grant a PAT ability — a token's abilities are fixed at mint");
+  assert.doesNotMatch(body, /role on this team/,
+    "an ability does not live on a team; saying it does is half the defect");
+  assert.doesNotMatch(body, /"deploy" permission on this team/,
+    "the exact sentence the base commit shipped for this payload");
+  assert.match(body, /No team role grants it/,
+    "the sentence DELETES the team-role remedy rather than leaving it unsaid");
+  assert.notEqual(body, "We couldn't launch for this team.",
+    "it is evidence copy, not the caller's fallback — the arm must actually fire");
+});
+
+test("cch-w48-bl: a scope:token refusal never renders a team role — newLaunchRefusalToast()", () => {
+  const refusal = hooks.newLaunchRefusalToast(TOKEN_403);
+
+  assert.doesNotMatch(refusal.body, /Ask a team deploy/,
+    "there is no team 'deploy' to ask — this was the shipped sentence on the launch path");
+  assert.doesNotMatch(refusal.body, /deploy role on this team/,
+    "a PAT ability rendered as a team role is the whole defect");
+  assert.doesNotMatch(refusal.body, /an admin on this team can grant it/,
+    "the quieter half of the same lie must not arrive through the delegation either");
+  assert.match(refusal.body, /"deploy" ability/);
+  assert.equal(refusal.billingAction, false);
+
+  // ONE TRUTH, not two sentences to keep in step. The token arm delegates to
+  // friendly() — it does not carry its own copy of the ability vocabulary — so
+  // the two emitters are byte-identical on the same bytes. This is the
+  // assertion that reds if someone "fixes" the toast by writing a second
+  // sentence beside the first.
+  assert.equal(refusal.body, hooks.friendly(TOKEN_403, "We couldn't launch for this team."),
+    "the toast's token arm IS friendly()'s sentence, never a second copy of it");
+});
+
+test("cch-w48-bl: the team and platform arms are byte-for-byte unchanged", () => {
+  // These four strings are the SHIPPED sentences on the base commit, retyped
+  // here on purpose: this arm's whole job is to red if the scope branch leaks
+  // into a payload it was never meant to touch.
+  assert.equal(hooks.friendly(TEAM_403, "FB"),
+    "You need the admin role on this team — an admin on this team can grant it.");
+  assert.equal(hooks.friendly({ error: "forbidden", scope: "team", required: "owner" }, "FB"),
+    "You need the owner role on this team — only the team owner can grant it.");
+  assert.equal(
+    hooks.friendly({ error: "forbidden", scope: "platform", required: "platform_operator" }, "FB"),
+    "That's limited to platform operators — no team role grants it.");
+  // primary_team is the pre-cch-w37-s3 spelling; a payload still carrying it
+  // must take the same path it always did.
+  assert.equal(hooks.friendly({ error: "forbidden", scope: "primary_team", required: "admin" }, "FB"),
+    "You need the admin role on this team — an admin on this team can grant it.");
+
+  assert.equal(hooks.newLaunchRefusalToast(TEAM_403).body, hooks.launchRoleClause("admin"),
+    "the team arm still renders the ONE clause, not the delegation");
+  assert.equal(hooks.newLaunchRefusalToast({ error: "forbidden", required: "admin" }).body,
+    hooks.launchRoleClause("admin"),
+    "a payload with no scope at all is a TEAM refusal by every existing pin — unchanged");
+  // The bare arm's D537 delegation is untouched.
+  assert.equal(hooks.newLaunchRefusalToast({ error: "forbidden" }).body,
+    hooks.friendly({ error: "forbidden" }, "We couldn't launch for this team."));
+});
+
+test("cch-w48-bl: scope:token with an unlabellable `required` renders no sentence at all", () => {
+  // The token arm reuses the same label fence as the role tail: an unbounded
+  // echo of a server string into copy is how a message becomes markup. No
+  // sentence is better than a fabricated one.
+  const body = hooks.friendly(
+    { error: "forbidden", scope: "token", required: "<img src=x onerror=1>" },
+    "FALLBACK");
+  // forbiddenEvidenceCopy returns null, so friendly() falls to its curated
+  // `forbidden` entry — the D447 generic that claims no role and invents no
+  // remedy. NOT the caller's fallback: the curated rung precedes it.
+  assert.equal(body,
+    "You don't have permission to do that, and the refusal didn't say which role would allow it.");
+  assert.doesNotMatch(body, /onerror/, "an unlabellable `required` never reaches copy");
+});
+
 // ── cch-w10-oauth-exchange-code · THE OAUTH LANDING GATE ───────────────────
 // This path had ZERO coverage before this group: `handleOAuthReturn` was not in
 // __bpTestHook, and "oauth" appeared in this file exactly twice, both inside one
@@ -9483,9 +9590,11 @@ test("liveness chip: app.css carries a paint rule for EVERY chip state", () => {
 
 test("liveness chip: every state's .live-dot rule DECLARES a background (per-declaration fence)", () => {
   // D41/D66 — closes the KNOWN GRANULARITY LIMIT the sibling fence above declared.
-  // That fence proves SELECTOR-PREFIX presence: deleting ONLY app.css:3470
-  // (`.live-chip[data-state="stale"] .live-dot { background: … }`) leaves the
-  // same-prefix `.live-chip-label` rule on :3471, so the prefix survives and every
+  // That fence proves SELECTOR-PREFIX presence: deleting ONLY
+  // `.live-chip[data-state="stale"] .live-dot { background: … }` (re-derive with
+  // grep -n '^\.live-chip\[data-state="stale"\] \.live-dot' app.css) leaves the
+  // same-prefix `.live-chip[data-state="stale"] .live-chip-label` rule on the NEXT
+  // line, so the prefix survives and every
   // gate stays green while the state silently loses its dot colour — the one
   // property that carries the severity signal. This probe reads PER DECLARATION:
   // it isolates each state's own `.live-dot {…}` block and asserts the background
@@ -11332,6 +11441,82 @@ test("S11b: lifecyclePillState folds each client state onto a canonical S4 state
   assert.equal(p.state, "live");
   assert.equal(p.label, "Live");
   assert.equal(p.cls, "bp-inst--live");
+});
+
+// ── cch-w54-bl: the label map's DOMAIN is exactly the fold's RANGE ──────────
+// The map once declared seven states while the fold could return five, so
+// `archived` and `adopted` were labels no input reached. They were deleted (no
+// producer exists for either: instanceLifecycle reads four row fields and
+// barkpark_json/5 serializes no archived/adopted fact). This guard keeps the two
+// sets equal by DRIVING the fold — reading the map to learn what the console
+// paints is the exact error the deleted labels embodied.
+test("cch-w54-bl: LIFECYCLE_PILL_LABEL's domain equals lifecyclePillState's range", () => {
+  // The fold's branch precedence, in source order: removing wins, then the two
+  // error branches, then paused, then the two positive ones.
+  const FOLD_ORDER = ["removing", "removeFailed", "failed", "suspended", "provisioning", "live"];
+  const fixtures = [
+    ["removing", { deprovision_status: "pending", host: "h" }],
+    ["removeFailed", { deprovision_status: "failed", host: "h" }],
+    ["failed", { provision_status: "failed" }],
+    ["suspended", { host: "h", suspended: true }],
+    ["provisioning", {}],
+    ["live", { host: "h" }],
+  ];
+
+  // PRECONDITION, not decoration: each fixture must actually SELECT the branch it
+  // is named for and must not be shadowed by an earlier one. Without this, two
+  // fixtures could collapse onto a single branch and the "range" below would be
+  // built from fewer branches than it claims — a set that is right by accident.
+  for (const [branch, bp] of fixtures) {
+    const lc = hooks.instanceLifecycle(bp);
+    assert.ok(lc[branch],
+      branch + " fixture does not select the " + branch + " branch: " + JSON.stringify(lc));
+    for (const earlier of FOLD_ORDER.slice(0, FOLD_ORDER.indexOf(branch))) {
+      if (earlier === "removeFailed" && branch === "failed") continue; // same precedence level
+      assert.ok(!lc[earlier],
+        branch + " fixture is shadowed by the earlier " + earlier + " branch");
+    }
+  }
+
+  // THE RANGE, driven. Every value each of the four fields instanceLifecycle
+  // reads can hold, including the two absent forms — so a new branch inside the
+  // fold shows up here with no edit to this test.
+  const AXES = {
+    deprovision_status: [null, undefined, "pending", "claimed", "failed", "succeeded"],
+    host: ["", null, undefined, "box.barkpark.cloud"],
+    provision_status: [null, undefined, "failed", "succeeded"],
+    suspended: [false, true],
+  };
+  const range = new Set();
+  let combos = 0;
+  for (const deprovision_status of AXES.deprovision_status)
+    for (const host of AXES.host)
+      for (const provision_status of AXES.provision_status)
+        for (const suspended of AXES.suspended) {
+          combos += 1;
+          range.add(hooks.lifecyclePillState({ deprovision_status, host, provision_status, suspended }));
+        }
+  assert.ok(combos > 0, "the matrix drove no inputs at all");
+
+  // Every named branch's state is in the driven range (the two derivations agree).
+  for (const [branch, bp] of fixtures) {
+    assert.ok(range.has(hooks.lifecyclePillState(bp)),
+      "the cartesian matrix never reached the state the " + branch + " fixture folds to");
+  }
+
+  // The seventh branch — the fold's own `return ""` sentinel — has NO witness.
+  // `live`'s last conjunct IS bp.host, so a box with a host that is not
+  // removing / failed / suspended is live, and a box without one is provisioning
+  // or failed. "" is a defensive fallback, not a state, and is rightly unlabelled.
+  assert.ok(!range.has(""),
+    '"" is now reachable: the fold gained a state with no label. Give it a label ' +
+    "and a manifest row, or keep it unreachable.");
+
+  assert.deepEqual([...range].sort(), Object.keys(hooks.LIFECYCLE_PILL_LABEL).sort(),
+    "LIFECYCLE_PILL_LABEL's declared domain drifted from lifecyclePillState's driven range. " +
+    "A label with no fold branch is a state nothing can paint (that was `archived` and " +
+    "`adopted`, deleted by cch-w54-bl); a returned state with no label renders as " +
+    '"Unknown". Both are reds.');
 });
 
 // ── fleetInfraLine: region · size, blank-tolerant (pre-S6 rows) ─────────────
@@ -21327,7 +21512,7 @@ test("cch-w20-s3: BOTH text sites shave the scheme together — the card and the
   const row = hooks.fleetRow(bp);
   assert.match(row, /class="fleet-url">production-5b2c1e\.barkpark\.cloud</);
   assert.ok(row.indexOf('class="fleet-url">https://') === -1,
-    "the fleet row must not keep the scheme while the card drops it — that split is the sin scenarios.mjs:2331 exists to prevent");
+    "the fleet row must not keep the scheme while the card drops it — that split is the sin the fleet-row URL fixture in scenarios.mjs exists to prevent (re-derive: grep -n fleet-url scenarios.mjs)");
   // …while the PAYLOAD keeps the whole address: a person copying it needs the
   // scheme. This is the same guarantee test 658 (GR24) pins on the header.
   const header = hooks.instanceHeaderHtml(bp);
@@ -22878,8 +23063,9 @@ test("cch-w36-s3: the smoke `tokens-member` assertion body can no longer pass ag
 // rc 0. A unification slice could therefore silently DELETE the admin limb and
 // show a perfect board. That green is not general vacuity: the INVERSE
 // mutation (admin-only, dropping the owner limb) reds three of the four by
-// name in smoke. The mechanism is censused — scenarios.mjs:952 defines
-// me(team, onb, role) with `role || "owner"`, and across ~100 me() call sites
+// name in smoke. The mechanism is censused — scenarios.mjs defines
+// me(team, onb, role) with `role || "owner"` (grep -n 'function me(' scenarios.mjs),
+// and across ~100 me() call sites
 // the third argument is "member" 7x, "owner" 3x and "admin" ZERO times, so no
 // fixture in the whole preview corpus has ever been an admin.
 //
@@ -24213,6 +24399,112 @@ test("cch-w54-bl: already_attached relays the plane's sentence — the host in t
     "already_attached must not be confused with `taken` — taken is ANOTHER surface holding the host");
 });
 
+// ── dr-w26-bl: the 409 `taken` refusal names WHICH population holds the host ──
+//
+// POST /v1/barkparks/:id/domain merges `claim_leg` + a caller-safe `detail`
+// onto the 409 taken body (registry.ex provisioning_fqdn_claim_disclosure/2,
+// TOTAL over claim_leg/2's six legs). The console answered every one of them
+// with the fixed string "That domain is already in use.", so a refusal whose
+// remedy is "pick another hostname, that name is billed" and one whose remedy
+// is "wait a minute, a job is in flight" rendered IDENTICALLY and the leg
+// reached a human only through the raw API response.
+//
+// Driven per LEG, all six, because the leg is the axis that used to collapse.
+test("dr-w26-bl: the taken 409 relays the claim leg and its caller-safe detail — six refusals, six sentences", () => {
+  const f = hooks.attachDomainFailureCopy;
+
+  // The six legs claim_leg/2 can return, each with the caller-facing sentence
+  // caller_claim_detail/1 writes for it (registry.ex), trimmed to its remedy.
+  const legs = {
+    admin_credential:
+      "That hostname still belongs to an instance the platform holds a live credential for, " +
+      "so the name is not free to re-attach. Decommission that instance first, or pick another hostname.",
+    recent_usage_sample:
+      "That hostname was still being reached by the platform within the last 24 hours, " +
+      "so the name is not free to re-attach.",
+    active_subscription:
+      "That hostname belongs to an instance on a live, still-entitled subscription. " +
+      "A billed name is never released — pick another hostname.",
+    agent_reporting:
+      "An agent on that hostname has phoned home recently, so the instance answering on it " +
+      "is live and the name is not free to re-attach.",
+    active_job:
+      "A provisioning job for that hostname is still in flight. Wait for it to finish and " +
+      "try again, or pick another hostname.",
+    within_grace:
+      "That hostname belongs to an instance younger than the 30-day abandonment window, " +
+      "so it is not yet releasable. Decommission it first, or pick another hostname.",
+  };
+
+  const rendered = {};
+  for (const [leg, detail] of Object.entries(legs)) {
+    const out = f(409, { error: "taken", claim_leg: leg, detail });
+    rendered[leg] = out;
+    assert.ok(out.indexOf(detail) === 0,
+      leg + ": the plane's caller-safe sentence must be relayed, not replaced — got " + JSON.stringify(out));
+    assert.ok(out.indexOf(leg) !== -1,
+      leg + ": the LEG itself must reach the person — it is the category that says which remedy applies");
+    assert.equal(out.indexOf("That domain is already in use."), -1,
+      leg + ": the fixed string must not survive a body that carried a detail");
+  }
+
+  // THE MUTATION, ON THE AXIS THAT COLLAPSED: six legs, six DISTINCT sentences.
+  // Pre-fix this set had size 1 for every leg.
+  assert.equal(new Set(Object.values(rendered)).size, 6,
+    "six legs must render six distinct sentences — a collapsed set is the pre-fix defect");
+
+  // MUTATING THE LEG ALONE (same detail) changes the rendered sentence.
+  const sameDetail = "That hostname is held by another instance and is not free to re-attach.";
+  assert.notEqual(
+    f(409, { error: "taken", claim_leg: "active_job", detail: sameDetail }),
+    f(409, { error: "taken", claim_leg: "active_subscription", detail: sameDetail }),
+    "the leg is READ: swapping only claim_leg must change what the person is shown");
+
+  // THE FALLBACK: no detail on the body (a name held by some OTHER surface — a
+  // Site domain, another instance's custom_host, a lost race on the unique
+  // index — merges no keys at all) keeps the fixed sentence.
+  assert.equal(f(409, { error: "taken" }), "That domain is already in use.",
+    "a keyless taken body still says something true");
+  assert.equal(f(409, { error: "taken", claim_leg: "active_job" }),
+    "That domain is already in use. (active_job)",
+    "a leg with no detail still reaches the person, on top of the fixed fallback");
+  assert.equal(f(409, { error: "taken", detail: "" }), "That domain is already in use.",
+    "an empty detail is not a sentence");
+
+  // The neighbouring arms are UNTOUCHED by this change.
+  assert.equal(f(409, { error: "already_attaching" }), "An attach is already running.");
+  assert.equal(
+    f(409, { error: "already_attached", custom_host: "host-a.barkpark.cloud" }),
+    "This instance already answers on host-a.barkpark.cloud.",
+    "already_attached still relays its own host — it is a DIFFERENT refusal from taken");
+});
+
+test("dr-w26-bl: the relayed taken detail is RENDERED via textContent (a server sentence never becomes markup)", async () => {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document };
+  const dom = recordingDom(["domain-input", "domain-error", "domain-go"]);
+  dom.els["domain-input"].value = "taken.barkpark.cloud";
+  sandbox.fetch = fetchStub(409, {
+    error: "taken",
+    claim_leg: "active_subscription",
+    detail:
+      "That hostname belongs to an instance on a live, still-entitled subscription. " +
+      "A billed name is never released — pick another hostname.",
+  });
+  sandbox.document = dom.document;
+  try {
+    hooks.attachDomain({ id: "bp1", name: "Production" });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally { Object.assign(sandbox, saved); }
+  const errEl = dom.els["domain-error"];
+  assert.equal(errEl.hidden, false, "the inline error shows");
+  assert.match(errEl.textContent, /still-entitled subscription/,
+    "the plane's caller-safe sentence reaches the user through the DOM");
+  assert.match(errEl.textContent, /active_subscription/,
+    "…and so does the leg that says WHICH remedy applies");
+  assert.deepEqual(errEl.writes, [],
+    "the arm writes textContent only — the recording DOM records every innerHTML write and saw none");
+});
+
 test("cch-w40-bl: domain_not_pointed is RENDERED via textContent on the live arm (server IPs never become markup)", async () => {
   // The impure drive proves the wire → DOM path: the measured IP reaches the
   // inline error through textContent, not the false sentence. This is the leg that
@@ -24729,7 +25021,17 @@ test("cch-w35-s4: the no-team arm is MAPPED, never echoed as its slug", () => {
 });
 
 test("cch-w35-s4: an unwritten `required` renders as a bounded label, and junk falls through", () => {
+  // cch-w48-bl AMENDS THIS LINE, and the amendment IS the defect this row
+  // names. It used to expect 'You need the "deploy" permission on this team —
+  // an admin on this team can grant it.' for a scope:"token" payload: a PAT
+  // ability rendered as a team-grantable permission. The label fence is what
+  // this test is actually about and it is unchanged — the bounded-label
+  // property now holds on the token arm instead of the role tail.
   assert.equal(hooks.friendly({ error: "forbidden", required: "deploy", scope: "token" }),
+    'That access token doesn\'t carry the "deploy" ability. No team role grants it — ' +
+    "a token's abilities are fixed when it is created.");
+  // The SAME unwritten label with a TEAM scope keeps the role tail verbatim.
+  assert.equal(hooks.friendly({ error: "forbidden", required: "deploy", scope: "team" }),
     'You need the "deploy" permission on this team — an admin on this team can grant it.');
   // Not a label → no interpolation, no markup, back to the curated entry.
   for (const junk of ["<img src=x onerror=alert(1)>", "Admin", "", "  ", "a".repeat(64), 7, null, {}]) {
@@ -27311,7 +27613,10 @@ test("cch-w67: siteDeleteFailureCopy — SEVEN typed arms, every one a DISTINCT 
   // cch-w67 review wired the shipped reader for those two fields in.
   const other = hooks.siteDeleteFailureCopy(403, { error: "forbidden", scope: "token", required: "write" });
   assert.match(other.body, /still registered/);
-  assert.match(other.body, /"write" permission/);
+  // cch-w48-bl: scope:"token" now renders the ABILITY sentence here too — this
+  // reader delegates to friendly(), so it inherited the fix without an edit.
+  assert.match(other.body, /"write" ability/);
+  assert.doesNotMatch(other.body, /an admin on this team can grant it/);
   assert.doesNotMatch(other.body, /didn't say why/);
   assert.equal(other.recovery, "close", "no second click grants an authority you don't hold");
   // A BARE forbidden carries no evidence, so it keeps the generic relay — the
@@ -32116,4 +32421,136 @@ test("cchi-w61-bl: the console harness runs on the Node cloud/priv/static/__node
     `through scripts/console-harness.sh, which resolves the declared major, or ` +
     `change the declaration deliberately (console-runtime-pin-check.sh will then ` +
     `require console-harness.yml's console-unit job to follow).`);
+});
+
+// ── cloud-console-user-security-log: the account modal's Security log ────────
+// The user-scoped trail (GET /v1/me/security-events) rendered beside Sessions.
+// Everything asserted here is a property the render could plausibly get wrong:
+// a verb the console has never heard of painted as a confident sentence, an
+// empty trail and a FAILED fetch painting the same reassuring blank, the IP
+// column leaking onto a security surface where it is uniform garbage (GR81),
+// and a fold whose count is retyped rather than derived.
+test("security log: the five verbs read as sentences and an unknown verb falls through to its slug", () => {
+  assert.equal(hooks.securityEventLabel("password_changed"), "Password changed");
+  assert.equal(hooks.securityEventLabel("two_factor_disabled"),
+    "Two-factor authentication turned off");
+  assert.equal(hooks.securityEventLabel("session_revoked"), "A device was signed out");
+  assert.equal(hooks.securityEventLabel("sessions_revoked_everywhere"), "Signed out everywhere");
+  assert.equal(hooks.securityEventLabel("email_changed"), "Email address changed");
+
+  // A verb this console has never heard of must read as "something I do not
+  // recognise happened" — never as the nearest friendly sentence.
+  assert.equal(hooks.securityEventLabel("account_deleted"), "account_deleted");
+  assert.equal(hooks.securityEventLabel(""), "Unknown change");
+  assert.equal(hooks.securityEventLabel(undefined), "Unknown change");
+});
+
+test("security log: the detail line carries the former email and the revoked count, and nothing else", () => {
+  assert.equal(
+    hooks.securityEventDetail({ action: "email_changed", metadata: { previous_email: "old@x.io" } }),
+    "from old@x.io");
+  assert.equal(
+    hooks.securityEventDetail({ action: "sessions_revoked_everywhere", metadata: { revoked: 3 } }),
+    "3 other devices");
+  assert.equal(
+    hooks.securityEventDetail({ action: "sessions_revoked_everywhere", metadata: { revoked: 1 } }),
+    "1 other device");
+  // Zero is a number, and "0 other devices" is the honest answer — not "".
+  assert.equal(
+    hooks.securityEventDetail({ action: "sessions_revoked_everywhere", metadata: { revoked: 0 } }),
+    "0 other devices");
+  // No filler: a verb with nothing extra to say says nothing extra.
+  assert.equal(hooks.securityEventDetail({ action: "password_changed", metadata: {} }), "");
+  assert.equal(hooks.securityEventDetail({}), "");
+  assert.equal(hooks.securityEventDetail(null), "");
+});
+
+test("security log: GR81 — the row never paints the stored ip, and hostile fields are escaped", () => {
+  const row = hooks.securityEventRowHtml({
+    id: "ev_1",
+    action: "password_changed",
+    ip: "172.18.0.1",
+    user_agent: "Mozilla/5.0 (Macintosh) Chrome/120",
+    metadata: {},
+    inserted_at: new Date().toISOString(),
+  });
+
+  // The IP is stored server-side and deliberately suppressed here: every
+  // control-plane request arrives from the Docker bridge gateway, so the value
+  // is identical for every client and can never separate "me" from "a stranger".
+  assert.ok(!row.includes("172.18.0.1"),
+    "GR81: the uniform bridge IP must not appear on a security surface: " + row);
+  assert.ok(row.includes("Password changed"));
+  assert.ok(row.includes("Chrome"), "the device label is the recognisable fact that survives");
+  // No control on a row that records something already done.
+  assert.ok(!row.includes("<button"), "a past event offers no action");
+
+  const nasty = hooks.securityEventRowHtml({
+    action: "email_changed",
+    metadata: { previous_email: "<script>alert(1)</script>@x.io" },
+    user_agent: "<img src=x onerror=1>",
+    inserted_at: new Date().toISOString(),
+  });
+  assert.ok(!nasty.includes("<script>"), "the former address is escaped: " + nasty);
+  assert.ok(!nasty.includes("<img"), "the user agent is escaped: " + nasty);
+});
+
+test("security log: an empty trail says what empty MEANS, and the fold count is derived", () => {
+  const empty = hooks.securityLogHtml([], false);
+  assert.ok(empty.includes("No sensitive changes recorded yet"),
+    "an empty log must state what empty means, not render a blank box: " + empty);
+  assert.ok(!empty.includes("session-row"));
+
+  const mk = (n) => Array.from({ length: n }, (_, i) => ({
+    id: "ev_" + i, action: "password_changed", user_agent: "barkpark-cli/0.9",
+    metadata: {}, inserted_at: new Date().toISOString(),
+  }));
+
+  const five = hooks.securityLogHtml(mk(5), false);
+  assert.equal((five.match(/class="session-row"/g) || []).length, 5);
+  assert.ok(!five.includes("security-log-fold"), "five rows must not grow a fold button");
+
+  const nine = hooks.securityLogHtml(mk(9), false);
+  assert.equal((nine.match(/class="session-row"/g) || []).length, 5);
+  assert.ok(nine.includes(">Show 4 more events<"), "the count must match the hidden tail: " + nine);
+  assert.ok(nine.includes('aria-expanded="false"'));
+  assert.ok(hooks.securityLogHtml(mk(6), false).includes(">Show 1 more event<"),
+    "one hidden row is an event, not events");
+
+  const open = hooks.securityLogHtml(mk(9), true);
+  assert.equal((open.match(/class="session-row"/g) || []).length, 9);
+  assert.ok(open.includes(">Show fewer<") && open.includes('aria-expanded="true"'));
+});
+
+test("security log: the modal mounts it, and a failed read never paints as an empty trail", () => {
+  // The section exists in the modal body, with the box the loader writes into.
+  const modal = hooks.accountModalHtml({ name: "Ada", email: "ada@x.io" }, "loaded");
+  assert.ok(modal.includes('id="security-log-box"'),
+    "the account modal must mount the security log box");
+  assert.ok(modal.includes(">Security log<"), "the section needs its heading");
+  // It sits beside Sessions, not somewhere else in the modal.
+  assert.ok(modal.indexOf('id="sessions-box"') < modal.indexOf('id="security-log-box"'),
+    "the security log belongs directly under Sessions");
+
+  // The DOM mount has no pure seam, so this arm reads source (same technique the
+  // sessions-fold arm above uses).
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function loadSecurityLog("));
+  const body = fn.slice(0, fn.indexOf("\n  // PUT /v1/account/password"));
+  assert.ok(body.includes('api("GET", "/v1/me/security-events")'),
+    "loadSecurityLog must read the user-scoped route");
+  assert.ok(body.includes('querySelector("#security-log-fold")'),
+    "loadSecurityLog must delegate the fold toggle through #security-log-fold");
+  // THE LOAD-BEARING ARM: a failed fetch and an empty trail must not paint the
+  // same thing. "Nothing has changed on your account" is exactly the
+  // reassurance a reader would wrongly take from a silent blank box.
+  assert.ok(body.includes("load your security log"),
+    "a failed read must say so: " + body);
+  assert.ok(!body.includes("No sensitive changes recorded yet"),
+    "the failure arm must not borrow the empty-state sentence");
+
+  // And the modal opener actually calls it — a render nothing invokes is dead.
+  const opener = src.slice(src.indexOf("function openAccountModal("));
+  assert.ok(opener.slice(0, 2000).includes("loadSecurityLog()"),
+    "openAccountModal must load the security log");
 });

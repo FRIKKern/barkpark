@@ -25,6 +25,13 @@
 #   8. @canonical capability:<slug> markers are unique repo-wide, sit on a
 #      PUBLIC entry point, and their optional doc: backlink resolves — checked
 #      only AFTER a planted fixture proves the scan can still find a defect.
+#  13. @boundary capability:<slug> markers are unique repo-wide and their
+#      `test:<relpath>#<name>` pointer RESOLVES — the file exists and that test
+#      is declared in it (D41: a coverage boundary must be machine-checked; a
+#      comment is not a tripwire). Delegated to scripts/boundary-marker-check.sh
+#      exactly as §9/§10 are, and ALSO wired on the REQUIRED, unfiltered
+#      `Elixir gate` — this job's context is paths-filtered and cannot block a
+#      merge, so it is not by itself a venue for an enforcement claim.
 #  11. docs/auth.md's "## Plug pipelines (HTTP)" section agrees with
 #      api/lib/barkpark_web/router.ex, both directions: every pipeline whose
 #      body plugs RequireAdmin must be named there (the required set is DERIVED
@@ -1348,6 +1355,54 @@ else
     echo "ok:   §10 no in-place bp copy recipe on this tree"
   else
     echo "FAIL: §10 an in-place bp copy recipe is present (rc=$BPCP_RC, see above)"
+    FAIL=1
+  fi
+fi
+
+# --- 13. @boundary capability markers (D41 coverage-boundary registry) -------
+# A coverage boundary is the highest-value prose in the tree and, until this
+# arm, the least checked: a boundary comment could name the test that enforces
+# it, that test could be renamed or deleted, and nothing anywhere read the
+# pointer. §13 requires every `@boundary capability:<slug>` to own a unique slug
+# and to carry a `test:<relpath>#<name>` that RESOLVES.
+#
+# NECESSARY, NEVER SUFFICIENT — say it here because a green in this section is
+# exactly the thing a reader will over-read. A static grep proves the PAIRING
+# EXISTS; it cannot observe mutation-kill, and a vacuous, skipped or
+# assertion-free test satisfies it completely. The kill burden stays with
+# authoring discipline (PR #5434 is the worked example: the stale boundary
+# comment AND its mutation-proven census pin, in one commit).
+#
+# Delegated for §9's reason — the derivation deserves its own --selftest — and
+# INVOKED here so a doc-gates run still exercises it. The delegate is ALSO wired
+# as two steps on elixir.yml's deliberately-unfiltered `path-escape` job, which
+# feeds the REQUIRED `Elixir gate`: this job publishes a paths-filtered,
+# S4-excluded context that stops no merge, so wiring the guard only here would
+# ship a mutation-proven gate with no merge authority.
+echo ""
+echo "== §13 @boundary capability markers =="
+if [ -n "${DOCS_ANCHORS_ROOT:-}" ]; then
+  # A CUSTOM ROOT IS NOT THIS REPO — same precedent as §8b, §9 and §10. The
+  # selftest fixtures carry four files and no boundary markers; the delegate has
+  # its own hermetic fixture suite, which is where that scanner is certified.
+  echo "ok:   §13 @boundary registry not applicable to a custom DOCS_ANCHORS_ROOT"
+elif [ ! -x "$REPO_ROOT/scripts/boundary-marker-check.sh" ]; then
+  # A missing or non-executable delegate is a RED, never a skip: a deleted
+  # tripwire otherwise reads exactly like "no unpaired boundary found".
+  echo "FAIL: §13 scripts/boundary-marker-check.sh is missing or not executable"
+  FAIL=1
+else
+  # rc captured BEFORE any formatting — a gate whose red is laundered by its own
+  # pretty-printer is worse than no gate (§9's lesson, same shape).
+  set +e
+  BND_OUT=$("$REPO_ROOT/scripts/boundary-marker-check.sh" 2>&1)
+  BND_RC=$?
+  set -e
+  printf '%s\n' "$BND_OUT" | sed 's/^/      /'
+  if [ "$BND_RC" -eq 0 ]; then
+    echo "ok:   §13 every @boundary marker names a test that exists (pairing only, not mutation-kill)"
+  else
+    echo "FAIL: §13 a @boundary marker is unpaired, duplicated or dangling (rc=$BND_RC, see above)"
     FAIL=1
   fi
 fi

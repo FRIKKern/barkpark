@@ -218,7 +218,7 @@
 // Both are the same sentence in two places: A POPULATION THIS PROGRAM COULD NOT READ IS
 // NOT A POPULATION IT READ AND FOUND CLEAN.
 //
-//   UNREADABLE-REPO-ROOT / REPO-NOT-A-GIT-WORK-TREE (infra, exit 2)
+//   UNREADABLE-REPO-ROOT / REPO-NOT-A-GIT-WORK-TREE / REPO-BEHIND-ORIGIN-MAIN (infra, exit 2)
 //     Five clause-(b) legs resolve paths under `--repo`, and each reports its own miss
 //     as a DEFECT sentence. A `git archive` extraction therefore produced six verbatim
 //     "commit <sha> is not an ancestor of origin/main" lines — all false, all about a
@@ -1255,7 +1255,8 @@ function gitDiffPaths(sha) {
 //   1. REF     `rev-parse --verify --quiet origin/main` — is there a thing to compare to?
 //   2. OBJECT  `cat-file -e <sha>^{commit}` — is the commit itself in this store?
 //   3. WALK    is a graft on HEAD's OWN history? — PORTED from
-//              `scripts/pds-record-parity.sh:261 walk_truncation()`, which is
+//              `walk_truncation()` in `scripts/pds-record-parity.sh` (grep -n
+//              'walk_truncation()' scripts/pds-record-parity.sh), which is
 //              mutation-proven in `scripts/pds-record-parity.test.sh`. That file is
 //              PDS-owned and a concurrent wave is live on it, so the LOGIC is ported
 //              rather than the file imported — and this file's own header law is ZERO
@@ -1278,7 +1279,7 @@ const gitProbe = (args) => {
   return { rc: r.error || r.status === null ? 128 : r.status, out: (r.stdout || '').trim() };
 };
 
-// PORTED from scripts/pds-record-parity.sh:261 `walk_truncation()`, fail-closed in all
+// PORTED from `walk_truncation()` in scripts/pds-record-parity.sh (grep -n it), fail-closed in all
 // four of its own unknown shapes (non-boolean store answer, missing common dir,
 // unreadable graft list, untestable graft). Memoised: it is repository-wide, asked once
 // per registered defect, and cannot change mid-run.
@@ -1886,6 +1887,69 @@ function ladderOnly(fixture, guardOverride, stamp, head) {
 //
 // Returns the resolved HEAD sha on the live path (for the verdict token's `head=`), or
 // null on the fixture path, where there is no tree to name.
+// LEG 3, LIVE PATH ONLY -- THE TREE IS NOT BEHIND `origin/main`.
+//
+// THE SAME DISEASE AS LEG 2, ONE FACT OVER. Leg 2 refuses a claim about the PRODUCT
+// derived from a fact about the DIRECTORY. This leg refuses a claim about the product
+// derived from a fact about the directory's DATE. The commit-ancestry legs read
+// `origin/main`, but the guard files, the workflow file and every `measured_by` path
+// are read off the WORKING TREE -- so a checkout behind `origin/main` scores clause (b)
+// against register guards that landed after it was cut, and reports "guard ... is NOT
+// COMMITTED" for a guard that is committed, on main, today.
+//
+// MEASURED, NOT FEARED: the same binary in one session printed b=FAIL with four failing
+// register entries from a 678-commit-stale primary checkout and b=PASS from a tree at
+// `origin/main`. And it is SYMMETRIC -- a stale tree can also carry a guard whose
+// register entry was since REWRITTEN, which reads as a false b=PASS. Loud-but-wrong in
+// both directions is the shape this whole file exists to refuse.
+//
+// IT DOES NOT FETCH, AND THAT IS A CHOICE WITH A REASON. Three of them:
+//
+//   1. A PREDICATE MAY NOT MUTATE ITS OWN SUBJECT. `git fetch` writes to the object
+//      store and moves `refs/remotes/origin/main` in a tree this program was handed to
+//      READ. The measurement would then be taken against a ref the measurement itself
+//      moved, and no reader could reproduce the number from the tree as they found it.
+//   2. A NETWORK ACT INSIDE A LOCAL LEG CANNOT FAIL HONESTLY. `--ladder-only` makes no
+//      HTTP call by contract; a fetch would give the one hermetic mode a remote to hang
+//      on, and an offline run would refuse for the network rather than for the tree.
+//   3. THE FETCH IS THE CALLER'S, AND IT IS ALREADY THEIRS. CI checks out immediately
+//      before the run; a worktree is cut from a fetched ref. `make update` is one line.
+//
+// SO THIS LEG NAMES ITS OWN CEILING RATHER THAN PRETENDING NOT TO HAVE ONE: a STALE
+// `origin/main` REF reads zero commits behind and this leg is blind to it. It catches
+// the tree that did not move, never the remote-tracking ref that did not move.
+//
+// AN UNREADABLE COMPARISON IS NOT A STALE TREE. When `rev-list` cannot answer -- no
+// `origin/main` at all, which is exactly what actions/checkout@v4's depth-1 default
+// leaves behind on every `console-unit` run -- this leg says NOTHING and gets out of
+// the way. Clause (b) already discriminates that shape by name (`MISSING-REF`,
+// HISTORY-UNAVAILABLE, `b-unavailable=N/M`) with a far more precise sentence, and
+// refusing here would replace that precision with this blunter one and red the BLOCKING
+// Console gate for an environment fact. Same reasoning Leg 1 gives for deliberately not
+// also demanding `.github/required-checks.json`.
+//
+// A NON-NUMERIC ANSWER IS TREATED AS NO ANSWER for the same reason: `rev-list` exiting 0
+// with prose is a git this program does not recognise, and inventing `Number(...)` = NaN
+// from it would refuse every run on every machine where that ever happened.
+function assertRepoNotBehindOriginMain() {
+  const r = gitProbe(['rev-list', '--count', 'HEAD..origin/main']);
+  if (r.rc !== 0 || !/^[0-9]+$/.test(r.out)) return;
+  const behind = Number(r.out);
+  if (behind === 0) return;
+  throw new Infra(
+    `--repo ${REPO} is ${behind} commit(s) BEHIND origin/main (\`git rev-list --count HEAD..origin/main\` = ${behind}). `
+    + 'The ancestry leg reads origin/main, but the guard files, the workflow file and every `measured_by` path are '
+    + 'read off THIS WORKING TREE, so clause (b) would score today\'s register against an older tree and report '
+    + '"guard ... is NOT COMMITTED" for a guard that is committed on main right now. Measured: the same command '
+    + 'printed b=FAIL with four failing entries from a 678-commit-stale checkout and b=PASS from a tree at '
+    + 'origin/main, and the error is SYMMETRIC -- a stale tree can carry a since-rewritten guard and read a false '
+    + 'b=PASS just as easily. A claim about the PRODUCT may not be derived from a fact about the DIRECTORY\'s DATE. '
+    + 'Nothing is asserted about clause (b). Bring the tree to origin/main (`git fetch origin main && git merge '
+    + '--ff-only origin/main`, or `make update`) and re-run. This leg does NOT fetch: a predicate may not move the '
+    + 'ref it measures against, so a STALE origin/main ref reads 0 behind and is invisible here.',
+    'REPO-BEHIND-ORIGIN-MAIN');
+}
+
 function assertReadableRepoRoot(ledgerPath) {
   if (!existsSync(`${REPO}/.github/workflows/cloud.yml`))
     throw new Infra(
@@ -1912,6 +1976,8 @@ function assertReadableRepoRoot(ledgerPath) {
       + 'a `git archive` extraction: six such sentences, all false. Nothing is asserted about clause (b). A ledger '
       + 'fixture (--ledger) stands `landed` in for ancestry and is not subject to this leg.',
       'REPO-NOT-A-GIT-WORK-TREE');
+
+  assertRepoNotBehindOriginMain();
 
   try {
     return execFileSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'],

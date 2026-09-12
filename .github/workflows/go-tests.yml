@@ -96,6 +96,16 @@ on:
       # introduced here: internal/pdrender/inline_code_source_parity_test.go
       # reads this fixture, so an edit to it must dispatch the Go suite.
       - "api/test/support/fixtures/inline-code-source.json"
+      # internal/pdrender/code_source_alias_parity_test.go reads this fixture
+      # (one fixture, three engines — #17684); an edit must dispatch the Go leg.
+      - "api/test/support/fixtures/code-source-aliases.json"
+      # internal/pdrender/inline_block_wrapper_parity_test.go reads this fixture
+      # (#17759); same rule.
+      - "api/test/support/fixtures/inline-block-wrapper.json"
+      # internal/pdrender/section_boundary_rules_parity_test.go reads this
+      # fixture (task-a4d1ae76fdb2a6b0 — one rule per boundary, three engines);
+      # same rule.
+      - "api/test/support/fixtures/section-boundary-rules.json"
       # Taskboard TUI golden frames (internal/taskboard/testdata/*.txt). The
       # compose/render/glyph-budget suites assert the committed frames byte-for-byte
       # and inventory every glyph in them; a golden REGEN (or a hand-added fixture)

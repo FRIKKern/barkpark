@@ -35,6 +35,11 @@ on:
       - "api/lib/barkpark/portable_doc/**"
       - "api/test/support/fixtures/pd-parity/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/test/support/fixtures/code-source-aliases.json"
+      - "api/test/support/fixtures/inline-block-wrapper.json"
+      - "api/test/support/fixtures/section-boundary-rules.json"
+      - "api/test/support/fixtures/inline-code-source.json"
+      - "api/test/support/fixtures/sdk-capabilities-parity.json"
   pull_request:
     paths:
       - "js/**"
@@ -56,6 +61,11 @@ on:
       - "api/lib/barkpark/portable_doc/**"
       - "api/test/support/fixtures/pd-parity/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/test/support/fixtures/code-source-aliases.json"
+      - "api/test/support/fixtures/inline-block-wrapper.json"
+      - "api/test/support/fixtures/section-boundary-rules.json"
+      - "api/test/support/fixtures/inline-code-source.json"
+      - "api/test/support/fixtures/sdk-capabilities-parity.json"
 
 concurrency:
   group: js-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}

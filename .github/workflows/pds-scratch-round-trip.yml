@@ -1,0 +1,272 @@
+# Scheduled round trip of the PDS scratch target: boot → verify → teardown.
+#
+# WHY THIS EXISTS (task pds-w2-scratch-harness-ci). scripts/pds-scratch-target.sh
+# is crown infrastructure — the PDS crown proof pulls a live dataset into a
+# scratch target — and until this workflow the ONLY thing CI ran against it was
+# scripts/pds-scratch-target_test.sh, an OFFLINE harness that drives a stub
+# `barkpark` it writes itself and names no Postgres binary anywhere (see its row
+# in the pds door census). That harness proves the script's bookkeeping. It
+# cannot prove the round trip: bin/barkpark, bin/barkpark-pg, config/runtime.exs's
+# BARKPARK_MEDIA_DIR branch, the api_tokens shape and the HTTP surface are all
+# exercised ONLY by a real `up --verify`, and that has never run anywhere but a
+# developer's laptop, by hand. So a regression in any of them stayed invisible
+# until the next crown attempt tripped over it.
+#
+# WHY IT IS NOT A PR CHECK, AND WHY THAT IS PART OF THE REQUIREMENT. `up` boots
+# the server under MIX_ENV=prod and ensure_secrets compiles under MIX_ENV=dev, so
+# a cold tree pays TWO full compiles — >10 minutes, measured, see the cost header
+# in scripts/pds-scratch-target.sh. Wiring that onto every pull request would tax
+# every unrelated PR for a drift detector. SCHEDULED (plus manual dispatch) is the
+# proportionate venue, and the task row calls a per-PR implementation a WRONG
+# build, not a partial one. Consequently this workflow renders NO check-run name
+# on any PR head and therefore needs no accounting row in
+# .github/required-checks.json — the trigger block below is the whole argument.
+#
+# Its red is main state. Not required, not in any aggregator.
+#
+# THE NEGATIVE CONTROL IS THE POINT, AND THIS JOB RE-ASSERTS IT ITSELF.
+# cmd_verify prints Barkpark.Media.upload_dir() twice — once with
+# BARKPARK_MEDIA_DIR exported by scratch.env, once with it stripped by `env -u` —
+# and the second must be THIS CHECKOUT's api/uploads. If the un-isolated probe
+# ever stopped resolving to a real blast target, the isolated green above it
+# would be free. The script already FAILs on that; the gate step below ALSO
+# pins the printed value against the runner's own api/uploads path, so a future
+# refactor that silently drops the probe cannot pass here by printing nothing.
+#
+# TEARDOWN RUNS EVEN WHEN VERIFICATION FAILS, and the ordering is deliberate:
+# the `up --verify` step NEVER fails the job (it captures its own exit code); the
+# GATE step is what reds; teardown carries `if: always()` and therefore runs after
+# a red gate. To PROVE that rather than assert it, dispatch this workflow with
+# inject_failure=true: the gate appends a synthetic FAIL line, the job goes red,
+# and the teardown step's transcript in the SAME run shows the scratch root,
+# Postgres and both ports going away regardless. That is the injected-failure
+# proof for the task's third criterion.
+name: pds-scratch-round-trip
+
+on:
+  schedule:
+    - cron: "47 4 * * *" # 04:47 UTC — after required-checks-drift (04:17), before task-lease-renew's 05:17 slot
+  workflow_dispatch:
+    inputs:
+      inject_failure:
+        description: "Inject a synthetic FAIL line into the verify gate, to prove the always-teardown still runs"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pds-scratch-round-trip-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  scratch-round-trip:
+    name: scratch target up --verify then teardown
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Read by the gate and teardown steps. A dispatch without the input (or a
+      # schedule, where inputs do not exist) leaves this the empty string, which
+      # is not "true", so injection is off by default on every scheduled run.
+      INJECT_FAILURE: ${{ inputs.inject_failure }}
+    steps:
+      - uses: actions/checkout@v4
+        # fetch-depth: 0 — Barkpark.BuildInfo shells `git describe --tags` during
+        # the prod compile that `barkpark up` triggers; the default depth-1
+        # checkout has no tags and turns that into noise on a job whose whole
+        # output is a PASS/FAIL transcript.
+        with:
+          fetch-depth: 0
+
+      - name: Setup BEAM
+        # Same action and the same pins elixir.yml / elixir-nightly.yml use.
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.0"
+          elixir-version: "1.18.4"
+
+      - name: Cache deps + _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            api/deps
+            api/_build
+          # Its OWN key family, NOT elixir.yml's: that cache is MIX_ENV=test and
+          # this job's cost is a MIX_ENV=prod compile. Sharing the key would let
+          # one job's _build decide the other's regime.
+          key: ${{ runner.os }}-pds-scratch-mix-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pds-scratch-mix-27.0-1.18.4-
+
+      - name: Preflight — Postgres binaries, lsof, curl, shasum
+        # bin/barkpark-pg runs its OWN initdb'd cluster inside $BARKPARK_HOME on a
+        # free port. It does NOT talk to a Postgres SERVICE CONTAINER, so a
+        # `services: postgres:` block here would be dead weight — what the runner
+        # must supply is the BINARIES (initdb, pg_ctl, psql, pg_isready).
+        # barkpark-pg's own search order is BARKPARK_PG_BIN, then Postgres.app,
+        # then Homebrew kegs, then PATH — none of which resolve on ubuntu-latest,
+        # where the image ships PostgreSQL under /usr/lib/postgresql/<major>/bin
+        # and does not put it on PATH. So resolve it here and export the override.
+        run: |
+          set -u
+          pgbin=""
+          for d in $(printf '%s\n' /usr/lib/postgresql/*/bin | sort -V -r); do
+            if [ -x "$d/initdb" ]; then pgbin="$d"; break; fi
+          done
+          if [ -z "$pgbin" ]; then
+            echo "no /usr/lib/postgresql/*/bin/initdb on this image — installing postgresql"
+            # The refresh may fail (a stale third-party apt index in the image
+            # has reddened unrelated gates with a Hash Sum mismatch); the INSTALL
+            # is the decision, and the re-resolve below is what actually rules.
+            sudo apt-get update || echo "apt-get update failed — trying the install against the baked index anyway"
+            sudo apt-get install -y postgresql || echo "apt-get install postgresql failed — the re-resolve below decides"
+            for d in $(printf '%s\n' /usr/lib/postgresql/*/bin | sort -V -r); do
+              if [ -x "$d/initdb" ]; then pgbin="$d"; break; fi
+            done
+          fi
+          case "$pgbin" in
+            "") echo "FAIL preflight: no initdb found; barkpark-pg cannot stand up a cluster" >&2; exit 1 ;;
+            *)  echo "BARKPARK_PG_BIN=$pgbin" >> "$GITHUB_ENV"
+                "$pgbin/initdb" --version ;;
+          esac
+          # Postgres refuses to initdb as root; the runner user is `runner`, and
+          # asserting it here beats a cryptic pg_ctl failure 10 minutes in.
+          case "$(id -u)" in
+            0) echo "FAIL preflight: running as root, initdb refuses" >&2; exit 1 ;;
+            *) echo "uid $(id -u) ($(id -un)) — not root, initdb will run" ;;
+          esac
+          # port_in_use() and the orphan-postgres assert in teardown are both
+          # lsof-based; without lsof teardown's asserts go vacuously quiet.
+          command -v lsof >/dev/null 2>&1 || sudo apt-get install -y lsof
+          for b in lsof curl shasum mix; do
+            command -v "$b" >/dev/null 2>&1 || { echo "FAIL preflight: $b not on PATH" >&2; exit 1; }
+          done
+          echo "preflight OK"
+
+      - name: scratch target — up --verify
+        id: upverify
+        # NEVER fails the step. The exit code is captured and handed to the gate
+        # below so that a verification failure still reaches the `if: always()`
+        # teardown through a RED GATE rather than by aborting the job here.
+        #
+        # NOT PIPED — TRAP 5 in the script's header: on a first boot the spawned
+        # postgres and the nohup'd BEAM inherit a pipe's write end, so a `| tee`
+        # reader never sees EOF and the command hangs (measured: 9 minutes, ended
+        # by SIGTERM). Redirect to a file, then cat the file.
+        run: |
+          set -u
+          rc=0
+          bash scripts/pds-scratch-target.sh up --verify > up-verify.log 2>&1 || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          echo "---------------- up --verify transcript ----------------"
+          cat up-verify.log
+          echo "---------------- end transcript (rc=$rc) ---------------"
+
+      - name: Gate — no FAIL line, verify PASS, negative control fired
+        env:
+          # Through the env, not interpolated into the script body: a `${{ }}`
+          # expansion inside a run: block is textual substitution, and keeping
+          # every one of them out of the shell source is the house rule.
+          UP_RC: ${{ steps.upverify.outputs.rc }}
+        run: |
+          set -u
+          log=up-verify.log
+          fails=0
+          red() { printf 'GATE FAIL  %s\n' "$*"; fails=$((fails + 1)); }
+          ok()  { printf 'GATE PASS  %s\n' "$*"; }
+
+          [ -f "$log" ] || { echo "GATE FAIL  no $log — the up step produced no transcript" >&2; exit 1; }
+
+          # An injected synthetic FAIL, for the always-teardown proof. Appended
+          # BEFORE the scan so it travels the same code path a real FAIL does.
+          case "${INJECT_FAILURE:-}" in
+            true) printf '  FAIL  injected synthetic failure (workflow_dispatch inject_failure=true) — the teardown step below must still run and still pass\n' >> "$log"
+                  echo "INJECTED: a synthetic FAIL line was appended to $log on purpose" ;;
+            *)    : ;;
+          esac
+
+          # `case` on a captured string, never `grep -q` in a pipeline: under
+          # pipefail a SIGPIPE'd producer returns 141 and the boolean lies.
+          fail_lines="$(grep -n 'FAIL' "$log" || true)"
+          case "$fail_lines" in
+            "") ok "no FAIL line in the transcript" ;;
+            *)  red "FAIL line(s) in the transcript:"; printf '%s\n' "$fail_lines" ;;
+          esac
+
+          verdict="$(grep -c -- '---- verify: PASS' "$log" || true)"
+          case "$verdict" in
+            0) red "the transcript carries no '---- verify: PASS' verdict line" ;;
+            *) ok  "verify printed PASS" ;;
+          esac
+
+          # THE NEGATIVE CONTROL, re-asserted here rather than trusted. Both
+          # probe lines must be PRESENT (an absent probe is the failure mode a
+          # FAIL-line scan alone cannot see) and the un-isolated one must be this
+          # CHECKOUT's api/uploads — the real blast target.
+          expected_unisolated="$(cd api && pwd -P)/uploads"
+          isolated="$(sed -n 's/^  WITH  BARKPARK_MEDIA_DIR -> //p' "$log" | tail -1)"
+          unisolated="$(sed -n 's/^  env -u BARKPARK_MEDIA_DIR -> //p' "$log" | tail -1)"
+          printf 'isolated   upload_dir : %s\n' "${isolated:-<ABSENT>}"
+          printf 'env -u     upload_dir : %s\n' "${unisolated:-<ABSENT>}"
+          printf 'expected env -u value : %s\n' "$expected_unisolated"
+
+          case "$isolated" in
+            "")  red "the isolated upload_dir probe line is ABSENT from the transcript" ;;
+            /tmp/pds.*|/private/tmp/pds.*) ok "isolated upload_dir is a scratch path: $isolated" ;;
+            *)   red "isolated upload_dir is '$isolated', which is not a scratch root" ;;
+          esac
+          case "$unisolated" in
+            "") red "the 'env -u BARKPARK_MEDIA_DIR' probe line is ABSENT — the negative control did not run, so the isolated green above is free" ;;
+            "$expected_unisolated") ok "env -u upload_dir is the CHECKOUT's api/uploads — the blast target is real on this runner" ;;
+            *)  red "env -u upload_dir is '$unisolated', expected '$expected_unisolated'" ;;
+          esac
+
+          case "$UP_RC" in
+            0) ok "up --verify exited 0" ;;
+            *) red "up --verify exited $UP_RC" ;;
+          esac
+
+          {
+            printf '### pds-scratch-round-trip gate\n\n'
+            printf -- '- isolated upload_dir: %s\n' "${isolated:-ABSENT}"
+            printf -- '- env -u upload_dir: %s\n' "${unisolated:-ABSENT}"
+            printf -- '- gate failures: %s\n' "$fails"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          [ "$fails" -eq 0 ] || { echo "gate: $fails failure(s)"; exit 1; }
+          echo "gate: PASS"
+
+      - name: Teardown (always) — server, Postgres, ports, scratch files
+        if: always()
+        # RUNS AFTER A RED GATE. That is the whole point of this step, and the
+        # inject_failure dispatch input exists to produce a transcript proving it.
+        run: |
+          set -u
+          rc=0
+          roots="$(ls -d /tmp/pds.* 2>/dev/null || true)"
+          case "$roots" in
+            "") echo "no scratch root exists — up never got far enough to create one; nothing to tear down" ;;
+            *)  bash scripts/pds-scratch-target.sh teardown || rc=$?
+                echo "teardown rc=$rc" ;;
+          esac
+
+          # RESIDUE ASSERTS, independent of teardown's own exit code — a teardown
+          # that printed PASS while leaving a root standing is exactly the failure
+          # this job is here to catch.
+          left="$(ls -d /tmp/pds.*/scratch.env 2>/dev/null || true)"
+          case "$left" in
+            "") echo "PASS  no scratch.env under /tmp/pds.* — scratch files are gone" ;;
+            *)  echo "FAIL  scratch roots survived teardown:"; printf '%s\n' "$left"; rc=1 ;;
+          esac
+
+          # shellcheck disable=SC2009  # deliberate, and the SAME choice the script under
+          # test documents: `pgrep -f` takes a REGEX, so a root path carrying a regex
+          # metacharacter would match the wrong process. grep -F is exact.
+          orphans="$(ps -Ao pid=,command= 2>/dev/null | grep -F postgres | grep -F /tmp/pds. || true)"
+          case "$orphans" in
+            "") echo "PASS  no postgres process still bound to a /tmp/pds.* data dir" ;;
+            *)  echo "FAIL  orphan postgres processes:"; printf '%s\n' "$orphans"; rc=1 ;;
+          esac
+
+          [ "$rc" -eq 0 ] || exit 1

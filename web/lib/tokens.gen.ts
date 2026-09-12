@@ -35,3 +35,39 @@ export const paperCallout = {
   info: { light: { bg: "#e9eff7", fg: "#2d5e8f" }, dark: { bg: "#172032", fg: "#9db8ff" } },
   neutral: { light: { bg: "#edf0ee", fg: "#4a544f" }, dark: { bg: "#23211e", fg: "#c9c2b6" } },
 } as const;
+
+/** A typed typography step: px size, unitless line height, CSS font weight. */
+export type TypeStep = { readonly size: number; readonly lineHeight: number; readonly weight: number };
+
+/** UI CHROME type ladder (Inter), largest → smallest, from design/tokens.json
+ *  `type.chrome`. This is the ONE web source for chrome type: styleguide.tsx
+ *  renders its specimens straight off these numbers. Never hand-keep a second
+ *  copy — retune tokens.json, re-emit, and the ladder moves here. */
+export const chromeType = {
+  "2xl": { size: 26, lineHeight: 1.2, weight: 700 },
+  xl: { size: 20, lineHeight: 1.3, weight: 700 },
+  lg: { size: 16, lineHeight: 1.4, weight: 600 },
+  base: { size: 14, lineHeight: 1.5, weight: 400 },
+  sm: { size: 13, lineHeight: 1.45, weight: 400 },
+  xs: { size: 12, lineHeight: 1.4, weight: 400 },
+  "2xs": { size: 11, lineHeight: 1.4, weight: 400 },
+  "3xs": { size: 10, lineHeight: 1.4, weight: 400 },
+} as const satisfies Record<string, TypeStep>;
+
+/** The step order the chrome ladder is displayed in (largest → smallest). */
+export const chromeTypeOrder = ["2xl", "xl", "lg", "base", "sm", "xs", "2xs", "3xs"] as const;
+
+/** READING type ladder (serif prose) from design/tokens.json `type.reading` —
+ *  the SAME leaves paper-surface.css emits as --tok-reading-*-size/-lh and the
+ *  `.bp-paper-surface` heading rules consume, so what the styleguide shows is
+ *  what @barkpark/react PortableDoc actually paints. `weight` resolves the
+ *  per-step override against the shared type.reading.headingWeight scalar. */
+export const readingType = {
+  h1: { size: 40, lineHeight: 1.05, weight: 600 },
+  h2: { size: 36, lineHeight: 1.15, weight: 400 },
+  h3: { size: 21, lineHeight: 1.3, weight: 600 },
+  body: { size: 18, lineHeight: 1.6, weight: 400 },
+} as const satisfies Record<string, TypeStep>;
+
+/** The step order the reading ladder is displayed in (display → body). */
+export const readingTypeOrder = ["h1", "h2", "h3", "body"] as const;

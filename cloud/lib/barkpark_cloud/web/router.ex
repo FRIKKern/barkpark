@@ -53,6 +53,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/account/sessions/:id     user  revoke one session by id (own only)
       DELETE  /v1/account/sessions         user  sign out everywhere except this tab
       PUT     /v1/account/password         user  change password ⇒ sign out everywhere
+      GET     /v1/me/security-events       user  the caller's OWN security trail (password/2FA/session/email), newest first
       GET     /v1/subscription     user      {subscription | nil} — current plan
       GET     /v1/events           user*     Server-Sent-Events live stream (*ticket= or Bearer)
       POST    /v1/agent/report     agent     land a health report (health + events)
@@ -650,6 +651,7 @@ defmodule BarkparkCloud.Web.Router do
   # across 45 of the 56 top-level GETs would reinstate the 404 lie on four fifths
   # of the API (D34). Out of scope BY DECISION. Do not grow this list to cover
   # them. Full measurement lives on task cch-w2-head-sideeffect-fence.
+  # @boundary capability:cloud-head-sideeffect-fence test:cloud/test/barkpark_cloud/web/router_head_fence_census_test.exs#the side-effecting-GET deny clauses are exactly the committed set, in order
   defp refuse_head_on_side_effecting_gets(%Plug.Conn{method: "HEAD"} = conn, _opts) do
     if side_effecting_get?(conn.path_info) do
       conn
@@ -698,6 +700,7 @@ defmodule BarkparkCloud.Web.Router do
   # the real stream has not yet redeemed, and the user's own connect then 401s.
   # There is exactly ONE ticket-redeeming call site in lib/, so this one clause is
   # SUFFICIENT, not a sample — see `router_sse_ticket_head_burn_test.exs`.
+  # @boundary capability:cloud-sse-ticket-head-burn test:cloud/test/barkpark_cloud/web/router_sse_ticket_head_burn_test.exs#does NOT burn the ticket, and the user's own GET still opens
   defp side_effecting_get?(["v1", "events"]), do: true
 
   defp side_effecting_get?(_path_info), do: false
@@ -1674,6 +1677,73 @@ defmodule BarkparkCloud.Web.Router do
     :ok
   end
 
+  # THE USER-SCOPED SECURITY-LOG PRODUCER — the one writer of
+  # `user_security_events` in this router, and the only place the five verbs are
+  # spelled.
+  #
+  # WHY IT IS NOT `audit_account_security/2`. That helper writes the TEAM
+  # register, whose `team_id` is `null: false`, so it carries a LOGGED SKIP arm
+  # for a membership-less user — and a membership-less user is precisely who the
+  # auth self-service routes serve (register, reset, password change and session
+  # revoke all work before any team exists). This helper has NO skip arm because
+  # it needs none: the scope is the user, and the user is always there.
+  #
+  # BEST-EFFORT AND POST-COMMIT, deliberately, exactly like its team-register
+  # sibling: the password is already rotated / the session already revoked / the
+  # email already swapped by the time this runs, so nothing here may become a
+  # 500. A user who cannot change their password because a log insert failed is a
+  # far worse security outcome than a missing row. The failure is LOGGED, never
+  # silently discarded (cch-w51-bl-record-audit-errors-are-discarded-at-every-call-site).
+  #
+  # THE DEVICE RIDES ALONG. `session_opts(conn)` is the same peer-IP + User-Agent
+  # pair the sessions list already shows, so "password changed" answers the
+  # question the user actually has — from WHERE. The UA is truncated in
+  # `UserSecurityEvent.changeset/2`, not here.
+  #
+  # NO SECRETS. `metadata` at every call site below is a count, a revoked row id,
+  # or the user's previous email address — never a password, a token, a TOTP code
+  # or a recovery code. The producing routes hold all four of those in scope; not
+  # one is passed.
+  defp record_user_security_event(conn, action, metadata \\ %{}) do
+    user = conn.assigns.current_user
+    opts = session_opts(conn)
+
+    attrs = %{
+      user_id: user.id,
+      action: action,
+      ip: opts[:ip_address],
+      user_agent: opts[:user_agent],
+      metadata: metadata
+    }
+
+    # THE RESCUE IS THE BEST-EFFORT PROMISE, IN CODE. `Repo.insert/1` returns
+    # `{:error, changeset}` only for the constraints Ecto models; a DB-level
+    # refusal (22001 on an oversize column, a dead pool) RAISES, and a raise here
+    # turns a completed password rotation into a 500 — the exact outcome the
+    # comment above says must never happen. Measured, not theorised: before the
+    # migration sized `user_agent`, a 1012-character User-Agent aborted
+    # `DELETE /v1/account/sessions` with a Postgrex 22001 AFTER every session was
+    # already revoked. Both halves shipped; this one is the one that holds when
+    # the next unmodelled refusal arrives.
+    try do
+      case Accounts.record_user_security_event(attrs) do
+        {:ok, _event} ->
+          :ok
+
+        {:error, cs} ->
+          Logger.error("user security event #{action} failed for #{user.id}: #{inspect(cs)}")
+          :ok
+      end
+    rescue
+      e ->
+        Logger.error(
+          "user security event #{action} raised for #{user.id}: #{Exception.message(e)}"
+        )
+
+        :ok
+    end
+  end
+
   # cch-w53-bl-oauth-linked-needs-a-branch-reporting-return — the `oauth.linked`
   # producer, and the ONLY one.
   #
@@ -1793,6 +1863,12 @@ defmodule BarkparkCloud.Web.Router do
       was_enabled? = Accounts.two_factor_enabled?(conn.assigns.current_user)
       {:ok, _} = Accounts.disable_two_factor(conn.assigns.current_user)
       if was_enabled?, do: audit_account_security(conn, "twofa.disabled")
+      # The USER trail gets the same gate for the same reason: the route is
+      # idempotent, and a `two_factor_disabled` row for a user who never had it
+      # on would describe a change that did not happen. The team register above
+      # is the operator's view of this fact and SKIPS for a teamless user; this
+      # one is the account owner's view and never skips.
+      if was_enabled?, do: record_user_security_event(conn, "two_factor_disabled")
       json(conn, 200, %{ok: true})
     end
   end
@@ -1915,8 +1991,21 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 422, %{error: "invalid_code"})
 
       true ->
+        previous_email = conn.assigns.current_user.email
+
         case Accounts.update_user_email(conn.assigns.current_user, conn.body_params["code"]) do
           {:ok, user} ->
+            # `previous_email` is read BEFORE the swap — afterwards the struct in
+            # `conn.assigns` is the stale one and `user` is the new address, so
+            # neither says what the mail used to be. It is the user's OWN former
+            # address, which is the one fact that makes this row actionable ("my
+            # account was moved to an address I do not control"); the
+            # confirmation CODE, which is in scope right here, is not passed.
+            record_user_security_event(conn, "email_changed", %{
+              previous_email: previous_email,
+              new_email: user.email
+            })
+
             json(conn, 200, %{
               user: %{id: user.id, email: user.email, confirmed: not is_nil(user.confirmed_at)}
             })
@@ -2051,6 +2140,44 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # GET /v1/me/security-events?limit= → 200 {events: [{id, action, ip,
+  # user_agent, metadata, inserted_at}]} — THE ACCOUNT OWNER'S OWN SECURITY
+  # TRAIL, newest first, limit 100 by default and 200 at most.
+  #
+  # SCOPE. `Accounts.list_user_security_events/2` filters on ONE column,
+  # `user_id`, against `conn.assigns.current_user` — there is no query parameter
+  # on this route that touches the scope, and there is no team predicate to get
+  # wrong. That is the point of the separate table: `/v1/account/security-audit`
+  # next door has to prove "self" out of three fields of an audit row
+  # (actor AND target_type AND target_id) because a team audit row is not
+  # user-keyed. Here it is a column.
+  #
+  # THIS ROUTE DOES NOT WIDEN THE TEAM REGISTER, AND NOTHING WIDENS INTO IT.
+  # `GET /v1/audit` (team-admin) and the platform-operator reads query
+  # `audit_events`; `user_security_events` has exactly one reader, this route,
+  # and exactly one writer, `record_user_security_event/3`. A team admin reading
+  # their own team's trail cannot reach a member's rows here, because no
+  # team-scoped query names this table at all.
+  #
+  # USER-gated (`Auth.require_user/2`) like its three self-scoped siblings
+  # `/v1/account/sessions`, `/v1/account/two-factor` and
+  # `/v1/account/security-audit`. Unauthenticated is the guard's 401.
+  get "/v1/me/security-events" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      events =
+        Accounts.list_user_security_events(
+          conn.assigns.current_user,
+          limit: parse_int(conn.query_params["limit"], 100)
+        )
+
+      json(conn, 200, %{events: Enum.map(events, &user_security_event_json/1)})
+    end
+  end
+
   # DELETE /v1/account/sessions/:id → 200 {ok: true} | 404. Revoke one of the
   # caller's sessions by row id. Ownership-scoped: another user's token id is a
   # 404, never an existence leak.
@@ -2061,8 +2188,20 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       case Accounts.revoke_user_session(conn.assigns.current_user, conn.path_params["id"]) do
-        {:ok, _} -> json(conn, 200, %{ok: true})
-        {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+        {:ok, _} ->
+          # Only the OK arm produces. A 404 here is "that row is not yours or
+          # does not exist" — nothing was revoked, so a row saying one was would
+          # be a false entry in the one log the user is supposed to trust. The
+          # revoked row's id is safe metadata (it is already in the sessions
+          # list the caller just read); the token hash is not, and is not here.
+          record_user_security_event(conn, "session_revoked", %{
+            session_id: conn.path_params["id"]
+          })
+
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
       end
     end
   end
@@ -2080,6 +2219,12 @@ defmodule BarkparkCloud.Web.Router do
         Accounts.revoke_all_user_sessions(conn.assigns.current_user,
           except: Auth.bearer_token(conn)
         )
+
+      # Produced even when n == 0. "I pressed sign-out-everywhere and nothing
+      # else was signed in" is itself a fact worth having in the trail — unlike
+      # the 2FA and single-revoke arms above, the ACT happened and completed; it
+      # simply had no other device to reach. The count is the metadata.
+      record_user_security_event(conn, "sessions_revoked_everywhere", %{revoked: n})
 
       json(conn, 200, %{revoked: n})
     end
@@ -2117,6 +2262,15 @@ defmodule BarkparkCloud.Web.Router do
               user,
               session_opts(conn) ++ [origin: "password_change"]
             )
+
+          # Neither password is passed. `current_password` and `new_password`
+          # are both bound in this clause's enclosing scope (`cur` / `new`) and
+          # neither reaches the row — the metadata states only the side effect
+          # the user needs to recognise: this change signed their other devices
+          # out.
+          record_user_security_event(conn, "password_changed", %{
+            revoked_other_sessions: true
+          })
 
           json(conn, 200, %{ok: true, token: fresh})
 
@@ -2650,9 +2804,13 @@ defmodule BarkparkCloud.Web.Router do
   # tear down the developer's home base.
   # Credential-aware, the SAME family as POST /v1/fleet/supports and go-live: a
   # credential that can BIND can UNBIND — a PAT must carry the `deploy` ability;
-  # a session must be team-admin (owner/admin). Anon 401. The no-team case falls
-  # through to the downstream 404 (POST's is 422 — the asymmetry is left for
-  # backlog pdf-bl-cp-no-team-status-mismatch, deliberately not normalized here).
+  # a session must be team-admin (owner/admin). Anon 401. A caller with NO active
+  # team gets the SHARED gate refusal `no_team/1` emits — the same
+  # `403 {"error":"forbidden","reason":"no_team","scope":"team"}` the POST twin
+  # answers (task-3ae0ca3aec358df9). It used to fall through to the downstream
+  # 404: nothing had been looked up, so "not_found" was never a true answer, and
+  # `bp cloud support remove` read that status and told a teamless operator the
+  # row was "already gone" when the truth was `bp team use <team>`.
   #
   # task-688ebffc4b0aa50a — THE LIVE/NON-LIVE DISJUNCTION, the same one
   # `DELETE /v1/barkparks/:id` above already makes, and for the same reason.
@@ -2715,7 +2873,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 404, %{error: "not_found"})
+        no_team(conn)
 
       true ->
         team = conn.assigns.current_team
@@ -3247,8 +3405,18 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # A box with a pending/claimed DEPROVISION job is on its way out — not a live
-  # target for the verify suite. (A provisioning box has no url yet, which
-  # Verify.run/1 already gates as :not_live.)
+  # target for the verify suite, and (task-353dacaf39f33244) not a live target
+  # for an attach-domain enqueue either. (A provisioning box has no url yet,
+  # which Verify.run/1 already gates as :not_live.)
+  #
+  # NAME ↔ BODY (the `any_kind?` mis-naming from #14038 recurred twice, so say
+  # it out loud): this decides exactly ONE thing — does the LATEST deprovision
+  # job for this instance sit in "pending" or "claimed". It is NOT a general
+  # "is this box healthy" predicate. It does not read `suspended` (callers gate
+  # that separately, above), does not look at provision/attach jobs of any other
+  # kind, and a deprovision whose LATEST job reached "succeeded" or "failed" (the
+  # only other two `ProvisionJob` statuses) is FALSE here. The body was not
+  # widened or narrowed by the second caller.
   defp instance_deprovisioning?(%Barkpark{id: id}) do
     case Registry.latest_deprovision_status_map([id]) do
       %{^id => %{status: status}} -> status in ["pending", "claimed"]
@@ -5060,6 +5228,9 @@ defmodule BarkparkCloud.Web.Router do
   # host — a re-attach is refused, never an overwrite, because an overwrite
   # strands the previous host's A record on a live box (cch-w54-bl). Attaching
   # the SAME host again is still a 202 (the failed-attach recovery path).
+  # 409 not_live when a deprovision job for this instance is pending/claimed —
+  # see `instance_deprovisioning?/1`; it NARROWS the attach/teardown window, it
+  # does not close it (PR #14039's worker-side gate is the durable fix).
   #
   # ADMIN-gated: pointing platform DNS + rewriting a live box's Caddy/env is
   # privileged infra, like self-update above — require_current_team_admin halts
@@ -5081,10 +5252,31 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            if is_binary(domain) and domain != "" do
-              attach_custom_domain(conn, team, bp, domain)
-            else
-              json(conn, 422, %{error: "domain_required"})
+            cond do
+              not (is_binary(domain) and domain != "") ->
+                json(conn, 422, %{error: "domain_required"})
+
+              # task-353dacaf39f33244: the attach ENQUEUE had no lifecycle check
+              # at all, so a caller could persist a custom_host and queue an
+              # attach_domain job against a box that is already on its way out —
+              # the worker then points DNS at a machine the deprovision job is
+              # deleting, stranding the A record. Same predicate the verify
+              # route already calls (its ONLY call site before this one), not a
+              # second near-duplicate, and the same 409 `not_live` envelope.
+              #
+              # THIS NARROWS THE WINDOW; IT DOES NOT CLOSE THE RACE. A
+              # deprovision enqueued (or claimed) microseconds after this check
+              # still beats the attach worker. The durable fix is the
+              # WORKER-side gate from PR #14039 — AttachDomainWith re-checks box
+              # liveness BEFORE and AFTER the platform A-record upsert and
+              # deletes the record it just wrote if the box vanished mid-write.
+              # That gate remains load-bearing; this is the loud refusal for the
+              # majority of callers who have not yet raced.
+              instance_deprovisioning?(bp) ->
+                json(conn, 409, %{error: "not_live"})
+
+              true ->
+                attach_custom_domain(conn, team, bp, domain)
             end
 
           _ ->
@@ -16266,6 +16458,22 @@ defmodule BarkparkCloud.Web.Router do
       last_used_at: t.last_used_at,
       inserted_at: t.inserted_at,
       current: t.token_hash == current_hash
+    }
+  end
+
+  # One row of GET /v1/me/security-events. There is no `user` field and no
+  # actor: every row in this table is BY and ABOUT the caller, so echoing their
+  # own id back on each row would be noise. `metadata` is emitted verbatim —
+  # every producer's map is a literal at its call site and none of them carries a
+  # secret (see `record_user_security_event/3`).
+  defp user_security_event_json(%Accounts.UserSecurityEvent{} = e) do
+    %{
+      id: e.id,
+      action: e.action,
+      ip: e.ip,
+      user_agent: e.user_agent,
+      metadata: e.metadata,
+      inserted_at: e.inserted_at
     }
   end
 
