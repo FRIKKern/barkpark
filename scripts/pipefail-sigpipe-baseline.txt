@@ -97,4 +97,25 @@
 # and may never RISE, and a rise means a new site.
 #
 # Filed under task-ab1d5320e09c9e72.
-113
+#
+# ── RE-MEASURED 2026-09-12 (task-ab1d5320e09c9e72, rebase onto origin/main 7b3145e1d): 113 → 114 ──
+# THE +1 IS #17920's OWN CONTROL SPECIMEN, NOT A NEW BLIND SPOT. This PR banked 113
+# measured on origin/main 3f38dd0f8. Rebasing onto current origin/main 7b3145e1d
+# (which now carries #17920, bfa388097) re-measures 114, by exactly:
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
+#     → pipefail-sigpipe-scan: 114 finding(s) — high 114 · medium 0 · low 0 — over 381 file(s)
+#
+# WHY IT MOVED. #17920 fixed scripts/pds-scratch-target.sh's urandom-cred site
+# (`tr </dev/urandom | head -c 40` → `od -N20`) but added scripts/pds-scratch-target_test.sh
+# keeping the OLD form as a deliberate 141 control at :219, which the arm now flags
+# HIGH. Net across the origin/main drift 3f38dd0f8→7b3145e1d (378→381 files):
+# required-checks.test.sh 45→48, pds-scratch-target.sh 2→1, +1 pds-scratch-target_test.sh:219
+# = 114. That test's :219 is #17920's own SIGPIPE demo, by design — not a regression.
+#
+# Without this bump the ratchet reds ON MAIN after merge (114 > 113) and nothing on
+# the PR head shows it, because the PR head measured against the older base 3f38dd0f8.
+# Re-measured AFTER the final rebase, per the regeneration rule (never hand-counted).
+#
+# Filed under task-ab1d5320e09c9e72.
+114
