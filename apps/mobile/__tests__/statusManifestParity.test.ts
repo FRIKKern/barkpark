@@ -92,11 +92,13 @@ const manifestByRole = new Map(manifest.roles.map((r) => [r.role, r]))
  * gate's SANCTIONED_EXTRA makes for the react and web twins. */
 const SENTINEL = 'unknown'
 
-/** `cancel` resolves and renders, but it is not a BOARD LANE: the web folds
- * cancelled rows into a tally rather than giving them a column, and mobile
- * mirrors that. Recorded here so the lane-order assertion below stays a byte
- * check against the manifest rather than a hand-kept second list. */
-const NON_LANE_ROLES: ReadonlySet<string> = new Set(['cancel'])
+/** The TERMINAL rung (task-881952f8d8417f4b). EVERY manifest role is a board
+ * lane now — `cancel` included — but it sorts LAST rather than in its manifest
+ * position: a cancelled row must neither VANISH (the drop the Elixir and Go
+ * boards shipped) nor sit in `open`, the CLAIMABLE lane `bp task ready` serves
+ * and mobile used to file it into. Recorded here so the lane-order assertion
+ * below stays a computed check against the manifest, not a hand-kept list. */
+const TERMINAL_ROLES: readonly string[] = ['cancel']
 
 /** THE ADJUDICATED DIVERGENCES, READ FROM THE MANIFEST — not restated here.
  *
@@ -206,13 +208,31 @@ describe('mobile status vocabulary ≡ design/status-manifest.json', () => {
     }
   })
 
-  it('orders the board lanes by manifest order, minus the recorded non-lane roles', () => {
-    const want = manifestOrder.filter((r) => !NON_LANE_ROLES.has(r))
+  it('orders the board lanes by manifest order, with the terminal rung LAST', () => {
+    const want = [
+      ...manifestOrder.filter((r) => !TERMINAL_ROLES.includes(r)),
+      ...TERMINAL_ROLES.filter((r) => manifestOrder.includes(r)),
+    ]
     expect([...BOARD_ROLES]).toEqual(want)
   })
 
-  it('keeps NON_LANE_ROLES honest — every excluded role is a real manifest role', () => {
-    for (const role of NON_LANE_ROLES) expect(manifestByRole.has(role)).toBe(true)
+  // c3 — the DERIVATION LOCK. BOARD_ROLES is computed from ROLE_LABEL's
+  // (manifest-ordered) keys, so a rung added to design/status-manifest.json becomes
+  // a lane automatically and can never ship another silent drop.
+  // MUTATION: retype BOARD_ROLES beside the manifest as the old seven-role literal
+  // and this reds naming `cancel` as a rung with no lane; the shell gate's Part 5b
+  // reds on the same edit from the other direction.
+  it('gives EVERY manifest rung a lane — nothing is dropped from the board', () => {
+    // A rung with no lane is a SILENT DROP: its rows never reach the board and
+    // nothing says so. The message rides the assertion value so jest names the rung.
+    const missing = manifestOrder.filter((r) => !BOARD_ROLES.includes(r))
+    expect({ rungsWithNoLane: missing }).toEqual({ rungsWithNoLane: [] })
+    expect(BOARD_ROLES).toHaveLength(manifestOrder.length)
+  })
+
+  it('keeps TERMINAL_ROLES honest — every terminal rung is a real manifest role, and sorts last', () => {
+    for (const role of TERMINAL_ROLES) expect(manifestByRole.has(role)).toBe(true)
+    expect(BOARD_ROLES[BOARD_ROLES.length - 1]).toBe(TERMINAL_ROLES[TERMINAL_ROLES.length - 1])
     expect(BOARD_ROLES).not.toContain(SENTINEL)
   })
 

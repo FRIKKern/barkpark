@@ -78,17 +78,32 @@ export const ROLE_LABEL: Record<string, string> = {
   unknown: 'Unknown',
 }
 
-/** The board's lane roles, in white-ladder order. `cancel` is NOT a lane (it
- * folds to a tally on the web) and neither is the `unknown` sentinel — see
- * taskBoard for what happens to their rows. */
+/** The terminal, non-claimable rung. Named once so the lane derivation reads as a
+ * RULE ("move the terminal rung last"), not as a second hand-typed list. */
+export const CANCEL_ROLE = 'cancel'
+
+/** The opacity the terminal lane renders at — the web twin's
+ * `.bp-board__col--cancel { opacity: .55 }`. */
+const LANE_DEEMPHASIS = 0.55
+
+/** The JS-only fail-open sentinel (D11) — never a manifest rung, never a lane. */
+const SENTINEL_ROLE = 'unknown'
+
+/** The board's lane roles — DERIVED from ROLE_LABEL's key order, which
+ * scripts/status-manifest-check.sh part 5b and statusManifestParity.test.ts both
+ * pin to design/status-manifest.json's roles[] order. EVERY manifest rung is a
+ * lane, with the terminal `cancel` rung moved LAST and de-emphasised (see lane()).
+ *
+ * Before task-881952f8d8417f4b this was a hand-typed seven-role list without
+ * `cancel`, so the fallback in taskBoard homed cancelled rows in `open` — the
+ * CLAIMABLE lane `bp task ready` serves — manufacturing phantom ready work. With
+ * every rung a lane, the only role that fallback can still catch is the sentinel.
+ *
+ * Deriving rather than retyping means a rung added to the manifest becomes a lane
+ * automatically; it can never be silently dropped or misfiled again. */
 export const BOARD_ROLES: readonly string[] = [
-  'open',
-  'ready',
-  'progress',
-  'blocked',
-  'done',
-  'considering',
-  'researching',
+  ...Object.keys(ROLE_LABEL).filter((r) => r !== SENTINEL_ROLE && r !== CANCEL_ROLE),
+  CANCEL_ROLE,
 ]
 
 /** An absent or empty status is `open`; an unrecognized one is `unknown`
@@ -237,7 +252,19 @@ function boardCard(row: unknown, ctx: BlockCtx, key: number): ReactNode {
  * keep the surface fill that every other mobile card block already uses. */
 function lane(role: string, rows: unknown[], ctx: BlockCtx, key: number): ReactNode {
   return (
-    <View key={key} style={{ marginTop: 12, borderTopWidth: 3, borderTopColor: laneRule(role, ctx), paddingTop: 8 }}>
+    <View
+      key={key}
+      style={{
+        marginTop: 12,
+        borderTopWidth: 3,
+        borderTopColor: laneRule(role, ctx),
+        paddingTop: 8,
+        // The terminal lane is DE-EMPHASISED: abandoned work stays legible but
+        // does not compete with claimable work. Mirrors the web's
+        // `.bp-board__col--cancel { opacity: .55 }`.
+        opacity: role === CANCEL_ROLE ? LANE_DEEMPHASIS : 1,
+      }}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <Text style={{ ...scale.micro, fontWeight: '700', letterSpacing: 0.6, color: ctx.theme.textMuted }}>
           {labelOf(role).toUpperCase()}
@@ -280,11 +307,11 @@ const taskBoard: Render = (b, ctx, key) => {
   const rows = asList(b.snapshot)
   if (rows.length === 0) return emptyTasks(ctx, key)
 
-  // A ROW IS NEVER DROPPED (D46c). A role without a lane — `cancel`, or the
-  // fail-open `unknown` sentinel — homes in `open`, keeping its own glyph. The
-  // TUI's board resolves considering/researching and then silently drops those
-  // rows (5 lanes only, filed mob-zb-bl-tui-board-thought-lanes) and Elixir
-  // drops cancelled ones; react is the newest register and mobile follows it.
+  // A ROW IS NEVER DROPPED (D46c) AND NEVER MISFILED. Every manifest rung has a
+  // lane of its own now (task-881952f8d8417f4b), so the only role that can reach
+  // the `open` fallback is the non-manifest `unknown` sentinel — a cancelled row
+  // lands in the terminal `cancel` lane, last and de-emphasised, not in the
+  // claimable lane. All four sibling board surfaces obey the same derived rule.
   const byLane = new Map<string, unknown[]>()
   for (const r of rows) {
     const role = roleOf(isMap(r) ? r.status : undefined)
