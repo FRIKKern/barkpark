@@ -24,7 +24,7 @@ defmodule Barkpark.Content.Papers.AuthoringWallMountTest do
       grandfathering).
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query, only: [from: 2]
 

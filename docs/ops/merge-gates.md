@@ -301,54 +301,77 @@ is harmless:
   of any of them cannot stop a merge. `format` **left this class on 2026-09-04**
   (#15971): it dropped `continue-on-error` FIRST, precisely so the laundering
   above could not happen, and only then joined `elixir-gate`'s `needs:`, where it
-  is now SUBSUMED like every other upstream (see
-  the `elixir-gate` job's `needs:` comment block, which now records that
-  `format` IS in `needs`, and item 2 above for the diff scope). `plugin-node` is a third case again: blocking
+  is now SUBSUMED (the `elixir-gate` job's `needs:` comment block records it, and
+  item 2 above has the diff scope). `plugin-node` is a third case again: blocking
   nothing today, and relevant only when the PR touches `api/priv/plugins/**`.
 
 - **A NAME THAT SAYS `(blocking)` AND HAS NO MERGE AUTHORITY AT ALL.**
   `gofmt drift ceiling (blocking)` (`.github/workflows/go-format.yml`) is a real,
   working guard: it reds by name on any new off-roster gofmt drift and fails
   closed on a vacuous scan (`OK: 838 Go files scanned; 0 off-roster drift`). It
-  is not required, not `needs:`-ed by any required aggregator, and — because
-  go-format.yml carries a workflow-level `on: pull_request: paths:` filter — it
-  is structurally ineligible to be required, since an absent context reports
-  `expected` forever. Its `(blocking)` means *blocking inside its own workflow*,
+  is not required, not `needs:`-ed by any required aggregator, and structurally
+  ineligible to be required because go-format.yml is paths-filtered (the venue
+  rule below). Its `(blocking)` means *blocking inside its own workflow*,
   the same sense as doc-gates' 26 `(fails this job)` steps below (that label
-  replaced `(blocking)` there in #12631). Until 2026-08-08 it
-  appeared in **neither** `.github/required-checks.json` nor this page:
-  `grep -c gofmt` was 0 in both. That was not an oversight anyone could have
-  caught by re-reading — `required-checks.json` is GENERATED from names observed
-  on sampled heads, and its own `_readme` concedes "EXCLUSIONS ARE WHAT THE
-  SAMPLE SAW, never a complete census", so **every paths-filtered workflow is
-  invisible to that census by construction**. The same mechanism loses rows in
-  the other direction with no report: four names once enumerated there
-  (`PR task gate self-test`, `Re-land advisory`, `Filebase aesthetics gate`,
-  `Boundary gate`) have silently left the list on regeneration. Three of those
-  four carry written rows again as of 2026-09-06 — `PR task gate self-test`
-  earlier, `Re-land advisory` and `Boundary gate` in the every-rendered-name
-  census pass; `Filebase aesthetics gate` did not render on that sample and is
-  still unledgered. Read an absence
-  from that file as "the sample did not see it", never as "no such gate exists";
-  the ceiling is now filed there under **S4 PATHS-FILTERED** with that mechanism
-  written into its reason. **That hand-added row now survives a regeneration,
-  and until 2026-08-09 it did not.** History: [merge-gates-history.md](merge-gates-history.md#the-generator-merge-that-lost-25-exclusion-rows).
+  replaced `(blocking)` there in #12631). It is now filed under
+  **S4 PATHS-FILTERED**, and until 2026-08-08 it appeared in **neither**
+  `.github/required-checks.json` nor this page. `required-checks.json` is
+  GENERATED from names observed on sampled heads, so **every paths-filtered
+  workflow is invisible to that census by construction**, and the same mechanism
+  drops rows the other way with no report. Read an absence from that file as
+  "the sample did not see it", never as "no such gate exists". History, with the
+  four names it lost and the regeneration that now carries this row:
+  [merge-gates-history.md](merge-gates-history.md#the-generator-merge-that-lost-25-exclusion-rows).
 - **ADDING A BLOCKING JOB TO `security.yml` COSTS A SIXTH PLACE, and forgetting
   it reds the spec gate on every open PR.** #14073 paid the five its own message
   enumerates (the job, the aggregator's `needs`, its decide binding, every
   `env -i` simulator of that step body, the spec-authority marker) and stopped
   there. The sixth is the `ACK_EX` list in §14 of
-  `scripts/required-checks.test.sh`: the hermetic suite drives the generator
-  over a FROZEN fixture pair, a job added after that freeze can never render
-  there, and the committed exclusion row it needs is therefore permanently
-  unrenderable ON THAT WINDOW — so the generator refuses every emit until the
-  name is acknowledged. Re-sampling is not the escape hatch (D130 freezes the
-  pair on purpose); typing the rendered name into `ACK_EX` is. History: [merge-gates-history.md](merge-gates-history.md#the-2026-08-spec-gate-deadlock).
+  `scripts/required-checks.test.sh`: the hermetic suite drives the generator over
+  a FROZEN fixture pair, so a job added after that freeze can never render there
+  and the exclusion row it needs is permanently unrenderable ON THAT WINDOW — the
+  generator then refuses every emit until the name is acknowledged. Re-sampling
+  is not the escape hatch (D130 freezes the pair); typing the name into `ACK_EX`
+  is. History: [merge-gates-history.md](merge-gates-history.md#the-2026-08-spec-gate-deadlock).
 
 §19 of `scripts/required-checks.test.sh` derives both lists from source — the
 aggregators' `needs:` from `.github/workflows/`, the required contexts from
 `.github/required-checks.json` — and reds if this page ever again describes a
 transitive upstream of a required aggregator as unable to stop a merge.
+
+### Where a guard that must BLOCK lives
+
+**A guard can be mutation-proven and still stop nothing, because of the file it
+was put in.** A workflow-level `on: pull_request: paths:` filter emits no run and
+no check run on a PR that misses the paths, and an absent required context reads
+`expected` forever (D18). `.github/required-checks.json` is the truth about the
+required set, and its **S4 PATHS-FILTERED** rows (`go-format.yml`,
+`doc-gates.yml`, `architecture.yml`, …) are that disqualification. The false step is the next: that a path-scoped guard therefore
+has no home with merge authority.
+
+**It has one, and the repo built it four times.** On origin/main 58092344b all
+four required contexts live in workflows whose `pull_request:` arm carries NO
+`paths:` key — elixir.yml, cloud.yml, console-harness.yml, pr-task-gate.yml — so
+each starts on every PR and saves cost inside: one cheap dispatcher job
+publishes the path decision as an output, and every expensive job carries a
+**job-level `if:`** on it (four such jobs in elixir.yml, five in
+console-harness.yml, three in cloud.yml — cloud.yml:572 is the reader-corpus
+census, #17522). A job-level `if:` renders the check SKIPPED where a `paths:`
+filter renders nothing: **skipped is a verdict, absent is not.** That is the
+rule. A `push:`-arm filter is a separate question and is allowed
+(console-harness.yml:103): protection gates merges INTO main and never sees a
+push-to-main run.
+
+**The dispatcher pays for it.** Every PR starts the workflow, so it must be cheap
+and must never publish a silent `false`: two exits, no third — FAIL on an
+unresolvable base, dispatch TRUE and run everything on an empty changed-file set
+(console-harness.yml:313, cloud.yml:185 and elixir.yml's dispatcher each print
+"a skip here would green a required context nothing measured", priced). A run
+that dispatched nothing must then DISCLOSE that it evaluated nothing — NOT
+APPLICABLE below, worked at pr-task-gate.yml:227. A guard kept out of
+this shape must record that choice and its reason where it is documented
+(`docs/contracts/canonical-impl-markers.md` is the worked example). What the rule
+forbids is advisory while read as blocking.
 
 ### The required set governs the MERGE, not main's health afterwards
 
@@ -360,11 +383,10 @@ History: [merge-gates-history.md](merge-gates-history.md#the-2026-08-24-merge-th
 
 **The mechanism is the trigger block, not the required list.** A workflow with a
 `push:` arm re-runs against the merge commit, so a red one on the PR is a red one
-on main — required or not. **RE-DERIVE these counts; do not quote them.** They
-were measured 2026-08-24 over 55 workflows and were stale within a day — three
-workflows landed 2026-08-24/25 (`research-coverage-suite`, `hundesteder`,
-`chronicle-paper`) and this block still read "41 of 55" on 2026-09-01. The
-figures below are the 2026-09-01 re-derivation:
+on main — required or not. **RE-DERIVE these counts; do not quote them.** The
+2026-08-24 measurement over 55 workflows was stale within a day (three landed
+2026-08-24/25) and this block still read "41 of 55" a week later. The figures
+below are the 2026-09-01 re-derivation:
 
 ```bash
 # workflows that re-run on main after a merge — 42 of 57 on 2026-09-01
@@ -401,16 +423,14 @@ merge" and "cannot hurt you" are not the same sentence.
 
 **And the post-merge watcher does not cover this.** `main-gate-watch.yml` reads
 the required set **live from branch protection** and watches only those contexts
-on main's tip. A red NON-required context on main therefore has *no* watcher:
-main carries a red check while `main-gate-watch` stays green — correctly, since
-that context was never in its scope. The second scream is scoped to the first
-scream's list.
+on main's tip, so a red NON-required context on main has *no* watcher: main
+carries a red check while `main-gate-watch` stays green, correctly — that context
+was never in its scope. The second scream is scoped to the first scream's list.
 
 **Operationally:** four required greens are a *merge* predicate, not a
-main-health predicate. Before merging — and especially from automation — read the
+main-health predicate. Before merging — especially from automation — read the
 full check list and treat any red whose workflow has a `push:` arm as a red you
-are about to move onto main. It is not blocked, and it will not be caught
-afterwards either.
+are about to move onto main: nothing stops it, and nothing catches it after.
 
 #### Changing branch protection taxes the watcher — read this first
 
@@ -473,13 +493,11 @@ declared path sets.** That green means **NOT APPLICABLE to this diff** — never
 "the suite passed". Nothing was compiled, nothing was tested, no job was
 dispatched, and the check-run still reads `pass` next to the merge button.
 
-Measured on merged PRs, not inferred: on #10565 (head `bb15f596d`, a single
-ledger `.md`) the per-commit check-runs read `Cloud control-plane (compile +
-format) | skipped`, `Cloud control-plane (test) | skipped`, `Cloud gate |
-success` with one annotation. #10450 (head `5a43bf893`) is the same shape.
-`gh pr checks 10565` prints `Cloud gate  pass  4s` and stops there — the
-disclosure is one API call or one UI click further on, which is why this page
-has to tell you it exists.
+Measured on merged PRs, not inferred: on #10565 (a single ledger `.md`) the
+per-commit check-runs read both Cloud jobs `skipped` under a `success` gate
+carrying one annotation, and #10450 is the same shape. `gh pr checks 10565`
+prints `Cloud gate  pass  4s` and stops there — the disclosure is one API call
+or one UI click further on, which is why this page has to tell you it exists.
 
 Each path-gated aggregator emits the disclosure itself, as a `::notice`
 annotation on its own check-run. The roster below is the contract §21 of
@@ -509,9 +527,9 @@ this roster. `Web gate` is ci.yml's aggregator, added 2026-09-11
 `web/ typecheck + unit tests + lint`, was ABSENT on a non-web head and could not
 be required at all. Registering `Web gate` (the aggregator, never that leaf)
 takes the required set 4 -> 5 and is a separate, deliberate act.
-`Go gate` is step 2
-of the sequence in go-tests.yml's header; step 3 (register `Go gate`, never the
-leaf `go vet + test`) has not landed. If `Compose smoke` or `Go gate` is ever
+`Go gate` is step 2 of
+go-tests.yml's header sequence; step 3 (register `Go gate`, never the leaf
+`go vet + test`) has not landed. If `Compose smoke` or `Go gate` is ever
 promoted to a required context, its `no` above must flip to `yes` in the same PR:
 clause 3 of §21 parses the required set from `.github/required-checks.json` and
 reds on any disagreement in either direction.
@@ -528,17 +546,10 @@ It is deliberately **not** worded `nothing ran` and stays a `—` row in the tab
 above: this green is not path-gating, and the roster that table holds is about
 path-gated aggregators. History: [merge-gates-history.md](merge-gates-history.md#the-pr-task-gate-grandfather-branch-and-the-39-of-39-re-derivation).
 
-The annotation says it in its own words. `Cloud gate`, verbatim from
-`cloud.yml`:
-
-```
-NOTHING CLOUD RAN on this head.
-Cloud gate is green because this diff touched none of its declared path sets,
-NOT because anything was tested.
-Not dispatched: <the job list>
-Green here means NOT APPLICABLE to this diff. Read it as 'no Cloud job
-executed', never as 'the Cloud suite passed'.
-```
+The annotation says it in its own words — `cloud.yml`'s reads "NOTHING CLOUD RAN
+on this head … green because this diff touched none of its declared path sets,
+NOT because anything was tested", names the jobs it did not dispatch, and ends
+"Read it as 'no Cloud job executed', never as 'the Cloud suite passed'."
 
 **Where a merger reads it.** The check-run page in the GitHub UI shows the
 annotation inline. From a terminal, `gh pr checks <pr>` will not show it —
@@ -583,16 +594,15 @@ direction:
 - **Count ALL-OF-PRESENT, never occurrences-of-SUCCESS.** #10722 and #10720
   render FIVE required-named rollup entries, because `PR references an active
   task` appears twice on one head: once FAILURE, once SUCCESS. Counting SUCCESS
-  occurrences still reaches 4, so the failing required context is laundered out
-  of the report. Occurrence-counting says TEN; all-of-present says EIGHT — a 25%
-  over-report. A context is green only when it rendered and *every* entry
-  carrying its name concluded SUCCESS.
+  occurrences still reaches 4, laundering the failing required context out of
+  the report (TEN by occurrence, EIGHT all-of-present — a 25% over-report). A
+  context is green only when it rendered and *every* entry carrying its name
+  concluded SUCCESS.
 - **`mergeable` is LAZILY COMPUTED, and UNKNOWN is a warning row.** On
   2026-08-09 the first `gh pr list` after a quiet period answered 39 UNKNOWN of
-  40 open; the second, 12 seconds later, answered 22 CONFLICTING / 18 MERGEABLE.
-  A naive `select(.mergeable == "CONFLICTING")` silently drops those rows and
-  prints a smaller, calmer number. Re-poll, and print whatever is still UNKNOWN
-  as a warning row rather than omitting it.
+  40 open; 12 seconds later, 22 CONFLICTING / 18 MERGEABLE. A naive
+  `select(.mergeable == "CONFLICTING")` drops those rows and prints a calmer
+  number. Re-poll, and print whatever is still UNKNOWN as a warning row.
 
 Being merely **behind** main is not in this class and is never reported: main is
 `strict: false`, so a MERGEABLE PR behind main is exactly what the merge policy
@@ -608,13 +618,8 @@ own prose indistinguishable from the remaining work.** The codebase's own search
 key stops discriminating, and it stops discriminating in the comforting
 direction — the fix looks like the biggest remaining cluster.
 
-Measured, not inferred: #16888 tightened 32 multi-status refusal assertions and
-gave each site a comment quoting the bracket literal it had just deleted. A
-sweep for that literal over `api/test` then returned 80 hits, of which 20 were
-that PR's own explanations — and all 20 sat in the ten files that were already
-fixed. A sweeper re-deriving the remaining population reads the highest apparent
-density of work precisely where there is none. It produced one false reading
-before it was caught.
+Measured, not inferred, on #16888:
+[merge-gates-history.md](merge-gates-history.md#the-16888-sweep-that-counted-its-own-explanations).
 
 When a fix narrates the pattern it deleted, describe that pattern in prose —
 name the statuses, not the numerals — rather than reproducing a greppable
@@ -773,24 +778,17 @@ run them, cannot run them locally, and cannot fix them in a PR.
     Vercel GitHub App (projects `guerrilla/barkpark` and `guerrilla/demo`).
     **Advisory** — and advisory here means *ignored*, not *tolerated*: there
     is no `continue-on-error` to set, because these are not our jobs. The
-    classification rests on measurement, not on preference. Both report
-    `fail` on **every** open and recently-merged PR repo-wide, including PRs
-    that touch neither `cloud/` nor the console nor any front-end file (of
-    the six most recently merged PRs, all six carry both failures and five
-    change zero `cloud/` files), and PR #4732 merged carrying both. A check
-    that is red identically on PRs with disjoint diffs is not reading the
-    diff — the breakage is platform-side integration, not a defect in PR
-    code. **The root cause is NOT diagnosed.** The check surfaces
-    `Deployment has failed — npx vercel inspect dpl_<id> --logs`; nobody has
-    run that and read the build log, so "platform-side" is an inference from
-    the failure *pattern*, not a diagnosis. Until someone does, treat these
-    two as carrying no information about the PR under review — and do not
-    cite this entry as evidence that Vercel is *healthy*. Diagnosis is owned
-    by **`hg-bl-vercel-legacy-statuses-red-repo-wide`** (it absorbed
-    `gr-blk-vercel-checks-ungoverned`, which was cancelled as a duplicate —
-    do not re-file either); when it lands, this entry gets
-    replaced by a real classification (fix it, or turn the integration off —
-    a permanently-red check trains reviewers to ignore red).
+    classification rests on measurement: both report `fail` on **every** open
+    and recently-merged PR repo-wide, including PRs that change zero `cloud/`
+    files, and a check red identically on disjoint diffs is not reading the
+    diff. **The root cause is NOT diagnosed** — "platform-side" is an inference
+    from the failure *pattern*; nobody has run the `npx vercel inspect
+    dpl_<id> --logs` the check surfaces. So treat these two as carrying no
+    information about the PR under review, and do not cite this entry as
+    evidence that Vercel is *healthy*. Diagnosis is owned by
+    **`hg-bl-vercel-legacy-statuses-red-repo-wide`** (it absorbed
+    `gr-blk-vercel-checks-ungoverned`, cancelled as a duplicate — do not
+    re-file either); when it lands, this entry gets a real classification.
 
     History: [merge-gates-history.md](merge-gates-history.md#provenance-of-the-vercel-advisory-classification).
 
