@@ -26,6 +26,7 @@ defmodule Barkpark.Content.WriterFenceTest do
 
   `async: false` because the hook seam mutates the global `:barkpark, :plugins` env.
   """
+  # sync: hook seam mutates the node-global `:barkpark, :plugins` Application env
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content

@@ -14,7 +14,7 @@ defmodule Barkpark.Content.PapersCacheProvenanceTest do
   the page stays 200 and looks like a refutation. Every assertion below is on
   STATE: a return value, or a reloaded row.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
 
