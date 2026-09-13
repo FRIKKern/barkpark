@@ -1476,6 +1476,22 @@ defmodule BarkparkWeb.TasksController do
         # disposition_reason is refused; the caller has to say they read what
         # is there. `stage_supersede/1` reads both wire spellings.
         |> Params.put_opt(:supersede, Params.stage_supersede(params))
+        # THE SECOND DURABLE SLOT (task-bd7476eecdede252). Standing guidance
+        # and its OWN override, forwarded separately from the note's — one
+        # flag for both would license a verdict-replacer to destroy guidance
+        # they never read. Hyphenated and underscored spellings both accepted,
+        # same reason as `reopen-trigger`: the manifest flag is hyphenated and
+        # the CLI sends the flag name verbatim, while a hand-written JSON body
+        # naturally uses the content key.
+        |> Params.put_opt(
+          :instruction,
+          params["instruction"] || params["operating_instruction"] ||
+            params["operating-instruction"]
+        )
+        |> Params.put_opt(
+          :supersede_instruction,
+          Params.stage_supersede_instruction(params)
+        )
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
         |> Params.put_opt(:session, session_id(conn, params))
 
@@ -1603,8 +1619,41 @@ defmodule BarkparkWeb.TasksController do
                 "If replacing it IS what you meant, re-run the same stage with " <>
                 "--supersede; the displaced text then stays recoverable from " <>
                 "`bp task events --payload` as `payload.staged.superseded_note`. " <>
-                "If it is not, put your text somewhere that does not overwrite a " <>
-                "caution — the brief, or a comment on the row."
+                "If it is not — if what you are writing is STANDING GUIDANCE for the " <>
+                "next reader rather than a verdict — write it with --instruction, which " <>
+                "lands on content.operating_instruction, a separate durable slot this " <>
+                "refusal does not guard and --supersede cannot reach."
+          })
+
+        # AN INSTRUCTION THAT WOULD DESTROY AN INSTRUCTION
+        # (task-bd7476eecdede252). The note guard's twin, one field over and
+        # with its OWN override, because standing guidance and a dated verdict
+        # must not share a key to both locks. 409, and NOTHING was written.
+        {:error, {:instruction_would_supersede, existing}} ->
+          {excerpt, truncated?} = Params.note_excerpt(existing)
+
+          conn
+          |> put_status(:conflict)
+          |> json(%{
+            ok: false,
+            reason: "instruction_would_supersede",
+            existing_instruction: excerpt,
+            existing_instruction_length: String.length(existing),
+            existing_instruction_truncated: truncated?,
+            message:
+              "refusing to replace the operating_instruction already on this row — " <>
+                "--instruction REPLACES, it does not append, and nothing was written. " <>
+                "THE INSTRUCTION YOU WOULD HAVE DESTROYED (#{String.length(existing)} chars" <>
+                if(truncated?, do: ", shown truncated", else: "") <>
+                "): #{inspect(excerpt)} — read it before you decide. An operating " <>
+                "instruction is STANDING GUIDANCE, not a dated measurement: nothing is " <>
+                "newer than it. If replacing it IS what you meant, re-run the same stage " <>
+                "with --supersede-instruction; the displaced text then stays recoverable " <>
+                "from `bp task events --payload` as " <>
+                "`payload.staged.superseded_instruction`. If you are recording a VERDICT " <>
+                "rather than guidance, use --note instead — it lands on " <>
+                "content.disposition_reason, a different durable slot, and leaves this " <>
+                "instruction byte-identical."
           })
 
         {:error, :not_found} ->

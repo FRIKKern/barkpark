@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Plugs.RequireChatHost do
 
   import Plug.Conn
   alias Barkpark.ChatHosts
+  alias BarkparkWeb.ErrorResponse
 
   def init(opts), do: opts
 
@@ -21,13 +22,18 @@ defmodule BarkparkWeb.Plugs.RequireChatHost do
 
   defp parse_authorization(_), do: {:error, :invalid_authorization}
 
+  # One shared emitter -> the 401 carries request_id (+ the code-keyed hint) for
+  # log correlation. It hand-rolled the envelope through `Jason.encode!` +
+  # `send_resp`, which is the same fork the controllers had with one extra twist:
+  # it also bypassed Phoenix's JSON encoder, so nothing downstream could add a
+  # field even in principle. `ErrorResponse.emit_custom/5` halts, which this
+  # pre-router plug REQUIRES, so the `halt/1` is not lost.
   defp unauthorized(conn) do
-    conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(
+    ErrorResponse.emit_custom(
+      conn,
       401,
-      Jason.encode!(%{error: %{code: "unauthorized", message: "invalid host credential"}})
+      "unauthorized",
+      "invalid host credential"
     )
-    |> halt()
   end
 end

@@ -186,6 +186,12 @@ services:
       - BARKPARK_TICKET_RATE_ATTACHMENT
       - BARKPARK_TICKET_RATE_CREATE
       - BARKPARK_TICKET_RATE_MESSAGE
+      # Quiz room-spawn rails (Barkpark.Quiz.SpawnBudget; both read in
+      # api/config/runtime.exs). MODE is the kill switch ("enforce"/"shadow"/
+      # "off"); PER_HOUR is parsed with String.to_integer/1, so the bare form
+      # matters doubly here — `${...:-}` would hand it "" and crash the boot.
+      - BARKPARK_QUIZ_ROOM_SPAWN_MODE
+      - BARKPARK_QUIZ_ROOM_SPAWN_PER_HOUR
       # Sync (cloud mirror)
       - BARKPARK_CLOUD_URL
       - BARKPARK_SYNC_DATASET

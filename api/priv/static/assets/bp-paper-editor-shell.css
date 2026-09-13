@@ -731,6 +731,15 @@
       padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
     }
 .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+/* PROSE LONG-TOKEN BREAK — the EDIT half of the View rule in
+   paper-surface.css (`.bp-paper-surface p, li`). It is not optional and not a
+   copy for tidiness: view_edit_parity_test.exs §2 reds the moment View
+   declares a property Edit does not, because a paper whose prose wraps at a
+   different word in Edit than in View is the exact drift that suite exists to
+   catch. `h1` beside it already carries the identical guard for the identical
+   reason. The View-side comment carries the measurements. */
+.bp-paper-editor-body p,
+.bp-paper-editor-body li { overflow-wrap: break-word; }
 /* A nested disclosure heading is not a document section boundary. */
 .bp-expandable__body .bp-paper-editor-body > .ProseMirror > h2 {
   margin-top: 1.9em; border-top: 0; padding-top: 0;

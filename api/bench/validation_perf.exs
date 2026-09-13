@@ -11,12 +11,49 @@
 #
 # Generates a synthetic 200-field / 30-contributor doc with a 100-rule
 # rule list, compiles the rules through `Rules.compile_all/1`, then runs
-# `Barkpark.Content.Validation.Evaluator.run_rules/3` 5 times and prints
-# min / median / max / mean wall-clock time in milliseconds.
+# `Barkpark.Content.Validation.Evaluator.run_rules/3` @iterations times and
+# prints min / median / p95 / max / mean wall-clock time in milliseconds.
 #
-# CI regression alarm: exits with status 1 if the median run exceeds
-# `@regression_alarm_ms` (100ms — the Phase 3 target itself, no headroom).
-# CI runs this on `ubuntu-latest-4-core` so the runner profile is stable.
+# ── THE ALARM IS RELATIVE, NOT A FIXED MILLISECOND NUMBER ──────────────────
+#
+# It used to be `median of 5 > 100ms`. Measured 2026-09-06 over 24 sampled CI
+# runs of this job (task-578619eaf4824adb), the medians printed were
+# 0.41-1.41 ms: the alarm sat ~70x above the quantity it measured, so a 50x
+# validation regression merged green through a REQUIRED context. A fixed
+# number cannot simply be lowered either — a slow or noisy shared runner would
+# then red honest code, which is how a gate stops being believed.
+#
+# So the job now measures the RUNNER ITSELF in the same process, on the same
+# core, seconds apart: `baseline/1` is a fixed-work pure-BEAM loop (binary
+# construction, map lookup, integer arithmetic — the primitives the evaluator's
+# hot path is made of) run @baseline_iterations times, median taken. Both
+# numbers are printed side by side and the verdict is their RATIO. A runner
+# twice as slow moves the baseline and the sample together and the ratio does
+# not move; a validation regression moves only the sample.
+#
+# Two independent arms, either one fails the job:
+#
+#   * RATIO  p95(validation) / median(baseline), expressed as a MULTIPLE of
+#     the nominal ratio this bench records for honest code, > @alarm_multiple.
+#     This is the arm that actually catches regressions. The nominal ratio is
+#     a constant, but a runner-INDEPENDENT one: it is a ratio of two timings
+#     taken on the same core seconds apart, so a slower runner scales both
+#     numerator and denominator and leaves it where it was. That is exactly
+#     what a fixed millisecond threshold could not do.
+#   * CEILING p95(validation) > @absolute_ceiling_ms.
+#     The Phase 3 plan target, kept as a backstop so a pathology that slows
+#     the baseline and the sample equally (and therefore hides from the ratio)
+#     still reds.
+#
+# p95 over @iterations samples, not median-of-5: a percentile is only as stable
+# as the sample behind it, and 5 points have no 95th.
+#
+# CI runs this on `ubuntu-latest` (see the `runs-on:` of the validation-perf
+# job in .github/workflows/elixir.yml). It used to say `ubuntu-latest-4-core`
+# here; that label is a PAID larger runner this account never gets, the job was
+# moved to the standard runner, and this sentence was not updated — which is
+# precisely why the threshold can no longer be a constant tuned to "a stable
+# runner profile".
 #
 # Phase 3 WI1 (commit d902ffa, PR #48) introduced the canonical evaluator
 # API: `Evaluator.run/3` takes a `schema_id` (cache lookup) and
@@ -34,64 +71,205 @@ defmodule Barkpark.Bench.ValidationPerf do
   @field_count 200
   @contributor_count 30
   @rule_count 100
-  @iterations 5
+  # >= 50 is the floor a p95 needs to mean anything; 60 is that floor plus a
+  # round margin, and at the medians this bench prints it costs well under a
+  # second. Read the header for why the verdict moved off median-of-5.
+  @iterations 60
+  @warmups 3
+
+  # ── the runner baseline ───────────────────────────────────────────────────
+  # @baseline_units is tuned so the baseline lands in the SAME ORDER as the
+  # validation sample — a baseline 100x smaller would be dominated by timer
+  # resolution and a baseline 100x larger would drown the signal. Measured
+  # 2026-09-13, `MIX_ENV=test mix run --no-start bench/validation_perf.exs` on
+  # an Apple M-series laptop: 20_000 units gave a baseline median of 1.710 ms
+  # against a validation median of 0.402 ms and a p95 of 0.836 ms — the same
+  # order. Re-tune only if the two numbers in the printed block drift more
+  # than ~10x apart.
+  @baseline_units 20_000
+  @baseline_iterations 21
+
+  # THE NOMINAL RATIO — what honest code costs in units of this runner's own
+  # speed, so the verdict can be stated as a MULTIPLE of it. Both numbers
+  # below carry their date and the command that produced them; replace them
+  # only by re-running the bench and quoting the new run.
+  #
+  #   2026-09-13, local (Apple M-series, `mix run --no-start`), two runs on a
+  #   BUSY machine — which is the point of the ratio, not an apology for it:
+  #     run 1: baseline 1.710 ms, p95 0.836 ms -> ratio 0.49x
+  #     run 2: baseline 1.148 ms, p95 0.615 ms -> ratio 0.54x
+  #     run 3: baseline 1.879 ms, p95 0.827 ms -> ratio 0.44x
+  #   The baseline spans 1.148-1.879 ms, a 64% spread; the ratio spans
+  #   0.44-0.54x, a 23% one. A fixed millisecond threshold absorbs the whole
+  #   64% and calls it signal.
+  #   2026-09-13, CI (ubuntu-latest, run 34746159133, this bench's own
+  #   validation-perf job): baseline 1.351 ms, p95 0.479 ms -> ratio 0.35x.
+  #
+  # PINNED TO THE CI VENUE, rounded up, because CI is the only venue where
+  # this gate DECIDES anything — a local run prints, it does not block a
+  # merge. Pinning to the slowest venue instead would spend the alarm's
+  # headroom on a machine that cannot red a PR: at nominal 0.60 the 5x
+  # mutation below lands at 2.95x against a 2.50x alarm, an 18% margin; at
+  # 0.40 it lands at 4.4x, and the busiest local ratio observed (0.54x) still
+  # only indexes 1.35x, less than half the alarm.
+  @nominal_ratio 0.40
+
+  # A 5x validation slowdown — the mutation this change was proved with —
+  # lands at 5.0x nominal and reds with 2x margin. Honest code may drift to
+  # 2.5x nominal before the job reds, which covers the residual venue-to-venue
+  # variance the baseline does not cancel. Today's shipped gate (fixed
+  # >100 ms on a median of 5) does not red that mutation at all: 5 x 0.402 ms
+  # is 2.0 ms, twenty-fold under the threshold.
+  @alarm_multiple 2.5
+
+  # The Phase 3 plan target, kept as an absolute backstop (header, CEILING arm).
   @target_ms 100
-  # Phase 3 WI4 dispatch tightened the alarm: CI fails the job when the
-  # median run exceeds the target. No headroom — the goal is to catch any
-  # drift the moment it happens.
-  @regression_alarm_ms 100
+  @absolute_ceiling_ms 100
   @tag :mutate
 
   def run do
     doc = build_doc(@field_count, @contributor_count)
     rules = build_rules(@rule_count, @field_count)
+    baseline_map = build_baseline_map(@field_count)
 
     # Warm-up: load atoms / compile call sites / settle the BEAM JIT before
     # we start timing. Discarded.
-    _ = Evaluator.run_rules(doc, rules, @tag)
+    for _ <- 1..@warmups do
+      _ = Evaluator.run_rules(doc, rules, @tag)
+      _ = baseline(baseline_map)
+    end
 
-    times_us =
+    # THE BASELINE IS MEASURED FIRST AND ON THIS SAME PROCESS, so the two
+    # samples see the same core, the same scheduler and the same neighbours.
+    baseline_ms =
+      for _ <- 1..@baseline_iterations do
+        {micros, _} = :timer.tc(fn -> baseline(baseline_map) end)
+        micros / 1000.0
+      end
+
+    times_ms =
       for _ <- 1..@iterations do
         {micros, _result} =
           :timer.tc(fn ->
             Evaluator.run_rules(doc, rules, @tag)
           end)
 
-        micros
+        micros / 1000.0
       end
 
-    times_ms = Enum.map(times_us, &(&1 / 1000.0))
     sorted = Enum.sort(times_ms)
     min = List.first(sorted)
     max = List.last(sorted)
-    median = Enum.at(sorted, div(@iterations, 2))
+    median = percentile(sorted, 0.50)
+    p95 = percentile(sorted, 0.95)
     mean = Enum.sum(times_ms) / @iterations
 
-    IO.puts("""
+    baseline_sorted = Enum.sort(baseline_ms)
+    baseline_median = percentile(baseline_sorted, 0.50)
 
-    === Validation perf bench (Phase 3 WI4) ============================
-      doc:           #{@field_count} scalars + #{@contributor_count} contributors
-      rules:         #{@rule_count}
-      iterations:    #{@iterations}
-
-      min:           #{format_ms(min)}
-      median:        #{format_ms(median)}
-      mean:          #{format_ms(mean)}
-      max:           #{format_ms(max)}
-
-      target:        <#{@target_ms}ms (Phase 3 plan)
-      alarm:         >#{@regression_alarm_ms}ms (CI gate — fails the job)
-    =====================================================================
-    """)
-
-    if median > @regression_alarm_ms do
+    # A baseline that measured nothing must never be allowed to divide: a
+    # zero or negative median would make every ratio infinite or negative and
+    # the gate would be loud-but-meaningless in one direction and vacuous in
+    # the other. Name it and refuse, rather than print a verdict.
+    if baseline_median <= 0.0 do
       IO.puts(:stderr, """
-      REGRESSION: median #{format_ms(median)} exceeds alarm threshold \
-      #{@regression_alarm_ms}ms.
+      CANNOT READ: the runner baseline measured #{format_ms(baseline_median)} \
+      over #{@baseline_iterations} iterations, which cannot be a divisor. \
+      Refusing to emit a ratio verdict from a baseline that measured nothing.
       """)
 
       System.halt(1)
     end
+
+    ratio = p95 / baseline_median
+    index = ratio / @nominal_ratio
+
+    IO.puts("""
+
+    === Validation perf bench (relative alarm) =========================
+      doc:             #{@field_count} scalars + #{@contributor_count} contributors
+      rules:           #{@rule_count}
+      iterations:      #{@iterations} (warmups: #{@warmups})
+
+      RUNNER BASELINE  (#{@baseline_units} units x #{@baseline_iterations} iterations)
+      baseline median: #{format_ms(baseline_median)}
+
+      VALIDATION SAMPLE
+      min:             #{format_ms(min)}
+      median:          #{format_ms(median)}
+      p95:             #{format_ms(p95)}
+      mean:            #{format_ms(mean)}
+      max:             #{format_ms(max)}
+
+      VERDICT
+      ratio:           #{format_ratio(ratio)}  (p95 #{format_ms(p95)} / baseline #{format_ms(baseline_median)})
+      nominal ratio:   #{format_ratio(@nominal_ratio)} (recorded for honest code — see the attribute)
+      index:           #{format_ratio(index)} of nominal
+      alarm:           >#{format_ratio(@alarm_multiple)} of nominal (relative gate — fails the job)
+      ceiling:         >#{@absolute_ceiling_ms}ms on p95 (absolute backstop — fails the job)
+      target:          <#{@target_ms}ms (Phase 3 plan)
+    =====================================================================
+    """)
+
+    failures =
+      []
+      |> then(fn acc ->
+        if index > @alarm_multiple do
+          ["RATIO #{format_ratio(ratio)} is #{format_ratio(index)} of the nominal " <>
+             "#{format_ratio(@nominal_ratio)}, over the #{format_ratio(@alarm_multiple)} alarm " <>
+             "(p95 #{format_ms(p95)} against a runner baseline of #{format_ms(baseline_median)})"
+           | acc]
+        else
+          acc
+        end
+      end)
+      |> then(fn acc ->
+        if p95 > @absolute_ceiling_ms do
+          ["CEILING p95 #{format_ms(p95)} exceeds the absolute ceiling #{@absolute_ceiling_ms}ms"
+           | acc]
+        else
+          acc
+        end
+      end)
+      |> Enum.reverse()
+
+    case failures do
+      [] ->
+        IO.puts(
+          "OK: validation perf is #{format_ratio(index)} of nominal against the measured " <>
+            "runner baseline, under the #{format_ratio(@alarm_multiple)} alarm."
+        )
+
+      reasons ->
+        IO.puts(:stderr, "REGRESSION:\n" <> Enum.map_join(reasons, "\n", &("  - " <> &1)))
+        System.halt(1)
+    end
+  end
+
+  # Nearest-rank percentile on an ALREADY SORTED list. Nearest-rank, not
+  # interpolated, so the value printed is one the bench actually observed.
+  defp percentile(sorted, q) when is_list(sorted) and q > 0 and q <= 1 do
+    n = length(sorted)
+    rank = max(1, min(n, ceil(q * n)))
+    Enum.at(sorted, rank - 1)
+  end
+
+  # ── the runner baseline workload ──────────────────────────────────────────
+  # Fixed work, no I/O, no processes, no ETS: binary construction, map lookup
+  # and integer arithmetic, which is what the evaluator's hot path is made of.
+  # Its only job is to cost a reproducible amount of BEAM time on whatever
+  # hardware the job landed on.
+
+  defp build_baseline_map(field_count) do
+    for i <- 1..field_count, into: %{}, do: {"f_#{i}", "value-#{i}"}
+  end
+
+  defp baseline(map) do
+    Enum.reduce(1..@baseline_units, 0, fn i, acc ->
+      key = "f_" <> Integer.to_string(rem(i, @field_count) + 1)
+      value = Map.get(map, key, "")
+      acc + byte_size(value) + rem(i * 7, 13)
+    end)
   end
 
   # ── doc fixture (inlined) ─────────────────────────────────────────────────
@@ -225,7 +403,11 @@ defmodule Barkpark.Bench.ValidationPerf do
   end
 
   defp format_ms(ms) when is_float(ms) do
-    :io_lib.format("~.2fms", [ms]) |> List.to_string()
+    :io_lib.format("~.3fms", [ms]) |> List.to_string()
+  end
+
+  defp format_ratio(r) when is_number(r) do
+    :io_lib.format("~.2fx", [r / 1]) |> List.to_string()
   end
 end
 

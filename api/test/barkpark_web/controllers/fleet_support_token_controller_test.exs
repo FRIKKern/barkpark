@@ -246,7 +246,7 @@ defmodule BarkparkWeb.FleetSupportTokenControllerTest do
 
       for resp <- [missing, garbage, family, foreign] do
         assert resp.status == 404
-        assert resp.resp_body == missing.resp_body
+        assert denial_bytes(resp) == denial_bytes(missing)
       end
     end
 
@@ -373,8 +373,26 @@ defmodule BarkparkWeb.FleetSupportTokenControllerTest do
 
       for resp <- [missing, unbound, unlabelled] do
         assert resp.status == 404
-        assert resp.resp_body == missing.resp_body
+        assert denial_bytes(resp) == denial_bytes(missing)
       end
+    end
+  end
+
+  # A refusal's BYTES, with `request_id` removed.
+  #
+  # Since task-8737e2d7ff1884e0 routed every hand-built envelope through
+  # `BarkparkWeb.ErrorResponse`, every §9 refusal carries a `request_id` — and
+  # that value is PER-REQUEST, so two refusals that must be indistinguishable to
+  # a caller can never again be equal as raw strings. The indistinguishability
+  # this file guards is about the RESOURCE, and `request_id` says nothing about
+  # one: it is derived from the request, the caller already has it on the
+  # response's own `x-request-id` header, and it is the handle that makes the
+  # refusal correlatable to a log line. So it is elided here rather than
+  # suppressed at the emitter.
+  defp denial_bytes(conn) do
+    case Jason.decode(conn.resp_body) do
+      {:ok, %{"error" => error} = body} -> %{body | "error" => Map.delete(error, "request_id")}
+      _ -> conn.resp_body
     end
   end
 end

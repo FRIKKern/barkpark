@@ -935,6 +935,39 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     assert DataViz.lineage_html(%{"type" => "lineage", "nodes" => [%{}]}) =~ "bp-dataviz--empty"
   end
 
+  # pe-bl-clock-strip-block — the clock strip's per-stop VERDICT. A stop can
+  # carry `tone` from the same four-word vocabulary the chart regions use; the
+  # stylesheet colours that stop's spine tick and its time from the tone token.
+  # The control legs are the point: a stop with no tone, and a stop with a tone
+  # outside the vocabulary, must both emit the BARE class — every lineage
+  # authored before the clock strip renders byte-identically.
+  test "lineage: a stop's tone becomes a per-stop verdict class; unknown and absent tones stay bare" do
+    html =
+      DataViz.lineage_html(%{
+        "type" => "lineage",
+        "nodes" => [
+          %{"overline" => "20:47:43", "title" => "Thanks for finding this", "tone" => "ok"},
+          %{"overline" => "20:50:24", "title" => "First of four rewrites", "tone" => "warn"},
+          %{"overline" => "20:54:36", "title" => "Test disclosure gone", "tone" => "danger"},
+          %{"overline" => "20:55:53", "title" => "Merged, zero comments", "tone" => "info"},
+          %{"overline" => "later", "title" => "No tone at all"},
+          %{"overline" => "later still", "title" => "Tone off-vocabulary", "tone" => "puce"}
+        ]
+      })
+
+    assert html =~ ~s|<li class="bp-lineage__node bp-lineage__node--ok">|
+    assert html =~ ~s|<li class="bp-lineage__node bp-lineage__node--warn">|
+    assert html =~ ~s|<li class="bp-lineage__node bp-lineage__node--danger">|
+    assert html =~ ~s|<li class="bp-lineage__node bp-lineage__node--info">|
+    # the two controls: bare class, no modifier, for absent and unknown tone
+    assert html =~ ~s|<li class="bp-lineage__node"><div class="bp-lineage__overline">later</div>|
+
+    assert html =~
+             ~s|<li class="bp-lineage__node"><div class="bp-lineage__overline">later still</div>|
+
+    refute html =~ "bp-lineage__node--puce"
+  end
+
   test "lineage dispatches through compose for :article and email styles" do
     b = %{"type" => "lineage", "nodes" => [%{"overline" => "2026", "title" => "T"}]}
 
