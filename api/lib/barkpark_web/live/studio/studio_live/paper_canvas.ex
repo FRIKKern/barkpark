@@ -81,7 +81,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # an optional `caption`. Both no longer SPLIT a run. UNLIKE the divider they
   # carry a mutable body and CAN emit a patch-block; UNLIKE the callout they have no
   # inline body. field-* / sheet STILL split until their own increments.
-  @canvas_attr_atom_types ~w(code diagram)
+  #
+  # scaffy-backlog-blocks-editable-studio adds `diff` and `filetree` to this SAME
+  # tier. Both are VERBATIM-TEXT blocks: one body field (`diff` / `text`) plus
+  # OPTIONAL scalar metadata (`file`/`lang` / `legend`) — exactly the code/diagram
+  # shape, generalized. They differ in ONE respect: their canvas PREVIEW is the
+  # READER'S OWN server-pushed HTML (`bp:block-html`, shared/paper.ex
+  # @technical_render_types), because no client runtime can produce
+  # `Components.diff_html/1` / `filetree_html/1` markup and
+  # canvas_reader_parity_gate_test.exs §3 forbids hand-mirroring it in JS.
+  # THREE-WAY LOCKSTEP: run-convert.js CANVAS_ATTR_ATOM_TYPES ⇄ index.js
+  # (Code/Diagram/Diff/Filetree) ⇄ here.
+  @canvas_attr_atom_types ~w(code diagram diff filetree)
 
   # S3.5: the 7 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
   # nodes — atom nodes (no PM-managed body, like the divider/code) whose VALUE rides
