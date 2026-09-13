@@ -65,8 +65,8 @@ on:
 # existence. Everything else is explicitly `none`.
 permissions:
   contents: write
-  actions: none
-  checks: none
+  actions: read
+  checks: read
   deployments: none
   issues: none
   packages: none
