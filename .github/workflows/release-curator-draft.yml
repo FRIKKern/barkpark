@@ -1,0 +1,133 @@
+name: Release curator (draft only)
+
+# WHAT THIS IS. The automated half of the release bless: once a day this job
+# scans main, and when there are commits since the last vA.B.C tag AND CI on
+# that head is green, it opens (or refreshes) ONE **draft** GitHub Release so a
+# human has something to bless. It closes task-f2bdc01d54559e1a c2 — "release
+# blessing is automated (green-main or scheduled) so the autoupdate machine has
+# a target to roll". Nothing has been blessed since v0.2.25, which is why the
+# fleet's update_state reads `current` on boxes hundreds of commits behind main:
+# the autoupdate machine had no target to roll.
+#
+# THE RULING THIS IMPLEMENTS (orchestrator, 2026-09-13T08:10Z, verbatim):
+#
+#   > OPTION A — a scheduled release-curator run that DRAFTS only; a human
+#   > blesses and tags. Never an autonomous tag on green main.
+#
+# So the automation stops one step short of the bless, on purpose. A green main
+# is NOT a decision to ship: "is this range worth releasing" is judgment, and
+# `.claude/workflows/release-curator.md` step 3 is explicit that a pile of
+# chore/docs commits is not a release. What this job removes is the OTHER
+# failure — nobody remembering to look. A draft sitting in the Releases tab is
+# a standing invitation; an empty tab is silence.
+#
+# WHAT IT NEVER DOES, and where each "never" is enforced:
+#   - never creates a git tag          → scripts/release-curator-draft.sh runs
+#                                        no `git tag`, and after every write it
+#                                        asserts `git ls-remote --tags origin
+#                                        refs/tags/<tag>` is EMPTY (exit 4 if not)
+#   - never publishes a release        → every `gh release create` goes through
+#                                        one function that refuses an argv
+#                                        without `--draft`
+#   - never pushes, never writes main  → there is no push/commit step here at all
+#   - never a second draft per candidate → an existing draft is `gh release edit`ed
+#   - never touches the cli-v* tag space → release-scan.sh excludes it by construction
+# `scripts/release-curator-draft.test.sh` proves the first two from OUTSIDE the
+# script (fake `gh` on PATH, argv recorded) and parses THIS FILE to prove the
+# venue and step bodies. Both arms are mutation-proved in that file's header.
+#
+# VENUE: schedule + workflow_dispatch ONLY. There is deliberately NO
+# `pull_request:` and NO `push:` arm:
+#   - a PR head is not main, and a release candidate is a statement about MAIN;
+#   - a push arm would re-open/refresh a draft on every single merge, which is
+#     noise, not signal, and would make the draft's `--target` chase main so
+#     fast that the notes a human just read describe a head that is already gone.
+# The daily tick is the cadence the ruling asked for. `workflow_dispatch` is how
+# a human asks for one now. (A new workflow is undispatchable until it exists on
+# the default branch — GitHub answers `HTTP 404: workflow not found on the
+# default branch` — so this file's FIRST real run is the reviewer's to trigger
+# after merge. Nothing here has executed against the live repo.)
+
+on:
+  schedule:
+    # 07:10 UTC daily — after the night's merges have settled and before the
+    # working day, so a draft is waiting when someone looks.
+    - cron: '10 7 * * *'
+  workflow_dispatch:
+
+# MINIMAL PERMISSIONS. `contents: write` is what the Releases API needs — there
+# is no finer scope: GitHub's releases endpoints are governed by the `contents`
+# permission, the same one that governs refs, and the token cannot be granted
+# one without the other. So the narrowing is done in the JOB BODY, not by the
+# token: this job has no step that pushes, commits, tags, or otherwise touches
+# a ref. The only writes it performs are `gh release create --draft` and
+# `gh release edit`, and the script asserts after each that no tag came into
+# existence. Everything else is explicitly `none`.
+permissions:
+  contents: write
+  actions: none
+  checks: none
+  deployments: none
+  issues: none
+  packages: none
+  pages: none
+  pull-requests: none
+  security-events: none
+  statuses: none
+
+concurrency:
+  # One curator at a time. Two concurrent runs would race on the same draft.
+  group: release-curator-draft
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    name: Release curator draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+        with:
+          # ALWAYS main, whatever ref the dispatch came from: a release
+          # candidate is a statement about main and nothing else.
+          ref: main
+          # MUST be a full clone. scripts/release-scan.sh walks tags with
+          # `git describe --tags` and `git log <tag>..HEAD`; under a truncated
+          # history it FATALs at exit 3 rather than silently reporting an empty
+          # range (its own shallow guard), and this job treats that exit as
+          # CANNOT READ. fetch-depth: 0 is what keeps that guard quiet.
+          fetch-depth: 0
+
+      - name: Assert the checkout can support a scan
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          set -uo pipefail
+          if [ "$(git rev-parse --is-shallow-repository)" != "false" ]; then
+            echo "CANNOT READ: the checkout is shallow despite fetch-depth: 0 — release-scan would under-report the range" >&2
+            echo "::error::release-curator-draft CANNOT READ: shallow checkout"
+            exit 1
+          fi
+          if ! git fetch --no-tags origin main >/dev/null 2>&1; then
+            echo "CANNOT READ: git fetch origin main failed — origin/main cannot be resolved" >&2
+            echo "::error::release-curator-draft CANNOT READ: git fetch origin main failed"
+            exit 1
+          fi
+          git rev-parse --verify origin/main >/dev/null 2>&1 || {
+            echo "CANNOT READ: origin/main is unresolvable after a successful fetch" >&2
+            echo "::error::release-curator-draft CANNOT READ: origin/main unresolvable"
+            exit 1
+          }
+          echo "checkout OK — origin/main is $(git rev-parse origin/main)"
+
+      - name: Open or refresh the draft release
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_CURATOR_REPO: ${{ github.repository }}
+          RELEASE_CURATOR_REF: origin/main
+        # THE WHOLE JOB BODY IS THIS SCRIPT. Not inlined here, so the harness
+        # drives the same code this line runs. Its exits: 0 drafted/refreshed/
+        # holding · 2 CANNOT READ · 3 CANNOT WRITE · 4 a tag appeared (never
+        # expected; the loudest failure this job can produce).
+        run: bash scripts/release-curator-draft.sh
