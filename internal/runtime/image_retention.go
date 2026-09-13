@@ -256,7 +256,7 @@ func (e *Executor) sweepSiteImages(ctx context.Context, slug, currentName string
 		return
 	}
 
-	out, err := e.runOut(ctx, "docker", "ps", "-a", "--no-trunc",
+	out, err := e.runOut(ctx, OpDockerQuery, e.Timeouts.dockerQuery(), "docker", "ps", "-a", "--no-trunc",
 		"--filter", "name=site-"+slug+"-", "--format", sweepPSFormat)
 	if err != nil {
 		e.logf("image retention: docker ps for site %s failed (nothing reaped): %v", slug, err)
@@ -293,7 +293,7 @@ func (e *Executor) sweepSiteImages(ctx context.Context, slug, currentName string
 		reclaimed        int64
 	)
 	for _, victim := range doomed {
-		if err := e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", victim.id); err != nil {
+		if err := e.runOp(ctx, OpDockerRemove, e.Timeouts.dockerRemove(), devNull{}, "docker", "rm", "-f", victim.id); err != nil {
 			// Leave the image alone too: an un-removed container still pins it,
 			// and `docker image rm` would fail anyway.
 			e.logf("image retention: docker rm %s (%s) failed, keeping its image: %v",
@@ -319,7 +319,7 @@ func (e *Executor) sweepSiteImages(ctx context.Context, slug, currentName string
 			continue
 		}
 		size := e.imageSize(ctx, ref)
-		if err := e.runner().Run(ctx, devNull{}, "docker", "image", "rm", ref); err != nil {
+		if err := e.runOp(ctx, OpDockerImageRm, e.Timeouts.dockerRemove(), devNull{}, "docker", "image", "rm", ref); err != nil {
 			e.logf("image retention: docker image rm %s failed: %v", ref, err)
 			continue
 		}
@@ -351,7 +351,7 @@ func (e *Executor) sweepBuildCache(ctx context.Context) {
 	if keep == "" {
 		return
 	}
-	out, err := e.runOut(ctx, "docker", "builder", "prune", "-f", "--keep-storage", keep)
+	out, err := e.runOut(ctx, OpBuilderPrune, e.Timeouts.builderPrune(), "docker", "builder", "prune", "-f", "--keep-storage", keep)
 	if err != nil {
 		e.logf("image retention: docker builder prune failed (deploy unaffected): %v", err)
 		return
@@ -365,7 +365,7 @@ func (e *Executor) sweepBuildCache(ctx context.Context) {
 // answer. A size we cannot read must not stop a removal — it only makes the
 // reclaimed figure conservative.
 func (e *Executor) imageSize(ctx context.Context, ref string) int64 {
-	out, err := e.runOut(ctx, "docker", "image", "inspect", "--format", "{{.Size}}", ref)
+	out, err := e.runOut(ctx, OpDockerQuery, e.Timeouts.dockerQuery(), "docker", "image", "inspect", "--format", "{{.Size}}", ref)
 	if err != nil {
 		return 0
 	}
@@ -378,9 +378,9 @@ func (e *Executor) imageSize(ctx context.Context, ref string) int64 {
 
 // runOut runs a command and returns its combined output, for the handful of
 // docker calls the sweep must READ rather than just fire.
-func (e *Executor) runOut(ctx context.Context, name string, args ...string) (string, error) {
+func (e *Executor) runOut(ctx context.Context, op string, budget time.Duration, name string, args ...string) (string, error) {
 	var buf bytes.Buffer
-	err := e.runner().Run(ctx, &buf, name, args...)
+	err := e.runOp(ctx, op, budget, &buf, name, args...)
 	return buf.String(), err
 }
 

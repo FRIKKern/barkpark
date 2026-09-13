@@ -742,6 +742,43 @@ func ensureTaskPortableBrief(body map[string]any) {
 	title, _ := body["title"].(string)
 	description, _ := body["description"].(string)
 	description = strings.TrimSpace(strings.NewReplacer("**", "", "__", "", "`", "").Replace(description))
+	// THE AUTO-STUB RULING (task-23c70e97c90809c6, ruling B: THE STUB STAYS).
+	// tooling/grip/ledger/brief-purpose-drift-2026-08-20.md counted 122 published
+	// rows (76 of them open, 2026-08-20 count) whose brief purpose is this stub
+	// and whose description says something else. A later sweep WILL find that
+	// table again and be tempted to re-file it as CLI drift. It is not drift, and
+	// the stub is not to be removed or turned into a refusal. Four reasons, each
+	// checkable at the cited line:
+	//
+	//  1. THE STUB CANNOT REACH A PUBLISHED ROW. checkWallDescription
+	//     (tasks_publish_wall.go) refuses `--publish` when `description` is absent
+	//     or under wallMinDescription = 20 runes, and the server re-refuses at
+	//     EVERY publish door -- Barkpark.Content.LabelSpine.check_description/1,
+	//     api/lib/barkpark/content/label_spine.ex, @min_description 20 -- so
+	//     `bp doc publish task <id> --yes` on a description-less draft is refused
+	//     too. A body that takes this branch is a DRAFT and stays one.
+	//  2. REFUSING HERE WOULD MAKE THE CLI STRICTER THAN ITS STORE. label_spine.ex
+	//     is explicit that "a draft may legitimately carry no `description` and no
+	//     `tags` at all" and that "drafts stay free; publish is the wall".
+	//     Refusing a description-less create breaks the scaffold-a-draft-then-fill
+	//     -it-in path the store deliberately allows -- a worse defect than the
+	//     purposeless drafts it would prevent.
+	//  3. THE 122 ARE HISTORY, NOT A LEAK. They predate that wall; repairing them
+	//     is a ledger backfill (gr-bl-brief-drift-backfill-714, done 5/5), not a
+	//     change to this composer.
+	//  4. DROPPING THE PURPOSE BLOCK INSTEAD WOULD BE PERMANENT. The resync path
+	//     keys on this block by id (@purpose_block_id, Barkpark.Tasks.BriefMirror
+	//     .resync_blocks/3, api/lib/barkpark/tasks/brief_mirror.ex) and only ever
+	//     MAPS over existing blocks -- it never appends a missing one. Omit the
+	//     block and a later `--set description=...` has nothing to resync into, so
+	//     the brief is purposeless forever. The stub is a placeholder the resync
+	//     overwrites the moment a real description lands; an absent block is not.
+	//
+	// The same stub string is composed on the Elixir side by BriefMirror.stub_for/2
+	// for the resync path. Both sites are intentional; keep the wording identical.
+	// Pinned by TestAutoStubRulingStubSurvivesOnlyOnDrafts,
+	// TestAutoStubRulingKeepsThePurposeBlockAsTheResyncAnchor and
+	// TestAutoStubRulingIsRecordedAtTheStubSite in tasks_create_cmd_test.go.
 	if description == "" {
 		description = "Complete the work described by “" + strings.TrimSpace(title) + "” and record verifiable evidence."
 	}
