@@ -223,12 +223,82 @@ const RETRACTION_MARKERS = ["filing wrong", "does not exist", "correction", "the
   // its artifact is not committed, so these fail SAFE: a marker this list is MISSING
   // costs an extra lead, never a missed one. Specimens: task-785908d0a0ccb6bb,
   // spd-bl-primary-checkout-diverged, dr-w13-s6-publish-clock-first-caller.
-  "uncommitted", "untracked", "is gone from", "never landed", "-> absent"];
+  // NOTE: "is gone from" and "-> absent" USED to live here. They are TREE ASSERTIONS, not
+  // evidence, and they are now handled by assertsAbsentAt() below — see the doctrine note
+  // there for why a demotion was the wrong disposal for them.
+  "uncommitted", "untracked", "never landed"];
 export function retractedNear(text, needle) {
   const i = (text || "").indexOf(needle);
   if (i === -1) return false;
   const w = (text.slice(Math.max(0, i - 260), i + needle.length + 260)).toLowerCase();
   return RETRACTION_MARKERS.some((m) => w.includes(m));
+}
+
+// ---------------------------------------------------------------- POLARITY
+//
+// ASK THE TREE, DO NOT TRUST THE PHRASE.
+//
+// "cloud/lib/barkpark_cloud/publish_clock.ex is GONE from origin/main" is not evidence.
+// It is a CLOSER'S ASSERTION ABOUT THE TREE — the one thing a closer is least entitled to
+// be believed about, and precisely the claim this instrument exists to check. Demoting it
+// on the strength of the phrase (which is what RETRACTION_MARKERS did until this commit)
+// is CIRCULAR: the sweep accepted, as grounds for AGREE, exactly the kind of statement it
+// was built to verify.
+//
+// THE DEEPER FAULT THE DEMOTION WAS PAPERING OVER IS POLARITY. The ARM P loop assumes
+// every path a close_reason names is asserted PRESENT, so it fires when the path is
+// ABSENT. A cancel-shaped reason asserts the OPPOSITE. For those citations the truth
+// table is INVERTED:
+//
+//     reason asserts      tree says      verdict
+//     ------------------  -------------  ----------------------------------------
+//     present (default)   present        AGREE
+//     present (default)   absent         DISAGREE-path        (the classic stale close)
+//     ABSENT              absent         AGREE — EARNED, not trusted: git agreed
+//     ABSENT              PRESENT        DISAGREE-present     (NEW: a stale cancel)
+//
+// The bottom row is a detection the instrument could not make AT ALL before this commit,
+// and NOT because of the marker: for a present path the ARM P loop `continue`s before
+// retractedNear is ever consulted. Deleting the markers would therefore NOT have bought
+// this case — only inverting the polarity does. A row that says "X is gone from main"
+// while X sits in the tree is a real stale close, and it used to score AGREE in silence.
+//
+// ADJACENCY, NOT PROXIMITY — AND THIS IS A MEASURED CHOICE, NOT CAUTION. retractedNear's
+// +/-260-char window is right for a DEMOTION (a marker it misses costs one extra lead) and
+// catastrophic for a PROMOTION to DISAGREE (a marker it over-fires manufactures a finding).
+// Measured over the 2026-09-13 closed population (9,609 documents exported, 8,157 closed):
+// a +/-90-char window with these markers produced 12 hits, of which NINE were false — the
+// marker belonged to a neighbouring clause ("nothing remains for this row to build", "the
+// premise is gone from main", a quoted test comment, a grep result about a symbol INSIDE
+// the file). Requiring the claim to sit IMMEDIATELY AFTER the citation, separated only by
+// quoting punctuation, produced 2 hits and ZERO false positives on the same population.
+// So: the marker must FOLLOW the path and must be ADJACENT to it.
+//
+// Two markers from the wider cancel vocabulary are deliberately NOT here. "nothing
+// remains" is boilerplate ("…so nothing remains for this row to build") and appears on 100+
+// closed rows. "returns zero hits" asserts a GREP RESULT INSIDE a file, not the file's
+// absence — `git grep -n rescue … -- api/lib/barkpark/content/writer.ex returns ZERO hits`
+// is a claim ABOUT a file that is very much present. Both would over-fire.
+//
+// "uncommitted" and "untracked" stay in RETRACTION_MARKERS and are NOT polarity markers.
+// They are statements AGAINST the closer's own interest — a stale close never volunteers
+// that its artifact was never committed — so they are evidence about the world, not
+// assertions about the tree, and they are not the class this arm polices.
+const ABSENCE_ASSERTION_MARKERS = ["is gone from", "-> absent", "no longer exists", "is still absent"];
+// punctuation a closer may put between the citation and the claim: a closing backtick, a
+// quote, whitespace. Anything WORDY in the gap means the claim belongs to another clause.
+const RE_ADJACENCY_GAP = /^[`'"\s]*/;
+export function assertsAbsentAt(text, needle) {
+  const lo = (text || "").toLowerCase(), nl = (needle || "").toLowerCase();
+  if (!nl) return null;
+  let i = lo.indexOf(nl);
+  while (i !== -1) {
+    const end = i + nl.length;
+    const tail = lo.slice(end).replace(RE_ADJACENCY_GAP, "");
+    for (const m of ABSENCE_ASSERTION_MARKERS) if (tail.startsWith(m)) return m;
+    i = lo.indexOf(nl, end);
+  }
+  return null;
 }
 const RE_MFA = /\b[A-Z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*\.([a-z_][A-Za-z0-9_?!]*)\/\d\b/g;
 const RE_BACKTICK = /`([A-Za-z_][A-Za-z0-9_.?!]{3,})`/g;
@@ -418,11 +488,30 @@ function adjudicate(d, git) {
     return { verdict: "UNCHECKABLE", line: "(close_reason names no path, no symbol and no sha — ARM BLIND)", advisory };
   }
 
+  const verifiedAbsences = [];
   for (const p of pathCands) {
     const st = git.pathState(p);
+    const present = st === "exact" || st === "suffix" || st === "moved";
+    // POLARITY ARM. This citation is asserted ABSENT, so the tree is asked the INVERTED
+    // question. Note this runs BEFORE the present-`continue` below: that ordering is the
+    // whole new detection, because a present path never reached the demotion at all.
+    const claim = assertsAbsentAt(text, p);
+    if (claim) {
+      if (!present) {
+        // EARNED, NOT TRUSTED. git was asked and git agreed with the closer.
+        verifiedAbsences.push(p);
+        advisory.push(`absence-claim-verified ${p} ("${claim}") — ABSENT at ${git.revSha.slice(0, 9)}, as the reason asserts`);
+        continue;
+      }
+      return {
+        verdict: "DISAGREE-present",
+        line: `asserts ${p} "${claim}" the tree — but it is PRESENT at ${git.revSha.slice(0, 9)} (${st}${st === "moved" ? ` -> ${git.movedTo(p)}` : ""})`,
+        advisory,
+      };
+    }
     // "moved" is PRESENT, not absent: the tree carries the file under a name that gained
     // or lost a directory segment. Resolving it here is what keeps the row CHECKABLE.
-    if (st === "exact" || st === "suffix" || st === "moved") continue;
+    if (present) continue;
     // THE RETRACTION BLIND SPOT: a close_reason that names an absent path IN ORDER TO
     // CORRECT SOMEBODY is indistinguishable, to any grep, from one that names it because
     // the close is stale. Two of the eight raw findings were exactly this ("Filing wrong:
@@ -463,6 +552,16 @@ function adjudicate(d, git) {
   }
 
   const anchorPath = pathCands.find((p) => git.pathState(p) !== "absent");
+  // A row whose only anchor is a VERIFIED ABSENCE must not be reported as "present at
+  // <sha>" — that line would assert the opposite of what was checked. It agrees because
+  // the tree was asked and matched the claim, and the line has to say exactly that.
+  if (!anchorPath && verifiedAbsences.length) {
+    return {
+      verdict: "AGREE",
+      line: `absence claim EARNED: ${verifiedAbsences[0]} is ABSENT at ${git.revSha.slice(0, 9)}, as the reason asserts`,
+      advisory,
+    };
+  }
   const anchor =
     anchorPath ? `path ${anchorPath} (${git.pathState(anchorPath)}${git.pathState(anchorPath) === "moved" ? ` -> ${git.movedTo(anchorPath)}` : ""})` :
     symbols[0] ? `symbol ${symbols[0]}` :
@@ -618,11 +717,94 @@ function selftest() {
   eq("self-declared: `uncommitted` demotes a path whose closer says it is not committed",
      retractedNear("Probes are on branch killswitch-probe (worktree .claude/worktrees/killswitch-probe), uncommitted. api/killswitch_probe.exs is the repro.",
                    "api/killswitch_probe.exs"), true);
-  eq("cancel-shaped: `is GONE from origin/main` demotes the path it exists to report",
-     retractedNear("cloud/lib/barkpark_cloud/publish_clock.ex is GONE from origin/main, removed by a5260f609a (#11083)",
-                   "cloud/lib/barkpark_cloud/publish_clock.ex"), true);
   eq("the added markers do NOT demote a plain shipping claim",
      retractedNear("shipped the guard at scripts/pr-task-gate.sh and wired it into CI", "scripts/pr-task-gate.sh"), false);
+
+  // --- POLARITY: THE TREE-ASSERTION CLASS IS ASKED, NOT TRUSTED (task-e3e693ec0be90597).
+  // "X is GONE from origin/main" is a closer's assertion ABOUT THE TREE, which is the one
+  // claim a closer is least entitled to be believed about. It used to be a demotion
+  // marker; demoting it meant the sweep accepted, as grounds for AGREE, exactly the kind
+  // of statement it exists to verify. These cases pin the replacement: adjacency-gated
+  // detection, then an INVERTED check against git.
+
+  // (1) THE MARKER NO LONGER DEMOTES. This is the retired behaviour, pinned so a later
+  // edit cannot quietly restore the circularity by putting the phrase back in the list.
+  eq("polarity: `is gone from` is NO LONGER a demotion marker — the tree decides now",
+     retractedNear("cloud/lib/barkpark_cloud/publish_clock.ex is GONE from origin/main, removed by a5260f609a (#11083)",
+                   "cloud/lib/barkpark_cloud/publish_clock.ex"), false);
+  eq("polarity: `-> ABSENT` is NO LONGER a demotion marker either",
+     retractedNear("`git cat-file -e origin/main:scripts/format-drift-ceiling.sh` -> ABSENT", "scripts/format-drift-ceiling.sh"), false);
+
+  // (2) DETECTION. The real specimens, verbatim from the two live rows that carry the
+  // shape: dr-w13-s6-publish-clock-first-caller and hg-w1-format-drift-ceiling.
+  eq("polarity: an absence assertion is DETECTED on the live `is GONE from` specimen",
+     assertsAbsentAt("cloud/lib/barkpark_cloud/publish_clock.ex is GONE from origin/main, removed by a5260f609a (#11083)",
+                     "cloud/lib/barkpark_cloud/publish_clock.ex"), "is gone from");
+  eq("polarity: a closing backtick between citation and claim is still ADJACENT",
+     assertsAbsentAt("`git cat-file -e origin/main:scripts/format-drift-ceiling.sh` -> ABSENT; next",
+                     "scripts/format-drift-ceiling.sh"), "-> absent");
+  eq("polarity: `no longer exists` and `is still absent` are the same claim shape",
+     [assertsAbsentAt("scripts/x.sh no longer exists on main", "scripts/x.sh"),
+      assertsAbsentAt("scripts/x.sh is still absent at HEAD", "scripts/x.sh")],
+     ["no longer exists", "is still absent"]);
+  eq("polarity: a plain citation asserts nothing about absence",
+     assertsAbsentAt("the guard lives in scripts/pr-task-gate.sh and is green", "scripts/pr-task-gate.sh"), null);
+
+  // (3) ADJACENCY, MUTATION-PINNED. Widening the gap to retractedNear's +/-260 chars makes
+  // all four of these fire, and every one of them is FALSE — measured: a +/-90-char window
+  // over the 2026-09-13 closed population produced 12 hits of which NINE were this shape.
+  // Each of these manufactured a DISAGREE that a human would have to throw out.
+  eq("polarity: a marker in a NEIGHBOURING clause does not attach (the premise is gone, not the file)",
+     assertsAbsentAt("the premise is gone from main. Control grep on origin/main: cloud/test/barkpark_cloud/payload_key_set_census_test.exs carries ZERO notes",
+                     "cloud/test/barkpark_cloud/payload_key_set_census_test.exs"), null);
+  eq("polarity: a marker BEFORE the citation does not attach",
+     assertsAbsentAt("NO LONGER EXISTS ANYWHERE. The criterion evidence states that the final line of docs/INDEX.md reads",
+                     "docs/INDEX.md"), null);
+  eq("polarity: the NEXT command's path is not covered by the PREVIOUS command's verdict",
+     assertsAbsentAt("`git cat-file -e origin/main:scripts/format-drift-ceiling.sh` -> ABSENT; `git show origin/main:.github/workflows/elixir.yml | grep -n advisory` -> line 198",
+                     ".github/workflows/elixir.yml"), null);
+  eq("polarity: a line-number suffix breaks adjacency (a quoted test comment is not a claim)",
+     assertsAbsentAt("api/test/barkpark/studio_chat/stream_segments_test.exs:459  \"the swallow is gone from the converter\"",
+                     "api/test/barkpark/studio_chat/stream_segments_test.exs"), null);
+
+  // (4) THE TWO MARKERS DELIBERATELY EXCLUDED FROM THE POLARITY SET. "nothing remains" is
+  // boilerplate on 100+ closed rows; "returns zero hits" asserts a grep result INSIDE a
+  // file that is very much present. Both are adjacent in real prose, so only their
+  // ABSENCE FROM THE MARKER SET stops them — which is what this pins.
+  eq("polarity: `nothing remains` is boilerplate, NOT an absence assertion about the path",
+     assertsAbsentAt("Sweep verdict: scripts/absent-context-census.sh nothing remains for this row to build",
+                     "scripts/absent-context-census.sh"), null);
+  eq("polarity: `returns zero hits` is a claim INSIDE a present file, not about its existence",
+     assertsAbsentAt("git grep -n rescue origin/main -- api/lib/barkpark/content/writer.ex returns ZERO hits",
+                     "api/lib/barkpark/content/writer.ex"), null);
+
+  // (5) THE INVERTED TRUTH TABLE, END TO END, against a FIXTURE GIT. Absent-and-asserted
+  // -absent is AGREE and must say WHY; present-and-asserted-absent is the new DISAGREE.
+  // The present arm has NO live specimen in the 2026-09-13 population — it is constructed
+  // here, and it is the whole reason this commit exists: before it, a row claiming a file
+  // was gone while the file sat in the tree scored AGREE in silence, because ARM P
+  // `continue`d on a present path before any demotion was consulted.
+  const FAKEGIT = {
+    revSha: "abcdef1234567890",
+    isRepoRoot: (seg) => ["scripts", "cloud", "api"].includes(seg),
+    pathState: (p) => (p === "scripts/pr-task-gate.sh" ? "exact" : "absent"),
+    movedTo: () => null,
+    hasSymbol: () => true,
+    shaState: () => "ancestor",
+    deletedBy: () => null,
+  };
+  const gone = adjudicate({ close_reason: "cancelled: scripts/format-drift-ceiling.sh is gone from origin/main" }, FAKEGIT);
+  eq("polarity: asserted ABSENT + tree ABSENT = AGREE, and the line says EARNED not present",
+     [gone.verdict, /absence claim EARNED/.test(gone.line), /present at/.test(gone.line)], ["AGREE", true, false]);
+  eq("polarity: the earned AGREE records the claim it verified in an advisory",
+     gone.advisory.some((a) => a.startsWith("absence-claim-verified scripts/format-drift-ceiling.sh")), true);
+  const stillThere = adjudicate({ close_reason: "cancelled: scripts/pr-task-gate.sh is gone from origin/main, nothing to do" }, FAKEGIT);
+  eq("polarity: asserted ABSENT + tree PRESENT = DISAGREE-present (the NEW detection)",
+     [stillThere.verdict, /PRESENT at/.test(stillThere.line)], ["DISAGREE-present", true]);
+  eq("polarity: an ordinary stale close is UNCHANGED — asserted present, tree absent, DISAGREE-path",
+     adjudicate({ close_reason: "shipped the guard at scripts/format-drift-ceiling.sh" }, FAKEGIT).verdict, "DISAGREE-path");
+  eq("polarity: an ordinary good close is UNCHANGED — asserted present, tree present, AGREE",
+     adjudicate({ close_reason: "shipped the guard at scripts/pr-task-gate.sh" }, FAKEGIT).verdict, "AGREE");
 
   // THE CLASSES DELIBERATELY LEFT AS FINDINGS. Demoting these would buy silence:
   // CONSOLIDATED-AWAY is exactly the shape a genuinely stale close has (the close says
@@ -716,7 +898,7 @@ console.log(`# repo         ${repo}`);
 console.log("");
 
 let advisoryTotal = 0;
-const counts = { AGREE: 0, UNCHECKABLE: 0, "DISAGREE-path": 0, "DISAGREE-symbol": 0, "DISAGREE-sha": 0 };
+const counts = { AGREE: 0, UNCHECKABLE: 0, "DISAGREE-path": 0, "DISAGREE-present": 0, "DISAGREE-symbol": 0, "DISAGREE-sha": 0 };
 const findings = [];
 for (const d of sample) {
   const { verdict, line, advisory: adv } = adjudicate(d, git);
@@ -729,7 +911,7 @@ for (const d of sample) {
 }
 
 const checkable = sample.length - counts.UNCHECKABLE;
-const dis = counts["DISAGREE-path"] + counts["DISAGREE-symbol"] + counts["DISAGREE-sha"];
+const dis = counts["DISAGREE-path"] + counts["DISAGREE-present"] + counts["DISAGREE-symbol"] + counts["DISAGREE-sha"];
 console.log("");
 console.log(`# ---- counts`);
 console.log(`# sampled        ${sample.length}`);
@@ -737,6 +919,7 @@ console.log(`# UNCHECKABLE    ${counts.UNCHECKABLE}   (the named blind spot: no 
 console.log(`# checkable      ${checkable}`);
 console.log(`# AGREE          ${counts.AGREE}`);
 console.log(`# DISAGREE-path  ${counts["DISAGREE-path"]}`);
+console.log(`# DISAGREE-pres  ${counts["DISAGREE-present"]}   (reason asserts the path is GONE; the tree still carries it — the INVERTED polarity)`);
 console.log(`# DISAGREE-sym   ${counts["DISAGREE-symbol"]}`);
 console.log(`# DISAGREE-sha   ${counts["DISAGREE-sha"]}   (ARM C is ADVISORY — see the demotion note in adjudicate())`);
 console.log(`# advisory notes ${advisoryTotal}   (artifact paths, retracted paths/symbols, branch + unresolvable shas — printed, never counted)`);
