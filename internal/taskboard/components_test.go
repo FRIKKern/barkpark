@@ -144,14 +144,34 @@ func TestRoleForMapping(t *testing.T) {
 			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-1 * time.Minute)}},
 			"info",
 		},
+		// The lease bands are the SERVER's 2700s (:task_lease_ttl_seconds), not
+		// the 5-minute constant this table used to encode: -4m/-6m were the
+		// WARN/DANGER cases only because the client had the lease wrong by a
+		// factor of nine (task-f30dab8c54c605e6). They are now the control that
+		// a claim well inside the real lease stays INFO.
+		{
+			"claim 4 minutes in is still info under the 45m lease",
+			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-4 * time.Minute)}},
+			"info",
+		},
+		{
+			"claim 6 minutes in is still info under the 45m lease",
+			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-6 * time.Minute)}},
+			"info",
+		},
 		{
 			"claim past 70% lease is warn",
-			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-4 * time.Minute)}},
+			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-32 * time.Minute)}},
 			"warn",
 		},
 		{
 			"claim past lease is danger",
-			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-6 * time.Minute)}},
+			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-46 * time.Minute)}},
+			"danger",
+		},
+		{
+			"a SERVER-SENT short lease wins over the default",
+			Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: testNow.Add(-6 * time.Minute), LeaseSeconds: 300}},
 			"danger",
 		},
 	}
@@ -442,8 +462,8 @@ func TestCriteriaLadderPulseSpinsExactlyTheNamedRung(t *testing.T) {
 	if p, _ := criteriaLadder(task, testNow, 0); p != "✓○⠋" {
 		t.Errorf("pulse on the missed rung = %q, want %q", p, "✓○⠋")
 	}
-	// A STALE pulse (older than the lease TTL) spins nothing.
-	task.Claim.Now = &ClaimPulse{Text: "long gone", At: testNow.Add(-leaseTTL), Criterion: 1}
+	// A STALE pulse (older than the PULSE horizon) spins nothing.
+	task.Claim.Now = &ClaimPulse{Text: "long gone", At: testNow.Add(-pulseTTL), Criterion: 1}
 	if p, _ := criteriaLadder(task, testNow, 0); p != "✓○!" {
 		t.Errorf("stale pulse ladder = %q, want no spinner: %q", p, "✓○!")
 	}

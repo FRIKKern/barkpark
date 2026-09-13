@@ -92,6 +92,7 @@ on:
       # run on THIS PR to catch a TUI divergence from the new projection.
       - "internal/pdrender/testdata/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/test/support/fixtures/code-block-lang-parity.json"
       # PRE-EXISTING RATCHET RED on origin/main 038d310fce (#17729), not
       # introduced here: internal/pdrender/inline_code_source_parity_test.go
       # reads this fixture, so an edit to it must dispatch the Go suite.
