@@ -1040,6 +1040,21 @@ defmodule PDS.Census do
     {:post, "/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert, :status_only_receipt},
     {:post, "/v1/shares", "BarkparkWeb.ShareController", :create, :status_only_receipt},
     {:post, "/v1/shares/links", "BarkparkWeb.ShareLinkController", :mint, :status_only_receipt},
+    # `post /v1/shares/media` — the one-verb media-publish affordance behind `bp media
+    # publish` and the Studio media-library action. SAME SHAPE AND SAME CLASS AS ITS
+    # SIBLING `post /v1/shares` -> :create one row above: do_publish_media/2 renders the
+    # `{:ok, share}` the WRITE returned (`share_json(share, "stored")`, plus the copy
+    # block MediaVisibilityCopy.public_option/3 derives from that same stored row) and
+    # spells no `ok: true` literal anywhere, so this lens keys on nothing here and the
+    # action carries no roster anchor. That — and only that — is what
+    # :status_only_receipt claims post-wave-40. It is NOT :repaired_computed_receipt
+    # (this route is NEW; there is no laundered receipt here that a human repaired), NOT
+    # :liveview_handle_event (it is a controller action, not a handle_event/3 clause),
+    # and NOT :selftest_fixture (the module is real and in this corpus). The receipt IS
+    # store-derived and pinned end-to-end by
+    # api/test/barkpark_web/media_share_affordance_test.exs; promoting it to a ROSTER row
+    # is the follow-up, not this row.
+    {:post, "/v1/shares/media", "BarkparkWeb.ShareController", :publish_media, :status_only_receipt},
     {:post, "/v1/shares/tokens", "BarkparkWeb.ShareController", :mint_token, :status_only_receipt},
     {:post, "/v1/status/incidents", "BarkparkWeb.StatusController", :create_incident, :status_only_receipt},
     {:post, "/v1/status/incidents/:id/resolve", "BarkparkWeb.StatusController", :resolve_incident, :status_only_receipt},
@@ -1216,6 +1231,7 @@ defmodule PDS.Census do
     {:post, "/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert} => {"BarkparkWeb.SchemaController.upsert/2", 1, "130638547"},
     {:post, "/v1/shares", "BarkparkWeb.ShareController", :create} => {"BarkparkWeb.ShareController.create/2", 1, "79903332"},
     {:post, "/v1/shares/links", "BarkparkWeb.ShareLinkController", :mint} => {"BarkparkWeb.ShareLinkController.mint/2", 1, "80845768"},
+    {:post, "/v1/shares/media", "BarkparkWeb.ShareController", :publish_media} => {"BarkparkWeb.ShareController.publish_media/2", 1, "87108197"},
     {:post, "/v1/shares/tokens", "BarkparkWeb.ShareController", :mint_token} => {"BarkparkWeb.ShareController.mint_token/2", 1, "22269926"},
     {:post, "/v1/status/incidents", "BarkparkWeb.StatusController", :create_incident} => {"BarkparkWeb.StatusController.create_incident/2", 1, "31495109"},
     {:post, "/v1/status/incidents/:id/resolve", "BarkparkWeb.StatusController", :resolve_incident} => {"BarkparkWeb.StatusController.resolve_incident/2", 1, "110488227"},
