@@ -132,6 +132,8 @@ const surfaceHtml = renderPortableDocument(post.content)
 
 **Avoiding double hydration:** `hydratePortableDoc` stamps every mount point it touches (`data-processed`/`data-asciicast-done`/`data-hydrated`), so a repeat call — React Strict Mode's dev double-invoke, an Astro View Transitions re-run, a parent re-render — is a no-op on already-hydrated nodes.
 
+**A recording that will not load:** a cast whose `data-cast-src` 404s, is blocked by CSP/CORS, or is unreachable in an air-gapped reader makes `asciinema-player` paint a bordered box holding a single 💥 glyph. Hydration detects that and replaces it with an honest fallback — "Opptaket kunne ikke lastes." plus a link to the raw recording — leaving the figure's `<figcaption>` in place, and stamps the mount `data-asciicast-failed="true"`. The returned counts say so too: `asciicast` is the number of recordings that actually **loaded**, with `asciicastMounted` (players attempted) and `asciicastFailed` beside it, so `asciicast + asciicastFailed === asciicastMounted`.
+
 **Error behavior:** `.catch(() => {})` is deliberate, not an oversight — the pre-hydration server markup is already valid, readable content, so a failed dynamic `import('mermaid')`/`import('asciinema-player')` (offline, CDN hiccup, ad-blocker) must degrade to that markup, never to a broken page.
 
 **Cleanup:** none needed. Hydration only mutates the DOM subtree it scans; it registers no listener, timer, or subscription outside it, so there is nothing to unregister on unmount — removing the node removes everything hydration attached.
