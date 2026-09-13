@@ -17,20 +17,17 @@ defmodule BarkparkWeb.Contract.ErrorEnvelopeRequestIdParityTest do
   `BarkparkWeb.Contract.RequestIdTest` already does exactly this for the CORE
   data paths, and these are the SSO/plugin paths that were outside it.
 
-  Scope note (task-bb83570ba0f6f9f2 C3): the five sites below are the #13642 set
-  and nothing else. The separate census of hand-built code-keyed error maps still
-  in `api/lib` belongs to task-8737e2d7ff1884e0 and is NOT proven by this file.
+  Scope note, SUPERSEDED 2026-09-13 (task-8737e2d7ff1884e0). The note that stood
+  here said the census of hand-built `error: %{code:` maps "belongs to
+  task-8737e2d7ff1884e0 and is NOT proven by this file", and quoted 83 hits
+  across 22 files. That sweep has now landed: all 137 of them (the row's
+  single-line grep was undercounting by 54 — the same envelope written across
+  two lines does not match that spelling) route through
+  `BarkparkWeb.ErrorResponse`, and
+  `BarkparkWeb.Contract.ErrorEnvelopeForkGuardTest` fails the build on the
+  138th. The `#13642` set below is unchanged; the block after it is the
+  8737 sweep's representative sample, on the three highest-count files.
 
-  The two sets are DISJOINT, and mechanically so — 8737's census is keyed on the
-  spelling `error: %{code:`, which by construction cannot match what #13642 fixed
-  (bare strings `error: "..."` and `type`-keyed maps `error: %{type:`). Re-run it:
-
-      grep -rn 'error: %{code:' lib --include='*.ex' | grep -v error_response.ex
-
-  83 hits across 22 files, and ZERO of them are in social_controller.ex,
-  oidc_controller.ex, saml_controller.ex, sso_routing_controller.ex or
-  onixedit/web/export_controller.ex. So this file closes nothing of 8737's, and
-  8737's eventual fix will close nothing of this row's.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -128,6 +125,66 @@ defmodule BarkparkWeb.Contract.ErrorEnvelopeRequestIdParityTest do
 
       assert resp.status == 404
       body = assert_request_id_parity(resp, "onixedit/web/export_controller.ex send_404/1")
+      assert body["error"]["code"] == "not_found"
+    end
+  end
+
+  describe "the ErrorResponse sweep (task-8737e2d7ff1884e0) — top-count files" do
+    @sweep_admin_token "barkpark-sweep-parity-admin-token"
+
+    setup do
+      {:ok, _} =
+        Auth.create_token(@sweep_admin_token, "sweep-parity-admin", "test", [
+          "read",
+          "write",
+          "admin"
+        ])
+
+      :ok
+    end
+
+    # bulldocs_ingest_controller.ex — 70 of the 137 sites were in this one file.
+    # This arm also exercises `emit_fields/3`'s reason for existing: the refusal
+    # carries `parameter` and `fenced_route` as TOP-LEVEL siblings of `code`,
+    # which is the shape the route's consumers already read, so the sweep had to
+    # add request_id WITHOUT relocating them under `details`.
+    test "bulldocs_ingest_controller: unfenced POST with ifRev", %{conn: conn} do
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer " <> @sweep_admin_token)
+        |> post("/v1/paperflow/papers", %{"ifRev" => "rev-1"})
+
+      assert resp.status == 400
+
+      body =
+        assert_request_id_parity(resp, "bulldocs_ingest_controller.ex refuse_unfenced_if_rev/2")
+
+      assert body["error"]["code"] == "malformed"
+
+      assert body["error"]["parameter"] == "ifRev",
+             "the sweep must not relocate a top-level sibling under details"
+    end
+
+    # chat_host_controller.ex — 8 sites. `enroll/2`'s catch-all is FULLY
+    # ANONYMOUS, so this is the cheapest reachable one.
+    test "chat_host_controller: enroll with no enrollment token", %{conn: conn} do
+      resp = post(conn, "/v1/chat-host/enroll", %{})
+
+      assert resp.status == 401
+      body = assert_request_id_parity(resp, "chat_host_controller.ex unauthorized_enrollment/1")
+      assert body["error"]["code"] == "invalid_enrollment"
+    end
+
+    # access_controller.ex — 4 sites. `show/2` on a grant id that does not
+    # exist: the FIRST rung of the three-rung denial ladder.
+    test "access_controller: show a grant that does not exist", %{conn: conn} do
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer " <> @sweep_admin_token)
+        |> get("/v1/access/00000000-0000-0000-0000-000000000000")
+
+      assert resp.status == 404
+      body = assert_request_id_parity(resp, "access_controller.ex not_found/1")
       assert body["error"]["code"] == "not_found"
     end
   end

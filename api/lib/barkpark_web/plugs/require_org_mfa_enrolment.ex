@@ -17,7 +17,9 @@ defmodule BarkparkWeb.Plugs.RequireOrgMfaEnrolment do
   query for unenrolled users and changes NOTHING observable — the opt-in,
   zero-tax contract.
   """
-  import Plug.Conn
+  # No `import Plug.Conn`: the refusal's `put_status` + `halt` now live inside
+  # `BarkparkWeb.ErrorResponse`, which is the point — a gate that builds its own
+  # envelope is a gate that can forget `request_id`, and this one had.
   alias Barkpark.Accounts
   alias Barkpark.Tenancy
 
@@ -66,17 +68,16 @@ defmodule BarkparkWeb.Plugs.RequireOrgMfaEnrolment do
       metadata: %{"reason" => "org_require_mfa", "path" => conn.request_path}
     })
 
+    # One shared emitter -> the 403 carries request_id for log correlation. The
+    # route-specific `hint` below is kept verbatim: `Errors.stamp/2` only fills a
+    # hint in when the envelope has none, so an arm that spoke for itself wins.
     conn
-    |> put_status(403)
-    |> Phoenix.Controller.json(%{
-      error: %{
-        code: "mfa_enrolment_required",
-        message: "an organization you belong to requires MFA — enrol a factor to continue",
-        hint:
-          "enrol TOTP via POST /v1/auth/mfa/enroll + /verify, or a passkey via " <>
-            "POST /v1/auth/webauthn/register/challenge + /register, then retry"
-      }
+    |> BarkparkWeb.ErrorResponse.emit_fields(403, %{
+      code: "mfa_enrolment_required",
+      message: "an organization you belong to requires MFA — enrol a factor to continue",
+      hint:
+        "enrol TOTP via POST /v1/auth/mfa/enroll + /verify, or a passkey via " <>
+          "POST /v1/auth/webauthn/register/challenge + /register, then retry"
     })
-    |> halt()
   end
 end
