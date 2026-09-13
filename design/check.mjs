@@ -965,6 +965,85 @@ for (const p of PAIRINGS) {
 if (failed === failedBeforeH)
   console.log(`  ok   ${PAIRINGS.length} curated pairings × ${Object.keys(contrastThemes).length} themes × 2 modes = ${pairChecks} checks, all ≥ AA (text 4.5 / nontext 3.0)`);
 
+// ── Part H (verdict arm): the loss/peace inks on the READING page ────────────
+// The pairings above are Studio-shell selectors read out of root.html.heex. The
+// VERDICT pair (color.verdict — pe-bl-verdict-accent-tokens) never appears there:
+// it lands inside `.bp-paper-surface`, so its curated pairings are read out of
+// api/assets/paper-surface/paper-surface.css instead. Same gate, same AA floor,
+// different sheet.
+//
+// TWO grounds per ink, and both are required:
+//   • ink on its OWN soft ground — a verdict callout fills the soft wash and
+//     paints the text/rail in the ink.
+//   • ink on the bare reading page (paper.surface.bg) — a verdict stat VALUE
+//     paints the digits straight onto the tile with no wash under them.
+// derive.mjs walks the ink against soft only (soft is the worse ground in both
+// modes). That is an ARGUMENT; this arm is the MEASUREMENT, and it measures the
+// page pairing separately so the argument cannot quietly stop being true.
+//
+// The foreground token is read LIVE out of the committed rule body, exactly as
+// ruleColor() does for the Studio sheet — so deleting or re-pointing
+// `.bp-stat__v--loss` / `.bp-callout--peace` reds HERE. That is what makes these
+// tokens consumed rather than merely declared: the named test that fails if the
+// consumption goes away is `node design/check.mjs` Part H, this arm.
+{
+  const surfaceCssH = readFileSync(join(repoRoot, "api/assets/paper-surface/paper-surface.css"), "utf8");
+  // Same shape as ruleColor(), pointed at the paper-surface sheet.
+  const surfaceRuleColor = (sel) => {
+    const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m = surfaceCssH.match(new RegExp(`(?:^|\\n)[ \\t]*${esc}[ \\t]*\\{([\\s\\S]*?)\\}`));
+    if (!m) return { err: `rule not found in paper-surface.css: ${sel}` };
+    const c = m[1].match(/color:\s*var\((--[\w-]+)(?:\s*,[^)]*)?\)/);
+    if (!c) return { err: `no "color: var(--…)" in rule ${sel}` };
+    return { token: c[1] };
+  };
+  // --bp-verdict-* / --paper-* CSS var → derive SLOTS slot (mode appended below).
+  const VERDICT_SLOT = {
+    "--bp-verdict-loss": "verdict.loss",
+    "--bp-verdict-peace": "verdict.peace",
+    "--bp-verdict-loss-soft": "verdict.loss-soft",
+    "--bp-verdict-peace-soft": "verdict.peace-soft",
+    "--paper-bg": "paper.surface.bg",
+    "--paper-bg-deep": "paper.surface.bg-deep",
+  };
+  const VERDICT_PAIRINGS = [
+    { sel: ".bp-paper-surface .bp-callout--loss",  surface: "--bp-verdict-loss-soft",  kind: "text", where: "paper-surface.css .bp-callout--loss — the card paints its own soft wash under the ink" },
+    { sel: ".bp-paper-surface .bp-callout--peace", surface: "--bp-verdict-peace-soft", kind: "text", where: "paper-surface.css .bp-callout--peace — the card paints its own soft wash under the ink" },
+    { sel: ".bp-paper-surface .bp-stat__v--loss",  surface: "--paper-bg-deep",         kind: "text", where: "paper-surface.css .bp-stat — the KPI tile's ground is --paper-bg-deep, no wash under the digits" },
+    { sel: ".bp-paper-surface .bp-stat__v--peace", surface: "--paper-bg-deep",         kind: "text", where: "paper-surface.css .bp-stat — the KPI tile's ground is --paper-bg-deep, no wash under the digits" },
+    { sel: ".bp-paper-surface .bp-stat__v--loss",  surface: "--paper-bg",              kind: "text", where: "paper-surface.css — a bare stat outside a tile falls back to the page ground" },
+    { sel: ".bp-paper-surface .bp-stat__v--peace", surface: "--paper-bg",              kind: "text", where: "paper-surface.css — a bare stat outside a tile falls back to the page ground" },
+  ];
+  let verdictChecks = 0;
+  for (const p of VERDICT_PAIRINGS) {
+    const fg = surfaceRuleColor(p.sel);
+    if (fg.err) { fail(`  Part H FAIL: ${p.sel} — ${fg.err}`); continue; }
+    const fgSlot = VERDICT_SLOT[fg.token];
+    const bgSlot = VERDICT_SLOT[p.surface];
+    if (!fgSlot) { fail(`  Part H FAIL: ${p.sel} — fg token ${fg.token} has no VERDICT_SLOT mapping (the rule stopped reading a verdict ink)`); continue; }
+    if (!bgSlot) { fail(`  Part H FAIL: ${p.sel} — surface token ${p.surface} has no VERDICT_SLOT mapping`); continue; }
+    const need = AA_THRESH[p.kind];
+    for (const [name, values] of Object.entries(contrastThemes)) {
+      for (const mode of ["light", "dark"]) {
+        const fgv = values[`${fgSlot}.${mode}`];
+        const bgv = values[`${bgSlot}.${mode}`];
+        if (fgv === undefined || bgv === undefined) {
+          fail(`  Part H FAIL: ${p.sel} — ${name}/${mode} missing slot (${fgSlot}=${fgv}, ${bgSlot}=${bgv})`);
+          continue;
+        }
+        let ratio;
+        try { ratio = contrast(fgv, bgv); }
+        catch (e) { fail(`  Part H FAIL: ${p.sel} — ${name}/${mode} contrast() threw (${e.message})`); continue; }
+        verdictChecks++;
+        if (ratio < need - 1e-9)
+          fail(`  Part H FAIL: ${p.sel} (${fg.token} on ${p.surface}, ${p.kind}) = ${ratio.toFixed(2)} < ${need} in ${name}/${mode} — ${p.where}`);
+      }
+    }
+  }
+  if (failed === failedBeforeH)
+    console.log(`  ok   verdict arm: ${VERDICT_PAIRINGS.length} loss/peace pairings (ink on soft wash + ink on page) × ${Object.keys(contrastThemes).length} themes × 2 modes = ${verdictChecks} checks, all ≥ AA 4.5`);
+}
+
 // ── Part I: the write fence's own predicates, proven able to fail ────────────
 // Part A above is the fence's REPORTING half; `run()` in emit.mjs is its
 // BLOCKING half. Both rest on exactly two predicates — attribute() and

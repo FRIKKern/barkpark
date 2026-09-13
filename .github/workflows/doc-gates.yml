@@ -148,6 +148,15 @@ on:
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
       - "internal/pdrender/tokens_gen.go"
+      # tlv-bl-js-vocab-generator: the two JS/TS status-vocabulary artifacts now
+      # emitted from design/status-manifest.json (they replaced the hand copies
+      # status-manifest-check.sh Part 5 used to byte-check). The web one rides
+      # `web/**` below, but js/packages/** matched NO glob in this workflow — so a
+      # hand-edit of the react generated file would never have run design/check.mjs
+      # Part A, the ONE gate that now catches it. Named explicitly, both of them,
+      # so neither depends on a broader glob staying broad.
+      - "js/packages/react/src/status-vocab.gen.ts"
+      - "web/lib/status-ladder.gen.ts"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
       # Studio literal-color gate — Studio chrome must consume emitted tokens.
       - "api/lib/barkpark_web/**/*.ex"
@@ -465,6 +474,15 @@ on:
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
       - "internal/pdrender/tokens_gen.go"
+      # tlv-bl-js-vocab-generator: the two JS/TS status-vocabulary artifacts now
+      # emitted from design/status-manifest.json (they replaced the hand copies
+      # status-manifest-check.sh Part 5 used to byte-check). The web one rides
+      # `web/**` below, but js/packages/** matched NO glob in this workflow — so a
+      # hand-edit of the react generated file would never have run design/check.mjs
+      # Part A, the ONE gate that now catches it. Named explicitly, both of them,
+      # so neither depends on a broader glob staying broad.
+      - "js/packages/react/src/status-vocab.gen.ts"
+      - "web/lib/status-ladder.gen.ts"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
       # Studio literal-color gate — Studio chrome must consume emitted tokens.
       - "api/lib/barkpark_web/**/*.ex"
@@ -881,13 +899,13 @@ jobs:
       #
       # --selftest runs FIRST, IN THIS SAME STEP (cgsi-s8 idiom; the selftest
       # itself is cgsi-bl-status-manifest-no-selftest). This gate was wired BARE
-      # here — it had no --selftest to run, so none of its five parts had ever
-      # been shown to RED and CI could never catch a weakened one. The 15-arm
+      # here — it had no --selftest to run, so none of its parts had ever
+      # been shown to RED and CI could never catch a weakened one. The 13-arm
       # harness copies the gate and the six files it reads into a throwaway
       # tree, plants one violation per part in turn (a drifted tone value, an
       # orphan .bp-g--<role> class, a missing one, a drifted Go roleGlyph, a
-      # drifted Go roleLabel, a reordered STATUS_ROLES entry, a drifted mobile
-      # ROLE_LABEL), asserts the REAL gate exits 1 naming that part, and
+      # drifted Go roleLabel, a drifted mobile ROLE_LABEL), asserts the REAL gate
+      # exits 1 naming that part, and
       # restores the planted file to prove it greens again. It plants nothing in
       # this repo. Same step, not a later one: Actions skips a job's remaining
       # steps once one fails, so a trailing tripwire never runs on exactly the

@@ -23,8 +23,12 @@
 # which is how registry entries are matched) — plus a scratch.env of the same
 # shape. Every OTHER verb under test is the real one, unmodified.
 #
-# NO CI COVERAGE: nothing under .github/workflows runs scripts/pds-*. This is a
-# LOCAL harness test. Run it by hand:  bash scripts/pds-scratch-target_test.sh
+# CI COVERAGE: .github/workflows/shell-harnesses.yml runs this file on an
+# ubuntu-latest runner (job "PDS census / parity / scratch-target harnesses",
+# `run: bash scripts/pds-scratch-target_test.sh`). It is therefore NOT a
+# macOS-only harness, and no assertion here may pin a value that only one of
+# the two platforms produces. Run it by hand too:
+#   bash scripts/pds-scratch-target_test.sh
 #
 # PDS_SCRATCH_TEST_SCRIPT points the whole file at a different copy of the
 # script — that is how the pre-fix demonstration is taken (point it at
@@ -212,12 +216,54 @@ check_lacks    "…root D is not offered" "$D" "$out"
 hr "7. the token producer is unbounded-reader-free, and the mint grants a membership"
 
 # THE MECHANISM, proven deterministically rather than raced. An infinite
-# producer piped into a truncating reader returns 141 under pipefail — that is
-# the class the old `tr -dc ... </dev/urandom | head -c 40` belonged to, and it
-# is why the fix is "do not truncate a producer", not "ignore the stderr line".
+# producer piped into a truncating reader POISONS the pipeline status under
+# pipefail — that is the class the old `tr -dc ... </dev/urandom | head -c 40`
+# belonged to, and it is why the fix is "do not truncate a producer", not
+# "ignore the stderr line".
+#
+# THIS CONTROL DOES NOT PIN AN EXIT NUMBER, AND MUST NOT. A broken pipe has two
+# platform spellings and either literal is a lie on the other host:
+#   · BSD/macOS: the producer takes the DEFAULT SIGPIPE and dies — rc 141,
+#     empty stderr (measured: `yes a | head -c 4` under pipefail → 141).
+#   · GNU coreutils on the Linux runner: the write error is DIAGNOSED, not
+#     fatal — rc 1 with "…: Broken pipe" on stderr. Observed at source in
+#     shell-harnesses run 34762021418, job 103737859945:
+#       "FAIL: CONTROL: an infinite producer truncated by `head` exits 141
+#        under pipefail — expected '141', got '1'"
+#     and in the original incident's own words, "tr: write error: Broken pipe".
+# Accepting "141 or 1" would be the weaker repair: 1 is the exit status of an
+# ORDINARY failure, so the control could no longer tell a broken pipe from any
+# other way the producer might die — the one distinction it exists to make.
+# So it asserts the MECHANISM instead, in four parts that a merely-failing
+# pipeline cannot satisfy: the READER succeeded, the PRODUCER did not, it
+# failed BY BROKEN PIPE (signal death 141, OR an EPIPE diagnostic on its own
+# stderr — LC_ALL=C pins the strerror wording to "Broken pipe", and the match
+# is case-folded and also admits a literal "EPIPE"), and PIPEFAIL is what
+# propagates that into the
+# substitution's status. Every arm is true on both platforms.
+mech_err="$TMP/mech.err"
 mech_rc=0
-( set -o pipefail; yes a 2>/dev/null | head -c 4 >/dev/null ) || mech_rc=$?
-check_eq "CONTROL: an infinite producer truncated by \`head\` exits 141 under pipefail" "141" "$mech_rc"
+( set -o pipefail; LC_ALL=C yes a 2>"$mech_err" | head -c 4 >/dev/null ) || mech_rc=$?
+mech_ps="$( set -o pipefail; LC_ALL=C yes a 2>/dev/null | head -c 4 >/dev/null; printf '%s' "${PIPESTATUS[*]}" )"
+mech_prod_rc="${mech_ps%% *}"
+mech_read_rc="${mech_ps##* }"
+mech_nopf_rc=0
+( set +o pipefail; LC_ALL=C yes a 2>/dev/null | head -c 4 >/dev/null ) || mech_nopf_rc=$?
+mech_stderr="$(cat "$mech_err")"
+mech_stderr_lc="$(printf '%s' "$mech_stderr" | tr '[:upper:]' '[:lower:]')"
+
+check_eq "CONTROL: the truncating reader \`head\` itself SUCCEEDS" "0" "$mech_read_rc"
+if [ "$mech_read_rc" = "0" ] && [ "$mech_prod_rc" != "0" ]; then
+  pass "CONTROL: …while the infinite producer FAILS under it (producer rc $mech_prod_rc)"
+else
+  fail "CONTROL: …the infinite producer did NOT fail under a truncating reader — PIPESTATUS '$mech_ps'"
+fi
+if [ "$mech_rc" = "141" ] || contains "broken pipe" "$mech_stderr_lc" || contains "epipe" "$mech_stderr_lc"; then
+  pass "CONTROL: …and it failed BY BROKEN PIPE, not merely failed (rc $mech_rc, stderr '$mech_stderr')"
+else
+  fail "CONTROL: …producer failed by something OTHER than a broken pipe — rc $mech_rc, stderr '$mech_stderr'"
+fi
+check_eq "CONTROL: …and PIPEFAIL is what propagates it (without pipefail the same pipeline exits 0)" "0" "$mech_nopf_rc"
 
 # The SHIPPED producer line, lifted from the script so this can never drift from
 # what `up` actually runs. It must carry no truncating reader at all.

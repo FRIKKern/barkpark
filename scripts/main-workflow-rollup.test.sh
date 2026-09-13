@@ -31,6 +31,24 @@
 #
 #   bash scripts/main-workflow-rollup.test.sh
 
+# INTERPRETER GUARD — shebang-independent, and it must stay ABOVE the first
+# process substitution in this file. bash reads a script INCREMENTALLY: invoked
+# as `sh` it is in POSIX mode, where `<(…)` cannot be parsed, so everything
+# above the offending line has ALREADY RUN and the script dies with the status
+# of the last completed command. MEASURED 2026-09-13: under `sh` this file exited 2 after running 26 lines of output, i.e. it TRUNCATED mid-suite rather than reporting a failure.
+# Pinned by scripts/posix-vacuous-green-census.sh, which reds if this guard is
+# removed or moved below the first process substitution.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "main-workflow-rollup.test.sh: needs bash (this script uses process substitution); run: bash scripts/main-workflow-rollup.test.sh" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "main-workflow-rollup.test.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/main-workflow-rollup.test.sh" >&2
+    exit 2
+    ;;
+esac
+
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

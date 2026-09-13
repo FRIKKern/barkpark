@@ -949,6 +949,25 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "Telemetry aging out on a schedule, with no team resource removed and no actor.",
       anchor: ~r/@delivery_retention_days 180/
     },
+    "barkpark_cloud/workers/agent_retention_worker.ex|prune_notification_deliveries" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the fifth retention arm, and it does NOT inherit the excuse above — that entry says " <>
+          "\"no team resource removed\", which is FALSE for this table and is not claimed here. " <>
+          "The four prunes in perform/1 are plane telemetry (agent events, dead tokens, usage " <>
+          "samples, and platform_deliveries — Barkpark's OWN deploys, which no team can read); " <>
+          "notification_deliveries is a TEAM resource, served to a team admin by " <>
+          "GET /v1/notifications/deliveries. What is true is the rest of the class: no actor " <>
+          "and no act. The query is keyed on inserted_at alone with no team parameter, so " <>
+          "every row it takes was already outside a window this file states in days, in " <>
+          "advance, for everyone. And a row-per-prune audit event is not merely noise here, " <>
+          "it is IMPOSSIBLE for part of the table: notification_deliveries.team_id is " <>
+          "nullable (user-scoped identity emails carry none) while audit_events.team_id is " <>
+          "null: false, so a teamless delivery's removal cannot be recorded on this trail at " <>
+          "all — the same construction delete_warm_server/2 is excused by below.",
+      anchor: ~r/@notification_delivery_retention_days 180/
+    },
 
     ## ── ALLOWLISTED: fleet-internal capacity, no team to record against ──────
     "barkpark_cloud/registry.ex|delete_warm_server" => %{

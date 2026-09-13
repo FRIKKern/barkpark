@@ -329,6 +329,14 @@ func onboardingWhoamiSpine(g globals, ctx manifest.Context, cfg *Config, m *mani
 func whoamiCLIFreshness() onbCLICheck {
 	c := onbCLICheck{Installed: cliVersion, Status: onbCLIUnreported}
 	if cliVersion == "dev" {
+		// A COMMIT-STAMPED dev build (make cli-install) is comparable even
+		// though no release matches it: its -ldflags commit can be diffed
+		// against origin/main for internal/cli, which is a real reading and
+		// gets the real vocabulary. Only an unstamped or unresolvable build
+		// falls through to UNREPORTED. See cli_staleness.go.
+		if r, ok := devBuildCommitFreshness(); ok {
+			return r
+		}
 		c.Detail = "running a dev build (go build) — there is no release to compare it against, so freshness is UNREPORTED; refresh it with `" + onbCLIDevRemedy + "`"
 		return c
 	}
@@ -401,6 +409,14 @@ func onboardingPathCheck() onbPathCheck {
 func onboardingCLIFreshness() onbCLICheck {
 	c := onbCLICheck{Installed: cliVersion, Status: onbCLIUnreported}
 	if cliVersion == "dev" {
+		// A COMMIT-STAMPED dev build (make cli-install) is comparable even
+		// though no release matches it: its -ldflags commit can be diffed
+		// against origin/main for internal/cli, which is a real reading and
+		// gets the real vocabulary. Only an unstamped or unresolvable build
+		// falls through to UNREPORTED. See cli_staleness.go.
+		if r, ok := devBuildCommitFreshness(); ok {
+			return r
+		}
 		c.Detail = "running a dev build (go build) — there is no release to compare it against, so freshness is UNREPORTED; refresh it with `" + onbCLIDevRemedy + "`"
 		return c
 	}

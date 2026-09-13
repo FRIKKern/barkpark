@@ -64,6 +64,37 @@ defmodule BarkparkCloud.Push do
       the reaper only collects devices that never get sends.
     * A pooled, multiplexed APNs connection (see `Push.HTTP.Mint`): worth doing
       when fan-out volume justifies a supervised pool, not before.
+
+  ## Deferred: session-lifecycle revocation (2026-09-13)
+
+  `device_push_tokens` has exactly THREE revocation paths and none of them is a
+  session event: `deliver/3` revokes a row the platform reports
+  unregistered/invalid, `register_device_token/2` evicts surplus rows at the
+  per-user cap, and the registration UPSERT CLEARS `revoked_at`. "Sign out
+  everywhere" (`Accounts.revoke_all_user_sessions/2`) stamps `user_tokens` only
+  — it never touches this table — and `active_device_tokens_for_barkpark/1`
+  selects purely on `team_memberships.team_id` and `is_nil(revoked_at)`, with
+  no session linkage at all. So a device whose sessions were all revoked stays
+  a live fan-out target, and the notification body carries real content (see
+  `notification/2`: `body = payload["title"]`, the chat session title).
+
+  This is DEFERRED, not accepted. It is unfired today because BOTH halves of
+  severability hold: the credential half (`adapter_for/1` resolves to
+  `Adapters.NotConfigured` for every platform while no APNs/FCM secret exists)
+  and the row half (`apps/mobile` does not depend on `expo-notifications`, so
+  `deviceToken.ts` reports `unavailable` and NO `device_push_tokens` row is
+  ever written). Zero rows, zero victims.
+
+  TRIGGER — the deferral expires the moment either half opens: a real adapter
+  becomes selectable, or the mobile client can mint a device token. At that
+  point the push feature OWES a session-lifecycle revocation path — call it
+  `Push.revoke_device_tokens_for_user/1` — wired into
+  `Accounts.revoke_all_user_sessions/2` so signing out everywhere silences the
+  phone too. The guard that makes this visible rather than forgotten is
+  `cloud/test/barkpark_cloud/push/session_revocation_deferral_test.exs`; it
+  fails, naming this paragraph, as soon as either half opens.
+
+  Owner row: `cch-w53-bl-device-push-tokens-survive-sign-out-everywhere`.
   """
 
   import Ecto.Query

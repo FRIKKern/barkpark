@@ -93,10 +93,54 @@ COPY api/config/config.exs api/config/prod.exs api/config/runtime.exs config/
 #                                      module refuses to compile without it, so a missing
 #                                      COPY fails the build instead of shipping a scrub
 #                                      that redacts nothing.
+#   VERSION                          ← Barkpark.BuildInfo tier 3, the checked-in
+#                                      release marker. `.git` is EXCLUDED from this
+#                                      build context (api/Dockerfile.dockerignore),
+#                                      so BuildInfo's `git describe` tier CANNOT fire
+#                                      here — without this file every compose/tarball
+#                                      install reports release "unknown", which
+#                                      SelfUpdate.Checker.parse_release/1 refuses,
+#                                      permanently killing the update check on the one
+#                                      install shape it exists for, and renders
+#                                      "Barkpark vunknown · unknown" in the Studio nav
+#                                      (task-2ab4f5f0a07e887a). BuildInfo's @repo_root
+#                                      resolves to `/` inside the release (it sits at
+#                                      /app/lib/barkpark/), hence the `/VERSION` target.
+COPY VERSION /VERSION
 COPY design /design
 COPY tooling/pds /tooling/pds
 COPY cloud/priv/secret-scrub.exs /cloud/priv/secret-scrub.exs
 COPY api/assets assets
+
+# ── Build identity overrides (Barkpark.BuildInfo tiers 1 and the commit/date
+# hatches) ───────────────────────────────────────────────────────────────────
+# Placed AFTER `mix deps.compile` on purpose: an ENV change invalidates every
+# later layer, and the commit sha changes on every build. Ahead of the deps
+# layer these three would re-fetch and re-compile the whole dependency tree on
+# each commit.
+#
+# EMPTY IS THE CORRECT DEFAULT and is NOT the docker-compose `${FOO:-}` trap:
+# BuildInfo's env reader treats "" exactly as unset, so an unpassed arg falls
+# through to the COPYed VERSION file above rather than pinning anything. A
+# release pipeline that knows better passes them:
+#
+#   docker build -f api/Dockerfile \
+#     --build-arg BARKPARK_BUILD_VERSION="$(git describe --tags --match 'v[0-9]*')" \
+#     --build-arg BARKPARK_BUILD_COMMIT="$(git rev-parse --short HEAD)" \
+#     --build-arg BARKPARK_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" -t barkpark-api .
+#
+# BARKPARK_BUILD_VERSION accepts A.B.C or A.B.C.D; only the first three
+# segments ever reach the update check.
+# ARG ONLY — NEVER `ENV BARKPARK_BUILD_VERSION=${BARKPARK_BUILD_VERSION}`.
+# Docker already exposes a build ARG to every later RUN as an environment
+# variable, so `mix compile` sees these without an ENV line, and the ENV form is
+# actively wrong twice over: it would bake the value into the RUNTIME image, and
+# scripts/env-census.py's "Dockerfile ENV SHADOW" check reds on exactly that
+# (measured: the ENV form took `compose-smoke.sh census` from its pre-existing
+# 2-miss FAIL to a 3-shadow FAIL as well).
+ARG BARKPARK_BUILD_VERSION=""
+ARG BARKPARK_BUILD_COMMIT=""
+ARG BARKPARK_BUILD_DATE=""
 
 COPY api/lib lib
 COPY api/priv priv
@@ -108,6 +152,7 @@ COPY api/priv priv
 # #15234 (the register) is on main, so the promised line is here: the pre-gate
 # register is now asserted by name, exactly as the 2026-09-02 note said it would be.
 RUN set -e; for f in \
+      /VERSION \
       /design/status-manifest.json \
       /cloud/priv/secret-scrub.exs \
       /tooling/pds/pre-gate-papers.json; do \

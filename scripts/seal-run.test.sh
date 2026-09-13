@@ -590,7 +590,18 @@ else
   gitq "$E2E" update-ref refs/remotes/origin/main HEAD
 
   E2E_SHORT="$(gitq "$E2E" rev-parse --short HEAD)"
-  OUT="$(bash "$SEAL" --repo "$E2E" --epic deploy-reliability-epic --show-withheld -- --ladder-only 2>&1)"; CODE=$?
+  # THE EPIC MUST BE ONE THE PREDICATE HAS A REGISTER FOR. #17798 (5568363ef)
+  # keyed seal-predicate.mjs's frozen registers by epic (EPIC_REGISTERS) and made
+  # an unregistered epic a pre-clause REFUSAL (exit 3, reason=UNREGISTERED-EPIC).
+  # This arm had been passing `deploy-reliability-epic`, which has no entry, so
+  # from 2026-09-12 onward the predicate refused before emitting a LADDER-ONLY
+  # token and these four assertions reddened every completed main run
+  # (measured 2026-09-13: runs 34700108272 .. 34753745582, all four identical).
+  # What this arm probes is the runner's head= parsing over the REAL emitter, not
+  # any particular epic's register — so it reads the epic the register table
+  # actually carries. If that key is ever renamed, read the live key out of
+  # `EPIC_REGISTERS` in cloud/priv/static/__preview__/seal-predicate.mjs.
+  OUT="$(bash "$SEAL" --repo "$E2E" --epic cloud-console-hardening-epic --show-withheld -- --ladder-only 2>&1)"; CODE=$?
 
   expect_has "the REAL predicate ran through the runner and emitted its own token" "VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY"
   expect_has "the runner parsed the real token's head= and quotes it back" "head=$E2E_SHORT"

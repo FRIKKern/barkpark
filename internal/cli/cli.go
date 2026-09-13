@@ -284,9 +284,15 @@ func Execute(args []string) int {
 		// onramp: `context` is not a manifest noun, so this intercept shadows
 		// nothing and needs no server change. Local file I/O only — no network.
 		// Research trail: /papers/optical-compression-research-report.
-		// `pack` itself dispatches from the nounBuiltins registry above.
+		// `bp context map <keyword>` is the sibling verb: given a keyword
+		// instead of a file list it pictures the SHAPE of an epic (modules,
+		// gists, public defs, observed reference edges) and routes every
+		// trust-boundary sentence to an authoritative laws sidecar.
+		// Both verbs dispatch from the nounBuiltins registry above.
 		if g.help || verb == "" {
 			printContextPackHelp(out)
+			out.outf("\n")
+			printContextMapHelp(out)
 			return exitOK
 		}
 		return usageErrf(out, func() { printContextPackHelp(out) }, "unknown command %q %q", noun, verb)
@@ -551,6 +557,14 @@ func Execute(args []string) int {
 		if verb != "" {
 			if cmd, ok := tree.Lookup(noun, verb); ok {
 				usageCommand(out, *cmd)
+				// `bp task close --help` renders the manifest's arguments, which
+				// say nothing about what the REASON must NAME to stay checkable
+				// by the tree. The close-prose contract is appended here because
+				// this is the one page the next writer of a close reads before
+				// writing one. See tasks_close_evidence_contract.go.
+				if noun == "task" && verb == "close" {
+					printCloseEvidenceContract(out)
+				}
 				return exitOK
 			}
 		}

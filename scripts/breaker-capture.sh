@@ -37,6 +37,10 @@ STEP_SCRIPT="${1:-}"
 [ -n "$STEP_SCRIPT" ] || { echo "breaker-capture: no step script given" >&2; exit 2; }
 
 CAP="${BREAKER_ERROR_LOG:-${RUNNER_TEMP:-/tmp}/main-red-breaker-errors.txt}"
+# The fence literals. main-red-breaker.sh greps for these EXACT strings; the
+# drift guard in scripts/main-red-breaker.test.sh asserts both files agree.
+BLOCK_BEGIN='##[breaker-block]begin '
+BLOCK_END='##[breaker-block]end'
 tmp="$(mktemp -t breaker-capture.XXXXXX)" || tmp=""
 
 if [ -z "$tmp" ]; then
@@ -49,8 +53,38 @@ trap 'rm -f "$tmp"' EXIT
 BREAKER_CAPTURE_ARMED=1 bash -e "$STEP_SCRIPT" 2>&1 | tee "$tmp"
 rc="${PIPESTATUS[0]}"
 
+# EACH FAILING STEP IS FENCED (task-501a3f6f34d5aa20). Before this, every
+# failing step in a job appended into ONE flat file and the breaker compared the
+# UNION of their output against main's. A union hides the thing that matters:
+# whether the step that actually red carries any per-finding detail at all. In
+# PR #17984 job 103556399633 the doc-byte-budget step's whole captured red was
+#
+#     check-doc-budgets --selftest: FAILED — the full gate did not pass with DOC_BUDGETS_SPAN_ONLY set
+#
+# — one line, byte-identical no matter WHICH doc is over cap or how many are —
+# while a SIBLING step in the same job printed `FAIL: docs/evidence/….md …`.
+# Union'd together the set looks richly detailed, so the subset test read
+# "signature matched" and the red was waved through as inherited. Fenced, the
+# breaker can see that ONE of the blocks names nothing and refuse.
+#
+# The fence carries the step's COMMAND, not its name: GitHub does not hand a
+# step its own `name`, and inventing one by counting `##[group]Run` blocks is
+# the positional guess main-red-breaker.sh already refutes elsewhere. The first
+# meaningful line of the runner's temp script is a true, derived identifier.
+# A capture written by an OLDER copy of this script has no fences; the breaker
+# treats such a file as a single block and SAYS which shape it read.
+step_cmd() { # -> the first non-blank, non-comment, non-`set` line of the step script
+  awk 'NF == 0 { next }
+       /^[[:space:]]*#/ { next }
+       /^[[:space:]]*set[[:space:]]/ { next }
+       { gsub(/\r$/, ""); print; exit }' "$STEP_SCRIPT" 2>/dev/null | cut -c1-200
+}
+
 if [ "$rc" -ne 0 ] && [ -s "$tmp" ]; then
   mkdir -p "$(dirname "$CAP")" 2>/dev/null || true
-  cat "$tmp" >> "$CAP" 2>/dev/null || true
+  { printf '%s%s\n' "$BLOCK_BEGIN" "$(step_cmd)"
+    cat "$tmp"
+    printf '%s\n' "$BLOCK_END"
+  } >> "$CAP" 2>/dev/null || true
 fi
 exit "$rc"

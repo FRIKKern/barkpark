@@ -533,6 +533,228 @@ fi
 
 printf '\n'
 
+# ── RUNG 6's SENTINEL COVERAGE, AND THE TWO DEMOS THE THAW OWES ─────────────
+# (pds-bl-legb-visibility-control-n3 · pds-bl-rung6-percolumn-invisible-on-green
+#  · PDS-D742/D743/D744)
+#
+# PDS-D744 licenses the thaw only against a SHOWN failure, and neither demo may
+# be a live target mutation (PDS-D31: no guerrilla export is spent here). Both
+# are driven as FIXTURES through the SHIPPED functions, loaded in library mode —
+# the same machinery every other arm in this file uses.
+#
+# THE FIXTURE IS AN ALL-PRIVATE ROSTER, which is the target shape the row was
+# filed about: three in-scope rows whose `visibility` is already 'private', so
+# the sentinel's constant `visibility = 'private'` is a literal no-op on every
+# one of them. Every OTHER guarded column moves.
+printf 'pds-pull-proof_test: rung 6 measures what the sentinel MOVED, and reds a control that could not fire\n'
+
+if ! declare -f moved_column_counts >/dev/null 2>&1; then
+  printf 'pds-pull-proof_test: moved_column_counts is not defined after sourcing %s — the rung-6 coverage arms would be testing nothing\n' "$PROOF" >&2
+  exit 1
+fi
+
+# one line per row: `dataset|name` TAB md5-per-column, in GUARDED_COLUMNS order
+# (title icon visibility owner_scoped fields cors_origins desk_groups list_preview)
+fx_pre() { # the target BEFORE the sentinel: all three rows already private
+  local i
+  for i in 1 2 3; do
+    printf 'production|s%s\tt%s\ti%s\tPRIVATE\to%s\tf%s\tc%s\td%s\tl%s\n' "$i" "$i" "$i" "$i" "$i" "$i" "$i" "$i"
+  done
+}
+fx_sentinelled() { # after the sentinel UPDATE: seven columns moved, visibility did NOT
+  local i
+  for i in 1 2 3; do
+    printf 'production|s%s\tMARK\tMARK\tPRIVATE\tO%s\tF%s\tC%s\tD%s\tL%s\n' "$i" "$i" "$i" "$i" "$i" "$i"
+  done
+}
+fx_healthy() { # the same roster with a genuinely mixed visibility: all eight move
+  local i
+  for i in 1 2 3; do
+    printf 'production|s%s\tMARK\tMARK\tMOVED%s\tO%s\tF%s\tC%s\tD%s\tL%s\n' "$i" "$i" "$i" "$i" "$i" "$i" "$i"
+  done
+}
+
+# the aggregate per-column digest lines `columns_where` compares (8 tab fields)
+AGG_SENTINELLED="$(printf 'sT\tsI\tsV\tsO\tsF\tsC\tsD\tsL')"
+# a FULL clobber: every guarded column reverted, visibility included — note that
+# visibility moves here because the BOOT wrote the plugin's declared value, not
+# because the sentinel ever drifted it. That is the whole vacuity.
+AGG_CLOBBERED_FULL="$(printf 'cT\tcI\tcV\tcO\tcF\tcC\tcD\tcL')"
+# a PARTIAL revert: `icon` and `desk_groups` left alone
+AGG_CLOBBERED_PARTIAL="$(printf 'cT\tsI\tcV\tcO\tcF\tcC\tsD\tcL')"
+
+# ── DEMO (i): the all-private fixture — OLD passes, NEW reds by name ─────────
+vec_dead="$(moved_column_counts "$(fx_pre)" "$(fx_sentinelled)")"; vec_dead_rc=$?
+if [ "$vec_dead_rc" -eq 0 ] && [ "$vec_dead" = "title=3 icon=3 visibility=0 owner_scoped=3 fields=3 cors_origins=3 desk_groups=3 list_preview=3" ]; then
+  ok "DEMO(i) the sentinel's measured coverage on an all-private roster — $vec_dead"
+else
+  bad 'DEMO(i) the per-column moved-row counts are measured' "moved_column_counts returned rc=$vec_dead_rc and '$vec_dead'; the all-private fixture must report visibility=0 and 3 for the other seven, or the third digest state is not measuring the sentinel"
+fi
+
+dead_named="$(moved_columns_where zero "$vec_dead")"
+if [ "$dead_named" = "visibility" ]; then
+  ok "DEMO(i) NEW code REDS rung 6 BY NAME — the control that could not fire: $dead_named"
+else
+  bad 'DEMO(i) the zero-coverage column is named' "moved_columns_where zero named '${dead_named:-<nothing>}'; a rung that cannot say WHICH control was vacuous is the silent green this thaw exists to remove"
+fi
+
+live_named="$(moved_columns_where nonzero "$vec_dead")"
+if [ "$live_named" = "title icon owner_scoped fields cors_origins desk_groups list_preview" ]; then
+  ok 'DEMO(i) the seven columns that DID move are named too, so the red is scoped rather than total'
+else
+  bad 'DEMO(i) the moved columns are named' "moved_columns_where nonzero named '$live_named'"
+fi
+
+old_verdict="$(columns_where same "$AGG_SENTINELLED" "$AGG_CLOBBERED_FULL")"
+if [ -z "$old_verdict" ]; then
+  ok 'DEMO(i) OLD code PASSES on the same fixture — columns_where same finds NOTHING to complain about, so rung 6 went green with its visibility control proving nothing'
+else
+  bad 'DEMO(i) the OLD shape passes on the all-private fixture' "columns_where same named '$old_verdict' on a full clobber; if the pre-fix code already redded here there is no failure for this thaw to have fixed (PDS-D100/D743)"
+fi
+
+# ── DEMO (ii): a deliberately partial revert must NAME the missing columns ───
+partial="$(columns_where same "$AGG_SENTINELLED" "$AGG_CLOBBERED_PARTIAL")"
+if [ "$partial" = "icon desk_groups" ]; then
+  ok "DEMO(ii) a partial revert is NAMED, column by column: $partial"
+else
+  bad 'DEMO(ii) a partial revert names the missing columns' "columns_where same named '${partial:-<nothing>}', expected 'icon desk_groups' — a partial clobber that the aggregate digest hides (PDS-D130) must be named, not counted"
+fi
+
+vec_healthy="$(moved_column_counts "$(fx_pre)" "$(fx_healthy)")"
+partial_scoped="$(columns_intersect "$partial" "$(moved_columns_where nonzero "$vec_healthy")")"
+if [ "$partial_scoped" = "icon desk_groups" ]; then
+  ok 'DEMO(ii) scoping leg B to the MEASURED moved set removes nothing when every column moved — the assertion names its support instead of inheriting the eight from a literal'
+else
+  bad 'leg B scoped to the measured moved set' "columns_intersect returned '$partial_scoped', expected 'icon desk_groups'. Scoping the assertion must never DROP a column the sentinel moved — that would be the loosening PDS-D744 forbids"
+fi
+
+legb_moved="$(columns_where diff "$AGG_SENTINELLED" "$AGG_CLOBBERED_PARTIAL")"
+if [ "$legb_moved" = "title visibility owner_scoped fields cors_origins list_preview" ]; then
+  ok "DEMO(ii) the leg B moved-columns vector rung 6 now prints on its PASS path: $legb_moved"
+else
+  bad 'the leg B moved vector is computable for the PASS path' "columns_where diff returned '$legb_moved' — the vector printed on green must be the measured one (pds-bl-rung6-percolumn-invisible-on-green c0)"
+fi
+
+# ── the healthy roster: every guarded column moved, nothing is named dead ────
+if [ "$vec_healthy" = "title=3 icon=3 visibility=3 owner_scoped=3 fields=3 cors_origins=3 desk_groups=3 list_preview=3" ] &&
+   [ -z "$(moved_columns_where zero "$vec_healthy")" ]; then
+  ok 'a genuinely mixed roster moves all eight and names no dead control — the new red is two-sided, not an always-red'
+else
+  bad 'the new red does not fire on a healthy roster' "vec='$vec_healthy', zero='$(moved_columns_where zero "$vec_healthy")'. A check that reds on every target is the same defect with the polarity flipped"
+fi
+
+# ── a row set that SHIFTED is a refusal, never a count ───────────────────────
+shifted="$(moved_column_counts "$(fx_pre)" "$(fx_sentinelled | head -2)")"; shifted_rc=$?
+if [ "$shifted_rc" -ne 0 ] && [ -z "$shifted" ]; then
+  ok "a pre/post pair over DIFFERENT row sets is refused (rc=$shifted_rc), not folded into the counts"
+else
+  bad 'a shifted row set is refused' "moved_column_counts returned rc=$shifted_rc and '$shifted'. Counting a vanished row as movement manufactures coverage for a column nothing was written to — the exact silent green this measurement exists to refuse"
+fi
+
+printf '\n'
+
+# ── cond_d's JOB DISCRIMINATION (pds-bl-cond-d-job-blind-false-abort) ───────
+# The gate the old (d) could not fail in the safe direction. `deploy.yml` runs
+# TWO independent deploy jobs behind one `changes` job — `control-plane` ships
+# to CP_HOST, `instance` ships to GUERRILLA_HOST — and only `instance` can swap
+# the slot under a PDS export. The old (d) asked `gh run list --workflow
+# deploy.yml --status in_progress` and aborted on ANY hit, so a cloud-only merge
+# tripped a FALSE ABORT. PDS-D746 sanctions the fix; PDS-D31 forbids buying the
+# demonstration with a real export, so both directions are driven as FIXTURES
+# through the SHIPPED functions in library mode.
+printf 'pds-pull-proof_test: cond_d tells an instance-targeting deploy run from a control-plane-only one\n'
+
+for _fn in deploy_run_instance_verdict gate_d_verdict; do
+  if ! declare -f "$_fn" >/dev/null 2>&1; then
+    printf 'pds-pull-proof_test: %s is not defined after sourcing %s — the cond_d arms would be testing nothing\n' "$_fn" "$PROOF" >&2
+    exit 1
+  fi
+done
+
+TAB="$(printf '\t')"
+# The three shapes the API actually returns. A skipped job IS listed, with
+# conclusion `skipped`; a running job is listed with an EMPTY conclusion.
+JOBS_CLOUD_ONLY="changes${TAB}completed${TAB}success
+control-plane${TAB}in_progress${TAB}
+instance${TAB}completed${TAB}skipped"
+JOBS_INSTANCE_LIVE="changes${TAB}completed${TAB}success
+control-plane${TAB}completed${TAB}skipped
+instance${TAB}in_progress${TAB}"
+JOBS_INSTANCE_DONE="changes${TAB}completed${TAB}success
+control-plane${TAB}completed${TAB}skipped
+instance${TAB}completed${TAB}success"
+JOBS_UNDECIDED="changes${TAB}in_progress${TAB}"
+
+v="$(deploy_run_instance_verdict "$JOBS_CLOUD_ONLY")"
+if [ "$v" = "control-plane-only" ]; then
+  ok 'a cloud-only run (instance job skipped) is NOT instance-targeting'
+else
+  bad 'a cloud-only run (instance job skipped) is NOT instance-targeting' "got '$v'. This is the false abort the row was filed about: a deploy that cannot reach the source box must not cost the export its preconditions"
+fi
+
+v="$(deploy_run_instance_verdict "$JOBS_INSTANCE_LIVE")"
+if [ "$v" = "instance" ]; then
+  ok 'a run whose instance job is IN PROGRESS is instance-targeting'
+else
+  bad 'a run whose instance job is IN PROGRESS is instance-targeting' "got '$v'. A discriminator that never says 'instance' has replaced a false abort with a silent green"
+fi
+
+v="$(deploy_run_instance_verdict "$JOBS_INSTANCE_DONE")"
+if [ "$v" = "instance" ]; then
+  ok 'a run whose instance job ALREADY COMPLETED is instance-targeting'
+else
+  bad 'a run whose instance job ALREADY COMPLETED is instance-targeting' "got '$v'. `skipped` is the only conclusion that means the box was untouched; a finished `success` means the slot was ALREADY swapped"
+fi
+
+v="$(deploy_run_instance_verdict "$JOBS_UNDECIDED")"
+case "$v" in
+  unknown:*) ok 'a run whose `changes` job has not completed is UNKNOWN, never control-plane-only' ;;
+  *) bad 'a run whose `changes` job has not completed is UNKNOWN, never control-plane-only' "got '$v'. GitHub materialises a job only once the run reaches it, so the ABSENCE of an `instance` line before `changes` finishes says nothing — reading it as 'control-plane only' is the most reassuring possible answer to a question never asked" ;;
+esac
+
+v="$(deploy_run_instance_verdict "")"
+case "$v" in
+  unknown:*) ok 'an empty job graph is UNKNOWN — the gate fails CLOSED (PDS-D98)' ;;
+  *) bad 'an empty job graph is UNKNOWN — the gate fails CLOSED (PDS-D98)' "got '$v'. An unreadable listing that reads OK is the fail-open shape PDS-D98 exists to refuse" ;;
+esac
+
+d="$(gate_d_verdict 0)"; rc=$?
+if [ "$rc" -eq 0 ] && [ "${d#OK}" != "$d" ]; then
+  ok 'no deploy.yml run at all still passes (d)'
+else
+  bad 'no deploy.yml run at all still passes (d)' "rc=$rc, text='$d'. The fix must not turn the quiet case into an abort"
+fi
+
+d="$(gate_d_verdict 0 '111=control-plane-only')"; rc=$?
+if [ "$rc" -eq 0 ] && [ "${d#OK}" != "$d" ] && printf '%s' "$d" | grep -q 'CONTROL-PLANE ONLY'; then
+  ok 'a live control-plane-only run PASSES (d) and the transcript SAYS which run it forgave'
+else
+  bad 'a live control-plane-only run PASSES (d) and the transcript SAYS which run it forgave' "rc=$rc, text='$d'. A pass that reads 'no deploy.yml run in progress' while one IS in progress is a true verdict with a false sentence"
+fi
+
+d="$(gate_d_verdict 0 '111=control-plane-only' '222=instance')"; rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$d" | grep -q '222'; then
+  ok 'ONE instance-targeting run among control-plane-only ones still ABORTS, by id'
+else
+  bad 'ONE instance-targeting run among control-plane-only ones still ABORTS, by id' "rc=$rc, text='$d'. The aggregate must be worst-case, and it must name the run that caused it"
+fi
+
+d="$(gate_d_verdict 0 '111=unknown:the API never answered for this run')"; rc=$?
+if [ "$rc" -ne 0 ] && [ "${d#UNKNOWN}" != "$d" ]; then
+  ok 'a run whose job graph could not be read makes (d) UNKNOWN, never OK'
+else
+  bad 'a run whose job graph could not be read makes (d) UNKNOWN, never OK' "rc=$rc, text='$d'. Per-run blindness must fail closed exactly as the whole-listing blindness already does"
+fi
+
+d="$(gate_d_verdict 7)"; rc=$?
+if [ "$rc" -ne 0 ] && [ "${d#UNKNOWN}" != "$d" ] && printf '%s' "$d" | grep -q '7'; then
+  ok 'a nonzero gh exit is still UNKNOWN with the code quoted (PDS-D98 preserved)'
+else
+  bad 'a nonzero gh exit is still UNKNOWN with the code quoted (PDS-D98 preserved)' "rc=$rc, text='$d'. The thaw must not spend the fail-closed behaviour it inherited"
+fi
+
+printf '\n'
+
 # ── the receipt's own arithmetic is an arm ──────────────────────────────────
 # The headline total used to be hand-typed beside a hand-typed breakdown, and a
 # wave that added 17 arms typed 58 over a breakdown summing to 57. Nothing local
@@ -542,8 +764,8 @@ printf '\n'
 # checks itself three ways before it is printed: the breakdown must SUM to the
 # declared total, and the declared total must equal the arms this run actually
 # printed. A miscount now reds here, in the second it is typed.
-ARMS_DECLARED=57
-ARMS_BREAKDOWN='13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording'
+ARMS_DECLARED=76
+ARMS_BREAKDOWN='13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording, 9 rung-6 sentinel coverage, 10 cond_d job discrimination'
 breakdown_sum="$(printf '%s' "$ARMS_BREAKDOWN" | tr ',' '\n' | awk '{s += $1} END {print s + 0}')"
 if [ "$breakdown_sum" -ne "$ARMS_DECLARED" ]; then
   bad 'the receipt adds up' "the declared total is $ARMS_DECLARED but the breakdown sums to $breakdown_sum — one of the two was typed and not counted"

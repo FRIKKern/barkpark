@@ -731,6 +731,15 @@
       padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
     }
 .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+/* PROSE LONG-TOKEN BREAK — the EDIT half of the View rule in
+   paper-surface.css (`.bp-paper-surface p, li`). It is not optional and not a
+   copy for tidiness: view_edit_parity_test.exs §2 reds the moment View
+   declares a property Edit does not, because a paper whose prose wraps at a
+   different word in Edit than in View is the exact drift that suite exists to
+   catch. `h1` beside it already carries the identical guard for the identical
+   reason. The View-side comment carries the measurements. */
+.bp-paper-editor-body p,
+.bp-paper-editor-body li { overflow-wrap: break-word; }
 /* A nested disclosure heading is not a document section boundary. */
 .bp-expandable__body .bp-paper-editor-body > .ProseMirror > h2 {
   margin-top: 1.9em; border-top: 0; padding-top: 0;
@@ -1681,16 +1690,24 @@
 .bp-canvas-fleet { margin: 0; overflow: visible; white-space: normal; }
 
 /* Diagram configuration stays outside the reader figure's layout. */
-.bp-canvas-diagram { position: relative; }
-.bp-canvas-diagram-editor { position: absolute; top: 0; right: 0; z-index: 3; max-width: 100%; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; opacity: 0; pointer-events: none; }
+/* scaffy-backlog-blocks-editable-studio: .bp-canvas-technical* is the diff/filetree
+   edit chrome. It SHARES these rules with the diagram editor rather than restating
+   them — one declaration block, so the two attr-atom families can never drift and no
+   new hand-stamped type literal enters the design ratchet. */
+.bp-canvas-diagram, .bp-canvas-technical { position: relative; }
+.bp-canvas-diagram-editor, .bp-canvas-technical-editor { position: absolute; top: 0; right: 0; z-index: 3; max-width: 100%; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; opacity: 0; pointer-events: none; }
 .bp-canvas-diagram:hover .bp-canvas-diagram-editor,
 .bp-canvas-diagram:focus-within .bp-canvas-diagram-editor,
-.bp-canvas-diagram-editor[open] { opacity: 1; pointer-events: auto; }
-.bp-canvas-diagram-editor-toggle { cursor: pointer; width: max-content; margin-left: auto; background: var(--paper-bg); padding: 2px 6px; border-radius: 4px; }
-.bp-canvas-diagram-fields { display: grid; gap: 0.65rem; width: min(32rem, 75vw); max-width: 100%; box-sizing: border-box; margin-top: 0.55rem; padding: 0.75rem; background: var(--paper-bg); border: 1px solid var(--paper-rule); border-radius: 4px; }
-.bp-canvas-diagram-field { display: grid; gap: 0.3rem; min-width: 0; }
-.bp-canvas-diagram-area, .bp-canvas-diagram-caption { width: 100%; box-sizing: border-box; color: var(--paper-ink); background: transparent; border: 1px solid var(--paper-rule); border-radius: 3px; padding: 0.5rem; }
-.bp-canvas-diagram-editor :is(summary, input, textarea):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+.bp-canvas-diagram-editor[open],
+.bp-canvas-technical:hover .bp-canvas-technical-editor,
+.bp-canvas-technical:focus-within .bp-canvas-technical-editor,
+.bp-canvas-technical-editor[open] { opacity: 1; pointer-events: auto; }
+.bp-canvas-diagram-editor-toggle, .bp-canvas-technical-editor-toggle { cursor: pointer; width: max-content; margin-left: auto; background: var(--paper-bg); padding: 2px 6px; border-radius: 4px; }
+.bp-canvas-diagram-fields, .bp-canvas-technical-fields { display: grid; gap: 0.65rem; width: min(32rem, 75vw); max-width: 100%; box-sizing: border-box; margin-top: 0.55rem; padding: 0.75rem; background: var(--paper-bg); border: 1px solid var(--paper-rule); border-radius: 4px; }
+.bp-canvas-diagram-field, .bp-canvas-technical-field { display: grid; gap: 0.3rem; min-width: 0; }
+.bp-canvas-diagram-area, .bp-canvas-diagram-caption, .bp-canvas-technical-area, .bp-canvas-technical-meta { width: 100%; box-sizing: border-box; color: var(--paper-ink); background: transparent; border: 1px solid var(--paper-rule); border-radius: 3px; padding: 0.5rem; }
+.bp-canvas-diagram-editor :is(summary, input, textarea):focus-visible,
+.bp-canvas-technical-editor :is(summary, input, textarea):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
 
 /* Reference-family configuration floats over the canonical reader render.
    Closed controls therefore add no document rhythm, while the native details /

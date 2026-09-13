@@ -1228,8 +1228,26 @@ select.form-input {
   box-shadow: var(--shadow-sm);
 }
 .tier-name { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-text); }
-.tier-price { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 10px 0 2px; }
-.tier-price small { font-size: 13px; font-weight: 500; color: var(--dim); }
+/* ===== RETIRED: the tier/plan PRICE + QUOTA rules (cch-w49-s1 follow-up) =====
+   cch-w49-s1 removed .tier-price, .plan-price, .new-tier-price and .tier-quota
+   from every render path in app.js — no server value supports a price or an
+   instance ceiling on these screens — but left their CSS behind, because app.css
+   was outside that slice's declared files fence. EIGHT rule heads stood here with
+   zero producers, verified one token at a time across app.js, index.html and
+   styleguide.html. SEVEN are retired here; the eighth, `.tier-free .tier-price`,
+   is left standing for a measured reason recorded at its own site below:
+
+     .tier-price            .tier-price small
+     .plan-price            .plan-price small
+     .new-tier-price        .new-tier-price .dim
+     .tier-quota
+
+   Dead style, not a defect: nothing selected them, so removing them paints
+   nothing differently. Note what did NOT catch this — E2 reds on a class EMITTED
+   with no rule; the reverse, a rule with no emitter, is caught only by the
+   cssom-heads exact-count ratchet, which is why the baseline moves with this
+   commit. `.tier-name`, `.tier-note`, `.tier .btn` and the whole `.plan-feats`
+   family STAY: those are still rendered. */
 .tier-note { font-size: 12px; color: var(--dim); margin: 0 0 18px; flex: 1; }
 /* cch-tier-note-undefined-render — `margin-top: auto` is what keeps the
    Subscribe buttons on one line across the tier grid. It USED to be a
@@ -1244,7 +1262,34 @@ select.form-input {
    and it makes the alignment a property of the button rather than a lucky
    consequence of every row happening to have prose in it. */
 .tier .btn { width: 100%; margin-top: auto; }
-.tier-free .tier-price { color: var(--muted-text); }
+/* THE EIGHTH ORPHAN, NOW RETIRED — AND THE EMISSION DELIBERATELY KEPT.
+   `.tier-free .tier-price` was the last of the eight and stood here on the
+   ground that it was the ONLY authored head carrying `.tier-free`, so deleting
+   it would convert a dead RULE into a class emitted with no rule and red
+   __css_check E2. That half was correct. The prescribed remedy — drop the
+   EMISSION too — was NOT, and the refusal of an ALLOW_HOOK_CLASSES entry rested
+   on a claim that is false: "nothing queries `.tier-free` in JS".
+
+   Something does. `__preview__/breakpoint-sweep.mjs`'s tier-CTA tense probe
+   (function `tierLabelProbeJs`; re-derive with
+   `grep -n "tier-free" cloud/priv/static/__preview__/breakpoint-sweep.mjs`)
+   locates the Free tier's button as `grid.querySelector('.tier-free .btn')` and
+   REFUSES when it finds none. That probe is the deciding measurement of the
+   `tier-floor-render` job, which is a `needs:` of the required `Console gate`.
+   Run, not predicted — with the emission dropped:
+
+     !! BREAKPOINT SWEEP (exit 2): billing-trial/dark@901: tier CTA tense probe
+        — the live pass rendered no .tier-free CTA at all
+
+   while `__css_check` stayed exit 0 through the same mutation, so the row's own
+   named gates could not see the regression at all.
+
+   So `.tier-free` is exactly what ALLOW_HOOK_CLASSES documents: a selector
+   target with no style rule by design. The rule is retired (the ratchet moves
+   -1, re-measured), the emission STAYS, and the class is registered as a hook
+   rather than silenced — the entry absolves a real E2 on every run, so it is
+   not the waiver-absolving-nothing shape. `.tier-current` is unaffected: it has
+   its own rule above. */
 
 /* ========================================================== MODAL */
 /* GR63 OVERFLOW: the modal root is the ONLY scroll container a modal has —
@@ -1563,8 +1608,6 @@ select.form-input {
   padding: 2px 8px; border-radius: var(--pill);
 }
 .plan-tagline { font-size: 13px; color: var(--muted-text); margin: 4px 0 16px; }
-.plan-price { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
-.plan-price small { font-size: 14px; font-weight: 500; color: var(--dim); }
 .plan-feats { list-style: none; padding: 0; margin: 18px 0 22px; display: flex; flex-direction: column; gap: 10px; }
 .plan-feats li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .plan-feats .ck { color: var(--success); font-weight: 700; }
@@ -3079,8 +3122,6 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-tier { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
 .new-tier-head { display: flex; align-items: baseline; justify-content: space-between; }
 .new-tier-name { font-weight: 600; }
-.new-tier-price { font-size: 20px; font-weight: 700; }
-.new-tier-price .dim { font-size: 13px; font-weight: 400; }
 .new-tier .btn { margin-top: 12px; }
 
 /* ── GR18 theater (v4, screens/09): head + price line + two-column stage ─────
@@ -6057,9 +6098,6 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dunning-title { color: var(--warn-strong); font-weight: 700; }
 .dunning-body { margin: 0; max-width: 62ch; }
 
-/* Quota-honest tier cards: the real ceiling, mono, right above the action. */
-.tier-quota { font-family: var(--mono); font-size: var(--text-xs); color: var(--cc-fg3); margin: 0 0 12px; }
-
 /* GR20 topbar billing chip — sits AHEAD of the SSE liveness chip; trial rides
    the info blue, past-due the danger red. It is a link to #billing. */
 .billing-chip {
@@ -6422,6 +6460,30 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dom-rung--failed { color: var(--danger); background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.3); }
 .dom-rung--active { color: var(--info); background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.3); }
 .dom-rung--proxied { color: var(--info); background: hsl(var(--info-hsl) / 0.08); border-color: hsl(var(--info-hsl) / 0.25); }
+/* A rung nobody has reached yet. Its treatment IS the muted base pill above, and
+   this rule restates it EXACTLY — same three tokens, byte-for-byte the same paint
+   — so adding it changes no pixel. It is here because `domainStageRows` folds a
+   status into one of SIX closed roles and this was the only one of the six with
+   no rule of its own: the modifier resolved to nothing and the chip fell through
+   to `.dom-rung`.
+
+   THIS IS NOT THE cch-w64 IMPERSONATION SHAPE, and that difference IS the finding
+   the row demanded before any CSS was written. There, `siteFreshnessSeg`
+   deliberately ships a BARE `.fresh-badge` as its own meaningful state ("never
+   deployed"), so a rule-less modifier rendered byte-identical to a DIFFERENT
+   state. Here `domainRungChip` always emits `dom-rung dom-rung--<role>`, never a
+   bare base, and of the six roles ok/failed/active/proxied/unknown all carry
+   rules — so `pending` was the only role that ever reached the base, and the
+   fall-through was landing on the right paint by COINCIDENCE rather than
+   impersonating anything. A weaker defect than the sibling's; recorded as such
+   rather than inheriting its severity. The remedy is the same, though, and it is
+   NOT a consent list: an unwritten fall-through is not a treatment, so the rule
+   is written and E18 then requires one for all six roles. */
+.dom-rung--pending {
+  color: var(--muted-text);
+  background: var(--muted-surface);
+  border-color: var(--border);
+}
 /* A rung the control plane ATTEMPTED and could not measure. It must not look
    like a rung we are still waiting on (the default muted pill): amber, and a
    DASHED border — the shape says "no reading taken", not "in flight". Same
@@ -6527,8 +6589,34 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    and the horizontal score goes green while the words are still wrong. The
    pill must simply refuse to shrink; the sentence beside it is the flexible
    part. `flex` is not one of E14's five core properties, so this block starts
-   no recipe it must then finish (__css_check.mjs E14, design choice 1). */
-.op-gate .status-pill { flex: 0 0 auto; }
+   no recipe it must then finish (__css_check.mjs E14, design choice 1).
+
+   cch-w19-bl-op-gate-dot-centring-at-320 — `align-self: flex-start` JOINS THIS
+   SAME RULE, AND IT IS ON THE PILL, NOT ON `.op-gate`. The second defect on
+   this host is vertical: `.op-gate` is `align-items: center`, so whenever the
+   sentence WRAPS the pill is centred against the whole wrapped block and its
+   dot marks a line in the MIDDLE of the sentence it introduces. Measured with
+   a Range over the sentence's TEXT NODE (the element's merged client rect
+   spans every line and is green on this by construction), 244 of 280 gates
+   across the operator leg's axes rendered a wrapped sentence and the dot sat
+   off line 1 in every one of them — at 320 on `operator-zero-staging` the gate
+   sentence takes FIVE lines and the dot centred on line 3.
+
+   WHY `align-self` ON THE CHILD AND NOT `align-items: flex-start` ON
+   `.op-gate`, which is what the row asked for: the row's cited precedent does
+   not exist. `.fleet-status` declares `align-items: center`, not `flex-start`
+   (grep -n 'fleet-status' app.css; exactly one of its lines carries
+   align-items and the value is `center`). Both candidates were DRIVEN.
+   Container-level `flex-start` also re-anchors the SENTENCE, which is the
+   shorter box on a ONE-line gate: every unwrapped cell moved its text up
+   2.25px — a restyle of the case that was never broken. `align-self` on the
+   pill is a no-op wherever the pill is the tall item, so the one-line cells
+   are byte-identical: all 280 cells match origin/main on wrap count, line-1
+   rect, gate height and pill scrollWidth/clientWidth, and only the dot moves.
+   Guarded by the dot/line-1 arm of overflow-guard's W20-op-gate-pill-bounded
+   leg, whose anti-vacuity arm reds if no cell ever renders a wrapped
+   sentence. */
+.op-gate .status-pill { flex: 0 0 auto; align-self: flex-start; }
 
 /* The rollout's own vocabulary, stated once under the rows. */
 .op-foot {

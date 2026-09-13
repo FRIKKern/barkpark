@@ -330,6 +330,75 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
     refute failed.failure_reason =~ "no build source"
   end
 
+  ## 7b. (task-85693fd7401812fd) Pass (0b) covers BOTH content-bound kinds.
+  ##
+  ##     A NODE site is content-bound EXACTLY like a static one — the repo says
+  ##     so in `require_content_binding/2`, in `mint_site_read_token/3`, and in
+  ##     `list_orphaned_static_deployments/0`. Pass (0b) matched `s.kind ==
+  ##     "static"` alone, so an unbound NODE row matched NEITHER (0a) (excluded
+  ##     by kind) NOR (0b) (excluded by kind) and spun `queued` forever behind a
+  ##     permanent dashboard spinner. LATENT, NOT AN INCIDENT: the door guard
+  ##     upstream refuses an unbound node create with a 422, so no such row can
+  ##     exist today — this is the BACKSTOP, and a backstop covering 2 of 3 kinds
+  ##     fails silently.
+  ##
+  ##     MUTATION PROOF: put `s.kind == "static"` back in place of
+  ##     `s.kind in ["static", "node"]` on pass (0b) of
+  ##     `Registry.reap_stale_deployments/0` and the FIRST test below reds
+  ##     (`no_source_failed` is 0 and the row is still `queued`). The static
+  ##     tests above stay green under that mutation — which is exactly why they
+  ##     were vacuous for this row.
+
+  defp node_site_fixture(barkpark, attrs \\ %{}) do
+    static_site_fixture(
+      barkpark,
+      Enum.into(attrs, %{kind: "node", framework: "nextjs", template: "search-starter"})
+    )
+  end
+
+  test "an UNBOUND NODE queued row is terminally failed by pass (0b), with the content-binding reason" do
+    bp = team_fixture() |> barkpark_fixture()
+    site = node_site_fixture(bp, %{bootstrap_dataset: nil})
+
+    assert site.kind == "node"
+    assert is_nil(site.bootstrap_dataset)
+    # Not reachable by (0a) either: (0a) is container-scoped, and this row has no
+    # artifact and no repo — the exact shape that used to match NOTHING.
+    assert is_nil(site.github_repo)
+
+    {:ok, d} = Registry.create_deployment(site, %{})
+    assert d.status == "queued"
+
+    # It is FRESH, so pass (0c)'s time budget cannot be what kills it: the only
+    # pass that can terminate this row is (0b).
+    assert {:ok, %{no_source_failed: 1, spawn_failed: 0}} =
+             perform_job(StaleDeploymentReaper, %{})
+
+    failed = Repo.get(Deployment, d.id)
+    assert failed.status == "failed"
+    assert failed.failure_reason =~ "no content binding"
+    assert failed.failure_reason =~ "--dataset"
+    # The reason names the cure a node site actually has — not an artifact
+    # upload and not a GitHub repo, neither of which binds its content.
+    refute failed.failure_reason =~ "no build source"
+    refute failed.failure_reason =~ "refused"
+  end
+
+  test "a content-bound NODE queued row SURVIVES the sweep (the widening terminates only UNBOUND rows)" do
+    bp = team_fixture() |> barkpark_fixture()
+    site = node_site_fixture(bp)
+
+    refute is_nil(site.bootstrap_dataset)
+
+    {:ok, d} = Registry.create_deployment(site, %{build_id: "nb0", content_rev: "nc0"})
+
+    assert {:ok, %{no_source_failed: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    kept = Repo.get(Deployment, d.id)
+    assert kept.status == "queued"
+    assert is_nil(kept.failure_reason)
+  end
+
   test "the two passes sum into ONE no_source_failed count (the worker's return shape is unchanged)" do
     bp = team_fixture() |> barkpark_fixture()
     container = site_fixture(bp)

@@ -117,6 +117,12 @@
 set -uo pipefail
 
 SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
+# Absolute path to the docs neighbour, resolved HERE while the cwd is still the
+# invocation's, so the --self-test README count guard at the foot of the selftest
+# block can find it after blocks below have cd'd into tmpdirs. Resolves to a
+# non-existent path when this engine was extracted without its directory, and the
+# guard then skips cleanly - which is the point.
+SELFTEST_README="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || true)/README.md"
 
 # Shared primitives (charter D61): emit/BPSTAGE, valid_slug/valid_build_id,
 # meta_value, build_failure_reason, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy-node.sh
@@ -3406,6 +3412,41 @@ GATENPM
 
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
+  # --- deploy/README.md count guard (ssw8-selftest-count-guard) -------------
+  # deploy/README.md publishes this engine's check count in prose, and until now
+  # NOTHING read it back, so it drifted freely (110 -> 128 -> the number this
+  # guard landed with). Direction matters: the README number is the ASSERTED
+  # value and $TESTS, which this run just measured, is the MEASUREMENT, so the
+  # guard only ever READS the README. A guard that learned its expected value
+  # from the thing it guards would have agreed with every drifted number.
+  # Skips cleanly when the README is absent, so a box that ships only the
+  # engines without the docs tree is unaffected.
+  if [ ! -f "$SELFTEST_README" ]; then
+    echo "[selftest] README count guard: SKIPPED - no $SELFTEST_README (engine shipped without the docs tree)"
+  elif [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" != 1 ]; then
+    # Asserted only on the COMPLETE run - the same condition SELFTEST_FLOOR_FULL
+    # uses. A bare run may honestly skip the optional blocks, so its $TESTS is a
+    # lower bound, and equality there would red on the runner's toolchain rather
+    # than on the drift this guard is looking for.
+    echo "[selftest] README count guard: NOT ASSERTED - bare run (the optional blocks may skip honestly, so $TESTS is a lower bound); it is asserted under BARKPARK_SELFTEST_REQUIRE_E2E=1, which is how CI runs this engine"
+  else
+    # The anchor is this engine's own invocation followed by its count, which
+    # occurs exactly once in the README. Zero matches, or more than one, is a
+    # FAILURE and not a pass: a reworded sentence must red here rather than
+    # quietly disarm the guard by matching nothing.
+    SELFTEST_README_RE='deploy/site-deploy\.sh --self-test[^0-9]{1,12}[0-9]+ checks'
+    SELFTEST_README_HITS="$(grep -oE "$SELFTEST_README_RE" "$SELFTEST_README" | wc -l | tr -d ' ')"
+    if [ "$SELFTEST_README_HITS" != 1 ]; then
+      echo "[selftest] FAILED (1) - README count guard, deploy/site-deploy.sh: expected exactly ONE 'deploy/site-deploy.sh --self-test ... <N> checks' anchor in $SELFTEST_README, found $SELFTEST_README_HITS. The guard reads that sentence to learn the published count; if you reworded it, restore the anchor (the invocation, then the number, then the word 'checks', all on one line) in the SAME commit."
+      exit 1
+    fi
+    SELFTEST_README_COUNT="$(grep -oE "$SELFTEST_README_RE" "$SELFTEST_README" | sed -E 's/.*[^0-9]([0-9]+) checks$/\1/')"
+    if [ "$SELFTEST_README_COUNT" != "$TESTS" ]; then
+      echo "[selftest] FAILED (1) - README count drift in deploy/site-deploy.sh: deploy/README.md publishes $SELFTEST_README_COUNT checks, this run measured $TESTS. The run is the truth - update the number in deploy/README.md to $TESTS in the SAME commit that changed the check count, or the two drift apart again."
+      exit 1
+    fi
+    echo "[selftest] README count guard: deploy/README.md publishes $SELFTEST_README_COUNT checks for deploy/site-deploy.sh, this run measured $TESTS - agreed"
+  fi
   # The floor (see SELFTEST_FLOOR_* at the top of this block). `FAILED (1)` is
   # the shape internal/cli/cloud_site_preflight.go recognises as terminal.
   if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then

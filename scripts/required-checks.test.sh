@@ -2974,6 +2974,227 @@ else
   bad "the planted both-lists contradiction was not reported (planted '$RC_INT_PLANT', predicate said '${RC_INT_MUT_HITS:-nothing}') — the intersection clauses above are vacuous"
 fi
 
+section "14e. THE EMIT'S ARGV SHAPE — no single jq argument may cross Linux's 128 KiB per-argument cap"
+
+# WHAT BROKE, AND WHY NO ASSERTION IN THIS FILE SAW IT. Until 2026-09-13 the emit
+# passed the whole committed spec to jq as `--argjson base "$base_json"` — one
+# execve argument holding the entire file. Linux caps a SINGLE argument at
+# MAX_ARG_STRLEN (32 pages = 131072 bytes) independently of ARG_MAX, so the cap
+# is a per-string one that total-size headroom never relieves. #17989 grew
+# .github/required-checks.json from 98,463 to 133,127 bytes (661e87d9f) to give
+# the 22 unaccounted rendered names a written status — and from that commit EVERY
+# generator call on a Linux runner died with
+#   scripts/required-checks-generate.sh: line 1493: /usr/bin/jq: Argument list too long
+# exit 126. §14/§14b/§24 and the promoted-spec clauses all route that through
+# `fail_emit` into BLOCKED, which is correct — it IS a producer refusal — and the
+# workflow then reds as a HOLD. Measured: required-checks-drift concluded failure
+# on every main head from 661e87d9f (run 34745232714) through a9f727cbc (run
+# 34752269932) with the census clause GREEN underneath it, i.e. the drift detector
+# had stopped being able to say anything about drift.
+#
+# MACOS CANNOT REPRODUCE IT: Darwin enforces a total ARG_MAX (~1 MiB) and no
+# per-argument cap, so the same call succeeds on a developer laptop and dies in
+# CI. A test that waited for the limit would therefore be a test that only ever
+# runs in the place it cannot help. So this section asserts the SHAPE instead —
+# it measures the longest single argument every jq call in a full emit receives,
+# on any platform, and refuses one over the cap.
+RC_ARGV_DIR="$TMP/argv-shim"
+RC_ARGV_LOG="$TMP/argv-maxlen.txt"
+mkdir -p "$RC_ARGV_DIR"
+: > "$RC_ARGV_LOG"
+RC_REAL_JQ="$(command -v jq)"
+# LC_ALL=C makes bash's ${#a} count BYTES, which is the quantity execve measures;
+# under a UTF-8 locale it counts characters and would under-report every reason
+# string carrying an em dash — the exact strings that make this file large.
+cat > "$RC_ARGV_DIR/jq" <<RC_SHIM
+#!/usr/bin/env bash
+LC_ALL=C
+rc_max=0
+for rc_a in "\$@"; do
+  rc_n=\${#rc_a}
+  [ "\$rc_n" -gt "\$rc_max" ] && rc_max=\$rc_n
+done
+printf '%s\n' "\$rc_max" >> "$RC_ARGV_LOG"
+exec "$RC_REAL_JQ" "\$@"
+RC_SHIM
+chmod +x "$RC_ARGV_DIR/jq"
+
+# MAX_ARG_STRLEN on Linux: 32 pages x 4096. Not a preference — the kernel's own
+# constant (fs/exec.c), unchanged across every runner image this repo uses.
+RC_ARGV_CAP=131072
+
+# THE SHIM CANNOT MEASURE WHAT THE KERNEL REFUSES TO START. On Linux the plant
+# below dies in execve BEFORE the shim's first line runs, so the over-cap
+# argument is never logged and the maximum reads like an ordinary small one —
+# measured in CI 2026-09-13: `FAIL the planted argv argument measured 2012
+# byte(s)`, on a runner where the fault the plant reproduces is precisely what
+# killed it. The probe therefore keeps the producer's EXIT STATUS and OUTPUT
+# beside the measurement: over-cap-by-measurement (Darwin, which has no
+# per-argument cap) and refused-by-name (Linux) are two readings of one fault,
+# and the clause below accepts either as the detection.
+rc_argv_probe() {  # $1 = the emit's --out path, rest = the command; sets RC_PROBE_*
+  local out="$1"; shift
+  : > "$RC_ARGV_LOG"
+  rm -f "$out"
+  RC_PROBE_OUT="$(PATH="$RC_ARGV_DIR:$PATH" "$@" 2>&1)" && RC_PROBE_RC=0 || RC_PROBE_RC=$?
+  RC_PROBE_CALLS="$(grep -c . "$RC_ARGV_LOG" || true)"
+  RC_PROBE_MAX="$(awk 'BEGIN{m=0} {if ($1+0 > m) m=$1+0} END{print m}' "$RC_ARGV_LOG")"
+  RC_PROBE_SPEC=0; [ -s "$out" ] && RC_PROBE_SPEC=1
+  return 0
+}
+
+rc_argv_probe "$TMP/argv-spec.json" \
+  bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --out "$TMP/argv-spec.json"
+RC_ARGV_MAX="$RC_PROBE_MAX"
+RC_ARGV_CALLS="$RC_PROBE_CALLS"
+RC_ARGV_SPEC="$RC_PROBE_SPEC"
+
+# THE PRECONDITION, FIRST: a shim that was never reached measures nothing, and an
+# empty log would otherwise read byte-identically to "every argument is small".
+if [ "${RC_ARGV_CALLS:-0}" -gt 0 ] && [ "$RC_ARGV_SPEC" -eq 1 ]; then
+  ok "the shim is on the path the emit actually walks: $RC_ARGV_CALLS jq call(s) observed in one full emit, and the emit still wrote its spec (generator exit $RC_PROBE_RC)"
+else
+  bad "the argv shim recorded ${RC_ARGV_CALLS:-0} jq call(s) and the emit wrote $( [ "$RC_ARGV_SPEC" -eq 1 ] && echo "a spec" || echo "nothing") (generator exit $RC_PROBE_RC) — this section would be vacuous, fix the shim before reading the clause below"
+fi
+
+if [ -n "$RC_ARGV_MAX" ] && [ "$RC_ARGV_MAX" -le "$RC_ARGV_CAP" ]; then
+  ok "no single jq argument in the emit exceeds MAX_ARG_STRLEN: longest is $RC_ARGV_MAX byte(s) of $RC_ARGV_CAP (committed spec is $(wc -c < "$SPEC" | tr -d ' ') bytes, and it travels by --slurpfile, not argv)"
+else
+  bad "a single jq argument is ${RC_ARGV_MAX:-unmeasured} byte(s), over the $RC_ARGV_CAP-byte per-argument cap — this emit dies \`Argument list too long\` (exit 126) on every Linux runner while passing on macOS"
+fi
+
+# MUTATION: the clause is only worth its line if it can SEE the shape it forbids.
+# Plant the committed spec back into argv as one `--arg`, which is byte-for-byte
+# the shape 661e87d9f hit, and leave the --slurpfile inputs alone so the emit
+# still succeeds — the single variable under test is the argv shape, not the
+# output.
+RC_ARGV_MUT="$TMP/gen-argv-plant.sh"
+sed 's|--slurpfile base_in "$argdir/base.json" \\|--slurpfile base_in "$argdir/base.json" --arg argv_plant "$base_json" \\|' \
+  "$GEN" > "$RC_ARGV_MUT"
+if grep -q 'argv_plant' "$RC_ARGV_MUT"; then
+  ok "the argv-plant mutation applies: a copy of the generator passes the committed spec as one execve argument again"
+else
+  bad "the argv-plant mutation did not apply — the emit's --slurpfile line moved, so the proof below is vacuous"
+fi
+rc_argv_probe "$TMP/argv-plant-spec.json" \
+  bash "$RC_ARGV_MUT" "${FIXARGS[@]}" "${ACK[@]}" --out "$TMP/argv-plant-spec.json"
+RC_ARGV_MUT_MAX="$RC_PROBE_MAX"
+RC_ARGV_MUT_E2BIG=0
+case "$RC_PROBE_OUT" in *"Argument list too long"*) RC_ARGV_MUT_E2BIG=1 ;; esac
+if [ "${RC_ARGV_MUT_MAX:-0}" -gt "$RC_ARGV_CAP" ]; then
+  ok "…and with the spec back in argv the SAME measurement reads $RC_ARGV_MUT_MAX byte(s) — over the cap, so this clause reds on exactly the regression it was written for (mutation-proven able to fail, by measurement: this kernel has no per-argument cap)"
+elif [ "$RC_ARGV_MUT_E2BIG" -eq 1 ] && [ "$RC_PROBE_RC" -ne 0 ] && [ "$RC_PROBE_SPEC" -eq 0 ]; then
+  ok "…and with the spec back in argv this kernel REFUSES the emit by name — the producer exits $RC_PROBE_RC writing no spec and says \`Argument list too long\` (mutation-proven able to fail, by the kernel: execve dies before the shim's first line, which is why the measurement above reads only $RC_ARGV_MUT_MAX byte(s))"
+else
+  bad "the planted argv argument measured ${RC_ARGV_MUT_MAX:-nothing} byte(s), not over $RC_ARGV_CAP, AND the producer did not refuse by name (exit $RC_PROBE_RC, spec written=$RC_PROBE_SPEC) — the clause above cannot be shown able to fail"
+fi
+
+section "14f. THE CONSUMERS' ARGV SHAPE — the floor and the verifier read the SAME growing file, and neither may put it in argv"
+
+# §14e closed the PRODUCER. This closes the two CONSUMERS, because the fault is a
+# property of the FILE, not of the script that happened to hit it first: every
+# tool in this family reads .github/required-checks.json, and that file grew from
+# 98,463 to 133,127 bytes in a single PR (661e87d9f / #17989) and stood at
+# 136,352 bytes at e029337793eb (measured 2026-09-13; the clauses below print
+# the live number, this one dates itself deliberately). Whatever crosses MAX_ARG_STRLEN
+# next will cross it the same way: a value that was comfortably small on the day
+# it was written.
+#
+# LEFT STANDING DELIBERATELY, THEN CLOSED HERE. The #18123 fix converted the
+# generator only, so its hunk stayed readable, and filed the survivor rather than
+# forgetting it: scripts/required-checks-floor.sh passed the spec's whole
+# `_readme` array as one execve argument (`--argjson g "$got_readme"`). Measured
+# on origin/main at e029337793eb, 2026-09-13: `_readme` serialises to 8,005 bytes
+# against the 131,072-byte cap — LATENT at roughly 16x margin, not live, and
+# closing, because `_readme` is where essentially all of this file's growth goes
+# (136,352 bytes of spec, of which `.protection` is 509). The floor now passes
+# every spec-derived value by --slurpfile; scripts/required-checks-verify.sh
+# still passes `.protection`-derived values in argv and is recorded SAFE for a
+# reason this section MEASURES rather than asserts: those values are the
+# protection subtree, which never carries `_readme` at all.
+#
+# MACOS CANNOT REPRODUCE ANY OF IT. Darwin enforces a total ARG_MAX and no
+# per-argument cap, so every call here succeeds on a developer laptop at any
+# size, and a local green proves nothing whatever about whether a Linux runner
+# can start the process. That is the whole reason this clause measures a SHAPE
+# on every platform instead of waiting for a size.
+RC_CONS_CAP=131072
+
+# One probe, no --out contract: the floor and the verifier write verdicts to
+# stdout/stderr, so the PRECONDITION is that the shim saw calls at all. An empty
+# log reads byte-identically to "every argument is small", which is why the
+# call count is asserted separately below before any maximum is believed.
+rc_cons_probe() {  # $@ = the command; sets RC_CONS_*
+  : > "$RC_ARGV_LOG"
+  RC_CONS_OUT="$(PATH="$RC_ARGV_DIR:$PATH" "$@" 2>&1)" && RC_CONS_RC=0 || RC_CONS_RC=$?
+  RC_CONS_CALLS="$(grep -c . "$RC_ARGV_LOG" || true)"
+  RC_CONS_MAX="$(awk 'BEGIN{m=0} {if ($1+0 > m) m=$1+0} END{print m}' "$RC_ARGV_LOG")"
+  RC_CONS_E2BIG=0
+  case "$RC_CONS_OUT" in *"Argument list too long"*) RC_CONS_E2BIG=1 ;; esac
+  return 0
+}
+
+# A full floor run against the COMMITTED spec as both reference and candidate —
+# the shape that walks every jq call in the script, including the _readme clause.
+rc_cons_probe bash "$FLOOR" --reference "$SPEC" "$SPEC"
+RC_FLOOR_MAX="$RC_CONS_MAX"; RC_FLOOR_CALLS="$RC_CONS_CALLS"; RC_FLOOR_RC="$RC_CONS_RC"
+RC_FLOOR_VERDICT=0
+case "$RC_CONS_OUT" in *"FLOOR OK"*) RC_FLOOR_VERDICT=1 ;; esac
+
+if [ "${RC_FLOOR_CALLS:-0}" -gt 0 ] && [ "$RC_FLOOR_VERDICT" -eq 1 ]; then
+  ok "the shim is on the path the floor actually walks: $RC_FLOOR_CALLS jq call(s) in one full floor run, and the run still reached its verdict (exit $RC_FLOOR_RC, FLOOR OK printed)"
+else
+  bad "the argv shim recorded ${RC_FLOOR_CALLS:-0} jq call(s) and the floor $( [ "$RC_FLOOR_VERDICT" -eq 1 ] && echo "printed" || echo "did NOT print") a verdict (exit $RC_FLOOR_RC) — this section would be vacuous, fix the probe before reading the clauses below"
+fi
+
+if [ -n "$RC_FLOOR_MAX" ] && [ "$RC_FLOOR_MAX" -le "$RC_CONS_CAP" ]; then
+  ok "no single jq argument in a full floor run exceeds MAX_ARG_STRLEN: longest is $RC_FLOOR_MAX byte(s) of $RC_CONS_CAP (the spec is $(wc -c < "$SPEC" | tr -d ' ') bytes and its _readme $(jq -c '._readme // []' "$SPEC" | tr -d '\n' | wc -c | tr -d ' '); both travel by --slurpfile, not argv)"
+else
+  bad "a single jq argument in the floor run is ${RC_FLOOR_MAX:-unmeasured} byte(s), over the $RC_CONS_CAP-byte per-argument cap — this floor dies \`Argument list too long\` on every Linux runner while passing on macOS, and a floor that cannot start is a floor that cannot refuse"
+fi
+
+# THE SIBLING, MEASURED RATHER THAN TRUSTED. required-checks-verify.sh keeps
+# `--argjson w "$(jq -c '.protection.required_status_checks.checks' "$SPEC")"`
+# and `--argjson spec "$(jq -c '.protection' "$SPEC")"` in argv. Recording a site
+# as safe is only worth its line if something re-measures it, so the same probe
+# walks a full verify run: the day `.protection` starts carrying the growth,
+# this clause reds here instead of the runner refusing the process there.
+if [ -f "$TMP/enforced.json" ] && [ -f "$TMP/rb.json" ] && [ -f "$TMP/runs.json" ]; then
+  rc_cons_probe bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe
+  RC_VERIFY_MAX="$RC_CONS_MAX"; RC_VERIFY_CALLS="$RC_CONS_CALLS"
+  if [ "${RC_VERIFY_CALLS:-0}" -gt 0 ] && [ "${RC_VERIFY_MAX:-0}" -le "$RC_CONS_CAP" ]; then
+    ok "…and no single jq argument in a full verify run exceeds the cap either: longest is $RC_VERIFY_MAX byte(s) of $RC_CONS_CAP over $RC_VERIFY_CALLS call(s) — the argv values there are the .protection subtree ($(jq -c '.protection' "$SPEC" | tr -d '\n' | wc -c | tr -d ' ') bytes), which never carries _readme"
+  else
+    bad "the verify run recorded ${RC_VERIFY_CALLS:-0} jq call(s) with a longest argument of ${RC_VERIFY_MAX:-unmeasured} byte(s) against the $RC_CONS_CAP-byte cap — either the probe missed the run or .protection has grown into the same fault the floor just left"
+  fi
+else
+  bad "the §6 verify fixtures are missing, so the verifier's argv shape went unmeasured — this is a gap, not a pass"
+fi
+
+# MUTATION: the floor clause is only worth its line if it can SEE the shape it
+# forbids. Plant the whole reference spec back into argv on the same jq call the
+# conversion touched — byte-for-byte the shape 661e87d9f hit in the generator,
+# and the shape `_readme` reaches on its own after roughly one more #17989.
+RC_CONS_MUT="$TMP/floor-argv-plant.sh"
+sed 's|--slurpfile g_in "$argdir/got.json"|--slurpfile g_in "$argdir/got.json" --arg argv_plant "$ref"|' \
+  "$FLOOR" > "$RC_CONS_MUT"
+if grep -q 'argv_plant' "$RC_CONS_MUT"; then
+  ok "the argv-plant mutation applies: a copy of the floor passes the whole reference spec as one execve argument again"
+else
+  bad "the argv-plant mutation did not apply — the floor's --slurpfile line moved, so the proof below is vacuous"
+fi
+rc_cons_probe bash "$RC_CONS_MUT" --reference "$SPEC" "$SPEC"
+RC_MUT_MAX="$RC_CONS_MAX"; RC_MUT_RC="$RC_CONS_RC"; RC_MUT_E2BIG="$RC_CONS_E2BIG"
+RC_MUT_VERDICT=0
+case "$RC_CONS_OUT" in *"FLOOR OK"*) RC_MUT_VERDICT=1 ;; esac
+if [ "${RC_MUT_MAX:-0}" -gt "$RC_CONS_CAP" ]; then
+  ok "…and with the spec back in argv the SAME measurement reads $RC_MUT_MAX byte(s) — over the $RC_CONS_CAP-byte cap, so this clause reds on exactly the regression it was written for (mutation-proven able to fail, BY MEASUREMENT: this kernel has no per-argument cap)"
+elif [ "$RC_MUT_E2BIG" -eq 1 ] && [ "$RC_MUT_RC" -ne 0 ] && [ "$RC_MUT_VERDICT" -eq 0 ]; then
+  ok "…and with the spec back in argv this kernel REFUSES the floor BY NAME — it exits $RC_MUT_RC printing no verdict and says \`Argument list too long\` (mutation-proven able to fail, BY THE KERNEL: execve dies before the shim's first line, which is why the measurement above reads only $RC_MUT_MAX byte(s) — the trap §14e hit in CI on 2026-09-13)"
+else
+  bad "the planted argv argument measured ${RC_MUT_MAX:-nothing} byte(s), not over $RC_CONS_CAP, AND the floor did not refuse by name (exit $RC_MUT_RC, verdict printed=$RC_MUT_VERDICT) — the floor clause above cannot be shown able to fail"
+fi
+
 section "15. S6 LEAF DEMOTION — an excluded aggregator takes its \`needs\` upstreams DOWN with it, never up"
 
 S6_OUT="$(bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --explain 2>&1 || true)"
@@ -5997,8 +6218,20 @@ fi
 # report a phantom hit).
 RC25_OLD_NEEDLE='bad "$('"why_emit"
 RC25_NEW_NEEDLE='fail_emit "$('"why_emit"
-RC25_OLD_N="$(grep -cF "$RC25_OLD_NEEDLE" "$0" || true)"
-RC25_NEW_N="$(grep -cF "$RC25_NEW_NEEDLE" "$0" || true)"
+# A COMMENT IS NOT A CALL SITE. `grep -cF` over the whole file counted the
+# PROSE that names the old shape as an instance of it: §27's note "that ratchet
+# counts `bad "$(why_emit` sites" carries the needle inside backticks, so this
+# clause reported 1 surviving site and reddened the suite over a sentence. It
+# was a standing red on main (2026-09-12 run 34701385467 named it at line 6548;
+# 2026-09-13 PR run 34755410507 at 6700 — the line number moved with the file,
+# the "finding" never did), invisible for a day because the E2BIG above stopped
+# the suite before it. Comment lines are stripped from BOTH counts: an
+# explanation of the defect must not read as the defect, and the non-vacuity
+# count must be a count of real call sites too.
+rc25_sites() { grep -nF "$1" "$0" | sed 's/^[0-9]*://' | grep -vc '^[[:space:]]*#' || true; }
+rc25_show()  { grep -nF "$1" "$0" | awk -F: '{l=$0; sub(/^[0-9]+:/,"",l); if (l !~ /^[[:space:]]*#/) print}'; }
+RC25_OLD_N="$(rc25_sites "$RC25_OLD_NEEDLE")"
+RC25_NEW_N="$(rc25_sites "$RC25_NEW_NEEDLE")"
 if [ "$RC25_NEW_N" -gt 0 ]; then
   ok "the ratchet is non-vacuous: $RC25_NEW_N site(s) consume a generator-written spec through the router"
 else
@@ -6007,7 +6240,7 @@ fi
 if [ "$RC25_OLD_N" -eq 0 ]; then
   ok "…and NO site still reds a generator-written spec with a bare failure — the exit-4 contract cannot be silently re-conflated one call site at a time"
 else
-  bad "$RC25_OLD_N site(s) still red a generator-written spec with a bare failure, so a generator outage there is reported as spec drift (exit 1): $(grep -nF "$RC25_OLD_NEEDLE" "$0" | head -3 | tr '\n' '⏎')"
+  bad "$RC25_OLD_N site(s) still red a generator-written spec with a bare failure, so a generator outage there is reported as spec drift (exit 1): $(rc25_show "$RC25_OLD_NEEDLE" | head -3 | tr '\n' '⏎')"
 fi
 
 # ═══ 26. the INVERSE blocking-authority clause, planted as suite clauses ════
