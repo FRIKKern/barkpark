@@ -3700,3 +3700,4 @@ jobs:
           bash -n .claude/skills/orchestrate-tasks/helpers/launch-headless-builder.sh
       - name: "orchestrate-launch-recipe.test.sh (21 assertions incl. the env-var mutation)"
         run: bash scripts/orchestrate-launch-recipe.test.sh
+# probe marker for task-3d58169ded21964a arm measurement; delete me
