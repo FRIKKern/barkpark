@@ -182,6 +182,31 @@ defmodule Barkpark.Tasks.TerminalCriteriaFence do
 
   def changes_terminal_criteria?(_incumbent_content, _new_content), do: false
 
+  @doc """
+  The rule AND ITS REFUSAL, for the PUBLISH seam (task-b821ec4b2bcf8087 — the
+  residue this module's moduledoc states above).
+
+  `Content.Lifecycle`'s publish gate decides with
+  `changes_terminal_criteria?/2` and then calls this to BUILD the refusal, so
+  the second seam restates neither the rule nor the sentence that teaches it:
+  a caller cannot tell which of the two doors refused it, exactly as the
+  criteria-regression fence beside it already arranges.
+
+  Returns `{:error, {:invalid_task_content, details}}` unconditionally — call it
+  only where `changes_terminal_criteria?/2` has already returned true.
+  """
+  @spec refusal(map(), map()) :: {:error, {:invalid_task_content, map()}}
+  def refusal(incumbent_content, new_content)
+      when is_map(incumbent_content) and is_map(new_content) do
+    {:error,
+     {:invalid_task_content,
+      terminal_criteria_error(
+        incumbent_content["lifecycle_status"],
+        incumbent_content,
+        new_content
+      )}}
+  end
+
   defp verdict(incumbent_content, content) do
     if changes_terminal_criteria?(incumbent_content, content) do
       {:error,

@@ -603,6 +603,54 @@ defmodule Barkpark.Content.WriteScope do
 
   def inherit_scope_attrs(attrs, _), do: attrs
 
+  @doc """
+  THE TRANSITION-SEAT DOOR (task-d507d3d83476b57d, the seeded-Default ruling's
+  clause (d)).
+
+  `inherit_scope_attrs/2` is nil-skipping BY CONSTRUCTION
+  (`maybe_put_scope_attr(attrs, _key, nil) -> attrs`), which is right when the
+  source row carries a scope and WRONG when it does not: a nil-workspace source
+  produced a nil-workspace destination row, and
+  `Content.Scope.scope_to_workspace_including_global/3` is
+  `workspace_id == ^ws or is_nil(...)`, so that row is readable by EVERY tenant
+  through `Content.Analytics` and `Content.TagRegistry`.
+
+  This is the seat-side half of the classified door: INHERIT when the source has
+  a workspace (byte-identical to `inherit_scope_attrs/2` — the door is not
+  consulted at all, so a scoped publish/unpublish/seed is unchanged), otherwise
+  RESOLVE through `put_scope_attrs/2` and therefore through
+  `resolve_key_absent_write_scope/1` — an attributable caller is inferred or
+  REFUSED (`{:error, :workspace_scope_required}`), an `instance_wide: true`
+  declaration keeps the seeded Default, and only the residual (no scope key, no
+  principal — fixtures, internal helpers) lands in Default.
+
+  WHY RESOLVE AND NOT REFUSE OUTRIGHT at these seats: the source row is itself
+  already nil-workspace, so refusing the transition strands it with no verb that
+  can fix it. Resolving ATTRIBUTES the destination row, which is the outcome the
+  ruling asks for; a caller that cannot be attributed unambiguously is still
+  refused, by the door, in one place.
+
+  The resolved attrs are re-inherited from the source afterwards, so any
+  NON-workspace key the source did carry (`project_id`, `dataset_id`,
+  `owner_id`) still wins over the freshly-resolved one. Callers pass only
+  `%{"dataset" => dataset}` — deliberately NOT the row's `type` — so
+  `resolve_owner_id_for_write/2` takes its `not is_binary(type)` arm and the
+  destination's ownership comes from the SOURCE, never from the publisher.
+  """
+  @spec inherit_or_resolve_scope_attrs(map(), Document.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def inherit_or_resolve_scope_attrs(attrs, %Document{} = source, opts) do
+    inherited = inherit_scope_attrs(attrs, source)
+
+    if is_nil(Map.get(inherited, "workspace_id")) do
+      with {:ok, resolved} <- put_scope_attrs(inherited, opts) do
+        {:ok, inherit_scope_attrs(resolved, source)}
+      end
+    else
+      {:ok, inherited}
+    end
+  end
+
   def fire_after({:ok, doc}, event, payload) do
     after_payload = %{payload | event: event, doc: doc}
     _ = Barkpark.Plugins.Hooks.fire(event, after_payload)

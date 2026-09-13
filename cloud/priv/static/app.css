@@ -1228,8 +1228,26 @@ select.form-input {
   box-shadow: var(--shadow-sm);
 }
 .tier-name { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-text); }
-.tier-price { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 10px 0 2px; }
-.tier-price small { font-size: 13px; font-weight: 500; color: var(--dim); }
+/* ===== RETIRED: the tier/plan PRICE + QUOTA rules (cch-w49-s1 follow-up) =====
+   cch-w49-s1 removed .tier-price, .plan-price, .new-tier-price and .tier-quota
+   from every render path in app.js — no server value supports a price or an
+   instance ceiling on these screens — but left their CSS behind, because app.css
+   was outside that slice's declared files fence. EIGHT rule heads stood here with
+   zero producers, verified one token at a time across app.js, index.html and
+   styleguide.html. SEVEN are retired here; the eighth, `.tier-free .tier-price`,
+   is left standing for a measured reason recorded at its own site below:
+
+     .tier-price            .tier-price small
+     .plan-price            .plan-price small
+     .new-tier-price        .new-tier-price .dim
+     .tier-quota
+
+   Dead style, not a defect: nothing selected them, so removing them paints
+   nothing differently. Note what did NOT catch this — E2 reds on a class EMITTED
+   with no rule; the reverse, a rule with no emitter, is caught only by the
+   cssom-heads exact-count ratchet, which is why the baseline moves with this
+   commit. `.tier-name`, `.tier-note`, `.tier .btn` and the whole `.plan-feats`
+   family STAY: those are still rendered. */
 .tier-note { font-size: 12px; color: var(--dim); margin: 0 0 18px; flex: 1; }
 /* cch-tier-note-undefined-render — `margin-top: auto` is what keeps the
    Subscribe buttons on one line across the tier grid. It USED to be a
@@ -1244,6 +1262,24 @@ select.form-input {
    and it makes the alignment a property of the button rather than a lucky
    consequence of every row happening to have prose in it. */
 .tier .btn { width: 100%; margin-top: auto; }
+/* THE EIGHTH ORPHAN, DELIBERATELY LEFT STANDING, and the reason is a measurement
+   rather than a preference. `.tier-free .tier-price` is as dead as the seven rules
+   retired above — .tier-price has had no emitter since cch-w49-s1. But it is also
+   the ONLY authored rule head carrying `.tier-free`, and app.js still emits that
+   class (`(t.free ? " tier-free" : "")`, grep -n 'tier-free' app.js — one site).
+   Deleting this line therefore does not retire dead style; it converts a dead RULE
+   into a class emitted with no rule at all, and __css_check E2 reds on exactly that:
+
+     FAIL  E2 app.js  class "tier-free" is emitted but has no rule in app.css
+
+   That was run, not predicted. The two consenting ways to silence it — a KNOWN_GAPS
+   demotion or an ALLOW_HOOK_CLASSES entry — are both refused here: the first is the
+   waiver-absolving-nothing shape this very commit deletes two instances of, and the
+   second would be false, since nothing queries `.tier-free` in JS. The honest fix is
+   to drop the EMISSION and this rule together, which is one line in app.js — a file
+   fenced to a sequential lane and out of this PR's declared scope. Filed as its own
+   row so the pair moves together. `.tier-current` is NOT in the same position: it
+   has its own rule (app.css, `.tier-current { border-color: … }`). */
 .tier-free .tier-price { color: var(--muted-text); }
 
 /* ========================================================== MODAL */
@@ -1563,8 +1599,6 @@ select.form-input {
   padding: 2px 8px; border-radius: var(--pill);
 }
 .plan-tagline { font-size: 13px; color: var(--muted-text); margin: 4px 0 16px; }
-.plan-price { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
-.plan-price small { font-size: 14px; font-weight: 500; color: var(--dim); }
 .plan-feats { list-style: none; padding: 0; margin: 18px 0 22px; display: flex; flex-direction: column; gap: 10px; }
 .plan-feats li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .plan-feats .ck { color: var(--success); font-weight: 700; }
@@ -3079,8 +3113,6 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-tier { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
 .new-tier-head { display: flex; align-items: baseline; justify-content: space-between; }
 .new-tier-name { font-weight: 600; }
-.new-tier-price { font-size: 20px; font-weight: 700; }
-.new-tier-price .dim { font-size: 13px; font-weight: 400; }
 .new-tier .btn { margin-top: 12px; }
 
 /* ── GR18 theater (v4, screens/09): head + price line + two-column stage ─────
@@ -6057,9 +6089,6 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dunning-title { color: var(--warn-strong); font-weight: 700; }
 .dunning-body { margin: 0; max-width: 62ch; }
 
-/* Quota-honest tier cards: the real ceiling, mono, right above the action. */
-.tier-quota { font-family: var(--mono); font-size: var(--text-xs); color: var(--cc-fg3); margin: 0 0 12px; }
-
 /* GR20 topbar billing chip — sits AHEAD of the SSE liveness chip; trial rides
    the info blue, past-due the danger red. It is a link to #billing. */
 .billing-chip {
@@ -6422,6 +6451,30 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dom-rung--failed { color: var(--danger); background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.3); }
 .dom-rung--active { color: var(--info); background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.3); }
 .dom-rung--proxied { color: var(--info); background: hsl(var(--info-hsl) / 0.08); border-color: hsl(var(--info-hsl) / 0.25); }
+/* A rung nobody has reached yet. Its treatment IS the muted base pill above, and
+   this rule restates it EXACTLY — same three tokens, byte-for-byte the same paint
+   — so adding it changes no pixel. It is here because `domainStageRows` folds a
+   status into one of SIX closed roles and this was the only one of the six with
+   no rule of its own: the modifier resolved to nothing and the chip fell through
+   to `.dom-rung`.
+
+   THIS IS NOT THE cch-w64 IMPERSONATION SHAPE, and that difference IS the finding
+   the row demanded before any CSS was written. There, `siteFreshnessSeg`
+   deliberately ships a BARE `.fresh-badge` as its own meaningful state ("never
+   deployed"), so a rule-less modifier rendered byte-identical to a DIFFERENT
+   state. Here `domainRungChip` always emits `dom-rung dom-rung--<role>`, never a
+   bare base, and of the six roles ok/failed/active/proxied/unknown all carry
+   rules — so `pending` was the only role that ever reached the base, and the
+   fall-through was landing on the right paint by COINCIDENCE rather than
+   impersonating anything. A weaker defect than the sibling's; recorded as such
+   rather than inheriting its severity. The remedy is the same, though, and it is
+   NOT a consent list: an unwritten fall-through is not a treatment, so the rule
+   is written and E18 then requires one for all six roles. */
+.dom-rung--pending {
+  color: var(--muted-text);
+  background: var(--muted-surface);
+  border-color: var(--border);
+}
 /* A rung the control plane ATTEMPTED and could not measure. It must not look
    like a rung we are still waiting on (the default muted pill): amber, and a
    DASHED border — the shape says "no reading taken", not "in flight". Same

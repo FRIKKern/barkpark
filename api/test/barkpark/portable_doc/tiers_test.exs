@@ -87,14 +87,118 @@ defmodule Barkpark.PortableDoc.TiersTest do
                     __DIR__
                   )
 
-    defp renderable_types do
-      source = File.read!(@compose_path)
+    # ── THE EXTRACTOR: compose_block CLAUSE HEADS, read off the AST ───────────
+    # This was a FILE-WIDE regex pair, and the `when t in [...]` half read ANY
+    # such guard anywhere in compose.ex as a list of block types. #17811 tripped
+    # it: a column-type whitelist (`when t in ["text", "num", "delta", "spark"]`)
+    # inside the private `table_col_types/2` helper moved this anchor 80 → 84
+    # with no block type added, and the workaround was a comment in PRODUCTION
+    # code forbidding a legal Elixir form because a TEST's regex could not parse
+    # it — a fence around the instrument instead of a fix.
+    #
+    # The extractor now quotes the source and reads ONLY `def compose_block/2,3`
+    # clause heads, so nothing outside a clause head can move the number.
+    # Everything else is UNCHANGED, deliberately: a type is named either by a
+    # literal `"type" => "x"` in the first-argument map pattern, or by a literal
+    # `t in ["x", "y"]` guard over the variable that pattern binds. On compose.ex
+    # as of this commit the two extractors agree exactly — 80 types, empty set
+    # difference both ways — so this is a re-anchoring, not a re-count.
+    #
+    # The `t == "x"` and `t in @attr` variable-guard forms stay OUT, as they were
+    # before: that is compose.ex's documented ALIAS form (see its comments above
+    # @unordered_list_aliases and @heading_aliases). An alias has no tier of its
+    # own — it borrows its target's — so it is not a member of this set.
+    defp renderable_types, do: @compose_path |> File.read!() |> compose_block_clause_types()
 
+    defp compose_block_clause_types(source) do
+      source
+      |> Code.string_to_quoted!()
+      |> compose_block_clause_heads()
+      |> Enum.flat_map(&clause_head_types/1)
+      |> Enum.uniq()
+      |> Enum.sort()
+    end
+
+    defp compose_block_clause_heads(ast) do
+      {_, heads} =
+        Macro.prewalk(ast, [], fn
+          {:def, _, [head | _]} = node, acc -> {node, [head | acc]}
+          node, acc -> {node, acc}
+        end)
+
+      Enum.filter(heads, fn head ->
+        match?(
+          {:compose_block, _, args} when is_list(args) and length(args) in [2, 3],
+          call_of(head)
+        )
+      end)
+    end
+
+    defp call_of({:when, _, [call, _guard]}), do: call
+    defp call_of(call), do: call
+
+    defp guard_of({:when, _, [_call, guard]}), do: guard
+    defp guard_of(_head), do: nil
+
+    defp clause_head_types(head) do
+      {:compose_block, _, args} = call_of(head)
+
+      case type_pattern(hd(args)) do
+        {:ok, literal} when is_binary(literal) ->
+          [literal]
+
+        {:ok, {var, _, ctx}} when is_atom(var) and is_atom(ctx) ->
+          guard_literals(guard_of(head), var)
+
+        _ ->
+          []
+      end
+    end
+
+    # the first argument is `%{"type" => …}`, or `%{"type" => …} = b`
+    defp type_pattern({:=, _, parts}) do
+      Enum.find_value(parts, :error, fn part ->
+        case type_pattern(part) do
+          {:ok, value} -> {:ok, value}
+          :error -> nil
+        end
+      end)
+    end
+
+    defp type_pattern({:%{}, _, pairs}) when is_list(pairs) do
+      case List.keyfind(pairs, "type", 0) do
+        {"type", value} -> {:ok, value}
+        nil -> :error
+      end
+    end
+
+    defp type_pattern(_other), do: :error
+
+    defp guard_literals(nil, _var), do: []
+
+    defp guard_literals(guard, var) do
+      {_, acc} =
+        Macro.prewalk(guard, [], fn
+          {:in, _, [{^var, _, _}, list]} = node, acc when is_list(list) ->
+            {node, acc ++ Enum.filter(list, &is_binary/1)}
+
+          node, acc ->
+            {node, acc}
+        end)
+
+      acc
+    end
+
+    # The RETIRED file-wide regex, kept for exactly one purpose: it is the
+    # control arm. A test below feeds it the same fixtures as the extractor and
+    # asserts it MISBEHAVES on them — without that, "the guard in a non-block
+    # helper does not move the count" would pass on a fixture that never had a
+    # trap in it, and the control would be vacuous.
+    defp legacy_regex_types(source) do
       direct =
         Regex.scan(~r/compose_block\(%\{"type" => "([A-Za-z0-9-]+)"/, source)
         |> Enum.map(&List.last/1)
 
-      # the `when t in ["tasks", "task-list"]` guard clause
       guard =
         Regex.scan(~r/when t in \[([^\]]+)\]/, source)
         |> Enum.flat_map(fn [_, inner] ->
@@ -111,6 +215,85 @@ defmodule Barkpark.PortableDoc.TiersTest do
       assert "section" in types
       assert "tasks" in types, "the `when t in [...]` guard clause was not parsed"
       assert length(types) > 30, "only #{length(types)} types parsed — compose.ex moved?"
+    end
+
+    # ── CONTROLS ON THE INSTRUMENT ────────────────────────────────────────────
+    # This anchor's whole failure mode is an extractor that answers confidently
+    # about a population it never measured, so a green on the real file proves
+    # nothing on its own. Each control below runs the extractor on a FIXTURE
+    # whose correct answer is known by construction.
+
+    @fixture_two_clause_forms """
+    defmodule Fixture do
+      def compose_block(%{"type" => "alpha"} = b, style), do: {b, style}
+      def compose_block(%{"type" => t} = b, style) when t in ["beta", "gamma"], do: {b, style}
+    end
+    """
+
+    @fixture_guard_in_non_block_helper """
+    defmodule Fixture do
+      def compose_block(%{"type" => "alpha"} = b, style), do: {b, style}
+
+      defp table_col_types(cols) do
+        Enum.map(cols, fn
+          %{"type" => t} when t in ["text", "num", "delta", "spark"] -> t
+          _ -> "text"
+        end)
+      end
+    end
+    """
+
+    @fixture_multiline_clause_head """
+    defmodule Fixture do
+      def compose_block(
+            %{"type" => "alpha"} = b,
+            style
+          ),
+          do: {b, style}
+    end
+    """
+
+    @fixture_no_compose_block """
+    defmodule Fixture do
+      defp helper(t) when t in ["alpha", "beta"], do: t
+    end
+    """
+
+    test "POSITIVE CONTROL: the extractor finds BOTH clause-head forms it claims to read" do
+      # literal `"type" => "alpha"` head AND the `t in [...]` guard head.
+      assert compose_block_clause_types(@fixture_two_clause_forms) == ["alpha", "beta", "gamma"]
+    end
+
+    test "EMPTY-POPULATION REFUSAL: nothing to read yields [], and the real file is NOT empty" do
+      # An extractor that silently returns [] makes every membership assertion
+      # below it pass vacuously. Both halves are asserted: the extractor CAN
+      # return empty (so `== []` elsewhere is a real outcome, not an impossibility),
+      # and on the file this anchor is actually about it does not.
+      assert compose_block_clause_types(@fixture_no_compose_block) == []
+
+      real = renderable_types()
+      refute real == [], "the extractor parsed compose.ex to an EMPTY set — it measured nothing"
+
+      assert length(real) > 30,
+             "only #{length(real)} clause-head types parsed — compose.ex moved?"
+    end
+
+    test "NEGATIVE CONTROL (#17811's trap): a `when t in [...]` guard in a NON-block helper cannot move the count" do
+      assert compose_block_clause_types(@fixture_guard_in_non_block_helper) == ["alpha"]
+
+      # …and the control is not vacuous: the retired file-wide regex swallows the
+      # column-type whitelist whole, which is exactly the 80 → 84 inflation that
+      # produced the ban comment in compose.ex.
+      assert legacy_regex_types(@fixture_guard_in_non_block_helper) ==
+               ["alpha", "delta", "num", "spark", "text"]
+    end
+
+    test "OLD-BLIND / NEW-SIGHTED: a multi-line clause head is invisible to the retired regex" do
+      # The retired regex needed `compose_block(%{"type" => "` contiguous on one
+      # line, so a clause head the formatter wrapped was silently dropped — the
+      # same class of error as the over-count, in the other direction.
+      assert compose_block_clause_types(@fixture_multiline_clause_head) == ["alpha"]
+      assert legacy_regex_types(@fixture_multiline_clause_head) == []
     end
 
     test "EVERY renderable block type has a tier" do

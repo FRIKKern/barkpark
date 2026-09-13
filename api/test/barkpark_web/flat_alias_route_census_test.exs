@@ -850,6 +850,13 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "create/delete/mint_token/revoke_token resolve the target workspace first. Foreign " <>
          "rows are ABSENT, never 403. DOCUMENTED RESIDUAL: the `env` half of index/2 is left " <>
          "unclamped pending the owner ruling arpss-stored-share-registry-ruling."},
+    # ShareController.publish_media (task-cbb112a9b4c600cc)
+    {"POST", "/v1/shares/media"} =>
+      {:workspace_derived,
+       "workspace_admin?-confined, same order as its POST /v1/shares sibling: grammar -> " <>
+         "resolve the workspace the SCOPE names -> authorize -> write. A caller who does not " <>
+         "administer that workspace gets 403 before Sharing.publish_media/1 touches the " <>
+         "store, so the affordance can never be a softer door onto the same registry."},
     # ShareLinkController.list
     {"GET", "/v1/shares/links"} =>
       {:workspace_derived,

@@ -3279,7 +3279,18 @@
         '<input class="form-input" id="cred-label" type="text" placeholder="main" /></div>' +
       credentialFieldsHtml(p) +
       '<div class="cred-remediation" id="cred-remediation" role="alert" hidden></div>' +
-      '<div class="modal-actions"><button class="btn btn-primary btn-block" id="cred-submit" type="button">Add provider</button></div>'
+      // cch-r17-w12 — THE FENCE. POST /v1/providers is `Auth.require_team_admin`
+      // and this sheet used to offer it to anyone who reached it, with no
+      // authority read of its own: a member saw "Add provider", typed a real
+      // credential, pressed it and collected a 403. Drawn through
+      // adminWriteControlHtml, whose refusal arm DROPS liveAttrs (D428) — so a
+      // refused principal gets NO `id="cred-submit"`, the wiring below finds
+      // nothing to bind, and the same verb is drawn disabled-and-explained.
+      // The "wizard-block" emphasis reproduces this button's shipped class list
+      // (`btn btn-primary btn-block`) byte for byte on the GRANT arm only.
+      '<div class="modal-actions">' +
+        adminWriteControlHtml(providerWriteAuthority(), "Add provider", 'id="cred-submit"', "", "wizard-block") +
+      "</div>"
     );
     if (!body) return;
     var back = body.querySelector("#cred-back");
@@ -3460,6 +3471,31 @@
   // closed exactly as the old meCache-falsy read did.
   function providerCanWrite() {
     return teamAuthorityState() === "grant";
+  }
+
+  // cch-r17-w12 — THE PROVIDER BAND'S WRITE AUTHORITY, narrowed for
+  // adminWriteControlHtml, and the SAME narrowing idiom newWriteAuthority()
+  // shipped for the launch band (#18136): a five-valued source band mapped onto
+  // the control helper's three-valued vocabulary, FAILING CLOSED so
+  // loading/failed/stale can never read as a grant at a call site that never
+  // heard about them.
+  //
+  // WHY teamAuthorityState() AND NOT launchAuthority(). The route this fences
+  // is POST /v1/providers, whose tier is `Auth.require_team_admin` — the very
+  // fact team_authority.admin carries, and the band providerCanWrite() and the
+  // PREDICATED inline sibling (submitInlineProviderCred) already read. The
+  // launch band is a DIFFERENT question about a DIFFERENT route (POST
+  // /v1/launch); that the launch wizard happens to be the only door into this
+  // sheet is a reachability accident, not this row's predicate, which is
+  // exactly what __binding_census.mjs's note refused to accept as a fence.
+  //
+  // It is a separate function rather than a widening of providerCanWrite()
+  // because that one is a BOOLEAN by design (D439): a two-valued read of a
+  // three-valued fact is the lie this wave exists to kill, and every existing
+  // caller of it branches on truthiness.
+  function providerWriteAuthority() {
+    var state = teamAuthorityState();
+    return (state === "grant" || state === "refuse") ? state : "unknown";
   }
 
   // A prod-tier provider's display name for a matrix column / roster row.
@@ -29322,6 +29358,12 @@
       // even ALWAYS-TRUE — a fail-open GR9 forbids. Pure role reads; the render
       // policy they gate stays smoke+browser-verified.
       providerCanWrite: providerCanWrite,
+      // cch-r17-w12 — the narrowing the credential sheet's submit is drawn
+      // through, plus the sheet opener itself: the smoke corpus can then reach
+      // this offer site with a REAL member /v1/me behind it, so the band is a
+      // consequence of the fixture rather than an argument a test hands in.
+      providerWriteAuthority: providerWriteAuthority,
+      openProviderCredential: openProviderCredential,
       notifCanManage: notifCanManage,
       canManageOnboarding: canManageOnboarding,
       billingHasPaidPlan: billingHasPaidPlan,

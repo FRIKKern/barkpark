@@ -397,6 +397,21 @@ const F_LAUNCH = (read, decide) => ({ band: LAUNCH_BAND, read: read, decide: dec
 const NEW_WRITE_BAND = "newWriteAuthority";
 const F_NEWWRITE = (read, decide) => ({ band: NEW_WRITE_BAND, read: read, decide: decide });
 
+// ── cch-r17-w12 — THE PROVIDER BAND'S WRITE VOCABULARY, and it is the SAME
+// ── narrowing shape NEW_WRITE_BAND is, for the same reason. providerCanWrite is
+// ── a BOOLEAN band (`teamAuthorityState() === "grant"`) and every caller of it
+// ── branches on truthiness; adminWriteControlHtml needs the three-valued
+// ── grant/refuse/unknown vocabulary and its refusal arm drops the mount hook.
+// ── providerWriteAuthority() is that narrowing — teamAuthorityState()'s five
+// ── values mapped onto the helper's three, failing CLOSED — and it is a band in
+// ── its own right here because (2i-2) checks that each pinned READ calls the
+// ── band it names, and the credential sheet calls the narrowing, not the
+// ── boolean. It is DELIBERATELY NOT the launch band: the route is POST
+// ── /v1/providers (require_team_admin), and the launch wizard being this
+// ── sheet's only door is reachability, not this row's predicate.
+const PROVIDER_WRITE_BAND = "providerWriteAuthority";
+const F_PROVWRITE = (read, decide) => ({ band: PROVIDER_WRITE_BAND, read: read, decide: decide });
+
 // ── THE BOOLEAN BANDS (bands 4-7), pinnable only since (2i-3) grew its shape
 // ── arm. Every one of them answers `someState() === "grant"`, so there is no
 // ── vocabulary to derive and nothing for the string arm to compare; what each
@@ -455,7 +470,7 @@ const PIN = [
   { fn: "openResurrectModal", verb: "POST", route: "/v1/resurrect", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadArchives", "archiveRowHtml"), auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "cch-w48-s4 re-pin: loadArchives reads the band and threads it into archivesModel; archiveRowHtml emits .archive-resurrect-btn ONLY on a grant — refuse/unknown draw the CLI chip alone, with no button to mount. Was pinned UNPREDICATED, which stopped being true when the offer-time answer shipped. resurrect/1 still refuses non-admins inside a cond, so the context_fn and the overlay stay" },
 
   // ── providers — THE DECISIVE PAIR. Same route, opposite verdicts.
-  { fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED — but NOT for the reason this row used to give. The old note said the .launch-connect-provider button 'renders unconditionally' and credited a renderLaunchConnect that app.js does not declare; both halves were false (cch-w48-s4). What is true: catalogPanelHtml draws the button, and it is only ever reached inside the launch wizard, which launchFlow withholds unless launchAuthority() === 'grant'. That fence is THREE HOPS away, belongs to the LAUNCH band, and guards POST /v1/launch — not this row's POST /v1/providers, whose own tier is require_team_admin. A predicate this row does not evaluate is not this row's predicate, so it stays null and stays owned" },
+  { fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: PROVIDER_WRITE_BAND, fence: F_PROVWRITE("openProviderCredential", "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-r17-w12: FENCED, and the row leaves the UNPREDICATED list on that fence and not on a re-worded note. The old note was right that the launch wizard's own fence does not count — it is THREE HOPS away, belongs to the LAUNCH band and guards POST /v1/launch, while this route's tier is require_team_admin. So the sheet now asks its OWN question: openProviderCredential reads providerWriteAuthority() (teamAuthorityState() narrowed to adminWriteControlHtml's three-valued vocabulary, failing closed) and draws the submit through adminWriteControlHtml(…, \"wizard-block\") — the refusal arm DROPS liveAttrs, so a refused principal gets no id=\"cred-submit\" and the wiring below binds nothing. MEASURED BOTH WAYS in the RENDERED BYTES of two committed scenarios, with the band read from each fixture's own /v1/me and only the OPENING gesture supplied: providers-member paints the disabled-and-explained arm with zero id=\"cred-submit\", providers-connected paints the live btn-primary btn-block button. The sheet's only forward door (.launch-connect-provider) sits inside a wizard launchFlow withholds from a member entirely, so no member fixture can reach it by clicking and minting one that could would be fiction — the same boundary member-authority-sweep.mjs declares for #new-vercel-claim" },
   { fn: "submitInlineProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV(["loadProviders", "renderProviderPage"], "renderProviderPage", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "renderConnectCard mounts only when providerCanWrite()" },
   { fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV(["loadProviders", "renderProviderPage"], "renderProviderPage", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
 
@@ -1245,14 +1260,13 @@ const die2 = (lines) => {
 const CONTROL_FLOOR = 1000;
 
 const OFFERS = [
-  {
-    key: "submitProviderCred|POST /v1/providers",
-    id: "cred-submit", withoutData: "data-connect-submit",
-    what: "the launch wizard's credential SHEET (openProviderCredential's modal body). THE ID IS SHARED " +
-      "with the PREDICATED inline sibling and the two are told apart ONLY by data-connect-submit, which " +
-      "renderConnectCard's button carries and this one does not — a probe keyed on the bare id would " +
-      "attribute the sibling's renders to this row, which is exactly the mis-reading this arm exists to end",
-  },
+  // cch-r17-w12 REMOVED the submitProviderCred row that sat here. This list is a
+  // PREDICATE OVER THE PIN — one entry per unpredicated row, both directions
+  // checked — so a row that leaves the unpredicated population must leave this
+  // list in the same commit or the arm reds as an offer spec for a row nobody
+  // classifies. Its offer site did not disappear; it is FENCED, and #cred-submit
+  // is now measured in the rendered bytes by smoke.mjs on BOTH bands
+  // (providers-member refuses, providers-connected offers).
   {
     key: "submitAgentKey|POST /v1/barkparks/:*/agent-key",
     data: "data-agent-key-send",
@@ -1488,7 +1502,13 @@ for (const f of FILING_FIVE) {
 // so what is left is the two this slice does not own. RE-DERIVED by RUNNING
 // this census and reading the `found` line it PRINTED ("0 reachable · 1 omitted
 // · 1 unobservable"), never by subtracting three.
-const EXPECT_POPULATIONS = { reachable: 0, omitted: 1, unobservable: 1 };
+// cch-r17-w12 moved UNOBSERVABLE 1 -> 0, and the direction is the GOOD one
+// twice over: the row left the unpredicated population entirely (it is FENCED
+// now, not merely re-classified), and it was the last UNOBSERVABLE one — what
+// is left is the single PROVEN-OMITTED row this slice does not own. RE-DERIVED
+// by RUNNING this census and reading the split line it PRINTED, never by
+// subtracting one.
+const EXPECT_POPULATIONS = { reachable: 0, omitted: 1, unobservable: 0 };
 if (POP.reachable !== EXPECT_POPULATIONS.reachable ||
     POP.omitted !== EXPECT_POPULATIONS.omitted ||
     POP.unobservable !== EXPECT_POPULATIONS.unobservable) {
@@ -1579,7 +1599,15 @@ if (unresolved.length) {
 // bands instead of 34. RE-DERIVED by RUNNING this census and reading the
 // `found` line it PRINTED ("80 rows · 39 elevated · 37 predicated · 2
 // unpredicated"), never by adding three and subtracting three.
-const EXPECT = { total: 80, elevated: 39, predicated: 37, unpredicated: 2 };
+// predicated 37 → 38, unpredicated 2 → 1 (cch-r17-w12): submitProviderCred, the
+// FOURTH unowned row on the UNPREDICATED list, is now fenced on the PROVIDER
+// band through adminWriteControlHtml, so it moves from the unpredicated column
+// into the predicated one. `total` and `elevated` are UNMOVED and that is the
+// load-bearing part of this bump: no call site was added or removed and no
+// route's tier changed — the same 39 elevated writes are decided by 38 bands
+// instead of 37. RE-DERIVED by RUNNING this census and reading the line it
+// PRINTED, never by adding one and subtracting one.
+const EXPECT = { total: 80, elevated: 39, predicated: 38, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
@@ -1649,8 +1677,13 @@ const LEGACY_UNPREDICATED = [
   //     for (const m of s.matchAll(/\{ fn: "([^"]+)", verb: "([^"]+)", route: "([^"]+)", elevated: true, predicate: null,/g))
   //       console.log(`"${m[1]}|${m[2]} ${m[3]}",`)'
   // …or simply read the "UNPREDICATED ELEVATED WRITES" block this file prints.
-  "submitProviderCred|POST /v1/providers",
   "submitAgentKey|POST /v1/barkparks/:*/agent-key",
+  // cch-r17-w12 RATCHETED THIS CEILING DOWN BY ONE MORE. submitProviderCred is
+  // fenced through adminWriteControlHtml on the PROVIDER band, so it is no
+  // longer an unpredicated row and may not sit on a list whose whole job is to
+  // name what is still unfixed. Removing it is the ratchet TIGHTENING: the day
+  // it regresses to predicate:null it reds as NOVEL rather than being absorbed
+  // by a stale ceiling.
   // cch-r16-w11 RATCHETED THIS CEILING DOWN BY THREE. newVercelDeploy,
   // newCreateRepo and newRenderFailed are fenced through adminWriteControlHtml
   // on the launch band, so they are no longer unpredicated rows and may not sit
