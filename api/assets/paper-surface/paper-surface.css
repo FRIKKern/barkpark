@@ -741,6 +741,18 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }
 .bp-paper-surface .bp-callout--danger  { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg);  border-left-color: var(--bp-tone-danger-fg); }
 .bp-paper-surface .bp-callout--neutral { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); border-left-color: var(--bp-tone-neutral-fg); }
+
+/* VERDICT callouts — the two SEMANTIC tones (design/tokens.json color.verdict):
+   `loss` is the terracotta-red verdict and `peace` the green one. They sit here
+   beside the five `--bp-tone-*` system tones and read a DIFFERENT token family
+   on purpose: a tone says what STATE a thing is in, a verdict says what the
+   reader should CONCLUDE, and the verdict inks are AA-walked against the reading
+   page rather than the Studio shell. The rail (`border-left-color`) takes the
+   ink and the card takes the soft ground — the same rail/wash split the tone
+   rules use, so the two families are visually one system and semantically two.
+   check.mjs Part H's verdict arm reads THESE rules: delete one and it reds. */
+.bp-paper-surface .bp-callout--loss  { background: var(--bp-verdict-loss-soft);  color: var(--bp-verdict-loss);  border-left-color: var(--bp-verdict-loss); }
+.bp-paper-surface .bp-callout--peace { background: var(--bp-verdict-peace-soft); color: var(--bp-verdict-peace); border-left-color: var(--bp-verdict-peace); }
 .bp-paper-surface .bp-callout__summary { cursor: pointer; font-weight: bold; }
 .bp-paper-surface .bp-callout__body { margin-top: 8px; }
 
@@ -1083,6 +1095,7 @@ html[data-theme="dark"] .bp-paper-body {
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --bp-verdict-loss: #965447; --bp-verdict-loss-soft: #ffe7e1; --bp-verdict-peace: #447652; --bp-verdict-peace-soft: #dff3e3;
 }
 @media (prefers-color-scheme: dark) {
   .bp-paper-surface, .bp-paper-body {
@@ -1090,6 +1103,7 @@ html[data-theme="dark"] .bp-paper-body {
     --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
     --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
     --warn-strong: hsl(var(--warn-hsl) / 0.34);
+    --bp-verdict-loss: #fca391; --bp-verdict-loss-soft: #2f0b06; --bp-verdict-peace: #90cfa0; --bp-verdict-peace-soft: #021f0c;
   }
 }
 html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {
@@ -1097,12 +1111,14 @@ html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-b
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --bp-verdict-loss: #965447; --bp-verdict-loss-soft: #ffe7e1; --bp-verdict-peace: #447652; --bp-verdict-peace-soft: #dff3e3;
 }
 html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {
   --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --bp-verdict-loss: #fca391; --bp-verdict-loss-soft: #2f0b06; --bp-verdict-peace: #90cfa0; --bp-verdict-peace-soft: #021f0c;
 }
 /* lifecycle glyph tones — the CSS half of the §6 GUI/TUI parity assertion */
 .bp-lg--in_progress { color: #2563eb; }
@@ -1143,6 +1159,7 @@ html[data-bp-theme="evergreen"] .bp-paper-surface, html[data-bp-theme="evergreen
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --bp-verdict-loss: #965447; --bp-verdict-loss-soft: #ffe7e1; --bp-verdict-peace: #447652; --bp-verdict-peace-soft: #dff3e3;
 }
 html[data-bp-theme="evergreen"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="evergreen"][data-theme="dark"] .bp-paper-body {
   --paper-bg: #0e1614;
@@ -1161,6 +1178,7 @@ html[data-bp-theme="evergreen"][data-theme="dark"] .bp-paper-surface, html[data-
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --bp-verdict-loss: #fca391; --bp-verdict-loss-soft: #2f0b06; --bp-verdict-peace: #90cfa0; --bp-verdict-peace-soft: #021f0c;
 }
 html[data-bp-theme="charple"] .bp-paper-surface, html[data-bp-theme="charple"] .bp-paper-body {
   --paper-bg: #fcf9fd;
@@ -1179,6 +1197,7 @@ html[data-bp-theme="charple"] .bp-paper-surface, html[data-bp-theme="charple"] .
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --bp-verdict-loss: #9e4e3f; --bp-verdict-loss-soft: #ffe7e1; --bp-verdict-peace: #3a784e; --bp-verdict-peace-soft: #dcf4e1;
 }
 html[data-bp-theme="charple"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="charple"][data-theme="dark"] .bp-paper-body {
   --paper-bg: #0b080c;
@@ -1197,6 +1216,7 @@ html[data-bp-theme="charple"][data-theme="dark"] .bp-paper-surface, html[data-bp
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --bp-verdict-loss: #f7a695; --bp-verdict-loss-soft: #2d0d07; --bp-verdict-peace: #94cea3; --bp-verdict-peace-soft: #051f0d;
 }
 html[data-bp-theme="ember"] .bp-paper-surface, html[data-bp-theme="ember"] .bp-paper-body {
   --paper-bg: #fef9f7;
@@ -1215,6 +1235,7 @@ html[data-bp-theme="ember"] .bp-paper-surface, html[data-bp-theme="ember"] .bp-p
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --bp-verdict-loss: #9c5041; --bp-verdict-loss-soft: #ffe7e1; --bp-verdict-peace: #3d784f; --bp-verdict-peace-soft: #ddf4e2;
 }
 html[data-bp-theme="ember"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="ember"][data-theme="dark"] .bp-paper-body {
   --paper-bg: #0d0806;
@@ -1233,6 +1254,7 @@ html[data-bp-theme="ember"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --bp-verdict-loss: #f6a696; --bp-verdict-loss-soft: #2d0d08; --bp-verdict-peace: #95cea3; --bp-verdict-peace-soft: #051f0e;
 }
 html[data-bp-theme="fjord"] .bp-paper-surface, html[data-bp-theme="fjord"] .bp-paper-body {
   --paper-bg: #f6fbfd;
@@ -1251,6 +1273,7 @@ html[data-bp-theme="fjord"] .bp-paper-surface, html[data-bp-theme="fjord"] .bp-p
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --bp-verdict-loss: #8e594e; --bp-verdict-loss-soft: #ffe7e1; --bp-verdict-peace: #4d7357; --bp-verdict-peace-soft: #e2f2e5;
 }
 html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-body {
   --paper-bg: #050a0c;
@@ -1269,6 +1292,7 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --bp-verdict-loss: #eaac9f; --bp-verdict-loss-soft: #29110c; --bp-verdict-peace: #9fcaaa; --bp-verdict-peace-soft: #0b1d10;
 }
 html[data-bp-theme="iris"] .bp-paper-surface, html[data-bp-theme="iris"] .bp-paper-body {
   --paper-bg: #f9fafe;
@@ -1287,6 +1311,7 @@ html[data-bp-theme="iris"] .bp-paper-surface, html[data-bp-theme="iris"] .bp-pap
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --bp-verdict-loss: #af4b39; --bp-verdict-loss-soft: #ffe7e1; --bp-verdict-peace: #217541; --bp-verdict-peace-soft: #d8f6df;
 }
 html[data-bp-theme="iris"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="iris"][data-theme="dark"] .bp-paper-body {
   --paper-bg: #09080e;
@@ -1305,6 +1330,7 @@ html[data-bp-theme="iris"][data-theme="dark"] .bp-paper-surface, html[data-bp-th
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --bp-verdict-loss: #ffa18f; --bp-verdict-loss-soft: #300a05; --bp-verdict-peace: #8dd09f; --bp-verdict-peace-soft: #011f0b;
 }
 /* END GENERATED: tokens */
 
@@ -1928,6 +1954,15 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    THE KILDE LAW: every figure datum carries a source ref, surfaced as the
    small mono «kilde» stamp under the figure. Units are always their own span
    beside the display-string number, never fused into it. */
+/* VERDICT stat values — a KPI cell whose `verdict` is "loss" or "peace" paints
+   its DIGITS in the verdict ink (design/tokens.json color.verdict). Only the
+   value moves: the label, body and rule keep the page voice, so the number is
+   the one thing carrying the judgement and the tile does not become a coloured
+   box. The `--denom`/`--unit` suffixes deliberately stay `--paper-ink-soft` —
+   "71/118" reads as one number with a dim divisor whatever the verdict is.
+   check.mjs Part H's verdict arm reads THIS rule; deleting it reds the gate. */
+.bp-paper-surface .bp-stat__v--loss  { color: var(--bp-verdict-loss); }
+.bp-paper-surface .bp-stat__v--peace { color: var(--bp-verdict-peace); }
 .bp-paper-surface .bp-stat__unit { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
 .bp-paper-surface .bp-stat__body { order: 3; font-size: 0.75rem; color: var(--paper-ink-soft); line-height: 1.45; }
 

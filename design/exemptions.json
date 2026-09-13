@@ -132,8 +132,8 @@
    },
    {
     "path": "cloud/priv/static/app.css",
-    "count": 317,
-    "note": "Cloud SPA. Not a paper surface, but on the colour ledger and therefore on the derived set — the same discipline, one census."
+    "count": 311,
+    "note": "Cloud SPA. Not a paper surface, but on the colour ledger and therefore on the derived set — the same discipline, one census. 317 -> 311 (cch-w49-s1-followup, 2026-09-13): retiring seven orphaned tier/plan price + quota rules took six hand-typed type literals with them. LOWERED, not raised, and MEASURED — `node design/check.mjs` Part O printed \"SHRANK 317 -> 311 (-6)\" and named 311; a ratchet reds in BOTH directions, and leaving it high would let a future regression hide under the slack."
    },
    {
     "path": "api/assets/paper-editor/src/styles.css",

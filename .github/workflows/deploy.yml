@@ -46,6 +46,34 @@ on:
     paths:
       - "cloud/**"
       - "api/**"
+      # DEPLOY-EXCLUSION (task-75f45c6baba2e633). A merge confined to api/test/**
+      # cannot change the deployed artifact: api/mix.exs elixirc_paths(:test) is
+      # ["lib", "test/support"] and elixirc_paths(_) is ["lib"], so a prod build
+      # compiles NOTHING under api/test/ — support modules included. MEASURED
+      # 2026-09-07 on origin/main --first-parent --since="7 days ago": of the 890
+      # merges that matched this path filter at all, 86 (9.7%, ~12/day) matched
+      # ONLY because of files under api/test/, and each one took a full
+      # rebuild-and-swap of guerrilla plus a health check for a byte-identical
+      # release. Re-measured after this change; see the PR for the window and sha.
+      #
+      # GitHub applies the LAST matching pattern per changed file, so this line
+      # must stay AFTER "api/**". A merge touching api/lib AND api/test still runs:
+      # the api/lib file's last match is the positive "api/**".
+      #
+      # THE ONE RESIDUAL, read rather than assumed: api/lib/barkpark/search/
+      # golden_eval.ex:187 DOES read api/test/search_golden/<surface>/test.jsonl at
+      # runtime (File.read!). Its only caller is `mix search.eval`
+      # (api/lib/mix/tasks/search.eval.ex:39), a Mix task; a release has no Mix, no
+      # api/test/ tree, and nothing in deploy/, scripts/ or .github/ invokes
+      # search.eval (grep: zero hits). The six api/lib/mix/tasks/barkpark.*.gen_*
+      # generators that name test/support are File.write!/mkdir_p! only — they
+      # WRITE fixtures, they never read them. The other six api/lib mentions of
+      # test/support are comments and @moduledoc prose.
+      #
+      # Kept in step by scripts/check-deployyml-filters.sh: its exclusion arm pins
+      # this entry's presence, proves the `changes` classifier below drops the same
+      # subtree BEHAVIOURALLY, and proves the parent tree still deploys.
+      - "!api/test/**"
       - "internal/**"
       - "cmd/**"
       - "deploy/**"
@@ -267,12 +295,36 @@ jobs:
           # against both shapes and reds if this line regresses.
           changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "$base" "${{ github.sha }}" | tr '\0' '\n')"
           echo "changed files:"; echo "$changed"
+          # ── THE DEPLOY-EXCLUSION ARM (task-75f45c6baba2e633) ───────────────
+          #
+          # The SECOND half of the api/test/** exclusion. on.push.paths above
+          # stops this workflow STARTING for an api/test-only merge; this stops
+          # the classifier from dispatching one when an api/test file rides in on
+          # some other run's diff range. Fixing only one arm is inert: the
+          # `changes` job's diff is anchored to the LAST SUCCESSFUL DEPLOY, not to
+          # this push, so it routinely sees files from pushes that never started a
+          # run of their own — an api/test-only merge that lands between two
+          # deploys reaches this line even though its own push was filtered out.
+          #
+          # `grep -vE`, deliberately NOT the -qE spelling: the dispatch-filter
+          # extractors in scripts/check-deployyml-filters.sh and
+          # scripts/deploy-convergence-check.sh harvest single-quoted -qE patterns
+          # inside this job as DISPATCH filters (and fail closed on a shape they
+          # cannot decompose), and a SUBTRACTIVE filter is not a dispatch. Writing
+          # the exclusion with -vE keeps it out of that harvest. `|| true`
+          # because grep -v exits 1 when it drops every line, which is exactly the
+          # api/test-only case this exists for.
+          #
+          # The prefix is EXACT — `api/test/`, not `api/test` — so a sibling named
+          # api/testing/ is not silently excluded too.
+          deployable="$(printf '%s\n' "$changed" | grep -vE '^api/test/' || true)"
+          echo "deployable files (api/test/** excluded — a prod build compiles only api/lib):"; echo "$deployable"
           # internal/ + cmd/ ride the control plane too: bp-provisioner is
           # cross-built from ./cmd/barkpark-provisioner (code under
           # internal/cli/cloud), so an internal-only worker fix must roll the
           # CP or the stale binary keeps provisioning (bit us 2026-07-24: the
           # secrets-chain fix deployed guerrilla but left the CP worker broken).
-          if echo "$changed" | grep -qE '^(cloud|deploy|internal|cmd)/'; then cp=true; else cp=false; fi
+          if echo "$deployable" | grep -qE '^(cloud|deploy|internal|cmd)/'; then cp=true; else cp=false; fi
           # connectors/ rides the content instance: instance-deploy.sh npm-installs
           # it and restarts barkpark-connectors behind the /connectors route.
           # templates/ rides it too (stw9, charter D57a): the box builds sites FROM
@@ -294,7 +346,7 @@ jobs:
           # The TARGET arm of check-deployyml-filters.sh pins BOTH halves of this
           # prefix by name (cmd -> instance, cmd -> cp): the forward arm cannot see
           # it, because a path matched by the WRONG job is still a path matched.
-          if echo "$changed" | grep -qE '^(api|internal|cmd|deploy|connectors|templates|scripts/connectors)/'; then instance=true; else instance=false; fi
+          if echo "$deployable" | grep -qE '^(api|internal|cmd|deploy|connectors|templates|scripts/connectors)/'; then instance=true; else instance=false; fi
           # THE OVERRIDE, AND ONLY ON A DISPATCH. A push can never reach this —
           # `github.event_name` is the trigger, not an input — so the automatic
           # path is byte-for-byte what it was. `auto` deliberately falls through

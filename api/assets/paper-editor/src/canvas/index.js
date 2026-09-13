@@ -206,6 +206,7 @@ import { normalizeTone } from "../tone.js";
 // insertable-type allowlist; canvasDefaultBlock mirrors default_block/2; slashTypeToNode
 // builds the per-type default NODE via runToTiptap (so it round-trips byte-identically);
 // CANVAS_SLASH_TEXTABLE_NODES marks which inserted nodes take an into-body caret.
+import { CANVAS_SECTION_PRESETS } from "./section-presets.js";
 import {
   CANVAS_SLASH_TYPES,
   canvasDefaultBlock,
@@ -228,6 +229,7 @@ import {
   buildCommandRegistry,
   insertSlashTypeAtSelection,
   insertCompoundAtSelection,
+  insertSectionPresetAtSelection,
 } from "./command-palette.js";
 // P5 MARKDOWN SOURCE-MODE: the merged, PURE, dependency-free blocks⇄markdown
 // converter (../markdown.js). The "source mode" toggle swaps the rich ProseMirror
@@ -468,6 +470,21 @@ const CANVAS_SLASH_ITEMS = [
     label: c.label,
     hint: c.hint,
     desc: c.desc,
+  })),
+  // …and the CANVAS-ONLY section presets (CANVAS_SECTION_PRESETS): each becomes a
+  // "Presets" row carrying a `preset` marker _chooseSlash branches on, the exact
+  // Starters precedent one shape up — a preset inserts N TOP-LEVEL blocks, so it is
+  // likewise absent from SLASH_ITEMS (the per-block menu dispatches bp-slash-insert to
+  // default_block/2, which has no multi-block path) and lands client-side via
+  // insertSectionPresetAtSelection. `type` mirrors the kind for the row's dataset /
+  // filter haystack only — it is NOT a portable-doc type.
+  ...CANVAS_SECTION_PRESETS.map((p) => ({
+    group: "Presets",
+    type: p.kind,
+    preset: p.kind,
+    label: p.label,
+    hint: p.hint,
+    desc: p.desc,
   })),
 ];
 
@@ -2095,6 +2112,13 @@ class BpPaperCanvas extends HTMLElement {
     // single-node pick, but the carried node is a container + seeded children.
     if (item && item.compound) {
       insertCompoundAtSelection(this._editor, item.compound);
+      return;
+    }
+    // A SECTION PRESET row (the Presets group): insert the whole ORDERED SEQUENCE of
+    // top-level blocks through the same landing seam — same guard, same degrade, and
+    // the preset's declared placeholder is selected so the next keystroke overtypes it.
+    if (item && item.preset) {
+      insertSectionPresetAtSelection(this._editor, item.preset);
       return;
     }
     if (!item || !CANVAS_SLASH_TYPES.has(item.type)) {

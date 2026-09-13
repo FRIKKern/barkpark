@@ -4750,6 +4750,63 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/shares/media": {
+      "post": {
+        "operationId": "share.publish-media",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: scope.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Publish this scope's media — add the :media :read share so anonymous <img> loads resolve (never flips asset visibility).",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/auth/me": {
       "get": {
         "operationId": "auth.me",

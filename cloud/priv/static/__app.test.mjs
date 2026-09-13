@@ -6815,6 +6815,46 @@ test("vercelClaimHtml: UNDEPLOYED is unaffected — nothing to be unsure about",
   assert.doesNotMatch(html, /new-vercel-claim-unknown/);
 });
 
+// cch-r16-w11 — THE VERCEL DEPLOY OFFER, BOTH WAYS, IN ONE RUN.
+// POST /v1/barkparks/:*/vercel-deploy is Auth.require_team_admin and this is
+// the only place its two arms can be measured. It is NOT reachable from the
+// scenario corpus: the control renders only when GET
+// /v1/barkparks/:id/bootstrap answers a `vercel` envelope, and THAT read is
+// itself require_team_admin, so a member's read 403s before the button is ever
+// composed and no committed fixture paints it for anyone (measured: zero
+// renders in all 132 scenarios). Here the band is an ARGUMENT, so the refusal
+// is a losable measurement rather than a consequence of a sibling read — which
+// is exactly why member-authority-sweep.mjs declares it as BLIND SPOT B6 and
+// points here instead of minting a fixture the server cannot serve a member.
+test("cch-r16-w11: vercelClaimHtml draws the deploy button live on grant and hookless-disabled on refuse", () => {
+  const vercel = { configured: true, deployed: false, claimed: false, claim_url: null };
+  const grant = hooks.vercelClaimHtml(vercel, { id: "b1" }, "grant");
+  const refuse = hooks.vercelClaimHtml(vercel, { id: "b1" }, "refuse");
+  const unknown = hooks.vercelClaimHtml(vercel, { id: "b1" }, "unknown");
+
+  // GRANT: the shipped bytes, class list included — the fence must not restyle
+  // the control it lets through.
+  assert.ok(grant.includes('<button class="btn btn-block btn-vercel" type="button" id="new-vercel-claim">Deploy your site to Vercel</button>'),
+    "the grant arm keeps the shipped btn-block btn-vercel button and its mount hook");
+
+  // REFUSE: no id anywhere — adminWriteControlHtml's refusal arm DROPS
+  // liveAttrs, so newWireReady's `$("#new-vercel-claim")` finds nothing and
+  // there is no click to bind. The verb is still drawn, and the reason is the
+  // server's own.
+  assert.doesNotMatch(refuse, /id="new-vercel-claim"/,
+    "the refusal arm must carry NO mount hook — a disabled button with an id is still a hook");
+  assert.ok(refuse.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Deploy your site to Vercel</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
+    "the same verb, drawn disabled-and-explained with its own inline reason");
+
+  // UNKNOWN fails CLOSED with the still-checking caption, never a grant.
+  assert.doesNotMatch(unknown, /id="new-vercel-claim"/);
+  assert.ok(unknown.includes("Checking capabilities"));
+
+  // The area wrapper survives all three — the swap target must exist whichever
+  // arm painted it, or a late repaint has nowhere to land.
+  for (const html of [grant, refuse, unknown]) assert.match(html, /id="new-vercel-area"/);
+});
+
 test("vercelClaimInnerHtml: the post-deploy in-place swap runs the SAME ladder", () => {
   // newVercelDeploy() swaps #new-vercel-area's innerHTML with this; if the POST
   // re-minted a code for a project that already left our team, the swap must
@@ -25516,6 +25556,110 @@ test("cch-w41-bl: both predicates fail CLOSED on BOTH not-a-role states, and sta
   hooks.clearMe();
 });
 
+// ── cch-r17-w12 — THE PROVIDER BAND'S WRITE NARROWING ──────────────────────
+// providerWriteAuthority() is what the credential sheet's submit is drawn
+// through (adminWriteControlHtml(…, "wizard-block")), and it is the FOURTH
+// unpredicated elevated write's fence. smoke.mjs measures the two arms the
+// corpus can reach — providers-member refuses, providers-connected offers, both
+// in the RENDERED BYTES with the band read from each fixture's own /v1/me. What
+// no scenario can reach is the THREE not-a-role states, and those are exactly
+// where a narrowing fails open if it is written as `=== "refuse" ? … : "grant"`.
+// So they are pinned here, where the band's source is drivable directly.
+test("cch-r17-w12: providerWriteAuthority narrows the provider band — owner grant, admin grant, member refuse", async () => {
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(hooks.providerWriteAuthority(), "grant", "an owner may connect a provider");
+  hooks.clearMe();
+  await driveMe(200, W41BL_ADMIN);
+  assert.equal(hooks.providerWriteAuthority(), "grant",
+    "ADMIN grant — the limb a role-literal regression drops first; POST /v1/providers is require_team_admin, i.e. owner|admin");
+  hooks.clearMe();
+  await driveMe(200, ME_TA_MEMBER);
+  assert.equal(hooks.providerWriteAuthority(), "refuse",
+    "a member gets a DETERMINATE refusal, never the unknown arm — the sheet may name the remedy");
+  hooks.clearMe();
+});
+
+test("cch-r17-w12: providerWriteAuthority FAILS CLOSED on all three not-a-role states, and the sheet paints no mount hook on any of them", async () => {
+  const REFUSE_TITLE = 'title="You need the admin role on this team';
+  // loading — /v1/me never asked.
+  hooks.clearMe();
+  assert.equal(hooks.providerWriteAuthority(), "unknown",
+    "MUTATION TARGET: widen this to a grant and the line above is the red — an unasked question is not an admin");
+  // failed — a fault is a different fact from a refusal, and neither is a grant.
+  await driveMe(500, { error: "server_error" });
+  assert.equal(hooks.providerWriteAuthority(), "unknown", "an unproven actor is not an admin");
+  // stale — the pin moved under the cached answer, so it is not about this team.
+  hooks.clearMe();
+  await withTeamPin(async (store) => {
+    store.setItem("bp.active-team", "t1");
+    await driveMe(200, ME_TA);
+    assert.equal(hooks.providerWriteAuthority(), "grant", "fetched under t1, answered for t1");
+    store.setItem("bp.active-team", "t2");
+    assert.equal(hooks.teamAuthorityState(), "stale", "the precondition: the source band actually reads stale here");
+    assert.equal(hooks.providerWriteAuthority(), "unknown",
+      "and the narrowing maps stale onto the honest unknown arm, never onto grant and never onto a determinate refusal");
+  });
+  hooks.clearMe();
+});
+
+// …and THE CONSEQUENCE, on the SHEET'S OWN BYTES, for all three bands including
+// the two no committed scenario can reach. This drives the REAL
+// openProviderCredential against a minimal mounted DOM — the same technique the
+// closeModal arm above uses — so what is measured is the sheet, not a helper
+// standing in for it. smoke.mjs measures grant and refuse with the band read
+// from a fixture's own /v1/me; this adds the UNKNOWN arm and pins the grant
+// arm's bytes where a restyling regression cannot hide behind a fixture.
+test("cch-r17-w12: the credential sheet paints its submit live ONLY on grant — refuse and unknown carry no #cred-submit at all", async () => {
+  const el = (id) => ({
+    id, innerHTML: "", hidden: false, textContent: "", value: "",
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => id === "modal-x" },
+    setAttribute() {}, removeAttribute() {}, addEventListener() {},
+    querySelector: () => null, querySelectorAll: () => [], focus() {},
+  });
+  const nodes = { "#modal-root": el("modal-root"), "#modal-body": el("modal-body"), ".modal-x": el("modal-x") };
+  const prevQS = sandbox.document.querySelector;
+  const prevGE = sandbox.document.getElementById;
+  sandbox.document.querySelector = (sel) => nodes[sel] || null;
+  sandbox.document.getElementById = (id) => nodes["#" + id] || null;
+  const paint = async (status, envelope) => {
+    hooks.clearMe();
+    if (status) await driveMe(status, envelope);
+    nodes["#modal-body"].innerHTML = "";
+    hooks.openProviderCredential("hetzner");
+    return nodes["#modal-body"].innerHTML;
+  };
+  try {
+    const grant = await paint(200, ME_TA);
+    assert.equal(hooks.providerWriteAuthority(), "grant", "precondition: this envelope is a determinate grant");
+    assert.ok(grant.includes('<div class="modal-actions"><button class="btn btn-primary btn-block" type="button" id="cred-submit">Add provider</button></div>'),
+      "the grant arm keeps the shipped btn-primary btn-block button and its mount hook; got: " + grant.slice(-240));
+
+    const refuse = await paint(200, ME_TA_MEMBER);
+    assert.equal(hooks.providerWriteAuthority(), "refuse", "precondition: a member is a determinate refusal");
+    assert.doesNotMatch(refuse, /id="cred-submit"/,
+      "the refusal arm must carry NO mount hook — openProviderCredential's own `body.querySelector(\"#cred-submit\")` then binds nothing");
+    assert.ok(refuse.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Add provider</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
+      "the same verb, drawn disabled-and-explained with its own inline reason");
+
+    const unknown = await paint(null, null);
+    assert.equal(hooks.providerWriteAuthority(), "unknown", "precondition: an unasked /v1/me is the unknown arm");
+    assert.doesNotMatch(unknown, /id="cred-submit"/, "unknown fails CLOSED with no hook either");
+    assert.ok(unknown.includes("Checking capabilities"), "and says so honestly rather than naming a role it has not read");
+
+    // The rest of the sheet survives every arm: the fence withholds the WRITE,
+    // never the screen the person came to read.
+    for (const html of [grant, refuse, unknown]) {
+      assert.match(html, /id="cred-token"/, "the credential field is still there — a refused principal still sees what the sheet is for");
+      assert.match(html, /id="cred-back"/, "and the way back out");
+    }
+  } finally {
+    sandbox.document.querySelector = prevQS;
+    sandbox.document.getElementById = prevGE;
+    hooks.clearMe();
+  }
+});
+
 test("cch-w42-s1: THE STALENESS ARM — the pin moving under a cached answer reads as stale, not as authority", async () => {
   await withTeamPin(async (store) => {
     store.setItem("bp.active-team", "t1");
@@ -26481,6 +26625,87 @@ test("cch-w48-s1: the unanswered /new step asks ONCE, and its exit re-asks", asy
     for (let i = 0; i < 12; i++) await Promise.resolve();
     assert.equal(second.calls.length, 1, "the retry actually re-asks");
     assert.match(slot.innerHTML, /id="new-launch-btn"/, "one click, one answer, painted without a reload");
+  } finally {
+    Object.assign(sandbox, saved);
+    hooks.clearMe();
+  }
+});
+
+// ── cch-w48-s1-followup · ONE FUNNEL, ONE ROLE QUESTION ─────────────────────
+// The launch step above asks GET /v1/me once and lands it through absorbMe. The
+// 402 plan step below it (renderNewPricing, called by newLaunch's 402 arm as
+// `renderNewPricing(newState.template)` — ONE argument, so `authority` is
+// undefined) used to issue its OWN unconditional GET /v1/me. Two identical
+// reads in one funnel, and — the part that is not merely wasteful — two screens
+// that can DISAGREE, because a role that moves between the two answers is
+// rendered as one authority on the launch step and another on the plan step.
+//
+// DRIVEN, not region-scoped: the double read lives in a fetch callback and in
+// the argument count of one call site, so only a drive that counts requests
+// across BOTH steps can see it. The count is filtered to /v1/me on purpose —
+// /new legitimately asks /v1/subscription on this step (cch-w49-s7) and a bare
+// calls.length would go red for the wrong reason.
+test("cch-w48-s1-followup: the /new funnel asks /v1/me ONCE across the launch step and the 402 plan step", async () => {
+  const saved = { document: sandbox.document, fetch: sandbox.fetch };
+  const { slot } = newBodySlot();
+  const meCalls = (net) => net.calls.filter((c) => String(c.path).indexOf("/v1/me") !== -1).length;
+  try {
+    sandbox.document = newFlowDom(slot);
+
+    // Drain the module latch first. `newLaunchMeAsked` is IIFE state shared by
+    // every drive in this file, and only the step's own retry resets it — so a
+    // cold renderNewLaunch here would silently ask NOTHING and the count below
+    // would pass over a funnel that never read anything. One throwaway render
+    // leaves the latch set and the exit on screen whatever it was before; the
+    // retry click that follows is then the one deterministic read.
+    hooks.clearMe();
+    sandbox.fetch = fetchStub(500, { error: "server_error" });
+    hooks.renderNewLaunch(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.match(slot.innerHTML, /data-me-retry/, "the unknown arm must be on screen for the drain to work");
+
+    // STEP 1 — the launch step asks for the role itself, once, and absorbs it.
+    const net = fetchStub(200, W47_OWNER);
+    sandbox.fetch = net;
+    slot.querySelector("[data-me-retry]").click();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.match(slot.innerHTML, /id="new-launch-btn"/,
+      "the owner must reach the form, or there is no 402 for the next step to fold");
+    assert.equal(meCalls(net), 1, "the launch step's own read — the one this funnel is allowed");
+
+    // STEP 2 — POST /v1/launch answered 402, so newLaunch folds the plan step in
+    // with no authority argument. The absorbed answer must decide it.
+    hooks.renderNewPricing(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(meCalls(net), 1,
+      "one funnel, one role question: the plan step must reuse the absorbed answer, got " + meCalls(net));
+    assert.match(slot.innerHTML, /Choose Supporter/,
+      "…and the reused answer must actually decide the screen — an owner keeps the checkout CTAs");
+
+    // The reuse carries the REFUSING band too, not just the permissive one: a
+    // loaded member answer withholds the CTAs with no second read of its own.
+    // (driveMe absorbs through the shipped loader on its OWN stub, so the count
+    // below is the PLAN STEP's alone — an answer already in hand, as after the
+    // launch step. The w48 member test above drives it under this same DOM.)
+    hooks.clearMe();
+    await driveMe(200, W47_MEMBER);
+    const memberNet = fetchStub(200, W47_MEMBER);
+    sandbox.fetch = memberNet;
+    hooks.renderNewPricing(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(meCalls(memberNet), 0, "a loaded answer is not re-asked for the plan step");
+    assert.match(slot.innerHTML, /Only the team owner can start a paid plan/,
+      "the absorbed member answer blocks checkout, exactly as the fetched one did");
+
+    // FAIL OPEN, UNCHANGED. With no absorbed answer the step still asks, and a
+    // read that FAILS still leaves the CTAs standing (unknown, never refused).
+    hooks.clearMe();
+    const coldNet = fetchStub(500, { error: "server_error" });
+    sandbox.fetch = coldNet;
+    hooks.renderNewPricing(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(meCalls(coldNet), 1, "an unknown role is still asked for — the reuse is not a mute");
+    assert.match(slot.innerHTML, /Choose Supporter/, "and a failed read refuses nobody");
   } finally {
     Object.assign(sandbox, saved);
     hooks.clearMe();
@@ -29837,7 +30062,20 @@ test("cch-w47-s1-fu: every launchAuthority() call site is either the FORM seam o
   const code = w31BlankComments(src);
   // The three seams that may read the whole band: the mount that withholds the
   // form, its repaint, and the /new step's own offer builder.
-  const SEAMS = new Set(["launchFlow", "repaintLaunchAuthority", "renderNewLaunch"]);
+  // cch-r16-w11 adds a FOURTH: newWriteAuthority, the narrowing that maps this
+  // five-valued band onto adminWriteControlHtml's three-valued one. It belongs
+  // with the FORM seam and not with the four offer sites, and the distinction
+  // this test is drawing is exactly why. An OFFER site DELETES a control (a
+  // `.hidden` property, an omitted menu row), so reading anything but
+  // `=== "refuse"` there would make a moved team pin erase an owner's button.
+  // newWriteAuthority deletes nothing: on `stale` it answers "unknown", and
+  // adminWriteControlHtml's unknown arm still draws the SAME verb, disabled and
+  // captioned "Checking capabilities…" — the control stands, only its live
+  // mount hook is withheld. That is launchFlow's fail-closed treatment of a
+  // moved pin ("the whole form is withheld"), one control at a time, and it is
+  // the right one for a WRITE: the alternative is offering a POST the server
+  // will refuse because we are no longer sure which team we are asking about.
+  const SEAMS = new Set(["launchFlow", "repaintLaunchAuthority", "renderNewLaunch", "newWriteAuthority"]);
   const re = /launchAuthority\(\)/g;
   const sites = [];
   let m;

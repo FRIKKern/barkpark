@@ -123,8 +123,17 @@ concurrency:
   # nothing; cancel-in-progress is false so a reading already under way is never
   # replaced by one of a newer tip mid-flight — a half-taken reading is not a
   # reading, and the newer tip gets its own run.
-  group: seal-reading
-  cancel-in-progress: false
+  #
+  # PER MAIN SHA, not one global group. GitHub keeps ONE not-yet-started run per
+  # group, so under merge cadence a single `seal-reading` group let each merge
+  # evict the PENDING reading before a runner picked it up — the reading per
+  # merged state this file exists to take. scripts/main-run-concurrency-check.sh
+  # names exactly that (measured 2026-09-13, run 34753745582, step "every
+  # main-triggered workflow keeps one group per main sha"). Splitting by sha
+  # preserves the intent above verbatim: cancel-in-progress stays FALSE on main,
+  # and two readings of the SAME tip still cannot queue behind each other.
+  group: seal-reading-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   reading:

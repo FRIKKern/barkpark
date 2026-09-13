@@ -136,6 +136,23 @@
 //    it and asserts the live control plus its handler, and __app.test.mjs's
 //    cch-w38-s1 offer table pins its member arm. Declaring the boundary is the
 //    honest option; silently counting three of four as "the sites" is not.
+// B6 #new-vercel-claim — the launch wizard's one-click Vercel deploy (POST
+//    /v1/barkparks/:*/vercel-deploy, Auth.require_team_admin), fenced in app.js
+//    by cch-r16-w11 alongside its two neighbours and the ONE of the three this
+//    sweep cannot cover. It renders only when GET /v1/barkparks/:id/bootstrap
+//    answers a `vercel` envelope, and THAT read is itself
+//    `Auth.require_team_admin` at the router — a member's read 403s before the
+//    control is ever composed. MEASURED over all 131 committed scenarios (boot
+//    + a scan of every registry entry's innerHTML): `id="new-vercel-claim"`
+//    renders in ZERO of them, for owner and member alike, because the corpus's
+//    catch-all serves `{}` for that read and no fixture mints the envelope.
+//    An `assert: true` WATCHED row would therefore be unlosable and an
+//    `assert: false` one would report a member zero the fence did not cause. It
+//    is NOT uncovered in the tree: __app.test.mjs pins vercelClaimHtml's bytes
+//    on BOTH bands (grant paints `id="new-vercel-claim"`, refuse paints the
+//    hookless disabled-and-explained wrapper), where the band is an ARGUMENT
+//    rather than a consequence of a sibling read. Declaring the boundary is the
+//    honest option; minting a fixture the server cannot serve a member is not.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -278,6 +295,27 @@ const HOOKS = [
   { key: "button.btn.btn-primary.btn-sm[data-vf-run]", route: "POST /v1/barkparks/:*/verify", what: "run verification now", source: "census PIN: runVerifyNow — team-scoped member action" },
   { key: "button.btn.btn-ghost.btn-sm.token-revoke[data-id][data-name]", route: "DELETE /v1/tokens/:*", what: "revoke your own token", source: "census PIN: confirmRevokeToken — self-scope" },
   { key: "button.btn.btn-ghost.btn-sm[data-life-retry]", route: null, what: "retry the lifecycle read that failed", source: "markup: re-issues the same GET the view already made" },
+  // ── cch-r16-w11: the /new LAUNCH WIZARD's own controls, which entered this
+  // sweep's view with `theater-ready-github-member` and `theater-failed-member`
+  // — the first member actors ever to reach either theater screen. Every row
+  // here was named because the sweep REFUSED on it as UNACCOUNTED; none was
+  // written ahead of a refusal.
+  //
+  // The two ROUTED ones are member-level at the router and the census reads
+  // them that way, which is why they are rows here rather than findings: a
+  // member legitimately opens Studio on their own team's instance and
+  // legitimately tells us their site URL. The elevated pair on these same two
+  // screens (POST /v1/github/repos, POST /v1/barkparks/:*/retry) are NOT rows —
+  // they are WATCHED below, because adminWriteControlHtml's refusal arm drops
+  // their hooks entirely and a HOOKS row keyed on the live shape would be a
+  // dead row on every run.
+  { key: "button#new-open-studio", route: "POST /v1/barkparks/:*/studio-link", what: "open Studio from the launch wizard's ready hero", source: "census PIN: openStudio — Auth.require_user at the router, pinned `member`" },
+  { key: "button#new-site-url-btn", route: "POST /v1/barkparks/:*/site-url", what: "wire revalidation to the deployed site URL", source: "census PIN: newSubmitSiteUrl — Auth.require_user at the router, pinned `member`" },
+  { key: "input#new-site-url", route: null, what: "the site-URL field its own button submits", source: "markup: a text input; the write is newSubmitSiteUrl's, one row above" },
+  { key: "input#new-gh-name", route: null, what: "the repo-name field beside Create GitHub repo", source: "markup: a text input; the write is POST /v1/github/repos, which is WATCHED — and the fence DISABLES this field on the refusal arm, so a member cannot type into a form whose button is gone" },
+  { key: "a#new-vercel", route: null, what: "the vercel.com/new/clone handoff (the fallback path, no platform token)", source: "markup: target=_blank anchor to vercel.com — leaves our origin entirely, calls nothing of ours" },
+  { key: "a.btn.btn-block.btn-ghost", route: null, what: "the ready hero's secondary View affordance (\"View instance\" on /new)", source: "markup: an href into the dashboard — hash/path navigation" },
+  { key: "button#new-console-toggle", route: null, what: "expand/collapse the launch wizard's provisioning console", source: "markup: local disclosure — flips newState.consoleCollapsed and re-renders bytes the boot already fetched, no api() call on the path" },
   // cch-w38-s1-fu: the provision timeline's console disclosure, which entered
   // this sweep's view with `instance-failed-member` — the first member fixture
   // on a FAILED box. It is client-only in the strictest sense: the toggle flips
@@ -414,6 +452,35 @@ const WATCHED = [
     minted: "cch-w38-s1 (#12996) — instanceTimelineHtml takes an `authority` argument and draws Retry setup through adminWriteControlHtml(…, \"dock\"), whose refusal arm drops both the data attribute and the .bp-tl-retry dock",
     fenceNote: "__route_fence.mjs carries no row for this route; __binding_census.mjs reads retryInstance/newRenderFailed as Auth.require_team_admin",
   },
+  // ── cch-r16-w11: THE LAUNCH WIZARD'S TWO MEASURABLE ELEVATED WRITES ────────
+  // Both mount into #new-body, the /new document's one body registry entry, and
+  // both are drawn by adminWriteControlHtml — so the refusal arm drops the id
+  // and the member's count is a real ZERO against a twin that paints 1.
+  //
+  // WHY THE THIRD ROW OF THIS SLICE IS NOT HERE. POST
+  // /v1/barkparks/:*/vercel-deploy is offered by #new-vercel-claim, which
+  // renders only when GET /v1/barkparks/:id/bootstrap answers a `vercel`
+  // envelope — and that read is `Auth.require_team_admin` at the router, so a
+  // member's read 403s and NO actor in this corpus paints the control. An
+  // `assert: true` row on it would be unlosable and an `assert: false` one
+  // would report a member zero that the fence did not cause. It is fenced in
+  // app.js all the same and its bytes are pinned BOTH ways in __app.test.mjs,
+  // where the band is an argument rather than a consequence of a sibling read.
+  // Written up as BLIND SPOT B6 rather than faked into a row.
+  {
+    id: "new-gh-create", sel: "#new-gh-create", mount: "new-body",
+    scenario: "theater-ready-github-member", twin: "theater-ready-github",
+    route: "POST /v1/github/repos", assert: true,
+    minted: "cch-r16-w11 — newGithubHtml takes an `authority` argument and draws Create GitHub repo through adminWriteControlHtml(…, \"wizard\"), whose refusal arm drops the id (and disables the name field beside it)",
+    fenceNote: "__route_fence.mjs carries no row for this route; __binding_census.mjs reads newCreateRepo as Auth.require_team_admin",
+  },
+  {
+    id: "new-retry", sel: "#new-retry", mount: "new-body",
+    scenario: "theater-failed-member", twin: "theater-failed",
+    route: "POST /v1/barkparks/:*/retry", assert: true,
+    minted: "cch-r16-w11 — newRenderFailed reads newWriteAuthority() and draws Retry setup through adminWriteControlHtml(…, \"wizard-block\"), whose refusal arm drops the id; this is the THIRD offer site of the verb #12996 fenced twice",
+    fenceNote: "__route_fence.mjs carries no row for this route; __binding_census.mjs reads retryInstance/newRenderFailed as Auth.require_team_admin",
+  },
 ];
 for (const w of WATCHED) {
   if (!w.sel) w.sel = "#" + w.id;
@@ -472,7 +539,7 @@ const KNOWN = [
 // ── PINS ─────────────────────────────────────────────────────────────────────
 // Derived-but-pinned, so corpus growth is NAMED rather than silently absorbed
 // (LIMIT L1). Update them in the same commit that grows the corpus.
-const PIN_MEMBER_SCENARIOS = 12;
+const PIN_MEMBER_SCENARIOS = 14;
 // 114 -> 115: cch-w37-bl-operator-retry-click-undriven added `operator-me-recovers`
 // (the one-shot /v1/me fault whose retry smoke.mjs clicks). RE-DERIVED by running
 // this sweep, not by adding one: its actor is an OPERATOR, so the member slice
@@ -583,7 +650,24 @@ const PIN_MEMBER_SCENARIOS = 12;
 // Both numbers were RE-DERIVED by RUNNING this sweep and reading what it
 // PRINTED ("the member-actor corpus is 12, pinned at 9" and "the committed
 // corpus grew to 128 scenario(s), pinned at 125"), never by adding three.
-const PIN_TOTAL_SCENARIOS = 128;
+// cch-w48-s1-followup added `new-launch-me-unreadable`, the /new launch step in
+// front of a /v1/me that 500s, so smoke.mjs can measure that step's own
+// [data-me-retry] in a browser. The member slice STAYED at 12, the same case the
+// note above forbids bumping: its `me` is the ordinary owner fixture
+// (`me("Ada's Lab")`) and its meFault makes `meRole()` read the 500 body and
+// answer null, so it cannot enter the member set by construction. That took the
+// corpus to 129 on main.
+// 129 -> 132, and the member slice 12 -> 14 (cch-r16-w11): `theater-ready-github`
+// (owner), `theater-ready-github-member` and `theater-failed-member` — the first
+// actors of ANY role to reach the /new ready screen with GitHub connected, and
+// the first plain MEMBERS to reach either theater screen at all. Two of the
+// three are member actors, which is why BOTH pins move; this is the second case
+// the note above allows (the member slice itself moved). Both numbers were
+// RE-DERIVED, AFTER the rebase onto the main that carries #18064, by RUNNING
+// this sweep and reading what it PRINTED ("the member-actor corpus is 14,
+// pinned at 12" and "the committed corpus grew to 132 scenario(s), pinned at
+// 129"), never by adding three and two.
+const PIN_TOTAL_SCENARIOS = 132;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).
@@ -1043,6 +1127,21 @@ async function main() {
   for (const name of members) {
     const boot = bootScenario(name, {});
     await flush();
+    // cch-r16-w11 — THE SHELL GATE, and it is a precondition, not an excuse.
+    // #overview-launch and #fleet-launch are authored INSIDE #app-shell, and
+    // their fence is a `.hidden` PROPERTY applyRoute sets during the dashboard
+    // boot. The /new document never boots the dashboard at all: renderNewFlow
+    // calls showNewScreen(), which hides #app-shell outright, and nothing ever
+    // reaches the property. This scan reads each button's own hidden union and
+    // NOT its ancestors (the shim's registry is flat), so without this gate
+    // every /new member scenario reports both buttons "visible and enabled"
+    // — a finding about a control inside a container the page does not show.
+    // MEASURED, not assumed: smoke.mjs asserts `reg.get("app-shell").hidden ===
+    // true` on /new, and the same three scenarios reported both buttons before
+    // this gate and neither after, while the dashboard member scenarios (whose
+    // #app-shell is visible) are unmoved either way.
+    const shell = boot.registry.has("app-shell") ? boot.registry.get("app-shell") : null;
+    if (shell && elementHiddenUnion(shell).hidden) continue;
     for (const id of STATIC_LAUNCH) {
       if (missing.indexOf(id) !== -1) continue;
       // registry.has(), never byId(): byId AUTO-CREATES and would manufacture a
