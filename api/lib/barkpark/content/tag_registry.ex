@@ -144,7 +144,11 @@ defmodule Barkpark.Content.TagRegistry do
   end
 
   defp do_register!(attrs, dataset) do
-    case Content.upsert_schema(attrs, dataset) do
+    # CLASS (c), the seeded-Default ruling (task-e6523cc7154304f0): the core
+    # `tag` schema is instance-wide — registered at boot, no principal, no
+    # request, and needed in every tenant. `workspace_id: :instance` declares
+    # the seeded-Default scope instead of arriving there by fallback.
+    case Content.upsert_schema(attrs, dataset, workspace_id: :instance) do
       {:ok, schema} ->
         schema
 

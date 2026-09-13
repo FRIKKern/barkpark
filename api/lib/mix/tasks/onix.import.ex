@@ -206,7 +206,13 @@ defmodule Mix.Tasks.Onix.Import do
       Mix.shell().info("would create: drafts.#{doc_id} — #{title}")
       :ok
     else
-      case Content.create_document("book", attrs, dataset, source: :cli) do
+      # CLASS (c), the seeded-Default ruling (task-e6523cc7154304f0): a mix-task
+      # import runs on the box with no principal and no request; its rows are
+      # instance-wide by design. `workspace_id: :instance` declares that.
+      case Content.create_document("book", attrs, dataset,
+             source: :cli,
+             workspace_id: :instance
+           ) do
         {:ok, _doc} ->
           Mix.shell().info("created: drafts.#{doc_id} — #{title}")
           :ok
