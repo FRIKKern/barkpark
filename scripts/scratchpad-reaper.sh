@@ -95,6 +95,15 @@
 #   3  BLIND       — could not measure (missing root, df or guard unreadable)
 #   4  USAGE       — bad invocation
 #
+# COST, measured on this machine 2026-09-13. A dry run over ONE session
+# scratchpad holding 7,397,328 entries took 5m34s: two full `find` passes for
+# the entry census plus a pruned `.git` walk per candidate. Scope a run to the
+# root you mean (a wave's own scratchpad), not to the whole per-user tree — the
+# shared root above it held 14,264,338 entries on the same day. The unpushed
+# scan is a FULL walk by design: bounding its depth would let a checkout below
+# the bound be deleted with work in it, which is the one outcome this script
+# exists to make impossible.
+#
 # bash 3.2 compatible (macOS system bash): no associative arrays, no mapfile.
 
 set -uo pipefail
@@ -341,8 +350,16 @@ sweep() {
 			cannot_read "$root" "df gave no usable Avail figure AFTER the sweep"
 		else
 			freed=$((after - before))
-			printf '%s: DF-AFTER-ROOT %s avail_kb=%s (%s) freed_kb=%d\n' \
-				"$PROG" "$root" "$after" "$(kb_human "$after")" "$freed"
+			# A ROOT-LEVEL delta is NOT a reclaim figure and is never reported as
+			# one. Measured on this box 2026-09-13: a DRY run over a 7,397,328-entry
+			# scratchpad deleted nothing and still showed delta_kb=-278876, because
+			# ~30 other agent lanes wrote to the same volume during the 5m34s walk
+			# (the entry count ROSE by 8,983 over the same window). Only the
+			# per-step REAPED delta is attributable, and even that is approximate
+			# on a shared host. This line is a context reading, labelled as one.
+			printf '%s: DF-AFTER-ROOT %s avail_kb=%s (%s) delta_kb=%d (context only — other lanes write this volume; NOT a reclaim figure%s)\n' \
+				"$PROG" "$root" "$after" "$(kb_human "$after")" "$freed" \
+				"$([ "$MODE" = dry-run ] && printf ', and this run deleted NOTHING' || printf '')"
 			printf '%s: ENTRIES-AFTER %s %s\n' \
 				"$PROG" "$root" "$(find "$root" 2>/dev/null | wc -l | tr -d ' ')"
 		fi
