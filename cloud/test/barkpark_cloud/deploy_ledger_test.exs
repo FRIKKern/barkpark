@@ -3637,6 +3637,43 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert census.coverage_cohorts.basis =~ "bounded on the LEFT only"
     end
 
+    # THE SAME BOUND, ON THE OTHER CONSUMER OF THE SAME QUERY.
+    #
+    # `live_marks/1` is folded by TWO nodes — `coverage_cohorts/2` and
+    # `deferral_wait/2` — so both publish numbers computed against the same
+    # right-unbounded covering query. Shipping the token on one and leaving the
+    # other with an English paragraph is the prose-is-not-a-key defect one node
+    # over: a decoder reading the deferral-wait node had no way to branch on it.
+    #
+    # DRIFT LOCK: the two values are read out of ONE census return and compared
+    # to EACH OTHER. A second literal typed into the deferral node would pass a
+    # per-node `== "left_only"` forever and still be free to drift; this arm can
+    # only pass while both nodes read the one attribute.
+    test "covering_bound rides on BOTH consumers of live_marks/1, with ONE shared value",
+         %{site: site} do
+      # A deferred row with a later live build on the same site: a real COVERED
+      # observation, so the node under test is publishing numbers and not just a
+      # shape.
+      deployments!(site, [
+        %{status: "deferred", inserted_at: DateTime.add(@cov_from, 1_000, :second)},
+        %{status: "live", inserted_at: DateTime.add(@cov_from, 2_000, :second)}
+      ])
+
+      census = DeployLedger.census(@cov_from, @cov_to)
+
+      assert census.deferral_wait.population.covered == 1
+
+      # The token is THERE, and it says the same word the coverage node says.
+      assert census.deferral_wait.covering_bound == "left_only"
+
+      assert census.deferral_wait.covering_bound == census.coverage_cohorts.covering_bound
+
+      # The prose still ships, and now it POINTS AT the key rather than being
+      # the only place the fact lives.
+      assert census.deferral_wait.basis =~ "bounded on the LEFT only"
+      assert census.deferral_wait.basis =~ "covering_bound"
+    end
+
     # ONE `as_of` PER ENVELOPE. The operator route builds its body as
     # `census(from, to) |> Map.put(:delivery, delivery(from, to))` — two calls
     # that used to read two different clocks, measured 15.7s apart on the live
