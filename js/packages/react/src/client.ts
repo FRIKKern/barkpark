@@ -361,6 +361,9 @@ const ASCIICAST_PROBE_TIMEOUT_MS = 4000
 /** The honest fallback's copy (jf-backlog-asciicast-empty-box). */
 const ASCIICAST_FALLBACK_MESSAGE = 'Opptaket kunne ikke lastes.'
 const ASCIICAST_FALLBACK_LINK = 'Åpne opptaket direkte'
+/** Inline, like every other emitter in this family: a consuming app needs no
+ * extra stylesheet for the fallback to read as prose inside the cast's frame. */
+const FALLBACK_STYLE = 'padding:1rem;font-size:0.9em;line-height:1.5'
 
 /** What one hydrate pass did to the `asciicast` mount points under `root`. */
 interface AsciicastTally {
@@ -422,24 +425,16 @@ function renderCastFallback(el: HTMLElement, src: string): void {
 
   const box = doc.createElement('div')
   box.className = 'bp-asciicast__fallback'
-  box.setAttribute(
-    'style',
-    'padding:0.9rem 1rem;color:var(--paper-ink-soft, #5b6b64);font-size:0.9em;line-height:1.5',
-  )
-
-  const message = doc.createElement('p')
-  message.className = 'bp-asciicast__fallback-message'
-  message.setAttribute('style', 'margin:0')
-  message.textContent = ASCIICAST_FALLBACK_MESSAGE
-  box.appendChild(message)
+  box.setAttribute('style', FALLBACK_STYLE)
+  box.textContent = ASCIICAST_FALLBACK_MESSAGE
 
   const href = castHref(src)
   if (href !== null) {
     const link = doc.createElement('a')
     link.className = 'bp-asciicast__fallback-link'
-    link.setAttribute('style', 'display:inline-block;margin-top:0.35rem')
     link.setAttribute('href', href)
     link.textContent = ASCIICAST_FALLBACK_LINK
+    box.appendChild(doc.createElement('br'))
     box.appendChild(link)
   }
 
