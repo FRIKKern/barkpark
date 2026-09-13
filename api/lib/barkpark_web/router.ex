@@ -2737,6 +2737,13 @@ defmodule BarkparkWeb.Router do
     post("/", ShareController, :create)
     delete("/", ShareController, :delete)
 
+    # THE AFFORDANCE (task-cbb112a9b4c600cc). One door, one write: add the
+    # `:media` surface to this scope's stored share so anonymous `<img>` loads
+    # resolve. It is a SHARE write — the RULED remedy — and never touches an
+    # asset's `bp_visibility`. Same `[:api, :require_admin]` pipeline and the
+    # same workspace-admin confinement as its `POST /` sibling.
+    post("/media", ShareController, :publish_media)
+
     # P5 edit-token management (admin-only minting, owner decision 2026-06-09).
     # mint_token shows the raw token ONCE; list_tokens never returns it; revoke
     # stamps revoked_at. The registry kill-switch (remove/downgrade the share)

@@ -357,6 +357,11 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
     {:delete, "/v1/shares"} =>
       {:tenant_bound, "workspace_admin?(conn",
        "delete/2, same resolve-then-workspace_admin?/2 shape as create/2."},
+    {:post, "/v1/shares/media"} =>
+      {:tenant_bound, "workspace_admin?(conn",
+       "publish_media/2 (task-cbb112a9b4c600cc), the SAME resolve-then-workspace_admin?/2 " <>
+         "shape as create/2 — the affordance that adds the :media surface must not be a " <>
+         "softer door onto the registry its sibling guards."},
     {:get, "/v1/shares/tokens"} =>
       {:tenant_bound, "workspace_admin?(conn",
        "list_tokens/2 filters the row set through workspace_admin?/2 per row."},

@@ -17,6 +17,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
+  alias BarkparkWeb.MediaVisibilityCopy
   alias BarkparkWeb.Plugs.RequireWritePermission
   alias BarkparkWeb.SearchIntel
 
@@ -368,11 +369,32 @@ defmodule BarkparkWeb.V1.MediaController do
 
       json(conn, %{
         result: AssetResponse.render(file, doc, render_opts(conn, params, dataset: dataset)),
+        visibility: visibility_notice(conn, dataset),
         syncTags: sync_tags(dataset, file.id),
         ms: ms
       })
     end
   end
+
+  # THE OPERATOR AFFORDANCE, READ HALF (task-cbb112a9b4c600cc). `bp media get`
+  # renders this action, so this is where `bp`'s asset output says what the
+  # asset's `public` visibility actually promises: readable WITHIN this scope's
+  # sharing, plus whether the scope currently carries a `:media` share.
+  #
+  # The copy is `BarkparkWeb.MediaVisibilityCopy`'s and nobody else's — the
+  # Studio media library banner renders the SAME functions, so the two surfaces
+  # cannot drift into describing the same door differently. ADDITIVE: a new
+  # top-level key beside `result`, so no existing field moves or changes shape.
+  defp visibility_notice(conn, dataset) do
+    MediaVisibilityCopy.public_option(
+      slug_of(conn.assigns[:current_workspace]),
+      slug_of(conn.assigns[:current_project]),
+      dataset
+    )
+  end
+
+  defp slug_of(%{slug: slug}) when is_binary(slug), do: slug
+  defp slug_of(_other), do: nil
 
   def relations(conn, %{"dataset" => dataset, "id" => id} = params) do
     with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
