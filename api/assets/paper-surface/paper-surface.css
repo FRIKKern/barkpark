@@ -506,6 +506,38 @@ html[data-theme="dark"] .bp-paper-body {
    `start`, ragged right), so all `auto` bought was broken words down the right
    edge of every paragraph. `manual` still honours an author's own soft hyphen. */
 .bp-paper-surface p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+/* PROSE LONG-TOKEN BREAK — the same `break-word` the heading rule above already
+   takes (`.bp-paper-surface h1..h6`) and for the same reason, with the same
+   deliberate NOT-`anywhere`. Headings were guarded; RUNNING PROSE was not, and
+   running prose is where this codebase's unbreakable tokens actually live: a
+   40-character git SHA, a bare paper URL, a `--flag=value`.
+
+   MEASURED, on the live public reader, not argued from the cascade
+   (/papers/paper-editing-parity-status-2026-09-07 through headless Chromium):
+
+     viewport   gutter   content box   <p> over its own box   document scroll
+     360px      16px     328px         28 paragraphs (worst   392px in a 360px
+                                       376px vs 328px)        viewport — the
+                                                              WHOLE PAGE slid
+                                                              sideways by 32px
+     390px      16px     358px         6 paragraphs           392 vs 390
+
+   The gutter ladder is NOT the defect — it already steps 40/24/16 at 767/479
+   and measured exactly that. The column is the right WIDTH; a word inside it
+   simply had no way to break.
+
+   `break-word` acts only once a word has a whole line to itself and still does
+   not fit, so every column already wide enough for its content is untouched:
+   verified by diffing every rendered element geometry on the live reader at
+   1280px with and without this rule — identical.
+
+   It rides the SHARED surface sheet rather than bulldocs.html.heex on purpose:
+   put it in the reader layout alone and View wraps a line at a different word
+   than Edit, which is the one drift measure_parity_test.exs exists to prevent.
+   `li` is included because a list item is prose in a narrower box than the
+   paragraph beside it. */
+.bp-paper-surface p,
+.bp-paper-surface li { overflow-wrap: break-word; }
 /* Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
    2026-07-31): an exact empty paragraph is never published layout. The engines
    (walk.ex paragraph/3, blocks/core.ts paragraph) no longer emit `<p></p>` at
@@ -1366,7 +1398,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   font-family: var(--paper-font-mono); color: var(--paper-ink-soft); font-size: 0.85rem;
   border: 1px dashed var(--paper-chrome-border); border-radius: 8px; padding: 14px; text-align: center; margin: 1.4rem 0;
 }
-.bp-paper-surface .bp-tasks__title { font-family: var(--paper-font-serif); font-weight: 600; font-size: 1.05rem; color: var(--paper-ink); margin-bottom: 0.7rem; }
+.bp-paper-surface .bp-tasks__title { font-family: var(--paper-font-serif); font-weight: 600; font-size: 1.05rem; color: var(--paper-ink); margin-bottom: 0.7rem; overflow-wrap: break-word; }
 .bp-paper-surface .bp-tasks__list { border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
 
 /* the glyph ladder — one shared set with the terminal */
@@ -1445,8 +1477,22 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    type inside the detail card, and the only one of the card-title family that
    outgrows prose. Measured at a 320px viewport, a single 30-character compound
    noun puts the document 4px past the screen while the same word in a `<p>`
-   still fits; `.bp-card__t` (0.9rem) and `.bp-tasks__title` (1.05rem) are
-   measured clean at the same width and are deliberately left alone.
+   still fits.
+
+   CORRECTED (gp-b-mobile-reading-column). This comment used to end "`.bp-card__t`
+   (0.9rem) and `.bp-tasks__title` (1.05rem) are measured clean at the same width
+   and are deliberately left alone." Both now carry the guard, because that
+   sentence was true only of the token it was measured with. The measurement
+   behind it used a 30-character compound noun; against a 68-character paper
+   PERMALINK — the token a Barkpark paper most often actually carries — both
+   overflow (__narrow_render.mjs: .bp-tasks__title 442px and .bp-card__t 408px,
+   in viewports of 390, 360 and 320).
+
+   That case was INVISIBLE until the prose guard above landed. __narrow_render
+   skips any token its plain-prose CONTROL also fails, and before the `p, li`
+   rule plain prose failed the permalink too — so the two assertions were being
+   skipped, and their silence read as a pass. Fixing prose did not break these
+   blocks; it stopped hiding them.
 
    Four pixels is a horizontal scrollbar on the whole page, which is why it is
    worth a declaration: the cost of the overflow is not proportional to its
@@ -1625,7 +1671,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
  * still emits them. The card WIDGET's model-A slot-chrome rules (__media/__action,
  * STEP 4) are GONE (S10, parity2-bug-card-slot-chrome): model B recurses slots to
  * bare semantics (h2 / p / img / a.bp-button) — no reader element carried them. */
-.bp-paper-surface .bp-card__t { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-weight: 700; font-size: 0.9rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-card__t { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-weight: 700; font-size: 0.9rem; color: var(--paper-ink); overflow-wrap: break-word; }
 .bp-paper-surface .bp-card__d { font-size: 0.85rem; color: var(--paper-ink-soft); line-height: 1.5; margin-top: 6px; }
 /* STEP 4 canvas edit hook — a light hover-revealed control row; chrome only (bp-canvas-*). */
 .bp-paper-surface .bp-canvas-card { position: relative; }

@@ -237,5 +237,73 @@ for (const selector of [
   });
 }
 
+// ── 5. RUNNING PROSE breaks a long unbreakable token ─────────────────────────
+//
+// gp-b-mobile-reading-column. Sections 1-4 above guard the `.bp-*` COMPONENT
+// containers. Nothing guarded the two elements that carry most of a paper's
+// words: `p` and `li`. Headings already take `overflow-wrap: break-word`
+// (`.bp-paper-surface h1..h6`, with its own note on why), so prose was the
+// remaining hole, and prose is where this codebase's unbreakable tokens
+// actually appear — a 40-character git SHA, a bare paper URL, a `--flag=value`.
+//
+// MEASURED on the live public reader (headless Chromium against
+// guerrilla.barkpark.cloud/papers/paper-editing-parity-status-2026-09-07),
+// which is how this was found rather than argued out of the cascade:
+//
+//   360px viewport, --paper-gutter 16px, 328px content box:
+//     28 paragraphs had scrollWidth > clientWidth (worst 376 vs 328) and
+//     documentElement.scrollWidth was 392 against a 360px viewport — the whole
+//     page scrolled sideways by 32px on a phone.
+//   390px viewport, 358px content box: 6 paragraphs, document 392 vs 390.
+//   With the rule injected on that same live page: both go to ZERO.
+//
+// The gutter ladder is NOT the defect and this rule does not touch it: the
+// shell already steps 40/24/16 at 767/479 and measured exactly that. The
+// column is the right WIDTH; a word inside it had no way to break.
+//
+// `break-word` and deliberately not `anywhere`, matching the heading rule: it
+// acts only once a word has a whole line to itself and still does not fit, so
+// a column already wide enough for its content is untouched. Verified by
+// diffing EVERY rendered element's geometry on the live reader at 1280px and
+// 768px with and without the rule — byte-identical, zero elements moved.
+//
+// It must live in THIS shared sheet and not in bulldocs.html.heex: put it in
+// the reader layout alone and View wraps a line at a different word than Edit,
+// which is the single drift measure_parity_test.exs exists to prevent.
+
+check("running prose (p, li) carries a long-token break guard", () => {
+  const re = /\.bp-paper-surface\s+p,\s*\n\s*\.bp-paper-surface\s+li\s*\{([^}]*)\}/;
+  const m = surface.match(re);
+  assert.ok(
+    m,
+    "no `.bp-paper-surface p, .bp-paper-surface li { ... }` rule in " +
+      "paper-surface.css — running prose has no long-token break guard. " +
+      "Measured without it at 360px on the live reader: 28 paragraphs " +
+      "overflowed their 328px column and the document scrolled sideways " +
+      "392 vs 360 (gp-b-mobile-reading-column).",
+  );
+  assert.ok(
+    /overflow-wrap\s*:\s*break-word/.test(m[1]),
+    "the prose rule must set overflow-wrap: break-word — the same guard the " +
+      "heading rule takes, and deliberately not `anywhere`, which would " +
+      "break words that still had room to fit.",
+  );
+  assert.ok(
+    !/overflow-wrap\s*:\s*anywhere/.test(m[1]),
+    "`anywhere` breaks a word the moment the line is tight rather than only " +
+      "when the word alone cannot fit, so it changes wrapping in columns that " +
+      "were never overflowing — the 1280px before/after geometry diff that " +
+      "proved this change desktop-neutral would no longer hold.",
+  );
+  // The gutter ladder is a separate mechanism; this guard must not be read as
+  // covering it, and the paragraph rule above must keep its own declarations.
+  const para = ruleFor(".bp-paper-surface p ", surface);
+  assert.ok(
+    /hyphens\s*:\s*manual/.test(para),
+    "the paragraph rule lost `hyphens: manual` — the explicit OFF that keeps " +
+      "ragged-right prose from auto-hyphenating.",
+  );
+});
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
