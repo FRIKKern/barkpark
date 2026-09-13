@@ -208,6 +208,100 @@ defmodule Barkpark.Tasks.Stage do
   shared family `reopen_trigger` already does. D336(a) ruled this once for
   `reopen_trigger` and pinned it with the SHAREDTRIG fixture; a distinctness
   check here would repeat that mistake under a new field name.
+
+  ## Two durable slots, because a verdict and an instruction have opposite lifetimes
+
+  (task-bd7476eecdede252.) Every durable key above belongs to ONE
+  adjudication: a TERM, its WHY, its WHEN-RECONSIDERED, its falsifier. All
+  four are *dated measurements* — a later, better measurement SHOULD replace
+  them, and `:supersede` is the door that lets it.
+
+  A row also carries a second, different kind of durable writing: an
+  **OPERATING INSTRUCTION** — standing guidance addressed to whoever touches
+  the row next ("INDEX CONVENTION … READ BEFORE STAMPING"; "do not execute
+  this row as written"). That is not a version of the verdict. It is not
+  dated, nothing supersedes it by being newer, and a later verdict must never
+  displace it.
+
+  Before this hunk both kinds shared `content.disposition_reason`, so a lane
+  ruling on a row whose reason slot held guidance had exactly two moves:
+  DESTROY THE GUIDANCE (`--supersede`) or RECORD NOTHING. MEASURED: of 22
+  rulings written across the 2026-09-07 ledger campaign, TEN were safe only
+  because the slot happened to be blank, and on
+  `tgw11-bl-root-criteria-stamp-needs-close-window` — carrying a 1,960-byte
+  pinned INDEX CONVENTION note — the verdict was never written at all,
+  because there was nowhere to put it.
+
+  A DELIMITER CONVENTION INSIDE ONE FIELD DOES NOT FIX THIS and is explicitly
+  refused: it is the same collision with a convention painted on top, it still
+  makes `--supersede` destroy guidance, and it still gives two lifetimes one
+  slot. The separation is STRUCTURAL:
+
+    * `content.disposition_reason` — the durable VERDICT. Unchanged, including
+      its supersede guard.
+    * `content.operating_instruction` — the durable INSTRUCTION, its OWN
+      addressable key, with its OWN supersede guard
+      (`{:error, {:instruction_would_supersede, existing}}`, opt-in via
+      `:supersede_instruction`).
+
+  THE TWO GUARDS ARE INDEPENDENT BY CONSTRUCTION, which is the whole property.
+  `:supersede` is read ONLY by `check_note_supersession/3` and
+  `:supersede_instruction` ONLY by `check_instruction_supersession/3`; a stage
+  that omits `:instruction` never reaches `@operating_instruction_key` (the
+  `apply_adjudication_key(content, _key, nil)` clause returns the content
+  untouched) and a stage that omits `:note` never reaches
+  `@durable_reason_key`. So a verdict written WITH `--supersede` onto a row
+  holding an instruction leaves that instruction BYTE-IDENTICAL, and an
+  instruction written with `--supersede-instruction` onto a row holding a
+  verdict leaves that verdict byte-identical. Both arms are asserted in
+  `test/barkpark/tasks/stage_operating_instruction_test.exs`.
+
+  ### Legacy values are not reclassified, and nothing guesses
+
+  Rows already carry `content.disposition_reason` holding BOTH kinds of
+  writing mixed together — this is a live ledger, and the 2026-09-07 campaign
+  alone wrote 22 of them, one of which (`cch-w63-bl-a-task-carries-its-pr-in-
+  a-structured-field`) holds a superseded note quoted verbatim inside its
+  replacement. THERE IS NO MIGRATION and there will not be one. An existing
+  `disposition_reason` stays exactly where it is, byte-identical, still the
+  verdict slot, still under the same guard it had yesterday;
+  `content.operating_instruction` is simply ABSENT on every legacy row, and an
+  absent instruction slot is what makes the FIRST `--instruction` on a legacy
+  row unguarded — there is nothing there to displace.
+
+  No heuristic reads a legacy string and decides which kind it is, because no
+  heuristic can: "do not execute this row as written" and "this row's premise
+  aged" are the same data type and only the author knows which they meant. The
+  cost is stated rather than papered over — guidance sitting TODAY in a legacy
+  `disposition_reason` is still guarded by the note guard only, and moving it
+  into the new slot is a deliberate authored act (`--instruction` with the
+  text, then the verdict), never something this code does behind the author's
+  back.
+
+  ### Independent corroboration is NOT solved here, and that is a ruling
+
+  The other way this field loses information is CORROBORATION: when a second
+  lane's verdict AGREES with an existing one, replacing it merges two
+  independent passes into one opinion and destroys the fact that two readers
+  reached the same answer independently. `task-bb4eded7e1cc8dac` is the
+  measured specimen — `lead-triage-c2` and `lead-ledger-c2` reached the same
+  conclusion separately, and the second was deliberately NOT written precisely
+  to avoid that destruction.
+
+  THIS CHANGE DOES NOT PRESERVE SEPARATE AUTHORED VERDICT RECORDS, and
+  declines to on purpose. The split here is by LIFETIME (dated measurement vs.
+  standing guidance), which is a fixed two-way TYPE distinction; corroboration
+  needs an APPEND-ONLY, AUTHOR-KEYED LIST — an unbounded `[{who, when, text}]`
+  with its own read surface, its own bound, and its own answer for every
+  existing census that reads `disposition_reason` as a string. Bolting on a
+  second verdict SCALAR would buy exactly one corroborating reader and collide
+  again on the third, which is the enumeration-instead-of-a-rule mistake one
+  field over. So for corroboration the honest moves remain the ones the
+  campaign used: record nothing, or supersede while quoting the displaced text
+  verbatim inside the replacement — and the `note_would_supersede` refusal,
+  which quotes the existing text IN FULL, is what lets the second reader see
+  the first instead of clobbering it blind. The separate-record mechanism is a
+  different row.
   """
 
   import Barkpark.Tasks.Internal,
@@ -252,6 +346,17 @@ defmodule Barkpark.Tasks.Stage do
   # reason WRONG. Same writer, same CAS update, same raw-door refusal — and
   # OPTIONAL, because a reason is allowed to say it cannot be checked.
   @disposition_rerun_key "disposition_rerun"
+
+  # ── THE SECOND DURABLE SLOT: STANDING GUIDANCE (task-bd7476eecdede252) ────
+  #
+  # NOT a fifth member of the adjudication — a SEPARATE KIND of durable
+  # writing, with the opposite lifetime. A verdict is a dated measurement a
+  # later measurement should replace; an operating instruction is standing
+  # guidance nothing newer supersedes. They shared `disposition_reason`, so a
+  # lane ruling on a row holding guidance could only DESTROY IT or SAY
+  # NOTHING. Its own key, its own supersede guard, its own opt-in flag — so
+  # `--supersede` on a note can never reach it.
+  @operating_instruction_key "operating_instruction"
 
   # ── THE FIFTH DURABLE KEY: WHO OWNS THE ADJUDICATION ──────────────────────
   # (api half of pds-bl-disposition-owner-role-registry)
@@ -446,6 +551,16 @@ defmodule Barkpark.Tasks.Stage do
   def disposition_rerun_key, do: @disposition_rerun_key
 
   @doc """
+  The content key a durable OPERATING INSTRUCTION is written to
+  (task-bd7476eecdede252) — standing guidance for whoever touches this row
+  next. Structurally separate from `durable_reason_key/0`: replacing a verdict
+  cannot touch an instruction and replacing an instruction cannot touch a
+  verdict, because each has its own key AND its own supersede guard.
+  """
+  @spec operating_instruction_key() :: String.t()
+  def operating_instruction_key, do: @operating_instruction_key
+
+  @doc """
   The content key the ADJUDICATION OWNER is written to — who is accountable
   for the verdict on this row (api half of
   pds-bl-disposition-owner-role-registry).
@@ -625,6 +740,21 @@ defmodule Barkpark.Tasks.Stage do
       checkable. What is refused is a rerun that CANNOT FAIL — see
       `forbidden_rerun_shapes/0` — with `{:error, {:unfalsifiable_rerun, code,
       value}}` and NOTHING written.
+    * `:instruction` (alias `:operating_instruction`) — a durable OPERATING
+      INSTRUCTION: standing guidance for whoever touches this row next
+      (task-bd7476eecdede252). Written to `content.#{@operating_instruction_key}`
+      in the SAME CAS update as everything else. Optional, blank-is-absent, and
+      a stage that says nothing about it leaves it exactly as it was. It is NOT
+      a verdict and shares nothing with `:note`: `:supersede` cannot displace
+      it and `:supersede_instruction` cannot displace a `:note`.
+    * `:supersede_instruction` — `true` to allow an `:instruction` to displace
+      a DIFFERENT non-blank instruction already on the row. Default `false`,
+      which refuses that write with
+      `{:error, {:instruction_would_supersede, existing}}` and writes NOTHING.
+      Deliberately a SECOND flag rather than a reuse of `:supersede`: one flag
+      for both slots would mean a caller replacing a verdict on purpose is
+      silently also licensed to destroy standing guidance, which is the exact
+      collision this key exists to remove.
     * `:caller_token_id` — audit stamp for the mutation_event.
 
   Returns `{:ok, doc}`, or:
@@ -641,6 +771,10 @@ defmodule Barkpark.Tasks.Stage do
       reopen condition, on the stage or on the row. NOTHING is written.
     * `{:error, {:unfalsifiable_rerun, code, value}}` — a rerun that cannot
       fail. NOTHING is written.
+    * `{:error, {:instruction_would_supersede, existing}}` — the `:instruction`
+      would have replaced a DIFFERENT non-blank operating instruction already
+      on the row and `:supersede_instruction` was not passed. `existing` is
+      that instruction IN FULL. NOTHING is written.
     * `{:error, {:note_would_supersede, existing}}` — the `:note` would have
       replaced a DIFFERENT non-blank reason already on the row and `:supersede`
       was not passed. `existing` is that reason IN FULL, so the refusal can
@@ -657,6 +791,7 @@ defmodule Barkpark.Tasks.Stage do
              | {:invalid_disposition, term()}
              | {:missing_reopen_trigger, String.t()}
              | {:unfalsifiable_rerun, atom(), term()}
+             | {:instruction_would_supersede, String.t()}
              | {:note_would_supersede, String.t()}}
   def stage(task_id, to, opts \\ []) when is_binary(task_id) and is_binary(to) do
     object = Keyword.get(opts, :object) || "research"
@@ -664,7 +799,11 @@ defmodule Barkpark.Tasks.Stage do
     note = normalize_note(Keyword.get(opts, :note) || Keyword.get(opts, :disposition_reason))
     reopen_trigger = normalize_note(Keyword.get(opts, :reopen_trigger))
     rerun = normalize_note(Keyword.get(opts, :rerun) || Keyword.get(opts, :disposition_rerun))
+    instruction =
+      normalize_note(Keyword.get(opts, :instruction) || Keyword.get(opts, :operating_instruction))
+
     supersede = Keyword.get(opts, :supersede) == true
+    supersede_instruction = Keyword.get(opts, :supersede_instruction) == true
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
     result =
@@ -688,12 +827,15 @@ defmodule Barkpark.Tasks.Stage do
                  {:ok, disposition} <- check_disposition(Keyword.get(opts, :disposition)),
                  :ok <- check_reopen_trigger(doc, disposition, reopen_trigger),
                  :ok <- check_rerun(rerun),
-                 :ok <- check_note_supersession(doc, note, supersede) do
+                 :ok <- check_note_supersession(doc, note, supersede),
+                 :ok <-
+                   check_instruction_supersession(doc, instruction, supersede_instruction) do
               adj = %{
                 note: note,
                 disposition: disposition,
                 reopen_trigger: reopen_trigger,
-                rerun: rerun
+                rerun: rerun,
+                instruction: instruction
               }
 
               do_stage(doc, from, to, object, holder, adj, caller_token_id)
@@ -856,6 +998,40 @@ defmodule Barkpark.Tasks.Stage do
     end
   end
 
+  # THE SECOND DISPLACEMENT DOOR (task-bd7476eecdede252).
+  #
+  # Identical in SHAPE to `check_note_supersession/3` and deliberately NOT
+  # sharing its flag. The two fields hold different KINDS of writing with
+  # opposite lifetimes, so one override for both would mean a caller saying "I
+  # read this verdict and I am replacing it" is also, silently, saying "and I
+  # am destroying whatever standing instruction this row carries" — which is
+  # precisely the collision the separate key removes. Two slots with one key to
+  # both locks is one slot wearing a costume.
+  #
+  # Same three non-refusals, for the same reason (none of them destroys text):
+  # an absent/blank instruction, an absent/blank existing instruction, and a
+  # re-write with the SAME normalized text. Runs under the advisory lock and
+  # BEFORE the CAS, so a refusal leaves the row byte-identical. The refusal
+  # carries the existing instruction IN FULL — a bare "no" would send the
+  # caller straight back with the override without reading the guidance they
+  # were about to erase.
+  defp check_instruction_supersession(_doc, nil, _supersede), do: :ok
+  defp check_instruction_supersession(_doc, _instruction, true), do: :ok
+
+  defp check_instruction_supersession(%Document{content: content}, instruction, _supersede) do
+    existing =
+      content
+      |> content_map()
+      |> Map.get(@operating_instruction_key)
+      |> normalize_note()
+
+    cond do
+      is_nil(existing) -> :ok
+      String.trim(existing) == String.trim(instruction) -> :ok
+      true -> {:error, {:instruction_would_supersede, existing}}
+    end
+  end
+
   defp check_rerun(nil), do: :ok
 
   defp check_rerun(rerun) when is_binary(rerun) do
@@ -922,6 +1098,15 @@ defmodule Barkpark.Tasks.Stage do
         _ -> Map.get(content || %{}, @durable_reason_key)
       end
 
+    # The same receipt for the OTHER slot, read from the OTHER key. Keeping
+    # them separate here is not symmetry for its own sake: reusing one variable
+    # would make a note-only stage echo an instruction it never touched.
+    superseded_instruction =
+      case adj.instruction do
+        nil -> nil
+        _ -> Map.get(content || %{}, @operating_instruction_key)
+      end
+
     # The adjudication triple lands in this ONE map, which this ONE CAS update
     # persists — there is no window in which a row is parked without its
     # trigger, because there is no second write.
@@ -932,6 +1117,7 @@ defmodule Barkpark.Tasks.Stage do
       |> apply_adjudication_key(@disposition_key, adj.disposition)
       |> apply_adjudication_key(@reopen_trigger_key, adj.reopen_trigger)
       |> apply_adjudication_key(@disposition_rerun_key, adj.rerun)
+      |> apply_adjudication_key(@operating_instruction_key, adj.instruction)
 
     # PDS-D451: the receipt is the STORED row, not a reconstruction of intent.
     case fenced_content_write(doc, observed_rev, new_content, new_rev) do
@@ -943,7 +1129,15 @@ defmodule Barkpark.Tasks.Stage do
             observed_rev,
             "api",
             Map.merge(
-              staged_payload(from, to, engagement, holder, adj, superseded_note),
+              staged_payload(
+                from,
+                to,
+                engagement,
+                holder,
+                adj,
+                superseded_note,
+                superseded_instruction
+              ),
               caller_stamp(caller_token_id)
             )
           )
@@ -995,7 +1189,7 @@ defmodule Barkpark.Tasks.Stage do
   # re-leases exactly as it did before.
   #
   # The returned `nil` is not "the lease is gone" — it is "this stage wrote no
-  # lease". `staged_payload/6` echoes what this stage WROTE, and an
+  # lease". `staged_payload/7` echoes what this stage WROTE, and an
   # adjudication writes nothing to `content.engagement`, so the event payload
   # for a same-state stage is byte-identical to what it was before this fix.
   defp apply_engagement(content, from, to, _object, _holder, _ts_iso) when from == to do
@@ -1049,10 +1243,11 @@ defmodule Barkpark.Tasks.Stage do
   # The adjudication triple is echoed the same way the note is — the VALUE plus
   # the KEY it landed on — so a consumer of the event can tell an adjudication
   # that was written from one that was merely passed.
-  defp staged_payload(from, to, engagement, holder, adj, superseded_note) do
+  defp staged_payload(from, to, engagement, holder, adj, superseded_note, superseded_instruction) do
     %{
       "staged" => %{
         "superseded_note" => superseded_note,
+        "superseded_instruction" => superseded_instruction,
         "from" => from,
         "to" => to,
         "object" => engagement && Map.get(engagement, "object"),
@@ -1065,6 +1260,8 @@ defmodule Barkpark.Tasks.Stage do
         "reopen_trigger_key" => adj.reopen_trigger && @reopen_trigger_key,
         "disposition_rerun" => adj.rerun,
         "disposition_rerun_key" => adj.rerun && @disposition_rerun_key,
+        "operating_instruction" => adj.instruction,
+        "operating_instruction_key" => adj.instruction && @operating_instruction_key,
         "lapses_at" => engagement && Map.get(engagement, "lapses_at")
       }
     }
