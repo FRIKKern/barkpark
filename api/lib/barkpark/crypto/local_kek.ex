@@ -101,6 +101,17 @@ defmodule Barkpark.Crypto.LocalKek do
   # (MEDIUM-9). Previous keys are configured via `:previous_keys` (a list or a
   # single Base64 string — wired from BARKPARK_KEK_PREVIOUS in runtime.exs);
   # blank or malformed entries are skipped so a stray comma never breaks unwrap.
+  #
+  # That skip is a LAST RESORT, not the diagnostic. A malformed entry arriving
+  # from the environment is now AUDITED at boot by config/runtime.exs under the
+  # same base64/32-byte contract as the primary KEK: it emits one Logger.warning
+  # naming the 1-based positions (never the entries) and publishes the same
+  # verdict on /status.json as the `kek_previous` component. Keep the two in
+  # step: strip that audit and a bad rotation key goes back to being discarded
+  # here in silence, its ciphertext permanently undecryptable. Refusing the boot
+  # outright is deferred to task-ef0c59e4fd3fc985 (an auto-deploying api/ change
+  # must not brick a prod boot on an unread env value); the raise block that did
+  # refuse lives in this branch's history at commit cb3bb6d58.
   defp keys do
     config = Application.get_env(:barkpark, __MODULE__, [])
 
