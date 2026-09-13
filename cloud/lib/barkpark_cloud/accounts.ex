@@ -330,14 +330,32 @@ defmodule BarkparkCloud.Accounts do
     end
   end
 
-  @doc "Fetch the membership for `user` in `team`, or nil."
-  @spec get_membership(Team.t() | binary(), User.t() | binary()) :: TeamMembership.t() | nil
+  @doc """
+  Fetch the membership for `user` in `team`, or nil.
+
+  TOTAL over the declared domain, and deliberately so: this is the funnel every
+  `Authz` entry point reaches, so a non-UUID or nil id must mean "no membership",
+  never a 500. Both ids go through `Repo.uuid_or_nil/1` — the class guard for
+  `:binary_id` lookups — and a catch-all closes the clauses, so `""`,
+  `"not-a-uuid"` and `nil` all land on `nil` instead of raising
+  `Ecto.Query.CastError` / `FunctionClauseError`. Pinned by ARM 1 of
+  `test/barkpark_cloud/accounts/authz_call_site_census_test.exs`.
+  """
+  @spec get_membership(Team.t() | binary() | nil, User.t() | binary() | nil) ::
+          TeamMembership.t() | nil
   def get_membership(%Team{id: team_id}, user), do: get_membership(team_id, user)
   def get_membership(team_id, %User{id: user_id}), do: get_membership(team_id, user_id)
 
   def get_membership(team_id, user_id) when is_binary(team_id) and is_binary(user_id) do
-    Repo.get_by(TeamMembership, team_id: team_id, user_id: user_id)
+    with tid when is_binary(tid) <- Repo.uuid_or_nil(team_id),
+         uid when is_binary(uid) <- Repo.uuid_or_nil(user_id) do
+      Repo.get_by(TeamMembership, team_id: tid, user_id: uid)
+    else
+      nil -> nil
+    end
   end
+
+  def get_membership(_team, _user), do: nil
 
   @doc """
   All Teams `user` belongs to, oldest membership first. The membership order is
