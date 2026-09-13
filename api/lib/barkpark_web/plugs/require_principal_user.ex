@@ -20,12 +20,16 @@ defmodule BarkparkWeb.Plugs.RequirePrincipalUser do
   def call(%Plug.Conn{assigns: %{current_user: %User{}}} = conn, _opts), do: conn
 
   # One shared emitter → the 401 carries request_id (+ hint) for log correlation.
+  # The hint is ROUTE-DERIVED (task-57081836b628df35): this gate takes EITHER
+  # principal path, which the code-keyed default cannot express.
   def call(conn, _opts) do
     BarkparkWeb.ErrorResponse.emit_custom(
       conn,
       401,
       "unauthorized",
-      "a user identity is required (a login session or an owned token)"
+      "a user identity is required (a login session or an owned token)",
+      %{},
+      "Send a login session — the user_session cookie or a login-session bearer — or an api token that has an owner user."
     )
   end
 end

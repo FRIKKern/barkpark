@@ -250,6 +250,15 @@ var claimDispositions = []claimDisposition{
 		Identity: []string{"ID", "Name", "Slug", "Dataset"},
 		Post:     []string{"Theme"},
 	},
+	{
+		// ssw10: the same render probed on the field `--prebuilt-enabled`
+		// changes. Theme joins the IDENTITY here — held byte-identical — so the
+		// only thing that can make the two runs print differently is the stored
+		// opt-in itself.
+		Name:     "renderSiteSettingsUpdated/prebuilt-enabled",
+		Identity: []string{"ID", "Name", "Slug", "Dataset", "Theme"},
+		Post:     []string{"PrebuiltEnabled"},
+	},
 
 	// ── cloud_site_doctor.go — the per-substrate receipt (ssw8) ─────────────
 	// The identity is the ROW that was examined (same site, same clock, same
