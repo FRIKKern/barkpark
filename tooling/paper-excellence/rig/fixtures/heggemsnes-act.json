@@ -192,6 +192,7 @@
               "type": "paragraph"
             }
           ],
+          "id": "hga-articles-step-0",
           "title": "A contributor's branch is theirs."
         },
         {
@@ -207,6 +208,7 @@
               "type": "paragraph"
             }
           ],
+          "id": "hga-articles-step-1",
           "title": "Disagreement is a review comment, never an edit."
         },
         {
@@ -222,6 +224,7 @@
               "type": "paragraph"
             }
           ],
+          "id": "hga-articles-step-2",
           "title": "Their testimony is untouchable."
         },
         {
@@ -237,6 +240,7 @@
               "type": "paragraph"
             }
           ],
+          "id": "hga-articles-step-3",
           "title": "Full evidence before any verdict."
         },
         {
@@ -252,6 +256,7 @@
               "type": "paragraph"
             }
           ],
+          "id": "hga-articles-step-4",
           "title": "Credit is structural, not courteous."
         },
         {
@@ -267,6 +272,7 @@
               "type": "paragraph"
             }
           ],
+          "id": "hga-articles-step-5",
           "title": "Every outside contribution gets a human-grade review."
         },
         {
@@ -282,6 +288,7 @@
               "type": "paragraph"
             }
           ],
+          "id": "hga-articles-step-6",
           "title": "Repair is performed, not promised."
         }
       ],
@@ -296,11 +303,21 @@
     {
       "id": "hga-remedies",
       "items": [
-        "PR #11556: his original description restored verbatim from the edit history; the after-the-fact edits disclosed in a clearly separated maintainer note.",
-        "PR #11556: his deleted testing disclosure stands again, word for word.",
-        "PR #11556: the disagreement stated in the open at last — mechanism, reproduction script, and measured loss table posted where he can answer.",
-        "PR #11556: credit returned — the diagnosis, measurements and fix are his; the follow-up commit should have carried his co-author line and now says so.",
-        "PR #9530: a real approving review after eight days of silence — what is good named, all four causes of the red census gate diagnosed and reproduced locally, the fix recipe attached, and the branch left untouched, his to decide."
+        {
+          "text": "PR #11556: his original description restored verbatim from the edit history; the after-the-fact edits disclosed in a clearly separated maintainer note."
+        },
+        {
+          "text": "PR #11556: his deleted testing disclosure stands again, word for word."
+        },
+        {
+          "text": "PR #11556: the disagreement stated in the open at last — mechanism, reproduction script, and measured loss table posted where he can answer."
+        },
+        {
+          "text": "PR #11556: credit returned — the diagnosis, measurements and fix are his; the follow-up commit should have carried his co-author line and now says so."
+        },
+        {
+          "text": "PR #9530: a real approving review after eight days of silence — what is good named, all four causes of the red census gate diagnosed and reproduced locally, the fix recipe attached, and the branch left untouched, his to decide."
+        }
       ],
       "type": "notes"
     },
@@ -331,7 +348,7 @@
       "type": "callout"
     }
   ],
-  "source_rev": "2a89cadb4f726d7ba412bea0dc051a47",
+  "source_rev": "3ead12a03aaca4ae264630ba0ac36fd1",
   "style": "article",
   "title": "The Heggemsnes Act — a declaration of humility before the people who help"
 }
