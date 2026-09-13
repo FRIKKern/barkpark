@@ -14036,7 +14036,9 @@ defmodule PDS.Census do
   # the ones it can DECIDE. It is TIERED AS MEASURED, not as hoped:
   #
   #   REDS          end_to_end (and end_to_end_unmutated, the same predicate minus the
-  #                 mutation) · stub_mapping_only, THE "DOES read Repo" HALF ONLY ·
+  #                 mutation) · stub_mapping_only, BOTH HALVES — the "DOES read Repo" half
+  #                 and, since pds-bl-w37-tier2-basis-falsifiers, the SEAM half, whose
+  #                 vocabulary is DERIVED from api/lib's own `*_fun` keys (seam_keys/1) ·
   #                 context_differential_only · two_hop_composed (PDS wave 39 — promoted
   #                 WITH the widened @repo_tokens probe, mutation-proven, and the tier is
   #                 read from @basis_vocab rather than hardcoded, which is what makes the
@@ -14104,6 +14106,59 @@ defmodule PDS.Census do
   # arrives citing anything else has left the measured ground and REDS, because the
   # zero-collateral claim above was measured over this set and nothing wider.
   @stub_citation_allowlist ["api/test/barkpark_web/controllers/github_webhook_controller_test.exs"]
+
+  # ------------------------------------------------- the SEAM half of stub_mapping_only
+  #
+  # THE SEAM HALF IS NOW ARMED, AND IT NEEDED NO TEST-TREE INDEX (pds-bl-w37-tier2-basis-
+  # falsifiers). The backlog row costed this arm as "a whole test-tree index" and it is
+  # not one: `stub_mapping_only` claims the cited test proves a STUB->RESPONSE MAPPING, so
+  # the question is whether THAT CITED BLOCK injects a stub — a read of the block plus its
+  # resolved same-file helpers, which cited_findings/4 has already opened. No index, no
+  # second parse corpus, no second `guard_corpus!`. The row's "~150-200 lines PLUS a
+  # doubled parse corpus" was the cost of the OTHER half of the vocabulary (two_hop's
+  # negative existential), spent on this one by inheritance.
+  #
+  # THE VOCABULARY IS DERIVED FROM api/lib, NEVER TYPED HERE. Every injection seam this
+  # repo has is spelled `*_fun` — 6 app-env keys (`Application.get_env(:barkpark,
+  # :<k>_fun`) and 19 `opts` lines across 8 modules, 14 distinct keys — and there is no
+  # Mox: `mox` appears in NO mix.exs and NO mix.lock, and its ONE occurrence anywhere under
+  # api/ is a prose word inside a comment in pds_write_verb_seam_test.exs. So the key set
+  # is read out of api/lib at run time (20 keys at 12415bf92) and a key added to a module
+  # tomorrow is admitted without an edit here. A HARDCODED LIST WOULD ROT INTO A FALSE
+  # ACCUSATION: this falsifier reds when the seam is ABSENT, so a key the list has not
+  # heard of accuses an honest row.
+  #
+  # AN EMPTY DERIVED SET REFUSES RATHER THAN GREENS. A seam vocabulary of zero keys makes
+  # `seam?` false for every row and would turn this arm into a blanket accusation; it can
+  # only mean the api/lib read found nothing, so it reds naming the cause instead.
+  @seam_key_re ~r/:([a-z_]+_fun)\b/
+
+  defp seam_keys(cache) do
+    case Map.fetch(cache, :seam_keys) do
+      {:ok, keys} ->
+        {keys, cache}
+
+      :error ->
+        keys =
+          "api/lib/**/*.ex"
+          |> Path.wildcard()
+          |> Enum.flat_map(fn f ->
+            @seam_key_re |> Regex.scan(File.read!(f)) |> Enum.map(&List.last/1)
+          end)
+          |> Enum.uniq()
+          |> Enum.sort()
+
+        {keys, Map.put(cache, :seam_keys, keys)}
+    end
+  end
+
+  # THE TEST-SIDE SPELLING OF A SEAM, BOTH HALVES. An app-env seam is swapped as `:<key>`
+  # (`Application.put_env(:barkpark, :github_webhook_intake_fun, fn ...)`) and an opts seam
+  # is passed as `<key>:` (`Worker.tick(opts, tick_fun: fn -> ... end)`), so the probe asks
+  # for either spelling of any derived key.
+  defp seam_in?(text, keys) do
+    Enum.any?(keys, &(String.contains?(text, ":" <> &1) or String.contains?(text, &1 <> ":")))
+  end
 
   # THE BASES check_row_basis/2 ACTUALLY DISPATCHES THROUGH THE CITATION ARM. Held as ONE
   # list because `armed_redding_values/0` reads it: a hand-copy would let the printed
@@ -14222,7 +14277,7 @@ defmodule PDS.Census do
 
       case resolve_marker(lines, marker) do
         {:ok, line} ->
-          {judge_citation(r, path, marker, tier, cited_text(lines, line)), cache}
+          judge_citation(r, path, marker, tier, cited_text(lines, line), cache)
 
         {:error, why} ->
           # ALWAYS A RED, whatever the basis's tier: a citation that resolves to nothing
@@ -14287,7 +14342,14 @@ defmodule PDS.Census do
     end
   end
 
-  defp judge_citation(r, path, marker, tier, text) do
+  defp judge_citation(r, path, marker, tier, text, cache) do
+    {keys, cache} =
+      if r.basis == :stub_mapping_only, do: seam_keys(cache), else: {[], cache}
+
+    {judged_citation(r, path, marker, tier, text, keys), cache}
+  end
+
+  defp judged_citation(r, path, marker, tier, text, seam_keys) do
     ev = cite(path, marker)
     conn? = Enum.any?(@conn_tokens, &String.contains?(text, &1))
     repo? = Enum.any?(@repo_tokens, &String.contains?(text, &1))
@@ -14301,17 +14363,28 @@ defmodule PDS.Census do
         end
 
       :stub_mapping_only ->
-        # ONLY THE REPO HALF REDS. The seam half ("has no injection seam") is advisory:
-        # a seam can be a put_env, a Mox, a passed fun or a config key, and a denylist of
-        # spellings would refuse honest rows.
+        # BOTH HALVES RED NOW. The seam half was advisory on the reasoning that "a seam can
+        # be a put_env, a Mox, a passed fun or a config key, and a denylist of spellings
+        # would refuse honest rows" — MEASURED, that disjunction is one shape: every seam in
+        # this repo is a `*_fun` key, there is no Mox at all, and the key set is DERIVED
+        # from api/lib rather than typed, so it is not a denylist of spellings (see
+        # seam_keys/1 above).
         #
-        # THE ARRIVAL TRIPWIRE FIRST. This falsifier is INVERTED — a store read REFUTES
-        # the basis — so it is the one arm @repo_tokens can hurt, and its safety was
-        # measured only over @stub_citation_allowlist. A citation that arrives from
-        # anywhere else REDS rather than silently spending an unmeasured probe.
+        # THE ARRIVAL TRIPWIRE FIRST. The REPO half of this falsifier is INVERTED — a store
+        # read REFUTES the basis — so it is the one arm @repo_tokens can hurt, and its
+        # safety was measured only over @stub_citation_allowlist. A citation that arrives
+        # from anywhere else REDS rather than silently spending an unmeasured probe. The
+        # SEAM half is not inverted (an absent seam refutes), but it rides the same gate:
+        # a row off the measured ground is refused before either probe runs.
         cond do
           path not in @stub_citation_allowlist ->
             [finding(r, :reds, "cites #{ev}, OUTSIDE the measured-safe citation set for `stub_mapping_only` (#{Enum.join(@stub_citation_allowlist, ", ")}). This falsifier is INVERTED — a store read refutes it — and @repo_tokens' zero-collateral was measured only over that set. RE-MEASURE the widened probe against this file, then widen the allowlist.")]
+
+          seam_keys == [] ->
+            [finding(r, :reds, "the injection-seam vocabulary derived from api/lib is EMPTY, so the seam half of `stub_mapping_only` would accuse every row it is handed. This is a broken read of api/lib, not a finding about #{ev}.")]
+
+          not seam_in?(text, seam_keys) ->
+            [finding(r, tier, "#{ev} INJECTS NO SEAM — the cited block and its resolved same-file helpers name none of the #{length(seam_keys)} `*_fun` injection keys api/lib actually reads, so there is no stub for `stub_mapping_only` to be about")]
 
           repo? ->
             [finding(r, tier, "#{ev} DOES read Repo — `stub_mapping_only` understates what the suite proves")]
