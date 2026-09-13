@@ -3023,23 +3023,38 @@ chmod +x "$RC_ARGV_DIR/jq"
 # constant (fs/exec.c), unchanged across every runner image this repo uses.
 RC_ARGV_CAP=131072
 
-rc_argv_maxlen() {  # run the generator under the shim; echo the longest single argument, in bytes
+# THE SHIM CANNOT MEASURE WHAT THE KERNEL REFUSES TO START. On Linux the plant
+# below dies in execve BEFORE the shim's first line runs, so the over-cap
+# argument is never logged and the maximum reads like an ordinary small one —
+# measured in CI 2026-09-13: `FAIL the planted argv argument measured 2012
+# byte(s)`, on a runner where the fault the plant reproduces is precisely what
+# killed it. The probe therefore keeps the producer's EXIT STATUS and OUTPUT
+# beside the measurement: over-cap-by-measurement (Darwin, which has no
+# per-argument cap) and refused-by-name (Linux) are two readings of one fault,
+# and the clause below accepts either as the detection.
+rc_argv_probe() {  # $1 = the emit's --out path, rest = the command; sets RC_PROBE_*
   local out="$1"; shift
   : > "$RC_ARGV_LOG"
-  PATH="$RC_ARGV_DIR:$PATH" "$@" >/dev/null 2>&1 || true
-  sort -rn "$RC_ARGV_LOG" | head -1
+  rm -f "$out"
+  RC_PROBE_OUT="$(PATH="$RC_ARGV_DIR:$PATH" "$@" 2>&1)" && RC_PROBE_RC=0 || RC_PROBE_RC=$?
+  RC_PROBE_CALLS="$(grep -c . "$RC_ARGV_LOG" || true)"
+  RC_PROBE_MAX="$(awk 'BEGIN{m=0} {if ($1+0 > m) m=$1+0} END{print m}' "$RC_ARGV_LOG")"
+  RC_PROBE_SPEC=0; [ -s "$out" ] && RC_PROBE_SPEC=1
+  return 0
 }
 
-RC_ARGV_MAX="$(rc_argv_maxlen "$TMP/argv-spec.json" \
-  bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --out "$TMP/argv-spec.json")"
-RC_ARGV_CALLS="$(grep -c . "$RC_ARGV_LOG" || true)"
+rc_argv_probe "$TMP/argv-spec.json" \
+  bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --out "$TMP/argv-spec.json"
+RC_ARGV_MAX="$RC_PROBE_MAX"
+RC_ARGV_CALLS="$RC_PROBE_CALLS"
+RC_ARGV_SPEC="$RC_PROBE_SPEC"
 
 # THE PRECONDITION, FIRST: a shim that was never reached measures nothing, and an
 # empty log would otherwise read byte-identically to "every argument is small".
-if [ "${RC_ARGV_CALLS:-0}" -gt 0 ] && [ -s "$TMP/argv-spec.json" ]; then
-  ok "the shim is on the path the emit actually walks: $RC_ARGV_CALLS jq call(s) observed in one full emit, and the emit still wrote its spec"
+if [ "${RC_ARGV_CALLS:-0}" -gt 0 ] && [ "$RC_ARGV_SPEC" -eq 1 ]; then
+  ok "the shim is on the path the emit actually walks: $RC_ARGV_CALLS jq call(s) observed in one full emit, and the emit still wrote its spec (generator exit $RC_PROBE_RC)"
 else
-  bad "the argv shim recorded ${RC_ARGV_CALLS:-0} jq call(s) and the emit wrote $( [ -s "$TMP/argv-spec.json" ] && echo "a spec" || echo "nothing") — this section would be vacuous, fix the shim before reading the clause below"
+  bad "the argv shim recorded ${RC_ARGV_CALLS:-0} jq call(s) and the emit wrote $( [ "$RC_ARGV_SPEC" -eq 1 ] && echo "a spec" || echo "nothing") (generator exit $RC_PROBE_RC) — this section would be vacuous, fix the shim before reading the clause below"
 fi
 
 if [ -n "$RC_ARGV_MAX" ] && [ "$RC_ARGV_MAX" -le "$RC_ARGV_CAP" ]; then
@@ -3061,12 +3076,17 @@ if grep -q 'argv_plant' "$RC_ARGV_MUT"; then
 else
   bad "the argv-plant mutation did not apply — the emit's --slurpfile line moved, so the proof below is vacuous"
 fi
-RC_ARGV_MUT_MAX="$(rc_argv_maxlen "$TMP/argv-plant-spec.json" \
-  bash "$RC_ARGV_MUT" "${FIXARGS[@]}" "${ACK[@]}" --out "$TMP/argv-plant-spec.json")"
-if [ -n "$RC_ARGV_MUT_MAX" ] && [ "$RC_ARGV_MUT_MAX" -gt "$RC_ARGV_CAP" ]; then
-  ok "…and with the spec back in argv the SAME measurement reads $RC_ARGV_MUT_MAX byte(s) — over the cap, so this clause reds on exactly the regression it was written for (mutation-proven able to fail)"
+rc_argv_probe "$TMP/argv-plant-spec.json" \
+  bash "$RC_ARGV_MUT" "${FIXARGS[@]}" "${ACK[@]}" --out "$TMP/argv-plant-spec.json"
+RC_ARGV_MUT_MAX="$RC_PROBE_MAX"
+RC_ARGV_MUT_E2BIG=0
+case "$RC_PROBE_OUT" in *"Argument list too long"*) RC_ARGV_MUT_E2BIG=1 ;; esac
+if [ "${RC_ARGV_MUT_MAX:-0}" -gt "$RC_ARGV_CAP" ]; then
+  ok "…and with the spec back in argv the SAME measurement reads $RC_ARGV_MUT_MAX byte(s) — over the cap, so this clause reds on exactly the regression it was written for (mutation-proven able to fail, by measurement: this kernel has no per-argument cap)"
+elif [ "$RC_ARGV_MUT_E2BIG" -eq 1 ] && [ "$RC_PROBE_RC" -ne 0 ] && [ "$RC_PROBE_SPEC" -eq 0 ]; then
+  ok "…and with the spec back in argv this kernel REFUSES the emit by name — the producer exits $RC_PROBE_RC writing no spec and says \`Argument list too long\` (mutation-proven able to fail, by the kernel: execve dies before the shim's first line, which is why the measurement above reads only $RC_ARGV_MUT_MAX byte(s))"
 else
-  bad "the planted argv argument measured ${RC_ARGV_MUT_MAX:-nothing} byte(s), not over $RC_ARGV_CAP — the clause above cannot be shown able to fail"
+  bad "the planted argv argument measured ${RC_ARGV_MUT_MAX:-nothing} byte(s), not over $RC_ARGV_CAP, AND the producer did not refuse by name (exit $RC_PROBE_RC, spec written=$RC_PROBE_SPEC) — the clause above cannot be shown able to fail"
 fi
 
 section "15. S6 LEAF DEMOTION — an excluded aggregator takes its \`needs\` upstreams DOWN with it, never up"
@@ -6092,8 +6112,20 @@ fi
 # report a phantom hit).
 RC25_OLD_NEEDLE='bad "$('"why_emit"
 RC25_NEW_NEEDLE='fail_emit "$('"why_emit"
-RC25_OLD_N="$(grep -cF "$RC25_OLD_NEEDLE" "$0" || true)"
-RC25_NEW_N="$(grep -cF "$RC25_NEW_NEEDLE" "$0" || true)"
+# A COMMENT IS NOT A CALL SITE. `grep -cF` over the whole file counted the
+# PROSE that names the old shape as an instance of it: §27's note "that ratchet
+# counts `bad "$(why_emit` sites" carries the needle inside backticks, so this
+# clause reported 1 surviving site and reddened the suite over a sentence. It
+# was a standing red on main (2026-09-12 run 34701385467 named it at line 6548;
+# 2026-09-13 PR run 34755410507 at 6700 — the line number moved with the file,
+# the "finding" never did), invisible for a day because the E2BIG above stopped
+# the suite before it. Comment lines are stripped from BOTH counts: an
+# explanation of the defect must not read as the defect, and the non-vacuity
+# count must be a count of real call sites too.
+rc25_sites() { grep -nF "$1" "$0" | sed 's/^[0-9]*://' | grep -vc '^[[:space:]]*#' || true; }
+rc25_show()  { grep -nF "$1" "$0" | awk -F: '{l=$0; sub(/^[0-9]+:/,"",l); if (l !~ /^[[:space:]]*#/) print}'; }
+RC25_OLD_N="$(rc25_sites "$RC25_OLD_NEEDLE")"
+RC25_NEW_N="$(rc25_sites "$RC25_NEW_NEEDLE")"
 if [ "$RC25_NEW_N" -gt 0 ]; then
   ok "the ratchet is non-vacuous: $RC25_NEW_N site(s) consume a generator-written spec through the router"
 else
@@ -6102,7 +6134,7 @@ fi
 if [ "$RC25_OLD_N" -eq 0 ]; then
   ok "…and NO site still reds a generator-written spec with a bare failure — the exit-4 contract cannot be silently re-conflated one call site at a time"
 else
-  bad "$RC25_OLD_N site(s) still red a generator-written spec with a bare failure, so a generator outage there is reported as spec drift (exit 1): $(grep -nF "$RC25_OLD_NEEDLE" "$0" | head -3 | tr '\n' '⏎')"
+  bad "$RC25_OLD_N site(s) still red a generator-written spec with a bare failure, so a generator outage there is reported as spec drift (exit 1): $(rc25_show "$RC25_OLD_NEEDLE" | head -3 | tr '\n' '⏎')"
 fi
 
 # ═══ 26. the INVERSE blocking-authority clause, planted as suite clauses ════
