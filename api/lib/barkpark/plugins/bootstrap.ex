@@ -253,7 +253,13 @@ defmodule Barkpark.Plugins.Bootstrap do
   end
 
   defp do_upsert(plugin_name, attrs, dataset, scope) do
-    case Content.upsert_schema(attrs, dataset) do
+    # CLASS (c), the seeded-Default ruling (task-e6523cc7154304f0): a plugin's
+    # schema registration is INSTANCE-WIDE by design — it runs at boot, carries
+    # no principal and no request, and every tenant on this box needs the row.
+    # `instance_wide: true` DECLARES that, so the seeded Default is a caller's
+    # choice rather than WriteScope's silent fallback. (The per-scope copy is
+    # stamped afterwards by `stamp_scope/2`.)
+    case Content.upsert_schema(attrs, dataset, instance_wide: true) do
       {:ok, %SchemaDefinition{} = saved} ->
         stamp_scope(saved, scope)
 
