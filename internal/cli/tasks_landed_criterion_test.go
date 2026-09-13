@@ -337,3 +337,43 @@ func TestTaskLanded_WithoutANoteNothingIsResolved(t *testing.T) {
 		t.Fatalf("queries = %v, want one landing with no criterion", posts)
 	}
 }
+
+// THE POLARITY, PINNED — and the one place task-4dca6c8453fb1f7c's c2 and this
+// code disagree, made MECHANICAL instead of only written down.
+//
+// c2 asks for "a criterion carrying merge_gate:true is NOT flipped by this
+// verb". The server reads that field the OTHER way: `Tasks.Landed.merge_shaped?/1`
+// returns the explicit flag verbatim, so `merge_gate: true` is merge-SHAPED and
+// therefore flippable (subject only to `merge_discharges?/1`), and it is an
+// explicit `false` that VETOES. This client mirrors the server, so an explicit
+// `merge_gate: true` IS resolved into a flip.
+//
+// Measured against guerrilla 2026-09-13 with the shipped predicate: of the nine
+// rows the filing names, exactly TWO still carry a resolvable candidate, and one
+// of them — task-dd37cc248363e633 index 2, the shape reproduced below — is
+// resolvable ONLY because of this polarity. Enforcing c2 as written would leave
+// the cure reaching ONE row of the nine (task-f56d553a70a4bba8 index 4, whose own
+// text reads "MERGE-GATED (the LEAD closes this)"), i.e. it would nullify the
+// measured effect. That is a decision for the lead, not for this test — so the
+// test only makes the disagreement fail loudly if the polarity is ever flipped
+// without c2 being settled.
+func TestTaskLanded_ExplicitMergeGateTrueIsTheCandidate(t *testing.T) {
+	cap := landedCriterionServer(t, []landedCrit{
+		{text: "OpsController maps {:error, :replay_unavailable} to 503 with the retry-after hint"},
+		{text: "If docs/openapi.json enumerates /ops error codes, it carries replay_unavailable"},
+		{text: "MERGE-GATED: merged to main with the Elixir gate green; evidence = PR number + merge sha.", mergeGate: boolPtr(true)},
+	})
+
+	_, code := landWithNote(t)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want exitOK (%d)", code, exitOK)
+	}
+	posts := cap.posts()
+	if len(posts) != 1 || !strings.Contains(posts[0], "criterion=2") {
+		t.Fatalf("queries = %v — an explicit merge_gate:true is MERGE-SHAPED on the server "+
+			"(Tasks.Landed.merge_shaped?/1 returns the flag verbatim; only an explicit false vetoes), "+
+			"so index 2 is the candidate. If this now reds because the polarity was deliberately "+
+			"inverted to satisfy task-4dca6c8453fb1f7c's c2, say so in the PR and re-measure the nine rows: "+
+			"the inversion leaves the cure reaching ONE of them.", posts)
+	}
+}
