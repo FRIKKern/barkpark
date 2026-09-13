@@ -1581,8 +1581,14 @@ defmodule BarkparkCloud.Web.Router do
       json(conn, 200, %{
         # two-factor-auth: the SPA reads two_factor_enabled to render the right
         # Security-panel state on load. The secret/codes columns are NEVER
-        # serialized — only the boolean on/off switch. email-verification adds
-        # `confirmed` so the SPA can nudge an unverified account.
+        # serialized — only the boolean on/off switch. `confirmed` is served
+        # for API CONSUMERS, not for this console: grepping
+        # cloud/priv/static/app.js for a `.confirmed` / `confirmed:` read finds
+        # one hit and it is a comment saying nothing reads it — there is no
+        # unverified-account nudge and no read of this field anywhere under
+        # cloud/priv/static. The nudge was REFUSED rather than built: it is a
+        # product feature nobody asked for, and the field stays on the wire
+        # because something outside this repo may consume it.
         user: %{
           id: user.id,
           email: user.email,
