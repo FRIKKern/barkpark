@@ -298,7 +298,12 @@ scripts/prod-build-cache-guard.sh'
 #   that move only when a duel is recorded, so the full-suite cost is rare and
 #   bounded, which is the same judgement the templates/** note above records.
 #   THE DOC BYTE-CAP ENTRIES (2026-09-13, task-4c9c1682f5ba5c7a) are the 36 doc
-#   paths and the cap table itself, and they are here because the caps in
+#   paths NOT ALREADY MATCHED here, plus the cap table itself. 36 is not the
+#   whole table: the CAPS table holds 39 rows (CAPS_ROWS_EXPECTED=39), and the
+#   other three -- api/CLAUDE.md, docs/api-v1.md and docs/api/error-codes.md --
+#   are already covered by pre-existing entries, verified by querying the
+#   matcher rather than by reading this list. Coverage is COMPLETE at 39/39; do
+#   not read the 36 as three docs forgotten. They are here because the caps in
 #   scripts/check-doc-budgets.sh had NO BLOCKING READER. Their only enforcer is
 #   the `Doc budgets + anchors` job, which required-checks.json holds out as
 #   "S4 PATHS-FILTERED: doc-gates.yml only runs on matching paths, so on other
