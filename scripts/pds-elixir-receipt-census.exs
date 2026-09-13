@@ -11798,6 +11798,38 @@ defmodule PDS.Census do
       expect: ["FAIL  REGISTER-RETIRED-STAYS-RETIRED", "RESURRECTED"],
       proves: "a RETIRED row whose site is live again reds by name instead of quietly re-adopting the site — the retired form cannot be used as a suppression switch"
     },
+    # THE HASH ARM (task-2045aba7304ea724), CORPUS :repo FOR THE SAME REASON AS ITS
+    # NEIGHBOURS: the register arms are scoped to the corpus the register's paths live in,
+    # so a mutant over the synthetic tree would be proven exactly where the arm is off.
+    %{
+      name: "REGISTER-STALE-ACK-SEES-A-CORRUPT-HASH",
+      corpus: :repo,
+      argv: [],
+      # ONE DIGIT OF ONE RECORDED head_hash, on a row that resolves LIVE today. Before this
+      # arm existed the same mutation exited 0 with `PASS  REGISTER-COMPLETE`, moving the
+      # demoted population 15 -> 16 and nothing else — the whole defect in one character.
+      mut:
+        {"Web.ImportController.create/2\", \"513" <> "20322\"",
+         "Web.ImportController.create/2\", \"51320323\""},
+      exit: 1,
+      expect: ["FAIL  REGISTER-STALE-ACKED", "UNDECLARED MISMATCH", "NO stale_ack"],
+      proves: "a recorded hash that is not the hash its site derives, and that no stale_ack declares, REDS by name — the property is `a wrong hash cannot pass`, and it is proven on the exact mutation that used to pass"
+    },
+    %{
+      name: "REGISTER-STALE-ACK-NOT-VACUOUS",
+      corpus: :repo,
+      argv: [],
+      # THE 0-OF-N SHAPE, the same one ROSTER-FRESH-NOT-VACUOUS and
+      # EXCLUSION-NARROW-NOT-VACUOUS pin: an arm that verifies NOTHING also passes on a
+      # correct register and is indistinguishable from the fix. Emptying the judged set is
+      # the cheapest way to ask whether the count in the PASS sentence is measured.
+      mut:
+        {"resolve_register(classified), st in [:live" <> ", :stale], do: {r, st, s}",
+         "resolve_register(classified), st in [], do: {r, st, s}"},
+      exit: 1,
+      expect: ["FAIL  REGISTER-STALE-ACKED", "certified an EMPTY SET", "0 row(s) hash-verified"],
+      proves: "the arm reds on its own vacuity instead of printing PASS over an empty set — the hash-verified count in its PASS sentence is a measurement, not a constant"
+    },
     # THE ONE-HOP JOIN (PDS wave 41), AND WHY ITS CORPUS IS THE REPO. The join's whole
     # subject is a HOP between two real defs, and the synthetic tree's controllers respond
     # in their own bodies — a fixture would exercise the code and prove nothing about it.
