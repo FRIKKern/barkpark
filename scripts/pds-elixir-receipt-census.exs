@@ -1774,6 +1774,9 @@ defmodule PDS.Census do
     # "revoking by id actually stops the token authenticating".
     %{key: {"api/lib/barkpark_web/controllers/app_token_controller.ex",
             "BarkparkWeb.AppTokenController.delete_by_id/2", "15384850", "117712781"},
+      stale_ack: %{recorded: {"15384850", "117712781"}, current: {"15384850", "102381692"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 117712781 -> 102381692; head_hash 15384850 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "PROVEN", basis: :end_to_end,
       evidence:
         {"api/test/barkpark_web/controllers/app_token_admin_revoke_test.exs",
@@ -1883,6 +1886,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:164
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "1989150", "124223564"},
+      stale_ack: %{recorded: {"1989150", "124223564"}, current: {"1989150", "63570316"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 124223564 -> 63570316; head_hash 1989150 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs `a valid block paper (locked title at index 0) still saves — positive control`) reads nothing back at all, so it cannot even assert that."},
@@ -1975,6 +1981,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/github_status_controller.ex:65
     %{key: {"api/lib/barkpark_web/controllers/github_status_controller.ex",
             "BarkparkWeb.GithubStatusController.status/2", "63059312", "64996178"},
+      stale_ack: %{recorded: {"63059312", "64996178"}, current: {"63059312", "100969891"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 64996178 -> 100969891; head_hash 63059312 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unexamined},
     # ── THIS CONTROLLER'S `{:error, reason}` 5xx ARMS, DISPOSED (PDS w36 crit 3) ──
     #
@@ -2146,6 +2155,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/oidc_controller.ex:82
     %{key: {"api/lib/barkpark_web/controllers/oidc_controller.ex",
             "BarkparkWeb.OidcController.callback/2", "55913437", "73996638"},
+      stale_ack: %{recorded: {"55913437", "73996638"}, current: {"91406491", "73996638"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: head_hash moved 55913437 -> 91406491; expr_fp 73996638 is unmoved, so the enclosing def's HEAD was re-shaped and the receipt expression was not. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unexamined},
     # barkpark_web/controllers/plugin_settings_controller.ex — update/2 LEFT THIS
     # REGISTER at the wave-39-residue repair (pds-w39-literal-receipt-residue).
@@ -2178,6 +2190,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/saml_controller.ex:66
     %{key: {"api/lib/barkpark_web/controllers/saml_controller.ex",
             "BarkparkWeb.SamlController.acs/2", "32993266", "73996638"},
+      stale_ack: %{recorded: {"32993266", "73996638"}, current: {"63032879", "73996638"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: head_hash moved 32993266 -> 63032879; expr_fp 73996638 is unmoved, so the enclosing def's HEAD was re-shaped and the receipt expression was not. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/saml_controller_test.exs",
          ~S|test "POST ACS consumes a signed response, mints a session, and JIT-provisions", %{conn: conn} do|}},
@@ -2228,6 +2243,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/social_controller.ex:66
     %{key: {"api/lib/barkpark_web/controllers/social_controller.ex",
             "BarkparkWeb.SocialController.callback/2", "9871709", "73996638"},
+      stale_ack: %{recorded: {"9871709", "73996638"}, current: {"33308446", "73996638"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: head_hash moved 9871709 -> 33308446; expr_fp 73996638 is unmoved, so the enclosing def's HEAD was re-shaped and the receipt expression was not. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unexamined},
     # barkpark_web/controllers/tasks_controller.ex:83
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
@@ -2247,16 +2265,25 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:316
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.claim/2", "130674472", "21159066"},
+      stale_ack: %{recorded: {"130674472", "21159066"}, current: {"130674472", "113934956"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 21159066 -> 113934956; head_hash 130674472 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/tasks_controller_test.exs",
          ~S|test "full view keeps ONE claim copy: top-level intact, content echo drops it, storage untouched",|}},
     # barkpark_web/controllers/tasks_controller.ex:371
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.show/2", "107047617", "14030995"},
+      stale_ack: %{recorded: {"107047617", "14030995"}, current: {"107047617", "46106495"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 14030995 -> 46106495; head_hash 107047617 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:435
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.claim_by_id/2", "59151065", "67476"},
+      stale_ack: %{recorded: {"59151065", "67476"}, current: {"59151065", "92118910"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 67476 -> 92118910; head_hash 59151065 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :context_differential_only, evidence:
         {"api/test/barkpark/tasks/receipt_honesty_test.exs",
          ~S|test "claim (claim.ex do_claim)", %{scope: scope} do|}},
@@ -2331,6 +2358,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:861
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.pulse/2", "62712851", "71420310"},
+      stale_ack: %{recorded: {"62712851", "71420310"}, current: {"62712851", "30560441"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 71420310 -> 30560441; head_hash 62712851 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :context_differential_only, evidence:
         {"api/test/barkpark/tasks/receipt_honesty_remainder_test.exs",
          ~S|test "pulse (pulse.ex apply_pulse)", %{scope: scope} do|}},
@@ -2395,18 +2425,30 @@ defmodule PDS.Census do
     # reports, or about it being the postcondition, changed.
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.graph_traverse/3", "72555353", "14314567"},
+      stale_ack: %{recorded: {"72555353", "14314567"}, current: {"72555353", "121457495"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 14314567 -> 121457495; head_hash 72555353 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:984
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.graph_tasks/2", "6484558", "37641606"},
+      stale_ack: %{recorded: {"6484558", "37641606"}, current: {"6484558", "82037153"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 37641606 -> 82037153; head_hash 6484558 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:1008
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.graph_orphans/2", "87006539", "21591304"},
+      stale_ack: %{recorded: {"87006539", "21591304"}, current: {"87006539", "111559021"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 21591304 -> 111559021; head_hash 87006539 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:1015
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.graph_dangling/2", "113055363", "33214619"},
+      stale_ack: %{recorded: {"113055363", "33214619"}, current: {"113055363", "75605829"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 33214619 -> 75605829; head_hash 113055363 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:1142
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
@@ -2451,6 +2493,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:1696
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.fleet_roster/2", "116314994", "118018566"},
+      stale_ack: %{recorded: {"116314994", "118018566"}, current: {"116314994", "21327746"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 118018566 -> 21327746; head_hash 116314994 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tickets_controller.ex:93
     %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
@@ -11753,6 +11798,38 @@ defmodule PDS.Census do
       expect: ["FAIL  REGISTER-RETIRED-STAYS-RETIRED", "RESURRECTED"],
       proves: "a RETIRED row whose site is live again reds by name instead of quietly re-adopting the site — the retired form cannot be used as a suppression switch"
     },
+    # THE HASH ARM (task-2045aba7304ea724), CORPUS :repo FOR THE SAME REASON AS ITS
+    # NEIGHBOURS: the register arms are scoped to the corpus the register's paths live in,
+    # so a mutant over the synthetic tree would be proven exactly where the arm is off.
+    %{
+      name: "REGISTER-STALE-ACK-SEES-A-CORRUPT-HASH",
+      corpus: :repo,
+      argv: [],
+      # ONE DIGIT OF ONE RECORDED head_hash, on a row that resolves LIVE today. Before this
+      # arm existed the same mutation exited 0 with `PASS  REGISTER-COMPLETE`, moving the
+      # demoted population 15 -> 16 and nothing else — the whole defect in one character.
+      mut:
+        {"Web.ImportController.create/2\", \"513" <> "20322\"",
+         "Web.ImportController.create/2\", \"51320323\""},
+      exit: 1,
+      expect: ["FAIL  REGISTER-STALE-ACKED", "UNDECLARED MISMATCH", "NO stale_ack"],
+      proves: "a recorded hash that is not the hash its site derives, and that no stale_ack declares, REDS by name — the property is `a wrong hash cannot pass`, and it is proven on the exact mutation that used to pass"
+    },
+    %{
+      name: "REGISTER-STALE-ACK-NOT-VACUOUS",
+      corpus: :repo,
+      argv: [],
+      # THE 0-OF-N SHAPE, the same one ROSTER-FRESH-NOT-VACUOUS and
+      # EXCLUSION-NARROW-NOT-VACUOUS pin: an arm that verifies NOTHING also passes on a
+      # correct register and is indistinguishable from the fix. Emptying the judged set is
+      # the cheapest way to ask whether the count in the PASS sentence is measured.
+      mut:
+        {"resolve_register(classified), st in [:live" <> ", :stale], do: {r, st, s}",
+         "resolve_register(classified), st in [], do: {r, st, s}"},
+      exit: 1,
+      expect: ["FAIL  REGISTER-STALE-ACKED", "certified an EMPTY SET", "0 row(s) hash-verified"],
+      proves: "the arm reds on its own vacuity instead of printing PASS over an empty set — the hash-verified count in its PASS sentence is a measurement, not a constant"
+    },
     # THE ONE-HOP JOIN (PDS wave 41), AND WHY ITS CORPUS IS THE REPO. The join's whole
     # subject is a HOP between two real defs, and the synthetic tree's controllers respond
     # in their own bodies — a fixture would exercise the code and prove nothing about it.
@@ -12167,6 +12244,15 @@ defmodule PDS.Census do
     # STALE SPECIMEN; the mutated one must. That is a discriminator no honest register
     # edit can flip, and it proves the whole path end to end: demotion -> specimen ->
     # printed sentence -> the arm's PASS.
+    #
+    # AND ITS EXIT CODE MOVED 0 -> 1 WHEN REGISTER-STALE-ACKED WAS ARMED
+    # (task-2045aba7304ea724), WHICH IS THE POINT AND NOT COLLATERAL. This case
+    # MANUFACTURES exactly the thing that arm refuses: a recorded expr_fp that is not the
+    # one its site derives, declared by nothing. Before the arm existed the manufactured
+    # corruption exited 0 with CENSUS OK — the whole defect, sitting inside this file's own
+    # selftest. The four prose assertions below are unchanged and still carry the case's
+    # subject; what changed is that the tree now SAYS SO. A run where this mutation still
+    # exited 0 would mean the new arm had gone blind.
     %{
       name: "LADDER-STALE-ARM-SPECIMEN",
       corpus: :repo,
@@ -12174,15 +12260,16 @@ defmodule PDS.Census do
       mut:
         {"\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"17468236\"},",
          "\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"999999999\"},"},
-      exit: 0,
+      exit: 1,
       expect: [
         "the freshness arm MOVES ON THIS TREE",
         "STALE SPECIMEN  BarkparkWeb.SecretController.delete",
         "PASS  LADDER-STALE-ARM-EXERCISED",
-        "CENSUS OK"
+        "FAIL  REGISTER-STALE-ACKED",
+        "UNDECLARED MISMATCH"
       ],
       refute: ["the freshness arm is a NO-OP ON THIS TREE"],
-      proves: "the :stale arm can be MADE to fire from committed data alone: demoting one PROVEN register row's expression fingerprint sends resolve_register/1 down its {path, mfa} fallback, the row resolves :stale, and that row's def appears as a NAMED STALE SPECIMEN admitted to leg A by the :stale arm and by nothing else — which is what the printed zero of wave 45 could not show"
+      proves: "the :stale arm can be MADE to fire from committed data alone: demoting one PROVEN register row's expression fingerprint sends resolve_register/1 down its {path, mfa} fallback, the row resolves :stale, and that row's def appears as a NAMED STALE SPECIMEN admitted to leg A by the :stale arm and by nothing else — which is what the printed zero of wave 45 could not show. IT NOW ALSO PROVES THE SECOND HALF: the same manufactured demotion, declared by nothing, REDS REGISTER-STALE-ACKED at exit 1 where it used to print CENSUS OK"
     },
     # THE POPULATION BASELINE STOPS BEING ADVISORY (PDS-D678, wave 47), AND THE CORPUS IS
     # THE REPO FOR THE SAME REASON THE ROSTER CASES USE IT: baseline_checks/2 is scoped by
@@ -14054,6 +14141,7 @@ defmodule PDS.Census do
       :real ->
         [
           register_complete(classified),
+          register_stale_acked(classified),
           register_retired_intact(classified),
           declared_rows_resolve(classified),
           declared_basis_intact(parsed),
@@ -14113,6 +14201,99 @@ defmodule PDS.Census do
       end
 
     {"REGISTER-COMPLETE", ok?, why}
+  end
+
+  # THE HASH IS POLICED OR IT IS DECORATION (task-2045aba7304ea724). REGISTER-COMPLETE
+  # joins a row to its site on the four-field key FIRST, but a row whose recorded
+  # head_hash/expr_fp no longer derive falls to the {path, mfa} fallback in
+  # resolve_register/1, which destructures the hash away (`{path, mfa, _, _} = r.key`) and
+  # resolves :stale — and :stale sits inside `covered`, so the site counts as judged and
+  # the gate PASSES. MEASURED on 9b5dc6c35, never inferred: changing ONE digit of a LIVE
+  # row's recorded head_hash (Barkpark.Plugins.Sheets.Web.ImportController.create/2,
+  # 51320322 -> 51320323) left rc=0 with `PASS  REGISTER-COMPLETE` and moved the demoted
+  # population 15 -> 16; changing the FUNCTION key of a row reds at rc=1 naming the
+  # orphan. The function key was policed; the hash was policed only by a counter no arm
+  # reads.
+  #
+  # WHAT THIS ARM IS NOT. It is NOT "basis_stale must be zero". A floor over an honest
+  # population reds on every legitimate edit, and a red that cannot separate a moved body
+  # from a wrong hash is the false alarm that gets the arm switched off. The property is
+  # A WRONG HASH CANNOT PASS.
+  #
+  # WHAT IT IS. Every stale demotion must be DECLARED by a `stale_ack` on its own row, and
+  # the declaration pins BOTH pairs: the `recorded` {head_hash, expr_fp} the row carries
+  # and the `current` pair its site derives today. A divergence nobody declared is a wrong
+  # hash and reds.
+  #   · PINNING `recorded` is what gives the arm teeth on an ALREADY-STALE row. Pin only
+  #     `current` and corrupting the RECORDED hash of a declared-stale row still passes —
+  #     the same blindness, one row over. Measured: on 9b5dc6c35 that corruption is
+  #     invisible even to the counter (the demoted population stays at 15).
+  #   · PINNING `current` is what makes a declaration SELF-INVALIDATING. The next real edit
+  #     under that row moves the current pair, the ack stops describing it, and the row
+  #     reds again asking to be re-derived. A declaration is never permanent permission to
+  #     be stale — that is the tightening, and it is why this is not a ratchet that sits.
+  #   · AN ACK ON A ROW THAT IS NOT STALE REDS TOO. A declaration left behind after a
+  #     re-derivation describes nothing, and a dead ack is exactly how a suppression switch
+  #     gets built out of an honesty field.
+  #
+  # FAIL-CLOSED IMMEDIATELY, NOT RATCHETED FROM THE CURRENT POPULATION. All 15 demotions
+  # live on 9b5dc6c35 were triaged and carry a stale_ack transcribed FROM A RUN of this
+  # census (never re-typed from a comment), so the armed arm is green at 0 undeclared on
+  # the day it lands and the 16th is a red. None was "re-derived": editing a recorded key
+  # to match a moved body silently re-adopts a bought verdict for code the author never
+  # read, which is the defect this register exists to refuse — the honest repair is to
+  # re-JUDGE the row, and until someone does, the row stands demoted AND declared.
+  #
+  # THE ZERO FLOOR. An arm that verifies nothing also passes on a correct register and is
+  # indistinguishable from the fix, so a run that hash-verifies 0 rows REDS on its own
+  # vacuity rather than printing PASS over an empty set.
+  defp register_stale_acked(classified) do
+    judged =
+      for {r, st, s} <- resolve_register(classified), st in [:live, :stale], do: {r, st, s}
+
+    exact = Enum.count(judged, fn {_r, st, _s} -> st == :live end)
+    declared = Enum.count(judged, fn {_r, st, _s} -> st == :stale end)
+
+    faults =
+      Enum.flat_map(judged, fn {r, st, s} ->
+        {path, mfa, hh, fp} = r.key
+        ack = Map.get(r, :stale_ack)
+        now = {head_hash(s), expr_fp(s)}
+        where = "#{short(path)} #{mfa}"
+
+        cond do
+          st == :live and is_nil(ack) ->
+            []
+
+          st == :live ->
+            ["DEAD ACK #{where} — the row resolves on its EXACT recorded key #{hh}/#{fp}, so its stale_ack describes nothing; delete it"]
+
+          is_nil(ack) ->
+            ["UNDECLARED MISMATCH #{where} — recorded #{hh}/#{fp} · current #{elem(now, 0)}/#{elem(now, 1)} · NO stale_ack: this row's committed hash is not the hash its site derives and nothing says why"]
+
+          Map.get(ack, :recorded) != {hh, fp} ->
+            ["ACK DOES NOT PIN THE RECORDED KEY #{where} — the row carries #{hh}/#{fp}, the ack declares #{inspect(Map.get(ack, :recorded))}"]
+
+          Map.get(ack, :current) != now ->
+            ["ACK IS OUT OF DATE #{where} — the ack declares current #{inspect(Map.get(ack, :current))}, the site derives #{elem(now, 0)}/#{elem(now, 1)}: the body moved again, so RE-JUDGE the row and re-derive the ack"]
+
+          true ->
+            []
+        end
+      end)
+
+    vacuous = if judged == [], do: ["VACUOUS — 0 row(s) hash-verified: this arm certified an EMPTY SET"], else: []
+    red = vacuous ++ faults
+
+    why =
+      if red == [] do
+        "hash-verified #{length(judged)} of #{length(@register)} row(s) against the {head_hash, expr_fp} their site DERIVES — #{exact} on an exact recorded-key match, #{declared} declared-stale with a stale_ack pinning BOTH the recorded and the current pair — 0 undeclared mismatch(es)"
+      else
+        "#{length(red)} row(s) whose recorded hash is not accounted for (#{length(judged)} hash-verified): " <>
+          Enum.join(Enum.take(red, 4), " · ")
+      end
+
+    {"REGISTER-STALE-ACKED", red == [], why}
   end
 
   # A RETIRED ROW THAT RESOLVES AGAIN IS A CONTRADICTION, NEVER A QUIET RE-ADOPTION. The
