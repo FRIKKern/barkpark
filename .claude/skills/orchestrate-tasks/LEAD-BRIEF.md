@@ -36,14 +36,25 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    "<what you found>"` (cancelled rows are exempt from the criteria gate).
 2. **Claim** with your worker id: `bp task claim <id> lead-<lane> --yes` (prints epoch). Pulse
    while it is held: `bp task pulse <id> lead-<lane> --now "<what is happening>" --yes`.
-3. **Dispatch** an Opus worker: `Agent(subagent_type: "general-purpose", model: "opus",
+3. **Before you dispatch, measure the disk — a full host makes every gate lie.**
+   `bash scripts/scratchpad-reaper.sh --floor 25 "$ORCH"`. Exit 0 dispatches; exit 2 REFUSES
+   and names the floor and the measured free space; exit 3 means it could not measure, which
+   is also not a pass. On a refusal, do NOT dispatch: tell `main`, hold the lane, and say
+   "disk floor". A worker launched onto a full box comes back with a red gate that reads
+   exactly like a real defect, and you spend the round on code that was never broken —
+   measured 2026-08-10, `ENOSPC` killed every Bash call on a wave host (a bare `true`
+   failed) and the digest phase ran ZERO commands. The remedy briefed that day,
+   `rm -rf /private/tmp/claude-501/*/tasks/*.output`, is a PROVED NO-OP: 0 files matched,
+   `rm` rc=1, free unchanged at 117Mi — those files are the fault's victim, not its cause.
+   Do not repeat it to a worker.
+4. **Dispatch** an Opus worker: `Agent(subagent_type: "general-purpose", model: "opus",
    name: "<lane>-w<N>")`. The worker prompt must contain: the task id, "the task row IS
    the spec — do not trust my paraphrase", the worktree command below, the fence, the
    gate to run, the commit rules, and "report what the filing got WRONG". Five workers
    at most in flight; parallelise across rows, not inside one.
-4. **Worker builds** in `git worktree add $ORCH/wt/<lane>-<slug> -b <lane>/<slug> origin/main`.
+5. **Worker builds** in `git worktree add $ORCH/wt/<lane>-<slug> -b <lane>/<slug> origin/main`.
    IMMEDIATELY record the base: `git -C <wt> merge-base HEAD origin/main > $ORCH/tmp/<lane>-w<N>/base.sha`.
-   That file is the only reset target rule 5 allows; `origin/main` moves while the worker works.
+   That file is the only reset target the commit rules below allow; `origin/main` moves while the worker works.
    Elixir gates run inside that worktree, through the STRICT entry point —
    `cd api && ../scripts/mix-test-strict.sh <files>` (or `cd cloud && ../scripts/…`);
    never borrow `_build` from another tree. NOT bare `mix test <files>`: mix refuses
@@ -54,20 +65,20 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    `cc` on this Mac is a Claude Code shim: cgo/NIF builds die on a fake "unknown option" — use
    `CGO_ENABLED=0` for Go (as the Makefile does) and `CC=/usr/bin/clang` for mix when a NIF compiles.
    A change with a test proves red-without / green-with (mutation-prove it).
-5. **Commit rules** (worker): `git add <exact paths>`; `git commit -- <exact paths>`;
+6. **Commit rules** (worker): `git add <exact paths>`; `git commit -- <exact paths>`;
    then `git log -1 --stat` and READ the list — a file you did not write means another
    writer is in your tree; strip it (`git reset --soft <the literal base sha you recorded at worktree creation>` — NEVER `origin/main`, which moves; restage yours only) before pushing.
    No `Co-Authored-By` lines. Commit BEFORE reporting — the branch ref outlives the dir.
-6. **PR** (worker): `git push -u origin <lane>/<slug>`; `gh pr create` with a body that
+7. **PR** (worker): `git push -u origin <lane>/<slug>`; `gh pr create` with a body that
    ends in the trailer line `Task: <doc_id>`. Report the PR URL and criteria status.
-7. **Review + merge** (you): read the diff, not the worker's prose. Run the gate once
+8. **Review + merge** (you): read the diff, not the worker's prose. Run the gate once
    yourself if the change is in a shared path. Merge with `gh pr merge <pr> --squash --delete-branch` once
    `bash $ORCH/pr-required.sh <pr> FRIKKern/barkpark` says MERGEABLE — ALWAYS pass the repo as arg 2:
    the cwd-derived default needs no GraphQL outage to go empty, and an empty repo printed `0/4` at
    exit 0 for PRs that were at 3/4. (`scripts/bp-merge.sh` takes NO argument — it derives the PR from the current branch, so
    it only works from inside that PR's worktree). Red required checks: fix or
    hand back; never bypass, never auto-merge.
-8. **Stamp + close** (you): take the wording FROM THE ROW into a file — `bp task get <id> -o json |
+9. **Stamp + close** (you): take the wording FROM THE ROW into a file — `bp task get <id> -o json |
    jq -r '.doc.content.acceptance_criteria[N].criterion' > crit.txt` — then `bp task stamp <id>
    lead-<lane> <epoch> --criterion N --criterion-text-file crit.txt --met --evidence "PR #… merged
    <sha>"` per met criterion (index is ZERO-based; a merge-gate criterion needs `--merge-gated`).
@@ -140,6 +151,18 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    criterion's own `merge_gate` KEY before you believe bp's refusal prose — its message
    explains a wide prose fallback at length and reads like a false positive when the key was
    simply true (measured 2026-09-02; a lead stamped a wrong sentence on that misreading).
+
+10. **Round end — reap what the round accrued, AFTER every branch is pushed.** Your workers'
+    worktrees and scratch dirs are the refill engine: ~11 GB/day per project scratchpad,
+    and on 2026-09-13 a single session scratchpad on this box held 7,397,328 entries.
+    `bash scripts/scratchpad-reaper.sh --dry-run --root "$ORCH/tmp" --repo <repo>`, READ every
+    line, then `--reap --yes-delete`. It skips every REGISTERED worktree unconditionally and
+    refuses any other checkout carrying an unpushed commit, an untracked file, a stash, or no
+    remote — 17 registered worktrees were live during the incident and one blind `rm -rf` would
+    have stranded a lane's build. Push first, or your own unmerged branches become
+    SKIP-UNPUSHED lines and nothing is reclaimed. Report the `freed_kb=` figures, which come
+    from `df` before/after. **Never report a `du` figure**: measured 2026-08-10, 36 session
+    directories `du` valued at ~33 GB freed UNDER 0.5 GB, because APFS clones share blocks.
 
 - **Hold the claim until the PR MERGES, not just until it opens.** The lease (~40 min) lapses while a PR
   waits in a deep CI queue and the required task gate then fails "carries no claim" (measured 2026-09-02
