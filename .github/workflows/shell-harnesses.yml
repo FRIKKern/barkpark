@@ -382,6 +382,13 @@ on:
       - "scripts/compose-smoke.test.sh"
       - "scripts/workflow-trigger-coverage.sh"
       - "scripts/workflow-trigger-coverage.test.sh"
+      # UNDISPATCHED TARGETS (task-3fd49a953afffd2f). The MIRROR of the
+      # *-path-escape-check.sh family: it asks whether every DECLARED target
+      # actually dispatches. Its inputs are the guard scripts it reads sets out
+      # of and the whole workflow corpus (.github/workflows/*.yml, already
+      # declared above), so an edit to any guard must re-run it.
+      - "scripts/undispatched-target-check.sh"
+      - "scripts/*-path-escape-check.sh"
       # FLEET COORDINATION (task-f89c2aed221d9fdb). Three subjects and three
       # harnesses. Until now no workflow named any of the six, so all three
       # self-tests were unreachable: they could not fire and could not lose.
@@ -813,6 +820,13 @@ on:
       - "scripts/compose-smoke.test.sh"
       - "scripts/workflow-trigger-coverage.sh"
       - "scripts/workflow-trigger-coverage.test.sh"
+      # UNDISPATCHED TARGETS (task-3fd49a953afffd2f). The MIRROR of the
+      # *-path-escape-check.sh family: it asks whether every DECLARED target
+      # actually dispatches. Its inputs are the guard scripts it reads sets out
+      # of and the whole workflow corpus (.github/workflows/*.yml, already
+      # declared above), so an edit to any guard must re-run it.
+      - "scripts/undispatched-target-check.sh"
+      - "scripts/*-path-escape-check.sh"
       # FLEET COORDINATION (task-f89c2aed221d9fdb). Mirrored from
       # on.pull_request.paths — doc-gates-paths-parity-check.sh runs against
       # this file at the end of this workflow and reds unless the two lists are
@@ -1078,6 +1092,7 @@ jobs:
       principal-gate-harnesses: ${{ steps.sets.outputs.principal-gate-harnesses }}
       compose-smoke-dispatcher: ${{ steps.sets.outputs.compose-smoke-dispatcher }}
       workflow-trigger-coverage: ${{ steps.sets.outputs.workflow-trigger-coverage }}
+      undispatched-target: ${{ steps.sets.outputs.undispatched-target }}
       orphan-harnesses: ${{ steps.sets.outputs.orphan-harnesses }}
       selftest-wiring-census: ${{ steps.sets.outputs.selftest-wiring-census }}
       exit-laundering-sweep: ${{ steps.sets.outputs.exit-laundering-sweep }}
@@ -1298,6 +1313,9 @@ jobs:
           workflow-trigger-coverage scripts/workflow-trigger-coverage.sh
           workflow-trigger-coverage scripts/workflow-trigger-coverage.test.sh
           workflow-trigger-coverage .github/workflows/*.yml
+          undispatched-target scripts/undispatched-target-check.sh
+          undispatched-target scripts/*-path-escape-check.sh
+          undispatched-target .github/workflows/*.yml
           dispatch-selftest scripts/shell-harnesses-dispatch.test.sh
           orphan-harnesses scripts/local-update.sh
           orphan-harnesses scripts/local-update.test.sh
@@ -3024,6 +3042,24 @@ jobs:
       - name: no declared path alternative is dead
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/workflow-trigger-coverage.sh
+
+  undispatched-target:
+    needs: [changes]
+    if: needs.changes.outputs.undispatched-target == 'true'
+    name: every declared dispatch target actually dispatches
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: subject syntax check
+        run: bash -n scripts/undispatched-target-check.sh
+      - name: prove the check can lose (hermetic, synthetic trees)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/undispatched-target-check.sh --selftest
+      - name: no declared target is undispatched
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/undispatched-target-check.sh
 
   # ── DISPATCHER SELFTEST ──────────────────────────────────────────────────
   # The `changes` job above partitions this workflow's paths list per harness.
