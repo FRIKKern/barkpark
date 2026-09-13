@@ -157,6 +157,74 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
       assert Registry.get_barkpark(bp.id).custom_host == @domain
     end
 
+    # task-353dacaf39f33244 — the attach enqueue reaches the SAME
+    # `instance_deprovisioning?/1` the verify route already calls. Attaching a
+    # domain to a box whose teardown is already queued points DNS at a machine
+    # the deprovision worker is deleting. NOTE the row's own limit: this NARROWS
+    # the window, it does NOT close the race — a deprovision enqueued just after
+    # this check still beats the attach worker, and the worker-side gate from PR
+    # #14039 (AttachDomainWith re-checking liveness before AND after the
+    # platform A-record upsert) remains the durable fix.
+    test "deprovisioning instance → 409 not_live; nothing persisted, nothing enqueued" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = session_token(user)
+
+      {:ok, dep} = Registry.enqueue_deprovision_job(bp)
+      assert dep.status == "pending"
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain}, token)
+
+      assert conn.status == 409
+      assert json_body(conn) == %{"error" => "not_live"}
+
+      # The refusal is BEFORE the persist: no custom_host on the row, no
+      # attach_domain job, and the ask-gate still refuses the host.
+      assert is_nil(Registry.get_barkpark(bp.id).custom_host)
+      assert active_attaches(bp) == 0
+      assert call(:get, "/v1/tls/ask?domain=#{@domain}").status == 404
+
+      # A CLAIMED deprovision refuses identically (both states the predicate
+      # names).
+      {:ok, _} = dep |> Ecto.Changeset.change(%{status: "claimed"}) |> Repo.update()
+      claimed = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain}, token)
+      assert claimed.status == 409
+      assert json_body(claimed) == %{"error" => "not_live"}
+    end
+
+    # CONTROL for the 409 above, and the scope proof for the predicate's NAME:
+    # `instance_deprovisioning?/1` decides ONLY "is the LATEST deprovision job
+    # pending or claimed". The same instance, same domain, with the deprovision
+    # in a TERMINAL state, still attaches — so the guard is not a blanket
+    # "unhealthy box" refusal that would break the ordinary attach.
+    test "healthy instance still attaches (202), and a terminal deprovision does not block it" do
+      {user, team} = user_with_team()
+      healthy = live_barkpark(team)
+      token = session_token(user)
+
+      ok = call(:post, "/v1/barkparks/#{healthy.id}/domain", %{domain: @domain}, token)
+      assert ok.status == 202
+      assert json_body(ok)["status"] == "attaching"
+      assert Registry.get_barkpark(healthy.id).custom_host == @domain
+      assert active_attaches(healthy) == 1
+
+      # Second box: a deprovision that already FAILED is not "on its way out".
+      other = live_barkpark(team)
+      {:ok, dep} = Registry.enqueue_deprovision_job(other)
+      {:ok, _} = dep |> Ecto.Changeset.change(%{status: "failed"}) |> Repo.update()
+
+      revived =
+        call(
+          :post,
+          "/v1/barkparks/#{other.id}/domain",
+          %{domain: "revived.barkpark.cloud"},
+          token
+        )
+
+      assert revived.status == 202
+      assert active_attaches(other) == 1
+    end
+
     test "malformed domain → 422 invalid_domain; missing → 422 domain_required; nothing persisted or enqueued" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)

@@ -177,11 +177,19 @@ function Start-Server {
   $cmd = "`$env:Path='$dirs;'+`$env:Path; `$env:PORT='$Port'; Set-Location '$ApiDir'; Write-Host 'Barkpark dev server -- close this window to stop' -ForegroundColor Cyan; mix phx.server"
   Start-Process powershell -ArgumentList '-NoExit','-NoProfile','-Command', $cmd | Out-Null
 
+  # The probe is /status.json, NOT the legacy /api/schemas: that route pipes
+  # through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+  # `sunset: Wed, 31 Dec 2026 23:59:59 GMT`. Both probes below gate on a 200, so
+  # after removal a healthy box would report "API did not answer in time" and
+  # "api : down" forever. /status.json (router.ex
+  # `get "/status.json", StatusController, :show_json`, :api pipeline only, no
+  # deprecation scope, no token) has no removal date, and Status.health/0 runs a
+  # bare Repo.all/1 — so a dead DB is a 500 rather than a false green.
   Step 'Waiting for the API to answer'
   $deadline = (Get-Date).AddMinutes(2)
   while ((Get-Date) -lt $deadline) {
     try {
-      $r = Invoke-WebRequest "http://localhost:$Port/api/schemas" -UseBasicParsing -TimeoutSec 3
+      $r = Invoke-WebRequest "http://localhost:$Port/status.json" -UseBasicParsing -TimeoutSec 3
       if ($r.StatusCode -eq 200) { Ok 'API is live'; return $true }
     } catch { Start-Sleep -Seconds 3 }
   }
@@ -196,7 +204,8 @@ function Show-Status {
   Write-Host ("    elixir : " + ((& elixir --version 2>$null | Select-String '^Elixir').ToString()))
   if (Test-Pg) { Write-Host "    postgres: UP (:5432)" -ForegroundColor Green } else { Write-Host "    postgres: down" -ForegroundColor Yellow }
   try {
-    $r = Invoke-WebRequest "http://localhost:$Port/api/schemas" -UseBasicParsing -TimeoutSec 3
+    # /status.json, not the sunset /api/schemas — see Start-Server above.
+    $r = Invoke-WebRequest "http://localhost:$Port/status.json" -UseBasicParsing -TimeoutSec 3
     Write-Host "    api    : UP (http://localhost:$Port, HTTP $($r.StatusCode))" -ForegroundColor Green
   } catch { Write-Host "    api    : down (:$Port)" -ForegroundColor Yellow }
 }

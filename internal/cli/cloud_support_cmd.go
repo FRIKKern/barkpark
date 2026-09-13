@@ -1243,6 +1243,14 @@ func (r *supportRemoveRun) stepToken() (int, bool) {
 		case status == http.StatusNotFound:
 			r.revoked[id] = "already gone (404)"
 			r.done("token", id+" already gone (404)")
+		// DELIBERATELY STATUS-ONLY (cch-w40-fu, re-derived). This request goes to
+		// the MAIN (r.base, r.token), not the control plane: `grep -rn no_team
+		// api/lib` is EMPTY — the instance API has no team concept at all, so no
+		// refusal it can emit carries a `reason` this arm could read. The 403 here
+		// is the admin gate on POST/DELETE /v1/fleet/support-tokens and nothing
+		// else, and exitAuth is the honest code for it. Routing it through
+		// supportCPNoTeam would add a permanently-false branch on a host that
+		// cannot speak the shape.
 		case status == http.StatusUnauthorized || status == http.StatusForbidden:
 			return r.fail("token", fmt.Sprintf("the main answered %d — the revoke route is admin-gated; use an admin token against the main", status),
 				fmt.Sprintf("token %s NOT revoked; the control-plane row still holds its id", id), exitAuth)
@@ -1407,6 +1415,19 @@ func (r *supportRemoveRun) stepCPRow() (int, bool) {
 			// A re-run cannot converge on a dead session — name the fix (the
 			// same credential contract add narrates, PDF-D69/D71).
 			r.out.errf("⚠ cp-row: the control plane answered 401: %s — the Cloud session is missing or dead; run `bp login`, then re-run. Continuing; the census below is the truth", supportTrim(resp))
+		// cch-w40-fu: the CAUSE decides, not the status — the same predicate the
+		// add/bind arm reads (supportCPNoTeam, which covers 422 {"error":"no_team"}
+		// and 403 {"error":"forbidden","reason":"no_team"} alike). A login with NO
+		// TEAM cannot be repaired by a role grant, so the role sentence below would
+		// point at re-authenticating a credential that is fine. TODAY'''s control
+		// plane never reaches this arm on THIS route: `delete "/v1/fleet/supports/:id"`
+		// answers a teamless caller `404 {"error":"not_found"}` (its `is_nil(current_team)`
+		// arm), not the gate'''s 403 — but this CLI talks to control planes it does not
+		// version, and the route'''s declared credential family (PDF-D69, shape parity
+		// with POST /v1/fleet/supports) is the one that DOES emit no_team. Keying on
+		// the cause is what makes the two narrations unable to drift.
+		case supportCPNoTeam(status, resp):
+			r.out.errf("⚠ cp-row: the control plane answered %d: %s — your Cloud login has no active team; run `bp team use <team>`, then re-run. Continuing; the census below is the truth", status, supportTrim(resp))
 		case status == http.StatusForbidden:
 			r.out.errf("⚠ cp-row: the control plane answered 403: %s — a session needs team-admin, a PAT needs the deploy ability; fix the credential, then re-run. Continuing; the census below is the truth", supportTrim(resp))
 		default:
@@ -1474,6 +1495,10 @@ func (r *supportRemoveRun) census() int {
 				before = fmt.Sprintf("%d before, ", r.probeBefore)
 			}
 			r.out.progressf("  · token: DEAD — the admin-gated mint endpoint read %s401 after revoke", before)
+		// DELIBERATELY STATUS-ONLY (cch-w40-fu): here the status IS the
+		// measurement, not a narration choice — 403 means the MAIN authenticated
+		// the support'''s own bearer (token ALIVE), 401 means it did not (DEAD).
+		// Reading a `reason` would answer a different question than the probe asks.
 		case st == http.StatusForbidden:
 			residue = append(residue, "support token STILL VALID — the admin-gated mint endpoint answered 403 (authenticated), not 401, to the support's own bearer")
 		default:
@@ -1555,6 +1580,15 @@ type supportCPRow struct {
 
 // supportCPBarkparks lists the caller's fleet from the control plane. Non-2xx
 // is returned as a status, not an error — callers own the honest narration.
+//
+// The non-2xx BODY is deliberately dropped, so every caller's refusal arm
+// (resolveParent, stepCPRead) is status-only BY CONSTRUCTION (cch-w40-fu,
+// re-derived). That is sound for this route and only this route: `get
+// "/v1/barkparks"` gates with require_user_or_pat + require_ability("read") —
+// neither emits no_team — and then answers a TEAMLESS caller `200 {"barkparks":
+// []}` (its `case current_team do nil -> [] end` arm). There is no no_team shape
+// for these callers to miss. Teaching them the cause would mean returning the
+// body from here; do that only when the control plane starts refusing this list.
 func supportCPBarkparks(cpBase, cpToken string) ([]supportCPRow, int, error) {
 	status, body, err := supportMainJSON(http.MethodGet, cpBase+"/v1/barkparks", cpToken, nil)
 	if err != nil {

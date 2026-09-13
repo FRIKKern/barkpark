@@ -122,6 +122,66 @@ defmodule BarkparkWeb.QuizLiveTest do
     assert render(host) =~ "SWAPPED LIVE"
   end
 
+  describe "per-principal spawn-budget refusal at the host door" do
+    # The refusal a REAL visitor can reach. The capacity fixture below has to
+    # re-point a supervisor to reach its branch precisely because 10_000 rooms
+    # is unreachable; this one needs no fixture surgery at all — two mounts and
+    # a budget of one — which is the whole argument for the brake existing.
+    setup do
+      original = Application.get_env(:barkpark, :quiz_room_spawn)
+      Application.put_env(:barkpark, :quiz_room_spawn, per_hour: 1)
+
+      on_exit(fn ->
+        case original do
+          nil -> Application.delete_env(:barkpark, :quiz_room_spawn)
+          opts -> Application.put_env(:barkpark, :quiz_room_spawn, opts)
+        end
+      end)
+
+      :ok
+    end
+
+    test "the second room from one visitor renders the humane hold, not a crash",
+         %{conn: conn, pin: pin} do
+      {:ok, _view, html} = live(conn, "/quiz/host/#{pin}")
+
+      assert html =~ "powers Barkpark",
+             "the FIRST room must open — otherwise the next assertion proves nothing"
+
+      second = pin <> "B"
+      on_exit(fn -> Quiz.stop_room(second) end)
+
+      {:ok, _view, refused} = live(conn, "/quiz/host/#{second}")
+
+      assert refused =~ "opened a lot of quiz rooms"
+      assert refused =~ "q-status"
+      assert refused =~ "role=\"status\""
+
+      # It is the VISITOR'S budget, not the service's capacity. Rendering the
+      # capacity copy here would tell a host the product is broken when it is
+      # their own hour that is spent.
+      refute refused =~ "at room capacity"
+
+      # And the refusal is real: no room was started behind the message.
+      assert Barkpark.Quiz.Room.whereis(second) == nil
+    end
+
+    test "a DIFFERENT pin from the same visitor is what is refused — the first room still lives",
+         %{conn: conn, pin: pin} do
+      {:ok, _view, _html} = live(conn, "/quiz/host/#{pin}")
+
+      second = pin <> "C"
+      on_exit(fn -> Quiz.stop_room(second) end)
+      {:ok, _view, _} = live(conn, "/quiz/host/#{second}")
+
+      # Re-mounting the ALREADY-LIVE pin costs no budget, so the host's own
+      # room keeps working through the refusal.
+      {:ok, _view, again} = live(conn, "/quiz/host/#{pin}")
+      assert again =~ "powers Barkpark"
+      refute again =~ "opened a lot of quiz rooms"
+    end
+  end
+
   describe "room capacity refusal on the host mount" do
     # `Room.ensure/1` returns `{:error, :max_children}` BY DESIGN once
     # `Quiz.RoomSupervisor` is at its cap (plugins/quiz.ex: max_children 10_000,

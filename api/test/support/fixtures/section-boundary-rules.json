@@ -1,0 +1,130 @@
+{
+  "_comment": [
+    "ONE RULE PER BOUNDARY — the shared fixture of the section-boundary parity lock",
+    "(task-a4d1ae76fdb2a6b0). A `section` container used to open AND close on a",
+    "full-width rule, so two adjacent sections stacked two lines where the grammar",
+    "wants one. The Elixir engine settled the grammar in #16233: an UNTITLED",
+    "stack-mode section whose first child is a heading draws NO rule pair at all —",
+    "the heading itself carries the boundary (paper-surface.css gives a container",
+    "head the same 92px beat / 2px rule / 16px gap a top-level h2 gets, #15806).",
+    "Every OTHER shape keeps the pair: a bold title needs a rule above it to read",
+    "as a head, and a grid-mode section is a layout box, not a chapter.",
+    "",
+    "THREE ENGINES READ THIS ONE FILE — never three generated mirrors, which drift",
+    "the moment one side is regenerated and the others are not:",
+    "  Elixir  api/lib/barkpark/portable_doc/render/section_layout.ex stack_rules?/2",
+    "          api/test/barkpark/portable_doc/render/section_boundary_rules_parity_test.exs",
+    "  Go      internal/pdrender/blocks.go sectionStackRules",
+    "          internal/pdrender/section_boundary_rules_parity_test.go",
+    "  JS      js/packages/react/src/blocks/core.ts sectionStackRules",
+    "          js/packages/react/tests/section-boundary-rules.parity.test.ts",
+    "",
+    "`rules` is the number of BOUNDARY rules the section draws around its body: the",
+    "web engines count `<hr class=\"bp-hr\"` and the TUI counts full-width `─` lines.",
+    "Children are deliberately level-2/3 headings and paragraphs only — a level-1",
+    "heading draws its own underline in the TUI and an `hr` child would draw a rule",
+    "of its own, either of which would corrupt the count."
+  ],
+  "cases": [
+    {
+      "name": "untitled section opening on a level-2 heading — the heading IS the boundary",
+      "rules": 0,
+      "block": {
+        "type": "section",
+        "blocks": [
+          { "type": "heading", "level": 2, "text": "Second movement" },
+          { "type": "paragraph", "content": [{ "type": "text", "value": "body" }] }
+        ]
+      }
+    },
+    {
+      "name": "untitled section opening on a level-3 heading — the predicate is the TYPE, not the level",
+      "rules": 0,
+      "block": {
+        "type": "section",
+        "blocks": [
+          { "type": "heading", "level": 3, "text": "A sub argument" },
+          { "type": "paragraph", "content": [{ "type": "text", "value": "body" }] }
+        ]
+      }
+    },
+    {
+      "name": "an explicitly null title is an ABSENCE, not a title",
+      "rules": 0,
+      "block": {
+        "type": "section",
+        "title": null,
+        "blocks": [
+          { "type": "heading", "level": 2, "text": "Still headless" },
+          { "type": "paragraph", "content": [{ "type": "text", "value": "body" }] }
+        ]
+      }
+    },
+    {
+      "name": "untitled section opening on a paragraph — no head to carry the boundary, keep the pair",
+      "rules": 2,
+      "block": {
+        "type": "section",
+        "blocks": [
+          { "type": "paragraph", "content": [{ "type": "text", "value": "body" }] },
+          { "type": "heading", "level": 2, "text": "A head that is not first" }
+        ]
+      }
+    },
+    {
+      "name": "titled section opening on a heading — the bold title needs the rule above it",
+      "rules": 2,
+      "block": {
+        "type": "section",
+        "title": "Finale",
+        "blocks": [
+          { "type": "heading", "level": 2, "text": "Second movement" },
+          { "type": "paragraph", "content": [{ "type": "text", "value": "body" }] }
+        ]
+      }
+    },
+    {
+      "name": "titled section opening on a paragraph",
+      "rules": 2,
+      "block": {
+        "type": "section",
+        "title": "Finale",
+        "blocks": [{ "type": "paragraph", "content": [{ "type": "text", "value": "body" }] }]
+      }
+    },
+    {
+      "name": "an EMPTY-STRING title is a title — the gate is nil, not blankness",
+      "rules": 2,
+      "block": {
+        "type": "section",
+        "title": "",
+        "blocks": [
+          { "type": "heading", "level": 2, "text": "Second movement" },
+          { "type": "paragraph", "content": [{ "type": "text", "value": "body" }] }
+        ]
+      }
+    },
+    {
+      "name": "grid-mode section opening on a heading — a layout box is not a chapter, keep the pair",
+      "rules": 2,
+      "block": {
+        "type": "section",
+        "layout": { "mode": "grid", "tracks": 2 },
+        "blocks": [
+          { "type": "heading", "level": 2, "text": "Second movement" },
+          { "type": "paragraph", "content": [{ "type": "text", "value": "body" }] }
+        ]
+      }
+    },
+    {
+      "name": "a section with an EMPTY blocks list draws its pair",
+      "rules": 2,
+      "block": { "type": "section", "blocks": [] }
+    },
+    {
+      "name": "a section with NO blocks key at all draws its pair",
+      "rules": 2,
+      "block": { "type": "section" }
+    }
+  ]
+}

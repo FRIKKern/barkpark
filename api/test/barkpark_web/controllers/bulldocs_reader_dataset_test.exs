@@ -74,20 +74,32 @@ defmodule BarkparkWeb.BulldocsReaderDatasetTest do
     refute html =~ "Wrong production task"
   end
 
+  # PUBLISHED tasks: since task-b10e10b944f6f55b every reader surface resolves
+  # task blocks in the PUBLISHED perspective, so a fixture that stays at
+  # `drafts.<id>` proves nothing about which DATASET the reader read — it would
+  # resolve to an empty block on all three paths. The spine (`with_labels/1` +
+  # `register_tags!/1`) is what the authoring wall demands at the publish door.
   defp seed_task!(title, label, dataset, scope) do
-    Content.upsert_document(
-      "task",
-      %{
-        "doc_id" => "task-#{System.unique_integer([:positive])}",
-        "title" => title,
-        "content" => %{
-          "kind" => "task",
-          "lifecycle_status" => "open",
-          "labels" => [label]
-        }
-      },
-      dataset,
-      scope
-    )
+    Barkpark.LabelFixtures.register_tags!(dataset)
+    doc_id = "task-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Content.upsert_document(
+        "task",
+        %{
+          "doc_id" => doc_id,
+          "title" => title,
+          "content" =>
+            Barkpark.LabelFixtures.with_labels(%{
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "labels" => [label]
+            })
+        },
+        dataset,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document(doc_id, "task", dataset, scope)
   end
 end

@@ -1,0 +1,102 @@
+{
+  "tool": "scripts/measurements/spd-b11-subxs-shot.mjs",
+  "base": "https://guerrilla.barkpark.cloud",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "measured_at": "2026-09-12T10:19:25.478Z",
+  "surfaces": [
+    {
+      "id": "1-media",
+      "label": "Media library (the densest 11px cluster: cards, size lines, format chips)",
+      "url": "/w/default/p/default/d/production/studio/media",
+      "clicks": [],
+      "before": "docs/evidence/spd-b11-subxs-type-scale/1-media-before-1440.png",
+      "after": "docs/evidence/spd-b11-subxs-type-scale/1-media-after-1440.png",
+      "stylesheet_substitutions": {
+        "11px->var(--text-2xs)": 82,
+        "10px->var(--text-3xs)": 20
+      },
+      "resolved_sizes_before": {
+        "n11": 70,
+        "n10": 5
+      },
+      "resolved_sizes_after": {
+        "n11": 70,
+        "n10": 5
+      },
+      "resolved_sizes_unchanged": true,
+      "bytes_before": 2000548,
+      "bytes_after": 2000564,
+      "identical": false,
+      "differing_pixels": 440,
+      "max_channel_delta": 9,
+      "difference_bbox": "547x1238++1284++59 of 2880x2000"
+    },
+    {
+      "id": "2-papers-pane",
+      "label": "Papers desk pane (100 rows of list chrome — the densest 10px cluster)",
+      "url": "/w/default/p/default/d/production/studio",
+      "clicks": [
+        "text=Papers"
+      ],
+      "before": "docs/evidence/spd-b11-subxs-type-scale/2-papers-pane-before-1440.png",
+      "after": "docs/evidence/spd-b11-subxs-type-scale/2-papers-pane-after-1440.png",
+      "stylesheet_substitutions": {
+        "11px->var(--text-2xs)": 82,
+        "10px->var(--text-3xs)": 20
+      },
+      "resolved_sizes_before": {
+        "n11": 8,
+        "n10": 101
+      },
+      "resolved_sizes_after": {
+        "n11": 8,
+        "n10": 101
+      },
+      "resolved_sizes_unchanged": true,
+      "bytes_before": 281120,
+      "bytes_after": 280519,
+      "identical": false,
+      "differing_pixels": 1649,
+      "max_channel_delta": 143,
+      "difference_bbox": "440x22++245++1963 of 2880x2000"
+    },
+    {
+      "id": "3-tasks-pane",
+      "label": "Tasks desk pane (row meta, lifecycle chips, uppercase eyebrows)",
+      "url": "/w/default/p/default/d/production/studio",
+      "clicks": [
+        "text=Tasks"
+      ],
+      "before": "docs/evidence/spd-b11-subxs-type-scale/3-tasks-pane-before-1440.png",
+      "after": "docs/evidence/spd-b11-subxs-type-scale/3-tasks-pane-after-1440.png",
+      "stylesheet_substitutions": {
+        "11px->var(--text-2xs)": 82,
+        "10px->var(--text-3xs)": 20
+      },
+      "resolved_sizes_before": {
+        "n11": 8,
+        "n10": 201
+      },
+      "resolved_sizes_after": {
+        "n11": 8,
+        "n10": 201
+      },
+      "resolved_sizes_unchanged": true,
+      "bytes_before": 233914,
+      "bytes_after": 228078,
+      "identical": false,
+      "differing_pixels": 41901,
+      "max_channel_delta": 232,
+      "difference_bbox": "359x169++0++1831 of 2880x2000"
+    }
+  ],
+  "browser": {
+    "channel": "chrome (fallback: no pinned Chromium build for this playwright)",
+    "playwright": "unknown"
+  },
+  "served_sha": "14cc08e0c",
+  "recompared_at": "2026-09-12T10:21:53.183Z"
+}

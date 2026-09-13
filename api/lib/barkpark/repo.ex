@@ -256,4 +256,154 @@ defmodule Barkpark.Repo do
   end
 
   def uuid_or_nil(_), do: nil
+
+  @doc """
+  Start a dedicated, short-lived connection pool for ONE workspace export, and
+  return the dynamic-repo name to run its `COPY … TO STDOUT` streams on.
+
+  ## Why the export needs its own connections (pds-bl-export-pool-starvation)
+
+  `Tenancy.WorkspaceBundle.run_copy_out/3` holds ONE pool member for the whole
+  of one `COPY … TO STDOUT` — measured at 9.34 s (`mutation_events`, 478 MB)
+  and 8.04 s (`revisions`, 385 MB) on a WARM cache, longer cold, and with
+  `statement_timeout` deliberately lifted to `0` so nothing cancels it. In prod
+  that member comes out of the SAME `POOL_SIZE` (default 10) that 29 Oban queue
+  slots and all HTTP traffic share (see the note above `repo_opts` in
+  `config/runtime.exs`). A checkout that queues behind it is charged the wait
+  against its own budget, which is how a dev-profile export produced, six
+  seconds after it finished:
+
+      Postgrex.Protocol disconnected: (DBConnection.ConnectionError) client
+      (Barkpark.EdgeProjector.ProjectorWorker) timed out because it queued and
+      checked out the connection for longer than 15000ms
+
+  The export was not the victim and was not slow — it was simply holding a
+  member of a pool that had none to spare.
+
+  ## Why a pool, and why this shape
+
+  Three remedies were on the table; only one removes the coupling.
+
+    * An export-path CHECKOUT TIMEOUT re-prices the wrong side. The export is
+      not the client that times out; capping its own wait fails exports without
+      returning a single connection to the starved worker any sooner.
+    * A BOUNDED COPY HOLD is not implementable without changing what the bundle
+      is. `COPY (SELECT …) TO STDOUT` cannot be suspended and resumed — bounding
+      it means keyset-paginating each member into many statements, multiplying
+      the statement count and giving up the single-statement snapshot each
+      member is dumped under. That is a bundle-fidelity change wearing a
+      pool-pressure costume.
+    * ISOLATION removes the coupling itself: if the COPY never draws on the
+      shared pool, no unrelated checkout can queue behind it, whatever the
+      export's duration — and the duration is exactly the quantity that is NOT
+      stable (the same dev export measured 1.345 s and 7.110 s across runs).
+
+  It is started PER EXPORT and stopped in the export's `after`, not held
+  permanently in the supervision tree, because the charter refuses to pay for
+  idle connections on a 2-vCPU box already deep in swap
+  (`bp-deploy-reliability-charter.md` D75). Between exports the box carries
+  exactly the connections it carries today.
+
+  `pool_size` defaults to **1**, which is the whole demand: the COPY loop is a
+  sequential `Enum.reduce` over the member tables and never has two streams in
+  flight. So an export in progress costs POOL_SIZE + 1 connections while the
+  shared pool keeps all of its own — strictly better than today, where the
+  export takes one of the shared ten and holds it for seconds at a time.
+
+  The name is unique per call (`System.unique_integer/1`), so two concurrent
+  exports never contend for one another's pool and neither can stop the other's.
+
+  Returns `{:ok, pid}` (the pool is UNNAMED — the pid is the handle, so no
+  atom is created per export), `:disabled` when `:export_pool_size` is `0` or
+  less (the config/test.exs default — the SQL sandbox owns the connection there
+  and a second real pool would not see the test's uncommitted rows), or
+  `{:error, reason}`. A caller that does not get a pool MUST fall back to the
+  default repo: this is a contention remedy, never a correctness precondition.
+  """
+  @spec start_export_pool(keyword()) :: {:ok, pid()} | :disabled | {:error, term()}
+  def start_export_pool(opts \\ []) do
+    size = Keyword.get(opts, :pool_size, export_pool_size())
+
+    if is_integer(size) and size > 0 do
+      repo_opts =
+        config()
+        |> Keyword.drop([:name, :pool, :pool_size, :pool_count])
+        |> Keyword.merge(
+          # UNNAMED, and the PID is the handle (Ecto's documented form for a
+          # repo started dynamically: `MyApp.Repo.start_link(name: nil, …)`;
+          # `put_dynamic_repo/1` and `Ecto.Adapter.lookup_meta/1` both take a
+          # pid). A per-export ATOM would be a new atom on every export, and
+          # atoms are never garbage collected — an unbounded allocation on a
+          # request-reachable admin path, which is exactly what Sobelow's
+          # DOS.BinToAtom names. A pid also removes the `{:already_started, _}`
+          # case entirely: there is no name left to collide on.
+          name: nil,
+          # NEVER inherit `pool:` from config: in :test that is
+          # `Ecto.Adapters.SQL.Sandbox`, and a second sandbox pool is not a
+          # second pool at all. This one is always a real pool.
+          pool: DBConnection.ConnectionPool,
+          pool_size: size
+        )
+
+      case start_link(repo_opts) do
+        {:ok, pid} -> {:ok, pid}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      :disabled
+    end
+  end
+
+  @doc """
+  Stop a pool started by `start_export_pool/1`. Best-effort: a pool that has
+  already died, or that exits `:shutdown` on its way out, is not an error the
+  export should care about.
+  """
+  @spec stop_export_pool(pid()) :: :ok
+  def stop_export_pool(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      try do
+        Supervisor.stop(pid, :normal, 5_000)
+      catch
+        :exit, _ -> :ok
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
+  Run `fun` with `pid` as the dynamic repo, restoring the previous one after.
+
+  `nil` means "no dedicated pool" and runs `fun` unchanged on whatever repo the
+  caller already had — the fallback every caller of `start_export_pool/1` needs.
+
+  NOTE FOR CALLERS THAT STREAM: the generated `Repo.*` functions resolve the
+  dynamic repo for you, but `Ecto.Adapters.SQL.stream/4` does NOT — it calls
+  `Ecto.Adapter.lookup_meta/1` on whatever it is handed. Hand it
+  `get_dynamic_repo()`, not the bare module, or the stream keys its adapter meta
+  on the DEFAULT pool while the surrounding transaction checked out of this one
+  and `Ecto.Adapters.SQL.reduce/6` raises "cannot reduce stream outside of
+  transaction".
+  """
+  @spec with_export_repo(pid() | nil, (-> result)) :: result when result: var
+  def with_export_repo(nil, fun) when is_function(fun, 0), do: fun.()
+
+  def with_export_repo(pid, fun) when is_pid(pid) and is_function(fun, 0) do
+    previous = get_dynamic_repo()
+    put_dynamic_repo(pid)
+
+    try do
+      fun.()
+    after
+      put_dynamic_repo(previous)
+    end
+  end
+
+  @doc """
+  How many connections one export's dedicated pool gets. `0` disables the
+  dedicated pool entirely (config/test.exs).
+  """
+  @spec export_pool_size() :: integer()
+  def export_pool_size, do: Application.get_env(:barkpark, :export_pool_size, 1)
 end

@@ -46,7 +46,6 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.PortableDoc.TableEditing
-  alias Barkpark.Preview
   alias Barkpark.Repo.IdempotencyStore
 
   @paper_type "paper"
@@ -4938,16 +4937,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp blocks_doc_preview_opts(@paper_type, slug, scope), do: paper_preview_opts(slug, scope)
 
   defp blocks_doc_preview_opts(type, _slug, scope) do
-    %{media_resolver: Preview.media_resolver(scope), doc_type: type}
+    %{media_scope: scope, doc_type: type}
   end
 
   # The :preview sub-map injected into render_opts so Projection.project derives a
-  # rich content["preview"] card for a paper: the media resolver (bound to this
-  # paper's tenancy scope so it never resolves another tenant's blob), the reader
+  # rich content["preview"] card for a paper: the media SCOPE (this paper's
+  # tenancy, which `Projection.bind_media_resolver/1` binds into the resolver
+  # closure, so it never resolves another tenant's blob — and so the kernel never
+  # names `Barkpark.Preview`; task-1e93b1d801ff4696 edge 1), the reader
   # url, and the raw doctype. Render.render_blocks ignores the extra key.
   defp paper_preview_opts(slug, scope) do
     %{
-      media_resolver: Preview.media_resolver(scope),
+      media_scope: scope,
       url: "/papers/#{slug}",
       doc_type: @paper_type
     }
@@ -4961,7 +4962,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   # The :preview sub-map for a generic (non-paper) block-bearing document — the
-  # raw doctype + a scope-bound media resolver. No reader url (arbitrary doctypes
+  # raw doctype + the media scope the resolver is bound from. No reader url (arbitrary doctypes
   # have no canonical public page); Preview leaves manifest["url"] nil.
   defp doc_project_opts(dataset, type, %Document{} = doc) do
     scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
@@ -4975,7 +4976,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # ever wrong. The paper leg above (`maybe_project/6`) is the one that was.
     Labels.render_opts(dataset, scope)
     |> Map.put(:preview, %{
-      media_resolver: Preview.media_resolver(scope),
+      media_scope: scope,
       doc_type: type
     })
     |> Map.put(:style, :article)

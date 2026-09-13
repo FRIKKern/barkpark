@@ -1,5 +1,6 @@
 defmodule Barkpark.Content.Validation.EvaluatorTest do
   # Touches the Validation.Registry singleton. Keep synchronous.
+  # sync: touches the `Validation.Registry` singleton ETS table
   use ExUnit.Case, async: false
 
   alias Barkpark.Content.Validation.{Evaluator, Rules}

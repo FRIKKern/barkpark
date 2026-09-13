@@ -22,7 +22,8 @@
 //     "stops at 1024" is one axis among many, not the file's ceiling.
 //
 // ── WHY A MODULE AND NOT A CORRECTED SENTENCE ───────────────────────────────
-// breakpoint-sweep.mjs:611 — "A COMMENT CANNOT BE DERIVED, only RECOUNTED by an
+// breakpoint-sweep.mjs (grep -n 'A COMMENT CANNOT BE DERIVED' breakpoint-sweep.mjs)
+// — "A COMMENT CANNOT BE DERIVED, only RECOUNTED by an
 // arm that reads these bytes." Retyping the true names today buys one correct
 // run and the identical rot: the next axis edit puts the sentence back where it
 // was, silently, on a green run, in the prose a reviewer quotes to justify

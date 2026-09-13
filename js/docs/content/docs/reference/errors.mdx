@@ -99,17 +99,6 @@ Example body:
 - For `publish`, confirm a draft exists before calling.
 - For `delete`, Barkpark returns `not_found` only if neither draft nor published row exists.
 
-### `schema_unknown`
-
-**HTTP status:** 404
-
-**Raised when:** This code is defined in the error catalog but is not currently emitted by any live route. Accessing a `_type` that does not exist or is `visibility: "private"` without a valid token returns `not_found` (404), not `schema_unknown`. Callers should not expect to see `schema_unknown` in production responses.
-
-**How to fix:**
-- Confirm the `_type` matches a schema name exactly (case-sensitive).
-- If the schema is private, send a valid bearer token with `read` scope.
-- Use `GET /v1/schemas/{dataset}` (with an admin token) to enumerate available schemas.
-
 ## Conflict and concurrency
 
 ### `conflict`

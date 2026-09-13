@@ -859,6 +859,80 @@ func TestRunCloudSiteCreateDeployInstanceNotLive(t *testing.T) {
 	}
 }
 
+// TestChainSiteDeployBranchesOnStatusNotSubstring is the BOTH-STATUSES arm of
+// task-4ee4b6588ea91fc6. The control plane emits ONE slug, `instance_not_live`,
+// at TWO statuses with OPPOSITE remedies, so a guard that reads only the slug
+// cannot be right about both:
+//
+//   - 422 — the box has no URL yet. RETRYABLE: say "still provisioning" and
+//     point at `bp cloud site deploy`.
+//   - 409 — the box was deprovisioned in flight (do_bind_cloudflare fails
+//     closed). It is GONE: retrying never works, so the retry hint is a lie and
+//     the exit must be the conflict family, not the generic one.
+//
+// A single-status test cannot distinguish the old substring guard from the new
+// typed one — only the pair can. RED BEFORE the fix on the 409 arm: the
+// substring matched, the operator was told to retry a box that no longer
+// exists, and the exit was exitGeneric.
+func TestChainSiteDeployBranchesOnStatusNotSubstring(t *testing.T) {
+	const created = `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`
+
+	t.Run("422 is retryable — keep the provisioning hint", func(t *testing.T) {
+		cp := newSiteCP(t)
+		cp.createResp = fakeResp{200, created}
+		cp.deployResp = fakeResp{422, `{"error":"instance_not_live","detail":"the instance has no URL yet"}`}
+		cp.serve()
+
+		stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--deploy")
+		if code != exitGeneric {
+			t.Fatalf("a 422 instance_not_live must stay the retryable create-chain refusal (exit %d), got %d\nstdout:%s\nstderr:%s", exitGeneric, code, stdout, stderr)
+		}
+		if !strings.Contains(stderr, "still provisioning") || !strings.Contains(stderr, "bp cloud site deploy") {
+			t.Fatalf("the 422 arm lost its retry hint:\n%s", stderr)
+		}
+	})
+
+	t.Run("409 is fail-closed — never tell them to retry a freed box", func(t *testing.T) {
+		cp := newSiteCP(t)
+		cp.createResp = fakeResp{200, created}
+		cp.deployResp = fakeResp{409, `{"error":"instance_not_live","detail":"the instance backing this site was deprovisioned while this request was in flight"}`}
+		cp.serve()
+
+		stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--deploy")
+		if code == exitGeneric {
+			t.Fatalf("a 409 instance_not_live took the 422 retry branch — the guard read the slug, not the status\nstdout:%s\nstderr:%s", stdout, stderr)
+		}
+		if code != exitConflict {
+			t.Fatalf("a 409 instance_not_live must exit %d (%s), got %d (%s)\nstderr:%s", exitConflict, siteExitName(exitConflict), code, siteExitName(code), stderr)
+		}
+		if strings.Contains(stderr, "still provisioning") {
+			t.Fatalf("a deprovisioned box was reported as still provisioning — the box is GONE:\n%s", stderr)
+		}
+		if !strings.Contains(stderr, "deprovisioned") {
+			t.Fatalf("the 409 refusal did not name what the server said:\n%s", stderr)
+		}
+	})
+}
+
+// TestSiteInstanceNotLiveIgnoresProseMentions is the FALSE-POSITIVE arm the
+// substring guard could not have: cloudError folds `detail` INTO the message, so
+// any OTHER refusal quoting the slug in its prose matched. The typed read looks
+// at re.Code, so prose is prose.
+func TestSiteInstanceNotLiveIgnoresProseMentions(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.deployResp = fakeResp{422, `{"error":"no_content_binding","detail":"this site has no bootstrap dataset (this is not instance_not_live)"}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--deploy")
+	if strings.Contains(stderr, "still provisioning") {
+		t.Fatalf("a no_content_binding refusal that merely MENTIONS the slug took the provisioning branch:\n%s", stderr)
+	}
+	if code == exitOK {
+		t.Fatalf("a refused chained deploy exited 0\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+}
+
 // TestRunCloudSiteCreateNoDeployKeepsHint is the tripwire on the unchanged default:
 // without --deploy, create prints the separate-deploy hint and NEVER touches the
 // deploy route — so the 30+ pinned deploy tests stay green and a plain create is

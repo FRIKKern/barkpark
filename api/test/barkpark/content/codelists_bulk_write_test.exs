@@ -17,6 +17,7 @@ defmodule Barkpark.Content.CodelistsBulkWriteTest do
   `Barkpark.QueryCounter`.
   """
 
+  # sync: counts queries off the node-global `[:barkpark, :repo, :query]` telemetry event
   use Barkpark.DataCase, async: false
 
   alias Barkpark.QueryCounter

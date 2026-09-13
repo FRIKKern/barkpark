@@ -204,7 +204,7 @@ export const instRoleChannels = (role) =>
   role === "" ? tokens.color["muted-text"] : tokens.color.status[role];
 // Chrome type-scale steps, largest → smallest (display order for the Studio type
 // ladder). Mirrors tokens.type.chrome; the emitter and check.mjs both key off it.
-export const TYPE_STEPS = ["2xl", "xl", "lg", "base", "sm", "xs"];
+export const TYPE_STEPS = ["2xl", "xl", "lg", "base", "sm", "xs", "2xs", "3xs"];
 // The READING ladder's steps, display order (largest → body). Mirrors
 // tokens.type.reading; the web TS emitter keys off it so the styleguide can show
 // the prose scale the /papers surface actually paints with.

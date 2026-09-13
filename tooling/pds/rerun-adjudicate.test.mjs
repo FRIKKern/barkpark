@@ -271,13 +271,25 @@ function sh(cmd) {
 // ── 5. ABSENCE CLAIMS ARE FIRST-CLASS, AND THE PREDICATES ARE POLARISED ──────
 {
   // The absence recipe's command legitimately exits 1 BECAUSE the claim holds.
-  const abs = sh("git grep -c completeness origin/main -- internal/cli/export_cmd.go");
+  //
+  // READ FROM THE RECIPE, NEVER RETYPED. Until 2026-09-12 this line carried its
+  // own hand-copied spelling of the command, and that is exactly how the drift
+  // this section exists to catch stayed invisible: the recipe's command moved
+  // out from under the screen (#13481 refused a sub-verb's own `-c`, #17224 then
+  // refused the ungraded count) while 5.1 went on probing a string nothing
+  // adjudicated. A probe that does not read the artefact cannot witness it.
+  const ABSENCE_ID = "pds-bl-export-close-delimited-silent-truncation";
+  const absenceRecipe = recipes.find((r) => r.doc_id === ABSENCE_ID);
+  ok("5.0 the absence recipe is the one this section probes", Boolean(absenceRecipe), ABSENCE_ID);
+  const abs = sh(absenceRecipe.command);
   eq("5.1 the absence rerun exits 1 (a genuine no-match)", abs.exit, 1);
+  ok("5.1b and its command carries no ungraded counting stage — the screen would refuse it",
+    countingSpelling(absenceRecipe.command) === null, String(countingSpelling(absenceRecipe.command)));
   const exists = sh("git cat-file -t origin/main:internal/cli/export_cmd.go");
   eq("5.2 while the file it reads is present", exists.exit, 0);
 
   const report = adjudicateCorpus(rows, recipes, RUN);
-  const absRow = report.rows.find((r) => r.doc_id === "pds-bl-export-close-delimited-silent-truncation");
+  const absRow = report.rows.find((r) => r.doc_id === ABSENCE_ID);
   eq("5.3 a nonzero-exit absence is RE-DERIVED, not REFUTED", absRow.verdict, PDS_VERDICT.RE_DERIVED);
   eq("5.4 via grip's admitsAbsenceClaim, not `verdict == ADMITTED`", absRow.reason, "ABSENCE-ADMITTED");
 

@@ -203,6 +203,50 @@ check_eq       "with one of two roots gone by hand, \`env\` resolves the other" 
 check_contains "…and it is root C"  "BARKPARK_HOME=\"$C\"" "$out"
 check_lacks    "…root D is not offered" "$D" "$out"
 
+# ── 7 · the credential producer cannot SIGPIPE, and the mint creates TENANCY ─
+#
+# Both arms exist because CI run 34685061716 (2026-09-12, the first main
+# dispatch of .github/workflows/pds-scratch-round-trip.yml) hit them together:
+# "tr: write error: Broken pipe" during the mint, then
+# `PUT /api/workspaces/default/media/blob/... -> 404 workspace not found`.
+hr "7. the token producer is unbounded-reader-free, and the mint grants a membership"
+
+# THE MECHANISM, proven deterministically rather than raced. An infinite
+# producer piped into a truncating reader returns 141 under pipefail — that is
+# the class the old `tr -dc ... </dev/urandom | head -c 40` belonged to, and it
+# is why the fix is "do not truncate a producer", not "ignore the stderr line".
+mech_rc=0
+( set -o pipefail; yes a 2>/dev/null | head -c 4 >/dev/null ) || mech_rc=$?
+check_eq "CONTROL: an infinite producer truncated by \`head\` exits 141 under pipefail" "141" "$mech_rc"
+
+# The SHIPPED producer line, lifted from the script so this can never drift from
+# what `up` actually runs. It must carry no truncating reader at all.
+producer="$(grep -n 'raw="pds-scratch-\$(' "$SCRIPT" | sed 's/^[0-9]*://' | sed 's/^ *//')"
+check_lacks    "the shipped producer truncates nothing with \`head\`" "head -c" "$producer"
+check_contains "…it reads a BOUNDED 20 bytes with od"                "-N20"    "$producer"
+
+prod_err="$TMP/producer.err"
+prod_out="$( set -o pipefail; eval "$producer" || exit $?; printf '%s' "$raw" )" 2>"$prod_err"; prod_rc=$?
+check_eq    "the shipped producer exits 0 under pipefail"     "0"  "$prod_rc"
+check_eq    "…and yields 'pds-scratch-' + 40 hex (52 chars)"  "52" "${#prod_out}"
+check_eq    "…with an EMPTY stderr (no 'write error: Broken pipe')" "" "$(cat "$prod_err")"
+case "$prod_out" in
+  pds-scratch-[0-9a-f]*) pass "…and it is lowercase hex after the label" ;;
+  *) fail "…producer output is not 'pds-scratch-<hex>': $prod_out" ;;
+esac
+
+# TRAP 7, STRUCTURAL: the DB is unreachable offline, so this pins the three
+# statements/guards the fix added. The BEHAVIOURAL proof is the round-trip
+# workflow's section-3 `-> 200` line on a fresh Postgres.
+mint="$(sed -n '/^mint_admin_token() {/,/^}/p' "$SCRIPT")"
+check_contains "STRUCTURAL: the mint creates the workspace the probe addresses" "INSERT INTO workspaces" "$mint"
+check_contains "STRUCTURAL: …and the owner|admin membership the route demands" "INSERT INTO workspace_memberships" "$mint"
+check_contains "STRUCTURAL: …then READS the joined row back"                   "scratch_membership_count" "$mint"
+check_contains "STRUCTURAL: …and an empty read dies as CANNOT READ, not as a zero" "CANNOT READ workspace_memberships" "$mint"
+
+probe="$(grep -c 'workspaces/\$PDS_SCRATCH_WS_SLUG/media/blob' "$SCRIPT" || true)"
+check_eq "the probe URL and the mint share ONE slug constant" "1" "$probe"
+
 printf '\n'
 hr "$fails failure(s)"
 if [ "$fails" -eq 0 ]; then
