@@ -56,6 +56,16 @@
   var SLATE = "#94A3B8";
   var AMBER = "#FBBF24";
 
+  // LIGHT-ground siblings for the four hues above — the only colours this
+  // renderer paints RAW on whichever ground is active. The dark values land at
+  // 2.53/2.31/2.33/1.52 on BG_LIGHT, all under the 3.0 WCAG non-text floor, and
+  // A11Y_RING is the keyboard focus ring. accent()/a11yRing()/slate()/amber()
+  // below pick between the pair; dark keeps its original vivid values.
+  var ACCENT_LIGHT = "#604cf0";
+  var A11Y_RING_LIGHT = "#2563EB";
+  var SLATE_LIGHT = "#64748B";
+  var AMBER_LIGHT = "#B45309";
+
   // Monochrome node tint — one muted desaturated lavender-grey for EVERY node
   // on dark (the default look). Per-type colour is the opt-in "Full color" toggle.
   var MONO_DARK = "#a6adc0";
@@ -1281,6 +1291,33 @@
       return theme === "light" ? BG_LIGHT : BG_DARK;
     }
 
+    // The four hues painted RAW on whichever ground is active — everything else
+    // either already carries a *_LIGHT sibling or goes through shiftL(hex,-0.22).
+    // On BG_LIGHT the dark values measure 2.53 (accent), 2.31 (a11yRing),
+    // 2.33 (slate) and 1.52 (amber) against the 3.0 WCAG non-text floor, so on
+    // light we paint the deeper sibling instead: 5.05 / 4.71 / 4.33 / 4.57.
+    // A11Y_RING is the KEYBOARD FOCUS RING — under the floor a keyboard user
+    // cannot reliably see where focus is (WCAG 1.4.11 + 2.4.11). Dark is
+    // untouched: these return the original vivid values whenever theme !== "light".
+    function accent() {
+      return theme === "light" ? ACCENT_LIGHT : ACCENT;
+    }
+    function a11yRing() {
+      return theme === "light" ? A11Y_RING_LIGHT : A11Y_RING;
+    }
+    function slate() {
+      return theme === "light" ? SLATE_LIGHT : SLATE;
+    }
+    function amber() {
+      return theme === "light" ? AMBER_LIGHT : AMBER;
+    }
+    // "Lift" the accent for hover/active emphasis. On dark that means lighter;
+    // on light the whole file moves toward ink instead (see NODE_INK_LIGHT), and
+    // lightening there would walk the accent straight back under the floor.
+    function accentLift(dl) {
+      return shiftL(accent(), theme === "light" ? -dl : dl);
+    }
+
     function worldToScreen(x, y) {
       return [x * cam.scale + cam.tx, y * cam.scale + cam.ty];
     }
@@ -1449,14 +1486,14 @@
 
       // ── authored empty / error states share this bed ──
       if (errorState) {
-        drawCenterMessage(AMBER, 0.8, "Couldn't load graph data");
+        drawCenterMessage(amber(), 0.8, "Couldn't load graph data");
         return;
       }
       if (nodes.length === 0) {
         if (fetching) {
           drawFetchRing(t);
         } else {
-          drawCenterMessage(SLATE, 0.65, "No connections yet");
+          drawCenterMessage(slate(), 0.65, "No connections yet");
         }
         return;
       }
@@ -1514,7 +1551,7 @@
       var r = 0.22 * Math.min(W, H) * scale;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = rgba(ACCENT, a);
+      ctx.strokeStyle = rgba(accent(), a);
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -1683,7 +1720,7 @@
     function nodeFill(node) {
       var mono = theme === "light" ? MONO_LIGHT : MONO_DARK;
       if (node.phantom) return mono;
-      if (node.id === rootId) return ACCENT;
+      if (node.id === rootId) return accent();
       if (fullColor) {
         var hex = TYPE_HEX[node.type] || SLATE;
         return theme === "light" ? shiftL(hex, -0.22) : hex;
@@ -1756,7 +1793,7 @@
         var ringR = r + (3 + 9 * sp) * cam.scale;
         ctx.save();
         ctx.globalAlpha = (1 - sp) * (1 - sp) * 0.7;
-        ctx.strokeStyle = forced ? "CanvasText" : ACCENT;
+        ctx.strokeStyle = forced ? "CanvasText" : accent();
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(p[0], p[1], ringR, 0, Math.PI * 2);
@@ -1770,7 +1807,7 @@
         fill = isRoot ? "Highlight" : "CanvasText";
       } else if (isRoot) {
         // active node: accent, lifting toward a lighter accent on hover.
-        fill = hovered || neighbor ? shiftL(ACCENT, 0.1) : ACCENT;
+        fill = hovered || neighbor ? accentLift(0.1) : accent();
       } else if (hovered) {
         // hovered node brightens toward white (dark) / dark (light).
         fill = theme === "light" ? NODE_INK_LIGHT : NODE_WHITE;
@@ -1802,7 +1839,7 @@
       if (isRoot && !forced && !frosted) {
         ctx.save();
         ctx.globalAlpha = a;
-        ctx.strokeStyle = shiftL(ACCENT, 0.18);
+        ctx.strokeStyle = accentLift(0.18);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(p[0], p[1], r + 0.5, 0, Math.PI * 2);
@@ -1814,7 +1851,7 @@
       if (!frosted && node.type === "task" && node.status === "in_progress" && !forced) {
         ctx.save();
         ctx.globalAlpha = a;
-        ctx.strokeStyle = ACCENT;
+        ctx.strokeStyle = accent();
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(p[0], p[1], r + 2, -Math.PI / 2, 0);
@@ -2006,7 +2043,7 @@
         // active node label — accent-tinted, a hair larger. Not a sun, just
         // gently distinguished.
         font = "500 11px " + FONT_STACK;
-        color = ACCENT;
+        color = accent();
         track = "0.005em";
       } else if (node.phantom) {
         font = "italic 400 9px " + FONT_STACK;
@@ -2063,10 +2100,10 @@
       var p = worldToScreen(node.x, node.y);
       var r = node.r * cam.scale + 4;
       ctx.save();
-      ctx.strokeStyle = A11Y_RING;
+      ctx.strokeStyle = a11yRing();
       ctx.lineWidth = 3;
       if (!reduced) {
-        ctx.shadowColor = A11Y_RING;
+        ctx.shadowColor = a11yRing();
         ctx.shadowBlur = 8;
       }
       ctx.beginPath();
@@ -2092,7 +2129,7 @@
       // Hairline the title underline with the node's resolved hue for a bespoke
       // feel (vs. a generic popover). Title text stays high-contrast per theme
       // (white was invisible on the light tooltip's white glass).
-      var hue = node.phantom ? SLATE : TYPE_HEX[node.type] || SLATE;
+      var hue = node.phantom ? slate() : TYPE_HEX[node.type] || slate();
       var light = theme === "light";
       html +=
         "<div style='font-weight:600;color:" + (light ? TOOLTIP_TITLE_LIGHT : TOOLTIP_TITLE_DARK) + ";margin-bottom:4px;padding-bottom:3px;" +
@@ -2914,8 +2951,8 @@
         });
         b.addEventListener("pointerdown", function () { b.style.transform = "scale(0.92)"; });
         b.addEventListener("pointerup", function () { b.style.transform = "scale(1)"; });
-        // keyboard focus ring in the distinct A11Y_RING color.
-        b.addEventListener("focus", function () { b.style.boxShadow = "0 0 0 2px " + A11Y_RING; });
+        // keyboard focus ring in the distinct a11yRing() color (per-theme).
+        b.addEventListener("focus", function () { b.style.boxShadow = "0 0 0 2px " + a11yRing(); });
         b.addEventListener("blur", function () { b.style.boxShadow = "none"; });
         strip.appendChild(b);
       });
@@ -2963,7 +3000,7 @@
         legend.appendChild(mrow);
         var arow = document.createElement("div");
         arow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:" + cc.row + ";";
-        arow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + ACCENT + "'></span> active";
+        arow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + accent() + "'></span> active";
         legend.appendChild(arow);
       }
       // phantom ghost entry
@@ -3038,7 +3075,7 @@
       dot.style.cssText =
         "width:7px;height:7px;border-radius:50%;flex:0 0 auto;" +
         (on
-          ? "background:" + ACCENT + ";box-shadow:0 0 6px " + rgba(ACCENT, 0.8) + ";"
+          ? "background:" + accent() + ";box-shadow:0 0 6px " + rgba(accent(), 0.8) + ";"
           : "background:" + cc.dotOff + ";");
       var txt = document.createElement("span");
       txt.textContent = label;
