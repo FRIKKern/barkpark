@@ -1044,6 +1044,160 @@ if (failed === failedBeforeH)
     console.log(`  ok   verdict arm: ${VERDICT_PAIRINGS.length} loss/peace pairings (ink on soft wash + ink on page) × ${Object.keys(contrastThemes).length} themes × 2 modes = ${verdictChecks} checks, all ≥ AA 4.5`);
 }
 
+// ── Part H2: WCAG contrast of the bp-graph Canvas palette (DERIVED pairings) ──
+// Part H above gates the Studio DOM. The bp-graph.js force-graph paints on a
+// <canvas>: `ctx.fillStyle` cannot consume var(), so its palette is concrete
+// bytes and NO CSS-level gate can ever see it. Before this part, the graph
+// palette was gated for DRIFT (the token pipeline / the four byte-identical
+// copies) and not once for LEGIBILITY — every node fill, edge stroke, focus ring
+// and error colour could move with every gate green (task-66233ad49c176b1c).
+//
+// The pairings here are DERIVED, never hand-listed — an enumeration is a
+// snapshot, a predicate is a rule, and a hand list silently skips the next
+// colour somebody adds. Two sources, unioned, both read by predicate:
+//   1. tokens.color.graphCanvas — every leaf colour in the family, recursively.
+//      A colour added to that family is evaluated with NO edit here.
+//   2. web/public/bp-graph.js — every `var NAME = "<colour>";` in the SHIPPED
+//      renderer, read LIVE off disk (Part H's own idiom: read the artifact, so
+//      reverting a fix reds this gate). While the palette still lives in the JS
+//      these ARE the values; once it moves into the token family the emit fence
+//      makes the two sources byte-identical, so the union is stable either way.
+//
+// GROUND vs INK, and which theme a colour is painted in, are also predicates:
+//   ground  ⟺ the key names a background (`canvas` / `bg…` / `…Bg`)
+//   theme   ⟺ the key says light/dark, ELSE the renderer source decides — a var
+//             used ONLY inside a `theme === "light" ? A : B` ternary is bound to
+//             the branch it sits on; anything else is painted in BOTH themes.
+// Thresholds are WCAG: 4.5 for text-bearing keys (labels/tooltips/titles), 3.0
+// for every other graphical object (1.4.11 — node dots, edges, the focus ring).
+console.log("\ndesign/check.mjs — Part H2: WCAG-AA contrast of the bp-graph Canvas palette (derived pairings)");
+{
+  const failedBeforeH2 = failed;
+  const GRAPH_JS = "web/public/bp-graph.js";
+  const graphSrc = readFileSync(join(repoRoot, GRAPH_JS), "utf8");
+
+  // ---- source 1: the token family, walked recursively (leaves only) ----------
+  const FAMILY = "color.graphCanvas";
+  const familyRoot = tokens?.color?.graphCanvas;
+  const palette = new Map(); // display key -> { value, origin }
+  const addColour = (key, value, origin) => {
+    if (typeof value !== "string") return;
+    if (!/^(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\()/.test(value.trim())) return;
+    if (!palette.has(key)) palette.set(key, { value: value.trim(), origin });
+  };
+  (function walk(node, path) {
+    if (!node || typeof node !== "object") return;
+    for (const [k, v] of Object.entries(node)) {
+      if (k.startsWith("_")) continue; // _note and friends are prose, not colour
+      if (v && typeof v === "object") walk(v, path ? `${path}.${k}` : k);
+      else addColour(path ? `${path}.${k}` : k, v, FAMILY);
+    }
+  })(familyRoot, "");
+  const fromFamily = palette.size;
+
+  // ---- source 2: the shipped renderer's own `var NAME = "<colour>";` ---------
+  const declLines = new Map(); // var name -> declaration line index
+  const srcLines = graphSrc.split("\n");
+  srcLines.forEach((line, i) => {
+    const m = line.match(/^\s*var\s+([A-Za-z_$][\w$]*)\s*=\s*"([^"]+)"\s*;/);
+    if (m) { declLines.set(m[1], i); addColour(m[1], m[2], GRAPH_JS); }
+  });
+  const fromRenderer = palette.size - fromFamily;
+
+  // ---- predicates: ground vs ink, and the theme(s) a colour is painted in ----
+  const isGround = (key) => /(^|[._])(canvas|bg)|Bg$|_BG$/i.test(key.split(".").pop()) || /(^|[._])bg[_A-Z]/i.test(key);
+  const nameTheme = (key) => (/light/i.test(key) ? "light" : /dark/i.test(key) ? "dark" : null);
+  // A renderer var used ONLY inside `theme === "light" ? A : B` is bound to the
+  // branch it sits on — that is how NODE_WHITE is dark-only despite its name.
+  const sourceTheme = (key) => {
+    const decl = declLines.get(key);
+    if (decl === undefined) return null;
+    let uses = 0, light = 0, dark = 0;
+    srcLines.forEach((line, i) => {
+      if (i === decl) return;
+      if (!new RegExp(`\\b${key}\\b`).test(line)) return;
+      uses++;
+      const t = line.match(/theme\s*===\s*"light"\s*\?([^:]*):(.*)$/);
+      if (!t) return;
+      if (new RegExp(`\\b${key}\\b`).test(t[1])) light++;
+      else if (new RegExp(`\\b${key}\\b`).test(t[2])) dark++;
+    });
+    if (uses === 0) return null;
+    if (light === uses && dark === 0) return "light";
+    if (dark === uses && light === 0) return "dark";
+    return null;
+  };
+  const themesOf = (key) => {
+    const t = nameTheme(key) || sourceTheme(key);
+    return t ? [t] : ["light", "dark"];
+  };
+  // A GROUND's theme is read off the ground itself, not its name: a ground that
+  // is nearer black than white IS the dark mode's ground whatever it is called.
+  // (`canvas` carries no light/dark in its name; without this a light-bound ink
+  // would be paired against it — a co-occurrence that never happens on screen.)
+  const groundTheme = (value) => (contrast(value, "#000000") > contrast(value, "#ffffff") ? "light" : "dark");
+  const OPAQUE = (v) => /^#[0-9a-fA-F]{6}$|^#[0-9a-fA-F]{3}$/.test(v);
+  const isText = (key) => /label|tooltip|title|text|row/i.test(key);
+
+  const grounds = [], inks = [];
+  for (const [key, { value, origin }] of palette) {
+    if (!OPAQUE(value)) continue; // a translucent fill has no single ratio
+    if (isGround(key)) grounds.push({ key, value, origin, themes: [groundTheme(value)] });
+    else inks.push({ key, value, origin, themes: themesOf(key) });
+  }
+
+  // Known sub-AA pairings that PRE-DATE this gate. Each carries a reason and the
+  // row it is filed under; the check reds in BOTH directions — an unlisted
+  // failure reds, and a listed pairing that has RISEN to AA reds as stale.
+  const KNOWN_SUB_AA = {
+    "ACCENT×BG_LIGHT": "graph root/active violet on the light ground — pre-existing, filed task-66233ad49c176b1c; the fix edits web/public/bp-graph.js (4 byte-identical copies, hot in PR #18109)",
+    "SLATE×BG_LIGHT": "the _unknown / phantom node tint on the light ground — pre-existing, filed task-66233ad49c176b1c",
+    "A11Y_RING×BG_LIGHT": "keyboard focus ring on the light ground — pre-existing WCAG 2.4.11/1.4.11 failure, filed task-66233ad49c176b1c",
+    "AMBER×BG_LIGHT": "parse-error message colour on the light ground — pre-existing, filed task-66233ad49c176b1c",
+  };
+  const seenKnown = new Set();
+
+  const AA_GRAPH = { text: 4.5, nontext: 3.0 };
+  let graphPairs = 0;
+  for (const ink of inks) {
+    for (const g of grounds) {
+      const themes = ink.themes.filter((t) => g.themes.includes(t));
+      if (themes.length === 0) continue;
+      const need = AA_GRAPH[isText(ink.key) ? "text" : "nontext"];
+      let ratio;
+      try { ratio = contrast(ink.value, g.value); }
+      catch (e) { fail(`  Part H2 FAIL: ${ink.key} on ${g.key} — contrast() threw (${e.message})`); continue; }
+      graphPairs++;
+      const id = `${ink.key}×${g.key}`;
+      const known = Object.prototype.hasOwnProperty.call(KNOWN_SUB_AA, id);
+      if (known) seenKnown.add(id);
+      if (ratio < need - 1e-9) {
+        if (known) console.log(`  known ${id} = ${ratio.toFixed(2)} < ${need} — ${KNOWN_SUB_AA[id]}`);
+        else fail(`  Part H2 FAIL: ${id} (${ink.value} on ${g.value}, ${isText(ink.key) ? "text" : "nontext"}) = ${ratio.toFixed(2)} < ${need} — bp-graph Canvas palette, ${ink.origin}; raise the value in ${FAMILY} / ${GRAPH_JS} or justify it in KNOWN_SUB_AA`);
+      } else if (known) {
+        fail(`  Part H2 FAIL: ${id} = ${ratio.toFixed(2)} ≥ ${need} but is still listed in KNOWN_SUB_AA — the defect is FIXED, delete the entry (a stale exemption hides the next regression)`);
+      }
+    }
+  }
+  for (const id of Object.keys(KNOWN_SUB_AA))
+    if (!seenKnown.has(id)) fail(`  Part H2 FAIL: KNOWN_SUB_AA lists ${id}, which the derivation never produced — the exemption names a pairing that does not exist (renamed or removed token); delete it`);
+
+  // ---- the refusal: a guard that resolves nothing is theatre, not a pass -----
+  // THIS is the line that refuses on an empty read. It fires before any "ok",
+  // so a misnamed family, an emptied family, or a renderer whose var block
+  // vanished can never present as a green.
+  if (graphPairs === 0)
+    fail(`  Part H2 FAIL: REFUSING — derived ZERO pairings from ${FAMILY} (${fromFamily} colours) ∪ ${GRAPH_JS} (${fromRenderer} colours): ${grounds.length} grounds × ${inks.length} inks. An empty read is a broken derivation, never a pass.`);
+  // Positive control: the derivation must also see BOTH themes and both sources.
+  const coveredThemes = new Set(grounds.flatMap((g) => g.themes));
+  if (grounds.length === 0) fail(`  Part H2 FAIL: REFUSING — zero GROUND colours matched in ${FAMILY} ∪ ${GRAPH_JS}; every ink would be unevaluated.`);
+  if (inks.length === 0) fail(`  Part H2 FAIL: REFUSING — zero INK colours matched in ${FAMILY} ∪ ${GRAPH_JS}; nothing would be evaluated against a ground.`);
+  if (coveredThemes.size < 2) fail(`  Part H2 FAIL: REFUSING — grounds cover only [${[...coveredThemes].join(", ")}]; the criterion requires BOTH light and dark.`);
+
+  if (failed === failedBeforeH2)
+    console.log(`  ok   ${graphPairs} derived pairings (${inks.length} inks × ${grounds.length} grounds, themes ${[...coveredThemes].sort().join("+")}) from ${FAMILY} (${fromFamily}) ∪ ${GRAPH_JS} (${fromRenderer}), all ≥ AA (text 4.5 / nontext 3.0) or justified in KNOWN_SUB_AA`);
+}
+
 // ── Part I: the write fence's own predicates, proven able to fail ────────────
 // Part A above is the fence's REPORTING half; `run()` in emit.mjs is its
 // BLOCKING half. Both rest on exactly two predicates — attribute() and
