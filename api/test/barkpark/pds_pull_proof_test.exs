@@ -104,7 +104,16 @@ defmodule Barkpark.PdsPullProofTest do
              `icon desk_groups`, one shows scoping leg B to the measured moved set \
              dropping nothing, one shows the new red is two-sided on a healthy roster, \
              and one shows a shifted row set refused by exit code rather than folded \
-             into the counts. No live target is touched (PDS-D31).\n#{out}"
+             into the counts. TEN MORE ARRIVED WITH THE PDS-D746 thaw and are the \
+             two-sided demo it requires: they drive the shipped \
+             `deploy_run_instance_verdict` / `gate_d_verdict` against fixture job \
+             graphs, because `deploy.yml` runs TWO independent deploy jobs behind one \
+             `changes` job — `control-plane` ships to CP_HOST, `instance` ships to \
+             GUERRILLA_HOST — and only `instance` can swap the slot under an export. \
+             A cloud-only run (instance `skipped`) must NOT abort and an \
+             instance-targeting run MUST, with the undecided, unreadable and \
+             nonzero-gh shapes all staying UNKNOWN so the gate keeps failing CLOSED \
+             (PDS-D98). No live target is touched (PDS-D31).\n#{out}"
 
     assert out =~ "pds-pull-proof_test: PASS",
            "the harness exited 0 without printing its PASS line — an exit code that does not " <>
@@ -113,15 +122,15 @@ defmodule Barkpark.PdsPullProofTest do
     # Non-vacuity: a harness whose fixtures stopped building would print a
     # tidy PASS over zero arms. The count is asserted, not assumed.
     assert out =~
-             "PASS (66 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording, 9 rung-6 sentinel coverage)",
+             "PASS (76 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording, 9 rung-6 sentinel coverage, 10 cond_d job discrimination)",
            "the harness passed with an arm count this door does not recognise. If arms were " <>
              "added or removed deliberately, update this assertion in the same commit — an " <>
              "unpinned count lets a shrinking harness keep printing PASS.\n#{out}"
 
     ok_lines = out |> String.split("\n") |> Enum.count(&String.starts_with?(&1, "  ok   "))
 
-    assert ok_lines == 66,
-           "expected 66 `ok` arm lines, counted #{ok_lines}. A pass prints a real count; a " <>
+    assert ok_lines == 76,
+           "expected 76 `ok` arm lines, counted #{ok_lines}. A pass prints a real count; a " <>
              "green with no arms means the harness never ran its assertions.\n#{out}"
   end
 end

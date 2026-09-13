@@ -653,6 +653,108 @@ fi
 
 printf '\n'
 
+# ── cond_d's JOB DISCRIMINATION (pds-bl-cond-d-job-blind-false-abort) ───────
+# The gate the old (d) could not fail in the safe direction. `deploy.yml` runs
+# TWO independent deploy jobs behind one `changes` job — `control-plane` ships
+# to CP_HOST, `instance` ships to GUERRILLA_HOST — and only `instance` can swap
+# the slot under a PDS export. The old (d) asked `gh run list --workflow
+# deploy.yml --status in_progress` and aborted on ANY hit, so a cloud-only merge
+# tripped a FALSE ABORT. PDS-D746 sanctions the fix; PDS-D31 forbids buying the
+# demonstration with a real export, so both directions are driven as FIXTURES
+# through the SHIPPED functions in library mode.
+printf 'pds-pull-proof_test: cond_d tells an instance-targeting deploy run from a control-plane-only one\n'
+
+for _fn in deploy_run_instance_verdict gate_d_verdict; do
+  if ! declare -f "$_fn" >/dev/null 2>&1; then
+    printf 'pds-pull-proof_test: %s is not defined after sourcing %s — the cond_d arms would be testing nothing\n' "$_fn" "$PROOF" >&2
+    exit 1
+  fi
+done
+
+TAB="$(printf '\t')"
+# The three shapes the API actually returns. A skipped job IS listed, with
+# conclusion `skipped`; a running job is listed with an EMPTY conclusion.
+JOBS_CLOUD_ONLY="changes${TAB}completed${TAB}success
+control-plane${TAB}in_progress${TAB}
+instance${TAB}completed${TAB}skipped"
+JOBS_INSTANCE_LIVE="changes${TAB}completed${TAB}success
+control-plane${TAB}completed${TAB}skipped
+instance${TAB}in_progress${TAB}"
+JOBS_INSTANCE_DONE="changes${TAB}completed${TAB}success
+control-plane${TAB}completed${TAB}skipped
+instance${TAB}completed${TAB}success"
+JOBS_UNDECIDED="changes${TAB}in_progress${TAB}"
+
+v="$(deploy_run_instance_verdict "$JOBS_CLOUD_ONLY")"
+if [ "$v" = "control-plane-only" ]; then
+  ok 'a cloud-only run (instance job skipped) is NOT instance-targeting'
+else
+  bad 'a cloud-only run (instance job skipped) is NOT instance-targeting' "got '$v'. This is the false abort the row was filed about: a deploy that cannot reach the source box must not cost the export its preconditions"
+fi
+
+v="$(deploy_run_instance_verdict "$JOBS_INSTANCE_LIVE")"
+if [ "$v" = "instance" ]; then
+  ok 'a run whose instance job is IN PROGRESS is instance-targeting'
+else
+  bad 'a run whose instance job is IN PROGRESS is instance-targeting' "got '$v'. A discriminator that never says 'instance' has replaced a false abort with a silent green"
+fi
+
+v="$(deploy_run_instance_verdict "$JOBS_INSTANCE_DONE")"
+if [ "$v" = "instance" ]; then
+  ok 'a run whose instance job ALREADY COMPLETED is instance-targeting'
+else
+  bad 'a run whose instance job ALREADY COMPLETED is instance-targeting' "got '$v'. `skipped` is the only conclusion that means the box was untouched; a finished `success` means the slot was ALREADY swapped"
+fi
+
+v="$(deploy_run_instance_verdict "$JOBS_UNDECIDED")"
+case "$v" in
+  unknown:*) ok 'a run whose `changes` job has not completed is UNKNOWN, never control-plane-only' ;;
+  *) bad 'a run whose `changes` job has not completed is UNKNOWN, never control-plane-only' "got '$v'. GitHub materialises a job only once the run reaches it, so the ABSENCE of an `instance` line before `changes` finishes says nothing — reading it as 'control-plane only' is the most reassuring possible answer to a question never asked" ;;
+esac
+
+v="$(deploy_run_instance_verdict "")"
+case "$v" in
+  unknown:*) ok 'an empty job graph is UNKNOWN — the gate fails CLOSED (PDS-D98)' ;;
+  *) bad 'an empty job graph is UNKNOWN — the gate fails CLOSED (PDS-D98)' "got '$v'. An unreadable listing that reads OK is the fail-open shape PDS-D98 exists to refuse" ;;
+esac
+
+d="$(gate_d_verdict 0)"; rc=$?
+if [ "$rc" -eq 0 ] && [ "${d#OK}" != "$d" ]; then
+  ok 'no deploy.yml run at all still passes (d)'
+else
+  bad 'no deploy.yml run at all still passes (d)' "rc=$rc, text='$d'. The fix must not turn the quiet case into an abort"
+fi
+
+d="$(gate_d_verdict 0 '111=control-plane-only')"; rc=$?
+if [ "$rc" -eq 0 ] && [ "${d#OK}" != "$d" ] && printf '%s' "$d" | grep -q 'CONTROL-PLANE ONLY'; then
+  ok 'a live control-plane-only run PASSES (d) and the transcript SAYS which run it forgave'
+else
+  bad 'a live control-plane-only run PASSES (d) and the transcript SAYS which run it forgave' "rc=$rc, text='$d'. A pass that reads 'no deploy.yml run in progress' while one IS in progress is a true verdict with a false sentence"
+fi
+
+d="$(gate_d_verdict 0 '111=control-plane-only' '222=instance')"; rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$d" | grep -q '222'; then
+  ok 'ONE instance-targeting run among control-plane-only ones still ABORTS, by id'
+else
+  bad 'ONE instance-targeting run among control-plane-only ones still ABORTS, by id' "rc=$rc, text='$d'. The aggregate must be worst-case, and it must name the run that caused it"
+fi
+
+d="$(gate_d_verdict 0 '111=unknown:the API never answered for this run')"; rc=$?
+if [ "$rc" -ne 0 ] && [ "${d#UNKNOWN}" != "$d" ]; then
+  ok 'a run whose job graph could not be read makes (d) UNKNOWN, never OK'
+else
+  bad 'a run whose job graph could not be read makes (d) UNKNOWN, never OK' "rc=$rc, text='$d'. Per-run blindness must fail closed exactly as the whole-listing blindness already does"
+fi
+
+d="$(gate_d_verdict 7)"; rc=$?
+if [ "$rc" -ne 0 ] && [ "${d#UNKNOWN}" != "$d" ] && printf '%s' "$d" | grep -q '7'; then
+  ok 'a nonzero gh exit is still UNKNOWN with the code quoted (PDS-D98 preserved)'
+else
+  bad 'a nonzero gh exit is still UNKNOWN with the code quoted (PDS-D98 preserved)' "rc=$rc, text='$d'. The thaw must not spend the fail-closed behaviour it inherited"
+fi
+
+printf '\n'
+
 # ── the receipt's own arithmetic is an arm ──────────────────────────────────
 # The headline total used to be hand-typed beside a hand-typed breakdown, and a
 # wave that added 17 arms typed 58 over a breakdown summing to 57. Nothing local
@@ -662,8 +764,8 @@ printf '\n'
 # checks itself three ways before it is printed: the breakdown must SUM to the
 # declared total, and the declared total must equal the arms this run actually
 # printed. A miscount now reds here, in the second it is typed.
-ARMS_DECLARED=66
-ARMS_BREAKDOWN='13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording, 9 rung-6 sentinel coverage'
+ARMS_DECLARED=76
+ARMS_BREAKDOWN='13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording, 9 rung-6 sentinel coverage, 10 cond_d job discrimination'
 breakdown_sum="$(printf '%s' "$ARMS_BREAKDOWN" | tr ',' '\n' | awk '{s += $1} END {print s + 0}')"
 if [ "$breakdown_sum" -ne "$ARMS_DECLARED" ]; then
   bad 'the receipt adds up' "the declared total is $ARMS_DECLARED but the breakdown sums to $breakdown_sum — one of the two was typed and not counted"
