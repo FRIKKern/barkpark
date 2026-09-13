@@ -5,7 +5,7 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
   delegate-a-DB-mutation shape — but scheduled DAILY, not per-minute: retention is
   a slow-moving housekeeping concern, not a staleness race.
 
-  Three append-only tables grow forever without this:
+  Five append-only tables grow forever without this:
 
     * `agent_events` — one `health` row per 60s beat per box (~1440 rows/box/day)
       PLUS one `space` row per 15-minute disk report (~96 rows/box/day, +6.7% —
@@ -34,9 +34,19 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
       become the next unbounded table someone discovers. Sizing: ~62 commits/day
       at ~200 B/row ≈ 5 MB/year against a 265 MB database — retention here is
       designed in, not inherited.
+    * `notification_deliveries` — one row per notification send attempt
+      (recipient / event / channel / status / attempts / last_error), written by
+      `Notifications.record_delivery/6` and `log_chat_delivery/6` and never
+      mutated after its terminal status. NOTHING pruned it: it was the last
+      append-only table in cloud/ with no retention arm
+      (cch-w34-bl-delivery-log-has-no-retention). We keep 180 days — see
+      `@notification_delivery_retention_days` for why that number and not 14.
+      This arm is BATCHED, unlike the four above; see
+      `@notification_delivery_batch_limit`.
 
   Idempotent: a run with nothing to prune returns `{:ok, %{events_deleted: 0,
-  tokens_deleted: 0, samples_deleted: 0, deliveries_deleted: 0}}` and never raises. `max_attempts: 1` —
+  tokens_deleted: 0, samples_deleted: 0, deliveries_deleted: 0,
+  notification_deliveries_deleted: 0}}` and never raises. `max_attempts: 1` —
   a missed daily prune is harmless (the next tick catches up), so there is
   nothing to retry.
   """
@@ -45,6 +55,7 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
 
   import Ecto.Query
 
+  alias BarkparkCloud.Notifications.Delivery
   alias BarkparkCloud.PlatformDelivery
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Registry.{AgentEvent, AgentToken}
@@ -59,6 +70,37 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
   # Keep the platform's own delivery record this long — two quarters, so a
   # quarter-over-quarter comparison always has its predecessor to compare to.
   @delivery_retention_days 180
+
+  # Keep a NOTIFICATION delivery row this long. CHOSEN, not inherited from the
+  # 14-day sample window above, and the difference is the point: a usage sample
+  # is a cache whose only reader wants the latest row, while a delivery log is
+  # EVIDENCE a person reads — `GET /v1/notifications/deliveries` is the one
+  # surface that answers "was I notified?", and a member who asks it about an
+  # alert they think they missed is asking about something weeks or months old.
+  # 180 days is the same window this file already gives the OTHER delivery log
+  # (`@delivery_retention_days`, platform_deliveries): two full quarters, so a
+  # quarter-over-quarter question always has its predecessor, and short enough
+  # that the table is bounded forever. Pruning a delivery log on a sample table's
+  # schedule would destroy the audit trail to save a megabyte.
+  @notification_delivery_retention_days 180
+
+  # One tick deletes at most this many notification delivery rows per statement,
+  # and at most @notification_delivery_max_batches statements. The FIRST prune
+  # after this ships is the only bulk one — every later tick removes a single
+  # day's drift — and it must not be issued as one unbounded DELETE against a
+  # table nobody has ever pruned.
+  #
+  # THE MEASUREMENT behind the size: production (cloud-db-1) held 2,160 rows /
+  # 952 kB when this was re-derived — ~440 B/row — growing ~60 rows/day
+  # platform-wide, one team owning 98%. One batch of 5,000 rows is ~2.2 MB: more
+  # than TWICE the entire production table, so in practice the first prune is a
+  # single statement with the bound never binding. The bound exists for the case
+  # the measurement does not cover — a table that grew unwatched between this
+  # commit and the day it first runs — and 10 batches gives one tick a ceiling of
+  # 50,000 rows, ~23x the measured table, while the daily cron drains any
+  # remainder against a 60 rows/day inflow.
+  @notification_delivery_batch_limit 5_000
+  @notification_delivery_max_batches 10
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
@@ -97,12 +139,73 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
       from(d in PlatformDelivery, where: d.inserted_at < ^deliveries_cutoff)
       |> Repo.delete_all()
 
+    # Drop notification delivery rows past 180 days, keyed on `inserted_at` —
+    # the instant the send attempt was recorded. Time-keyed ONLY: there is no
+    # team parameter anywhere in this query, so a row lives or dies by its own
+    # age and one team's retention can never reach another team's rows (nor can
+    # a team-scoped read of the log see a neighbour's, which is the router's
+    # fence, not this worker's). Batched — see the constants above.
+    notification_deliveries_deleted =
+      prune_notification_deliveries(
+        DateTime.add(now, -@notification_delivery_retention_days * 24 * 3600, :second)
+      )
+
     {:ok,
      %{
        events_deleted: events_deleted,
        tokens_deleted: tokens_deleted,
        samples_deleted: samples_deleted,
-       deliveries_deleted: deliveries_deleted
+       deliveries_deleted: deliveries_deleted,
+       notification_deliveries_deleted: notification_deliveries_deleted
      }}
   end
+
+  @doc """
+  The notification-delivery prune, in bounded batches. Returns rows deleted.
+
+  PUBLIC with explicit `limit` / `max_batches` so the BATCHING itself is
+  testable: a test drives it at `limit: 2, max_batches: 2` over five old rows and
+  gets four — a number a single unbounded `DELETE` could never return. A private
+  helper at production constants would need 5,001 fixture rows to say anything,
+  which is a load generator, not a test.
+
+  Stops the instant a batch comes back SHORT: a short batch means the cutoff is
+  exhausted, so a tick with nothing to prune costs exactly one SELECT and issues
+  no DELETE at all.
+  """
+  @spec prune_notification_deliveries(DateTime.t(), pos_integer(), pos_integer()) ::
+          non_neg_integer()
+  def prune_notification_deliveries(
+        cutoff,
+        limit \\ @notification_delivery_batch_limit,
+        max_batches \\ @notification_delivery_max_batches
+      ) do
+    Enum.reduce_while(1..max_batches, 0, fn _i, acc ->
+      ids =
+        from(d in Delivery,
+          where: d.inserted_at < ^cutoff,
+          select: d.id,
+          limit: ^limit
+        )
+        |> Repo.all()
+
+      case ids do
+        [] ->
+          {:halt, acc}
+
+        ids ->
+          {deleted, _} = Repo.delete_all(from(d in Delivery, where: d.id in ^ids))
+
+          if length(ids) < limit do
+            {:halt, acc + deleted}
+          else
+            {:cont, acc + deleted}
+          end
+      end
+    end)
+  end
+
+  @doc "The retention window applied to `notification_deliveries`, in days."
+  @spec notification_delivery_retention_days() :: pos_integer()
+  def notification_delivery_retention_days, do: @notification_delivery_retention_days
 end
