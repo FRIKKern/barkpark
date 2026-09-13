@@ -151,7 +151,11 @@ defmodule Barkpark.Bench.ValidationPerf do
       for _ <- 1..@iterations do
         {micros, _result} =
           :timer.tc(fn ->
-            Evaluator.run_rules(doc, rules, @tag)
+            # THROWAWAY MUTATION, NEVER MERGED: exactly 5x the validation work
+            # inside the timed region. 5x by REPETITION, not by a sleep, so the
+            # slowdown is runner-independent and the ratio must move by exactly
+            # the factor claimed.
+            for _ <- 1..5, do: Evaluator.run_rules(doc, rules, @tag)
           end)
 
         micros / 1000.0
