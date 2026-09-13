@@ -28821,6 +28821,14 @@
       githubInstallOutcome: githubInstallOutcome,
       githubInstallUnconfirmedToast: githubInstallUnconfirmedToast,
       handleGithubInstallReturn: handleGithubInstallReturn,
+      // …and the two card MOUNTS the leg composes with, so the harness can open
+      // on a disconnected plane and read the repaint it causes. Exported for the
+      // rig only; both remain browser-verified surfaces.
+      loadGithub: loadGithub, disconnectGithub: disconnectGithub,
+      // The /new ready panel's GitHub block — the SECOND "Connect GitHub" CTA.
+      // Pure; exported so the honest-absence arm can assert that BOTH CTAs point
+      // at the same App install URL and therefore share one return leg.
+      newGithubHtml: newGithubHtml,
       // cch wave 13 — WHICH cloud account a connection points at, shown before a
       // rotation is committed. Pure; loadProviderIdentity's fetch is the mount.
       providerIdentityModel: providerIdentityModel, providerIdentityHtml: providerIdentityHtml,

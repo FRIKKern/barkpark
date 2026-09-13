@@ -30976,6 +30976,9 @@ const CCHW65_MUST_ANSWER = [
   "malformed_body", "malformed_request", "name_required", "network_error",
   "no_active_subscription", "no_admin_token", "no_content_binding", "no_subscription",
   "github_error", "invalid_name",
+  // cch-w73-bl: the install return leg made this 422 human-reachable and paid it
+  // with a curated sentence; pinned here so a later deletion is not invisible.
+  "installation_not_found",
   "no_team", "not_live", "password_invalid", "plan_invalid", "portal_failed",
   "rate_limited", "repo_not_in_installation", "request_too_large", "role_too_high",
   "server_error", "suspended", "unsupported_media_type", "validation_failed",
@@ -31410,10 +31413,6 @@ test("cch-w75-s1 D883: repo_not_in_installation still renders the permanent trut
 test("cch-w72-bl NEGATIVE CONTROL: the two honest silences stay silent", () => {
   // These are NOT paid, on purpose, and their census rows STAY:
   //
-  //   installation_not_found  — POST /v1/github/installations has zero callers in
-  //                             app.js, internal/ or js/: no GitHub App
-  //                             setup_action callback consumer was ever built, so
-  //                             no person can reach the emit.
   //   repo_full_name_required — guard-shielded: the connect select is built only
   //                             when repos.length is nonzero and always submits a
   //                             member of it; only a hand-built request omits it.
@@ -31421,7 +31420,12 @@ test("cch-w72-bl NEGATIVE CONTROL: the two honest silences stay silent", () => {
   // A curated sentence for either would be copy for a reader that does not
   // exist. This control reds if a future diff registers one WITHOUT retiring its
   // census row — the mirror of the rot arm, on the JS side.
-  for (const slug of ["installation_not_found", "repo_full_name_required"]) {
+  // cch-w73-bl (wave 73) REMOVED installation_not_found from this list: its
+  // zero-caller premise was spent by handleGithubInstallReturn, it gained a
+  // curated reader, and its census row was deleted in that same diff. The slug
+  // is asserted PAID in the cch-w73-bl block at the tail of this file — so the
+  // two directions are still both guarded, just from opposite ends.
+  for (const slug of ["repo_full_name_required"]) {
     for (const fb of ["Please try again.", "Couldn't load your repositories."]) {
       assert.equal(hooks.friendly({ error: slug }, fb), fb,
         slug + " gained an ERRORS entry — pay it in the census too, or drop the entry");
@@ -32791,4 +32795,258 @@ test("security log: the modal mounts it, and a failed read never paints as an em
   const opener = src.slice(src.indexOf("function openAccountModal("));
   assert.ok(opener.slice(0, 2000).includes("loadSecurityLog()"),
     "openAccountModal must load the security log");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w73-bl · THE GITHUB APP INSTALL RETURN LEG
+//
+// THE DEFECT (wave-73 verify, zero-caller proof): the console's "Connect
+// GitHub" affordances were bare links OUT to github.com/apps/<slug>/
+// installations/new and NOTHING ever brought the resulting installation back.
+// POST /v1/github/installations had zero callers in app.js, internal/ and js/ —
+// a writer the plane shipped for a consumer that was never built — so a person
+// who completed the install returned to a console that still said "not
+// connected", forever, with no way to fix it from inside the product.
+//
+// THE RULING (criterion c0), recorded in the two durable venues this merge
+// carries — the comment block above handleGithubInstallReturn in app.js, and
+// the PR body: CONSOLE CONSUMER, not a server callback route. The App setup
+// redirect is an unauthenticated GET with no signature, no state parameter and
+// no bearer token; a server route there could not tell which team was
+// installing, while the console at that URL already holds the session and the
+// team pin, and the plane already has the authenticated, admin-gated,
+// id-validating writer. So the server side of this task needed NO change.
+//
+// IS GITHUB CONFIGURED ON THE DEPLOYMENT UNDER TEST (criterion c6)? NO — the
+// live control plane carries no ^GITHUB env (the measured fact cch-w48-s3/s6
+// recorded), so GitHub.configured?() is false there, every install CTA is
+// withheld and no live install can be driven. The evidence below is therefore
+// the corpus round trip plus node pins, which is what the criterion's "run or
+// fixture evidence quoted" allows.
+
+// previewRoute is already in scope (the session-revoke contract block imports
+// it near the head of this file) — the corpus route() IS the fixture server.
+
+// A realm wired for the return leg: the two nodes the leg can paint into
+// (#toast-stack, #github-card) RECORD their bytes, and fetch is dispatched
+// through the REAL scenario corpus so the round trip is a fixture round trip
+// and not a hand-built echo.
+async function w73Realm(source, search) {
+  const { h, box } = w49s6Realm(source || APP_SRC);
+  box.location.search = search;
+  const nodes = {};
+  const make = () => {
+    const n = {
+      // isConnected: loadGithub drops its answer when the box it painted into
+      // has left the document — a mounted node must say it is still there.
+      innerHTML: "", hidden: false, children: [], isConnected: true,
+      addEventListener: noop, removeEventListener: noop, setAttribute: noop,
+      appendChild(c) { n.children.push(c); }, removeChild: noop,
+      querySelector: () => null, querySelectorAll: () => [],
+    };
+    return n;
+  };
+  for (const sel of ["#toast-stack", "#github-card"]) nodes[sel] = make();
+  box.document.querySelector = (sel) => nodes[sel] || null;
+  // toast() wires its own close button off el.querySelector(".toast-close"),
+  // so a created element must hand back a node, not null.
+  box.document.createElement = () => ({
+    className: "", innerHTML: "", parentNode: null,
+    setAttribute: noop, addEventListener: noop,
+    querySelector: () => ({ addEventListener: noop }), querySelectorAll: () => [],
+  });
+  // history is ABSENT from the w49s6 realm, which exercises the leg's own
+  // `typeof history === "undefined"` guard for free — the scrub degrades to a
+  // no-op instead of throwing on the boot path.
+  const state = {};
+  const calls = [];
+  box.fetch = (path, opts) => {
+    const method = (opts && opts.method) || "GET";
+    calls.push({ method, path, body: opts && opts.body ? JSON.parse(opts.body) : null });
+    const answer = previewRoute("providers-connected", method, path, state) ||
+      { status: 200, body: {} };
+    return Promise.resolve({
+      ok: answer.status >= 200 && answer.status < 300,
+      status: answer.status,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(answer.body),
+    });
+  };
+  // The corpus' own owner actor, through the REAL loadMe: providerCanWrite()
+  // gates the card's write affordances, and an unasked /v1/me paints the
+  // read-only member arm — which carries no "Connect GitHub" CTA at all and
+  // would make every precondition below measure the wrong screen.
+  h.loadMe();
+  await w49s6Settle();
+  return { h, box, nodes, calls, state };
+}
+const w73Toasts = (nodes) => nodes["#toast-stack"].children.map((c) => c.innerHTML).join("\n");
+// Objects minted INSIDE the vm realm have that realm's Object prototype, so
+// deepStrictEqual refuses them on identity alone. Compare the VALUES. (`plain`
+// is already taken further up this file, hence the local name.)
+const w73Plain = (v) => JSON.parse(JSON.stringify(v));
+
+test("cch-w73-bl: githubInstallReturnFromSearch reads GitHub's setup redirect, and nothing else", () => {
+  const f = hooks.githubInstallReturnFromSearch;
+  assert.equal(typeof f, "function", "the parse rung must be node-pinned");
+  // The shape GitHub actually sends after an install and after an update.
+  assert.deepEqual(w73Plain(f("?installation_id=41234567&setup_action=install")),
+    { installation_id: "41234567", setup_action: "install" });
+  assert.deepEqual(w73Plain(f("?setup_action=update&installation_id=41234567")),
+    { installation_id: "41234567", setup_action: "update" });
+  // …beside other parameters, and with the leading ? absent.
+  assert.deepEqual(w73Plain(f("?foo=1&installation_id=9&setup_action=install&bar=2")),
+    { installation_id: "9", setup_action: "install" });
+  // setup_action=request: the org-approval shape, NO installation to record.
+  // It is a VALUE, not a null — the leg has something honest to say about it.
+  assert.deepEqual(w73Plain(f("?setup_action=request")), { installation_id: "", setup_action: "request" });
+  // Not a return leg at all.
+  for (const s of ["", "?", "?checkout=success", "?billing=portal", null, undefined]) {
+    assert.equal(f(s), null, "a non-install query must not arm the leg: " + JSON.stringify(s));
+  }
+  // Malformed input degrades to a value, never a throw — this runs at boot.
+  assert.doesNotThrow(() => f("%%%&installation_id=7&setup_action=install"));
+});
+
+test("cch-w73-bl c2: installation_not_found is READ — the curated sentence, with no invented cause", () => {
+  const copy = hooks.friendly({ error: "installation_not_found" }, "Please try again.");
+  assert.notEqual(copy, "Please try again.",
+    "installation_not_found must be READ — its census row was deleted on the strength of this reader");
+  assert.equal(copy,
+    "Barkpark can't see that GitHub installation any more — it was removed, or the link was used after the fact. " +
+    "Install the Barkpark app on GitHub again, then come back.");
+  // Permanent until the app is installed again: no transience verb may appear.
+  for (const verb of [/try again in/i, /shortly/i, /in a moment/i, /retry/i, /wait/i, /temporar/i]) {
+    assert.ok(!verb.test(copy), "installation_not_found paints a permanent state as transient: " + verb);
+  }
+  // The plane validated the id; GitHub did not "refuse" anything (the D878 lie class).
+  assert.ok(!/GitHub (refused|rejected|said|declined)/i.test(copy),
+    "installation_not_found must not attribute the plane's own validation to GitHub: " + copy);
+  // It names the one act that changes the state.
+  assert.ok(/Install the Barkpark app on GitHub again/.test(copy), "the sentence must carry the remedy");
+});
+
+test("cch-w73-bl c1+c5 THE ROUND TRIP: an install redirect POSTs the id and the card repaints CONNECTED", async () => {
+  // Driven against cch-w47-s6's github fixture on `providers-connected`, through
+  // the REAL scenario route() — and it PRODUCES the connected state rather than
+  // starting in it: the leg opens on a DISCONNECTED plane (the corpus' own
+  // stateful DELETE arm puts it there, exactly as a person who had disconnected
+  // would be), so a card that ends up connected can only have got there through
+  // this POST.
+  const { h, nodes, calls, box } = await w73Realm(null, "?installation_id=41234567&setup_action=install");
+  h.disconnectGithub();
+  await w49s6Settle();
+  assert.ok(nodes["#github-card"].innerHTML.includes("Connect GitHub"),
+    "PRECONDITION: the card must start NOT connected — rendered: " +
+      JSON.stringify(nodes["#github-card"].innerHTML.slice(0, 240)));
+  assert.equal(calls.filter((c) => c.path === "/v1/github/installations").length, 0,
+    "PRECONDITION: nothing has been recorded yet");
+
+  assert.equal(h.handleGithubInstallReturn(), true, "the leg must claim the boot");
+  await w49s6Settle();
+
+  const posts = calls.filter((c) => c.method === "POST" && c.path === "/v1/github/installations");
+  assert.equal(posts.length, 1,
+    "EXACTLY one POST /v1/github/installations must reach the wire; got " + posts.length +
+      " (paths seen: " + calls.map((c) => c.method + " " + c.path).join(", ") + ")");
+  assert.deepEqual(posts[0].body, { installation_id: "41234567" },
+    "the id GitHub sent must be the id the plane is asked to record");
+
+  const card = nodes["#github-card"].innerHTML;
+  assert.ok(card.includes("acme-engineering"), "the card must name the account the fixture connected: " + JSON.stringify(card.slice(0, 300)));
+  assert.ok(card.includes("Connected"), "…and read CONNECTED, which is the whole return leg");
+  assert.ok(!card.includes("Connect GitHub"), "…and stop offering the install it just completed");
+  const toasts = w73Toasts(nodes);
+  assert.ok(toasts.includes("GitHub connected"), "the person is told, in words: " + JSON.stringify(toasts));
+  assert.ok(!/can&#39;t confirm|can't confirm/.test(toasts), "…and is NOT told we could not confirm");
+  // The site screen's one-shot readiness band learned the deployment fact for free.
+  assert.equal(h.githubReadinessState(), "ready", "a 201 proves the deployment IS configured");
+  assert.equal(box.location.search, "?installation_id=41234567&setup_action=install",
+    "…and with no history object the scrub degraded to a no-op rather than throwing");
+});
+
+test("cch-w73-bl c4 HONEST ABSENCE: setup_action=request records nothing and says the console cannot confirm", async () => {
+  // GitHub's org-approval shape: a member asked, an owner has not approved, and
+  // there IS no installation_id. The console must not POST, must not claim a
+  // connection, and must say plainly that it cannot confirm the install.
+  const { h, nodes, calls } = await w73Realm(null, "?setup_action=request");
+  assert.equal(h.handleGithubInstallReturn(), true, "the leg still claims the boot — it has something to say");
+  await w49s6Settle();
+  assert.equal(calls.filter((c) => c.path === "/v1/github/installations").length, 0,
+    "a redirect with no installation_id must issue NO write");
+  const toasts = w73Toasts(nodes);
+  assert.ok(/can&#39;t confirm the install/.test(toasts),
+    "the console must say plainly that IT cannot confirm: " + JSON.stringify(toasts));
+  assert.ok(!/GitHub connected/.test(toasts), "…and must claim no connection");
+  // BOTH "Connect GitHub" CTAs — githubCardHtml's on Providers and
+  // newGithubHtml's on the /new ready panel — are links to the SAME App install
+  // URL and return through this ONE leg, so this one sentence covers both. That
+  // shared return path is asserted, not assumed:
+  const installUrl = "https://github.com/apps/barkpark-cloud/installations/new";
+  const gh = { configured: true, install_url: installUrl, connected: false };
+  assert.ok(hooks.githubCardHtml(gh, true).includes('href="' + installUrl + '"'),
+    "CTA 1 (Providers card) must point at the App install URL");
+  assert.ok(hooks.newGithubHtml({ deployable: true, slug: "blog", name: "Blog" }, gh).includes('href="' + installUrl + '"'),
+    "CTA 2 (/new ready panel) must point at the SAME URL — one return leg serves both");
+});
+
+test("cch-w73-bl c4 HONEST ABSENCE: a REFUSED record claims nothing, and a 2xx with a junk body claims nothing either", () => {
+  const o = hooks.githubInstallOutcome;
+  // The 422 the leg made reachable renders its curated sentence.
+  const nf = o({ ok: false, status: 422, data: { error: "installation_not_found" } });
+  assert.equal(nf.kind, "error");
+  assert.equal(nf.title, "Couldn't confirm the GitHub install");
+  assert.ok(/can't see that GitHub installation/.test(nf.body), "the curated reader must win: " + nf.body);
+  // A refusal with no curated copy falls to the ONE shared honest sentence.
+  for (const r of [
+    { ok: false, status: 403, data: { error: "forbidden" } },
+    { ok: false, status: 503, data: { error: "feature_not_configured" } },
+    { ok: false, status: 0, data: null },
+    null,
+  ]) {
+    const t = o(r);
+    assert.equal(t.kind, "error", "a refusal is never a success toast");
+    assert.ok(!/connected/i.test(t.title), "…and never titled as connected: " + t.title);
+  }
+  assert.ok(/can't confirm the install/.test(o({ ok: false, status: 0, data: null }).body),
+    "a transport fault says plainly that the console cannot confirm");
+  // FAIL-CLOSED ON SHAPE: only a body carrying installation.connected === true
+  // may claim a connection — a 2xx with anything else proves nothing.
+  for (const data of [{}, { installation: {} }, { installation: { connected: "true" } },
+                      { installation: { connected: false } }, { connected: true }, null]) {
+    assert.equal(o({ ok: true, status: 201, data: data }).kind, "error",
+      "a 2xx whose body does not prove a connection must not claim one: " + JSON.stringify(data));
+  }
+  const good = o({ ok: true, status: 201, data: { installation: { connected: true, account_login: "acme-engineering" } } });
+  assert.deepEqual(w73Plain(good), { kind: "success", title: "GitHub connected", body: "Barkpark recorded the app install for acme-engineering." });
+});
+
+test("cch-w73-bl c6 CONTROL: removing the recording path reds this guard BY NAME", async () => {
+  // The mutation IS the row's "a guard reds when the recording path is removed":
+  // the one api() call that carries the installation back to the plane is turned
+  // into a no-op that keeps every other rung — the parse, the scrub, the toast,
+  // the repaint — intact. A guard that only watched the toast would stay green.
+  const anchor = 'return api("POST", "/v1/github/installations", { installation_id: id }).then(function (r) {';
+  assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur EXACTLY once");
+  const mutant = APP_SRC.replace(anchor,
+    'return Promise.resolve({ ok: true, status: 201, data: {} }).then(function (r) {');
+  assert.notEqual(mutant, APP_SRC, "the mutation must have APPLIED");
+
+  const { h, nodes, calls } = await w73Realm(mutant, "?installation_id=41234567&setup_action=install");
+  h.disconnectGithub();
+  await w49s6Settle();
+  h.handleGithubInstallReturn();
+  await w49s6Settle();
+
+  assert.equal(calls.filter((c) => c.path === "/v1/github/installations").length, 0,
+    "the mutant records NOTHING — which is precisely the pre-wave state this task was filed on");
+  assert.ok(!nodes["#github-card"].innerHTML.includes("Connected"),
+    "…so the card is STILL not connected after a completed install: the defect, reproduced");
+  assert.ok(nodes["#github-card"].innerHTML.includes("Connect GitHub"),
+    "…and still offers the install the person just finished");
+  // And the mutant is caught by the shipped assertions, not only by this control:
+  // the round-trip test above asserts exactly one POST and a CONNECTED card, and
+  // both of those are false here.
+  assert.ok(!/GitHub connected/.test(w73Toasts(nodes)),
+    "the mutant cannot even claim success — githubInstallOutcome fails closed on the empty body");
 });
