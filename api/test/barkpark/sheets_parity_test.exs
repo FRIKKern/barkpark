@@ -696,6 +696,59 @@ defmodule Barkpark.SheetsParityTest do
   # so the mirror cannot drift from EITHER side without a required context going
   # red. Two exact files, not globs — the whole tree would be far more CI than
   # this buys.
+  #
+  # ── CONTEXTS CONSIDERED, AND WHY EACH WAS TAKEN OR REJECTED ─────────────────
+  #
+  # Written down so nobody re-proposes the fix that deadlocks the branch. Every
+  # candidate that could have carried this lock, with its verdict (recorded
+  # 2026-09-13, task-cdf478b93c8fb455):
+  #
+  #   * `Elixir gate` — TAKEN. Required in .github/required-checks.json, and
+  #     elixir.yml carries NO workflow-level `on: … paths:` key (its own header
+  #     forbids one), so it renders on EVERY PR. `mix test` runs this file, so
+  #     the lock above is red on a context that can block. PROVEN, not asserted:
+  #     a scratch branch that added a ninth engine code and regenerated the
+  #     fixture, walk.ex, cells.ex, the mobile mirror and web/lib/sheets.ts —
+  #     everything #15374 touched — while leaving sheet.ts alone reddened the
+  #     Elixir gate with exactly this one failure.
+  #
+  #   * `Build + test + gates` (js-tests.yml) — REJECTED, and this is the
+  #     deadlocking fix. js-tests.yml carries a workflow-level
+  #     `on: pull_request: paths:` filter, so on a PR that touches none of those
+  #     paths the workflow emits NO check run at all, and a required context
+  #     that never reports sits at "expected" forever — past even
+  #     `gh pr merge --admin` (D18). This is precisely the S4 class
+  #     required-checks.json already holds three names out for (Break-glass
+  #     watch, Doc budgets + anchors, gofmt drift ceiling). Requiring it would
+  #     deadlock every docs-only and api-only PR.
+  #
+  #   * `Changeset present (PRs only)` (js-tests.yml) — REJECTED. Same workflow,
+  #     therefore the same paths filter and the same deadlock; and it asserts a
+  #     changeset file exists, never the vocabulary.
+  #
+  #   * A new `js-gate` aggregator — CONSIDERED, NOT BUILT HERE. The structural
+  #     prize: strip the workflow-level paths, add an always-running changes
+  #     dispatcher plus job-level `if:`, and have an aggregator ASSERT on EVERY
+  #     upstream result (`if: always()` buys the right to decide, it does not
+  #     decide; skipped counts as passing), so js-gate is REPORTED — not
+  #     skipped, not absent — on an api/-only PR. It makes ALL js reds blocking,
+  #     not just this one. It is not needed to close THIS drift: #15374 touched
+  #     api/, so the Elixir gate already ran on it. If that aggregator is ever
+  #     built, register `js-gate` — never `Build + test + gates` as it stands.
+  #
+  #   * Putting an `on: … paths:` filter on elixir.yml so this test only runs on
+  #     sheet touches — REJECTED for the same D18 reason, and elixir.yml's
+  #     header states the rule verbatim: it must never gain a workflow-level
+  #     paths key.
+  #
+  #   * `Cloud gate` / `Console gate` — REJECTED: wrong venue. Neither runs
+  #     `mix test` over api/test nor reads js/.
+  #
+  #   * `PR references an active task` — REJECTED: it validates the PR body's
+  #     `Task:` trailer and carries no test of any kind.
+  #
+  # .github/required-checks.json is therefore UNCHANGED by this remedy — no new
+  # rendered context name, and the required set stays exactly four.
   test "the @barkpark/react ERROR_VALUES mirror equals Engine.error_values/0" do
     codes =
       Path.expand("../../../js/packages/react/src/blocks/sheet.ts", __DIR__)

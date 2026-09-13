@@ -26,7 +26,22 @@ Shape: `you (1) → leads (6, fable) → workers (≤5 each, opus)`. Never Haiku
 3. **Snapshot the backlog.** `node .claude/skills/orchestrate-tasks/helpers/backlog-snapshot.mjs`
    writes `ready.json` into `$ORCH` and prints: counts by priority, the biggest parents,
    and the P0/P1 leaves. `$ORCH` is `<scratchpad>/orchestrate`; export it.
-4. **Carve six lanes by FILE TREE, not by epic.** A lane is a set of paths plus the
+4. **Measure the disk before you dispatch anything.**
+   `bash scripts/scratchpad-reaper.sh --floor 25 "$ORCH"`. Exit 0 dispatches; exit 2 is a
+   REFUSAL naming the floor and the measured free space; exit 3 means it could not measure,
+   which is also not a green. Do NOT start a campaign on a refusal — reclaim first (§4 step 3, the reaper), then re-run the check and quote both lines.
+
+   This is not hygiene, it is gate honesty. Measured 2026-08-10: a wave host hit
+   `ENOSPC: no space left on device` and every Bash call died opening its OWN output file —
+   a bare `true` failed. The digest phase ran ZERO commands, three surveyors lost their
+   scans. Every gate on that host failed at once with output INDISTINGUISHABLE from a real
+   defect, and the wave spent its round debugging code that was fine.
+   **The remedy briefed during that incident, `rm -rf /private/tmp/claude-501/*/tasks/*.output`,
+   is a PROVED NO-OP** (measured: 0 files matched, `rm` rc=1, free unchanged at 117Mi). Those
+   files are the fault's victim — at zero bytes free the harness cannot create one. Never
+   brief it again.
+
+5. **Carve six lanes by FILE TREE, not by epic.** A lane is a set of paths plus the
    epics/leaves that live there. Lanes must be fence-disjoint so no two leads edit the
    same file. Registry files that everyone touches (`api/lib/barkpark_web/router.ex`,
    `api/priv/static/openapi*.json`, `api/.sobelow-*`, `CHANGELOG*`) belong to no lane:
@@ -106,6 +121,26 @@ held). Install the UNAVOIDABLE one: copy `helpers/mix-slot-wrapper.sh` to `~/.lo
 `helpers/go-slot-wrapper.sh` to `~/.local/bin/go` (that dir precedes Homebrew on PATH; every new
 shell picks them up), 3 slots each, `BP_NO_SLOT=1` bypasses, delete the files to disable. Tell the
 owner: their own `mix test` waits for a slot too while the campaign runs.
+
+**Disk is the OTHER ceiling, and it lies louder than CPU.** A loaded box gets slower; a full
+box makes every gate red at once and nothing in the output says "disk". So: re-run
+`bash scripts/scratchpad-reaper.sh --floor 25 "$ORCH"` at the top of every round, before you
+dispatch that round's workers, and treat exit 2 the way you treat main-red — hold the fleet, do
+not dispatch. At the END of each round, reclaim what the round accrued:
+
+```
+bash scripts/scratchpad-reaper.sh --dry-run --root "$ORCH/tmp" --repo <repo>     # read it
+bash scripts/scratchpad-reaper.sh --reap --yes-delete --root "$ORCH/tmp" --repo <repo>
+```
+
+The reaper skips every REGISTERED git worktree unconditionally and refuses any other checkout
+that holds an unpushed commit, an untracked file, a stash, or no remote at all — 17 registered
+worktrees were live in the scratch tree during that incident and a single `rm -rf` would have
+stranded a lane's build. It sizes every reclaim with `df` before/after and never with `du`:
+measured that day, deleting 36 session directories `du` valued at ~33 GB freed UNDER 0.5 GB,
+because APFS clones share blocks. A refill rate of ~11 GB/day per project scratchpad is the
+baseline this exists to cap; on 2026-09-13 a SINGLE session scratchpad on this box held
+7,397,328 entries and grew by 8,983 in five and a half minutes.
 
 ## 2c. When main goes red — one owner, one fix, then update-branch
 
@@ -204,7 +239,13 @@ campaign is judged on those as much as on closes.
 1. Collect the six reports. Tally in ONE table: tasks closed, PRs merged, PRs open,
    system improvements, blocked-on-user.
 2. `bp session log` the tally if a session is open; push every branch; nothing stays local.
-3. Final message: the table, the blocked-on-user questions (2 options each, your pick),
+3. **Reap the campaign's scratch, AFTER every branch is pushed.** Pushing first is what makes
+   the reclaim safe to widen: `--reap` refuses a checkout with unpushed commits, so an unpushed
+   branch turns into a SKIP-UNPUSHED line and a tree that never shrinks.
+   `bash scripts/scratchpad-reaper.sh --dry-run --root "$ORCH" --repo <repo>`, READ the
+   classification, then re-run with `--reap --yes-delete`. Quote the `DF-BEFORE-ROOT` /
+   `REAPED … freed_kb=` lines in the final report. Never quote a `du` figure.
+4. Final message: the table, the blocked-on-user questions (2 options each, your pick),
    and where each open PR sits. Nothing else.
 
 ## Rules that are not optional

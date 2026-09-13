@@ -314,6 +314,54 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/shim-trigger-filter-check.sh
 
+      # ── dispatch-filter-staleness-check ───────────────────────────────────────
+      # THE TWIN OF THE RATCHET ABOVE, one step later in the same story. That one
+      # refuses a paths filter where a name must always render. This one refuses
+      # the case where a legitimate paths filter WIDENED after a PR's head was
+      # pushed: GitHub re-evaluates `paths:` only when an event FIRES, and moving
+      # main fires none. The widened job never runs on that head, emits no check
+      # run, and the ABSENCE is byte-identical to a pass.
+      #
+      # MEASURED (task-9419f71d6aafe299): #17939 added
+      # `.claude/workflows/bp-pds-charter.md` to shell-harnesses.yml's filter at
+      # 2026-09-12T10:54:49Z. #17933's head b1b11381a was committed at 10:43:28Z,
+      # eleven minutes earlier, touched that exact file, and merged at 12:26:55Z
+      # with `Shell harnesses` never having run on it — 23 runs on that sha, none
+      # of them that one. The job then failed on the push to main and main carried
+      # the red. A 30-day census puts the population at 9 of 3036 merged PRs, so
+      # this is rare and it is not theoretical.
+      #
+      # THE REMEDY IS A REBASE, NEVER A NEW REQUIRED CONTEXT. A path-filtered
+      # workflow emits no check run on a non-matching head, so its name can never
+      # be required without deadlocking every unrelated PR (the paragraph above,
+      # and honest-gates D18). This step therefore rides this advisory job — which
+      # already runs on EVERY pull request, unfiltered — and blocks nothing. The
+      # required set is untouched: Cloud gate, Console gate, Elixir gate, PR
+      # references an active task.
+      #
+      # Selftest first, same discipline as the three above and for the same
+      # reason: the expected verdict is "clean" on almost every PR forever, which
+      # is exactly when a broken scanner and a clean tree print the same green.
+      # The matrix is 14 arms including three MUTATIONS of this very file, so a
+      # green here means the comparison and both vacuity guards are load-bearing.
+      - name: Prove the dispatch-staleness detector can fail (--selftest, 14 arms)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/dispatch-filter-staleness-check.sh --selftest
+
+      # `origin/main` is fetched explicitly: the checkout above is the MERGE ref,
+      # and the merge ref is not the branch. The head sha comes from the event,
+      # never from `git rev-parse HEAD` — that would name the merge commit, whose
+      # tree already contains main's newest filters and would make every PR look
+      # clean. That substitution is the one way this step goes vacuous.
+      - name: No workflow path filter widened onto this head after it was pushed
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && github.event_name == 'pull_request' }}
+        run: |
+          set -euo pipefail
+          git fetch -q --no-tags origin main
+          bash scripts/dispatch-filter-staleness-check.sh \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --tip origin/main
+
       # The PR-path CI inventory's own derivations — required/feeds-required,
       # the venue rule, and the real-compute accounting that refuses to count a
       # run which never executed a step. OFFLINE and ~1 s: --selftest touches
