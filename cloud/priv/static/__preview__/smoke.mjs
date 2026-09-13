@@ -4380,6 +4380,25 @@ const EXPECTATIONS = {
         "…and it must never answer a successful disconnect with a claim about the DEPLOYMENT's configuration");
       assert.ok((reg.get("toast-stack") || {}).innerHTML.includes("GitHub disconnected"),
         "the disconnect must report itself");
+
+      // ── cch-r17-w12 — THE OWNER TWIN of the credential sheet's fence ────────
+      // The paired positive control for providers-member's refusal leg. Without
+      // it that assertion is satisfiable by a sheet that renders no submit for
+      // ANYBODY — an absence proves a fence only when the same gesture, on the
+      // same code path, produces the control for a principal the server would
+      // accept. Byte for byte: the GRANT arm must keep the class list this
+      // button shipped with (`btn btn-primary btn-block`, the "wizard-block"
+      // emphasis) so routing it through adminWriteControlHtml changed the
+      // AUTHORITY and nothing an operator can see.
+      assert.equal(hooks.providerWriteAuthority(), "grant",
+        "this scenario's own /v1/me must be a determinate grant, or the twin proves nothing");
+      hooks.openProviderCredential("hetzner");
+      await ctx.settle();
+      const ownerSheet = (reg.get("modal-body") || {}).innerHTML || "";
+      assert.ok(ownerSheet.includes('<div class="modal-actions"><button class="btn btn-primary btn-block" type="button" id="cred-submit">Add provider</button></div>'),
+        "the owner gets the live submit, byte for byte the class list it shipped with; got: " + ownerSheet.slice(-260));
+      assert.ok(!ownerSheet.includes("inst-life-disabled"),
+        "nothing in an owner's credential sheet is disabled-and-explained");
     },
   },
   "providers-empty": {
@@ -4413,8 +4432,8 @@ const EXPECTATIONS = {
     },
   },
   "providers-member": {
-    what: "a plain member sees a read-only roster + matrix with ZERO write affordances",
-    check(reg) {
+    what: "a plain member sees a read-only roster + matrix with ZERO write affordances — AND the credential SHEET refuses them too: openProviderCredential paints the disabled-and-explained arm with no #cred-submit at all",
+    async check(reg, hooks, ctx) {
       const roster = (reg.get("provider-roster") || {}).innerHTML || "";
       assert.ok(roster.includes("prov-row"), "the member still sees the roster (GET is member-readable)");
       assert.ok(!roster.includes("data-prov-disconnect"), "a member roster has NO Disconnect affordance");
@@ -4435,6 +4454,40 @@ const EXPECTATIONS = {
       assert.ok(gh.includes("Connected"), "the connected arm renders at all (arm 1 of renderGithub)");
       assert.ok(!gh.includes("Loading GitHub"), "an ANSWERED /v1/github/installation is not a loading state");
       assert.ok(!gh.includes("aren&#39;t configured"), "the fixture answers connected — the not-configured arm must NOT be what renders");
+
+      // ── cch-r17-w12 — THE CREDENTIAL SHEET'S OWN FENCE, MEASURED ───────────
+      // submitProviderCred (POST /v1/providers, Auth.require_team_admin) was the
+      // FOURTH unpredicated elevated write on __binding_census.mjs's list: the
+      // sheet drew "Add provider" for anyone who reached it and read no
+      // authority of its own. The census's note is explicit that the launch
+      // wizard's own fence does not count — it belongs to the LAUNCH band and
+      // guards POST /v1/launch, three hops away. So this asserts THIS row's
+      // predicate, on THIS row's band.
+      //
+      // WHY THE SHEET IS OPENED BY HAND AND THAT IS STILL A MEASUREMENT. The
+      // sheet's only forward door is `.launch-connect-provider`, which lives
+      // inside the launch wizard, which launchFlow withholds from a member
+      // entirely — so no member fixture can reach it by clicking, and minting
+      // one that could would be fiction (the same reason
+      // member-authority-sweep.mjs declares #new-vercel-claim a BLIND SPOT
+      // rather than faking its envelope). What is hand-supplied here is only the
+      // OPENING gesture, exactly as the account and token modals are opened in
+      // this file. The BAND is not supplied: it is read by the app out of THIS
+      // fixture's own /v1/me, which is pinned first below — a member sentence
+      // asserted against an unconfirmed role is the cch-w36-s3 false green.
+      assert.equal(hooks.meState(), "loaded",
+        "the refusal may only be asserted against a CONFIRMED /v1/me — an owner whose read FAILED renders the unknown arm, which also has no #cred-submit and would pass this by accident");
+      assert.equal(hooks.meFlags().role, "member", "and the confirmed answer must actually say member; got " + JSON.stringify(hooks.meFlags()));
+      assert.equal(hooks.providerWriteAuthority(), "refuse",
+        "the provider band's write authority, narrowed for adminWriteControlHtml, is a DETERMINATE refusal here — not the unknown arm");
+      hooks.openProviderCredential("hetzner");
+      await ctx.settle();
+      const sheet = (reg.get("modal-body") || {}).innerHTML || "";
+      assert.ok(sheet.includes("Add provider"), "the member still reaches the sheet — the fence withholds the WRITE, never the screen");
+      assert.equal(countMatches(sheet, 'id="cred-submit"'), 0,
+        "adminWriteControlHtml's refusal arm DROPS liveAttrs: there must be no mount hook at all, so the wiring below it binds nothing");
+      assert.ok(sheet.includes('<div class="modal-actions"><div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Add provider</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div></div>'),
+        "the same verb is drawn disabled-and-explained, with its own inline reason (this sheet is a group of one and keeps the title+reason pair)");
     },
   },
   // ── G-04 notifications (the crown): the settings-anatomy page ───────────────
