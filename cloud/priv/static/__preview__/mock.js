@@ -117,7 +117,8 @@
   //     changed: the DELETE splice is guarded by `if (state)`, so the row
   //     vanished from the optimistic re-render and REAPPEARED on the refetch
   //     app.js fires right after the success toast. smoke.mjs already passes a
-  //     bag (smoke.mjs:317); this is the browser twin, so both harnesses now
+  //     bag (the `fixtureState` literal — grep -n 'const fixtureState' smoke.mjs);
+  //     this is the browser twin, so both harnesses now
   //     answer the same destructive routes the same way. Per page load is the
   //     correct lifetime — a reload is a fresh fixture, a refetch is not.
   var fixtureState = {};

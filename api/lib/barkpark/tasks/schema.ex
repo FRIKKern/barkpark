@@ -693,6 +693,49 @@ defmodule Barkpark.Tasks.Schema do
             "One command an auditor can run to try to prove the disposition reason WRONG (PDS wave 28). OPTIONAL -- an absent rerun is an honest \"this cannot be checked\". Screened by Stage: no `git -C`, no `$( )`, no `test`/`[` predicate, no output-formatting tail that would mask the probe's exit code."
         },
 
+        # ── THE FIFTH DURABLE KEY: THE ADJUDICATION OWNER ──────────────────
+        # (api half of pds-bl-disposition-owner-role-registry)
+        #
+        # Declared here for exactly the reason the four above were: it
+        # PERSISTS on live PDS rows and it was INVISIBLE — `task_schema/1`
+        # returned no `disposition_owner`, while a create carrying
+        # `content.disposition_owner` read it straight back off the row.
+        #
+        # NAME READ, NOT RETYPED: `Stage.disposition_owner_key/0` is the one
+        # place the string is written, and `options` IS
+        # `Stage.durable_owner_roles/0` — the SAME list
+        # `Mutations.ensure_disposition_owner_registered/4` screens a write
+        # against, read from `tooling/pds/disposition-owner-registry.json`
+        # (PR #17836) at compile time. There is no hand-copied mirror to
+        # unlock, for the same reason `disposition` reads
+        # `Stage.dispositions/0`. `schema_adjudication_triple_test.exs`
+        # decodes both sides and reds if this declaration is removed or the
+        # key diverges; `disposition_owner_registry_lock_test.exs` reds if the
+        # role list diverges from the JSON in EITHER direction.
+        #
+        # `options` IS EMPTY WHEN THE REGISTRY IS ABSENT, and that is the
+        # honest reading of a fail-closed build: no owner is legal, so no
+        # owner is offered. It is not a hand-written placeholder.
+        #
+        # GROUP `work`, same as the rest of the adjudication family — a parked
+        # row is not terminal, so the `close` group would hide the owner on
+        # precisely the rows that carry one.
+        #
+        # UNLIKE THE FOUR ABOVE, THIS DECLARATION HAS A FENCE BEHIND IT. The
+        # raw mutate door refuses a WRITE of an owner that is not a durable
+        # role of the registry — but the fence is on the WRITE, not the row:
+        # the ~22 live rows carrying an unregistered owner still read, and
+        # still patch every other field.
+        %{
+          "name" => Stage.disposition_owner_key(),
+          "title" => "Disposition owner",
+          "type" => "select",
+          "options" => Stage.durable_owner_roles(),
+          "group" => "work",
+          "description" =>
+            "WHO is accountable for the adjudication — a durable role slug from tooling/pds/disposition-owner-registry.json, never a person and never a wave. The mutate door refuses an owner that is not a `durable-role` of that registry, refuses the expiring `wave-N` shape (it self-clears at wave close and nothing would reassign it) and refuses a ledger task id in the owner slot. Adding a role is pds-owner-onboarding-owner's call."
+        },
+
         # Fleet handoff memory. Append-only by convention via the generic
         # mutate path. NOT named `history` — the compactor owns that key
         # and tail-replaces it; worklog must never collide.

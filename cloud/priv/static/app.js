@@ -419,13 +419,28 @@
   // Returns a sentence ONLY when the 403 carried evidence; otherwise null, so
   // every caller falls through to exactly what it renders today. Deliberately
   // NOT composed from two other keys the payload also carries:
-  //   • `scope` is NEVER interpolated. It is evidence for a log, not copy.
-  //     require_current_team_admin reads conn.assigns[:current_team], which
-  //     resolve_team fills from the x-barkpark-team header — so the label used
-  //     to say "primary_team" even when a SECOND team refused an owner of their
-  //     primary team. cch-w37-s3 renamed it to `scope: "team"`, which is what
-  //     the gate actually consulted; "this team" is what the sentence says
+  //   • `scope` is NEVER INTERPOLATED — but cch-w48-bl CORRECTS the half of this
+  //     bullet that said it is "evidence for a log, not copy", a claim that only
+  //     ever covered the TEAM scopes. The original reasoning still stands for
+  //     those: require_current_team_admin reads conn.assigns[:current_team],
+  //     which resolve_team fills from the x-barkpark-team header — so the label
+  //     used to say "primary_team" even when a SECOND team refused an owner of
+  //     their primary team. cch-w37-s3 renamed it to `scope: "team"`, which is
+  //     what the gate actually consulted; "this team" is what the sentence says
   //     either way, and it stays true under the team switcher.
+  //
+  //     Auth.require_ability/2 sends a FOURTH value the bullet never covered:
+  //     `scope: "token"`, with `required` set to a PAT ABILITY (read/write/
+  //     deploy/root), not a team role. On that payload the role sentence below
+  //     is false TWICE — the ability does not live "on this team", and NO admin
+  //     can grant it: there is no PATCH over a token's abilities anywhere in the
+  //     router, they are fixed by POST /v1/tokens at mint. So `scope` is READ —
+  //     it BRANCHES, it is still never interpolated into a sentence — and the
+  //     token arm below states the ability, deletes the fabricated remedy, and
+  //     names the one mechanism that is true (mint-time). MEASURED on the launch
+  //     path: POST /v1/launch's PAT branch is `Auth.require_ability(conn,
+  //     "deploy")` (router.ex go_live/1), so `{error:"forbidden", scope:"token",
+  //     required:"deploy"}` is a shape this function really receives.
   //   • `reason` is a SLUG ("no_team"). It is MAPPED through a written arm,
   //     never echoed — echoing it renders the literal string "no team" at a
   //     human.
@@ -435,6 +450,15 @@
     if (typeof reason === "string" && FORBIDDEN_REASON_COPY[reason]) return FORBIDDEN_REASON_COPY[reason];
     var required = data.required;
     if (typeof required !== "string" || !required) return null;
+    // THE SCOPE BRANCH COMES FIRST, ahead of every team-role rung: `required`
+    // alone cannot tell a team role from a token ability, and both maps below
+    // (plus the generic tail) end in "on this team". A token refusal that fell
+    // through to them would read as a role an admin could grant.
+    if (data.scope === "token") {
+      if (!FORBIDDEN_LABEL_RE.test(required)) return null;
+      return 'That access token doesn\'t carry the "' + required.replace(/_/g, " ") +
+        '" ability. No team role grants it — a token\'s abilities are fixed when it is created.';
+    }
     if (FORBIDDEN_ROLE_COPY[required]) return FORBIDDEN_ROLE_COPY[required];
     if (!FORBIDDEN_LABEL_RE.test(required)) return null;
     return 'You need the "' + required.replace(/_/g, " ") +
@@ -2276,10 +2300,29 @@
   // control plane actually did. The (state, reason) manifest —
   // cloud/test/barkpark_cloud/lifecycle_state_manifest_test.exs — reds if this
   // label starts claiming a halt again.
+  //
+  // cch-w54-bl (D-r12-w54) — THE MAP DECLARES EXACTLY WHAT THE FOLD CAN RETURN.
+  // It used to declare seven, of which `archived` and `adopted` were labels no
+  // input could reach: `lifecyclePillState` folds `instanceLifecycle(bp)`, whose
+  // whole vocabulary is removing / removeFailed / failed / provisioning /
+  // suspended / live, derived from four row fields (deprovision_status, host,
+  // provision_status, suspended). There is no `lifecycle_state` column and
+  // `barkpark_json/5` serializes no archived/adopted fact, so no producer exists
+  // to feed either word. DECISION: DELETE, not make-reachable — adding a state
+  // with no producer would be exactly the "label-map domain mistaken for the
+  // fold's range" error this rail already pays a guard to prevent. ("Archived"
+  // as a word survives elsewhere and means something else: GET /v1/archives and
+  // ArchiveStore list a team's torn-down instance BUNDLES, which is an object,
+  // not a state a live box wears.) The set-equality guard in __app.test.mjs
+  // ("cch-w54-bl: LIFECYCLE_PILL_LABEL's domain equals lifecyclePillState's
+  // range") DERIVES the range by driving one fixture per fold branch, so it reds
+  // in both directions: a re-added dead label, and a returned state with no
+  // label. `INSTANCE_LIFECYCLE` (the CSS-class vocabulary above) deliberately
+  // keeps all seven tokens — it is the S4 token/hue register and the styleguide
+  // paints all seven — so this delete is scoped to the LABELS.
   var LIFECYCLE_PILL_LABEL = {
     provisioning: "Provisioning", live: "Live", degraded: "Degraded",
-    stopped: "Suspended", archived: "Archived", decommissioned: "Decommissioning",
-    adopted: "Adopted",
+    stopped: "Suspended", decommissioned: "Decommissioning",
   };
 
   // Map the client-derived instance state (instanceLifecycle booleans, the same
@@ -3320,7 +3363,7 @@
   //
   // So the BOX's top is what is scrolled to, not the button's. `block:"start"`
   // aligns it to the start edge of every scroll ancestor; on the page path the
-  // sticky `.topbar` (56px, app.css:794) then covers that edge, so the occluded
+  // sticky `.topbar` (56px; grep -n '^\.topbar [{]' app.css) then covers that edge, so the occluded
   // strip is given back with one `scrollBy`. Inside the dialog nothing overlays
   // it and no compensation is applied. #cred-submit stays reachable for free:
   // it renders BELOW the box, so a viewport that holds the box's top holds the
@@ -23497,7 +23540,24 @@
       // The evidenced arm still names exactly what the server asked for; the
       // bare arm delegates to friendly(), which already owns the honest generic
       // for an unevidenced refusal (D447: no role claimed, no remedy invented).
-      var role = data && typeof data.required === "string" && data.required ? data.required : null;
+      // cch-w48-bl — SCOPE DECIDES, NOT `required` ALONE. This was the SECOND
+      // emitter of the same lie, and its sentence was the louder one: fed
+      // `{error:"forbidden", scope:"token", required:"deploy"}` — the exact body
+      // POST /v1/launch's PAT branch sends (router.ex go_live/1 ->
+      // Auth.require_ability(conn, "deploy")) — launchRoleClause interpolated
+      // `deploy` into BOTH of its role slots, telling the person to ask a team
+      // "deploy" to grant them the "deploy" role. `deploy` is a PAT ABILITY:
+      // there is no such team member to ask and no admin who can grant it. The
+      // clause itself is NOT quoted here — cch-w47-s1 counts its literal in this
+      // file and requires exactly one, in launchRoleClause.
+      //
+      // The token arm DELEGATES to friendly(), exactly like the bare arm (D537),
+      // rather than growing a second copy of the ability vocabulary here: the
+      // sentence has ONE owner, forbiddenEvidenceCopy's token branch. The
+      // team/primary_team and platform arms are untouched — they still name the
+      // role through launchRoleClause, and their pins assert that verbatim.
+      var scoped = data && data.scope === "token";
+      var role = !scoped && data && typeof data.required === "string" && data.required ? data.required : null;
       return {
         title: LAUNCH_REFUSAL_TITLE,
         body: role ? launchRoleClause(role) : friendly(data, "We couldn't launch for this team."),
@@ -28440,8 +28500,11 @@
       // The DOM mount (wireLifecycleActions/runDecommission) is browser-verified.
       lifecyclePillState: lifecyclePillState, lifecyclePill: lifecyclePill,
       // cch-w54-s1 — the DECLARED label map, exported so the manifest dump can
-      // report the two labels no input can reach (archived / adopted). The
-      // painted set itself is always read by RUNNING the fold, never from here.
+      // compare the declared domain against the painted range. cch-w54-bl
+      // deleted the two labels no input could reach (archived / adopted), so
+      // the two sets are equal today; the export stays because the painted set
+      // must keep being read by RUNNING the fold, never from here, and because
+      // both guards (node set-equality, Elixir manifest) need the domain.
       LIFECYCLE_PILL_LABEL: LIFECYCLE_PILL_LABEL,
       fleetInfraLine: fleetInfraLine, showLifecycleRow: showLifecycleRow,
       lifecycleActionsModel: lifecycleActionsModel, lifecycleActionRowHtml: lifecycleActionRowHtml,

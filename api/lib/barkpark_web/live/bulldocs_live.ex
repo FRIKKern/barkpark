@@ -1111,7 +1111,11 @@ defmodule BarkparkWeb.BulldocsLive do
   #
   # Visibility note: this surfaces the paper's-tenant task data (titles /
   # statuses) to whoever can read the paper — the author opts in by embedding a
-  # query. Cross-tenant leakage is impossible (workspace fail-closed).
+  # query. Cross-tenant leakage is impossible (workspace fail-closed), and the
+  # PUBLISHED PERSPECTIVE is enforced: `reader_task_scope/1` carries
+  # `published_only: true`, exactly as `reader_resolvers/3` does for
+  # wikilinks/values/labels. This is the same D5 gate — the reader is the
+  # anonymous surface, so an unpublished (`drafts.`-only) task must not reach it.
   defp with_live_tasks(blocks, paper, dataset) when is_list(blocks) do
     Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, reader_task_scope(paper), dataset)
   end
@@ -1126,7 +1130,17 @@ defmodule BarkparkWeb.BulldocsLive do
           _ -> nil
         end
 
-    [workspace_id: ws_id, project_id: paper && paper.project_id]
+    # `published_only: true` is HARD-CODED, not an opt (the same shape
+    # `reader_resolvers/3` uses): every mount of this LiveView is a READER mount
+    # — /papers/:slug and the share/membership-gated scoped twin — and neither is
+    # an authoring surface. The authorised author's draft-visible view of the
+    # SAME blocks is Studio's `paper_stream_items/4`, which threads its own
+    # session scope WITHOUT this key and is deliberately untouched.
+    # Without it a draft-only task (`drafts.<id>`, no published twin — i.e. every
+    # `bp task create` row) rendered into a PUBLISHED paper's task block for an
+    # anonymous reader (task-b10e10b944f6f55b). `Tasks.Query.docs_for_query/2`
+    # consumes the key.
+    [workspace_id: ws_id, project_id: paper && paper.project_id, published_only: true]
   end
 
   @task_block_types ~w(tasks task-list task-board roadmap task-detail)

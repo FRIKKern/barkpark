@@ -46,6 +46,7 @@ defmodule Barkpark.Content.DedupPublishToctouTest do
   the RED arm is not a commit-message anecdote — it runs in CI beside the
   GREEN one.
   """
+  # sync: swaps node-global Application env (`:dedup_publish_scope_lock`) and spawns Repo writers needing the shared sandbox
   use ExUnit.Case, async: false
 
   alias Barkpark.Content

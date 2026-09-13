@@ -13,6 +13,7 @@ import {
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { DATASET } from "@/lib/config";
 import { SEARCH_FIELDS } from "@/lib/search-fields";
+import { MAX_HITS } from "@/lib/search-limits";
 
 /**
  * Shared upstream search — the one place that talks to the Barkpark search API.
@@ -57,9 +58,6 @@ const ORIGIN = new URL(API_URL).origin;
  * serves both engines.
  */
 const SEARCH_BASE = TOKEN ? `${ORIGIN}${SCOPE}` : ORIGIN;
-
-/** Cap the working set; the client facets + sorts + paginates over it. */
-const MAX_HITS = 100;
 
 /** The finder is a CONTENT browser: scope to known content types via the API's
  * `types` allowlist so both engines stay consistent and private config schemas
