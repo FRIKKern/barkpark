@@ -25556,6 +25556,110 @@ test("cch-w41-bl: both predicates fail CLOSED on BOTH not-a-role states, and sta
   hooks.clearMe();
 });
 
+// ── cch-r17-w12 — THE PROVIDER BAND'S WRITE NARROWING ──────────────────────
+// providerWriteAuthority() is what the credential sheet's submit is drawn
+// through (adminWriteControlHtml(…, "wizard-block")), and it is the FOURTH
+// unpredicated elevated write's fence. smoke.mjs measures the two arms the
+// corpus can reach — providers-member refuses, providers-connected offers, both
+// in the RENDERED BYTES with the band read from each fixture's own /v1/me. What
+// no scenario can reach is the THREE not-a-role states, and those are exactly
+// where a narrowing fails open if it is written as `=== "refuse" ? … : "grant"`.
+// So they are pinned here, where the band's source is drivable directly.
+test("cch-r17-w12: providerWriteAuthority narrows the provider band — owner grant, admin grant, member refuse", async () => {
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(hooks.providerWriteAuthority(), "grant", "an owner may connect a provider");
+  hooks.clearMe();
+  await driveMe(200, W41BL_ADMIN);
+  assert.equal(hooks.providerWriteAuthority(), "grant",
+    "ADMIN grant — the limb a role-literal regression drops first; POST /v1/providers is require_team_admin, i.e. owner|admin");
+  hooks.clearMe();
+  await driveMe(200, ME_TA_MEMBER);
+  assert.equal(hooks.providerWriteAuthority(), "refuse",
+    "a member gets a DETERMINATE refusal, never the unknown arm — the sheet may name the remedy");
+  hooks.clearMe();
+});
+
+test("cch-r17-w12: providerWriteAuthority FAILS CLOSED on all three not-a-role states, and the sheet paints no mount hook on any of them", async () => {
+  const REFUSE_TITLE = 'title="You need the admin role on this team';
+  // loading — /v1/me never asked.
+  hooks.clearMe();
+  assert.equal(hooks.providerWriteAuthority(), "unknown",
+    "MUTATION TARGET: widen this to a grant and the line above is the red — an unasked question is not an admin");
+  // failed — a fault is a different fact from a refusal, and neither is a grant.
+  await driveMe(500, { error: "server_error" });
+  assert.equal(hooks.providerWriteAuthority(), "unknown", "an unproven actor is not an admin");
+  // stale — the pin moved under the cached answer, so it is not about this team.
+  hooks.clearMe();
+  await withTeamPin(async (store) => {
+    store.setItem("bp.active-team", "t1");
+    await driveMe(200, ME_TA);
+    assert.equal(hooks.providerWriteAuthority(), "grant", "fetched under t1, answered for t1");
+    store.setItem("bp.active-team", "t2");
+    assert.equal(hooks.teamAuthorityState(), "stale", "the precondition: the source band actually reads stale here");
+    assert.equal(hooks.providerWriteAuthority(), "unknown",
+      "and the narrowing maps stale onto the honest unknown arm, never onto grant and never onto a determinate refusal");
+  });
+  hooks.clearMe();
+});
+
+// …and THE CONSEQUENCE, on the SHEET'S OWN BYTES, for all three bands including
+// the two no committed scenario can reach. This drives the REAL
+// openProviderCredential against a minimal mounted DOM — the same technique the
+// closeModal arm above uses — so what is measured is the sheet, not a helper
+// standing in for it. smoke.mjs measures grant and refuse with the band read
+// from a fixture's own /v1/me; this adds the UNKNOWN arm and pins the grant
+// arm's bytes where a restyling regression cannot hide behind a fixture.
+test("cch-r17-w12: the credential sheet paints its submit live ONLY on grant — refuse and unknown carry no #cred-submit at all", async () => {
+  const el = (id) => ({
+    id, innerHTML: "", hidden: false, textContent: "", value: "",
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => id === "modal-x" },
+    setAttribute() {}, removeAttribute() {}, addEventListener() {},
+    querySelector: () => null, querySelectorAll: () => [], focus() {},
+  });
+  const nodes = { "#modal-root": el("modal-root"), "#modal-body": el("modal-body"), ".modal-x": el("modal-x") };
+  const prevQS = sandbox.document.querySelector;
+  const prevGE = sandbox.document.getElementById;
+  sandbox.document.querySelector = (sel) => nodes[sel] || null;
+  sandbox.document.getElementById = (id) => nodes["#" + id] || null;
+  const paint = async (status, envelope) => {
+    hooks.clearMe();
+    if (status) await driveMe(status, envelope);
+    nodes["#modal-body"].innerHTML = "";
+    hooks.openProviderCredential("hetzner");
+    return nodes["#modal-body"].innerHTML;
+  };
+  try {
+    const grant = await paint(200, ME_TA);
+    assert.equal(hooks.providerWriteAuthority(), "grant", "precondition: this envelope is a determinate grant");
+    assert.ok(grant.includes('<div class="modal-actions"><button class="btn btn-primary btn-block" type="button" id="cred-submit">Add provider</button></div>'),
+      "the grant arm keeps the shipped btn-primary btn-block button and its mount hook; got: " + grant.slice(-240));
+
+    const refuse = await paint(200, ME_TA_MEMBER);
+    assert.equal(hooks.providerWriteAuthority(), "refuse", "precondition: a member is a determinate refusal");
+    assert.doesNotMatch(refuse, /id="cred-submit"/,
+      "the refusal arm must carry NO mount hook — openProviderCredential's own `body.querySelector(\"#cred-submit\")` then binds nothing");
+    assert.ok(refuse.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Add provider</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
+      "the same verb, drawn disabled-and-explained with its own inline reason");
+
+    const unknown = await paint(null, null);
+    assert.equal(hooks.providerWriteAuthority(), "unknown", "precondition: an unasked /v1/me is the unknown arm");
+    assert.doesNotMatch(unknown, /id="cred-submit"/, "unknown fails CLOSED with no hook either");
+    assert.ok(unknown.includes("Checking capabilities"), "and says so honestly rather than naming a role it has not read");
+
+    // The rest of the sheet survives every arm: the fence withholds the WRITE,
+    // never the screen the person came to read.
+    for (const html of [grant, refuse, unknown]) {
+      assert.match(html, /id="cred-token"/, "the credential field is still there — a refused principal still sees what the sheet is for");
+      assert.match(html, /id="cred-back"/, "and the way back out");
+    }
+  } finally {
+    sandbox.document.querySelector = prevQS;
+    sandbox.document.getElementById = prevGE;
+    hooks.clearMe();
+  }
+});
+
 test("cch-w42-s1: THE STALENESS ARM — the pin moving under a cached answer reads as stale, not as authority", async () => {
   await withTeamPin(async (store) => {
     store.setItem("bp.active-team", "t1");
