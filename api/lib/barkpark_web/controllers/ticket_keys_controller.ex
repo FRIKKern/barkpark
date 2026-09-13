@@ -19,6 +19,7 @@ defmodule BarkparkWeb.TicketKeysController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Plugins.Tickets.{Handoff, Keys}
+  alias BarkparkWeb.ErrorResponse
 
   @doc """
   `POST /v1/plugins/tickets/keys` — mint a named ticket key.
@@ -183,13 +184,11 @@ defmodule BarkparkWeb.TicketKeysController do
 
   defp unprocessable(conn, message) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", message: message})
   end
 
   defp not_found(conn, message) do
     conn
-    |> put_status(:not_found)
-    |> json(%{error: %{code: "not_found", message: message}})
+    |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: message})
   end
 end

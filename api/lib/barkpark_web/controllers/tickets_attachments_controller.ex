@@ -76,6 +76,7 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   alias Barkpark.Plugins.Tickets.Attachments
   alias Barkpark.Plugins.Tickets.Thread
   alias BarkparkWeb.Plugs.RequireToken
+  alias BarkparkWeb.ErrorResponse
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -358,8 +359,10 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
 
       {:error, :not_found} ->
         conn
-        |> put_status(:not_found)
-        |> json(%{error: %{code: "not_found", message: "attachment blob missing"}})
+        |> ErrorResponse.emit_fields(:not_found, %{
+          code: "not_found",
+          message: "attachment blob missing"
+        })
     end
   end
 

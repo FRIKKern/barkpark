@@ -48,6 +48,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
   alias Barkpark.Plugins.Sheets
   alias Barkpark.Plugins.Sheets.{Csv, XlsxImport}
   alias Barkpark.Tenancy
+  alias BarkparkWeb.ErrorResponse
 
   @byte_cap 15_000_000
   @default_dataset "production"
@@ -74,8 +75,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
     else
       {:error, status, code, message} ->
         conn
-        |> put_status(status)
-        |> json(%{error: %{code: code, message: message}})
+        |> ErrorResponse.emit_fields(status, %{code: code, message: message})
     end
   end
 

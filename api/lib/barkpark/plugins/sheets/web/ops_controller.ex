@@ -62,6 +62,7 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Session
+  alias BarkparkWeb.ErrorResponse
 
   @default_dataset "production"
 
@@ -91,12 +92,9 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
       # (the batch_too_large precedent), NOT a session op code.
       :invalid_request_id ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{
-            code: "invalid_request_id",
-            message: "request_id must be a non-empty string of at most 200 bytes"
-          }
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "invalid_request_id",
+          message: "request_id must be a non-empty string of at most 200 bytes"
         })
 
       other ->
@@ -106,8 +104,10 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
 
   def apply_ops(conn, _params) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "malformed_ops", message: "the body must carry an \"ops\" list"}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+      code: "malformed_ops",
+      message: "the body must carry an \"ops\" list"
+    })
   end
 
   # The whole-request SHAPE rejections (`malformed_ops` via the second
@@ -173,23 +173,17 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
     case result do
       {:error, :not_found} ->
         conn
-        |> put_status(:not_found)
-        |> json(%{
-          error: %{
-            code: "not_found",
-            message: "no sheet #{inspect(slug)} in dataset #{inspect(dataset)}"
-          }
+        |> ErrorResponse.emit_fields(:not_found, %{
+          code: "not_found",
+          message: "no sheet #{inspect(slug)} in dataset #{inspect(dataset)}"
         })
 
       {:error, :batch_too_large, n} ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{
-            code: "batch_too_large",
-            message:
-              "the ops list carries #{n} ops; the cap is #{Session.max_ops_per_call()} per call — split the batch"
-          }
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "batch_too_large",
+          message:
+            "the ops list carries #{n} ops; the cap is #{Session.max_ops_per_call()} per call — split the batch"
         })
 
       # The session died twice in a row (crash loop / restart window) —
@@ -197,12 +191,9 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
       {:error, :session_unavailable} ->
         conn
         |> put_resp_header("retry-after", "2")
-        |> put_status(:service_unavailable)
-        |> json(%{
-          error: %{
-            code: "session_restarting",
-            message: "the sheet session is restarting — retry shortly"
-          }
+        |> ErrorResponse.emit_fields(:service_unavailable, %{
+          code: "session_restarting",
+          message: "the sheet session is restarting — retry shortly"
         })
 
       # The exactly-once ring has no table to read, so the session refuses the
@@ -216,21 +207,18 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
       {:error, :replay_unavailable} ->
         conn
         |> put_resp_header("retry-after", "2")
-        |> put_status(:service_unavailable)
-        |> json(%{
-          error: %{
-            code: "replay_unavailable",
-            message:
-              "the exactly-once replay ring is unavailable — the batch was NOT " <>
-                "applied; retry shortly"
-          }
+        |> ErrorResponse.emit_fields(:service_unavailable, %{
+          code: "replay_unavailable",
+          message:
+            "the exactly-once replay ring is unavailable — the batch was NOT " <>
+              "applied; retry shortly"
         })
 
       {:error, _other} ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{code: "session_start_failed", message: "the sheet session could not start"}
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "session_start_failed",
+          message: "the sheet session could not start"
         })
     end
   end

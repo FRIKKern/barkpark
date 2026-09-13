@@ -14,7 +14,9 @@ defmodule BarkparkWeb.Plugs.RequireRecentMfa do
   assigns (`:current_user`, `:current_user_session`) it reads; if those are
   absent it fails closed.
   """
-  import Plug.Conn
+  # No `import Plug.Conn`: the refusal's `put_status` + `halt` now live inside
+  # `BarkparkWeb.ErrorResponse`, which is the point — a gate that builds its own
+  # envelope is a gate that can forget `request_id`, and this one had.
   alias Barkpark.Accounts
   alias Barkpark.Accounts.UserSession
 
@@ -50,15 +52,14 @@ defmodule BarkparkWeb.Plugs.RequireRecentMfa do
       metadata: %{"reason" => "step_up_required", "path" => conn.request_path}
     })
 
+    # One shared emitter -> the 401 carries request_id for log correlation. The
+    # route-specific `hint` below is kept verbatim: `Errors.stamp/2` only fills a
+    # hint in when the envelope has none, so an arm that spoke for itself wins.
     conn
-    |> put_status(401)
-    |> Phoenix.Controller.json(%{
-      error: %{
-        code: "mfa_required",
-        message: "a recent MFA verification is required for this action",
-        hint: "call POST /v1/auth/mfa/step-up with a current code, then retry"
-      }
+    |> BarkparkWeb.ErrorResponse.emit_fields(401, %{
+      code: "mfa_required",
+      message: "a recent MFA verification is required for this action",
+      hint: "call POST /v1/auth/mfa/step-up with a current code, then retry"
     })
-    |> halt()
   end
 end
