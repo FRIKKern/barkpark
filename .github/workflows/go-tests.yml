@@ -93,6 +93,10 @@ on:
       - "internal/pdrender/testdata/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
       - "api/test/support/fixtures/code-block-lang-parity.json"
+      # internal/pdrender/code_block_emphasis_parity_test.go reads this fixture
+      # (pe-bl-code-emphasis — one fixture, three engines); an edit must
+      # dispatch the Go leg even with no .go source change.
+      - "api/test/support/fixtures/code-block-emphasis-parity.json"
       # PRE-EXISTING RATCHET RED on origin/main 038d310fce (#17729), not
       # introduced here: internal/pdrender/inline_code_source_parity_test.go
       # reads this fixture, so an edit to it must dispatch the Go suite.
@@ -107,6 +111,12 @@ on:
       # fixture (task-a4d1ae76fdb2a6b0 — one rule per boundary, three engines);
       # same rule.
       - "api/test/support/fixtures/section-boundary-rules.json"
+      # internal/cli/tasks_adjudication_drift_test.go reads this Elixir module
+      # (const serverStagePath) to lock the CLI's adjudication vocabulary fixture
+      # to Stage's @dispositions / @trigger_required / key attrs in BOTH directions
+      # (#17878). An edit to stage.ex with no .go change must dispatch the Go leg
+      # or the lock cannot fire on the PR that breaks it.
+      - "api/lib/barkpark/tasks/stage.ex"
       # Taskboard TUI golden frames (internal/taskboard/testdata/*.txt). The
       # compose/render/glyph-budget suites assert the committed frames byte-for-byte
       # and inventory every glyph in them; a golden REGEN (or a hand-added fixture)

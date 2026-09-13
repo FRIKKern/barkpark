@@ -76,21 +76,50 @@ check(".bp-tdetail__title can break a long word", () => {
   );
 });
 
-// The siblings are measured clean. Pinning that keeps the next reader from
-// guarding them for symmetry with no measurement behind it.
-for (const [selector, why] of [
-  [".bp-card__t", "0.9rem"],
-  [".bp-tasks__title", "1.05rem"],
+// THE VERDICT FLIPPED — and the old test asked for exactly this (gp-b-mobile-
+// reading-column). These two used to be pinned as "left unguarded on purpose":
+// measured clean at 320px "on every token plain prose survives", with the
+// instruction that if a measurement ever said otherwise, the declaration should
+// be added along with THE NUMBER that proves it. Here are the numbers.
+//
+// The old pin was not wrong when it was written; its PRECONDITION moved. Its
+// scope was "every token plain prose survives", and before `.bp-paper-surface
+// p, li { overflow-wrap: break-word }` landed, plain prose did NOT survive a
+// long paper permalink. __narrow_render.mjs skips any token its prose CONTROL
+// also fails, so the permalink case against these two was never being asserted
+// — the pass was silence, not evidence. Guarding prose widened the set of
+// tokens the control survives, and the moment it did, both blocks failed:
+//
+//   token: "https://guerrilla.barkpark.cloud/papers/mechanical-spacing-doctrine"
+//   .bp-tasks__title  442px  |  .bp-card__t  408px   — in viewports of 390, 360
+//   and 320px (a plain <p> carrying the same token now fits in all three).
+//
+// So the size reasoning ("0.9rem does not need one") held only for the
+// 30-character compound noun it was measured with. A paper permalink is 68
+// characters and is the token these blocks most often actually receive.
+// `break-word`, not `anywhere`: neither block sizes its own box.
+for (const [selector, px] of [
+  [".bp-card__t", 408],
+  [".bp-tasks__title", 442],
 ]) {
-  check(`${selector} is left unguarded on purpose`, () => {
+  check(`${selector} breaks a long permalink`, () => {
     const decls = ruleFor(`.bp-paper-surface ${selector}`);
+    assert.match(
+      decls,
+      /overflow-wrap\s*:\s*break-word/,
+      `${selector} must set overflow-wrap: break-word — carrying a paper ` +
+        `permalink it renders ${px}px wide and scrolls the whole document ` +
+        "sideways at 390, 360 and 320px (__narrow_render.mjs). This block was " +
+        "previously pinned as deliberately unguarded; that pin was scoped to " +
+        "'every token plain prose survives', and it stopped holding when the " +
+        "prose guard widened that set.",
+    );
     assert.doesNotMatch(
       decls,
-      /overflow-wrap/,
-      `${selector} has no wrap guard because at ${why} it does not need one — ` +
-        "measured clean at 320px on every token plain prose survives. If a " +
-        "measurement now says otherwise, add the declaration AND the number that " +
-        "proves it; do not add it for symmetry with .bp-tdetail__title.",
+      /overflow-wrap\s*:\s*anywhere/,
+      `${selector} does not size its own box, so the declaration that cannot ` +
+        "participate in min-content sizing is the one that cannot move a " +
+        "layout that was not already overflowing.",
     );
   });
 }

@@ -26487,6 +26487,87 @@ test("cch-w48-s1: the unanswered /new step asks ONCE, and its exit re-asks", asy
   }
 });
 
+// ── cch-w48-s1-followup · ONE FUNNEL, ONE ROLE QUESTION ─────────────────────
+// The launch step above asks GET /v1/me once and lands it through absorbMe. The
+// 402 plan step below it (renderNewPricing, called by newLaunch's 402 arm as
+// `renderNewPricing(newState.template)` — ONE argument, so `authority` is
+// undefined) used to issue its OWN unconditional GET /v1/me. Two identical
+// reads in one funnel, and — the part that is not merely wasteful — two screens
+// that can DISAGREE, because a role that moves between the two answers is
+// rendered as one authority on the launch step and another on the plan step.
+//
+// DRIVEN, not region-scoped: the double read lives in a fetch callback and in
+// the argument count of one call site, so only a drive that counts requests
+// across BOTH steps can see it. The count is filtered to /v1/me on purpose —
+// /new legitimately asks /v1/subscription on this step (cch-w49-s7) and a bare
+// calls.length would go red for the wrong reason.
+test("cch-w48-s1-followup: the /new funnel asks /v1/me ONCE across the launch step and the 402 plan step", async () => {
+  const saved = { document: sandbox.document, fetch: sandbox.fetch };
+  const { slot } = newBodySlot();
+  const meCalls = (net) => net.calls.filter((c) => String(c.path).indexOf("/v1/me") !== -1).length;
+  try {
+    sandbox.document = newFlowDom(slot);
+
+    // Drain the module latch first. `newLaunchMeAsked` is IIFE state shared by
+    // every drive in this file, and only the step's own retry resets it — so a
+    // cold renderNewLaunch here would silently ask NOTHING and the count below
+    // would pass over a funnel that never read anything. One throwaway render
+    // leaves the latch set and the exit on screen whatever it was before; the
+    // retry click that follows is then the one deterministic read.
+    hooks.clearMe();
+    sandbox.fetch = fetchStub(500, { error: "server_error" });
+    hooks.renderNewLaunch(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.match(slot.innerHTML, /data-me-retry/, "the unknown arm must be on screen for the drain to work");
+
+    // STEP 1 — the launch step asks for the role itself, once, and absorbs it.
+    const net = fetchStub(200, W47_OWNER);
+    sandbox.fetch = net;
+    slot.querySelector("[data-me-retry]").click();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.match(slot.innerHTML, /id="new-launch-btn"/,
+      "the owner must reach the form, or there is no 402 for the next step to fold");
+    assert.equal(meCalls(net), 1, "the launch step's own read — the one this funnel is allowed");
+
+    // STEP 2 — POST /v1/launch answered 402, so newLaunch folds the plan step in
+    // with no authority argument. The absorbed answer must decide it.
+    hooks.renderNewPricing(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(meCalls(net), 1,
+      "one funnel, one role question: the plan step must reuse the absorbed answer, got " + meCalls(net));
+    assert.match(slot.innerHTML, /Choose Supporter/,
+      "…and the reused answer must actually decide the screen — an owner keeps the checkout CTAs");
+
+    // The reuse carries the REFUSING band too, not just the permissive one: a
+    // loaded member answer withholds the CTAs with no second read of its own.
+    // (driveMe absorbs through the shipped loader on its OWN stub, so the count
+    // below is the PLAN STEP's alone — an answer already in hand, as after the
+    // launch step. The w48 member test above drives it under this same DOM.)
+    hooks.clearMe();
+    await driveMe(200, W47_MEMBER);
+    const memberNet = fetchStub(200, W47_MEMBER);
+    sandbox.fetch = memberNet;
+    hooks.renderNewPricing(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(meCalls(memberNet), 0, "a loaded answer is not re-asked for the plan step");
+    assert.match(slot.innerHTML, /Only the team owner can start a paid plan/,
+      "the absorbed member answer blocks checkout, exactly as the fetched one did");
+
+    // FAIL OPEN, UNCHANGED. With no absorbed answer the step still asks, and a
+    // read that FAILS still leaves the CTAs standing (unknown, never refused).
+    hooks.clearMe();
+    const coldNet = fetchStub(500, { error: "server_error" });
+    sandbox.fetch = coldNet;
+    hooks.renderNewPricing(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(meCalls(coldNet), 1, "an unknown role is still asked for — the reuse is not a mute");
+    assert.match(slot.innerHTML, /Choose Supporter/, "and a failed read refuses nobody");
+  } finally {
+    Object.assign(sandbox, saved);
+    hooks.clearMe();
+  }
+});
+
 // ── cch-w49-s1 · THE TWO CORPUS-DARK LAUNCH SURFACES ────────────────────────
 // launchPlanGridHtml serves BOTH the dashboard's 402 plan fold (renderLaunchPlan)
 // and the /new signup funnel's pricing step (renderNewPricing) — the first money

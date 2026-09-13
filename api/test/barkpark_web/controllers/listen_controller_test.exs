@@ -269,6 +269,13 @@ defmodule BarkparkWeb.ListenControllerTest do
           @owned_type,
           %{"doc_id" => "drafts.owned-a", "title" => "A-secret", "content" => %{"body" => "ok"}},
           @dataset,
+          # CLASS (c) DECLARATION (the seeded-Default ruling,
+          # task-e6523cc7154304f0): the caller_context is here for the OWNER
+          # stamp this block tests; the write names no workspace and this suite
+          # tests the SSE owner-ACL, not tenancy. Without the declaration the
+          # funnel treats a principal-bearing, workspace-less write as class (a)
+          # and refuses (this synthetic user is a member of no workspace).
+          instance_wide: true,
           caller_context: CallerContext.from_user(user_a)
         )
 

@@ -70,6 +70,7 @@ defmodule BarkparkWeb.GithubWebhookController do
   require Logger
 
   alias Barkpark.Plugins.Github.Settings
+  alias BarkparkWeb.ErrorResponse
 
   @doc """
   The single webhook action. Signature is already verified upstream; this
@@ -127,8 +128,10 @@ defmodule BarkparkWeb.GithubWebhookController do
         )
 
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: %{code: "inbound_failed", message: "could not process delivery"}})
+        |> ErrorResponse.emit_fields(:internal_server_error, %{
+          code: "inbound_failed",
+          message: "could not process delivery"
+        })
     end
   end
 
@@ -171,8 +174,10 @@ defmodule BarkparkWeb.GithubWebhookController do
         )
 
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: %{code: "intake_failed", message: "could not process delivery"}})
+        |> ErrorResponse.emit_fields(:internal_server_error, %{
+          code: "intake_failed",
+          message: "could not process delivery"
+        })
     end
   end
 
@@ -230,9 +235,9 @@ defmodule BarkparkWeb.GithubWebhookController do
         )
 
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{
-          error: %{code: "merge_reconcile_failed", message: "could not process delivery"}
+        |> ErrorResponse.emit_fields(:internal_server_error, %{
+          code: "merge_reconcile_failed",
+          message: "could not process delivery"
         })
     end
   end

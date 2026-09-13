@@ -3,6 +3,7 @@ defmodule BarkparkWeb.ChatHostController do
 
   alias Barkpark.ChatHosts
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.ErrorResponse
 
   def index(conn, _params) do
     json(conn, %{hosts: ChatHosts.list_hosts(conn.assigns.current_workspace.id)})
@@ -26,8 +27,10 @@ defmodule BarkparkWeb.ChatHostController do
       end
     else
       conn
-      |> put_status(:forbidden)
-      |> json(%{error: %{code: "forbidden", message: "workspace owner required"}})
+      |> ErrorResponse.emit_fields(:forbidden, %{
+        code: "forbidden",
+        message: "workspace owner required"
+      })
     end
   end
 
@@ -108,41 +111,36 @@ defmodule BarkparkWeb.ChatHostController do
 
   def report_state(conn, _params) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{
-      error: %{
-        code: "invalid_state_report",
-        message:
-          "state must be one of working|blocked|idle|unknown and epoch must be the lease's integer epoch"
-      }
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+      code: "invalid_state_report",
+      message:
+        "state must be one of working|blocked|idle|unknown and epoch must be the lease's integer epoch"
     })
   end
 
   defp session_not_found(conn) do
     conn
-    |> put_status(:not_found)
-    |> json(%{error: %{code: "not_found", message: "session not found"}})
+    |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: "session not found"})
   end
 
   defp unauthorized_enrollment(conn) do
     conn
-    |> put_status(:unauthorized)
-    |> json(%{
-      error: %{code: "invalid_enrollment", message: "enrollment token is invalid or expired"}
+    |> ErrorResponse.emit_fields(:unauthorized, %{
+      code: "invalid_enrollment",
+      message: "enrollment token is invalid or expired"
     })
   end
 
   defp not_found(conn) do
     conn
-    |> put_status(:not_found)
-    |> json(%{error: %{code: "not_found", message: "host not found"}})
+    |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: "host not found"})
   end
 
   defp conflict(conn, reason) do
     conn
-    |> put_status(:conflict)
-    |> json(%{
-      error: %{code: to_string(reason), message: "host lease fence is no longer current"}
+    |> ErrorResponse.emit_fields(:conflict, %{
+      code: to_string(reason),
+      message: "host lease fence is no longer current"
     })
   end
 
@@ -155,13 +153,14 @@ defmodule BarkparkWeb.ChatHostController do
       end)
 
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", fields: errors}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", fields: errors})
   end
 
   defp unprocessable(conn, reason) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: inspect(reason)}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+      code: "unprocessable",
+      message: inspect(reason)
+    })
   end
 end

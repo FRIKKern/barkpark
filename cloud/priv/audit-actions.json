@@ -59,6 +59,21 @@
         "wire word (reason: \"identity_refused\") and which write it was."
       ]
     },
+    {
+      "verb": "barkpark.suspended_refused",
+      "label": "was refused — the instance is suspended",
+      "note": [
+        "cch-w59-bl. The row a SUSPENSION-REFUSED act leaves. Sibling of",
+        "barkpark.credentials_refused, and a DIFFERENT fact: there the box spoke",
+        "and rejected our credential; here the plane withheld attention and the",
+        "box was never asked. ONE verb for every suspended refusal in the plane —",
+        "the route/act is a metadata field (`route`), never a second verb — so an",
+        "operator queries `action = barkpark.suspended_refused` once and sees",
+        "every attempt against a suspended box. Written OUTSIDE Accounts.audit/3:",
+        "that wrapper rolls back on an error tuple, which is exactly the shape a",
+        "refusal returns, so a transactional write of this row could never land."
+      ]
+    },
     { "verb": "provider.connected", "label": "connected a provider credential" },
     { "verb": "provider.disconnected", "label": "disconnected a provider credential" },
     { "verb": "github.installation_connected", "label": "connected a GitHub App installation" },

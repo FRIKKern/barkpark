@@ -10,6 +10,7 @@ defmodule BarkparkWeb.SessionIssuer do
   import Phoenix.Controller, only: [json: 2]
 
   alias Barkpark.Accounts
+  alias BarkparkWeb.ErrorResponse
 
   @doc """
   Issue a session for `user` and render the standard login response. `opts` are
@@ -90,15 +91,12 @@ defmodule BarkparkWeb.SessionIssuer do
       |> Phoenix.Controller.redirect(to: "/login")
     else
       conn
-      |> put_status(403)
-      |> json(%{
-        error: %{
-          code: "mfa_enrolment_required",
-          message: "an organization you belong to requires MFA — enrol a factor to continue",
-          hint:
-            "enrol TOTP via POST /v1/auth/mfa/enroll + /verify, or a passkey via " <>
-              "POST /v1/auth/webauthn/register/challenge + /register, then retry"
-        }
+      |> ErrorResponse.emit_fields(403, %{
+        code: "mfa_enrolment_required",
+        message: "an organization you belong to requires MFA — enrol a factor to continue",
+        hint:
+          "enrol TOTP via POST /v1/auth/mfa/enroll + /verify, or a passkey via " <>
+            "POST /v1/auth/webauthn/register/challenge + /register, then retry"
       })
     end
   end
@@ -166,13 +164,10 @@ defmodule BarkparkWeb.SessionIssuer do
       |> Phoenix.Controller.redirect(to: "/login")
     else
       conn
-      |> put_status(403)
-      |> json(%{
-        error: %{
-          code: "auth_method_not_allowed",
-          message: auth_method_message(method),
-          hint: auth_method_hint(allowed)
-        }
+      |> ErrorResponse.emit_fields(403, %{
+        code: "auth_method_not_allowed",
+        message: auth_method_message(method),
+        hint: auth_method_hint(allowed)
       })
     end
   end

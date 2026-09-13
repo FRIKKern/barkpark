@@ -191,4 +191,21 @@ defmodule BarkparkCloud.Web.RouterEmailVerificationTest do
       assert json_body(conn) == %{"error" => "no_pending_email"}
     end
   end
+
+  describe "GET /v1/me confirmed flag" do
+    # The console SPA does not read `confirmed` — the router comment now says
+    # so instead of claiming an unverified-account nudge that was never built.
+    # Correcting the comment must NOT take the field off the wire: an API
+    # consumer outside this repo may read it, so /v1/me keeps serving the key
+    # for an UNVERIFIED account too — present and false, never absent.
+    test "an unverified account still gets the key, served false (not absent)" do
+      user = user_fixture()
+      refute Repo.get!(User, user.id).confirmed_at
+
+      me = call(:get, "/v1/me", nil, session(user))
+      assert me.status == 200
+      assert Map.has_key?(json_body(me)["user"], "confirmed")
+      assert json_body(me)["user"]["confirmed"] == false
+    end
+  end
 end

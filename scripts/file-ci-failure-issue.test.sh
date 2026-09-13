@@ -376,5 +376,196 @@ if grep -q 'redaction disarmed' "$mut"; then
   if grep -q 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab' "$BODY_FILE"; then ok "redaction mutation: without redact() the token reaches the body (the case can fail)"; else bad "redaction mutation: the disarmed subject still masked — the case is vacuous"; fi
 else bad "redaction mutation: could not disarm redact() in the subject copy"; fi
 
+
+echo
+echo "--- main-gate-watch reporter wiring (task-d1d19ca64ddd2f59) ---"
+# WHY THIS ARM LIVES HERE. main-gate-watch.yml concluded FAILURE on NINE
+# consecutive main runs (34710221041 .. 34749744107, 2026-09-12T18:07Z ..
+# 2026-09-13T09:34Z) and reached nobody, because it had no reporter job wired to
+# THIS script. The fix is three reporter jobs, and what has to stay true about
+# them is a property of the WORKFLOW FILE, not of this script's runtime — so it
+# is checked by PARSING the YAML. Every `needs:`, `if:` and `env:` below is read
+# out of the file; nothing about the guards is retyped into this test. The
+# scenario table then evaluates each reporter's real `if:` expression under the
+# job results a fault / a scream / an absence / a green / a cancelled / a
+# not-on-main run actually produce, so "fires for a fault, not for a green" is
+# measured rather than asserted.
+cat >"$work/mgw-reporter-wiring.py" <<'MGWPY'
+import re, sys, yaml
+
+wf_path = sys.argv[1]
+wf = yaml.safe_load(open(wf_path))
+jobs = wf["jobs"]
+fail = []
+
+
+def chk(cond, msg):
+    if cond:
+        print("  ok   " + msg)
+    else:
+        fail.append(msg)
+        print("  BAD  " + msg)
+
+
+# The three reporters, one per failing OUTCOME this workflow can produce.
+REPORTERS = ["report-main-gate-watch-fault",
+             "report-main-gate-watch-scream",
+             "report-main-verdict-presence"]
+for r in REPORTERS:
+    chk(r in jobs, "workflow declares job %s" % r)
+if fail:
+    print("CANNOT READ: a reporter job is missing from %s" % wf_path)
+    sys.exit(1)
+
+keys = {}
+for r in REPORTERS:
+    j = jobs[r]
+    last = j["steps"][-1] or {}
+    env = last.get("env", {}) or {}
+    perms = j.get("permissions", {}) or {}
+    run = last.get("run", "") or ""
+    chk(run.strip() == "bash scripts/file-ci-failure-issue.sh",
+        "%s runs the filer verbatim" % r)
+    chk(perms.get("issues") == "write",
+        "%s carries JOB-LEVEL issues: write" % r)
+    chk(bool(env.get("CI_FAILURE_KEY")), "%s sets CI_FAILURE_KEY" % r)
+    chk(len((env.get("CI_FAILURE_DETAIL") or "").strip()) > 100,
+        "%s sets a substantive CI_FAILURE_DETAIL" % r)
+    # The filer reads GITHUB_TOKEN and nothing else — GH_TOKEN is the known slip.
+    chk("GITHUB_TOKEN" in env, "%s sets GITHUB_TOKEN (not GH_TOKEN)" % r)
+    keys[r] = env.get("CI_FAILURE_KEY")
+chk(len(set(keys.values())) == len(REPORTERS),
+    "the three CI_FAILURE_KEYs are DISTINCT (dedupe is per key): %s"
+    % sorted(set(keys.values())))
+
+# `issues: write` must never be granted workflow-wide: that would re-scope the
+# breakglass-token jobs above it.
+chk("issues" not in (wf.get("permissions", {}) or {}),
+    "no top-level issues: grant was added")
+
+
+def ancestors(job, seen=None):
+    seen = seen if seen is not None else set()
+    # `needs:` is a STRING when a job names exactly one dependency and a LIST
+    # otherwise — main-gate-watch uses the string form. Iterating the string
+    # walks its CHARACTERS and raises KeyError: 'm'; this test caught exactly
+    # that on its first run, which is why the normalisation is spelled out.
+    needs = jobs[job].get("needs") or []
+    if isinstance(needs, str):
+        needs = [needs]
+    for n in needs:
+        if n not in seen:
+            seen.add(n)
+            ancestors(n, seen)
+    return seen
+
+
+def evaluate(job, results, ref):
+    """True when GitHub would RUN this job — its `if:` read from the file."""
+    anc = ancestors(job)
+    expr = str(jobs[job].get("if", "true")).strip()
+    for term in [t.strip() for t in re.split(r"&&", expr)]:
+        if term in ("true", "always()"):
+            v = True
+        elif term == "failure()":
+            v = any(results.get(a) == "failure" for a in anc)
+        elif term == "success()":
+            v = all(results.get(a) == "success" for a in anc)
+        elif term == "cancelled()":
+            v = any(results.get(a) == "cancelled" for a in anc)
+        else:
+            m = re.match(r"^(\S+)\s*(==|!=)\s*'([^']*)'$", term)
+            if not m:
+                raise SystemExit(
+                    "CANNOT READ: unparseable if-term %r in %s" % (term, job))
+            lhs, op, lit = m.groups()
+            n = re.match(r"^needs\.([A-Za-z0-9_-]+)\.result$", lhs)
+            if n:
+                actual = results.get(n.group(1))
+            elif lhs == "github.ref":
+                actual = ref
+            elif lhs == "github.event_name":
+                actual = results.get("__event", "schedule")
+            else:
+                raise SystemExit(
+                    "CANNOT READ: unknown operand %r in %s" % (lhs, job))
+            v = (actual == lit) if op == "==" else (actual != lit)
+        if not v:
+            return False
+    return True
+
+
+MAIN = "refs/heads/main"
+S = "success"
+SCENARIOS = [
+    # rc 3: the fault job reds and SKIPS its sibling (that sibling's own `if:`
+    # excludes rc 3), so only the fault key may be filed.
+    ("CONFIGURATION FAULT on main", MAIN,
+     {"main-gate-watch-fault": "failure", "main-gate-watch": "skipped",
+      "main-verdict-presence": S},
+     {"report-main-gate-watch-fault"}),
+    # rc 1: the watch screams about main's tip.
+    ("scream on main", MAIN,
+     {"main-gate-watch-fault": S, "main-gate-watch": "failure",
+      "main-verdict-presence": S},
+     {"report-main-gate-watch-scream"}),
+    ("verdict absence on main", MAIN,
+     {"main-gate-watch-fault": S, "main-gate-watch": S,
+      "main-verdict-presence": "failure"},
+     {"report-main-verdict-presence"}),
+    ("green on main files NOTHING", MAIN,
+     {"main-gate-watch-fault": S, "main-gate-watch": S,
+      "main-verdict-presence": S},
+     set()),
+    # failure() is FALSE for cancelled, deliberately: a run collapsed by the
+    # concurrency group executed nothing and has nothing to report.
+    ("cancelled on main files NOTHING", MAIN,
+     {"main-gate-watch-fault": "cancelled", "main-gate-watch": "cancelled",
+      "main-verdict-presence": "cancelled"},
+     set()),
+    # workflow_dispatch is dispatchable against ANY ref; a topic-branch debug run
+    # already has a human attached and must mint no public issue. (The schedule
+    # arm can only ever run on the default branch, so the guard passes there.)
+    ("scream on a NON-main dispatch files NOTHING", "refs/heads/topic",
+     {"main-gate-watch-fault": S, "main-gate-watch": "failure",
+      "main-verdict-presence": S},
+     set()),
+]
+
+for label, ref, results, expected in SCENARIOS:
+    fired = set(r for r in REPORTERS if evaluate(r, results, ref))
+    chk(fired == expected,
+        "%s -> fires %s (expected %s)"
+        % (label, sorted(fired) or "nothing", sorted(expected) or "nothing"))
+
+print("mgw reporter wiring: %d failed" % len(fail))
+sys.exit(1 if fail else 0)
+MGWPY
+
+MGW_WF=".github/workflows/main-gate-watch.yml"
+if python3 "$work/mgw-reporter-wiring.py" "$MGW_WF"; then
+  ok "mgw wiring: the parsed guards fire on fault/scream/absence and NOT on green/cancelled/non-main"
+else
+  bad "mgw wiring: see the BAD lines above"
+fi
+
+# MUTATION: strip the ref guard from the reporters. The non-main scenario must
+# then fire and this arm must go RED — a scenario table that stays green under a
+# disarmed guard is measuring nothing.
+mgw_mut="$work/main-gate-watch.mutated.yml"
+sed "s/github\.ref == 'refs\/heads\/main'/true/g" "$MGW_WF" >"$mgw_mut"
+if [ "$(grep -c "github.ref == 'refs/heads/main'" "$mgw_mut")" = 0 ] \
+   && [ "$(grep -c "github.ref == 'refs/heads/main'" "$MGW_WF")" -ge 3 ]; then
+  if python3 "$work/mgw-reporter-wiring.py" "$mgw_mut" >"$work/mgw-mut.out" 2>&1; then
+    bad "mgw mutation: the ref guard was stripped and the arm STILL passed — vacuous"
+  elif grep -q 'NON-main dispatch' "$work/mgw-mut.out"; then
+    ok "mgw mutation: stripping the ref guard reds this arm on the non-main scenario (the case can fail)"
+  else
+    bad "mgw mutation: reddened, but not on the non-main scenario: $(grep BAD "$work/mgw-mut.out" | head -3)"
+  fi
+else
+  bad "mgw mutation: could not disarm the ref guard in the workflow copy"
+fi
+
 echo "passed: $pass  failed: $fail"
 [ "$fail" = 0 ]

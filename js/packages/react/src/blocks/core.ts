@@ -597,7 +597,12 @@ const numberedList: Emit = (b) => list({ ...b, ordered: true } as Block)
 // tone word three times — the class switch even repeated each word on its own
 // arm (`case 'success': return 'success'`) — so a fifth tone meant editing two
 // functions in lockstep and a label could silently drift from its class.
-const CALLOUT_TONES = ['success', 'warning', 'danger', 'neutral']
+// 'loss' and 'peace' are the two VERDICT tones (design/tokens.json color.verdict):
+// the same `tone` field, a different token family (`--bp-verdict-*`, resolved by
+// paper-surface.css `.bp-callout--loss` / `--peace`). MIRROR of walk.ex
+// callout_tone_class/1 + tone_label/1 — the parity suite renders both halves and
+// byte-compares, so adding a tone on one side alone reds.
+const CALLOUT_TONES = ['success', 'warning', 'danger', 'neutral', 'loss', 'peace']
 
 function calloutToneClass(tone: unknown): string {
   const slug = str(tone)
@@ -639,13 +644,66 @@ const MONO = 'ui-monospace,Menlo,monospace'
 // --paper-bg-deep slab on the --paper-bg page — no left bar: the 3px
 // reading-accent bar was retired with task-ddb1e0ab09a62466 once the reader
 // body stopped painting the fill token as the page.
-function codeBlockHtml(value: string): string {
-  const escaped = escapeHtml(value)
+function codeBlockHtml(value: string, emphasis: EmphasisRange[] = []): string {
+  const escaped = codeBodyHtml(value, emphasis)
   return (
     `<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);` +
     `margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ${MONO});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);` +
     `overflow-x:auto;white-space:pre">${escaped}</pre>`
   )
+}
+
+/* ── THE code-block LINE-EMPHASIS contract (pe-bl-code-emphasis) ──────────────
+ *
+ * A `code` block MAY carry `emphasis`: an ARRAY of {from, to, tone} ranges over
+ * the selected source, 1-BASED and INCLUSIVE, `to` optional (defaults to
+ * `from`). The tone vocabulary is CLOSED — comment / offending / fixed — and a
+ * range with an unknown tone, a non-integer/`< 1` `from`, or a `to` below
+ * `from` is DROPPED. Overlaps resolve first-in-array-order. A block whose
+ * ranges all drop renders through the legacy single-escape path, byte-identical
+ * to a block with no `emphasis` key — which is what keeps this emitter a
+ * byte-faithful mirror of Figures.code_block_html/2 for the 9711-row corpus
+ * that carries no emphasis at all.
+ *
+ * `Number.isInteger` is the strict read on purpose: it rejects the string "3"
+ * exactly as Elixir's `is_integer/1` guard does. The shared fixture
+ * api/test/support/fixtures/code-block-emphasis-parity.json (read by the Go,
+ * Elixir and JS legs) carries a `"from": "3"` case to hold that line. */
+type EmphasisRange = { from: number; to: number; tone: string }
+
+const EMPHASIS_TONES = ['comment', 'offending', 'fixed']
+
+function codeEmphasis(b: Block): EmphasisRange[] {
+  const raw = (b as Record<string, unknown>).emphasis
+  if (!Array.isArray(raw)) return []
+  const out: EmphasisRange[] = []
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const r = entry as Record<string, unknown>
+    const tone = str(r.tone).trim()
+    if (!EMPHASIS_TONES.includes(tone)) continue
+    const from = r.from
+    if (!Number.isInteger(from) || (from as number) < 1) continue
+    const to = r.to === undefined || r.to === null ? from : r.to
+    if (!Number.isInteger(to) || (to as number) < (from as number)) continue
+    out.push({ from: from as number, to: to as number, tone })
+  }
+  return out
+}
+
+// Split/join on "\n" round-trips the source exactly, so an emphasized block
+// differs from the legacy one ONLY by the spans.
+function codeBodyHtml(value: string, emphasis: EmphasisRange[]): string {
+  if (emphasis.length === 0) return escapeHtml(value)
+  return value
+    .split('\n')
+    .map((line, i) => {
+      const hit = emphasis.find((r) => i + 1 >= r.from && i + 1 <= r.to)
+      return hit
+        ? `<span class="bp-code-em bp-code-em--${hit.tone}">${escapeHtml(line)}</span>`
+        : escapeHtml(line)
+    })
+    .join('\n')
 }
 
 // The FOUR accepted source keys, first non-blank wins — `codeSource` in
@@ -655,7 +713,7 @@ function codeBlockHtml(value: string): string {
 // below takes the same "sourceless block is editor scaffolding" exit.
 const code: Emit = (b) => {
   const source = codeSource(b)
-  return source.trim() === '' ? '' : codeBlockHtml(source)
+  return source.trim() === '' ? '' : codeBlockHtml(source, codeEmphasis(b))
 }
 
 // The `bp-section-divider` classes carry no styling (every value is inline, the
