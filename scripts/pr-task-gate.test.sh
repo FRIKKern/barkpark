@@ -422,7 +422,10 @@ else
   # grepping for that symbol, the search line matched itself and this arm went
   # green on a citation pointing at the assignment rather than the rule. A line
   # that names a symbol is not the line that enforces it.
-  if [ -n "$cited_line" ] && printf '%s' "$cited_src" | grep -qE '^[[:space:]]*\[ "\$released_ge_expired" = "no" \].*\|\| fail'; then
+  # D37: here-string, not `printf | grep -q`. Under the `set -uo pipefail` at the
+  # top of this file an early-closing reader kills the producer, pipefail hands
+  # back 141, and a TRUE match reads as a miss. A here-string forks no writer.
+  if [ -n "$cited_line" ] && grep -qE '^[[:space:]]*\[ "\$released_ge_expired" = "no" \].*\|\| fail' <<<"$cited_src"; then
     pass=$((pass+1)); printf 'ok   %-40s (line %s is the ordering clause)\n' "cited ordering-clause line is real" "$cited_line"
   else
     fail=$((fail+1)); printf 'FAIL %-40s cited line %s reads: %s\n' "cited ordering-clause line is real" "${cited_line:-<none>}" "${cited_src:-<nothing>}"
@@ -950,9 +953,11 @@ orc=$?
 osum="$(cat "$vsum")"
 if [ "$orc" != "1" ]; then
   fail=$((fail+1)); printf 'FAIL %-40s step exited %s (want 1)\n' "step verify: outage QUOTES its attempts" "$orc"
-elif ! printf '%s' "$osum" | grep -qF -- 'Evidence — what the ledger actually returned on each attempt:'; then
+# D37: here-strings below — $osum is a whole step summary, exactly the
+# output-length-dependent shape where `printf | grep -q` answers 141.
+elif ! grep -qF -- 'Evidence — what the ledger actually returned on each attempt:' <<<"$osum"; then
   fail=$((fail+1)); printf 'FAIL %-40s the summary states the claim with no evidence behind it\n' "step verify: outage QUOTES its attempts"
-elif ! printf '%s' "$osum" | grep -qF -- 'could not reach the ledger'; then
+elif ! grep -qF -- 'could not reach the ledger' <<<"$osum"; then
   fail=$((fail+1)); printf 'FAIL %-40s the evidence clause is present but empty of attempt lines\n' "step verify: outage QUOTES its attempts"
 else
   pass=$((pass+1)); printf 'ok   %-40s (summary carries the attempt lines)\n' "step verify: outage QUOTES its attempts"

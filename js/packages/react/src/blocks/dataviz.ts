@@ -96,6 +96,8 @@ function sparkSvg(values: number[]): string {
   return `<svg class="bp-stat__spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}"/></svg>`
 }
 
+const VERDICTS = ['loss', 'peace']
+
 const stat: Emit = (block) => statHtml(block)
 
 function statHtml(block: unknown): string {
@@ -124,7 +126,17 @@ function statHtml(block: unknown): string {
   // THE KILDE LAW: a stat is a datum, and a datum carries its provenance.
   const ref = parseSourceRef(displayString(get(block, 'source')))
   const kilde = kildeHtml(ref === null ? [] : [ref])
-  return `<div class="bp-stat">${bar}<div class="bp-stat__v">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
+  // THE VERDICT: 'loss' or 'peace' paints the DIGITS in the verdict ink
+  // (design/tokens.json color.verdict; paper-surface.css .bp-stat__v--loss /
+  // --peace). Only the value moves — label, body and rule keep the page voice,
+  // so the number carries the judgement and the tile does not become a coloured
+  // box. Off-vocabulary or absent → the bare class, byte-identical to before.
+  // MIRROR of data_viz.ex stat_html/1; tests/stat-verdict.parity.test.ts holds
+  // the two halves together.
+  const verdictMod = VERDICTS.includes(displayString(get(block, 'verdict')))
+    ? ` bp-stat__v--${displayString(get(block, 'verdict'))}`
+    : ''
+  return `<div class="bp-stat">${bar}<div class="bp-stat__v${verdictMod}">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
 }
 
 const stats: Emit = (block) => {

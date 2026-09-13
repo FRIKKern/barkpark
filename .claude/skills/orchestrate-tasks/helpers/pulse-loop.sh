@@ -37,8 +37,15 @@
 #     and three claims lapsed.
 #
 # USAGE
-#   pulse-loop.sh lead-cli "$ORCH/lead-cli/held.txt" "$ORCH/lead-cli/pulse.log"        # forever
-#   pulse-loop.sh --once lead-cli held.txt pulse.log     # one round, then exit (foreground check)
+#   pulse-loop.sh lead-cli "$ORCH/lead-cli/held.s2.txt" "$ORCH/lead-cli/pulse.s2.log"  # forever
+#   pulse-loop.sh --once lead-cli held.s2.txt pulse.s2.log  # one round, then exit (foreground check)
+#
+# THE HELD FILE IS PER SESSION, NOT PER LANE (task-50d7d1a599dd14dd). `held.txt`
+# is the legacy lane-wide name and two concurrent sessions of one lane sharing
+# it dropped a live row at 00:35:35Z on 2026-09-07 — a removal errors nowhere
+# and the claim lapses ~40 min later. Take the path from
+# `helpers/session-files.sh open <lane-dir> <session>` (HELD= / PULSE_LOG=) and
+# pass it here; this script reads exactly the file it is given and no other.
 #   pulse-loop.sh --selftest                             # hermetic, no network, stub bp on PATH
 #
 # FLAGS

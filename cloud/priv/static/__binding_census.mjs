@@ -383,6 +383,20 @@ const F_LCO = (read) => ({ band: LAUNCH_CHECKOUT_BAND, read: read, decide: "laun
 const LAUNCH_BAND = "launchAuthority";
 const F_LAUNCH = (read, decide) => ({ band: LAUNCH_BAND, read: read, decide: decide });
 
+// ── cch-r16-w11 — THE LAUNCH WIZARD'S WRITE BAND, and it is a NEW SIBLING of
+// ── launchAuthority for the same reason launchAuthority is a new sibling of
+// ── instanceAdminAuthority: the caller vocabularies differ. launchAuthority
+// ── answers five values (grant/refuse/loading/failed/stale) and the launch
+// ── step branches on all five by name; adminWriteControlHtml answers three
+// ── (grant / refuse / unknown) and its refusal arm DROPS the mount hook.
+// ── newWriteAuthority() is the narrowing — `launchAuthority()` mapped onto
+// ── that vocabulary, failing CLOSED so loading/failed/stale can never read as
+// ── a grant at a call site that never heard about them. It is a band in its
+// ── own right here because (2i-2) checks that each pinned READ calls the band
+// ── it names, and these three reads call the narrowing, not the source.
+const NEW_WRITE_BAND = "newWriteAuthority";
+const F_NEWWRITE = (read, decide) => ({ band: NEW_WRITE_BAND, read: read, decide: decide });
+
 // ── THE BOOLEAN BANDS (bands 4-7), pinnable only since (2i-3) grew its shape
 // ── arm. Every one of them answers `someState() === "grant"`, so there is no
 // ── vocabulary to derive and nothing for the string arm to compare; what each
@@ -549,10 +563,10 @@ const PIN = [
   // accounting is not done (cch-w48-bl-fence-pins-for-the-other-eight-bands).
   { fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", fence: F_LAUNCH("renderNewLaunch", "newLaunchOffer"), auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s1: newLaunchOffer emits #new-launch-btn only on \"grant\"; refuse omits it, unknown withholds it and renders the one exit. cch-w48-bl FENCE PIN: renderNewLaunch is the read (`newLaunchOffer(launchAuthority(), tpl)`) and newLaunchOffer is the decide — the classic D530 split, the answer threaded as a value into a pure helper. renderNewLaunch also binds the submit ONLY on offer.mode === \"grant\", so a refused principal has no form to submit" },
   { fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", fence: F_LCO("renderNewPricing"), auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority. cch-w48-bl FENCE PIN: renderNewPricing READS the band itself — when its caller passed no authority it fires one GET /v1/me and calls launchCheckoutAuthority(r.data), repainting only if the answer is \"blocked\" and only while the pricing screen is still mounted. Same decide as its sibling: launchPlanGridHtml owns the omit fork" },
-  { fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: NEW_WRITE_BAND, fence: F_NEWWRITE(["newReadyHtml", "newVercelDeploy"], "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-r16-w11: FENCED, and the row leaves the UNPREDICATED list on that fence and not on a re-worded note. newReadyHtml reads the band ONCE per paint through newWriteAuthority() (launchAuthority() narrowed to adminWriteControlHtml\'s three-valued vocabulary) and threads it into vercelClaimHtml -> vercelClaimInnerHtml, whose deploy/re-mint arm is drawn by adminWriteControlHtml(…, \"vercel\") — the refusal arm DROPS liveAttrs, so #new-vercel-claim and its mount hook are absent for a member. READ TWICE: newVercelDeploy re-asks for the in-place swap it paints after a successful POST, so a claim area repainted post-deploy cannot come back live under a band that has since moved. THE THEATER\'S OWN /v1/me: the resume path never loaded one, so newStartProgress kicks newAskTheaterAuthority (latched with the launch step\'s ask) and the answer repaints the mounted step. NOT OBSERVABLE FROM THE CORPUS (member-authority-sweep BLIND SPOT B6): the control renders only when GET /v1/barkparks/:id/bootstrap answers a vercel envelope and THAT read is itself require_team_admin, so no actor paints it; its bytes are pinned both ways in __app.test.mjs instead" },
+  { fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: NEW_WRITE_BAND, fence: F_NEWWRITE("newReadyHtml", "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-r16-w11: FENCED, and the row leaves the UNPREDICATED list on that fence and not on a re-worded note. newReadyHtml reads the band once and threads it into newGithubHtml, whose Create-GitHub-repo control is drawn by adminWriteControlHtml(…, \"wizard\") — the refusal arm drops #new-gh-create, and the repo-name field beside it is disabled in the same arm. MEASURED BOTH WAYS in the rendered bytes: theater-ready-github paints 1, theater-ready-github-member paints 0 (member-authority-sweep WATCHED row #new-gh-create)" },
   { fn: "newSubmitSiteUrl", verb: "POST", route: "/v1/barkparks/:*/site-url", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { fn: "newRenderFailed", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6776" },
+  { fn: "newRenderFailed", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: NEW_WRITE_BAND, fence: F_NEWWRITE("newRenderFailed", "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-r16-w11: FENCED, and the row leaves the UNPREDICATED list on that fence and not on a re-worded note. THE THIRD offer site of the verb #12996 fenced twice (instanceTimelineHtml\'s [data-tl-retry] and verifyNoteHtml\'s [data-vf-reprovision]) — on the launch wizard\'s own failure screen, which that PR never entered. newRenderFailed reads newWriteAuthority() once and draws Retry setup through adminWriteControlHtml(…, \"wizard-block\"); the refusal arm drops #new-retry, and the click wiring below it is guarded on the hook so a refused principal has nothing bound. MEASURED BOTH WAYS: theater-failed paints 1, theater-failed-member paints 0 (member-authority-sweep WATCHED row #new-retry)" },
 
   // ── team membership — every write behind assignableRoles(ctx.role)
   { fn: "submitInvite", verb: "POST", route: "/v1/teams/:*/invitations", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "canManage = assignableRoles(ctx.role).length > 0" },
@@ -1244,21 +1258,14 @@ const OFFERS = [
     data: "data-agent-key-send",
     what: "supportRowHtml's Deliver-key button, one per LIVE support row",
   },
-  {
-    key: "newVercelDeploy|POST /v1/barkparks/:*/vercel-deploy",
-    id: "new-vercel-claim",
-    what: "the post-launch theater's Vercel claim button",
-  },
-  {
-    key: "newCreateRepo|POST /v1/github/repos",
-    id: "new-gh-create",
-    what: "the post-launch theater's Create-GitHub-repo button",
-  },
-  {
-    key: "newRenderFailed|POST /v1/barkparks/:*/retry",
-    id: "new-retry",
-    what: "the post-launch theater's Retry-setup button on the failed arm",
-  },
+  // cch-r16-w11 REMOVED the three launch-wizard rows that sat here
+  // (newVercelDeploy / newCreateRepo / newRenderFailed). This list is a
+  // PREDICATE OVER THE PIN — one entry per unpredicated row, both directions
+  // checked — so a row that leaves the unpredicated population must leave this
+  // list in the same commit or the arm reds as an offer spec for a row nobody
+  // classifies. Their offer sites did not disappear; they are FENCED, and the
+  // three ids (#new-vercel-claim, #new-gh-create, #new-retry) are now measured
+  // by member-authority-sweep.mjs's WATCHED arm and by __app.test.mjs instead.
 ];
 
 // THE OFFER SET IS A PREDICATE OVER THE PIN, NOT A LIST BESIDE IT. A new
@@ -1475,7 +1482,13 @@ for (const f of FILING_FIVE) {
 // console moved — a row that becomes PROVEN-REACHABLE is a defect arriving, and
 // one that leaves UNOBSERVABLE means the corpus grew a scenario that can finally
 // see it. Neither should land silently.
-const EXPECT_POPULATIONS = { reachable: 0, omitted: 1, unobservable: 4 };
+// cch-r16-w11 moved UNOBSERVABLE 4 -> 1, and the direction is the GOOD one
+// twice over: three rows left the unpredicated population entirely (they are
+// FENCED now, not merely re-classified), and all three were unobservable rows,
+// so what is left is the two this slice does not own. RE-DERIVED by RUNNING
+// this census and reading the `found` line it PRINTED ("0 reachable · 1 omitted
+// · 1 unobservable"), never by subtracting three.
+const EXPECT_POPULATIONS = { reachable: 0, omitted: 1, unobservable: 1 };
 if (POP.reachable !== EXPECT_POPULATIONS.reachable ||
     POP.omitted !== EXPECT_POPULATIONS.omitted ||
     POP.unobservable !== EXPECT_POPULATIONS.unobservable) {
@@ -1556,7 +1569,17 @@ if (unresolved.length) {
 // is pre-session, so it adds nothing to `elevated` and therefore nothing to
 // `predicated`/`unpredicated`. A bump that moved `unpredicated` would mean the
 // console had grown an affordance the server can refuse — this one did not.
-const EXPECT = { total: 80, elevated: 39, predicated: 34, unpredicated: 5 };
+// predicated 34 → 37, unpredicated 5 → 2 (cch-r16-w11): newVercelDeploy,
+// newCreateRepo and newRenderFailed — the three unowned rows on the
+// UNPREDICATED list — are now fenced on the LAUNCH band through
+// adminWriteControlHtml, so each moves from the unpredicated column into the
+// predicated one. `total` and `elevated` are UNMOVED and that is the
+// load-bearing part of this bump: no call site was added or removed and no
+// route's tier changed — the same 39 elevated writes are simply decided by 37
+// bands instead of 34. RE-DERIVED by RUNNING this census and reading the
+// `found` line it PRINTED ("80 rows · 39 elevated · 37 predicated · 2
+// unpredicated"), never by adding three and subtracting three.
+const EXPECT = { total: 80, elevated: 39, predicated: 37, unpredicated: 2 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
@@ -1628,9 +1651,12 @@ const LEGACY_UNPREDICATED = [
   // …or simply read the "UNPREDICATED ELEVATED WRITES" block this file prints.
   "submitProviderCred|POST /v1/providers",
   "submitAgentKey|POST /v1/barkparks/:*/agent-key",
-  "newVercelDeploy|POST /v1/barkparks/:*/vercel-deploy",
-  "newCreateRepo|POST /v1/github/repos",
-  "newRenderFailed|POST /v1/barkparks/:*/retry",
+  // cch-r16-w11 RATCHETED THIS CEILING DOWN BY THREE. newVercelDeploy,
+  // newCreateRepo and newRenderFailed are fenced through adminWriteControlHtml
+  // on the launch band, so they are no longer unpredicated rows and may not sit
+  // on a list whose whole job is to name what is still unfixed. Removing them
+  // is the ratchet TIGHTENING: the day one of them regresses to predicate:null
+  // it reds as NOVEL rather than being absorbed by a stale ceiling.
 ];
 {
   if (new Set(LEGACY_UNPREDICATED).size !== LEGACY_UNPREDICATED.length) {
@@ -2545,6 +2571,16 @@ if (dupes.length) {
       { fn: "refreshLaunchOffers", why: "NAV, not a write: it drives setHeaderLaunchHidden for those same two header doors after a fleet load, because that path never re-enters the wizard. Same affordance as setHeaderLaunchHidden, one hop up" },
       { fn: "paintOverviewHead", why: "COPY, not an affordance at all: the only thing this read changes is the text of #overview-sub — launchRefusalCopy().title on a determinate refusal, the shipped line otherwise. There is no control here to withhold, so there is nothing for a row to pin" },
       { fn: "paletteActionItems", why: "NAV, not a write: it filters the act-launch entry out of the palette on a determinate \"refuse\". The palette re-emits on every open and, like the scope menu, keeps the row on \"loading\"/\"failed\" rather than deleting an owner's action over a slow /v1/me" },
+      // cch-r16-w11 — the SIXTH reader of the launch band, and the only one that
+      // is neither a write nor a door: newWriteAuthority() is the NARROWING that
+      // maps launchAuthority()'s five values onto adminWriteControlHtml's three.
+      // It decides nothing itself and fronts no control; the three rows that DO
+      // front a control (newVercelDeploy, newCreateRepo, newRenderFailed) claim
+      // `newWriteAuthority` as their band and their own render functions as the
+      // read, which is where (2i-2) checks the question is actually asked. A row
+      // claiming THIS function as its launchAuthority read would be pinning the
+      // adapter instead of the affordance.
+      { fn: "newWriteAuthority", why: "NARROWING, not a write and not a door: it maps launchAuthority()'s five-valued band onto adminWriteControlHtml's three-valued one, failing closed (loading/failed/stale -> \"unknown\"). It fronts no control of its own — the three launch-wizard write rows pin the NEW_WRITE_BAND it produces, and their reads are the render functions that call it" },
     ],
   };
 

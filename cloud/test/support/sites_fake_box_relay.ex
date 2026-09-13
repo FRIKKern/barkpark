@@ -140,23 +140,32 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
   argument and every other key has a plausible default.
   """
   def terminal_record(slug, build_id, log_state, opts \\ []) do
-    defaults = %{
-      "record" => "present",
-      "log_path" => "/var/lib/barkpark/site-runs/#{slug}-#{build_id}.log",
-      "log_bytes" => 31_402,
-      "exit_code" => 12,
-      "failure_reason" => "BUILD failed (exit 12)",
-      "stages" => [%{"name" => "BUILD", "status" => "failed"}],
-      "unit_name" => "barkpark-site@#{slug}.service",
-      "journal_command" => "journalctl -u barkpark-site@#{slug}",
-      "mode" => "deploy",
-      "runtime_target" => "static",
-      "started_at" => "2026-08-06T01:00:00Z",
-      "finished_at" => "2026-08-06T01:04:00Z",
-      "evicted_at" => nil,
-      "route_status" => nil,
-      "route_detail" => nil
-    }
+    # KEYED BY ATOM, CONVERTED TO STRING — never the reverse. An earlier version
+    # kept these as string keys and reached the caller's opts through
+    # `String.to_existing_atom(key)`. That made the fixture's correctness depend
+    # on whether some OTHER module happening to be loaded in the same run had
+    # already interned `:finished_at` — true for the full suite, FALSE for
+    # `mix test test/barkpark_cloud/web/` or either RouterBuildLog file alone,
+    # where all 11 tests calling this helper died with "1st argument: not an
+    # already existing atom". The opt names are literals right here, so write
+    # them as atoms and derive the string: no run-order dependency left.
+    defaults = [
+      record: "present",
+      log_path: "/var/lib/barkpark/site-runs/#{slug}-#{build_id}.log",
+      log_bytes: 31_402,
+      exit_code: 12,
+      failure_reason: "BUILD failed (exit 12)",
+      stages: [%{"name" => "BUILD", "status" => "failed"}],
+      unit_name: "barkpark-site@#{slug}.service",
+      journal_command: "journalctl -u barkpark-site@#{slug}",
+      mode: "deploy",
+      runtime_target: "static",
+      started_at: "2026-08-06T01:00:00Z",
+      finished_at: "2026-08-06T01:04:00Z",
+      evicted_at: nil,
+      route_status: nil,
+      route_detail: nil
+    ]
 
     # THE KEY SET IS READ, NOT TYPED. `record_body/1` names every key
     # `render_build_record/1` emits, straight out of the shared JSON, so a key
@@ -173,7 +182,7 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
 
     body =
       Enum.reduce(defaults, body, fn {key, value}, acc ->
-        Map.put(acc, key, Keyword.get(opts, String.to_existing_atom(key), value))
+        Map.put(acc, Atom.to_string(key), Keyword.get(opts, key, value))
       end)
 
     {:ok, 200, body}

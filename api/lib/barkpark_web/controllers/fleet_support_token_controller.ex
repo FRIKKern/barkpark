@@ -71,6 +71,7 @@ defmodule BarkparkWeb.FleetSupportTokenController do
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Repo
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.ErrorResponse
 
   # A support token exists to work the ledger: read to poll ready tasks, write to
   # claim/pulse/stamp/close them. NOT admin — it can never mint more tokens.
@@ -192,13 +193,11 @@ defmodule BarkparkWeb.FleetSupportTokenController do
 
   defp unprocessable(conn, message) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", message: message})
   end
 
   defp not_found(conn, message) do
     conn
-    |> put_status(:not_found)
-    |> json(%{error: %{code: "not_found", message: message}})
+    |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: message})
   end
 end

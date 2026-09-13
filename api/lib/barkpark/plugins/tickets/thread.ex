@@ -145,12 +145,20 @@ defmodule Barkpark.Plugins.Tickets.Thread do
           "waiting_since" => now
         }
 
-        Content.create_document(
-          @type_name,
-          %{"title" => subject, "content" => content},
-          dataset_of(key),
-          key_scope(key)
-        )
+        # CLASS (b), the seeded-Default ruling (task-e6523cc7154304f0):
+        # anonymous ticket submission has no principal, so scope can only come
+        # from the ROUTE'S SITE CONTEXT — here, the submitter key, which
+        # `Keys.mint` binds to a workspace. A key with no workspace cannot
+        # attribute its ticket to anyone, and stamping the seeded Default would
+        # file a stranger's ticket under a tenant nobody chose. REFUSE instead.
+        with {:ok, scope} <- key_write_scope(key) do
+          Content.create_document(
+            @type_name,
+            %{"title" => subject, "content" => content},
+            dataset_of(key),
+            scope
+          )
+        end
     end
   end
 
@@ -539,12 +547,18 @@ defmodule Barkpark.Plugins.Tickets.Thread do
       "status" => fresh.status || "draft"
     }
 
-    Content.upsert_document(
-      @type_name,
-      attrs,
-      fresh.dataset,
-      doc_scope(fresh) ++ [if_rev: fresh.rev]
-    )
+    # CLASS (b) again: an append inherits the ticket row's own tenancy. A
+    # nil-workspace ticket row is pre-tenancy; re-persisting it through
+    # WriteScope with no scope key would stamp it into the seeded Default on
+    # the way past. Refuse rather than move someone's ticket.
+    with {:ok, scope} <- doc_write_scope(fresh) do
+      Content.upsert_document(
+        @type_name,
+        attrs,
+        fresh.dataset,
+        scope ++ [if_rev: fresh.rev]
+      )
+    end
   end
 
   defp refetch(%Document{doc_id: doc_id, dataset: dataset} = doc) do
@@ -623,6 +637,25 @@ defmodule Barkpark.Plugins.Tickets.Thread do
     []
     |> put_if(:workspace_id, ws)
     |> put_if(:project_id, pr)
+  end
+
+  # WRITE-side scope (the seeded-Default ruling, task-e6523cc7154304f0). The
+  # read-side `key_scope/1` / `doc_scope/1` above stay tolerant of a nil
+  # workspace — a read that names no workspace narrows, it does not misattribute.
+  # A WRITE that names none would be stamped into the seeded Default by
+  # `Content.WriteScope`, so these two gate it: scope or refusal, never Default.
+  defp key_write_scope(key) do
+    case kfetch(key, :workspace_id) do
+      ws when is_binary(ws) and ws != "" -> {:ok, key_scope(key)}
+      _ -> {:error, :workspace_scope_required}
+    end
+  end
+
+  defp doc_write_scope(%Document{workspace_id: ws} = doc) do
+    case ws do
+      w when is_binary(w) and w != "" -> {:ok, doc_scope(doc)}
+      _ -> {:error, :workspace_scope_required}
+    end
   end
 
   defp put_if(opts, _key, nil), do: opts

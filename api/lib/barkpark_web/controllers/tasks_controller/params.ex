@@ -2587,6 +2587,22 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   @doc """
+  The `--supersede-instruction` flag, read the same way and kept DELIBERATELY
+  SEPARATE from `stage_supersede/1` (task-bd7476eecdede252): the note override
+  and the instruction override are two locks, and one key to both would let a
+  caller replacing a verdict on purpose destroy standing guidance they never
+  read. Absent → `nil`, so `put_opt/3` leaves the opt off entirely and
+  `Tasks.Stage` defaults it to refusing.
+  """
+  @spec stage_supersede_instruction(map()) :: true | nil
+  def stage_supersede_instruction(params) do
+    flag =
+      Map.get(params, "supersede_instruction") || Map.get(params, "supersede-instruction")
+
+    if stamp_flag?(flag), do: true, else: nil
+  end
+
+  @doc """
   Bounds a disposition_reason for an error envelope. Returns
   `{excerpt, truncated?}`: the note verbatim when it fits, otherwise its first
   #{@note_excerpt_limit} graphemes with an ellipsis and `true`.
