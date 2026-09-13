@@ -631,7 +631,7 @@ func (b *detailBuilder) emitClaim(d TaskDetail, width int, now time.Time) {
 		switch {
 		case rem <= 0:
 			b.add(dangerStyle.Render(truncate("       lease expired "+AgeBadge(d.ClaimExpiredAt, now)+" ago", width)))
-		case rem <= leaseTTL*3/10:
+		case rem <= claimLeaseTTL(d.Claim)*3/10:
 			b.add(warnStyle.Render(truncate("       lease expires in "+durToken(rem), width)))
 		default:
 			b.add(dimStyle.Render(truncate("       lease expires in "+durToken(rem), width)))
