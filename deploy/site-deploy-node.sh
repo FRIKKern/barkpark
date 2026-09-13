@@ -960,23 +960,263 @@ if [ "$MODE" = selftest ]; then
   # the handed pair is NOT what the message names. The first two checks above
   # were VACUOUS until these landed: the fixture handed the teardown the same
   # ports the env files carried, so held_port's env read was unmeasured.
-  SELFTEST_FLOOR_MIN=438
-  SELFTEST_FLOOR_FULL=455
+  # 2026-09-12: +42 (438->480, 455->497) for the FIXTURE/ARRIVED pair —
+  # check_run_arrived states, on its own three lines, that the harness kept both
+  # RESERVED ports and that the run staged and reached HEALTH, for each of the 14
+  # sl_deploy-driven e2e blocks (task-a1a209424c7127e8). Until these landed, a
+  # block's only negative assertion passed VACUOUSLY on a run that never arrived.
+  # All 42 sit outside both optional blocks, so BOTH floors move by the same 42.
+  SELFTEST_FLOOR_MIN=480
+  SELFTEST_FLOOR_FULL=497
   TESTS=0; FAILS=0
-  check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
+  # A bare "FAIL - <label>" is not evidence. It cannot tell a SUBJECT that
+  # misbehaved from a FIXTURE that never reached the state under test, and the
+  # value the predicate actually saw is gone the instant the line is printed —
+  # which is exactly how one red in six runs of the truncation MUTATION PROOF
+  # became unrecoverable (task-a1a209424c7127e8). So every failure now names
+  # what it OBSERVED: the predicate with its arguments ALREADY EXPANDED by the
+  # shell (`[ 0 = 14 ]` names the exit code that was really seen), a
+  # predicate-specific probe where one exists, and the stage trail of the run
+  # the log holds. The cure lives HERE, in the one helper every check passes
+  # through, so no block in this engine can produce a bare FAIL again.
+  check() {
+    local label="$1"; shift
+    TESTS=$((TESTS + 1))
+    if "$@"; then
+      echo "  ok   - $label"
+    else
+      echo "  FAIL - $label"
+      check_observed "$@" 2>&1 | sed 's/^/         observed: /'
+      FAILS=$((FAILS + 1))
+    fi
+  }
+  check_observed() {
+    printf 'predicate as it ran: '; printf '%s ' "$@"; printf '\n'
+    if declare -F "observe_$1" >/dev/null 2>&1; then "observe_$1" "${@:2}"; fi
+    run_trail
+  }
+  # The stage trail is the "did the run ARRIVE" half, printed beside every red so
+  # the two failure modes are distinguishable in the log without a re-run.
+  run_trail() {
+    [ -n "${TD:-}" ] || return 0
+    if [ -s "$TD/out.log" ]; then
+      printf 'the run trail was: %s\n' \
+        "$(grep '^BPSTAGE ' "$TD/out.log" 2>/dev/null | sed 's/ detail=.*//' | tr '\n' '|' | cut -c1-420)"
+    else
+      printf 'the run left NO log at all (%s empty or absent) — the fixture never got there\n' "$TD/out.log"
+    fi
+  }
+  observe_saw()   { printf 'BPSTAGE lines seen for name=%s: %s\n' "$1" \
+                      "$(grep "^BPSTAGE name=$1 " "$TD/out.log" 2>/dev/null | sed 's/ detail=.*//' | tr '\n' '|')"; }
+  observe_nosaw() { observe_saw "$@"; }
+  observe_no_log_match() { printf 'lines matching %s: %s\n' "$1" \
+                      "$(grep -n "$1" "$TD/out.log" 2>/dev/null | head -3 | tr '\n' '|' | cut -c1-300)"; }
+  observe_grep()  { local f="${!#}"; printf 'searched %s (%s lines); nothing matched\n' "$f" \
+                      "$(wc -l < "$f" 2>/dev/null | tr -d ' ')"; }
+  observe_log_has_a_run() { printf 'the negative assertion was REFUSED as vacuous: this log records no run\n'; }
+  observe_fixture_clean() { cat "$TD/fixture.verdict" 2>/dev/null; }
+  observe_res_held() { printf 'reservation record %s: %s\n' "$RESDIR/$1.holder" \
+                      "$(cat "$RESDIR/$1.holder" 2>/dev/null || echo GONE)"; }
 
   TD="$(mktemp -d "${TMPDIR:-/tmp}/site-deploy-node-selftest.XXXXXX")"
   # Kill any slot http servers the fake systemctl left running.
   # shellcheck disable=SC2154  # pf is the for-loop var inside the (deferred) trap body
-  trap 'for pf in "$TD"/slotpids/*; do [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null; done; rm -rf "$TD"' EXIT
+  trap 'for pf in "$TD"/slotpids/* "$TD"/portres/*.holder; do [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null; done; rm -rf "$TD"' EXIT
 
-  # Two free loopback ports for the two slots.
-  free_port() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'; }
-  T_PORT_A="$(free_port)"; T_PORT_B="$(free_port)"; T_PORT_C="$(free_port)"; T_PORT_D="$(free_port)"
-  T_PORT_E="$(free_port)"; T_PORT_F="$(free_port)"   # basePath site's two slots
-  T_PORT_G="$(free_port)"; T_PORT_H="$(free_port)"   # prefix-collision: the LONGER sibling
-  T_PORT_I="$(free_port)"; T_PORT_J="$(free_port)"   # prefix-collision: the PREFIX slug
-  T_PORT_K="$(free_port)"; T_PORT_L="$(free_port)"   # the pre-#3382 block's two slots
+  # -------------------------------------------------------------------------
+  # THE PORT IS RESERVED, NOT GUESSED (task-a1a209424c7127e8).
+  #
+  # The helper this replaces was:
+  #     free_port() { python3 -c 'import socket;s=socket.socket();
+  #                   s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'; }
+  # bind -> read the number -> CLOSE -> hand the bare number to a deploy that
+  # binds it seconds later. Textbook TOCTOU, and NOT local to one block: every
+  # e2e block in this engine took its ports from that one helper, so on a loaded
+  # box ANY of them could lose its port between pick and bind, fail to boot its
+  # fake slot, and red as if the SUBJECT had misbehaved.
+  #
+  # Here the socket is never let go. `reserve_port` starts a HOLDER process that
+  # binds, LISTENS, and keeps the socket open; the number only becomes knowable
+  # after the socket is listening. The slot server does not re-bind it — it
+  # BORROWS the holder's socket over a unix channel (SCM_RIGHTS), and the holder
+  # keeps its own copy, so the port is never unbound for an instant. There is no
+  # window between pick and bind because nothing binds twice. A slot that
+  # is stopped simply gives the socket back to the holder that never let go, so
+  # the port stays ours for the whole life of the fixture and `res_held` is an
+  # ASSERTABLE fact rather than a hope.
+  # -------------------------------------------------------------------------
+  RESDIR="$TD/portres"; mkdir -p "$RESDIR"
+  cat > "$TD/portres.py" <<'PORTRES'
+"""Hold a loopback port by keeping its LISTENING socket open for the whole life
+of the fixture, and lend that very socket to each slot server over a unix socket
+(SCM_RIGHTS). The holder NEVER closes its own copy, so there is no instant at
+which the port is unbound and stealable — and because the server is still
+spawned by the fake systemctl (not exec'd out of this process), the slot keeps
+the file-descriptor lineage the build-gate leak proof depends on.
+
+While no server holds the port, the holder drains-and-closes arriving
+connections, so a stopped slot fails fast instead of hanging on a backlog
+nobody accepts.
+"""
+import array
+import os
+import select
+import socket
+import sys
+import time
+
+
+def hold(want):
+    deadline = time.time() + 20.0
+    while True:
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", want))
+            s.listen(64)
+            return s
+        except OSError as exc:
+            s.close()
+            if want == 0 or time.time() > deadline:
+                sys.stderr.write("portres: cannot hold port %d: %s\n" % (want, exc))
+                sys.exit(3)
+            time.sleep(0.05)
+
+
+def alive(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def main():
+    resdir = sys.argv[1]
+    want = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    sock = hold(want)
+    port = sock.getsockname()[1]
+
+    ctlpath = os.path.join(resdir, "%d.sock" % port)
+    armed = os.path.join(resdir, "%d.armed" % port)
+    for stale in (ctlpath, armed):
+        try:
+            os.unlink(stale)
+        except OSError:
+            pass
+    ctl = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    ctl.bind(ctlpath)
+    ctl.listen(8)
+
+    tmp = os.path.join(resdir, "%d.holder.tmp" % port)
+    with open(tmp, "w") as fh:
+        fh.write("%d\n" % os.getpid())
+    os.rename(tmp, os.path.join(resdir, "%d.holder" % port))
+    # The number becomes knowable only HERE — with the socket already LISTENING.
+    sys.stdout.write("%d\n" % port)
+    sys.stdout.flush()
+    os.close(1)
+
+    borrower = 0
+    while True:
+        watch = [ctl] if alive(borrower) else [ctl, sock]
+        try:
+            ready = select.select(watch, [], [], 0.2)[0]
+        except OSError:
+            continue
+        if ctl in ready:
+            conn, _ = ctl.accept()
+            try:
+                who = conn.recv(64).decode().strip()
+                conn.sendmsg(
+                    [b"1"],
+                    [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [sock.fileno()]))],
+                )
+                borrower = int(who or 0)
+                with open(armed + ".tmp", "w") as fh:
+                    fh.write("%d\n" % borrower)
+                os.rename(armed + ".tmp", armed)
+            except (OSError, ValueError):
+                pass
+            finally:
+                conn.close()
+        if sock in ready:
+            # No server is holding this port: refuse fast rather than leave the
+            # caller hanging on a backlog nobody will accept.
+            try:
+                sock.accept()[0].close()
+            except OSError:
+                pass
+
+
+main()
+PORTRES
+  # The fd-lending client, shared by both slot servers.
+  cat > "$TD/resock.py" <<'RESOCK'
+"""Borrow the RESERVED listening socket from its holder. The holder keeps its own
+copy open, so the port is never unbound between the pick and this serve."""
+import array
+import os
+import socket
+
+
+def acquire():
+    path = os.environ.get("BP_RESERVED_SOCK")
+    if not path:
+        return None
+    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    c.connect(path)
+    c.sendall(("%d\n" % os.getpid()).encode())
+    fds = array.array("i")
+    _, anc, _, _ = c.recvmsg(1, socket.CMSG_SPACE(4))
+    for level, typ, data in anc:
+        if level == socket.SOL_SOCKET and typ == socket.SCM_RIGHTS:
+            fds.frombytes(data[: len(data) - (len(data) % fds.itemsize)])
+    c.close()
+    if not fds:
+        raise SystemExit("portres: no reserved fd arrived from %s" % path)
+    return socket.socket(fileno=fds[0])
+RESOCK
+
+  # reserve_port -> a port whose listening socket is HELD by a live holder.
+  # Retries WITH VERIFICATION: a pick is only returned once the holder's own
+  # reservation record is on disk and its pid is alive. It never returns a number
+  # nobody is holding.
+  reserve_port() {
+    local attempt=0 out port hp n
+    while [ "$attempt" -lt 5 ]; do
+      attempt=$((attempt + 1))
+      out="$RESDIR/pick.$$.$attempt"
+      : > "$out"
+      python3 "$TD/portres.py" "$RESDIR" 0 > "$out" 2>"$out.err" &
+      hp=$!
+      n=0; port=""
+      while [ "$n" -lt 500 ]; do
+        port="$(head -n1 "$out" 2>/dev/null)"
+        [ -n "$port" ] && break
+        kill -0 "$hp" 2>/dev/null || break
+        sleep 0.02; n=$((n + 1))
+      done
+      if [ -n "$port" ] && res_held "$port"; then
+        printf '%s\n' "$port"
+        return 0
+      fi
+      kill "$hp" 2>/dev/null
+    done
+    echo "FIXTURE: reserve_port could not hold a loopback port in 5 attempts: $(cat "$out.err" 2>/dev/null)" >&2
+    return 1
+  }
+  # The reservation as an ASSERTABLE fact: the port is held by a process of ours
+  # that is still alive (the idle holder before hand-off, the slot server after).
+  res_held() { local hp; hp="$(cat "$RESDIR/$1.holder" 2>/dev/null)"; [ -n "$hp" ] && kill -0 "$hp" 2>/dev/null; }
+
+  T_PORT_A="$(reserve_port)"; T_PORT_B="$(reserve_port)"; T_PORT_C="$(reserve_port)"; T_PORT_D="$(reserve_port)"
+  T_PORT_E="$(reserve_port)"; T_PORT_F="$(reserve_port)"   # basePath site's two slots
+  T_PORT_G="$(reserve_port)"; T_PORT_H="$(reserve_port)"   # prefix-collision: the LONGER sibling
+  T_PORT_I="$(reserve_port)"; T_PORT_J="$(reserve_port)"   # prefix-collision: the PREFIX slug
+  T_PORT_K="$(reserve_port)"; T_PORT_L="$(reserve_port)"   # the pre-#3382 block's two slots
 
   FAKEBIN="$TD/bin"; SLOTPIDS="$TD/slotpids"; SENV="$TD/slots"; SRC="$TD/src"
   mkdir -p "$FAKEBIN" "$SLOTPIDS" "$SENV" "$SRC"
@@ -990,7 +1230,33 @@ if [ "$MODE" = selftest ]; then
   # so the REAL health_gate_node code gates a REAL http endpoint offline.
   cat > "$FAKEBIN/systemctl" <<SYSCTL
 #!/usr/bin/env bash
-SENVDIR="$SENV"; PIDDIR="$SLOTPIDS"
+SENVDIR="$SENV"; PIDDIR="$SLOTPIDS"; RESDIR="$RESDIR"
+# A slot NEVER binds a port itself. Its port has been held, listening, by its
+# reservation holder since the moment it was picked; res_handoff makes the slot
+# server BORROW that socket over the holder's unix channel and waits until the
+# holder confirms the hand-off, so `start` is done only once the port is being
+# served. The server is still spawned HERE, as a child of the deploy, which is
+# what keeps the build-gate fd-leak proof meaningful.
+res_handoff() {
+  local p="\$1"; shift
+  local hp n=0
+  hp="\$(cat "\$RESDIR/\$p.holder" 2>/dev/null)"
+  if [ -z "\$hp" ] || ! kill -0 "\$hp" 2>/dev/null; then
+    echo "FIXTURE: port \$p has no live reservation holder — the harness lost its port" >&2
+    return 1
+  fi
+  rm -f "\$RESDIR/\$p.armed"
+  BP_RESERVED_SOCK="\$RESDIR/\$p.sock" python3 "\$@" >/dev/null 2>&1 &
+  local srv=\$!
+  while [ "\$n" -lt 500 ]; do
+    [ -f "\$RESDIR/\$p.armed" ] && { echo "\$srv"; return 0; }
+    kill -0 "\$srv" 2>/dev/null || break
+    sleep 0.02; n=\$((n + 1))
+  done
+  echo "FIXTURE: slot server never borrowed reserved port \$p" >&2
+  kill "\$srv" 2>/dev/null
+  return 1
+}
 verb="\${1:-}"
 case "\$verb" in
   is-active) shift; [ "\${1:-}" = --quiet ] && shift; unit="\${1:-}";;
@@ -1019,18 +1285,24 @@ case "\$verb" in
     # flush, then the stream hangs before bp-doc-id. That is the shape a probe
     # ceiling turns into http_code=200 + curl exit 28 + a partial document.
     if [ -f "\$rel/.truncate-serve" ]; then
-      python3 "$TD/trunc-server.py" "\$port" "\$rel" "\$(cat "\$rel/.truncate-serve")" >/dev/null 2>&1 &
-    elif [ -f "\$rel/.slow-serve" ] || [ -f "\$rel/.broken-serve" ]; then
+      srvpid="\$(res_handoff "\$port" "$TD/trunc-server.py" "\$port" "\$rel" "\$(cat "\$rel/.truncate-serve")")" || exit 1
+    else
+      # The plain file server is the probe server with no delay and status 200 —
+      # one code path, so the fd hand-off is written once.
       delay=0; status=200
       [ -f "\$rel/.slow-serve" ]   && delay="\$(cat "\$rel/.slow-serve")"
       [ -f "\$rel/.broken-serve" ] && status="\$(cat "\$rel/.broken-serve")"
-      python3 "$TD/probe-server.py" "\$port" "\$rel" "\$delay" "\$status" >/dev/null 2>&1 &
-    else
-      python3 -m http.server "\$port" --bind 127.0.0.1 --directory "\$rel" >/dev/null 2>&1 &
+      srvpid="\$(res_handoff "\$port" "$TD/probe-server.py" "\$port" "\$rel" "\$delay" "\$status")" || exit 1
     fi
-    echo \$! > "\$pidf"; exit 0;;
+    echo "\$srvpid" > "\$pidf"; exit 0;;
   stop)
-    [ -f "\$pidf" ] && { kill "\$(cat "\$pidf")" 2>/dev/null; rm -f "\$pidf"; }; exit 0;;
+    # Only the BORROWER dies. The reservation holder still has the listening
+    # socket, so a stopped slot's port is never released back to the box.
+    [ -f "\$pidf" ] && { kill "\$(cat "\$pidf")" 2>/dev/null; rm -f "\$pidf"; }
+    envf="\$SENVDIR/\$inst.env"
+    p="\$(grep -E '^PORT=' "\$envf" 2>/dev/null | cut -d= -f2)"
+    [ -n "\$p" ] && rm -f "\$RESDIR/\$p.armed"
+    exit 0;;
   is-active)
     [ -f "\$pidf" ] && kill -0 "\$(cat "\$pidf")" 2>/dev/null && exit 0; exit 1;;
 esac
@@ -1040,7 +1312,7 @@ SYSCTL
   # takes 48s to render and a slot that never answers 200 are INDISTINGUISHABLE to
   # a probe with one ceiling — this is how both are driven offline, in seconds.
   cat > "$TD/probe-server.py" <<'PROBESRV'
-import http.server, sys, time
+import http.server, os, sys, time
 port, root, delay, status = int(sys.argv[1]), sys.argv[2], float(sys.argv[3]), int(sys.argv[4])
 class H(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
@@ -1056,7 +1328,18 @@ class H(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             return
         super().do_GET()
-http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+# The listening socket is BORROWED from the reservation holder — this process
+# never binds, so the port cannot be lost between the pick and the serve.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import resock
+_ls = resock.acquire()
+if _ls is not None:
+    srv = http.server.HTTPServer(("127.0.0.1", port), H, bind_and_activate=False)
+    srv.socket = _ls
+    srv.server_address = _ls.getsockname()
+else:
+    srv = http.server.HTTPServer(("127.0.0.1", port), H)
+srv.serve_forever()
 PROBESRV
   # THE TRUNCATING SLOT SERVER — a render that STREAMS. It answers 200
   # immediately, flushes everything up to (but not including) the bp-doc-id
@@ -1068,7 +1351,7 @@ PROBESRV
   # markers. Threaded on purpose: each probe attempt must be answered on its own
   # timeline, not queued behind the previous attempt's stall.
   cat > "$TD/trunc-server.py" <<'TRUNCSRV'
-import http.server, socketserver, sys, time
+import http.server, os, socketserver, sys, time
 port, root, stall = int(sys.argv[1]), sys.argv[2], float(sys.argv[3])
 with open(root + "/index.html", "rb") as f:
     DOC = f.read()
@@ -1091,7 +1374,16 @@ class H(http.server.BaseHTTPRequestHandler):
             pass
 class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
-S(("127.0.0.1", port), H).serve_forever()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import resock
+_ls = resock.acquire()
+if _ls is not None:
+    srv = S(("127.0.0.1", port), H, bind_and_activate=False)
+    srv.socket = _ls
+    srv.server_address = _ls.getsockname()
+else:
+    srv = S(("127.0.0.1", port), H)
+srv.serve_forever()
 TRUNCSRV
   # Fake npm: `ci` no-ops; `run build` emits a Next standalone layout carrying the
   # markers the health gate asserts. Lie/fail switches ride in FILES in the source
@@ -1224,7 +1516,34 @@ FAKENPM
   nosaw() { ! grep -q "^BPSTAGE name=$1 " "$TD/out.log"; }
   # "this run's log says nothing of the kind" — the negative half of a reason
   # assertion (a diagnosis must not be invented when nothing was recorded).
-  no_log_match() { ! grep -q "$1" "$TD/out.log"; }
+  # A NEGATIVE ASSERTION IS ONLY EVIDENCE IF THE RUN ARRIVED. The old form
+  # `! grep -q …` passes on an EMPTY log — a run that never started satisfies
+  # every "it did not say X" in this file at once, which is precisely the shape
+  # that made one red unreadable (task-a1a209424c7127e8). It now refuses a log
+  # that records no run at all, and every block that uses it also states arrival
+  # positively via check_run_arrived.
+  log_has_a_run() { [ -s "$TD/out.log" ] && grep -q '^BPSTAGE name=' "$TD/out.log"; }
+  no_log_match() { log_has_a_run && ! grep -q "$1" "$TD/out.log"; }
+
+  # THE FIXTURE'S OWN VERDICT. sl_deploy records, either side of the run, whether
+  # the two RESERVED ports were still held by this harness; an empty verdict file
+  # means the fixture was intact. Without it a lost port reads as a subject that
+  # misbehaved.
+  fixture_clean() { [ ! -s "$TD/fixture.verdict" ]; }
+
+  # THE PAIR (c2). "the subject behaved differently" and "the fixture never got
+  # there" used to be indistinguishable in this log, because a block asserted
+  # only what the run CONCLUDED. Arrival is now stated POSITIVELY, SEPARATELY,
+  # and BEFORE any claim about the conclusion — three own-line checks, so a red
+  # names which half broke.
+  check_run_arrived() { # <build_id>
+    check "FIXTURE ($1): both reserved ports were still held by the harness across the run" \
+      fixture_clean
+    check "ARRIVED ($1): the run staged a release (STAGE ok) — the subject really was exercised" \
+      grep -qE "^BPSTAGE name=STAGE status=ok build_id=$1" "$TD/out.log"
+    check "ARRIVED ($1): the run reached the HEALTH gate — asserted apart from what HEALTH concluded" \
+      grep -qE "^BPSTAGE name=HEALTH status=(started|ok|failed) build_id=$1" "$TD/out.log"
+  }
   cf_port() { awk -v m="BARKPARK_SITE_ROUTE:selftest" 'index($0,m){i=1} i&&match($0,/localhost:[0-9]+/){p=substr($0,RSTART+10,RLENGTH-10);print p;exit}' "$CF"; }
 
   # -------------------------------------------------------------------------
@@ -1709,7 +2028,17 @@ FAKENPM
   # seconds, not minutes. What must differ is the OUTCOME, not the wording alone:
   # one deploys, one refuses.
   # -------------------------------------------------------------------------
+  # The harness HELPER, not each calling block, records whether the fixture was
+  # sound: the two reserved ports are checked for a live holder BEFORE the run
+  # and again AFTER it, and anything wrong is written, with the observed holder,
+  # to $TD/fixture.verdict for check_run_arrived to assert and print.
   sl_deploy() { # <slug> <build_id> <lock> <port-a> <port-b> [patient-max] -> exit code
+    local p rc
+    : > "$TD/fixture.verdict"
+    for p in "$4" "$5"; do
+      res_held "$p" || printf 'reserved port %s had NO live holder BEFORE the run (record: %s)\n' \
+        "$p" "$(cat "$RESDIR/$p.holder" 2>/dev/null || echo GONE)" >> "$TD/fixture.verdict"
+    done
     env PATH="$FAKEBIN:$PATH" SITE_SLUG="$1" BUILD_ID="$2" CONTENT_REV=sl-rev \
       SITE_SRC="$SRC" SITE_PORT_A="$4" SITE_PORT_B="$5" \
       BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
@@ -1717,13 +2046,19 @@ FAKENPM
       BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
       BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
       BARKPARK_SITE_HEALTH_PATIENT_MAX="${6:-20}" \
-      bash "${SL_ENGINE:-$SELF}" > "$TD/out.log" 2> "$TD/err.log"; echo $?
+      bash "${SL_ENGINE:-$SELF}" > "$TD/out.log" 2> "$TD/err.log"; rc=$?
+    for p in "$4" "$5"; do
+      res_held "$p" || printf 'reserved port %s LOST its holder DURING the run (record: %s)\n' \
+        "$p" "$(cat "$RESDIR/$p.holder" 2>/dev/null || echo GONE)" >> "$TD/fixture.verdict"
+    done
+    echo "$rc"
   }
 
   echo "[selftest] e2e: a SLOW site (serves 200, past the per-attempt ceiling) is gated HEALTHY and SAYS it is slow"
   printf '2\n' > "$SRC/.slow-serve"
-  rc="$(sl_deploy slowsite sl1 slowsite "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy slowsite sl1 slowsite "$(reserve_port)" "$(reserve_port)")"
   rm -f "$SRC/.slow-serve"
+  check_run_arrived sl1
   check "slow deploy exit 0 (it renders — refusing it would be a false 'boot failed')" [ "$rc" = 0 ]
   check "HEALTH ok"                            saw HEALTH ok sl1
   check "SWITCH ok (a slow site still goes live)" saw SWITCH ok sl1
@@ -1738,8 +2073,9 @@ FAKENPM
 
   echo "[selftest] e2e: a BROKEN site (never 200, even unthrottled) is refused — a DIFFERENT outcome, in different words"
   printf '503\n' > "$SRC/.broken-serve"
-  rc="$(sl_deploy brokesite br1 brokesite "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy brokesite br1 brokesite "$(reserve_port)" "$(reserve_port)")"
   rm -f "$SRC/.broken-serve"
+  check_run_arrived br1
   check "broken deploy exit 14 (HEALTH refused)"  [ "$rc" = 14 ]
   check "HEALTH failed"                           saw HEALTH failed br1
   check "the detail says NEVER served 200"        grep -q 'NEVER served 200' "$TD/out.log"
@@ -1757,8 +2093,9 @@ FAKENPM
   # green is refused, and refused with the BROKEN wording. The distinction is
   # therefore load-bearing, not decorative.
   printf '2\n' > "$SRC/.slow-serve"
-  rc="$(sl_deploy slowsite2 sl2 slowsite2 "$(free_port)" "$(free_port)" 1)"
+  rc="$(sl_deploy slowsite2 sl2 slowsite2 "$(reserve_port)" "$(reserve_port)" 1)"
   rm -f "$SRC/.slow-serve"
+  check_run_arrived sl2
   check "MUTANT: no headroom -> the identical slow site exits 14"  [ "$rc" = 14 ]
   check "MUTANT: and it is called BROKEN, which is the false diagnosis being fixed" \
     grep -q 'BROKEN, not slow' "$TD/out.log"
@@ -1797,8 +2134,9 @@ FAKENPM
   # -------------------------------------------------------------------------
   echo "[selftest] e2e: a TRUNCATED fast read is NOT accepted as a 200 — the patient probe reads the document whole and the site deploys"
   printf '2\n' > "$SRC/.truncate-serve"
-  rc="$(sl_deploy truncsite tr1 truncsite "$(free_port)" "$(free_port)" 20)"
+  rc="$(sl_deploy truncsite tr1 truncsite "$(reserve_port)" "$(reserve_port)" 20)"
   rm -f "$SRC/.truncate-serve"
+  check_run_arrived tr1
   check "truncating-then-complete deploy exit 0"   [ "$rc" = 0 ]
   check "HEALTH ok"                                saw HEALTH ok tr1
   check "SWITCH ok (the document WAS readable — just not inside the fast ceiling)" \
@@ -1818,8 +2156,9 @@ FAKENPM
 
   echo "[selftest] e2e: a read TRUNCATED even at the patient ceiling refuses by naming the TRUNCATION — never as a fact about the content"
   printf '8\n' > "$SRC/.truncate-serve"
-  rc="$(sl_deploy truncsite2 tr2 truncsite2 "$(free_port)" "$(free_port)" 3)"
+  rc="$(sl_deploy truncsite2 tr2 truncsite2 "$(reserve_port)" "$(reserve_port)" 3)"
   rm -f "$SRC/.truncate-serve"
+  check_run_arrived tr2
   check "unreadable-within-the-ceiling deploy exit 14" [ "$rc" = 14 ]
   check "HEALTH failed"                            saw HEALTH failed tr2
   check "the detail says the body was TRUNCATED, with the seconds and the curl exit" \
@@ -1864,8 +2203,9 @@ FAKENPM
   check "the mutant differs by exactly ONE line (the mutation APPLIED)" \
     [ "$(diff "$SELF" "$TRMUT" | grep -c '^[<>]')" = 2 ]
   printf '2\n' > "$SRC/.truncate-serve"
-  mrc="$(SL_ENGINE="$TRMUT" sl_deploy truncsite3 tr3 truncsite3 "$(free_port)" "$(free_port)" 20)"
+  mrc="$(SL_ENGINE="$TRMUT" sl_deploy truncsite3 tr3 truncsite3 "$(reserve_port)" "$(reserve_port)" 20)"
   rm -f "$SRC/.truncate-serve"
+  check_run_arrived tr3
   check "MUTANT: the identical readable site is REFUSED (exit 14)"  [ "$mrc" = 14 ]
   check "MUTANT: and the reason is the FABRICATED content diagnosis" \
     grep -q 'the SSR rendered no content document (no bp-corpus-status marker: this build predates the corpus-status contract' "$TD/out.log"
@@ -1899,7 +2239,8 @@ FAKENPM
   echo "[selftest] e2e: FAIL-BEFORE — a release whose LINKED route 404s is REFUSED (14), never switched"
   printf '/sites/deep1/d/hello/\n' > "$SRC/.deep-link"
   printf '/sites/deep1/\n'         > "$SRC/.site-base"
-  rc="$(sl_deploy deep1 dp1 deep1 "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy deep1 dp1 deep1 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp1
   check "the home page itself was fine: HEALTH read all three markers" \
     no_log_match 'bp-doc-id marker is empty'
   check "deploy exits 14 (HEALTH failed)"          [ "$rc" = 14 ]
@@ -1916,7 +2257,8 @@ FAKENPM
 
   echo "[selftest] e2e: the SAME release with the linked route PRESENT deploys, and the gate names the path it certified"
   printf 'd/hello\n' > "$SRC/.deep-page"
-  rc="$(sl_deploy deep2 dp2 deep2 "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy deep2 dp2 deep2 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp2
   check "deploy exit 0"                            [ "$rc" = 0 ]
   check "HEALTH ok"                                saw HEALTH ok dp2
   check "SWITCH ok"                                saw SWITCH ok dp2
@@ -1928,14 +2270,16 @@ FAKENPM
   rm -f "$SRC/.deep-link" "$SRC/.deep-page" "$SRC/.site-base"
 
   echo "[selftest] e2e: a single-page render (no internal link) passes — the probe is n/a, never a refusal"
-  rc="$(sl_deploy deep3 dp3 deep3 "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy deep3 dp3 deep3 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp3
   check "deploy exit 0"                            [ "$rc" = 0 ]
   check "and it SAYS the probe was n/a"            grep -q 'deep-path probe n/a (single-page build)' "$TD/out.log"
 
   echo "[selftest] e2e: an href pointing OUTSIDE this site's base is SKIPPED, not manufactured into a refusal"
   printf '/some/other/site/page/\n' > "$SRC/.deep-link"
   printf '/sites/deep4/\n'          > "$SRC/.site-base"
-  rc="$(sl_deploy deep4 dp4 deep4 "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy deep4 dp4 deep4 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp4
   rm -f "$SRC/.deep-link" "$SRC/.site-base"
   check "deploy exit 0 (an off-site link is not this release's problem)" [ "$rc" = 0 ]
   check "and the probe reports n/a"                grep -q 'deep-path probe n/a' "$TD/out.log"
@@ -1950,7 +2294,7 @@ FAKENPM
   printf '/sites/deep5/\n'         > "$SRC/.site-base"
   printf 'd/hello\n'               > "$SRC/.deep-page"
   cnc_rc="$(env PATH="$FAKEBIN:$PATH" SITE_SLUG=deep5 BUILD_ID=dp5 CONTENT_REV=sl-rev \
-      SITE_SRC="$SRC" SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+      SITE_SRC="$SRC" SITE_PORT_A="$(reserve_port)" SITE_PORT_B="$(reserve_port)" \
       BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
       BARKPARK_SITE_DEPLOY_LOCK="$TD/deep5.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
       BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
@@ -1962,7 +2306,8 @@ FAKENPM
   check "and it says COULD-NOT-CHECK"              grep -q 'deep-path probe COULD-NOT-CHECK' "$TD/out.log"
   check "…naming the interpreter that did not run" grep -q "did not run (exit 127)" "$TD/out.log"
   check "and it does NOT read as a single-page build" no_log_match 'deep-path probe n/a'
-  rc="$(sl_deploy deep5b dp5b deep5b "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy deep5b dp5b deep5b "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp5b
   check "CONTROL: exit 0 and the deep path is CERTIFIED" \
     sh -c "[ '$rc' = 0 ] && grep -q 'deep path /d/hello/ serves 200' '$TD/out.log'"
   rm -f "$SRC/.deep-link" "$SRC/.site-base" "$SRC/.deep-page"
@@ -1981,12 +2326,12 @@ FAKENPM
       BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
       bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?
   }
-  rc="$(bp6_deploy dp6 "$(free_port)" "$(free_port)")"
+  rc="$(bp6_deploy dp6 "$(reserve_port)" "$(reserve_port)")"
   check "basePath deploy exit 0"                   [ "$rc" = 0 ]
   check "the deep path was fetched UNDER the base, not at root" \
     grep -q 'deep path /sites/deep6/d/x/ serves 200' "$TD/out.log"
   rm -f "$SRC/.deep-page"
-  rc="$(bp6_deploy dp6b "$(free_port)" "$(free_port)")"
+  rc="$(bp6_deploy dp6b "$(reserve_port)" "$(reserve_port)")"
   check "basePath: the same link with the route GONE is refused (14)"  [ "$rc" = 14 ]
   check "…naming the base-qualified path"          grep -q 'links to /sites/deep6/d/x/' "$TD/out.log"
   rm -f "$SRC/.basepath" "$SRC/.deep-link" "$SRC/.site-base"
@@ -1998,12 +2343,14 @@ FAKENPM
   printf '/sites/deep7/d/caf%%C3%%A9/\n' > "$SRC/.deep-link"
   printf '/sites/deep7/\n'               > "$SRC/.site-base"
   printf 'd/caf\xc3\xa9\n'               > "$SRC/.deep-page"
-  rc="$(sl_deploy deep7 dp7 deep7 "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy deep7 dp7 deep7 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp7
   check "accented deep route present: deploy exit 0"  [ "$rc" = 0 ]
   check "and the gate reports the PERCENT-ENCODED path (pure ASCII on the wire)" \
     grep -q 'deep path /d/caf%C3%A9/ serves 200' "$TD/out.log"
   rm -f "$SRC/.deep-page"
-  rc="$(sl_deploy deep7b dp7b deep7b "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy deep7b dp7b deep7b "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp7b
   check "accented deep route MANGLED away: refused (14)"  [ "$rc" = 14 ]
   check "…and the refusal names the encoded path"    grep -q 'links to /d/caf%C3%A9/' "$TD/out.log"
 
@@ -2018,7 +2365,8 @@ FAKENPM
     "$SELF" > "$DPMUT"
   check "the mutant differs by exactly ONE line (the mutation APPLIED)" \
     [ "$(diff "$SELF" "$DPMUT" | grep -c '^[<>]')" = 2 ]
-  mrc="$(SL_ENGINE="$DPMUT" sl_deploy deep8 dp8 deep8 "$(free_port)" "$(free_port)")"
+  mrc="$(SL_ENGINE="$DPMUT" sl_deploy deep8 dp8 deep8 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp8
   check "MUTANT: the identical 404-linked release exits 0"      [ "$mrc" = 0 ]
   check "MUTANT: and it SWITCHES live"                          saw SWITCH ok dp8
   check "MUTANT: the refusal sentence is never emitted"         no_log_match 'answered HTTP 404 there'
@@ -2403,7 +2751,7 @@ NOSTOP
     # inherits nothing), but it is a 20-minute hang if you reuse a slug here.
     ng_deploy() { # <slug> <build_id> [VAR=value…] -> exit code; log at $NG/out.log
       local slug="$1" bid="$2" pa pb; shift 2
-      pa="$(free_port)"; pb="$(free_port)"
+      pa="$(reserve_port)"; pb="$(reserve_port)"
       env PATH="$GBIN:$PATH" "$@" \
         SITE_SLUG="$slug" BUILD_ID="$bid" CONTENT_REV=rev-1 \
         SITE_SRC="$GSRC" SITE_PORT_A="$pa" SITE_PORT_B="$pb" \
@@ -2557,7 +2905,7 @@ FAKEMV
   # ONE fixture, run twice — the arms differ ONLY by which engine binary runs.
   rb_arm() { # <engine> <slug> -> populates $TD/rb-<slug>/, echoes the STAGE-failure exit code
     local eng="$1" slug="$2" base="$TD/rb-$2" pa pb
-    pa="$(free_port)"; pb="$(free_port)"
+    pa="$(reserve_port)"; pb="$(reserve_port)"
     mkdir -p "$base/sites"
     rb_deploy() { # <build_id>
       env PATH="$RBBIN:$FAKEBIN:$PATH" \
@@ -2618,7 +2966,7 @@ FAKEMV
   mv "$RBF/sites/rbfix/releases/rb1" "$RBF/sites/rbfix/releases/rb1.aside"
   rb_recover_rc="$(env PATH="$RBBIN:$FAKEBIN:$PATH" \
     SITE_SLUG=rbfix BUILD_ID=rb1 CONTENT_REV=rb-rev SITE_SRC="$RBSRC" \
-    SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+    SITE_PORT_A="$(reserve_port)" SITE_PORT_B="$(reserve_port)" \
     BARKPARK_SITES_DIR="$RBF/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
     BARKPARK_CADDYFILE="$CF" \
     BARKPARK_SITE_DEPLOY_LOCK="$RBF/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
@@ -2641,7 +2989,7 @@ FAKEMV
   : > "$RBF/mv.log"
   rb_norecover_rc="$(env PATH="$RBBIN:$FAKEBIN:$PATH" \
     SITE_SLUG=rbfix BUILD_ID=rb1 CONTENT_REV=rb-rev SITE_SRC="$RBSRC" \
-    SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+    SITE_PORT_A="$(reserve_port)" SITE_PORT_B="$(reserve_port)" \
     BARKPARK_SITES_DIR="$RBF/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
     BARKPARK_CADDYFILE="$CF" \
     BARKPARK_SITE_DEPLOY_LOCK="$RBF/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
@@ -2688,7 +3036,7 @@ FAKEMV
   SFCF="$TD/Caddyfile.switchfail"
   printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$SFCF"
   cp "$SFCF" "$SFCF.orig"
-  SF_PORT_A="$(free_port)"; SF_PORT_B="$(free_port)"
+  SF_PORT_A="$(reserve_port)"; SF_PORT_B="$(reserve_port)"
   sf_rc="$(env PATH="$SFB:$FAKEBIN:$PATH" \
     SITE_SLUG=switchfail BUILD_ID=sf1 CONTENT_REV=sf-rev SITE_SRC="$SRC" \
     SITE_PORT_A="$SF_PORT_A" SITE_PORT_B="$SF_PORT_B" \
@@ -2742,7 +3090,7 @@ FAKEMV
   echo "[selftest] e2e: a REJECTED RE-DEPLOY flip fails CLOSED with exit 16 and leaves the LIVE slot routed"
   FLCF="$TD/Caddyfile.flipfail"
   printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$FLCF"
-  FL_PORT_A="$(free_port)"; FL_PORT_B="$(free_port)"
+  FL_PORT_A="$(reserve_port)"; FL_PORT_B="$(reserve_port)"
   fl_deploy() { # <build_id> <extra-PATH-prefix> -> exit code, logs $TD/fl.<id>.out
     env PATH="${2}$FAKEBIN:$PATH" \
       SITE_SLUG=flipfail BUILD_ID="$1" CONTENT_REV="fl-$1" SITE_SRC="$SRC" \
@@ -2938,8 +3286,8 @@ SWPMV
     cp -a "$SWP/$1-snap/Caddyfile" "$SWP/$1.Caddyfile"
   }
 
-  SWP_PA="$(free_port)"; SWP_PB="$(free_port)"   # the FIXED arm's two slots
-  SWP_PC="$(free_port)"; SWP_PD="$(free_port)"   # the MUTANT arm's two slots
+  SWP_PA="$(reserve_port)"; SWP_PB="$(reserve_port)"   # the FIXED arm's two slots
+  SWP_PC="$(reserve_port)"; SWP_PD="$(reserve_port)"   # the MUTANT arm's two slots
   swp_fixture fixed  swpfix "$SELF"   "$SWP_PA" "$SWP_PB"
   swp_fixture mutant swpmut "$RBMUT"  "$SWP_PC" "$SWP_PD"
   check "fixture (fixed):  .previous names n1 (n1 IS the rollback target)" \
