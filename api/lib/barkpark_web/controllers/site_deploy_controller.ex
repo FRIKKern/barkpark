@@ -80,6 +80,7 @@ defmodule BarkparkWeb.SiteDeployController do
 
   alias Barkpark.Sites.DeployRequest
   alias Barkpark.Sites.DeployRunner
+  alias BarkparkWeb.ErrorResponse
 
   @doc """
   Start a site deploy (`mode: "deploy"`, the default) or an instant rollback
@@ -116,12 +117,9 @@ defmodule BarkparkWeb.SiteDeployController do
 
       {:error, :already_running} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{
-          error: %{
-            code: "already_running",
-            message: "a deploy for site '#{req.slug}' is already running"
-          }
+        |> ErrorResponse.emit_fields(:conflict, %{
+          code: "already_running",
+          message: "a deploy for site '#{req.slug}' is already running"
         })
 
       {:error, :box_at_capacity} ->
@@ -184,23 +182,17 @@ defmodule BarkparkWeb.SiteDeployController do
         # spawn". It is NOT a stage: site-spawner D34 keeps PROVISION a silent
         # pre-BUILD step, and the six stage names are untouched.
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{
-          error: %{
-            code: "site_provision_failed",
-            message: "site source could not be provisioned — the deploy never started",
-            reason: reason
-          }
+        |> ErrorResponse.emit_fields(:internal_server_error, %{
+          code: "site_provision_failed",
+          message: "site source could not be provisioned — the deploy never started",
+          reason: reason
         })
 
       {:error, :start_failed} ->
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{
-          error: %{
-            code: "runner_start_failed",
-            message: "site-deploy runner failed to start — check the server logs"
-          }
+        |> ErrorResponse.emit_fields(:internal_server_error, %{
+          code: "runner_start_failed",
+          message: "site-deploy runner failed to start — check the server logs"
         })
     end
   end
@@ -393,17 +385,14 @@ defmodule BarkparkWeb.SiteDeployController do
 
   defp feature_not_configured(conn) do
     conn
-    |> put_status(:service_unavailable)
-    |> json(%{
-      error: %{
-        code: "feature_not_configured",
-        message:
-          "this instance has not consented to run third-party site build code " <>
-            "— a site deploy executes the site's own npm dependency tree " <>
-            "(postinstall scripts included) on this box, so opting in is the " <>
-            "box owner's decision, not a retry; the per-box prerequisites are " <>
-            "checked by `deploy/instance-deploy.sh --site-deploy-preflight`"
-      }
+    |> ErrorResponse.emit_fields(:service_unavailable, %{
+      code: "feature_not_configured",
+      message:
+        "this instance has not consented to run third-party site build code " <>
+          "— a site deploy executes the site's own npm dependency tree " <>
+          "(postinstall scripts included) on this box, so opting in is the " <>
+          "box owner's decision, not a retry; the per-box prerequisites are " <>
+          "checked by `deploy/instance-deploy.sh --site-deploy-preflight`"
     })
   end
 
@@ -420,23 +409,19 @@ defmodule BarkparkWeb.SiteDeployController do
 
   defp runner_unavailable(conn) do
     conn
-    |> put_status(:service_unavailable)
     |> put_resp_header("retry-after", Integer.to_string(@runner_unavailable_retry_after_s))
-    |> json(%{
-      error: %{
-        code: "deploy_runner_unavailable",
-        message:
-          "the deploy runner did not answer in time — the box is busy or wedged, " <>
-            "not unconfigured; retry in #{@runner_unavailable_retry_after_s}s " <>
-            "(if the trigger did land, the retry answers already_running)"
-      }
+    |> ErrorResponse.emit_fields(:service_unavailable, %{
+      code: "deploy_runner_unavailable",
+      message:
+        "the deploy runner did not answer in time — the box is busy or wedged, " <>
+          "not unconfigured; retry in #{@runner_unavailable_retry_after_s}s " <>
+          "(if the trigger did land, the retry answers already_running)"
     })
   end
 
   defp bad_request(conn, code, message) do
     conn
-    |> put_status(:bad_request)
-    |> json(%{error: %{code: code, message: message}})
+    |> ErrorResponse.emit_fields(:bad_request, %{code: code, message: message})
   end
 
   # The polled build_id is not the run this slug is currently serving — it was
@@ -444,14 +429,11 @@ defmodule BarkparkWeb.SiteDeployController do
   # so the control plane keeps waiting instead of adopting the wrong run's stages.
   defp build_id_mismatch(conn, slug, build_id) do
     conn
-    |> put_status(:not_found)
-    |> json(%{
-      error: %{
-        code: "build_id_mismatch",
-        message:
-          "no run for site '#{slug}' matches build_id '#{build_id}' — " <>
-            "it was superseded by a newer build or has not started yet"
-      }
+    |> ErrorResponse.emit_fields(:not_found, %{
+      code: "build_id_mismatch",
+      message:
+        "no run for site '#{slug}' matches build_id '#{build_id}' — " <>
+          "it was superseded by a newer build or has not started yet"
     })
   end
 

@@ -106,11 +106,17 @@ defmodule Barkpark.AuditTest do
     test "create_document writes a content_mutation row for the doc" do
       dataset = "test"
 
+      # CLASS (c) DECLARATION (task-e6523cc7154304f0): the user_id is here so
+      # the audit row has an ACTOR; the write names no workspace and this test
+      # asserts the audit trail, not tenancy. A principal-bearing write with no
+      # workspace is infer-or-refuse at the funnel now, and "editor-42" is a
+      # member of no workspace, so the door would (correctly) refuse.
       {:ok, doc} =
         Content.create_document(
           "author",
           %{"_id" => "audit-author-1", "title" => "Audited"},
           dataset,
+          instance_wide: true,
           user_id: "editor-42"
         )
 

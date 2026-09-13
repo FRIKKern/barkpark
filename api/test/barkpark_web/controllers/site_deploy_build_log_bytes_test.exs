@@ -261,7 +261,7 @@ defmodule BarkparkWeb.SiteDeployBuildLogBytesTest do
         conn |> admin_conn() |> get("/v1/admin/site-deploy?slug=boom&build_id=bld-1&bytes=1")
 
       assert flagged.status == plain.status
-      assert flagged.resp_body == plain.resp_body
+      assert denial_bytes(flagged) == denial_bytes(plain)
       refute flagged.resp_body =~ "tail"
 
       record =
@@ -447,6 +447,24 @@ defmodule BarkparkWeb.SiteDeployBuildLogBytesTest do
 
       assert is_binary(body["tail"])
       assert body["tail"] =~ "npm ERR!"
+    end
+  end
+
+  # A refusal's BYTES, with `request_id` removed.
+  #
+  # Since task-8737e2d7ff1884e0 routed every hand-built envelope through
+  # `BarkparkWeb.ErrorResponse`, every §9 refusal carries a `request_id` — and
+  # that value is PER-REQUEST, so two refusals that must be indistinguishable to
+  # a caller can never again be equal as raw strings. The indistinguishability
+  # this file guards is about the RESOURCE, and `request_id` says nothing about
+  # one: it is derived from the request, the caller already has it on the
+  # response's own `x-request-id` header, and it is the handle that makes the
+  # refusal correlatable to a log line. So it is elided here rather than
+  # suppressed at the emitter.
+  defp denial_bytes(conn) do
+    case Jason.decode(conn.resp_body) do
+      {:ok, %{"error" => error} = body} -> %{body | "error" => Map.delete(error, "request_id")}
+      _ -> conn.resp_body
     end
   end
 end

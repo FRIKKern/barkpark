@@ -13,6 +13,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
   alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
   alias BarkparkWeb.Plugs.RequireWritePermission
+  alias BarkparkWeb.ErrorResponse
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -203,12 +204,9 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
     else
       {:error, :expired} ->
         conn
-        |> put_status(:gone)
-        |> json(%{
-          error: %{
-            code: "share_expired",
-            message: "share link has expired or been revoked"
-          }
+        |> ErrorResponse.emit_fields(:gone, %{
+          code: "share_expired",
+          message: "share link has expired or been revoked"
         })
 
       {:error, :not_found} ->

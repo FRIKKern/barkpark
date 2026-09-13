@@ -64,6 +64,7 @@ defmodule BarkparkWeb.WorkspaceController do
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
   alias Barkpark.Tenancy.WorkspaceBundle.SingleFlight
+  alias BarkparkWeb.ErrorResponse
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -393,8 +394,11 @@ defmodule BarkparkWeb.WorkspaceController do
     else
       {:error, {:export_scope, reason, message}} ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "unprocessable", reason: reason, message: message}})
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "unprocessable",
+          reason: reason,
+          message: message
+        })
 
       # PDS-D43: a transport-class failure used to escape as a bare 500
       # `internal_error / unknown error` — the caller learned nothing and could
@@ -406,16 +410,13 @@ defmodule BarkparkWeb.WorkspaceController do
       # actually succeeds (PDS-D44: an attempt costs the same as a success).
       {:error, {:export_failed, reason, message}} ->
         conn
-        |> put_status(:service_unavailable)
-        |> json(%{
-          error: %{
-            code: "export_transport_failed",
-            reason: reason,
-            message: message,
-            hint:
-              "the export did not finish (database transport failure). Retry; " <>
-                "if it fails again, narrow the bundle with ?profile=dev and/or ?dataset=<slug>."
-          }
+        |> ErrorResponse.emit_fields(:service_unavailable, %{
+          code: "export_transport_failed",
+          reason: reason,
+          message: message,
+          hint:
+            "the export did not finish (database transport failure). Retry; " <>
+              "if it fails again, narrow the bundle with ?profile=dev and/or ?dataset=<slug>."
         })
 
       # THE ENGINE'S ERROR CENSUS. `WorkspaceBundle.export_to_file/2` returns
@@ -474,20 +475,17 @@ defmodule BarkparkWeb.WorkspaceController do
   defp export_in_flight_conflict(conn, info) do
     conn
     |> put_resp_header("retry-after", Integer.to_string(info.retry_after_seconds))
-    |> put_status(:conflict)
-    |> json(%{
-      error: %{
-        code: "export_already_running",
-        reason: Atom.to_string(info.reason),
-        message: export_in_flight_message(info),
-        running_for_seconds: info.running_for_seconds,
-        limit: info.limit,
-        hint:
-          "one workspace export runs at a time on this instance, because the " <>
-            "free-space preflight that refuses an export before its first spill " <>
-            "byte measures a single shared filesystem. Retry in " <>
-            "#{info.retry_after_seconds}s."
-      }
+    |> ErrorResponse.emit_fields(:conflict, %{
+      code: "export_already_running",
+      reason: Atom.to_string(info.reason),
+      message: export_in_flight_message(info),
+      running_for_seconds: info.running_for_seconds,
+      limit: info.limit,
+      hint:
+        "one workspace export runs at a time on this instance, because the " <>
+          "free-space preflight that refuses an export before its first spill " <>
+          "byte measures a single shared filesystem. Retry in " <>
+          "#{info.retry_after_seconds}s."
     })
   end
 
@@ -652,25 +650,19 @@ defmodule BarkparkWeb.WorkspaceController do
           # the server operator must explicitly allow it — refused BEFORE the
           # body is drained or the engine is touched.
           conn
-          |> put_status(:forbidden)
-          |> json(%{
-            error: %{
-              code: "bundle_import_disabled",
-              message:
-                "mode=merge requires the server to opt in via the " <>
-                  ":allow_bundle_import config (BARKPARK_ALLOW_BUNDLE_IMPORT)"
-            }
+          |> ErrorResponse.emit_fields(:forbidden, %{
+            code: "bundle_import_disabled",
+            message:
+              "mode=merge requires the server to opt in via the " <>
+                ":allow_bundle_import config (BARKPARK_ALLOW_BUNDLE_IMPORT)"
           })
         end
 
       other ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{
-            code: "invalid_import_mode",
-            message: "unknown import mode #{inspect(other)} (expected clean or merge)"
-          }
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "invalid_import_mode",
+          message: "unknown import mode #{inspect(other)} (expected clean or merge)"
         })
     end
   end
@@ -721,18 +713,15 @@ defmodule BarkparkWeb.WorkspaceController do
 
       {:error, {:workspace_slug_conflict, info}} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{
-          error: %{
-            code: "workspace_slug_conflict",
-            message:
-              "workspace slug #{inspect(info.slug)} exists under a different id and is " <>
-                "not an empty shell — refuse to merge over it",
-            details: %{
-              slug: info.slug,
-              existing_id: info.existing_id,
-              bundle_id: info.bundle_id
-            }
+        |> ErrorResponse.emit_fields(:conflict, %{
+          code: "workspace_slug_conflict",
+          message:
+            "workspace slug #{inspect(info.slug)} exists under a different id and is " <>
+              "not an empty shell — refuse to merge over it",
+          details: %{
+            slug: info.slug,
+            existing_id: info.existing_id,
+            bundle_id: info.bundle_id
           }
         })
 
@@ -824,8 +813,7 @@ defmodule BarkparkWeb.WorkspaceController do
   # machine-branchable 422 rather than an opaque 500 the caller cannot act on.
   defp invalid_bundle(conn, %InvalidBundleError{} = e) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: e.code, message: e.message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: e.code, message: e.message})
   end
 
   # The Postgres error classes an import can hit against RESIDENT target
@@ -857,24 +845,21 @@ defmodule BarkparkWeb.WorkspaceController do
        )
        when code in @import_constraint_pg_codes do
     conn
-    |> put_status(:conflict)
-    |> json(%{
-      error: %{
-        code: "import_constraint_violation",
-        # Class-A raw-echo ruling (task arpss-classa-lowsev-hygiene-rulings,
-        # site 3) — ACCEPT BY DESIGN. The raw Postgres message names the
-        # colliding key values, and that IS the deliverable: the only caller
-        # who can reach this arm is a GLOBAL admin (the router's
-        # `:require_admin` pipeline gates the whole import action) importing a
-        # bundle they supplied, who needs the constraint + values to repair it.
-        # Re-affirms task-63a199c0a0ce2a06, which added this after an on-box
-        # import 500'd with nothing but "exit status 8".
-        message: Exception.message(e),
-        details: %{
-          pg_code: Atom.to_string(code),
-          constraint: pg[:constraint],
-          table: pg[:table]
-        }
+    |> ErrorResponse.emit_fields(:conflict, %{
+      code: "import_constraint_violation",
+      # Class-A raw-echo ruling (task arpss-classa-lowsev-hygiene-rulings,
+      # site 3) — ACCEPT BY DESIGN. The raw Postgres message names the
+      # colliding key values, and that IS the deliverable: the only caller
+      # who can reach this arm is a GLOBAL admin (the router's
+      # `:require_admin` pipeline gates the whole import action) importing a
+      # bundle they supplied, who needs the constraint + values to repair it.
+      # Re-affirms task-63a199c0a0ce2a06, which added this after an on-box
+      # import 500'd with nothing but "exit status 8".
+      message: Exception.message(e),
+      details: %{
+        pg_code: Atom.to_string(code),
+        constraint: pg[:constraint],
+        table: pg[:table]
       }
     })
   end
@@ -1289,17 +1274,14 @@ defmodule BarkparkWeb.WorkspaceController do
 
   defp body_too_large(conn, read) do
     conn
-    |> put_status(:request_entity_too_large)
-    |> json(%{
-      error: %{
-        code: "import_body_too_large",
-        message:
-          "import body exceeds the #{max_import_body_bytes()}-byte ceiling " <>
-            "(read #{read} bytes before refusing). The limit is 2x the measured " <>
-            "2,605.5 MiB full-fidelity bundle — one more doubling of the growth this " <>
-            "epic observed (942 MB -> 2,012,650,519 B of database).",
-        details: %{limit_bytes: max_import_body_bytes(), read_bytes: read}
-      }
+    |> ErrorResponse.emit_fields(:request_entity_too_large, %{
+      code: "import_body_too_large",
+      message:
+        "import body exceeds the #{max_import_body_bytes()}-byte ceiling " <>
+          "(read #{read} bytes before refusing). The limit is 2x the measured " <>
+          "2,605.5 MiB full-fidelity bundle — one more doubling of the growth this " <>
+          "epic observed (942 MB -> 2,012,650,519 B of database).",
+      details: %{limit_bytes: max_import_body_bytes(), read_bytes: read}
     })
   end
 
@@ -1308,15 +1290,12 @@ defmodule BarkparkWeb.WorkspaceController do
   # 3-byte handshake failure from a 2 GB upload that timed out at the last mile.
   defp body_read_failed(conn, reason, read) do
     conn
-    |> put_status(:bad_request)
-    |> json(%{
-      error: %{
-        code: "import_body_read_failed",
-        message:
-          "the import body could not be read to completion (#{inspect(reason)}) after " <>
-            "#{read} bytes — the upload was interrupted; nothing was imported. Re-run it.",
-        details: %{reason: inspect(reason), read_bytes: read}
-      }
+    |> ErrorResponse.emit_fields(:bad_request, %{
+      code: "import_body_read_failed",
+      message:
+        "the import body could not be read to completion (#{inspect(reason)}) after " <>
+          "#{read} bytes — the upload was interrupted; nothing was imported. Re-run it.",
+      details: %{reason: inspect(reason), read_bytes: read}
     })
   end
 
@@ -1332,33 +1311,27 @@ defmodule BarkparkWeb.WorkspaceController do
       end
 
     conn
-    |> put_status(507)
-    |> json(%{
-      error: %{
-        code: "import_spill_write_failed",
-        message:
-          "writing the import body to #{scratch} failed (#{inspect(reason)}) after " <>
-            "#{read} bytes; free space now reads #{free}. Nothing was imported, and the " <>
-            "scratch is removed by this request's `after` clause on the way out. Free " <>
-            "space or point BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
-        details: %{reason: inspect(reason), written_bytes: read, free_bytes: free}
-      }
+    |> ErrorResponse.emit_fields(507, %{
+      code: "import_spill_write_failed",
+      message:
+        "writing the import body to #{scratch} failed (#{inspect(reason)}) after " <>
+          "#{read} bytes; free space now reads #{free}. Nothing was imported, and the " <>
+          "scratch is removed by this request's `after` clause on the way out. Free " <>
+          "space or point BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
+      details: %{reason: inspect(reason), written_bytes: read, free_bytes: free}
     })
   end
 
   defp insufficient_disk_space(conn, info) do
     conn
-    |> put_status(507)
-    |> json(%{
-      error: %{
-        code: "insufficient_disk_space",
-        message:
-          "refusing the import before spilling: #{info.dir} has #{info.free_bytes} bytes " <>
-            "free and this import needs #{info.required_bytes} (the body spill and the " <>
-            "extracted members are held together). Free space or point " <>
-            "BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
-        details: info
-      }
+    |> ErrorResponse.emit_fields(507, %{
+      code: "insufficient_disk_space",
+      message:
+        "refusing the import before spilling: #{info.dir} has #{info.free_bytes} bytes " <>
+          "free and this import needs #{info.required_bytes} (the body spill and the " <>
+          "extracted members are held together). Free space or point " <>
+          "BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
+      details: info
     })
   end
 
