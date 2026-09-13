@@ -3805,7 +3805,7 @@ USAGE
   bp cloud site status    <site> [--window <attempts>]
   bp cloud site doctor    <site>                                   read every substrate this site occupies and name the repair
   bp cloud site open       <site> [--print-only]
-  bp cloud site preflight [--dir <path>] [--skip-build]
+  bp cloud site preflight [--dir <path>] [--skip-build]            build your LOCAL tree and check that build — it reads NOTHING about the remote site, its content binding, its dataset or its instance
   bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>] [--prebuilt-enabled true|false]
 
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
