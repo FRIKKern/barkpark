@@ -1,4 +1,4 @@
-<!-- doc-tier: human | canonical-for: spd-b11 sub-xs type rung density evidence | budget: 4000tok -->
+<!-- doc-tier: human | canonical-for: spd-b11-sub-xs-type-rung-density-evidence | budget: 4000tok -->
 
 # spd-b11 — the sub-xs chrome rung moved zero pixels
 
