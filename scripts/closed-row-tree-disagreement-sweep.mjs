@@ -119,6 +119,28 @@ function refuse(msg) {
 
 const RE_PATH = /(?:\.?[A-Za-z0-9_.\-]+\/)+[A-Za-z0-9_.\-]+\.(?:go|ex|exs|heex|sh|mjs|js|ts|tsx|json|yml|yaml|md|sql)\b/g;
 const ARTIFACT_SEGMENTS = new Set(["node_modules", "dist", "_build", "deps", "coverage", "build", ".turbo"]);
+
+// ELIDED PATHS. A closer writing prose abbreviates the middle of a long path:
+// "api/lib/.../deploy_runner.ex". The path regex matches the whole token, git cannot
+// resolve it, and the row scores DISAGREE for a citation that named a real file. SIX of
+// the 27 raw findings in the 2026-09-13 FULL pass (n=7972) were this one class. An
+// elided path is UNCHECKABLE BY CONSTRUCTION — the segments it dropped are the ones
+// that would resolve it — so it is demoted to advisory, never counted.
+export function isElidedPath(p) {
+  return (p || "").split("/").some((sg) => /^\.{2,}$/.test(sg));
+}
+
+// GENERIC SYMBOLS. The MFA arm reads the function name out of `UserSocket.id/1` and
+// searches for `id`, which either matches everything or, with -w and the wrong casing,
+// nothing. A name this short discriminates nothing: it cannot support a DISAGREE either
+// way. task-d67f007715c96828 was the whole DISAGREE-sym count in the FULL pass, and its
+// close_reason cites a module that IS on main. Symbols under 4 chars, plus a denylist of
+// ubiquitous Elixir/Go callbacks, are dropped before ARM S runs.
+const GENERIC_SYMBOLS = new Set(["id", "get", "put", "new", "run", "call", "init", "key", "all", "one", "add", "set", "map", "url", "ok", "do", "up", "down", "start", "stop", "name", "type", "list", "show", "main", "test", "path", "text", "data"]);
+export function isGenericSymbol(sym) {
+  const s = (sym || "").trim();
+  return s.length < 4 || GENERIC_SYMBOLS.has(s.toLowerCase());
+}
 const RETRACTION_MARKERS = ["filing wrong", "does not exist", "correction", "the file is", "wrong path", "retract", "i was wrong", "no such file", "mis-cited", "miscited",
   // CANCEL-SHAPED: a row cancelled BECAUSE the artifact is gone names the absent path as
   // its whole point. tgw10-bl-stranded-unique-commons-row is the specimen.
@@ -261,6 +283,7 @@ function adjudicate(d, git) {
   const pathCands = paths.filter((p) => {
     const segs = p.split("/");
     if (segs.some((sg) => ARTIFACT_SEGMENTS.has(sg))) { advisory.push(`artifact-path ${p}`); return false; }
+    if (isElidedPath(p)) { advisory.push(`elided-path ${p}`); return false; }
     return true;
   });
 
@@ -286,7 +309,9 @@ function adjudicate(d, git) {
     return { verdict: "DISAGREE-path", line: `names ${p} — absent at ${git.revSha.slice(0, 9)}`, advisory };
   }
 
-  const missSyms = symbols.filter((s) => !git.hasSymbol(s));
+  for (const s of symbols) if (isGenericSymbol(s)) advisory.push(`generic-symbol ${s}`);
+  const symCands = symbols.filter((s) => !isGenericSymbol(s));
+  const missSyms = symCands.filter((s) => !git.hasSymbol(s));
   const liveMissSyms = missSyms.filter((s) => !retractedNear(text, s));
   for (const s of missSyms) if (retractedNear(text, s)) advisory.push(`retracted-symbol ${s}`);
   if (liveMissSyms.length) {
@@ -366,6 +391,22 @@ function selftest() {
                    "tooling/grip/ledger/w34-chatlive-belt-semantics.recipe.md"), true);
   eq("a plain citation is NOT demoted",
      retractedNear("the guard lives in scripts/pr-task-gate.sh and is green", "scripts/pr-task-gate.sh"), false);
+
+  // --- the two artefact classes measured in the 2026-09-13 FULL pass (n=7972).
+  // Together they were 7 of that pass's 27 raw findings, and every one was adjudicated
+  // FALSE by reading the row's own close_reason.
+  eq("elided path is demoted (api/lib/.../tenancy.ex named 6 of 27 raw findings)",
+     isElidedPath("api/lib/.../tenancy.ex"), true);
+  eq("a real path with a dotfile segment is NOT elided",
+     isElidedPath(".github/workflows/ci.yml"), false);
+  eq("a relative-looking path is NOT elided",
+     isElidedPath("api/lib/barkpark/tasks/criteria.ex"), false);
+  eq("generic symbol is dropped (UserSocket.id/1 -> `id` was the whole DISAGREE-sym count)",
+     isGenericSymbol("id"), true);
+  eq("a short-but-listed callback is dropped", isGenericSymbol("init"), true);
+  eq("a discriminating symbol survives", isGenericSymbol("merge_gated?"), false);
+  eq("the MFA arm still extracts the generic name (the DROP happens in adjudicate)",
+     extractArtifacts("UserSocket.id/1 is token-derived").symbols.includes("id"), true);
 
   eq("isClosed: done", isClosed({ lifecycle_status: "done" }), true);
   eq("isClosed: cancelled", isClosed({ lifecycle_status: "cancelled" }), true);
