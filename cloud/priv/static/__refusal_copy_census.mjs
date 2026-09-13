@@ -750,6 +750,40 @@ const PIN = [
   { key: "MAP|ERRORS.repo_not_in_installation", verdict: "CONSULTED", copy: "GitHub's app can no longer see that repository — grant it a..." },
   { key: "MAP|ERRORS.github_error", verdict: "CONSULTED", copy: "GitHub did not respond as expected — the problem is on GitH..." },
   { key: "MAP|ERRORS.invalid_name", verdict: "CONSULTED", copy: "That repository name isn't allowed — use only letters, numb..." },
+  // cch-w73-bl — THE THREE SITES THE GITHUB INSTALL RETURN LEG BROUGHT.
+  //
+  // installation_not_found is CONSULTED, and the emitter is named: the POST
+  // /v1/github/installations handler validates the id through the client seam
+  // and answers 422 {"error":"installation_not_found"} when the App can no
+  // longer see it (cloud/lib/barkpark_cloud/web/router.ex — re-derive with
+  // `grep -n installation_not_found cloud/lib/barkpark_cloud/web/router.ex`).
+  // Before this wave the slug had NO reader, because the route had no caller at
+  // all; the leg made it human-reachable and the sentence was paid in the same
+  // diff that deleted its wire-vs-reader census row.
+  { key: "MAP|ERRORS.installation_not_found", verdict: "CONSULTED", copy: "Barkpark can't see that GitHub installation any more — it w..." },
+  // githubInstallOutcome's two TOAST sentences. AUTHORED, both, and neither is
+  // a refusal CAUSE: the first is the console's own success line for a 201 it
+  // verified (installation.connected === true and nothing less), the second is
+  // its honest-absence TITLE, under which friendly() then renders the server's
+  // own cause when there is one. The console invents these, so the census's
+  // question — "can the server produce this?" — is answered "it does not have
+  // to": they state what the CONSOLE knows, which is exactly the claim the leg
+  // exists to keep narrow.
+  { key: "FN|githubInstallOutcome|c12d75b8", verdict: "AUTHORED", copy: "Barkpark recorded the app install" },
+  { key: "FN|githubInstallOutcome|12f8d6af", verdict: "AUTHORED", copy: "Couldn't confirm the GitHub install" },
+  // cch-w73-bl (census pass) — THE FENCE'S OWN SENTENCE, split across the four
+  // string literals that build it. AUTHORED, and this is the one place in the
+  // leg where that verdict is the POINT rather than a concession: the console
+  // is NOT reading a server cause here, it is refusing to produce one. It knows
+  // from /v1/me that this principal is not a team admin, so it never POSTs and
+  // never collects the 403 whose generic copy would have been rendered under
+  // "Couldn't confirm the GitHub install" — a sentence about the INSTALL for a
+  // refusal about the READER. The server emitter exists (require_team_admin's
+  // 403 forbidden); it is simply never reached, which is the whole fence.
+  { key: "FN|githubInstallRefusalToast|0a1d9085", verdict: "AUTHORED", copy: "Only a team admin can connect GitHub" },
+  { key: "FN|githubInstallRefusalToast|3940bbc9", verdict: "AUTHORED", copy: "The app may now be installed on your GitHub account, but re..." },
+  { key: "FN|githubInstallRefusalToast|6ffd53cb", verdict: "AUTHORED", copy: "for this team is an admin-only action. Ask a team admin to ..." },
+  { key: "FN|githubInstallRefusalToast|5d33800f", verdict: "AUTHORED", copy: "Settings \\u2192 Providers and connect GitHub." },
   { key: "MAP|FORBIDDEN_ROLE_COPY.admin", verdict: "CONSULTED", copy: "You need the admin role on this team — an admin on this tea..." },
   { key: "MAP|FORBIDDEN_ROLE_COPY.owner", verdict: "CONSULTED", copy: "You need the owner role on this team — only the team owner ..." },
   { key: "MAP|FORBIDDEN_ROLE_COPY.platform_operator", verdict: "CONSULTED", copy: "That's limited to platform operators — no team role grants it." },
