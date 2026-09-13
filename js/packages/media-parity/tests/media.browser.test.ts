@@ -135,12 +135,25 @@ describe('W4 media hydration — real browser', () => {
     document.body.appendChild(container)
 
     const first = await hydratePortableDoc(container)
-    expect(first).toEqual({ mermaid: 1, asciicast: 1, codeTabs: 0, tabs: 0 })
+    // `asciicastMounted`/`asciicastFailed` ride beside the loaded count since
+    // jf-backlog-asciicast-empty-box: a cast that MOUNTS but cannot LOAD is no
+    // longer counted as a hydrated recording. This fixture's cast loads, so
+    // loaded === mounted === 1 and failed is 0.
+    expect(first).toEqual({
+      mermaid: 1,
+      asciicast: 1,
+      asciicastMounted: 1,
+      asciicastFailed: 0,
+      codeTabs: 0,
+      tabs: 0,
+    })
 
     const second = await hydratePortableDoc(container)
     expect(second, 'processed mount points are skipped on re-run').toEqual({
       mermaid: 0,
       asciicast: 0,
+      asciicastMounted: 0,
+      asciicastFailed: 0,
       codeTabs: 0,
       tabs: 0,
     })
@@ -153,6 +166,13 @@ describe('W4 media hydration — real browser', () => {
     document.body.appendChild(container)
 
     const result = await hydratePortableDoc(container)
-    expect(result).toEqual({ mermaid: 0, asciicast: 0, codeTabs: 0, tabs: 0 })
+    expect(result).toEqual({
+      mermaid: 0,
+      asciicast: 0,
+      asciicastMounted: 0,
+      asciicastFailed: 0,
+      codeTabs: 0,
+      tabs: 0,
+    })
   })
 })
