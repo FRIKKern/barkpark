@@ -307,6 +307,7 @@ cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh
 deploy/site-deploy.sh
 docs/api-v1.md
+js/packages/react/src/client.ts
 docs/api/error-codes.md
 docs/openapi.json
 internal/chat/testdata/**
