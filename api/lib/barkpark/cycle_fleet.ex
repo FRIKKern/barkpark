@@ -2490,7 +2490,7 @@ defmodule Barkpark.CycleFleet do
                            where: q.correction_wave_id == ^target.id
                        ),
                    {:ok, restoration} <-
-                     restore_release_materializations(chain, restore_event_id) do
+                     restore_release_materializations(chain, restore_event_id, root) do
                 persist_promotion_event(
                   root,
                   target,
@@ -3150,7 +3150,7 @@ defmodule Barkpark.CycleFleet do
     end
   end
 
-  defp restore_release_materializations(chain, restore_event_id) do
+  defp restore_release_materializations(chain, restore_event_id, %Wave{} = root) do
     promotions =
       Enum.filter(chain, &(&1.action == "promote" and is_map(&1.release_materialization)))
 
@@ -3168,6 +3168,7 @@ defmodule Barkpark.CycleFleet do
            Enum.reduce_while(desired, :ok, fn {document_id, state}, :ok ->
              restore_release_document(
                {document_id, Map.fetch!(current, document_id), state},
+               root,
                :ok
              )
            end) do
@@ -3204,10 +3205,44 @@ defmodule Barkpark.CycleFleet do
     end)
   end
 
-  defp restore_release_document({document_id, expected, state}, :ok) do
+  # ── SEAT CLASSIFICATION (task-d507d3d83476b57d, ruling clause (d)) ────────
+  #
+  # A raw `Repo.update_all` on `Document` keyed by UUID PK — the only seat of
+  # the five that never passes through `Document.changeset`, and therefore the
+  # only one whose harm is NOT a nil-workspace stamp: it sets rev / revision
+  # pointers / title / status / content and touches no scope column at all, so
+  # it can neither create a row nor null one's workspace.
+  #
+  # Its harm is the other direction — a CROSS-TENANT write. The document ids come
+  # from `release_materialization["documents"]`, replayed out of stored promotion
+  # EVENTS, and the statement then rewrote whatever row carried that id in ANY
+  # workspace. CLASS (a) by the ruling's wording (a scope context EXISTS and was
+  # not consulted), so the remedy is a REFUSAL, not a Default stamp: the wave's
+  # own `workspace_id` is the authority — `rollback_correction/2` already
+  # requires `root.project_id` — and a document outside it halts the restore with
+  # `:paper_restore_scope_mismatch`, rolling the whole rollback back. A root wave
+  # with a nil workspace (pre-tenancy fleet rows) keeps the old behaviour rather
+  # than refusing a rollback nobody can scope — the ruling's residual arm.
+  defp restore_release_document({document_id, expected, state}, %Wave{} = root, :ok) do
     document = Repo.one(from d in Document, where: d.id == ^document_id, lock: "FOR UPDATE")
     revision = Repo.get(Revision, state["current_revision_id"])
 
+    if document && not release_document_in_scope?(document, root) do
+      {:halt, {:error, :paper_restore_scope_mismatch}}
+    else
+      restore_release_document_in_scope(document, revision, expected, state)
+    end
+  end
+
+  # Public ONLY so the seat test can exercise the guard's decision surface
+  # without standing up a whole promotion chain (the end-to-end rollback path is
+  # covered by `cycle_fleet_test.exs`). Production callers reach it through
+  # `restore_release_document/3`.
+  @doc false
+  def release_document_in_scope?(%Document{workspace_id: doc_ws}, %Wave{workspace_id: wave_ws}),
+    do: is_nil(wave_ws) or doc_ws == wave_ws
+
+  defp restore_release_document_in_scope(document, revision, expected, state) do
     if (document && revision && revision.document_id == document.id) and
          document.rev == expected["rev"] and
          document.current_revision_id == expected["current_revision_id"] and

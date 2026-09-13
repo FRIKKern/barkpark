@@ -341,7 +341,14 @@ echo "--- happy (everything answers 200) rc=$rc ---"; grep '^>>' "$OUT" || true
 assert_rc  "happy: make deploy exits 0 when every claim was measured" "$rc" 0
 assert_has "happy: deploy-rebuild says it restarted AND answered"     "$OUT" "restarted and answering"
 assert_has "happy: the receipt cites the recorded hook outcome"       "$OUT" "recorded outcome: rebuilt"
-assert_has "happy: the receipt cites the measured status code"        "$OUT" "/api/schemas -> HTTP 200"
+# /status.json, NOT /api/schemas. #17772 (8970ea272) moved deploy-rebuild.sh's
+# health probe off the sunset /api/schemas route (BP_HEALTH_URL, deploy-rebuild.sh
+# :210-215) and this assertion kept quoting the old path, so the receipt it reads
+# ("API is live (/status.json -> HTTP 200)") no longer matched and this harness
+# reddened every completed main run (measured 2026-09-13, run 34753745582: FAILED
+# 1 of 54). The assertion's subject is unchanged — the receipt must cite a status
+# code somebody MEASURED — only the URL it measures moved.
+assert_has "happy: the receipt cites the measured status code"        "$OUT" "/status.json -> HTTP 200"
 if [ ! -s "$DANGER" ]; then ok "happy: no nested make/go escaped the stub PATH"; else bad "happy: escape recorded: $(cat "$DANGER")"; fi
 
 # ─────────────────────────────────────────────────────────────────────────────

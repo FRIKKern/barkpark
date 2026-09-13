@@ -17,6 +17,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
+  alias BarkparkWeb.MediaVisibilityCopy
   alias BarkparkWeb.Plugs.RequireWritePermission
   alias BarkparkWeb.SearchIntel
 
@@ -366,13 +367,49 @@ defmodule BarkparkWeb.V1.MediaController do
          :ok <- ensure_viewable(conn, file, doc) do
       ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
+      asset =
+        file
+        |> AssetResponse.render(doc, render_opts(conn, params, dataset: dataset))
+        |> Map.put(:visibilityNotice, visibility_notice(conn, dataset))
+
       json(conn, %{
-        result: AssetResponse.render(file, doc, render_opts(conn, params, dataset: dataset)),
+        result: asset,
         syncTags: sync_tags(dataset, file.id),
         ms: ms
       })
     end
   end
+
+  # THE OPERATOR AFFORDANCE, READ HALF (task-cbb112a9b4c600cc). `bp media get`
+  # renders this action, so this is where `bp`'s asset output says what the
+  # asset's `public` visibility actually promises: readable WITHIN this scope's
+  # sharing, plus whether the scope currently carries a `:media` share.
+  #
+  # The copy is `BarkparkWeb.MediaVisibilityCopy`'s and nobody else's — the
+  # Studio media library banner renders the SAME functions, so the two surfaces
+  # cannot drift into describing the same door differently.
+  #
+  # IT RIDES INSIDE `result`, AND THAT PLACEMENT IS LOAD-BEARING. bp's Go client
+  # renders a successful body through `unwrapResult` (internal/cli/run.go),
+  # which returns the `result` value and DROPS every top-level sibling. A key
+  # beside `result` — where this first shipped — never reaches `bp media get`'s
+  # output at all, so the copy would exist in the JSON and be invisible to the
+  # one surface the criterion names. Inside `result` it survives the unwrap.
+  #
+  # The key is `visibilityNotice`, NOT `visibility`: `AssetResponse.render/3`
+  # already puts `visibility` in that map (the asset's delivery tier string), so
+  # reusing the name would change an existing field's TYPE. Additive as placed —
+  # nothing that was in `result` moves or changes shape.
+  defp visibility_notice(conn, dataset) do
+    MediaVisibilityCopy.public_option(
+      slug_of(conn.assigns[:current_workspace]),
+      slug_of(conn.assigns[:current_project]),
+      dataset
+    )
+  end
+
+  defp slug_of(%{slug: slug}) when is_binary(slug), do: slug
+  defp slug_of(_other), do: nil
 
   def relations(conn, %{"dataset" => dataset, "id" => id} = params) do
     with {:ok, file} <- Media.get_file(id, scope_opts(conn)),

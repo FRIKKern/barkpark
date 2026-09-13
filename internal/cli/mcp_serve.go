@@ -134,6 +134,24 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 // with it.
 const mcpToolsetTasksBestEffort = "tasks-best-effort"
 
+// mcpToolsetChat is the reserved `--tools chat` word: the curated CHAT toolset —
+// the curated task tools (mcp_tasks.go) + the curated chat session tools
+// (mcp_chat.go) + the hand-reviewed document/search command allowlist
+// (chatBridgeToolIDs, mcp_bridge.go). It is what the Studio loopback spawns
+// (api/lib/barkpark/studio_chat/provider/claude.ex, runtime/codex/session.ex),
+// replacing `--tools all` and its ~107-command prompt and blast surface with an
+// intentional capability boundary. The set is frozen by an ID allowlist, so a
+// newly added manifest command does NOT join it automatically.
+const mcpToolsetChat = "chat"
+
+// mcpToolsetChatBestEffort is to "chat" what mcpToolsetTasksBestEffort is to
+// "tasks": the registration mode the `--http` transport substitutes, where a
+// verb the anonymous startup manifest cannot back is OMITTED with one loud
+// stderr line instead of refusing startup (the rationale is identical — see
+// mcpToolsetTasksBestEffort). Unreachable from user input: parseToolsSelector
+// returns only "tasks", "all", "chat", or "subset".
+const mcpToolsetChatBestEffort = "chat-best-effort"
+
 // buildMCPServer assembles a fully registered MCP server: the curated task
 // tools, optionally the generic capabilities bridge (--tools all), and the
 // published-papers resources. Extracted from runMCPServe so the stdio path (one
@@ -197,11 +215,13 @@ func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 	}
 
 	if err := registerTaskTools(srv, g, ctx, m); err != nil {
-		if toolset != "all" && toolset != mcpToolsetTasksBestEffort {
+		if toolset != "all" && toolset != mcpToolsetTasksBestEffort && toolset != mcpToolsetChatBestEffort {
 			return nil, fmt.Errorf("register task tools: %w", err)
 		}
 		// stderr only — os.Stdout is the JSON-RPC protocol stream (decision 4).
-		if toolset == mcpToolsetTasksBestEffort {
+		if toolset == mcpToolsetChatBestEffort {
+			out.errf("mcp serve: DEGRADED — curated task tools NOT registered (%s): register task tools: %v; --tools chat over --http holds no ambient credential (forward-through, charter D18) so its startup manifest is the ANONYMOUS /v1/capabilities projection, which carries no task noun — serving the rest of the curated chat set (document/search verbs, chat session tools, paper resources) anyway instead of exiting 1", strings.Join(curatedTaskToolNames, ", "), err)
+		} else if toolset == mcpToolsetTasksBestEffort {
 			out.errf("mcp serve: DEGRADED — curated task tools NOT registered (%s): register task tools: %v; --http holds no ambient credential (forward-through, charter D18) so its startup manifest is the ANONYMOUS /v1/capabilities projection, which carries no task noun, and a caller's own bearer cannot restore them because the stateless per-request server is rebuilt from this same startup manifest; serving the chat tools and paper resources anyway instead of exiting 1 — point the server at a manifest that carries the task noun (--manifest / $BARKPARK_MANIFEST, or a Barkpark whose anonymous projection includes task) to get them back", strings.Join(curatedTaskToolNames, ", "), err)
 		} else {
 			out.errf("mcp serve: curated task tools unavailable (%v) — serving --tools all bridge-only", err)
@@ -210,6 +230,26 @@ func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 	if toolset == "all" {
 		if err := registerBridgeTools(srv, g, ctx, m); err != nil {
 			return nil, fmt.Errorf("register bridge tools: %w", err)
+		}
+	}
+
+	// The curated CHAT toolset adds exactly the hand-reviewed document/search
+	// commands (chatBridgeToolIDs) on top of the curated task tools — an ID
+	// allowlist, never a noun filter, so a new manifest command cannot join it
+	// without a human editing that list. One documented policy for a verb the
+	// manifest cannot back, chosen by transport: stdio refuses to start, --http
+	// omits it after one loud stderr line (registerChatBridgeTools).
+	if toolset == mcpToolsetChat || toolset == mcpToolsetChatBestEffort {
+		bestEffort := toolset == mcpToolsetChatBestEffort
+		missing, err := registerChatBridgeTools(srv, g, ctx, m, bestEffort)
+		if err != nil {
+			return nil, fmt.Errorf("register chat bridge tools: %w", err)
+		}
+		if len(missing) > 0 {
+			if !bestEffort {
+				return nil, fmt.Errorf("register chat bridge tools: manifest cannot back curated --tools chat verb(s): %s (point the server at a manifest that declares them, or use --tools all)", strings.Join(missing, ", "))
+			}
+			out.errf("mcp serve: DEGRADED — --tools chat OMITTING %s: the manifest does not declare them; --http holds no ambient credential (charter D18) so its startup manifest is the ANONYMOUS /v1/capabilities projection — serving the rest of the curated chat set rather than exiting 1", strings.Join(missing, ", "))
 		}
 	}
 
@@ -404,6 +444,9 @@ func newMCPHTTPHandler(out *writer, g globals, base manifest.Context, m *manifes
 	if toolset == "tasks" {
 		toolset = mcpToolsetTasksBestEffort
 	}
+	if toolset == mcpToolsetChat {
+		toolset = mcpToolsetChatBestEffort
+	}
 
 	// Still fail fast on anything the manifest genuinely cannot back (a bad
 	// --tools all bridge, a broken subset): refuse to come up rather than 500
@@ -469,7 +512,7 @@ func parseMCPServeArgs(tail []string) (toolset string, nouns []string, httpAddr 
 		case "--tools":
 			if !hasInline {
 				if i+1 >= len(tail) {
-					return "", nil, "", fmt.Errorf("flag --tools needs a value (tasks|all|<noun>[,<noun>…])")
+					return "", nil, "", fmt.Errorf("flag --tools needs a value (tasks|chat|all|<noun>[,<noun>…])")
 				}
 				val = tail[i+1]
 				i++
@@ -492,7 +535,7 @@ func parseMCPServeArgs(tail []string) (toolset string, nouns []string, httpAddr 
 			}
 			httpAddr = val
 		default:
-			return "", nil, "", fmt.Errorf("unknown argument %q (mcp serve accepts --tools tasks|all|<noun>[,<noun>…] and --http <addr>)", a)
+			return "", nil, "", fmt.Errorf("unknown argument %q (mcp serve accepts --tools tasks|chat|all|<noun>[,<noun>…] and --http <addr>)", a)
 		}
 	}
 	return toolset, nouns, httpAddr, nil
@@ -513,10 +556,10 @@ func parseMCPServeArgs(tail []string) (toolset string, nouns []string, httpAddr 
 // which a cloud agent reaches those services.)
 func parseToolsSelector(val string) (toolset string, nouns []string, err error) {
 	if strings.TrimSpace(val) == "" {
-		return "", nil, fmt.Errorf("flag --tools needs a value (tasks|all|<noun>[,<noun>…])")
+		return "", nil, fmt.Errorf("flag --tools needs a value (tasks|chat|all|<noun>[,<noun>…])")
 	}
 	switch val {
-	case "tasks", "all":
+	case "tasks", "all", mcpToolsetChat:
 		return val, nil, nil
 	}
 	parts := strings.Split(val, ",")
@@ -526,7 +569,7 @@ func parseToolsSelector(val string) (toolset string, nouns []string, err error) 
 			return "", nil, fmt.Errorf("invalid --tools %q: empty noun between commas", val)
 		}
 		switch p {
-		case "tasks", "all":
+		case "tasks", "all", mcpToolsetChat:
 			return "", nil, fmt.Errorf("invalid --tools %q: reserved word %q cannot appear in a noun list", val, p)
 		}
 		ns = append(ns, p)
@@ -546,11 +589,15 @@ func toolsetLabel(toolset string, nouns []string) string {
 		// mode, not a selector the operator typed — print what they asked for.
 		return "tasks"
 	}
+	if toolset == mcpToolsetChatBestEffort {
+		// Same for the --http best-effort variant of "chat".
+		return mcpToolsetChat
+	}
 	return toolset
 }
 
 func printMCPServeHelp(out *writer) {
-	out.outf(`usage: bp mcp serve [--tools tasks|all|<noun>[,<noun>…]] [--http <addr>]
+	out.outf(`usage: bp mcp serve [--tools tasks|chat|all|<noun>[,<noun>…]] [--http <addr>]
   Run a Model-Context-Protocol server exposing Barkpark to MCP clients
   (Cursor, Claude Desktop, any MCP host). Path B for task tracking — the
   MCP-native counterpart to the shell-based .cursor/rules/barkpark-tasks.mdc
@@ -562,7 +609,15 @@ flags:
                       eight — task_ready, task_next, task_show, task_close,
                       task_create, task_prime, task_stamp, task_pulse — plus
                       the four chat session tools (chat_spawn_session,
-                      chat_send, chat_read_tail, chat_wait_for_state). "all"
+                      chat_send, chat_read_tail, chat_wait_for_state). "chat"
+                      is the curated CHAT set the Studio loopback spawns: the
+                      same task + chat session tools PLUS a frozen, hand-
+                      reviewed document/search allowlist (bp_search_query,
+                      bp_doc_ls, bp_doc_get, bp_doc_create, bp_doc_mutate,
+                      bp_doc_publish) — and nothing else; a newly added
+                      manifest command never joins it automatically, and a
+                      verb the manifest cannot back refuses startup on stdio
+                      (over --http it is omitted with one stderr line). "all"
                       additionally bridges every other bp capability into a
                       generic tool. A comma-separated NOUN list (e.g.
                       "media,doc") serves ONLY those nouns' commands as generic

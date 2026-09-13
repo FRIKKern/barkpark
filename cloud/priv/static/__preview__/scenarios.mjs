@@ -4335,6 +4335,125 @@ export const SCENARIOS = {
       catalog: theaterCatalog,
     },
   },
+  // cch-w48-s1-followup — THE /new LAUNCH STEP'S UNKNOWN ARM, INSTRUMENTED.
+  // cch-w48-s1 gave that step a three-valued band and an exit, and pinned both
+  // in node. Nothing RENDERED the unanswered arm: every committed /new fixture
+  // answers /v1/me, so the funnel's own [data-me-retry] — the one control a
+  // person stuck behind a failed role read can press — existed in the corpus
+  // only as an assertion about a string. It reuses the `meFault` override
+  // (route() in this file) the billing arms already consume rather than minting
+  // a second mechanism, and it sits on the SAME deep link as new-launch, so no
+  // new residue family is created.
+  "new-launch-me-unreadable": {
+    label: "/new — the launch step whose /v1/me 500s: the honest unknown arm with its one Retry, never a form and never a refusal",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog",
+    data: {
+      me: me("Ada's Lab"),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [], subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+    },
+  },
+
+  // ── cch-r16-w11: THE LAUNCH WIZARD'S OWN ELEVATED WRITES, BOTH WAYS ─────────
+  // Three of the five rows on __binding_census.mjs's UNPREDICATED ELEVATED
+  // WRITES list live on these two screens — the /new ready hero and the /new
+  // failure screen — and until this commit the corpus had no MEMBER actor on
+  // either, so every guard aimed at their fence was green by construction.
+  //
+  // WHY A GITHUB FIXTURE AND NOT A VERCEL ONE. The ready screen offers two
+  // elevated writes. POST /v1/github/repos sits behind GET
+  // /v1/github/installation, which the router gates at `Auth.require_user` —
+  // a plain member READS it, sees connected:true, and is therefore genuinely
+  // offered the create affordance. POST /v1/barkparks/:id/vercel-deploy sits
+  // behind GET /v1/barkparks/:id/bootstrap, which the router gates at
+  // `Auth.require_team_admin` — a member's read 403s, so no actor in this
+  // corpus can paint #new-vercel-claim and asserting its absence for a member
+  // would pass on a DOM that never rendered it. That one is fenced in app.js
+  // all the same (defence in depth: the console must not depend on a sibling
+  // READ's refusal for its own authority) and its bytes are pinned both ways
+  // in __app.test.mjs, where the band can be passed directly. Declared as a
+  // BLIND SPOT in member-authority-sweep.mjs rather than faked here.
+  "theater-ready-github": {
+    label: "/new theater ready with GitHub CONNECTED — the OWNER twin: #new-gh-create renders live (POST /v1/github/repos is team-admin)",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog&bp=" + THEATER_IDS.ready,
+    data: {
+      me: me("Ada's Lab", { instance: true }),
+      barkparks: [bpBase({
+        id: THEATER_IDS.ready,
+        name: "Hugin",
+        slug: "hugin",
+        url: "https://hugin-5b2c1e.barkpark.cloud",
+        host: "hugin-5b2c1e.barkpark.cloud",
+        health_status: "up",
+        agent_status: "online",
+        version: "0.9.2",
+        last_seen_at: tMinus(20),
+        provider: "hetzner",
+        region: "fsn1",
+        server_type: "cx22",
+        provision_status: "succeeded",
+      })],
+      subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+      catalog: theaterCatalog,
+      // The envelope GET /v1/github/installation actually answers on a
+      // connected team (github/installation.ex: connected + account_login).
+      github: { connected: true, configured: true, account_login: "ada" },
+    },
+  },
+  "theater-ready-github-member": {
+    label: "/new theater ready with GitHub connected, entered by a plain MEMBER — no live #new-gh-create, the disabled-and-explained arm instead",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog&bp=" + THEATER_IDS.ready,
+    data: {
+      me: me("Ada's Lab", { instance: true }, "member", "usr_rex"),
+      barkparks: [bpBase({
+        id: THEATER_IDS.ready,
+        name: "Hugin",
+        slug: "hugin",
+        url: "https://hugin-5b2c1e.barkpark.cloud",
+        host: "hugin-5b2c1e.barkpark.cloud",
+        health_status: "up",
+        agent_status: "online",
+        version: "0.9.2",
+        last_seen_at: tMinus(20),
+        provider: "hetzner",
+        region: "fsn1",
+        server_type: "cx22",
+        provision_status: "succeeded",
+      })],
+      subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+      catalog: theaterCatalog,
+      github: { connected: true, configured: true, account_login: "ada" },
+    },
+  },
+  "theater-failed-member": {
+    label: "/new theater failed, entered by a plain MEMBER — no live #new-retry (POST /v1/barkparks/:id/retry is team-admin), the disabled-and-explained arm instead",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog&bp=" + THEATER_IDS.failed,
+    data: {
+      me: me("Ada's Lab", { instance: true }, "member", "usr_rex"),
+      barkparks: [bpBase({
+        id: THEATER_IDS.failed,
+        name: "Munin",
+        slug: "munin",
+        provision_status: "failed",
+        provision_error: "Couldn't secure hugin.barkpark.cloud — the TLS certificate was never issued (DNS didn't propagate). The server exists but isn't serving; nothing else was set up.",
+        provision_steps: theaterFailedSteps,
+        provision_console: theaterFailedConsole,
+      })],
+      subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+    },
+  },
 
   // ── gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview states (tail-append, OC9) ─
   // Three states of the ONE Overview region: the self-healing trial runway, the

@@ -729,7 +729,13 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     barkpark = %{
       "barkpark" => %{
         "command" => Keyword.get(config(), :bp_binary, "bp"),
-        "args" => ["mcp", "serve", "--tools", "all"],
+        # --tools chat, NOT --tools all: the CURATED loopback surface
+        # (task-scc-bl-mcp-chat-toolset) — the eight task tools, the four chat
+        # session tools, and a frozen document/search allowlist, instead of every
+        # one of the manifest's ~107 commands. Pinned Go-side by
+        # TestChatToolsetAdvertisesExactlyTheCuratedSet; a new manifest command
+        # does NOT join it automatically.
+        "args" => ["mcp", "serve", "--tools", "chat"],
         "env" => %{
           "BARKPARK_API_URL" => mcp_api_url(),
           "BARKPARK_API_TOKEN" => raw_token

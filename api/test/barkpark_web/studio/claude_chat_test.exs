@@ -332,11 +332,14 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       refute "--strict-mcp-config" in args
     end
 
-    test "mcp_config/1 shape: bp mcp serve --tools all + a COMPLETE env block" do
+    test "mcp_config/1 shape: bp mcp serve --tools chat + a COMPLETE env block" do
       config = ClaudeChat.mcp_config("bpcs_secret")
       assert %{"mcpServers" => %{"barkpark" => server}} = config
       assert server["command"] == "bp"
-      assert server["args"] == ["mcp", "serve", "--tools", "all"]
+      # The loopback spawns the CURATED chat toolset, never the ~107-command
+      # --tools all bridge (task-scc-bl-mcp-chat-toolset, charter D64).
+      assert server["args"] == ["mcp", "serve", "--tools", "chat"]
+      refute "all" in server["args"]
       # BOTH url and token pinned: the child bp never falls back to the
       # host's saved credentials (no admin inheritance — D63).
       assert %{"BARKPARK_API_URL" => url, "BARKPARK_API_TOKEN" => "bpcs_secret"} =

@@ -289,6 +289,14 @@ DENY_PATTERNS = [
     "deploy.yml",           # performs the production deploy
     "release.yml",          # publishes packages
     "release-artifact.yml", # builds and uploads a release artifact
+    # A PREDICATE, NOT AN ENUMERATION. The control below calls every live
+    # `release*.yml` an action/watcher, so each new one named that way used to
+    # red this selftest until somebody added its literal name — which is how
+    # release-curator-draft.yml (a9f727cbc, #18069, 2026-09-13) broke every
+    # completed main run of shell-harnesses.yml. The two literals above stay:
+    # deleting a denylist line is the dangerous edit, and each still matches a
+    # live file, which is what the pattern-liveness half of the control asks.
+    "release*.yml",         # anything that releases, drafts a release, or curates one
     "cli-release.yml",      # publishes the CLI
     "landed-mark.yml",      # WRITES to the task ledger for the pushed sha
     "*-watch.yml",          # breakglass / main-gate / stale-verdict: a skipped watch is a blind window

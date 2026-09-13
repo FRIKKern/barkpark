@@ -551,6 +551,14 @@ func Execute(args []string) int {
 		if verb != "" {
 			if cmd, ok := tree.Lookup(noun, verb); ok {
 				usageCommand(out, *cmd)
+				// `bp task close --help` renders the manifest's arguments, which
+				// say nothing about what the REASON must NAME to stay checkable
+				// by the tree. The close-prose contract is appended here because
+				// this is the one page the next writer of a close reads before
+				// writing one. See tasks_close_evidence_contract.go.
+				if noun == "task" && verb == "close" {
+					printCloseEvidenceContract(out)
+				}
 				return exitOK
 			}
 		}

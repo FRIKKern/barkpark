@@ -34,6 +34,11 @@ import {
   CANVAS_COMPOUND_INSERTS,
   compoundKindToNode,
 } from "./slash-insert.js";
+import {
+  CANVAS_SECTION_PRESETS,
+  sectionPresetNodes,
+  sectionPresetCaretTarget,
+} from "./section-presets.js";
 
 // ── the shared "insert a canvas default node, replacing the caret block" seam ──
 //
@@ -85,24 +90,70 @@ export function insertCompoundAtSelection(editor, kind) {
   return insertNodeAtSelection(editor, node);
 }
 
-// The SHARED node-landing seam: replace the enclosing top-level-prose block with
-// `node`, or degrade to an insert-after when the caret sits somewhere a replace would
-// corrupt. Factored from insertSlashTypeAtSelection (byte-identical behavior) so the
-// single-node AND compound insert paths land nodes through ONE code path.
+// insertSectionPresetAtSelection(editor, kind) → insert a SECTION PRESET (an ORDERED
+// SEQUENCE of top-level blocks — the /papers/section-presets recipes) at the
+// selection, through the SAME replace/degrade seam the single-node and compound
+// inserts use. Unlike those two, a preset lands N top-level nodes, so runToOps emits
+// one insert-after PER block, minting every id.
+//
+// The caret then SELECTS the preset's declared placeholder (registry `caret`), so the
+// author's next keystroke overtypes it. When that block has no ProseMirror text hole
+// (a data-viz atom whose config is authored in the bpFleet JSON island), the block is
+// NodeSelection-ed instead — still focused, still replaced by the next keystroke.
+// Returns true iff inserted (unknown kind → false).
+// The NODE names whose body is an inline text hole a preset placeholder can be
+// SELECTED in: the canvas textable set (paragraph/heading/list/callout/note) plus the
+// four ARTICLE-CHROME role nodes (role-nodes.js — eyebrow/byline are content:"text*",
+// ingress/pullquote content:"inline*"). Everything else (bpOpaque/bpFleet/bpColumns/
+// divider …) has no text hole and is NodeSelection-ed instead.
+const PRESET_OVERTYPE_NODES = new Set([
+  ...CANVAS_SLASH_TEXTABLE_NODES,
+  "eyebrow",
+  "byline",
+  "ingress",
+  "pullquote",
+]);
+
+export function insertSectionPresetAtSelection(editor, kind) {
+  if (!editor) return false;
+  const nodes = sectionPresetNodes(kind);
+  if (!nodes || nodes.length === 0) return false;
+  return insertNodesAtSelection(editor, nodes, sectionPresetCaretTarget(kind));
+}
+
+// The single-node entry point, kept as the thin wrapper the slash pick and the
+// per-type Insert commands call — behavior byte-identical to before the multi-node
+// generalization (one node in, caret target defaulted to that node).
 function insertNodeAtSelection(editor, node) {
+  return insertNodesAtSelection(editor, [node], null);
+}
+
+// The SHARED node-landing seam: replace the enclosing top-level-prose block with
+// `nodes`, or degrade to an insert-after when the caret sits somewhere a replace would
+// corrupt. Factored from insertSlashTypeAtSelection (byte-identical behavior for a
+// single node) so the single-node, compound AND preset insert paths land nodes
+// through ONE code path.
+//
+// `caretTarget` is null for the single-node paths (caret rules unchanged: into the
+// body for a textable node, NodeSelection on an atom). A preset passes
+// { block, placeholder }: the caret lands on that block, SELECTING `placeholder` when
+// the node exposes an inline text hole.
+function insertNodesAtSelection(editor, nodes, caretTarget) {
   const { state, view } = editor;
   const $pos = state.selection.$from;
-  const newNode = state.schema.nodeFromJSON(node);
+  const newNodes = nodes.map((n) => state.schema.nodeFromJSON(n));
+  const newNode = newNodes[0];
+  const node = nodes[0];
 
   let tr;
-  let caretAnchor; // doc position the new node starts at (for caret placement)
+  let caretAnchor; // doc position the FIRST new node starts at (for caret placement)
 
   if (slashTriggerAllowsParent($pos.depth, $pos.parent.type.name)) {
     // TOP-LEVEL PROSE: replace the whole enclosing block (identical to the slash
     // pick — start=$pos.before(depth), end=$pos.after(depth)).
     const start = $pos.before($pos.depth);
     const end = $pos.after($pos.depth);
-    tr = state.tr.replaceWith(start, end, newNode);
+    tr = state.tr.replaceWith(start, end, newNodes);
     caretAnchor = start;
   } else {
     // DEGRADE SAFELY: the caret is inside a callout body / list item / other non-
@@ -111,14 +162,33 @@ function insertNodeAtSelection(editor, node) {
     // top-level spot without splitting the run. depth>=1 always has a depth-1
     // ancestor; after(1) is the position just past that top-level node.
     const insertAt = $pos.depth >= 1 ? $pos.after(1) : state.doc.content.size;
-    tr = state.tr.insert(insertAt, newNode);
+    tr = state.tr.insert(insertAt, newNodes);
     caretAnchor = insertAt;
   }
 
   // Caret placement — same rule as _chooseSlash. Best-effort; the insert already
   // landed even if selection placement throws.
   try {
-    if (CANVAS_SLASH_TEXTABLE_NODES.has(node.type)) {
+    if (caretTarget) {
+      // PRESET: land on the declared block, selecting its placeholder when that node
+      // exposes an inline text hole (so the next keystroke overtypes it); otherwise
+      // NodeSelection the block (a data-viz atom — no PM text hole).
+      const idx = Math.min(
+        Math.max(caretTarget.block | 0, 0),
+        newNodes.length - 1,
+      );
+      let pos = caretAnchor;
+      for (let i = 0; i < idx; i += 1) pos += newNodes[i].nodeSize;
+      const target = newNodes[idx];
+      const inlineSize = target.content ? target.content.size : 0;
+      if (PRESET_OVERTYPE_NODES.has(target.type.name) && inlineSize > 0) {
+        tr = tr.setSelection(
+          TextSelection.create(tr.doc, pos + 1, pos + 1 + inlineSize),
+        );
+      } else {
+        tr = tr.setSelection(NodeSelection.create(tr.doc, pos));
+      }
+    } else if (CANVAS_SLASH_TEXTABLE_NODES.has(node.type)) {
       tr = tr.setSelection(TextSelection.near(tr.doc.resolve(caretAnchor + 1)));
     } else {
       tr = tr.setSelection(NodeSelection.create(tr.doc, caretAnchor));
@@ -131,7 +201,14 @@ function insertNodeAtSelection(editor, node) {
   // paragraph's history can make undo attempt an invalid empty `doc`, especially
   // after the server stamps generated ids. Keep the transform as its own event:
   // undo restores the trigger paragraph first, then an earlier undo may remove it.
-  if (["section", "table"].includes(node.attrs?.bpType)) tr = closeHistory(tr);
+  // A PRESET is always its own history event — it lands N top-level nodes, so the
+  // same invalid-empty-doc hazard applies regardless of which types it carries.
+  if (
+    caretTarget ||
+    newNodes.some((n) => ["section", "table"].includes(n.attrs?.bpType))
+  ) {
+    tr = closeHistory(tr);
+  }
   view.dispatch(tr);
   editor.commands.focus();
   return true;
@@ -145,6 +222,8 @@ function insertNodeAtSelection(editor, node) {
 //               EXACTLY like the slash pick (via insertSlashTypeAtSelection).
 //   Starters  — one per CANVAS_COMPOUND_INSERTS entry; run() inserts a pre-composed
 //               container+children subtree (via insertCompoundAtSelection).
+//   Presets   — one per CANVAS_SECTION_PRESETS entry; run() inserts an ORDERED
+//               SEQUENCE of top-level blocks (via insertSectionPresetAtSelection).
 //   Format    — toggle bold/italic/strike/code + clear formatting, on the selection.
 //   Turn into — set the current block to paragraph / heading 1-3 / bullet / ordered.
 //
@@ -274,6 +353,22 @@ export function buildCommandRegistry(editor, opts) {
       group: "Starters",
       hint: c.hint,
       run: (ed) => insertCompoundAtSelection(ed, c.kind),
+    });
+  }
+
+  // PRESETS — section presets: an ORDERED SEQUENCE of top-level blocks per
+  // CANVAS_SECTION_PRESETS entry (masthead / annotated figure / live dashboard
+  // section / runbook step, the /papers/section-presets recipes). A THIRD group on
+  // purpose: Insert stays one-command-per-CANVAS_SLASH_TYPES and Starters stays
+  // one-command-per-compound (both count-pinned in the smoke), and a preset is
+  // neither a typed single-node insert nor a single pre-composed block.
+  for (const p of CANVAS_SECTION_PRESETS) {
+    cmds.push({
+      id: `preset-${p.kind}`,
+      label: `Insert ${p.label}`,
+      group: "Presets",
+      hint: p.hint,
+      run: (ed) => insertSectionPresetAtSelection(ed, p.kind),
     });
   }
 

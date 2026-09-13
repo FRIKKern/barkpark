@@ -222,6 +222,70 @@ says "UNCHECKED: charter not found" "the UNCHECKED names the missing charter"
 
 echo
 
+# ══ AXIS D — a PDS SCRIPT may not cite an authority that does not exist ══════
+#
+# The corpus axis A structurally cannot see. Every fixture below runs against a
+# FIXTURE TREE via --citation-root, so the pins do not move when somebody edits
+# a real comment in scripts/. The live tree gets one fixture of its own at the
+# end, and it asserts a NUMBER as well as a code — a green over a corpus of
+# zero files is exactly the vacuous pass this arm exists to refuse.
+echo
+echo "AXIS D — a PDS script may not cite an authority that does not exist"
+
+DROOT="$TMP/droot"
+mkdir -p "$DROOT/scripts" "$DROOT/tooling/pds"
+printf '#!/usr/bin/env bash\n# per PDS-D1 and PDS-D404 this is fine\n' > "$DROOT/scripts/pds-clean.sh"
+# A HARNESS in the fixture tree, carrying a planted phantom. It must be SKIPPED.
+printf '#!/usr/bin/env bash\n# a planted fixture number: PDS-D9999\n' > "$DROOT/scripts/pds-clean.test.sh"
+printf '{"note": "per PDS-D2"}\n' > "$DROOT/tooling/pds/clean.json"
+
+run 0 "axis D greens when every cited D resolves" -- --axis d --charter "$CH" --citation-root "$DROOT"
+says "files:      2 in scope" "the harness beside it is EXCLUDED — 3 files on disk, 2 in scope"
+says "citations:  3 occurrence(s), 3 distinct PDS-D" "the scan read every occurrence, not just the first per file"
+says "undefined:  0 firing" "the harness's planted PDS-D9999 does not red the axis"
+
+# THE PHANTOM. This is the renumber defect in miniature: a comment carried
+# forward onto a number the charter no longer (or does not yet) define.
+printf '#!/usr/bin/env bash\n# stale after a rebase: PDS-D9999\n' > "$DROOT/scripts/pds-phantom.sh"
+run 1 "axis D REDS on a script citing an undefined D" -- --axis d --charter "$CH" --citation-root "$DROOT"
+says "UNDEFINED-CITATION   scripts/pds-phantom.sh:2 cites PDS-D9999" "the red names the FILE, the LINE and the number"
+says "nearest defined: PDS-D404" "the red offers the nearest defined number, which is what a renumber repair needs"
+says "undefined:  1 firing" "exactly one citation fired"
+
+# …and removing it greens again. Without this half the red above is compatible
+# with an arm that reds on everything.
+rm "$DROOT/scripts/pds-phantom.sh"
+run 0 "removing the phantom citation greens axis D again" -- --axis d --charter "$CH" --citation-root "$DROOT"
+says_not "UNDEFINED-CITATION" "the red is gone with the citation, not sticky"
+
+# THE SENTINELS. PDS-D777/999/1000 are this harness's own synthetic numbers and
+# must never red — but they must be COUNTED, not silently dropped.
+printf '#!/usr/bin/env bash\n# the fixtures PDS-D777 PDS-D999 PDS-D1000 are sentinels\n' > "$DROOT/scripts/pds-sentinel.sh"
+run 0 "the synthetic sentinels do not red axis D" -- --axis d --charter "$CH" --citation-root "$DROOT"
+says "sentinels:  3 occurrence(s) skipped" "the exclusion is PRINTED, so it cannot hide a growing skip list"
+rm "$DROOT/scripts/pds-sentinel.sh"
+
+# A corpus root with nothing in it is UNCHECKED. An arm that printed PARITY here
+# would be certifying a corpus it never opened.
+run 2 "an empty corpus root is UNCHECKED, never a green" -- --axis d --charter "$CH" --citation-root "$TMP/no-such-root"
+says "UNCHECKED: the scope matched no file" "the UNCHECKED names the empty scope"
+
+run 2 "axis D with a missing charter is UNCHECKED" -- --axis d --charter "$TMP/no-such-charter.md" --citation-root "$DROOT"
+says "UNCHECKED: charter not found" "the UNCHECKED names the missing charter"
+
+# THE LIVE TREE. The fixtures above prove the mechanism; this one proves the
+# mechanism is pointed at the real corpus. It pins a FLOOR on the citation count
+# rather than an exact number, because the real corpus grows.
+run 0 "axis D is GREEN on this checkout's real scripts/pds-*.sh + tooling/pds/**" -- --axis d
+LIVE_OCC="$(printf '%s\n' "$LAST_OUT" | sed -n 's/^  citations:  \([0-9]*\) occurrence.*/\1/p')"
+CHECKS=$((CHECKS + 1))
+if [ "${LIVE_OCC:-0}" -ge 100 ]; then
+  echo "ok    the live run read ${LIVE_OCC} citations (floor 100) — the green is over a real corpus"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  the live axis D green covered only ${LIVE_OCC:-0} citation(s) — a green over an empty corpus"
+fi
+
 # ══ AXIS A, UNIQUENESS LEG — one D-number, one finding ═══════════════════════
 #
 # The old definition set was `sort -u`'d, so a number defined TWICE read as
