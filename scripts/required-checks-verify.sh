@@ -115,6 +115,24 @@
 #                                                     that clause (see
 #                                                     REQUIRE_PROSE_CANDIDATES)
 
+# INTERPRETER GUARD — shebang-independent, and it must stay ABOVE the first
+# process substitution in this file. bash reads a script INCREMENTALLY: invoked
+# as `sh` it is in POSIX mode, where `<(…)` cannot be parsed, so everything
+# above the offending line has ALREADY RUN and the script dies with the status
+# of the last completed command. MEASURED 2026-09-13: under `sh` this file exited 0 with output byte-identical to the bash control, because its process substitution sits inside spec_freshness_check, which that invocation never reached. A LATENT vacuous green: reach that function under sh and `missing` is empty, so "the spec and main agree" is concluded having compared nothing — on the verifier the merge path depends on.
+# Pinned by scripts/posix-vacuous-green-census.sh, which reds if this guard is
+# removed or moved below the first process substitution.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "required-checks-verify.sh: needs bash (this script uses process substitution); run: bash scripts/required-checks-verify.sh" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "required-checks-verify.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/required-checks-verify.sh" >&2
+    exit 2
+    ;;
+esac
+
 set -euo pipefail
 
 # ── THE LOCALE PIN — one line, and it is not a style preference ──────────────

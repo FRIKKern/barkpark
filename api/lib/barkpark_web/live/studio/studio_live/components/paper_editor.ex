@@ -2193,28 +2193,111 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           />
         </form>
         <.rich_body_editor block={@block} />
+      <%!-- code (task-33af97d6c80cbe72): the body textarea PLUS the LINE-EMPHASIS
+            range inspector, and a live preview above them.
+
+            THE PREVIEW is the View<->Edit parity mechanism. A `<textarea>` has no
+            per-line DOM, so the edit control itself can never paint the spans; the
+            preview instead runs the block through `Render.render_block/2` — the
+            SAME producer the /papers reader uses — and the Studio shell is a
+            `.bp-paper-surface` sink (components.ex `bp-paper-shell bp-paper-surface`),
+            so the `.bp-code-em--<tone>` rules in the ONE canonical stylesheet paint
+            it with the reader's own bytes. Parity is by CONSTRUCTION (one producer,
+            one stylesheet), not by a mirrored `.bp-paper-editor-body` rule — minting
+            a twin rule would CREATE the cross-file drift surface view_edit_parity_test
+            exists to catch.
+
+            THE RANGE ROWS, not per-line gutter toggles: the stored model is a RANGE
+            list ({from,to,tone}, 1-based inclusive), so a per-line toggle would have
+            to split and re-merge the author's ranges on every click. The repeated-row
+            fieldset is the idiom toc / criteria-progress / gauge-list already use, and
+            it rides `put_editor_collection/7` unchanged. --%>
       <% "code" -> %>
-        <form
-          class="bp-paper-edit-form"
-          phx-submit="paper-edit-block"
-          phx-change="paper-block-autosave"
-          phx-debounce="500"
-        >
-          <input type="hidden" name="block_id" value={@id} />
-          <input
-            type="text"
-            name="lang"
-            class="bp-paper-edit-text"
-            placeholder="lang"
-            value={Map.get(@block, "lang", "")}
-          />
-          <textarea
-            name="value"
-            class="bp-paper-edit-textarea bp-paper-edit-code"
-            rows="5"
-            data-test-id="paper-field-value"
-          ><%= Map.get(@block, "value", "") %></textarea>
-        </form>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-code-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-code-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <form
+            id={"code-form-" <> @id}
+            class="bp-paper-edit-form"
+            phx-submit="paper-edit-block"
+            phx-change="paper-block-autosave"
+            phx-debounce="500"
+          >
+            <input type="hidden" name="block_id" value={@id} />
+            <input
+              type="text"
+              name="lang"
+              class="bp-paper-edit-text"
+              placeholder="lang"
+              value={Map.get(@block, "lang", "")}
+            />
+            <textarea
+              name="value"
+              class="bp-paper-edit-textarea bp-paper-edit-code"
+              rows="5"
+              data-test-id="paper-field-value"
+            ><%= Map.get(@block, "value", "") %></textarea>
+            <%!-- The emphasis rows live in THIS form, not a second one: the block
+                  patch is a shallow merge, so a separate form would have to re-send
+                  `value` or clobber it with "". --%>
+            <details
+              id={"code-emphasis-controls-" <> @id}
+              class="bp-paper-contextual-controls"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
+              <summary class="bp-paper-contextual-toggle">Emphasised lines</summary>
+              <div class="bp-paper-contextual-panel" data-test-id="paper-code-emphasis-editor">
+                <input
+                  type="hidden"
+                  name="emphasis-count"
+                  value={length(Blocks.code_emphasis_ranges(@block))}
+                />
+                <fieldset
+                  :for={{range, index} <- Enum.with_index(Blocks.code_emphasis_ranges(@block))}
+                  class="bp-paper-edit-form"
+                  data-test-id="paper-code-emphasis-row"
+                  data-emphasis-index={index}
+                >
+                  <legend>Range <%= index + 1 %></legend>
+                  <%= if is_map(range) do %>
+                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-from-#{@id}"}>First line</label>
+                    <input id={"emphasis-#{index}-from-#{@id}"} type="text" inputmode="numeric"
+                           name={"emphasis-#{index}-from"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(range, "from"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-to-#{@id}"}>Last line</label>
+                    <input id={"emphasis-#{index}-to-#{@id}"} type="text" inputmode="numeric"
+                           name={"emphasis-#{index}-to"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(range, "to"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-tone-#{@id}"}>Tone</label>
+                    <select id={"emphasis-#{index}-tone-#{@id}"} name={"emphasis-#{index}-tone"}
+                            class="bp-paper-edit-tone">
+                      <option :for={tone <- Blocks.code_emphasis_tones()} value={tone}
+                              selected={Map.get(range, "tone") == tone}><%= tone %></option>
+                    </select>
+                  <% else %>
+                    <p class="bp-paper-edit-readonly" data-test-id="paper-code-emphasis-legacy-row">
+                      Legacy range retained until explicitly removed.
+                    </p>
+                  <% end %>
+                  <div class="bp-paper-edit-actions">
+                    <button type="submit" name="emphasis-action" value={"up:#{index}"}
+                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                    <button type="submit" name="emphasis-action" value={"down:#{index}"}
+                            class="btn btn-ghost btn-sm"
+                            disabled={index == length(Blocks.code_emphasis_ranges(@block)) - 1}>Move down</button>
+                    <button type="submit" name="emphasis-action" value={"remove:#{index}"}
+                            class="btn btn-destructive btn-sm"
+                            data-test-id="paper-code-emphasis-remove">Remove range</button>
+                  </div>
+                </fieldset>
+
+                <button type="submit" name="emphasis-action" value="add" class="btn btn-ghost btn-sm"
+                        data-test-id="paper-code-emphasis-add">Add range</button>
+              </div>
+            </details>
+          </form>
+        </div>
       <%!-- diagram (barkpark-woxx): a Mermaid `source` textarea (mirrors the code
             block's value textarea, monospace) + an optional caption input. Both
             are flat strings on the block — build_block_patch reads them verbatim. --%>

@@ -6815,6 +6815,46 @@ test("vercelClaimHtml: UNDEPLOYED is unaffected — nothing to be unsure about",
   assert.doesNotMatch(html, /new-vercel-claim-unknown/);
 });
 
+// cch-r16-w11 — THE VERCEL DEPLOY OFFER, BOTH WAYS, IN ONE RUN.
+// POST /v1/barkparks/:*/vercel-deploy is Auth.require_team_admin and this is
+// the only place its two arms can be measured. It is NOT reachable from the
+// scenario corpus: the control renders only when GET
+// /v1/barkparks/:id/bootstrap answers a `vercel` envelope, and THAT read is
+// itself require_team_admin, so a member's read 403s before the button is ever
+// composed and no committed fixture paints it for anyone (measured: zero
+// renders in all 132 scenarios). Here the band is an ARGUMENT, so the refusal
+// is a losable measurement rather than a consequence of a sibling read — which
+// is exactly why member-authority-sweep.mjs declares it as BLIND SPOT B6 and
+// points here instead of minting a fixture the server cannot serve a member.
+test("cch-r16-w11: vercelClaimHtml draws the deploy button live on grant and hookless-disabled on refuse", () => {
+  const vercel = { configured: true, deployed: false, claimed: false, claim_url: null };
+  const grant = hooks.vercelClaimHtml(vercel, { id: "b1" }, "grant");
+  const refuse = hooks.vercelClaimHtml(vercel, { id: "b1" }, "refuse");
+  const unknown = hooks.vercelClaimHtml(vercel, { id: "b1" }, "unknown");
+
+  // GRANT: the shipped bytes, class list included — the fence must not restyle
+  // the control it lets through.
+  assert.ok(grant.includes('<button class="btn btn-block btn-vercel" type="button" id="new-vercel-claim">Deploy your site to Vercel</button>'),
+    "the grant arm keeps the shipped btn-block btn-vercel button and its mount hook");
+
+  // REFUSE: no id anywhere — adminWriteControlHtml's refusal arm DROPS
+  // liveAttrs, so newWireReady's `$("#new-vercel-claim")` finds nothing and
+  // there is no click to bind. The verb is still drawn, and the reason is the
+  // server's own.
+  assert.doesNotMatch(refuse, /id="new-vercel-claim"/,
+    "the refusal arm must carry NO mount hook — a disabled button with an id is still a hook");
+  assert.ok(refuse.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Deploy your site to Vercel</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
+    "the same verb, drawn disabled-and-explained with its own inline reason");
+
+  // UNKNOWN fails CLOSED with the still-checking caption, never a grant.
+  assert.doesNotMatch(unknown, /id="new-vercel-claim"/);
+  assert.ok(unknown.includes("Checking capabilities"));
+
+  // The area wrapper survives all three — the swap target must exist whichever
+  // arm painted it, or a late repaint has nowhere to land.
+  for (const html of [grant, refuse, unknown]) assert.match(html, /id="new-vercel-area"/);
+});
+
 test("vercelClaimInnerHtml: the post-deploy in-place swap runs the SAME ladder", () => {
   // newVercelDeploy() swaps #new-vercel-area's innerHTML with this; if the POST
   // re-minted a code for a project that already left our team, the swap must
@@ -25516,6 +25556,110 @@ test("cch-w41-bl: both predicates fail CLOSED on BOTH not-a-role states, and sta
   hooks.clearMe();
 });
 
+// ── cch-r17-w12 — THE PROVIDER BAND'S WRITE NARROWING ──────────────────────
+// providerWriteAuthority() is what the credential sheet's submit is drawn
+// through (adminWriteControlHtml(…, "wizard-block")), and it is the FOURTH
+// unpredicated elevated write's fence. smoke.mjs measures the two arms the
+// corpus can reach — providers-member refuses, providers-connected offers, both
+// in the RENDERED BYTES with the band read from each fixture's own /v1/me. What
+// no scenario can reach is the THREE not-a-role states, and those are exactly
+// where a narrowing fails open if it is written as `=== "refuse" ? … : "grant"`.
+// So they are pinned here, where the band's source is drivable directly.
+test("cch-r17-w12: providerWriteAuthority narrows the provider band — owner grant, admin grant, member refuse", async () => {
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(hooks.providerWriteAuthority(), "grant", "an owner may connect a provider");
+  hooks.clearMe();
+  await driveMe(200, W41BL_ADMIN);
+  assert.equal(hooks.providerWriteAuthority(), "grant",
+    "ADMIN grant — the limb a role-literal regression drops first; POST /v1/providers is require_team_admin, i.e. owner|admin");
+  hooks.clearMe();
+  await driveMe(200, ME_TA_MEMBER);
+  assert.equal(hooks.providerWriteAuthority(), "refuse",
+    "a member gets a DETERMINATE refusal, never the unknown arm — the sheet may name the remedy");
+  hooks.clearMe();
+});
+
+test("cch-r17-w12: providerWriteAuthority FAILS CLOSED on all three not-a-role states, and the sheet paints no mount hook on any of them", async () => {
+  const REFUSE_TITLE = 'title="You need the admin role on this team';
+  // loading — /v1/me never asked.
+  hooks.clearMe();
+  assert.equal(hooks.providerWriteAuthority(), "unknown",
+    "MUTATION TARGET: widen this to a grant and the line above is the red — an unasked question is not an admin");
+  // failed — a fault is a different fact from a refusal, and neither is a grant.
+  await driveMe(500, { error: "server_error" });
+  assert.equal(hooks.providerWriteAuthority(), "unknown", "an unproven actor is not an admin");
+  // stale — the pin moved under the cached answer, so it is not about this team.
+  hooks.clearMe();
+  await withTeamPin(async (store) => {
+    store.setItem("bp.active-team", "t1");
+    await driveMe(200, ME_TA);
+    assert.equal(hooks.providerWriteAuthority(), "grant", "fetched under t1, answered for t1");
+    store.setItem("bp.active-team", "t2");
+    assert.equal(hooks.teamAuthorityState(), "stale", "the precondition: the source band actually reads stale here");
+    assert.equal(hooks.providerWriteAuthority(), "unknown",
+      "and the narrowing maps stale onto the honest unknown arm, never onto grant and never onto a determinate refusal");
+  });
+  hooks.clearMe();
+});
+
+// …and THE CONSEQUENCE, on the SHEET'S OWN BYTES, for all three bands including
+// the two no committed scenario can reach. This drives the REAL
+// openProviderCredential against a minimal mounted DOM — the same technique the
+// closeModal arm above uses — so what is measured is the sheet, not a helper
+// standing in for it. smoke.mjs measures grant and refuse with the band read
+// from a fixture's own /v1/me; this adds the UNKNOWN arm and pins the grant
+// arm's bytes where a restyling regression cannot hide behind a fixture.
+test("cch-r17-w12: the credential sheet paints its submit live ONLY on grant — refuse and unknown carry no #cred-submit at all", async () => {
+  const el = (id) => ({
+    id, innerHTML: "", hidden: false, textContent: "", value: "",
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => id === "modal-x" },
+    setAttribute() {}, removeAttribute() {}, addEventListener() {},
+    querySelector: () => null, querySelectorAll: () => [], focus() {},
+  });
+  const nodes = { "#modal-root": el("modal-root"), "#modal-body": el("modal-body"), ".modal-x": el("modal-x") };
+  const prevQS = sandbox.document.querySelector;
+  const prevGE = sandbox.document.getElementById;
+  sandbox.document.querySelector = (sel) => nodes[sel] || null;
+  sandbox.document.getElementById = (id) => nodes["#" + id] || null;
+  const paint = async (status, envelope) => {
+    hooks.clearMe();
+    if (status) await driveMe(status, envelope);
+    nodes["#modal-body"].innerHTML = "";
+    hooks.openProviderCredential("hetzner");
+    return nodes["#modal-body"].innerHTML;
+  };
+  try {
+    const grant = await paint(200, ME_TA);
+    assert.equal(hooks.providerWriteAuthority(), "grant", "precondition: this envelope is a determinate grant");
+    assert.ok(grant.includes('<div class="modal-actions"><button class="btn btn-primary btn-block" type="button" id="cred-submit">Add provider</button></div>'),
+      "the grant arm keeps the shipped btn-primary btn-block button and its mount hook; got: " + grant.slice(-240));
+
+    const refuse = await paint(200, ME_TA_MEMBER);
+    assert.equal(hooks.providerWriteAuthority(), "refuse", "precondition: a member is a determinate refusal");
+    assert.doesNotMatch(refuse, /id="cred-submit"/,
+      "the refusal arm must carry NO mount hook — openProviderCredential's own `body.querySelector(\"#cred-submit\")` then binds nothing");
+    assert.ok(refuse.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Add provider</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
+      "the same verb, drawn disabled-and-explained with its own inline reason");
+
+    const unknown = await paint(null, null);
+    assert.equal(hooks.providerWriteAuthority(), "unknown", "precondition: an unasked /v1/me is the unknown arm");
+    assert.doesNotMatch(unknown, /id="cred-submit"/, "unknown fails CLOSED with no hook either");
+    assert.ok(unknown.includes("Checking capabilities"), "and says so honestly rather than naming a role it has not read");
+
+    // The rest of the sheet survives every arm: the fence withholds the WRITE,
+    // never the screen the person came to read.
+    for (const html of [grant, refuse, unknown]) {
+      assert.match(html, /id="cred-token"/, "the credential field is still there — a refused principal still sees what the sheet is for");
+      assert.match(html, /id="cred-back"/, "and the way back out");
+    }
+  } finally {
+    sandbox.document.querySelector = prevQS;
+    sandbox.document.getElementById = prevGE;
+    hooks.clearMe();
+  }
+});
+
 test("cch-w42-s1: THE STALENESS ARM — the pin moving under a cached answer reads as stale, not as authority", async () => {
   await withTeamPin(async (store) => {
     store.setItem("bp.active-team", "t1");
@@ -26481,6 +26625,87 @@ test("cch-w48-s1: the unanswered /new step asks ONCE, and its exit re-asks", asy
     for (let i = 0; i < 12; i++) await Promise.resolve();
     assert.equal(second.calls.length, 1, "the retry actually re-asks");
     assert.match(slot.innerHTML, /id="new-launch-btn"/, "one click, one answer, painted without a reload");
+  } finally {
+    Object.assign(sandbox, saved);
+    hooks.clearMe();
+  }
+});
+
+// ── cch-w48-s1-followup · ONE FUNNEL, ONE ROLE QUESTION ─────────────────────
+// The launch step above asks GET /v1/me once and lands it through absorbMe. The
+// 402 plan step below it (renderNewPricing, called by newLaunch's 402 arm as
+// `renderNewPricing(newState.template)` — ONE argument, so `authority` is
+// undefined) used to issue its OWN unconditional GET /v1/me. Two identical
+// reads in one funnel, and — the part that is not merely wasteful — two screens
+// that can DISAGREE, because a role that moves between the two answers is
+// rendered as one authority on the launch step and another on the plan step.
+//
+// DRIVEN, not region-scoped: the double read lives in a fetch callback and in
+// the argument count of one call site, so only a drive that counts requests
+// across BOTH steps can see it. The count is filtered to /v1/me on purpose —
+// /new legitimately asks /v1/subscription on this step (cch-w49-s7) and a bare
+// calls.length would go red for the wrong reason.
+test("cch-w48-s1-followup: the /new funnel asks /v1/me ONCE across the launch step and the 402 plan step", async () => {
+  const saved = { document: sandbox.document, fetch: sandbox.fetch };
+  const { slot } = newBodySlot();
+  const meCalls = (net) => net.calls.filter((c) => String(c.path).indexOf("/v1/me") !== -1).length;
+  try {
+    sandbox.document = newFlowDom(slot);
+
+    // Drain the module latch first. `newLaunchMeAsked` is IIFE state shared by
+    // every drive in this file, and only the step's own retry resets it — so a
+    // cold renderNewLaunch here would silently ask NOTHING and the count below
+    // would pass over a funnel that never read anything. One throwaway render
+    // leaves the latch set and the exit on screen whatever it was before; the
+    // retry click that follows is then the one deterministic read.
+    hooks.clearMe();
+    sandbox.fetch = fetchStub(500, { error: "server_error" });
+    hooks.renderNewLaunch(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.match(slot.innerHTML, /data-me-retry/, "the unknown arm must be on screen for the drain to work");
+
+    // STEP 1 — the launch step asks for the role itself, once, and absorbs it.
+    const net = fetchStub(200, W47_OWNER);
+    sandbox.fetch = net;
+    slot.querySelector("[data-me-retry]").click();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.match(slot.innerHTML, /id="new-launch-btn"/,
+      "the owner must reach the form, or there is no 402 for the next step to fold");
+    assert.equal(meCalls(net), 1, "the launch step's own read — the one this funnel is allowed");
+
+    // STEP 2 — POST /v1/launch answered 402, so newLaunch folds the plan step in
+    // with no authority argument. The absorbed answer must decide it.
+    hooks.renderNewPricing(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(meCalls(net), 1,
+      "one funnel, one role question: the plan step must reuse the absorbed answer, got " + meCalls(net));
+    assert.match(slot.innerHTML, /Choose Supporter/,
+      "…and the reused answer must actually decide the screen — an owner keeps the checkout CTAs");
+
+    // The reuse carries the REFUSING band too, not just the permissive one: a
+    // loaded member answer withholds the CTAs with no second read of its own.
+    // (driveMe absorbs through the shipped loader on its OWN stub, so the count
+    // below is the PLAN STEP's alone — an answer already in hand, as after the
+    // launch step. The w48 member test above drives it under this same DOM.)
+    hooks.clearMe();
+    await driveMe(200, W47_MEMBER);
+    const memberNet = fetchStub(200, W47_MEMBER);
+    sandbox.fetch = memberNet;
+    hooks.renderNewPricing(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(meCalls(memberNet), 0, "a loaded answer is not re-asked for the plan step");
+    assert.match(slot.innerHTML, /Only the team owner can start a paid plan/,
+      "the absorbed member answer blocks checkout, exactly as the fetched one did");
+
+    // FAIL OPEN, UNCHANGED. With no absorbed answer the step still asks, and a
+    // read that FAILS still leaves the CTAs standing (unknown, never refused).
+    hooks.clearMe();
+    const coldNet = fetchStub(500, { error: "server_error" });
+    sandbox.fetch = coldNet;
+    hooks.renderNewPricing(W48_TPL);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(meCalls(coldNet), 1, "an unknown role is still asked for — the reuse is not a mute");
+    assert.match(slot.innerHTML, /Choose Supporter/, "and a failed read refuses nobody");
   } finally {
     Object.assign(sandbox, saved);
     hooks.clearMe();
@@ -29837,7 +30062,20 @@ test("cch-w47-s1-fu: every launchAuthority() call site is either the FORM seam o
   const code = w31BlankComments(src);
   // The three seams that may read the whole band: the mount that withholds the
   // form, its repaint, and the /new step's own offer builder.
-  const SEAMS = new Set(["launchFlow", "repaintLaunchAuthority", "renderNewLaunch"]);
+  // cch-r16-w11 adds a FOURTH: newWriteAuthority, the narrowing that maps this
+  // five-valued band onto adminWriteControlHtml's three-valued one. It belongs
+  // with the FORM seam and not with the four offer sites, and the distinction
+  // this test is drawing is exactly why. An OFFER site DELETES a control (a
+  // `.hidden` property, an omitted menu row), so reading anything but
+  // `=== "refuse"` there would make a moved team pin erase an owner's button.
+  // newWriteAuthority deletes nothing: on `stale` it answers "unknown", and
+  // adminWriteControlHtml's unknown arm still draws the SAME verb, disabled and
+  // captioned "Checking capabilities…" — the control stands, only its live
+  // mount hook is withheld. That is launchFlow's fail-closed treatment of a
+  // moved pin ("the whole form is withheld"), one control at a time, and it is
+  // the right one for a WRITE: the alternative is offering a POST the server
+  // will refuse because we are no longer sure which team we are asking about.
+  const SEAMS = new Set(["launchFlow", "repaintLaunchAuthority", "renderNewLaunch", "newWriteAuthority"]);
   const re = /launchAuthority\(\)/g;
   const sites = [];
   let m;
@@ -30738,6 +30976,9 @@ const CCHW65_MUST_ANSWER = [
   "malformed_body", "malformed_request", "name_required", "network_error",
   "no_active_subscription", "no_admin_token", "no_content_binding", "no_subscription",
   "github_error", "invalid_name",
+  // cch-w73-bl: the install return leg made this 422 human-reachable and paid it
+  // with a curated sentence; pinned here so a later deletion is not invisible.
+  "installation_not_found",
   "no_team", "not_live", "password_invalid", "plan_invalid", "portal_failed",
   "rate_limited", "repo_not_in_installation", "request_too_large", "role_too_high",
   "server_error", "suspended", "unsupported_media_type", "validation_failed",
@@ -31172,10 +31413,6 @@ test("cch-w75-s1 D883: repo_not_in_installation still renders the permanent trut
 test("cch-w72-bl NEGATIVE CONTROL: the two honest silences stay silent", () => {
   // These are NOT paid, on purpose, and their census rows STAY:
   //
-  //   installation_not_found  — POST /v1/github/installations has zero callers in
-  //                             app.js, internal/ or js/: no GitHub App
-  //                             setup_action callback consumer was ever built, so
-  //                             no person can reach the emit.
   //   repo_full_name_required — guard-shielded: the connect select is built only
   //                             when repos.length is nonzero and always submits a
   //                             member of it; only a hand-built request omits it.
@@ -31183,7 +31420,12 @@ test("cch-w72-bl NEGATIVE CONTROL: the two honest silences stay silent", () => {
   // A curated sentence for either would be copy for a reader that does not
   // exist. This control reds if a future diff registers one WITHOUT retiring its
   // census row — the mirror of the rot arm, on the JS side.
-  for (const slug of ["installation_not_found", "repo_full_name_required"]) {
+  // cch-w73-bl (wave 73) REMOVED installation_not_found from this list: its
+  // zero-caller premise was spent by handleGithubInstallReturn, it gained a
+  // curated reader, and its census row was deleted in that same diff. The slug
+  // is asserted PAID in the cch-w73-bl block at the tail of this file — so the
+  // two directions are still both guarded, just from opposite ends.
+  for (const slug of ["repo_full_name_required"]) {
     for (const fb of ["Please try again.", "Couldn't load your repositories."]) {
       assert.equal(hooks.friendly({ error: slug }, fb), fb,
         slug + " gained an ERRORS entry — pay it in the census too, or drop the entry");
@@ -32553,4 +32795,359 @@ test("security log: the modal mounts it, and a failed read never paints as an em
   const opener = src.slice(src.indexOf("function openAccountModal("));
   assert.ok(opener.slice(0, 2000).includes("loadSecurityLog()"),
     "openAccountModal must load the security log");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w73-bl · THE GITHUB APP INSTALL RETURN LEG
+//
+// THE DEFECT (wave-73 verify, zero-caller proof): the console's "Connect
+// GitHub" affordances were bare links OUT to github.com/apps/<slug>/
+// installations/new and NOTHING ever brought the resulting installation back.
+// POST /v1/github/installations had zero callers in app.js, internal/ and js/ —
+// a writer the plane shipped for a consumer that was never built — so a person
+// who completed the install returned to a console that still said "not
+// connected", forever, with no way to fix it from inside the product.
+//
+// THE RULING (criterion c0), recorded in the two durable venues this merge
+// carries — the comment block above handleGithubInstallReturn in app.js, and
+// the PR body: CONSOLE CONSUMER, not a server callback route. The App setup
+// redirect is an unauthenticated GET with no signature, no state parameter and
+// no bearer token; a server route there could not tell which team was
+// installing, while the console at that URL already holds the session and the
+// team pin, and the plane already has the authenticated, admin-gated,
+// id-validating writer. So the server side of this task needed NO change.
+//
+// IS GITHUB CONFIGURED ON THE DEPLOYMENT UNDER TEST (criterion c6)? NO — the
+// live control plane carries no ^GITHUB env (the measured fact cch-w48-s3/s6
+// recorded), so GitHub.configured?() is false there, every install CTA is
+// withheld and no live install can be driven. The evidence below is therefore
+// the corpus round trip plus node pins, which is what the criterion's "run or
+// fixture evidence quoted" allows.
+
+// previewRoute is already in scope (the session-revoke contract block imports
+// it near the head of this file) — the corpus route() IS the fixture server.
+
+// A realm wired for the return leg: the two nodes the leg can paint into
+// (#toast-stack, #github-card) RECORD their bytes, and fetch is dispatched
+// through the REAL scenario corpus so the round trip is a fixture round trip
+// and not a hand-built echo.
+async function w73Realm(source, search, scenario) {
+  const SCEN = scenario || "providers-connected";
+  const { h, box } = w49s6Realm(source || APP_SRC);
+  box.location.search = search;
+  const nodes = {};
+  const make = () => {
+    const n = {
+      // isConnected: loadGithub drops its answer when the box it painted into
+      // has left the document — a mounted node must say it is still there.
+      innerHTML: "", hidden: false, children: [], isConnected: true,
+      addEventListener: noop, removeEventListener: noop, setAttribute: noop,
+      appendChild(c) { n.children.push(c); }, removeChild: noop,
+      querySelector: () => null, querySelectorAll: () => [],
+    };
+    return n;
+  };
+  for (const sel of ["#toast-stack", "#github-card"]) nodes[sel] = make();
+  box.document.querySelector = (sel) => nodes[sel] || null;
+  // toast() wires its own close button off el.querySelector(".toast-close"),
+  // so a created element must hand back a node, not null.
+  box.document.createElement = () => ({
+    className: "", innerHTML: "", parentNode: null,
+    setAttribute: noop, addEventListener: noop,
+    querySelector: () => ({ addEventListener: noop }), querySelectorAll: () => [],
+  });
+  // history is ABSENT from the w49s6 realm, which exercises the leg's own
+  // `typeof history === "undefined"` guard for free — the scrub degrades to a
+  // no-op instead of throwing on the boot path.
+  const state = {};
+  const calls = [];
+  box.fetch = (path, opts) => {
+    const method = (opts && opts.method) || "GET";
+    calls.push({ method, path, body: opts && opts.body ? JSON.parse(opts.body) : null });
+    const answer = previewRoute(SCEN, method, path, state) ||
+      { status: 200, body: {} };
+    return Promise.resolve({
+      ok: answer.status >= 200 && answer.status < 300,
+      status: answer.status,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(answer.body),
+    });
+  };
+  // The corpus' own owner actor, through the REAL loadMe: providerCanWrite()
+  // gates the card's write affordances, and an unasked /v1/me paints the
+  // read-only member arm — which carries no "Connect GitHub" CTA at all and
+  // would make every precondition below measure the wrong screen.
+  h.loadMe();
+  await w49s6Settle();
+  return { h, box, nodes, calls, state };
+}
+const w73Toasts = (nodes) => nodes["#toast-stack"].children.map((c) => c.innerHTML).join("\n");
+// Objects minted INSIDE the vm realm have that realm's Object prototype, so
+// deepStrictEqual refuses them on identity alone. Compare the VALUES. (`plain`
+// is already taken further up this file, hence the local name.)
+const w73Plain = (v) => JSON.parse(JSON.stringify(v));
+
+test("cch-w73-bl: githubInstallReturnFromSearch reads GitHub's setup redirect, and nothing else", () => {
+  const f = hooks.githubInstallReturnFromSearch;
+  assert.equal(typeof f, "function", "the parse rung must be node-pinned");
+  // The shape GitHub actually sends after an install and after an update.
+  assert.deepEqual(w73Plain(f("?installation_id=41234567&setup_action=install")),
+    { installation_id: "41234567", setup_action: "install" });
+  assert.deepEqual(w73Plain(f("?setup_action=update&installation_id=41234567")),
+    { installation_id: "41234567", setup_action: "update" });
+  // …beside other parameters, and with the leading ? absent.
+  assert.deepEqual(w73Plain(f("?foo=1&installation_id=9&setup_action=install&bar=2")),
+    { installation_id: "9", setup_action: "install" });
+  // setup_action=request: the org-approval shape, NO installation to record.
+  // It is a VALUE, not a null — the leg has something honest to say about it.
+  assert.deepEqual(w73Plain(f("?setup_action=request")), { installation_id: "", setup_action: "request" });
+  // Not a return leg at all.
+  for (const s of ["", "?", "?checkout=success", "?billing=portal", null, undefined]) {
+    assert.equal(f(s), null, "a non-install query must not arm the leg: " + JSON.stringify(s));
+  }
+  // Malformed input degrades to a value, never a throw — this runs at boot.
+  assert.doesNotThrow(() => f("%%%&installation_id=7&setup_action=install"));
+});
+
+test("cch-w73-bl c2: installation_not_found is READ — the curated sentence, with no invented cause", () => {
+  const copy = hooks.friendly({ error: "installation_not_found" }, "Please try again.");
+  assert.notEqual(copy, "Please try again.",
+    "installation_not_found must be READ — its census row was deleted on the strength of this reader");
+  assert.equal(copy,
+    "Barkpark can't see that GitHub installation any more — it was removed, or the link was used after the fact. " +
+    "Install the Barkpark app on GitHub again, then come back.");
+  // Permanent until the app is installed again: no transience verb may appear.
+  for (const verb of [/try again in/i, /shortly/i, /in a moment/i, /retry/i, /wait/i, /temporar/i]) {
+    assert.ok(!verb.test(copy), "installation_not_found paints a permanent state as transient: " + verb);
+  }
+  // The plane validated the id; GitHub did not "refuse" anything (the D878 lie class).
+  assert.ok(!/GitHub (refused|rejected|said|declined)/i.test(copy),
+    "installation_not_found must not attribute the plane's own validation to GitHub: " + copy);
+  // It names the one act that changes the state.
+  assert.ok(/Install the Barkpark app on GitHub again/.test(copy), "the sentence must carry the remedy");
+});
+
+test("cch-w73-bl c1+c5 THE ROUND TRIP: an install redirect POSTs the id and the card repaints CONNECTED", async () => {
+  // Driven against cch-w47-s6's github fixture on `providers-connected`, through
+  // the REAL scenario route() — and it PRODUCES the connected state rather than
+  // starting in it: the leg opens on a DISCONNECTED plane (the corpus' own
+  // stateful DELETE arm puts it there, exactly as a person who had disconnected
+  // would be), so a card that ends up connected can only have got there through
+  // this POST.
+  const { h, nodes, calls, box } = await w73Realm(null, "?installation_id=41234567&setup_action=install");
+  h.disconnectGithub();
+  await w49s6Settle();
+  assert.ok(nodes["#github-card"].innerHTML.includes("Connect GitHub"),
+    "PRECONDITION: the card must start NOT connected — rendered: " +
+      JSON.stringify(nodes["#github-card"].innerHTML.slice(0, 240)));
+  assert.equal(calls.filter((c) => c.path === "/v1/github/installations").length, 0,
+    "PRECONDITION: nothing has been recorded yet");
+
+  assert.equal(h.handleGithubInstallReturn(), true, "the leg must claim the boot");
+  await w49s6Settle();
+
+  const posts = calls.filter((c) => c.method === "POST" && c.path === "/v1/github/installations");
+  assert.equal(posts.length, 1,
+    "EXACTLY one POST /v1/github/installations must reach the wire; got " + posts.length +
+      " (paths seen: " + calls.map((c) => c.method + " " + c.path).join(", ") + ")");
+  assert.deepEqual(posts[0].body, { installation_id: "41234567" },
+    "the id GitHub sent must be the id the plane is asked to record");
+
+  const card = nodes["#github-card"].innerHTML;
+  assert.ok(card.includes("acme-engineering"), "the card must name the account the fixture connected: " + JSON.stringify(card.slice(0, 300)));
+  assert.ok(card.includes("Connected"), "…and read CONNECTED, which is the whole return leg");
+  assert.ok(!card.includes("Connect GitHub"), "…and stop offering the install it just completed");
+  const toasts = w73Toasts(nodes);
+  assert.ok(toasts.includes("GitHub connected"), "the person is told, in words: " + JSON.stringify(toasts));
+  assert.ok(!/can&#39;t confirm|can't confirm/.test(toasts), "…and is NOT told we could not confirm");
+  // The site screen's one-shot readiness band learned the deployment fact for free.
+  assert.equal(h.githubReadinessState(), "ready", "a 201 proves the deployment IS configured");
+  assert.equal(box.location.search, "?installation_id=41234567&setup_action=install",
+    "…and with no history object the scrub degraded to a no-op rather than throwing");
+});
+
+test("cch-w73-bl c4 HONEST ABSENCE: setup_action=request records nothing and says the console cannot confirm", async () => {
+  // GitHub's org-approval shape: a member asked, an owner has not approved, and
+  // there IS no installation_id. The console must not POST, must not claim a
+  // connection, and must say plainly that it cannot confirm the install.
+  const { h, nodes, calls } = await w73Realm(null, "?setup_action=request");
+  assert.equal(h.handleGithubInstallReturn(), true, "the leg still claims the boot — it has something to say");
+  await w49s6Settle();
+  assert.equal(calls.filter((c) => c.path === "/v1/github/installations").length, 0,
+    "a redirect with no installation_id must issue NO write");
+  const toasts = w73Toasts(nodes);
+  assert.ok(/can&#39;t confirm the install/.test(toasts),
+    "the console must say plainly that IT cannot confirm: " + JSON.stringify(toasts));
+  assert.ok(!/GitHub connected/.test(toasts), "…and must claim no connection");
+  // BOTH "Connect GitHub" CTAs — githubCardHtml's on Providers and
+  // newGithubHtml's on the /new ready panel — are links to the SAME App install
+  // URL and return through this ONE leg, so this one sentence covers both. That
+  // shared return path is asserted, not assumed:
+  const installUrl = "https://github.com/apps/barkpark-cloud/installations/new";
+  const gh = { configured: true, install_url: installUrl, connected: false };
+  assert.ok(hooks.githubCardHtml(gh, true).includes('href="' + installUrl + '"'),
+    "CTA 1 (Providers card) must point at the App install URL");
+  assert.ok(hooks.newGithubHtml({ deployable: true, slug: "blog", name: "Blog" }, gh).includes('href="' + installUrl + '"'),
+    "CTA 2 (/new ready panel) must point at the SAME URL — one return leg serves both");
+});
+
+test("cch-w73-bl c4 HONEST ABSENCE: a REFUSED record claims nothing, and a 2xx with a junk body claims nothing either", () => {
+  const o = hooks.githubInstallOutcome;
+  // The 422 the leg made reachable renders its curated sentence.
+  const nf = o({ ok: false, status: 422, data: { error: "installation_not_found" } });
+  assert.equal(nf.kind, "error");
+  assert.equal(nf.title, "Couldn't confirm the GitHub install");
+  assert.ok(/can't see that GitHub installation/.test(nf.body), "the curated reader must win: " + nf.body);
+  // A refusal with no curated copy falls to the ONE shared honest sentence.
+  for (const r of [
+    { ok: false, status: 403, data: { error: "forbidden" } },
+    { ok: false, status: 503, data: { error: "feature_not_configured" } },
+    { ok: false, status: 0, data: null },
+    null,
+  ]) {
+    const t = o(r);
+    assert.equal(t.kind, "error", "a refusal is never a success toast");
+    assert.ok(!/connected/i.test(t.title), "…and never titled as connected: " + t.title);
+  }
+  assert.ok(/can't confirm the install/.test(o({ ok: false, status: 0, data: null }).body),
+    "a transport fault says plainly that the console cannot confirm");
+  // FAIL-CLOSED ON SHAPE: only a body carrying installation.connected === true
+  // may claim a connection — a 2xx with anything else proves nothing.
+  for (const data of [{}, { installation: {} }, { installation: { connected: "true" } },
+                      { installation: { connected: false } }, { connected: true }, null]) {
+    assert.equal(o({ ok: true, status: 201, data: data }).kind, "error",
+      "a 2xx whose body does not prove a connection must not claim one: " + JSON.stringify(data));
+  }
+  const good = o({ ok: true, status: 201, data: { installation: { connected: true, account_login: "acme-engineering" } } });
+  assert.deepEqual(w73Plain(good), { kind: "success", title: "GitHub connected", body: "Barkpark recorded the app install for acme-engineering." });
+});
+
+test("cch-w73-bl c6 CONTROL: removing the recording path reds this guard BY NAME", async () => {
+  // The mutation IS the row's "a guard reds when the recording path is removed":
+  // the one api() call that carries the installation back to the plane is turned
+  // into a no-op that keeps every other rung — the parse, the scrub, the toast,
+  // the repaint — intact. A guard that only watched the toast would stay green.
+  const anchor = 'return api("POST", "/v1/github/installations", { installation_id: id }).then(function (r) {';
+  assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur EXACTLY once");
+  const mutant = APP_SRC.replace(anchor,
+    'return Promise.resolve({ ok: true, status: 201, data: {} }).then(function (r) {');
+  assert.notEqual(mutant, APP_SRC, "the mutation must have APPLIED");
+
+  const { h, nodes, calls } = await w73Realm(mutant, "?installation_id=41234567&setup_action=install");
+  h.disconnectGithub();
+  await w49s6Settle();
+  h.handleGithubInstallReturn();
+  await w49s6Settle();
+
+  assert.equal(calls.filter((c) => c.path === "/v1/github/installations").length, 0,
+    "the mutant records NOTHING — which is precisely the pre-wave state this task was filed on");
+  assert.ok(!nodes["#github-card"].innerHTML.includes("Connected"),
+    "…so the card is STILL not connected after a completed install: the defect, reproduced");
+  assert.ok(nodes["#github-card"].innerHTML.includes("Connect GitHub"),
+    "…and still offers the install the person just finished");
+  // And the mutant is caught by the shipped assertions, not only by this control:
+  // the round-trip test above asserts exactly one POST and a CONNECTED card, and
+  // both of those are false here.
+  assert.ok(!/GitHub connected/.test(w73Toasts(nodes)),
+    "the mutant cannot even claim success — githubInstallOutcome fails closed on the empty body");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w73-bl (census pass) · THE FENCE ON THE RETURN LEG
+//
+// __binding_census.mjs refused the leg as it first shipped: POST
+// /v1/github/installations is `Auth.require_team_admin(conn, [])` at the router
+// (re-derive: `grep -n 'post "/v1/github/installations"' -A2
+// cloud/lib/barkpark_cloud/web/router.ex`), and the call site had no client
+// predicate in front of it. A plain member who lands on the App's Setup URL —
+// bookmarkable, and replayable straight out of browser history — would have
+// POSTed, collected a 403, and been shown the leg's can't-confirm sentence:
+// copy that blames the INSTALL for a refusal about the READER.
+//
+// The fence is not a withheld control, because there is no control: this
+// affordance is an ACT on a boot path. So it sits at the decision —
+// githubInstallDecision — and the band it reads is teamAuthorityState()
+// narrowed to three values, the same narrowing newWriteAuthority() applies to
+// launchAuthority() (#18136).
+
+test("cch-w73-bl FENCE: githubInstallDecision withholds the write on a determinate refuse only", () => {
+  const d = hooks.githubInstallDecision;
+  assert.equal(typeof d, "function", "the decide must be node-pinned — it is what the census pins as `decide`");
+
+  const refused = w73Plain(d("41234567", "refuse"));
+  assert.equal(refused.record, null, "a determinate refuse must carry NO id to record");
+  assert.equal(refused.toast.title, "Only a team admin can connect GitHub");
+  // It must not claim the install failed — it almost certainly succeeded on
+  // GitHub's side — and must not offer a retry that cannot work.
+  assert.ok(!/couldn't install|failed|didn't install/i.test(refused.toast.body), refused.toast.body);
+  assert.ok(!/try again|retry/i.test(refused.toast.body),
+    "retrying as the same principal cannot work, so the copy must not suggest it: " + refused.toast.body);
+  assert.ok(/admin/i.test(refused.toast.body), "…and it must name the actor who CAN: " + refused.toast.body);
+
+  // grant records. unknown ALSO records, and that is a ruling, not an oversight:
+  // the installation_id is spent and unrepeatable, so a /v1/me that FAILED must
+  // not be allowed to destroy a real admin's install. See the comment beside
+  // resolveGithubInstallReturn in app.js.
+  assert.equal(w73Plain(d("41234567", "grant")).record, "41234567");
+  assert.equal(w73Plain(d("41234567", "unknown")).record, "41234567");
+});
+
+test("cch-w73-bl FENCE: the band is teamAuthorityState() narrowed, and it never reads an unknown as truthy", () => {
+  const b = hooks.githubInstallWriteAuthority;
+  assert.equal(typeof b, "function", "the band must be node-pinned — the census pins it as `band`");
+  // Its whole vocabulary, and the census derives the same three from its returns.
+  const src = APP_SRC.slice(APP_SRC.indexOf("function githubInstallWriteAuthority("));
+  const body = src.slice(0, src.indexOf("\n  }\n") + 5);
+  assert.ok(/teamAuthorityState\(\)/.test(body), "the band must be derived, never a second role read: " + body);
+  for (const v of ['return "grant"', 'return "refuse"', 'return "unknown"']) {
+    assert.ok(body.includes(v), "the band must answer " + v + " — got: " + body);
+  }
+  // No fourth answer: loading / failed / stale all fold into ONE unknown.
+  assert.equal((body.match(/return "/g) || []).length, 3,
+    "a fourth band value would be a state this leg's decide has never heard of: " + body);
+});
+
+test("cch-w73-bl FENCE DRIVEN: a plain member's install return issues NO write and is told who can", async () => {
+  // The REAL corpus, on providers-member — cch-w48-s6's plain-member scenario,
+  // which carries the same github fixture. The actor is a member, so
+  // teamAuthorityState() answers "refuse" and the leg must never reach the wire.
+  const { h, nodes, calls } = await w73Realm(null, "?installation_id=41234567&setup_action=install", "providers-member");
+  assert.equal(h.githubInstallWriteAuthority(), "refuse",
+    "PRECONDITION: the corpus member actor must produce a DETERMINATE refuse, or this test measures nothing");
+  const before = calls.length;
+
+  assert.equal(h.handleGithubInstallReturn(), true, "the leg still claims the boot — it has something to say");
+  await w49s6Settle();
+
+  assert.equal(calls.filter((c) => c.path === "/v1/github/installations").length, 0,
+    "a member must issue NO POST; wire saw: " +
+      calls.slice(before).map((c) => c.method + " " + c.path).join(", "));
+  const toasts = w73Toasts(nodes);
+  assert.ok(/Only a team admin can connect GitHub/.test(toasts),
+    "the person must be told who can do this: " + JSON.stringify(toasts));
+  assert.ok(!/can&#39;t confirm|can't confirm/.test(toasts),
+    "…and must NOT be handed the can't-confirm sentence, which blames the install for a refusal about the reader");
+  assert.ok(!/GitHub connected/.test(toasts), "…and nothing may claim a connection");
+});
+
+test("cch-w73-bl FENCE CONTROL: removing the fence reds THIS test — the member POSTs again", async () => {
+  // THE MUTATION, in the fence's own direction: githubInstallDecision stops
+  // consulting the band and records unconditionally. Every other rung — parse,
+  // scrub, band, read, recorder — is untouched, so a guard that only watched
+  // the round trip would stay green (the owner path is unchanged by this edit).
+  const anchor = '    if (authority === "refuse") return { record: null, toast: githubInstallRefusalToast() };\n';
+  assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur EXACTLY once");
+  const mutant = APP_SRC.replace(anchor, "");
+  assert.notEqual(mutant, APP_SRC, "the mutation must have APPLIED");
+
+  const { h, nodes, calls } = await w73Realm(mutant, "?installation_id=41234567&setup_action=install", "providers-member");
+  assert.equal(h.githubInstallWriteAuthority(), "refuse",
+    "PRECONDITION: the mutant's BAND is untouched — only the decide stopped consulting it");
+  h.handleGithubInstallReturn();
+  await w49s6Settle();
+
+  assert.equal(calls.filter((c) => c.path === "/v1/github/installations").length, 1,
+    "UNFENCED, reproduced: the member's boot POSTs the install the router will refuse");
+  assert.ok(!/Only a team admin can connect GitHub/.test(w73Toasts(nodes)),
+    "…and the true sentence is gone with the fence that produced it");
 });

@@ -57,8 +57,20 @@ name: Shell harnesses
 # `scripts/registration-sample.test.sh` (40 pass / 3 fail on origin/main, green
 # on the parent commit) and NOTHING reported it. That harness is fixed and wired
 # in the same change, and the two ratchets it delegates classification to are in
-# the paths list below precisely so the NEXT path-set edit reds here instead of
-# rotting in silence.
+# the paths list below. Be exact about what that buys: the next path-set edit
+# RE-RUNS this lane on the PR that makes it, and the harness's expectations are
+# DERIVED from those ratchets, so a reclassification MOVES the derived numbers
+# rather than rotting into stale literals. It is not a promise of a red —
+# deriving is precisely what stops a reclassification from redding. Measured by
+# planted narrowing (`internal/**` deleted from CLOUD_PATHS, semantically
+# verified): 60 pass / 0 fail, with the derived assertion text tracking the edit.
+# The lane REDS only when an edit leaves the fixture's classification coverage
+# UNEXERCISED, and each boundary is asserted by name: no NEITHER-shape qualifier
+# left among the control's qualifying heads ("the shape clause is UNEXERCISED"),
+# no BOTH-shape head ("path classification is not being exercised"), or a
+# plant-B reshape the ratchets no longer score zero-NEITHER ("plant B's reshape
+# has decayed"). Re-running on the edit is what beats rotting in silence; the
+# red is a narrower event with those three named triggers.
 #
 # MENTION IS NOT EXECUTION, and absence of mention is not proof of orphanhood.
 # `console-path-escape-check.test.sh` appears four times across
@@ -117,6 +129,12 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # TASK DUP SWEEP (task-a8eec40f9ae36364). The fixture is a SUBJECT, not an
+      # input: its 243 frozen rows and its pinned ledger IDF table ARE the
+      # calibration, so an edit there changes what the known pairs score without
+      # touching the script.
+      - "scripts/task-dup-sweep.mjs"
+      - "scripts/fixtures/task-dup-sweep-selftest.json"
       # DEPLOY CONVERGENCE (task-0c3069135d1b4bfd). The last entry is an INPUT,
       # not the harness: the check reads deploy.yml's own on.push.paths and the
       # `changes` job's per-target filters rather than copying them, so an edit
@@ -187,11 +205,31 @@ on:
       # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
       - ".claude/workflows/bp-pds-charter.md"
       - "tooling/pds/d-number-reservations.tsv"
+      # AXIS D'S CORPUS. `--axis d` resolves every PDS-D literal carried in the
+      # PDS scripts against the charter, so ANY of them is an input: the PR that
+      # produced this axis edited only scripts/pds-secret-scan.sh, which was not
+      # on this list and therefore ran no pds-harnesses job at all. A guard whose
+      # corpus cannot trigger it is a guard that watches the wrong PRs.
+      - "scripts/pds-*.sh"
+      - "tooling/pds/**"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
       - "scripts/pds-read-preflight-audit.sh"
       - "scripts/pds-read-preflight-audit_test.sh"
+      # BUDGET-LITERAL MOVE GUARD (pds-bl-w49-budget-literal-moved-by-its-own-pr).
+      # BOTH files, and the guard itself is the load-bearing half: its WATCHED
+      # roster and its extractors live in the guard, so an edit there can void
+      # every arm of the harness without touching the harness. A filter that
+      # listed only the _test.sh would let exactly that edit skip this job.
+      - "scripts/pds-threshold-move-guard.sh"
+      - "scripts/pds-threshold-move-guard_test.sh"
       - "scripts/pds-crown-stamp.sh"
+      # THE COLD-READER SMOKE (pds-bl-personal-local-doc-staleness). Its
+      # --dry-run arm resolves eleven LITERAL anchors in the setup guide, so an
+      # edit to the DOC can red it without touching a line of shell — the doc is
+      # an INPUT of this job exactly as bp-pds-charter.md is above.
+      - "scripts/pds-personal-local-smoke_test.sh"
+      - "docs/setup/personal-local.md"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -570,6 +608,28 @@ on:
       # other jobs, so naming it here is what reaches THIS one.
       - "scripts/mix-test-strict.sh"
       - "scripts/mix-test-strict.test.sh"
+      # ── SCRATCHPAD REAPER (task-80d117829feec84e) ─────────────────────────
+      # The reaper DELETES directories. Its skip gates (registered worktrees,
+      # unpushed commits at any depth, an age floor) are the only thing between
+      # a reclaim and a stranded lane, and its --floor mode is what lets a wave
+      # refuse to dispatch onto a full host. disk-headroom-guard.sh is listed
+      # beside it as an INPUT, not a second subject: --floor delegates the
+      # verdict to it, so an edit there changes what the reaper decides without
+      # touching either file above.
+      - "scripts/scratchpad-reaper.sh"
+      - "scripts/scratchpad-reaper.test.sh"
+      - "scripts/disk-headroom-guard.sh"
+      # ── ORCHESTRATE-TASKS LAUNCH RECIPE (task-018fc84f61c33923,
+      # task-50d7d1a599dd14dd). The harness DERIVES its recipe set by grepping
+      # the skill, so the two docs and the helpers dir are INPUTS, not
+      # neighbours: an edit to SKILL.md can invalidate the matrix without
+      # touching the harness. Per file for the docs; one glob for the helpers,
+      # because the PR that adds a NEW helper composing a `claude -p` line is
+      # exactly the PR this control exists to red on.
+      - "scripts/orchestrate-launch-recipe.test.sh"
+      - ".claude/skills/orchestrate-tasks/SKILL.md"
+      - ".claude/skills/orchestrate-tasks/LEAD-BRIEF.md"
+      - ".claude/skills/orchestrate-tasks/helpers/*.sh"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -578,6 +638,12 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # TASK DUP SWEEP (task-a8eec40f9ae36364). The fixture is a SUBJECT, not an
+      # input: its 243 frozen rows and its pinned ledger IDF table ARE the
+      # calibration, so an edit there changes what the known pairs score without
+      # touching the script.
+      - "scripts/task-dup-sweep.mjs"
+      - "scripts/fixtures/task-dup-sweep-selftest.json"
       # DEPLOY CONVERGENCE (task-0c3069135d1b4bfd). The last entry is an INPUT,
       # not the harness: the check reads deploy.yml's own on.push.paths and the
       # `changes` job's per-target filters rather than copying them, so an edit
@@ -649,11 +715,31 @@ on:
       # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
       - ".claude/workflows/bp-pds-charter.md"
       - "tooling/pds/d-number-reservations.tsv"
+      # AXIS D'S CORPUS. `--axis d` resolves every PDS-D literal carried in the
+      # PDS scripts against the charter, so ANY of them is an input: the PR that
+      # produced this axis edited only scripts/pds-secret-scan.sh, which was not
+      # on this list and therefore ran no pds-harnesses job at all. A guard whose
+      # corpus cannot trigger it is a guard that watches the wrong PRs.
+      - "scripts/pds-*.sh"
+      - "tooling/pds/**"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
       - "scripts/pds-read-preflight-audit.sh"
       - "scripts/pds-read-preflight-audit_test.sh"
+      # BUDGET-LITERAL MOVE GUARD (pds-bl-w49-budget-literal-moved-by-its-own-pr).
+      # BOTH files, and the guard itself is the load-bearing half: its WATCHED
+      # roster and its extractors live in the guard, so an edit there can void
+      # every arm of the harness without touching the harness. A filter that
+      # listed only the _test.sh would let exactly that edit skip this job.
+      - "scripts/pds-threshold-move-guard.sh"
+      - "scripts/pds-threshold-move-guard_test.sh"
       - "scripts/pds-crown-stamp.sh"
+      # THE COLD-READER SMOKE (pds-bl-personal-local-doc-staleness). Its
+      # --dry-run arm resolves eleven LITERAL anchors in the setup guide, so an
+      # edit to the DOC can red it without touching a line of shell — the doc is
+      # an INPUT of this job exactly as bp-pds-charter.md is above.
+      - "scripts/pds-personal-local-smoke_test.sh"
+      - "docs/setup/personal-local.md"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -985,6 +1071,28 @@ on:
       # other jobs, so naming it here is what reaches THIS one.
       - "scripts/mix-test-strict.sh"
       - "scripts/mix-test-strict.test.sh"
+      # ── SCRATCHPAD REAPER (task-80d117829feec84e) ─────────────────────────
+      # The reaper DELETES directories. Its skip gates (registered worktrees,
+      # unpushed commits at any depth, an age floor) are the only thing between
+      # a reclaim and a stranded lane, and its --floor mode is what lets a wave
+      # refuse to dispatch onto a full host. disk-headroom-guard.sh is listed
+      # beside it as an INPUT, not a second subject: --floor delegates the
+      # verdict to it, so an edit there changes what the reaper decides without
+      # touching either file above.
+      - "scripts/scratchpad-reaper.sh"
+      - "scripts/scratchpad-reaper.test.sh"
+      - "scripts/disk-headroom-guard.sh"
+      # ── ORCHESTRATE-TASKS LAUNCH RECIPE (task-018fc84f61c33923,
+      # task-50d7d1a599dd14dd). The harness DERIVES its recipe set by grepping
+      # the skill, so the two docs and the helpers dir are INPUTS, not
+      # neighbours: an edit to SKILL.md can invalidate the matrix without
+      # touching the harness. Per file for the docs; one glob for the helpers,
+      # because the PR that adds a NEW helper composing a `claude -p` line is
+      # exactly the PR this control exists to red on.
+      - "scripts/orchestrate-launch-recipe.test.sh"
+      - ".claude/skills/orchestrate-tasks/SKILL.md"
+      - ".claude/skills/orchestrate-tasks/LEAD-BRIEF.md"
+      - ".claude/skills/orchestrate-tasks/helpers/*.sh"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -1060,6 +1168,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
+      task-dup-sweep: ${{ steps.sets.outputs.task-dup-sweep }}
       node-test-floor: ${{ steps.sets.outputs.node-test-floor }}
       doctor-matrix: ${{ steps.sets.outputs.doctor-matrix }}
       merge-verb-table: ${{ steps.sets.outputs.merge-verb-table }}
@@ -1101,10 +1210,12 @@ jobs:
       which-gates: ${{ steps.sets.outputs.which-gates }}
       bp-curl: ${{ steps.sets.outputs.bp-curl }}
       migration-version-collision: ${{ steps.sets.outputs.migration-version-collision }}
+      orchestrate-launch-recipe: ${{ steps.sets.outputs.orchestrate-launch-recipe }}
       sunset-route-consumers: ${{ steps.sets.outputs.sunset-route-consumers }}
       mix-test-strict: ${{ steps.sets.outputs.mix-test-strict }}
       main-workflow-rollup: ${{ steps.sets.outputs.main-workflow-rollup }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
+      scratchpad-reaper: ${{ steps.sets.outputs.scratchpad-reaper }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1145,6 +1256,8 @@ jobs:
           node-test-floor .github/workflows/hundesteder.yml
           node-test-floor .github/workflows/astro-search-finder-test.yml
           node-test-floor .github/workflows/search-starter-smoke.yml
+          task-dup-sweep scripts/task-dup-sweep.mjs
+          task-dup-sweep scripts/fixtures/task-dup-sweep-selftest.json
           doctor-matrix scripts/doctor.sh
           doctor-matrix scripts/doctor.test.sh
           merge-verb-table scripts/bp-merge.sh
@@ -1199,7 +1312,11 @@ jobs:
           pds-harnesses scripts/pds-scratch-target_test.sh
           pds-harnesses scripts/pds-read-preflight-audit.sh
           pds-harnesses scripts/pds-read-preflight-audit_test.sh
+          pds-harnesses scripts/pds-threshold-move-guard.sh
+          pds-harnesses scripts/pds-threshold-move-guard_test.sh
           pds-harnesses scripts/pds-crown-stamp.sh
+          pds-harnesses scripts/pds-personal-local-smoke_test.sh
+          pds-harnesses docs/setup/personal-local.md
           pds-harnesses scripts/pr-task-gate.sh
           ci-failure-issue-filer scripts/file-ci-failure-issue.sh
           ci-failure-issue-filer scripts/file-ci-failure-issue.test.sh
@@ -1339,6 +1456,10 @@ jobs:
           which-gates .github/workflows/cloud.yml
           which-gates .github/workflows/console-harness.yml
           which-gates .github/workflows/go-tests.yml
+          orchestrate-launch-recipe scripts/orchestrate-launch-recipe.test.sh
+          orchestrate-launch-recipe .claude/skills/orchestrate-tasks/SKILL.md
+          orchestrate-launch-recipe .claude/skills/orchestrate-tasks/LEAD-BRIEF.md
+          orchestrate-launch-recipe .claude/skills/orchestrate-tasks/helpers/*.sh
           bp-curl scripts/lib/bp-curl.sh
           bp-curl scripts/lib/bp-curl.test.sh
           migration-version-collision scripts/migration-version-collision-check.sh
@@ -1370,6 +1491,9 @@ jobs:
           sunset-route-consumers deploy/uptime-kuma/README.md
           mix-test-strict scripts/mix-test-strict.sh
           mix-test-strict scripts/mix-test-strict.test.sh
+          scratchpad-reaper scripts/scratchpad-reaper.sh
+          scratchpad-reaper scripts/scratchpad-reaper.test.sh
+          scratchpad-reaper scripts/disk-headroom-guard.sh
           '
           self=".github/workflows/shell-harnesses.yml"
 
@@ -1469,6 +1593,42 @@ jobs:
             echo "verdict: ${j}=${v}"
             echo "${j}=${v}" >> "$GITHUB_OUTPUT"
           done
+  task-dup-sweep:
+    needs: [changes]
+    if: needs.changes.outputs.task-dup-sweep == 'true'
+    name: task-dup-sweep calibration + vacuity arms
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        id: setup
+        with:
+          node-version: "22"
+      - name: task-dup-sweep.mjs syntax check
+        run: node --check scripts/task-dup-sweep.mjs
+      - name: "calibration + vacuity arms (frozen 243-row fixture, no bp, no network)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # NINE assertions over four arms, and the point of every one is that the
+        # instrument it guards REPLACES one that could not see its own true
+        # positives: the create-path lexical wall scores the two
+        # human-confirmed duplicate pairs 0.109 and 0.077 against its own 0.55
+        # refuse threshold, and ranks the partner 955th and 1065th of 9,209.
+        #   · two VACUITY arms — an empty corpus and a pair generator that
+        #     yields nothing must REFUSE (exit 3, named line). A sweep that
+        #     compares nothing otherwise reports a beautiful zero that is
+        #     indistinguishable from a clean ledger.
+        #   · KNOWN POSITIVES — both confirmed pairs must be reported at the
+        #     recall operating point, at the score and rank a live 9,210-row run
+        #     gives them (the fixture pins term weights to a frozen ledger IDF
+        #     precisely so the fixture cannot invent its own easier numbers).
+        #   · KNOWN NEGATIVES — five pairs read by hand and judged DISTINCT must
+        #     stay out of the tight point. The arm also PRINTS that all five ARE
+        #     reported at the recall point, which is why that point is documented
+        #     as a candidate pool and never as a duplicate rate.
+        #   · PLANTED DUPLICATE — a row restating an existing row's defect in
+        #     different words is caught when present and absent when removed.
+        run: node scripts/task-dup-sweep.mjs --selftest
   node-test-floor:
     needs: [changes]
     if: needs.changes.outputs.node-test-floor == 'true'
@@ -1733,8 +1893,16 @@ jobs:
         # stopped being NEITHER-shape and three `of which NEITHER` expectations
         # went stale in one commit, with nothing running to say so. The
         # expectations now DERIVE from the same ratchets the sampler consults, and
-        # both ratchets are in this workflow's paths list, so the next path-set
-        # edit reds here on the PR that makes it.
+        # both ratchets are in this workflow's paths list, so a path-set edit
+        # RE-RUNS this job on the PR that makes it and the expectations track the
+        # edit instead of going stale. That is a RUN, not a red: deriving is
+        # exactly why a reclassification does not red here (planted narrowing,
+        # `internal/**` removed from CLOUD_PATHS: 60 pass / 0 fail, derived text
+        # following the move). This job REDS when the edit destroys the fixture's
+        # classification COVERAGE — no NEITHER-shape qualifier left among the
+        # control's qualifying heads, no BOTH-shape head, or a plant-B reshape the
+        # ratchets no longer score zero-NEITHER — each asserted explicitly, in
+        # both directions, by scripts/registration-sample.test.sh.
         run: bash scripts/registration-sample.test.sh
 
   deploy-convergence:
@@ -2004,6 +2172,38 @@ jobs:
         # the read-back evidence diff: a stub bp that ACKS a met-to-met stamp and
         # drops the evidence must red, the honest stub must stay green.
         run: bash scripts/pds-read-preflight-audit_test.sh
+      - name: pds-threshold-move-guard 15-arm mutation matrix (hermetic git fixture)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # THE PAIR THIS JOB EXISTS TO KEEP HONEST is arms 2 and 3: the SAME head
+        # tree, the same moved cap, REFUSED at exit 1 and then PASS at exit 0
+        # once the PR body states both values with a reason. A guard that could
+        # only refuse would be a freeze on caps that legitimately move, and a
+        # freeze gets deleted the first week it costs someone a merge.
+        #
+        # FULL HISTORY IS LOAD-BEARING HERE TOO, and it is already provided by
+        # the checkout above. Arm 12 replays the real incident -- commit
+        # c3b0421cb (PR #9601), which raised js/packages/react/.size-limit.json
+        # from 22.5 KB to 22.75 KB in the same commit a criterion cited the
+        # 22.5 KB cap against. Under a shallow checkout that arm STANDS DOWN and
+        # says so in the log rather than passing silently, so a depth regression
+        # shows up as a named stand-down, never as a quieter green.
+        run: bash scripts/pds-threshold-move-guard_test.sh
+
+      - name: personal-local cold-reader smoke — the --dry-run arm (no boot)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # ONLY `--dry-run`, AND THAT IS THE WHOLE DESIGN — never widen this to
+        # `--boot`. The dry-run arm reads ONE file (docs/setup/personal-local.md),
+        # resolves eleven literal anchors, prints each beside its line number and
+        # exits 1 if any is gone: no mix, no Postgres, no BEAM, no network, no
+        # credential, ~0.14 s of CPU. `--boot` walks the guide for real — mix
+        # deps.get, `bin/barkpark up`, a raw-blob PUT — which needs a Postgres
+        # toolchain this runner does not have and minutes it should not spend. The
+        # arm that belongs in a lane is the one that reds when the DOC rots, which
+        # is the failure this row exists to catch.
+        #
+        # This job is NOT a required context (an S4 PATHS-FILTERED exclusion in
+        # .github/required-checks.json), so wiring the arm makes it RUN, not BLOCK.
+        run: bash scripts/pds-personal-local-smoke_test.sh --dry-run
       - name: "PDS-D allocation arbiter: --check-alloc and --axis a over the merged tree"
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # THE NAMED TRIGGER (task-6fd11672fdeefd0b) for two charter rulings that
@@ -2080,7 +2280,10 @@ jobs:
           [ -n "${charter_hw:-}" ] || { echo "RED: the charter defines no PDS-D at all -- the lens is measuring itself, not the corpus" >&2; exit 1; }
 
           rc_total=0
-          for arm in --check-alloc "--axis a"; do
+          # `--axis d` joins the loop: it is PURE-TREE like --check-alloc (charter
+          # + the PDS scripts, no network, no git walk), so it runs everywhere
+          # --axis a does and cannot go UNCHECKED on a shallow checkout.
+          for arm in --check-alloc "--axis a" "--axis d"; do
             echo "── bash scripts/pds-record-parity.sh $arm ──"
             # `|| rc=$?` and NOT a bare call followed by `rc=$?`: the default
             # shell for a `run:` block is `bash -e {0}`, which would exit on the
@@ -3477,3 +3680,104 @@ jobs:
             exit 1
           fi
           echo "cloud.yml: collision check at line $call, mix test at line $test_line — ordered correctly"
+
+  scratchpad-reaper:
+    needs: [changes]
+    if: needs.changes.outputs.scratchpad-reaper == 'true'
+    name: scratchpad-reaper.sh skip-gate + floor matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: scratchpad-reaper.sh syntax check
+        run: bash -n scripts/scratchpad-reaper.sh
+      - name: scratchpad-reaper.test.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/scratchpad-reaper.test.sh
+      - name: the reaper's skip gates can still LOSE (49 checks, 3 differential controls, mktemp git fixtures)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # This is the one harness in this file whose subject DELETES DIRECTORIES,
+        # so it is also the one that must never be allowed to rot into a
+        # presence check. The three controls are differential, not observational:
+        # the SAME fixture path flips SKIP-WORKTREE -> WOULD-REAP when the
+        # registration is removed, SKIP-UNPUSHED -> WOULD-REAP when the commit
+        # is pushed, and the floor REFUSES (2) then PASSES (0) on one path in
+        # one run. A skip that could not flip would prove nothing about the
+        # gate. Every fixture is built under mktemp -d (resolved with pwd -P,
+        # because git prints /private/var while $TMPDIR says /var and the
+        # registration assertion would otherwise compare two spellings and
+        # measure nothing); no real session directory is named or read.
+        run: bash scripts/scratchpad-reaper.test.sh
+      - name: the free-space guard the reaper delegates its verdict to still bites
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # --floor does not grow a second definition of "full": it runs
+        # disk-headroom-guard.sh and propagates its exit code. That makes the
+        # guard's own self-test an input to this lane — until this job existed
+        # the guard had ZERO callers repo-wide.
+        run: bash scripts/disk-headroom-guard.sh --self-test
+      - name: --floor refuses ON THIS RUNNER above its measured free space, and passes below it
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # The harness proves this against a temp dir; this step proves it once
+        # more against the runner's own volume, so the refusal is demonstrated
+        # on a real filesystem and not only on fixtures.
+        run: |
+          # `set +e` is LOAD-BEARING and its absence failed this step on
+          # 2026-09-13: GitHub runs every `run:` body as `bash -e {0}`, so the
+          # deliberate non-zero REFUSAL below aborted the step before
+          # `rc_refuse=$?` could read it — the step reporting a failure for
+          # doing exactly what it was asserting. `set -uo pipefail` does not
+          # cancel an inherited -e.
+          set +e
+          set -uo pipefail
+          avail_gb=$(df -P -k . | awk 'NR==2 {print int($4/1024/1024)}')
+          case "$avail_gb" in
+            ''|*[!0-9]*)
+              echo "::error::CANNOT READ — df gave no GiB figure for the workspace; refusing to report a floor verdict it did not measure"
+              exit 1 ;;
+          esac
+          above=$((avail_gb + 1000))
+          bash scripts/scratchpad-reaper.sh --floor "$above" .
+          rc_refuse=$?
+          bash scripts/scratchpad-reaper.sh --floor 0 .
+          rc_pass=$?
+          echo "measured: ${avail_gb} GiB free · floor ${above} GiB -> rc=${rc_refuse} · floor 0 GiB -> rc=${rc_pass}"
+          if [ "$rc_refuse" != "2" ]; then
+            echo "::error::a floor above the measured free space returned $rc_refuse, not the REFUSED code 2"
+            exit 1
+          fi
+          if [ "$rc_pass" != "0" ]; then
+            echo "::error::a floor of 0 GiB returned $rc_pass, not OK"
+            exit 1
+          fi
+          echo "the floor is distinguishable: REFUSED=2, OK=0, on the same path."
+  orchestrate-launch-recipe:
+    needs: [changes]
+    if: needs.changes.outputs.orchestrate-launch-recipe == 'true'
+    # THE LAUNCH-RECIPE CONTROL (task-018fc84f61c33923, task-50d7d1a599dd14dd).
+    # Two findings that prose alone cannot hold. A headless builder launched as
+    # `nohup claude -p … --model opus --dangerously-skip-permissions` terminates
+    # its own background tasks at 600 s, mid-Elixir-compile, and exits looking
+    # like a calm finish (five builders, five deaths, 2026-09-05); the fix is one
+    # env var in a line people retype from memory. And two sessions of ONE lane
+    # sharing one set of filenames removed a live row from a pulse list and
+    # rewrote a status file 149 lines -> 94 (2026-09-07); the fix is per-SESSION
+    # names, which rot the moment a doc or a reader goes back to `status.md`.
+    #
+    # The harness DERIVES the recipe set by grepping the skill rather than
+    # listing it, refuses (exit 2) when it finds ZERO recipes instead of passing
+    # vacuously, and arm 9 mutates a scratch copy with the env var deleted and
+    # asserts the harness reds on it. Hermetic: no bp, no network, no claude
+    # binary — it reads files and runs two helper selftests.
+    name: orchestrate-tasks launch recipe + per-session lane files
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: harness + helper syntax check
+        run: |
+          bash -n scripts/orchestrate-launch-recipe.test.sh
+          bash -n .claude/skills/orchestrate-tasks/helpers/session-files.sh
+          bash -n .claude/skills/orchestrate-tasks/helpers/launch-headless-builder.sh
+      - name: "orchestrate-launch-recipe.test.sh (21 assertions incl. the env-var mutation)"
+        run: bash scripts/orchestrate-launch-recipe.test.sh

@@ -1082,13 +1082,32 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
   // PRINTED (`128 scenarios · 24 distinct covered by 25 cells · 104 residue over
   // 13 families`), never by adding three to the line above.
-  assert.equal(r.total, 128);
+  // cch-w48-s1-followup added `new-launch-me-unreadable`: the /new launch step in
+  // front of a /v1/me that 500s, so the funnel's own [data-me-retry] — until then
+  // a string asserted in node and rendered by nothing — is instrumented. That
+  // took the corpus 128 -> 129 and the residue 104 -> 105 on main.
+  // cch-r16-w11 moves it by THREE more, in ONE commit (the strict:false hazard
+  // the 104->105 precedent names): `theater-ready-github`,
+  // `theater-ready-github-member` and `theater-failed-member` — the first
+  // fixtures to put ANY actor on the /new ready screen with GitHub connected,
+  // and the first to put a plain MEMBER on either theater screen at all, so
+  // the first able to measure the launch wizard's own team-admin writes both
+  // ways. Total 129 -> 132, residue 105 -> 108. CELLS (25), distinctCovered
+  // (24) and families (13) are DELIBERATELY UNMOVED: all three land in the
+  // residue, not a cell, and their familyOf is `path:/new` — a family that
+  // already had five members, so three more cannot create a 14th. Both moved
+  // integers were RE-DERIVED, AFTER the rebase onto the main that carries
+  // #18064, by RUNNING `node breakpoint-sweep.mjs` on this branch and reading
+  // the `>> scenarios` line it PRINTED (`132 scenarios · 24 distinct covered by
+  // 25 cells · 108 residue over 13 families`), never by adding three to the
+  // line above.
+  assert.equal(r.total, 132);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 104, "104 is the RESIDUE, not the census");
+  assert.equal(r.residue, 108, "108 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 104, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 108, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

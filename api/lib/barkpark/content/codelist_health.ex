@@ -3,7 +3,7 @@ defmodule Barkpark.Content.CodelistHealth do
   Operator-visible verdict on whether the boot codelist seed actually landed.
 
   A failed seed used to leave exactly one rescued log line. `Barkpark.Codelists.EDItEUR`
-  rescues its own seeders and `Plugins.Registry.run_all_codelist_seeders/0` rescues
+  rescues its own seeders and the registry's `run_all_codelist_seeders/0` rescues
   the rest, so a boot whose Thema seed died on a statement timeout still finishes
   starting, answers 200, and serves an OnixEdit Thema field with no codes in it.
   This module turns that silence into a named signal on `/status.json`, the status
@@ -18,9 +18,12 @@ defmodule Barkpark.Content.CodelistHealth do
   to walk and nothing to complain about. That is precisely the fresh-install
   failure this check exists for.
 
-  So the roster comes from the plugins: every registered plugin that exports
-  `codelist_requirements/0` declares `{plugin_name, list_id, issue}` for each list
-  its schema references (today: `Barkpark.Plugins.OnixEdit`, 74 lists). The audit
+  So the roster is DECLARED by the plugins and arrives here through an injected
+  collector (`:codelist_requirements_collector`, installed at the composition
+  root): every registered plugin that exports `codelist_requirements/0` declares
+  `{plugin_name, list_id, issue}` for each list its schema references (today:
+  the OnixEdit plugin, 74 lists). This module names no plugin module and
+  no registry — the kernel does not reach into the plugin layer. The audit
   asks, for each declared requirement, whether the database holds that list at
   that issue with at least one value, and names the ones that do not:
 
@@ -35,7 +38,7 @@ defmodule Barkpark.Content.CodelistHealth do
   references a codelist the box cannot serve — so it is reported, not excluded.
 
   Pure and injectable: `audit/1` takes `:requirements`, so a caller can audit an
-  arbitrary roster without touching the plugin registry.
+  arbitrary roster, and the default roster itself arrives through the seam.
   """
 
   import Ecto.Query, warn: false
@@ -61,37 +64,42 @@ defmodule Barkpark.Content.CodelistHealth do
 
   @type audit :: %{status: :ok | :degraded, checked: non_neg_integer(), problems: [problem()]}
 
-  @doc """
-  The declared codelist roster across every registered plugin.
+  # The INVERTED codelist-requirements seam. `content` is a KERNEL concept and
+  # the plugin registry is a FEATURE, so the kernel must hold no
+  # compile-time reference to it — the same rule `Barkpark.Content.Graph`'s
+  # `:edge_extractor_collector` already obeys. The composition root
+  # (`Barkpark.Application.start/2`, the ONE installer) hands the plugin-roster
+  # fan-out DOWN into this key; `requirements/0` only READS it.
+  @requirements_collector_key :codelist_requirements_collector
 
-  `codelist_requirements/0` is a plugin-local declaration, not a
-  `Barkpark.Plugin` callback, so this probes for it with `function_exported?/3`
-  rather than assuming it. A registry that is not up (or a plugin that raises)
-  yields `[]` — a health probe must never be the thing that takes the node down.
+  @doc """
+  The declared codelist roster, as handed in through the injected collector.
+
+  Two installable shapes, exactly as the edge-extractor seam accepts:
+
+    * a 0-arity fun (what the boot installer captures), and
+    * a `{module, function}` pair, so a release or a config file can wire the
+      seam without the OTP app having started.
+
+  UNSET yields `[]` — the fresh-install invariant: a plugin-free host (or a
+  script, or a test that never booted the app) declares no codelists, so
+  nothing is missing and `audit/1` is `:ok`. A garbage value, a collector that
+  raises, or a plugin that raises yields `[]` too: a health probe must never be
+  the thing that takes the node down.
   """
   @spec requirements() :: [requirement()]
   def requirements do
-    Barkpark.Plugins.Registry.all()
-    |> Enum.flat_map(&plugin_requirements/1)
+    case Application.get_env(:barkpark, @requirements_collector_key) do
+      collector when is_function(collector, 0) -> collector.() |> List.wrap()
+      {mod, fun} when is_atom(mod) and is_atom(fun) -> apply(mod, fun, []) |> List.wrap()
+      _ -> []
+    end
+    |> Enum.filter(&valid_requirement?/1)
   rescue
     _ -> []
   catch
     _, _ -> []
   end
-
-  defp plugin_requirements(%{module: module}) when is_atom(module) do
-    Code.ensure_loaded?(module)
-
-    if function_exported?(module, :codelist_requirements, 0) do
-      module.codelist_requirements() |> List.wrap() |> Enum.filter(&valid_requirement?/1)
-    else
-      []
-    end
-  rescue
-    _ -> []
-  end
-
-  defp plugin_requirements(_), do: []
 
   defp valid_requirement?(%{plugin_name: p, list_id: l, issue: i})
        when is_binary(p) and is_binary(l) and is_binary(i),

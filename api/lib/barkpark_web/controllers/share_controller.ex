@@ -108,6 +108,7 @@ defmodule BarkparkWeb.ShareController do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.MediaVisibilityCopy
 
   @doc """
   `GET /v1/shares` — list every live share, env baseline + persisted, each
@@ -239,6 +240,68 @@ defmodule BarkparkWeb.ShareController do
           conn,
           "invalid share — check scope, surfaces (papers,docs,media), access (read,edit)"
         )
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        unprocessable(conn, changeset_errors(changeset))
+    end
+  end
+
+  @doc """
+  `POST /v1/shares/media` — publish this scope's media.
+
+  Params: `scope` (required, `ws[/project[/dataset]]`). THE ONE VERB behind
+  `bp share publish-media` and the Studio media library's "Publish this scope's
+  media" action: it adds the `:media` surface to the scope's stored share
+  through `Barkpark.Sharing.publish_media/1` and returns the resulting share
+  plus the visibility copy the asset label should now be read with.
+
+  It is a share write, not a visibility write. The RULED answer to "my website
+  cannot show its images" is the `:media` `:read` share
+  (`BarkparkWeb.Plugs.RequireShareScope`, task-8627e1a3f974693d); this action
+  touches no asset document and no `bp_visibility` value.
+
+  Same tenancy order as `create/2` — grammar -> resolve -> AUTHORIZE -> write —
+  and the same `workspace_admin?/2` predicate against the workspace the SCOPE
+  names, so it cannot become a softer door onto the same registry.
+  """
+  def publish_media(conn, params) do
+    scope = params["scope"]
+
+    if not is_binary(scope) or scope == "" do
+      unprocessable(conn, "scope is required")
+    else
+      case scope_workspace(scope) do
+        {:ok, ws_id} ->
+          if workspace_admin?(conn, ws_id),
+            do: do_publish_media(conn, scope),
+            else: forbidden(conn)
+
+        :unknown_workspace ->
+          unprocessable(conn, "could not publish media: the workspace/project does not exist")
+
+        :invalid_scope ->
+          do_publish_media(conn, scope)
+      end
+    end
+  end
+
+  defp do_publish_media(conn, scope) do
+    case Sharing.publish_media(scope) do
+      {:ok, share} ->
+        conn
+        |> put_status(:created)
+        |> json(%{
+          share: share_json(share, "stored"),
+          visibility:
+            MediaVisibilityCopy.public_option(
+              share.workspace_slug,
+              share.project_slug,
+              share.dataset
+            )
+        })
+
+      {:error, :invalid} ->
+        unprocessable(conn, "invalid scope — expected ws[/project[/dataset]]")
 
       {:error, %Ecto.Changeset{} = changeset} ->
         unprocessable(conn, changeset_errors(changeset))

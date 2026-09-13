@@ -146,10 +146,16 @@ if is_all "$out"; then ok "an EMPTY changed-path set selects ALL"; else bad "an 
 # This is the case a per-path selector gets wrong: it narrows on the good paths
 # and quietly drops the one it did not understand.
 lib_leaf=""
-for cand in $(cd "$ROOT/api" && ls lib/barkpark/*.ex 2>/dev/null | head -20); do
-  # a leaf: something with a convention test, so §2 has a target
+for cand in $(cd "$ROOT/api" && ls lib/barkpark/*.ex 2>/dev/null | head -60); do
+  # a leaf: something with a convention test, so §2 has a target — and NOT a
+  # RULE 4 door, which selects ALL by design and would make every §2 assertion
+  # below read as a regression. The predicate is asked, never hard-coded: the
+  # first candidate on this tree (lib/barkpark/access.ex) IS a door, and the
+  # next file to become one must not silently turn §2 red.
   t="test/${cand#lib/}"; t="${t%.ex}_test.exs"
-  [ -f "$ROOT/api/$t" ] && { lib_leaf="api/$cand"; lib_leaf_test="$t"; break; }
+  [ -f "$ROOT/api/$t" ] || continue
+  bash "$SEL" --is-door "api/$cand" >/dev/null 2>&1 && continue
+  lib_leaf="api/$cand"; lib_leaf_test="$t"; break
 done
 if [ -z "$lib_leaf" ]; then
   bad "harness setup: found no api/lib/barkpark/*.ex with a convention test" "the whole of §2 cannot run"
@@ -235,10 +241,21 @@ echo "=== §2b  RULE 3 — the web-surface hop (the #17153 blind spot)"
 # rule that selects nothing.
 
 # ── the real specimen, on the real tree ────────────────────────────────────
+# THE #17153 SPECIMEN IS NOW ALSO A RULE 4 DOOR. lib/barkpark/tasks/landed.ex
+# returns `{:error, :…_required}`, so RULE 4 (added for #18085) claims it first
+# and the selection is ALL — a strict SUPERSET of what RULE 3 would have
+# selected, so the #17153 defect is still caught, but this arm can no longer
+# measure RULE 3 through it. Asked of the predicate, never assumed: if landed.ex
+# stops being a door the original assertion comes straight back.
 specimen_lib="api/lib/barkpark/tasks/landed.ex"
 specimen_test="test/barkpark_web/controllers/tasks_landed_test.exs"
+specimen_is_door=0
+if bash "$SEL" --is-door "$specimen_lib" >/dev/null 2>&1; then specimen_is_door=1; fi
+
 if [ ! -f "$ROOT/${specimen_lib}" ] || [ ! -f "$ROOT/api/${specimen_test}" ]; then
   bad "the #17153 specimen is still in the tree" "$specimen_lib / $specimen_test — the arm below cannot run"
+elif [ "$specimen_is_door" -eq 1 ]; then
+  assert_all "the #17153 specimen is now a RULE 4 door — it selects ALL, a superset of RULE 3's answer" "$specimen_lib"
 else
   # The PRECONDITION, asserted rather than assumed: if the contract test ever
   # starts naming the module, the by-name net reaches it and this arm stops
@@ -252,20 +269,51 @@ else
   fi
 fi
 
-# ── the negative control: a FAMILY, not the directory ──────────────────────
-# A rule that answered "every controller test" would satisfy the arm above and
-# buy nothing. Count what the specimen actually drags out of controllers/ and
-# compare it against the directory.
-ctl_total="$(cd "$ROOT/api" && find test/barkpark_web/controllers -name '*_test.exs' | awk 'END{print NR}')"
-sel_out="$(sel "$specimen_lib")"
-if is_all "$sel_out"; then
-  bad "the specimen does not select ALL" "it selected ALL — §2b measured nothing"
+# ── a DERIVED real-tree specimen, so RULE 3 stays measured on the real tree ─
+# Found by the definition of the rule rather than by a remembered filename: a
+# NON-door lib module whose selection contains a web test that (i) is not in the
+# ALWAYS set, (ii) names none of the module's modules, and (iii) is therefore
+# reachable ONLY by the lib->lib hop. The first hit wins; the search is bounded.
+always_for_r3="$(bash "$SEL" --print-always 2>/dev/null)"
+r3_lib=""; r3_test=""
+while IFS= read -r cand; do
+  [ -n "$cand" ] || continue
+  bash "$SEL" --is-door "api/$cand" >/dev/null 2>&1 && continue
+  cand_mods="$(sed -nE 's/^[[:space:]]*defmodule[[:space:]]+([A-Za-z0-9_.]+).*/\1/p' "$ROOT/api/$cand")"
+  [ -n "$cand_mods" ] || continue
+  cand_out="$(sel "api/$cand")"
+  is_all "$cand_out" && continue
+  while IFS= read -r wt; do
+    [ -n "$wt" ] || continue
+    grep -qxF -- "$wt" <<<"$always_for_r3" && continue
+    named=0
+    while IFS= read -r m; do
+      [ -n "$m" ] || continue
+      grep -qF -- "$m" "$ROOT/api/$wt" 2>/dev/null && named=1
+    done <<<"$cand_mods"
+    [ "$named" -eq 1 ] && continue
+    r3_lib="api/$cand"; r3_test="$wt"; break
+  done <<<"$(grep '^test/barkpark_web/' <<<"$cand_out" || true)"
+  [ -n "$r3_lib" ] && break
+done <<<"$(cd "$ROOT/api" && find lib/barkpark -name '*.ex' -not -path 'lib/barkpark_web/*' | LC_ALL=C sort | head -60)"
+
+if [ -z "$r3_lib" ]; then
+  bad "a RULE-3-only specimen exists on the real tree" "none found in 60 candidates — the lib->lib hop may be dead on the real tree"
 else
-  ctl_sel="$(grep -c '^test/barkpark_web/controllers/' <<<"$sel_out" || true)"
-  if [ "${ctl_total:-0}" -gt 0 ] && [ "${ctl_sel:-0}" -gt 0 ] && [ "$ctl_sel" -lt "$ctl_total" ]; then
-    ok "the specimen selects $ctl_sel of $ctl_total controller tests — a family, not the directory"
+  ok "derived RULE-3-only specimen: $r3_lib -> $r3_test (not in ALWAYS, names no module of the change)"
+  assert_selects "the derived specimen's web test IS selected by the lib->lib hop" "$r3_lib" "$r3_test"
+
+  # ── the negative control: a FAMILY, not the directory ────────────────────
+  # A rule that answered "every web test" would satisfy the arm above and buy
+  # nothing. Count what the specimen actually drags out of test/barkpark_web/
+  # beyond the ALWAYS set, and compare it against the directory.
+  web_total="$(cd "$ROOT/api" && find test/barkpark_web -name '*_test.exs' | awk 'END{print NR}')"
+  sel_out="$(sel "$r3_lib")"
+  web_sel="$(grep -c '^test/barkpark_web/' <<<"$sel_out" || true)"
+  if [ "${web_total:-0}" -gt 0 ] && [ "${web_sel:-0}" -gt 0 ] && [ "$web_sel" -lt "$web_total" ]; then
+    ok "the derived specimen selects $web_sel of $web_total web tests — a family, not the directory"
   else
-    bad "the specimen selects a strict subset of controllers/" "got $ctl_sel of $ctl_total"
+    bad "the derived specimen selects a strict subset of test/barkpark_web/" "got $web_sel of $web_total"
   fi
 fi
 
@@ -311,6 +359,112 @@ elif grep -q '^test/barkpark_web/controllers/' <<<"$herm_out"; then
   bad "a lib module no web surface names drags in no controller test" "it selected $(grep -c '^test/barkpark_web/controllers/' <<<"$herm_out")"
 else
   ok "a lib module NO web surface names drags in no controller test (the hop is a hop, not a default)"
+fi
+
+echo
+echo "=== §2c  RULE 4 — the fail-closed door (the #18085 blind spot)"
+#
+# THE DEFECT THIS SECTION EXISTS FOR. #18085 (head 02d74f815, job 103713658033)
+# changed api/lib/barkpark/content/write_scope.ex so an unresolved write from an
+# attributable caller REFUSES. The selector narrowed to 563 test files, the
+# required Elixir gate went 4/4 green, it merged, and main reddened on the same
+# base at api/test/barkpark/search/indx_engine_scope_test.exs with
+# MatchError {:error, :workspace_scope_required} — a test that calls
+# Content.create_document/4 and reaches the door at RUNTIME without naming it.
+#
+# Four arms, and all four are needed. (a) is satisfied by a script hard-wired to
+# ALL, so (b) and (c) are the negative controls that make it mean something;
+# (d) is the census bound, without which RULE 4 could eat the whole selector and
+# every other case in this file would still pass.
+
+door_lib="api/lib/barkpark/content/write_scope.ex"
+door_test="test/barkpark/search/indx_engine_scope_test.exs"
+
+# ── the PRECONDITION, asserted rather than assumed ─────────────────────────
+# If the failing test ever starts naming the door module, the ordinary by-name
+# net reaches it and this section stops measuring RULE 4 while still passing.
+if [ ! -f "$ROOT/$door_lib" ] || [ ! -f "$ROOT/api/$door_test" ]; then
+  bad "the #18085 specimen is still in the tree" "$door_lib / api/$door_test — §2c cannot run"
+elif grep -qF 'Barkpark.Content.WriteScope' "$ROOT/api/$door_test" 2>/dev/null; then
+  bad "the specimen test names NO module of the door it passes through" \
+      "$door_test now names Barkpark.Content.WriteScope — the by-name net reaches it, so this section no longer measures RULE 4"
+else
+  ok "precondition: $door_test names no module of the door it calls through (so only RULE 4 can reach it)"
+
+  # (a) the predicate classifies the real door
+  if bash "$SEL" --is-door "$door_lib" >/dev/null 2>&1; then
+    ok "the predicate classifies $door_lib as a door"
+  else
+    bad "the predicate classifies $door_lib as a door" "--is-door exited non-zero"
+  fi
+
+  assert_all "a change confined to the door selects ALL" "$door_lib"
+
+  # ── THE REPLAY of #18085's OWN twelve-path diff, not a stand-in ──────────
+  # The camouflage that made the original miss invisible is in this list: five
+  # sibling TEST files were edited and therefore selected, so the selection
+  # looked complete while the one unedited test the change broke never ran.
+  replay_18085="api/lib/barkpark/content/tag_registry.ex
+api/lib/barkpark/content/write_scope.ex
+api/lib/barkpark/plugins/bootstrap.ex
+api/lib/barkpark/plugins/tickets/thread.ex
+api/lib/mix/tasks/onix.import.ex
+api/test/barkpark/audit_test.exs
+api/test/barkpark/content/graph_test.exs
+api/test/barkpark/content/mutation_echo_test.exs
+api/test/barkpark/content/owner_scoped_test.exs
+api/test/barkpark/content/write_scope_classified_door_test.exs
+api/test/barkpark_web/controllers/listen_controller_test.exs
+api/test/barkpark_web/live/bulldocs_live_test.exs"
+  replay_out="$(sel "$replay_18085")"
+  if is_all "$replay_out"; then
+    ok "REPLAY #18085: its twelve-path diff selects ALL — $door_test runs"
+  elif grep -qxF -- "$door_test" <<<"$replay_out"; then
+    ok "REPLAY #18085: $door_test is in the narrowed selection"
+  else
+    bad "REPLAY #18085: the selection reaches $door_test" \
+        "it is NOT in the $(printf '%s\n' "$replay_out" | awk 'END{print NR}')-file selection — the original miss is unfixed"
+  fi
+fi
+
+# ── (b)(c) the MUTATION MATRIX, on a synthetic tree ───────────────────────
+# Three modules that differ ONLY in the property RULE 4 keys on. Without the
+# middle one, a rule that answered ALL for any lib file would pass.
+mkdir -p "$tmp/api5/lib/barkpark/gate" "$tmp/api5/test/barkpark/gate"
+printf 'defmodule Barkpark.Gate.Refuser do\n  def check(_), do: {:error, :workspace_scope_required}\nend\n' >"$tmp/api5/lib/barkpark/gate/refuser.ex"
+printf 'defmodule Barkpark.Gate.Polite do\n  def check(_), do: {:error, :nope}\nend\n' >"$tmp/api5/lib/barkpark/gate/polite.ex"
+printf 'defmodule Barkpark.Gate.Declared do\n  # @impact door — refuses with a vocabulary the derived arm does not know\n  def check(_), do: {:error, :nope}\nend\n' >"$tmp/api5/lib/barkpark/gate/declared.ex"
+printf 'defmodule Barkpark.Gate.PoliteTest do\n  use ExUnit.Case\nend\n' >"$tmp/api5/test/barkpark/gate/polite_test.exs"
+
+synth_door() { printf '%s\n' "$1" | BP_IMPACTED_XREF_DIR="$tmp/api5" bash "$SEL" --select 2>/dev/null; }
+
+out="$(synth_door api/lib/barkpark/gate/refuser.ex)"
+if is_all "$out"; then ok "a module returning a policy refusal selects ALL (the derived arm)"; else bad "a module returning a policy refusal selects ALL" "got $(printf '%s\n' "$out" | awk 'END{print NR}') files"; fi
+
+out="$(synth_door api/lib/barkpark/gate/declared.ex)"
+if is_all "$out"; then ok "a module carrying '@impact door' selects ALL even with no known refusal atom (the declared arm)"; else bad "a module carrying '@impact door' selects ALL" "got $(printf '%s\n' "$out" | awk 'END{print NR}') files"; fi
+
+# THE NEGATIVE CONTROL. Same tree, same shape, no refusal vocabulary and no
+# declaration: it must still narrow, or RULE 4 is just `echo ALL`.
+out="$(synth_door api/lib/barkpark/gate/polite.ex)"
+if is_all "$out"; then
+  bad "an ordinary lib module is NOT a door" "it selected ALL — RULE 4 is not keyed on the refusal vocabulary at all"
+elif [ -z "$out" ]; then
+  bad "an ordinary lib module is NOT a door" "it selected EMPTY"
+else
+  ok "an ordinary lib module in the same tree still NARROWS ($(printf '%s\n' "$out" | awk 'END{print NR}') files) — RULE 4 is keyed on the refusal, not on being a lib file"
+fi
+
+# ── (d) THE CENSUS BOUND. A door class that grew to most of lib would make the
+# selector an expensive `echo ALL`, and every arm above would still pass.
+doors_n="$(bash "$SEL" --doors 2>/dev/null | sed '/^$/d' | awk 'END{print NR}')"
+lib_n="$(cd "$ROOT/api" && find lib -name '*.ex' | awk 'END{print NR}')"
+if [ "${doors_n:-0}" -eq 0 ]; then
+  bad "the door census is non-empty" "it named none — RULE 4 is inert and §2c's real-tree arm cannot be measuring it"
+elif [ "$doors_n" -lt $((lib_n / 7)) ]; then
+  ok "the door census is $doors_n of $lib_n lib modules (< 15%, so narrowing still buys something)"
+else
+  bad "the door census is under 15% of lib" "$doors_n of $lib_n — RULE 4 has eaten the selection"
 fi
 
 echo

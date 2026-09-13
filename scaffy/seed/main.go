@@ -33,9 +33,13 @@
 //
 // --check is the drift tripwire (README §"Re-seed after amend"): it derives
 // every payload in memory (NO out/ writes), fetches the served catalog
-// tokenless, compares sha256(source) per command id, prints a table, and
-// exits nonzero on ANY non-MATCH. A command file edited without a re-seed is
-// exactly the drift class this catches. It fails LOUD on any network error —
+// tokenless, compares EVERY field seeding writes — title, description,
+// concept, variant, domain, direction, tags and source — per command id,
+// prints a table naming the divergent fields, and exits nonzero on ANY
+// non-MATCH. A command file edited without a re-seed is one drift class this
+// catches; a change under internal/scaffy/ that alters what the SAME bytes
+// derive to, leaving source identical while title/direction/tags move, is the
+// other, and comparing source alone was blind to it. It fails LOUD on any network error —
 // a check that cannot check must never exit 0.
 package main
 
@@ -92,7 +96,7 @@ type weightedTag struct {
 func main() {
 	commandsDir := flag.String("commands", "scaffy/commands", "directory of .scaffy corpus files")
 	outDir := flag.String("out", "scaffy/seed/out", "directory to write one <_id>.json payload per command (derived; never committed)")
-	check := flag.Bool("check", false, "audit mode: derive in memory (no out/ writes), fetch the served catalog tokenless, compare sha256(source) per command id, print a table, exit nonzero on any drift")
+	check := flag.Bool("check", false, "audit mode: derive in memory (no out/ writes), fetch the served catalog tokenless, compare every field seeding writes (title, description, concept, variant, domain, direction, tags, source) per command id, print a table naming the divergent fields, exit nonzero on any drift")
 	flag.Parse()
 
 	if *check {
@@ -297,9 +301,10 @@ func weightedTags(file, raw string) ([]weightedTag, error) {
 }
 
 // runCheck is the drift tripwire. It derives every payload in memory (no out/
-// writes), fetches the served catalog tokenless, compares sha256(source) per
-// command id, prints a table, and returns a non-nil error (→ exit 1) on ANY
-// non-MATCH. Network failures also return an error: a check that cannot check
+// writes), fetches the served catalog tokenless, compares EVERY field seeding
+// writes per command id — title, description, concept, variant, domain,
+// direction, tags and source — prints a table naming the divergent fields, and
+// returns a non-nil error (→ exit 1) on ANY non-MATCH. Network failures also return an error: a check that cannot check
 // must never report clean.
 func runCheck(commandsDir string) error {
 	payloads, err := deriveAll(commandsDir)
@@ -316,28 +321,144 @@ func runCheck(commandsDir string) error {
 
 	drifted := printCheckTable(os.Stdout, server, payloads, served)
 	if drifted > 0 {
-		return fmt.Errorf("%d command(s) drifted from the served catalog — re-seed the touched commands (see scaffy/seed/README.md)", drifted)
+		return fmt.Errorf("%d command(s) diverged from the served catalog — see the DIVERGENT FIELDS column and the breakdown above for whether to re-seed or to look at the deriver", drifted)
 	}
 	return nil
+}
+
+// servedDoc is one document as the served catalog returns it. It mirrors
+// `payload`'s nine seeded fields EXACTLY — that identity is the point: the
+// check can only compare what it decodes, and a field added to `derive` but
+// not to this struct becomes invisible to the gate the moment it is seeded.
+// Keep the two in step; comparedFields below is the machine-readable version
+// of that promise and the table prints it, so a drift between them is visible
+// in the output rather than only in this comment.
+type servedDoc struct {
+	ID          string        `json:"_id"`
+	Title       string        `json:"title"`
+	Description string        `json:"description"`
+	Concept     string        `json:"concept"`
+	Variant     string        `json:"variant"`
+	Domain      string        `json:"domain"`
+	Direction   string        `json:"direction"`
+	Tags        []weightedTag `json:"tags"`
+	Source      string        `json:"source"`
+}
+
+// comparedFields is the ordered list of document fields the drift check
+// compares. `_id` is absent because it is the JOIN KEY, not a compared value —
+// an id present on one side only is already a MISSING/EXTRA row.
+var comparedFields = []string{
+	"title", "description", "concept", "variant", "domain", "direction", "tags", "source",
+}
+
+// uncomparedServedKeys are keys the served documents carry that this check
+// deliberately does NOT compare, because SEEDING DOES NOT WRITE THEM: the
+// system fields Barkpark stamps on every document, plus `main_tag`, which the
+// server derives from the weighted `tags` composite rather than reading it off
+// the payload. They are named in the table's scope line rather than silently
+// excluded — a check credited with "the served catalog matches main" owes the
+// reader the boundary of "the catalog".
+var uncomparedServedKeys = []string{
+	"_createdAt", "_draft", "_publishedId", "_rev", "_type", "_updatedAt", "main_tag",
+}
+
+// comparableTags canonicalises the weighted-tags composite for comparison.
+// Order is significant and deliberately so: `weightedTags` assigns DESCENDING
+// 90/80/70 strengths by header position, so a reordered TAGS header is a real
+// derivation change even when the same names come back.
+func comparableTags(tags []weightedTag) string {
+	b, err := json.Marshal(tags)
+	if err != nil {
+		// Unreachable for a []weightedTag of plain scalars; a marshal failure
+		// must never read as "equal", so return something no other value equals.
+		return fmt.Sprintf("<unmarshalable:%v>", err)
+	}
+	return string(b)
+}
+
+// localFields projects a derived payload onto comparedFields.
+func localFields(p *payload) map[string]string {
+	return map[string]string{
+		"title":       p.Title,
+		"description": p.Description,
+		"concept":     p.Concept,
+		"variant":     p.Variant,
+		"domain":      p.Domain,
+		"direction":   p.Direction,
+		"tags":        comparableTags(p.Tags),
+		"source":      p.Source,
+	}
+}
+
+// servedFields projects a served document onto the SAME keys, through the same
+// canonicalisation, so the two maps are comparable key by key.
+func servedFields(d servedDoc) map[string]string {
+	return map[string]string{
+		"title":       d.Title,
+		"description": d.Description,
+		"concept":     d.Concept,
+		"variant":     d.Variant,
+		"domain":      d.Domain,
+		"direction":   d.Direction,
+		"tags":        comparableTags(d.Tags),
+		"source":      d.Source,
+	}
+}
+
+// divergentFields returns the compared fields whose values differ, in
+// comparedFields order (stable output, never map-iteration order).
+func divergentFields(local, served map[string]string) []string {
+	var out []string
+	for _, f := range comparedFields {
+		if local[f] != served[f] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // row is one line of the --check comparison table.
 type row struct {
 	id        string
-	localSHA  string // "" when the command has no local corpus file (EXTRA)
-	servedSHA string // "" when the command is not served (MISSING)
-	status    string // MATCH | DRIFT | MISSING | EXTRA
+	localSHA  string   // "" when the command has no local corpus file (EXTRA)
+	servedSHA string   // "" when the command is not served (MISSING)
+	fields    []string // the compared fields that diverged; empty on MATCH
+	status    string   // MATCH | DRIFT | MISSING | EXTRA
+}
+
+// fieldsCell renders the divergent-field list for the table.
+func (r row) fieldsCell() string {
+	if len(r.fields) == 0 {
+		return "-"
+	}
+	return strings.Join(r.fields, ",")
 }
 
 // printCheckTable renders the comparison over the union of local and served
 // command ids (sorted) and returns the count of non-MATCH rows.
-func printCheckTable(w io.Writer, server string, payloads []*payload, served map[string]string) int {
-	local := make(map[string]string, len(payloads))
+//
+// THE STATUS TOKEN IS A CONTRACT, NOT A LABEL. .github/workflows/
+// scaffy-catalog-drift.yml greps `[[:space:]](DRIFT|MISSING|EXTRA)$` to tell a
+// drift verdict from an UNREACHABLE fetch, and awk-extracts $1 off those same
+// lines to build the re-seed list. So the status stays one of exactly
+// MATCH|DRIFT|MISSING|EXTRA and stays the LAST field on the line. The finer
+// verdict the operator needs — re-seed (source moved) versus investigate the
+// parser (metadata moved under an unchanged source) — is carried by the FIELDS
+// column and the summary breakdown, NOT by a new status token: a
+// "METADATA-DRIFT" status would not match that grep and would have routed a
+// real drift into the workflow's UNREACHABLE branch.
+func printCheckTable(w io.Writer, server string, payloads []*payload, served map[string]servedDoc) int {
+	local := make(map[string]map[string]string, len(payloads))
 	for _, p := range payloads {
-		local[p.ID] = fmt.Sprintf("%x", sha256.Sum256([]byte(p.Source)))
+		local[p.ID] = localFields(p)
+	}
+	servedF := make(map[string]map[string]string, len(served))
+	for id, d := range served {
+		servedF[id] = servedFields(d)
 	}
 
-	ids := make([]string, 0, len(local)+len(served))
+	ids := make([]string, 0, len(local)+len(servedF))
 	seen := map[string]bool{}
 	for id := range local {
 		if !seen[id] {
@@ -345,7 +466,7 @@ func printCheckTable(w io.Writer, server string, payloads []*payload, served map
 			seen[id] = true
 		}
 	}
-	for id := range served {
+	for id := range servedF {
 		if !seen[id] {
 			ids = append(ids, id)
 			seen[id] = true
@@ -354,16 +475,25 @@ func printCheckTable(w io.Writer, server string, payloads []*payload, served map
 	sort.Strings(ids)
 
 	rows := make([]row, 0, len(ids))
-	nonMatch := 0
+	nonMatch, sourceDrift, metadataOnlyDrift := 0, 0, 0
 	for _, id := range ids {
-		ls, hasLocal := local[id]
-		ss, hasServed := served[id]
+		lf, hasLocal := local[id]
+		sf, hasServed := servedF[id]
 		var status string
+		var diverged []string
 		switch {
-		case hasLocal && hasServed && ls == ss:
-			status = "MATCH"
 		case hasLocal && hasServed:
-			status = "DRIFT"
+			diverged = divergentFields(lf, sf)
+			if len(diverged) == 0 {
+				status = "MATCH"
+			} else {
+				status = "DRIFT"
+				if slicesContains(diverged, "source") {
+					sourceDrift++
+				} else {
+					metadataOnlyDrift++
+				}
+			}
 		case hasLocal && !hasServed:
 			status = "MISSING" // in the repo, not served — never seeded
 		default:
@@ -372,22 +502,59 @@ func printCheckTable(w io.Writer, server string, payloads []*payload, served map
 		if status != "MATCH" {
 			nonMatch++
 		}
-		rows = append(rows, row{id: id, localSHA: sha8(ls), servedSHA: sha8(ss), status: status})
+		rows = append(rows, row{
+			id:        id,
+			localSHA:  sha8(sourceSHA(lf, hasLocal)),
+			servedSHA: sha8(sourceSHA(sf, hasServed)),
+			fields:    diverged,
+			status:    status,
+		})
 	}
 
-	fmt.Fprintf(w, "scaffy catalog drift check — %s (%d local, %d served)\n\n", server, len(local), len(served))
-	fmt.Fprintf(w, "%-44s  %-8s  %-8s  %s\n", "ID", "LOCAL", "SERVED", "STATUS")
-	fmt.Fprintf(w, "%-44s  %-8s  %-8s  %s\n", strings.Repeat("-", 44), "--------", "--------", "------")
+	fmt.Fprintf(w, "scaffy catalog drift check — %s (%d local, %d served)\n\n", server, len(local), len(servedF))
+	fmt.Fprintf(w, "%-44s  %-8s  %-8s  %-28s  %s\n", "ID", "LOCAL", "SERVED", "DIVERGENT FIELDS", "STATUS")
+	fmt.Fprintf(w, "%-44s  %-8s  %-8s  %-28s  %s\n", strings.Repeat("-", 44), "--------", "--------", strings.Repeat("-", 28), "------")
 	for _, r := range rows {
-		fmt.Fprintf(w, "%-44s  %-8s  %-8s  %s\n", r.id, r.localSHA, r.servedSHA, r.status)
+		fmt.Fprintf(w, "%-44s  %-8s  %-8s  %-28s  %s\n", r.id, r.localSHA, r.servedSHA, r.fieldsCell(), r.status)
 	}
 	fmt.Fprintln(w)
+	// THE SCOPE LINE. It states what was compared and what was not, so the
+	// verdict below it cannot be read as broader than the comparison that
+	// produced it.
+	fmt.Fprintf(w, "compared per id: %s\n", strings.Join(comparedFields, ", "))
+	fmt.Fprintf(w, "not compared (seeding does not write them): %s\n", strings.Join(uncomparedServedKeys, ", "))
 	if nonMatch == 0 {
 		fmt.Fprintf(w, "%d/%d MATCH — catalog in sync\n", len(rows), len(rows))
 	} else {
 		fmt.Fprintf(w, "%d/%d MATCH, %d DRIFT/MISSING/EXTRA\n", len(rows)-nonMatch, len(rows), nonMatch)
+		if sourceDrift > 0 {
+			fmt.Fprintf(w, "  %d with a changed source — re-seed the touched commands (see scaffy/seed/README.md)\n", sourceDrift)
+		}
+		if metadataOnlyDrift > 0 {
+			fmt.Fprintf(w, "  %d whose source is UNCHANGED but whose derived metadata moved — the deriver changed, not the corpus; re-seed, then look at what changed under internal/scaffy/\n", metadataOnlyDrift)
+		}
 	}
 	return nonMatch
+}
+
+// sourceSHA returns the hex sha256 of the `source` field of a projected side,
+// or "" when that side has no document at all (MISSING/EXTRA).
+func sourceSHA(fields map[string]string, present bool) string {
+	if !present {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(fields["source"])))
+}
+
+// slicesContains is the two-line membership test, kept local rather than
+// pulling the whole slices package in for one call.
+func slicesContains(hay []string, needle string) bool {
+	for _, h := range hay {
+		if h == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // sha8 shortens a hex digest to the first 8 chars for the table, rendering a
@@ -457,7 +624,7 @@ var (
 // a failure that cannot be cured by waiting (a 404, a body that is not the
 // envelope) fails on the first attempt so a misconfiguration is reported fast
 // instead of being padded out by pointless retries.
-func fetchServed(server string) (map[string]string, error) {
+func fetchServed(server string) (map[string]servedDoc, error) {
 	var lastErr error
 	for attempt := 1; attempt <= fetchAttempts; attempt++ {
 		out, retryable, err := fetchServedOnce(server)
@@ -483,7 +650,7 @@ func fetchServed(server string) (map[string]string, error) {
 // worth retrying: transport errors, 5xx and 429 are transient; a 4xx other
 // than 429 and a body that will not decode are not — waiting cannot fix a
 // wrong URL or a non-envelope response.
-func fetchServedOnce(server string) (map[string]string, bool, error) {
+func fetchServedOnce(server string) (map[string]servedDoc, bool, error) {
 	url := server + "/v1/data/query/production/command?limit=100"
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Get(url)
@@ -500,20 +667,26 @@ func fetchServedOnce(server string) (map[string]string, bool, error) {
 		// A read that dies mid-body is a transport fault, not a bad catalog.
 		return nil, true, err
 	}
+	// THE ENVELOPE DECODES EVERY FIELD SEEDING WRITES, not {_id, source}.
+	// `derive` posts nine fields and the served document carries all nine; a
+	// two-field envelope made every verdict in this table a statement about
+	// the source string alone, so a change under internal/scaffy/** that alters
+	// what the corpus DERIVES TO — header extraction, cmd.Direction(),
+	// weightedTags' 90/80/70 ladder — moved the served metadata out from under
+	// the check while `source` still matched and the gate printed 22/22 MATCH.
+	// internal/scaffy/** is one of this gate's own `on: push: paths:` entries,
+	// so it fired on exactly the class it could not see (task-7c037e523ccac6ee).
 	var env struct {
 		Result struct {
-			Documents []struct {
-				ID     string `json:"_id"`
-				Source string `json:"source"`
-			} `json:"documents"`
+			Documents []servedDoc `json:"documents"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
 		return nil, false, fmt.Errorf("decode query envelope: %w", err)
 	}
-	out := make(map[string]string, len(env.Result.Documents))
+	out := make(map[string]servedDoc, len(env.Result.Documents))
 	for _, d := range env.Result.Documents {
-		out[d.ID] = fmt.Sprintf("%x", sha256.Sum256([]byte(d.Source)))
+		out[d.ID] = d
 	}
 	return out, false, nil
 }

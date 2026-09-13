@@ -5,12 +5,19 @@
 # The law, unchanged since wave 22: NO BARKPARK VERB MAY REPORT SUCCESS ON AN
 # EXIT CODE ALONE. Every arm this epic has shipped so far points that law at
 # some OTHER surface — a controller, a census, a receipt. This one points it at
-# the record the epic itself writes, on two axes:
+# the record the epic itself writes, on three axes:
 #
 #   AXIS A — A COMMIT MAY NOT CITE AN AUTHORITY THAT DOES NOT EXIST.
 #            Every PDS-Dnnn cited in a commit message must be DEFINED in the
 #            charter. A decision id in a commit is a citation; a citation to
 #            nothing is a commit claiming an authority it never had.
+#
+#   AXIS D — A PDS SCRIPT MAY NOT CITE AN AUTHORITY THAT DOES NOT EXIST.
+#            The same law as axis A, pointed at the corpus axis A cannot see:
+#            the PDS-Dnnn literals carried in `scripts/pds-*.sh` and
+#            `tooling/pds/**`. A commit message is written once; a script
+#            comment survives the charter RENUMBER that invalidates it.
+#            (There is no axis C. The letter is D for the D-numbers.)
 #
 #   AXIS B — A MERGED PR MAY NOT LEAVE ITS TASK ROW OPEN.
 #            Every merged PR names a task. That task must have reached a
@@ -219,6 +226,8 @@
 # usage:
 #   bash scripts/pds-record-parity.sh
 #   bash scripts/pds-record-parity.sh --axis a
+#   bash scripts/pds-record-parity.sh --axis d            # script citations vs charter
+#   bash scripts/pds-record-parity.sh --axis d --citation-root <dir>  # fixture tree
 #   bash scripts/pds-record-parity.sh --limit 400 --grace-hours 6
 #   bash scripts/pds-record-parity.sh --commits-file <file>  # axis A corpus, verbatim
 #   bash scripts/pds-record-parity.sh --fixture-dir <dir>   # hermetic, selftest
@@ -263,6 +272,8 @@ DUP_NONDEF_BY_NAME="559"
 # nobody has measured it.
 BASELINED_CHARTER_BASENAME="bp-pds-charter.md"
 COMMITS_FILE=""          # axis A corpus override (fixtures); default = git log
+# Axis D's corpus root — the repo by default, a fixture tree in the selftest.
+CITATION_ROOT="${PDS_RECORD_PARITY_CITATION_ROOT:-.}"
 FIXTURE_DIR=""           # hermetic transport for BOTH gh and the ledger
 HEADING_LENS=0           # lens artifact demonstrator; never the gate
 ALLOCATE_D=""            # --allocate-d <n>: mint n PDS-D numbers through the arbiter
@@ -287,6 +298,7 @@ usage() { sed -n '/^# usage:/,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 3; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --axis)          AXIS="${2:-}"; shift 2 ;;
+    --citation-root) CITATION_ROOT="${2:-}"; shift 2 ;;
     --limit)         LIMIT="${2:-}"; shift 2 ;;
     --grace-hours)   GRACE_HOURS="${2:-}"; shift 2 ;;
     --charter)       CHARTER="${2:-}"; shift 2 ;;
@@ -302,7 +314,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$AXIS" in a|b|both) : ;; *) echo "pds-record-parity: --axis must be a|b|both, got '${AXIS}'" >&2; usage ;; esac
+case "$AXIS" in a|b|d|both) : ;; *) echo "pds-record-parity: --axis must be a|b|d|both, got '${AXIS}'" >&2; usage ;; esac
 case "$LIMIT" in ''|*[!0-9]*|0) echo "pds-record-parity: --limit must be a positive integer, got '${LIMIT}'" >&2; usage ;; esac
 case "$GRACE_HOURS" in ''|*[!0-9]*) echo "pds-record-parity: --grace-hours must be a non-negative integer, got '${GRACE_HOURS}'" >&2; usage ;; esac
 case "$RETRIES" in ''|*[!0-9]*|0) echo "pds-record-parity: PDS_RECORD_PARITY_RETRIES must be a positive integer, got '${RETRIES}'" >&2; usage ;; esac
@@ -813,6 +825,56 @@ EOF
   return 0
 }
 
+# ══ THE SYNTHETIC FIXTURE ROSTER — ONE DECLARATION, BOTH AXES READ IT ═════════
+#
+# This harness family mints D-numbers that no charter will ever define: prose
+# examples in this script's own header, and phantoms the selftest PLANTS to
+# prove an axis can fire. Two axes meet them in two different corpora, so the
+# skip has to be declared once and DERIVED, never copied — a copy is a second
+# thing to forget, and forgetting it is what put this block here. The incident:
+# the squash commit of the PR that ADDED axis D described its own fixtures in
+# its commit message, and axis A — whose corpus is `git log --format=%B` — read
+# that sentence as a claim on an authority and reddened main. The guard's own
+# commit message tripped its sibling axis.
+#
+# Each entry is `<number>:<axes that SKIP it>`:
+#
+#   :ad — a synthetic this harness DOCUMENTS in its own prose. Axis A skips it
+#         (a sentence ABOUT a fixture is not a claim on an authority) and axis D
+#         skips it (this subject script writes the three of them out in the
+#         header above, and a guard that reds on its own documentation is a
+#         guard nobody keeps). These are the same three the DEFINITION lens is
+#         written strictly to refuse minting from — see charter_defined_numbers.
+#
+#   :a  — axis A skips it; axis D MUST NOT. This is the selftest's PHANTOM: the
+#         number it plants in a subject script so `--axis d` reds by name. Put
+#         it in the :ad set and that proof goes vacuous — the arm would skip the
+#         very citation the assertion is waiting for. So it is skipped exactly
+#         where it is only ever PROSE (a commit message) and left live exactly
+#         where it is a planted CITATION (a file).
+#
+# WHAT THIS DELIBERATELY DOES NOT DO: it does not widen a grace window and it
+# names no commit. A commit message citing an undefined number that is NOT on
+# this roster still reds axis A — that is the whole of the axis, and the
+# selftest pins both directions.
+#
+# (Written WITHOUT the `PDS-` prefix on purpose: axis D scans THIS file, and a
+# prefixed literal here would be a citation of a number nothing defines.)
+PDS_SYNTHETIC_FIXTURES="777:ad 999:ad 1000:ad 9999:a"
+
+# pds_synthetic_numbers <a|d> — the numbers the named axis skips, space-separated.
+# Both axes derive from the one declaration above; neither keeps a list.
+pds_synthetic_numbers() {
+  local axis="$1" entry out=""
+  for entry in $PDS_SYNTHETIC_FIXTURES; do
+    case "${entry#*:}" in
+      *"$axis"*) out="${out:+$out }${entry%%:*}" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+
 # ══ AXIS A — a commit may not cite an authority that does not exist ═══════════
 axis_a() {
   echo
@@ -894,6 +956,19 @@ axis_a() {
     git log --format=%B | grep -oE 'PDS-D[0-9]+' | sort -u > "$cites"
   fi
 
+  # THE ROSTER, OUT OF THE CORPUS — the same declaration axis D reads, taken at
+  # this axis's scope. A commit message that DISCUSSES a synthetic fixture is
+  # prose about the harness, not a claim on an authority, and axis A reading it
+  # as one is how this arm reddened its own main. Counted and PRINTED, so the
+  # skip is visible in the run rather than hidden in a lens. Nothing else is
+  # removed: an undefined number that is not on the roster still reds below.
+  local a_sent_nums a_sent_re a_sent_skipped
+  a_sent_nums="$(pds_synthetic_numbers a)"
+  a_sent_re="$(printf '%s' "$a_sent_nums" | tr ' ' '|')"
+  a_sent_skipped="$(grep -cE "^PDS-D(${a_sent_re})\$" "$cites" || true)"
+  grep -vE "^PDS-D(${a_sent_re})\$" "$cites" > "$WORKDIR/a_cites_real" || true
+  mv -f "$WORKDIR/a_cites_real" "$cites"
+
   comm -23 "$cites" "$defs" > "$unresolved"
 
   local n_def n_cite n_unres
@@ -905,6 +980,7 @@ axis_a() {
   echo "  charter:    ${CHARTER}"
   echo "  defined:    ${n_def} distinct PDS-D"
   echo "  cited:      ${n_cite} distinct PDS-D across the commit corpus"
+  echo "  fixtures:   ${a_sent_skipped} dropped before resolving, off a roster of $(printf '%s' "$a_sent_nums" | wc -w | tr -d ' ') (PDS-D$(printf '%s' "$a_sent_nums" | sed 's/ /, PDS-D/g'))"
   echo "  unresolved: ${n_unres}"
 
   if [ "$n_unres" -gt 0 ]; then
@@ -922,6 +998,215 @@ axis_a() {
   # so it runs under --heading-lens too and its verdict is its own. The two legs
   # are independent by construction: breaking one cannot green or red the other.
   uniqueness_leg "$cites"
+  return 0
+}
+
+
+# ══ AXIS D — a PDS-* SCRIPT may not cite an authority that does not exist ═════
+#
+# WHY THIS IS A SEPARATE AXIS AND NOT A WIDER AXIS A. Axis A's corpus is the
+# COMMIT MESSAGE. A commit message is written once and never rebased; a comment
+# in a script is carried forward, copied, and — this is the whole defect —
+# survives a charter RENUMBER unchanged. Measured 2026-09-13 on origin/main
+# (4ecd652ee): 663 PDS-D occurrences across 33 `scripts/pds-*.sh` and 23 more
+# across `tooling/pds/**`, and NOT ONE of them is read by any gate in the repo.
+#   * axis A never sees them — it reads `git log --format=%B`, nothing else.
+#   * scripts/charter-citation-check.sh never sees them either, and says so in
+#     its own grammar section: its anchor is the WORD `charter` followed by a
+#     bare `D<n>`, and "Prefixed forms (`PDS-D155`, …) never carry the `charter`
+#     anchor and are outside the grammar entirely."
+# So the prefixed citation — the ONLY form the PDS surfaces actually use — sat
+# in the gap between the two checks that look like they cover it.
+#
+# THE OBSERVED FAILURE. A charter PR's decision block is renumbered on rebase
+# (main took D719 while #17937 was in flight, so its D719–D739 block became
+# D720–D740). Every script comment citing the pre-rebase number now points at a
+# DIFFERENT ruling, or at one that does not exist. Both happened in one week on
+# scripts/pds-secret-scan.sh: D736 (stale by one) and, earlier, D532 — a wholly
+# unrelated ruling ("THE REGISTER SURVIVES ITS OWN WAVE"). Nothing red.
+#
+# (The two numbers above are written WITHOUT the `PDS-` prefix on purpose. This
+# axis scans this file, a prefixed literal here would be a citation, and a guard
+# that reds on its own account of the defect it guards is a guard nobody keeps.)
+#
+# WHAT THIS AXIS CAN AND CANNOT SEE — stated so a green is not over-read.
+# It is an EXISTENCE check, not a semantic one. It catches the citation that
+# resolves to NOTHING, which is the whole of the D736 case while the charter
+# tops out below 736, and it is structurally blind to the D532 case, where the
+# number exists and names something unrelated. Judging "does this ruling's title
+# have anything to do with this sentence?" is not mechanisable here, so it is
+# not claimed. A hand sample of 20 citations on 4ecd652ee found 0 mis-pointed
+# by title and 2 that are not citations at all (a grammar EXAMPLE in this
+# script's own header, a fixture string in its selftest) — both resolve, neither
+# asserts an authority. The axis therefore reds on existence alone.
+#
+# THE SENTINELS are declared ONCE, above axis A, in PDS_SYNTHETIC_FIXTURES, and
+# this axis reads its share of them through `pds_synthetic_numbers d`. They are
+# excluded BY NUMBER and the count of skipped occurrences is PRINTED, so the
+# exclusion is visible in the run rather than hidden in a lens.
+#
+# THE TEST HARNESSES ARE OUT OF SCOPE, AND THIS IS THE ONE NARROWING.
+# `scripts/pds-*.test.sh` and `scripts/pds-*_test.sh` PLANT undefined D-numbers
+# on purpose — that is what a mutation fixture IS — and no property of the text
+# distinguishes a planted phantom from a stale citation. Keeping them in scope
+# would make this axis red on its own fixtures, and a guard that reds on its own
+# fixtures gets deleted rather than repaired. The cost is stated rather than
+# hidden: prose citations inside a `pds-*` harness are NOT checked by this axis.
+# It is the SUBJECT scripts — the ones that carry a ruling forward across a
+# rebase — that the renumber defect actually lives in.
+axis_d_is_harness() { # axis_d_is_harness <path>
+  case "${1##*/}" in
+    pds-*.test.sh|pds-*_test.sh) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+#
+# THE BASELINE ALLOWLIST — `path:line:number`, one per line, each dated with the
+# ruling or rebase that stranded it. IT SHRINKS AND NEVER GROWS: an entry is a
+# citation somebody still has to repair, not a dispensation to write another.
+# Adding a line here is the wrong repair for a new red — the right one is to fix
+# the citation. The count is printed on every run so an allowlist that stopped
+# shrinking is visible.
+#
+# THE NUMBER IS BARE — `scripts/pds-foo.sh:12:736`, never the prefixed form. The
+# prefixed form would make this very file cite the undefined number it is
+# excusing, and the axis would then red on its own baseline — proven by a
+# planted entry before the format was fixed. A baseline that cannot be written
+# without tripping the check it feeds is not a baseline.
+#
+# MEASURED 2026-09-13 at 4ecd652ee: EMPTY. Every one of the 686 citations in the
+# corpus resolves once the three sentinels are excluded, so this guard lands on
+# a clean main and its first red will be a real one.
+AXIS_D_ALLOWLIST=""
+
+# The corpus root, overridable so the selftest can point the axis at a fixture
+# tree instead of the live checkout.
+axis_d_corpus_files() { # axis_d_corpus_files <root>
+  local root="$1"
+  if [ -d "$root/scripts" ]; then
+    find "$root/scripts" -maxdepth 1 -type f -name 'pds-*.sh' | while IFS= read -r f; do
+      axis_d_is_harness "$f" || printf '%s\n' "$f"
+    done
+  fi
+  [ -d "$root/tooling/pds" ] && find "$root/tooling/pds" -type f
+  return 0
+}
+
+axis_d() {
+  echo
+  echo "AXIS D — PDS-D numbers cited by the PDS SCRIPTS must resolve in the charter"
+  echo "  scope:      scripts/pds-*.sh + tooling/pds/** under ${CITATION_ROOT}"
+  echo "              (pds-*.test.sh / pds-*_test.sh EXCLUDED — they plant phantoms)"
+  echo "  NOTE: EXISTENCE only. A citation that is STALE BY ONE onto a number that"
+  echo "        happens to exist resolves here and is NOT caught. See the header."
+
+  if [ ! -f "$CHARTER" ]; then
+    echo "  UNCHECKED: charter not found at ${CHARTER} — the axis cannot resolve a single citation" >&2
+    raise 2; return 0
+  fi
+
+  local defs="$WORKDIR/d_defs" cites="$WORKDIR/d_cites" files="$WORKDIR/d_files"
+  local unres="$WORKDIR/d_unres" allow="$WORKDIR/d_allow" fired="$WORKDIR/d_fired"
+
+  charter_defined_numbers > "$defs" || { echo "  UNCHECKED: the definition lens read nothing" >&2; raise 2; return 0; }
+  if [ ! -s "$defs" ]; then
+    echo "  UNCHECKED: ${CHARTER} defines no PDS-D at all — the lens is measuring itself" >&2
+    raise 2; return 0
+  fi
+
+  axis_d_corpus_files "$CITATION_ROOT" | sort > "$files"
+  if [ ! -s "$files" ]; then
+    echo "  UNCHECKED: the scope matched no file under ${CITATION_ROOT} — a verdict over a" >&2
+    echo "             corpus that was never read is not a pass." >&2
+    raise 2; return 0
+  fi
+
+  # file:line:PDS-Dn, one per occurrence. `-I` drops binaries; the corpus is
+  # text today and a future .png in tooling/pds must not make the axis UNCHECKED.
+  : > "$cites"
+  while IFS= read -r f; do
+    grep -I -noE 'PDS-D[0-9]+' "$f" 2>/dev/null | sed "s|^|${f#"$CITATION_ROOT"/}:|" >> "$cites" || true
+  done < "$files"
+
+  local n_files n_occ n_distinct
+  n_files="$(wc -l < "$files" | tr -d ' ')"
+  n_occ="$(wc -l < "$cites" | tr -d ' ')"
+  n_distinct="$(sed 's/.*:\(PDS-D[0-9]*\)$/\1/' "$cites" | sort -u | wc -l | tr -d ' ')"
+
+  if [ "$n_occ" -eq 0 ]; then
+    echo "  UNCHECKED: ${n_files} file(s) in scope and ZERO citations in any of them." >&2
+    echo "             The PDS scripts cite the charter constantly; zero means the scan" >&2
+    echo "             broke, not that the corpus is clean." >&2
+    raise 2; return 0
+  fi
+
+  # Sentinels out, by number, counted. DERIVED from the one roster, never copied.
+  local sent_nums sent_re sent_skipped
+  sent_nums="$(pds_synthetic_numbers d)"
+  sent_re="$(printf '%s' "$sent_nums" | tr ' ' '|')"
+  sent_skipped="$(grep -cE ":PDS-D(${sent_re})\$" "$cites" || true)"
+  grep -vE ":PDS-D(${sent_re})\$" "$cites" > "$WORKDIR/d_cites_real" || true
+
+  # NORMALISED to `path:line:number` — the bare number, so the allowlist below
+  # can name an entry without itself becoming a citation of it.
+  sed 's/:PDS-D\([0-9][0-9]*\)$/:\1/' "$WORKDIR/d_cites_real" > "$WORKDIR/d_cites_norm"
+
+  # Undefined = the number is not in the definition lens's output.
+  : > "$unres"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    local num="${line##*:}"
+    grep -qx "$num" "$defs" || printf '%s\n' "$line" >> "$unres"
+  done < "$WORKDIR/d_cites_norm"
+
+  printf '%s\n' "$AXIS_D_ALLOWLIST" | sed '/^[[:space:]]*$/d' | sort -u > "$allow"
+
+  echo "  charter:    ${CHARTER}"
+  echo "  files:      ${n_files} in scope"
+  echo "  citations:  ${n_occ} occurrence(s), ${n_distinct} distinct PDS-D"
+  echo "  sentinels:  ${sent_skipped} occurrence(s) skipped (PDS-D$(printf '%s' "$sent_nums" | sed 's/ /, PDS-D/g'))"
+  echo "  defined:    $(wc -l < "$defs" | tr -d ' ') distinct PDS-D in the charter"
+  echo "  allowlist:  $(wc -l < "$allow" | tr -d ' ') entry(ies) — shrinks, never grows"
+
+  : > "$fired"
+  local n_allowed=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if grep -qxF "$line" "$allow"; then
+      n_allowed=$((n_allowed + 1))
+      echo "    ALLOWLISTED-CITATION ${line} (PDS-D${line##*:}) — baselined, still unrepaired"
+      continue
+    fi
+    printf '%s\n' "$line" >> "$fired"
+  done < "$unres"
+
+  if [ -s "$fired" ]; then
+    while IFS= read -r line; do
+      local num="${line##*:}" below above near=""
+      below="$(awk -v n="$num" '$1 < n {v=$1} END {print v}' "$defs")"
+      above="$(awk -v n="$num" '$1 > n {print $1; exit}' "$defs")"
+      [ -n "$below" ] && near="PDS-D${below}"
+      [ -n "$above" ] && near="${near:+${near}, }PDS-D${above}"
+      echo "    UNDEFINED-CITATION   ${line%:*} cites PDS-D${num}"
+      echo "                         nearest defined: ${near:-<none>}"
+      echo "                         (the charter defines neither this number nor anything"
+      echo "                          claiming it — repair the citation, do not allowlist it)"
+    done < "$fired"
+    raise 1
+  fi
+
+  # THE MIRROR. An allowlist entry that no longer names an undefined citation is
+  # a repair nobody deleted the baseline for, and a baseline that only ever grows
+  # is the thing this axis exists to refuse.
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    grep -qxF "$line" "$unres" || {
+      echo "    STALE-ALLOWLIST      ${line} — no longer an undefined citation; delete this entry"
+      raise 1
+    }
+  done < "$allow"
+
+  echo "  undefined:  $(wc -l < "$fired" | tr -d ' ') firing, ${n_allowed} allowlisted"
   return 0
 }
 
@@ -1259,6 +1544,7 @@ axis_b() {
 
 case "$AXIS" in a|both) axis_a ;; esac
 case "$AXIS" in b|both) axis_b ;; esac
+case "$AXIS" in d|both) axis_d ;; esac
 
 echo
 case "$WORST" in

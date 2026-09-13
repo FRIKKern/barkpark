@@ -153,7 +153,10 @@ cat > "$CH" <<'EOF'
 # A charter
 
 Some prose that mentions PDS-D999 in passing, which is a REFERENCE, not a
-definition — a lens that counted it would call an undefined D defined.
+definition — a lens that counted it would call an undefined D defined. The same
+goes for PDS-D555, mentioned here and nowhere else; 555 carries the assertion
+because it is not on the arm's synthetic roster, and a roster number is PRINTED
+in the run's own fixtures line where a says_not could not tell the two apart.
 
 - **PDS-D1** the first decision.
 * **PDS-D2** the second, with an asterisk bullet.
@@ -167,7 +170,19 @@ EOF
 CM_OK="$TMP/commits-ok.txt"
 printf 'fix(x): do a thing per PDS-D1 and PDS-D2\n\nfeat(y): PDS-D3\n' > "$CM_OK"
 CM_BAD="$TMP/commits-bad.txt"
-printf 'fix(x): PDS-D1\n\nfeat(y): cites PDS-D777 which nothing defines\n' > "$CM_BAD"
+printf 'fix(x): PDS-D1\n\nfeat(y): cites PDS-D888 which nothing defines\n' > "$CM_BAD"
+
+# THE ROSTER FIXTURES. 777 is ON the arm's synthetic roster (scope :ad) and 9999
+# is on it at axis-A scope (:a), so axis A must DROP both out of a commit corpus.
+# 888 is deliberately NOT on the roster, which is why the red arm above plants
+# it: an arm that skipped everything would green on 888 too, and the pair below
+# is the only thing that tells the two apart.
+CM_SENTINEL="$TMP/commits-sentinel.txt"
+printf 'feat(pds): the fixtures are PDS-D777 and PDS-D9999, and PDS-D1 is real\n' > "$CM_SENTINEL"
+grep -q '^PDS_SYNTHETIC_FIXTURES=' "$ARM" || harness_fail "the arm no longer declares PDS_SYNTHETIC_FIXTURES — the roster the two axes share"
+case "$(grep '^PDS_SYNTHETIC_FIXTURES=' "$ARM")" in
+  *888*) harness_fail "888 is ON the roster, so the axis A red arm below proves nothing" ;;
+esac
 
 CM_HEAD="$TMP/commits-heading.txt"
 printf 'fix(z): per PDS-D404, which the charter defines as a HEADING and nothing else\n' > "$CM_HEAD"
@@ -175,7 +190,7 @@ printf 'fix(z): per PDS-D404, which the charter defines as a HEADING and nothing
 run 0 "axis A greens when every cited D resolves" -- --axis a --charter "$CH" --commits-file "$CM_OK"
 says "defined:    4 distinct PDS-D" "the union lens counts BOTH definition forms — three bold leads and one own-line heading"
 says "unresolved: 0" "axis A reports zero unresolved"
-says_not "PDS-D999" "a D merely MENTIONED in charter prose is not counted as defined"
+says_not "PDS-D555" "a D merely MENTIONED in charter prose is not counted as defined"
 
 # RULING 1, THE REGRESSION THAT SHIPPED SIX FALSE REDS. Before this wave the
 # gate lens was bold-lead ONLY, and the charter had grown 24 numbers (D643–D673)
@@ -188,7 +203,23 @@ says_not "UNRESOLVED-CITATION PDS-D404" "the arm no longer manufactures a phanto
 
 # THE RED SIDE. Without this the arm could hardcode `unresolved: 0`.
 run 1 "axis A REDS on a commit citing an undefined D" -- --axis a --charter "$CH" --commits-file "$CM_BAD"
-says "UNRESOLVED-CITATION PDS-D777" "the red names the offending citation"
+says "UNRESOLVED-CITATION PDS-D888" "the red names the offending citation"
+
+# THE ROSTER, BOTH DIRECTIONS. The arm reddened its own main because the squash
+# commit of the PR that added axis D described its own fixtures in its message
+# and axis A — corpus `git log --format=%B` — read the sentence as a claim on an
+# authority. A synthetic on the shared roster is now dropped from the corpus
+# BEFORE resolving; anything else is not. The red arm directly above is the
+# other half of this pair and must stay adjacent to it.
+run 0 "axis A does NOT red on a commit message that merely MENTIONS a roster fixture" -- --axis a --charter "$CH" --commits-file "$CM_SENTINEL"
+says "fixtures:   2 dropped before resolving, off a roster of 4" "the drop is COUNTED and PRINTED, so it cannot hide a growing skip list"
+says "unresolved: 0" "prose about a fixture is not a claim on an authority"
+says_not "UNRESOLVED-CITATION" "the sentinel citations are dropped, not reported"
+
+# …and the roster is DERIVED from one declaration, not copied per axis: the same
+# number axis A drops out of a commit message, axis D still reds on in a FILE
+# when the declaration says so. That asymmetry is the point of the scope field,
+# and the axis D phantom fixture further down is its proof.
 
 # The heading arm of the union must be ANCHORED at the start of the heading
 # text. A heading that merely MENTIONS a D in passing — the charter's wave
@@ -221,6 +252,70 @@ run 2 "a missing charter lands in UNCHECKED, never a silent PASS" -- --axis a --
 says "UNCHECKED: charter not found" "the UNCHECKED names the missing charter"
 
 echo
+
+# ══ AXIS D — a PDS SCRIPT may not cite an authority that does not exist ══════
+#
+# The corpus axis A structurally cannot see. Every fixture below runs against a
+# FIXTURE TREE via --citation-root, so the pins do not move when somebody edits
+# a real comment in scripts/. The live tree gets one fixture of its own at the
+# end, and it asserts a NUMBER as well as a code — a green over a corpus of
+# zero files is exactly the vacuous pass this arm exists to refuse.
+echo
+echo "AXIS D — a PDS script may not cite an authority that does not exist"
+
+DROOT="$TMP/droot"
+mkdir -p "$DROOT/scripts" "$DROOT/tooling/pds"
+printf '#!/usr/bin/env bash\n# per PDS-D1 and PDS-D404 this is fine\n' > "$DROOT/scripts/pds-clean.sh"
+# A HARNESS in the fixture tree, carrying a planted phantom. It must be SKIPPED.
+printf '#!/usr/bin/env bash\n# a planted fixture number: PDS-D9999\n' > "$DROOT/scripts/pds-clean.test.sh"
+printf '{"note": "per PDS-D2"}\n' > "$DROOT/tooling/pds/clean.json"
+
+run 0 "axis D greens when every cited D resolves" -- --axis d --charter "$CH" --citation-root "$DROOT"
+says "files:      2 in scope" "the harness beside it is EXCLUDED — 3 files on disk, 2 in scope"
+says "citations:  3 occurrence(s), 3 distinct PDS-D" "the scan read every occurrence, not just the first per file"
+says "undefined:  0 firing" "the harness's planted PDS-D9999 does not red the axis"
+
+# THE PHANTOM. This is the renumber defect in miniature: a comment carried
+# forward onto a number the charter no longer (or does not yet) define.
+printf '#!/usr/bin/env bash\n# stale after a rebase: PDS-D9999\n' > "$DROOT/scripts/pds-phantom.sh"
+run 1 "axis D REDS on a script citing an undefined D" -- --axis d --charter "$CH" --citation-root "$DROOT"
+says "UNDEFINED-CITATION   scripts/pds-phantom.sh:2 cites PDS-D9999" "the red names the FILE, the LINE and the number"
+says "nearest defined: PDS-D404" "the red offers the nearest defined number, which is what a renumber repair needs"
+says "undefined:  1 firing" "exactly one citation fired"
+
+# …and removing it greens again. Without this half the red above is compatible
+# with an arm that reds on everything.
+rm "$DROOT/scripts/pds-phantom.sh"
+run 0 "removing the phantom citation greens axis D again" -- --axis d --charter "$CH" --citation-root "$DROOT"
+says_not "UNDEFINED-CITATION" "the red is gone with the citation, not sticky"
+
+# THE SENTINELS. PDS-D777/999/1000 are this harness's own synthetic numbers and
+# must never red — but they must be COUNTED, not silently dropped.
+printf '#!/usr/bin/env bash\n# the fixtures PDS-D777 PDS-D999 PDS-D1000 are sentinels\n' > "$DROOT/scripts/pds-sentinel.sh"
+run 0 "the synthetic sentinels do not red axis D" -- --axis d --charter "$CH" --citation-root "$DROOT"
+says "sentinels:  3 occurrence(s) skipped" "the exclusion is PRINTED, so it cannot hide a growing skip list"
+rm "$DROOT/scripts/pds-sentinel.sh"
+
+# A corpus root with nothing in it is UNCHECKED. An arm that printed PARITY here
+# would be certifying a corpus it never opened.
+run 2 "an empty corpus root is UNCHECKED, never a green" -- --axis d --charter "$CH" --citation-root "$TMP/no-such-root"
+says "UNCHECKED: the scope matched no file" "the UNCHECKED names the empty scope"
+
+run 2 "axis D with a missing charter is UNCHECKED" -- --axis d --charter "$TMP/no-such-charter.md" --citation-root "$DROOT"
+says "UNCHECKED: charter not found" "the UNCHECKED names the missing charter"
+
+# THE LIVE TREE. The fixtures above prove the mechanism; this one proves the
+# mechanism is pointed at the real corpus. It pins a FLOOR on the citation count
+# rather than an exact number, because the real corpus grows.
+run 0 "axis D is GREEN on this checkout's real scripts/pds-*.sh + tooling/pds/**" -- --axis d
+LIVE_OCC="$(printf '%s\n' "$LAST_OUT" | sed -n 's/^  citations:  \([0-9]*\) occurrence.*/\1/p')"
+CHECKS=$((CHECKS + 1))
+if [ "${LIVE_OCC:-0}" -ge 100 ]; then
+  echo "ok    the live run read ${LIVE_OCC} citations (floor 100) — the green is over a real corpus"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  the live axis D green covered only ${LIVE_OCC:-0} citation(s) — a green over an empty corpus"
+fi
 
 # ══ AXIS A, UNIQUENESS LEG — one D-number, one finding ═══════════════════════
 #
@@ -397,7 +492,7 @@ run_at "$SHALLOW/scripts/pds-record-parity.sh" 0 \
 says "cited:      3 distinct PDS-D" "the escape reads the corpus it was handed, not the truncated walk"
 run_at "$SHALLOW/scripts/pds-record-parity.sh" 1 \
   "the escape can still RED on a shallow checkout" -- --axis a --charter "$CH" --commits-file "$CM_BAD"
-says "UNRESOLVED-CITATION PDS-D777" "the escape's red still names the offending citation"
+says "UNRESOLVED-CITATION PDS-D888" "the escape's red still names the offending citation"
 
 # ── (3) THE OFF-HEAD GRAFT: store-shallow, HEAD complete ────────────────────
 # THIS IS THE FIXTURE THAT PINS THE PREDICATE. One `--depth` fetch of an

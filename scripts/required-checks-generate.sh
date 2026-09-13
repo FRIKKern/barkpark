@@ -1389,19 +1389,44 @@ EOF
   # The check list is a UNION on the context string, base first so a committed
   # app_id pin wins over a freshly derived one, then sorted by context so the
   # diff of a regeneration is a diff of DECISIONS and not of sampling order.
+  # THE BIG INPUTS GO THROUGH FILES, NEVER ARGV. `--argjson base "$base_json"`
+  # put the whole committed spec into ONE execve argument, and Linux caps a
+  # SINGLE argument at MAX_ARG_STRLEN (128 KiB = 131072 bytes) independently of
+  # ARG_MAX, so no amount of total-size headroom helps. Measured 2026-09-13:
+  # .github/required-checks.json reached 136,352 bytes at a9f727cbc (first over
+  # the cap at 661e87d9f / #17989, 98,463 -> 133,127), and from that commit every
+  # generator call on a Linux runner died `jq: Argument list too long` (exit 126).
+  # The mutation suite reads that as "the producer refused", so required-checks-
+  # drift concluded failure on every main head from 661e87d9f onward — a drift
+  # detector that had stopped measuring anything. macOS has no per-argument cap,
+  # so the fault is INVISIBLE locally; §14e of scripts/required-checks.test.sh
+  # asserts the argv SHAPE (no single jq argument over the cap) instead of
+  # waiting for the platform to raise it.
+  local argdir
+  argdir="$(mktemp -d)" || die "could not create a temp dir for the emit's jq inputs"
+  printf '%s\n' "$base_json"       >"$argdir/base.json"
+  printf '%s\n' "$exclusions_json" >"$argdir/exclusions.json"
+  printf '%s\n' "$checks_json"     >"$argdir/checks.json"
+
   local spec
   spec="$(jq -n \
     --arg repo "$REPO" \
     --arg branch "$BRANCH" \
     --arg enforced "$ENFORCED" \
-    --argjson base "$base_json" \
-    --argjson checks "$checks_json" \
-    --argjson exclusions "$exclusions_json" \
+    --slurpfile base_in "$argdir/base.json" \
+    --slurpfile checks_in "$argdir/checks.json" \
+    --slurpfile exclusions_in "$argdir/exclusions.json" \
     --argjson promoted_drop "$promoted_drop" \
     --argjson demoted_drop "$demoted_drop" \
     --argjson shas "$(printf '%s\n' "${SHAS[@]}" | jq -R . | jq -s '.')" \
     '
-    ($enforced == "true") as $on
+    # `--slurpfile` wraps the single JSON value in each file in an array; unwrap it
+    # here so every reference below is the same `$base`/`$checks`/`$exclusions`
+    # the argv form bound.
+    ($base_in[0]) as $base
+    | ($checks_in[0]) as $checks
+    | ($exclusions_in[0]) as $exclusions
+    | ($enforced == "true") as $on
     | ($shas | map(.[0:9]) | join(" and ")) as $shortshas
     | ($base | if type == "object" then . else {} end) as $b
     | [
@@ -1491,6 +1516,7 @@ EOF
                             then .[0] else .[-1] end) | del(.derived_class))
                      | sort_by(.context))
       }')"
+  rm -rf "$argdir"
 
   local emitted
   emitted="$(jq '.protection.required_status_checks.checks | length' <<<"$spec")"

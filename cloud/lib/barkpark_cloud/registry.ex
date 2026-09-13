@@ -10183,16 +10183,20 @@ defmodule BarkparkCloud.Registry do
       D28): "no build source" means something DIFFERENT for each Site kind, so
       this is two status-guarded passes summed into one `no_source_failed` count.
       A CONTAINER row is un-buildable with no `artifact_url` AND a site with no
-      `github_repo`. A STATIC row is content-bound, not artifact-bound: it is
+      `github_repo`. A CONTENT-BOUND row — STATIC *or* NODE, the two kinds
+      whose build reads from a Barkpark dataset — is content-bound, not
+      artifact-bound: it is
       un-buildable exactly when its site has no `bootstrap_dataset` (nothing to
       read content from) — a legitimate static row (bound dataset, no artifact,
       no repo) matches the CONTAINER predicate exactly, so a single un-scoped
       pass would terminally fail every static deploy within 60s with a message
       about artifacts and GitHub repos that names neither the cause nor the cure.
       Kind-scoping the container pass ALONE is the other half of the trap: an
-      UNBOUND static row would then match nothing and spin `queued` forever —
-      the eternal spinner this sweep exists to kill. Hence: two passes, each with
-      its own honest reason. Such a row can NEVER build regardless of fleet
+      UNBOUND content-bound row would then match nothing and spin `queued`
+      forever — the eternal spinner this sweep exists to kill. Hence: two passes,
+      each with its own honest reason, and between them they name ALL THREE
+      kinds — container in (0a), static AND node in (0b) — so no kind is left
+      silently uncovered. Such a row can NEVER build regardless of fleet
       (nothing to build from), so it would otherwise sit queued forever behind an
       eternal dashboard spinner. NOT staleness-gated (it is un-buildable the
       instant it exists). Repo-backed queued rows (a `github_repo` is set) are
@@ -10330,18 +10334,43 @@ defmodule BarkparkCloud.Registry do
         ]
       )
 
-    # (0b) STATIC: the twin, and the half a naive kind-scope forgets. A static
-    # build reads its content from a Barkpark dataset, so its build source IS the
-    # content binding — a site with no `bootstrap_dataset` has nothing to build
-    # from and can never succeed. Without this pass an unbound static row matches
-    # NOTHING (0a excludes it by kind) and spins `queued` forever: the exact
-    # eternal-spinner disease the reaper exists to cure. The reason names the
-    # cure the user can actually run.
+    # (0b) CONTENT-BOUND — STATIC *AND* NODE: the twin, and the half a naive
+    # kind-scope forgets. A static build reads its content from a Barkpark
+    # dataset, so its build source IS the content binding — a site with no
+    # `bootstrap_dataset` has nothing to build from and can never succeed.
+    # Without this pass an unbound content-bound row matches NOTHING (0a excludes
+    # it by kind) and spins `queued` forever: the exact eternal-spinner disease
+    # the reaper exists to cure. The reason names the cure the user can actually
+    # run.
+    #
+    # BOTH content-bound kinds, not just static (task-85693fd7401812fd). A NODE
+    # site is content-bound EXACTLY like a static one, and this is CITED, not
+    # re-derived — the repo already states it in three places: `Web.Router`'s
+    # `require_content_binding/2` ("a NODE site is content-bound EXACTLY like a
+    # static one — its SSR build fetches from workspace/project/dataset and has
+    # literally nothing to render without all three"), `Web.Router`'s
+    # `mint_site_read_token/3` ("a node site is content-bound like a static one,
+    # so it mints the SAME public-read token over the SAME scoped route"), and
+    # `list_orphaned_static_deployments/0` in THIS module ("live-caught twice in
+    # one evening that a NODE row strands identically (W7 made node ride the same
+    # box relay), so the sweep now covers both box-driven kinds").
+    #
+    # Left at `== "static"`, an unbound NODE row matched NEITHER (0a) (excluded
+    # by kind) NOR (0b) (excluded by kind) and inherited the exact eternal
+    # spinner this pass exists to kill. LATENT, NOT LIVE:
+    # `require_content_binding("node", attrs)` refuses an unbound node create at
+    # the door, `create_site/2` has exactly one caller downstream of that guard,
+    # no update path can NULL an existing `bootstrap_dataset`, and the guard and
+    # the node kind landed in the SAME commit (afa5c5d49d) — so no unbound node
+    # row can exist today. This pass is the BACKSTOP for a door-guard regression,
+    # and a backstop covering 2 of 3 kinds fails SILENTLY.
     {static_failed, static_rows} =
       from(d in Deployment,
         join: s in Site,
         on: s.id == d.site_id,
-        where: d.status == "queued" and s.kind == "static" and is_nil(s.bootstrap_dataset),
+        where:
+          d.status == "queued" and s.kind in ["static", "node"] and
+            is_nil(s.bootstrap_dataset),
         select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> Repo.update_all(

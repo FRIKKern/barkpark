@@ -97,6 +97,12 @@ defmodule Barkpark.Application do
     # edges to add).
     install_edge_extractor_seam()
 
+    # The same inversion for the codelist health roster: `Content.CodelistHealth`
+    # reads `:codelist_requirements_collector`; it never names the registry.
+    # Unset → an empty roster (the fresh-install invariant: a plugin-free host
+    # declares no codelists, so its audit is `:ok`, not a crash).
+    install_codelist_requirements_seam()
+
     # C4-1: plugins may contribute Oban Cron entries via `oban_crontab/0`.
     # Collect them here (a pure, GenServer-independent call, same as
     # collect_workers/1 above) and fold them into the host's static Oban
@@ -406,6 +412,22 @@ defmodule Barkpark.Application do
         :barkpark,
         :edge_extractor_collector,
         &Barkpark.Plugins.Registry.collect_edge_extractors/1
+      )
+    end
+
+    :ok
+  end
+
+  # Installs the plugin codelist-roster fan-out into the key
+  # `Barkpark.Content.CodelistHealth` reads. As with the edge-extractor seam, an
+  # explicit `config :barkpark, :codelist_requirements_collector, …` WINS — the
+  # seam is substitutable, not merely indirect.
+  defp install_codelist_requirements_seam do
+    if is_nil(Application.get_env(:barkpark, :codelist_requirements_collector)) do
+      Application.put_env(
+        :barkpark,
+        :codelist_requirements_collector,
+        &Barkpark.Plugins.Registry.collect_codelist_requirements/0
       )
     end
 

@@ -71,7 +71,12 @@
 # all FAILS, a tree exempted from every job with its prefix stripped from both
 # regexes (Mutation C) FAILS, an unbounded exemption FAILS, an exemption whose
 # named job still matches FAILS, and a routed path with no TARGET_PAIRS row
-# FAILS on the coverage predicate alone. Modelled on
+# FAILS on the coverage predicate alone. For the api/test exclusion, four more,
+# each ISOLATING one arm: deleting the `!api/test/**` push-path line FAILS on the
+# presence allowlist alone, neutering the classifier's `grep -vE` half FAILS on
+# the BEHAVIOURAL arm alone, widening the exclusion to all of `api/` FAILS on the
+# CONTROL alone, and dropping the whole diff instead of just the excluded files
+# FAILS on the MIXED case alone. Modelled on
 # scripts/connectors-catalog-drift-check.sh's bundled selftest.
 
 set -euo pipefail
@@ -206,6 +211,11 @@ extract_paths() {
       gsub(/"/, "", line)
       gsub(/\047/, "", line)
       if (line == "") next
+      # A leading "!" is a GitHub path-filter EXCLUSION, not a trigger: it can
+      # never START the workflow, so the forward/reverse/coverage arms must not
+      # judge it as one (each would read it as a path targeting no deploy job).
+      # It gets its own arm instead — check_exclusions below.
+      if (substr(line, 1, 1) == "!") { print line "\tEXCLUSION"; exempt = 0; jobs = ""; next }
       print line "\t" (exempt ? "EXEMPT:" jobs : "REQUIRED")
       exempt = 0
       jobs = ""
@@ -275,6 +285,20 @@ REQUIRED_PATHS=(
   "scripts/connectors/**"
 )
 
+# The mirror of REQUIRED_PATHS for the other direction (task-75f45c6baba2e633).
+# An EXCLUSION is invisible to every arm that judges triggers, so deleting the
+# `- "!api/test/**"` line leaves nothing to drift and the gate would read green
+# over a workflow that redeploys production for a change a prod build cannot
+# compile (api/mix.exs elixirc_paths(_) is ["lib"]). Measured before the
+# exclusion landed: 86 of 890 deploy-triggering merges in seven days matched
+# ONLY because of files under api/test/.
+#
+# This pins PRESENCE. check_exclusions below pins BEHAVIOUR — the two halves of
+# the same deletion, exactly as REQUIRED_PATHS and the drift arm are.
+REQUIRED_EXCLUSIONS=(
+  "!api/test/**"
+)
+
 # Assert every REQUIRED_PATHS entry appears in extract_paths() output (either
 # REQUIRED or EXEMPT column — presence is what matters here, drift is the other
 # arm's job). Fails closed if any is absent.
@@ -300,6 +324,30 @@ check_required_paths() {
     echo "FAIL[$label]: $missing required path(s) absent from on.push.paths." >&2
     echo "Fix: restore the '- \"<path>\"' entry under on.push.paths AND its matching prefix in the" >&2
     echo "'changes' job instance regex — deleting both is the false-green this allowlist exists to catch." >&2
+    return 1
+  fi
+  return 0
+}
+
+# Assert every REQUIRED_EXCLUSIONS entry is still listed under on.push.paths.
+check_required_exclusions() {
+  local yml="$1" label="$2"
+  local present missing=0 req
+  present="$(extract_paths "$yml" | cut -f1)"
+  for req in "${REQUIRED_EXCLUSIONS[@]}"; do
+    # Here-string, not a pipe — same pipefail+SIGPIPE reason as above.
+    if grep -qxF "$req" <<<"$present"; then
+      echo "  present  $req (required on.push.paths EXCLUSION)"
+    else
+      echo "  MISSING  $req  ->  required on.push.paths exclusion absent (a merge under that subtree would deploy production again)" >&2
+      missing=$((missing + 1))
+    fi
+  done
+  if [ "$missing" -gt 0 ]; then
+    echo "FAIL[$label]: $missing required exclusion(s) absent from on.push.paths." >&2
+    echo "Fix: restore the '- \"!<path>\"' entry AFTER the positive entry it narrows (GitHub applies the" >&2
+    echo "LAST matching pattern per changed file) AND keep the matching 'grep -vE' line in the 'changes'" >&2
+    echo "job. Deleting either half is the regression this allowlist exists to catch." >&2
     return 1
   fi
   return 0
@@ -389,11 +437,13 @@ check_reverse() {
     return 1
   fi
 
-  paths_globs="$(extract_paths "$yml" | cut -f1)"
-
   # Every LISTED path counts, EXEMPT included: `deploy-filter-exempt` says the
   # entry targets no deploy job, not that it cannot start the workflow — and
-  # starting the workflow is the entire question this direction asks.
+  # starting the workflow is the entire question this direction asks. An
+  # EXCLUSION is the one thing that does NOT count: a `!` entry cannot deliver a
+  # file to anything, so treating it as a deliverer would manufacture
+  # reachability — a false PASS in the one arm that exists to catch its absence.
+  paths_globs="$(extract_paths "$yml" | awk -F'\t' '$2 != "EXCLUSION" { print $1 }')"
   path_res=""
   while IFS= read -r entry; do
     [ -n "$entry" ] || continue
@@ -720,6 +770,10 @@ check_target_coverage() {
 
   while IFS=$'\t' read -r path state; do
     [ -n "$path" ] || continue
+    # An EXCLUSION names no deploy target by construction and can never start
+    # the workflow, so it neither needs a TARGET_PAIRS row nor counts as a
+    # listing that would satisfy one. check_exclusions is its arm.
+    [ "$state" = "EXCLUSION" ] && continue
     prefix="$(prefix_of_glob "$path")"
     listed="${listed}|${prefix}|"
     ex_jobs=""
@@ -873,11 +927,186 @@ check_target() {
   return "$rc"
 }
 
+# ── exclusions: the subtree a merge must NOT deploy (task-75f45c6baba2e633) ──
+#
+# THE HOLE THIS ARM CLOSES
+#
+# `on.push.paths` carried `- "api/**"` with no test exclusion and the `changes`
+# classifier matched `^(api|...)/` with none either, so a merge confined to
+# api/test/** started the production deploy and swapped the guerrilla instance —
+# for a change a prod build cannot compile (api/mix.exs: elixirc_paths(_) is
+# ["lib"]). MEASURED 2026-09-07 on origin/main --first-parent --since="7 days
+# ago": 86 of the 890 deploy-triggering merges (9.7%, ~12/day) matched ONLY
+# because of files under api/test/.
+#
+# The exclusion therefore has TWO halves that must agree, and fixing one is
+# inert: the push-path `!` entry stops the workflow STARTING, and the classifier
+# `grep -vE` stops it DISPATCHING when an api/test file rides in on another run's
+# diff range (the `changes` diff is anchored to the last successful deploy, not
+# to this push). Nothing above can see either half — every arm there judges
+# TRIGGERS, and an exclusion is the absence of one.
+#
+# So this arm is a PREDICATE over whatever `!` entries the file lists, never an
+# enumeration, and it is BEHAVIOURAL: it drives the real `changes` step body (the
+# same extract_changes_step/classify pair the producer and target arms use — the
+# regexes are never re-typed here) against fixture trees and reads the job flags
+# the step actually emits. For each exclusion `!P/**` it asserts four things:
+#
+#   parent   some POSITIVE on.push.paths entry matches a file under P. An
+#            exclusion that narrows nothing is dead text, and dead text is what
+#            the next author copies.
+#   negative a tree state touching only `P/x` — and only `P/a/b/x`, to prove the
+#            match is not depth-one — emits FALSE for every job the classifier
+#            dispatches.
+#   control  a tree state touching only `<parent>/x`, differing from the
+#            negative one ONLY in which file it touches, emits TRUE for some
+#            job. Without it a classifier that said false to everything would
+#            satisfy the negative case and this arm would certify a dead filter.
+#   mixed    a tree state touching `<parent>/x` AND `P/x` together still emits
+#            TRUE. An exclusion implemented as "drop the whole diff when any
+#            excluded file is present" passes negative+control and strands a real
+#            code change the moment a test file rides along with it.
+
+EXCLUSIONS_CHECKED=0
+
+# One fixture branch carrying exactly the named files, built lazily off the
+# shared base and reused. `git diff --name-only` over it yields exactly that set,
+# which is the shape the classifier runs against.
+exclusion_branch() {
+  local br="$1"; shift
+  local dr="$PRODUCER_TMP/repo" f
+  if ! git -C "$dr" rev-parse --verify -q "refs/heads/$br" >/dev/null 2>&1; then
+    git -C "$dr" checkout -q -b "$br" "$PRODUCER_BASE"
+    for f in "$@"; do
+      mkdir -p "$dr/$(dirname "$f")"
+      printf 'x\n' >"$dr/$f"
+    done
+    git -C "$dr" add -A >/dev/null 2>&1
+    git -C "$dr" -c user.email=t@t -c user.name=t commit -qm "$br" >/dev/null 2>&1
+  fi
+  printf '%s\n' "$br"
+}
+
+# "true" if ANY job the classifier dispatches came back true for this branch,
+# "false" if every one came back false. A job flag the step did not emit at all
+# is reported as `<none>` by classify and counts as not-true — which is the safe
+# reading here only because the control case demands a true, so a step that
+# emitted nothing reds rather than passing.
+any_job_true() {
+  local step="$1" br="$2" yml="$3" jr_job jr_re got
+  while IFS=$'\t' read -r jr_job jr_re; do
+    [ -n "$jr_job" ] || continue
+    got="$(classify "$step" "$br" "$jr_job")"
+    if [ "$got" = "true" ]; then printf 'true\n'; return 0; fi
+  done <<EOF
+$(extract_job_regexes "$yml")
+EOF
+  printf 'false\n'
+  return 0
+}
+
+# check_exclusions <yml> <label> — 0 if every listed exclusion narrows a real
+# positive entry and the classifier agrees with it on real input.
+check_exclusions() {
+  local yml="$1" label="$2" step rc=0
+  local path state prefix parent parent_entry entry entry_state entry_re
+  local br verdict
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "HARNESS-UNAVAILABLE[$label]: python3 not on PATH — the exclusion arm cannot run." >&2
+    return 2
+  fi
+  producer_fixture
+  step="$PRODUCER_TMP/changes-step.sh"
+  if ! extract_changes_step "$yml" "$step" 2>"$PRODUCER_TMP/extract.err"; then
+    echo "FAIL[$label]: could not extract the changes job step id f for the exclusion arm: $(cat "$PRODUCER_TMP/extract.err")" >&2
+    return 1
+  fi
+
+  EXCLUSIONS_CHECKED=0
+  while IFS=$'\t' read -r path state; do
+    [ -n "$path" ] || continue
+    [ "$state" = "EXCLUSION" ] || continue
+    EXCLUSIONS_CHECKED=$((EXCLUSIONS_CHECKED + 1))
+    prefix="$(prefix_of_glob "${path#!}")"
+
+    # parent: the positive entry this exclusion narrows.
+    parent_entry=""
+    while IFS=$'\t' read -r entry entry_state; do
+      [ -n "$entry" ] || continue
+      [ "$entry_state" = "EXCLUSION" ] && continue
+      entry_re="$(glob_to_regex "$entry")"
+      if grep -qE "$entry_re" <<<"$prefix/x"; then parent_entry="$entry"; break; fi
+    done <<EOF
+$(extract_paths "$yml")
+EOF
+    if [ -z "$parent_entry" ]; then
+      echo "  DEAD-EXCLUSION  $path  ->  no positive on.push.paths entry delivers a file under $prefix/, so this line narrows nothing" >&2
+      echo "                  Fix: drop it, or add the positive entry it was written for. GitHub applies the" >&2
+      echo "                  LAST matching pattern per file — an exclusion before its positive is also inert." >&2
+      rc=1
+      continue
+    fi
+    parent="$(prefix_of_glob "$parent_entry")"
+    echo "  narrows  $path  <-  $parent_entry"
+
+    # negative, shallow and deep
+    for br in "$(exclusion_branch "excl-$(printf '%s' "$prefix" | tr '/' '-')" "$prefix/x")" \
+              "$(exclusion_branch "excl-deep-$(printf '%s' "$prefix" | tr '/' '-')" "$prefix/a/b/x")"; do
+      verdict="$(any_job_true "$step" "$br" "$yml")"
+      if [ "$verdict" = "false" ]; then
+        echo "  exclude  a change confined to $prefix/ (branch $br)  ->  every deploy job false"
+      else
+        echo "  LEAKS    a change confined to $prefix/ (branch $br)  ->  a deploy job came back TRUE" >&2
+        echo "           on.push.paths carries [$path] but the changes classifier does not drop the same" >&2
+        echo "           subtree, so the merge still deploys whenever it reaches the classifier diff range." >&2
+        echo "           Fix: in the changes job, subtract the subtree from the changed-file list BEFORE the" >&2
+        echo "           dispatch filters run, with a grep -vE anchored at ^$prefix/ — and keep it OUT of the" >&2
+        echo "           single-quoted -qE shape the dispatch-filter extractors harvest." >&2
+        rc=1
+      fi
+    done
+
+    # control: the parent tree must STILL deploy
+    br="$(exclusion_branch "excl-ctl-$(printf '%s' "$parent" | tr '/' '-')" "$parent/x")"
+    verdict="$(any_job_true "$step" "$br" "$yml")"
+    if [ "$verdict" = "true" ]; then
+      echo "  control  a change under $parent/ but NOT $prefix/ (branch $br)  ->  a deploy job is true"
+    else
+      echo "  OVER-EXCLUDED  $parent/x  ->  every deploy job came back false; the exclusion swallowed its own parent tree" >&2
+      echo "                 A classifier that says false to everything satisfies the negative case above and" >&2
+      echo "                 deploys NOTHING. That is a worse failure than the one the exclusion fixes." >&2
+      rc=1
+    fi
+
+    # mixed: the parent tree and the excluded subtree together
+    br="$(exclusion_branch "excl-mix-$(printf '%s' "$prefix" | tr '/' '-')" "$parent/x" "$prefix/x")"
+    verdict="$(any_job_true "$step" "$br" "$yml")"
+    if [ "$verdict" = "true" ]; then
+      echo "  mixed    $parent/x + $prefix/x together (branch $br)  ->  a deploy job is true"
+    else
+      echo "  STRANDS-MIXED  $parent/x + $prefix/x  ->  every deploy job false; a real code change that happens" >&2
+      echo "                 to ship alongside an excluded file would never reach production." >&2
+      echo "                 The exclusion must drop the excluded FILES from the list, never the whole diff." >&2
+      rc=1
+    fi
+  done <<EOF
+$(extract_paths "$yml")
+EOF
+
+  if [ "$EXCLUSIONS_CHECKED" -eq 0 ]; then
+    # Not a failure: a workflow with no exclusions is a valid state. It is
+    # reported so the OK line can never imply this arm judged something it did
+    # not. check_required_exclusions is what stops a listed exclusion vanishing.
+    echo "  exclusions: none listed (0 judged)"
+  fi
+  return "$rc"
+}
+
 # ── the check ────────────────────────────────────────────────────────────────
 
 check_file() {
   local yml="$1" label="$2"
-  local failures=0 checked=0 exempted=0
+  local failures=0 checked=0 exempted=0 excluded=0
 
   # Parse first. Everything below is a text scan and is meaningless — worse,
   # falsely reassuring — on a file GitHub itself cannot load.
@@ -920,6 +1149,14 @@ EOF
     sample="$(sample_for "$path")"
 
     case "$state" in
+      EXCLUSION)
+        # Not a trigger. The drift arm asks "does this path reach a deploy job?"
+        # and the answer for a `!` entry is "it must not" — judging it here would
+        # red every exclusion forever. check_exclusions proves it behaviourally.
+        excluded=$((excluded + 1))
+        echo "  exclude  $path (a GitHub path-filter exclusion; judged by the exclusion arm, not by drift)"
+        continue
+        ;;
       EXEMPT:*)
         exempted=$((exempted + 1))
         ex_jobs="${state#EXEMPT:}"
@@ -1022,6 +1259,7 @@ EOF
   # DELETED required path leaves nothing to drift, so this arm asserts it too.
   local presence_rc=0
   check_required_paths "$yml" "$label" || presence_rc=$?
+  check_required_exclusions "$yml" "$label" || presence_rc=$?
 
   # The other direction: a job filter naming a prefix on.push.paths cannot
   # deliver. Run unconditionally so ONE run reports every drift it can see —
@@ -1055,11 +1293,18 @@ EOF
     return 2
   fi
 
-  if [ "$presence_rc" -ne 0 ] || [ "$reverse_rc" -ne 0 ] || [ "$producer_rc" -ne 0 ] || [ "$target_rc" -ne 0 ]; then
+  # The exclusion arm: the subtree a merge must NOT deploy, proved on real input.
+  local exclusion_rc=0
+  check_exclusions "$yml" "$label" || exclusion_rc=$?
+  if [ "$exclusion_rc" -eq 2 ]; then
+    return 2
+  fi
+
+  if [ "$presence_rc" -ne 0 ] || [ "$reverse_rc" -ne 0 ] || [ "$producer_rc" -ne 0 ] || [ "$target_rc" -ne 0 ] || [ "$exclusion_rc" -ne 0 ]; then
     return 1
   fi
 
-  echo "OK[$label]: $checked path(s) each target at least one deploy job ($exempted exempt, each bounded); reverse: $REVERSE_PREFIXES regex prefix(es), all reachable from on.push.paths; target: $TARGET_CHECKED declared (prefix -> job) pair(s), each reaching the job that builds it, and every listed tree has a row."
+  echo "OK[$label]: $checked path(s) each target at least one deploy job ($exempted exempt, each bounded; $excluded exclusion(s) not judged here); reverse: $REVERSE_PREFIXES regex prefix(es), all reachable from on.push.paths; target: $TARGET_CHECKED declared (prefix -> job) pair(s), each reaching the job that builds it, and every listed tree has a row; exclusions: $EXCLUSIONS_CHECKED judged behaviourally (negative shallow+deep, control, mixed)."
   return 0
 }
 
@@ -1076,14 +1321,14 @@ selftest() {
   local rc=0
   local out sub_rc
 
-  echo "selftest 1/16: the real workflow passes"
+  echo "selftest 1/20: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/16: dropping 'templates' from the instance regex must FAIL (the original bug)"
+  echo "selftest 2/20: dropping 'templates' from the instance regex must FAIL (the original bug)"
   sed "s#|connectors|templates|scripts/connectors)/#|connectors|scripts/connectors)/#" "$real" > "$tmp/mutated.yml"
   if cmp -s "$real" "$tmp/mutated.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the instance regex no longer looks as expected" >&2
@@ -1096,7 +1341,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/16: an unexplained targetless path must FAIL"
+  echo "selftest 3/20: an unexplained targetless path must FAIL"
   awk '{ print } /^      - "connectors\/\*\*"$/ { print "      - \"totally-unrouted/**\"" }' \
     "$real" > "$tmp/orphan.yml"
   sub_rc=0
@@ -1121,7 +1366,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 4/16: another job's own regex must NOT rescue a drifted dispatch filter"
+  echo "selftest 4/20: another job's own regex must NOT rescue a drifted dispatch filter"
   # The disarm shape, verbatim: strip `templates` from the instance filter AND
   # append a recorder job whose shell carries a copy of the same regex. Before
   # extract_regexes was scoped to `changes`, this read OK at rc=0.
@@ -1145,7 +1390,7 @@ YML
   fi
 
   echo
-  echo "selftest 5/16: the YAML arm must PASS the real workflow and FAIL an unparseable one"
+  echo "selftest 5/20: the YAML arm must PASS the real workflow and FAIL an unparseable one"
   # The measured shape, verbatim: a heredoc body written at two spaces inside a
   # `run: |` block. Two spaces is LESS than the block scalar's content indent, so
   # the scalar ends there and the line is parsed as a YAML key with no ':'.
@@ -1177,7 +1422,7 @@ YML
   fi
 
   echo
-  echo "selftest 6/16: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
+  echo "selftest 6/20: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
   # Mirror of case 2, but for DELETION not drift: strip the required push-path
   # line entirely. The drift arm now sees nothing to judge — the false-green W35
   # exists to close (charter D275). (Since the reverse arm landed, this half also
@@ -1196,7 +1441,7 @@ YML
   fi
 
   echo
-  echo "selftest 7/16: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
+  echo "selftest 7/20: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
   # `web` is dispatched by the control-plane filter, but no on.push.paths entry
   # delivers a web/ file — so a web-only merge never starts the workflow and that
   # arm of the filter can only ever fire on somebody else's co-triggering merge.
@@ -1220,7 +1465,7 @@ YML
   fi
 
   echo
-  echo "selftest 8/16: the reverse arm must actually RUN on the real workflow (non-vacuity)"
+  echo "selftest 8/20: the reverse arm must actually RUN on the real workflow (non-vacuity)"
   # A direction that silently checks nothing is worse than no direction: it puts
   # the word "reverse" in a green line. So the count must be non-zero AND the
   # per-prefix verdicts must be present, on the REAL file.
@@ -1243,7 +1488,7 @@ YML
   fi
 
   echo
-  echo "selftest 9/16: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
+  echo "selftest 9/20: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
   # The D275 shape, and the reason the allowlist is not made redundant by the
   # reverse arm: with the push-path line AND its regex prefix both gone, the
   # forward arm has no path to judge and the reverse arm has no prefix to judge.
@@ -1275,7 +1520,7 @@ YML
   fi
 
   echo
-  echo "selftest 10/16: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
+  echo "selftest 10/20: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
   # The fail-closed arm of prefixes_of, proven rather than asserted. A dispatch
   # filter that is not an anchored alternation is a filter this direction cannot
   # answer for — and "could not look" must never print as "it is fine". Without
@@ -1301,7 +1546,7 @@ YML
   fi
 
   echo
-  echo "selftest 11/16: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
+  echo "selftest 11/20: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
   # THE MUTATION THAT MATTERS. Every case above mutates a LIST; this one mutates
   # the line that feeds them, back to exactly what deploy.yml carried before the
   # wave-10 sweep. Both false-green shapes must reappear, or the behaviour arm is
@@ -1359,7 +1604,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 12/16: stripping 'cmd' from the instance regex must FAIL — on the TARGET arm ALONE"
+  echo "selftest 12/20: stripping 'cmd' from the instance regex must FAIL — on the TARGET arm ALONE"
   # THE MUTATION THIS ARM EXISTS FOR, and the one no other arm can feel. cmd/**
   # stays listed in on.push.paths and stays matched by the CONTROL-PLANE regex,
   # so the forward arm still prints `ok`, the reverse arm still finds every
@@ -1420,7 +1665,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 13/16: Mutation C — a TREE exempted from every job, its prefix stripped from BOTH regexes, must FAIL"
+  echo "selftest 13/20: Mutation C — a TREE exempted from every job, its prefix stripped from BOTH regexes, must FAIL"
   # THE MEASURED FALSE GREEN (task-9ece1f95b89111cf). Before the bounded
   # exemption: `# deploy-filter-exempt:` above `- "internal/**"` plus
   # `internal|` removed from the cp AND instance filters read
@@ -1485,7 +1730,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 14/16: the legacy UNBOUNDED 'deploy-filter-exempt:' spelling must FAIL"
+  echo "selftest 14/20: the legacy UNBOUNDED 'deploy-filter-exempt:' spelling must FAIL"
   # The spelling the measured green used. An exemption that names no job
   # exempts from every job — over a tree it is Mutation C, over a file it is a
   # claim nobody can check. Either way it is refused by name.
@@ -1522,7 +1767,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 15/16: a listed, ROUTED tree with no TARGET_PAIRS row must FAIL — on the coverage predicate ALONE"
+  echo "selftest 15/20: a listed, ROUTED tree with no TARGET_PAIRS row must FAIL — on the coverage predicate ALONE"
   # The enumeration hole with no exemption involved: add web/** to
   # on.push.paths AND to the cp regex. Forward prints its cheerful ok, reverse
   # finds web reachable, presence and producer read clean, every declared pair
@@ -1574,7 +1819,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 16/16: an exemption whose named job's filter STILL matches the path must FAIL"
+  echo "selftest 16/20: an exemption whose named job's filter STILL matches the path must FAIL"
   # A bounded exemption is a checkable claim; this is the check. cloud/** is
   # matched by the cp filter, so `deploy-filter-exempt[cp]` above it is false.
   python3 - "$real" "$tmp/stale-exempt.yml" <<'PYMUT'
@@ -1607,6 +1852,146 @@ PYMUT
     else
       echo "  ok: an exemption the filter contradicts is refused by name"
     fi
+  fi
+
+  echo
+  echo "selftest 17/20: deleting the '!api/test/**' push-path exclusion must FAIL (the exclusion presence allowlist)"
+  # The push arm alone. The classifier keeps its grep -vE, so the BEHAVIOURAL
+  # arm still reads clean — only the presence allowlist can see this half go.
+  grep -v '^      - "!api/test/\*\*"$' "$real" > "$tmp/noexcl.yml"
+  sub_rc=0
+  if cmp -s "$real" "$tmp/noexcl.yml"; then
+    echo "SELFTEST FAIL: the exclusion-strip mutation changed nothing — !api/test/** is not listed as expected" >&2
+    rc=1
+  else
+    out="$(check_file "$tmp/noexcl.yml" "noexcl" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: a copy missing !api/test/** read GREEN — the exclusion allowlist cannot fail" >&2
+      rc=1
+    elif ! grep -q 'MISSING  !api/test/\*\*' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not by naming the missing exclusion" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: the gate reds when the push-path exclusion is deleted (by name)"
+    fi
+  fi
+
+  echo
+  echo "selftest 18/20: neutering the CLASSIFIER half must FAIL on the exclusion arm (LEAKS)"
+  # The other half, and the one no arm could see before: on.push.paths still
+  # carries the exclusion, so presence, forward, reverse, coverage and target all
+  # read clean. Only driving the real step body against an api/test-only tree
+  # catches it — which is the whole point of a behavioural arm.
+  sed "s#grep -vE '\^api/test/'#grep -vE '^__this_prefix_never_matches__/'#" "$real" > "$tmp/leak.yml"
+  sub_rc=0
+  if cmp -s "$real" "$tmp/leak.yml"; then
+    echo "SELFTEST FAIL: the classifier-neuter mutation changed nothing — the grep -vE line is not shaped as expected" >&2
+    rc=1
+  else
+    out="$(check_file "$tmp/leak.yml" "leak" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: a classifier that still dispatches api/test-only merges read GREEN" >&2
+      rc=1
+    elif ! grep -q 'LEAKS    a change confined to api/test/' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not on the exclusion arm naming the leak" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif grep -q 'MISSING  !api/test/\*\*' <<<"$out"; then
+      echo "SELFTEST FAIL: the presence arm also red — this mutation must isolate the BEHAVIOURAL arm" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: the gate reds when only the classifier half regresses (behavioural arm alone)"
+    fi
+  fi
+
+  echo
+  echo "selftest 19/20: widening the exclusion to the whole api/ tree must FAIL on the CONTROL (OVER-EXCLUDED)"
+  # The opposite failure, and the reason the arm carries a control at all: a
+  # classifier that says false to everything satisfies the negative case and
+  # deploys nothing. Without this case, selftest 18 could be answered by simply
+  # dropping more.
+  sed "s#grep -vE '\^api/test/'#grep -vE '^api/'#" "$real" > "$tmp/overexcl.yml"
+  sub_rc=0
+  if cmp -s "$real" "$tmp/overexcl.yml"; then
+    echo "SELFTEST FAIL: the over-exclusion mutation changed nothing" >&2
+    rc=1
+  else
+    out="$(check_file "$tmp/overexcl.yml" "overexcl" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: an exclusion that swallows all of api/ read GREEN" >&2
+      rc=1
+    elif ! grep -q 'OVER-EXCLUDED  api/x' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not on the control arm naming the over-exclusion" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: the gate reds when the exclusion swallows its own parent tree (control arm, by name)"
+    fi
+  fi
+
+  echo
+  echo "selftest 20/20: dropping the WHOLE diff when an excluded file is present must FAIL on the MIXED case"
+  # The third distinct way to get an exclusion wrong, and the one both cases
+  # above pass: subtract the excluded FILES and a real code change riding
+  # alongside a test file still deploys; subtract the whole DIFF and it strands.
+  # Written with python3 rather than sed because the replacement carries the awk
+  # program's own quoting; python3 is already a hard dependency of this arm.
+  python3 - "$real" "$tmp/mixdrop.yml" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+old = """grep -vE '^api/test/' || true)"""
+new = ("""awk '/^api\\/test\\//{bad=1}{l[NR]=$0}"""
+       """END{if(!bad)for(i=1;i<=NR;i++)print l[i]}')""")
+assert s.count(old) == 1, "mixdrop anchor count=%d" % s.count(old)
+open(dst, "w").write(s.replace(old, new, 1))
+PY
+  sub_rc=0
+  if cmp -s "$real" "$tmp/mixdrop.yml"; then
+    echo "SELFTEST FAIL: the whole-diff-drop mutation changed nothing" >&2
+    rc=1
+  else
+    out="$(check_file "$tmp/mixdrop.yml" "mixdrop" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: an exclusion that drops the whole diff read GREEN" >&2
+      rc=1
+    elif ! grep -q 'STRANDS-MIXED  api/x + api/test/x' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not on the mixed case naming the strand" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif grep -q 'LEAKS    a change confined to api/test/' <<<"$out"; then
+      echo "SELFTEST FAIL: the negative case also red — this mutation must isolate the MIXED case" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif grep -q 'OVER-EXCLUDED  api/x' <<<"$out"; then
+      echo "SELFTEST FAIL: the control also red — this mutation must isolate the MIXED case" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: the gate reds when the exclusion drops the whole diff (mixed case alone)"
+    fi
+  fi
+
+  echo
+  echo "selftest: the exclusion arm must be NON-VACUOUS on the real workflow"
+  sub_rc=0
+  out="$(check_file "$real" "exclusion-count" 2>&1)" || sub_rc=$?
+  if [ "$sub_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the real deploy.yml did not pass with the exclusion arm wired in" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  elif ! grep -qE 'exclusions: [1-9][0-9]* judged behaviourally' <<<"$out"; then
+    echo "SELFTEST FAIL: no non-zero exclusion count in the output — the arm ran vacuously" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  elif ! grep -q '  narrows  !api/test/\*\*  <-  api/\*\*' <<<"$out"; then
+    echo "SELFTEST FAIL: the exclusion arm did not bind !api/test/** to the api/** entry it narrows" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  else
+    printf '%s\n' "$out" | grep -oE 'exclusions: [0-9]+ judged behaviourally' | sed 's/^/  ok: /'
   fi
 
   echo

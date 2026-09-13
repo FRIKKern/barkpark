@@ -30,7 +30,8 @@ defmodule Barkpark.Status do
       check(:migrations, &migrations_current?/0),
       check(:plugins, &plugins_ok?/0),
       check(:mail, &mail_deliverable?/0),
-      codelists_component()
+      codelists_component(),
+      kek_previous_component()
     ]
 
     incidents = open_incidents()
@@ -96,6 +97,90 @@ defmodule Barkpark.Status do
 
   defp component(name, status, detail),
     do: %{component: name, status: status, detail: detail}
+
+  @doc """
+  The `:kek_previous` component: is every BARKPARK_KEK_PREVIOUS rotation key
+  actually usable?
+
+  `Barkpark.Crypto.LocalKek.keys/0` DISCARDS a malformed previous key in silence
+  (`Enum.filter(&match?(<<_::binary-size(32)>>, &1))`), so a single typo in a
+  rotation entry makes every blob sealed under that KEK permanently
+  undecryptable — with a clean boot and, until now, nothing an operator could
+  read. `config/runtime.exs` audits each entry at boot and records the verdict
+  under `Barkpark.Crypto.LocalKek`'s `:kek_previous_audit` key; this probe
+  republishes it where a human actually looks. A boot log line alone would be
+  theatre.
+
+  `detail` names HOW MANY entries were discarded and their 1-based POSITIONS.
+  It NEVER echoes an entry: those are key material.
+
+  The four states are deliberately distinguishable, so that a FAILED READ can
+  never be mistaken for a healthy box:
+
+    * audit says `checked: true, discarded: 0` -> `:operational`, no `detail`
+      (and `component_json/1` omits the key entirely) — the only silent arm.
+    * audit says `discarded: n > 0` -> `:degraded`, `detail` names n + positions.
+    * audit says `checked: false` -> `:operational` WITH a `detail` saying the
+      audit did not apply: with no primary BARKPARK_KEK, runtime.exs never
+      configures `previous_keys`, so no entry is consumed and none is discarded.
+    * NO audit recorded (anything else, including `nil`) -> `:degraded`, because
+      that means config/runtime.exs did not run or did not record a verdict.
+      This box's rotation keys are UNKNOWN, which is not the same as good.
+  """
+  @spec kek_previous_component() :: %{
+          component: :kek_previous,
+          status: :operational | :degraded,
+          detail: String.t() | nil
+        }
+  def kek_previous_component do
+    # Never let a surprising config shape 500 the public status page: anything
+    # that is not a keyword list carrying an audit falls through to the
+    # `:degraded` "audit is MISSING" arm, which is the honest verdict.
+    case Application.get_env(:barkpark, Barkpark.Crypto.LocalKek, []) do
+      config when is_list(config) -> Keyword.get(config, :kek_previous_audit)
+      _ -> nil
+    end
+    |> kek_previous_verdict()
+  end
+
+  defp kek_previous_verdict(%{checked: true, discarded: 0}),
+    do: component(:kek_previous, :operational, nil)
+
+  defp kek_previous_verdict(%{checked: true, discarded: n, positions: positions})
+       when is_integer(n) and n > 0 do
+    component(
+      :kek_previous,
+      :degraded,
+      "BARKPARK_KEK_PREVIOUS: #{n} malformed #{plural_entry(n)} discarded at 1-based " <>
+        "position#{if n == 1, do: "", else: "s"} #{Enum.join(positions, ", ")} — " <>
+        "not base64 of exactly 32 raw bytes. Barkpark.Crypto.LocalKek drops " <>
+        "#{if n == 1, do: "it", else: "them"}, so blobs sealed under that KEK cannot be " <>
+        "unwrapped and DataKeys.rewrap_all/0 cannot finish the rotation. Fix or remove " <>
+        "the named position(s) and restart. The entries themselves are never published here."
+    )
+  end
+
+  defp kek_previous_verdict(%{checked: false}),
+    do:
+      component(
+        :kek_previous,
+        :operational,
+        "not applicable: BARKPARK_KEK is unset, so config/runtime.exs configures no " <>
+          "previous_keys and no BARKPARK_KEK_PREVIOUS entry is consumed or discarded."
+      )
+
+  defp kek_previous_verdict(_missing),
+    do:
+      component(
+        :kek_previous,
+        :degraded,
+        "BARKPARK_KEK_PREVIOUS audit is MISSING: config/runtime.exs recorded no verdict " <>
+          "under Barkpark.Crypto.LocalKek :kek_previous_audit. The rotation keys on this " <>
+          "box are UNKNOWN, which is NOT the same as known-good — do not read this as healthy."
+      )
+
+  defp plural_entry(1), do: "entry"
+  defp plural_entry(_), do: "entries"
 
   defp boot_codelist_seeders_enabled? do
     Application.get_env(:barkpark, :run_boot_codelist_seeders, true)

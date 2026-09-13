@@ -300,9 +300,18 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # self-scoped siblings (`/v1/account/sessions`, `/v1/account/two-factor`,
   # `/v1/account/security-audit`), so `total` and `session` each rise by exactly
   # one; machine and public are untouched.
-  @baseline_total 73
+  # 2026-09-13: 74 / 53 / 9 / 12. ONE ROUTE WAS ADDED — `GET /v1/agent/sites`
+  # (the box's live-site TLS state fetch: this barkpark's sites and their current
+  # `serving_mode`, which the on-box runtime reconciles its rendered Caddyfile
+  # against so a flip on an already-live site stops waiting for that site's next
+  # deploy). A bare HEAD of it MUTATES NOTHING: the body is `Auth.require_agent/2`
+  # then `Registry.list_sites/1`, a `Repo.all` with no write, no token mint and no
+  # nonce burn — so it owes no `side_effecting_get?/1` clause. It is agent-gated
+  # like its `/v1/agent/*` siblings, so `total` and `agent_or_worker` each rise by
+  # exactly one; session and public are untouched.
+  @baseline_total 74
   @baseline_session 53
-  @baseline_machine 8
+  @baseline_machine 9
   @baseline_public 12
 
   # THE FENCE. Every `side_effecting_get?/1` clause, as {path_segments, verdict}.

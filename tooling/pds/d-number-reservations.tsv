@@ -1,6 +1,7 @@
 # PDS-D RESERVATION LEDGER — a number is SPOKEN FOR here before the charter carries it.
 # number	reserved_at	for
 SEED	718	2026-09-11T18:32:42Z	high-water mark at adoption; numbers at or below it predate the arbiter
+PDS-D719	2026-09-13T09:44:29Z	#17933 75b64fd73, minted by charter read after the arbiter; backfilled
 PDS-D720	2026-09-12T09:51:48Z	w50 CHARTER-BACKFILL
 PDS-D721	2026-09-12T09:51:48Z	w50 CHARTER-BACKFILL
 PDS-D722	2026-09-12T09:51:48Z	w50 CHARTER-BACKFILL
@@ -23,3 +24,8 @@ PDS-D738	2026-09-12T09:51:48Z	w50 CHARTER-BACKFILL
 PDS-D739	2026-09-12T09:51:48Z	w50 CHARTER-BACKFILL
 PDS-D740	2026-09-12T09:51:48Z	w50 CHARTER-BACKFILL
 PDS-D741	2026-09-13T09:04:59Z	pds-bl-gate-b-anticorrelated
+PDS-D742	2026-09-13T10:57:53Z	pds-bl-legb-visibility-control-n3
+PDS-D743	2026-09-13T10:57:53Z	pds-bl-legb-visibility-control-n3
+PDS-D744	2026-09-13T10:57:53Z	pds-bl-legb-visibility-control-n3
+PDS-D745	2026-09-13T14:58:41Z	pds-bl-cond-d-job-blind-false-abort + task-373ca724b4f37257
+PDS-D746	2026-09-13T14:58:41Z	pds-bl-cond-d-job-blind-false-abort + task-373ca724b4f37257

@@ -208,10 +208,13 @@ set -euo pipefail
 # pass vacuously the way an unguarded loop over an empty list would.
 #
 # THE COST, NAMED AND ACCEPTED. These are EXACT FILES, never `api/**` or
-# `web/**`. Seven of them (the `.gen.ts`, `tokens_gen.go`, `chrome_gen.go`,
-# `tokens_gen.ex` rows) are WHOLE-FILE generated artifacts: nothing but a token
+# `web/**`. Nine of them (the three `.gen.ts`, `tokens_gen.go`,
+# `chrome_gen.go` and `tokens_gen.ex` rows) are WHOLE-FILE generated artifacts: nothing but a token
 # regeneration or the hand-edit this guard exists to refuse ever touches them,
-# so their dispatch bill is near zero. The other nine are hand-written surfaces
+# so their dispatch bill is near zero. Four more (the bp-graph.js canonical and
+# its three mirrors) are hand-written files carrying ONE generated palette
+# region, spliced by design/emit.mjs and held byte-identical by
+# scripts/check-bp-graph-drift.sh. The other nine are hand-written surfaces
 # that CARRY a generated region — the Studio and /papers layouts, the two
 # controller HTML modules, the status controller, the /sheets reader, the web
 # demo's globals.css, paper-surface.css and the paper-editor bundle — and those
@@ -252,8 +255,15 @@ internal/semrole/tokens_gen.go
 internal/semrole/chrome_gen.go
 web/app/globals.css
 web/lib/tokens.gen.ts
+api/priv/static/assets/bp-graph.js
+web/public/bp-graph.js
+templates/search-starter/public/bp-graph.js
+templates/astro-search-starter/public/bp-graph.js
+js/packages/react/src/status-vocab.gen.ts
+web/lib/status-ladder.gen.ts
 scripts/console-path-escape-check.sh
-scripts/console-path-escape-check.test.sh'
+scripts/console-path-escape-check.test.sh
+scripts/console-pins.sh'
 
 # EXEMPT — reads that resolve to a real file but are NOT reachable from the
 # console harness's default lane. Each line is `<path><TAB><why>`; an entry

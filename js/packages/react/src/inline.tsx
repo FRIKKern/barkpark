@@ -173,98 +173,46 @@ export function isMap(v: unknown): v is Record<string, unknown> {
 
 /* ── the status ladder (white ladder) — D15 ───────────────────────────────────
  *
- * HAND-COPIED from design/status-manifest.json (the ONE source of truth). The
- * Elixir side (Render.StatusVocab) inlines the manifest at compile time so it
- * cannot drift; this JS copy CAN. DRIFT RISK: if a role/glyph/label/meaning is
- * added or changed in design/status-manifest.json, update this table in lockstep.
- * A later wave wires a manifest→JS generator + drift guard (charter D15 backlog
- * child); until then this comment IS the guard. `scripts/status-manifest-check.sh`
- * gates the Elixir/CSS surfaces against the manifest — extend it to this file. */
+ * GENERATED from design/status-manifest.json by design/emit.mjs (see
+ * ./status-vocab.gen). Until tlv-bl-js-vocab-generator this table was typed by
+ * HAND here; a comment, then scripts/status-manifest-check.sh Part 5's
+ * byte-check, stood in for generation. Both are retired: the manifest roles, the
+ * status→role map and the default role now come from the generated module, so a
+ * manifest edit re-emits them and drift is impossible rather than merely
+ * detected. `node design/emit.mjs --write` regenerates; design/check.mjs Part A
+ * reds if the generated file is hand-edited.
+ *
+ * What is still authored HERE, on purpose: the fail-open `unknown` sentinel
+ * (D11). It is JS-only, never a lifecycle state, and appears in no manifest. */
 
-export interface StatusRole {
-  role: string
-  glyph: string
-  spinner: boolean
-  label: string
-  meaning: string
+export type { StatusRole } from './status-vocab.gen'
+import type { StatusRole } from './status-vocab.gen'
+import {
+  MANIFEST_DEFAULT_ROLE,
+  MANIFEST_STATUS_ROLES,
+  MANIFEST_STATUS_TO_ROLE,
+} from './status-vocab.gen'
+
+/** The fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
+ * a dim neutral glyph, never masquerading as the bright `open` circle. Absent/
+ * empty status still defaults to `open` (see roleOf). JS-only: the manifest has
+ * no such state, so this row is authored, not generated. */
+const UNKNOWN_STATUS_ROLE: StatusRole = {
+  role: 'unknown',
+  glyph: '◦', // U+25E6 white bullet — dim neutral, distinct from open's ○
+  spinner: false,
+  label: 'unknown',
+  meaning: 'unrecognized status — shown dim until the vocabulary catches up',
 }
 
-export const STATUS_ROLES: StatusRole[] = [
-  { role: 'open', glyph: '○', spinner: false, label: 'open', meaning: 'backlog — not ready yet' },
-  {
-    role: 'ready',
-    glyph: '○',
-    spinner: false,
-    label: 'ready',
-    meaning: 'unchecked — claim it now',
-  },
-  {
-    role: 'progress',
-    glyph: '',
-    spinner: true,
-    label: 'in progress',
-    meaning: 'being worked right now',
-  },
-  {
-    role: 'blocked',
-    glyph: '!',
-    spinner: false,
-    label: 'blocked',
-    meaning: 'something is required first',
-  },
-  { role: 'done', glyph: '✓', spinner: false, label: 'done', meaning: 'complete' },
-  {
-    role: 'cancel',
-    glyph: '✕',
-    spinner: false,
-    label: 'cancelled',
-    meaning: 'abandoned or superseded',
-  },
-  // ── thought states (task-lifecycle-visibility): a task is contemplated before
-  // it is ever ready. Dim, glyph-only, at the tail of the ladder. `considering` =
-  // a candidate the strategizer named; `researching` = under investigation.
-  {
-    role: 'considering',
-    glyph: '◌', // U+25CC dotted circle — a candidate, not yet committed
-    spinner: false,
-    label: 'considering',
-    meaning: 'a candidate being weighed',
-  },
-  {
-    role: 'researching',
-    glyph: '◎', // U+25CE bullseye — under investigation before it is ready
-    spinner: false,
-    label: 'researching',
-    meaning: 'under active investigation',
-  },
-  // ── fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
-  // a dim neutral glyph, never masquerading as the bright `open` circle. Absent/
-  // empty status still defaults to `open` (see roleOf).
-  {
-    role: 'unknown',
-    glyph: '◦', // U+25E6 white bullet — dim neutral, distinct from open's ○
-    spinner: false,
-    label: 'unknown',
-    meaning: 'unrecognized status — shown dim until the vocabulary catches up',
-  },
-]
+export const STATUS_ROLES: StatusRole[] = [...MANIFEST_STATUS_ROLES, UNKNOWN_STATUS_ROLE]
 
-const STATUS_TO_ROLE: Record<string, string> = {
-  open: 'open',
-  ready: 'ready',
-  in_progress: 'progress',
-  blocked: 'blocked',
-  done: 'done',
-  closed: 'done',
-  cancelled: 'cancel',
-  considering: 'considering',
-  researching: 'researching',
-}
+const STATUS_TO_ROLE: Record<string, string> = MANIFEST_STATUS_TO_ROLE
 
-const DEFAULT_ROLE = 'open'
+const DEFAULT_ROLE = MANIFEST_DEFAULT_ROLE
 // The fail-open role for an unrecognized NON-EMPTY status (D11). Absent/empty
 // stays on DEFAULT_ROLE so nothing about today's blank-status rows changes.
-const UNKNOWN_ROLE = 'unknown'
+const UNKNOWN_ROLE = UNKNOWN_STATUS_ROLE.role
 const ROLE_BY_NAME: Record<string, StatusRole> = Object.fromEntries(
   STATUS_ROLES.map((r) => [r.role, r]),
 )

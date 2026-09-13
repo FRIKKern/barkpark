@@ -2561,6 +2561,31 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "minimal"
       ),
+      # THE AFFORDANCE (task-cbb112a9b4c600cc). ONE verb, and it creates the
+      # SHARE: after the task-8627e1a3f974693d ruling a `:media` `:read` share
+      # is the only thing that admits an anonymous read of a non-Default
+      # tenant's scoped media, so "my website cannot show its images" is one
+      # command. Deliberately NOT a visibility verb — flipping an asset's
+      # bp_visibility opens no door RequireShareScope asks about.
+      core_cmd(
+        "share.publish-media",
+        "share",
+        "publish-media",
+        "Publish this scope's media — add the :media :read share so anonymous <img> loads resolve (never flips asset visibility).",
+        "POST",
+        "/v1/shares/media",
+        "admin",
+        args: [
+          arg(
+            "scope",
+            true,
+            "string",
+            "ws[/project[/dataset]] — defaults project=default, dataset=production."
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
       core_cmd(
         "share.rm",
         "share",
