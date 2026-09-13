@@ -646,7 +646,7 @@
 # "FAIL app.css — baseline mismatch with 0 misses": MISSES 0 is what makes this an
 # unrecorded ADD rather than a parity defect. styleguide.html PASSED unchanged at 84.
 # Bumped in the SAME COMMIT as the CSS hunk (D158).
-1341
+1340
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
@@ -691,13 +691,31 @@
 #       (outside its declared files fence): .tier-price, .tier-price small, .plan-price,
 #       .plan-price small, .new-tier-price, .new-tier-price .dim, .tier-quota. Zero
 #       producers each, grepped one token at a time across app.js, index.html and
-#       styleguide.html. The filed row named EIGHT: the eighth, `.tier-free .tier-price`,
-#       STAYS, and its site in app.css carries the measured reason — it is the only
-#       authored head carrying `.tier-free`, a class app.js still emits, so deleting it
-#       turns a dead rule into an E2 hard-fail.
+#       styleguide.html. The filed row named EIGHT; the eighth, `.tier-free .tier-price`,
+#       stayed behind here and is retired by task-b06052f97676df77 below.
 #   +1  .dom-rung--pending, the sixth domain-checklist role finally getting a rule of its
 #       own. It restates the .dom-rung base EXACTLY, so this ADD paints nothing new.
 # MISSES stays 0 WITHOUT a browser run, and that is the one claim here not taken from
 # Chrome: MISSES counts authored heads absent from the CSSOM. Deleting whole authored
 # rules cannot manufacture one, and the single ADD is a flat class selector with three
 # plain declarations — no at-rule, no nesting, no selector Chrome could drop.
+
+# task-b06052f97676df77 2026-09-13 (console/r17-w24-tier-free-hook-class): 1341 -> 1340,
+# -1 authored rule head — the EIGHTH orphan, `.tier-free .tier-price`, finally retired.
+# NOT hand-incremented and NOT arithmetic: 1340 is the return of cssom-parity.mjs's own
+# exported `authoredHeads(app.css).length` run on this branch. The SAME call on
+# origin/main's app.css returned 1341, matching the baseline it replaces — that control
+# is what says the -1 is this diff and not a resolver difference.
+# THE ROW'S PRESCRIBED FIX WAS REFUTED BY RUN, and the refutation is the reason this
+# commit looks different from the row. The row required the `" tier-free"` EMISSION in
+# app.js to go with the rule, on the stated ground that "nothing queries `.tier-free` in
+# JS". Something does: `__preview__/breakpoint-sweep.mjs`'s `tierLabelProbeJs` locates the
+# Free tier CTA as `grid.querySelector('.tier-free .btn')` and REFUSES when it finds none.
+# With the emission dropped, `--render --widths 901 --cell billing-trial` exited 2 —
+# "the live pass rendered no .tier-free CTA at all" — reddening `tier-floor-render`, a
+# `needs:` of the required `Console gate`, while `__css_check` stayed exit 0 through the
+# same mutation. So the emission STAYS and `.tier-free` is registered in
+# ALLOW_HOOK_CLASSES as the selector target it actually is; that entry absolves a real E2
+# on every run, so it is not the waiver-absolving-nothing shape E19 exists for.
+# MISSES 0 and the styleguide sheet's 84 are unchanged: this diff removes one authored
+# head and adds none.
