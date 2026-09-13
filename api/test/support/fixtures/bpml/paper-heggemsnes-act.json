@@ -1,5 +1,7 @@
 {
-  "_id": "heggemsnes-act",
+  "paper": "heggemsnes-act",
+  "rev": "3ead12a03aaca4ae264630ba0ac36fd1",
+  "title": "The Heggemsnes Act — a declaration of humility before the people who help",
   "blocks": [
     {
       "id": "hga-eyebrow",
@@ -347,8 +349,5 @@
       "id": "hga-callout",
       "type": "callout"
     }
-  ],
-  "source_rev": "3ead12a03aaca4ae264630ba0ac36fd1",
-  "style": "article",
-  "title": "The Heggemsnes Act — a declaration of humility before the people who help"
+  ]
 }
