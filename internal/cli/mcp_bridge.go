@@ -122,29 +122,41 @@ func registerBridgeToolsFiltered(srv *mcp.Server, g globals, ctx manifest.Contex
 		if allow != nil && !allow[cmd.Noun] {
 			continue
 		}
-		schema, err := json.Marshal(bridgeInputSchema(cmd))
-		if err != nil {
-			return fmt.Errorf("derive schema for %s: %w", cmd.ID, err)
+		if err := registerOneBridgeTool(srv, g, ctx, m, cmd); err != nil {
+			return err
 		}
-		srv.AddTool(&mcp.Tool{
-			Name:        bridgeToolName(cmd),
-			Description: cmd.Summary,
-			InputSchema: json.RawMessage(schema),
-			Annotations: bridgeAnnotations(cmd),
-		}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			var args map[string]any
-			if err := decodeMCPArgs(req, &args); err != nil {
-				return mcpArgError(err), nil
-			}
-			tail := buildCommandTail(cmd, args)
-			// Bridge tools inherit the manifest's agent-default view generically
-			// (agentViewGlobals, run.go): a command declaring
-			// views.default_for_agents gets ?view= with zero per-tool code here —
-			// the manifest stays the moat.
-			status, body, rerr := execManifestCommand(agentViewGlobals(g, cmd), ctx, m, cmd, tail)
-			return mcpRunFor(status, body, rerr, cmd.Writes), nil
-		})
 	}
+	return nil
+}
+
+// registerOneBridgeTool registers exactly one manifest command as a generic
+// bp_<noun>_<verb> bridge tool. Factored out of registerBridgeToolsFiltered so
+// the ID-keyed chat allowlist (registerChatBridgeTools) produces tools that are
+// byte-identical in name, description, schema and annotations to the ones
+// `--tools all` produces — one generator, so the two surfaces can never drift.
+func registerOneBridgeTool(srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command) error {
+	schema, err := json.Marshal(bridgeInputSchema(cmd))
+	if err != nil {
+		return fmt.Errorf("derive schema for %s: %w", cmd.ID, err)
+	}
+	srv.AddTool(&mcp.Tool{
+		Name:        bridgeToolName(cmd),
+		Description: cmd.Summary,
+		InputSchema: json.RawMessage(schema),
+		Annotations: bridgeAnnotations(cmd),
+	}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var args map[string]any
+		if err := decodeMCPArgs(req, &args); err != nil {
+			return mcpArgError(err), nil
+		}
+		tail := buildCommandTail(cmd, args)
+		// Bridge tools inherit the manifest's agent-default view generically
+		// (agentViewGlobals, run.go): a command declaring
+		// views.default_for_agents gets ?view= with zero per-tool code here —
+		// the manifest stays the moat.
+		status, body, rerr := execManifestCommand(agentViewGlobals(g, cmd), ctx, m, cmd, tail)
+		return mcpRunFor(status, body, rerr, cmd.Writes), nil
+	})
 	return nil
 }
 
@@ -346,4 +358,98 @@ func isTruthy(v any) bool {
 	default:
 		return false
 	}
+}
+
+// chatBridgeToolIDs is the CURATED, hand-reviewed manifest-command allowlist of
+// the `--tools chat` toolset (task-scc-bl-mcp-chat-toolset, charter D64): the
+// document and search verbs a Studio chat agent genuinely works with, on top of
+// the curated task tools (mcp_tasks.go) and the curated chat session tools
+// (mcp_chat.go). The Studio loopback used to spawn `--tools all` — every one of
+// the live manifest's ~107 commands — because the default `--tools tasks` set
+// carries no search and no document verbs; `chat` is that missing middle,
+// intentionally frozen.
+//
+// It is an explicit list of command IDs, NOT a noun filter, and that is the
+// whole point: `--tools doc,search` (a noun subset, nounAllowSet) would silently
+// ADOPT every new doc.* / search.* verb a future plugin or migration adds, so
+// the advertised chat surface would grow without anyone reviewing it. Keyed by
+// ID, a newly added manifest command is invisible to `chat` until a human edits
+// THIS list and its pin (TestChatToolsetIsAnIDAllowlist).
+//
+// The order of THIS slice is registration order and reading order for a human —
+// it is NOT an advertised property, and the pin does not cover it. The MCP SDK
+// stores tools in a map keyed by name and serves tools/list from
+// slices.Sorted(maps.Keys(...)) (go-sdk mcp/features.go: "the spec never
+// mentions an ordering for the List calls, so what it calls a \"list\" is
+// actually a set"), so reversing this slice changes nothing a client can see.
+// TestChatToolsetAdvertisesExactlyTheCuratedSet asserts that name-sorted wire
+// order explicitly: if a future SDK ever preserves insertion order, that
+// assertion reds and this set pin must become an order pin.
+//
+// Deliberately absent: everything else. No admin/auth/token verbs, no plugin
+// nouns (github, sheets, tickets, onix, media, grip, pulse…), no dataset or
+// workspace administration, no doc DELETE. An operator who wants those asks for
+// them explicitly with `--tools all` or a noun subset.
+var chatBridgeToolIDs = []string{
+	"search.query", // find anything by text — the read verb `tasks` lacks
+	"doc.ls",       // list documents of a type (the other half of finding)
+	"doc.get",      // read one document
+	"doc.create",   // author a new document
+	"doc.mutate",   // patch an existing document
+	"doc.publish",  // promote a draft to published
+}
+
+// registerChatBridgeTools registers the chatBridgeToolIDs commands on srv as
+// generic bridge tools, in chatBridgeToolIDs order, and reports which of them
+// the manifest could NOT back (`missing`, in the same order). Registration
+// order is what the ERROR and stderr text is ordered by; it is not the order a
+// client sees, because tools/list is name-sorted by the SDK (see
+// chatBridgeToolIDs).
+//
+// ONE documented policy for an unavailable backing verb, and it is chosen by the
+// caller's transport, exactly as the curated task tools already are:
+//
+//   - stdio (bestEffort == false): NOTHING is registered and every missing ID is
+//     returned, so buildMCPServer can refuse to start. A stdio server is launched
+//     per client with the operator's own credential, so a manifest that cannot
+//     back the reviewed set is a real misconfiguration, and a tool that 404s
+//     every call is worse than a clear startup error. The lookup pass runs BEFORE
+//     the first AddTool — the same batch-first invariant registerTaskTools holds
+//     — so a refusal leaves nothing half-registered on srv.
+//   - --http (bestEffort == true): what the manifest DOES back is registered and
+//     the missing IDs are returned for ONE loud stderr line. An --http server
+//     holds no ambient credential (charter D18), so its startup manifest is the
+//     ANONYMOUS /v1/capabilities projection; failing fast there turns a useful
+//     bridge into a systemd crash loop (see mcpToolsetTasksBestEffort).
+//
+// Either way the omission is never silent and never partial-by-accident, and no
+// byte of it reaches os.Stdout — diagnostics are stderr-only (decision 4),
+// because stdout IS the JSON-RPC stream.
+func registerChatBridgeTools(srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest, bestEffort bool) (missing []string, err error) {
+	// Pass 1 — resolve every allowlisted ID against the manifest. No AddTool yet.
+	byID := make(map[string]manifest.Command, len(m.Commands))
+	for i := range m.Commands {
+		byID[m.Commands[i].ID] = m.Commands[i]
+	}
+	found := make([]manifest.Command, 0, len(chatBridgeToolIDs))
+	for _, id := range chatBridgeToolIDs {
+		cmd, ok := byID[id]
+		if !ok {
+			missing = append(missing, id)
+			continue
+		}
+		found = append(found, cmd)
+	}
+	if len(missing) > 0 && !bestEffort {
+		// Fail-fast policy: register nothing, let the caller refuse startup.
+		return missing, nil
+	}
+
+	// Pass 2 — register, in allowlist order.
+	for _, cmd := range found {
+		if err := registerOneBridgeTool(srv, g, ctx, m, cmd); err != nil {
+			return missing, err
+		}
+	}
+	return missing, nil
 }

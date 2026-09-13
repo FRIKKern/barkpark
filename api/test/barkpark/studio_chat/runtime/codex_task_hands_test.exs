@@ -81,6 +81,10 @@ defmodule Barkpark.StudioChat.Runtime.CodexTaskHandsTest do
     wire = File.read!(log)
     assert wire =~ ~s("mcp_servers")
     assert wire =~ ~s("barkpark")
+    # The Codex loopback spawns the CURATED chat toolset, never --tools all
+    # (task-scc-bl-mcp-chat-toolset, charter D64).
+    assert wire =~ ~s(["mcp","serve","--tools","chat"])
+    refute wire =~ ~s("--tools","all")
     assert wire =~ ~s("BARKPARK_WORKER_ID")
     refute wire =~ "bpcs_"
 
