@@ -7145,12 +7145,28 @@
     bp = bp || {};
     var host = !!bp.host;
     var removing = bp.deprovision_status === "pending" || bp.deprovision_status === "claimed";
-    // "live" mirrors the Go reference EXACTLY (cloud_status_cmd.go statusOf):
-    // host set, not tearing down, not suspended. A failed *latest* provision job
-    // is deliberately NOT excluded — for a host-set box that is otherwise
-    // healthy the CLI reads "ok", so we must too; and a host-set box that is
-    // UNHEALTHY must read "degraded", never slip to a false-green "ok". Both
-    // surfaces implement decision 15, so they must agree byte-for-byte.
+    // "live" DIVERGES from the Go reference, and the comment that stood here
+    // claiming byte-for-byte parity was the false part. Two corrections. First
+    // the NAME: the Go counterpart is attentionStatus, not statusOf — statusOf
+    // is THIS file's pill renderer, and no Go function by that name exists in
+    // cloud_status_cmd.go (re-derive: `git grep -n "func statusOf\|func
+    // attentionStatus" -- internal/cli/cloud_status_cmd.go` returns
+    // attentionStatus only; the repo-wide `func statusOf` hit is an unrelated
+    // fakeWarmClient method in internal/provisioner). Second the CLAIM: Go's
+    // `live` carries a FOURTH conjunct, ProvisionStatus != "failed"; this one
+    // is host / not removing / not suspended, three. So a host-set box with
+    // provision_status "failed" and an unhealthy read prints "ok" there and
+    // "degraded" here. Decision 15 does NOT rank that state — rank 2 requires
+    // no host, and every live arm requires live — so neither surface is the
+    // charter's verbatim reading of it.
+    //
+    // The state is UNREACHABLE today: no writer can un-succeed the provision
+    // job that set the host, derived from registry.ex's write paths and written
+    // out in full above attentionStatus in cloud_status_cmd.go. So this is a
+    // documented latent divergence, not a live false-green. Do NOT add the
+    // fourth conjunct here alone — that is exactly the one-sided drift D32
+    // exists to prevent. If a future writer makes the state reachable, amend
+    // decision 15 first, then both implementations together in one round.
     var live = host && !removing && !bp.suspended;
     var healthy = (bp.health_status || "unknown") === "up" && (bp.agent_status || "offline") === "online";
 
