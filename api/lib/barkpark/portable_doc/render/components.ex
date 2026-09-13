@@ -597,12 +597,16 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   def task_board_html(_), do: ""
 
-  # The board's column roles, in white-ladder order (cancel folds to a tally, so
-  # it is NOT a column). One place defines the order; labels are DERIVED, never a
-  # second hardcoded copy. The two thought states are dim columns at the ladder
-  # BOTTOM (charter D12 — thought states ARE visible board columns); empty columns
-  # are dropped, so a board with no considering/researching rows is byte-stable.
-  defp board_roles, do: ~w(open ready progress blocked done considering researching)
+  # The board's column roles — DERIVED from design/status-manifest.json roles[]
+  # via `StatusVocab.board_roles/0`, never retyped here. Every manifest rung is a
+  # column, in manifest order, with the terminal `cancel` rung LAST and
+  # de-emphasised (`.bp-board__col--cancel`). Before task-881952f8d8417f4b this
+  # was a hand-typed seven-role list that omitted `cancel`, so a cancelled row was
+  # silently DROPPED from the board — a failure whose success state is quiet.
+  # Labels are DERIVED too (the fold), never a second hardcoded copy. Empty
+  # columns are still dropped, so a board with no cancelled/thought rows is
+  # byte-stable.
+  defp board_roles, do: StatusVocab.board_roles()
 
   # A board column header: the canonical lowercase label sentence-cased at render
   # (the fold — "in progress" → "In progress"), NOT a hand-typed board label.
