@@ -23633,6 +23633,28 @@
   // fire a SECOND /v1/me.
   var newPricingCapAsked = false;
 
+  // cch-w48-s1-followup — THE FUNNEL PAYS FOR /v1/me ONCE, NOT TWICE. The step
+  // ABOVE this one (newAskLaunchAuthority) already asks GET /v1/me and lands the
+  // answer through absorbMe, so by the time a 402 folds this screen in, the
+  // console HOLDS the role. The unconditional read below re-asked for it: two
+  // identical reads inside one funnel, and — worse than the cost — two screens
+  // that can disagree, because a role that moves between the two answers is
+  // rendered as an authority on one step and a different one on the next.
+  //
+  // The reuse is the SHIPPED derivation (launchCheckoutAuthority over meCache),
+  // exactly what renderLaunchPlan's dashboard twin already does, so no second
+  // policy read re-derives the role from string literals here.
+  //
+  // FAIL OPEN IS UNCHANGED, in BOTH directions. This consults the cache only on
+  // meState() === "loaded" — the one band where the SERVER has told us the role;
+  // "loading" and "failed" still fall through to the read below, and that read
+  // still leaves the CTAs standing on a non-answer. And a loaded answer carrying
+  // no role string yields "unknown" from the shipped derivation, which is the
+  // same open arm the fetch's own failure takes — never a refusal.
+  function newPricingAbsorbedAuthority() {
+    return meState() === "loaded" ? launchCheckoutAuthority(meCache) : null;
+  }
+
   function newAskCheckoutCapability(tpl, authority) {
     if (newPricingCapAsked || capCache) return;
     newPricingCapAsked = true;
@@ -23648,7 +23670,9 @@
   }
 
   function renderNewPricing(tpl, authority) {
-    var known = authority || "unknown";
+    // The absorbed answer, when the funnel's launch step already paid for one.
+    var absorbed = authority ? null : newPricingAbsorbedAuthority();
+    var known = authority || absorbed || "unknown";
     var blocked = known === "blocked";
     var tiers = launchPlanGridHtml(known, { billing_capability: capCache });
     newSetBody(newPanel(newTemplateHead(tpl) +
@@ -23659,9 +23683,10 @@
           ? "Your free trial has been used."
           : "Your free trial has been used. Pick a plan to launch — cancel anytime.") + "</p>" +
       tiers + "</div>"));
-    if (!authority) {
-      // One read, only on this screen, and only when the authority is still
-      // unknown — a failed read leaves the CTAs standing (unknown, not refused).
+    if (!authority && !absorbed) {
+      // One read, only on this screen, only when no caller supplied the band AND
+      // the funnel is not already holding an absorbed answer — a failed read
+      // leaves the CTAs standing (unknown, not refused).
       api("GET", "/v1/me").then(function (r) {
         var resolved = r.ok && r.data ? launchCheckoutAuthority(r.data) : "unknown";
         if (resolved !== "blocked") return;
