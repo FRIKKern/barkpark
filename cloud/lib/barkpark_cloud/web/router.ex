@@ -6517,7 +6517,10 @@ defmodule BarkparkCloud.Web.Router do
   # ADMIN read on the same team still walks the compound index backwards and
   # stops at the LIMIT: 0.037 ms / 6 buffers. The team fence keeps it bounded and
   # 30 ms is a fine page today, but it scales with the TEAM'S WHOLE LOG rather
-  # than the page size, and this table has no retention policy. The fix is an
+  # than the page size. The table's unboundedness is now CLOSED —
+  # `Workers.AgentRetentionWorker` prunes `notification_deliveries` past 180 days
+  # (cch-w34-bl-delivery-log-has-no-retention) — so the team's whole log is
+  # bounded by that window rather than by nothing. The remaining fix is an
   # index on `(team_id, lower(recipient), inserted_at)` — deliberately NOT taken
   # in this slice (it is a migration, outside this slice's file fence). It is
   # OPEN WORK, not a solved problem: re-run the same EXPLAIN (ANALYZE, BUFFERS)
