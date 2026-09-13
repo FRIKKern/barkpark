@@ -799,6 +799,7 @@ defmodule Barkpark.Tasks.Stage do
     note = normalize_note(Keyword.get(opts, :note) || Keyword.get(opts, :disposition_reason))
     reopen_trigger = normalize_note(Keyword.get(opts, :reopen_trigger))
     rerun = normalize_note(Keyword.get(opts, :rerun) || Keyword.get(opts, :disposition_rerun))
+
     instruction =
       normalize_note(Keyword.get(opts, :instruction) || Keyword.get(opts, :operating_instruction))
 

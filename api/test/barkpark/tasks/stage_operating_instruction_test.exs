@@ -179,7 +179,10 @@ defmodule Barkpark.Tasks.StageOperatingInstructionTest do
       assert row.content["disposition_reason"] == @verdict
 
       [ev] = staged_events(task)
-      assert ev.document["staged"]["superseded_instruction"] == "an older convention, since replaced"
+
+      assert ev.document["staged"]["superseded_instruction"] ==
+               "an older convention, since replaced"
+
       assert ev.document["staged"]["operating_instruction"] == @index_convention
       assert ev.document["staged"]["operating_instruction_key"] == "operating_instruction"
       assert ev.document["staged"]["superseded_note"] == nil
