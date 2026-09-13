@@ -115,6 +115,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.PortableDoc.Bpml.UnprintableError
   alias Barkpark.Tenancy
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.SessionAutoLog
 
   # The SIX DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
   #
@@ -847,6 +848,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
+        auto_log_publish(conn, paper, attrs)
+
         body = %{
           ok: true,
           slug: paper.doc_id,
@@ -988,6 +991,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
+        auto_log_publish(conn, paper, attrs)
+
         body = %{
           ok: true,
           slug: paper.doc_id,
@@ -2007,6 +2012,34 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # global read — matching the write side's own Default-workspace fallback
   # posture (a scope-less write still stamps a real workspace_id; a
   # scope-less read here just doesn't narrow by one).
+  # SESSION AUTO-LOG (session-handoff v1.5 §5b). A paper publish is the second
+  # milestone Barkpark itself witnesses, so when the caller names an open
+  # session on `X-Barkpark-Session-Slug` the `paper-published` event is written
+  # HERE instead of by a `bp session log` the agent had to remember. Called
+  # from BOTH `ingest/2` legs (blocks and the legacy body_html) — which
+  # spelling the producer used must not decide whether the session hears about
+  # the publish.
+  #
+  # Scope comes off the STORED paper, not off `attrs` and not off a second
+  # `resolve_scope/2`: `Content.upsert_paper/1` applies its own Default-workspace
+  # fallback, so a scope-less body still lands in a real workspace and `attrs`
+  # would have understated it. `SessionAutoLog.doc_scope_opts/1` is fail-closed
+  # (see its moduledoc — a nil workspace_id at `Scope.scope_to_workspace_or_global/3`
+  # is the CROSS-TENANT read, so it is never passed). Non-blocking: the return
+  # is discarded and the ingest receipt is byte-unchanged.
+  defp auto_log_publish(conn, paper, attrs) do
+    _ =
+      SessionAutoLog.maybe_log(
+        conn,
+        "paper-published",
+        paper.doc_id,
+        attrs["dataset"],
+        SessionAutoLog.doc_scope_opts(paper)
+      )
+
+    :ok
+  end
+
   defp session_scope_opts(conn, params) do
     case resolve_scope(conn, params) do
       {nil, nil} -> []

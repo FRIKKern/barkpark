@@ -119,6 +119,8 @@ defmodule BarkparkWeb.TasksController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
+  alias BarkparkWeb.SessionAutoLog
+
   # ─── GET /v1/tasks/ready ────────────────────────────────────────────────
 
   # task-e1b74c19174cb2c1: the `filter[...]` container is PARSED here too, and
@@ -1306,6 +1308,23 @@ defmodule BarkparkWeb.TasksController do
           )
 
         {:ok, %Document{} = doc, :closed} ->
+          # SESSION AUTO-LOG (session-handoff v1.5 §5b). A close is one of the
+          # two milestones Barkpark itself witnesses, so when the caller names
+          # an open session on `X-Barkpark-Session-Slug` the trail is written
+          # HERE rather than by a `bp session log` the agent had to remember.
+          # Only this arm logs: the `:already_closed` replay above changed
+          # nothing, and logging it would put a second "task-closed" on the
+          # trail for one close. Non-blocking by contract — the return is
+          # discarded and the close's own response is byte-unchanged.
+          _ =
+            SessionAutoLog.maybe_log(
+              conn,
+              "task-closed",
+              doc.doc_id,
+              request_dataset(conn),
+              SessionAutoLog.doc_scope_opts(doc)
+            )
+
           # Graduated enforcement (living-values §12): unmet criteria are
           # SURFACED as a soft warning on the (already successful) close —
           # never a gate (close_response below, shipped with lvw-t6).
