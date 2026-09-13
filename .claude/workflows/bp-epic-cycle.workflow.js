@@ -171,6 +171,22 @@ const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system,
 const JOURNEY_BLOCK = `YOUR JOURNEY (required — the epic's human story is assembled from these, and the debrief agent reads it days later):
 Return journey{}: mission (one line), 2-5 key_moments — each a turning point or surprise WITH the evidence that caused it; a step log is not a journey — outcome, and meaning (the so-what for this wave). Write it for a human reader who was not there. Padded moments are worse than fewer moments.`
 
+const DISK_BLOCK = `DISK FLOOR — MEASURE BEFORE YOU DISPATCH, REAP WHEN THE WAVE ENDS (task-80d117829feec84e).
+A full host is the one failure this wave cannot diagnose from its own output. MEASURED 2026-08-10, cloud-console-hardening wave 66: every Bash call on the wave host died with \`ENOSPC: no space left on device\` while opening its OWN output file — a bare \`true\` failed. The digest phase ran ZERO commands; it could not patch the wave Paper, could not stamp the epic heartbeat, ran no premise smoke; three surveyors lost their final scans. A wave that dispatches builders onto a full box gets gate output INDISTINGUISHABLE from a real defect and spends its round debugging code that was fine.
+
+FIRST COMMAND OF THE PHASE, before any fan-out: \`bash scripts/scratchpad-reaper.sh --floor 25 .\`
+  exit 0 = OK, dispatch · exit 2 = REFUSED, naming the floor and the measured free space · exit 3 = BLIND, which is NOT a pass.
+On 2 or 3: do NOT dispatch. Reclaim first (below), re-run the check, and quote BOTH lines in your report. If you cannot get above the floor, end the phase saying so — a refusal you can read beats a wave of red gates you cannot.
+
+WAVE END (Review phase, AFTER every branch is pushed — pushing first is what makes the reclaim safe):
+  \`bash scripts/scratchpad-reaper.sh --dry-run --root <the wave scratch root> --repo <repo>\` — READ every line
+  \`bash scripts/scratchpad-reaper.sh --reap --yes-delete --root <the wave scratch root> --repo <repo>\`
+It skips every REGISTERED git worktree unconditionally and refuses any other checkout holding an unpushed commit, an untracked file, a stash, or no remote at all — 17 registered worktrees were live in the scratch tree during that incident, and one blind \`rm -rf\` would have stranded a sibling lane's build.
+
+TWO THINGS NEVER TO REPEAT.
+(1) The remedy briefed that day, \`rm -rf /private/tmp/claude-501/*/tasks/*.output\`, is a PROVED NO-OP: 0 files matched, \`rm\` rc=1, free unchanged at 117Mi. Those files are the fault's VICTIM — at zero bytes free the harness cannot create one. Never brief it, never run it.
+(2) Never size a reclaim with \`du\`. Deleting 36 session directories \`du\` valued at ~33 GB freed UNDER 0.5 GB, because APFS clones share blocks. Every figure you report comes from \`df\` before/after, which is what the reaper prints.`
+
 const PREMISE_SMOKE_BLOCK = `PREMISE SMOKE (E1, graduated into this cycle 2026-07-23 — a cheap pre-build check that caught the phantom-citation class for ~2% of a full survey's cost; DISTINCT from your own facts[].rerun discipline). Your facts[].rerun attaches a re-derivation command to facts YOU emit; this governs the INHERITED premises you are about to RELY ON but did not author — a charter D-number the direction/charter CITES, a candidate a prior phase NAMED reachable, a code site the wish points a builder at. A rerun string passes by being non-empty; a premise passes only when you RUN the check. Three obligations, each a cheap L1/L2 git-show (34-54ms — cheaper than being wrong):
 - CITATION EXISTS AND COVERS: git-show every cited charter D-number / prior decision on origin/main (\`git show origin/main:<path>\`) and read that it actually AUTHORIZES what it is cited for. Existence is not enough — the arm-D phantom-D32 miss was a REAL entry cited as authority it does not cover. A citation you did not git-show is unverified; one whose text you did not read for coverage is a phantom wearing a number.
 - CANDIDATE IS REACHABLE: confirm every candidate capability is reachable through a REAL non-admin write path, and name the caller/route that proves it. A path only an admin can reach is not the reachability the slice claims (the codelists-refutation lesson).
@@ -724,6 +740,8 @@ Your output:
 CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
 ${JOURNEY_BLOCK}
 ${PREMISE_SMOKE_BLOCK}
+
+${DISK_BLOCK}
 ${PAPER_BLOCK}
 ${LEAD_NOTES}`,
   { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: m, effort: EFFORT_FOR(m) }
@@ -1138,6 +1156,8 @@ if (built.length > 0) {
 ${USER_WISH_BLOCK}
 
 Read the epic charter at ${CHARTER_PATH} first. Epic parent task: ${architect.epic_task_id}.${architect.charter_pr ? ` NOTE: this wave's charter is an OPEN PR (${architect.charter_pr}) — \`main\` is protected and Decide publishes by PR, so the copy on your disk is the PREVIOUS wave's. Read this wave's decisions from the wave Paper (${WAVE_PAPER}) and from \`gh pr diff\` on that PR. Your step-8 wave-log entry therefore belongs on the CHARTER PR's branch, not on a copy of main: check the PR out into your own worktree, append there, and push — appending to the stale local file silently drops this wave's charter changes.` : ''}
+
+${DISK_BLOCK}
 
 BUILT SLICES (review every green one):
 ${JSON.stringify(greenBuilt.map((b) => ({ task_id: b.task_id, branch: b.branch, gate: b.gate_command, summary: b.summary, builder_review: b.review, files: b.files_changed })), null, 2)}
