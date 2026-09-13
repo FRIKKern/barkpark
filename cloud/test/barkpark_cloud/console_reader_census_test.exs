@@ -453,20 +453,23 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "installation_id_required",
       site: "router.ex POST /v1/github/installations",
       reason:
-        "Unreachable from every shipped surface: zero callers of the installations " <>
-          "route in app.js, internal/, or js/ (w73 zero-caller proof), because no " <>
-          "GitHub App setup_action callback consumer was ever built. Flip: the " <>
-          "callback consumer ships (cch-w73-bl-github-install-callback-loop-open)."
+        "RELABELED (wave 73, cch-w73-bl): the zero-caller premise is spent — app.js " <>
+          "now HAS a caller (handleGithubInstallReturn). The code is nonetheless " <>
+          "guard-shielded from that caller: the console POSTs only an installation_id " <>
+          "it already trimmed to non-empty (githubInstallReturnFromSearch), and a " <>
+          "redirect carrying no id takes the honest-absence arm and issues NO request " <>
+          "at all. Only a CLI/PAT or hand-built POST can send an empty or absent id. " <>
+          "Flip: a caller that can submit a blank installation_id ships."
     },
-    %{
-      code: "installation_not_found",
-      site: "router.ex POST /v1/github/installations",
-      reason:
-        "Unreachable from every shipped surface: same zero-caller proof as its " <>
-          "sibling — no App-install callback consumer exists, no setup_action route, " <>
-          "no installation_id reader anywhere. Conditioned on that absence. Flip: a " <>
-          "callback consumer ships and this becomes a reader-owed row."
-    },
+    # installation_not_found was PAID in Round 5 (wave 73,
+    # cch-w73-bl-github-install-callback-loop-open): its flip condition — "a
+    # callback consumer ships" — FIRED. app.js's handleGithubInstallReturn reads
+    # ?installation_id&setup_action off the boot URL and POSTs the id to this
+    # very route, so the 422 is now human-reachable (an installation removed
+    # between GitHub's redirect and the POST, or a bookmarked Setup-URL link
+    # replayed later — the URL is in browser history). It gained a curated
+    # ERRORS reader in the same diff and this row was deleted; the rot arm ran
+    # RED naming installation_not_found before the deletion.
     %{
       code: "repo_full_name_required",
       site: "router.ex connect_site_github",

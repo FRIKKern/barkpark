@@ -239,6 +239,20 @@
     // bare word "suspended" through the key.replace fallback. It names the CP's
     // own refusal, and claims nothing about the server's power state — nothing
     // on the suspension path reaches the host.
+    // cch-w73-bl — THE 422 THE INSTALL RETURN LEG CAN NOW REACH. Before this
+    // wave POST /v1/github/installations had zero callers anywhere, so this slug
+    // was CLASSIFIED unreachable in the wire-vs-reader census. The console
+    // consumer (handleGithubInstallReturn) makes it human-reachable: GitHub
+    // redirects the browser back to the App's Setup URL with an installation_id,
+    // and the plane VALIDATES that id through the client seam before writing —
+    // an id for an installation the App can no longer see (uninstalled between
+    // the redirect and the POST, or a stale Setup-URL link replayed out of
+    // browser history, which is the reachable shape: the URL is bookmarkable)
+    // refuses 422 with nothing written. PERMANENT until the app is installed
+    // again, so the sentence carries NO transience verb and names the one act
+    // that can change it. It does NOT say "GitHub refused" — the refusal is the
+    // plane's own validation of what GitHub's API answered about that id.
+    installation_not_found: "Barkpark can't see that GitHub installation any more — it was removed, or the link was used after the fact. Install the Barkpark app on GitHub again, then come back.",
     suspended: "This instance is suspended — Barkpark Cloud won't act on it until the suspension is cleared.",
     // cch-w40-s1 (charter D447) — THE DEFAULT NOW STATES ONLY WHAT A BARE 403
     // PROVES. This key used to read "Only the team owner can manage billing."
@@ -4199,6 +4213,148 @@
         toast(githubDisconnectErrorToast(r.data));
       }
     });
+  }
+
+  // ── cch-w73-bl · THE GITHUB APP INSTALL RETURN LEG ────────────────────────
+  //
+  // THE RULING (criterion c0, and this comment block is one of the two durable
+  // venues the merge carries — the other is the PR body): the installation is
+  // recorded by a CONSOLE CONSUMER, not by a new server callback route.
+  //
+  // WHY THE CONSOLE AND NOT A ROUTE. A GitHub App sends the browser to the
+  // App's own Setup URL after an install — `?installation_id=<n>&setup_action=
+  // install|update` on a plain GET, with NO signature, NO state parameter and
+  // NO bearer token. A server route at that URL would therefore be an
+  // unauthenticated GET that has to reconstruct WHICH team is installing from a
+  // cookie the API does not use (the console is a token-bearing SPA), and would
+  // have to mint its own redirect back into the SPA afterwards. The console is
+  // already AT that URL, already holds the session token and the team pin, and
+  // the plane ALREADY has the authenticated, team-admin-gated, id-validating
+  // writer this leg needs: POST /v1/github/installations, whose own comment has
+  // described this consumer since it shipped ("records the team's GitHub App
+  // installation after the App-install redirect"). So the server needed no
+  // change at all: this slice is the caller it was always written for.
+  //
+  // WHAT THE LEG DOES, in order: read the two params off location.search at
+  // boot, scrub them from the address bar (replaceState — a refresh must not
+  // replay the POST), POST the installation_id, toast the outcome, and repaint
+  // the GitHub card from a fresh read.
+  //
+  // THE HONEST-ABSENCE ARM (criterion c4). BOTH "Connect GitHub" CTAs —
+  // githubCardHtml's on the Providers view and newGithubHtml's on the /new
+  // ready panel — are bare links out to the SAME App install URL and therefore
+  // return through this SAME leg; there is one return path, so one sentence
+  // covers both. When the leg cannot close the loop it says so PLAINLY and
+  // claims nothing else: GitHub can answer `setup_action=request` (a member
+  // asked an org owner to approve the install) with NO installation_id at all,
+  // and the POST can refuse or fail. In every one of those cases the console
+  // states that IT cannot confirm the install, that the app may nonetheless be
+  // installed on GitHub, and where to look — never "connected", and never a
+  // bare retry that would replay a POST with no id to send.
+  //
+  // IS GITHUB CONFIGURED ON THE DEPLOYMENT UNDER TEST (criterion c6)? NO. The
+  // live control plane carries no ^GITHUB env — the same measured fact
+  // cch-w48-s3/s6 recorded above and in scenarios.mjs — so GitHub.configured?()
+  // is false there, every install CTA is withheld, and no live install can be
+  // driven against it. The evidence for this leg is therefore fixture-driven
+  // (the scenario corpus' `github-install-return` scenario PRODUCES the
+  // connected state through this very POST) plus node-pinned, which is what the
+  // criterion's "run or fixture evidence quoted" allows.
+
+  // The sentence BOTH unconfirmable shapes share. One string, so the no-id arm
+  // and the refused-POST arm can never drift into disagreeing about what the
+  // console knows.
+  var GITHUB_INSTALL_UNCONFIRMED =
+    "Barkpark can't confirm the install. The app may still be installed on your " +
+    "GitHub account — check it there, then connect again from this page.";
+
+  // Pure: the GitHub App setup redirect out of a location.search string, or null
+  // when this boot is not a return leg. A malformed query degrades to null —
+  // never a throw on the boot path (the confirmTokenFromSearch contract).
+  // Returns the raw pair; the MISSING-id case is a real GitHub shape
+  // (setup_action=request), so it is a value this function reports, not a null.
+  function githubInstallReturnFromSearch(search) {
+    var params;
+    try { params = new URLSearchParams(search || ""); }
+    catch (e) { return null; }
+    var action = (params.get("setup_action") || "").trim();
+    var id = (params.get("installation_id") || "").trim();
+    if (action === "" && id === "") return null;
+    return { installation_id: id, setup_action: action };
+  }
+
+  // Drop ONLY the two GitHub keys from the address bar, preserving every other
+  // parameter and the path, and land on the Providers view — the screen that
+  // owns the GitHub card. replaceState, never pushState: a back button must not
+  // walk into a spent installation_id, and a refresh must not replay the POST.
+  function scrubGithubInstallParams() {
+    if (typeof history === "undefined" || !history.replaceState) return;
+    var kept = (location.search || "").replace(/^\?/, "").split("&").filter(function (kv) {
+      var k = kv.split("=")[0];
+      return kv !== "" && k !== "installation_id" && k !== "setup_action";
+    });
+    var qs = kept.length ? "?" + kept.join("&") : "";
+    history.replaceState(null, "", (location.pathname || "/") + qs + "#settings/providers");
+  }
+
+  // Pure: the toast an install POST answer earns. Only a 201 carrying
+  // installation.connected === true may claim a connection — the same
+  // "only a 200 body may claim a state" rule githubReadinessFrom follows, for
+  // the same reason: a 2xx with an unexpected body proves nothing.
+  function githubInstallOutcome(r) {
+    var inst = r && r.ok && r.data && r.data.installation;
+    if (inst && inst.connected === true) {
+      return {
+        kind: "success",
+        title: "GitHub connected",
+        body: "Barkpark recorded the app install" +
+          (inst.account_login ? " for " + inst.account_login : "") + ".",
+      };
+    }
+    return {
+      kind: "error",
+      title: "Couldn't confirm the GitHub install",
+      body: friendly(r && r.data, GITHUB_INSTALL_UNCONFIRMED),
+    };
+  }
+
+  // The no-id arm: GitHub sent us back with no installation to record at all.
+  // Same honesty, different cause — so it names the cause and reuses the one
+  // shared sentence rather than inventing a second, subtly different claim.
+  function githubInstallUnconfirmedToast() {
+    return {
+      kind: "info",
+      title: "GitHub didn't send an installation back",
+      body: GITHUB_INSTALL_UNCONFIRMED,
+    };
+  }
+
+  // THE RECORDING PATH. This single api() call is the whole return leg's reason
+  // to exist; the guard cch-w73-bl-* in __app.test.mjs mutates it away and reds.
+  function recordGithubInstall(id) {
+    return api("POST", "/v1/github/installations", { installation_id: id }).then(function (r) {
+      toast(githubInstallOutcome(r));
+      // The install just proved the deployment IS configured (a 503 arm cannot
+      // mint a 201), so the site screen's one-shot readiness band learns it for
+      // free; a refusal teaches nothing and must not overwrite what we knew.
+      if (r && r.ok) { githubReadinessAsked = true; githubReadiness = "ready"; }
+      // Repaint from the plane, never from the POST body: loadGithub no-ops when
+      // the Providers view is not mounted yet, and applyRoute paints it anyway.
+      loadGithub();
+      return r;
+    });
+  }
+
+  function handleGithubInstallReturn() {
+    var ret = githubInstallReturnFromSearch(location.search);
+    if (!ret) return false;
+    scrubGithubInstallParams();
+    if (!ret.installation_id) {
+      toast(githubInstallUnconfirmedToast());
+      return true;
+    }
+    recordGithubInstall(ret.installation_id);
+    return true;
   }
 
   // ====================================================== NOTIFICATIONS
@@ -27127,6 +27283,9 @@
     // GR16: a Stripe billing-portal return (?billing=portal) — scrub the flag,
     // land on #billing, re-poll the subscription (neutral ack, never a claim).
     var fromPortal = handleBillingPortalReturn();
+    // cch-w73-bl: a GitHub App install return leg (?installation_id&setup_action)
+    // — scrub the params, record the installation, land on #settings/providers.
+    var fromGithubInstall = handleGithubInstallReturn();
 
     // Invitation resume: a parked accept token (a logged-out landing that just
     // came through login / signup / OAuth) outranks whatever hash the
@@ -27156,7 +27315,8 @@
     // Validate the route. Accept tab views and BOTH drill-downs (#instance/…,
     // #site/…) — the old guard reset a site deep-link to #fleet on reload.
     var r = parseHash();
-    if (!fromCheckout && !fromPortal && VIEWS.indexOf(r.view) === -1 && DETAIL_VIEWS.indexOf(r.view) === -1) {
+    if (!fromCheckout && !fromPortal && !fromGithubInstall &&
+        VIEWS.indexOf(r.view) === -1 && DETAIL_VIEWS.indexOf(r.view) === -1) {
       location.hash = "#overview";
     }
     applyRoute();
@@ -28654,6 +28814,13 @@
       // losable on a hand-built payload (the card paints arm 3 for every actor
       // in the corpus), and githubDisconnectErrorToast pins the refusal copy.
       githubCardHtml: githubCardHtml, githubDisconnectErrorToast: githubDisconnectErrorToast,
+      // cch-w73-bl — the install return leg. The three pure rungs (parse,
+      // outcome, honest-absence) plus the DOM-free recorder, so the harness can
+      // drive the whole leg and mutate the recording path away.
+      githubInstallReturnFromSearch: githubInstallReturnFromSearch,
+      githubInstallOutcome: githubInstallOutcome,
+      githubInstallUnconfirmedToast: githubInstallUnconfirmedToast,
+      handleGithubInstallReturn: handleGithubInstallReturn,
       // cch wave 13 — WHICH cloud account a connection points at, shown before a
       // rotation is committed. Pure; loadProviderIdentity's fetch is the mount.
       providerIdentityModel: providerIdentityModel, providerIdentityHtml: providerIdentityHtml,
