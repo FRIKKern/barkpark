@@ -923,6 +923,75 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // longer unguarded: the chronicle arm below the residue parsers reads these
 // bytes and reds on a duplicate landing slot, an out-of-order block, or an
 // ordinal past the measured census.
+//
+// ── THE TYPED-COUNTER OWNERSHIP TABLE ────────────────────────────────────────
+//
+// Read this before you move ANY global integer in the console harness. It
+// answers one question — "which single file do I edit, and what re-derives the
+// number?" — because the failure this table exists to stop is a builder moving
+// a copy and leaving the owner, or moving the owner and leaving a copy.
+//
+// THIRTEEN typed global counters live across TWO owner files. (The row that
+// asked for this table said NINE, measured 2026-08-23; that count is stale on
+// both ends — see the two footnotes.) Each number below names exactly ONE
+// owner. Anchors are FUNCTION NAMES AND GREPPABLE STRINGS, never line numbers:
+// under cloud/priv/static a `<file>:<digits>` citation rots within days and
+// reds the Console gate's E11 clause.
+//
+// OWNER 1 — cloud/priv/static/__preview__/breakpoint-sweep.test.mjs, in the
+//   test whose title is BUILT from scenarioReport (grep: `the census
+//   reconciles:`). Six numbers, all from ONE measurement:
+//
+//     r.total            125   grep `assert.equal(r.total, 125)`
+//     r.cells             25   grep `assert.equal(r.cells, 25)`
+//     r.distinctCovered   24   grep `mixed-fleet is used twice`
+//     r.residue          101   grep `101 is the RESIDUE, not the census`
+//     r.families          13   grep `assert.equal(r.families, 13)`
+//     SCENARIO_RESIDUE   101   grep `the COMMITTED literal, counted from the
+//                              committed bytes` — this is residue typed a
+//                              SECOND time, deliberately, against the committed
+//                              bytes rather than the report. Move BOTH or the
+//                              file contradicts itself.
+//
+//   RE-DERIVE, never increment: `node cloud/priv/static/__preview__/breakpoint-sweep.mjs`
+//   prints the whole set on its `>> scenarios` line —
+//   `125 scenarios · 24 distinct covered by 25 cells · 101 residue over 13
+//   families (committed literal)`. Read that line and copy from it.
+//
+// OWNER 2 — cloud/priv/static/__binding_census.mjs (NOT under __preview__, and
+//   NOT a node --test file: it is a script that exits 2). Seven numbers in two
+//   separate pins:
+//
+//     EXPECT.total          80   grep `FAIL(2): the PIN no longer sums`
+//     EXPECT.elevated       39   (same pin)
+//     EXPECT.predicated     34   (same pin)
+//     EXPECT.unpredicated    5   (same pin)
+//
+//     EXPECT_POPULATIONS.reachable      0   grep `FAIL(2m): the unpredicated
+//     EXPECT_POPULATIONS.omitted        1   population no longer splits`
+//     EXPECT_POPULATIONS.unobservable   4
+//
+//   RE-DERIVE: `node cloud/priv/static/__binding_census.mjs`. Exit 0 means all
+//   seven agree with the artifact; exit 2 prints `expected …` beside `found …`
+//   for whichever pin moved. Copy from `found`.
+//
+// NOT PINNED ANYWHERE, and do not go looking for a literal to move: the unit
+// count, the smoke count and the me-envelope count. smoke.mjs builds its
+// sentence from `names.length`; .github/workflows/console-harness.yml pins NO
+// counter at all — every integer in that file is comment prose and can be
+// stale without redding anything.
+//
+// FOOTNOTE A (why the table is not "five in this file"): the five integers
+// used to be typed a SIXTH time in this test's TITLE prose. cch-w47-s4 (D527)
+// deleted that copy by BUILDING the title from `scenarioReport` — which is why
+// the `test(\`…\`)` line above is a template literal. There is no sixth copy to
+// keep in step, and re-introducing a literal title would re-create one.
+//
+// FOOTNOTE B (why seven and not four in the census): EXPECT_POPULATIONS did
+// not exist when the ownership row was filed. It is a second, independent pin
+// over the same PIN rows, and it reds on its own die2 with its own `FAIL(2m)`
+// prefix. A builder who moves EXPECT and stops has moved half the owner.
+//
 const census = scenarioReport({ scenarios: SCENARIOS });
 test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered} distinct covered by ${census.cells} cells, ${census.residue} residue over ${census.families} families`, () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
