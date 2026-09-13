@@ -184,6 +184,16 @@ export const ROUTE_TIERS = [
 
   // ── instance / barkpark writes ──
   { key: "POST /v1/barkparks/:*/verify", auth_fn: A_USER, pin: "POST /v1/barkparks/:*/verify", why: "team-scoped member action" },
+  // cch-r16-w11 — the two MEMBER-LEVEL writes the launch wizard's ready hero
+  // offers beside its two elevated ones. They entered this table because
+  // member-authority-sweep.mjs refused UNFENCED on both the moment a plain
+  // member first reached /new: a routed hook row whose route this table does
+  // not carry answers `unknown`, and unknown is never a pass. Both are plain
+  // `Auth.require_user` at the router with no inline-cond overlay, and the
+  // census PIN reads both as `member` — so the answer is member, and the two
+  // rows are here to make that a LOOKED-UP answer rather than a silence.
+  { key: "POST /v1/barkparks/:*/studio-link", auth_fn: A_USER, pin: "POST /v1/barkparks/:*/studio-link", why: "require_user at the router; any team member may open Studio on their own team's instance" },
+  { key: "POST /v1/barkparks/:*/site-url", auth_fn: A_USER, pin: "POST /v1/barkparks/:*/site-url", why: "require_user at the router; team-scoped member action (wire revalidation to the site you deployed)" },
   // THE INSTANCE-ADMIN BAND'S PIN-BOUND ROUTE. Two call sites ride it —
   // runDecommission (the CLI rail's live Decommission) and removeInstance (the
   // header's Retry removal) — and the census PIN carries a row for each, both
