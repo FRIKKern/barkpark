@@ -227,6 +227,76 @@ defmodule Barkpark.Media.Delivery.EventsTest do
     assert media_delivery!().status == "ok"
   end
 
+  describe "media dedup, measured at the EVENTS layer" do
+    # `Events.dispatch/5` returns `:ok` whether it delivered or deduped, and the
+    # dedup ARM returns `:ok` too — so a test that reads the return value cannot
+    # tell the two apart. The SUBJECT here is the outbound POST itself: the
+    # counter is incremented by the Bypass handler, so it counts requests that
+    # actually reached the endpoint, by whichever path (`Dispatcher.deliver_media/3`
+    # OR the `single_shot/3` fallback the refusal used to fall through into).
+    #
+    # `Bypass.stub/4` deliberately, not `expect_once/4`: an expectation asserts a
+    # request ARRIVES, and the whole point of the first test is that the second
+    # one does NOT.
+    defp posts_counted(bypass) do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Bypass.stub(bypass, "POST", "/hook", fn conn ->
+        Agent.update(counter, &(&1 + 1))
+        Plug.Conn.resp(conn, 200, "")
+      end)
+
+      counter
+    end
+
+    defp media_row_count do
+      Repo.aggregate(from(d in Delivery, where: d.source_kind == "media"), :count)
+    end
+
+    test "a re-drive of the SAME logical event produces NO second POST" do
+      bypass = Bypass.open()
+      counter = posts_counted(bypass)
+      put_endpoints([endpoint(bypass)])
+
+      # ONE file struct, dispatched twice — exactly what the stuck-processing
+      # sweeper does when it re-fires `media.processed` for a recovered file.
+      file = media_file()
+
+      Events.dispatch("production", "media.processed", file, nil)
+      settle()
+
+      # PRECONDITION: the first delivery really happened. Without this the
+      # "no second POST" assertion below could pass on a path that never
+      # delivered at all.
+      assert Agent.get(counter, & &1) == 1
+      assert media_row_count() == 1
+
+      Events.dispatch("production", "media.processed", file, nil)
+      settle()
+
+      # THE SUBJECT: the subscriber saw the event exactly once.
+      assert Agent.get(counter, & &1) == 1
+      assert media_row_count() == 1
+    end
+
+    test "CONTROL — two DIFFERENT logical events BOTH post" do
+      bypass = Bypass.open()
+      counter = posts_counted(bypass)
+      put_endpoints([endpoint(bypass)])
+
+      # Two distinct media files: two distinct logical events, two deliveries.
+      # Without this control, suppressing the delivery path ENTIRELY would pass
+      # the test above.
+      Events.dispatch("production", "media.processed", media_file(), nil)
+      settle()
+      Events.dispatch("production", "media.processed", media_file(), nil)
+      settle()
+
+      assert Agent.get(counter, & &1) == 2
+      assert media_row_count() == 2
+    end
+  end
+
   # ── helpers ──────────────────────────────────────────────────────────────
 
   defp settle do
