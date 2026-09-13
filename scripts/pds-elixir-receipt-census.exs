@@ -12244,6 +12244,15 @@ defmodule PDS.Census do
     # STALE SPECIMEN; the mutated one must. That is a discriminator no honest register
     # edit can flip, and it proves the whole path end to end: demotion -> specimen ->
     # printed sentence -> the arm's PASS.
+    #
+    # AND ITS EXIT CODE MOVED 0 -> 1 WHEN REGISTER-STALE-ACKED WAS ARMED
+    # (task-2045aba7304ea724), WHICH IS THE POINT AND NOT COLLATERAL. This case
+    # MANUFACTURES exactly the thing that arm refuses: a recorded expr_fp that is not the
+    # one its site derives, declared by nothing. Before the arm existed the manufactured
+    # corruption exited 0 with CENSUS OK — the whole defect, sitting inside this file's own
+    # selftest. The four prose assertions below are unchanged and still carry the case's
+    # subject; what changed is that the tree now SAYS SO. A run where this mutation still
+    # exited 0 would mean the new arm had gone blind.
     %{
       name: "LADDER-STALE-ARM-SPECIMEN",
       corpus: :repo,
@@ -12251,15 +12260,16 @@ defmodule PDS.Census do
       mut:
         {"\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"17468236\"},",
          "\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"999999999\"},"},
-      exit: 0,
+      exit: 1,
       expect: [
         "the freshness arm MOVES ON THIS TREE",
         "STALE SPECIMEN  BarkparkWeb.SecretController.delete",
         "PASS  LADDER-STALE-ARM-EXERCISED",
-        "CENSUS OK"
+        "FAIL  REGISTER-STALE-ACKED",
+        "UNDECLARED MISMATCH"
       ],
       refute: ["the freshness arm is a NO-OP ON THIS TREE"],
-      proves: "the :stale arm can be MADE to fire from committed data alone: demoting one PROVEN register row's expression fingerprint sends resolve_register/1 down its {path, mfa} fallback, the row resolves :stale, and that row's def appears as a NAMED STALE SPECIMEN admitted to leg A by the :stale arm and by nothing else — which is what the printed zero of wave 45 could not show"
+      proves: "the :stale arm can be MADE to fire from committed data alone: demoting one PROVEN register row's expression fingerprint sends resolve_register/1 down its {path, mfa} fallback, the row resolves :stale, and that row's def appears as a NAMED STALE SPECIMEN admitted to leg A by the :stale arm and by nothing else — which is what the printed zero of wave 45 could not show. IT NOW ALSO PROVES THE SECOND HALF: the same manufactured demotion, declared by nothing, REDS REGISTER-STALE-ACKED at exit 1 where it used to print CENSUS OK"
     },
     # THE POPULATION BASELINE STOPS BEING ADVISORY (PDS-D678, wave 47), AND THE CORPUS IS
     # THE REPO FOR THE SAME REASON THE ROSTER CASES USE IT: baseline_checks/2 is scoped by
