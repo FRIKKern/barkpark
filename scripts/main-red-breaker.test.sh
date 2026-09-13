@@ -1248,4 +1248,173 @@ out="$(run "$out_s2" pull_request "$main_green_trusted")"
 has "$out" "a step main does not" "25b) CONTROL: when the API reports a GATE step failed, api_trusted fires and the breaker accuses"
 has "$out" "RC=1" "25b) …rc 1 — the proof is alive, and only its precondition is absent in production"
 
+# ── 26. THE VACUOUS SIGNATURE (task-501a3f6f34d5aa20) ───────────────────────
+# The subset test above compares the FINDING SET, not the step name. It is only
+# as strong as that set: a step whose red prints the SAME sentence for every
+# breach makes `comm -23` empty no matter what the PR broke, and the verdict
+# silently degrades to v1's step-name match.
+#
+# THE SPECIMEN IS REAL AND IS QUOTED VERBATIM. PR #17984 (head 9dced86a), job
+# 103556399633, 2026-09-12: `Doc byte budgets` runs its --selftest first under
+# `bash -e`, arm (i) of that selftest runs the FULL gate and expects a pass, so
+# on an over-cap tree the selftest reds and the step ABORTS before the gate's
+# per-file `FAIL: <doc> is <n>B, cap is <m>B` lines are ever printed. Main's job
+# 103555717072 printed the same one line. The breaker reported
+#   "Signature matched too: all 13 normalised error line(s) ... reports neutral (exit 0)"
+# while the PR carried a genuinely new breach: docs/setup/TASK-SYSTEM.md went
+# 16450B -> 16532B against a 16000B cap.
+SPEC_BUDGET='check-doc-budgets --selftest: FAILED — the full gate did not pass with DOC_BUDGETS_SPAN_ONLY set'
+SPEC_ANCHOR='FAIL: docs/evidence/spd-b2-subxs-type-scale/README.md missing G1 doc-tier header'
+spec_names="$(python3 -c 'import json; print(json.dumps({"s1":"Doc byte budgets (fails this job)","s2":"Doc anchors + headers (fails this job)"}))')"
+spec_out='{"s1":{"outcome":"failure"},"s2":{"outcome":"failure"}}'
+spec_jobs="$TMP/spec-jobs.json"; cat > "$spec_jobs" <<'J'
+{"jobs":[{"id":103555717072,"name":"Doc budgets + anchors","conclusion":"failure","steps":[
+  {"name":"Doc byte budgets (fails this job)","conclusion":"success"},
+  {"name":"Doc anchors + headers (fails this job)","conclusion":"success"},
+  {"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"failure"}]}]}
+J
+# main's side: the opaque budget line, the anchors detail, and one
+# MAIN-FAILED-STEP marker per failing step (main's own Decide writes these).
+spec_main_log="$TMP/spec-main.log"; {
+  printf '2026-09-12T12:55:07.5909393Z %s\n' "$SPEC_BUDGET"
+  printf '2026-09-12T12:55:40.0000000Z %s\n' "$SPEC_ANCHOR"
+  printf '2026-09-12T12:55:41.0000000Z docs-anchors-check: FAILED\n'
+  printf "2026-09-12T12:56:00.0000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc byte budgets (fails this job)\n"
+  printf "2026-09-12T12:56:00.1000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc anchors + headers (fails this job)\n"
+} > "$spec_main_log"
+spec_run() { # $1 = our capture file
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$spec_out" STEP_NAMES="$spec_names" \
+      JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE=doc-gates.yml \
+      GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_FIXTURE="$spec_jobs" \
+      MAIN_RED_BREAKER_LOG_FIXTURE="$spec_main_log" BREAKER_ERROR_LOG="$1"
+    bash "$SUBJECT" 2>&1; echo "RC=$?" )
+}
+BB='##[breaker-block]begin '
+BE='##[breaker-block]end'
+# (A) THE SPECIMEN AS IT REALLY WAS — the budget step's whole red is one line
+#     that names no document. Fenced, exactly as breaker-capture.sh now writes.
+spec_opaque="$TMP/spec-opaque.txt"; {
+  printf '%s%s\n' "$BB" 'bash scripts/check-doc-budgets.sh --selftest'
+  printf '%s\n' "$SPEC_BUDGET"
+  printf '%s\n' "$BE"
+  printf '%s%s\n' "$BB" 'bash scripts/docs-anchors-check.sh'
+  printf '%s\n' "$SPEC_ANCHOR"
+  printf 'docs-anchors-check: FAILED\n'
+  printf '%s\n' "$BE"
+} > "$spec_opaque"
+# (B) THE SAME JOB, GENUINELY INHERITED — the budget step names the doc it
+#     found, and it is the doc main already carries. Nothing new: neutral.
+spec_same="$TMP/spec-same.txt"; {
+  printf '%s%s\n' "$BB" 'bash scripts/check-doc-budgets.sh'
+  printf 'FAIL: docs/api/error-codes.md is 2154B, cap is 1900B — split to the owning contract/runbook or retire content\n'
+  printf '%s\n' "$BE"
+  printf '%s%s\n' "$BB" 'bash scripts/docs-anchors-check.sh'
+  printf '%s\n' "$SPEC_ANCHOR"
+  printf '%s\n' "$BE"
+} > "$spec_same"
+# (C) A NEW FINDING INSIDE THE ALREADY-FAILING STEP — the second over-cap doc
+#     that #17984 really added. Main's log has error-codes.md only.
+spec_new="$TMP/spec-new.txt"; {
+  printf '%s%s\n' "$BB" 'bash scripts/check-doc-budgets.sh'
+  printf 'FAIL: docs/api/error-codes.md is 2154B, cap is 1900B — split to the owning contract/runbook or retire content\n'
+  printf 'FAIL: docs/setup/TASK-SYSTEM.md is 16532B, cap is 16000B — split to the owning contract/runbook or retire content\n'
+  printf '%s\n' "$BE"
+  printf '%s%s\n' "$BB" 'bash scripts/docs-anchors-check.sh'
+  printf '%s\n' "$SPEC_ANCHOR"
+  printf '%s\n' "$BE"
+} > "$spec_new"
+# main's log for (B)/(C) must carry the per-file line, or (B) would differ for
+# the wrong reason. Same markers, budget detail instead of the opaque sentence.
+spec_main_detail="$TMP/spec-main-detail.log"; {
+  printf '2026-09-12T12:55:07.5909393Z FAIL: docs/api/error-codes.md is 2154B, cap is 1900B — split to the owning contract/runbook or retire content\n'
+  printf '2026-09-12T12:55:40.0000000Z %s\n' "$SPEC_ANCHOR"
+  printf "2026-09-12T12:56:00.0000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc byte budgets (fails this job)\n"
+  printf "2026-09-12T12:56:00.1000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc anchors + headers (fails this job)\n"
+} > "$spec_main_detail"
+spec_run_detail() { MAIN_RED_BREAKER_LOG_FIXTURE_OVERRIDE=1 spec_run_with "$spec_main_detail" "$1"; }
+spec_run_with() { # $1 main log, $2 our capture
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$spec_out" STEP_NAMES="$spec_names" \
+      JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE=doc-gates.yml \
+      GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_FIXTURE="$spec_jobs" \
+      MAIN_RED_BREAKER_LOG_FIXTURE="$1" BREAKER_ERROR_LOG="$2"
+    bash "$SUBJECT" 2>&1; echo "RC=$?" )
+}
+
+# 26a. THE INHERITED DIRECTION STILL WORKS. Identical finding set, and every
+#      block NAMES what it found: neutral, exit 0. If this arm ever reds the fix
+#      has become a blanket refusal, which is a different lie.
+out="$(spec_run_with "$spec_main_detail" "$spec_same")"
+has "$out" "INHERITED-FROM-MAIN" "26a) identical finding set, both blocks discriminating => still inherited"
+has "$out" "RC=0" "26a) rc 0"
+has "$out" "also NAMES what it found" "26a) and the notice states the set was discriminating"
+case "$out" in *"CANNOT READ the finding set"*) bad "26a) refused a red it could read" ;; *) ok "26a) no spurious refusal" ;; esac
+
+# 26b. A NEW FINDING INSIDE AN ALREADY-FAILING STEP IS THE PR'S OWN. This is the
+#      direction the whole row exists for, and it is reachable ONLY because the
+#      step names its findings.
+out="$(spec_run_with "$spec_main_detail" "$spec_new")"
+has "$out" "NOT with the same failure signature" "26b) a second over-cap doc in the same step is the PR's OWN"
+has "$out" "TASK-SYSTEM.md" "26b) and it prints the breach main does not carry"
+has "$out" "RC=1" "26b) rc 1"
+case "$out" in *INHERITED-FROM-MAIN*) bad "26b) waved a new over-cap doc through as inherited" ;; *) ok "26b) does not inherit a fresh breach" ;; esac
+
+# 26c. THE SPECIMEN ITSELF. Byte-identical opaque sentence on both sides, so the
+#      subset test is empty and v1 and v2 agree on "inherited" — and both are
+#      wrong. The breaker must REFUSE, loudly, and never with the neutral text.
+out="$(spec_run "$spec_opaque")"
+has "$out" "CANNOT READ the finding set" "26c) the specimen refuses instead of inheriting"
+has "$out" "OWNERSHIP-UNDETERMINED" "26c) it is the undetermined verdict, not a blame verdict"
+has "$out" "RC=1" "26c) rc 1 — never exit 0"
+has "$out" "check-doc-budgets.sh --selftest" "26c) it names the step whose red names nothing"
+has "$out" "$SPEC_BUDGET" "26c) and quotes that step's entire captured red"
+has "$out" "::warning" "26c) ::warning, not ::notice — a scraper can tell them apart"
+case "$out" in *INHERITED-FROM-MAIN*) bad "26c) THE DEFECT IS BACK: the specimen read as inherited" ;; *) ok "26c) the specimen no longer reads as inherited" ;; esac
+case "$out" in *"reports neutral (exit 0)"*) bad "26c) printed the neutral sentence for a red it could not read" ;; *) ok "26c) the refusal is not byte-similar to the neutral notice" ;; esac
+
+# 26d. THE SIBLING BLOCK DOES NOT RESCUE IT. `$spec_opaque` block 2 (the anchors
+#      guard) DOES name a path. Before the fence the two blocks were one flat
+#      file and that path made the whole set look detailed — which is precisely
+#      how the union hid the opaque half. Assert the discriminating sibling is
+#      present, or 26c passes for the wrong reason.
+grep -q 'docs/evidence/spd-b2-subxs-type-scale/README.md' "$spec_opaque" \
+  && ok "26d) PRECONDITION: the opaque fixture DOES contain a path-bearing sibling block" \
+  || bad "26d) PRECONDITION FAILED: no sibling path in the fixture, so 26c proves nothing about the union"
+out="$(spec_run "$(cat "$spec_opaque" > "$TMP/spec-flat-src.txt"; grep -v '^##\[breaker-block\]' "$TMP/spec-flat-src.txt" > "$TMP/spec-flat.txt"; echo "$TMP/spec-flat.txt")")"
+has "$out" "INHERITED-FROM-MAIN" "26d) UNFENCED (the pre-fix capture shape): the sibling's path makes the union look detailed and the red inherits"
+has "$out" "unfenced" "26d) and the notice says it read an unfenced capture rather than pretending otherwise"
+
+# 26e. THE FENCE LITERALS MUST AGREE ACROSS THE TWO FILES. They are a wire
+#      format between two scripts; a one-sided rename turns every capture into a
+#      single unfenced block and 26c silently stops firing.
+for lit in '##[breaker-block]begin ' '##[breaker-block]end'; do
+  a="$(grep -cF "$lit" "$ROOT/scripts/breaker-capture.sh")"; b="$(grep -cF "$lit" "$ROOT/scripts/main-red-breaker.sh")"
+  if [ "$a" -ge 1 ] && [ "$b" -ge 1 ]; then ok "26e) fence literal '$lit' present in BOTH scripts ($a / $b)"
+  else bad "26e) fence literal '$lit' drifted — capture:$a breaker:$b"; fi
+done
+
+# 26f. MUTATION — neutralise the locator predicate (every line counts as naming
+#      something), which is exactly the pre-fix behaviour. 26a must stay GREEN
+#      and 26c must go RED. A mutation that reds both would mean 26a was never
+#      measuring the inherited direction.
+if mutate "26f locator predicate" "LOC = re.compile(r'[A-Za-z0-9_.~-]+/[A-Za-z0-9_./~-]+|\\b[A-Za-z0-9_~-]+\\.[A-Za-z][A-Za-z0-9]{0,6}\\b')" "LOC = re.compile(r'')" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    oa="$(spec_run_with "$spec_main_detail" "$spec_same")"
+    oc="$(spec_run "$spec_opaque")"
+    rc=0
+    case "$oa" in *INHERITED-FROM-MAIN*) echo "  PASS  26f) with the predicate neutralised the INHERITED arm (26a) is UNCHANGED — the guard is not a blanket refusal" ;;
+                  *) echo "  FAIL  26f) the mutation also broke 26a, so 26a was not measuring what it claims"; rc=1 ;; esac
+    case "$oc" in *INHERITED-FROM-MAIN*) echo "  PASS  26f) and the SPECIMEN (26c) regresses to INHERITED-FROM-MAIN — the predicate is the load-bearing part" ;;
+                  *) echo "  FAIL  26f) MUTATION SURVIVED: the specimen still refused without the locator predicate"; rc=1 ;; esac
+    exit $rc ) && PASS=$((PASS+2)) || FAIL=$((FAIL+1))
+fi
+# 26g. MUTATION — delete the refusal itself (fall through to the neutral notice),
+#      the literal pre-fix control flow. 26c must stop refusing.
+if mutate "26g the refusal" 'if [ "${OPAQUE_N:-0}" -gt 0 ]; then' 'if false; then' 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(spec_run "$spec_opaque")"
+    case "$out" in *INHERITED-FROM-MAIN*) echo "  PASS  26g) without the refusal the specimen inherits again — 26c is not vacuous"; exit 0 ;;
+                   *) echo "  FAIL  26g) MUTATION SURVIVED: still refused with the refusal branch removed"; exit 1 ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+fi
+
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]

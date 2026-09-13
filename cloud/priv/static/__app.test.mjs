@@ -6815,6 +6815,46 @@ test("vercelClaimHtml: UNDEPLOYED is unaffected — nothing to be unsure about",
   assert.doesNotMatch(html, /new-vercel-claim-unknown/);
 });
 
+// cch-r16-w11 — THE VERCEL DEPLOY OFFER, BOTH WAYS, IN ONE RUN.
+// POST /v1/barkparks/:*/vercel-deploy is Auth.require_team_admin and this is
+// the only place its two arms can be measured. It is NOT reachable from the
+// scenario corpus: the control renders only when GET
+// /v1/barkparks/:id/bootstrap answers a `vercel` envelope, and THAT read is
+// itself require_team_admin, so a member's read 403s before the button is ever
+// composed and no committed fixture paints it for anyone (measured: zero
+// renders in all 132 scenarios). Here the band is an ARGUMENT, so the refusal
+// is a losable measurement rather than a consequence of a sibling read — which
+// is exactly why member-authority-sweep.mjs declares it as BLIND SPOT B6 and
+// points here instead of minting a fixture the server cannot serve a member.
+test("cch-r16-w11: vercelClaimHtml draws the deploy button live on grant and hookless-disabled on refuse", () => {
+  const vercel = { configured: true, deployed: false, claimed: false, claim_url: null };
+  const grant = hooks.vercelClaimHtml(vercel, { id: "b1" }, "grant");
+  const refuse = hooks.vercelClaimHtml(vercel, { id: "b1" }, "refuse");
+  const unknown = hooks.vercelClaimHtml(vercel, { id: "b1" }, "unknown");
+
+  // GRANT: the shipped bytes, class list included — the fence must not restyle
+  // the control it lets through.
+  assert.ok(grant.includes('<button class="btn btn-block btn-vercel" type="button" id="new-vercel-claim">Deploy your site to Vercel</button>'),
+    "the grant arm keeps the shipped btn-block btn-vercel button and its mount hook");
+
+  // REFUSE: no id anywhere — adminWriteControlHtml's refusal arm DROPS
+  // liveAttrs, so newWireReady's `$("#new-vercel-claim")` finds nothing and
+  // there is no click to bind. The verb is still drawn, and the reason is the
+  // server's own.
+  assert.doesNotMatch(refuse, /id="new-vercel-claim"/,
+    "the refusal arm must carry NO mount hook — a disabled button with an id is still a hook");
+  assert.ok(refuse.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Deploy your site to Vercel</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
+    "the same verb, drawn disabled-and-explained with its own inline reason");
+
+  // UNKNOWN fails CLOSED with the still-checking caption, never a grant.
+  assert.doesNotMatch(unknown, /id="new-vercel-claim"/);
+  assert.ok(unknown.includes("Checking capabilities"));
+
+  // The area wrapper survives all three — the swap target must exist whichever
+  // arm painted it, or a late repaint has nowhere to land.
+  for (const html of [grant, refuse, unknown]) assert.match(html, /id="new-vercel-area"/);
+});
+
 test("vercelClaimInnerHtml: the post-deploy in-place swap runs the SAME ladder", () => {
   // newVercelDeploy() swaps #new-vercel-area's innerHTML with this; if the POST
   // re-minted a code for a project that already left our team, the swap must
@@ -29918,7 +29958,20 @@ test("cch-w47-s1-fu: every launchAuthority() call site is either the FORM seam o
   const code = w31BlankComments(src);
   // The three seams that may read the whole band: the mount that withholds the
   // form, its repaint, and the /new step's own offer builder.
-  const SEAMS = new Set(["launchFlow", "repaintLaunchAuthority", "renderNewLaunch"]);
+  // cch-r16-w11 adds a FOURTH: newWriteAuthority, the narrowing that maps this
+  // five-valued band onto adminWriteControlHtml's three-valued one. It belongs
+  // with the FORM seam and not with the four offer sites, and the distinction
+  // this test is drawing is exactly why. An OFFER site DELETES a control (a
+  // `.hidden` property, an omitted menu row), so reading anything but
+  // `=== "refuse"` there would make a moved team pin erase an owner's button.
+  // newWriteAuthority deletes nothing: on `stale` it answers "unknown", and
+  // adminWriteControlHtml's unknown arm still draws the SAME verb, disabled and
+  // captioned "Checking capabilities…" — the control stands, only its live
+  // mount hook is withheld. That is launchFlow's fail-closed treatment of a
+  // moved pin ("the whole form is withheld"), one control at a time, and it is
+  // the right one for a WRITE: the alternative is offering a POST the server
+  // will refuse because we are no longer sure which team we are asking about.
+  const SEAMS = new Set(["launchFlow", "repaintLaunchAuthority", "renderNewLaunch", "newWriteAuthority"]);
   const re = /launchAuthority\(\)/g;
   const sites = [];
   let m;

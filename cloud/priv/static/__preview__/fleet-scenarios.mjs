@@ -91,6 +91,18 @@ export const FLEET_SCEN_SKIP = [
     scen: "theater-ready",
     why: 'pathname "/new" — the launch theater page, which does not mount the console shell, so `#fleet` never routes there and the cell would measure the wrong screen',
   },
+  {
+    scen: "theater-failed-member",
+    why: 'pathname "/new" — the launch theater page, which does not mount the console shell, so `#fleet` never routes there and the cell would measure the wrong screen. Same reason class as `theater-failed` above, which it is the plain-MEMBER twin of; cch-r16-w11 added it and the W15 leg REFUSED (exit 2) until this entry existed, naming the row markup (1 row, sig 21beb1a871b9) no driven scenario reproduces',
+  },
+  {
+    scen: "theater-ready-github",
+    why: 'pathname "/new" — the launch theater page, which does not mount the console shell, so `#fleet` never routes there and the cell would measure the wrong screen. Same reason class as `theater-ready` above; cch-r16-w11 added it as the first fixture to reach the ready screen with GitHub connected, and its row markup (1 row, sig f58b5b44f2b7) is reproduced by no scenario the leg can drive',
+  },
+  {
+    scen: "theater-ready-github-member",
+    why: 'pathname "/new" — the launch theater page, which does not mount the console shell, so `#fleet` never routes there and the cell would measure the wrong screen. The plain-MEMBER twin of `theater-ready-github`; it shares that scenario\'s rendered-row markup class (sig f58b5b44f2b7), which is itself undrivable, so the copy-is-driven rule cannot cover it either',
+  },
 ];
 
 // The console shell is served at the site root; anything else is another page.
