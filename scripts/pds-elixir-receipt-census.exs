@@ -73,6 +73,11 @@
 #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys # STDOUT: the EXCLUSION anchor, TSV, one line per @routed_excluded row
 #   elixir scripts/pds-elixir-receipt-census.exs --citations # STDOUT: every evidence citation RESOLVED BY CONTENT, TSV: path, line, block fingerprint, marker
 #   elixir scripts/pds-elixir-receipt-census.exs --routed-rows # PROPOSE paste-ready @routed_excluded rows for every undisposed member; NEVER writes
+#   elixir scripts/pds-elixir-receipt-census.exs --emission-shapes # census the OUTSIDE population: every emission shape the `ok: true` lens does NOT see,
+#        over api/lib/barkpark_web/controllers/** — json/2 partitioned ok/error/BARE by an AST
+#        read of the actual argument, plus put_status(2xx), send_resp(2xx), redirect/2, render
+#        and put_flash(:info). ADVISORY over the population (no count reds); reds only on its
+#        own integrity. Prints the ARRIVAL RULE, because a TOTAL over this population is unsound.
 #   elixir scripts/pds-elixir-receipt-census.exs --selftest # mutate this file over a synthetic corpus; prove the arms can go RED
 #
 # EXIT: 0 all integrity checks pass · 1 an integrity check failed · 2 corpus refused OR
@@ -2603,6 +2608,7 @@ defmodule PDS.Census do
     case parse_args(argv) do
       {:error, msgs} -> refuse_args(msgs)
       %{selftest?: true} -> selftest()
+      %{emission_shapes?: true} -> emission_shapes_run()
       %{citations?: true} -> citations_run()
       %{keys?: true} = opts -> keys_run(opts)
       %{exclusion_keys?: true} = opts -> exclusion_keys_run(opts)
@@ -2624,6 +2630,7 @@ defmodule PDS.Census do
           selftest?: false,
           citations?: false,
           routed_rows?: false,
+          emission_shapes?: false,
           files_from: nil
         },
         []
@@ -2648,6 +2655,13 @@ defmodule PDS.Census do
   defp parse_args(["--routed-rows" | rest], o, bad),
     do: parse_args(rest, %{o | routed_rows?: true}, bad)
 
+  # ON THE STRICT LIST BY NAME, like every other flag. `--emission-shapes` selects a
+  # DIFFERENT CORPUS from every other arm (the controllers subtree, not api/lib), so a
+  # near-miss swallowed into the flagless path would print the api/lib census under a
+  # heading nobody asked for — the exact PDS-D493 shape.
+  defp parse_args(["--emission-shapes" | rest], o, bad),
+    do: parse_args(rest, %{o | emission_shapes?: true}, bad)
+
   defp parse_args(["--files-from", path | rest], o, bad),
     do: parse_args(rest, %{o | files_from: path}, bad)
 
@@ -2662,7 +2676,7 @@ defmodule PDS.Census do
     p("REFUSED: UNKNOWN ARGUMENT")
     Enum.each(msgs, &p("  " <> &1))
     p("")
-    p("  accepted: --sites · --files-from FILE · --keys · --exclusion-keys · --citations · --routed-rows · --selftest")
+    p("  accepted: --sites · --files-from FILE · --keys · --exclusion-keys · --citations · --routed-rows · --emission-shapes · --selftest")
     p("  A swallowed flag is a census measuring a lens nobody asked for. Exit 2.")
     System.halt(2)
   end
@@ -4945,6 +4959,334 @@ defmodule PDS.Census do
 
     System.halt(0)
   end
+
+  # ======================================================== the EMISSION-SHAPE census
+  #
+  # WHAT THIS ARM MEASURES, AND WHY IT IS A DIFFERENT POPULATION. Everything above
+  # censuses the `ok: true` / `"ok" => true` LENS over api/lib. This arm censuses the
+  # population that lens does NOT see: every other shape a controller answers in. Its
+  # corpus is NOT tree_population/0 — it is #{} the controllers subtree named by
+  # @emission_glob, because that is where the wave-38 filing measured and a count
+  # re-derived over a different corpus is not a correction, it is a second number.
+  #
+  # THE PARSE IS AST, WHICH SUBSUMES PAREN-BALANCING. The task asked for a paren-balanced
+  # read of the actual `json/2` argument rather than substring counting. `Code.string_to_quoted/2`
+  # is strictly stronger: the argument arrives as a TREE, so `json(conn, %{ok: true, data:
+  # f(a, b)})` is ONE site with ONE body no matter how many parens the body closes, and a
+  # `json(` occurring inside a string, a comment or a @doc is not a site at all. Pipes are
+  # expanded FIRST (expand_pipes/1, PDS-D491) so `conn |> put_status(:created) |> json(body)`
+  # is seen as json/2 AND as a put_status site — two shapes, one statement, counted once each.
+  #
+  # THE FIXTURE PROVES THE PARSER ON EVERY RUN, BEFORE THE TREE IS READ. @emission_fixture
+  # is censused first and its counts asserted; a classifier that double-counts a nested-paren
+  # body, or that loses a piped json, reds at exit 1 without the tree ever being opened. A
+  # parser nobody proved is a number nobody can quote.
+  #
+  # THIS ARM IS ADVISORY OVER THE POPULATION, AND THAT IS A RULING, NOT AN OMISSION
+  # (PDS-D454, and the wave-38 row's own DRIFT WARNING). Measured across the same tree at
+  # two shas below, every shape here grows at the SAME RATE as the `ok: true` lens itself
+  # — bare json 193 -> 223 while ok: true went 82 -> 86 — so a TOTAL over this population
+  # is a number that reds on growth and greens on deletion, which is the wrong direction
+  # twice. The only sound arm over it is ARRIVAL: a NEW site must carry X. This arm ships
+  # NO such gate; it PRINTS the arrival rule so whoever builds one cannot build a total by
+  # accident. What it DOES red on is its own integrity: an empty corpus (exit 2), a file it
+  # cannot parse, a partition that does not add up, or the fixture above (exit 1).
+  @emission_glob "api/lib/barkpark_web/controllers/**/*.ex"
+
+  # THE PARSER FIXTURE. Four sites, four different shapes, and the FIRST one is the
+  # nested-paren case the task names by hand: a body whose own parens close twice must
+  # classify ONCE. The expected counts live beside it in @emission_fixture_expect.
+  @emission_pair "ok:" <> " true"
+
+  @emission_fixture """
+  defmodule FixtureController do
+    def a(conn, _p), do: json(conn, %{#{@emission_pair}, data: f(a, b)})
+    def b(conn, _p), do: json(conn, %{error: g(h(1), 2)})
+    def c(conn, _p), do: json(conn, %{count: i(j(k(1)))})
+    def d(conn, _p), do: conn |> put_status(:created) |> json(%{id: 1})
+  end
+  """
+
+  @emission_fixture_expect %{json2: 4, ok_true: 1, error: 1, bare: 2, put_status_2xx: 1}
+
+  # THE MECHANICAL / PROSE SPLIT (the task's second criterion). A shape is MECHANICAL when
+  # its success claim is recoverable from the emitted expression alone; it is PROSE-REQUIRED
+  # when the claim lives somewhere the AST does not carry — a template file, a flash string,
+  # a Location header.
+  @emission_mechanical [:json_ok_true, :json_error, :json_bare, :put_status_2xx, :send_resp_2xx]
+  @emission_prose [:redirect, :render_local, :render_dot, :put_flash_info]
+
+  defp emission_shapes_run do
+    emission_banner()
+    emission_prove_parser!()
+
+    files = Path.wildcard(@emission_glob) |> Enum.sort()
+
+    if files == [] do
+      p("REFUSED: EMPTY EMISSION CORPUS — #{@emission_glob} matched no file under #{File.cwd!()}.")
+      p("  A census of nothing prints zeros it cannot stand behind. Exit 2.")
+      System.halt(2)
+    end
+
+    {counts, unparsed} =
+      Enum.reduce(files, {emission_zero(), []}, fn path, {acc, bad} ->
+        case Code.string_to_quoted(File.read!(path), emission_parse_opts()) do
+          {:ok, ast} -> {emission_count(ast, acc), bad}
+          {:error, _} -> {acc, [path | bad]}
+        end
+      end)
+
+    emission_report(counts, files, unparsed)
+  end
+
+  defp emission_parse_opts,
+    do: [
+      literal_encoder: &{:ok, {:__block__, &2, [&1]}},
+      token_metadata: true,
+      columns: true,
+      emit_warnings: false,
+      unescape: false
+    ]
+
+  defp emission_zero,
+    do: %{
+      json2: 0,
+      json_ok_true: 0,
+      json_error: 0,
+      json_bare: 0,
+      put_status_2xx: 0,
+      send_resp_2xx: 0,
+      redirect: 0,
+      render_local: 0,
+      render_dot: 0,
+      put_flash_info: 0
+    }
+
+  # ONE PREWALK, ONE VISIT PER NODE — which is what makes "classify once, not twice" a
+  # property of the traversal and not of a hand-written guard. The nested call inside a
+  # json body is visited too, and is simply not an emission node.
+  defp emission_count(ast, acc) do
+    {_, out} =
+      ast
+      |> expand_pipes()
+      |> Macro.prewalk(acc, fn
+        {:json, _, [_conn, body]} = n, a ->
+          a = %{a | json2: a.json2 + 1}
+
+          key =
+            case emission_classify(body) do
+              :ok_true -> :json_ok_true
+              :error -> :json_error
+              :bare -> :json_bare
+            end
+
+          {n, Map.update!(a, key, &(&1 + 1))}
+
+        {:put_status, _, [_conn, status]} = n, a ->
+          {n, if(status_2xx?(status), do: %{a | put_status_2xx: a.put_status_2xx + 1}, else: a)}
+
+        {:send_resp, _, [_conn, status, _body]} = n, a ->
+          {n, if(status_2xx?(status), do: %{a | send_resp_2xx: a.send_resp_2xx + 1}, else: a)}
+
+        {:redirect, _, [_conn, _to]} = n, a ->
+          {n, %{a | redirect: a.redirect + 1}}
+
+        {:put_flash, _, [_conn, {:__block__, _, [:info]}, _msg]} = n, a ->
+          {n, %{a | put_flash_info: a.put_flash_info + 1}}
+
+        # RENDER HAS TWO SPELLINGS AND THEY ARE COUNTED APART ON PURPOSE. `render(conn, :new)`
+        # is a local call; `Phoenix.Controller.render(conn, ...)` / `MyHTML.render(...)` is a
+        # dot call. A textual `render(` lens sums them and cannot say which moved — which is
+        # exactly why the wave-38 filing's single `render` figure could not be reproduced.
+        {:render, _, [_ | _]} = n, a ->
+          {n, %{a | render_local: a.render_local + 1}}
+
+        {{:., _, [_target, :render]}, _, [_ | _]} = n, a ->
+          {n, %{a | render_dot: a.render_dot + 1}}
+
+        n, a ->
+          {n, a}
+      end)
+
+    out
+  end
+
+  # THE PARTITION OF A `json/2` BODY. `ok: true` (atom or string key) wins; otherwise an
+  # `error` key or an explicit `ok: false` makes it an ERROR receipt; otherwise it is BARE —
+  # a 200 with a body that spells no verdict at all. The three are exhaustive and disjoint
+  # BY CONSTRUCTION (a cond with a true arm), which is what EMISSION-PARTITION-TOTAL checks.
+  defp emission_classify(body) do
+    cond do
+      emission_kv?(body, :ok, &emission_true?/1) or emission_kv?(body, "ok", &emission_true?/1) ->
+        :ok_true
+
+      emission_key?(body, :error) or emission_key?(body, "error") or
+        emission_kv?(body, :ok, &emission_false?/1) or
+          emission_kv?(body, "ok", &emission_false?/1) ->
+        :error
+
+      true ->
+        :bare
+    end
+  end
+
+  # literal_encoder WRAPS EVERY LITERAL, so a keyword pair arrives as
+  # `{{:__block__, _, [:ok]}, {:__block__, _, [true]}}` and a map's pairs arrive the same
+  # way inside `{:%{}, _, pairs}`. One prewalk pattern covers both shapes; a naive
+  # `{:ok, true}` match reads ZERO through the encoder (the trap PDS-D448 names at :3167).
+  defp emission_kv?(body, want, pred) do
+    {_, hit} =
+      Macro.prewalk(body, false, fn
+        {{:__block__, _, [k]}, v} = n, acc when k == want -> {n, acc or pred.(v)}
+        n, acc -> {n, acc}
+      end)
+
+    hit
+  end
+
+  defp emission_key?(body, want), do: emission_kv?(body, want, fn _ -> true end)
+  defp emission_true?({:__block__, _, [v]}), do: v == true
+  defp emission_true?(_), do: false
+  defp emission_false?({:__block__, _, [v]}), do: v == false
+  defp emission_false?(_), do: false
+
+  defp emission_prove_parser! do
+    {:ok, ast} = Code.string_to_quoted(@emission_fixture, emission_parse_opts())
+    got = emission_count(ast, emission_zero())
+
+    want = @emission_fixture_expect
+
+    actual = %{
+      json2: got.json2,
+      ok_true: got.json_ok_true,
+      error: got.json_error,
+      bare: got.json_bare,
+      put_status_2xx: got.put_status_2xx
+    }
+
+    if actual == want do
+      p("parser      EMISSION-PARSER-FIXTURE holds — #{inspect(Map.to_list(want))}")
+      p("            The first fixture site is `json(conn, %{ok: true, data: f(a, b)})`: a body")
+      p("            whose own parens close TWICE and which classifies ONCE. A substring lens")
+      p("            counting `json(` reads that line as 2 sites; this arm reads 1.")
+      p("")
+    else
+      p("")
+      p("FAIL  EMISSION-PARSER-FIXTURE  the parser does not classify its own fixture.")
+      p("      want #{inspect(Map.to_list(want))}")
+      p("      got  #{inspect(Map.to_list(actual))}")
+      p("      A nested-paren body counted twice, or a piped json lost, makes every number")
+      p("      below unquotable. Exit 1.")
+      System.halt(1)
+    end
+  end
+
+  defp emission_banner do
+    {otp, erts} = {System.otp_release(), :erlang.system_info(:version)}
+
+    p("PDS EMISSION-SHAPE CENSUS — the population the `ok: true` lens does NOT see")
+    p(String.duplicate("=", 78))
+    p("engine      Elixir #{System.version()} · Erlang/OTP #{otp} (erts #{erts}) · #{:erlang.system_info(:system_architecture)}")
+    p("corpus      #{@emission_glob}  (NOT tree_population/0 — a narrower population, named)")
+    p("lens        AST (Code.string_to_quoted/2, literal_encoder) with expand_pipes/1 applied")
+    p("            FIRST. Sites are AST nodes, not substrings: a `json(` inside a string, a")
+    p("            comment or a @doc is not a site, and a body with nested parens is ONE site.")
+    p("gate        NONE over the population (PDS-D454). Integrity only: see EXITS below.")
+    p("exits       0 census printed · 1 an integrity arm failed · 2 empty corpus / bad flag")
+    p("")
+  end
+
+  defp emission_report(c, files, unparsed) do
+    render_total = c.render_local + c.render_dot
+
+    p("SHAPE COUNTS — #{length(files)} file(s) parsed")
+    p(String.duplicate("-", 78))
+    p("  json/2 call sites                        #{c.json2}")
+    p("    ├─ carries ok: true (THE LENS)         #{c.json_ok_true}")
+    p("    ├─ carries error: / ok: false          #{c.json_error}")
+    p("    └─ BARE (neither key)                  #{c.json_bare}")
+    p("  put_status(2xx) sites                    #{c.put_status_2xx}")
+    p("  send_resp(2xx, _) sites                  #{c.send_resp_2xx}")
+    p("  redirect/2 sites                         #{c.redirect}")
+    p("  render sites (local + dot)               #{render_total}   (local #{c.render_local} · dot #{c.render_dot})")
+    p("  put_flash(:info, _) sites                #{c.put_flash_info}")
+    p("")
+
+    mech = Enum.sum(Enum.map(@emission_mechanical, &emission_n(c, &1)))
+    prose = Enum.sum(Enum.map(@emission_prose, &emission_n(c, &1)))
+
+    p("MECHANICALLY CLASSIFIABLE vs PROSE-REQUIRED")
+    p(String.duplicate("-", 78))
+    p("  MECHANICAL  #{mech}  — the success claim is recoverable from the emitted expression")
+    Enum.each(@emission_mechanical, &p("                #{String.pad_trailing(to_string(&1), 20)} #{emission_n(c, &1)}"))
+    p("      json/2 partitions into ok / error / bare with ZERO ambiguity: the body is a tree,")
+    p("      the keys are literals, and the cond that splits them has a total arm.")
+    p("")
+    p("  PROSE       #{prose}  — the claim lives where the AST does not carry it")
+    Enum.each(@emission_prose, &p("                #{String.pad_trailing(to_string(&1), 20)} #{emission_n(c, &1)}"))
+    p("      A redirect answers with no body; a render's claim is in a template file; a flash")
+    p("      string is a sentence for a person. Disposition for these needs a reader, not a parser.")
+    p("")
+
+    p("THE ARRIVAL RULE — READ THIS BEFORE ARMING ANYTHING OVER THESE NUMBERS")
+    p(String.duplicate("-", 78))
+    p("  NO ARM IN THIS FILE REDS ON ANY COUNT ABOVE, and none should. Measured over this")
+    p("  same corpus at two shas (c2affd445, 2026-08-02 -> bc9eff9c7, 2026-09-13): json/2")
+    p("  446 -> 499, bare 193 -> 223, error 171 -> 190, while the `ok: true` LENS itself")
+    p("  went 82 -> 86. The outside population grows at the lens's own rate, so a TOTAL over")
+    p("  it reds on ordinary growth and GREENS ON DELETION — wrong in both directions.")
+    p("  THE ONLY SOUND ARM IS ARRIVAL: a NEW site must carry X. Key the baseline by site")
+    p("  (path + enclosing mfa + expression fingerprint, the way site_key/1 does above),")
+    p("  diff the KEY SET, and judge only the keys that ARRIVED. A count is not a key set.")
+    p("")
+
+    arms = [
+      emission_arm(
+        "EMISSION-PARTITION-TOTAL",
+        c.json_ok_true + c.json_error + c.json_bare == c.json2,
+        "ok #{c.json_ok_true} + error #{c.json_error} + bare #{c.json_bare} == json/2 #{c.json2}",
+        "the json/2 partition does not add up — #{c.json_ok_true} + #{c.json_error} + #{c.json_bare} != #{c.json2}; a site fell out of the taxonomy"
+      ),
+      emission_arm(
+        "EMISSION-CORPUS-PARSES",
+        unparsed == [],
+        "every file in the corpus parsed",
+        "#{length(unparsed)} file(s) did not parse and were SILENTLY absent from every count above: #{Enum.join(Enum.sort(unparsed), ", ")}"
+      ),
+      emission_arm(
+        "EMISSION-LENS-IS-A-SUBSET",
+        c.json_ok_true <= c.json2,
+        "the ok: true lens is a subset of the json/2 population",
+        "the lens counts MORE sites than the population it partitions"
+      )
+    ]
+
+    p("INTEGRITY ARMS — these red on THIS INSTRUMENT, never on the population")
+    p(String.duplicate("-", 78))
+    Enum.each(arms, fn a -> p("  #{if a.ok?, do: "PASS", else: "FAIL"}  #{String.pad_trailing(a.name, 26)} #{a.why}") end)
+    p("")
+
+    if Enum.all?(arms, & &1.ok?) do
+      p("EMISSION CENSUS OK — #{c.json2 + c.put_status_2xx + c.send_resp_2xx + c.redirect + render_total + c.put_flash_info} emission sites over #{length(files)} files, ADVISORY, arrival-only.")
+      System.halt(0)
+    else
+      p("EMISSION CENSUS FAILED — an integrity arm went red. The counts above are not quotable.")
+      System.halt(1)
+    end
+  end
+
+  defp emission_n(c, :json_ok_true), do: c.json_ok_true
+  defp emission_n(c, :json_error), do: c.json_error
+  defp emission_n(c, :json_bare), do: c.json_bare
+  defp emission_n(c, :put_status_2xx), do: c.put_status_2xx
+  defp emission_n(c, :send_resp_2xx), do: c.send_resp_2xx
+  defp emission_n(c, :redirect), do: c.redirect
+  defp emission_n(c, :render_local), do: c.render_local
+  defp emission_n(c, :render_dot), do: c.render_dot
+  defp emission_n(c, :put_flash_info), do: c.put_flash_info
+
+  defp emission_arm(name, true, why, _), do: %{name: name, ok?: true, why: why}
+  defp emission_arm(name, false, _, why), do: %{name: name, ok?: false, why: why}
 
   # ---------------------------------------------------------------- reporting
 
@@ -12627,6 +12969,65 @@ defmodule PDS.Census do
       expect: ["MINTS DECIDE", "CENSUS OK"],
       refute: ["NO mint decides a printed class this run"],
       proves: "the exact measure is the intersection and NOT the proxy: substitute `best_minted` (a mint anywhere in the winning substitution) back into the slot the intersection fills and the derived verdict flips from NO mint decides to MINTS DECIDE, at exit 0 both times — which is precisely how the overstatement shipped unnoticed"
+    },
+    # ---------------------------------------------- the EMISSION-SHAPE arm (wave 38)
+    #
+    # THESE FOUR RUN OVER THE `:repo` CORPUS, NOT THE SYNTHETIC ONE, AND THEY HAVE TO.
+    # `--emission-shapes` censuses api/lib/barkpark_web/controllers/**, which the synthetic
+    # tree does not hold at all — over `:full` the arm would refuse an EMPTY CORPUS at exit 2
+    # and every mutant below would "red" for a reason that has nothing to do with the mutation
+    # (PDS-D541, the same reason ROSTER-VERDICT-FRESH runs against the repo).
+    %{
+      name: "EMISSION-SHAPES-GREEN",
+      corpus: :repo,
+      argv: ["--emission-shapes"],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "EMISSION-PARSER-FIXTURE holds",
+        "EMISSION CENSUS OK",
+        "THE ARRIVAL RULE",
+        "ADVISORY, arrival-only"
+      ],
+      proves: "the emission census runs clean over the real controllers tree AND prints the arrival rule — so every red below is the mutation, and no reader can quote a count without reading why a total over it is unsound"
+    },
+    %{
+      name: "EMISSION-ARGV-STRICT",
+      corpus: :repo,
+      argv: ["--emission-shape"],
+      mut: nil,
+      exit: 2,
+      expect: ["REFUSED: UNKNOWN ARGUMENT", "--emission-shapes"],
+      proves: "the singular near-miss refuses instead of falling through to the api/lib census — this flag selects a DIFFERENT CORPUS, so a swallowed near-miss would print one population under the other's heading"
+    },
+    %{
+      name: "EMISSION-DOUBLE-COUNT",
+      corpus: :repo,
+      argv: ["--emission-shapes"],
+      mut: {"a = %{a | json2: a.json2" <> " + 1}", "a = %{a | json2: a.json2 + 2}"},
+      exit: 1,
+      expect: ["FAIL  EMISSION-PARSER-FIXTURE", "want", "got"],
+      proves: "a json/2 site counted TWICE reds on the fixture before the tree is opened — which is the substring-lens failure this arm exists to rule out: `json(conn, %{ok: true, data: f(a, b)})` closes its parens twice and must still be ONE site"
+    },
+    %{
+      name: "EMISSION-PIPED-JSON-LOST",
+      corpus: :repo,
+      argv: ["--emission-shapes"],
+      mut: {"    ast\n      |> expand_pipes()" <> "\n", "    ast\n"},
+      exit: 1,
+      expect: ["FAIL  EMISSION-PARSER-FIXTURE"],
+      proves: "dropping expand_pipes/1 makes `conn |> put_status(:created) |> json(body)` invisible as a json/2 site (PDS-D491) — the fixture's fourth site is exactly that shape, so the loss reds instead of quietly shrinking the denominator"
+    },
+    %{
+      name: "EMISSION-PARTITION-TOTAL",
+      corpus: :repo,
+      argv: ["--emission-shapes"],
+      mut:
+        {"c.json_ok_true + c.json_error + c.json_bare == c.json2," <> "\n",
+         "c.json_ok_true + c.json_error + c.json_bare == c.json2 + 1,\n"},
+      exit: 1,
+      expect: ["FAIL  EMISSION-PARTITION-TOTAL", "EMISSION CENSUS FAILED"],
+      proves: "the partition arm itself can go RED and exits 1 naming itself — the fixture arm shadows every partition break the fixture can SEE, so the arm is perturbed directly, the way CORPUS-INTACT bypasses the guard that shadows it"
     }
   ]
 

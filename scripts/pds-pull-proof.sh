@@ -3293,6 +3293,103 @@ columns_where() { # <same|diff> before_line after_line -> the column names whose
   printf '%s' "${out# }"
 }
 
+columns_intersect() { # "<names>" "<names>" -> the names present in BOTH, in
+                      # GUARDED_COLUMNS order. Used to say out loud which
+                      # columns an assertion rests on rather than inheriting the
+                      # eight from a literal.
+  local col out=""
+  for col in $GUARDED_COLUMNS; do
+    case " $1 " in *" $col "*) : ;; *) continue ;; esac
+    case " $2 " in *" $col "*) out="$out $col" ;; esac
+  done
+  printf '%s' "${out# }"
+}
+
+# ── THE THIRD DIGEST STATE: PRE-SENTINEL, PER ROW, PER COLUMN (PDS-D742) ─────
+#
+# `scoped_column_digests` answers "is this column's aggregate what it was". That
+# is enough for leg A and for leg B ONCE THE DRIFT EXISTS, and it says nothing
+# about whether the drift exists at all. The sentinel writes the CONSTANT
+# `visibility = 'private'`, and `visibility` is
+# `validate_inclusion(:visibility, ~w(public private))`
+# (api/lib/barkpark/content/schema_definition.ex) — a binary enum with no third
+# legal value — so on every row that is ALREADY private that write is a literal
+# no-op. Measured on a live scratch target in wave 9: 31 of the 34 in-scope rows
+# were already private, so leg B's visibility control rested on THREE rows. On
+# an all-private roster it would rest on NONE, and the rung would still go green
+# off the other seven columns while one of its eight guarded controls proved
+# nothing — PDS-D130's partial clobber arriving through the back door.
+#
+# THE FIX IS A MEASUREMENT, NOT A STRONGER SENTINEL. Drifting `visibility` the
+# other way — flipping the 31 private rows to 'public' to buy an n=34 control —
+# would INVERT the exposure the sentinel comment below relies on ('private' 404s
+# anonymous document reads, contained ONLY because step 6 is terminal among
+# target-reading rungs), so it is refused. Instead the run captures a THIRD
+# state taken BEFORE the sentinel UPDATE, at per-ROW granularity, and diffs
+# pre-vs-sentinelled: the set of columns leg B must see revert becomes the set
+# the sentinel is MEASURED to have moved, each column's moved-row count is
+# printed, and a guarded column the sentinel moved on ZERO rows REDS the rung by
+# name instead of riding the other seven's green.
+scoped_row_column_fingerprints() { # workspace_id -> one line per in-scope row:
+                                   # `dataset|name` TAB md5(col) … in
+                                   # GUARDED_COLUMNS order. Per-ROW on purpose:
+                                   # a per-column aggregate cannot say HOW MANY
+                                   # rows a write actually moved, and "how many"
+                                   # is the whole question here.
+  local ws="$1" col sel=""
+  for col in $GUARDED_COLUMNS; do
+    sel="$sel || E'\t' || md5(coalesce(${col}::text,'<null>'))"
+  done
+  tgt_psql "SELECT dataset || '|' || name$sel FROM schema_definitions WHERE $(sentinel_scope_sql "$ws") ORDER BY dataset, name"
+}
+
+moved_column_counts() { # before_block after_block -> `<col>=<n>` per guarded
+                        # column, space separated, in GUARDED_COLUMNS order.
+                        #
+                        # rc 1 = the two blocks do not describe the SAME row set.
+                        # That is a scope that shifted under the run, not a
+                        # movement to count; folding it into the counts would
+                        # manufacture coverage for a column nothing was written
+                        # to, which is precisely the silent green this function
+                        # exists to refuse. So it is a REFUSAL by exit code, not
+                        # a number the caller cannot tell apart from a real one.
+  local b="$1" a="$2"
+  { printf '%s\n' "$b"; printf '%s\n' '__PDS_SIDE_BREAK__'; printf '%s\n' "$a"; } |
+  awk -F'\t' -v cols="$GUARDED_COLUMNS" '
+    BEGIN { n = split(cols, name, " "); side = 0; nb = 0; na = 0 }
+    $0 == "__PDS_SIDE_BREAK__" { side = 1; next }
+    $0 == "" { next }
+    {
+      if (side == 0) { nb++; seen_b[$1] = 1; for (i = 2; i <= n + 1; i++) before[$1, i] = $i }
+      else           { na++; seen_a[$1] = 1; for (i = 2; i <= n + 1; i++) after[$1, i]  = $i }
+    }
+    END {
+      if (nb == 0 || nb != na) { exit 1 }
+      for (k in seen_b) { if (!(k in seen_a)) { exit 1 } }
+      for (k in seen_b)
+        for (i = 2; i <= n + 1; i++)
+          if (before[k, i] != after[k, i]) moved[i]++
+      out = ""
+      for (i = 2; i <= n + 1; i++) out = out (out == "" ? "" : " ") name[i - 1] "=" (moved[i] + 0)
+      print out
+    }'
+}
+
+moved_columns_where() { # <zero|nonzero> "<col>=<n> …" -> the column names whose
+                        # measured moved-row count is / is not zero, in the
+                        # order the vector carries them.
+  local want="$1" tok out=""
+  for tok in $2; do
+    case "$want:${tok##*=}" in
+      zero:0)    out="$out ${tok%%=*}" ;;
+      zero:*)    : ;;
+      nonzero:0) : ;;
+      *)         out="$out ${tok%%=*}" ;;
+    esac
+  done
+  printf '%s' "${out# }"
+}
+
 reboot_target() { # 0 = the target answered HTTP again
   local i code
   "$TARGET_TREE/bin/barkpark" stop >/dev/null 2>&1 || true
@@ -3400,6 +3497,15 @@ step_6() {
   say ""
   info "SENTINEL        writing deliberate drift into all eight guarded columns"
   info "                scope: workspace $stamp_ws · dataset $SOURCE_DS · name NOT IN ('tag','metric')"
+  # THE PRE-SENTINEL STATE (PDS-D742), taken BEFORE the UPDATE and per row, so
+  # the run can MEASURE which guarded columns the sentinel moved rather than
+  # assume all eight moved because all eight appear in the SET list.
+  local rows_pre_sentinel
+  rows_pre_sentinel="$(scoped_row_column_fingerprints "$stamp_ws")"
+  if [ -z "$rows_pre_sentinel" ]; then
+    fail 6 "could not read the PRE-SENTINEL per-row fingerprints for workspace $stamp_ws / dataset '$SOURCE_DS' — without the third digest state this run cannot tell a guarded column the sentinel MOVED from one it wrote a no-op into, so leg B's per-column claim would rest on an assumption (PDS-D742). Nothing was written to the target."
+    return 0
+  fi
   sentinel_rows="$(tgt_psql "WITH upd AS (UPDATE schema_definitions SET title = '$mark', icon = '$mark', visibility = 'private', owner_scoped = NOT coalesce(owner_scoped, false), fields = coalesce(fields, ARRAY[]::jsonb[]) || '{\"__pds_sentinel\":\"$sentinel_id\"}'::jsonb, cors_origins = coalesce(cors_origins, ARRAY[]::text[]) || ARRAY['$mark'], desk_groups = coalesce(desk_groups, ARRAY[]::jsonb[]) || '{\"__pds_sentinel\":\"$sentinel_id\"}'::jsonb, list_preview = coalesce(list_preview, '{}'::jsonb) || '{\"__pds_sentinel\":\"$sentinel_id\"}'::jsonb WHERE $(sentinel_scope_sql "$stamp_ws") RETURNING id) SELECT count(*) FROM upd" | head -1 | tr -d '[:space:]' || true)"
   info "RETURNING       ${sentinel_rows:-<nothing>} rows sentinelled"
   case "${sentinel_rows:-}" in
@@ -3412,6 +3518,26 @@ step_6() {
     return 0
   fi
 
+  # ── WHAT THE SENTINEL ACTUALLY MOVED, PER COLUMN (PDS-D742) ───────────────
+  #
+  # Third state minus second state. Printed, then ASSERTED: a guarded column the
+  # sentinel moved on zero rows is a control that could not fire, and it reds
+  # here rather than riding the other columns' green all the way to `pass 6`.
+  local rows_sentinelled sentinel_moved sentinel_dead sentinel_live
+  rows_sentinelled="$(scoped_row_column_fingerprints "$stamp_ws")"
+  if ! sentinel_moved="$(moved_column_counts "$rows_pre_sentinel" "$rows_sentinelled")"; then
+    fail 6 "the PRE-SENTINEL and SENTINELLED reads do not describe the same row set in workspace $stamp_ws / dataset '$SOURCE_DS' — the sentinel scope moved under the run, so a per-column moved-row count taken across them would be counting rows that appeared or vanished rather than a write (PDS-D742). NOTE: the target is SENTINELLED and was not reverted."
+    return 0
+  fi
+  info "sentinel moved  $sentinel_moved"
+  info "                ^ rows the sentinel GENUINELY changed, per guarded column, out of $sentinel_rows in scope. A column at 0 is a control that could not fire."
+  sentinel_dead="$(moved_columns_where zero "$sentinel_moved")"
+  sentinel_live="$(moved_columns_where nonzero "$sentinel_moved")"
+  if [ -n "$sentinel_dead" ]; then
+    fail 6 "THIS CONTROL COULD NOT FIRE: the sentinel UPDATE changed ZERO of the $sentinel_rows in-scope rows in these guarded columns: $sentinel_dead (measured pre-sentinel against sentinelled: $sentinel_moved). The written value is a no-op on this target's roster, not a drift — \`visibility\` takes only public|private, so an all-private slot makes that column's write a no-op on every row. Leg B below would then 'prove' reversion on a column nothing drifted and the rung would go green off the remaining columns: the PDS-D130 partial clobber arriving through the back door (PDS-D742). NOTE: the target is SENTINELLED and was not reverted."
+    return 0
+  fi
+
   # digest_before now reflects the SENTINELLED state — that is the whole point.
   digest_before="$(tgt_psql "$GUARDED_DIGEST_SQL" | head -1 || true)"
   local cols_before
@@ -3420,7 +3546,8 @@ step_6() {
     fail 6 "could not digest schema_definitions on the target — the eight guarded columns cannot be compared across a reboot, so a 'converged' verdict would be unmeasured"
     return 0
   fi
-  info "before reboot   guarded-column digest $digest_before"
+  info "before reboot   guarded-column digest $digest_before   [WHOLE TABLE]"
+  info "                ^ WHOLE-TABLE digest: GUARDED_DIGEST_SQL carries no WHERE, so its \`rows=\` counts EVERY schema_definitions row on the target, including the \`tag\` and \`metric\` rows the sentinel scope deliberately excludes. It is a headline, not the quantity either leg measures — that is the SCOPED per-column vector over $sentinel_rows rows, printed above and below (PDS-D743)."
 
   # The SKIP count is read from the log the BOOT BELOW appends, so the offset is
   # taken now. `bin/barkpark` APPENDS to $BARKPARK_HOME/server.log across
@@ -3472,7 +3599,8 @@ step_6() {
   local cols_after leg_a_changed survivors
   cols_after="$(scoped_column_digests "$stamp_ws")"
   leg_a_changed="$(columns_where diff "$cols_before" "$cols_after")"
-  info "after reboot    guarded-column digest ${digest_after:-<unreadable>}"
+  info "after reboot    guarded-column digest ${digest_after:-<unreadable>}   [WHOLE TABLE]"
+  info "leg A columns   changed across the STAMPED reboot: ${leg_a_changed:-<none — every guarded column held>}   (measured, scoped to the $sentinel_rows sentinelled rows)"
 
   # ZERO SKIPs is a different fact from a MISCOUNT, and conflating them puts a
   # roster-drift diagnosis on a boot where the guard simply never ran.
@@ -3523,7 +3651,7 @@ step_6() {
   # verbatim), so this is direct SQL — and the RETURNING value is ASSERTED,
   # because jsonb_set is a proven silent NO-OP when the parent path is absent.
   if [ "${PDS_STEP6_GUARD_DEMO:-1}" != "1" ]; then
-    pass 6 "content-and-presence convergence across a real reboot: $sentinel_rows rows were deliberately DRIFTED in all eight guarded columns and the guard preserved every one of them ($digest_before, unchanged; $survivors/$sentinel_rows sentinels intact; $skip_count SKIPs logged), and the pull_provenance stamp survived. NOTE: the guard-off control was DISABLED (PDS_STEP6_GUARD_DEMO=0), so nothing here proves this box would clobber without the stamp — the green is weaker for it, and the target is left SENTINELLED."
+    pass 6 "content-and-presence convergence across a real reboot: $sentinel_rows rows were deliberately DRIFTED with the MEASURED per-column coverage [$sentinel_moved] (every guarded column moved on at least one row; a zero would have redded this rung by name, PDS-D742) and the guard preserved every one of them — leg A changed columns: ${leg_a_changed:-<none>}; $survivors/$sentinel_rows sentinels intact; $skip_count SKIPs logged; whole-table digest $digest_before, unchanged — and the pull_provenance stamp survived. NOTE: the guard-off control was DISABLED (PDS_STEP6_GUARD_DEMO=0), so nothing here proves this box would clobber without the stamp — the green is weaker for it, and the target is left SENTINELLED."
     return 0
   fi
 
@@ -3547,7 +3675,7 @@ step_6() {
     return 0
   fi
   digest_clobbered="$(tgt_psql "$GUARDED_DIGEST_SQL" | head -1 || true)"
-  info "after guard-off ${digest_clobbered:-<unreadable>}"
+  info "after guard-off ${digest_clobbered:-<unreadable>}   [WHOLE TABLE]"
   if [ "$digest_clobbered" = "$digest_before" ]; then
     fail 6 "THE CONTROL DID NOT FIRE: with the provenance stamp cleared, a boot left the eight guarded columns unchanged. Then the converged green above was not measuring a guard — it was measuring a plugin whose declaration happens to match. Uninterpretable either way (PDS-D20)."
     return 0
@@ -3563,9 +3691,20 @@ step_6() {
   # eight in one Repo.update, pinned by the committed S7 probe — but the
   # per-column assertion costs nothing and is the only shape that stays honest
   # if that cast list ever narrows.
-  local cols_clobbered leg_b_unmoved survivors_after
+  #
+  # AND IT ASSERTS OVER THE COLUMNS IT CAN NAME SUPPORT FOR (PDS-D742). The
+  # required set is $sentinel_live — the columns the pre-sentinel diff MEASURED
+  # the sentinel to have moved — not the eight names in the GUARDED_COLUMNS
+  # literal. On any run that reaches this line the two sets are IDENTICAL,
+  # because a zero-coverage column redded the rung terminally above; the
+  # intersection therefore removes nothing today. It is here so the assertion
+  # names its own support rather than inheriting it from a constant, which is
+  # the difference between a control that is measured and one that is assumed.
+  local cols_clobbered leg_b_unmoved leg_b_moved survivors_after
   cols_clobbered="$(scoped_column_digests "$stamp_ws")"
-  leg_b_unmoved="$(columns_where same "$cols_before" "$cols_clobbered")"
+  leg_b_moved="$(columns_where diff "$cols_before" "$cols_clobbered")"
+  leg_b_unmoved="$(columns_intersect "$(columns_where same "$cols_before" "$cols_clobbered")" "$sentinel_live")"
+  info "leg B columns   moved by the GUARD-OFF boot: ${leg_b_moved:-<none>}   (required: $sentinel_live)"
   survivors_after="$(tgt_psql "SELECT count(*) FROM schema_definitions WHERE $(sentinel_scope_sql "$stamp_ws") AND (title = '$mark' OR icon = '$mark' OR '$mark' = ANY(cors_origins) OR fields::text LIKE '%$sentinel_id%' OR desk_groups::text LIKE '%$sentinel_id%' OR list_preview::text LIKE '%$sentinel_id%')" | head -1 | tr -d '[:space:]' || true)"
   info "sentinel wiped  ${survivors_after:-?} of $sentinel_rows rows still carry ANY trace of the drift"
   if [ -n "$leg_b_unmoved" ]; then
@@ -3580,7 +3719,7 @@ step_6() {
   info "NOTE            the target is now CLOBBERED on purpose. Steps 2 and 5 are"
   info "                sequenced BEFORE this control for exactly that reason; a"
   info "                re-pull is required before any further assertion about it."
-  pass 6 "content-and-presence convergence across a real reboot, measured against DELIBERATE DRIFT rather than against an untouched target: $sentinel_rows rows (workspace $stamp_ws · dataset $SOURCE_DS · minus the tag/metric non-plugin rows) were sentinelled in all eight guarded columns, the boot logged exactly $skip_count Bootstrap guard SKIPs to match (plus ${tag_skip_count:-0} TagRegistry skip of the core \`tag\` row, which the scope excludes), and the stamped reboot preserved every column and all $survivors sentinels ($digest_before, unchanged) — AND the control fires per column: with the stamp cleared by asserted SQL, the very next boot reverted ALL EIGHT of $GUARDED_COLUMNS and wiped every trace of the drift (${digest_clobbered}). At sha parity a sentinel-free version of this rung would pass with the guard deleted from the codebase; this one cannot."
+  pass 6 "content-and-presence convergence across a real reboot, measured against DELIBERATE DRIFT rather than against an untouched target: $sentinel_rows rows (workspace $stamp_ws · dataset $SOURCE_DS · minus the tag/metric non-plugin rows) were sentinelled with the MEASURED per-column coverage [$sentinel_moved] — every guarded column moved on at least one row, and a zero would have redded this rung by name rather than riding the others' green (PDS-D742) — the boot logged exactly $skip_count Bootstrap guard SKIPs to match (plus ${tag_skip_count:-0} TagRegistry skip of the core \`tag\` row, which the scope excludes), and the stamped reboot preserved every column and all $survivors sentinels — leg A changed columns: ${leg_a_changed:-<none>}; whole-table digest $digest_before, unchanged (that headline counts every schema_definitions row, \`tag\` and \`metric\` included; the scoped per-column vectors are the measured quantity, PDS-D743) — AND the control fires per column: with the stamp cleared by asserted SQL, the very next boot moved leg B columns [$leg_b_moved] against the required set [$sentinel_live] and wiped every trace of the drift (whole-table digest ${digest_clobbered}). At sha parity a sentinel-free version of this rung would pass with the guard deleted from the codebase; this one cannot."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════

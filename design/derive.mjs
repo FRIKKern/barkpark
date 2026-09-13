@@ -775,6 +775,69 @@ function calloutII(mode, role, sub, skin, misses) {
   return toHex(w.rgb);
 }
 
+// VERDICT accents (pe-bl-verdict-accent-tokens) — the artifact's two SEMANTIC
+// hues, the pair that carries a JUDGEMENT rather than a system state:
+//
+//   loss  — terracotta-red. "This is the number that went wrong."
+//   peace — green.          "This one is fine; stop reading here."
+//
+// Deliberately NOT status.danger / status.ok and NOT paperCallout.danger /
+// .success, even though the hues are neighbours. Those four are SYSTEM roles
+// grounded on the Studio shell (white / the shell bg) and they answer "what is
+// this thing's state". A verdict answers "what should the reader conclude", it
+// lands INSIDE the reading page, and its ground is therefore `paper.surface.bg`
+// — a different ground means a different AA walk means a different byte. Folding
+// them together would pick one ground and silently mis-contrast on the other.
+//
+// Each role ships TWO leaves:
+//   <role>       the INK — a stat value's digits, a callout's text and its rail.
+//   <role>-soft  the GROUND — the pale wash a verdict callout/panel fills with.
+//
+// The ink is AA-walked against the WORST GROUND it can land on — not against a
+// single nominated one. A verdict ink meets three grounds in practice:
+//
+//   <role>-soft              the callout wash it paints itself onto,
+//   paper.surface.bg-deep    a stat TILE's fill (the KPI card is bg-deep),
+//   paper.surface.bg         the bare reading page.
+//
+// In light mode the ink is dark, so the worst of those is the DARKEST; in dark
+// mode the ink is light, so the worst is the LIGHTEST. Clearing 4.5 on that one
+// clears it on the other two by construction. Picking any single ground and
+// arguing the rest follow is exactly how this went wrong once already: walked
+// against the soft wash alone, iris/light's peace ink landed at 4.49 on the
+// stat tile's bg-deep — a 0.01 miss no eye would catch and no gate would have,
+// had check.mjs Part H's verdict arm not measured the tile pairing separately.
+// Output hex (the paperCallout/tokens shape).
+const VERDICT_HUE = { loss: 32, peace: 152 };   // OKLCH degrees
+const VERDICT_CMAX = { loss: 0.135, peace: 0.115 };
+const VERDICT_SOFT_L = { light: 0.945, dark: 0.212 };
+const VERDICT_SOFT_CSCALE = { light: 0.38, dark: 0.55 };
+
+/** The SOFT ground for one verdict role — a pale wash of the locked hue. */
+function verdictSoft(role, skin, mode) {
+  const sat = satOf(srgbToOklch(skin[mode].accent).C);
+  const C = VERDICT_CMAX[role] * sat * VERDICT_SOFT_CSCALE[mode];
+  return oklchToSrgb(VERDICT_SOFT_L[mode], C, VERDICT_HUE[role]);
+}
+
+function verdictII(role, sub, ctx, mode) {
+  const { skin, resolve, misses } = ctx;
+  const soft = verdictSoft(role, skin, mode);
+  if (sub === "soft") return toHex(soft);
+  // The worst ground: darkest in light mode, lightest in dark mode.
+  const grounds = [soft, resolve(`paper.surface.bg.${mode}`), resolve(`paper.surface.bg-deep.${mode}`)];
+  const worst = grounds.reduce((a, b) =>
+    (mode === "light" ? relLum(parseColor(b)) < relLum(parseColor(a))
+                      : relLum(parseColor(b)) > relLum(parseColor(a))) ? b : a);
+  const sat = satOf(srgbToOklch(skin[mode].accent).C);
+  const w = aaWalk(
+    mode === "light" ? 0.56 : 0.80, VERDICT_CMAX[role] * sat, VERDICT_HUE[role], worst,
+    { target: 4.5, step: mode === "light" ? -0.02 : 0.02, maxL: 0.97 },
+  );
+  if (!w.hit) misses.push({ slot: `verdict.${role}.${mode}`, got: w.contrast, want: 4.5 });
+  return toHex(w.rgb);
+}
+
 // Warm-shift an HSL triplet (hue rotate + optional sat bump) — the decorative /
 // reading accents are a warmer sibling hue of the brand seed.
 function shiftHsl(hslStr, dh, ds = 0) {
@@ -924,6 +987,12 @@ function buildFormulas() {
   for (const [slot, src] of Object.entries(emailMap))
     F[`paperEmail.${slot}`] = src == null ? () => "#ffffff" : ((s) => (c) => c.resolve(s))(src);
 
+  // — verdict: 2 semantic roles × {ink, soft} × 2 modes, grounded on the PAPER page —
+  for (const role of ["loss", "peace"]) {
+    M((m) => [`verdict.${role}.${m}`, (c) => verdictII(role, "ink", c, m)]);
+    M((m) => [`verdict.${role}-soft.${m}`, (c) => verdictII(role, "soft", c, m)]);
+  }
+
   // — paperCallout: 5 role tones × {bg,fg} × 2 modes, TINTED from the status ramp —
   for (const mode of modes)
     for (const role of ["success", "warning", "danger", "info", "neutral"])
@@ -960,6 +1029,7 @@ export const SLOTS = (() => {
   for (const t of ["light", "dark"])
     for (const r of ["success", "warning", "danger", "info", "neutral"])
       for (const k of ["bg", "fg"]) s.push(`paperCallout.${t}.${r}.${k}`);
+  for (const r of ["loss", "loss-soft", "peace", "peace-soft"]) for (const m of ["light", "dark"]) s.push(`verdict.${r}.${m}`);
   return s;
 })();
 

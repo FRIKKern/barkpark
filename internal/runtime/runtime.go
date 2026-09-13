@@ -86,6 +86,11 @@ type Executor struct {
 	// Zero (unset) takes DefaultBuildCacheKeep; "off" disables that arm.
 	BuildCacheKeep string
 
+	// Timeouts bounds each docker/caddy subprocess with its own per-operation
+	// budget. A zero field takes its Default… constant (see optimeout.go), so
+	// the zero value is the production configuration.
+	Timeouts OpTimeouts
+
 	// Logger is called for non-fatal warnings the executor wants visible
 	// without failing the deploy — e.g. a best-effort drain that didn't
 	// succeed. nil -> silent.
@@ -309,7 +314,7 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	if err := e.writeCaddyfile(updated); err != nil {
 		// The green container is up but unreachable (no Caddyfile entry). Tear
 		// it down so a flapping Caddy doesn't leak 512m orphans across reboots.
-		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName(slug, d.ID))
+		_ = e.runOp(ctx, OpDockerRemove, e.Timeouts.dockerRemove(), devNull{}, "docker", "rm", "-f", containerName(slug, d.ID))
 		_ = e.transition(ctx, d.ID, map[string]any{
 			"worker_id":      e.WorkerID,
 			"observed_epoch": d.Epoch,
@@ -322,7 +327,7 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	if err := e.reloadCaddy(ctx); err != nil {
 		// Same as above — the new container is pinned to a loopback port that
 		// Caddy never picked up. Reap it before failing the transition.
-		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName(slug, d.ID))
+		_ = e.runOp(ctx, OpDockerRemove, e.Timeouts.dockerRemove(), devNull{}, "docker", "rm", "-f", containerName(slug, d.ID))
 		_ = e.transition(ctx, d.ID, map[string]any{
 			"worker_id":      e.WorkerID,
 			"observed_epoch": d.Epoch,
@@ -487,7 +492,7 @@ func (e *Executor) executeDeploy(
 	// a command the shell expands. A prior `sh -c "docker load -i %q"` was a real
 	// RCE — Go's %q does NOT neutralize `$(...)`/backticks inside a shell.
 	imageTar := fmt.Sprintf("%s/%s.tar", strings.TrimRight(e.CacheDir, "/"), d.ImageTag)
-	if err := e.runner().Run(ctx, devNull{},
+	if err := e.runOp(ctx, OpDockerLoad, e.Timeouts.dockerLoad(), devNull{},
 		"docker", "load", "-i", imageTar); err != nil {
 		return "", "", nil, 0, 0, fmt.Errorf("docker load %s: %w", imageTar, err)
 	}
@@ -544,7 +549,7 @@ func (e *Executor) executeDeploy(
 	// deployment 2f92055a left site-jarl-website-2f92055a in Created, and the
 	// retry's `docker run` failed with "name already in use", exit 125).
 	// Best-effort removal; an absent name just errors quietly.
-	_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", container)
+	_ = e.runOp(ctx, OpDockerRemove, e.Timeouts.dockerRemove(), devNull{}, "docker", "rm", "-f", container)
 
 	args := []string{
 		"run", "-d",
@@ -561,14 +566,14 @@ func (e *Executor) executeDeploy(
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, containerInnerPort),
 		d.ImageTag,
 	)
-	if err := e.runner().Run(ctx, devNull{}, "docker", args...); err != nil {
+	if err := e.runOp(ctx, OpDockerRun, e.Timeouts.dockerRun(), devNull{}, "docker", args...); err != nil {
 		return "", "", nil, 0, 0, fmt.Errorf("docker run: %w", err)
 	}
 
 	// 5. Health-check the container until /` answers (any non-5xx).
 	if err := e.healthCheck(ctx, port); err != nil {
 		// Tear down the failed container before bailing.
-		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", container)
+		_ = e.runOp(ctx, OpDockerRemove, e.Timeouts.dockerRemove(), devNull{}, "docker", "rm", "-f", container)
 		return "", "", nil, 0, 0, fmt.Errorf("health-check: %w", err)
 	}
 
@@ -715,7 +720,7 @@ func (e *Executor) writeCaddyfile(sites []caddyfile.Site) error {
 }
 
 func (e *Executor) reloadCaddy(ctx context.Context) error {
-	return e.runner().Run(ctx, devNull{}, "caddy", "reload", "--config", e.CaddyfilePath)
+	return e.runOp(ctx, OpCaddyReload, e.Timeouts.caddyReload(), devNull{}, "caddy", "reload", "--config", e.CaddyfilePath)
 }
 
 func (e *Executor) drainContainer(ctx context.Context, name string, port int) error {
@@ -724,7 +729,7 @@ func (e *Executor) drainContainer(ctx context.Context, name string, port int) er
 	// visible via Logger instead of leaving the old container running with
 	// zero trace.
 	var buf bytes.Buffer
-	err := e.runner().Run(ctx, &buf, "sh", "-c",
+	err := e.runOp(ctx, OpDrain, e.Timeouts.drain(), &buf, "sh", "-c",
 		fmt.Sprintf("docker ps -q --filter publish=%d | xargs -r docker stop -t 5", port))
 	if err != nil {
 		e.logf("drain %s (port %d) failed: %v; output: %s", name, port, err, strings.TrimSpace(buf.String()))

@@ -211,12 +211,22 @@ check "36 a branch-delete failure that is NOT a worktree collision still REFUSES
   "failed to delete local branch gates/gone: failed to run git: error: branch 'gates/gone' not found."
 check "37 …and a bare git failure still REFUSES" UNRECOGNISED \
   'failed to run git: exit status 129'
-# Captured verbatim from two runs on 2026-09-02 (PRs #14899 and #14892). A REAL
-# refusal — the merge did NOT land, main moved under the head — pinned here so
-# the shape is on the record and any future arm for it is a deliberate edit
-# rather than a silent reclassification.
-check "38 'Base branch was modified' is a REAL refusal and stays UNRECOGNISED" UNRECOGNISED \
+# Captured verbatim from two runs on 2026-09-02 (PRs #14899 and #14892) and
+# twice more on 2026-09-13 (the api and studio lanes). It IS a real refusal —
+# the merge did not land — and it is also TRANSIENT: on 2026-09-13 a by-hand
+# retry merged first try in BOTH cases, because the base simply moved between
+# GitHub's mergeability snapshot and its write. This row previously asserted
+# UNRECOGNISED, and that was the right SHAPE with the wrong COVERAGE: it made
+# every lane resolve a named, safe-to-retry-once condition by hand. Rows 52-58
+# drive the bounded retry end to end. Changing this row is the deliberate edit
+# the old comment asked for.
+check "38 'Base branch was modified' is NAMED BASE_MODIFIED, not UNRECOGNISED (measured 2026-09-13)" BASE_MODIFIED \
   'GraphQL: Base branch was modified. Review and try the merge again. (mergePullRequest)'
+# THE NEEDLE IS NOT WIDENED. The retry is a WRITE; any other "was modified"
+# message is an unmeasured shape and must keep refusing, or the arm becomes a
+# message-shaped guess about which writes are safe to repeat.
+check "38a a different 'was modified' message is NOT the retry arm" UNRECOGNISED \
+  'GraphQL: The head ref was modified since the last review. (mergePullRequest)'
 advice_contains "39 LOCAL_POST_MERGE advice names the CONFIRM command, never a re-merge" \
                 LOCAL_POST_MERGE 'gh pr view 123 --json state,mergedAt'
 advice_contains "39b …and says the local step ran after the merge call" \
@@ -596,6 +606,182 @@ if awk '/^  preflight_mergeable$/ {seen=1} /^  merge_loop$/ {print (seen ? "OK" 
 else
   fail=$((fail + 1)); echo "  FAIL preflight_mergeable is not called before merge_loop in main()" >&2
 fi
+
+# ── 52-58. THE BOUNDED RETRY ON 'Base branch was modified' ──────────────────
+# DRIVEN THROUGH main(), NOT GREPPED. `gh` is stubbed, so resolve_pr →
+# preflight → preflight_mergeable → merge_loop is the REAL order and the merge
+# ATTEMPT COUNT is read out of the stub's own counter file rather than asserted
+# from the source. Both directions run in THIS ONE run:
+#   A transient-then-success  exits 0 after exactly TWO attempts
+#   B always-transient        exits 1 refusing after exactly TWO attempts
+# Without B, a script that retried forever would pass A. Without A, a script
+# that never retried at all would pass B.
+#
+# THE STUB HAS THREE EXPLICIT MODES, and refuses an unknown one rather than
+# defaulting to anything: `transient-then-success` answers the captured sentence
+# on attempt 1 only, `always-transient` answers it on every attempt, and
+# `never-transient` merges first try (row 57's control, which proves the stub is
+# actually reached and that the new arm is inert off its own message).
+#
+# THE STUB IS EXPLICIT: `pr merge` bumps a counter FILE (main() runs inside a
+# command substitution, so a shell counter would die in the subshell), then
+# answers the captured GitHub sentence on attempt 1 — and, in mode B, on every
+# attempt. `api` answers whatever BM_STATE says, which is how the re-read gate
+# is driven. Every argv is logged, and row 55 reads that log to prove the
+# re-read happened BETWEEN the two merge calls.
+BM_TMP="$(mktemp -d)"
+trap 'rm -rf "$BM_TMP"' EXIT
+printf '#!/usr/bin/env bash\nexit 0\n' > "$BM_TMP/verify.sh"
+chmod +x "$BM_TMP/verify.sh"
+BM_FIXTURE='GraphQL: Base branch was modified. Review and try the merge again. (mergePullRequest)'
+BM_LOG="$BM_TMP/gh-argv.log"
+BM_COUNT="$BM_TMP/merge-attempts"
+BM_MODE="transient-then-success"
+BM_STATE="clean"
+: > "$BM_LOG"; printf '0\n' > "$BM_COUNT"
+
+gh() {
+  printf '%s\n' "$*" >> "$BM_LOG"
+  case "$1" in
+    pr)
+      case "${2:-}" in
+        view)
+          case "$*" in
+            *"--json state"*) printf 'OPEN\n' ;;
+            *) printf '{"number":123,"url":"https://github.com/FRIKKern/barkpark/pull/123","headRefOid":"deadbeef","state":"OPEN","isDraft":false}\n' ;;
+          esac ;;
+        merge)
+          local n
+          n=$(( $(cat "$BM_COUNT") + 1 ))
+          printf '%s\n' "$n" > "$BM_COUNT"
+          case "$BM_MODE" in
+            always-transient) printf '%s\n' "$BM_FIXTURE" >&2; return 1 ;;
+            transient-then-success)
+              if [ "$n" -eq 1 ]; then printf '%s\n' "$BM_FIXTURE" >&2; return 1; fi ;;
+            never-transient) : ;;
+            *) printf 'bm stub: unknown mode %s\n' "$BM_MODE" >&2; return 1 ;;
+          esac
+          printf 'Merged pull request #123 (stub)\n' ;;
+        *) return 1 ;;
+      esac ;;
+    api) printf '%s\n' "$BM_STATE" ;;
+    *) return 1 ;;
+  esac
+}
+bm_has() { case "$1" in *"$2"*) return 0 ;; *) return 1 ;; esac; }
+
+MERGEABLE_POLLS=3
+MERGEABLE_POLL_SECONDS=0
+BASE_MODIFIED_RETRY_SLEEP=0
+
+drive_bm() { # mode recheck_state -> BM_RC, BM_OUT, BM_ATTEMPTS
+  BM_MODE="$1"; BM_STATE="${2:-clean}"
+  : > "$BM_LOG"; printf '0\n' > "$BM_COUNT"
+  BM_RC=0
+  BM_OUT="$( VERIFY="$BM_TMP/verify.sh" merge_loop 2>&1 )" || BM_RC=$?
+  BM_ATTEMPTS="$(cat "$BM_COUNT")"
+}
+PR_NUMBER=123
+PR_URL="https://github.com/FRIKKern/barkpark/pull/123"
+HEAD_SHA=deadbeef
+PR_STATE_READ="OPEN"; PR_STATE_ERROR=""
+BUDGET_SECONDS=60
+POLL_SECONDS=0
+
+# 52. DIRECTION A — transient, then it merges. Exactly two attempts.
+drive_bm transient-then-success clean
+if [ "$BM_RC" = "0" ] && [ "$BM_ATTEMPTS" = "2" ] && bm_has "$BM_OUT" 'MERGED #123'; then
+  pass=$((pass + 1)); echo "  ok   52 transient-then-success MERGES after exactly $BM_ATTEMPTS merge attempts (rc=$BM_RC)"
+else
+  fail=$((fail + 1))
+  echo "  FAIL the transient refusal was not retried into a merge (rc=$BM_RC attempts=$BM_ATTEMPTS)" >&2
+  printf '%s\n' "$BM_OUT" | sed 's/^/       /' >&2
+fi
+if bm_has "$BM_OUT" 'the base moved under the merge call'; then
+  pass=$((pass + 1)); echo "  ok   52a …and says WHY it retried, in a line naming the condition"
+else
+  fail=$((fail + 1)); echo "  FAIL the retry is silent — a retried write must announce itself" >&2
+fi
+
+# 53/54. DIRECTION B — always transient. It must REFUSE, and it must have
+# stopped at TWO attempts. This is the bound, PROVED: the count comes from the
+# stub, not from reading the source.
+drive_bm always-transient clean
+if [ "$BM_RC" = "1" ] && [ "$BM_ATTEMPTS" = "2" ]; then
+  pass=$((pass + 1)); echo "  ok   53 always-transient REFUSES (rc=$BM_RC) after exactly $BM_ATTEMPTS merge attempts — the retry is BOUNDED"
+else
+  fail=$((fail + 1))
+  echo "  FAIL the bound did not hold (rc=$BM_RC attempts=$BM_ATTEMPTS; expected rc=1 attempts=2)" >&2
+  printf '%s\n' "$BM_OUT" | sed 's/^/       /' >&2
+fi
+if bm_has "$BM_OUT" 'REFUSED — BASE_MODIFIED' \
+   && bm_has "$BM_OUT" 'AGAIN after 2 merge attempts'; then
+  pass=$((pass + 1)); echo "  ok   54 …and the refusal NAMES the state and quotes the attempt count"
+else
+  fail=$((fail + 1)); echo "  FAIL the bounded refusal does not name BASE_MODIFIED or its attempt count" >&2
+  printf '%s\n' "$BM_OUT" | sed 's/^/       /' >&2
+fi
+
+# 55. THE RE-READ HAPPENS BETWEEN THE TWO MERGE CALLS. Asserted off the argv
+# LOG, so moving the re-read after the retry (or deleting it) reds here even
+# though both attempt counts would be unchanged.
+drive_bm transient-then-success clean
+if awk '/^pr merge/ {m++; next} /^api / {if (m==1) between=1} END {exit !(m==2 && between)}' "$BM_LOG"; then
+  pass=$((pass + 1)); echo "  ok   55 a mergeable_state re-read sits BETWEEN the two merge calls (never a retry off the stale read)"
+else
+  fail=$((fail + 1)); echo "  FAIL no fresh mergeable_state read between the two merge attempts" >&2
+  sed 's/^/       /' "$BM_LOG" >&2
+fi
+
+# 56. THE RE-READ IS A GATE, NOT A FORMALITY. Same transient message, but the
+# fresh read now says DIRTY — the sibling that moved the base took this head
+# conflicting with it. One attempt, then refuse. A retry here would be the arm
+# swallowing a genuine conflict.
+drive_bm transient-then-success dirty
+if [ "$BM_RC" != "0" ] && [ "$BM_ATTEMPTS" = "1" ] && bm_has "$BM_OUT" 'the re-read says DIRTY'; then
+  pass=$((pass + 1)); echo "  ok   56 a re-read of DIRTY spends NO retry (attempts=$BM_ATTEMPTS, rc=$BM_RC) — a conflict is never retried"
+else
+  fail=$((fail + 1))
+  echo "  FAIL the retry ignored a DIRTY re-read (rc=$BM_RC attempts=$BM_ATTEMPTS)" >&2
+  printf '%s\n' "$BM_OUT" | sed 's/^/       /' >&2
+fi
+# 56a. Same shape for 'unknown': GitHub has not recomputed mergeability since
+# the base moved, and unknown is never a green anywhere else in this file.
+drive_bm transient-then-success unknown
+if [ "$BM_RC" != "0" ] && [ "$BM_ATTEMPTS" = "1" ]; then
+  pass=$((pass + 1)); echo "  ok   56a …and an 'unknown' re-read spends no retry either (attempts=$BM_ATTEMPTS)"
+else
+  fail=$((fail + 1)); echo "  FAIL an 'unknown' re-read still spent the retry (attempts=$BM_ATTEMPTS)" >&2
+fi
+
+# 57. CONTROL: THE STUB IS REACHED. Every row above is a claim about attempt
+# COUNTS, and a fixture that never reached the code under test would report
+# zero and look like a bound. A clean, non-transient run must reach the stub
+# exactly ONCE and merge — which also proves the new arm changed nothing for
+# every other message.
+drive_bm never-transient clean
+if [ "$BM_RC" = "0" ] && [ "$BM_ATTEMPTS" = "1" ] && bm_has "$BM_OUT" 'MERGED #123'; then
+  pass=$((pass + 1)); echo "  ok   57 CONTROL: a non-transient merge still takes exactly ONE attempt (the arm is inert off its message)"
+else
+  fail=$((fail + 1))
+  echo "  FAIL the control run is wrong (rc=$BM_RC attempts=$BM_ATTEMPTS) — the counts above may be vacuous" >&2
+fi
+
+# 58. THE BOUND IS A LITERAL, NOT AN ENV KNOB. Every other budget in this file
+# is overridable; this one governs how many times a WRITE is repeated, and an
+# env-tunable retry count is an unbounded loop one variable away.
+if grep -qE '^BASE_MODIFIED_RETRY_BUDGET=1$' "$ROOT/scripts/bp-merge.sh"; then
+  pass=$((pass + 1)); echo "  ok   58 the retry bound is a literal 1, unreachable from the environment"
+else
+  fail=$((fail + 1)); echo "  FAIL the retry bound is not a literal — it can be widened from the environment" >&2
+fi
+advice_contains "58a BASE_MODIFIED advice says the condition is transient" BASE_MODIFIED 'TRANSIENT'
+advice_contains "58b …and names a resolving command like every other arm"  BASE_MODIFIED 'scripts/bp-merge.sh'
+advice_contains "58c …and says it is NOT a finding about the checks"       BASE_MODIFIED 'NOT a finding about the checks'
+
+unset -f gh bm_has drive_bm
+rm -rf "$BM_TMP"
+trap - EXIT
 
 echo
 echo "bp-merge harness: $pass passed, $fail failed"
