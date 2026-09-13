@@ -98,12 +98,21 @@ defmodule Barkpark.Bench.ValidationPerf do
   #   BUSY machine — which is the point of the ratio, not an apology for it:
   #     run 1: baseline 1.710 ms, p95 0.836 ms -> ratio 0.49x
   #     run 2: baseline 1.148 ms, p95 0.615 ms -> ratio 0.54x
-  #   The baseline moved 33% between the two; the ratio moved 10%. A fixed
-  #   millisecond threshold would have absorbed the whole 33%.
-  #   2026-09-13, CI (ubuntu-latest, the validation-perf job of this PR): the
-  #   run ids and their printed ratios are quoted in the PR body. The value
-  #   pinned below covers both venues with room above the highest observed.
-  @nominal_ratio 0.60
+  #     run 3: baseline 1.879 ms, p95 0.827 ms -> ratio 0.44x
+  #   The baseline spans 1.148-1.879 ms, a 64% spread; the ratio spans
+  #   0.44-0.54x, a 23% one. A fixed millisecond threshold absorbs the whole
+  #   64% and calls it signal.
+  #   2026-09-13, CI (ubuntu-latest, run 34746159133, this bench's own
+  #   validation-perf job): baseline 1.351 ms, p95 0.479 ms -> ratio 0.35x.
+  #
+  # PINNED TO THE CI VENUE, rounded up, because CI is the only venue where
+  # this gate DECIDES anything — a local run prints, it does not block a
+  # merge. Pinning to the slowest venue instead would spend the alarm's
+  # headroom on a machine that cannot red a PR: at nominal 0.60 the 5x
+  # mutation below lands at 2.95x against a 2.50x alarm, an 18% margin; at
+  # 0.40 it lands at 4.4x, and the busiest local ratio observed (0.54x) still
+  # only indexes 1.35x, less than half the alarm.
+  @nominal_ratio 0.40
 
   # A 5x validation slowdown — the mutation this change was proved with —
   # lands at 5.0x nominal and reds with 2x margin. Honest code may drift to
