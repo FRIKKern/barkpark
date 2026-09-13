@@ -1870,19 +1870,52 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-route__meta { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.78rem !important; color: var(--paper-ink-soft) !important; margin-top: 8px !important; }
 .bp-paper-surface .bp-route__caption { font-size: 0.82rem !important; color: var(--paper-ink-soft) !important; font-style: italic; margin-top: 3px !important; }
 
-.bp-paper-surface .bp-lineage { margin: 1.4rem 0; }
-.bp-paper-surface .bp-lineage__nodes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
-.bp-paper-surface .bp-lineage__node { border-top: 1px solid var(--paper-rule); padding-top: 8px; }
-.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); }
-.bp-paper-surface .bp-lineage__title { font-size: 0.88rem; font-weight: 600; color: var(--paper-ink); margin-top: 4px; }
+/* THE CLOCK STRIP (pe-bl-clock-strip-block). Lineage is a DATED STRIP: stops
+   read left-to-right along ONE continuous spine, the way the four-cell clock
+   strip in /papers/eight-minute-erasure §I reads. Three things the old
+   `repeat(auto-fit, minmax(150px, 1fr))` grid could not do, each measured in
+   pixels before it was changed:
+
+   1. SIDE-BY-SIDE. auto-fit fits as many 150px tracks as the box holds and
+      WRAPS the rest: inside the 672px reading column four stops render 3+1,
+      and the fourth stop starts a second row that reads as a second timeline.
+      `grid-auto-flow: column` lays exactly ONE track per stop, always — four
+      dated stops are four columns at any width.
+   2. A CONTINUOUS SPINE. The line used to be a per-node `border-top`, so every
+      14px gap CUT it — four dashes, not a spine. The rule now lives on the
+      TRACK (`__nodes`), one unbroken hairline the whole strip long, and each
+      stop marks its own place on it with a tick that carries the stop's tone
+      (`bp-lineage__node--{info,ok,warn,danger}` — the per-stop verdict, in the
+      same four-word vocabulary `bp-chart__region--*` already uses).
+   3. EVIDENCE WIDTH. A time axis gains resolution with every pixel, so the
+      strip breaks out of the reading column onto the evidence band exactly as
+      `.bp-stats` and `.bp-table` do — it is evidence, not prose, and the
+      column starves it. Below the column the band collapses to 100% and the
+      TRACK self-scrolls (`overflow-x: auto`, the inner boundary pe-w1-air-beat
+      established), so at 360px the stops stay side-by-side on one spine, the
+      spine still spans the full visible width, and the page body still never
+      scrolls sideways. */
+.bp-paper-surface .bp-lineage { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-surface .bp-lineage__nodes { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 14px; border-top: 1px solid var(--paper-rule); overflow-x: auto; overscroll-behavior-x: contain; }
+.bp-paper-surface .bp-lineage__node { position: relative; padding-top: 9px; min-width: 0; }
+.bp-paper-surface .bp-lineage__node::before { content: ""; position: absolute; top: -1px; left: 0; width: 11px; height: 2px; background: var(--paper-accent); }
+.bp-paper-surface .bp-lineage__node--info::before { background: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-lineage__node--ok::before { background: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-lineage__node--warn::before { background: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-lineage__node--danger::before { background: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); white-space: nowrap; }
+.bp-paper-surface .bp-lineage__node--info .bp-lineage__overline { color: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-lineage__node--ok .bp-lineage__overline { color: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-lineage__node--warn .bp-lineage__overline { color: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-lineage__node--danger .bp-lineage__overline { color: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-lineage__title { font-size: 0.88rem; font-weight: 600; color: var(--paper-ink); margin-top: 4px; overflow-wrap: anywhere; }
 .bp-paper-surface .bp-lineage__value { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 650; color: var(--paper-accent); margin-top: 4px; }
 .bp-paper-surface .bp-lineage__unit { font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
-/* jf-w1-engine-narrow-dark-fixes: __nodes is an auto-fit minmax(150px,1fr)
-   grid, so a node can be squeezed to its 150px floor at narrow measures — a
-   long unbroken body string (a URL, a compound word) then blows the column
-   out sideways instead of wrapping. `anywhere` (not break-word) so it also
-   counts toward text-wrap balancing rather than being treated as unbreakable
-   for layout purposes. */
+/* jf-w1-engine-narrow-dark-fixes: a stop can be squeezed to its 150px floor at
+   narrow measures — a long unbroken body string (a URL, a compound word) then
+   blows the column out sideways instead of wrapping. `anywhere` (not
+   break-word) so it also counts toward text-wrap balancing rather than being
+   treated as unbreakable for layout purposes. */
 .bp-paper-surface .bp-lineage__body { font-size: 0.76rem; color: var(--paper-ink-soft); line-height: 1.45; margin-top: 5px; overflow-wrap: anywhere; }
 
 .bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }
