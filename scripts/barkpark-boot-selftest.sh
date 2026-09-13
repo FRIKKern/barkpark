@@ -425,7 +425,8 @@ fx_up_reports_missing_credential() {
 # can prove it.
 #
 # THE STATE, built exactly as D5 builds it: something holds $PORT, it does not
-# answer /api/schemas (HARNESS_CURL_RC=1), and the pidfile does not name it.
+# answer /status.json, nor the legacy /api/schemas fallback (HARNESS_CURL_RC=1
+# applies to every path the stub is asked for), and the pidfile does not name it.
 
 # W1  The refusal itself now names the route out, at the moment of refusing.
 #     Pre-w25: the refusal ends at "run 'kill <pid>' yourself" — a manual kill,

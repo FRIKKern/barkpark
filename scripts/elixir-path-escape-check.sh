@@ -128,6 +128,7 @@ ELIXIR_COMPILE_PATHS='api/**
 cloud/priv/secret-scrub.exs
 design/**
 tooling/pds/pre-gate-papers.json
+tooling/pds/disposition-owner-registry.json
 .github/workflows/elixir.yml
 scripts/elixir-path-escape-check.sh
 scripts/elixir-path-escape-check.test.sh
@@ -319,6 +320,7 @@ scripts/async_env_seam_scan.exs
 scripts/check-deployyml-filters.sh
 scripts/pds-door-census.sh
 scripts/pds-elixir-receipt-census.exs
+scripts/pds-live-hetzner-placement-group.sh
 scripts/pds-published-artifact-door.sh
 scripts/pds-pull-proof_test.sh
 scripts/pds-published-artifact-door_test.sh

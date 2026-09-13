@@ -10,6 +10,7 @@ defmodule Barkpark.Plugins.Sheets.HtmlTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.Plugins.Sheets.Html
+  alias Barkpark.Test.ExportedDocument
 
   defp single_tab_content do
     %{
@@ -70,8 +71,22 @@ defmodule Barkpark.Plugins.Sheets.HtmlTest do
     test "self-contained: no external scripts or stylesheets" do
       html = Html.export(single_tab_content(), "Report")
 
-      refute html =~ "<script"
-      refute html =~ "<link"
+      # WHOLE DOCUMENT ON PURPOSE: an external `<script src>` or
+      # `<link rel="stylesheet">` would live in `<head>`, so scoping this to the
+      # body would blind it. The export inlines the canonical paper-surface
+      # stylesheet into that same `<head>`, so the CSS BYTES are excluded
+      # structurally — the `<style>` element's content is dropped, the element
+      # and the rest of the document stay — rather than by allowlisting the
+      # literals the stylesheet happens to contain.
+      doc = ExportedDocument.outside_stylesheet(html)
+
+      # The excluded region is the stylesheet and nothing else: head and body
+      # chrome are both still in scope, so these refutes can still fail.
+      assert doc =~ "<title>Report</title>"
+      assert doc =~ "</body></html>"
+
+      refute doc =~ "<script"
+      refute doc =~ "<link"
     end
   end
 
@@ -101,7 +116,11 @@ defmodule Barkpark.Plugins.Sheets.HtmlTest do
       html = Html.export(single_tab_content(), "Q3 <Profits> & \"Losses\"")
 
       assert html =~ "<title>Q3 &lt;Profits&gt; &amp; &quot;Losses&quot;</title>"
-      refute html =~ "<Profits>"
+
+      # The title reaches BOTH `<title>` (in `<head>`) and `<h1>` (in the body),
+      # so this one refute must keep the head in scope — only the inlined
+      # stylesheet's bytes are excluded, structurally.
+      refute ExportedDocument.outside_stylesheet(html) =~ "<Profits>"
     end
   end
 
@@ -118,7 +137,7 @@ defmodule Barkpark.Plugins.Sheets.HtmlTest do
       content = %{"tabs" => [%{"cells" => %{"A1" => %{"v" => "x"}}}]}
       html = Html.export(content, "Report")
 
-      refute html =~ "<h2"
+      refute ExportedDocument.body(html) =~ "<h2"
     end
 
     test "multi-tab: named tabs emit their name as <h2>" do
@@ -146,7 +165,7 @@ defmodule Barkpark.Plugins.Sheets.HtmlTest do
       html = Html.export(content, "Test")
 
       assert html =~ "&lt;script&gt;alert(1)&lt;/script&gt;</h2>"
-      refute html =~ "<script>alert(1)</script>"
+      refute ExportedDocument.body(html) =~ "<script>alert(1)</script>"
     end
   end
 
@@ -163,7 +182,7 @@ defmodule Barkpark.Plugins.Sheets.HtmlTest do
       html = Html.export(%{"tabs" => []}, "No Tabs")
 
       assert html =~ "<title>No Tabs</title>"
-      refute html =~ "<table"
+      refute ExportedDocument.body(html) =~ "<table"
       assert html =~ "</body></html>"
     end
   end
@@ -192,8 +211,68 @@ defmodule Barkpark.Plugins.Sheets.HtmlTest do
       assert html =~ "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"
       assert html =~ "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;"
       # … and no live <script>/onerror sink reaches the output body.
-      refute html =~ "<script>alert('xss')</script>"
-      refute html =~ "<img src=x onerror=\"alert(1)\">"
+      body = ExportedDocument.body(html)
+      refute body =~ "<script>alert('xss')</script>"
+      refute body =~ "<img src=x onerror=\"alert(1)\">"
+    end
+  end
+
+  # ── refute scoping: the regions themselves ────────────────────────────────
+  #
+  # Every absence assertion above runs against a region DERIVED from the export
+  # document rather than against the whole string, because the document inlines
+  # the canonical paper-surface stylesheet. These two tests are the control pair
+  # for that scoping, in both directions: a literal that exists only inside the
+  # stylesheet must be invisible, and a literal the export really emits must
+  # still be visible. The second is the one that matters — a scoping that made
+  # these refutes unable to fail would be worse than the bug it fixes.
+  describe "export/2 — refute region scoping" do
+    test "a tag literal living only in the inlined stylesheet is outside both regions" do
+      html = Html.export(single_tab_content(), "Report")
+
+      [before_close, after_close] = String.split(html, "</style>", parts: 2)
+
+      injected = ~s(/* <h2 class="bp-section__title"> <table> <script src="x"> */)
+      mutated = before_close <> injected <> "</style>" <> after_close
+
+      # Control: the literals really are in the mutated document, so the
+      # refutes below are a claim about the SCOPING and not about an absence
+      # that was there anyway.
+      assert mutated =~ ~s(<h2 class="bp-section__title">)
+      assert mutated =~ "<script src="
+
+      body = ExportedDocument.body(mutated)
+      refute body =~ ~s(<h2 class=)
+      refute body =~ "<script src="
+
+      outside = ExportedDocument.outside_stylesheet(mutated)
+      refute outside =~ ~s(<h2 class=)
+      refute outside =~ "<script src="
+    end
+
+    test "a tag the export really emits into the body is still visible to both regions" do
+      # single_tab_content/0 has a NAMED tab, so the export emits a real <h2>
+      # and a real <table>. If the scoping above could not see these, every
+      # refute in this file would have gone vacuous.
+      html = Html.export(single_tab_content(), "Report")
+
+      body = ExportedDocument.body(html)
+      assert body =~ "<h2"
+      assert body =~ "<table"
+
+      assert ExportedDocument.outside_stylesheet(html) =~ "<h2"
+    end
+
+    test "body/1 raises rather than degrading to an empty region" do
+      assert_raise ArgumentError, fn -> ExportedDocument.body("<p>no head here</p>") end
+    end
+
+    test "outside_stylesheet/1 raises when there is no inlined stylesheet to exclude" do
+      assert_raise ArgumentError, fn ->
+        ExportedDocument.outside_stylesheet(
+          "<!doctype html><html><head></head><body></body></html>"
+        )
+      end
     end
   end
 end

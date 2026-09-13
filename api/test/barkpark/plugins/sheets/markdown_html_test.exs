@@ -8,6 +8,7 @@ defmodule Barkpark.Plugins.Sheets.MarkdownHtmlTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.Plugins.Sheets.{Html, Markdown}
+  alias Barkpark.Test.ExportedDocument
 
   defp content do
     %{
@@ -78,9 +79,14 @@ defmodule Barkpark.Plugins.Sheets.MarkdownHtmlTest do
       assert html =~ ~s(colspan="2")
       assert html =~ "font-weight:bold;"
       assert html =~ "background:#ffcc00;"
-      # no scripts, no external CSS — self-contained
-      refute html =~ "<script"
-      refute html =~ "<link"
+      # no scripts, no external CSS — self-contained. WHOLE DOCUMENT ON
+      # PURPOSE (an external `<link>`/`<script src>` would sit in `<head>`), so
+      # only the inlined paper-surface stylesheet's BYTES are excluded, and
+      # structurally: the `<style>` element's content is dropped, nothing else.
+      self_contained = ExportedDocument.outside_stylesheet(html)
+      assert self_contained =~ "</body></html>"
+      refute self_contained =~ "<script"
+      refute self_contained =~ "<link"
     end
 
     test "title defaults and escapes; empty content still renders a page" do

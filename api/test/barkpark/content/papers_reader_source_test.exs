@@ -1,5 +1,5 @@
 defmodule Barkpark.Content.PapersReaderSourceTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
 
