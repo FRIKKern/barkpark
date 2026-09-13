@@ -58,6 +58,17 @@
 // and a FLOOR on the true rate, never an estimate of it. Only re-deriving each close
 // from source finds the rest.
 //
+// THE BLIND SPOT IS NOW RULED ON, and the ruling lives where a close gets WRITTEN, not
+// here: internal/cli/tasks_close_evidence_contract.go (task-dfa5723c433382b3), surfaced
+// on `bp task close --help` and as an advisory beside a landed close. In short — a
+// reason is CHECKABLE when it names one un-elided repo path, one discriminating symbol,
+// or one ancestor commit sha, which is exactly what the three arms below read; and the
+// rows ALREADY closed without one are recorded as PERMANENTLY UNCHECKABLE rather than
+// migrated, because an anchor back-filled by a later reader would turn an honest blind
+// spot into a false AGREE. THE UNCHECKABLE COUNT THIS TOOL PRINTS IS THAT RECORD, and it
+// re-derives itself on every run instead of rotting in a doc. Measured at origin/main
+// e02933779 on 2026-09-13: 2740 UNCHECKABLE of 8006 closed rows (34.2%), the 9584-document `bp export --type task` population.
+//
 // THE SECOND BLIND SPOT: a named artifact that IS present proves only that the NAME
 // survives, not that the asserted BEHAVIOUR did. pds-bl-w47-stamp-tripwire-false-positive
 // is the worked example and the positive control: its close_reason names
@@ -407,6 +418,23 @@ function selftest() {
   eq("a discriminating symbol survives", isGenericSymbol("merge_gated?"), false);
   eq("the MFA arm still extracts the generic name (the DROP happens in adjudicate)",
      extractArtifacts("UserSocket.id/1 is token-derived").symbols.includes("id"), true);
+
+  // --- THE CLOSE-PROSE CONTRACT (task-dfa5723c433382b3). The ruling's definition of a
+  // CHECKABLE close and this instrument's three arms have to be ONE definition, or the
+  // contract teaches a rule the sweep does not enforce. These four assert the boundary
+  // in both directions on the ruling's own worked examples.
+  const anchored = extractArtifacts("fixed in api/lib/barkpark/tasks/close.ex");
+  eq("contract: a repo path alone makes a close CHECKABLE",
+     [anchored.paths.length > 0, isElidedPath(anchored.paths[0])], [true, false]);
+  eq("contract: a backticked discriminating symbol alone makes a close CHECKABLE",
+     extractArtifacts("the guard is `merge_gated?` and it is live").symbols.filter((x) => !isGenericSymbol(x)),
+     ["merge_gated?"]);
+  eq("contract: an ancestor-shaped sha alone makes a close CHECKABLE",
+     extractArtifacts("landed as 70ff34f9fd on main").shas, ["70ff34f9fd"]);
+  const bare = extractArtifacts("closed as duplicate of the earlier row, nothing shipped");
+  eq("contract: a reason naming none of the three is UNCHECKABLE, not AGREE",
+     [bare.paths.length, bare.symbols.filter((x) => !isGenericSymbol(x)).length, bare.shas.length],
+     [0, 0, 0]);
 
   eq("isClosed: done", isClosed({ lifecycle_status: "done" }), true);
   eq("isClosed: cancelled", isClosed({ lifecycle_status: "cancelled" }), true);
