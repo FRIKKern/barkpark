@@ -89,6 +89,20 @@ for (const sub of ["fg", "bg"]) {
   }
 }
 
+// --- verdict accents (color.verdict): 2 semantic roles, each ink + soft ------
+// The pair must ship COMPLETE — an ink with no soft ground is a callout with a
+// rail and no wash, and a soft with no ink is a wash with nothing on it. Both
+// halves of both roles, both modes, hex.
+const verdict = color.verdict || {};
+for (const role of ["loss", "loss-soft", "peace", "peace-soft"]) {
+  const o = verdict[role];
+  ok(o && typeof o === "object", `color.verdict.${role} is required (the verdict pair ships ink + soft, both roles)`);
+  if (o) {
+    ok(HEX.test(o.light || ""), `color.verdict.${role}.light must be #rrggbb, got ${JSON.stringify(o.light)}`);
+    ok(HEX.test(o.dark || ""), `color.verdict.${role}.dark must be #rrggbb, got ${JSON.stringify(o.dark)}`);
+  }
+}
+
 // --- neutral callout tone (color.cliCalloutNeutral): pdrender-only hex pair ---
 const calloutNeutral = color.cliCalloutNeutral || {};
 ok(HEX.test(calloutNeutral.light || ""), `color.cliCalloutNeutral.light must be #rrggbb, got ${JSON.stringify(calloutNeutral.light)}`);
