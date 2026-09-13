@@ -19,6 +19,7 @@ import {
   glyphHtml,
   glyphChar,
   labelForRole,
+  LEGEND_ROLES,
 } from '../inline'
 import {
   priorityHtml,
@@ -32,12 +33,28 @@ type Emit = (block: Block) => string
 
 /* ── task-board (kanban) — Components.task_board_html/1 ─────────────────────── */
 
-// The board column roles, in white-ladder order (cancel folds to a tally, so it
-// is NOT a column). The two thought states — `considering`/`researching` — trail
-// at the END (dim; empty columns collapse). Labels are DERIVED (sentence-cased),
-// never a second copy. `unknown` is NOT a column: fail-open rows home in `open`
-// (placement) while keeping their dim-neutral glyph (styling) — the two decouple.
-const BOARD_ROLES = ['open', 'ready', 'progress', 'blocked', 'done', 'considering', 'researching']
+// The terminal, non-claimable rung. Named once so the lane derivation reads as a
+// RULE ("move the terminal rung last"), not as a second hand-typed list.
+const CANCEL_ROLE = 'cancel'
+
+// The board column roles — DERIVED from LEGEND_ROLES, which is itself
+// design/status-manifest.json's roles[] (STATUS_ROLES minus the JS-only `unknown`
+// sentinel). EVERY manifest rung is a column, in manifest order, with the terminal
+// `cancel` rung moved LAST and de-emphasised in CSS (.bp-board__col--cancel).
+//
+// Before task-881952f8d8417f4b this was a hand-typed seven-role list without
+// `cancel`, and the fallback below therefore homed cancelled rows in `open` — the
+// CLAIMABLE lane that `bp task ready` serves — manufacturing phantom ready work on
+// a surface people act from. `cancel` is now a lane of its own, so the ONLY role
+// the fallback can still catch is the non-manifest `unknown` sentinel.
+//
+// Deriving rather than retyping means a rung added to the manifest becomes a
+// column automatically; it can never be silently dropped or misfiled again.
+// Labels are DERIVED too (sentence-cased), never a second copy.
+const BOARD_ROLES: string[] = [
+  ...LEGEND_ROLES.map((r) => r.role).filter((r) => r !== CANCEL_ROLE),
+  CANCEL_ROLE,
+]
 
 function boardLabel(role: string): string {
   return capitalize(labelForRole(role))
@@ -68,9 +85,11 @@ const taskBoard: Emit = (b) => {
   const byRole: Record<string, Block[]> = {}
   for (const r of rows) {
     const role = roleOf(isMap(r) ? r.status : undefined)
-    // Placement decouples from styling: a role WITHOUT a column (the fail-open
-    // `unknown` sentinel) homes in `open` so a row never vanishes; its glyph
-    // stays the row's own role (see boardCol).
+    // Placement decouples from styling: a role WITHOUT a column homes in `open`
+    // so a row never vanishes; its glyph stays the row's own role (see boardCol).
+    // Because BOARD_ROLES now carries EVERY manifest rung, the only role that can
+    // reach this fallback is the non-manifest `unknown` sentinel — no lifecycle
+    // state, and in particular no cancelled row, can refill the claimable lane.
     const col = BOARD_ROLES.includes(role) ? role : 'open'
     ;(byRole[col] ??= []).push(r)
   }
