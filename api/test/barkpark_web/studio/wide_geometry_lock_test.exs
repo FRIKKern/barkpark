@@ -737,15 +737,15 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
         # move real geometry (`flex`, `width`) and are allowed to precisely
         # because `html:not([data-width-bucket="wide"])` cannot match in
         # epic criterion 2's own band (charter D92).
+        # POSITIVE bucket equality on `standard`, added with the 260px
+        # dock. It is the same strength of scoping as the phone/narrow
+        # prefixes above and NOT the weaker `:not(...)` form: an attribute
+        # equality on the literal value `standard` cannot match a desk
+        # stamped `wide`, so a rule behind it is structurally absent from
+        # epic criterion 2's band rather than merely believed to be.
         scoped? =
           String.starts_with?(selector, ~S|html[data-width-bucket="phone"] |) or
             String.starts_with?(selector, ~S|html[data-width-bucket="narrow"] |) or
-            # POSITIVE bucket equality on `standard`, added with the 260px
-            # dock. It is the same strength of scoping as the phone/narrow
-            # prefixes above and NOT the weaker `:not(...)` form: an attribute
-            # equality on the literal value `standard` cannot match a desk
-            # stamped `wide`, so a rule behind it is structurally absent from
-            # epic criterion 2's band rather than merely believed to be.
             String.starts_with?(selector, ~S|html[data-width-bucket="standard"] |) or
             String.starts_with?(selector, ~S|html[data-editor-focus="beta"] |) or
             String.starts_with?(selector, ~S|html:not([data-width-bucket="wide"]) |) or
