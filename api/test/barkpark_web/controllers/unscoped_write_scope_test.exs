@@ -43,7 +43,7 @@ defmodule BarkparkWeb.UnscopedWriteScopeTest do
     _proj_b = TenancyFixtures.create_project!(ws_b, "default")
 
     # The schema must be resolvable in EVERY workspace the writes land in, or
-    # the mutate 404s `schema_unknown` before scope resolution is reached and
+    # the mutate 404s `not_found` before scope resolution is reached and
     # the test proves nothing about scope.
     for ws <- [ws_a, ws_b] do
       Content.upsert_schema(
