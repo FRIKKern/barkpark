@@ -6580,8 +6580,34 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    and the horizontal score goes green while the words are still wrong. The
    pill must simply refuse to shrink; the sentence beside it is the flexible
    part. `flex` is not one of E14's five core properties, so this block starts
-   no recipe it must then finish (__css_check.mjs E14, design choice 1). */
-.op-gate .status-pill { flex: 0 0 auto; }
+   no recipe it must then finish (__css_check.mjs E14, design choice 1).
+
+   cch-w19-bl-op-gate-dot-centring-at-320 — `align-self: flex-start` JOINS THIS
+   SAME RULE, AND IT IS ON THE PILL, NOT ON `.op-gate`. The second defect on
+   this host is vertical: `.op-gate` is `align-items: center`, so whenever the
+   sentence WRAPS the pill is centred against the whole wrapped block and its
+   dot marks a line in the MIDDLE of the sentence it introduces. Measured with
+   a Range over the sentence's TEXT NODE (the element's merged client rect
+   spans every line and is green on this by construction), 244 of 280 gates
+   across the operator leg's axes rendered a wrapped sentence and the dot sat
+   off line 1 in every one of them — at 320 on `operator-zero-staging` the gate
+   sentence takes FIVE lines and the dot centred on line 3.
+
+   WHY `align-self` ON THE CHILD AND NOT `align-items: flex-start` ON
+   `.op-gate`, which is what the row asked for: the row's cited precedent does
+   not exist. `.fleet-status` declares `align-items: center`, not `flex-start`
+   (grep -n 'fleet-status' app.css; exactly one of its lines carries
+   align-items and the value is `center`). Both candidates were DRIVEN.
+   Container-level `flex-start` also re-anchors the SENTENCE, which is the
+   shorter box on a ONE-line gate: every unwrapped cell moved its text up
+   2.25px — a restyle of the case that was never broken. `align-self` on the
+   pill is a no-op wherever the pill is the tall item, so the one-line cells
+   are byte-identical: all 280 cells match origin/main on wrap count, line-1
+   rect, gate height and pill scrollWidth/clientWidth, and only the dot moves.
+   Guarded by the dot/line-1 arm of overflow-guard's W20-op-gate-pill-bounded
+   leg, whose anti-vacuity arm reds if no cell ever renders a wrapped
+   sentence. */
+.op-gate .status-pill { flex: 0 0 auto; align-self: flex-start; }
 
 /* The rollout's own vocabulary, stated once under the rows. */
 .op-foot {
