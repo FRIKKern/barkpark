@@ -553,7 +553,18 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
 
       # A team OWNER is still refused here, and the body says why: this axis is
       # the platform allowlist, which no team grant can reach.
-      assert Jason.decode!(conn.resp_body) == %{
+      #
+      # dr-bl-w8-census-403-cannot-say-the-list-is-empty — the gate now splits
+      # its 403 into two arms and the UNCONFIGURED one carries an additive
+      # `allowlist` marker. Which arm this test takes depends on
+      # `:platform_admin_emails`, which is process-global Application config
+      # other suites own, and this module is `async: true` — so the arm marker
+      # is dropped here and the AUTHORITY evidence (identical on both arms) is
+      # still asserted as an exact map, extra keys and all. The two arms
+      # themselves are pinned side by side in `router_operator_test.exs`.
+      body = Jason.decode!(conn.resp_body)
+
+      assert Map.drop(body, ["allowlist"]) == %{
                "error" => "forbidden",
                "required" => "platform_operator",
                "scope" => "platform"
