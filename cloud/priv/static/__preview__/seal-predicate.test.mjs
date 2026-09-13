@@ -161,10 +161,27 @@ export function objectDatabaseRefusal(root) {
 // terminate with the refusal still in the buffer, refusing SILENTLY. `writeSync`
 // returns only once the bytes are out, which is the one shape that is both drained
 // and immediate. Same reasoning __preview__/exit-vocabulary.mjs gives for draining.
+//
+// WHY THIS EXIT IS MARKED AND NOT REWRITTEN AS process.exitCode. Arm B of
+// scripts/workflow-run-shell-check.sh refuses an unmarked process.exit() in any
+// script a workflow PIPES, and console-harness.yml pipes this file into `tee`.
+// The defect that arm guards is a TRUNCATED PAYLOAD: node does not flush a
+// pending asynchronous stdout write before exit. Neither half of that applies
+// here. (1) There is no pending stdout write to lose — this runs before the
+// first `test()` registration, so not one byte of TAP has been produced, and
+// the end-to-end control below asserts exactly that (`not one predicate ran`,
+// `and no tally was printed`). (2) The refusal itself goes out via `writeSync`,
+// which returns only once the bytes are gone, for the reason the paragraph
+// above gives. Setting `process.exitCode` instead would not abort module
+// evaluation: the hundred-odd registrations below would run anyway against the
+// broken tree and print the 36 false reds this block exists to prevent. The
+// exit CODE is the payload here, not the stdout — `NO_OBJECT_DATABASE` is a
+// contract the suite's own control asserts by spawning this file (search this
+// file for `the suite must refuse, not run`).
 const OBJECT_DB_REFUSAL = objectDatabaseRefusal(REPO);
 if (OBJECT_DB_REFUSAL) {
   writeSync(2, `${OBJECT_DB_REFUSAL}\n`);
-  process.exit(NO_OBJECT_DATABASE);
+  process.exit(NO_OBJECT_DATABASE); // pipe-exit-ok: aborts before any test registers, so no stdout payload exists to truncate; writeSync has already drained the refusal, and the exit CODE is the contract a control below asserts
 }
 
 // ── THE CONTROLS FOR THE BLOCK ABOVE ────────────────────────────────────────
