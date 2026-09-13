@@ -279,6 +279,42 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  The declared codelist roster across every registered plugin — the supplier
+  side of the INVERTED codelist-requirements seam
+  (`:codelist_requirements_collector`, installed by
+  `Barkpark.Application.start/2` and read by `Barkpark.Content.CodelistHealth`).
+
+  `codelist_requirements/0` is a plugin-local declaration, not a
+  `Barkpark.Plugin` callback, so each plugin is PROBED with
+  `function_exported?/3` rather than assumed. A plugin that raises contributes
+  `[]`; the roster feeds a health probe, which must never be the thing that
+  takes the node down. Malformed entries are dropped by the reader.
+  """
+  @spec collect_codelist_requirements() :: [map()]
+  def collect_codelist_requirements do
+    all()
+    |> Enum.flat_map(&plugin_codelist_requirements/1)
+  rescue
+    _ -> []
+  catch
+    _, _ -> []
+  end
+
+  defp plugin_codelist_requirements(%{module: module}) when is_atom(module) do
+    Code.ensure_loaded?(module)
+
+    if function_exported?(module, :codelist_requirements, 0) do
+      module.codelist_requirements() |> List.wrap()
+    else
+      []
+    end
+  rescue
+    _ -> []
+  end
+
+  defp plugin_codelist_requirements(_), do: []
+
+  @doc """
   Drives the `resolve_extract_edges/2` chain — the content-graph edge
   collector. `Barkpark.EdgeProjector.Projector` seeds `:baseline` with the
   document's CORE reference-field edges and `ctx = %{doc, dataset}`; each

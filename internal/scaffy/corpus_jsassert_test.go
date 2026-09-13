@@ -14,10 +14,14 @@ package scaffy
 // sits after the gate it is meant to prime. The mutation subtests pin
 // exactly that — a reordered synthetic still reds.
 //
-// The two `node --test cloud/priv/static/__app.test.mjs` console gates run
-// the Node test runner against committed .mjs with zero workspace deps, so
-// they need no bootstrap. They self-exempt BY TEXT: `node` is deliberately
-// NOT a JS token, so no allowlist is required.
+// The two console gates run the Node test runner against committed .mjs
+// with zero workspace deps, so they need no bootstrap. They used to
+// self-exempt BY TEXT (`node` is deliberately NOT a JS token, so no
+// allowlist is required). Since 9e8126153 (#17867, 2026-09-11) they read
+// `sh scripts/console-harness.sh` instead, and a shell script is OPAQUE to
+// a text-keyed predicate: the assert mentions neither a JS token nor
+// `node`, so it fell out of BOTH arms silently. That is the blind spot
+// this file now names rather than guesses at — see classifyAssert.
 
 import (
 	"fmt"
@@ -40,6 +44,68 @@ func isJSTouching(text string) bool {
 		}
 	}
 	return false
+}
+
+// repoRoot is the repository root relative to this package dir (go test
+// cwd) — the same anchor corpusDir is written against (D30).
+const repoRoot = "../.."
+
+// delegatedScriptRefs returns the repo-relative shell scripts an ASSERT CMD
+// hands its work to (`sh scripts/x.sh`, `bash scripts/x.sh`, `./scripts/x.sh`).
+//
+// WHY THIS EXISTS. A text-keyed classifier cannot see past a script name:
+// `sh scripts/console-harness.sh` mentions no JS token and no `node`, so
+// before this it was classified as NOTHING — invisible to the order guard
+// AND absent from the census, which is exactly how the exempt term fell
+// from 2 to 0 on 2026-09-11 with no corpus gate becoming safer.
+//
+// Reading the script's BYTES and token-scanning them was measured and
+// REJECTED on 2026-09-13: of the four scripts the corpus delegates to,
+// console-harness.sh carries `js/` inside `installs/nodejs/`,
+// docs-anchors-check.sh carries `pnpm` and `npx` inside a CMD_VERBS regex
+// alternation, and check-doc-budgets.sh carries `js/CLAUDE.md` as a budget
+// path. Three of four would be classified JS-touching on prose and paths
+// alone. So delegation is surfaced as its OWN pinned census class and
+// adjudicated by a human once per change, instead of being guessed at.
+func delegatedScriptRefs(text string) []string {
+	var refs []string
+	for _, f := range strings.Fields(text) {
+		f = strings.Trim(f, "\"'`();|&")
+		f = strings.TrimPrefix(f, "./")
+		if strings.HasSuffix(f, ".sh") {
+			refs = append(refs, f)
+		}
+	}
+	return refs
+}
+
+// assertClass is the census class of one ASSERT CMD.
+type assertClass int
+
+const (
+	classPlain      assertClass = iota // touches neither JS, a script, nor node
+	classJSTouching                    // needs a hydrated pnpm workspace
+	classDelegated                     // hands off to a repo shell script — OPAQUE
+	classNodeExempt                    // runs node directly, no workspace token
+)
+
+// classifyAssert is THE code path that decides exemption. Order is
+// load-bearing and is the whole adjudication: a JS token in the assert's
+// own text wins (it is the dangerous class); a delegation to a repo script
+// is next, because the script's name tells us nothing and a guess here is
+// how the detector went blind; only a DIRECT `node` with no JS token and no
+// delegation is exempt.
+func classifyAssert(text string) assertClass {
+	if isJSTouching(text) {
+		return classJSTouching
+	}
+	if len(delegatedScriptRefs(text)) > 0 {
+		return classDelegated
+	}
+	if strings.Contains(text, "node") {
+		return classNodeExempt
+	}
+	return classPlain
 }
 
 // scanJSAssertOrder walks cmd's asserts in source order (by Pos.Line) and
@@ -77,7 +143,7 @@ func scanJSAssertOrder(cmd *Command) (violations []*Assert, jsTouching, selfPrim
 // The census is logged and pinned so a parser regression that drops
 // asserts cannot vacuously green this test.
 func TestCorpusJSAssertClassification(t *testing.T) {
-	totalJS, totalSelfPriming, totalExempt := 0, 0, 0
+	totalJS, totalSelfPriming, totalExempt, totalDelegated := 0, 0, 0, 0
 	var problems []string
 	for _, path := range corpusFiles(t) {
 		src, err := os.ReadFile(path)
@@ -91,11 +157,25 @@ func TestCorpusJSAssertClassification(t *testing.T) {
 		violations, js, sp := scanJSAssertOrder(cmd)
 		totalJS += js
 		totalSelfPriming += sp
-		// Exempt: an ASSERT CMD that runs `node` but touches no pnpm
-		// workspace token — the console `node --test` gates.
 		for _, a := range cmd.Asserts {
-			if a.Kind == AssertCmd && !isJSTouching(a.Text) && strings.Contains(a.Text, "node") {
+			if a.Kind != AssertCmd {
+				continue
+			}
+			switch classifyAssert(a.Text) {
+			case classNodeExempt:
 				totalExempt++
+			case classDelegated:
+				totalDelegated++
+				// A delegation to a script that is not in the tree is a
+				// broken gate, and it is also the shape that would let a
+				// delegated assert be "classified" against nothing.
+				for _, ref := range delegatedScriptRefs(a.Text) {
+					if _, err := os.Stat(filepath.Join(repoRoot, ref)); err != nil {
+						problems = append(problems, fmt.Sprintf(
+							"%s:%d: ASSERT CMD delegates to %q, which is not in the tree: %v",
+							filepath.Base(path), a.Pos.Line, ref, err))
+					}
+				}
 			}
 		}
 		for _, v := range violations {
@@ -105,8 +185,8 @@ func TestCorpusJSAssertClassification(t *testing.T) {
 		}
 	}
 
-	t.Logf("JS-assert census across the %d-file corpus: %d JS-touching (%d self-priming, %d order-dependent), %d node --test exempt",
-		corpusFileCount, totalJS, totalSelfPriming, totalJS-totalSelfPriming, totalExempt)
+	t.Logf("JS-assert census across the %d-file corpus: %d JS-touching (%d self-priming, %d order-dependent), %d direct node --test exempt, %d delegated to a repo script",
+		corpusFileCount, totalJS, totalSelfPriming, totalJS-totalSelfPriming, totalExempt, totalDelegated)
 
 	if len(problems) != 0 {
 		t.Errorf("%d JS-touching ASSERT CMD(s) lack a preceding `pnpm install` — false red on a fresh worktree:", len(problems))
@@ -117,8 +197,11 @@ func TestCorpusJSAssertClassification(t *testing.T) {
 
 	// Census pin (distrust vacuous green): today's corpus carries exactly
 	// 11 JS-touching asserts (3 self-priming `pnpm install`, 8 order-
-	// dependent) and 2 node --test exempt. A corpus edit that adds or
-	// removes a JS-touching gate updates these on purpose.
+	// dependent), 0 asserts that run `node` DIRECTLY, and 7 that delegate
+	// to a committed repo script. A corpus edit that adds or removes a
+	// JS-touching gate, or introduces a new delegation, updates these on
+	// purpose — and a new delegation MUST be adjudicated by hand, because
+	// classifyAssert deliberately refuses to guess what a script runs.
 	//
 	// +3 JS-touching / +1 self-priming on 2026-07-27: add-block-type's
 	// Surface 6 (apps/mobile) leg. It carries its OWN `pnpm install`
@@ -126,15 +209,61 @@ func TestCorpusJSAssertClassification(t *testing.T) {
 	// (web, js/packages/*, apps/mobile) and js/'s own (packages/*, docs) —
 	// so the earlier `cd js && pnpm install` hydrates the wrong tree and
 	// primes nothing for the mobile gates.
-	if totalJS != 11 || totalSelfPriming != 3 || totalExempt != 2 {
-		t.Errorf("JS-assert census drift: got %d JS-touching / %d self-priming / %d exempt, want 11 / 3 / 2",
-			totalJS, totalSelfPriming, totalExempt)
+	//
+	// exempt 2 -> 0, delegated +2 on 2026-09-13 (the change landed
+	// 2026-09-11 in 9e8126153, #17867): add-console-helper.scaffy:155 and
+	// ensure-console-hook-zones.scaffy:191 moved from
+	// `ASSERT CMD "node --test cloud/priv/static/__app.test.mjs"` to
+	// `ASSERT CMD "sh scripts/console-harness.sh"`. THE WORLD DID NOT
+	// IMPROVE: scripts/console-harness.sh still ends `exec "$node" --test
+	// "$ROOT/$TEST_REL"` and invokes no pnpm/npx/vitest/tsc anywhere, so
+	// those two gates still need no workspace bootstrap and still deserve
+	// the exemption — it moved BEHIND a script the classifier could not
+	// see through. The exempt pin therefore does NOT drop to a bare 0 on
+	// its own; it drops to 0 alongside a delegated term that recovers the
+	// sight, so the two gates are still counted and a THIRD delegation
+	// cannot arrive unnoticed. The other five delegations predate this and
+	// were measured on 2026-09-13, per assert, not per script name (a
+	// distinct-script count is 4 and is the WRONG number here):
+	// add-canonical-marker:104 and add-docs-card:151 and
+	// remove-docs-card:101 -> scripts/docs-anchors-check.sh,
+	// add-block-type:731 -> scripts/pd-parity-completeness.sh,
+	// remove-docs-card:100 -> scripts/check-doc-budgets.sh.
+	if totalJS != 11 || totalSelfPriming != 3 || totalExempt != 0 || totalDelegated != 7 {
+		t.Errorf("JS-assert census drift: got %d JS-touching / %d self-priming / %d direct-node exempt / %d delegated, want 11 / 3 / 0 / 7",
+			totalJS, totalSelfPriming, totalExempt, totalDelegated)
 	}
 }
 
-// synthJSAssert wraps ASSERT CMD lines in the minimal valid grammar so
-// Parse yields a command whose Asserts the guard can walk. No testdata
-// file — testdata/red|green is frozen lint-catalog vocabulary (D28).
+// TestJSAssertClassification pins classifyAssert itself — the code path
+// that decides exemption. Without this the census pin is the only thing
+// holding the classifier, and a census pin cannot tell a class that moved
+// from a class that disappeared. The `sh scripts/console-harness.sh` arm
+// is the literal 2026-09-11 regression: before delegation was a class it
+// returned classPlain, invisible to every term.
+func TestJSAssertClassification(t *testing.T) {
+	cases := []struct {
+		text string
+		want assertClass
+	}{
+		{"node --test cloud/priv/static/__app.test.mjs", classNodeExempt},
+		{"sh scripts/console-harness.sh", classDelegated},
+		{"bash scripts/docs-anchors-check.sh", classDelegated},
+		{"./scripts/console-harness.sh", classDelegated},
+		{"cd js/packages/core && npx vitest run", classJSTouching},
+		{"cd js && pnpm install && pnpm --filter @barkpark/core build", classJSTouching},
+		{"cd api && mix compile", classPlain},
+		// A delegation that ALSO names a JS token in its own text stays in
+		// the dangerous class — the order guard must keep flagging it.
+		{"cd js/packages/core && sh scripts/console-harness.sh", classJSTouching},
+	}
+	for _, tc := range cases {
+		if got := classifyAssert(tc.text); got != tc.want {
+			t.Errorf("classifyAssert(%q) = %v, want %v", tc.text, got, tc.want)
+		}
+	}
+}
+
 func synthJSAssert(assertLines string) string {
 	return `COMMAND "syn"
 DESCRIPTION "synthetic JS-assert fixture."

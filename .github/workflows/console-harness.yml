@@ -577,22 +577,34 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
-      # PIN 1438 — bumped 2026-09-13 from 1437 by cch-r16-w11, which adds ONE
-      # arm to cloud/priv/static/__app.test.mjs ("cch-r16-w11: vercelClaimHtml
-      # draws the deploy button live on grant and hookless-disabled on refuse"
-      # — the only place POST /v1/barkparks/:*/vercel-deploy's two arms can be
-      # measured, since the control's gating READ is itself team-admin and no
-      # scenario fixture can paint it). RE-DERIVED after the rebase onto the
-      # main that carries #18064 (17327eb37), by RUNNING `bash
-      # scripts/console-harness.sh` on the declared Node 20 in that branch's
-      # worktree and summing its `# pass N` fields the way the step below does:
-      # it printed `# tests 1438 / # pass 1438 / # fail 0`. NEVER by adding one
-      # to the previous pin — #18064 had already moved this literal from 1436 to
-      # 1437 under this branch, so arithmetic on the number this branch was
-      # authored against would have produced 1437 and reddened the gate.
-      # Previously PIN 1437 — bumped 2026-09-13 from 1436 (#18064). That PR added
-      # one arm to __app.test.mjs (the /new launch step's unknown arm in the
-      # preview corpus).
+      # PIN 1451 — bumped 2026-09-13 from 1441 on console/github-install-return-leg.
+      # This PR grows cloud/priv/static/__app.test.mjs by TEN arms: six for the
+      # GitHub install return leg itself, and four more for the fence the binding
+      # census demanded of it (the band, the decide, the driven member arm, and
+      # the fence's own mutation control).
+      # RE-DERIVED after rebasing onto origin/main c2b5efe91 — the base that
+      # carries cch-r17-w12's three arms and moved main's literal 1438 -> 1441 —
+      # by RUNNING `bash scripts/console-harness.sh` on the declared node 20
+      # (v20.20.2, banner MATCHES __node-version) and summing its `# pass N`
+      # fields with this step's own awk: it printed
+      # `# tests 1451 / # pass 1451 / # fail 0` and the awk summed 1451.
+      # NEVER by adding ten to 1441 or by carrying 1448 forward. This branch has
+      # now carried FOUR absolute values (1442, 1443, 1448, 1451) under four
+      # bases for the same arms: the invariant that survives a rebase is the
+      # DELTA, and the absolute number is re-measured every single time.
+      # Previously PIN 1448 — measured on origin/main 36e92646b, before cch-r17-w12.
+      # Previously PIN 1443 — measured on origin/main 6acbdf459, before #18136.
+      # Previously PIN 1442 — measured at f0f8ad1e4 on a base that predates #18064.
+      # PIN 1437 — bumped 2026-09-13 from 1436. This PR adds one arm to
+      # cloud/priv/static/__app.test.mjs (the /new launch step's unknown arm in the
+      # preview corpus); a local node-20 `bash scripts/console-harness.sh` on
+      # 25f69770f (this branch re-rebased onto origin/main f4743352d, the base that
+      # carries #18046 and #18088) reports `# tests 1437 / # pass 1437 / # fail 0`.
+      # origin/main still pins 1436 on that same base — #18046 grew the preview
+      # corpus, not __app.test.mjs — so this branch's +1 arm is still the only
+      # mover. The earlier draft of this note cited 4835a2bcb, a pre-rebase SHA
+      # that the rebase orphaned; the number did not move, the commit it was
+      # measured on did.
       # Previously PIN 1436 — bumped 2026-09-12 from 1431. #17919 (E11 widen, dcbd22469)
       # grew __app.test.mjs by +5 arms and did NOT bump this literal in the same
       # diff, so every console PR (and main) reddened here at 1436-vs-1431. Re-derived
@@ -606,7 +618,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1438-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1451-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -622,14 +634,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1438 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1438 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1451 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1451 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1438 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1438 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1438 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1451 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1451 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1451 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1438 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1451 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It

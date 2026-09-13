@@ -19,6 +19,7 @@ defmodule BarkparkCloud.HealthTest do
   import Plug.Test
 
   alias BarkparkCloud.Health
+  alias BarkparkCloud.Health.ServingMemory
   alias BarkparkCloud.Web.Router
 
   @env "BARKPARK_GIT_SHA"
@@ -27,12 +28,28 @@ defmodule BarkparkCloud.HealthTest do
   setup do
     previous = System.get_env(@env)
     System.delete_env(@env)
+    # serving_since is now durable and memoised per BEAM; drop this node's
+    # sightings so one test's sha cannot answer another's read.
+    ServingMemory.forget()
 
     on_exit(fn ->
+      ServingMemory.forget()
       if previous, do: System.put_env(@env, previous), else: System.delete_env(@env)
     end)
 
     :ok
+  end
+
+  # A sighting of `sha` as a deploy that happened before this BEAM existed.
+  defp backdate!(sha, hours) do
+    at = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+    Repo.insert_all("serving_memories", [%{sha: sha, first_seen_at: at}],
+      on_conflict: :nothing,
+      conflict_target: :sha
+    )
+
+    at
   end
 
   defp ok_body do
@@ -73,26 +90,45 @@ defmodule BarkparkCloud.HealthTest do
     end
   end
 
-  describe "serving_since" do
-    test "is VM-derived: it tracks the BEAM's own uptime, not any env value" do
-      uptime_ms =
-        System.convert_time_unit(
-          :erlang.monotonic_time() - :erlang.system_info(:start_time),
-          :native,
-          :millisecond
-        )
+  describe "serving_since (durable — clk-bl-cloud-health-serving-since-is-boot-local)" do
+    # It USED to be VM-derived, and the test that stood here asserted exactly
+    # that. A gauge a bare `docker restart` improves is the defect, not the
+    # contract, so the assertion is inverted: the value must be OLDER than this
+    # BEAM, which nothing computed from :erlang.system_info(:start_time) can be.
+    test "predates this BEAM — it comes from the record, not from the VM's uptime" do
+      sha = "ddddddd4444444444444444444444444444dddd"
+      deployed_at = backdate!(sha, 4)
+      System.put_env(@env, sha)
 
-      independent = DateTime.add(DateTime.utc_now(), -uptime_ms, :millisecond)
+      serving = Health.serving()
 
-      drift = DateTime.diff(Health.serving().serving_since, independent, :millisecond)
-      assert abs(drift) < 2000, "serving_since drifted #{drift}ms from a recomputed VM uptime"
+      assert serving.serving_since == deployed_at
+
+      assert DateTime.compare(serving.serving_since, serving.process_since) == :lt,
+             "serving_since is not older than process_since — it is still boot-local"
     end
 
-    test "is a real DateTime on the ok arm and is not moved by the env" do
-      System.put_env(@env, "ddddddd4444444444444444444444444444dddd")
-      assert %DateTime{} = serving_since = ok_body().serving_since
-      # In the past (the VM started before now) but within this VM's lifetime.
-      assert DateTime.compare(serving_since, DateTime.utc_now()) == :lt
+    test "a restart does not move it: same record, new BEAM, same instant" do
+      sha = "dddddda4444444444444444444444444444dddd"
+      System.put_env(@env, sha)
+
+      before_restart = ok_body().serving_since
+      assert %DateTime{} = before_restart
+
+      # What a real restart does for free: this node forgets its sightings and
+      # has nothing left but the durable record.
+      ServingMemory.forget()
+
+      assert ok_body().serving_since == before_restart
+    end
+
+    test "no sha means no clock — serving_sha and serving_since are nil together" do
+      serving = Health.serving()
+
+      assert Map.fetch!(serving, :serving_sha) == nil
+      assert Map.fetch!(serving, :serving_since) == nil
+      # process_since is unaffected: it never needed a sha.
+      assert %DateTime{} = serving.process_since
     end
   end
 
@@ -141,28 +177,50 @@ defmodule BarkparkCloud.HealthTest do
       assert Map.fetch!(body, "git_sha") == nil
     end
 
-    test "process_since is on the wire as ISO-8601, alongside serving_since" do
-      System.put_env(@env, "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbb2222")
+    test "process_since and serving_since are both on the wire, and they are DIFFERENT clocks" do
+      sha = "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbb2222"
+      deployed_at = backdate!(sha, 6)
+      System.put_env(@env, sha)
 
       body = health_body()
 
-      assert {:ok, %DateTime{}, _} = DateTime.from_iso8601(Map.fetch!(body, "process_since"))
-      # No key was removed: serving_since is still there, still a timestamp.
-      assert {:ok, %DateTime{}, _} = DateTime.from_iso8601(Map.fetch!(body, "serving_since"))
-      assert body["process_since"] == body["serving_since"]
+      assert {:ok, %DateTime{} = process_since, _} =
+               DateTime.from_iso8601(Map.fetch!(body, "process_since"))
+
+      assert {:ok, %DateTime{} = serving_since, _} =
+               DateTime.from_iso8601(Map.fetch!(body, "serving_since"))
+
+      # They were the SAME value before this fix, which is precisely why a
+      # deploy-lag reading taken against serving_since shrank on every restart.
+      assert DateTime.compare(serving_since, deployed_at) == :eq
+      assert DateTime.compare(serving_since, process_since) == :lt
+      refute body["process_since"] == body["serving_since"]
     end
 
-    test "serving_since ships a basis string that says it is process-derived and restart-improvable" do
-      # THE GUARD. Delete @serving_since_basis (or drop the key from serving/0)
-      # and this test reds: the wire loses the only place that admits a bare
-      # restart makes the lag read smaller.
+    test "serving_since ships a basis string naming WHICH state produced it" do
+      # THE GUARD. Drop the key from serving/0 and this reds: the wire loses the
+      # only place that says whether serving_since is a durable record, an
+      # unknown sha, or an unreachable store. Its wording must no longer confess
+      # to being process-derived — that confession was the old defect's label.
+      System.put_env(@env, "3333333ccccccccccccccccccccccccccc33333")
+
       basis = Map.fetch!(health_body(), "serving_since_basis")
 
       assert is_binary(basis) and basis != ""
       down = String.downcase(basis)
-      assert down =~ "process-derived"
+      assert down =~ "durable"
       assert down =~ "restart"
-      assert down =~ "smaller"
+      refute down =~ "process-derived"
+    end
+
+    test "an unknown sha renders serving_sha and serving_since as JSON null, together" do
+      body = health_body()
+
+      assert Map.fetch!(body, "serving_sha") == nil
+      assert Map.fetch!(body, "serving_since") == nil
+      assert String.downcase(Map.fetch!(body, "serving_since_basis")) =~ "unknown"
+      # process_since survives: it is boot-local on purpose and needs no sha.
+      assert {:ok, %DateTime{}, _} = DateTime.from_iso8601(Map.fetch!(body, "process_since"))
     end
   end
 end
@@ -188,6 +246,7 @@ defmodule BarkparkCloud.HealthErrorArmTest do
   use ExUnit.Case, async: false
 
   alias BarkparkCloud.Health
+  alias BarkparkCloud.Health.ServingMemory
 
   @env "BARKPARK_GIT_SHA"
 
@@ -195,21 +254,39 @@ defmodule BarkparkCloud.HealthErrorArmTest do
     Ecto.Adapters.SQL.Sandbox.mode(BarkparkCloud.Repo, :manual)
     previous = System.get_env(@env)
     System.delete_env(@env)
+    ServingMemory.forget()
 
     on_exit(fn ->
+      ServingMemory.forget()
       if previous, do: System.put_env(@env, previous), else: System.delete_env(@env)
     end)
 
     :ok
   end
 
-  test "the {:error, ...} arm carries the injected sha and serving_since" do
+  test "the {:error, ...} arm carries the injected sha, and DECLINES to invent a serving_since" do
     System.put_env(@env, "9999999777777777777777777777777799999")
 
     assert {:error, body} = Health.health()
     assert body.db == :down
     assert body.git_sha == "9999999777777777777777777777777799999"
-    assert %DateTime{} = body.serving_since
+
+    # The sha is the whole reason this arm carries serving data at all, and it
+    # is still here. serving_since is not: the durable record is IN the Postgres
+    # that just failed, and the old fallback — this BEAM's boot instant — is the
+    # very gauge a restart improves. Declining is the safe direction.
+    assert Map.fetch!(body, :serving_since) == nil
+    assert String.downcase(body.serving_since_basis) =~ "unavailable"
+  end
+
+  test "an unreachable store does not raise, and does not fall back to the boot clock" do
+    System.put_env(@env, "8888888666666666666666666666666688888")
+
+    assert {:error, body} = Health.health()
+
+    assert %DateTime{} = body.process_since
+    assert Map.fetch!(body, :serving_since) == nil
+    refute body.serving_since == body.process_since
   end
 
   test "a DB-down box with no sha env says nil, honestly, instead of raising" do

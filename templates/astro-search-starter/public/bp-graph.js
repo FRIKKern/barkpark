@@ -39,25 +39,136 @@
   // Obsidian-faithful restyle: small flat dots, thin faint threads, near-
   // monochrome, generous void. Beauty through restraint. The luminous-nebula
   // language (orbs, corona, blast-rings, vignette, glyphs) is gone.
-  var ACCENT = "#9a8cff"; // root / active / selection — soft Obsidian violet
+  //
+  // EVERY concrete colour this renderer paints is GENERATED below from
+  // design/tokens.json (color.graphCanvas.graph) — Canvas 2D fillStyle cannot take
+  // var(), so the token compiler splices the resolved values in at emit time
+  // instead. Change a colour in tokens.json and run `node design/emit.mjs --write`;
+  // a hand edit inside the marker is deleted by the next regeneration and reds
+  // design/check.mjs. Non-colour constants (alphas, radii, fade multipliers, the
+  // font stack) stay hand-written OUTSIDE the marker.
+  /* BEGIN GENERATED: bp-graph-palette (design/tokens.json color.graphCanvas.graph via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
+  // Obsidian-faithful restyle: small flat dots, thin faint threads, near-
+  // monochrome, generous void. Beauty through restraint.
+  var ACCENT = "#9a8cff";
   var ACCENT_RGB = [154, 140, 255];
-  var A11Y_RING = "#60A5FA"; // keyboard-focus ring, kept DISTINCT from accent
-  var SLATE = "#94A3B8"; // _unknown + phantom + ash mix target
-  var AMBER = "#FBBF24"; // the only warm pixel — parse-error state
+  var A11Y_RING = "#60A5FA";
+  var SLATE = "#94A3B8";
+  var AMBER = "#FBBF24";
 
   // Monochrome node tint — one muted desaturated lavender-grey for EVERY node
-  // on dark (the default look). Per-type color is the opt-in "Full color" toggle.
-  var MONO_DARK = "#a6adc0"; // dark-theme resting node fill (soft cool blue-grey)
-  var MONO_LIGHT = "#5a5f6e"; // light-theme resting node fill (dark dot on white)
-  var NODE_WHITE = "#f2f3f8"; // hovered/neighbor brighten target (dark)
+  // on dark (the default look). Per-type colour is the opt-in "Full color" toggle.
+  var MONO_DARK = "#a6adc0";
+  var MONO_LIGHT = "#5a5f6e";
+  var NODE_WHITE = "#f2f3f8";
+  var NODE_INK_LIGHT = "#2a2e3a";
 
   // Flat theme backgrounds (no gradient, no vignette).
   var BG_DARK = "#16161a";
   var BG_LIGHT = "#f4f4f6";
 
-  // Link base color/opacity — very faint thin threads.
+  // Link base colour channels — very faint thin threads (alphas stay outside).
   var LINK_RGB_DARK = "170,180,205";
   var LINK_RGB_LIGHT = "40,44,58";
+
+  // Label colours: resting, hovered, and the mix targets a matched label walks to.
+  var LABEL_COLOR_DARK = "#8b92a3";
+  var LABEL_COLOR_LIGHT = "#5a5f6e";
+  var LABEL_HOT_DARK = "#e6e7f0";
+  var LABEL_HOT_LIGHT = "#2a2e3a";
+  var LABEL_MIX_DARK = "#e8e9f2";
+  var LABEL_MIX_LIGHT = "#1e2230";
+  var LABEL_HOV_DARK = "#d8dae6";
+  var LABEL_SHADOW_DARK = "rgba(10,10,14,0.85)";
+  var LABEL_SHADOW_LIGHT = "rgba(255,255,255,0.85)";
+
+  // Canvas toast pill + the hover tooltip's own glass.
+  var TOAST_BG_DARK = "rgba(19,20,27,0.55)";
+  var TOAST_BG_LIGHT = "rgba(255,255,255,0.6)";
+  var TOAST_BORDER = "rgba(255,255,255,0.07)";
+  var TOOLTIP_TITLE_DARK = "#fff";
+  var TOOLTIP_TITLE_LIGHT = "#16161a";
+  var TOOLTIP_META_DARK = "rgba(226,232,240,0.7)";
+  var TOOLTIP_META_LIGHT = "rgba(15,17,23,0.6)";
+  var TOOLTIP_BG_DARK = "rgba(19,20,27,0.92)";
+  var TOOLTIP_BG_LIGHT = "rgba(255,255,255,0.92)";
+  var TOOLTIP_BORDER_DARK = "rgba(255,255,255,0.08)";
+  var TOOLTIP_BORDER_LIGHT = "rgba(15,17,23,0.10)";
+
+  // Per-type hues — painted ONLY under the optional "Full color" toggle.
+  var TYPE_HEX = {
+    post: "#7C8CEF",
+    page: "#9B82ED",
+    paper: "#38BDF8",
+    task: "#FB7185",
+    author: "#34D399",
+    category: "#4ADE80",
+    book: "#FBBF24",
+    asset: "#FB923C",
+    mediaAsset: "#FB923C",
+    sheet: "#22D3EE",
+    project: "#A3E635",
+    "game-data": "#E879F9",
+    tag: "#2DD4BF",
+    command: "#C084FC",
+    metric: "#FACC15",
+    session: "#F472B6",
+    _unknown: "#94A3B8"
+  };
+
+  // Overlay chrome (legend, zoom strip, toggles, search) — inline styles on the
+  // injected DOM, rebuilt by setTheme() so canvas and chrome flip together.
+  var CHROME_PALETTE = {
+    light: {
+      panelBg: "rgba(255,255,255,0.72)",
+      panelBorder: "rgba(15,17,23,0.10)",
+      title: "rgba(15,17,23,0.45)",
+      row: "rgba(15,17,23,0.68)",
+      rowDim: "rgba(15,17,23,0.52)",
+      btnBg: "rgba(255,255,255,0.72)",
+      btnBgHover: "rgba(255,255,255,0.95)",
+      btnBorder: "rgba(15,17,23,0.10)",
+      btnBorderHover: "rgba(15,17,23,0.20)",
+      btnText: "rgba(15,17,23,0.72)",
+      btnTextHover: "rgba(15,17,23,0.95)",
+      togBgOn: "rgba(226,229,238,0.8)",
+      togBgOff: "rgba(226,229,238,0.45)",
+      togBorderOn: "rgba(15,17,23,0.14)",
+      togBorderOff: "rgba(15,17,23,0.07)",
+      togTextOn: "rgba(15,17,23,0.85)",
+      togTextOff: "rgba(15,17,23,0.55)",
+      dotOff: "rgba(15,17,23,0.25)",
+      inputText: "#16161a",
+      phantomRing: "rgba(90,95,110,0.55)",
+      mono: "#5a5f6e"
+    },
+    dark: {
+      panelBg: "rgba(15,17,23,0.55)",
+      panelBorder: "rgba(255,255,255,0.07)",
+      title: "rgba(255,255,255,0.45)",
+      row: "rgba(255,255,255,0.65)",
+      rowDim: "rgba(255,255,255,0.5)",
+      btnBg: "rgba(15,17,23,0.55)",
+      btnBgHover: "rgba(24,27,36,0.72)",
+      btnBorder: "rgba(255,255,255,0.07)",
+      btnBorderHover: "rgba(255,255,255,0.14)",
+      btnText: "rgba(255,255,255,0.75)",
+      btnTextHover: "rgba(255,255,255,0.95)",
+      togBgOn: "rgba(40,44,58,0.7)",
+      togBgOff: "rgba(40,44,58,0.4)",
+      togBorderOn: "rgba(255,255,255,0.12)",
+      togBorderOff: "rgba(255,255,255,0.06)",
+      togTextOn: "rgba(255,255,255,0.85)",
+      togTextOff: "rgba(255,255,255,0.6)",
+      dotOff: "rgba(255,255,255,0.25)",
+      inputText: "#fff",
+      phantomRing: "rgba(148,163,184,0.5)",
+      mono: "#a6adc0"
+    }
+  };
+  /* END GENERATED: bp-graph-palette */
+
+  // Link opacity — very faint thin threads.
   var LINK_A_DARK = 0.09; // resting link alpha (dark) — very faint thread
   var LINK_A_LIGHT = 0.14; // resting link alpha (light)
   var LINK_A_FOCUS = 0.5; // incident-to-hover link alpha (bright)
@@ -90,9 +201,7 @@
     return DEPTH_FAR + (1 - DEPTH_FAR) * Math.pow(DEPTH_RING, d - 1);
   }
 
-  // Label color (muted grey) + zoom-fade thresholds.
-  var LABEL_COLOR_DARK = "#8b92a3"; // muted grey
-  var LABEL_COLOR_LIGHT = "#5a5f6e";
+  // Label zoom-fade thresholds (LABEL_COLOR_* are generated above).
   // Obsidian text-fade is FIT-RELATIVE: the auto-fit scale for a spread layout
   // can land well below any fixed value, so we gate labels off the ratio of the
   // current camera scale to the captured fitScale rather than absolute scale.
@@ -106,32 +215,10 @@
   var FONT_STACK =
     "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', ui-sans-serif, system-ui, sans-serif";
 
-  // Per-type hues — used ONLY when the optional "Full color" toggle is on.
-  // The default look is monochrome (MONO_DARK/MONO_LIGHT), so this is capacity,
-  // not a mandate. Every node is a plain filled circle; type is not a shape or
-  // glyph channel anymore (Obsidian draws plain dots).
-  var TYPE_HEX = {
-    post: "#7C8CEF",
-    page: "#9B82ED",
-    paper: "#38BDF8",
-    task: "#FB7185",
-    author: "#34D399",
-    category: "#4ADE80",
-    book: "#FBBF24",
-    asset: "#FB923C",
-    mediaAsset: "#FB923C",
-    sheet: "#22D3EE",
-    project: "#A3E635",
-    "game-data": "#E879F9",
-    // Live dogfood-corpus types (search-starter flagship). Same Tailwind-400
-    // family as the rest of the palette; each hue is distinct from every type
-    // it actually co-occurs with (task=rose, paper=sky dominate that corpus).
-    tag: "#2DD4BF",
-    command: "#C084FC",
-    metric: "#FACC15",
-    session: "#F472B6",
-    _unknown: SLATE
-  };
+  // TYPE_HEX (per-type hues, used ONLY when the optional "Full color" toggle is
+  // on) is generated above. The default look is monochrome (MONO_DARK/MONO_LIGHT),
+  // so it is capacity, not a mandate: every node is a plain filled circle and type
+  // is not a shape or glyph channel (Obsidian draws plain dots).
 
   // ─────────────────────────────────────────────────────────── color utils ──
   function hexToRgb(hex) {
@@ -1451,9 +1538,9 @@
       var bx = cx - bw / 2,
         by = cy - bh / 2 + (1 - ease) * 12;
       roundRect(ctx, bx, by, bw, bh, 10);
-      ctx.fillStyle = theme === "light" ? "rgba(255,255,255,0.6)" : "rgba(19,20,27,0.55)";
+      ctx.fillStyle = theme === "light" ? TOAST_BG_LIGHT : TOAST_BG_DARK;
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.07)";
+      ctx.strokeStyle = TOAST_BORDER;
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.fillStyle = color;
@@ -1686,9 +1773,9 @@
         fill = hovered || neighbor ? shiftL(ACCENT, 0.1) : ACCENT;
       } else if (hovered) {
         // hovered node brightens toward white (dark) / dark (light).
-        fill = theme === "light" ? "#2a2e3a" : NODE_WHITE;
+        fill = theme === "light" ? NODE_INK_LIGHT : NODE_WHITE;
       } else if (neighbor) {
-        fill = theme === "light" ? mixHex(nodeFill(node), "#2a2e3a", 0.4) : mixHex(nodeFill(node), NODE_WHITE, 0.45);
+        fill = theme === "light" ? mixHex(nodeFill(node), NODE_INK_LIGHT, 0.4) : mixHex(nodeFill(node), NODE_WHITE, 0.45);
       } else {
         fill = nodeFill(node);
       }
@@ -1931,14 +2018,14 @@
         // high-legibility grey→white family).
         font = (mw >= 0.55 ? "500 " : "400 ") + (10 + Math.round(2 * mw)) + "px " + FONT_STACK;
         color = isHov
-          ? (theme === "light" ? "#2a2e3a" : "#e6e7f0")
-          : mixHex(baseColor, theme === "light" ? "#1e2230" : "#e8e9f2", 0.35 + 0.5 * mw);
+          ? (theme === "light" ? LABEL_HOT_LIGHT : LABEL_HOT_DARK)
+          : mixHex(baseColor, theme === "light" ? LABEL_MIX_LIGHT : LABEL_MIX_DARK, 0.35 + 0.5 * mw);
         track = "0.006em";
       } else {
         font = "400 10px " + FONT_STACK;
         // hovered node + neighbors brighten their label toward the node color.
         color = isHov
-          ? (theme === "light" ? "#2a2e3a" : "#d8dae6")
+          ? (theme === "light" ? LABEL_HOT_LIGHT : LABEL_HOV_DARK)
           : baseColor;
         track = "0.008em";
       }
@@ -1961,10 +2048,10 @@
       ctx.globalAlpha = node.alpha * labelA;
       // Subtle 1px dark drop shadow for legibility — no pill. Skip in light/forced.
       if (!forced && theme !== "light") {
-        ctx.fillStyle = "rgba(10,10,14,0.85)";
+        ctx.fillStyle = LABEL_SHADOW_DARK;
         ctx.fillText(text, x + 0.6, y + 0.8);
       } else if (theme === "light" && !forced) {
-        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.fillStyle = LABEL_SHADOW_LIGHT;
         ctx.fillText(text, x + 0.6, y + 0.8);
       }
       ctx.fillStyle = color;
@@ -2008,7 +2095,7 @@
       var hue = node.phantom ? SLATE : TYPE_HEX[node.type] || SLATE;
       var light = theme === "light";
       html +=
-        "<div style='font-weight:600;color:" + (light ? "#16161a" : "#fff") + ";margin-bottom:4px;padding-bottom:3px;" +
+        "<div style='font-weight:600;color:" + (light ? TOOLTIP_TITLE_LIGHT : TOOLTIP_TITLE_DARK) + ";margin-bottom:4px;padding-bottom:3px;" +
         "border-bottom:1.5px solid " + rgba(hue, 0.55) + "'>" + esc(title) + "</div>";
       if (node.phantom) {
         var line = node.via
@@ -2018,11 +2105,11 @@
       } else {
         html += "<div style='color:" + (light ? shiftL(ACCENT, -0.22) : rgba(ACCENT, 0.9)) + "'>" + esc(node.type) + "</div>";
         var cc = Object.keys(adj[node.id] || {}).length;
-        html += "<div style='color:" + (light ? "rgba(15,17,23,0.6)" : "rgba(226,232,240,0.7)") + ";margin-top:2px'>" + cc + " connection" + (cc === 1 ? "" : "s") + "</div>";
+        html += "<div style='color:" + (light ? TOOLTIP_META_LIGHT : TOOLTIP_META_DARK) + ";margin-top:2px'>" + cc + " connection" + (cc === 1 ? "" : "s") + "</div>";
       }
       tooltip.innerHTML = html;
-      tooltip.style.background = light ? "rgba(255,255,255,0.92)" : "rgba(19,20,27,0.92)";
-      tooltip.style.border = "1px solid " + (light ? "rgba(15,17,23,0.10)" : "rgba(255,255,255,0.08)");
+      tooltip.style.background = light ? TOOLTIP_BG_LIGHT : TOOLTIP_BG_DARK;
+      tooltip.style.border = "1px solid " + (light ? TOOLTIP_BORDER_LIGHT : TOOLTIP_BORDER_DARK);
       tooltip.style.backdropFilter = "blur(14px)";
       tooltip.style.opacity = "1";
 
@@ -2769,54 +2856,7 @@
     // live). Dark keeps the exact original values; light mirrors them on a
     // white glass. setTheme() rebuilds the chrome so both flip together.
     function chromeC() {
-      if (theme === "light") {
-        return {
-          panelBg: "rgba(255,255,255,0.72)",
-          panelBorder: "rgba(15,17,23,0.10)",
-          title: "rgba(15,17,23,0.45)",
-          row: "rgba(15,17,23,0.68)",
-          rowDim: "rgba(15,17,23,0.52)",
-          btnBg: "rgba(255,255,255,0.72)",
-          btnBgHover: "rgba(255,255,255,0.95)",
-          btnBorder: "rgba(15,17,23,0.10)",
-          btnBorderHover: "rgba(15,17,23,0.20)",
-          btnText: "rgba(15,17,23,0.72)",
-          btnTextHover: "rgba(15,17,23,0.95)",
-          togBgOn: "rgba(226,229,238,0.8)",
-          togBgOff: "rgba(226,229,238,0.45)",
-          togBorderOn: "rgba(15,17,23,0.14)",
-          togBorderOff: "rgba(15,17,23,0.07)",
-          togTextOn: "rgba(15,17,23,0.85)",
-          togTextOff: "rgba(15,17,23,0.55)",
-          dotOff: "rgba(15,17,23,0.25)",
-          inputText: "#16161a",
-          mono: MONO_LIGHT,
-          phantomRing: "rgba(90,95,110,0.55)"
-        };
-      }
-      return {
-        panelBg: "rgba(15,17,23,0.55)",
-        panelBorder: "rgba(255,255,255,0.07)",
-        title: "rgba(255,255,255,0.45)",
-        row: "rgba(255,255,255,0.65)",
-        rowDim: "rgba(255,255,255,0.5)",
-        btnBg: "rgba(15,17,23,0.55)",
-        btnBgHover: "rgba(24,27,36,0.72)",
-        btnBorder: "rgba(255,255,255,0.07)",
-        btnBorderHover: "rgba(255,255,255,0.14)",
-        btnText: "rgba(255,255,255,0.75)",
-        btnTextHover: "rgba(255,255,255,0.95)",
-        togBgOn: "rgba(40,44,58,0.7)",
-        togBgOff: "rgba(40,44,58,0.4)",
-        togBorderOn: "rgba(255,255,255,0.12)",
-        togBorderOff: "rgba(255,255,255,0.06)",
-        togTextOn: "rgba(255,255,255,0.85)",
-        togTextOff: "rgba(255,255,255,0.6)",
-        dotOff: "rgba(255,255,255,0.25)",
-        inputText: "#fff",
-        mono: MONO_DARK,
-        phantomRing: "rgba(148,163,184,0.5)"
-      };
+      return theme === "light" ? CHROME_PALETTE.light : CHROME_PALETTE.dark;
     }
     function buildChrome() {
       // On first build, fade the whole chrome layer in AFTER the constellation

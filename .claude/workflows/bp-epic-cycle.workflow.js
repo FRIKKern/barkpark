@@ -124,6 +124,11 @@ const USER_WISH_BLOCK = `THE USER'S WISH (this is the focus — everything serve
 ${WISH}
 """`
 
+const COLD_START_ATLAS_BLOCK = `COLD START — BUILD THE ATLAS BEFORE YOU TRAVERSE, THEN VERIFY BEFORE YOU ASSERT:
+Run \`bp context map <keyword>\` (keyword = this epic's area, e.g. its plugin, noun, or directory stem) before you start reading files one by one. It writes an atlas directory holding page_N.png (the shape: modules, self-described gists, public definitions, and the reference edges OBSERVED between them), <keyword>.laws.txt, and map.json. Read the pages with the Read tool — they cost a fraction of the text they picture.
+TWO CHANNELS, AND THE TEXT ONE WINS. The image carries topology, never rules. Every must / must not / never / only / always sentence rides <keyword>.laws.txt VERBATIM; for ANY trust-boundary claim trust that file over the picture, and over your memory of the picture.
+VERIFY BEFORE YOU ASSERT. Every relation in map.json is an OBSERVATION carrying the file and 1-based line where it was seen (edges[].from/to/via/line). Before you state that one module calls, depends on, or is constrained by another — in a report, a task, a PR body, or a commit message — open that line and see it. State no relation the atlas does not carry: an atlas is a record of what was observed, never a licence to infer what was not. If the atlas says it is CLIPPED, absence from it is not evidence of absence in the repo.`
+
 const GATES_BLOCK = `Local gates available (a slice must name at least one that proves it):
 - Cloud SPA: node --check cloud/priv/static/app.js AND node cloud/priv/static/__app.test.mjs (node:vm harness over __bpTestHook — extend it for new pure helpers)
 - Go CLI: go build ./... && go vet ./internal/cli/... && go test ./internal/cli/...
@@ -749,6 +754,8 @@ ${USER_WISH_BLOCK}
 STRATEGIC DIRECTION (context for what your answer feeds):
 ${strategist.direction}
 
+${COLD_START_ATLAS_BLOCK}
+
 YOUR ASSIGNMENT [${q.key}]: ${q.question}
 WHY IT MATTERS: ${q.why}
 ${q.task_id ? `CANDIDATE TASK: ${q.task_id} — this assignment settles a published \`considering\` candidate. Stage it to \`researching\` before you dig (the one mutation you are allowed), and echo the id back in task_id so Decide can resolve it.` : 'CANDIDATE TASK: none — this assignment settles no candidate; make no bp mutations at all.'}
@@ -1048,6 +1055,8 @@ const built = (await parallel(
       `You are BUILDING one slice of a Barkpark epic inside your OWN isolated git worktree (safe to edit/commit; you will not collide with other builders).
 
 ${USER_WISH_BLOCK}
+
+${COLD_START_ATLAS_BLOCK}
 
 Read the epic charter at ${CHARTER_PATH} first — your slice must respect its decisions. ${architect.charter_pr ? `HEADS UP, and this is not a formality: THIS wave's charter is still an OPEN PULL REQUEST (${architect.charter_pr}), because \`main\` is protected and Decide no longer pushes to it. Your worktree branched from origin/main, so the ${CHARTER_PATH} on your disk is the PREVIOUS wave's — it will read as plausible and be silently out of date. Get this wave's decisions from the wave Paper (${WAVE_PAPER}), which is current, and from your bp task brief; if you need the charter diff itself, \`gh pr diff ${String(architect.charter_pr).replace(/[^0-9]/g, '') || architect.charter_pr}\`.` : ''} The wave Paper (${WAVE_PAPER}) carries this wave's story — decisions, verification proofs, the other slices; read it for context, NEVER write it (your bp task is your voice).
 

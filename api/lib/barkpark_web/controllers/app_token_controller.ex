@@ -126,7 +126,7 @@ defmodule BarkparkWeb.AppTokenController do
 
     cond do
       revoke_rate_limited?(conn) ->
-        ErrorResponse.emit(conn, {:error, :rate_limited})
+        rate_limited(conn)
 
       not Auth.has_permission?(bearer, "admin") ->
         ErrorResponse.emit(conn, {:error, :unauthorized})
@@ -267,7 +267,7 @@ defmodule BarkparkWeb.AppTokenController do
   def delete_by_id(conn, %{"id" => id}) do
     cond do
       revoke_rate_limited?(conn) ->
-        ErrorResponse.emit(conn, {:error, :rate_limited})
+        rate_limited(conn)
 
       not Auth.has_permission?(conn.assigns.api_token, "admin") ->
         ErrorResponse.emit(conn, {:error, :unauthorized})
@@ -316,7 +316,7 @@ defmodule BarkparkWeb.AppTokenController do
 
     cond do
       revoke_rate_limited?(conn) ->
-        ErrorResponse.emit(conn, {:error, :rate_limited})
+        rate_limited(conn)
 
       Auth.has_permission?(token, "admin") ->
         unprocessable(conn, "admin tokens cannot self-revoke through the app-token path")
@@ -409,6 +409,31 @@ defmodule BarkparkWeb.AppTokenController do
   # (Registry.revoke_app_token/3) still wins — a whole team does not share one
   # bucket keyed on the single Cloud egress IP — provided that egress address is
   # listed in BARKPARK_TRUSTED_PROXIES; unlisted, it is correctly disbelieved.
+  # THE 429 MUST CARRY THE REMEDY ITS OWN HINT NAMES (task-57081836b628df35).
+  #
+  # `Content.Errors`'s code-keyed hint for "rate_limited" reads "Back off and
+  # retry after the Retry-After header's value" — and `Errors.put_hint/1`
+  # dispatches on the CODE STRING ALONE, so that sentence is served at EVERY
+  # emitter of the code. The two rate-limit PLUGS (`TicketRateLimit`,
+  # `AuthWriteRateLimit`) honour it: they emit `{:error, :rate_limited,
+  # %{retry_after: s}}` AND set the header. These three revoke gates emitted the
+  # bare `{:error, :rate_limited}` and set NO header, so the refusal sent the
+  # caller to read a value off a header the response does not carry — a named
+  # remedy the caller cannot take, which is the defect this task governs.
+  # EXPOSE rather than un-name: the bucket's refill rate makes the wait
+  # computable, so it is published as the header AND `details.retry_after` —
+  # the same pair the plugs emit, from the same expression.
+  @revoke_retry_after_seconds max(
+                                1,
+                                div(60 + @revoke_bucket_capacity - 1, @revoke_bucket_capacity)
+                              )
+
+  defp rate_limited(conn) do
+    conn
+    |> Plug.Conn.put_resp_header("retry-after", Integer.to_string(@revoke_retry_after_seconds))
+    |> ErrorResponse.emit({:error, :rate_limited, %{retry_after: @revoke_retry_after_seconds}})
+  end
+
   defp revoke_rate_limited?(conn) do
     key = {:app_token_revoke, RateLimiter.client_ip(conn)}
 

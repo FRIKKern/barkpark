@@ -127,8 +127,11 @@ jobs:
           go run ./scaffy/seed --out "$tmp/payloads"
 
           # Full-corpus fixture: the exact envelope guerrilla would serve if
-          # perfectly in sync (fetchServed reads result.documents[]._id/source).
-          jq -s '{result: {documents: map({_id: ._id, source: .source})}}' \
+          # perfectly in sync. It carries EVERY field seeding writes, because
+          # that is what fetchServed now decodes and compares: a fixture holding
+          # only {_id, source} would green this self-test while proving nothing
+          # about the seven derived fields (task-7c037e523ccac6ee).
+          jq -s '{result: {documents: map({_id, source, title, description, concept, variant, domain, direction, tags})}}' \
             "$tmp"/payloads/*.json > "$tmp/fixture/v1/data/query/production/command"
 
           # python3 http.server strips the query string (?limit=100) when

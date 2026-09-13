@@ -431,6 +431,12 @@ func stampReceipt(req stampRequest, stored taskboard.CriterionItem, readback api
 	// caller that branches on `confirmed` can still SEE that its --miss left
 	// met standing and read the verb that lowers it.
 	notes := []string{}
+	// The draft ruling is a NOTE, not a problem: the problem (a value on a row
+	// no board reads) is already listed by stampVerdictProblems, and this is the
+	// recorded reason the write was allowed to land there at all.
+	if readback.IsDraft() {
+		notes = append(notes, stampDraftRulingNote)
+	}
 	if n := missLeftMetTrueNote(req, stored); n != "" {
 		notes = append(notes, n)
 	}
@@ -482,6 +488,9 @@ func renderStampVerdict(out *writer, req stampRequest, stored taskboard.Criterio
 		out.errf("  criterion index %d (0-based) = criterion #%d as boards/rubric number them", req.index, req.index+1)
 		out.errf("  the draft holds: %s", storedCriterionSummary(stored))
 		out.errf("  publish the row, then stamp again — `bp doc get task %s` returns not_found until you do", req.docID)
+		// The ruling that explains why the write happened at all rides the
+		// refusal it governs (tasks_stamp_draft_ruling.go).
+		out.errf("  %s", stampDraftRulingNote)
 		return exitConflict
 	}
 

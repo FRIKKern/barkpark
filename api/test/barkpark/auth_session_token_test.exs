@@ -237,7 +237,8 @@ defmodule Barkpark.AuthSessionTokenTest do
       assert File.exists?(path)
       config = path |> File.read!() |> Jason.decode!()
       server = config["mcpServers"]["barkpark"]
-      assert server["args"] == ["mcp", "serve", "--tools", "all"]
+      # Curated chat toolset, not the full bridge (task-scc-bl-mcp-chat-toolset).
+      assert server["args"] == ["mcp", "serve", "--tools", "chat"]
 
       # the env block wins over any saved host config: BOTH url and token are
       # pinned, and the token is the freshly-minted SESSION credential (it

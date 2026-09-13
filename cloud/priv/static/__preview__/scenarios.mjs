@@ -6939,6 +6939,37 @@ export function route(name, method, path, state) {
     if (method === "GET") return { status: 200, body: inst };
   }
 
+  // cch-w73-bl — THE INSTALL RETURN LEG'S WRITER, and the arm that lets this
+  // corpus PRODUCE the connected state rather than merely be handed it.
+  // app.js's handleGithubInstallReturn reads ?installation_id&setup_action off
+  // the boot URL and POSTs the id here; before this arm the plural path fell to
+  // the terminal `/v1/` 200 {}, whose body carries no `installation` key, so the
+  // console's own "only a 201 carrying installation.connected may claim a
+  // connection" rule would have read the round trip as UNCONFIRMED — a fixture
+  // that could never show the success arm.
+  //
+  // STATEFUL, on the same githubOf bag the DELETE arm already mutates, so the
+  // pair composes into the real journey: disconnect (connected:false) → the App
+  // install redirect → POST → connected again, with the GET reading through it
+  // at every step. GATED ON THE `github` FIXTURE exactly like its sibling, so no
+  // scenario without one moves by a byte.
+  //
+  // NO BODY VALIDATION, because route() takes no body: the two refusal shapes
+  // (installation_id_required, installation_not_found) are node-pinned in
+  // __app.test.mjs against hand-built answers instead. This arm models the
+  // ACCEPTED write only, which is the one thing a fixture can prove.
+  if (p === "/v1/github/installations" && method === "POST" && d.github) {
+    const inst = githubOf(d, state);
+    if (state) {
+      inst.connected = true;
+      inst.account_login = (d.github && d.github.account_login) || "acme-engineering";
+    }
+    return {
+      status: 201,
+      body: { installation: { connected: true, account_login: inst.account_login } },
+    };
+  }
+
   // Anything else under /v1 answers a benign empty 200 so a stray read never
   // trips the 401→logout path or throws mid-render.
   if (p.indexOf("/v1/") === 0) return { status: 200, body: {} };

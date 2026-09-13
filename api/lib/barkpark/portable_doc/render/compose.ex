@@ -2419,14 +2419,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp table_col_types(b, :article) do
     case Map.get(b, "cols") do
       cols when is_list(cols) and cols != [] ->
-        # NOT a `when t in [...]` guard on purpose: tiers_test.exs extracts the
-        # renderable BLOCK-type surface out of this file with a regex that reads
-        # every such guard as a list of block types, so a guard here would
-        # inflate the canonical block-type count by four COLUMN types.
         Enum.map(cols, fn
-          %{"type" => "num"} -> "num"
-          %{"type" => "delta"} -> "delta"
-          %{"type" => "spark"} -> "spark"
+          %{"type" => t} when t in ["num", "delta", "spark"] -> t
           _ -> "text"
         end)
 
