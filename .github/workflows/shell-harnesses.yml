@@ -182,6 +182,13 @@ on:
       - "scripts/pds-scratch-target_test.sh"
       - "scripts/pds-read-preflight-audit.sh"
       - "scripts/pds-read-preflight-audit_test.sh"
+      # BUDGET-LITERAL MOVE GUARD (pds-bl-w49-budget-literal-moved-by-its-own-pr).
+      # BOTH files, and the guard itself is the load-bearing half: its WATCHED
+      # roster and its extractors live in the guard, so an edit there can void
+      # every arm of the harness without touching the harness. A filter that
+      # listed only the _test.sh would let exactly that edit skip this job.
+      - "scripts/pds-threshold-move-guard.sh"
+      - "scripts/pds-threshold-move-guard_test.sh"
       - "scripts/pds-crown-stamp.sh"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
@@ -628,6 +635,13 @@ on:
       - "scripts/pds-scratch-target_test.sh"
       - "scripts/pds-read-preflight-audit.sh"
       - "scripts/pds-read-preflight-audit_test.sh"
+      # BUDGET-LITERAL MOVE GUARD (pds-bl-w49-budget-literal-moved-by-its-own-pr).
+      # BOTH files, and the guard itself is the load-bearing half: its WATCHED
+      # roster and its extractors live in the guard, so an edit there can void
+      # every arm of the harness without touching the harness. A filter that
+      # listed only the _test.sh would let exactly that edit skip this job.
+      - "scripts/pds-threshold-move-guard.sh"
+      - "scripts/pds-threshold-move-guard_test.sh"
       - "scripts/pds-crown-stamp.sh"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
@@ -1162,6 +1176,8 @@ jobs:
           pds-harnesses scripts/pds-scratch-target_test.sh
           pds-harnesses scripts/pds-read-preflight-audit.sh
           pds-harnesses scripts/pds-read-preflight-audit_test.sh
+          pds-harnesses scripts/pds-threshold-move-guard.sh
+          pds-harnesses scripts/pds-threshold-move-guard_test.sh
           pds-harnesses scripts/pds-crown-stamp.sh
           pds-harnesses scripts/pr-task-gate.sh
           ci-failure-issue-filer scripts/file-ci-failure-issue.sh
@@ -1940,6 +1956,22 @@ jobs:
         # the read-back evidence diff: a stub bp that ACKS a met-to-met stamp and
         # drops the evidence must red, the honest stub must stay green.
         run: bash scripts/pds-read-preflight-audit_test.sh
+      - name: pds-threshold-move-guard 15-arm mutation matrix (hermetic git fixture)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # THE PAIR THIS JOB EXISTS TO KEEP HONEST is arms 2 and 3: the SAME head
+        # tree, the same moved cap, REFUSED at exit 1 and then PASS at exit 0
+        # once the PR body states both values with a reason. A guard that could
+        # only refuse would be a freeze on caps that legitimately move, and a
+        # freeze gets deleted the first week it costs someone a merge.
+        #
+        # FULL HISTORY IS LOAD-BEARING HERE TOO, and it is already provided by
+        # the checkout above. Arm 12 replays the real incident -- commit
+        # c3b0421cb (PR #9601), which raised js/packages/react/.size-limit.json
+        # from 22.5 KB to 22.75 KB in the same commit a criterion cited the
+        # 22.5 KB cap against. Under a shallow checkout that arm STANDS DOWN and
+        # says so in the log rather than passing silently, so a depth regression
+        # shows up as a named stand-down, never as a quieter green.
+        run: bash scripts/pds-threshold-move-guard_test.sh
       - name: "PDS-D allocation arbiter: --check-alloc and --axis a over the merged tree"
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # THE NAMED TRIGGER (task-6fd11672fdeefd0b) for two charter rulings that
