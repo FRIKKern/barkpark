@@ -110,6 +110,22 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		return useError(out, mergeGatedReasonCode, mergeGatedReasonMessage, exitValidation)
 	}
 
+	// THE MISS-FIELD REFUSAL, AND ITS POSITION IS THE POINT. A miss keeps its
+	// reason in --note and NOWHERE ELSE: the server's parse_stamp `miss ->`
+	// branch (api/lib/barkpark_web/controllers/tasks_controller/params.ex) reads
+	// "note" and never looks at "evidence", and the miss write path
+	// (api/lib/barkpark/tasks/internal.ex, apply_entry_update on an "attempt")
+	// appends to `attempts` and leaves `evidence` untouched. So `--miss --note x
+	// --evidence y` is not refused anywhere — it returns 2xx and DROPS y.
+	// Measured on main: the note-less spelling WAS refused, but by the server,
+	// i.e. after stampEchoLine had already printed "miss (attempt) — met is
+	// UNCHANGED", a line that reads like the write is under way on a call that is
+	// about to be refused. Both shapes are therefore refused HERE: before the
+	// echo, before the pre-check reads, before anything is sent.
+	if code, msg := stampMissFieldRefusal(sa); code != "" {
+		return useError(out, code, msg, exitValidation)
+	}
+
 	// LEGACY-SERVER FALLBACK ONLY. When the server declares --merge-gated it
 	// owns the verdict (it can read the stored `merge_gate` field; we cannot),
 	// and the flag rides the POST. Against an older manifest the flag is not
@@ -526,14 +542,80 @@ func renderStampVerdict(out *writer, req stampRequest, stored taskboard.Criterio
 	return exitConflict
 }
 
+// Refusal codes for the two miss-field shapes. Two codes, because they are two
+// different mistakes: one reached for the wrong field, the other named no reason
+// at all.
+const (
+	stampMissEvidenceCode = "miss_takes_note_not_evidence"
+	stampMissNoteCode     = "miss_requires_note"
+)
+
+// missReasonField names, in one clause, WHERE a landed miss keeps its reason.
+// Spelled once so the refusal, the read-back line and the docs cannot drift into
+// three different answers.
+const missReasonField = "acceptance_criteria[N].attempts[].note"
+
+// stampMissFieldRefusal decides whether a `--miss` invocation must be refused
+// before the CLI echoes or sends anything, returning an error code and message.
+// It returns ("", "") for every other verb: --met and --withdraw own their own
+// fields and are untouched by it.
+//
+// Deliberately CLIENT-SIDE, and deliberately NOT a copy of the server's wording.
+// The server stays the authority — it still refuses a note-less miss on its own
+// and this loosens nothing. What this adds is (a) ORDER, so the reader sees the
+// refusal instead of a progress line implying the write is under way, and (b)
+// the `--evidence` case, which the server does not refuse at all. Because the
+// prose here says what the server's message cannot (it names the field the
+// reason lands in), there is no string that must stay term-identical across Go
+// and Elixir; the only thing spelled on both sides is the RULE, and the server
+// keeps the last word on it.
+func stampMissFieldRefusal(sa stampArgs) (string, string) {
+	// ONLY an unambiguous miss. `--met --miss` names two verbs, and that is the
+	// "pass exactly one of --met / --miss / --withdraw" refusal's to answer (the
+	// server's, which reports it as a USAGE error). Firing here would relabel a
+	// two-verb command line as a miss-field mistake and move its exit code —
+	// TestTaskStampExit_LostLeaseAndBadCommandLineDiffer measures exactly that.
+	if !sa.miss || sa.met || sa.withdraw {
+		return "", ""
+	}
+	if sa.hasEvidence {
+		return stampMissEvidenceCode,
+			"--miss does not take --evidence: a miss records an ATTEMPT, not a proof, and its reason rides --note. " +
+				"Nothing on the server reads `evidence` on the miss path, so this text would NOT have been refused — it would have been DROPPED behind a 2xx. " +
+				"Re-run it as `--miss --note \"<why it is unmet>\"`; the sentence is then readable at " + missReasonField +
+				" and NOT at .evidence, which a miss never writes (a readback keyed on `.evidence|length` reports 0 for every landed miss — that false zero is what this refusal exists to stop you inheriting)."
+	}
+	if strings.TrimSpace(sa.note) == "" {
+		return stampMissNoteCode,
+			"--miss requires a non-empty --note: an honest attempt has words, and --note is the ONLY field a miss keeps them in. " +
+				"It lands at " + missReasonField + ", not at .evidence, which a miss never writes. " +
+				"Refused here, before the target was echoed and before anything was sent — nothing reached the store."
+	}
+	return "", ""
+}
+
 // storedCriterionSummary describes the row AS STORED: its wording, its met
 // lock, how much evidence it carries and how many honest attempts are recorded.
 // Evidence is reported by LENGTH as well as text so a truncated write (the
 // transport-ceiling class) is visible rather than merely plausible.
+//
+// THE EMPTY-EVIDENCE MISS. A landed miss leaves `evidence` exactly as it found
+// it — usually "" — and puts its reason in the attempt trail, so a bare
+// "evidence <empty>" was byte-identical on a miss that stored a perfect sentence
+// and on a write that vanished. When there IS an attempt trail and no evidence,
+// this reports the reason's REAL address and quotes the most recent note: the
+// server appends and keeps the last five (`Enum.take(attempts ++ [attempt], -5)`
+// in api/lib/barkpark/tasks/internal.ex), so the LAST element is the newest. A
+// row carrying evidence never reaches this branch, so every caller reading a MET
+// row reads exactly what it read before.
 func storedCriterionSummary(stored taskboard.CriterionItem) string {
 	ev := "evidence <empty>"
 	if stored.Evidence != "" {
 		ev = fmt.Sprintf("evidence %d bytes %q", len(stored.Evidence), truncateCell(stored.Evidence, 48))
+	} else if n := len(stored.Attempts); n > 0 {
+		latest := stored.Attempts[n-1]
+		ev = fmt.Sprintf("no evidence (a miss writes none) — the reason is at %s, %d bytes %q",
+			missReasonField, len(latest.Note), truncateCell(latest.Note, 48))
 	}
 	s := fmt.Sprintf("met=%v  %s  criterion %q", stored.Met, ev, truncateCell(stored.Criterion, 72))
 	if n := len(stored.Attempts); n > 0 {
@@ -667,6 +749,14 @@ type stampArgs struct {
 	// blank reason is a usage refusal (see runTaskStamp) — the whole point of
 	// the change is that the override can no longer be free.
 	mergeGatedReason string
+	// note / evidence record the TEXT each flag carried; hasNote / hasEvidence
+	// record whether the flag was TYPED AT ALL. Those are different questions:
+	// `--evidence ""` is still a caller reaching for the wrong field on a miss,
+	// and the refusal has to say so rather than silently treating it as absent.
+	note        string
+	evidence    string
+	hasNote     bool
+	hasEvidence bool
 }
 
 // parseStampArgs pulls the criterion index, criterion-text, the met/miss
@@ -740,6 +830,12 @@ func parseStampArgs(tail []string, mergeGatedType string) (stampArgs, []string) 
 			}
 		case "--criterion-text":
 			sa.criterionText = spaceVal()
+		case "--note":
+			sa.note = spaceVal()
+			sa.hasNote = true
+		case "--evidence":
+			sa.evidence = spaceVal()
+			sa.hasEvidence = true
 		case stampExpectFlag:
 			// CLIENT-SIDE AND UNDECLARABLE. The pin is an expectation authored
 			// before the row was read; the server has nothing to do with it and
