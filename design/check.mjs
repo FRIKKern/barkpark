@@ -1072,9 +1072,18 @@ if (failed === failedBeforeH)
 // for every other graphical object (1.4.11 — node dots, edges, the focus ring).
 console.log("\ndesign/check.mjs — Part H2: WCAG-AA contrast of the bp-graph Canvas palette (derived pairings)");
 {
-  const failedBeforeH2 = failed;
+  // `failed` is a shared BOOLEAN, so "did THIS part fail" cannot be read off it —
+  // an earlier part's failure makes `failed === failedBeforeH2` true and the ok
+  // line would print beside our own FAILs. Count this part's own failures.
+  let h2Failed = 0;
+  const failH2 = (msg) => { h2Failed++; fail(msg); };
   const GRAPH_JS = "web/public/bp-graph.js";
-  const graphSrc = readFileSync(join(repoRoot, GRAPH_JS), "utf8");
+  // A MOVED or renamed renderer must reach the refusal below as a named empty
+  // read, not as a raw ENOENT stack trace two parts from the sentence that says
+  // what actually went wrong.
+  let graphSrc = "";
+  try { graphSrc = readFileSync(join(repoRoot, GRAPH_JS), "utf8"); }
+  catch (e) { failH2(`  Part H2 FAIL: cannot read ${GRAPH_JS} (${e.code || e.message}) — the shipped renderer is one of this gate's two derivation sources; if it moved, update GRAPH_JS.`); }
 
   // ---- source 1: the token family, walked recursively (leaves only) ----------
   const FAMILY = "color.graphCanvas";
@@ -1166,35 +1175,35 @@ console.log("\ndesign/check.mjs — Part H2: WCAG-AA contrast of the bp-graph Ca
       const need = AA_GRAPH[isText(ink.key) ? "text" : "nontext"];
       let ratio;
       try { ratio = contrast(ink.value, g.value); }
-      catch (e) { fail(`  Part H2 FAIL: ${ink.key} on ${g.key} — contrast() threw (${e.message})`); continue; }
+      catch (e) { failH2(`  Part H2 FAIL: ${ink.key} on ${g.key} — contrast() threw (${e.message})`); continue; }
       graphPairs++;
       const id = `${ink.key}×${g.key}`;
       const known = Object.prototype.hasOwnProperty.call(KNOWN_SUB_AA, id);
       if (known) seenKnown.add(id);
       if (ratio < need - 1e-9) {
         if (known) console.log(`  known ${id} = ${ratio.toFixed(2)} < ${need} — ${KNOWN_SUB_AA[id]}`);
-        else fail(`  Part H2 FAIL: ${id} (${ink.value} on ${g.value}, ${isText(ink.key) ? "text" : "nontext"}) = ${ratio.toFixed(2)} < ${need} — bp-graph Canvas palette, ${ink.origin}; raise the value in ${FAMILY} / ${GRAPH_JS} or justify it in KNOWN_SUB_AA`);
+        else failH2(`  Part H2 FAIL: ${id} (${ink.value} on ${g.value}, ${isText(ink.key) ? "text" : "nontext"}) = ${ratio.toFixed(2)} < ${need} — bp-graph Canvas palette, ${ink.origin}; raise the value in ${FAMILY} / ${GRAPH_JS} or justify it in KNOWN_SUB_AA`);
       } else if (known) {
-        fail(`  Part H2 FAIL: ${id} = ${ratio.toFixed(2)} ≥ ${need} but is still listed in KNOWN_SUB_AA — the defect is FIXED, delete the entry (a stale exemption hides the next regression)`);
+        failH2(`  Part H2 FAIL: ${id} = ${ratio.toFixed(2)} ≥ ${need} but is still listed in KNOWN_SUB_AA — the defect is FIXED, delete the entry (a stale exemption hides the next regression)`);
       }
     }
   }
   for (const id of Object.keys(KNOWN_SUB_AA))
-    if (!seenKnown.has(id)) fail(`  Part H2 FAIL: KNOWN_SUB_AA lists ${id}, which the derivation never produced — the exemption names a pairing that does not exist (renamed or removed token); delete it`);
+    if (!seenKnown.has(id)) failH2(`  Part H2 FAIL: KNOWN_SUB_AA lists ${id}, which the derivation never produced — the exemption names a pairing that does not exist (renamed or removed token); delete it`);
 
   // ---- the refusal: a guard that resolves nothing is theatre, not a pass -----
   // THIS is the line that refuses on an empty read. It fires before any "ok",
   // so a misnamed family, an emptied family, or a renderer whose var block
   // vanished can never present as a green.
   if (graphPairs === 0)
-    fail(`  Part H2 FAIL: REFUSING — derived ZERO pairings from ${FAMILY} (${fromFamily} colours) ∪ ${GRAPH_JS} (${fromRenderer} colours): ${grounds.length} grounds × ${inks.length} inks. An empty read is a broken derivation, never a pass.`);
+    failH2(`  Part H2 FAIL: REFUSING — derived ZERO pairings from ${FAMILY} (${fromFamily} colours) ∪ ${GRAPH_JS} (${fromRenderer} colours): ${grounds.length} grounds × ${inks.length} inks. An empty read is a broken derivation, never a pass.`);
   // Positive control: the derivation must also see BOTH themes and both sources.
   const coveredThemes = new Set(grounds.flatMap((g) => g.themes));
-  if (grounds.length === 0) fail(`  Part H2 FAIL: REFUSING — zero GROUND colours matched in ${FAMILY} ∪ ${GRAPH_JS}; every ink would be unevaluated.`);
-  if (inks.length === 0) fail(`  Part H2 FAIL: REFUSING — zero INK colours matched in ${FAMILY} ∪ ${GRAPH_JS}; nothing would be evaluated against a ground.`);
-  if (coveredThemes.size < 2) fail(`  Part H2 FAIL: REFUSING — grounds cover only [${[...coveredThemes].join(", ")}]; the criterion requires BOTH light and dark.`);
+  if (grounds.length === 0) failH2(`  Part H2 FAIL: REFUSING — zero GROUND colours matched in ${FAMILY} ∪ ${GRAPH_JS}; every ink would be unevaluated.`);
+  if (inks.length === 0) failH2(`  Part H2 FAIL: REFUSING — zero INK colours matched in ${FAMILY} ∪ ${GRAPH_JS}; nothing would be evaluated against a ground.`);
+  if (coveredThemes.size < 2) failH2(`  Part H2 FAIL: REFUSING — grounds cover only [${[...coveredThemes].join(", ")}]; the criterion requires BOTH light and dark.`);
 
-  if (failed === failedBeforeH2)
+  if (h2Failed === 0)
     console.log(`  ok   ${graphPairs} derived pairings (${inks.length} inks × ${grounds.length} grounds, themes ${[...coveredThemes].sort().join("+")}) from ${FAMILY} (${fromFamily}) ∪ ${GRAPH_JS} (${fromRenderer}), all ≥ AA (text 4.5 / nontext 3.0) or justified in KNOWN_SUB_AA`);
 }
 
