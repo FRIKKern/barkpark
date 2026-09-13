@@ -67,7 +67,7 @@
 #   2  worse, the site was invisible at EVERY tier: the pipeline lived inside
 #      `"$( … )"`, and strip_quoted blanked every double-quoted run wholesale.
 #      See strip_quoted_keep_subst.
-# Measured on the tree that shipped it: scripts/pds-scratch-target.sh:389 read 0
+# Measured on the tree that shipped it: scripts/pds-scratch-target.sh:389 (lineref-ok, historical) read 0
 # findings at --min-confidence low before this change and is reported at high
 # after it.  #17920 fixed that one site; this change is the scanner's blind spot.
 #
@@ -276,7 +276,7 @@ set -uo pipefail
     esac
   }
 
-  # POSITIVE — verbatim from scripts/pds-scratch-target.sh:389 as it shipped.
+  # POSITIVE — verbatim from scripts/pds-scratch-target.sh:389 as it shipped (lineref-ok, historical).
   # An INFINITE producer (/dev/urandom through tr) into a 40-byte truncating
   # reader, the pipeline captured into an assignment under set -e.  Before this
   # arm the scanner reported it at NO confidence at all: the pipeline lives
@@ -578,7 +578,7 @@ strip_quoted() {
 # a pipeline that lives inside a command substitution inside double quotes —
 # `x="$(producer | head -c 40)"` — arrives at the matcher as `x=""`: no pipe, no
 # reader, nothing to report.  That is the exact shape that let
-# scripts/pds-scratch-target.sh:389 ship `LC_ALL=C tr -dc 'a-f0-9' </dev/urandom
+# scripts/pds-scratch-target.sh:389 (lineref-ok, historical) ship `LC_ALL=C tr -dc 'a-f0-9' </dev/urandom
 # | head -c 40` unflagged at EVERY confidence tier until a CI runner printed
 # "tr: write error: Broken pipe" (main run 34685061716; fixed by #17920).
 # Answers in STRIPPED_SUBST.  Used ONLY when the plain strip found no pipe at
@@ -1035,7 +1035,7 @@ for f in "${files[@]}"; do
     # word alone matches neither, so a genuinely harmless site gets reported.
     # Peel the closers off a COPY before testing; `bare` itself is untouched
     # because the reported text comes from it.  Measured 2026-09-12: without
-    # this, scripts/pds-crown-launch.sh:1886 (a `| head -1 || true)"` line
+    # this, scripts/pds-crown-launch.sh:1886 (lineref-ok, historical; a `| head -1 || true)"` line
     # continuation) is a false positive banked into the enforced ratchet.
     swallow="$bare"
     while :; do
