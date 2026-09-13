@@ -125,7 +125,11 @@ defmodule BarkparkWeb.Layouts.ReaderAsciicastFallbackParityTest do
 
     test "extract!/3 flunks instead of returning nil when a constant is missing" do
       assert_raise ExUnit.AssertionError, fn ->
-        extract!("const SOMETHING_ELSE = 'x'", "A_MISSING_CONSTANT", ~r/A_MISSING_CONSTANT = '([^']+)'/)
+        extract!(
+          "const SOMETHING_ELSE = 'x'",
+          "A_MISSING_CONSTANT",
+          ~r/A_MISSING_CONSTANT = '([^']+)'/
+        )
       end
     end
   end
