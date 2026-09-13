@@ -576,8 +576,20 @@ cmd_lift() {
   opened_sha="$(printf '%s' "$json" | jq -r --arg id "$slug" '.holds[] | select(.id == $id) | .opened_on_sha')"
   owner="$(printf '%s' "$json" | jq -r --arg id "$slug" '.holds[] | select(.id == $id) | .owner')"
 
-  local sha dir log rc
+  local sha dir log rc same_sha=0
   sha="$(resolve_main_sha "$mainref" "$do_fetch")" || return 3
+
+  # A LIFT MEASURES A LATER MAIN, NEVER AN EARLIER ONE. Re-measuring on a sha
+  # that PREDATES the one the hold was opened on cannot say anything about the
+  # fix, and it is the shape a stale checkout produces silently: the command
+  # runs, exits 0, and the hold clears against code the fix never reached.
+  if [ "$sha" = "$opened_sha" ]; then
+    same_sha=1
+  elif ! git -C "$ROOT" merge-base --is-ancestor "$opened_sha" "$sha" >/dev/null 2>&1; then
+    cannot_read "'$mainref' resolves to $sha, which is NOT a descendant of the sha this hold was opened on ($opened_sha). A lift measures a LATER main; measuring an older or divergent one clears the hold against code the fix never reached."
+    return 3
+  fi
+
   dir="$(make_clean_checkout "$sha")" || return 3
   log="$(mktemp "${TMPDIR:-/tmp}/main-red-hold-lift.XXXXXX")" || {
     cannot_read "cannot create a log file for the lift measurement"; return 3; }
@@ -609,6 +621,9 @@ cmd_lift() {
   printf '%s\n' "$new" >"$reg_abs" || { cannot_read "could not write $reg_abs"; return 3; }
 
   printf 'LIFTED: %s\n' "$slug"
+  if [ "$same_sha" = "1" ]; then
+    printf '  NOTE: main has NOT moved since this hold was opened. The same command on the SAME sha now exits 0, so the original red was FLAKY, not fixed. That is worth saying out loud rather than recording as a fix.\n'
+  fi
   printf '  measured on: CLEAN checkout of %s (%s)\n' "$mainref" "$sha"
   printf '  command    : %s\n' "$repro"
   printf '  exit code  : 0 (read directly, not through a pipe)\n'
@@ -728,6 +743,17 @@ selftest() {
   case "$out" in *"$sha1"*) st_ok "6b the LIFTED verdict quotes the later sha" ;; *) st_bad "6b later sha not quoted: $out" ;; esac
   case "$out" in *"exit code  : 0"*) st_ok "6c the LIFTED verdict quotes the exit code" ;; *) st_bad "6c exit code not quoted" ;; esac
   st_is "6d the hold is gone" "0" "$(jq '.holds | length' "$reg")"
+
+  # 6e — a lift against an OLDER/divergent main is refused. The fixture's first
+  #      commit is an ancestor of the second, so lifting a hold opened on sha1
+  #      against sha0 is the "measured an earlier main" shape.
+  git -C "$fix" branch -f older "$sha0" >/dev/null 2>&1
+  jq --arg r "$GREEN" --arg s "$sha1" '.holds = [{id:"st-old", trees:["internal/widget"], repro:$r, owner:"x", task:null, opened_at:"t", opened_on_sha:$s, opened_exit:1, derivation:"D1-package", note:null, reproduction_head:""}]' "$reg" >"$reg.tmp" && mv "$reg.tmp" "$reg"
+  out="$(eval "$RUN" lift --id st-old --main-ref older --no-fetch --registry "$reg" 2>&1)"; rc=$?
+  st_is "6e lift against an EARLIER main sha is CANNOT READ (exit 3)" "3" "$rc"
+  case "$out" in *"NOT a descendant"*) st_ok "6f it says the sha is not a descendant" ;; *) st_bad "6f: $out" ;; esac
+  st_is "6g and the hold survived the refused lift" "1" "$(jq '.holds | length' "$reg")"
+  jq '.holds = []' "$reg" >"$reg.tmp" && mv "$reg.tmp" "$reg"
 
   # 7 — there is NO manual lift path.
   eval "$RUN" lift --id st-hold --force --registry "$reg" >/dev/null 2>&1; rc=$?
