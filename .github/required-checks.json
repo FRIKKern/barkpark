@@ -392,6 +392,14 @@
       "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `tooling-harnesses`. Harness for tooling/task-obsession/reland_check.py, tooling/fleet/fleet-run.sh, scripts/audit-paper-readers.sh, tooling/gate-map and scripts/main-red-breaker.sh."
     },
     {
+      "context": "Release curator draft",
+      "reason": "S7 EXCLUDED BY DECISION, and S4 in effect. TOPOLOGY: .github/workflows/release-curator-draft.yml carries NO `pull_request:` and NO `push:` arm at all (its only triggers are a daily schedule and workflow_dispatch), so on a PR head this name is ABSENT — and a required absent context reports 'expected' forever (D18). A scheduled run still attaches a check run to the default branch's head, which is why it needs a row here rather than being unseeable: a name that renders on a sampled head and carries no status is UNACCOUNTED, and an unaccounted name is not a waived one. THE DECISION GROUND, which outlives the topology one: this job opens a DRAFT GitHub Release for a human to bless (orchestrator ruling 2026-09-13T08:10Z, OPTION A — 'a scheduled release-curator run that DRAFTS only; a human blesses and tags. Never an autonomous tag on green main'). Its red means the RUNNER could not read main or `gh` refused a write — a fact about the environment and about GitHub's availability, never a finding about the PR under review. Requiring a name whose red means 'the release-drafting robot had a bad night' would pin branch protection to an external service. Added by task-f2bdc01d54559e1a c2."
+    },
+    {
+      "context": "release-curator-draft.sh drafts only (no tag, no publish)",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `release-curator-draft-guard`. Harness for scripts/release-curator-draft.sh and .github/workflows/release-curator-draft.yml — the draft-only invariant of the release curator (no git tag, no publish, schedule/workflow_dispatch venue only). Added by task-f2bdc01d54559e1a c2."
+    },
+    {
       "context": "release-scan.sh CI-verdict derivation",
       "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `release-scan-verdict`. Harness for scripts/release-scan.sh — how a release scan derives a CI verdict from check runs."
     },
