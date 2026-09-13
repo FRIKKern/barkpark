@@ -353,8 +353,12 @@ defmodule Barkpark.PortableDoc.BpmlRoundtripPropertyTest do
       test label do
         bpml = print(@block)
 
-        assert {:ok, [parsed]} = Bpml.parse_blocks(bpml),
-               "the printed BPML did not parse:\n#{bpml}"
+        parse_result = Bpml.parse_blocks(bpml)
+
+        assert match?({:ok, [_]}, parse_result),
+               "the printed BPML did not parse:\n#{bpml}\n#{inspect(parse_result)}"
+
+        {:ok, [parsed]} = parse_result
 
         assert parsed == @block,
                """
