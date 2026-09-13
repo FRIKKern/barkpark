@@ -129,6 +129,17 @@ scripts/node-test-floor.mjs
 # pinned by web/__tests__/template-format-date.test.ts and
 # template-webhook-lazy.test.ts.
 js/packages/create-barkpark-app/templates/**
+# web/__tests__/type-ladder-emitted.test.ts DERIVES the chrome and reading step
+# sets — and their display order — out of this file at test time, instead of
+# retyping them beside the assertion (task-84a6c4bcd988fa44). The literal it
+# retyped went stale the day 1234c1c65 added the 2xs/3xs rungs, and the test
+# failed on main until the expected side was made derived. Now that the source
+# IS the expectation, a tokens.json edit changes what the web suite asserts, so
+# the web job must dispatch on it — without this row the ratchet above reds
+# (measured: `ESCAPED design/tokens.json`, exit 1) and, worse, a rung added
+# here would dispatch no web job at all while this test is the thing that pins
+# the ladder. RETIRE THIS ROW only together with that derivation.
+design/tokens.json
 
 # ---- the js/ workspace ROOT files the web-checks job reads ------------------
 # NOT surfaced by the census: the census resolves literals written INSIDE web/,
