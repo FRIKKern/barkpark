@@ -4345,6 +4345,94 @@
     });
   }
 
+  // ── THE FENCE (cch-w73-bl, the census pass) ───────────────────────────────
+  //
+  // POST /v1/github/installations is `Auth.require_team_admin(conn, [])` at the
+  // router — re-derive with `grep -n 'post "/v1/github/installations"' -A2
+  // cloud/lib/barkpark_cloud/web/router.ex`. So this leg carries a TEAM-ADMIN
+  // write, and __binding_census.mjs refuses a call site on such a route with no
+  // client predicate in front of it.
+  //
+  // WHAT THE FENCE IS NOT. There is no button here to withhold. The two
+  // "Connect GitHub" CTAs that send a person out to GitHub are already fenced
+  // (githubCardHtml on providerCanWrite, newGithubHtml on the /new ready
+  // panel), and adminWriteControlHtml — the shipped idiom for an offer a member
+  // may not have — has nothing to draw on a boot path. The affordance this leg
+  // owns is the ACT, not a control, so the fence is placed where the act is
+  // decided: a determinate "this principal is not a team admin" issues NO POST
+  // and says the true thing instead of routing a 403 through the leg's
+  // can't-confirm sentence, which would blame the install for a refusal about
+  // the reader.
+  //
+  // THE BAND, narrowed exactly the way newWriteAuthority() narrows
+  // launchAuthority() (#18136): teamAuthorityState() is five-valued and this
+  // leg can only act on three, so the two it cannot read are folded into ONE
+  // "unknown" rather than silently taken as truthy.
+  function githubInstallWriteAuthority() {
+    var band = teamAuthorityState();
+    if (band === "grant") return "grant";
+    if (band === "refuse") return "refuse";
+    return "unknown";
+  }
+
+  // THE REFUSAL COPY. It never says the install failed — it very likely
+  // succeeded on GitHub's side — and it never says "try again", because
+  // retrying as the same principal cannot work. It names the actor who can.
+  function githubInstallRefusalToast() {
+    return {
+      kind: "error",
+      title: "Only a team admin can connect GitHub",
+      body: "The app may now be installed on your GitHub account, but recording it " +
+        "for this team is an admin-only action. Ask a team admin to open " +
+        "Settings \u2192 Providers and connect GitHub.",
+    };
+  }
+
+  // THE DECIDE. Pure, and the ONLY place the band's answer turns into an act:
+  // `record` carries the id the recorder may send, or null with the toast that
+  // replaces it. "unknown" RECORDS — see resolveGithubInstallReturn for why
+  // that is the honest arm here and not a hole.
+  function githubInstallDecision(id, authority) {
+    if (authority === "refuse") return { record: null, toast: githubInstallRefusalToast() };
+    return { record: id, toast: null };
+  }
+
+  // THE READ. Asks githubInstallWriteAuthority() and hands the answer to the
+  // decide — but never on a band that has not answered yet. At boot /v1/me is
+  // still in flight (loadMe() is kicked two statements above this leg's call
+  // site), so a first read ALWAYS says "unknown"; deciding on that would make
+  // the fence theater, green because it never fires. So an unknown band buys
+  // exactly ONE re-ask, and `reasked` makes that a bounded recursion rather
+  // than a retry loop. The cost is one extra GET /v1/me on the one boot in a
+  // product lifetime that carries an install redirect, and it is only spent
+  // when the band is genuinely unreadable.
+  //
+  // AND THEN "unknown" STILL RECORDS, deliberately, against the fail-closed
+  // habit the rendered bands follow — because this is not a rendered offer. The
+  // installation_id is spent and unrepeatable: there is no control to re-arm
+  // and no retry that can recover it, so withholding the POST because /v1/me
+  // FAILED would destroy a real admin's install to avoid one refused request.
+  // The fence exists to stop the console acting on an authority it has already
+  // been told it does not have; a determinate "refuse" is that, and a failed
+  // read is not. THE LIMIT, said out loud: a /v1/me that never answers defeats
+  // this fence, exactly once, on the optimistic side.
+  function resolveGithubInstallReturn(id, reasked) {
+    var authority = githubInstallWriteAuthority();
+    if (authority === "unknown" && !reasked) {
+      api("GET", "/v1/me").then(function (r) {
+        absorbMe(r);
+        resolveGithubInstallReturn(id, true);
+      });
+      return;
+    }
+    var decision = githubInstallDecision(id, authority);
+    if (decision.record) {
+      recordGithubInstall(decision.record);
+      return;
+    }
+    toast(decision.toast);
+  }
+
   function handleGithubInstallReturn() {
     var ret = githubInstallReturnFromSearch(location.search);
     if (!ret) return false;
@@ -4353,7 +4441,7 @@
       toast(githubInstallUnconfirmedToast());
       return true;
     }
-    recordGithubInstall(ret.installation_id);
+    resolveGithubInstallReturn(ret.installation_id, false);
     return true;
   }
 
@@ -28821,6 +28909,11 @@
       githubInstallOutcome: githubInstallOutcome,
       githubInstallUnconfirmedToast: githubInstallUnconfirmedToast,
       handleGithubInstallReturn: handleGithubInstallReturn,
+      // cch-w73-bl (census pass) — the fence: the narrowed band, the pure
+      // decide, and the refusal copy, so each is losable on its own.
+      githubInstallWriteAuthority: githubInstallWriteAuthority,
+      githubInstallDecision: githubInstallDecision,
+      githubInstallRefusalToast: githubInstallRefusalToast,
       // …and the two card MOUNTS the leg composes with, so the harness can open
       // on a disconnected plane and read the repaint it causes. Exported for the
       // rig only; both remain browser-verified surfaces.

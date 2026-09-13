@@ -451,6 +451,21 @@ const F_ONBOARD = () => ({ band: ONBOARDING_BAND, read: "paintOverviewState", de
 // and bounces the hash — there is no threaded identifier to name, so the row
 // omits `value` and (2i-3) consults the band CALL itself. Both operator write
 // rows live behind that one bounce.
+// githubInstallWriteAuthority: the GITHUB-INSTALL RETURN LEG's band (cch-w73-bl).
+// The one row in this pin whose affordance is an ACT and not a control. GitHub
+// redirects the browser back to the App's Setup URL after an install, and the
+// console consumes that redirect at boot — there is no button to withhold, so
+// adminWriteControlHtml has nothing to draw and the fence lives at the decision
+// instead. The band is teamAuthorityState() narrowed the way newWriteAuthority()
+// narrows launchAuthority() (#18136): "grant"/"refuse"/"unknown", so the two
+// states this leg cannot read are folded into one rather than read as truthy.
+// resolveGithubInstallReturn READS it (and re-asks once, because at boot /v1/me
+// is still in flight and a first read is always "unknown" — deciding on that
+// would be a fence that never fires); githubInstallDecision DECIDES, and only
+// its `authority === "refuse"` arm withholds the write.
+const GITHUB_INSTALL_BAND = "githubInstallWriteAuthority";
+const F_GHINST = () => ({ band: GITHUB_INSTALL_BAND, read: "resolveGithubInstallReturn", decide: "githubInstallDecision" });
+
 const OPERATOR_BAND = "operatorRouteAllowed";
 const F_OPERATOR = () => ({ band: OPERATOR_BAND, read: "loadOperator", decide: "loadOperator" });
 
@@ -483,6 +498,21 @@ const PIN = [
   // vocabulary to derive — the row names `canWrite`, the value githubCardHtml
   // is handed, and the arm proves that helper still binds it and still branches.
   { fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV("renderGithub", "githubCardHtml", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s3: githubCardHtml OMITs #github-disconnect unless providerCanWrite()" },
+  // cch-w73-bl — THE INSTALL RETURN LEG, and the one row here whose affordance
+  // is not drawn. ROUTER GROUND TRUTH, read off origin/main and pasted so the
+  // tier is not a memory: `post "/v1/github/installations" do` is followed by
+  // `conn = Auth.require_team_admin(conn, [])` — team admin, full stop, with the
+  // rest of the handler a cond over configured?/valid-id. So the write IS
+  // elevated and a plain member who lands on the App's Setup URL (bookmarkable,
+  // replayable out of history) would have POSTed and collected a 403 that the
+  // leg then rendered through its can't-confirm sentence — blaming the install
+  // for a refusal about the reader. FENCED, not excused: githubInstallDecision
+  // issues no write on a determinate refuse and says who can. The band's
+  // "unknown" arm RECORDS, which is the one place this row departs from the
+  // rendered bands' fail-closed habit, and the reason is in app.js beside
+  // resolveGithubInstallReturn: the installation_id is spent and unrepeatable,
+  // so a failed /v1/me must not be allowed to destroy a real admin's install.
+  { fn: "recordGithubInstall", verb: "POST", route: "/v1/github/installations", elevated: true, predicate: GITHUB_INSTALL_BAND, fence: F_GHINST(), auth_fn: A_TADMIN, context_fn: null, note: "cch-w73-bl: githubInstallDecision withholds the POST on a determinate refuse and toasts the admin-only truth instead; resolveGithubInstallReturn is the read, and it re-asks ONCE because a boot-time first read is always unknown" },
 
   // ── notifications — every write is wired behind notifCanManage()
   { fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
@@ -1602,12 +1632,19 @@ if (unresolved.length) {
 // predicated 37 → 38, unpredicated 2 → 1 (cch-r17-w12): submitProviderCred, the
 // FOURTH unowned row on the UNPREDICATED list, is now fenced on the PROVIDER
 // band through adminWriteControlHtml, so it moves from the unpredicated column
-// into the predicated one. `total` and `elevated` are UNMOVED and that is the
-// load-bearing part of this bump: no call site was added or removed and no
-// route's tier changed — the same 39 elevated writes are decided by 38 bands
-// instead of 37. RE-DERIVED by RUNNING this census and reading the line it
-// PRINTED, never by adding one and subtracting one.
-const EXPECT = { total: 80, elevated: 39, predicated: 38, unpredicated: 1 };
+// into the predicated one. `total` and `elevated` were UNMOVED by that bump.
+//
+// cch-w73-bl MOVES total AND elevated, which cch-r17-w12 deliberately did not:
+// the console grew a NEW write call site (recordGithubInstall's POST
+// /v1/github/installations, the GitHub App install return leg), on a route
+// whose router tier is Auth.require_team_admin. So on top of w12's tree,
+// total 80 -> 81, elevated 39 -> 40, predicated 38 -> 39, and `unpredicated`
+// does NOT move — the site arrived WITH its fence, which is the only way a new
+// elevated affordance is allowed to land. RE-DERIVED by RUNNING this census on
+// the REBASED tree and reading the `found` line it PRINTED, never by arithmetic
+// over two branches' numbers: this row was authored against 80/39/37/2 and the
+// base has since moved twice.
+const EXPECT = { total: 81, elevated: 40, predicated: 39, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||

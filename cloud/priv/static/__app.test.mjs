@@ -32831,7 +32831,8 @@ test("security log: the modal mounts it, and a failed read never paints as an em
 // (#toast-stack, #github-card) RECORD their bytes, and fetch is dispatched
 // through the REAL scenario corpus so the round trip is a fixture round trip
 // and not a hand-built echo.
-async function w73Realm(source, search) {
+async function w73Realm(source, search, scenario) {
+  const SCEN = scenario || "providers-connected";
   const { h, box } = w49s6Realm(source || APP_SRC);
   box.location.search = search;
   const nodes = {};
@@ -32863,7 +32864,7 @@ async function w73Realm(source, search) {
   box.fetch = (path, opts) => {
     const method = (opts && opts.method) || "GET";
     calls.push({ method, path, body: opts && opts.body ? JSON.parse(opts.body) : null });
-    const answer = previewRoute("providers-connected", method, path, state) ||
+    const answer = previewRoute(SCEN, method, path, state) ||
       { status: 200, body: {} };
     return Promise.resolve({
       ok: answer.status >= 200 && answer.status < 300,
@@ -33049,4 +33050,104 @@ test("cch-w73-bl c6 CONTROL: removing the recording path reds this guard BY NAME
   // both of those are false here.
   assert.ok(!/GitHub connected/.test(w73Toasts(nodes)),
     "the mutant cannot even claim success — githubInstallOutcome fails closed on the empty body");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w73-bl (census pass) · THE FENCE ON THE RETURN LEG
+//
+// __binding_census.mjs refused the leg as it first shipped: POST
+// /v1/github/installations is `Auth.require_team_admin(conn, [])` at the router
+// (re-derive: `grep -n 'post "/v1/github/installations"' -A2
+// cloud/lib/barkpark_cloud/web/router.ex`), and the call site had no client
+// predicate in front of it. A plain member who lands on the App's Setup URL —
+// bookmarkable, and replayable straight out of browser history — would have
+// POSTed, collected a 403, and been shown the leg's can't-confirm sentence:
+// copy that blames the INSTALL for a refusal about the READER.
+//
+// The fence is not a withheld control, because there is no control: this
+// affordance is an ACT on a boot path. So it sits at the decision —
+// githubInstallDecision — and the band it reads is teamAuthorityState()
+// narrowed to three values, the same narrowing newWriteAuthority() applies to
+// launchAuthority() (#18136).
+
+test("cch-w73-bl FENCE: githubInstallDecision withholds the write on a determinate refuse only", () => {
+  const d = hooks.githubInstallDecision;
+  assert.equal(typeof d, "function", "the decide must be node-pinned — it is what the census pins as `decide`");
+
+  const refused = w73Plain(d("41234567", "refuse"));
+  assert.equal(refused.record, null, "a determinate refuse must carry NO id to record");
+  assert.equal(refused.toast.title, "Only a team admin can connect GitHub");
+  // It must not claim the install failed — it almost certainly succeeded on
+  // GitHub's side — and must not offer a retry that cannot work.
+  assert.ok(!/couldn't install|failed|didn't install/i.test(refused.toast.body), refused.toast.body);
+  assert.ok(!/try again|retry/i.test(refused.toast.body),
+    "retrying as the same principal cannot work, so the copy must not suggest it: " + refused.toast.body);
+  assert.ok(/admin/i.test(refused.toast.body), "…and it must name the actor who CAN: " + refused.toast.body);
+
+  // grant records. unknown ALSO records, and that is a ruling, not an oversight:
+  // the installation_id is spent and unrepeatable, so a /v1/me that FAILED must
+  // not be allowed to destroy a real admin's install. See the comment beside
+  // resolveGithubInstallReturn in app.js.
+  assert.equal(w73Plain(d("41234567", "grant")).record, "41234567");
+  assert.equal(w73Plain(d("41234567", "unknown")).record, "41234567");
+});
+
+test("cch-w73-bl FENCE: the band is teamAuthorityState() narrowed, and it never reads an unknown as truthy", () => {
+  const b = hooks.githubInstallWriteAuthority;
+  assert.equal(typeof b, "function", "the band must be node-pinned — the census pins it as `band`");
+  // Its whole vocabulary, and the census derives the same three from its returns.
+  const src = APP_SRC.slice(APP_SRC.indexOf("function githubInstallWriteAuthority("));
+  const body = src.slice(0, src.indexOf("\n  }\n") + 5);
+  assert.ok(/teamAuthorityState\(\)/.test(body), "the band must be derived, never a second role read: " + body);
+  for (const v of ['return "grant"', 'return "refuse"', 'return "unknown"']) {
+    assert.ok(body.includes(v), "the band must answer " + v + " — got: " + body);
+  }
+  // No fourth answer: loading / failed / stale all fold into ONE unknown.
+  assert.equal((body.match(/return "/g) || []).length, 3,
+    "a fourth band value would be a state this leg's decide has never heard of: " + body);
+});
+
+test("cch-w73-bl FENCE DRIVEN: a plain member's install return issues NO write and is told who can", async () => {
+  // The REAL corpus, on providers-member — cch-w48-s6's plain-member scenario,
+  // which carries the same github fixture. The actor is a member, so
+  // teamAuthorityState() answers "refuse" and the leg must never reach the wire.
+  const { h, nodes, calls } = await w73Realm(null, "?installation_id=41234567&setup_action=install", "providers-member");
+  assert.equal(h.githubInstallWriteAuthority(), "refuse",
+    "PRECONDITION: the corpus member actor must produce a DETERMINATE refuse, or this test measures nothing");
+  const before = calls.length;
+
+  assert.equal(h.handleGithubInstallReturn(), true, "the leg still claims the boot — it has something to say");
+  await w49s6Settle();
+
+  assert.equal(calls.filter((c) => c.path === "/v1/github/installations").length, 0,
+    "a member must issue NO POST; wire saw: " +
+      calls.slice(before).map((c) => c.method + " " + c.path).join(", "));
+  const toasts = w73Toasts(nodes);
+  assert.ok(/Only a team admin can connect GitHub/.test(toasts),
+    "the person must be told who can do this: " + JSON.stringify(toasts));
+  assert.ok(!/can&#39;t confirm|can't confirm/.test(toasts),
+    "…and must NOT be handed the can't-confirm sentence, which blames the install for a refusal about the reader");
+  assert.ok(!/GitHub connected/.test(toasts), "…and nothing may claim a connection");
+});
+
+test("cch-w73-bl FENCE CONTROL: removing the fence reds THIS test — the member POSTs again", async () => {
+  // THE MUTATION, in the fence's own direction: githubInstallDecision stops
+  // consulting the band and records unconditionally. Every other rung — parse,
+  // scrub, band, read, recorder — is untouched, so a guard that only watched
+  // the round trip would stay green (the owner path is unchanged by this edit).
+  const anchor = '    if (authority === "refuse") return { record: null, toast: githubInstallRefusalToast() };\n';
+  assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur EXACTLY once");
+  const mutant = APP_SRC.replace(anchor, "");
+  assert.notEqual(mutant, APP_SRC, "the mutation must have APPLIED");
+
+  const { h, nodes, calls } = await w73Realm(mutant, "?installation_id=41234567&setup_action=install", "providers-member");
+  assert.equal(h.githubInstallWriteAuthority(), "refuse",
+    "PRECONDITION: the mutant's BAND is untouched — only the decide stopped consulting it");
+  h.handleGithubInstallReturn();
+  await w49s6Settle();
+
+  assert.equal(calls.filter((c) => c.path === "/v1/github/installations").length, 1,
+    "UNFENCED, reproduced: the member's boot POSTs the install the router will refuse");
+  assert.ok(!/Only a team admin can connect GitHub/.test(w73Toasts(nodes)),
+    "…and the true sentence is gone with the fence that produced it");
 });
