@@ -1095,6 +1095,17 @@ defmodule Barkpark.Content.Mutations do
         {:error,
          {:invalid_task_content, rerun_bypass_error(merged[Stage.disposition_rerun_key()])}}
 
+      # THE OPERATING-INSTRUCTION SLOT changed through the raw door
+      # (task-bd7476eecdede252). The whole point of giving standing guidance
+      # its own key is that it cannot be destroyed by a verdict write; a raw
+      # `set` reaches it without ever meeting `check_instruction_supersession/3`,
+      # which would re-open the destruction door one field over from where it
+      # was closed. Fenced exactly like `disposition` and `disposition_rerun`.
+      merged[Stage.operating_instruction_key()] != was[Stage.operating_instruction_key()] ->
+        {:error,
+         {:invalid_task_content,
+          instruction_bypass_error(merged[Stage.operating_instruction_key()])}}
+
       # The term is unchanged, but the trigger that makes a park honest is
       # being erased underneath it.
       now_term in Stage.trigger_required_dispositions() and
@@ -1347,6 +1358,23 @@ defmodule Barkpark.Content.Mutations do
           "(`bp task stage <id> <state> --rerun \"git cat-file -e origin/main:<path>\"`), " <>
           "POST /v1/tasks/:id/stage — and omitting the rerun is always allowed: a reason " <>
           "may honestly refuse to be checkable."
+      ]
+    }
+  end
+
+  defp instruction_bypass_error(now) do
+    %{
+      Stage.operating_instruction_key() => [
+        "cannot be set to #{inspect(now)} through /v1/data/mutate. An operating instruction " <>
+          "is STANDING GUIDANCE for whoever touches this row next, and it is durable " <>
+          "precisely because the verb refuses to let one writer displace another's " <>
+          "(`instruction_would_supersede`, overridable only per call with " <>
+          "--supersede-instruction, which quotes the text you would destroy). A raw set " <>
+          "reaches the key without meeting that guard, which puts the destruction back one " <>
+          "field over from where it was closed. A revision precondition does NOT unlock " <>
+          "this. Write it through the sanctioned verb instead " <>
+          "(`bp task stage <id> <state> --instruction \"READ BEFORE STAMPING: …\"`), " <>
+          "POST /v1/tasks/:id/stage."
       ]
     }
   end

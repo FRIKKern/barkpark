@@ -25,6 +25,7 @@ defmodule BarkparkWeb.MemberController do
 
   alias Barkpark.Auth
   alias Barkpark.Tenancy.Members
+  alias BarkparkWeb.ErrorResponse
 
   @default_role "member"
 
@@ -295,20 +296,17 @@ defmodule BarkparkWeb.MemberController do
 
   defp not_found(conn, message) do
     conn
-    |> put_status(:not_found)
-    |> json(%{error: %{code: "not_found", message: message}})
+    |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: message})
   end
 
   defp conflict(conn, code, message) do
     conn
-    |> put_status(:conflict)
-    |> json(%{error: %{code: code, message: message}})
+    |> ErrorResponse.emit_fields(:conflict, %{code: code, message: message})
   end
 
   defp unprocessable(conn, message) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", message: message})
   end
 
   defp unresolved_workspace(conn),
