@@ -139,4 +139,13 @@ defmodule Barkpark.BuildInfo do
       "built_at" => @built_at
     }
   end
+
+  # THROWAWAY MUTATION, NEVER MERGED. A deliberate unused variable, to prove
+  # which CI job owns the compile verdict: `mix-prod-compile` must red on this
+  # and `Validation perf bench` must not.
+  def __gate_mutation_probe__(input) do
+    unused_on_purpose = input
+    :ok
+  end
+
 end
