@@ -114,6 +114,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Content.Papers.MixedWriteGuard
   alias Barkpark.PortableDoc.Bpml.UnprintableError
   alias Barkpark.Tenancy
+  alias BarkparkWeb.ErrorResponse
 
   # The SIX DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
   #
@@ -269,26 +270,26 @@ defmodule BarkparkWeb.BulldocsIngestController do
     cond do
       not is_binary(bpml) ->
         conn
-        |> put_status(:bad_request)
-        |> json(%{error: %{code: "malformed", message: "sync needs a bpml (string) body"}})
+        |> ErrorResponse.emit_fields(:bad_request, %{
+          code: "malformed",
+          message: "sync needs a bpml (string) body"
+        })
 
       not (is_binary(base_rev) and base_rev != "") ->
         conn
-        |> put_status(:bad_request)
-        |> json(%{
-          error: %{
-            code: "malformed",
-            message: "sync needs baseRev — the rev your pull anchored on (x-paper-rev)"
-          }
+        |> ErrorResponse.emit_fields(:bad_request, %{
+          code: "malformed",
+          message: "sync needs baseRev — the rev your pull anchored on (x-paper-rev)"
         })
 
       true ->
         case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
           {:error, errors} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{code: "bpml", message: "the BPML document did not parse", errors: errors}
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "bpml",
+              message: "the BPML document did not parse",
+              errors: errors
             })
 
           {:ok, parsed} ->
@@ -328,15 +329,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
           # has no honest BPML sync at ANY rev, so "pull first" would be a lie.
           unprintable != nil ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: "bpml_unprintable",
-                message:
-                  "this paper's current blocks cannot be printed as BPML, so a BPML document cannot describe them — syncing would delete everything outside the kernel: #{unprintable}",
-                hint:
-                  "edit this paper with block ops (or bp bulldocs publish); BPML sync works once every block is inside the kernel vocabulary"
-              }
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "bpml_unprintable",
+              message:
+                "this paper's current blocks cannot be printed as BPML, so a BPML document cannot describe them — syncing would delete everything outside the kernel: #{unprintable}",
+              hint:
+                "edit this paper with block ops (or bp bulldocs publish); BPML sync works once every block is inside the kernel vocabulary"
             })
 
           # A failed READ is NOT a mismatch. Ordered before the comparison so
@@ -345,38 +343,29 @@ defmodule BarkparkWeb.BulldocsIngestController do
             {:error, {:unreadable_rev, field}} = rev_read
 
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: "paper_rev_unreadable",
-                message:
-                  "cannot read the op-anchor rev of paper #{paper.doc_id}: #{field} is present but not an integer — refusing to compare your baseRev against a failed read",
-                hint: "this paper's #{field} is corrupt; repair it before pushing a working copy"
-              }
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "paper_rev_unreadable",
+              message:
+                "cannot read the op-anchor rev of paper #{paper.doc_id}: #{field} is present but not an integer — refusing to compare your baseRev against a failed read",
+              hint: "this paper's #{field} is corrupt; repair it before pushing a working copy"
             })
 
           current_rev != to_string(base_rev) ->
             conn
-            |> put_status(:precondition_failed)
-            |> json(%{
-              error: %{
-                code: "precondition_failed",
-                message: "paper is at rev #{current_rev}, your copy anchored on #{base_rev}",
-                hint: "bp paper pull to absorb the drift, re-apply your edit, push again"
-              }
+            |> ErrorResponse.emit_fields(:precondition_failed, %{
+              code: "precondition_failed",
+              message: "paper is at rev #{current_rev}, your copy anchored on #{base_rev}",
+              hint: "bp paper pull to absorb the drift, re-apply your edit, push again"
             })
 
           true ->
             case Barkpark.PortableDoc.Bpml.Diff.derive(current_blocks, parsed["blocks"] || []) do
               {:error, :diff_verification_failed} ->
                 conn
-                |> put_status(:unprocessable_entity)
-                |> json(%{
-                  error: %{
-                    code: "bpml",
-                    message: "the derived op batch failed its replay proof — nothing was applied",
-                    hint: "this is a server-side differ bug; fall back to bp bulldocs publish"
-                  }
+                |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+                  code: "bpml",
+                  message: "the derived op batch failed its replay proof — nothing was applied",
+                  hint: "this is a server-side differ bug; fall back to bp bulldocs publish"
                 })
 
               {:ok, _minted, []} ->
@@ -416,30 +405,29 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
       {:error, :precondition_failed} ->
         conn
-        |> put_status(:precondition_failed)
-        |> json(%{
-          error: %{
-            code: "precondition_failed",
-            message: "another write landed mid-sync; no ops applied",
-            hint: "bp paper pull, re-apply your edit, push again"
-          }
+        |> ErrorResponse.emit_fields(:precondition_failed, %{
+          code: "precondition_failed",
+          message: "another write landed mid-sync; no ops applied",
+          hint: "bp paper pull, re-apply your edit, push again"
         })
 
       {:error, {:constraint, message, op_kind}} ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "constraint",
+          message: message,
+          op: op_kind
+        })
 
       {:error, {:halted, reason}} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{error: %{code: "halted", message: reason}})
+        |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
       {:error, _other} ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{code: "invalid_op", message: "the derived batch could not be applied"}
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "invalid_op",
+          message: "the derived batch could not be applied"
         })
     end
   end
@@ -476,15 +464,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     if is_binary(doc_slug) and doc_slug != "" and doc_slug != slug do
       conn
-      |> put_status(:unprocessable_entity)
-      |> json(%{
-        error: %{
-          code: "slug_mismatch",
-          message:
-            "the document says <paper slug=\"#{doc_slug}\"> but you pushed to #{slug} — nothing was written",
-          hint:
-            "the pushed path is the paper's identity; rename the file or fix the <paper slug> so they agree"
-        }
+      |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+        code: "slug_mismatch",
+        message:
+          "the document says <paper slug=\"#{doc_slug}\"> but you pushed to #{slug} — nothing was written",
+        hint:
+          "the pushed path is the paper's identity; rename the file or fix the <paper slug> so they agree"
       })
     else
       blocks = parsed["blocks"] || []
@@ -542,16 +527,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
       violations ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{
-            code: "create_wall",
-            message:
-              "no paper #{slug} exists yet; creating it ran the full publish wall, which refused — nothing was written",
-            hint:
-              "fix each violation below; see them before pushing with the dry-run: bp paper push #{slug} --check (POST /v1/plugins/bulldocs/papers/validate)",
-            errors: violations
-          }
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "create_wall",
+          message:
+            "no paper #{slug} exists yet; creating it ran the full publish wall, which refused — nothing was written",
+          hint:
+            "fix each violation below; see them before pushing with the dry-run: bp paper push #{slug} --check (POST /v1/plugins/bulldocs/papers/validate)",
+          errors: violations
         })
     end
   end
@@ -598,8 +580,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
       # arms follow a write: enforce_blocks_wall precedes the Repo insert.
       {:error, {:halted, reason}} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{error: %{code: "halted", message: reason}})
+        |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
       {:error, {:label_spine, _}} = err ->
         render_error(conn, err)
@@ -704,19 +685,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   defp refuse_unfenced_if_rev(conn, key) do
     conn
-    |> put_status(:bad_request)
-    |> json(%{
-      error: %{
-        code: "malformed",
-        message:
-          "#{key} is not honoured on POST /v1/plugins/bulldocs/papers — this route is an " <>
-            "unfenced create-or-replace. The fenced path is " <>
-            "POST /v1/plugins/bulldocs/papers/:slug/ops (bp bulldocs patch --if-rev), " <>
-            "which rejects a stale rev with 412 precondition_failed. " <>
-            "Remove the key to publish unfenced.",
-        parameter: key,
-        fenced_route: "/v1/plugins/bulldocs/papers/:slug/ops"
-      }
+    |> ErrorResponse.emit_fields(:bad_request, %{
+      code: "malformed",
+      message:
+        "#{key} is not honoured on POST /v1/plugins/bulldocs/papers — this route is an " <>
+          "unfenced create-or-replace. The fenced path is " <>
+          "POST /v1/plugins/bulldocs/papers/:slug/ops (bp bulldocs patch --if-rev), " <>
+          "which rejects a stale rev with 412 precondition_failed. " <>
+          "Remove the key to publish unfenced.",
+      parameter: key,
+      fenced_route: "/v1/plugins/bulldocs/papers/:slug/ops"
     })
   end
 
@@ -791,12 +769,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
             cond do
               not (is_binary(slug) and slug != "") ->
                 conn
-                |> put_status(:bad_request)
-                |> json(%{
-                  error: %{
-                    code: "malformed",
-                    message: "no slug: pass it on <paper slug=\"…\"> or as a top-level param"
-                  }
+                |> ErrorResponse.emit_fields(:bad_request, %{
+                  code: "malformed",
+                  message: "no slug: pass it on <paper slug=\"…\"> or as a top-level param"
                 })
 
               not valid_ingest_text?(Map.put(merged, "blocks", parsed["blocks"])) ->
@@ -808,25 +783,19 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
           {:error, errors} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: "bpml",
-                message: "the BPML document did not parse",
-                errors: errors
-              }
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "bpml",
+              message: "the BPML document did not parse",
+              errors: errors
             })
         end
 
       _malformed ->
         conn
-        |> put_status(:bad_request)
-        |> json(%{
-          error: %{
-            code: "malformed",
-            message:
-              "slug plus either blocks (list), body_html (string), or bpml (string) are required"
-          }
+        |> ErrorResponse.emit_fields(:bad_request, %{
+          code: "malformed",
+          message:
+            "slug plus either blocks (list), body_html (string), or bpml (string) are required"
         })
     end
   end
@@ -906,8 +875,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
       # the generic invalid_paper below.
       {:error, {:halted, reason}} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{error: %{code: "halted", message: reason}})
+        |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
       # Publish-wall rejections (authoring-excellence D27). Once the upsert_paper
       # mount (D26) lands, a walled paper birth surfaces as a RAW wall tuple —
@@ -1040,8 +1008,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
       # VERBATIM (see the blocks path).
       {:error, {:halted, reason}} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{error: %{code: "halted", message: reason}})
+        |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
       # Publish-wall rejections (authoring-excellence D27) — see the blocks path
       # above. Same three raw wall tuples, routed through render_error/2 above
@@ -1113,8 +1080,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
       {:error, {:halted, reason}} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{error: %{code: "halted", message: reason}})
+        |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
       {:error, {:label_spine, _}} = err ->
         render_error(conn, err)
@@ -1145,8 +1111,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   def ingest_session(conn, _params) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "missing_slug", message: "slug required"}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+      code: "missing_slug",
+      message: "slug required"
+    })
   end
 
   @doc """
@@ -1170,8 +1138,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
     case Content.get_blocks_doc(slug, "session", dataset, session_scope_opts(conn, params)) do
       nil ->
         conn
-        |> put_status(:not_found)
-        |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+        |> ErrorResponse.emit_fields(:not_found, %{
+          code: "not_found",
+          message: "no session for slug #{slug}"
+        })
 
       doc ->
         json(
@@ -1209,8 +1179,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
     cond do
       not valid_op_shape?(op) ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "malformed_op",
+          message: "op must name a known DocPatchOp"
+        })
 
       true ->
         dataset = params["dataset"] || Content.paper_default_dataset()
@@ -1245,40 +1217,45 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
           {:error, :not_found} ->
             conn
-            |> put_status(:not_found)
-            |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+            |> ErrorResponse.emit_fields(:not_found, %{
+              code: "not_found",
+              message: "no session for slug #{slug}"
+            })
 
           {:error, {:constraint, message, op_kind}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "constraint",
+              message: message,
+              op: op_kind
+            })
 
           {:error, {code, target, op_kind}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: to_string(code),
-                message: "#{op_kind} failed on #{inspect(target)}",
-                op: op_kind,
-                target: target
-              }
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: to_string(code),
+              message: "#{op_kind} failed on #{inspect(target)}",
+              op: op_kind,
+              target: target
             })
 
           {:error, {:invalid_op, _}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "invalid_op",
+              message: "op could not be applied"
+            })
 
           {:error, {:halted, reason}} ->
             conn
-            |> put_status(:conflict)
-            |> json(%{error: %{code: "halted", message: reason}})
+            |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
           {:error, _other} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "invalid_op",
+              message: "op could not be applied"
+            })
         end
     end
   end
@@ -1307,25 +1284,24 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
       {:error, :invalid_kind} ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{
-            code: "invalid_kind",
-            message: "kind must be one of the allowed session event kinds",
-            allowed: Barkpark.Content.Sessions.event_kinds()
-          }
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "invalid_kind",
+          message: "kind must be one of the allowed session event kinds",
+          allowed: Barkpark.Content.Sessions.event_kinds()
         })
 
       {:error, :not_found} ->
         conn
-        |> put_status(:not_found)
-        |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+        |> ErrorResponse.emit_fields(:not_found, %{
+          code: "not_found",
+          message: "no session for slug #{slug}"
+        })
 
       {:error, :stale} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{
-          error: %{code: "conflict_retry", message: "session was updated concurrently; retry"}
+        |> ErrorResponse.emit_fields(:conflict, %{
+          code: "conflict_retry",
+          message: "session was updated concurrently; retry"
         })
     end
   end
@@ -1356,24 +1332,23 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
       {:error, :invalid_conversation} ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{
-            code: "invalid_conversation",
-            message: "conversation id must be a non-empty string"
-          }
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "invalid_conversation",
+          message: "conversation id must be a non-empty string"
         })
 
       {:error, :not_found} ->
         conn
-        |> put_status(:not_found)
-        |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+        |> ErrorResponse.emit_fields(:not_found, %{
+          code: "not_found",
+          message: "no session for slug #{slug}"
+        })
 
       {:error, :stale} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{
-          error: %{code: "conflict_retry", message: "session was updated concurrently; retry"}
+        |> ErrorResponse.emit_fields(:conflict, %{
+          code: "conflict_retry",
+          message: "session was updated concurrently; retry"
         })
     end
   end
@@ -1409,9 +1384,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
     case expand_bpml_ops(ops) do
       {:error, errors} ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{code: "bpml", message: "a BPML op fragment did not parse", errors: errors}
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "bpml",
+          message: "a BPML op fragment did not parse",
+          errors: errors
         })
 
       {:ok, ops} ->
@@ -1425,8 +1401,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
     cond do
       not valid_op_shape?(op) ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "malformed_op",
+          message: "op must name a known DocPatchOp"
+        })
 
       true ->
         dataset = params["dataset"] || Content.paper_default_dataset()
@@ -1452,41 +1430,46 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
           {:error, :not_found} ->
             conn
-            |> put_status(:not_found)
-            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
+            |> ErrorResponse.emit_fields(:not_found, %{
+              code: "not_found",
+              message: "no paper for slug #{slug}"
+            })
 
           # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
           {:error, {:constraint, message, op_kind}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "constraint",
+              message: message,
+              op: op_kind
+            })
 
           {:error, {code, target, op_kind}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: to_string(code),
-                message: "#{op_kind} failed on #{inspect(target)}",
-                op: op_kind,
-                target: target
-              }
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: to_string(code),
+              message: "#{op_kind} failed on #{inspect(target)}",
+              op: op_kind,
+              target: target
             })
 
           {:error, {:invalid_op, _}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "invalid_op",
+              message: "op could not be applied"
+            })
 
           {:error, {:halted, reason}} ->
             conn
-            |> put_status(:conflict)
-            |> json(%{error: %{code: "halted", message: reason}})
+            |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
           {:error, _other} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "invalid_op",
+              message: "op could not be applied"
+            })
         end
     end
   end
@@ -1495,9 +1478,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
     cond do
       not Enum.all?(ops, &valid_op_shape?/1) ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{code: "malformed_op", message: "every op must name a known DocPatchOp"}
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "malformed_op",
+          message: "every op must name a known DocPatchOp"
         })
 
       true ->
@@ -1526,42 +1509,43 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
           {:error, :precondition_failed} ->
             conn
-            |> put_status(:precondition_failed)
-            |> json(%{
-              error: %{
-                code: "precondition_failed",
-                message: "ifRev did not match the paper's current rev; no ops applied"
-              }
+            |> ErrorResponse.emit_fields(:precondition_failed, %{
+              code: "precondition_failed",
+              message: "ifRev did not match the paper's current rev; no ops applied"
             })
 
           {:error, :not_found} ->
             conn
-            |> put_status(:not_found)
-            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
+            |> ErrorResponse.emit_fields(:not_found, %{
+              code: "not_found",
+              message: "no paper for slug #{slug}"
+            })
 
           # Constraint-vocabulary veto (pdd-t20): the middle element IS the
           # human-readable violation, not a block id — surface it verbatim.
           {:error, {:constraint, message, op_kind}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "constraint",
+              message: message,
+              op: op_kind
+            })
 
           {:error, {code, target, op_kind}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: to_string(code),
-                message: "#{op_kind} failed on #{inspect(target)}",
-                op: op_kind,
-                target: target
-              }
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: to_string(code),
+              message: "#{op_kind} failed on #{inspect(target)}",
+              op: op_kind,
+              target: target
             })
 
           {:error, {:invalid_op, _}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "an op could not be applied"}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "invalid_op",
+              message: "an op could not be applied"
+            })
 
           # Server veto ({:halted, reason} — hollow-body ratchet once
           # p-hollow-gate-server lands at this seam) — surface the reason
@@ -1569,13 +1553,14 @@ defmodule BarkparkWeb.BulldocsIngestController do
           # invalid_op below.
           {:error, {:halted, reason}} ->
             conn
-            |> put_status(:conflict)
-            |> json(%{error: %{code: "halted", message: reason}})
+            |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
           {:error, _other} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "an op could not be applied"}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "invalid_op",
+              message: "an op could not be applied"
+            })
         end
     end
   end
@@ -1644,19 +1629,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
     cond do
       not is_list(ops) ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{code: "malformed_proposal", message: "ops (a list of insert ops) is required"}
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "malformed_proposal",
+          message: "ops (a list of insert ops) is required"
         })
 
       not is_map(source) ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{
-            code: "missing_source",
-            message: "source {doc_id, agent} is required — every proposal carries provenance"
-          }
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "missing_source",
+          message: "source {doc_id, agent} is required — every proposal carries provenance"
         })
 
       true ->
@@ -1684,48 +1666,48 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
           {:error, :not_found} ->
             conn
-            |> put_status(:not_found)
-            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
+            |> ErrorResponse.emit_fields(:not_found, %{
+              code: "not_found",
+              message: "no paper for slug #{slug}"
+            })
 
           {:error, :source_not_found} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: "source_not_found",
-                message:
-                  "source.doc_id did not resolve to a document in scope; nothing was written"
-              }
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "source_not_found",
+              message: "source.doc_id did not resolve to a document in scope; nothing was written"
             })
 
           {:error, {:invalid_proposal, message}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_proposal", message: message}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "invalid_proposal",
+              message: message
+            })
 
           # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
           {:error, {:constraint, message, op_kind}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "constraint",
+              message: message,
+              op: op_kind
+            })
 
           {:error, {code, target, op_kind}} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: to_string(code),
-                message: "#{op_kind} failed on #{inspect(target)}",
-                op: op_kind,
-                target: target
-              }
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: to_string(code),
+              message: "#{op_kind} failed on #{inspect(target)}",
+              op: op_kind,
+              target: target
             })
 
           {:error, _other} ->
             conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{code: "invalid_proposal", message: "proposal could not be applied"}
+            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+              code: "invalid_proposal",
+              message: "proposal could not be applied"
             })
         end
     end
@@ -1760,13 +1742,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # at the case, visibly, instead of inside Ecto.
   defp invalid_paper_error(conn, %Ecto.Changeset{} = changeset) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{
-      error: %{
-        code: "invalid_paper",
-        message: "could not store paper",
-        details: changeset_field_errors(changeset)
-      }
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+      code: "invalid_paper",
+      message: "could not store paper",
+      details: changeset_field_errors(changeset)
     })
   end
 
@@ -1841,12 +1820,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   defp invalid_text(conn) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{
-      error: %{
-        code: "invalid_text",
-        message: "paper text must be valid UTF-8 and cannot contain NUL bytes"
-      }
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+      code: "invalid_text",
+      message: "paper text must be valid UTF-8 and cannot contain NUL bytes"
     })
   end
 

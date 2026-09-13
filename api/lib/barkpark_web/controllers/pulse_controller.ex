@@ -29,6 +29,7 @@ defmodule BarkparkWeb.PulseController do
 
   alias Barkpark.Pulse
   alias Barkpark.RateLimiter
+  alias BarkparkWeb.ErrorResponse
 
   @burst 3
 
@@ -102,8 +103,10 @@ defmodule BarkparkWeb.PulseController do
       :error ->
         {:halted,
          conn
-         |> put_status(:not_found)
-         |> json(%{error: %{code: "not_found", message: "unknown pulse channel"}})}
+         |> ErrorResponse.emit_fields(:not_found, %{
+           code: "not_found",
+           message: "unknown pulse channel"
+         })}
     end
   end
 
@@ -153,14 +156,16 @@ defmodule BarkparkWeb.PulseController do
   defp rate_limited(conn, retry_after) do
     conn
     |> put_resp_header("retry-after", Integer.to_string(retry_after))
-    |> put_status(:too_many_requests)
-    |> json(%{error: %{code: "rate_limited", message: "slow down", retry_after: retry_after}})
+    |> ErrorResponse.emit_fields(:too_many_requests, %{
+      code: "rate_limited",
+      message: "slow down",
+      retry_after: retry_after
+    })
   end
 
   defp bad_request(conn, reason) do
     conn
-    |> put_status(:bad_request)
-    |> json(%{error: %{code: "invalid_event", message: reason}})
+    |> ErrorResponse.emit_fields(:bad_request, %{code: "invalid_event", message: reason})
   end
 
   defp parse_int(nil, default), do: default

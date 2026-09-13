@@ -112,23 +112,21 @@ defmodule BarkparkWeb.GithubAdoptController do
 
       {:error, :not_intake} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{
-          error: %{
-            code: "not_intake",
-            message: "task is not a src:github intake awaiting adoption"
-          }
+        |> ErrorResponse.emit_fields(:conflict, %{
+          code: "not_intake",
+          message: "task is not a src:github intake awaiting adoption"
         })
 
       {:error, :not_found} ->
         conn
-        |> put_status(:not_found)
-        |> json(%{error: %{code: "not_found", message: "no such task"}})
+        |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: "no such task"})
 
       {:error, _reason} ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "adopt_failed", message: "could not adopt task"}})
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "adopt_failed",
+          message: "could not adopt task"
+        })
     end
   end
 
