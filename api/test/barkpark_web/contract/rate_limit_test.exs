@@ -160,8 +160,12 @@ defmodule BarkparkWeb.Contract.RateLimitTest do
 
     [value] = get_resp_header(resp, "retry-after")
 
-    assert {seconds, ""} = Integer.parse(value),
+    parsed = Integer.parse(value)
+
+    assert match?({_, ""}, parsed),
            "#{label}: retry-after is #{inspect(value)}, which is not the integer seconds the hint tells the caller to wait"
+
+    {seconds, ""} = parsed
 
     assert seconds > 0,
            "#{label}: retry-after is #{seconds} — a non-positive wait is not a remedy"
