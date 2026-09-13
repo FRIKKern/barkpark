@@ -284,6 +284,69 @@ test("a blank member is not an unknown cell called \"\"", () => {
   assert.deepEqual(r.cells.map((c) => c.name), ["fleet"]);
 });
 
+// ── THE GATE'S OWN COMMENT ABOUT `--cell`, PINNED TO THE FLAG IT DESCRIBES ───
+// cch-w24-bl-console-harness-comment-lies-about-cell-flag. console-harness.yml
+// told a reader that `--cell` was single-name-only and that a comma list exits
+// 2. The tests directly above are what REFUTED it — selectCells has split on
+// commas since the typo fix, and the workflow's own roster phone-band leg drives
+// `--cell members,members-member` on every push. So the COMMENT was the wrong
+// half, not the code, and a behavioural test cannot catch prose: nothing in this
+// suite would have reddened while that sentence sat in the gating file.
+//
+// The remedy is not a better sentence. It is a sentence that CANNOT be true on
+// its own: the workflow now QUOTES the sweep's own RUN usage line, and these two
+// tests hold the quote to its source and refuse the retracted claim's return.
+// Both read the real repository files, and both assert they actually READ
+// something before asserting anything is absent — an empty read must never pass
+// for agreement.
+const REPO_ROOT = path.resolve(HERE, "..", "..", "..", "..");
+const CONSOLE_WF = path.join(REPO_ROOT, ".github", "workflows", "console-harness.yml");
+
+// `#`/`//` comment marker off, runs of whitespace collapsed. The same sentence
+// wears YAML indentation in one file and a JS comment in the other; what must
+// agree is the COMMAND, not the gutter it is printed in.
+function commentText(line) {
+  return line.replace(/^\s*(#|\/\/)\s?/, "").replace(/\s+/g, " ").trim();
+}
+
+test("the gate's `--cell` comment QUOTES the sweep's own usage line rather than restating it", () => {
+  assert.ok(fs.existsSync(CONSOLE_WF),
+    "REFUSING TO MEASURE: " + CONSOLE_WF + " is not there. A missing workflow must red this guard, never satisfy it by giving it nothing to disagree with.");
+  const wf = fs.readFileSync(CONSOLE_WF, "utf8");
+  const sweepSrc = fs.readFileSync(path.join(HERE, "breakpoint-sweep.mjs"), "utf8");
+  assert.ok(wf.length > 0 && sweepSrc.length > 0, "both files must be non-empty before either is searched");
+
+  // The usage line is the SOURCE of truth, and it is found by the flag it
+  // documents — not by a line number, which is the drift this row is about.
+  const usage = sweepSrc.split("\n").map(commentText)
+    .filter((t) => t.startsWith("node ") && t.includes("--cell") && t.includes(","));
+  assert.equal(usage.length, 1,
+    "breakpoint-sweep.mjs must carry exactly ONE comma-list usage line for --cell; found " + usage.length + ": " + JSON.stringify(usage));
+
+  const quoted = wf.split("\n").map(commentText).filter((t) => t === usage[0]);
+  assert.equal(quoted.length, 1,
+    "console-harness.yml must quote that usage line verbatim, once. Wanted:\n  " + usage[0] +
+    "\nIf you changed the sweep's RUN block, change the quote in the workflow in the SAME commit — the two are one statement.");
+});
+
+test("no console-harness comment claims `--cell` refuses a comma list", () => {
+  assert.ok(fs.existsSync(CONSOLE_WF), "REFUSING TO MEASURE: " + CONSOLE_WF + " is not there.");
+  const lines = fs.readFileSync(CONSOLE_WF, "utf8").split("\n");
+  // POSITIVE CONTROL FIRST. An absence proves nothing until the haystack is
+  // shown to contain the thing the claim would be ABOUT.
+  assert.ok(lines.some((l) => l.includes("--cell")),
+    "control failed: the workflow mentions no --cell at all, so a clean scan here would measure nothing");
+
+  const retracted = /exact-match SINGLE-NAME|comma list exits 2|single-name only/i;
+  const offenders = lines.map((l, i) => [i + 1, l]).filter(([, l]) => retracted.test(l));
+  assert.deepEqual(offenders, [],
+    "the retracted claim is back in the gating file. It was REFUTED BY RUN: `--render --widths 320 --cell members,members-member` renders 2 cells x 2 themes = 4 and exits 0, while `--cell members,nosuchcell` exits 2 naming the one bad member. Offenders: " + JSON.stringify(offenders));
+  // ...and prove the detector can still say YES, so the deepEqual above is not
+  // a regex that stopped matching anything at all.
+  assert.ok(retracted.test("# `--cell` is exact-match SINGLE-NAME on main: a comma list exits 2."),
+    "the detector no longer recognises the very sentence it exists to refuse");
+});
+
 test("no sentinel is merely the screen's own container", () => {
   // A container-only sentinel is satisfied by an EMPTY state, which is the
   // precise false green clause 3 exists to kill.
