@@ -683,6 +683,7 @@ const ALLOW_HOOK_CLASSES = [
   "launch-region",     // querySelector(".launch-region") — region <select>, styled by .form-input; S7 change hook
   "launch-connect-provider", // querySelector(".launch-connect-provider") — connect CTA, styled by .btn; S7 click hook
   "launch-catalog-retry",    // querySelector(".launch-catalog-retry") — retry button, styled by .btn; S7 click hook
+  "tier-free",         // querySelector(".tier-free .btn") in __preview__/breakpoint-sweep.mjs (tierLabelProbeJs) — the tier-floor-render probe's Free-tier anchor; styled by .tier/.btn, no rule of its own
 ];
 
 // R3 / KNOWN_GAPS — genuine E2/E3 violations that live in app.js and index.html,
