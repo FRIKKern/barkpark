@@ -201,6 +201,24 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
     end
   end
 
+  # ALREADY LANDED, NOT RE-BUILT (task-267f329679b38a00 c0). The row that owns
+  # this file was filed against a worker that wrote NOTHING to `subscriptions`.
+  # The terminal write landed in 66391dd8c (2026-09-02, "fix(cloud): close the
+  # lapsed trial — a terminal status, a scan horizon, and copy that stops
+  # promising" #14853), which is the commit that added the moduledoc's step 3,
+  # "Finalisation (cch-w50) … writes the terminal status on the subscription row
+  # (`Billing.expire_trial/2` → `canceled`)". What remained was the AUDIT of the
+  # other readers of `subscriptions.status`, not another worker fix; it is driven
+  # in `cloud/test/barkpark_cloud/subscription_status_reader_audit_test.exs`.
+  #
+  # AND THE LIMIT IS NOT WHERE THE FILING PUT IT. The zero-box limit stated at
+  # the end of step 2 is the TEARDOWN NOTICE's — a lapsed trial with no boxes
+  # gets no `trial_expired` mail. Finalisation is the opposite way round: the
+  # empty-box clause below is the one that WRITES, so a zero-box lapsed trial is
+  # finalised on its FIRST pass (the fifteen cch-w50 ghosts carry exactly that
+  # shape). The residual window where the column still reads `active` is
+  # "lapsed AND boxes not yet gone", and that gate is the race guard.
+  #
   # cch-w50 — the terminal write, gated on the teardown having COMPLETED. A team
   # that still has a box keeps its live `trial` row (see handle_trial/4 and the
   # `Billing.expire_trial/2` doc for why that gate is the race guard). Returns
