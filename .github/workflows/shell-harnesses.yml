@@ -117,6 +117,12 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # TASK DUP SWEEP (task-a8eec40f9ae36364). The fixture is a SUBJECT, not an
+      # input: its 243 frozen rows and its pinned ledger IDF table ARE the
+      # calibration, so an edit there changes what the known pairs score without
+      # touching the script.
+      - "scripts/task-dup-sweep.mjs"
+      - "scripts/fixtures/task-dup-sweep-selftest.json"
       # DEPLOY CONVERGENCE (task-0c3069135d1b4bfd). The last entry is an INPUT,
       # not the harness: the check reads deploy.yml's own on.push.paths and the
       # `changes` job's per-target filters rather than copying them, so an edit
@@ -596,6 +602,12 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # TASK DUP SWEEP (task-a8eec40f9ae36364). The fixture is a SUBJECT, not an
+      # input: its 243 frozen rows and its pinned ledger IDF table ARE the
+      # calibration, so an edit there changes what the known pairs score without
+      # touching the script.
+      - "scripts/task-dup-sweep.mjs"
+      - "scripts/fixtures/task-dup-sweep-selftest.json"
       # DEPLOY CONVERGENCE (task-0c3069135d1b4bfd). The last entry is an INPUT,
       # not the harness: the check reads deploy.yml's own on.push.paths and the
       # `changes` job's per-target filters rather than copying them, so an edit
@@ -1096,6 +1108,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
+      task-dup-sweep: ${{ steps.sets.outputs.task-dup-sweep }}
       node-test-floor: ${{ steps.sets.outputs.node-test-floor }}
       doctor-matrix: ${{ steps.sets.outputs.doctor-matrix }}
       merge-verb-table: ${{ steps.sets.outputs.merge-verb-table }}
@@ -1182,6 +1195,8 @@ jobs:
           node-test-floor .github/workflows/hundesteder.yml
           node-test-floor .github/workflows/astro-search-finder-test.yml
           node-test-floor .github/workflows/search-starter-smoke.yml
+          task-dup-sweep scripts/task-dup-sweep.mjs
+          task-dup-sweep scripts/fixtures/task-dup-sweep-selftest.json
           doctor-matrix scripts/doctor.sh
           doctor-matrix scripts/doctor.test.sh
           merge-verb-table scripts/bp-merge.sh
@@ -1511,6 +1526,42 @@ jobs:
             echo "verdict: ${j}=${v}"
             echo "${j}=${v}" >> "$GITHUB_OUTPUT"
           done
+  task-dup-sweep:
+    needs: [changes]
+    if: needs.changes.outputs.task-dup-sweep == 'true'
+    name: task-dup-sweep calibration + vacuity arms
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        id: setup
+        with:
+          node-version: "22"
+      - name: task-dup-sweep.mjs syntax check
+        run: node --check scripts/task-dup-sweep.mjs
+      - name: "calibration + vacuity arms (frozen 243-row fixture, no bp, no network)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # NINE assertions over four arms, and the point of every one is that the
+        # instrument it guards REPLACES one that could not see its own true
+        # positives: the create-path lexical wall scores the two
+        # human-confirmed duplicate pairs 0.109 and 0.077 against its own 0.55
+        # refuse threshold, and ranks the partner 955th and 1065th of 9,209.
+        #   · two VACUITY arms — an empty corpus and a pair generator that
+        #     yields nothing must REFUSE (exit 3, named line). A sweep that
+        #     compares nothing otherwise reports a beautiful zero that is
+        #     indistinguishable from a clean ledger.
+        #   · KNOWN POSITIVES — both confirmed pairs must be reported at the
+        #     recall operating point, at the score and rank a live 9,210-row run
+        #     gives them (the fixture pins term weights to a frozen ledger IDF
+        #     precisely so the fixture cannot invent its own easier numbers).
+        #   · KNOWN NEGATIVES — five pairs read by hand and judged DISTINCT must
+        #     stay out of the tight point. The arm also PRINTS that all five ARE
+        #     reported at the recall point, which is why that point is documented
+        #     as a candidate pool and never as a duplicate rate.
+        #   · PLANTED DUPLICATE — a row restating an existing row's defect in
+        #     different words is caught when present and absent when removed.
+        run: node scripts/task-dup-sweep.mjs --selftest
   node-test-floor:
     needs: [changes]
     if: needs.changes.outputs.node-test-floor == 'true'
