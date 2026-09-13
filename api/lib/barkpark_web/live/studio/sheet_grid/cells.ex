@@ -17,7 +17,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   # error_values/0` (@canonical engine-error-vocabulary); a drift-guard test
   # (sheets_parity_test) asserts THIS mirror EQUALS that list, so a new code
   # can't silently fork.
-  @engine_errors ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME?)
+  @engine_errors ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME? #GHOST!)
 
   # @doc false accessor — exists ONLY so the drift-guard test can assert this
   # local mirror equals `Barkpark.Plugins.Sheets.Engine.error_values/0`.

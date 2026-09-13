@@ -79,7 +79,7 @@ const CELL_LINES = 2
  * neither side can drift alone again. Exported for that test and for
  * `__tests__/gridNatives.test.tsx` — it is not part of any public entry point.
  */
-export const ERROR_VALUES = new Set(['#CYCLE!', '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#SPILL!', '#NAME?'])
+export const ERROR_VALUES = new Set(['#CYCLE!', '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#SPILL!', '#NAME?', '#GHOST!'])
 
 // The four value-shape gates, byte-copied from react's sheet.ts so the same
 // cell reads the same way on both surfaces.

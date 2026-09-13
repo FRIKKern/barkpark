@@ -295,6 +295,7 @@ export const ENGINE_ERRORS: ReadonlySet<string> = new Set([
   "#NUM!",
   "#SPILL!",
   "#NAME?",
+  "#GHOST!",
 ]);
 
 /** True when a cell's computed value is an engine error code — the grid marks

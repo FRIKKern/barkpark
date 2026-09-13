@@ -510,7 +510,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 PMT FV PV NPV IRR RATE NPER)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
-  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME?)
+  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME? #GHOST!)
 
   # 2^1024 — the first magnitude past the float64 range (max double < 2^1024).
   # An integer this big or bigger cannot survive `/`/`*` coercion to float
