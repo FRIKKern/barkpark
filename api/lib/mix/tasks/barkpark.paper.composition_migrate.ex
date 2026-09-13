@@ -53,7 +53,11 @@ defmodule Mix.Tasks.Barkpark.Paper.CompositionMigrate do
 
   @impl Mix.Task
   def run(args) do
-    Mix.Task.run("app.start")
+    # One-shot boot: Repo + this task's deps ONLY, never the Endpoint,
+    # Oban, plugin workers or the codelist seeders. See
+    # `Barkpark.MixBoot` for the 2026-09-02 guerrilla incident a full
+    # application boot here used to cause on a live box.
+    Barkpark.MixBoot.boot!(:repo)
 
     {opts, _argv, invalid} = OptionParser.parse(args, strict: @switches)
 
