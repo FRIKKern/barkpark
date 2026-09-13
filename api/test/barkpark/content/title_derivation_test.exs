@@ -5,7 +5,7 @@ defmodule Barkpark.Content.TitleDerivationTest do
   desk rows, `/v1/data/doc`, search hits and the reference pill all agree; a
   type WITH a title field is byte-identical to before.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.TitleDerivation

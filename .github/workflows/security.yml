@@ -693,6 +693,35 @@ jobs:
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash api/scripts/sobelow-baseline-fingerprint-check.sh
+
+      # THE SUM CASE (task-96e5b06e4b5ea391). The step above reads ONE tree. On a
+      # pull_request that tree is the merge ref GitHub computed when the PR was
+      # last pushed, against the base AS IT WAS THEN -- nothing recomputes this
+      # check run when the base moves under an already-green PR. Two PRs that each
+      # insert lines above the SAME Config.CSRF waiver and each re-anchor it
+      # CORRECTLY against their own base write BYTE-IDENTICAL hunks into
+      # api/.sobelow-skips; git's 3-way merge takes two identical hunks clean while
+      # the shifts in router.ex ADD. Each head is green, the pair is a dead waiver,
+      # and no per-head run ever measured the pair.
+      #
+      # ONLY --selftest IS WIRED, deliberately. The live arm needs both histories
+      # back to the merge base, and actions/checkout@v4 clones the pull_request
+      # merge ref at depth 1 -- merge-tree would find no merge base and the arm
+      # would exit 2 on its own plumbing rather than on the defect. Deepening the
+      # fetch to cover a repo landing ~100 commits a day is a flake surface bought
+      # for a class whose measured base rate is ZERO (3 overlapping PR pairs in the
+      # whole life of the file, all three sequential). --selftest is hermetic -- a
+      # real git fixture, real branches, a real merge-tree -- and it EXECUTES this
+      # checker in both directions, so the capability cannot rot unnoticed. The
+      # live arm is a runbook command in the script's header; the durable
+      # post-merge verdict stays where it already is, on this file's
+      # `push: branches: [main]` arm.
+      - name: Merge-time waiver ratchet can lose (the two- and three-way sum fixtures)
+        id: s3
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash api/scripts/sobelow-waiver-merge-time-check.sh --selftest
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries
@@ -702,7 +731,7 @@ jobs:
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Selftest (the fingerprint ratchet must be able to fail)\", \"s2\": \"Every reconstructible baseline row still hashes to its stored fingerprint\"}"
+          STEP_NAMES: "{\"s1\": \"Selftest (the fingerprint ratchet must be able to fail)\", \"s2\": \"Every reconstructible baseline row still hashes to its stored fingerprint\", \"s3\": \"Merge-time waiver ratchet can lose (the two- and three-way sum fixtures)\"}"
           JOB_NAME: "Sobelow baseline rows still hash to their own fingerprint (blocking)"
           WORKFLOW_FILE: security.yml
           GITHUB_TOKEN: ${{ github.token }}
