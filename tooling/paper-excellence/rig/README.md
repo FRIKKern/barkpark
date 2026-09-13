@@ -186,7 +186,21 @@ fixtures in the image above moved exactly the numbers the host controls and
 nothing else — `heggemsnes-act` prose CPL `67.7 → 66.9`, `ingressRatio
 `0.783 → 0.785`, caption width `400.4 → 400`, and the section-boundary `y`
 offsets that follow from a different line box. Column width, band width, track
-counts, rule census, paragraph counts and blocked-request counts did not move.
+counts, paragraph counts and blocked-request counts did not move.
+
+**The rule census moved on exactly one fixture, and this file said for a day
+that it did not** (corrected 2026-09-13 against the committed diff of
+`8dd49c0b4`, which is the oracle — the prose was not). `portabledoc-showcase`
+went `rules.total 208 → 210` and `rules.byWeight.1 198 → 200`, identically on
+all four shots; `heavyRules` did not move, so both new runs are hairlines. The
+reason is the same line box as everything else in this paragraph: `census.mjs`
+merges edges into visual runs at the "same y within a pixel" (§WHAT IS MERGED),
+so two hairlines that shared a y with a neighbouring rule under Iowan Old Style
+resolve to their own y in the Linux fallback and are counted separately. No
+other fixture's census changed. That is a font-fallback delta too — but a
+sentence claiming a key held is exactly where nobody looks again, so it is named
+here rather than left as a blanket "did not move".
+
 That is a font-fallback delta, measured rather than assumed — and it is why no
 CPL or font-metric threshold may be pinned against a laptop capture.
 
