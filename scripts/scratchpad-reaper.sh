@@ -410,7 +410,18 @@ $wt_list
 EOF
 
 	# 2. FRESHNESS — a live agent's tree is the one most likely to be mid-write.
-	mtime_epoch=$(stat -f %m "$entry" 2>/dev/null || stat -c %Y "$entry" 2>/dev/null)
+	# ORDER IS LOAD-BEARING, and getting it wrong is invisible on macOS.
+	# `stat -f %m` is BSD's "modification time"; on GNU coreutils `-f` means
+	# FILE SYSTEM and `%m` is the MOUNT POINT, so the BSD form SUCCEEDS on
+	# Linux and prints `/`. A BSD-first `||` fallback therefore never reaches
+	# the GNU form, and every candidate on a Linux runner reads as undatable
+	# (measured on the ubuntu runner 2026-09-13: 7 of 8 fixtures CANNOT READ).
+	# GNU's `-c` is rejected outright by BSD stat, so trying it FIRST is the
+	# order that fails loudly on the wrong platform instead of quietly.
+	mtime_epoch=$(stat -c %Y "$entry" 2>/dev/null)
+	case "$mtime_epoch" in
+	'' | *[!0-9]*) mtime_epoch=$(stat -f %m "$entry" 2>/dev/null) ;;
+	esac
 	case "$mtime_epoch" in
 	'' | *[!0-9]*)
 		cannot_read "$entry" "stat gave no usable mtime; not removing what cannot be dated"
