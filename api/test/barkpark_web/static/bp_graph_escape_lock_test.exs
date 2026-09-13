@@ -88,6 +88,9 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
     {~r/^rgba\(.*\)$/s, "rgba(hex, alpha) — in-file colour helper, emits numerics"},
     {~r/^shiftL\(.*\)$/s, "shiftL(hex, dl) — in-file lightness shift, emits a #hex"},
     {~r/^chromeC\(\)$/, "chromeC() — in-file theme palette object of literal colours"},
+    {~r/^accent\(\)$/,
+     "accent() — in-file theme selector returning ACCENT or ACCENT_LIGHT, both " <>
+       "#hex literals (asserted literal below)"},
     {~r/^TYPE_HEX\[[^\]]*\]$/, "TYPE_HEX[...] — literal #hex map (asserted literal below)"},
     {~r/^-?\d+(\.\d+)?$/, "numeric literal"},
     {~r/\.length$/, "a .length — a number, never text"}
@@ -186,6 +189,69 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
       assert bad == [],
              "TYPE_HEX carries a non-literal value; it is no longer presentational by " <>
                "construction and must leave @presentational: " <> inspect(bad)
+    end
+
+    test "accent() selects between two #hex literals, which is what makes it presentational" do
+      src = read_or_refuse!(canonical_path())
+
+      # accent() is reachable from an innerHTML sink (the legend's "active" row),
+      # so it is only presentational while its ENTIRE body is a choice between
+      # two colour constants. It was a bare `ACCENT` identifier until the light
+      # ground got a deeper sibling; the scanner resolved that to a literal on
+      # its own. A function call it cannot, so the ground is asserted HERE
+      # rather than taken on the declaration's word.
+      body =
+        case Regex.run(~r/function accent\(\)\s*\{(.*?)\n    \}/s, src) do
+          [_, b] ->
+            b
+
+          _ ->
+            flunk(
+              "could not locate function accent() in #{@canonical} — the scanner lost its shape"
+            )
+        end
+
+      names =
+        case Regex.run(
+               ~r/^\s*return theme === "light" \? ([A-Za-z_$][A-Za-z0-9_$]*) : ([A-Za-z_$][A-Za-z0-9_$]*);\s*$/,
+               body
+             ) do
+          [_, light, dark] ->
+            [light, dark]
+
+          _ ->
+            flunk("""
+            accent() is no longer a two-identifier theme ternary. Its body is:
+            #{String.trim(body)}
+
+            Anything else can carry a value this test has not proven to be a
+            colour literal, so accent() must leave @presentational (or the call
+            site at the legend sink must be esc()-wrapped) until it is proven
+            again here.
+            """)
+        end
+
+      for name <- names do
+        # 1. it is declared as a #hex string literal, and
+        assert Regex.match?(~r/\bvar\s+#{Regex.escape(name)}\s*=\s*"#[0-9A-Fa-f]{3,8}"\s*;/, src),
+               "#{name} (returned by accent()) has no `var #{name} = \"#hex\";` declaration"
+
+        # 2. that declaration is its ONLY assignment — nothing later rebinds it
+        #    to a server-derived string. The same probe run against `theme`
+        #    finds three writes, which is what shows it can tell them apart.
+        writes = Regex.scan(~r/\b#{Regex.escape(name)}\s*=(?!=)/, src)
+
+        assert length(writes) == 1,
+               "#{name} is assigned #{length(writes)} times in #{@canonical}; a colour " <>
+                 "constant reaching an HTML sink must be written exactly once, at its " <>
+                 "literal declaration"
+      end
+
+      # CONTROL for the write probe above: `theme` IS reassigned (setTheme), so a
+      # probe that reports 1 write for everything would be measuring nothing.
+      assert length(Regex.scan(~r/\btheme\s*=(?!=)/, src)) > 1,
+             "the assignment probe found <=1 write to `theme`, which setTheme() " <>
+               "demonstrably rebinds — the probe is broken, not the file"
     end
   end
 
