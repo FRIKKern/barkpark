@@ -712,6 +712,28 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-callout__summary { cursor: pointer; font-weight: bold; }
 .bp-paper-surface .bp-callout__body { margin-top: 8px; }
 
+/* Code-block LINE EMPHASIS (pe-bl-code-emphasis). `Figures.code_block_html/2`
+   (and its JS mirror, blocks/core.ts `codeBlockHtml`) wraps an emphasized line
+   of a `<pre>` code block in `.bp-code-em.bp-code-em--<tone>`; the tone
+   vocabulary is closed (comment / offending / fixed) and narrowed in the
+   composer, so only these three selectors can ever be asked for. The wash is
+   full-line: `display:inline-block; width:100%` fills the line box inside a
+   `white-space:pre` slab without introducing a break the source did not author
+   (a `display:block` span would).
+
+   Colour comes from the EXISTING `--bp-tone-*` pairs — the same light+dark token
+   family the callouts and chips read — never a literal: `comment` reads neutral
+   (an aside, not a verdict), `offending` reads danger, `fixed` reads success.
+   Reusing the pairs rather than minting `--bp-code-em-*` tokens is deliberate:
+   a new `--bp-*` token would have to be mirrored into the generated embedder
+   token region (scripts/paper-editor-mirror-check.sh part 3), and three tones
+   that mean exactly what three existing tone pairs already mean do not earn a
+   second vocabulary. */
+.bp-paper-surface .bp-code-em { display: inline-block; width: 100%; }
+.bp-paper-surface .bp-code-em--comment   { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); }
+.bp-paper-surface .bp-code-em--offending { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-code-em--fixed     { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); }
+
 /* Table CHROME (also the sheet's outer collapse/width). `display:block` +
    overflow-x makes a wide table scroll INSIDE its own box instead of widening
    the document — a 3-col table was the measured mobile-overflow culprit at
