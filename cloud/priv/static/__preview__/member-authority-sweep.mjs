@@ -583,7 +583,15 @@ const PIN_MEMBER_SCENARIOS = 12;
 // Both numbers were RE-DERIVED by RUNNING this sweep and reading what it
 // PRINTED ("the member-actor corpus is 12, pinned at 9" and "the committed
 // corpus grew to 128 scenario(s), pinned at 125"), never by adding three.
-const PIN_TOTAL_SCENARIOS = 128;
+// cch-w48-s1-followup adds `new-launch-me-unreadable`, the /new launch step in
+// front of a /v1/me that 500s, so smoke.mjs can measure that step's own
+// [data-me-retry] in a browser. The member slice STAYS at 12, the same case the
+// note above forbids bumping: its `me` is the ordinary owner fixture
+// (`me("Ada's Lab")`) and its meFault makes `meRole()` read the 500 body and
+// answer null, so it cannot enter the member set by construction. 129 was
+// RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
+// corpus grew to 129 scenario(s), pinned at 128"), never by adding one.
+const PIN_TOTAL_SCENARIOS = 129;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).
