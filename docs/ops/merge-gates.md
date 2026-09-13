@@ -538,22 +538,29 @@ reds on any disagreement in either direction.
 2026-08-08 it disclosed nothing.** `pr-task-gate.yml` grandfathers a PR whose
 base commit predates the gate, and every evaluating step below carries
 `if: enforced == '1'` — so a grandfathered run concludes SUCCESS having verified
-no task at all, byte-identical on the check-run API to one where a live claim was
-proven. It now emits its own annotation on that path,
+no task at all, byte-identical on the check-run API to a proven live claim. It
+now emits its own annotation on that path,
 `::notice title=PR task gate: green — nothing evaluated::` ("NO TASK WAS CHECKED
 on this PR … Read it as 'no task check ran', never as 'this PR is task-backed'").
 It is deliberately **not** worded `nothing ran` and stays a `—` row in the table
-above: this green is not path-gating, and the roster that table holds is about
-path-gated aggregators. History: [merge-gates-history.md](merge-gates-history.md#the-pr-task-gate-grandfather-branch-and-the-39-of-39-re-derivation).
+above: this green is not path-gating and that roster is for path-gated
+aggregators. History: [merge-gates-history.md](merge-gates-history.md#the-pr-task-gate-grandfather-branch-and-the-39-of-39-re-derivation).
 
-The annotation says it in its own words — `cloud.yml`'s reads "NOTHING CLOUD RAN
-on this head … green because this diff touched none of its declared path sets,
-NOT because anything was tested", names the jobs it did not dispatch, and ends
-"Read it as 'no Cloud job executed', never as 'the Cloud suite passed'."
+The annotation says it in its own words. `Cloud gate`, verbatim from
+`cloud.yml`:
 
-**Where a merger reads it.** The check-run page in the GitHub UI shows the
-annotation inline. From a terminal, `gh pr checks <pr>` will not show it —
-resolve the check-run id for the head SHA and read the annotations:
+```
+NOTHING CLOUD RAN on this head.
+Cloud gate is green because this diff touched none of its declared path sets,
+NOT because anything was tested.
+Not dispatched: <the job list>
+Green here means NOT APPLICABLE to this diff. Read it as 'no Cloud job
+executed', never as 'the Cloud suite passed'.
+```
+
+**Where a merger reads it.** The GitHub check-run page shows the annotation
+inline. From a terminal, `gh pr checks <pr>` will not show it — resolve the
+head SHA's check-run id and read its annotations:
 
 ```bash
 gh api "repos/FRIKKern/barkpark/commits/$(gh pr view <pr> --json headRefOid -q .headRefOid)/check-runs" \
@@ -562,8 +569,8 @@ gh api repos/FRIKKern/barkpark/check-runs/<id>/annotations \
   -q '.[] | "\(.annotation_level)\t\(.title)\t\(.message)"'
 ```
 
-`ann=0` on a gate that reports green means it really ran; `ann=1` with that
-title means it ran nothing. The emission is pinned by
+`ann=0` on a green gate means it really ran; `ann=1` with that title means it
+ran nothing. The emission is pinned by
 `scripts/gate-announces-skips.test.sh`, which runs inside the `Elixir gate`
 aggregator's own `needs:` graph and asserts the DELIVERED annotation title, so a
 gate that quietly stopped disclosing reds a required context.

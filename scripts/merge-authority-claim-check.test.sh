@@ -200,16 +200,25 @@ fi
 
 # B5. path-escape carries the gate value NEVER in the aggregator's decide body,
 #     so it cannot be skipped into a green.
-if grep 'decide "path-escape ratchet"' "$WORKFLOW" | grep -q 'NEVER'; then
-  ok "B5 the aggregator judges path-escape with gate value NEVER"
-else
-  no "B5 the aggregator no longer judges path-escape with gate value NEVER"
-fi
+# D37: no pipe into an early-closing reader. `grep FILE | grep -q` under the
+# `set -euo pipefail` at the top of this file returns 141 when the first grep is
+# still writing as the second exits at its first match, so a TRUE match reports
+# as a MISS and B5 reds for a reason foreign to its subject. Capture, then match
+# with a shell `case` — no writer process exists to kill.
+b5_decide="$(grep 'decide "path-escape ratchet"' "$WORKFLOW" || true)"
+case "$b5_decide" in
+  *NEVER*)
+    ok "B5 the aggregator judges path-escape with gate value NEVER" ;;
+  *)
+    no "B5 the aggregator no longer judges path-escape with gate value NEVER" ;;
+esac
 
 # B6. path-escape is unfiltered and blocking: no job-level `if:`, no
 #     continue-on-error. Either one would make this whole venue a lie.
 pe_body="$(awk '/^  path-escape:/ { p = 1; next } p && /^  [a-z-]+:[ \t]*$/ { exit } p' "$WORKFLOW")"
-if printf '%s\n' "$pe_body" | grep -qE '^    (if|continue-on-error):'; then
+# D37: here-string, not a pipe — a here-string is a file the shell hands grep,
+# so there is no producer to take SIGPIPE when grep -q exits at its first match.
+if grep -qE '^    (if|continue-on-error):' <<<"$pe_body"; then
   no "B6 path-escape gained an 'if:' or 'continue-on-error:' — it can now go dark or launder a red"
 else
   ok "B6 path-escape carries no job-level 'if:' and no continue-on-error"
@@ -218,7 +227,8 @@ fi
 # B7. elixir.yml carries no workflow-level `on: … paths:` key — the rule its own
 #     header states as an absolute. A paths filter emits NO check run at all.
 on_body="$(awk '/^on:/ { o = 1; next } o && /^[a-zA-Z]/ { exit } o' "$WORKFLOW")"
-if printf '%s\n' "$on_body" | grep -qE '^[ \t]+paths(-ignore)?:'; then
+# D37: here-string, not a pipe (same reason as B6 above).
+if grep -qE '^[ \t]+paths(-ignore)?:' <<<"$on_body"; then
   no "B7 elixir.yml gained a workflow-level paths filter — the required context can now be ABSENT, which reports 'expected' forever"
 else
   ok "B7 elixir.yml carries no workflow-level 'paths:' key"

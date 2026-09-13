@@ -122,6 +122,11 @@
 #                        its lock. Deliberately NOT under ART_DIR.
 #   PDS_FULL_EXPORT_BUDGET       default 1 attempt, ever, per store
 #   PDS_FULL_EXPORT_MIN_MEM_MB   default 2200 — the source's MemAvailable floor
+#   PDS_FULL_EXPORT_MAX_BEAM_SWAP_MB  default 256 — the ceiling on how much of
+#                        the LIVE beam.smp may be paged out. MemAvailable alone
+#                        RISES as the BEAM is evicted, so the floor above is
+#                        anti-correlated with safety unless it is paired with
+#                        this (PDS-D741, pds-bl-gate-b-anticorrelated)
 #   PDS_STEP5_FAILDEMO=0 skip step 5's truncate/restore failure demonstration
 #                        (the pass then says so: nothing proved the comparator
 #                        can fail)
@@ -242,6 +247,23 @@ FULL_TMP_TAR="$FULL_TAR.incoming.$RUN_TAG.$$"
 # the parked bundle is still on disk, which is exactly what the temp-then-rename
 # shape above requires; a parked bundle LARGER than the floor raises it.
 FULL_MIN_FREE_MB="${PDS_FULL_EXPORT_MIN_FREE_MB:-1536}"
+# (b) IS A CONJUNCTION, AND THIS IS ITS SECOND HALF (pds-bl-gate-b-anticorrelated,
+# PDS-D741). A MemAvailable floor ON ITS OWN is ANTI-CORRELATED with the thing
+# gate (b) exists to prevent. MEASURED on the source 2026-07-20, over 55 s:
+# MemAvailable rose 1,586,644 -> 2,984,512 kB precisely BECAUSE the live BEAM was
+# being paged out — over the same window its VmSwap rose 51,624 -> 874,760 kB and
+# its RSS collapsed 1,024,468 -> 216,852 kB. Seven of eight samples PASSED the
+# floor. So the old gate opened most reliably in the state where materialising a
+# ~1.03 GB bundle is MOST dangerous: the working set the export must fault back
+# in is on disk, and the "headroom" the floor read is that working set's grave.
+#
+# THE CEILING'S DERIVATION, not a round number picked for looking round: the
+# same measured window puts ordinary residue at 51,624 kB (50 MB) of beam swap
+# and the pathological readings at 859,944-874,760 kB (839-854 MB). 256 MB sits
+# 5x above the residue and 3.3x below the pathology, and is ~25% of the ~1,000 MB
+# healthy beam.smp RSS baseline measured in that same window — i.e. it refuses
+# once a quarter of the live BEAM's working set is on disk.
+FULL_MAX_SWAP_MB="${PDS_FULL_EXPORT_MAX_BEAM_SWAP_MB:-256}"
 FULL_LOCK_OWNED=""
 FULL_WHY=""            # why acquisition aborted, if it did
 FULL_META_WHY=""       # which full_meta_ok expectation failed, if one did
@@ -293,6 +315,7 @@ int_ok() { case "${1-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 # the door is the difference between a wrong number and a wrong story.
 int_ok "$FULL_BUDGET"     || die "PDS_FULL_EXPORT_BUDGET must be a non-negative integer, got '$FULL_BUDGET'"
 int_ok "$FULL_MIN_MEM_MB" || die "PDS_FULL_EXPORT_MIN_MEM_MB must be a non-negative integer, got '$FULL_MIN_MEM_MB'"
+int_ok "$FULL_MAX_SWAP_MB" || die "PDS_FULL_EXPORT_MAX_BEAM_SWAP_MB must be a non-negative integer, got '$FULL_MAX_SWAP_MB'"
 
 # One integer from a counter capture, or the EMPTY string when there isn't one.
 # Never invents a zero: emptiness is what `int_ok` is for. The `head -n 1` is
@@ -824,7 +847,9 @@ cmd_plan() {
   say "               or with PDS_KEEP_ARTIFACTS=1. Backlog: $SELF --sweep-artifacts"
   say "full export:   $FULL_TAR"
   say "               budget=$FULL_BUDGET attempt(s) · spent so far=$([ -f "$FULL_ATTEMPTS_FILE" ] && cat "$FULL_ATTEMPTS_FILE" || echo 0) · on-disk bundle=$([ -s "$FULL_TAR" ] && echo "PRESENT ($(wc -c <"$FULL_TAR" | tr -d ' ') bytes, would be REUSED for 0 attempts)" || echo absent)"
-  say "               min MemAvailable on the source before it is taken: ${FULL_MIN_MEM_MB} MB"
+  say "               gate (b) before it is taken: MemAvailable >= ${FULL_MIN_MEM_MB} MB AND the live"
+  say "               beam.smp's own VmSwap <= ${FULL_MAX_SWAP_MB} MB. BOTH, because MemAvailable RISES"
+  say "               as the BEAM is evicted — the floor alone opens on a swapped-out box"
   say "siblings:      $(basename "$SCRATCH_SCRIPT") $([ -x "$SCRATCH_SCRIPT" ] && echo present || echo MISSING) · $(basename "$SCAN_SCRIPT") $([ -x "$SCAN_SCRIPT" ] && echo present || echo MISSING)"
   say "tooling:       curl $(command -v curl >/dev/null 2>&1 && echo yes || echo NO) · python3 $(command -v python3 >/dev/null 2>&1 && echo yes || echo NO) · psql $(command -v psql >/dev/null 2>&1 && echo yes || echo NO) · ssh $(command -v ssh >/dev/null 2>&1 && echo yes || echo NO) · bp $(command -v bp >/dev/null 2>&1 && echo yes || echo NO)"
   say ""
@@ -1043,6 +1068,20 @@ banner() {
   say "     and only as the FIRING control for steps 3 and 4. Its memory figure is"
   say "     measured by a 1 Hz ps sampler over SSH during that export; no cgroup"
   say "     number and no survey number is reprinted as this run's."
+  say "   · Full-export GATE scope — precondition (b) asserts a CONJUNCTION: the"
+  say "     source's MemAvailable is at or above ${FULL_MIN_MEM_MB} MB AND the live beam.smp"
+  say "     has at most ${FULL_MAX_SWAP_MB} MB of itself swapped out, both read in ONE probe"
+  say "     immediately before the request. The second half is not decoration:"
+  say "     MemAvailable RISES as the BEAM is evicted (measured 2026-07-20 —"
+  say "     MemAvailable 1,586,644 -> 2,984,512 kB while beam VmSwap rose"
+  say "     51,624 -> 874,760 kB), so a floor read ALONE opens most reliably in"
+  say "     the most dangerous state and is not a safety property (PDS-D741)."
+  say "     WHAT IT STILL DOES NOT CLAIM: it is a point-in-time reading taken"
+  say "     before a multi-minute export, not a reservation — nothing holds that"
+  say "     memory, the box can degrade the instant after the probe, and no"
+  say "     precondition on this box makes a ONE-BINARY ~1.03 GB export safe."
+  say "     Only streaming the export removes the allocation; the gate narrows"
+  say "     the window, it does not close it."
   say "   · RSS scope — that peak is WHOLE-PROCESS beam.smp RSS over the export"
   say "     window, NOT export-exclusive. The same BEAM serves the live content"
   say "     API throughout, and \`ps -o rss=\` cannot separate export-caused memory"
@@ -2192,6 +2231,57 @@ full_attempts() { # -> integer (never empty — an empty/garbage counter file re
   printf '%s' "${n:-0}"
 }
 
+# ── GATE (b): THE PAIRED MEMORY PREDICATE ───────────────────────────────────
+# (pds-bl-gate-b-anticorrelated, PDS-D741)
+#
+# A PURE FUNCTION OVER NUMBERS, deliberately: it performs no SSH, reads no file
+# and touches no global but the two configured limits, so the exact figures the
+# source produced on 2026-07-20 can be replayed through the SHIPPED predicate
+# without a box. Everything measured lives in the caller; everything judged
+# lives here.
+#
+# WHAT IT ASSERTS: MemAvailable >= floor AND the live beam.smp's own VmSwap <=
+# ceiling. The conjunction is the whole point — see the FULL_MAX_SWAP_MB block
+# above for the measurement that makes the floor alone anti-correlated.
+#
+# FAIL-CLOSED ON BLINDNESS, exactly as (d) does (PDS-D98): an unreadable
+# MemAvailable or an unreadable VmSwap is UNKNOWN, never OK. The swapped-out
+# state is precisely the one where a probe is slow enough to be dropped, so a
+# missing VmSwap must not degrade into the old single-value gate.
+gate_b_verdict() { # <memavail_kb> <vmswap_kb> <floor_mb> [beam_rss_kb] -> the cond_b text; 0 = OK
+  local avail_kb="${1-}" swap_kb="${2-}" floor_mb="${3-0}" rss_kb="${4-}"
+  local avail_mb swap_mb rss_mb committed=""
+
+  if ! int_ok "$avail_kb"; then
+    printf 'UNKNOWN (MemAvailable unreadable — SSH is the only route to it, and a gate that cannot see is never OK)\n'
+    return 1
+  fi
+  avail_mb=$((avail_kb / 1024))
+  if ! int_ok "$swap_kb"; then
+    printf 'UNKNOWN (MemAvailable is %s MB, but NO comm-anchored beam.smp VmSwap could be read — and VmSwap is the half of this gate that tells a healthy box from an evicted one. The floor ALONE would have said OK here; that is the reading PDS-D741 refuses)\n' "$avail_mb"
+    return 1
+  fi
+  swap_mb=$((swap_kb / 1024))
+  if int_ok "$rss_kb"; then
+    rss_mb=$((rss_kb / 1024))
+    committed="$(printf ', beam committed footprint %s MB = RSS %s + swap %s' "$((rss_mb + swap_mb))" "$rss_mb" "$swap_mb")"
+  fi
+
+  if [ "$avail_mb" -lt "$floor_mb" ]; then
+    printf 'FAILED (%s MB available, floor %s MB; beam swapped out %s MB, ceiling %s MB)%s — too little headroom to materialise the bundle beside a LIVE content API\n' \
+      "$avail_mb" "$floor_mb" "$swap_mb" "$FULL_MAX_SWAP_MB" "$committed"
+    return 1
+  fi
+  if [ "$swap_mb" -gt "$FULL_MAX_SWAP_MB" ]; then
+    printf 'FAILED — %s MB available CLEARS the %s MB floor, but %s MB of the LIVE beam.smp is SWAPPED OUT (ceiling %s MB)%s. That headroom IS the evicted working set: the export would fault it all back in. This is the exact reading the floor alone passed on 2026-07-20\n' \
+      "$avail_mb" "$floor_mb" "$swap_mb" "$FULL_MAX_SWAP_MB" "$committed"
+    return 1
+  fi
+  printf 'OK (%s MB available >= floor %s MB, AND %s MB of the live beam.smp swapped out <= ceiling %s MB)%s\n' \
+    "$avail_mb" "$floor_mb" "$swap_mb" "$FULL_MAX_SWAP_MB" "$committed"
+  return 0
+}
+
 acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says why not
   FULL_WHY=""
   local stale_note=""
@@ -2233,7 +2323,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   fi
 
   # ── the six conditions, printed with measured values, before any byte moves
-  local spent mem_kb mem_mb sha_now deploy_running gh_rc gh_out cond_a cond_b cond_c cond_d cond_e cond_f ok=1
+  local spent mem_kb sha_now deploy_running gh_rc gh_out cond_a cond_b cond_c cond_d cond_e cond_f ok=1
   local parked_note free_mb need_mb parked_mb parked_bytes
   spent="$(full_attempts)"
 
@@ -2247,18 +2337,31 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     cond_a="FAILED — the box redeployed since step 0a ($DEPLOYED_SHA -> $sha_now)"; ok=0
   fi
 
-  mem_mb=""
+  # ── (b) BOTH HALVES COME BACK IN ONE PROBE (pds-bl-gate-b-anticorrelated) ─
+  # ONE round trip, so the two numbers describe the SAME instant: a MemAvailable
+  # read at T and a VmSwap read at T+2s can disagree about the box by a hundred
+  # megabytes on a thrashing host, and the pair is the whole assertion.
+  #
+  # `pgrep -x beam.smp` — comm-anchored and UNANCHORED-to-argv, matching the RSS
+  # sampler below, for the reason recorded there (PDS-D135): `pgrep -f beam` also
+  # matches THIS VERY ssh command line. Every slot's VmSwap is SUMMED, because
+  # every slot's evicted pages compete for the same faults during the export.
+  local mem_probe swap_kb beam_rss_kb
+  mem_probe=""; swap_kb=""; beam_rss_kb=""
   if ssh_available; then
-    mem_kb="$(ssh_src "awk '/MemAvailable/{print \$2}' /proc/meminfo" | tr -d '[:space:]' || true)"
-    [ -n "$mem_kb" ] && mem_mb=$((mem_kb / 1024))
+    mem_probe="$(ssh_src "awk '/^MemAvailable:/{print \"memavail \" \$2}' /proc/meminfo; pgrep -x beam.smp | while read -r bp; do awk '/^VmSwap:/{print \"vmswap \" \$2} /^VmRSS:/{print \"vmrss \" \$2}' /proc/\$bp/status 2>/dev/null; done" || true)"
+    mem_kb="$(first_int "$(printf '%s\n' "$mem_probe" | awk '/^memavail /{print $2; exit}')")"
+    # NO DEFAULT ZERO. An absent vmswap line means the probe could not see the
+    # BEAM at all; defaulting it to 0 would read as "nothing is swapped out",
+    # which is the most reassuring possible answer to a question that was never
+    # answered. awk's `END {print s+0}` would do exactly that, so the presence
+    # of the line is checked FIRST and the sum is only taken when there is one.
+    if printf '%s\n' "$mem_probe" | grep -q '^vmswap '; then
+      swap_kb="$(first_int "$(printf '%s\n' "$mem_probe" | awk '/^vmswap /{s += $2} END {print s}')")"
+      beam_rss_kb="$(first_int "$(printf '%s\n' "$mem_probe" | awk '/^vmrss /{s += $2} END {print s}')")"
+    fi
   fi
-  if [ -z "$mem_mb" ]; then
-    cond_b="UNKNOWN (MemAvailable unreadable — SSH is the only route to it)"; ok=0
-  elif [ "$mem_mb" -ge "$FULL_MIN_MEM_MB" ]; then
-    cond_b="OK (${mem_mb} MB available, floor ${FULL_MIN_MEM_MB} MB)"
-  else
-    cond_b="FAILED (${mem_mb} MB available, floor ${FULL_MIN_MEM_MB} MB) — taking it now risks OOMing the LIVE content API"; ok=0
-  fi
+  cond_b="$(gate_b_verdict "$mem_kb" "$swap_kb" "$FULL_MIN_MEM_MB" "$beam_rss_kb")" || ok=0
 
   if [ "$spent" -lt "$FULL_BUDGET" ]; then
     cond_c="OK ($spent of $FULL_BUDGET attempt(s) spent)"
@@ -2342,7 +2445,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   say ""
   info "FULL-EXPORT PRECONDITIONS (all six printed BEFORE any byte moves):"
   info "  (a) served sha re-pinned == step 0a's ....... $cond_a"
-  info "  (b) MemAvailable >= ${FULL_MIN_MEM_MB} MB ................. $cond_b"
+  info "  (b) MemAvail >= ${FULL_MIN_MEM_MB} MB AND beam swap <= ${FULL_MAX_SWAP_MB} MB ... $cond_b"
   info "  (c) attempts < budget ...................... $cond_c"
   info "  (d) no deploy.yml run in progress .......... $cond_d"
   info "  (f) free space >= the incoming bundle ...... $cond_f"

@@ -64,6 +64,35 @@
 // DESKTOP IS UNCHANGED, MEASURED. At 1280 the computed font-size is 27.2px
 // before and after, and the value renders on one line in both.
 //
+// THE THIRD DEFECT: A STAT THAT IS NOT IN THE GRID. Everything above reasons
+// about `.bp-stats` — the `repeat(auto-fit, minmax(140px, 1fr))` grid and the
+// ~149px cell it makes at 390px. But a stat does not have to be in that grid.
+// `stat_html/1` emits a LONE stat as a top-level `<div class="bp-stat">` with
+// no `.bp-stats` wrapper (frozen in
+// js/packages/react/tests/fixtures/pd-golden/stat.golden.json), and the two
+// declarations that make the gridded case safe — `min-width: 0` and
+// `display: flex` — live on `.bp-paper-surface .bp-stats .bp-stat`, a selector
+// the standalone div never matches. What it matches is the BASE rule, which is
+// `display: inline-flex`: shrink-to-fit, sized from its own max-content. So
+// `.bp-stat__v`'s `max-width: 100%` resolves against a box that is already as
+// wide as the value, constrains nothing, and the document grows.
+//
+// MEASURED, headless Chromium at 390px, `.bp-stat__v` carrying the
+// 45-character branch name `feat/deploy-with-barkpark-warm-pool-provision`,
+// `document.documentElement.scrollWidth` (`npm run narrow:render`):
+//
+//   base rule as it was                          632px   page scrolls 242px
+//   + max-width: 100%                            408px   page scrolls  18px
+//   + max-width: 100%; box-sizing: border-box    390px   no scroll
+//
+// The middle row is why the assertion below pins BOTH. Under the default
+// `content-box`, `max-width: 100%` caps the CONTENT box at the 358px reading
+// column and then hangs the 32px padding + 2px border outside that cap — a
+// 392px border box starting at the 16px gutter, a 408px document.
+// `box-sizing: border-box` folds the chrome back inside. Neither declaration
+// is redundant; removing either re-opens the defect, at 390px and at 320px.
+// With both, `npm run narrow:render` at `BP_NARROW_WIDTHS=390,320` is ALL PASS.
+//
 // Run: node src/__narrow_stat_guards.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
@@ -139,6 +168,40 @@ check(".bp-stat__v cannot push the document sideways", () => {
       "keeping a 13-character figure from growing document.scrollWidth past the " +
       "viewport — measured at 320/360/390/480/620/768/1280, overflow 0px at " +
       "every one. Removing it re-opens the exact defect this file was opened for.",
+  );
+});
+
+check("a STANDALONE .bp-stat is bounded by the reading column", () => {
+  // NOT `.bp-stats .bp-stat`. That override (min-width: 0; display: flex) is
+  // the GRIDDED case and cannot reach the top-level `<div class="bp-stat">`
+  // that stat.golden.json emits. This is the base rule, the one the lone stat
+  // actually matches, and the only thing bounding it.
+  const decls = ruleFor(".bp-paper-surface .bp-stat");
+  // The neighbour pin: `min-width: 130px` and `inline-flex` belong to the BASE
+  // rule only, so a matcher that drifted onto `.bp-stats .bp-stat` (min-width:
+  // 0; display: flex) fails here loudly instead of passing by luck.
+  assert.match(
+    decls,
+    /min-width\s*:\s*130px/,
+    "matched a rule without `min-width: 130px` — that is not the base " +
+      ".bp-stat rule this check is about.",
+  );
+  assert.match(
+    decls,
+    /max-width\s*:\s*100%/,
+    "the base .bp-stat rule lost max-width: 100%. It is `display: inline-flex`, " +
+      "so without a cap it sizes from its own max-content: a 45-character branch " +
+      "name in .bp-stat__v grew the document to 632px in a 390px viewport. The " +
+      "grid override that supplies `min-width: 0` is `.bp-stats .bp-stat` and " +
+      "never matches a standalone stat.",
+  );
+  assert.match(
+    decls,
+    /box-sizing\s*:\s*border-box/,
+    "the base .bp-stat rule lost box-sizing: border-box. Under content-box, " +
+      "`max-width: 100%` caps the content at the 358px column and then hangs " +
+      "14px/16px of padding and the border outside it — measured 408px in a " +
+      "390px viewport, still scrolling. Both declarations are load-bearing.",
   );
 });
 

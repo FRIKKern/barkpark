@@ -340,7 +340,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
           "index": { "type": "integer", "description": "0-based position in the task's acceptance_criteria. The FIRST criterion is 0." },
           "met": { "type": "boolean" },
           "evidence": { "type": "string", "description": "Concrete proof: test names, gate output, branch, commit." },
-          "criterion": { "type": "string", "description": "REQUIRED when met is true: the criterion's exact stored wording, copied verbatim from acceptance_criteria[index].criterion. It is the off-by-one guard — without it the close is REJECTED (409 criterion_text_required); with a text that does not match the row at index it is REJECTED (409 criteria_mismatch) and nothing is written. An entry with met:false needs no text." }
+          "criterion": { "type": "string", "description": "REQUIRED when met is true: the criterion's exact stored wording, copied verbatim from acceptance_criteria[index].criterion. It is the off-by-one guard — without it the close is REJECTED (409 criterion_text_required); with a text that does not match the row at index it is REJECTED (409 criteria_mismatch) and nothing is written. An entry with met:false needs no text. DO NOT READ THIS VALUE BACK FROM THE ROW YOU ARE STAMPING: a confirmation derived from acceptance_criteria[criterion] matches whatever index it is paired with, BY CONSTRUCTION, so the guard returns success and discriminates nothing — the measured defeat of this flag (task-33e42f188c491bbe). Derive it INDEPENDENTLY: from a plan written before the run, or typed by the author, and check ALIGNMENT (does this evidence answer THIS criterion) rather than whether the stamp succeeded." }
         }
       }
     }
@@ -625,7 +625,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "criterion_text": {
       "type": "string",
-      "description": "REQUIRED with met (optional with miss): the criterion's exact stored wording, copied verbatim from acceptance_criteria[criterion].criterion. It is the off-by-one guard — a met stamp with NO criterion_text is REJECTED (409 criterion_text_required), and one whose text does not match the row at criterion is REJECTED (409 criteria_mismatch), instead of silently flipping a neighbour. Nothing is written on either rejection."
+      "description": "REQUIRED with met (optional with miss): the criterion's exact stored wording, copied verbatim from acceptance_criteria[criterion].criterion. It is the off-by-one guard — a met stamp with NO criterion_text is REJECTED (409 criterion_text_required), and one whose text does not match the row at criterion is REJECTED (409 criteria_mismatch), instead of silently flipping a neighbour. Nothing is written on either rejection. DO NOT READ THIS VALUE BACK FROM THE ROW YOU ARE STAMPING: a confirmation derived from acceptance_criteria[criterion] matches whatever index it is paired with, BY CONSTRUCTION, so the guard returns success and discriminates nothing — the measured defeat of this flag (task-33e42f188c491bbe). Derive it INDEPENDENTLY: from a plan written before the run, or typed by the author, and check ALIGNMENT (does this evidence answer THIS criterion) rather than whether the stamp succeeded."
     },
     "met": {
       "type": "boolean",

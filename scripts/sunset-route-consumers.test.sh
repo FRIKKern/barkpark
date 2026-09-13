@@ -130,7 +130,7 @@ probe "docker-compose.yml (api healthcheck)" \
   "$(extract_path 'compose healthcheck' docker-compose.yml 's|.*wget -q -O /dev/null http://localhost:4000\(/[^ ]*\) .*|\1|p')"
 
 probe "deploy.sh (one-box provisioning bring-up probe)" \
-  "$(extract_path 'deploy.sh' deploy.sh 's|.*bp_curl_body -s "http://localhost:\$APP_PORT\(/[^"]*\)".*|\1|p')"
+  "$(extract_path 'deploy.sh' deploy.sh 's|.*bp_health_probe "http://localhost:\$APP_PORT\(/[^"]*\)".*|\1|p')"
 
 probe "internal/cli/cloud/support.go (SupportLocalHealthProbe)" \
   "$(extract_path 'support.go' internal/cli/cloud/support.go 's|^const SupportLocalHealthProbe = .curl -fsS http://localhost:4000\(/[^ ]*\) .*|\1|p')"

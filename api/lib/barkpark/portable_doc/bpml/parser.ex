@@ -61,7 +61,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "bar-chart" => ~w(id title values),
     "bar" => ~w(label value),
     "lineage" => ~w(id),
-    "lineage-node" => ~w(title overline source),
+    "lineage-node" => ~w(title overline source tone),
     "chart" => ~w(id kind caption min max xlabels),
     "series" => ~w(label),
     "step" => ~w(id title),
@@ -606,6 +606,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
           |> put_attr("title", node_attrs)
           |> put_attr("overline", node_attrs)
           |> put_attr("source", node_attrs)
+          |> put_attr("tone", node_attrs)
           |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
 
         {:ok, node, cur}

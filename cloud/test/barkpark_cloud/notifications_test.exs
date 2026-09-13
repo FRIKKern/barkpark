@@ -526,7 +526,7 @@ defmodule BarkparkCloud.NotificationsTest do
 
       assert bodies[a1] =~ "alpha-only"
       refute bodies[a1] =~ "bravo-only"
-      assert bodies[a1] =~ "Fleet: 1 instance"
+      assert bodies[a1] =~ "Your team owns 1 instance"
 
       assert bodies[b1] =~ "bravo-only"
       refute bodies[b1] =~ "alpha-only"

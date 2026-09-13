@@ -263,12 +263,49 @@ defmodule Barkpark.Content.WriteScope do
   #   * `workspace_id: :shared_only` — a REQUEST arrived and the routing layer
   #     resolved no tenant (`ScopeHelpers.put_workspace_scope/3`'s `:sentinel`
   #     arm; only an HTTP conn can produce it). THE RULING APPLIES.
-  #   * the key ABSENT or nil — an internal, legitimately-unattributed writer:
-  #     seeds, mix tasks, Oban workers, plugin bootstrap, LiveView/channel
-  #     sockets (whose `:legacy` arm omits the key by design). They carry no
-  #     principal that could name a workspace, so refusing them would refuse a
-  #     write nobody can ever scope. They keep the seeded-Default fallback,
-  #     byte-identical.
+  #   * the key ABSENT or nil — an internal writer: seeds, mix tasks, Oban
+  #     workers, plugin bootstrap, LiveView/channel sockets (whose `:legacy` arm
+  #     omits the key by design). That population was EXCLUDED by the 6fa0 ruling
+  #     and is governed by the follow-on ruling below.
+  #
+  # ── THE SEEDED-DEFAULT RULING (task-e6523cc7154304f0, main 2026-09-13) ─────
+  #
+  # The 6fa0 ruling's excluded population was enumerated: 30 seats across 22
+  # files reach the `true ->` arm, plus 5 that bypass WriteScope entirely. They
+  # are not one population but three, and the arm below is now a CLASSIFIED
+  # DOOR that makes a caller say which one it is:
+  #
+  #   (a) A PRINCIPAL EXISTS but no scope was resolved. That is the fail-open
+  #       scoping class — the write is attributable and was attributed to a
+  #       tenant nobody chose. It now takes the SAME infer-or-refuse path the
+  #       6fa0 ruling built for `:shared_only`: exactly one candidate workspace
+  #       is used, anything else is `{:error, :workspace_scope_required}`.
+  #       (Studio LiveView `Shared.hook_opts/1` carries `user_id:`; any write
+  #       opts carrying a `:caller_context` with a user/token id are in here.)
+  #
+  #   (b) ANONYMOUS-BY-DESIGN seats (anonymous ticket submission via
+  #       `Plugins.Tickets.Thread`) must derive scope from the ROUTE's
+  #       site/workspace context and refuse when it is absent. They are fixed at
+  #       the SEAT (there is no principal for the funnel to infer from), and a
+  #       seat that fails to thread it lands in the residual arm below rather
+  #       than silently in Default.
+  #
+  #   (c) BOOT-TIME, INSTANCE-WIDE seats — plugin `upsert_schema` in
+  #       `Plugins.Bootstrap`, `Content.TagRegistry.do_register!/2`, seeds,
+  #       `mix onix.import` — legitimately belong to the whole instance. They
+  #       KEEP the seeded Default, but must now SAY SO by passing the explicit
+  #       `instance_wide: true` declaration. A declaration is auditable; an
+  #       omission is not. Each such seat carries a comment naming this ruling.
+  #
+  # THE RESIDUAL. An opts list with no scope key AND no principal AND no
+  # `instance_wide: true` declaration still resolves to the seeded Default, because that
+  # population is dominated by fixtures and internal helpers that predate any of
+  # this and refusing them wholesale would refuse writes nobody can scope. It is
+  # NO LONGER the same arm as (a) or (c) though: it is reached only after the
+  # door has ruled out an attributable caller, so the fail-open class — a write
+  # that COULD have named a tenant and didn't — can no longer reach Default.
+  # Tightening the residual to a refusal is the next ratchet step and needs its
+  # own row; the door is the seam that makes it a one-line change.
   #
   # This is the write-side reading of "degrade to vacancy, never to capture":
   # for a WRITE, vacancy is REFUSAL, not an unowned row. Writing a nil-workspace
@@ -293,10 +330,67 @@ defmodule Barkpark.Content.WriteScope do
         {:ok, {opt_ws, opt_proj}}
 
       true ->
-        ws = Tenancy.get_default_workspace()
-        proj = Tenancy.get_default_project()
-        {:ok, {ws && ws.id, proj && proj.id}}
+        resolve_key_absent_write_scope(opts)
     end
+  end
+
+  # THE CLASSIFIED DOOR for a key-absent write (see the ruling block above).
+  #
+  #   1. `instance_wide: true` — the class-(c) DECLARATION. Checked first, so a
+  #      boot seat that happens to carry a principal (a console-run seed, say)
+  #      still lands instance-wide because it SAID so.
+  #   2. an attributable caller — class (a) — takes infer-or-refuse.
+  #   3. the residual keeps the seeded Default.
+  #
+  # WHY A SEPARATE KEY and not a second `:workspace_id` atom next to
+  # `:shared_only`: `:shared_only` is understood across the READ side too
+  # (`Content.Scope`, `Tasks.Queue`, `Tasks.Fleet`, `Tasks.Events`, `Media`),
+  # because a request that resolved no tenant must narrow reads as well as
+  # writes. An instance-wide DECLARATION has no read meaning at all — it says
+  # only "stamp the seeded Default on this write" — so putting it in
+  # `:workspace_id` would force every one of those read consumers to learn an
+  # atom that means nothing to them, and a missed one would widen a read.
+  defp resolve_key_absent_write_scope(opts) do
+    cond do
+      Keyword.get(opts, :instance_wide) == true ->
+        seeded_default_write_scope()
+
+      ctx = attributable_caller_context(opts) ->
+        resolve_unscoped_request_write_scope(Keyword.put(opts, :caller_context, ctx))
+
+      true ->
+        seeded_default_write_scope()
+    end
+  end
+
+  # The class-(a) predicate, written as a PREDICATE and not a seat list: does
+  # this opts list name a principal that could have named a workspace? Either an
+  # explicit `:caller_context` carrying a user/token id, or a bare `:user_id`
+  # (what the Studio LiveView hook opts carry). A `:caller_context` that is
+  # anonymous names no principal and is NOT class (a) — it is class (b)/residual.
+  defp attributable_caller_context(opts) do
+    case Keyword.get(opts, :caller_context) do
+      %CallerContext{principal_type: :user, user_id: uid} = ctx when is_binary(uid) ->
+        ctx
+
+      %CallerContext{principal_type: :api_token, token_id: tid} = ctx when is_binary(tid) ->
+        ctx
+
+      _ ->
+        case Keyword.get(opts, :user_id) do
+          uid when is_binary(uid) -> %CallerContext{principal_type: :user, user_id: uid}
+          _ -> nil
+        end
+    end
+  end
+
+  # Class (c) + the residual: the instance-wide seeded scope. Degrades to nil
+  # when the backfill has not run yet (fresh test sandbox before seed) — never
+  # crashes.
+  defp seeded_default_write_scope do
+    ws = Tenancy.get_default_workspace()
+    proj = Tenancy.get_default_project()
+    {:ok, {ws && ws.id, proj && proj.id}}
   end
 
   defp resolve_unscoped_request_write_scope(opts) do
