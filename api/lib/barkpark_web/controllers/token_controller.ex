@@ -24,6 +24,7 @@ defmodule BarkparkWeb.TokenController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Auth
+  alias BarkparkWeb.ErrorResponse
 
   # The ONLY permissions this endpoint will mint. Read-only by construction —
   # anything else (write/admin/ops/…) is a 422, never silently dropped.
@@ -142,7 +143,6 @@ defmodule BarkparkWeb.TokenController do
 
   defp unprocessable(conn, message) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", message: message})
   end
 end

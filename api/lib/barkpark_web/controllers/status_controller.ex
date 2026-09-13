@@ -16,6 +16,7 @@ defmodule BarkparkWeb.StatusController do
 
   alias Barkpark.Status
   alias BarkparkWeb.Studio.TokensGen
+  alias BarkparkWeb.ErrorResponse
 
   # Severity LABEL text only. The per-status health tone is DATA, looked up from
   # BarkparkWeb.Studio.TokensGen.status_health/0 (design/tokens.json
@@ -71,8 +72,7 @@ defmodule BarkparkWeb.StatusController do
 
       {:error, cs} ->
         conn
-        |> put_status(422)
-        |> json(%{error: %{code: "invalid_incident", message: errors(cs)}})
+        |> ErrorResponse.emit_fields(422, %{code: "invalid_incident", message: errors(cs)})
     end
   end
 
@@ -80,8 +80,7 @@ defmodule BarkparkWeb.StatusController do
     case Status.get_incident(id) do
       nil ->
         conn
-        |> put_status(404)
-        |> json(%{error: %{code: "not_found", message: "no such incident"}})
+        |> ErrorResponse.emit_fields(404, %{code: "not_found", message: "no such incident"})
 
       incident ->
         {:ok, resolved} = Status.resolve_incident(incident)
