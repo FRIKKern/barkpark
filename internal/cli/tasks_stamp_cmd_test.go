@@ -1191,8 +1191,19 @@ func TestTaskStampExecute_DiscriminatingCriterionTextPasses(t *testing.T) {
 // derived from index i is byte-identical to a correct text for index i, so no
 // CLI-side validation can tell them apart. Closing it requires a confirmation
 // the ROW CANNOT SUPPLY (an author-typed index→prefix pin plus an alignment
-// read-back). WHEN THAT LANDS, THIS TEST REDS — and that red is the success
-// signal: delete it then, and record here which change closed it.
+// read-back).
+//
+// THAT LANDED (task-f7b781a0bcd7f70b, tasks_stamp_expect_pin.go) AND THIS TEST
+// STILL PASSES — read the scope before reading that as a failure. The pin is
+// `--expect '<index>:<first words>'` and it is OPT-IN: making it mandatory would
+// refuse every existing scripted caller in the same breath as the fix, which is
+// a worse defect than the one it closes. So the rotation below, WITH NO PIN, is
+// still silent, and this test keeps saying so honestly. Its twin
+// TestTaskStampExecute_RotatedIndicesRefusedWhenPinned runs THIS EXACT LOOP with
+// the author's pin added and proves every rotation is refused before the POST.
+// The pair is the whole truth: the defect survives an unpinned stamp and dies on
+// a pinned one. Delete this test only if the pin is ever made mandatory — then it
+// reds, and that red is the success signal.
 func TestTaskStampExecute_RotatedIndicesOnDistinctCriteriaStillSilent(t *testing.T) {
 	for i := range fourDistinctCriteria {
 		rotated := (i + 1) % len(fourDistinctCriteria)

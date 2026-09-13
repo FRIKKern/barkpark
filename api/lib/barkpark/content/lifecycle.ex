@@ -49,6 +49,7 @@ defmodule Barkpark.Content.Lifecycle do
   alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.PortableDoc.Projection
   alias Barkpark.Tasks.CriteriaContract
+  alias Barkpark.Tasks.TerminalCriteriaFence
   alias Barkpark.Tasks.Transitions
 
   # TIMED: the publish/lifecycle hot path had ZERO telemetry, so "what is p95 of
@@ -279,7 +280,21 @@ defmodule Barkpark.Content.Lifecycle do
     # nothing below runs, each emitting its telemetry at AuthoringWall's own
     # else seam — and `pub_content` is the draft's content with the D7
     # main_tag stamp applied (put on derivation, DROPPED when stale).
-    with {:ok, pub_content} <- AuthoringWall.enforce(draft, type, pid, dataset, opts) do
+    # ── SEAT CLASSIFICATION (task-d507d3d83476b57d, ruling clause (d)) ──────
+    #
+    # The publish write below is a RAW `Document.changeset |> Repo.insert/update`
+    # that never passes `Content.Writer`, so it never reached
+    # `WriteScope.put_scope_attrs/2`. It is a CLASS (a) seat: every reachable
+    # caller (`POST /v1/data/mutate`, Studio LiveView, `bp doc publish`) carries
+    # a principal and/or a route scope in `opts`, so when the DRAFT carries no
+    # workspace the destination row is attributable and must not be left NULL.
+    # Not class (b) — no anonymous route publishes; not class (c) — a publish is
+    # never instance-wide. Resolved here, BEFORE the `:before_publish` hook and
+    # the transaction, so a refusal is side-effect-free (the gate-position
+    # precedent above). A draft that HAS a workspace still inherits it verbatim.
+    with {:ok, pub_content} <- AuthoringWall.enforce(draft, type, pid, dataset, opts),
+         {:ok, scope_attrs} <-
+           WriteScope.inherit_or_resolve_scope_attrs(%{"dataset" => dataset}, draft, opts) do
       # Hook stays BEFORE the transaction. The rev-fenced delete below
       # closes the publish-during-edit TOCTOU: a concurrent write that
       # bumps the draft between the read above and the delete now surfaces
@@ -304,7 +319,7 @@ defmodule Barkpark.Content.Lifecycle do
               "content" => pub_content,
               "rev" => Writer.generate_rev()
             }
-            |> WriteScope.inherit_scope_attrs(draft)
+            |> Map.merge(scope_attrs)
 
           # [acrc-publish-atomicity-txn-boundary] The published upsert, the
           # fenced draft delete AND the `mutation_events` row now share ONE
@@ -360,7 +375,7 @@ defmodule Barkpark.Content.Lifecycle do
                     case Content.get_document(pid, type, dataset, opts) do
                       {:ok, existing} ->
                         existing = lock_published_row(existing, type)
-                        :ok = assert_no_criteria_regression!(existing, pub_attrs, type)
+                        :ok = assert_no_criteria_regression!(existing, pub_attrs, type, opts)
                         pub_attrs = advance_paper_publish_revision(pub_attrs, existing, type)
                         {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
@@ -594,14 +609,34 @@ defmodule Barkpark.Content.Lifecycle do
   #
   # Every publish SOURCE is covered here, `:sync` included, matching the
   # door-level rule that a stamped proof is erasable by no replication payload.
-  defp assert_no_criteria_regression!(%Document{content: pub_content}, pub_attrs, "task") do
-    case criteria_fence(pub_content || %{}, pub_attrs["content"] || %{}) do
+  defp assert_no_criteria_regression!(%Document{content: pub_content}, pub_attrs, "task", opts) do
+    pub_content = pub_content || %{}
+    draft_content = pub_attrs["content"] || %{}
+
+    result =
+      with :ok <- criteria_fence(pub_content, draft_content) do
+        # The TERMINAL fence, re-evaluated here for the SAME reason the
+        # regression fence is (task-b821ec4b2bcf8087): the door-level verdict
+        # was taken against a published row read outside this transaction, and
+        # a `Tasks.Close` landing in that window is EXACTLY the shape this
+        # fence names — the row was open when the gate looked and is `done` by
+        # the time this update runs. `:sync` is exempt at the door, so it is
+        # exempt here too (the fence's own `source != :api` rule); nothing else
+        # about the predicate changes.
+        if Keyword.get(opts, :source, :api) == :sync do
+          :ok
+        else
+          terminal_criteria_fence(pub_content, draft_content)
+        end
+      end
+
+    case result do
       :ok -> :ok
       {:error, reason} -> Repo.rollback(reason)
     end
   end
 
-  defp assert_no_criteria_regression!(_existing, _pub_attrs, _type), do: :ok
+  defp assert_no_criteria_regression!(_existing, _pub_attrs, _type, _opts), do: :ok
 
   defp advance_paper_publish_revision(attrs, %Document{content: current}, "paper") do
     Map.update!(attrs, "content", fn content ->
@@ -923,7 +958,8 @@ defmodule Barkpark.Content.Lifecycle do
         # claim was taken against survive this write? See
         # `Barkpark.Tasks.CriteriaContract` for the predicate and its scope.
         with :ok <- CriteriaContract.check_substitution(pub_content, draft_content),
-             :ok <- criteria_fence(pub_content, draft_content) do
+             :ok <- criteria_fence(pub_content, draft_content),
+             :ok <- terminal_criteria_fence(pub_content, draft_content) do
           task_door_field_fence(pub_content, draft_content)
         end
     end
@@ -1026,6 +1062,36 @@ defmodule Barkpark.Content.Lifecycle do
   # The criteria fence as a standalone gate: the ONE check that applies to
   # every publish source, `:sync` included (a stamped proof is erasable by no
   # replication payload).
+  # ── THE TERMINAL-CRITERIA FENCE AT THE PUBLISH SEAM (task-b821ec4b2bcf8087)
+  #
+  # `criteria_fence/2` above is a REGRESSION fence: it walks the PUBLISHED row's
+  # PROOF-BEARING criteria and refuses a draft that drops or unproves one. A
+  # published row with NO criteria has no proof to regress, and a draft that ADDS
+  # an unmet entry BESIDE the met ones regresses nothing at any occupied index —
+  # so a draft minted BEFORE a close, carrying already-divergent criteria and
+  # published AFTER it, sailed through and landed the row `done 1/2`. That is the
+  # residue #17949 stated and deliberately left open: its fence is wired into
+  # `Content.Writer`'s two task chains, and THIS write never passes Writer.
+  #
+  # The rule is already written and public, so this seam DECIDES with
+  # `TerminalCriteriaFence.changes_terminal_criteria?/2` and lets that module
+  # build the refusal (`refusal/2`) — one spelling of the rule, one spelling of
+  # the sentence that teaches it. Everything the fence deliberately exempts
+  # (a REOPEN in the same write, `blocked`, a write that does not name
+  # `acceptance_criteria`, byte-identical criteria, a birth) is exempt here by
+  # construction, because the predicate is the same one.
+  #
+  # `:sync` never reaches this function — `ensure_task_publish_transition_legal/5`
+  # routes a mirror write to the bare `criteria_fence/2` — which matches the
+  # fence's own `source != :api` exemption.
+  defp terminal_criteria_fence(pub_content, draft_content) do
+    if TerminalCriteriaFence.changes_terminal_criteria?(pub_content, draft_content) do
+      TerminalCriteriaFence.refusal(pub_content, draft_content)
+    else
+      :ok
+    end
+  end
+
   defp criteria_fence(pub_content, draft_content) do
     case criteria_regression(pub_content, draft_content) do
       nil -> :ok
@@ -1202,86 +1268,93 @@ defmodule Barkpark.Content.Lifecycle do
     pid = DraftId.published_id(published_doc_id)
     did = DraftId.draft_id(published_doc_id)
 
-    case Content.get_document(pid, type, dataset, opts) do
-      {:ok, pub} ->
-        ctx = WriteScope.build_ctx(opts)
+    # ── SEAT CLASSIFICATION (task-d507d3d83476b57d, ruling clause (d)) ──────
+    #
+    # The draft upsert below is a raw `Document.changeset |> Repo.insert/update`
+    # that never passes `Content.Writer`. CLASS (a), for the same reason as the
+    # publish seat: an unpublish is only ever reached from an authenticated
+    # mutate/Studio/CLI caller, so a published row carrying no workspace must
+    # not mint a nil-workspace DRAFT — it must be attributed through the door,
+    # or the caller refused. Resolved before the `:before_unpublish` hook so a
+    # refusal is side-effect-free; a scoped row still inherits verbatim.
+    with {:ok, pub} <- Content.get_document(pid, type, dataset, opts),
+         {:ok, scope_attrs} <-
+           WriteScope.inherit_or_resolve_scope_attrs(%{"dataset" => dataset}, pub, opts) do
+      ctx = WriteScope.build_ctx(opts)
 
-        payload = %{
-          event: :before_unpublish,
-          doc: pub,
-          dataset: dataset,
-          prev_doc: pub,
-          ctx: ctx
-        }
+      payload = %{
+        event: :before_unpublish,
+        doc: pub,
+        dataset: dataset,
+        prev_doc: pub,
+        ctx: ctx
+      }
 
-        # Hook stays BEFORE the transaction (see publish_document's TOCTOU note).
-        case Barkpark.Plugins.Hooks.fire(:before_unpublish, payload) do
-          {:halt, reason} ->
-            {:error, {:halted, reason}}
+      # Hook stays BEFORE the transaction (see publish_document's TOCTOU note).
+      case Barkpark.Plugins.Hooks.fire(:before_unpublish, payload) do
+        {:halt, reason} ->
+          {:error, {:halted, reason}}
 
-          :ok ->
-            # Create draft with published content. Inherit the published row's
-            # tenancy scope so an unpublish keeps workspace_id/project_id.
-            draft_attrs =
-              %{
-                "doc_id" => did,
-                "type" => type,
-                "dataset" => dataset,
-                "title" => pub.title,
-                "status" => "draft",
-                "content" => pub.content,
-                "rev" => Writer.generate_rev()
-              }
-              |> WriteScope.inherit_scope_attrs(pub)
+        :ok ->
+          # Create draft with published content. Inherit the published row's
+          # tenancy scope so an unpublish keeps workspace_id/project_id.
+          draft_attrs =
+            %{
+              "doc_id" => did,
+              "type" => type,
+              "dataset" => dataset,
+              "title" => pub.title,
+              "status" => "draft",
+              "content" => pub.content,
+              "rev" => Writer.generate_rev()
+            }
+            |> Map.merge(scope_attrs)
 
-            txn =
-              Repo.transaction(fn ->
-                {draft_result, prev_draft_rev} =
-                  case Content.get_document(did, type, dataset, opts) do
-                    {:ok, existing} ->
-                      {existing |> Document.changeset(draft_attrs) |> Repo.update(), existing.rev}
+          txn =
+            Repo.transaction(fn ->
+              {draft_result, prev_draft_rev} =
+                case Content.get_document(did, type, dataset, opts) do
+                  {:ok, existing} ->
+                    {existing |> Document.changeset(draft_attrs) |> Repo.update(), existing.rev}
 
-                    _ ->
-                      {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
-                  end
-
-                case draft_result do
-                  {:error, cs} ->
-                    Repo.rollback(cs)
-
-                  {:ok, draft} ->
-                    # Rev-fenced: a concurrent write to the published row since
-                    # the read above surfaces a rev_mismatch (412); a vanished
-                    # row resolves to {:error, :not_found} (prior semantics).
-                    case fenced_delete(pub) do
-                      :ok -> {draft, prev_draft_rev}
-                      {:error, reason} -> Repo.rollback(reason)
-                    end
+                  _ ->
+                    {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
                 end
-              end)
 
-            result =
-              case txn do
-                {:ok, {draft, prev_draft_rev}} ->
-                  Broadcast.tap_broadcast(
-                    {:ok, draft},
-                    dataset,
-                    type,
-                    "unpublish",
-                    prev_draft_rev,
-                    Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id)
-                  )
+              case draft_result do
+                {:error, cs} ->
+                  Repo.rollback(cs)
 
-                {:error, reason} ->
-                  {:error, reason}
+                {:ok, draft} ->
+                  # Rev-fenced: a concurrent write to the published row since
+                  # the read above surfaces a rev_mismatch (412); a vanished
+                  # row resolves to {:error, :not_found} (prior semantics).
+                  case fenced_delete(pub) do
+                    :ok -> {draft, prev_draft_rev}
+                    {:error, reason} -> Repo.rollback(reason)
+                  end
               end
+            end)
 
-            WriteScope.fire_after(result, :after_unpublish, payload)
-        end
+          result =
+            case txn do
+              {:ok, {draft, prev_draft_rev}} ->
+                Broadcast.tap_broadcast(
+                  {:ok, draft},
+                  dataset,
+                  type,
+                  "unpublish",
+                  prev_draft_rev,
+                  Keyword.get(opts, :source, :api),
+                  Keyword.get(opts, :user_id)
+                )
 
-      error ->
-        error
+              {:error, reason} ->
+                {:error, reason}
+            end
+
+          WriteScope.fire_after(result, :after_unpublish, payload)
+      end
     end
   end
 

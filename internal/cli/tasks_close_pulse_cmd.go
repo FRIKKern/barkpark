@@ -97,6 +97,12 @@ func runTaskClose(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	if code, refused := refuseBlankCancelReason(out, cmd, tail); refused {
 		return code
 	}
+	// THE CLOSE-PROSE CONTRACT, opt-in arm. Default OFF — see ruling §4 in
+	// tasks_close_evidence_contract.go. With BARKPARK_CLOSE_REQUIRE_ANCHOR=1 a
+	// reason that names no path, symbol or sha is refused before the POST.
+	if code, refused := refuseAnchorlessCloseReason(out, cmd, tail); refused {
+		return code
+	}
 
 	rc := runCommand(out, g, ctx, m, cmd, tail)
 
@@ -497,6 +503,9 @@ func renderCloseVerdict(out *writer, req closeRequest, stored taskboard.SealRow,
 		}
 		out.progressf("✓ the store holds it — %s", storedSealSummary(stored))
 		reportCloseReasonReplaced(out, req, readback)
+		// The seal is real; this only says whether anything will ever be able to
+		// disagree with the sentence beside it. Exit code untouched (ruling §4).
+		reportUncheckableCloseReason(out, req)
 		return exitOK
 	}
 	out.userErr("close NOT confirmed by the store — the seal did not land as asked")
