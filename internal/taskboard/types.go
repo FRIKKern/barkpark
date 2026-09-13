@@ -50,6 +50,13 @@ type Claim struct {
 	// written atomically with the lease renewal by `bp task pulse`. Nil when the
 	// claim carries no pulse (every claim written before the pulse verb shipped).
 	Now *ClaimPulse
+	// LeaseSeconds is the SERVER's claim-lease horizon for this row, read off
+	// the read payload (claim.lease_seconds, minted from
+	// `Barkpark.Tasks.QueueGate.lease_ttl_seconds/0`). 0 means the server did
+	// not send one — an older API, or a claim map the producer left untouched —
+	// and the board falls back to defaultClaimLeaseTTL (2700s), the same server
+	// default, NEVER to a client-invented number (task-f30dab8c54c605e6).
+	LeaseSeconds int
 }
 
 // ClaimPulse is the decoded content.claim.now — {"text","ts","criterion"?}
@@ -138,7 +145,15 @@ type Snapshot struct {
 	// clamp maximum (limit=100): the readiness overlay is then honest-but-partial
 	// beyond the top of the queue, so the ready count renders with a "+" suffix.
 	ReadyHeadClamped bool
-	FetchedAt        time.Time
+	// Exhaustive is true when the corpus below was walked to the END of the
+	// route's keyset cursor — every task the server holds, not one
+	// desc:updated_at window of them (task-6c59bff7cb6b36ee). It is false on a
+	// server that does not offer the cursor, on a walk that hit the page cap,
+	// and on any snapshot restored from an older cache file. False is the
+	// CONSERVATIVE value: it keeps mergeForward's absence heuristic armed, so a
+	// row missing from a partial corpus is never mistaken for a closed one.
+	Exhaustive bool
+	FetchedAt  time.Time
 	// EventCursor is the last /v1/tasks/events id the board had accounted for
 	// when this snapshot was cached — the resume point for the cheap keyset poll
 	// (events.go), NOT board data. It rides the snapshot only because the cache
