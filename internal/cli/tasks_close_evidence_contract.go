@@ -2,7 +2,10 @@ package cli
 
 // tasks_close_evidence_contract.go — THE CLOSE-PROSE CONTRACT.
 //
-// @canonical capability:close-evidence-anchor aka:close-prose-contract,uncheckable-close,anchorless-close doc:internal/cli/tasks_close_evidence_contract.go
+// (search vocabulary: close-prose contract, uncheckable close, anchorless close,
+//  close evidence anchor, what a close must name, unfalsifiable close. NOT stamped
+//  @canonical: every entry point here is package-private, and docs-anchors-check.sh
+//  section 8 requires a marker to sit above a PUBLIC one.)
 //
 // WHY THIS FILE EXISTS. scripts/closed-row-tree-disagreement-sweep.mjs asks one
 // question of a CLOSED row: does its close_reason assert a change origin/main
