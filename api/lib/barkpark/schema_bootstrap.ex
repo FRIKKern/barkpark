@@ -92,6 +92,18 @@ defmodule Barkpark.SchemaBootstrap do
       # the boot pass removes the flake source without changing what's available.
       if Application.get_env(:barkpark, :run_boot_codelist_seeders, true) do
         Barkpark.Plugins.Registry.run_all_codelist_seeders()
+
+        # BOOT SELF-CHECK. Every seeder is rescued — EDItEUR rescues its own,
+        # `run_all_codelist_seeders/0` rescues the rest — so a Thema seed that
+        # dies on a statement timeout leaves the node fully started, answering
+        # 200, serving an OnixEdit Thema field with no codes and ONE warning
+        # line in a boot log nobody reads. This names the damage instead, at
+        # `:error`, driven by what the plugins DECLARE rather than by what the
+        # table happens to contain — the header upsert shares the values'
+        # transaction, so a first-ever seed that rolls back leaves the list
+        # ABSENT, which no emptiness scan can see. Same verdict is on
+        # /status.json as the `:codelists` component.
+        Barkpark.Content.CodelistHealth.log_boot_audit()
       end
     rescue
       e ->

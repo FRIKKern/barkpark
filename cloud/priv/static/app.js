@@ -3363,7 +3363,7 @@
   //
   // So the BOX's top is what is scrolled to, not the button's. `block:"start"`
   // aligns it to the start edge of every scroll ancestor; on the page path the
-  // sticky `.topbar` (56px, app.css:794) then covers that edge, so the occluded
+  // sticky `.topbar` (56px; grep -n '^\.topbar [{]' app.css) then covers that edge, so the occluded
   // strip is given back with one `scrollBy`. Inside the dialog nothing overlays
   // it and no compensation is applied. #cred-submit stays reachable for free:
   // it renders BELOW the box, so a viewport that holds the box's top holds the

@@ -2804,9 +2804,13 @@ defmodule BarkparkCloud.Web.Router do
   # tear down the developer's home base.
   # Credential-aware, the SAME family as POST /v1/fleet/supports and go-live: a
   # credential that can BIND can UNBIND — a PAT must carry the `deploy` ability;
-  # a session must be team-admin (owner/admin). Anon 401. The no-team case falls
-  # through to the downstream 404 (POST's is 422 — the asymmetry is left for
-  # backlog pdf-bl-cp-no-team-status-mismatch, deliberately not normalized here).
+  # a session must be team-admin (owner/admin). Anon 401. A caller with NO active
+  # team gets the SHARED gate refusal `no_team/1` emits — the same
+  # `403 {"error":"forbidden","reason":"no_team","scope":"team"}` the POST twin
+  # answers (task-3ae0ca3aec358df9). It used to fall through to the downstream
+  # 404: nothing had been looked up, so "not_found" was never a true answer, and
+  # `bp cloud support remove` read that status and told a teamless operator the
+  # row was "already gone" when the truth was `bp team use <team>`.
   #
   # task-688ebffc4b0aa50a — THE LIVE/NON-LIVE DISJUNCTION, the same one
   # `DELETE /v1/barkparks/:id` above already makes, and for the same reason.
@@ -2869,7 +2873,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 404, %{error: "not_found"})
+        no_team(conn)
 
       true ->
         team = conn.assigns.current_team
@@ -3401,8 +3405,18 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # A box with a pending/claimed DEPROVISION job is on its way out — not a live
-  # target for the verify suite. (A provisioning box has no url yet, which
-  # Verify.run/1 already gates as :not_live.)
+  # target for the verify suite, and (task-353dacaf39f33244) not a live target
+  # for an attach-domain enqueue either. (A provisioning box has no url yet,
+  # which Verify.run/1 already gates as :not_live.)
+  #
+  # NAME ↔ BODY (the `any_kind?` mis-naming from #14038 recurred twice, so say
+  # it out loud): this decides exactly ONE thing — does the LATEST deprovision
+  # job for this instance sit in "pending" or "claimed". It is NOT a general
+  # "is this box healthy" predicate. It does not read `suspended` (callers gate
+  # that separately, above), does not look at provision/attach jobs of any other
+  # kind, and a deprovision whose LATEST job reached "succeeded" or "failed" (the
+  # only other two `ProvisionJob` statuses) is FALSE here. The body was not
+  # widened or narrowed by the second caller.
   defp instance_deprovisioning?(%Barkpark{id: id}) do
     case Registry.latest_deprovision_status_map([id]) do
       %{^id => %{status: status}} -> status in ["pending", "claimed"]
@@ -5214,6 +5228,9 @@ defmodule BarkparkCloud.Web.Router do
   # host — a re-attach is refused, never an overwrite, because an overwrite
   # strands the previous host's A record on a live box (cch-w54-bl). Attaching
   # the SAME host again is still a 202 (the failed-attach recovery path).
+  # 409 not_live when a deprovision job for this instance is pending/claimed —
+  # see `instance_deprovisioning?/1`; it NARROWS the attach/teardown window, it
+  # does not close it (PR #14039's worker-side gate is the durable fix).
   #
   # ADMIN-gated: pointing platform DNS + rewriting a live box's Caddy/env is
   # privileged infra, like self-update above — require_current_team_admin halts
@@ -5235,10 +5252,31 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            if is_binary(domain) and domain != "" do
-              attach_custom_domain(conn, team, bp, domain)
-            else
-              json(conn, 422, %{error: "domain_required"})
+            cond do
+              not (is_binary(domain) and domain != "") ->
+                json(conn, 422, %{error: "domain_required"})
+
+              # task-353dacaf39f33244: the attach ENQUEUE had no lifecycle check
+              # at all, so a caller could persist a custom_host and queue an
+              # attach_domain job against a box that is already on its way out —
+              # the worker then points DNS at a machine the deprovision job is
+              # deleting, stranding the A record. Same predicate the verify
+              # route already calls (its ONLY call site before this one), not a
+              # second near-duplicate, and the same 409 `not_live` envelope.
+              #
+              # THIS NARROWS THE WINDOW; IT DOES NOT CLOSE THE RACE. A
+              # deprovision enqueued (or claimed) microseconds after this check
+              # still beats the attach worker. The durable fix is the
+              # WORKER-side gate from PR #14039 — AttachDomainWith re-checks box
+              # liveness BEFORE and AFTER the platform A-record upsert and
+              # deletes the record it just wrote if the box vanished mid-write.
+              # That gate remains load-bearing; this is the loud refusal for the
+              # majority of callers who have not yet raced.
+              instance_deprovisioning?(bp) ->
+                json(conn, 409, %{error: "not_live"})
+
+              true ->
+                attach_custom_domain(conn, team, bp, domain)
             end
 
           _ ->

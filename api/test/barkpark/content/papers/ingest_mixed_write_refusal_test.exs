@@ -32,7 +32,7 @@ defmodule Barkpark.Content.Papers.IngestMixedWriteRefusalTest do
      a `blocks` write onto a blocks paper still succeeds. Without these the
      refusal could pass by refusing everything.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers

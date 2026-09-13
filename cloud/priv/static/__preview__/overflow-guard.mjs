@@ -137,7 +137,9 @@
 //      ORIGINAL stylesheet and reports a false "did not flip".
 //  (d) A ROUTE IS NOT A QUERY STRING (W13). `?scen=rollback` alone renders
 //      #overview: scenarios.mjs's deepLink is consumed by the CALLER
-//      (smoke.mjs:372, shoot.sh:118), never applied by mock.js. A sweep that
+//      (smoke.mjs's `hash: scen.deepLink || "#overview"` and shoot.sh's
+//      `s.deepLink` census — grep -n 'scen\.deepLink' smoke.mjs and
+//      grep -n 's\.deepLink' shoot.sh), never applied by mock.js. A sweep that
 //      omits the hash prints a full, plausible table in which every "detail
 //      route" is the overview screen. W13 appends the hash itself and asserts
 //      the visible section.view id (plus the active .inst-tab, because the
@@ -814,8 +816,9 @@ const knownHit = (scen, sel, width) =>
 const BAND_WIDTHS = [721, 768, 769, 790, 830, 860, 899, 900, 1024];
 
 // The six routes. `view` is the section.view that MUST be visible: `?scen=` on
-// its own does NOT route (deepLink is applied by the CALLER — smoke.mjs:372,
-// shoot.sh:118 — never by mock.js), so a sweep without the hash renders
+// its own does NOT route (deepLink is applied by the CALLER — grep -n
+// 'scen\.deepLink' smoke.mjs and grep -n 's\.deepLink' shoot.sh — never by
+// mock.js), so a sweep without the hash renders
 // #overview six times and prints a plausible, entirely phantom table. The hash
 // is appended here AND the landed view is asserted per cell. `tab` additionally
 // pins WHICH instance sub-tab landed, because all three instance routes share
@@ -2142,7 +2145,8 @@ async function main() {
       //
       //  * THE PREDICATE CANNOT FIRE, EVER. `.instance-card` is a stretched
       //    grid item under `grid-template-columns: minmax(0, 1fr)`
-      //    (app.css:3509, inside `@media (max-width: 620px)` — and every one of
+      //    (`.instances-grid` inside `@media (max-width: 620px)`; re-derive with
+//    grep -n '\.instances-grid [{] grid-template-columns: minmax' app.css — and every one of
       //    the ten PHONE_WIDTHS is <= 620), so the card's border-box width IS
       //    the track BY CONSTRUCTION. Measured over 4 scenarios x 10 widths x 2
       //    themes: card[288..288]/grid288 at 320, card[588..588]/grid588 at 620,
@@ -2312,7 +2316,7 @@ async function main() {
         // that is not the row's. The true margin is ZERO.
         //
         // AND THE GAP WAS REACHABLE. Regressing the exact remedy this assertion
-        // certifies — `.set-matrix-corner` (app.css:2157) from `align-self:
+        // certifies — `.set-matrix-corner` (grep -n '^\.set-matrix-corner [{]' app.css) from `align-self:
         // stretch` to `align-self: center; height: 40px` — left the old probe
         // GREEN, printing "(40/35px)", while 7.5px of both 55px headings stood
         // uncovered top and bottom and scrolled through the pinned label
@@ -3960,7 +3964,7 @@ async function main() {
     //    live (mock.js's `?modal=account` is the seam, the same one shoot.sh
     //    derives from the `account-modal` name prefix).
     //
-    //    WHAT IS BROKEN. `.am-name` (app.css:5631) renders `accountModel()`'s
+    //    WHAT IS BROKEN. `.am-name` (grep -n '^\.am-name [{]' app.css) renders `accountModel()`'s
     //    `name`, which is `email.split("@")[0]` (accountModel() — re-derive with
     //    `grep -n 'function accountModel' cloud/priv/static/app.js`) — the person's own
     //    email LOCAL PART, not a display name. The rule carried font-size,
@@ -3983,7 +3987,7 @@ async function main() {
     //    WHY NO EXISTING LEG COULD HAVE SEEN IT, TWICE OVER:
     //      · THE PAGE NEVER SCROLLS. `documentElement.scrollWidth ==
     //        clientWidth` in every cell (320/320 …): the overflow is confined to
-    //        `.modal-root` (app.css:1114 — `overflow-y: auto` makes overflow-x
+    //        `.modal-root` (grep -n '^\.modal-root [{]' app.css — `overflow-y: auto` makes overflow-x
     //        compute `auto`, and it declares no x control), which scrolls
     //        sideways — measured 1054px at 320 on this fixture, 371px at 1440.
     //        Every page-level leg above reads clean.
@@ -4124,7 +4128,7 @@ async function main() {
             for (const x of m.roots) {
               if (x.sw > x.cw) {
                 rootOver++;
-                fail(D, `${s.scen}/${theme}@${width} \`.modal-root\`: scrollWidth ${x.sw} > clientWidth ${x.cw} — the MODAL scrolls sideways by ${x.sw - x.cw}px (app.css:1114 declares overflow-y:auto, which computes overflow-x:auto, with no x control of its own). The page does not scroll, which is why every page-level leg in this file reads clean here`);
+                fail(D, `${s.scen}/${theme}@${width} \`.modal-root\`: scrollWidth ${x.sw} > clientWidth ${x.cw} — the MODAL scrolls sideways by ${x.sw - x.cw}px (the base `.modal-root` rule in app.css declares overflow-y:auto, which computes overflow-x:auto, with no x control of its own). The page does not scroll, which is why every page-level leg in this file reads clean here`);
               }
             }
             // THE PAGE IS A TRIPWIRE, NOT THE DEFECT: it measures 320/320 both
@@ -4891,7 +4895,7 @@ async function main() {
     //          the same "no gesture at all" bug pushes the box off the BOTTOM
     //          when the button sat low, which scores a perfect (a).
     //      (c) the first line is not COVERED. `.topbar` is `position: sticky;
-    //          top: 0` (56px, app.css:794), so a fix that aligns the box to
+    //          top: 0` (56px; grep -n '^\.topbar [{]' app.css), so a fix that aligns the box to
     //          the scrollport's start edge lands it at top 0 UNDER the bar and
     //          passes (a) and (b) while the person reads nothing.
     //          `elementFromPoint` over the first line is what sees that.
@@ -5090,7 +5094,7 @@ async function main() {
                 fail(D, `${cell.scen}/${theme}@${width}x${height} box${b.i}: the remediation's top edge is ${b.top} against a ${m.vh}px viewport — the whole instruction is BELOW the fold (box h=${b.h}). Revealing copy the viewport never travels to is the same defect with the sign flipped`);
               } else if (b.covered) {
                 covered++;
-                fail(D, `${cell.scen}/${theme}@${width}x${height} box${b.i}: the first line sits at top ${b.top} and \`elementFromPoint\` over it returns "${b.hit}" — something (the sticky .topbar, app.css:794) is PAINTED ON TOP of the instruction. top >= 0 is not the same as readable`);
+                fail(D, `${cell.scen}/${theme}@${width}x${height} box${b.i}: the first line sits at top ${b.top} and \`elementFromPoint\` over it returns "${b.hit}" — something (the sticky .topbar in app.css) is PAINTED ON TOP of the instruction. top >= 0 is not the same as readable`);
               }
             }
             const tops = m.shown.map((b) => `${b.top}+${b.h}`).join(",");
@@ -6642,9 +6646,9 @@ async function main() {
     //    filed about `.env-row` and `.audit-row`, one rung up.
     //
     //    THE TWO ASSERTIONS, AND WHY NEITHER ALONE REACHES THIS SCREEN.
-    //      · `.tlv-title` (app.css:4601) is `flex: 1 1 auto; min-width: 0;
+    //      · `.tlv-title` (grep -n '^\.tlv-title [{]' app.css) is `flex: 1 1 auto; min-width: 0;
     //        overflow: hidden; text-overflow: ellipsis; white-space: nowrap` —
-    //        and `@media (max-width: 620px)` (app.css:4705) flips it to
+    //        and `@media (max-width: 620px)` (grep -n '\.tlv-title [{] white-space: normal' app.css) flips it to
     //        `white-space: normal` while `.tlv-head` gains `flex-wrap: wrap`.
     //        THAT FLIP IS THE PHONE BAND'S OWN RULE and 620 is its only edge the
     //        sweep touches: everything the rule governs from 619 down was driven
@@ -6919,7 +6923,9 @@ async function main() {
     //    THE AXIS IS THE CRUEL BAND, NOT THE W24 PHONE BAND, AND THE REASON IS
     //    THIS FAMILY'S OWN BREAKPOINT. `.fleet-row`'s stack and
     //    `.fleet-badges { justify-content: flex-start }` are declared inside
-    //    `@media (max-width: 899px)` (app.css:2680) — the row changes from a
+    //    `@media (max-width: 899px)` (the block carrying
+    //    `.fleet-badges { justify-content: flex-start; }` — grep -Fn it in app.css)
+    //    — the row changes from a
     //    two-column flex line into a stack at 899, and the badge column moves
     //    from the right edge to the left. A 320-618 phone band never renders the
     //    two-column form at all, so it would certify the family on one of its two
@@ -6940,7 +6946,8 @@ async function main() {
     //    shipped fixtures that populate the digest are `activity` (7 audit
     //    events) and `mixed-fleet` (5). BOTH render `ada@acme.com` — 12
     //    characters — as the actor: `auditEvent` DEFAULTS that actor
-    //    (scenarios.mjs:1613) and `mixedAudit`'s entries omit the field, so the
+    //    (grep -n 'function auditEvent' scenarios.mjs) and `mixedAudit`'s entries
+    //    omit the field, so the
     //    `|| "system"` fallback in `activityRow` is reached by NEITHER corpus.
     //    THE MUTATION RUN IS WHAT SAYS SO: the first draft of this comment read
     //    "mixed-fleet is actorless, every name begins system", and the injected
@@ -6958,7 +6965,8 @@ async function main() {
     //      · `.fleet-name` and `.fleet-url.dim` are held to the SAME D253 cue
     //        predicate the two legs above use, imported rather than retyped
     //        (cue-paint-verdict.mjs). Both carry `overflow-wrap: break-word`
-    //        (app.css:1065/:1066) and neither declares `text-overflow`, so if
+    //        (the adjacent `.fleet-name` / `.fleet-url` base rules — grep -n
+    //        '^\.fleet-name [{]' app.css) and neither declares `text-overflow`, so if
     //        either ever DOES overflow its box there is no cue that can paint and
     //        the text is simply gone — which is precisely the state the predicate
     //        reds on, whatever the declarations say.
@@ -7169,7 +7177,7 @@ async function main() {
           `\`toLocaleString()\` TIMESTAMP — NEITHER IS A HOST, despite sharing class tokens with the fleet row ` +
           `that D248 drives at 253 characters. The two shipped fixtures that populate this container are ` +
           `\`activity\` (7 events) and \`mixed-fleet\` (5). BOTH render the actor \`ada@acme.com\`, 12 characters: ` +
-          `\`auditEvent\` DEFAULTS it (scenarios.mjs:1613) and mixedAudit omits the field, so \`activityRow\`'s ` +
+          `\`auditEvent\` DEFAULTS it (grep -n 'function auditEvent' scenarios.mjs) and mixedAudit omits the field, so \`activityRow\`'s ` +
           `\`|| "system"\` fallback is reached by neither — established by the injected-clip MUTATION RUN, against ` +
           `a first draft of this very sentence that claimed the opposite. A cruel audit fixture is REAL residual ` +
           `work, deliberately not built here: scenarios.mjs ` +
@@ -7204,13 +7212,15 @@ async function main() {
     //
     //    TWO HOSTS, TWO DIFFERENT FAILURE SHAPES, which is why one assertion
     //    could not have caught both:
-    //      · `.fleet-url` (app.css:954) CLIPS ITSELF — it is font/colour/mono/
-    //        margin only, and its only wrap declaration (:1560) is scoped to
+    //      · `.fleet-url` (grep -n '^\.fleet-url [{]' app.css) CLIPS ITSELF — it is
+    //        font/colour/mono/margin only, and its only wrap declaration
+    //        (grep -n '\.fleet-url \.site-open' app.css) is scoped to
     //        `.fleet-url .site-open`, the Visit chip, not the URL text. Driven
     //        on pre-fix bytes it measured scrollWidth 1822 against clientWidth
     //        250 and the remainder painted THROUGH the neighbouring column
-    //        (`overflow: visible`, exactly the SPILL app.css:2220 records).
-    //      · `.instance-card-name` (app.css:3134) NEVER CLIPS ITSELF — it has
+    //        (`overflow: visible`, exactly the SPILL app.css records in prose —
+    //        grep -n 'SPILL, not truncation' app.css).
+    //      · `.instance-card-name` (grep -n '^\.instance-card-name [{]' app.css) NEVER CLIPS ITSELF — it has
     //        no bound at all, so there is nothing for a per-element scrollWidth
     //        check to see. It pushes the PAGE instead: documentElement
     //        .scrollWidth 2395 against a 320 viewport, 2075px of sideways
@@ -7355,7 +7365,8 @@ async function main() {
       //                   NOT `CRUEL`: that term means a person-typed value AT a
       //                   cap, and there is neither a person nor a cap here.
       // A CRUEL row's fixture proves its own cap and format at load
-      // (scenarios.mjs:1433-1442 throws on GONE-KIND and on a format the server
+      // (the CRUEL-row fixture guards in scenarios.mjs — grep -n 'cruel fixture:'
+      // scenarios.mjs — throw at load on a gone-kind length and on a format the server
       // would reject), so those two refusals are enforced upstream of this table.
       // SCOPE OF THIS SHAPE (cch-w23-s4): the row shape, the vocabulary and the
       // two refusals only. ZERO new cruel families are added here — widening the
@@ -7704,7 +7715,8 @@ async function main() {
           // `$("#pin-input").value.trim()`. A team admin types the value and
           // the server keeps all 255 characters of it.
           //
-          // THE HOST HAS NO WRAP PROTECTION: `.fleet-meta` (app.css:1069)
+          // THE HOST HAS NO WRAP PROTECTION: `.fleet-meta`
+          // (grep -n '^\.fleet-meta [{]' app.css)
           // declares font-size, colour, font-family and margin-top and NOTHING
           // about wrapping or overflow — which is why the fixture string is a
           // single unbroken token (scenarios.mjs refuses one that is not).

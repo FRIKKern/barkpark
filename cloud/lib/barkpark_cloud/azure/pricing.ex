@@ -78,6 +78,8 @@ defmodule BarkparkCloud.Azure.Pricing do
   """
   use GenServer
 
+  require Logger
+
   @table __MODULE__
   @ttl_ms 24 * 60 * 60 * 1000
   @hours_per_month 730
@@ -106,7 +108,10 @@ defmodule BarkparkCloud.Azure.Pricing do
     # `refreshing?` is the in-flight guard that coalesces concurrent stale reads
     # into ONE background fetch; `waiters` are `flush/0` callers parked until the
     # in-flight refresh settles.
-    {:ok, %{refreshing?: false, waiters: []}}
+    # `monitor` is the ref of the in-flight refresh task's monitor (nil when
+    # idle) — the refresh is MONITORED so its death is observed here, never by
+    # whatever test window happens to be open milliseconds later.
+    {:ok, %{refreshing?: false, waiters: [], monitor: nil}}
   end
 
   @doc """
@@ -176,29 +181,68 @@ defmodule BarkparkCloud.Azure.Pricing do
       _ ->
         server = self()
 
-        # The spawn is unlinked and unmonitored, so if refresh/1 RAISES (inets
-        # not started, a cacerts failure, an unforeseen return shape) the
-        # completion signal would never fire and `refreshing?` would latch true
-        # for the BEAM lifetime — every later stale read short-circuits on the
-        # in-flight guard (cache frozen at last-good) and every flush/0 waiter
-        # parks. `after` fires the signal on the raising path too; refresh/1 is
-        # already fail-closed, so a crash-into-completion is correct here.
-        spawn(fn ->
-          try do
-            _ = refresh(now_ms)
-          after
-            send(server, :refresh_done)
-          end
-        end)
+        # If refresh/1 RAISES (inets not started, a cacerts failure, an
+        # unforeseen return shape) two things must hold:
+        #
+        #   1. the completion signal STILL fires — otherwise `refreshing?`
+        #      latches true for the BEAM lifetime, every later stale read
+        #      short-circuits on the in-flight guard (cache frozen at last-good)
+        #      and every flush/0 waiter parks;
+        #   2. the failure is OBSERVED BEFORE that signal is sent.
+        #
+        # (2) is why the body rescues instead of dying: a bare `spawn` that dies
+        # of an exception is reported by the VM's error handler ASYNCHRONOUSLY,
+        # strictly AFTER `after` has already released flush/0 — so the crash
+        # report lands in whatever ExUnit.CaptureLog window is open some
+        # milliseconds later (CaptureLog captures the WHOLE VM), reddening an
+        # unrelated test's `assert log == ""`. Logging it HERE, synchronously,
+        # before `:refresh_done`, keeps the diagnostic (it is legitimate output)
+        # and makes flush/0 a real barrier for it. The task is also MONITORED so
+        # a death this body cannot rescue (a brutal kill) still settles the
+        # guard via handle_info({:DOWN, ...}).
+        {_pid, ref} =
+          spawn_monitor(fn ->
+            try do
+              _ = refresh(now_ms)
+            rescue
+              e ->
+                Logger.error(
+                  "azure pricing background refresh failed: " <>
+                    Exception.format(:error, e, __STACKTRACE__)
+                )
+            catch
+              kind, reason ->
+                Logger.error(
+                  "azure pricing background refresh failed: " <>
+                    Exception.format(kind, reason, __STACKTRACE__)
+                )
+            after
+              send(server, :refresh_done)
+            end
+          end)
 
-        {:noreply, %{state | refreshing?: true}}
+        {:noreply, %{state | refreshing?: true, monitor: ref}}
     end
   end
 
   @impl true
   def handle_info(:refresh_done, state) do
+    # Demonitor with :flush so the task's own DOWN can never arrive later and
+    # settle a DIFFERENT, still-in-flight refresh.
+    if state.monitor, do: Process.demonitor(state.monitor, [:flush])
+    {:noreply, settle(state)}
+  end
+
+  # Only the CURRENT refresh's monitor settles the guard (a stale DOWN is
+  # dropped). Reached only when the body could not rescue its own death.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{monitor: ref} = state),
+    do: {:noreply, settle(state)}
+
+  def handle_info({:DOWN, _ref, :process, _pid, _reason}, state), do: {:noreply, state}
+
+  defp settle(state) do
     Enum.each(state.waiters, &GenServer.reply(&1, :ok))
-    {:noreply, %{state | refreshing?: false, waiters: []}}
+    %{state | refreshing?: false, waiters: [], monitor: nil}
   end
 
   @impl true

@@ -49,6 +49,62 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
   defp authed(conn, raw), do: put_req_header(conn, "authorization", "Bearer " <> raw)
 
+  # Hold one export slot the way a live export's request process does — take it
+  # and stay alive. NOT a second export: no COPY, no spill, no load. The slot is
+  # taken from a SEPARATE process on purpose, because `SingleFlight` scopes a
+  # release to the owning pid and the test process is not the owner.
+  defp hold_export_slot(slug) do
+    test = self()
+
+    pid =
+      spawn(fn ->
+        send(test, {:slot, self(), Barkpark.Tenancy.WorkspaceBundle.SingleFlight.acquire(slug)})
+
+        receive do
+          {:release, from} ->
+            Barkpark.Tenancy.WorkspaceBundle.SingleFlight.release(slug)
+            send(from, {:slot_released, self()})
+        end
+      end)
+
+    assert_receive {:slot, ^pid, :ok}, 2_000
+
+    # BELT AND BRACES, and it earns its keep: when an assertion between the
+    # acquire and `release_export_slot/1` fails, that release never runs and the
+    # holder strands the only slot for every LATER test in the file — turning
+    # one honest red into a cascade that hides which test actually broke.
+    # (Observed exactly once, while mutation-proving this guard.)
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+      wait_for_free_export_slot()
+    end)
+
+    pid
+  end
+
+  # The guard reclaims a killed holder's slot on a `:DOWN` inside its GenServer,
+  # which the test process cannot observe synchronously. Bounded poll, not a
+  # sleep.
+  defp wait_for_free_export_slot(deadline \\ 2_000) do
+    cond do
+      Barkpark.Tenancy.WorkspaceBundle.SingleFlight.in_flight() == [] ->
+        :ok
+
+      deadline <= 0 ->
+        :ok
+
+      true ->
+        Process.sleep(10)
+        wait_for_free_export_slot(deadline - 10)
+    end
+  end
+
+  defp release_export_slot(pid) do
+    send(pid, {:release, self()})
+    assert_receive {:slot_released, ^pid}, 2_000
+    :ok
+  end
+
   describe "GET /api/workspaces" do
     test "returns ONLY the caller's member workspaces; a non-member workspace is absent", %{
       conn: conn,
@@ -921,6 +977,139 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
       assert resp.status == 200
       assert byte_size(resp.resp_body) > 0
+    end
+
+    # ── SINGLE-FLIGHT ADMISSION CONTROL (PDS-D719, task
+    # pds-bl-export-single-flight-guard) ──────────────────────────────────
+    # The route had NO concurrency guard: `:require_admin` is an AUTH gate, so
+    # N concurrent admin requests each paid the peak independently, and the
+    # free-space preflight — the only place an honest refusal can exist once
+    # `send_file/3` has put 200 on the wire — reads `df` once per request and
+    # so can only ever guarantee `required ≤ free` per caller, never
+    # `Σ required ≤ free`. These arms pin the WIRE shape of the refusal; the
+    # guard's own semantics (crash release, capacity, the disable switch) are
+    # in test/barkpark/tenancy/workspace_bundle_single_flight_test.exs.
+    #
+    # No second export is ever started here. The slot is held by an ordinary
+    # process — which is all a live export's request process is to the guard —
+    # so this costs no COPY, no spill and no load on the box.
+    test "409 export_already_running while THIS workspace is already exporting — with Retry-After",
+         %{conn: conn} do
+      raw_admin = "ws-export-409-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "In Flight WS"}, admin_token(raw_admin))
+
+      holder = hold_export_slot(target.slug)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export")
+
+      assert resp.status == 409
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "export_already_running"
+      assert body["error"]["reason"] == "workspace_export_in_flight"
+      # The caller just proved workspace_admin?/2 on this slug, so echoing it
+      # leaks nothing and tells a polling client which export it collided with.
+      assert body["error"]["message"] =~ target.slug
+      assert body["error"]["limit"] == 1
+
+      # A real header, not just prose: a generic client/proxy must back off
+      # without parsing the envelope.
+      assert [retry_after] = Plug.Conn.get_resp_header(resp, "retry-after")
+      assert String.to_integer(retry_after) > 0
+
+      release_export_slot(holder)
+    end
+
+    test "409 export_capacity_reached for a DIFFERENT workspace — and the body never names the in-flight one",
+         %{conn: conn} do
+      raw_admin = "ws-export-cap-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, mine} =
+        Tenancy.create_workspace_with_owner(%{name: "My Export WS"}, admin_token(raw_admin))
+
+      # Some OTHER tenant's export holds the only slot.
+      other_slug = "ws-export-secret-tenant-#{System.unique_integer([:positive])}"
+      holder = hold_export_slot(other_slug)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{mine.slug}/export")
+
+      assert resp.status == 409
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["reason"] == "export_capacity_reached"
+
+      # THE LEAK CONTROL. This caller administers `mine` and proved nothing
+      # about the other tenant; a 409 must not hand them its existence.
+      refute resp.resp_body =~ other_slug
+
+      release_export_slot(holder)
+    end
+
+    test "POSITIVE CONTROL: once the slot is released the very same request exports 200",
+         %{conn: conn} do
+      raw_admin = "ws-export-freed-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Freed Export WS"}, admin_token(raw_admin))
+
+      holder = hold_export_slot(target.slug)
+
+      blocked =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export")
+
+      assert blocked.status == 409
+
+      release_export_slot(holder)
+
+      # The guard RELEASES. Without this arm a guard that took the slug and
+      # never gave it back would pass every assertion above it, and the route
+      # would be permanently 409 in production.
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export")
+
+      assert resp.status == 200
+      assert Plug.Conn.get_resp_header(resp, "content-type") == ["application/x-tar"]
+      assert byte_size(resp.resp_body) > 0
+    end
+
+    test "the guard is taken AFTER the tenant gate: a refused caller gets 403, never a 409 that reveals a live export",
+         %{conn: conn} do
+      raw_a = "ws-export-gate-a-#{System.unique_integer([:positive])}"
+      {:ok, token_a} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      raw_b = "ws-export-gate-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      {:ok, victim} =
+        Tenancy.create_workspace_with_owner(%{name: "Gate Order WS"}, admin_token(raw_b))
+
+      {:ok, _m} = TenancyAuth.create_membership(victim.id, token_a.id, "member")
+
+      holder = hold_export_slot(victim.slug)
+
+      resp =
+        conn
+        |> authed(raw_a)
+        |> get("/api/workspaces/#{victim.slug}/export")
+
+      # 403, not 409. Ordering the guard before the gate would turn the
+      # export's LIVENESS into a fact any member could probe for.
+      assert resp.status == 403
+
+      release_export_slot(holder)
     end
 
     test "404 for an unknown workspace slug (admin)", %{conn: conn} do

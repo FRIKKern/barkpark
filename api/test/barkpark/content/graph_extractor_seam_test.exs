@@ -26,6 +26,7 @@ defmodule Barkpark.Content.GraphExtractorSeamTest do
   # concurrently would observe this module's stub (or its deletion) as its own
   # configuration and the drafts assertions on both sides would go non-
   # deterministic.
+  # sync: swaps node-global Application env (the graph-extractor seam key) — one value for the whole node
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content

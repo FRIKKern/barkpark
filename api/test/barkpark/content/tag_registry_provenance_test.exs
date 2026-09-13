@@ -31,7 +31,7 @@ defmodule Barkpark.Content.TagRegistryProvenanceTest do
   indistinguishable from "tag registration stopped working").
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query
   import ExUnit.CaptureLog

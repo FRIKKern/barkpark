@@ -165,6 +165,34 @@ probe "internal/cli/setup/local.go (barkparkAnswering — the 'is a server alrea
 probe "internal/provisioner/support.go (supportEnableImportStep restart wait)" \
   "$(extract_path 'provisioner support' internal/provisioner/support.go 's|^for i in \$(seq 1 60); do curl -fsS http://localhost:4000\(/[^ ]*\) .*|\1|p')"
 
+# ── the api fence (the root entry points). Six probe sites, each extracted from
+# its OWN file for the same reason: reverting one reds this harness with no edit
+# here. PowerShell is not runnable on the CI/dev host, so setup-windows.ps1's two
+# sites are checked the same way every other one is — the path is pulled out of
+# the file and driven with curl. That measures the retarget, not the interpreter.
+probe "Makefile (make deploy post-pull health poll)" \
+  "$(extract_path 'Makefile deploy poll' Makefile 's|.*bp_curl_code -s -o /dev/null --max-time 5 http://localhost:4000\([a-z./]*\).*|\1|p')"
+
+probe "bin/barkpark (wait_server — the boot gate barkpark up dies on)" \
+  "$(extract_path 'bin/barkpark wait_server' bin/barkpark 's|^    if curl -sf "http://\$PHX_HOST:\$PORT\(/[^"]*\)" >/dev/null 2>&1; then$|\1|p')"
+
+# server_answering keeps a DOCUMENTED legacy fallback on its SECOND line, for an
+# older build (pre-d40092ab9, 2026-07-05) that has no /status.json and is not
+# affected by the sunset because the removal lands in new builds, not in a
+# running binary. What must survive the sunset is the PRIMARY path, and that is
+# the line extracted here — the one every current build is decided by.
+probe "bin/barkpark (server_answering PRIMARY — stop/status identity probe)" \
+  "$(extract_path 'bin/barkpark server_answering' bin/barkpark 's|^  curl -sf "http://\$PHX_HOST:\$PORT\(/[^"]*\)" >/dev/null 2>&1 && return 0$|\1|p')"
+
+probe "run.sh (api_answers — the dev bring-up 'is Phoenix already up?' test)" \
+  "$(extract_path 'run.sh api_answers' run.sh 's|.*bp_curl_code -s -o /dev/null "\$API_URL\(/[^"]*\)".*|\1|p')"
+
+probe "scripts/setup-windows.ps1 (Start-Server boot wait)" \
+  "$(extract_path 'setup-windows Start-Server' scripts/setup-windows.ps1 's|^      \$r = Invoke-WebRequest "http://localhost:\$Port\(/[^"]*\)" -UseBasicParsing -TimeoutSec 3$|\1|p')"
+
+probe "scripts/setup-windows.ps1 (Show-Status api line)" \
+  "$(extract_path 'setup-windows Show-Status' scripts/setup-windows.ps1 's|^    \$r = Invoke-WebRequest "http://localhost:\$Port\(/[^"]*\)" -UseBasicParsing -TimeoutSec 3$|\1|p')"
+
 echo ""
 echo "---- CENSUS: who is STILL on the sunset route (a predicate over the tree, not a list)"
 # A line is a PROBE when it names api/schemas AND carries a fetch verb or builds
@@ -174,9 +202,11 @@ echo "---- CENSUS: who is STILL on the sunset route (a predicate over the tree, 
 # vanished from the census.
 #
 # The verb set is VALIDATED IN BOTH DIRECTIONS against origin/main at fe01df112:
-# run over the pre-repoint tree it names all eleven cli-fence sites this PR
+# run over the pre-repoint tree it names all eleven cli-fence sites that PR
 # changed (the nine probes plus the vendored deploy.sh's `curl -v` diagnostic),
-# and over the post-repoint tree it names only the api fence's seven.
+# and over the post-repoint tree it named only the api fence's seven. Those
+# seven are this branch's subject: six are repointed above and the census now
+# sees only the two ADJUDICATED files below.
 #
 # Scope is the shipping health surface: the root entry points, the deploy/setup
 # scripts, and the Go CLI + provisioner. Tests, testdata and this harness are
@@ -218,23 +248,36 @@ CLI_LEFT="$(printf '%s\n' "$CENSUS" | grep -E '^internal/(cli|provisioner)/' || 
 check "cli fence (internal/cli, internal/provisioner) has ZERO probes left on the sunset route" \
   "" "$(printf '%s' "$CLI_LEFT")"
 
-# THE API FENCE: not this task's half (task-631beef14cef7460 splits the work by
-# fence). A shrink-only ledger of FILES — never line numbers, which move. It
-# fails in BOTH directions: a file that acquires a probe and is not listed is a
-# REGRESSION; a listed file that no longer has one is a STALE entry to delete.
-API_LEDGER='Makefile
-bin/barkpark
-run.sh
-scripts/pds-pull-proof.sh
-scripts/setup-windows.ps1'
+# THE API FENCE: the root entry points. Everything the census can still see here
+# must be ADJUDICATED — named in one of the two ledgers below, each of which is a
+# list of FILES (never line numbers, which move) and fails in BOTH directions: a
+# file that acquires a probe and is in neither ledger is a REGRESSION; a ledgered
+# file that no longer has one is a STALE entry to delete. "Unadjudicated" is the
+# only state that is a failure — the ledgers do not excuse, they ACCOUNT.
+#
+# ADJUDICATED — a remaining mention that is CORRECT, and whose correctness is
+# measured elsewhere in this file rather than asserted here:
+#   bin/barkpark  server_answering() keeps the legacy path as a documented
+#                 SECOND probe so `stop`/`status` still recognise an older build
+#                 (pre-d40092ab9, 2026-07-05) that has no /status.json and that
+#                 the sunset cannot touch — the removal lands in new builds, not
+#                 in a running binary. Its PRIMARY path has its own fixture case
+#                 above, so this entry is backed by a measurement, not a note.
+ADJUDICATED='bin/barkpark'
+# STILL TO REPOINT — a real probe that will fail closed on removal day, left to
+# the lane that owns the file. Shrink-only.
+#   scripts/pds-pull-proof.sh:3109  reboot_target()'s post-reboot health wait,
+#                 inside the pds loan fence (scripts/pds-*).
+API_LEDGER='scripts/pds-pull-proof.sh'
 API_LEFT="$(printf '%s\n' "$CENSUS" | grep -vE '^internal/(cli|provisioner)/' | cut -d: -f1 | sort -u | grep -v '^$' || true)"
-UNLEDGERED="$(comm -23 <(printf '%s\n' "$API_LEFT") <(printf '%s\n' "$API_LEDGER" | sort))"
-STALE="$(comm -13 <(printf '%s\n' "$API_LEFT") <(printf '%s\n' "$API_LEDGER" | sort))"
-check "no UNLEDGERED file gained a sunset-route probe (a new one is a regression)" "" "$(printf '%s' "$UNLEDGERED")"
+ADJ_ALL="$(printf '%s\n%s\n' "$ADJUDICATED" "$API_LEDGER" | grep -v '^$' | sort -u)"
+UNLEDGERED="$(comm -23 <(printf '%s\n' "$API_LEFT") <(printf '%s\n' "$ADJ_ALL"))"
+STALE="$(comm -13 <(printf '%s\n' "$API_LEFT") <(printf '%s\n' "$ADJ_ALL"))"
+check "no UNADJUDICATED file on the health surface names the sunset route (a new one is a regression)" "" "$(printf '%s' "$UNLEDGERED")"
 if [ -n "$STALE" ]; then
-  bad "the api-fence ledger is STALE — these files no longer probe the sunset route, delete them from API_LEDGER in this file: $(printf '%s' "$STALE" | tr '\n' ' ')"
+  bad "a ledger is STALE — these files no longer name the sunset route, delete them from ADJUDICATED/API_LEDGER in this file: $(printf '%s' "$STALE" | tr '\n' ' ')"
 else
-  ok "the api-fence ledger names exactly the files still to be repointed ($(printf '%s\n' "$API_LEDGER" | wc -l | tr -d ' ') left, api lane's half)"
+  ok "the api-fence ledgers name exactly the files that still mention the sunset route ($(printf '%s\n' "$ADJUDICATED" | wc -l | tr -d ' ') adjudicated, $(printf '%s\n' "$API_LEDGER" | wc -l | tr -d ' ') still to repoint)"
 fi
 
 echo ""
