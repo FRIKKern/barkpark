@@ -191,10 +191,13 @@ defmodule Barkpark.Content.WriteScopeClassifiedDoorTest do
       assert stamped["workspace_id"] == Tenancy.get_default_workspace().id
     end
 
-    test "the class-(c) SEATS pass the declaration" do
-      # A predicate, not a list: every seat the ruling names as class (c) must
-      # carry the sentinel in its source. A new class-(c) seat that forgets it
-      # lands in the residual, which this assertion is here to keep visible.
+    test "the class-(c) SEATS pass the declaration — in CODE, not in a comment" do
+      # Every seat the ruling names as class (c) must carry the declaration in
+      # its source. COMMENT LINES ARE STRIPPED FIRST: each of these seats also
+      # NAMES `instance_wide: true` in the comment explaining why it is class
+      # (c), so a whole-file match would pass on a seat whose call had lost the
+      # option. (Caught by mutation 3 — dropping the option from bootstrap.ex
+      # left the test green until this line stripped the comments.)
       root = Path.expand("../../..", __DIR__)
 
       for {file, symbol} <- [
@@ -202,9 +205,15 @@ defmodule Barkpark.Content.WriteScopeClassifiedDoorTest do
             {"lib/barkpark/content/tag_registry.ex", "do_register!"},
             {"lib/mix/tasks/onix.import.ex", "handle_upsert"}
           ] do
-        source = File.read!(Path.join(root, file))
+        code =
+          root
+          |> Path.join(file)
+          |> File.read!()
+          |> String.split("\n")
+          |> Enum.reject(&(String.trim_leading(&1) |> String.starts_with?("#")))
+          |> Enum.join("\n")
 
-        assert source =~ "instance_wide: true",
+        assert code =~ "instance_wide: true",
                "#{file} (#{symbol}) is a class-(c) seat and must DECLARE the seeded Default"
       end
     end
