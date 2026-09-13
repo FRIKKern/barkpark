@@ -646,10 +646,19 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     if blank_code_source?(b) do
       %{"kind" => "_raw", "html" => ""}
     else
-      %{"kind" => "_raw", "html" => Figures.code_block_html(code_source(b))}
+      %{"kind" => "_raw", "html" => Figures.code_block_html(code_source(b), code_emphasis(b))}
     end
   end
 
+  # LINE EMPHASIS is a WEB-ONLY channel (pe-bl-code-emphasis). The default arm
+  # below is the EMAIL arm (`compose_block/1` defaults to `:email`), and it does
+  # not read `emphasis` at all: a mail client gets the same per-line `<code>`
+  # chip stack it always got, which is the honest degradation — a background
+  # wash on one line is exactly the thing Outlook drops silently, and a span
+  # carrying a class the mail has no stylesheet for is worse than no span. The
+  # parity fixture asserts the degradation directly (an emphasis-bearing block
+  # and the same block with the field stripped compose to the IDENTICAL email
+  # tree) rather than trusting this comment.
   def compose_block(%{"type" => "code"} = b, _style) do
     if blank_code_source?(b) do
       %{"kind" => "_raw", "html" => ""}
@@ -2103,6 +2112,53 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       if String.trim(source) == "", do: nil, else: source
     end)
   end
+
+  # ── THE code-block LINE-EMPHASIS contract (pe-bl-code-emphasis) ────────────
+  #
+  # A `code` block MAY carry `emphasis`: an ARRAY of `{from, to, tone}` range
+  # objects marking lines of the SELECTED source (`code_source/1` above — the
+  # emphasis indexes whatever key won, so a `code`-keyed block emphasizes the
+  # same text the reader sees). `from`/`to` are 1-BASED INCLUSIVE; `to` is
+  # optional and defaults to `from`.
+  #
+  # The tone vocabulary is CLOSED — comment / offending / fixed — because the
+  # tone reaches the DOM as a class name; narrowing here is what makes the
+  # emitter's string interpolation safe. A range is DROPPED (never raises) when
+  # its tone is outside the vocabulary, when `from` is not an integer >= 1, or
+  # when `to` is present but below `from`. Dropping rather than raising is the
+  # same posture the source-key contract takes: the renderer is not the
+  # validator, and half-authored emphasis must still render the CODE.
+  #
+  # A block whose ranges ALL drop returns `[]`, which `Figures.code_block_html/2`
+  # renders through the legacy one-escape path — byte-identical to a block with
+  # no `emphasis` key. The shared fixture
+  # api/test/support/fixtures/code-block-emphasis-parity.json is the single file
+  # the Elixir, Go and JS legs all assert against.
+  @code_emphasis_tones ~w(comment offending fixed)
+
+  def code_emphasis(b) when is_map(b) do
+    case Map.get(b, "emphasis") do
+      list when is_list(list) -> Enum.flat_map(list, &code_emphasis_range/1)
+      _ -> []
+    end
+  end
+
+  def code_emphasis(_), do: []
+
+  defp code_emphasis_range(range) when is_map(range) do
+    tone = range |> Map.get("tone") |> stringish() |> String.trim()
+    from = Map.get(range, "from")
+    to = Map.get(range, "to", from)
+
+    if tone in @code_emphasis_tones and is_integer(from) and from >= 1 and
+         is_integer(to) and to >= from do
+      [{from, to, tone}]
+    else
+      []
+    end
+  end
+
+  defp code_emphasis_range(_), do: []
 
   # The `content` shape flattens an inline-node ARRAY. Each node contributes the
   # FIRST NON-EMPTY of its `"value"` then its `"text"` — the same dual-read every

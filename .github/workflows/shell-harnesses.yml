@@ -130,12 +130,23 @@ on:
       - "scripts/deploy-concurrency-check.sh"
       - "scripts/deploy-concurrency-check.test.sh"
       - "scripts/main-run-concurrency-check.sh"
+      - "scripts/deploy-supersede-exit.sh"
+      - "scripts/deploy-supersede-exit.test.sh"
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
       - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
+      # RELEASE CURATOR DRAFT (task-f2bdc01d54559e1a c2, orchestrator ruling
+      # 2026-09-13T08:10Z). scripts/release-curator-draft.sh is the job body of
+      # .github/workflows/release-curator-draft.yml, and its harness reads THAT
+      # WORKFLOW FILE as a fixture (the static arm parses its `on:` keys and
+      # step bodies) — which is why the dispatcher roster below gives this job
+      # a `.github/workflows/*.yml` row as well.
+      - "scripts/release-curator-draft.sh"
+      - "scripts/release-curator-draft.test.sh"
+      - ".github/workflows/release-curator-draft.yml"
       - "scripts/epic-zero-criteria-census.sh"
       - "scripts/webhook-fanout-watch.sh"
       - "scripts/webhook-fanout-watch.test.sh"
@@ -573,12 +584,23 @@ on:
       - "scripts/deploy-concurrency-check.sh"
       - "scripts/deploy-concurrency-check.test.sh"
       - "scripts/main-run-concurrency-check.sh"
+      - "scripts/deploy-supersede-exit.sh"
+      - "scripts/deploy-supersede-exit.test.sh"
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
       - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
+      # RELEASE CURATOR DRAFT (task-f2bdc01d54559e1a c2, orchestrator ruling
+      # 2026-09-13T08:10Z). scripts/release-curator-draft.sh is the job body of
+      # .github/workflows/release-curator-draft.yml, and its harness reads THAT
+      # WORKFLOW FILE as a fixture (the static arm parses its `on:` keys and
+      # step bodies) — which is why the dispatcher roster below gives this job
+      # a `.github/workflows/*.yml` row as well.
+      - "scripts/release-curator-draft.sh"
+      - "scripts/release-curator-draft.test.sh"
+      - ".github/workflows/release-curator-draft.yml"
       - "scripts/epic-zero-criteria-census.sh"
       - "scripts/webhook-fanout-watch.sh"
       - "scripts/webhook-fanout-watch.test.sh"
@@ -1028,6 +1050,7 @@ jobs:
       doctor-matrix: ${{ steps.sets.outputs.doctor-matrix }}
       merge-verb-table: ${{ steps.sets.outputs.merge-verb-table }}
       release-scan-verdict: ${{ steps.sets.outputs.release-scan-verdict }}
+      release-curator-draft-guard: ${{ steps.sets.outputs.release-curator-draft-guard }}
       zero-criteria-census: ${{ steps.sets.outputs.zero-criteria-census }}
       webhook-fanout-guard: ${{ steps.sets.outputs.webhook-fanout-guard }}
       seal-run-guard: ${{ steps.sets.outputs.seal-run-guard }}
@@ -1116,6 +1139,9 @@ jobs:
           merge-verb-table scripts/lib/check-runs.test.sh
           release-scan-verdict scripts/release-scan.sh
           release-scan-verdict scripts/release-scan.test.sh
+          release-curator-draft-guard scripts/release-curator-draft.sh
+          release-curator-draft-guard scripts/release-curator-draft.test.sh
+          release-curator-draft-guard .github/workflows/release-curator-draft.yml
           zero-criteria-census scripts/epic-zero-criteria-census.sh
           webhook-fanout-guard scripts/webhook-fanout-watch.sh
           webhook-fanout-guard scripts/webhook-fanout-watch.test.sh
@@ -1134,6 +1160,8 @@ jobs:
           deploy-concurrency scripts/deploy-concurrency-check.sh
           deploy-concurrency scripts/deploy-concurrency-check.test.sh
           deploy-concurrency scripts/main-run-concurrency-check.sh
+          deploy-concurrency scripts/deploy-supersede-exit.sh
+          deploy-concurrency scripts/deploy-supersede-exit.test.sh
           deploy-concurrency .github/workflows/deploy.yml
           deploy-concurrency .github/workflows/*.yml
           console-path-ratchet scripts/console-path-escape-check.sh
@@ -1530,6 +1558,30 @@ jobs:
         # recordings against the real API.
         run: bash scripts/release-scan.test.sh
 
+  release-curator-draft-guard:
+    needs: [changes]
+    if: needs.changes.outputs.release-curator-draft-guard == 'true'
+    name: release-curator-draft.sh drafts only (no tag, no publish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: release-curator-draft.sh syntax check
+        run: bash -n scripts/release-curator-draft.sh
+      - name: draft-only invariant matrix (fake gh, real git, no network)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # The harness builds real git repos with real bare origins and puts a
+        # fake `gh` plus a LOGGING `git` on PATH, so `git ls-remote --tags
+        # origin` in the subject answers for real instead of being stubbed into
+        # agreement — a stubbed ls-remote would make the no-tag assertion
+        # vacuous, which is the one defect this job exists to prevent. Its
+        # static arm parses .github/workflows/release-curator-draft.yml and
+        # reds if any `on:` key other than schedule/workflow_dispatch appears,
+        # or if any step runs `git tag`/`git push`/`gh release create` without
+        # `--draft`. Both arms are mutation-proved in the harness header.
+        run: bash scripts/release-curator-draft.test.sh
+
   zero-criteria-census:
     needs: [changes]
     if: needs.changes.outputs.zero-criteria-census == 'true'
@@ -1756,6 +1808,26 @@ jobs:
         # Harness FIRST, subject second — the house selftest-first idiom. A gate
         # that has lost the ability to fail must red before its green is read.
         run: bash scripts/deploy-concurrency-check.sh
+      # ── exit-at-START for a superseded sha (task-01f48337d83a0d15) ──────────
+      # Same family: per-sha groups stop EVICTION, but a merge storm still runs
+      # N full deploys at once. deploy-supersede-exit.sh decides — by main
+      # ANCESTRY, never wall clock — whether THIS run is superseded and must
+      # exit before any scp/ssh. Harness FIRST (its own --selftest matrix), then
+      # the classifier's --selftest, then the wiring harness that EXTRACTS the
+      # changes step from the live deploy.yml. Disarming the exit in a scratch
+      # copy took the harness to 16 passed / 2 FAILED.
+      - name: deploy-supersede-exit.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/deploy-supersede-exit.sh
+      - name: deploy-supersede-exit.test.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/deploy-supersede-exit.test.sh
+      - name: the classifier can still LOSE (11-arm ancestry matrix)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/deploy-supersede-exit.sh --selftest
+      - name: the exit-at-start wiring both directions + the live deploy.yml
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/deploy-supersede-exit.test.sh
       # The same eviction shape on the MAIN runs of the gate workflows
       # (task-b04364c216f877e6): 37 of 40 main elixir runs since 10:27Z on
       # 2026-09-02 were cancelled by the next merge. Per-sha group on main.

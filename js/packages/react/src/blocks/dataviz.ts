@@ -270,6 +270,14 @@ const duel: Emit = (block) => {
 // `value`) carry the provenance obligation (own `source`, else
 // `sourceDefault`).
 
+// tone_class/2's mirror (data_viz.ex): the four-word verdict vocabulary the
+// chart regions already use. An absent or unrecognised tone yields the bare
+// base class, so every lineage authored before the clock strip is unchanged.
+function toneClass(base: string, tone: unknown): string {
+  const t = displayString(tone)
+  return t === 'info' || t === 'ok' || t === 'warn' || t === 'danger' ? `${base} ${base}--${t}` : base
+}
+
 function lineageNodeHtml(n: unknown): string {
   const overline = displayString(get(n, 'overline'))
   const title = displayString(get(n, 'title'))
@@ -282,7 +290,7 @@ function lineageNodeHtml(n: unknown): string {
     (title === '' ? '' : `<div class="bp-lineage__title">${escapeHtml(title)}</div>`) +
     (value === '' ? '' : `<div class="bp-lineage__value">${escapeHtml(value)}${unitHtml}</div>`) +
     (body === '' ? '' : `<div class="bp-lineage__body">${escapeHtml(body)}</div>`)
-  return `<li class="bp-lineage__node">${parts}</li>`
+  return `<li class="${toneClass('bp-lineage__node', get(n, 'tone'))}">${parts}</li>`
 }
 
 const lineage: Emit = (block) => {
