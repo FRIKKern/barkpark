@@ -19,6 +19,11 @@
 #                  floor actually protects), both must succeed. Never a host-port
 #                  curl: a host beam.smp already bound to :4000 produced a
 #                  measured false 200.
+#                  Then BUILD IDENTITY: /status.json's version and the authed
+#                  /v1/capabilities?build=1 block must both carry a real vA.B.C
+#                  release, never the literal "unknown" (task-2ab4f5f0a07e887a).
+#                  See assert_build_identity below for why a green boot proves
+#                  nothing about it.
 #   census         scripts/env-census.py over BOTH runtime roots (api + cloud);
 #                  any drift between code's env reads and the compose passthrough
 #                  allowlists is a failure (charter D14/D15).
@@ -74,8 +79,15 @@ export_common_env() {
   PREVIEW_JWT_SECRET="$(openssl rand -base64 32)"
   BARKPARK_RELEASE_CAPTURE_HMAC_SECRET="$(openssl rand -base64 32)" # >= 32 bytes required
   PHX_HOST=localhost
+  # The BUILD-IDENTITY probe in the green arm reads /v1/capabilities?build=1,
+  # and `maybe_put_build/3` withholds the build block from tier "none" — an
+  # anonymous read of that URL is structurally blind to the thing under test.
+  # `Barkpark.Seeds.Clean.bootstrap_admin_token/1` installs THIS value when it
+  # is set (the `bp setup` path), so entrypoint.sh's seed step hands the probe a
+  # real admin credential. Minted per run, never a fixed literal.
+  BARKPARK_SEED_ADMIN_TOKEN="bp_admin_$(openssl rand -hex 24)"
   export BARKPARK_CLOAK_KEY BARKPARK_KEK PREVIEW_JWT_SECRET \
-    BARKPARK_RELEASE_CAPTURE_HMAC_SECRET PHX_HOST
+    BARKPARK_RELEASE_CAPTURE_HMAC_SECRET PHX_HOST BARKPARK_SEED_ADMIN_TOKEN
 }
 
 # ── refusal arm ──────────────────────────────────────────────────────────────
@@ -223,6 +235,84 @@ arm_green() {
     die "green arm: in-container wget /login failed — the session route is the one a bad SECRET_KEY_BASE breaks"
   fi
   pass "/login serves in-container — session key derivation works"
+
+  assert_build_identity "$cid"
+}
+
+# ── build identity (task-2ab4f5f0a07e887a) ───────────────────────────────────
+#
+# WHY THIS IS A GATE AND NOT A NICETY. `.git` is excluded from this image's
+# build context (api/Dockerfile.dockerignore), so Barkpark.BuildInfo's
+# `git describe` tier CANNOT fire inside the image — the identity comes from the
+# checked-in VERSION file the Dockerfile COPYs, or from nowhere. When it comes
+# from nowhere the failure is SILENT and the image is otherwise perfectly green:
+# it builds, boots, reaches healthy and serves both probes above, while
+# `Barkpark.SelfUpdate.Checker.run_check/0` parses BuildInfo.release() with
+# ^\d+\.\d+\.\d+$, takes its {:running, :error} arm, and reports
+# `running release is "unknown" (no vA.B.C build tag)` FOREVER. The update check
+# is then structurally dead on the one install shape it exists for, and the
+# Studio nav renders `Barkpark vunknown · unknown`. Every existing arm of this
+# script is blind to that, by construction.
+#
+# TWO SURFACES, ON PURPOSE:
+#   * /status.json      — public, unauthenticated, and what an operator reads.
+#                         Carries BuildInfo.version() verbatim.
+#   * /v1/capabilities?build=1 — the manifest block every SDK/CLI consumer sees,
+#                         and the surface the task names. It is AUTHED: the
+#                         build key is withheld from tier "none", so this probe
+#                         uses the admin token export_common_env seeded.
+# The release assertion below applies EXACTLY the regex parse_release/1 applies,
+# so a pass here is a statement about the checker, not a look-alike of it.
+assert_build_identity() { # assert_build_identity <cid>
+  local cid="$1" body version release caps
+
+  note "green arm: in-container build identity — /status.json"
+  if ! body="$(compose exec -T api wget -q -O - http://localhost:4000/status.json)"; then
+    assert_container_alive "$cid" "the failed /status.json body read"
+    die "green arm: could not read the /status.json body in-container"
+  fi
+
+  version="$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))')"
+  [ -n "$version" ] || die "green arm: /status.json carries no \"version\" key"
+
+  if [ "$version" = "unknown" ]; then
+    die "green arm: the image reports build version \"unknown\". This image compiles with NO .git, so BuildInfo's git tier cannot fire — the repo-root VERSION file is the tier that must, and it did not reach the build. Check the \`COPY VERSION /VERSION\` line in api/Dockerfile and that VERSION holds one A.B.C line."
+  fi
+
+  # A.B.C.D — BuildInfo's canonical shape. D is the commits-since-tag distance
+  # and is 0 for a VERSION-file build, which is the honest value there.
+  if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    die "green arm: build version '$version' is not A.B.C.D"
+  fi
+  pass "/status.json reports build version $version (not \"unknown\")"
+
+  release="$(printf '%s' "$version" | cut -d. -f1-3)"
+  # VERBATIM parse_release/1 (api/lib/barkpark/self_update/checker.ex).
+  if ! printf '%s' "$release" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    die "green arm: release '$release' fails SelfUpdate.Checker.parse_release/1's ^A.B.C\$ — run_check/0 would take its {:running, :error} arm forever"
+  fi
+  pass "release $release parses under parse_release/1 — run_check/0 cannot take the {:running, :error} arm"
+
+  note "green arm: in-container build identity — /v1/capabilities?build=1 (authed)"
+  if ! caps="$(compose exec -T api wget -q -O - \
+        --header="Authorization: Bearer ${BARKPARK_SEED_ADMIN_TOKEN}" \
+        'http://localhost:4000/v1/capabilities?build=1')"; then
+    assert_container_alive "$cid" "the failed /v1/capabilities?build=1 read"
+    die "green arm: could not read /v1/capabilities?build=1 in-container with the seeded admin token"
+  fi
+
+  local caps_release
+  caps_release="$(printf '%s' "$caps" | python3 -c 'import json,sys; print((json.load(sys.stdin).get("build") or {}).get("release",""))')"
+  if [ -z "$caps_release" ]; then
+    die "green arm: /v1/capabilities?build=1 returned no build.release. The block is withheld from tier \"none\", so an empty value most likely means the seeded admin token was not accepted — not that the build identity is missing."
+  fi
+  if ! printf '%s' "$caps_release" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    die "green arm: the capabilities build block reports release '$caps_release', which parse_release/1 refuses"
+  fi
+  if [ "$caps_release" != "$release" ]; then
+    die "green arm: /status.json and the capabilities build block disagree ($release vs $caps_release)"
+  fi
+  pass "capabilities build block reports release $caps_release — the manifest surface agrees with /status.json"
 }
 
 # ── env census (both roots) ──────────────────────────────────────────────────

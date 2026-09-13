@@ -191,7 +191,13 @@ jobs:
           # census's roots from env-census.py's own `--root` choices — so
           # adding a third root, or re-narrowing this line, reds by name
           # instead of going quietly blind again.
-          if printf '%s\n' "$changed" | grep -qE '^(docker-compose\.yml|\.env\.example|scripts/compose-smoke\.sh|scripts/env-census\.py|\.github/workflows/compose-smoke\.yml)$|^api/|^cloud/'; then
+          # `VERSION` is in the set because it is a BUILD INPUT to the image,
+          # not documentation: api/Dockerfile COPYs it and Barkpark.BuildInfo
+          # reads it at compile time as the tier that gives a `.git`-less build
+          # a real release (task-2ab4f5f0a07e887a). Without this alternative a
+          # PR that edits ONLY VERSION skips the one gate that checks what the
+          # image reports.
+          if printf '%s\n' "$changed" | grep -qE '^(VERSION|docker-compose\.yml|\.env\.example|scripts/compose-smoke\.sh|scripts/env-census\.py|\.github/workflows/compose-smoke\.yml)$|^api/|^cloud/'; then
             smoke=true
           else
             smoke=false
