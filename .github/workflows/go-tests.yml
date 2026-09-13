@@ -219,6 +219,11 @@ on:
       - "cloud/lib/barkpark_cloud/telemetry.ex"
       - "cloud/lib/barkpark_cloud/usage.ex"
       - "cloud/lib/barkpark_cloud/web/router.ex"
+      # build_log_bytes.ex: internal/cloudclient/producer_contract_test.go reads
+      # the server's @bytes_keys sigil from DISK (buildLogBytesProducerPath) and
+      # locks the Go struct's tags against it in serializer order, so an edit to
+      # the producer's key set must dispatch the Go job (task-801c6c33769ca01d).
+      - "cloud/lib/barkpark_cloud/sites/build_log_bytes.ex"
       # Onramp corpus: internal/cli/movement_doctrine_test.go reads all ten of
       # these docs from DISK and asserts each carries the movement doctrine
       # verbatim; onramp_cmd_test.go additionally pins the ZED.md json stanza and
