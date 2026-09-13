@@ -1289,8 +1289,18 @@ check_match "design/status-manifest.json" compile true
 check_match ".github/workflows/elixir.yml" compile true
 check_match "scripts/elixir-path-escape-check.sh" compile true
 check_match "docs/ops/merge-gates.md" compile false
-check_match "docs/ops/merge-gates.md" test false
-check_match "README.md" test false
+# BOTH FLIPPED TO true 2026-09-13 (task-4c9c1682f5ba5c7a), and the flip is the
+# fact, not a fixture repair: merge-gates.md and README.md are now DECLARED in
+# ELIXIR_TEST_ONLY_PATHS because they carry byte caps in
+# scripts/check-doc-budgets.sh, and api/test/barkpark/doc_budget_cap_test.exs
+# enforces those caps from the required `Elixir gate`. A capped doc that does not
+# dispatch the test job would skip the only gate that can refuse it.
+check_match "docs/ops/merge-gates.md" test true
+check_match "README.md" test true
+# The DOC negative specimen the two above used to be. SETUP.md carries no cap, so
+# it stays out — which is what proves the doc entries are EXACT FILES and not a
+# `docs/**` tree that would dispatch the whole suite on every documentation PR.
+check_match "docs/setup/SETUP.md" test false
 check_match "web/src/app/page.tsx" test false
 check_match "internal/taskboard/components.go" test true
 check_match "internal/taskboard/components.go" compile false

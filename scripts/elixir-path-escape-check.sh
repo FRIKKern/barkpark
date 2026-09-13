@@ -298,7 +298,73 @@ scripts/prod-build-cache-guard.sh'
 #   this list could have named in advance. It is 34 committed envelopes / ~255 KB
 #   that move only when a duel is recorded, so the full-suite cost is rare and
 #   bounded, which is the same judgement the templates/** note above records.
+#   THE DOC BYTE-CAP ENTRIES (2026-09-13, task-4c9c1682f5ba5c7a) are the 36 doc
+#   paths NOT ALREADY MATCHED here, plus the cap table itself. 36 is not the
+#   whole table: the CAPS table holds 39 rows (CAPS_ROWS_EXPECTED=39), and the
+#   other three -- api/CLAUDE.md, docs/api-v1.md and docs/api/error-codes.md --
+#   are already covered by pre-existing entries, verified by querying the
+#   matcher rather than by reading this list. Coverage is COMPLETE at 39/39; do
+#   not read the 36 as three docs forgotten. They are here because the caps in
+#   scripts/check-doc-budgets.sh had NO BLOCKING READER. Their only enforcer is
+#   the `Doc budgets + anchors` job, which required-checks.json holds out as
+#   "S4 PATHS-FILTERED: doc-gates.yml only runs on matching paths, so on other
+#   PRs this name is ABSENT - a required absent context never reports". So a
+#   capped doc went 43 B OVER on main (docs/setup/TASK-SYSTEM.md, 16043 B against
+#   a 16000 B cap, via merged #17878 -> #17984 -> #17979) and nothing refused any
+#   of the three. The blocking route is the one the meter rider above already
+#   takes: api/test/barkpark/doc_budget_cap_test.exs reads the cap table and
+#   rides the already-required `Elixir gate`, touching no byte of .github/.
+#   check-doc-budgets.sh is TEST_ONLY, not COMPILE, because the test reads it at
+#   runtime with File.read!/1 and it is not an @external_resource -- the compile
+#   set would assert a recompile dependency that does not exist, and a
+#   compile-time resource filed as test-only would let an edit skip the compile
+#   lane and green vacuously. THE 36 DOC PATHS ARE THE POINT, not padding:
+#   mix-test carries `if: needs.changes.outputs.test == 'true'` and a skipped job
+#   counts as PASSING for a required context, so without them a PR that edits
+#   only a capped doc SKIPS this suite and the cap is enforced on every PR except
+#   the ones that can break it. EXACT FILES, never `docs/**`: that tree churns
+#   constantly and the over-inclusion is what the templates/** and tooling/**
+#   notes above refuse. The two lists cannot silently drift apart either -- the
+#   test's third arm asserts every capped path is matched by a dispatched glob,
+#   so a new cap row landing without its path here REDS the Elixir gate.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
+CLAUDE.md
+js/CLAUDE.md
+AGENTS.md
+docs/INDEX.md
+docs/contracts/bokbasen.md
+docs/contracts/onix-field-map.md
+docs/contracts/webhook-realtime.md
+docs/contracts/paper-corpus-layers.md
+docs/contracts/schema-v2.md
+docs/contracts/portable-doc-inline.md
+docs/contracts/tenancy.md
+docs/contracts/task-claim-lifecycle.md
+docs/contracts/close-packet.md
+docs/contracts/cloud-object-authz.md
+docs/contracts/canonical-impl-markers.md
+docs/contracts/sheets-engine.md
+docs/contracts/document-graph-and-history.md
+docs/contracts/media-http-envelope.md
+README.md
+docs/ops/PROD_OPS.md
+docs/ops/merge-gates.md
+docs/ops/branch-protection-and-overrides.md
+docs/auth.md
+docs/auth-user-sessions.md
+docs/setup/QUICKSTART.md
+docs/setup/TASK-SYSTEM.md
+docs/cheatsheets/bp.md
+docs/cheatsheets/tui.md
+docs/cheatsheets/tasks.md
+docs/cheatsheets/http-api.md
+docs/cheatsheets/papers.md
+docs/setup/AGENTS-MD.md
+docs/setup/AGENT-ONRAMPS.md
+docs/decisions/success-claim-census.md
+scripts/deploy-reliability-exit-2026-08-10.md
+scripts/deploy-reliability-exit-2026-08-17.md
+scripts/check-doc-budgets.sh
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
 api/assets/sheet-grid/**
