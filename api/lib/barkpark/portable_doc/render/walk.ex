@@ -1665,6 +1665,16 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   # Tone → modifier class, mirroring `Util.tone_palette/1`'s clause set (unknown
   # → info). The five knowns each get a `--bp-tone-<tone>-{bg,fg}` token pair.
+  # The two VERDICT tones (design/tokens.json color.verdict) ride the SAME `tone`
+  # field as the five system tones — a verdict is a callout wearing a different
+  # token family, not a new block type. They resolve `--bp-verdict-*` instead of
+  # `--bp-tone-*` (paper-surface.css `.bp-callout--loss` / `--peace`), so they are
+  # ARTICLE-only: the inline/email clause below paints from `Util.tone_palette/1`,
+  # which has no verdict pair and falls back to info — deliberate, an email has no
+  # reading-page ground to walk against. Mirrored in js/packages/react
+  # blocks/core.ts CALLOUT_TONES; __parity.test.mjs holds the two halves together.
+  defp callout_tone_class("loss"), do: "loss"
+  defp callout_tone_class("peace"), do: "peace"
   defp callout_tone_class("success"), do: "success"
   defp callout_tone_class("warning"), do: "warning"
   defp callout_tone_class("danger"), do: "danger"
@@ -1701,6 +1711,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     end
   end
 
+  defp tone_label("loss"), do: "Loss"
+  defp tone_label("peace"), do: "Peace"
   defp tone_label("success"), do: "Success"
   defp tone_label("warning"), do: "Warning"
   defp tone_label("danger"), do: "Danger"

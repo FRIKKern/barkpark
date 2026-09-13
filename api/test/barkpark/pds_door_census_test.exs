@@ -280,19 +280,37 @@ defmodule Barkpark.PdsDoorCensusTest do
     # 44 and this pin refuted 7 — the pin did its job a second time in one day.
     # RE-DERIVED by running the census on this tree: it prints `harnesses : 8` and
     # names the file.
-    assert out =~ ~r/harnesses\s+: 8 /,
-           "the derived harness count moved off 8. Harness-hood is derived from the " <>
-             "*_test.sh / *.test.sh name; if a ninth harness landed (or one left), " <>
+    #
+    # A NINTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-13):
+    # scripts/pds-threshold-move-guard_test.sh, the offline harness for the
+    # budget-literal move guard (pds-bl-w49-budget-literal-moved-by-its-own-pr).
+    # It is a harness by the same derived *_test.sh rule, it is wired into
+    # shell-harnesses.yml (pds-harnesses job, not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. Landing it WITHOUT the row and this bump is what reddened main
+    # twice before (#17651, #17687): the census would read UNDISPOSED 2 of 47 and
+    # this pin would refute 8. Both halves are paid in the same PR as the harness,
+    # and the count below reads 9 ON PURPOSE.
+    # RE-DERIVED by running the census on this tree: it prints `harnesses : 9` and
+    # names the file.
+    assert out =~ ~r/harnesses\s+: 9 /,
+           "the derived harness count moved off 9. Harness-hood is derived from the " <>
+             "*_test.sh / *.test.sh name; if a tenth harness landed (or one left), " <>
              "say so on purpose.\n#{out}"
+
+    assert out =~ "pds-threshold-move-guard_test.sh",
+           "the census stopped naming pds-threshold-move-guard_test.sh among its derived " <>
+             "harnesses. The count above would still read 9 if a DIFFERENT harness had " <>
+             "replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-live-hetzner-placement-group_test.sh",
            "the census stopped naming pds-live-hetzner-placement-group_test.sh among its " <>
-             "derived harnesses. The count above would still read 8 if a DIFFERENT harness " <>
+             "derived harnesses. The count above would still read 9 if a DIFFERENT harness " <>
              "had replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-read-preflight-audit_test.sh",
            "the census stopped naming pds-read-preflight-audit_test.sh among its derived " <>
-             "harnesses. The count above would still read 8 if a DIFFERENT harness had " <>
+             "harnesses. The count above would still read 9 if a DIFFERENT harness had " <>
              "replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-pull-proof_test.sh",

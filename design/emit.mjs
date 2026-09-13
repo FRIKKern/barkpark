@@ -392,6 +392,20 @@ function statusVars(theme, indent, t = tokens) {
   return lines.map((l) => indent + l).join("\n");
 }
 
+// The VERDICT pair (color.verdict) → `--bp-verdict-loss/-soft` +
+// `--bp-verdict-peace/-soft` on the PAPER reading surface. Emitted as resolved
+// hex, not as an hsl() channel triplet like the status roles: a verdict has no
+// alpha-derived `-soft` companion to compose — its soft ground is its OWN derived
+// leaf (AA-walked against, not faded out of, the ink), so there is nothing for a
+// channel split to buy. `--bp-` and not `--tok-` because the consumers read it
+// directly (the `--tok-*`→`--bp-*` bridge exists for the values paper-surface.css
+// recomposes; these are read as-is).
+const VERDICT_ROLES = ["loss", "loss-soft", "peace", "peace-soft"];
+function verdictVars(theme, indent, t = tokens) {
+  const v = t.color.verdict;
+  return indent + VERDICT_ROLES.map((r) => `--bp-verdict-${r}: ${v[r][theme]};`).join(" ");
+}
+
 function baseVars(theme, indent, t = tokens) {
   return BASE_ROLES.map((r) => indent + baseVar(r, theme, t)).join("\n");
 }
@@ -722,10 +736,12 @@ const paperThemeBlock = (name, t) => [
   `html[data-bp-theme="${name}"] .bp-paper-surface, html[data-bp-theme="${name}"] .bp-paper-body {`,
   paperColorVars("light", "  ", t),
   statusVars("light", "  ", t),
+  verdictVars("light", "  ", t),
   "}",
   `html[data-bp-theme="${name}"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="${name}"][data-theme="dark"] .bp-paper-body {`,
   paperColorVars("dark", "  ", t),
   statusVars("dark", "  ", t),
+  verdictVars("dark", "  ", t),
   "}",
 ].join("\n");
 
@@ -832,17 +848,21 @@ function paperBlock(themes = loadThemes()) {
     ".bp-paper-surface, .bp-paper-body {",
     readingVars,
     statusVars("light", "  "),
+    verdictVars("light", "  "),
     "}",
     "@media (prefers-color-scheme: dark) {",
     "  .bp-paper-surface, .bp-paper-body {",
     statusVars("dark", "    "),
+    verdictVars("dark", "    "),
     "  }",
     "}",
     'html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {',
     statusVars("light", "  "),
+    verdictVars("light", "  "),
     "}",
     'html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {',
     statusVars("dark", "  "),
+    verdictVars("dark", "  "),
     "}",
     "/* lifecycle glyph tones — the CSS half of the §6 GUI/TUI parity assertion */",
     lifeClasses("light"),
