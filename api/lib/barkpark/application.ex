@@ -148,7 +148,8 @@ defmodule Barkpark.Application do
     self_update_children =
       if Barkpark.SelfUpdate.enabled?(), do: [Barkpark.SelfUpdate.Checker], else: []
 
-    children = child_specs(plugin_children, oban_config, sync_children, self_update_children)
+    children =
+      child_specs(plugin_children, oban_config, sync_children, self_update_children, boot_mode())
 
     # Chapter 64 (layering isolates blast radius). The top supervisor keeps the
     # OTP-default 3-restarts-in-5s budget — made EXPLICIT here — but that budget
@@ -204,6 +205,38 @@ defmodule Barkpark.Application do
     end
   end
 
+  @typedoc """
+  How much of the tree `start/2` puts up. See `child_specs/5`.
+  """
+  @type boot_mode :: :full | :seed
+
+  @boot_modes [:full, :seed]
+
+  @doc """
+  The boot mode for THIS node, read from `:barkpark, :boot_mode` (default
+  `:full`).
+
+  A one-shot `bin/barkpark eval` sets it BEFORE `Application.ensure_all_started/1`
+  (see `Barkpark.Release.seed_boot!/0`); nothing in `config/*.exs` sets it, so
+  every ordinary boot — `bin/barkpark start`, `mix phx.server`, `mix test` —
+  takes the `:full` default. Raises on an unknown value rather than silently
+  falling back: a typo'd mode that quietly booted the FULL tree would bind a
+  listener on a box that asked not to, which is the defect this seam exists to
+  prevent.
+  """
+  @spec boot_mode() :: boot_mode()
+  def boot_mode do
+    case Application.get_env(:barkpark, :boot_mode, :full) do
+      mode when mode in @boot_modes ->
+        mode
+
+      other ->
+        raise ArgumentError,
+              "unknown :barkpark, :boot_mode #{inspect(other)} " <>
+                "(expected one of #{inspect(@boot_modes)})"
+    end
+  end
+
   @doc """
   Build the top-level child spec list, tiered for blast-radius isolation.
 
@@ -231,7 +264,45 @@ defmodule Barkpark.Application do
   @spec child_specs(list(), keyword(), list(), list()) :: [
           Supervisor.child_spec() | {module(), term()} | module()
         ]
-  def child_specs(plugin_children, oban_config, sync_children, self_update_children)
+  def child_specs(plugin_children, oban_config, sync_children, self_update_children),
+    do: child_specs(plugin_children, oban_config, sync_children, self_update_children, :full)
+
+  @doc """
+  The same list, narrowed for a BOOT MODE.
+
+    * `:full` — verbatim `child_specs/4`; what `bin/barkpark start` boots.
+    * `:seed` — the canonical list MINUS `BarkparkWeb.Endpoint`, with the `Oban`
+      child started INERT (`queues: false, plugins: false`).
+
+  `:seed` exists for `Barkpark.Release.seed/0`. The seed bodies are ordinary
+  application code — `Barkpark.Seeds.run/0` needs the live `Plugins.Registry`
+  populated by the `SchemaBootstrap` boot child, PubSub, `Barkpark.Vault`, the
+  validation registries, and an Oban instance (`Oban.insert/1` raises without
+  one). So the seed eval cannot run repo-only. What it must NOT do is bind a
+  listener or drain live queues: `bin/barkpark eval` runs on a box whose real
+  node may already be serving, and an inert Oban still ACCEPTS inserts (the
+  seeded jobs stay queued for the serving node) while starting no producer and
+  no plugin (no Cron, no Pruner, no Lifeline) — it enqueues, it never dequeues.
+
+  DERIVED, never hand-picked: the `:seed` clause filters the `:full` list, so a
+  child added above appears in seed mode too and boot ORDER is preserved
+  verbatim. Hand-picking a subset here would fork the order from the canonical
+  list and silently change what a seeded instance contains (charter D9).
+  """
+  @spec child_specs(list(), keyword(), list(), list(), boot_mode()) :: [
+          Supervisor.child_spec() | {module(), term()} | module()
+        ]
+  def child_specs(plugin_children, oban_config, sync_children, self_update_children, :seed) do
+    plugin_children
+    |> child_specs(oban_config, sync_children, self_update_children, :full)
+    |> Enum.reject(&(&1 == BarkparkWeb.Endpoint))
+    |> Enum.map(fn
+      {Oban, config} -> {Oban, Keyword.merge(config, queues: false, plugins: false)}
+      other -> other
+    end)
+  end
+
+  def child_specs(plugin_children, oban_config, sync_children, self_update_children, :full)
       when is_list(plugin_children) and is_list(sync_children) and is_list(self_update_children) do
     [
       # Dedicated Finch pool for the auth/login OUTBOUND path (Felix W10,
