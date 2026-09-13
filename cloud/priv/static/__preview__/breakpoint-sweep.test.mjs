@@ -998,13 +998,28 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
   // PRINTED (`125 scenarios · 24 distinct covered by 25 cells · 101 residue over
   // 13 families`), never by adding one to the line above.
-  assert.equal(r.total, 125);
+  // cch-w38-s1-fu (task-8cf413b005cbcd40) moves it by THREE in ONE commit:
+  // `instance-behind-member`, `instance-remove-failed-member` and
+  // `instance-failed-member` — the MEMBER arm of the three instance states
+  // cch-w45-bl added as owners. Until them, member-authority-sweep.mjs (the
+  // console's only rendered-bytes member instrument) could not reach ANY of the
+  // three offer sites #12996 fenced: measured on origin/main 661e87d9f3, it
+  // exited 0 with 0 findings over both the fenced tree and a tree with #12996's
+  // three app.js hunks reverted. Total 125 -> 128, residue 101 -> 104. CELLS
+  // (25), distinctCovered (24) and families (13) are DELIBERATELY UNMOVED: all
+  // three land in the residue, not a cell, and their familyOf is
+  // `hash:#instance` — a family that already had 26 members, so three more
+  // cannot create a 14th. Both moved integers were RE-DERIVED by RUNNING `node
+  // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
+  // PRINTED (`128 scenarios · 24 distinct covered by 25 cells · 104 residue over
+  // 13 families`), never by adding three to the line above.
+  assert.equal(r.total, 128);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 101, "101 is the RESIDUE, not the census");
+  assert.equal(r.residue, 104, "104 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 101, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 104, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
