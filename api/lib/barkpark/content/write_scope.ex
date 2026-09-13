@@ -294,11 +294,11 @@ defmodule Barkpark.Content.WriteScope do
   #       `Plugins.Bootstrap`, `Content.TagRegistry.do_register!/2`, seeds,
   #       `mix onix.import` — legitimately belong to the whole instance. They
   #       KEEP the seeded Default, but must now SAY SO by passing the explicit
-  #       `workspace_id: :instance` sentinel. A declaration is auditable; an
+  #       `instance_wide: true` declaration. A declaration is auditable; an
   #       omission is not. Each such seat carries a comment naming this ruling.
   #
   # THE RESIDUAL. An opts list with no scope key AND no principal AND no
-  # `:instance` declaration still resolves to the seeded Default, because that
+  # `instance_wide: true` declaration still resolves to the seeded Default, because that
   # population is dominated by fixtures and internal helpers that predate any of
   # this and refusing them wholesale would refuse writes nobody can scope. It is
   # NO LONGER the same arm as (a) or (c) though: it is reached only after the
@@ -320,9 +320,6 @@ defmodule Barkpark.Content.WriteScope do
     opt_proj = Keyword.get(opts, :project_id)
 
     cond do
-      opt_ws == :instance ->
-        seeded_default_write_scope()
-
       opt_ws == :shared_only ->
         resolve_unscoped_request_write_scope(opts)
 
@@ -338,14 +335,30 @@ defmodule Barkpark.Content.WriteScope do
   end
 
   # THE CLASSIFIED DOOR for a key-absent write (see the ruling block above).
-  # Class (a) — an attributable caller — takes infer-or-refuse. Everything else
-  # is the residual and keeps the seeded Default.
+  #
+  #   1. `instance_wide: true` — the class-(c) DECLARATION. Checked first, so a
+  #      boot seat that happens to carry a principal (a console-run seed, say)
+  #      still lands instance-wide because it SAID so.
+  #   2. an attributable caller — class (a) — takes infer-or-refuse.
+  #   3. the residual keeps the seeded Default.
+  #
+  # WHY A SEPARATE KEY and not a second `:workspace_id` atom next to
+  # `:shared_only`: `:shared_only` is understood across the READ side too
+  # (`Content.Scope`, `Tasks.Queue`, `Tasks.Fleet`, `Tasks.Events`, `Media`),
+  # because a request that resolved no tenant must narrow reads as well as
+  # writes. An instance-wide DECLARATION has no read meaning at all — it says
+  # only "stamp the seeded Default on this write" — so putting it in
+  # `:workspace_id` would force every one of those read consumers to learn an
+  # atom that means nothing to them, and a missed one would widen a read.
   defp resolve_key_absent_write_scope(opts) do
-    case attributable_caller_context(opts) do
-      %CallerContext{} = ctx ->
+    cond do
+      Keyword.get(opts, :instance_wide) == true ->
+        seeded_default_write_scope()
+
+      ctx = attributable_caller_context(opts) ->
         resolve_unscoped_request_write_scope(Keyword.put(opts, :caller_context, ctx))
 
-      nil ->
+      true ->
         seeded_default_write_scope()
     end
   end
