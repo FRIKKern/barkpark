@@ -176,7 +176,7 @@ default list fall behind `fixtures/*.json` reds a visible check.
 |---|---|
 | image | `ubuntu-latest` = **`ImageOS=ubuntu24 ImageVersion=20260907.300.1`**, `PRETTY_NAME="Ubuntu 24.04.5 LTS"` |
 | fonts on that image | **53** faces (`fc-list \| wc -l`) — no Iowan Old Style, no Source Serif 4 |
-| captured by | `paper-rig.yml` run **34642496728** (`workflow_dispatch`, `recapture: true`) on `studio/paper-rig-ci` |
+| captured by | `paper-rig.yml` run **34745476269** (`workflow_dispatch`, `recapture: true`) on `studio/rig-fixtures-refresh`, 2026-09-13 — the fixture refresh below. The run before it was **34642496728** on `studio/paper-rig-ci`, in the SAME image version, which is why nothing in this table moved except the run id |
 | browser | Playwright **1.59.1** chromium, installed globally, resolved via `PLAYWRIGHT_DIR` |
 | panel | 9 fixtures x light/dark x 1280/1920 = 36 JPEGs + 9 `report.json` |
 
@@ -396,6 +396,33 @@ The check **can lose**, proven by mutation on a copy of
 A red here is a review item, not a re-baseline reflex: read the drifted numbers,
 then `bash tooling/paper-excellence/rig/baseline.sh <slug>` **only** once the
 change behind them is the intended one.
+
+### The 2026-09-13 fixture refresh (task-abaff15e4d9e39a9)
+
+`fetch-fixtures.sh` with no arguments refetched all **seven** published fixtures
+(the two authored ones have no live paper — `fixture-list-check.sh` prints the
+split). Four moved `source_rev` only; three carried real content drift, and the
+panel was re-shot for it by run **34745476269**. Every `source_rev` in
+`fixtures/` equals the live `_rev` on guerrilla at that head.
+
+The whole moved set, by cause — **every one of them is fixture content; none is
+a font or image delta**, because the recapture ran in the same
+`ImageVersion=20260907.300.1` as the panel it replaced:
+
+| moved report key | fixture | cause |
+|---|---|---|
+| `shots[0..3].rules.heavyRules[4].y` `3857.2 → 4179.4` (4 keys) | `heggemsnes-act` | content. The server now stamps `id` on nested `steps` children and the items are objects where the fixture held strings, so the step list draws taller and every boundary below it moves 322.2px |
+| `shots[0..3].sectionBeats[0..10].skippedEmpty` `2 → 0` (44 keys) | `hobby-hardening-capstone` | content. The spacing-doctrine flip removed 28 empty `hhc-gap-*` paragraphs (97 → 69 blocks). They rendered as zero-height boxes the beat walk had to skip, so the skip count goes to zero and **no geometry moves at all** — its four JPEGs are byte-identical |
+| *(none)* | `portabledoc-showcase` | `--report-diff` reports `1099 measured values compared, 0 differences`. It gained server-stamped `id`s on nested `card`/`columns` children, which do not draw. Its `light__1280` JPEG moved 310 bytes (2482711 → 2482401) — encoder noise, which the oracle already ignores |
+
+`--report-diff` over the three: **4 + 44 + 0 = 48** drifted measurements out of
+459 + 1087 + 1099 values compared. Eight of the 45 committed files moved.
+
+**The measure band did not move.** `node shoot.mjs --band-check baselines/*.report.json`
+→ `band-check OK — 36 cell(s) in 9 report(s) inside the 66-72 editorial measure
+band`. Min **66.9** (`heggemsnes-act`) and max **72.0**
+(`agent-flight-recorder-charter`) are unchanged, so the table above still reads
+true and the ceiling still has zero headroom.
 
 ### The 2026-09-11 re-baseline (task-7b197c9b4bef6664)
 

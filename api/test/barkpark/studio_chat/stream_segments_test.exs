@@ -17,6 +17,7 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
 
   use Barkpark.DataCase, async: false
 
+  alias Barkpark.ChatHosts
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.{Recorder, StreamSegments, StreamTail}
@@ -1107,7 +1108,7 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
     end
 
     test "FRAME ORDER on BOTH lanes: the raw bytes precede the stable frame that covers them",
-         %{recorder: recorder} do
+         %{recorder: recorder, sid: sid} do
       # The defect this pins was real and user-visible: the runtime lane derived
       # segments inside capture_runtime_event/3, which every ingest site calls
       # BEFORE broadcast, so `stable` landed ahead of the bytes it covered. Mobile
@@ -1139,6 +1140,90 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       drive_runtime_turn(recorder, fn event ->
         :ok = GenServer.call(recorder, {:project_runtime_event, event})
       end)
+
+      # (d) the registered-host replay fold — handle_info(:replay_registered_host_events),
+      # which reads DURABLE rows (`ChatHosts.replay_unprojected/1`) rather than
+      # receiving a message per event. This is the path a host takes after a
+      # recorder gap, so its events arrive in one burst inside a single
+      # `handle_info`; if the fold ever stopped funnelling through
+      # `ingest_runtime_event/3`, EVERY buffered byte of a reconnect would commit
+      # behind its own stable frame. Seeded through real persisted rows so the
+      # arm dies the moment the fold or the query changes shape.
+      seeded = seed_unprojected_host_turn(sid)
+
+      assert length(ChatHosts.replay_unprojected(sid)) == seeded,
+             "the replay fixture persisted no unprojected rows — the arm would be vacuous"
+
+      send_frame(recorder, :replay_registered_host_events)
+
+      assert ChatHosts.replay_unprojected(sid) == [],
+             "the fold did not consume the seeded rows — it never reached ingest"
+
+      assert_raw_precedes_stable(collect_ordered(), :runtime)
+    end
+
+    # Persist ONE codex turn as unprojected registered-host events for `session_id`
+    # (the exact rows `ChatHosts.replay_unprojected/1` returns after a recorder
+    # gap), and return how many were written. Deliberately inserted directly:
+    # `ChatHosts.accept_event/2` projects synchronously into a LIVE recorder, which
+    # is ingress path (c) — the only way to reach the replay fold is rows the
+    # recorder never saw.
+    defp seed_unprojected_host_turn(session_id) do
+      suffix = System.unique_integer([:positive])
+
+      {:ok, workspace} =
+        Barkpark.Tenancy.create_workspace(%{
+          slug: "replay-fold-#{suffix}",
+          name: "Replay #{suffix}"
+        })
+
+      {:ok, host} =
+        %Barkpark.ChatHosts.RegisteredHost{}
+        |> Barkpark.ChatHosts.RegisteredHost.enrollment_changeset(%{
+          workspace_id: workspace.id,
+          name: "replay-host-#{suffix}",
+          enrollment_hash: :crypto.strong_rand_bytes(32),
+          enrollment_expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)
+        })
+        |> Repo.insert()
+
+      {:ok, lease} =
+        %Barkpark.ChatHosts.ExecutionLease{}
+        |> Barkpark.ChatHosts.ExecutionLease.changeset(%{
+          host_id: host.id,
+          workspace_id: workspace.id,
+          session_id: session_id,
+          provider: "codex",
+          command_key: "replay-fold-#{suffix}",
+          expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)
+        })
+        |> Repo.insert()
+
+      payloads =
+        [%{"kind" => "turn_started"}] ++
+          for chunk <- ["codex para\n", "\ncodex more\n\n"] do
+            %{"kind" => "text_delta", "delta" => chunk}
+          end ++
+          [%{"kind" => "turn_completed"}]
+
+      payloads
+      |> Enum.with_index(1)
+      |> Enum.each(fn {payload, cursor} ->
+        {:ok, _} =
+          %Barkpark.ChatHosts.ExecutionEvent{}
+          |> Barkpark.ChatHosts.ExecutionEvent.changeset(%{
+            lease_id: lease.id,
+            host_id: host.id,
+            workspace_id: workspace.id,
+            cursor: cursor,
+            idempotency_key: "replay-#{suffix}-#{cursor}",
+            kind: payload["kind"],
+            payload: payload
+          })
+          |> Repo.insert()
+      end)
+
+      length(payloads)
     end
 
     # Drive one codex turn through `deliver` and assert the runtime lane's order.
@@ -1207,11 +1292,11 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
     defp raw_delta_bytes(_msg, _lane), do: nil
 
     test "RATCHET: every runtime ingest goes through ingest_runtime_event/3" do
-      # The order test above drives three of the four ingress paths; the fourth
-      # (`:replay_registered_host_events`) needs persisted ChatHosts rows. Rather
-      # than leave it uncovered — and rather than leave a FIFTH future site free to
-      # reintroduce the inversion — this is a source ratchet: `capture_runtime_event`
-      # must have exactly ONE caller, the helper that owns the order.
+      # The order test above drives all four ingress paths, the replay fold through
+      # real persisted ChatHosts rows. This ratchet covers what no arm can: a FIFTH
+      # future site, free to reintroduce the inversion. It is a source ratchet —
+      # `capture_runtime_event` must have exactly ONE caller, the helper that owns
+      # the order.
       source = File.read!("lib/barkpark/studio_chat/recorder.ex")
 
       callers =

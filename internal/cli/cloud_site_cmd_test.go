@@ -167,6 +167,19 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.patchBody, _ = io.ReadAll(r.Body)
 			cp.write(w, cp.patchResp)
 		case r.Method == "GET" && path == "/v1/sites/"+testSiteID:
+			// Default body, for the same reason the LIST route above has one: the
+			// `--prebuilt` lane now READS the site row before it mints (the
+			// opt-in preflight, ssw10-prebuilt-preflight-opt-in), so every
+			// pre-existing prebuilt test would otherwise hit an unset fakeResp —
+			// a 200 with an empty body — and fail to decode. An opted-in site is
+			// what those tests have always been modelling: they assert the mint
+			// and the upload SUCCEED, which the control plane only allows for a
+			// site whose prebuilt_enabled is true. A test that wants the other
+			// answer sets getResp itself.
+			if cp.getResp.body == "" && cp.getResp.status == 0 {
+				cp.write(w, fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","prebuilt_enabled":true}}`})
+				break
+			}
 			cp.write(w, cp.getResp)
 		default:
 			cp.t.Fatalf("unexpected request %s %s", r.Method, path)
@@ -2974,7 +2987,7 @@ func TestCloudSitePrebuiltPrintsThePathSiteBaseFromTheSlug(t *testing.T) {
 	cp := newSiteCP(t)
 	// The mint's real shape: queued, and NO url — deployment_url is nil until live.
 	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"freshbuildid00","content_rev":"cr-42","source":"prebuilt"}}`}
-	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"Blog","slug":"blog","kind":"static"}}`}
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"Blog","slug":"blog","kind":"static","prebuilt_enabled":true}}`}
 	cp.serve()
 
 	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
@@ -3020,7 +3033,7 @@ func TestCloudSitePrebuiltSiteBaseIgnoresADeploymentURL(t *testing.T) {
 
 	cp := newSiteCP(t)
 	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-9","status":"queued","build_id":"freshbuildid00","content_rev":"cr-7","source":"prebuilt","url":"https://guerrilla.barkpark.cloud/sites/blog/"}}`}
-	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"Blog","slug":"blog"}}`}
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"Blog","slug":"blog","prebuilt_enabled":true}}`}
 	cp.serve()
 
 	stdout, stderr, _ := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
@@ -4847,5 +4860,210 @@ func TestSiteStatusJSONCarriesThePublishTrigger(t *testing.T) {
 	without := spawnSiteMap(cloudclient.SpawnSite{ID: "s1"})
 	if _, ok := without["publish_trigger"]; ok {
 		t.Errorf("an unsent publish_trigger must be OMITTED, never rendered as an absence the CP did not claim: %v", without)
+	}
+}
+
+// --- the prebuilt opt-in: preflight + read path (ssw10) -----------------------
+
+// TestCloudSitePrebuiltRefusesAnUnOptedInSiteBeforeMintingOrPacking is the wire
+// proof for ssw10-prebuilt-preflight-opt-in. Prebuilt is a per-site opt-in
+// (charter D87) and `bp` used to learn that from the control plane's 422 — AFTER
+// the mint. A prebuilt mint is nonced, so the burned row cannot be re-used by
+// re-running the same command: the cost of learning late is an orphan queued
+// deployment and a command that never converges.
+//
+// The two counters ARE the test. deployHits==0 says nothing was minted;
+// artifactHits==0 says nothing was packed and shipped. A guard that merely
+// printed a warning would leave both non-zero.
+func TestCloudSitePrebuiltRefusesAnUnOptedInSiteBeforeMintingOrPacking(t *testing.T) {
+	const buildID = "b0b0b0b0b0b0b0b0"
+	dir := writeDistFixture(t, buildID)
+
+	cp := newSiteCP(t)
+	// The site row the control plane stores: off-box builds are NOT enabled.
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","prebuilt_enabled":false}}`}
+	// Both write routes are armed with a SUCCESS: if the guard did not fire, this
+	// test would pass the deploy, not error out — the counters below are the only
+	// thing standing between the two outcomes.
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"` + buildID + `","source":"prebuilt"}}`}
+	cp.artifactResp = fakeResp{201, `{"artifact_url":"db://artifact/dep-1"}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	if code == exitOK {
+		t.Fatalf("an un-opted-in site must not deploy --prebuilt\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	if cp.deployHits != 0 {
+		t.Fatalf("deploy hits=%d want 0 — the refusal must land BEFORE the mint (a prebuilt mint is nonced)", cp.deployHits)
+	}
+	if cp.artifactHits != 0 {
+		t.Fatalf("artifact hits=%d want 0 — the refusal must land BEFORE the pack", cp.artifactHits)
+	}
+	all := stdout + stderr
+	// The control plane's OWN wording (router.ex deploy_static_site), not a second
+	// divergent sentence for the same fault.
+	for _, want := range []string{
+		"builds on its box — enable off-box builds first",
+		`PATCH /v1/sites/` + testSiteID,
+		`{"prebuilt_enabled": true}`,
+		"bp cloud site settings " + testSiteID + " --prebuilt-enabled true",
+	} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("the refusal must carry %q:\n%s", want, all)
+		}
+	}
+	// THE HANDLE THE USER TYPED, not the row's name. The fixture's name is "blog"
+	// and the caller addressed the site by its id — a refusal that says "blog"
+	// names something the user never typed and cannot paste back.
+	if !strings.HasPrefix(strings.TrimSpace(all[strings.Index(all, testSiteID):]), testSiteID+" builds on its box") {
+		t.Fatalf("the refusal must open with the handle the caller typed (%s), not the row's name:\n%s", testSiteID, all)
+	}
+}
+
+// TestCloudSitePrebuiltUnreadableSiteRowStillMints is the CONTROL for the guard
+// above: it fires on a DEFINITE false, never on an absent answer. A site row that
+// could not be read is a saved round trip we did not get — not evidence about the
+// opt-in — so the deploy proceeds and the control plane's own 422 stays the
+// backstop. Without this arm the preflight would be fail-closed, and a flaky GET
+// would block deploys that the control plane would have accepted.
+func TestCloudSitePrebuiltUnreadableSiteRowStillMints(t *testing.T) {
+	const buildID = "b0b0b0b0b0b0b0b0"
+	dir := writeDistFixture(t, buildID)
+
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{500, `{"error":"boom"}`}
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"` + buildID + `","source":"prebuilt"}}`}
+	cp.artifactResp = fakeResp{201, `{"artifact_url":"db://artifact/dep-1"}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"live","stage":"RETIRE","build_id":"` + buildID + `","source":"prebuilt","url":"https://box.example/sites/blog/"}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	if code != exitOK {
+		t.Fatalf("an unreadable site row must not block the deploy: exit=%d\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if cp.deployHits != 1 {
+		t.Fatalf("deploy hits=%d want 1 — the mint must still happen", cp.deployHits)
+	}
+	if !strings.Contains(stdout+stderr, "could not read") {
+		t.Fatalf("an un-run check must be SAID, never implied to have passed:\n%s%s", stdout, stderr)
+	}
+}
+
+// TestSiteSettingsReceiptEchoesPrebuiltFromTheStoredRow is the row-2 proof, and
+// it is deliberately a test on the PRINTED BYTES rather than on cp.patchBody.
+// The pre-existing prebuilt-enabled test asserts only the request body, so a
+// control plane that stored `false` when you sent `true` — or an older one that
+// ignored the key — produced byte-identical output and nothing could see it.
+//
+// The fixture makes those two disagree on purpose: the request says true, the
+// stored row says false, and the receipt has to print the ROW.
+func TestSiteSettingsReceiptEchoesPrebuiltFromTheStoredRow(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.patchResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","theme":"ember","prebuilt_enabled":false}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "settings", testSiteID, "--prebuilt-enabled", "true")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s%s", code, stdout, stderr)
+	}
+	if !bytes.Contains(cp.patchBody, []byte(`"prebuilt_enabled":true`)) {
+		t.Fatalf("the request must still carry the flag: %s", cp.patchBody)
+	}
+	if !strings.Contains(stdout, "prebuilt: disabled") {
+		t.Fatalf("the receipt must echo the STORED row (false), not the request (true):\n%s", stdout)
+	}
+	if strings.Contains(stdout, "prebuilt: enabled") {
+		t.Fatalf("the receipt printed the request back — that is the A3 violation this row exists to kill:\n%s", stdout)
+	}
+
+	// And the other direction, so the line is not a constant.
+	cp2 := newSiteCP(t)
+	cp2.patchResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","theme":"ember","prebuilt_enabled":true}}`}
+	cp2.serve()
+	stdout2, _, _ := runSite(t, "table", "settings", testSiteID, "--prebuilt-enabled", "false")
+	if !strings.Contains(stdout2, "prebuilt: enabled") {
+		t.Fatalf("a stored true must print enabled:\n%s", stdout2)
+	}
+}
+
+// TestCloudSiteStatusCarriesThePrebuiltFlag: the opt-in gains a read path that
+// does not cost a deploy attempt. Before this, `bp` could TURN prebuilt on and
+// then never read it back from any surface — settings, status or -o json — and
+// the only oracle was the 422 from a mint that had already burned a nonced row.
+func TestCloudSiteStatusCarriesThePrebuiltFlag(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production","prebuilt_enabled":true}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "prebuilt") || !strings.Contains(stdout, "enabled —") {
+		t.Fatalf("the human status header must carry the opt-in:\n%s", stdout)
+	}
+
+	jout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("json status exit=%d", jcode)
+	}
+	var env struct {
+		Site map[string]any `json:"site"`
+	}
+	if err := json.Unmarshal([]byte(jout), &env); err != nil {
+		t.Fatalf("decode %q: %v", jout, err)
+	}
+	if env.Site["prebuilt_enabled"] != true {
+		t.Fatalf("the json shape must carry prebuilt_enabled=true, got %v:\n%s", env.Site["prebuilt_enabled"], jout)
+	}
+
+	// The other value, so the key is read from the row rather than hardcoded.
+	cp2 := newSiteCP(t)
+	cp2.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","prebuilt_enabled":false}}`}
+	cp2.serve()
+	sout2, _, _ := runSite(t, "table", "status", testSiteID)
+	if !strings.Contains(sout2, "disabled — this site builds on its box") {
+		t.Fatalf("a site that has not opted in must say so:\n%s", sout2)
+	}
+	jout2, _, _ := runSite(t, "json", "status", testSiteID)
+	if !strings.Contains(jout2, `"prebuilt_enabled": false`) && !strings.Contains(jout2, `"prebuilt_enabled":false`) {
+		t.Fatalf("the json shape must carry a false rather than omit it:\n%s", jout2)
+	}
+}
+
+// TestCloudSitePrebuiltMintReadsTheSourceBack: the mint receipt's "no build
+// started on the box" was printed from the LOCAL flag — it asserted the outcome
+// of the verb the user typed. A control plane that ignored source=prebuilt and
+// queued a real box build returned a row saying exactly that, and the line said
+// the opposite. The resume path already checked dep.Source; the mint did not.
+func TestCloudSitePrebuiltMintReadsTheSourceBack(t *testing.T) {
+	const buildID = "b0b0b0b0b0b0b0b0"
+	dir := writeDistFixture(t, buildID)
+
+	cp := newSiteCP(t)
+	// The control plane minted a BOX BUILD despite the prebuilt request.
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"` + buildID + `","source":"box-build"}}`}
+	cp.artifactResp = fakeResp{201, `{"artifact_url":"db://artifact/dep-1"}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"live","stage":"RETIRE","build_id":"` + buildID + `","source":"box-build","url":"https://box.example/sites/blog/"}}`}
+	cp.serve()
+
+	stdout, stderr, _ := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	all := stdout + stderr
+	if strings.Contains(all, "no build started on the box") {
+		t.Fatalf("the mint claimed no box build while the row it was handed said box-build:\n%s", all)
+	}
+	if !strings.Contains(all, "NOT a prebuilt one") {
+		t.Fatalf("a source the control plane did not honour must be reported:\n%s", all)
+	}
+
+	// The prebuilt row still says it, so the line is not merely deleted.
+	cp2 := newSiteCP(t)
+	cp2.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"` + buildID + `","source":"prebuilt"}}`}
+	cp2.artifactResp = fakeResp{201, `{"artifact_url":"db://artifact/dep-1"}`}
+	cp2.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"live","stage":"RETIRE","build_id":"` + buildID + `","source":"prebuilt","url":"https://box.example/sites/blog/"}}`}
+	cp2.serve()
+	sout2, serr2, _ := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	if !strings.Contains(sout2+serr2, "no build started on the box") {
+		t.Fatalf("a genuinely prebuilt mint must still say it:\n%s%s", sout2, serr2)
 	}
 }

@@ -122,6 +122,20 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 			exitValidation)
 	}
 
+	// THE DISCRIMINATION PRE-CHECK (task-33e42f188c491bbe). `--criterion-text`
+	// is the off-by-one guard, and every scripted caller defeats it the same
+	// way: it passes `crit[i]["criterion"]` READ BACK FROM THE ROW IT IS
+	// STAMPING, so the confirmation matches whatever index it lands on, by
+	// construction. Before the POST, ask the store what the row's criteria
+	// actually are and refuse the one case the wire can PROVE is worthless: a
+	// confirmation that byte-matches MORE THAN ONE index. Such a text cannot
+	// name a criterion — it fits several equally well — so it confirms nothing
+	// whichever index rides beside it, and the server's own match-at-index test
+	// accepts it anyway.
+	if rc := refuseNonDiscriminatingCriterionText(out, ctx, sa, cmd, forward); rc != exitOK {
+		return rc
+	}
+
 	// Echo the translated target so a 0-vs-1 base slip is visible immediately —
 	// stderr, so a scripted caller's stdout stays byte-identical to the bare
 	// manifest path (mirrors emitHelpHints).
@@ -929,4 +943,150 @@ func storedMergeGateFlag(c *apiclient.Client, docID string, idx int) (*bool, str
 			len(content.Criteria), docID, idx)
 	}
 	return content.Criteria[idx].MergeGate, content.Criteria[idx].Criterion, nil
+}
+
+// ─── THE DISCRIMINATION PRE-CHECK ───────────────────────────────────────────
+//
+// A GUARD WHOSE EXPECTED VALUE IS READ FROM THE THING IT GUARDS CANNOT FIRE
+// (task-33e42f188c491bbe). `--criterion-text` exists to catch an off-by-one:
+// the caller names index i and confirms it by quoting the criterion stored at
+// i, and the server refuses a mismatch. Every scripted caller measured on this
+// campaign produced that confirmation the same way — `crit[i]["criterion"]`,
+// read back from the row being stamped — so index and text came from ONE
+// expression and agreed BY CONSTRUCTION, for every i. The guard was present,
+// was invoked, returned success, and discriminated nothing.
+//
+// WHAT THIS CAN AND CANNOT DECIDE, stated plainly because the limit is the
+// point. Nothing on the wire distinguishes a hand-typed confirmation from a
+// copied one: on a row whose criteria are all DISTINCT, a text derived from
+// index i is byte-identical to a correct text for index i. A CLI-side
+// validation therefore cannot, even in principle, refuse "this was copied".
+// It CAN refuse the case where the supplied text is provably incapable of
+// naming a criterion: when it byte-matches the stored wording at MORE THAN ONE
+// index, the confirmation fits several criteria equally well, so pairing it
+// with any one of them asserts nothing the other indices do not also satisfy.
+// The server's match-at-index test accepts that text at every one of those
+// indices; this refuses it at all of them.
+//
+// THE RESIDUAL HAZARD IS NAMED, NOT CLOSED. On a distinct-criteria row the
+// silent-by-construction case survives this check (see
+// TestTaskStampExecute_RotatedIndicesOnDistinctCriteriaStillSilent, which
+// EXERCISES that survival rather than asserting it away). Closing it needs a
+// confirmation the row cannot supply — an index→prefix pin typed by the author
+// BEFORE the row is read, plus an alignment read-back — which is a change to
+// what the verb ASKS FOR, not to what it validates, and is not made here.
+const criterionTextNotDiscriminatingCode = "criterion_text_not_discriminating"
+
+// refuseNonDiscriminatingCriterionText reads the row's criteria BEFORE the POST
+// and refuses a met-stamp whose `--criterion-text` matches more than one of
+// them. Returns exitOK to mean "carry on".
+//
+// Armed for `--met` only, and only when a text was supplied: a miss flips
+// nothing, and a stamp with no text is already refused by the server
+// (criterion_text_required) with a better message than this one could give.
+//
+// ADVISORY ON A FAILED READ, BY DESIGN. If the store cannot be reached the
+// check says so on stderr and lets the stamp proceed: this is an ADDITIONAL
+// refusal layered on a server guard that still runs, so turning an unreachable
+// read into a blocked write would trade a narrow false-negative for a broad
+// outage. "We could not ask" is reported, never silently treated as a pass.
+func refuseNonDiscriminatingCriterionText(out *writer, ctx manifest.Context, sa stampArgs, cmd manifest.Command, forward []string) int {
+	if !sa.met || sa.criterion == nil {
+		return exitOK
+	}
+	want := strings.TrimSpace(sa.criterionText)
+	if want == "" {
+		return exitOK
+	}
+	req, ok := stampRequestOf(cmd, forward)
+	if !ok {
+		return exitOK
+	}
+	texts, err := storedCriterionTexts(taskReadbackClient(ctx), req.docID)
+	if err != nil {
+		out.errf("(could not read %s back to check that --criterion-text names ONE criterion: %v — the stamp proceeds under the server's guard alone)", req.docID, err)
+		return exitOK
+	}
+	matches := criterionTextMatchIndices(texts, want)
+	if len(matches) < 2 {
+		return exitOK
+	}
+	return useError(out, criterionTextNotDiscriminatingCode,
+		fmt.Sprintf("refusing this stamp: --criterion-text does not name ONE criterion. The wording you passed byte-matches the stored criterion at %s of %s — so it confirms index %d no more than it confirms the others, and the off-by-one guard it is supposed to be is inert for this row. %s",
+			pluralIndexList(matches), pluralCount(len(texts), "criterion", "criteria"), *sa.criterion,
+			"Fix the ROW, not the invocation: duplicate criteria are unstampable-with-confidence by anyone, so patch the wording so each criterion says something only it says (`bp task get <id> -o json | jq '.doc.content.acceptance_criteria'`, then `bp doc patch task <id> --set 'acceptance_criteria:=<the corrected list>'`), then stamp again."),
+		exitValidation)
+}
+
+// criterionTextMatchIndices reports every index whose stored criterion is the
+// supplied text, compared on trimmed bytes — the same comparison the read-back
+// verdict (stampMismatches) and the server's guard use, so the three can never
+// disagree about what "matches" means.
+//
+// EMPTY STORED SLOTS NEVER MATCH. A row shorter than the indices in play, or a
+// criteria list carrying a blank entry, would otherwise collide with every
+// other blank and manufacture a refusal out of the row's shape rather than its
+// wording. The supplied text is already known non-empty at the call site.
+func criterionTextMatchIndices(criteria []string, want string) []int {
+	var out []int
+	for i, c := range criteria {
+		stored := strings.TrimSpace(c)
+		if stored == "" {
+			continue
+		}
+		if stored == want {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// storedCriterionTexts reads the row's acceptance_criteria and returns just the
+// wording, positionally. The decode is local and minimal for the same reason
+// storedMergeGateFlag's is: internal/taskboard's CriterionItem models the row a
+// BOARD renders, and this needs the whole LIST, not one item.
+func storedCriterionTexts(c *apiclient.Client, docID string) ([]string, error) {
+	rb, err := c.TaskGetContent(docID)
+	if err != nil {
+		return nil, err
+	}
+	var content struct {
+		Criteria []struct {
+			Criterion string `json:"criterion"`
+		} `json:"acceptance_criteria"`
+	}
+	if err := json.Unmarshal(rb.Content, &content); err != nil {
+		return nil, fmt.Errorf("the store's acceptance_criteria did not decode: %w", err)
+	}
+	texts := make([]string, len(content.Criteria))
+	for i, item := range content.Criteria {
+		texts[i] = item.Criterion
+	}
+	return texts, nil
+}
+
+// pluralIndexList renders "indices 0, 3 and 5" (0-based, as the flag is) with
+// the 1-based board positions beside them, because the refusal is ABOUT index
+// confusion and a message that speaks only one base would add to it.
+func pluralIndexList(idx []int) string {
+	parts := make([]string, len(idx))
+	for i, n := range idx {
+		parts[i] = fmt.Sprintf("index %d (#%d as boards number them)", n, n+1)
+	}
+	switch len(parts) {
+	case 0:
+		return "no index"
+	case 1:
+		return parts[0]
+	default:
+		return strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
+	}
+}
+
+// pluralCount renders "4 criteria" / "1 criterion".
+func pluralCount(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
