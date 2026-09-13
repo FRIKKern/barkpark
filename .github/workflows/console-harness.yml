@@ -577,7 +577,17 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
-      # PIN 1436 — bumped 2026-09-12 from 1431. #17919 (E11 widen, dcbd22469)
+      # PIN 1437 — bumped 2026-09-13 from 1436. This PR adds one arm to
+      # cloud/priv/static/__app.test.mjs (the /new launch step's unknown arm in the
+      # preview corpus); a local node-20 `bash scripts/console-harness.sh` on
+      # 25f69770f (this branch re-rebased onto origin/main f4743352d, the base that
+      # carries #18046 and #18088) reports `# tests 1437 / # pass 1437 / # fail 0`.
+      # origin/main still pins 1436 on that same base — #18046 grew the preview
+      # corpus, not __app.test.mjs — so this branch's +1 arm is still the only
+      # mover. The earlier draft of this note cited 4835a2bcb, a pre-rebase SHA
+      # that the rebase orphaned; the number did not move, the commit it was
+      # measured on did.
+      # Previously PIN 1436 — bumped 2026-09-12 from 1431. #17919 (E11 widen, dcbd22469)
       # grew __app.test.mjs by +5 arms and did NOT bump this literal in the same
       # diff, so every console PR (and main) reddened here at 1436-vs-1431. Re-derived
       # on origin/main 7b3145e1d: the CI console-unit run for #17982 reported
@@ -590,7 +600,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1436-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1437-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -606,14 +616,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1436 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1436 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1437 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1437 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1436 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1436 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1436 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1437 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1437 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1437 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1436 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1437 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -674,7 +684,14 @@ jobs:
           echo "::error title=console-unit ${v} — member-authority-sweep.mjs::member-authority-sweep.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
           exit 1
 
-      # The seal predicate's OWN TESTS — never a live seal run. `seal-predicate.mjs`
+      # The seal predicate's OWN TESTS — never a live seal run HERE. That clause is
+      # about THIS JOB'S CHECKOUT, not about live runs in general: the one live
+      # machine-taken reading lives in .github/workflows/seal-reading.yml, which
+      # checks out at `fetch-depth: 0` detached at origin/main and puts
+      # `scripts/seal-run.sh` in front of the predicate so a tree that cannot
+      # support a quotable reading is REFUSED rather than published. It is
+      # advisory and carries an S7 exclusion row in .github/required-checks.json.
+      # The paragraph below is why THIS job must not do that. `seal-predicate.mjs`
       # decides clause (b) with `git merge-base --is-ancestor`, and under
       # actions/checkout@v4's depth-1 default (what both jobs here use) that exits
       # 128 `Not a valid object name`; the predicate catches ANY non-zero as "not an
@@ -682,7 +699,11 @@ jobs:
       # NO SEAL out of a shallow clone. What runs here instead is the predicate's
       # test file, which drives it against COMMITTED FIXTURES through `--ledger`:
       # a fixture's own `landed`/`diffs` entries stand in for those git reads
-      # (seal-predicate.mjs:441-450), so the fixture-driven tests never ask a
+      # (`grep -n 'Fixture mode is a MUTATION CONTROL' seal-predicate.mjs` — that
+      # block is where `landed` stands in for the ancestry read; the line number
+      # this comment used to carry, 441-450, had rotted onto unrelated code by the
+      # time anyone re-derived it, which is why it is a grep now), so the
+      # fixture-driven tests never ask a
       # shallow clone a question it cannot answer.
       #
       # TWO THINGS THE OLD TEXT HERE ASSERTED AND THE BYTES REFUSE, both re-measured
@@ -691,7 +712,7 @@ jobs:
       #   * NOT every spawn is `--guard-cmd true`. Most are — that stub is how the
       #     fixture tests isolate clause (b) from the guard arm — but the clause-(b)
       #     ladder section runs WITHOUT it on purpose (its own words, at
-      #     seal-predicate.test.mjs:546: "Run WITHOUT --guard-cmd, so the two
+      #     `grep -n 'Run WITHOUT --guard-cmd' seal-predicate.test.mjs`: "Run WITHOUT --guard-cmd, so the two
       #     committed guards actually execute"), so the two registered rung-1
       #     guards — cloud/priv/static/__app.test.mjs and design/emit-fence.test.mjs
       #     — really spawn and their stdout is really matched against `guardExpect`.

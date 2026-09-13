@@ -122,6 +122,7 @@ defmodule BarkparkWeb.AccessController do
   alias Barkpark.Accounts.User
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy.Auth
+  alias BarkparkWeb.ErrorResponse
 
   # The ONLY grant fields ever serialized. `link_token_hash` (raw-secret hash) is
   # absent BY CONSTRUCTION — a new schema field is invisible until added here.
@@ -350,28 +351,25 @@ defmodule BarkparkWeb.AccessController do
   # The single no-oracle failure — byte-identical for every claim failure kind.
   defp invalid_grant(conn) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{
-      error: %{code: "invalid_grant", message: "This access link is invalid or has expired."}
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+      code: "invalid_grant",
+      message: "This access link is invalid or has expired."
     })
   end
 
   defp forbidden(conn, message) do
     conn
-    |> put_status(:forbidden)
-    |> json(%{error: %{code: "forbidden", message: message}})
+    |> ErrorResponse.emit_fields(:forbidden, %{code: "forbidden", message: message})
   end
 
   defp not_found(conn) do
     conn
-    |> put_status(:not_found)
-    |> json(%{error: %{code: "not_found", message: "grant not found"}})
+    |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: "grant not found"})
   end
 
   defp unprocessable(conn, message) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", message: message})
   end
 
   defp changeset_message(%Ecto.Changeset{} = changeset) do

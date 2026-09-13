@@ -3058,6 +3058,31 @@ const EXPECTATIONS = {
       assert.ok(!body.includes("new-progress"), "the progress theater has handed over");
     },
   },
+  // cch-w48-s1-followup — THE FUNNEL'S OWN UNKNOWN ARM, RENDERED AT LAST.
+  // cch-w48-s1 gave the /new launch step a three-valued band and the shared
+  // [data-me-retry] exit, and pinned both in node. No committed fixture ever
+  // answered /v1/me with anything but a 200 on this path, so the exit existed in
+  // the corpus only as an assertion about a string: nothing proved a browser
+  // paints it, or that the form is really withheld behind it.
+  "new-launch-me-unreadable": {
+    what: "/new whose /v1/me 500s — the honest unknown arm with its ONE Retry, and no form behind it",
+    check(reg) {
+      assert.equal(reg.get("new-screen").hidden, false, "the /new screen must be visible");
+      assert.equal(reg.get("app-shell").hidden, true, "the app shell stays hidden on /new");
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes('class="new-title">Astro Blog'), "the template card still renders — only the OFFER is withheld");
+      // FAIL CLOSED: the step withholds the whole form, never a disabled ghost.
+      assert.ok(!body.includes("new-launch-btn"), "an unread role must not sell the Launch the server may refuse");
+      assert.ok(!body.includes("new-name"), "…and not the name field behind it either");
+      // The honest fault, and the ONE exit — this is the byte-level proof the
+      // node pin could not buy: a real browser paints the retry on this screen.
+      assert.ok(body.includes("We couldn't check your account"), "a failed read is reported as a fault, never as a refusal");
+      assert.ok(body.includes("We can&#39;t offer Launch until we know your role on this team."),
+        "the per-surface consequence names what is withheld and why");
+      assert.equal(countMatches(body, "data-me-retry"), 1, "exactly one exit — the page's own, not the dashboard's");
+      assert.ok(!body.includes("admin role on this team"), "a fault is not a refusal: it must not name a role nobody asked about");
+    },
+  },
 
   // ── gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview states (tail-append, OC9) ─
   "overview-trial-runway": {
@@ -5520,6 +5545,68 @@ const EXPECTATIONS = {
       await ctx.settle();
       assert.equal(ctx.countCalls("POST", "/v1/barkparks/" + SCEN_IDS.liveInstance + "/retry"), 1,
         "…and it POSTs /retry exactly once — the primitive the note names in words");
+    },
+  },
+
+  // ── cch-w38-s1-fu (task-8cf413b005cbcd40) · THE MEMBER ARM OF THE SAME THREE ─
+  // Each of these is the fixture directly above with ONE axis moved (the actor),
+  // and each asserts BOTH directions on the same screen: the live mount hook is
+  // ABSENT, and the disable-and-explain wrapper the refusal renders instead is
+  // PRESENT with its reason. Both halves are load-bearing and neither is
+  // redundant — a control that simply VANISHED for everybody also satisfies "no
+  // live hook", which is the failure #12996's own mutation 2 names by hand ("If
+  // the control is simply ABSENT from that markup, that is the defect and not
+  // the fix"). The owner arm above is what proves the state renders at all.
+  "instance-behind-member": {
+    what: "the behind box's self-update CTA, entered by a plain MEMBER — no live #inst-update anywhere in the bytes, and the refusal is the disabled wrapper pointing at the strip's ONE reason",
+    check(reg) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-body rendered empty");
+      assert.equal(body.indexOf('id="inst-update"'), -1,
+        "a member must never be handed the live #inst-update mount hook — POST /v1/barkparks/:id/self-update is require_current_team_admin and the server would refuse the click");
+      assert.ok(body.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-header-actions-reason">Update to v0.9.2</button></div>'),
+        "…and it is WITHHELD, not deleted: the same verb, same label, drawn disabled and pointed at the strip's reason (D428)");
+      assert.ok(body.includes('<span class="inst-life-reason" id="inst-header-actions-reason">You need the admin role on this team'),
+        "the strip states WHY once, at the id every disabled control in it addresses");
+      // The state is still the one that produces the offer — otherwise this
+      // would be an assertion about a box that is simply up to date.
+      assert.ok(body.includes("Update available"), "the pill states the same fact the withheld CTA would have acted on");
+    },
+  },
+  "instance-remove-failed-member": {
+    what: "the failed teardown's Retry removal, entered by a plain MEMBER — no live #inst-remove-retry, the disabled wrapper instead, and the server's verbatim reason still rendered",
+    check(reg) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-body rendered empty");
+      assert.equal(body.indexOf('id="inst-remove-retry"'), -1,
+        "a member must never be handed the live #inst-remove-retry mount hook — DELETE /v1/barkparks/:id is require_current_team_admin");
+      assert.ok(body.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-header-actions-reason">Retry removal</button></div>'),
+        "…and it is WITHHELD, not deleted");
+      assert.ok(body.includes('<span class="inst-life-reason" id="inst-header-actions-reason">You need the admin role on this team'),
+        "the refusal is EXPLAINED, not silent");
+      // A refused verb does not change what the box IS: the failure is still
+      // reported to the member in the server's own words.
+      assert.ok(body.includes("<b>Removal failed.</b> hcloud: server delete returned 409 (a volume is still attached)"),
+        "the deprovision_error is rendered verbatim to a member too — the fence is on the WRITE, not on the truth");
+    },
+  },
+  "instance-failed-member": {
+    what: "the provision timeline's docked Retry setup, entered by a plain MEMBER — no live [data-tl-retry], and the refusal carries its own inline reason span (this strip has no group id)",
+    check(reg) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-body rendered empty");
+      assert.equal(body.indexOf("data-tl-retry"), -1,
+        "a member must never be handed the live [data-tl-retry] mount hook — POST /v1/barkparks/:id/retry is require_current_team_admin");
+      // NOT the aria-describedby shape: instanceTimelineHtml passes no
+      // groupReasonId, so adminWriteControlHtml takes its title+span arm. The
+      // two shapes are asserted apart on purpose — collapsing them to a
+      // substring of "inst-life-disabled" would pass on either.
+      assert.ok(body.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Retry setup</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
+        "…and it is WITHHELD with its own inline reason, and WITHOUT the dock class: .bp-tl-retry is position:fixed, and a refusal is never a floating control");
+      assert.equal(body.indexOf("bp-tl-retry"), -1,
+        "the dock rides the GRANT arm only — a fixed dead button would float over every screen and strand its reason back at the timeline");
+      assert.ok(body.includes("<b>Setup failed.</b> verify.login: 500 — Studio never came up"),
+        "the failure is still reported to the member verbatim");
     },
   },
 

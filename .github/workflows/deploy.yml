@@ -134,6 +134,62 @@ jobs:
           DISPATCH_TARGETS: ${{ inputs.targets }}
           DISPATCH_REASON: ${{ inputs.reason }}
         run: |
+          # ── SUPERSEDED AT START — exit before ANY remote box mutation ───────
+          #
+          # (task-01f48337d83a0d15) A merge storm queues N per-sha deploy runs
+          # (MEASURED 2026-09-11T19:44Z: 8 in_progress + 4 queued,
+          # 30d7c357c..3a9faf139) and only the NEWEST main-ancestry sha matters.
+          # The "already covered" exit below fires only once a newer sha has
+          # COMPLETED, so it cannot drain a pile that is still IN FLIGHT. This
+          # fires while a newer sha is still in_progress/queued: the run sets
+          # cp=false + instance=false and exits 0, so the deploy jobs SKIP and no
+          # scp/ssh — no remote box mutation — ever happens for this sha.
+          #
+          # ANCESTRY, NEVER WALL CLOCK. "Newer" is descendancy on main via
+          # `git merge-base --is-ancestor` (scripts/deploy-supersede-exit.sh,
+          # which borrows scripts/deploy-convergence-check.sh's is_ancestor
+          # discipline). A run created later can carry an OLDER commit; trusting
+          # creation time is task-0c3069135d1b4bfd's exact defect.
+          #
+          # NEVER A CANCEL (honest-gates D12). This run decides only about
+          # ITSELF and exits at START. It never runs `gh run cancel`, never
+          # touches another run, and the newest run is never superseded (no
+          # in-flight candidate is its strict descendant). `concurrency` keeps
+          # `cancel-in-progress: false`; scripts/never-cancel-main-check.sh stays
+          # green because nothing here adds a bare `cancel-in-progress: true`.
+          #
+          # PUSH ONLY, same reason as the already-covered exit: a
+          # workflow_dispatch is the DELIBERATE repair named in
+          # report-convergence-failure's issue body, and must never talk itself
+          # out of deploying.
+          #
+          # FAIL-OPEN. Only exit code 3 (a clean, ancestry-proven "a newer run
+          # is in flight") skips. rc 0 (we are newest) and rc 2 (could not look)
+          # both fall through to a normal deploy — a redundant deploy coalesces
+          # on the box's lock, a wrongly-skipped one strands a commit.
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            # in_progress + queued deploy.yml runs on main, one per line as
+            # "<run_id> <sha> <status> <created_at>". created_at is carried only
+            # to prove the decision ignores it; --limit is generous so a wide
+            # merge storm is fully enumerated. A gh failure yields an empty list
+            # and the decider then PROCEEDS (fail-open).
+            super_rc=0
+            gh run list --workflow=deploy.yml --branch=main --limit 80 \
+                --json databaseId,headSha,status,createdAt \
+                --jq '.[] | select(.status=="in_progress" or .status=="queued") | "\(.databaseId) \(.headSha) \(.status) \(.createdAt)"' \
+              2>/dev/null \
+              | bash scripts/deploy-supersede-exit.sh decide \
+                  --our-run-id "$GITHUB_RUN_ID" --our-sha "$GITHUB_SHA" || super_rc=$?
+            if [ "$super_rc" -eq 3 ]; then
+              echo "::notice title=deploy superseded at start::a newer main-ancestry sha is already in_progress/queued; skipping the deploy jobs. This is NOT a failure — the deploy legs are SKIPPED and no box is touched."
+              echo "cp=false" >> "$GITHUB_OUTPUT"
+              echo "instance=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$super_rc" -ne 0 ]; then
+              echo "::warning::deploy-supersede-exit could not decide (rc=${super_rc}) — proceeding to deploy (fail-open)."
+            fi
+          fi
           # Diff since the last SUCCESSFUL deploy of THIS workflow, not just the
           # previous push. Every push now gets its own concurrency group (see the
           # stanza above), so a run is no longer evicted before it starts — but it

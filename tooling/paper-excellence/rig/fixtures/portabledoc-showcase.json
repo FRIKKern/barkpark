@@ -422,6 +422,7 @@
       "caption": "A figure wraps any single child block and captions it — here, an image.",
       "child": {
         "alt": "The element inventory",
+        "id": "fd-018-child-0",
         "src": "/media/files/2026/07/elements-c94b8cbc.png",
         "type": "image"
       },
@@ -895,11 +896,13 @@
                 "value": " width math as every other side-by-side surface."
               }
             ],
+            "id": "fd-058-column-0-0",
             "type": "paragraph"
           }
         ],
         [
           {
+            "id": "fd-058-column-1-0",
             "items": [
               [
                 {
@@ -937,6 +940,7 @@
               "value": "$ bp doc query paper | grep portabledoc-showcase"
             }
           ],
+          "id": "fd-059-0",
           "type": "paragraph"
         },
         {
@@ -946,6 +950,7 @@
               "value": "→ 1 document · 3 surfaces · 0 divergences"
             }
           ],
+          "id": "fd-059-1",
           "type": "paragraph"
         }
       ],
@@ -1225,9 +1230,11 @@
               "value": "$ bp task ls --parent tui-mermaid-diagrams"
             }
           ],
+          "id": "fd-080-0",
           "type": "paragraph"
         },
         {
+          "id": "fd-080-1",
           "query": {
             "parent_id": "tui-mermaid-diagrams"
           },
@@ -2007,7 +2014,7 @@
       "type": "filetree"
     }
   ],
-  "source_rev": "ba2b7e477aaec671ecbd0c7065b72c22",
+  "source_rev": "11b70f9a0f8ff35ddf8679f1030757c6",
   "style": "article",
   "title": "Every component, on every surface"
 }

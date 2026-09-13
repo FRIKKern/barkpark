@@ -96,6 +96,8 @@ function sparkSvg(values: number[]): string {
   return `<svg class="bp-stat__spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}"/></svg>`
 }
 
+const VERDICTS = ['loss', 'peace']
+
 const stat: Emit = (block) => statHtml(block)
 
 function statHtml(block: unknown): string {
@@ -124,7 +126,17 @@ function statHtml(block: unknown): string {
   // THE KILDE LAW: a stat is a datum, and a datum carries its provenance.
   const ref = parseSourceRef(displayString(get(block, 'source')))
   const kilde = kildeHtml(ref === null ? [] : [ref])
-  return `<div class="bp-stat">${bar}<div class="bp-stat__v">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
+  // THE VERDICT: 'loss' or 'peace' paints the DIGITS in the verdict ink
+  // (design/tokens.json color.verdict; paper-surface.css .bp-stat__v--loss /
+  // --peace). Only the value moves — label, body and rule keep the page voice,
+  // so the number carries the judgement and the tile does not become a coloured
+  // box. Off-vocabulary or absent → the bare class, byte-identical to before.
+  // MIRROR of data_viz.ex stat_html/1; tests/stat-verdict.parity.test.ts holds
+  // the two halves together.
+  const verdictMod = VERDICTS.includes(displayString(get(block, 'verdict')))
+    ? ` bp-stat__v--${displayString(get(block, 'verdict'))}`
+    : ''
+  return `<div class="bp-stat">${bar}<div class="bp-stat__v${verdictMod}">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
 }
 
 const stats: Emit = (block) => {
@@ -270,6 +282,14 @@ const duel: Emit = (block) => {
 // `value`) carry the provenance obligation (own `source`, else
 // `sourceDefault`).
 
+// tone_class/2's mirror (data_viz.ex): the four-word verdict vocabulary the
+// chart regions already use. An absent or unrecognised tone yields the bare
+// base class, so every lineage authored before the clock strip is unchanged.
+function toneClass(base: string, tone: unknown): string {
+  const t = displayString(tone)
+  return t === 'info' || t === 'ok' || t === 'warn' || t === 'danger' ? `${base} ${base}--${t}` : base
+}
+
 function lineageNodeHtml(n: unknown): string {
   const overline = displayString(get(n, 'overline'))
   const title = displayString(get(n, 'title'))
@@ -282,7 +302,7 @@ function lineageNodeHtml(n: unknown): string {
     (title === '' ? '' : `<div class="bp-lineage__title">${escapeHtml(title)}</div>`) +
     (value === '' ? '' : `<div class="bp-lineage__value">${escapeHtml(value)}${unitHtml}</div>`) +
     (body === '' ? '' : `<div class="bp-lineage__body">${escapeHtml(body)}</div>`)
-  return `<li class="bp-lineage__node">${parts}</li>`
+  return `<li class="${toneClass('bp-lineage__node', get(n, 'tone'))}">${parts}</li>`
 }
 
 const lineage: Emit = (block) => {

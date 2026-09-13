@@ -79,4 +79,58 @@ defmodule BarkparkCloud.Sites.BuildLogBytesProducerLockTest do
     assert rendered -- producer == [],
            "BuildLogBytes reads #{inspect(rendered -- producer)}, which the box never emits"
   end
+
+  ## The fixture must not depend on WHICH tests ran alongside it ---------------
+
+  @fake_relay "test/support/sites_fake_box_relay.ex"
+
+  defp fake_relay_path do
+    Path.expand(Path.join([__DIR__, "..", "..", "..", @fake_relay]))
+  end
+
+  # THE INCIDENT THIS PINS. `terminal_record/4` used to reach the caller's opts
+  # through `String.to_existing_atom(key)` over its own string-keyed defaults.
+  # `:finished_at` is interned by modules the FULL suite loads, so CI was green
+  # forever — while `mix test test/barkpark_cloud/web/`, or either RouterBuildLog
+  # file on its own, killed all 11 tests that call this helper with
+  # "1st argument: not an already existing atom". A fixture whose correctness
+  # depends on the run's file selection is not a fixture.
+  test "the fake box relay interns no atom at runtime" do
+    # CODE ONLY. The prose above and the note in the fixture itself both name the
+    # banned call; a guard that matched them would red on its own explanation.
+    source =
+      fake_relay_path()
+      |> File.read!()
+      |> String.split("\n")
+      |> Enum.reject(&(String.trim_leading(&1) =~ ~r/^#/))
+      |> Enum.join("\n")
+
+    refute source =~ "to_existing_atom",
+           """
+           #{@fake_relay} calls String.to_existing_atom/1.
+
+           That makes the fixture's behaviour depend on whether some other module
+           in the same run already interned the atom: green for the full suite,
+           ArgumentError for a narrow `mix test <dir>`. The opt names are literals
+           in the source — write them as atoms and derive the string with
+           Atom.to_string/1.
+           """
+  end
+
+  # THE CONTROL for the rewrite above: the atom -> string conversion must still
+  # let a caller override a default by its atom opt name. A version that only
+  # stopped interning atoms, and quietly stopped honouring opts, passes the guard
+  # above and fails here.
+  test "terminal_record/4 honours an opt override keyed by atom" do
+    {:ok, 200, default} = FakeBoxRelay.terminal_record("blog", "bld-1", "available")
+
+    {:ok, 200, overridden} =
+      FakeBoxRelay.terminal_record("blog", "bld-1", "available",
+        finished_at: "2027-01-01T00:00:00Z"
+      )
+
+    assert default["finished_at"] == "2026-08-06T01:04:00Z"
+    assert overridden["finished_at"] == "2027-01-01T00:00:00Z"
+    assert overridden["log_state"] == "available"
+  end
 end

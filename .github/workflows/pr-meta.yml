@@ -171,14 +171,33 @@ jobs:
       # node-test-floor.mjs (not bare `node --test`): a zero-match glob, a dropped
       # path or a file that registers no tests is a red, and `--floor 1` pins the
       # file count; the tally assert pins the 12 tests the pin was filed with.
-      - name: tooling/status tests (node-test-floor, 12-test tally)
+      #
+      # THE 12 IS A DELIBERATE FLOOR, NOT A DERIVED COUNT, and this is the
+      # rationale rather than the omission (task-32fe5f327e91f23d).
+      # DERIVATION, dated: `node scripts/node-test-floor.mjs --floor 1
+      # 'tooling/status/test/*.test.mjs'` printed `ran 12 tests from 1 files
+      # (pass 12, fail 0)` on 2026-09-12 against 45e59e3c8 — so the floor equals
+      # the tree's tally TODAY, with zero headroom, which is what makes a single
+      # deleted test red it.
+      # WHY NOT DERIVED. A count re-derived from the tree each run asserts
+      # nothing: it re-measures the same number it compares against and a
+      # deletion moves both sides together — the vacuous shape this repo already
+      # paid for in the gate-map snapshot two steps below (a DERIVED map, but
+      # its `--verify` deliberately checks PROPERTIES a removal breaks, never a
+      # committed count). The pin's job is to survive the deletion, so its
+      # expected value must come from OUTSIDE the run: a number typed here by a
+      # human, on the date below, with the direction of travel stated. `-lt` and
+      # not `-ne` on purpose — ADDING tests must never red this step; only
+      # losing them. RAISING IT is the deliberate act that re-earns it: when the
+      # suite grows, bump this number and re-date this block.
+      - name: tooling/status tests (node-test-floor, 12-test floor, re-derived 2026-09-12)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           set -euo pipefail
           node scripts/node-test-floor.mjs --floor 1 'tooling/status/test/*.test.mjs' 2>&1 | tee /tmp/status-tests.txt
           tally=$(sed -nE 's/^node-test floor: ran ([0-9]+) tests .*/\1/p' /tmp/status-tests.txt | tail -1)
           if [ "${tally:-0}" -lt 12 ]; then
-            echo "::error::tooling/status: ran ${tally:-0} test(s), the pin was filed with 12 — a test file stopped being discovered or tests were deleted; lower the floor here deliberately or restore them"
+            echo "::error::tooling/status: ran ${tally:-0} test(s), the deliberate FLOOR here is 12 (re-derived 2026-09-12: the tree ran exactly 12 from 1 file) — a test file stopped being discovered or tests were deleted; restore them, or lower the floor here deliberately and re-date the derivation comment above this step"
             exit 1
           fi
           echo "tooling/status: ${tally} tests, floor 12 — pin re-earned"

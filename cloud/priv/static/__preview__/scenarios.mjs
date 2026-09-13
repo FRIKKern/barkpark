@@ -4335,6 +4335,27 @@ export const SCENARIOS = {
       catalog: theaterCatalog,
     },
   },
+  // cch-w48-s1-followup — THE /new LAUNCH STEP'S UNKNOWN ARM, INSTRUMENTED.
+  // cch-w48-s1 gave that step a three-valued band and an exit, and pinned both
+  // in node. Nothing RENDERED the unanswered arm: every committed /new fixture
+  // answers /v1/me, so the funnel's own [data-me-retry] — the one control a
+  // person stuck behind a failed role read can press — existed in the corpus
+  // only as an assertion about a string. It reuses the `meFault` override
+  // (route() in this file) the billing arms already consume rather than minting
+  // a second mechanism, and it sits on the SAME deep link as new-launch, so no
+  // new residue family is created.
+  "new-launch-me-unreadable": {
+    label: "/new — the launch step whose /v1/me 500s: the honest unknown arm with its one Retry, never a form and never a refusal",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog",
+    data: {
+      me: me("Ada's Lab"),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [], subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+    },
+  },
 
   // ── gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview states (tail-append, OC9) ─
   // Three states of the ONE Overview region: the self-healing trial runway, the
@@ -5687,6 +5708,88 @@ export const SCENARIOS = {
       // so verifyNoteHtml("no_admin_token", …) — and the [data-vf-reprovision]
       // mount inside it — was unreachable from this harness at all.
       instanceVerify: { status: 404, body: { error: "no_admin_token" } },
+    },
+  },
+
+  // ── cch-w38-s1-fu (task-8cf413b005cbcd40): THE MEMBER ARM OF THE THREE STATES
+  // ABOVE. The three owner fixtures directly above exist so #inst-update,
+  // #inst-remove-retry and [data-tl-retry] can render AT ALL; their comment says
+  // the member arm "is already pinned in __app.test.mjs's cch-w38-s1 eleven-offer
+  // table". That is a unit-level pin over a hand-built markup string — and
+  // member-authority-sweep.mjs, the console's ONLY rendered-bytes instrument for
+  // "what is a plain member actually OFFERED", could not see any of the three:
+  // MEASURED on origin/main 661e87d9f3 by booting all 125 committed scenarios
+  // through smoke.mjs's shim and scanning every registry entry's innerHTML,
+  //   id="inst-update"        1 hit  (instance-behind,        actor OWNER)
+  //   id="inst-remove-retry"  1 hit  (instance-remove-failed, actor OWNER)
+  //   data-tl-retry           1 hit  (failed,                 actor OWNER)
+  //   data-vf-reprovision     0 hits (see the note on the last scenario below)
+  // so the sweep's verdict over PR #12996 did not move across the defect and its
+  // repair: it exited 0 with 0 findings BOTH ways. An unlosable green.
+  //
+  // Each of these three is byte-identical to the owner fixture it sits beside
+  // except for the ONE moved axis — me(…, "member", …) — which is the same shape
+  // `site-member` and `panel-overview-member` use. The deepLink is deliberately
+  // IDENTICAL to the owner fixture's, because member-authority-sweep pairs every
+  // member screen with a PRIVILEGED TWIN on the same deep link and reds if the
+  // twin does not out-render the member; these three fixtures ARE those twins.
+  "instance-behind-member": {
+    label: "Instance header as a plain MEMBER — the behind box's self-update CTA is disabled-and-explained, never offered (POST /v1/barkparks/:id/self-update is team-admin)",
+    authed: true,
+    deepLink: "#instance/" + IDS.behindInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member", "usr_rex"),
+      barkparks: [liveInstance, behindInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  "instance-remove-failed-member": {
+    label: "Instance header as a plain MEMBER — the failed teardown's Retry removal is disabled-and-explained, never offered (DELETE /v1/barkparks/:id is team-admin)",
+    authed: true,
+    deepLink: "#instance/" + IDS.removeFailedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member", "usr_rex"),
+      barkparks: [liveInstance, removeFailedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  // The timeline's docked Retry setup. Its owner twin is `failed` (the solo
+  // failed box), so this fixture carries `failed`'s OWN barkpark row rather than
+  // failedInstanceRow — the deepLink must match the twin's for the sweep's
+  // per-screen positive control to bind.
+  //
+  // THE FOURTH SITE IS NOT HERE, AND THAT IS DECLARED RATHER THAN SKIPPED.
+  // [data-vf-reprovision] is painted by verifyNoteHtml's no_admin_token arm,
+  // which runVerifyNow reaches only after a CLICK on [data-vf-run] issues
+  // POST /verify and collects a 404. member-authority-sweep BOOTS scenarios; it
+  // never drives them. So the control renders in ZERO of the 125 committed
+  // scenarios — `verify-no-credentials` included, which is the fixture that
+  // exists for it — and no member fixture can make it reachable to this
+  // instrument. It is unreachable HERE by construction, and it is named in the
+  // sweep's own BLIND SPOTS list (B5) for that reason. Its member arm is scored
+  // by smoke.mjs's `verify-no-credentials` drive, which does click.
+  "instance-failed-member": {
+    label: "Provision timeline as a plain MEMBER — the docked Retry setup is disabled-and-explained, never offered (POST /v1/barkparks/:id/retry is team-admin)",
+    authed: true,
+    deepLink: "#instance/" + IDS.soloFailed,
+    data: {
+      me: me("Acme Inc", { instance: true }, "member", "usr_rex"),
+      barkparks: [bpBase({
+        id: IDS.soloFailed,
+        name: "Reporting",
+        slug: "reporting",
+        provision_status: "failed",
+        provision_error: "verify.login: 500 — Studio never came up",
+        provision_steps: failedSteps,
+        provision_console: failedConsole,
+      })],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
     },
   },
 

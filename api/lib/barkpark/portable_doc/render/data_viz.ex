@@ -103,9 +103,28 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         |> List.wrap()
         |> kilde_html()
 
+      # THE VERDICT: "loss" or "peace" paints the DIGITS in the verdict ink
+      # (design/tokens.json color.verdict; paper-surface.css .bp-stat__v--loss /
+      # --peace). Only the value moves — the label, body and rule keep the page
+      # voice, so the number is the one thing carrying the judgement and the tile
+      # does not become a coloured box. Off-vocabulary or absent → the bare class,
+      # so every stat that existed before this field stays byte-identical.
+      # Mirrored in js/packages/react/src/blocks/dataviz.ts statHtml.
+      # Every branch is a STRING LITERAL, deliberately: the attr-escape guard
+      # (attr_escape_guard_test.exs) discharges a case whose arms are all
+      # literals, and " bp-stat__v--#{v}" off a guard-bound v is not something
+      # its prover can close. A literal per arm costs one line and keeps the
+      # site off the hand-reviewed residue list.
+      verdict_mod =
+        case block |> get("verdict") |> display_string() do
+          "loss" -> " bp-stat__v--loss"
+          "peace" -> " bp-stat__v--peace"
+          _ -> ""
+        end
+
       ~s|<div class="bp-stat">| <>
         bar <>
-        ~s|<div class="bp-stat__v">#{escape_html(value)}#{denom_html}#{unit_html}</div>| <>
+        ~s|<div class="bp-stat__v#{verdict_mod}">#{escape_html(value)}#{denom_html}#{unit_html}</div>| <>
         label_html <> body_html <> spark_svg(spark) <> kilde <> "</div>"
     end
   end
@@ -328,7 +347,14 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         ) <>
         if body == "", do: "", else: ~s|<div class="bp-lineage__body">#{escape_html(body)}</div>|
 
-    ~s|<li class="bp-lineage__node">| <> parts <> "</li>"
+    # Per-stop VERDICT. `tone` is optional and rides the same four-word
+    # vocabulary the chart regions use (info/ok/warn/danger, tone_class/2), so a
+    # clock strip can colour the stop where the thing went wrong without a new
+    # attribute grammar. An absent or unrecognised tone emits the bare class —
+    # every lineage authored before this stays byte-identical.
+    cls = tone_class("bp-lineage__node", get(n, "tone"))
+
+    ~s|<li class="#{cls}">| <> parts <> "</li>"
   end
 
   # ── heatmap ──────────────────────────────────────────────────────────────────

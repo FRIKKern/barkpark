@@ -30,13 +30,19 @@ defmodule BarkparkCloud.Accounts.Authz do
       action, a string action, and a nil action all return
       `{:error, :forbidden}` / `nil` / `false` and never raise (we deliberately
       avoid Coolify's `Role::from` unknown-role throw, see `app/Enums/Role.php`).
-    * LATENTLY NON-TOTAL AT THE CLAUSE LEVEL. Every entry point funnels into
-      `Accounts.get_membership/2`, which has THREE clauses and NO catch-all and
-      does an UNGUARDED `Repo.get_by` where `Repo.get_by_uuid/2` exists for
-      exactly this. So `team = ""` raises `Ecto.Query.CastError` and
-      `team = nil` raises `FunctionClauseError` — and `@type team ::
-      Team.t() | binary()` below ADMITS both of those inputs.
-    * AND NO REQUEST PATH REACHES THAT — by three NAMED guards, not by luck:
+    * TOTAL AT THE CLAUSE LEVEL TOO, as of 2026-09-13. Every entry point funnels
+      into `Accounts.get_membership/2`, which USED to have three clauses, no
+      catch-all, and an UNGUARDED `Repo.get_by` — so `team = ""` raised
+      `Ecto.Query.CastError` and `team = nil` raised `FunctionClauseError`,
+      while `@type team :: Team.t() | binary()` below ADMITTED the first of
+      those. That contradiction is closed: the binary clause now launders both
+      ids through `Repo.uuid_or_nil/1` and a catch-all closes the rest, so `""`,
+      `"not-a-uuid"` and `nil` all mean "no membership" — `role/2` returns nil,
+      the `?` predicates false, `authorize/3` and `can_grant?/3`
+      `{:error, :forbidden}`. Nothing here raises on any input.
+    * AND NO REQUEST PATH EVER REACHED THE OLD RAISES ANYWAY — by three NAMED
+      guards, not by luck. They are still the load-bearing defence (the clause
+      guard above is depth, not a licence to drop them):
       (1) `Web.Auth.resolve_team/2` launders the caller-supplied
       `x-barkpark-team` header through `Accounts.get_team/1` =
       `Repo.get_by_uuid/2` (nil on a malformed id) and falls back to
@@ -52,10 +58,11 @@ defmodule BarkparkCloud.Accounts.Authz do
       request × header combinations over 6 routes and 2 role postures produced
       200/403/422 only — zero 500s.
 
-  Both halves are now tripwired by
+  All three clauses are tripwired by
   `test/barkpark_cloud/accounts/authz_call_site_census_test.exs`: ARM 1
-  measures the domain — including the raises — so a change that totalises
-  `get_membership/2` REDS this paragraph instead of silently staling it; ARM 2
+  measures the domain — including the unresolved inputs, which it now asserts
+  are DENIED — so a change that de-totalises `get_membership/2` REDS this
+  paragraph instead of silently staling it; ARM 2
   censuses every `Authz`/`Accounts` membership call site in `cloud/lib` for one
   of the guard forms above, so a new unguarded one reds.
 

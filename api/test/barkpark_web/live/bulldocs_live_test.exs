@@ -429,7 +429,14 @@ defmodule BarkparkWeb.BulldocsLiveTest do
         dataset
       )
 
+      # CLASS (c) DECLARATION (the seeded-Default ruling, task-e6523cc7154304f0).
+      # The caller_context is here only so the OWNER stamp has a principal; the
+      # write names no workspace and this test is about the used-by panel's
+      # owner-ACL, not tenancy. A principal-bearing write with no workspace is
+      # class (a) at the funnel and is refused (this synthetic user belongs to
+      # no workspace), so the fixture DECLARES what it means instead.
       owner_ctx = [
+        instance_wide: true,
         caller_context: Barkpark.Content.CallerContext.from_user(Ecto.UUID.generate(), roles: [])
       ]
 
