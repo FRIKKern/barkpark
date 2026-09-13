@@ -58,16 +58,34 @@
 # the contract-test family named after that surface inside its own test
 # directory is selected. It is derived from the tree on every run, not pinned.
 #
+# A SECOND INSTANCE WAS PAID FOR, AND IS NOW A CLASS. #18085 (job 103713658033)
+# changed api/lib/barkpark/content/write_scope.ex — a fail-closed POLICY DOOR —
+# narrowed to 563 files, went 4/4 green, and reddened main at
+# api/test/barkpark/search/indx_engine_scope_test.exs:264. That test calls
+# `Content.create_document/4` and reaches the door at RUNTIME without naming it,
+# so neither the closure, nor the by-name net, nor RULE 3 could see it.
+#
+# RULE 4 below catches that class: a module whose own source returns a POLICY
+# REFUSAL (`{:error, :…_required|_forbidden|_denied|_not_allowed}`,
+# `:unauthorized`, `:forbidden`), or which declares itself with `@impact door`,
+# is not narrowed at all — its impact is every test that performs the guarded
+# operation, which no closure can enumerate. Derived from the changed file on
+# every run, not pinned.
+#
 # IT STILL CANNOT SEE: a contract test whose basename shares no stem with the
 # surface it exercises; a surface that reaches the changed module through a
 # SECOND runtime hop (registry, plugin route, configured implementation) rather
-# than by naming it; a test outside the surface's own test directory. Those
-# remain the ALWAYS set's job, and main-per-sha plus the nightly's after that.
+# than by naming it; a test outside the surface's own test directory; a door
+# that refuses with a vocabulary RULE 4 does not know and has not stamped
+# itself. Those remain the ALWAYS set's job, and main-per-sha plus the
+# nightly's after that.
 #
 # ── USAGE ─────────────────────────────────────────────────────────────────
 #
 #   git diff --name-only HEAD^1 HEAD | scripts/elixir-impacted-tests.sh --select
 #   scripts/elixir-impacted-tests.sh --print-always     # the safety net, derived
+#   scripts/elixir-impacted-tests.sh --doors            # the RULE 4 door census
+#   scripts/elixir-impacted-tests.sh --is-door <path>   # one path, exit 0/1
 #   scripts/elixir-impacted-tests.sh --selftest         # the mutation matrix
 #
 # `--select` reads REPO-ROOT-relative changed paths on stdin and prints
@@ -495,6 +513,112 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# RULE 4 — THE FAIL-CLOSED DOOR. The fix for the runtime-only POLICY call,
+# measured on a real miss rather than imagined.
+# ---------------------------------------------------------------------------
+# THE INCIDENT (#18085, head 02d74f815, job 103713658033). That PR changed
+# api/lib/barkpark/content/write_scope.ex so an unresolved write from an
+# attributable caller REFUSES instead of stamping the seeded Default workspace.
+# The selector narrowed to `running 563 selected test files` -> 8,679 tests,
+# 0 failures, the required Elixir gate went 4/4, it merged, and main went red
+# on the same base at api/test/barkpark/search/indx_engine_scope_test.exs:264
+# with `MatchError {:error, :workspace_scope_required}` — 20,832 tests, 1
+# failure. That test file appears ZERO times in the PR job's log.
+#
+# WHY EVERY EXISTING HALF MISSED IT, measured on this tree at 9c95a26fe:
+#   * the compile closure: `mix xref graph --sink lib/barkpark/content/
+#     write_scope.ex --label compile-connected` names NOTHING. The module is
+#     reached by ordinary remote calls, which are runtime edges, so no
+#     recompilation depends on it and the closure is correctly empty;
+#   * the by-name test net: the failing test calls `Content.create_document/4`
+#     and the call routes through WriteScope at runtime. `grep -F
+#     'Barkpark.Content.WriteScope' test/barkpark/search/indx_engine_scope_test.exs`
+#     is EMPTY — the test names the context it calls, never the door it passes
+#     through;
+#   * RULE 3: write_scope.ex is not named by any lib/barkpark_web/ module, and
+#     the failing test is not a contract test of a web surface anyway.
+#   * the camouflage: #18085 also edited five sibling TEST files, and those five
+#     WERE selected — because they were EDITED. The selection therefore LOOKED
+#     complete. The one unedited test the change actually broke was invisible.
+#
+# THE CLASS, and why it is a PREDICATE and not a pin. The set of tests that can
+# break on a door change is "every test that performs the guarded operation",
+# which is an enumeration where a rule is needed (D-"an enumeration is a
+# snapshot, a predicate is a rule"): pinning indx_engine_scope_test.exs would
+# have covered one file and left the class open, and a pin per affected test
+# cannot cover a policy module somebody adds next month.
+#
+# A DOOR IS RECOGNISED FROM THE MODULE'S OWN SOURCE, by the refusal vocabulary
+# this repo already writes: a module that returns `{:error, :…_required}`,
+# `:…_forbidden`, `:…_denied`, `:…_not_allowed`, `:unauthorized` or `:forbidden`
+# is a fail-closed policy gate by construction — it exists to REFUSE an
+# operation its callers perform without naming it. A door may also declare
+# itself with `# @impact door` in its own source, for a gate whose refusal
+# vocabulary is idiosyncratic; that is a marker the MODULE owns, in the same
+# shape as the repo's `@canonical capability:` markers, not a list in this file.
+# Either arm selects ALL.
+#
+# WHY THE DERIVED ARM IS THE RIGHT SHAPE, measured 2026-09-13 on 9c95a26fe:
+#   * 59 of 904 api/lib .ex files match the refusal vocabulary — 6.5%, so this
+#     is a narrow class and not a synonym for "any lib file";
+#   * ALL 59 have a compile-connected dependent set of EXACTLY ZERO files
+#     (computed by parsing `mix xref graph --label compile-connected --format
+#     dot` over the whole tree and taking each node's reverse transitive
+#     closure). That is the mechanical statement of the blind spot: for every
+#     module in this class, the compile closure can reach none of its callers;
+#   * write_scope.ex is in the set, with 5 test files naming it out of 1,458.
+#
+# THE REMEDY THE ROW SUGGESTED AND THIS FILE REJECTS, also measured: "a second
+# index carrying runtime call edges". `mix xref graph --sink X` WITHOUT
+# `--label compile-connected` gives exactly that index, and it is useless here.
+# Reverse transitive closures over the full-label graph put 766 of 904 lib
+# files (84.7%) at a runtime fan-in of 500+ dependents, write_scope.ex among
+# them at 512 — this application's runtime graph is one nearly-complete
+# component, so a runtime index answers "essentially everything" for 85% of lib
+# changes. A selector that says ALL for 85% of its inputs is correct and buys
+# nothing. The refusal predicate says ALL for the 6.5% where the compile
+# closure is provably blind, and leaves the other 93.5% narrowed.
+#
+# WHAT IT COSTS, measured over the last 200 commits on origin/main (2026-09-13):
+# 61 touch api/. 24 of those already select ALL for an unrelated reason (a
+# non-narrowable api/ path in the same diff). Of the 37 that narrow today, 7
+# (18.9%) touch a door file and would now select ALL — 11.5% of api-touching
+# commits. That is the price of the class, and it is paid only by PRs that
+# change a fail-closed gate.
+#
+# WHAT IT STILL CANNOT SEE: a door that refuses with a vocabulary neither arm
+# knows and that has not stamped itself — `{:error, :nope}`. `--doors` prints
+# the census so the class can be audited against the tree, and a module the
+# author knows is a door can always stamp itself. main-per-sha and the nightly
+# remain the net under the net.
+DOOR_REFUSAL_ERE='\{:error, :[a-z_]*(_required|_forbidden|_denied|_not_allowed)\}|\{:error, :(unauthorized|forbidden)\}'
+DOOR_DECLARE_ERE='@impact[[:space:]]+door([[:space:]]|$)'
+
+# A repo-root path -> is it a fail-closed door? Non-zero for everything else,
+# INCLUDING a path whose file is not on disk: a deleted lib file cannot be read,
+# and that case already reaches ALL through the `defines no module` arm below,
+# so this predicate never has to guess from an absent file.
+is_door_module() {
+  local p="$1" f
+  case "$p" in api/lib/*.ex) ;; *) return 1 ;; esac
+  f="$API_DIR/${p#api/}"
+  [ -f "$f" ] || return 1
+  if grep -qE "$DOOR_DECLARE_ERE" -- "$f" 2>/dev/null; then return 0; fi
+  if grep -qE "$DOOR_REFUSAL_ERE" -- "$f" 2>/dev/null; then return 0; fi
+  return 1
+}
+
+# The census, derived from the tree on every call — api-relative paths.
+door_census() {
+  (
+    cd -- "$API_DIR" 2>/dev/null || exit 0
+    { grep -rlE "$DOOR_DECLARE_ERE" lib --include='*.ex' 2>/dev/null || true
+      grep -rlE "$DOOR_REFUSAL_ERE" lib --include='*.ex' 2>/dev/null || true
+    } | LC_ALL=C sort -u | sed '/^$/d'
+  )
+}
+
+# ---------------------------------------------------------------------------
 # --select
 # ---------------------------------------------------------------------------
 select_tests() {
@@ -519,6 +643,15 @@ select_tests() {
       continue
     fi
     if is_narrowable_lib "$p"; then
+      # RULE 4 FIRST: a fail-closed door is reached by callers that do not name
+      # it, on runtime edges no closure can follow. Its impact is every test
+      # that performs the guarded operation, which is not a set this script can
+      # enumerate — so it is not narrowed at all. See RULE 4 above (#18085).
+      if is_door_module "$p"; then
+        echo "elixir-impacted-tests: ${p} is a FAIL-CLOSED DOOR (it returns a policy refusal, or declares itself with @impact door) — every test that performs the guarded operation can break on it and none of them has to name it, so no closure can narrow this. Selecting ALL." >&2
+        echo "ALL"
+        return 0
+      fi
       # A lib file that defines no module (a bare script, a `defimpl`-only
       # file) leaves the by-name net empty, and an empty net on a real code
       # change is indistinguishable from a working one. Run everything instead.
@@ -564,6 +697,11 @@ select_tests() {
           api/test/*_test.exs) sel="${sel}${r#api/}
 " ;;
           api/lib/*.ex)
+            if is_door_module "$r"; then
+              echo "elixir-impacted-tests: ${p} is read by ${r}, which is a FAIL-CLOSED DOOR — selecting ALL." >&2
+              echo "ALL"
+              return 0
+            fi
             if ! xref_probe || ! closure="$(compile_closure "$r")"; then
               echo "ALL"
               return 0
@@ -640,6 +778,27 @@ case "${1:---select}" in
     exit 1
     ;;
   --print-pins) printf '%s\n' "$ALWAYS_PINS" ;;
+  --doors)
+    # The RULE 4 census, derived from the tree. Printed so the class can be
+    # audited against a real diff instead of argued about: `--doors | wc -l`
+    # against `find lib -name '*.ex' | wc -l` is the widening number.
+    door_census
+    ;;
+  --is-door)
+    # One repo-root path -> exit 0 when RULE 4 classifies it as a door. Exists
+    # so the harness can pick a NON-door leaf fixture by asking the predicate
+    # rather than by hard-coding a filename that may become a door tomorrow.
+    if [ "$#" -lt 2 ]; then
+      echo "elixir-impacted-tests: --is-door needs a repo-root path" >&2
+      exit 2
+    fi
+    if is_door_module "$2"; then
+      echo "door: $2"
+      exit 0
+    fi
+    echo "not-a-door: $2"
+    exit 1
+    ;;
   --check-pins)
     # A pinned entry that no longer exists is a hole in the net wearing the
     # shape of a full list. Red on it.
@@ -663,7 +822,7 @@ EOF
   --selftest) exec bash "$SCRIPT_DIR/elixir-impacted-tests.test.sh" ;;
   *)
     echo "elixir-impacted-tests: unknown argument '$1'" >&2
-    echo "usage: $0 [--select|--print-always|--print-pins|--check-pins|--selftest]" >&2
+    echo "usage: $0 [--select|--print-always|--print-pins|--check-pins|--doors|--is-door <path>|--selftest]" >&2
     exit 2
     ;;
 esac
