@@ -110,13 +110,29 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
                      [".bp-table__spark polyline"]
 
   # scaffy-backlog-blocks-editable-studio — the TECHNICAL pair (diff, filetree).
-  # These two CANNOT ride @parity_elements: they carry NO CSS rule on either
-  # surface. `Components.diff_html/1` / `filetree_html/1` paint their container
-  # entirely with INLINE styles, and the canvas shows the reader's OWN bytes
-  # (the block's preview is server-pushed on `bp:block-html` into a
-  # `.bp-paper-surface` hole — canvas_reader_parity_gate_test.exs §1/§3 pin that
-  # to the one emitter). Adding them to @parity_elements would red the
-  # parser-sanity guard on an element neither stylesheet declares.
+  #
+  # CORRECTED 2026-09-13 (lead-studio-r17, on studio-r17-w8's second read). An
+  # earlier draft of this comment said these two "carry NO CSS rule on either
+  # surface". THAT IS FALSE on the View surface and the false half was the
+  # load-bearing half, so it is restated here rather than quietly deleted:
+  # `paper-surface.css` DOES declare
+  # `.bp-paper-surface .bp-diff, .bp-paper-surface .bp-filetree` with ten
+  # declarations (font-family, font-size, line-height, background,
+  # border-radius, padding, margin, width, box-sizing, overflow-x), and that
+  # rule's own comment says it mirrors the emitters' inline ones. Only the EDIT
+  # side has none: every `bp-diff` hit in root.html.heex is
+  # `.bp-draft-diff-table` / `.bp-diff-row`, the draft-review table UI, and
+  # bp-paper-editor-shell.css has zero.
+  #
+  # THE REAL REASON THEY CANNOT RIDE @parity_elements is structural, not an
+  # absence. @parity_elements reconciles TWO HAND-KEPT COPIES of one intent —
+  # a View rule and an Edit rule that must agree. For these two there is only
+  # ONE copy: the canvas paints by dropping the server's `bp:block-html` bytes
+  # into a `.bp-paper-surface` sink (canvas/technical-node.js), so the SAME
+  # `.bp-paper-surface .bp-diff` rule governs both surfaces. An entry here
+  # would assert a symmetry on a construction that cannot be asymmetric — and
+  # it would red §2 FIRST, with eight `View="…" Edit=nil` mismatches, before
+  # the parser-sanity guard ever spoke.
   #
   # So the parity they need is the TOKEN-RESOLUTION one, gated below: every
   # custom property those inline styles bind must be DEFINED in the single source
