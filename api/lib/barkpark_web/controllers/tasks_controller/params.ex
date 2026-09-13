@@ -541,10 +541,14 @@ defmodule BarkparkWeb.TasksController.Params do
   # ADDITIVE BY CONSTRUCTION, and that IS the negative arm: `classify/2`
   # answers nil for every zero-child row, so all 979 of the 1,000 measured
   # leaves emit a byte-identical card. A page of pure leaves is unchanged on
-  # the wire — including the hostile 50-card byte tripwire below, whose ~2,080
-  # B of headroom this cannot touch. Worst case is 50 delegated cards at
-  # `,"dispatch":"delegated"` = 24 B each = 1,200 B, inside that headroom; the
-  # measured page carries 13.
+  # the wire — including the hostile 50-card byte tripwire below, whose
+  # headroom this cannot touch: re-measured 2026-09-13 at e2c55a71e as
+  # 11,889 B plain (18,831 B of 30,720 B) and 10,689 B fully delegated
+  # (20,031 B). An earlier "~2,080 B" figure here, and a "765 B" one carried
+  # by task-935213699e606b6a, were never re-derived and are retired. Worst case
+  # is 50 delegated cards at `,"dispatch":"delegated"` = 24 B each = 1,200 B,
+  # measured exactly by the fully-delegated sibling tripwire; the measured
+  # page carries 13.
   #
   # `live_child_counts` DEFAULTS TO nil, NOT %{}: an empty map would read as
   # "zero live children" and stamp `undecided` on every parent a caller could
