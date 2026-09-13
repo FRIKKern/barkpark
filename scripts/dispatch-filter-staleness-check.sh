@@ -304,49 +304,20 @@ sys.exit(1)
   exit "$rc"
 }
 
-# ── CENSUS: the measured population (criterion 0) ─────────────────────────────
+# ── CENSUS: the measured population (criterion 0) ────────────────────────
+# The per-PR verdict above is the PREDICATE; this is the SNAPSHOT it was derived
+# from. It reads scripts/lib/dispatch-filter-census.py, which rebuilds main's
+# own filter timeline from git and asks the same question of every merged PR in
+# the window. Needs `gh` + network, so it is deliberately NOT wired into CI.
 run_census() {
   command -v gh >/dev/null 2>&1 || { echo "CANNOT READ: gh is not on PATH; the census reads merged PRs from the API" >&2; exit 2; }
-  cd "$REPO_ROOT" || { echo "CANNOT READ: cannot cd to $REPO_ROOT" >&2; exit 2; }
-  local since
-  since="$(python3 -c "import datetime,sys; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=int(sys.argv[1]))).strftime('%Y-%m-%d'))" "$CENSUS_DAYS" 2>/dev/null)"
-  [ -n "$since" ] || { echo "CANNOT READ: could not compute the census window" >&2; exit 2; }
-  echo "# census window: PRs merged since $since (${CENSUS_DAYS}d), repo FRIKKern/barkpark"
-  local list
-  list="$(gh pr list --state merged --limit 1000 --search "merged:>=$since" --json number,headRefOid,mergedAt,title 2>/dev/null)"
-  [ -n "$list" ] || { echo "CANNOT READ: gh pr list returned nothing for the window" >&2; exit 2; }
-  local total
-  total="$(printf '%s' "$list" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
-  [ "$total" -gt 0 ] || { echo "CANNOT READ: the census window holds ZERO merged PRs — it measured nothing" >&2; exit 2; }
-  echo "# merged PRs in window: $total"
-  local n flagged=0 unreadable=0
-  while IFS=$'\t' read -r n sha merged_at title; do
-    [ -n "$sha" ] || continue
-    if ! git rev-parse --verify "$sha^{commit}" >/dev/null 2>&1; then
-      git fetch -q origin "$sha" 2>/dev/null || true
-    fi
-    if ! git rev-parse --verify "$sha^{commit}" >/dev/null 2>&1; then
-      unreadable=$((unreadable+1))
-      echo "UNREADABLE #$n $sha (head object not in this clone)"
-      continue
-    fi
-    local out rc
-    out="$("$0" --head "$sha" --tip "$TIP_REF" 2>&1)"; rc=$?
-    if [ "$rc" -eq 1 ]; then
-      flagged=$((flagged+1))
-      echo "FLAGGED #$n merged=$merged_at head=${sha:0:9} :: $title"
-      printf '%s\n' "$out" | sed -n 's/^STALE DISPATCH/    STALE DISPATCH/p'
-    elif [ "$rc" -eq 2 ]; then
-      unreadable=$((unreadable+1))
-      echo "UNREADABLE #$n ${sha:0:9} :: $(printf '%s' "$out" | sed -n 's/^CANNOT READ: //p' | head -1)"
-    fi
-  done <<< "$(printf '%s' "$list" | python3 -c '
-import json, sys
-for r in json.load(sys.stdin):
-    print("%s\t%s\t%s\t%s" % (r["number"], r["headRefOid"], r["mergedAt"], r["title"][:70]))')"
-  echo "# population: $flagged of $total merged PRs dispatched under a stale filter; $unreadable unreadable"
-  [ "$flagged" -eq 0 ] && [ "$unreadable" -eq 0 ] && echo "# clean window"
-  return 0
+  have_python || { echo "CANNOT READ: python3 is not on PATH" >&2; exit 2; }
+  python3 -c 'import yaml' 2>/dev/null || { echo "CANNOT READ: python3 cannot import yaml (PyYAML)" >&2; exit 2; }
+  local reader="$REPO_ROOT/scripts/lib/dispatch-filter-census.py"
+  [ -r "$reader" ] || { echo "CANNOT READ: $reader is missing" >&2; exit 2; }
+  CENSUS_DAYS="$CENSUS_DAYS" CENSUS_TIP="$TIP_REF" CENSUS_ROOT="$REPO_ROOT" \
+    python3 "$reader"
+  exit $?
 }
 
 # ── SELFTEST: hermetic, both directions, no git and no network ───────────────
@@ -485,7 +456,40 @@ print('  ok   ARM11 bare \`on:\` reads as boolean True and the parser still find
 " || { fail=$((fail+1)); echo "  FAIL ARM11 PyYAML True fold"; }
   pass=$((pass+1))
 
-  rm -rf "$fx"
+  # ── ARM 12..14 — MUTATION. Every green above must be load-bearing: gut the
+  # comparison in a COPY of this file and the arms that proved the finding must
+  # RED, while the refusals stay refusals. A suite that survives its own
+  # mutation was measuring nothing.
+  local SUT MUT
+  SUT="${BASH_SOURCE[0]}"
+  # The mutant lives BESIDE the SUT, not in the fixture dir: this script derives
+  # REPO_ROOT from its own dirname, and a copy under /tmp resolves a REPO_ROOT
+  # that is not a git repository — every mutant then exits 2 for the wrong
+  # reason and the whole mutation matrix "fails" while proving nothing.
+  MUT="$(dirname "$SUT")/.dispatch-filter-staleness-mutant.tmp.sh"
+  trap 'rm -f "$MUT"' RETURN
+
+  # M1: the widening comparison is neutered — every new match counts as old.
+  sed 's/^        if hit_new and not hit_old:$/        if False:/' "$SUT" > "$MUT"
+  cmp -s "$SUT" "$MUT" && { fail=$((fail+1)); echo "  FAIL ARM12 mutation M1 changed nothing (the anchor line moved)"; }
+  bash "$MUT" --head HEAD --tip HEAD --paths-from "$fx/p17933" --workflow-dir "$fx/wf" >/dev/null 2>&1
+  t "ARM12 M1 (widening comparison gutted) makes ARM1 go GREEN — ARM1 is load-bearing" 0 $?
+
+  # M2: the vacuity guard is removed — zero filtered workflows must stop being
+  # a refusal. If ARM8 still passes without the guard, ARM8 proved nothing.
+  sed "s/^if filtered == 0:$/if False:/" "$SUT" > "$MUT"
+  cmp -s "$SUT" "$MUT" && { fail=$((fail+1)); echo "  FAIL ARM13 mutation M2 changed nothing (the anchor line moved)"; }
+  bash "$MUT" --head HEAD --tip HEAD --paths-from "$fx/p17933" --workflow-dir "$fx/wfnofilter" >/dev/null 2>&1
+  t "ARM13 M2 (vacuity guard removed) turns ARM8's refusal into a silent 0" 0 $?
+
+  # M3: the empty-subject guard is removed. An empty changed-path set must stop
+  # being a refusal — that is the exact shape of a detector failing silently.
+  sed 's/^  if \[ "\$npaths" -eq 0 \]; then$/  if false; then/' "$SUT" > "$MUT"
+  cmp -s "$SUT" "$MUT" && { fail=$((fail+1)); echo "  FAIL ARM14 mutation M3 changed nothing (the anchor line moved)"; }
+  bash "$MUT" --head HEAD --tip HEAD --paths-from "$fx/pempty" --workflow-dir "$fx/wf" >/dev/null 2>&1
+  t "ARM14 M3 (empty-subject guard removed) turns ARM5's refusal into a silent 0" 0 $?
+
+  rm -rf "$fx"; rm -f "$MUT"
   echo "selftest: $pass passed, $fail failed"
   [ "$fail" -eq 0 ] || return 1
   return 0
