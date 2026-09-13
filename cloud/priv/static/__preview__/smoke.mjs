@@ -3058,6 +3058,31 @@ const EXPECTATIONS = {
       assert.ok(!body.includes("new-progress"), "the progress theater has handed over");
     },
   },
+  // cch-w48-s1-followup — THE FUNNEL'S OWN UNKNOWN ARM, RENDERED AT LAST.
+  // cch-w48-s1 gave the /new launch step a three-valued band and the shared
+  // [data-me-retry] exit, and pinned both in node. No committed fixture ever
+  // answered /v1/me with anything but a 200 on this path, so the exit existed in
+  // the corpus only as an assertion about a string: nothing proved a browser
+  // paints it, or that the form is really withheld behind it.
+  "new-launch-me-unreadable": {
+    what: "/new whose /v1/me 500s — the honest unknown arm with its ONE Retry, and no form behind it",
+    check(reg) {
+      assert.equal(reg.get("new-screen").hidden, false, "the /new screen must be visible");
+      assert.equal(reg.get("app-shell").hidden, true, "the app shell stays hidden on /new");
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes('class="new-title">Astro Blog'), "the template card still renders — only the OFFER is withheld");
+      // FAIL CLOSED: the step withholds the whole form, never a disabled ghost.
+      assert.ok(!body.includes("new-launch-btn"), "an unread role must not sell the Launch the server may refuse");
+      assert.ok(!body.includes("new-name"), "…and not the name field behind it either");
+      // The honest fault, and the ONE exit — this is the byte-level proof the
+      // node pin could not buy: a real browser paints the retry on this screen.
+      assert.ok(body.includes("We couldn't check your account"), "a failed read is reported as a fault, never as a refusal");
+      assert.ok(body.includes("We can&#39;t offer Launch until we know your role on this team."),
+        "the per-surface consequence names what is withheld and why");
+      assert.equal(countMatches(body, "data-me-retry"), 1, "exactly one exit — the page's own, not the dashboard's");
+      assert.ok(!body.includes("admin role on this team"), "a fault is not a refusal: it must not name a role nobody asked about");
+    },
+  },
 
   // ── gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview states (tail-append, OC9) ─
   "overview-trial-runway": {

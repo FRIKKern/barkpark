@@ -1082,13 +1082,24 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
   // PRINTED (`128 scenarios · 24 distinct covered by 25 cells · 104 residue over
   // 13 families`), never by adding three to the line above.
-  assert.equal(r.total, 128);
+  // cch-w48-s1-followup adds `new-launch-me-unreadable`: the /new launch step in
+  // front of a /v1/me that 500s, so the funnel's own [data-me-retry] — until now
+  // a string asserted in node and rendered by nothing — is instrumented. Total
+  // 128 -> 129, residue 104 -> 105. CELLS (25), distinctCovered (24) and
+  // families (13) are DELIBERATELY UNMOVED: it lands in the residue (the /new
+  // page is its own document outside the shell) and its familyOf is `path:/new`,
+  // a family that already had four members, so it cannot create a 14th. Both
+  // integers were RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` on this
+  // branch and reading the `>> scenarios` line it PRINTED (`129 scenarios · 24
+  // distinct covered by 25 cells · 105 residue over 13 families`), never by
+  // adding one to the line above.
+  assert.equal(r.total, 129);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 104, "104 is the RESIDUE, not the census");
+  assert.equal(r.residue, 105, "105 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 104, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 105, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

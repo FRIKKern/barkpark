@@ -4335,6 +4335,27 @@ export const SCENARIOS = {
       catalog: theaterCatalog,
     },
   },
+  // cch-w48-s1-followup — THE /new LAUNCH STEP'S UNKNOWN ARM, INSTRUMENTED.
+  // cch-w48-s1 gave that step a three-valued band and an exit, and pinned both
+  // in node. Nothing RENDERED the unanswered arm: every committed /new fixture
+  // answers /v1/me, so the funnel's own [data-me-retry] — the one control a
+  // person stuck behind a failed role read can press — existed in the corpus
+  // only as an assertion about a string. It reuses the `meFault` override
+  // (route() in this file) the billing arms already consume rather than minting
+  // a second mechanism, and it sits on the SAME deep link as new-launch, so no
+  // new residue family is created.
+  "new-launch-me-unreadable": {
+    label: "/new — the launch step whose /v1/me 500s: the honest unknown arm with its one Retry, never a form and never a refusal",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog",
+    data: {
+      me: me("Ada's Lab"),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [], subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+    },
+  },
 
   // ── gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview states (tail-append, OC9) ─
   // Three states of the ONE Overview region: the self-healing trial runway, the

@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  128 scenarios, 24 rendered, 104 in a COMMITTED residue literal.
+//   SCENARIO  129 scenarios, 24 rendered, 105 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -524,8 +524,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 128 scenarios · 25 cells over 24 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 104 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 129 scenarios · 25 cells over 24 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 105 · 13 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -682,7 +682,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
 // below is now recounted, either from `scenarioReport` or from these same
 // committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
-//   * 128 / 25 / 24 / 104 / 13 — "the census five in breakpoint-sweep.mjs's
+//   * 129 / 25 / 24 / 105 / 13 — "the census five in breakpoint-sweep.mjs's
 //     prose are recounted from the derived report", which reads BOTH typed
 //     copies out of the committed bytes (this bullet and "THE CENSUS THIS
 //     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
@@ -863,11 +863,12 @@ export const SCENARIO_RESIDUE = {
   "activate-gone": "path:/activate",
   "activate-rate-limited": "path:/activate",
   "activate-logged-out": "path:/activate",
-  // path:/new — 4
+  // path:/new — 5
   "new-launch": "path:/new",
   "theater-midflight": "path:/new",
   "theater-failed": "path:/new",
   "theater-ready": "path:/new",
+  "new-launch-me-unreadable": "path:/new",
   // hash:#billing — 9
   "billing-forever": "hash:#billing",
   "billing-portal-return": "hash:#billing",
