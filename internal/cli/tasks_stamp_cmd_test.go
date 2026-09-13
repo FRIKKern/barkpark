@@ -1045,3 +1045,208 @@ func TestStoredCriterionSummaryFlagsAWithdrawnRow(t *testing.T) {
 		t.Fatalf("the receipt must mark a withdrawn row and re-frame its evidence: %q", s)
 	}
 }
+
+// ─── THE DISCRIMINATION PRE-CHECK (task-33e42f188c491bbe) ───────────────────
+//
+// EVERY TEST HERE IS A DETECTOR, and the set is written to be honest about a
+// limit rather than to look complete:
+//
+//   - TestTaskStampExecute_NonDiscriminatingCriterionTextRefused is the
+//     primary arm: a confirmation that byte-matches TWO stored criteria is
+//     refused BEFORE the POST. Delete the call in runTaskStamp and it reds
+//     twice (exitOK instead of exitValidation, hits 1 instead of 0).
+//   - TestTaskStampExecute_DiscriminatingCriterionTextPasses is the
+//     coverage-unchanged CONTROL: the ordinary distinct-criteria stamp is
+//     untouched. A check that refused everything would red here.
+//   - TestTaskStampExecute_RotatedIndicesOnDistinctCriteriaStillSilent
+//     EXERCISES the silent-by-construction property the row names: a
+//     four-criterion row stamped in the observed shape with the indices
+//     rotated by one produces no error, no refusal and no diagnostic, TODAY
+//     AND UNDER THIS CHANGE. It is a test that asserts a defect SURVIVES,
+//     which is the only honest way to record that this change does not close
+//     it. If a later change DOES close it, this test reds and its comment says
+//     to delete it.
+//   - TestCriterionTextMatchIndices is the pure-function table over the cells
+//     that decide the verdict.
+
+// stampTestServerCriteria wires a fake Barkpark whose GET serves a FIXED
+// criteria list — the thing the pre-check reads — while still counting POSTs
+// to the stamp route. The honest-mode store in stampTestServerWith echoes back
+// whatever was stamped, which cannot express "the row already holds these four
+// criteria", so this is a second fake beside it rather than a mode of it.
+func stampTestServerCriteria(t *testing.T, criteria []string) *int32 {
+	t.Helper()
+	var hits int32
+	var mu sync.Mutex
+	// The criteria WORDING is fixed (that is what the pre-check reads); the
+	// met/evidence half is applied from the POST, so the verb's own read-back
+	// confirms instead of reddening these tests for an unrelated reason.
+	wrote := map[int]string{}
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stamp"):
+			atomic.AddInt32(&hits, 1)
+			q := stampMergedParams(r)
+			if idx, err := strconv.Atoi(q.Get("criterion")); err == nil {
+				mu.Lock()
+				wrote[idx] = q.Get("evidence")
+				mu.Unlock()
+			}
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
+			mu.Lock()
+			rows := make([]map[string]any, len(criteria))
+			for i, c := range criteria {
+				ev, ok := wrote[i]
+				rows[i] = map[string]any{"criterion": c, "met": ok, "evidence": ev}
+			}
+			mu.Unlock()
+			body, _ := json.Marshal(map[string]any{
+				"ok":  true,
+				"doc": map[string]any{"content": map[string]any{"acceptance_criteria": rows}},
+			})
+			_, _ = w.Write(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(backend.Close)
+
+	mf := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(mf, []byte(minimalStampManifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	t.Setenv("BARKPARK_MANIFEST", mf)
+	t.Setenv("BARKPARK_API_URL", backend.URL)
+	t.Setenv("BARKPARK_API_TOKEN", "stamp-stub")
+	return &hits
+}
+
+// fourDistinctCriteria is the row shape the original instance ran on: four
+// criteria, each saying something only it says.
+var fourDistinctCriteria = []string{
+	"the gate refuses a bare override",
+	"the reason rides the POST",
+	"the read-back renders from the store",
+	"the census is re-run at the worker's own sha",
+}
+
+// THE PRIMARY DETECTOR. Two criteria carry the SAME wording, so a confirmation
+// quoting it names neither: it fits index 1 exactly as well as index 3. The
+// stamp is refused before anything is sent.
+func TestTaskStampExecute_NonDiscriminatingCriterionTextRefused(t *testing.T) {
+	dup := "the evidence is recorded"
+	hits := stampTestServerCriteria(t, []string{"a distinct one", dup, "another distinct one", dup})
+	out, code := captureExecuteCode(t, []string{
+		"task", "stamp", "bp-task-x", "w", "1",
+		"--criterion", "1", "--met", "--evidence", "e",
+		"--criterion-text", dup,
+	})
+	if code != exitValidation {
+		t.Fatalf("exit = %d, want exitValidation (%d); out:\n%s", code, exitValidation, out)
+	}
+	if n := atomic.LoadInt32(hits); n != 0 {
+		t.Fatalf("stamp POST fired %d times; a non-discriminating confirmation must be refused BEFORE sending", n)
+	}
+	// The refusal has to name BOTH colliding indices in BOTH bases, or the
+	// operator cannot see which pair of rows to patch.
+	for _, want := range []string{"--criterion-text", "index 1", "index 3", "#2", "#4", "4 criteria"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("refusal does not name %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// THE COVERAGE-UNCHANGED CONTROL. On a distinct-criteria row the ordinary
+// stamp still goes through: the pre-check adds a refusal, it does not narrow
+// what a correct invocation may do. A check that keyed on "the text came from
+// the row" — which nothing on the wire can tell — would red here, which is why
+// it is not what was built.
+func TestTaskStampExecute_DiscriminatingCriterionTextPasses(t *testing.T) {
+	hits := stampTestServerCriteria(t, fourDistinctCriteria)
+	out, code := captureExecuteCode(t, []string{
+		"task", "stamp", "bp-task-x", "w", "1",
+		"--criterion", "2", "--met", "--evidence", "e",
+		"--criterion-text", fourDistinctCriteria[2],
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want exitOK; out:\n%s", code, out)
+	}
+	if n := atomic.LoadInt32(hits); n != 1 {
+		t.Fatalf("stamp POST fired %d times, want 1", n)
+	}
+}
+
+// THE SILENT-BY-CONSTRUCTION EXERCISER. This is the observed shape: a script
+// walks a four-criterion row, and its index→evidence map is rotated by one, so
+// the evidence written for criterion #2 lands on criterion #1. Because the
+// script ALSO reads --criterion-text from the same (wrong) index, index and
+// text agree by construction and every stamp is accepted — no error, no
+// refusal, no diagnostic, at every one of the four indices.
+//
+// THIS TEST ASSERTS THAT THE DEFECT SURVIVES. It is the evidence for the row's
+// claim that the original instance was exposed by an accident (an IndexError
+// from a three-criterion row meeting a four-key dict) and not by detection.
+// The pre-check above cannot close it: on a distinct-criteria row a text
+// derived from index i is byte-identical to a correct text for index i, so no
+// CLI-side validation can tell them apart. Closing it requires a confirmation
+// the ROW CANNOT SUPPLY (an author-typed index→prefix pin plus an alignment
+// read-back). WHEN THAT LANDS, THIS TEST REDS — and that red is the success
+// signal: delete it then, and record here which change closed it.
+func TestTaskStampExecute_RotatedIndicesOnDistinctCriteriaStillSilent(t *testing.T) {
+	for i := range fourDistinctCriteria {
+		rotated := (i + 1) % len(fourDistinctCriteria)
+		hits := stampTestServerCriteria(t, fourDistinctCriteria)
+		out, code := captureExecuteCode(t, []string{
+			"task", "stamp", "bp-task-x", "w", "1",
+			"--criterion", strconv.Itoa(rotated), "--met",
+			// The evidence was authored for criterion i and lands on `rotated`.
+			"--evidence", "proof for criterion " + strconv.Itoa(i),
+			// …and the text is read from the SAME wrong index, which is what
+			// makes the pair self-consistent and the guard inert.
+			"--criterion-text", fourDistinctCriteria[rotated],
+		})
+		if code != exitOK {
+			t.Fatalf("rotation %d→%d: exit = %d, want exitOK — if a change now REFUSES this, the silent case is closed: delete this test and name the change; out:\n%s", i, rotated, code, out)
+		}
+		if n := atomic.LoadInt32(hits); n != 1 {
+			t.Fatalf("rotation %d→%d: stamp POST fired %d times, want 1", i, rotated, n)
+		}
+		// "no diagnostic": `bp: ` is the prefix every CLI-side refusal and
+		// every read-back failure carries (useError / userErr). Matching on
+		// the word "refus" would match the CRITERION WORDING instead, which is
+		// exactly the unanchored-substring mistake this campaign is auditing.
+		if strings.Contains(out, "bp: ") {
+			t.Fatalf("rotation %d→%d: output carries a refusal/diagnostic; out:\n%s", i, rotated, out)
+		}
+	}
+}
+
+// The pure function, over the cells that decide the verdict.
+func TestCriterionTextMatchIndices(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		criteria []string
+		want     string
+		expect   []int
+	}{
+		{"unique match", []string{"a", "b", "c"}, "b", []int{1}},
+		{"no match", []string{"a", "b", "c"}, "z", nil},
+		{"two collide", []string{"a", "dup", "c", "dup"}, "dup", []int{1, 3}},
+		{"all identical", []string{"same", "same", "same"}, "same", []int{0, 1, 2}},
+		// Whitespace is trimmed on BOTH sides, the same comparison
+		// stampMismatches and the server's guard use.
+		{"trimmed both sides", []string{"  a  ", "a"}, "a", []int{0, 1}},
+		// BLANK SLOTS NEVER COLLIDE. A short or sparse criteria list must not
+		// manufacture a refusal out of the row's shape.
+		{"blank slots ignored", []string{"", "   ", "a"}, "a", []int{2}},
+		{"empty list", nil, "a", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := criterionTextMatchIndices(c.criteria, c.want)
+			if !reflect.DeepEqual(got, c.expect) {
+				t.Fatalf("criterionTextMatchIndices(%q, %q) = %v, want %v", c.criteria, c.want, got, c.expect)
+			}
+		})
+	}
+}
