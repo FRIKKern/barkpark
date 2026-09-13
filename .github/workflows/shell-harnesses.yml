@@ -224,6 +224,12 @@ on:
       - "scripts/pds-threshold-move-guard.sh"
       - "scripts/pds-threshold-move-guard_test.sh"
       - "scripts/pds-crown-stamp.sh"
+      # THE COLD-READER SMOKE (pds-bl-personal-local-doc-staleness). Its
+      # --dry-run arm resolves eleven LITERAL anchors in the setup guide, so an
+      # edit to the DOC can red it without touching a line of shell — the doc is
+      # an INPUT of this job exactly as bp-pds-charter.md is above.
+      - "scripts/pds-personal-local-smoke_test.sh"
+      - "docs/setup/personal-local.md"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -728,6 +734,12 @@ on:
       - "scripts/pds-threshold-move-guard.sh"
       - "scripts/pds-threshold-move-guard_test.sh"
       - "scripts/pds-crown-stamp.sh"
+      # THE COLD-READER SMOKE (pds-bl-personal-local-doc-staleness). Its
+      # --dry-run arm resolves eleven LITERAL anchors in the setup guide, so an
+      # edit to the DOC can red it without touching a line of shell — the doc is
+      # an INPUT of this job exactly as bp-pds-charter.md is above.
+      - "scripts/pds-personal-local-smoke_test.sh"
+      - "docs/setup/personal-local.md"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -1303,6 +1315,8 @@ jobs:
           pds-harnesses scripts/pds-threshold-move-guard.sh
           pds-harnesses scripts/pds-threshold-move-guard_test.sh
           pds-harnesses scripts/pds-crown-stamp.sh
+          pds-harnesses scripts/pds-personal-local-smoke_test.sh
+          pds-harnesses docs/setup/personal-local.md
           pds-harnesses scripts/pr-task-gate.sh
           ci-failure-issue-filer scripts/file-ci-failure-issue.sh
           ci-failure-issue-filer scripts/file-ci-failure-issue.test.sh
@@ -2174,6 +2188,22 @@ jobs:
         # says so in the log rather than passing silently, so a depth regression
         # shows up as a named stand-down, never as a quieter green.
         run: bash scripts/pds-threshold-move-guard_test.sh
+
+      - name: personal-local cold-reader smoke — the --dry-run arm (no boot)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # ONLY `--dry-run`, AND THAT IS THE WHOLE DESIGN — never widen this to
+        # `--boot`. The dry-run arm reads ONE file (docs/setup/personal-local.md),
+        # resolves eleven literal anchors, prints each beside its line number and
+        # exits 1 if any is gone: no mix, no Postgres, no BEAM, no network, no
+        # credential, ~0.14 s of CPU. `--boot` walks the guide for real — mix
+        # deps.get, `bin/barkpark up`, a raw-blob PUT — which needs a Postgres
+        # toolchain this runner does not have and minutes it should not spend. The
+        # arm that belongs in a lane is the one that reds when the DOC rots, which
+        # is the failure this row exists to catch.
+        #
+        # This job is NOT a required context (an S4 PATHS-FILTERED exclusion in
+        # .github/required-checks.json), so wiring the arm makes it RUN, not BLOCK.
+        run: bash scripts/pds-personal-local-smoke_test.sh --dry-run
       - name: "PDS-D allocation arbiter: --check-alloc and --axis a over the merged tree"
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # THE NAMED TRIGGER (task-6fd11672fdeefd0b) for two charter rulings that
