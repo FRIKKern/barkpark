@@ -83,6 +83,8 @@
 #   --repo DIR           a git repo whose worktree registrations are honoured;
 #                        repeatable; defaults to this script's own repo root
 #   --min-age-days N     a candidate modified within N days is never touched (default 2)
+#   --no-entries-census  skip the before/after `find | wc -l` entry count (two extra
+#                        full walks per root); never changes what is reaped
 #   --floor <GiB>        check mode (see above); delegates the verdict to
 #                        scripts/disk-headroom-guard.sh, which is the repo's
 #                        one free-space instrument
@@ -114,6 +116,7 @@ REPO_ROOT=$(cd -- "$SELF_DIR/.." && pwd)
 GUARD="$SELF_DIR/disk-headroom-guard.sh"
 
 MIN_AGE_DAYS=2
+ENTRIES_CENSUS=1
 MODE=dry-run
 YES_DELETE=0
 FLOOR_GB=""
@@ -337,8 +340,12 @@ sweep() {
 		fi
 		printf '%s: ROOT %s\n' "$PROG" "$root"
 		printf '%s: DF-BEFORE-ROOT %s avail_kb=%s (%s)\n' "$PROG" "$root" "$before" "$(kb_human "$before")"
-		printf '%s: ENTRIES-BEFORE %s %s (find, all depths — the count the incident used)\n' \
-			"$PROG" "$root" "$(find "$root" 2>/dev/null | wc -l | tr -d ' ')"
+		if [ "$ENTRIES_CENSUS" -eq 1 ]; then
+			printf '%s: ENTRIES-BEFORE %s %s (find, all depths — the count the incident used)\n' \
+				"$PROG" "$root" "$(find "$root" 2>/dev/null | wc -l | tr -d ' ')"
+		else
+			printf '%s: ENTRIES-BEFORE %s SKIPPED (--no-entries-census)\n' "$PROG" "$root"
+		fi
 
 		for entry in "$root"/*; do
 			[ -e "$entry" ] || continue
@@ -360,8 +367,12 @@ sweep() {
 			printf '%s: DF-AFTER-ROOT %s avail_kb=%s (%s) delta_kb=%d (context only — other lanes write this volume; NOT a reclaim figure%s)\n' \
 				"$PROG" "$root" "$after" "$(kb_human "$after")" "$freed" \
 				"$([ "$MODE" = dry-run ] && printf ', and this run deleted NOTHING' || printf '')"
-			printf '%s: ENTRIES-AFTER %s %s\n' \
-				"$PROG" "$root" "$(find "$root" 2>/dev/null | wc -l | tr -d ' ')"
+			if [ "$ENTRIES_CENSUS" -eq 1 ]; then
+				printf '%s: ENTRIES-AFTER %s %s\n' \
+					"$PROG" "$root" "$(find "$root" 2>/dev/null | wc -l | tr -d ' ')"
+			else
+				printf '%s: ENTRIES-AFTER %s SKIPPED (--no-entries-census)\n' "$PROG" "$root"
+			fi
 		fi
 	done
 
@@ -493,6 +504,15 @@ main() {
 			esac
 			MIN_AGE_DAYS="$2"
 			shift 2
+			;;
+		--no-entries-census)
+			# The entry census is TWO extra full `find` passes per root. It is the
+			# figure criterion 1 of task-80d117829feec84e asks for and stays ON by
+			# default, but on a very large root it dominates the run (14,264,338
+			# entries measured under one per-user tree on 2026-09-13), so it can be
+			# turned off. Turning it off never changes which candidates are reaped.
+			ENTRIES_CENSUS=0
+			shift
 			;;
 		--dry-run)
 			MODE=dry-run
