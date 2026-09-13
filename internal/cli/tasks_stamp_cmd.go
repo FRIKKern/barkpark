@@ -136,11 +136,28 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		return rc
 	}
 
+	// THE OUT-OF-ROW PIN (task-f7b781a0bcd7f70b). Everything above this line is
+	// validated against values READ FROM THE ROW BEING STAMPED, which is why an
+	// off-by-one stamp scripted in the observed shape is wire-identical to a
+	// correct one. `--expect '<index>:<first words>'` is typed by the AUTHOR
+	// before the row is read, so a rotated index disagrees with it. Refused here
+	// (before the POST) and checked again on the read-back — see
+	// tasks_stamp_expect_pin.go.
+	pin, rcPin := refuseMisalignedExpectPin(out, ctx, sa, cmd, forward)
+	if rcPin != exitOK {
+		return rcPin
+	}
+
 	// Echo the translated target so a 0-vs-1 base slip is visible immediately —
 	// stderr, so a scripted caller's stdout stays byte-identical to the bare
 	// manifest path (mirrors emitHelpHints).
 	if line := stampEchoLine(sa); line != "" {
 		out.errf("%s", line)
+		// A flag nobody can discover is a flag nobody types, and the guard this
+		// stamp IS using is the one the observed shape defeats.
+		if adv := stampExpectAdvisory(sa); adv != "" {
+			out.errf("%s", adv)
+		}
 	}
 
 	// THE MACHINE RECEIPT (criterion 2 of this row). Under -o json the dispatch
@@ -206,6 +223,7 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		return cap.flush(out, rc, nil)
 	}
 	req, ok := stampRequestOf(cmd, forward)
+	req.pin = pin
 	if !ok {
 		// No usable --criterion index (the manifest dispatch has already
 		// reported whatever was wrong with the invocation): there is no
@@ -266,6 +284,12 @@ type stampRequest struct {
 	// stampMismatches): a withdrawal that "landed" while met is still true is
 	// exactly the class of lie this verb exists to end.
 	withdraw bool
+	// pin is the author-typed `--expect` expectation, or nil. It is the ONE
+	// field here the row cannot supply, which is why the read-back's alignment
+	// check (stampMismatches) is keyed on it rather than on --criterion-text.
+	// It is attached by runTaskStamp after stampRequestOf, because the flag is
+	// stripped from the forwarded tail and stampRequestOf re-parses that tail.
+	pin *stampPin
 }
 
 // stampRequestOf re-resolves the stamp invocation through the SAME splitArgs +
@@ -543,6 +567,16 @@ func readbackRowLabel(rb apiclient.TaskReadback) string {
 // a met flip, because a miss flips nothing.
 func stampMismatches(req stampRequest, stored taskboard.CriterionItem) []string {
 	var out []string
+	// THE ALIGNMENT CHECK, and it is FIRST because it is the only one that can
+	// fail on a write the store is perfectly happy with. Every other mismatch
+	// below asks "did the value land"; this one asks "did it land where the
+	// AUTHOR said it should", which is a question no value read from the row can
+	// pose (tasks_stamp_expect_pin.go).
+	if req.pin != nil {
+		if p := stampPinReadbackProblem(*req.pin, req.index, stored.Criterion); p != "" {
+			out = append(out, p)
+		}
+	}
 	if want := strings.TrimSpace(req.text); want != "" && want != strings.TrimSpace(stored.Criterion) {
 		out = append(out, "the row at that index is a DIFFERENT criterion than the one named by --criterion-text")
 	}
@@ -612,6 +646,11 @@ type stampArgs struct {
 	met           bool
 	miss          bool
 	withdraw      bool
+	// expect is the AUTHOR-TYPED pin, verbatim as it was typed
+	// (`<index>:<first words>`), or "" when none was given. It is the one value
+	// in this struct that does not come from the row being stamped — see
+	// tasks_stamp_expect_pin.go.
+	expect string
 	// mergeGated is FLAG PRESENCE, not permission: `--merge-gated` appeared in
 	// the tail at all.
 	mergeGated bool
@@ -692,6 +731,18 @@ func parseStampArgs(tail []string, mergeGatedType string) (stampArgs, []string) 
 			}
 		case "--criterion-text":
 			sa.criterionText = spaceVal()
+		case stampExpectFlag:
+			// CLIENT-SIDE AND UNDECLARABLE. The pin is an expectation authored
+			// before the row was read; the server has nothing to do with it and
+			// does not declare the flag, so forwarding it would fail splitArgs
+			// with "unknown flag". Consume the value token too when the
+			// `--expect <pin>` spelling was used, or it would bind as a
+			// positional (the same shape as the legacy --merge-gated strip).
+			sa.expect = spaceVal()
+			if !inline && i+1 < len(tail) && !strings.HasPrefix(tail[i+1], "-") {
+				i++
+			}
+			continue
 		}
 		forward = append(forward, tail[i])
 	}

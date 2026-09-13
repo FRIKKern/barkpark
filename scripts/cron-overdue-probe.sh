@@ -191,9 +191,25 @@ poll_sleep() { printf '%s' "${CRON_PROBE_POLL_SLEEP:-5}"; }
 # `schedule:` trigger on origin/main that day. The task that ordered this work
 # said 14; the tree had 16 (task-lease-renew gained its push arm in #15757 and
 # is counted here as critical-with-fallback).
+#
+# 2026-09-13 (task-3d58169ded21964a): five rows added, taking the table to 28
+# against the 28 workflows carrying a `schedule:` on origin/main e02933779 —
+# cli-release-cadence, pds-scratch-round-trip, posix-vacuous-green-census,
+# release-curator-draft, seal-reading. They were NOT a hidden drift: main's own
+# push arm reported them on every merge (run 34759749673, 2026-09-13T13:27Z,
+# "REFUSED: scheduled workflow(s) carry no classification line" naming all five,
+# and the same red on every completed push:main run that day). Nobody had
+# classified them, so every workflow-touching PR inherited main's red through
+# the harness job's pull_request arm — the cost of leaving a true refusal
+# standing, not a defect in where it is asked. NONE of the five is critical:
+# each is an audit, a measurement or a digest whose lag costs a sample, and
+# three of them deliberately carry no push: arm (pds-scratch-round-trip and
+# release-curator-draft have none at all), which is exactly the case
+# check_fallbacks would wrongly demand a trigger for if they were critical.
 DEFAULT_TABLE='absent-context-census.yml|periodic|360|2026-09-03: 6 h absence audit. Its own harness (absent-context-census.test.sh §7) asserts this workflow is SCHEDULE-ONLY, so a push arm is forbidden here by a committed test; a 6 h sweep tolerates a 6 h lag by construction.
 breakglass-watch.yml|critical|30|2026-09-03: watches whether branch protection was broken open. Carries push: branches [main] — cron silence cannot hide an unrestored breakglass across a merge.
 chronicle-paper.yml|report|1440|2026-09-03: nightly narrative digest. A late chronicle is a late chronicle.
+cli-release-cadence.yml|periodic|10080|2026-09-13: weekly (cron 14 9 * * 4) check that the shipped `bp` has not moved past the newest installable `cli-v*` release; carries push: branches [main] AND an unfiltered pull_request arm, so a week of cron silence still leaves it running on every merge and every PR. PERIODIC, not critical: its red is cleared by an ACT OF RELEASE (`git tag cli-v<semver>`), never by a change to any PR, and its own header says so and refuses promotion to the required set. Same shape as the pipefail-sigpipe-scan/posix-vacuous-green-census rows.
 codebase-intel.yml|report|10080|2026-09-03: weekly intelligence sweep. Weekly cadence, weekly tolerance.
 cron-overdue-probe.yml|critical|60|2026-09-03: this probe itself. Hourly, and it carries push: branches [main] — a silence watch delivered only by the mechanism it watches is a smoke detector wired to the fire. It appeared in this table because its own table/tree check REFUSED the first live run that did not classify it.
 crown-reconcile.yml|periodic|360|2026-09-03: 6 h reconciliation sweep; carries push: branches [main] already.
@@ -203,11 +219,15 @@ grip-suite.yml|periodic|1440|2026-09-06: nightly Grip suite (cron 03:25Z); carri
 landed-open-report.yml|report|1440|2026-09-07: daily ledger digest (cron 06:27Z), wired in #16640. Classified report, not critical: its own header states a red here means THE READ FAILED, findings exit 0 to the step summary, and it deliberately carries no push: arm so it renders no check run anywhere. A day late is a day late — and report class is what leaves check_fallbacks satisfied without inventing a trigger this workflow was designed not to have.
 main-gate-watch.yml|critical|30|2026-09-03: the second scream on main tip verdicts. push-refused:scripts/main-gate-watch.test.sh — a push arm was MEASURED harmful (wave 60 D721: 2 of 2 push runs red on tip 026c5b1d78 while main was green, because ~15 s after a merge no check-run row exists yet) and a committed test reds if one comes back. Its fallback is THIS probe: a workflow that may not carry a trigger fallback must at least be watched for silence.
 paper-readers.yml|report|1440|2026-09-03: daily paper-reader digest; did not run at all on 09-03, which is the tolerated case for a report.
+pds-scratch-round-trip.yml|periodic|1440|2026-09-13: daily (cron 47 4 * * *) boot/verify/teardown of the PDS scratch target. SCHEDULE + workflow_dispatch ONLY and it may stay that way: its own header measures the run at >10 minutes (two full compiles) and calls a per-PR venue a WRONG build, so push/pull_request arms are deliberately absent. PERIODIC, not critical, precisely so check_fallbacks does not demand a trigger this workflow was designed not to have — the same argument landed-open-report.yml carries. A day-late drift report on crown infrastructure costs a day.
 pipefail-sigpipe-scan.yml|periodic|10080|2026-09-09: weekly repo-state scan for pipelines that can return 141 instead of a verdict (cron 41 5 * * 1, wired in #17081). PERIODIC because the whole point is the sweep, not the minute: the class it hunts is latent and static, a week late costs nothing, and it carries push: branches [main] plus a pull_request arm, so a week of cron silence still leaves it running on every merge. Same shape as the twoslash/grip-suite/deploy-harnesses rows.
+posix-vacuous-green-census.yml|periodic|10080|2026-09-13: weekly (cron 23 17 * * 2) census of scripts/*.sh using process substitution without an interpreter guard. PERIODIC for the same reason pipefail-sigpipe-scan.yml is, and it is the file that row already names as its own shape: the class is latent and static, a week late costs nothing, and it carries push: branches [main] plus an unfiltered pull_request arm, so cron is far from its only way to fire.
 pr-meta.yml|periodic|1440|2026-09-09: the nightly venue of the filebase aesthetics critic (cron 17 5 * * *), moved off the PR path in #17079 because it was 573 s of a 615 s run for an advisory that cannot block a merge. PERIODIC, not critical: the critic is an advisory score sweep with its own watcher, it is ADDITIONALLY armed by push: branches [main] (scoped to changes under tooling/aesthetics/ or this workflow), and a skipped night costs a score sample, not a safety net.
+release-curator-draft.yml|report|1440|2026-09-13: daily (cron 10 7 * * *) scan of main that opens or refreshes ONE draft GitHub Release for a human to bless. REPORT, not critical: schedule + workflow_dispatch are the ONLY triggers by design (its header rules out a push arm as noise that would make the draft chase main), and report class is what leaves check_fallbacks satisfied without inventing that trigger — the landed-open-report.yml argument again. A day late is a day late: the draft is a standing invitation, not a safety net.
 renew-mail-cert.yml|report|43200|2026-09-03: monthly certificate renewal. 3x a month is a 90-day bound, which is not a useful alarm — the certificate expiry is the alarm, and it is watched where it lands, not here.
 required-checks-drift.yml|periodic|1440|2026-09-03: daily drift audit of the required set; carries push: branches [main] already.
 scaffy-catalog-drift.yml|report|1440|2026-09-03: daily catalog drift digest; carries push: branches [main].
+seal-reading.yml|periodic|1440|2026-09-13: the one MACHINE-TAKEN seal reading (cron 20 6 * * *), plus push: branches [main] — a reading per merged state, and a daily tick because the rungs of the register can rot without a commit. PERIODIC: it is a MEASUREMENT whose CONTENT never reds it (charter D335 — only a refusal or an infra fault does), it gates no merge, and it deliberately has no pull_request arm because seal-run.sh refuses a reading taken off a tree that is not the tip of origin/main.
 search-starter-smoke.yml|report|1440|2026-09-03: daily starter smoke; carries push: branches [main].
 stale-verdict-watch.yml|critical|30|2026-09-03: watches PRs asserting a green main has moved past. Carries push: branches [main].
 studio-journey-smoke.yml|report|1440|2026-09-03: daily Studio journey smoke; carries push: branches [main].
