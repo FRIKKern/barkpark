@@ -46,7 +46,7 @@ defmodule BarkparkWeb.StatusController do
 
     json(conn, %{
       status: health.status,
-      components: Enum.map(health.components, &%{name: &1.component, status: &1.status}),
+      components: Enum.map(health.components, &component_json/1),
       version: health.version,
       # The sha is the identity; `version`'s trailing segment is only a
       # commits-since-tag distance. Public + unauthenticated on purpose.
@@ -175,11 +175,37 @@ defmodule BarkparkWeb.StatusController do
     """
   end
 
-  defp component_row(%{component: name, status: status}) do
+  # `detail` is emitted only when a probe has something to say. A degraded
+  # component whose payload is just a colour word is not actionable: the
+  # codelists probe names the lists, and an unattended owner reading
+  # /status.json with no bearer token is exactly who needs that name.
+  @doc false
+  # Public only so the JSON projection can be asserted directly: the degraded
+  # arm needs a codelist actually missing, which a live /status.json request in
+  # the test env (boot seeders off) will never produce.
+  @spec component_json(map()) :: map()
+  def component_json(component) do
+    base = %{name: component.component, status: component.status}
+
+    case Map.get(component, :detail) do
+      detail when is_binary(detail) and detail != "" -> Map.put(base, :detail, detail)
+      _ -> base
+    end
+  end
+
+  defp component_row(%{component: name, status: status} = component) do
     color = Map.get(TokensGen.status_health(), status, TokensGen.status_health_unknown())
+    detail = Map.get(component, :detail)
+
+    detail_html =
+      if is_binary(detail) and detail != "" do
+        ~s(<div class="m" style="font-size:.8rem">#{esc(detail)}</div>)
+      else
+        ""
+      end
 
     """
-    <div class="row"><span>#{name |> to_string() |> String.capitalize()}</span>
+    <div class="row"><span>#{name |> to_string() |> String.capitalize()}#{detail_html}</span>
     <span class="pill"><span class="dot" style="background:#{color};display:inline-block;margin-right:.4rem"></span>#{status}</span></div>
     """
   end

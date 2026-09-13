@@ -409,11 +409,28 @@ func chainSiteDeploy(out *writer, cfg *Config, ref string, site cloudclient.Spaw
 
 // siteInstanceNotLive reports whether a deploy error is the control plane's 422
 // instance_not_live — the box the site lives on is still provisioning and cannot
-// build yet. cloudError renders the wire code (optionally `code: detail`) into the
-// message, so the substring is the honest, decode-independent signal; the create
-// --deploy one-motion degrades to a retry hint on it rather than a bare failure.
+// build yet, so the create --deploy one-motion degrades to a retry hint rather
+// than a bare failure.
+//
+// THE STATUS IS PART OF THE FACT, not decoration. The control plane emits the
+// SAME `instance_not_live` slug at TWO statuses with OPPOSITE remedies
+// (cloud/lib/barkpark_cloud/web/router.ex):
+//
+//   - 422 — the instance hosting this site has no URL yet; wait for it to finish
+//     provisioning. RETRYABLE. This is the one the retry hint is for.
+//   - 409 — the instance backing this site was deprovisioned while the request
+//     was in flight; the box is GONE and retrying never works (maybe_bind_cloudflare
+//     fails closed rather than point DNS at a freed address).
+//
+// A substring match on err.Error() cannot tell them apart, and told the operator
+// to "deploy it in a moment" about a box that no longer exists. It also matched
+// any OTHER refusal that merely quoted the slug in its prose, because cloudError
+// folds detail/reason/required/scope INTO the message. Reading the typed
+// *cloudclient.CloudRefusal — the same errors.As read siteRefusalFail in this
+// file already does — gives both facts as facts.
 func siteInstanceNotLive(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "instance_not_live")
+	var re *cloudclient.CloudRefusal
+	return errors.As(err, &re) && re.HTTPStatus == 422 && re.Code == "instance_not_live"
 }
 
 // runCloudSiteDeploy is `bp cloud site deploy <site>` (alias `build`) — enqueue a

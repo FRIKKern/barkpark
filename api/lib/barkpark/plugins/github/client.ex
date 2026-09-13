@@ -69,6 +69,21 @@ defmodule Barkpark.Plugins.Github.Client do
   # too small to serve as a park ceiling).
   @retry_after_max_seconds 300
 
+  # LOWER bound on the SAME value, and the counterpart to the ceiling above.
+  # `x-ratelimit-reset` is an absolute epoch instant from the peer; if the LOCAL
+  # clock has stepped FORWARD past it (NTP correction, VM resume, a skewed box),
+  # `reset - now` is <= 0. The old `max(0, ...)` floored that to 0, MirrorJob
+  # turned it into `{:snooze, max(s || 0, 1)}`, and Oban's snooze does
+  # `inc: [max_attempts: 1]` — so the job re-fired every second FOREVER without
+  # ever exhausting attempts: a perpetual hammer against exactly the limit that
+  # is already tripped. A non-positive interval is not "retry immediately", it
+  # is "this clock cannot tell me when"; 60 s is GitHub's own documented minimum
+  # wait before retrying after a secondary rate limit. It also covers a missing
+  # reset header (`x-ratelimit-remaining: 0` alone) and an unparseable
+  # `Retry-After` — `parse_int/1` returns 0 for both. A POSITIVE peer-supplied
+  # interval is still honoured verbatim, however small.
+  @retry_after_min_seconds 60
+
   # ---------------------------------------------------------------------------
   # Public API
   # ---------------------------------------------------------------------------
@@ -355,6 +370,12 @@ defmodule Barkpark.Plugins.Github.Client do
   # missing UPPER bound on an externally supplied value, not the clock source.
   # `now` is injectable so the clamp is provable without sleeps (same shape as
   # Github.DrainWorker.backoff_ms/1); the production call site stays arity-1.
+  #
+  # The clock SOURCE is still not guarded — it cannot be, against a peer epoch —
+  # but its FORWARD-STEP consequence now is: see @retry_after_min_seconds. This
+  # function is reached only from the 403/429 `rate_limited?/1` branch, so every
+  # value it returns is a back-off from an ALREADY-TRIPPED limit; returning 0
+  # there is never right.
   @doc false
   @spec retry_after_seconds(term(), integer()) :: non_neg_integer()
   def retry_after_seconds(headers, now \\ System.system_time(:second)) do
@@ -364,13 +385,19 @@ defmodule Barkpark.Plugins.Github.Client do
           parse_int(ra)
 
         reset = get_header(headers, "x-ratelimit-reset") ->
-          max(0, parse_int(reset) - now)
+          parse_int(reset) - now
 
         true ->
           0
       end
 
-    seconds |> max(0) |> min(@retry_after_max_seconds)
+    # Two-sided: a positive interval is clamped to the ceiling, a non-positive
+    # one (clock ahead of reset / no usable header) takes the floor. Never 0.
+    if seconds > 0 do
+      min(seconds, @retry_after_max_seconds)
+    else
+      @retry_after_min_seconds
+    end
   end
 
   defp get_header(headers, name) when is_map(headers) and not is_struct(headers) do

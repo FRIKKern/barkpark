@@ -1,5 +1,5 @@
 defmodule Barkpark.Content.SessionBlocksDocTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
   alias Barkpark.Content
 
   @dataset "production"

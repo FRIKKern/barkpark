@@ -288,7 +288,7 @@ const type = tokens.type || {};
 // exactly the hole that let web/components/styleguide.tsx hand-keep a parallel
 // 700/700/600/400/400/400 column beside this file (au-r4-web-type-ladder).
 const CHROME_WEIGHT_RANGE = (tokens.font && tokens.font.chrome && tokens.font.chrome.weightRange) || [100, 900];
-const CHROME_ORDER = ["xs", "sm", "base", "lg", "xl", "2xl"];
+const CHROME_ORDER = ["3xs", "2xs", "xs", "sm", "base", "lg", "xl", "2xl"];
 for (const step of CHROME_ORDER) {
   const s = (type.chrome || {})[step];
   ok(s && typeof s.size === "number" && typeof s.lineHeight === "number", `type.chrome.${step} needs {size,lineHeight}`);

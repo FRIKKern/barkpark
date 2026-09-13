@@ -2646,6 +2646,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   attr :question_forms, :map, required: true
 
   defp turn_fold(assigns) do
+    # The turn's files-changed aggregate (task-eb3a6938ecc8576c), DERIVED by the
+    # renderer from the same shape dispatch the per-row diffs use. An empty
+    # aggregate draws neither the summary nor the container — a turn that
+    # mutated nothing says nothing.
+    assigns = assign(assigns, :files_changed, ChatToolRenderer.files_changed(assigns.rows))
+
     ~H"""
     <div data-role="turn-fold" data-turn-fold={@fold_key} style="font-family: var(--font-mono);">
       <button
@@ -2664,7 +2670,29 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <span style="opacity: 0.7;">
           · <%= length(@rows) %> <%= if length(@rows) == 1, do: "step", else: "steps" %>
         </span>
+        <span :if={@files_changed != []} data-turn-files-changed style="opacity: 0.7;">
+          · <%= ChatToolRenderer.files_changed_label(@files_changed) %>
+        </span>
       </button>
+
+      <%!-- The per-path list the summary expands to. One row per PATH with the
+            turn's TOTAL +/- for it — never one row per tool call. --%>
+      <div
+        :if={@expanded and @files_changed != []}
+        data-role="turn-files-changed"
+        class="text-xs"
+        style="margin: 4px 0 4px 16px; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; line-height: 1.5;"
+      >
+        <div
+          :for={file <- @files_changed}
+          data-turn-file={file.path}
+          style="display: flex; gap: 8px; align-items: baseline;"
+        >
+          <span style="min-width: 0; overflow-wrap: anywhere; flex: 1;"><%= file.path %></span>
+          <span style="color: var(--ok); flex: none;">+<%= file.added %></span>
+          <span style="color: var(--danger); flex: none;">−<%= file.removed %></span>
+        </div>
+      </div>
 
       <%!-- The turn's rows, byte-identical to the flat transcript they came
             from — folding is a wrapper, never a second rendering of a row. --%>

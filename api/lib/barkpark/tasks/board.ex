@@ -527,11 +527,26 @@ defmodule Barkpark.Tasks.Board do
   # Cancelled children never count (they were split out before enrich);
   # childless cards carry nil. Derived at build time from the same corpus —
   # a realtime event refreshes it on the next :refresh reconcile.
+  #
+  # THE GROUPING KEY IS THE PUBLISHED ID, NOT THE STORED ONE (task-56bc2039bae5010f).
+  # `card.doc_id` is already `Content.published_id/1`'d by `to_card/4`, but
+  # `card.parent_id` is the RAW `content.parent_id` — and a task written through
+  # `/v1/data/mutate` lands in the draft shadow, so a child filed against a
+  # drafts-shaped epic carries `parent_id: "drafts.<epic>"`. Grouped raw, that
+  # child keys a bucket no card's doc_id can ever match, and the epic's `sub`
+  # summary silently UNDER-COUNTS it (or reads nil where it should read 1).
+  #
+  # Every other rail reader already strips the prefix on both sides —
+  # `Tasks.Query.maybe_filter_parent_id/2`, `Tasks.Rail.rail_children/2`,
+  # `TasksController.Params.batch_child_counts/2` — in SQL; this is the same rule
+  # in Elixir, over the already-loaded snapshot. Normalising here and not at
+  # `to_card/4` keeps `parent_id` on the card as the value the document actually
+  # stores, which `facets/1` and `lanes/2` render to the operator.
   defp attach_subtasks(cards) do
     by_parent =
       cards
       |> Enum.filter(&is_binary(&1.parent_id))
-      |> Enum.group_by(& &1.parent_id)
+      |> Enum.group_by(&Content.published_id(&1.parent_id))
 
     Enum.map(cards, fn card ->
       Map.put(card, :sub, sub_summary(Map.get(by_parent, card.doc_id, [])))

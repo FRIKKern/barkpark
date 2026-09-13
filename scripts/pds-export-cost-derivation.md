@@ -362,17 +362,28 @@ worth recording:
 ### 6c.3 How a future re-derivation is run
 
 ```
-# the full-fidelity figure, directly comparable to 2235.43 MiB
-scripts/pds-export-peak-measure.sh --label post-spill --out /tmp/peak.line
+# the full-fidelity figure, directly comparable to 2235.43 MiB.
+# --window is REQUIRED and has no default; state one you can defend and read
+# the PAIRING line in the output before quoting the control beside the delta.
+scripts/pds-export-peak-measure.sh --window 300 --label post-spill --out /tmp/peak.line
 
 # a narrowed acquisition (skips the full-export headroom gate)
 scripts/pds-export-peak-measure.sh --window 30 \
   --path '/api/workspaces/default/export?profile=dev&dataset=production'
 ```
 
-Defaults: acquisition = the FULL workspace export; `--window` = 130 s, the canonical export's
-wall time, so the control pairs with a full run. The script **refuses** (exit 2) rather than
-guess when it cannot measure honestly:
+Defaults: acquisition = the FULL workspace export. `--window` has **no default** and the
+script exits 3 without it. It used to default to 130 s, "the canonical export's wall time,
+so the control pairs with a full run" — that wall time was measured in wave 7 on the
+**retired in-memory** export engine, and the streaming spill engine deployed since wave 11
+has never completed the full export, so its duration is UNMEASURED (open blocker
+`pds-bl-w13-export-duration-unmeasured`). A control shorter than the acquisition beside it
+does not refuse: it accumulates less drift than the export window could have and so flatters
+the export's delta, always in that direction. Rather than substitute a second guess, the
+instrument makes the caller state the window and own the pairing claim; the `--window 300`
+above is this procedure's stated choice, not a measured figure, and both the requested and
+the measured window are on the machine line (`idle_window_requested_s`, `idle_window_s`).
+The script **refuses** (exit 2) rather than guess when it cannot measure honestly:
 
 - SSH unavailable — the BEAM's RSS lives on the source box and nothing is quoted unsampled;
 - no process with `comm == beam.smp` — never falls back to a looser argv match;

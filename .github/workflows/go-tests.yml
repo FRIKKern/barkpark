@@ -102,6 +102,10 @@ on:
       # internal/pdrender/inline_block_wrapper_parity_test.go reads this fixture
       # (#17759); same rule.
       - "api/test/support/fixtures/inline-block-wrapper.json"
+      # internal/pdrender/section_boundary_rules_parity_test.go reads this
+      # fixture (task-a4d1ae76fdb2a6b0 — one rule per boundary, three engines);
+      # same rule.
+      - "api/test/support/fixtures/section-boundary-rules.json"
       # Taskboard TUI golden frames (internal/taskboard/testdata/*.txt). The
       # compose/render/glyph-budget suites assert the committed frames byte-for-byte
       # and inventory every glyph in them; a golden REGEN (or a hand-added fixture)
@@ -215,6 +219,11 @@ on:
       - "cloud/lib/barkpark_cloud/telemetry.ex"
       - "cloud/lib/barkpark_cloud/usage.ex"
       - "cloud/lib/barkpark_cloud/web/router.ex"
+      # build_log_bytes.ex: internal/cloudclient/producer_contract_test.go reads
+      # the server's @bytes_keys sigil from DISK (buildLogBytesProducerPath) and
+      # locks the Go struct's tags against it in serializer order, so an edit to
+      # the producer's key set must dispatch the Go job (task-801c6c33769ca01d).
+      - "cloud/lib/barkpark_cloud/sites/build_log_bytes.ex"
       # Onramp corpus: internal/cli/movement_doctrine_test.go reads all ten of
       # these docs from DISK and asserts each carries the movement doctrine
       # verbatim; onramp_cmd_test.go additionally pins the ZED.md json stanza and

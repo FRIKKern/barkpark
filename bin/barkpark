@@ -13,7 +13,7 @@
 #                      happens to hold the port.
 #   barkpark stop --force <pid>
 #                      the owner's explicit way out of a WEDGED server: a process
-#                      that holds $PORT but does not answer /api/schemas, with a
+#                      that holds $PORT but does not answer /status.json, with a
 #                      pidfile that does not name it. Plain `stop` refuses it
 #                      (rightly — it cannot tell it from a stranger on 4000) and
 #                      `up` then dies on the held port, so `reload` dead-ends.
@@ -182,7 +182,7 @@ start_server() {
       report_credential
       return 0
     fi
-    die "port $PORT is held by pid $lpid but http://$PHX_HOST:$PORT/api/schemas does not answer — a wedged server, one still booting, or something else entirely. Run 'barkpark status' first; if it is still wedged, the way out is 'barkpark stop --force $lpid' (it kills that pid and only that pid, and refuses if $lpid is not the one holding port $PORT), or set PORT=<other>; see $SERVER_LOG"
+    die "port $PORT is held by pid $lpid but http://$PHX_HOST:$PORT/status.json does not answer — a wedged server, one still booting, or something else entirely. Run 'barkpark status' first; if it is still wedged, the way out is 'barkpark stop --force $lpid' (it kills that pid and only that pid, and refuses if $lpid is not the one holding port $PORT), or set PORT=<other>; see $SERVER_LOG"
   fi
 
   # Nothing is listening, so ANY pidfile here is a claim we cannot corroborate:
@@ -223,7 +223,7 @@ start_server() {
 # the empty one, name the command that fixes it.
 #
 # The probe is the managed Postgres, because that is the only place the answer
-# lives — /api/schemas is public and tells us nothing about credentials.
+# lives — /status.json is public and tells us nothing about credentials.
 # `permissions` is a text[] (Barkpark.Auth.ApiToken: {:array, :string}), hence
 # `= ANY(...)`; `kind='api'` is what Auth.verify_token/1 filters on; an unrevoked
 # token is `revoked_at IS NULL` — the same three predicates
@@ -248,10 +248,17 @@ report_credential() {
   fi
 }
 
+# The path is /status.json, NOT the legacy /api/schemas: that route pipes
+# through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+# `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, and this loop gates on `curl -sf`
+# (2xx only), so after removal `barkpark up` would `die` on every healthy boot.
+# No older-build fallback is needed HERE: wait_server only ever waits on the
+# server this script just started out of THIS checkout, which carries
+# /status.json (router.ex, :api pipeline, no deprecation scope, no token).
 wait_server() {
   local i
   for i in $(seq 1 60); do
-    if curl -sf "http://$PHX_HOST:$PORT/api/schemas" >/dev/null 2>&1; then
+    if curl -sf "http://$PHX_HOST:$PORT/status.json" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -281,13 +288,13 @@ stop_server() {
     why="$SERVER_PID_FILE names the pid holding port $PORT"
   elif [ -n "$lpid" ] && server_answering; then
     pid="$lpid"
-    why="it answers http://$PHX_HOST:$PORT/api/schemas"
+    why="it answers http://$PHX_HOST:$PORT/status.json (or, on an older build, /api/schemas)"
   fi
 
   if [ -z "$pid" ]; then
     if [ -n "$lpid" ]; then
       STOP_REFUSED_PID="$lpid"
-      log "refusing to stop pid $lpid — it holds port $PORT but does not answer http://$PHX_HOST:$PORT/api/schemas and $SERVER_PID_FILE does not name it, so it is not identifiably Barkpark. Nothing was killed."
+      log "refusing to stop pid $lpid — it holds port $PORT but answers neither http://$PHX_HOST:$PORT/status.json nor the legacy /api/schemas, and $SERVER_PID_FILE does not name it, so it is not identifiably Barkpark. Nothing was killed."
       log "  if that pid IS your wedged Barkpark, the way out is: barkpark stop --force $lpid"
     elif [ -n "$claim" ] && kill -0 "$claim" 2>/dev/null; then
       log "not stopping pid $claim — $SERVER_PID_FILE claims it, but nothing is listening on port $PORT. Stale pidfile: discarding it without killing anything."
@@ -446,9 +453,27 @@ cmd_stop() { # [--force <pid>]
   "$PG" stop
 }
 
-# Does the server ANSWER? The same probe wait_server uses to decide the boot
-# succeeded — liveness is "it serves HTTP", never "a pid exists".
+# Does the server ANSWER? Liveness is "it serves HTTP", never "a pid exists".
+#
+# TWO paths, in this order, and the SECOND one is deliberate. /status.json is
+# the primary: /api/schemas pipes through BarkparkWeb.Plugs.LegacyDeprecation
+# and carries a published `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, so a probe
+# that gates on it alone is red on a healthy box the day it is removed.
+#
+# But this function is not only a health check — `stop` and `status` use it to
+# decide whether the process holding $PORT is IDENTIFIABLY Barkpark, and the
+# thing holding the port may be an OLDER build than this checkout. /status.json
+# only exists from d40092ab9 (2026-07-05); the same caveat is stated at
+# running_version() below. A pre-July-2026 server answers /api/schemas and not
+# /status.json — and it keeps answering it after the sunset, because the removal
+# lands in NEW builds, not in a binary already running. Dropping the legacy path
+# would make `stop` refuse to kill such a server ("not identifiably Barkpark")
+# and `up` then die on the held port, with `reload` dead-ending — the exact
+# WEDGED state `stop --force` exists to escape. So the fallback stays, second,
+# and documented: /status.json decides the answer for every current build.
 server_answering() {
+  curl -sf "http://$PHX_HOST:$PORT/status.json" >/dev/null 2>&1 && return 0
+  # Legacy fallback — an older build (pre-d40092ab9) that has no /status.json.
   curl -sf "http://$PHX_HOST:$PORT/api/schemas" >/dev/null 2>&1
 }
 
@@ -478,10 +503,10 @@ running_version() {
 # is a claim; the port and an HTTP answer are the state. Both failure directions
 # were observed on a dev box before this: a pidfile pointing at an unrelated
 # `sleep` printed "server running", and with no pidfile at all it printed
-# "server stopped" while beam.smp held :4000 and /api/schemas returned 200.
+# "server stopped" while beam.smp held :4000 and /status.json returned 200.
 #
 # FOUR OUTCOMES — there is no bare "running":
-#   ANSWERING                    port held AND /api/schemas answers (+ version/commit)
+#   ANSWERING                    port held AND /status.json answers (+ version/commit)
 #   PROCESS-ALIVE-NOT-ANSWERING  port held, HTTP does not answer (booting or wedged)
 #   STOPPED                      nothing holds the port
 #   UNKNOWN                      pidfile claims a live pid that does NOT hold the port
@@ -503,7 +528,7 @@ cmd_status() {
         log "server ANSWERING (pid $lpid) — http://$PHX_HOST:$PORT — version unknown (/status.json not served)"
       fi
     else
-      log "server PROCESS-ALIVE-NOT-ANSWERING — pid $lpid holds port $PORT but http://$PHX_HOST:$PORT/api/schemas did not answer — see $SERVER_LOG"
+      log "server PROCESS-ALIVE-NOT-ANSWERING — pid $lpid holds port $PORT but http://$PHX_HOST:$PORT/status.json did not answer — see $SERVER_LOG"
     fi
     if [ -n "$ppid_claim" ] && [ "$ppid_claim" != "$lpid" ]; then
       log "note: $SERVER_PID_FILE claims pid $ppid_claim, which is NOT the process holding port $PORT"

@@ -50,10 +50,12 @@ export const chromeType = {
   base: { size: 14, lineHeight: 1.5, weight: 400 },
   sm: { size: 13, lineHeight: 1.45, weight: 400 },
   xs: { size: 12, lineHeight: 1.4, weight: 400 },
+  "2xs": { size: 11, lineHeight: 1.4, weight: 400 },
+  "3xs": { size: 10, lineHeight: 1.4, weight: 400 },
 } as const satisfies Record<string, TypeStep>;
 
 /** The step order the chrome ladder is displayed in (largest → smallest). */
-export const chromeTypeOrder = ["2xl", "xl", "lg", "base", "sm", "xs"] as const;
+export const chromeTypeOrder = ["2xl", "xl", "lg", "base", "sm", "xs", "2xs", "3xs"] as const;
 
 /** READING type ladder (serif prose) from design/tokens.json `type.reading` —
  *  the SAME leaves paper-surface.css emits as --tok-reading-*-size/-lh and the

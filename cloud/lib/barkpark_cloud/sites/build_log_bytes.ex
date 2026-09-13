@@ -55,6 +55,13 @@ defmodule BarkparkCloud.Sites.BuildLogBytes do
   though the box should already have refused it. An invariant held somewhere
   else is exactly what a byte door must not rely on.
 
+  That rule is enforced ONCE, at the single point every answer is built through
+  (`record/1`), and not per branch: the relayed box-422, the relayed box-410 and
+  the `evicted` / `missing` / `never_recorded` arms can each carry a `tail` the
+  box should not have sent, and a guard written on one of them is a guard four
+  shapes never reach. No shape leaves here with a non-nil `tail` unless the
+  record names the pattern-set version its bytes were folded with.
+
   ## Not SSE-broadcast, and operator-gated
 
   Pull-only, one deployment per request, behind `Auth.require_platform_operator/2`
@@ -253,8 +260,7 @@ defmodule BarkparkCloud.Sites.BuildLogBytes do
         {422,
          base
          |> Map.merge(%{error: "build_log_unscrubbed", available: false})
-         |> Map.merge(record(body))
-         |> Map.put(:tail, nil)}
+         |> Map.merge(record(body))}
 
       {"available", _scrub, tail} when is_binary(tail) ->
         {200,
@@ -303,8 +309,40 @@ defmodule BarkparkCloud.Sites.BuildLogBytes do
         :error -> acc
       end
     end)
+    |> withhold_unscrubbed_tail(Map.get(body, "log_scrub"))
     |> cap_tail()
   end
+
+  # THE CHOKE POINT, and the reason it is here rather than on a branch. Every
+  # shape that can put a `tail` on the wire — the relayed box-422 and box-410
+  # (`wire/3`), and `decide_bytes`' available / evicted / missing /
+  # never_recorded arms — builds its body through `record/1`. Writing the rule
+  # on the branch that happened to think of it leaves the other four relaying
+  # whatever the box sent, which is the inheritance this module's own moduledoc
+  # says a byte door must not do. So: NO shape carries a non-nil `tail` unless
+  # the RECORD says which pattern-set version folded it.
+  #
+  # Fail-closed on a MISSING `log_scrub` too, not only an explicit null: a box
+  # that does not say its bytes were folded has not said it. (`decide/2` already
+  # routes a box too old to speak `bytes=1` to 502 on the absent `tail` key, so
+  # this arm is about a box that sends bytes and no provenance.)
+  #
+  # `tail_bytes` and `truncated` are rewritten with it: both describe the binary
+  # that ships, and a withheld tail ships none.
+  defp withhold_unscrubbed_tail(rendered, nil) do
+    case Map.fetch(rendered, :tail) do
+      {:ok, tail} when is_binary(tail) ->
+        rendered
+        |> Map.put(:tail, nil)
+        |> Map.put(:tail_bytes, 0)
+        |> Map.put(:truncated, false)
+
+      _ ->
+        rendered
+    end
+  end
+
+  defp withhold_unscrubbed_tail(rendered, _log_scrub), do: rendered
 
   # Truncation is VISIBLE, never silent — a caller that sees the marker knows the
   # bytes were longer. `tail_bytes` is re-measured off what actually goes on the

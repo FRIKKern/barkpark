@@ -12,6 +12,8 @@ bash tooling/paper-excellence/rig/gate.sh --panel      # every committed fixture
 bash tooling/paper-excellence/rig/gate.sh --panel --check   # …and diff the committed numbers
 bash tooling/paper-excellence/rig/baseline.sh          # re-capture the committed panel
 bash tooling/paper-excellence/rig/fetch-fixtures.sh    # the ONE networked step: refresh fixtures
+bash tooling/paper-excellence/rig/fetch-fixtures.sh --list   # …which slugs that would touch, no network
+bash tooling/paper-excellence/rig/fixture-list-check.sh      # does that list still cover the panel?
 ```
 
 Any path the shell accepts works: `gate.sh` resolves the fixture and the out-dir
@@ -27,9 +29,21 @@ so the natural repo-relative invocation
 | `census.mjs` | the heavy-rule census — one measurement function, run on the artifact AND on a rendered paper |
 | `gate.sh` | render + shoot a committed fixture (`heggemsnes-act` by default, `--panel` for all 9); nonzero on any content failure |
 | `baseline.sh` | the same path, writing into `baselines/` so a refresh is a reviewable diff; its no-argument slug list is DERIVED from `fixtures/*.json`, so a new fixture cannot be added without the default re-baseline covering it |
-| `fetch-fixtures.sh` | pulls paper blocks from Barkpark via `bp` and rewrites `fixtures/*.json`; its default slug list is every **published** fixture (`design-probe` is authored and has no live doc — `eight-minute-erasure` once drifted purely by being absent from this list) |
-| `fixtures/` | 9 papers, each stamped with the `source_rev` it was taken from (`design-probe` and `stat-partial-row` are authored, not published) |
+| `fetch-fixtures.sh` | pulls paper blocks from Barkpark via `bp` and rewrites `fixtures/*.json`; its no-argument slug list is **DERIVED** from `fixtures/*.json` — every fixture carrying a `source_rev` (published, so a live document stands behind it), never one carrying `_source` (authored, `bp doc get` would 404). `--list` prints that set without touching the network |
+| `fixture-list-check.sh` | asserts the two facts the derivation rests on, hermetically, and is run by `gate.sh` on every run: every fixture carries exactly one of `source_rev` / `_source`, and `fetch-fixtures.sh --list` equals a second derivation of the published set written in node rather than python |
+| `fixtures/` | every committed fixture is either **published** (stamped with the `source_rev` it was taken from) or **authored** (carries `_source`: hand-written, no live paper). `bash fixture-list-check.sh` prints the split — 7 published, 2 authored, 9 fixtures on 2026-09-12 |
 | `baselines/` | the committed panel (see below) |
+
+**Why the fetch list is derived and not typed** (task-15d30569241d3542). It was
+a hand-written array of slugs until 2026-09-12, and a typed list is a snapshot
+of the panel on the day someone typed it. `eight-minute-erasure` drifted in
+2026-08-17 purely by being absent from that array; `agent-flight-recorder-charter`
+(added 2026-09-10 by #17199) was absent from it again three weeks later, so a
+bare refresh would have silently skipped it — the same failure, twice, from the
+same cause. `baseline.sh` and `gate.sh --panel` had already stopped curating;
+this one now does too, and `fixture-list-check.sh` reds if it is ever typed
+back. The exclusion is a PREDICATE (`_source` present) and not a skip list, so
+a third authored fixture needs no edit here.
 
 ## How it stays hermetic
 
@@ -114,8 +128,9 @@ renderer or paper-CSS change reached `main` having been photographed by nobody.
 
 | trigger | what runs |
 |---|---|
-| `push` to main / `pull_request` touching the renderer, `api/assets/paper-surface/**`, `bulldocs_live.ex` or `rig/**` | `gate.sh` on the default fixture — 8 cells, 5 DOM-content assertions each |
-| `workflow_dispatch` with `recapture: true`, or a `rig-recapture` LABEL on a pull request | `baseline.sh` over all 8 fixtures **inside the runner image**, then `git diff --stat` and an upload of `baselines/` as an artifact |
+| `push` to main / `pull_request` touching the renderer, `api/assets/paper-surface/**`, `bulldocs_live.ex` or `rig/**` | `fixture-list-check.sh`, then `gate.sh` on the default fixture — 8 cells, 5 DOM-content assertions each |
+| `workflow_dispatch` with `check: true` | `gate.sh --panel --check` **inside the runner image** — the numeric oracle over the whole panel, diffed against the committed `baselines/*.report.json` |
+| `workflow_dispatch` with `recapture: true`, or a `rig-recapture` LABEL on a pull request | `baseline.sh` over **every** committed fixture (its no-argument list is derived from `fixtures/*.json`, so this arm cannot fall behind the panel) **inside the runner image**, then `git diff --stat` and an upload of `baselines/` as an artifact |
 
 The label route is not a convenience. `workflow_dispatch` is only dispatchable
 once the workflow file is on the **default** branch, so the very capture that has
@@ -140,7 +155,18 @@ that job: the rig needs a browser, not the SDK monorepo.
 The PR arm does **not** pass `--check`. The committed `report.json` oracle is a
 numeric diff, and until the baselines were re-captured in this image (see
 below) a `--check` there would have compared a Linux run against macOS numbers
-and reddened on font fallback rather than on a layout regression.
+and reddened on font fallback rather than on a layout regression. It stays off
+the PR arm even now that the baselines ARE Linux: `--check` re-shoots the whole
+panel, and a host-dependent number is a thing to ASK about on demand, not a
+thing every pull request must survive. The `check: true` dispatch input is that
+question — `gate.sh --panel --check` in the same image the baselines came from,
+which is the only host where a red there means a layout regression rather than
+a font stack.
+
+The PR arm does, however, run `fixture-list-check.sh` first (it is the first
+thing `gate.sh` does). That one IS hermetic — no browser, no network, no
+host-dependent number — so a pull request that lets `fetch-fixtures.sh`'s
+default list fall behind `fixtures/*.json` reds a visible check.
 
 ### Which image produced the committed baselines
 
@@ -176,7 +202,12 @@ nobody can reproduce.
 
 ## Baselines
 
-`baselines/` holds the 9-paper panel: `agent-flight-recorder-charter`,
+`baselines/` holds one panel per committed fixture — **45 files on 2026-09-12**,
+and that number is derived, not decreed: `2 schemes x 2 widths x 9 fixtures = 36`
+JPEGs plus one `report.json` each. Re-derive it rather than trusting this
+sentence — `ls tooling/paper-excellence/rig/baselines | wc -l`, and
+`bash tooling/paper-excellence/rig/fixture-list-check.sh` for the fixture count
+it is a function of. Today the nine are: `agent-flight-recorder-charter`,
 `design-probe`, `eight-minute-erasure`,
 `heggemsnes-act`, `hobby-hardening-capstone`, `mechanical-spacing-doctrine`,
 `paper-excellence-wave-2026-08-12`, `portabledoc-showcase`, `stat-partial-row`
@@ -220,6 +251,73 @@ and blocked-request count — and, per cell, the four **crown measurements**
   probe fails too (anti-vacuity). `stat-partial-row` is the committed fixture
   that has one at every panel width (11 cells — prime, so no track count
   divides it: 8+3 @1280, 9+2 @1920).
+
+## The editorial measure band — 66-72 CPL (task-21b7dd42b946b64e)
+
+The prose measure is asserted per cell in **characters per line**, and since the
+Linux baselines landed the band is **66-72, inclusive at both ends** (it was
+55-75 while the only numbers available were laptop numbers). Both ends are live
+wherever the 660px column does NOT fill the viewport — every cell in the
+committed panel. Where the column IS viewport-bound (360px), only the ceiling
+applies: the phone sets the measure there, not the type (34.7 CPL).
+
+The band is set against the committed Linux panel, not against a target:
+
+| fixture | prose CPL (1280 / 1920) |
+| --- | --- |
+| `heggemsnes-act` | **66.9** — floor-binding, 0.9 spare |
+| `design-probe` | 68.1 |
+| `mechanical-spacing-doctrine` | 69.2 |
+| `paper-excellence-wave-2026-08-12` | 70.6 |
+| `portabledoc-showcase` | 70.7 / 71.1 |
+| `hobby-hardening-capstone` | 70.8 |
+| `eight-minute-erasure` | 71.1 |
+| `stat-partial-row` | 71.8 |
+| `agent-flight-recorder-charter` | **72.0** — ceiling-binding, **ZERO headroom** |
+
+Proven in the image, not on a laptop: `paper-rig.yml` run
+**34689409744** (`workflow_dispatch`, `check: true`, branch `studio/rig-cpl-band`)
+ran `gate.sh --panel --check` under this band and closed
+`panel: 9 fixtures committed, 9 attempted, 9 passed, 0 failed, 36 shots`, every
+fixture's report-check reporting `0 differences`.
+
+`agent-flight-recorder-charter` passes only because the comparison is `>`, not
+`>=`. A 0.1 CPL font-metric shift in that fixture reds this arm. That cost is
+accepted because the workflow is advisory and `--check` is dispatch-only; the
+answer to a flap is to re-capture and RESTATE this table, never to widen the
+ceiling.
+
+**No allowlist.** The task asked for `portabledoc-showcase` to be allowlisted by
+name as a below-band outlier. On this rig's instrument it measures 70.7/71.1 —
+mid-band. The below-band claim is wave-1's different CPL instrument, which
+disagrees with this one by up to 7.9 on the same paper
+(`tooling/grip/ledger/ingress-ratio-arm-mutation-and-instrument-divergence-2026-08-17.md`).
+An allowlist entry that can never match gates nothing while reading as coverage.
+
+### Judging the band offline — `--band-check`
+
+```bash
+node tooling/paper-excellence/rig/shoot.mjs --band-check tooling/paper-excellence/rig/baselines/*.report.json
+# → rig/shoot: band-check OK — 36 cell(s) in 9 report(s) inside the 66-72 editorial measure band
+```
+
+Same predicate as the live gate (`cplBandFailure`, one function, two callers —
+two copies would drift and the offline arm would then prove nothing about the
+gate a pull request runs). No browser, no renderer, no network: the band is the
+one number here a reviewer edits by hand, and this is how a band edit is shown
+to still be able to LOSE without a twenty-minute headless panel run. The
+viewport width is read from the cell name's trailing `__<width>`; a cell name
+without one is a hard failure, never a skip.
+
+Mutation proof (2026-09-12, against temp copies; `baselines/` untouched):
+
+| mutation | verdict |
+| --- | --- |
+| charter `proseCpl` 72.0 → 75.3 (the 720px-column defect's measured value) | exit 1, names `agent-flight-recorder-charter__light__1280` |
+| charter `proseCpl` 72.0 → 72.4 | exit 1 — and 72.4 was **green** under the old 55-75, so the red belongs to the tightening |
+| `heggemsnes-act` `proseCpl` 66.9 → 64.0 | exit 1 on the floor at a non-column-bound cell |
+| unmutated copies of both | exit 0, "8 cell(s) … inside the band" |
+| a cell renamed `…__light__wide` | exit 1 — "does not end in a viewport width" |
 
 ## The ingress-ratio arm
 
