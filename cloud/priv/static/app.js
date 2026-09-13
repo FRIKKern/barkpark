@@ -1903,19 +1903,37 @@
   // a security surface. Unrecognised values fall through to the raw string
   // rather than being dropped: a newer server that mints an origin this client
   // has never heard of should still show it, slightly ugly and entirely true.
+  // Pure: ONE factor's human phrasing. OAuth reports the provider itself
+  // ("oauth:github"), so the tail IS the label — one arm covers every provider,
+  // present and future. Anything else falls through to the raw value for the
+  // reason originLabel's own comment gives.
+  function originFactorLabel(part) {
+    if (part.indexOf("oauth:") === 0) return part.slice(6);
+    var known = {
+      password: "password",
+      two_factor: "two-factor",
+      password_change: "password change",
+      register: "sign-up",
+      device_link: "device link"
+    };
+    return known[part] || part;
+  }
+
   function originLabel(origin) {
     if (!origin) return "";
-    // OAuth reports the provider itself ("oauth:github"), so the tail IS the
-    // label — one arm covers every provider, present and future.
-    if (origin.indexOf("oauth:") === 0) return "via " + origin.slice(6);
-    var known = {
-      password: "via password",
-      two_factor: "via two-factor",
-      password_change: "via password change",
-      register: "via sign-up",
-      device_link: "via device link"
-    };
-    return known[origin] || "via " + origin;
+    // A COMPOUND origin names its factors in order, joined by "+" — the control
+    // plane's two-factor leg stamps `<first factor>+two_factor` so a session
+    // that began at an OAuth provider and finished at a TOTP prompt cannot
+    // claim to be either one alone. Labelling is therefore per FACTOR and the
+    // parts are rejoined: a PREDICATE, not a case for the one compound that
+    // exists today, so a compound this client has never seen still names every
+    // factor it carries instead of showing the tail as a provider's name.
+    // "oauth:github+two_factor" used to render "via github+two_factor", which
+    // reads as a provider called "github+two_factor" and silently drops the
+    // fact that a second factor was ever presented.
+    var parts = origin.split("+").filter(Boolean);
+    if (!parts.length) return "via " + origin;
+    return "via " + parts.map(originFactorLabel).join(" + ");
   }
 
   // Pure: one active-session row. Extracted from loadSessions so the TALL modal

@@ -1703,6 +1703,46 @@ test("gr-p5-session-provenance: the session row shows origin only when the serve
   // ...and it is escaped like every other server-controlled string on this row.
   assert.ok(!hooks.sessionRowHtml({ id: "e", origin: "<img src=x>" }).includes("<img"),
     "the origin must be escaped");
+
+  // cch-w53-s6-fu — A COMPOUND ORIGIN NAMES BOTH FACTORS. The control plane's
+  // two-factor leg stamps `<first factor>+two_factor` on the session the
+  // challenge finally mints, so a session that began at an OAuth provider and
+  // finished at a TOTP prompt cannot claim to be either one alone. This row used
+  // to render that as "via github+two_factor" — which reads as a provider CALLED
+  // "github+two_factor", and buries the second factor inside the first's name.
+  const compound = hooks.sessionRowHtml({ id: "f", origin: "oauth:github+two_factor" });
+  assert.ok(compound.includes("via github + two-factor"),
+    "a compound origin must name both factors, separately: " + compound);
+  assert.ok(!compound.includes("two_factor"),
+    "the raw wire token must not survive into copy: " + compound);
+  // The first factor is the half a naive fix drops — assert it is still there
+  // on its own terms, so a label that renders only "via two-factor" cannot pass.
+  assert.ok(/via github\b/.test(compound), "the provider must survive: " + compound);
+
+  // LABELLING IS PER FACTOR, NOT A CASE FOR THE ONE COMPOUND THAT EXISTS TODAY.
+  // A compound built from parts this client DOES know, in an order it has never
+  // seen, still labels every part.
+  assert.ok(hooks.sessionRowHtml({ id: "g", origin: "device_link+two_factor" })
+    .includes("via device link + two-factor"),
+    "every member of a compound goes through the same label table");
+
+  // ...and the fall-through survives the split: an INVENTED origin, compound or
+  // not, still renders raw rather than being dropped. A newer server must not go
+  // silent against an older SPA — that is this function's stated contract and it
+  // is the property most easily lost by adding arms to it.
+  const invented = hooks.sessionRowHtml({ id: "h", origin: "webauthn:yubikey-5c" });
+  assert.ok(invented.includes("via webauthn:yubikey-5c"),
+    "an origin no arm recognises falls through whole: " + invented);
+  const inventedCompound = hooks.sessionRowHtml({ id: "i", origin: "smartcard+webauthn" });
+  assert.ok(inventedCompound.includes("via smartcard + webauthn"),
+    "a compound of two unrecognised factors falls through member by member: " + inventedCompound);
+
+  // The single-factor arms are re-asserted HERE, after the split, because the
+  // split is what could break them: `"password".split("+")` must still be one
+  // part and must not gain a separator.
+  assert.ok(hooks.sessionRowHtml({ id: "j", origin: "password" }).includes("via password"));
+  assert.ok(!hooks.sessionRowHtml({ id: "k", origin: "two_factor" }).includes(" + "),
+    "a single factor must never render a separator");
 });
 
 test("sessions fold: past five rows the list collapses to an honest count, and the current device never hides", () => {
