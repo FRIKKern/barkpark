@@ -1,0 +1,79 @@
+{
+  "_comment": "THE code-block LINE-EMPHASIS contract, as ONE file read by all four render legs: api/test/barkpark/portable_doc/render/code_block_emphasis_parity_test.exs (the Elixir :article web leg AND the :email degradation leg), internal/pdrender/code_block_emphasis_parity_test.go (the Go TUI leg), and js/packages/react/tests/code-block-emphasis.parity.test.ts (the JS SDK web leg). Hand-authored; regenerate nothing. FIELD: a `code` block MAY carry `emphasis`, an ARRAY of range objects {from, to, tone}. `from` and `to` are 1-based INCLUSIVE line numbers into the selected code source; `to` is optional and defaults to `from` (a one-line range). TONE VOCABULARY is closed: comment | offending | fixed. A range is DROPPED (renders plain) when its tone is outside the vocabulary, when `from` is not an integer >= 1, or when `to` is present but < `from` — a malformed range never poisons the block, and a block whose ranges ALL drop renders byte-identically to a block with no `emphasis` key at all. OVERLAP: the FIRST range in array order that contains a line wins. Lines past the end of the source are simply never matched. RENDERING per engine, all keyed off `line_tones` below (one entry per source line, null = no emphasis): web (Elixir :article + the JS mirror) wraps an emphasized line in <span class=\"bp-code-em bp-code-em--TONE\">, an unemphasized line stays bare escaped text, and a block with no live range emits the pre body byte-identically to before this field existed (paper-surface.css paints the three classes off the existing --bp-tone-* pairs; no colour literal); TUI (Go internal/pdrender/code.go) keeps the 2-cell gutter width and swaps the separator cell for a tone SIGIL (comment '~', offending '-', fixed '+', none ' ') with the gutter bar re-styled through Theme.Callout(neutral|danger|success), so the emphasis survives even the NoColor profile where lipgloss emits no escapes; EMAIL (the Elixir default/:email compose arm) IGNORES the field entirely and MUST NOT emit the spans — an emphasis-bearing block composes to the exact same Pd tree as the same block with the field removed. That plain degradation is the point of asserting it here rather than trusting it.",
+  "tones": ["comment", "offending", "fixed"],
+  "sigils": { "comment": "~", "offending": "-", "fixed": "+", "none": " " },
+  "span_class_prefix": "bp-code-em",
+  "source": "alpha one\nbravo two\ncharlie three\ndelta four\necho five\n",
+  "cases": [
+    {
+      "name": "no emphasis key at all — the legacy block, byte-identical",
+      "block": { "type": "code", "value": "alpha one\nbravo two\ncharlie three\ndelta four\necho five\n" },
+      "line_tones": [null, null, null, null, null, null]
+    },
+    {
+      "name": "a one-line range: `to` omitted defaults to `from`",
+      "block": {
+        "type": "code",
+        "value": "alpha one\nbravo two\ncharlie three\ndelta four\necho five\n",
+        "emphasis": [{ "from": 2, "tone": "comment" }]
+      },
+      "line_tones": [null, "comment", null, null, null, null]
+    },
+    {
+      "name": "a multi-line inclusive range",
+      "block": {
+        "type": "code",
+        "value": "alpha one\nbravo two\ncharlie three\ndelta four\necho five\n",
+        "emphasis": [{ "from": 2, "to": 4, "tone": "offending" }]
+      },
+      "line_tones": [null, "offending", "offending", "offending", null, null]
+    },
+    {
+      "name": "two ranges, two tones, in one block",
+      "block": {
+        "type": "code",
+        "value": "alpha one\nbravo two\ncharlie three\ndelta four\necho five\n",
+        "emphasis": [
+          { "from": 1, "tone": "comment" },
+          { "from": 4, "to": 5, "tone": "fixed" }
+        ]
+      },
+      "line_tones": ["comment", null, null, "fixed", "fixed", null]
+    },
+    {
+      "name": "an unknown tone is DROPPED — renders exactly like no emphasis",
+      "block": {
+        "type": "code",
+        "value": "alpha one\nbravo two\ncharlie three\ndelta four\necho five\n",
+        "emphasis": [{ "from": 2, "to": 3, "tone": "sparkle" }]
+      },
+      "line_tones": [null, null, null, null, null, null]
+    },
+    {
+      "name": "a malformed range is DROPPED, a well-formed sibling survives",
+      "block": {
+        "type": "code",
+        "value": "alpha one\nbravo two\ncharlie three\ndelta four\necho five\n",
+        "emphasis": [
+          { "from": 0, "to": 2, "tone": "offending" },
+          { "from": 4, "to": 2, "tone": "offending" },
+          { "from": "3", "tone": "offending" },
+          { "from": 5, "tone": "fixed" }
+        ]
+      },
+      "line_tones": [null, null, null, null, "fixed", null]
+    },
+    {
+      "name": "overlapping ranges: the FIRST in array order wins",
+      "block": {
+        "type": "code",
+        "value": "alpha one\nbravo two\ncharlie three\ndelta four\necho five\n",
+        "emphasis": [
+          { "from": 1, "to": 3, "tone": "offending" },
+          { "from": 3, "to": 5, "tone": "fixed" }
+        ]
+      },
+      "line_tones": ["offending", "offending", "offending", "fixed", "fixed", null]
+    }
+  ]
+}

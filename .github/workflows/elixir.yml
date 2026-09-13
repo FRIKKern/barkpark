@@ -1898,8 +1898,29 @@ jobs:
     # Phase 3 WI4 — cross-field validation perf gate. Independent of mix-test
     # (which is advisory) so a perf regression blocks merge even while the
     # test suite is being remediated, and a flaky test does not mask perf
-    # drift. Runs the synthetic 200-field / 100-rule bench, takes the median
-    # of 5 timed runs, fails the job if median > 100ms.
+    # drift. Runs the synthetic 200-field / 100-rule bench.
+    #
+    # ── THIS JOB REDS ON THE BENCH, AND ONLY ON THE BENCH ──────────────────
+    # Measured 2026-09-06 over 1,366 executed instances of this job
+    # (task-8adc3266e46e4ec4): it produced 7 reds in 4.6 days and NOT ONE was
+    # the bench. Six were `Compile --warnings-as-errors` on ordinary Elixir
+    # diffs — a verdict `mix-prod-compile` above already owns and reports
+    # under a name that says `compile` — and one was `Fetch deps` losing a
+    # hex.pm registry record. A required context that reds for a reason other
+    # than the one its name states is how a red gets MISREAD: #16340's
+    # registry blip was read as a load-sensitive bench and sent a whole lane
+    # hunting a perf problem that did not exist. So the compile step here
+    # DROPS `--warnings-as-errors` (see there) and `mix deps.get` is retried
+    # (see there).
+    #
+    # THE NAME BELOW IS STALE AND IS DELIBERATELY LEFT ALONE. The bench no
+    # longer takes a median of 5 and its alarm is no longer a fixed 100 ms
+    # (api/bench/validation_perf.exs). This string is a KEY: it is carried
+    # twice in .github/required-checks.json (run-shape and skipped-shape rows)
+    # and acknowledged twice in scripts/required-checks.test.sh, and branch
+    # protection plus every census in this repo key on the STRING. Renaming it
+    # is a registry change that belongs in its own PR with the census
+    # regenerated, not a rider on a bench change.
     name: Validation perf bench (median-of-5, alarm >100ms)
     needs: changes
     # Pure api/** compute (bench/validation_perf.exs against the rule
@@ -1942,14 +1963,65 @@ jobs:
             ${{ runner.os }}-mix-perf-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: Fetch deps
-        run: mix deps.get
+        # RETRIED, because a hex.pm blip is not a merge decision. Measured
+        # 2026-09-06 (task-8adc3266e46e4ec4): run 34019004680 attempt 1 died
+        # here on `Failed to fetch record for fine from registry` and attempt 2
+        # — a plain re-run, no code change — was green, so PR #16340 was
+        # blocked on a REQUIRED context by a network flake. Same shape and same
+        # remedy as the libxml2-utils install in `mix-test` above: retry with
+        # backoff, then FAIL LOUDLY. Never `|| true` — a deps tree that is
+        # genuinely unfetchable must still red, or the bench below would run
+        # against nothing and the job would mean nothing.
+        #
+        # 3 attempts, sleeping 5s then 15s between them (~20s of added wall
+        # time in the worst case, against a job whose median is minutes).
+        # Backoff rather than a flat retry: a registry serving one bad record
+        # is usually mid-deploy, and the second gap is the one that matters.
+        run: |
+          set -u
+          fetched=0
+          delays="5 15"
+          attempt=0
+          for delay in $delays ""; do
+            attempt=$((attempt + 1))
+            if mix deps.get; then
+              fetched=1
+              echo "mix deps.get succeeded on attempt ${attempt}."
+              break
+            fi
+            if [ -n "$delay" ]; then
+              echo "mix deps.get attempt ${attempt}/3 failed (a hex.pm registry blip is the usual cause) — retrying in ${delay}s"
+              sleep "$delay"
+            fi
+          done
+          if [ "$fetched" != 1 ]; then
+            echo "::error::mix deps.get failed on all 3 attempts. This is NOT being tolerated: the bench below would then measure an untrusted dependency tree, so the job reds here instead."
+            exit 1
+          fi
 
       - name: Compile
-        run: mix compile --warnings-as-errors
+        # NO `--warnings-as-errors` HERE, ON PURPOSE. `mix-prod-compile` above
+        # is the job whose name says compile and whose green is the compile
+        # contract; `mix-test` compiles with the flag too, in dev. This job
+        # compiles only so it has something to benchmark, so a warning here is
+        # a THIRD report of a verdict two other jobs already publish, under a
+        # name that promises a perf measurement. Six of the seven reds this job
+        # produced in the 4.6 days measured 2026-09-06 were exactly that.
+        # A compile ERROR still reds, and rightly: there is no bench to run.
+        # Warning TEXT still appears in this job's log; what is dropped is the
+        # merge verdict, which belongs to the compile job.
+        run: mix compile
 
-      - name: Run validation perf bench (median-of-5, fail if >100ms)
+      - name: Run validation perf bench (relative alarm vs a measured runner baseline)
         # --no-start skips OTP app boot. The bench is pure-compute; we don't
         # need Postgres just to time the rule evaluator.
+        #
+        # THE ONLY STEP IN THIS JOB WHOSE RED IS A PERF VERDICT. It measures a
+        # fixed-work runner baseline in the same process, prints it beside the
+        # validation sample, and reds when the ratio exceeds a recorded
+        # nominal by more than the alarm multiple — so a slow runner moves
+        # both numbers and the verdict does not move. Full derivation:
+        # api/bench/validation_perf.exs.
         run: mix run --no-start bench/validation_perf.exs
 
   elixir-gate:

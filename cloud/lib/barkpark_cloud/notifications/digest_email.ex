@@ -387,22 +387,33 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   end
 
   @doc """
-  The digest subject line — the fleet health at a glance, on the MEASURED rungs.
+  The digest subject line — the health of THE RECIPIENT TEAM'S OWN instances at
+  a glance, on the MEASURED rungs.
 
   `current` / `behind` / `unmeasured` / `paused` are always present (a `0
-  unmeasured` is itself the signal that the fleet is fully measured); `diverged`
-  and `ahead of main` appear only when a box is actually on them.
+  unmeasured` is itself the signal that every one of those instances is
+  measured); `diverged` and `ahead of main` appear only when a box is actually
+  on them.
+
+  IT SAYS "YOUR", NOT "FLEET" (dr-w28-fu). `deliver_fleet_digest/1` partitions
+  the rows BY TEAM before it builds anything, so every summary that ever reaches
+  `build/2` holds one team's own instances and nothing else. The counts were
+  already correct; the WORD was not — a reader who owns 2 of 13 instances read
+  "Barkpark fleet digest — 0 current / 2 behind" as the platform having two
+  boxes. That is the same defect `dr-w18-bl-census-headline-still-says-fleet`
+  names on the census surface, and `deploy_block/1` below already refuses it on
+  the other half of this same email.
   """
   @spec subject(summary()) :: String.t()
   def subject(%{} = s) do
-    "Barkpark fleet digest — " <> Enum.join(count_words(s), " / ")
+    "Your Barkpark instances — " <> Enum.join(count_words(s), " / ")
   end
 
   @doc """
-  The plain-text digest body: a fleet header (counts + latest available release)
-  then one honest line per instance (name, running -> latest, state, pin/pause
-  flags, last checked). An empty fleet renders a clear "no instances" line rather
-  than a bare header.
+  The plain-text digest body: a header naming THIS TEAM'S OWN instances (counts +
+  latest available release) then one honest line per instance (name, running ->
+  latest, state, pin/pause flags, last checked). A team that owns no instances
+  renders a clear "no instances" line rather than a bare header.
   """
   @spec body(summary()) :: String.t()
   def body(%{instances: []} = s) do
@@ -448,21 +459,26 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
 
   ## ── Rendering helpers ────────────────────────────────────────────────────
 
+  # THE HEADER SAYS WHOSE ROWS THESE ARE (dr-w28-fu). Every summary that reaches
+  # here was built inside `deliver_fleet_digest/1`'s per-team comprehension, so
+  # "Fleet:" over these counts was a claim about the platform made out of one
+  # team's rows. There is no fleet-wide caller to keep honest: `build/2` has
+  # exactly one call site and it is the team-partitioned one.
   defp header(%{total: total, latest: latest} = s) do
-    fleet =
+    owned =
       case total do
         0 ->
-          "Fleet: 0 instances."
+          "Your team owns 0 instances."
 
         _ ->
-          "Fleet: #{total} #{pluralize(total, "instance")} — " <>
+          "Your team owns #{total} #{pluralize(total, "instance")} — " <>
             Enum.join(count_words(s), ", ") <> "."
       end
 
     """
-    Barkpark fleet — daily update digest.
+    Your Barkpark instances — daily update digest.
 
-    #{fleet}
+    #{owned}
     Latest available release: #{latest || "unknown"}\
     """
   end

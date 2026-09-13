@@ -136,10 +136,42 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
 
   ## 2. The SUBJECT LINE carries the corrected counts
 
+  test "no rendered byte of a team-scoped digest calls these rows a FLEET" do
+    # dr-w28-fu. `deliver_fleet_digest/1` partitions the rows BY TEAM before it
+    # builds anything — `DigestEmail.build/2` has exactly one call site and it is
+    # inside that per-team comprehension — so the subject and the header describe
+    # ONE TEAM'S OWN instances. They used to say "Your Barkpark instances — …",
+    # "Barkpark fleet — daily update digest." and "Fleet: N instances", which a
+    # reader who owns 2 of 13 boxes reads as the platform having two.
+    #
+    # This is deliberately a WORD check over the whole rendered email and not an
+    # equality assertion on one line: the counts were never wrong, so an
+    # assertion that pins bytes would have passed on every one of those three
+    # lies. Nothing else the digest renders — instance rows, the deploy block,
+    # the footer — contains the word, so a hit is always a regression here.
+    for summary <- [
+          DigestEmail.summary([stale_box(), fresh_box()]),
+          DigestEmail.summary([])
+        ] do
+      email = DigestEmail.build(summary, "ops@example.com")
+
+      refute email.subject =~ ~r/fleet/i,
+             "subject still calls a team-scoped read a fleet: #{email.subject}"
+
+      refute email.text_body =~ ~r/fleet/i,
+             "body still calls a team-scoped read a fleet: #{email.text_body}"
+
+      # And it says whose rows they ARE — removing the word is only half of it.
+      assert email.subject =~ "Your Barkpark instances"
+      assert email.text_body =~ "Your Barkpark instances — daily update digest."
+      assert email.text_body =~ "Your team owns"
+    end
+  end
+
   test "the subject line reports the stale box as behind, not current" do
     subject = DigestEmail.subject(DigestEmail.summary([stale_box(), fresh_box()]))
 
-    assert subject == "Barkpark fleet digest — 1 current / 1 behind / 0 unmeasured / 0 paused"
+    assert subject == "Your Barkpark instances — 1 current / 1 behind / 0 unmeasured / 0 paused"
 
     # BEFORE this slice the same fixture rendered "2 current / 0 behind /
     # 0 paused" — both boxes self-report `current` on the unmoved tag. That is
@@ -161,7 +193,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
 
     subject = DigestEmail.subject(DigestEmail.summary(rows))
 
-    assert subject == "Barkpark fleet digest — 0 current / 5 behind / 0 unmeasured / 0 paused"
+    assert subject == "Your Barkpark instances — 0 current / 5 behind / 0 unmeasured / 0 paused"
   end
 
   ## 3. UNMEASURED is its own rung, with a named reason
@@ -174,7 +206,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     assert DigestEmail.subject(s) =~ "0 current / 0 behind / 1 unmeasured"
 
     body = DigestEmail.body(s)
-    assert body =~ "Fleet: 1 instance — 0 current, 0 behind, 1 unmeasured, 0 paused."
+    assert body =~ "Your team owns 1 instance — 0 current, 0 behind, 1 unmeasured, 0 paused."
 
     assert body =~
              "- Never (never): v0.2.25 -> v0.2.25 | state: unmeasured (release self-report: current) | commit distance unmeasured (never measured) | checked 2026-08-07 14:02 UTC"
@@ -229,7 +261,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     assert {s.current, s.behind, s.diverged} == {0, 0, 1}
 
     assert DigestEmail.subject(s) ==
-             "Barkpark fleet digest — 0 current / 0 behind / 1 diverged / 0 unmeasured / 0 paused"
+             "Your Barkpark instances — 0 current / 0 behind / 1 diverged / 0 unmeasured / 0 paused"
 
     assert DigestEmail.body(s) =~
              "- Fork (fork): v0.2.25 -> v0.2.25 | state: diverged (release self-report: current) | diverged from main, 7 commits not on main (measured 2026-08-08 03:11 UTC) | checked 2026-08-07 14:02 UTC"
@@ -308,7 +340,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     email = DigestEmail.build(DigestEmail.summary([stale_box(), fresh_box()]), "ops@example.com")
 
     assert email.subject ==
-             "Barkpark fleet digest — 1 current / 1 behind / 0 unmeasured / 0 paused"
+             "Your Barkpark instances — 1 current / 1 behind / 0 unmeasured / 0 paused"
 
     assert email.text_body =~ "2509 commits behind main"
     assert [{_, "ops@example.com"}] = email.to
@@ -318,10 +350,10 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     s = DigestEmail.summary([])
 
     assert DigestEmail.subject(s) ==
-             "Barkpark fleet digest — 0 current / 0 behind / 0 unmeasured / 0 paused"
+             "Your Barkpark instances — 0 current / 0 behind / 0 unmeasured / 0 paused"
 
     body = DigestEmail.body(s)
-    assert body =~ "Fleet: 0 instances."
+    assert body =~ "Your team owns 0 instances."
     assert body =~ "No instances are registered yet"
   end
 
