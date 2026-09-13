@@ -26,17 +26,19 @@
 #     sentence-cases) and `roleMeaning` (the one-line gloss). Both are byte-checked
 #     against the manifest's `roles[].label` / `roles[].meaning` (no exception —
 #     these are prose, not spinner glyphs), so a Go label/meaning drift trips here.
-#   Part 5 — JS/TS twins: two hand-maintained copies mirror the manifest by hand
-#     (the generator is deferred, tlv-bl-js-vocab-generator) — the react legend
-#     vocabulary `STATUS_ROLES` in js/packages/react/src/inline.tsx and the web
-#     board ladder `STATUS_LADDER` in web/lib/component-projections.ts. Each TS
-#     array literal is byte-checked against the manifest: the manifest roles must
-#     appear in manifest ORDER with byte-equal glyph + label, none missing. The
-#     ONE documented exception is the JS-only fail-open `unknown` sentinel (D11) —
-#     it is NEVER a real lifecycle state, so it is the only sanctioned non-manifest
-#     role; ANY other extra/missing/reorder/glyph/label desync reds the gate.
-#     Byte-check only — this gate does NOT generate the TS (that is the deferred
-#     generator); it keeps the hand-copies honest until then.
+#   Part 5 — RETIRED (tlv-bl-js-vocab-generator). The react `STATUS_ROLES` and web
+#     `STATUS_LADDER` twins used to be hand-maintained TS literals byte-checked
+#     here. They are now GENERATED from the manifest by design/emit.mjs into
+#     js/packages/react/src/status-vocab.gen.ts and web/lib/status-ladder.gen.ts,
+#     so there is no hand copy left to drift: a byte-check of a generated file
+#     against its own source is a tautology. design/check.mjs Part A re-emits both
+#     from design/status-manifest.json and byte-compares the committed files, so a
+#     HAND-EDIT of either generated file (or a manifest edit without a regen) reds
+#     the design-token drift gate instead of this one.
+#   Part 5b — apps/mobile: the ONE remaining hand-maintained JS/TS twin (it is a
+#     React Native surface outside the emitter's reach — four Records/arrays, not
+#     one array-of-objects). It is byte-checked below against the manifest, with
+#     the manifest's OWN platform_overrides as the adjudicated exception.
 #
 # The Elixir emitters need no check here: Render.StatusVocab reads THIS manifest
 # at compile time, so they cannot diverge by construction.
@@ -48,7 +50,7 @@
 #     the bare check and --write), so none of its five parts had ever been shown
 #     to fail on a planted violation: a comparator that quietly stopped
 #     discriminating would have gone on printing PASS lines forever. The harness
-#     builds a THROWAWAY copy of the tree (this script plus the six files it
+#     builds a THROWAWAY copy of the tree (this script plus the four files it
 #     reads), plants ONE violation per arm, re-invokes THIS script inside that
 #     copy — so the assertions drive the shipping comparator, not a second copy
 #     of it — and then restores the planted file and re-runs to prove the arm
@@ -61,12 +63,10 @@ cd "$(dirname "$0")/.."
 MANIFEST="design/status-manifest.json"
 CSS="api/assets/paper-surface/paper-surface.css"
 GO="internal/pdrender/gridblocks.go"
-REACT_TSX="js/packages/react/src/inline.tsx"
-WEB_TS="web/lib/component-projections.ts"
-# apps/mobile is the THIRD hand-maintained JS/TS copy and was absent from this
-# gate entirely until mob-bl-status-manifest-mobile-gate. Its shape differs from
-# the other two — four Records/arrays instead of one array-of-objects — so Part 5
-# parses it with its own reader; see the block there.
+# apps/mobile is the LAST hand-maintained JS/TS copy (the react + web twins are
+# generated — see the Part 5 note above). It was absent from this gate entirely
+# until mob-bl-status-manifest-mobile-gate. Its shape is four Records/arrays
+# rather than one array-of-objects, so Part 5b parses it with its own reader.
 MOBILE_TSX="apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
 # `MODE="${1:-check}"` used to pass ANY argument straight through to the Python,
 # which treats everything that is not `--write` as check mode — so a typo, or a
@@ -86,7 +86,7 @@ fi
 
 # ── selftest: prove each part can still RED, and greens again on restore ─────
 #
-# The six files above ARE the gate's whole input. Each arm copies them (plus
+# The four files above ARE the gate's whole input. Each arm copies them (plus
 # this script) into a throwaway tree, plants exactly ONE violation, and runs the
 # copied script there — `cd "$(dirname "$0")/.."` makes the copy read the
 # throwaway tree, so the REAL parts run against the planted corpus and this repo
@@ -101,7 +101,6 @@ import json, re, sys
 root, kind = sys.argv[1], sys.argv[2]
 CSS  = root + "/api/assets/paper-surface/paper-surface.css"
 GO   = root + "/internal/pdrender/gridblocks.go"
-TSX  = root + "/js/packages/react/src/inline.tsx"
 MOB  = root + "/apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
 MAN  = root + "/design/status-manifest.json"
 
@@ -144,19 +143,6 @@ elif kind == "go-glyph":
     txt = rd(GO); out, note = go_first_value(txt, "roleGlyph", "¤"); path = GO
 elif kind == "go-label":
     txt = rd(GO); out, note = go_first_value(txt, "roleLabel", "drifted"); path = GO
-elif kind == "ts-reorder":
-    txt = rd(TSX)
-    am = re.search(r"STATUS_ROLES[^=]*=\s*\[(.*?)\n\]", txt, re.DOTALL)
-    if not am:
-        print("PLANT FAILED: STATUS_ROLES array not found", file=sys.stderr); sys.exit(3)
-    objs = list(re.finditer(r"\{[^{}]*\}", am.group(1), re.DOTALL))
-    if len(objs) < 2:
-        print("PLANT FAILED: fewer than two role objects in STATUS_ROLES", file=sys.stderr); sys.exit(3)
-    a, b = objs[0], objs[1]
-    inner = am.group(1)
-    swapped = inner[:a.start()] + b.group(0) + inner[a.end():b.start()] + a.group(0) + inner[b.end():]
-    out = txt[:am.start(1)] + swapped + txt[am.end(1):]
-    note = "swapped the first two STATUS_ROLES entries (manifest ORDER broken)"; path = TSX
 elif kind == "mobile-label":
     txt = rd(MOB)
     am = re.search(r"(?:export\s+)?const\s+ROLE_LABEL\b[^=]*=\s*\{(.*?)\n\}", txt, re.DOTALL)
@@ -188,8 +174,6 @@ st_selftest() {
     "design/status-manifest.json"
     "api/assets/paper-surface/paper-surface.css"
     "internal/pdrender/gridblocks.go"
-    "js/packages/react/src/inline.tsx"
-    "web/lib/component-projections.ts"
     "apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
   )
 
@@ -265,7 +249,6 @@ st_selftest() {
   arm "part 2 missing glyph"     missing-glyph  "part 2: FAILED"
   arm "part 3 Go roleGlyph"      go-glyph       "part 3: FAILED"
   arm "part 4 Go roleLabel"      go-label       "part 4: FAILED"
-  arm "part 5 TS role order"     ts-reorder     "part 5: FAILED"
   arm "part 5b mobile label"     mobile-label   "part 5: FAILED"
 
   # ARG DISPATCH — an unknown flag is still a refusal (2), not a silent check.
@@ -292,11 +275,11 @@ if [ "$MODE" = "selftest" ]; then
   exit $?
 fi
 
-python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$REACT_TSX" "$WEB_TS" "$MOBILE_TSX" <<'PY'
+python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$MOBILE_TSX" <<'PY'
 import json, re, sys
 
 manifest_path, css_path, mode, go_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-react_path, web_path, mobile_path = sys.argv[5], sys.argv[6], sys.argv[7]
+mobile_path = sys.argv[5]
 m = json.load(open(manifest_path))
 css = open(css_path).read()
 
@@ -483,14 +466,24 @@ if p4_fails:
 print(f"status-manifest-check part 4: PASS — Go pdrender label+meaning in lockstep "
       f"({len(man_label)} labels, {len(man_meaning)} meanings).")
 
-# ── Part 5: JS/TS status-vocabulary twins ────────────────────────────────────
-# Two hand-maintained TS copies mirror the manifest (the generator is deferred,
-# tlv-bl-js-vocab-generator): STATUS_ROLES in the react package (the legend
-# vocabulary) and STATUS_LADDER in the web app (the board ladder). Byte-check
-# each array literal against the manifest — role set, manifest ORDER, glyph and
-# label. The JS-only fail-open `unknown` sentinel (D11) is NEVER a lifecycle
-# state, so it is the ONE sanctioned non-manifest role; any other extra, any
-# missing role, any reorder, any glyph/label mismatch reds this gate.
+# ── Part 5: RETIRED — the react + web twins are GENERATED ────────────────────
+# tlv-bl-js-vocab-generator. `STATUS_ROLES` (js/packages/react/src/inline.tsx)
+# and `STATUS_LADDER` (web/lib/component-projections.ts) were hand-typed copies
+# of the manifest, and this part byte-checked them. Both now come from
+# design/emit.mjs artifacts generated OFF THIS MANIFEST:
+#   js/packages/react/src/status-vocab.gen.ts   (MANIFEST_STATUS_ROLES, …)
+#   web/lib/status-ladder.gen.ts                (STATUS_LADDER, …)
+# A generated file cannot drift from its own source, so re-checking it here would
+# assert a tautology. What CAN still go wrong is someone hand-editing a generated
+# file or landing a manifest edit without regenerating — and design/check.mjs
+# Part A catches exactly that, by re-emitting both artifacts from this manifest
+# and byte-comparing the committed bytes (CI: doc-gates "Design-token drift
+# gate"). The react vocabulary is additionally pinned behaviourally by
+# js/packages/react/tests/status-manifest-parity.test.ts, which imports the real
+# constants and compares them to THIS file.
+#
+# The definitions below are NOT part 5 leftovers: part 5b (the one remaining
+# hand-maintained twin, apps/mobile) reads them.
 SANCTIONED_EXTRA = {"unknown"}
 # The apps/mobile surface key, as it appears in the manifest's platform_overrides.
 mobile_surface = "apps/mobile"
@@ -504,81 +497,9 @@ MOBILE_TERMINAL_ROLES = ["cancel"]
 man_roles_order = [r["role"] for r in m["roles"]]
 p5_glyph = {r["role"]: r["glyph"] for r in m["roles"]}
 p5_label = {r["role"]: r["label"] for r in m["roles"]}
-
-def parse_ts_ladder(path, var):
-    """Extract the ordered [(role, glyph, label), ...] from a `const <var> = [...]`
-    TS array literal, tolerating single OR double quotes and multi-line objects.
-    The objects hold no nested [] or {}, so a flat scan is exact."""
-    txt = open(path).read()
-    am = re.search(re.escape(var) + r"[^=]*=\s*\[(.*?)\n\]", txt, re.DOTALL)
-    if not am:
-        print(f"status-manifest-check part 5: FAILED — `{var} = [...]` array literal "
-              f"not found in {path}.", file=sys.stderr)
-        sys.exit(1)
-    rows = []
-    for obj in re.finditer(r"\{([^{}]*)\}", am.group(1), re.DOTALL):
-        body = obj.group(1)
-        # (?<![A-Za-z_]) so `glyph_role:` does NOT match `role:`/`glyph:`.
-        rm = re.search(r"(?<![A-Za-z_])role:\s*['\"]([^'\"]*)['\"]", body)
-        gm = re.search(r"(?<![A-Za-z_])glyph:\s*['\"]([^'\"]*)['\"]", body)
-        lm = re.search(r"(?<![A-Za-z_])label:\s*['\"]([^'\"]*)['\"]", body)
-        if not (rm and gm and lm):
-            continue
-        rows.append((rm.group(1), gm.group(1), lm.group(1)))
-    return rows
-
-p5_fails = []
-p5_counts = []
-for path, var in ((react_path, "STATUS_ROLES"), (web_path, "STATUS_LADDER")):
-    rows = parse_ts_ladder(path, var)
-    if not rows:
-        p5_fails.append(f"  {var} ({path}): parsed ZERO role objects — the literal shape changed.")
-        continue
-    ts_order = [r[0] for r in rows]
-    ts_by_role = {}
-    for role, glyph, label in rows:
-        if role in ts_by_role:
-            p5_fails.append(f"  {var} ({path}): duplicate role {role!r} in the array")
-        ts_by_role[role] = (glyph, label)
-    # Non-manifest roles: only the sanctioned `unknown` sentinel is allowed.
-    for r in ts_order:
-        if r not in p5_glyph and r not in SANCTIONED_EXTRA:
-            p5_fails.append(f"  {var} ({path}): non-manifest role {r!r} not in the "
-                            f"sanctioned set {sorted(SANCTIONED_EXTRA)} (hand-added?)")
-    # Every manifest role must be present.
-    for r in man_roles_order:
-        if r not in ts_by_role:
-            p5_fails.append(f"  {var} ({path}): MISSING manifest role {r!r} "
-                            f"(glyph {p5_glyph[r]!r}, label {p5_label[r]!r})")
-    # The manifest roles, in the order they appear in the TS, must equal manifest order.
-    ts_manifest_seq = [r for r in ts_order if r in p5_glyph]
-    if ts_manifest_seq != man_roles_order:
-        p5_fails.append(f"  {var} ({path}): manifest roles OUT OF ORDER — "
-                        f"got {ts_manifest_seq}, want {man_roles_order}")
-    # Glyph + label byte-equality per manifest role.
-    for r in man_roles_order:
-        if r in ts_by_role:
-            g, l = ts_by_role[r]
-            if g != p5_glyph[r]:
-                p5_fails.append(f"  {var} ({path}): glyph[{r!r}] = {g!r} != manifest {p5_glyph[r]!r}")
-            if l != p5_label[r]:
-                p5_fails.append(f"  {var} ({path}): label[{r!r}] = {l!r} != manifest {p5_label[r]!r}")
-    p5_counts.append(f"{var}={len(rows)} roles")
-
-if p5_fails:
-    print("status-manifest-check part 5: FAILED — a JS/TS status-vocabulary twin is STALE vs "
-          "design/status-manifest.json:", file=sys.stderr)
-    for f in p5_fails:
-        print(f, file=sys.stderr)
-    print("\n  Fix: edit the TS array to match design/status-manifest.json — "
-          "js/packages/react/src/inline.tsx (STATUS_ROLES) / "
-          "web/lib/component-projections.ts (STATUS_LADDER). Byte-equal role order, "
-          "glyph and label; the JS-only `unknown` sentinel is the ONLY sanctioned "
-          "non-manifest role. (The generator that would remove this hand-copy is "
-          "deferred: tlv-bl-js-vocab-generator.)", file=sys.stderr)
-    sys.exit(1)
-print(f"status-manifest-check part 5: PASS — JS/TS vocab twins in lockstep "
-      f"({len(man_roles_order)} manifest roles, order+glyph+label byte-equal; {', '.join(p5_counts)}).")
+print("status-manifest-check part 5: RETIRED — the react + web vocabulary twins are "
+      "GENERATED from this manifest (design/emit.mjs -> status-vocab.gen.ts / "
+      "status-ladder.gen.ts); design/check.mjs Part A byte-checks them.")
 
 # ── Part 5b: apps/mobile — the THIRD hand-maintained twin ────────────────────
 # It was absent from this gate entirely until mob-bl-status-manifest-mobile-gate,
