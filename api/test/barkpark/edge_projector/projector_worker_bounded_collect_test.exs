@@ -216,16 +216,29 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerBoundedCollectTest do
       seed_articles!(1..8)
       publish!("article", "art-solo", %{"author" => "auth-2"})
 
-      assert :ok = rebuild(%{"projector" => inspect(CaptureProjector)})
+      bounded_q =
+        count_queries(fn -> assert :ok = rebuild(%{"projector" => inspect(CaptureProjector)}) end)
+
       assert_received {:edges, bounded_edges}
 
-      assert :ok =
-               rebuild(%{
-                 "projector" => inspect(CaptureProjector),
-                 "content" => inspect(WalkOnlyContent)
-               })
+      walk_q =
+        count_queries(fn ->
+          assert :ok =
+                   rebuild(%{
+                     "projector" => inspect(CaptureProjector),
+                     "content" => inspect(WalkOnlyContent)
+                   })
+        end)
 
       assert_received {:edges, walk_edges}
+
+      # PRECONDITION, not decoration: the equality below is only a FINDING if
+      # the two arms really ran DIFFERENT collectors. If both took the page
+      # walk (say a future change makes `corpus_collector?/1` always false),
+      # the term-equality is trivially true and this test measures nothing.
+      assert bounded_q < walk_q,
+             "the two arms ran the same collector (bounded=#{bounded_q} walk=#{walk_q}) — " <>
+               "the edge comparison below would be vacuous"
 
       sort = &Enum.sort_by(&1, fn e -> {e[:from_id], e[:to_id], e[:kind]} end)
 
