@@ -62,6 +62,16 @@
 #                                                       BOTH needles are required — "is not mergeable:"
 #                                                       ALSO prefixes the CLIENT_BLOCK message, so the
 #                                                       first needle alone would swallow that arm.
+#     "Base branch was modified. Review
+#      and try the merge again."          BASE_MODIFIED TRANSIENT. MEASURED twice on 2026-09-13 (the api
+#                                                       and studio lanes): GitHub raced our merge against
+#                                                       another landing on the same base, and a by-hand
+#                                                       retry merged FIRST TRY in both cases. The ONLY arm
+#                                                       here that retries, and it retries AT MOST ONCE,
+#                                                       after RE-READING mergeable_state — never off the
+#                                                       stale read that produced the error. A second
+#                                                       failure, or a re-read that no longer reports the
+#                                                       head mergeable, takes the ordinary refusal path.
 #     anything else                       UNRECOGNISED  refuse loudly — NEVER assume green
 #
 #   The `is failing.` row advises a re-run before any code investigation because
@@ -175,6 +185,19 @@ classify_refusal() {
     # needle is GitHub's own conflict sentence and appears nowhere else.
     *"is not mergeable"*"the merge commit cannot be cleanly created"*)
                                       printf 'DIRTY\n' ;;
+    # TRANSIENT, and the only arm this script ever retries. GitHub emits this
+    # from the merge mutation when the base advanced between the mergeability
+    # snapshot it took and the merge it tried to write — a race, not a verdict
+    # about this head. Measured twice on 2026-09-13 (api and studio lanes): the
+    # by-hand retry merged first try both times, and before this arm existed the
+    # table answered UNRECOGNISED, which is the right SHAPE and the wrong
+    # COVERAGE — a named, safe-to-retry-once condition read as an unknown one.
+    #
+    # The needle is GitHub's own sentence and appears in no other measured
+    # shape. It is deliberately NOT widened to "was modified": the retry is a
+    # WRITE, and a message-shaped guess about which writes are safe to repeat is
+    # exactly the vacuous pass the rest of this table refuses.
+    *"Base branch was modified"*)      printf 'BASE_MODIFIED\n' ;;
     *)                                printf 'UNRECOGNISED\n' ;;
   esac
 }
@@ -261,6 +284,16 @@ refusal_advice() {
       printf 'NOT:     gh also prints a local "git merge origin/main" recipe. It works, and it puts a\n'
       printf '         MERGE commit on a branch this repo squash-merges; the rebase above is the form\n'
       printf '         that leaves the same one-commit shape the base expects.\n'
+      ;;
+    BASE_MODIFIED)
+      printf 'THE BASE MOVED UNDER THE MERGE CALL. GitHub took a mergeability snapshot, another PR landed on\n'
+      printf 'the base before our write, and the mutation refused. It is TRANSIENT — measured twice on\n'
+      printf '2026-09-13 (api and studio lanes), where a by-hand retry merged first try both times. This\n'
+      printf 'script already re-read mergeable_state and spent its ONE retry; seeing this message here means\n'
+      printf 'the SECOND attempt refused too, so it is no longer behaving like a race.\n'
+      printf 'RESOLVE: scripts/bp-merge.sh        # run it again — a fresh run gets a fresh pair of attempts\n'
+      printf 'THEN:    if it keeps repeating, the base is landing faster than this head can merge; rebase and\n'
+      printf '         re-run, or wait for the lane to quieten. It is NOT a finding about the checks.\n'
       ;;
     UNRECOGNISED)
       printf 'UNRECOGNISED REFUSAL. This shape is not in the measured table, so this script refuses to guess —\n'
@@ -410,6 +443,56 @@ preflight_mergeable() {
       exit 1 ;;
     *)
       echo "bp-merge: pre-flight ok — mergeable_state: $state (not a conflict)." ;;
+  esac
+}
+
+# ── the ONE retry: 'Base branch was modified' ────────────────────────────────
+# THE BOUND IS A LITERAL AND IS NOT READ FROM THE ENVIRONMENT. Every other knob
+# in this file is overridable because widening it costs only time; this one
+# governs how many times a WRITE is repeated against GitHub, and an env-tunable
+# retry count is an unbounded retry loop one variable away. One retry is what
+# the measurement supports (2026-09-13, api and studio lanes: the first by-hand
+# retry merged in both cases) and one retry is what this script will spend.
+BASE_MODIFIED_RETRY_BUDGET=1
+
+# The pause before the retry. The base just moved; hitting the same mutation in
+# the same millisecond re-races the write that already lost. Overridable ONLY so
+# the harness can drive the arm without spending wall time — it does not change
+# how many attempts happen.
+BASE_MODIFIED_RETRY_SLEEP="${BP_MERGE_BASE_MODIFIED_RETRY_SLEEP:-5}"
+
+# RE-READ BEFORE THE RETRY, NEVER OFF THE STALE READ. The pre-flight's
+# mergeable_state was read BEFORE the merge call, and the refusal we are
+# answering says, in GitHub's own words, that the base changed since then. So
+# the one thing the pre-flight measured is the one thing now known to be out of
+# date: the same sibling that moved the base may have made this head CONFLICT.
+# A retry off the pre-flight read would be a retry off a read the error itself
+# invalidated. Returns 0 only on a FRESH read that still reports the head
+# mergeable; every other outcome (unreadable, dirty, unknown, empty) returns 1
+# and the caller takes the ordinary refusal path.
+recheck_mergeable_for_retry() {
+  local state="" rc=0
+  state="$(read_mergeable_state)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    {
+      echo "bp-merge: could not RE-READ mergeable_state before the retry — NOT retrying blind."
+      echo "          The API answered:"
+      printf '%s\n' "$state" | sed 's/^/            /'
+    } >&2
+    return 1
+  fi
+  case "$state" in
+    dirty)
+      echo "bp-merge: the re-read says DIRTY — the base that moved took this head CONFLICTING with it." >&2
+      echo "          NOT retrying: a retry cannot merge a conflict, and a rebase is the only remedy." >&2
+      return 1 ;;
+    unknown|"")
+      echo "bp-merge: the re-read says '$state' — GitHub has not recomputed mergeability since the base moved." >&2
+      echo "          NOT retrying: 'unknown' is never a green here either." >&2
+      return 1 ;;
+    *)
+      echo "bp-merge: re-read after the moved base — mergeable_state: $state. Spending the ONE retry."
+      return 0 ;;
   esac
 }
 
@@ -622,6 +705,9 @@ merged_despite_error() {
 merge_loop() {
   local deadline=$(( $(date +%s) + BUDGET_SECONDS ))
   local out rc state waited=0
+  # Counts RETRIES SPENT, not attempts. attempts == retries + 1, and the two
+  # are printed together in the refusal so the bound is readable from the run.
+  local base_modified_retries=0
   while :; do
     rc=0
     out="$(gh pr merge "$PR_NUMBER" --squash --delete-branch 2>&1)" || rc=$?
@@ -636,6 +722,43 @@ merge_loop() {
     state="$(classify_refusal "$out")"
     case "$state" in
       WAIT) : ;;
+      # THE ONLY RETRY IN THIS SCRIPT, AND IT IS BOUNDED AT ONE. Three gates
+      # stand between this message and a second merge call, and any of them
+      # failing takes the ordinary refusal path:
+      #   1. the retry budget is not already spent (a second BASE_MODIFIED
+      #      refuses — it is no longer behaving like a race);
+      #   2. a FRESH mergeable_state read still reports the head mergeable
+      #      (never retry off the read the error invalidated);
+      #   3. the overall budget has not run out.
+      # It can therefore never become an unbounded loop, and it cannot swallow
+      # a genuine conflict: gate 2 reads `dirty` and refuses, and a real
+      # conflict answers with the DIRTY string, which is a different arm.
+      BASE_MODIFIED)
+        if [ "$base_modified_retries" -ge "$BASE_MODIFIED_RETRY_BUDGET" ]; then
+          {
+            echo
+            echo "bp-merge: 'Base branch was modified' AGAIN after $(( base_modified_retries + 1 )) merge attempts"
+            echo "          (budget: $BASE_MODIFIED_RETRY_BUDGET retry). Twice is not a race — refusing."
+          } >&2
+          refuse "$state" "$out"
+        fi
+        echo "bp-merge: the base moved under the merge call (attempt $(( base_modified_retries + 1 ))). Re-reading mergeable_state before retrying."
+        recheck_mergeable_for_retry || refuse "$state" "$out"
+        base_modified_retries=$(( base_modified_retries + 1 ))
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+          {
+            echo
+            echo "bp-merge: OVER BUDGET after ${waited}s (budget ${BUDGET_SECONDS}s) with a retry still owed. NOT merged."
+            printf '%s\n' "$out" | sed 's/^/    /'
+            echo "  PR: $PR_URL"
+            echo "  RESOLVE: scripts/bp-merge.sh        # a fresh run gets a fresh pair of attempts"
+          } >&2
+          exit 2
+        fi
+        [ "$BASE_MODIFIED_RETRY_SLEEP" -le 0 ] || sleep "$BASE_MODIFIED_RETRY_SLEEP"
+        echo "bp-merge: retrying the merge ONCE (attempt $(( base_modified_retries + 1 )) of $(( BASE_MODIFIED_RETRY_BUDGET + 1 )))."
+        continue
+        ;;
       PLURAL)
         # No names in the message. Ask the detector; if it says the contexts are
         # all present, the plural refusal is pending-or-failing — and the string
