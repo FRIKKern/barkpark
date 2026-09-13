@@ -262,7 +262,8 @@ templates/astro-search-starter/public/bp-graph.js
 js/packages/react/src/status-vocab.gen.ts
 web/lib/status-ladder.gen.ts
 scripts/console-path-escape-check.sh
-scripts/console-path-escape-check.test.sh'
+scripts/console-path-escape-check.test.sh
+scripts/console-pins.sh'
 
 # EXEMPT — reads that resolve to a real file but are NOT reachable from the
 # console harness's default lane. Each line is `<path><TAB><why>`; an entry
