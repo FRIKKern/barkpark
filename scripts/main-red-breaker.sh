@@ -1249,6 +1249,104 @@ else
     exit 1
   fi
   SIG_NOTE=" Signature matched too: all $(wc -l < "$TMPD/our-sigs.txt" | tr -d ' ') normalised error line(s) of this red also appear in main's."
+
+  # ── the DISCRIMINATION test (task-501a3f6f34d5aa20) ────────────────────────
+  # A SUBSET TEST IS ONLY AS STRONG AS THE SET IT COMPARES. Everything above
+  # compares the FINDING SET, not the step name — that has been true since
+  # #15842. What it could not see is a step whose red SET IS A CONSTANT: for a
+  # per-file or per-finding gate (a byte-budget cap, a census, a path-escape
+  # ratchet) the red is one breach among many, and if the step prints the SAME
+  # sentence for every breach then `comm -23` finds nothing our side has that
+  # main's lacks NO MATTER WHAT WE BROKE. The subset test degrades, silently and
+  # exactly, to the v1 step-name verdict this file's header exists to bury.
+  #
+  # THE REAL SPECIMEN (PR #17984, job 103556399633, 2026-09-12). `Doc byte
+  # budgets` runs `check-doc-budgets.sh --selftest` before the gate itself under
+  # `bash -e`, and arm (i) of that selftest RUNS THE FULL GATE AND EXPECTS IT TO
+  # PASS. So the moment the tree is over cap the selftest reds, the step aborts,
+  # and the per-file `FAIL: <doc> is <n>B, cap is <m>B` lines never reach the
+  # log. The step's entire captured red is one line that names no document:
+  #   check-doc-budgets --selftest: FAILED — the full gate did not pass with DOC_BUDGETS_SPAN_ONLY set
+  # Main printed it. The PR printed it. The breaker said "Signature matched too:
+  # all 13 normalised error line(s)" and reported neutral at exit 0 — for a
+  # genuinely new breach (docs/setup/TASK-SYSTEM.md, 16450B -> 16532B against a
+  # 16000B cap). That is the defect: not a step-name match, a VACUOUS set.
+  #
+  # HOW THE CLASS IS DERIVED, AND WHY IT IS NOT A LIST. There is no enumeration
+  # of "per-file gates" here and there must not be: the class is open (39 capped
+  # docs, a growing discovery census, several ratchets) and a two-item skip list
+  # for an open class expires the day someone adds the third. The question is
+  # answered from the OUTPUT SHAPE instead, per failing step:
+  #
+  #     a red that reports a FINDING names the finding.
+  #
+  # So a block DISCRIMINATES if any of its lines carries a locator — a path (a
+  # `/` between name characters) or a bare filename with an extension. A block
+  # carrying none of that cannot have its findings subtracted from main's,
+  # because it reports no findings; it reports only that something failed. That
+  # is a RULE over shape, not a roster of gates: a gate added tomorrow is
+  # classified the first time it reds, with no edit here.
+  #
+  # AND IT REFUSES RATHER THAN GUESSES. An opaque block does not become "the
+  # author's" — we genuinely cannot tell, and this file's founding rule is that
+  # "I cannot tell" is never folded into either answer. It routes to
+  # OWNERSHIP-UNDETERMINED (exit 1, ::warning) under its own CANNOT READ
+  # sentence, which is nothing like the neutral notice. The cost is bounded: the
+  # doc-gates job is advisory and cannot block a merge, so refusing costs a
+  # warning, while guessing cost two over-cap merges (#17878, #17984) nobody
+  # could see.
+  #
+  # THE FENCES COME FROM scripts/breaker-capture.sh. A capture written by an
+  # older copy has none; such a file is ONE block — the pre-fence behaviour —
+  # and the sentence says which shape it read rather than pretending.
+  BLOCK_AUDIT="$(python3 - "$OUR_LOG" 2>/dev/null <<'BLKPY'
+import re, sys
+BEGIN, END = "##[breaker-block]begin ", "##[breaker-block]end"
+# The only property this test needs is "does any line NAME a thing". Digits are
+# NOT a locator: the signature normaliser erases them (`<sha>`, `#`), so a line
+# whose only variation is a number is already indistinguishable downstream and
+# must not count as detail.
+LOC = re.compile(r'[A-Za-z0-9_.~-]+/[A-Za-z0-9_./~-]+|\b[A-Za-z0-9_~-]+\.[A-Za-z][A-Za-z0-9]{0,6}\b')
+try:
+    raw = open(sys.argv[1], errors="replace").read().split("\n")
+except Exception as e:
+    print("READFAIL\t%s" % e); raise SystemExit
+blocks, cur, label, fenced = [], [], "(unfenced capture - an older breaker-capture.sh wrote it)", False
+for line in raw:
+    if line.startswith(BEGIN):
+        fenced = True
+        if cur and any(l.strip() for l in cur): blocks.append((label, cur))
+        label, cur = line[len(BEGIN):].strip() or "(step command unreadable)", []
+    elif line.strip() == END:
+        blocks.append((label, cur)); label, cur = "(output after a closing fence)", []
+    else:
+        cur.append(line)
+if cur and any(l.strip() for l in cur): blocks.append((label, cur))
+print("SHAPE\t%s\t%d" % ("fenced" if fenced else "unfenced", len(blocks)))
+for label, body in blocks:
+    if not any(l.strip() for l in body): continue
+    if not any(LOC.search(l) for l in body):
+        print("OPAQUE\t%s\t%s" % (label, " / ".join(l.strip() for l in body if l.strip())[:300]))
+BLKPY
+)"
+  if [ -z "$BLOCK_AUDIT" ]; then
+    undetermined "CANNOT READ the finding set: the per-step block audit of ${OUR_LOG} produced no output at all, so a 'signature matched' cannot be told apart from a signature that says nothing. No red is waved through on an instrument that did not run."
+  fi
+  AUDIT_SHAPE="$(printf '%s\n' "$BLOCK_AUDIT" | awk -F'\t' '$1 == "SHAPE" { print $2 ", " $3 " block(s)" }')"
+  if printf '%s\n' "$BLOCK_AUDIT" | grep -q '^READFAIL'; then
+    undetermined "CANNOT READ the finding set: the per-step block audit of ${OUR_LOG} failed ($(printf '%s\n' "$BLOCK_AUDIT" | awk -F'\t' '$1 == "READFAIL" { print $2 }')). No red is waved through on an instrument that could not read its input."
+  fi
+  OPAQUE_N="$(printf '%s\n' "$BLOCK_AUDIT" | grep -c '^OPAQUE' || :)"
+  if [ "${OPAQUE_N:-0}" -gt 0 ]; then
+    say "OPAQUE-RED — CANNOT READ the finding set of this red, so 'main fails it too' cannot be checked against WHAT main fails:" >&2
+    # awk, not sed: BSD sed does not read `\t` in a pattern nor emit `\n` in a
+    # replacement, so a sed version of this printed NOTHING on macOS while the
+    # verdict above still reddened — a refusal that names no step is half a
+    # refusal. (Caught by arm 26c, which asserts the step and its output appear.)
+    printf '%s\n' "$BLOCK_AUDIT" | awk -F'\t' '$1 == "OPAQUE" { print "    step: " $2; print "      its entire captured red: " $3 }' >&2
+    undetermined "CANNOT READ the finding set: ${OPAQUE_N} of the failing step(s) printed a red that NAMES NOTHING — no path, no file, no finding (capture shape: ${AUDIT_SHAPE:-unknown}). For a per-file or per-finding gate that sentence is a CONSTANT: byte-identical whether one document is over its cap or twenty, so matching it against main's proves only that both sides failed the same step — the v1 verdict this breaker replaced. The step(s) and their captured output are printed above. ACTION: make the step print what it found (the doc-budget gate already does; its per-file FAIL lines are suppressed because its --selftest runs the full gate first under 'bash -e' and aborts the step), or fix main's red so there is nothing to inherit."
+  fi
+  SIG_NOTE="${SIG_NOTE} Every failing step's red also NAMES what it found (capture shape: ${AUDIT_SHAPE:-unknown}), so the subset test compared findings and not merely the fact of failure."
 fi
 
 MSG="INHERITED-FROM-MAIN — '${JOB_NAME}' failed only on step(s) main's newest completed run (${MAIN_RUN_ID}) already fails: ${OURS_1L}.${SIG_NOTE} This is main's defect, not this PR's; the main watcher owns it. This job reports neutral (exit 0). ${MAIN_RUN_DESC}"
