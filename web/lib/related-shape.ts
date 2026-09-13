@@ -22,8 +22,29 @@
  *     } ], "count": 1 }, "syncTags": ["bp:ds:…:related:…"] }
  *
  * A zero-tag source degrades to backlink-only related entries
- * (`sources == ["references"]`, empty `shared_tags`) — the ~35% untagged
- * corpus. `isBacklinkOnly` is the provenance predicate the UI badges on.
+ * (`sources == ["references"]`, empty `shared_tags`). That is a COMMON path:
+ * ~27% of the published `paper` corpus carries zero weighted tags.
+ * `isBacklinkOnly` is the provenance predicate the UI badges on.
+ *
+ * THE FIGURE IS DERIVED, NOT QUOTED. Census: charter D77 in
+ * `.claude/workflows/bp-authoring-excellence-charter.md`, recorded 2026-07-22
+ * against the guerrilla `paper` corpus — 340 weighted-tagged / 127 untagged /
+ * 0 flat-only, so 127 / (340 + 127) = 127/467 = 27.2%. The re-runnable SQL,
+ * the scope caveat (D77 counted `paper` rows only) and the two defects this
+ * replaces live in the `Barkpark.Content.Related` moduledoc under "The
+ * untagged share". Both defects, named here too so this copy stands alone:
+ * (a) the retired "~35%" named no census and its introducing commit
+ * `ba53e7b93` (#5615) carries no figure; (b) it was ~8 points high from the
+ * hour it was written — D77 landed 4.5 hours EARLIER the same day.
+ *
+ * THIS NUMBER IS MIRRORED IN THREE FILES and locked by
+ * `api/test/barkpark/content/related_untagged_census_test.exs`: this file,
+ * `lib/related.ts`, and `api/lib/barkpark/content/related.ex` must all carry
+ * 27% / charter D77 / 2026-07-22 / 127/467. The lock's rule for the retired
+ * figure is a PREDICATE, not a blocklist: it may appear only on a line that
+ * also says "retired", so a retraction like the one above is legal and a
+ * fresh assertion is not. Move all three together or the Elixir suite reds —
+ * three sites DISAGREEING is what a half-finished repair looks like.
  */
 
 /** Provenance leg an entry earned its place through. */

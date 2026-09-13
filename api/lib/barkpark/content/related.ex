@@ -29,7 +29,65 @@ defmodule Barkpark.Content.Related do
   `title`, `score`, `sources` (`[:tags]` / `[:references]` / both) and the
   `shared_tags` detail (`[%{tag, src_strength, cand_strength}]`) so surfaces
   can render WHY. A source with zero weighted tags degrades honestly to
-  backlink-only related (the ~35% untagged corpus) — never empty-by-crash.
+  backlink-only related — never empty-by-crash. That degrade is a COMMON
+  path, not an edge one: see "The untagged share" below for the census.
+
+  ## The untagged share — ~27% of the published `paper` corpus (2026-07-22)
+
+  CENSUS (named, so it can be re-run): **charter D77** in
+  `.claude/workflows/bp-authoring-excellence-charter.md`, recorded
+  **2026-07-22** against the guerrilla `paper` corpus —
+  **340 weighted-tagged / 127 untagged / 0 flat-only**.
+  ARITHMETIC: `127 / (340 + 127)` = **127/467** = **27.2%**.
+
+  RE-RUN IT. This is the census as SQL. Its predicate is `weighted_entry?/1`
+  and the `@tag_leg_sql` shape guards spelled out, so "untagged" here means
+  exactly what the TAG LEG means by it — not "has no `tags` key". No
+  array/NULL guard is needed: `tags_meta` is a GENERATED column that is
+  ALWAYS a jsonb array (`20260718100000_add_documents_tags_meta_generated_column`).
+
+      SELECT count(*) FILTER (WHERE weighted)     AS weighted,
+             count(*) FILTER (WHERE NOT weighted) AS untagged,
+             count(*)                             AS total
+      FROM (
+        SELECT EXISTS (
+                 SELECT 1
+                 FROM jsonb_array_elements(d.tags_meta) AS e
+                 WHERE jsonb_typeof(e) = 'object'
+                   AND e->>'tag' IS NOT NULL
+                   AND e->>'strength' ~ '^[0-9]+$'
+               ) AS weighted
+        FROM documents d
+        WHERE d.status = 'published' AND d.type = 'paper'
+      ) s;
+
+  `test/barkpark/content/related_untagged_census_test.exs` runs that EXACT
+  query against a seeded corpus whose split is known, so the instrument is
+  proven before its output is quoted — and it pins this figure against the two
+  `web/` copies (`web/lib/related-shape.ts`, `web/lib/related.ts`), which is
+  the lock: three sites agreeing is what made the retired number read as
+  measured, so they must move together or the test reds.
+
+  THIS REPLACES TWO SEPARATE DEFECTS, and they were separate:
+
+    * **(a) UNDERIVED.** The retired text read "the ~35% untagged corpus" and
+      named no census. Its introducing commit `ba53e7b93` (#5615) carries no
+      figure — not in the message, not in the diff. The number arrived
+      unsourced and was copied VERBATIM into both `web/` files, where three
+      agreeing sites made repetition look like corroboration.
+    * **(b) WRONG BY ~8 POINTS — and never stale.** D77's census is the only
+      untagged census that has ever existed in this tree, and it landed
+      2026-07-22T03:26+02:00, **four and a half hours BEFORE** `ba53e7b93`
+      (2026-07-22T07:59+02:00) introduced the retired ~35%. So it did not go
+      stale: it was ~8 points high from the hour it was written.
+      (Do NOT confuse this with the `2117/2132` above — that is the
+      empty-TITLE ratio, a different fact and an easy false match.)
+
+  SCOPE, STATED HONESTLY. D77 counted `paper` rows only. `related_documents/3`
+  serves EVERY type, and no all-type untagged census exists anywhere in this
+  repo. So ~27% is the published-`paper` share, cited as such; a reader who
+  needs the all-type number runs the query above with the `type` clause
+  dropped, and should re-date this section when they do.
 
   ## The clamp set — ONE definition, BOTH legs (task-0e2bb63990e505fa)
 

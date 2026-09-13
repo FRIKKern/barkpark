@@ -61,9 +61,25 @@ const cachedRelated = unstable_cache(rawRelated, ["related", DATASET], {
 
 /**
  * Related documents for `id` (a slug or doc id) within `dataset`, best first.
- * Never throws — an empty list is a first-class, common answer (the ~35%
- * untagged corpus, an anonymous/token-less deploy that 404s, or a transient
- * upstream error), and the Related section renders NOTHING for it.
+ * Never throws — an empty list is a first-class, common answer: a source with
+ * zero weighted tags, an anonymous/token-less deploy that 404s, or a
+ * transient upstream error. The Related section renders NOTHING for it.
+ *
+ * The zero-tag arm is the COMMON one — ~27% of the published `paper` corpus.
+ * DERIVED, not quoted: charter D77's census
+ * (`.claude/workflows/bp-authoring-excellence-charter.md`), recorded
+ * 2026-07-22 against the guerrilla `paper` corpus, 340 weighted-tagged / 127
+ * untagged / 0 flat-only → 127/467 = 27.2%. The re-runnable SQL and the scope
+ * caveat live in the `Barkpark.Content.Related` moduledoc ("The untagged
+ * share"). Two defects this replaces: (a) the retired "~35%" named no census
+ * and its introducing commit `ba53e7b93` (#5615) carries no figure;
+ * (b) the retired figure was ~8 points high from the hour it was written —
+ * D77 landed 4.5 hours EARLIER the same day, so it was never merely stale.
+ *
+ * MIRRORED IN THREE FILES — this one, `lib/related-shape.ts` and
+ * `api/lib/barkpark/content/related.ex` — and locked by
+ * `api/test/barkpark/content/related_untagged_census_test.exs`. Move all
+ * three together or the Elixir suite reds.
  */
 export async function fetchRelated(
   id: string,
