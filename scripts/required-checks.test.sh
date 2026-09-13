@@ -2634,7 +2634,10 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "make wasm + node smoke"
         --expect-unrendered "migration version collision matrix"
         --expect-unrendered "Stale verdict watch read fault"
-        --expect-unrendered "Typecheck + lint + jest")
+        --expect-unrendered "Typecheck + lint + jest"
+        # 2026-09-13 (task-32fe5f327e91f23d): landed during the 2026-09-12 GitHub outage,
+        # after the two passes above; shell-harnesses `mix-test-strict`, paths-filtered.
+        --expect-unrendered "mix-test-strict.sh refusal + pass-through matrix")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
