@@ -503,6 +503,35 @@ jobs:
           sh scripts/console-runtime-pin-check.sh --selftest
           sh scripts/console-runtime-pin-check.sh
 
+      # ── THE PIN RE-DERIVER'S OWN PREDICATE (task-cc6397fdbed50261) ─────────
+      # scripts/console-pins.sh re-earns every EXACT two-sided pin in THIS file
+      # by measuring, so the re-earn chore stops being a sequence somebody has
+      # to remember. It finds the pins by the sentence they print when they red
+      # ("the committed pin is <N>"), which means it goes BLIND the day that
+      # wording changes — and a blind re-deriver reports a clean, vacuous zero
+      # drift. So its --selftest runs here: it asserts the predicate finds at
+      # least one pin, that it says NO on a workflow whose pin sentences are
+      # removed, and that every pin step it found is still interpretable (a tee
+      # target, the field-wise `# pass N` awk, and `-ne` literals that agree
+      # with the step's own red sentence). It measures nothing and runs no
+      # suite, so it costs milliseconds.
+      #
+      # IN THIS JOB, DELIBERATELY. `path-escape` is the UNFILTERED, blocking
+      # job (see the job list at the top of this file): it runs on every PR,
+      # not only console ones. A PR that reworded a pin's red sentence in any
+      # lane would otherwise blind the re-deriver silently and nothing would
+      # say so until the next re-earn produced a vacuous clean run.
+      #
+      # NOT the full `--check`: that would re-run every suite the console-unit
+      # job below already runs, a second time. Those steps ARE the measurement
+      # and they are the authority; this one only keeps the tool that re-earns
+      # them honest.
+      - name: console-pins.sh syntax check
+        run: bash -n scripts/console-pins.sh
+
+      - name: Pin re-deriver predicate self-test (console-pins.sh --selftest)
+        run: bash scripts/console-pins.sh --selftest
+
   console-unit:
     name: Console client unit harness
     needs: changes

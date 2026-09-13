@@ -253,7 +253,8 @@ internal/semrole/chrome_gen.go
 web/app/globals.css
 web/lib/tokens.gen.ts
 scripts/console-path-escape-check.sh
-scripts/console-path-escape-check.test.sh'
+scripts/console-path-escape-check.test.sh
+scripts/console-pins.sh'
 
 # EXEMPT — reads that resolve to a real file but are NOT reachable from the
 # console harness's default lane. Each line is `<path><TAB><why>`; an entry
