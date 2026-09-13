@@ -111,10 +111,9 @@ in `.github/workflows/shell-harnesses.yml` — RUN, not BLOCK.
 ## Elixir — NOT ENFORCED. No gate ships. And the glyph census is structurally blind here.
 
 Denominator, re-derived (`grep -r -o "✓" api/lib | wc -l`): **49 occurrences across 17
-files**. Of these, **48 are LiveView/HEEx/render chrome** —
-`panes.ex`, `chat_live.ex`, `paper_editor.ex`, `board_live.ex`, `components.ex`,
-`portable_doc/render/components.ex`, `root.html.heex` and friends. A checkmark in a
-template is a UI affordance, not a claim about a post-condition.
+files**. Of these, **48 are LiveView/HEEx/render chrome** (live views, function
+components, `root.html.heex`). A checkmark in a template is a UI affordance, not a
+claim about a post-condition.
 
 Exactly **one** console emitter carries the glyph:
 `api/lib/mix/tasks/barkpark.workspace.provision_schemas.ex:115` —
@@ -122,25 +121,23 @@ Exactly **one** console emitter carries the glyph:
 That is **A2**: the success arm is the Repo returning the record it wrote, and the
 `{:error, cs}` arm prints `✗` with the changeset errors. Compliant.
 
-**Ruling: no Elixir gate.** A guard over one compliant site is a fake green. Shipping
-it would let the next reader believe the Elixir surface is policed. It is not.
+**Ruling: no Elixir gate.** A guard over one compliant site is a fake green — it would
+let the next reader believe the Elixir surface is policed. It is not.
 
 ### The lie the glyph census cannot see (PDS-D311)
 
 Restricting the census to a glyph — or to console output at all — misses the shape
-that actually bites on this surface: **`mix ecto.migrations` reporting `up` reads a
-row in `schema_migrations`; it never reads the object the migration claims to have
-produced.** A migration amended in place after it ran leaves its version row stamped
-`up` forever, so the trigger/index/column the amended body would have created is
-absent while the check still reports clean — a success claim backed by a bookkeeping
-row instead of by the state. This is the same A3 failure as
-`autoupdateReceipt`, wearing a schema instead of a checkmark, and no lint over `IO.puts`
-will ever find it. The honest fix is a post-condition read of the OBJECT
-(`pg_trigger` / `pg_indexes` / `information_schema.columns`), not a wider glyph grep.
+that actually bites here: **`mix ecto.migrations` reporting `up` reads a row in
+`schema_migrations`; it never reads the object the migration claims to have produced.**
+A migration amended in place after it ran stays stamped `up` forever, so the
+trigger/index/column its amended body would have created is absent while the check
+reports clean — the same A3 failure as `autoupdateReceipt`, wearing a schema instead of
+a checkmark, and no lint over `IO.puts` will find it. The honest fix is a post-condition
+read of the OBJECT (`pg_trigger` / `pg_indexes` / `information_schema.columns`).
 
 ### THE POPULATION AND ITS OWNER (PDS wave 38) — `router.ex`, not the string `ok: true`
 
-**The 95 emitted `ok: true` claims are the population of one LENS, not of the
+**The 98 emitted `ok: true` claims are the population of one LENS, not of the
 surface.** The string `ok: true` is a convention an author may decline; a ROUTE is not. An unrouted write is unreachable, and a routed
 write is in the table by construction — so the denominator's owner is
 `api/lib/barkpark_web/router.ex`, and the 95 is a numerator measured against it.
@@ -212,26 +209,23 @@ elixir scripts/pds-elixir-receipt-census.exs        # add --sites for all 95 emi
 
 | layer | n | what it is |
 |---|---|---|
-| textual occurrences | 108 | plain substring, 107 lines (`auth_controller.ex:441` carries two): 104 `ok: true` + 4 `"ok" => true` |
-| AST-literal pairs | 99 | real `ok:`/`"ok" =>` pairs — a bare `{:ok, true}` tuple quotes identically and is excluded by key metadata (`format: :keyword` / `assoc:`) |
+| textual occurrences | 111 | plain substring, 107 lines (`auth_controller.ex:441` carries two): 104 `ok: true` + 4 `"ok" => true` |
+| AST-literal pairs | 102 | real `ok:`/`"ok" =>` pairs — a bare `{:ok, true}` tuple quotes identically and is excluded by key metadata (`format: :keyword` / `assoc:`) |
 | phantoms | 9 | 8 prose in `@doc`/comments + `github/web/ops_live.ex:342`, which is `db_ok: true` — **a different key** |
 | consumers | 4 | `connectors/bridge_client.ex:66,83,97` + `sync/pusher.ex:286` pattern-match a REMOTE response; they make no claim |
-| **emitted claims** | **95** | the numerator over the 260 |
+| **emitted claims** | **98** | the numerator over the 260 |
 
-Routed through the call graph (defdelegate followed, and a defdelegate costs **zero**
-depth — it is a rename, not logic; charging it a hop is how the 21-entry
-`Barkpark.Tasks` facade makes a naive detector report 24/25 false). At depth 3:
-write **36** / read 21 / unrouted 38. At depth 6 (the census depth): 57 / 15 / 23.
+Routed through the call graph (defdelegate followed at **zero** depth — a rename, not
+logic; charging it a hop is how the 21-entry `Barkpark.Tasks` facade makes a naive
+detector report 24/25 false). At depth 3:
+write **36** / read 24 / unrouted 38. At depth 6 (the census depth): 57 / 29 / 12.
 
 **57 is a FLOOR, and so is 36.** The write count is a function of the depth budget, not
-a property of the code — which is why the script prints the whole sweep instead of one
-integer, and why it prints the DRIFT against PDS-D448's hand-followed 64/17/10 rather
-than hiding it. The harder finding: **23 emitted claims reach no `Repo` verb at all
-within six hops** — and they are unrouted because the lens gave up or could not resolve
-an alias, not because they touch no state.
+a property of the code — which is why the script prints the whole sweep, and the DRIFT
+against PDS-D448's hand-followed 64/17/10, rather than one integer.
 
-Shapes (PDS-D453) are assertion-backed — `classified 20 + unclassified 75 == emitted 95`:
-POST-READ **17** · CATCH-ALL-TO-SUCCESS **3** · UNCLASSIFIED **75** · the other four
+Shapes (PDS-D453) are assertion-backed — `classified 24 + unclassified 74 == emitted 98`:
+POST-READ **21** · CATCH-ALL-TO-SUCCESS **3** · UNCLASSIFIED **74** · the other four
 shapes 0, each printing why it is 0. Read POST-READ as a **ceiling**: its evidence is
 line order (a `Repo` read below a `Repo` write inside the writing function) —
 necessary, not sufficient, since the lens cannot prove the read is *of the row written*.
@@ -239,28 +233,18 @@ Only `select:` **inside** the update query proves that; `returning:` is silently
 by `update_all` (`auth.ex:139-141`) and proves nothing.
 
 **Blind spots, re-derived by the same run**: 231 `json(conn, …)`, 67 `put_status(2xx)`,
-3 `send_resp(conn, 2xx)` — every one of them a success claim this lens never sees, and
-the same shape the 145 `status_only_receipt` routes wear one axis up.
+3 `send_resp(conn, 2xx)` — success claims this lens never sees, the same shape the 145
+`status_only_receipt` routes wear one axis up.
 
 **The lens is part of the finding (PDS-D448a).** On macOS, Apple Git 2.39.5's POSIX ERE
 has no `\b`, and the engines disagree — measured, with the command beside each:
 
-| engine | command | result |
-|---|---|---|
-| Apple git ERE | `git grep -cE '\bok: true' -- 'api/lib/**/*.ex'` | **0 lines, exit 1, SILENTLY** |
-| git PCRE | `git grep -cP '\bok: true' -- 'api/lib/**/*.ex'` | 102 lines |
-| BSD grep | `grep -rEo '\bok: true' --include='*.ex' api/lib \| wc -l` | 103 occurrences |
-| substring | `grep -rFo 'ok: true' --include='*.ex' api/lib \| wc -l` | 104 occurrences |
-
-The three non-empty engines do not agree with each other either: `\b` refuses
-`db_ok: true` (the wrong-key phantom) where the substring accepts it, and a per-line
-count loses the second pair on `auth_controller.ex:351`. **The census uses no regex at
-all.** Two greens that could not fail were closed: a corpus of only the carrier files
-reports `write=0` with no error (now **refused** by naming missing route-bearing
-sentinels, exit 2), and the delegate facade — proven by mutation at
-`api/lib/barkpark/tasks/internal.ex`, where neutering BOTH `Repo.update_all:57` and
-`Repo.insert!:386` flips `DELEGATE-REACHES-WRITE` to FAIL at exit 1, while neutering
-only `Repo.update_all` correctly stays PASS at depth 2.
+`git grep -cE '\bok: true'` returns **0 lines, exit 1, SILENTLY**; `git grep -cP`,
+BSD `grep -rE` and a plain substring scan return 102/103/104 over the identical corpus,
+and disagree with each other too (`\b` refuses the `db_ok: true` phantom; a per-line
+count loses a doubled pair). Full table in the script header. **The census uses no regex.** Two greens that could not fail were closed by mutation: a carriers-only corpus
+(`write=0`, no error) is now **refused** at exit 2, and `DELEGATE-REACHES-WRITE` flips
+to FAIL only when BOTH writes in `barkpark/tasks/internal.ex` are neutered.
 
 **Ruling: still no Elixir gate (PDS-D454).** A population now exists on both axes, but a
 gate keyed on these integers would be the number-shaped guard this epic keeps filing as
@@ -268,25 +252,38 @@ a defect. Wave 38 bucketed the write-routed sites MECHANICALLY from `router.ex`'
 not by hand, and not against `ok: true`. The script ships as a census, not a check: its
 *integrity* can go red, its *numbers* never do.
 
-**How many arms can actually go red — counted, not asserted:**
+**How many arms can go red — count them, never quote a number:**
+`elixir scripts/pds-elixir-receipt-census.exs | grep -cE '^  (PASS|FAIL) '`. One arm is
+not red-capable in normal operation — `CORPUS-INTACT` tests `files >= 600` and
+`guard_corpus!/1` exits 2 on that same condition first (PDS-D467b). Every other arm is.
 
-```sh
-elixir scripts/pds-elixir-receipt-census.exs | grep -cE '^  (PASS|FAIL) '
-```
+### The 12 unrouted sites, read from source
 
-That prints the number of PASS/FAIL arms the run emitted. **One of them is not
-red-capable in normal operation**: `CORPUS-INTACT` tests `files >= 600`, and
-`guard_corpus!/1` refuses on exactly that condition and exits 2 before the arm is ever
-evaluated — the script says so in its own words at the arm, and the selftest reaches it
-only by BYPASSING the guard (PDS-D467b). Every other arm is reachable. Do not carry a
-number forward from this paragraph; run the command.
+Re-derived by run at `4ecd652ee`: **12**, not the 35 the filing carried; the sweep does
+NOT stall — 12/10/6/3 at depths 6/7/8/9, flat from 10. Each was decided by reading
+the controller. `gwc` = `github_webhook_controller.ex`.
+
+- **Honest ack (6)** — `gwc` :86 ping, :87 unknown event, :115/:150 `:dropped`, :120/:154
+  `:ignored`: deliberate no-ops with an explicit discriminator and 202. No state
+  exists to read back, so no post-read would improve them. :87's catch-all is over event
+  NAMES; failures have their own 5xx clauses.
+- **Dynamic dispatch (2)** — `gwc` :111, :145. `inbound_fun/0` :301 and `intake_fun/0` :290
+  resolve via `Application.get_env` then `Module.concat` + `mod.f(…)` (:294, :305); terminal
+  verb `Link.put/4` at `github/inbound_events.ex:171`. Route at depth 10.
+- **State elsewhere (3)** — `search_controller.ex:232` → `Oban.insert()`
+  (`indexer_worker.ex:200`), no `Repo` verb; `self_update_controller.ex:24` and
+  `site_deploy_controller.ex:112` → GenServer + `Port.open` (`runner.ex:332`),
+  status via ETS (`deploy_runner.ex:397`). All three post-read — honest.
+- **MIXED — the one open defect** — `gwc:161`: `intake.ex:261` writes a dead-letter row
+  BEST-EFFORT, but `:226`'s `{:halted, _}` veto returns the same `{:refused, _}` having
+  written nothing. One receipt, two outcomes.
 
 ## Standing rule
 
 Adding a receipt to `internal/cli` means adding its registry row. Shell and Elixir
 stay unguarded — but Elixir is no longer uncounted, and the count is no longer keyed on
 a string an author may decline: rerun
-`elixir scripts/pds-elixir-receipt-census.exs` (add `--sites` for all 95).
+`elixir scripts/pds-elixir-receipt-census.exs` (add `--sites` for all 98).
 **Refusing to ship a fake green is the successful outcome for those two surfaces.**
 
 ## Code anchors

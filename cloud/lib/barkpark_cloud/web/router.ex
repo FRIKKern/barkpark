@@ -1545,10 +1545,37 @@ defmodule BarkparkCloud.Web.Router do
     else
       user = conn.assigns.current_user
       team = conn.assigns.current_team
-      # ONE role read, spent by both the top-level `role:` key and
-      # `team_authority.role` — the two state the same fact and a second lookup
-      # would let a future edit desync them (and costs an extra membership read
-      # on every boot).
+      # ONE role read shared by the top-level `role:` key and
+      # `team_authority.role` — those two state the same fact off the same
+      # binding, so a future edit cannot desync THEM.
+      #
+      # It is not the only membership read in this response, and the rest of
+      # the map is NOT deduped. Telemetry-counted (attach to
+      # `[:barkpark_cloud, :repo, :query]`, filter to `team_memberships`):
+      # one `GET /v1/me` by a single-team member performs SIX
+      # team_memberships-touching SELECTs, FOUR of them direct
+      # `get_membership/2` row reads —
+      #
+      #   1. `Auth.require_user_or_pat/2` -> `Accounts.primary_team/1` ->
+      #      `list_user_teams/1`                                       (JOIN)
+      #   2. this binding -> `Accounts.team_role/2` -> `get_membership/2`
+      #   3. the `teams:` switcher list -> `list_user_teams/1`         (JOIN)
+      #   4. `teams:` per-team `Accounts.team_role/2` -> `get_membership/2`
+      #      (one per team the user belongs to)
+      #   5. `team_authority.admin` -> `Authz.team_admin?/2` -> `Authz.role/2`
+      #   6. `team_authority.owner` -> `Authz.team_owner?/2` -> `Authz.role/2`
+      #
+      # So `.admin` and `.owner` are derived from their OWN reads, through a
+      # DIFFERENT module (Accounts.team_role/2 vs Authz.role/2), and are not
+      # guaranteed mutually consistent with `role:` even within one response —
+      # a consumer cross-checking `team_authority.role` against
+      # `team_authority.admin` is comparing two reads, not one fact. Threading
+      # one membership through all three is a PERFORMANCE change and needs its
+      # own justification; it has not been made.
+      #
+      # `test/barkpark_cloud/web/router_me_membership_read_count_test.exs`
+      # pins 6 and 4, so these numbers cannot rot silently: change the reads
+      # and that test reds, and this comment gets updated with it.
       team_role = team && Accounts.team_role(user, team)
 
       json(conn, 200, %{
@@ -3125,6 +3152,64 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # THE SUSPENDED-REFUSAL TRACE — cch-w59-bl. ONE verb, written by EVERY place
+  # the control plane refuses an act because the box is suspended. Before this,
+  # a refused act left exactly the trace of nobody doing anything: a suspended
+  # customer hammering the wire button and an idle account were indistinguishable
+  # to an operator.
+  #
+  # WHY IT IS NOT `Accounts.audit/3`. That wrapper is deliberately atomic with
+  # its mutation — `{:error, reason}` from the closure is `Repo.rollback(reason)`,
+  # NO row. A refusal IS that error tuple, so an audit row stamped through the
+  # wrapper on the refused path could never commit, by construction. This writes
+  # through `Accounts.record_audit/1` OUTSIDE any transaction, exactly as
+  # `maybe_audit_instance_mutation/4` and `audit_lifecycle_trigger/5` do, so the
+  # row survives the refusal it records. Best-effort, post-decision: a failed
+  # insert is LOGGED and never turns a correct 409 into a 500.
+  #
+  # ONE EVENT NAME, ROUTE AS A FIELD (the decision this row exists to make once).
+  # Ten refusal sites, one verb: an operator asks `action =
+  # "barkpark.suspended_refused"` ONCE and sees every attempt against every
+  # suspended box, then reads `metadata.route` to learn which act it was. A verb
+  # per route would have made the census question "did you remember to add the
+  # eleventh verb" — the exact drift this epic exists to stop.
+  #
+  # THE SIBLING VERB IS A DIFFERENT FACT. `barkpark.credentials_refused` means
+  # the box SPOKE and rejected our stored credential; this means the plane
+  # withheld attention and the box was never asked. Same register, two facts.
+  #
+  # Returns `conn`, and every call site spells it
+  # `conn = audit_suspended_refusal(conn, team, bp, "<route>")` on the line
+  # ABOVE the untouched `json(conn, 409, …)` — DELIBERATELY not a `|>` pipe.
+  # `router_error_envelope_census_test.exs` walks this file's AST for
+  # `{:json, _, [conn, status, body]}`; a piped `conn |> json(409, …)` is a
+  # two-argument node it cannot see, and piping these clauses silently dropped
+  # two nested-envelope emitters out of that census's population (29 -> 27,
+  # run-proved). The trace is written BEFORE the response and never instead of
+  # it. It changes no status code, no envelope and no ordering relative to the
+  # credential: every call site below still sits ABOVE the decrypt, so nothing
+  # reaches a wire.
+  defp audit_suspended_refusal(conn, team, bp, route) do
+    case Accounts.record_audit(%{
+           team_id: team.id,
+           actor_user_id: conn.assigns[:current_user] && conn.assigns.current_user.id,
+           action: "barkpark.suspended_refused",
+           target_type: "barkpark",
+           target_id: bp.id,
+           metadata: %{
+             route: route,
+             method: conn.method,
+             path: conn.request_path,
+             name: bp.name
+           }
+         }) do
+      {:ok, _event} -> push_event(team.id, "audit")
+      {:error, cs} -> Logger.error("audit barkpark.suspended_refused failed: #{inspect(cs)}")
+    end
+
+    conn
+  end
+
   # EVERY OTHER LANE THAT DELETES A BARKPARK ROW (the destructive-lane arm of
   # audit_vocabulary_census_test.exs). Five lanes removed a row and wrote
   # nothing: both arms of `DELETE /v1/fleet/supports/:id`, both arms of
@@ -3340,6 +3425,8 @@ defmodule BarkparkCloud.Web.Router do
               # `suspended` slug + detail shape as studio-link / app-token, which
               # `app.js` (ERRORS.suspended) already renders.
               bp.suspended ->
+                conn = audit_suspended_refusal(conn, team, bp, "verify")
+
                 json(conn, 409, %{
                   error: "suspended",
                   detail:
@@ -3530,7 +3617,9 @@ defmodule BarkparkCloud.Web.Router do
           # plane holds. Keyed on the boolean the console already paints
           # ("stopped"), and placed ABOVE the reveal so the ciphertext is never
           # decrypted. Same 409 shape as the two mint routes below.
-          %Barkpark{team_id: tid, suspended: true} when tid == team.id ->
+          %Barkpark{team_id: tid, suspended: true} = bp when tid == team.id ->
+            conn = audit_suspended_refusal(conn, team, bp, "credentials")
+
             json(conn, 409, %{
               error: "suspended",
               detail:
@@ -3621,6 +3710,8 @@ defmodule BarkparkCloud.Web.Router do
               # banner. "Until the suspension is cleared" is true on both axes and
               # is the same vocabulary as the console's ERRORS.suspended string.
               {:error, :suspended} ->
+                conn = audit_suspended_refusal(conn, team, bp, "studio-link")
+
                 json(conn, 409, %{
                   error: "suspended",
                   detail:
@@ -3714,6 +3805,8 @@ defmodule BarkparkCloud.Web.Router do
               # the credential it withholds is durable read+write+chat and would
               # outlive the suspension that was supposed to revoke access.
               {:error, :suspended} ->
+                conn = audit_suspended_refusal(conn, team, bp, "app-token")
+
                 json(conn, 409, %{
                   error: "suspended",
                   detail:
@@ -3953,6 +4046,7 @@ defmodule BarkparkCloud.Web.Router do
               # cch-w58-bl: an EXPLICIT clause, because the `{:error, _other}`
               # catch-all below would report a deliberate refusal as a 500.
               {:error, :suspended} ->
+                conn = audit_suspended_refusal(conn, team, bp, "push-relay")
                 json(conn, 409, %{error: "suspended"})
 
               {:error, :not_live} ->
@@ -4056,6 +4150,7 @@ defmodule BarkparkCloud.Web.Router do
               # webhook configuration. `app.js` already ships a named human
               # message for this code (ERRORS.suspended).
               {:error, :suspended} ->
+                conn = audit_suspended_refusal(conn, team, bp, "site-url")
                 json(conn, 409, %{error: "suspended"})
 
               {:error, :not_live} ->
@@ -4144,6 +4239,7 @@ defmodule BarkparkCloud.Web.Router do
               # app-token, which `app.js` (ERRORS.suspended) already renders, so
               # no new console copy is minted.
               bp.suspended ->
+                conn = audit_suspended_refusal(conn, team, bp, "self-update")
                 json(conn, 409, %{ok: false, error: %{code: "suspended"}})
 
               true ->
@@ -4314,6 +4410,7 @@ defmodule BarkparkCloud.Web.Router do
               # the wire; the 409 `suspended` slug is the one `app.js` already
               # maps.
               bp.suspended ->
+                conn = audit_suspended_refusal(conn, team, bp, "rollback")
                 json(conn, 409, %{ok: false, error: %{code: "suspended"}})
 
               true ->
@@ -5430,7 +5527,9 @@ defmodule BarkparkCloud.Web.Router do
           # boolean the console paints, and placed ABOVE the reveal so
           # Registry.reveal_bootstrap is never reached on a suspended box. Same
           # 409 "suspended" shape as /credentials, /studio-link, /app-token.
-          %Barkpark{team_id: tid, suspended: true} when tid == team.id ->
+          %Barkpark{team_id: tid, suspended: true} = bp when tid == team.id ->
+            conn = audit_suspended_refusal(conn, team, bp, "bootstrap")
+
             json(conn, 409, %{
               error: "suspended",
               detail:
@@ -13553,6 +13652,7 @@ defmodule BarkparkCloud.Web.Router do
       # Placed ABOVE `instance_admin_token/1` on purpose: the ciphertext is never
       # decrypted on the refused path. Same 409 `suspended` slug as studio-link.
       bp.suspended and entry.tier == :mutate ->
+        conn = audit_suspended_refusal(conn, team, bp, "instance-api:#{capability}")
         instance_api_error(conn, 409, "suspended")
 
       true ->

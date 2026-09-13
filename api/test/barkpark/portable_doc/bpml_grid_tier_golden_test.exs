@@ -2,7 +2,7 @@ defmodule Barkpark.PortableDoc.BpmlGridTierGoldenTest do
   @moduledoc """
   The grid/widget tier's golden round trip (task-3b08cbd8a16ad48e criterion 1).
 
-  Thirteen block types the BPML kernel could not spell until this suite existed.
+  Sixteen block types the BPML kernel could not spell until this suite existed.
   Each fixture under `test/support/fixtures/bpml/real-<type>.json` is a REAL
   block lifted verbatim from a REAL published paper (the paper's slug travels in
   the fixture, so a failure names the document to go look at), and each test
@@ -20,7 +20,7 @@ defmodule Barkpark.PortableDoc.BpmlGridTierGoldenTest do
   attribute name that stopped at the underscore both shipped broken until the
   whole corpus was printed.
 
-  ## Why these thirteen
+  ## Why these sixteen
 
   Census (`tooling/bpml/bpml-block-census.exs`, 2026-09-03, 1006 block-bearing
   published papers): 294 carried a top-level type the printer could not spell —
@@ -48,8 +48,12 @@ defmodule Barkpark.PortableDoc.BpmlGridTierGoldenTest do
 
   # The four the row names first (cards, bar-chart, lineage, terminal) plus the
   # nine the census and the corpus print run put ahead of or alongside them.
+  # The flagship taste tier (task-2957c0caa1ffd1b0) rides the same harness:
+  # figure, asciicast and columns, each lifted from `eight-minute-erasure` —
+  # the paper whose seal criterion names all three.
   @types ~w(paper-links cards card terminal action pipeline stat-grid
-            blockquote quote toc bar-chart lineage chart)
+            blockquote quote toc bar-chart lineage chart
+            figure asciicast columns)
 
   for type <- @types do
     test "#{type} round-trips print -> parse -> print byte-identically on a real paper" do

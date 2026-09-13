@@ -85,7 +85,10 @@ defmodule BarkparkCloud.Web.RouterAuditDiscardCensusTest do
   # The number of `Accounts.record_audit(%{` call sites in the router. A floor
   # AND a ceiling: this is a census, so a new call site is a deliberate edit
   # that re-reads this file rather than a number that drifts.
-  @router_call_sites 15
+  # cch-w59-bl raised this 15 -> 16: `audit_suspended_refusal/4`, the ONE writer
+  # every suspended refusal in the plane goes through. It is `case`-gated like
+  # the other fifteen, so both assertions below still hold at the new number.
+  @router_call_sites 16
 
   defp lib_files, do: Path.wildcard(Path.join(@lib_root, "**/*.ex"))
 

@@ -67,6 +67,45 @@ defmodule BarkparkWeb.BulldocsIngestController do
   Approval is the EXISTING draft→publish gate (`{"publish":{"id":"<slug>",
   "type":"paper"}}` on `/v1/data/mutate/:dataset`); rejection is
   `discardDraft`. See `Barkpark.Content.Papers.Proposals`.
+
+  ## THE INGEST SCOPE RULE (task-3f027a24e1330c6f)
+
+  Every write through this controller is stamped with the workspace the
+  `:ingest` PIPELINE resolved — `DeriveWorkspaceFromToken` turning the bearer's
+  `api_tokens.workspace_id` into `:current_workspace`. It used to be stamped
+  from the `workspace`/`workspace_id` body field or the `x-barkpark-workspace`
+  header ALONE, so a workspace-bound token that sent no header had its tenant
+  discarded and the paper landed in the seeded Default.
+
+  In full, for one request:
+
+    1. **The pipeline resolved a tenant** (the token is bound to a workspace).
+       That workspace stands. A request slug may still REFINE it — naming a
+       project under that same workspace, or naming that same workspace
+       redundantly. A request naming a DIFFERENT workspace is REFUSED (422
+       `workspace_scope_conflict`): a body field or a header is not a
+       credential, and any admin token passes `RequireIngestToken`, so
+       honouring it would be a cross-tenant write door. Never silently dropped,
+       never silently retargeted.
+    2. **The pipeline resolved nothing and the request named a workspace.**
+       Unchanged: the named workspace is used (the shared-secret producer that
+       addresses a workspace by slug).
+    3. **Nothing named anything, and the caller is a TOKEN** (the admin arm,
+       bound to no workspace). The ruled infer-or-refuse path of
+       task-6fa023cdabdc5f6a applies — `WriteScope.infer_write_workspace/1`:
+       the one workspace the credential can mean, else a typed 422
+       `workspace_scope_required` that writes nothing. NEVER the seeded
+       Default.
+    4. **Nothing named anything, and the caller is the SHARED SECRET** (no
+       principal at all — `Secrets.ingest_token/0` is the instance-wide
+       `:global` tier). It keeps the pipeline's Default, byte-identical: that
+       is the population the ruling explicitly excluded, because there is no
+       principal to infer from and refusing would refuse a write nobody can
+       ever scope.
+
+  The READ twin (`resolve_scope/2` → `session_scope_opts/2`) follows the same
+  precedence with no refusal leg: a disagreeing request slug is dropped and the
+  pipeline's tenant stands.
   """
   use BarkparkWeb, :controller
 
@@ -691,6 +730,14 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # moving the 200/4xx renders behind an extra `ingest_body/2` hop made this route an
   # UNDISPOSED ARRIVAL and reddened the required Elixir gate. Keeping the accepting body
   # in `ingest/2` itself keeps the receipts where the census can see them.
+  # THE INGEST SCOPE RULE's gate (see the moduledoc). A controller plug, not a
+  # line in each action: the refusal is a property of {credential, request
+  # scope} alone, so running it once at the door keeps every action body
+  # byte-unchanged AND makes `put_scope/3`'s strict match a real precondition
+  # rather than a hope. Halts on refusal; otherwise the conn passes through and
+  # `put_scope/3` re-resolves the same (pure) decision.
+  plug(:require_resolvable_scope when action in [:ingest, :ingest_session])
+
   def ingest(conn, %{"ifRev" => _}), do: refuse_unfenced_if_rev(conn, "ifRev")
   def ingest(conn, %{"if_rev" => _}), do: refuse_unfenced_if_rev(conn, "if_rev")
 
@@ -1809,17 +1856,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp valid_op_shape?(%{"op" => kind}) when kind in @op_kinds, do: true
   defp valid_op_shape?(_), do: false
 
-  # W1.5-C: thread an OPTIONAL workspace/project into the upsert attrs so a
-  # paper (and its emitted lifecycle event) lands in the goal's scope when
-  # paper ingest starts sending it. The scope may arrive as either a JSON body
-  # field (`workspace`/`project`, OR the explicit id `workspace_id`/`project_id`)
-  # or an HTTP header (`x-barkpark-workspace` / `x-barkpark-project`, carrying a
-  # slug). Slugs are resolved to ids via Tenancy; an unknown slug resolves to no
-  # scope key → upsert_paper's Default fallback applies (never a hard error, so
-  # the flat paper ingest keeps working unchanged). When NO scope is given,
-  # the attrs are returned untouched and Default fallback handles it.
+  # W1.5-C: thread the write's workspace/project into the upsert attrs so a
+  # paper (and its emitted lifecycle event) lands in the right tenant.
+  #
+  # PRECONDITION: the `:require_resolvable_scope` plug above has already run
+  # `resolve_write_scope/2` for this same conn and halted on a refusal, so it
+  # cannot answer `{:error, _}` here. The strict match is deliberate — a future
+  # caller that skips the guard must fail LOUDLY rather than silently fall back
+  # to the seeded Default, which is the whole defect this rule closes.
   defp put_scope(attrs, conn, params) do
-    {ws_id, project_id} = resolve_scope(conn, params)
+    {:ok, {ws_id, project_id}} = resolve_write_scope(conn, params)
 
     attrs
     |> maybe_put("workspace_id", ws_id)
@@ -1830,11 +1876,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
     |> maybe_put("dataset", blank_to_nil(params["dataset"]))
   end
 
-  # Resolve {workspace_id, project_id}. Precedence: explicit ids in the body win;
-  # then a workspace/project slug (body field or header). project is only
-  # resolved alongside a workspace. Returns {nil, nil} when nothing was provided
-  # or a slug didn't resolve.
-  defp resolve_scope(conn, params) do
+  # ── THE INGEST SCOPE RULE (task-3f027a24e1330c6f) ─────────────────────────
+  # See the moduledoc section of the same name. Three helpers implement it:
+  # `requested_scope/2` (what the REQUEST named), `pipeline_workspace/1` (what
+  # the `:ingest` PIPELINE resolved), and `resolve_write_scope/2` /
+  # `resolve_scope/2` (the write and read reconciliations).
+
+  # What the REQUEST named — the pre-rule `resolve_scope/2`, verbatim. Explicit
+  # ids in the body win; then a workspace/project slug (body field or header).
+  # project is only resolved alongside a workspace. `{nil, nil}` when nothing
+  # was provided or a slug didn't resolve.
+  defp requested_scope(conn, params) do
     cond do
       is_binary(params["workspace_id"]) and params["workspace_id"] != "" ->
         {params["workspace_id"], blank_to_nil(params["project_id"])}
@@ -1842,6 +1894,131 @@ defmodule BarkparkWeb.BulldocsIngestController do
       true ->
         ws_slug = scope_value(conn, params, "workspace", "x-barkpark-workspace")
         resolve_from_slug(ws_slug, scope_value(conn, params, "project", "x-barkpark-project"))
+    end
+  end
+
+  # The workspace the `:ingest` PIPELINE resolved for this request, or nil.
+  #
+  # `conn.assigns.current_workspace` alone cannot answer this: `AssignDefaultScope`
+  # runs last on the pipeline and stamps the seeded Default on EVERY request that
+  # resolved nothing, so the assign is never nil once the Default is seeded. The
+  # `:api_token` assign is the PROOF that the assign came from
+  # `DeriveWorkspaceFromToken` (whose only source is `api_token.workspace_id`)
+  # rather than from that shim — so we read the assign, and confirm it with the
+  # token.
+  defp pipeline_workspace(conn) do
+    with %{id: ws_id} = ws <- conn.assigns[:current_workspace],
+         %{workspace_id: ^ws_id} <- conn.assigns[:api_token] do
+      ws
+    else
+      _ -> nil
+    end
+  end
+
+  # THE WRITE reconciliation. Returns `{:ok, {ws_id, project_id}}` or a typed
+  # refusal (rendered by `scope_refusal/2` at the action head).
+  defp resolve_write_scope(conn, params) do
+    ws = pipeline_workspace(conn)
+    {req_ws, req_proj} = requested_scope(conn, params)
+
+    cond do
+      # The pipeline named a tenant and the request agrees (or said nothing):
+      # the pipeline's workspace stands, and the request may still REFINE the
+      # project under it.
+      not is_nil(ws) and req_ws in [nil, ws.id] ->
+        {:ok, {ws.id, req_proj || project_under(ws, conn, params)}}
+
+      # The pipeline named a tenant and the request named a DIFFERENT one. A
+      # slug in a body/header is not a credential: honouring it would let any
+      # admin token write into any workspace. Refuse — never silently drop,
+      # never silently retarget.
+      not is_nil(ws) ->
+        {:error,
+         {:workspace_scope_conflict,
+          scope_value(conn, params, "workspace", "x-barkpark-workspace"), ws.slug}}
+
+      # No pipeline tenant, but the request named one: unchanged legacy
+      # behaviour (the shared-secret producer that addresses a workspace by
+      # slug).
+      not is_nil(req_ws) ->
+        {:ok, {req_ws, req_proj}}
+
+      # Nothing named anything. A SCOPE-LESS TOKEN takes the ruled
+      # infer-or-refuse path (task-6fa023cdabdc5f6a) — never the seeded
+      # Default, which is the silent misattribution that ruling retired.
+      true ->
+        case conn.assigns[:api_token] do
+          %{} = token ->
+            infer_or_refuse(token)
+
+          # The SHARED-SECRET arm carries no principal at all
+          # (`Barkpark.Secrets.ingest_token/0` is the instance-wide `:global`
+          # tier), so there is nothing to infer FROM. It is the ruling's
+          # explicitly excluded population and keeps the pipeline's Default,
+          # byte-identical — refusing it would refuse a write nobody can scope.
+          _ ->
+            {:ok, {nil, nil}}
+        end
+    end
+  end
+
+  defp infer_or_refuse(token) do
+    ctx = Barkpark.Content.CallerContext.from_token(token)
+
+    case Barkpark.Content.WriteScope.infer_write_workspace(ctx) do
+      {:ok, ws} ->
+        {:ok, {ws.id, nil}}
+
+      {:error, :workspace_scope_required} ->
+        slugs = Enum.map(Tenancy.list_workspaces_for(token.id), & &1.slug)
+        {:error, {:workspace_scope_required, slugs}}
+    end
+  end
+
+  defp project_under(ws, conn, params),
+    do: resolve_project(ws, scope_value(conn, params, "project", "x-barkpark-project"))
+
+  # The plug half of the gate (mounted above the ingest actions). Passes the
+  # conn through when this request's scope resolves; renders the typed refusal
+  # and HALTS when it does not — so a refused write never reaches an action and
+  # leaves no row.
+  defp require_resolvable_scope(conn, _opts) do
+    case resolve_write_scope(conn, conn.params) do
+      {:ok, _scope} ->
+        conn
+
+      # Reuses the ruling's own curated envelope (`Content.Errors` owns the
+      # code, the 422, and the hint that names the scope door to send instead).
+      {:error, {:workspace_scope_required, slugs}} ->
+        conn
+        |> render_error({:error, {:workspace_scope_required, slugs}})
+        |> halt()
+
+      {:error, {:workspace_scope_conflict, sent, resolved}} ->
+        BarkparkWeb.ErrorResponse.emit_custom(
+          conn,
+          :unprocessable_entity,
+          "workspace_scope_conflict",
+          "this credential resolves to workspace #{resolved}, but the request addressed " <>
+            "#{sent || "another workspace"} — a body field or header is not a credential, so " <>
+            "the write was refused rather than retargeted",
+          %{sent: sent, resolved: resolved}
+        )
+    end
+  end
+
+  # THE READ reconciliation — the same rule with NO refusal leg: a disagreeing
+  # request slug is dropped and the pipeline's tenant stands, because widening
+  # a read to the named workspace is exactly the cross-tenant read this rule
+  # closes on the write side.
+  defp resolve_scope(conn, params) do
+    ws = pipeline_workspace(conn)
+    {req_ws, req_proj} = requested_scope(conn, params)
+
+    cond do
+      is_nil(ws) -> {req_ws, req_proj}
+      req_ws in [nil, ws.id] -> {ws.id, req_proj || project_under(ws, conn, params)}
+      true -> {ws.id, nil}
     end
   end
 

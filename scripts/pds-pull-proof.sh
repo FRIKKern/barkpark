@@ -227,6 +227,21 @@ FULL_ATTEMPTS_FILE="$FULL_DIR/attempts"
 FULL_LOCK="$FULL_DIR/lock"
 FULL_BUDGET="${PDS_FULL_EXPORT_BUDGET:-1}"
 FULL_MIN_MEM_MB="${PDS_FULL_EXPORT_MIN_MEM_MB:-2200}"
+# THE INCOMING BODY NEVER LANDS ON THE PARKED PATH (pds-bl-w16-failed-refetch-
+# destroys-parked-bundle). `curl -o "$FULL_TAR"` opens the destination in
+# TRUNCATE mode, so the instant a re-fetch was ISSUED the old, intact, otherwise
+# usable bundle was gone — and a 503 then left the run with NEITHER a fresh
+# bundle NOR the fallback, having already spent the attempt. The download lands
+# on a per-run sibling path and is moved into place only after full_meta_ok has
+# passed on THAT path, so every failure mode leaves the parked bundle untouched.
+FULL_TMP_TAR="$FULL_TAR.incoming.$RUN_TAG.$$"
+# (f) FREE SPACE, measured before the request. Nothing in this ladder looked at
+# disk at all; a ~1.03 GB export that runs the filesystem out mid-download fails
+# as a truncated body — a shape indistinguishable from a dead export — after
+# paying the source's full memory peak. The floor covers the incoming copy while
+# the parked bundle is still on disk, which is exactly what the temp-then-rename
+# shape above requires; a parked bundle LARGER than the floor raises it.
+FULL_MIN_FREE_MB="${PDS_FULL_EXPORT_MIN_FREE_MB:-1536}"
 FULL_LOCK_OWNED=""
 FULL_WHY=""            # why acquisition aborted, if it did
 FULL_META_WHY=""       # which full_meta_ok expectation failed, if one did
@@ -2032,7 +2047,7 @@ step_2() {
 # gigabytes on a 3.8 GB box that is ALSO serving the live content API, and an
 # export that DIES still pays the peak. So: one run-stable copy, a persistent
 # attempt counter flushed BEFORE the request (a killed run must not get a free
-# retry), a mkdir lock (flock does not exist on Darwin), and five conditions
+# retry), a mkdir lock (flock does not exist on Darwin), and six conditions
 # printed with their measured values BEFORE any byte moves.
 #
 # THE RSS NUMBER IS MEASURED, NOT QUOTED. A 1 Hz `ps -o rss= -p <beam pid>`
@@ -2066,16 +2081,22 @@ step_2() {
 # it to pds-secret-scan.sh. The legacy pre-profile accept SURVIVES, but only for
 # a manifest that PARSED and genuinely carries no `profile` key — an unreadable
 # manifest is not a legacy engine.
-full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
+full_meta_ok() { # [path] -> 0 = THAT bundle is a usable FULL bundle (default $FULL_TAR)
   FULL_META_WHY=""
-  local d p sz kind prc=0 listing lrc=0 nmembers
+  local d p sz kind prc=0 listing lrc=0 nmembers tarball
+  # THE PATH IS AN ARGUMENT so the predicate can judge a body that has NOT been
+  # moved into place yet (pds-bl-w16-failed-refetch-destroys-parked-bundle): the
+  # fetch validates its temp file HERE and only a pass renames it over the parked
+  # bundle. Default $FULL_TAR — every existing caller reads the parked path and
+  # is unchanged, and the refusal text still names the file it actually judged.
+  tarball="${1:-$FULL_TAR}"
 
-  if [ ! -f "$FULL_TAR" ]; then
-    FULL_META_WHY="there is no file at $FULL_TAR"
+  if [ ! -f "$tarball" ]; then
+    FULL_META_WHY="there is no file at $tarball"
     return 1
   fi
-  if [ ! -s "$FULL_TAR" ]; then
-    FULL_META_WHY="$FULL_TAR is 0 bytes"
+  if [ ! -s "$tarball" ]; then
+    FULL_META_WHY="$tarball is 0 bytes"
     return 1
   fi
 
@@ -2083,12 +2104,12 @@ full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
   # gzip, and the byte count alone does not: name the type AND the size. Both
   # refusals below carry the same "What is actually on disk" clause, because
   # WHICH of the two fires is a property of the local tar(1), not of the body.
-  sz="$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')"
-  kind="$(file -b "$FULL_TAR" 2>/dev/null | tr -d '\n')"
+  sz="$(wc -c <"$tarball" 2>/dev/null | tr -d ' ')"
+  kind="$(file -b "$tarball" 2>/dev/null | tr -d '\n')"
 
-  listing="$(tar -tf "$FULL_TAR" 2>/dev/null)" || lrc=$?
+  listing="$(tar -tf "$tarball" 2>/dev/null)" || lrc=$?
   if [ "$lrc" -ne 0 ]; then
-    FULL_META_WHY="$FULL_TAR does not read as a tar archive at all — \`tar -tf\` refused it (exit $lrc). What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An error page, a truncated download or any non-tar body reaches this predicate looking exactly like a bundle, and every downstream extraction off it would read as an EMPTY bundle rather than a failed one"
+    FULL_META_WHY="$tarball does not read as a tar archive at all — \`tar -tf\` refused it (exit $lrc). What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An error page, a truncated download or any non-tar body reaches this predicate looking exactly like a bundle, and every downstream extraction off it would read as an EMPTY bundle rather than a failed one"
     return 1
   fi
 
@@ -2108,22 +2129,22 @@ full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
   # too, and the sentence is true of it as well: no members, so no bundle.
   nmembers="$(printf '%s' "$listing" | grep -c .)" || nmembers=0
   if [ "$nmembers" -eq 0 ]; then
-    FULL_META_WHY="$FULL_TAR lists ZERO members — \`tar -tf\` accepted it but named nothing inside it. What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An archive with no members carries no manifest and no tables, so it is not a bp-export-v1 bundle whatever it is. TWO different bodies land here: a genuinely empty tar, and — on GNU tar only — a GZIPPED non-tar body, which GNU decompresses transparently and then reports as an empty archive with exit 0 where bsdtar refuses it one branch earlier. Read file(1) above to tell which one you have"
+    FULL_META_WHY="$tarball lists ZERO members — \`tar -tf\` accepted it but named nothing inside it. What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An archive with no members carries no manifest and no tables, so it is not a bp-export-v1 bundle whatever it is. TWO different bodies land here: a genuinely empty tar, and — on GNU tar only — a GZIPPED non-tar body, which GNU decompresses transparently and then reports as an empty archive with exit 0 where bsdtar refuses it one branch earlier. Read file(1) above to tell which one you have"
     return 1
   fi
 
   d="$(mktemp -d "${TMPDIR:-/tmp}/pds-fm.XXXXXX")"
   TMP_DIRS="$TMP_DIRS $d"
 
-  if ! tar -xf "$FULL_TAR" -C "$d" manifest.json 2>/dev/null || [ ! -s "$d/manifest.json" ]; then
-    FULL_META_WHY="$FULL_TAR is a readable tar but carries no non-empty manifest.json member, so it is not a bp-export-v1 bundle at all"
+  if ! tar -xf "$tarball" -C "$d" manifest.json 2>/dev/null || [ ! -s "$d/manifest.json" ]; then
+    FULL_META_WHY="$tarball is a readable tar but carries no non-empty manifest.json member, so it is not a bp-export-v1 bundle at all"
     return 1
   fi
 
   # manifest_field's EXIT CODE is what makes the legacy accept safe: 1 is "the
   # manifest was read and carries no profile key" (the pre-profile engine), 2 is
   # "nothing was readable". The old predicate saw the same empty string for both.
-  p="$(manifest_field "$FULL_TAR" profile)" || prc=$?
+  p="$(manifest_field "$tarball" profile)" || prc=$?
   case "$prc" in
     2)
       FULL_META_WHY="manifest.json is present but is not a JSON object — its profile cannot be read, and an UNREADABLE manifest is not the legacy pre-profile engine the absent-profile branch exists for"
@@ -2137,7 +2158,7 @@ full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
       fi ;;
   esac
 
-  if ! tar -xf "$FULL_TAR" -C "$d" tables/documents.copy 2>/dev/null || [ ! -s "$d/tables/documents.copy" ]; then
+  if ! tar -xf "$tarball" -C "$d" tables/documents.copy 2>/dev/null || [ ! -s "$d/tables/documents.copy" ]; then
     FULL_META_WHY="the bundle carries no non-empty tables/documents.copy member — step 3's ticket-deny control and step 4's scan both read exactly that member, and a zero over an absent member is vacuous, not clean"
     return 1
   fi
@@ -2190,7 +2211,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     # Silence here is what let a non-tar body be reused as a full-fidelity
     # control for as long as it sat on disk (PDS-D261). $FULL_DIR defaults to
     # world-writable /tmp, so this branch is reachable without any bad export.
-    info "full bundle     PARKED FILE REFUSED — $FULL_META_WHY. Not reused; falling through to the five conditions."
+    info "full bundle     PARKED FILE REFUSED — $FULL_META_WHY. Not reused; falling through to the six conditions."
   fi
 
   if full_meta_ok; then
@@ -2211,8 +2232,9 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     fi
   fi
 
-  # ── the five conditions, printed with measured values, before any byte moves
-  local spent mem_kb mem_mb sha_now deploy_running gh_rc gh_out cond_a cond_b cond_c cond_d cond_e ok=1
+  # ── the six conditions, printed with measured values, before any byte moves
+  local spent mem_kb mem_mb sha_now deploy_running gh_rc gh_out cond_a cond_b cond_c cond_d cond_e cond_f ok=1
+  local parked_note free_mb need_mb parked_mb parked_bytes
   spent="$(full_attempts)"
 
   sha_now=""
@@ -2241,7 +2263,20 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   if [ "$spent" -lt "$FULL_BUDGET" ]; then
     cond_c="OK ($spent of $FULL_BUDGET attempt(s) spent)"
   else
-    cond_c="FAILED — the budget is exhausted ($spent of $FULL_BUDGET). A dead export still paid its peak; raise PDS_FULL_EXPORT_BUDGET deliberately or reuse $FULL_TAR"; ok=0
+    # "or reuse $FULL_TAR" was advice the run had ALREADY made impossible: every
+    # path that reaches the conditions has either no parked file, or a parked
+    # file this very invocation refused. Telling an operator to reuse a bundle
+    # full_meta_ok rejected sends them to a control that cannot be consumed —
+    # so the guidance is DERIVED from the parked path's measured state instead
+    # of being a fixed sentence (pds-bl-w16-failed-refetch-destroys-parked-bundle).
+    if [ ! -e "$FULL_TAR" ]; then
+      parked_note="there is NO file at $FULL_TAR, so there is nothing to fall back on either"
+    elif full_meta_ok; then
+      parked_note="the bundle parked at $FULL_TAR IS a usable full bundle, but this run did not reuse it: ${stale_note:-it was refused above; see the transcript. }Reusing it anyway would date another sha's artifact with this run's pin, which is the silent-wrong-answer class PDS-D20 exists to refuse — so reuse is an operator decision taken out loud, not a default"
+    else
+      parked_note="do NOT reuse $FULL_TAR — the validity check has ALREADY rejected the file parked there ($FULL_META_WHY), so it is not a fallback. Remove it or replace it deliberately"
+    fi
+    cond_c="FAILED — the budget is exhausted ($spent of $FULL_BUDGET). A dead export still paid its peak; raise PDS_FULL_EXPORT_BUDGET deliberately. On the parked path: $parked_note"; ok=0
   fi
 
   deploy_running=""
@@ -2267,6 +2302,33 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     cond_d="UNKNOWN (gh is not on PATH, so an in-flight deploy cannot be ruled out)"; ok=0
   fi
 
+  # ── (f) FREE SPACE — measured, with the figures, BEFORE the request ──────
+  # `grep -n 'df -\|disk'` over this file returned nothing before this change:
+  # the acquisition path pulled ~1.03 GB with no idea whether the filesystem
+  # could hold it. Running out mid-download produces a TRUNCATED body, which is
+  # indistinguishable on disk from a dead export, after the source has already
+  # paid its full memory peak — the most expensive way to learn about `df`.
+  # The requirement is the incoming copy sitting BESIDE the parked bundle (the
+  # temp-then-rename shape), so a parked bundle bigger than the floor raises it.
+  parked_bytes=0; parked_mb=0
+  if [ -s "$FULL_TAR" ]; then
+    parked_bytes="$(first_int "$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')")"
+    int_ok "$parked_bytes" || parked_bytes=0
+    parked_mb=$((parked_bytes / 1048576))
+  fi
+  need_mb="$FULL_MIN_FREE_MB"
+  if [ "$((parked_mb + 256))" -gt "$need_mb" ]; then need_mb=$((parked_mb + 256)); fi
+  # -P forces the one-line POSIX format (a long device name otherwise wraps and
+  # $4 reads the wrong column); -m fixes the unit so no block-size guess is made.
+  free_mb="$(first_int "$(df -Pm "$FULL_DIR" 2>/dev/null | awk 'NR==2 {print $4}')")"
+  if ! int_ok "$free_mb" || [ -z "$free_mb" ]; then
+    cond_f="UNKNOWN (df -Pm could not measure free space under $FULL_DIR — a gate that cannot see is never OK)"; ok=0
+  elif [ "$free_mb" -ge "$need_mb" ]; then
+    cond_f="OK (${free_mb} MB free under $FULL_DIR, floor ${need_mb} MB = ${FULL_MIN_FREE_MB} MB base vs parked ${parked_mb} MB + 256)"
+  else
+    cond_f="FAILED (${free_mb} MB free under $FULL_DIR, floor ${need_mb} MB) — short by $((need_mb - free_mb)) MB. The incoming bundle must fit BESIDE the parked one (parked: ${parked_bytes} bytes); starting the request would buy a truncated body at the price of the source's full memory peak"; ok=0
+  fi
+
   cond_e="not attempted (an earlier condition already failed)"
   if [ "$ok" -eq 1 ]; then
     if mkdir "$FULL_LOCK" 2>/dev/null; then
@@ -2278,16 +2340,17 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   fi
 
   say ""
-  info "FULL-EXPORT PRECONDITIONS (all five printed BEFORE any byte moves):"
+  info "FULL-EXPORT PRECONDITIONS (all six printed BEFORE any byte moves):"
   info "  (a) served sha re-pinned == step 0a's ....... $cond_a"
   info "  (b) MemAvailable >= ${FULL_MIN_MEM_MB} MB ................. $cond_b"
   info "  (c) attempts < budget ...................... $cond_c"
   info "  (d) no deploy.yml run in progress .......... $cond_d"
+  info "  (f) free space >= the incoming bundle ...... $cond_f"
   info "  (e) lock acquired .......................... $cond_e"
   say ""
 
   if [ "$ok" -ne 1 ]; then
-    FULL_WHY="${stale_note}a full-export precondition did not hold — (a) $cond_a · (b) $cond_b · (c) $cond_c · (d) $cond_d · (e) $cond_e"
+    FULL_WHY="${stale_note}a full-export precondition did not hold — (a) $cond_a · (b) $cond_b · (c) $cond_c · (d) $cond_d · (f) $cond_f · (e) $cond_e"
     return 1
   fi
 
@@ -2349,7 +2412,16 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     fi
   fi
 
-  local t0 t1 code bytes
+  local t0 t1 code bytes parked_before parked_sum
+  # THE DOWNLOAD LANDS ON A SIBLING PATH, NEVER ON THE PARKED ONE. Recorded here
+  # so every failure branch below can state, with measured figures, that the
+  # bundle an operator may still need is exactly where it was.
+  parked_before="absent"
+  if [ -s "$FULL_TAR" ]; then
+    parked_before="$(first_int "$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')") bytes"
+  fi
+  TMP_FILES="$TMP_FILES $FULL_TMP_TAR"
+  rm -f "$FULL_TMP_TAR"
   # PDS-BLIND-SPOT-METER: `date +%s`, WALL CLOCK around an HTTP/CLI call issued
   # from THIS shell. Placement is (a) of PDS-D633's law — an OS-level clock
   # OUTSIDE every BEAM. It has to be: the BEAM doing the work is the SERVER, on
@@ -2361,25 +2433,43 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   # comes from `pds-door-census.sh --measure`; a regression ratchet would need
   # `Process.info(pid, :reductions)`, which a shell has not got.
   t0="$(date +%s)"
-  code="$(http_code "$(curl_src "/api/workspaces/$SOURCE_WS/export" -o "$FULL_TAR" -w '%{http_code}' \
+  code="$(http_code "$(curl_src "/api/workspaces/$SOURCE_WS/export" -o "$FULL_TMP_TAR" -w '%{http_code}' \
             --max-time "${PDS_FULL_EXPORT_TIMEOUT:-900}" 2>/dev/null || true)")"
   t1="$(date +%s)"
 
   if [ -n "$rss_pid" ]; then kill "$rss_pid" 2>/dev/null || true; wait "$rss_pid" 2>/dev/null || true; fi
   peak_kb="$(first_int "$(awk '{ if ($1+0 > m) m = $1+0 } END { print m+0 }' "$rss_log" 2>/dev/null)")"
 
-  bytes="$(first_int "$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')")"
+  bytes="$(first_int "$(wc -c <"$FULL_TMP_TAR" 2>/dev/null | tr -d ' ')")"
   if [ "$code" != "200" ] || ! int_ok "$bytes" || [ "$bytes" -lt 1024 ]; then
-    rm -f "$FULL_TAR"
-    FULL_WHY="the full export returned HTTP $code / $bytes bytes and the attempt is spent ($spent_now of $FULL_BUDGET). A dead export still paid its memory peak, which is exactly why the counter moved first."
+    rm -f "$FULL_TMP_TAR"
+    FULL_WHY="the full export returned HTTP $code / $bytes bytes and the attempt is spent ($spent_now of $FULL_BUDGET). A dead export still paid its memory peak, which is exactly why the counter moved first. The body landed on $FULL_TMP_TAR and has been removed; the previously parked bundle at $FULL_TAR is UNTOUCHED ($parked_before before the request, $([ -s "$FULL_TAR" ] && printf '%s bytes' "$(wc -c <"$FULL_TAR" | tr -d ' ')" || printf 'absent') after it)."
     [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
     return 1
   fi
-  if ! full_meta_ok; then
-    FULL_WHY="the export returned HTTP 200 and $bytes bytes, but what came back is not a usable full-profile bp-export-v1 bundle: $FULL_META_WHY"
+  # THE SIBLING BRANCH CLEANS UP TOO (the absorbed task-ded188685e54afef). HTTP
+  # 200, >= 1024 bytes and a profile the predicate refuses used to release the
+  # lock and return 1 with NO rm — leaving ~1 GB of unusable, provenance-free
+  # archive at the run-stable path, indistinguishable on disk from a good bundle,
+  # which every future acquire then deterministically refused. `rm -f` appears
+  # on BOTH branches now, and neither can reach the parked path at all.
+  if ! full_meta_ok "$FULL_TMP_TAR"; then
+    rm -f "$FULL_TMP_TAR"
+    FULL_WHY="the export returned HTTP 200 and $bytes bytes, but what came back is not a usable full-profile bp-export-v1 bundle: $FULL_META_WHY. The rejected body was removed from $FULL_TMP_TAR rather than parked; the previously parked bundle at $FULL_TAR is UNTOUCHED ($parked_before before the request, $([ -s "$FULL_TAR" ] && printf '%s bytes' "$(wc -c <"$FULL_TAR" | tr -d ' ')" || printf 'absent') after it)."
     [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
     return 1
   fi
+
+  # ── MOVE INTO PLACE, and only now ────────────────────────────────────────
+  # Same directory, so this is a rename(2): the parked path goes from the OLD
+  # bundle to the NEW one with no window in which it holds a partial body.
+  if ! mv -f "$FULL_TMP_TAR" "$FULL_TAR"; then
+    FULL_WHY="the export returned a valid $bytes-byte full bundle at $FULL_TMP_TAR but it could not be moved onto $FULL_TAR. The validated body is left at $FULL_TMP_TAR; the previously parked bundle is untouched ($parked_before)."
+    [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
+    return 1
+  fi
+  parked_sum="replaced the $parked_before parked bundle"
+  [ "$parked_before" = "absent" ] && parked_sum="parked where nothing was"
 
   if int_ok "$peak_kb" && [ "$peak_kb" -gt 0 ]; then
     FULL_RSS_LINE="beam.smp RSS peaked at $((peak_kb / 1024)) MB — the MAX over ${beam_n:-?} comm-anchored beam.smp slot(s), measured by a 1 Hz ps sampler over SSH across this export only (primary/oldest pid ${beam_pid:-?}, baseline ${baseline_kb:-?} KB, $(grep -c . "$rss_log" 2>/dev/null || echo 0) samples, no slot restart)"
@@ -2405,7 +2495,7 @@ EOF
   pds_blind_spot_note \
     "date +%s, WALL CLOCK around an HTTP/CLI call issued from this shell — an OS clock outside every BEAM (PDS-D633 placement (a)); the BEAM doing the work is the remote SERVER, so no in-BEAM meter is reachable. A LATENCY, never a price (PDS-D605)" \
     "full bundle"
-  info "                parked at $FULL_TAR (+ .meta) — run-stable, so the NEXT run reuses it for 0 attempts"
+  info "                parked at $FULL_TAR (+ .meta) — run-stable, so the NEXT run reuses it for 0 attempts. Downloaded to $FULL_TMP_TAR and moved into place ONLY after full_meta_ok passed on it ($parked_sum)."
   [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
   return 0
 }

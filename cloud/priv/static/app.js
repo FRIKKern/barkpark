@@ -20940,7 +20940,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 2 of the 57 declared verbs have no entry here: they render
+    // 2 of the 58 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -20993,6 +20993,16 @@
     // The actor tried; the request never left. The expanded detail carries the
     // wire word (reason: "identity_refused") and which write it was.
     "barkpark.credentials_refused": "was refused — the instance rejected our access credential",
+    // cch-w59-bl. The row a SUSPENSION-REFUSED act leaves. Sibling of
+    // barkpark.credentials_refused, and a DIFFERENT fact: there the box spoke
+    // and rejected our credential; here the plane withheld attention and the
+    // box was never asked. ONE verb for every suspended refusal in the plane —
+    // the route/act is a metadata field (`route`), never a second verb — so an
+    // operator queries `action = barkpark.suspended_refused` once and sees
+    // every attempt against a suspended box. Written OUTSIDE Accounts.audit/3:
+    // that wrapper rolls back on an error tuple, which is exactly the shape a
+    // refusal returns, so a transactional write of this row could never land.
+    "barkpark.suspended_refused": "was refused — the instance is suspended",
     "provider.connected": "connected a provider credential",
     "provider.disconnected": "disconnected a provider credential",
     "github.installation_connected": "connected a GitHub App installation",
