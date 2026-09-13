@@ -3436,7 +3436,7 @@ jobs:
       - name: scratchpad-reaper.test.sh syntax check
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash -n scripts/scratchpad-reaper.test.sh
-      - name: the reaper's skip gates can still LOSE (45 checks, 3 differential controls, mktemp git fixtures)
+      - name: the reaper's skip gates can still LOSE (49 checks, 3 differential controls, mktemp git fixtures)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # This is the one harness in this file whose subject DELETES DIRECTORIES,
         # so it is also the one that must never be allowed to rot into a

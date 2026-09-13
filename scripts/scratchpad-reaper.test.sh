@@ -293,6 +293,24 @@ else
 	ok "C3 refusal ($rc7) and pass ($rc8) are distinguishable by exit code alone"
 fi
 
+printf '\n== --no-entries-census drops the census WITHOUT changing the verdicts ==\n'
+# The flag exists because the census is two extra full walks per root. It must
+# not become a way to change what gets reaped.
+out_c=$("$REAPER" --dry-run --no-entries-census --root "$ROOT" --repo "$REPO" 2>&1)
+rc_is "a no-census run still exits clean" "$?" 0
+has "the census is reported as skipped, not silently absent" "$out_c" "ENTRIES-BEFORE $ROOT SKIPPED"
+has "and so is the after count" "$out_c" "ENTRIES-AFTER $ROOT SKIPPED"
+verd_on=$(run_dry | grep -E 'WOULD-REAP|SKIP-' | sed "s/ — .*//" | sort)
+verd_off=$(printf '%s\n' "$out_c" | grep -E 'WOULD-REAP|SKIP-' | sed "s/ — .*//" | sort)
+if [ "$verd_on" = "$verd_off" ]; then
+	ok "the per-candidate verdicts are identical with and without the census"
+else
+	bad "the census flag CHANGED the verdicts" "with:
+$verd_on
+without:
+$verd_off"
+fi
+
 printf '\n== BLIND beats a false green ==\n'
 out9=$("$REAPER" --dry-run --root "$TMP/does-not-exist" --repo "$REPO" 2>&1)
 rc_is "a missing root is BLIND, not an empty success" "$?" 3
