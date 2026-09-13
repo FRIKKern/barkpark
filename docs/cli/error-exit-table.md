@@ -80,7 +80,7 @@ the API actually returns for that code.
 |---|---|---|---|---|
 | *(no error; success)* | 2xx | `0` | Command succeeded. | Print the result (or the minimal receipt on writes). |
 | `not_found` | 404 | `4` | Resource (doc/media/task/etc.) does not exist. | `not found: <noun> <id>` — suggest `barkpark <noun> ls`. |
-| `schema_unknown` | 404 | `4` | Named schema/type is not registered. | `unknown schema: <name>` — suggest `barkpark schema ls`. || `unauthorized` | 401 | `3` | Missing or invalid credential. | `authentication required` — suggest `barkpark login`. |
+| `unauthorized` | 401 | `3` | Missing or invalid credential. | `authentication required` — suggest `barkpark login`. |
 | `unauthorized` (+`reason:"replay"`) | 401 | `3` | Idempotency-key replay rejected. | `request replayed; retry with a fresh key`. |
 | `forbidden` | 403 | `3` | Authenticated but lacks permission. | `forbidden: token lacks <tier> for this command`. |
 | `cors_forbidden` | 403 | `3` | Origin not allowed (browser-origin path). | `origin not permitted` — rare from the CLI; treat as auth. |

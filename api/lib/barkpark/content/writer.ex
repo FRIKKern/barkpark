@@ -33,7 +33,6 @@ defmodule Barkpark.Content.Writer do
   alias Barkpark.Content.Papers.BlockOps
 
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
-  alias Barkpark.Preview
   alias Barkpark.Tasks.BriefMirror
   alias Barkpark.Tasks.Stage
   alias Barkpark.Tasks.Transitions
@@ -1959,7 +1958,10 @@ defmodule Barkpark.Content.Writer do
   # render_opts for the document projection paths, carrying the :preview sub-map
   # so Projection.project derives content["preview"] on a block-bearing whole-doc
   # write. doc_type is the raw type; the media resolver is bound to the write's
-  # tenancy scope. A paper (unusual on this generic path) also gets its reader
+  # tenancy scope, which this module DECLARES as `:media_scope` — the projection
+  # layer binds the closure (`Projection.bind_media_resolver/1`), so the kernel
+  # never names `Barkpark.Preview` (task-1e93b1d801ff4696, edge 1).
+  # A paper (unusual on this generic path) also gets its reader
   # url; other doctypes leave manifest["url"] nil. Render.render_blocks ignores
   # the extra key, so body_html is byte-unchanged. The row title is only the
   # preview's final fallback; content["title"] and a role:title block remain
@@ -1972,7 +1974,7 @@ defmodule Barkpark.Content.Writer do
 
     preview =
       %{
-        media_resolver: Preview.media_resolver(scope),
+        media_scope: scope,
         doc_type: type,
         title: Map.get(attrs, "title")
       }

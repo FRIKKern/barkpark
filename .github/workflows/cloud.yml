@@ -532,6 +532,41 @@ jobs:
         run: |
           mix ecto.create
           mix ecto.migrate
+      # BEFORE `mix test`, never after: a colliding version makes ecto.migrate a
+      # SILENT NO-OP (`Migrations already up`, exit 0, nothing applied), and the
+      # suite then measures a schema the PR never created. task-ac34d17c2aba4458.
+      #
+      # Detector A (two tracked files claiming one version in one directory) is
+      # the half that bites here and it needs no database — once the other lane
+      # merges, the losing branch carries both files and one of them will never
+      # run. Detector B reads THIS job's postgres service container, which is
+      # disposable and therefore expected to be clean; its value is that the same
+      # command a worker runs against the SHARED barkpark_cloud_test is the
+      # command CI runs, so the two cannot drift. Detector C wants a base ref and
+      # this job checks out at the default depth, so it DISCLOSES rather than
+      # silently passing — read the script's closing DISCLOSURE block.
+      #
+      # `--require-db` deliberately: if psql or the service container is missing,
+      # that is exit 2 here, not a quiet A-only green.
+      - name: psql is present (the schema_migrations reader is psql)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            echo "psql is NOT on PATH. The migration-version check below runs with"
+            echo "--require-db and would exit 2; failing here says WHY rather than"
+            echo "letting the runner image silently decide what this gate measures."
+            exit 1
+          fi
+          psql --version
+      - name: Migration versions do not collide (before mix test)
+        working-directory: ${{ github.workspace }}
+        run: |
+          bash scripts/migration-version-collision-check.sh \
+            --dir cloud/priv/repo/migrations \
+            --database-url "$DATABASE_URL" \
+            --base-ref origin/main \
+            --require-db
       - name: Test
         run: mix test
 
