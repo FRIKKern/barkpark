@@ -13,7 +13,7 @@ defmodule Barkpark.Content.TagRegistryTest do
     * the legacy flat-tag seed: DRAFT tag docs only, never auto-published.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query
 

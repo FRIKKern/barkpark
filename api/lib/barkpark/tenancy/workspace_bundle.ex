@@ -1187,6 +1187,31 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     # a boot-time sweep and a live concurrent export.
     Enum.each(Map.values(spills), &Janitor.own/1)
 
+    # pds-bl-export-pool-starvation: one dedicated connection for THIS export's
+    # COPY streams, so no unrelated checkout can queue behind a 9 s hold on the
+    # shared pool. Started here (once per export, not once per member table) and
+    # stopped in the `after` below; `:disabled`/`{:error, _}` both degrade to
+    # `nil`, which `Repo.with_export_repo/2` reads as "use the default repo" —
+    # this is a contention remedy, never a correctness precondition, so an
+    # export must never FAIL because it could not get its own pool. Full
+    # derivation (and why a checkout timeout / a bounded COPY hold are not
+    # remedies) in `Barkpark.Repo.start_export_pool/1`.
+    export_pool_pid =
+      case Repo.start_export_pool() do
+        {:ok, pid} ->
+          pid
+
+        other ->
+          if match?({:error, _}, other) do
+            Logger.warning(
+              "workspace export could not start its dedicated pool (#{inspect(other)}); " <>
+                "falling back to the shared pool"
+            )
+          end
+
+          nil
+      end
+
     try do
       {members, files} =
         Enum.reduce(specs, {[], %{}}, fn {table, partition, kind}, {members, files} ->
@@ -1194,7 +1219,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           order_cols = Catalog.order_columns(Repo, table)
           sql = copy_out_sql(table, kind, cols, order_cols, ctx)
           spill = Map.fetch!(spills, table)
-          {row_count, md5} = run_copy_out(sql, spill)
+          {row_count, md5} = run_copy_out(sql, spill, export_pool_pid)
 
           member = %{
             "name" => table,
@@ -1250,6 +1275,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       # failure path too, where the point is to leave nothing claimed by a pid
       # that is about to stop existing.
       Enum.each(Map.values(spills), &Janitor.disown/1)
+      # And the dedicated pool with them — the box carries no extra connections
+      # between exports. Runs on the failure path too, and on the PDS-D218 path
+      # where the client has already gone away.
+      if export_pool_pid, do: Repo.stop_export_pool(export_pool_pid)
     end
   end
 
@@ -1905,8 +1934,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # fetch_env! spill dir) and SQL.stream runs `sql`, a COPY ... TO STDOUT built
   # by copy_out_sql from catalog-derived table/columns (Catalog.live_e*,
   # information_schema); neither carries request input. PR #5083 security review.
+  #
+  # PUBLIC ONLY SO THE DETECTOR CAN DRIVE THE REAL HOLD.
+  # `test/barkpark/tenancy/workspace_bundle_export_pool_test.exs` reproduces the
+  # starvation by running THIS function with a `COPY (SELECT pg_sleep(…)) TO
+  # STDOUT` while an unrelated client probes the shared pool. Calling it through
+  # a re-implemented copy of its body would prove nothing about the code that
+  # ships, so the seam is here instead of in the test. `export_repo` defaults to
+  # `nil`, which is byte-for-byte the pre-fix behaviour.
+  @doc false
+  @spec run_copy_out(String.t(), Path.t(), pid() | nil) :: {non_neg_integer(), String.t()}
   # sobelow_skip ["Traversal.FileModule", "SQL.Stream"]
-  defp run_copy_out(sql, spill_path) do
+  def run_copy_out(sql, spill_path, export_repo \\ nil) do
     inject_copy_fault!()
 
     # INSPECTED, not `File.open!` (PDS-D209): the spill is where a full disk
@@ -1916,42 +1955,55 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     {row_count, digest} =
       open_spill!(spill_path, fn io ->
         {:ok, acc} =
-          Repo.transaction(
-            fn ->
-              # OPT-OUT from the pool-wide 30 s statement_timeout (runtime.exs):
-              # ONE `COPY … TO STDOUT` is one statement, run-proven at 9.34 s
-              # (mutation_events, 478 MB) on a WARM cache and longer cold, so the
-              # wall would cancel a legitimate export mid-dump. SET LOCAL, so it
-              # dies with this transaction and never rides the pooled connection
-              # back out. Issued INSIDE the existing transaction rather than by
-              # wrapping it in `with_statement_timeout/2`: an outer transaction
-              # would make the `timeout: copy_out_timeout()` below a savepoint
-              # option and INERT — the precise PDS-D42 trap two paragraphs up.
-              Repo.set_local_statement_timeout!(0)
+          Repo.with_export_repo(export_repo, fn ->
+            Repo.transaction(
+              fn ->
+                # OPT-OUT from the pool-wide 30 s statement_timeout (runtime.exs):
+                # ONE `COPY … TO STDOUT` is one statement, run-proven at 9.34 s
+                # (mutation_events, 478 MB) on a WARM cache and longer cold, so the
+                # wall would cancel a legitimate export mid-dump. SET LOCAL, so it
+                # dies with this transaction and never rides the pooled connection
+                # back out. Issued INSIDE the existing transaction rather than by
+                # wrapping it in `with_statement_timeout/2`: an outer transaction
+                # would make the `timeout: copy_out_timeout()` below a savepoint
+                # option and INERT — the precise PDS-D42 trap two paragraphs up.
+                Repo.set_local_statement_timeout!(0)
 
-              Repo
-              |> Ecto.Adapters.SQL.stream(sql, [])
-              |> Enum.reduce({0, :crypto.hash_init(:md5)}, fn chunk, {count, hash} ->
-                # `rows: nil` is defensive; the terminal chunk carries [].
-                rows = chunk.rows || []
-                # iodata all the way down — never flattened into a binary.
-                # INSPECTED: `IO.binwrite/2` RETURNS `{:error, :enospc}` on a
-                # full disk (it does not raise), and the `:ok = …` match this
-                # replaces made that a MatchError -> bare 500.
-                case IO.binwrite(io, rows) do
-                  :ok ->
-                    :ok
+                # `Repo.get_dynamic_repo/0`, NOT the bare `Repo` module.
+                # `Ecto.Adapters.SQL.stream/4` calls `Ecto.Adapter.lookup_meta/1`
+                # on WHATEVER it is handed and does NOT resolve the process's
+                # dynamic repo — hand it the module and the stream's adapter
+                # meta is the DEFAULT pool's while `Repo.transaction/2` above
+                # (which does resolve it) checked the connection out of the
+                # export pool. The two then key the process dictionary on
+                # different pool pids and `Ecto.Adapters.SQL.reduce/6` raises
+                # "cannot reduce stream outside of transaction". Run-proven both
+                # ways while building the detector. On the default path this is
+                # exactly `Barkpark.Repo`, so nothing changes without a pool.
+                Repo.get_dynamic_repo()
+                |> Ecto.Adapters.SQL.stream(sql, [])
+                |> Enum.reduce({0, :crypto.hash_init(:md5)}, fn chunk, {count, hash} ->
+                  # `rows: nil` is defensive; the terminal chunk carries [].
+                  rows = chunk.rows || []
+                  # iodata all the way down — never flattened into a binary.
+                  # INSPECTED: `IO.binwrite/2` RETURNS `{:error, :enospc}` on a
+                  # full disk (it does not raise), and the `:ok = …` match this
+                  # replaces made that a MatchError -> bare 500.
+                  case IO.binwrite(io, rows) do
+                    :ok ->
+                      :ok
 
-                  {:error, reason} ->
-                    raise BundleIoError,
-                      message: "could not write the spill #{spill_path}: #{inspect(reason)}"
-                end
+                    {:error, reason} ->
+                      raise BundleIoError,
+                        message: "could not write the spill #{spill_path}: #{inspect(reason)}"
+                  end
 
-                {count + length(rows), :crypto.hash_update(hash, rows)}
-              end)
-            end,
-            timeout: copy_out_timeout()
-          )
+                  {count + length(rows), :crypto.hash_update(hash, rows)}
+                end)
+              end,
+              timeout: copy_out_timeout()
+            )
+          end)
 
         acc
       end)

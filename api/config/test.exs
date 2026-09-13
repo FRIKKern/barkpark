@@ -64,6 +64,14 @@ config :barkpark, Barkpark.Repo,
 # integration tests can exercise ErrorJSON/ErrorHTML through the real endpoint.
 config :barkpark, error_test_routes: true
 
+# pds-bl-export-pool-starvation: NO dedicated export pool under the SQL sandbox.
+# The sandbox owns the connection and keeps a test's rows in an uncommitted
+# transaction, so a second REAL pool would dump an empty workspace and every
+# existing export assertion would go vacuous. The starvation detector
+# (test/barkpark/tenancy/workspace_bundle_export_pool_test.exs) turns the pool on
+# for itself, against its own real pools, and is the only test that needs it.
+config :barkpark, :export_pool_size, 0
+
 # Search-intel record writes are async in prod (a keystroke must never stall on
 # the event INSERT); tests run them sync so every existing "row exists after
 # record" assertion stays deterministic. The async path has its own test.

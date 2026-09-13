@@ -26,7 +26,7 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
   already-adjudicated row. The rest of the birth/adoption surface lives in
   `Barkpark.Content.TaskBirthFenceTest`.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query, only: [from: 2]
 

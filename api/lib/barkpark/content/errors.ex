@@ -17,8 +17,6 @@ defmodule Barkpark.Content.Errors do
     "cors_forbidden" =>
       "Add this origin to the dataset's allowed origins, or call from a server-side token instead.",
     "csrf_required" => "Add the x-requested-with header to cookie-authenticated mutations.",
-    "schema_unknown" =>
-      "Register a schema for this type via POST /v1/schemas/:dataset before writing documents of it.",
     "rev_mismatch" => "Re-fetch the document, then retry with its current _rev in ifRevisionID.",
     "precondition_failed" =>
       "Re-fetch the document and retry with the current revision — it changed under you.",
@@ -278,6 +276,21 @@ defmodule Barkpark.Content.Errors do
                          # …while the sheets xlsx build failure is 422 and
                          # PERMANENT (plugins/sheets/web/export_controller.ex).
                          "export_build_failed",
+                         # Workspace bundle EXPORT admission control (PDS-D719) —
+                         # workspace_controller.ex `export_in_flight_conflict/2`:
+                         # 409 + `Retry-After` when the node's single export slot
+                         # is already taken. RETRYABLE, and distinct from the 503
+                         # above in what the caller should do: nothing failed, the
+                         # request was never started. The envelope's `reason`
+                         # narrows it further — `workspace_export_in_flight` (the
+                         # caller's OWN workspace is exporting; the slug is echoed)
+                         # vs `export_capacity_reached` (another workspace holds
+                         # the slot; its slug is deliberately withheld, because
+                         # this caller proved workspace_admin?/2 on theirs and on
+                         # nothing else). Those two are `reason` values, NOT
+                         # Error.code values, so they are correctly absent here —
+                         # the wire `code` is this one string for both.
+                         "export_already_running",
                          # Chat transport send/create failures (chat_controller.ex,
                          # charter D26 reason split — mobile/TUI clients branch on
                          # these: 5xx → transient retry, 4xx → refused/permanent).
@@ -547,9 +560,6 @@ defmodule Barkpark.Content.Errors do
       message: "cookie-authenticated mutation requires the x-requested-with header",
       status: 403
     }
-
-  defp build({:error, :schema_unknown}),
-    do: %{code: "schema_unknown", message: "no schema for type", status: 404}
 
   defp build({:error, :rev_mismatch}),
     do: %{code: "rev_mismatch", message: "document was modified by another writer", status: 409}
