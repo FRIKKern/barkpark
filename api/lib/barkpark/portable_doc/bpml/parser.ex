@@ -782,15 +782,6 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
      ], consume_element("column", sc, cur)}
   end
 
-  defp figure_arity_err(n, l),
-    do:
-      err(
-        "figure-arity",
-        "<figure> holds exactly one child block, found #{n}",
-        l,
-        "wrap one block: <figure caption=\"…\"><diagram>…</diagram></figure>"
-      )
-
   defp build_block("table", attrs, sc, cur) do
     with {:ok, {head, rows}, cur} <- table_rows(sc, cur) do
       block =
@@ -825,6 +816,15 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       end
     end
   end
+
+  defp figure_arity_err(n, l),
+    do:
+      err(
+        "figure-arity",
+        "<figure> holds exactly one child block, found #{n}",
+        l,
+        "wrap one block: <figure caption=\"…\"><diagram>…</diagram></figure>"
+      )
 
   # ── shared block shapes ─────────────────────────────────────────────────────
 
