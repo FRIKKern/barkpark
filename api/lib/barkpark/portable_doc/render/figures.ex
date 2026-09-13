@@ -11,7 +11,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   Compose family, not here. Output is byte-identical to the pre-split engine.
   """
 
-  import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1, safe_url: 1]
+  import Barkpark.PortableDoc.Render.Util, only: [escape_attr: 1, escape_html: 1, safe_url: 1]
 
   @font_mono Barkpark.PortableDoc.Render.Palettes.font_mono()
 
@@ -26,10 +26,52 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # ladder already carries evidence (task-ddb1e0ab09a62466, lead taste ruling).
   # The value is HTML-escaped (the `<pre>` shows source verbatim, so no Mermaid
   # `pre.mermaid` selector concern here).
-  def code_block_html(value) do
+  # LINE EMPHASIS (pe-bl-code-emphasis): the second argument is the NORMALIZED
+  # range list `Compose.code_emphasis/1` produced — `[{from, to, tone}]`, 1-based
+  # inclusive, tone already narrowed to the closed vocabulary
+  # (comment / offending / fixed), malformed ranges already dropped. An EMPTY
+  # list takes the legacy path: the whole value escaped into the `<pre>` in one
+  # piece, byte-identical to before the field existed. That is why the split is
+  # on the list being empty and not on the key being present — a block whose
+  # every range is malformed must render like a block with no `emphasis` at all,
+  # and the fixture (api/test/support/fixtures/code-block-emphasis-parity.json)
+  # asserts exactly that. The class is `bp-code-em bp-code-em--<tone>`, painted
+  # in paper-surface.css off the existing `--bp-tone-*` pairs; the tone reaching
+  # the class name came from a closed vocabulary, so no author string can escape
+  # into the attribute.
+  def code_block_html(value), do: code_block_html(value, [])
+
+  def code_block_html(value, emphasis) do
     ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
       ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, #{@font_mono});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);| <>
-      ~s|overflow-x:auto;white-space:pre">#{escape_html(value)}</pre>|
+      ~s|overflow-x:auto;white-space:pre">#{code_body_html(value, emphasis)}</pre>|
+  end
+
+  # Split/join on "\n" round-trips the source exactly (including a trailing
+  # newline, which yields a final empty segment that simply never matches a
+  # range), so an emphasized block differs from the legacy one ONLY by the spans.
+  defp code_body_html(value, []), do: escape_html(value)
+
+  defp code_body_html(value, ranges) do
+    value
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.map_join("\n", fn {line, n} ->
+      case Enum.find(ranges, fn {from, to, _tone} -> n >= from and n <= to end) do
+        nil ->
+          escape_html(line)
+
+        {_from, _to, tone} ->
+          # `tone` is already narrowed to the closed vocabulary by
+          # `Compose.code_emphasis/1`, so no author string can reach here — but
+          # the attr-escape guard (attr_escape_guard_test.exs) proves safety by
+          # SCANNING the interpolation site, and a reader of this line should
+          # not have to chase a caller two modules away to know the attribute is
+          # closed. escape_attr/1 is the identity on all three tones; it costs
+          # nothing and makes the site self-evidently safe.
+          ~s|<span class="bp-code-em bp-code-em--#{escape_attr(tone)}">#{escape_html(line)}</span>|
+      end
+    end)
   end
 
   # The `.bp-section-divider` look: a centered "§" glyph straddling a hairline

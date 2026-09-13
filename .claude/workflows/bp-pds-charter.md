@@ -15402,3 +15402,63 @@ merge sha of that PR is named in the ruling; where nothing enforces a ruling yet
 - **PDS-D740 — PDS-D187 IS AMENDED: THE TRANSCRIPT CLAUSE IS DROPPED.** Suite-only coverage of the TagRegistry provenance guard is the standing position; rung 6 structurally cannot observe `tag_registry.ex:126`; no climb transcript states it because the frozen harness carries no per-guard prose. Why: a standing position that only a transcript restates is a mirror with one reader.
   *WHY: the clause was half-delivered and unremarked — c1 required that dropping it be amended onto the record with its reason, and this is that amendment.*
   PAYS: `pds-bl-tagregistry-standing-position-not-in-transcripts` c1 — "Or, if the clause is dropped, PDS-D187 is amended on the record to say so and why — the standing position is not left half-delivered and unremarked". SOURCE: lead-authored (deploy-r13); no PR proposed text for this row. PDS-D187 lives at `.claude/workflows/bp-pds-charter.md:1499` on `origin/main` — re-verify that line before committing.
+
+- **PDS-D741 — GATE (b) PROTECTS THE LIVE BEAM'S RESIDENCY, NOT THE BOX'S FREE PAGES; MEMAVAILABLE ALONE
+  IS ANTI-CORRELATED WITH IT AND THE FLOOR IS KEPT ONLY AS HALF A CONJUNCTION.**
+  The full-export precondition (b) in `scripts/pds-pull-proof.sh` was one instantaneous `MemAvailable`
+  read against `PDS_FULL_EXPORT_MIN_MEM_MB` (default 2200), and its refusal sentence claimed it stopped
+  the run from "OOMing the LIVE content API". **The measurement refutes the claim.** On the source,
+  2026-07-20, over 55 seconds: `MemAvailable` rose **1,586,644 → 2,984,512 kB** *precisely because* the
+  live BEAM was being paged out — over the same window the beam's `VmSwap` rose **51,624 → 874,760 kB**
+  and its RSS collapsed **1,024,468 → 216,852 kB**. Seven of eight samples cleared the floor. The pages
+  the gate was reading as headroom **were the BEAM's own working set, on disk.** The gate therefore
+  opened most reliably in the one state where materialising a ~1.03 GB single binary is most dangerous,
+  because the export must fault that whole working set back in. A threshold move cannot repair a signal
+  whose sign is wrong.
+
+  **THE DECISION: the gate is KEPT and PAIRED, not retired, and the hazard it names is restated.** What
+  (b) is for is *not* "the box has free pages" — free pages are cheap and, on this box, misleading. It
+  is: **the live beam.smp is RESIDENT, so the export's ~1 GB allocation does not have to be won back from
+  disk while the same BEAM is serving the content API.** (b) is now a conjunction —
+  `MemAvailable >= PDS_FULL_EXPORT_MIN_MEM_MB` **AND** the summed `VmSwap` of every comm-anchored
+  `beam.smp` slot `<= PDS_FULL_EXPORT_MAX_BEAM_SWAP_MB` (default **256**) — with both halves read in ONE
+  SSH round trip so the two numbers describe the same instant. The predicate is factored out as
+  `gate_b_verdict <memavail_kb> <vmswap_kb> <floor_mb> [beam_rss_kb]`, a pure function over numbers, so
+  the 2026-07-20 figures can be replayed through the SHIPPED gate without a box.
+
+  **THE CEILING IS DERIVED, NOT ROUND.** The same window puts ordinary residue at 51,624 kB (50 MB) of
+  beam swap and the pathological readings at 859,944–874,760 kB (839–854 MB). 256 MB sits 5x above the
+  residue and 3.3x below the pathology, and is ~25% of the ~1,000 MB healthy beam RSS baseline measured
+  in that same window: it refuses once a quarter of the live BEAM's working set is on disk.
+
+  **WHY NOT RETIRE IT IN FAVOUR OF STREAMING.** Streaming (`pds-bl-streaming-workspace-export`) is the
+  only change that removes the allocation, and this ruling does not contest that. But it is a SERVER-side
+  change to the export route; gate (b) governs a CLIENT's decision to issue the request, and until
+  streaming ships the gate is the only door in front of the largest allocation this epic makes. Retiring
+  it would replace a gate that lies with no gate at all, on the same box, in the same window. Two recorded
+  facts make keeping it nearly free: a closed gate returns **before** the attempt counter is incremented,
+  so (b) costs no budget and is free to retry; and the box is majority-open (**227/260 = 87.3%** over
+  21.5 minutes; `sar` gives 52.1–70.1% across four days). Tightening an 87.3%-open, free-to-retry gate
+  buys a real refusal at negligible cost. This is a VALIDITY fix, not a scarcity fix.
+
+  **FAIL-CLOSED ON BLINDNESS.** An unreadable `MemAvailable` **or** an unreadable `VmSwap` is `UNKNOWN`,
+  never `OK` — the same law (d) holds under PDS-D98. This matters more here than anywhere: the swapped-out
+  state is exactly the state in which a probe is slow enough to be dropped, so a missing `VmSwap` must not
+  silently degrade back into the single-value gate this ruling exists to refuse.
+
+  **WHAT THE GATE STILL DOES NOT CLAIM, now stated in the honesty banner.** It is a point-in-time reading
+  taken before a multi-minute export, not a reservation: nothing holds that memory, the box can degrade
+  the instant after the probe, and **no precondition on this box makes a one-binary ~1.03 GB export safe.**
+  The gate narrows the window; only streaming closes it.
+
+  **A CORRECTION TO THE ROW'S OWN ARITHMETIC.** The filing cites the 02:13:23Z sample (`VmSwap` 859,944 kB
+  with `MemAvail` 2,206,172 kB) among the readings the gate passed. It did not: the shipped arithmetic is
+  `mem_mb=$((mem_kb / 1024))`, giving **2154 MB against a 2200 MB floor** — a REFUSAL by 46 MB. Only the
+  02:14:18Z sample (2,984,512 kB → 2914 MB) is a demonstrated false-open. The finding is unharmed — one
+  proven false-open on an anti-correlated signal is the whole case — but the "7 of 8 passed" tally should
+  not be re-quoted as if every cited sample were one of the seven.
+
+  PAYS: `pds-bl-gate-b-anticorrelated` c0.
+  SOURCE: this PR (branch `deploy/gate-b-anticorrelated`),
+  `scripts/pds-pull-proof.sh` — `gate_b_verdict()`, the `FULL_MAX_SWAP_MB` derivation block, the (b)
+  block in `acquire_full_bundle`, and the banner's "Full-export GATE scope" bullet.

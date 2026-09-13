@@ -104,6 +104,11 @@ on:
       - "scripts/main-verdict-presence.test.sh"
       - ".github/main-push-workflows.txt"
       - ".github/workflows/main-gate-watch.yml"
+      # The reporter-wiring arm (task-d1d19ca64ddd2f59) PARSES this workflow out
+      # of scripts/file-ci-failure-issue.test.sh, so that harness and the script
+      # it exercises are inputs of the job below exactly as the watch scripts are.
+      - "scripts/file-ci-failure-issue.sh"
+      - "scripts/file-ci-failure-issue.test.sh"
 
 permissions:
   contents: read
@@ -336,3 +341,229 @@ jobs:
         run: bash -n scripts/main-verdict-presence.sh
       - name: Both-ways proofs (main-verdict-presence.test.sh)
         run: bash scripts/main-verdict-presence.test.sh
+      # THE EGRESS'S OWN PROOF (task-d1d19ca64ddd2f59). The three reporter jobs
+      # at the bottom of this file only ever execute on a FAILING push-to-main
+      # run, so nothing on a PR would otherwise notice that a guard had rotted.
+      # This suite's "main-gate-watch reporter wiring" arm PARSES this file and
+      # evaluates each reporter's real `if:` under fault / scream / absence /
+      # green / cancelled / non-main job results, and mutation-proves the ref
+      # guard. Hermetic: a fake GitHub API on localhost, no token, no network.
+      - name: Reporter wiring + the filer's behaviour matrix (file-ci-failure-issue.test.sh)
+        run: bash scripts/file-ci-failure-issue.test.sh
+
+  # ══ EGRESS: A RED HERE MUST REACH A HUMAN ══════════════════════════════════
+  #
+  # task-d1d19ca64ddd2f59. This workflow concluded FAILURE on NINE consecutive
+  # main runs, 2026-09-12T18:07Z .. 2026-09-13T09:34Z (run ids 34710221041 ..
+  # 34749744107), and nobody learned of it until a human happened to look at the
+  # badge at 08:10Z the next morning. The cause that time was a stale
+  # .github/main-push-workflows.txt (fixed separately, #18084), but the
+  # STRUCTURAL hole is the one fixed here: the watch had no egress at all. Every
+  # job above ends in a red check run and a red run conclusion that NOTHING in
+  # this repository reads — the exact defect this workflow was built to report
+  # about OTHER workflows, present in the watch itself.
+  #
+  # cch-w42-s4 gave console-harness.yml and cloud.yml the shape copied verbatim
+  # below: a job `needs:` the thing it reports on, `if: failure() && github.ref
+  # == 'refs/heads/main'`, job-level `issues: write`, running
+  # scripts/file-ci-failure-issue.sh with a CI_FAILURE_KEY and a CI_FAILURE_DETAIL.
+  #
+  # ONE REPORTER PER OUTCOME, WITH A DISTINCT KEY. cch-w59 split this workflow's
+  # failure classes into differently-named jobs precisely because they are
+  # different facts with different owners; fusing them back together at the
+  # egress would undo that. file-ci-failure-issue.sh keys its idempotency on
+  # CI_FAILURE_KEY (`title="CI failure: $key"`, then a GET of the open
+  # `ci-failure`-labelled issues and `select(.title == $title) | first`: an
+  # existing match is COMMENTED on, `exit 0`, and no POST /issues happens). So a
+  # distinct key per outcome means: nine consecutive faults produce ONE open
+  # issue with eight "Still failing." comments, and a scream that starts while a
+  # fault is open still gets its own issue rather than disappearing into the
+  # fault's thread.
+  #
+  #   main-gate-watch-fault      -> CI failure: main-gate-watch-fault
+  #   main-gate-watch (verdict)  -> CI failure: main-gate-watch-main
+  #   main-verdict-presence      -> CI failure: main-verdict-presence-main
+  #
+  # WHY `github.ref == 'refs/heads/main'` IS THE RIGHT FENCE ON *THIS* FILE.
+  # The `on:` block above has three arms and the guard is correct on each:
+  #   * `schedule:` — GitHub runs scheduled workflows on the DEFAULT BRANCH only,
+  #     so github.ref is `refs/heads/main` on every tick. The guard passes, which
+  #     is the whole point: the scheduled arm is where the nine reds happened.
+  #   * `workflow_dispatch:` — dispatchable against any ref. A dispatch on main
+  #     is the same fact as a tick and files; a dispatch on a topic branch is
+  #     somebody debugging the watch, has a human already attached, and must NOT
+  #     mint a public issue. The guard is what separates those.
+  #   * `pull_request:` — github.ref is `refs/pull/<n>/merge`, never
+  #     `refs/heads/main`, so these jobs are skipped on every PR. That is also
+  #     why none of the three names below needs a row in
+  #     .github/required-checks.json: a name that never renders on a PR head can
+  #     never be sampled into the required-check spec (the same argument the
+  #     three sibling jobs above make for their `if: github.event_name !=
+  #     'pull_request'` fence).
+  #
+  # `failure()` is FALSE for `cancelled`, deliberately. A run collapsed by the
+  # concurrency group executed nothing and has nothing to report; filing for it
+  # is the noise that trains people to ignore the real ones.
+  #
+  # `permissions:` is JOB-LEVEL on these three jobs and nowhere else. The repo's
+  # `default_workflow_permissions` is "read", so the issue POST 403s without an
+  # explicit `issues: write` — but adding it to the workflow-level block above
+  # would silently re-scope the token of the watch jobs too, which read GitHub
+  # with a breakglass token and must stay least-privileged.
+  #
+  # These jobs cannot warn-and-pass: file-ci-failure-issue.sh exits 1 whenever
+  # the alert was not delivered. A red here means "the watch is red AND nobody
+  # was told", which is worse than the condition it was reporting.
+  #
+  # Proven offline, no GitHub in the loop, by the "main-gate-watch reporter
+  # wiring" arm of scripts/file-ci-failure-issue.test.sh: it PARSES this file
+  # (needs:/if:/env read from the YAML, never typed into the test) and evaluates
+  # every guard against fault / scream / absence / green / cancelled / not-main
+  # scenarios, with a mutation that strips the ref guard and must red the arm.
+  report-main-gate-watch-fault:
+    name: Report main-gate-watch configuration fault to a human
+    needs: [main-gate-watch-fault]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: main-gate-watch-fault
+          CI_FAILURE_DETAIL: |
+            The watch's own exit code, read off the `main-gate-watch-fault`
+            job's `rc` output and not retyped here: `${{ needs.main-gate-watch-fault.outputs.rc }}`
+            (EMPTY means the job died before the watch step published one — a
+            checkout or tripwire failure, which is itself the report).
+
+            `main-gate-watch` failed as a CONFIGURATION FAULT — the watch could
+            not read what it watches, so it rendered NO verdict about main.
+            This is the instrument, not the branch: main may be perfectly green.
+
+            rc 3 is the fault proper (branch protection unreadable, or the runs feed
+            403/unparseable); any other rc reaching this job is a routing error.
+
+            Most likely causes, in the order worth checking:
+              * `secrets.BREAKGLASS_TOKEN` removed, rotated or revoked — the
+                fallback to `github.token` keeps the job RUNNABLE and then reds
+                on the protection read on EVERY tick, because GITHUB_TOKEN has
+                no repo-admin scope. Restore the secret; never soften the
+                classification.
+              * the `actions: read` grant in this workflow's `permissions:`
+                block went missing — that read is what separates "no check-run
+                row exists YET" from "this commit was never judged".
+              * scripts/main-gate-watch.sh changed and now exits a code
+                scripts/main-gate-watch-route.sh does not define.
+
+            Read the job log before anything else: the fault step prints which
+            read refused. This issue is idempotent per key — an ongoing fault
+            appends a comment rather than opening a new issue. CLOSE IT once the
+            watch can read again; the next fault opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh
+
+  report-main-gate-watch-scream:
+    name: Report main-gate-watch scream to a human
+    # BOTH jobs are in `needs:` so this step can quote the rc, which only the
+    # fault job publishes. That makes bare `failure()` insufficient on its own:
+    # it is TRUE whenever ANY ancestor failed, so a CONFIGURATION FAULT (which
+    # SKIPS `main-gate-watch`) would otherwise fire this reporter too and file
+    # the scream key for a run that rendered no verdict about main at all. The
+    # `needs.main-gate-watch.result == 'failure'` conjunct is what keeps the two
+    # outcomes on two keys; the `failure() && github.ref` guard is unchanged
+    # beside it. Its sibling above needs no such conjunct: `main-gate-watch-fault`
+    # has no ancestors, so `failure()` there can only mean the fault job itself.
+    needs: [main-gate-watch-fault, main-gate-watch]
+    if: >-
+      failure()
+      && needs.main-gate-watch.result == 'failure'
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: main-gate-watch-main
+          CI_FAILURE_DETAIL: |
+            The watch's own exit code, read off the `main-gate-watch-fault`
+            job's `rc` output: `${{ needs.main-gate-watch-fault.outputs.rc }}`
+            (1 = scream, 2 = WAITING and never a red, 0 = the watch passed and
+            the control-plane convergence step is what reddened).
+
+            `main-gate-watch` is SCREAMING: main's TIP does not carry a green
+            verdict on every post-merge-reproducible required context, or it
+            carries no verdict at all. This is a statement about the DEFAULT
+            BRANCH, made after the fact — every PR branched from this tip
+            inherits whatever is wrong with it.
+
+            Two steps in the `Main gate watch` job can red, and the log says
+            which:
+              * "Is main's tip green on every watched required context?" — the
+                watch proper (rc 1). It names each required context and whether
+                it was green, RED or MISSING on the tip. A MISSING row means the
+                sha was never judged, not that it passed. rc 2 is WAITING and is
+                NOT a red.
+              * "Does the control plane serve the newest deploy-relevant main?"
+                — CONTROL PLANE STRANDED: barkpark.cloud is serving an older sha
+                than main's newest deploy-relevant commit, i.e. merges are not in
+                production. Pull on the box (`docs/ops/PROD_OPS.md`).
+
+            This issue is idempotent per key: a scream that persists across many
+            scheduled ticks appends comments rather than opening an issue per
+            tick. CLOSE IT once main's tip is green again; the next scream opens
+            a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh
+
+  report-main-verdict-presence:
+    name: Report main verdict absence to a human
+    # `main-verdict-presence` has no `needs:` of its own, so `failure()` here can
+    # only mean that job (or its checkout/tripwire) failed — no conjunct needed.
+    # It gets its OWN key for the same reason the two above are split: "main's
+    # tip took no verdict" and "main's tip took a red verdict" are different
+    # facts with different remedies, and one thread would bury whichever arrived
+    # second.
+    needs: [main-verdict-presence]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: main-verdict-presence-main
+          CI_FAILURE_DETAIL: |
+            `Main verdict presence` is RED: either main's tip took NO verdict
+            from a workflow whose push arm reaches main (a cancelled,
+            never-created or startup_failure run publishes no context, and an
+            absent context is not a red one), or the main-push workflow set
+            itself could not be derived.
+
+            The job log distinguishes them:
+              * "MAIN'S TIP TOOK NO VERDICT …" — re-run the named workflows on
+                that sha.
+              * "CONFIGURATION FAULT — the main-push workflow set could not be
+                derived, drifted from .github/main-push-workflows.txt, or the
+                runs feed was unreadable." — this is the instrument, not the
+                branch. Re-derive the roster; see
+                scripts/main-verdict-presence.sh. A STALE
+                .github/main-push-workflows.txt is the known instance: it red
+                this workflow on nine consecutive main runs 2026-09-12T18:07Z ..
+                2026-09-13T09:34Z (34710221041 .. 34749744107) with no egress at
+                all, which is why this reporter exists.
+
+            Idempotent per key: an ongoing absence appends comments. CLOSE IT
+            once the tip is judged again; the next one opens a fresh issue.
+        run: bash scripts/file-ci-failure-issue.sh
