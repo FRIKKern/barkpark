@@ -730,6 +730,14 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # moving the 200/4xx renders behind an extra `ingest_body/2` hop made this route an
   # UNDISPOSED ARRIVAL and reddened the required Elixir gate. Keeping the accepting body
   # in `ingest/2` itself keeps the receipts where the census can see them.
+  # THE INGEST SCOPE RULE's gate (see the moduledoc). A controller plug, not a
+  # line in each action: the refusal is a property of {credential, request
+  # scope} alone, so running it once at the door keeps every action body
+  # byte-unchanged AND makes `put_scope/3`'s strict match a real precondition
+  # rather than a hope. Halts on refusal; otherwise the conn passes through and
+  # `put_scope/3` re-resolves the same (pure) decision.
+  plug(:require_resolvable_scope when action in [:ingest, :ingest_session])
+
   def ingest(conn, %{"ifRev" => _}), do: refuse_unfenced_if_rev(conn, "ifRev")
   def ingest(conn, %{"if_rev" => _}), do: refuse_unfenced_if_rev(conn, "if_rev")
 
@@ -748,13 +756,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # defect. Absent key → nil → unchanged behaviour for every existing caller
   # (no CLI path sends it; `bp bulldocs publish` declares no --if-rev flag).
   def ingest(conn, params) do
-    case scope_refusal(conn, params) do
-      nil -> do_ingest(conn, params)
-      refusal -> refusal
-    end
-  end
-
-  defp do_ingest(conn, params) do
     case params do
       %{"slug" => slug, "blocks" => blocks} = accepted
       when is_binary(slug) and slug != "" and is_list(blocks) ->
@@ -1097,19 +1098,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
   or every metadata-only update would wipe the stored blocks to `[]`.
   """
   def ingest_session(conn, %{"slug" => slug} = params) when is_binary(slug) and slug != "" do
-    case scope_refusal(conn, params) do
-      nil -> do_ingest_session(conn, params)
-      refusal -> refusal
-    end
-  end
-
-  def ingest_session(conn, _params) do
-    conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "missing_slug", message: "slug required"}})
-  end
-
-  defp do_ingest_session(conn, params) do
     attrs =
       params
       |> Map.take(@session_keys)
@@ -1153,6 +1141,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, _reason} = err ->
         render_error(conn, err)
     end
+  end
+
+  def ingest_session(conn, _params) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: %{code: "missing_slug", message: "slug required"}})
   end
 
   @doc """
@@ -1865,9 +1859,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # W1.5-C: thread the write's workspace/project into the upsert attrs so a
   # paper (and its emitted lifecycle event) lands in the right tenant.
   #
-  # PRECONDITION: `ingest/2` / `ingest_session/2` have already run
-  # `scope_refusal/2` for this same {conn, params}, so `resolve_write_scope/2`
-  # here cannot answer `{:error, _}`. The strict match is deliberate — a future
+  # PRECONDITION: the `:require_resolvable_scope` plug above has already run
+  # `resolve_write_scope/2` for this same conn and halted on a refusal, so it
+  # cannot answer `{:error, _}` here. The strict match is deliberate — a future
   # caller that skips the guard must fail LOUDLY rather than silently fall back
   # to the seeded Default, which is the whole defect this rule closes.
   defp put_scope(attrs, conn, params) do
@@ -1984,17 +1978,21 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp project_under(ws, conn, params),
     do: resolve_project(ws, scope_value(conn, params, "project", "x-barkpark-project"))
 
-  # Run at the head of every ingest WRITE action. `nil` = this request's scope
-  # resolves; anything else is the rendered refusal conn.
-  defp scope_refusal(conn, params) do
-    case resolve_write_scope(conn, params) do
+  # The plug half of the gate (mounted above the ingest actions). Passes the
+  # conn through when this request's scope resolves; renders the typed refusal
+  # and HALTS when it does not — so a refused write never reaches an action and
+  # leaves no row.
+  defp require_resolvable_scope(conn, _opts) do
+    case resolve_write_scope(conn, conn.params) do
       {:ok, _scope} ->
-        nil
+        conn
 
       # Reuses the ruling's own curated envelope (`Content.Errors` owns the
       # code, the 422, and the hint that names the scope door to send instead).
       {:error, {:workspace_scope_required, slugs}} ->
-        render_error(conn, {:error, {:workspace_scope_required, slugs}})
+        conn
+        |> render_error({:error, {:workspace_scope_required, slugs}})
+        |> halt()
 
       {:error, {:workspace_scope_conflict, sent, resolved}} ->
         BarkparkWeb.ErrorResponse.emit_custom(
