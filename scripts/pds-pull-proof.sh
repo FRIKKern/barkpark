@@ -2282,6 +2282,101 @@ gate_b_verdict() { # <memavail_kb> <vmswap_kb> <floor_mb> [beam_rss_kb] -> the c
   return 0
 }
 
+# ── (d)'s DISCRIMINATOR: which in-flight deploy.yml runs can touch THE BOX ───
+# `deploy.yml` is TWO independent deploy jobs behind one `changes` job: the
+# `control-plane` job (`if: needs.changes.outputs.cp == 'true'`) ships to
+# CP_HOST, and the `instance` job (`if: needs.changes.outputs.instance ==
+# 'true'`) ships to GUERRILLA_HOST. A PDS climb pulls from the INSTANCE box,
+# so only the `instance` job can swap the slot under an export. The old (d)
+# asked `gh run list --workflow deploy.yml --status in_progress` and stopped
+# there — a cloud-only merge, which never runs `instance` and cannot possibly
+# disturb the export, read identically to a real api deploy and tripped a FALSE
+# ABORT that cost the run its whole precondition set
+# (pds-bl-cond-d-job-blind-false-abort).
+#
+# PURE ON PURPOSE. The classification takes the jobs listing as TEXT so it is
+# decidable from a fixture: a gate whose only route to its own verdict is a live
+# GitHub API call is a gate nobody can show failing in both directions, and
+# PDS-D31 forbids buying that demonstration with a real export.
+deploy_run_instance_verdict() { # <jobs-tsv: name\tstatus\tconclusion per line> -> instance | control-plane-only | unknown:<why>
+  local tsv="${1-}" name status conclusion
+  local have_changes=0 changes_done=0 changes_status="" have_instance=0 inst_conc=""
+
+  while IFS="$(printf '\t')" read -r name status conclusion; do
+    [ -n "$name" ] || continue
+    case "$name" in
+      changes)  have_changes=1; changes_status="$status"
+                if [ "$status" = "completed" ]; then changes_done=1; fi ;;
+      instance) have_instance=1; inst_conc="$conclusion" ;;
+    esac
+  done <<EOF
+$tsv
+EOF
+
+  if [ "$have_instance" -eq 1 ]; then
+    # `skipped` is the ONLY conclusion that means the instance box was not and
+    # will not be touched. A NULL/empty conclusion is a job still running, and
+    # `success`/`failure` is a job that already ran — both touched the box.
+    if [ "$inst_conc" = "skipped" ]; then
+      printf 'control-plane-only'
+    else
+      printf 'instance'
+    fi
+    return 0
+  fi
+
+  # NO `instance` LINE IS NOT "NO INSTANCE JOB". GitHub materialises a job in
+  # the listing only once the run reaches it, so before `changes` completes the
+  # `instance` job's fate is undecided and its absence says nothing. Reading an
+  # absence as "control-plane only" is the most reassuring possible answer to a
+  # question that was never answered — the shape PDS-D98 makes this gate fail
+  # CLOSED over.
+  if [ "$have_changes" -eq 0 ]; then
+    printf 'unknown:the run listed no `changes` job, so its job graph could not be read at all'
+  elif [ "$changes_done" -eq 0 ]; then
+    printf 'unknown:the `changes` job is %s, so whether the `instance` job runs is not yet decided' "${changes_status:-in an unreported state}"
+  else
+    printf 'unknown:`changes` completed but no `instance` job is listed, so the job that targets the source box cannot be ruled in or out'
+  fi
+  return 0
+}
+
+gate_d_verdict() { # <gh_rc> [<run-id>=<verdict> ...] -> the cond_d text; 0 = OK
+  local gh_rc="${1-0}"; shift || true
+  local pair id verdict
+  local instance_ids="" unknown_notes="" cp_ids=""
+
+  if [ "$gh_rc" -ne 0 ]; then
+    printf 'UNKNOWN (gh exited %s — the GitHub API did not answer, so an in-flight deploy cannot be ruled out)\n' "$gh_rc"
+    return 1
+  fi
+  if [ "$#" -eq 0 ]; then
+    printf 'OK (no deploy.yml run in progress)\n'
+    return 0
+  fi
+
+  for pair in "$@"; do
+    id="${pair%%=*}"; verdict="${pair#*=}"
+    case "$verdict" in
+      instance)           instance_ids="$instance_ids $id" ;;
+      control-plane-only) cp_ids="$cp_ids $id" ;;
+      unknown:*)          unknown_notes="$unknown_notes; run $id: ${verdict#unknown:}" ;;
+      *)                  unknown_notes="$unknown_notes; run $id: unrecognised job verdict [$verdict]" ;;
+    esac
+  done
+
+  if [ -n "$instance_ids" ]; then
+    printf 'FAILED — deploy.yml run(s) whose `instance` job targets the source box are in progress:%s. A deploy mid-export swaps the slot under the request\n' "$instance_ids"
+    return 1
+  fi
+  if [ -n "$unknown_notes" ]; then
+    printf 'UNKNOWN (a deploy.yml run is in progress and its job graph did not settle the question%s). A gate that cannot see is never OK\n' "$unknown_notes"
+    return 1
+  fi
+  printf 'OK (deploy.yml run(s) in progress:%s, but every one of them is CONTROL-PLANE ONLY — the `instance` job that ships to the source box is skipped in each, so none can swap the slot under this export)\n' "$cp_ids"
+  return 0
+}
+
 acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says why not
   FULL_WHY=""
   local stale_note=""
@@ -2323,7 +2418,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   fi
 
   # ── the six conditions, printed with measured values, before any byte moves
-  local spent mem_kb sha_now deploy_running gh_rc gh_out cond_a cond_b cond_c cond_d cond_e cond_f ok=1
+  local spent mem_kb sha_now gh_rc gh_out cond_a cond_b cond_c cond_d cond_e cond_f ok=1
   local parked_note free_mb need_mb parked_mb parked_bytes
   spent="$(full_attempts)"
 
@@ -2382,7 +2477,6 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     cond_c="FAILED — the budget is exhausted ($spent of $FULL_BUDGET). A dead export still paid its peak; raise PDS_FULL_EXPORT_BUDGET deliberately. On the parked path: $parked_note"; ok=0
   fi
 
-  deploy_running=""
   if command -v gh >/dev/null 2>&1; then
     # gh's EXIT STATUS is captured apart from its stdout. Piping it straight into
     # `tr … || true` made an API error and a genuinely empty result identical —
@@ -2393,14 +2487,28 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     gh_rc=0
     gh_out="$(gh run list --workflow deploy.yml --branch main --status in_progress --limit 5 \
                 --json databaseId -q '.[].databaseId' 2>/dev/null)" || gh_rc=$?
-    deploy_running="$(printf '%s' "$gh_out" | tr '\n' ' ')"
-    if [ "$gh_rc" -ne 0 ]; then
-      cond_d="UNKNOWN (gh exited $gh_rc — the GitHub API did not answer, so an in-flight deploy cannot be ruled out)"; ok=0
-    elif [ -z "$gh_out" ]; then
-      cond_d="OK (no deploy.yml run in progress)"
-    else
-      cond_d="FAILED — deploy.yml run(s) in progress: $deploy_running. A deploy mid-export swaps the slot under the request"; ok=0
+    # SECOND QUERY, PER RUN: the listing above knows only that A deploy.yml run
+    # is live, never WHICH of its two deploy jobs that run will reach. That is
+    # the whole defect PDS-D746 thaws this block to fix — the discriminator is
+    # the `instance` job, and it is only visible one level down, in the run's
+    # own job graph.
+    local d_run d_jobs d_jrc d_pairs=()
+    if [ "$gh_rc" -eq 0 ] && [ -n "$gh_out" ]; then
+      while read -r d_run; do
+        [ -n "$d_run" ] || continue
+        d_jrc=0
+        d_jobs="$(gh run view "$d_run" --json jobs \
+                    -q '.jobs[] | [.name, .status, (.conclusion // "")] | @tsv' 2>/dev/null)" || d_jrc=$?
+        if [ "$d_jrc" -ne 0 ]; then
+          d_pairs+=("$d_run=unknown:gh run view exited $d_jrc, so this run's job graph was never read")
+        else
+          d_pairs+=("$d_run=$(deploy_run_instance_verdict "$d_jobs")")
+        fi
+      done <<EOF
+$gh_out
+EOF
     fi
+    cond_d="$(gate_d_verdict "$gh_rc" ${d_pairs[@]+"${d_pairs[@]}"})" || ok=0
   else
     cond_d="UNKNOWN (gh is not on PATH, so an in-flight deploy cannot be ruled out)"; ok=0
   fi
@@ -2447,9 +2555,25 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   info "  (a) served sha re-pinned == step 0a's ....... $cond_a"
   info "  (b) MemAvail >= ${FULL_MIN_MEM_MB} MB AND beam swap <= ${FULL_MAX_SWAP_MB} MB ... $cond_b"
   info "  (c) attempts < budget ...................... $cond_c"
-  info "  (d) no deploy.yml run in progress .......... $cond_d"
+  info "  (d) no INSTANCE-job deploy.yml run live .... $cond_d"
   info "  (f) free space >= the incoming bundle ...... $cond_f"
   info "  (e) lock acquired .......................... $cond_e"
+  say ""
+  # (d) IS A SAMPLE, NOT A RESERVATION. It reads the run list at ONE instant and
+  # holds nothing: a merge landing one second later races the export
+  # uninterrupted, and only rung 0b's sha-ancestor check would notice, after the
+  # fact. There is no deploy freeze a climb can take — `main`'s branch
+  # protection gates the MERGE on four CI contexts (`Elixir gate`, `Cloud gate`,
+  # `Console gate`, `PR references an active task`) and says nothing about
+  # deploys, and the box-side deploy lock in `deploy/instance-deploy.sh`
+  # serialises deploys against EACH OTHER, never against an export. The
+  # protection this gate gives an export is a sample plus a social convention,
+  # and the transcript says so rather than letting an OK read as a lock.
+  info "  (d) SCOPE — that is a SAMPLE taken just now, NOT a reservation held across the export."
+  info "      A deploy merged one second from now races this export uninterrupted; there is no"
+  info "      deploy freeze in this repo for a climb to take (branch protection gates the MERGE"
+  info "      on CI contexts only, and the box-side deploy lock serialises deploys against each"
+  info "      other, not against an export). Only rung 0b's sha-ancestor check sees that, after."
   say ""
 
   if [ "$ok" -ne 1 ]; then
