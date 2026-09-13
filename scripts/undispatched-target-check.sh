@@ -101,6 +101,22 @@
 
 set -uo pipefail
 
+# The guard below is copied verbatim (modulo the script name) from
+# scripts/committed-symlink-check.sh:82-91. It must stay POSIX-parseable and
+# must stay ABOVE the first process substitution: bash reads incrementally, so
+# anything the guard sits after is code a POSIX-mode shell has already run.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "undispatched-target-check.sh: needs bash (this script uses process substitution); run: bash scripts/undispatched-target-check.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "undispatched-target-check.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/undispatched-target-check.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
+
+
 ROOT="${UNDISPATCHED_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 WF_DIR="$ROOT/.github/workflows"
 SCRIPT_DIR="$ROOT/scripts"
