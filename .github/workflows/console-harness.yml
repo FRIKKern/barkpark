@@ -1386,6 +1386,40 @@ jobs:
           echo "::error title=console-unit ${v} — __me_envelope_census.mjs::__me_envelope_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
           exit 1
 
+      # ── EVERY SESSION-REACHABLE `required:` LABEL HAS CURATED COPY (cch-w41-bl)
+      #
+      # A TRIPWIRE, NOT A FIX. Nothing is broken on main: the bounded-label echo
+      # in app.js's forbiddenEvidenceCopy is unreachable for every
+      # browser-reachable 403 today, because every `required` a session can
+      # receive already has a FORBIDDEN_ROLE_COPY sentence. That is a property
+      # of today's label set, not of the code, so it is asserted here — one new
+      # `required:` literal and the echo starts telling a reader that "an admin
+      # on this team can grant it" about a label no gate author said that about.
+      #
+      # The left side is DERIVED from the gates (auth.ex + router.ex), not from
+      # a hand list, and the right side is DRIVEN: the census evaluates the
+      # shipped app.js in a node:vm sandbox and calls friendly() on each label,
+      # so a reworded map or a changed precedence chain cannot green it the way
+      # a source scan would. Wired in this job for the same reason as its two
+      # siblings above — console-gate already `needs:` it, so no new leaf name
+      # goes into .github/required-checks.json.
+      - name: required-label census (every session-reachable label has curated copy)
+        id: required-label-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__required_label_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __required_label_census.mjs::__required_label_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
       # ── THE SAME CENSUS, GENERALIZED PAST /v1/me (cch-w43-bl) ──────────────
       #
       # Wired exactly where its /v1/me sibling is, and for the same reason: this

@@ -139,6 +139,7 @@ export const NORMALISED = [
   { file: "cloud/priv/static/__init_wiring_census.mjs", name: "INIT WIRING CENSUS" },
   { file: "cloud/priv/static/__agent_event_vocabulary_census.mjs", name: "AGENT EVENT VOCABULARY CENSUS" },
   { file: "cloud/priv/static/__unknown_census.mjs", name: "UNKNOWN CENSUS" },
+  { file: "cloud/priv/static/__required_label_census.mjs", name: "REQUIRED LABEL CENSUS" },
 ];
 
 // Emitters that ALREADY spoke the shape. Each `sample` is a line copied from the
