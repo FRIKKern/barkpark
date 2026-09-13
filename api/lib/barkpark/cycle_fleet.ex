@@ -3234,7 +3234,12 @@ defmodule Barkpark.CycleFleet do
     end
   end
 
-  defp release_document_in_scope?(%Document{workspace_id: doc_ws}, %Wave{workspace_id: wave_ws}),
+  # Public ONLY so the seat test can exercise the guard's decision surface
+  # without standing up a whole promotion chain (the end-to-end rollback path is
+  # covered by `cycle_fleet_test.exs`). Production callers reach it through
+  # `restore_release_document/3`.
+  @doc false
+  def release_document_in_scope?(%Document{workspace_id: doc_ws}, %Wave{workspace_id: wave_ws}),
     do: is_nil(wave_ws) or doc_ws == wave_ws
 
   defp restore_release_document_in_scope(document, revision, expected, state) do
