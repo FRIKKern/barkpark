@@ -139,7 +139,7 @@ func TestMarkdownBlocksFencedCode(t *testing.T) {
 	if code.Type != "code" {
 		t.Fatalf("block 1 type = %q, want code", code.Type)
 	}
-	if lang, _ := code.Attrs["language"].(string); lang != "go" {
+	if lang, _ := code.Attrs["lang"].(string); lang != "go" {
 		t.Errorf("code language = %q, want go", lang)
 	}
 	// Source is verbatim: the tab indentation survives.

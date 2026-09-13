@@ -125,6 +125,7 @@ set -euo pipefail
 #   scripts/cloud-path-escape-check.sh), and dispatching the whole Elixir suite
 #   on it would be the over-inclusion the tooling/** note above refuses.
 ELIXIR_COMPILE_PATHS='api/**
+VERSION
 cloud/priv/secret-scrub.exs
 design/**
 tooling/pds/pre-gate-papers.json
@@ -523,9 +524,28 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 # Live population when these bounds were set (`--list-escapes | cut -f1,3 |
 # sort -u`, 33 distinct paths): test-cwd 27, test-dir 24, lib-cwd 11,
 # lib-dir 10, test-root 4 — all five DERIVED BY RUNNING the scanner on a clean
-# checkout, never guessed. `lib-root` gets no row because the scanner emits no
-# such tag today: a floor on an unpopulated idiom would red on a clean tree, and
-# the inventory check below is what catches the day api/lib starts using it.
+# checkout, never guessed.
+#
+# `lib-root` USED TO GET NO ROW, and the note here said the inventory check
+# below would catch the day api/lib started using the idiom. That day came
+# (task-2ab4f5f0a07e887a): `Barkpark.BuildInfo` reads the checked-in repo-root
+# `VERSION` file at compile time through `Path.join(@repo_root, "VERSION")`, the
+# scanner tagged it `lib-root`, and the run died with `idiom 'lib-root' has no
+# entry` — the inventory check firing exactly as designed. Measured population
+# on this tree: 1.
+#
+# ITS FLOOR IS 0, NOT 1, and that is a deliberate, measured concession rather
+# than the ~50% rule applied badly. A floor of 1 was tried first: the real tree
+# passed and the HARNESS went 284/0 -> 246/40, because
+# scripts/elixir-path-escape-check.test.sh points ELIXIR_PATH_ESCAPE_ROOT at
+# synthetic fixture trees that carry no api/lib root-anchored read at all, so
+# every fixture case redded on the floor instead of on the behaviour it was
+# staging. A floor that reds on 40 cases it has no opinion about is noise, not
+# enforcement. So this row joins the ten below on the same terms: it exists to
+# satisfy the idiom inventory, it buys no blindness detection, and the door's
+# protection lives in the harness's own rootanchor fixtures. Raise it to ~50%
+# once api/lib's population is large enough that the fixtures' zero stops being
+# the binding constraint.
 # Each bound sits near 40-50% of its live population: retiring
 # several cross-tree reads must never require touching this table, while a
 # blinded door — which takes its idiom to ZERO, not to 60% — reds immediately.
@@ -568,6 +588,7 @@ ELIXIR_ESCAPE_IDIOM_MIN='test-cwd	8
 test-dir	8
 lib-cwd	5
 lib-dir	5
+lib-root	0
 test-root	2
 test-rootpipe	0
 test-rootlist	0

@@ -21,6 +21,25 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
+      # ── Build identity (task-2ab4f5f0a07e887a) ───────────────────────────
+      # BUILD args, not runtime env: Barkpark.BuildInfo freezes version/commit/
+      # built_at at COMPILE time, so a value supplied here is the only one that
+      # can reach it. All three are OPTIONAL — leave them unset and the image
+      # takes its release from the checked-in VERSION file the Dockerfile COPYs,
+      # which is what a self-hoster building from a tarball or a `.git`-less
+      # context gets.
+      #
+      # `${FOO:-}` IS CORRECT HERE and is NOT the passthrough-allowlist trap
+      # documented under `environment:` below. There an empty string is a
+      # distinct and sometimes destructive VALUE (BARKPARK_PLUGINS="" is the
+      # plugin kill switch), so an unset var MUST stay unset. Here it is not a
+      # value at all: BuildInfo's env reader treats "" exactly as unset and
+      # falls through to the VERSION file, so the two spellings are
+      # indistinguishable to the only consumer.
+      args:
+        BARKPARK_BUILD_VERSION: ${BARKPARK_BUILD_VERSION:-}
+        BARKPARK_BUILD_COMMIT: ${BARKPARK_BUILD_COMMIT:-}
+        BARKPARK_BUILD_DATE: ${BARKPARK_BUILD_DATE:-}
     ports:
       - "${PORT:-4000}:4000"
     environment:

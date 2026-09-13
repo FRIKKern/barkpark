@@ -143,6 +143,7 @@ HYPERQUIZ.md none quiz plugin notes
 LICENSE none the licence
 Makefile none developer entry points
 README.md none human readme
+VERSION elixir the checked-in release marker Barkpark.BuildInfo reads at compile time (tier 3, declared in ELIXIR_COMPILE_PATHS); a docker or tarball build has no .git and takes its release from it
 api elixir the Phoenix app; the Elixir suite compiles and tests it
 apps none secondary app trees
 barkpark.json none project manifest
