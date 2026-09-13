@@ -3145,11 +3145,17 @@ defmodule BarkparkCloud.Web.Router do
   # the box SPOKE and rejected our stored credential; this means the plane
   # withheld attention and the box was never asked. Same register, two facts.
   #
-  # Returns `conn` so a refusal clause reads
-  # `conn |> audit_suspended_refusal(team, bp, "<route>") |> json(409, …)` —
-  # the trace is written BEFORE the response and never instead of it. It changes
-  # no status code, no envelope and no ordering relative to the credential: every
-  # call site below still sits ABOVE the decrypt, so nothing reaches a wire.
+  # Returns `conn`, and every call site spells it
+  # `conn = audit_suspended_refusal(conn, team, bp, "<route>")` on the line
+  # ABOVE the untouched `json(conn, 409, …)` — DELIBERATELY not a `|>` pipe.
+  # `router_error_envelope_census_test.exs` walks this file's AST for
+  # `{:json, _, [conn, status, body]}`; a piped `conn |> json(409, …)` is a
+  # two-argument node it cannot see, and piping these clauses silently dropped
+  # two nested-envelope emitters out of that census's population (29 -> 27,
+  # run-proved). The trace is written BEFORE the response and never instead of
+  # it. It changes no status code, no envelope and no ordering relative to the
+  # credential: every call site below still sits ABOVE the decrypt, so nothing
+  # reaches a wire.
   defp audit_suspended_refusal(conn, team, bp, route) do
     case Accounts.record_audit(%{
            team_id: team.id,
@@ -3386,9 +3392,9 @@ defmodule BarkparkCloud.Web.Router do
               # `suspended` slug + detail shape as studio-link / app-token, which
               # `app.js` (ERRORS.suspended) already renders.
               bp.suspended ->
-                conn
-                |> audit_suspended_refusal(team, bp, "verify")
-                |> json(409, %{
+                conn = audit_suspended_refusal(conn, team, bp, "verify")
+
+                json(conn, 409, %{
                   error: "suspended",
                   detail:
                     "This instance is suspended. It is not probed with the stored " <>
@@ -3579,9 +3585,9 @@ defmodule BarkparkCloud.Web.Router do
           # ("stopped"), and placed ABOVE the reveal so the ciphertext is never
           # decrypted. Same 409 shape as the two mint routes below.
           %Barkpark{team_id: tid, suspended: true} = bp when tid == team.id ->
-            conn
-            |> audit_suspended_refusal(team, bp, "credentials")
-            |> json(409, %{
+            conn = audit_suspended_refusal(conn, team, bp, "credentials")
+
+            json(conn, 409, %{
               error: "suspended",
               detail:
                 "This instance is suspended. The admin credential is not revealed " <>
@@ -3671,9 +3677,9 @@ defmodule BarkparkCloud.Web.Router do
               # banner. "Until the suspension is cleared" is true on both axes and
               # is the same vocabulary as the console's ERRORS.suspended string.
               {:error, :suspended} ->
-                conn
-                |> audit_suspended_refusal(team, bp, "studio-link")
-                |> json(409, %{
+                conn = audit_suspended_refusal(conn, team, bp, "studio-link")
+
+                json(conn, 409, %{
                   error: "suspended",
                   detail:
                     "This instance is suspended. Studio access is closed until the " <>
@@ -3766,9 +3772,9 @@ defmodule BarkparkCloud.Web.Router do
               # the credential it withholds is durable read+write+chat and would
               # outlive the suspension that was supposed to revoke access.
               {:error, :suspended} ->
-                conn
-                |> audit_suspended_refusal(team, bp, "app-token")
-                |> json(409, %{
+                conn = audit_suspended_refusal(conn, team, bp, "app-token")
+
+                json(conn, 409, %{
                   error: "suspended",
                   detail:
                     "This instance is suspended. New app tokens are not issued until " <>
@@ -4007,9 +4013,8 @@ defmodule BarkparkCloud.Web.Router do
               # cch-w58-bl: an EXPLICIT clause, because the `{:error, _other}`
               # catch-all below would report a deliberate refusal as a 500.
               {:error, :suspended} ->
-                conn
-                |> audit_suspended_refusal(team, bp, "push-relay")
-                |> json(409, %{error: "suspended"})
+                conn = audit_suspended_refusal(conn, team, bp, "push-relay")
+                json(conn, 409, %{error: "suspended"})
 
               {:error, :not_live} ->
                 json(conn, 409, %{error: "not_live"})
@@ -4112,9 +4117,8 @@ defmodule BarkparkCloud.Web.Router do
               # webhook configuration. `app.js` already ships a named human
               # message for this code (ERRORS.suspended).
               {:error, :suspended} ->
-                conn
-                |> audit_suspended_refusal(team, bp, "site-url")
-                |> json(409, %{error: "suspended"})
+                conn = audit_suspended_refusal(conn, team, bp, "site-url")
+                json(conn, 409, %{error: "suspended"})
 
               {:error, :not_live} ->
                 json(conn, 409, %{error: "not_live"})
@@ -4202,9 +4206,8 @@ defmodule BarkparkCloud.Web.Router do
               # app-token, which `app.js` (ERRORS.suspended) already renders, so
               # no new console copy is minted.
               bp.suspended ->
-                conn
-                |> audit_suspended_refusal(team, bp, "self-update")
-                |> json(409, %{ok: false, error: %{code: "suspended"}})
+                conn = audit_suspended_refusal(conn, team, bp, "self-update")
+                json(conn, 409, %{ok: false, error: %{code: "suspended"}})
 
               true ->
                 self_update_relay(conn, team, bp)
@@ -4374,9 +4377,8 @@ defmodule BarkparkCloud.Web.Router do
               # the wire; the 409 `suspended` slug is the one `app.js` already
               # maps.
               bp.suspended ->
-                conn
-                |> audit_suspended_refusal(team, bp, "rollback")
-                |> json(409, %{ok: false, error: %{code: "suspended"}})
+                conn = audit_suspended_refusal(conn, team, bp, "rollback")
+                json(conn, 409, %{ok: false, error: %{code: "suspended"}})
 
               true ->
                 rollback_relay(conn, team, bp)
@@ -5493,9 +5495,9 @@ defmodule BarkparkCloud.Web.Router do
           # Registry.reveal_bootstrap is never reached on a suspended box. Same
           # 409 "suspended" shape as /credentials, /studio-link, /app-token.
           %Barkpark{team_id: tid, suspended: true} = bp when tid == team.id ->
-            conn
-            |> audit_suspended_refusal(team, bp, "bootstrap")
-            |> json(409, %{
+            conn = audit_suspended_refusal(conn, team, bp, "bootstrap")
+
+            json(conn, 409, %{
               error: "suspended",
               detail:
                 "This instance is suspended. The content bootstrap is not revealed " <>
@@ -13617,9 +13619,8 @@ defmodule BarkparkCloud.Web.Router do
       # Placed ABOVE `instance_admin_token/1` on purpose: the ciphertext is never
       # decrypted on the refused path. Same 409 `suspended` slug as studio-link.
       bp.suspended and entry.tier == :mutate ->
-        conn
-        |> audit_suspended_refusal(team, bp, "instance-api:#{capability}")
-        |> instance_api_error(409, "suspended")
+        conn = audit_suspended_refusal(conn, team, bp, "instance-api:#{capability}")
+        instance_api_error(conn, 409, "suspended")
 
       true ->
         with {:ok, base} <- instance_base_url(bp),
