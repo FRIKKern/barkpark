@@ -43,9 +43,33 @@ defmodule Barkpark.Release.LoadAppBootScopeTest do
     _, _ -> :ok
   end
 
-  defp env_dump do
-    for {app, _, _} <- Application.loaded_applications(),
-        do: {app, Application.get_all_env(app)}
+  # Hand the peer this node's configuration. Two steps, in this order, because
+  # `Application.load/1` applies the `.app` resource file's `env` key and would
+  # otherwise overwrite anything already set: every app except `:barkpark` is
+  # LOADED on the peer first, then the env is copied over the top. `:barkpark`
+  # is deliberately left unloaded — loading it is the job of the function under
+  # test, and its `.app` env is the compiled `config.exs`+`test.exs` merge, i.e.
+  # already correct.
+  defp seed_peer_config(peer) do
+    for {app, _, _} <- Application.loaded_applications(), app != :barkpark do
+      _ = :peer.call(peer, :application, :load, [app])
+    end
+
+    env =
+      for {app, _, _} <- Application.loaded_applications(),
+          do: {app, Application.get_all_env(app)}
+
+    :ok = :peer.call(peer, Application, :put_all_env, [env])
+
+    # `:mix` must be RUNNING on the peer, not merely loaded: `Barkpark.Application`
+    # reaches `Mix.ProjectStack` on the way up in the test env. Without it the
+    # mutation arm below would die of a missing Mix rather than of a started
+    # endpoint — a control that fires for the wrong reason. Starting Mix changes
+    # nothing for the unmutated loader, which starts no application at all.
+    {:ok, _} = :peer.call(peer, Application, :ensure_all_started, [:mix])
+    :peer.call(peer, Mix, :start, [])
+    :peer.call(peer, Mix, :env, [Mix.env()])
+    :ok
   end
 
   test "the probe can see a started process on the peer (control)", %{peer: peer} do
@@ -75,9 +99,15 @@ defmodule Barkpark.Release.LoadAppBootScopeTest do
     # The peer boots without Mix, so it has no configuration. Hand it this
     # node's loaded-app environment, then let the loader run exactly as
     # `bin/barkpark eval "Barkpark.Release.migrate()"` runs it.
-    :ok = :peer.call(peer, Application, :put_all_env, [env_dump()])
+    seed_peer_config(peer)
+
+    refute :barkpark in names(:peer.call(peer, Application, :loaded_applications, [])),
+           "precondition: :barkpark must be neither loaded nor started before the loader runs"
 
     assert :ok = :peer.call(peer, Barkpark.Release, :load_app, [])
+
+    assert :barkpark in names(:peer.call(peer, Application, :loaded_applications, [])),
+           "the loader did not even LOAD the app — every assertion below would be vacuous"
 
     started = names(:peer.call(peer, Application, :started_applications, []))
 
