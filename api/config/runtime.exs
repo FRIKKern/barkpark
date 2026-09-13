@@ -213,6 +213,83 @@ if connectors_env != [] do
   config :barkpark, Barkpark.Connectors, connectors_env
 end
 
+require Logger
+
+# MEDIUM-9: BARKPARK_KEK_PREVIOUS (comma-separated Base64 keys, oldest-last)
+# lets `DataKeys.rewrap_all/0` complete a KEK rotation — it unwraps blobs
+# sealed by a prior KEK and re-wraps them under the current one. Set it to the
+# OLD BARKPARK_KEK during the rotation window, then clear it once rewrap_all
+# has run. Absent -> no fallback (single-key behaviour, unchanged).
+#
+# Blank entries are NOT an error: they are stripped here, so a stray or
+# trailing comma still boots (the pre-existing tolerance, unchanged).
+kek_previous_entries =
+  System.get_env("BARKPARK_KEK_PREVIOUS", "")
+  |> String.split(",", trim: true)
+  |> Enum.map(&String.trim/1)
+  |> Enum.reject(&(&1 == ""))
+
+# A malformed entry is DISCARDED IN SILENCE by `Barkpark.Crypto.LocalKek.keys/0`
+# (`Enum.filter(&match?(<<_::binary-size(32)>>, &1))`), so every blob sealed
+# under that KEK becomes permanently undecryptable with no diagnostic at either
+# end. We therefore AUDIT every set entry here, under exactly the primary
+# BARKPARK_KEK's contract (base64 of exactly 32 raw bytes), and record the
+# verdict so `Barkpark.Status` can surface it on /status.json.
+#
+# WHY THIS ONLY WARNS AND DOES NOT REFUSE THE BOOT. Refusing is the stronger,
+# more correct behaviour and it WAS implemented on this branch — see commit
+# cb3bb6d58 in this branch's history for the raise block. It is deliberately
+# NOT shipped: api/** auto-deploys on merge, and a refusal would brick the
+# boot of a production box whose live BARKPARK_KEK_PREVIOUS value nobody could
+# read first. The refusal is deferred to task-ef0c59e4fd3fc985, which is
+# blocked on the owner reading that live value.
+#
+# SCOPE DECISION (previously unstated): the audit runs ONLY when a primary
+# BARKPARK_KEK is set. With no primary KEK this file never configures
+# `previous_keys` at all, so the entries are not merely discarded — they are
+# never consumed by anything, and a "discarded" verdict about them would be
+# false. That state is recorded as `checked: false`, which is DISTINCT from
+# "checked and clean" so a reader can never mistake one for the other.
+kek_previous_audit =
+  if System.get_env("BARKPARK_KEK") do
+    malformed_positions =
+      kek_previous_entries
+      |> Enum.with_index(1)
+      |> Enum.reject(fn {entry, _position} ->
+        match?({:ok, <<_::binary-size(32)>>}, Base.decode64(entry))
+      end)
+      |> Enum.map(fn {_entry, position} -> position end)
+
+    %{
+      checked: true,
+      discarded: length(malformed_positions),
+      positions: malformed_positions
+    }
+  else
+    %{checked: false, discarded: 0, positions: []}
+  end
+
+config :barkpark, Barkpark.Crypto.LocalKek, kek_previous_audit: kek_previous_audit
+
+# `Logger.warning`, NOT `Logger.info`: runtime.exs is evaluated BEFORE the
+# Logger application starts, so the `:logger` primary level is still the Erlang
+# default `:notice`. A `Logger.info` line here produces NO OUTPUT AT ALL —
+# proved by control run — which would be a fix that ships the exact silence the
+# defect was filed for. The positions are named; the ENTRIES NEVER ARE (key
+# material). /status.json carries the same verdict for anyone who does not read
+# boot logs — see `Barkpark.Status.kek_previous_component/0`.
+if kek_previous_audit.discarded > 0 do
+  Logger.warning("""
+  BARKPARK_KEK_PREVIOUS: #{kek_previous_audit.discarded} entr#{if kek_previous_audit.discarded == 1, do: "y is", else: "ies are"} NOT the base64 encoding of exactly 32 raw bytes, \
+  at 1-based position#{if kek_previous_audit.discarded == 1, do: "", else: "s"} #{Enum.join(kek_previous_audit.positions, ", ")}.
+
+  Barkpark.Crypto.LocalKek will DISCARD #{if kek_previous_audit.discarded == 1, do: "it", else: "them"} silently, so every blob sealed under \
+  that KEK stays permanently undecryptable and `DataKeys.rewrap_all/0` cannot complete the rotation. \
+  Fix or remove the named position(s) and restart; clear BARKPARK_KEK_PREVIOUS entirely once rewrap_all/0 has run. \
+  This line never echoes the entry itself. The same verdict is published on /status.json as the `kek_previous` component.
+  """)
+end
+
 # Master KEK for envelope encryption (core auth/secrets, Phase 0). The dev/test
 # default lives in config/config.exs; here we OVERRIDE from BARKPARK_KEK and
 # REQUIRE it in prod. Base64 of exactly 32 raw bytes — generate with
@@ -250,20 +327,9 @@ case System.get_env("BARKPARK_KEK") do
         """
     end
 
-    # MEDIUM-9: BARKPARK_KEK_PREVIOUS (comma-separated Base64 keys, oldest-last)
-    # lets `DataKeys.rewrap_all/0` complete a KEK rotation — it unwraps blobs
-    # sealed by a prior KEK and re-wraps them under the current one. Set it to the
-    # OLD BARKPARK_KEK during the rotation window, then clear it once rewrap_all
-    # has run. Absent → no fallback (single-key behaviour, unchanged).
-    previous_keys =
-      System.get_env("BARKPARK_KEK_PREVIOUS", "")
-      |> String.split(",", trim: true)
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
-
     config :barkpark, Barkpark.Crypto.LocalKek,
       key: kek,
-      previous_keys: previous_keys,
+      previous_keys: kek_previous_entries,
       version: String.to_integer(System.get_env("BARKPARK_KEK_VERSION", "1"))
 end
 
@@ -361,9 +427,34 @@ end
 #
 # `EnvConfig.parse/1` returns `:unset` only for nil, so the common unset case
 # never touches the env and behaviour is identical to before.
+require Logger
+
 case Barkpark.Plugins.EnvConfig.parse(System.get_env("BARKPARK_PLUGINS")) do
-  :unset -> :ok
-  plugins when is_list(plugins) -> config :barkpark, :plugins, plugins
+  :unset ->
+    :ok
+
+  [] ->
+    # Charter D24: an empty BARKPARK_PLUGINS is a LEGITIMATE operator choice and
+    # must NEVER refuse boot. But a box that then serves /api/schemas with zero
+    # plugin schemas has to SAY so, by name, once — otherwise the empty surface
+    # reads as data loss and the kill switch is indistinguishable from a bug.
+    #
+    # WARNING, not info, deliberately: config/runtime.exs is evaluated BEFORE
+    # the Logger application starts, so the :logger primary level is still the
+    # Erlang default (:notice). Verified locally — at :notice a Logger.info/1
+    # call is dropped with no output while Logger.warning/1 is emitted. An
+    # info-level line here would be invisible at real release boot, i.e. the
+    # exact silence this branch exists to end. Do not lower the level.
+    Logger.warning(
+      "BARKPARK_PLUGINS is set but empty — the plugin KILL SWITCH is ACTIVE. " <>
+        "No plugins will be registered and /api/schemas will serve core schemas " <>
+        "only. UNSET BARKPARK_PLUGINS to restore discover-all-from-disk."
+    )
+
+    config :barkpark, :plugins, []
+
+  plugins when is_list(plugins) ->
+    config :barkpark, :plugins, plugins
 end
 
 # Task lease TTL override. The default (config.exs) is 2700 s (45 min), sized

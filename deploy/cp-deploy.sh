@@ -264,6 +264,43 @@ set -a; . cloud/.env; set +a
 # `- BARKPARK_GIT_SHA` line in cloud/docker-compose.yml; GET /health reads it.
 export BARKPARK_GIT_SHA="$NEW"
 
+# The slot must ALSO be able to state which PROVISIONER binary this box runs,
+# separately from the app sha — the two legitimately diverge. The provisioner is
+# cross-built on the runner from actions/checkout@v4 at the run's headSha, while
+# the app sha above comes from the `git pull --ff-only` a few lines up, which
+# under back-to-back merges can land AHEAD of that headSha. One "version" field
+# would be ambiguous; these are two readings of two different things.
+#
+# Read out of the ARTIFACT (`--version` on the binary this run is about to
+# install), never out of $NEW: $NEW is the app's sha and would make the two
+# fields agree by construction, which is the exact inference this exists to kill.
+# --version needs no control-url, no token and no network, and exits 0 even when
+# the binary carries no stamp.
+#
+# STRICTLY 40 lowercase hex or EMPTY. An unstamped binary (plain `go build`, or
+# any binary older than the --version flag) prints nothing on stdout, and an
+# empty value stays empty — absent means absent, an honest null, never an
+# invented or partial value. Mirrors the bare `- BARKPARK_PROVISIONER_SHA`
+# passthrough in cloud/docker-compose.yml, the same shape as BARKPARK_GIT_SHA.
+#
+# WINDOW, stated rather than hidden: the binary is installed later in this script
+# (the provisioner restart is a gate near the end). If that restart fails, the
+# script restores the previous binary AND fails the run — so a slot claiming a
+# sha the box did not keep is always a RED deploy, never a quiet green.
+BARKPARK_PROVISIONER_SHA=""
+if [ -n "$PROV_BIN" ] && [ -f "$PROV_BIN" ]; then
+  [ -x "$PROV_BIN" ] || chmod 0755 "$PROV_BIN" 2>/dev/null || true
+  _prov_sha="$("$PROV_BIN" --version 2>/dev/null | head -1 | tr -d '[:space:]')"
+  if printf '%s' "$_prov_sha" | grep -qE '^[0-9a-f]{40}$'; then
+    BARKPARK_PROVISIONER_SHA="$_prov_sha"
+  else
+    log "provisioner binary carries NO usable build sha (--version gave '${_prov_sha}') — reporting absent"
+  fi
+  unset _prov_sha
+fi
+export BARKPARK_PROVISIONER_SHA
+log "provisioner sha=${BARKPARK_PROVISIONER_SHA:-<absent>}"
+
 # ---- Which slot serves now? Caddy's upstream port is the source of truth.
 # SLOT PORTS ONLY (this used to grep the loose 'localhost:41[0-9]{2}'): any
 # OTHER localhost:41xx line in the Caddyfile — a sibling service, an admin

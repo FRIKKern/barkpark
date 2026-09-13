@@ -58,6 +58,24 @@
 // and a FLOOR on the true rate, never an estimate of it. Only re-deriving each close
 // from source finds the rest.
 //
+// THE BLIND SPOT IS NOW RULED ON, and the ruling lives where a close gets WRITTEN, not
+// here: internal/cli/tasks_close_evidence_contract.go (task-dfa5723c433382b3), surfaced
+// on `bp task close --help` and as an advisory beside a landed close. In short — a
+// reason is CHECKABLE when it names one un-elided repo path, one discriminating symbol,
+// or one ancestor commit sha, which is exactly what the three arms below read; and the
+// rows ALREADY closed without one are recorded as PERMANENTLY UNCHECKABLE rather than
+// migrated, because an anchor back-filled by a later reader would turn an honest blind
+// spot into a false AGREE. THE UNCHECKABLE COUNT THIS TOOL PRINTS IS THAT RECORD, and it
+// re-derives itself on every run instead of rotting in a doc. Measured at origin/main
+// c2b5efe91 on 2026-09-13: 2740 UNCHECKABLE of 8023 closed rows (34.1%), the 9587-document
+// `bp export --type task` population. THE SAME RUN, BEFORE AND AFTER THE EXTRACTION
+// REPAIRS BELOW: UNCHECKABLE 2740 -> 2740 and checkable 5283 -> 5283 (nothing left the
+// denominator), DISAGREE 20 -> 11, all 9 departures landing in AGREE and named in the
+// commit. The old-rev positive control on the same population — only --rev differing,
+// 736646f38 of 2026-07-01 — went 978/5283 = 18.5% -> 948/5283 = 17.9%, so the separation
+// from main WIDENED from 46x to 90x. A repair that had bought silence would have shrunk
+// that arm, and this is where you check that it did not.
+//
 // THE SECOND BLIND SPOT: a named artifact that IS present proves only that the NAME
 // survives, not that the asserted BEHAVIOUR did. pds-bl-w47-stamp-tripwire-false-positive
 // is the worked example and the positive control: its close_reason names
@@ -130,6 +148,60 @@ export function isElidedPath(p) {
   return (p || "").split("/").some((sg) => /^\.{2,}$/.test(sg));
 }
 
+// PROSE FRAGMENTS THAT LOOK LIKE PATHS. A closer writing "7 section-11
+// docs/auth.md-versus-router.ex pipeline mismatches" has hyphenated TWO filenames into
+// one token; RE_PATH's basename class accepts `-` and `.`, so it swallows the whole
+// phrase and git is asked for a file nobody ever named. The signature is SYNTACTIC and
+// needs no vocabulary: a known extension immediately followed by a hyphen INSIDE the
+// token. One of the 15,255 paths at origin/main c2b5efe91 carries the signature
+// (`.go-format-drift-ceiling`) and RE_PATH cannot emit it: it has no `/` and no trailing
+// extension, so it never reaches this filter. task-f7b4e355c8ceb074 was the specimen.
+const RE_INNER_EXT = /\.(?:go|ex|exs|heex|sh|mjs|js|ts|tsx|json|yml|yaml|md|sql)-/;
+export function isProseFragmentPath(p) {
+  return RE_INNER_EXT.test(p || "");
+}
+
+// MOVED PATHS, THE PURE CORE. Kept out here, and exported, so --selftest can hold it to
+// a fixture tree: the UNIQUENESS clause is the safety property, and a clause no test can
+// see is a clause a later edit can delete for free.
+//
+// THE RULE: same basename, and one segment list is a SUBSEQUENCE of the other (segments
+// INSERTED or REMOVED, never reordered or SUBSTITUTED), and exactly ONE tree path
+// qualifies. Both halves are load-bearing and each is mutation-pinned below.
+export function resolveMovedPath(cited, treePaths) {
+  const segs = (cited || "").split("/");
+  if (segs.length < 2) return null;
+  const base = segs[segs.length - 1];
+  const isSub = (a, b) => { let i = 0; for (const x of b) if (i < a.length && a[i] === x) i++; return i === a.length; };
+  const cands = (treePaths || []).filter((t) => {
+    if (t.slice(t.lastIndexOf("/") + 1) !== base) return false;
+    const ts = t.split("/");
+    return isSub(segs, ts) || isSub(ts, segs);
+  });
+  return cands.length === 1 ? cands[0] : null;
+}
+
+// GIT PATHSPECS. `git cat-file -e origin/main:scripts/format-drift-ceiling.sh -> ABSENT`
+// and `remains reachable at git show 6c24833a4:scripts/pdf-support-proof.sh` both name an
+// absent path IN ORDER TO REPORT THE RESULT OF A COMMAND, not to assert the tree carries
+// it. The tell is again SYNTACTIC, not lexical — the occurrence is preceded by `<rev>:` —
+// so this demotion does not depend on a list of English absence-words the way
+// RETRACTION_MARKERS does. Demoted only when EVERY occurrence of the path in the reason is
+// a pathspec: a path also asserted plainly somewhere else still counts.
+// Specimens: hg-w1-format-drift-ceiling, pdf-wc-support-proof.
+export function quotedAsGitPathspec(text, needle) {
+  const t = text || "";
+  if (!needle) return false;
+  let i = t.indexOf(needle), seen = 0;
+  while (i !== -1) {
+    seen++;
+    const before = t.slice(0, i);
+    if (!/[A-Za-z0-9_./^~^{}-]+:$/.test(before)) return false;
+    i = t.indexOf(needle, i + needle.length);
+  }
+  return seen > 0;
+}
+
 // GENERIC SYMBOLS. The MFA arm reads the function name out of `UserSocket.id/1` and
 // searches for `id`, which either matches everything or, with -w and the wrong casing,
 // nothing. A name this short discriminates nothing: it cannot support a DISAGREE either
@@ -144,7 +216,14 @@ export function isGenericSymbol(sym) {
 const RETRACTION_MARKERS = ["filing wrong", "does not exist", "correction", "the file is", "wrong path", "retract", "i was wrong", "no such file", "mis-cited", "miscited",
   // CANCEL-SHAPED: a row cancelled BECAUSE the artifact is gone names the absent path as
   // its whole point. tgw10-bl-stranded-unique-commons-row is the specimen.
-  "premise expired", "no longer holds", "no longer exists", "nothing remains", "is still absent", "returns zero hits"];
+  "premise expired", "no longer holds", "no longer exists", "nothing remains", "is still absent", "returns zero hits",
+  // SELF-DECLARED-UNCOMMITTED: the closer names the path to say WHERE THE REPRO LIVES —
+  // "Probes are on branch killswitch-probe … uncommitted", "untracked
+  // .claude/workflows/felix-audit-wave-paper.json". A stale close never volunteers that
+  // its artifact is not committed, so these fail SAFE: a marker this list is MISSING
+  // costs an extra lead, never a missed one. Specimens: task-785908d0a0ccb6bb,
+  // spd-bl-primary-checkout-diverged, dr-w13-s6-publish-clock-first-caller.
+  "uncommitted", "untracked", "is gone from", "never landed", "-> absent"];
 export function retractedNear(text, needle) {
   const i = (text || "").indexOf(needle);
   if (i === -1) return false;
@@ -214,6 +293,37 @@ function makeGit(repo, rev) {
     treePaths = all;
     return treePaths;
   };
+  // MOVED PATHS. The suffix arm only forgives segments dropped from the FRONT of a
+  // citation. The commonest real drift is a directory inserted or removed in the MIDDLE —
+  // studio/components.ex became studio/studio_live/components.ex; controllers/v1/
+  // capabilities_controller.ex lost its v1/ segment; cloud/router.ex is shorthand for
+  // cloud/lib/barkpark_cloud/web/router.ex. A rename is NOT a stale close: the change the
+  // reason asserts is in the tree, under a name the tree moved. So this RESOLVES the
+  // citation rather than demoting it — the row stays CHECKABLE and scores AGREE, and the
+  // denominator the disagreement rate divides by is unchanged.
+  //
+  // THE RULE: same basename, and one path's segment list is a SUBSEQUENCE of the other's
+  // (segments inserted or removed, never reordered or substituted), and the match is
+  // UNIQUE in the tree. Uniqueness is the whole safety property — two router.ex files
+  // would resolve to neither. A citation whose basename appears nowhere is untouched and
+  // still DISAGREEs, which is the shape a genuinely stale close has.
+  let byBase = null;
+  function movedTo(p) {
+    const segs = p.split("/");
+    if (segs.length < 2) return null;
+    if (!byBase) {
+      byBase = new Map();
+      for (const t of tree()) {
+        const b = t.slice(t.lastIndexOf("/") + 1);
+        if (!byBase.has(b)) byBase.set(b, []);
+        byBase.get(b).push(t);
+      }
+    }
+    // the basename index is a lookup shortcut only; resolveMovedPath re-checks the
+    // basename itself, so the two can never disagree about what qualifies.
+    return resolveMovedPath(p, byBase.get(segs[segs.length - 1]) || []);
+  }
+
   let topLevel = null;
   return {
     revSha,
@@ -236,9 +346,11 @@ function makeGit(repo, rev) {
       catch {
         const suf = "/" + p;
         if (tree().some((t) => t.endsWith(suf))) st = "suffix";
+        else if (movedTo(p)) st = "moved";
       }
       pathCache.set(p, st); return st;
     },
+    movedTo,
     hasSymbol(s) {
       if (symCache.has(s)) return symCache.get(s);
       let ok = true;
@@ -255,6 +367,20 @@ function makeGit(repo, rev) {
         catch { st = "orphan"; }
       } catch { st = "unresolvable"; }
       shaCache.set(s, st); return st;
+    },
+    // PROVENANCE FOR A LEAD, NOT A DEMOTION. Three of the 2026-09-13 artefact classes —
+    // DELETION-IS-THE-WORK (the close SHIPPED the removal), CONSOLIDATED-AWAY (a later PR
+    // folded the file away and the behaviour survives elsewhere) and HISTORICAL-BLOB —
+    // are all "main HAD this and deliberately dropped it". They are NOT demoted: a close
+    // that asserts a file main deleted is exactly the shape a genuinely stale close has,
+    // and a reader must rule on which one it is. What the instrument owes that reader is
+    // the commit, printed beside the lead, so the ruling costs one glance instead of a
+    // git archaeology session. Zero findings are lost to this line.
+    deletedBy(p) {
+      try {
+        const out = run(["log", "--diff-filter=D", "--max-count=1", "--format=%h %s", revSha, "--", p]).trim();
+        return out || null;
+      } catch { return null; }
     },
   };
 }
@@ -284,6 +410,7 @@ function adjudicate(d, git) {
     const segs = p.split("/");
     if (segs.some((sg) => ARTIFACT_SEGMENTS.has(sg))) { advisory.push(`artifact-path ${p}`); return false; }
     if (isElidedPath(p)) { advisory.push(`elided-path ${p}`); return false; }
+    if (isProseFragmentPath(p)) { advisory.push(`prose-fragment ${p}`); return false; }
     return true;
   });
 
@@ -293,7 +420,9 @@ function adjudicate(d, git) {
 
   for (const p of pathCands) {
     const st = git.pathState(p);
-    if (st === "exact" || st === "suffix") continue;
+    // "moved" is PRESENT, not absent: the tree carries the file under a name that gained
+    // or lost a directory segment. Resolving it here is what keeps the row CHECKABLE.
+    if (st === "exact" || st === "suffix" || st === "moved") continue;
     // THE RETRACTION BLIND SPOT: a close_reason that names an absent path IN ORDER TO
     // CORRECT SOMEBODY is indistinguishable, to any grep, from one that names it because
     // the close is stale. Two of the eight raw findings were exactly this ("Filing wrong:
@@ -306,7 +435,10 @@ function adjudicate(d, git) {
     // "findings" in the n=150 run. A stale close cites something that USED to exist and
     // therefore still roots at a real top-level dir; this class never did.
     if (!git.isRepoRoot(p.split("/")[0])) { advisory.push(`not-a-repo-path ${p}`); continue; }
-    return { verdict: "DISAGREE-path", line: `names ${p} — absent at ${git.revSha.slice(0, 9)}`, advisory };
+    if (quotedAsGitPathspec(text, p)) { advisory.push(`git-pathspec ${p} (quoted as <rev>:${p}, a command result, not a tree assertion)`); continue; }
+    const del = git.deletedBy(p);
+    if (del) advisory.push(`deleted-from-main ${p} by ${del}`);
+    return { verdict: "DISAGREE-path", line: `names ${p} — absent at ${git.revSha.slice(0, 9)}${del ? ` (deleted by ${del})` : ""}`, advisory };
   }
 
   for (const s of symbols) if (isGenericSymbol(s)) advisory.push(`generic-symbol ${s}`);
@@ -332,7 +464,7 @@ function adjudicate(d, git) {
 
   const anchorPath = pathCands.find((p) => git.pathState(p) !== "absent");
   const anchor =
-    anchorPath ? `path ${anchorPath} (${git.pathState(anchorPath)})` :
+    anchorPath ? `path ${anchorPath} (${git.pathState(anchorPath)}${git.pathState(anchorPath) === "moved" ? ` -> ${git.movedTo(anchorPath)}` : ""})` :
     symbols[0] ? `symbol ${symbols[0]}` :
     shas[0] ? `sha ${shas[0]} (${git.shaState(shas[0])})` : "(advisory only)";
   return { verdict: "AGREE", line: `${anchor} present at ${git.revSha.slice(0, 9)}`, advisory };
@@ -407,6 +539,105 @@ function selftest() {
   eq("a discriminating symbol survives", isGenericSymbol("merge_gated?"), false);
   eq("the MFA arm still extracts the generic name (the DROP happens in adjudicate)",
      extractArtifacts("UserSocket.id/1 is token-derived").symbols.includes("id"), true);
+
+  // --- THE CLOSE-PROSE CONTRACT (task-dfa5723c433382b3). The ruling's definition of a
+  // CHECKABLE close and this instrument's three arms have to be ONE definition, or the
+  // contract teaches a rule the sweep does not enforce. These four assert the boundary
+  // in both directions on the ruling's own worked examples.
+  const anchored = extractArtifacts("fixed in api/lib/barkpark/tasks/close.ex");
+  eq("contract: a repo path alone makes a close CHECKABLE",
+     [anchored.paths.length > 0, isElidedPath(anchored.paths[0])], [true, false]);
+  eq("contract: a backticked discriminating symbol alone makes a close CHECKABLE",
+     extractArtifacts("the guard is `merge_gated?` and it is live").symbols.filter((x) => !isGenericSymbol(x)),
+     ["merge_gated?"]);
+  eq("contract: an ancestor-shaped sha alone makes a close CHECKABLE",
+     extractArtifacts("landed as 70ff34f9fd on main").shas, ["70ff34f9fd"]);
+  const bare = extractArtifacts("closed as duplicate of the earlier row, nothing shipped");
+  eq("contract: a reason naming none of the three is UNCHECKABLE, not AGREE",
+     [bare.paths.length, bare.symbols.filter((x) => !isGenericSymbol(x)).length, bare.shas.length],
+     [0, 0, 0]);
+
+  // --- the 2026-09-13 artefact classes adjudicated in the SECOND full pass (n=8006 at
+  // origin/main c2b5efe91): 20 raw DISAGREE findings, 20 false. These assertions pin the
+  // three extraction repairs and, just as importantly, pin the classes NOT repaired.
+
+  // MOVED-PATH. A resolution, not a demotion: the row stays CHECKABLE and scores AGREE.
+  // The fixture is the real shape of all four 2026-09-13 specimens, including the
+  // AMBIGUOUS one (two components.ex under studio/) that must NOT resolve.
+  const TREE = [
+    "api/test/barkpark/tenancy/workspace_bundle_test.exs",
+    "api/lib/barkpark_web/controllers/capabilities_controller.ex",
+    "api/lib/barkpark_web/live/studio/studio_live/components.ex",
+    "api/lib/barkpark_web/live/studio/api_tester_live/components.ex",
+    "api/lib/barkpark_web/router.ex",
+    "cloud/lib/barkpark_cloud/web/router.ex",
+    "scripts/pr-task-gate.sh",
+  ];
+  eq("moved-path: a directory INSERTED mid-path resolves (tenancy/)",
+     resolveMovedPath("api/test/barkpark/workspace_bundle_test.exs", TREE),
+     "api/test/barkpark/tenancy/workspace_bundle_test.exs");
+  eq("moved-path: a directory the citation has and the tree lost resolves too (v1/)",
+     resolveMovedPath("api/lib/barkpark_web/controllers/v1/capabilities_controller.ex", TREE),
+     "api/lib/barkpark_web/controllers/capabilities_controller.ex");
+  eq("moved-path: prose shorthand resolves when one segment disambiguates it (cloud/router.ex)",
+     resolveMovedPath("cloud/router.ex", TREE), "cloud/lib/barkpark_cloud/web/router.ex");
+  // THE UNIQUENESS CLAUSE, MUTATION-PINNED. Relaxing `cands.length === 1` to `>= 1` makes
+  // this return api_tester_live/components.ex and silences a real lead.
+  eq("moved-path: TWO candidates resolve to NEITHER — ambiguity stays a DISAGREE",
+     resolveMovedPath("api/lib/barkpark_web/live/studio/components.ex", TREE), null);
+  // THE SUBSEQUENCE CLAUSE, MUTATION-PINNED. Relaxing the filter to basename-only makes
+  // this resolve to tenancy/ and forgives a segment the citation got WRONG, not moved.
+  eq("moved-path: a SUBSTITUTED segment does not resolve, even with a unique basename",
+     resolveMovedPath("api/test/barkpark/WRONGDIR/workspace_bundle_test.exs", TREE), null);
+  eq("moved-path: a basename the tree does not have at all stays absent (the stale-close shape)",
+     resolveMovedPath("scripts/this-file-never-existed-anywhere.sh", TREE), null);
+
+  // PROSE-FRAGMENT. Two filenames hyphenated into one token by a closer writing prose.
+  eq("prose-fragment: docs/auth.md-versus-router.ex is not a path",
+     isProseFragmentPath("docs/auth.md-versus-router.ex"), true);
+  eq("prose-fragment: a real hyphenated filename is NOT a fragment",
+     isProseFragmentPath("scripts/closed-row-tree-disagreement-sweep.mjs"), false);
+  eq("prose-fragment: a real dotted-and-hyphenated filename is NOT a fragment",
+     isProseFragmentPath(".github/workflows/shell-harnesses.yml"), false);
+
+  // GIT-PATHSPEC. Syntactic, not lexical: `<rev>:<path>` is a command result.
+  eq("git-pathspec: `origin/main:<path>` is a quoted command, not a tree assertion",
+     quotedAsGitPathspec("`git cat-file -e origin/main:scripts/format-drift-ceiling.sh` -> ABSENT",
+                         "scripts/format-drift-ceiling.sh"), true);
+  eq("git-pathspec: a historical blob reference is one too",
+     quotedAsGitPathspec("remains reachable at git show 6c24833a4:scripts/pdf-support-proof.sh",
+                         "scripts/pdf-support-proof.sh"), true);
+  eq("git-pathspec: a path ALSO asserted plainly somewhere else is NOT demoted",
+     quotedAsGitPathspec("shipped scripts/pdf-support-proof.sh; see git show 6c24833a4:scripts/pdf-support-proof.sh",
+                         "scripts/pdf-support-proof.sh"), false);
+  eq("git-pathspec: a plain citation is NOT a pathspec",
+     quotedAsGitPathspec("the guard lives in scripts/pr-task-gate.sh", "scripts/pr-task-gate.sh"), false);
+
+  // SELF-DECLARED-UNCOMMITTED / CANCEL-SHAPED. The marker list fails SAFE: a phrase it is
+  // MISSING costs an extra lead, never a missed one, which is why extending it is cheap.
+  eq("self-declared: `uncommitted` demotes a path whose closer says it is not committed",
+     retractedNear("Probes are on branch killswitch-probe (worktree .claude/worktrees/killswitch-probe), uncommitted. api/killswitch_probe.exs is the repro.",
+                   "api/killswitch_probe.exs"), true);
+  eq("cancel-shaped: `is GONE from origin/main` demotes the path it exists to report",
+     retractedNear("cloud/lib/barkpark_cloud/publish_clock.ex is GONE from origin/main, removed by a5260f609a (#11083)",
+                   "cloud/lib/barkpark_cloud/publish_clock.ex"), true);
+  eq("the added markers do NOT demote a plain shipping claim",
+     retractedNear("shipped the guard at scripts/pr-task-gate.sh and wired it into CI", "scripts/pr-task-gate.sh"), false);
+
+  // THE CLASSES DELIBERATELY LEFT AS FINDINGS. Demoting these would buy silence:
+  // CONSOLIDATED-AWAY is exactly the shape a genuinely stale close has (the close says
+  // present, main says absent), and CROSS-REPO / PLANNED-PATH have no mechanical tell that
+  // does not read intent out of prose. They stay DISAGREE and get a provenance advisory.
+  eq("not demoted: a cross-repo path has no syntactic tell, so it stays a lead",
+     [isProseFragmentPath("scripts/check-measure.mjs"),
+      quotedAsGitPathspec("scripts/check-measure.mjs a real blocking CI gate on jarl-website", "scripts/check-measure.mjs"),
+      retractedNear("scripts/check-measure.mjs a real blocking CI gate on jarl-website", "scripts/check-measure.mjs")],
+     [false, false, false]);
+  eq("not demoted: a consolidated-away workflow still DISAGREEs (close says present, main says absent)",
+     [isProseFragmentPath(".github/workflows/committed-symlink-gate.yml"),
+      retractedNear("scripts/committed-symlink-check.sh, .github/committed-symlinks.allow and .github/workflows/committed-symlink-gate.yml are all present on origin/main",
+                    ".github/workflows/committed-symlink-gate.yml")],
+     [false, false]);
 
   eq("isClosed: done", isClosed({ lifecycle_status: "done" }), true);
   eq("isClosed: cancelled", isClosed({ lifecycle_status: "cancelled" }), true);

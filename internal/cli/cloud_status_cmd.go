@@ -87,12 +87,39 @@ const fillingDiskPercent = 90.0
 // live box that is both strained and behind is "strained") falls out of the
 // ordering itself.
 //
-// Charter edge left as specified: a box with a host SET and provision_status =
-// "failed" matches no decision-15 rule (rank 2 requires no host; the live arms
-// require live, which a failed provision is not) and falls through to "ok".
-// Both surfaces implement the charter verbatim, so changing it here alone would
-// create exactly the drift D32 exists to prevent — if this state is reachable,
-// amend decision 15 first, then both implementations together.
+// Charter edge NOT ranked by decision 15: a box with a host SET and
+// provision_status = "failed" matches no decision-15 rule (rank 2 requires no
+// host; the live arms require live, which the predicate below denies a failed
+// provision) and falls through to "ok".
+//
+// THE TWO SURFACES DISAGREE HERE — they do NOT implement the charter verbatim,
+// and the comments that said they did were the false part. This function's
+// `live` carries a fourth conjunct, ProvisionStatus != "failed"; the console's
+// classifyBp (cloud/priv/static/app.js) builds `live` from host, removing and
+// suspended only. So a host-set box with provision_status "failed" and an
+// unhealthy read would print "ok" here and "degraded" there.
+//
+// REACHABILITY, derived from the WRITERS rather than from any reader's guard
+// (cloud/lib/barkpark_cloud/registry.ex): barkparks.host is written non-empty by
+// exactly two functions — upsert_succeeded_barkpark, which runs only inside
+// succeed_job's transaction and so lands host in the same commit as that job
+// flipping to "succeeded", and adopt_barkpark, which creates no job at all. A
+// provision-kind job reaches "failed" only through fail_job (which rolls back
+// :conflict rather than un-succeed a succeeded job), claim_loop and
+// reap_stale_provision_jobs (both of which write only a row whose status is
+// "claimed"). No writer can un-succeed the job that set the host. A LATER
+// provision-kind job on an already-host-set row would need one of the three
+// creators, and all three refuse: go_live and do_fleet_provision_support run on
+// freshly registered host-nil rows, and POST /v1/barkparks/:id/retry is gated by
+// retryable_provision_state? in cloud/lib/barkpark_cloud/web/router.ex, which
+// requires either the latest kind-"provision" job to already be "failed" (the
+// state itself — circular) or a blank host. So the state is UNREACHABLE today
+// and the divergence is latent, not a live false-green.
+//
+// That makes this a comment fix, not a behaviour fix, and it must stay one: do
+// NOT drop the fourth conjunct here alone. If a future writer makes the state
+// reachable, amend decision 15 first, then both implementations together in one
+// round.
 func attentionStatus(b cloudclient.Barkpark) string {
 	host := strings.TrimSpace(b.Host)
 	removing := b.DeprovisionStatus == "pending" || b.DeprovisionStatus == "claimed"

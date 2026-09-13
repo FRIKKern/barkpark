@@ -397,6 +397,21 @@ const F_LAUNCH = (read, decide) => ({ band: LAUNCH_BAND, read: read, decide: dec
 const NEW_WRITE_BAND = "newWriteAuthority";
 const F_NEWWRITE = (read, decide) => ({ band: NEW_WRITE_BAND, read: read, decide: decide });
 
+// ── cch-r17-w12 — THE PROVIDER BAND'S WRITE VOCABULARY, and it is the SAME
+// ── narrowing shape NEW_WRITE_BAND is, for the same reason. providerCanWrite is
+// ── a BOOLEAN band (`teamAuthorityState() === "grant"`) and every caller of it
+// ── branches on truthiness; adminWriteControlHtml needs the three-valued
+// ── grant/refuse/unknown vocabulary and its refusal arm drops the mount hook.
+// ── providerWriteAuthority() is that narrowing — teamAuthorityState()'s five
+// ── values mapped onto the helper's three, failing CLOSED — and it is a band in
+// ── its own right here because (2i-2) checks that each pinned READ calls the
+// ── band it names, and the credential sheet calls the narrowing, not the
+// ── boolean. It is DELIBERATELY NOT the launch band: the route is POST
+// ── /v1/providers (require_team_admin), and the launch wizard being this
+// ── sheet's only door is reachability, not this row's predicate.
+const PROVIDER_WRITE_BAND = "providerWriteAuthority";
+const F_PROVWRITE = (read, decide) => ({ band: PROVIDER_WRITE_BAND, read: read, decide: decide });
+
 // ── THE BOOLEAN BANDS (bands 4-7), pinnable only since (2i-3) grew its shape
 // ── arm. Every one of them answers `someState() === "grant"`, so there is no
 // ── vocabulary to derive and nothing for the string arm to compare; what each
@@ -436,6 +451,21 @@ const F_ONBOARD = () => ({ band: ONBOARDING_BAND, read: "paintOverviewState", de
 // and bounces the hash — there is no threaded identifier to name, so the row
 // omits `value` and (2i-3) consults the band CALL itself. Both operator write
 // rows live behind that one bounce.
+// githubInstallWriteAuthority: the GITHUB-INSTALL RETURN LEG's band (cch-w73-bl).
+// The one row in this pin whose affordance is an ACT and not a control. GitHub
+// redirects the browser back to the App's Setup URL after an install, and the
+// console consumes that redirect at boot — there is no button to withhold, so
+// adminWriteControlHtml has nothing to draw and the fence lives at the decision
+// instead. The band is teamAuthorityState() narrowed the way newWriteAuthority()
+// narrows launchAuthority() (#18136): "grant"/"refuse"/"unknown", so the two
+// states this leg cannot read are folded into one rather than read as truthy.
+// resolveGithubInstallReturn READS it (and re-asks once, because at boot /v1/me
+// is still in flight and a first read is always "unknown" — deciding on that
+// would be a fence that never fires); githubInstallDecision DECIDES, and only
+// its `authority === "refuse"` arm withholds the write.
+const GITHUB_INSTALL_BAND = "githubInstallWriteAuthority";
+const F_GHINST = () => ({ band: GITHUB_INSTALL_BAND, read: "resolveGithubInstallReturn", decide: "githubInstallDecision" });
+
 const OPERATOR_BAND = "operatorRouteAllowed";
 const F_OPERATOR = () => ({ band: OPERATOR_BAND, read: "loadOperator", decide: "loadOperator" });
 
@@ -455,7 +485,7 @@ const PIN = [
   { fn: "openResurrectModal", verb: "POST", route: "/v1/resurrect", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadArchives", "archiveRowHtml"), auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "cch-w48-s4 re-pin: loadArchives reads the band and threads it into archivesModel; archiveRowHtml emits .archive-resurrect-btn ONLY on a grant — refuse/unknown draw the CLI chip alone, with no button to mount. Was pinned UNPREDICATED, which stopped being true when the offer-time answer shipped. resurrect/1 still refuses non-admins inside a cond, so the context_fn and the overlay stay" },
 
   // ── providers — THE DECISIVE PAIR. Same route, opposite verdicts.
-  { fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED — but NOT for the reason this row used to give. The old note said the .launch-connect-provider button 'renders unconditionally' and credited a renderLaunchConnect that app.js does not declare; both halves were false (cch-w48-s4). What is true: catalogPanelHtml draws the button, and it is only ever reached inside the launch wizard, which launchFlow withholds unless launchAuthority() === 'grant'. That fence is THREE HOPS away, belongs to the LAUNCH band, and guards POST /v1/launch — not this row's POST /v1/providers, whose own tier is require_team_admin. A predicate this row does not evaluate is not this row's predicate, so it stays null and stays owned" },
+  { fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: PROVIDER_WRITE_BAND, fence: F_PROVWRITE("openProviderCredential", "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-r17-w12: FENCED, and the row leaves the UNPREDICATED list on that fence and not on a re-worded note. The old note was right that the launch wizard's own fence does not count — it is THREE HOPS away, belongs to the LAUNCH band and guards POST /v1/launch, while this route's tier is require_team_admin. So the sheet now asks its OWN question: openProviderCredential reads providerWriteAuthority() (teamAuthorityState() narrowed to adminWriteControlHtml's three-valued vocabulary, failing closed) and draws the submit through adminWriteControlHtml(…, \"wizard-block\") — the refusal arm DROPS liveAttrs, so a refused principal gets no id=\"cred-submit\" and the wiring below binds nothing. MEASURED BOTH WAYS in the RENDERED BYTES of two committed scenarios, with the band read from each fixture's own /v1/me and only the OPENING gesture supplied: providers-member paints the disabled-and-explained arm with zero id=\"cred-submit\", providers-connected paints the live btn-primary btn-block button. The sheet's only forward door (.launch-connect-provider) sits inside a wizard launchFlow withholds from a member entirely, so no member fixture can reach it by clicking and minting one that could would be fiction — the same boundary member-authority-sweep.mjs declares for #new-vercel-claim" },
   { fn: "submitInlineProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV(["loadProviders", "renderProviderPage"], "renderProviderPage", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "renderConnectCard mounts only when providerCanWrite()" },
   { fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV(["loadProviders", "renderProviderPage"], "renderProviderPage", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
 
@@ -468,6 +498,21 @@ const PIN = [
   // vocabulary to derive — the row names `canWrite`, the value githubCardHtml
   // is handed, and the arm proves that helper still binds it and still branches.
   { fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV("renderGithub", "githubCardHtml", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s3: githubCardHtml OMITs #github-disconnect unless providerCanWrite()" },
+  // cch-w73-bl — THE INSTALL RETURN LEG, and the one row here whose affordance
+  // is not drawn. ROUTER GROUND TRUTH, read off origin/main and pasted so the
+  // tier is not a memory: `post "/v1/github/installations" do` is followed by
+  // `conn = Auth.require_team_admin(conn, [])` — team admin, full stop, with the
+  // rest of the handler a cond over configured?/valid-id. So the write IS
+  // elevated and a plain member who lands on the App's Setup URL (bookmarkable,
+  // replayable out of history) would have POSTed and collected a 403 that the
+  // leg then rendered through its can't-confirm sentence — blaming the install
+  // for a refusal about the reader. FENCED, not excused: githubInstallDecision
+  // issues no write on a determinate refuse and says who can. The band's
+  // "unknown" arm RECORDS, which is the one place this row departs from the
+  // rendered bands' fail-closed habit, and the reason is in app.js beside
+  // resolveGithubInstallReturn: the installation_id is spent and unrepeatable,
+  // so a failed /v1/me must not be allowed to destroy a real admin's install.
+  { fn: "recordGithubInstall", verb: "POST", route: "/v1/github/installations", elevated: true, predicate: GITHUB_INSTALL_BAND, fence: F_GHINST(), auth_fn: A_TADMIN, context_fn: null, note: "cch-w73-bl: githubInstallDecision withholds the POST on a determinate refuse and toasts the admin-only truth instead; resolveGithubInstallReturn is the read, and it re-asks ONCE because a boot-time first read is always unknown" },
 
   // ── notifications — every write is wired behind notifCanManage()
   { fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
@@ -1245,14 +1290,13 @@ const die2 = (lines) => {
 const CONTROL_FLOOR = 1000;
 
 const OFFERS = [
-  {
-    key: "submitProviderCred|POST /v1/providers",
-    id: "cred-submit", withoutData: "data-connect-submit",
-    what: "the launch wizard's credential SHEET (openProviderCredential's modal body). THE ID IS SHARED " +
-      "with the PREDICATED inline sibling and the two are told apart ONLY by data-connect-submit, which " +
-      "renderConnectCard's button carries and this one does not — a probe keyed on the bare id would " +
-      "attribute the sibling's renders to this row, which is exactly the mis-reading this arm exists to end",
-  },
+  // cch-r17-w12 REMOVED the submitProviderCred row that sat here. This list is a
+  // PREDICATE OVER THE PIN — one entry per unpredicated row, both directions
+  // checked — so a row that leaves the unpredicated population must leave this
+  // list in the same commit or the arm reds as an offer spec for a row nobody
+  // classifies. Its offer site did not disappear; it is FENCED, and #cred-submit
+  // is now measured in the rendered bytes by smoke.mjs on BOTH bands
+  // (providers-member refuses, providers-connected offers).
   {
     key: "submitAgentKey|POST /v1/barkparks/:*/agent-key",
     data: "data-agent-key-send",
@@ -1488,7 +1532,13 @@ for (const f of FILING_FIVE) {
 // so what is left is the two this slice does not own. RE-DERIVED by RUNNING
 // this census and reading the `found` line it PRINTED ("0 reachable · 1 omitted
 // · 1 unobservable"), never by subtracting three.
-const EXPECT_POPULATIONS = { reachable: 0, omitted: 1, unobservable: 1 };
+// cch-r17-w12 moved UNOBSERVABLE 1 -> 0, and the direction is the GOOD one
+// twice over: the row left the unpredicated population entirely (it is FENCED
+// now, not merely re-classified), and it was the last UNOBSERVABLE one — what
+// is left is the single PROVEN-OMITTED row this slice does not own. RE-DERIVED
+// by RUNNING this census and reading the split line it PRINTED, never by
+// subtracting one.
+const EXPECT_POPULATIONS = { reachable: 0, omitted: 1, unobservable: 0 };
 if (POP.reachable !== EXPECT_POPULATIONS.reachable ||
     POP.omitted !== EXPECT_POPULATIONS.omitted ||
     POP.unobservable !== EXPECT_POPULATIONS.unobservable) {
@@ -1579,7 +1629,22 @@ if (unresolved.length) {
 // bands instead of 34. RE-DERIVED by RUNNING this census and reading the
 // `found` line it PRINTED ("80 rows · 39 elevated · 37 predicated · 2
 // unpredicated"), never by adding three and subtracting three.
-const EXPECT = { total: 80, elevated: 39, predicated: 37, unpredicated: 2 };
+// predicated 37 → 38, unpredicated 2 → 1 (cch-r17-w12): submitProviderCred, the
+// FOURTH unowned row on the UNPREDICATED list, is now fenced on the PROVIDER
+// band through adminWriteControlHtml, so it moves from the unpredicated column
+// into the predicated one. `total` and `elevated` were UNMOVED by that bump.
+//
+// cch-w73-bl MOVES total AND elevated, which cch-r17-w12 deliberately did not:
+// the console grew a NEW write call site (recordGithubInstall's POST
+// /v1/github/installations, the GitHub App install return leg), on a route
+// whose router tier is Auth.require_team_admin. So on top of w12's tree,
+// total 80 -> 81, elevated 39 -> 40, predicated 38 -> 39, and `unpredicated`
+// does NOT move — the site arrived WITH its fence, which is the only way a new
+// elevated affordance is allowed to land. RE-DERIVED by RUNNING this census on
+// the REBASED tree and reading the `found` line it PRINTED, never by arithmetic
+// over two branches' numbers: this row was authored against 80/39/37/2 and the
+// base has since moved twice.
+const EXPECT = { total: 81, elevated: 40, predicated: 39, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
@@ -1649,8 +1714,13 @@ const LEGACY_UNPREDICATED = [
   //     for (const m of s.matchAll(/\{ fn: "([^"]+)", verb: "([^"]+)", route: "([^"]+)", elevated: true, predicate: null,/g))
   //       console.log(`"${m[1]}|${m[2]} ${m[3]}",`)'
   // …or simply read the "UNPREDICATED ELEVATED WRITES" block this file prints.
-  "submitProviderCred|POST /v1/providers",
   "submitAgentKey|POST /v1/barkparks/:*/agent-key",
+  // cch-r17-w12 RATCHETED THIS CEILING DOWN BY ONE MORE. submitProviderCred is
+  // fenced through adminWriteControlHtml on the PROVIDER band, so it is no
+  // longer an unpredicated row and may not sit on a list whose whole job is to
+  // name what is still unfixed. Removing it is the ratchet TIGHTENING: the day
+  // it regresses to predicate:null it reds as NOVEL rather than being absorbed
+  // by a stale ceiling.
   // cch-r16-w11 RATCHETED THIS CEILING DOWN BY THREE. newVercelDeploy,
   // newCreateRepo and newRenderFailed are fenced through adminWriteControlHtml
   // on the launch band, so they are no longer unpredicated rows and may not sit

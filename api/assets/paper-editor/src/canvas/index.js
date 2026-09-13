@@ -106,6 +106,14 @@ import { Code } from "./code-node.js";
 // ships no `diagram` node), so NO StarterKit node is disabled for it. See
 // ./diagram-node.js.
 import { Diagram } from "./diagram-node.js";
+// scaffy-backlog-blocks-editable-studio: the `diff` + `filetree` blocks as canvas
+// ATTR-ATOM nodes — the code/diagram shape GENERALIZED to one verbatim-body attr
+// plus optional scalar metadata. UNLIKE code/diagram their PREVIEW is the reader's
+// OWN server-pushed HTML (bp:block-html), because no client runtime can produce
+// diff/filetree markup and the parity gate forbids hand-mirroring it. Named
+// `bpDiff` / `bpFiletree`; NO StarterKit collision, so no StarterKit node is
+// disabled for them. See ./technical-node.js.
+import { Diff, Filetree } from "./technical-node.js";
 // S3.5: the 7 native-control field-* blocks as a canvas CONTROL-ATOM node — the
 // FOURTH node-view variant. A SINGLE `bpField` node serves all 7 native field types
 // (string/slug/text/boolean/select/datetime/color), discriminated by bpType; the
@@ -206,6 +214,7 @@ import { normalizeTone } from "../tone.js";
 // insertable-type allowlist; canvasDefaultBlock mirrors default_block/2; slashTypeToNode
 // builds the per-type default NODE via runToTiptap (so it round-trips byte-identically);
 // CANVAS_SLASH_TEXTABLE_NODES marks which inserted nodes take an into-body caret.
+import { CANVAS_SECTION_PRESETS } from "./section-presets.js";
 import {
   CANVAS_SLASH_TYPES,
   canvasDefaultBlock,
@@ -228,6 +237,7 @@ import {
   buildCommandRegistry,
   insertSlashTypeAtSelection,
   insertCompoundAtSelection,
+  insertSectionPresetAtSelection,
 } from "./command-palette.js";
 // P5 MARKDOWN SOURCE-MODE: the merged, PURE, dependency-free blocks⇄markdown
 // converter (../markdown.js). The "source mode" toggle swaps the rich ProseMirror
@@ -468,6 +478,21 @@ const CANVAS_SLASH_ITEMS = [
     label: c.label,
     hint: c.hint,
     desc: c.desc,
+  })),
+  // …and the CANVAS-ONLY section presets (CANVAS_SECTION_PRESETS): each becomes a
+  // "Presets" row carrying a `preset` marker _chooseSlash branches on, the exact
+  // Starters precedent one shape up — a preset inserts N TOP-LEVEL blocks, so it is
+  // likewise absent from SLASH_ITEMS (the per-block menu dispatches bp-slash-insert to
+  // default_block/2, which has no multi-block path) and lands client-side via
+  // insertSectionPresetAtSelection. `type` mirrors the kind for the row's dataset /
+  // filter haystack only — it is NOT a portable-doc type.
+  ...CANVAS_SECTION_PRESETS.map((p) => ({
+    group: "Presets",
+    type: p.kind,
+    preset: p.kind,
+    label: p.label,
+    hint: p.hint,
+    desc: p.desc,
   })),
 ];
 
@@ -773,6 +798,17 @@ class BpPaperCanvas extends HTMLElement {
         // <pre data-bp-type='diagram'> (it does NOT claim the bare <pre> the code node
         // already owns).
         Diagram,
+        // scaffy-backlog-blocks-editable-studio: the diff + filetree attr-atom nodes
+        // + their shared node-view. Registers the `bpDiff` / `bpFiletree` node types
+        // (atoms; the verbatim body + optional metadata ride data-* attrs; a NodeView
+        // pairing a SERVER-PAINTED reader preview hole with a non-PM <textarea>
+        // island that uses stopEvent/ignoreMutation so PM never turns diff keystrokes
+        // into transactions) so runToTiptap's { type:"bpDiff", attrs:{diff,file?,lang?} }
+        // / { type:"bpFiletree", attrs:{text,legend?} } nodes mount as editable blocks
+        // whose fields round-trip through getJSON(). Each parses ONLY its own
+        // <div data-bp-type='diff'|'filetree'>.
+        Diff,
+        Filetree,
         // S3.5 + run-splitter tail: the field CONTROL-ATOM node + its node-view.
         // Registers the SINGLE `bpField` node type serving ALL 9 field-* kinds — the 7
         // NATIVE controls (field-string / field-slug / field-text / field-boolean /
@@ -2095,6 +2131,13 @@ class BpPaperCanvas extends HTMLElement {
     // single-node pick, but the carried node is a container + seeded children.
     if (item && item.compound) {
       insertCompoundAtSelection(this._editor, item.compound);
+      return;
+    }
+    // A SECTION PRESET row (the Presets group): insert the whole ORDERED SEQUENCE of
+    // top-level blocks through the same landing seam — same guard, same degrade, and
+    // the preset's declared placeholder is selected so the next keystroke overtypes it.
+    if (item && item.preset) {
+      insertSectionPresetAtSelection(this._editor, item.preset);
       return;
     }
     if (!item || !CANVAS_SLASH_TYPES.has(item.type)) {
