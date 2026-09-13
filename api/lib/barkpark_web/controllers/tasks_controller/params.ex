@@ -208,6 +208,52 @@ defmodule BarkparkWeb.TasksController.Params do
     %{doc | content: redacted}
   end
 
+  # ─── the claim lease horizon, ON THE READ PAYLOAD (task-f30dab8c54c605e6) ──
+  #
+  # `claim_lease/1` (below) has always told a caller how long its lease runs —
+  # but only on the claim/pulse RECEIPT. Every READ of a task carried the claim
+  # map with no horizon at all, so a consumer that wanted to grade a live claim
+  # had to hardcode a number. `internal/taskboard/theme.go` hardcoded FIVE
+  # MINUTES and painted a claim RED there, while the server keeps the lease for
+  # `:task_lease_ttl_seconds` — default 2700, forty more minutes. A false alarm
+  # on every long-running row, and the client could not have known better from
+  # this envelope.
+  #
+  # Named from the SAME single reader the sweeper's boundary comes from
+  # (`QueueGate.lease_ttl_seconds/0`), so a TTL config change moves the wire and
+  # the reap together and no consumer can drift from it again.
+  #
+  # LIVE CLAIMS ONLY. A SWEPT claim — `TtlSweeper`'s reap nulls `worker` and
+  # records `previous_worker`/`expired_at` — has no lease left to describe, so
+  # stamping a horizon on it would be the opposite lie from the one this row
+  # fixes: a reaped residue advertising forty-five minutes of life. The
+  # worker-held test is also what keeps the lapsed-residue wire contract
+  # (`brief_claim_lapsed_test.exs`, "FULL view … still carries the history")
+  # byte-identical.
+  #
+  # ADDITIVE BY CONSTRUCTION. A row with no claim stays `nil`; a claim map that
+  # is not a map is passed through untouched; `lease_expires_at` is added only
+  # when `claim.ts_iso` actually parses — an expiry the server GUESSED would be
+  # this same defect wearing a fix's clothes. Consumers that never look at the
+  # two new keys read a byte-identical claim map, key for key.
+  defp with_lease_horizon(%{"worker" => worker} = claim) when is_binary(worker) do
+    ttl = QueueGate.lease_ttl_seconds()
+    claim = Map.put(claim, "lease_seconds", ttl)
+
+    with ts when is_binary(ts) <- Map.get(claim, "ts_iso"),
+         {:ok, granted, _} <- DateTime.from_iso8601(ts) do
+      Map.put(
+        claim,
+        "lease_expires_at",
+        granted |> DateTime.add(ttl, :second) |> DateTime.to_iso8601()
+      )
+    else
+      _ -> claim
+    end
+  end
+
+  defp with_lease_horizon(other), do: other
+
   def render_doc(doc, view \\ :full)
 
   def render_doc(%Document{} = doc, :full) do
@@ -229,7 +275,7 @@ defmodule BarkparkWeb.TasksController.Params do
       execution_policy: Map.get(content, "execution_policy"),
       queue_gate: Map.get(content, "queue_gate"),
       execution_class: QueueGate.execution_class(content),
-      claim: Map.get(content, "claim"),
+      claim: content |> Map.get("claim") |> with_lease_horizon(),
       # tt5: surface content.labels at the top level so a client's `.labels[]`
       # (e.g. `bp task show`'s label view + the `label=` list filter) works
       # end-to-end. Callers read `doc.labels`; without this they always saw [].
