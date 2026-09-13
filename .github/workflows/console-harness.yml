@@ -580,10 +580,13 @@ jobs:
       # PIN 1437 — bumped 2026-09-13 from 1436. This PR adds one arm to
       # cloud/priv/static/__app.test.mjs (the /new launch step's unknown arm in the
       # preview corpus); a local node-20 `bash scripts/console-harness.sh` on
-      # 4835a2bcb (this branch rebased onto origin/main after #18046 merged)
-      # reports `# tests 1437 / # pass 1437 / # fail 0`. origin/main still pins
-      # 1436 after that rebase — #18046 grew the preview corpus, not
-      # __app.test.mjs — so this branch's +1 arm is still the only mover.
+      # 25f69770f (this branch re-rebased onto origin/main f4743352d, the base that
+      # carries #18046 and #18088) reports `# tests 1437 / # pass 1437 / # fail 0`.
+      # origin/main still pins 1436 on that same base — #18046 grew the preview
+      # corpus, not __app.test.mjs — so this branch's +1 arm is still the only
+      # mover. The earlier draft of this note cited 4835a2bcb, a pre-rebase SHA
+      # that the rebase orphaned; the number did not move, the commit it was
+      # measured on did.
       # Previously PIN 1436 — bumped 2026-09-12 from 1431. #17919 (E11 widen, dcbd22469)
       # grew __app.test.mjs by +5 arms and did NOT bump this literal in the same
       # diff, so every console PR (and main) reddened here at 1436-vs-1431. Re-derived
