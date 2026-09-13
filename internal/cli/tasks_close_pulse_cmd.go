@@ -661,12 +661,56 @@ type pulseRequest struct {
 	wantNow string
 }
 
+// pulseReceiptPrefix is the STABLE, machine-readable half of the pulse receipt.
+// A keep-alive loop has exactly two honest ways to learn whether its heartbeat
+// landed: the exit code, and this line. Neither is prose, and that is the whole
+// point — the human verdict ("✓ the store holds it — …") is free to be reworded,
+// translated or extended, and a loop that greps it is reading a moving target.
+// The line is emitted on stderr in EVERY output shape (so `-o json` stdout stays
+// one parseable document) and on EVERY terminal path of `bp task pulse`:
+//
+//	bp: pulse_receipt confirmed=true  epoch=<n>   exit=0
+//	bp: pulse_receipt confirmed=false reason=<code> exit=<n>
+//	bp: pulse_receipt confirmed=unknown reason=readback_failed exit=<n>
+//
+// `confirmed=true` is stated ONLY after the read-back found the now-line this
+// invocation sent in the store — it is the same fact exit 0 carries, not the
+// POST's own say-so.
+const pulseReceiptPrefix = "pulse_receipt"
+
+// emitPulseReceipt writes the one machine-readable receipt line. Every field is
+// key=value, space separated, in a fixed order, so `grep -q 'confirmed=true'`
+// and an awk split are both exact.
+func emitPulseReceipt(out *writer, confirmed, reason string, epoch, exit int) int {
+	line := fmt.Sprintf("bp: %s confirmed=%s", pulseReceiptPrefix, confirmed)
+	if reason != "" {
+		line += " reason=" + reason
+	}
+	if epoch > 0 {
+		line += fmt.Sprintf(" epoch=%d", epoch)
+	}
+	out.errf("%s exit=%d", line, exit)
+	return exit
+}
+
 // runTaskPulse wraps the manifest `task pulse` verb with the read-back.
 func runTaskPulse(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
 	rc := runCommand(out, g, ctx, m, cmd, tail)
 
-	if g.dryRun || (rc != exitOK && rc != exitServer) {
+	if g.dryRun {
 		return rc
+	}
+	// A REFUSED pulse. The exit code already carries it (the tasks 409 family —
+	// not_holder / not_in_progress:<status> — maps to exitConflict through
+	// codeExit, a transport failure to 1 and a 5xx to 8), and the receipt names
+	// the reason beside it so a loop never has to read the server's paragraph to
+	// learn that nothing was renewed.
+	if rc != exitOK && rc != exitServer {
+		reason := out.lastErrorCode
+		if reason == "" {
+			reason = "refused"
+		}
+		return emitPulseReceipt(out, "false", reason, 0, rc)
 	}
 	req, ok := pulseRequestOf(cmd, tail)
 	if !ok {
@@ -681,9 +725,9 @@ func runTaskPulse(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		out.userErr("pulse sent but NOT confirmed — the read-back of %s failed: %v", req.docID, err)
 		out.errf("  the now-line may or may not have landed; re-read with `bp task get %s` before trusting it", req.docID)
 		if rc != exitOK {
-			return rc
+			return emitPulseReceipt(out, "unknown", "readback_failed", 0, rc)
 		}
-		return exitGeneric
+		return emitPulseReceipt(out, "unknown", "readback_failed", 0, exitGeneric)
 	}
 	return renderPulseVerdict(out, req, stored, readback, rc)
 }
@@ -728,7 +772,7 @@ func renderPulseVerdict(out *writer, req pulseRequest, stored taskboard.PulseRow
 		out.userErr("pulse landed on a DRAFT, not the board — %s answered this read-back", readbackRowLabel(readback))
 		out.errf("  `%s` has no published row, so no board will ever show this now-line", req.docID)
 		out.errf("  the draft holds: %s", storedPulseSummary(stored))
-		return exitConflict
+		return emitPulseReceipt(out, "false", "draft_row", 0, exitConflict)
 	}
 
 	mismatches := pulseMismatches(req, stored)
@@ -746,7 +790,7 @@ func renderPulseVerdict(out *writer, req pulseRequest, stored taskboard.PulseRow
 			out.progressf("  the pulse ADVANCED the claim epoch to %d — pass %d to the next `bp task stamp` / `bp task close`; the epoch you were given at claim time is now stale",
 				stored.ClaimEpoch, stored.ClaimEpoch)
 		}
-		return exitOK
+		return emitPulseReceipt(out, "true", "", stored.ClaimEpoch, exitOK)
 	}
 	out.userErr("pulse NOT confirmed by the store — the now-line did not land as asked")
 	out.errf("  expected now-line: %q", truncateCell(req.wantNow, 72))
@@ -755,7 +799,7 @@ func renderPulseVerdict(out *writer, req pulseRequest, stored taskboard.PulseRow
 		out.errf("  ✗ %s", m)
 	}
 	out.errf("  a pulse is only real once the board can read it — re-read with `bp task get %s` and pulse again", req.docID)
-	return exitConflict
+	return emitPulseReceipt(out, "false", "not_stored", 0, exitConflict)
 }
 
 // storedPulseSummary describes the claim AS STORED.

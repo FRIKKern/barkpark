@@ -57,6 +57,10 @@ bp task release t1 agent-1 1  # voluntary walk-away, fenced: <doc_id> <worker> <
 # index and leaving the guard INERT.
 bp task get t1 -o json | jq -r '.doc.content.acceptance_criteria[0].criterion' > crit.txt
 bp task stamp t1 agent-1 1 --criterion 0 --criterion-text-file crit.txt --met --evidence "gate green"
+# A MISS keeps its reason in --note and NOWHERE ELSE: it lands at
+# .content.acceptance_criteria[N].attempts[].note (last 5 kept) and NEVER at .evidence, which a
+# miss does not write. So a readback keyed on (.evidence|length) reads 0 on every LANDED miss —
+# read attempts[].note beside it. `--miss --evidence ...` is refused: the server drops that field.
 bp task stamp t1 agent-1 1 --criterion 1 --miss --note "flaky"
 bp task stamp t1 agent-1 1 --criterion 0 --criterion-text-file crit.txt --withdraw --note "wrong branch"
 # A pulse BUMPS claim.epoch: stamp/close on the PULSE's epoch, not the claim's.

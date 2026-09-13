@@ -218,7 +218,31 @@ function isCanvasStageNode(nodeType) {
 //
 // A node is "canvas-handled" if it is PROSE, a canvas ATOM, a canvas ATTR-ATOM, or
 // a canvas CONTENT node; only a truly-unknown non-prose kind stays bpOpaque.
-const CANVAS_ATTR_ATOM_TYPES = new Set(["code", "diagram"]);
+// scaffy-backlog-blocks-editable-studio adds `diff` and `filetree` to this SAME
+// set. Both are VERBATIM-TEXT blocks whose body rides one attr plus optional scalar
+// metadata (diff → diff/file/lang; filetree → text/legend), edited by a non-PM
+// textarea island exactly like code/diagram. They differ from code/diagram in ONE
+// respect: their PREVIEW is the reader's own server-pushed HTML (bp:block-html),
+// because no client runtime can produce diff/filetree markup and the parity gate
+// (§3) forbids hand-mirroring it. See technical-node.js.
+const CANVAS_ATTR_ATOM_TYPES = new Set([
+  "code",
+  "diagram",
+  "diff",
+  "filetree",
+]);
+
+// The per-type SHAPE of a TECHNICAL attr-atom: the verbatim-body attr name plus the
+// OPTIONAL scalar metadata keys. Drives technicalBlockToNode / technicalNodeToBlock /
+// technicalNodeToPatch, so the projection, the reconstruction and the patch can never
+// disagree about which keys a type owns.
+//
+// KEEP LOCKSTEP with technical-node.js TECHNICAL_ATOM_SPECS and
+// TechnicalBlockEditor.build_patch/2 (~w(diff file lang) / ~w(text legend)).
+const TECHNICAL_ATOM_SHAPES = {
+  diff: { body: "diff", meta: ["file", "lang"] },
+  filetree: { body: "text", meta: ["legend"] },
+};
 
 // The TipTap NODE name for an attr-atom block differs from its bpType. For code it is
 // `bpCode`, NOT `code` — `code` is the StarterKit inline code MARK (a node + mark
@@ -227,11 +251,21 @@ const CANVAS_ATTR_ATOM_TYPES = new Set(["code", "diagram"]);
 // bp-prefix). runToTiptap maps a block.type → its node.type; runToOps maps it back
 // via bpType. Keep aligned with code-node.js:BP_CODE_NODE_NAME and
 // diagram-node.js:BP_DIAGRAM_NODE_NAME.
-const CANVAS_ATTR_ATOM_NODE_NAMES = { code: "bpCode", diagram: "bpDiagram" };
+const CANVAS_ATTR_ATOM_NODE_NAMES = {
+  code: "bpCode",
+  diagram: "bpDiagram",
+  diff: "bpDiff",
+  filetree: "bpFiletree",
+};
 // Reverse: node.type "bpCode" → bpType "code", "bpDiagram" → "diagram". Used by
 // runToOps to detect an attr-atom by its NODE type (the type carried on a getJSON
 // node).
-const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = { bpCode: "code", bpDiagram: "diagram" };
+const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = {
+  bpCode: "code",
+  bpDiagram: "diagram",
+  bpDiff: "diff",
+  bpFiletree: "filetree",
+};
 
 // S3.5: the 7 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
 // nodes — atom nodes (no PM-managed body, like the divider/code) whose VALUE rides
@@ -745,6 +779,10 @@ function blockToNode(block) {
       // node.type is the NODE name (bpCode / bpDiagram), not the bpType (code /
       // diagram). Dispatch by bpType: code → value/lang; diagram → source/caption.
       if (bpType === "diagram") return diagramBlockToNode(block, bpId, bpType);
+      // diff / filetree: the TECHNICAL pair — one verbatim-body attr + optional
+      // scalar metadata, driven by TECHNICAL_ATOM_SHAPES.
+      if (TECHNICAL_ATOM_SHAPES[bpType])
+        return technicalBlockToNode(block, bpId, bpType);
       return codeBlockToNode(block, bpId, bpType);
     }
 
@@ -1098,6 +1136,11 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
     if (nextChild.type === "bpDiagram") {
       return diagramNodeChanged(prevChild, nextChild)
         ? diagramNodeToPatch(nextChild)
+        : null;
+    }
+    if (isTechnicalAtomNode(nextChild.type)) {
+      return technicalNodeChanged(prevChild, nextChild)
+        ? technicalNodeToPatch(nextChild)
         : null;
     }
     return codeNodeChanged(prevChild, nextChild)
@@ -2301,6 +2344,107 @@ function stableDiagramKey(node) {
     source: a.source || "",
     caption: a.caption == null ? "" : a.caption,
   });
+}
+
+// ── diff / filetree ⇄ canvas TECHNICAL attr-atom node ───────────────────────
+//
+// scaffy-backlog-blocks-editable-studio. The two VERBATIM-TEXT technical blocks
+//   { id, type:"diff",     diff:"<text>", file?:"…", lang?:"…" }
+//   { id, type:"filetree", text:"<text>", legend?:"…" }
+// ⇄ the TipTap `bpDiff` / `bpFiletree` ATTR-ATOM nodes (technical-node.js). The
+// shape is the code/diagram shape GENERALIZED: ONE verbatim-body attr (always
+// projected, even "") plus N OPTIONAL scalar metadata attrs (present-only, so an
+// absent value round-trips as ABSENT and a lossless no-op edit emits zero ops).
+//
+// node.type is the NODE name (bpDiff / bpFiletree), NOT the bpType (diff /
+// filetree) — see the CANVAS_ATTR_ATOM_NODE_NAMES note.
+
+// True for a TipTap node type that is one of the technical attr-atoms. Used to
+// dispatch inside the isAttrAtom branches (which also serve bpCode / bpDiagram).
+function isTechnicalAtomNode(type) {
+  return type === "bpDiff" || type === "bpFiletree";
+}
+
+// The shape record for a technical NODE type (or undefined when it is not one).
+function technicalShapeForNode(type) {
+  const bpType = CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[type];
+  return bpType ? TECHNICAL_ATOM_SHAPES[bpType] : undefined;
+}
+
+// technicalBlockToNode(block) → { type:"bpDiff"|"bpFiletree", attrs:{ bpId, bpType,
+//   <body>, <meta>? } }
+//
+// The verbatim TEXT → the body attr (default ""). Each metadata key rides ONLY when
+// present + non-empty, so an untouched metadata-less block's getJSON re-projection
+// matches and emits zero ops.
+function technicalBlockToNode(block, bpId, bpType) {
+  const shape = TECHNICAL_ATOM_SHAPES[bpType];
+  const nodeName = CANVAS_ATTR_ATOM_NODE_NAMES[bpType];
+  const attrs = { bpId, bpType };
+  attrs[shape.body] = (block && block[shape.body]) || "";
+  for (const key of shape.meta) {
+    const value = block && block[key];
+    if (value != null && value !== "") attrs[key] = value;
+  }
+  return { type: nodeName, attrs };
+}
+
+// technicalNodeToBlock(node, id) → { id, type, <body>, <meta>? }
+//
+// Reconstruct the portable-doc block from a technical NODE (the inverse of
+// technicalBlockToNode). The body reads off the attr (default ""); each metadata key
+// is threaded ONLY when present + non-empty, so the reconstructed block is
+// byte-identical to a metadata-less round-trip (no stray file:"").
+function technicalNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const shape = technicalShapeForNode(node && node.type);
+  const bpType = CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node && node.type];
+  const block = { id, type: bpType };
+  block[shape.body] = attrs[shape.body] || "";
+  for (const key of shape.meta) {
+    if (attrs[key] != null && attrs[key] !== "") block[key] = attrs[key];
+  }
+  return block;
+}
+
+// The mutable-fields PATCH for a technical block. The body ALWAYS rides the patch;
+// each metadata key rides EXPLICITLY as a STRING ("" when cleared), NOT a dropped
+// key. The canvas paper-ops path folds via Patch.apply_patches, where patch-block is
+// a SHALLOW Map.merge (patch.ex merge_block) that can REPLACE or PRESERVE a key but
+// never DELETE one — so clearing a previously-set `file` must emit file:"", or the
+// merge would leave the STALE old value. "" is render-equivalent to absent
+// (Components.diff_html / filetree_html treat a missing and an empty metadata string
+// identically) and the canonical compare normalizes ""/null/absent equal, so the
+// cleared block still round-trips with zero spurious ops. Mirrors diagramNodeToPatch.
+function technicalNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  const shape = technicalShapeForNode(node && node.type);
+  const patch = {};
+  patch[shape.body] = attrs[shape.body] || "";
+  for (const key of shape.meta) {
+    patch[key] = attrs[key] == null ? "" : attrs[key];
+  }
+  return patch;
+}
+
+// True when a technical node's body OR any metadata field changed (an attr edit).
+// Canonical (key-order-insensitive) compare of the diff-relevant fields only, so a
+// body edit or a metadata change flips it but a pure reorder (bpId/bpType only) does
+// not. An absent metadata value normalizes to "" so a metadata-less node and one
+// carrying ""/null compare EQUAL (they persist render-identically).
+function technicalNodeChanged(prevNode, nextNode) {
+  return stableTechnicalKey(prevNode) !== stableTechnicalKey(nextNode);
+}
+
+function stableTechnicalKey(node) {
+  const attrs = (node && node.attrs) || {};
+  const shape = technicalShapeForNode(node && node.type);
+  if (!shape) return canonicalJSON(null);
+  const key = { body: attrs[shape.body] || "" };
+  for (const name of shape.meta) {
+    key[name] = attrs[name] == null ? "" : attrs[name];
+  }
+  return canonicalJSON(key);
 }
 
 // ── field ⇄ canvas control-atom node (S3.5) ─────────────────────────────────
@@ -3756,6 +3900,16 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
         }
         continue;
       }
+      if (isTechnicalAtomNode(entry.node.type)) {
+        if (technicalNodeChanged(prevNode, entry.node)) {
+          ops.push({
+            op: "patch-block",
+            id: entry.id,
+            patch: technicalNodeToPatch(entry.node),
+          });
+        }
+        continue;
+      }
       if (codeNodeChanged(prevNode, entry.node)) {
         ops.push({
           op: "patch-block",
@@ -3937,6 +4091,8 @@ function nodeContentEqual(serverNode, liveNode) {
   // Code / diagram (attr-atom): value+lang / source+caption.
   if (isCanvasAttrAtomNode(type)) {
     if (type === "bpDiagram") return !diagramNodeChanged(serverNode, liveNode);
+    if (isTechnicalAtomNode(type))
+      return !technicalNodeChanged(serverNode, liveNode);
     return !codeNodeChanged(serverNode, liveNode);
   }
   // Field (control-atom): the normalized value.
@@ -4099,6 +4255,8 @@ function nextNodeToBlock(entry, taken) {
     // when absent/empty — the insert path mirrors the persist default (a lang-less
     // code / caption-less diagram has no key). Dispatch by NODE type.
     if (node.type === "bpDiagram") return diagramNodeToBlock(node, entry.id);
+    if (isTechnicalAtomNode(node.type))
+      return technicalNodeToBlock(node, entry.id);
     return codeNodeToBlock(node, entry.id);
   }
   if (entry.isField) {

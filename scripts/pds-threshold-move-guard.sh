@@ -86,6 +86,24 @@
 #   required gate at all, so for those rows moving the literal was never even the
 #   cheapest way to go green — ignoring the red was. This guard makes the move
 #   VISIBLE. It does not make the underlying check blocking.
+# INTERPRETER GUARD — shebang-independent, and it must stay ABOVE the first
+# process substitution in this file. bash reads a script INCREMENTALLY: invoked
+# as `sh` it is in POSIX mode, where `<(…)` cannot be parsed, so everything
+# above the offending line has ALREADY RUN and the script dies with the status
+# of the last completed command. MEASURED 2026-09-13: under `sh` this file exited 2 having produced NO output at all.
+# Pinned by scripts/posix-vacuous-green-census.sh, which reds if this guard is
+# removed or moved below the first process substitution.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "pds-threshold-move-guard.sh: needs bash (this script uses process substitution); run: bash scripts/pds-threshold-move-guard.sh" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "pds-threshold-move-guard.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/pds-threshold-move-guard.sh" >&2
+    exit 2
+    ;;
+esac
+
 set -uo pipefail
 
 MIN_JUSTIFICATION_CHARS=20

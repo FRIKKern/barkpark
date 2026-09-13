@@ -414,7 +414,14 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Cross-build provisioner (linux/amd64)
-        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bp-provisioner ./cmd/barkpark-provisioner
+        # -ldflags -X stamps the binary with the commit it was built from, so the
+        # box can state which PROVISIONER it runs and not only which APP. The two
+        # legitimately diverge: this build is actions/checkout@v4 at $GITHUB_SHA,
+        # while cp-deploy.sh `git pull --ff-only origin main` ON THE BOX can land
+        # the app AHEAD of it under back-to-back merges. Pattern copied from the
+        # Makefile's LDFLAGS (`cli-build`, Makefile:173) — a plain `go build`
+        # leaves the var EMPTY and `--version` then prints nothing on stdout.
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-X main.buildSHA=$GITHUB_SHA" -o bp-provisioner ./cmd/barkpark-provisioner
       - name: Deploy control plane over SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
