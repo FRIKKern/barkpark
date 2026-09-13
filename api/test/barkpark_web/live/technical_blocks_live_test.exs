@@ -540,6 +540,17 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
 
   defp mount_editor(ctx, :studio) do
     {:ok, view, _html} = live(ctx.conn, scoped_studio("/d/#{@dataset}/studio/paper/#{ctx.slug}"))
+
+    # Studio has no View<->Edit toggle while the canvas is ON — components.ex
+    # derives `show_editor` from the flag, so the editor renders on open. The
+    # flag-OFF opt-out keeps the LEGACY shape: the read-only View pane plus a
+    # toggle whose `paper_edit_mode` still gates Edit (components.ex:140-147).
+    # The conditional click is therefore a no-op for every canvas-ON test in
+    # this file and the entry step for the canvas-OFF ones. Same idiom as
+    # shared_typed_leaf_authoring_test.exs.
+    if has_element?(view, ~s([data-test-id="paper-edit-toggle"])),
+      do: view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+
     view
   end
 
