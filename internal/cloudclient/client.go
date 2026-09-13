@@ -2177,7 +2177,21 @@ type SpawnSite struct {
 	// side by intent of the render: an EMPTY string means the control plane
 	// predates the field, which the renderer treats as "say nothing", never as
 	// "absent" — a fabricated absence would be its own silent lie.
-	PublishTrigger      string          `json:"publish_trigger,omitempty"`
+	PublishTrigger string `json:"publish_trigger,omitempty"`
+	// site-spawner W10 (ssw10-bl-prebuilt-enabled-no-read-path): the per-site
+	// opt-in to accepting builds produced somewhere other than the box. The
+	// control plane has serialized it on EVERY site-shaped route since W9 (one
+	// serializer, router.ex `prebuilt_enabled: s.prebuilt_enabled`), and
+	// `bp cloud site settings --prebuilt-enabled` has been able to PATCH it —
+	// but this struct did not declare it, so json.Unmarshal dropped it in
+	// silence and the settings receipt echoed a flag it had never decoded. The
+	// same failure PublishTrigger and DocType record above.
+	//
+	// NOT omitempty, and NOT guarded on "" the way DocType/PublishTrigger are:
+	// this is a bool, so a false here is an ANSWER ("this site builds on its
+	// box"), not an absence. cloudclient.Site declares it with the same
+	// reasoning.
+	PrebuiltEnabled     bool            `json:"prebuilt_enabled"`
 	Port                int             `json:"port,omitempty"`
 	PortBase            int             `json:"port_base,omitempty"`
 	CurrentDeploymentID string          `json:"current_deployment_id"`

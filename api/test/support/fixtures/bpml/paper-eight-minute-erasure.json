@@ -1,5 +1,7 @@
 {
-  "_id": "eight-minute-erasure",
+  "paper": "eight-minute-erasure",
+  "rev": "96b583c978578c3b3c40331bb5583078",
+  "title": "Eight Minutes Between the Apology and the Erasure",
   "blocks": [
     {
       "id": "em8-eyebrow",
@@ -995,8 +997,5 @@
       "id": "em8-declaration",
       "type": "section"
     }
-  ],
-  "source_rev": "96b583c978578c3b3c40331bb5583078",
-  "style": "article",
-  "title": "Eight Minutes Between the Apology and the Erasure"
+  ]
 }

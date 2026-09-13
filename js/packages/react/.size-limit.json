@@ -19,9 +19,9 @@
   "gzip": true
  },
  {
-  "name": "Media hydration client — 2026-09-08 nested-reader rebase: 1801 B -> 1801 B (+0); mermaid/asciinema external and dynamic",
+  "name": "Media hydration client — 2026-09-13 asciicast failure fallback (studio-r15): 1833 B -> 2385 B (+552); the post-mount load probe + honest fallback card jf-backlog-asciicast-empty-box asks for (mermaid/asciinema still external and dynamic); 115 B headroom",
   "path": "dist/client.mjs",
-  "limit": "2 KB",
+  "limit": "2.5 KB",
   "gzip": true,
   "ignore": [
    "mermaid",

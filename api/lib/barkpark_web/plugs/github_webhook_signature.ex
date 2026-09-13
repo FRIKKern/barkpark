@@ -50,12 +50,20 @@ defmodule BarkparkWeb.Plugs.GithubWebhookSignature do
   end
 
   # One shared emitter → the 401 carries request_id (+ hint) for log correlation.
+  #
+  # The hint is ROUTE-DERIVED (task-57081836b628df35). The code-keyed default
+  # for "unauthorized" cannot know that this pipeline's ONLY credential is the
+  # HMAC header — it is served identically to the ingest plug and the login
+  # gates — so this route names its own remedy and wins over the table.
   defp reject(conn) do
     BarkparkWeb.ErrorResponse.emit_custom(
       conn,
       :unauthorized,
       "unauthorized",
-      "invalid webhook signature"
+      "invalid webhook signature",
+      %{},
+      "Sign the RAW request body with this GitHub App's configured webhook secret (HMAC-SHA256) and send the result as the " <>
+        @header <> " header."
     )
   end
 end

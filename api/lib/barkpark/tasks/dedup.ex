@@ -18,6 +18,13 @@ defmodule Barkpark.Tasks.Dedup do
       content, so a `bp task get` / query shows exactly which matches were waved
       through and by whose decision.
 
+    * **`content.distinct_from_reason`** — a map of `id => why`, required once
+      the override is being used against MORE THAN ONE existing row carrying the
+      same normalized title as the new task. See `override_toll/5`: the
+      four-copies-in-127-seconds incident was four correct refusals dismissed by
+      a field value, so past the first same-title row the assertion has to be
+      explained, per id, in words that are not repeated.
+
   A bogus `distinct_from` id cannot bypass a real duplicate: it only removes the
   named candidate from consideration, so any OTHER refusing candidate still
   blocks. That is the D1 "must name a real candidate" property, enforced by
@@ -252,6 +259,8 @@ defmodule Barkpark.Tasks.Dedup do
     distinct =
       string_list(Map.get(content, "distinct_from") || Map.get(content, :distinct_from))
 
+    reasons = reason_map(content)
+
     # The new task's title IS the trgm probe. Passed as an opt rather than a
     # positional argument so a caller that already set `:probe_title` (tests
     # driving the empty-probe fallback) keeps control of it.
@@ -275,7 +284,7 @@ defmodule Barkpark.Tasks.Dedup do
 
         case refuse do
           [] ->
-            :ok
+            override_toll(new_task, candidates, assessment.excluded, reasons, scan)
 
           _ ->
             {:error,
@@ -349,6 +358,164 @@ defmodule Barkpark.Tasks.Dedup do
           "(`bp doc publish task <id>`) or discard it and retry."
     end
   end
+
+  # ── THE OVERRIDE HAS TO COST SOMETHING ─────────────────────────────────────
+  #
+  # MEASURED on the production ledger 2026-08-24. Four copies of one task were
+  # created inside 127 seconds on 2026-08-02, each one naming its predecessors
+  # in its own `distinct_from`:
+  #
+  #   11:25:41  drafts.task-834b13e3…  distinct_from = []
+  #   11:26:52  drafts.task-3a889e08…  distinct_from = [834b13e3]
+  #   11:27:12  drafts.task-d2954ebb…  distinct_from = [834b13e3, 3a889e08]
+  #   11:27:48  task-42ad3595…         distinct_from = [834b13e3, 3a889e08, d2954ebb]
+  #
+  # All four carry the identical title. THE WALL WAS RIGHT FOUR TIMES OUT OF
+  # FOUR and was told to stand down every time — a populated `distinct_from` is
+  # the AFFIRMATIVE RECORD that it fired and the author dismissed it, since the
+  # field cannot be populated by accident. The list GREW monotonically, so the
+  # gate got LOUDER at each copy and was overruled anyway. This is not a
+  # sensitivity defect (a detector failing to fire is a DIFFERENT row and a
+  # different lane); it is the override being the cheapest way past a wall that
+  # worked.
+  #
+  # THE TOLL, AND WHY IT IS SHAPED LIKE THIS:
+  #
+  #   * It fires on SAME NORMALIZED TITLE only. By copy 4 the author was
+  #     asserting distinctness against three rows carrying the same title, which
+  #     is the point where the assertion has stopped meaning anything. A
+  #     different-titled override is an ordinary judgement call and stays free.
+  #   * THE FIRST SAME-TITLE OVERRIDE IS FREE (`@free_same_title_overrides`).
+  #     One row that happens to share a title with yours is a coincidence a
+  #     human resolves in one word; a SECOND one is the beginning of the
+  #     observed pattern. Refusing the first would break every legitimate
+  #     one-id override (`DedupTest` "distinct_from naming the match ALLOWS the
+  #     create") for a population the evidence does not support.
+  #   * STRUCTURE STILL WINS. A match excluded because it is a `:sibling` or a
+  #     `:chain` was never saved by `distinct_from` — `Similarity.score/6`
+  #     checks the distinct set first, so an id can carry BOTH — and charging a
+  #     toll for it would tax a fixture that names its own epic peers rather
+  #     than the override this row is about.
+  #   * REASONS MUST BE NON-EMPTY AND MUTUALLY DISTINCT. One reason
+  #     copy-pasted across three ids is the bulk assertion in a costume; the
+  #     row's remedy (a) names "an empty or duplicated reason" explicitly.
+  #
+  # The toll runs ONLY on the `refuse == []` path — i.e. only when the override
+  # actually bought the create its passage. A create that is refused on its
+  # merits is refused with the ordinary message, unchanged.
+  @free_same_title_overrides 1
+
+  defp override_toll(new_task, candidates, excluded, reasons, scan) do
+    probe = normalized_title(Map.get(new_task, :title))
+
+    titles =
+      Map.new(candidates, fn c ->
+        {Similarity.norm_id(Map.get(c, :id)), Map.get(c, :title)}
+      end)
+
+    waved =
+      Enum.filter(excluded, fn m ->
+        Map.get(m, :structural) not in [:sibling, :chain] and probe != "" and
+          normalized_title(Map.get(titles, Similarity.norm_id(Map.get(m, :id)))) == probe
+      end)
+
+    if length(waved) > @free_same_title_overrides do
+      audit_override(waved, reasons, scan)
+    else
+      :ok
+    end
+  end
+
+  defp audit_override(waved, reasons, scan) do
+    ids = Enum.map(waved, fn m -> Similarity.norm_id(Map.get(m, :id)) end)
+    given = Enum.map(ids, fn id -> {id, Map.get(reasons, id)} end)
+
+    blank = for {id, r} <- given, blank_reason?(r), do: id
+
+    repeated =
+      given
+      |> Enum.reject(fn {_id, r} -> blank_reason?(r) end)
+      |> Enum.group_by(fn {_id, r} -> String.downcase(String.trim(r)) end)
+      |> Enum.filter(fn {_r, group} -> length(group) > 1 end)
+      |> Enum.flat_map(fn {_r, group} -> Enum.map(group, &elem(&1, 0)) end)
+      |> Enum.sort()
+
+    case {blank, repeated} do
+      {[], []} ->
+        :ok
+
+      _ ->
+        {:error,
+         {:duplicate_task,
+          %{
+            message: override_toll_message(ids, blank, repeated),
+            similar: Enum.map(waved, &present/1),
+            advise: [],
+            scan: scan
+          }}}
+    end
+  end
+
+  defp override_toll_message(ids, blank, repeated) do
+    base =
+      "this create names #{length(ids)} existing row(s) with the SAME normalized title in " <>
+        "`distinct_from` (#{Enum.join(Enum.take(ids, 5), ", ")}) — the duplicate wall fired " <>
+        "against each of them and was waved through. Past the first, that assertion has to be " <>
+        "EXPLAINED: set `content.distinct_from_reason` to a map of id => why that row is " <>
+        "genuinely different, one entry per id, each non-empty and each saying something " <>
+        "different from the others. (Four copies of one task were filed in 127 seconds on " <>
+        "2026-08-02 exactly this way, each naming its predecessors and none of them saying why.)"
+
+    base
+    |> then(fn m ->
+      case blank do
+        [] -> m
+        _ -> m <> " · NO REASON GIVEN FOR: #{Enum.join(blank, ", ")}."
+      end
+    end)
+    |> then(fn m ->
+      case repeated do
+        [] -> m
+        _ -> m <> " · THE SAME REASON IS REUSED FOR: #{Enum.join(repeated, ", ")}."
+      end
+    end)
+  end
+
+  defp blank_reason?(r) when is_binary(r), do: String.trim(r) == ""
+  defp blank_reason?(_), do: true
+
+  # `distinct_from_reason` is read as a map of id => reason. It rides content
+  # like every other escape hatch (`distinct_from`, `dedup_bypass`) so there is
+  # no new API or CLI surface, and `Tasks.Validation` leaves an unlisted content
+  # map alone — the same latitude `claim`/`engagement` already take.
+  #
+  # It FAILS CLOSED on a typo: a misspelled key yields no reasons, so the toll
+  # refuses rather than reads the absence as permission.
+  defp reason_map(content) do
+    case Map.get(content, "distinct_from_reason") || Map.get(content, :distinct_from_reason) do
+      map when is_map(map) ->
+        Map.new(map, fn {k, v} ->
+          {Similarity.norm_id(to_string(k)), if(is_binary(v), do: v, else: nil)}
+        end)
+
+      _ ->
+        %{}
+    end
+  end
+
+  # Titles are compared on their ALPHANUMERIC SKELETON: downcased, every run of
+  # non-alphanumerics collapsed to one space, trimmed. Not `Similarity.tokens/1`
+  # — that drops stopwords and ≤2-char tokens, which would fold two genuinely
+  # different short titles onto each other, and it emits a telemetry event per
+  # call. This comparison is exact-title-or-nothing by design.
+  defp normalized_title(title) when is_binary(title) do
+    title
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, " ")
+    |> String.trim()
+  end
+
+  defp normalized_title(_), do: ""
 
   # A stored row is published unless it carries the `drafts.` prefix. The
   # DISTINCT ON in `base_query/3` prefers the PUBLISHED row of a twin pair, so a

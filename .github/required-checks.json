@@ -396,6 +396,10 @@
       "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `release-scan-verdict`. Harness for scripts/release-scan.sh — how a release scan derives a CI verdict from check runs."
     },
     {
+      "context": "Seal reading (advisory)",
+      "reason": "S7 EXCLUDED BY DECISION, and S4 in effect. TOPOLOGY: .github/workflows/seal-reading.yml carries NO `pull_request:` arm at all (its triggers are push-to-main, a daily schedule and workflow_dispatch), so on a PR head this name is ABSENT — and a required absent context reports 'expected' forever (D18). It DOES render on main commits, which is why it needs a row here instead of being unseeable: a name that renders on a sampled head and carries no status is UNACCOUNTED, and an unaccounted name is not a waived one. THE DECISION GROUND, which outlives the topology one: this job takes a seal READING, and charter D335 says an instrument that reads and then exits 1 gets wired into CI as a gate — and a gate is a verdict again. The clause-(b) ladder exits 0 on a clean read EVEN WITH rung-3 entries, on purpose, and the job preserves that: a reading's CONTENT never reds it. What reds it is a `scripts/seal-run.sh` REFUSAL (the checkout could not support a quotable reading) or an INFRA FAULT (nothing was read) — facts about the runner, never findings about the epic. Requiring a name whose red means 'the runner was misconfigured' would pin branch protection to an environment. Added by dr-w28-bl-seal-run-is-available-but-not-enforced."
+    },
+    {
       "context": "seal-run.sh probe matrix",
       "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `seal-run-guard`. Probe matrix for scripts/seal-run.sh — the seal predicate's arms."
     },
