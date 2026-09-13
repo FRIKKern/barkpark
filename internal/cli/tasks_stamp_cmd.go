@@ -110,6 +110,22 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		return useError(out, mergeGatedReasonCode, mergeGatedReasonMessage, exitValidation)
 	}
 
+	// THE MISS-FIELD REFUSAL, AND ITS POSITION IS THE POINT. A miss keeps its
+	// reason in --note and NOWHERE ELSE: the server's parse_stamp `miss ->`
+	// branch (api/lib/barkpark_web/controllers/tasks_controller/params.ex) reads
+	// "note" and never looks at "evidence", and the miss write path
+	// (api/lib/barkpark/tasks/internal.ex, apply_entry_update on an "attempt")
+	// appends to `attempts` and leaves `evidence` untouched. So `--miss --note x
+	// --evidence y` is not refused anywhere — it returns 2xx and DROPS y.
+	// Measured on main: the note-less spelling WAS refused, but by the server,
+	// i.e. after stampEchoLine had already printed "miss (attempt) — met is
+	// UNCHANGED", a line that reads like the write is under way on a call that is
+	// about to be refused. Both shapes are therefore refused HERE: before the
+	// echo, before the pre-check reads, before anything is sent.
+	if code, msg := stampMissFieldRefusal(sa); code != "" {
+		return useError(out, code, msg, exitValidation)
+	}
+
 	// LEGACY-SERVER FALLBACK ONLY. When the server declares --merge-gated it
 	// owns the verdict (it can read the stored `merge_gate` field; we cannot),
 	// and the flag rides the POST. Against an older manifest the flag is not
@@ -136,11 +152,28 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		return rc
 	}
 
+	// THE OUT-OF-ROW PIN (task-f7b781a0bcd7f70b). Everything above this line is
+	// validated against values READ FROM THE ROW BEING STAMPED, which is why an
+	// off-by-one stamp scripted in the observed shape is wire-identical to a
+	// correct one. `--expect '<index>:<first words>'` is typed by the AUTHOR
+	// before the row is read, so a rotated index disagrees with it. Refused here
+	// (before the POST) and checked again on the read-back — see
+	// tasks_stamp_expect_pin.go.
+	pin, rcPin := refuseMisalignedExpectPin(out, ctx, sa, cmd, forward)
+	if rcPin != exitOK {
+		return rcPin
+	}
+
 	// Echo the translated target so a 0-vs-1 base slip is visible immediately —
 	// stderr, so a scripted caller's stdout stays byte-identical to the bare
 	// manifest path (mirrors emitHelpHints).
 	if line := stampEchoLine(sa); line != "" {
 		out.errf("%s", line)
+		// A flag nobody can discover is a flag nobody types, and the guard this
+		// stamp IS using is the one the observed shape defeats.
+		if adv := stampExpectAdvisory(sa); adv != "" {
+			out.errf("%s", adv)
+		}
 	}
 
 	// THE MACHINE RECEIPT (criterion 2 of this row). Under -o json the dispatch
@@ -206,6 +239,7 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		return cap.flush(out, rc, nil)
 	}
 	req, ok := stampRequestOf(cmd, forward)
+	req.pin = pin
 	if !ok {
 		// No usable --criterion index (the manifest dispatch has already
 		// reported whatever was wrong with the invocation): there is no
@@ -266,6 +300,12 @@ type stampRequest struct {
 	// stampMismatches): a withdrawal that "landed" while met is still true is
 	// exactly the class of lie this verb exists to end.
 	withdraw bool
+	// pin is the author-typed `--expect` expectation, or nil. It is the ONE
+	// field here the row cannot supply, which is why the read-back's alignment
+	// check (stampMismatches) is keyed on it rather than on --criterion-text.
+	// It is attached by runTaskStamp after stampRequestOf, because the flag is
+	// stripped from the forwarded tail and stampRequestOf re-parses that tail.
+	pin *stampPin
 }
 
 // stampRequestOf re-resolves the stamp invocation through the SAME splitArgs +
@@ -407,6 +447,12 @@ func stampReceipt(req stampRequest, stored taskboard.CriterionItem, readback api
 	// caller that branches on `confirmed` can still SEE that its --miss left
 	// met standing and read the verb that lowers it.
 	notes := []string{}
+	// The draft ruling is a NOTE, not a problem: the problem (a value on a row
+	// no board reads) is already listed by stampVerdictProblems, and this is the
+	// recorded reason the write was allowed to land there at all.
+	if readback.IsDraft() {
+		notes = append(notes, stampDraftRulingNote)
+	}
 	if n := missLeftMetTrueNote(req, stored); n != "" {
 		notes = append(notes, n)
 	}
@@ -458,6 +504,9 @@ func renderStampVerdict(out *writer, req stampRequest, stored taskboard.Criterio
 		out.errf("  criterion index %d (0-based) = criterion #%d as boards/rubric number them", req.index, req.index+1)
 		out.errf("  the draft holds: %s", storedCriterionSummary(stored))
 		out.errf("  publish the row, then stamp again — `bp doc get task %s` returns not_found until you do", req.docID)
+		// The ruling that explains why the write happened at all rides the
+		// refusal it governs (tasks_stamp_draft_ruling.go).
+		out.errf("  %s", stampDraftRulingNote)
 		return exitConflict
 	}
 
@@ -493,14 +542,80 @@ func renderStampVerdict(out *writer, req stampRequest, stored taskboard.Criterio
 	return exitConflict
 }
 
+// Refusal codes for the two miss-field shapes. Two codes, because they are two
+// different mistakes: one reached for the wrong field, the other named no reason
+// at all.
+const (
+	stampMissEvidenceCode = "miss_takes_note_not_evidence"
+	stampMissNoteCode     = "miss_requires_note"
+)
+
+// missReasonField names, in one clause, WHERE a landed miss keeps its reason.
+// Spelled once so the refusal, the read-back line and the docs cannot drift into
+// three different answers.
+const missReasonField = "acceptance_criteria[N].attempts[].note"
+
+// stampMissFieldRefusal decides whether a `--miss` invocation must be refused
+// before the CLI echoes or sends anything, returning an error code and message.
+// It returns ("", "") for every other verb: --met and --withdraw own their own
+// fields and are untouched by it.
+//
+// Deliberately CLIENT-SIDE, and deliberately NOT a copy of the server's wording.
+// The server stays the authority — it still refuses a note-less miss on its own
+// and this loosens nothing. What this adds is (a) ORDER, so the reader sees the
+// refusal instead of a progress line implying the write is under way, and (b)
+// the `--evidence` case, which the server does not refuse at all. Because the
+// prose here says what the server's message cannot (it names the field the
+// reason lands in), there is no string that must stay term-identical across Go
+// and Elixir; the only thing spelled on both sides is the RULE, and the server
+// keeps the last word on it.
+func stampMissFieldRefusal(sa stampArgs) (string, string) {
+	// ONLY an unambiguous miss. `--met --miss` names two verbs, and that is the
+	// "pass exactly one of --met / --miss / --withdraw" refusal's to answer (the
+	// server's, which reports it as a USAGE error). Firing here would relabel a
+	// two-verb command line as a miss-field mistake and move its exit code —
+	// TestTaskStampExit_LostLeaseAndBadCommandLineDiffer measures exactly that.
+	if !sa.miss || sa.met || sa.withdraw {
+		return "", ""
+	}
+	if sa.hasEvidence {
+		return stampMissEvidenceCode,
+			"--miss does not take --evidence: a miss records an ATTEMPT, not a proof, and its reason rides --note. " +
+				"Nothing on the server reads `evidence` on the miss path, so this text would NOT have been refused — it would have been DROPPED behind a 2xx. " +
+				"Re-run it as `--miss --note \"<why it is unmet>\"`; the sentence is then readable at " + missReasonField +
+				" and NOT at .evidence, which a miss never writes (a readback keyed on `.evidence|length` reports 0 for every landed miss — that false zero is what this refusal exists to stop you inheriting)."
+	}
+	if strings.TrimSpace(sa.note) == "" {
+		return stampMissNoteCode,
+			"--miss requires a non-empty --note: an honest attempt has words, and --note is the ONLY field a miss keeps them in. " +
+				"It lands at " + missReasonField + ", not at .evidence, which a miss never writes. " +
+				"Refused here, before the target was echoed and before anything was sent — nothing reached the store."
+	}
+	return "", ""
+}
+
 // storedCriterionSummary describes the row AS STORED: its wording, its met
 // lock, how much evidence it carries and how many honest attempts are recorded.
 // Evidence is reported by LENGTH as well as text so a truncated write (the
 // transport-ceiling class) is visible rather than merely plausible.
+//
+// THE EMPTY-EVIDENCE MISS. A landed miss leaves `evidence` exactly as it found
+// it — usually "" — and puts its reason in the attempt trail, so a bare
+// "evidence <empty>" was byte-identical on a miss that stored a perfect sentence
+// and on a write that vanished. When there IS an attempt trail and no evidence,
+// this reports the reason's REAL address and quotes the most recent note: the
+// server appends and keeps the last five (`Enum.take(attempts ++ [attempt], -5)`
+// in api/lib/barkpark/tasks/internal.ex), so the LAST element is the newest. A
+// row carrying evidence never reaches this branch, so every caller reading a MET
+// row reads exactly what it read before.
 func storedCriterionSummary(stored taskboard.CriterionItem) string {
 	ev := "evidence <empty>"
 	if stored.Evidence != "" {
 		ev = fmt.Sprintf("evidence %d bytes %q", len(stored.Evidence), truncateCell(stored.Evidence, 48))
+	} else if n := len(stored.Attempts); n > 0 {
+		latest := stored.Attempts[n-1]
+		ev = fmt.Sprintf("no evidence (a miss writes none) — the reason is at %s, %d bytes %q",
+			missReasonField, len(latest.Note), truncateCell(latest.Note, 48))
 	}
 	s := fmt.Sprintf("met=%v  %s  criterion %q", stored.Met, ev, truncateCell(stored.Criterion, 72))
 	if n := len(stored.Attempts); n > 0 {
@@ -543,6 +658,16 @@ func readbackRowLabel(rb apiclient.TaskReadback) string {
 // a met flip, because a miss flips nothing.
 func stampMismatches(req stampRequest, stored taskboard.CriterionItem) []string {
 	var out []string
+	// THE ALIGNMENT CHECK, and it is FIRST because it is the only one that can
+	// fail on a write the store is perfectly happy with. Every other mismatch
+	// below asks "did the value land"; this one asks "did it land where the
+	// AUTHOR said it should", which is a question no value read from the row can
+	// pose (tasks_stamp_expect_pin.go).
+	if req.pin != nil {
+		if p := stampPinReadbackProblem(*req.pin, req.index, stored.Criterion); p != "" {
+			out = append(out, p)
+		}
+	}
 	if want := strings.TrimSpace(req.text); want != "" && want != strings.TrimSpace(stored.Criterion) {
 		out = append(out, "the row at that index is a DIFFERENT criterion than the one named by --criterion-text")
 	}
@@ -612,6 +737,11 @@ type stampArgs struct {
 	met           bool
 	miss          bool
 	withdraw      bool
+	// expect is the AUTHOR-TYPED pin, verbatim as it was typed
+	// (`<index>:<first words>`), or "" when none was given. It is the one value
+	// in this struct that does not come from the row being stamped — see
+	// tasks_stamp_expect_pin.go.
+	expect string
 	// mergeGated is FLAG PRESENCE, not permission: `--merge-gated` appeared in
 	// the tail at all.
 	mergeGated bool
@@ -619,6 +749,14 @@ type stampArgs struct {
 	// blank reason is a usage refusal (see runTaskStamp) — the whole point of
 	// the change is that the override can no longer be free.
 	mergeGatedReason string
+	// note / evidence record the TEXT each flag carried; hasNote / hasEvidence
+	// record whether the flag was TYPED AT ALL. Those are different questions:
+	// `--evidence ""` is still a caller reaching for the wrong field on a miss,
+	// and the refusal has to say so rather than silently treating it as absent.
+	note        string
+	evidence    string
+	hasNote     bool
+	hasEvidence bool
 }
 
 // parseStampArgs pulls the criterion index, criterion-text, the met/miss
@@ -692,6 +830,24 @@ func parseStampArgs(tail []string, mergeGatedType string) (stampArgs, []string) 
 			}
 		case "--criterion-text":
 			sa.criterionText = spaceVal()
+		case "--note":
+			sa.note = spaceVal()
+			sa.hasNote = true
+		case "--evidence":
+			sa.evidence = spaceVal()
+			sa.hasEvidence = true
+		case stampExpectFlag:
+			// CLIENT-SIDE AND UNDECLARABLE. The pin is an expectation authored
+			// before the row was read; the server has nothing to do with it and
+			// does not declare the flag, so forwarding it would fail splitArgs
+			// with "unknown flag". Consume the value token too when the
+			// `--expect <pin>` spelling was used, or it would bind as a
+			// positional (the same shape as the legacy --merge-gated strip).
+			sa.expect = spaceVal()
+			if !inline && i+1 < len(tail) && !strings.HasPrefix(tail[i+1], "-") {
+				i++
+			}
+			continue
 		}
 		forward = append(forward, tail[i])
 	}

@@ -24,25 +24,17 @@ defmodule BarkparkCloud.Health do
     FIRST OBSERVED SERVING. Durable; a no-op restart must never move it.
   * `process_since` — when THIS BEAM started. Moves on every restart.
 
-  The plane does not have a durable serving record yet, so `serving_since`
-  here is still the process clock (see `serving/0`) and is emitted with an
-  explicit basis string saying so. Do NOT diff it against the box's
-  `serving_since` until it is durable.
+  `serving_since` is now DURABLE here too: `BarkparkCloud.Health.ServingMemory`
+  keeps one row per sha in the plane's own Postgres, so a restart that deploys
+  nothing cannot move it. It IS comparable to a box's `serving_since` — same
+  meaning, same name, both surviving a restart. The basis string beside it says
+  which of the store's three states produced the value.
   """
 
   require Logger
 
+  alias BarkparkCloud.Health.ServingMemory
   alias BarkparkCloud.Repo
-
-  # The honest label on a gauge a `docker restart` can IMPROVE. Emitted next to
-  # `serving_since` so nobody has to read this module to know what the number
-  # is. Its wording is asserted over the wire in health_test.exs — the test is
-  # the guard that this label cannot be quietly dropped.
-  @serving_since_basis "process-derived: this is when THIS BEAM started, not when this sha was " <>
-                         "first observed serving. A bare restart that deploys nothing moves it " <>
-                         "FORWARD, which makes any lag measured against it read SMALLER. Use " <>
-                         "serving_sha to decide what is deployed; do not read this as a deploy " <>
-                         "timestamp and do not compare it to the box's serving_since."
 
   @type result :: {:ok, map()} | {:error, map()}
 
@@ -93,37 +85,44 @@ defmodule BarkparkCloud.Health do
     `:erlang.system_info(:start_time)`), never env-derived, so config cannot
     fake it. It answers "how long has this PROCESS been up", NOT "how long has
     this SHA been live".
-  * `serving_since` currently carries that SAME process-derived instant, which
-    is why `serving_since_basis` ships beside it saying so in plain words.
+  * `serving_since` is read from `ServingMemory`, NOT from this VM. It is the
+    instant this plane first observed `serving_sha` serving, kept in Postgres
+    and keyed by that sha, and it is normally OLDER than `process_since` —
+    which is the whole point. `nil` is a legal answer (no sha, or the store is
+    unreachable) and `serving_since_basis` says which.
 
-  D417 PLACEHOLDER — READ THIS BEFORE COMPARING SURFACES. On this surface
-  `serving_since` is a PLACEHOLDER for a durable first-observed-serving record
-  that the control plane does not keep yet. Proved by run, not by reading: two
-  BEAMs running this exact body back to back reported lag 6,334 ms -> 263 ms,
-  with `serving_since` moving FORWARD 6.4 s — a 24x "improvement" from changing
-  nothing about what is deployed. The box (`ServingMemory`) uses this name for
-  the DURABLE instant, and renders an ISO-8601 string where this renders a
-  `%DateTime{}`. Do NOT compare the plane's `serving_since` to the box's until
-  this one is durable; compare `serving_sha` instead, and use `process_since`
-  when you mean uptime. Making it durable is a separate slice.
+  D417 CLOSED — it used to be the process clock, and this is the paragraph that
+  used to warn you about it. Proved by run, not by reading: two BEAMs running
+  the OLD body back to back reported lag 6,334 ms -> 263 ms, with
+  `serving_since` moving FORWARD 6.4 s — a 24x "improvement" from changing
+  nothing about what is deployed. That is fixed: the value now comes from a
+  durable per-sha record, so a bare restart cannot move it and the plane's
+  `serving_since` IS comparable to the box's. `process_since` is still here,
+  still boot-local, and is still what you want when you mean uptime.
   """
   @spec serving() :: %{
           git_sha: String.t() | nil,
           serving_sha: String.t() | nil,
-          serving_since: DateTime.t(),
+          serving_since: DateTime.t() | nil,
           process_since: DateTime.t(),
           serving_since_basis: String.t()
         }
   def serving do
+    # The RAW env value is what `git_sha`/`serving_sha` publish — that reader's
+    # contract is "absent means nil, present means exactly what you set", and it
+    # is asserted against three injected values. ServingMemory validates the
+    # same string for its own key and answers `nil` for anything that is not a
+    # git object name, so a branch name exported by mistake shows up as a sha
+    # you can see and a serving_since that declines to guess.
     sha = System.get_env("BARKPARK_GIT_SHA")
-    process_since = vm_started_at()
+    memory = ServingMemory.read(sha: sha)
 
     %{
       git_sha: sha,
       serving_sha: sha,
-      serving_since: process_since,
-      process_since: process_since,
-      serving_since_basis: @serving_since_basis
+      serving_since: memory.serving_since,
+      process_since: vm_started_at(),
+      serving_since_basis: memory.serving_since_basis
     }
   end
 

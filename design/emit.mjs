@@ -73,6 +73,18 @@ export const repoRoot = join(here, "..");
 export const rawTokens = JSON.parse(readFileSync(join(here, "tokens.json"), "utf8"));
 const activeTheme = JSON.parse(readFileSync(join(here, "themes", "evergreen.json"), "utf8"));
 
+// ── the SECOND source: design/status-manifest.json (the white ladder) ─────────
+// tokens.json owns colour/type/motion; the STATUS VOCABULARY (roles, glyphs,
+// labels, meanings, and the stored-status→role map) has always lived next door in
+// design/status-manifest.json, which the Elixir side reads at COMPILE time and
+// the CSS tone block is generated from. The two JS/TS surfaces were the last
+// hand-typed copies of it (tlv-bl-js-vocab-generator): a comment, then a
+// byte-check, guarded them. They are emitted here instead, so drift is not
+// detected — it is impossible.
+export const statusManifest = JSON.parse(
+  readFileSync(join(here, "status-manifest.json"), "utf8"),
+);
+
 // structural deep-equality — used by the seam guard. Compares by shape and
 // primitive value (order-independent for objects), so a non-string leaf that
 // silently drifted (e.g. status.warn.strong flipping) is caught, not skipped.
@@ -337,6 +349,32 @@ const ACTION_LABELS_MARKER_BEGIN =
   "/* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
 const ACTION_LABELS_MARKER_END = "/* END GENERATED: audit action labels */";
 
+// The bp-graph.js Canvas palette (task au-r6). Canvas 2D `ctx.fillStyle` cannot
+// consume `var()`, so the force-graph renderer assigns CONCRETE colour strings at
+// paint time — which is exactly why it carried a hand-authored JS palette that no
+// design gate could reach, exempted-with-rationale in design/exemptions.json. The
+// fix is emit-time, not runtime: tokens.json's `color.graphCanvas.graph` is now the
+// sole source, and this marker splices the concrete values into the renderer as a
+// generated region. Emit-time (not an init-time computed-style probe) because
+// bp-graph.js ships as a STATIC asset on four surfaces — two of them starter
+// templates with no Barkpark stylesheet to probe — so a runtime resolver would have
+// no governed CSS to read and would need a hand-written fallback palette, i.e. the
+// very thing this removes. One artifact per copy keeps all four byte-identical.
+const GRAPH_PALETTE_MARKER_BEGIN =
+  "/* BEGIN GENERATED: bp-graph-palette (design/tokens.json color.graphCanvas.graph via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
+const GRAPH_PALETTE_MARKER_END = "/* END GENERATED: bp-graph-palette */";
+
+// Every bp-graph.js copy. scripts/check-bp-graph-drift.sh holds these four
+// byte-identical; emitting each one separately from the SAME build() is what keeps
+// that true through a token change (a single-copy artifact would red the drift
+// tripwire on the next --write).
+export const GRAPH_PALETTE_PATHS = [
+  "api/priv/static/assets/bp-graph.js",
+  "web/public/bp-graph.js",
+  "templates/search-starter/public/bp-graph.js",
+  "templates/astro-search-starter/public/bp-graph.js",
+];
+
 // ── color helpers ───────────────────────────────────────────────────────────
 const hsl = (ch) => `hsl(${ch})`;
 const alpha = (a) => String(a); // 0.15 -> "0.15", 0.2 -> "0.2"
@@ -390,6 +428,20 @@ function statusVars(theme, indent, t = tokens) {
       .join(" "),
   ];
   return lines.map((l) => indent + l).join("\n");
+}
+
+// The VERDICT pair (color.verdict) → `--bp-verdict-loss/-soft` +
+// `--bp-verdict-peace/-soft` on the PAPER reading surface. Emitted as resolved
+// hex, not as an hsl() channel triplet like the status roles: a verdict has no
+// alpha-derived `-soft` companion to compose — its soft ground is its OWN derived
+// leaf (AA-walked against, not faded out of, the ink), so there is nothing for a
+// channel split to buy. `--bp-` and not `--tok-` because the consumers read it
+// directly (the `--tok-*`→`--bp-*` bridge exists for the values paper-surface.css
+// recomposes; these are read as-is).
+const VERDICT_ROLES = ["loss", "loss-soft", "peace", "peace-soft"];
+function verdictVars(theme, indent, t = tokens) {
+  const v = t.color.verdict;
+  return indent + VERDICT_ROLES.map((r) => `--bp-verdict-${r}: ${v[r][theme]};`).join(" ");
 }
 
 function baseVars(theme, indent, t = tokens) {
@@ -722,10 +774,12 @@ const paperThemeBlock = (name, t) => [
   `html[data-bp-theme="${name}"] .bp-paper-surface, html[data-bp-theme="${name}"] .bp-paper-body {`,
   paperColorVars("light", "  ", t),
   statusVars("light", "  ", t),
+  verdictVars("light", "  ", t),
   "}",
   `html[data-bp-theme="${name}"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="${name}"][data-theme="dark"] .bp-paper-body {`,
   paperColorVars("dark", "  ", t),
   statusVars("dark", "  ", t),
+  verdictVars("dark", "  ", t),
   "}",
 ].join("\n");
 
@@ -832,17 +886,21 @@ function paperBlock(themes = loadThemes()) {
     ".bp-paper-surface, .bp-paper-body {",
     readingVars,
     statusVars("light", "  "),
+    verdictVars("light", "  "),
     "}",
     "@media (prefers-color-scheme: dark) {",
     "  .bp-paper-surface, .bp-paper-body {",
     statusVars("dark", "    "),
+    verdictVars("dark", "    "),
     "  }",
     "}",
     'html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {',
     statusVars("light", "  "),
+    verdictVars("light", "  "),
     "}",
     'html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {',
     statusVars("dark", "  "),
+    verdictVars("dark", "  "),
     "}",
     "/* lifecycle glyph tones — the CSS half of the §6 GUI/TUI parity assertion */",
     lifeClasses("light"),
@@ -1106,6 +1164,141 @@ function webTokensTs() {
     "",
     "/** The step order the reading ladder is displayed in (display → body). */",
     `export const readingTypeOrder = [${READING_STEPS.map((s2) => `"${s2}"`).join(", ")}] as const;`,
+    "",
+  ].join("\n");
+}
+
+// ── surface: react status vocabulary (js/packages/react/src/status-vocab.gen.ts)
+// The white ladder, emitted from design/status-manifest.json. Until
+// tlv-bl-js-vocab-generator this table was TYPED BY HAND in inline.tsx with a
+// comment ("this comment IS the guard") and later a byte-check
+// (status-manifest-check.sh Part 5) standing in for generation. Neither is a
+// source of truth; this file is generated from one, so the react legend cannot
+// drift from the manifest by construction.
+//
+// What is NOT here, deliberately: the JS-only fail-open `unknown` sentinel (D11).
+// It is never a lifecycle state and appears in NO manifest, so it stays authored
+// in inline.tsx and is appended there. Everything the manifest owns — role order,
+// glyph, spinner, label, meaning, the stored-status→role map and the default role
+// — comes from here.
+//
+// Single quotes / no semicolons: the js package's prettier style, so the
+// generated file reads like its neighbours and passes `pnpm lint`.
+function tsq(s) {
+  return `'${String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
+export function reactStatusVocabTs() {
+  const m = statusManifest;
+  // Prettier's own printWidth=100 rule, applied HERE so the emitted file is
+  // prettier-clean the moment it is written (js-tests runs `prettier --check`
+  // over packages/*/src). A generated file that the formatter would rewrite is a
+  // standing diff nobody may fix, because fixing it by hand is the very thing
+  // design/check.mjs Part A reds — so the emitter formats, not the formatter.
+  const roleRows = m.roles.flatMap((r) => {
+    const fields = [
+      `role: ${tsq(r.role)}`,
+      `glyph: ${tsq(r.glyph)}`,
+      `spinner: ${r.spinner === true}`,
+      `label: ${tsq(r.label)}`,
+      `meaning: ${tsq(r.meaning)}`,
+    ];
+    const oneLine = `  { ${fields.join(", ")} },`;
+    if (oneLine.length <= 100) return [oneLine];
+    return ["  {", ...fields.map((f) => `    ${f},`), "  },"];
+  });
+  const statusRows = Object.entries(m.statuses).map(
+    ([status, role]) => `  ${/^[A-Za-z_$][\w$]*$/.test(status) ? status : tsq(status)}: ${tsq(role)},`,
+  );
+  return [
+    "// Code generated by design/emit.mjs from design/status-manifest.json. DO NOT EDIT.",
+    "// Regenerate: node design/emit.mjs --write",
+    "//",
+    "// The white ladder (D15) — the ONE task-status vocabulary, shared with the",
+    "// Elixir emitters (Render.StatusVocab reads the same manifest at compile time),",
+    "// the paper-surface --st-* tone tokens and the Go pdrender board. A manifest",
+    "// edit re-emits this file; hand-editing it is caught by design/check.mjs Part A.",
+    "//",
+    "// The JS-only fail-open `unknown` sentinel (D11) is NOT a manifest role and is",
+    "// appended by src/inline.tsx, which owns it.",
+    "",
+    "/** One rung of the status ladder. */",
+    "export interface StatusRole {",
+    "  role: string",
+    "  glyph: string",
+    "  spinner: boolean",
+    "  label: string",
+    "  meaning: string",
+    "}",
+    "",
+    "/** The manifest roles, in manifest order. */",
+    "export const MANIFEST_STATUS_ROLES: StatusRole[] = [",
+    ...roleRows,
+    "]",
+    "",
+    "/** Stored lifecycle status → ladder role (the manifest `statuses` map, aliases",
+    " *  and terminal states included). */",
+    "export const MANIFEST_STATUS_TO_ROLE: Record<string, string> = {",
+    ...statusRows,
+    "}",
+    "",
+    "/** The role an ABSENT/empty status falls back to (the manifest `default_role`). */",
+    `export const MANIFEST_DEFAULT_ROLE = ${tsq(m.default_role)}`,
+    "",
+  ].join("\n");
+}
+
+// ── surface: web status ladder (web/lib/status-ladder.gen.ts) ─────────────────
+// The web board's projection of the SAME ladder. Shape differs from the react
+// one (a `glyph_role` column, no `meaning`) because it byte-mirrors the Elixir
+// golden the cross-surface parity suite compares against — so it is a second
+// PROJECTION of the manifest, never a second copy of it. Double quotes and
+// semicolons: web/'s house style.
+export function webStatusLadderTs() {
+  const m = statusManifest;
+  const q = (s) => JSON.stringify(String(s));
+  const rows = m.roles.map(
+    (r) =>
+      `  { role: ${q(r.role)}, glyph_role: ${q(r.role)}, glyph: ${q(r.glyph)}, ` +
+      `spinner: ${r.spinner === true}, label: ${q(r.label)} },`,
+  );
+  const statusRows = Object.entries(m.statuses).map(
+    ([status, role]) => `  ${/^[A-Za-z_$][\w$]*$/.test(status) ? status : q(status)}: ${q(role)},`,
+  );
+  return [
+    "// Code generated by design/emit.mjs from design/status-manifest.json. DO NOT EDIT.",
+    "// Regenerate: node design/emit.mjs --write",
+    "//",
+    "// The white ladder (D15) as the web board projects it — the cross-surface",
+    "// parity KEY that __tests__/component-golden-parity.test.ts compares against the",
+    "// Elixir-emitted golden. Hand-editing this file is caught by design/check.mjs",
+    "// Part A; a manifest edit re-emits it.",
+    "",
+    "/** One projected ladder row (no `meaning` — the golden does not carry it). */",
+    "export interface LadderRow {",
+    "  role: string;",
+    "  glyph_role: string;",
+    "  glyph: string;",
+    "  spinner: boolean;",
+    "  label: string;",
+    "}",
+    "",
+    "/** The white ladder in manifest order. */",
+    "export const STATUS_LADDER: LadderRow[] = [",
+    ...rows,
+    "];",
+    "",
+    "/** The canonical manifest role names — the legend-projection scope. The JS-only",
+    " *  fail-open `unknown` sentinel is never a lifecycle state and is never here. */",
+    `export const MANIFEST_ROLE_NAMES: readonly string[] = [${m.roles.map((r) => q(r.role)).join(", ")}];`,
+    "",
+    "/** Stored lifecycle status → ladder role (the manifest `statuses` map). */",
+    "export const MANIFEST_STATUS_TO_ROLE: Record<string, string> = {",
+    ...statusRows,
+    "};",
+    "",
+    "/** The role an ABSENT/empty status falls back to (the manifest `default_role`). */",
+    `export const MANIFEST_DEFAULT_ROLE = ${q(m.default_role)};`,
     "",
   ].join("\n");
 }
@@ -2470,6 +2663,95 @@ function bulldocsBlock(themes = loadThemes()) {
 // carries the newline). This kills the GR12 drift: the SPA's identity picker
 // reads BP_THEMES at runtime, so a new design/themes/<id>.json reaches the picker
 // the moment `emit --write` runs — no second hand-list to forget.
+// ── the bp-graph.js Canvas palette block (task au-r6) ────────────────────────
+// Emits the renderer's colour constants from tokens.json. Only COLOUR lives here:
+// alphas, radii, zoom-fade multipliers and the font stack stay hand-written in
+// bp-graph.js outside the marker, because they are not colour tokens and moving
+// them would put non-design geometry under the theme compiler.
+export function graphPaletteBlock(t = tokens) {
+  const g = t.color.graphCanvas.graph;
+  const q = (v) => JSON.stringify(v);
+  const L = [];
+  const line = (name, value) => L.push(`  var ${name} = ${q(value)};`);
+
+  L.push("  // Obsidian-faithful restyle: small flat dots, thin faint threads, near-");
+  L.push("  // monochrome, generous void. Beauty through restraint.");
+  line("ACCENT", g.accent);
+  // DERIVED from accent, never a second token: a hand-kept `accentRgb` sibling
+  // silently survives an `accent` edit (measured — the mutation proof for au-r6
+  // changed accent and ACCENT_RGB stayed on the old hue), which is the exact drift
+  // this task exists to remove.
+  const rgbOf = (hex) => {
+    let h = hex.replace("#", "");
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  };
+  L.push(`  var ACCENT_RGB = [${rgbOf(g.accent).join(", ")}];`);
+  line("A11Y_RING", g.a11yRing);
+  line("SLATE", g.slate);
+  line("AMBER", g.amber);
+  L.push("");
+  L.push("  // Monochrome node tint — one muted desaturated lavender-grey for EVERY node");
+  L.push("  // on dark (the default look). Per-type colour is the opt-in \"Full color\" toggle.");
+  line("MONO_DARK", g.monoDark);
+  line("MONO_LIGHT", g.monoLight);
+  line("NODE_WHITE", g.nodeWhite);
+  line("NODE_INK_LIGHT", g.nodeInkLight);
+  L.push("");
+  L.push("  // Flat theme backgrounds (no gradient, no vignette).");
+  line("BG_DARK", g.bgDark);
+  line("BG_LIGHT", g.bgLight);
+  L.push("");
+  L.push("  // Link base colour channels — very faint thin threads (alphas stay outside).");
+  line("LINK_RGB_DARK", g.linkRgbDark);
+  line("LINK_RGB_LIGHT", g.linkRgbLight);
+  L.push("");
+  L.push("  // Label colours: resting, hovered, and the mix targets a matched label walks to.");
+  line("LABEL_COLOR_DARK", g.labelDark);
+  line("LABEL_COLOR_LIGHT", g.labelLight);
+  line("LABEL_HOT_DARK", g.labelHotDark);
+  line("LABEL_HOT_LIGHT", g.labelHotLight);
+  line("LABEL_MIX_DARK", g.labelMixDark);
+  line("LABEL_MIX_LIGHT", g.labelMixLight);
+  line("LABEL_HOV_DARK", g.labelHovDark);
+  line("LABEL_SHADOW_DARK", g.labelShadowDark);
+  line("LABEL_SHADOW_LIGHT", g.labelShadowLight);
+  L.push("");
+  L.push("  // Canvas toast pill + the hover tooltip's own glass.");
+  line("TOAST_BG_DARK", g.toastBgDark);
+  line("TOAST_BG_LIGHT", g.toastBgLight);
+  line("TOAST_BORDER", g.toastBorder);
+  line("TOOLTIP_TITLE_DARK", g.tooltipTitleDark);
+  line("TOOLTIP_TITLE_LIGHT", g.tooltipTitleLight);
+  line("TOOLTIP_META_DARK", g.tooltipMetaDark);
+  line("TOOLTIP_META_LIGHT", g.tooltipMetaLight);
+  line("TOOLTIP_BG_DARK", g.tooltipBgDark);
+  line("TOOLTIP_BG_LIGHT", g.tooltipBgLight);
+  line("TOOLTIP_BORDER_DARK", g.tooltipBorderDark);
+  line("TOOLTIP_BORDER_LIGHT", g.tooltipBorderLight);
+  L.push("");
+  L.push("  // Per-type hues — painted ONLY under the optional \"Full color\" toggle.");
+  L.push("  var TYPE_HEX = {");
+  const hues = Object.entries(g.typeHues).filter(([k]) => !k.startsWith("_"));
+  for (const [k, v] of hues) L.push(`    ${/^[A-Za-z_$][\w$]*$/.test(k) ? k : q(k)}: ${q(v)},`);
+  L.push(`    _unknown: ${q(g.slate)}`);
+  L.push("  };");
+  L.push("");
+  L.push("  // Overlay chrome (legend, zoom strip, toggles, search) — inline styles on the");
+  L.push("  // injected DOM, rebuilt by setTheme() so canvas and chrome flip together.");
+  L.push("  var CHROME_PALETTE = {");
+  for (const mode of ["light", "dark"]) {
+    const c = g.chrome[mode];
+    L.push(`    ${mode}: {`);
+    const keys = Object.keys(c).filter((k) => !k.startsWith("_"));
+    for (const k of keys) L.push(`      ${k}: ${q(c[k])},`);
+    L.push(`      mono: ${q(mode === "light" ? g.monoLight : g.monoDark)}`);
+    L.push(`    }${mode === "light" ? "," : ""}`);
+  }
+  L.push("  };");
+  return L.join("\n");
+}
+
 export function bpThemesList(themes = loadThemes()) {
   return "    " + themes.map(({ name }) => JSON.stringify(name)).join(", ");
 }
@@ -2606,6 +2888,8 @@ export const ARTIFACTS = [
   { name: "/papers reader skin", path: "api/lib/barkpark_web/layouts/bulldocs.html.heex", kind: "css", build: bulldocsBlock },
   { name: "web demo", path: "web/app/globals.css", kind: "css", build: webBlock },
   { name: "web TS tokens", path: "web/lib/tokens.gen.ts", kind: "ts", build: webTokensTs },
+  { name: "react status vocabulary", path: "js/packages/react/src/status-vocab.gen.ts", kind: "ts", build: reactStatusVocabTs },
+  { name: "web status ladder", path: "web/lib/status-ladder.gen.ts", kind: "ts", build: webStatusLadderTs },
   { name: "Go board", path: "internal/taskboard/tokens_gen.go", kind: "go", build: taskboardGo },
   { name: "Go pdrender", path: "internal/pdrender/tokens_gen.go", kind: "go", build: pdrenderGo },
   { name: "Go semrole", path: "internal/semrole/tokens_gen.go", kind: "go", build: semroleGo },
@@ -2617,6 +2901,14 @@ export const ARTIFACTS = [
   { name: "status page chrome", path: "api/lib/barkpark_web/controllers/status_controller.ex", kind: "css", build: statusChromeBlock },
   { name: "/sheets reader", path: "api/lib/barkpark_web/layouts/sheets.html.heex", kind: "css", build: sheetsBlock },
   { name: "living styleguide swatches", path: "cloud/priv/static/styleguide.html", kind: "html", build: styleguideSwatches },
+  { name: "bp-graph palette (1/4)", path: "api/priv/static/assets/bp-graph.js", kind: "css",
+    markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
+  { name: "bp-graph palette (2/4)", path: "web/public/bp-graph.js", kind: "css",
+    markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
+  { name: "bp-graph palette (3/4)", path: "templates/search-starter/public/bp-graph.js", kind: "css",
+    markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
+  { name: "bp-graph palette (4/4)", path: "templates/astro-search-starter/public/bp-graph.js", kind: "css",
+    markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
 ];
 
 // Tolerant of leading indentation on the marker lines (Studio's markers sit

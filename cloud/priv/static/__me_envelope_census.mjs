@@ -83,12 +83,13 @@
 // decoration (drop `is_nil` and the census refuses on unmodified main at
 // `user.confirmed`).
 //
-// HONEST RESIDUAL: moving `onboarding_json/1` into another module — making the
-// call DOTTED — restores the blindness and greens. This census reads ONE file,
-// so a remote helper is genuinely beyond it. The refuse rule is therefore
-// dodgeable by relocating the helper, and nothing reds when it is. Filed:
-// cch-w44-bl-me-census-module-file-map — give this census a module→file map,
-// the shape __binding_census.mjs's CONTEXT_SOURCES already carries.
+// THAT RESIDUAL IS CLOSED (cch-w44-bl-me-envelope-census-blindness-is-dodgeable-by-dotting).
+// It used to read: moving `onboarding_json/1` into another module — making the
+// call DOTTED — restores the blindness and greens, and nothing reds when it
+// does. This census now carries the module→file map __binding_census.mjs's
+// CONTEXT_SOURCES already carried, with the same fail-closed rule: a top-level
+// dotted call whose module is neither mapped nor signed exits 2 NAMING the
+// module and the function. See the MODULE_SOURCES block below.
 //
 // ── NO COUNT LITERAL, EITHER SIDE ───────────────────────────────────────────
 //
@@ -120,6 +121,77 @@ import { SCENARIO_NAMES, route } from "./__preview__/scenarios.mjs";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 const ROUTER = process.argv[2] || path.join(here, "../../lib/barkpark_cloud/web/router.ex");
+
+// ── THE MODULE→FILE MAP, AND THE FAIL-CLOSED RULE IT CARRIES (cch-w44-bl) ───
+//
+// The header above states an HONEST RESIDUAL: moving `onboarding_json/1` into
+// another module — making the call DOTTED — restored the blindness and greened,
+// and nothing red when it did. This is that residual closed, under the rule
+// __binding_census.mjs already states for its own CONTEXT_SOURCES, quoted
+// verbatim (re-derive it with
+// `grep -n 'would be the way to buy silence' cloud/priv/static/__binding_census.mjs`):
+//
+//     "A module-qualified context_fn whose module is absent here is a FAILURE,
+//      not a skip — otherwise naming an unmapped module would be the way to buy
+//      silence from the check."
+//
+// So a TOP-LEVEL dotted call in a /v1/me value is now exactly one of three
+// things, never a silent fourth:
+//
+//   mapped     — its module is in MODULE_SOURCES, so that file is read and the
+//                callee's clauses are walked by the SAME resolver that walks a
+//                bare local. A map literal joins the census under the calling
+//                key's prefix; a clause set with no `%{` anywhere is opaque and
+//                is opaque BECAUSE IT WAS SEEN, not because it was skipped.
+//   signed     — its module is in MODULE_ALLOWLIST, a committed list a PERSON
+//                edited, whose length is pinned by the LITERAL below.
+//   a refusal  — exit 2, naming the module AND the function, so the red says
+//                what to do instead of printing a bare exit code.
+//
+// TOP-LEVEL is the discriminator, and it is the right one: the OUTERMOST call
+// of a value is the one that states the value's shape, and everything inside
+// its parens is an argument to it. `onboarding: team &&
+// onboarding_json(Accounts.onboarding_status(team))` states its shape through
+// the BARE local `onboarding_json`; `Accounts.onboarding_status` sits in
+// argument position and says nothing about the JSON. Rewrite that value as
+// `Onboarding.json(Accounts.onboarding_status(team))` and `Onboarding.json`
+// becomes the top-level call — unmapped, unsigned — and this census exits 2
+// instead of greening on a five-key subtree it can no longer see. That is the
+// whole dodge the header confessed to, closed.
+//
+// SIGNING IS THE LAST RESORT, AND NOTHING IN THIS REPO IS SIGNED. All five
+// legitimate scalar-returning remote calls in the /v1/me map —
+// `Accounts.two_factor_enabled?/1`, `Accounts.team_role/2`,
+// `Authz.team_admin?/2`, `Authz.team_owner?/2` and
+// `Notifications.platform_admin_emails/0` — are MAPPED, not signed: this census
+// opens their modules, reads every clause head, and PROVES none returns a map
+// literal. So are the three the SIBLING census reaches (`Sites.Deploy`,
+// `DeployLedger`, `FailureCopy`). The only signed entries are `Atom` and
+// `Enum`, ELIXIR STDLIB modules whose source this repo does not hold and which
+// cannot state a router map at all — the one shape that is genuinely beyond
+// the map rather than merely inconvenient to add to it. A repo module in this
+// list would be exactly the silence the rule forbids, bought one line lower
+// down.
+//
+// The pin is a LITERAL, never derived, on the `check-doc-budgets.sh
+// CAPS_ROWS_EXPECTED=28` model: an entry cannot be added without a person
+// moving the number beside it in the same commit. Derive the expectation from
+// the list and a blind reader can make both sides agree at ANY length, which
+// is the failure the allowlist exists to prevent.
+const MODULE_SOURCES = {
+  Accounts: path.join(here, "../../lib/barkpark_cloud/accounts.ex"),
+  Authz: path.join(here, "../../lib/barkpark_cloud/accounts/authz.ex"),
+  Notifications: path.join(here, "../../lib/barkpark_cloud/notifications.ex"),
+  // Reached only by the SIBLING census (__envelope_census.mjs), whose
+  // /v1/sites serializer states `url:` through a remote call. Mapped here
+  // rather than signed, for the same reason as the five above: this census
+  // can open the file and PROVE the callee returns no map literal.
+  "Sites.Deploy": path.join(here, "../../lib/barkpark_cloud/sites/deploy.ex"),
+  DeployLedger: path.join(here, "../../lib/barkpark_cloud/deploy_ledger.ex"),
+  FailureCopy: path.join(here, "../../lib/barkpark_cloud/failure_copy.ex"),
+};
+const MODULE_ALLOWLIST = ["Atom", "Enum"];
+const MODULE_ALLOWLIST_EXPECTED = 2;
 
 // ── THIS FILE IS ALSO A PARSER LIBRARY (cch-w43-bl) ─────────────────────────
 //
@@ -276,6 +348,15 @@ function bareLocalCalls(value) {
   return names;
 }
 
+// An Elixir function name may end in `?` or `!`, and BOTH are regex
+// metacharacters. Interpolating `two_factor_enabled?` raw turns the final `d?`
+// into a quantifier, so the head regex matches `def two_factor_enable` — a
+// name that does not exist — and the resolver reports NO CLAUSE for a function
+// that has two. Before the module map below, no /v1/me name ended in `?` and
+// the bug was unreachable; `Accounts.two_factor_enabled?/1` and
+// `Authz.team_admin?/2` are the first names this census resolves that do.
+const reName = (n) => n.replace(/[?!]/g, "\\$&");
+
 // Names currently being resolved, so a helper that (directly or through another
 // helper) calls itself refuses instead of recursing forever.
 const RESOLVING = new Set();
@@ -301,8 +382,8 @@ export function localHelperMap(blanked, name, self) {
   // counted for the arity check and are never walked: with >1 clause we refuse,
   // and with a lone paren-less clause `clauses` is empty and the "no clause"
   // arm below refuses too.
-  const paren = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*\\(`, "g");
-  const bare = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*(,|do\\b)`, "g");
+  const paren = new RegExp(`(^|\\n)\\s*defp?\\s+${reName(name)}\\s*\\(`, "g");
+  const bare = new RegExp(`(^|\\n)\\s*defp?\\s+${reName(name)}\\s*(,|do\\b)`, "g");
   const clauses = [];
   let m;
   while ((m = paren.exec(blanked)) !== null) clauses.push(m.index + m[0].length - 1); // index of `(`
@@ -376,7 +457,7 @@ export function localHelperMap(blanked, name, self) {
 // is that this census is on the hook for its keys.
 export function namedHelperMap(blanked, name, arity) {
   const searched = `${path.relative(process.cwd(), CTX.router)} (searched for \`defp ${name}/${arity}\`)`;
-  const head = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*\\(`, "g");
+  const head = new RegExp(`(^|\\n)\\s*defp?\\s+${reName(name)}\\s*\\(`, "g");
   const matches = [];
   let m;
   while ((m = head.exec(blanked)) !== null) {
@@ -458,7 +539,7 @@ export function namedHelperMap(blanked, name, arity) {
 // seen still refuses, so the dodge this closes stays closed.
 export function scalarOrMapHelper(blanked, name, self) {
   const searched = `${path.relative(process.cwd(), CTX.router)} (searched for \`defp ${name}\`)`;
-  const head = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*(\\(|,|do\\b)`, "g");
+  const head = new RegExp(`(^|\\n)\\s*defp?\\s+${reName(name)}\\s*(\\(|,|do\\b)`, "g");
   let seen = 0;
   const maps = [];
   let m;
@@ -514,6 +595,110 @@ export function scalarOrMapHelper(blanked, name, self) {
   return maps.length ? maps[0] : null;
 }
 
+// ── THE DOTTED LEG: RESOLVE THROUGH THE MAP, OR REFUSE (cch-w44-bl) ─────────
+//
+// `bareLocalCalls` above excludes a dotted call BY CONSTRUCTION (the preceding
+// `.` fails its boundary class) and, before this slice, nothing else looked at
+// one: a dotted value fell straight through to `continue` and its whole subtree
+// went uncompared behind a clean `ok` line. These three functions are the other
+// half — the map, the signature check, and the refusal.
+
+// The dotted calls a value makes AT PAREN DEPTH ZERO — the outermost calls,
+// the ones that state the value's shape. A dotted call nested inside another
+// call's parens is an ARGUMENT and is deliberately not collected: see the
+// MODULE_SOURCES header for why `Accounts.onboarding_status` inside
+// `onboarding_json(...)` states nothing about the /v1/me JSON.
+export function topLevelDottedCalls(value) {
+  const out = [];
+  let depth = 0;
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i];
+    if (c === "(" || c === "{" || c === "[") { depth++; continue; }
+    if (c === ")" || c === "}" || c === "]") { depth--; continue; }
+    if (depth !== 0) continue;
+    if (!/[A-Z]/.test(c)) continue;
+    if (i > 0 && /[\w.]/.test(value[i - 1])) continue;
+    const m = /^([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*)\.([a-z_][A-Za-z0-9_]*[?!]?)\s*\(/.exec(value.slice(i));
+    if (!m) continue;
+    out.push({ mod: m[1], fn: m[2] });
+    // Resume one char BEFORE the `(` this match ends on, so the loop's own
+    // `i++` lands on it and the depth counter still sees it open.
+    i += m[0].length - 2;
+  }
+  return out;
+}
+
+// MODULE_ALLOWLIST is a list a person edits and MODULE_ALLOWLIST_EXPECTED is a
+// literal beside it. Deriving the expectation from the list would let a blind
+// reader make both sides agree with themselves at any length, which is the
+// failure mode the allowlist exists to prevent; comparing a literal to a
+// literal is the CAPS_ROWS_EXPECTED=28 shape and cannot.
+function assertAllowlistPin() {
+  if (MODULE_ALLOWLIST.length !== MODULE_ALLOWLIST_EXPECTED) {
+    CTX.die2([
+      `FAIL(2): MODULE_ALLOWLIST holds ${MODULE_ALLOWLIST.length} signed module(s) and`,
+      `         MODULE_ALLOWLIST_EXPECTED is ${MODULE_ALLOWLIST_EXPECTED}.`,
+      `         signed: ${MODULE_ALLOWLIST.length ? MODULE_ALLOWLIST.join(", ") : "(none)"}`,
+      `         An allowlist that can grow without a person moving the literal beside it is not a`,
+      `         signature, it is a default-allow arm with a comment on it.`,
+    ]);
+  }
+}
+
+// Blanked source per mapped module, read once.
+const REMOTE_BLANKED = new Map();
+function remoteBlanked(mod, file, self, fn) {
+  if (!REMOTE_BLANKED.has(file)) {
+    let src;
+    try {
+      src = fs.readFileSync(file, "utf8");
+    } catch (e) {
+      CTX.die2([
+        `FAIL(2): \`${self}\` is built by \`${mod}.${fn}(...)\` and module \`${mod}\` maps to ${file},`,
+        `         which is not readable — so this census cannot say whether that call states a map.`,
+        `         ${e.message}`,
+      ]);
+    }
+    REMOTE_BLANKED.set(file, blank(src));
+  }
+  return REMOTE_BLANKED.get(file);
+}
+
+// The region a top-level dotted call states, or null when every clause of it is
+// provably scalar. Never "skip": an unmapped, unsigned module exits 2 NAMING
+// the module and the function.
+export function dottedShapingRegion(mod, fn, self) {
+  assertAllowlistPin();
+  if (MODULE_ALLOWLIST.includes(mod)) return null;
+  const file = MODULE_SOURCES[mod];
+  if (!file) {
+    CTX.die2([
+      `FAIL(2): \`${self}\` is built by the remote call \`${mod}.${fn}(...)\`, and \`${mod}\` is neither`,
+      `         mapped in MODULE_SOURCES nor signed into MODULE_ALLOWLIST.`,
+      `         unmapped module   : ${mod}`,
+      `         unmapped call     : ${mod}.${fn}`,
+      `         stated at key path: ${self}`,
+      `         A module-qualified target whose module is absent from the map is a FAILURE, not a`,
+      `         skip — otherwise naming an unmapped module would be the way to buy silence from`,
+      `         this census (the rule __binding_census.mjs states for CONTEXT_SOURCES). Either map`,
+      `         \`${mod}\` to its source file, or sign it into MODULE_ALLOWLIST and move`,
+      `         MODULE_ALLOWLIST_EXPECTED in the same commit.`,
+    ]);
+  }
+  const blanked = remoteBlanked(mod, file, self, fn);
+  // scalarOrMapHelper reads CTX.router for nothing but its `searched` label, so
+  // point the label at the file actually being searched; a refusal that named
+  // router.ex while reading accounts.ex would send the reader to the wrong file.
+  const saved = CTX.router;
+  CTX.router = file;
+  try {
+    const region = scalarOrMapHelper(blanked, fn, `${self} (via ${mod}.${fn})`);
+    return region ? { blanked, region } : null;
+  } finally {
+    CTX.router = saved;
+  }
+}
+
 // Walk a map body into key paths. `blanked` drives the structure, `raw` is read
 // for nothing but nicer failure messages.
 export function walkMap(blanked, region, prefix, out, trail) {
@@ -540,10 +725,57 @@ export function walkMap(blanked, region, prefix, out, trail) {
     // Absolute offset of the first `%{` inside this value, if any.
     const rel = value.indexOf("%{");
     if (rel === -1) {
+      // ── THE DOTTED LEG FIRST (cch-w44-bl) ───────────────────────────────
+      // A top-level REMOTE call can hide a whole map too, and used to fall
+      // straight through this branch's `continue` with no line spent on it.
+      // `dottedShapingRegion` resolves it through MODULE_SOURCES or exits 2
+      // naming the module and the function; it answers null only for a module
+      // a person SIGNED, or for a callee whose every clause was SEEN and
+      // returns no map literal. There is deliberately NO per-caller opt-out:
+      // an "answer opaque here" switch is the same default-allow arm the
+      // unmapped-module refusal exists to remove, one indirection further out.
+      // Both censuses that use this walker run under the rule.
+      const remoteShaping = [];
+      for (const r of topLevelDottedCalls(value)) {
+        const res = dottedShapingRegion(r.mod, r.fn, self);
+        if (res) remoteShaping.push({ ...r, ...res });
+      }
+      if (remoteShaping.length > 1) {
+        CTX.die2([
+          `FAIL(2): \`${self}\` is built by ${remoteShaping.length} top-level remote calls that each return a map`,
+          `         (${remoteShaping.map((r) => r.mod + "." + r.fn).join(", ")}) and this census cannot say which`,
+          `         one states its shape.`,
+        ]);
+      }
       // No literal here — but a BARE local call can still hide a whole map
       // (`onboarding: team && onboarding_json(...)`). Resolve it in this file
       // rather than answering "opaque" to a question this census can answer.
       const local = bareLocalCalls(value);
+      if (remoteShaping.length === 1) {
+        const r = remoteShaping[0];
+        if (local.length) {
+          CTX.die2([
+            `FAIL(2): \`${self}\` is shaped by the remote call \`${r.mod}.${r.fn}(...)\` AND carries the bare`,
+            `         local call(s) ${local.join(", ")} at top level. This census will not pick one and call`,
+            `         it the shape.`,
+          ]);
+        }
+        const key = `${r.mod}.${r.fn}`;
+        if (RESOLVING.has(key)) {
+          CTX.die2([
+            `FAIL(2): \`${key}\`, reached from \`${self}\`, resolves through itself — this census cannot`,
+            `         state a shape for a recursive builder.`,
+          ]);
+        }
+        RESOLVING.add(key);
+        // The nested map lives in the REMOTE module's text, so the walk
+        // continues against that file's blanked source: a bare local call
+        // inside it is a local of THAT module, and resolving it against
+        // router.ex would hunt a `defp` in the wrong file.
+        walkMap(r.blanked, r.region, self + (isList ? "[]." : "."), out, self);
+        RESOLVING.delete(key);
+        continue;
+      }
       if (!local.length) continue; // genuinely opaque: a remote call, a variable, a scalar
       if (local.length > 1) {
         // Several bare locals in one value. With the DEFAULT resolver that is a

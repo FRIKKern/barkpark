@@ -125,6 +125,7 @@ set -euo pipefail
 #   scripts/cloud-path-escape-check.sh), and dispatching the whole Elixir suite
 #   on it would be the over-inclusion the tooling/** note above refuses.
 ELIXIR_COMPILE_PATHS='api/**
+VERSION
 cloud/priv/secret-scrub.exs
 design/**
 tooling/pds/pre-gate-papers.json
@@ -297,7 +298,73 @@ scripts/prod-build-cache-guard.sh'
 #   this list could have named in advance. It is 34 committed envelopes / ~255 KB
 #   that move only when a duel is recorded, so the full-suite cost is rare and
 #   bounded, which is the same judgement the templates/** note above records.
+#   THE DOC BYTE-CAP ENTRIES (2026-09-13, task-4c9c1682f5ba5c7a) are the 36 doc
+#   paths NOT ALREADY MATCHED here, plus the cap table itself. 36 is not the
+#   whole table: the CAPS table holds 39 rows (CAPS_ROWS_EXPECTED=39), and the
+#   other three -- api/CLAUDE.md, docs/api-v1.md and docs/api/error-codes.md --
+#   are already covered by pre-existing entries, verified by querying the
+#   matcher rather than by reading this list. Coverage is COMPLETE at 39/39; do
+#   not read the 36 as three docs forgotten. They are here because the caps in
+#   scripts/check-doc-budgets.sh had NO BLOCKING READER. Their only enforcer is
+#   the `Doc budgets + anchors` job, which required-checks.json holds out as
+#   "S4 PATHS-FILTERED: doc-gates.yml only runs on matching paths, so on other
+#   PRs this name is ABSENT - a required absent context never reports". So a
+#   capped doc went 43 B OVER on main (docs/setup/TASK-SYSTEM.md, 16043 B against
+#   a 16000 B cap, via merged #17878 -> #17984 -> #17979) and nothing refused any
+#   of the three. The blocking route is the one the meter rider above already
+#   takes: api/test/barkpark/doc_budget_cap_test.exs reads the cap table and
+#   rides the already-required `Elixir gate`, touching no byte of .github/.
+#   check-doc-budgets.sh is TEST_ONLY, not COMPILE, because the test reads it at
+#   runtime with File.read!/1 and it is not an @external_resource -- the compile
+#   set would assert a recompile dependency that does not exist, and a
+#   compile-time resource filed as test-only would let an edit skip the compile
+#   lane and green vacuously. THE 36 DOC PATHS ARE THE POINT, not padding:
+#   mix-test carries `if: needs.changes.outputs.test == 'true'` and a skipped job
+#   counts as PASSING for a required context, so without them a PR that edits
+#   only a capped doc SKIPS this suite and the cap is enforced on every PR except
+#   the ones that can break it. EXACT FILES, never `docs/**`: that tree churns
+#   constantly and the over-inclusion is what the templates/** and tooling/**
+#   notes above refuse. The two lists cannot silently drift apart either -- the
+#   test's third arm asserts every capped path is matched by a dispatched glob,
+#   so a new cap row landing without its path here REDS the Elixir gate.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
+CLAUDE.md
+js/CLAUDE.md
+AGENTS.md
+docs/INDEX.md
+docs/contracts/bokbasen.md
+docs/contracts/onix-field-map.md
+docs/contracts/webhook-realtime.md
+docs/contracts/paper-corpus-layers.md
+docs/contracts/schema-v2.md
+docs/contracts/portable-doc-inline.md
+docs/contracts/tenancy.md
+docs/contracts/task-claim-lifecycle.md
+docs/contracts/close-packet.md
+docs/contracts/cloud-object-authz.md
+docs/contracts/canonical-impl-markers.md
+docs/contracts/sheets-engine.md
+docs/contracts/document-graph-and-history.md
+docs/contracts/media-http-envelope.md
+README.md
+docs/ops/PROD_OPS.md
+docs/ops/merge-gates.md
+docs/ops/branch-protection-and-overrides.md
+docs/auth.md
+docs/auth-user-sessions.md
+docs/setup/QUICKSTART.md
+docs/setup/TASK-SYSTEM.md
+docs/cheatsheets/bp.md
+docs/cheatsheets/tui.md
+docs/cheatsheets/tasks.md
+docs/cheatsheets/http-api.md
+docs/cheatsheets/papers.md
+docs/setup/AGENTS-MD.md
+docs/setup/AGENT-ONRAMPS.md
+docs/decisions/success-claim-census.md
+scripts/deploy-reliability-exit-2026-08-10.md
+scripts/deploy-reliability-exit-2026-08-17.md
+scripts/check-doc-budgets.sh
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
 api/assets/sheet-grid/**
@@ -307,6 +374,7 @@ cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh
 deploy/site-deploy.sh
 docs/api-v1.md
+js/packages/react/src/client.ts
 docs/api/error-codes.md
 docs/openapi.json
 internal/chat/testdata/**
@@ -523,9 +591,28 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 # Live population when these bounds were set (`--list-escapes | cut -f1,3 |
 # sort -u`, 33 distinct paths): test-cwd 27, test-dir 24, lib-cwd 11,
 # lib-dir 10, test-root 4 — all five DERIVED BY RUNNING the scanner on a clean
-# checkout, never guessed. `lib-root` gets no row because the scanner emits no
-# such tag today: a floor on an unpopulated idiom would red on a clean tree, and
-# the inventory check below is what catches the day api/lib starts using it.
+# checkout, never guessed.
+#
+# `lib-root` USED TO GET NO ROW, and the note here said the inventory check
+# below would catch the day api/lib started using the idiom. That day came
+# (task-2ab4f5f0a07e887a): `Barkpark.BuildInfo` reads the checked-in repo-root
+# `VERSION` file at compile time through `Path.join(@repo_root, "VERSION")`, the
+# scanner tagged it `lib-root`, and the run died with `idiom 'lib-root' has no
+# entry` — the inventory check firing exactly as designed. Measured population
+# on this tree: 1.
+#
+# ITS FLOOR IS 0, NOT 1, and that is a deliberate, measured concession rather
+# than the ~50% rule applied badly. A floor of 1 was tried first: the real tree
+# passed and the HARNESS went 284/0 -> 246/40, because
+# scripts/elixir-path-escape-check.test.sh points ELIXIR_PATH_ESCAPE_ROOT at
+# synthetic fixture trees that carry no api/lib root-anchored read at all, so
+# every fixture case redded on the floor instead of on the behaviour it was
+# staging. A floor that reds on 40 cases it has no opinion about is noise, not
+# enforcement. So this row joins the ten below on the same terms: it exists to
+# satisfy the idiom inventory, it buys no blindness detection, and the door's
+# protection lives in the harness's own rootanchor fixtures. Raise it to ~50%
+# once api/lib's population is large enough that the fixtures' zero stops being
+# the binding constraint.
 # Each bound sits near 40-50% of its live population: retiring
 # several cross-tree reads must never require touching this table, while a
 # blinded door — which takes its idiom to ZERO, not to 60% — reds immediately.
@@ -568,6 +655,7 @@ ELIXIR_ESCAPE_IDIOM_MIN='test-cwd	8
 test-dir	8
 lib-cwd	5
 lib-dir	5
+lib-root	0
 test-root	2
 test-rootpipe	0
 test-rootlist	0

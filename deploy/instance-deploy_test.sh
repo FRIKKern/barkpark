@@ -57,8 +57,20 @@ SCRIPT="$HERE/instance-deploy.sh"
 # grepped for literally.
 VALID_KEK="JZPvbTh4LQuig6PAB7REzJsG5kaHfwCaHNeXFz784Pg="
 fails=0
-pass() { echo "  PASS: $*"; }
-fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
+# TESTS mirrors the counter the two site engines keep, so this harness publishes
+# a total of its OWN (`[selftest] N/M checks passed`) instead of leaving callers
+# to count `PASS:` lines. Counting an instrument's output SHAPE is a weaker
+# thing than reading a number the instrument published, and it rots differently:
+# rename the prefix and every such count silently changes answer while still
+# looking like a measurement. The README count guard at the foot of this file
+# asserts TESTS against deploy/README.md.
+TESTS=0
+# Raised by every block that skips itself for a missing tool. Such a run executed
+# fewer checks than a complete one, so its TESTS is a LOWER BOUND and the README
+# equality below must not be asserted against it.
+SELFTEST_SKIPPED=0
+pass() { TESTS=$((TESTS + 1)); echo "  PASS: $*"; }
+fail() { TESTS=$((TESTS + 1)); echo "  FAIL: $*"; fails=$((fails + 1)); }
 check() { if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
 
 # Replays api/start.sh's committed name-encoding guard in a clean shell, so the
@@ -843,8 +855,10 @@ echo "== Case 13: the shared Caddyfile lock (site-spawner D27) — a concurrent 
 # whether flock is real (fixed) or a no-op stub (locking defeated = the old
 # behaviour). Needs a real flock(1) — absent on macOS.
 if ! command -v flock >/dev/null 2>&1; then
+  SELFTEST_SKIPPED=1
   echo "  SKIP: flock(1) required (absent on macOS) — run this case on Linux/CI"
 elif ! command -v python3 >/dev/null 2>&1; then
+  SELFTEST_SKIPPED=1
   echo "  SKIP: python3 required (site-deploy's throwaway health server)"
 else
   race_setup() {
@@ -1596,4 +1610,40 @@ check "blank previous key: treated as UNSET, no line emitted" \
 rm -rf "$TMP"
 
 echo
+echo "[selftest] $((TESTS - fails))/$TESTS checks passed"
+# --- deploy/README.md count guard (ssw8-selftest-count-guard) ---------------
+# deploy/README.md publishes this harness's check count in prose, and until now
+# NOTHING read it back: the README said 169 while the harness ran 452.
+# Direction matters. The README number is the ASSERTED value; $TESTS, which this
+# run just measured, is the MEASUREMENT. The guard therefore only ever READS the
+# README — a guard that learns its expected value from the thing it guards is
+# inert, and would have agreed with every one of those drifted numbers.
+# Skips cleanly when the README is absent, so a box that ships only the engines
+# without the docs tree is unaffected.
+readme_md="$HERE/README.md"
+if [ ! -f "$readme_md" ]; then
+  echo "[selftest] README count guard: SKIPPED - no $readme_md (engine shipped without the docs tree)"
+elif [ "$SELFTEST_SKIPPED" = 1 ]; then
+  # Asserted only on a COMPLETE run. A run that honestly skipped a block for a
+  # missing tool ran fewer checks, so equality would red on the runner's
+  # toolchain rather than on the drift the guard is looking for.
+  echo "[selftest] README count guard: NOT ASSERTED - a block skipped itself for a missing tool, so $TESTS is a lower bound, not this harness's full count"
+else
+  # The anchor is this harness's own invocation followed by its count, which
+  # occurs exactly once in the README. Zero matches, or more than one, is a
+  # FAILURE and not a pass: a reworded sentence must red here rather than
+  # quietly disarm the guard by matching nothing.
+  readme_anchor='deploy/instance-deploy_test\.sh[^0-9]{1,12}[0-9]+ checks'
+  readme_hits="$(grep -oE "$readme_anchor" "$readme_md" | wc -l | tr -d ' ')"
+  if [ "$readme_hits" != 1 ]; then
+    echo "[selftest] FAILED (1) - README count guard, deploy/instance-deploy_test.sh: expected exactly ONE 'deploy/instance-deploy_test.sh ... <N> checks' anchor in $readme_md, found $readme_hits. The guard reads that sentence to learn the published count; if you reworded it, restore the anchor (the script path, then the number, then the word 'checks', all on one line) in the SAME commit."
+    exit 1
+  fi
+  readme_count="$(grep -oE "$readme_anchor" "$readme_md" | sed -E 's/.*[^0-9]([0-9]+) checks$/\1/')"
+  if [ "$readme_count" != "$TESTS" ]; then
+    echo "[selftest] FAILED (1) - README count drift in deploy/instance-deploy_test.sh: deploy/README.md publishes $readme_count checks, this run measured $TESTS. The run is the truth - update the number in deploy/README.md to $TESTS in the SAME commit that changed the case count, or the two drift apart again."
+    exit 1
+  fi
+  echo "[selftest] README count guard: deploy/README.md publishes $readme_count checks for deploy/instance-deploy_test.sh, this run measured $TESTS - agreed"
+fi
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

@@ -148,20 +148,42 @@ func siteCloudConfig(out *writer, action string) (*Config, bool) {
 	return cfg, true
 }
 
+// siteDatasetListHint is the tail every --dataset refusal carries. It exists for
+// the same reason siteInstanceRequired names `bp cloud status`: a refusal that
+// only says the input is wrong leaves the operator to GUESS a right one, and the
+// ws/proj/ds triple is the most typo-prone input this command takes. `bp whoami`
+// reports the ONE triple this machine's config points at, which is a workaround,
+// not a route — a caller with two projects cannot discover the second from it.
+//
+// `bp cloud workspace ls` (cloud_workspace_cmd.go) is the route: it walks the
+// membership-scoped switcher reads and prints one row per DATASET whose leading
+// cell is the joined triple, pasteable verbatim into this flag. Naming it turns
+// every arm below from a verdict into a next command.
+//
+// Note the SCOPE of what these arms can catch: they are SHAPE checks, and they
+// run before any network call. There is no `dataset_not_found` refusal anywhere
+// on the plane (`grep -rn 'dataset_not_found' cloud/ internal/` is empty), so a
+// well-formed triple naming a workspace that does not exist is not refused here
+// at all — which is exactly why the hint belongs on the shape arms, where the
+// CLI still has the floor.
+const siteDatasetListHint = " List the triples you can reach with `bp cloud workspace ls` " +
+	"(paste a DATASET cell verbatim into --dataset)."
+
 // parseDatasetTriple splits a `ws/proj/ds` selector into its three parts, with a
 // clear usage error for anything that is not exactly three non-empty segments.
+// Every error names `bp cloud workspace ls` — see siteDatasetListHint.
 func parseDatasetTriple(s string) (ws, proj, ds string, err error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return "", "", "", fmt.Errorf("--dataset is required (want ws/proj/ds)")
+		return "", "", "", fmt.Errorf("--dataset is required (want ws/proj/ds)." + siteDatasetListHint)
 	}
 	parts := strings.Split(s, "/")
 	if len(parts) != 3 {
-		return "", "", "", fmt.Errorf("--dataset wants three slash-separated parts ws/proj/ds, got %q", s)
+		return "", "", "", fmt.Errorf("--dataset wants three slash-separated parts ws/proj/ds, got %q."+siteDatasetListHint, s)
 	}
 	ws, proj, ds = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
 	if ws == "" || proj == "" || ds == "" {
-		return "", "", "", fmt.Errorf("--dataset ws/proj/ds must have no empty part, got %q", s)
+		return "", "", "", fmt.Errorf("--dataset ws/proj/ds must have no empty part, got %q."+siteDatasetListHint, s)
 	}
 	return ws, proj, ds, nil
 }
@@ -3783,7 +3805,7 @@ USAGE
   bp cloud site status    <site> [--window <attempts>]
   bp cloud site doctor    <site>                                   read every substrate this site occupies and name the repair
   bp cloud site open       <site> [--print-only]
-  bp cloud site preflight [--dir <path>] [--skip-build]
+  bp cloud site preflight [--dir <path>] [--skip-build]            build your LOCAL tree and check that build — it reads NOTHING about the remote site, its content binding, its dataset or its instance
   bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>] [--prebuilt-enabled true|false]
 
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it

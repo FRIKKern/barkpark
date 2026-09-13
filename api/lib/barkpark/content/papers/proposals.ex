@@ -88,7 +88,7 @@ defmodule Barkpark.Content.Papers.Proposals do
     with :ok <- validate_source(source),
          :ok <- validate_ops(ops),
          %Document{} = pub <- get_scoped_paper(slug, dataset, opts) do
-      case Repo.transaction(fn -> propose_txn(pub, slug, ops, source, dataset) end) do
+      case Repo.transaction(fn -> propose_txn(pub, slug, ops, source, dataset, opts) end) do
         {:ok, receipt} -> {:ok, receipt}
         {:error, reason} -> {:error, reason}
       end
@@ -100,8 +100,8 @@ defmodule Barkpark.Content.Papers.Proposals do
 
   # ── The transactional body ─────────────────────────────────────────────────
 
-  defp propose_txn(pub, slug, ops, source, dataset) do
-    draft = get_or_seed_draft(pub, dataset)
+  defp propose_txn(pub, slug, ops, source, dataset, opts) do
+    draft = get_or_seed_draft(pub, dataset, opts)
     blocks = get_in(draft.content || %{}, ["blocks"]) || []
     existing_ids = collect_block_ids(blocks)
 
@@ -224,12 +224,29 @@ defmodule Barkpark.Content.Papers.Proposals do
   # first proposal — the same row shape `unpublish_document` creates (content
   # copied verbatim, status "draft", tenancy scope inherited), so the existing
   # publish gate closes the loop without special-casing proposals.
-  defp get_or_seed_draft(pub, dataset) do
+  defp get_or_seed_draft(pub, dataset, opts) do
     case Content.get_document(DraftId.draft_id(pub.doc_id), @paper_type, dataset, []) do
       {:ok, draft} ->
         draft
 
       {:error, :not_found} ->
+        # ── SEAT CLASSIFICATION (task-d507d3d83476b57d, ruling clause (d)) ────
+        #
+        # A raw `Document.changeset |> Repo.insert` that never passes
+        # `Content.Writer`, so it never reached `WriteScope.put_scope_attrs/2`.
+        # CLASS (a): `propose_paper_blocks/5` is an agent-facing WRITE endpoint —
+        # `opts` always carry the caller's scope or principal (`get_scoped_paper/3`
+        # above reads through the very same opts). A published paper carrying no
+        # workspace must therefore not seed a nil-workspace draft; the draft is
+        # attributed through the classified door, or the caller is REFUSED.
+        # The refusal rolls the whole proposal back — provenance is already
+        # fail-closed here, and so is scope.
+        scope_attrs =
+          case WriteScope.inherit_or_resolve_scope_attrs(%{"dataset" => dataset}, pub, opts) do
+            {:ok, scope_attrs} -> scope_attrs
+            {:error, reason} -> Repo.rollback(reason)
+          end
+
         attrs =
           %{
             "doc_id" => DraftId.draft_id(pub.doc_id),
@@ -240,7 +257,7 @@ defmodule Barkpark.Content.Papers.Proposals do
             "content" => pub.content || %{},
             "rev" => generate_rev()
           }
-          |> WriteScope.inherit_scope_attrs(pub)
+          |> Map.merge(scope_attrs)
 
         case %Document{} |> Document.changeset(attrs) |> Repo.insert() do
           {:ok, draft} -> draft

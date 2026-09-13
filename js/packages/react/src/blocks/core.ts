@@ -597,7 +597,12 @@ const numberedList: Emit = (b) => list({ ...b, ordered: true } as Block)
 // tone word three times — the class switch even repeated each word on its own
 // arm (`case 'success': return 'success'`) — so a fifth tone meant editing two
 // functions in lockstep and a label could silently drift from its class.
-const CALLOUT_TONES = ['success', 'warning', 'danger', 'neutral']
+// 'loss' and 'peace' are the two VERDICT tones (design/tokens.json color.verdict):
+// the same `tone` field, a different token family (`--bp-verdict-*`, resolved by
+// paper-surface.css `.bp-callout--loss` / `--peace`). MIRROR of walk.ex
+// callout_tone_class/1 + tone_label/1 — the parity suite renders both halves and
+// byte-compares, so adding a tone on one side alone reds.
+const CALLOUT_TONES = ['success', 'warning', 'danger', 'neutral', 'loss', 'peace']
 
 function calloutToneClass(tone: unknown): string {
   const slug = str(tone)

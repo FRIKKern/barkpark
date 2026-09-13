@@ -60,7 +60,11 @@ func nounHelpText(t *testing.T, tree *manifest.Tree, noun string) string {
 	case noun == "mcp":
 		printMCPServeHelp(w)
 	case noun == "context":
+		// Both verbs, mirroring cli.go's `bp context` help surface: `pack`
+		// pictures the full text of files you name, `map` pictures the shape
+		// of an epic you name by keyword.
 		printContextPackHelp(w)
+		printContextMapHelp(w)
 	default:
 		t.Fatalf("noun %q carries a dispatched verb but this test knows no help "+
 			"surface for it — wire one (that missing surface IS the bug this test guards)", noun)

@@ -200,8 +200,13 @@ defmodule BarkparkCloud.NotificationsPlatformAdminEnvTest do
     refused = operator_call(owner)
     assert refused.status == 403
 
+    # dr-bl-w8-census-403-cannot-say-the-list-is-empty — this IS the unconfigured
+    # arm (`boot_with_env(nil)` above), and it now says so: the additive
+    # `allowlist` key is what lets a census reader tell "no operators are
+    # configured anywhere" apart from "you are not on the populated list". The
+    # slug, `scope` and `required` are byte-identical to the other arm.
     assert refused.resp_body ==
-             ~s({"error":"forbidden","scope":"platform","required":"platform_operator"})
+             ~s({"error":"forbidden","scope":"platform","required":"platform_operator","allowlist":"unconfigured"})
 
     # CONTROL — the only thing that changes is the allowlist.
     boot_with_env(owner.email)

@@ -116,6 +116,13 @@ x-control-plane: &control_plane
     # NOTHING (see the rule at the top of this file) and the container reports
     # null forever while looking built.
     - BARKPARK_GIT_SHA
+    # The INSTALLED provisioner binary's own sha, separate from the app sha above
+    # because the two legitimately diverge (the provisioner is cross-built at the
+    # run's headSha; the app is `git pull`-ed on the box). deploy/cp-deploy.sh
+    # reads it out of the artifact with `bp-provisioner --version` and exports it
+    # beside BARKPARK_GIT_SHA. BARE and WITHOUT a default, same rule: absent must
+    # stay absent so the reader reports null rather than an invented value.
+    - BARKPARK_PROVISIONER_SHA
     # ── Census widening (self-host-blessing W1/S1b) ────────────────────────
     # Everything below is read by cloud/config/runtime.exs or cloud/lib and was
     # NOT passed through: the container fell back to the code-side default (or

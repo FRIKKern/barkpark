@@ -91,6 +91,8 @@ func runCloudWorkspace(out *writer, g globals, args []string) int {
 		return useError(out, "usage", "missing workspace command (run `bp cloud workspace -h` for usage)", exitUsage)
 	}
 	switch args[0] {
+	case "ls", "list":
+		return runCloudWorkspaceList(out, g, args[1:])
 	case "export":
 		return runCloudWorkspaceExport(out, g, args[1:])
 	case "import":
@@ -1111,16 +1113,317 @@ func escapeBlobPath(p string) string {
 	return strings.Join(segs, "/")
 }
 
+// ── `bp cloud workspace ls` — the dataset-triple lister ──────────────────────
+//
+// WHY IT EXISTS. `--dataset <ws/proj/ds>` is the most typo-prone input in
+// `bp cloud site create`, and until this verb NOTHING in internal/cli
+// enumerated workspaces, projects or datasets. `bp whoami` reports the ONE
+// triple this machine's config points at, which is a workaround and not a
+// route: an operator with two projects could not discover the second, and one
+// with a typo'd config discovered a triple that does not exist.
+//
+// ROUTES (api/lib/barkpark_web/router.ex, the membership-scoped switcher
+// `scope "/api", BarkparkWeb` whose pipeline is [:api, :require_token] — grep
+// `WorkspaceController, :index` to land in it):
+//
+//	GET /api/workspaces                                          WorkspaceController :index
+//	GET /api/workspaces/:ws/projects                             WorkspaceController :projects
+//	GET /api/workspaces/:ws/projects/:proj/datasets              WorkspaceController :datasets
+//
+// All three are MEMBERSHIP-scoped in the context layer
+// (`Tenancy.list_workspaces_for/1` INNER-JOINs workspace_memberships), so what
+// this prints is exactly what the bearer can reach — never a fleet-wide roster.
+// No manifest command: the bundle verbs beside it are off-manifest by the same
+// D22 reasoning (a bare route trips zero OpenAPI drift gate), and `bp`
+// dispatches `cloud workspace` from the hand-written runCloud switch, not from
+// GET /v1/capabilities — so this verb is wired the same hand-written way.
+//
+// SHAPE OF THE OUTPUT. One row PER DATASET, carrying the `ws/proj/ds` string
+// ready to paste into `bp cloud site create --dataset` — never three columns
+// the caller must join by hand. That costs 1 + W + P requests (one index, one
+// projects call per workspace, one datasets call per project), which is the
+// honest price of a pasteable triple.
+//
+// PARTIAL FAILURE IS NAMED, NEVER SWALLOWED. A workspace whose projects (or a
+// project whose datasets) cannot be listed still prints — with the reason in
+// its NOTE cell / `error` field — and the command exits NON-ZERO, the same rule
+// the blob sidecar above follows. A list that silently drops what it could not
+// read is the exact lie this verb exists to prevent: the operator would conclude
+// the missing triple does not exist and go hunting for a typo they never made.
+
+// wsListWorkspace / wsListProject / wsListDataset decode the switcher payloads.
+// The controller renders `%{id, slug, name}` for all three levels
+// (workspace_controller.ex render_workspace/render_project/render_dataset).
+type wsListDataset struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+type wsListProject struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+type wsListWorkspace struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// workspaceListGetJSON performs one Bearer-authed GET against the content API
+// and decodes the JSON body into `into`. A non-2xx round-trips through the
+// SHARED error seam (classifyError) so a 401/403/404 lands on the CLI's stable
+// exit code rather than a bespoke string — the same seam export/import use.
+func workspaceListGetJSON(base, token, path string, into any) (apiError, error) {
+	req, err := http.NewRequest(http.MethodGet, base+path, nil)
+	if err != nil {
+		return apiError{}, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := newTransferClient().Do(req)
+	if err != nil {
+		return apiError{}, fmt.Errorf("request %s failed: %w", path, err)
+	}
+	defer resp.Body.Close()
+
+	body, rerr := readCapped(resp.Body, maxResponseBytes)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return classifyError(resp.StatusCode, body), errWorkspaceListHTTP
+	}
+	if rerr != nil {
+		return apiError{}, fmt.Errorf("read %s response: %w", path, rerr)
+	}
+	if uerr := json.Unmarshal(body, into); uerr != nil {
+		return apiError{}, fmt.Errorf("decode %s response: %w", path, uerr)
+	}
+	return apiError{}, nil
+}
+
+// errWorkspaceListHTTP marks "the server answered, and it was a refusal" so the
+// caller knows to render the classified apiError rather than the Go error text.
+var errWorkspaceListHTTP = fmt.Errorf("workspace list: server refused")
+
+// wsTripleRow is one printed row: a full ws/proj/ds triple, or a partial row
+// naming why it could not be completed. Note is EMPTY on a complete row.
+type wsTripleRow struct {
+	Workspace     string
+	WorkspaceName string
+	Project       string
+	ProjectName   string
+	Dataset       string
+	DatasetName   string
+	Note          string
+}
+
+// triple is the pasteable `--dataset` argument, empty when the row never got
+// all three parts (a workspace whose projects could not be read, or a project
+// with no datasets). An empty triple ALWAYS carries a Note.
+func (r wsTripleRow) triple() string {
+	if r.Workspace == "" || r.Project == "" || r.Dataset == "" {
+		return ""
+	}
+	return r.Workspace + "/" + r.Project + "/" + r.Dataset
+}
+
+// runCloudWorkspaceList is `bp cloud workspace ls`: walk the three membership-
+// scoped switcher routes and print every ws/proj/ds triple the token can reach.
+func runCloudWorkspaceList(out *writer, g globals, args []string) int {
+	const usage = "bp cloud workspace ls [--workspace <slug>]"
+	a, err := parseHzArgs(args, []string{"workspace"}, nil, usage)
+	if err != nil {
+		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	if len(a.pos) > 0 {
+		return useError(out, "usage", fmt.Sprintf("ls takes no positional arguments (usage: %s)", usage), exitUsage)
+	}
+	only := strings.TrimSpace(a.val("workspace"))
+	if only != "" && !validWorkspaceSlug(only) {
+		return useError(out, "usage", fmt.Sprintf("invalid workspace slug %q", only), exitUsage)
+	}
+
+	base, token := workspaceBundleTarget(g)
+	if g.dryRun {
+		out.progressf("DRY RUN — would GET %s/api/workspaces and then the projects/datasets of each", base)
+		return exitOK
+	}
+
+	var index struct {
+		Workspaces []wsListWorkspace `json:"workspaces"`
+	}
+	if ae, err := workspaceListGetJSON(base, token, "/api/workspaces", &index); err != nil {
+		if err == errWorkspaceListHTTP {
+			renderError(out, ae)
+			return ae.exit
+		}
+		return useError(out, "network", err.Error(), exitGeneric)
+	}
+
+	rows := make([]wsTripleRow, 0, len(index.Workspaces))
+	degraded := false
+
+	for _, ws := range index.Workspaces {
+		if only != "" && ws.Slug != only {
+			continue
+		}
+		var projects struct {
+			Projects []wsListProject `json:"projects"`
+		}
+		if ae, err := workspaceListGetJSON(base, token, "/api/workspaces/"+url.PathEscape(ws.Slug)+"/projects", &projects); err != nil {
+			degraded = true
+			rows = append(rows, wsTripleRow{
+				Workspace: ws.Slug, WorkspaceName: ws.Name,
+				Note: "projects unreadable: " + workspaceListWhy(ae, err),
+			})
+			continue
+		}
+		if len(projects.Projects) == 0 {
+			rows = append(rows, wsTripleRow{
+				Workspace: ws.Slug, WorkspaceName: ws.Name,
+				Note: "no projects",
+			})
+			continue
+		}
+		for _, proj := range projects.Projects {
+			var datasets struct {
+				Datasets []wsListDataset `json:"datasets"`
+			}
+			path := "/api/workspaces/" + url.PathEscape(ws.Slug) +
+				"/projects/" + url.PathEscape(proj.Slug) + "/datasets"
+			if ae, err := workspaceListGetJSON(base, token, path, &datasets); err != nil {
+				degraded = true
+				rows = append(rows, wsTripleRow{
+					Workspace: ws.Slug, WorkspaceName: ws.Name,
+					Project: proj.Slug, ProjectName: proj.Name,
+					Note: "datasets unreadable: " + workspaceListWhy(ae, err),
+				})
+				continue
+			}
+			if len(datasets.Datasets) == 0 {
+				rows = append(rows, wsTripleRow{
+					Workspace: ws.Slug, WorkspaceName: ws.Name,
+					Project: proj.Slug, ProjectName: proj.Name,
+					Note: "no datasets",
+				})
+				continue
+			}
+			for _, ds := range datasets.Datasets {
+				rows = append(rows, wsTripleRow{
+					Workspace: ws.Slug, WorkspaceName: ws.Name,
+					Project: proj.Slug, ProjectName: proj.Name,
+					Dataset: ds.Slug, DatasetName: ds.Name,
+				})
+			}
+		}
+	}
+
+	if out.output == "json" || out.output == "yaml" {
+		jsonRows := make([]map[string]any, 0, len(rows))
+		triples := make([]string, 0, len(rows))
+		for _, r := range rows {
+			row := map[string]any{
+				// ALWAYS present, empty when the row is incomplete — the honesty
+				// rule the cloud-status keys follow: a consumer must be able to
+				// tell "this row has no triple and here is why" from "this CLI
+				// never emitted the field".
+				"dataset":        r.triple(),
+				"workspace":      r.Workspace,
+				"workspace_name": r.WorkspaceName,
+				"project":        r.Project,
+				"project_name":   r.ProjectName,
+				"dataset_slug":   r.Dataset,
+				"dataset_name":   r.DatasetName,
+				"note":           r.Note,
+			}
+			jsonRows = append(jsonRows, row)
+			if t := r.triple(); t != "" {
+				triples = append(triples, t)
+			}
+		}
+		out.emitStructured(map[string]any{
+			"rows": jsonRows,
+			// The flat pasteable set, so `jq -r '.datasets[]'` is the whole
+			// script a caller needs to feed `--dataset`.
+			"datasets": triples,
+			"complete": !degraded,
+			"source":   "content-api",
+			"server":   base,
+		})
+		if degraded {
+			return exitGeneric
+		}
+		return exitOK
+	}
+
+	if len(rows) == 0 {
+		if only != "" {
+			out.outf("no workspace %q is reachable with this token — run `bp cloud workspace ls` for the ones that are", only)
+			return exitOK
+		}
+		out.outf("this token reaches no workspaces (the switcher route is membership-scoped: GET /api/workspaces returned an empty set)")
+		return exitOK
+	}
+
+	headers := []string{"DATASET", "WORKSPACE", "PROJECT", "NOTE"}
+	table := make([][]string, 0, len(rows))
+	for _, r := range rows {
+		table = append(table, []string{
+			hzCell(r.triple()), hzCell(r.Workspace), hzCell(r.Project), hzCell(r.Note),
+		})
+	}
+	renderHzTable(out, headers, table)
+	out.outf("")
+	out.outf("paste a DATASET cell verbatim into `bp cloud site create --dataset <ws/proj/ds>`")
+	if degraded {
+		out.userErr("this list is INCOMPLETE — the NOTE column names every workspace or project whose contents could not be read; triples under them are missing, not absent")
+		return exitGeneric
+	}
+	return exitOK
+}
+
+// workspaceListWhy renders the reason a sub-listing failed: the server's own
+// classified message when it answered, the transport error when it did not.
+func workspaceListWhy(ae apiError, err error) string {
+	if err == errWorkspaceListHTTP {
+		if strings.TrimSpace(ae.message) != "" {
+			return ae.message
+		}
+		return ae.code
+	}
+	return err.Error()
+}
+
 // printCloudWorkspaceHelp writes `bp cloud workspace` usage.
 func printCloudWorkspaceHelp(out *writer) {
-	const help = `bp cloud workspace — export/import a single workspace as a portable bundle.
+	const help = `bp cloud workspace — list the dataset triples you can reach, and
+export/import a single workspace as a portable bundle.
 
 USAGE
+  bp cloud workspace ls             [--workspace <slug>]
   bp cloud workspace export <slug> [--file <out>] [--profile full|dev]
                                    [--dataset <slug>] [--source-server <url>]
                                    [--with-blobs [--blobs <dir>]]
   bp cloud workspace import <slug>  --file <tar> --yes [--merge]
                                    [--with-blobs [--blobs <dir>]]
+
+LS
+  Prints one row PER DATASET — every ws/proj/ds triple this token can reach —
+  by walking the three membership-scoped switcher routes:
+    GET /api/workspaces
+    GET /api/workspaces/<ws>/projects
+    GET /api/workspaces/<ws>/projects/<proj>/datasets
+  The DATASET cell is the whole argument: paste it verbatim into
+  ` + "`bp cloud site create --dataset <ws/proj/ds>`" + ` — never three columns to join
+  by hand. ` + "`-o json`" + ` adds a flat ` + "`datasets[]`" + ` array of the same strings.
+    --workspace <slug>  narrow to one workspace (the walk is 1 + W + P requests)
+  Membership-scoped server-side, so this is what YOU can reach, never a
+  fleet-wide roster. A workspace or project whose contents could not be read
+  still prints, with the reason in NOTE, and the command exits NON-ZERO: a list
+  that silently drops what it could not read would read as "that triple does
+  not exist".
 
 EXPORT
   GETs /api/workspaces/<slug>/export and streams the tar to <out> (default

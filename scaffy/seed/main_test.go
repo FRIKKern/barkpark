@@ -32,7 +32,14 @@ func withFastRetries(t *testing.T, attempts int) {
 	t.Cleanup(func() { fetchAttempts, fetchBackoff = oldA, oldB })
 }
 
-const envelope = `{"result":{"documents":[{"_id":"a--b--c","source":"SRC-A"}]}}`
+// envelope is one served document carrying the SAME nine fields `derive`
+// posts — the shape guerrilla actually returns. It is deliberately not the
+// two-field {_id, source} shape the check used to decode: a fixture that
+// carries only what the old parser read cannot show that the new parser reads
+// more (task-7c037e523ccac6ee).
+const envelope = `{"result":{"documents":[{"_id":"a--b--c","title":"T","description":"D",` +
+	`"concept":"b","variant":"c","domain":"a","direction":"add",` +
+	`"tags":[{"tag":"x","strength":90,"rationale":"R"}],"source":"SRC-A"}]}}`
 
 // sha256hex mirrors how both sides of the comparison hash a source string, so a
 // fixture's "served" digest is built the same way fetchServed builds a real one.
@@ -62,7 +69,7 @@ func TestFetchServedRetriesTransientFailureThenSucceeds(t *testing.T) {
 	if n := atomic.LoadInt32(&hits); n != 2 {
 		t.Fatalf("expected exactly 2 requests (fail then succeed), got %d", n)
 	}
-	if len(got) != 1 || got["a--b--c"] == "" {
+	if len(got) != 1 || got["a--b--c"].Source == "" {
 		t.Fatalf("expected the envelope to decode into one id, got %v", got)
 	}
 }
@@ -188,10 +195,10 @@ func TestPrintCheckTableStatuses(t *testing.T) {
 		{ID: "drift--x--y", Source: "LOCAL"},
 		{ID: "missing--x--y", Source: "ONLY-LOCAL"},
 	}
-	served := map[string]string{
-		"match--x--y": sha256hex("SAME"),
-		"drift--x--y": sha256hex("SERVED"),
-		"extra--x--y": sha256hex("ONLY-SERVED"),
+	served := map[string]servedDoc{
+		"match--x--y": {ID: "match--x--y", Source: "SAME"},
+		"drift--x--y": {ID: "drift--x--y", Source: "SERVED"},
+		"extra--x--y": {ID: "extra--x--y", Source: "ONLY-SERVED"},
 	}
 
 	var sb strings.Builder
@@ -218,7 +225,7 @@ func TestPrintCheckTableStatuses(t *testing.T) {
 
 func TestPrintCheckTableAllMatchPrintsTheInSyncLine(t *testing.T) {
 	payloads := []*payload{{ID: "a--b--c", Source: "SRC"}}
-	served := map[string]string{"a--b--c": sha256hex("SRC")}
+	served := map[string]servedDoc{"a--b--c": {ID: "a--b--c", Source: "SRC"}}
 
 	var sb strings.Builder
 	if n := printCheckTable(&sb, "http://fixture", payloads, served); n != 0 {

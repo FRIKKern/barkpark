@@ -218,6 +218,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/builder/deployments/:id/detail  agent set the live sub-caption {detail} (latest-wins) → SSE (dwb-19; own box only)
       GET     /v1/builder/sites/:id/env agent decrypted site env for build-time injection (nixpacks --env; own box only)
       GET     /v1/agent/pending    agent     deployments in pushing for this box
+      GET     /v1/agent/sites      agent     this box's sites + current serving_mode (TLS reconcile)
       GET     /v1/agent/sites/:id/env agent  decrypted site env for the running container (own box only)
       POST    /v1/agent/deployments/claim agent atomic pickup of the next pushing
       POST    /v1/agent/deployments/:id/transition agent fenced live transition
@@ -6516,7 +6517,10 @@ defmodule BarkparkCloud.Web.Router do
   # ADMIN read on the same team still walks the compound index backwards and
   # stops at the LIMIT: 0.037 ms / 6 buffers. The team fence keeps it bounded and
   # 30 ms is a fine page today, but it scales with the TEAM'S WHOLE LOG rather
-  # than the page size, and this table has no retention policy. The fix is an
+  # than the page size. The table's unboundedness is now CLOSED —
+  # `Workers.AgentRetentionWorker` prunes `notification_deliveries` past 180 days
+  # (cch-w34-bl-delivery-log-has-no-retention) — so the team's whole log is
+  # bounded by that window rather than by nothing. The remaining fix is an
   # index on `(team_id, lower(recipient), inserted_at)` — deliberately NOT taken
   # in this slice (it is a migration, outside this slice's file fence). It is
   # OPEN WORK, not a solved problem: re-run the same EXPLAIN (ANALYZE, BUFFERS)
@@ -10621,6 +10625,40 @@ defmodule BarkparkCloud.Web.Router do
   # SAME 404, indistinguishable from missing (no existence leak), mirroring
   # agent_owns_deployment?/2 on the transition route above. Reveals are not
   # audit-logged (see the builder twin above for why).
+  # GET /v1/agent/sites → 200 {sites: [{slug, domains, serving_mode}]}.
+  #
+  # THE LIVE-SITE HALF of the CP→box TLS channel. The claim/pending site inline
+  # (deployment_with_site_json/1) carries serving_mode for the ONE site being
+  # deployed, so a site that flips to cf_proxied while it is ALREADY live keeps
+  # its rendered on-demand block until somebody deploys it again — on-demand
+  # ACME behind the Cloudflare proxy, whose challenge cannot complete, is a live
+  # 526 (and the reverse flip leaves `tls internal` over a now-direct hostname).
+  # The box's State comes from parsing its own Caddyfile, so nothing on the box
+  # could ever learn about that flip.
+  #
+  # This is the level-triggered fix: the runtime executor GETs this route on
+  # every idle claim cycle (internal/runtime/tls_reconcile.go) and re-renders
+  # only the live sites whose rendered TLS mode disagrees with the mode here.
+  # A pure read, scoped strictly to current_barkpark — same scope rule as
+  # /v1/agent/pending, so a box can never see another box's sites.
+  #
+  # Sorted by slug so two consecutive fetches are byte-comparable.
+  get "/v1/agent/sites" do
+    conn = Auth.require_agent(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      sites =
+        conn.assigns.current_barkpark
+        |> Registry.list_sites()
+        |> Enum.sort_by(& &1.slug)
+        |> Enum.map(&agent_site_state_json/1)
+
+      json(conn, 200, %{sites: sites})
+    end
+  end
+
   get "/v1/agent/sites/:id/env" do
     conn = Auth.require_agent(conn, [])
 
@@ -14691,6 +14729,15 @@ defmodule BarkparkCloud.Web.Router do
       :cf_proxied -> "cf_proxied"
       _ -> "direct"
     end
+  end
+
+  # One entry of GET /v1/agent/sites: the slug the box keys its Caddy block on,
+  # the domains it serves, and the CURRENT serving_mode. `agent_serving_mode/1`
+  # is reused verbatim — the reconcile route and the claim inline must never
+  # grow two different answers to "what mode is this site in", and reusing it
+  # also carries the fail-safe degrade (unknown / missing / nil → "direct").
+  defp agent_site_state_json(site) do
+    %{slug: site.slug, domains: site.domains || [], serving_mode: agent_serving_mode(site)}
   end
 
   # Scope check: does deployment_id's site belong to barkpark? Used by the

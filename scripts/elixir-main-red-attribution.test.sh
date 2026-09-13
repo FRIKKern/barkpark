@@ -55,17 +55,34 @@ expect() { # expect <desc> <want-rc> <want-verdict>
 # ── FIXTURE PICKING, from the live tree ───────────────────────────────────
 # A lib file with a convention test (so the selection contains a known file),
 # and a test file that the SAME change does NOT select (the miss fixture).
+#
+# THE FIXTURE MUST NARROW, AND THAT IS NOW A PROPERTY TO ASK ABOUT RATHER THAN
+# ASSUME. Everything below §1 rests on the selection for this one file being a
+# STRICT SUBSET of the suite: §1 needs a file inside it, §2 needs a file outside
+# it. The selector's RULE 4 answers ALL for a fail-closed DOOR — a module that
+# returns a policy refusal — and the first candidate this loop used to pick,
+# lib/barkpark/access.ex, is one. It selected ALL, §1's COVERED became
+# SELECTION_ALL and §2's outsider stopped being outside, so three assertions
+# collapsed at once WITHOUT the reporter changing at all.
+#
+# The fix is not to accept ALL here — that would retire the skip detection this
+# whole file exists to measure. It is to pick a fixture that still narrows, by
+# ASKING (`--is-door`) instead of hard-coding a filename that may become a door
+# next month. The non-empty assertion below is what reds if the class ever grows
+# to swallow every candidate.
 lib=""
 lib_test=""
 while IFS= read -r cand; do
   [ -n "$cand" ] || continue
   t="test/${cand#lib/}"
   t="${t%.ex}_test.exs"
-  [ -f "$ROOT/api/$t" ] && { lib="api/$cand"; lib_test="$t"; break; }
-done <<<"$(cd "$ROOT/api" && ls lib/barkpark/*.ex 2>/dev/null | head -30)"
+  [ -f "$ROOT/api/$t" ] || continue
+  bash "$HERE/elixir-impacted-tests.sh" --is-door "api/$cand" >/dev/null 2>&1 && continue
+  lib="api/$cand"; lib_test="$t"; break
+done <<<"$(cd "$ROOT/api" && ls lib/barkpark/*.ex 2>/dev/null | head -60)"
 
 if [ -z "$lib" ]; then
-  echo "  FAIL — harness setup: no api/lib/barkpark/*.ex with a convention test"
+  echo "  FAIL — harness setup: no NON-DOOR api/lib/barkpark/*.ex with a convention test"
   exit 1
 fi
 ok "harness setup: $lib / $lib_test"
@@ -75,6 +92,12 @@ printf 'api/mix.lock\n' >"$tmp/diff.all"
 
 # The selection for the narrow diff, so §2 can pick a file that is NOT in it.
 BP_IMPACTED_NO_XREF=1 bash "$HERE/elixir-impacted-tests.sh" --select <"$tmp/diff.narrow" >"$tmp/sel" 2>/dev/null
+if grep -qxF 'ALL' "$tmp/sel"; then
+  bad "harness setup: the narrow diff actually NARROWS" \
+      "$lib selected ALL — §1 and §2 would report verdicts about a narrowed selection having measured an unnarrowed one"
+else
+  ok "harness setup: the narrow diff selects $(grep -c . "$tmp/sel") test files, not ALL"
+fi
 outsider=""
 while IFS= read -r t; do
   [ -n "$t" ] || continue

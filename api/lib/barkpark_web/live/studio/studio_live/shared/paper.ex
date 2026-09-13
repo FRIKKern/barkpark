@@ -1116,6 +1116,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # paper_canvas.ex:@canvas_figure_types.
   @figure_render_types ~w(figure)
 
+  # scaffy-backlog-blocks-editable-studio — the TECHNICAL pair (`diff`, `filetree`).
+  # Both are EDITABLE canvas attr-atoms (paper_canvas.ex @canvas_attr_atom_types →
+  # bpDiff / bpFiletree, technical-node.js), NOT read-only fleet mirrors, so they are
+  # deliberately kept OUT of @fleet_render_types (which rides the 4-way lockstep with
+  # paper_editor.ex's classic boundary widget). But their PREVIEW still needs the ONE
+  # reader producer: unlike `diagram` (client-side Mermaid) there is no client runtime
+  # for a diff/filetree render, and D8 / canvas_reader_parity_gate_test.exs §3 forbid a
+  # hand-written JS producer. So they paint through the SAME `bp:block-html` channel,
+  # keyed by the block id, into the node-view's `[data-bp-fleet-body]` hole — the
+  # figure/task-list precedent (an editable island + a server-painted child).
+  #
+  # Keep aligned with paper_canvas.ex @canvas_attr_atom_types and
+  # run-convert.js TECHNICAL_ATOM_SHAPES.
+  @technical_render_types ~w(diff filetree)
+
   # pd-ee-dataviz-editors (charter D3) — the 5 DATA-VIZ kinds (Render.DataViz:
   # stat / stats / stat-grid / heatmap / chart; `stat-grid` is the accepted alias
   # of `stats`). They paint through the SAME `bp:block-html` channel + bpFleet atom
@@ -1155,6 +1170,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> Enum.filter(&fleet_block?/1)
         |> Enum.map(&fleet_render(&1, previews))
 
+      # The TECHNICAL pair's preview: the reader's OWN render_block(:article) — the
+      # same producer /papers uses — keyed by the block id, so the bpDiff / bpFiletree
+      # node-view's paint hole shows byte-identical reader HTML while its textarea
+      # island edits the verbatim source. No TaskResolver preview: neither type
+      # carries a query.
+      technical_renders =
+        render_blocks
+        |> Enum.filter(&technical_block?/1)
+        |> Enum.map(&fleet_render(&1, previews))
+
       # editable-figure: the CHILD-only render for every top-level figure, on the SAME
       # bp:block-html channel, keyed by the FIGURE id (so the bpFigure atom's paint
       # hole finds it with ZERO hook change). Concatenated with the fleet renders.
@@ -1164,7 +1189,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> Enum.map(&figure_render/1)
 
       renders =
-        (fleet_renders ++ figure_renders)
+        (fleet_renders ++ technical_renders ++ figure_renders)
         |> Enum.reject(&(&1["block_id"] in [nil, ""]))
 
       push_event(socket, "bp:block-html", %{renders: renders})
@@ -1187,6 +1212,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     do: Map.get(block, "type") in @figure_render_types
 
   defp figure_block?(_), do: false
+
+  # A block that paints its reader HTML through the fleet channel WITHOUT being a
+  # read-only fleet atom: the editable technical pair (diff / filetree).
+  defp technical_block?(block) when is_map(block),
+    do: Map.get(block, "type") in @technical_render_types
+
+  defp technical_block?(_), do: false
 
   @doc false
   # editable-figure — the CHILD-only reader render for one figure block, keyed by the

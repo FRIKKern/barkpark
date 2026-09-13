@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "holds": [
+    {
+      "id": "internal-taskboard-golden-drift",
+      "trees": [
+        "internal/taskboard"
+      ],
+      "repro": "CGO_ENABLED=0 go test ./internal/taskboard/",
+      "owner": "lane:cli",
+      "task": "task-bff484e54b711fb2",
+      "opened_at": "2026-09-13T15:08:57Z",
+      "opened_on_sha": "3237e0413ec7f7e554d228e2d065ee3a4807d777",
+      "opened_exit": 1,
+      "derivation": "D1-package",
+      "note": "Four golden drifts: TestComposePaperGolden, TestRenderPaperFrameGolden80, TestRenderTaskDetailGoldens at 60/80/100. Filed as task-bff484e54b711fb2 (P1) by lead-gates 2026-09-13.",
+      "reproduction_head": "--- FAIL: TestComposePaperGolden (0.00s)\n    compose_test.go:150: compose frame diverged from testdata/compose_paper_80.txt\n        --- got ---\n        \n         Task-TUI wave 5 charter\n         task-tui-wave5-charter · rev-7\n        \n         PAPER FRAME CHARTER\n         ───────────────────\n        \n         Driven by task-alpha — read it inline.\n        \n         ▌ go test ./internal/taskboard/...\n        \n         Tasks driven by this paper (1)\n         ▎ ⠋ Wire the SSE live bridge to the task board pane                       8m\n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        \n        "
+    }
+  ]
+}

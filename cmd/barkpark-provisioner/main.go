@@ -92,6 +92,22 @@ func warmPoolSize() int {
 	return n
 }
 
+// buildSHA is the commit this binary was built from, injected at LINK time with
+// `-ldflags "-X main.buildSHA=<sha>"`. The cross-build in
+// .github/workflows/deploy.yml stamps it from $GITHUB_SHA (the run's headSha,
+// which is exactly what actions/checkout@v4 built); the pattern is the one the
+// Makefile already uses for bp (LDFLAGS / `cli-build`).
+//
+// It exists because the CP app sha and the provisioner sha can legitimately
+// DIVERGE: cp-deploy.sh does `git pull --ff-only origin main` ON THE BOX, so
+// under back-to-back merges the app can land ahead of the run's headSha while
+// this binary stays pinned to it. One "version" field would be ambiguous.
+//
+// A plain `go build` leaves it EMPTY. `--version` then says so on STDERR and
+// prints NOTHING on stdout, so an absent sha reads as ABSENT and never as a
+// value — the same convention BarkparkCloud.Health holds for git_sha.
+var buildSHA string
+
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
@@ -104,9 +120,24 @@ func run(args []string) int {
 		tokenFile  = fs.String("token-file", "", "path to the WORKER_TOKEN file (overrides --token and $WORKER_TOKEN)")
 		interval   = fs.Duration("interval", provisioner.DefaultInterval, "claim-poll cadence when the queue is empty")
 		once       = fs.Bool("once", false, "run a single claim→provision→report cycle and exit")
+		version    = fs.Bool("version", false, "print the commit this binary was built from and exit")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	// --version is answered BEFORE --control-url is required: deploy/cp-deploy.sh
+	// reads the sha out of the artifact it is about to install, with no
+	// control plane, no token and no network. Always exit 0 — an unstamped
+	// binary is an absent sha, not a failure, and the capture must not trip a
+	// deploy.
+	if *version {
+		if buildSHA == "" {
+			fmt.Fprintln(os.Stderr, "barkpark-provisioner: no build sha (built without -ldflags -X main.buildSHA)")
+			return 0
+		}
+		fmt.Println(buildSHA)
+		return 0
 	}
 
 	if *controlURL == "" {

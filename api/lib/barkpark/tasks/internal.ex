@@ -398,14 +398,14 @@ defmodule Barkpark.Tasks.Internal do
       end
 
     updates
-    |> Enum.reduce_while({:ok, existing}, fn update, {:ok, acc} ->
-      case apply_criteria_update(acc, update) do
-        {:ok, next} -> {:cont, {:ok, next}}
+    |> Enum.reduce_while({:ok, existing, MapSet.new()}, fn update, {:ok, acc, seeded} ->
+      case apply_criteria_update(acc, update, seeded) do
+        {:ok, next, next_seeded} -> {:cont, {:ok, next, next_seeded}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
     |> case do
-      {:ok, merged} -> {:ok, Map.put(content, "acceptance_criteria", merged)}
+      {:ok, merged, _seeded} -> {:ok, Map.put(content, "acceptance_criteria", merged)}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -433,16 +433,104 @@ defmodule Barkpark.Tasks.Internal do
   #   * `:criterion_not_found`  — no stored row has that exact wording (the text
   #     was edited, or the caller retyped rather than copied).
   #   * `:criterion_ambiguous`  — 2+ rows share it; pass `"index"` to say which.
-  defp apply_criteria_update(list, %{"criterion" => text} = update)
+  defp apply_criteria_update(list, %{"criterion" => text} = update, seeded)
        when is_binary(text) and text != "" and not is_map_key(update, "index") do
     case resolve_criterion_index(list, text) do
-      {:ok, index} -> apply_criteria_update(list, Map.put(update, "index", index))
+      {:ok, index} -> apply_criteria_update(list, Map.put(update, "index", index), seeded)
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp apply_criteria_update(list, %{"index" => index} = update)
+  defp apply_criteria_update(list, %{"index" => index} = update, seeded)
        when is_integer(index) and index >= 0 do
+    cond do
+      # SAME-WRITE CREATE-AND-MEET (the seeding loophole, closed). An index this
+      # very merge appended is not a row the caller READ — it is a row the
+      # caller just invented — so a second update in the same payload must not
+      # be able to reach it. Without this, a two-entry payload could seed a
+      # criterion at index N and flip it met at index N in one call, which is
+      # exactly the self-grading the seed's `met: false` birth rule exists to
+      # prevent. Refused wholesale (even for a miss, which flips nothing): no
+      # honest caller edits a criterion it created microseconds earlier, and a
+      # narrower rule would be another guard that reads as protection while
+      # leaving a shape open.
+      MapSet.member?(seeded, index) ->
+        {:error, :criterion_seed_not_met}
+
+      match?(%{}, Enum.at(list, index)) ->
+        update_stored_criterion(list, index, update, seeded)
+
+      # THE SEED (task-00f5bc88af7de2e9). Exactly ONE past the end appends.
+      # Before this clause, `Enum.at/2` missed on every index against `[]` and
+      # a row whose `acceptance_criteria` key was absent (or stored `[]`) could
+      # never be given a criterion by ANY writer — close `--set criteria` and
+      # stamp both answered `:criteria_index_out_of_range`, and a raw HTTP
+      # content mutate, outside every honesty gate, was the only remaining
+      # door. `index + 2` and beyond stay out of range.
+      index == length(list) ->
+        seed_criterion(list, index, update, seeded)
+
+      true ->
+        {:error, :criteria_index_out_of_range}
+    end
+  end
+
+  defp apply_criteria_update(_list, _update, _seeded), do: {:error, :invalid_criteria}
+
+  # THE SEED CLAUSE. A new criterion is BORN UNMET, always, and it has to say
+  # what it is:
+  #
+  #   * NON-EMPTY TEXT IS MANDATORY. An index-only update one past the end is
+  #     byte-indistinguishable from the 1-based-by-habit off-by-one the range
+  #     guard exists to catch (D56's five-of-eight builders), so it keeps
+  #     answering `:criteria_index_out_of_range`. A failed read must never be
+  #     spelled the same way as a successful append.
+  #   * DUPLICATE TEXT IS THE OFF-BY-ONE SIGNATURE, not a new criterion: a
+  #     caller naming wording the row already stores meant the stored row and
+  #     mis-counted, so it is `:criteria_mismatch` — the same error an in-range
+  #     stale guard gets.
+  #   * A SEED THAT ASSERTS SATISFACTION IS REFUSED (`:criterion_seed_not_met`).
+  #     That covers an explicit `met: true` AND the met-key-absent default
+  #     (close-time semantics make an index+evidence update a met-flip), so an
+  #     evidence key with no explicit `met: false` cannot smuggle a proof in.
+  #     Seeding must not become the false-done vector wearing a helpful face:
+  #     if a closer could invent a criterion and mark it met in one call, it
+  #     would grade its own homework and the ledger would read as proven work.
+  #   * A WITHDRAWAL CANNOT SEED. There is nothing to lower on a row that does
+  #     not exist; the index names no criterion, so it is out of range.
+  #
+  # `--miss` seeds honestly: the attempt path pins `met` to the stored value,
+  # which on a newborn entry is `false`. That is what makes `bp task stamp` a
+  # seeding door at all, so a criteria-less row is reachable from the writer
+  # surface a caller actually uses rather than from raw HTTP alone.
+  defp seed_criterion(list, index, update, seeded) do
+    text = Map.get(update, "criterion")
+
+    cond do
+      withdraws?(update) ->
+        {:error, :criteria_index_out_of_range}
+
+      not guarded?(text) ->
+        {:error, :criteria_index_out_of_range}
+
+      Enum.any?(list, &(is_map(&1) and Map.get(&1, "criterion") == text)) ->
+        {:error, :criteria_mismatch}
+
+      flips_met_true?(update) ->
+        {:error, :criterion_seed_not_met}
+
+      true ->
+        base = %{"criterion" => text, "met" => false, "evidence" => ""}
+
+        case apply_entry_update(base, update) do
+          {:ok, entry} -> {:ok, list ++ [entry], MapSet.put(seeded, index)}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  # The in-range path — every guard exactly as D56 and D745 left it.
+  defp update_stored_criterion(list, index, update, seeded) do
     case Enum.at(list, index) do
       %{} = entry ->
         guard = Map.get(update, "criterion")
@@ -472,7 +560,7 @@ defmodule Barkpark.Tasks.Internal do
 
           true ->
             with {:ok, entry} <- apply_entry_update(entry, update) do
-              {:ok, List.replace_at(list, index, entry)}
+              {:ok, List.replace_at(list, index, entry), seeded}
             end
         end
 
@@ -480,8 +568,6 @@ defmodule Barkpark.Tasks.Internal do
         {:error, :criteria_index_out_of_range}
     end
   end
-
-  defp apply_criteria_update(_list, _update), do: {:error, :invalid_criteria}
 
   # Exact-match row lookup for a text-keyed update. Exactly one hit resolves;
   # zero and many are both named refusals (see the clause above).
