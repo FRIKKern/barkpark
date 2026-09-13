@@ -73,8 +73,13 @@
 #      unreadable deploy.yml). NEVER 0: "I could not check" is not "it is fine".
 #
 # Relevance comes from deploy.yml's own `on.push.paths`, minus any entry marked
-# `deploy-filter-exempt:` — the same list, read the same way, as
+# `deploy-filter-exempt:` and minus any file matched by a `!`-prefixed EXCLUSION
+# entry — the same list, read the same way, as
 # scripts/check-deployyml-filters.sh. Authoring it twice is how the two drift.
+# The exclusion half matters here or this gate manufactures outages: deploy.yml
+# deliberately does not deploy an api/test-only merge (task-75f45c6baba2e633),
+# and a relevance set that still counts it reports production STRANDED over a
+# commit production was never meant to carry.
 
 set -euo pipefail
 
@@ -143,8 +148,47 @@ extract_relevant_globs() {
       gsub(/"/, "", line)
       gsub(/\047/, "", line)
       if (line == "") next
+      # A leading "!" is a GitHub path-filter EXCLUSION (task-75f45c6baba2e633).
+      # It delivers nothing, so folding it into the POSITIVE union is at best
+      # dead text — `!api/test/.*` matches no path git ever prints — and at
+      # worst reads as a trigger. extract_exclusion_globs below is what reads it.
+      if (substr(line, 1, 1) == "!") next
       if (!exempt) print line
       exempt = 0
+    }
+  ' "$1"
+}
+
+# The EXCLUSION globs — the `!`-prefixed on.push.paths entries with the `!`
+# stripped, one per line (task-75f45c6baba2e633).
+#
+# WHY THIS GATE NEEDS THEM. Relevance here is "would a deploy carry this
+# commit?". deploy.yml excludes api/test/** from BOTH its push filter and its
+# `changes` classifier, so an api/test-only merge no longer deploys — by design,
+# since a prod build compiles only api/lib (api/mix.exs elixirc_paths(_)). Read
+# the positive filters alone and this gate calls such a commit relevant, finds it
+# absent from the box, and files a STRANDED verdict against production for a
+# commit production was never meant to carry: a FABRICATED outage, the exact
+# failure the --target split exists to avoid one class of.
+#
+# Read out of on.push.paths rather than out of the classifier on purpose: a
+# commit GitHub will not even start the workflow for cannot strand anything, and
+# the push list is the one both deploy arms are held to by
+# scripts/check-deployyml-filters.sh's exclusion arm.
+extract_exclusion_globs() {
+  awk '
+    /^("on"|\047on\047|on)[ \t]*:/ { in_on = 1; next }
+    in_on && /^[A-Za-z"\047]/ { in_on = 0 }
+    in_on && /^    paths:/    { in_paths = 1; next }
+    in_paths && /^    [a-z]/  { in_paths = 0 }
+    in_paths && /^ *#/        { next }
+    in_paths && /^ *- / {
+      line = $0
+      sub(/^ *- */, "", line)
+      gsub(/"/, "", line)
+      gsub(/\047/, "", line)
+      if (substr(line, 1, 1) != "!") next
+      print substr(line, 2)
     }
   ' "$1"
 }
@@ -208,6 +252,10 @@ extract_target_ere() {
 }
 
 RELEVANT_ERE=""
+# Empty means "nothing is excluded", which is the pre-exclusion behaviour
+# exactly. It is set from the SAME file as RELEVANT_ERE, in every mode, so no
+# call site can end up with one and not the other.
+EXCLUDED_ERE=""
 load_relevance() {
   local yml="$1" target="${2:-}"
   if [ ! -f "$yml" ]; then
@@ -215,6 +263,8 @@ load_relevance() {
     warn "This is NOT a verdict on production. A gate that cannot read its filter must not certify a box."
     return 2
   fi
+
+  EXCLUDED_ERE="$(extract_exclusion_globs "$yml" | globs_to_ere)"
 
   if [ -n "$target" ]; then
     case "$target" in
@@ -260,6 +310,16 @@ commit_is_relevant() {
   # machine at load average 119-161, where the identical construct in the
   # selftest failed 10 runs out of 10 with the matching text present all along.
   # `<<<` has no writer process, so there is no pipe to break.
+  #
+  # THE EXCLUDED FILES ARE DROPPED FIRST (task-75f45c6baba2e633), not tested
+  # afterwards: the question is whether ANY file in the commit would make a
+  # deploy carry it, so an excluded file must not be able to answer yes on its
+  # own — while a commit that touches api/lib AND api/test stays relevant,
+  # because the api/lib path survives the drop. `|| true` because grep -v exits
+  # 1 when it drops every line, which is precisely the test-only case.
+  if [ -n "$EXCLUDED_ERE" ]; then
+    files="$(grep -vE "$EXCLUDED_ERE" <<<"$files" || true)"
+  fi
   grep -qE "$RELEVANT_ERE" <<<"$files"
 }
 
@@ -713,7 +773,7 @@ YML
   OWED_ALL="$(epoch_to_iso "$(( $(st_git "$repo" show -s --format=%ct "$D") + 1 ))")"
 
   # ── 1. THE RED-FIRST SPEC: the later-STARTED run carries the OLDER commit ──
-  echo "selftest 1/13: supersession must keep the DESCENDANT, not the run that started last"
+  echo "selftest 1/14: supersession must keep the DESCENDANT, not the run that started last"
   set +e
   out="$(printf '%s\n' "31000001 $B 2026-07-19T18:56:00Z" "31000002 $A 2026-07-19T19:01:00Z" \
         | "$0" survivor --repo "$repo" 2>&1)"
@@ -730,7 +790,7 @@ YML
   fi
 
   # The naive rule, run here so the spec shows it LOSING rather than asserting it does.
-  echo "selftest 2/13: the naive wall-clock rule gets this WRONG — that is the defect"
+  echo "selftest 2/14: the naive wall-clock rule gets this WRONG — that is the defect"
   naive="$(printf '%s\n' "31000001 $B 2026-07-19T18:56:00Z" "31000002 $A 2026-07-19T19:01:00Z" \
           | sort -k3 | tail -1 | awk '{print $1}')"
   if [ "$naive" = "31000002" ]; then
@@ -740,7 +800,7 @@ YML
   fi
 
   # ── 3. THE INCIDENT, as a convergence verdict ─────────────────────────────
-  echo "selftest 3/13: box on the OLDER commit while main carries a newer api change must be STRANDED"
+  echo "selftest 3/14: box on the OLDER commit while main carries a newer api change must be STRANDED"
   local c3=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$A" --tip "$B" --owed-before "$OWED_ALL" 2>&1)"; c3=$?
@@ -751,7 +811,7 @@ YML
     echo "SELFTEST FAIL: the incident shape did not red (rc=$c3)" >&2; echo "$out" >&2; rc=1
   fi
 
-  echo "selftest 4/13: the same box, once it serves the newer commit, is CONVERGED"
+  echo "selftest 4/14: the same box, once it serves the newer commit, is CONVERGED"
   local c4=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$B" --tip "$B" --owed-before "$OWED_ALL" 2>&1)"; c4=$?
@@ -760,7 +820,7 @@ YML
   else echo "SELFTEST FAIL: a current box read as stranded (rc=$c4)" >&2; echo "$out" >&2; rc=1; fi
 
   # ── 5. The docs-only tail: the row's own "4 later commits are docs/tooling" ─
-  echo "selftest 5/13: a docs-only tail past the box must NOT red (it deploys nothing)"
+  echo "selftest 5/14: a docs-only tail past the box must NOT red (it deploys nothing)"
   local c5=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$B" --tip "$D" --owed-before "$OWED_ALL" 2>&1)"; c5=$?
@@ -772,7 +832,7 @@ YML
   fi
 
   # ── 6/7. The torn-read guard, and the NEGATIVE ARM that it did not blind ──
-  echo "selftest 6/13: a relevant commit too NEW to be owed must not red (the torn-read guard)"
+  echo "selftest 6/14: a relevant commit too NEW to be owed must not red (the torn-read guard)"
   local c6=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$A" --tip "$B" --grace-seconds 86400 2>&1)"; c6=$?
@@ -783,7 +843,7 @@ YML
     echo "SELFTEST FAIL: the guard did not hold a too-new commit (rc=$c6)" >&2; echo "$out" >&2; rc=1
   fi
 
-  echo "selftest 7/13: NEGATIVE ARM — the guard must not blind the instrument"
+  echo "selftest 7/14: NEGATIVE ARM — the guard must not blind the instrument"
   # Same repo, same pair, cutoff moved past B's commit date: it is owed again.
   local c7=0 owed_at bct
   bct="$(st_git "$repo" show -s --format=%ct "$B")"
@@ -798,7 +858,7 @@ YML
   fi
 
   # ── 8. Diverged candidates have no safe survivor ──────────────────────────
-  echo "selftest 8/13: diverged candidates must REFUSE, never silently pick one"
+  echo "selftest 8/14: diverged candidates must REFUSE, never silently pick one"
   local c8=0
   st_git "$repo" checkout -q -b side "$A"
   E="$(st_commit "$repo" api/e.ex 'E: a divergent api change')"
@@ -814,7 +874,7 @@ YML
   fi
 
   # ── 9. Cannot-look is never a pass ────────────────────────────────────────
-  echo "selftest 9/13: an unresolvable sha and an unreadable filter must exit 2, never 0"
+  echo "selftest 9/14: an unresolvable sha and an unreadable filter must exit 2, never 0"
   local c9a=0 c9b=0
   set +e
   "$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served deadbeefdeadbeef --tip "$B" --owed-before "$OWED_ALL" >/dev/null 2>&1; c9a=$?
@@ -827,7 +887,7 @@ YML
   fi
 
   # ── 10. per-target relevance: an api commit is the instance's debt, not cp's ─
-  echo "selftest 10/13: an api-only commit must strand the INSTANCE and NOT the control plane"
+  echo "selftest 10/14: an api-only commit must strand the INSTANCE and NOT the control plane"
   local c10a=0 c10b=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --target instance \
@@ -849,7 +909,7 @@ YML
   fi
 
   # ── 11. the filter must come from the `changes` job and nowhere else ───────
-  echo "selftest 11/13: a decoy job's identical grep must not answer for a target"
+  echo "selftest 11/14: a decoy job's identical grep must not answer for a target"
   # The fixture's `decoy` job carries a filter matching api/, cloud/ AND docs/.
   # If the extractor were unscoped it would harvest that one, and the docs tail
   # of case 5 would start reading as a strand. Prove cp's filter is cloud-only.
@@ -872,7 +932,7 @@ YML
   fi
 
   # ── 12. A BROKEN RELEVANCE TEST MUST REFUSE, NOT CALL EVERYTHING IRRELEVANT ─
-  echo "selftest 12/13: an unusable filter must REFUSE, never resolve to nothing-to-deploy"
+  echo "selftest 12/14: an unusable filter must REFUSE, never resolve to nothing-to-deploy"
   # The direction matters more than the case. commit_is_relevant answers 0 for
   # relevant and 1 for not; ANY other status is the tool failing, and the caller
   # now treats >1 as a refusal rather than as "not relevant". Before that it read
@@ -898,7 +958,7 @@ YML
   fi
 
   # ── 13. A TOP-LEVEL BLOCK SCALAR MUST NOT ANSWER FOR THE `changes` JOB ─────
-  echo "selftest 13/13: a 2-space block-scalar body must not be read as the changes job"
+  echo "selftest 13/14: a 2-space block-scalar body must not be read as the changes job"
   # THE DEFEAT THIS CLOSES. extract_target_ere used to scan for
   # `/^  [a-zA-Z0-9_-]+:/` — a TEXT rule. `run-name: |` is a top-level block
   # scalar GitHub accepts, and its body is indented two spaces, so every line of
@@ -956,6 +1016,74 @@ YML
     rc=1
   fi
 
+  # ── 14. the api/test exclusion: relevance must SUBTRACT it ────────────────
+  echo "selftest 14/14: an api/test-only commit must NOT strand, while api/lib still does"
+  # Two filter files differing ONLY in the `- "!api/test/**"` line, and the same
+  # commits run through both. The no-exclusion copy is the CONTROL: without it a
+  # green here could mean the commits never reached the comparison at all.
+  sed 's#      - "api/\*\*"#      - "api/**"\n      - "!api/test/**"#' \
+    "$tmp/wf/deploy.yml" > "$tmp/wf/deploy-excl.yml"
+  if cmp -s "$tmp/wf/deploy.yml" "$tmp/wf/deploy-excl.yml"; then
+    echo "SELFTEST FAIL: the exclusion fixture is byte-identical to the base — the injection missed" >&2; rc=1
+  fi
+  local E14 F14 G14 OWED14 c14=0
+  E14="$(st_commit "$repo" api/test/e_test.exs 'E: a test-only api change')"
+  F14="$(st_commit "$repo" api/lib/f.ex 'F: a real api change')"
+  G14="$(st_commit "$repo" api/lib/g.ex 'G: a real api change riding with a test')"
+  st_commit "$repo" api/test/g_test.exs 'G2: the test that rides with G' >/dev/null
+  G14="$(st_git "$repo" rev-parse HEAD)"
+  OWED14="$(epoch_to_iso "$(( $(st_git "$repo" show -s --format=%ct "$G14") + 1 ))")"
+
+  # NEGATIVE: served D, tip E — the only commit between them touches api/test.
+  set +e
+  out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy-excl.yml" --target instance \
+         --served "$D" --tip "$E14" --owed-before "$OWED14" 2>&1)"; c14=$?
+  set -e
+  if [ "$c14" -eq 0 ]; then
+    echo "  ok: an api/test-only commit is not relevant — no fabricated strand"
+  else
+    echo "SELFTEST FAIL: an api/test-only commit still red (rc=$c14) — the exclusion is not subtracted" >&2
+    echo "$out" >&2; rc=1
+  fi
+
+  # THE CONTROL, and it is what makes the line above mean anything: the SAME
+  # commits against the SAME filters minus the exclusion must RED.
+  set +e
+  out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --target instance \
+         --served "$D" --tip "$E14" --owed-before "$OWED14" 2>&1)"; c14=$?
+  set -e
+  if [ "$c14" -eq 1 ] && [[ "$out" == *$'\n'"STRANDED:"* ]]; then
+    echo "  ok: CONTROL — without the exclusion line the same commit reds, so the fixture reached the comparison"
+  else
+    echo "SELFTEST FAIL: the control did not red (rc=$c14) — the negative case above proves nothing" >&2
+    echo "$out" >&2; rc=1
+  fi
+
+  # POSITIVE: an api/lib commit must still strand WITH the exclusion in place.
+  set +e
+  out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy-excl.yml" --target instance \
+         --served "$E14" --tip "$F14" --owed-before "$OWED14" 2>&1)"; c14=$?
+  set -e
+  if [ "$c14" -eq 1 ] && [[ "$out" == *$'\n'"STRANDED:"* ]]; then
+    echo "  ok: an api/lib commit still reds with the exclusion in place"
+  else
+    echo "SELFTEST FAIL: an api/lib commit did not red (rc=$c14) — the exclusion swallowed the parent tree" >&2
+    echo "$out" >&2; rc=1
+  fi
+
+  # MIXED: a commit touching api/lib AND api/test must stay relevant. The
+  # exclusion drops FILES, never whole commits.
+  set +e
+  out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy-excl.yml" --target instance \
+         --served "$F14" --tip "$G14" --owed-before "$OWED14" 2>&1)"; c14=$?
+  set -e
+  if [ "$c14" -eq 1 ] && [[ "$out" == *$'\n'"STRANDED:"* ]]; then
+    echo "  ok: api/lib + api/test together still reds — the drop is per FILE, not per commit"
+  else
+    echo "SELFTEST FAIL: a mixed commit did not red (rc=$c14) — a real change riding with a test would strand" >&2
+    echo "$out" >&2; rc=1
+  fi
+
   rm -rf "$tmp"
   echo
   if [ "$rc" -eq 0 ]; then
@@ -993,6 +1121,10 @@ main() {
       shift
       local fyml="${1:-$DEPLOY_YML_DEFAULT}" t re frc=0
       say "on.push.paths union: $(extract_relevant_globs "$fyml" | globs_to_ere)"
+      # Printed even when empty, with the word EXCLUSIONS either way: a line that
+      # disappears when the set is empty is indistinguishable from a line the
+      # extractor failed to produce.
+      say "on.push.paths exclusions: $(extract_exclusion_globs "$fyml" | globs_to_ere)"
       for t in cp instance; do
         re="$(extract_target_ere "$fyml" "$t")"
         if [ -z "$re" ]; then

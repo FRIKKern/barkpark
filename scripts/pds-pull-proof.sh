@@ -122,6 +122,11 @@
 #                        its lock. Deliberately NOT under ART_DIR.
 #   PDS_FULL_EXPORT_BUDGET       default 1 attempt, ever, per store
 #   PDS_FULL_EXPORT_MIN_MEM_MB   default 2200 — the source's MemAvailable floor
+#   PDS_FULL_EXPORT_MAX_BEAM_SWAP_MB  default 256 — the ceiling on how much of
+#                        the LIVE beam.smp may be paged out. MemAvailable alone
+#                        RISES as the BEAM is evicted, so the floor above is
+#                        anti-correlated with safety unless it is paired with
+#                        this (PDS-D741, pds-bl-gate-b-anticorrelated)
 #   PDS_STEP5_FAILDEMO=0 skip step 5's truncate/restore failure demonstration
 #                        (the pass then says so: nothing proved the comparator
 #                        can fail)
@@ -227,6 +232,38 @@ FULL_ATTEMPTS_FILE="$FULL_DIR/attempts"
 FULL_LOCK="$FULL_DIR/lock"
 FULL_BUDGET="${PDS_FULL_EXPORT_BUDGET:-1}"
 FULL_MIN_MEM_MB="${PDS_FULL_EXPORT_MIN_MEM_MB:-2200}"
+# THE INCOMING BODY NEVER LANDS ON THE PARKED PATH (pds-bl-w16-failed-refetch-
+# destroys-parked-bundle). `curl -o "$FULL_TAR"` opens the destination in
+# TRUNCATE mode, so the instant a re-fetch was ISSUED the old, intact, otherwise
+# usable bundle was gone — and a 503 then left the run with NEITHER a fresh
+# bundle NOR the fallback, having already spent the attempt. The download lands
+# on a per-run sibling path and is moved into place only after full_meta_ok has
+# passed on THAT path, so every failure mode leaves the parked bundle untouched.
+FULL_TMP_TAR="$FULL_TAR.incoming.$RUN_TAG.$$"
+# (f) FREE SPACE, measured before the request. Nothing in this ladder looked at
+# disk at all; a ~1.03 GB export that runs the filesystem out mid-download fails
+# as a truncated body — a shape indistinguishable from a dead export — after
+# paying the source's full memory peak. The floor covers the incoming copy while
+# the parked bundle is still on disk, which is exactly what the temp-then-rename
+# shape above requires; a parked bundle LARGER than the floor raises it.
+FULL_MIN_FREE_MB="${PDS_FULL_EXPORT_MIN_FREE_MB:-1536}"
+# (b) IS A CONJUNCTION, AND THIS IS ITS SECOND HALF (pds-bl-gate-b-anticorrelated,
+# PDS-D741). A MemAvailable floor ON ITS OWN is ANTI-CORRELATED with the thing
+# gate (b) exists to prevent. MEASURED on the source 2026-07-20, over 55 s:
+# MemAvailable rose 1,586,644 -> 2,984,512 kB precisely BECAUSE the live BEAM was
+# being paged out — over the same window its VmSwap rose 51,624 -> 874,760 kB and
+# its RSS collapsed 1,024,468 -> 216,852 kB. Seven of eight samples PASSED the
+# floor. So the old gate opened most reliably in the state where materialising a
+# ~1.03 GB bundle is MOST dangerous: the working set the export must fault back
+# in is on disk, and the "headroom" the floor read is that working set's grave.
+#
+# THE CEILING'S DERIVATION, not a round number picked for looking round: the
+# same measured window puts ordinary residue at 51,624 kB (50 MB) of beam swap
+# and the pathological readings at 859,944-874,760 kB (839-854 MB). 256 MB sits
+# 5x above the residue and 3.3x below the pathology, and is ~25% of the ~1,000 MB
+# healthy beam.smp RSS baseline measured in that same window — i.e. it refuses
+# once a quarter of the live BEAM's working set is on disk.
+FULL_MAX_SWAP_MB="${PDS_FULL_EXPORT_MAX_BEAM_SWAP_MB:-256}"
 FULL_LOCK_OWNED=""
 FULL_WHY=""            # why acquisition aborted, if it did
 FULL_META_WHY=""       # which full_meta_ok expectation failed, if one did
@@ -278,6 +315,7 @@ int_ok() { case "${1-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 # the door is the difference between a wrong number and a wrong story.
 int_ok "$FULL_BUDGET"     || die "PDS_FULL_EXPORT_BUDGET must be a non-negative integer, got '$FULL_BUDGET'"
 int_ok "$FULL_MIN_MEM_MB" || die "PDS_FULL_EXPORT_MIN_MEM_MB must be a non-negative integer, got '$FULL_MIN_MEM_MB'"
+int_ok "$FULL_MAX_SWAP_MB" || die "PDS_FULL_EXPORT_MAX_BEAM_SWAP_MB must be a non-negative integer, got '$FULL_MAX_SWAP_MB'"
 
 # One integer from a counter capture, or the EMPTY string when there isn't one.
 # Never invents a zero: emptiness is what `int_ok` is for. The `head -n 1` is
@@ -809,7 +847,9 @@ cmd_plan() {
   say "               or with PDS_KEEP_ARTIFACTS=1. Backlog: $SELF --sweep-artifacts"
   say "full export:   $FULL_TAR"
   say "               budget=$FULL_BUDGET attempt(s) · spent so far=$([ -f "$FULL_ATTEMPTS_FILE" ] && cat "$FULL_ATTEMPTS_FILE" || echo 0) · on-disk bundle=$([ -s "$FULL_TAR" ] && echo "PRESENT ($(wc -c <"$FULL_TAR" | tr -d ' ') bytes, would be REUSED for 0 attempts)" || echo absent)"
-  say "               min MemAvailable on the source before it is taken: ${FULL_MIN_MEM_MB} MB"
+  say "               gate (b) before it is taken: MemAvailable >= ${FULL_MIN_MEM_MB} MB AND the live"
+  say "               beam.smp's own VmSwap <= ${FULL_MAX_SWAP_MB} MB. BOTH, because MemAvailable RISES"
+  say "               as the BEAM is evicted — the floor alone opens on a swapped-out box"
   say "siblings:      $(basename "$SCRATCH_SCRIPT") $([ -x "$SCRATCH_SCRIPT" ] && echo present || echo MISSING) · $(basename "$SCAN_SCRIPT") $([ -x "$SCAN_SCRIPT" ] && echo present || echo MISSING)"
   say "tooling:       curl $(command -v curl >/dev/null 2>&1 && echo yes || echo NO) · python3 $(command -v python3 >/dev/null 2>&1 && echo yes || echo NO) · psql $(command -v psql >/dev/null 2>&1 && echo yes || echo NO) · ssh $(command -v ssh >/dev/null 2>&1 && echo yes || echo NO) · bp $(command -v bp >/dev/null 2>&1 && echo yes || echo NO)"
   say ""
@@ -1028,6 +1068,20 @@ banner() {
   say "     and only as the FIRING control for steps 3 and 4. Its memory figure is"
   say "     measured by a 1 Hz ps sampler over SSH during that export; no cgroup"
   say "     number and no survey number is reprinted as this run's."
+  say "   · Full-export GATE scope — precondition (b) asserts a CONJUNCTION: the"
+  say "     source's MemAvailable is at or above ${FULL_MIN_MEM_MB} MB AND the live beam.smp"
+  say "     has at most ${FULL_MAX_SWAP_MB} MB of itself swapped out, both read in ONE probe"
+  say "     immediately before the request. The second half is not decoration:"
+  say "     MemAvailable RISES as the BEAM is evicted (measured 2026-07-20 —"
+  say "     MemAvailable 1,586,644 -> 2,984,512 kB while beam VmSwap rose"
+  say "     51,624 -> 874,760 kB), so a floor read ALONE opens most reliably in"
+  say "     the most dangerous state and is not a safety property (PDS-D741)."
+  say "     WHAT IT STILL DOES NOT CLAIM: it is a point-in-time reading taken"
+  say "     before a multi-minute export, not a reservation — nothing holds that"
+  say "     memory, the box can degrade the instant after the probe, and no"
+  say "     precondition on this box makes a ONE-BINARY ~1.03 GB export safe."
+  say "     Only streaming the export removes the allocation; the gate narrows"
+  say "     the window, it does not close it."
   say "   · RSS scope — that peak is WHOLE-PROCESS beam.smp RSS over the export"
   say "     window, NOT export-exclusive. The same BEAM serves the live content"
   say "     API throughout, and \`ps -o rss=\` cannot separate export-caused memory"
@@ -2032,7 +2086,7 @@ step_2() {
 # gigabytes on a 3.8 GB box that is ALSO serving the live content API, and an
 # export that DIES still pays the peak. So: one run-stable copy, a persistent
 # attempt counter flushed BEFORE the request (a killed run must not get a free
-# retry), a mkdir lock (flock does not exist on Darwin), and five conditions
+# retry), a mkdir lock (flock does not exist on Darwin), and six conditions
 # printed with their measured values BEFORE any byte moves.
 #
 # THE RSS NUMBER IS MEASURED, NOT QUOTED. A 1 Hz `ps -o rss= -p <beam pid>`
@@ -2066,16 +2120,22 @@ step_2() {
 # it to pds-secret-scan.sh. The legacy pre-profile accept SURVIVES, but only for
 # a manifest that PARSED and genuinely carries no `profile` key — an unreadable
 # manifest is not a legacy engine.
-full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
+full_meta_ok() { # [path] -> 0 = THAT bundle is a usable FULL bundle (default $FULL_TAR)
   FULL_META_WHY=""
-  local d p sz kind prc=0 listing lrc=0 nmembers
+  local d p sz kind prc=0 listing lrc=0 nmembers tarball
+  # THE PATH IS AN ARGUMENT so the predicate can judge a body that has NOT been
+  # moved into place yet (pds-bl-w16-failed-refetch-destroys-parked-bundle): the
+  # fetch validates its temp file HERE and only a pass renames it over the parked
+  # bundle. Default $FULL_TAR — every existing caller reads the parked path and
+  # is unchanged, and the refusal text still names the file it actually judged.
+  tarball="${1:-$FULL_TAR}"
 
-  if [ ! -f "$FULL_TAR" ]; then
-    FULL_META_WHY="there is no file at $FULL_TAR"
+  if [ ! -f "$tarball" ]; then
+    FULL_META_WHY="there is no file at $tarball"
     return 1
   fi
-  if [ ! -s "$FULL_TAR" ]; then
-    FULL_META_WHY="$FULL_TAR is 0 bytes"
+  if [ ! -s "$tarball" ]; then
+    FULL_META_WHY="$tarball is 0 bytes"
     return 1
   fi
 
@@ -2083,12 +2143,12 @@ full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
   # gzip, and the byte count alone does not: name the type AND the size. Both
   # refusals below carry the same "What is actually on disk" clause, because
   # WHICH of the two fires is a property of the local tar(1), not of the body.
-  sz="$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')"
-  kind="$(file -b "$FULL_TAR" 2>/dev/null | tr -d '\n')"
+  sz="$(wc -c <"$tarball" 2>/dev/null | tr -d ' ')"
+  kind="$(file -b "$tarball" 2>/dev/null | tr -d '\n')"
 
-  listing="$(tar -tf "$FULL_TAR" 2>/dev/null)" || lrc=$?
+  listing="$(tar -tf "$tarball" 2>/dev/null)" || lrc=$?
   if [ "$lrc" -ne 0 ]; then
-    FULL_META_WHY="$FULL_TAR does not read as a tar archive at all — \`tar -tf\` refused it (exit $lrc). What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An error page, a truncated download or any non-tar body reaches this predicate looking exactly like a bundle, and every downstream extraction off it would read as an EMPTY bundle rather than a failed one"
+    FULL_META_WHY="$tarball does not read as a tar archive at all — \`tar -tf\` refused it (exit $lrc). What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An error page, a truncated download or any non-tar body reaches this predicate looking exactly like a bundle, and every downstream extraction off it would read as an EMPTY bundle rather than a failed one"
     return 1
   fi
 
@@ -2108,22 +2168,22 @@ full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
   # too, and the sentence is true of it as well: no members, so no bundle.
   nmembers="$(printf '%s' "$listing" | grep -c .)" || nmembers=0
   if [ "$nmembers" -eq 0 ]; then
-    FULL_META_WHY="$FULL_TAR lists ZERO members — \`tar -tf\` accepted it but named nothing inside it. What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An archive with no members carries no manifest and no tables, so it is not a bp-export-v1 bundle whatever it is. TWO different bodies land here: a genuinely empty tar, and — on GNU tar only — a GZIPPED non-tar body, which GNU decompresses transparently and then reports as an empty archive with exit 0 where bsdtar refuses it one branch earlier. Read file(1) above to tell which one you have"
+    FULL_META_WHY="$tarball lists ZERO members — \`tar -tf\` accepted it but named nothing inside it. What is actually on disk: ${sz:-?} bytes, file(1) says [${kind:-unidentifiable}]. An archive with no members carries no manifest and no tables, so it is not a bp-export-v1 bundle whatever it is. TWO different bodies land here: a genuinely empty tar, and — on GNU tar only — a GZIPPED non-tar body, which GNU decompresses transparently and then reports as an empty archive with exit 0 where bsdtar refuses it one branch earlier. Read file(1) above to tell which one you have"
     return 1
   fi
 
   d="$(mktemp -d "${TMPDIR:-/tmp}/pds-fm.XXXXXX")"
   TMP_DIRS="$TMP_DIRS $d"
 
-  if ! tar -xf "$FULL_TAR" -C "$d" manifest.json 2>/dev/null || [ ! -s "$d/manifest.json" ]; then
-    FULL_META_WHY="$FULL_TAR is a readable tar but carries no non-empty manifest.json member, so it is not a bp-export-v1 bundle at all"
+  if ! tar -xf "$tarball" -C "$d" manifest.json 2>/dev/null || [ ! -s "$d/manifest.json" ]; then
+    FULL_META_WHY="$tarball is a readable tar but carries no non-empty manifest.json member, so it is not a bp-export-v1 bundle at all"
     return 1
   fi
 
   # manifest_field's EXIT CODE is what makes the legacy accept safe: 1 is "the
   # manifest was read and carries no profile key" (the pre-profile engine), 2 is
   # "nothing was readable". The old predicate saw the same empty string for both.
-  p="$(manifest_field "$FULL_TAR" profile)" || prc=$?
+  p="$(manifest_field "$tarball" profile)" || prc=$?
   case "$prc" in
     2)
       FULL_META_WHY="manifest.json is present but is not a JSON object — its profile cannot be read, and an UNREADABLE manifest is not the legacy pre-profile engine the absent-profile branch exists for"
@@ -2137,7 +2197,7 @@ full_meta_ok() { # 0 = the on-disk bundle is a usable FULL bundle
       fi ;;
   esac
 
-  if ! tar -xf "$FULL_TAR" -C "$d" tables/documents.copy 2>/dev/null || [ ! -s "$d/tables/documents.copy" ]; then
+  if ! tar -xf "$tarball" -C "$d" tables/documents.copy 2>/dev/null || [ ! -s "$d/tables/documents.copy" ]; then
     FULL_META_WHY="the bundle carries no non-empty tables/documents.copy member — step 3's ticket-deny control and step 4's scan both read exactly that member, and a zero over an absent member is vacuous, not clean"
     return 1
   fi
@@ -2171,6 +2231,57 @@ full_attempts() { # -> integer (never empty — an empty/garbage counter file re
   printf '%s' "${n:-0}"
 }
 
+# ── GATE (b): THE PAIRED MEMORY PREDICATE ───────────────────────────────────
+# (pds-bl-gate-b-anticorrelated, PDS-D741)
+#
+# A PURE FUNCTION OVER NUMBERS, deliberately: it performs no SSH, reads no file
+# and touches no global but the two configured limits, so the exact figures the
+# source produced on 2026-07-20 can be replayed through the SHIPPED predicate
+# without a box. Everything measured lives in the caller; everything judged
+# lives here.
+#
+# WHAT IT ASSERTS: MemAvailable >= floor AND the live beam.smp's own VmSwap <=
+# ceiling. The conjunction is the whole point — see the FULL_MAX_SWAP_MB block
+# above for the measurement that makes the floor alone anti-correlated.
+#
+# FAIL-CLOSED ON BLINDNESS, exactly as (d) does (PDS-D98): an unreadable
+# MemAvailable or an unreadable VmSwap is UNKNOWN, never OK. The swapped-out
+# state is precisely the one where a probe is slow enough to be dropped, so a
+# missing VmSwap must not degrade into the old single-value gate.
+gate_b_verdict() { # <memavail_kb> <vmswap_kb> <floor_mb> [beam_rss_kb] -> the cond_b text; 0 = OK
+  local avail_kb="${1-}" swap_kb="${2-}" floor_mb="${3-0}" rss_kb="${4-}"
+  local avail_mb swap_mb rss_mb committed=""
+
+  if ! int_ok "$avail_kb"; then
+    printf 'UNKNOWN (MemAvailable unreadable — SSH is the only route to it, and a gate that cannot see is never OK)\n'
+    return 1
+  fi
+  avail_mb=$((avail_kb / 1024))
+  if ! int_ok "$swap_kb"; then
+    printf 'UNKNOWN (MemAvailable is %s MB, but NO comm-anchored beam.smp VmSwap could be read — and VmSwap is the half of this gate that tells a healthy box from an evicted one. The floor ALONE would have said OK here; that is the reading PDS-D741 refuses)\n' "$avail_mb"
+    return 1
+  fi
+  swap_mb=$((swap_kb / 1024))
+  if int_ok "$rss_kb"; then
+    rss_mb=$((rss_kb / 1024))
+    committed="$(printf ', beam committed footprint %s MB = RSS %s + swap %s' "$((rss_mb + swap_mb))" "$rss_mb" "$swap_mb")"
+  fi
+
+  if [ "$avail_mb" -lt "$floor_mb" ]; then
+    printf 'FAILED (%s MB available, floor %s MB; beam swapped out %s MB, ceiling %s MB)%s — too little headroom to materialise the bundle beside a LIVE content API\n' \
+      "$avail_mb" "$floor_mb" "$swap_mb" "$FULL_MAX_SWAP_MB" "$committed"
+    return 1
+  fi
+  if [ "$swap_mb" -gt "$FULL_MAX_SWAP_MB" ]; then
+    printf 'FAILED — %s MB available CLEARS the %s MB floor, but %s MB of the LIVE beam.smp is SWAPPED OUT (ceiling %s MB)%s. That headroom IS the evicted working set: the export would fault it all back in. This is the exact reading the floor alone passed on 2026-07-20\n' \
+      "$avail_mb" "$floor_mb" "$swap_mb" "$FULL_MAX_SWAP_MB" "$committed"
+    return 1
+  fi
+  printf 'OK (%s MB available >= floor %s MB, AND %s MB of the live beam.smp swapped out <= ceiling %s MB)%s\n' \
+    "$avail_mb" "$floor_mb" "$swap_mb" "$FULL_MAX_SWAP_MB" "$committed"
+  return 0
+}
+
 acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says why not
   FULL_WHY=""
   local stale_note=""
@@ -2190,7 +2301,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     # Silence here is what let a non-tar body be reused as a full-fidelity
     # control for as long as it sat on disk (PDS-D261). $FULL_DIR defaults to
     # world-writable /tmp, so this branch is reachable without any bad export.
-    info "full bundle     PARKED FILE REFUSED — $FULL_META_WHY. Not reused; falling through to the five conditions."
+    info "full bundle     PARKED FILE REFUSED — $FULL_META_WHY. Not reused; falling through to the six conditions."
   fi
 
   if full_meta_ok; then
@@ -2211,8 +2322,9 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     fi
   fi
 
-  # ── the five conditions, printed with measured values, before any byte moves
-  local spent mem_kb mem_mb sha_now deploy_running gh_rc gh_out cond_a cond_b cond_c cond_d cond_e ok=1
+  # ── the six conditions, printed with measured values, before any byte moves
+  local spent mem_kb sha_now deploy_running gh_rc gh_out cond_a cond_b cond_c cond_d cond_e cond_f ok=1
+  local parked_note free_mb need_mb parked_mb parked_bytes
   spent="$(full_attempts)"
 
   sha_now=""
@@ -2225,23 +2337,49 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     cond_a="FAILED — the box redeployed since step 0a ($DEPLOYED_SHA -> $sha_now)"; ok=0
   fi
 
-  mem_mb=""
+  # ── (b) BOTH HALVES COME BACK IN ONE PROBE (pds-bl-gate-b-anticorrelated) ─
+  # ONE round trip, so the two numbers describe the SAME instant: a MemAvailable
+  # read at T and a VmSwap read at T+2s can disagree about the box by a hundred
+  # megabytes on a thrashing host, and the pair is the whole assertion.
+  #
+  # `pgrep -x beam.smp` — comm-anchored and UNANCHORED-to-argv, matching the RSS
+  # sampler below, for the reason recorded there (PDS-D135): `pgrep -f beam` also
+  # matches THIS VERY ssh command line. Every slot's VmSwap is SUMMED, because
+  # every slot's evicted pages compete for the same faults during the export.
+  local mem_probe swap_kb beam_rss_kb
+  mem_probe=""; swap_kb=""; beam_rss_kb=""
   if ssh_available; then
-    mem_kb="$(ssh_src "awk '/MemAvailable/{print \$2}' /proc/meminfo" | tr -d '[:space:]' || true)"
-    [ -n "$mem_kb" ] && mem_mb=$((mem_kb / 1024))
+    mem_probe="$(ssh_src "awk '/^MemAvailable:/{print \"memavail \" \$2}' /proc/meminfo; pgrep -x beam.smp | while read -r bp; do awk '/^VmSwap:/{print \"vmswap \" \$2} /^VmRSS:/{print \"vmrss \" \$2}' /proc/\$bp/status 2>/dev/null; done" || true)"
+    mem_kb="$(first_int "$(printf '%s\n' "$mem_probe" | awk '/^memavail /{print $2; exit}')")"
+    # NO DEFAULT ZERO. An absent vmswap line means the probe could not see the
+    # BEAM at all; defaulting it to 0 would read as "nothing is swapped out",
+    # which is the most reassuring possible answer to a question that was never
+    # answered. awk's `END {print s+0}` would do exactly that, so the presence
+    # of the line is checked FIRST and the sum is only taken when there is one.
+    if printf '%s\n' "$mem_probe" | grep -q '^vmswap '; then
+      swap_kb="$(first_int "$(printf '%s\n' "$mem_probe" | awk '/^vmswap /{s += $2} END {print s}')")"
+      beam_rss_kb="$(first_int "$(printf '%s\n' "$mem_probe" | awk '/^vmrss /{s += $2} END {print s}')")"
+    fi
   fi
-  if [ -z "$mem_mb" ]; then
-    cond_b="UNKNOWN (MemAvailable unreadable — SSH is the only route to it)"; ok=0
-  elif [ "$mem_mb" -ge "$FULL_MIN_MEM_MB" ]; then
-    cond_b="OK (${mem_mb} MB available, floor ${FULL_MIN_MEM_MB} MB)"
-  else
-    cond_b="FAILED (${mem_mb} MB available, floor ${FULL_MIN_MEM_MB} MB) — taking it now risks OOMing the LIVE content API"; ok=0
-  fi
+  cond_b="$(gate_b_verdict "$mem_kb" "$swap_kb" "$FULL_MIN_MEM_MB" "$beam_rss_kb")" || ok=0
 
   if [ "$spent" -lt "$FULL_BUDGET" ]; then
     cond_c="OK ($spent of $FULL_BUDGET attempt(s) spent)"
   else
-    cond_c="FAILED — the budget is exhausted ($spent of $FULL_BUDGET). A dead export still paid its peak; raise PDS_FULL_EXPORT_BUDGET deliberately or reuse $FULL_TAR"; ok=0
+    # "or reuse $FULL_TAR" was advice the run had ALREADY made impossible: every
+    # path that reaches the conditions has either no parked file, or a parked
+    # file this very invocation refused. Telling an operator to reuse a bundle
+    # full_meta_ok rejected sends them to a control that cannot be consumed —
+    # so the guidance is DERIVED from the parked path's measured state instead
+    # of being a fixed sentence (pds-bl-w16-failed-refetch-destroys-parked-bundle).
+    if [ ! -e "$FULL_TAR" ]; then
+      parked_note="there is NO file at $FULL_TAR, so there is nothing to fall back on either"
+    elif full_meta_ok; then
+      parked_note="the bundle parked at $FULL_TAR IS a usable full bundle, but this run did not reuse it: ${stale_note:-it was refused above; see the transcript. }Reusing it anyway would date another sha's artifact with this run's pin, which is the silent-wrong-answer class PDS-D20 exists to refuse — so reuse is an operator decision taken out loud, not a default"
+    else
+      parked_note="do NOT reuse $FULL_TAR — the validity check has ALREADY rejected the file parked there ($FULL_META_WHY), so it is not a fallback. Remove it or replace it deliberately"
+    fi
+    cond_c="FAILED — the budget is exhausted ($spent of $FULL_BUDGET). A dead export still paid its peak; raise PDS_FULL_EXPORT_BUDGET deliberately. On the parked path: $parked_note"; ok=0
   fi
 
   deploy_running=""
@@ -2267,6 +2405,33 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     cond_d="UNKNOWN (gh is not on PATH, so an in-flight deploy cannot be ruled out)"; ok=0
   fi
 
+  # ── (f) FREE SPACE — measured, with the figures, BEFORE the request ──────
+  # `grep -n 'df -\|disk'` over this file returned nothing before this change:
+  # the acquisition path pulled ~1.03 GB with no idea whether the filesystem
+  # could hold it. Running out mid-download produces a TRUNCATED body, which is
+  # indistinguishable on disk from a dead export, after the source has already
+  # paid its full memory peak — the most expensive way to learn about `df`.
+  # The requirement is the incoming copy sitting BESIDE the parked bundle (the
+  # temp-then-rename shape), so a parked bundle bigger than the floor raises it.
+  parked_bytes=0; parked_mb=0
+  if [ -s "$FULL_TAR" ]; then
+    parked_bytes="$(first_int "$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')")"
+    int_ok "$parked_bytes" || parked_bytes=0
+    parked_mb=$((parked_bytes / 1048576))
+  fi
+  need_mb="$FULL_MIN_FREE_MB"
+  if [ "$((parked_mb + 256))" -gt "$need_mb" ]; then need_mb=$((parked_mb + 256)); fi
+  # -P forces the one-line POSIX format (a long device name otherwise wraps and
+  # $4 reads the wrong column); -m fixes the unit so no block-size guess is made.
+  free_mb="$(first_int "$(df -Pm "$FULL_DIR" 2>/dev/null | awk 'NR==2 {print $4}')")"
+  if ! int_ok "$free_mb" || [ -z "$free_mb" ]; then
+    cond_f="UNKNOWN (df -Pm could not measure free space under $FULL_DIR — a gate that cannot see is never OK)"; ok=0
+  elif [ "$free_mb" -ge "$need_mb" ]; then
+    cond_f="OK (${free_mb} MB free under $FULL_DIR, floor ${need_mb} MB = ${FULL_MIN_FREE_MB} MB base vs parked ${parked_mb} MB + 256)"
+  else
+    cond_f="FAILED (${free_mb} MB free under $FULL_DIR, floor ${need_mb} MB) — short by $((need_mb - free_mb)) MB. The incoming bundle must fit BESIDE the parked one (parked: ${parked_bytes} bytes); starting the request would buy a truncated body at the price of the source's full memory peak"; ok=0
+  fi
+
   cond_e="not attempted (an earlier condition already failed)"
   if [ "$ok" -eq 1 ]; then
     if mkdir "$FULL_LOCK" 2>/dev/null; then
@@ -2278,16 +2443,17 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   fi
 
   say ""
-  info "FULL-EXPORT PRECONDITIONS (all five printed BEFORE any byte moves):"
+  info "FULL-EXPORT PRECONDITIONS (all six printed BEFORE any byte moves):"
   info "  (a) served sha re-pinned == step 0a's ....... $cond_a"
-  info "  (b) MemAvailable >= ${FULL_MIN_MEM_MB} MB ................. $cond_b"
+  info "  (b) MemAvail >= ${FULL_MIN_MEM_MB} MB AND beam swap <= ${FULL_MAX_SWAP_MB} MB ... $cond_b"
   info "  (c) attempts < budget ...................... $cond_c"
   info "  (d) no deploy.yml run in progress .......... $cond_d"
+  info "  (f) free space >= the incoming bundle ...... $cond_f"
   info "  (e) lock acquired .......................... $cond_e"
   say ""
 
   if [ "$ok" -ne 1 ]; then
-    FULL_WHY="${stale_note}a full-export precondition did not hold — (a) $cond_a · (b) $cond_b · (c) $cond_c · (d) $cond_d · (e) $cond_e"
+    FULL_WHY="${stale_note}a full-export precondition did not hold — (a) $cond_a · (b) $cond_b · (c) $cond_c · (d) $cond_d · (f) $cond_f · (e) $cond_e"
     return 1
   fi
 
@@ -2349,7 +2515,16 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     fi
   fi
 
-  local t0 t1 code bytes
+  local t0 t1 code bytes parked_before parked_sum
+  # THE DOWNLOAD LANDS ON A SIBLING PATH, NEVER ON THE PARKED ONE. Recorded here
+  # so every failure branch below can state, with measured figures, that the
+  # bundle an operator may still need is exactly where it was.
+  parked_before="absent"
+  if [ -s "$FULL_TAR" ]; then
+    parked_before="$(first_int "$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')") bytes"
+  fi
+  TMP_FILES="$TMP_FILES $FULL_TMP_TAR"
+  rm -f "$FULL_TMP_TAR"
   # PDS-BLIND-SPOT-METER: `date +%s`, WALL CLOCK around an HTTP/CLI call issued
   # from THIS shell. Placement is (a) of PDS-D633's law — an OS-level clock
   # OUTSIDE every BEAM. It has to be: the BEAM doing the work is the SERVER, on
@@ -2361,25 +2536,43 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   # comes from `pds-door-census.sh --measure`; a regression ratchet would need
   # `Process.info(pid, :reductions)`, which a shell has not got.
   t0="$(date +%s)"
-  code="$(http_code "$(curl_src "/api/workspaces/$SOURCE_WS/export" -o "$FULL_TAR" -w '%{http_code}' \
+  code="$(http_code "$(curl_src "/api/workspaces/$SOURCE_WS/export" -o "$FULL_TMP_TAR" -w '%{http_code}' \
             --max-time "${PDS_FULL_EXPORT_TIMEOUT:-900}" 2>/dev/null || true)")"
   t1="$(date +%s)"
 
   if [ -n "$rss_pid" ]; then kill "$rss_pid" 2>/dev/null || true; wait "$rss_pid" 2>/dev/null || true; fi
   peak_kb="$(first_int "$(awk '{ if ($1+0 > m) m = $1+0 } END { print m+0 }' "$rss_log" 2>/dev/null)")"
 
-  bytes="$(first_int "$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')")"
+  bytes="$(first_int "$(wc -c <"$FULL_TMP_TAR" 2>/dev/null | tr -d ' ')")"
   if [ "$code" != "200" ] || ! int_ok "$bytes" || [ "$bytes" -lt 1024 ]; then
-    rm -f "$FULL_TAR"
-    FULL_WHY="the full export returned HTTP $code / $bytes bytes and the attempt is spent ($spent_now of $FULL_BUDGET). A dead export still paid its memory peak, which is exactly why the counter moved first."
+    rm -f "$FULL_TMP_TAR"
+    FULL_WHY="the full export returned HTTP $code / $bytes bytes and the attempt is spent ($spent_now of $FULL_BUDGET). A dead export still paid its memory peak, which is exactly why the counter moved first. The body landed on $FULL_TMP_TAR and has been removed; the previously parked bundle at $FULL_TAR is UNTOUCHED ($parked_before before the request, $([ -s "$FULL_TAR" ] && printf '%s bytes' "$(wc -c <"$FULL_TAR" | tr -d ' ')" || printf 'absent') after it)."
     [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
     return 1
   fi
-  if ! full_meta_ok; then
-    FULL_WHY="the export returned HTTP 200 and $bytes bytes, but what came back is not a usable full-profile bp-export-v1 bundle: $FULL_META_WHY"
+  # THE SIBLING BRANCH CLEANS UP TOO (the absorbed task-ded188685e54afef). HTTP
+  # 200, >= 1024 bytes and a profile the predicate refuses used to release the
+  # lock and return 1 with NO rm — leaving ~1 GB of unusable, provenance-free
+  # archive at the run-stable path, indistinguishable on disk from a good bundle,
+  # which every future acquire then deterministically refused. `rm -f` appears
+  # on BOTH branches now, and neither can reach the parked path at all.
+  if ! full_meta_ok "$FULL_TMP_TAR"; then
+    rm -f "$FULL_TMP_TAR"
+    FULL_WHY="the export returned HTTP 200 and $bytes bytes, but what came back is not a usable full-profile bp-export-v1 bundle: $FULL_META_WHY. The rejected body was removed from $FULL_TMP_TAR rather than parked; the previously parked bundle at $FULL_TAR is UNTOUCHED ($parked_before before the request, $([ -s "$FULL_TAR" ] && printf '%s bytes' "$(wc -c <"$FULL_TAR" | tr -d ' ')" || printf 'absent') after it)."
     [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
     return 1
   fi
+
+  # ── MOVE INTO PLACE, and only now ────────────────────────────────────────
+  # Same directory, so this is a rename(2): the parked path goes from the OLD
+  # bundle to the NEW one with no window in which it holds a partial body.
+  if ! mv -f "$FULL_TMP_TAR" "$FULL_TAR"; then
+    FULL_WHY="the export returned a valid $bytes-byte full bundle at $FULL_TMP_TAR but it could not be moved onto $FULL_TAR. The validated body is left at $FULL_TMP_TAR; the previously parked bundle is untouched ($parked_before)."
+    [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
+    return 1
+  fi
+  parked_sum="replaced the $parked_before parked bundle"
+  [ "$parked_before" = "absent" ] && parked_sum="parked where nothing was"
 
   if int_ok "$peak_kb" && [ "$peak_kb" -gt 0 ]; then
     FULL_RSS_LINE="beam.smp RSS peaked at $((peak_kb / 1024)) MB — the MAX over ${beam_n:-?} comm-anchored beam.smp slot(s), measured by a 1 Hz ps sampler over SSH across this export only (primary/oldest pid ${beam_pid:-?}, baseline ${baseline_kb:-?} KB, $(grep -c . "$rss_log" 2>/dev/null || echo 0) samples, no slot restart)"
@@ -2405,7 +2598,7 @@ EOF
   pds_blind_spot_note \
     "date +%s, WALL CLOCK around an HTTP/CLI call issued from this shell — an OS clock outside every BEAM (PDS-D633 placement (a)); the BEAM doing the work is the remote SERVER, so no in-BEAM meter is reachable. A LATENCY, never a price (PDS-D605)" \
     "full bundle"
-  info "                parked at $FULL_TAR (+ .meta) — run-stable, so the NEXT run reuses it for 0 attempts"
+  info "                parked at $FULL_TAR (+ .meta) — run-stable, so the NEXT run reuses it for 0 attempts. Downloaded to $FULL_TMP_TAR and moved into place ONLY after full_meta_ok passed on it ($parked_sum)."
   [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
   return 0
 }
@@ -3100,6 +3293,103 @@ columns_where() { # <same|diff> before_line after_line -> the column names whose
   printf '%s' "${out# }"
 }
 
+columns_intersect() { # "<names>" "<names>" -> the names present in BOTH, in
+                      # GUARDED_COLUMNS order. Used to say out loud which
+                      # columns an assertion rests on rather than inheriting the
+                      # eight from a literal.
+  local col out=""
+  for col in $GUARDED_COLUMNS; do
+    case " $1 " in *" $col "*) : ;; *) continue ;; esac
+    case " $2 " in *" $col "*) out="$out $col" ;; esac
+  done
+  printf '%s' "${out# }"
+}
+
+# ── THE THIRD DIGEST STATE: PRE-SENTINEL, PER ROW, PER COLUMN (PDS-D742) ─────
+#
+# `scoped_column_digests` answers "is this column's aggregate what it was". That
+# is enough for leg A and for leg B ONCE THE DRIFT EXISTS, and it says nothing
+# about whether the drift exists at all. The sentinel writes the CONSTANT
+# `visibility = 'private'`, and `visibility` is
+# `validate_inclusion(:visibility, ~w(public private))`
+# (api/lib/barkpark/content/schema_definition.ex) — a binary enum with no third
+# legal value — so on every row that is ALREADY private that write is a literal
+# no-op. Measured on a live scratch target in wave 9: 31 of the 34 in-scope rows
+# were already private, so leg B's visibility control rested on THREE rows. On
+# an all-private roster it would rest on NONE, and the rung would still go green
+# off the other seven columns while one of its eight guarded controls proved
+# nothing — PDS-D130's partial clobber arriving through the back door.
+#
+# THE FIX IS A MEASUREMENT, NOT A STRONGER SENTINEL. Drifting `visibility` the
+# other way — flipping the 31 private rows to 'public' to buy an n=34 control —
+# would INVERT the exposure the sentinel comment below relies on ('private' 404s
+# anonymous document reads, contained ONLY because step 6 is terminal among
+# target-reading rungs), so it is refused. Instead the run captures a THIRD
+# state taken BEFORE the sentinel UPDATE, at per-ROW granularity, and diffs
+# pre-vs-sentinelled: the set of columns leg B must see revert becomes the set
+# the sentinel is MEASURED to have moved, each column's moved-row count is
+# printed, and a guarded column the sentinel moved on ZERO rows REDS the rung by
+# name instead of riding the other seven's green.
+scoped_row_column_fingerprints() { # workspace_id -> one line per in-scope row:
+                                   # `dataset|name` TAB md5(col) … in
+                                   # GUARDED_COLUMNS order. Per-ROW on purpose:
+                                   # a per-column aggregate cannot say HOW MANY
+                                   # rows a write actually moved, and "how many"
+                                   # is the whole question here.
+  local ws="$1" col sel=""
+  for col in $GUARDED_COLUMNS; do
+    sel="$sel || E'\t' || md5(coalesce(${col}::text,'<null>'))"
+  done
+  tgt_psql "SELECT dataset || '|' || name$sel FROM schema_definitions WHERE $(sentinel_scope_sql "$ws") ORDER BY dataset, name"
+}
+
+moved_column_counts() { # before_block after_block -> `<col>=<n>` per guarded
+                        # column, space separated, in GUARDED_COLUMNS order.
+                        #
+                        # rc 1 = the two blocks do not describe the SAME row set.
+                        # That is a scope that shifted under the run, not a
+                        # movement to count; folding it into the counts would
+                        # manufacture coverage for a column nothing was written
+                        # to, which is precisely the silent green this function
+                        # exists to refuse. So it is a REFUSAL by exit code, not
+                        # a number the caller cannot tell apart from a real one.
+  local b="$1" a="$2"
+  { printf '%s\n' "$b"; printf '%s\n' '__PDS_SIDE_BREAK__'; printf '%s\n' "$a"; } |
+  awk -F'\t' -v cols="$GUARDED_COLUMNS" '
+    BEGIN { n = split(cols, name, " "); side = 0; nb = 0; na = 0 }
+    $0 == "__PDS_SIDE_BREAK__" { side = 1; next }
+    $0 == "" { next }
+    {
+      if (side == 0) { nb++; seen_b[$1] = 1; for (i = 2; i <= n + 1; i++) before[$1, i] = $i }
+      else           { na++; seen_a[$1] = 1; for (i = 2; i <= n + 1; i++) after[$1, i]  = $i }
+    }
+    END {
+      if (nb == 0 || nb != na) { exit 1 }
+      for (k in seen_b) { if (!(k in seen_a)) { exit 1 } }
+      for (k in seen_b)
+        for (i = 2; i <= n + 1; i++)
+          if (before[k, i] != after[k, i]) moved[i]++
+      out = ""
+      for (i = 2; i <= n + 1; i++) out = out (out == "" ? "" : " ") name[i - 1] "=" (moved[i] + 0)
+      print out
+    }'
+}
+
+moved_columns_where() { # <zero|nonzero> "<col>=<n> …" -> the column names whose
+                        # measured moved-row count is / is not zero, in the
+                        # order the vector carries them.
+  local want="$1" tok out=""
+  for tok in $2; do
+    case "$want:${tok##*=}" in
+      zero:0)    out="$out ${tok%%=*}" ;;
+      zero:*)    : ;;
+      nonzero:0) : ;;
+      *)         out="$out ${tok%%=*}" ;;
+    esac
+  done
+  printf '%s' "${out# }"
+}
+
 reboot_target() { # 0 = the target answered HTTP again
   local i code
   "$TARGET_TREE/bin/barkpark" stop >/dev/null 2>&1 || true
@@ -3207,6 +3497,15 @@ step_6() {
   say ""
   info "SENTINEL        writing deliberate drift into all eight guarded columns"
   info "                scope: workspace $stamp_ws · dataset $SOURCE_DS · name NOT IN ('tag','metric')"
+  # THE PRE-SENTINEL STATE (PDS-D742), taken BEFORE the UPDATE and per row, so
+  # the run can MEASURE which guarded columns the sentinel moved rather than
+  # assume all eight moved because all eight appear in the SET list.
+  local rows_pre_sentinel
+  rows_pre_sentinel="$(scoped_row_column_fingerprints "$stamp_ws")"
+  if [ -z "$rows_pre_sentinel" ]; then
+    fail 6 "could not read the PRE-SENTINEL per-row fingerprints for workspace $stamp_ws / dataset '$SOURCE_DS' — without the third digest state this run cannot tell a guarded column the sentinel MOVED from one it wrote a no-op into, so leg B's per-column claim would rest on an assumption (PDS-D742). Nothing was written to the target."
+    return 0
+  fi
   sentinel_rows="$(tgt_psql "WITH upd AS (UPDATE schema_definitions SET title = '$mark', icon = '$mark', visibility = 'private', owner_scoped = NOT coalesce(owner_scoped, false), fields = coalesce(fields, ARRAY[]::jsonb[]) || '{\"__pds_sentinel\":\"$sentinel_id\"}'::jsonb, cors_origins = coalesce(cors_origins, ARRAY[]::text[]) || ARRAY['$mark'], desk_groups = coalesce(desk_groups, ARRAY[]::jsonb[]) || '{\"__pds_sentinel\":\"$sentinel_id\"}'::jsonb, list_preview = coalesce(list_preview, '{}'::jsonb) || '{\"__pds_sentinel\":\"$sentinel_id\"}'::jsonb WHERE $(sentinel_scope_sql "$stamp_ws") RETURNING id) SELECT count(*) FROM upd" | head -1 | tr -d '[:space:]' || true)"
   info "RETURNING       ${sentinel_rows:-<nothing>} rows sentinelled"
   case "${sentinel_rows:-}" in
@@ -3219,6 +3518,26 @@ step_6() {
     return 0
   fi
 
+  # ── WHAT THE SENTINEL ACTUALLY MOVED, PER COLUMN (PDS-D742) ───────────────
+  #
+  # Third state minus second state. Printed, then ASSERTED: a guarded column the
+  # sentinel moved on zero rows is a control that could not fire, and it reds
+  # here rather than riding the other columns' green all the way to `pass 6`.
+  local rows_sentinelled sentinel_moved sentinel_dead sentinel_live
+  rows_sentinelled="$(scoped_row_column_fingerprints "$stamp_ws")"
+  if ! sentinel_moved="$(moved_column_counts "$rows_pre_sentinel" "$rows_sentinelled")"; then
+    fail 6 "the PRE-SENTINEL and SENTINELLED reads do not describe the same row set in workspace $stamp_ws / dataset '$SOURCE_DS' — the sentinel scope moved under the run, so a per-column moved-row count taken across them would be counting rows that appeared or vanished rather than a write (PDS-D742). NOTE: the target is SENTINELLED and was not reverted."
+    return 0
+  fi
+  info "sentinel moved  $sentinel_moved"
+  info "                ^ rows the sentinel GENUINELY changed, per guarded column, out of $sentinel_rows in scope. A column at 0 is a control that could not fire."
+  sentinel_dead="$(moved_columns_where zero "$sentinel_moved")"
+  sentinel_live="$(moved_columns_where nonzero "$sentinel_moved")"
+  if [ -n "$sentinel_dead" ]; then
+    fail 6 "THIS CONTROL COULD NOT FIRE: the sentinel UPDATE changed ZERO of the $sentinel_rows in-scope rows in these guarded columns: $sentinel_dead (measured pre-sentinel against sentinelled: $sentinel_moved). The written value is a no-op on this target's roster, not a drift — \`visibility\` takes only public|private, so an all-private slot makes that column's write a no-op on every row. Leg B below would then 'prove' reversion on a column nothing drifted and the rung would go green off the remaining columns: the PDS-D130 partial clobber arriving through the back door (PDS-D742). NOTE: the target is SENTINELLED and was not reverted."
+    return 0
+  fi
+
   # digest_before now reflects the SENTINELLED state — that is the whole point.
   digest_before="$(tgt_psql "$GUARDED_DIGEST_SQL" | head -1 || true)"
   local cols_before
@@ -3227,7 +3546,8 @@ step_6() {
     fail 6 "could not digest schema_definitions on the target — the eight guarded columns cannot be compared across a reboot, so a 'converged' verdict would be unmeasured"
     return 0
   fi
-  info "before reboot   guarded-column digest $digest_before"
+  info "before reboot   guarded-column digest $digest_before   [WHOLE TABLE]"
+  info "                ^ WHOLE-TABLE digest: GUARDED_DIGEST_SQL carries no WHERE, so its \`rows=\` counts EVERY schema_definitions row on the target, including the \`tag\` and \`metric\` rows the sentinel scope deliberately excludes. It is a headline, not the quantity either leg measures — that is the SCOPED per-column vector over $sentinel_rows rows, printed above and below (PDS-D743)."
 
   # The SKIP count is read from the log the BOOT BELOW appends, so the offset is
   # taken now. `bin/barkpark` APPENDS to $BARKPARK_HOME/server.log across
@@ -3279,7 +3599,8 @@ step_6() {
   local cols_after leg_a_changed survivors
   cols_after="$(scoped_column_digests "$stamp_ws")"
   leg_a_changed="$(columns_where diff "$cols_before" "$cols_after")"
-  info "after reboot    guarded-column digest ${digest_after:-<unreadable>}"
+  info "after reboot    guarded-column digest ${digest_after:-<unreadable>}   [WHOLE TABLE]"
+  info "leg A columns   changed across the STAMPED reboot: ${leg_a_changed:-<none — every guarded column held>}   (measured, scoped to the $sentinel_rows sentinelled rows)"
 
   # ZERO SKIPs is a different fact from a MISCOUNT, and conflating them puts a
   # roster-drift diagnosis on a boot where the guard simply never ran.
@@ -3330,7 +3651,7 @@ step_6() {
   # verbatim), so this is direct SQL — and the RETURNING value is ASSERTED,
   # because jsonb_set is a proven silent NO-OP when the parent path is absent.
   if [ "${PDS_STEP6_GUARD_DEMO:-1}" != "1" ]; then
-    pass 6 "content-and-presence convergence across a real reboot: $sentinel_rows rows were deliberately DRIFTED in all eight guarded columns and the guard preserved every one of them ($digest_before, unchanged; $survivors/$sentinel_rows sentinels intact; $skip_count SKIPs logged), and the pull_provenance stamp survived. NOTE: the guard-off control was DISABLED (PDS_STEP6_GUARD_DEMO=0), so nothing here proves this box would clobber without the stamp — the green is weaker for it, and the target is left SENTINELLED."
+    pass 6 "content-and-presence convergence across a real reboot: $sentinel_rows rows were deliberately DRIFTED with the MEASURED per-column coverage [$sentinel_moved] (every guarded column moved on at least one row; a zero would have redded this rung by name, PDS-D742) and the guard preserved every one of them — leg A changed columns: ${leg_a_changed:-<none>}; $survivors/$sentinel_rows sentinels intact; $skip_count SKIPs logged; whole-table digest $digest_before, unchanged — and the pull_provenance stamp survived. NOTE: the guard-off control was DISABLED (PDS_STEP6_GUARD_DEMO=0), so nothing here proves this box would clobber without the stamp — the green is weaker for it, and the target is left SENTINELLED."
     return 0
   fi
 
@@ -3354,7 +3675,7 @@ step_6() {
     return 0
   fi
   digest_clobbered="$(tgt_psql "$GUARDED_DIGEST_SQL" | head -1 || true)"
-  info "after guard-off ${digest_clobbered:-<unreadable>}"
+  info "after guard-off ${digest_clobbered:-<unreadable>}   [WHOLE TABLE]"
   if [ "$digest_clobbered" = "$digest_before" ]; then
     fail 6 "THE CONTROL DID NOT FIRE: with the provenance stamp cleared, a boot left the eight guarded columns unchanged. Then the converged green above was not measuring a guard — it was measuring a plugin whose declaration happens to match. Uninterpretable either way (PDS-D20)."
     return 0
@@ -3370,9 +3691,20 @@ step_6() {
   # eight in one Repo.update, pinned by the committed S7 probe — but the
   # per-column assertion costs nothing and is the only shape that stays honest
   # if that cast list ever narrows.
-  local cols_clobbered leg_b_unmoved survivors_after
+  #
+  # AND IT ASSERTS OVER THE COLUMNS IT CAN NAME SUPPORT FOR (PDS-D742). The
+  # required set is $sentinel_live — the columns the pre-sentinel diff MEASURED
+  # the sentinel to have moved — not the eight names in the GUARDED_COLUMNS
+  # literal. On any run that reaches this line the two sets are IDENTICAL,
+  # because a zero-coverage column redded the rung terminally above; the
+  # intersection therefore removes nothing today. It is here so the assertion
+  # names its own support rather than inheriting it from a constant, which is
+  # the difference between a control that is measured and one that is assumed.
+  local cols_clobbered leg_b_unmoved leg_b_moved survivors_after
   cols_clobbered="$(scoped_column_digests "$stamp_ws")"
-  leg_b_unmoved="$(columns_where same "$cols_before" "$cols_clobbered")"
+  leg_b_moved="$(columns_where diff "$cols_before" "$cols_clobbered")"
+  leg_b_unmoved="$(columns_intersect "$(columns_where same "$cols_before" "$cols_clobbered")" "$sentinel_live")"
+  info "leg B columns   moved by the GUARD-OFF boot: ${leg_b_moved:-<none>}   (required: $sentinel_live)"
   survivors_after="$(tgt_psql "SELECT count(*) FROM schema_definitions WHERE $(sentinel_scope_sql "$stamp_ws") AND (title = '$mark' OR icon = '$mark' OR '$mark' = ANY(cors_origins) OR fields::text LIKE '%$sentinel_id%' OR desk_groups::text LIKE '%$sentinel_id%' OR list_preview::text LIKE '%$sentinel_id%')" | head -1 | tr -d '[:space:]' || true)"
   info "sentinel wiped  ${survivors_after:-?} of $sentinel_rows rows still carry ANY trace of the drift"
   if [ -n "$leg_b_unmoved" ]; then
@@ -3387,7 +3719,7 @@ step_6() {
   info "NOTE            the target is now CLOBBERED on purpose. Steps 2 and 5 are"
   info "                sequenced BEFORE this control for exactly that reason; a"
   info "                re-pull is required before any further assertion about it."
-  pass 6 "content-and-presence convergence across a real reboot, measured against DELIBERATE DRIFT rather than against an untouched target: $sentinel_rows rows (workspace $stamp_ws · dataset $SOURCE_DS · minus the tag/metric non-plugin rows) were sentinelled in all eight guarded columns, the boot logged exactly $skip_count Bootstrap guard SKIPs to match (plus ${tag_skip_count:-0} TagRegistry skip of the core \`tag\` row, which the scope excludes), and the stamped reboot preserved every column and all $survivors sentinels ($digest_before, unchanged) — AND the control fires per column: with the stamp cleared by asserted SQL, the very next boot reverted ALL EIGHT of $GUARDED_COLUMNS and wiped every trace of the drift (${digest_clobbered}). At sha parity a sentinel-free version of this rung would pass with the guard deleted from the codebase; this one cannot."
+  pass 6 "content-and-presence convergence across a real reboot, measured against DELIBERATE DRIFT rather than against an untouched target: $sentinel_rows rows (workspace $stamp_ws · dataset $SOURCE_DS · minus the tag/metric non-plugin rows) were sentinelled with the MEASURED per-column coverage [$sentinel_moved] — every guarded column moved on at least one row, and a zero would have redded this rung by name rather than riding the others' green (PDS-D742) — the boot logged exactly $skip_count Bootstrap guard SKIPs to match (plus ${tag_skip_count:-0} TagRegistry skip of the core \`tag\` row, which the scope excludes), and the stamped reboot preserved every column and all $survivors sentinels — leg A changed columns: ${leg_a_changed:-<none>}; whole-table digest $digest_before, unchanged (that headline counts every schema_definitions row, \`tag\` and \`metric\` included; the scoped per-column vectors are the measured quantity, PDS-D743) — AND the control fires per column: with the stamp cleared by asserted SQL, the very next boot moved leg B columns [$leg_b_moved] against the required set [$sentinel_live] and wiped every trace of the drift (whole-table digest ${digest_clobbered}). At sha parity a sentinel-free version of this rung would pass with the guard deleted from the codebase; this one cannot."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════

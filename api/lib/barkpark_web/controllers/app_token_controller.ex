@@ -553,8 +553,7 @@ defmodule BarkparkWeb.AppTokenController do
 
   defp unprocessable(conn, message) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", message: message})
   end
 
   # The list filter reuses the mint's OWN email discipline (trim, non-empty,

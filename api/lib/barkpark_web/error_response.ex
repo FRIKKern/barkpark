@@ -76,6 +76,36 @@ defmodule BarkparkWeb.ErrorResponse do
     |> write(conn)
   end
 
+  @doc """
+  Emit an envelope the caller has ALREADY built as a flat map of top-level
+  fields — `%{code: …, message: …}` plus whatever endpoint-specific siblings
+  that response's consumers already read (`:errors`, `:op`, `:fields`,
+  `:retry_after`, `:reason`, …).
+
+  This is `emit_custom/5`'s shape-preserving twin, and it exists because the
+  ~138 hand-built `json(%{error: %{code: …}})` sites this module was written to
+  retire (task-8737e2d7ff1884e0) are not uniformly `{code, message}`: a minority
+  carry extra keys AT THE TOP LEVEL of `error`, and a couple carry no `message`
+  at all. Routing those through `emit_custom/5`'s `details` map would move
+  `error.errors` to `error.details.errors` — a wire-shape change to a response
+  that is already correct — so the sweep would have had to choose between
+  breaking consumers and leaving the fork open. It does neither: the caller's
+  map is passed through verbatim and only `hint` + `request_id` are ADDED by
+  `Content.Errors.stamp/2`, the one owner.
+
+  Use `emit/4` when a `Content.Errors` reason tuple already names the
+  code/message/status, `emit_custom/5` for a bespoke `{code, message}` (+
+  `details`), and this only when the response carries top-level siblings.
+  """
+  @spec emit_fields(Plug.Conn.t(), atom() | integer(), map()) :: Plug.Conn.t()
+  def emit_fields(conn, status, fields)
+      when is_map(fields) and is_map_key(fields, :code) do
+    fields
+    |> Map.put(:status, status)
+    |> Errors.stamp(conn)
+    |> write(conn)
+  end
+
   defp write(env, conn) do
     conn
     |> put_status(env.status)

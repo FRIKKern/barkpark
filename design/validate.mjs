@@ -89,6 +89,20 @@ for (const sub of ["fg", "bg"]) {
   }
 }
 
+// --- verdict accents (color.verdict): 2 semantic roles, each ink + soft ------
+// The pair must ship COMPLETE — an ink with no soft ground is a callout with a
+// rail and no wash, and a soft with no ink is a wash with nothing on it. Both
+// halves of both roles, both modes, hex.
+const verdict = color.verdict || {};
+for (const role of ["loss", "loss-soft", "peace", "peace-soft"]) {
+  const o = verdict[role];
+  ok(o && typeof o === "object", `color.verdict.${role} is required (the verdict pair ships ink + soft, both roles)`);
+  if (o) {
+    ok(HEX.test(o.light || ""), `color.verdict.${role}.light must be #rrggbb, got ${JSON.stringify(o.light)}`);
+    ok(HEX.test(o.dark || ""), `color.verdict.${role}.dark must be #rrggbb, got ${JSON.stringify(o.dark)}`);
+  }
+}
+
 // --- neutral callout tone (color.cliCalloutNeutral): pdrender-only hex pair ---
 const calloutNeutral = color.cliCalloutNeutral || {};
 ok(HEX.test(calloutNeutral.light || ""), `color.cliCalloutNeutral.light must be #rrggbb, got ${JSON.stringify(calloutNeutral.light)}`);
@@ -474,7 +488,23 @@ for (const k of ["tabnav", "topbar", "menu", "modal", "toast"]) {
 
 // --- lifecycle: every required state present, reconciled with Go source ----
 const life = tokens.lifecycle || {};
-const REQUIRED_LIFE = ["in_progress", "blocked", "done", "closed", "cancelled", "ready", "open", "considering", "researching"];
+// REQUIRED_LIFE is DERIVED from design/status-manifest.json .statuses — the same
+// single source scripts/status-manifest-check.sh Part 5 reads — NOT a hardcoded
+// literal. A hardcoded closed list silently SKIPS a state added to the manifest
+// but never wired here (charter D10(a): "a closed list that silently skips new
+// states today"); deriving it makes that omission red instead. Proved able to
+// fail by mutation in design/validate-life-fence.test.mjs.
+const manifestPath = join(here, "status-manifest.json");
+let manifest;
+try {
+  manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+} catch (e) {
+  console.error(`FAIL: cannot read/parse ${manifestPath}: ${e.message}`);
+  process.exit(1);
+}
+const REQUIRED_LIFE = Object.keys((manifest && manifest.statuses) || {});
+ok(REQUIRED_LIFE.length > 0,
+  `status-manifest.json .statuses is empty or missing — the lifecycle half of this gate would check NOTHING (a vacuous pass); it is the single source for the required state set`);
 // role reconciled 1:1 with internal/semrole/semrole.go taskLifecycleRoles.
 // considering + researching are the pre-open thought states (task-lifecycle-
 // visibility epic): both neutral-role ('') — the dotted circle (considering) and
@@ -485,6 +515,20 @@ const EXPECTED_ROLE = {
   in_progress: "info", blocked: "warn", done: "ok", closed: "ok",
   cancelled: "", ready: "", open: "", considering: "", researching: "",
 };
+// Two-directional wiring ratchet on EXPECTED_ROLE. Deriving the SET from the
+// manifest is only half the fix: the semantic role of a state is a judgement the
+// manifest does not carry (its `roles` vocabulary is glyph roles — "progress",
+// "cancel" — not semrole's ok/info/warn/danger/''), so EXPECTED_ROLE stays a
+// hand-written map. These two loops make an UNWIRED map an error rather than an
+// undefined-comparison accident, in both directions.
+for (const state of REQUIRED_LIFE) {
+  ok(Object.prototype.hasOwnProperty.call(EXPECTED_ROLE, state),
+    `lifecycle.${state} is in design/status-manifest.json .statuses but design/validate.mjs EXPECTED_ROLE does not map it — wire the new state's semrole role here (and add lifecycle.${state} to design/tokens.json + internal/semrole)`);
+}
+for (const state of Object.keys(EXPECTED_ROLE)) {
+  ok(REQUIRED_LIFE.includes(state),
+    `design/validate.mjs EXPECTED_ROLE maps lifecycle.${state}, which design/status-manifest.json .statuses no longer lists — a stale expectation for a retired state; drop it here or restore it in the manifest`);
+}
 for (const state of REQUIRED_LIFE) {
   const e = life[state];
   if (e == null) { errors.push(`lifecycle.${state} is required`); continue; }

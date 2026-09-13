@@ -41,6 +41,10 @@ on:
       # of root.html.heex and main was red for 14 h with no run to say so.
       - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      # corpus 1 of the rendered sweep below — a golden fixture added or
+      # re-frozen here is a new block this workflow must render, and without
+      # this line the job that renders it cannot see it.
+      - "js/packages/react/tests/fixtures/pd-golden/**"
       - ".github/workflows/paper-editor.yml"
   pull_request:
     paths:
@@ -53,6 +57,10 @@ on:
       # of root.html.heex and main was red for 14 h with no run to say so.
       - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      # corpus 1 of the rendered sweep below — a golden fixture added or
+      # re-frozen here is a new block this workflow must render, and without
+      # this line the job that renders it cannot see it.
+      - "js/packages/react/tests/fixtures/pd-golden/**"
       - ".github/workflows/paper-editor.yml"
 
 concurrency:
@@ -98,3 +106,98 @@ jobs:
             stale=1
           fi
           exit "$stale"
+
+  # ── the RENDERED half of the narrow-viewport sweep ──────────────────────────
+  #
+  # `npm test` above runs four `__narrow_*_guards.test.mjs` suites, and all four
+  # are SOURCE guards: they read api/assets/paper-surface/paper-surface.css and
+  # regex-match declarations out of it. That catches a deleted declaration. It
+  # cannot tell you whether the page actually scrolls sideways on a phone, and
+  # it cannot find a block whose overflow nobody has thought about yet.
+  # `src/__narrow_render.mjs` is the half that measures — it renders every
+  # golden fixture, plus long unbreakable author tokens injected one field at a
+  # time, in headless Chromium and asserts documentElement.scrollWidth against
+  # the viewport at 390px and 320px.
+  #
+  # WHY IT IS ITS OWN JOB. The harness needs a browser; `npm test` must stay
+  # runnable on a machine that has none, which is why the harness is not in the
+  # `test` script (its own header: "a gate that cannot run everywhere is a gate
+  # people learn to ignore"). Here a browser is installed on purpose, so the
+  # measurement runs where it can.
+  #
+  # NO CHROMIUM, NO FAILURE — AND THAT IS THE TRAP THIS JOB DISARMS. Run with no
+  # browser, the harness prints SKIP and exits 0. A job that let that through
+  # would be green for the rest of its life having measured nothing. So the run
+  # step below asserts on the OUTPUT, not just the exit code: a SKIP line fails
+  # the job, and so does any run that did not print all four measured
+  # assertions (two corpora x two widths). Green here means it measured.
+  #
+  # NOT IN THE REQUIRED SET (.github/required-checks.json), and no
+  # continue-on-error: it reds its own check run honestly and cannot block a
+  # merge. That is the same advisory shape as the doc-budget job.
+  narrow-render:
+    name: Narrow-viewport rendered sweep
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api/assets/paper-editor
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache chrome-headless-shell
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: ${{ runner.os }}-puppeteer-chrome-headless-shell-stable
+
+      # chrome-headless-shell, not full Chrome: the harness only dumps the DOM
+      # after a virtual-time budget, so it needs no window server and no codecs.
+      # `install` prints "<browser>@<buildId> <absolute path>", and pinning
+      # BP_CHROME from that path is exact — it does not depend on the harness
+      # guessing a cache directory layout.
+      - name: Install chrome-headless-shell
+        run: |
+          set -euo pipefail
+          npx --yes @puppeteer/browsers install chrome-headless-shell@stable \
+            --path "$HOME/.cache/puppeteer" | tee "$RUNNER_TEMP/chrome-install.txt"
+          # The last line is "chrome-headless-shell@<buildId> <absolute path>".
+          bin="$(tail -1 "$RUNNER_TEMP/chrome-install.txt")"
+          bin="${bin##* }"
+          if [ ! -x "$bin" ]; then
+            echo "::error::chrome-headless-shell reported '$bin', which is not an executable. Refusing to run the sweep without a browser — it would SKIP and pass vacuously."
+            exit 1
+          fi
+          echo "BP_CHROME=$bin" >> "$GITHUB_ENV"
+
+      - name: Render the sweep at 390px and 320px
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/narrow-render.txt"
+          status=0
+          BP_NARROW_WIDTHS=390,320 BP_NARROW_VERBOSE=1 \
+            node src/__narrow_render.mjs > "$out" 2>&1 || status=$?
+          cat "$out"
+
+          # PROVE IT MEASURED. Everything below fails a run that produced a
+          # green exit code without rendering anything.
+          if grep -q '^SKIP  __narrow_render.mjs' "$out"; then
+            echo "::error::the harness found no browser and skipped. A skipped sweep is not a passing sweep."
+            exit 1
+          fi
+          if grep -q '^SKIP  golden corpus' "$out"; then
+            echo "::error::the golden corpus (js/packages/react/tests/fixtures/pd-golden) was absent, so corpus 1 measured nothing."
+            exit 1
+          fi
+          golden=$(grep -c '^\(PASS\|FAIL\)  no golden fixture scrolls the page sideways at ' "$out" || true)
+          blocks=$(grep -c '^\(PASS\|FAIL\)  no block overflows on a token plain prose survives, at ' "$out" || true)
+          if [ "$golden" -ne 2 ] || [ "$blocks" -ne 2 ]; then
+            echo "::error::expected 2 golden-corpus and 2 hostile-token assertions (one per width in BP_NARROW_WIDTHS=390,320); got $golden and $blocks. The run did not measure what this job claims to measure."
+            exit 1
+          fi
+
+          exit "$status"

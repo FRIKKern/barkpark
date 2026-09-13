@@ -118,7 +118,7 @@ defmodule BarkparkCloud.Notifications.FleetDigestSiteOwningAudienceTest do
     emails = delivered(2)
 
     site_body = body_for.(emails, site_owner.email)
-    assert site_body =~ "Fleet: 0 instances."
+    assert site_body =~ "Your team owns 0 instances."
     assert site_body =~ "Deploy health for this team's sites"
     refute site_body =~ "this team owns no sites"
 
@@ -126,7 +126,7 @@ defmodule BarkparkCloud.Notifications.FleetDigestSiteOwningAudienceTest do
     # still told it owns no sites — the site it used to own moved teams, not
     # inboxes.
     box_body = body_for.(emails, box_owner.email)
-    assert box_body =~ "Fleet: 1 instance"
+    assert box_body =~ "Your team owns 1 instance"
     assert box_body =~ "Deploy health: this team owns no sites, so it ran no deploys"
   end
 
@@ -146,7 +146,7 @@ defmodule BarkparkCloud.Notifications.FleetDigestSiteOwningAudienceTest do
 
     assert_email_sent(fn email ->
       assert Enum.any?(email.to, fn {_name, address} -> address == owner.email end)
-      assert email.text_body =~ "Fleet: 1 instance"
+      assert email.text_body =~ "Your team owns 1 instance"
 
       assert email.text_body =~
                "Deploy health: this team owns no sites, so it ran no deploys"

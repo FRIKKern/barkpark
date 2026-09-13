@@ -2430,6 +2430,94 @@
     html[data-width-bucket="standard"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
       content: none;
     }
+
+    /* ── THE STANDARD-BUCKET DOCK IS 260px, AND WIDE IS NOT TOUCHED ──────────
+       (task inspector-dock-260px-and-the-1024-900-non-monotonicity; lead ruling
+       2026-09-06; D83/D103 on ceiling-trimming; D149 on the 300px dock.)
+
+       ONE SHAPE, TIER-SCOPED, NOT A GLOBAL TRIM. The docked inspector keeps its
+       `flex: 0 0 300px` basis everywhere the base rule reaches. This rule is an
+       additive bucket-scoped override that moves the BASIS ONLY inside
+       `standard` (the width-bucket stamp's 1024–1279 band, EDGES [640,1024,1280]
+       in the pre-paint head script) and ONLY for the panel the user actually
+       asked for. `wide` is UNREACHABLE from this selector — an attribute
+       equality on a value `wide` never carries — so the wide bucket's
+       zero-pixel constraint is PRESERVED STRUCTURALLY, not by inspection: at
+       viewport 1280 and 1440 the dock is still 300px and the reading measure is
+       still 676px / 720px. Nothing here is a renegotiation of that constraint.
+
+       WHY 260 AND NOT 292. 292.42px is the exact arithmetic ceiling at which
+       ONE face (forced Georgia at 18px, 11.0469 px/ch probe-derived) crosses
+       55ch, and trimming a shipped dock to a single face's ceiling is the
+       threshold-gerrymandering D83 and D103 forbid by name — the next probe
+       run, the next face, or a 0.5px advance drift puts it back under. 260px is
+       not derived from a face at all: it is the shell's OWN list-column width
+       (`.pane-column` basis 260px, the second term of the measured
+       `visible_pane_widths_px: [44, 260]` shell), so the inspector docks at the
+       same width as the column it replaces on screen.
+
+       WHY A BUCKET ATTRIBUTE AND NOT A MEDIA OR CONTAINER QUERY. A media query
+       would re-derive the tier from raw `innerWidth` and drift from the stamp's
+       +32px widen-side dead-band, so the CSS and the desk's own tier contract
+       would disagree inside the hysteresis band. A container query would key on
+       PANE width — the one quantity the shell composition (a 360px
+       `.bp-secondary-pane`, a collapsed list column) changes underneath the
+       tier, which is exactly how D170's panel-arithmetic invariant was
+       falsified. The bucket stamp is the contract; the rule keys on the
+       contract.
+
+       WHERE IT ACTUALLY BITES, measured on a replica of this sheet, not
+       assumed. `.editor-panel` on the paper route is `vw - 304` (the [44, 260]
+       shell), and the `@container panel (max-width: 860px)` generator above
+       promotes the open inspector to an ABSOLUTE overlay whenever the pane is
+       <= 860px — where a flex basis does not apply at all. panel > 860 needs
+       vw > 1164, so inside `standard` this basis is live only from viewport
+       1165 up. Above it the `.bp-paper-surface` 660px cap takes over from the
+       dock as the binder, so the delta closes: it is a flat +40px of reading
+       column from 1165 to 1223, then decays to 0 by 1264. Replica-measured,
+       user-opened, forced Georgia 18px (11.0469 px/ch, probe-derived):
+       viewport 1165 content 481px = 43.54ch -> 521px = 47.16ch; viewport 1200
+       content 516px = 46.71ch -> 556px = 50.33ch; viewport 1224 content 540px
+       = 48.88ch -> 580px = 52.50ch. Viewports 1024, 1100, 1264, 1279, 1280 and
+       1440 are byte-identical across the two arms. Horizontal overflow on
+       `.editor-body.bp-paper-body` is 0px in every cell of both arms.
+
+       AND IT DOES NOT REACH 55ch, DELIBERATELY NOT CHASED. The 55ch floor
+       `calc(55ch + 2 * var(--paper-gutter))` sits behind
+       `@container content (min-width: 720px)`, and the content container IS
+       the reading column — `panel - dock`. Opening that gate inside `standard`
+       needs `vw - 304 - dock >= 720`, i.e. dock <= 255 at the very top of the
+       band (viewport 1279) and narrower still below it. Trimming to 255 to
+       clear a gate by 1px, for one face, at one viewport, is the
+       threshold-gerrymandering this rule already refused at 292.42px. Forced
+       Georgia therefore stays a MISS across the whole standard docked band and
+       that is an accepted, stated outcome of choosing a non-gerrymandered
+       width — not an oversight.
+
+       ── OWNED SHORTFALL: 1024 STILL READS WORSE THAN 900, AND NO DOCK NUMBER
+       FIXES IT (task criterion 2). In the DEFAULT state, replica-measured on
+       this sheet: viewport 900 forced Georgia content 607.625px = 55.00ch,
+       viewport 1024 content 580px = 52.50ch. The desk is genuinely
+       non-monotonic across the narrow->standard edge, on the Georgia face
+       only — native (Iowan, 10.0 px/ch) and the Source Serif slot measure
+       580px = 58.00ch at both widths.
+
+       THE CAUSE IS THE PANE SHELL AND THE FLOOR GATE, NOT THE DOCK. `narrow`
+       serves ONE visible pane (the 44px strip; panel 856) while `standard`
+       serves TWO (the [44, 260] shell; panel 720), so 1024 LOSES 136px of pane
+       to the very edge it crosses. Subtract the b29 41px in-flow strip and the
+       reading column is 815px at 900 against 679px at 1024 — 815 clears
+       `@container content (min-width: 720px)` and 679 does not, so the 55ch
+       floor binds at 900 (687.632px resolved) and is switched off at 1024,
+       where the 660px `max-inline-size` cap then rules. Neither term is a dock
+       width, and the default-state inspector is not docked at all: this rule
+       is inert there by construction. Recorded as an OWNED shortfall here
+       rather than silently left to the next reader of the ladder; the lever
+       that could move it is spd-b42's 1024 lever (the 41px strip against a
+       ~32px ceiling), or the shell itself. */
+    html[data-width-bucket="standard"] .bp-doc-sidebar.is-open[data-user-opened] {
+      flex-basis: 260px;
+    }
     .bp-doc-sidebar__head {
       display: flex; align-items: center; gap: 8px;
       padding: 8px 12px; border-bottom: 1px solid var(--border-muted);

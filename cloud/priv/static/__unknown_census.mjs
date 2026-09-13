@@ -282,9 +282,17 @@ const EXPECT = [
   { f: "newRenderOAuth", p: '"/v1/auth/oauth/providers"', v: "guarded",
     proof: [/data-oauth-retry/],
     why: "cch-w67-s4: the /new twin of renderOAuthButtons' arm" },
-  { f: "newAskLaunchAuthority", p: '"/v1/me"', v: "guarded",
+  // cch-r16-w11 RENAMED THE ENCLOSING FUNCTION, not the read. /new's one
+  // /v1/me moved from newAskLaunchAuthority into newAskMe when the theater
+  // steps (ready, failed) came to need the same answer for their own
+  // team-admin writes: one latch, one request per page-load, two repaint
+  // callbacks. The VERDICT is unchanged and so is the proof — absorbMe(r) is
+  // still the only thing done with the answer — and both consumers still fail
+  // CLOSED on an unknown: the launch step withholds the form (newLaunchOffer)
+  // and the theater steps withhold the live hook (adminWriteControlHtml).
+  { f: "newAskMe", p: '"/v1/me"', v: "guarded",
     proof: [/absorbMe\(r\)/],
-    why: "an unknown authority withholds the launch form and renders the one exit (newLaunchOffer, fail-closed)" },
+    why: "an unknown authority withholds the launch form and renders the one exit (newLaunchOffer, fail-closed); on the theater steps it withholds the elevated write's mount hook (adminWriteControlHtml, fail-closed)" },
   // cch-w49-s7 — /new's ONLY read of the plane's billing declaration. SANCTIONED,
   // not guarded: the absence of an answer is the ANSWER this screen already
   // commits to. capCache is LEFT UNTOUCHED on a non-200, billingCheckoutCapability

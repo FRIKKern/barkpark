@@ -108,6 +108,12 @@ on:
       # no workflow at all — a regression test nobody runs is a comment with a
       # process cost, so it is wired here beside its emit-fence sibling.
       - "design/mirror-fence.test.mjs"
+      # tlv: the mutation proof that validate.mjs' lifecycle gate DERIVES its
+      # required-state set from design/status-manifest.json. The manifest is the
+      # gate's new input, so an edit to it must re-run the gate that reads it —
+      # otherwise adding a state is exactly the silent skip this slice removed.
+      - "design/validate-life-fence.test.mjs"
+      - "design/status-manifest.json"
       # the attribution ledger itself (cch wave 68). A manifest-only edit — a
       # hand-tampered digest, a dropped slot — matched NO glob here, so the one
       # file the fence's memory lives in could change without the gate that
@@ -419,6 +425,12 @@ on:
       # no workflow at all — a regression test nobody runs is a comment with a
       # process cost, so it is wired here beside its emit-fence sibling.
       - "design/mirror-fence.test.mjs"
+      # tlv: the mutation proof that validate.mjs' lifecycle gate DERIVES its
+      # required-state set from design/status-manifest.json. The manifest is the
+      # gate's new input, so an edit to it must re-run the gate that reads it —
+      # otherwise adding a state is exactly the silent skip this slice removed.
+      - "design/validate-life-fence.test.mjs"
+      - "design/status-manifest.json"
       # the attribution ledger itself (cch wave 68). A manifest-only edit — a
       # hand-tampered digest, a dropped slot — matched NO glob here, so the one
       # file the fence's memory lives in could change without the gate that
@@ -950,6 +962,15 @@ jobs:
           # attribution fence — paper-editor-mirror.mjs and the Studio writer.
           # Zero-dep (node:test + node:assert), 7 assertions.
           node design/mirror-fence.test.mjs
+
+          # tlv (design/validate.mjs REQUIRED_LIFE): the lifecycle half of
+          # validate.mjs derives its required-state set from
+          # design/status-manifest.json .statuses instead of a closed 9-element
+          # literal. This suite drives the real validate.mjs CLI against a
+          # throwaway copy of design/ with a MUTATED manifest and asserts the
+          # non-zero exit names the state. Reverting the derivation to a literal
+          # reds 4 of its 5 tests (proven able to fail).
+          node design/validate-life-fence.test.mjs
 
       # Studio literal-color gate (unified-aesthetic W2.6). Studio chrome
       # (api/lib/barkpark_web/ heex + ex) must consume the emitted design tokens
