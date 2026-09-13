@@ -103,7 +103,15 @@ age() { touch -t "$STALE_TS" "$1"; }
 
 # ── the throwaway "repo under test" and its bare remote ──────────────────────
 ORIGIN="$TMP/origin.git"
-git init -q --bare "$ORIGIN" || cannot_measure "git init --bare failed"
+# -b main is LOAD-BEARING, and its absence is a Linux-only failure this harness
+# caught in CI on 2026-09-13. GIT_CONFIG_GLOBAL=/dev/null above erases any
+# init.defaultBranch, so a bare init lands HEAD on the git build's own default
+# (`master` on the ubuntu runner). Every later `git clone` of this remote then
+# prints `remote HEAD refers to nonexistent ref, unable to checkout` and yields
+# a checkout with NO working tree and NO local branch — and every fixture built
+# from it measures nothing. The precondition asserts below refuse on that
+# rather than passing, which is how it was found.
+git init -q --bare -b main "$ORIGIN" || cannot_measure "git init --bare failed"
 
 REPO="$TMP/repo"
 git init -q -b main "$REPO" || cannot_measure "git init failed"
@@ -177,6 +185,12 @@ case "$wt_out" in
 *"$ROOT/b-worktree"*) ;;
 *) cannot_measure "fixture B is not REGISTERED in the fixture repo's worktree list" ;;
 esac
+# A clone that produced no working tree is the Linux failure above. Assert the
+# CHECKOUT, not just the directory: a bare `[ -d ]` passes on an empty clone.
+for clone in c-unpushed d-pushed e-dirty h-nested/one/two/deep; do
+	[ -f "$ROOT/$clone/seed.txt" ] \
+		|| cannot_measure "fixture clone $clone has no working tree (the bare remote's HEAD does not name the pushed branch)"
+done
 unpushed_c=$(git -C "$ROOT/c-unpushed" rev-list --count main --not --remotes 2>/dev/null)
 [ "$unpushed_c" = "1" ] || cannot_measure "fixture C does not hold exactly one unpushed commit (got '$unpushed_c')"
 unpushed_d=$(git -C "$ROOT/d-pushed" rev-list --count main --not --remotes 2>/dev/null)

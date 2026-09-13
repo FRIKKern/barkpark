@@ -3437,6 +3437,13 @@ jobs:
         # more against the runner's own volume, so the refusal is demonstrated
         # on a real filesystem and not only on fixtures.
         run: |
+          # `set +e` is LOAD-BEARING and its absence failed this step on
+          # 2026-09-13: GitHub runs every `run:` body as `bash -e {0}`, so the
+          # deliberate non-zero REFUSAL below aborted the step before
+          # `rc_refuse=$?` could read it — the step reporting a failure for
+          # doing exactly what it was asserting. `set -uo pipefail` does not
+          # cancel an inherited -e.
+          set +e
           set -uo pipefail
           avail_gb=$(df -P -k . | awk 'NR==2 {print int($4/1024/1024)}')
           case "$avail_gb" in
