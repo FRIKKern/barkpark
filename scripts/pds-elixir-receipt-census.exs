@@ -1344,11 +1344,11 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "17468236"},
-      basis_spans: [{74, 78}],
+      basis_spans: [{75, 79}],
       basis_token: "always answers 2xx unless intake genuinely",
       class: "NO-OP-ACK",
       confirmation: "declared",
-      basis: "@doc :74-78 — \"always answers 2xx unless intake genuinely fails\"",
+      basis: "@doc :75-79 — \"always answers 2xx unless intake genuinely fails\"",
       why:
         "the `\"ping\"` clause head is a literal match, not a failure-discarding head, so the arm " <>
           "never fires here. A ping ack claims nothing beyond having been reached."
@@ -1356,11 +1356,11 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "105570378"},
-      basis_spans: [{74, 78}, {87, 87}],
+      basis_spans: [{75, 79}, {88, 88}],
       basis_token: "ignored:",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
-      basis: "the response body itself — `ignored: \"event\"` on :87, plus @doc :74-78",
+      basis: "the response body itself — `ignored: \"event\"` on :88, plus @doc :75-79",
       why:
         "THE ONE ROW THAT ACTUALLY SUPPRESSES. The arm fires here (head `_other`, body renders " <>
           "ok: true, site contained), and it is right to: this IS a catch-all routed to success. " <>
