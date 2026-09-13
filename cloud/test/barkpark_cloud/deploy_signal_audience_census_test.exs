@@ -705,6 +705,15 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   # as the row that names it.
   @site_build_log Path.expand("../../../internal/cloudclient/site_build_log.go", __DIR__)
 
+  # Added by task-801c6c33769ca01d (bp sites logs prints the build BYTES): the
+  # candidate derivation found `SiteBuildLogBytes` sending
+  # GET /v1/sites/*/deployments/*/build-log/bytes with no row, so its source joins
+  # @sources in the same commit as the reader row that names it (below).
+  @site_build_log_bytes Path.expand(
+                          "../../../internal/cloudclient/site_build_log_bytes.go",
+                          __DIR__
+                        )
+
   # The console bundle. `cloud/priv/static/**` is a CLOUD_PATH, so a console edit
   # re-runs this census — which is the point of counting its cards here rather
   # than in a number frozen into prose.
@@ -720,6 +729,7 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     "internal/cloudclient/client.go" => @cloudclient,
     "internal/cloudclient/deliveries.go" => @deliveries,
     "internal/cloudclient/site_build_log.go" => @site_build_log,
+    "internal/cloudclient/site_build_log_bytes.go" => @site_build_log_bytes,
     "cloud/lib/barkpark_cloud/notifications.ex" => @notifications
   }
 
@@ -773,8 +783,21 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
       name: "site_build_log",
       kind: :pull,
       what:
-        "the BUILD LOG of one deployment — the only deploy-health read that carries the failure's own words rather than a class label, and the last stop before a human guesses",
-      readers: [%{file: "internal/cloudclient/site_build_log.go", func: "SiteBuildLog"}]
+        "the BUILD LOG of one deployment — the only deploy-health read that carries the failure's own words rather than a class label, and the last stop before a human guesses. Two doors onto the one signal: the SCRUBBED record (user-tier) and the raw BYTES (operator-tier)",
+      readers: [
+        %{file: "internal/cloudclient/site_build_log.go", func: "SiteBuildLog"},
+        # SAME SIGNAL, SECOND DOOR (task-801c6c33769ca01d). `SiteBuildLogBytes`
+        # sends GET /v1/sites/*/deployments/*/build-log/bytes — a DISTINCT route
+        # from the record's /build-log, but onto the SAME signal: one deployment's
+        # build log. The bytes door is deliberately operator-gated because raw,
+        # never-scrubbed bytes can carry secrets, so Side B derives tier `operator`
+        # (empty) for THIS reader while the record reader stays `user(s)`. That is
+        # NOT an empty-audience finding: the build-log signal REACHES a human over
+        # the scrubbed record door, and the raw-bytes door is a superset-privilege
+        # escalation, not a signal addressed to nobody — which is exactly why the
+        # empty-audience arm reds only when EVERY reader of a signal is empty.
+        %{file: "internal/cloudclient/site_build_log_bytes.go", func: "SiteBuildLogBytes"}
+      ]
     },
     %{
       name: "site_deploy_rate_alert",
@@ -837,7 +860,10 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   @signal_floor 9
   # Raised 6 -> 10 in the same commit: three new signals plus the second reader
   # (`ListSpawnSiteDeployments`) the derivation found on an already-registered route.
-  @reader_floor 10
+  # Raised 10 -> 11 by task-801c6c33769ca01d: `SiteBuildLogBytes`, the second door
+  # (raw bytes) onto the `site_build_log` signal. Lowered only in the same commit
+  # as the reader that goes away.
+  @reader_floor 11
 
   # THE CANDIDATE FLOOR. Side C's own anti-vacuity number: a derivation that
   # finds FEWER candidates than the registry has rows has stopped reading the

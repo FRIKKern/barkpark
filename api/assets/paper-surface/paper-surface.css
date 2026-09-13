@@ -712,6 +712,28 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-callout__summary { cursor: pointer; font-weight: bold; }
 .bp-paper-surface .bp-callout__body { margin-top: 8px; }
 
+/* Code-block LINE EMPHASIS (pe-bl-code-emphasis). `Figures.code_block_html/2`
+   (and its JS mirror, blocks/core.ts `codeBlockHtml`) wraps an emphasized line
+   of a `<pre>` code block in `.bp-code-em.bp-code-em--<tone>`; the tone
+   vocabulary is closed (comment / offending / fixed) and narrowed in the
+   composer, so only these three selectors can ever be asked for. The wash is
+   full-line: `display:inline-block; width:100%` fills the line box inside a
+   `white-space:pre` slab without introducing a break the source did not author
+   (a `display:block` span would).
+
+   Colour comes from the EXISTING `--bp-tone-*` pairs — the same light+dark token
+   family the callouts and chips read — never a literal: `comment` reads neutral
+   (an aside, not a verdict), `offending` reads danger, `fixed` reads success.
+   Reusing the pairs rather than minting `--bp-code-em-*` tokens is deliberate:
+   a new `--bp-*` token would have to be mirrored into the generated embedder
+   token region (scripts/paper-editor-mirror-check.sh part 3), and three tones
+   that mean exactly what three existing tone pairs already mean do not earn a
+   second vocabulary. */
+.bp-paper-surface .bp-code-em { display: inline-block; width: 100%; }
+.bp-paper-surface .bp-code-em--comment   { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); }
+.bp-paper-surface .bp-code-em--offending { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-code-em--fixed     { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); }
+
 /* Table CHROME (also the sheet's outer collapse/width). `display:block` +
    overflow-x makes a wide table scroll INSIDE its own box instead of widening
    the document — a 3-col table was the measured mobile-overflow culprit at
@@ -789,9 +811,20 @@ html[data-theme="dark"] .bp-paper-body {
    fixed advance); the header rides right with its column. spark sizes the ONE
    sparkline primitive (DataViz.spark_svg/2, shared with the stat block) down to
    a cell-sized strip; the stroke rules mirror .bp-stat__spark polyline — fill
-   MUST be none or the polyline paints as a filled blob. */
-.bp-paper-surface :is(.bp-table__th--num, .bp-table__td--num) { text-align: right; font-variant-numeric: tabular-nums; }
-.bp-paper-surface :is(.bp-table__th--spark, .bp-table__td--spark) { width: 1%; white-space: nowrap; }
+   MUST be none or the polyline paints as a filled blob.
+   Written as an explicit comma-grouped selector list, NOT `:is(...)`: the
+   View↔Edit parity parser (view_edit_parity_test.exs `declarations_for/3`)
+   splits a rule's selector list on commas and matches
+   `.bp-paper-surface <element>` exactly, so a modifier hidden inside `:is()`
+   is INVISIBLE to the gate and its editor mirror could drift unseen. The
+   comma form is specificity-identical (`:is()` takes its most specific
+   argument — a class either way) and puts the modifiers on the wire. Keep
+   byte-aligned with priv/static/assets/bp-paper-editor-shell.css +
+   assets/paper-editor/src/styles.css. */
+.bp-paper-surface .bp-table__th--num,
+.bp-paper-surface .bp-table__td--num { text-align: right; font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-table__th--spark,
+.bp-paper-surface .bp-table__td--spark { width: 1%; white-space: nowrap; }
 .bp-paper-surface .bp-table__spark { display: block; width: 96px; height: 20px; }
 .bp-paper-surface .bp-table__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 
@@ -1456,6 +1489,12 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-board__col--progress { border-left-color: var(--st-info); }
 .bp-paper-surface .bp-board__col--blocked { border-left-color: var(--st-warn); }
 .bp-paper-surface .bp-board__col--done { border-left-color: var(--st-ok); }
+/* The terminal lane (task-881952f8d8417f4b): LAST in the column order and visibly
+   quieter than the live lanes, so abandoned work is legible without competing with
+   claimable work. It keeps the faint default border (no `--st-*` tone of its own)
+   and drops back in opacity — the same de-emphasis vocabulary `.bp-g--considering`
+   already uses. Tokens only; no colour literal. */
+.bp-paper-surface .bp-board__col--cancel { opacity: 0.55; }
 .bp-paper-surface .bp-board__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .bp-paper-surface .bp-board__label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
@@ -1627,7 +1666,37 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    indexed class — author data never carries color. */
 .bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 0.75rem; }
 
-.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 6px; min-width: 130px; background: var(--paper-bg-deep); border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; padding: 14px 16px; margin: 1.4rem 0; vertical-align: top; }
+/* A STANDALONE STAT IS SHRINK-TO-FIT AND MUST STILL FIT.
+
+   `display: inline-flex` sizes this box from its own max-content, so a stat
+   that is NOT inside a `.bp-stats` grid is bounded by nothing: the grid's
+   override `.bp-paper-surface .bp-stats .bp-stat` (further down this file) is
+   what supplies `min-width: 0` and `display: flex`, and it cannot reach the
+   top-level `<div class="bp-stat">` that `stat_html/1` emits for a lone stat
+   (frozen in js/packages/react/tests/fixtures/pd-golden/stat.golden.json).
+   `.bp-stat__v`'s own `max-width: 100%` is then 100% of a box already as wide
+   as its content, so it constrains nothing and the DOCUMENT grows.
+
+   MEASURED in headless Chromium at a 390px viewport, `.bp-stat__v` carrying the
+   45-character branch name `feat/deploy-with-barkpark-warm-pool-provision`,
+   `document.documentElement.scrollWidth`:
+
+     this rule as it was                       632px   (page scrolls 242px)
+     + max-width: 100%                         408px   (still scrolls 18px)
+     + max-width: 100%; box-sizing: border-box 390px   (no scroll)
+
+   BOTH declarations are load-bearing, which is why the middle row is written
+   down and not just the endpoints. Under the default `content-box`,
+   `max-width: 100%` caps the CONTENT box at the 358px column and then lays the
+   32px of padding and 2px of border OUTSIDE that cap — a 392px border box
+   starting at the 16px gutter, i.e. a 408px document, measured. `box-sizing:
+   border-box` is what folds that chrome back inside the cap. Neither
+   declaration is redundant; removing either re-opens the defect.
+
+   Asserted, not remembered:
+   api/assets/paper-editor/src/__narrow_stat_guards.test.mjs, and measured end
+   to end by api/assets/paper-editor/src/__narrow_render.mjs. */
+.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 6px; min-width: 130px; max-width: 100%; box-sizing: border-box; background: var(--paper-bg-deep); border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; padding: 14px 16px; margin: 1.4rem 0; vertical-align: top; }
 /* A VALUE IS ONE THING AND MUST RENDER AS ONE THING — `nowrap`, a size that
    fits, and a contained overflow.
 
@@ -1853,19 +1922,52 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-route__meta { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.78rem !important; color: var(--paper-ink-soft) !important; margin-top: 8px !important; }
 .bp-paper-surface .bp-route__caption { font-size: 0.82rem !important; color: var(--paper-ink-soft) !important; font-style: italic; margin-top: 3px !important; }
 
-.bp-paper-surface .bp-lineage { margin: 1.4rem 0; }
-.bp-paper-surface .bp-lineage__nodes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
-.bp-paper-surface .bp-lineage__node { border-top: 1px solid var(--paper-rule); padding-top: 8px; }
-.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); }
-.bp-paper-surface .bp-lineage__title { font-size: 0.88rem; font-weight: 600; color: var(--paper-ink); margin-top: 4px; }
+/* THE CLOCK STRIP (pe-bl-clock-strip-block). Lineage is a DATED STRIP: stops
+   read left-to-right along ONE continuous spine, the way the four-cell clock
+   strip in /papers/eight-minute-erasure §I reads. Three things the old
+   `repeat(auto-fit, minmax(150px, 1fr))` grid could not do, each measured in
+   pixels before it was changed:
+
+   1. SIDE-BY-SIDE. auto-fit fits as many 150px tracks as the box holds and
+      WRAPS the rest: inside the 672px reading column four stops render 3+1,
+      and the fourth stop starts a second row that reads as a second timeline.
+      `grid-auto-flow: column` lays exactly ONE track per stop, always — four
+      dated stops are four columns at any width.
+   2. A CONTINUOUS SPINE. The line used to be a per-node `border-top`, so every
+      14px gap CUT it — four dashes, not a spine. The rule now lives on the
+      TRACK (`__nodes`), one unbroken hairline the whole strip long, and each
+      stop marks its own place on it with a tick that carries the stop's tone
+      (`bp-lineage__node--{info,ok,warn,danger}` — the per-stop verdict, in the
+      same four-word vocabulary `bp-chart__region--*` already uses).
+   3. EVIDENCE WIDTH. A time axis gains resolution with every pixel, so the
+      strip breaks out of the reading column onto the evidence band exactly as
+      `.bp-stats` and `.bp-table` do — it is evidence, not prose, and the
+      column starves it. Below the column the band collapses to 100% and the
+      TRACK self-scrolls (`overflow-x: auto`, the inner boundary pe-w1-air-beat
+      established), so at 360px the stops stay side-by-side on one spine, the
+      spine still spans the full visible width, and the page body still never
+      scrolls sideways. */
+.bp-paper-surface .bp-lineage { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-surface .bp-lineage__nodes { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 14px; border-top: 1px solid var(--paper-rule); overflow-x: auto; overscroll-behavior-x: contain; }
+.bp-paper-surface .bp-lineage__node { position: relative; padding-top: 9px; min-width: 0; }
+.bp-paper-surface .bp-lineage__node::before { content: ""; position: absolute; top: -1px; left: 0; width: 11px; height: 2px; background: var(--paper-accent); }
+.bp-paper-surface .bp-lineage__node--info::before { background: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-lineage__node--ok::before { background: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-lineage__node--warn::before { background: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-lineage__node--danger::before { background: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); white-space: nowrap; }
+.bp-paper-surface .bp-lineage__node--info .bp-lineage__overline { color: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-lineage__node--ok .bp-lineage__overline { color: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-lineage__node--warn .bp-lineage__overline { color: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-lineage__node--danger .bp-lineage__overline { color: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-lineage__title { font-size: 0.88rem; font-weight: 600; color: var(--paper-ink); margin-top: 4px; overflow-wrap: anywhere; }
 .bp-paper-surface .bp-lineage__value { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 650; color: var(--paper-accent); margin-top: 4px; }
 .bp-paper-surface .bp-lineage__unit { font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
-/* jf-w1-engine-narrow-dark-fixes: __nodes is an auto-fit minmax(150px,1fr)
-   grid, so a node can be squeezed to its 150px floor at narrow measures — a
-   long unbroken body string (a URL, a compound word) then blows the column
-   out sideways instead of wrapping. `anywhere` (not break-word) so it also
-   counts toward text-wrap balancing rather than being treated as unbreakable
-   for layout purposes. */
+/* jf-w1-engine-narrow-dark-fixes: a stop can be squeezed to its 150px floor at
+   narrow measures — a long unbroken body string (a URL, a compound word) then
+   blows the column out sideways instead of wrapping. `anywhere` (not
+   break-word) so it also counts toward text-wrap balancing rather than being
+   treated as unbreakable for layout purposes. */
 .bp-paper-surface .bp-lineage__body { font-size: 0.76rem; color: var(--paper-ink-soft); line-height: 1.45; margin-top: 5px; overflow-wrap: anywhere; }
 
 .bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }

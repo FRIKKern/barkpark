@@ -494,11 +494,13 @@ print(f"status-manifest-check part 4: PASS — Go pdrender label+meaning in lock
 SANCTIONED_EXTRA = {"unknown"}
 # The apps/mobile surface key, as it appears in the manifest's platform_overrides.
 mobile_surface = "apps/mobile"
-# `cancel` resolves and renders on mobile but is NOT a board lane: the web folds
-# cancelled rows into a tally rather than giving them a column, and mobile mirrors
-# that. Recorded here so the lane assertion stays a check against manifest ORDER
+# The TERMINAL rung. Since task-881952f8d8417f4b every manifest role IS a board
+# lane on every surface — `cancel` included — but it sorts LAST rather than in its
+# manifest position, because a cancelled row is abandoned work and must neither
+# vanish (the old drop) nor sit in `open`, the claimable lane `bp task ready`
+# serves. Recorded here so the lane assertion stays a check against manifest ORDER
 # rather than a second hand-kept list.
-MOBILE_NON_LANE_ROLES = {"cancel"}
+MOBILE_TERMINAL_ROLES = ["cancel"]
 man_roles_order = [r["role"] for r in m["roles"]]
 p5_glyph = {r["role"]: r["glyph"] for r in m["roles"]}
 p5_label = {r["role"]: r["label"] for r in m["roles"]}
@@ -627,6 +629,19 @@ def parse_ts_record(txt, var, path):
     return rows
 
 
+def parse_ts_decl_body(txt, var, path):
+    """Extract the raw right-hand side of a `const <var>[: T] = ...` declaration,
+    up to the line that closes it. Used where the value is DERIVED (an expression)
+    rather than a literal this gate could parse."""
+    am = re.search(r"(?:export\s+)?const\s+" + re.escape(var) + r"\b[^=]*=\s*(.*?)\n(?:\]|\}|$)",
+                   txt, re.DOTALL)
+    if am is None:
+        print(f"status-manifest-check part 5: FAILED — `const {var}` declaration not "
+              f"found in {path}.", file=sys.stderr)
+        sys.exit(1)
+    return am.group(1)
+
+
 def parse_ts_string_array(txt, var, path):
     """Extract the ordered [value, ...] from a `const <var>: T = [ ... ]` TS array
     literal of plain strings."""
@@ -642,7 +657,13 @@ mobile_txt = open(mobile_path).read()
 mob_status_to_role = parse_ts_record(mobile_txt, "STATUS_TO_ROLE", mobile_path)
 mob_glyph = parse_ts_record(mobile_txt, "ROLE_GLYPH", mobile_path)
 mob_label = parse_ts_record(mobile_txt, "ROLE_LABEL", mobile_path)
-mob_board = parse_ts_string_array(mobile_txt, "BOARD_ROLES", mobile_path)
+# BOARD_ROLES is DERIVED on mobile, not a literal: it folds ROLE_LABEL's key order
+# (pinned to manifest order above) with the terminal rung moved last. A python
+# regex cannot evaluate TS, so this gate checks the DERIVATION — that no hand-typed
+# lane list came back — and apps/mobile/__tests__/statusManifestParity.test.ts
+# checks the resulting VALUE by importing the real constant. Retyping the list
+# beside the manifest reds here; getting the derived order wrong reds there.
+mob_board_decl = parse_ts_decl_body(mobile_txt, "BOARD_ROLES", mobile_path)
 
 overrides = (m.get("platform_overrides") or {}).get(mobile_surface, {})
 overrides = {k: v for k, v in overrides.items() if not k.startswith("$")}
@@ -717,11 +738,21 @@ for r in man_roles_order:
     if mob_label_by[r] != want:
         p5b.append(f"  ROLE_LABEL[{r!r}] = {mob_label_by[r]!r} != sentence-cased manifest {want!r}")
 
-# BOARD LANES: manifest ORDER, minus the roles that are not lanes.
-want_board = [r for r in man_roles_order if r not in MOBILE_NON_LANE_ROLES]
-if mob_board != want_board:
-    p5b.append(f"  BOARD_ROLES: {mob_board} != manifest order minus "
-               f"{sorted(MOBILE_NON_LANE_ROLES)} = {want_board}")
+# BOARD LANES: the value is checked in the mobile suite (it imports the real
+# constant); what reds HERE is the shape — a hand-typed lane list beside the
+# manifest, which is precisely the drift this gate exists to catch. A derivation
+# names no manifest roles at all; a retyped list names several.
+hardcoded_lanes = [r for r in man_roles_order if f"'{r}'" in mob_board_decl or f'"{r}"' in mob_board_decl]
+hardcoded_lanes = [r for r in hardcoded_lanes if r not in MOBILE_TERMINAL_ROLES]
+if hardcoded_lanes:
+    p5b.append(f"  BOARD_ROLES: RETYPED beside the manifest — the declaration names "
+               f"manifest roles {hardcoded_lanes} as literals. It must be DERIVED from "
+               f"ROLE_LABEL's (manifest-ordered) keys with the terminal rung "
+               f"{MOBILE_TERMINAL_ROLES} moved last, so a new manifest rung becomes a "
+               f"lane automatically instead of being silently dropped.")
+if "ROLE_LABEL" not in mob_board_decl:
+    p5b.append("  BOARD_ROLES: the declaration does not read ROLE_LABEL — it is no longer "
+               "derived from the manifest-ordered role table.")
 
 if p5b:
     print("status-manifest-check part 5: FAILED — the apps/mobile status-vocabulary twin is "
@@ -731,13 +762,15 @@ if p5b:
     print(f"\n  Fix: edit {mobile_path} to match design/status-manifest.json — "
           f"STATUS_TO_ROLE mirrors `statuses`; ROLE_GLYPH and ROLE_LABEL carry every "
           f"manifest role in manifest ORDER plus the `unknown` sentinel; labels are the "
-          f"manifest label sentence-cased; BOARD_ROLES is manifest order minus "
-          f"{sorted(MOBILE_NON_LANE_ROLES)}. A glyph that MUST differ on this platform is a "
+          f"manifest label sentence-cased; BOARD_ROLES is DERIVED from ROLE_LABEL's keys "
+          f"with the terminal rung(s) {MOBILE_TERMINAL_ROLES} moved last. "
+          f"A glyph that MUST differ on this platform is a "
           f"RULING and belongs in the manifest's platform_overrides with its reason — never "
           f"as a silent skip here. The sibling pin that runs inside the mobile suite is "
           f"apps/mobile/__tests__/statusManifestParity.test.ts.", file=sys.stderr)
     sys.exit(1)
 print(f"status-manifest-check part 5b: PASS — apps/mobile vocab twin in lockstep "
-      f"({len(mob_s2r)} statuses, {len(mob_glyph_by)} roles, {len(mob_board)} board lanes; "
+      f"({len(mob_s2r)} statuses, {len(mob_glyph_by)} roles, BOARD_ROLES derived from "
+      f"ROLE_LABEL with {MOBILE_TERMINAL_ROLES} last; "
       f"{len(overrides)} recorded platform override(s)).")
 PY

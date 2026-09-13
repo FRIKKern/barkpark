@@ -35,11 +35,22 @@ name: Research-coverage suite
 # the four that are GREEN (compare.test.mjs, spotlight-clutter.test.mjs,
 # safety-classifier.test.mjs, fn-coverage.test.mjs) following this file's own
 # floor+log-parse precedent below. tooling/pds/rerun-adjudicate.test.mjs is
-# DELIBERATELY EXCLUDED — it fails on a pds/grip polarity drift that needs
-# evidence-weighed triage under a hard fence forbidding any tooling/grip edit,
-# not a quick fix, and the one thing worse than leaving it unwired is quietly
-# weakening its expectations to get a green. Tracked as a follow-up task
-# (wbt-pds-grip-polarity-drift-2026-08-31) rather than fixed inline here.
+# NOW WIRED TOO (2026-09-12, wbt-pds-grip-polarity-drift-2026-08-31), as its
+# OWN step rather than a fifth entry in the glob: it is a script that counts its
+# own checks, and `node --test` collapses it to one passing test that hides all
+# 276 of them. The drift it was red on is triaged and fixed with ZERO weakened
+# expectations — grip's screen briefly mis-read `git grep -c`'s sub-verb `-c` as
+# a `git -c key=value` global (#13481) and grip itself fixed that (#17227); what
+# stayed red afterwards was a PDS-side recipe still spelling an ABSENCE read
+# with a `-c` whose printed count was never part of its claim, which pds's own
+# UNCOMPARED-COUNT screen (#17224) correctly refuses. The recipe now uses the
+# substitute that screen's own refusal text names.
+#
+# BOTH `paths:` TWINS CARRY tooling/pds/** AND tooling/grip/**. The pds gate
+# imports grip's shipped screen READ-ONLY, and section 10 of the suite re-runs
+# its probes through the LIVE screen — so a grip-side change can red this gate
+# without touching a single pds byte. That is precisely the drift above, and a
+# filter that did not watch grip would have let it land unseen a second time.
 #
 # The ergonomics safety-classifier suite imports ergonomics.mjs, which reads
 # tooling/file-importance/file-signals.json (gitignored, generated) at module
@@ -58,6 +69,8 @@ on:
       - "tooling/risk/fn-coverage.mjs"
       - "tooling/risk/fn-coverage.test.mjs"
       - "tooling/file-importance/build-signals.mjs"
+      - "tooling/pds/**"
+      - "tooling/grip/**"
       - ".github/workflows/research-coverage-suite.yml"
   push:
     branches: [main]
@@ -72,6 +85,8 @@ on:
       - "tooling/risk/fn-coverage.mjs"
       - "tooling/risk/fn-coverage.test.mjs"
       - "tooling/file-importance/build-signals.mjs"
+      - "tooling/pds/**"
+      - "tooling/grip/**"
       - ".github/workflows/research-coverage-suite.yml"
 
 permissions:
@@ -176,7 +191,7 @@ jobs:
         run: bash scripts/file-ci-failure-issue.sh
 
   tooling-regression-suite:
-    name: "tooling/{aesthetics,ergonomics,risk} node --test suite"
+    name: "tooling/{aesthetics,ergonomics,risk} node --test suite + tooling/pds gate"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -229,6 +244,53 @@ jobs:
           fi
           exit $status
 
+      # ── tooling/pds/rerun-adjudicate.test.mjs — ITS OWN STEP, ON PURPOSE ────
+      #
+      # IT IS NOT A `node --test` FILE AND MUST NEVER BE RUN AS ONE. It is a
+      # SCRIPT that counts its own checks and sets process.exitCode; its own
+      # header says so, citing grip README:193. Handed to `node --test` it
+      # collapses to ONE passing test — MEASURED 2026-09-12: `# tests 1`,
+      # `# pass 1`, `# fail 0`, with all 276 of its checks invisible to the
+      # clause-parser on the step above. Folding it into that glob would
+      # therefore have wired A GREEN THAT PROVES NOTHING — the exact trap this
+      # suite exists to refuse.
+      #
+      # So the run is direct, and three clauses must hold: the rc, the
+      # "0 failed" its own summary line prints, and a CHECK-COUNT FLOOR. The
+      # floor is the anti-vacuity half — an rc of 0 over a suite that silently
+      # stopped building its board is the failure a pass/fail clause cannot see.
+      - name: tooling/pds gate — rc 0 AND '0 failed' AND the check count is above its floor
+        run: |
+          set +e
+          set -o pipefail
+          node tooling/pds/rerun-adjudicate.test.mjs 2>&1 | tee "$RUNNER_TEMP/pds-suite.log"
+          run_rc=${PIPESTATUS[0]}
+
+          summary=$(grep -E '^pds/rerun-adjudicate: [0-9]+ checks, [0-9]+ failed$' "$RUNNER_TEMP/pds-suite.log" | tail -1)
+          checks=$(printf '%s' "$summary" | sed -nE 's|^pds/rerun-adjudicate: ([0-9]+) checks, ([0-9]+) failed$|\1|p')
+          failed=$(printf '%s' "$summary" | sed -nE 's|^pds/rerun-adjudicate: ([0-9]+) checks, ([0-9]+) failed$|\2|p')
+          echo "parsed clauses: run_rc=$run_rc checks=${checks:-<none>} failed=${failed:-<none>}"
+
+          floor=270
+          status=0
+          if [ "$run_rc" != "0" ]; then
+            echo "::error::node tooling/pds/rerun-adjudicate.test.mjs exited $run_rc"
+            status=1
+          fi
+          if [ -z "$summary" ]; then
+            echo "::error::the suite printed no 'pds/rerun-adjudicate: N checks, M failed' summary line — it never finished, and an rc alone cannot tell that from a pass"
+            status=1
+          fi
+          if [ -n "$failed" ] && [ "$failed" != "0" ]; then
+            echo "::error::expected '0 failed', got '$failed failed'"
+            status=1
+          fi
+          if [ -n "$checks" ] && [ "$checks" -lt "$floor" ]; then
+            echo "::error::CHECK-COUNT FLOOR: expected at least $floor checks, the suite ran only $checks — a green over a shrunken board proves less than it claims"
+            status=1
+          fi
+          exit $status
+
       - name: report failure to a human
         if: failure()
         env:
@@ -240,9 +302,11 @@ jobs:
             ${{ github.sha }}. These suites guard the aesthetics diff-summary
             (compare.mjs), the spotlight-clutter detector, the ergonomics
             safety classifier, and the per-function coverage parser (risk).
-            tooling/pds/rerun-adjudicate.test.mjs is intentionally NOT wired
-            into this job — it is red on a pds/grip polarity drift tracked as
-            a follow-up task rather than fixed here. This check is advisory,
-            so a red run does not block anything on its own. Open the run's
-            log for the failing test names.
+            tooling/pds/rerun-adjudicate.test.mjs IS now wired into this job
+            (2026-09-12) and runs as its OWN DIRECT STEP — never under
+            `node --test`, which collapses it to one passing test and hides
+            every one of its checks. Its gate is three clauses: the rc, the
+            "0 failed" in its own summary line, and a check-count floor.
+            This check is advisory, so a red run does not block anything on
+            its own. Open the run's log for the failing test names.
         run: bash scripts/file-ci-failure-issue.sh

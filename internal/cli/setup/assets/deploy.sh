@@ -345,17 +345,30 @@ ufw --force enable
 # the banner outrun the probe again.
 # ---- 429 backoff, INLINED (task-4526610517915589) ---------------------------
 # WHY THE SHARED HELPER scripts/lib/bp-curl.sh IS NOT SOURCED HERE.
-# This file is the go:embedded copy that the `bp` binary streams into
-# `ssh <host> '<env> bash -s'` (internal/cli/setup/deploy.go:78, fed from
-# assets.DeployScript). It arrives on the REMOTE over STDIN, so $0 is `bash`,
-# BASH_SOURCE names no file, and there is no sibling path to lib/ to source
-# from. The only bp-curl.sh that can exist on the box is whichever one step 1's
-# clone of $REPO happened to bring — a version this binary never chose — and a
-# bare `.` on a missing file under `set -euo pipefail` would abort a
-# PROVISIONING run at step 11, a far worse outcome than an unhandled 429 on a
-# localhost boot probe. So the bounded loop is inlined here instead, keeping
-# bp_curl_body's two load-bearing properties: the status is captured BEFORE any
-# branch, and the wait comes FROM THE RESPONSE rather than a hardcoded sleep.
+# BOTH copies of this file — the repo-root deploy.sh and the byte-identical
+# go:embedded copy at internal/cli/setup/assets/deploy.sh that the `bp` binary
+# streams into `ssh <host> '<env> bash -s'` (internal/cli/setup/deploy.go, fed
+# from assets.DeployScript) — arrive on the REMOTE over STDIN. The root copy's
+# own documented usage is `ssh root@VPS 'bash -s' < deploy.sh` (line 10). So in
+# both cases $0 is `bash`, BASH_SOURCE names no file, and there is no sibling
+# path to lib/ to source from. The only bp-curl.sh that can exist on the box is
+# whichever one step 1's clone of $REPO happened to bring — a version neither
+# this script nor the binary shipping it ever chose — and a bare `.` on a
+# missing file under `set -euo pipefail` would abort a PROVISIONING run at step
+# 11, a far worse outcome than an unhandled 429 on a localhost boot probe. So
+# the bounded loop is inlined here instead, keeping bp_curl_body's two
+# load-bearing properties: the status is captured BEFORE any branch, and the
+# wait comes FROM THE RESPONSE rather than a hardcoded sleep.
+#
+# SUPERSEDES the guarded `. "$APP_DIR/scripts/lib/bp-curl.sh"` + no-backoff
+# `bp_curl_body() { curl -fsS "$@"; }` degrade shim that PR 17592
+# (task-90059c5c680f6665) put in the ROOT copy only. That arm is deliberately
+# NOT carried forward: its fallback silently ran the probe with NO backoff at
+# all, and it could only ever have reached the shared helper on a box whose
+# $REPO clone happened to carry it. The inline loop is unconditional and has
+# no external dependency, so the two copies can be byte-identical — which is
+# what `make cli-assets-check` and scripts/doctor.sh require. scripts/lib/bp-curl.sh
+# remains canonical for scripts that genuinely run FROM a checkout.
 HEALTH_429_ATTEMPTS="${HEALTH_429_ATTEMPTS:-4}"       # tries within ONE probe, first included
 HEALTH_429_MAX_WAIT_S="${HEALTH_429_MAX_WAIT_S:-5}"   # a longer ask is a quota, not a blip
 
@@ -412,8 +425,8 @@ for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
   # ANSWERING" at the end of every provisioning run. /status.json is
   # `pipe_through(:api)` only, needs no token, and is strictly stronger:
   # Status.health/0 runs a bare Repo.all/1, so a dead DB is a 500, not a 200.
-  # This file is the VENDORED copy bp ships to every provisioned box; the root
-  # deploy.sh carries the same retarget (PR #17819).
+  # The repo-root deploy.sh and the VENDORED copy bp ships to every provisioned
+  # box are byte-identical, so this retarget (PR 17819) is live in both.
   if bp_health_probe "http://localhost:$APP_PORT/status.json" > /dev/null; then
     echo "   Ready! (probe $i/$HEALTH_ATTEMPTS)"
     HEALTHY=1

@@ -28,6 +28,7 @@ defmodule Barkpark.Content.LabelSpinePrecreateTest do
 
   `async: false` — it registers schemas into a shared dataset.
   """
+  # sync: registers schemas into a dataset shared with concurrent peers
   use Barkpark.DataCase, async: false
 
   import Ecto.Query, only: [from: 2]

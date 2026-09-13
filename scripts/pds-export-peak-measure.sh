@@ -86,19 +86,52 @@
 # full acquisition when MemAvailable is under the harness's own floor. It reads
 # that floor; it never changes it.
 #
+# WHY --window HAS NO DEFAULT (pds-bl-peak-measure-window-default-retired-engine).
+# This file used to default --window to 130 s, documented as "the canonical
+# export's wall time", so that the idle control would be length-paired with the
+# acquisition it controls for. That pairing claim is DEAD. The 130 s was
+# measured in wave 7 against the IN-MEMORY export engine (send_resp
+# materialising the whole tar as one BEAM binary), which wave 11 replaced with
+# the streaming spill engine now deployed. The deployed engine has never
+# completed the full canonical export, so its wall time is UNMEASURED — that is
+# the open blocker pds-bl-w13-export-duration-unmeasured, and until it is paid
+# nobody, including this script, knows whether the streaming engine is faster or
+# slower than the retired one.
+#
+# An inherited 130 s is worse than no number, and this instrument is the WORSE
+# of the two places to leave one, because here the control's length is compared
+# to something. A control shorter than the acquisition beside it does not
+# refuse: the run completes, PAIRING below prints INEXACT, and a too-SHORT
+# control accumulates less drift than the export window could have — which
+# flatters the export's own delta, in the same direction and for the same reason
+# every time. The mismatch is disclosed, but the number that produced it was
+# never anyone's measurement.
+#
+# The honest move is therefore NOT to substitute a guessed replacement. It is to
+# refuse to supply one: the caller states the window and owns the pairing claim.
+# Same anti-vacuous rule as PDS-D220a — a figure nobody measured must never
+# authorise a measurement. Until the blocker is paid, pass a window you can
+# defend and read PAIRING and idle_window_requested_s vs idle_window_s (both on
+# the machine line) before quoting the control beside the delta.
+#
+# This mirrors the identical remedy in scripts/pds-idle-sampler.sh, which shed
+# the same inherited 130 s for the same reason; PR #17825's ruling B binds the
+# two files to move together.
+#
 # USAGE
 #
-#   scripts/pds-export-peak-measure.sh [--path <api path>] [--window <seconds>]
+#   scripts/pds-export-peak-measure.sh --window <seconds> [--path <api path>]
 #                                      [--label <text>] [--out <file>]
 #
 #   --path     acquisition path on the source, default the FULL workspace
 #              export `/api/workspaces/$WS/export`. A path carrying
 #              `profile=dev` is treated as a cheap acquisition and skips the
 #              full-export headroom gate.
-#   --window   idle-control window length in seconds (default 130 — the
-#              canonical export's wall time). The export window's length is
-#              whatever the export takes; both are reported and any mismatch is
-#              named.
+#   --window   idle-control window length in seconds. REQUIRED — there is no
+#              default, and omitting it is a misconfiguration (exit 3), not an
+#              inherited number. See WHY --window HAS NO DEFAULT above. The
+#              export window's length is whatever the export takes; both are
+#              reported and any mismatch is named.
 #   --label    free text recorded in the output (e.g. "post-spill").
 #   --out      write the machine-readable line to this file as well as stdout.
 #
@@ -113,7 +146,8 @@
 #   PDS_RUN_ID           default a UTC stamp + pid
 #
 # EXIT: 0 measured · 2 refused (a precondition, or a window that logged nothing
-#       — see PDS-D220a) · 3 misconfigured.
+#       — see PDS-D220a) · 3 misconfigured (this includes a MISSING --window:
+#       see WHY --window HAS NO DEFAULT above).
 
 set -eu
 
@@ -160,7 +194,11 @@ ATTEMPT_CHARGED=no                # did THIS run charge the ledger?
 ATTEMPTS_AFTER=""                 # the counter's value once this run was done with it
 
 SAMPLE_HZ=1                       # stated in the output; see PDS-D114
-IDLE_SECONDS=130                  # the canonical export's wall time
+# NO DEFAULT. The empty string is the "caller said nothing" sentinel, refused
+# below. The old value (130 s) was the RETIRED in-memory engine's wall time and
+# the deployed streaming engine's is unmeasured — pds-bl-w13-export-duration-
+# unmeasured. See WHY --window HAS NO DEFAULT in the header.
+IDLE_SECONDS=""
 ACQ_PATH=""
 LABEL="unlabelled"
 OUT_FILE=""
@@ -197,7 +235,10 @@ while [ $# -gt 0 ]; do
     --window) IDLE_SECONDS="${2:-}"; shift 2 || die "--window needs a value" ;;
     --label)  LABEL="${2:-}"; shift 2 || die "--label needs a value" ;;
     --out)    OUT_FILE="${2:-}"; shift 2 || die "--out needs a value" ;;
-    -h|--help) sed -n '1,80p' "$0"; exit 0 ;;
+    # 1,150p — through the EXIT legend. This used to stop at 80, which cut
+    # the file off mid-paragraph: --help printed no USAGE, no flag list and no
+    # exit codes. A flag that is REQUIRED must be reachable from --help.
+    -h|--help) sed -n '1,150p' "$0"; exit 0 ;;
     *) die "unknown argument '$1' (try --help)" ;;
   esac
 done
@@ -211,8 +252,17 @@ case "$ACQ_PATH" in
   *--compressed*|*accept-encoding*|*Accept-Encoding*)
     die "the acquisition path smuggles compression. Bandit gzips send_resp bodies when the client offers gzip, and the frozen harness never asks for it — a compressed acquisition does not compare like with like (see the header, item 5)." ;;
 esac
+# The MISSING case is split out from the MALFORMED case on purpose: they are
+# different operator errors and the missing one needs to say what it is refusing
+# to guess. Refused here, before the first ssh and before the lock is taken, so
+# a caller who forgot the flag learns it in under a second rather than after a
+# full acquisition has already been charged against the attempt ledger.
+if [ -z "$IDLE_SECONDS" ]; then
+  die "--window is REQUIRED and has no default. This instrument used to default to 130 s, described as the canonical export's wall time — that figure was measured on the RETIRED in-memory export engine (wave 7), not on the streaming spill engine deployed since wave 11, whose full-export duration is UNMEASURED (open blocker: pds-bl-w13-export-duration-unmeasured). An idle control SHORTER than the acquisition beside it does not refuse; it accumulates less drift than the export window could have and so flatters the export's delta, always in that direction. Rather than guess a replacement, this instrument makes you state the window and own the pairing claim. Until that blocker is paid: state a window you can defend, then read the PAIRING line and idle_window_requested_s vs idle_window_s before quoting the control beside the delta."
+fi
+
 case "$IDLE_SECONDS" in
-  ''|*[!0-9]*) die "--window must be a whole number of seconds (got '$IDLE_SECONDS')" ;;
+  *[!0-9]*) die "--window must be a whole number of seconds (got '$IDLE_SECONDS')" ;;
 esac
 [ "$IDLE_SECONDS" -ge 5 ] || die "--window must be at least 5 s to produce a usable control"
 
@@ -816,7 +866,9 @@ say "  PAIRED IDLE CONTROL (zero requests issued)"
 say "    baseline t=0 ......... ${IDLE_BASELINE_KB} kB"
 say "    peak ................. ${IDLE_PEAK_KB} kB   (MAX across ${BEAM_N} slot(s), ${IDLE_SAMPLES} readings)"
 say "    drift [BEAM RSS] ..... ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB / 1024 = $(mib "$IDLE_DELTA_KB") MiB"
-say "    window ............... ${IDLE_WALL} s at ${SAMPLE_HZ} Hz · rate ${IDLE_RATE} MiB/s"
+say "    window ............... ${IDLE_WALL} s measured of ${IDLE_SECONDS} s requested, at ${SAMPLE_HZ} Hz · rate ${IDLE_RATE} MiB/s"
+say "                           (a measured window SHORTER than the requested one means"
+say "                            the control closed early; pair the two before quoting this)"
 say "    pairing .............. ${PAIRING}"
 say ""
 say "    MemAvailable, WHOLE BOX (a different unit class — PDS-D220b)"
@@ -881,7 +933,7 @@ else
 fi
 say ""
 
-MACHINE_LINE="PDS_PEAK_MEASURE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acq_path=$ACQ_PATH full_acquisition=$FULL_ACQ http_code=$HTTP_CODE bytes=$BYTES sample_hz=$SAMPLE_HZ units=kB_div_1024 compression=none selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_kb=$MEM_AVAIL_KB floor_mb=$FULL_MIN_MEM_MB export_baseline_kb=$EXPORT_BASELINE_KB export_peak_kb=$EXPORT_PEAK_KB export_delta_kb=$EXPORT_DELTA_KB export_delta_mib=$(mib "$EXPORT_DELTA_KB") export_samples=$EXPORT_SAMPLES export_drift_sign=$EXPORT_DRIFT_SIGN export_window_s=$EXPORT_WALL export_baseline_set_kb=$EXPORT_BASELINE_SET_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_drift_sign=$IDLE_DRIFT_SIGN idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES canonical_reference_mib=2235.43 full_attempt_charged=$ATTEMPT_CHARGED attempts_after=${ATTEMPTS_AFTER:-unknown} attempts_budget=$FULL_BUDGET floor_derivable=$FLOOR_DERIVABLE floor_refusal=$FLOOR_REFUSAL_CODE"
+MACHINE_LINE="PDS_PEAK_MEASURE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acq_path=$ACQ_PATH full_acquisition=$FULL_ACQ http_code=$HTTP_CODE bytes=$BYTES sample_hz=$SAMPLE_HZ units=kB_div_1024 compression=none selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_kb=$MEM_AVAIL_KB floor_mb=$FULL_MIN_MEM_MB export_baseline_kb=$EXPORT_BASELINE_KB export_peak_kb=$EXPORT_PEAK_KB export_delta_kb=$EXPORT_DELTA_KB export_delta_mib=$(mib "$EXPORT_DELTA_KB") export_samples=$EXPORT_SAMPLES export_drift_sign=$EXPORT_DRIFT_SIGN export_window_s=$EXPORT_WALL export_baseline_set_kb=$EXPORT_BASELINE_SET_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_drift_sign=$IDLE_DRIFT_SIGN idle_window_requested_s=$IDLE_SECONDS idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES canonical_reference_mib=2235.43 full_attempt_charged=$ATTEMPT_CHARGED attempts_after=${ATTEMPTS_AFTER:-unknown} attempts_budget=$FULL_BUDGET floor_derivable=$FLOOR_DERIVABLE floor_refusal=$FLOOR_REFUSAL_CODE"
 
 say "$MACHINE_LINE"
 say ""

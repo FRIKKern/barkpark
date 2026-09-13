@@ -1634,3 +1634,139 @@ func TestSitesListJSONCarriesTheCausePair(t *testing.T) {
 		}
 	}
 }
+
+// runDeploymentsFixtureJSON is runDeploymentsFixture's machine twin: the same
+// scripted control plane, `-o json`. The narrowing signal has to be assertable
+// on BOTH surfaces or a script and a human read different windows.
+func runDeploymentsFixtureJSON(t *testing.T, body string, extraArgs ...string) (string, int) {
+	t.Helper()
+	withTempConfigHome(t)
+	s := newScriptedCloud(t).
+		route("GET", "/v1/sites", http.StatusOK, `{"sites":[
+			{"id":"site-1","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":[],"scale_mode":"always_on"}
+		]}`).
+		route("GET", "/v1/sites/site-1/deployments", http.StatusOK, body)
+	srv := httptest.NewServer(s.handler())
+	t.Cleanup(srv.Close)
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "json"
+		return runSites(out, append([]string{"deployments", "blog"}, extraArgs...))
+	})
+	return stdout, code
+}
+
+// deploymentsNarrowingBody builds n live rows, optionally followed by a cursor.
+func deploymentsNarrowingBody(n int, nextCursor string) string {
+	var b strings.Builder
+	b.WriteString(`{"deployments":[`)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(fmt.Sprintf(`{"id":"dep-%d","site_id":"site-1","status":"live","inserted_at":"2026-08-%02dT00:00:00Z"}`, i, 28-(i%28)))
+	}
+	b.WriteString(`]`)
+	if nextCursor != "" {
+		b.WriteString(fmt.Sprintf(`,"next_cursor":%q`, nextCursor))
+	}
+	b.WriteString(`}`)
+	return b.String()
+}
+
+// TestSitesDeploymentsNamesTheRequestedLimit — task-0cc6ef66d405bb0d.
+//
+// A caller who typed `--limit 250` and got 200 rows was told "older rows exist",
+// which is ALSO what they are told when they typed `--limit 5` and got 5. The
+// requested limit is the one quantity the CLI knows and never printed, so the
+// reader kept reasoning about a denominator of 250 while holding 200 rows.
+//
+// The table below is the whole claim: narrowing is the CONJUNCTION of
+// fewer-rows-than-asked AND a cursor. Either alone must stay silent, because
+// either alone is honestly "that is all the rows there are" or "you got exactly
+// what you asked for".
+func TestSitesDeploymentsNamesTheRequestedLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       string
+		args       []string
+		wantNarrow bool
+	}{
+		{
+			name:       "narrowed: fewer rows than asked AND a cursor",
+			body:       deploymentsNarrowingBody(3, "cur-next"),
+			args:       []string{"--limit", "250"},
+			wantNarrow: true,
+		},
+		{
+			// NEGATIVE ARM 1 — a FULL window. The caller got exactly the 3 they
+			// asked for; the existing cursor clause already says the rest.
+			name:       "full window: rows == limit, cursor present",
+			body:       deploymentsNarrowingBody(3, "cur-next"),
+			args:       []string{"--limit", "3"},
+			wantNarrow: false,
+		},
+		{
+			// NEGATIVE ARM 2 — a GENUINELY short window. Nothing was narrowed:
+			// there are no more rows to have.
+			name:       "genuinely short window: rows < limit, no cursor",
+			body:       deploymentsNarrowingBody(3, ""),
+			args:       []string{"--limit", "250"},
+			wantNarrow: false,
+		},
+		{
+			// NEGATIVE ARM 3 — no --limit at all. The caller chose no number, so
+			// there is no number they can be misled about.
+			name:       "no --limit typed: nothing was requested",
+			body:       deploymentsNarrowingBody(3, "cur-next"),
+			args:       nil,
+			wantNarrow: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, stdout, code := runDeploymentsFixture(t, tc.body, tc.args...)
+			if code != exitOK {
+				t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+			}
+			got := strings.Contains(stdout, "NARROWED")
+			if got != tc.wantNarrow {
+				t.Fatalf("narrowing clause present = %v, want %v:\n%s", got, tc.wantNarrow, stdout)
+			}
+			if tc.wantNarrow {
+				// BOTH numbers, not one: the requested and the served.
+				if !strings.Contains(stdout, "you requested 250") || !strings.Contains(stdout, "the server served 3") {
+					t.Fatalf("the narrowing clause must name BOTH the requested and the served count:\n%s", stdout)
+				}
+				// And it must not have eaten the cursor clause it sits beside.
+				if !strings.Contains(stdout, "older rows exist — '--before cur-next'") {
+					t.Fatalf("the narrowing clause displaced the cursor clause:\n%s", stdout)
+				}
+			}
+
+			// The MACHINE surface carries the same signal, or a script and a
+			// human read different windows.
+			jsonOut, jcode := runDeploymentsFixtureJSON(t, tc.body, tc.args...)
+			if jcode != exitOK {
+				t.Fatalf("json exit = %d, want 0\n%s", jcode, jsonOut)
+			}
+			var payload struct {
+				RequestedLimit *int    `json:"requested_limit"`
+				NextCursor     *string `json:"next_cursor"`
+			}
+			if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+				t.Fatalf("json payload did not parse: %v\n%s", err, jsonOut)
+			}
+			if !strings.Contains(jsonOut, `"requested_limit"`) {
+				t.Fatalf("the json payload must carry requested_limit beside next_cursor, always — null when nothing was narrowed:\n%s", jsonOut)
+			}
+			if tc.wantNarrow {
+				if payload.RequestedLimit == nil || *payload.RequestedLimit != 250 {
+					t.Fatalf("requested_limit = %v, want 250:\n%s", payload.RequestedLimit, jsonOut)
+				}
+			} else if payload.RequestedLimit != nil {
+				t.Fatalf("requested_limit = %d on a window that was NOT narrowed:\n%s", *payload.RequestedLimit, jsonOut)
+			}
+		})
+	}
+}

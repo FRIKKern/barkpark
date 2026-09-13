@@ -32,6 +32,7 @@ defmodule Barkpark.Content.GraphBoundedReadsTest do
   assertion reads a shared table and stays serial for stability.
   """
 
+  # sync: reads a table shared with concurrent peers; the bound assertion needs a quiet table
   use Barkpark.DataCase, async: false
 
   import Barkpark.TenancyFixtures

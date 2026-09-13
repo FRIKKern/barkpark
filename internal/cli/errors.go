@@ -69,11 +69,10 @@ type apiError struct {
 // rule #3). The CLI keys on the envelope's `code` string and NEVER re-derives an
 // exit code from the HTTP status. Source: docs/cli/error-exit-table.md.
 var codeExit = map[string]int{
-	"not_found":      exitNotFound,
-	"schema_unknown": exitNotFound,
-	"share_expired":  exitNotFound, // 410, bucketed as gone/not-found
-	"unauthorized":   exitAuth,
-	"forbidden":      exitAuth,
+	"not_found":     exitNotFound,
+	"share_expired": exitNotFound, // 410, bucketed as gone/not-found
+	"unauthorized":  exitAuth,
+	"forbidden":     exitAuth,
 	// A filter/order over a field the caller may not read — semantically a
 	// permission denial (use a token that can read the field), so the auth
 	// bucket, even though the HTTP status is 422. Added when QueryController /
@@ -331,8 +330,13 @@ var codeExit = map[string]int{
 	"invalid_import_mode":     exitValidation, // 422, workspace_controller.ex (bundle import mode)
 	"invalid_deploy_mode":     exitValidation, // 400, sites/deploy_request.ex (site deploy mode)
 	"session_restarting":      exitServer,     // 503 + retry-after, sheets/ops_controller.ex (crash loop — RETRY)
-	"session_start_failed":    exitValidation, // 422, sheets/ops_controller.ex (session could not start — PERMANENT)
-	"replay_unavailable":      exitServer,     // 503 + retry-after, sheets/ops_controller.ex (exactly-once ring unreadable; batch NOT applied — RETRY)
+	// 409 + Retry-After, workspace_controller.ex export_in_flight_conflict/2: one workspace
+	// export runs at a time per instance (shared-filesystem free-space preflight) — RETRY
+	// after the header. Conflict, not server: the box is healthy, the slot is taken. Arrived
+	// in known_codes/0 via #17933 without this bucket; TestCodeExitCoversKnownAPICodes red on main.
+	"export_already_running": exitConflict,
+	"session_start_failed":   exitValidation, // 422, sheets/ops_controller.ex (session could not start — PERMANENT)
+	"replay_unavailable":     exitServer,     // 503 + retry-after, sheets/ops_controller.ex (exactly-once ring unreadable; batch NOT applied — RETRY)
 }
 
 // codeExitNotWireBucketable names the members of known_codes/0 that are
@@ -1282,7 +1286,7 @@ func (e apiError) hint() string {
 		return e.localHint
 	}
 	switch e.code {
-	case "not_found", "schema_unknown":
+	case "not_found":
 		return "check the type/id and --dataset; run `bp schema ls` to list types"
 	case "validation_failed", "invalid_op", "malformed_op", "type_mismatch", "duplicate_id", "block_not_found", "invalid_paper":
 		return "re-run with -v for field errors; check required/pattern fields"
@@ -1438,7 +1442,7 @@ func enumeratingSibling(m *manifest.Manifest, cmd manifest.Command) string {
 // "CLI message guidance" column of the table where a code is known.
 func (e apiError) errorMessage() string {
 	switch e.code {
-	case "not_found", "schema_unknown":
+	case "not_found":
 		if e.message != "" {
 			return "not found: " + e.message
 		}

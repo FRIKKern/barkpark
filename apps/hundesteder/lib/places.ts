@@ -91,9 +91,21 @@ export async function fetchPlaces(): Promise<Place[]> {
         )}/${PLACE_TYPE}?filter[status]=published&limit=${limit}&offset=${offset}`,
       );
       if (json === null) return null;
-      return (
-        (json as { result?: { documents?: unknown[] } }).result?.documents ?? []
-      );
+      // Hand the walk the RICH page, not just the rows: `result.hasMore` is
+      // the query API's EXACT truncation signal and `result.nextOffset` its
+      // cursor, so the walk terminates on what the server said rather than
+      // inferring it from page length (task-a5b10e7a686e37bb).
+      const result =
+        (json as {
+          result?: { documents?: unknown[]; hasMore?: unknown; nextOffset?: unknown };
+        }).result ?? {};
+      return {
+        rows: Array.isArray(result.documents) ? result.documents : [],
+        ...(typeof result.hasMore === "boolean" ? { hasMore: result.hasMore } : {}),
+        ...(typeof result.nextOffset === "number" && Number.isFinite(result.nextOffset)
+          ? { nextOffset: result.nextOffset }
+          : {}),
+      };
     },
     { limit: PLACES_PAGE_LIMIT, maxPages: PLACES_MAX_PAGES },
   );

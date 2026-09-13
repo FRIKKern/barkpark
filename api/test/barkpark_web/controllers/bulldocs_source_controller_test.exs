@@ -87,4 +87,88 @@ defmodule BarkparkWeb.BulldocsSourceControllerTest do
     refute sanitized =~ "<script"
     refute sanitized =~ "javascript:"
   end
+
+  describe "D5 published-perspective gate on task blocks (task-b10e10b944f6f55b)" do
+    @dataset "production"
+
+    setup do
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      scope = [workspace_id: ws.id, project_id: project.id]
+      Barkpark.LabelFixtures.register_tags!(@dataset)
+
+      for schema_def <- Barkpark.Tasks.schema_definitions(@dataset) do
+        attrs =
+          schema_def
+          |> Map.from_struct()
+          |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
+          |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+        {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
+      end
+
+      %{scope: scope}
+    end
+
+    defp mk_task!(title, epic, scope) do
+      {:ok, doc} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => "src-#{System.unique_integer([:positive])}",
+            "title" => title,
+            "content" =>
+              Barkpark.LabelFixtures.with_labels(%{
+                "kind" => "task",
+                "lifecycle_status" => "open",
+                "parent_id" => epic
+              })
+          },
+          @dataset,
+          scope
+        )
+
+      doc
+    end
+
+    # The SECOND reader path: `GET /papers/:slug/source` resolves the same task
+    # blocks through the same `Papers.resolve_tasks_in_blocks/3`. Its scope now
+    # carries the caller's `AnonPerspective` verdict, so a tokenless caller —
+    # pinned to `:published` — gets published task rows only.
+    test "an anonymous source read of a published paper omits a draft-only task",
+         %{conn: conn, scope: scope} do
+      epic = "epic-#{System.unique_integer([:positive])}"
+      _draft = mk_task!("unpublished source secret", epic, scope)
+
+      published = mk_task!("public source row", epic, scope)
+      pid = Barkpark.Content.DraftId.published_id(published.doc_id)
+      {:ok, _} = Content.publish_document(pid, "task", @dataset, scope)
+
+      slug = "source-tasks-#{System.unique_integer([:positive])}"
+
+      {:ok, _paper} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            blocks: [
+              %{
+                "id" => "t1",
+                "type" => "task-list",
+                "query" => %{"parent_id" => epic, "dataset" => @dataset}
+              }
+            ]
+          })
+        )
+
+      body = conn |> get("/papers/#{slug}/source") |> json_response(200)
+
+      titles =
+        body["source"]["blocks"]
+        |> Enum.flat_map(fn b -> b["snapshot"] || [] end)
+        |> Enum.map(& &1["title"])
+
+      # Positive control first: a green refute below can not be an empty block.
+      assert "public source row" in titles
+      refute "unpublished source secret" in titles
+    end
+  end
 end

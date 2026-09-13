@@ -39,6 +39,10 @@ DST_BASE="templates/astro-search-starter/src/finder"
 #   lib/*       <- lib/*                            (at src/finder/lib/*)
 #   globals.css <- app/globals.css                 (at src/styles/globals.css)
 # tokens.gen.ts is one of the 13 lib modules (src/finder/lib/tokens.gen.ts).
+# search-limits.ts joined the closure with task-19107773e2c41c5d: it is the ONE
+# declaration of MAX_HITS both transports import, so the Astro copy drifting
+# from it would put a DIFFERENT working-set cap on the island than on the
+# search-starter source it was copied from -- silently, on the wire.
 MAPPINGS="
 $SRC_BASE/components/finder.tsx|$DST_BASE/finder.tsx
 $SRC_BASE/lib/find.ts|$DST_BASE/lib/find.ts
@@ -54,6 +58,7 @@ $SRC_BASE/lib/stem.ts|$DST_BASE/lib/stem.ts
 $SRC_BASE/lib/fuzzy.ts|$DST_BASE/lib/fuzzy.ts
 $SRC_BASE/lib/tokens.gen.ts|$DST_BASE/lib/tokens.gen.ts
 $SRC_BASE/lib/base-path.ts|$DST_BASE/lib/base-path.ts
+$SRC_BASE/lib/search-limits.ts|$DST_BASE/lib/search-limits.ts
 $SRC_BASE/app/globals.css|templates/astro-search-starter/src/styles/globals.css
 "
 

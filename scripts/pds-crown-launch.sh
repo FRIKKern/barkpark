@@ -353,6 +353,42 @@ derive_run_tag() { # $1 = run id
   printf '%s' "$1" | cksum | awk '{printf "%x", $1}'
 }
 
+# ── THE SCRATCH-TARGET PRECONDITION (PDS-D266) ───────────────────────────────
+#
+# fire_detached exports BARKPARK_HOME=/tmp/pds-w14.$run_tag and NOTHING boots a
+# scratch target there. A FRESH arm invents run_id=<date>-$$, so its run_tag is
+# a number no earlier `pds-scratch-target.sh up` could possibly have targeted:
+# the harness reads $BARKPARK_HOME/scratch.env, finds it absent, and rungs
+# 0c/1/2/5/6 ABORT env:scratch-target-not-booted. Wave 16 spent attempt 3->4
+# exactly that way, on a budget that is one attempt ever.
+#
+# So the prerequisite is checked AT THE BOUNDARY, before anything is armed. Two
+# non-actions are as load-bearing as the check itself:
+#
+#   * arm does NOT boot the scratch. Booting is a ~minutes-long side effect with
+#     its own teardown obligation, and growing it here would make `arm` — whose
+#     entire contract is "return fast, fire once" — the owner of an instance it
+#     cannot tear down. It refuses honestly instead, and names the command.
+#   * pinning PDS_RUN_ID to an already-booted scratch is NOT the fix. It is what
+#     wave 19 does by hand, and it fails silently the first time somebody
+#     forgets. It stays WORKING — this check passes for exactly that case — but
+#     it is a workaround, not the guard.
+#
+# The prefix is spelled here EXACTLY as fire_detached spells it; §4e asserts the
+# two agree, because a drift between them would make this check assert on a path
+# the child never uses — a guard that passes about the wrong file.
+scratch_home_for() { # $1 = run_tag -> the BARKPARK_HOME fire_detached will export
+  printf '%s\n' "/tmp/pds-w14.$1"
+}
+
+# The predicate alone, side-effect free, so the selftest can drive BOTH answers
+# without arming anything (same reason as assert_child_up and run_slice).
+scratch_env_present() { # $1 = run_tag -> 0 present · 1 absent
+  local tag="${1:-}"
+  [ -n "$tag" ] || return 1
+  [ -f "$(scratch_home_for "$tag")/scratch.env" ]
+}
+
 # ── the generated child ──────────────────────────────────────────────────────
 #
 # Written to disk rather than inlined so the armed payload is READABLE after the
@@ -576,7 +612,7 @@ write_run_meta() {
 
 cmd_arm() {
   local force=0 run_id run_tag run_dir log pid_file child payload pid t0 t1
-  local child_state arc read_at prc
+  local child_state arc read_at prc scratch_home
   DO_PREWARM=1
 
   while [ $# -gt 0 ]; do
@@ -647,6 +683,44 @@ cmd_arm() {
   t0="$(date +%s)"
   run_id="${PDS_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
   run_tag="$(derive_run_tag "$run_id")"
+
+  # ── the scratch target must EXIST before anything is armed (PDS-D266) ─────
+  # Deliberately the FIRST thing after the tag is known: before mkdir, before
+  # the optional pre-warm compile, before write_child_script, and — the point
+  # of the whole check — before fire_detached, which is the only caller that
+  # resolves the attempt budget. Refusing here therefore spends ZERO attempts
+  # and leaves no run directory behind.
+  if ! scratch_env_present "$run_tag"; then
+    scratch_home="$(scratch_home_for "$run_tag")"
+    rule
+    say "NOT ARMED — the scratch target this run would measure is not booted."
+    rule
+    info "run_id      $run_id"
+    info "run_tag     $run_tag  (cksum of the run_id above)"
+    info "derived     BARKPARK_HOME=$scratch_home"
+    info "missing     $scratch_home/scratch.env"
+    info ""
+    info "fire_detached would export that BARKPARK_HOME into the child, and the"
+    info "harness reads \$BARKPARK_HOME/scratch.env to find the target it is"
+    info "supposed to measure. With the file absent, rungs 0c/1/2/5/6 abort"
+    info "env:scratch-target-not-booted — after the attempt has been spent."
+    info "Nothing was armed, and the attempt counter is UNTOUCHED."
+    info ""
+    info "Either boot a target at this exact home:"
+    info ""
+    info "    BARKPARK_HOME=$scratch_home scripts/pds-scratch-target.sh up --verify"
+    info ""
+    info "…or point this arm at a target that is ALREADY up, by pinning the SAME"
+    info "run id that booted it:"
+    info ""
+    info "    PDS_RUN_ID=<the booted run id> $SELF arm"
+    info ""
+    info "The pin is a REUSE path, not a repair: it works only while somebody"
+    info "remembers to set it, which is why this refusal exists at all."
+    rule
+    exit 3
+  fi
+
   run_dir="$STATE_DIR/$run_tag"
   mkdir -p "$run_dir"
   log="$run_dir/transcript.log"
@@ -1116,6 +1190,10 @@ cmd_collect() {
 
 ST_PASS=0
 ST_FAIL=0
+# §4e boots no scratch, but it does create ONE real /tmp/pds-w14.<tag> home to
+# drive the present-branch against the path the child actually gets. Global so
+# the EXIT trap can remove it even if a check aborts mid-section.
+ST_FAKE_HOME=""
 ok()   { ST_PASS=$((ST_PASS + 1)); printf '  ok    %s\n' "$*"; }
 bad()  { ST_FAIL=$((ST_FAIL + 1)); printf '  FAIL  %s\n' "$*"; }
 check(){ if [ "$1" = "$2" ]; then ok "$3 ($1)"; else bad "$3 — expected '$2', got '$1'"; fi; }
@@ -1138,13 +1216,14 @@ cmd_selftest() {
   local scratch real_attempts_before real_attempts_after
   local real_lock_before real_lock_after
   local t0 t1 elapsed pid line pgid ppid stat budget seeded expect
-  local state live_pid dead_pid out i reuse_log
+  local state live_pid dead_pid out i reuse_log rc
+  local unbooted_id unbooted_tag unbooted_home booted_id booted_tag
 
   real_attempts_before="$(cat /tmp/pds-full-export/attempts 2>/dev/null || echo '<none>')"
   real_lock_before=absent; [ -d /tmp/pds-full-export/lock ] && real_lock_before=present
 
   scratch="$(mktemp -d "${TMPDIR:-/tmp}/pds-launch-selftest.XXXXXX")"
-  trap '[ -n "${scratch:-}" ] && [ -d "$scratch" ] && rm -rf "$scratch"' EXIT
+  trap '[ -n "${scratch:-}" ] && [ -d "$scratch" ] && rm -rf "$scratch"; [ -n "${ST_FAKE_HOME:-}" ] && [ -d "$ST_FAKE_HOME" ] && rm -rf "$ST_FAKE_HOME"; true' EXIT
 
   rule
   say "pds-crown-launch selftest — DUMMY payload only, the real climb is never touched"
@@ -1635,6 +1714,182 @@ DUMMY
     check "$state" "KILLED" "no marker + dead pid classifies"
   else
     bad "could not obtain a reaped in-range pid for the KILLED fixture"
+  fi
+
+
+  # ── 4e · arm REFUSES when the scratch target it would measure is absent ───
+  #
+  # (pds-bl-launcher-assert-scratch-env.) fire_detached exports
+  # BARKPARK_HOME=/tmp/pds-w14.$run_tag and nothing boots a target there. A
+  # fresh arm invents run_id=<date>-$$, so no earlier `pds-scratch-target.sh
+  # up` can have targeted its tag: rungs 0c/1/2/5/6 abort
+  # env:scratch-target-not-booted AFTER the attempt is spent. Wave 16 burned
+  # attempt 3->4 exactly so.
+  #
+  # Both directions are driven, and the refusal is driven THROUGH cmd_arm
+  # rather than through the predicate alone — the whole claim is about what
+  # `arm` does with the answer (exit non-zero, spend nothing, fork nothing),
+  # and a predicate test proves none of that.
+  say ""
+  say "4e · arm asserts scratch.env at its derived BARKPARK_HOME before arming"
+
+  # (a) ABSENT. A control on the absence first: an empty read is only evidence
+  # once the path it read is shown to be the right one and really empty.
+  unbooted_id="pds-selftest-unbooted-$$-$(date -u +%s)"
+  unbooted_tag="$(derive_run_tag "$unbooted_id")"
+  unbooted_home="$(scratch_home_for "$unbooted_tag")"
+  check "$unbooted_home" "/tmp/pds-w14.$unbooted_tag" \
+    "the derived home is /tmp/pds-w14.<run_tag> (precondition)"
+  if [ -e "$unbooted_home" ]; then
+    bad "the 'unbooted' home $unbooted_home ALREADY EXISTS — this arm proves nothing"
+  else
+    ok "the derived home for a never-booted run id is absent (precondition)"
+  fi
+  if scratch_env_present "$unbooted_tag"; then
+    bad "scratch_env_present says PRESENT for a home that does not exist"
+  else
+    ok "scratch_env_present is FALSE when scratch.env is absent"
+  fi
+
+  # THE REFUSAL, end to end.
+  #
+  # The dummy harness is pinned here even though a PASSING guard never reaches
+  # it: under MUTATION — which is how this section is proved to fail — the arm
+  # runs to completion, and an unpinned PDS_LAUNCH_HARNESS would detach a child
+  # onto the REAL pds-pull-proof.sh. A selftest must not be one deleted line
+  # away from firing the instrument it exists to guard.
+  cat > "$scratch/harness4e.sh" <<'H4E'
+#!/bin/bash
+printf 'DUMMY HARNESS — no rung is run, nothing is measured.\n'
+sleep 30
+H4E
+  chmod +x "$scratch/harness4e.sh"
+  mkdir -p "$scratch/full4e"
+  printf '%s\n' "41" > "$scratch/full4e/attempts"
+  set +e
+  out="$(PDS_RUN_ID="$unbooted_id" \
+         PDS_LAUNCH_STATE_DIR="$scratch/state4e" \
+         PDS_FULL_EXPORT_DIR="$scratch/full4e" \
+         PDS_LAUNCH_HARNESS="$scratch/harness4e.sh" \
+         PDS_LAUNCH_ARM_SETTLE_S=3 \
+         "$0" arm --no-prewarm 2>&1)"
+  rc=$?
+  set -e
+  check "$rc" "3" "arm REFUSES (documented exit 3), it does not arm"
+  case "$out" in
+    *"NOT ARMED — the scratch target"*) ok "the refusal names its cause, not a bare failure" ;;
+    *) bad "arm exited $rc without naming the missing scratch target: $out" ;;
+  esac
+  case "$out" in
+    *"BARKPARK_HOME=$unbooted_home"*) ok "the refusal prints the DERIVED home it checked" ;;
+    *) bad "the refusal does not print the home it checked — the operator cannot verify it" ;;
+  esac
+  case "$out" in
+    *"$unbooted_home/scratch.env"*) ok "the refusal names the exact missing file" ;;
+    *) bad "the refusal never names \$BARKPARK_HOME/scratch.env" ;;
+  esac
+
+  # ZERO ATTEMPTS, and nothing forked. This is the whole point: the old
+  # behaviour reached the harness and paid an attempt to learn the same thing.
+  out="$(cat "$scratch/full4e/attempts")"
+  check "$out" "41" "the attempt counter is UNTOUCHED by the refusal"
+  if [ -e "$scratch/state4e/$unbooted_tag" ]; then
+    bad "the refusal left a run directory behind — it ran past the boundary"
+  else
+    ok "the refusal leaves no run directory (it aborts before mkdir)"
+  fi
+  # `|| true` on the find itself: `set -o pipefail` is on, and find exits 1 on a
+  # path that does not exist — which is the EXPECTED state here.
+  out="$( { find "$scratch/state4e" -name 'child.pid' 2>/dev/null || true; } | wc -l | tr -d ' ')"
+  check "${out:-0}" "0" "the refusal forked nothing"
+
+  # (b) PRESENT — the reuse path wave 19 relies on. A pinned run id whose
+  # scratch IS booted must arm exactly as before. The home is the REAL derived
+  # path (not a redirectable prefix) so this exercises the same string the
+  # child is handed; it is removed again below.
+  booted_id="pds-selftest-booted-$$-$(date -u +%s)"
+  booted_tag="$(derive_run_tag "$booted_id")"
+  ST_FAKE_HOME="$(scratch_home_for "$booted_tag")"
+  mkdir -p "$ST_FAKE_HOME"
+  printf 'PDS_SCRATCH_DB=postgres://selftest/none\n' > "$ST_FAKE_HOME/scratch.env"
+  if scratch_env_present "$booted_tag"; then
+    ok "scratch_env_present is TRUE once scratch.env exists at the derived home"
+  else
+    bad "scratch_env_present is FALSE with scratch.env present — the guard would refuse a booted target"
+  fi
+
+  mkdir -p "$scratch/full4e2"
+  printf '%s\n' "41" > "$scratch/full4e2/attempts"
+  set +e
+  out="$(PDS_RUN_ID="$booted_id" \
+         PDS_LAUNCH_STATE_DIR="$scratch/state4e2" \
+         PDS_FULL_EXPORT_DIR="$scratch/full4e2" \
+         PDS_LAUNCH_HARNESS="$scratch/harness4e.sh" \
+         PDS_LAUNCH_ARM_SETTLE_S=3 \
+         "$0" arm --no-prewarm 2>&1)"
+  rc=$?
+  set -e
+  check "$rc" "0" "a pinned run id whose scratch IS booted arms normally"
+  case "$out" in
+    *"NOT ARMED — the scratch target"*) bad "the guard refused a BOOTED target — the reuse path is broken" ;;
+    *) ok "the guard does not fire when scratch.env is present" ;;
+  esac
+  if [ -f "$scratch/state4e2/$booted_tag/child.pid" ]; then
+    ok "the booted-target arm reached the fork (child.pid written)"
+  else
+    bad "the booted-target arm never forked — the reuse path regressed"
+  fi
+
+  # Tear the dummy climb down: it is a `sleep 30` in its OWN session (that is
+  # the whole detach form), so nothing reaps it when this selftest exits.
+  pid="$(cat "$scratch/state4e2/$booted_tag/child.pid" 2>/dev/null | tr -d ' \n' || true)"
+  if is_int "${pid:-}"; then
+    pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    is_int "${pgid:-}" && kill -TERM -"$pgid" 2>/dev/null || true
+    kill -TERM "$pid" 2>/dev/null || true
+  fi
+  rm -rf "$ST_FAKE_HOME"; ST_FAKE_HOME=""
+
+  # (c) MUTATION GUARD — the call, and its POSITION. Deleting the call, or
+  # moving it after fire_detached, both restore the defect; only the first
+  # would be caught by a presence grep.
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'scratch_env_present' || true)"
+  if [ "${out:-0}" -ge 1 ]; then
+    ok "cmd_arm calls scratch_env_present (the guard is wired, not merely defined)"
+  else
+    bad "cmd_arm no longer asserts scratch.env — a fresh arm can spend an attempt that cannot run"
+  fi
+  i="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -n 'scratch_env_present' | head -1 | cut -d: -f1 || true)"
+  line="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -n '^  fire_detached ' | head -1 | cut -d: -f1 || true)"
+  if is_int "${i:-}" && is_int "${line:-}" && [ "$i" -lt "$line" ]; then
+    ok "the guard runs BEFORE fire_detached (line $i < $line inside cmd_arm)"
+  else
+    bad "the guard is not provably ahead of fire_detached (guard=${i:-<none>} fork=${line:-<none>}) — an attempt could be resolved first"
+  fi
+
+  # (d) DRIFT GUARD. scratch_home_for spells the prefix itself; fire_detached
+  # spells it again (§c1 pins that literal). If they diverge, this guard
+  # asserts a path the child never uses — correct about the wrong file.
+  # shellcheck disable=SC2016
+  # '$run_tag' is LITERAL on purpose: the needle is fire_detached's source text,
+  # which contains the unexpanded variable name, not any value of it.
+  out="$(sed -n '/^fire_detached()/,/^}/p' "$SCRIPT_DIR/$SELF" \
+         | grep -c "BARKPARK_HOME=\"$(scratch_home_for '$run_tag')\"" || true)"
+  check "${out:-0}" "1" "scratch_home_for and fire_detached spell the SAME /tmp/pds-w14.<tag> home"
+
+  # (e) EXPLICIT NEGATIVE. arm must REFUSE, never grow a side effect: booting a
+  # scratch is a minutes-long action with its own teardown obligation, and arm
+  # cannot own an instance it cannot tear down. Every mention of the boot
+  # command inside cmd_arm must be TEXT the operator reads, never a command.
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'pds-scratch-target' || true)"
+  i="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -cE '^ *(#|info ")' \
+       | head -1 || true)"
+  line="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" \
+          | grep 'pds-scratch-target' | grep -cE '^ *(#|info ")' || true)"
+  if [ "${out:-0}" -ge 1 ] && [ "${out:-0}" -eq "${line:-0}" ]; then
+    ok "cmd_arm only NAMES pds-scratch-target.sh ($out/$line mentions are prose); it never boots one"
+  else
+    bad "cmd_arm has $out mention(s) of pds-scratch-target.sh and only $line are prose — arm is booting the scratch itself"
   fi
 
   # ── 5. KILLED names the stranded lock (PDS-D248) ─────────────────────────

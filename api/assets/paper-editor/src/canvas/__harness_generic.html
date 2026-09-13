@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>bp-paper-canvas — generic harness (any paper's blocks, no fork)</title>
+
+  <!--
+    THE GENERIC CANVAS HARNESS. __harness.html (beside this file) hardcodes its
+    own three-block S1 run and its assertions are load-bearing for that
+    regression, so it stays byte-locked (see __harness_lock.test.mjs). This
+    file is the parameterized counterpart: it mounts ANY versioned blocks JSON
+    through the SAME production bundle, so a real-paper canvas investigation no
+    longer forks a harness into /tmp where nobody can review or re-run it.
+
+    ── THE ONE COMMAND ───────────────────────────────────────────────────────
+    From a clean checkout, repo root:
+
+        node api/assets/paper-editor/src/canvas/__harness_generic_run.mjs
+
+    That starts a static file server over the repo, drives headless Chromium
+    against this page, and prints the __assertCleanMount / __assertRoundTrip
+    results for the committed real-paper fixture. NO Phoenix, no database: the
+    page is static files only.
+
+    To look at it by hand instead:
+
+        python3 -m http.server 8123 --directory .      # repo root
+        open 'http://127.0.0.1:8123/api/assets/paper-editor/src/canvas/__harness_generic.html'
+        # then in the console: __assertCleanMount(), __assertRoundTrip()
+
+    ── INPUT ─────────────────────────────────────────────────────────────────
+    ?fixture=<url>   a URL resolved RELATIVE TO THIS PAGE. Default:
+                     ./__fixtures/paper-mechanical-spacing-doctrine.json
+    ?autorun=1       after mount + settle, write RESULT<json> into #__out so a
+                     `chrome --headless --dump-dom` driver can scrape it.
+    ?settle=<ms>     override the post-mount settle window (default 900ms, i.e.
+                     3x the canvas DEBOUNCE_MS of 300).
+
+    The fixture MUST be an object shaped { "version": 1, "blocks": [ … ] } with
+    a non-empty blocks array of objects that each carry a string `id` and a
+    string `type`. Anything else is REJECTED VISIBLY: a red #harness-error
+    panel appears, window.__harnessError is set, and both assertions return
+    { ok:false } / { clean:false } carrying that error instead of a false green.
+
+    ── WHY fetch(), AND WHY A SERVER ─────────────────────────────────────────
+    Loading the fixture with fetch() is what makes the harness generic. fetch()
+    of a file:// URL is blocked by Chromium, so this page is served over http
+    from a plain static server. That is a FEATURE for verification: it proves
+    the canvas mounts a real paper with Phoenix stopped and no /api in sight.
+
+    ── THE MOUNT RACE (a real trap, found 2026-07-11) ────────────────────────
+    Do NOT gate readiness on the `bp-ready` event. <bp-paper-canvas> is already
+    in the DOM when the bundle's customElements.define() runs, so the element
+    upgrades and connectedCallback mounts it EMPTY, synchronously, during that
+    script — bp-ready fires BEFORE any inline listener below can attach. The
+    later `el.blocks = …` re-projects through setContent(…, false) and does not
+    re-fire it. So readiness here is: el._editor is live AND our blocks were
+    assigned AND the document round-trips. __harnessReady flips only then.
+  -->
+
+  <script>
+    // Opt OUT of the element's self-inject — this page owns the <link> below so
+    // the relative path resolves under any static host.
+    window.BP_PAPER_EDITOR_NO_INJECT = true;
+  </script>
+  <link rel="stylesheet" href="../../../../priv/static/assets/bp-paper-editor.css" />
+
+  <style>
+    body { margin: 0; padding: 2rem; font-family: system-ui, sans-serif; background: #fafafa; }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 1rem; color: #666; font-weight: 600; }
+    .meta { font-size: 0.75rem; color: #888; margin: 0 0 1rem; font-family: ui-monospace, monospace; }
+    .surface { background: #fff; border: 1px solid #e3e3e3; border-radius: 8px; padding: 1.25rem 1.5rem; }
+    /* The malformed-input surface. Not a console.warn: an operator driving this
+       page by hand must SEE the rejection without opening devtools. */
+    #harness-error {
+      background: #fdecea; border: 2px solid #c0392b; color: #7f1d1d;
+      border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+      font-size: 0.9rem; line-height: 1.5;
+    }
+    #harness-error strong { display: block; font-size: 1rem; margin-bottom: 0.35rem; color: #c0392b; }
+    #harness-error code { font-family: ui-monospace, monospace; background: #fff; padding: 0 0.25em; }
+    .ops { margin-top: 1.5rem; }
+    .ops h2 { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; }
+    pre#ops-dump, pre#__out {
+      background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 6px;
+      font-size: 12px; overflow: auto; max-height: 320px; white-space: pre-wrap; word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>bp-paper-canvas · generic harness</h1>
+    <p class="meta" id="meta">loading fixture…</p>
+
+    <div id="harness-error" hidden></div>
+
+    <div class="surface">
+      <bp-paper-canvas id="canvas"></bp-paper-canvas>
+    </div>
+
+    <div class="ops">
+      <h2>bp-canvas-ops (window.__ops — latest batch)</h2>
+      <pre id="ops-dump">// edit the canvas → debounced op batch lands here</pre>
+    </div>
+
+    <div class="ops">
+      <h2>autorun result (window.__result)</h2>
+      <pre id="__out">pending</pre>
+    </div>
+  </div>
+
+  <!-- The SAME built bundle __harness.html loads. The production canvas code is
+       imported, never re-implemented: this page owns input + assertions only. -->
+  <script src="../../../../priv/static/assets/bp-paper-editor.bundle.js"></script>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const FIXTURE = params.get("fixture") || "./__fixtures/paper-mechanical-spacing-doctrine.json";
+    const SETTLE = Number(params.get("settle") || "900");
+    const AUTORUN = params.get("autorun") === "1";
+
+    const el = document.getElementById("canvas");
+    window.__canvas = el;
+    window.__run = null;
+    window.__fixtureUrl = FIXTURE;
+    window.__harnessError = null;
+    window.__harnessReady = false;
+    window.__result = null;
+
+    window.__ops = null;
+    window.__opsLog = [];
+    el.addEventListener("bp-canvas-ops", (e) => {
+      window.__ops = e.detail.ops;
+      window.__opsLog.push(e.detail.ops);
+      document.getElementById("ops-dump").textContent = JSON.stringify(e.detail.ops, null, 2);
+    });
+
+    function fail(message) {
+      window.__harnessError = message;
+      const box = document.getElementById("harness-error");
+      box.hidden = false;
+      box.innerHTML =
+        "<strong>Harness input rejected</strong>" +
+        "Fixture <code></code> is not a usable blocks payload.<br>";
+      box.querySelector("code").textContent = FIXTURE;
+      box.appendChild(document.createTextNode(message));
+      document.getElementById("meta").textContent = "fixture REJECTED — " + FIXTURE;
+      finish();
+      return null;
+    }
+
+    // ── input validation ────────────────────────────────────────────────────
+    // Every arm returns a SENTENCE naming what was wrong, because the operator
+    // reading the red panel is usually the person who just wrote the fixture.
+    function validate(payload) {
+      if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+        return "Top level must be a JSON object, got " +
+          (Array.isArray(payload) ? "an array" : typeof payload) + ".";
+      }
+      if (payload.version !== 1) {
+        return "Missing or unsupported `version`: expected the number 1, got " +
+          JSON.stringify(payload.version) + ".";
+      }
+      if (!Array.isArray(payload.blocks)) {
+        return "`blocks` must be an array, got " +
+          (payload.blocks === undefined ? "nothing" : typeof payload.blocks) + ".";
+      }
+      if (payload.blocks.length === 0) {
+        return "`blocks` is empty — there is nothing to mount.";
+      }
+      for (let i = 0; i < payload.blocks.length; i++) {
+        const b = payload.blocks[i];
+        if (b === null || typeof b !== "object" || Array.isArray(b)) {
+          return "blocks[" + i + "] must be an object, got " +
+            (Array.isArray(b) ? "an array" : typeof b) + ".";
+        }
+        if (typeof b.id !== "string" || b.id === "") {
+          return "blocks[" + i + "] has no string `id` — the canvas diffs by id, " +
+            "so an id-less block cannot round-trip.";
+        }
+        if (typeof b.type !== "string" || b.type === "") {
+          return "blocks[" + i + "] (id " + b.id + ") has no string `type`.";
+        }
+      }
+      return null;
+    }
+
+    // ── assertions (same names + shapes as __harness.html) ──────────────────
+    //
+    //   window.__assertCleanMount()  → { clean, ops, ready, error }
+    // An UNEDITED mount must emit NO ops. A harness that never mounted reports
+    // clean:false with the reason, never a vacuous true.
+    window.__assertCleanMount = function () {
+      if (window.__harnessError) {
+        return { clean: false, ops: null, ready: false, error: window.__harnessError };
+      }
+      if (!window.__harnessReady) {
+        return { clean: false, ops: window.__ops, ready: false, error: "harness not ready yet" };
+      }
+      return { clean: window.__ops === null, ops: window.__ops, ready: true, error: null };
+    };
+
+    //   window.__assertRoundTrip()  → { ok, ids, expected, error }
+    // Every top-level node in editor.getJSON() must still carry attrs.bpId ===
+    // the fixture's id, in order. If BpAttrs dropped them, runToOps would
+    // mis-diff the whole run as new.
+    window.__assertRoundTrip = function () {
+      if (window.__harnessError) {
+        return { ok: false, ids: [], expected: [], error: window.__harnessError };
+      }
+      if (!window.__harnessReady || !el._editor) {
+        return { ok: false, ids: [], expected: [], error: "harness not ready yet" };
+      }
+      const json = el._editor.getJSON();
+      const ids = (json.content || []).map((n) => (n.attrs && n.attrs.bpId) || null);
+      const expected = window.__run.map((b) => b.id);
+      const ok =
+        ids.length === expected.length && ids.every((id, i) => id === expected[i]);
+      return { ok, ids, expected, error: null };
+    };
+
+    function finish() {
+      const result = {
+        fixture: FIXTURE,
+        error: window.__harnessError,
+        ready: window.__harnessReady,
+        cleanMount: window.__assertCleanMount(),
+        roundTrip: window.__assertRoundTrip(),
+      };
+      window.__result = result;
+      // The scrape marker the --dump-dom driver matches.
+      document.getElementById("__out").textContent = "RESULT" + JSON.stringify(result);
+    }
+    window.__finish = finish;
+
+    // Poll for the live TipTap instance instead of listening for bp-ready —
+    // see the mount-race note in the header.
+    function whenEditorLive(cb) {
+      const deadline = Date.now() + 5000;
+      (function tick() {
+        if (el._editor) return cb();
+        if (Date.now() > deadline) {
+          fail("The <bp-paper-canvas> element never produced a live editor " +
+               "(el._editor stayed null for 5s) — is the bundle at " +
+               "priv/static/assets/bp-paper-editor.bundle.js present?");
+          return;
+        }
+        setTimeout(tick, 20);
+      })();
+    }
+
+    fetch(FIXTURE, { cache: "no-store" })
+      .then((r) => {
+        if (!r.ok) throw new Error("HTTP " + r.status + " fetching the fixture.");
+        return r.text();
+      })
+      .then((text) => {
+        let payload;
+        try {
+          payload = JSON.parse(text);
+        } catch (e) {
+          return fail("The fixture is not valid JSON: " + e.message);
+        }
+        const problem = validate(payload);
+        if (problem) return fail(problem);
+
+        const RUN = payload.blocks;
+        window.__run = RUN;
+        window.__payload = payload;
+        document.getElementById("meta").textContent =
+          FIXTURE + " · version " + payload.version + " · " + RUN.length + " blocks" +
+          (payload.capture && payload.capture.paper_slug
+            ? " · paper " + payload.capture.paper_slug + " @ rev " + payload.capture.paper_rev
+            : "");
+
+        whenEditorLive(() => {
+          el.blocks = RUN;
+          // _editor is live and the run is applied: THIS is readiness.
+          window.__harnessReady = !!el._editor;
+          if (AUTORUN) setTimeout(finish, SETTLE);
+        });
+      })
+      .catch((e) => fail(String((e && e.message) || e)));
+  </script>
+</body>
+</html>

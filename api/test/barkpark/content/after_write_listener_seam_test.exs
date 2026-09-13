@@ -24,6 +24,7 @@ defmodule Barkpark.Content.AfterWriteListenerSeamTest do
 
   NOT async: the seam is one global `Application` env key.
   """
+  # sync: swaps node-global Application env (the after-write listener seam key) — one value for the whole node
   use Barkpark.DataCase, async: false
   use Oban.Testing, repo: Barkpark.Repo
 

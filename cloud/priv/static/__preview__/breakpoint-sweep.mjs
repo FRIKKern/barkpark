@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  125 scenarios, 24 rendered, 101 in a COMMITTED residue literal.
+//   SCENARIO  128 scenarios, 24 rendered, 104 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -87,8 +87,10 @@
 //  declaration instead of the sweep, and shrinking the real width loop would
 //  leave it green. Shrink WIDTHS and this leg exits 2 — that is the test.
 //
-//  COMMENT-STRIPPING IS LOAD-BEARING, NOT HYGIENE. app.css:2131 contains the
-//  string "@media (max-width: 720px) shell fold" INSIDE a CSS comment.
+//  COMMENT-STRIPPING IS LOAD-BEARING, NOT HYGIENE. app.css names
+//  `@media (max-width: 720px)` INSIDE a CSS comment — re-derive the specimen with
+//  grep -n 'NOT TOUCHED, DELIBERATELY' app.css (a bare `grep -n 'shell fold'`
+//  is NOT unique: it returns several, two of which also carry the breakpoint).
 //  MEASURED ON THIS TREE (cch-w16-s2 corrected these — the previous three
 //  numbers had rotted to 21/20/20 while the file was edited around them):
 //  `grep -c '@media' app.css` says 23; comment-stripped it is 21; the CSSOM
@@ -198,7 +200,9 @@
 //      SHELL_CHROME_SELECTORS below (cch-w24-bl-q3-fold-budget-is-a-shell-
 //      property-at-320).
 //
-//  DO NOT RAISE app.css:4241. Wave 13 measured that raising the shell fold
+//  DO NOT RAISE THE SHELL FOLD's `.sidebar` cap — the `max-height: calc(40vh -
+//  60px)` declaration inside `@media (max-width: 720px)`; re-derive with
+//  grep -n 'max-height: calc(40vh - 60px);' app.css. Wave 13 measured that raising it
 //  RELOCATES the cliff and exports a 746px nav wall to every tablet.
 //
 // ─────────────────────────────────────────────────────────────────────────────
@@ -493,7 +497,7 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 96
 // name-keyed entries below, which is what makes a 121st scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 26 vary the CONTENT of a panel already rendered at all 18 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
+  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 29 vary the CONTENT of a panel already rendered at all 18 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 12 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all), and cch-w12-followup-login-fixture-gap's `activity-identity-change` (the corpus's ONLY successful-login fixture, a DRIVE through three states rather than a screen — smoke.mjs steps it from Activity to signed out to signed in as another team, and a transition is not a width) — over a grid already walked at all 18 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 14 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 18 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 3 routes (cruel + kind control + the classified caption), by overflow-guard's W25-deploy-rail-fail-wrap leg. `site-deploy-rail-failed-classified` (task-877bfc465162e104) is the third of those routes and the family's FOURTH instrument fixture: it renders the same `.deploy-rail-fail` box carrying the one capture in this corpus whose caption MOVES between the box and the browser (`FailureCopy.humanize/1` classifies it; the wave-26 pair passes through unchanged), and its classified sentence is a DIFFERENT length from both, which is content length again — overflow-guard's axis, not this sweep's. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) is the family's THIRD instrument fixture and the only one that is not cruel at all: it renders the rail's OTHER footer — `.deploy-rail-live`, which no scenario in this harness had ever produced — carrying the site's ordinary 55-character live URL. It is here rather than in a cell because what it exists to measure is one ANCHOR's wrap against its own container at phone widths, which is overflow-guard's axis and not a width walk over a .detail-grid the two cells already sweep at all 18 widths. It is driven at 320/360/390 x 2 themes by overflow-guard's W29-deploy-rail-live-url-wrap leg.",
   "hash:#settings": "The settings screens are swept by EIGHT cells across billing/providers/notifications/tokens/members. These 8 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 18 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
@@ -520,8 +524,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 125 scenarios · 25 cells over 24 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 101 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 128 scenarios · 25 cells over 24 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 104 · 13 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -678,7 +682,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
 // below is now recounted, either from `scenarioReport` or from these same
 // committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
-//   * 125 / 25 / 24 / 101 / 13 — "the census five in breakpoint-sweep.mjs's
+//   * 128 / 25 / 24 / 104 / 13 — "the census five in breakpoint-sweep.mjs's
 //     prose are recounted from the derived report", which reads BOTH typed
 //     copies out of the committed bytes (this bullet and "THE CENSUS THIS
 //     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
@@ -735,7 +739,7 @@ export const RESIDUE_FAMILY_REASONS = {
 //     until cch-w47-s4 this file was carrying two of them: `hash:#billing — 3`
 //     over four entries, and a `These 9` over ten.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 26
+  // hash:#instance — 29
   "sites-on-instance": "hash:#instance",
   "panel-overview-member": "hash:#instance",
   "instance-cruel-detail": "hash:#instance",
@@ -771,6 +775,17 @@ export const SCENARIO_RESIDUE = {
   "instance-behind": "hash:#instance",
   "instance-remove-failed": "hash:#instance",
   "verify-no-credentials": "hash:#instance",
+  // cch-w38-s1-fu (task-8cf413b005cbcd40) — the MEMBER arm of the three states
+  // directly above. Same argument, and it is the argument for a residue entry
+  // rather than a cell TWICE OVER: each one paints the instance-detail layout
+  // every hash:#instance cell already walks at all 18 widths, AND the only thing
+  // it moves is the actor — the geometry of a disabled-and-explained control is
+  // already swept by the `update-refused` cell. What they carry that no cell can
+  // score is a button that must NOT be live for a member, which is
+  // member-authority-sweep.mjs's axis (and smoke.mjs's).
+  "instance-behind-member": "hash:#instance",
+  "instance-remove-failed-member": "hash:#instance",
+  "instance-failed-member": "hash:#instance",
   // hash:#overview — 12
   "loggedout": "hash:#overview",
   "empty": "hash:#overview",
@@ -1864,7 +1879,7 @@ function legA() {
 
   const rawMedia = (css.match(/@media/g) || []).length;
   out(`>> source     ${rel(CSS_PATH)} · ${rel(HTML_PATH)}\n`);
-  out(`>> @media     ${rep.preludes.length} preludes (comment-stripped; the raw grep counts ${rawMedia} — app.css:2131 names a breakpoint INSIDE a comment)\n`);
+  out(`>> @media     ${rep.preludes.length} preludes (comment-stripped; the raw grep counts ${rawMedia} — app.css names a breakpoint INSIDE a comment: grep -n 'NOT TOUCHED, DELIBERATELY' app.css)\n`);
   out(`>> axis       ${rep.breakpoints.length} breakpoints [${rep.breakpoints.join(",")}] -> ${rep.widths.length} boundary widths [${rep.widths.join(",")}]\n`);
   out(`>> screens    ${rep.views.length} registered views · ${rep.cells} scenario x route cells covering ${COVERED_VIEWS.length}\n`);
   out(`>> themes     derived [${rep.themes.derived.join(",")}] vs declared [${rep.themes.declared.join(",")}] — COVERAGE, NOT YIELD: ` +

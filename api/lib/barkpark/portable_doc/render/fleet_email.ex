@@ -602,10 +602,13 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
   defp tone_light(tone), do: StatusVocab.tones() |> Map.fetch!(tone) |> Map.fetch!("light")
 
-  # White-ladder column order, with the two thought states as dim columns at the
-  # ladder BOTTOM (charter D12 — thought states ARE visible board columns). Empty
-  # columns are dropped, so a board with no considering/researching rows is byte-stable.
-  defp board_roles, do: ~w(open ready progress blocked done considering researching)
+  # White-ladder column order — DERIVED from design/status-manifest.json roles[]
+  # via `StatusVocab.board_roles/0`, never retyped here: every manifest rung is a
+  # column, terminal `cancel` LAST. This surface is the FIFTH board the ruling in
+  # task-881952f8d8417f4b reaches (the row named four); it dropped cancelled rows
+  # exactly as the article board did. Empty columns are dropped, so a board with
+  # no cancelled/considering/researching rows is byte-stable.
+  defp board_roles, do: StatusVocab.board_roles()
 
   # ── meta cells ───────────────────────────────────────────────────────────────
 

@@ -275,10 +275,14 @@ func TestSitesLogsByteClaimDetectorIsNotBlind(t *testing.T) {
 	}
 }
 
-// TestSitesLogsNeverClaimsTheRecordedBytesAreAvailable is THE NEGATIVE ARM.
-// Neither `bp sites -h` nor the rendered 200 may imply the recorded bytes are
-// available — and the disclaimer that says so must be present, so it cannot be
-// deleted silently.
+// TestSitesLogsNeverClaimsTheRecordedBytesAreAvailable is THE NEGATIVE ARM, and
+// #17752 moved what it guards. The bytes ARE served now — but only the SCRUBBED
+// ones, off a second route, and only through `runSiteBuildLogBytes`. What may
+// still never happen is the RECORD render implying it holds the bytes: this
+// fixture scripts the record route alone, so anything the 200 says about bytes
+// here is said without having read any. The help's promise moved with the code —
+// it no longer claims the bytes can never be served, it claims UNSCRUBBED ones
+// are refused by name, which is the guarantee the command now actually makes.
 func TestSitesLogsNeverClaimsTheRecordedBytesAreAvailable(t *testing.T) {
 	withTempConfigHome(t)
 	helpOut, _, helpCode := runCloudCapture(t, false, func(out *writer) int {
@@ -294,8 +298,11 @@ func TestSitesLogsNeverClaimsTheRecordedBytesAreAvailable(t *testing.T) {
 	if bad := claimsRecordedBytes(helpOut); len(bad) != 0 {
 		t.Fatalf("--help claims the recorded log bytes are available:\n%s", strings.Join(bad, "\n"))
 	}
-	if !strings.Contains(helpOut, "DOES NOT PRINT THE BUILD LOG BYTES") {
-		t.Fatalf("--help must say plainly that the bytes are not served:\n%s", helpOut)
+	if !strings.Contains(helpOut, "IT WILL NOT HAND YOU UNSCRUBBED BYTES") {
+		t.Fatalf("--help must say plainly that unscrubbed bytes are refused:\n%s", helpOut)
+	}
+	if !strings.Contains(helpOut, `not the same fact as "there is no log"`) {
+		t.Fatalf("--help must say a refusal is not an absence:\n%s", helpOut)
 	}
 
 	// The richest 200 the route can answer with: log_state available, a path, a

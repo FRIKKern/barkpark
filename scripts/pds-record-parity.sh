@@ -222,6 +222,8 @@
 #   bash scripts/pds-record-parity.sh --limit 400 --grace-hours 6
 #   bash scripts/pds-record-parity.sh --commits-file <file>  # axis A corpus, verbatim
 #   bash scripts/pds-record-parity.sh --fixture-dir <dir>   # hermetic, selftest
+#   bash scripts/pds-record-parity.sh --allocate-d <n> --for <label>  # MINT D numbers
+#   bash scripts/pds-record-parity.sh --check-alloc          # every mint was reserved
 
 set -uo pipefail
 
@@ -263,6 +265,12 @@ BASELINED_CHARTER_BASENAME="bp-pds-charter.md"
 COMMITS_FILE=""          # axis A corpus override (fixtures); default = git log
 FIXTURE_DIR=""           # hermetic transport for BOTH gh and the ledger
 HEADING_LENS=0           # lens artifact demonstrator; never the gate
+ALLOCATE_D=""            # --allocate-d <n>: mint n PDS-D numbers through the arbiter
+ALLOC_FOR=""             # --for <label>: who is minting (e.g. "w50 DECIDE")
+CHECK_ALLOC=0            # --check-alloc: every number minted since the seed was reserved
+# THE RESERVATION LEDGER. The arbiter's whole substance: a durable record that
+# a number has been SPOKEN FOR, written BEFORE the charter is. See allocate_d.
+ALLOC_LEDGER="${PDS_D_ALLOC_LEDGER:-tooling/pds/d-number-reservations.tsv}"
 REPO="${PDS_RECORD_PARITY_REPO:-FRIKKern/barkpark}"
 LEDGER_BASE="${LEDGER_BASE:-https://guerrilla.barkpark.cloud}"
 DATASET="${LEDGER_DATASET:-production}"
@@ -285,6 +293,10 @@ while [ $# -gt 0 ]; do
     --commits-file)  COMMITS_FILE="${2:-}"; shift 2 ;;
     --fixture-dir)   FIXTURE_DIR="${2:-}"; shift 2 ;;
     --heading-lens)  HEADING_LENS=1; shift ;;
+    --allocate-d)    ALLOCATE_D="${2:-}"; shift 2 ;;
+    --for)           ALLOC_FOR="${2:-}"; shift 2 ;;
+    --alloc-ledger)  ALLOC_LEDGER="${2:-}"; shift 2 ;;
+    --check-alloc)   CHECK_ALLOC=1; shift ;;
     -h|--help)       usage ;;
     *) echo "pds-record-parity: unknown argument '$1'" >&2; usage ;;
   esac
@@ -336,8 +348,210 @@ now_epoch() {
   if [ -n "${PDS_RECORD_PARITY_NOW:-}" ]; then printf '%s' "${PDS_RECORD_PARITY_NOW}"; else date -u +%s; fi
 }
 
+# ══ THE D-NUMBER ARBITER — fix the pointer, not the symptom ══════════════════
+#
+# THE DEFECT, STATED AS A MECHANISM AND NOT AS A SYMPTOM. Eighteen numbers in
+# this charter name two unrelated findings each, and every one of the eighteen
+# has the SAME shape: one occurrence in a wave's REVIEW block, one in the NEXT
+# wave's DECIDE block. Both authors computed the next number the only way there
+# was — `max(defined in the charter) + 1` — and both computed it BEFORE either
+# block was written down. Two reads of one unchanged corpus return one answer.
+# That is not bad luck and it is not carelessness; it is a pointer with no
+# write-side. It recurs every wave that allocates in both blocks, which is why
+# the uniqueness leg's baseline grows and why a threshold would have hidden it.
+#
+# THE FIX IS A RESERVATION, NOT A RE-READ. The arbiter writes the claim down
+# BEFORE the charter carries it, and every subsequent allocation reads the
+# charter AND the reservations. The REVIEW author reserves D719; the DECIDE
+# author, minutes later and with the charter still untouched, reads a corpus
+# that now says 719 is taken and mints D720. The collision is not detected
+# afterwards — it cannot be minted.
+#
+# WHY A LEDGER FILE AND NOT A BIGGER GREP. Every lens over the charter alone
+# shares the one property that causes this: it can only see numbers that have
+# already been WRITTEN. The window between "I decided to use 719" and "719 is
+# in the charter" is exactly where the collision lives, and no reader of the
+# charter can see into it. Something outside the charter has to hold the claim.
+#
+# MUTUAL EXCLUSION IS `mkdir`, NOT A FLAG FILE. `mkdir` is atomic and fails if
+# the directory exists — one syscall, no test-then-act window. `[ -e lock ] &&
+# exit || touch lock` is the classic two-step that loses exactly the race it was
+# written for. A lock that cannot be taken is UNCHECKED (exit 2), never a silent
+# proceed: the whole point is that minting without the arbiter is what broke.
+#
+# THE SEED. Numbers at or below the seed predate the arbiter and are not
+# reserved retroactively — a retroactive reservation would be a claim about
+# history nobody measured. --check-alloc therefore scores only numbers ABOVE
+# the seed, which is the set the arbiter could actually have governed.
+
+# The DEFINITION lens — bold-lead bullet UNION own-line heading, the same union
+# axis A resolves citations against. NOT "any PDS-D anywhere": the charter's own
+# prose mentions the synthetic fixtures PDS-D777/PDS-D999, and a lens that
+# counted those would jump the pointer to 1000 on the strength of a sentence
+# about a test fixture.
+charter_defined_numbers() {
+  [ -f "$CHARTER" ] || return 1
+  {
+    grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+' "$CHARTER"
+    grep -oE '^#+[[:space:]]+PDS-D[0-9]+([[:space:]]|$)' "$CHARTER"
+  } | grep -oE 'PDS-D[0-9]+' | sed 's/^PDS-D//' | sort -n -u
+}
+
+alloc_ledger_numbers() { # every number this ledger has ever spoken for, seed excluded
+  [ -f "$ALLOC_LEDGER" ] || return 0
+  awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { sub(/^PDS-D/, "", $1); print $1 }' "$ALLOC_LEDGER" | sort -n -u
+}
+
+alloc_seed() { # the high-water mark at adoption; empty if the ledger has none
+  [ -f "$ALLOC_LEDGER" ] || return 0
+  awk -F'\t' '$1 == "SEED" { print $2; exit }' "$ALLOC_LEDGER"
+}
+
+allocate_d() { # allocate_d <count>
+  local count="$1"
+  local dir lock
+  dir="$(dirname -- "$ALLOC_LEDGER")"
+  mkdir -p "$dir" 2>/dev/null || { echo "pds-record-parity: UNCHECKED: cannot create ${dir}" >&2; return 2; }
+  lock="${dir}/.d-alloc.lock"
+
+  # ATOMIC, AND IT FAILS CLOSED. No retry loop and no stale-lock reaper: a
+  # reaper is a second race (two callers can both decide a lock is stale) and
+  # an allocation is a five-second human act, not a queue. A held lock means
+  # somebody is minting right now — come back, or remove the directory by hand
+  # after you have looked at who owns it.
+  if ! mkdir "$lock" 2>/dev/null; then
+    echo "pds-record-parity: UNCHECKED: the allocation lock ${lock} is held." >&2
+    echo "  Another allocation is in flight. This is a REFUSAL, not a failure:" >&2
+    echo "  proceeding without the lock is exactly how the eighteen pairs were minted." >&2
+    return 2
+  fi
+  # The trap already removes WORKDIR; extend it rather than replace it, because
+  # a second `trap ... EXIT` silently discards the first and leaks the scratch dir.
+  trap 'rm -rf -- "$WORKDIR"; rmdir "'"$lock"'" 2>/dev/null' EXIT
+
+  local defs high_charter high_res high seed now
+  defs="$(charter_defined_numbers)" || {
+    echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found — the arbiter will not" >&2
+    echo "  mint a number against a corpus it cannot read." >&2
+    rmdir "$lock" 2>/dev/null; return 2
+  }
+  high_charter="$(printf '%s\n' "$defs" | tail -1)"
+  [ -n "$high_charter" ] || { echo "pds-record-parity: UNCHECKED: ${CHARTER} defines no PDS-D at all" >&2; rmdir "$lock" 2>/dev/null; return 2; }
+
+  # THE ARM UNDER MUTATION. Delete the next line and the pointer is `max(charter)
+  # + 1` again — the pre-arbiter pointer that minted all eighteen pairs. The
+  # selftest does exactly that deletion and watches the collision come back.
+  high_res="$(alloc_ledger_numbers | tail -1)"   # revert-marker: arbiter-reserve-arm
+  high="$high_charter"
+  [ -n "${high_res:-}" ] && [ "$high_res" -gt "$high" ] && high="$high_res"
+
+  seed="$(alloc_seed)"
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ -z "$seed" ]; then
+    # The `[ -f ]` test is taken BEFORE the redirection, not inside it: `>>` on a
+    # group creates the file first, so a test inside the group always sees it
+    # existing and the header line is never written.
+    local had_ledger=1; [ -f "$ALLOC_LEDGER" ] || had_ledger=0
+    { [ "$had_ledger" -eq 1 ] || printf '# PDS-D RESERVATION LEDGER — a number is SPOKEN FOR here before the charter carries it.\n# number\treserved_at\tfor\n'
+      printf 'SEED\t%s\t%s\thigh-water mark at adoption; numbers at or below it predate the arbiter\n' "$high_charter" "$now"
+    } >> "$ALLOC_LEDGER" || { echo "pds-record-parity: UNCHECKED: cannot write ${ALLOC_LEDGER}" >&2; rmdir "$lock" 2>/dev/null; return 2; }
+    seed="$high_charter"
+  fi
+
+  local i=0 n
+  while [ "$i" -lt "$count" ]; do
+    n=$(( high + 1 + i ))
+    printf 'PDS-D%s\t%s\t%s\n' "$n" "$now" "${ALLOC_FOR:-(unattributed)}" >> "$ALLOC_LEDGER" || {
+      echo "pds-record-parity: UNCHECKED: cannot append to ${ALLOC_LEDGER}" >&2; rmdir "$lock" 2>/dev/null; return 2; }
+    printf 'PDS-D%s\n' "$n"
+    i=$((i + 1))
+  done
+  rmdir "$lock" 2>/dev/null
+  echo "pds-record-parity: RESERVED ${count} number(s) in ${ALLOC_LEDGER} (charter high-water ${high_charter}, ledger high-water ${high}, seed ${seed})." >&2
+  echo "  Write them into the charter now. The reservation is what stops the NEXT block" >&2
+  echo "  minting them again while this one is still unwritten." >&2
+  return 0
+}
+
+check_alloc() {
+  local seed defs res unreserved=0 dupres=0 n
+  seed="$(alloc_seed)"
+  if [ -z "$seed" ]; then
+    echo "pds-record-parity: UNCHECKED: ${ALLOC_LEDGER} carries no SEED row — nothing has been" >&2
+    echo "  minted through the arbiter yet, so there is no population to check. Run" >&2
+    echo "  --allocate-d once to adopt it." >&2
+    # `return 2` ALONE IS THE VACUOUS GREEN. The caller folds through raise() and
+    # scores WORST; a bare return here printed UNCHECKED to stderr and then exited
+    # 0 — a verb reporting success having verified nothing, inside the arm written
+    # to make that impossible. The selftest fixture below caught it.
+    raise 2; return 0
+  fi
+  defs="$(charter_defined_numbers)" || { echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found" >&2; raise 2; return 0; }
+  res="$(alloc_ledger_numbers)"
+  echo "D-NUMBER ALLOCATION — every number minted since the seed was reserved first"
+  echo "  ledger:     ${ALLOC_LEDGER}"
+  echo "  seed:       ${seed} (numbers at or below it predate the arbiter and are not scored)"
+  echo "  reserved:   $(printf '%s\n' "$res" | grep -c '[0-9]') number(s)"
+  # A ledger that reserves one number twice is the defect wearing the fix's
+  # clothes, so it is scored before anything else.
+  dupres="$(awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { c[$1]++ } END { n=0; for (k in c) if (c[k] > 1) n++; print n }' "$ALLOC_LEDGER" 2>/dev/null || echo 0)"
+  if [ "${dupres:-0}" -gt 0 ]; then
+    echo "  DIVERGENT: ${dupres} number(s) reserved MORE THAN ONCE — the arbiter minted a collision."
+    raise 1
+  fi
+  for n in $defs; do
+    [ "$n" -le "$seed" ] && continue
+    if ! printf '%s\n' "$res" | grep -qx "$n"; then
+      echo "    UNRESERVED-MINT      PDS-D${n} — defined in the charter above the seed, never"
+      echo "                         reserved. Somebody minted it by reading the charter, which"
+      echo "                         is the pointer that produced all eighteen pairs."
+      unreserved=$((unreserved + 1))
+    fi
+  done
+  if [ "$unreserved" -gt 0 ]; then
+    echo "  DIVERGENT: ${unreserved} number(s) minted without a reservation."
+    raise 1
+  else
+    echo "  PARITY:     every charter number above the seed was reserved first."
+  fi
+  return 0
+}
+
+if [ -n "$ALLOCATE_D" ]; then
+  case "$ALLOCATE_D" in ''|*[!0-9]*|0) echo "pds-record-parity: --allocate-d must be a positive integer, got '${ALLOCATE_D}'" >&2; usage ;; esac
+  allocate_d "$ALLOCATE_D"; exit $?
+fi
+if [ "$CHECK_ALLOC" -eq 1 ]; then
+  check_alloc
+  case "$WORST" in
+    0) echo "pds-record-parity: PARITY — every number above the seed was reserved before it was minted." ;;
+    1) echo "pds-record-parity: DIVERGENT — see above." >&2 ;;
+    2) echo "pds-record-parity: UNCHECKED — the allocation ledger could not be scored. NOT a pass." >&2 ;;
+  esac
+  exit "$WORST"
+fi
+
 echo "pds-record-parity: the epic's law, turned on the epic's own record"
 echo "  repo=${REPO}  ledger=${LEDGER_BASE}  dataset=${DATASET}${FIXTURE_DIR:+  transport=FIXTURES(${FIXTURE_DIR})}"
+# ── THIS ARM IS A REPORTER. IT MUST NEVER CARRY A REQUIRED CHECK NAME. ────────
+# Said in the output and not only in a comment, because the comment is read by
+# whoever is already editing the file and the sentence is for whoever is reading
+# the RUN. Axis B reds on leaf rows belonging to epics that never consented to
+# this instrument — 93.4% of the wave-39 population belonged to eleven OTHER
+# epics — so a blocking version would fail other people's PRs on other people's
+# ledger hygiene. The structure agrees with the sentence today, in two places:
+# .github/workflows/shell-harnesses.yml carries a workflow-level
+# `on: pull_request: paths:` filter, so on a PR touching none of those paths the
+# `pds-harnesses` context is ABSENT — and a required context that is absent
+# reports "expected" forever (PDS-D18). .github/required-checks.json records
+# exactly that as an S4 PATHS-FILTERED exclusion for this job. So the arm
+# structurally CANNOT be required, and that is the design, not an accident.
+echo "  standing:   REPORTER, never a gate. Its red names OTHER epics' rows and must"
+echo "              never carry a required check name. shell-harnesses.yml is"
+echo "              paths-filtered, so the pds-harnesses context is ABSENT on a PR that"
+echo "              touches none of those paths — an absent required context reports"
+echo "              'expected' forever — and required-checks.json carries it as an"
+echo "              S4 PATHS-FILTERED exclusion. It structurally cannot be required."
 
 # ── is THIS walk truncated? (ruling 4) ────────────────────────────────────────
 # Sets WALK_STATE to one of:
@@ -570,13 +784,24 @@ uniqueness_leg() { # uniqueness_leg <cites-file>
   done < "$amb"
 
   if [ "$n_dup" -gt 0 ] || [ "$vanished" -gt 0 ]; then
+    # THE EXEMPLAR'S LINES ARE READ OFF THIS RUN, NOT TYPED. This sentence used
+    # to pin "D664 :2654 … :13311" in its own literal text, which is the very
+    # cite-by-line the baseline above refutes in the next breath: at the time of
+    # writing D664 sat at :2789/:13485 and the printed pair had been wrong for
+    # several waves, inside the paragraph explaining why lines must never be
+    # pinned. Re-derive it from $dups or do not print it.
+    local ex_num ex_lines
+    read -r ex_num ex_lines <<EOF
+$(awk -v g="$DUP_BASELINE_GENUINE" 'BEGIN{split(g,a," ");for(i in a)w["PDS-D" a[i]]=1} w[$1]{ n=$1; $1=""; $2=""; sub(/^  */,""); print n, $0; exit }' "$dups")
+EOF
     echo "  MECHANISM: a duplicate is not bad luck. Every genuine pair is ONE occurrence"
-    echo "             in a wave's REVIEW block and ONE in the NEXT wave's DECIDE block —"
-    echo "             D664 :2654 under \`### Wave 45 … REVIEWED\` vs :13311 under \`## WAVE 46\`"
-    echo "             … DECIDED; D553–D556 w38 REVIEW vs WAVE 39 DECIDE; D570–D573 w39"
+    echo "             in a wave's REVIEW block and ONE in the NEXT wave's DECIDE block."
+    [ -n "${ex_num:-}" ] && echo "             This run's exemplar, lines read off THIS charter: ${ex_num} ${ex_lines}."
+    echo "             D553–D556 are w38 REVIEW vs WAVE 39 DECIDE; D570–D573 are w39"
     echo "             REVIEW vs WAVE 40 DECIDE. The reviewer and the decider allocate from"
-    echo "             ONE next-number pointer with no arbiter, so it recurs EVERY wave,"
-    echo "             including this one. Fix the pointer, not the symptom."
+    echo "             ONE next-number pointer, so it recurs EVERY wave — unless the number"
+    echo "             is minted through the arbiter: \`--allocate-d N\` reserves before the"
+    echo "             charter is written, so the next caller cannot re-mint it."
   fi
 
   if [ "$unexpected" -gt 0 ] || [ "$vanished" -gt 0 ] || [ "$misclass" -gt 0 ]; then
@@ -905,6 +1130,7 @@ axis_b() {
     case "$LF_CODE" in
       404)
         echo "    NOT-FOUND  ${tid}  merged over a task id the ledger does not carry  ${prlist}"
+        printf '%s\t%s\t%s\n' "(no ledger row)" "$tid" "$prlist" >> "$leaves"
         n_notfound=$((n_notfound + 1)); n_leaf_ghost=$((n_leaf_ghost + 1)); raise 1
         continue ;;
       2??) : ;;
@@ -963,7 +1189,7 @@ axis_b() {
     fi
 
     echo "    DIVERGENT  ${tid}  lifecycle=${lifecycle}  parent=${parent}  merged over an OPEN row  ${prlist}"
-    printf '%s\n' "$tid" >> "$leaves"
+    printf '%s\t%s\t%s\n' "$parent" "$tid" "$prlist" >> "$leaves"
     n_leaf_open=$((n_leaf_open + 1)); raise 1
   done < <(cut -f1 "$ids" | sort -u)
 
@@ -981,6 +1207,53 @@ axis_b() {
   echo "       LEAF slices (REDDING):          ${n_leaf}"
   echo "         of which merged over an OPEN row:    ${n_leaf_open}"
   echo "         of which merged over a MISSING id:   ${n_leaf_ghost}"
+
+  # ── THE PER-OWNER REPORT — THE ONLY DISPOSAL SHAPE THIS RED HAS ────────────
+  # A red here is almost never PDS's. At wave 39 the population was 61 leaf
+  # reds and 93.4% of them belonged to ELEVEN OTHER EPICS; PDS owned 6.6%.
+  # A sweep that prints one flat list hands every owner somebody else's work
+  # and is ignored by all of them, which is how a standing red becomes
+  # furniture. So the arm groups by THE ROWS' OWN parent_id and prints one
+  # block per owner — the disposal shape pds-w38-ledger-hygiene-derived used
+  # to close nine rows on derived numbers.
+  #
+  # BY parent_id, NEVER BY SLUG PREFIX. At wave 39 three of the 61 carried
+  # opaque `task-…` ids that no prefix lens can group at all, and a prefix is
+  # a naming convention (a thing authors drift from) where parent_id is the
+  # ledger's own answer to "whose row is this?".
+  #
+  # AND IT IS COMPUTED, NEVER TRANSCRIBED. The wave-39 table of 61 was a
+  # SNAPSHOT of a window, and `--limit N` is a COUNT bound wearing a TIME
+  # bound's clothes (ruling 3): as the merge rate rose, 400 PRs stopped
+  # reaching wave 39 at all. A frozen table decays into a claim about a
+  # corpus nobody is looking at any more; a rule re-derives at whatever
+  # window you hand it. This is the rule.
+  if [ "$n_leaf" -gt 0 ]; then
+    echo
+    echo "  PER-OWNER REPORT — ${n_leaf} leaf red(s), grouped by the rows' own parent_id"
+    echo "    (a REPORT, never a gate: most of these belong to epics that never"
+    echo "     consented to this instrument. Hand each owner their own block.)"
+    local owner n_owners=0 owner_rows
+    while read -r owner; do
+      [ -n "$owner" ] || continue
+      n_owners=$((n_owners + 1))
+      owner_rows="$(awk -F'\t' -v o="$owner" '$1==o' "$leaves" | wc -l | tr -d ' ')"
+      echo "    OWNER ${owner}  —  ${owner_rows} leaf red(s)"
+      awk -F'\t' -v o="$owner" '$1==o { printf "      %s  %s\n", $2, $3 }' "$leaves"
+    done < <(cut -f1 "$leaves" | sort | uniq -c | sort -rn | awk '{ $1=""; sub(/^ /,""); print }')
+    # THE HEADLINE MUST EQUAL WHAT IS UNDER IT. A per-owner block that prints
+    # fewer rows than the tally counted is the shape where a reader trusts a
+    # number nothing under it descends from, so the two are reconciled out loud
+    # and a disagreement is UNCHECKED — the arm can no longer say what it saw.
+    local n_grouped
+    n_grouped="$(wc -l < "$leaves" | tr -d ' ')"
+    echo "    owners:     ${n_owners}  covering ${n_grouped} of ${n_leaf} leaf red(s)"
+    if [ "$n_grouped" -ne "$n_leaf" ]; then
+      echo "  UNCHECKED: the per-owner blocks cover ${n_grouped} rows but the tally counted ${n_leaf}." >&2
+      echo "             The report and the headline stopped descending from one measurement." >&2
+      raise 2
+    fi
+  fi
   return 0
 }
 

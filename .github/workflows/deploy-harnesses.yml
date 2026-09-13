@@ -248,6 +248,31 @@ jobs:
       # ~0.25 s.
       - name: Site spawner live-proof judges self-check
         run: bash deploy/site-spawner-live-proof.sh --self-check
+      # The SECOND runtime target's judges (task-5565bf10ac02be6d, 2026-09-12).
+      # site-spawner-node-live-proof.sh proves the Node/SSR deploy path — six
+      # stages to a live systemd slot, true per-request SSR, warm-standby
+      # rollback, fail-closed HEALTH — and its header (line 28) advertises
+      # `--self-check # offline; proves every red fires`. Nothing in CI ran it:
+      # 40 named reds sat as unexercised dead code between human live walks,
+      # exactly the hole the live-proof step above was written to close for the
+      # STATIC engine. Offline (no bp, no cloud session, no network) and ~0.11 s
+      # measured locally; the run ends in `SELF-CHECK PASSED — every named red
+      # fires` and exits non-zero the moment a judge stops firing.
+      - name: Site spawner Node live-proof judges self-check
+        run: bash deploy/site-spawner-node-live-proof.sh --self-check
+      # The auto-update capstone's judges, same bargain and same gap
+      # (task-5565bf10ac02be6d, 2026-09-12). site-spawner-autorebuild-proof.sh
+      # proves a PUBLISH re-deploys the site with NO manual `bp cloud site
+      # deploy` — including AUTOREBUILD_MANUAL_LEAKED, the judge whose whole job
+      # is to refuse the vacuous green where the harness deploys by hand and
+      # calls it automatic — plus the burst-coalescing ceiling. Its LIVE half
+      # needs a cloud session and a real box and is NOT registered here (a CI arm
+      # for it could only be a skip that prints green, the same reasoning the
+      # push-to-live note below records); its `--self-check` half is offline and
+      # ~0.11 s, drives all 26 judges with good AND bad input, and reds if any
+      # one of them stops firing.
+      - name: Site spawner auto-rebuild proof judges self-check
+        run: bash deploy/site-spawner-autorebuild-proof.sh --self-check
       # THE FRESH-BOX PUSH-TO-LIVE ACCEPTANCE RUN, offline half
       # (task jpf-bl-e2e-push-proof). site-push-live-proof.sh answers the one
       # question none of the spawner proofs can: launch a box that did not

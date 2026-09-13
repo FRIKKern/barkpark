@@ -34,7 +34,7 @@ defmodule Barkpark.PortableDoc.Bpml do
 
   Block tags: `paper section p pullquote ingress eyebrow h1 h2 h3 byline/item
   ul/li table/tr/th/td code diagram route stats/stat notes/note note steps/step
-  callout`.
+  callout figure asciicast columns/column`.
   Inline tags: `b i code u s a` (→ marks `strong em code underline strike`,
   and `<a href>` → a `link` node).
   """
@@ -90,6 +90,10 @@ defmodule Barkpark.PortableDoc.Bpml do
             "lineage-node",
             "series",
             "step",
+            # the flagship taste tier's positional child (task-2957c0caa1ffd1b0)
+            # — a `<column>` missing here silently drops from /v1/capabilities
+            # and a client generating types cannot spell a `columns` block.
+            "column",
             "item",
             "li",
             "tr",

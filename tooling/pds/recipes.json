@@ -32,8 +32,8 @@
    "claim_class": "absence",
    "claim": "internal/cli/export_cmd.go still carries no completeness signal in origin/main — the token completeness does not occur in it.",
    "terms": { "ref": "origin/main", "path": "internal/cli/export_cmd.go", "token": "completeness" },
-   "command": "git grep -c completeness origin/main -- internal/cli/export_cmd.go",
-   "binds": "This command exits 1. That is the whole point of PDS-D389: the exit code is nonzero BECAUSE the claim is an absence and the absence holds. It is ruled through grip's shipped admitsAbsenceClaim, never through `verdict == ADMITTED`, which would call this true reason false."
+   "command": "git grep completeness origin/main -- internal/cli/export_cmd.go",
+   "binds": "This command exits 1. That is the whole point of PDS-D389: the exit code is nonzero BECAUSE the claim is an absence and the absence holds. It is ruled through grip's shipped admitsAbsenceClaim, never through `verdict == ADMITTED`, which would call this true reason false. THE `-c` IS GONE ON PURPOSE (2026-09-12). It was never part of this claim — the `binds` note above rules on the EXIT CODE and never on the printed number — and variance.mjs's UNCOMPARED-COUNT screen (#17224) correctly refuses ANY ungraded counting stage, whose own refusal text names this exact substitute: `drop the count and match the token instead`. Polarity is unchanged and measured: `git grep -c completeness ...` and `git grep completeness ...` both exit 1 here, and `git grep -c export ...` exits 0 — the count was decoration on a predicate that was already an EXISTENCE/CONTENT read."
   },
   {
    "doc_id": "pds-bl-go-literal-selftest-false-red-macos",

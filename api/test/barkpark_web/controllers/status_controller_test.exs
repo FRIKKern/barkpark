@@ -29,6 +29,32 @@ defmodule BarkparkWeb.StatusControllerTest do
     assert is_integer(body["uptime_seconds"])
   end
 
+  test "GET /status.json carries the codelists component, and a detail when one is degraded",
+       %{conn: conn} do
+    body = conn |> get("/status.json") |> json_response(200)
+
+    names = Enum.map(body["components"], & &1["name"])
+    assert "codelists" in names
+
+    # The seed signal is only worth publishing if it survives JSON: a degraded
+    # component whose payload is the word "degraded" tells an operator nothing,
+    # so `detail` must ride through and NAME the list. Rendered from the same
+    # component shape `Status.health/0` builds.
+    degraded = %{
+      component: :codelists,
+      status: :degraded,
+      detail: "codelist onixedit:thema is empty or stale: registered at issue 1.6 with 0 values"
+    }
+
+    rendered = BarkparkWeb.StatusController.component_json(degraded)
+
+    assert rendered.detail =~ "codelist onixedit:thema is empty or stale"
+
+    # And an operational probe with nothing to say does NOT invent a detail key.
+    clean = %{component: :database, status: :operational, detail: nil}
+    refute Map.has_key?(BarkparkWeb.StatusController.component_json(clean), :detail)
+  end
+
   test "GET /status.json publishes the running commit sha to an ANONYMOUS caller", %{conn: conn} do
     # No bearer, no session — this is the unattended owner's uptime monitor.
     body = scoped_conn() |> get("/status.json") |> json_response(200)

@@ -92,7 +92,9 @@
 // ── TWO HONEST LIMITS (stated, not hidden) ───────────────────────────────────
 // L1 COVERAGE IS CORPUS-BOUND. The actor set is DERIVED (a scenario whose own
 //    GET /v1/me answers role === "member"), not typed — but it can only be as
-//    wide as the committed corpus, which is 10 of 111 scenarios today. The
+//    wide as the committed corpus, which is 12 of 128 scenarios today (this
+//    sentence was UNGUARDED and had rotted to "10 of 111" — nothing recounts
+//    it, so re-read it against the actor-set line the sweep PRINTS). The
 //    count is PINNED so corpus growth is NAMED rather than silently absorbed.
 // L2 ROUTE ATTRIBUTION IN THE HOOK TABLE IS TYPED, NOT DERIVED. UNACCOUNTED and
 //    DEAD ROW guard completeness in BOTH directions, but a row naming the WRONG
@@ -121,6 +123,19 @@
 //    green, which is how wave 48's crown failed. It is reported, never counted.
 // B4 text content is not modelled by the shim's flat parse, so a control is
 //    identified by tag/id/class/data-attrs and never by its label.
+// B5 [data-vf-reprovision] — the FOURTH offer site of the three verbs cch-w38-s1
+//    fenced, and the one this sweep CANNOT cover. verifyNoteHtml's no_admin_token
+//    arm is reached only from runVerifyNow, i.e. only after a CLICK on
+//    [data-vf-run] issues POST /verify and collects a 404. This sweep BOOTS
+//    scenarios; it never drives them. MEASURED over all 128 committed scenarios
+//    (boot + a scan of every registry entry's innerHTML): `data-vf-reprovision`
+//    renders in ZERO of them — `verify-no-credentials`, the fixture that exists
+//    for it, included. So no member fixture can make it reachable HERE, and the
+//    three WATCHED rows below deliberately stop at three. It is NOT uncovered in
+//    the tree: smoke.mjs's `verify-no-credentials` expectation clicks through to
+//    it and asserts the live control plus its handler, and __app.test.mjs's
+//    cch-w38-s1 offer table pins its member arm. Declaring the boundary is the
+//    honest option; silently counting three of four as "the sites" is not.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -129,7 +144,7 @@ import { fileURLToPath } from "node:url";
 import { bootScenario, makeDom, flush } from "./smoke.mjs";
 import { SCENARIOS, SCENARIO_NAMES, route } from "./scenarios.mjs";
 import { parseStaticControlIds } from "./breakpoint-sweep.mjs";
-import { F_CLIENT, F_UNKNOWN, ELEVATED, fenceForRoute, overlayGapReport } from "../__route_fence.mjs";
+import { F_CLIENT, F_UNKNOWN, ELEVATED, fenceForRoute, overlayGapReport, pinHatchReport } from "../__route_fence.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = path.join(HERE, "..", "index.html");
@@ -263,11 +278,31 @@ const HOOKS = [
   { key: "button.btn.btn-primary.btn-sm[data-vf-run]", route: "POST /v1/barkparks/:*/verify", what: "run verification now", source: "census PIN: runVerifyNow — team-scoped member action" },
   { key: "button.btn.btn-ghost.btn-sm.token-revoke[data-id][data-name]", route: "DELETE /v1/tokens/:*", what: "revoke your own token", source: "census PIN: confirmRevokeToken — self-scope" },
   { key: "button.btn.btn-ghost.btn-sm[data-life-retry]", route: null, what: "retry the lifecycle read that failed", source: "markup: re-issues the same GET the view already made" },
+  // cch-w38-s1-fu: the provision timeline's console disclosure, which entered
+  // this sweep's view with `instance-failed-member` — the first member fixture
+  // on a FAILED box. It is client-only in the strictest sense: the toggle flips
+  // `instanceConsoleCollapsed` and re-renders bytes the boot already fetched,
+  // issuing no request at all. It is NOT an aria-controls disclosure (it toggles
+  // its own sibling by re-render, not by pointing at a container), which is why
+  // it needs its own row rather than riding #inst-cli-toggle's.
+  { key: "button.bp-console-toggle[data-tl-console-toggle]", route: null, what: "expand/collapse the provisioning console tail", source: "markup: local disclosure — flips instanceConsoleCollapsed and re-renders, no api() call on the path" },
   // The two DISABLED shapes. They still need rows — accounting is not
   // conditional on being enabled — and their fence is recorded as elevated so
   // that the day one of them renders ENABLED to a member, it is a FINDING and
   // not a silent new key.
-  { key: "button.btn.btn-ghost.btn-sm", route: "POST /v1/instances/:*/lifecycle", what: "instance lifecycle verb, drawn disabled-and-explained for a member (D428)", source: "census: the lifecycle band is team_admin; a member gets the disabled ghost with the grant sentence" },
+  // ROUTE RE-POINTED (this row and the one below). Both used to type
+  // `POST /v1/instances/:*/lifecycle`, which is a BAND LABEL and not a router
+  // route: the census PIN has never carried a row on it, so the "census:" prose
+  // each row cited could not have been checked by anyone, and the shared table
+  // had to record the pair as pin:null. This key is adminWriteControlHtml's
+  // disabled arm, whose grant arm mounts the instance-admin band's writes; of
+  // those, DELETE /v1/barkparks/:* is the one the shared table carries and the
+  // PIN pins twice (runDecommission, removeInstance — the header's Retry
+  // removal is drawn by THIS arm). Every write in the band is
+  // require_current_team_admin, so the fence ANSWER is unchanged
+  // (elevated:team_admin, before and after) — what changed is that the answer
+  // is now derived from a route the census re-reads.
+  { key: "button.btn.btn-ghost.btn-sm", route: "DELETE /v1/barkparks/:*", what: "instance-admin write, drawn disabled-and-explained for a member (D428) — adminWriteControlHtml's hookless disabled arm", source: "census PIN: removeInstance / runDecommission, both require_current_team_admin; re-read by the shared table's PIN cross-arm" },
   // cch-w46-bl RE-KEYED THIS ROW, and the re-key IS the fix landing. `button.btn.btn-sm`
   // was the GENERIC COLLIDING KEY this row's filing names as the harm: the CLI rail's
   // refused arm emitted a bare `<button class="btn btn-sm" type="button" disabled>` with
@@ -287,7 +322,19 @@ const HOOKS = [
   // The row ABOVE keeps its class-only key on purpose: `button.btn.btn-ghost.btn-sm` is
   // adminWriteControlHtml's disabled arm, which is still hookless and belongs to a later
   // PR. The two rows differing is the honest state of the tree today, not an oversight.
-  { key: "button.btn.btn-sm[data-life-verb]", route: "POST /v1/instances/:*/lifecycle", what: "the CLI rail's lifecycle verb, drawn disabled for a member — one identity whether offered or refused (cch-w46-bl)", source: "same band as the row above" },
+  //
+  // ROUTE RE-POINTED for the same reason as the row above, and read off the
+  // rail's own model: lifecycleActionsModel gives every verb but decommission a
+  // CLI chip (capability true) or a server-gap disabled control (capability
+  // false), neither of which calls anything; decommissionAction is the ONE verb
+  // the authority answer decides, and its live arm's click runs
+  // confirmDecommission -> runDecommission, which issues DELETE
+  // /v1/barkparks/:<id>. So the write this row watches for is that route, not a
+  // lifecycle endpoint the console never calls. The row is KEPT rather than
+  // deleted: the affordance is not a routeless CLI chip, it is the refused arm
+  // of a real console write, and the day it renders ENABLED to a member it must
+  // still be a finding.
+  { key: "button.btn.btn-sm[data-life-verb]", route: "DELETE /v1/barkparks/:*", what: "the CLI rail's lifecycle verb, drawn disabled for a member — one identity whether offered or refused (cch-w46-bl); decommission is the one verb on this arm with a route", source: "census PIN: runDecommission — api(\"DELETE\", \"/v1/barkparks/\" + id), require_current_team_admin" },
 ];
 // THE DERIVATION, applied once to every row that names a route (cch-w50-bl).
 // A client-only row (route null) is `client`; a routed row gets the shared
@@ -315,8 +362,63 @@ const WATCHED = [
     minted: "cch-w48-s3 — githubCardHtml omits #github-disconnect unless providerCanWrite()",
     why_not: "D535: zero /v1/github handlers in the corpus, so EVERY actor paints the \"Not configured\" arm and the control is absent for owner and member alike. Asserting absence here would pass on a DOM that never rendered it",
   },
+  // ── cch-w38-s1-fu (task-8cf413b005cbcd40): THE THREE VERBS #12996 FENCED ───
+  // These are the reason this row exists. Each `scenario` is a MEMBER fixture
+  // committed in the same commit, and each `twin` is the OWNER fixture that has
+  // stood beside it since cch-w45-bl — so `assert: true` is earned: the
+  // privileged arm demonstrably paints the control, which makes the member's
+  // ZERO a losable measurement rather than a statement about markup nobody
+  // renders (BLIND SPOT B3's whole argument).
+  //
+  // WHY A WATCHED ROW AND NOT A HOOKS ROW. adminWriteControlHtml's refusal arm
+  // DROPS `liveAttrs` entirely, so on the fenced tree there is no `#inst-update`
+  // and no `[data-tl-retry]` in the bytes at all — a HOOKS row keyed on the live
+  // shape would be a DEAD ROW every single run. The WATCHED arm is the one that
+  // asserts an ABSENCE against a positive control, which is exactly the shape of
+  // this claim. It is also the arm that names the ROUTE in its failure text, so
+  // a revert reds saying which verb came back.
+  //
+  // `sel` (added with these rows) is the mount-scoped selector. The first two
+  // controls carry an id; the timeline's Retry carries only `data-tl-retry`, a
+  // bare data attribute — one of the shim's four legal element-level selector
+  // shapes, so `[data-tl-retry]` answers over the mount's parsed kids the same
+  // way `#id` does. Defaulting `sel` to `"#" + id` keeps #site-github and
+  // #github-disconnect byte-identical to what they asserted before.
+  //
+  // THE FENCE STRING IS `unknown` FOR TWO OF THE THREE, AND THAT IS RECORDED,
+  // NOT HIDDEN: __route_fence.mjs (cloud/priv/static/, outside this slice's
+  // fence) carries `DELETE /v1/barkparks/:*` but NOT
+  // `POST /v1/barkparks/:*/self-update` or `POST /v1/barkparks/:*/retry`, even
+  // though __binding_census.mjs reads both as Auth.require_team_admin. The
+  // WATCHED arm does not gate on the fence string — its verdict is the
+  // member-zero/twin-nonzero comparison — so an unknown here weakens the
+  // failure MESSAGE and nothing else. Adding the two routes to the shared table
+  // is filed as its own row; see `fenceNote` below, which is printed verbatim.
+  {
+    id: "inst-update", sel: "#inst-update", mount: "instance-body",
+    scenario: "instance-behind-member", twin: "instance-behind",
+    route: "POST /v1/barkparks/:*/self-update", assert: true,
+    minted: "cch-w38-s1 (#12996) — instanceOverviewHtml routes the behind-box Update CTA through adminWriteControlHtml(authority, …, \"primary\"), whose refusal arm drops the id",
+    fenceNote: "__route_fence.mjs carries no row for this route; __binding_census.mjs reads updateInstance as Auth.require_team_admin",
+  },
+  {
+    id: "inst-remove-retry", sel: "#inst-remove-retry", mount: "instance-body",
+    scenario: "instance-remove-failed-member", twin: "instance-remove-failed",
+    route: "DELETE /v1/barkparks/:*", assert: true,
+    minted: "cch-w38-s1 (#12996) — the removeFailed fold's Retry removal goes through adminWriteControlHtml, whose refusal arm drops the id",
+  },
+  {
+    id: "tl-retry", sel: "[data-tl-retry]", mount: "instance-body",
+    scenario: "instance-failed-member", twin: "failed",
+    route: "POST /v1/barkparks/:*/retry", assert: true,
+    minted: "cch-w38-s1 (#12996) — instanceTimelineHtml takes an `authority` argument and draws Retry setup through adminWriteControlHtml(…, \"dock\"), whose refusal arm drops both the data attribute and the .bp-tl-retry dock",
+    fenceNote: "__route_fence.mjs carries no row for this route; __binding_census.mjs reads retryInstance/newRenderFailed as Auth.require_team_admin",
+  },
 ];
-for (const w of WATCHED) w.fence = fenceForRoute(w.route);
+for (const w of WATCHED) {
+  if (!w.sel) w.sel = "#" + w.id;
+  w.fence = fenceForRoute(w.route);
+}
 
 // ── the static shell's launch pair (H5) ──────────────────────────────────────
 // Their fence is a `.hidden` PROPERTY app.js sets, which NO byte reflects — the
@@ -370,7 +472,7 @@ const KNOWN = [
 // ── PINS ─────────────────────────────────────────────────────────────────────
 // Derived-but-pinned, so corpus growth is NAMED rather than silently absorbed
 // (LIMIT L1). Update them in the same commit that grows the corpus.
-const PIN_MEMBER_SCENARIOS = 9;
+const PIN_MEMBER_SCENARIOS = 12;
 // 114 -> 115: cch-w37-bl-operator-retry-click-undriven added `operator-me-recovers`
 // (the one-shot /v1/me fault whose retry smoke.mjs clicks). RE-DERIVED by running
 // this sweep, not by adding one: its actor is an OPERATOR, so the member slice
@@ -461,9 +563,30 @@ const PIN_MEMBER_SCENARIOS = 9;
 // enter the member set by construction. 125 was RE-DERIVED by RUNNING this
 // sweep and reading what it PRINTED ("the committed corpus grew to 125
 // scenario(s), pinned at 124"), never by adding one.
-const PIN_TOTAL_SCENARIOS = 125;
+// 125 -> 128, and the member slice 9 -> 12 (cch-w38-s1-fu, task-8cf413b005cbcd40):
+// `instance-behind-member`, `instance-remove-failed-member` and
+// `instance-failed-member` — the MEMBER arm of the three instance states
+// cch-w45-bl committed as OWNERS. This is the SECOND time the member slice
+// itself moves (the first was cch-w53-bl's deletion), and it is the case the
+// note above permits: all three fixtures answer role="member" on their own
+// GET /v1/me, so the actor-set line moves by exactly the same three.
+// WHY THEY HAD TO EXIST. The comment on those owner fixtures says the member
+// arm "is already pinned in __app.test.mjs's cch-w38-s1 eleven-offer table" —
+// a unit-level pin over a hand-built markup string. THIS instrument, the only
+// one that reads what a member is offered from RENDERED BYTES, could reach
+// none of the three: measured over the 125-scenario corpus at 661e87d9f3,
+// `id="inst-update"`, `id="inst-remove-retry"` and `data-tl-retry` each had
+// exactly ONE producer and its actor was an owner. So the sweep exited 0 with
+// 0 findings over the fenced tree AND over a tree with #12996's three app.js
+// hunks reverted — for that defect, an unlosable green. With these three
+// committed the reverted tree reds by name (section 6's WATCHED arm).
+// Both numbers were RE-DERIVED by RUNNING this sweep and reading what it
+// PRINTED ("the member-actor corpus is 12, pinned at 9" and "the committed
+// corpus grew to 128 scenario(s), pinned at 125"), never by adding three.
+const PIN_TOTAL_SCENARIOS = 128;
 // FLOOR, not an equality: an added control must not force a table churn, but a
-// corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
+// corpus that suddenly enumerates almost nothing is vacuous and reds. 134
+// today (also unguarded prose; it read 66 while the sweep printed 69).
 const FLOOR_CONTROLS = 60;
 const FLOOR_MOUNTS = 20;
 
@@ -825,6 +948,17 @@ async function main() {
     (fenceGap.lines.length ? ":\n" + fenceGap.lines.map((l) => "                    " + l).join("\n") : "") + "\n");
   for (const b of fenceGap.bad) broken.push("SHARED FENCE TABLE: " + b);
 
+  // 3b — THE PIN HATCH. Every routed hook row above resolves through the shared
+  // table, so a table row that names no census PIN key is a hook fence nothing
+  // re-reads. The hatch is legal for READS alone (the PIN is a write call-site
+  // census), and this arm is the predicate that says so — it is what replaced
+  // the two lifecycle rows' band label with a route the census pins.
+  const hatch = pinHatchReport();
+  out("  " + (hatch.ok ? "ok  " : "FAIL") + " pin-hatch       — " + hatch.reads.length +
+    " PIN-less route(s) in the shared table, all reads" +
+    (hatch.reads.length ? " (" + hatch.reads.map((r) => r.key).join(", ") + ")" : "") + "\n");
+  for (const b of hatch.bad) broken.push("SHARED FENCE TABLE: " + b);
+
   // 4 — the floor. The only remaining defence against a corpus that renders
   // nothing and passes.
   const floorOk = totalControls >= FLOOR_CONTROLS && totalMounts >= FLOOR_MOUNTS;
@@ -865,29 +999,32 @@ async function main() {
     // NEVER getElementById / $(): both AUTO-CREATE the element, which makes
     // absence and offered-ness indistinguishable. This reads the mount's own
     // parsed kids, which can answer [].
-    const hereN = mountEl ? mountEl.querySelectorAll("#" + w.id).length : -1;
+    const hereN = mountEl ? mountEl.querySelectorAll(w.sel).length : -1;
     if (!w.assert) {
-      out("  note #" + w.id + " watched but NOT asserted (" + w.route + "): " + w.why_not +
+      out("  note " + w.sel + " watched but NOT asserted (" + w.route + "): " + w.why_not +
         ". Member arm renders " + hereN + "; reported, never counted.\n");
       continue;
     }
     const twinSurvey = await surveyScenario(w.twin);
     const twinMount = twinSurvey.registry.has(w.mount) ? twinSurvey.registry.get(w.mount) : null;
-    const twinN = twinMount ? twinMount.querySelectorAll("#" + w.id).length : -1;
+    const twinN = twinMount ? twinMount.querySelectorAll(w.sel).length : -1;
     const ok = hereN === 0 && twinN >= 1;
-    out("  " + (ok ? "ok  " : "FAIL") + " #" + w.id.padEnd(15) + " — " + w.route + " · scoped through registry.get(\"" +
-      w.mount + "\").querySelectorAll(\"#" + w.id + "\"): member " + w.scenario + " → " + hereN + ", privileged " +
+    out("  " + (ok ? "ok  " : "FAIL") + " " + w.sel.padEnd(16) + " — " + w.route + " [" + w.fence + "]" +
+      (w.fenceNote ? " (" + w.fenceNote + ")" : "") + " · scoped through registry.get(\"" +
+      w.mount + "\").querySelectorAll(\"" + w.sel + "\"): member " + w.scenario + " → " + hereN + ", privileged " +
       w.twin + " → " + twinN + "\n");
     if (twinMount === null) {
-      broken.push("#" + w.id + ": the mount #" + w.mount + " is not in the privileged twin's registry either — there " +
+      broken.push(w.sel + ": the mount #" + w.mount + " is not in the privileged twin's registry either — there " +
         "is no positive control, so \"absent for a member\" is unlosable here.");
     } else if (twinN < 1) {
-      broken.push("#" + w.id + ": the PRIVILEGED actor " + w.twin + " does not render it either, so the member's " +
+      broken.push(w.sel + ": the PRIVILEGED actor " + w.twin + " does not render it either, so the member's " +
         "absence proves nothing. The fence (" + w.minted + ") may have been reverted into an omit-for-everyone.");
     } else if (hereN !== 0) {
-      broken.push("#" + w.id + " IS OFFERED TO A MEMBER on " + w.scenario + " (" + w.route + ", " + w.fence + "). " +
-        "The fence that withheld it — " + w.minted + " — is gone: the privileged arm renders " + twinN + " and the " +
-        "member arm now renders " + hereN + ". The server refuses this write; the console must not offer it.");
+      broken.push(w.sel + " IS OFFERED TO A MEMBER on " + w.scenario + " — the write behind it is " + w.route +
+        " (" + w.fence + (w.fenceNote ? "; " + w.fenceNote : "") + "). " +
+        "The fence that withheld it — " + w.minted + " — is gone: the privileged arm " + w.twin + " renders " +
+        twinN + " and the member arm now renders " + hereN + ". The server refuses this write; the console must " +
+        "not offer it.");
     }
   }
 

@@ -25,7 +25,7 @@ defmodule Barkpark.Content.MutationsAdjudicationVocabularyLockTest do
   Sibling: `Barkpark.Tasks.SchemaAdjudicationTripleTest` locks the same
   vocabulary for the task SCHEMA (#17843).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Repo, TenancyFixtures}
   alias Barkpark.Content.Document

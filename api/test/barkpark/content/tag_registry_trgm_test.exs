@@ -37,7 +37,7 @@ defmodule Barkpark.Content.TagRegistryTrgmTest do
   value is making the index REACHABLE (correctness/preparedness). The behavioral
   tests in `tag_registry_test.exs` stay green under the same rewrite.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query, only: [from: 2]
 

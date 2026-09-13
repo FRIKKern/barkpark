@@ -3,6 +3,8 @@ package pdrender
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -19,8 +21,14 @@ import (
 // the prose renderers this goes through chroma DIRECTLY (not glamour) for full
 // control over the chrome.
 //
-// The portable-doc `code` block has NO `lang` field, so we let chroma's
-// lexers.Analyse(source) guess the language; on a miss we fall back to the
+// The portable-doc `code` block MAY carry a `lang` field — the one spelling the
+// BPML/authoring model uses everywhere (from_markdown code fences, the Studio
+// code-block editor's `Map.get(@block, "lang", "")`, and the canvas code node).
+// It is NOT `language`: that key belongs to `code-tabs` tab entries, a different
+// block type, and a standalone `code` block never carries it (the BPML kernel's
+// @block_attrs["code"] is just `id`, so a round-trip cannot introduce it). When
+// `lang` is present it names the chroma lexer directly; absent, we let
+// lexers.Analyse(source) guess the language, and on a miss we fall back to the
 // plaintext lexer (lexers.Get("text")). The chroma style name is theme-driven
 // (Theme.ChromaStyle: "github" light / "monokai"|"dracula" dark). The FORMATTER
 // is chosen by ctx.Profile so the emitted SGR escapes match the terminal's
@@ -77,7 +85,8 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 	// file. Both engines read the same four keys in the same order; the shared
 	// fixture ../../api/test/support/fixtures/code-source-aliases.json is the lock.
 	source := codeSource(b.Attrs)
-	lang := attrStrFirst(b.Attrs, "language", "lang") // usually absent; tolerated.
+	lang := attrStrFirst(b.Attrs, "lang") // the one authored spelling (never `language`); usually absent, tolerated.
+	emphasis := codeEmphasis(b.Attrs)     // line-emphasis ranges; see codeEmphasis at the bottom of this file.
 
 	// A blank or whitespace-only source renders NOTHING — no lines, no accent
 	// bar. This mirrors the Elixir composer since #14806 (a sourceless code
@@ -94,7 +103,10 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 
 	key := codeKey{
-		hash:    hashStrings(source, lang),
+		// The emphasis ranges are part of the CONTENT axis: two blocks with the
+		// same source and lang but different emphasis render differently, so a
+		// key that ignored them would serve one block's gutter for the other's.
+		hash:    hashStrings(append([]string{source, lang}, emphasisKeyParts(emphasis)...)...),
 		width:   ctx.Width,
 		themeID: ctx.Theme.themeID, // theme identity (ts-w4c)
 		mode:    ctx.Theme.name,    // Theme.name holds the light/dark mode
@@ -110,7 +122,7 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 	cr.misses++
 	cr.mu.Unlock()
 
-	lines := cr.render(source, lang, ctx)
+	lines := cr.render(source, lang, emphasis, ctx)
 
 	cr.mu.Lock()
 	if len(cr.cache) >= maxCodeCacheEntries {
@@ -122,7 +134,7 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 }
 
 // render is the un-memoized body: lex → highlight → chrome.
-func (cr *codeRenderer) render(source, lang string, ctx RenderCtx) []string {
+func (cr *codeRenderer) render(source, lang string, emphasis []emphasisRange, ctx RenderCtx) []string {
 	const chrome = 2 // "▌ " bar (2)
 	inner := ctx.Width - chrome
 	if inner < MinWidth {
@@ -141,7 +153,21 @@ func (cr *codeRenderer) render(source, lang string, ctx RenderCtx) []string {
 		header := ctx.Theme.Dim.Render(strings.ToUpper(name))
 		out = append(out, bar+" "+header)
 	}
-	for _, line := range highlighted {
+	for i, line := range highlighted {
+		// LINE EMPHASIS (pe-bl-code-emphasis). The gutter stays exactly 2 cells
+		// wide — the bar glyph plus a separator — so an emphasized block wraps
+		// identically to a plain one; only the two gutter cells change. The
+		// separator carries a tone SIGIL and the bar is restyled through
+		// Theme.Callout, which means the emphasis is legible BOTH in colour and
+		// in the NoColor profile (where lipgloss emits no escapes and the sigil
+		// is all that is left). The code text itself is untouched: chroma has
+		// already coloured it, and layering a lipgloss foreground over its SGR
+		// runs would fight the highlighter rather than annotate it.
+		if tone, ok := emphasisToneAt(emphasis, i+1); ok {
+			toneBar, _ := ctx.Theme.Callout(emphasisCalloutTone[tone])
+			out = append(out, toneBar.Render("▌")+emphasisSigil[tone]+line)
+			continue
+		}
 		out = append(out, bar+" "+line)
 	}
 	return out
@@ -347,4 +373,121 @@ func codeSourceText(m map[string]any, key string) string {
 		return sb.String()
 	}
 	return stringishAttr(m, key)
+}
+
+// ── THE code-block LINE-EMPHASIS contract (pe-bl-code-emphasis) ──────────────
+//
+// A `code` block MAY carry `emphasis`: a JSON ARRAY of {from, to, tone} range
+// objects over the SELECTED source (codeSource above), 1-BASED and INCLUSIVE,
+// with `to` optional and defaulting to `from`. The tone vocabulary is CLOSED —
+// comment / offending / fixed — and a range whose tone is outside it, whose
+// `from` is not a whole number >= 1, or whose `to` is below `from`, is DROPPED.
+// Overlaps resolve FIRST-IN-ARRAY-ORDER.
+//
+// This mirrors compose.ex `code_emphasis/1` clause for clause. The shared
+// fixture ../../api/test/support/fixtures/code-block-emphasis-parity.json is the
+// one file the Go, Elixir and JS legs all assert against — one file, not a
+// mirror trio: a mirror can drift, a shared file cannot.
+//
+// NOTE ON STRICTNESS: line numbers are read with emphasisLine, NOT attrInt.
+// attrInt deliberately coerces a numeric STRING ("3" → 3) because attribute
+// values arrive stringly-typed all over the corpus; emphasis does not get that
+// tolerance, because Elixir's `is_integer(from)` guard does not, and a leg that
+// accepted "3" where the composer dropped it would put the wash on a different
+// line in the TUI than on the web. The fixture carries a `"from": "3"` case for
+// exactly this reason.
+type emphasisRange struct {
+	from, to int
+	tone     string
+}
+
+// emphasisSigil is the separator cell (the second of the gutter's two) per tone.
+// The diff vocabulary is deliberate: a reader who has ever read a patch knows
+// what '-' and '+' mean without a legend, and '~' reads as an aside.
+var emphasisSigil = map[string]string{
+	"comment":   "~",
+	"offending": "-",
+	"fixed":     "+",
+}
+
+// emphasisCalloutTone maps the code-emphasis vocabulary onto the callout tone
+// palette the theme already resolves — the same pairing paper-surface.css makes
+// on the web side (comment→neutral, offending→danger, fixed→success), so the
+// TUI and the reader agree about which tone is a verdict and which is an aside.
+var emphasisCalloutTone = map[string]string{
+	"comment":   "neutral",
+	"offending": "danger",
+	"fixed":     "success",
+}
+
+func codeEmphasis(m map[string]any) []emphasisRange {
+	raw := attrSlice(m, "emphasis")
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]emphasisRange, 0, len(raw))
+	for _, entry := range raw {
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		tone := strings.TrimSpace(attrStr(obj, "tone"))
+		if _, known := emphasisSigil[tone]; !known {
+			continue
+		}
+		from, ok := emphasisLine(obj["from"])
+		if !ok || from < 1 {
+			continue
+		}
+		to := from
+		if v, present := obj["to"]; present && v != nil {
+			to, ok = emphasisLine(v)
+			if !ok {
+				continue
+			}
+		}
+		if to < from {
+			continue
+		}
+		out = append(out, emphasisRange{from: from, to: to, tone: tone})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// emphasisLine reads ONE line number: a whole JSON number only. A string, a
+// bool, a fraction or a missing key all fail — see the strictness note above.
+func emphasisLine(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		if n == math.Trunc(n) && n >= math.MinInt64 && n < math.MaxInt64 {
+			return int(n), true
+		}
+	}
+	return 0, false
+}
+
+// emphasisToneAt returns the tone for a 1-based line, first range wins.
+func emphasisToneAt(ranges []emphasisRange, line int) (string, bool) {
+	for _, r := range ranges {
+		if line >= r.from && line <= r.to {
+			return r.tone, true
+		}
+	}
+	return "", false
+}
+
+// emphasisKeyParts flattens the ranges into the memo key's content axis.
+func emphasisKeyParts(ranges []emphasisRange) []string {
+	parts := make([]string, 0, len(ranges))
+	for _, r := range ranges {
+		parts = append(parts, r.tone+":"+strconv.Itoa(r.from)+"-"+strconv.Itoa(r.to))
+	}
+	return parts
 }

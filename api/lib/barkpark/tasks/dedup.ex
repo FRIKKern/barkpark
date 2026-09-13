@@ -18,6 +18,13 @@ defmodule Barkpark.Tasks.Dedup do
       content, so a `bp task get` / query shows exactly which matches were waved
       through and by whose decision.
 
+    * **`content.distinct_from_reason`** — a map of `id => why`, required once
+      the override is being used against MORE THAN ONE existing row carrying the
+      same normalized title as the new task. See `override_toll/5`: the
+      four-copies-in-127-seconds incident was four correct refusals dismissed by
+      a field value, so past the first same-title row the assertion has to be
+      explained, per id, in words that are not repeated.
+
   A bogus `distinct_from` id cannot bypass a real duplicate: it only removes the
   named candidate from consideration, so any OTHER refusing candidate still
   blocks. That is the D1 "must name a real candidate" property, enforced by
@@ -130,6 +137,39 @@ defmodule Barkpark.Tasks.Dedup do
   # exactly the state the truncation tripwire should be reporting.
   @candidate_limit 500
 
+  # THE FALLBACK SHAPES DO NOT GET THE KNN CAP, BECAUSE THEY DO NOT GET THE KNN
+  # ORDERING. `@candidate_limit` is 500 ONLY because `fetch_rows/6`'s probe
+  # clause hands the scorer the 500 MOST TITLE-SIMILAR rows: the cut is made by
+  # dissimilarity, so what falls off the end is what was least likely to be a
+  # duplicate. Both unfiltered clauses — the blank probe and the pg_trgm rescue —
+  # have no `<->` term at all; they are `DISTINCT ON (canonical doc_id)` in
+  # ASCENDING id order, so their cut is made by ALPHABET, exactly the blind spot
+  # the KNN change retired on the working path.
+  #
+  # Letting them inherit 500 would therefore not preserve the old fallback, it
+  # would shrink it 10x: this module's pre-#14061 unfiltered scan ran at 5,000
+  # (`git show 2403c0c28b^:api/lib/barkpark/tasks/dedup.ex`, `@candidate_limit
+  # 5000`). So the safety net keeps the number the safety net always had, and the
+  # ordering-justified cut applies only where the ordering exists.
+  #
+  # RE-MEASURED 2026-09-12 (`bp task ls --all`, guerrilla `production`, the
+  # scan's own non-cancelled predicate): 9,160 task rows, 991 cancelled, 410
+  # `drafts.` twins -> 8,169 eligible rows -> **8,159 distinct canonical ids**.
+  # So on the unfiltered shape the cap reaches 61.3% of the corpus at 5,000 and
+  # would have reached 6.1% at 500 — the 10x is real and current, not inherited
+  # from the 7,064-id figure above.
+  #
+  # AND THE HONEST HALF: 5,000 does NOT buy back the `task-*` family here. The
+  # 2,386 `task-*` canonical ids start at ASC index 5,363 of 8,159, so the
+  # alphabetic fallback misses 100% of them at BOTH caps. Only the KNN path
+  # reaches them. This constant restores the pre-#14061 safety net's SIZE; it
+  # does not pretend to restore its coverage, which it never had.
+  #
+  # The scorer cost is the documented one (6,217 ms at 5,000 vs 89 ms at 500) and
+  # it is the price of the fallback being a fallback: both clauses are off the
+  # hot path by construction.
+  @unfiltered_candidate_limit 5_000
+
   # Trgm net for the candidate FETCH only: over-fetch here, then let the precise
   # token-Jaccard in `Similarity.assess/3` score it down.
   #
@@ -219,6 +259,8 @@ defmodule Barkpark.Tasks.Dedup do
     distinct =
       string_list(Map.get(content, "distinct_from") || Map.get(content, :distinct_from))
 
+    reasons = reason_map(content)
+
     # The new task's title IS the trgm probe. Passed as an opt rather than a
     # positional argument so a caller that already set `:probe_title` (tests
     # driving the empty-probe fallback) keeps control of it.
@@ -242,7 +284,7 @@ defmodule Barkpark.Tasks.Dedup do
 
         case refuse do
           [] ->
-            :ok
+            override_toll(new_task, candidates, assessment.excluded, reasons, scan)
 
           _ ->
             {:error,
@@ -316,6 +358,164 @@ defmodule Barkpark.Tasks.Dedup do
           "(`bp doc publish task <id>`) or discard it and retry."
     end
   end
+
+  # ── THE OVERRIDE HAS TO COST SOMETHING ─────────────────────────────────────
+  #
+  # MEASURED on the production ledger 2026-08-24. Four copies of one task were
+  # created inside 127 seconds on 2026-08-02, each one naming its predecessors
+  # in its own `distinct_from`:
+  #
+  #   11:25:41  drafts.task-834b13e3…  distinct_from = []
+  #   11:26:52  drafts.task-3a889e08…  distinct_from = [834b13e3]
+  #   11:27:12  drafts.task-d2954ebb…  distinct_from = [834b13e3, 3a889e08]
+  #   11:27:48  task-42ad3595…         distinct_from = [834b13e3, 3a889e08, d2954ebb]
+  #
+  # All four carry the identical title. THE WALL WAS RIGHT FOUR TIMES OUT OF
+  # FOUR and was told to stand down every time — a populated `distinct_from` is
+  # the AFFIRMATIVE RECORD that it fired and the author dismissed it, since the
+  # field cannot be populated by accident. The list GREW monotonically, so the
+  # gate got LOUDER at each copy and was overruled anyway. This is not a
+  # sensitivity defect (a detector failing to fire is a DIFFERENT row and a
+  # different lane); it is the override being the cheapest way past a wall that
+  # worked.
+  #
+  # THE TOLL, AND WHY IT IS SHAPED LIKE THIS:
+  #
+  #   * It fires on SAME NORMALIZED TITLE only. By copy 4 the author was
+  #     asserting distinctness against three rows carrying the same title, which
+  #     is the point where the assertion has stopped meaning anything. A
+  #     different-titled override is an ordinary judgement call and stays free.
+  #   * THE FIRST SAME-TITLE OVERRIDE IS FREE (`@free_same_title_overrides`).
+  #     One row that happens to share a title with yours is a coincidence a
+  #     human resolves in one word; a SECOND one is the beginning of the
+  #     observed pattern. Refusing the first would break every legitimate
+  #     one-id override (`DedupTest` "distinct_from naming the match ALLOWS the
+  #     create") for a population the evidence does not support.
+  #   * STRUCTURE STILL WINS. A match excluded because it is a `:sibling` or a
+  #     `:chain` was never saved by `distinct_from` — `Similarity.score/6`
+  #     checks the distinct set first, so an id can carry BOTH — and charging a
+  #     toll for it would tax a fixture that names its own epic peers rather
+  #     than the override this row is about.
+  #   * REASONS MUST BE NON-EMPTY AND MUTUALLY DISTINCT. One reason
+  #     copy-pasted across three ids is the bulk assertion in a costume; the
+  #     row's remedy (a) names "an empty or duplicated reason" explicitly.
+  #
+  # The toll runs ONLY on the `refuse == []` path — i.e. only when the override
+  # actually bought the create its passage. A create that is refused on its
+  # merits is refused with the ordinary message, unchanged.
+  @free_same_title_overrides 1
+
+  defp override_toll(new_task, candidates, excluded, reasons, scan) do
+    probe = normalized_title(Map.get(new_task, :title))
+
+    titles =
+      Map.new(candidates, fn c ->
+        {Similarity.norm_id(Map.get(c, :id)), Map.get(c, :title)}
+      end)
+
+    waved =
+      Enum.filter(excluded, fn m ->
+        Map.get(m, :structural) not in [:sibling, :chain] and probe != "" and
+          normalized_title(Map.get(titles, Similarity.norm_id(Map.get(m, :id)))) == probe
+      end)
+
+    if length(waved) > @free_same_title_overrides do
+      audit_override(waved, reasons, scan)
+    else
+      :ok
+    end
+  end
+
+  defp audit_override(waved, reasons, scan) do
+    ids = Enum.map(waved, fn m -> Similarity.norm_id(Map.get(m, :id)) end)
+    given = Enum.map(ids, fn id -> {id, Map.get(reasons, id)} end)
+
+    blank = for {id, r} <- given, blank_reason?(r), do: id
+
+    repeated =
+      given
+      |> Enum.reject(fn {_id, r} -> blank_reason?(r) end)
+      |> Enum.group_by(fn {_id, r} -> String.downcase(String.trim(r)) end)
+      |> Enum.filter(fn {_r, group} -> length(group) > 1 end)
+      |> Enum.flat_map(fn {_r, group} -> Enum.map(group, &elem(&1, 0)) end)
+      |> Enum.sort()
+
+    case {blank, repeated} do
+      {[], []} ->
+        :ok
+
+      _ ->
+        {:error,
+         {:duplicate_task,
+          %{
+            message: override_toll_message(ids, blank, repeated),
+            similar: Enum.map(waved, &present/1),
+            advise: [],
+            scan: scan
+          }}}
+    end
+  end
+
+  defp override_toll_message(ids, blank, repeated) do
+    base =
+      "this create names #{length(ids)} existing row(s) with the SAME normalized title in " <>
+        "`distinct_from` (#{Enum.join(Enum.take(ids, 5), ", ")}) — the duplicate wall fired " <>
+        "against each of them and was waved through. Past the first, that assertion has to be " <>
+        "EXPLAINED: set `content.distinct_from_reason` to a map of id => why that row is " <>
+        "genuinely different, one entry per id, each non-empty and each saying something " <>
+        "different from the others. (Four copies of one task were filed in 127 seconds on " <>
+        "2026-08-02 exactly this way, each naming its predecessors and none of them saying why.)"
+
+    base
+    |> then(fn m ->
+      case blank do
+        [] -> m
+        _ -> m <> " · NO REASON GIVEN FOR: #{Enum.join(blank, ", ")}."
+      end
+    end)
+    |> then(fn m ->
+      case repeated do
+        [] -> m
+        _ -> m <> " · THE SAME REASON IS REUSED FOR: #{Enum.join(repeated, ", ")}."
+      end
+    end)
+  end
+
+  defp blank_reason?(r) when is_binary(r), do: String.trim(r) == ""
+  defp blank_reason?(_), do: true
+
+  # `distinct_from_reason` is read as a map of id => reason. It rides content
+  # like every other escape hatch (`distinct_from`, `dedup_bypass`) so there is
+  # no new API or CLI surface, and `Tasks.Validation` leaves an unlisted content
+  # map alone — the same latitude `claim`/`engagement` already take.
+  #
+  # It FAILS CLOSED on a typo: a misspelled key yields no reasons, so the toll
+  # refuses rather than reads the absence as permission.
+  defp reason_map(content) do
+    case Map.get(content, "distinct_from_reason") || Map.get(content, :distinct_from_reason) do
+      map when is_map(map) ->
+        Map.new(map, fn {k, v} ->
+          {Similarity.norm_id(to_string(k)), if(is_binary(v), do: v, else: nil)}
+        end)
+
+      _ ->
+        %{}
+    end
+  end
+
+  # Titles are compared on their ALPHANUMERIC SKELETON: downcased, every run of
+  # non-alphanumerics collapsed to one space, trimmed. Not `Similarity.tokens/1`
+  # — that drops stopwords and ≤2-char tokens, which would fold two genuinely
+  # different short titles onto each other, and it emits a telemetry event per
+  # call. This comparison is exact-title-or-nothing by design.
+  defp normalized_title(title) when is_binary(title) do
+    title
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, " ")
+    |> String.trim()
+  end
+
+  defp normalized_title(_), do: ""
 
   # A stored row is published unless it carries the `drafts.` prefix. The
   # DISTINCT ON in `base_query/3` prefers the PUBLISHED row of a twin pair, so a
@@ -447,6 +647,11 @@ defmodule Barkpark.Tasks.Dedup do
   # a duplicate — and every id in the corpus is now reachable, because the index
   # is consulted over all of it instead of a sorted prefix.
   #
+  # THAT LAST SENTENCE IS TRUE OF THIS CLAUSE ONLY. The two UNFILTERED shapes
+  # below (blank probe title, missing pg_trgm) still read a sorted prefix, and
+  # they always did; see `@unfiltered_candidate_limit` for what they actually
+  # scan today and for why they do not inherit `@candidate_limit`.
+  #
   # An empty probe title cannot be allowed to silently match nothing (that would
   # be a fail-OPEN gate wearing a green light), so it falls back to the
   # unfiltered scan — see `fetch_rows/6`.
@@ -454,10 +659,24 @@ defmodule Barkpark.Tasks.Dedup do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
     timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
-    limit = Keyword.get(opts, :dedup_candidate_limit, @candidate_limit)
+    # TWO CAPS, TWO OVERRIDES, BECAUSE THEY ARE TWO DIFFERENT NUMBERS.
+    # `:dedup_candidate_limit` bounds the KNN shape ONLY — a test that shrinks it
+    # to prove the truncation tripwire must not also, silently, shrink the
+    # unfiltered fallback, because "the fallback inherits the KNN cap" is exactly
+    # the defect this pair exists to stop (task-4671d136b2c568b4).
+    limits = {
+      Keyword.get(opts, :dedup_candidate_limit, @candidate_limit),
+      Keyword.get(opts, :dedup_unfiltered_candidate_limit, @unfiltered_candidate_limit)
+    }
+
     probe_title = Keyword.get(opts, :probe_title) || ""
 
-    rows = fetch_rows(dataset, workspace_id, project_id, timeout, limit, probe_title)
+    # The cap that BOUND the scan is whatever the clause that actually ran
+    # applied — the pg_trgm rescue switches shapes mid-call, so this cannot be
+    # read off `limits` at the call site. Truncation maths and every honesty
+    # channel below use the returned one.
+    {shape, limit, rows} =
+      fetch_rows(dataset, workspace_id, project_id, timeout, limits, probe_title)
 
     # The probe row is the ONLY thing that distinguishes "the backlog happens to
     # be exactly `limit` rows" from "the backlog is larger than this scan saw".
@@ -466,7 +685,7 @@ defmodule Barkpark.Tasks.Dedup do
     {kept, truncated?} =
       if length(rows) > limit, do: {Enum.take(rows, limit), true}, else: {rows, false}
 
-    report_scan(truncated?, length(kept), limit, dataset)
+    report_scan(truncated?, length(kept), limit, dataset, shape)
 
     {:ok, to_tasks(kept), scan_report(truncated?, length(kept), limit)}
   rescue
@@ -509,14 +728,29 @@ defmodule Barkpark.Tasks.Dedup do
   # empty case keeps the old whole-corpus behaviour (slow, but honest) instead.
   # `check_new_task/5` already short-circuits when title AND description are both
   # blank; this covers the title-blank-description-present remainder.
-  defp fetch_rows(dataset, workspace_id, project_id, timeout, limit, "") do
-    base_query(dataset, workspace_id, project_id)
-    |> twin_collapsed()
-    |> limited(limit)
-    |> Repo.all(timeout: timeout)
+  #
+  # SAID PLAINLY, BECAUSE THE OLD WORDING HERE WAS FALSE: this is NOT the
+  # "whole-corpus behaviour". It is `DISTINCT ON (canonical doc_id)` ASCENDING
+  # under a LIMIT, i.e. the alphabetically-first `@unfiltered_candidate_limit`
+  # rows and nothing after them — the alphabetic truncation the trgm change
+  # retired on the probe path, still present here. What it keeps is the old
+  # fallback's SIZE (5,000, see `@unfiltered_candidate_limit`), not a full scan:
+  # against the 8,159 canonical ids measured 2026-09-12 it reads 61.3% of them,
+  # and none of the 2,386 `task-*` ids, which sort past index 5,363.
+  # It is kept because a partial honest scan is still a scan, where
+  # `similarity(x, '')` would have been a gate that matched nothing and reported
+  # success.
+  defp fetch_rows(dataset, workspace_id, project_id, timeout, {_knn, unfiltered}, "") do
+    rows =
+      base_query(dataset, workspace_id, project_id)
+      |> twin_collapsed()
+      |> limited(unfiltered)
+      |> Repo.all(timeout: timeout)
+
+    {:unfiltered, unfiltered, rows}
   end
 
-  defp fetch_rows(dataset, workspace_id, project_id, timeout, limit, probe_title) do
+  defp fetch_rows(dataset, workspace_id, project_id, timeout, {limit, _un} = limits, probe_title) do
     # ONE QUERY, AND IT MUST STAY ONE. The old shape was a `DISTINCT ON`
     # subquery under an outer `ORDER BY similarity(...) DESC, doc_id`: two
     # stages, because `DISTINCT ON` requires its expression to lead the
@@ -545,9 +779,12 @@ defmodule Barkpark.Tasks.Dedup do
     # pool-checkout death into `{:error, reason}` instead of an escaped exit.
     case Repo.transaction(fn -> Repo.all(query, timeout: timeout) end, timeout: timeout) do
       {:ok, rows} ->
-        rows
-        |> Enum.filter(&(&1.sim >= @candidate_trgm_floor))
-        |> collapse_twins()
+        kept =
+          rows
+          |> Enum.filter(&(&1.sim >= @candidate_trgm_floor))
+          |> collapse_twins()
+
+        {:knn, limit, kept}
 
       # A rolled-back txn is a DEGRADED scan, not an empty corpus. Raising here
       # routes it into the `rescue` in `fetch_candidates/2`, which is what turns
@@ -574,12 +811,17 @@ defmodule Barkpark.Tasks.Dedup do
       if trgm_unavailable?(e) do
         Logger.warning(
           "Tasks.Dedup: pg_trgm is unavailable, falling back to the UNFILTERED backlog " <>
-            "scan. Detection is unaffected; the scan is slow and the candidate cap is " <>
-            "alphabetical again. Run `CREATE EXTENSION IF NOT EXISTS pg_trgm;` to restore " <>
-            "the pre-filter."
+            "scan. The scan is slow, its candidate cap is ALPHABETICAL again (DISTINCT ON " <>
+            "canonical doc_id ASCENDING), and detection is therefore NOT unaffected: rows " <>
+            "sorting after the first #{elem(limits, 1)} canonical ids are invisible to this " <>
+            "check, including every `task-*` id if the corpus is larger than that. Run " <>
+            "`CREATE EXTENSION IF NOT EXISTS pg_trgm;` to restore the pre-filter."
         )
 
-        fetch_rows(dataset, workspace_id, project_id, timeout, limit, "")
+        # The rescue re-enters through the unfiltered clause, which applies the
+        # UNFILTERED cap — it must not inherit `limit`, which is sized for an
+        # ordering this shape does not have.
+        fetch_rows(dataset, workspace_id, project_id, timeout, limits, "")
       else
         reraise e, __STACKTRACE__
       end
@@ -681,26 +923,40 @@ defmodule Barkpark.Tasks.Dedup do
 
   defp limited(query, limit), do: from(d in query, limit: ^(limit + @candidate_probe))
 
-  defp report_scan(false, _returned, _limit, _dataset), do: :ok
+  defp report_scan(false, _returned, _limit, _dataset, _shape), do: :ok
 
-  defp report_scan(true, returned, limit, dataset) do
+  defp report_scan(true, returned, limit, dataset, shape) do
     Logger.warning(
       "Tasks.Dedup scan TRUNCATED: returned #{returned} of a larger candidate set at " <>
         "limit #{limit} (dataset=#{inspect(dataset)}). The duplicate check ran over a " <>
         "PARTIAL candidate set — an :ok from this scan means 'no duplicate among the " <>
-        "#{returned} rows scanned', not 'no duplicate'. This now means something " <>
-        "DIFFERENT and much rarer than it used to: the rows kept are the #{limit} MOST " <>
-        "TITLE-SIMILAR, not the alphabetically-first, so a bind here says the new title " <>
-        "trigram-matches more than #{limit} existing tasks — a generic title, or a " <>
-        "corpus that has outgrown the floor. Tighten @candidate_trgm_floor before you " <>
-        "raise the limit."
+        "#{returned} rows scanned', not 'no duplicate'. " <> truncation_shape_note(shape, limit)
     )
 
     :telemetry.execute(
       [:barkpark, :tasks, :dedup, :scan_truncated],
       %{returned: returned, limit: limit},
-      %{dataset: dataset}
+      %{dataset: dataset, shape: shape}
     )
+  end
+
+  # THE SAME BIND MEANS TWO DIFFERENT THINGS, so it must not be reported in one
+  # sentence. On the KNN path a bind is rare and benign-ish; on the unfiltered
+  # fallback it is the alphabetic blind spot, and saying "the MOST TITLE-SIMILAR"
+  # there would be the module vouching for a property that branch does not have.
+  defp truncation_shape_note(:knn, limit) do
+    "This now means something DIFFERENT and much rarer than it used to: the rows kept " <>
+      "are the #{limit} MOST TITLE-SIMILAR, not the alphabetically-first, so a bind here " <>
+      "says the new title trigram-matches more than #{limit} existing tasks — a generic " <>
+      "title, or a corpus that has outgrown the floor. Tighten @candidate_trgm_floor " <>
+      "before you raise the limit."
+  end
+
+  defp truncation_shape_note(:unfiltered, limit) do
+    "This is the UNFILTERED fallback (blank probe title, or pg_trgm missing), which has " <>
+      "no similarity ordering at all: the rows kept are the ALPHABETICALLY-FIRST #{limit} " <>
+      "canonical ids, so every id sorting after them was never compared. Restore pg_trgm " <>
+      "(or a non-blank probe title) rather than raising this limit."
   end
 
   defp scan_report(truncated?, returned, limit) do

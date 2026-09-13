@@ -162,7 +162,7 @@ test("app.css's declared axis is exactly the sweep's BREAKPOINTS, with nothing u
 test("the raw grep over-counts @media — comment-stripping is why the parser does not", () => {
   const raw = (APP_CSS.match(/@media/g) || []).length;
   const stripped = parseMediaBreakpoints(APP_CSS).preludes.length;
-  assert.ok(raw > stripped, `raw grep ${raw} must exceed the parsed block count ${stripped} (app.css:2131 names a breakpoint inside a comment)`);
+  assert.ok(raw > stripped, `raw grep ${raw} must exceed the parsed block count ${stripped} (app.css names a breakpoint inside a comment: grep -n 'NOT TOUCHED, DELIBERATELY' app.css)`);
 });
 
 test("index.html's registered screens are exactly the screens CELLS drives", () => {
@@ -821,8 +821,8 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
   // to cover it; the clamp reding IS the guard working. It also reds on a
   // COMMENT that merely mentions 620px — the parser strips comments and this
   // count does not — and that is the one case where the fix is to reword the
-  // comment (app.css:2131 is the standing precedent for a breakpoint named
-  // inside one).
+  // comment (app.css's own `NOT TOUCHED, DELIBERATELY` line is the standing
+  // precedent for a breakpoint named inside one — grep -n it).
   assert.equal((css.match(/740px/g) || []).length, 0,
     "the 740px mutation left a 740px occurrence behind — app.css names 740 in a form " +
     "`max-width: 740px` does not match (range syntax `(width <= 740px)`, a `min-width` " +
@@ -923,6 +923,75 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // longer unguarded: the chronicle arm below the residue parsers reads these
 // bytes and reds on a duplicate landing slot, an out-of-order block, or an
 // ordinal past the measured census.
+//
+// ── THE TYPED-COUNTER OWNERSHIP TABLE ────────────────────────────────────────
+//
+// Read this before you move ANY global integer in the console harness. It
+// answers one question — "which single file do I edit, and what re-derives the
+// number?" — because the failure this table exists to stop is a builder moving
+// a copy and leaving the owner, or moving the owner and leaving a copy.
+//
+// THIRTEEN typed global counters live across TWO owner files. (The row that
+// asked for this table said NINE, measured 2026-08-23; that count is stale on
+// both ends — see the two footnotes.) Each number below names exactly ONE
+// owner. Anchors are FUNCTION NAMES AND GREPPABLE STRINGS, never line numbers:
+// under cloud/priv/static a `<file>:<digits>` citation rots within days and
+// reds the Console gate's E11 clause.
+//
+// OWNER 1 — cloud/priv/static/__preview__/breakpoint-sweep.test.mjs, in the
+//   test whose title is BUILT from scenarioReport (grep: `the census
+//   reconciles:`). Six numbers, all from ONE measurement:
+//
+//     r.total            125   grep `assert.equal(r.total, 125)`
+//     r.cells             25   grep `assert.equal(r.cells, 25)`
+//     r.distinctCovered   24   grep `mixed-fleet is used twice`
+//     r.residue          101   grep `101 is the RESIDUE, not the census`
+//     r.families          13   grep `assert.equal(r.families, 13)`
+//     SCENARIO_RESIDUE   101   grep `the COMMITTED literal, counted from the
+//                              committed bytes` — this is residue typed a
+//                              SECOND time, deliberately, against the committed
+//                              bytes rather than the report. Move BOTH or the
+//                              file contradicts itself.
+//
+//   RE-DERIVE, never increment: `node cloud/priv/static/__preview__/breakpoint-sweep.mjs`
+//   prints the whole set on its `>> scenarios` line —
+//   `125 scenarios · 24 distinct covered by 25 cells · 101 residue over 13
+//   families (committed literal)`. Read that line and copy from it.
+//
+// OWNER 2 — cloud/priv/static/__binding_census.mjs (NOT under __preview__, and
+//   NOT a node --test file: it is a script that exits 2). Seven numbers in two
+//   separate pins:
+//
+//     EXPECT.total          80   grep `FAIL(2): the PIN no longer sums`
+//     EXPECT.elevated       39   (same pin)
+//     EXPECT.predicated     34   (same pin)
+//     EXPECT.unpredicated    5   (same pin)
+//
+//     EXPECT_POPULATIONS.reachable      0   grep `FAIL(2m): the unpredicated
+//     EXPECT_POPULATIONS.omitted        1   population no longer splits`
+//     EXPECT_POPULATIONS.unobservable   4
+//
+//   RE-DERIVE: `node cloud/priv/static/__binding_census.mjs`. Exit 0 means all
+//   seven agree with the artifact; exit 2 prints `expected …` beside `found …`
+//   for whichever pin moved. Copy from `found`.
+//
+// NOT PINNED ANYWHERE, and do not go looking for a literal to move: the unit
+// count, the smoke count and the me-envelope count. smoke.mjs builds its
+// sentence from `names.length`; .github/workflows/console-harness.yml pins NO
+// counter at all — every integer in that file is comment prose and can be
+// stale without redding anything.
+//
+// FOOTNOTE A (why the table is not "five in this file"): the five integers
+// used to be typed a SIXTH time in this test's TITLE prose. cch-w47-s4 (D527)
+// deleted that copy by BUILDING the title from `scenarioReport` — which is why
+// the `test(\`…\`)` line above is a template literal. There is no sixth copy to
+// keep in step, and re-introducing a literal title would re-create one.
+//
+// FOOTNOTE B (why seven and not four in the census): EXPECT_POPULATIONS did
+// not exist when the ownership row was filed. It is a second, independent pin
+// over the same PIN rows, and it reds on its own die2 with its own `FAIL(2m)`
+// prefix. A builder who moves EXPECT and stops has moved half the owner.
+//
 const census = scenarioReport({ scenarios: SCENARIOS });
 test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered} distinct covered by ${census.cells} cells, ${census.residue} residue over ${census.families} families`, () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
@@ -998,13 +1067,28 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
   // PRINTED (`125 scenarios · 24 distinct covered by 25 cells · 101 residue over
   // 13 families`), never by adding one to the line above.
-  assert.equal(r.total, 125);
+  // cch-w38-s1-fu (task-8cf413b005cbcd40) moves it by THREE in ONE commit:
+  // `instance-behind-member`, `instance-remove-failed-member` and
+  // `instance-failed-member` — the MEMBER arm of the three instance states
+  // cch-w45-bl added as owners. Until them, member-authority-sweep.mjs (the
+  // console's only rendered-bytes member instrument) could not reach ANY of the
+  // three offer sites #12996 fenced: measured on origin/main 661e87d9f3, it
+  // exited 0 with 0 findings over both the fenced tree and a tree with #12996's
+  // three app.js hunks reverted. Total 125 -> 128, residue 101 -> 104. CELLS
+  // (25), distinctCovered (24) and families (13) are DELIBERATELY UNMOVED: all
+  // three land in the residue, not a cell, and their familyOf is
+  // `hash:#instance` — a family that already had 26 members, so three more
+  // cannot create a 14th. Both moved integers were RE-DERIVED by RUNNING `node
+  // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
+  // PRINTED (`128 scenarios · 24 distinct covered by 25 cells · 104 residue over
+  // 13 families`), never by adding three to the line above.
+  assert.equal(r.total, 128);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 101, "101 is the RESIDUE, not the census");
+  assert.equal(r.residue, 104, "104 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 101, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 104, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
