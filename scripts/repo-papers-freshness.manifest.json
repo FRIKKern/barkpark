@@ -175,7 +175,7 @@
     },
     "ops-prod-ops": {
       "source": "docs/ops/PROD_OPS.md",
-      "baseline": 12,
+      "baseline": 0,
       "exempt": []
     },
     "ops-realtime-webhook-setup": {
