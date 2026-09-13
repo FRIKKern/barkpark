@@ -7,10 +7,12 @@
 #   CONDITIONAL  paths-filtered push arm — owed-ness depends on the commit
 .github/workflows/architecture.yml	CONDITIONAL
 .github/workflows/astro-finder-drift.yml	CONDITIONAL
+.github/workflows/astro-finder-render-smoke.yml	ALWAYS
 .github/workflows/astro-search-finder-test.yml	CONDITIONAL
 .github/workflows/bp-graph-drift.yml	CONDITIONAL
 .github/workflows/breakglass-watch.yml	ALWAYS
 .github/workflows/ci.yml	CONDITIONAL
+.github/workflows/cli-release-cadence.yml	ALWAYS
 .github/workflows/cloud.yml	ALWAYS
 .github/workflows/compose-smoke.yml	ALWAYS
 .github/workflows/connectors.yml	CONDITIONAL
@@ -30,15 +32,18 @@
 .github/workflows/landed-mark.yml	ALWAYS
 .github/workflows/mobile.yml	CONDITIONAL
 .github/workflows/paper-editor.yml	CONDITIONAL
+.github/workflows/paper-rig.yml	CONDITIONAL
 .github/workflows/pdrender-wasm.yml	CONDITIONAL
 .github/workflows/pipefail-sigpipe-scan.yml	ALWAYS
 .github/workflows/plugin-node.yml	CONDITIONAL
+.github/workflows/posix-vacuous-green-census.yml	ALWAYS
 .github/workflows/pr-meta.yml	ALWAYS
 .github/workflows/release-artifact.yml	CONDITIONAL
 .github/workflows/required-checks-drift.yml	CONDITIONAL
 .github/workflows/research-coverage-suite.yml	CONDITIONAL
 .github/workflows/scaffy-catalog-drift.yml	CONDITIONAL
 .github/workflows/sdk-tests.yml	CONDITIONAL
+.github/workflows/seal-reading.yml	ALWAYS
 .github/workflows/search-starter-smoke.yml	CONDITIONAL
 .github/workflows/search-template-gates.yml	ALWAYS
 .github/workflows/security.yml	CONDITIONAL
