@@ -109,6 +109,75 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols .bp-figcaption .bp-table__th--num .bp-table__td--num .bp-table__th--spark .bp-table__td--spark .bp-table__spark) ++
                      [".bp-table__spark polyline"]
 
+  # scaffy-backlog-blocks-editable-studio — the TECHNICAL pair (diff, filetree).
+  # These two CANNOT ride @parity_elements: they carry NO CSS rule on either
+  # surface. `Components.diff_html/1` / `filetree_html/1` paint their container
+  # entirely with INLINE styles, and the canvas shows the reader's OWN bytes
+  # (the block's preview is server-pushed on `bp:block-html` into a
+  # `.bp-paper-surface` hole — canvas_reader_parity_gate_test.exs §1/§3 pin that
+  # to the one emitter). Adding them to @parity_elements would red the
+  # parser-sanity guard on an element neither stylesheet declares.
+  #
+  # So the parity they need is the TOKEN-RESOLUTION one, gated below: every
+  # custom property those inline styles bind must be DEFINED in the single source
+  # (`Stylesheet.css/0`, which Studio inlines on the same page as the canvas). A
+  # token typo/rename in components.ex would leave the canvas paint resolving to a
+  # browser default with nothing red — the exact failure §3 exists for, one level
+  # down. Red-before (mutation-proven, this task): renaming `--muted-surface` to
+  # `--muted-surfacex` in components.ex diff_html/1 reds the section below with
+  # `diff binds undefined tokens: ["--muted-surfacex"]`.
+  @technical_inline_blocks [
+    {".bp-diff",
+     %{
+       "type" => "diff",
+       "file" => "lib/a.ex",
+       "lang" => "elixir",
+       "diff" => "@@ -1,2 +1,2 @@\n context\n-old\n+new"
+     }},
+    {".bp-filetree",
+     %{
+       "type" => "filetree",
+       "text" => "lib/\n├── a.ex ● covered",
+       "legend" => "● covered"
+     }}
+  ]
+
+  test "the technical pair's inline-styled containers bind only tokens the single source defines" do
+    view = view_css()
+
+    # EVERY custom property the single source DEFINES — not just the --bp-/--paper-
+    # families. diff_html/1 legitimately binds the shared chat-console palette
+    # (--font-mono, --fg-dim, --muted-surface, --ok, --danger), which paper-surface.css
+    # defines alongside the paper tokens; a prefix-limited scan here would manufacture
+    # a false "undefined token" for every one of them.
+    defined =
+      ~r/(--[a-z0-9-]+)\s*:/
+      |> Regex.scan(view)
+      |> Enum.map(fn [_, name] -> name end)
+      |> MapSet.new()
+
+    for {selector, block} <- @technical_inline_blocks do
+      html = Render.render_block(block, %{style: :article})
+
+      assert String.contains?(html, String.trim_leading(selector, ".")),
+             "#{selector}: the fixture no longer renders through the emitter — this check went vacuous"
+
+      referenced =
+        ~r/var\(\s*(--[a-z0-9-]+)/
+        |> Regex.scan(html)
+        |> Enum.map(fn [_, name] -> name end)
+        |> MapSet.new()
+
+      assert MapSet.size(referenced) > 0,
+             "#{selector}: the render binds NO custom property — the inline-style extractor is looking at the wrong bytes"
+
+      dangling = MapSet.difference(referenced, defined)
+
+      assert MapSet.size(dangling) == 0,
+             "#{selector} binds undefined tokens: #{inspect(MapSet.to_list(dangling))} — the Studio canvas paints this block with the reader's own inline styles, so an undefined token resolves to a browser default there too"
+    end
+  end
+
   @root_heex Path.expand(
                "../../../../lib/barkpark_web/layouts/root.html.heex",
                __DIR__
