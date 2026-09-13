@@ -1545,10 +1545,37 @@ defmodule BarkparkCloud.Web.Router do
     else
       user = conn.assigns.current_user
       team = conn.assigns.current_team
-      # ONE role read, spent by both the top-level `role:` key and
-      # `team_authority.role` — the two state the same fact and a second lookup
-      # would let a future edit desync them (and costs an extra membership read
-      # on every boot).
+      # ONE role read shared by the top-level `role:` key and
+      # `team_authority.role` — those two state the same fact off the same
+      # binding, so a future edit cannot desync THEM.
+      #
+      # It is not the only membership read in this response, and the rest of
+      # the map is NOT deduped. Telemetry-counted (attach to
+      # `[:barkpark_cloud, :repo, :query]`, filter to `team_memberships`):
+      # one `GET /v1/me` by a single-team member performs SIX
+      # team_memberships-touching SELECTs, FOUR of them direct
+      # `get_membership/2` row reads —
+      #
+      #   1. `Auth.require_user_or_pat/2` -> `Accounts.primary_team/1` ->
+      #      `list_user_teams/1`                                       (JOIN)
+      #   2. this binding -> `Accounts.team_role/2` -> `get_membership/2`
+      #   3. the `teams:` switcher list -> `list_user_teams/1`         (JOIN)
+      #   4. `teams:` per-team `Accounts.team_role/2` -> `get_membership/2`
+      #      (one per team the user belongs to)
+      #   5. `team_authority.admin` -> `Authz.team_admin?/2` -> `Authz.role/2`
+      #   6. `team_authority.owner` -> `Authz.team_owner?/2` -> `Authz.role/2`
+      #
+      # So `.admin` and `.owner` are derived from their OWN reads, through a
+      # DIFFERENT module (Accounts.team_role/2 vs Authz.role/2), and are not
+      # guaranteed mutually consistent with `role:` even within one response —
+      # a consumer cross-checking `team_authority.role` against
+      # `team_authority.admin` is comparing two reads, not one fact. Threading
+      # one membership through all three is a PERFORMANCE change and needs its
+      # own justification; it has not been made.
+      #
+      # `test/barkpark_cloud/web/router_me_membership_read_count_test.exs`
+      # pins 6 and 4, so these numbers cannot rot silently: change the reads
+      # and that test reds, and this comment gets updated with it.
       team_role = team && Accounts.team_role(user, team)
 
       json(conn, 200, %{
