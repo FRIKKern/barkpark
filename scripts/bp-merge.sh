@@ -40,7 +40,11 @@
 #   Measured on a freshly protected throwaway base: EVERY refusal shape exits 1
 #   — deadlock, red, cancelled, pending, plural and gh's own client-side block.
 #   The exit code carries no information at all, so the classifier below reads
-#   the message. Six arms plus an explicit UNRECOGNISED default that refuses:
+#   the message. NINE named arms plus an explicit UNRECOGNISED default that
+#   refuses (count derived 2026-09-13:
+#     awk '/^classify_refusal\(\) \{/,/^\}/' scripts/bp-merge.sh | grep -cE "printf '[A-Z_]+"
+#   answers 10 — the nine below plus the default. The old header said 'Six',
+#   which had been stale since LOCAL_POST_MERGE and DIRTY landed):
 #
 #     "base branch policy prohibits"      CLIENT_BLOCK  gh blocked locally; the API was never reached
 #     "N of M required status checks…"    PLURAL        carries counts and CATEGORIES, never names, and
