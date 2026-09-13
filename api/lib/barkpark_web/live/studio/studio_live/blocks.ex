@@ -16,6 +16,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   @card_action_priorities ["primary", "secondary"]
   @action_form_fields ~w(action-label action-href action-priority)
   @action_priorities ["primary", "secondary"]
+
+  # The code block's LINE-EMPHASIS tone vocabulary, CLOSED and byte-identical to
+  # `Barkpark.PortableDoc.Render.Compose`'s `@code_emphasis_tones` — the renderer
+  # DROPS a range whose tone is outside it (compose.ex, "THE code-block
+  # LINE-EMPHASIS contract"). Restating it here is what lets the editor offer a
+  # `<select>` instead of a free-text field: the author can only ever author a
+  # tone the three render legs paint.
+  @code_emphasis_tones ~w(comment offending fixed)
   @paper_link_ref_form_keys ~w(block_id paper-link-ref-field paper-link-ref-guard paper-link-ref-index paper-link-ref-slug paper-link-ref-value)
   @paper_link_ref_guard_max_bytes 16 * 1024
 
@@ -402,10 +410,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> Map.put("collapsed", parse_bool(params["collapsed"]))
   end
 
-  def build_block_patch(%{"type" => "code"}, params) do
+  # `emphasis` rides the SAME form as lang/value on purpose. The patch is a
+  # SHALLOW merge (patch.ex merge_block) that never DELETES a key, so a
+  # separate emphasis form would have to re-send `value` anyway or clobber it
+  # with "" — one form is the only shape where a body edit and a range edit
+  # cannot destroy each other. put_code_emphasis/3 is a no-op unless the form
+  # actually carried `emphasis-count`, so every pre-existing code-form caller
+  # (which sends only lang+value) leaves a stored `emphasis` untouched.
+  def build_block_patch(%{"type" => "code"} = block, params) do
     %{}
     |> put_if_present("lang", params["lang"])
     |> Map.put("value", params["value"] || "")
+    |> put_code_emphasis(block, params)
   end
 
   # diagram (barkpark-woxx): a Mermaid `source` textarea + an optional `caption`
@@ -699,6 +715,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
+  # code: the emphasis collection is validated the way toc/criteria-progress
+  # validate theirs — an exact submitted row count (so a stale form cannot
+  # silently re-index somebody else's ranges), positive integers for from/to,
+  # and a tone inside the closed vocabulary. NOT validated: `to >= from`. The
+  # render contract deliberately DROPS an inverted range rather than raising
+  # (compose.ex), and rejecting it here would block the intermediate keystroke
+  # where `from` has been raised but `to` has not.
+  def validate_block_patch(%{"type" => "code"} = block, params) do
+    with :ok <- validate_collection_count(block, params, "emphasis", "emphasis"),
+         :ok <-
+           validate_collection_numbers(block, params, "emphasis", "emphasis", ~w(from to), true),
+         :ok <- validate_code_emphasis_tones(block, params) do
+      {:ok, build_block_patch(block, params)}
+    end
+  end
+
   def validate_block_patch(%{"type" => "criteria-progress"} = block, params) do
     with :ok <- validate_collection_count(block, params, "rows", "criterion"),
          :ok <- validate_text_form_fields(params, ~w(detail), "detail"),
@@ -920,6 +952,51 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     |> put_form_param_preserving_shape(params, prefix <> "text", "text")
     |> put_positive_integer_form_field(item, params, prefix <> "level", "level")
     |> put_form_param_preserving_shape(params, prefix <> "anchor", "anchor")
+  end
+
+  defp put_code_emphasis(patch, block, params) do
+    put_editor_collection(
+      patch,
+      block,
+      params,
+      "emphasis",
+      "emphasis",
+      &update_code_emphasis_range/3,
+      %{"from" => 1, "to" => 1, "tone" => "comment"}
+    )
+  end
+
+  defp update_code_emphasis_range(range, params, index) do
+    prefix = "emphasis-#{index}-"
+
+    range
+    |> put_positive_integer_form_field(range, params, prefix <> "from", "from")
+    |> put_positive_integer_form_field(range, params, prefix <> "to", "to")
+    |> put_code_emphasis_tone(params, prefix <> "tone")
+  end
+
+  # A tone outside the closed vocabulary is never WRITTEN (validate_block_patch
+  # has already refused it on the LiveView seam; this is the second door, so a
+  # direct build_block_patch/2 caller cannot smuggle one in either).
+  defp put_code_emphasis_tone(range, params, param) do
+    case Map.fetch(params, param) do
+      {:ok, tone} when tone in @code_emphasis_tones -> Map.put(range, "tone", tone)
+      _ -> range
+    end
+  end
+
+  defp validate_code_emphasis_tones(block, params) do
+    with {:ok, items} <- stored_collection(block, "emphasis") do
+      items
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn {_item, index}, :ok ->
+        param = "emphasis-#{index}-tone"
+
+        if not Map.has_key?(params, param) or params[param] in @code_emphasis_tones,
+          do: {:cont, :ok},
+          else: {:halt, {:error, {:invalid_option, "emphasis"}}}
+      end)
+    end
   end
 
   defp put_criteria_progress_rows(patch, block, params) do
@@ -3725,6 +3802,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   @doc false
   def criteria_progress_rows(block) when is_map(block), do: collection_form_items(block, "rows")
+
+  @doc false
+  def code_emphasis_ranges(block) when is_map(block), do: collection_form_items(block, "emphasis")
+  def code_emphasis_ranges(_block), do: []
+
+  @doc false
+  def code_emphasis_tones, do: @code_emphasis_tones
 
   @doc false
   def gauge_list_mode(block) when is_map(block) do
