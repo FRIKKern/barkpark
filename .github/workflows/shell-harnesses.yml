@@ -199,6 +199,13 @@ on:
       # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
       - ".claude/workflows/bp-pds-charter.md"
       - "tooling/pds/d-number-reservations.tsv"
+      # AXIS D'S CORPUS. `--axis d` resolves every PDS-D literal carried in the
+      # PDS scripts against the charter, so ANY of them is an input: the PR that
+      # produced this axis edited only scripts/pds-secret-scan.sh, which was not
+      # on this list and therefore ran no pds-harnesses job at all. A guard whose
+      # corpus cannot trigger it is a guard that watches the wrong PRs.
+      - "scripts/pds-*.sh"
+      - "tooling/pds/**"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
       - "scripts/pds-read-preflight-audit.sh"
@@ -679,6 +686,13 @@ on:
       # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
       - ".claude/workflows/bp-pds-charter.md"
       - "tooling/pds/d-number-reservations.tsv"
+      # AXIS D'S CORPUS. `--axis d` resolves every PDS-D literal carried in the
+      # PDS scripts against the charter, so ANY of them is an input: the PR that
+      # produced this axis edited only scripts/pds-secret-scan.sh, which was not
+      # on this list and therefore ran no pds-harnesses job at all. A guard whose
+      # corpus cannot trigger it is a guard that watches the wrong PRs.
+      - "scripts/pds-*.sh"
+      - "tooling/pds/**"
       - "scripts/pds-scratch-target.sh"
       - "scripts/pds-scratch-target_test.sh"
       - "scripts/pds-read-preflight-audit.sh"
@@ -2158,7 +2172,10 @@ jobs:
           [ -n "${charter_hw:-}" ] || { echo "RED: the charter defines no PDS-D at all -- the lens is measuring itself, not the corpus" >&2; exit 1; }
 
           rc_total=0
-          for arm in --check-alloc "--axis a"; do
+          # `--axis d` joins the loop: it is PURE-TREE like --check-alloc (charter
+          # + the PDS scripts, no network, no git walk), so it runs everywhere
+          # --axis a does and cannot go UNCHECKED on a shallow checkout.
+          for arm in --check-alloc "--axis a" "--axis d"; do
             echo "── bash scripts/pds-record-parity.sh $arm ──"
             # `|| rc=$?` and NOT a bare call followed by `rc=$?`: the default
             # shell for a `run:` block is `bash -e {0}`, which would exit on the
