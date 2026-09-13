@@ -23,6 +23,12 @@ defmodule BarkparkCloud.Health do
   * `serving_since` — RESERVED, on every surface, for the instant this sha was
     FIRST OBSERVED SERVING. Durable; a no-op restart must never move it.
   * `process_since` — when THIS BEAM started. Moves on every restart.
+  * `provisioner_sha` — the commit the INSTALLED provisioner binary was built
+    from. A SECOND reading of a DIFFERENT thing, not a second name for
+    `serving_sha`: the provisioner is cross-built on the runner at the run's
+    headSha, while this app is `git pull --ff-only`-ed on the box, so under
+    back-to-back merges the two legitimately diverge. One "version" field would
+    be ambiguous; these are two clocks.
 
   `serving_since` is now DURABLE here too: `BarkparkCloud.Health.ServingMemory`
   keeps one row per sha in the plane's own Postgres, so a restart that deploys
@@ -85,6 +91,31 @@ defmodule BarkparkCloud.Health do
     `:erlang.system_info(:start_time)`), never env-derived, so config cannot
     fake it. It answers "how long has this PROCESS been up", NOT "how long has
     this SHA been live".
+  * `provisioner_sha` is read from `BARKPARK_PROVISIONER_SHA` at call time, and
+    is the sha of the provisioner BINARY installed on this box — never a second
+    read of the app's sha. `deploy/cp-deploy.sh` (the `BARKPARK_PROVISIONER_SHA`
+    block) reads it out of the ARTIFACT it is about to install with
+    `bp-provisioner --version`, deliberately NOT from `$NEW`, because `$NEW` is
+    the APP's sha and would make the two fields agree by construction — the
+    exact inference this field exists to kill. Like `BARKPARK_GIT_SHA` it is
+    exported AFTER `cloud/.env` is sourced, so a stale `.env` cannot win, and
+    the compose line (`cloud/docker-compose.yml`, bare
+    `- BARKPARK_PROVISIONER_SHA`) carries no default.
+
+    ABSENT MEANS `nil`, and absent has TWO shapes here, both collapsed to `nil`
+    ON PURPOSE: the var UNSET (a control plane deployed before that block
+    existed, or any local/dev run) and the var set to the EMPTY STRING (deploy
+    ran, but the installed binary carries no stamp — a plain `go build`, or any
+    provisioner older than the `--version` flag). The writer's own contract is
+    "strictly 40 lowercase hex **or empty**", so an empty export is how deploy
+    says "I looked and there was nothing"; republishing that as `""` would put a
+    value-shaped non-answer on the wire. A string that is neither empty nor a
+    sha is published RAW rather than nil-ed: cp-deploy.sh already validates and
+    logs, so a malformed value reaching here means something bypassed it, and an
+    operator is better served seeing it than having it hidden as an
+    indistinguishable `nil`. Nothing is ever SUBSTITUTED — in particular this
+    never falls back to `git_sha`, which would manufacture the agreement the
+    field exists to disprove.
   * `serving_since` is read from `ServingMemory`, NOT from this VM. It is the
     instant this plane first observed `serving_sha` serving, kept in Postgres
     and keyed by that sha, and it is normally OLDER than `process_since` —
@@ -103,6 +134,7 @@ defmodule BarkparkCloud.Health do
   @spec serving() :: %{
           git_sha: String.t() | nil,
           serving_sha: String.t() | nil,
+          provisioner_sha: String.t() | nil,
           serving_since: DateTime.t() | nil,
           process_since: DateTime.t(),
           serving_since_basis: String.t()
@@ -120,10 +152,29 @@ defmodule BarkparkCloud.Health do
     %{
       git_sha: sha,
       serving_sha: sha,
+      provisioner_sha: provisioner_sha(),
       serving_since: memory.serving_since,
       process_since: vm_started_at(),
       serving_since_basis: memory.serving_since_basis
     }
+  end
+
+  # The installed provisioner binary's sha, or nil. Read at call time from a
+  # DIFFERENT env var than `git_sha`, so the two fields can disagree — which is
+  # the entire point of publishing both.
+  #
+  # UNSET and EMPTY both answer nil: deploy writes "" when the artifact carried
+  # no stamp, so "" IS this writer's way of saying absent, and emitting it back
+  # would put a value-shaped non-answer on an anonymous surface. Trimming first
+  # means a hand-exported value with a trailing newline reads as the sha it
+  # obviously is rather than as a near-miss. Anything else goes out RAW: it is
+  # visibly not a sha, so it cannot be mistaken for one, and hiding it would
+  # hide the misconfiguration that produced it.
+  defp provisioner_sha do
+    case System.get_env("BARKPARK_PROVISIONER_SHA") do
+      nil -> nil
+      value -> if String.trim(value) == "", do: nil, else: String.trim(value)
+    end
   end
 
   defp vm_started_at do
