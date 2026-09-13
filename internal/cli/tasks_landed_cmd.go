@@ -182,6 +182,37 @@ var errGHUnavailable = fmt.Errorf("exec: \"gh\": executable file not found in $P
 // (`storedMergeGateFlag`: true / false / absent, where absent is the state that
 // selects the prose arm).
 //
+// THE DECISION, AND THE TWO OPTIONS REJECTED (task-4dca6c8453fb1f7c c0). Three
+// answers were open to a verb that writes a landed label onto a row whose
+// criteria still read met:false, and doing nothing was not one of them — a verb
+// that leaves two fields contradicting each other IS the defect.
+//
+//   - CHOSEN — flip only the merge-shaped ones, through the server's existing
+//     opt-in index. It settles exactly the criteria a merge is evidence for and
+//     no others, it adds no authority (every guard in `criterion_update/5` stays
+//     where it is), and it needs no server change, so nothing downstream has to
+//     learn a new field.
+//
+//   - REJECTED — refuse to label a row whose criteria contradict the label.
+//     The refusal falls on the wrong side: the merge is a FACT, and declining
+//     to record it loses the one thing this verb knows for certain in order to
+//     protest something it could instead fix. Worse, `landed-mark.yml` runs it
+//     on the push, so the refusal would land on CI, where nobody is reading —
+//     and the rows it fired hardest on would be the ones with the most unmet
+//     criteria, i.e. exactly the rows whose merge record matters most.
+//
+//   - REJECTED — write the landed fact into a field the readiness query already
+//     reads. That is the SIBLING lane's half (the parent row split it that way:
+//     the ledger lane owns the readiness filter) and it cures a different thing.
+//     Hiding the row from the queue leaves the ledger still asserting both
+//     halves of the contradiction, so every later reader — a census, a rollup, a
+//     human — still inherits it. It suppresses the symptom at one reader and
+//     settles nothing.
+//
+// HONESTLY DATED: this block and the code it describes were written in the same
+// change, so "recorded BEFORE code" is true of the reasoning and not provable of
+// the calendar.
+//
 // THE ARITY RULE IS THE WHOLE SAFETY ARGUMENT:
 //
 //   - exactly ONE unmet merge-shaped criterion → send it. The flip is
