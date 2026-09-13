@@ -646,7 +646,7 @@
 # "FAIL app.css — baseline mismatch with 0 misses": MISSES 0 is what makes this an
 # unrecorded ADD rather than a parity defect. styleguide.html PASSED unchanged at 84.
 # Bumped in the SAME COMMIT as the CSS hunk (D158).
-1347
+1341
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
@@ -678,3 +678,26 @@
 # (console/cruel-corpus-second-tranche) adds ONE head of its own off the same 1345 base, so
 # whichever of the two lands LAST re-runs cssom-parity and writes the tool's number — never
 # the sum of two guesses.
+
+# task-4a8f859e463dff6e + cch-w49-s1-followup 2026-09-13
+# (console/r17-w13-css-rules-and-waivers): 1347 -> 1341, a NET -6 authored rule heads.
+# NOT hand-incremented and NOT arithmetic: 1341 is the return of cssom-parity.mjs's own
+# exported `authoredHeads(app.css).length` run on this branch. The SAME call on
+# origin/main's app.css returned 1347, matching the baseline it replaces — that control
+# is what says the -6 is this diff and not a resolver difference.
+# The move is -7 +1, both halves deliberate:
+#   -7  the orphaned tier/plan PRICE + QUOTA rules cch-w49-s1 left behind when it took
+#       prices and instance ceilings out of every render path but could not touch app.css
+#       (outside its declared files fence): .tier-price, .tier-price small, .plan-price,
+#       .plan-price small, .new-tier-price, .new-tier-price .dim, .tier-quota. Zero
+#       producers each, grepped one token at a time across app.js, index.html and
+#       styleguide.html. The filed row named EIGHT: the eighth, `.tier-free .tier-price`,
+#       STAYS, and its site in app.css carries the measured reason — it is the only
+#       authored head carrying `.tier-free`, a class app.js still emits, so deleting it
+#       turns a dead rule into an E2 hard-fail.
+#   +1  .dom-rung--pending, the sixth domain-checklist role finally getting a rule of its
+#       own. It restates the .dom-rung base EXACTLY, so this ADD paints nothing new.
+# MISSES stays 0 WITHOUT a browser run, and that is the one claim here not taken from
+# Chrome: MISSES counts authored heads absent from the CSSOM. Deleting whole authored
+# rules cannot manufacture one, and the single ADD is a flat class selector with three
+# plain declarations — no at-rule, no nesting, no selector Chrome could drop.
