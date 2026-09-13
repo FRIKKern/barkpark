@@ -11,7 +11,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   Compose family, not here. Output is byte-identical to the pre-split engine.
   """
 
-  import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1, safe_url: 1]
+  import Barkpark.PortableDoc.Render.Util, only: [escape_attr: 1, escape_html: 1, safe_url: 1]
 
   @font_mono Barkpark.PortableDoc.Render.Palettes.font_mono()
 
@@ -62,7 +62,14 @@ defmodule Barkpark.PortableDoc.Render.Figures do
           escape_html(line)
 
         {_from, _to, tone} ->
-          ~s|<span class="bp-code-em bp-code-em--#{tone}">#{escape_html(line)}</span>|
+          # `tone` is already narrowed to the closed vocabulary by
+          # `Compose.code_emphasis/1`, so no author string can reach here — but
+          # the attr-escape guard (attr_escape_guard_test.exs) proves safety by
+          # SCANNING the interpolation site, and a reader of this line should
+          # not have to chase a caller two modules away to know the attribute is
+          # closed. escape_attr/1 is the identity on all three tones; it costs
+          # nothing and makes the site self-evidently safe.
+          ~s|<span class="bp-code-em bp-code-em--#{escape_attr(tone)}">#{escape_html(line)}</span>|
       end
     end)
   end
