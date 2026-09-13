@@ -282,6 +282,16 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 		return false, fmt.Errorf("claim: %w", err)
 	}
 	if !claimed {
+		// Idle cycle. Nothing to deploy, so this is where the box re-derives
+		// the TLS mode of the sites it is ALREADY serving from the control
+		// plane's current serving_mode — the flip-on-a-live-site half of the
+		// CP→box TLS channel that the claim inline can never reach, because a
+		// claim only ever speaks about the one site being deployed. See
+		// tls_reconcile.go for the invariant and its bound. A reconcile
+		// failure is logged, not returned: it must never stall claiming.
+		if _, err := e.reconcileTLSModes(ctx, state); err != nil {
+			e.logf("tls reconcile: %v", err)
+		}
 		return false, nil
 	}
 
