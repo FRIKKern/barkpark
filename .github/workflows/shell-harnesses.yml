@@ -554,6 +554,17 @@ on:
       # other jobs, so naming it here is what reaches THIS one.
       - "scripts/mix-test-strict.sh"
       - "scripts/mix-test-strict.test.sh"
+      # ── SCRATCHPAD REAPER (task-80d117829feec84e) ─────────────────────────
+      # The reaper DELETES directories. Its skip gates (registered worktrees,
+      # unpushed commits at any depth, an age floor) are the only thing between
+      # a reclaim and a stranded lane, and its --floor mode is what lets a wave
+      # refuse to dispatch onto a full host. disk-headroom-guard.sh is listed
+      # beside it as an INPUT, not a second subject: --floor delegates the
+      # verdict to it, so an edit there changes what the reaper decides without
+      # touching either file above.
+      - "scripts/scratchpad-reaper.sh"
+      - "scripts/scratchpad-reaper.test.sh"
+      - "scripts/disk-headroom-guard.sh"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -953,6 +964,17 @@ on:
       # other jobs, so naming it here is what reaches THIS one.
       - "scripts/mix-test-strict.sh"
       - "scripts/mix-test-strict.test.sh"
+      # ── SCRATCHPAD REAPER (task-80d117829feec84e) ─────────────────────────
+      # The reaper DELETES directories. Its skip gates (registered worktrees,
+      # unpushed commits at any depth, an age floor) are the only thing between
+      # a reclaim and a stranded lane, and its --floor mode is what lets a wave
+      # refuse to dispatch onto a full host. disk-headroom-guard.sh is listed
+      # beside it as an INPUT, not a second subject: --floor delegates the
+      # verdict to it, so an edit there changes what the reaper decides without
+      # touching either file above.
+      - "scripts/scratchpad-reaper.sh"
+      - "scripts/scratchpad-reaper.test.sh"
+      - "scripts/disk-headroom-guard.sh"
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
@@ -1071,6 +1093,7 @@ jobs:
       mix-test-strict: ${{ steps.sets.outputs.mix-test-strict }}
       main-workflow-rollup: ${{ steps.sets.outputs.main-workflow-rollup }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
+      scratchpad-reaper: ${{ steps.sets.outputs.scratchpad-reaper }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1330,6 +1353,9 @@ jobs:
           sunset-route-consumers deploy/uptime-kuma/README.md
           mix-test-strict scripts/mix-test-strict.sh
           mix-test-strict scripts/mix-test-strict.test.sh
+          scratchpad-reaper scripts/scratchpad-reaper.sh
+          scratchpad-reaper scripts/scratchpad-reaper.test.sh
+          scratchpad-reaper scripts/disk-headroom-guard.sh
           '
           self=".github/workflows/shell-harnesses.yml"
 
@@ -3395,3 +3421,67 @@ jobs:
             exit 1
           fi
           echo "cloud.yml: collision check at line $call, mix test at line $test_line — ordered correctly"
+
+  scratchpad-reaper:
+    needs: [changes]
+    if: needs.changes.outputs.scratchpad-reaper == 'true'
+    name: scratchpad-reaper.sh skip-gate + floor matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: scratchpad-reaper.sh syntax check
+        run: bash -n scripts/scratchpad-reaper.sh
+      - name: scratchpad-reaper.test.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/scratchpad-reaper.test.sh
+      - name: the reaper's skip gates can still LOSE (45 checks, 3 differential controls, mktemp git fixtures)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # This is the one harness in this file whose subject DELETES DIRECTORIES,
+        # so it is also the one that must never be allowed to rot into a
+        # presence check. The three controls are differential, not observational:
+        # the SAME fixture path flips SKIP-WORKTREE -> WOULD-REAP when the
+        # registration is removed, SKIP-UNPUSHED -> WOULD-REAP when the commit
+        # is pushed, and the floor REFUSES (2) then PASSES (0) on one path in
+        # one run. A skip that could not flip would prove nothing about the
+        # gate. Every fixture is built under mktemp -d (resolved with pwd -P,
+        # because git prints /private/var while $TMPDIR says /var and the
+        # registration assertion would otherwise compare two spellings and
+        # measure nothing); no real session directory is named or read.
+        run: bash scripts/scratchpad-reaper.test.sh
+      - name: the free-space guard the reaper delegates its verdict to still bites
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # --floor does not grow a second definition of "full": it runs
+        # disk-headroom-guard.sh and propagates its exit code. That makes the
+        # guard's own self-test an input to this lane — until this job existed
+        # the guard had ZERO callers repo-wide.
+        run: bash scripts/disk-headroom-guard.sh --self-test
+      - name: --floor refuses ON THIS RUNNER above its measured free space, and passes below it
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # The harness proves this against a temp dir; this step proves it once
+        # more against the runner's own volume, so the refusal is demonstrated
+        # on a real filesystem and not only on fixtures.
+        run: |
+          set -uo pipefail
+          avail_gb=$(df -P -k . | awk 'NR==2 {print int($4/1024/1024)}')
+          case "$avail_gb" in
+            ''|*[!0-9]*)
+              echo "::error::CANNOT READ — df gave no GiB figure for the workspace; refusing to report a floor verdict it did not measure"
+              exit 1 ;;
+          esac
+          above=$((avail_gb + 1000))
+          bash scripts/scratchpad-reaper.sh --floor "$above" .
+          rc_refuse=$?
+          bash scripts/scratchpad-reaper.sh --floor 0 .
+          rc_pass=$?
+          echo "measured: ${avail_gb} GiB free · floor ${above} GiB -> rc=${rc_refuse} · floor 0 GiB -> rc=${rc_pass}"
+          if [ "$rc_refuse" != "2" ]; then
+            echo "::error::a floor above the measured free space returned $rc_refuse, not the REFUSED code 2"
+            exit 1
+          fi
+          if [ "$rc_pass" != "0" ]; then
+            echo "::error::a floor of 0 GiB returned $rc_pass, not OK"
+            exit 1
+          fi
+          echo "the floor is distinguishable: REFUSED=2, OK=0, on the same path."
