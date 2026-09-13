@@ -178,8 +178,16 @@ resolve_main_sha() {
 }
 
 make_clean_checkout() {
-  # $1 = sha. Sets CLEAN_DIR. Refuses (3) if the checkout is not clean or not
-  # the requested sha — a checkout carrying anything is not evidence about main.
+  # $1 = sha. Sets the GLOBAL CLEAN_DIR. Refuses (3) if the checkout is not
+  # clean or not the requested sha — a checkout carrying anything is not
+  # evidence about main.
+  #
+  # IT PRINTS NOTHING, AND MUST NEVER BE CALLED IN `$(...)`. Measured
+  # 2026-09-13 during this script's own build: called through a command
+  # substitution it set CLEAN_DIR inside a SUBSHELL, the EXIT trap in the
+  # parent saw an empty variable, and every run leaked a detached git worktree
+  # (three of them, before a `git worktree list` caught it). Callers read the
+  # global after `make_clean_checkout "$sha" || return 3`.
   local sha="$1" dir head dirty
   dir="$(mktemp -d "${TMPDIR:-/tmp}/main-red-hold.XXXXXX")" || {
     cannot_read "cannot create a temporary directory for the clean checkout"; return 3; }
@@ -200,7 +208,6 @@ make_clean_checkout() {
     cannot_read "the checkout at $dir is NOT clean — it carries changes, so nothing run in it is evidence about main"
     return 3
   fi
-  printf '%s\n' "$dir"
   return 0
 }
 
@@ -330,7 +337,8 @@ cmd_open() {
   reg_abs="$(reg_path "$reg")"
 
   sha="$(resolve_main_sha "$mainref" "$do_fetch")" || return 3
-  dir="$(make_clean_checkout "$sha")" || return 3
+  make_clean_checkout "$sha" || return 3
+  dir="$CLEAN_DIR"
 
   log="$(mktemp "${TMPDIR:-/tmp}/main-red-hold-log.XXXXXX")" || {
     cannot_read "cannot create a log file for the reproduction"; return 3; }
@@ -590,7 +598,8 @@ cmd_lift() {
     return 3
   fi
 
-  dir="$(make_clean_checkout "$sha")" || return 3
+  make_clean_checkout "$sha" || return 3
+  dir="$CLEAN_DIR"
   log="$(mktemp "${TMPDIR:-/tmp}/main-red-hold-lift.XXXXXX")" || {
     cannot_read "cannot create a log file for the lift measurement"; return 3; }
 
@@ -836,6 +845,15 @@ selftest() {
   if [ "$(wc -l <"$mutant")" -lt "$(wc -l <"$SELF")" ]; then st_ok "13c-pre the mutation actually removed lines"; else st_bad "13c-pre the mutation removed nothing"; fi
   out="$(MAIN_RED_HOLD_ROOT="$fix" bash "$mutant" check --registry "$base/bad.json" internal/widget/w.go 2>&1)"; rc=$?
   if [ "$rc" != "3" ]; then st_ok "13c mutant (registry guard gone) fails OPEN on unparseable JSON (exit $rc, original 3)"; else st_bad "13c mutant still refused: $out"; fi
+
+  # 13d — NO DETACHED WORKTREE IS LEAKED. The clean checkout is a real git
+  #       worktree of the repo under test; a run that leaves one behind poisons
+  #       the next run's `git worktree list` and, in CI, the runner's disk. This
+  #       arm was written because the first cut leaked one PER RUN (see the
+  #       header on make_clean_checkout).
+  local leaked
+  leaked="$(git -C "$fix" worktree list 2>/dev/null | grep -c 'main-red-hold\.')"
+  st_is "13d no detached clean-checkout worktree was leaked by any arm above" "0" "$leaked"
 
   # 14 — the restored original still refuses (the mutations did not leak).
   eval "$RUN" check --registry "$base/bad.json" internal/widget/w.go >/dev/null 2>&1; rc=$?
