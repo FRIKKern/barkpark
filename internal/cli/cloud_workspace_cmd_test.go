@@ -12,6 +12,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -1414,5 +1415,230 @@ func TestCloudWorkspaceExportAbsentDeclaredSizeIsNotAFailure(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "declared size absent") {
 		t.Fatalf("the CLI must SAY the declared size was absent:\n%s", stderr)
+	}
+}
+
+// ── `bp cloud workspace ls` ──────────────────────────────────────────────────
+//
+// The defect these pin (task-62125649e68b4938): `--dataset <ws/proj/ds>` is the
+// most typo-prone input in `bp cloud site create`, and NOTHING in internal/cli
+// enumerated workspaces, projects or datasets — the dispatcher knew export,
+// import and help only. `bp whoami` reports the ONE triple this machine's config
+// points at, which cannot discover a second project and cheerfully reports a
+// typo'd one.
+//
+// The mock serves the three real membership-scoped switcher routes
+// (api/lib/barkpark_web/router.ex, WorkspaceController
+// :index/:projects/:datasets) in the shapes the controller actually renders:
+// `%{workspaces: [%{id, slug, name}]}`, `%{workspace:…, projects: […]}` and
+// `%{workspace:…, project:…, datasets: […]}`.
+
+// workspaceSwitcherMock serves the three switcher routes over a two-workspace
+// fixture. `projectsStatus` (when non-zero) makes the /projects route of
+// `failWorkspace` refuse, so the partial-failure arm has something real to read.
+func workspaceSwitcherMock(t *testing.T, projectsStatus int, failWorkspace string) (*httptest.Server, *[]string) {
+	t.Helper()
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		if r.Header.Get("Authorization") != "Bearer admin-tok" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"code":"unauthorized","message":"no"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/workspaces":
+			_, _ = w.Write([]byte(`{"workspaces":[` +
+				`{"id":"ws-1","slug":"acme","name":"Acme"},` +
+				`{"id":"ws-2","slug":"beta","name":"Beta Co"}]}`))
+		case "/api/workspaces/acme/projects":
+			if projectsStatus != 0 && failWorkspace == "acme" {
+				w.WriteHeader(projectsStatus)
+				_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"not a member of acme"}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"workspace":{"id":"ws-1","slug":"acme","name":"Acme"},` +
+				`"projects":[{"id":"p-1","slug":"web","name":"Web"},{"id":"p-2","slug":"docs","name":"Docs"}]}`))
+		case "/api/workspaces/beta/projects":
+			if projectsStatus != 0 && failWorkspace == "beta" {
+				w.WriteHeader(projectsStatus)
+				_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"not a member of beta"}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"workspace":{"id":"ws-2","slug":"beta","name":"Beta Co"},` +
+				`"projects":[{"id":"p-3","slug":"site","name":"Site"}]}`))
+		case "/api/workspaces/acme/projects/web/datasets":
+			_, _ = w.Write([]byte(`{"datasets":[{"id":"d-1","slug":"production","name":"Production"},` +
+				`{"id":"d-2","slug":"staging","name":"Staging"}]}`))
+		case "/api/workspaces/acme/projects/docs/datasets":
+			_, _ = w.Write([]byte(`{"datasets":[{"id":"d-3","slug":"production","name":"Production"}]}`))
+		case "/api/workspaces/beta/projects/site/datasets":
+			_, _ = w.Write([]byte(`{"datasets":[{"id":"d-4","slug":"production","name":"Production"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"no such route"}}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &seen
+}
+
+// TestCloudWorkspaceListPrintsPasteableTriples: the table carries a ws/proj/ds
+// string per dataset — the whole --dataset argument, not three columns to join.
+func TestCloudWorkspaceListPrintsPasteableTriples(t *testing.T) {
+	workspaceEnvIsolate(t)
+	srv, seen := workspaceSwitcherMock(t, 0, "")
+
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "table", "ls")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	for _, triple := range []string{
+		"acme/web/production", "acme/web/staging", "acme/docs/production", "beta/site/production",
+	} {
+		if !strings.Contains(stdout, triple) {
+			t.Errorf("stdout missing pasteable triple %q — a caller must not have to join columns:\n%s", triple, stdout)
+		}
+	}
+	if !strings.Contains(stdout, "--dataset") {
+		t.Errorf("stdout never names the flag the triples feed:\n%s", stdout)
+	}
+	// The walk really hit all three routes — without this the assertions above
+	// could pass off a single hard-coded response.
+	for _, want := range []string{
+		"GET /api/workspaces",
+		"GET /api/workspaces/acme/projects",
+		"GET /api/workspaces/acme/projects/web/datasets",
+	} {
+		found := false
+		for _, s := range *seen {
+			if s == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("never hit %q; saw %v", want, *seen)
+		}
+	}
+}
+
+// TestCloudWorkspaceListJSONCarriesTriple: `-o json` carries the SAME pasteable
+// string per row plus the flat datasets[] set, so `jq -r '.datasets[]'` is the
+// whole script.
+func TestCloudWorkspaceListJSONCarriesTriple(t *testing.T) {
+	workspaceEnvIsolate(t)
+	srv, _ := workspaceSwitcherMock(t, 0, "")
+
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "json", "ls")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	var got struct {
+		Rows []struct {
+			Dataset   string `json:"dataset"`
+			Workspace string `json:"workspace"`
+			Project   string `json:"project"`
+			Note      string `json:"note"`
+		} `json:"rows"`
+		Datasets []string `json:"datasets"`
+		Complete bool     `json:"complete"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("decode -o json: %v\n%s", err, stdout)
+	}
+	if !got.Complete {
+		t.Errorf("complete = false on an all-200 walk:\n%s", stdout)
+	}
+	if len(got.Rows) != 4 {
+		t.Fatalf("rows = %d, want 4 (2+1 acme datasets + 1 beta):\n%s", len(got.Rows), stdout)
+	}
+	for _, r := range got.Rows {
+		if r.Dataset == "" {
+			t.Errorf("a complete row emitted an empty dataset triple: %+v", r)
+		}
+	}
+	want := map[string]bool{
+		"acme/web/production": true, "acme/web/staging": true,
+		"acme/docs/production": true, "beta/site/production": true,
+	}
+	for _, d := range got.Datasets {
+		delete(want, d)
+	}
+	if len(want) != 0 {
+		t.Errorf("datasets[] missing %v; got %v", want, got.Datasets)
+	}
+}
+
+// TestCloudWorkspaceListNamesUnreadableAndExitsNonZero: a workspace whose
+// projects the token cannot read still PRINTS, with the server's own reason, and
+// the command exits non-zero. A silently-dropped workspace would tell the
+// operator their triple does not exist.
+func TestCloudWorkspaceListNamesUnreadableAndExitsNonZero(t *testing.T) {
+	workspaceEnvIsolate(t)
+	srv, _ := workspaceSwitcherMock(t, http.StatusForbidden, "beta")
+
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "table", "ls")
+	if code == exitOK {
+		t.Fatalf("exit = 0 on a partial list; an incomplete roster must be loud\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	if !strings.Contains(stdout, "beta") {
+		t.Errorf("the unreadable workspace vanished from the output:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "not a member of beta") {
+		t.Errorf("the server's own reason is not on the row:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "acme/web/production") {
+		t.Errorf("one refusal must not cost the workspaces that DID read:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "INCOMPLETE") {
+		t.Errorf("stderr never says the list is incomplete:\n%s", stderr)
+	}
+}
+
+// TestCloudWorkspaceHelpListsLsVerb: the verb is discoverable — `-h` names it in
+// the USAGE block, which is half of what makes a lister a route rather than a
+// secret.
+func TestCloudWorkspaceHelpListsLsVerb(t *testing.T) {
+	workspaceEnvIsolate(t)
+	stdout, stderr, code := runWorkspace(t, globals{}, "table", "-h")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "bp cloud workspace ls") {
+		t.Errorf("USAGE block does not list the ls verb:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "ws/proj/ds") {
+		t.Errorf("help never says what the ls rows are FOR:\n%s", stdout)
+	}
+}
+
+// TestCloudWorkspaceListNarrowsToOneWorkspace: --workspace filters, and a slug
+// this token cannot reach says so rather than printing an empty success.
+func TestCloudWorkspaceListNarrowsToOneWorkspace(t *testing.T) {
+	workspaceEnvIsolate(t)
+	srv, _ := workspaceSwitcherMock(t, 0, "")
+	g := globals{server: srv.URL, token: "admin-tok"}
+
+	stdout, stderr, code := runWorkspace(t, g, "table", "ls", "--workspace", "beta")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "beta/site/production") {
+		t.Errorf("narrowed list lost its own triple:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "acme/") {
+		t.Errorf("--workspace beta still printed acme rows:\n%s", stdout)
+	}
+
+	stdout, stderr, code = runWorkspace(t, g, "table", "ls", "--workspace", "ghost")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "ghost") {
+		t.Errorf("an unreachable slug must be named back:\n%s", stdout)
 	}
 }
