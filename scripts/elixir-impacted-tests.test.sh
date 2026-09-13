@@ -368,7 +368,7 @@ echo "=== §2c  RULE 4 — the fail-closed door (the #18085 blind spot)"
 # changed api/lib/barkpark/content/write_scope.ex so an unresolved write from an
 # attributable caller REFUSES. The selector narrowed to 563 test files, the
 # required Elixir gate went 4/4 green, it merged, and main reddened on the same
-# base at api/test/barkpark/search/indx_engine_scope_test.exs:264 with
+# base at api/test/barkpark/search/indx_engine_scope_test.exs with
 # MatchError {:error, :workspace_scope_required} — a test that calls
 # Content.create_document/4 and reaches the door at RUNTIME without naming it.
 #

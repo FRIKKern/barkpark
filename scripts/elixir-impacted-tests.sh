@@ -61,7 +61,7 @@
 # A SECOND INSTANCE WAS PAID FOR, AND IS NOW A CLASS. #18085 (job 103713658033)
 # changed api/lib/barkpark/content/write_scope.ex — a fail-closed POLICY DOOR —
 # narrowed to 563 files, went 4/4 green, and reddened main at
-# api/test/barkpark/search/indx_engine_scope_test.exs:264. That test calls
+# api/test/barkpark/search/indx_engine_scope_test.exs. That test calls
 # `Content.create_document/4` and reaches the door at RUNTIME without naming it,
 # so neither the closure, nor the by-name net, nor RULE 3 could see it.
 #
@@ -521,7 +521,7 @@ EOF
 # attributable caller REFUSES instead of stamping the seeded Default workspace.
 # The selector narrowed to `running 563 selected test files` -> 8,679 tests,
 # 0 failures, the required Elixir gate went 4/4, it merged, and main went red
-# on the same base at api/test/barkpark/search/indx_engine_scope_test.exs:264
+# on the same base at api/test/barkpark/search/indx_engine_scope_test.exs
 # with `MatchError {:error, :workspace_scope_required}` — 20,832 tests, 1
 # failure. That test file appears ZERO times in the PR job's log.
 #
