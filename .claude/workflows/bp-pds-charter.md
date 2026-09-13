@@ -15402,3 +15402,87 @@ merge sha of that PR is named in the ruling; where nothing enforces a ruling yet
 - **PDS-D740 — PDS-D187 IS AMENDED: THE TRANSCRIPT CLAUSE IS DROPPED.** Suite-only coverage of the TagRegistry provenance guard is the standing position; rung 6 structurally cannot observe `tag_registry.ex:126`; no climb transcript states it because the frozen harness carries no per-guard prose. Why: a standing position that only a transcript restates is a mirror with one reader.
   *WHY: the clause was half-delivered and unremarked — c1 required that dropping it be amended onto the record with its reason, and this is that amendment.*
   PAYS: `pds-bl-tagregistry-standing-position-not-in-transcripts` c1 — "Or, if the clause is dropped, PDS-D187 is amended on the record to say so and why — the standing position is not left half-delivered and unremarked". SOURCE: lead-authored (deploy-r13); no PR proposed text for this row. PDS-D187 lives at `.claude/workflows/bp-pds-charter.md:1499` on `origin/main` — re-verify that line before committing.
+
+- **PDS-D741 — GATE (b) PROTECTS THE LIVE BEAM'S RESIDENCY, NOT THE BOX'S FREE PAGES; MEMAVAILABLE ALONE
+  IS ANTI-CORRELATED WITH IT AND THE FLOOR IS KEPT ONLY AS HALF A CONJUNCTION.**
+  The full-export precondition (b) in `scripts/pds-pull-proof.sh` was one instantaneous `MemAvailable`
+  read against `PDS_FULL_EXPORT_MIN_MEM_MB` (default 2200), and its refusal sentence claimed it stopped
+  the run from "OOMing the LIVE content API". **The measurement refutes the claim.** On the source,
+  2026-07-20, over 55 seconds: `MemAvailable` rose **1,586,644 → 2,984,512 kB** *precisely because* the
+  live BEAM was being paged out — over the same window the beam's `VmSwap` rose **51,624 → 874,760 kB**
+  and its RSS collapsed **1,024,468 → 216,852 kB**. Seven of eight samples cleared the floor. The pages
+  the gate was reading as headroom **were the BEAM's own working set, on disk.** The gate therefore
+  opened most reliably in the one state where materialising a ~1.03 GB single binary is most dangerous,
+  because the export must fault that whole working set back in. A threshold move cannot repair a signal
+  whose sign is wrong.
+
+  **THE DECISION: the gate is KEPT and PAIRED, not retired, and the hazard it names is restated.** What
+  (b) is for is *not* "the box has free pages" — free pages are cheap and, on this box, misleading. It
+  is: **the live beam.smp is RESIDENT, so the export's ~1 GB allocation does not have to be won back from
+  disk while the same BEAM is serving the content API.** (b) is now a conjunction —
+  `MemAvailable >= PDS_FULL_EXPORT_MIN_MEM_MB` **AND** the summed `VmSwap` of every comm-anchored
+  `beam.smp` slot `<= PDS_FULL_EXPORT_MAX_BEAM_SWAP_MB` (default **256**) — with both halves read in ONE
+  SSH round trip so the two numbers describe the same instant. The predicate is factored out as
+  `gate_b_verdict <memavail_kb> <vmswap_kb> <floor_mb> [beam_rss_kb]`, a pure function over numbers, so
+  the 2026-07-20 figures can be replayed through the SHIPPED gate without a box.
+
+  **THE CEILING IS DERIVED, NOT ROUND.** The same window puts ordinary residue at 51,624 kB (50 MB) of
+  beam swap and the pathological readings at 859,944–874,760 kB (839–854 MB). 256 MB sits 5x above the
+  residue and 3.3x below the pathology, and is ~25% of the ~1,000 MB healthy beam RSS baseline measured
+  in that same window: it refuses once a quarter of the live BEAM's working set is on disk.
+
+  **WHY NOT RETIRE IT IN FAVOUR OF STREAMING.** Streaming (`pds-bl-streaming-workspace-export`) is the
+  only change that removes the allocation, and this ruling does not contest that. But it is a SERVER-side
+  change to the export route; gate (b) governs a CLIENT's decision to issue the request, and until
+  streaming ships the gate is the only door in front of the largest allocation this epic makes. Retiring
+  it would replace a gate that lies with no gate at all, on the same box, in the same window. Two recorded
+  facts make keeping it nearly free: a closed gate returns **before** the attempt counter is incremented,
+  so (b) costs no budget and is free to retry; and the box is majority-open (**227/260 = 87.3%** over
+  21.5 minutes; `sar` gives 52.1–70.1% across four days). Tightening an 87.3%-open, free-to-retry gate
+  buys a real refusal at negligible cost. This is a VALIDITY fix, not a scarcity fix.
+
+  **FAIL-CLOSED ON BLINDNESS.** An unreadable `MemAvailable` **or** an unreadable `VmSwap` is `UNKNOWN`,
+  never `OK` — the same law (d) holds under PDS-D98. This matters more here than anywhere: the swapped-out
+  state is exactly the state in which a probe is slow enough to be dropped, so a missing `VmSwap` must not
+  silently degrade back into the single-value gate this ruling exists to refuse.
+
+  **WHAT THE GATE STILL DOES NOT CLAIM, now stated in the honesty banner.** It is a point-in-time reading
+  taken before a multi-minute export, not a reservation: nothing holds that memory, the box can degrade
+  the instant after the probe, and **no precondition on this box makes a one-binary ~1.03 GB export safe.**
+  The gate narrows the window; only streaming closes it.
+
+  **A CORRECTION TO THE ROW'S OWN ARITHMETIC.** The filing cites the 02:13:23Z sample (`VmSwap` 859,944 kB
+  with `MemAvail` 2,206,172 kB) among the readings the gate passed. It did not: the shipped arithmetic is
+  `mem_mb=$((mem_kb / 1024))`, giving **2154 MB against a 2200 MB floor** — a REFUSAL by 46 MB. Only the
+  02:14:18Z sample (2,984,512 kB → 2914 MB) is a demonstrated false-open. The finding is unharmed — one
+  proven false-open on an anti-correlated signal is the whole case — but the "7 of 8 passed" tally should
+  not be re-quoted as if every cited sample were one of the seven.
+
+  PAYS: `pds-bl-gate-b-anticorrelated` c0.
+  SOURCE: this PR (branch `deploy/gate-b-anticorrelated`),
+  `scripts/pds-pull-proof.sh` — `gate_b_verdict()`, the `FULL_MAX_SWAP_MB` derivation block, the (b)
+  block in `acquire_full_bundle`, and the banner's "Full-export GATE scope" bullet.
+
+- **PDS-D742 — THE VISIBILITY CONTROL IS MEASURED, NOT DRIFTED: LEG B REQUIRES REVERSION ONLY ON THE COLUMNS A PRE-SENTINEL DIFF PROVES THE SENTINEL MOVED, AND A ZERO-COVERAGE COLUMN REDS THE RUNG INSTEAD OF RIDING A SILENT GREEN.** The sanctioned thaw REFUSES the row's own c0 remedy — the sentinel keeps writing the constant `visibility = 'private'` — and instead adds a THIRD digest state (pre-sentinel) so the set of columns leg B must see revert is the set the sentinel is measured to have moved, with each column's moved-row count printed, and any guarded column whose moved count is 0 fails rung 6 as "this control could not fire" rather than passing on the other seven.
+
+  `visibility` is `validate_inclusion(:visibility, ~w(public private))` (`api/lib/barkpark/content/schema_definition.ex:107`, default `"public"` at `:11`) — the enum is binary, so there is no non-public drift value and "drift every row" can only mean flipping the 31 natively-private rows to `'public'`, which is exactly the exposure inversion the row's own c7 caveat names: the containment comment (`scripts/pds-pull-proof.sh`, the SENTINEL block — NOT the `:2152-2158` the row cites) says `'private'` 404s anonymous document reads and that this is contained only because step 6 is terminal among target-reading rungs — flipping the other direction un-404s 31 schemas for the length of the run, so the drift remedy buys an n=34 control by weakening the target. The three-state diff buys the same honesty for nothing: the sentinel UPDATE, `scoped_column_digests`/`columns_where` and `leg_b_unmoved = columns_where same "$cols_before" "$cols_clobbered"` already compute per-column md5s, so a pre-sentinel capture taken before the UPDATE yields the moved set directly. This is also the shape the CANCELLED sibling row `pds-bl-legb-visibility-false-red` already proposed ("only require reversion on columns the sentinel moved… strictly stronger… would also cover any future column with a small value domain"), and it is the only shape that keeps PDS-D130's per-column assertion honest in BOTH failure directions — the false red on an all-private roster and the silent 7-of-8 green this row was filed for.
+
+  **SCOPE.** Sanctions edits to `scripts/pds-pull-proof.sh` ONLY, inside rung 6: the sentinel block, the digest/compare helpers, the leg A/leg B compare sites and the `pass 6` line. No other file; in particular `scripts/pds-climb-preflight.sh` is NOT thawed and `FREEZE_BLOB_HISTORICAL` is NOT edited. **RE-FREEZE:** per PDS-D136/D146 the PR body quotes the POST-MERGE blob OID read with `git rev-parse origin/main:scripts/pds-pull-proof.sh` — `git rev-parse`, never `shasum` (PDS-D154) — and that OID is the evidence stamped on the row's thaw criterion (c3). No literal is edited anywhere: since PR #16311 the preflight DERIVES the freeze from `refs/remotes/origin/main:scripts/pds-pull-proof.sh` at run time (`scripts/pds-climb-preflight.sh:113-138`), so the merge itself IS the re-freeze and the harness is frozen again from attempt 1.
+
+  PAYS: `pds-bl-legb-visibility-control-n3` c3 (in part — the "record the new hash" half is OBSOLETE, see above), c5, c7. SOURCE: the wave's thaw ruling, read at `origin/main` `1c71c5a03`.
+
+- **PDS-D743 — RUNG 6's GREEN MUST PRINT WHAT IT PROVED: THE TWO PER-COLUMN VECTORS, A SCOPED HEADLINE DIGEST, AND A BANNER THAT CLAIMS ONLY THE MEASURED COVERAGE.** The same thaw sanctions three visibility corrections in rung 6 — print the leg A changed-columns vector (expected empty) and the leg B moved-columns vector on the PASS path, scope the headline digest to the sentinel scope or label it in the transcript as a whole-table digest, and replace the banner's "sentinelled in all eight guarded columns" with the measured per-column result required by PDS-D181.
+
+  All three are re-confirmed at this sha. `leg_a_changed` and `leg_b_unmoved` are interpolated only into `fail` strings; the `pass 6` line prints `$GUARDED_COLUMNS` — the eight NAMES from the literal — not the measured vector, so a green transcript asserts the per-column result while showing only the constant. `GUARDED_DIGEST_SQL` ends `FROM schema_definitions` with no `WHERE`, so the printed `rows=` is whole-table and includes the `tag`/`metric` rows that `sentinel_scope_sql` deliberately excludes — the transcript's headline is not the quantity either leg measures. And the banner phrase is the exact overclaim PDS-D181 was written to stop; PDS-D742's printed per-column counts are what replaces it, which is why the two rows must not be split.
+
+  **SCOPE.** Same file and same regions as PDS-D742 — `scripts/pds-pull-proof.sh`, the digest/compare helpers, the leg A/leg B compare sites and both `pass 6` lines — plus no other file. **RE-FREEZE:** identical to PDS-D742, and it is ONE re-freeze for both rows because they land in one PR; a second PR would mean a second post-merge OID and two blobs claiming to be the freeze.
+
+  PAYS: `pds-bl-rung6-percolumn-invisible-on-green` c0, c1, c2, and c4 in part (the "record the new hash" half is OBSOLETE). Its own anchors are stale: `:2238`, `:2321`, `:1996`.
+
+- **PDS-D744 — THE THAW PAYS PDS-D100's PRICE WITH TWO FIXTURE DEMOS, AND NEITHER MAY BE A LIVE TARGET MUTATION.** The thaw is licensed only against a SHOWN failure: (i) an all-private in-scope fixture must make the OLD code pass rung 6 with the visibility control proving nothing and the NEW code red it by name, and (ii) a deliberately partial revert must make the new per-column output NAME the missing columns — both pasted into the PR body, and both driven by fixture SQL against a scratch target, never by relaxing an assertion.
+
+  PDS-D100 licenses a filed harness bug to be corrected only with the corrected assertion shown still failing on the pre-fix condition, and PDS-D134 is the precedent for paying that in full (three demos for wave 8's thaw). The two rows already ask for exactly these: c1 and c6 on `pds-bl-legb-visibility-control-n3`, c3 on `pds-bl-rung6-percolumn-invisible-on-green`. The edit must make rung 6 STRICTER on every path — nothing here loosens an assertion, which is the test PDS-D134 set for a legal thaw.
+
+  **SCOPE.** No harness edit of its own; it constrains the PR that carries PDS-D742 and PDS-D743. **RE-FREEZE:** none separately — the demos run against the PRE-merge branch blob, and the freeze that matters is the post-merge OID of PDS-D742.
+
+  PAYS: `pds-bl-legb-visibility-control-n3` c1 and c6; `pds-bl-rung6-percolumn-invisible-on-green` c3. Discharged in `scripts/pds-pull-proof_test.sh` as the nine `rung-6 sentinel coverage` arms, credential-free and target-free (PDS-D31).

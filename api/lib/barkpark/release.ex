@@ -66,7 +66,20 @@ defmodule Barkpark.Release do
   # and survives line moves.
   # sobelow_skip ["RCE.CodeModule"]
   def seed do
-    load_app()
+    # DELIBERATELY `start_app/0`, not `load_app/0`. Unlike migrate, the seed
+    # bodies are ordinary application code: `Barkpark.Seeds.run/0` reaches
+    # `Plugins.Bootstrap.register_all_schemas/0` (needs the live
+    # `Plugins.Registry` GenServer, populated by the `SchemaBootstrap` boot
+    # child), `Content.upsert_schema/2` and `Tenancy`/`Auth` writes (PubSub +
+    # `Barkpark.TaskSupervisor` + `Barkpark.Vault`), and the codelist seeders.
+    # Starting a hand-picked subset here would fork the boot order away from
+    # `Barkpark.Application.child_specs/4` and silently change what a seeded
+    # instance contains. api/** is auto-deploy-exposed (charter D9): the seed
+    # RESULT must not move. Narrowing this step is tracked separately — the
+    # crash storm this module was filed for belongs entirely to `migrate/0`,
+    # which runs FIRST and is what a first-ever boot hits against an empty
+    # schema.
+    start_app()
 
     for repo <- repos() do
       {:ok, _, _} =
@@ -84,7 +97,47 @@ defmodule Barkpark.Release do
     Application.fetch_env!(@app, :ecto_repos)
   end
 
-  defp load_app do
+  @doc """
+  LOAD `:barkpark` without STARTING it.
+
+  `Application.load/1` makes the app's environment (`:ecto_repos`, every
+  `repo.config()`, `:code.priv_dir`) and its modules readable; it runs no
+  `start/2` callback, so no supervision tree exists afterwards. That is the
+  whole point: `bin/barkpark eval "Barkpark.Release.migrate()"` is the FIRST
+  thing `entrypoint.sh` runs, against a database that on a first-ever boot has
+  no tables at all. The previous `Application.ensure_all_started(@app)` booted
+  the entire tree there — `BarkparkWeb.Endpoint`, `Oban`, the plugin tier — so
+  a stranger's first log was a crash storm (`undefined_table` on `workspaces`
+  and `plugin_settings`, `DrainWorker` terminating) emitted BEFORE the
+  migrations that create those tables had run.
+
+  The repo itself is started by `Ecto.Migrator.with_repo/3` at each call site:
+  it starts `:ecto_sql` (plus `:start_apps_before_migration`) and the repo
+  only, and stops what it started when the function returns. Repo-only is
+  exactly what a migration needs.
+
+  Public because it is the reusable "read config, start nothing" step for any
+  one-shot task that then wraps its work in `Ecto.Migrator.with_repo/3`.
+  Idempotent: an already-loaded app returns `:ok`.
+  """
+  @spec load_app() :: :ok
+  def load_app do
+    case Application.load(@app) do
+      :ok -> :ok
+      {:error, {:already_loaded, @app}} -> :ok
+      {:error, reason} -> raise "could not load #{@app}: #{inspect(reason)}"
+    end
+  end
+
+  @doc """
+  Load AND start `:barkpark` — the full supervision tree.
+
+  Only `seed/0` needs this; see the comment there for why. Kept as a named
+  function so the two release steps differ by one obvious call and a reader
+  can see which one boots a tree.
+  """
+  @spec start_app() :: {:ok, [atom()]} | {:error, term()}
+  def start_app do
     Application.ensure_all_started(@app)
   end
 

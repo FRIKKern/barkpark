@@ -200,6 +200,32 @@ defmodule Barkpark.Tasks.Release do
       # same way, or `bp task get` disagrees with itself depending on WHICH
       # verb freed the lease.
       |> Map.delete("resources")
+      # SAME REASON, SECOND FIELD (task-7674bdd9964d953f). `expired_at` is
+      # written by ONE writer, `TtlSweeper.apply_reap/1`, and it means "this
+      # lease LAPSED, at this time". A RELEASE means a worker WALKED AWAY, so
+      # a lapse timestamp on the claim this function stores describes a
+      # SUPERSEDED event: beside a fresh `released_at` it makes the map state
+      # two mutually exclusive reasons at once, and every reader then has to
+      # compare two timestamps to recover which one is current
+      # (`scripts/pr-task-gate.sh` does exactly that, and says so in its CURE
+      # string). The next reader will not know to. Same ruling as `resources`
+      # directly above: a field that no longer describes the row does not
+      # survive the verb that superseded it.
+      #
+      # MEASURED, so nobody re-derives it: the reap -> re-claim -> release
+      # path does NOT reach here carrying `expired_at` today, because
+      # `Tasks.Claim.do_claim_resolved/7` builds its claim as a FRESH map
+      # literal and the re-claim drops the field first. This delete is
+      # therefore the STRUCTURAL guarantee, holding for any claim map handed
+      # to this function — an older engine's row, a `bp doc patch`, or a
+      # future claim path that merges. `release_test.exs` pins the claim-side
+      # behaviour so that future reds here rather than going unnoticed.
+      #
+      # NOT `previous_worker`, deliberately: it records WHO held the lease,
+      # which stays true after a release, and pr-task-gate.sh's `prev_worker`
+      # clause depends on it. NOT `epoch` either — the CAS fence rides on it.
+      # This deletes the one field whose meaning the release falsifies.
+      |> Map.delete("expired_at")
 
     # RULING (task-lifecycle-visibility wave, 2026-07-21): release ALWAYS
     # lands "open" — deliberately NOT a restore of the pre-claim status.

@@ -73,6 +73,11 @@
 #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys # STDOUT: the EXCLUSION anchor, TSV, one line per @routed_excluded row
 #   elixir scripts/pds-elixir-receipt-census.exs --citations # STDOUT: every evidence citation RESOLVED BY CONTENT, TSV: path, line, block fingerprint, marker
 #   elixir scripts/pds-elixir-receipt-census.exs --routed-rows # PROPOSE paste-ready @routed_excluded rows for every undisposed member; NEVER writes
+#   elixir scripts/pds-elixir-receipt-census.exs --emission-shapes # census the OUTSIDE population: every emission shape the `ok: true` lens does NOT see,
+#        over api/lib/barkpark_web/controllers/** — json/2 partitioned ok/error/BARE by an AST
+#        read of the actual argument, plus put_status(2xx), send_resp(2xx), redirect/2, render
+#        and put_flash(:info). ADVISORY over the population (no count reds); reds only on its
+#        own integrity. Prints the ARRIVAL RULE, because a TOTAL over this population is unsound.
 #   elixir scripts/pds-elixir-receipt-census.exs --selftest # mutate this file over a synthetic corpus; prove the arms can go RED
 #
 # EXIT: 0 all integrity checks pass · 1 an integrity check failed · 2 corpus refused OR
@@ -1344,11 +1349,11 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "17468236"},
-      basis_spans: [{74, 78}],
+      basis_spans: [{75, 79}],
       basis_token: "always answers 2xx unless intake genuinely",
       class: "NO-OP-ACK",
       confirmation: "declared",
-      basis: "@doc :74-78 — \"always answers 2xx unless intake genuinely fails\"",
+      basis: "@doc :75-79 — \"always answers 2xx unless intake genuinely fails\"",
       why:
         "the `\"ping\"` clause head is a literal match, not a failure-discarding head, so the arm " <>
           "never fires here. A ping ack claims nothing beyond having been reached."
@@ -1356,11 +1361,11 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "105570378"},
-      basis_spans: [{74, 78}, {87, 87}],
+      basis_spans: [{75, 79}, {88, 88}],
       basis_token: "ignored:",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
-      basis: "the response body itself — `ignored: \"event\"` on :87, plus @doc :74-78",
+      basis: "the response body itself — `ignored: \"event\"` on :88, plus @doc :75-79",
       why:
         "THE ONE ROW THAT ACTUALLY SUPPRESSES. The arm fires here (head `_other`, body renders " <>
           "ok: true, site contained), and it is right to: this IS a catch-all routed to success. " <>
@@ -1774,6 +1779,9 @@ defmodule PDS.Census do
     # "revoking by id actually stops the token authenticating".
     %{key: {"api/lib/barkpark_web/controllers/app_token_controller.ex",
             "BarkparkWeb.AppTokenController.delete_by_id/2", "15384850", "117712781"},
+      stale_ack: %{recorded: {"15384850", "117712781"}, current: {"15384850", "102381692"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 117712781 -> 102381692; head_hash 15384850 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "PROVEN", basis: :end_to_end,
       evidence:
         {"api/test/barkpark_web/controllers/app_token_admin_revoke_test.exs",
@@ -1883,6 +1891,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:164
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "1989150", "124223564"},
+      stale_ack: %{recorded: {"1989150", "124223564"}, current: {"1989150", "63570316"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 124223564 -> 63570316; head_hash 1989150 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs `a valid block paper (locked title at index 0) still saves — positive control`) reads nothing back at all, so it cannot even assert that."},
@@ -1975,6 +1986,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/github_status_controller.ex:65
     %{key: {"api/lib/barkpark_web/controllers/github_status_controller.ex",
             "BarkparkWeb.GithubStatusController.status/2", "63059312", "64996178"},
+      stale_ack: %{recorded: {"63059312", "64996178"}, current: {"63059312", "100969891"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 64996178 -> 100969891; head_hash 63059312 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unexamined},
     # ── THIS CONTROLLER'S `{:error, reason}` 5xx ARMS, DISPOSED (PDS w36 crit 3) ──
     #
@@ -2146,6 +2160,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/oidc_controller.ex:82
     %{key: {"api/lib/barkpark_web/controllers/oidc_controller.ex",
             "BarkparkWeb.OidcController.callback/2", "55913437", "73996638"},
+      stale_ack: %{recorded: {"55913437", "73996638"}, current: {"91406491", "73996638"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: head_hash moved 55913437 -> 91406491; expr_fp 73996638 is unmoved, so the enclosing def's HEAD was re-shaped and the receipt expression was not. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unexamined},
     # barkpark_web/controllers/plugin_settings_controller.ex — update/2 LEFT THIS
     # REGISTER at the wave-39-residue repair (pds-w39-literal-receipt-residue).
@@ -2178,6 +2195,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/saml_controller.ex:66
     %{key: {"api/lib/barkpark_web/controllers/saml_controller.ex",
             "BarkparkWeb.SamlController.acs/2", "32993266", "73996638"},
+      stale_ack: %{recorded: {"32993266", "73996638"}, current: {"63032879", "73996638"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: head_hash moved 32993266 -> 63032879; expr_fp 73996638 is unmoved, so the enclosing def's HEAD was re-shaped and the receipt expression was not. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/saml_controller_test.exs",
          ~S|test "POST ACS consumes a signed response, mints a session, and JIT-provisions", %{conn: conn} do|}},
@@ -2228,6 +2248,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/social_controller.ex:66
     %{key: {"api/lib/barkpark_web/controllers/social_controller.ex",
             "BarkparkWeb.SocialController.callback/2", "9871709", "73996638"},
+      stale_ack: %{recorded: {"9871709", "73996638"}, current: {"33308446", "73996638"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: head_hash moved 9871709 -> 33308446; expr_fp 73996638 is unmoved, so the enclosing def's HEAD was re-shaped and the receipt expression was not. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unexamined},
     # barkpark_web/controllers/tasks_controller.ex:83
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
@@ -2247,16 +2270,25 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:316
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.claim/2", "130674472", "21159066"},
+      stale_ack: %{recorded: {"130674472", "21159066"}, current: {"130674472", "113934956"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 21159066 -> 113934956; head_hash 130674472 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/tasks_controller_test.exs",
          ~S|test "full view keeps ONE claim copy: top-level intact, content echo drops it, storage untouched",|}},
     # barkpark_web/controllers/tasks_controller.ex:371
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.show/2", "107047617", "14030995"},
+      stale_ack: %{recorded: {"107047617", "14030995"}, current: {"107047617", "46106495"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 14030995 -> 46106495; head_hash 107047617 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:435
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.claim_by_id/2", "59151065", "67476"},
+      stale_ack: %{recorded: {"59151065", "67476"}, current: {"59151065", "92118910"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 67476 -> 92118910; head_hash 59151065 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :context_differential_only, evidence:
         {"api/test/barkpark/tasks/receipt_honesty_test.exs",
          ~S|test "claim (claim.ex do_claim)", %{scope: scope} do|}},
@@ -2331,6 +2363,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:861
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.pulse/2", "62712851", "71420310"},
+      stale_ack: %{recorded: {"62712851", "71420310"}, current: {"62712851", "30560441"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 71420310 -> 30560441; head_hash 62712851 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :context_differential_only, evidence:
         {"api/test/barkpark/tasks/receipt_honesty_remainder_test.exs",
          ~S|test "pulse (pulse.ex apply_pulse)", %{scope: scope} do|}},
@@ -2395,18 +2430,30 @@ defmodule PDS.Census do
     # reports, or about it being the postcondition, changed.
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.graph_traverse/3", "72555353", "14314567"},
+      stale_ack: %{recorded: {"72555353", "14314567"}, current: {"72555353", "121457495"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 14314567 -> 121457495; head_hash 72555353 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:984
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.graph_tasks/2", "6484558", "37641606"},
+      stale_ack: %{recorded: {"6484558", "37641606"}, current: {"6484558", "82037153"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 37641606 -> 82037153; head_hash 6484558 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:1008
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.graph_orphans/2", "87006539", "21591304"},
+      stale_ack: %{recorded: {"87006539", "21591304"}, current: {"87006539", "111559021"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 21591304 -> 111559021; head_hash 87006539 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:1015
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.graph_dangling/2", "113055363", "33214619"},
+      stale_ack: %{recorded: {"113055363", "33214619"}, current: {"113055363", "75605829"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 33214619 -> 75605829; head_hash 113055363 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:1142
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
@@ -2451,6 +2498,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:1696
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.fleet_roster/2", "116314994", "118018566"},
+      stale_ack: %{recorded: {"116314994", "118018566"}, current: {"116314994", "21327746"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 118018566 -> 21327746; head_hash 116314994 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tickets_controller.ex:93
     %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
@@ -2558,6 +2608,7 @@ defmodule PDS.Census do
     case parse_args(argv) do
       {:error, msgs} -> refuse_args(msgs)
       %{selftest?: true} -> selftest()
+      %{emission_shapes?: true} -> emission_shapes_run()
       %{citations?: true} -> citations_run()
       %{keys?: true} = opts -> keys_run(opts)
       %{exclusion_keys?: true} = opts -> exclusion_keys_run(opts)
@@ -2579,6 +2630,7 @@ defmodule PDS.Census do
           selftest?: false,
           citations?: false,
           routed_rows?: false,
+          emission_shapes?: false,
           files_from: nil
         },
         []
@@ -2603,6 +2655,13 @@ defmodule PDS.Census do
   defp parse_args(["--routed-rows" | rest], o, bad),
     do: parse_args(rest, %{o | routed_rows?: true}, bad)
 
+  # ON THE STRICT LIST BY NAME, like every other flag. `--emission-shapes` selects a
+  # DIFFERENT CORPUS from every other arm (the controllers subtree, not api/lib), so a
+  # near-miss swallowed into the flagless path would print the api/lib census under a
+  # heading nobody asked for — the exact PDS-D493 shape.
+  defp parse_args(["--emission-shapes" | rest], o, bad),
+    do: parse_args(rest, %{o | emission_shapes?: true}, bad)
+
   defp parse_args(["--files-from", path | rest], o, bad),
     do: parse_args(rest, %{o | files_from: path}, bad)
 
@@ -2617,7 +2676,7 @@ defmodule PDS.Census do
     p("REFUSED: UNKNOWN ARGUMENT")
     Enum.each(msgs, &p("  " <> &1))
     p("")
-    p("  accepted: --sites · --files-from FILE · --keys · --exclusion-keys · --citations · --routed-rows · --selftest")
+    p("  accepted: --sites · --files-from FILE · --keys · --exclusion-keys · --citations · --routed-rows · --emission-shapes · --selftest")
     p("  A swallowed flag is a census measuring a lens nobody asked for. Exit 2.")
     System.halt(2)
   end
@@ -4900,6 +4959,334 @@ defmodule PDS.Census do
 
     System.halt(0)
   end
+
+  # ======================================================== the EMISSION-SHAPE census
+  #
+  # WHAT THIS ARM MEASURES, AND WHY IT IS A DIFFERENT POPULATION. Everything above
+  # censuses the `ok: true` / `"ok" => true` LENS over api/lib. This arm censuses the
+  # population that lens does NOT see: every other shape a controller answers in. Its
+  # corpus is NOT tree_population/0 — it is #{} the controllers subtree named by
+  # @emission_glob, because that is where the wave-38 filing measured and a count
+  # re-derived over a different corpus is not a correction, it is a second number.
+  #
+  # THE PARSE IS AST, WHICH SUBSUMES PAREN-BALANCING. The task asked for a paren-balanced
+  # read of the actual `json/2` argument rather than substring counting. `Code.string_to_quoted/2`
+  # is strictly stronger: the argument arrives as a TREE, so `json(conn, %{ok: true, data:
+  # f(a, b)})` is ONE site with ONE body no matter how many parens the body closes, and a
+  # `json(` occurring inside a string, a comment or a @doc is not a site at all. Pipes are
+  # expanded FIRST (expand_pipes/1, PDS-D491) so `conn |> put_status(:created) |> json(body)`
+  # is seen as json/2 AND as a put_status site — two shapes, one statement, counted once each.
+  #
+  # THE FIXTURE PROVES THE PARSER ON EVERY RUN, BEFORE THE TREE IS READ. @emission_fixture
+  # is censused first and its counts asserted; a classifier that double-counts a nested-paren
+  # body, or that loses a piped json, reds at exit 1 without the tree ever being opened. A
+  # parser nobody proved is a number nobody can quote.
+  #
+  # THIS ARM IS ADVISORY OVER THE POPULATION, AND THAT IS A RULING, NOT AN OMISSION
+  # (PDS-D454, and the wave-38 row's own DRIFT WARNING). Measured across the same tree at
+  # two shas below, every shape here grows at the SAME RATE as the `ok: true` lens itself
+  # — bare json 193 -> 223 while ok: true went 82 -> 86 — so a TOTAL over this population
+  # is a number that reds on growth and greens on deletion, which is the wrong direction
+  # twice. The only sound arm over it is ARRIVAL: a NEW site must carry X. This arm ships
+  # NO such gate; it PRINTS the arrival rule so whoever builds one cannot build a total by
+  # accident. What it DOES red on is its own integrity: an empty corpus (exit 2), a file it
+  # cannot parse, a partition that does not add up, or the fixture above (exit 1).
+  @emission_glob "api/lib/barkpark_web/controllers/**/*.ex"
+
+  # THE PARSER FIXTURE. Four sites, four different shapes, and the FIRST one is the
+  # nested-paren case the task names by hand: a body whose own parens close twice must
+  # classify ONCE. The expected counts live beside it in @emission_fixture_expect.
+  @emission_pair "ok:" <> " true"
+
+  @emission_fixture """
+  defmodule FixtureController do
+    def a(conn, _p), do: json(conn, %{#{@emission_pair}, data: f(a, b)})
+    def b(conn, _p), do: json(conn, %{error: g(h(1), 2)})
+    def c(conn, _p), do: json(conn, %{count: i(j(k(1)))})
+    def d(conn, _p), do: conn |> put_status(:created) |> json(%{id: 1})
+  end
+  """
+
+  @emission_fixture_expect %{json2: 4, ok_true: 1, error: 1, bare: 2, put_status_2xx: 1}
+
+  # THE MECHANICAL / PROSE SPLIT (the task's second criterion). A shape is MECHANICAL when
+  # its success claim is recoverable from the emitted expression alone; it is PROSE-REQUIRED
+  # when the claim lives somewhere the AST does not carry — a template file, a flash string,
+  # a Location header.
+  @emission_mechanical [:json_ok_true, :json_error, :json_bare, :put_status_2xx, :send_resp_2xx]
+  @emission_prose [:redirect, :render_local, :render_dot, :put_flash_info]
+
+  defp emission_shapes_run do
+    emission_banner()
+    emission_prove_parser!()
+
+    files = Path.wildcard(@emission_glob) |> Enum.sort()
+
+    if files == [] do
+      p("REFUSED: EMPTY EMISSION CORPUS — #{@emission_glob} matched no file under #{File.cwd!()}.")
+      p("  A census of nothing prints zeros it cannot stand behind. Exit 2.")
+      System.halt(2)
+    end
+
+    {counts, unparsed} =
+      Enum.reduce(files, {emission_zero(), []}, fn path, {acc, bad} ->
+        case Code.string_to_quoted(File.read!(path), emission_parse_opts()) do
+          {:ok, ast} -> {emission_count(ast, acc), bad}
+          {:error, _} -> {acc, [path | bad]}
+        end
+      end)
+
+    emission_report(counts, files, unparsed)
+  end
+
+  defp emission_parse_opts,
+    do: [
+      literal_encoder: &{:ok, {:__block__, &2, [&1]}},
+      token_metadata: true,
+      columns: true,
+      emit_warnings: false,
+      unescape: false
+    ]
+
+  defp emission_zero,
+    do: %{
+      json2: 0,
+      json_ok_true: 0,
+      json_error: 0,
+      json_bare: 0,
+      put_status_2xx: 0,
+      send_resp_2xx: 0,
+      redirect: 0,
+      render_local: 0,
+      render_dot: 0,
+      put_flash_info: 0
+    }
+
+  # ONE PREWALK, ONE VISIT PER NODE — which is what makes "classify once, not twice" a
+  # property of the traversal and not of a hand-written guard. The nested call inside a
+  # json body is visited too, and is simply not an emission node.
+  defp emission_count(ast, acc) do
+    {_, out} =
+      ast
+      |> expand_pipes()
+      |> Macro.prewalk(acc, fn
+        {:json, _, [_conn, body]} = n, a ->
+          a = %{a | json2: a.json2 + 1}
+
+          key =
+            case emission_classify(body) do
+              :ok_true -> :json_ok_true
+              :error -> :json_error
+              :bare -> :json_bare
+            end
+
+          {n, Map.update!(a, key, &(&1 + 1))}
+
+        {:put_status, _, [_conn, status]} = n, a ->
+          {n, if(status_2xx?(status), do: %{a | put_status_2xx: a.put_status_2xx + 1}, else: a)}
+
+        {:send_resp, _, [_conn, status, _body]} = n, a ->
+          {n, if(status_2xx?(status), do: %{a | send_resp_2xx: a.send_resp_2xx + 1}, else: a)}
+
+        {:redirect, _, [_conn, _to]} = n, a ->
+          {n, %{a | redirect: a.redirect + 1}}
+
+        {:put_flash, _, [_conn, {:__block__, _, [:info]}, _msg]} = n, a ->
+          {n, %{a | put_flash_info: a.put_flash_info + 1}}
+
+        # RENDER HAS TWO SPELLINGS AND THEY ARE COUNTED APART ON PURPOSE. `render(conn, :new)`
+        # is a local call; `Phoenix.Controller.render(conn, ...)` / `MyHTML.render(...)` is a
+        # dot call. A textual `render(` lens sums them and cannot say which moved — which is
+        # exactly why the wave-38 filing's single `render` figure could not be reproduced.
+        {:render, _, [_ | _]} = n, a ->
+          {n, %{a | render_local: a.render_local + 1}}
+
+        {{:., _, [_target, :render]}, _, [_ | _]} = n, a ->
+          {n, %{a | render_dot: a.render_dot + 1}}
+
+        n, a ->
+          {n, a}
+      end)
+
+    out
+  end
+
+  # THE PARTITION OF A `json/2` BODY. `ok: true` (atom or string key) wins; otherwise an
+  # `error` key or an explicit `ok: false` makes it an ERROR receipt; otherwise it is BARE —
+  # a 200 with a body that spells no verdict at all. The three are exhaustive and disjoint
+  # BY CONSTRUCTION (a cond with a true arm), which is what EMISSION-PARTITION-TOTAL checks.
+  defp emission_classify(body) do
+    cond do
+      emission_kv?(body, :ok, &emission_true?/1) or emission_kv?(body, "ok", &emission_true?/1) ->
+        :ok_true
+
+      emission_key?(body, :error) or emission_key?(body, "error") or
+        emission_kv?(body, :ok, &emission_false?/1) or
+          emission_kv?(body, "ok", &emission_false?/1) ->
+        :error
+
+      true ->
+        :bare
+    end
+  end
+
+  # literal_encoder WRAPS EVERY LITERAL, so a keyword pair arrives as
+  # `{{:__block__, _, [:ok]}, {:__block__, _, [true]}}` and a map's pairs arrive the same
+  # way inside `{:%{}, _, pairs}`. One prewalk pattern covers both shapes; a naive
+  # `{:ok, true}` match reads ZERO through the encoder (the trap PDS-D448 names at :3167).
+  defp emission_kv?(body, want, pred) do
+    {_, hit} =
+      Macro.prewalk(body, false, fn
+        {{:__block__, _, [k]}, v} = n, acc when k == want -> {n, acc or pred.(v)}
+        n, acc -> {n, acc}
+      end)
+
+    hit
+  end
+
+  defp emission_key?(body, want), do: emission_kv?(body, want, fn _ -> true end)
+  defp emission_true?({:__block__, _, [v]}), do: v == true
+  defp emission_true?(_), do: false
+  defp emission_false?({:__block__, _, [v]}), do: v == false
+  defp emission_false?(_), do: false
+
+  defp emission_prove_parser! do
+    {:ok, ast} = Code.string_to_quoted(@emission_fixture, emission_parse_opts())
+    got = emission_count(ast, emission_zero())
+
+    want = @emission_fixture_expect
+
+    actual = %{
+      json2: got.json2,
+      ok_true: got.json_ok_true,
+      error: got.json_error,
+      bare: got.json_bare,
+      put_status_2xx: got.put_status_2xx
+    }
+
+    if actual == want do
+      p("parser      EMISSION-PARSER-FIXTURE holds — #{inspect(Map.to_list(want))}")
+      p("            The first fixture site is `json(conn, %{ok: true, data: f(a, b)})`: a body")
+      p("            whose own parens close TWICE and which classifies ONCE. A substring lens")
+      p("            counting `json(` reads that line as 2 sites; this arm reads 1.")
+      p("")
+    else
+      p("")
+      p("FAIL  EMISSION-PARSER-FIXTURE  the parser does not classify its own fixture.")
+      p("      want #{inspect(Map.to_list(want))}")
+      p("      got  #{inspect(Map.to_list(actual))}")
+      p("      A nested-paren body counted twice, or a piped json lost, makes every number")
+      p("      below unquotable. Exit 1.")
+      System.halt(1)
+    end
+  end
+
+  defp emission_banner do
+    {otp, erts} = {System.otp_release(), :erlang.system_info(:version)}
+
+    p("PDS EMISSION-SHAPE CENSUS — the population the `ok: true` lens does NOT see")
+    p(String.duplicate("=", 78))
+    p("engine      Elixir #{System.version()} · Erlang/OTP #{otp} (erts #{erts}) · #{:erlang.system_info(:system_architecture)}")
+    p("corpus      #{@emission_glob}  (NOT tree_population/0 — a narrower population, named)")
+    p("lens        AST (Code.string_to_quoted/2, literal_encoder) with expand_pipes/1 applied")
+    p("            FIRST. Sites are AST nodes, not substrings: a `json(` inside a string, a")
+    p("            comment or a @doc is not a site, and a body with nested parens is ONE site.")
+    p("gate        NONE over the population (PDS-D454). Integrity only: see EXITS below.")
+    p("exits       0 census printed · 1 an integrity arm failed · 2 empty corpus / bad flag")
+    p("")
+  end
+
+  defp emission_report(c, files, unparsed) do
+    render_total = c.render_local + c.render_dot
+
+    p("SHAPE COUNTS — #{length(files)} file(s) parsed")
+    p(String.duplicate("-", 78))
+    p("  json/2 call sites                        #{c.json2}")
+    p("    ├─ carries ok: true (THE LENS)         #{c.json_ok_true}")
+    p("    ├─ carries error: / ok: false          #{c.json_error}")
+    p("    └─ BARE (neither key)                  #{c.json_bare}")
+    p("  put_status(2xx) sites                    #{c.put_status_2xx}")
+    p("  send_resp(2xx, _) sites                  #{c.send_resp_2xx}")
+    p("  redirect/2 sites                         #{c.redirect}")
+    p("  render sites (local + dot)               #{render_total}   (local #{c.render_local} · dot #{c.render_dot})")
+    p("  put_flash(:info, _) sites                #{c.put_flash_info}")
+    p("")
+
+    mech = Enum.sum(Enum.map(@emission_mechanical, &emission_n(c, &1)))
+    prose = Enum.sum(Enum.map(@emission_prose, &emission_n(c, &1)))
+
+    p("MECHANICALLY CLASSIFIABLE vs PROSE-REQUIRED")
+    p(String.duplicate("-", 78))
+    p("  MECHANICAL  #{mech}  — the success claim is recoverable from the emitted expression")
+    Enum.each(@emission_mechanical, &p("                #{String.pad_trailing(to_string(&1), 20)} #{emission_n(c, &1)}"))
+    p("      json/2 partitions into ok / error / bare with ZERO ambiguity: the body is a tree,")
+    p("      the keys are literals, and the cond that splits them has a total arm.")
+    p("")
+    p("  PROSE       #{prose}  — the claim lives where the AST does not carry it")
+    Enum.each(@emission_prose, &p("                #{String.pad_trailing(to_string(&1), 20)} #{emission_n(c, &1)}"))
+    p("      A redirect answers with no body; a render's claim is in a template file; a flash")
+    p("      string is a sentence for a person. Disposition for these needs a reader, not a parser.")
+    p("")
+
+    p("THE ARRIVAL RULE — READ THIS BEFORE ARMING ANYTHING OVER THESE NUMBERS")
+    p(String.duplicate("-", 78))
+    p("  NO ARM IN THIS FILE REDS ON ANY COUNT ABOVE, and none should. Measured over this")
+    p("  same corpus at two shas (c2affd445, 2026-08-02 -> bc9eff9c7, 2026-09-13): json/2")
+    p("  446 -> 499, bare 193 -> 223, error 171 -> 190, while the `ok: true` LENS itself")
+    p("  went 82 -> 86. The outside population grows at the lens's own rate, so a TOTAL over")
+    p("  it reds on ordinary growth and GREENS ON DELETION — wrong in both directions.")
+    p("  THE ONLY SOUND ARM IS ARRIVAL: a NEW site must carry X. Key the baseline by site")
+    p("  (path + enclosing mfa + expression fingerprint, the way site_key/1 does above),")
+    p("  diff the KEY SET, and judge only the keys that ARRIVED. A count is not a key set.")
+    p("")
+
+    arms = [
+      emission_arm(
+        "EMISSION-PARTITION-TOTAL",
+        c.json_ok_true + c.json_error + c.json_bare == c.json2,
+        "ok #{c.json_ok_true} + error #{c.json_error} + bare #{c.json_bare} == json/2 #{c.json2}",
+        "the json/2 partition does not add up — #{c.json_ok_true} + #{c.json_error} + #{c.json_bare} != #{c.json2}; a site fell out of the taxonomy"
+      ),
+      emission_arm(
+        "EMISSION-CORPUS-PARSES",
+        unparsed == [],
+        "every file in the corpus parsed",
+        "#{length(unparsed)} file(s) did not parse and were SILENTLY absent from every count above: #{Enum.join(Enum.sort(unparsed), ", ")}"
+      ),
+      emission_arm(
+        "EMISSION-LENS-IS-A-SUBSET",
+        c.json_ok_true <= c.json2,
+        "the ok: true lens is a subset of the json/2 population",
+        "the lens counts MORE sites than the population it partitions"
+      )
+    ]
+
+    p("INTEGRITY ARMS — these red on THIS INSTRUMENT, never on the population")
+    p(String.duplicate("-", 78))
+    Enum.each(arms, fn a -> p("  #{if a.ok?, do: "PASS", else: "FAIL"}  #{String.pad_trailing(a.name, 26)} #{a.why}") end)
+    p("")
+
+    if Enum.all?(arms, & &1.ok?) do
+      p("EMISSION CENSUS OK — #{c.json2 + c.put_status_2xx + c.send_resp_2xx + c.redirect + render_total + c.put_flash_info} emission sites over #{length(files)} files, ADVISORY, arrival-only.")
+      System.halt(0)
+    else
+      p("EMISSION CENSUS FAILED — an integrity arm went red. The counts above are not quotable.")
+      System.halt(1)
+    end
+  end
+
+  defp emission_n(c, :json_ok_true), do: c.json_ok_true
+  defp emission_n(c, :json_error), do: c.json_error
+  defp emission_n(c, :json_bare), do: c.json_bare
+  defp emission_n(c, :put_status_2xx), do: c.put_status_2xx
+  defp emission_n(c, :send_resp_2xx), do: c.send_resp_2xx
+  defp emission_n(c, :redirect), do: c.redirect
+  defp emission_n(c, :render_local), do: c.render_local
+  defp emission_n(c, :render_dot), do: c.render_dot
+  defp emission_n(c, :put_flash_info), do: c.put_flash_info
+
+  defp emission_arm(name, true, why, _), do: %{name: name, ok?: true, why: why}
+  defp emission_arm(name, false, _, why), do: %{name: name, ok?: false, why: why}
 
   # ---------------------------------------------------------------- reporting
 
@@ -11753,6 +12140,38 @@ defmodule PDS.Census do
       expect: ["FAIL  REGISTER-RETIRED-STAYS-RETIRED", "RESURRECTED"],
       proves: "a RETIRED row whose site is live again reds by name instead of quietly re-adopting the site — the retired form cannot be used as a suppression switch"
     },
+    # THE HASH ARM (task-2045aba7304ea724), CORPUS :repo FOR THE SAME REASON AS ITS
+    # NEIGHBOURS: the register arms are scoped to the corpus the register's paths live in,
+    # so a mutant over the synthetic tree would be proven exactly where the arm is off.
+    %{
+      name: "REGISTER-STALE-ACK-SEES-A-CORRUPT-HASH",
+      corpus: :repo,
+      argv: [],
+      # ONE DIGIT OF ONE RECORDED head_hash, on a row that resolves LIVE today. Before this
+      # arm existed the same mutation exited 0 with `PASS  REGISTER-COMPLETE`, moving the
+      # demoted population 15 -> 16 and nothing else — the whole defect in one character.
+      mut:
+        {"Web.ImportController.create/2\", \"513" <> "20322\"",
+         "Web.ImportController.create/2\", \"51320323\""},
+      exit: 1,
+      expect: ["FAIL  REGISTER-STALE-ACKED", "UNDECLARED MISMATCH", "NO stale_ack"],
+      proves: "a recorded hash that is not the hash its site derives, and that no stale_ack declares, REDS by name — the property is `a wrong hash cannot pass`, and it is proven on the exact mutation that used to pass"
+    },
+    %{
+      name: "REGISTER-STALE-ACK-NOT-VACUOUS",
+      corpus: :repo,
+      argv: [],
+      # THE 0-OF-N SHAPE, the same one ROSTER-FRESH-NOT-VACUOUS and
+      # EXCLUSION-NARROW-NOT-VACUOUS pin: an arm that verifies NOTHING also passes on a
+      # correct register and is indistinguishable from the fix. Emptying the judged set is
+      # the cheapest way to ask whether the count in the PASS sentence is measured.
+      mut:
+        {"resolve_register(classified), st in [:live" <> ", :stale], do: {r, st, s}",
+         "resolve_register(classified), st in [], do: {r, st, s}"},
+      exit: 1,
+      expect: ["FAIL  REGISTER-STALE-ACKED", "certified an EMPTY SET", "0 row(s) hash-verified"],
+      proves: "the arm reds on its own vacuity instead of printing PASS over an empty set — the hash-verified count in its PASS sentence is a measurement, not a constant"
+    },
     # THE ONE-HOP JOIN (PDS wave 41), AND WHY ITS CORPUS IS THE REPO. The join's whole
     # subject is a HOP between two real defs, and the synthetic tree's controllers respond
     # in their own bodies — a fixture would exercise the code and prove nothing about it.
@@ -12167,6 +12586,15 @@ defmodule PDS.Census do
     # STALE SPECIMEN; the mutated one must. That is a discriminator no honest register
     # edit can flip, and it proves the whole path end to end: demotion -> specimen ->
     # printed sentence -> the arm's PASS.
+    #
+    # AND ITS EXIT CODE MOVED 0 -> 1 WHEN REGISTER-STALE-ACKED WAS ARMED
+    # (task-2045aba7304ea724), WHICH IS THE POINT AND NOT COLLATERAL. This case
+    # MANUFACTURES exactly the thing that arm refuses: a recorded expr_fp that is not the
+    # one its site derives, declared by nothing. Before the arm existed the manufactured
+    # corruption exited 0 with CENSUS OK — the whole defect, sitting inside this file's own
+    # selftest. The four prose assertions below are unchanged and still carry the case's
+    # subject; what changed is that the tree now SAYS SO. A run where this mutation still
+    # exited 0 would mean the new arm had gone blind.
     %{
       name: "LADDER-STALE-ARM-SPECIMEN",
       corpus: :repo,
@@ -12174,15 +12602,16 @@ defmodule PDS.Census do
       mut:
         {"\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"17468236\"},",
          "\"BarkparkWeb.SecretController.delete/2\", \"115609568\", " <> "\"999999999\"},"},
-      exit: 0,
+      exit: 1,
       expect: [
         "the freshness arm MOVES ON THIS TREE",
         "STALE SPECIMEN  BarkparkWeb.SecretController.delete",
         "PASS  LADDER-STALE-ARM-EXERCISED",
-        "CENSUS OK"
+        "FAIL  REGISTER-STALE-ACKED",
+        "UNDECLARED MISMATCH"
       ],
       refute: ["the freshness arm is a NO-OP ON THIS TREE"],
-      proves: "the :stale arm can be MADE to fire from committed data alone: demoting one PROVEN register row's expression fingerprint sends resolve_register/1 down its {path, mfa} fallback, the row resolves :stale, and that row's def appears as a NAMED STALE SPECIMEN admitted to leg A by the :stale arm and by nothing else — which is what the printed zero of wave 45 could not show"
+      proves: "the :stale arm can be MADE to fire from committed data alone: demoting one PROVEN register row's expression fingerprint sends resolve_register/1 down its {path, mfa} fallback, the row resolves :stale, and that row's def appears as a NAMED STALE SPECIMEN admitted to leg A by the :stale arm and by nothing else — which is what the printed zero of wave 45 could not show. IT NOW ALSO PROVES THE SECOND HALF: the same manufactured demotion, declared by nothing, REDS REGISTER-STALE-ACKED at exit 1 where it used to print CENSUS OK"
     },
     # THE POPULATION BASELINE STOPS BEING ADVISORY (PDS-D678, wave 47), AND THE CORPUS IS
     # THE REPO FOR THE SAME REASON THE ROSTER CASES USE IT: baseline_checks/2 is scoped by
@@ -12540,6 +12969,65 @@ defmodule PDS.Census do
       expect: ["MINTS DECIDE", "CENSUS OK"],
       refute: ["NO mint decides a printed class this run"],
       proves: "the exact measure is the intersection and NOT the proxy: substitute `best_minted` (a mint anywhere in the winning substitution) back into the slot the intersection fills and the derived verdict flips from NO mint decides to MINTS DECIDE, at exit 0 both times — which is precisely how the overstatement shipped unnoticed"
+    },
+    # ---------------------------------------------- the EMISSION-SHAPE arm (wave 38)
+    #
+    # THESE FOUR RUN OVER THE `:repo` CORPUS, NOT THE SYNTHETIC ONE, AND THEY HAVE TO.
+    # `--emission-shapes` censuses api/lib/barkpark_web/controllers/**, which the synthetic
+    # tree does not hold at all — over `:full` the arm would refuse an EMPTY CORPUS at exit 2
+    # and every mutant below would "red" for a reason that has nothing to do with the mutation
+    # (PDS-D541, the same reason ROSTER-VERDICT-FRESH runs against the repo).
+    %{
+      name: "EMISSION-SHAPES-GREEN",
+      corpus: :repo,
+      argv: ["--emission-shapes"],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "EMISSION-PARSER-FIXTURE holds",
+        "EMISSION CENSUS OK",
+        "THE ARRIVAL RULE",
+        "ADVISORY, arrival-only"
+      ],
+      proves: "the emission census runs clean over the real controllers tree AND prints the arrival rule — so every red below is the mutation, and no reader can quote a count without reading why a total over it is unsound"
+    },
+    %{
+      name: "EMISSION-ARGV-STRICT",
+      corpus: :repo,
+      argv: ["--emission-shape"],
+      mut: nil,
+      exit: 2,
+      expect: ["REFUSED: UNKNOWN ARGUMENT", "--emission-shapes"],
+      proves: "the singular near-miss refuses instead of falling through to the api/lib census — this flag selects a DIFFERENT CORPUS, so a swallowed near-miss would print one population under the other's heading"
+    },
+    %{
+      name: "EMISSION-DOUBLE-COUNT",
+      corpus: :repo,
+      argv: ["--emission-shapes"],
+      mut: {"a = %{a | json2: a.json2" <> " + 1}", "a = %{a | json2: a.json2 + 2}"},
+      exit: 1,
+      expect: ["FAIL  EMISSION-PARSER-FIXTURE", "want", "got"],
+      proves: "a json/2 site counted TWICE reds on the fixture before the tree is opened — which is the substring-lens failure this arm exists to rule out: `json(conn, %{ok: true, data: f(a, b)})` closes its parens twice and must still be ONE site"
+    },
+    %{
+      name: "EMISSION-PIPED-JSON-LOST",
+      corpus: :repo,
+      argv: ["--emission-shapes"],
+      mut: {"    ast\n      |> expand_pipes()" <> "\n", "    ast\n"},
+      exit: 1,
+      expect: ["FAIL  EMISSION-PARSER-FIXTURE"],
+      proves: "dropping expand_pipes/1 makes `conn |> put_status(:created) |> json(body)` invisible as a json/2 site (PDS-D491) — the fixture's fourth site is exactly that shape, so the loss reds instead of quietly shrinking the denominator"
+    },
+    %{
+      name: "EMISSION-PARTITION-TOTAL",
+      corpus: :repo,
+      argv: ["--emission-shapes"],
+      mut:
+        {"c.json_ok_true + c.json_error + c.json_bare == c.json2," <> "\n",
+         "c.json_ok_true + c.json_error + c.json_bare == c.json2 + 1,\n"},
+      exit: 1,
+      expect: ["FAIL  EMISSION-PARTITION-TOTAL", "EMISSION CENSUS FAILED"],
+      proves: "the partition arm itself can go RED and exits 1 naming itself — the fixture arm shadows every partition break the fixture can SEE, so the arm is perturbed directly, the way CORPUS-INTACT bypasses the guard that shadows it"
     }
   ]
 
@@ -14054,6 +14542,7 @@ defmodule PDS.Census do
       :real ->
         [
           register_complete(classified),
+          register_stale_acked(classified),
           register_retired_intact(classified),
           declared_rows_resolve(classified),
           declared_basis_intact(parsed),
@@ -14113,6 +14602,99 @@ defmodule PDS.Census do
       end
 
     {"REGISTER-COMPLETE", ok?, why}
+  end
+
+  # THE HASH IS POLICED OR IT IS DECORATION (task-2045aba7304ea724). REGISTER-COMPLETE
+  # joins a row to its site on the four-field key FIRST, but a row whose recorded
+  # head_hash/expr_fp no longer derive falls to the {path, mfa} fallback in
+  # resolve_register/1, which destructures the hash away (`{path, mfa, _, _} = r.key`) and
+  # resolves :stale — and :stale sits inside `covered`, so the site counts as judged and
+  # the gate PASSES. MEASURED on 9b5dc6c35, never inferred: changing ONE digit of a LIVE
+  # row's recorded head_hash (Barkpark.Plugins.Sheets.Web.ImportController.create/2,
+  # 51320322 -> 51320323) left rc=0 with `PASS  REGISTER-COMPLETE` and moved the demoted
+  # population 15 -> 16; changing the FUNCTION key of a row reds at rc=1 naming the
+  # orphan. The function key was policed; the hash was policed only by a counter no arm
+  # reads.
+  #
+  # WHAT THIS ARM IS NOT. It is NOT "basis_stale must be zero". A floor over an honest
+  # population reds on every legitimate edit, and a red that cannot separate a moved body
+  # from a wrong hash is the false alarm that gets the arm switched off. The property is
+  # A WRONG HASH CANNOT PASS.
+  #
+  # WHAT IT IS. Every stale demotion must be DECLARED by a `stale_ack` on its own row, and
+  # the declaration pins BOTH pairs: the `recorded` {head_hash, expr_fp} the row carries
+  # and the `current` pair its site derives today. A divergence nobody declared is a wrong
+  # hash and reds.
+  #   · PINNING `recorded` is what gives the arm teeth on an ALREADY-STALE row. Pin only
+  #     `current` and corrupting the RECORDED hash of a declared-stale row still passes —
+  #     the same blindness, one row over. Measured: on 9b5dc6c35 that corruption is
+  #     invisible even to the counter (the demoted population stays at 15).
+  #   · PINNING `current` is what makes a declaration SELF-INVALIDATING. The next real edit
+  #     under that row moves the current pair, the ack stops describing it, and the row
+  #     reds again asking to be re-derived. A declaration is never permanent permission to
+  #     be stale — that is the tightening, and it is why this is not a ratchet that sits.
+  #   · AN ACK ON A ROW THAT IS NOT STALE REDS TOO. A declaration left behind after a
+  #     re-derivation describes nothing, and a dead ack is exactly how a suppression switch
+  #     gets built out of an honesty field.
+  #
+  # FAIL-CLOSED IMMEDIATELY, NOT RATCHETED FROM THE CURRENT POPULATION. All 15 demotions
+  # live on 9b5dc6c35 were triaged and carry a stale_ack transcribed FROM A RUN of this
+  # census (never re-typed from a comment), so the armed arm is green at 0 undeclared on
+  # the day it lands and the 16th is a red. None was "re-derived": editing a recorded key
+  # to match a moved body silently re-adopts a bought verdict for code the author never
+  # read, which is the defect this register exists to refuse — the honest repair is to
+  # re-JUDGE the row, and until someone does, the row stands demoted AND declared.
+  #
+  # THE ZERO FLOOR. An arm that verifies nothing also passes on a correct register and is
+  # indistinguishable from the fix, so a run that hash-verifies 0 rows REDS on its own
+  # vacuity rather than printing PASS over an empty set.
+  defp register_stale_acked(classified) do
+    judged =
+      for {r, st, s} <- resolve_register(classified), st in [:live, :stale], do: {r, st, s}
+
+    exact = Enum.count(judged, fn {_r, st, _s} -> st == :live end)
+    declared = Enum.count(judged, fn {_r, st, _s} -> st == :stale end)
+
+    faults =
+      Enum.flat_map(judged, fn {r, st, s} ->
+        {path, mfa, hh, fp} = r.key
+        ack = Map.get(r, :stale_ack)
+        now = {head_hash(s), expr_fp(s)}
+        where = "#{short(path)} #{mfa}"
+
+        cond do
+          st == :live and is_nil(ack) ->
+            []
+
+          st == :live ->
+            ["DEAD ACK #{where} — the row resolves on its EXACT recorded key #{hh}/#{fp}, so its stale_ack describes nothing; delete it"]
+
+          is_nil(ack) ->
+            ["UNDECLARED MISMATCH #{where} — recorded #{hh}/#{fp} · current #{elem(now, 0)}/#{elem(now, 1)} · NO stale_ack: this row's committed hash is not the hash its site derives and nothing says why"]
+
+          Map.get(ack, :recorded) != {hh, fp} ->
+            ["ACK DOES NOT PIN THE RECORDED KEY #{where} — the row carries #{hh}/#{fp}, the ack declares #{inspect(Map.get(ack, :recorded))}"]
+
+          Map.get(ack, :current) != now ->
+            ["ACK IS OUT OF DATE #{where} — the ack declares current #{inspect(Map.get(ack, :current))}, the site derives #{elem(now, 0)}/#{elem(now, 1)}: the body moved again, so RE-JUDGE the row and re-derive the ack"]
+
+          true ->
+            []
+        end
+      end)
+
+    vacuous = if judged == [], do: ["VACUOUS — 0 row(s) hash-verified: this arm certified an EMPTY SET"], else: []
+    red = vacuous ++ faults
+
+    why =
+      if red == [] do
+        "hash-verified #{length(judged)} of #{length(@register)} row(s) against the {head_hash, expr_fp} their site DERIVES — #{exact} on an exact recorded-key match, #{declared} declared-stale with a stale_ack pinning BOTH the recorded and the current pair — 0 undeclared mismatch(es)"
+      else
+        "#{length(red)} row(s) whose recorded hash is not accounted for (#{length(judged)} hash-verified): " <>
+          Enum.join(Enum.take(red, 4), " · ")
+      end
+
+    {"REGISTER-STALE-ACKED", red == [], why}
   end
 
   # A RETIRED ROW THAT RESOLVES AGAIN IS A CONTRADICTION, NEVER A QUIET RE-ADOPTION. The

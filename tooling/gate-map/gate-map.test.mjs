@@ -43,9 +43,30 @@ test("THE WAVE-16 EDGE: __css_check's directory readdir is derived, not imported
     sites.some((s) => s.kind === "dir" && s.p === "cloud/priv/static/__preview__"),
     "the readdirSync over __preview__ is a derived scan site"
   );
-  // The negative half: __css_check does NOT import or name the sweep, so an
-  // import-graph reader could not have found this. Prove the absence.
-  assert.ok(!/breakpoint-sweep/.test(src), "__css_check never names breakpoint-sweep — only the directory scan links them");
+  // The negative half: __css_check does NOT import or name the sweep IN CODE, so
+  // an import-graph reader could not have found this. Prove the absence.
+  //
+  // COMMENTS ARE NOT LINKS, and reading them as links made this test wrong.
+  // #17919 (dcbd22469) added a `//` line to __css_check.mjs naming
+  // __preview__/breakpoint-sweep.mjs while arguing about E11's anchor grammar.
+  // No import, no path read, nothing an import-graph reader could follow — but
+  // the raw-source regex below saw the name and reddened every completed main
+  // run of shell-harnesses.yml from 2026-09-12T14:43Z onward (measured
+  // 2026-09-13, run 34753745582, job "reland-check / fleet-run-verdict /
+  // paper-reader-audit harnesses", subtest 2). So the absence is asserted over
+  // the CODE, with comments stripped — the property the test was always about.
+  //
+  // WHOLE-LINE `//` ONLY, and deliberately not a block-comment strip: this file
+  // writes all its prose in `//` lines, and 44 of those lines (plus a string
+  // literal at :810) contain a bare `/*` token, so a `/\*[\s\S]*?\*\//`
+  // replace swallows the file from :55 past :1139 and the absence below goes
+  // vacuous — measured here 2026-09-13 by the control on the next line, which
+  // caught it.
+  const code = src.replace(/^[ \t]*\/\/.*$/gm, " ");
+  // The stripper's own control: a regex that ate the file would make the
+  // absence below vacuously true, so prove the code survived it.
+  assert.ok(/readdirSync/.test(code), "comment-stripping left __css_check's code intact (the absence below is not vacuous)");
+  assert.ok(!/breakpoint-sweep/.test(code), "__css_check never names breakpoint-sweep in code — only the directory scan links them");
 });
 
 test("relative dynamic imports and new URL reads are derived as file scan sites", () => {

@@ -3058,6 +3058,75 @@ const EXPECTATIONS = {
       assert.ok(!body.includes("new-progress"), "the progress theater has handed over");
     },
   },
+  // cch-w48-s1-followup — THE FUNNEL'S OWN UNKNOWN ARM, RENDERED AT LAST.
+  // cch-w48-s1 gave the /new launch step a three-valued band and the shared
+  // [data-me-retry] exit, and pinned both in node. No committed fixture ever
+  // answered /v1/me with anything but a 200 on this path, so the exit existed in
+  // the corpus only as an assertion about a string: nothing proved a browser
+  // paints it, or that the form is really withheld behind it.
+  "new-launch-me-unreadable": {
+    what: "/new whose /v1/me 500s — the honest unknown arm with its ONE Retry, and no form behind it",
+    check(reg) {
+      assert.equal(reg.get("new-screen").hidden, false, "the /new screen must be visible");
+      assert.equal(reg.get("app-shell").hidden, true, "the app shell stays hidden on /new");
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes('class="new-title">Astro Blog'), "the template card still renders — only the OFFER is withheld");
+      // FAIL CLOSED: the step withholds the whole form, never a disabled ghost.
+      assert.ok(!body.includes("new-launch-btn"), "an unread role must not sell the Launch the server may refuse");
+      assert.ok(!body.includes("new-name"), "…and not the name field behind it either");
+      // The honest fault, and the ONE exit — this is the byte-level proof the
+      // node pin could not buy: a real browser paints the retry on this screen.
+      assert.ok(body.includes("We couldn't check your account"), "a failed read is reported as a fault, never as a refusal");
+      assert.ok(body.includes("We can&#39;t offer Launch until we know your role on this team."),
+        "the per-surface consequence names what is withheld and why");
+      assert.equal(countMatches(body, "data-me-retry"), 1, "exactly one exit — the page's own, not the dashboard's");
+      assert.ok(!body.includes("admin role on this team"), "a fault is not a refusal: it must not name a role nobody asked about");
+    },
+  },
+
+  // ── cch-r16-w11: the launch wizard's own elevated writes, BOTH WAYS ─────────
+  // The three rows this pair and `theater-failed-member` retire from
+  // __binding_census.mjs's UNPREDICATED list. Each member assertion is an
+  // ABSENCE, so it is paired with the twin that PROVES the control renders at
+  // all — the only way an absence is a measurement rather than a statement
+  // about markup nobody paints.
+  "theater-ready-github": {
+    what: "the /new ready hero with GitHub connected, as the OWNER — #new-gh-create is LIVE (the grant arm keeps its shipped btn-primary bytes)",
+    check(reg) {
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes("Hugin is ready"), "the hero names the live instance");
+      assert.ok(body.includes('<button class="btn btn-primary" type="button" id="new-gh-create">Create GitHub repo</button>'),
+        "the owner gets the live create button, byte for byte the class list it shipped with");
+      assert.ok(body.includes('id="new-gh-name" type="text"'), "the repo-name field is live beside it");
+      assert.ok(!body.includes("inst-life-disabled"), "nothing on the owner's ready screen is disabled-and-explained");
+    },
+  },
+  "theater-ready-github-member": {
+    what: "the same screen as a plain MEMBER — no live #new-gh-create anywhere in the bytes, the disabled-and-explained arm and a disabled name field instead",
+    check(reg) {
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes("Hugin is ready"), "the member still reaches the ready screen — only the elevated write is withheld");
+      assert.ok(!body.includes('id="new-gh-create"'),
+        "adminWriteControlHtml's refusal arm DROPS liveAttrs: there must be no mount hook at all");
+      assert.ok(body.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Create GitHub repo</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
+        "the same verb is drawn disabled, with its own inline reason (this block has no group reason id)");
+      assert.ok(body.includes('id="new-gh-name" type="text" value="astro-blog" spellcheck="false" disabled'),
+        "the name field goes with the button — a live field beside a dead button is an invitation to a 403");
+    },
+  },
+  "theater-failed-member": {
+    what: "the /new failure screen as a plain MEMBER — no live #new-retry (the third offer site of POST /v1/barkparks/:id/retry), the disabled-and-explained arm instead",
+    check(reg) {
+      const body = reg.get("new-body").innerHTML || "";
+      assert.ok(body.includes("Setup didn&#39;t finish"), "the member still reads what broke");
+      assert.ok(body.includes("the TLS certificate was never issued"), "provision_error renders verbatim for a member too");
+      assert.equal(countMatches(body, 'id="new-retry"'), 0,
+        "the refusal arm drops the id — there is no hook to click and none to wire");
+      assert.ok(body.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Retry setup</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
+        "Retry setup is drawn disabled-and-explained, the same way the shell's two offer sites of this verb already refuse");
+      assert.ok(body.includes("new-console"), "the console stays on the failed screen for a member too");
+    },
+  },
 
   // ── gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview states (tail-append, OC9) ─
   "overview-trial-runway": {

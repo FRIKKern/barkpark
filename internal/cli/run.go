@@ -117,7 +117,7 @@ func (e *dispatchError) Error() string { return e.msg }
 // so it must run exactly once per invocation.
 func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string, ownsProcessStdin bool) (*manifestRequest, *dispatchError) {
 	// Split tail into positional args and command-local flags.
-	posArgs, cmdFlags, err := splitArgs(cmd, tail)
+	posArgs, cmdFlags, err := splitArgsWithManifest(m, cmd, tail)
 	if err != nil {
 		// A manifest/parser DRIFT refusal is not a typo: it names the stale
 		// install and the one command that fixes it, so the per-command usage
@@ -1468,6 +1468,15 @@ func flagShaped(tok string, byName map[string]manifest.Flag) bool {
 // --filter: the rule is general and every non-repeatable flag on every command
 // is covered by it.
 func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[string][]string, err error) {
+	return splitArgsWithManifest(nil, cmd, tail)
+}
+
+// splitArgsWithManifest is splitArgs with the loaded manifest in hand. The
+// manifest is used for ONE thing: deciding whether an unknown flag is a stale
+// binary (drift) or a cross-reference to a flag some OTHER command declares —
+// see unknownFlagError. Every other parsing rule is identical, so the nil-
+// manifest wrapper above is behaviour-preserving for callers that have none.
+func splitArgsWithManifest(m *manifest.Manifest, cmd manifest.Command, tail []string) (pos []string, flags map[string][]string, err error) {
 	flags = map[string][]string{}
 	byName := map[string]manifest.Flag{}
 	for _, f := range cmd.Flags {
@@ -1490,7 +1499,7 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 			}
 			f, ok := byName[name]
 			if !ok {
-				return nil, nil, unknownFlagError(cmd, "--"+name, name)
+				return nil, nil, unknownFlagError(m, cmd, "--"+name, name)
 			}
 			if f.Type == "bool" {
 				// `--force=false` must not silently set the flag true: an inline
@@ -1527,11 +1536,11 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 		if len(a) == 2 && a[0] == '-' && a != "-" {
 			long, aliased := shortFlagAliases[a]
 			if !aliased {
-				return nil, nil, unknownFlagError(cmd, a, "")
+				return nil, nil, unknownFlagError(m, cmd, a, "")
 			}
 			f, ok := byName[long]
 			if !ok {
-				return nil, nil, unknownFlagError(cmd, a, long)
+				return nil, nil, unknownFlagError(m, cmd, a, long)
 			}
 			if f.Type == "bool" {
 				if err := refuseRepeatedFlag(cmd, f, flags[long], "true"); err != nil {
