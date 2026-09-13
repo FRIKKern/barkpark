@@ -328,7 +328,14 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         ) <>
         if body == "", do: "", else: ~s|<div class="bp-lineage__body">#{escape_html(body)}</div>|
 
-    ~s|<li class="bp-lineage__node">| <> parts <> "</li>"
+    # Per-stop VERDICT. `tone` is optional and rides the same four-word
+    # vocabulary the chart regions use (info/ok/warn/danger, tone_class/2), so a
+    # clock strip can colour the stop where the thing went wrong without a new
+    # attribute grammar. An absent or unrecognised tone emits the bare class —
+    # every lineage authored before this stays byte-identical.
+    cls = tone_class("bp-lineage__node", get(n, "tone"))
+
+    ~s|<li class="#{cls}">| <> parts <> "</li>"
   end
 
   # ── heatmap ──────────────────────────────────────────────────────────────────

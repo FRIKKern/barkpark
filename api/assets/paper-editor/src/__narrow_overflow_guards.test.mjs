@@ -129,6 +129,57 @@ check(".bp-lineage__body carries an overflow-wrap guard", () => {
   }
 });
 
+// ── 1b. the CLOCK STRIP stays a strip at 360px ───────────────────────────────
+//
+// pe-bl-clock-strip-block. `.bp-lineage__nodes` was
+// `repeat(auto-fit, minmax(150px, 1fr))`, which WRAPS: four dated stops render
+// 3+1 inside the reading column and the fourth starts a second row that reads
+// as a second timeline. The three declarations below are what make it a strip
+// instead, and each one is load-bearing at 360px:
+//
+//   grid-auto-flow: column   one track per stop, so the stops never wrap
+//   overflow-x: auto         the strip self-scrolls instead of pushing the
+//                            page body sideways once 4 x 150px exceeds the box
+//   border-top on __nodes    ONE continuous spine — the old per-node border-top
+//                            was cut by every 14px gap
+//
+// The per-node rule must NOT carry a border-top any more: if it comes back the
+// spine is four dashes again, and nothing else in the file would notice.
+check(".bp-lineage__nodes is a self-scrolling strip on one continuous spine", () => {
+  const nodes = ruleFor(".bp-paper-surface .bp-lineage__nodes", surface);
+  assert.ok(
+    /grid-auto-flow\s*:\s*column/.test(nodes),
+    ".bp-lineage__nodes must set grid-auto-flow: column — auto-fit wraps the " +
+      "fourth stop onto a second row at the reading measure.",
+  );
+  assert.ok(
+    /grid-auto-columns\s*:\s*minmax\(\s*150px/.test(nodes),
+    ".bp-lineage__nodes must floor each stop at 150px so a stop stays legible " +
+      "once the strip starts scrolling.",
+  );
+  assert.ok(
+    /overflow-x\s*:\s*auto/.test(nodes),
+    ".bp-lineage__nodes must self-scroll (overflow-x: auto) — at 360px four " +
+      "150px stops exceed the box and the PAGE must not scroll sideways.",
+  );
+  assert.ok(
+    /border-top\s*:\s*1px solid var\(--paper-rule\)/.test(nodes),
+    ".bp-lineage__nodes must carry the spine itself; a per-node border-top is " +
+      "cut by every gap.",
+  );
+
+  const node = ruleFor(".bp-paper-surface .bp-lineage__node", surface);
+  assert.ok(
+    !/border-top/.test(node),
+    ".bp-lineage__node must NOT carry a border-top — that is the broken spine " +
+      "the clock strip replaced.",
+  );
+  assert.ok(
+    /position\s*:\s*relative/.test(node),
+    ".bp-lineage__node must be a positioning context for its spine tick.",
+  );
+});
+
 // ── 2. .bp-duel__table self-contains like .bp-table does ──────────────────────
 
 check(".bp-duel__table self-contains horizontally, .bp-table's own escape hatch", () => {

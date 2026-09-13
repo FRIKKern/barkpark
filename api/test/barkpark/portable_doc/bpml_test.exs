@@ -741,6 +741,36 @@ defmodule Barkpark.PortableDoc.BpmlTest do
     end)
   end
 
+  # pe-bl-clock-strip-block — a clock strip authored in BPML carries a per-stop
+  # verdict on `<lineage-node tone="...">`. If the parser does not read it or
+  # the printer does not spell it, the verdict is silently erased by the first
+  # edit that round-trips the paper through source — the loss is invisible in
+  # the rendered HTML of the version you are looking at.
+  describe "lineage tone (the clock strip's per-stop verdict)" do
+    test "tone survives parse and print, and a lineage without one is unchanged" do
+      src = """
+      <lineage id="em8-clock">
+        <lineage-node overline="20:54:36" title="Fourth rewrite" tone="danger"></lineage-node>
+        <lineage-node overline="20:55:53" title="Merged"></lineage-node>
+      </lineage>
+      """
+
+      assert {:ok, [block]} = Bpml.parse_blocks(src)
+
+      assert [%{"tone" => "danger"} = toned, untoned] = block["nodes"]
+      assert toned["overline"] == "20:54:36"
+      refute Map.has_key?(untoned, "tone")
+
+      printed = Bpml.print_blocks([block])
+      assert printed =~ ~s|tone="danger"|
+      # the untoned stop prints no tone attribute at all
+      assert printed =~ ~s|<lineage-node overline="20:55:53" title="Merged">|
+
+      {_bpml, parsed} = roundtrip!([block])
+      assert parsed == [block]
+    end
+  end
+
   @words ~w(rollout canary deploy paper block strict teach diff push pull meter proof)
   @hostile ["a & b", "x < y", "\"quoted\"", "5 > 3", "tag <p> literal"]
 

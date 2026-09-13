@@ -353,7 +353,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "lineage"} = b, d) do
     nodes =
       Enum.map(alias_get(b, ["nodes", "items"]) || [], fn n ->
-        "#{pad(d + 1)}<lineage-node#{attr_str(n, ["title", "overline", "source"])}>" <>
+        "#{pad(d + 1)}<lineage-node#{attr_str(n, ["title", "overline", "source", "tone"])}>" <>
           "#{esc(plain_alias(n, ["body"]) || "")}</lineage-node>"
       end)
 
