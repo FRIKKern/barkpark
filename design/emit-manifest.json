@@ -20,9 +20,11 @@
     "internal/semrole/chrome_gen.go#Go CLI chrome": "a55b48dbdff4c327e7a456bcc894f2a423d75c6509c91cd695355ae7ac90734d",
     "internal/semrole/tokens_gen.go#Go semrole": "e15a4495b1f473b8465bffc84c9dca5621e03aba8a42bb0577f03f400629c5bf",
     "internal/taskboard/tokens_gen.go#Go board": "9215c045732c56f88ced73d318b154a15e94724a369cdfe6a2d6417e7c9c9852",
+    "js/packages/react/src/status-vocab.gen.ts#react status vocabulary": "5c754de31124162382b26a0f81a604fc8689b9306a3851bd60bbbdef3831c08a",
     "templates/astro-search-starter/public/bp-graph.js#bp-graph palette (4/4)": "af88417d22543c39339d6a7fc93de12991380250da4e465eeb0f11e6ce35c103",
     "templates/search-starter/public/bp-graph.js#bp-graph palette (3/4)": "af88417d22543c39339d6a7fc93de12991380250da4e465eeb0f11e6ce35c103",
     "web/app/globals.css#web demo": "db891fc852d8b37af88bba52186a9acae034fd7fa952761f2e3950ed35763497",
+    "web/lib/status-ladder.gen.ts#web status ladder": "42a0629f8d6afbaad3d50917dd61c1eb55284a32fe1f8b736da921f7018bc0d4",
     "web/lib/tokens.gen.ts#web TS tokens": "c7fa28ce4e534f7358e192ad937d8f6a00aef2c94852c2825e78fdce0edbdfa5",
     "web/public/bp-graph.js#bp-graph palette (2/4)": "af88417d22543c39339d6a7fc93de12991380250da4e465eeb0f11e6ce35c103"
   }
