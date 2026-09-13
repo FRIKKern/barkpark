@@ -23633,28 +23633,6 @@
   // fire a SECOND /v1/me.
   var newPricingCapAsked = false;
 
-  // cch-w48-s1-followup — THE FUNNEL PAYS FOR /v1/me ONCE, NOT TWICE. The step
-  // ABOVE this one (newAskLaunchAuthority) already asks GET /v1/me and lands the
-  // answer through absorbMe, so by the time a 402 folds this screen in, the
-  // console HOLDS the role. The unconditional read below re-asked for it: two
-  // identical reads inside one funnel, and — worse than the cost — two screens
-  // that can disagree, because a role that moves between the two answers is
-  // rendered as an authority on one step and a different one on the next.
-  //
-  // The reuse is the SHIPPED derivation (launchCheckoutAuthority over meCache),
-  // exactly what renderLaunchPlan's dashboard twin already does, so no second
-  // policy read re-derives the role from string literals here.
-  //
-  // FAIL OPEN IS UNCHANGED, in BOTH directions. This consults the cache only on
-  // meState() === "loaded" — the one band where the SERVER has told us the role;
-  // "loading" and "failed" still fall through to the read below, and that read
-  // still leaves the CTAs standing on a non-answer. And a loaded answer carrying
-  // no role string yields "unknown" from the shipped derivation, which is the
-  // same open arm the fetch's own failure takes — never a refusal.
-  function newPricingAbsorbedAuthority() {
-    return meState() === "loaded" ? launchCheckoutAuthority(meCache) : null;
-  }
-
   function newAskCheckoutCapability(tpl, authority) {
     if (newPricingCapAsked || capCache) return;
     newPricingCapAsked = true;
@@ -23670,8 +23648,30 @@
   }
 
   function renderNewPricing(tpl, authority) {
-    // The absorbed answer, when the funnel's launch step already paid for one.
-    var absorbed = authority ? null : newPricingAbsorbedAuthority();
+    // cch-w48-s1-followup — THE FUNNEL PAYS FOR /v1/me ONCE, NOT TWICE. The step
+    // ABOVE this one (newAskLaunchAuthority) already asks GET /v1/me and lands the
+    // answer through absorbMe, so by the time a 402 folds this screen in, the
+    // console HOLDS the role. The unconditional read below re-asked for it: two
+    // identical reads inside one funnel, and — worse than the cost — two screens
+    // that can disagree, because a role that moves between the two answers is
+    // rendered as an authority on one step and a different one on the next.
+    //
+    // The reuse is the SHIPPED derivation (launchCheckoutAuthority over meCache),
+    // exactly what renderLaunchPlan's dashboard twin already does, so no second
+    // policy read re-derives the role from string literals here. It is read INLINE,
+    // in this pinned function's own frame, and not behind a helper: the elevated-
+    // write binding census accounts a band read to its ENCLOSING def, and the row
+    // that owns this affordance is renderNewPricing — a helper frame would read the
+    // band somewhere no PIN row claims, which is exactly the decay that gate exists
+    // to refuse.
+    //
+    // FAIL OPEN IS UNCHANGED, in BOTH directions. This consults the cache only on
+    // meState() === "loaded" — the one band where the SERVER has told us the role;
+    // "loading" and "failed" still fall through to the read below, and that read
+    // still leaves the CTAs standing on a non-answer. And a loaded answer carrying
+    // no role string yields "unknown" from the shipped derivation, which is the
+    // same open arm the fetch's own failure takes — never a refusal.
+    var absorbed = authority || meState() !== "loaded" ? null : launchCheckoutAuthority(meCache);
     var known = authority || absorbed || "unknown";
     var blocked = known === "blocked";
     var tiers = launchPlanGridHtml(known, { billing_capability: capCache });
