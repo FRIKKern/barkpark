@@ -150,7 +150,7 @@ defmodule BarkparkWeb.MediaShareAffordanceTest do
         |> put_req_header("authorization", "Bearer #{raw}")
         |> get(asset_path(ws, proj, file))
         |> json_response(200)
-        |> Map.fetch!("visibility")
+        |> bp_media_get_notice()
 
       # bp's asset output states, in its OWN copy, what `public` promises …
       assert bp_unshared["copy"] =~ "readable within this scope's sharing"
@@ -178,7 +178,7 @@ defmodule BarkparkWeb.MediaShareAffordanceTest do
         |> put_req_header("authorization", "Bearer #{raw}")
         |> get(asset_path(ws, proj, file))
         |> json_response(200)
-        |> Map.fetch!("visibility")
+        |> bp_media_get_notice()
 
       # The COPY is identical (it is one module's sentence, not per-state
       # prose); only the share-state read moves.
@@ -191,6 +191,34 @@ defmodule BarkparkWeb.MediaShareAffordanceTest do
       assert studio_shared =~ "readable within this scope&#39;s sharing"
       assert studio_shared =~ "this scope carries a :media share"
     end
+  end
+
+  # WHAT `bp media get` ACTUALLY READS, and the reason this is not a plain
+  # `Map.fetch!(body, "visibility")`.
+  #
+  # bp's Go client renders every successful body through `unwrapResult`
+  # (internal/cli/run.go): it returns the body's `result` value and DROPS every
+  # top-level sibling. A notice that rides BESIDE `result` is in the JSON and
+  # invisible to `bp media get` — c0 ("in bp's media/asset output, in its own
+  # copy") would be unmet in practice while a raw-JSON assertion stayed green.
+  #
+  # So this helper reproduces the unwrap — take `result`, then read the notice
+  # out of it — and additionally refuses the old placement outright. Move the
+  # key back beside `result` and BOTH halves red.
+  defp bp_media_get_notice(body) do
+    refute Map.has_key?(body, "visibility"),
+           "the visibility notice must not ride beside `result`: bp's unwrapResult " <>
+             "keeps only `result`, so a top-level key never reaches `bp media get`"
+
+    unwrapped = Map.fetch!(body, "result")
+
+    # The notice is a SIBLING of the asset's own delivery-tier `visibility`
+    # string inside `result`, never a replacement for it — reusing that name
+    # would change an existing field's type.
+    assert Map.has_key?(unwrapped, "visibility")
+    refute is_map(unwrapped["visibility"])
+
+    Map.fetch!(unwrapped, "visibilityNotice")
   end
 
   defp studio_media_html(raw_token, ws, proj) do

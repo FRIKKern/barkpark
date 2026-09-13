@@ -367,9 +367,13 @@ defmodule BarkparkWeb.V1.MediaController do
          :ok <- ensure_viewable(conn, file, doc) do
       ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
+      asset =
+        file
+        |> AssetResponse.render(doc, render_opts(conn, params, dataset: dataset))
+        |> Map.put(:visibilityNotice, visibility_notice(conn, dataset))
+
       json(conn, %{
-        result: AssetResponse.render(file, doc, render_opts(conn, params, dataset: dataset)),
-        visibility: visibility_notice(conn, dataset),
+        result: asset,
         syncTags: sync_tags(dataset, file.id),
         ms: ms
       })
@@ -383,8 +387,19 @@ defmodule BarkparkWeb.V1.MediaController do
   #
   # The copy is `BarkparkWeb.MediaVisibilityCopy`'s and nobody else's — the
   # Studio media library banner renders the SAME functions, so the two surfaces
-  # cannot drift into describing the same door differently. ADDITIVE: a new
-  # top-level key beside `result`, so no existing field moves or changes shape.
+  # cannot drift into describing the same door differently.
+  #
+  # IT RIDES INSIDE `result`, AND THAT PLACEMENT IS LOAD-BEARING. bp's Go client
+  # renders a successful body through `unwrapResult` (internal/cli/run.go),
+  # which returns the `result` value and DROPS every top-level sibling. A key
+  # beside `result` — where this first shipped — never reaches `bp media get`'s
+  # output at all, so the copy would exist in the JSON and be invisible to the
+  # one surface the criterion names. Inside `result` it survives the unwrap.
+  #
+  # The key is `visibilityNotice`, NOT `visibility`: `AssetResponse.render/3`
+  # already puts `visibility` in that map (the asset's delivery tier string), so
+  # reusing the name would change an existing field's TYPE. Additive as placed —
+  # nothing that was in `result` moves or changes shape.
   defp visibility_notice(conn, dataset) do
     MediaVisibilityCopy.public_option(
       slug_of(conn.assigns[:current_workspace]),
