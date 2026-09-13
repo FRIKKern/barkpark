@@ -764,7 +764,7 @@ defmodule Barkpark.PortableDoc.BpmlTest do
       printed = Bpml.print_blocks([block])
       assert printed =~ ~s|tone="danger"|
       # the untoned stop prints no tone attribute at all
-      assert printed =~ ~s|<lineage-node overline="20:55:53" title="Merged">|
+      assert printed =~ ~s|<lineage-node title="Merged" overline="20:55:53">|
 
       {_bpml, parsed} = roundtrip!([block])
       assert parsed == [block]
