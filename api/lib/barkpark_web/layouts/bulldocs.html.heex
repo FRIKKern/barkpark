@@ -2644,20 +2644,101 @@
         // enters the DOM. Guarded for asciinema-player.min.js (deferred) not
         // being ready yet: we retry on window load.
         runAsciicast() {
+          // ── the honest fallback (jf-backlog-asciicast-empty-box) ──────────
+          // asciinema-player 3.x exposes no `error` event, so its own DOM IS
+          // the error channel: on a recording it cannot fetch it paints
+          // `div.ap-overlay-error`, a bordered box whose entire content is a
+          // 💥 glyph — the empty box the komposisjon law forbids. These
+          // constants and renderCastFallback() are the TWIN of client.ts's
+          // ASCIICAST_* / renderCastFallback. They are NOT kept in step by
+          // this comment: reader_asciicast_fallback_parity_test.exs READS
+          // every literal below out of js/packages/react/src/client.ts and
+          // asserts this file carries it, so a change on EITHER side reds.
+          let ERROR_SELECTOR = ".ap-overlay-error";
+          let READY_SELECTOR = ".ap-terminal, .ap-overlay-start";
+          let PROBE_STEP_MS = 25;
+          let PROBE_TIMEOUT_MS = 4000;
+          let FALLBACK_MESSAGE = "Opptaket kunne ikke lastes.";
+          let FALLBACK_LINK = "Åpne opptaket direkte";
+          let FALLBACK_STYLE = "padding:1rem;font-size:0.9em;line-height:1.5";
+
+          // `href` for the raw recording, or null when `data-cast-src` is not a
+          // fetchable web URL. Same allow-list as client.ts's castHref: http(s)
+          // or a same-origin path; protocol-relative and every other scheme
+          // (`javascript:`, `data:`) refused, so a hostile src degrades to
+          // message-only rather than becoming a clickable payload.
+          let castHref = (src) => {
+            let trimmed = src.replace(/^[\x00-\x20]+/, "");
+            if (/^https?:\/\//i.test(trimmed)) return trimmed;
+            if (trimmed.charAt(0) === "/" && !/^\/[/\\]/.test(trimmed)) return trimmed;
+            return null;
+          };
+
+          // Replace a faulted player with prose + a raw link. The CAPTION
+          // survives by construction: Figures.asciicast_html puts
+          // <figcaption> NEXT TO the mount point inside the <figure>, so
+          // emptying the mount div cannot reach it.
+          let renderCastFallback = (el, src) => {
+            let doc = el.ownerDocument;
+            el.textContent = "";
+            let box = doc.createElement("div");
+            box.className = "bp-asciicast__fallback";
+            box.setAttribute("style", FALLBACK_STYLE);
+            box.textContent = FALLBACK_MESSAGE;
+            let href = castHref(src);
+            if (href !== null) {
+              let link = doc.createElement("a");
+              link.className = "bp-asciicast__fallback-link";
+              link.setAttribute("href", href);
+              link.textContent = FALLBACK_LINK;
+              box.appendChild(doc.createElement("br"));
+              box.appendChild(link);
+            }
+            el.appendChild(box);
+            // A second stamp beside `data-asciicast-done`: the mount stays
+            // skipped by the idempotency guard, and a screenshot test can
+            // select the faulted casts without parsing our copy.
+            el.dataset.asciicastFailed = "true";
+          };
+
+          // Swap ONLY on asciinema's own error overlay — never on a timeout. A
+          // player showing neither marker inside the ceiling is left alone:
+          // replacing a slow-but-working player with a "could not be loaded"
+          // card would be its own lie.
+          let probeCast = (el, src) => {
+            let deadline = Date.now() + PROBE_TIMEOUT_MS;
+            let step = () => {
+              if (el.querySelector(ERROR_SELECTOR)) return renderCastFallback(el, src);
+              if (el.querySelector(READY_SELECTOR)) return;
+              if (Date.now() >= deadline) return;
+              window.setTimeout(step, PROBE_STEP_MS);
+            };
+            step();
+          };
+
           let mountPlayer = (el) => {
             let src = el.dataset.castSrc;
             if (!src) return;
+            // Stamped BEFORE the outcome is known: the guard is about
+            // re-entrancy (a stream delta re-running the hook mid-probe), not
+            // about success.
+            el.dataset.asciicastDone = "true";
             // `data-cast-poster` is the block's optional resting frame (an npt
             // timestamp, or "end"), emitted by Figures.asciicast_html only when
             // set — unset falls back to npt:0:1. Twin of client.ts's
             // hydrateAsciicast; keep the two in step.
-            window.AsciinemaPlayer.create(src, el, {
-              fit: "width",
-              poster: el.dataset.castPoster || "npt:0:1",
-              idleTimeLimit: 2,
-              theme: "asciinema"
-            });
-            el.dataset.asciicastDone = "true";
+            try {
+              window.AsciinemaPlayer.create(src, el, {
+                fit: "width",
+                poster: el.dataset.castPoster || "npt:0:1",
+                idleTimeLimit: 2,
+                theme: "asciinema"
+              });
+            } catch (_e) {
+              // A create() that threw never painted anything — straight to the card.
+              return renderCastFallback(el, src);
+            }
+            probeCast(el, src);
           };
           let nodes = Array.from(
             this.el.querySelectorAll('div.bp-asciicast:not([data-asciicast-done="true"])')
