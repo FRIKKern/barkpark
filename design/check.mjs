@@ -8,7 +8,7 @@
 // Dependency-free (Node built-ins only). Pairs with design/validate.mjs (shape)
 // and design/emit.mjs (the single source of the emitted bytes).
 import {
-  evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, READING_STEPS, AIR_STEPS, EVIDENCE_KEYS, EVIDENCE_UNITS, SECTION_KEYS, SECTION_UNITS, RULE_KEYS, RULE_UNITS, MOTION_STEPS, MOTION_SURFACES, glyphOf, ARTIFACTS, repoRoot,
+  evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, typeLadderFrom, LADDER_REFUSE, READING_STEPS, AIR_STEPS, EVIDENCE_KEYS, EVIDENCE_UNITS, SECTION_KEYS, SECTION_UNITS, RULE_KEYS, RULE_UNITS, MOTION_STEPS, MOTION_SURFACES, glyphOf, ARTIFACTS, repoRoot,
   INST_ORDER, PROVIDERS, INST_ROLE_CSS, instRoleChannels, hslToHex,
   readManifest, attribute, lostLines, regionDigest, MANIFEST_PATH,
   auditActions, AUDIT_ACTIONS_PATH,
@@ -272,6 +272,51 @@ const styleguidePath = "web/components/styleguide.tsx";
 const webTokensText = readFileSync(join(repoRoot, webTokensPath), "utf8");
 const styleguideText = readFileSync(join(repoRoot, styleguidePath), "utf8");
 const webTypeFail = (m) => { fail(m); webTypeOk = false; };
+// arm 0 — the STEP SET the rest of this part walks is tokens.json's own ladder
+// (task-039d433a1bac63ab). Arms 1 and 2 below iterate TYPE_STEPS, and for as long
+// as TYPE_STEPS was a hand-written literal that made them measure the copy
+// against the source IN THE DIRECTION THAT CANNOT FAIL: every entry of the copy
+// was checked present in tokens.json, and a rung present in tokens.json but
+// absent from the copy was walked past in silence. This arm re-derives the
+// ladder from `tokens` HERE — independently of whatever list emit.mjs chose to
+// build the artifacts from — and compares the two as ARRAYS, so a rung tokens
+// declares and the emitter does not walk reds NAMING THAT RUNG, and a
+// display-order swap reds even though the two sets are character-identical.
+let chromeFromSource = null;
+try {
+  chromeFromSource = typeLadderFrom(tokens, "chrome");
+} catch (e) {
+  webTypeFail(`  Part C2 FAIL: could not derive the chrome ladder from tokens.type.chrome: ${e.message}`);
+}
+if (chromeFromSource) {
+  // POSITIVE CONTROL: a derivation that went blind would hand back [] and every
+  // comparison below would agree with an empty emitted ladder. A guard that
+  // cannot see must not report a pass.
+  if (chromeFromSource.length < 4)
+    webTypeFail(`  Part C2 FAIL: derived only ${chromeFromSource.length} chrome step(s) from tokens.type.chrome — the derivation has gone blind`);
+  for (const step of chromeFromSource)
+    if (!TYPE_STEPS.includes(step))
+      webTypeFail(`  Part C2 FAIL: tokens.type.chrome declares the rung "${step}", which the emitted step list (emit.mjs TYPE_STEPS) does not walk — it would be emitted nowhere and checked by nothing`);
+  for (const step of TYPE_STEPS)
+    if (!chromeFromSource.includes(step))
+      webTypeFail(`  Part C2 FAIL: the emitted step list walks "${step}", which tokens.type.chrome does not declare as a rung`);
+  if (TYPE_STEPS.length === chromeFromSource.length && TYPE_STEPS.some((s2, i) => s2 !== chromeFromSource[i]))
+    webTypeFail(`  Part C2 FAIL: the emitted chrome step ORDER [${TYPE_STEPS.join(", ")}] ≠ tokens.type.chrome by descending size [${chromeFromSource.join(", ")}]`);
+}
+// NEGATIVE CONTROLS, in-process: each way of seeing nothing must THROW rather
+// than hand back an empty ladder. Without these the refusal itself can rot and
+// arm 0 quietly becomes theatre.
+for (const [label, arg] of [
+  ["a missing family", {}],
+  ["a non-object family", { type: { chrome: 7 } }],
+  ["a zero-rung family", { type: { chrome: { _note: "prose only" } } }],
+  ["an ambiguous (tied-size) ladder", { type: { chrome: { a: { size: 12 }, b: { size: 12 } } } }],
+]) {
+  let refused = false;
+  try { typeLadderFrom(arg, "chrome"); } catch (e) { refused = String(e.message).includes(LADDER_REFUSE); }
+  if (!refused)
+    webTypeFail(`  Part C2 FAIL: typeLadderFrom did not refuse ${label} with "${LADDER_REFUSE}" — the ladder derivation can go blind and still report a pass`);
+}
 // arm 1 — every emitted step carries tokens.json's three numbers, verbatim.
 const emittedStep = (family, step) => {
   const re = new RegExp(`^  (?:"${step}"|${step}): \\{ size: (\\d+(?:\\.\\d+)?), lineHeight: (\\d+(?:\\.\\d+)?), weight: (\\d+) \\},$`, "m");
@@ -305,7 +350,7 @@ for (const [re, what] of [[/\bsize:\s*\d/, "a literal type size"], [/\blh:\s*\d/
   if (re.test(styleguideText))
     webTypeFail(`  Part C2 FAIL: ${styleguidePath} declares ${what} — the hand-kept ladder is back beside the emitted one`);
 if (webTypeOk)
-  console.log(`  ok   ${TYPE_STEPS.length} chrome + ${READING_STEPS.length} reading steps emit typed {size,lineHeight,weight} into ${webTokensPath}, and ${styleguidePath} consumes them without restating a step`);
+  console.log(`  ok   ${TYPE_STEPS.length} chrome (derived from tokens.type.chrome, descending size) + ${READING_STEPS.length} reading steps emit typed {size,lineHeight,weight} into ${webTokensPath}, and ${styleguidePath} consumes them without restating a step`);
 
 // ── Part D: cloud-console family parity (charter azure-hetzner Decision 7) ────
 // The instanceLifecycle + provider-identity families are DUAL-emitted: the SPA
