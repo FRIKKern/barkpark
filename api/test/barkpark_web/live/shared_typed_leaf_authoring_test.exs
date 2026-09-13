@@ -262,6 +262,15 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
   end
 
   test "technical forms persist through both hosts and reject stale collection counts", ctx do
+    # scaffy-backlog-blocks-editable-studio — the CLASSIC form surface, so the
+    # CLASSIC flag value. `diff` and `filetree` are now canvas attr-atoms
+    # (paper_canvas.ex @canvas_attr_atom_types): with the canvas ON they ride a
+    # run and are edited by their node-views, so no `#technical-block-form-diff`
+    # exists there, just as none exists for `code` / `diagram`. `footnote` and
+    # `code-tabs` remain boundary kinds; their canvas-ON coverage is unchanged
+    # in the other tests of this file.
+    BarkparkWeb.PaperEditorTestHelpers.pin_paper_canvas!("0")
+
     path = "/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/papers/#{ctx.slug}"
     {:ok, public, _} = live(ctx.conn, path)
     render_click(public, "paper-toggle-edit", %{})

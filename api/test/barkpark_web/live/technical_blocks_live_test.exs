@@ -137,6 +137,19 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
     end
 
     test "#{host} technical form edits persist through a fresh mount", ctx do
+      # scaffy-backlog-blocks-editable-studio — this test pins the CLASSIC form
+      # surface, so it pins the CLASSIC flag value. `diff` and `filetree` joined
+      # paper_canvas.ex @canvas_attr_atom_types, which means that with the canvas
+      # ON they are FOLDED INTO A RUN and edited by the bpDiff / bpFiletree
+      # node-views — there is no per-block `#technical-block-form-*` for them any
+      # more, exactly as there is none for `code` or `diagram`. The other two
+      # blocks here (`notes` / `tabs`) are still boundary kinds and their
+      # canvas-ON form coverage is unchanged, held by "technical collection
+      # actions add, reorder, and remove retained rows" in this same file.
+      # The CANVAS half of the round-trip is pinned by
+      # test/barkpark_web/live/studio/technical_blocks_canvas_test.exs.
+      BarkparkWeb.PaperEditorTestHelpers.pin_paper_canvas!("0")
+
       view = mount_editor(ctx, @host)
 
       for id <- ~w(diff tree notes tabs) do
