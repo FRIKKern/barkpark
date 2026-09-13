@@ -91,12 +91,17 @@ defmodule BarkparkWeb.Plugs.RequireIngestToken do
 
   # Route through the ONE shared emitter so the 401 carries request_id (+ the
   # code-keyed hint) for log correlation — it was hand-built without it before.
+  # The hint is ROUTE-DERIVED (task-57081836b628df35): this route takes the
+  # ingest shared secret OR an admin api token, which is not what the
+  # code-keyed "unauthorized" default could ever say for all eleven emitters.
   defp reject(conn) do
     BarkparkWeb.ErrorResponse.emit_custom(
       conn,
       :unauthorized,
       "unauthorized",
-      "invalid ingest token"
+      "invalid ingest token",
+      %{},
+      "Send the instance's ingest token, or an admin api token, as Authorization: Bearer <token>."
     )
   end
 end
