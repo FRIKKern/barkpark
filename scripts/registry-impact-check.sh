@@ -81,8 +81,10 @@
 #                  content MATCHES it — so the edit made the file a MEMBER. The
 #                  patterns and the --include extensions are read out of the
 #                  registry's own `grep -rl` / `git grep -l` invocation, so this
-#                  is a predicate over a shape (13 files repo-wide use it, 7 of
-#                  them registries), never a second list.
+#                  is a predicate over a SHAPE, never a second list: 15 files
+#                  under *.sh/*.mjs/*.exs/*.py carry a list-mode recursive
+#                  content grep as this script sees them (comments stripped,
+#                  continuations joined).
 #
 # WHY D4 EXISTS, measured: d3af39283 reddened run-level-reader-census.sh on main
 # and stayed red. It touched three paths, and NONE of them is in any registry's
@@ -101,8 +103,9 @@
 # BARE quoted pattern as grep's first operand is NOT covered:
 #   scripts/docs-anchors-check.sh — `grep -rl '^## Code anchors' docs --include='*.md'`
 # so a doc that GAINS that heading becomes a member and this check stays silent.
-# Measured, of the 8 files in the tree carrying a list-mode recursive content
-# grep, 2 use -e and 6 do not. I implemented the bare-operand door and REMOVED it:
+# Measured: of those 15 files, exactly 2 pass patterns as `-e` literals
+# (scripts/run-level-reader-census.sh and scripts/orchestrate-launch-recipe.test.sh)
+# and 13 do not. I implemented the bare-operand door and REMOVED it:
 # those invocations are pipelines, so telling grep's pattern from the filter's
 # pattern is not soundly doable by extraction, and the two-path negative control
 # went from CLEAN to two implicated registries, BOTH FALSE (web/README.md contains
