@@ -407,6 +407,35 @@ check_match "tooling/grip/ledger/x.md" cloud false
 check_match "scripts/some-new-caller.sh" cloud true
 check_match ".github/workflows/elixir.yml" cloud true
 
+# ── WHAT THE LINES ABOVE ARE, AND WHAT THEY ARE NOT ────────────────────────
+# (task-babc3e4205843165 c3.) Every `check_match … cloud true` above is a
+# HAND-PINNED FIXTURE. It is a SECOND, WEAKER INSTRUMENT than the entry-decision
+# arm (`--audit-set`, case 14), and the two must not be described as if either
+# one settles the set:
+#
+#   * these lines cover ONLY the paths they name. A path nobody typed here is
+#     not covered by them, and they cannot tell you whether a declared entry
+#     buys anything — a `cloud true` assertion passes identically whether the
+#     entry that produced it is load-bearing or dead text.
+#   * `--audit-set` decides the WHOLE set by rule, but says nothing about
+#     whether a particular concrete path lands where a reader expects. A
+#     subsumed entry is provably harmless AND its `check_match` line is the only
+#     thing asserting that its subject still resolves to `true`.
+#
+# So: neither is a superset of the other, and the honest reading of a green here
+# is "these named paths behave", never "the set is right".
+#
+# THE COUNT IS RECORDED so the weakness is a measured size rather than a mood.
+# Derived from this file, not typed, so it follows edits to the lines above.
+hand_pinned="$(grep -c '^check_match .* cloud true$' "${BASH_SOURCE[0]}" || true)"
+hand_pinned_false="$(grep -c '^check_match .* cloud false$' "${BASH_SOURCE[0]}" || true)"
+declared_n="$("$SCRIPT" --print-set cloud | sed '/^$/d' | wc -l | tr -d ' ')"
+if [ "${hand_pinned:-0}" -gt 0 ]; then
+  ok "the hand-pinned --match fixture covers $hand_pinned named paths true / $hand_pinned_false false, against $declared_n declared entries — a SECOND, weaker instrument, not a verdict on the set"
+else
+  no "no hand-pinned --match true fixtures found; the accounting above is stale"
+fi
+
 # ── THE CENSUS TIER — the second, cheaper verdict ──────────────────────────
 # (dr-w26-followup-reader-corpus-dispatch.) The pairs matter more than either
 # column: `census true / cloud false` is the whole claim — the reader census
@@ -1909,6 +1938,277 @@ if has "$real_out" "DEAD DECLARATION"; then
   no "a CLOUD_PATHS entry names a path that is not in this tree: $real_out"
 else
   ok "every CLOUD_PATHS entry names something that exists in this tree"
+fi
+echo
+
+
+# ── case 14: the ENTRY-DECISION arm and the CENSUS-TIER coverage arm ────────
+# (task-babc3e4205843165 / task-a00a72a027c5f698.)
+#
+# Case 3 proves an UNCOVERED READ reds. Nothing proved that a NARROWING of the
+# declared set reds — and measured on c42fde07c it mostly does not: planting the
+# removal of each of the 24 entries in turn, NINE removals red and FIFTEEN are
+# silent. This case pins the rule that decides the fifteen, and — the part that
+# matters — pins that the deciding arm can still FAIL IN BOTH DIRECTIONS.
+#
+# THE MIRROR. These arms read the DECLARATION's own repository ($DECL_ROOT, the
+# parent of the running script), so a mutated copy must sit in a scripts/ dir
+# whose parent looks like this repo. It is built as a directory of SYMLINKS to
+# the real top-level entries plus a REAL scripts/ holding the copy — so the
+# copy's DECL_ROOT resolves to live trees while the file itself is disposable.
+# The census stays the real one via CLOUD_PATH_ESCAPE_ROOT.
+echo "case 14: every CLOUD_PATHS entry is decided by rule, and the rule can fail"
+
+MIR="$TMPROOT/mirror"
+mkdir -p "$MIR/scripts"
+for _e in "$REAL_ROOT"/* "$REAL_ROOT"/.[!.]*; do
+  [ -e "$_e" ] || continue
+  case "$(basename -- "$_e")" in scripts) continue ;; esac
+  ln -sf "$_e" "$MIR/$(basename -- "$_e")"
+done
+for _e in "$REAL_ROOT"/scripts/*; do
+  [ -e "$_e" ] || continue
+  ln -sf "$_e" "$MIR/scripts/$(basename -- "$_e")"
+done
+MIRC="$MIR/scripts/cloud-path-escape-check.sh"
+rm -f "$MIRC"
+cp "$SCRIPT" "$MIRC"
+
+# `mutate <sed-free python replacement>`: rewrite the copy from the ORIGINAL
+# every time, so mutations never stack.
+mut() {
+  python3 - "$SCRIPT" "$MIRC" "$1" "$2" <<'PY'
+import sys
+src, dst, old, new = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+t = open(src).read()
+if t.count(old) != 1:
+    sys.stderr.write("MUTATION ANCHOR NOT UNIQUE (%d): %r\n" % (t.count(old), old[:60]))
+    sys.exit(3)
+open(dst, "w").write(t.replace(old, new))
+PY
+}
+mirrun() { ( cd "$MIR" && CLOUD_PATH_ESCAPE_ROOT="$REAL_ROOT" bash "$MIRC" "$@" ) 2>&1; }
+
+# (a) the real set is decidable, and BOTH arms are non-empty. A tally with
+#     red=0 or silent=0 is a classifier that has stopped discriminating.
+audit_out="$("$SCRIPT" --audit-set 2>&1)" && audit_rc=0 || audit_rc=$?
+if [ "$audit_rc" -eq 0 ]; then
+  ok "--audit-set decides every entry in this tree (exit 0)"
+else
+  no "--audit-set failed on the real tree: $audit_out"
+fi
+tally="$(printf '%s\n' "$audit_out" | grep '^entries=' || true)"
+if [ -n "$tally" ]; then
+  ok "the run prints the scored tally: $tally"
+else
+  no "--audit-set printed no tally line"
+fi
+# ANCHORED on purpose: an unanchored `.*red=` matches the `red=` inside
+# `decla`+`red=` and silently reads the wrong field (measured: it read 3 for a
+# run whose red was 9).
+a_red="$(printf '%s\n' "$tally" | sed -n 's/^entries=[0-9][0-9]* red=\([0-9][0-9]*\) .*/\1/p')"
+a_sil="$(printf '%s\n' "$tally" | sed -n 's/^entries=[0-9][0-9]* red=[0-9][0-9]* silent=\([0-9][0-9]*\) .*/\1/p')"
+if [ "${a_red:-0}" -gt 0 ] && [ "${a_sil:-0}" -gt 0 ]; then
+  ok "both arms scored in one run: $a_red removals RED, $a_sil SILENT"
+else
+  no "one arm is empty (red=$a_red silent=$a_sil) — the classifier is not discriminating"
+fi
+if has "$audit_out" "UNDECIDABLE"; then
+  no "an entry is undecidable on the real tree: $audit_out"
+else
+  ok "no entry is UNDECIDABLE on the real tree"
+fi
+
+# (b) a NEW entry that buys nothing is the red. The mutation is a plausible
+#     one: somebody declares a tree "to be safe".
+mut "CLOUD_PATHS='cloud/**" "CLOUD_PATHS='docs/**
+cloud/**"
+out="$(mirrun --check)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) with an undecidable entry in the set"
+else
+  no "--check PASSED with an entry nothing can justify: $out"
+fi
+if has_fixed "$out" "UNDECIDABLE	docs/**"; then
+  ok "names the undecidable entry (docs/**)"
+else
+  no "did not name the undecidable entry: $out"
+fi
+
+# (c) THE STALE REASON. A declaration that no longer holds is a red on its own,
+#     not a silent downgrade to SUBSUMED.
+mut "CLOUD_PATHS_REASON='cloud/**	scanned-root	" "CLOUD_PATHS_REASON='cloud/**	census-neighbour	"
+out="$(mirrun --audit-set)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && has_fixed "$out" "STALE-REASON	cloud/**"; then
+  ok "a declared reason that stopped holding reds by name (exit $rc)"
+else
+  no "a stale declared reason did not red: rc=$rc $out"
+fi
+
+# (d) THE PLANT IS CONTROLLED. A removal that does not apply must be a HARD
+#     ERROR, never a clean sheet: an inert plant uncovers nothing, so every
+#     entry would score SUBSUMED and the run would print a green tally about a
+#     mutation that never ran.
+mut '    reduced="$(printf '"'"'%s\n'"'"' "$entries" | grep -Fxv -- "$e" || true)"' '    reduced="$entries"'
+out="$(mirrun --audit-set)" && rc=0 || rc=$?
+if [ "$rc" -eq 2 ]; then
+  ok "a non-applying plant is exit 2, not a pass"
+else
+  no "a non-applying plant returned $rc: $out"
+fi
+if has_fixed "$out" "PLANT DID NOT APPLY"; then
+  ok "the refusal says the plant did not apply"
+else
+  no "the refusal did not name the cause: $out"
+fi
+
+# (e) THE RED ARM CAN FAIL. Disarm the sole-cover predicate and the nine reds
+#     must become silence — the proof that the nine are a measurement and not
+#     nine constants.
+mut '    if [ -n "$lost" ]; then' '    lost=""
+    if [ -n "$lost" ]; then'
+out="$(mirrun --audit-set)" && rc=0 || rc=$?
+dis_red="$(printf '%s\n' "$out" | sed -n 's/^entries=.* red=\([0-9][0-9]*\).*/\1/p')"
+if [ "${dis_red:-x}" = "0" ]; then
+  ok "disarming the sole-cover predicate turns $a_red reds into silence (red=0)"
+else
+  no "the sole-cover predicate is not what produces the reds (disarmed red=$dis_red): $out"
+fi
+if [ "$rc" -ne 0 ]; then
+  ok "…and the disarmament itself reds (exit $rc) rather than going quietly green"
+else
+  no "a disarmed sole-cover arm exited 0"
+fi
+
+# (f) THE LAZY REMEDY, SIMULATED AND SHOWN BLIND. The obvious cheap fix for
+#     "15 of 24 removals are silent" is to PIN THE TWO NUMBERS. Run that remedy
+#     against a real narrowing — `.github/workflows/**` cut down to the single
+#     file cloud.yml, which stops every OTHER workflow edit from dispatching the
+#     Cloud suite — and it passes at exit 0 with the tally UNCHANGED, because
+#     the narrowed entry is silent in exactly the way the one it replaced was.
+#     The predicate reds on the same mutation. This is measured here rather than
+#     argued in a comment, because a ratchet argument that is not run is a
+#     prediction.
+narrow_old="CLOUD_PATHS='cloud/**
+cloud/lib/**
+.github/workflows/**"
+narrow_new="CLOUD_PATHS='cloud/**
+cloud/lib/**
+.github/workflows/cloud.yml"
+mut "$narrow_old" "$narrow_new"
+pred_out="$(mirrun --audit-set)" && pred_rc=0 || pred_rc=$?
+if [ "$pred_rc" -ne 0 ] && has_fixed "$pred_out" "UNDECIDABLE	.github/workflows/cloud.yml"; then
+  ok "the predicate reds on the narrowing (exit $pred_rc)"
+else
+  no "the predicate did not red on the narrowing: rc=$pred_rc $pred_out"
+fi
+# the same narrowing, plus the count-pinning remedy in place of the classifier
+python3 - "$MIRC" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+old = '''  [ "$undecidable" -eq 0 ] && [ "$stale" -eq 0 ] && return 0
+  return 1'''
+new = '''  [ "$sole" -eq 9 ] && [ "$((base_n - sole))" -eq 15 ] && return 0
+  return 1'''
+if t.count(old) != 1:
+    sys.stderr.write("LAZY ANCHOR NOT UNIQUE\n"); sys.exit(3)
+open(p, "w").write(t.replace(old, new))
+PY
+lazy_out="$(mirrun --audit-set)" && lazy_rc=0 || lazy_rc=$?
+if [ "$lazy_rc" -eq 0 ]; then
+  ok "the count-pinning remedy passes the SAME narrowing at exit 0 — it is blind"
+else
+  no "the lazy remedy was not blind (rc=$lazy_rc), so this simulation proves nothing: $lazy_out"
+fi
+# THE TWO FIELDS THE LAZY REMEDY PINS, and only those. The rest of the tally
+# (declared=, undecidable=) moves because the PREDICATE saw the narrowing — that
+# movement is the thing the count-pinning remedy cannot read.
+lazy_tally="$(printf '%s\n' "$lazy_out" | grep '^entries=' || true)"
+l_red="$(printf '%s\n' "$lazy_tally" | sed -n 's/^entries=[0-9][0-9]* red=\([0-9][0-9]*\) .*/\1/p')"
+l_sil="$(printf '%s\n' "$lazy_tally" | sed -n 's/^entries=[0-9][0-9]* red=[0-9][0-9]* silent=\([0-9][0-9]*\) .*/\1/p')"
+if [ "$l_red" = "$a_red" ] && [ "$l_sil" = "$a_sil" ]; then
+  ok "…and the two numbers it pins never moved (red=$l_red silent=$l_sil), which is why it cannot see the narrowing"
+else
+  no "the pinned numbers moved (red=$l_red silent=$l_sil vs red=$a_red silent=$a_sil) — pick a narrowing that keeps them still"
+fi
+
+rm -f "$MIRC"
+cp "$SCRIPT" "$MIRC"
+
+# (g) THE CENSUS-TIER COVERAGE ARM, both directions plus the positive control.
+#     $CENSUS_TEST is the ONE file the census job dispatches on, so a repo-root
+#     read of a census root FROM IT is dispatched on and must be accepted. The
+#     same read from any other cloud/test file must still be refused — that file
+#     is not in the census job, so its suite would skip and green.
+CENFX="$TMPROOT/census-tier"
+CENSRC2="$("$SCRIPT" --census-source)"
+rm -rf "$CENFX"
+# The DERIVED fixture, not a hand-built one: it carries a population above the
+# floor, so the arms below read the coverage verdict instead of every run dying
+# on `only 1 repo-root read(s) found`. (Measured: a three-file fixture redded on
+# the floor and both census-tier arms scored against a run that never reached
+# the coverage loop.)
+make_fixture "$CENFX"
+mkdir -p "$CENFX/$(dirname "$CENSRC2")" "$CENFX/cloud/test/other" "$CENFX/api"
+: >"$CENFX/api/fixture-probe.txt"
+: >"$CENFX/$CENSRC2"
+cenrun() { ( CLOUD_PATH_ESCAPE_ROOT="$CENFX" "$SCRIPT" --check ) 2>&1; }
+
+#   positive control FIRST: with no api read anywhere, the fixture is clean and
+#   nothing reports an api escape. Without this the two arms below could both be
+#   scoring a run that never mentions api at all.
+out="$(cenrun)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "control: the fixture with NO api read is green (exit 0)"
+else
+  no "control: the census-tier fixture is not clean before the mutation: $out"
+fi
+if has_fixed "$out" "UNCOVERED repo-root read: api"; then
+  no "control FAILED: an api read was reported with no api literal in the fixture"
+else
+  ok "control: no api read is reported when the fixture holds none"
+fi
+
+#   ARM 1 — the read from $CENSUS_TEST is ACCEPTED, because the census job
+#   dispatches on that file's own corpus.
+printf '  @probe Path.join([__DIR__, "..", "..", "..", "api"])\n' >>"$CENFX/$CENSRC2"
+out="$(cenrun)" && rc=0 || rc=$?
+if has_fixed "$out" "census-tier: api"; then
+  ok "a census-root read from \$CENSUS_TEST is covered by the census tier"
+else
+  no "the census tier did not cover a read from its own source file: $out"
+fi
+if has_fixed "$out" "UNCOVERED repo-root read: api"; then
+  no "the census-tier arm did not actually take: $out"
+else
+  ok "…and it is no longer reported UNCOVERED (exit $rc)"
+fi
+
+#   ARM 2 — the SAME read from ANY OTHER cloud/test file is still REFUSED. That
+#   file is not what the census job dispatches on, so its suite would skip and
+#   green on an api-only PR. This is the arm that keeps the widening narrow.
+printf '  @x Path.join([__DIR__, "..", "..", "..", "..", "api"])\n' >"$CENFX/cloud/test/other/ordinary_test.exs"
+out="$(cenrun)" && rc=0 || rc=$?
+if has_fixed "$out" "UNCOVERED repo-root read: api"; then
+  ok "the same read from an ordinary cloud/test file is still UNCOVERED (exit $rc)"
+else
+  no "the census-tier arm leaked coverage to a file the census job does not dispatch: $out"
+fi
+
+# (h) THE DISPATCH DERIVATION. Every workflow that consumes this script's
+#     verdict must run on the PR that edits it — derived from the workflow
+#     files, not asserted in a comment.
+out="$("$SCRIPT" --audit-dispatch 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "--audit-dispatch: every consuming workflow dispatches on this file"
+else
+  no "a workflow consumes this verdict without dispatching on the file: $out"
+fi
+if has "$out" "consuming-workflows=[1-9]"; then
+  ok "…and it found consumers: $(printf '%s\n' "$out" | tail -1)"
+else
+  no "--audit-dispatch found no consuming workflow — the derivation is vacuous: $out"
 fi
 echo
 
