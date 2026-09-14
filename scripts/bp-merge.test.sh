@@ -783,6 +783,323 @@ unset -f gh bm_has drive_bm
 rm -rf "$BM_TMP"
 trap - EXIT
 
+# ── 59-73. THE MAIN-RED HOLD PRE-FLIGHT ─────────────────────────────────────
+#
+# DRIVEN THROUGH THE REAL preflight_hold() AGAINST THE REAL
+# scripts/main-red-hold.sh, over REGISTRY FIXTURES written here. Nothing is
+# grepped out of the source and no GitHub is touched: `gh` is stubbed so
+# read_pr_files returns a file list this file chooses, and the registry is
+# selected with BP_MERGE_HOLD_REGISTRY (an ABSOLUTE path, because
+# main-red-hold.sh resolves a relative --registry against ITS OWN root).
+#
+# BOTH DIRECTIONS RUN AGAINST THE SAME REGISTRY IN THIS ONE RUN. Rows 60 and 61
+# judge the identical file (`$HOLD_REG`); only the PR's file list differs. A
+# check that refused everything would pass 60 and fail 61; a check that refused
+# nothing would pass 61 and fail 60. Neither arm is evidence without the other,
+# and running them against two different registries would prove only that two
+# files differ.
+#
+# preflight_hold exits rather than returning, so every row runs it in a
+# SUBSHELL and reads the exit code on the very next line.
+HOLD_TMP="$(mktemp -d)"
+HOLD_REG="$HOLD_TMP/holds.json"
+HOLD_FILES=""
+HOLD_COMMENT_RC=0
+HOLD_COMMENT_LOG="$HOLD_TMP/gh-comment.log"
+: > "$HOLD_COMMENT_LOG"
+
+cat > "$HOLD_REG" <<'HOLDREG'
+{
+  "version": 1,
+  "holds": [
+    {
+      "id": "st-taskboard-drift",
+      "owner": "lane:cli",
+      "task": "task-deadbeefcafe0001",
+      "trees": ["internal/taskboard"],
+      "repro": "CGO_ENABLED=0 go test ./internal/taskboard/",
+      "opened_on_sha": "1111111111111111111111111111111111111111",
+      "opened_exit": 1,
+      "opened_at": "2026-09-13T00:00:00Z"
+    }
+  ]
+}
+HOLDREG
+
+gh() {
+  case "$1" in
+    pr)
+      case "${2:-}" in
+        view)    printf '%s\n' "$HOLD_FILES" ;;
+        comment) printf '%s\n' "$*" >> "$HOLD_COMMENT_LOG"
+                 if [ "$HOLD_COMMENT_RC" != "0" ]; then
+                   printf 'HTTP 403: Resource not accessible by integration\n' >&2
+                   return "$HOLD_COMMENT_RC"
+                 fi
+                 printf 'https://github.com/FRIKKern/barkpark/pull/123#issuecomment-1\n' ;;
+        *)       printf 'hold stub: unexpected `gh pr %s`\n' "${2:-}" >&2; return 1 ;;
+      esac ;;
+    *) printf 'hold stub: unexpected `gh %s`\n' "$1" >&2; return 1 ;;
+  esac
+}
+
+PR_NUMBER=123
+REPO_ROOT="$ROOT"
+HOLD_SCRIPT="$ROOT/scripts/main-red-hold.sh"
+
+drive_hold() { # files registry -> HOLD_RC, HOLD_OUT
+  HOLD_FILES="$1"
+  HOLD_RC=0
+  HOLD_OUT="$( HOLD_REGISTRY="$2" preflight_hold 2>&1 )" || HOLD_RC=$?
+}
+hold_has() { case "$1" in *"$2"*) return 0 ;; *) return 1 ;; esac; }
+
+hold_row() { # label want_rc needle... ; uses HOLD_RC/HOLD_OUT
+  local label="$1" want="$2"; shift 2
+  local bad="" n
+  [ "$HOLD_RC" = "$want" ] || bad="exit $HOLD_RC (wanted $want)"
+  for n in "$@"; do
+    hold_has "$HOLD_OUT" "$n" || bad="$bad; missing '$n'"
+  done
+  if [ -z "$bad" ]; then
+    pass=$((pass + 1)); echo "  ok   $label (exit $HOLD_RC)"
+  else
+    fail=$((fail + 1)); echo "  FAIL $label: $bad" >&2
+    printf '%s\n' "$HOLD_OUT" | sed 's/^/       /' >&2
+  fi
+}
+
+echo
+echo "── main-red hold pre-flight: real main-red-hold.sh, fixture registry, no live GitHub ──"
+
+# 59. CONTROL FIRST: the fixture registry is the one being judged, and it holds
+# exactly one hold. Without this row every "not held" verdict below could be a
+# verdict about an empty file.
+if [ "$(jq -r '.holds | length' "$HOLD_REG")" = "1" ] \
+   && [ "$(jq -r '.holds[0].id' "$HOLD_REG")" = "st-taskboard-drift" ]; then
+  pass=$((pass + 1)); echo "  ok   59 CONTROL: the fixture registry carries exactly one hold, id st-taskboard-drift"
+else
+  fail=$((fail + 1)); echo "  FAIL the fixture registry is not the shape every row below assumes" >&2
+fi
+
+# 60. DIRECTION A — HELD. The file list is quoted in the verdict, and the
+# refusal carries the TREE, the OWNER and the TASK ID off the registry.
+drive_hold 'internal/taskboard/golden.go
+docs/INDEX.md' "$HOLD_REG"
+hold_row "60 a PR touching internal/taskboard/golden.go is HELD" 5 \
+  "REFUSED — MAIN-RED HOLD" "HELD: st-taskboard-drift" \
+  "internal/taskboard" "lane:cli" "task-deadbeefcafe0001" \
+  "internal/taskboard/golden.go"
+echo "       file list that decided 60: internal/taskboard/golden.go, docs/INDEX.md"
+
+# 60a. THE REFUSAL IS DISTINGUISHABLE FROM EVERY OTHER REFUSAL THIS SCRIPT
+# EMITS. Asserted POSITIVELY and derived, not eyeballed: the banner is counted
+# across the whole script and must appear on exactly the arms that mean HOLD.
+HOLD_BANNERS="$(grep -c 'REFUSED — MAIN-RED HOLD' "$ROOT/scripts/bp-merge.sh" || true)"
+HOLD_OTHER="$(grep -c 'bp-merge: REFUSED — ' "$ROOT/scripts/bp-merge.sh" || true)"
+if [ "$HOLD_BANNERS" -ge 1 ] && [ "$HOLD_OTHER" -gt "$HOLD_BANNERS" ]; then
+  pass=$((pass + 1))
+  echo "  ok   60a the HOLD banner is its own string ($HOLD_BANNERS hold arm(s) among $HOLD_OTHER 'REFUSED — ' arms)"
+else
+  fail=$((fail + 1))
+  echo "  FAIL CANNOT READ: banner census came back $HOLD_BANNERS/$HOLD_OTHER — below the floor of 1 hold arm strictly inside a larger refusal set" >&2
+fi
+
+# 61. DIRECTION B — CLEAR, SAME REGISTRY, SAME RUN. A PR touching nothing held
+# passes the pre-flight and says so.
+drive_hold 'docs/INDEX.md
+scripts/doctor.sh' "$HOLD_REG"
+hold_row "61 a PR touching NOTHING held is CLEAR and unaffected" 0 \
+  "hold pre-flight ok" "CLEAR" "not held: st-taskboard-drift"
+echo "       file list that decided 61: docs/INDEX.md, scripts/doctor.sh"
+
+# 61a. AND THE VERDICTS DIFFER. Two rows that printed the same thing would be
+# one row twice.
+if hold_has "$HOLD_OUT" "CLEAR" && ! hold_has "$HOLD_OUT" "REFUSED — MAIN-RED HOLD"; then
+  pass=$((pass + 1)); echo "  ok   61a …and the CLEAR verdict carries no HOLD refusal (the two arms are not one arm twice)"
+else
+  fail=$((fail + 1)); echo "  FAIL the CLEAR run still printed a HOLD refusal" >&2
+fi
+
+# 62-64. FAIL CLOSED. Three unreadable shapes, each exit 6 with the distinct
+# CANNOT READ line — never 0, never byte-identical to CLEAR.
+drive_hold 'internal/taskboard/golden.go' "$HOLD_TMP/does-not-exist.json"
+hold_row "62 a MISSING registry is CANNOT READ, never CLEAR" 6 "HOLD CHECK CANNOT READ"
+
+: > "$HOLD_TMP/empty.json"
+drive_hold 'internal/taskboard/golden.go' "$HOLD_TMP/empty.json"
+hold_row "63 an EMPTY registry is CANNOT READ, never CLEAR" 6 "HOLD CHECK CANNOT READ"
+
+printf '{ "holds": [ {,,, \n' > "$HOLD_TMP/garbage.json"
+drive_hold 'internal/taskboard/golden.go' "$HOLD_TMP/garbage.json"
+hold_row "64 an UNPARSEABLE registry is CANNOT READ, never CLEAR" 6 "HOLD CHECK CANNOT READ"
+
+# 65. AN EMPTY FILE LIST IS A FAILED READ, NOT A CLEAN PR. This is the shape
+# that would otherwise sail through every hold on earth.
+drive_hold '' "$HOLD_REG"
+hold_row "65 a ZERO-file PR is CANNOT READ, never CLEAR" 6 "HOLD CHECK CANNOT READ" "ZERO changed files"
+
+# 66. THE CANNOT READ VERDICT IS NOT THE CLEAR VERDICT AND NOT THE HELD ONE.
+#
+# THE SENTINELS ARE THE VERDICT LINES, NOT THE WORD "CLEAR". This row first
+# probed for the bare substring `CLEAR` and FAILED on a correct refusal: the
+# CANNOT READ text itself says "refusing to report CLEAR off a file that is not
+# there", so the probe matched its own counter-example. A negative probe cannot
+# live in a file that contains the word it is hunting. What actually
+# distinguishes the three verdicts is the line each one ends on, so those are
+# what this asserts.
+HOLD_V_CLEAR="bp-merge: hold pre-flight ok"
+HOLD_V_HELD="bp-merge: REFUSED — MAIN-RED HOLD"
+HOLD_V_CANT="bp-merge: HOLD CHECK CANNOT READ"
+drive_hold 'internal/taskboard/golden.go' "$HOLD_TMP/does-not-exist.json"
+if hold_has "$HOLD_OUT" "$HOLD_V_CANT" \
+   && ! hold_has "$HOLD_OUT" "$HOLD_V_CLEAR" && ! hold_has "$HOLD_OUT" "$HOLD_V_HELD"; then
+  pass=$((pass + 1)); echo "  ok   66 the CANNOT READ verdict line is neither the CLEAR one nor the HELD one — it claims neither"
+else
+  fail=$((fail + 1)); echo "  FAIL the CANNOT READ verdict is confusable with a CLEAR or a HELD one" >&2
+  printf '%s\n' "$HOLD_OUT" | sed 's/^/       /' >&2
+fi
+
+# 66a. CONTROL FOR 66: the three sentinels are not vacuous strings that never
+# appear. Each one is shown to fire on its OWN case in this same run. A row
+# asserting three absences proves nothing until each string is shown findable.
+drive_hold 'docs/INDEX.md' "$HOLD_REG"
+hold_has "$HOLD_OUT" "$HOLD_V_CLEAR" && HOLD_S1=1 || HOLD_S1=0
+drive_hold 'internal/taskboard/golden.go' "$HOLD_REG"
+hold_has "$HOLD_OUT" "$HOLD_V_HELD" && HOLD_S2=1 || HOLD_S2=0
+drive_hold 'internal/taskboard/golden.go' "$HOLD_TMP/does-not-exist.json"
+hold_has "$HOLD_OUT" "$HOLD_V_CANT" && HOLD_S3=1 || HOLD_S3=0
+if [ "$HOLD_S1$HOLD_S2$HOLD_S3" = "111" ]; then
+  pass=$((pass + 1)); echo "  ok   66a CONTROL: all three verdict sentinels fire on their own case (clear/held/cannot-read = $HOLD_S1$HOLD_S2$HOLD_S3)"
+else
+  fail=$((fail + 1)); echo "  FAIL CANNOT READ: sentinel control came back $HOLD_S1$HOLD_S2$HOLD_S3, not 111 — row 66's absences assert nothing" >&2
+fi
+
+# 67-70. THE OVERRIDE. Explicit, three-part, and the RECORD IS A PRECONDITION.
+drive_hold_ov() { # id who why files registry
+  HOLD_FILES="$4"
+  HOLD_RC=0
+  HOLD_OUT="$( BP_MERGE_HOLD_OVERRIDE_ID="$1" BP_MERGE_HOLD_OVERRIDE_WHO="$2" \
+               BP_MERGE_HOLD_OVERRIDE_WHY="$3" HOLD_REGISTRY="$5" preflight_hold 2>&1 )" || HOLD_RC=$?
+}
+
+: > "$HOLD_COMMENT_LOG"
+HOLD_COMMENT_RC=0
+drive_hold_ov st-taskboard-drift 'lead-cli' 'carries the fix for this very red' \
+  'internal/taskboard/golden.go' "$HOLD_REG"
+hold_row "67 a COMPLETE override releases the hold" 0 \
+  "OVERRIDDEN by lead-cli" "authorisation recorded on the PR"
+if grep -q 'AUTHORISED BY: lead-cli' "$HOLD_COMMENT_LOG" \
+   && grep -q 'REASON: carries the fix for this very red' "$HOLD_COMMENT_LOG" \
+   && grep -q 'st-taskboard-drift' "$HOLD_COMMENT_LOG"; then
+  pass=$((pass + 1)); echo "  ok   67a …and the WHO and the WHY landed in a PR COMMENT, not only in stdout"
+else
+  fail=$((fail + 1)); echo "  FAIL the override left no durable record: gh pr comment was not called with who/why/id" >&2
+  sed 's/^/       /' "$HOLD_COMMENT_LOG" >&2
+fi
+
+drive_hold_ov st-taskboard-drift 'lead-cli' '' 'internal/taskboard/golden.go' "$HOLD_REG"
+hold_row "68 a PARTIAL override is refused and names what is missing" 5 \
+  "OVERRIDE INCOMPLETE" "BP_MERGE_HOLD_OVERRIDE_WHY"
+
+drive_hold_ov some-other-hold 'lead-cli' 'because' 'internal/taskboard/golden.go' "$HOLD_REG"
+hold_row "69 an override naming a hold this PR is NOT held by is refused" 5 \
+  "OVERRIDE NAMES THE WRONG HOLD"
+
+: > "$HOLD_COMMENT_LOG"
+HOLD_COMMENT_RC=1
+drive_hold_ov st-taskboard-drift 'lead-cli' 'carries the fix' 'internal/taskboard/golden.go' "$HOLD_REG"
+hold_row "70 an override whose RECORD could not be posted refuses — the hold stands" 5 \
+  "OVERRIDE COULD NOT BE RECORDED"
+HOLD_COMMENT_RC=0
+
+# 71. EXIT 6 HAS NO DOOR. A complete, correct-looking override against an
+# UNREADABLE registry must still be exit 6 — you cannot authorise past a
+# judgement that never happened.
+drive_hold_ov st-taskboard-drift 'lead-cli' 'because' 'internal/taskboard/golden.go' "$HOLD_TMP/does-not-exist.json"
+hold_row "71 an override CANNOT open the unreadable-registry door" 6 "HOLD CHECK CANNOT READ"
+
+# 72. CONTROL: the override is INERT on a CLEAR PR. A door that also changed
+# the cleared path would mean rows 61 and 67 were measuring the same thing.
+: > "$HOLD_COMMENT_LOG"
+drive_hold_ov st-taskboard-drift 'lead-cli' 'because' 'docs/INDEX.md' "$HOLD_REG"
+if [ "$HOLD_RC" = "0" ] && hold_has "$HOLD_OUT" "CLEAR" && [ ! -s "$HOLD_COMMENT_LOG" ]; then
+  pass=$((pass + 1)); echo "  ok   72 CONTROL: the override is inert on a CLEAR PR and posts nothing"
+else
+  fail=$((fail + 1)); echo "  FAIL the override changed the CLEAR path (rc=$HOLD_RC, comment log $(wc -c < "$HOLD_COMMENT_LOG") bytes)" >&2
+fi
+
+# 73. MUTATION, BOTH DIRECTIONS AND ASYMMETRIC. The fail-closed arm is the one
+# criterion that matters most, so it is proved by BREAKING it in a scratch copy
+# rather than by reading it. The mutation is ANCHORED TO THE LINE the census
+# below locates — a bare substring replace landed 311 lines off target in this
+# campaign and the test still went green — and the row ASSERTS THE MUTATION
+# LANDED before it draws any conclusion.
+#
+# ASYMMETRY IS THE POINT: the mutant must go GREEN-on-unreadable (it merges
+# through a registry it could not read — the exact defect) while STILL refusing
+# the HELD case. Two arms that red together may be one arm twice; these two do
+# not move together.
+HOLD_MUT="$HOLD_TMP/bp-merge-mutant.sh"
+cp "$ROOT/scripts/bp-merge.sh" "$HOLD_MUT"
+HOLD_MUT_LINE="$(grep -n '^hold_cannot_read() { # \$1 = what could not be read$' "$HOLD_MUT" | cut -d: -f1)"
+if [ -z "$HOLD_MUT_LINE" ]; then
+  fail=$((fail + 1)); echo "  FAIL 73 CANNOT READ: could not locate hold_cannot_read()'s definition line — the mutation has no anchor and nothing below was measured" >&2
+else
+  # Replace the BODY's exit with a `return 0`, anchored at the located line.
+  # The defect being simulated is the one the criterion names: the unreadable
+  # case falls THROUGH to the merge instead of refusing.
+  awk -v L="$HOLD_MUT_LINE" 'NR==L {print "hold_cannot_read() { echo \"bp-merge: (mutant) ignoring unreadable registry: $1\"; return 0; }"; print "hold_cannot_read_dead() {"; next} {print}' \
+    "$HOLD_MUT" > "$HOLD_MUT.tmp" && mv "$HOLD_MUT.tmp" "$HOLD_MUT"
+  if sed -n "${HOLD_MUT_LINE}p" "$HOLD_MUT" | grep -q '(mutant) ignoring unreadable registry'; then
+    pass=$((pass + 1)); echo "  ok   73a the mutation landed on line $HOLD_MUT_LINE, the line hold_cannot_read() is defined on"
+
+    HOLD_MUT_RC=0
+    HOLD_MUT_OUT="$(
+      BP_MERGE_LIB=1 . "$HOLD_MUT"
+      PR_NUMBER=123; REPO_ROOT="$ROOT"; HOLD_SCRIPT="$ROOT/scripts/main-red-hold.sh"
+      gh() { printf 'internal/taskboard/golden.go\n'; }
+      HOLD_REGISTRY="$HOLD_TMP/does-not-exist.json" preflight_hold 2>&1
+    )" || HOLD_MUT_RC=$?
+    if [ "$HOLD_MUT_RC" = "0" ]; then
+      pass=$((pass + 1)); echo "  ok   73b the MUTANT falls open on an unreadable registry (exit 0) — the guard is load-bearing"
+    else
+      fail=$((fail + 1)); echo "  FAIL 73b the mutant still refused (exit $HOLD_MUT_RC) — row 62-65 would pass with the guard gutted, so they assert nothing" >&2
+    fi
+
+    HOLD_MUT_HELD_RC=0
+    HOLD_MUT_HELD_OUT="$(
+      BP_MERGE_LIB=1 . "$HOLD_MUT"
+      PR_NUMBER=123; REPO_ROOT="$ROOT"; HOLD_SCRIPT="$ROOT/scripts/main-red-hold.sh"
+      gh() { printf 'internal/taskboard/golden.go\n'; }
+      HOLD_REGISTRY="$HOLD_REG" preflight_hold 2>&1
+    )" || HOLD_MUT_HELD_RC=$?
+    if [ "$HOLD_MUT_HELD_RC" = "5" ]; then
+      pass=$((pass + 1)); echo "  ok   73c ASYMMETRY: the same mutant STILL refuses the HELD case (exit 5) — 62-65 and 60 are different arms"
+    else
+      fail=$((fail + 1)); echo "  FAIL 73c the mutation moved the HELD arm too (exit $HOLD_MUT_HELD_RC); the two arms are not independent" >&2
+    fi
+  else
+    fail=$((fail + 1)); echo "  FAIL 73a CANNOT READ: the mutation did NOT land on line $HOLD_MUT_LINE; nothing below it was measured" >&2
+  fi
+fi
+
+# 74. AND THE ORIGINAL STILL REFUSES — the restore direction. Without it, 73
+# proves only that a broken copy is broken.
+drive_hold 'internal/taskboard/golden.go' "$HOLD_TMP/does-not-exist.json"
+hold_row "74 the ORIGINAL still refuses the same input the mutant merged" 6 "HOLD CHECK CANNOT READ"
+
+# 75. WIRED INTO main(), AND BEFORE THE PRE-FLIGHT THAT SPENDS API READS.
+if awk '/^  preflight_hold$/ {seen=1} /^  preflight$/ {print (seen ? "OK" : "LATE"); exit}' \
+     "$ROOT/scripts/bp-merge.sh" | grep -q OK; then
+  pass=$((pass + 1)); echo "  ok   75 main() runs preflight_hold BEFORE preflight"
+else
+  fail=$((fail + 1)); echo "  FAIL preflight_hold is not called before preflight in main()" >&2
+fi
+
+unset -f gh hold_has hold_row drive_hold drive_hold_ov
+rm -rf "$HOLD_TMP"
+
 echo
 echo "bp-merge harness: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1
