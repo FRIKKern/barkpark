@@ -39,9 +39,22 @@ test("the population is committed files, and it is not empty", () => {
 test("THE WAVE-16 EDGE: __css_check's directory readdir is derived, not imported", () => {
   const src = fs.readFileSync(path.join(REPO, CSS), "utf8");
   const sites = scanSites(CSS, src);
+  // ASSERTED THROUGH `matches`, NOT AGAINST A SITE KIND. The property this test
+  // is about is that __css_check's directory scan REACHES the sweep; the shape
+  // that carries it is the deriver's business and has already changed once
+  // (two `dir` arms became one descending `tree` when citationScanFiles() went
+  // recursive). Pinning `kind === "dir" && p === ".../__preview__"` reds on a
+  // widening that makes the edge STRONGER, which is a ratchet pointing the
+  // wrong way.
   assert.ok(
-    sites.some((s) => s.kind === "dir" && s.p === "cloud/priv/static/__preview__"),
-    "the readdirSync over __preview__ is a derived scan site"
+    sites.some((s) => matches(s, SWEEP)),
+    `no derived scan site of __css_check reaches ${SWEEP}: ${JSON.stringify(sites)}`
+  );
+  // NON-VACUITY: a site list that matched everything would pass the line above
+  // while modelling nothing. A file in a sibling tree must NOT be reached.
+  assert.ok(
+    !sites.some((s) => matches(s, "api/lib/barkpark/application.ex")),
+    `the scan sites must not match everything: ${JSON.stringify(sites)}`
   );
   // The negative half: __css_check does NOT import or name the sweep IN CODE, so
   // an import-graph reader could not have found this. Prove the absence.
@@ -103,7 +116,13 @@ test("THE COMPOSITION: a slice touching only breakpoint-sweep.mjs REQUIRES __css
   assert.ok(paths.includes(SWEEP), "the edited instrument runs too");
   assert.ok(paths.includes("cloud/priv/static/__preview__/breakpoint-sweep.test.mjs"), "and its unit suite");
   const why = req.find((r) => r.path === CSS).why[0];
-  assert.equal(why.via.kind, "dir");
+  // A DIRECTORY-SHAPED SITE, not a named file: that is the property the edge is
+  // about (an import graph could not have found it). Which directory shape —
+  // `dir` for a flat readdir, `tree` for one that descends — follows
+  // citationScanFiles()'s reach and has already changed once; pinning the
+  // narrower of the two reds when the instrument gets STRONGER.
+  assert.ok(["dir", "tree"].includes(why.via.kind), `expected a directory scan site, got ${why.via.kind}`);
+  assert.notEqual(why.via.kind, "file", "a file site would mean an import graph could have found this");
   assert.match(why.via.evidence, /__css_check\.mjs:\d+/);
 });
 
@@ -163,7 +182,16 @@ test("SELFTEST — a MOVED scan set is refused", () => {
   const map = currentMap();
   const moved = JSON.parse(JSON.stringify(map));
   const css = moved.instruments.find((i) => i.path === CSS);
-  css.scans = css.scans.filter((s) => s.p !== "cloud/priv/static/__preview__");
+  // THE MUTATION IS DERIVED, NOT NAMED. This filtered a literal
+  // "cloud/priv/static/__preview__" site; when citationScanFiles() went
+  // recursive that exact site stopped existing, and the filter silently removed
+  // NOTHING — the "narrowed" map was identical to the fresh one, verify
+  // correctly said ok, and a mutation test that no longer mutates passes for
+  // the wrong reason. Drop whatever sites actually carry the reach, and assert
+  // that something was dropped before asking for the refusal.
+  const before = css.scans.length;
+  css.scans = css.scans.filter((s) => !matches(s, SWEEP));
+  assert.ok(css.scans.length < before, `the mutation must remove a scan site (had ${before})`);
   const v = verify(moved);
   assert.equal(v.ok, false, "a narrowed scan set must be a refusal");
   assert.ok(v.problems.some((p) => /scan set moved/.test(p)), v.problems.join("; "));
