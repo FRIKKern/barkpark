@@ -1324,7 +1324,46 @@ func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Comman
 	if limit <= 0 {
 		return
 	}
-	rows, _ := extractListRows(unwrapResult(respBody))
+	body := unwrapResult(respBody)
+
+	// A SERVER-CLAMPED --limit FALLS THROUGH THE ROW-COUNT TEST BELOW, because
+	// a clamp makes the page SHORTER than what was asked. `--limit 2000`
+	// against the /v1/tasks cap of 1000 returns 1000 rows, and `1000 < 2000`
+	// reads as "the page did not fill, so there is nothing more" — the exact
+	// inference the cap invalidates. So asking for MORE bought LESS warning,
+	// and the remedy this function itself recommends ("raise --limit") was the
+	// action that silenced it. Measured on c42fde07c against guerrilla:
+	// `bp task ls --limit 1000` warned, `--limit 2000` printed nothing at all
+	// while the envelope said has_more:true, next_offset:1000.
+	//
+	// The row count cannot see a clamp; the ENVELOPE can. `page.limit` is the
+	// EFFECTIVE limit after clamping (api tasks_controller/params.ex page_meta
+	// documents it as "the number the caller asked for is not the number they
+	// got, and this field is about what they got"), so `page.limit < --limit`
+	// IS the clamp, stated by the only party that knows the cap. Reported here
+	// rather than guessed, because the cap differs per route (1000 tasks, 500
+	// events, 200 deployments, 50 related) and a client-side table of caps
+	// would be a copy that drifts.
+	//
+	// has_more DECIDES WHICH TRUTH IS TOLD. A clamp is not by itself
+	// incompleteness: if the population is smaller than the cap the page is
+	// genuinely whole, and saying "more may be available" there would be the
+	// same defect pointing the other way — an instrument that cries truncation
+	// at every read is as useless as one that never does. So the reduction is
+	// always named, and the continuation is promised only when the server
+	// promises it.
+	if explicit {
+		if served, ok := pageEffectiveLimit(body); ok && served < limit {
+			if pageHasMore(body) {
+				out.userErr("your --limit of %d was reduced to %d by the server's cap; more rows remain beyond this page — page with --offset or re-run with --all", limit, served)
+			} else {
+				out.userErr("your --limit of %d was reduced to %d by the server's cap; this page is complete (the server reports no further rows), but a larger page is not available", limit, served)
+			}
+			return
+		}
+	}
+
+	rows, _ := extractListRows(body)
 	if len(rows) < limit {
 		return
 	}
@@ -1334,6 +1373,39 @@ func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Comman
 		return
 	}
 	out.userErr("result page reached the default limit of %d; more may be available — re-run with --all", limit)
+}
+
+// pageEffectiveLimit reads `page.limit` — the limit the server ACTUALLY
+// applied, after its own clamp — from a list envelope. The second return is
+// false when the envelope carries no readable page block, which is the honest
+// "this route told me nothing" and must never be confused with a limit of 0:
+// every caller below treats !ok as "no clamp evidence" and falls back to the
+// row-count heuristic rather than inventing a reduction.
+func pageEffectiveLimit(payload []byte) (int, bool) {
+	var env struct {
+		Page *struct {
+			Limit *int `json:"limit"`
+		} `json:"page"`
+	}
+	if json.Unmarshal(payload, &env) != nil || env.Page == nil || env.Page.Limit == nil {
+		return 0, false
+	}
+	return *env.Page.Limit, true
+}
+
+// pageHasMore reports the server's own `page.has_more`. A missing block or a
+// missing field reads false: this value only ever ADDS a promise of more rows,
+// so the absent case must be the one that promises nothing.
+func pageHasMore(payload []byte) bool {
+	var env struct {
+		Page *struct {
+			HasMore bool `json:"has_more"`
+		} `json:"page"`
+	}
+	if json.Unmarshal(payload, &env) != nil || env.Page == nil {
+		return false
+	}
+	return env.Page.HasMore
 }
 
 func defaultPageLimit(cmd manifest.Command) int {

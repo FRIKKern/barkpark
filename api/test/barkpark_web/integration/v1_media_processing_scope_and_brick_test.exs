@@ -287,4 +287,106 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingScopeAndBrickTest do
       assert content["bp_processing_status"] == "ready"
     end
   end
+
+  # Park the asset on the sweeper's give-up terminal, the state the defect
+  # destroyed. Asserts the fixture persisted — a silent no-op here would make
+  # every test below vacuously green.
+  defp park_failed!(t) do
+    {:ok, _} =
+      Content.upsert_document(
+        @asset_type,
+        %{
+          "doc_id" => t.doc.doc_id,
+          "title" => t.doc.title,
+          "status" => t.doc.status,
+          "content" => Map.put(t.doc.content || %{}, "bp_processing_status", "failed")
+        },
+        @ds,
+        [source: :api] ++ scope(t)
+      )
+
+    assert stored(t).content["bp_processing_status"] == "failed",
+           "the terminal fixture did not persist — these tests would be vacuous"
+
+    t
+  end
+
+  describe "an unrecognised status cannot rewrite a terminal state" do
+    # THE DEFECT (asm-bl-normalize-status-terminal-preservation):
+    # `normalize_status/1` ended in `defp normalize_status(_), do: "processing"`,
+    # so ANY status the controller did not recognise — a typo, a new processor's
+    # own vocabulary, a forged body, or no status field at all — was silently
+    # read as "processing" and WRITTEN over `bp_processing_status`. On a row the
+    # stuck-processing sweeper had already given up on and parked at "failed",
+    # that un-sticks the give-up terminal and re-arms the reconciliation loop.
+    #
+    # These tests pin the refusal from BOTH sides: the terminal value in the
+    # store is unchanged, AND the caller is told 422 rather than being led to
+    # believe the write landed.
+
+    test "an unknown status is refused with 422 and leaves a terminal 'failed' row alone" do
+      t = park_failed!(default_tenant())
+
+      resp = post_callback(t, %{"status" => "requeued", "provider" => "transcoder"})
+
+      assert resp.status == 422,
+             "an unrecognised status was ACCEPTED (got #{resp.status}) — the catch-all " <>
+               "is still guessing a status the caller never sent"
+
+      assert json_response(resp, 422)["error"]["code"] == "unprocessable"
+
+      assert stored(t).content["bp_processing_status"] == "failed",
+             "an unrecognised status rewrote a terminal row back to " <>
+               inspect(stored(t).content["bp_processing_status"])
+    end
+
+    test "a callback with NO status at all is refused, not defaulted to 'processing'" do
+      t = park_failed!(default_tenant())
+
+      resp = post_callback(t, %{"provider" => "transcoder"})
+
+      assert resp.status == 422
+
+      assert stored(t).content["bp_processing_status"] == "failed",
+             "an untyped callback defaulted its way over the give-up terminal"
+    end
+
+    test "the refusal writes NOTHING — not even the callback bookkeeping" do
+      t = park_failed!(default_tenant())
+      before = stored(t).content
+
+      assert post_callback(t, %{"status" => "whatever", "jobId" => "job-9"}).status == 422
+
+      assert stored(t).content == before,
+             "the refused callback still mutated the document"
+    end
+
+    test "positive control: every legitimately-accepted status still lands" do
+      # Derived from `normalize_status/1`'s own clause list — the closed set the
+      # 422 message names. If a real processor status were caught by the new
+      # refusal, one of these would 422 instead of 200.
+      for {sent, stored_as} <- [
+            {"ready", "ready"},
+            {"processing", "processing"},
+            {"failed", "failed"},
+            {"complete", "ready"},
+            {"completed", "ready"},
+            {"error", "failed"}
+          ] do
+        t = default_tenant()
+
+        assert post_callback(t, %{"status" => sent, "provider" => "transcoder"}).status == 200,
+               "a legitimate processor status #{inspect(sent)} was refused"
+
+        assert stored(t).content["bp_processing_status"] == stored_as
+      end
+    end
+
+    test "the alias field processingStatus is still honoured" do
+      t = default_tenant()
+
+      assert post_callback(t, %{"processingStatus" => "complete"}).status == 200
+      assert stored(t).content["bp_processing_status"] == "ready"
+    end
+  end
 end

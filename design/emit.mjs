@@ -214,9 +214,51 @@ export const PROVIDERS = ["hetzner", "azure"];
 export const INST_ROLE_CSS = { ok: "--ok", warn: "--warn", danger: "--danger", info: "--info", "": "--muted-text" };
 export const instRoleChannels = (role) =>
   role === "" ? tokens.color["muted-text"] : tokens.color.status[role];
+// ── the chrome type ladder, DERIVED (task-039d433a1bac63ab) ─────────────────
+// TYPE_STEPS used to be the hand-written literal
+//
+//     export const TYPE_STEPS = ["2xl","xl","lg","base","sm","xs","2xs","3xs"];
+//
+// under a comment saying it mirrored tokens.type.chrome. It was load-bearing in
+// BOTH directions at once: it GENERATES the consumer (chromeTypeVars below, the
+// web `chromeType` rows and `chromeTypeOrder`), and it is the list check.mjs
+// Part C2 ITERATES. A gate that walks a hand copy and finds each of ITS OWN
+// entries present in the source can only ever fail in one direction — a rung
+// added to tokens.json and not to the literal is invisible to the very gate
+// meant to hold the two in lockstep. PR #17942 added `2xs`/`3xs` and happened to
+// update the literal too; nothing would have caught it if it had not. (The same
+// defect one level out — a retyped expected side in
+// web/__tests__/type-ladder-emitted.test.ts — is what surfaced this one.)
+//
+// So the step list AND ITS ORDER now come out of tokens.json. ORDER IS NOT KEY
+// ORDER: tokens.json lists type.chrome smallest-first, while display order is
+// largest → smallest, so the derivation sorts by DESCENDING SIZE — the contract
+// the emitted comment already states — and REFUSES a tie, because two steps of
+// the same size do not name one order. And it refuses rather than going blind:
+// a missing family, a non-object family or a family yielding zero steps would
+// derive [] and every downstream assertion would pass vacuously, which is the
+// exact failure a ladder gate exists to prevent. check.mjs Part C2 drives all
+// of those arms in-process plus a positive control on the derived count.
+export const LADDER_REFUSE = "REFUSING TO MEASURE";
+export function typeLadderFrom(doc, family) {
+  const block = doc?.type?.[family];
+  if (!block || typeof block !== "object")
+    throw new Error(`${LADDER_REFUSE} — tokens.type.${family} is missing or is not an object`);
+  // `_note` prose and scalars like type.reading.headingWeight are not rungs: a
+  // rung is an entry carrying a finite positive `size`.
+  const steps = Object.entries(block)
+    .filter(([k]) => !k.startsWith("_"))
+    .map(([k, v]) => [k, v?.size])
+    .filter(([, size]) => typeof size === "number" && Number.isFinite(size) && size > 0);
+  if (steps.length === 0)
+    throw new Error(`${LADDER_REFUSE} — derived ZERO steps from tokens.type.${family}; every ladder assertion downstream would pass vacuously`);
+  if (new Set(steps.map(([, size]) => size)).size !== steps.length)
+    throw new Error(`${LADDER_REFUSE} — tokens.type.${family} has two steps of the same size, so "largest → smallest" does not name one order`);
+  return steps.slice().sort((a, b) => b[1] - a[1]).map(([k]) => k);
+}
 // Chrome type-scale steps, largest → smallest (display order for the Studio type
-// ladder). Mirrors tokens.type.chrome; the emitter and check.mjs both key off it.
-export const TYPE_STEPS = ["2xl", "xl", "lg", "base", "sm", "xs", "2xs", "3xs"];
+// ladder). DERIVED from tokens.type.chrome — never retype it here.
+export const TYPE_STEPS = typeLadderFrom(tokens, "chrome");
 // The READING ladder's steps, display order (largest → body). Mirrors
 // tokens.type.reading; the web TS emitter keys off it so the styleguide can show
 // the prose scale the /papers surface actually paints with.
