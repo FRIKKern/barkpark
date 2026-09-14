@@ -74,7 +74,9 @@ defmodule BarkparkWeb.StudioLocale do
       "remove" => gettext("Remove"),
       "no_matches" => gettext("No matches"),
       "draft" => gettext("draft"),
-      "search" => gettext("Search %{types}…"),
+      # The picker fills %{types} client-side (the joined ref-type set), so the
+      # placeholder is handed through verbatim instead of bound here.
+      "search" => gettext("Search %{types}…", types: "%{types}"),
       "documents" => gettext("documents")
     })
   end
