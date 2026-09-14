@@ -49,10 +49,12 @@ COMMAND "Ensure console hook zones" DESCRIPTION "Idempotently plant the three na
 #      hook-map comment groups: "pure helpers node-pinned via __bpTestHook;
 #      DOM mounts browser-verified". Every feature repeats the same
 #      three-site mechanical chore by hand. The three sites are genuinely
-#      append-shaped AND semantics-free — but two of them sit at moving,
-#      feature-named neighborhoods (the newest palette entries; the newest
-#      test group), so without zones every command anchor would rot as the
-#      files grow. Zones repair that once.
+#      append-shaped, but only the two app.js sites are semantics-free; the
+#      tests site is position-CONSTRAINED — it must live below the harness's
+#      last top-level `await`, for the TDZ reason OP 3 spells out. Two of the
+#      three also sit at moving, feature-named neighborhoods (the newest
+#      palette entries; the newest test group), so without zones every command
+#      anchor would rot as the files grow. Zones repair that once.
 #
 # CI note: __app.test.mjs is a REAL enforced gate — console-harness.yml runs
 # `node --test cloud/priv/static/__app.test.mjs` (438 tests, ~250ms, zero
