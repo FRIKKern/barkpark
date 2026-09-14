@@ -817,6 +817,114 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/selftest-wiring-census.sh
 
+      # ── the vendored-SDK freshness comparison, riding this job ────────────
+      # (task-632a54405ba79314)
+      #
+      # VENUE, and the venue is the entire point of these two steps.
+      # scripts/check-vendor-freshness.mjs already ran — as the job
+      # `vendor-sdk-freshness` in .github/workflows/search-template-gates.yml,
+      # whose pull_request arm ALREADY lists every pack input this gate reads
+      # (js/packages/{core,react}/src/**, package.json, tsup.config.ts,
+      # tsconfig.json). Coverage was never the defect and this is not a
+      # coverage fix. That workflow carries a workflow-level `paths:` filter
+      # and is therefore filed S4 PATHS-FILTERED in
+      # .github/required-checks.json, so its verdict could not stop a merge.
+      #
+      # MEASURED, not assumed. #18092 (merged d58a09857, 2026-09-13T15:58:50Z)
+      # changed js/packages/react/src/inline.tsx and added
+      # src/status-vocab.gen.ts. `Vendored SDK freshness` FIRED and went RED on
+      # that PR — twice, on heads f666cd258 (run 34755514346) and 2a298b785
+      # (run 34761228165), the latter printing the exact pair main still
+      # carried a day later: `source sha256:1e119abf0acb63ff… vs stamped
+      # sha256:0743095e65fa855d…`. The PR merged anyway. Main then failed this
+      # workflow on every push run from dc7d77f5d (2026-09-13T16:04:26Z)
+      # through c42fde07c (2026-09-14T14:25:56Z) — 24 `failure`, 6 `cancelled`,
+      # ZERO `success` — shipping the pre-#18092 renderer to every user who
+      # scaffolded from templates/*. Two compounding reasons, both structural:
+      # the context is advisory, AND on the FINAL head (efe999824, run
+      # 34764701777) the run was CANCELLED at 15:11:57 — so the rollup a
+      # merger reads showed `cancelled`, not `failure`. The push-arm run on the
+      # merge commit itself (34767194543) was cancelled too, by the
+      # main-collapse concurrency marker that workflow documents as its
+      # residual. Neither arm ever published a red ON the merged sha.
+      #
+      # THE PATHS-FILTERED LEAF CANNOT SIMPLY BE PROMOTED, and that door is
+      # closed for two independent reasons, both re-derived from the files:
+      # (1) a workflow-level `on: pull_request: paths:` filter emits NO check
+      # run on a non-matching PR, and a required context that never emits
+      # reports `expected` forever (D18) — the .exclusions reason text for
+      # `Vendored SDK freshness` says exactly this; and (2) that same reason
+      # text records a second constraint the row did not carry: the workflow's
+      # main-collapse concurrency marker is sound ONLY while no job name in it
+      # is a required context, and scripts/main-run-concurrency-check.sh
+      # re-derives that. Registering the leaf would void the marker as well as
+      # deadlock the branch. search-template-gates.yml's own header says the
+      # only promotable shape is an AGGREGATOR that always emits.
+      #
+      # HERE, for the reason every step above it is here: this job carries no
+      # `if:`, no continue-on-error and no `needs`, and the aggregator judges
+      # it with the gate value NEVER — so it runs on EVERY PR head, cannot be
+      # skipped into a green, and a red here reds `Elixir gate`, one of the
+      # four REQUIRED contexts. A STEP and not a job: a step publishes no
+      # check-run name, so the required set is NOT widened by one name,
+      # required-checks-verify.sh's roster is unchanged, and the sibling
+      # path-escape harnesses' `blocking_not_in_needs` derivation is untouched.
+      # search-template-gates.yml's own tenant is deliberately LEFT IN PLACE:
+      # it is where `--selftest` (the proof this gate can fail) lives, and
+      # these steps are the merge-authority half, not a replacement.
+      #
+      # WHAT THIS MAKES TRUE: a PR that changes a vendored package's pack
+      # inputs cannot merge without re-cutting in the SAME PR
+      # (`bash scripts/recut-vendor-tarballs.sh`, then commit the re-cut
+      # templates/*/vendor/*.tgz, both package-lock.json integrity pins and
+      # templates/VENDOR-STAMP.json). That is this repo's recurring
+      # "the PR that introduces a resource declares it" rule, sixth member.
+      #
+      # THE FENCE FOLLOWS THE RULE. search-template-gates.yml already records
+      # that the trigger and the remedy live in different trees — the gate
+      # fires on js/packages/**, the only remedy writes templates/**. Until
+      # now a lane fenced out of templates/** could merge past the red; now it
+      # cannot, so an SDK lane's fence MUST include templates/*/vendor/*.tgz,
+      # templates/*/package-lock.json and templates/VENDOR-STAMP.json.
+      #
+      # UNFILTERED, and not by omission. A diff-scoped predicate here would
+      # reproduce the defect it treats: the tarballs are a FROZEN artifact that
+      # rots against a source tree that keeps moving, so the run that proves
+      # they are still fresh is exactly the run on the commit that did not
+      # touch them — search-template-gates.yml makes the same argument for its
+      # path-unfiltered push arm. It is also a PREDICATE and not an
+      # enumeration: the package set, the pack-input set and the template set
+      # are all derived inside check-vendor-freshness.mjs, so adding a third
+      # vendored package needs no list edited here.
+      #
+      # PRICED. Zero npm dependencies — checkout, node and the system `tar`,
+      # nothing else — and measured 2026-09-14 on this tree at 0.28/0.39/0.45 s
+      # wall over three runs, against this job's 2m35s average. Off the
+      # critical path.
+      #
+      # node WITHOUT setup-node, like console-harness.yml's own `path-escape`
+      # job and eight other jobs in this tree: the runner image ships it, and
+      # a setup-node step would put a toolchain resolution on a required
+      # context to save nothing. The preflight below makes its absence a
+      # legible refusal rather than a bare `node: command not found`.
+      - name: node is present (the freshness gate is a node program)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          set -uo pipefail
+          if ! command -v node >/dev/null 2>&1; then
+            echo "CANNOT READ: node is not on this runner. check-vendor-freshness.mjs is a node program, so no freshness reading was taken and none is being reported as fresh." >&2
+            echo "::error title=Vendored SDK freshness CANNOT READ::node missing on the runner image"
+            exit 1
+          fi
+          node --version
+
+      # Never piped. A gate piped through tail or grep -q reports the PIPE's
+      # exit code, and under pipefail a SIGPIPE turns a red into a 141 that
+      # reads as a flake.
+      - name: The vendored starter SDKs match js/packages source
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: node scripts/check-vendor-freshness.mjs
+
   format:
     # ADVISORY format signal — NOT a merge gate. This job pins THE FORMATTER
     # DEVELOPERS RUN, not the Elixir production compiles with. `mix format`

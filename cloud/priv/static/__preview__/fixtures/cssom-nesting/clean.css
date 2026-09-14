@@ -1,0 +1,76 @@
+/* clean.css — CSS nesting the parser MUST model.
+   Every authored rule head below has exactly one CSSOM counterpart, so a run over
+   this file proves authoredHeads() descends into style-rule bodies the same way the
+   CSSOM walk descends into `r.cssRules`. Head count is asserted by heads.baseline. */
+
+/* 1. the plain case: an explicit `&` descendant and an `&`-compound. */
+.alpha {
+  color: red;
+  & .beta { color: blue; }
+  &:hover { color: green; }
+}
+
+/* 2. DECLARATIONS AFTER A NESTED RULE. Chrome wraps these in a CSSNestedDeclarations
+      rule, which has no `selectorText` — so the CSSOM walk skips it and the authored
+      side must author no head for it either. This is the arm that catches a parser
+      that counts a declaration block as a rule head. */
+.gamma {
+  color: teal;
+  & .delta { color: olive; }
+  background: white;
+  border: 0;
+}
+
+/* 3. A NESTED RULE WITH NO `&` — a bare selector nested inside a rule is a relative
+      selector with an implied descendant combinator. The parser must not mistake it
+      for a declaration just because it lacks the `&`. */
+.epsilon {
+  color: navy;
+  .zeta { color: maroon; }
+}
+
+/* 4. TWO LEVELS DEEP, to prove the descent is a stack and not a boolean. */
+.eta {
+  color: gray;
+  & .theta {
+    color: lime;
+    & .iota { color: aqua; }
+  }
+}
+
+/* 5. A GROUPING AT-RULE INSIDE A STYLE RULE — @media is in GROUPING_AT, and nesting
+      lets it sit inside a rule body. Both sides must descend through it. */
+.kappa {
+  color: black;
+  @media (min-width: 400px) {
+    & .lambda { color: silver; }
+    /* IMPLIED `&` ACROSS A GROUPING AT-RULE: the nesting context is the nearest
+       enclosing STYLE RULE (.kappa), not the nearest block (@media), so Chrome
+       serialises this as `& .rho` too. A parser keying on the innermost frame
+       reports it as a miss. */
+    .rho { color: khaki; }
+  }
+}
+
+/* 6. A NESTED RULE WHOSE PRELUDE CARRIES A `;`-TERMINATED DECLARATION IMMEDIATELY
+      BEFORE IT — the declaration must be dropped at the `;` rather than glued onto
+      the following prelude. If it glued, the head would read `padding: 0 & .mu`. */
+.nu {
+  padding: 0;
+  & .mu { color: fuchsia; }
+}
+
+/* 7. AN OPAQUE AT-RULE NESTED INSIDE A STYLE RULE. @keyframes' percent stops are
+      CSSKeyframeRule with no selectorText, so the CSSOM walk contributes nothing and
+      the authored side must skip the block wholesale. */
+.xi {
+  color: purple;
+}
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* 8. A TOP-LEVEL RULE AFTER ALL OF IT, so a stack that failed to unwind is visible
+      as a depth error rather than passing silently. */
+.omicron { color: coral; }
