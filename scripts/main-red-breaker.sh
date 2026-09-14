@@ -1280,12 +1280,50 @@ else
   #
   #     a red that reports a FINDING names the finding.
   #
-  # So a block DISCRIMINATES if any of its lines carries a locator — a path (a
-  # `/` between name characters) or a bare filename with an extension. A block
-  # carrying none of that cannot have its findings subtracted from main's,
-  # because it reports no findings; it reports only that something failed. That
-  # is a RULE over shape, not a roster of gates: a gate added tomorrow is
-  # classified the first time it reds, with no edit here.
+  # A locator is ONE shape that sentence takes, and for a long time it was the
+  # only one this file could see — which made "does this red name a FILE?" stand
+  # in for "does this red name its FINDINGS?". Those are different questions, and
+  # for a whole class of gates the first is permanently NO however well the gate
+  # reports: a gate whose findings are BARE IDENTIFIERS — block type names,
+  # capability slugs, atoms, colour tokens — has no slash and no dot anywhere in
+  # its red. Two REAL specimens on main (measured 2026-09-14, head d4177ca6b):
+  #   scripts/pd-parity-completeness.sh  ->  FAIL: no golden fixture for in-scope type(s): delta num spark
+  #   scripts/docs-anchors-check.sh      ->  FAIL: @canonical capability:field-encryption claimed by >1 impl (a copy-paste that kept the marker?)
+  # Both name exactly what they found; both matched the locator test ZERO times,
+  # so both routed to OWNERSHIP-UNDETERMINED under an ACTION line telling the
+  # author to make the step print what it found — when the step already did.
+  #
+  # SO THE QUESTION IS ASKED ABOUT THE SLOT, NOT THE VOCABULARY. A red that
+  # reports a finding puts the thing it found in a PAYLOAD SLOT — a position the
+  # program FILLED. A constant sentence has no slot: it is byte-identical whether
+  # one document is over its cap or twenty, which is precisely why subtracting it
+  # from main's proves nothing. Three slot shapes are recognised, and each is
+  # carried by a real specimen in scripts/main-red-breaker.test.sh:
+  #   (1) LOCATOR   a path, or a bare filename with an extension.   (lineref-sweep)
+  #   (2) WELD      `label:value` with NO space, the value lowercase and carrying
+  #                 an internal separator — `capability:field-encryption`. A space
+  #                 after the colon starts a SENTENCE, not a value, which is why
+  #                 `--selftest: FAILED — the full gate did not pass …` has none.
+  #   (3) ITEM-SET  a `: `-terminated tail that is two or more BARE item tokens
+  #                 (lowercase, no punctuation) — AND corroborated by a SECOND
+  #                 such tail elsewhere in the same block sharing a token with it
+  #                 (`in-scope types: … delta … num … spark …` above
+  #                 `type(s): delta num spark`). One list alone is not enough: on
+  #                 shape alone `delta num spark` and `something went wrong` are
+  #                 the same thing, and this file refuses rather than guesses, so
+  #                 an uncorroborated list stays OPAQUE — the SAFE direction.
+  #
+  # WHY THAT IS A PREDICATE AND NOT AN ENUMERATION. It names no gate, no file and
+  # no finding vocabulary; it asks of ANY line "is there a slot here a program
+  # filled?". A gate added tomorrow is classified the first time it reds with no
+  # edit here — which is the same property the locator arm always had, just no
+  # longer restricted to findings that happen to be filenames.
+  #
+  # AND IT MUST NOT BE WIDENED UNTIL THE CONSTANT PASSES. Widening the locator
+  # regex until pd-parity matched would also match the doc-budget sentence above,
+  # and that sentence MUST keep reading OPAQUE — it is the specimen this whole
+  # test was built for. Arms 26h/26i prove BOTH halves in ONE run against the
+  # SAME classifier for exactly that reason.
   #
   # AND IT REFUSES RATHER THAN GUESSES. An opaque block does not become "the
   # author's" — we genuinely cannot tell, and this file's founding rule is that
@@ -1302,11 +1340,38 @@ else
   BLOCK_AUDIT="$(python3 - "$OUR_LOG" 2>/dev/null <<'BLKPY'
 import re, sys
 BEGIN, END = "##[breaker-block]begin ", "##[breaker-block]end"
-# The only property this test needs is "does any line NAME a thing". Digits are
-# NOT a locator: the signature normaliser erases them (`<sha>`, `#`), so a line
-# whose only variation is a number is already indistinguishable downstream and
-# must not count as detail.
+# The only property this test needs is "does any line fill a PAYLOAD SLOT with
+# the thing it found". Digits are NOT a payload: the signature normaliser erases
+# them (`<sha>`, `#`), so a line whose only variation is a number is already
+# indistinguishable downstream and must not count as detail.
+# (1) LOCATOR.
 LOC = re.compile(r'[A-Za-z0-9_.~-]+/[A-Za-z0-9_./~-]+|\b[A-Za-z0-9_~-]+\.[A-Za-z][A-Za-z0-9]{0,6}\b')
+# (2) WELD: label:value, no space, value lowercase WITH an internal separator.
+#     The separator requirement is what keeps `MIX_ENV=test` and a bare English
+#     `note:see` out; the no-space requirement is what keeps a sentence out.
+WELD = re.compile(r'\b[A-Za-z][A-Za-z0-9_-]*:[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)+\b')
+# (3) ITEM-SET: a `: `-terminated tail of >=2 bare item tokens. Corroboration is
+#     applied per BLOCK below, not per line.
+ITEM = re.compile(r'^[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*$')
+TAIL = re.compile(r':[ \t]+')
+def item_sets(body):
+    out = []
+    for l in body:
+        for m in TAIL.finditer(l):
+            toks = l[m.end():].split()
+            if len(toks) >= 2 and all(ITEM.match(t) for t in toks):
+                out.append(set(toks))
+    return out
+def names_a_finding(body):
+    for l in body:
+        if LOC.search(l) or WELD.search(l):
+            return True
+    sets = item_sets(body)
+    for i in range(len(sets)):
+        for j in range(i + 1, len(sets)):
+            if sets[i] & sets[j]:
+                return True
+    return False
 try:
     raw = open(sys.argv[1], errors="replace").read().split("\n")
 except Exception as e:
@@ -1325,7 +1390,7 @@ if cur and any(l.strip() for l in cur): blocks.append((label, cur))
 print("SHAPE\t%s\t%d" % ("fenced" if fenced else "unfenced", len(blocks)))
 for label, body in blocks:
     if not any(l.strip() for l in body): continue
-    if not any(LOC.search(l) for l in body):
+    if not names_a_finding(body):
         print("OPAQUE\t%s\t%s" % (label, " / ".join(l.strip() for l in body if l.strip())[:300]))
 BLKPY
 )"
@@ -1344,7 +1409,7 @@ BLKPY
     # verdict above still reddened — a refusal that names no step is half a
     # refusal. (Caught by arm 26c, which asserts the step and its output appear.)
     printf '%s\n' "$BLOCK_AUDIT" | awk -F'\t' '$1 == "OPAQUE" { print "    step: " $2; print "      its entire captured red: " $3 }' >&2
-    undetermined "CANNOT READ the finding set: ${OPAQUE_N} of the failing step(s) printed a red that NAMES NOTHING — no path, no file, no finding (capture shape: ${AUDIT_SHAPE:-unknown}). For a per-file or per-finding gate that sentence is a CONSTANT: byte-identical whether one document is over its cap or twenty, so matching it against main's proves only that both sides failed the same step — the v1 verdict this breaker replaced. The step(s) and their captured output are printed above. ACTION: make the step print what it found (the doc-budget gate already does; its per-file FAIL lines are suppressed because its --selftest runs the full gate first under 'bash -e' and aborts the step), or fix main's red so there is nothing to inherit."
+    undetermined "CANNOT READ the finding set: ${OPAQUE_N} of the failing step(s) printed a red that NAMES NOTHING — no path, no file, no finding (capture shape: ${AUDIT_SHAPE:-unknown}). For a per-file or per-finding gate that sentence is a CONSTANT: byte-identical whether one document is over its cap or twenty, so matching it against main's proves only that both sides failed the same step — the v1 verdict this breaker replaced. The step(s) and their captured output are printed above. ACTION: READ THAT BLOCK FIRST — this verdict says the red carries no per-finding SUBJECT, and there are three different reasons for that, with three different fixes. (a) THE STEP ABORTED BEFORE REPORTING: a --selftest or pre-flight that runs the full gate first and dies under 'bash -e', which is exactly what the doc-budget gate does — its per-file 'FAIL: <doc> is <n>B' lines are never printed, so fix the abort, not the reporting. (b) THE RED IS A CONSTANT SENTENCE that says only that something failed — then, and only then, make the step print what it found. (c) THE STEP DID NAME WHAT IT FOUND and this refusal is still firing — then the defect is HERE, in this classifier, not in your step: it recognises a payload slot in three shapes (a path or dotted filename; a 'label:value' welded with no space; a ': '-terminated list of bare item tokens corroborated by a second such list in the same block), and a gate whose findings sit in none of them reads opaque however well it reports. Add your specimen and a new arm to scripts/main-red-breaker.test.sh and widen the slot test — never by relaxing it until the constant sentence in (b) passes too, which would delete this test. Or fix main's red so there is nothing to inherit."
   fi
   SIG_NOTE="${SIG_NOTE} Every failing step's red also NAMES what it found (capture shape: ${AUDIT_SHAPE:-unknown}), so the subset test compared findings and not merely the fact of failure."
 fi
