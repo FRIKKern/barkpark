@@ -305,6 +305,8 @@ on:
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
+      - "scripts/paper_structure.py"
+      - "scripts/paper_structure_test.py"
       - "tooling/gate-map/gate-map.mjs"
       - "tooling/gate-map/gate-map.test.mjs"
       - "bin/barkpark"
@@ -815,6 +817,8 @@ on:
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
+      - "scripts/paper_structure.py"
+      - "scripts/paper_structure_test.py"
       - "tooling/gate-map/gate-map.mjs"
       - "tooling/gate-map/gate-map.test.mjs"
       - "bin/barkpark"
@@ -1339,6 +1343,8 @@ jobs:
           tooling-harnesses tooling/fleet/fleet-run-verdict-test.sh
           tooling-harnesses scripts/audit-paper-readers.sh
           tooling-harnesses scripts/audit-paper-readers-test.sh
+          tooling-harnesses scripts/paper_structure.py
+          tooling-harnesses scripts/paper_structure_test.py
           tooling-harnesses tooling/gate-map/gate-map.mjs
           tooling-harnesses tooling/gate-map/gate-map.test.mjs
           tooling-harnesses scripts/relandcheck-diff-producer.test.sh
@@ -2496,6 +2502,28 @@ jobs:
         # fixture harness — the only thing that proves the audit can report a
         # miss — executed nowhere.
         run: bash scripts/audit-paper-readers-test.sh
+
+      - name: paper_structure.py audit unit suite
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # paper-readers.yml (cron "17 5 * * *") folds this module's summary
+        # STRAIGHT into the nightly ok expression — `$structure | length == 1
+        # and .[0].violations == 0` in audit-paper-readers.sh — so a regression
+        # in paper_structure.py either reds the nightly or passes it wrongly.
+        # Its unit suite shipped next to it and ran NOWHERE: shell-harnesses.yml
+        # referenced scripts/paper_structure_test.py zero times.
+        #
+        # Invoked BY PATH, not as a module, and that is what makes the
+        # `from paper_structure import audit_documents, ...` at the top of the
+        # suite resolve: python3 puts the SCRIPT'S OWN directory at sys.path[0],
+        # so scripts/ is already on the path and no PYTHONPATH is needed. (An
+        # earlier draft of this step set PYTHONPATH=scripts and claimed it was
+        # load-bearing; a control run without it passed 19/19, so the setting
+        # was inert and the claim false. Measured 2026-09-14.)
+        #
+        # No pipe and no `|| true`: unittest's non-zero exit IS this step's
+        # exit status. A `| tee` here would report tee's status and green a
+        # failing suite.
+        run: python3 scripts/paper_structure_test.py -v
 
   launcher-boot-selftest:
     needs: [changes]

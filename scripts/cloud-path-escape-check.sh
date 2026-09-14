@@ -722,6 +722,293 @@ is_exempt() {
   return 1
 }
 
+
+# ---------------------------------------------------------------------------
+# THE ENTRY-DECISION ARM — every CLOUD_PATHS entry decided BY RULE
+# (task-babc3e4205843165)
+# ---------------------------------------------------------------------------
+# The coverage arm above is COVERAGE-SHAPED: it walks the census and asks "is
+# this read declared?". It never walks the DECLARATION and asks "does this entry
+# buy anything?". Those are different questions, and the second one was never
+# asked. Measured on c42fde07c (2026-09-14) by planting the removal of each of
+# the 24 entries in turn and re-running `--check`: NINE removals red and FIFTEEN
+# are SILENT. A narrowing of the dispatch set — the edit that makes a PR touching
+# some tree stop running the Cloud suite — is therefore invisible for five
+# entries in eight.
+#
+# THE FIFTEEN ARE NOT FIFTEEN DEFECTS, and that is the whole point of deciding
+# them by rule rather than by list. Twelve of them are SUBSUMED: a broader entry
+# in the same set already matches everything they match (`deploy/site-deploy.sh`
+# under `deploy/**`, every `internal/...` line under `internal/**`, and so on),
+# so their removal is harmless BY CONSTRUCTION and their presence buys
+# documentation, not dispatch. Three are neither a sole cover nor subsumed —
+# `cloud/**`, `.github/workflows/**`, `deploy/**` — and those three are the ones
+# that need a declared reason, because nothing in the tree makes them necessary.
+#
+# So each entry must fall into exactly one of four classes, and the script says
+# which:
+#
+#   SOLE-COVER  (derived) removing it leaves >=1 live repo-root read uncovered.
+#               This is today's --check rule, restated per-entry. It is the only
+#               class whose removal reds.
+#   SUBSUMED    (derived) another entry's pattern matches this entry's own
+#               representative path. Its removal CANNOT uncover a read, so the
+#               silence is a theorem, not a gap. The subsuming entry is named.
+#   DECLARED    (declared + verified) the entry carries a machine-readable reason
+#               below naming a PREDICATE — not a path list — and that predicate
+#               is re-derived from the tree on every run. When the reason stops
+#               holding, the arm reds.
+#   UNDECIDABLE an entry in none of the three. THAT is the red: it is text that
+#               dispatches CI work for a reason nobody can state or check.
+#
+# A HAND-WRITTEN SKIP LIST WOULD HAVE BEEN THE LAZY REMEDY AND IT IS BLIND.
+# "These fifteen are fine" passes at exit 0 the moment a SIXTEENTH undeclared
+# entry is added, because a list cannot classify what it has not met. The
+# harness proves this rather than asserting it: case 14(f) runs the list-shaped
+# classifier and the predicate side by side against a planted new entry and
+# shows the list green while the predicate reds.
+#
+# WHY THE REASONS ARE PREDICATES. An earlier sketch gave each declared entry a
+# witness PATH. That is an enumeration wearing a predicate's clothes: the witness
+# is a second hand-written path that rots the same way the entry does. The three
+# kinds below are each re-derived from the tree:
+#
+#   scanned-root      the entry contains a directory `list_escapes` itself walks
+#                     (cloud/lib, cloud/test). Stops holding if the scanner is
+#                     re-pointed.
+#   consumer-workflow the entry contains >=1 workflow file that names THIS SCRIPT.
+#                     Stops holding when the last consumer stops calling it —
+#                     which is the same fact the entry exists to protect.
+#   census-neighbour  the entry contains >=1 live repo-root read from the census
+#                     while not being its sole cover. Stops holding when the last
+#                     read inside that tree goes away.
+#
+# Each line is `<entry><TAB><kind><TAB><why>`. A declared entry whose predicate
+# does not hold is a RED even if it would otherwise classify as SUBSUMED: a
+# stale reason is the failure this table exists to catch.
+CLOUD_PATHS_REASON='cloud/**	scanned-root	The suite under test. list_escapes enumerates cloud/lib + cloud/test, so an edit anywhere in this tree can change what the ratchet sees and what the suite asserts. It covers no repo-root read by construction — reads that stay inside cloud/ are not escapes.
+.github/workflows/**	consumer-workflow	The workflows that CONSUME this script'"'"'s verdict live here. A PR editing the dispatcher, the job-level `if:`, or the aggregator changes whether the Cloud suite runs at all, and that must run the suite.
+deploy/**	census-neighbour	The box-deploy engine. deploy/site-deploy.sh is a live repo-root read (sites_deploy_stage_caption_test.exs derives its failure corpus from it), and its siblings in this tree change the same behaviour without being read by name.'
+
+# The representative path of an entry: the thing its pattern is a claim ABOUT.
+# `dir/**` -> `dir`; an exact entry is its own representative. Used to ask
+# whether a DIFFERENT entry already matches it (subsumption).
+entry_representative() {
+  case "$1" in
+    */'**') printf '%s' "${1%/**}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# The declared reason kind for an entry, or the empty string.
+entry_reason_kind() {
+  local e="$1" line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if [ "${line%%	*}" = "$e" ]; then
+      line="${line#*	}"
+      printf '%s' "${line%%	*}"
+      return 0
+    fi
+  done <<EOF
+$CLOUD_PATHS_REASON
+EOF
+  return 1
+}
+
+# Does the declared predicate still hold for this entry? Re-derived from the
+# tree every run; never read off a stored path.
+reason_predicate_holds() {
+  local e="$1" kind="$2" ere rep hit
+  ere="$(glob_to_ere "$e")"
+  case "$kind" in
+    scanned-root)
+      # cloud/lib and cloud/test are the roots list_escapes walks. Named HERE
+      # rather than passed in because they are the same two literals that
+      # function uses; if it is re-pointed, this predicate must be re-pointed
+      # with it and the entry re-argued.
+      for rep in cloud/lib cloud/test; do
+        grep -Eq -- "$ere" <<<"$rep" || continue
+        [ -d "$DECL_ROOT/$rep" ] && return 0
+      done
+      return 1
+      ;;
+    consumer-workflow)
+      rep="$(entry_representative "$e")"
+      [ -d "$DECL_ROOT/$rep" ] || return 1
+      hit="$(grep -rl -- "cloud-path-escape-check.sh" "$DECL_ROOT/$rep" 2>/dev/null || true)"
+      [ -n "$hit" ] && return 0
+      return 1
+      ;;
+    census-neighbour)
+      # >=1 live census path inside the entry. $ENTRY_AUDIT_PATHS is the census
+      # path column, set by the caller.
+      grep -Eq -- "$ere" <<<"$ENTRY_AUDIT_PATHS" && return 0
+      return 1
+      ;;
+    *)
+      echo "cloud-path-escape-check: unknown reason kind '$kind' for entry '$e'" >&2
+      exit 2
+      ;;
+  esac
+}
+
+# Score every entry by PLANTED REMOVAL, over the whole set and not a sample.
+# Prints `<CLASS><TAB><entry><TAB><evidence>` per entry, then a tally line.
+# Exit 1 if any entry is UNDECIDABLE or any declared reason has gone stale;
+# exit 2 if a plant does not apply (a plant that silently no-ops would score
+# every entry SUBSUMED and print a clean sheet about nothing).
+#
+# $ENTRY_AUDIT_PATHS must already hold the census path column, one per line.
+audit_entry_set() {
+  local entries base_n e reduced reduced_n reduced_ere full_ere rep lost kind
+  local all_eres idx=0
+  local sole=0 subsumed=0 declared=0 undecidable=0 stale=0
+  entries="$(set_globs cloud | sed '/^$/d')"
+  base_n="$(printf '%s\n' "$entries" | wc -l | tr -d ' ')"
+  full_ere="$(set_ere cloud)"
+  # ONE ERE per entry, computed ONCE, in the same order as $entries. Rebuilding
+  # the reduced alternation from scratch per entry meant N*N calls to
+  # glob_to_ere — 576 `sed` subprocesses per --check on a 24-entry set, paid by
+  # every harness case that runs --check. Dropping the i-th LINE of this list is
+  # the same reduced set for a fraction of the cost.
+  all_eres="$(
+    while IFS= read -r e; do
+      [ -n "$e" ] || continue
+      glob_to_ere "$e"
+      printf '\n'
+    done <<EOF
+$entries
+EOF
+  )"
+  while IFS= read -r e; do
+    [ -n "$e" ] || continue
+
+    # ── THE PLANT, and its two controls ────────────────────────────────────
+    # THE PLANT LINE. The harness mutates exactly this line on a COPY (sed to
+    # `reduced="$entries"`) to prove the refusal below can fire. There is no env
+    # handle for it on purpose: an env var that changes a ratchet's behaviour is
+    # a one-line CI bypass of the ratchet.
+    reduced="$(printf '%s\n' "$entries" | grep -Fxv -- "$e" || true)"
+    if grep -Fxq -- "$e" <<<"$reduced"; then
+      echo "::error::cloud-path-escape-check: PLANT DID NOT APPLY: '$e' is still in the reduced set." >&2
+      echo "  Refusing to score it: a removal that did not happen reads as 'nothing was lost' and" >&2
+      echo "  would classify every entry SUBSUMED — a clean sheet about a mutation that never ran." >&2
+      exit 2
+    fi
+    reduced_n="$(printf '%s\n' "$reduced" | sed '/^$/d' | wc -l | tr -d ' ')"
+    if [ "$reduced_n" -ne "$((base_n - 1))" ]; then
+      echo "::error::cloud-path-escape-check: PLANT DID NOT APPLY: removing '$e' left $reduced_n entries, expected $((base_n - 1))." >&2
+      exit 2
+    fi
+
+    # ── the declared reason is verified FIRST, so a stale one cannot hide ──
+    kind=""
+    if kind="$(entry_reason_kind "$e")"; then
+      if ! reason_predicate_holds "$e" "$kind"; then
+        stale=$((stale + 1))
+        printf 'STALE-REASON\t%s\tdeclared %s no longer holds\n' "$e" "$kind"
+        continue
+      fi
+    fi
+
+    # ── SOLE-COVER: what does the planted removal actually uncover? ────────
+    idx=$((idx + 1))
+    reduced_ere="$(printf '%s\n' "$all_eres" | sed "${idx}d" | sed '/^$/d' | tr '\n' '|')"
+    reduced_ere="${reduced_ere%|}"
+    lost=""
+    if [ -n "$reduced_ere" ]; then
+      lost="$(grep -E -- "$full_ere" <<<"$ENTRY_AUDIT_PATHS" | grep -Ev -- "$reduced_ere" || true)"
+    else
+      lost="$(grep -E -- "$full_ere" <<<"$ENTRY_AUDIT_PATHS" || true)"
+    fi
+    if [ -n "$lost" ]; then
+      sole=$((sole + 1))
+      printf 'SOLE-COVER\t%s\tsole cover for: %s\n' "$e" "$(printf '%s' "$lost" | tr '\n' ' ')"
+      continue
+    fi
+
+    # ── SUBSUMED: a different entry already matches this one's subject ─────
+    rep="$(entry_representative "$e")"
+    if [ -n "$reduced_ere" ] && grep -Eq -- "$reduced_ere" <<<"$rep"; then
+      subsumed=$((subsumed + 1))
+      printf 'SUBSUMED\t%s\t%s is already matched by another entry\n' "$e" "$rep"
+      continue
+    fi
+
+    if [ -n "$kind" ]; then
+      declared=$((declared + 1))
+      printf 'DECLARED\t%s\t%s (predicate re-derived, holds)\n' "$e" "$kind"
+      continue
+    fi
+
+    undecidable=$((undecidable + 1))
+    printf 'UNDECIDABLE\t%s\tneither a sole cover, nor subsumed, nor declared\n' "$e"
+  done <<EOF
+$entries
+EOF
+
+  # THE TALLY. `red` and `silent` are the two arms scored in ONE run: a removal
+  # REDS iff the entry is a sole cover; every other class is SILENT today and
+  # says by which rule.
+  printf 'entries=%s red=%s silent=%s (subsumed=%s declared=%s undecidable=%s stale-reason=%s)\n' \
+    "$base_n" "$sole" "$((base_n - sole))" "$subsumed" "$declared" "$undecidable" "$stale"
+  [ "$undecidable" -eq 0 ] && [ "$stale" -eq 0 ] && return 0
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# THE DISPATCH-DERIVATION ARM — does the guard run on the PR that edits it?
+# ---------------------------------------------------------------------------
+# A guard that is not dispatched by the edit it guards is decoration. The claim
+# is normally made in a COMMENT; this derives it from the workflow files.
+# For every workflow under .github/workflows that names this script, print
+# whether it carries a workflow-level `on: … paths:` filter and, if it does,
+# whether this script is selected by it. A workflow with no paths filter runs on
+# every PR and trivially qualifies.
+audit_dispatch() {
+  local self="scripts/cloud-path-escape-check.sh" wf name paths sel bad=0 n=0
+  for wf in "$DECL_ROOT"/.github/workflows/*.yml "$DECL_ROOT"/.github/workflows/*.yaml; do
+    [ -e "$wf" ] || continue
+    grep -q -- "cloud-path-escape-check.sh" "$wf" || continue
+    n=$((n + 1))
+    name=".github/workflows/$(basename -- "$wf")"
+    # The workflow-level paths block: `paths:` at exactly four spaces of indent
+    # (under `on:` -> a trigger), and the `- "…"` items beneath it.
+    paths="$(awk '
+      /^on:/ { inon = 1; next }
+      inon && /^[^[:space:]]/ { inon = 0 }
+      inon && /^    paths:[[:space:]]*$/ { inp = 1; next }
+      inp && /^      -[[:space:]]/ {
+        line = $0
+        sub(/^      -[[:space:]]*/, "", line)
+        gsub(/"/, "", line)
+        print line
+        next
+      }
+      inp && !/^      -[[:space:]]/ && !/^      #/ && !/^[[:space:]]*$/ { inp = 0 }
+    ' "$wf")"
+    if [ -z "$paths" ]; then
+      printf 'CONSUMER\t%s\tno workflow-level paths filter — runs on every PR\n' "$name"
+      continue
+    fi
+    sel="$(printf '%s\n' "$paths" | grep -Fx -- "$self" || true)"
+    if [ -n "$sel" ]; then
+      printf 'CONSUMER\t%s\tpaths filter selects %s\n' "$name" "$self"
+    else
+      bad=$((bad + 1))
+      printf 'NOT-DISPATCHED\t%s\tpaths filter does NOT select %s\n' "$name" "$self"
+    fi
+  done
+  printf 'consuming-workflows=%s not-dispatched=%s\n' "$n" "$bad"
+  if [ "$n" -eq 0 ]; then
+    echo "::error::cloud-path-escape-check: NO workflow names this script. Its verdict is consumed by nothing." >&2
+    return 1
+  fi
+  [ "$bad" -eq 0 ] && return 0
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # modes
 # ---------------------------------------------------------------------------
@@ -771,11 +1058,25 @@ case "$mode" in
     exec bash "$(dirname -- "${BASH_SOURCE[0]}")/cloud-path-escape-check.test.sh"
     ;;
 
+  --audit-set)
+    # The entry-decision arm, printed. Same predicates --check enforces; this
+    # mode exists so the derivation can be READ, not only failed on.
+    ENTRY_AUDIT_PATHS="$(list_escapes | cut -f1 | sort -u | sed '/^$/d')"
+    audit_entry_set
+    exit $?
+    ;;
+
+  --audit-dispatch)
+    audit_dispatch
+    exit $?
+    ;;
+
+
   --check) ;;
 
   *)
     echo "cloud-path-escape-check: unknown argument '$mode'" >&2
-    echo "usage: $0 [--check|--selftest|--list-escapes|--census-source|--print-set SET|--match SET]" >&2
+    echo "usage: $0 [--check|--selftest|--list-escapes|--census-source|--print-set SET|--match SET|--audit-set|--audit-dispatch]" >&2
     exit 2
     ;;
 esac
@@ -945,6 +1246,44 @@ MSG
 fi
 
 cloud_ere="$(set_ere cloud)"
+
+# ── THE CENSUS-TIER COVERAGE ARM (task-a00a72a027c5f698) ───────────────────
+# `--match cloud` is not the only dispatch this repo has. THE CENSUS TIER above
+# gates a one-file job on the census set (api, web, js, internal,
+# cloud/priv/static), derived from $CENSUS_TEST'"'"'s own `@roots`. A read of one of
+# those trees FROM THAT FILE is therefore dispatched on — by the census job, at
+# the census job'"'"'s price — and refusing it as UNCOVERED was the coverage arm
+# asking about the wrong set. Measured on c42fde07c: appending
+# `Path.join([__DIR__, "..", "..", "..", "api"])` to $CENSUS_TEST made --check
+# exit 1 with `UNCOVERED repo-root read: api`, which is why that file still
+# routes around the ratchet.
+#
+# THE ARM IS DELIBERATELY NARROW, and the narrowness is the whole design. It
+# accepts a path only when EVERY census row for it names $CENSUS_TEST. An
+# ordinary cloud/test file reading api/ is still UNCOVERED and still reds —
+# otherwise this would not widen coverage, it would delete it: that file is not
+# in the census job, so its suite would skip and green on an api-only PR.
+#
+# It is also FAIL-CLOSED on its own declaration. If the census set cannot be
+# derived (the harness runs copies of this script from fixture roots that have
+# no $CENSUS_TEST), census_tier_ere stays empty and this arm covers NOTHING —
+# an empty ERE matches every line, so it is never handed to grep.
+census_tier_ere="$(set_ere census 2>/dev/null || true)"
+
+census_tier_covers() {
+  local p="$1" srcs s
+  [ -n "$census_tier_ere" ] || return 1
+  srcs="$(printf '%s\n' "$census" | awk -F'\t' -v p="$p" '$1 == p { print $2 }' | sort -u)"
+  [ -n "$srcs" ] || return 1
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    [ "$s" = "$CENSUS_TEST" ] || return 1
+  done <<EOF
+$srcs
+EOF
+  grep -Eq -- "$census_tier_ere" <<<"$p"
+}
+
 uncovered=0
 while IFS= read -r p; do
   [ -n "$p" ] || continue
@@ -956,6 +1295,10 @@ while IFS= read -r p; do
   # ratchet measures. Only the 64 KiB pipe buffer kept it quiet: one short path
   # is written before grep can exit. Luck, not correctness.
   if grep -Eq -- "$cloud_ere" <<<"$p"; then
+    continue
+  fi
+  if census_tier_covers "$p"; then
+    echo "  census-tier: $p (read only from $CENSUS_TEST; dispatched by \`--match census\`)"
     continue
   fi
   if is_exempt "$p"; then
@@ -982,3 +1325,36 @@ fi
 
 echo "OK: every repo-root read from cloud/lib + cloud/test is dispatched on."
 echo "OK: no cloud/lib reader escapes the image build context."
+
+# ── THE ENTRY-DECISION ARM runs LAST ───────────────────────────────────────
+# Last on purpose: a dead declaration, a neutered scanner and an uncovered read
+# all EXPLAIN a strange classification, so an operator should meet them first.
+# By the time this runs, the set is known to be live and the census known to be
+# covered — which is what makes "this entry buys nothing anybody can state" a
+# statement about the DECLARATION rather than about the tree.
+ENTRY_AUDIT_PATHS="$paths"
+# The full per-entry table is `--audit-set`. Here only the tally and anything
+# that is not a clean classification is printed: a 24-line table on every green
+# run is how a reader stops reading it.
+entry_audit_out="$(audit_entry_set)" && entry_audit_rc=0 || entry_audit_rc=$?
+printf '%s\n' "$entry_audit_out" | grep -Ev '^(SOLE-COVER|SUBSUMED|DECLARED)	'
+echo "  (per-entry derivation: $0 --audit-set)"
+if [ "$entry_audit_rc" -ne 0 ]; then
+  cat >&2 <<'MSG'
+
+A CLOUD_PATHS entry is UNDECIDABLE, or a declared reason has gone STALE.
+
+An UNDECIDABLE entry is one whose removal reds nothing (it is no read's sole
+cover), which no other entry already subsumes, and which carries no declared
+reason. It dispatches CI work for a purpose nobody can state or check — and it
+can be deleted, narrowed, or quietly scoped down with this ratchet saying OK.
+
+Fix: give it a reason in CLOUD_PATHS_REASON naming one of the three PREDICATE
+kinds (scanned-root, consumer-workflow, census-neighbour) — or delete the entry.
+Do not add it to a skip list: a list cannot classify the next entry.
+
+A STALE-REASON is the other direction: the entry still declares a predicate that
+no longer holds. Re-argue the entry or remove it.
+MSG
+  exit 1
+fi
