@@ -216,6 +216,23 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerBoundedCollectTest do
       seed_articles!(1..8)
       publish!("article", "art-solo", %{"author" => "auth-2"})
 
+      # A NEVER-PUBLISHED document. Without it the two collectors cannot
+      # diverge on this fixture and the term-equality below is vacuous on the
+      # one axis where substituting the collector actually changes ROWS:
+      # `collect_all_documents/3` runs through `list_documents/3`, which
+      # applies `perspective: :published`; `collect_corpus_documents/3` is
+      # draft-preferred `DISTINCT ON` and, until the `:perspective` option was
+      # threaded into `corpus_query/3`, returned `drafts.art-unpublished` as a
+      # corpus row. MEASURED with that clause reverted: walk = ["art-1".."art-8",
+      # "art-solo"], corpus = the same PLUS "drafts.art-unpublished" — draft
+      # edges projected into a published scope.
+      {:ok, _} =
+        Content.create_document(
+          "article",
+          %{"_id" => "art-unpublished", "title" => "art-unpublished", "author" => "auth-1"},
+          @dataset
+        )
+
       bounded_q =
         count_queries(fn -> assert :ok = rebuild(%{"projector" => inspect(CaptureProjector)}) end)
 
