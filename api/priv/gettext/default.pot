@@ -18,22 +18,22 @@ msgid_plural "%{count} warnings — publishing is still allowed"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1009
+#: lib/barkpark_web/studio/pane_builder.ex:1011
 #, elixir-autogen, elixir-format
 msgid "%{n}d ago"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1008
+#: lib/barkpark_web/studio/pane_builder.ex:1010
 #, elixir-autogen, elixir-format
 msgid "%{n}h ago"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1007
+#: lib/barkpark_web/studio/pane_builder.ex:1009
 #, elixir-autogen, elixir-format
 msgid "%{n}m ago"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1010
+#: lib/barkpark_web/studio/pane_builder.ex:1012
 #, elixir-autogen, elixir-format
 msgid "%{n}mo ago"
 msgstr ""
@@ -76,12 +76,12 @@ msgstr ""
 msgid "Back to the desk"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:270
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:275
 #, elixir-autogen, elixir-format
 msgid "Close reference: %{title}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:306
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:311
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr ""
@@ -91,22 +91,22 @@ msgstr ""
 msgid "Desk filters"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:194
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:198
 #, elixir-autogen, elixir-format
 msgid "Diff"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:208
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:212
 #, elixir-autogen, elixir-format
 msgid "Discard draft"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:223
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:227
 #, elixir-autogen, elixir-format
 msgid "Duplicate"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:194
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:198
 #, elixir-autogen, elixir-format
 msgid "Edit"
 msgstr ""
@@ -121,7 +121,7 @@ msgstr ""
 msgid "Generate from %{source}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:180
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:182
 #, elixir-autogen, elixir-format
 msgid "Hide preview"
 msgstr ""
@@ -163,7 +163,7 @@ msgstr ""
 msgid "No schema for"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:237
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:241
 #, elixir-autogen, elixir-format
 msgid "Open another"
 msgstr ""
@@ -173,7 +173,7 @@ msgstr ""
 msgid "Open it in %{workspace}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:362
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:367
 #, elixir-autogen, elixir-format
 msgid "Preview"
 msgstr ""
@@ -201,7 +201,7 @@ msgstr ""
 msgid "Share access to %{type}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:180
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:183
 #, elixir-autogen, elixir-format
 msgid "Show preview"
 msgstr ""
@@ -256,12 +256,12 @@ msgstr ""
 msgid "Untitled %{type} · %{tail}"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:999
+#: lib/barkpark_web/studio/pane_builder.ex:1000
 #, elixir-autogen, elixir-format
 msgid "Updated %{ago}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:289
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:294
 #, elixir-autogen, elixir-format
 msgid "View blast radius"
 msgstr ""
@@ -307,7 +307,7 @@ msgstr ""
 msgid "it covers %{scope}"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1006
+#: lib/barkpark_web/studio/pane_builder.ex:1008
 #, elixir-autogen, elixir-format
 msgid "just now"
 msgstr ""
@@ -332,52 +332,52 @@ msgstr ""
 msgid "Browse library"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:74
+#: lib/barkpark_web/studio_locale.ex:76
 #, elixir-autogen, elixir-format
 msgid "Change"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:68
+#: lib/barkpark_web/studio_locale.ex:70
 #, elixir-autogen, elixir-format
 msgid "Close"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:66
+#: lib/barkpark_web/studio_locale.ex:68
 #, elixir-autogen, elixir-format
 msgid "Media library"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:63
+#: lib/barkpark_web/studio_locale.ex:65
 #, elixir-autogen, elixir-format
 msgid "No image selected — drop a file, or click to upload"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:76
+#: lib/barkpark_web/studio_locale.ex:78
 #, elixir-autogen, elixir-format
 msgid "No matches"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:75
+#: lib/barkpark_web/studio_locale.ex:77
 #, elixir-autogen, elixir-format
 msgid "Remove"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:61
+#: lib/barkpark_web/studio_locale.ex:64
 #, elixir-autogen, elixir-format
 msgid "Remove image"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:65
+#: lib/barkpark_web/studio_locale.ex:67
 #, elixir-autogen, elixir-format
 msgid "Right-click for image options"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:78
+#: lib/barkpark_web/studio_locale.ex:82
 #, elixir-autogen, elixir-format
 msgid "Search %{types}…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:67
+#: lib/barkpark_web/studio_locale.ex:69
 #, elixir-autogen, elixir-format
 msgid "Search assets…"
 msgstr ""
@@ -387,17 +387,37 @@ msgstr ""
 msgid "Upload file"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:64
+#: lib/barkpark_web/studio_locale.ex:66
 #, elixir-autogen, elixir-format
 msgid "Uploading…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:79
+#: lib/barkpark_web/studio_locale.ex:83
 #, elixir-autogen, elixir-format
 msgid "documents"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:77
+#: lib/barkpark_web/studio_locale.ex:79
 #, elixir-autogen, elixir-format
 msgid "draft"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:62
+#, elixir-autogen, elixir-format
+msgid "Alt text"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:63
+#, elixir-autogen, elixir-format
+msgid "Describe the image for people who cannot see it"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:1127
+#, elixir-autogen, elixir-format
+msgid "Title"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:61
+#, elixir-autogen, elixir-format
+msgid "Upload"
 msgstr ""

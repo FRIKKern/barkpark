@@ -18,22 +18,22 @@ msgid_plural "%{count} warnings — publishing is still allowed"
 msgstr[0] "%{count} advarsel — publisering er fortsatt tillatt"
 msgstr[1] "%{count} advarsler — publisering er fortsatt tillatt"
 
-#: lib/barkpark_web/studio/pane_builder.ex:1009
+#: lib/barkpark_web/studio/pane_builder.ex:1011
 #, elixir-autogen, elixir-format
 msgid "%{n}d ago"
 msgstr "for %{n} d siden"
 
-#: lib/barkpark_web/studio/pane_builder.ex:1008
+#: lib/barkpark_web/studio/pane_builder.ex:1010
 #, elixir-autogen, elixir-format
 msgid "%{n}h ago"
 msgstr "for %{n} t siden"
 
-#: lib/barkpark_web/studio/pane_builder.ex:1007
+#: lib/barkpark_web/studio/pane_builder.ex:1009
 #, elixir-autogen, elixir-format
 msgid "%{n}m ago"
 msgstr "for %{n} min siden"
 
-#: lib/barkpark_web/studio/pane_builder.ex:1010
+#: lib/barkpark_web/studio/pane_builder.ex:1012
 #, elixir-autogen, elixir-format
 msgid "%{n}mo ago"
 msgstr "for %{n} mnd siden"
@@ -76,12 +76,12 @@ msgstr "Tilbake til %{type}-lista"
 msgid "Back to the desk"
 msgstr "Tilbake til desken"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:270
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:275
 #, elixir-autogen, elixir-format
 msgid "Close reference: %{title}"
 msgstr "Lukk referanse: %{title}"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:306
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:311
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr "Slett"
@@ -91,22 +91,22 @@ msgstr "Slett"
 msgid "Desk filters"
 msgstr "Desk-filtre"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:194
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:198
 #, elixir-autogen, elixir-format
 msgid "Diff"
 msgstr "Diff"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:208
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:212
 #, elixir-autogen, elixir-format
 msgid "Discard draft"
 msgstr "Forkast utkast"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:223
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:227
 #, elixir-autogen, elixir-format
 msgid "Duplicate"
 msgstr "Dupliser"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:194
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:198
 #, elixir-autogen, elixir-format
 msgid "Edit"
 msgstr "Rediger"
@@ -121,7 +121,7 @@ msgstr "Generer"
 msgid "Generate from %{source}"
 msgstr "Generer fra %{source}"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:180
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:182
 #, elixir-autogen, elixir-format
 msgid "Hide preview"
 msgstr "Skjul forhåndsvisning"
@@ -163,7 +163,7 @@ msgstr "Ingen dokument er åpent. Velg ett i lista for å begynne å redigere."
 msgid "No schema for"
 msgstr "Ingen skjema for"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:237
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:241
 #, elixir-autogen, elixir-format
 msgid "Open another"
 msgstr "Åpne et annet"
@@ -173,7 +173,7 @@ msgstr "Åpne et annet"
 msgid "Open it in %{workspace}"
 msgstr "Åpne det i %{workspace}"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:362
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:367
 #, elixir-autogen, elixir-format
 msgid "Preview"
 msgstr "Forhåndsvisning"
@@ -201,7 +201,7 @@ msgstr "Se over tilgangsgrantene"
 msgid "Share access to %{type}"
 msgstr "Del tilgang til %{type}"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:180
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:183
 #, elixir-autogen, elixir-format
 msgid "Show preview"
 msgstr "Vis forhåndsvisning"
@@ -256,12 +256,12 @@ msgstr "Uten tittel"
 msgid "Untitled %{type} · %{tail}"
 msgstr "%{type} uten tittel · %{tail}"
 
-#: lib/barkpark_web/studio/pane_builder.ex:999
+#: lib/barkpark_web/studio/pane_builder.ex:1000
 #, elixir-autogen, elixir-format
 msgid "Updated %{ago}"
 msgstr "Oppdatert %{ago}"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:289
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:294
 #, elixir-autogen, elixir-format
 msgid "View blast radius"
 msgstr "Vis påvirkning"
@@ -307,7 +307,7 @@ msgstr "er installert i dette datasettet, så Studio har ingen felt å vise doku
 msgid "it covers %{scope}"
 msgstr "den dekker %{scope}"
 
-#: lib/barkpark_web/studio/pane_builder.ex:1006
+#: lib/barkpark_web/studio/pane_builder.ex:1008
 #, elixir-autogen, elixir-format
 msgid "just now"
 msgstr "akkurat nå"
@@ -332,52 +332,52 @@ msgstr "du ba om"
 msgid "Browse library"
 msgstr "Bla i mediebiblioteket"
 
-#: lib/barkpark_web/studio_locale.ex:74
+#: lib/barkpark_web/studio_locale.ex:76
 #, elixir-autogen, elixir-format
 msgid "Change"
 msgstr "Endre"
 
-#: lib/barkpark_web/studio_locale.ex:68
+#: lib/barkpark_web/studio_locale.ex:70
 #, elixir-autogen, elixir-format
 msgid "Close"
 msgstr "Lukk"
 
-#: lib/barkpark_web/studio_locale.ex:66
+#: lib/barkpark_web/studio_locale.ex:68
 #, elixir-autogen, elixir-format
 msgid "Media library"
 msgstr "Mediebibliotek"
 
-#: lib/barkpark_web/studio_locale.ex:63
+#: lib/barkpark_web/studio_locale.ex:65
 #, elixir-autogen, elixir-format
 msgid "No image selected — drop a file, or click to upload"
 msgstr "Ingen bilde valgt — slipp en fil her, eller klikk for å laste opp"
 
-#: lib/barkpark_web/studio_locale.ex:76
+#: lib/barkpark_web/studio_locale.ex:78
 #, elixir-autogen, elixir-format
 msgid "No matches"
 msgstr "Ingen treff"
 
-#: lib/barkpark_web/studio_locale.ex:75
-#, elixir-autogen, elixir-format, fuzzy
+#: lib/barkpark_web/studio_locale.ex:77
+#, elixir-autogen, elixir-format
 msgid "Remove"
 msgstr "Fjern"
 
-#: lib/barkpark_web/studio_locale.ex:61
+#: lib/barkpark_web/studio_locale.ex:64
 #, elixir-autogen, elixir-format
 msgid "Remove image"
 msgstr "Fjern bilde"
 
-#: lib/barkpark_web/studio_locale.ex:65
+#: lib/barkpark_web/studio_locale.ex:67
 #, elixir-autogen, elixir-format
 msgid "Right-click for image options"
 msgstr "Høyreklikk for bildevalg"
 
-#: lib/barkpark_web/studio_locale.ex:78
+#: lib/barkpark_web/studio_locale.ex:82
 #, elixir-autogen, elixir-format
 msgid "Search %{types}…"
 msgstr "Søk i %{types}…"
 
-#: lib/barkpark_web/studio_locale.ex:67
+#: lib/barkpark_web/studio_locale.ex:69
 #, elixir-autogen, elixir-format
 msgid "Search assets…"
 msgstr "Søk i medier…"
@@ -387,17 +387,34 @@ msgstr "Søk i medier…"
 msgid "Upload file"
 msgstr "Last opp fil"
 
-#: lib/barkpark_web/studio_locale.ex:64
+#: lib/barkpark_web/studio_locale.ex:66
 #, elixir-autogen, elixir-format
 msgid "Uploading…"
 msgstr "Laster opp…"
 
-#: lib/barkpark_web/studio_locale.ex:79
-#, elixir-autogen, elixir-format, fuzzy
+#: lib/barkpark_web/studio_locale.ex:83
+#, elixir-autogen, elixir-format
 msgid "documents"
 msgstr "dokumenter"
 
-#: lib/barkpark_web/studio_locale.ex:77
+#: lib/barkpark_web/studio_locale.ex:79
 #, elixir-autogen, elixir-format
 msgid "draft"
 msgstr "utkast"
+
+#, elixir-autogen, elixir-format
+msgid "Alt text"
+msgstr "Alt-tekst"
+
+#, elixir-autogen, elixir-format
+msgid "Describe the image for people who cannot see it"
+msgstr "Beskriv bildet for dem som ikke kan se det"
+
+#: lib/barkpark_web/components/studio_components/editor.ex:1127
+#, elixir-autogen, elixir-format
+msgid "Title"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Upload"
+msgstr "Last opp"
