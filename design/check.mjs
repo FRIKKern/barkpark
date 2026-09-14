@@ -19,8 +19,17 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-let failed = false;
-const fail = (msg) => { console.error(msg); failed = true; };
+// `failed` is a COUNT, not a flag. Every part below gates its `ok` summary on
+// `failed === failedBefore<X>` — a snapshot taken at the part's head. With a
+// sticky boolean that comparison answered "has anything failed all run?", so
+// once ANY earlier part tripped it, `true === true` held even after the part
+// recorded its OWN failures, and the part printed its green line beside its own
+// red ones. Counting makes the SAME comparison ask the question it always meant:
+// "did anything fail SINCE my head?" — a per-part delta. Truthiness is unchanged
+// (0 is falsy), so the verdict arm and the process exit code are untouched, and a
+// part added later inherits the fix simply by copying the existing idiom.
+let failed = 0;
+const fail = (msg) => { console.error(msg); failed++; };
 
 // ── Part 0: the audit verb table's own shape (charter cch-w65) ────────────────
 // cloud/priv/audit-actions.json is the SOLE authority for TWO vocabularies — the
@@ -1172,15 +1181,18 @@ console.log("\ndesign/check.mjs — Part J: air-scale consumer census");
 //      two are censused as a PAIR, per rule, and a half-breakout reds.
 console.log("\ndesign/check.mjs — Part K: evidence-band consumer census");
 {
-  // Part K counts its OWN failures rather than reading the shared `failed`
-  // boolean the parts above it use. That flag is sticky: once ANY earlier part
-  // has tripped, `failed === failedBefore<X>` is true again and the part prints
-  // its green line beside its own red ones. Proven while mutation-testing this
-  // part — dropping the gutter term reds the mirror check first, and Part K then
-  // printed both two FAILs and its `ok`. The run still exits 1, so nothing ships
-  // on it, but a green line under a red one is the kind of output that teaches a
-  // reader to skim. Parts D-J share the pattern and are left alone here: they
-  // belong to other changes in flight.
+  // Part K counts its OWN failures in `kFailed` as well as calling `fail`. That
+  // local count was once the ONLY defence against a sticky shared flag: `failed`
+  // was a boolean, so once ANY earlier part had tripped it, `failed ===
+  // failedBefore<X>` was true again and a part printed its green line beside its
+  // own red ones. Proven while mutation-testing this part — dropping the gutter
+  // term reds the mirror check first, and Part K then printed both two FAILs and
+  // its `ok`. `failed` is now a COUNT (see its declaration at the top of this
+  // file), so `failed === failedBefore<X>` is a per-part delta and Parts D-J are
+  // correct by the same construction. `kFailed` is redundant with that now, and is
+  // kept only because Parts L-O already spell the same local-count idiom (lFailed,
+  // mFailed, nFailed, oFailed); churning five parts to save five lines would cost
+  // more in review than it buys.
   let kFailed = false;
   const kFail = (msg) => { kFailed = true; fail(msg); };
   const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
