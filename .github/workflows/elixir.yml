@@ -370,6 +370,10 @@ jobs:
     # it is needed (charter D26: scripts/pr-task-gate.test.sh was 30 green
     # fixtures executed by nothing). It costs a few seconds of bash.
     name: Elixir path-escape ratchet
+    outputs:
+      # REFUSED when any instrument in this job exited 2 — see the refusal
+      # channel note on the last step. Read by `elixir-gate` as V_ESCAPE.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -459,11 +463,11 @@ jobs:
       - name: Harness (the ratchet must be able to fail)
         # `!= 'skip'`, never `== 'run'`: a missing or garbled output must RUN.
         if: steps.harness-scope.outputs.decision != 'skip'
-        run: bash scripts/elixir-path-escape-check.sh --selftest
+        run: bash scripts/run-instrument.sh elixir-path-escape-selftest -- bash scripts/elixir-path-escape-check.sh --selftest
 
       - name: Every repo-root read is dispatched on
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/elixir-path-escape-check.sh
+        run: bash scripts/run-instrument.sh elixir-path-escape -- bash scripts/elixir-path-escape-check.sh
 
       # ── the wave-33 skip-disclosure ratchet, riding this job ─────────────
       # Same wiring intent as security.yml's `Security gate shape ratchet`
@@ -509,11 +513,11 @@ jobs:
       # name, so required-checks-verify.sh's roster is unchanged.
       - name: The merge-authority claim guard must be able to fail
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/merge-authority-claim-check.test.sh
+        run: bash scripts/run-instrument.sh merge-authority-claim-harness -- bash scripts/merge-authority-claim-check.test.sh
 
       - name: No workflow or card claims merge authority the spec denies
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/merge-authority-claim-check.sh
+        run: bash scripts/run-instrument.sh merge-authority-claim -- bash scripts/merge-authority-claim-check.sh
 
       # ── the unrecognised-top-level default (task-fb7857b984ff5ff8) ────────
       # Every path set in this tree fails OPEN. Re-derived live on origin/main
@@ -546,11 +550,11 @@ jobs:
       # classify it, never rendered at all.
       - name: Every changed top-level entry is one the repo knows
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/toplevel-classifier-check.sh
+        run: bash scripts/run-instrument.sh toplevel-classifier -- bash scripts/toplevel-classifier-check.sh
 
       - name: The top-level classifier must be able to fail (27-case harness)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/toplevel-classifier-check.sh --selftest
+        run: bash scripts/run-instrument.sh toplevel-classifier-selftest -- bash scripts/toplevel-classifier-check.sh --selftest
 
       # ── the vips hedge, now a tripwire instead of a 39-second bill ────────
       # mix-prod-compile below used to `apt-get install libvips-dev` purely as
@@ -565,7 +569,7 @@ jobs:
       # rendered check name, so required-checks-verify.sh's roster is unchanged.
       - name: The vips hedge tripwire must be able to fail
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/vips-hedge-tripwire.sh --selftest
+        run: bash scripts/run-instrument.sh vips-hedge-tripwire-selftest -- bash scripts/vips-hedge-tripwire.sh --selftest
 
       # NAME THIS STEP WITHOUT THE MODE TOKEN. A `name:` is not a comment, so
       # the tripwire's own step name counted as a live selection and reddened it
@@ -573,7 +577,7 @@ jobs:
       # correct behaviour and the reason the name reads around the token.
       - name: A platform-provided vips mode is never selected bare
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/vips-hedge-tripwire.sh
+        run: bash scripts/run-instrument.sh vips-hedge-tripwire -- bash scripts/vips-hedge-tripwire.sh
 
       # ── the D41 @boundary marker registry, riding this job ───────────────
       # VENUE IS THE POINT. The registry's natural home is doc-gates.yml, next
@@ -594,13 +598,13 @@ jobs:
       # ~2s over the whole tree.
       - name: The @boundary marker registry must be able to fail
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/boundary-marker-check.sh --selftest
+        run: bash scripts/run-instrument.sh boundary-marker-selftest -- bash scripts/boundary-marker-check.sh --selftest
 
       # STATIC PAIRING ONLY. A green here says every @boundary comment names a
       # test that EXISTS — never that the test would fail if the boundary broke.
       - name: Every @boundary comment names a test that still exists
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/boundary-marker-check.sh
+        run: bash scripts/run-instrument.sh boundary-marker -- bash scripts/boundary-marker-check.sh
 
       # ── the diff-scoped format verdict, end to end ───────────────────────
       # It rides HERE and not in the `format` job, deliberately: `format`
@@ -666,7 +670,7 @@ jobs:
       # name, so required-checks-verify.sh's roster is unchanged.
       - name: The PR test selector must fail safe (47-case harness)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/elixir-impacted-tests.sh --selftest
+        run: bash scripts/run-instrument.sh elixir-impacted-tests-selftest -- bash scripts/elixir-impacted-tests.sh --selftest
 
       # The pinned half of the selector's ALWAYS set is the net under the tests
       # a compile closure structurally cannot reach — the plugin registry, the
@@ -675,7 +679,7 @@ jobs:
       # existence of every pin is asserted separately from the harness.
       - name: Every pinned ALWAYS test still exists
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/elixir-impacted-tests.sh --check-pins
+        run: bash scripts/run-instrument.sh elixir-impacted-tests-pins -- bash scripts/elixir-impacted-tests.sh --check-pins
 
       # The main-red attribution reporter (elixir-main-red-attribution.yml) runs
       # only when main is red, which is rare — so its own harness would go
@@ -689,11 +693,11 @@ jobs:
 
       - name: The pin-agreement gate must be able to fail
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/toolchain-skew-check.sh --selftest
+        run: bash scripts/run-instrument.sh toolchain-skew-selftest -- bash scripts/toolchain-skew-check.sh --selftest
 
       - name: The production Elixir pin is covered by the jobs that test it
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/toolchain-skew-check.sh
+        run: bash scripts/run-instrument.sh toolchain-skew -- bash scripts/toolchain-skew-check.sh
 
       # ── the ACK_EX deriver (task-188100520e018ee4), riding this job ───────
       # A row added to `.github/required-checks.json`'s `.exclusions` that the
@@ -770,7 +774,7 @@ jobs:
       # `!= 'skip'`, never `== 'run'`: a missing or garbled output must RUN.
       - name: Every unrenderable .exclusions row is acknowledged in ACK_EX
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && steps.ack-ex-scope.outputs.decision != 'skip' }}
-        run: bash scripts/required-checks-ack-derive.sh --selftest
+        run: bash scripts/run-instrument.sh required-checks-ack-derive-selftest -- bash scripts/required-checks-ack-derive.sh --selftest
 
       # ── the selftest-wiring census, riding this job (task-47448b5c7eb29e54) ─
       # VENUE, and the venue is the entire point of this step.
@@ -815,7 +819,22 @@ jobs:
       # laptop, against this job's 2m35s average — off the critical path.
       - name: Every self-test under scripts/ is executed by CI or declares an exemption
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/selftest-wiring-census.sh
+        run: bash scripts/run-instrument.sh selftest-wiring-census -- bash scripts/selftest-wiring-census.sh
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when an instrument above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV; a `||` chain
+      # over the individual step outputs would take the FIRST non-empty one and
+      # so drop a refusal that happened after a clean measurement.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `elixir-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
       # ── the vendored-SDK freshness comparison, riding this job ────────────
       # (task-632a54405ba79314)
@@ -996,6 +1015,9 @@ jobs:
     outputs:
       unformatted_in_diff: ${{ steps.scope.outputs.unformatted_in_diff }}
       unformatted_total: ${{ steps.scope.outputs.unformatted_total }}
+      # REFUSED when any instrument in this job exited 2 — see the refusal
+      # channel note on the last step. Read by `elixir-gate` as V_FORMAT.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     strategy:
       fail-fast: false
       matrix:
@@ -1096,7 +1118,7 @@ jobs:
       # contract as the guard's --selftest above, and it needs no toolchain.
       - name: The diff scope must be able to refuse, to red, and to stay neutral
         working-directory: .
-        run: bash scripts/format-diff-scope.sh --selftest
+        run: bash scripts/run-instrument.sh format-diff-scope-selftest -- bash scripts/format-diff-scope.sh --selftest
 
       # CAPTURED, NOT DECIDED ON. This step is deliberately the last one in this
       # job that may not fail: `mix format --check-formatted` answers "is the
@@ -1177,10 +1199,25 @@ jobs:
             fi
           fi
           echo "PR diff: $(wc -l < "$changed" | tr -d ' ') changed path(s) (empty = push, or no computable diff)"
-          bash scripts/format-diff-scope.sh \
+          bash scripts/run-instrument.sh format-diff-scope -- bash scripts/format-diff-scope.sh \
             --verdict-log "${tmp}/format-verdict.log" \
             --guard-rc "${GUARD_RC:-2}" \
             --changed "$changed"
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when an instrument above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV; a `||` chain
+      # over the individual step outputs would take the FIRST non-empty one and
+      # so drop a refusal that happened after a clean measurement.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `elixir-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
   mix-test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
@@ -1191,6 +1228,10 @@ jobs:
     # sets, not one — charter D31. Declared in, and proven by,
     # scripts/elixir-path-escape-check.sh.
     if: needs.changes.outputs.test == 'true'
+    outputs:
+      # REFUSED when any instrument in this job exited 2 — see the refusal
+      # channel note on the last step. Read by `elixir-gate` as V_TEST.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     # BLOCKING since 2026-06-10: the remediation this job waited on is done —
     # suite de-flaked at the root (CompactorTest serialization, DateTime
@@ -1356,11 +1397,11 @@ jobs:
       # would satisfy a can-it-red test while measuring nothing.
       - name: The client-ip resolver guard must be able to fail
         working-directory: .
-        run: bash scripts/client-ip-resolver-check.sh --selftest
+        run: bash scripts/run-instrument.sh client-ip-resolver-selftest -- bash scripts/client-ip-resolver-check.sh --selftest
 
       - name: No conn.remote_ip read outside the canonical resolver
         working-directory: .
-        run: bash scripts/client-ip-resolver-check.sh
+        run: bash scripts/run-instrument.sh client-ip-resolver -- bash scripts/client-ip-resolver-check.sh
 
       # ── test-env-leak ratchet, riding this job ───────────────────────────
       # STEPS, not a job — the same reasoning the two ratchets above record.
@@ -1765,6 +1806,21 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
         run: mix test --only boot_test test/barkpark/plugin_free_boot_test.exs
 
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when an instrument above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV; a `||` chain
+      # over the individual step outputs would take the FIRST non-empty one and
+      # so drop a refusal that happened after a clean measurement.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `elixir-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
+
   mix-prod-compile:
     # The merge gate. See docs/ops/merge-gates.md.
     name: Prod compile gate (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
@@ -1784,6 +1840,10 @@ jobs:
     # belt-and-braces. It stays: the aggregator must not depend on the shape of
     # the `needs` graph to stay fail-closed.
     if: needs.changes.outputs.compile == 'true'
+    outputs:
+      # REFUSED when any instrument in this job exited 2 — see the refusal
+      # channel note on the last step. Read by `elixir-gate` as V_PROD.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1867,7 +1927,7 @@ jobs:
       # proven only once at authoring time is not one either — so it is proven
       # on every run of the gate it protects.
       - name: Prove the tripwire can fail (guard --selftest)
-        run: bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" --selftest
+        run: bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" prod-build-cache-guard-selftest -- bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" --selftest
         working-directory: .
 
       # THE TRIPWIRE. Two arms, and the job is not allowed to proceed on a
@@ -2001,6 +2061,21 @@ jobs:
         run: mix compile --warnings-as-errors
         env:
           MIX_ENV: prod
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when an instrument above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV; a `||` chain
+      # over the individual step outputs would take the FIRST non-empty one and
+      # so drop a refusal that happened after a clean measurement.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `elixir-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
   validation-perf:
     # Phase 3 WI4 — cross-field validation perf gate. Independent of mix-test
@@ -2186,6 +2261,19 @@ jobs:
           R_FORMAT: ${{ needs.format.result }}
           O_COMPILE: ${{ needs.changes.outputs.compile }}
           O_TEST: ${{ needs.changes.outputs.test }}
+          # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ───────────
+          # `R_*` is a RESULT — success/failure/skipped — and a failure on that
+          # channel is ONE word over two utterly different facts: "I measured
+          # and found a defect" and "I could not measure at all". `V_*` is the
+          # second fact, published by `scripts/run-instrument.sh` at the call
+          # site of every refusal-capable instrument in the job. Empty means
+          # the job never reached one of those steps (skipped, or it died
+          # earlier) — which is NOT a claim that nothing refused, so this step
+          # never reads an empty V_* as MEASURED.
+          V_ESCAPE: ${{ needs.path-escape.outputs.verdict }}
+          V_FORMAT: ${{ needs.format.outputs.verdict }}
+          V_TEST: ${{ needs.mix-test.outputs.verdict }}
+          V_PROD: ${{ needs.mix-prod-compile.outputs.verdict }}
           # NOT a second verdict — R_FORMAT above is the verdict. This is the
           # NAMES, so the ::error:: (the only line the check-run API carries)
           # says WHICH file, per D770/D771. Empty on every green path.
@@ -2311,6 +2399,31 @@ jobs:
 
           # The dispatcher itself may never skip: without it there are no gate
           # values, so nothing downstream can be judged.
+          # ── the refusal ledger ───────────────────────────────────────────
+          # Built BEFORE the verdict, so the `::error::` below can say WHICH
+          # instruments refused. Derived from ${job}, never a hardcoded name.
+          refusals=""
+          note_verdict() {
+            local job="$1" v="$2"
+            case "$v" in
+              REFUSED|UNKNOWN)
+                echo "  REFUSED ${job}: the instrument exited 2 — it COULD NOT MEASURE and made NO"
+                echo "          claim in either direction. Read that job's own log: it printed the"
+                echo "          cause by name. This is still red — a refusal is not a pass."
+                refusals="${refusals:+${refusals}, }${job}"
+                ;;
+              MEASURED-DEFECT)
+                echo "  measured ${job}: the instrument RAN and found a defect. The fault is in the"
+                echo "          tree, not on the runner." ;;
+              MEASURED-CLEAN|'') : ;;
+              *) echo "  note    ${job}: unrecognised verdict '${v}' on the refusal channel." ;;
+            esac
+          }
+          note_verdict "path-escape ratchet" "${V_ESCAPE:-}"
+          note_verdict "format (diff-scoped)" "${V_FORMAT:-}"
+          note_verdict "mix-test"             "${V_TEST:-}"
+          note_verdict "mix-prod-compile"     "${V_PROD:-}"
+
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
           decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
           decide "mix-test"                "${R_TEST}"    "${O_TEST}"
@@ -2333,7 +2446,25 @@ jobs:
           fi
 
           if [ "$bad" -ne 0 ]; then
-            echo "::error::Elixir gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose. NOT IN THE ALLOW-SET: ${reds}"
+            if [ -n "$refusals" ]; then
+              # The ONE line the check-run API carries. Say which half of the
+              # vocabulary fired, or the reader re-derives it from scratch and
+              # usually guesses "the runner".
+              echo "::error title=Elixir gate RED — an instrument REFUSED TO MEASURE::RED because at least one upstream job is not in the allow-set.%0AREFUSED TO MEASURE (exit 2): ${refusals}%0AA refusal is the ABSENCE of a measurement: those instruments made no claim about this tree in either direction — nothing here says it is clean and nothing here says it is broken. exit 2 is ONE code over MANY causes and this aggregate measured none of them: an unknown path-set or argument name, a source root that is not there, a base ref that does not resolve, a toolchain the box does not carry. READ THE REFUSING JOB'S OWN LINE — it printed the cause by name, and that cause may well be a committed file in this repo rather than the runner.%0ANOT IN THE ALLOW-SET: ${reds}"
+            else
+              echo "::error::Elixir gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose. NOT IN THE ALLOW-SET: ${reds}"
+            fi
+            exit 1
+          fi
+
+          if [ -n "$refusals" ]; then
+            # Every upstream is in the allow-set and an instrument still refused
+            # — possible when a refusing step sits behind `!cancelled()` in a
+            # job that ends green some other way, or inside the advisory
+            # `format` job, which is `continue-on-error` and so reports success
+            # whatever it found. A green required context over an unmeasured
+            # hole is precisely the vacuous green this channel exists to kill.
+            echo "::error title=Elixir gate RED — a refusal reached the aggregate with every job green::REFUSED TO MEASURE (exit 2): ${refusals}%0AEvery upstream job is in the allow-set, and an instrument still refused to measure. Greening on that would publish a required context over a hole nothing looked into. Read the refusing job's own line for the cause."
             exit 1
           fi
 
