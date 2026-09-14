@@ -495,9 +495,9 @@ it exists. Measured on merged PRs:
 [merge-gates-history.md](merge-gates-history.md#the-path-gated-green-measured-on-merged-prs).
 
 Each path-gated aggregator emits the disclosure itself, as a `::notice`
-annotation on its own check-run. The roster below is the contract §21 of
-`scripts/required-checks.test.sh` holds both sides of; `—` in the second column
-means that gate does not emit, because it is not path-gated at all.
+annotation on its own check-run. §21 of `scripts/required-checks.test.sh` holds
+both sides of the roster below; `—` means that gate does not emit, because it is
+not path-gated at all.
 
 | Gate | Emits `gate: green — nothing ran` from | Required context |
 | --- | --- | --- |
@@ -718,10 +718,12 @@ Elixir security gates, path-triggered on `api/**`:
 
    **Topology: the S4 objection is DEAD as of wave 10 — one blocker remains.**
    This entry used to conclude "no `security.yml` check can be required", on two
-   arguments now retired ([history](merge-gates-history.md#the-two-retired-arguments-against-a-required-security-check)).
-   Trap worth keeping from the first: `gh api …/rulesets` → `[]` is a TRUE
-   reading that produces the WRONG conclusion, because this repo's protection is
-   not a ruleset. The second rested on **S4**, and wave 10 paid it:
+   successive arguments that are both now retired. The first rested on "`main`
+   has no branch protection" — **false since 2026-07-28**: protection is live
+   with `enforce_admins: true` and the tracked file carries `"enforced": true`.
+   (Trap worth keeping: `gh api …/rulesets` → `[]` is a TRUE reading that
+   produces the WRONG conclusion, because this repo's protection is not a
+   ruleset.) The second rested on **S4**, and wave 10 paid it:
 
    - `security.yml` **no longer carries a workflow-level `paths:` key** on either
      trigger, so it renders a check run on every head. Path decisions moved to
@@ -1003,8 +1005,6 @@ content — never raise the cap.
 | Run the plugin matrix test | `bash api/test/scripts/test-plugin-node-matrix.sh` |
 | Lint the workflows         | `actionlint .github/workflows/*.yml`           |
 
-`actionlint` is not installed by default in this repo's environment. To add
-it locally: `brew install actionlint` (macOS) or
-`go install github.com/rhysd/actionlint/cmd/actionlint@latest`. CI does not
-currently run `actionlint`; add it as a separate workflow if drift becomes
-common.
+`actionlint` is not installed here by default (`brew install actionlint`, or
+`go install github.com/rhysd/actionlint/cmd/actionlint@latest`) and CI does not
+run it; add it as a separate workflow if drift becomes common.

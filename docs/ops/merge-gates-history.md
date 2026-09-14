@@ -105,13 +105,10 @@ On #10565 (a single ledger `.md`) the per-commit check-runs read both Cloud jobs
 `skipped` under a `success` gate carrying one annotation, and #10450 is the same
 shape. `gh pr checks 10565` prints `Cloud gate  pass  4s` and stops there.
 
-## The two retired arguments against a required security check
+## The Sobelow floor paragraph's own decay
 
-The first rested on "`main` has no branch protection" — false since 2026-07-28:
-protection is live with `enforce_admins: true` and the tracked file carries
-`"enforced": true`. The second rested on S4, and wave 10 paid it. The amended
-floor paragraph also said **10** and **8** until 2026-09-01, having predicted
-its own decay and never been re-derived after the fix landed; the table carried
+It said **10** and **8** until 2026-09-01, having predicted its own decay and
+never been re-derived after the fix landed; the table carried
 `bulldocs.html.heex:67` for the row really at `:95`.
 
 ## Why the two unannotatable Sobelow classes are unreachable, in full
