@@ -86,8 +86,9 @@ classify() {
   case "$argv" in *"$SELF_NAME"*) return 1 ;; esac
 
   # The preview static server. serve.mjs always lives under __preview__/, and
-  # every instrument spawns it by that path (overflow-guard.mjs:604,
-  # modal-oracle.mjs:481, breakpoint-sweep.mjs:1387, shoot.sh:233).
+  # every instrument spawns it by that path (overflow-guard.mjs, modal-oracle.mjs,
+  # breakpoint-sweep.mjs and shoot.sh). Re-derive every spawn site with:
+  #   grep -n 'serve\.mjs' __preview__/*.mjs __preview__/shoot.sh
   case "$argv" in *__preview__/serve.mjs*) printf 'preview-server'; return 0 ;; esac
 
   # Headless Chrome, but only when it also carries an argument that only OUR
