@@ -529,6 +529,24 @@ func Execute(args []string) int {
 	m, err := loadManifest(g, ctx)
 	if err != nil {
 		out.userErr("%v", err)
+		// A HELP REQUEST THAT DIES HERE NEEDS A DIFFERENT SENTENCE
+		// (task-23c76938811ff2db). `bp <noun> <verb> --help` renders the
+		// manifest's own argument and flag table (usageCommand, below), so the
+		// per-command help pages are SERVED, not baked: 136 of the 143 commands
+		// in docs/cli/fixtures/full-manifest.json cannot print help with no
+		// config, no cache and no server, and the bare refusal above tells the
+		// reader to `bp setup` as if they had asked to DO something. They asked
+		// what the command is. Name the reason and the offline route, once,
+		// beside the refusal — the exit class is unchanged.
+		if g.help {
+			what := noun
+			if verb != "" {
+				what = noun + " " + verb
+			}
+			out.errf("  note: per-command help is rendered from the server's capabilities manifest,")
+			out.errf("        so `bp %s --help` needs one too. To read help offline, point at a saved", what)
+			out.errf("        copy: --manifest <file> or BARKPARK_MANIFEST=<file> (write it with `%s`).", manifestCaptureCmd)
+		}
 		return exitGeneric
 	}
 	tree := m.Tree()
