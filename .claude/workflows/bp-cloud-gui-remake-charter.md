@@ -510,6 +510,12 @@ epic id `cloud-gui-remake-epic` (which does not resolve); both were followed to 
   upper edge moves with chip text and locale. The fix that works is breakpoint-free and two
   declarations — `.topbar-right > * { min-width: 0 }` plus ellipsizing `.billing-chip` — measured
   **0 of 44 overflowing** across 721/750/768/769/775/780/785/800/900/1024/1440 x 2 themes x 2 scenarios.
+  **CORRECTED 2026-09-15 at `abdec5a65`: the 0/44 is real but it is NOT attributable to this pair.** Removing
+  either declaration, or both together, still measures 0/44 — and `text-overflow: ellipsis` on a flex
+  container was later found inert in any case. The band is held by the `@media (max-width: 830px)`
+  liveness-label hide shipped later by W17-S6; the pair only becomes load-bearing (the parent min-width, not
+  the child one named here) once that label is restored. Full arm table in the corrected GR108 mechanism
+  paragraph of the round-12 seal section.
   Its one cost is that the past-due billing chip ellipsizes in the 721-782 band; three cosmetic
   declarations in the existing 768 block buy the full 169.78px back. **The two halves ship together**:
   the unconditional pair is correctness, the in-block trio prevents trading a scrollbar for a truncated
@@ -903,7 +909,11 @@ Round 1 dispatches two dependency-free slices with **disjoint file sets**; round
 - **`gr-p5r8-register-defect-commits`** (round 1, opus, `cloud/priv/static/__preview__/seal-predicate.mjs`) —
   the ONE permitted edit: `commit: null` → `0261ace15`, registered against all three defects. Sound because
   the SHA was proven **by diff, per defect** (GR108 = `.topbar-right > * { min-width: 0; }` at app.css:787,
-  breakpoint-free because children floor at `min-width:auto` and overflow at ~782px ABOVE the 768 breakpoint;
+  breakpoint-free because children floor at `min-width:auto` and overflow at ~782px ABOVE the 768 breakpoint
+  — **CORRECTED 2026-09-15: that rule is the one the register NAMES, but it is not the one doing the work.
+  Mutation-measured at `abdec5a65`, removing it changes no guard verdict in any arm; see the corrected GR108
+  mechanism paragraph in the round-12 seal section. The register entry stays (the diff is what it certifies),
+  the causal gloss on it does not**;
   GR109 = the `.attention-row` tablet-stack block relocated to sit AFTER its base rule; GR115 = the
   `.bp-console-*` block relocated BEFORE the shared media block) — three non-overlapping hunks with in-place
   GR comments. Gate: `node --check` + the three clause-(b) checkmarks from a repo-root run.
@@ -1980,13 +1990,53 @@ and re-verified byte-identical to `origin/main` before this section was written.
 **One honest surprise from that probe, recorded rather than buried.** Setting `.topbar-right > *` to
 `min-width: auto` — which is exactly *removing* the landed GR108 fix, since `auto` is the flex-item default —
 did **not** reproduce the overflow: the guard still measured 0/44 with the chip at 169.78px. The GR108 defect
-is therefore **over-determined** at `origin/main`: some other landed rule (most likely the `min-width: 0` on
-`.topbar-left, .topbar-right` themselves at `app.css:776`) independently prevents it at these widths, so the
-child rule is belt-and-braces rather than the sole load-bearing fix. This does not weaken the seal — the
-defect is measured absent, which is what clause (b) certifies — but it means the charter's causal story
-("the CHILDREN escape because they are flex items at the default `min-width:auto`") is **not the whole
-mechanism** at the tree that shipped. Filed as `gr-bl-gr108-fix-overdetermined`, not fixed here: touching
-`app.css` at the seal would have been the eighth instrument by another name.
+is therefore **over-determined** at `origin/main`. Filed as `gr-bl-gr108-fix-overdetermined`, not fixed here:
+touching `app.css` at the seal would have been the eighth instrument by another name.
+
+> **CORRECTED 2026-09-15 at `abdec5a65` — the guess in this paragraph was WRONG, and the answer is not a
+> min-width rule at all.** The sentence that stood here guessed that *"some other landed rule (most likely the
+> `min-width: 0` on `.topbar-left, .topbar-right` themselves at `app.css:776`) independently prevents it at
+> these widths, so the child rule is belt-and-braces rather than the sole load-bearing fix."* Both halves are
+> refuted by measurement. Every arm below is one anchored single-line mutation on a clean worktree, restored
+> byte-clean, run as `node cloud/priv/static/__preview__/overflow-guard.mjs --defect
+> GR108-tablet-topbar-overflow`, exit code read directly and never through a pipe. (The two cited line numbers
+> have also rotted; the rules are re-found by selector name.)
+>
+> | arm | mutation | rc | result |
+> |---|---|---|---|
+> | baseline | none | 0 | PASS, 0/44, chip 168/168 at all 17 tablet widths |
+> | A | `.topbar-left, .topbar-right` min-width removed | 0 | PASS — **refutes the "most likely" guess** |
+> | B | `.topbar-right > *` → `min-width: auto` (the landed fix removed) | 0 | PASS |
+> | E | A + B + `.billing-chip { overflow: visible }` | 0 | PASS, chip still 168/168 |
+> | CONTROL | `.topbar-right > *` → `min-width: 400px` | 1 | FAIL, 44 findings — the guard CAN red here |
+> | **F** | liveness-label hide in the `@media (max-width: 830px)` block un-hidden | **1** | **FAIL, 24 chip-TRUNCATED cells at 721-750** |
+> | F+A | F plus the parent min-width removed | 1 | **FAIL, 4 PAGE cells — `scrollWidth 732 > viewport 721`** |
+> | F+B | F plus the landed fix removed | 1 | 24 findings — the **same cells** as F, ~5px worse pixels |
+> | F+D | F plus `.billing-chip { overflow: visible }` | 0 | PASS — **the assertion goes VACUOUS**, see below |
+>
+> **THE MECHANISM, stated as measured.** None of the three candidate rules is load-bearing at today's tree;
+> arms A, B and E all pass. What holds the band is the `.live-chip-label, .live-chip-ago { display: none }`
+> declaration inside the `@media (max-width: 830px)` liveness block (the W17-S6 GR116 tighten) — it frees
+> enough width from `.topbar-right` that no min-width rule is ever exercised. Restore the label and the
+> ordering inverts: the **parent** `.topbar-left, .topbar-right { min-width: 0 }` becomes the load-bearing
+> **page-overflow** protection (F+A reproduces GR108's real horizontal-scrollbar symptom), while
+> `.topbar-right > * { min-width: 0 }` — the rule this charter's per-defect diff proof and the seal register
+> both name as "the GR108 fix" — **changes no verdict in any arm run**. It is measurably active (F+B's chip is
+> ~5px narrower than F's) and never decisive.
+>
+> **So the protection is a coincidence of content width, not a construction.** "Width-independent by
+> construction: it cannot regress when chip text or locale changes" is the false claim; a longer label, a
+> locale, or a font swap (see D218, which moves the chip 168 → 172) moves the margin the 830 block provides.
+>
+> **A GUARD BLIND SPOT FOUND ON THE WAY.** Flipping `.billing-chip`'s `overflow: hidden` to `visible` does not
+> make the layout safe — it makes the guard's chip-truncation assertion **vacuous**, because `scrollWidth`
+> stops exceeding `clientWidth` once the box no longer clips. F reds with 24 cells; F+D greens on the same
+> slack. Any arm that mutates that declaration and reports PASS has switched the assertion off, not proved a
+> protection. Filed rather than fixed here.
+>
+> **WHAT IS STILL NOT ESTABLISHED.** The arms above prove the 830-block label hide is *sufficient* to keep the
+> band clean and that the parent min-width is load-bearing *given* the label restored. They do not prove the
+> label hide is the *only* remaining slack source, and no arm isolates the margin in pixels.
 
 The epic ends here. There is no round 13.
 

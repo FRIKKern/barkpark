@@ -881,7 +881,31 @@ select.form-input {
    every topbar-right child shrink (the chip clips via its own overflow:hidden
    below) measured 0/44 overflowing across 721-1440 x 2 themes x 2 past-due
    scenarios. Width-independent by construction: it cannot regress when chip
-   text or locale changes. */
+   text or locale changes.
+
+   CORRECTED 2026-09-15 — "WIDTH-INDEPENDENT BY CONSTRUCTION" IS THE FALSE HALF,
+   AND THIS RULE IS NOT THE ONE DOING THE WORK. Re-measured at abdec5a65 with
+   `--defect GR108-tablet-topbar-overflow`, one anchored mutation per arm on a
+   clean worktree: setting this declaration to `min-width: auto` — which IS
+   removing the landed GR108 fix — exits 0, unchanged. Removing the parent
+   `.topbar-left, .topbar-right` min-width exits 0. Doing both plus flipping
+   `.billing-chip`'s `overflow` to visible exits 0, chip 168/168 at all 17
+   tablet widths. A positive control (this rule at `min-width: 400px`) exits 1
+   with 44 findings, so the guard CAN red on this leg at this tree — the five
+   greens are a measurement, not a dead instrument.
+
+   What the band actually rests on is the liveness-label hide in the
+   `@media (max-width: 830px)` block (`grep -n 'live-chip-label, .live-chip-ago'
+   app.css`), which frees enough width that no min-width rule is exercised.
+   Un-hide it and the topbar comes under real pressure: alone it exits 1 with 24
+   chip-TRUNCATED cells at 721-750; together with the parent min-width removed
+   it reproduces GR108's page-level symptom (4 cells, scrollWidth 732 > viewport
+   721). Under pressure the PARENT min-width is the load-bearing page
+   protection; THIS child rule still flips no verdict in any arm (removing it
+   narrows the chip ~5px and changes no cell's pass/fail). Keep it — it is
+   correct and cheap — but do not cite it as the protection, and do not treat
+   the current green as width-independent: it is a coincidence of how much the
+   830 block frees, so a longer label, a locale or a font swap moves it. */
 .topbar-right > * { min-width: 0; }
 .crumb-sep { color: var(--border); font-size: 16px; flex: 0 0 auto; }
 
@@ -6120,10 +6144,39 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      — it is a flex container, and Chrome does not ellipsize a flex container's
      anonymous items. In the 769-782 band the chip CLIPS; it does not paint a
      literal "…". `overflow: hidden` is the declaration doing the work (it also
-     zeroes the chip's automatic minimum size, which is why the guard's GR108
-     mutation only flips when the WHOLE pair is reverted — each half alone
-     measures clean at today's label widths, verified both directions at
-     review). The ellipsis is kept as charter-authored intent and as correct
+     zeroes the chip's automatic minimum size).
+
+     CORRECTED 2026-09-15 — THE SENTENCE THAT STOOD HERE WAS FALSE. It claimed
+     the guard's GR108 mutation "only flips when the WHOLE pair is reverted —
+     each half alone measures clean at today's label widths, verified both
+     directions at review". Nobody re-ran it after it was written. Re-run at
+     abdec5a65 against `--defect GR108-tablet-topbar-overflow`, every arm an
+     anchored single-line mutation on a clean worktree restored byte-clean:
+     reverting the parent min-width, the child min-width and this `overflow`
+     ALL THREE TOGETHER still exits 0, chip 168/168 at all 17 tablet widths.
+     NONE of the three is load-bearing at today's content width; the pair is
+     dormant, not belt-and-braces.
+
+     WHAT ACTUALLY HOLDS THE BAND is the liveness-label hide in the
+     `@media (max-width: 830px)` block — find it with
+     `grep -n 'live-chip-label, .live-chip-ago' app.css`. Un-hiding that alone
+     exits 1 with 24 chip-TRUNCATED cells across 721-750. Un-hiding it together
+     with the `.topbar-left, .topbar-right` min-width:0 reproduces GR108's real
+     symptom: 4 page-level `scrollWidth 732 > viewport 721` cells. So the PARENT
+     min-width is the load-bearing page protection once the topbar is actually
+     under pressure, while `.topbar-right > * { min-width: 0 }` — the rule the
+     charter and the seal register both call "the GR108 fix" — changed no
+     verdict in any arm (its removal moves the chip ~5px narrower and flips no
+     cell). The protection is a coincidence of how much width the 830 block
+     frees, so a longer label, a locale change or a font swap moves it.
+
+     AND THIS `overflow: hidden` IS LOAD-BEARING FOR THE GUARD, NOT THE LAYOUT:
+     flipping it to `visible` makes the chip-truncation assertion VACUOUS
+     (scrollWidth stops exceeding clientWidth), so that arm greens by switching
+     the assertion off rather than by the layout being safe. Never read a green
+     from that mutation as evidence of a protection.
+
+     The ellipsis is kept as charter-authored intent and as correct
      behaviour the day the chip stops being a flex container; it is documented
      here rather than described as polish it does not deliver. */
   overflow: hidden;
