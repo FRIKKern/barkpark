@@ -77,6 +77,37 @@
 #   D3 SELF        the changed path IS the registry, or IS one of its expectation
 #                  artifacts. Covers the self-counting harness (a --self-test
 #                  that tallies its own checks against a published number).
+#   D4 CONTENT     the registry's corpus is a CONTENT grep, and the changed file's
+#                  content MATCHES it — so the edit made the file a MEMBER. The
+#                  patterns and the --include extensions are read out of the
+#                  registry's own `grep -rl` / `git grep -l` invocation, so this
+#                  is a predicate over a shape (13 files repo-wide use it, 7 of
+#                  them registries), never a second list.
+#
+# WHY D4 EXISTS, measured: d3af39283 reddened run-level-reader-census.sh on main
+# and stayed red. It touched three paths, and NONE of them is in any registry's
+# rows or globs — tooling/concept-map/ci-boundary.test.mjs BECAME a member by
+# gaining run-level reads (0 source hits at d3af39283^, 2 at d3af39283). D1/D2/D3
+# are all path-keyed and every one of them stayed silent. Membership here is
+# decided by what a file CONTAINS after the edit, not by where it sits.
+#
+# Hence --content-at: a membership question must be asked of the tree the change
+# produced. A historical replay that asks it of the current working tree gets the
+# wrong answer in both directions, and the harness proves both — the SAME path set
+# is CLEAN at d3af39283^ and IMPLICATED at d3af39283, with only that flag moving.
+#
+# D4'S DECLARED GAP — the honest half, and it is stated in the CLEAN output too.
+# D4 reads patterns ONLY from the `-e '<pat>'` shape. A registry that passes a
+# BARE quoted pattern as grep's first operand is NOT covered:
+#   scripts/docs-anchors-check.sh — `grep -rl '^## Code anchors' docs --include='*.md'`
+# so a doc that GAINS that heading becomes a member and this check stays silent.
+# Measured, of the 8 files in the tree carrying a list-mode recursive content
+# grep, 2 use -e and 6 do not. I implemented the bare-operand door and REMOVED it:
+# those invocations are pipelines, so telling grep's pattern from the filter's
+# pattern is not soundly doable by extraction, and the two-path negative control
+# went from CLEAN to two implicated registries, BOTH FALSE (web/README.md contains
+# `^## Code anchors` zero times). Detection bought by making everything implicated
+# is worse than a declared gap, so the gap is declared.
 #
 # WHAT IT DELIBERATELY DOES NOT DO
 # --------------------------------
@@ -101,6 +132,8 @@
 #   registry-impact-check.sh --base <ref>
 #   registry-impact-check.sh --path P [--path Q]  # explicit path set
 #   registry-impact-check.sh --paths-from <file>  # one path per line, - for stdin
+#   registry-impact-check.sh --content-at <ref>   # ask content membership of <ref>
+#                                                 # (default: the working tree)
 #   registry-impact-check.sh --list-registries    # the derived set, with misses
 #   registry-impact-check.sh --selftest           # harness hook
 #
@@ -133,12 +166,16 @@ trap 'rm -rf "$TMP"' EXIT
 # ---------------------------------------------------------------- argument parse
 MODE=run
 BASE="${REGISTRY_IMPACT_BASE:-origin/main}"
+# Empty = the working tree. A historical replay must set this to the commit under
+# test, or the content-membership door asks its question of the wrong tree.
+CONTENT_REF="${REGISTRY_IMPACT_CONTENT_REF:-}"
 : > "$TMP/paths.explicit"
 HAVE_EXPLICIT=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --base) shift; [ $# -gt 0 ] || cannot_read "--base needs a ref"; BASE="$1" ;;
+    --content-at) shift; [ $# -gt 0 ] || cannot_read "--content-at needs a ref"; CONTENT_REF="$1" ;;
     --path) shift; [ $# -gt 0 ] || cannot_read "--path needs a path"; printf '%s\n' "$1" >> "$TMP/paths.explicit"; HAVE_EXPLICIT=1 ;;
     --paths-from)
       shift; [ $# -gt 0 ] || cannot_read "--paths-from needs a file"
@@ -170,6 +207,10 @@ TRACKED_N=$(wc -l < "$TMP/tracked" | tr -d ' ')
 # resolved against THIS, never against the shape of a shell word.
 sed -E 's#/[^/]*$##' "$TMP/tracked" | LC_ALL=C sort -u > "$TMP/dirs"
 : > "$TMP/too-broad"
+: > "$TMP/degenerate"
+# The degenerate-pattern control string. Shares no vocabulary with any real
+# corpus pattern, so only a pattern matching on STRUCTURE can match it.
+printf 'zqxjk-degenerate-pattern-control-7f3\n' > "$TMP/sentinel"
 
 # A corpus glob wider than this share of the tree is a shrug, not an obligation.
 BREADTH_MAX=$(( TRACKED_N / 20 ))
@@ -221,8 +262,44 @@ fi
 # For registry R this writes two files:
 #   $TMP/art/<slug>   tracked expectation artifacts R reads
 #   $TMP/glob/<slug>  ERE matchers for path globs R hands to a corpus-scan verb
-mkdir -p "$TMP/art" "$TMP/glob"
+mkdir -p "$TMP/art" "$TMP/glob" "$TMP/cpat" "$TMP/cinc" "$TMP/cdir" "$TMP/content"
 slug_of() { printf '%s' "$1" | tr '/.' '__'; }
+
+# A registry whose corpus is a CONTENT GREP decides membership by what a file
+# CONTAINS, not by where it sits. scripts/run-level-reader-census.sh is the
+# measured example: its corpus is
+#   grep -rl --include='*.sh' --include='*.yml' --include='*.mjs' \
+#        -e 'gh run list' -e 'gh run view' -e 'workflow_runs[' -e 'actions/runs' $dirs
+# so tooling/concept-map/ci-boundary.test.mjs was NOT a member at d3af39283^ (0
+# source hits) and BECAME one at d3af39283 (2 hits), reddening main — while every
+# path-keyed door stayed silent, because the file's PATH never entered any list.
+# That transition is the new-MEMBER half of the new-file class, and D1/D2/D3 are
+# all structurally blind to it.
+#
+# This is derived from the registry's OWN grep invocation — the patterns it hands
+# to -e, the extensions it hands to --include — so it is a predicate over a shape
+# (13 files repo-wide use a list-mode recursive content grep, 7 of them registries),
+# not a second hard-coded list. No registry is named anywhere in this file.
+CONTENT_GREP_RE='(grep[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-[a-zA-Z]*(rl|lr)[a-zA-Z]*|git[[:space:]]+grep[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-[a-zA-Z]*l)[[:space:]]'
+
+# The file content a membership question is asked OF. A replay of a historical
+# commit MUST resolve content at that commit: the whole point is that the file
+# was not a member before it and is one after, and the working tree at this head
+# is neither. Falls back to HEAD for a path not on disk.
+content_of() {
+  local p="$1" cs
+  cs="$TMP/content/$(slug_of "$p")"
+  if [ ! -e "$cs" ]; then
+    if [ -n "$CONTENT_REF" ]; then
+      git -C "$ROOT" show "$CONTENT_REF:$p" 2>/dev/null | head -c 2000000 > "$cs" || : > "$cs"
+    elif [ -f "$ROOT/$p" ]; then
+      head -c 2000000 "$ROOT/$p" > "$cs" 2>/dev/null || : > "$cs"
+    else
+      git -C "$ROOT" show "HEAD:$p" 2>/dev/null | head -c 2000000 > "$cs" || : > "$cs"
+    fi
+  fi
+  printf '%s' "$cs"
+}
 
 SCAN_VERB_RE='git ls-files|\bfind[[:space:]]|git grep|Path\.wildcard|File\.ls|readdir|glob\(|for[[:space:]].*[[:space:]]in[[:space:]].*\*|ls[[:space:]]'
 
@@ -328,6 +405,125 @@ extract_for() {
   # Unconditional. Guarding this on the loop's exit status is what let a single
   # erroring comparison silently discard a whole registry's corpus.
   mv "$TMP/glob/$slug.tmp" "$TMP/glob/$slug"
+
+  # --- D4: the content-keyed corpus, read out of the registry's own grep.
+  : > "$TMP/cpat/$slug"; : > "$TMP/cinc/$slug"; : > "$TMP/cdir/$slug"
+  # Join backslash continuations FIRST. The measured example spans three physical
+  # lines and its -e patterns live on the second: a line-at-a-time reader sees the
+  # `grep -rl` and none of what it greps FOR.
+  # WHOLE-LINE COMMENTS GO FIRST, then continuations are joined. Order matters and
+  # the omission was self-inflicted: the header of THIS FILE quotes the measured
+  # registry's grep invocation verbatim as documentation, the joiner glued that
+  # comment block into one line, and the extractor read `-e 'gh run list'` out of
+  # its own prose — making this script a content-member of everything the census
+  # matches, itself included. An instrument must not be able to match its own
+  # description of another instrument. This is the same reason the census strips
+  # comments before counting: prose about a pattern is not the pattern.
+  local joined="$TMP/joined.$slug"
+  grep -vE '^[[:space:]]*(#|//)' "$f" 2>/dev/null \
+    | sed -e :a -e '/\\$/N; s/\\\n//; ta' > "$joined" || : > "$joined"
+  grep -E "$CONTENT_GREP_RE" "$joined" 2>/dev/null | head -40 > "$TMP/cg.$slug" || : > "$TMP/cg.$slug"
+  if [ -s "$TMP/cg.$slug" ]; then
+    # Patterns: every -e argument. Quoted literals only — an unquoted or
+    # variable-bearing pattern is DROPPED rather than guessed, because a guessed
+    # pattern manufactures membership nobody owes.
+    # ONLY the `-e '<pat>'` shape. This is a DELIBERATE, MEASURED narrowing.
+    #
+    # Of the 8 files in the tree carrying a list-mode recursive content grep, 2
+    # pass patterns as `-e` literals and the rest pass a BARE quoted pattern as
+    # grep's first operand — scripts/docs-anchors-check.sh keys a real corpus on
+    # `grep -rl '^## Code anchors' docs --include='*.md'`, so a doc gaining that
+    # heading becomes a member. That is a genuine second instance of this class
+    # and it is NOT covered here.
+    #
+    # It is not covered because I tried and MEASURED THE COST. Extracting the bare
+    # operand means telling grep's pattern apart from every other quoted string on
+    # a line that has already had its continuations joined — and those lines are
+    # pipelines (`grep -rl '…' docs --include='*.md' | grep -v '^docs/cards/'`),
+    # so "strip the option-attached strings and take the first one left" picks up
+    # the filter's pattern, or a neighbouring command's. The two-path negative
+    # control went from CLEAN to TWO implicated registries, both FALSE:
+    # web/README.md contains `^## Code anchors` zero times. A 100% false-positive
+    # rate on the control is buying detection by making everything implicated,
+    # which is the one thing this door must not do. The gap is declared in the
+    # header and in --list-registries instead of being papered over.
+    grep -oE "\-e[[:space:]]+'[^']+'|\-e[[:space:]]+\"[^\"\$]+\"" "$TMP/cg.$slug" 2>/dev/null \
+      | sed -E "s/^-e[[:space:]]+//; s/^['\"]//; s/['\"]$//" \
+      | LC_ALL=C sort -u \
+      | while IFS= read -r cp; do
+          [ -n "$cp" ] || continue
+          # DEGENERATE-PATTERN CONTROL. This script's own source contains the
+          # string `-e[[:space:]]+'[^']+'` — the extractor's own regex — so
+          # extracting from itself yields the pattern `[^']+`, which matches
+          # essentially every line of every file and made this script a
+          # content-member of everything, itself included. The rejection is a
+          # CONTROL, not a length heuristic: a pattern that matches a sentinel
+          # string sharing no vocabulary with any real corpus pattern is matching
+          # on structure rather than on content, and is dropped.
+          # Greps a FILE, never a pipe: `printf … | grep -q` is the 141-under-load
+          # shape this script already had to remove once.
+          if LC_ALL=C grep -qE -- "$cp" "$TMP/sentinel" 2>/dev/null; then
+            echo "$cp" >> "$TMP/degenerate"
+            continue
+          fi
+          printf '%s\n' "$cp"
+        done > "$TMP/cpat/$slug"
+    # Extension scope: every --include glob.
+    grep -oE "\-\-include=?[[:space:]]*'[^']+'|\-\-include=?[[:space:]]*\"[^\"]+\"" "$TMP/cg.$slug" 2>/dev/null \
+      | sed -E "s/^--include=?[[:space:]]*//; s/^['\"]//; s/['\"]$//" \
+      | LC_ALL=C sort -u > "$TMP/cinc/$slug"
+    # Directory scope. The operand is usually a variable ($dirs), built a loop
+    # away from its literal, so it is not resolvable at the call site. Instead:
+    # any literal assignment in this file whose value is a list of REAL tracked
+    # directories is taken as scope (SCAN_DIRS="scripts tooling .github/workflows"
+    # resolves this way). Union only — it can narrow nothing — and when nothing
+    # resolves, the check simply does not scope by directory, which over-calls in
+    # the direction of the finding rather than away from it.
+    grep -oE '^[[:space:]]*[A-Z][A-Z0-9_]*=("[^"]*"|'"'"'[^'"'"']*'"'"')' "$f" 2>/dev/null \
+      | sed -E 's/^[[:space:]]*[A-Z][A-Z0-9_]*=//; s/^["'"'"']//; s/["'"'"']$//' \
+      | tr ' ' '\n' | grep -vE '^[[:space:]]*$' \
+      | while IFS= read -r d; do
+          case "$d" in *'$'*|/*|*'*'*) continue ;; esac
+          # `--` or grep reads a value like `--sha` as an OPTION and spews a
+          # usage block per candidate. Harmless to the verdict, fatal to the
+          # output's readability, and it is the shape that hides a real error.
+          LC_ALL=C grep -qxF -- "$d" "$TMP/dirs" && printf '%s\n' "$d"
+        done | LC_ALL=C sort -u > "$TMP/cdir/$slug"
+  fi
+}
+
+# Is path $1 a content-member of registry slug $2?
+d4_member() {
+  local p="$1" s="$2" cs ok inc d
+  [ -s "$TMP/cpat/$s" ] || return 1
+  # Extension scope, when the registry declared one.
+  if [ -s "$TMP/cinc/$s" ]; then
+    ok=1
+    while IFS= read -r inc; do
+      [ -n "$inc" ] || continue
+      case "${p##*/}" in $inc) ok=0; break ;; esac
+    done < "$TMP/cinc/$s"
+    [ "$ok" = 0 ] || return 1
+  fi
+  # Directory scope, when one resolved.
+  if [ -s "$TMP/cdir/$s" ]; then
+    ok=1
+    while IFS= read -r d; do
+      [ -n "$d" ] || continue
+      case "$p" in "$d"/*) ok=0; break ;; esac
+    done < "$TMP/cdir/$s"
+    [ "$ok" = 0 ] || return 1
+  fi
+  cs="$(content_of "$p")"
+  [ -s "$cs" ] || return 1
+  # Comment lines are stripped the way the measured registry strips them, so
+  # prose describing a pattern does not manufacture a member.
+  grep -vE '^[[:space:]]*(#|//)' "$cs" 2>/dev/null > "$cs.code" || : > "$cs.code"
+  while IFS= read -r pat; do
+    [ -n "$pat" ] || continue
+    if LC_ALL=C grep -qE -- "$pat" "$cs.code" 2>/dev/null; then return 0; fi
+  done < "$TMP/cpat/$s"
+  return 1
 }
 
 # glob -> ERE. '**' matches across separators, a lone '*' does not.
@@ -432,7 +628,14 @@ while IFS= read -r r; do
         # flagged this very line. Bash's own =~ touches no second process.
         g_ere="$(glob_to_ere "$g")"
         if [[ "$p" =~ $g_ere ]]; then door="D2-SCANNED:$g"; break; fi
+
       done < "$TMP/glob/$s"
+    fi
+    # D4 LAST, because D1/D2/D3 already name a remedy and this one is the most
+    # expensive. It is the only door that can see a file BECOME a member by what
+    # the edit put inside it.
+    if [ -z "$door" ] && d4_member "$p" "$s"; then
+      door="D4-CONTENT"
     fi
     [ -n "$door" ] || continue
     printf '%s\t%s\t%s\n' "$r" "$p" "$door" >> "$TMP/hits"
@@ -446,6 +649,24 @@ if [ "${HIT_N:-0}" -eq 0 ]; then
   echo "This is a MEASURED empty, not a skipped one: $REG_N registries were resolved and"
   echo "each was matched against all $CHANGED_N changed path(s). A scan that could not run"
   echo "exits $RC_CANNOT_READ and prints no tally at all."
+  # A CLEAN must say what it looked at, including the door most likely to be
+  # misread. Content membership is the one that depends on WHICH TREE the question
+  # was asked of, and a clean that does not name the ref is inviting the reader to
+  # assume a tree that was never read.
+  # Counted off the filesystem, not by a grep whose flags I guessed: `grep -lc`
+  # printed 202 content-keyed registries out of 201 examined — an impossible
+  # number, and a tally that can exceed its own denominator is the lie this
+  # script's own rules forbid. -size +0 asks the only question that matters here.
+  CK_N=$(find "$TMP/cpat" -type f 2>/dev/null | wc -l | tr -d ' ')
+  CK_LIVE=$(find "$TMP/cpat" -type f -size +0 2>/dev/null | wc -l | tr -d ' ')
+  echo "Content membership (D4) was evaluated for $CK_LIVE content-keyed registr(y|ies) of $CK_N examined,"
+  echo "against ${CONTENT_REF:-the working tree}. A registry whose corpus is decided by file CONTENT is only"
+  echo "answered correctly for the tree the change produces — if you are replaying a commit, pass"
+  echo "--content-at <that commit> or this line is measuring the wrong tree."
+  echo "THIS CLEAN DOES NOT COVER: a registry whose corpus grep passes a BARE quoted pattern rather"
+  echo "than -e '<pat>' (scripts/docs-anchors-check.sh is the known one: a doc gaining a"
+  echo "'## Code anchors' heading becomes a member). Extraction cannot tell that pattern from a"
+  echo "pipeline filter's without manufacturing false positives, so it is declared, not guessed."
   echo ""
   echo "TALLY: 0 obligation(s) across $CHANGED_N changed path(s); $REG_N registries scanned."
   exit "$RC_CLEAN"

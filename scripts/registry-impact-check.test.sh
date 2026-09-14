@@ -84,6 +84,50 @@ else
   skip "case 2: origin/deploy/assets-survive-gap not in this checkout — this arm measured NOTHING"
 fi
 
+# ------------------------------------------- CASE 3 replay: CONTENT membership
+# d3af39283 ("fix(ci-boundary): add a --from-ci read mode") reddened
+# run-level-reader-census.sh on main and every commit since. It touched three
+# paths, none of which appears in ANY registry's rows or globs: the census's
+# corpus is a CONTENT grep, and tooling/concept-map/ci-boundary.test.mjs BECAME a
+# member by gaining run-level reads (0 source hits at d3af39283^, 2 at
+# d3af39283). Every path-keyed door is structurally blind to that transition.
+#
+# THE CONTROL IS THE POINT AND IT RUNS THE SAME PATHS. Only --content-at differs
+# between the two arms, so a D4 that simply always fires fails the control, and a
+# D4 that reads the wrong tree fails the subject. Both directions, one mechanism.
+if have_rev d3af39283; then
+  git -C "$ROOT" show --name-only --format= d3af39283 > "$TMP/c3.paths" 2>/dev/null
+  out3="$(bash "$CHECK" --paths-from "$TMP/c3.paths" --content-at d3af39283 2>&1)"; rc3=$?
+  [ "$rc3" = 1 ] && ok "case 3: exits 1 (implicated) on the content-membership case" \
+    || bad "case 3: expected rc=1, got $rc3 — the live main red is invisible to this check"
+  grep -q 'REGISTRY  scripts/run-level-reader-census\.sh' <<< "$out3" \
+    && ok "case 3: names scripts/run-level-reader-census.sh" \
+    || bad "case 3: did NOT name run-level-reader-census.sh — the registry that is RED on main"
+  grep -q 'via D4-CONTENT  *tooling/concept-map/ci-boundary\.test\.mjs' <<< "$out3" \
+    && ok "case 3: reaches it through the CONTENT door, naming the file that became a member" \
+    || bad "case 3: did not attribute the hit to D4-CONTENT on ci-boundary.test.mjs"
+  grep -q 'DECLARE in \.github/run-level-readers\.allow' <<< "$out3" \
+    && ok "case 3: names the allow file the adjudication row belongs in" \
+    || bad "case 3: did not name .github/run-level-readers.allow"
+  # Self-match guard. This file's header quotes the census's own grep invocation
+  # as documentation; joining continuations before stripping comments made the
+  # extractor read `-e 'gh run list'` out of its own prose and become a content
+  # member of everything. An instrument must not match its own description.
+  grep -q 'REGISTRY  scripts/registry-impact-check\.sh' <<< "$out3" \
+    && bad "case 3: the check reported ITSELF as a content member — it is matching its own documentation" \
+    || ok "case 3: the check does not match its own prose about another instrument"
+  # THE CONTROL: identical paths, content one commit earlier, when the file was
+  # not yet a member.
+  out3c="$(bash "$CHECK" --paths-from "$TMP/c3.paths" --content-at 'd3af39283^' 2>&1)"; rc3c=$?
+  [ "$rc3c" = 0 ] && ok "case 3 control: the SAME paths at d3af39283^ are CLEAN (rc=0)" \
+    || bad "case 3 control: expected rc=0 before the content landed, got $rc3c — D4 fires on the path, not the transition"
+  grep -q 'REGISTRY  scripts/run-level-reader-census\.sh' <<< "$out3c" \
+    && bad "case 3 control: named the census at d3af39283^, where the file had ZERO run-level reads" \
+    || ok "case 3 control: does not name the census before the reads were added"
+else
+  skip "case 3: commit d3af39283 not in this checkout — the content-membership arms measured NOTHING"
+fi
+
 # --------------------------------------------- D2 GLOB DOOR (the new-file class)
 # The door that no allowlist can carry: a file that does not exist yet is in no
 # registry's rows by construction. Only the corpus glob can reach it.
