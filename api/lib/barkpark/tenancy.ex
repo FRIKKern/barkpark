@@ -771,6 +771,80 @@ defmodule Barkpark.Tenancy do
 
   defp do_set_workspace_theme(_workspace_or_id, _theme), do: {:error, :not_found}
 
+  # ── Workspace locale (Gyldendal parity E7) ─────────────────────────────────
+  #
+  # The language the Studio CHROME speaks for this workspace — Publish/History/
+  # Generate/the error card/the desk row fallbacks — stored in the same
+  # `settings` jsonb bag as `theme`, under `"locale"`. Schema-provided titles
+  # and descriptions are never touched by this (they are the content owner's
+  # words already). Values are BCP-47 the way Sanity's locale packages spell
+  # them (`nb-NO`); the gettext directory spelling (`nb_NO`) is derived at the
+  # seam (`BarkparkWeb.StudioLocale`). A workspace with no locale set renders
+  # exactly as before: English.
+  @default_locale "en"
+  @known_locales ["en", "nb-NO"]
+
+  @doc "The locales the Studio chrome ships translations for."
+  @spec known_locales() :: [String.t()]
+  def known_locales, do: @known_locales
+
+  @doc "The baked-in default locale — the English chrome every surface shipped with."
+  @spec default_locale() :: String.t()
+  def default_locale, do: @default_locale
+
+  @doc """
+  Resolve a workspace's Studio locale from its `settings` bag.
+
+  Returns `settings["locale"]` when it is a KNOWN locale, else the default
+  (`"en"`). Guards a `nil` workspace and a nil/non-map `settings`.
+  """
+  @spec workspace_locale(Workspace.t() | nil) :: String.t()
+  def workspace_locale(%Workspace{settings: settings}) when is_map(settings) do
+    case settings["locale"] do
+      locale when is_binary(locale) and locale in @known_locales -> locale
+      _ -> @default_locale
+    end
+  end
+
+  def workspace_locale(_), do: @default_locale
+
+  @doc """
+  Persist a workspace's Studio locale into its `settings` bag.
+
+  Accepts a `%Workspace{}` or a workspace id. Rejects an unknown locale with
+  `{:error, :unknown_locale}`; merges into `settings` so theme and plugin
+  overrides survive. A missing/malformed id returns `{:error, :not_found}`.
+  """
+  @spec set_workspace_locale(Workspace.t() | binary(), String.t()) ::
+          {:ok, Workspace.t()} | {:error, :unknown_locale | :not_found | Ecto.Changeset.t()}
+  def set_workspace_locale(workspace_or_id, locale) when is_binary(locale) do
+    if locale in @known_locales do
+      do_set_workspace_locale(workspace_or_id, locale)
+    else
+      {:error, :unknown_locale}
+    end
+  end
+
+  def set_workspace_locale(_workspace_or_id, _locale), do: {:error, :unknown_locale}
+
+  defp do_set_workspace_locale(%Workspace{} = workspace, locale) do
+    settings = Map.put(workspace.settings || %{}, "locale", locale)
+
+    workspace
+    |> Workspace.changeset(%{slug: workspace.slug, name: workspace.name, settings: settings})
+    |> Repo.update()
+    |> bust_default_scope()
+  end
+
+  defp do_set_workspace_locale(id, locale) when is_binary(id) do
+    case get_workspace_by_id(id) do
+      nil -> {:error, :not_found}
+      %Workspace{} = workspace -> do_set_workspace_locale(workspace, locale)
+    end
+  end
+
+  defp do_set_workspace_locale(_workspace_or_id, _locale), do: {:error, :not_found}
+
   # ── Workspace plugin enablement (ssp-w1-plugin-enablement) ────────────────
   #
   # The per-workspace SURFACING overrides for plugins live in the same

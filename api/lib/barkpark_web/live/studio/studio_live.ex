@@ -226,6 +226,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     socket = Shared.ensure_tenancy_scope(socket)
 
+    # Studio chrome locale (Gyldendal parity E7): process-local, so it rides
+    # every handle_params — the workspace is resolved just above, and a
+    # mid-session scope switch re-stamps it exactly like the log metadata.
+    BarkparkWeb.StudioLocale.put(socket.assigns[:current_workspace])
+
     # Tenant log attribution (both-surfaces parity with the HTTP TenantLogMetadata
     # plug). Logger.metadata is per-process; the connected Studio runs on this
     # long-lived LiveView process, and handle_params re-runs on every navigation /

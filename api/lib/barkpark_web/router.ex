@@ -3204,6 +3204,10 @@ defmodule BarkparkWeb.Router do
     patch("/v1/members/:principal_ref", MemberController, :update)
     delete("/v1/members/:principal_ref", MemberController, :delete)
 
+    # Workspace Studio locale (Gyldendal parity E7): admin-gated like the roster.
+    # `bp workspace set-locale <locale>` lands here.
+    patch("/v1/workspace/locale", WorkspaceLocaleController, :update)
+
     # Token inventory + revocation. `GET` answers "which credentials reach this
     # workspace"; `DELETE` kills one, gated on that token actually holding a
     # seat HERE (cross-tenant rail — an admin of A must not reach B's token).

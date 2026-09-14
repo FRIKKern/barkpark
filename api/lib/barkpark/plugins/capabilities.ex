@@ -2156,6 +2156,19 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "workspace.set-locale",
+        "workspace",
+        "set-locale",
+        "Set the Studio chrome language for the active --workspace (en | nb-NO). Schema titles and descriptions are never translated.",
+        "PATCH",
+        "/v1/workspace/locale",
+        "scoped_admin",
+        args: [arg("locale", true, "string", "en | nb-NO")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "workspace.member-rm",
         "workspace",
         "member-rm",

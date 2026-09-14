@@ -7,6 +7,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   every call site keeps working unchanged.
   """
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   import BarkparkWeb.Icons
 
@@ -511,7 +512,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
     [
       %{
-        label: "Structure",
+        label: gettext("Structure"),
         path: base,
         # folder-tree glyph ships with sup-w1-icon-authority; until it merges
         # the icon component falls back to the generic "file" glyph (graceful).

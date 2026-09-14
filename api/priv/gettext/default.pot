@@ -1,0 +1,403 @@
+## This file is a PO Template file.
+##
+## "msgid"s here are often extracted from source code.
+## Add new messages manually only if they're dynamic
+## messages that can't be statically extracted.
+##
+## Run "mix gettext.extract" to bring this file up to
+## date. Leave "msgstr"s empty as changing them here has no
+## effect: edit them in PO (.po) files instead.
+#
+msgid ""
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:711
+#, elixir-autogen, elixir-format
+msgid "%{count} warning — publishing is still allowed"
+msgid_plural "%{count} warnings — publishing is still allowed"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/studio/pane_builder.ex:1009
+#, elixir-autogen, elixir-format
+msgid "%{n}d ago"
+msgstr ""
+
+#: lib/barkpark_web/studio/pane_builder.ex:1008
+#, elixir-autogen, elixir-format
+msgid "%{n}h ago"
+msgstr ""
+
+#: lib/barkpark_web/studio/pane_builder.ex:1007
+#, elixir-autogen, elixir-format
+msgid "%{n}m ago"
+msgstr ""
+
+#: lib/barkpark_web/studio/pane_builder.ex:1010
+#, elixir-autogen, elixir-format
+msgid "%{n}mo ago"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:297
+#, elixir-autogen, elixir-format
+msgid "A %{type} with the id"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_html/new.html.heex:92
+#, elixir-autogen, elixir-format
+msgid "API token"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex:146
+#, elixir-autogen, elixir-format
+msgid "Add"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:298
+#, elixir-autogen, elixir-format
+msgid "Ask whoever shared access with you to widen the grant."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:100
+#: lib/barkpark_web/layouts/studio.html.heex:28
+#: lib/barkpark_web/layouts/studio.html.heex:29
+#, elixir-autogen, elixir-format
+msgid "Back to Studio"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:325
+#, elixir-autogen, elixir-format
+msgid "Back to the %{type} list"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:325
+#: lib/barkpark_web/components/studio_components/editor.ex:333
+#, elixir-autogen, elixir-format
+msgid "Back to the desk"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:270
+#, elixir-autogen, elixir-format
+msgid "Close reference: %{title}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:306
+#, elixir-autogen, elixir-format
+msgid "Delete"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1435
+#, elixir-autogen, elixir-format
+msgid "Desk filters"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:194
+#, elixir-autogen, elixir-format
+msgid "Diff"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:208
+#, elixir-autogen, elixir-format
+msgid "Discard draft"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:223
+#, elixir-autogen, elixir-format
+msgid "Duplicate"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:194
+#, elixir-autogen, elixir-format
+msgid "Edit"
+msgstr ""
+
+#: lib/barkpark_web/components/field_inputs.ex:373
+#, elixir-autogen, elixir-format
+msgid "Generate"
+msgstr ""
+
+#: lib/barkpark_web/components/field_inputs.ex:373
+#, elixir-autogen, elixir-format
+msgid "Generate from %{source}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:180
+#, elixir-autogen, elixir-format
+msgid "Hide preview"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:168
+#, elixir-autogen, elixir-format
+msgid "History"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex:115
+#, elixir-autogen, elixir-format
+msgid "Move down"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex:103
+#, elixir-autogen, elixir-format
+msgid "Move up"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1412
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1413
+#, elixir-autogen, elixir-format
+msgid "New %{type}"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:294
+#: lib/barkpark_web/components/studio_components/editor.ex:301
+#, elixir-autogen, elixir-format
+msgid "No %{type} with the id"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:271
+#, elixir-autogen, elixir-format
+msgid "No document is open. Pick one from the list to start editing."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:304
+#, elixir-autogen, elixir-format
+msgid "No schema for"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:237
+#, elixir-autogen, elixir-format
+msgid "Open another"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:318
+#, elixir-autogen, elixir-format
+msgid "Open it in %{workspace}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:362
+#, elixir-autogen, elixir-format
+msgid "Preview"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:130
+#, elixir-autogen, elixir-format
+msgid "Publish"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex:128
+#, elixir-autogen, elixir-format
+msgid "Remove row"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1402
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1403
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1759
+#, elixir-autogen, elixir-format
+msgid "Review scoped access grants"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1392
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1393
+#, elixir-autogen, elixir-format
+msgid "Share access to %{type}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:180
+#, elixir-autogen, elixir-format
+msgid "Show preview"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_html/new.html.heex:86
+#, elixir-autogen, elixir-format
+msgid "Sign in with an API token instead"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_html/new.html.heex:104
+#, elixir-autogen, elixir-format
+msgid "Sign in with token"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:515
+#, elixir-autogen, elixir-format
+msgid "Structure"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:291
+#, elixir-autogen, elixir-format
+msgid "Studio could not open this document."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:309
+#, elixir-autogen, elixir-format
+msgid "The link may predate a structure change, or the plugin that owned it may be disabled."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:297
+#, elixir-autogen, elixir-format
+msgid "The type"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:308
+#, elixir-autogen, elixir-format
+msgid "This desk has no section named"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:142
+#, elixir-autogen, elixir-format
+msgid "Unpublish"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:74
+#, elixir-autogen, elixir-format
+msgid "Untitled"
+msgstr ""
+
+#: lib/barkpark_web/studio/pane_builder.ex:975
+#, elixir-autogen, elixir-format
+msgid "Untitled %{type} · %{tail}"
+msgstr ""
+
+#: lib/barkpark_web/studio/pane_builder.ex:999
+#, elixir-autogen, elixir-format
+msgid "Updated %{ago}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:289
+#, elixir-autogen, elixir-format
+msgid "View blast radius"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:305
+#, elixir-autogen, elixir-format
+msgid "Whatever is stored under that type is untouched."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:297
+#, elixir-autogen, elixir-format
+msgid "but your access grant does not cover it"
+msgstr ""
+
+#: lib/barkpark_web/studio/pane_builder.ex:979
+#, elixir-autogen, elixir-format
+msgid "document"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:297
+#: lib/barkpark_web/components/studio_components/editor.ex:297
+#, elixir-autogen, elixir-format
+msgid "exists in this dataset"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:301
+#, elixir-autogen, elixir-format
+msgid "exists in this dataset. It may have been deleted."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:294
+#, elixir-autogen, elixir-format
+msgid "exists in this workspace — but a document with that id lives in the workspace"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:304
+#, elixir-autogen, elixir-format
+msgid "is installed in this dataset, so Studio has no fields to show its documents with"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:297
+#, elixir-autogen, elixir-format
+msgid "it covers %{scope}"
+msgstr ""
+
+#: lib/barkpark_web/studio/pane_builder.ex:1006
+#, elixir-autogen, elixir-format
+msgid "just now"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_html/new.html.heex:100
+#, elixir-autogen, elixir-format
+msgid "paste token"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:308
+#, elixir-autogen, elixir-format
+msgid "so the path could not be walked to a document"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:304
+#, elixir-autogen, elixir-format
+msgid "you asked for"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:60
+#, elixir-autogen, elixir-format
+msgid "Browse library"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:74
+#, elixir-autogen, elixir-format
+msgid "Change"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:68
+#, elixir-autogen, elixir-format
+msgid "Close"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:66
+#, elixir-autogen, elixir-format
+msgid "Media library"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:63
+#, elixir-autogen, elixir-format
+msgid "No image selected — drop a file, or click to upload"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:76
+#, elixir-autogen, elixir-format
+msgid "No matches"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:75
+#, elixir-autogen, elixir-format
+msgid "Remove"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:61
+#, elixir-autogen, elixir-format
+msgid "Remove image"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:65
+#, elixir-autogen, elixir-format
+msgid "Right-click for image options"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:78
+#, elixir-autogen, elixir-format
+msgid "Search %{types}…"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:67
+#, elixir-autogen, elixir-format
+msgid "Search assets…"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:59
+#, elixir-autogen, elixir-format
+msgid "Upload file"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:64
+#, elixir-autogen, elixir-format
+msgid "Uploading…"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:79
+#, elixir-autogen, elixir-format
+msgid "documents"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:77
+#, elixir-autogen, elixir-format
+msgid "draft"
+msgstr ""

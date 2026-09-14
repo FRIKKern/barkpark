@@ -56,6 +56,13 @@ class BpReferencePicker extends HTMLElement {
   connectedCallback() {
     if (this._mounted) return;
     this._mounted = true;
+    // Gyldendal parity E7: workspace-locale strings stamped by the server as
+    // `data-strings` (JSON); each key falls back to the English literal.
+    try {
+      this._strings = this.dataset.strings ? JSON.parse(this.dataset.strings) : {};
+    } catch (_e) {
+      this._strings = {};
+    }
     this._value = this.getAttribute("value") || "";
     this._refType = this.getAttribute("ref-type") || "";
     this._refTypes = this._refType
@@ -70,6 +77,11 @@ class BpReferencePicker extends HTMLElement {
     this._searchIntel.clientId = BpSearchIntel.clientId("documents", this._dataset);
     this._render();
     if (this._value) this._loadSelectedTitle();
+  }
+
+  _t(key, fallback) {
+    const strings = this._strings || {};
+    return typeof strings[key] === "string" ? strings[key] : fallback;
   }
 
   disconnectedCallback() {
@@ -117,14 +129,14 @@ class BpReferencePicker extends HTMLElement {
     const change = document.createElement("button");
     change.type = "button";
     change.className = "btn btn-sm";
-    change.textContent = "Change";
+    change.textContent = this._t("change", "Change");
     change.addEventListener("click", () => this._switchToSearch());
     actions.appendChild(change);
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "btn btn-destructive btn-sm";
-    remove.textContent = "Remove";
+    remove.textContent = this._t("remove", "Remove");
     remove.addEventListener("click", () => this._clear());
     actions.appendChild(remove);
 
@@ -141,7 +153,7 @@ class BpReferencePicker extends HTMLElement {
     const input = document.createElement("input");
     input.type = "text";
     input.className = "form-input bp-ref-search-input";
-    input.placeholder = `Search ${this._refTypes.length ? this._refTypes.join(", ") : "documents"}…`;
+    input.placeholder = this._t("search", "Search %{types}…").replace("%{types}", this._refTypes.length ? this._refTypes.join(", ") : this._t("documents", "documents"));
     input.autocomplete = "off";
     input.setAttribute("aria-expanded", "false");
     input.setAttribute("aria-controls", this._listId);
@@ -414,7 +426,7 @@ class BpReferencePicker extends HTMLElement {
     if (!matches.length) {
       const empty = document.createElement("div");
       empty.className = "bp-ref-dropdown-empty";
-      empty.textContent = "No matches";
+      empty.textContent = this._t("no_matches", "No matches");
       this._dropdown.appendChild(empty);
       this._dropdown.hidden = false;
       if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
@@ -438,7 +450,7 @@ class BpReferencePicker extends HTMLElement {
         // Sanity-style draft indicator on unpublished candidates.
         const badge = document.createElement("span");
         badge.className = "bp-ref-suggest-meta";
-        badge.textContent = "draft";
+        badge.textContent = this._t("draft", "draft");
         btn.appendChild(badge);
       }
       btn.addEventListener("mousedown", (e) => {

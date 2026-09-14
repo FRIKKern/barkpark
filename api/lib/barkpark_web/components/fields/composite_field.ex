@@ -333,7 +333,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     ~H"""
     <div id={"bp-ref-wrap-#{@input_id}-#{:erlang.phash2(@value)}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-ref-hidden-#{@input_id}"} name={@input_name} value={@value} phx-change={@on_change} phx-debounce="500" />
-      <bp-reference-picker
+      <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@value}
         ref-type={@ref_type}
         dataset={@dataset}
@@ -348,7 +348,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     ~H"""
     <div id={"bp-mp-wrap-#{@input_id}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@input_id}"} name={@input_name} value={@value} phx-debounce="500" />
-      <bp-media-picker
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@value}
         data-bridge-target={"bp-mp-hidden-#{@input_id}"}
         hotspot={@hotspot}

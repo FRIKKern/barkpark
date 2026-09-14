@@ -1389,8 +1389,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 class="pane-add-btn"
                 phx-click="airdrop-open"
                 phx-value-type={pane.type_name}
-                title={"Share access to #{pane.type_name}"}
-                aria-label={"Share access to #{pane.type_name}"}
+                title={gettext("Share access to %{type}", type: pane.type_name)}
+                aria-label={gettext("Share access to %{type}", type: pane.type_name)}
                 data-test-id="airdrop-open-type"
               ><.icon name="share-2" size={14} /></button>
               <%!-- Access panel entry (airdrop-grants): review + revoke scoped
@@ -1399,8 +1399,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 :if={@airdrop_can_share?}
                 class="pane-add-btn"
                 phx-click="access-open"
-                title="Review scoped access grants"
-                aria-label="Review scoped access grants"
+                title={gettext("Review scoped access grants")}
+                aria-label={gettext("Review scoped access grants")}
                 data-test-id="access-open-type"
               ><.icon name="clock" size={14} /></button>
               <%!-- Icon-only: without an explicit label its accessible name
@@ -1409,8 +1409,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 class="pane-add-btn"
                 phx-click="new-document"
                 phx-value-type={pane.type_name}
-                title={"New #{pane.type_name}"}
-                aria-label={"New #{pane.type_name}"}
+                title={gettext("New %{type}", type: pane.type_name)}
+                aria-label={gettext("New %{type}", type: pane.type_name)}
               ><.icon name="plus" size={14} /></button>
             <% end %>
           </:header_actions>
@@ -1432,7 +1432,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   aria-current="true" exactly like the sibling pane rows (the
                   vocabulary is written down once, in StudioComponents.Panes'
                   moduledoc). --%>
-            <div class="bp-desk-filter" role="group" aria-label="Desk filters">
+            <div class="bp-desk-filter" role="group" aria-label={gettext("Desk filters")}>
               <%= for grp <- pane.desk_groups do %>
                 <% gname = Map.get(grp, "name") || Map.get(grp, :name) %>
                 <% gtitle = Map.get(grp, "title") || Map.get(grp, :title) || gname %>
@@ -1756,7 +1756,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               type="button"
               class="btn btn-ghost btn-sm"
               phx-click="access-open"
-              title="Review scoped access grants"
+              title={gettext("Review scoped access grants")}
               data-test-id="access-open"
             >
               <.icon name="clock" size={14} /> Access
