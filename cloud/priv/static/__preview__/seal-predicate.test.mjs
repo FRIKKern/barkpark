@@ -252,13 +252,36 @@ test('PRECONDITION END-TO-END: this file, run from a `.git`-less tree, exits 3 b
   // hatch by design.
   if (process.env.SEAL_TEST_E2E_CHILD === '1') return;
   // REPO is `resolve(HERE, '../../../..')`, so four levels of directory reproduce the
-  // real layout; nothing else is copied because the refusal must fire before the first
-  // read of the predicate, the fixtures or the workflow.
+  // real layout; no fixture, predicate or workflow is copied, because the refusal must
+  // fire before the first read of any of them.
+  //
+  // THE SIBLING MODULES COME TOO, and the list is DERIVED rather than typed. An ES
+  // import is resolved BEFORE the module body runs, so a sibling this file imports and
+  // the copy lacks makes node exit 1 with ERR_MODULE_NOT_FOUND — upstream of the
+  // refusal, which then never fires. The assertion below would read that 1 as "the
+  // refusal did not happen", which is true, for entirely the wrong reason. Measured
+  // the day this file grew its first relative import. So: walk the relative specifiers
+  // transitively and copy what they name. A hand-kept list cannot notice an import
+  // that ARRIVES.
   const root = tmp('seal-pred-e2e-');
   const dir = join(root, 'cloud', 'priv', 'static', '__preview__');
   mkdirSync(dir, { recursive: true });
+  const copySibling = (name, seen = new Set()) => {
+    if (seen.has(name)) return seen;
+    seen.add(name);
+    const text = readFileSync(join(HERE, name), 'utf8');
+    writeFileSync(join(dir, name), text);
+    for (const m of text.matchAll(/(?:^|\n)\s*(?:import|export)[^;\n]*?from\s+'\.\/([^'\/]+)'/g)) {
+      copySibling(m[1], seen);
+    }
+    return seen;
+  };
+  const copied = copySibling('seal-predicate.test.mjs');
+  // The walk must have SEEN something beyond the file itself, or it has gone blind and
+  // the next sibling to arrive reproduces the defect above in silence.
+  assert.ok(copied.size > 1,
+    `the sibling walk found no relative import in this file — it can no longer notice one: ${[...copied]}`);
   const copy = join(dir, 'seal-predicate.test.mjs');
-  writeFileSync(copy, readFileSync(join(HERE, 'seal-predicate.test.mjs'), 'utf8'));
 
   const child = { ...process.env, SEAL_TEST_E2E_CHILD: '1' };
   const direct = spawnSync('node', [copy], { encoding: 'utf8', timeout: 120000, env: child });
