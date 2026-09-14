@@ -1060,6 +1060,16 @@ defmodule PDS.Census do
     # api/test/barkpark_web/media_share_affordance_test.exs; promoting it to a ROSTER row
     # is the follow-up, not this row.
     {:post, "/v1/shares/media", "BarkparkWeb.ShareController", :publish_media, :status_only_receipt},
+    # `patch /w/:workspace_slug/p/:project_slug/v1/workspace/locale` (Gyldendal parity E7, task-072a9a58a215b1d7) — the
+    # workspace Studio-locale setter behind `bp workspace set-locale` and the Studio
+    # settings page. SAME CLASS AS `post /v1/shares/media` above: update/2 renders the
+    # STORED value the write returned (`Tenancy.workspace_locale(workspace)` off the
+    # `{:ok, workspace}` Tenancy.set_workspace_locale/2 handed back, plus the known
+    # list) and spells no `ok: true` literal, so this lens keys on nothing here. NOT
+    # :repaired_computed_receipt (the route is new), NOT :liveview_handle_event (a
+    # controller action). The receipt is store-derived and pinned by
+    # api/test/barkpark_web/controllers/workspace_locale_controller_test.exs.
+    {:patch, "/w/:workspace_slug/p/:project_slug/v1/workspace/locale", "BarkparkWeb.WorkspaceLocaleController", :update, :status_only_receipt},
     {:post, "/v1/shares/tokens", "BarkparkWeb.ShareController", :mint_token, :status_only_receipt},
     {:post, "/v1/status/incidents", "BarkparkWeb.StatusController", :create_incident, :status_only_receipt},
     {:post, "/v1/status/incidents/:id/resolve", "BarkparkWeb.StatusController", :resolve_incident, :status_only_receipt},
