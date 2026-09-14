@@ -2103,14 +2103,17 @@ else
   no "the predicate did not red on the narrowing: rc=$pred_rc $pred_out"
 fi
 # the same narrowing, plus the count-pinning remedy in place of the classifier
-python3 - "$MIRC" <<'PY'
+# The two numbers are READ from the unmutated run above, never typed: a lazy
+# remedy hard-coding 9 and 15 would rot the moment CLOUD_PATHS changes and this
+# case would then be failing about its own constants.
+python3 - "$MIRC" "$a_red" "$a_sil" <<'PY'
 import sys
-p = sys.argv[1]
+p, red, sil = sys.argv[1], sys.argv[2], sys.argv[3]
 t = open(p).read()
 old = '''  [ "$undecidable" -eq 0 ] && [ "$stale" -eq 0 ] && return 0
   return 1'''
-new = '''  [ "$sole" -eq 9 ] && [ "$((base_n - sole))" -eq 15 ] && return 0
-  return 1'''
+new = '''  [ "$sole" -eq %s ] && [ "$((base_n - sole))" -eq %s ] && return 0
+  return 1''' % (red, sil)
 if t.count(old) != 1:
     sys.stderr.write("LAZY ANCHOR NOT UNIQUE\n"); sys.exit(3)
 open(p, "w").write(t.replace(old, new))
