@@ -1065,6 +1065,7 @@ else
       pass=$((pass + 1)); echo "  ok   73b the MUTANT falls open on an unreadable registry (exit 0) — the guard is load-bearing"
     else
       fail=$((fail + 1)); echo "  FAIL 73b the mutant still refused (exit $HOLD_MUT_RC) — row 62-65 would pass with the guard gutted, so they assert nothing" >&2
+      printf '%s\n' "$HOLD_MUT_OUT" | sed 's/^/       /' >&2
     fi
 
     HOLD_MUT_HELD_RC=0
@@ -1078,6 +1079,7 @@ else
       pass=$((pass + 1)); echo "  ok   73c ASYMMETRY: the same mutant STILL refuses the HELD case (exit 5) — 62-65 and 60 are different arms"
     else
       fail=$((fail + 1)); echo "  FAIL 73c the mutation moved the HELD arm too (exit $HOLD_MUT_HELD_RC); the two arms are not independent" >&2
+      printf '%s\n' "$HOLD_MUT_HELD_OUT" | sed 's/^/       /' >&2
     fi
   else
     fail=$((fail + 1)); echo "  FAIL 73a CANNOT READ: the mutation did NOT land on line $HOLD_MUT_LINE; nothing below it was measured" >&2
