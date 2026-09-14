@@ -62,6 +62,13 @@ check("data-strings from the server: the menu speaks the workspace's language", 
   assert.equal(items[2].destructive, true, "the destructive flag survives translation");
 });
 
+check("the default chrome carries no English literal the workspace locale cannot reach", () => {
+  const src = fs.readFileSync(SRC, "utf8");
+  for (const lit of [">Browse library<", ">Remove<", "<span>Upload</span>", ">Alt text<", 'placeholder="Describe the image']) {
+    assert.ok(!src.includes(lit), `chrome literal still hard-coded: ${lit}`);
+  }
+});
+
 check("a partial or malformed data-strings falls back per key, never throws", () => {
   const partial = hook.menuItems({ hasValue: true, strings: { browse: "Bla i mediebiblioteket" } });
   assert.deepEqual(

@@ -674,7 +674,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     back to the schema title instead (Gyldendal parity E1.5). --%>
               <.editor_field
                 :if={title_input?(@editor_schema)}
-                label="Title"
+                label={title_label(@editor_schema)}
                 required={(get_title_validation(@editor_schema) || %{})["required"] == true}
                 errors={Map.get(@validation_errors, "title", [])}
                 warnings={Map.get(@validation_warnings, "title", [])}
@@ -1116,6 +1116,17 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   defp preview_title(doc, schema),
     do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
+
+  # Gyldendal parity E7 follow-up: the synthetic Title input backs the
+  # schema's OWN `title` field when there is one, so it wears that field's
+  # declared title («Tittel»), not a hard-coded «Title». A schema with no title
+  # field (or none loaded) keeps the localised chrome word.
+  defp title_label(schema) do
+    case schema && Barkpark.Content.TitleDerivation.title_field(schema) do
+      %{"title" => t} when is_binary(t) and t != "" -> t
+      _ -> gettext("Title")
+    end
+  end
 
   defp singleton_title(schema) do
     if schema && singleton?(schema) && title_input?(schema) == false, do: schema.title, else: nil

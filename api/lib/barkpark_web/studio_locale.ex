@@ -58,6 +58,9 @@ defmodule BarkparkWeb.StudioLocale do
     Jason.encode!(%{
       "upload" => gettext("Upload file"),
       "browse" => gettext("Browse library"),
+      "upload_button" => gettext("Upload"),
+      "alt" => gettext("Alt text"),
+      "alt_placeholder" => gettext("Describe the image for people who cannot see it"),
       "remove" => gettext("Remove image"),
       "empty" => gettext("No image selected — drop a file, or click to upload"),
       "uploading" => gettext("Uploading…"),

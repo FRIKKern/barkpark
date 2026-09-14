@@ -343,16 +343,16 @@ class BpMediaPicker extends HTMLElement {
       ? '<input class="bp-mp-file" type="file" accept="image/*" hidden />'
       : '<div class="bp-mp-actions">' +
         '<label class="bp-mp-upload btn btn-sm">' +
-        "<span>Upload</span>" +
+        '<span>' + this._t("upload_button", "Upload") + '</span>' +
         '<input type="file" accept="image/*" hidden />' +
         "</label>" +
-        '<button type="button" class="bp-mp-browse btn btn-sm">Browse library</button>' +
-        '<button type="button" class="bp-mp-clear btn btn-destructive btn-sm">Remove</button>' +
+        '<button type="button" class="bp-mp-browse btn btn-sm">' + this._t("browse", "Browse library") + '</button>' +
+        '<button type="button" class="bp-mp-clear btn btn-destructive btn-sm">' + this._t("remove", "Remove") + '</button>' +
         "</div>";
 
     const altHtml = this._wantsAlt()
-      ? '<label class="bp-mp-alt-row"><span class="bp-mp-alt-label">Alt text</span>' +
-        '<input class="bp-mp-alt" type="text" placeholder="Describe the image for people who cannot see it" /></label>'
+      ? '<label class="bp-mp-alt-row"><span class="bp-mp-alt-label">' + this._t("alt", "Alt text") + '</span>' +
+        '<input class="bp-mp-alt" type="text" placeholder="' + this._t("alt_placeholder", "Describe the image for people who cannot see it") + '" /></label>'
       : "";
 
     this.innerHTML =
