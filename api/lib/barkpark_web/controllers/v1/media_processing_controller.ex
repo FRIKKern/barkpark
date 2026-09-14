@@ -24,6 +24,7 @@ defmodule BarkparkWeb.V1.MediaProcessingController do
   alias Barkpark.Media
   alias Barkpark.Media.Delivery.{AssetResponse, Cdn, Events}
   alias Barkpark.Plugins.Media.Assets
+  alias BarkparkWeb.ErrorResponse
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -36,14 +37,33 @@ defmodule BarkparkWeb.V1.MediaProcessingController do
   # `Map.put/3` over. See `maybe_merge_metadata/2`.
   @reserved_content_keys ["bp_processing_status", "bp_external_processing"]
 
+  # Every status string an external processor may legitimately send, echoed in
+  # the 422 so a mis-integrated processor can fix itself in one round trip.
+  # Kept beside `normalize_status/1`, which is the clause list it describes.
+  @accepted_statuses ["ready", "processing", "failed", "complete", "completed", "error"]
+
   def callback(conn, %{"dataset" => dataset, "id" => id} = params) do
+    # REFUSE BEFORE RESOLVING. An unrecognised (or absent) `status` used to fall
+    # through `normalize_status/1`'s catch-all to "processing", which REWROTE a
+    # terminal row: an asset the sweeper had given up on as "failed" went back
+    # to "processing" and re-armed the reconciliation loop, on nothing more than
+    # a typo or a forged callback. There is no status this endpoint can infer —
+    # the processor is the only thing that knows — so the only honest answer is
+    # 422 and NO write. The check is first because it reads the BODY only; a
+    # malformed body is refused without a tenant lookup.
+    case normalize_status(params["status"] || params["processingStatus"]) do
+      {:ok, status} -> do_callback(conn, dataset, id, params, status)
+      :error -> refuse_unknown_status(conn, params["status"] || params["processingStatus"])
+    end
+  end
+
+  defp do_callback(conn, dataset, id, params, status) do
     # Unscoped by design — see the moduledoc. This resolution is what DEFINES
     # the tenant for the rest of the action.
     with {:ok, file} <- Media.get_file(id),
          :ok <- ensure_dataset(file, dataset),
          scope = Assets.file_scope_opts(file),
          %{} = doc <- Media.asset_doc_for_file(file, dataset, scope) || {:error, :not_found} do
-      status = normalize_status(params["status"] || params["processingStatus"])
       doc = patch_callback(doc, file, params, status, scope)
 
       case status do
@@ -126,11 +146,38 @@ defmodule BarkparkWeb.V1.MediaProcessingController do
 
   defp maybe_merge_metadata(content, _), do: content
 
-  defp normalize_status("complete"), do: "ready"
-  defp normalize_status("completed"), do: "ready"
-  defp normalize_status("error"), do: "failed"
-  defp normalize_status(status) when status in ["ready", "processing", "failed"], do: status
-  defp normalize_status(_), do: "processing"
+  # The CLOSED set of inbound statuses. Everything a processor may legitimately
+  # send is named here; the catch-all refuses instead of guessing, because the
+  # only guess available ("processing") is the one that destroys a terminal
+  # state. `nil` (no `status` and no `processingStatus` in the body) lands on
+  # the catch-all too — an untyped callback is exactly as uninterpretable as a
+  # mistyped one.
+  defp normalize_status("complete"), do: {:ok, "ready"}
+  defp normalize_status("completed"), do: {:ok, "ready"}
+  defp normalize_status("error"), do: {:ok, "failed"}
+
+  defp normalize_status(status) when status in ["ready", "processing", "failed"],
+    do: {:ok, status}
+
+  defp normalize_status(_), do: :error
+
+  # 422 with the `unprocessable` code the v1 error vocabulary already carries
+  # (`Content.Errors.known_codes/0`) — no new code enters the shared registry
+  # for a one-endpoint body validation. Emitted through `ErrorResponse`, the
+  # single §9 envelope owner, so the response carries `request_id` and the
+  # code-keyed `hint` like every other refusal. Hand-building the envelope map
+  # here instead is caught by `ErrorEnvelopeForkGuardTest`, which greps this
+  # file's TEXT — so do not spell the forked shape out even in a comment.
+  defp refuse_unknown_status(conn, raw) do
+    ErrorResponse.emit_custom(
+      conn,
+      422,
+      "unprocessable",
+      "unrecognised processing status #{inspect(raw)} — expected one of " <>
+        Enum.join(@accepted_statuses, ", "),
+      %{accepted: @accepted_statuses}
+    )
+  end
 
   defp ensure_dataset(%{dataset: ds}, ds), do: :ok
   defp ensure_dataset(_, _), do: {:error, :not_found}

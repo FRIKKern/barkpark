@@ -536,6 +536,54 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       assert conflict.detail["status"] == 422
     end
 
+    # THE GAP (clk-bl-mirror-job-snooze-ceiling-unasserted): the two snooze sites
+    # in mirror_job.ex (`classify/7` on %RateLimitError{} and the projection
+    # rate-limit branch) emit `{:snooze, max(s || 0, 1)}` with NO ceiling of
+    # their own. The 300s bound lives one hop away, in
+    # `Client.retry_after_seconds/2`, and the six tests that prove it all run
+    # against that function directly. The assertion below is the missing one at
+    # the CONSUMPTION site: it drives a real rate-limited response through
+    # MirrorJob and pins the value the job actually hands Oban.
+    #
+    # The fixture sends `retry-after: 86400` — a day, 288x the ceiling — so the
+    # test is NOT vacuous: it can only pass because something between the wire
+    # and the return value clamps. Remove `min(seconds, @retry_after_max_seconds)`
+    # from client.ex:397 and this goes red with `{:snooze, 86400}`.
+    #
+    # ASSERTION ONLY — do not "fix" a red here by changing the clamp or the
+    # ceiling. A red means the bound moved, which is the whole point.
+    test "a rate-limited response snoozes within the 300s ceiling, never the raw Retry-After",
+         %{bypass: bypass, scope: scope} do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 91, state: "synced"}, scope)
+
+      stub_get(bypass, 91)
+
+      # An absurd Retry-After the peer is entitled to send. Unbounded, Oban
+      # would park the job for a DAY on a level-triggered reconcile.
+      raw_retry_after = 86_400
+      assert raw_retry_after > 300, "the fixture must exceed the ceiling or this proves nothing"
+
+      Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/91", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", Integer.to_string(raw_retry_after))
+        |> Plug.Conn.resp(429, ~s({"message":"rate limited"}))
+      end)
+
+      assert {:snooze, seconds} =
+               MirrorJob.perform(%Oban.Job{args: %{"doc_id" => id, "dataset" => @dataset}})
+
+      assert is_integer(seconds) and seconds >= 1,
+             "a snooze must be a positive integer, got #{inspect(seconds)}"
+
+      assert seconds <= 300,
+             "MirrorJob emitted an UNBOUNDED snooze of #{seconds}s from a Retry-After of " <>
+               "#{raw_retry_after}s — the ceiling in Client.retry_after_seconds/2 no longer " <>
+               "reaches this consumption site"
+    end
+
     test "429 with Retry-After → {:snooze, retry_after}", %{bypass: bypass, scope: scope} do
       stub_token(bypass)
       id = uniq("gh")
