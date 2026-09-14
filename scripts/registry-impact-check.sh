@@ -1,0 +1,480 @@
+#!/usr/bin/env bash
+#
+# registry-impact-check.sh — WHICH REGISTRIES COUNT THE FILES THIS DIFF TOUCHES?
+#
+# THE CLASS
+# ---------
+# A FENCE AROUND A FILE DOES NOT COVER THE REGISTRIES THAT COUNT THINGS IN IT.
+# An author reasons carefully about the file being edited. A census, ratchet or
+# pin that COUNTS things in that file is simply not the kind of object a scope
+# paragraph is written to think about, so the change lands, main goes red AFTER
+# the merge, and the author had no way to see it coming.
+#
+# Measured, and the reason this file exists — both are replayed by the harness:
+#
+#   1. #18213 (7d56df653) thawed a region inside scripts/pds-pull-proof.sh. That
+#      file is a ROW in .github/run-level-readers.allow, pinned at a reference
+#      COUNT. The count moved, the row did not, main reddened, and #18258
+#      (90d63a4dd) was a one-line follow-up editing only the allow file.
+#   2. #18191 (5ca440b3d) taught three deploy engines to read their own published
+#      check count back out of deploy/README.md. Branch deploy/assets-survive-gap
+#      adds 147 lines of checks to deploy/instance-deploy_test.sh; it DOES touch
+#      deploy/README.md, but only to add a prose paragraph, never to move the
+#      pinned number. It reds on rebase.
+#
+# The rule has been WRITTEN DOWN repeatedly and still missed its own next case
+# twice. A written finding does not fire by itself. This is the script with the
+# trigger.
+#
+# WHAT A REGISTRY IS — THE DERIVATION PREDICATE, STATED ONCE
+# ----------------------------------------------------------
+# NOT a hard-coded list of the five or six known ones. A list is a SNAPSHOT and
+# it rots; a two-item skip list in this repo turned out to really be eight. The
+# set is DERIVED from the tree on every run by one rule:
+#
+#   A REGISTRY IS A FILE THAT HOLDS AN EXPECTED VALUE IT DID NOT COMPUTE IN THIS
+#   RUN AND COMPARES A MEASUREMENT AGAINST IT, **OR** THAT WALKS A FILE-TYPE
+#   GLOB AND DEMANDS EVERY MEMBER BE ACCOUNTED FOR.
+#
+# The second clause is not decoration. It was added because the first clause
+# alone, measured against the six known registries, MISSED the two that govern
+# brand-new scripts/ files — selftest-wiring-census.sh and pds-door-census.sh —
+# whose expectation is a row or a wiring per member and is therefore held by the
+# CORPUS, never by the registry. Those are exactly the new-file class.
+#
+# Three doors satisfy it, and a file needs only one:
+#
+#   B1 IN-FILE PIN       an upper-case identifier whose name carries EXPECTED /
+#                        FLOOR / PIN / PINNED / BASELINE / ROWS / _MAX / _MIN,
+#                        assigned a bare integer literal. The literal is the
+#                        recorded expectation. (Elixir module attributes too.)
+#   B2 COMMITTED ARTIFACT  the file names a TRACKED path ending .allow / .pin /
+#                        .allowlist / .baseline / .tsv / -registry.json, or names
+#                        a tracked README.md on a line that also carries a count
+#                        word. That artifact is the recorded expectation.
+#   B3 TOTALITY          it hands a file-type glob to a corpus-scan verb. There
+#                        is no number to read; the expectation is "every member
+#                        is accounted for", distributed across the corpus as a
+#                        row, a wiring or an exemption marker per file.
+#
+# KNOWN MISS, stated here rather than discovered later: a RIDER that pins facts
+# about a census it execs — api/test/barkpark/pds_door_census_test.exs — matches
+# no door, because it holds neither an expectation nor a glob of its own. Its
+# obligation still surfaces, via the census it rides (scripts/pds-door-census.sh),
+# so the miss costs a name in the output and not a missed red.
+#
+# Everything else this script does is CORPUS RESOLUTION: given a registry, which
+# files can move its measurement? Three doors, and the honest limits of each are
+# stated in --list-registries output:
+#
+#   D1 ENUMERATED  the changed path appears VERBATIM in one of the registry's
+#                  expectation artifacts. Exact, zero guesswork. Cannot fire for
+#                  a NEW file — by construction a new file is in no allowlist
+#                  yet, which is precisely the defect class, so D2 carries it.
+#   D2 SCANNED     the changed path matches a path glob the registry hands to a
+#                  corpus-scan verb (git ls-files / find / git grep / wildcard /
+#                  readdir / for..in). This is the NEW-FILE door.
+#   D3 SELF        the changed path IS the registry, or IS one of its expectation
+#                  artifacts. Covers the self-counting harness (a --self-test
+#                  that tallies its own checks against a published number).
+#
+# WHAT IT DELIBERATELY DOES NOT DO
+# --------------------------------
+# It NEVER says "declared, you are fine". Touching an expectation artifact is not
+# proof of bumping the right value inside it — case 2 above touched
+# deploy/README.md and reddened anyway. A touch is reported as an annotation
+# beside the obligation, never as a discharge of it. A checker that can clear its
+# own finding on a file-path match would have passed case 2.
+#
+# ADVISORY AND READ-ONLY. It writes nothing, re-seeds nothing, mutates nothing.
+#
+# EXIT CODES — three states, three codes
+#   0  nothing implicated (and the run proved it actually scanned something)
+#   1  at least one registry counts something in these paths
+#   2  CANNOT READ — the scan did not happen; no verdict is available
+#
+# A failed read must never look like a clean one, so exit 2 prints no tally at
+# all, only the refusal and its reason.
+#
+# USAGE
+#   registry-impact-check.sh                      # diff against origin/main + working tree
+#   registry-impact-check.sh --base <ref>
+#   registry-impact-check.sh --path P [--path Q]  # explicit path set
+#   registry-impact-check.sh --paths-from <file>  # one path per line, - for stdin
+#   registry-impact-check.sh --list-registries    # the derived set, with misses
+#   registry-impact-check.sh --selftest           # harness hook
+#
+# bash 3.2 compatible (macOS system bash): no associative arrays, no mapfile.
+
+set -uo pipefail
+
+RC_CLEAN=0
+RC_IMPLICATED=1
+RC_CANNOT_READ=2
+
+ROOT="${REGISTRY_IMPACT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)}"
+
+# A floor on the candidate sweep. Not a cosmetic number: if the tree or the grep
+# machinery breaks, the derived set collapses toward zero, every path is
+# "implicated by nothing", and this script prints a confident clean. The floor is
+# what a broken scan cannot satisfy. Same shape as ALLOW_ROWS_EXPECTED in
+# run-level-reader-census.sh and CAPS_ROWS_EXPECTED in check-doc-budgets.sh.
+REGISTRY_FLOOR="${REGISTRY_IMPACT_FLOOR:-20}"
+
+cannot_read() {
+  echo "registry-impact-check: CANNOT READ — $1" >&2
+  echo "registry-impact-check: no verdict. This run measured nothing; do not read silence as a clean result." >&2
+  exit "$RC_CANNOT_READ"
+}
+
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/registry-impact.XXXXXX" 2>/dev/null)" || cannot_read "could not create a temp dir"
+trap 'rm -rf "$TMP"' EXIT
+
+# ---------------------------------------------------------------- argument parse
+MODE=run
+BASE="${REGISTRY_IMPACT_BASE:-origin/main}"
+: > "$TMP/paths.explicit"
+HAVE_EXPLICIT=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base) shift; [ $# -gt 0 ] || cannot_read "--base needs a ref"; BASE="$1" ;;
+    --path) shift; [ $# -gt 0 ] || cannot_read "--path needs a path"; printf '%s\n' "$1" >> "$TMP/paths.explicit"; HAVE_EXPLICIT=1 ;;
+    --paths-from)
+      shift; [ $# -gt 0 ] || cannot_read "--paths-from needs a file"
+      if [ "$1" = "-" ]; then cat >> "$TMP/paths.explicit"
+      else [ -f "$1" ] || cannot_read "--paths-from: no such file: $1"; cat "$1" >> "$TMP/paths.explicit"; fi
+      HAVE_EXPLICIT=1 ;;
+    --list-registries) MODE=list ;;
+    --selftest) MODE=selftest ;;
+    -h|--help) sed -n '1,90p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) cannot_read "unknown argument: $1" ;;
+  esac
+  shift
+done
+
+[ -d "$ROOT/.git" ] || [ -f "$ROOT/.git" ] || cannot_read "no git repository at $ROOT"
+
+if [ "$MODE" = selftest ]; then
+  ST="$ROOT/scripts/registry-impact-check.test.sh"
+  [ -f "$ST" ] || cannot_read "--selftest: no harness at $ST"
+  exec bash "$ST"
+fi
+
+# ------------------------------------------------------------------ tracked tree
+git -C "$ROOT" ls-files > "$TMP/tracked" 2>/dev/null || cannot_read "git ls-files failed under $ROOT"
+TRACKED_N=$(wc -l < "$TMP/tracked" | tr -d ' ')
+[ "$TRACKED_N" -gt 0 ] 2>/dev/null || cannot_read "git ls-files returned nothing under $ROOT"
+
+# Every directory that really exists in the tracked tree. A glob's directory is
+# resolved against THIS, never against the shape of a shell word.
+sed -E 's#/[^/]*$##' "$TMP/tracked" | LC_ALL=C sort -u > "$TMP/dirs"
+: > "$TMP/too-broad"
+
+# A corpus glob wider than this share of the tree is a shrug, not an obligation.
+BREADTH_MAX=$(( TRACKED_N / 20 ))
+[ "$BREADTH_MAX" -gt 0 ] || BREADTH_MAX=1
+
+# CONTROL for the grep machinery. git grep's ERE has no word boundary and has
+# silently returned ZERO FILES for a pattern that is everywhere; a -P sweep whose
+# control also returns zero is a broken instrument, not an absence. This control
+# must hit, or there is no verdict.
+CTRL_N=$(git -C "$ROOT" grep -lP 'set -uo pipefail' -- '*.sh' 2>/dev/null | wc -l | tr -d ' ')
+[ "${CTRL_N:-0}" -gt 5 ] 2>/dev/null || cannot_read "grep control failed: a -P sweep for 'set -uo pipefail' over *.sh matched ${CTRL_N:-0} files. The scan machinery is not working, so an empty result would be meaningless."
+
+# ------------------------------------------------------- PHASE 1: derive the set
+# B1 — an in-file pinned integer expectation.
+B1_RE='^[[:space:]]*(readonly[[:space:]]+|export[[:space:]]+|@|const[[:space:]]+|local[[:space:]]+)?[A-Za-z_@][A-Za-z0-9_]*(EXPECTED|Expected|_FLOOR|_floor|_PIN|_pin|PINNED|BASELINE|baseline|_ROWS|_MAX|_MIN|expected)[A-Za-z0-9_]*[[:space:]]*[:=][[:space:]]*"?[0-9]+"?[[:space:]]*$'
+# B2 — names a committed expectation artifact.
+B2_RE='[A-Za-z0-9_][A-Za-z0-9_./-]*\.(allow|allowlist|pin|baseline|tsv)\b|[A-Za-z0-9_][A-Za-z0-9_./-]*-registry\.json\b'
+# B2b — names a tracked README on a line that also carries a count word.
+B2B_RE='[A-Za-z0-9_][A-Za-z0-9_./-]*README\.md\b.*\b(count|checks|CHECKS|COUNT|Count)\b|\b(count|checks|COUNT|CHECKS)\b.*[A-Za-z0-9_][A-Za-z0-9_./-]*README\.md\b'
+# B3 — THE TOTALITY SHAPE, and the door that carries the whole NEW-FILE class.
+# A census like selftest-wiring-census.sh records no number anywhere: it walks a
+# file-type glob and demands that every member be accounted for — wired, or
+# exempt, or carrying a disposition row. Its expectation is DISTRIBUTED ACROSS
+# ITS OWN CORPUS, not held by the registry, so B1 and B2 are both structurally
+# blind to it. Measured: B1+B2+B2b alone missed selftest-wiring-census.sh and
+# pds-door-census.sh — the two registries that govern brand-new scripts/ files,
+# which is precisely the defect class this whole script exists for.
+#
+# The verb set must match SCAN_VERB_RE below. It did not at first, and the gap
+# cost pds-door-census.sh: it enumerates with `for g in 'scripts/pds-*.sh' …`,
+# which carries no find/ls-files/grep verb at all.
+B3_RE='(git ls-files|\bfind\s|git grep|Path\.wildcard|File\.ls|readdirSync|\bfor\s+\w+\s+in\s)[^\n]*[*][.][a-z]'
+
+SRC_GLOBS=( '*.sh' '*.mjs' '*.js' '*.exs' '*.ex' '*.py' '*.yml' )
+
+{
+  git -C "$ROOT" grep -lP "$B1_RE"  -- "${SRC_GLOBS[@]}" 2>/dev/null
+  git -C "$ROOT" grep -lP "$B2_RE"  -- "${SRC_GLOBS[@]}" 2>/dev/null
+  git -C "$ROOT" grep -lP "$B2B_RE" -- "${SRC_GLOBS[@]}" 2>/dev/null
+  git -C "$ROOT" grep -lP "$B3_RE"  -- "${SRC_GLOBS[@]}" 2>/dev/null
+} | LC_ALL=C sort -u > "$TMP/registries"
+
+REG_N=$(wc -l < "$TMP/registries" | tr -d ' ')
+if [ "${REG_N:-0}" -lt "$REGISTRY_FLOOR" ]; then
+  cannot_read "the derivation predicate matched only ${REG_N:-0} files, below the floor of $REGISTRY_FLOOR. A collapsed set makes every path look un-implicated, so this run has no verdict to give. (tracked files seen: $TRACKED_N; grep control: $CTRL_N)"
+fi
+
+# -------------------------------------------------- PHASE 2: per-registry corpus
+# For registry R this writes two files:
+#   $TMP/art/<slug>   tracked expectation artifacts R reads
+#   $TMP/glob/<slug>  ERE matchers for path globs R hands to a corpus-scan verb
+mkdir -p "$TMP/art" "$TMP/glob"
+slug_of() { printf '%s' "$1" | tr '/.' '__'; }
+
+SCAN_VERB_RE='git ls-files|\bfind[[:space:]]|git grep|Path\.wildcard|File\.ls|readdir|glob\(|for[[:space:]].*[[:space:]]in[[:space:]].*\*|ls[[:space:]]'
+
+extract_for() {
+  local r="$1" slug f line tok norm
+  slug="$(slug_of "$r")"
+  f="$ROOT/$r"
+  : > "$TMP/art/$slug"; : > "$TMP/glob/$slug"
+  [ -f "$f" ] || return 0
+
+  # --- expectation artifacts: path-shaped tokens that EXIST in the tracked tree.
+  #
+  # NARROW ON PURPOSE. A first cut accepted .md/.json/.txt too and drowned: it
+  # offered scripts/elixir-path-escape-check.sh's 48 CENSUS SUBJECTS (every doc
+  # the Elixir suite reads) as 48 things to "declare". Those are its corpus, not
+  # its expectation. Only suffixes whose whole reason to exist is to RECORD an
+  # expectation are taken, plus a README named beside a count word (the
+  # deploy/README.md self-test count guard, which has no other spelling).
+  {
+    grep -oE '\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(allow|allowlist|pin|baseline|tsv)' "$f" 2>/dev/null
+    grep -oE '\.?[A-Za-z0-9_][A-Za-z0-9_./-]*-registry\.json' "$f" 2>/dev/null
+    grep -hE "$B2B_RE" "$f" 2>/dev/null | grep -oE '\.?[A-Za-z0-9_][A-Za-z0-9_./-]*README\.md' 2>/dev/null
+  } | LC_ALL=C sort -u \
+    | while IFS= read -r tok; do
+        [ -n "$tok" ] || continue
+        # Resolve the literal against the tracked tree, trying the dotted form
+        # too: a token is scraped as `github/run-level-readers.allow` because the
+        # leading `.` is not a word character, and the un-dotted form is tracked
+        # by nothing. That one missing dot made D1 — the exact door — dead for
+        # every .github/ artifact in the repo, and the first run only fired
+        # through the fuzzy glob door instead.
+        if LC_ALL=C grep -qxF "$tok" "$TMP/tracked"; then
+          printf '%s\n' "$tok"
+        elif LC_ALL=C grep -qxF ".$tok" "$TMP/tracked"; then
+          printf '.%s\n' "$tok"
+        fi
+      done | LC_ALL=C sort -u > "$TMP/art/$slug"
+
+  # --- corpus globs, taken ONLY from lines carrying a corpus-scan verb.
+  grep -nE "$SCAN_VERB_RE" "$f" 2>/dev/null | head -400 | while IFS= read -r line; do
+    printf '%s\n' "$line" | grep -oE "[A-Za-z0-9_$\{\}\"'./-]*\*[A-Za-z0-9_./*-]*" 2>/dev/null | while IFS= read -r tok; do
+      [ -n "$tok" ] || continue
+      # Normalise: drop a leading shell variable segment ("$root/scripts" -> scripts).
+      norm="$(printf '%s' "$tok" | sed -E 's/^["'"'"']+//; s/["'"'"']+$//; s/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\///')"
+      case "$norm" in
+        *'$'*) continue ;;             # still variable-bearing: unresolvable, drop it
+        '*'|'*.'*)
+          # A bare extension glob. Scope it to a directory named on the same line,
+          # else to the registry's own top-level directory — never repo-wide.
+          local dir cand
+          # Resolve the directory against DIRECTORIES THAT ACTUALLY EXIST in the
+          # tracked tree, never by regex shape. A shape-only reader took
+          #   find "$root/scripts" -type f -name '*.test.sh'
+          # and produced the glob `root/*.test.sh`, because the leftmost match of
+          # a `<dir>/` pattern inside "$root/scripts" is `root/` — the SHELL
+          # VARIABLE's name, which is not a directory anywhere. That matched no
+          # file, and the new-file door — the only one that can reach a file that
+          # does not exist yet — was silently dead. The harness caught it; nothing
+          # in the output looked wrong.
+          dir=""
+          for cand in $(printf '%s\n' "$line" | grep -oE '[A-Za-z_$][A-Za-z0-9_${}/.-]*' | sed -E 's/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\///; s#/+$##'); do
+            case "$cand" in *'$'*|'') continue ;; esac
+            if LC_ALL=C grep -qxF "$cand" "$TMP/dirs"; then dir="$cand"; break; fi
+          done
+          [ -n "$dir" ] || dir="${r%%/*}"
+          case "$dir" in ''|*'$'*) continue ;; esac
+          printf '%s/%s\n' "$dir" "$norm" ;;
+        */*) printf '%s\n' "$norm" ;;
+        *) continue ;;
+      esac
+    done
+  done | LC_ALL=C sort -u | while IFS= read -r g; do
+    # A corpus census names a FILE TYPE. A bare `dir/*` does not: it is almost
+    # always an `ls` or a copy, and admitting it made the first run offer
+    # scripts/*  as the corpus of an unrelated .test.mjs, implicating it in every
+    # change under scripts/. Requiring an extension component is what separates
+    # "this census walks *.test.sh" from "this line happened to list a directory".
+    case "$g" in
+      *'*'*.[a-z]*) : ;;
+      *) continue ;;
+    esac
+    # BREADTH CAP, derived from the tree rather than declared. A repo-wide glob
+    # like `**/*.ex` resolved 1116 of 15304 tracked files and made every Elixir
+    # edit "implicated" by a dozen unrelated pin tests — a checker that fires on
+    # everything has told the author nothing. The cap is a share of the tracked
+    # count, so it moves with the repo instead of rotting: 5% here separates
+    # scripts/*.sh (281, a real corpus) from **/*.ex (1116, a shrug.)
+    # `gn=$(grep -c … || echo 0)` is WRONG and was the bug that killed the
+    # new-file door: grep -c PRINTS "0" and THEN exits 1, so the `|| echo 0`
+    # appends a second line and gn becomes "0\n0". `[ "0\n0" -gt N ]` is not
+    # false, it is an ERROR returning 2 — which became the while-loop's exit
+    # status, which made the `&& mv` below not run, which left the glob file at
+    # the empty stub. Every glob for that registry vanished and the output looked
+    # exactly like an honest CLEAN.
+    gn=$(LC_ALL=C grep -cE "$(glob_to_ere "$g")" "$TMP/tracked" 2>/dev/null) || gn=0
+    case "$gn" in ''|*[!0-9]*) gn=0 ;; esac
+    if [ "$gn" -gt "$BREADTH_MAX" ]; then
+      echo "$g" >> "$TMP/too-broad"
+      continue
+    fi
+    printf '%s\n' "$g"
+  done > "$TMP/glob/$slug.tmp"
+  # Unconditional. Guarding this on the loop's exit status is what let a single
+  # erroring comparison silently discard a whole registry's corpus.
+  mv "$TMP/glob/$slug.tmp" "$TMP/glob/$slug"
+}
+
+# glob -> ERE. '**' matches across separators, a lone '*' does not.
+glob_to_ere() {
+  printf '%s' "$1" | sed -E 's/[.]/\\./g; s/\*\*/\x01/g; s/\*/[^\/]*/g; s/\x01/.*/g; s/^/^/; s/$/$/'
+}
+
+# ------------------------------------------------------------------ list mode
+if [ "$MODE" = list ]; then
+  echo "registry-impact-check --list-registries"
+  echo "  tracked files:      $TRACKED_N"
+  echo "  grep control:       $CTRL_N files matched the control pattern (>5 required)"
+  echo "  derived registries: $REG_N (floor $REGISTRY_FLOOR)"
+  echo ""
+  echo "PREDICATE: a file holding an expected value it did not compute this run."
+  echo "  B1 in-file pinned integer  B2 committed artifact (.allow/.pin/.tsv/.baseline/-registry.json)"
+  echo "  B2b a tracked README.md named beside a count word"
+  echo ""
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    extract_for "$r"
+    s="$(slug_of "$r")"
+    printf '%s\n' "$r"
+    if [ -s "$TMP/art/$s" ]; then
+      printf '    expects: '; tr '\n' ' ' < "$TMP/art/$s"; printf '\n'
+    fi
+    if [ -s "$TMP/glob/$s" ]; then
+      printf '    scans:   '; tr '\n' ' ' < "$TMP/glob/$s"; printf '\n'
+    fi
+  done < "$TMP/registries"
+  echo ""
+  echo "TALLY: $REG_N registries derived from $TRACKED_N tracked files."
+  exit "$RC_CLEAN"
+fi
+
+# ------------------------------------------------------ PHASE 3: the changed set
+if [ "$HAVE_EXPLICIT" = 1 ]; then
+  grep -v '^[[:space:]]*$' "$TMP/paths.explicit" | LC_ALL=C sort -u > "$TMP/changed"
+  CHANGED_SRC="explicit (--path/--paths-from)"
+else
+  MB="$(git -C "$ROOT" merge-base "$BASE" HEAD 2>/dev/null)"
+  [ -n "$MB" ] || cannot_read "no merge-base between '$BASE' and HEAD; pass --base or --path"
+  {
+    git -C "$ROOT" diff --name-only "$MB" HEAD 2>/dev/null
+    git -C "$ROOT" diff --name-only HEAD 2>/dev/null
+    git -C "$ROOT" ls-files --others --exclude-standard 2>/dev/null
+  } | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u > "$TMP/changed"
+  CHANGED_SRC="$BASE...HEAD (merge-base ${MB:0:9}) + working tree + untracked"
+fi
+
+CHANGED_N=$(wc -l < "$TMP/changed" | tr -d ' ')
+
+echo "registry-impact-check — which registries count the files this change touches?"
+echo "  changed set:        $CHANGED_N path(s) from $CHANGED_SRC"
+echo "  derived registries: $REG_N (floor $REGISTRY_FLOOR, tracked $TRACKED_N, grep control $CTRL_N)"
+echo ""
+
+if [ "${CHANGED_N:-0}" -eq 0 ]; then
+  echo "EMPTY CHANGED SET — nothing to check. This is not a clean bill of health for any"
+  echo "change; it is the statement that this run was handed no paths."
+  echo ""
+  echo "TALLY: 0 obligation(s) across 0 changed path(s); $REG_N registries were scanned."
+  exit "$RC_CLEAN"
+fi
+
+: > "$TMP/hits"
+while IFS= read -r r; do
+  [ -n "$r" ] || continue
+  extract_for "$r"
+  s="$(slug_of "$r")"
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    door=""
+    if [ -s "$TMP/art/$s" ] && LC_ALL=C grep -qxF "$p" "$TMP/art/$s" 2>/dev/null; then
+      door="D3-ARTIFACT"
+    elif [ "$p" = "$r" ]; then
+      door="D3-SELF"
+    fi
+    if [ -z "$door" ] && [ -s "$TMP/art/$s" ]; then
+      # EXACT token match, never a substring. A bare `grep -F` for
+      # `scripts/pds-pull-proof.sh` also hits `scripts/pds-pull-proof_test.sh`
+      # and every longer sibling, so a row for one file would claim its whole
+      # name-family. The path must be bounded by something that cannot be part
+      # of a path on either side.
+      p_ere="$(printf '%s' "$p" | sed -E 's/[][^$.*\\\/+?(){}|]/\\&/g')"
+      while IFS= read -r a; do
+        [ -n "$a" ] || continue
+        if LC_ALL=C grep -qE "(^|[^A-Za-z0-9_./-])${p_ere}([^A-Za-z0-9_./-]|$)" "$ROOT/$a" 2>/dev/null; then
+          door="D1-ENUMERATED"; break
+        fi
+      done < "$TMP/art/$s"
+    fi
+    if [ -z "$door" ] && [ -s "$TMP/glob/$s" ]; then
+      while IFS= read -r g; do
+        [ -n "$g" ] || continue
+        # NO PIPE HERE, deliberately. `printf … | grep -q` is the shape that
+        # returns 141 under load: grep -q exits on the first match and closes the
+        # pipe, printf takes SIGPIPE, and `pipefail` hands the pipeline 141 — so a
+        # MATCH reads as a NO-MATCH exactly when the box is busy. That would kill
+        # the new-file door intermittently and invisibly, which is the same defect
+        # class this script exists to catch. scripts/pipefail-sigpipe-scan.sh
+        # flagged this very line. Bash's own =~ touches no second process.
+        g_ere="$(glob_to_ere "$g")"
+        if [[ "$p" =~ $g_ere ]]; then door="D2-SCANNED:$g"; break; fi
+      done < "$TMP/glob/$s"
+    fi
+    [ -n "$door" ] || continue
+    printf '%s\t%s\t%s\n' "$r" "$p" "$door" >> "$TMP/hits"
+  done < "$TMP/changed"
+done < "$TMP/registries"
+
+HIT_N=$(wc -l < "$TMP/hits" | tr -d ' ')
+
+if [ "${HIT_N:-0}" -eq 0 ]; then
+  echo "CLEAN — no derived registry counts or enumerates anything in these paths."
+  echo "This is a MEASURED empty, not a skipped one: $REG_N registries were resolved and"
+  echo "each was matched against all $CHANGED_N changed path(s). A scan that could not run"
+  echo "exits $RC_CANNOT_READ and prints no tally at all."
+  echo ""
+  echo "TALLY: 0 obligation(s) across $CHANGED_N changed path(s); $REG_N registries scanned."
+  exit "$RC_CLEAN"
+fi
+
+echo "IMPLICATED — these registries count or enumerate something in the changed paths."
+echo "Each needs its declaration IN THIS SAME COMMIT, or main reds after the merge."
+echo ""
+
+LC_ALL=C sort -u "$TMP/hits" | cut -f1 | LC_ALL=C uniq | while IFS= read -r r; do
+  s="$(slug_of "$r")"
+  echo "REGISTRY  $r"
+  LC_ALL=C sort -u "$TMP/hits" | awk -F'\t' -v R="$r" '$1==R {printf "    via %-28s %s\n", $3, $2}'
+  if [ -s "$TMP/art/$s" ]; then
+    while IFS= read -r a; do
+      [ -n "$a" ] || continue
+      if LC_ALL=C grep -qxF "$a" "$TMP/changed"; then
+        echo "    DECLARE in $a  [this diff TOUCHES it — a touch is NOT a bump; verify the pinned value moved]"
+      else
+        echo "    DECLARE in $a  [this diff does NOT touch it]"
+      fi
+    done < "$TMP/art/$s"
+  else
+    echo "    DECLARE by re-running $r and reconciling its in-file pinned expectation."
+  fi
+  echo ""
+done
+
+OBLIG_N=$(LC_ALL=C sort -u "$TMP/hits" | cut -f1 | LC_ALL=C uniq | wc -l | tr -d ' ')
+echo "TALLY: $OBLIG_N registr(y|ies) implicated by $HIT_N path-match(es) across $CHANGED_N changed path(s)."
+echo "Advisory and read-only: nothing was written. Run each named registry to see the red before CI does."
+exit "$RC_IMPLICATED"
