@@ -1060,7 +1060,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         Barkpark.Tenancy.Auth.member?(token, ws_id)
 
       _ ->
-        match?(%{id: ^ws_id}, socket.assigns[:current_workspace])
+        # An ACCOUNT session carries `:current_user`, never `:api_token`
+        # (OptionalSessionToken). Before this arm a signed-in account could
+        # reach only the workspace it was already mounted in, so the scope
+        # switcher's dataset click (scope-open) silently closed the menu for
+        # every account user — Gyldendal, 2026-09-14, an owner of Default
+        # trying to leave the twin workspace. Membership is asked of the
+        # user's OWN principal kind; the identity fallback stays for the
+        # anonymous/dev socket only.
+        case socket.assigns[:current_user] do
+          %Barkpark.Accounts.User{} = user ->
+            Barkpark.Tenancy.Auth.member?(user, ws_id)
+
+          _ ->
+            match?(%{id: ^ws_id}, socket.assigns[:current_workspace])
+        end
     end
   end
 
