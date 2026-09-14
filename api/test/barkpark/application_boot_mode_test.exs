@@ -11,7 +11,16 @@ defmodule Barkpark.ApplicationBootModeTest do
   CONTROL proving the full-mode list contains X, so a filter that returned `[]`
   (or a typo'd module name that is in neither list) cannot manufacture a pass.
   """
-  use ExUnit.Case, async: true
+  # async: false is REQUIRED, not a convenience. Two tests below swap
+  # :boot_mode via Application.put_env(persistent: true), and that writes ONE
+  # value for the WHOLE NODE — the swap would also be in force for every other
+  # async module running at that instant (Barkpark.AsyncGlobalSeamGuardTest
+  # catches exactly this and names this file). The key CANNOT be process-scoped
+  # the way the FailingRegistry/OAuthStub patterns scope theirs: it is read by
+  # Barkpark.Application.start/2 at boot, in whatever process the supervisor
+  # starts, so a caller-process opt-in would not be visible to the code under
+  # test. Isolating by serialising the module is the honest option here.
+  use ExUnit.Case, async: false
 
   alias Barkpark.Application, as: App
 
