@@ -8,11 +8,28 @@ name: compose-smoke
 #     non-zero at the migrate step with the runtime.exs refusal's anchor line
 #     in its logs. NEVER an HTTP probe: Plug's 64-byte floor is lazy and
 #     /api/schemas serves 200 on a short secret (measured).
-#   * GREEN ARM — generated secrets must reach healthcheck-healthy, then
-#     in-container wget of /api/schemas AND /login (the session route) both
-#     succeed via `docker compose exec` — never a host-port curl (a host beam
-#     on :4000 produced a measured false 200). The same job runs the env
-#     census over both runtime roots (D14/D15) and the D23 blessing-word grep.
+#   * GREEN ARM — generated secrets must reach healthcheck-healthy, then FIVE
+#     in-container wget probes via `docker compose exec` — never a host-port
+#     curl (a host beam on :4000 produced a measured false 200):
+#       - /status.json and /login (the session route) — liveness;
+#       - /status.json and /v1/capabilities?build=1 bodies — build identity;
+#       - a dead render of an :admin LiveView route — the on_mount chain, which
+#         is where gh-8461's release-only crash lived while both liveness
+#         probes stayed green (task-0b75a09ab8057598).
+#     Plus one non-wget probe that is NOT an HTTP probe at all: the plugin
+#     census over `bin/barkpark rpc`, which asserts registration OUTCOME.
+#     Bootstrap rescues a plugin that raises in register_schemas/1 and boots
+#     anyway, so the release in which six of nine plugins were dead answered
+#     every HTTP probe 200 and this arm said PASS for weeks
+#     (task-a6ef8e3b2c78054f). No number of liveness probes closes that.
+#     The same job runs the env census over both runtime roots (D14/D15) and
+#     the D23 blessing-word grep.
+#
+#     NOTE — the step NAME below still reads "/api/schemas". The script has
+#     probed /status.json since the S1c refusal work; the name is stale and is
+#     deliberately NOT corrected here, because scripts/main-red-breaker.sh
+#     matches main's history BY STEP NAME and a rename blinds the inheritance
+#     check. Renaming it is its own change.
 #
 # The D17 skip-the-image escape hatch is FORBIDDEN anywhere in this gate — by
 # name, which is why this file never spells it: skipping the image build would
