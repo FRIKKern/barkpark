@@ -10,7 +10,6 @@ msgid ""
 msgstr ""
 "Language: nb_NO\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
 #: lib/barkpark_web/components/studio_components/editor.ex:711
 #, elixir-autogen, elixir-format
