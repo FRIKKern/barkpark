@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Components.Fields.{CodelistField, CompositeField, LocalizedTextField}
 
@@ -99,7 +100,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   phx-value-path={@path}
                   phx-value-index={idx}
                   disabled={@readonly or idx == 0}
-                  aria-label="Move up"
+                  aria-label={gettext("Move up")}
                 >▲</button>
                 <button
                   type="button"
@@ -111,7 +112,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   phx-value-path={@path}
                   phx-value-index={idx}
                   disabled={@readonly or idx == length(@rows) - 1}
-                  aria-label="Move down"
+                  aria-label={gettext("Move down")}
                 >▼</button>
               <% end %>
               <button
@@ -124,7 +125,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                 phx-value-path={@path}
                 phx-value-index={idx}
                 disabled={@readonly}
-                aria-label="Remove row"
+                aria-label={gettext("Remove row")}
               >×</button>
             </div>
             <%= for err <- row_errors(@errors, idx) do %>
@@ -142,7 +143,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         phx-value-field={@field.name}
         phx-value-path={@path}
         disabled={@readonly}
-      >+ Add</button>
+      >+ <%= gettext("Add") %></button>
     </fieldset>
     """
   end
@@ -460,7 +461,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         value={@row_value}
         phx-change={@on_change}
       />
-      <bp-media-picker
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@row_value}
         value-mode="reference"
         dataset={@dataset}
@@ -482,7 +483,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         value={@row_value}
         phx-change={@on_change}
       />
-      <bp-reference-picker
+      <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@row_value}
         ref-type={@ref_type}
         dataset={@dataset}
@@ -559,7 +560,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         value={@row_value}
         phx-change={@on_change}
       />
-      <bp-media-picker
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@row_value}
         dataset={@dataset}
         scope-prefix={@scope_prefix}

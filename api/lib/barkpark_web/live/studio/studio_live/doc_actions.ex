@@ -16,6 +16,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   """
 
   require Logger
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.StudioComponents.EditorFields
@@ -70,7 +71,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   # untitled doc gets the same "Untitled" the card's own header prints, so the
   # two surfaces name the same document the same way.
   defp secondary_doc_title(%{title: title}) when is_binary(title) and title != "", do: title
-  defp secondary_doc_title(_), do: "Untitled"
+  defp secondary_doc_title(_), do: gettext("Untitled")
 
   defp doc_id_from_assigns(assigns) do
     case assigns[:editor_doc] do
@@ -126,7 +127,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if is_draft do
         %{
           "name" => "publish",
-          "label" => "Publish",
+          "label" => gettext("Publish"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -138,7 +139,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       else
         %{
           "name" => "unpublish",
-          "label" => "Unpublish",
+          "label" => gettext("Unpublish"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -164,7 +165,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       preview_doc_action(editor_schema, editor_doc),
       %{
         "name" => "show-history",
-        "label" => "History",
+        "label" => gettext("History"),
         "kind" => "event",
         "scope" => "editor_header",
         "opts" => %{
@@ -176,7 +177,11 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if has_content_preview do
         %{
           "name" => "toggle-content-preview",
-          "label" => if(content_preview_visible, do: "Hide preview", else: "Show preview"),
+          "label" =>
+            if(content_preview_visible,
+              do: gettext("Hide preview"),
+              else: gettext("Show preview")
+            ),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -190,7 +195,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if has_published_twin do
         %{
           "name" => "toggle-diff",
-          "label" => if(diff_visible, do: "Edit", else: "Diff"),
+          "label" => if(diff_visible, do: gettext("Edit"), else: gettext("Diff")),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -204,7 +209,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if has_published_twin do
         %{
           "name" => "discard-draft",
-          "label" => "Discard draft",
+          "label" => gettext("Discard draft"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -219,7 +224,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if editor_doc do
         %{
           "name" => "duplicate-doc",
-          "label" => "Duplicate",
+          "label" => gettext("Duplicate"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -233,7 +238,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if editor_doc do
         %{
           "name" => "open-secondary-picker",
-          "label" => "Open another",
+          "label" => gettext("Open another"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -266,7 +271,8 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if editor_doc && secondary_doc && not EditorFields.secondary_pane_bucket?(width_bucket) do
         %{
           "name" => "close-secondary",
-          "label" => "Close reference: #{secondary_doc_title(secondary_doc)}",
+          "label" =>
+            gettext("Close reference: %{title}", title: secondary_doc_title(secondary_doc)),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -285,7 +291,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if editor_doc do
         %{
           "name" => "view-graph",
-          "label" => "View blast radius",
+          "label" => gettext("View blast radius"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -302,7 +308,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       # the hot zone (sup-w5-doc-actions-order).
       %{
         "name" => "delete-doc",
-        "label" => "Delete",
+        "label" => gettext("Delete"),
         "kind" => "event",
         "scope" => "editor_header",
         "opts" => %{
@@ -358,7 +364,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
          true <- placeholders_resolvable?(template, doc) do
       %{
         "name" => "preview",
-        "label" => "Preview",
+        "label" => gettext("Preview"),
         "kind" => "link",
         "scope" => "editor_header",
         "opts" => %{

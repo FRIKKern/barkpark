@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   for the full rationale.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
   alias Barkpark.{Content, Structure}
   alias Barkpark.Content.Graph
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -971,11 +972,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
 
   defp unnamed_row_title(doc) do
-    "Untitled #{row_type_word(doc)} · #{doc_id_tail(doc)}"
+    gettext("Untitled %{type} · %{tail}", type: row_type_word(doc), tail: doc_id_tail(doc))
   end
 
   defp row_type_word(%{type: type}) when is_binary(type) and type != "", do: type
-  defp row_type_word(_), do: "document"
+  defp row_type_word(_), do: gettext("document")
 
   # The entropy half of `<type>-<64 bits>` (`Content.generate_id/1`). Split from
   # the RIGHT so a type containing a hyphen cannot eat the tail, and fall back
@@ -995,18 +996,20 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # every Document struct (`content/query.ex` orders by updated_at_desc); this
   # only READS it — nothing here touches the /v1/structure node wire the Go TUI
   # shares. nil when a row somehow carries no usable timestamp.
-  defp relative_updated(%{updated_at: %DateTime{} = ts}), do: "Updated " <> ago(ts)
+  defp relative_updated(%{updated_at: %DateTime{} = ts}),
+    do: gettext("Updated %{ago}", ago: ago(ts))
+
   defp relative_updated(_), do: nil
 
   defp ago(%DateTime{} = ts) do
     secs = max(DateTime.diff(DateTime.utc_now(), ts, :second), 0)
 
     cond do
-      secs < 60 -> "just now"
-      secs < 3_600 -> "#{div(secs, 60)}m ago"
-      secs < 86_400 -> "#{div(secs, 3_600)}h ago"
-      secs < 2_592_000 -> "#{div(secs, 86_400)}d ago"
-      true -> "#{div(secs, 2_592_000)}mo ago"
+      secs < 60 -> gettext("just now")
+      secs < 3_600 -> gettext("%{n}m ago", n: div(secs, 60))
+      secs < 86_400 -> gettext("%{n}h ago", n: div(secs, 3_600))
+      secs < 2_592_000 -> gettext("%{n}d ago", n: div(secs, 86_400))
+      true -> gettext("%{n}mo ago", n: div(secs, 2_592_000))
     end
   end
 
