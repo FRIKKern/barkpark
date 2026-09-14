@@ -153,6 +153,8 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
 
   @behaviour BarkparkCloud.Sites.BoxRelay
 
+  require Logger
+
   alias BarkparkCloud.Registry
 
   @path "/v1/admin/site-deploy"
@@ -206,10 +208,29 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
   # timeout: a rollback we cannot CONFIRM quickly is a rollback we must not claim
   # happened.
   @rollback_poll_ms 50
-  @rollback_budget_ms 10_000
+  @rollback_budget_default_ms 10_000
   # A teardown stops the slots + disarms Caddy + deletes the tree — a few seconds,
   # but a cold node slot stop can lag, so allow more headroom than a pointer flip.
-  @teardown_budget_ms 30_000
+  @teardown_budget_default_ms 30_000
+
+  # Both budgets are WALL-CLOCK, and both are overridable so a test can drive them
+  # down far enough to prove the deadline actually bites (prior art:
+  # `BarkparkCloud.Usage`'s `:usage_fanout_budget_ms` aggregate deadline).
+  defp rollback_budget_ms,
+    do:
+      Application.get_env(
+        :barkpark_cloud,
+        :site_rollback_budget_ms,
+        @rollback_budget_default_ms
+      )
+
+  defp teardown_budget_ms,
+    do:
+      Application.get_env(
+        :barkpark_cloud,
+        :site_teardown_budget_ms,
+        @teardown_budget_default_ms
+      )
 
   @impl true
   def rollback(bp, payload) when is_map(payload) do
@@ -217,6 +238,7 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
     # Deployment.promotion_attrs (charter D5): a promote is a NEW build (seconds
     # to minutes); a static rollback is a symlink repoint (25ms measured).
     slug = payload[:slug] || payload["slug"]
+    started_at = System.monotonic_time(:millisecond)
 
     case Registry.relay_admin(bp, :post, @path, Map.put_new(payload, :mode, "rollback")) do
       {:ok, status, _body} when status in 200..299 ->
@@ -226,7 +248,9 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
         # "sub-second" into the wire, since the thing being timed would be the
         # accept, not the flip. This behaviour promises to answer only once the
         # flip has really happened (charter D5), so: wait for it.
-        await_flip(bp, slug, @rollback_budget_ms)
+        attribute(:rollback, slug, started_at, fn ->
+          await_flip(bp, slug, deadline(rollback_budget_ms()), zero_split())
+        end)
 
       # 409 lock held, 4xx/5xx refusal, unreachable box — relay the box's own
       # verdict verbatim. Nothing is invented here.
@@ -235,30 +259,35 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
     end
   end
 
-  defp await_flip(_bp, _slug, left_ms) when left_ms <= 0 do
-    {:ok, 504,
-     %{
-       "error" =>
-         "the instance did not confirm the rollback in time — it may still be flipping; " <>
-           "check `bp cloud site status`"
-     }}
-  end
+  # THE DEADLINE IS WALL-CLOCK, NOT AN ITERATION COUNT (rollback-latency c0).
+  # This loop used to recur on `left_ms - @rollback_poll_ms`, subtracting only its
+  # own SLEEP and never the round trip it had just spent on the wire. That made
+  # `@rollback_budget_ms` a budget of 200 ITERATIONS, not of 10 seconds: each
+  # iteration also costs a full CP->box poll, and the box's own status read is
+  # allowed to take up to 20s (`DeployRunner.@status_call_timeout_ms`), so a slow
+  # box could hold the control plane far past the CLI's 15s client timeout while
+  # the code believed it was inside budget. A monotonic deadline cannot drift that
+  # way — it counts the wire time too.
+  #
+  # `split` accumulates the ATTRIBUTION (how many polls, how much of the wait was
+  # relay wire time vs this loop's own quantisation); `attribute/4` logs it.
+  defp await_flip(bp, slug, deadline, split) do
+    if expired?(deadline) do
+      {timed_out(:rollback), split}
+    else
+      {reply, split} = poll_once(bp, slug, split)
 
-  defp await_flip(bp, slug, left_ms) do
-    # build_id is irrelevant to a rollback (there is exactly one run per slug and
-    # the box's GET keys on slug alone) — the empty string keeps the behaviour's
-    # 3-arity poll contract without inventing a build we do not have.
-    case poll_deploy(bp, slug, "") do
-      {:ok, status, body} when status in 200..299 ->
-        if to_string(body["state"]) == "done" do
-          settle_flip(body)
-        else
-          Process.sleep(@rollback_poll_ms)
-          await_flip(bp, slug, left_ms - @rollback_poll_ms)
-        end
+      case reply do
+        {:ok, status, body} when status in 200..299 ->
+          if to_string(body["state"]) == "done" do
+            {settle_flip(body), split}
+          else
+            await_flip(bp, slug, deadline, nap(deadline, split))
+          end
 
-      other ->
-        other
+        other ->
+          {other, split}
+      end
     end
   end
 
@@ -297,17 +326,83 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
     # finish (a `TORN_DOWN=` line finalizes it exit 0) before reporting success —
     # otherwise the CP would deregister the row while the box still serves it.
     slug = payload[:slug] || payload["slug"]
+    started_at = System.monotonic_time(:millisecond)
 
     case Registry.relay_admin(bp, :post, @path, Map.put_new(payload, :mode, "teardown")) do
       {:ok, status, _body} when status in 200..299 ->
-        await_teardown(bp, slug, @teardown_budget_ms)
+        attribute(:teardown, slug, started_at, fn ->
+          await_teardown(bp, slug, deadline(teardown_budget_ms()), zero_split())
+        end)
 
       other ->
         other
     end
   end
 
-  defp await_teardown(_bp, _slug, left_ms) when left_ms <= 0 do
+  # Same wall-clock deadline as `await_flip/4` — the iteration-count defect was
+  # byte-identical here, and a teardown's 30s budget made it 600 iterations.
+  defp await_teardown(bp, slug, deadline, split) do
+    if expired?(deadline) do
+      {timed_out(:teardown), split}
+    else
+      {reply, split} = poll_once(bp, slug, split)
+
+      case reply do
+        {:ok, status, body} when status in 200..299 ->
+          if to_string(body["state"]) == "done" do
+            {settle_teardown(body), split}
+          else
+            await_teardown(bp, slug, deadline, nap(deadline, split))
+          end
+
+        other ->
+          {other, split}
+      end
+    end
+  end
+
+  # ── the shared wait mechanics + the attribution split ──────────────────────
+
+  defp deadline(budget_ms), do: System.monotonic_time(:millisecond) + budget_ms
+
+  defp expired?(deadline), do: System.monotonic_time(:millisecond) >= deadline
+
+  defp zero_split, do: %{polls: 0, poll_wire_ms: 0, sleep_ms: 0}
+
+  # One CP->box status read, with its WIRE time charged to the split. This is the
+  # component `@rollback_poll_ms` never accounted for.
+  defp poll_once(bp, slug, split) do
+    # build_id is irrelevant to a rollback (there is exactly one run per slug and
+    # the box's GET keys on slug alone) — the empty string keeps the behaviour's
+    # 3-arity poll contract without inventing a build we do not have.
+    at = System.monotonic_time(:millisecond)
+    reply = poll_deploy(bp, slug, "")
+    wire = System.monotonic_time(:millisecond) - at
+
+    {reply, %{split | polls: split.polls + 1, poll_wire_ms: split.poll_wire_ms + wire}}
+  end
+
+  # Sleep the poll interval, but never PAST the deadline: overshooting it is how a
+  # bounded wait turns into budget + one interval on every single call.
+  defp nap(deadline, split) do
+    ms =
+      @rollback_poll_ms
+      |> min(max(deadline - System.monotonic_time(:millisecond), 0))
+
+    Process.sleep(ms)
+    %{split | sleep_ms: split.sleep_ms + ms}
+  end
+
+  defp timed_out(:rollback) do
+    {:ok, 504,
+     %{
+       "error" =>
+         "the instance did not confirm the rollback in time — it may still be flipping; " <>
+           "check `bp cloud site status`"
+     }}
+  end
+
+  defp timed_out(:teardown) do
     {:ok, 504,
      %{
        "error" =>
@@ -316,19 +411,31 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
      }}
   end
 
-  defp await_teardown(bp, slug, left_ms) do
-    case poll_deploy(bp, slug, "") do
-      {:ok, status, body} when status in 200..299 ->
-        if to_string(body["state"]) == "done" do
-          settle_teardown(body)
-        else
-          Process.sleep(@rollback_poll_ms)
-          await_teardown(bp, slug, left_ms - @rollback_poll_ms)
-        end
+  # WHERE THE SERVER-SIDE TIME WENT (rollback-latency c0). A live rollback measured
+  # 1.4-3.4s server-side against an engine flip the charter measured at 25ms, and
+  # nothing in the control plane could say which seam held it. Now every wait
+  # reports its own arithmetic, so ONE live rollback attributes itself:
+  #
+  #   * `accept_ms`  — the CP->box POST round trip (the relay, one trip)
+  #   * `poll_wire_ms` — the CP->box status reads (the relay, `polls` trips)
+  #   * `sleep_ms`   — THIS loop's own 50ms quantisation (the control plane)
+  #   * the box's own work is what forced `polls` above 1; with `polls: 1` the
+  #     box was already done before the first read and the time is all relay.
+  #
+  # `total_ms` is the whole behaviour call, so `total_ms - accept_ms -
+  # poll_wire_ms - sleep_ms` is the residue this module does not account for.
+  defp attribute(mode, slug, started_at, wait) do
+    accept_ms = System.monotonic_time(:millisecond) - started_at
+    {reply, split} = wait.()
+    total_ms = System.monotonic_time(:millisecond) - started_at
 
-      other ->
-        other
-    end
+    Logger.info(fn ->
+      "site #{mode} attribution slug=#{slug} total_ms=#{total_ms} " <>
+        "accept_ms=#{accept_ms} polls=#{split.polls} " <>
+        "poll_wire_ms=#{split.poll_wire_ms} sleep_ms=#{split.sleep_ms}"
+    end)
+
+    reply
   end
 
   # exit_code 0 (the engine printed `TORN_DOWN=<slug>`) is a real teardown;

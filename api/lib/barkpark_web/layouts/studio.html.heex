@@ -25,8 +25,8 @@
           :if={is_binary(assigns[:return_to]) and assigns[:return_to] != ""}
           href={assigns[:return_to]}
           class="btn btn-ghost btn-sm"
-          title="Back to Studio"
-          aria-label="Back to Studio"
+          title={gettext("Back to Studio")}
+          aria-label={gettext("Back to Studio")}
           data-test-id="return-to-scope"
         >
           <span class="bp-action-icon" aria-hidden="true">

@@ -63,15 +63,14 @@ func manifestAdvertisesFlag(cmd manifest.Command, name string) bool {
 		haystacks = append(haystacks, f.Summary)
 	}
 	for _, h := range haystacks {
-		// PROSE ABOUT A FOREIGN TOOL IS NOT AN ADVERTISEMENT. A summary that
-		// quotes another program's command line (`git rev-list --count …`,
-		// `git merge-base --is-ancestor`, `git -C`) mentions flags that are
-		// not bp's and never will be, so a drift verdict off that text sends
-		// an up-to-date operator to a reinstall that cannot help. Such a field
-		// can advertise nothing; the ordinary usage refusal is the right one.
-		if quotesForeignProgram(h) {
-			continue
-		}
+		// PROSE ABOUT A FOREIGN TOOL IS NOT AN ADVERTISEMENT — but only THAT
+		// PROSE. A summary that quotes another program's command line
+		// (`git rev-list --count …`, `git -C`) mentions flags that are not
+		// bp's and never will be, so a drift verdict off that text sends an
+		// up-to-date operator to a reinstall that cannot help. The
+		// disqualification is scoped to the CLAUSE that talks about the
+		// foreign tool; the rest of the field still advertises normally.
+		h = withoutForeignProgramClauses(h)
 		for i := 0; ; {
 			j := strings.Index(h[i:], needle)
 			if j < 0 {
@@ -98,36 +97,121 @@ func isFlagNameByte(b byte) bool {
 	return false
 }
 
-// quotesForeignProgram reports whether text contains a backticked code span
-// that invokes a program other than bp — the shape manifest prose uses when it
-// tells the operator to run something else (`git rev-list …`). A span whose
-// first token is not a bare word (`-`, the stdin spelling) invokes nothing and
-// is ignored, so a field that only quotes VALUES stays eligible to advertise.
-func quotesForeignProgram(text string) bool {
+// ─── SCOPING THE FOREIGN-TOOL DISQUALIFIER ──────────────────────────────────
+//
+// The first cut of this guard disqualified the WHOLE FIELD as soon as any
+// backticked bare word appeared, and its doc comment claimed "a field that only
+// quotes VALUES stays eligible to advertise." That sentence was false about the
+// code beneath it: the span reader applied no invocation test at all, so a
+// backticked NOUN disqualified the field just as hard as a command line.
+//
+// Measured over api/lib/barkpark/plugins/tasks.ex (the tasks manifest prose,
+// 2026-09-13): 39 long prose strings mention a `--flag`; 5 of those carry a
+// backticked bare word; exactly ONE of the 5 is a real program invocation (the
+// PDS wave-28 `--rerun` summary quoting `git rev-list --count …`). The other
+// four were disqualified by a NOUN — `cursor`/`has_more`, `file_digests`,
+// `state`/`open`/`note`, `landed`/`renew` — and three of them advertise real bp
+// flags (`--since`, `--files`, `--note`/`--supersede`/`--disposition`) that the
+// guard therefore went blind to. A guard that exists so the CLI does not go
+// quiet had made four fields quiet.
+//
+// THE UNIT IS A CLAUSE, NOT A FIELD — and not a bare span either. Scoping to
+// the span alone is too narrow on the real prose: the `--rerun` summary writes
+// "`git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo
+// the check runs against)", so git's own flags sit OUTSIDE the backticks. Span
+// scoping would re-open the exact false stale-install verdict on
+// `bp task stage --git-dir` that this guard was built to close. The clause that
+// invokes the foreign program is the smallest unit that covers the mention and
+// still leaves the other four-fifths of that field able to advertise.
+
+// spanInvokesForeignProgram reports whether a backticked code span's first
+// token names a program other than bp. It decides what a SPAN is — never what a
+// FIELD is. A span whose first token is not a bare word (`-`, the stdin
+// spelling; `<path>`; `--files …`) invokes nothing.
+func spanInvokesForeignProgram(span string) bool {
+	word := strings.TrimSpace(span)
+	if k := strings.IndexAny(word, " \t"); k >= 0 {
+		word = word[:k]
+	}
+	if word == "" || word == "bp" || word == "barkpark" {
+		return false
+	}
+	return isBareWord(word)
+}
+
+// withoutForeignProgramClauses returns text with every clause that invokes a
+// foreign program replaced by a space. Clauses break at `.`, `;`, `!` and `?`
+// followed by whitespace or end-of-text, and NEVER inside a backtick span — so
+// `git rev-list --count origin/main..<sha>` and `api/lib/x.ex` do not split a
+// sentence in half.
+func withoutForeignProgramClauses(text string) string {
+	var out strings.Builder
+	out.Grow(len(text))
+	for _, clause := range splitClauses(text) {
+		if clauseInvokesForeignProgram(clause) {
+			out.WriteByte(' ')
+			continue
+		}
+		out.WriteString(clause)
+	}
+	return out.String()
+}
+
+// clauseInvokesForeignProgram reports whether any complete backtick span in the
+// clause invokes a foreign program.
+func clauseInvokesForeignProgram(clause string) bool {
 	for {
-		i := strings.IndexByte(text, '`')
+		i := strings.IndexByte(clause, '`')
 		if i < 0 {
 			return false
 		}
-		rest := text[i+1:]
+		rest := clause[i+1:]
 		j := strings.IndexByte(rest, '`')
 		if j < 0 {
 			return false
 		}
-		span := rest[:j]
-		text = rest[j+1:]
-		word := strings.TrimSpace(span)
-		if k := strings.IndexAny(word, " \t"); k >= 0 {
-			word = word[:k]
+		if spanInvokesForeignProgram(rest[:j]) {
+			return true
 		}
-		if word == "" || word == "bp" || word == "barkpark" {
-			continue
-		}
-		if !isBareWord(word) {
-			continue
-		}
-		return true
+		clause = rest[j+1:]
 	}
+}
+
+// splitClauses cuts text into clauses at sentence punctuation that is outside a
+// backtick span and followed by whitespace or the end of the text. The
+// terminator and the whitespace after it stay with the clause they end, so
+// concatenating the result reproduces text exactly.
+func splitClauses(text string) []string {
+	var out []string
+	inSpan := false
+	start := 0
+	for i := 0; i < len(text); i++ {
+		switch c := text[i]; {
+		case c == '`':
+			inSpan = !inSpan
+		case inSpan:
+		case c == '.' || c == ';' || c == '!' || c == '?':
+			j := i + 1
+			if j < len(text) && !isSpaceByte(text[j]) {
+				continue
+			}
+			for j < len(text) && isSpaceByte(text[j]) {
+				j++
+			}
+			out = append(out, text[start:j])
+			start = j
+			i = j - 1
+		}
+	}
+	if start < len(text) {
+		out = append(out, text[start:])
+	}
+	return out
+}
+
+// isSpaceByte reports whether b is inter-word whitespace.
+func isSpaceByte(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
 // isBareWord reports whether w is an identifier-shaped program name: a letter

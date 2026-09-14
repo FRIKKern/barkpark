@@ -825,6 +825,56 @@ EOF
   return 0
 }
 
+# ══ THE SYNTHETIC FIXTURE ROSTER — ONE DECLARATION, BOTH AXES READ IT ═════════
+#
+# This harness family mints D-numbers that no charter will ever define: prose
+# examples in this script's own header, and phantoms the selftest PLANTS to
+# prove an axis can fire. Two axes meet them in two different corpora, so the
+# skip has to be declared once and DERIVED, never copied — a copy is a second
+# thing to forget, and forgetting it is what put this block here. The incident:
+# the squash commit of the PR that ADDED axis D described its own fixtures in
+# its commit message, and axis A — whose corpus is `git log --format=%B` — read
+# that sentence as a claim on an authority and reddened main. The guard's own
+# commit message tripped its sibling axis.
+#
+# Each entry is `<number>:<axes that SKIP it>`:
+#
+#   :ad — a synthetic this harness DOCUMENTS in its own prose. Axis A skips it
+#         (a sentence ABOUT a fixture is not a claim on an authority) and axis D
+#         skips it (this subject script writes the three of them out in the
+#         header above, and a guard that reds on its own documentation is a
+#         guard nobody keeps). These are the same three the DEFINITION lens is
+#         written strictly to refuse minting from — see charter_defined_numbers.
+#
+#   :a  — axis A skips it; axis D MUST NOT. This is the selftest's PHANTOM: the
+#         number it plants in a subject script so `--axis d` reds by name. Put
+#         it in the :ad set and that proof goes vacuous — the arm would skip the
+#         very citation the assertion is waiting for. So it is skipped exactly
+#         where it is only ever PROSE (a commit message) and left live exactly
+#         where it is a planted CITATION (a file).
+#
+# WHAT THIS DELIBERATELY DOES NOT DO: it does not widen a grace window and it
+# names no commit. A commit message citing an undefined number that is NOT on
+# this roster still reds axis A — that is the whole of the axis, and the
+# selftest pins both directions.
+#
+# (Written WITHOUT the `PDS-` prefix on purpose: axis D scans THIS file, and a
+# prefixed literal here would be a citation of a number nothing defines.)
+PDS_SYNTHETIC_FIXTURES="777:ad 999:ad 1000:ad 9999:a"
+
+# pds_synthetic_numbers <a|d> — the numbers the named axis skips, space-separated.
+# Both axes derive from the one declaration above; neither keeps a list.
+pds_synthetic_numbers() {
+  local axis="$1" entry out=""
+  for entry in $PDS_SYNTHETIC_FIXTURES; do
+    case "${entry#*:}" in
+      *"$axis"*) out="${out:+$out }${entry%%:*}" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+
 # ══ AXIS A — a commit may not cite an authority that does not exist ═══════════
 axis_a() {
   echo
@@ -906,6 +956,19 @@ axis_a() {
     git log --format=%B | grep -oE 'PDS-D[0-9]+' | sort -u > "$cites"
   fi
 
+  # THE ROSTER, OUT OF THE CORPUS — the same declaration axis D reads, taken at
+  # this axis's scope. A commit message that DISCUSSES a synthetic fixture is
+  # prose about the harness, not a claim on an authority, and axis A reading it
+  # as one is how this arm reddened its own main. Counted and PRINTED, so the
+  # skip is visible in the run rather than hidden in a lens. Nothing else is
+  # removed: an undefined number that is not on the roster still reds below.
+  local a_sent_nums a_sent_re a_sent_skipped
+  a_sent_nums="$(pds_synthetic_numbers a)"
+  a_sent_re="$(printf '%s' "$a_sent_nums" | tr ' ' '|')"
+  a_sent_skipped="$(grep -cE "^PDS-D(${a_sent_re})\$" "$cites" || true)"
+  grep -vE "^PDS-D(${a_sent_re})\$" "$cites" > "$WORKDIR/a_cites_real" || true
+  mv -f "$WORKDIR/a_cites_real" "$cites"
+
   comm -23 "$cites" "$defs" > "$unresolved"
 
   local n_def n_cite n_unres
@@ -917,6 +980,7 @@ axis_a() {
   echo "  charter:    ${CHARTER}"
   echo "  defined:    ${n_def} distinct PDS-D"
   echo "  cited:      ${n_cite} distinct PDS-D across the commit corpus"
+  echo "  fixtures:   ${a_sent_skipped} dropped before resolving, off a roster of $(printf '%s' "$a_sent_nums" | wc -w | tr -d ' ') (PDS-D$(printf '%s' "$a_sent_nums" | sed 's/ /, PDS-D/g'))"
   echo "  unresolved: ${n_unres}"
 
   if [ "$n_unres" -gt 0 ]; then
@@ -976,12 +1040,10 @@ axis_a() {
 # script's own header, a fixture string in its selftest) — both resolve, neither
 # asserts an authority. The axis therefore reds on existence alone.
 #
-# THE SENTINELS. PDS-D777 / PDS-D999 / PDS-D1000 are this arm's own synthetic
-# fixtures — the same three the DEFINITION lens is written strictly to refuse
-# minting from (see charter_defined_numbers). They are excluded BY NUMBER and
-# the count of skipped occurrences is PRINTED, so the exclusion is visible in
-# the run rather than hidden in a lens.
-AXIS_D_SENTINELS="777 999 1000"
+# THE SENTINELS are declared ONCE, above axis A, in PDS_SYNTHETIC_FIXTURES, and
+# this axis reads its share of them through `pds_synthetic_numbers d`. They are
+# excluded BY NUMBER and the count of skipped occurrences is PRINTED, so the
+# exclusion is visible in the run rather than hidden in a lens.
 #
 # THE TEST HARNESSES ARE OUT OF SCOPE, AND THIS IS THE ONE NARROWING.
 # `scripts/pds-*.test.sh` and `scripts/pds-*_test.sh` PLANT undefined D-numbers
@@ -1078,9 +1140,10 @@ axis_d() {
     raise 2; return 0
   fi
 
-  # Sentinels out, by number, counted.
-  local sent_re sent_skipped
-  sent_re="$(printf '%s' "$AXIS_D_SENTINELS" | tr ' ' '|')"
+  # Sentinels out, by number, counted. DERIVED from the one roster, never copied.
+  local sent_nums sent_re sent_skipped
+  sent_nums="$(pds_synthetic_numbers d)"
+  sent_re="$(printf '%s' "$sent_nums" | tr ' ' '|')"
   sent_skipped="$(grep -cE ":PDS-D(${sent_re})\$" "$cites" || true)"
   grep -vE ":PDS-D(${sent_re})\$" "$cites" > "$WORKDIR/d_cites_real" || true
 
@@ -1101,7 +1164,7 @@ axis_d() {
   echo "  charter:    ${CHARTER}"
   echo "  files:      ${n_files} in scope"
   echo "  citations:  ${n_occ} occurrence(s), ${n_distinct} distinct PDS-D"
-  echo "  sentinels:  ${sent_skipped} occurrence(s) skipped (PDS-D$(printf '%s' "$AXIS_D_SENTINELS" | sed 's/ /, PDS-D/g'))"
+  echo "  sentinels:  ${sent_skipped} occurrence(s) skipped (PDS-D$(printf '%s' "$sent_nums" | sed 's/ /, PDS-D/g'))"
   echo "  defined:    $(wc -l < "$defs" | tr -d ' ') distinct PDS-D in the charter"
   echo "  allowlist:  $(wc -l < "$allow" | tr -d ' ') entry(ies) — shrinks, never grows"
 

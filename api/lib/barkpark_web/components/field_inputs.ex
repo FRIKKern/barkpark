@@ -53,6 +53,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   attr :field, :map, required: true
   attr :editor_form, :map, required: true
@@ -277,7 +278,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div id={"bp-mp-ref-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-media-picker
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@v}
         value-mode="reference"
         dataset={@dataset}
@@ -309,7 +310,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div id={"bp-ref-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-reference-picker
+      <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@v}
         ref-type={@ref_type}
         dataset={@dataset}
@@ -341,7 +342,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div id={"bp-mp-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-media-picker
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@v}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
@@ -369,7 +370,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div style="display:flex;gap:6px;align-items:center;">
       <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" />
-      <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} data-slug-source={@source} title={"Generate from #{@source}"}>Generate</button>
+      <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} data-slug-source={@source} title={gettext("Generate from %{source}", source: @source)}><%= gettext("Generate") %></button>
     </div>
     """
   end

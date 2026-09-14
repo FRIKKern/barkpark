@@ -1262,25 +1262,34 @@ select.form-input {
    and it makes the alignment a property of the button rather than a lucky
    consequence of every row happening to have prose in it. */
 .tier .btn { width: 100%; margin-top: auto; }
-/* THE EIGHTH ORPHAN, DELIBERATELY LEFT STANDING, and the reason is a measurement
-   rather than a preference. `.tier-free .tier-price` is as dead as the seven rules
-   retired above — .tier-price has had no emitter since cch-w49-s1. But it is also
-   the ONLY authored rule head carrying `.tier-free`, and app.js still emits that
-   class (`(t.free ? " tier-free" : "")`, grep -n 'tier-free' app.js — one site).
-   Deleting this line therefore does not retire dead style; it converts a dead RULE
-   into a class emitted with no rule at all, and __css_check E2 reds on exactly that:
+/* THE EIGHTH ORPHAN, NOW RETIRED — AND THE EMISSION DELIBERATELY KEPT.
+   `.tier-free .tier-price` was the last of the eight and stood here on the
+   ground that it was the ONLY authored head carrying `.tier-free`, so deleting
+   it would convert a dead RULE into a class emitted with no rule and red
+   __css_check E2. That half was correct. The prescribed remedy — drop the
+   EMISSION too — was NOT, and the refusal of an ALLOW_HOOK_CLASSES entry rested
+   on a claim that is false: "nothing queries `.tier-free` in JS".
 
-     FAIL  E2 app.js  class "tier-free" is emitted but has no rule in app.css
+   Something does. `__preview__/breakpoint-sweep.mjs`'s tier-CTA tense probe
+   (function `tierLabelProbeJs`; re-derive with
+   `grep -n "tier-free" cloud/priv/static/__preview__/breakpoint-sweep.mjs`)
+   locates the Free tier's button as `grid.querySelector('.tier-free .btn')` and
+   REFUSES when it finds none. That probe is the deciding measurement of the
+   `tier-floor-render` job, which is a `needs:` of the required `Console gate`.
+   Run, not predicted — with the emission dropped:
 
-   That was run, not predicted. The two consenting ways to silence it — a KNOWN_GAPS
-   demotion or an ALLOW_HOOK_CLASSES entry — are both refused here: the first is the
-   waiver-absolving-nothing shape this very commit deletes two instances of, and the
-   second would be false, since nothing queries `.tier-free` in JS. The honest fix is
-   to drop the EMISSION and this rule together, which is one line in app.js — a file
-   fenced to a sequential lane and out of this PR's declared scope. Filed as its own
-   row so the pair moves together. `.tier-current` is NOT in the same position: it
-   has its own rule (app.css, `.tier-current { border-color: … }`). */
-.tier-free .tier-price { color: var(--muted-text); }
+     !! BREAKPOINT SWEEP (exit 2): billing-trial/dark@901: tier CTA tense probe
+        — the live pass rendered no .tier-free CTA at all
+
+   while `__css_check` stayed exit 0 through the same mutation, so the row's own
+   named gates could not see the regression at all.
+
+   So `.tier-free` is exactly what ALLOW_HOOK_CLASSES documents: a selector
+   target with no style rule by design. The rule is retired (the ratchet moves
+   -1, re-measured), the emission STAYS, and the class is registered as a hook
+   rather than silenced — the entry absolves a real E2 on every run, so it is
+   not the waiver-absolving-nothing shape. `.tier-current` is unaffected: it has
+   its own rule above. */
 
 /* ========================================================== MODAL */
 /* GR63 OVERFLOW: the modal root is the ONLY scroll container a modal has —
@@ -6580,8 +6589,34 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    and the horizontal score goes green while the words are still wrong. The
    pill must simply refuse to shrink; the sentence beside it is the flexible
    part. `flex` is not one of E14's five core properties, so this block starts
-   no recipe it must then finish (__css_check.mjs E14, design choice 1). */
-.op-gate .status-pill { flex: 0 0 auto; }
+   no recipe it must then finish (__css_check.mjs E14, design choice 1).
+
+   cch-w19-bl-op-gate-dot-centring-at-320 — `align-self: flex-start` JOINS THIS
+   SAME RULE, AND IT IS ON THE PILL, NOT ON `.op-gate`. The second defect on
+   this host is vertical: `.op-gate` is `align-items: center`, so whenever the
+   sentence WRAPS the pill is centred against the whole wrapped block and its
+   dot marks a line in the MIDDLE of the sentence it introduces. Measured with
+   a Range over the sentence's TEXT NODE (the element's merged client rect
+   spans every line and is green on this by construction), 244 of 280 gates
+   across the operator leg's axes rendered a wrapped sentence and the dot sat
+   off line 1 in every one of them — at 320 on `operator-zero-staging` the gate
+   sentence takes FIVE lines and the dot centred on line 3.
+
+   WHY `align-self` ON THE CHILD AND NOT `align-items: flex-start` ON
+   `.op-gate`, which is what the row asked for: the row's cited precedent does
+   not exist. `.fleet-status` declares `align-items: center`, not `flex-start`
+   (grep -n 'fleet-status' app.css; exactly one of its lines carries
+   align-items and the value is `center`). Both candidates were DRIVEN.
+   Container-level `flex-start` also re-anchors the SENTENCE, which is the
+   shorter box on a ONE-line gate: every unwrapped cell moved its text up
+   2.25px — a restyle of the case that was never broken. `align-self` on the
+   pill is a no-op wherever the pill is the tall item, so the one-line cells
+   are byte-identical: all 280 cells match origin/main on wrap count, line-1
+   rect, gate height and pill scrollWidth/clientWidth, and only the dot moves.
+   Guarded by the dot/line-1 arm of overflow-guard's W20-op-gate-pill-bounded
+   leg, whose anti-vacuity arm reds if no cell ever renders a wrapped
+   sentence. */
+.op-gate .status-pill { flex: 0 0 auto; align-self: flex-start; }
 
 /* The rollout's own vocabulary, stated once under the rows. */
 .op-foot {

@@ -149,6 +149,14 @@ var nounBuiltins = []nounBuiltin{
 			return runContextPack(out, g, tail)
 		},
 	},
+	{
+		Noun:    "context",
+		Verb:    "map",
+		Summary: "Mine a keyword into a context atlas (shape page + an authoritative laws sidecar).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runContextMap(out, g, tail)
+		},
+	},
 }
 
 // lookupNounBuiltin returns the built-in Execute must run for (noun, verb),

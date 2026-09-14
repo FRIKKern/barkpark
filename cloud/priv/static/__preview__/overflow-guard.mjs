@@ -5974,7 +5974,7 @@ async function main() {
         `\n${D} — ${GATE_SCENS.length} operator scenarios x ${GATE_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells; .op-gate .status-pill scrollWidth vs clientWidth, + page overflow)\n`,
       );
-      let cells = 0, pillsSeen = 0, squeezed = 0, pageOver = 0;
+      let cells = 0, pillsSeen = 0, squeezed = 0, pageOver = 0, wrapped = 0, offLine1 = 0;
       for (const scen of GATE_SCENS) {
         for (const theme of ["light", "dark"]) {
           // Enter wide and assert the LANDED view — `?scen=` alone does not
@@ -6001,11 +6001,31 @@ async function main() {
               `(function(){` +
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var d=document.documentElement;` +
-              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,pills:0,bad:[],m:[]};` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,pills:0,bad:[],m:[],dots:[]};` +
               `[].slice.call(v?v.querySelectorAll('.op-gate .status-pill'):[]).forEach(function(p,i){` +
               `  out.pills++;` +
               `  out.m.push(p.clientWidth+'/'+p.scrollWidth);` +
               `  if(p.scrollWidth>p.clientWidth) out.bad.push({i:i,sw:p.scrollWidth,cw:p.clientWidth,t:(p.textContent||'').trim().slice(0,32)});` +
+              `});` +
+              // cch-w19-bl-op-gate-dot-centring-at-320 — THE DOT'S OWN LINE.
+              // PER-LINE rects, never the sentence element's merged client rect:
+              // a wrapped <span> returns ONE rect spanning every line, and the
+              // pill's centre is inside it by construction, so the element-rect
+              // form of this question is green on the defect. A Range over the
+              // sentence's TEXT NODE returns one rect PER LINE, and line 1 is
+              // the only one the dot may sit on. `lines` rides along per gate so
+              // the anti-vacuity arm below can prove a wrap was ever rendered.
+              `[].slice.call(v?v.querySelectorAll('.op-gate'):[]).forEach(function(g,i){` +
+              `  var dot=g.querySelector('.status-pill-dot');` +
+              `  var sent=[].slice.call(g.children).filter(function(c){return !c.classList.contains('status-pill');}).pop();` +
+              `  if(!dot||!sent){out.dots.push({i:i,measured:false,why:'gate has no .status-pill-dot or no sentence span'});return;}` +
+              `  var tn=sent.firstChild, r=document.createRange();` +
+              `  if(tn&&tn.nodeType===3) r.selectNodeContents(tn); else r.selectNodeContents(sent);` +
+              `  var rects=[].slice.call(r.getClientRects());` +
+              `  if(!rects.length){out.dots.push({i:i,measured:false,why:'Range over the sentence returned ZERO client rects'});return;}` +
+              `  var d=dot.getBoundingClientRect(), c=(d.top+d.bottom)/2, l1=rects[0];` +
+              `  out.dots.push({i:i,measured:true,lines:rects.length,c:+c.toFixed(2),t:+l1.top.toFixed(2),b:+l1.bottom.toFixed(2),` +
+              `    ok:(c>=l1.top&&c<=l1.bottom),label:((g.querySelector('.status-pill-label')||{}).textContent||'').slice(0,24)});` +
               `});` +
               `return out;})()`,
             );
@@ -6034,12 +6054,40 @@ async function main() {
               squeezed++;
               fail(D, `${scen}/${theme}@${width} gate${b.i} \`.op-gate .status-pill\`: scrollWidth ${b.sw} > clientWidth ${b.cw} — the chip is ${b.sw - b.cw}px narrower than its own label "${b.t}", which therefore paints OUTSIDE the capsule`);
             }
-            row.push(`${width}:${m.m.join(",")}${m.bad.length ? " !" + m.bad.length : ""}`);
+            // THE DOT MUST SIT ON LINE 1 OF THE SENTENCE IT INTRODUCES.
+            // `.op-gate` is `align-items: center`, so a pill beside a sentence
+            // that WRAPS lands on the middle line — at 320 on
+            // `operator-zero-staging` the gate sentence takes 5 lines and the
+            // dot centred on LINE 3, entirely below the words it marks. An
+            // unmeasurable cell is a FAILURE, never a skip.
+            for (const g of m.dots) {
+              if (!g.measured) {
+                fail(D, `${scen}/${theme}@${width} gate${g.i}: the dot/line-1 question could not be measured — ${g.why}. An unmeasured cell is not a clean cell`);
+                continue;
+              }
+              if (g.lines > 1) wrapped++;
+              if (!g.ok) {
+                offLine1++;
+                fail(D, `${scen}/${theme}@${width} gate${g.i} ("${g.label}"): the pill's dot centre is ${g.c}, outside line 1's rect [${g.t}, ${g.b}] of a ${g.lines}-line sentence — the dot marks a line BELOW the one it introduces`);
+              }
+            }
+            row.push(`${width}:${m.m.join(",")}${m.dots.length ? " L" + m.dots.map((g) => (g.measured ? g.lines : "?")).join("") : ""}${m.bad.length ? " !" + m.bad.length : ""}`);
           }
           process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
         }
       }
+      // ANTI-VACUITY 1 — the dot/line-1 assertion is TRIVIALLY TRUE on a
+      // sentence that never wraps (one line rect, and the centred dot is inside
+      // it). If not one cell in this whole sweep rendered a wrapped sentence,
+      // the arm above measured nothing and must say so rather than print a
+      // green built out of single-line cells.
+      if (wrapped === 0) {
+        fail(D, `axis check: not one of the ${cells} cells rendered a WRAPPED gate sentence, so the dot/line-1 assertion is vacuous — it is trivially true on a one-line sentence. Either the fixtures' copy shrank or the width set lost its phone end`);
+      }
       if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${wrapped} of the ${pillsSeen} measured gates rendered a WRAPPED sentence and the dot sat on LINE 1 in every one of them (${offLine1} off line 1) — the question is asked with a Range over the sentence's TEXT NODE, because the element's merged client rect spans every line and is green on the defect by construction`,
+        );
         okLine(
           `${cells} / ${cells} cells clean (${pillsSeen} .op-gate .status-pill measured) across ` +
           `${GATE_WIDTHS.join("/")} on ${GATE_SCENS.join(" + ")}; ${squeezed} chips narrower than their ` +

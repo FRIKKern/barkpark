@@ -374,6 +374,57 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 scripts/ci-pr-inventory.py --selftest
 
+      # ── MAIN-RED PER-TREE HOLD (task-fdd556e0b6ba071b, 2026-09-13) ────────────
+      # A red that REPRODUCES ON CLEAN MAIN gets an owner and a per-tree hold, in
+      # one motion. Three defects reached main behind a green merge button in a
+      # single round on 2026-09-13 — a doc-budget breach 82 bytes over cap behind
+      # a NEUTRAL breaker verdict, a published package changed with no changeset,
+      # and a live `go test` failure in internal/taskboard the fleet merged
+      # through all afternoon. All three were UNOWNED, not unnoticed.
+      #
+      # WHY HERE AND NOT IN THE REQUIRED SET. Widening the four required contexts
+      # is the wrong fix and this step deliberately does not: a paths-filtered
+      # workflow emits NO check run on a non-matching PR (so its name can never be
+      # required without deadlocking the branch — the S4 exclusions), and a
+      # required job carrying `if: needs.changes.outputs.*` is SKIPPED on most PRs
+      # while A SKIPPED JOB COUNTS AS PASSING, so adding conditional jobs to the
+      # required set buys a green that asserts nothing. The hold rides `pr-meta`
+      # because this job is PATH-AGNOSTIC by construction (see the header): the
+      # tree filter is computed by the script from the held registry, and a
+      # `paths:` predicate on the venue would make the check green-because-it-
+      # never-ran on exactly the PRs it is for.
+      #
+      # Harness FIRST, subject second — the house selftest-first idiom. The
+      # --selftest arms include the two-direction proof (a change inside a held
+      # tree is HELD, one outside is not, in ONE run) and three MUTATION pairs in
+      # which a refusal guard is deleted from a scratch copy and the mutant is
+      # shown to fail open on the same input.
+      - name: Prove the main-red hold can refuse, in both directions (--selftest)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/main-red-hold.sh --selftest
+
+      # Reads .github/main-red-holds.json (committed — a lane reads the file, not
+      # a message) against this PR's own changed files. Exit codes are read
+      # DIRECTLY, never through a pipe: a gate piped to `tail` reports tail's exit
+      # code, and this repo has already misread `rc=0` off exactly that shape.
+      # 3 (CANNOT READ) reds just as loudly as 1 (HELD) — a failed read must never
+      # be byte-identical to a clean one.
+      - name: This change touches no tree held red on main
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && github.event_name == 'pull_request' }}
+        run: |
+          git fetch -q origin main || true
+          set +e
+          bash scripts/main-red-hold.sh check --changed-since origin/main
+          rc=$?
+          set -e
+          echo "main-red-hold.sh check exited ${rc} (read directly, unpiped)"
+          case "$rc" in
+            0) echo "::notice title=main-red hold::CLEAR — this change touches no tree currently held red on main." ;;
+            1) echo "::error title=main-red hold::HELD — this change touches a tree that is RED ON MAIN, reproduced on a clean checkout. The verdict above names the OWNER, the reproduction command and the sha it reproduced on. It lifts when that same command exits 0 on a clean checkout of a later main sha (scripts/main-red-hold.sh lift --id <id>); there is no --force."; exit 1 ;;
+            3) echo "::error title=main-red hold::CANNOT READ — the hold check could not measure (registry unparseable, base ref unresolvable, or an empty diff). This is NOT 'no hold needed'; the cause is printed above."; exit 1 ;;
+            *) echo "::error title=main-red hold::unexpected exit ${rc} from scripts/main-red-hold.sh check"; exit 1 ;;
+          esac
+
   # ── VENUE MOVE 2026-09-09 (task-33742276cf0a35b1) ──────────────────────────
   # The filebase critic used to be five steps inside `pr-meta` above. MEASURED
   # over 61 pull_request runs of this workflow created 2026-09-08T11:36Z ..

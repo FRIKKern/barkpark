@@ -192,6 +192,29 @@ cli-install: cli-build ## LOCAL: build + install the STAMPED bp onto PATH ($(BIN
 	@command -v bp >/dev/null 2>&1 && [ "$$(command -v bp)" != "$(BINDIR)/bp" ] \
 	  && echo ">> NOTE: PATH resolves bp to $$(command -v bp), not $(BINDIR)/bp — adjust PATH or BINDIR" || true
 
+# THE SHARED BINARY HAS NO UNDO, and that is why a stale fleet bp stays stale.
+# `$(BINDIR)/bp` is ONE file that every concurrent agent session on this host
+# executes for `bp task claim|pulse|stamp|close`. `cli-install` overwrites it in
+# place: `install -m 0755` truncates the target, so the moment it runs the
+# previous binary NO LONGER EXISTS ANYWHERE, and a swap that turns out to be
+# wrong can only be undone by rebuilding from the old commit — which needs that
+# commit, which is exactly what the overwritten binary was carrying. The swap
+# everybody is afraid of is not afraid of the BUILD; it is afraid of the
+# missing undo. This target adds it: the outgoing binary is copied to
+# `$(BINDIR)/bp.prev-<its own stamped commit>` BEFORE anything replaces it, and
+# the one-line restore is printed at the end where the operator can copy it.
+#
+# The backup is keyed on the OUTGOING commit, never on a date or a serial: two
+# runs from the same old binary write the same path (idempotent), and two runs
+# from different ones cannot clobber each other's undo.
+cli-install-safe: cli-build ## LOCAL: back up the installed bp, THEN install (prints the one-line rollback)
+	@mkdir -p "$(BINDIR)"
+	@rm -f "$(BINDIR)/.bp.prev-commit"
+	@if [ -e "$(BINDIR)/bp" ]; then prev="$$("$(BINDIR)/bp" version -o json 2>/dev/null | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')"; [ -n "$$prev" ] || prev=unstamped; cp -p "$(BINDIR)/bp" "$(BINDIR)/bp.prev-$$prev" || exit 1; printf '%s\n' "$$prev" > "$(BINDIR)/.bp.prev-commit"; echo ">> Backed up the outgoing bp ($$prev) -> $(BINDIR)/bp.prev-$$prev"; else echo ">> No existing $(BINDIR)/bp to back up (first install)"; fi
+	@$(MAKE) --no-print-directory cli-install
+	@prev="$$(cat "$(BINDIR)/.bp.prev-commit" 2>/dev/null)"; if [ -n "$$prev" ]; then echo ">> ROLLBACK (one line): cp -p $(BINDIR)/bp.prev-$$prev $(BINDIR)/bp"; fi
+
+
 # The pdrender→TUI wasm the paper reader lazy-loads (api/.../bulldocs.html.heex
 # fetches /assets/bp-pdrender.wasm.gz). Built from #1357's entry (cmd/pdrender-wasm)
 # with a PINNED toolchain: Go's js/wasm output is not byte-reproducible across

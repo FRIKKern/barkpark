@@ -23,26 +23,24 @@ defmodule BarkparkCloud.Health do
   * `serving_since` — RESERVED, on every surface, for the instant this sha was
     FIRST OBSERVED SERVING. Durable; a no-op restart must never move it.
   * `process_since` — when THIS BEAM started. Moves on every restart.
+  * `provisioner_sha` — the commit the INSTALLED provisioner binary was built
+    from. A SECOND reading of a DIFFERENT thing, not a second name for
+    `serving_sha`: the provisioner is cross-built on the runner at the run's
+    headSha, while this app is `git pull --ff-only`-ed on the box, so under
+    back-to-back merges the two legitimately diverge. One "version" field would
+    be ambiguous; these are two clocks.
 
-  The plane does not have a durable serving record yet, so `serving_since`
-  here is still the process clock (see `serving/0`) and is emitted with an
-  explicit basis string saying so. Do NOT diff it against the box's
-  `serving_since` until it is durable.
+  `serving_since` is now DURABLE here too: `BarkparkCloud.Health.ServingMemory`
+  keeps one row per sha in the plane's own Postgres, so a restart that deploys
+  nothing cannot move it. It IS comparable to a box's `serving_since` — same
+  meaning, same name, both surviving a restart. The basis string beside it says
+  which of the store's three states produced the value.
   """
 
   require Logger
 
+  alias BarkparkCloud.Health.ServingMemory
   alias BarkparkCloud.Repo
-
-  # The honest label on a gauge a `docker restart` can IMPROVE. Emitted next to
-  # `serving_since` so nobody has to read this module to know what the number
-  # is. Its wording is asserted over the wire in health_test.exs — the test is
-  # the guard that this label cannot be quietly dropped.
-  @serving_since_basis "process-derived: this is when THIS BEAM started, not when this sha was " <>
-                         "first observed serving. A bare restart that deploys nothing moves it " <>
-                         "FORWARD, which makes any lag measured against it read SMALLER. Use " <>
-                         "serving_sha to decide what is deployed; do not read this as a deploy " <>
-                         "timestamp and do not compare it to the box's serving_since."
 
   @type result :: {:ok, map()} | {:error, map()}
 
@@ -93,38 +91,90 @@ defmodule BarkparkCloud.Health do
     `:erlang.system_info(:start_time)`), never env-derived, so config cannot
     fake it. It answers "how long has this PROCESS been up", NOT "how long has
     this SHA been live".
-  * `serving_since` currently carries that SAME process-derived instant, which
-    is why `serving_since_basis` ships beside it saying so in plain words.
+  * `provisioner_sha` is read from `BARKPARK_PROVISIONER_SHA` at call time, and
+    is the sha of the provisioner BINARY installed on this box — never a second
+    read of the app's sha. `deploy/cp-deploy.sh` (the `BARKPARK_PROVISIONER_SHA`
+    block) reads it out of the ARTIFACT it is about to install with
+    `bp-provisioner --version`, deliberately NOT from `$NEW`, because `$NEW` is
+    the APP's sha and would make the two fields agree by construction — the
+    exact inference this field exists to kill. Like `BARKPARK_GIT_SHA` it is
+    exported AFTER `cloud/.env` is sourced, so a stale `.env` cannot win, and
+    the compose line (`cloud/docker-compose.yml`, bare
+    `- BARKPARK_PROVISIONER_SHA`) carries no default.
 
-  D417 PLACEHOLDER — READ THIS BEFORE COMPARING SURFACES. On this surface
-  `serving_since` is a PLACEHOLDER for a durable first-observed-serving record
-  that the control plane does not keep yet. Proved by run, not by reading: two
-  BEAMs running this exact body back to back reported lag 6,334 ms -> 263 ms,
-  with `serving_since` moving FORWARD 6.4 s — a 24x "improvement" from changing
-  nothing about what is deployed. The box (`ServingMemory`) uses this name for
-  the DURABLE instant, and renders an ISO-8601 string where this renders a
-  `%DateTime{}`. Do NOT compare the plane's `serving_since` to the box's until
-  this one is durable; compare `serving_sha` instead, and use `process_since`
-  when you mean uptime. Making it durable is a separate slice.
+    ABSENT MEANS `nil`, and absent has TWO shapes here, both collapsed to `nil`
+    ON PURPOSE: the var UNSET (a control plane deployed before that block
+    existed, or any local/dev run) and the var set to the EMPTY STRING (deploy
+    ran, but the installed binary carries no stamp — a plain `go build`, or any
+    provisioner older than the `--version` flag). The writer's own contract is
+    "strictly 40 lowercase hex **or empty**", so an empty export is how deploy
+    says "I looked and there was nothing"; republishing that as `""` would put a
+    value-shaped non-answer on the wire. A string that is neither empty nor a
+    sha is published RAW rather than nil-ed: cp-deploy.sh already validates and
+    logs, so a malformed value reaching here means something bypassed it, and an
+    operator is better served seeing it than having it hidden as an
+    indistinguishable `nil`. Nothing is ever SUBSTITUTED — in particular this
+    never falls back to `git_sha`, which would manufacture the agreement the
+    field exists to disprove.
+  * `serving_since` is read from `ServingMemory`, NOT from this VM. It is the
+    instant this plane first observed `serving_sha` serving, kept in Postgres
+    and keyed by that sha, and it is normally OLDER than `process_since` —
+    which is the whole point. `nil` is a legal answer (no sha, or the store is
+    unreachable) and `serving_since_basis` says which.
+
+  D417 CLOSED — it used to be the process clock, and this is the paragraph that
+  used to warn you about it. Proved by run, not by reading: two BEAMs running
+  the OLD body back to back reported lag 6,334 ms -> 263 ms, with
+  `serving_since` moving FORWARD 6.4 s — a 24x "improvement" from changing
+  nothing about what is deployed. That is fixed: the value now comes from a
+  durable per-sha record, so a bare restart cannot move it and the plane's
+  `serving_since` IS comparable to the box's. `process_since` is still here,
+  still boot-local, and is still what you want when you mean uptime.
   """
   @spec serving() :: %{
           git_sha: String.t() | nil,
           serving_sha: String.t() | nil,
-          serving_since: DateTime.t(),
+          provisioner_sha: String.t() | nil,
+          serving_since: DateTime.t() | nil,
           process_since: DateTime.t(),
           serving_since_basis: String.t()
         }
   def serving do
+    # The RAW env value is what `git_sha`/`serving_sha` publish — that reader's
+    # contract is "absent means nil, present means exactly what you set", and it
+    # is asserted against three injected values. ServingMemory validates the
+    # same string for its own key and answers `nil` for anything that is not a
+    # git object name, so a branch name exported by mistake shows up as a sha
+    # you can see and a serving_since that declines to guess.
     sha = System.get_env("BARKPARK_GIT_SHA")
-    process_since = vm_started_at()
+    memory = ServingMemory.read(sha: sha)
 
     %{
       git_sha: sha,
       serving_sha: sha,
-      serving_since: process_since,
-      process_since: process_since,
-      serving_since_basis: @serving_since_basis
+      provisioner_sha: provisioner_sha(),
+      serving_since: memory.serving_since,
+      process_since: vm_started_at(),
+      serving_since_basis: memory.serving_since_basis
     }
+  end
+
+  # The installed provisioner binary's sha, or nil. Read at call time from a
+  # DIFFERENT env var than `git_sha`, so the two fields can disagree — which is
+  # the entire point of publishing both.
+  #
+  # UNSET and EMPTY both answer nil: deploy writes "" when the artifact carried
+  # no stamp, so "" IS this writer's way of saying absent, and emitting it back
+  # would put a value-shaped non-answer on an anonymous surface. Trimming first
+  # means a hand-exported value with a trailing newline reads as the sha it
+  # obviously is rather than as a near-miss. Anything else goes out RAW: it is
+  # visibly not a sha, so it cannot be mistaken for one, and hiding it would
+  # hide the misconfiguration that produced it.
+  defp provisioner_sha do
+    case System.get_env("BARKPARK_PROVISIONER_SHA") do
+      nil -> nil
+      value -> if String.trim(value) == "", do: nil, else: String.trim(value)
+    end
   end
 
   defp vm_started_at do

@@ -353,6 +353,13 @@ set -euo pipefail
 # a census-only tier in this script — re-filed for gates 2026-09-10. Until that
 # lands the gap is real, the direction is safe, and the measurement is written
 # down here so nobody re-derives it and reaches the same dead end.
+#
+# apps/mobile/package.json — cch-w53. Declared because
+# cloud/test/barkpark_cloud/push/session_revocation_deferral_test.exs reads it
+# (Path.expand("../../../../apps/mobile/package.json", __DIR__)) to prove the
+# mobile half of the push-token deferral is still unshipped. A DECLARATION, not
+# an exemption: the test is an ordinary cloud/test file in the default lane, so
+# a PR editing apps/mobile/package.json must dispatch the suite that reads it.
 CLOUD_PATHS='cloud/**
 cloud/lib/**
 .github/workflows/**
@@ -371,6 +378,7 @@ api/test/support/totp_test_helper.ex
 api/lib/barkpark_web/controllers/site_deploy_controller.ex
 api/test/support/fixtures/box_capacity_refusal.json
 api/test/support/fixtures/box_status_payload.json
+apps/mobile/package.json
 js/packages/create-barkpark-app/templates/**
 scripts/**
 templates/**

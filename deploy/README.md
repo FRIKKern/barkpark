@@ -40,10 +40,12 @@ seamless, this covers crashes/restarts outside deploys. Baked into the renderers
 armed on running boxes by `instance-deploy.sh` (idempotent, `caddy validate`d,
 auto-reverting; port-flip-safe). Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script (169 checks: slot selection, flip, failure semantics, channel seam,
-coalesce, rollback happy flip-back + typed refusals + unhealthy fail-closed,
-/mcp + /connectors route idempotence and their install guards):
-`deploy/instance-deploy_test.sh`.
+script: `bash deploy/instance-deploy_test.sh` — 452 checks: slot selection,
+flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
+typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
+and their install guards. Each of the three check counts on this page is READ
+BACK and asserted by the engine it describes, which fails naming both numbers
+when they disagree — so a count here cannot drift silently again.
 
 **Remote MCP endpoint (`/mcp`).** `instance-deploy.sh` arms an idempotent
 path-based Caddy route (`handle /mcp /mcp/*` → `localhost:4010`, marker
@@ -162,7 +164,7 @@ Caddy port-flip back (`<1 s`, no reboot/re-gate); a cold older release reboots t
 idle slot onto it + gates + flips. The slot unit is
 `deploy/systemd/barkpark-site@.service` (§below). Offline gate (fake
 `systemctl`/`caddy`/`npm`, no real systemd/network): `bash
-deploy/site-deploy-node.sh --self-test` — 124 checks: the six-stage protocol,
+deploy/site-deploy-node.sh --self-test` — 497 checks: the six-stage protocol,
 boot-in-place HEALTH with the marker-value gate, the marker-anchored port flip,
 retire protecting both live slots, the warm-rollback flip, and the fleet build
 admission gate (below) — including the hazard specific to THIS engine: HEALTH
@@ -255,8 +257,9 @@ fd form is mandatory: the kernel dropping fd 7 is the only release that survives
 SIGKILL. Fails OPEN and loudly (no `flock(1)`, unopenable lock) — a gate that
 denies every deploy is worse than the contention it prevents.
 
-Offline gate (no npm/caddy/systemd): `bash deploy/site-deploy.sh --self-test` —
-228 checks: the symlink flip, forward/back rollback and retire-N over fixture
+Offline gate (no npm/caddy/systemd):
+`bash deploy/site-deploy.sh --self-test` — 557 checks: the symlink flip,
+forward/back rollback and retire-N over fixture
 release dirs, the marker reader, then the real script driven end-to-end against a
 fake npm (the six-stage protocol, a lying build failing HEALTH with exit 14 and
 being purged, the retry rebuilding, a BUILD failure carrying its 401 to stdout),

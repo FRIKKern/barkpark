@@ -106,6 +106,14 @@ import { Code } from "./code-node.js";
 // ships no `diagram` node), so NO StarterKit node is disabled for it. See
 // ./diagram-node.js.
 import { Diagram } from "./diagram-node.js";
+// scaffy-backlog-blocks-editable-studio: the `diff` + `filetree` blocks as canvas
+// ATTR-ATOM nodes — the code/diagram shape GENERALIZED to one verbatim-body attr
+// plus optional scalar metadata. UNLIKE code/diagram their PREVIEW is the reader's
+// OWN server-pushed HTML (bp:block-html), because no client runtime can produce
+// diff/filetree markup and the parity gate forbids hand-mirroring it. Named
+// `bpDiff` / `bpFiletree`; NO StarterKit collision, so no StarterKit node is
+// disabled for them. See ./technical-node.js.
+import { Diff, Filetree } from "./technical-node.js";
 // S3.5: the 7 native-control field-* blocks as a canvas CONTROL-ATOM node — the
 // FOURTH node-view variant. A SINGLE `bpField` node serves all 7 native field types
 // (string/slug/text/boolean/select/datetime/color), discriminated by bpType; the
@@ -790,6 +798,17 @@ class BpPaperCanvas extends HTMLElement {
         // <pre data-bp-type='diagram'> (it does NOT claim the bare <pre> the code node
         // already owns).
         Diagram,
+        // scaffy-backlog-blocks-editable-studio: the diff + filetree attr-atom nodes
+        // + their shared node-view. Registers the `bpDiff` / `bpFiletree` node types
+        // (atoms; the verbatim body + optional metadata ride data-* attrs; a NodeView
+        // pairing a SERVER-PAINTED reader preview hole with a non-PM <textarea>
+        // island that uses stopEvent/ignoreMutation so PM never turns diff keystrokes
+        // into transactions) so runToTiptap's { type:"bpDiff", attrs:{diff,file?,lang?} }
+        // / { type:"bpFiletree", attrs:{text,legend?} } nodes mount as editable blocks
+        // whose fields round-trip through getJSON(). Each parses ONLY its own
+        // <div data-bp-type='diff'|'filetree'>.
+        Diff,
+        Filetree,
         // S3.5 + run-splitter tail: the field CONTROL-ATOM node + its node-view.
         // Registers the SINGLE `bpField` node type serving ALL 9 field-* kinds — the 7
         // NATIVE controls (field-string / field-slug / field-text / field-boolean /

@@ -178,7 +178,7 @@ func listBlock(items []any) pdrender.Block {
 func codeBlock(source, lang string) pdrender.Block {
 	attrs := map[string]any{"code": source}
 	if lang != "" {
-		attrs["language"] = lang
+		attrs["lang"] = lang
 	}
 	return pdrender.Block{Type: "code", Attrs: attrs}
 }

@@ -23,9 +23,13 @@ defmodule BarkparkCloud.Notifications do
       allowlist + the per-event toggle decide whether to send, recipients are
       ALWAYS team members (Coolify's `EmailChannel.php` data-exfiltration guard),
       and every send is recorded as a `Delivery` row (status / attempts /
-      last_error). Synchronous for v1 — cloud/ has no Oban — but the `Delivery`
-      row is the retry seam for when it does. `dispatch_event/3` NEVER raises into
-      its caller's broadcast path.
+      last_error). The EMAIL send is synchronous, and the `Delivery` row is the
+      retry seam. The "cloud/ has no Oban" this used to say has been FALSE since
+      the chat lane landed: cloud/ runs Oban, and this very module enqueues jobs
+      through it (`enqueue_chat_job/1` → `Oban.insert/1`); the durable log that
+      seam writes is itself pruned on a 180-day window by
+      `Workers.AgentRetentionWorker`. `dispatch_event/3` NEVER raises into its
+      caller's broadcast path.
   """
   import Ecto.Query, warn: false
   require Logger
@@ -1562,9 +1566,11 @@ defmodule BarkparkCloud.Notifications do
   Recipients are ALWAYS team members — the data-exfiltration guard from Coolify's
   `EmailChannel.php`. Each recipient gets one `Delivery` row (status sent/failed).
 
-  Synchronous for v1 (cloud/ has no Oban); always returns `:ok` and NEVER raises
-  into the caller's broadcast path — a send failure lands as a `failed` Delivery
-  row, not an exception.
+  The EMAIL send is synchronous (the chat fan-out is NOT — it enqueues one Oban
+  job per routed channel; cloud/ has run Oban since that lane landed, and the
+  "cloud/ has no Oban" this line used to carry was stale). Always returns `:ok`
+  and NEVER raises into the caller's broadcast path — a send failure lands as a
+  `failed` Delivery row, not an exception.
   """
   @spec dispatch_event(Team.t() | binary(), atom(), map()) :: :ok
   def dispatch_event(team, event, payload \\ %{}) when is_atom(event) do

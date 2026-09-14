@@ -161,10 +161,27 @@ export function objectDatabaseRefusal(root) {
 // terminate with the refusal still in the buffer, refusing SILENTLY. `writeSync`
 // returns only once the bytes are out, which is the one shape that is both drained
 // and immediate. Same reasoning __preview__/exit-vocabulary.mjs gives for draining.
+//
+// WHY THIS EXIT IS MARKED AND NOT REWRITTEN AS process.exitCode. Arm B of
+// scripts/workflow-run-shell-check.sh refuses an unmarked process.exit() in any
+// script a workflow PIPES, and console-harness.yml pipes this file into `tee`.
+// The defect that arm guards is a TRUNCATED PAYLOAD: node does not flush a
+// pending asynchronous stdout write before exit. Neither half of that applies
+// here. (1) There is no pending stdout write to lose — this runs before the
+// first `test()` registration, so not one byte of TAP has been produced, and
+// the end-to-end control below asserts exactly that (`not one predicate ran`,
+// `and no tally was printed`). (2) The refusal itself goes out via `writeSync`,
+// which returns only once the bytes are gone, for the reason the paragraph
+// above gives. Setting `process.exitCode` instead would not abort module
+// evaluation: the hundred-odd registrations below would run anyway against the
+// broken tree and print the 36 false reds this block exists to prevent. The
+// exit CODE is the payload here, not the stdout — `NO_OBJECT_DATABASE` is a
+// contract the suite's own control asserts by spawning this file (search this
+// file for `the suite must refuse, not run`).
 const OBJECT_DB_REFUSAL = objectDatabaseRefusal(REPO);
 if (OBJECT_DB_REFUSAL) {
   writeSync(2, `${OBJECT_DB_REFUSAL}\n`);
-  process.exit(NO_OBJECT_DATABASE);
+  process.exit(NO_OBJECT_DATABASE); // pipe-exit-ok: aborts before any test registers, so no stdout payload exists to truncate; writeSync has already drained the refusal, and the exit CODE is the contract a control below asserts
 }
 
 // ── THE CONTROLS FOR THE BLOCK ABOVE ────────────────────────────────────────
@@ -2790,12 +2807,38 @@ test('wave 68: a 429 that CLEARS lets the read succeed — the retry recovers, i
 // Return the source of the `cloud-gate:` job alone, so a mutator cannot resolve
 // through `report-main-failure:` (which also carries an inline `needs:`) — the same
 // bounding the wave-9 `needs:` spelling case had to adopt.
-const cloudGateBody = (text) => {
+const cloudGateSpan = (text) => {
   const from = text.search(/^ {2}cloud-gate:$/m);
   assert.notEqual(from, -1, 'sanity: cloud.yml must declare a cloud-gate job at column 2');
   const rest = text.slice(from + 1);
   const next = rest.search(/^ {2}[A-Za-z0-9_-]+:$/m);
-  return next === -1 ? rest : rest.slice(0, next);
+  return { from: from + 1, to: next === -1 ? text.length : from + 1 + next };
+};
+const cloudGateBody = (text) => {
+  const { from, to } = cloudGateSpan(text);
+  return text.slice(from, to);
+};
+
+// …and APPLY a mutation inside that same span. Finding the target in cloud-gate's body
+// and then handing the matched TEXT to `String.prototype.replace` over the whole file
+// throws the bounding away: `replace` takes the FIRST substring match anywhere, and a
+// job key at 4 spaces is a substring of a STEP key at 8. The day cloud.yml grew two
+// step-level `if: always()` lines above `cloud-gate:`, M5's rewrap landed on the first
+// of them and cloud-gate's own line stayed bare — the mutation still "applied", the run
+// still produced a verdict, and that verdict was about a line the test does not name.
+// Re-derive the collision: `grep -n '^ *if: always()$' .github/workflows/cloud.yml`.
+// The needle must be a WHOLE line (matched with its newlines) and unique in the span,
+// so a mutator that stops being well-defined says so instead of picking one silently.
+const replaceInCloudGate = (text, needle, replacement) => {
+  const { from, to } = cloudGateSpan(text);
+  const body = text.slice(from, to);
+  const at = body.indexOf(`\n${needle}\n`);
+  assert.notEqual(at, -1,
+    `the mutation target must be a whole line inside cloud-gate's own body: ${JSON.stringify(needle)}`);
+  assert.equal(body.indexOf(`\n${needle}\n`, at + 1), -1,
+    `the mutation target must be unique within cloud-gate's body: ${JSON.stringify(needle)}`);
+  const head = `${text.slice(0, from)}${body.slice(0, at + 1)}`;
+  return `${head}${replacement}${body.slice(at + 1 + needle.length)}${text.slice(to)}`;
 };
 
 // The `jobs:` block as raw text — everything a column-0 line has NOT yet ended.
@@ -2840,7 +2883,7 @@ test('wave 28 M5: `if: ${{ always() }}` is the same expression as `if: always()`
       'sanity: this mutation must be LATENT — cloud.yml spells it bare today');
     const bare = cloudGateBody(src).match(/^ {4}if: always\(\)$/m);
     assert.ok(bare, 'sanity: cloud-gate must carry a bare `if: always()` for this case to rewrap');
-    const mutated = src.replace(bare[0], '    if: ${{ always() }}');
+    const mutated = replaceInCloudGate(src, bare[0], '    if: ${{ always() }}');
     assert.notEqual(mutated, src, 'the ${{ }} rewrap must actually apply');
     assert.ok(!/^ {4}if: always\(\)$/m.test(cloudGateBody(mutated)),
       'the bare spelling must be GONE from cloud-gate, else this resolves through the old form');
@@ -2863,7 +2906,7 @@ test('wave 28 M7: a TAB-indented key REFUSES rather than silently losing the edg
     assert.doesNotMatch(src, /\t/, 'sanity: this mutation must be LATENT — cloud.yml has no tab anywhere today');
     const inline = cloudGateBody(src).match(/^ {4}needs: \[[^\]]*\]$/m);
     assert.ok(inline, 'sanity: cloud-gate must declare an inline needs: for this case to re-indent');
-    const mutated = src.replace(inline[0], inline[0].replace(/^ {4}/, '\t'));
+    const mutated = replaceInCloudGate(src, inline[0], inline[0].replace(/^ {4}/, '\t'));
     assert.notEqual(mutated, src, 'the tab re-indent must actually apply');
     assert.match(mutated, /^\tneeds: \[/m, 'the needs: key must really be tab-indented');
     return mutated;
@@ -2914,9 +2957,11 @@ test('wave 28 M8 (durable): the commented job key is read AS ITS OWN JOB, named 
       const body = cloudGateBody(src);
       const named = body.match(/^ {4}name: .+$/m);
       assert.ok(named, 'sanity: cloud-gate must carry a name: for this case to drop');
-      return src
-        .replace(/^ {2}cloud-gate:$/m, '  cloud-gate:  # the aggregator')
-        .replace(named[0], '    # name: dropped, so the rendered context is the job KEY');
+      // `name:` first, while the job key is still plain — commenting the key is exactly
+      // what makes `cloudGateSpan`'s `/^ {2}cloud-gate:$/` stop matching.
+      return replaceInCloudGate(src, named[0],
+        '    # name: dropped, so the rendered context is the job KEY')
+        .replace(/^ {2}cloud-gate:$/m, '  cloud-gate:  # the aggregator');
     },
     requiredChecks: (rc) => {
       rc.protection.required_status_checks.checks =

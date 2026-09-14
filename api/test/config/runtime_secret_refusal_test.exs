@@ -135,7 +135,19 @@ defmodule Barkpark.Config.RuntimeSecretRefusalTest do
 
     test "unset outside prod stays permitted (nil branch prod-gated, unchanged)" do
       config = read!(%{"BARKPARK_KEK" => nil}, :dev)
-      assert get_in(config, [:barkpark, Barkpark.Crypto.LocalKek]) == nil
+
+      # No KEY, no VERSION, no PREVIOUS_KEYS — the nil branch still configures
+      # nothing LocalKek acts on, exactly as before.
+      kek = get_in(config, [:barkpark, Barkpark.Crypto.LocalKek]) || []
+      assert Keyword.get(kek, :key) == nil
+      assert Keyword.get(kek, :previous_keys) == nil
+      assert Keyword.get(kek, :version) == nil
+
+      # The ONE key that is now always written: the BARKPARK_KEK_PREVIOUS audit,
+      # recorded as `checked: false` so /status.json can tell "not applicable"
+      # apart from "checked and clean" (and from a MISSING audit).
+      assert Keyword.get(kek, :kek_previous_audit) ==
+               %{checked: false, discarded: 0, positions: []}
     end
   end
 

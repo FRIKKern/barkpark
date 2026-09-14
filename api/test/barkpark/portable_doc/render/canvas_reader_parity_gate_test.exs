@@ -156,6 +156,32 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
        "bp-asciicast"},
       {"diagram", %{"type" => "diagram", "source" => "graph TD; A-->B", "caption" => "A graph"},
        &Figures.diagram_html(&1["source"], &1["caption"], :article), "class=\"mermaid\""},
+      # scaffy-backlog-blocks-editable-studio: the TECHNICAL pair. Both are EDITABLE
+      # canvas attr-atoms (bpDiff / bpFiletree, technical-node.js) — like `diagram`,
+      # not like the read-only fleet atoms — but UNLIKE diagram they have NO client
+      # runtime that could produce their markup, so their canvas preview is the
+      # reader's OWN `Components.diff_html/1` / `filetree_html/1`, pushed on
+      # `bp:block-html` (shared/paper.ex @technical_render_types) and painted into the
+      # node-view's hole. Enrolling them here is what makes that the ONLY path: §1
+      # pins render_block to the one emitter, and §3 mechanically forbids `bp-diff` /
+      # `bp-filetree` anywhere in the editor JS — so a future node-view that
+      # hand-mirrors a diff row reds. The fixtures carry a REAL multi-file diff (a
+      # `diff --git` header, a `@@` hunk, +/- rows) and a REAL annotated tree so every
+      # emitter branch is exercised, never a vacuous empty box.
+      {"diff",
+       %{
+         "type" => "diff",
+         "file" => "lib/a.ex",
+         "lang" => "elixir",
+         "diff" =>
+           "diff --git a/lib/a.ex b/lib/a.ex\n--- a/lib/a.ex\n+++ b/lib/a.ex\n@@ -1,3 +1,3 @@\n context\n-old line\n+new line"
+       }, &Components.diff_html/1, "bp-diff"},
+      {"filetree",
+       %{
+         "type" => "filetree",
+         "text" => "lib/\n├── a.ex ● covered\n└── b.ex ✕ missing",
+         "legend" => "● covered  ✕ missing"
+       }, &Components.filetree_html/1, "bp-filetree"},
       # pd-ee-dataviz-editors (charter D3): the 5 DATA-VIZ kinds are server-painted
       # bpFleet atoms (a parallel painted-set — run-convert.js CANVAS_DATAVIZ_TYPES /
       # paper_canvas.ex @canvas_dataviz_types / shared/paper.ex @dataviz_render_types),

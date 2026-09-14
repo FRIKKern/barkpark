@@ -25,6 +25,24 @@
 #
 # Run: bash scripts/sunset-route-consumers.test.sh
 # ─────────────────────────────────────────────────────────────────────────────
+# INTERPRETER GUARD — shebang-independent, and it must stay ABOVE the first
+# process substitution in this file. bash reads a script INCREMENTALLY: invoked
+# as `sh` it is in POSIX mode, where `<(…)` cannot be parsed, so everything
+# above the offending line has ALREADY RUN and the script dies with the status
+# of the last completed command. MEASURED 2026-09-13: under `sh` this file exited 0 printing "TEST PASSED" while lines 274-275 (now shifted) died on command substitution, so UNLEDGERED and STALE were both silently EMPTY and two checks passed having compared nothing — a live vacuous green.
+# Pinned by scripts/posix-vacuous-green-census.sh, which reds if this guard is
+# removed or moved below the first process substitution.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "sunset-route-consumers.test.sh: needs bash (this script uses process substitution); run: bash scripts/sunset-route-consumers.test.sh" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "sunset-route-consumers.test.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/sunset-route-consumers.test.sh" >&2
+    exit 2
+    ;;
+esac
+
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

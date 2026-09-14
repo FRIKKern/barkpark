@@ -132,11 +132,24 @@ defmodule BarkparkCloud.PlatformDelivery do
   # The `serving_since_basis` vocabulary (W29). WHICH CLOCK produced this row's
   # `serving_since` — a fact the recorder has always known and never written.
   #
-  #   * "process_start"     — the cp leg. /health's `serving_since` is the BEAM's
-  #     own start instant (BarkparkCloud.Health says so in words, and ships a
-  #     `serving_since_basis` sentence beside it on that payload). A bare restart
-  #     that deploys nothing moves it FORWARD, so a lag measured against it is an
-  #     UPPER BOUND that reads SMALLER than the truth.
+  #   * "process_start"     — the cp leg, HISTORICALLY. /health's `serving_since`
+  #     WAS the BEAM's own start instant, so a bare restart that deployed
+  #     nothing moved it FORWARD and a lag measured against it was an UPPER
+  #     BOUND that read SMALLER than the truth. Every row already stamped with
+  #     this word means exactly that and still does — which is the whole reason
+  #     the word is on the row rather than inferred later.
+  #
+  #     THAT IS NO LONGER WHAT /health EMITS.
+  #     `clk-bl-cloud-health-serving-since-is-boot-local` made the plane's
+  #     `serving_since` durable (`BarkparkCloud.Health.ServingMemory`: one row
+  #     per sha in the plane's own Postgres, unmoved by a restart). The RECORDER
+  #     that stamps this column is `.github/workflows/deploy.yml`, which is
+  #     outside that change's fence and still writes "process_start" for the cp
+  #     leg. So a cp row stamped today under-describes a value that is now as
+  #     durable as the instance leg's. Correcting the recorder — a new word here
+  #     plus the deploy.yml line that writes it — is a deploy-lane follow-up; it
+  #     is NOT done by widening this list alone, because a word no writer emits
+  #     measures nothing.
   #   * "deploy_flip_mtime" — the instance leg. The mtime of
   #     `/opt/barkpark/.instance-deploy-last`, which IS the flip instant.
   #

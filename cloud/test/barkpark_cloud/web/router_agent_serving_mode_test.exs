@@ -137,6 +137,85 @@ defmodule BarkparkCloud.Web.RouterAgentServingModeTest do
     end
   end
 
+  ## The live-site state fetch
+
+  # GET /v1/agent/sites exactly as the runtime executor reads it.
+  defp agent_sites(token) do
+    conn =
+      :get
+      |> conn("/v1/agent/sites")
+      |> put_req_header("authorization", "Bearer #{token}")
+      |> Router.call(@opts)
+
+    assert conn.status == 200
+    Jason.decode!(conn.resp_body)["sites"]
+  end
+
+  describe "GET /v1/agent/sites re-emits serving_mode for ALREADY-LIVE sites" do
+    test "a flip on a live site changes the fetch WITHOUT any new deployment" do
+      # THE DEFECT THIS ROUTE EXISTS FOR. The claim inline only ever speaks
+      # about the site being deployed, and the box rebuilds its live-site state
+      # by parsing its own Caddyfile — so before this route a flip on a live
+      # site reached the box only via that site's NEXT deploy. Between the two
+      # the box kept running on-demand ACME behind the Cloudflare proxy: a 526.
+      {token, site} = agent_setup(%{})
+      d = pushing_deployment(site)
+
+      {:ok, _} =
+        Registry.transition_deployment(d, %{status: "live", became_live_at: DateTime.utc_now()})
+
+      # The site is LIVE and nothing further is queued.
+      assert Registry.list_pending_deployments_for_barkpark(
+               Registry.get_barkpark(site.barkpark_id)
+             ) ==
+               []
+
+      assert agent_sites(token) == [fixture("sites_state_direct")]
+
+      # The operator flips the edge binding. No deploy is created.
+      {:ok, flipped} = Registry.set_cf_binding(site, %{serving_mode: "cf_proxied"})
+
+      assert agent_sites(token) == [fixture("sites_state_cf_proxied")],
+             "the flip must be visible on the box's state fetch with no deploy in between"
+
+      # …and back, the reverse direction of the same defect (`tls internal` left
+      # standing over a hostname that now resolves straight to the box).
+      {:ok, _} = Registry.set_cf_binding(flipped, %{serving_mode: "direct"})
+      assert agent_sites(token) == [fixture("sites_state_direct")]
+
+      # Still nothing queued: the whole point is that no deploy was involved.
+      assert Registry.list_pending_deployments_for_barkpark(
+               Registry.get_barkpark(site.barkpark_id)
+             ) ==
+               []
+    end
+
+    test "the fetch is scoped to the agent's own barkpark" do
+      {_token, site} = agent_setup(%{})
+      {:ok, _} = Registry.set_cf_binding(site, %{serving_mode: "cf_proxied"})
+
+      # A second box, same slug (the unique index is per team), its own domain
+      # (domains are globally unique).
+      n = System.unique_integer([:positive])
+      {other_token, _other} = agent_setup(%{domains: ["other-#{n}.example.com"]})
+
+      # A cross-box leak here would re-render a stranger's Caddyfile: the other
+      # agent must see ONLY its own site, and its own direct mode.
+      assert agent_sites(other_token) == [
+               %{
+                 "slug" => "shop",
+                 "domains" => ["other-#{n}.example.com"],
+                 "serving_mode" => "direct"
+               }
+             ]
+    end
+
+    test "an unauthenticated fetch is refused" do
+      conn = Router.call(conn(:get, "/v1/agent/sites"), @opts)
+      assert conn.status in [401, 403]
+    end
+  end
+
   ## The lock itself
 
   describe "the shared fixture" do
@@ -147,6 +226,10 @@ defmodule BarkparkCloud.Web.RouterAgentServingModeTest do
       legacy = fixture("legacy_control_plane")
       refute Map.has_key?(legacy, "serving_mode")
       assert Map.has_key?(fixture("cf_proxied"), "serving_mode")
+
+      # The reconcile wire is the same vocabulary on a different route.
+      assert fixture("sites_state_cf_proxied")["serving_mode"] == "cf_proxied"
+      assert fixture("sites_state_direct")["serving_mode"] == "direct"
     end
   end
 end

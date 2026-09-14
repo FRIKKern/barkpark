@@ -336,16 +336,33 @@ jobs:
     # costs a few seconds of bash.
     name: Cloud path-escape ratchet
     runs-on: ubuntu-latest
+    outputs:
+      # REFUSED when any instrument in this job exited 2 — see the channel note
+      # below. Read by `cloud-gate` as V_ESCAPE.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
         id: setup
 
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # Every instrument below declares a THREE-code vocabulary in its own
+      # header — 0 clean, 1 measured defect, 2 CANNOT MEASURE — and until this
+      # commit every call site here was a bare `bash scripts/X.sh`, which
+      # collapses 1 and 2 into the single string `failure` on
+      # `needs.<job>.result`. `scripts/run-instrument.sh` is the one place that
+      # reads rc 2 and names it: it publishes `verdict=REFUSED`, annotates the
+      # step saying NO claim was made in either direction, and STILL exits
+      # non-zero — a refusal is not a pass. `scripts/gate-refusal-vocabulary-
+      # check.sh` is the guard that reds when a refusal-capable script gains a
+      # bare call site here, or when this job's verdict stops reaching the
+      # aggregator below.
       - name: Harness (the ratchet must be able to fail)
-        run: bash scripts/cloud-path-escape-check.sh --selftest
+        run: bash scripts/run-instrument.sh cloud-path-escape-selftest -- bash scripts/cloud-path-escape-check.sh --selftest
 
       - name: Every repo-root read is dispatched on
+        id: ratchet
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/cloud-path-escape-check.sh
+        run: bash scripts/run-instrument.sh cloud-path-escape -- bash scripts/cloud-path-escape-check.sh
 
       # ── the FailureCopy scrub/strip_ansi ORDER tripwire ──────────────────
       # Lives in THIS job, not a new one, and not in shell-harnesses.yml:
@@ -372,13 +389,14 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/failure-copy-scrub-order-check.sh --selftest
+          bash scripts/run-instrument.sh failure-copy-scrub-order-selftest -- bash scripts/failure-copy-scrub-order-check.sh --selftest
 
       - name: No display boundary scrubs before it strips ANSI
+        id: scrub
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/failure-copy-scrub-order-check.sh
+          bash scripts/run-instrument.sh failure-copy-scrub-order -- bash scripts/failure-copy-scrub-order-check.sh
 
       # ── the DNS step VOCABULARY pin (dr-w22-bl-internal-cli-…-gates) ──────
       # Same job, and for the same three reasons the scrub-order tripwire above
@@ -405,13 +423,51 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/cli-dns-step-vocabulary-check.sh --selftest
+          bash scripts/run-instrument.sh cli-dns-step-vocabulary-selftest -- bash scripts/cli-dns-step-vocabulary-check.sh --selftest
+
+      # ── the REFUSAL-VOCABULARY guard (cchi-w64-…-exit-2-vocabulary) ─────
+      # Lives in THIS job for the three reasons the two tripwires above give:
+      # `path-escape` is already in `cloud-gate`'s `needs:`, so a red here reds
+      # the REQUIRED `Cloud gate`; it is DELIBERATELY UNFILTERED, so the guard
+      # cannot go dark on the very PR that adds a bare call site; and a wired
+      # parent `--selftest` is what keeps this script out of
+      # shell-harnesses.yml's census by that census's own doctrine.
+      #
+      # WHAT IT BUYS. The refusal channel above is a PROPERTY of this file, and
+      # a property nothing reads decays. This guard derives REFUSAL-CAPABILITY
+      # from each script's own bytes — a script that gains its FIRST live
+      # `exit 2` tomorrow flips from not-required to required and reds its
+      # untouched bare call site on that commit. It also reds the other
+      # direction: a `verdict` output bound into `cloud-gate`'s env that the
+      # decide body never reads is a refusal carried all the way to the
+      # aggregator and then dropped.
+      #
+      # Harness FIRST, subject second — the house selftest-first idiom.
+      - name: Harness (the refusal-vocabulary guard must be able to fail)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh gate-refusal-vocabulary-selftest -- bash scripts/gate-refusal-vocabulary-check.sh --selftest
+
+      - name: Every refusal-capable instrument declares its channel
+        id: refusalvocab
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh gate-refusal-vocabulary -- bash scripts/gate-refusal-vocabulary-check.sh
 
       - name: Every DNS step verb the Go readers emit is classified
+        id: dnsvocab
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/cli-dns-step-vocabulary-check.sh
+          bash scripts/run-instrument.sh cli-dns-step-vocabulary -- bash scripts/cli-dns-step-vocabulary-check.sh
+
+      # `if: always()` and LAST. Every step above appended its verdict to
+      # $GITHUB_ENV, combined worst-first; this copies the combined value into
+      # the single step output this job publishes. A `||` chain over the step
+      # outputs would take the FIRST non-empty verdict and so drop a refusal
+      # that happened after a clean measurement — see run-instrument.sh.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
   compile:
     name: Cloud control-plane (compile + format)
@@ -468,6 +524,10 @@ jobs:
     # `if:` resolves through. Losing it would silently drop the drift guard.
     if: needs.changes.outputs.cloud == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      # REFUSED when the migration-version reader could not measure — see the
+      # channel note at that step. Read by `cloud-gate` as V_TEST.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     defaults:
       run:
         working-directory: cloud
@@ -559,16 +619,31 @@ jobs:
             exit 1
           fi
           psql --version
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # This is the call site the row was filed on. `--require-db` means a
+      # missing psql, an unreachable DATABASE_URL, or a `--base-ref` that does
+      # not resolve all exit 2 — "I could not measure" — and until this commit
+      # that was byte-identical, at `needs.test.result`, to a real migration
+      # version collision. `run-instrument.sh` gives the two different names.
       - name: Migration versions do not collide (before mix test)
+        id: migrations
         working-directory: ${{ github.workspace }}
         run: |
-          bash scripts/migration-version-collision-check.sh \
+          bash scripts/run-instrument.sh migration-version-collision -- \
+            bash scripts/migration-version-collision-check.sh \
             --dir cloud/priv/repo/migrations \
             --database-url "$DATABASE_URL" \
             --base-ref origin/main \
             --require-db
       - name: Test
         run: mix test
+
+      # `if: always()` and LAST — see the identical step in `path-escape`.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
   census:
     # ── THE CHEAP TIER (dr-w26-followup-reader-corpus-dispatch) ──────────────
@@ -715,6 +790,17 @@ jobs:
           R_ESCAPE: ${{ needs.path-escape.result }}
           O_CLOUD: ${{ needs.changes.outputs.cloud }}
           O_CENSUS: ${{ needs.changes.outputs.census }}
+          # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ───────────
+          # `R_*` is a RESULT — success/failure/skipped — and a failure on that
+          # channel is ONE word over two utterly different facts: "I measured
+          # and found a defect" and "I could not measure at all". `V_*` is the
+          # second fact, published by `scripts/run-instrument.sh` at the call
+          # site of every refusal-capable instrument in the job. Empty means
+          # the job never reached one of those steps (skipped, or it died
+          # earlier) — which is NOT a claim that nothing refused, so this step
+          # never reads an empty V_* as MEASURED.
+          V_ESCAPE: ${{ needs.path-escape.outputs.verdict }}
+          V_TEST: ${{ needs.test.outputs.verdict }}
         run: |
           set -euo pipefail
 
@@ -821,6 +907,29 @@ jobs:
           echo "census job gate (derived from census='${O_CENSUS}' cloud='${O_CLOUD}'): ${census_gate}"
           echo
 
+          # ── the refusal ledger ───────────────────────────────────────────
+          # Built BEFORE the verdict, so the `::error::` below can say WHICH
+          # instruments refused. Derived from ${job}, never a hardcoded name.
+          refusals=""
+          note_verdict() {
+            local job="$1" v="$2"
+            case "$v" in
+              REFUSED|UNKNOWN)
+                echo "  REFUSED ${job}: the instrument exited 2 — it COULD NOT MEASURE and made NO"
+                echo "          claim in either direction. Read that job's own log: it printed the"
+                echo "          cause by name. This is still red — a refusal is not a pass."
+                refusals="${refusals:+${refusals}, }${job}"
+                ;;
+              MEASURED-DEFECT)
+                echo "  measured ${job}: the instrument RAN and found a defect. The fault is in the"
+                echo "          tree, not on the runner." ;;
+              MEASURED-CLEAN|'') : ;;
+              *) echo "  note    ${job}: unrecognised verdict '${v}' on the refusal channel." ;;
+            esac
+          }
+          note_verdict "path-escape ratchet" "${V_ESCAPE:-}"
+          note_verdict "test"                "${V_TEST:-}"
+
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
           decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
           decide "compile"                 "${R_COMPILE}" "${O_CLOUD}"
@@ -829,7 +938,23 @@ jobs:
 
           echo
           if [ "$bad" -ne 0 ]; then
-            echo "::error::Cloud gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose. NOT IN THE ALLOW-SET: ${reds}"
+            if [ -n "$refusals" ]; then
+              # The ONE line the check-run API carries. Say which half of the
+              # vocabulary fired, or the reader re-derives it from scratch and
+              # usually guesses "the runner".
+              echo "::error title=Cloud gate RED — an instrument REFUSED TO MEASURE::RED because at least one upstream job is not in the allow-set.%0AREFUSED TO MEASURE (exit 2): ${refusals}%0AA refusal is the ABSENCE of a measurement: those instruments made no claim about this tree in either direction — nothing here says it is clean and nothing here says it is broken. exit 2 is ONE code over MANY causes and this aggregate measured none of them: an unknown path-set or argument name, a source root that is not there, a base ref that does not resolve, psql missing from the runner image, a postgres service that never came up. READ THE REFUSING JOB'S OWN LINE — it printed the cause by name, and that cause may well be a committed file in this repo rather than the runner.%0ANOT IN THE ALLOW-SET: ${reds}"
+            else
+              echo "::error::Cloud gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose. NOT IN THE ALLOW-SET: ${reds}"
+            fi
+            exit 1
+          fi
+          if [ -n "$refusals" ]; then
+            # Every upstream is in the allow-set and an instrument still refused
+            # — possible when a refusing step sits behind `!cancelled()` in a
+            # job that ends green some other way. A green required context over
+            # an unmeasured hole is precisely the vacuous green this row exists
+            # to kill.
+            echo "::error title=Cloud gate RED — a refusal reached the aggregate with every job green::REFUSED TO MEASURE (exit 2): ${refusals}%0AEvery upstream job is in the allow-set, and an instrument still refused to measure. Greening on that would publish a required context over a hole nothing looked into. Read the refusing job's own line for the cause."
             exit 1
           fi
 

@@ -69,71 +69,43 @@ function slotElement(block: Block, name: string): Block | undefined {
   return first && typeof first === "object" ? (first as Block) : undefined;
 }
 
-/* ── the shared status vocabulary (mirrors design/status-manifest.json) ─────── */
+/* ── the shared status vocabulary — GENERATED ─────────────────────────────────
+ *
+ * The white ladder is EMITTED from design/status-manifest.json by
+ * design/emit.mjs into ./status-ladder.gen (tlv-bl-js-vocab-generator). It used
+ * to be typed by hand here beside a comment, and latterly beside
+ * scripts/status-manifest-check.sh Part 5's byte-check; both stood in for
+ * generation and both are retired. A manifest edit re-emits the module, so this
+ * projection cannot drift from the manifest — design/check.mjs Part A reds if
+ * the generated file is hand-edited.
+ *
+ * STATUS_LADDER is re-exported (not re-declared) so every existing importer —
+ * __tests__/component-golden-parity.test.ts included — keeps its import path.
+ */
 
-interface LadderRow {
-  role: string;
-  glyph_role: string;
-  glyph: string;
-  spinner: boolean;
-  label: string;
-}
+import {
+  MANIFEST_ROLE_NAMES,
+  MANIFEST_STATUS_TO_ROLE,
+  MANIFEST_DEFAULT_ROLE,
+  STATUS_LADDER,
+  type LadderRow,
+} from "./status-ladder.gen.ts";
 
-/** The white ladder, in manifest order — the status-legend projection. Mirrors
- * `StatusVocab.roles/0` + glyph/spinner/label; a manifest edit re-derives the
- * Elixir fixture, so this hard-coded twin must move in lockstep or the web leg
- * reds. `label` is the canonical lowercase display noun (progress→"in progress",
- * cancel→"cancelled"). */
-export const STATUS_LADDER: LadderRow[] = [
-  { role: "open", glyph_role: "open", glyph: "○", spinner: false, label: "open" },
-  { role: "ready", glyph_role: "ready", glyph: "○", spinner: false, label: "ready" },
-  { role: "progress", glyph_role: "progress", glyph: "", spinner: true, label: "in progress" },
-  { role: "blocked", glyph_role: "blocked", glyph: "!", spinner: false, label: "blocked" },
-  { role: "done", glyph_role: "done", glyph: "✓", spinner: false, label: "done" },
-  { role: "cancel", glyph_role: "cancel", glyph: "✕", spinner: false, label: "cancelled" },
-  // ── thought states (task-lifecycle-visibility): contemplated before ready.
-  // Dim, glyph-only, trailing the ladder. considering ◌ (U+25CC), researching ◎
-  // (U+25CE). A manifest edit re-derives the Elixir fixture; this twin moves in
-  // lockstep with design/status-manifest.json.
-  { role: "considering", glyph_role: "considering", glyph: "◌", spinner: false, label: "considering" },
-  { role: "researching", glyph_role: "researching", glyph: "◎", spinner: false, label: "researching" },
-];
+export type { LadderRow };
+export { STATUS_LADDER };
 
-/** The EIGHT canonical manifest roles (design/status-manifest.json). The
- * status-legend projection is the cross-surface parity KEY and must stay byte-
- * frozen to what Render.StatusVocab emits. The manifest has now ADOPTED the two
- * thought states (task-lifecycle-visibility substrate slice), so the regenerated
- * golden carries them and this set gains them in lockstep. The JS-only fail-open
- * `unknown` sentinel stays excluded permanently — it is never a lifecycle state. */
-const MANIFEST_LADDER = new Set([
-  "open",
-  "ready",
-  "progress",
-  "blocked",
-  "done",
-  "cancel",
-  "considering",
-  "researching",
-]);
+/** The canonical manifest roles — the cross-surface parity KEY the status-legend
+ * projection is scoped to. The JS-only fail-open `unknown` sentinel is never a
+ * lifecycle state and is permanently out. */
+const MANIFEST_LADDER = new Set(MANIFEST_ROLE_NAMES);
 
-/** Stored lifecycle status → ladder role (mirrors the manifest `statuses` map).
- * ABSENT/empty → the `open` default; an unrecognized NON-EMPTY status fails OPEN
- * to the dim-neutral `unknown` role (D11) — never masquerading as bright `open`. */
-const STATUS_TO_ROLE: Record<string, string> = {
-  open: "open",
-  ready: "ready",
-  in_progress: "progress",
-  blocked: "blocked",
-  done: "done",
-  closed: "done",
-  cancelled: "cancel",
-  considering: "considering",
-  researching: "researching",
-};
-
+/** Stored lifecycle status -> ladder role (the manifest `statuses` map).
+ * ABSENT/empty -> the manifest default role; an unrecognized NON-EMPTY status
+ * fails OPEN to the dim-neutral `unknown` role (D11) -- never masquerading as
+ * bright `open`. */
 export function roleForStatus(status: string): string {
-  if (status === "") return "open";
-  return STATUS_TO_ROLE[status] ?? "unknown";
+  if (status === "") return MANIFEST_DEFAULT_ROLE;
+  return MANIFEST_STATUS_TO_ROLE[status] ?? "unknown";
 }
 
 /* ── projection shapes (byte-mirror the golden `expected`) ──────────────────── */

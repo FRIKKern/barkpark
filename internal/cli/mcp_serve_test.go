@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -739,6 +741,12 @@ func TestParseMCPServeArgs(t *testing.T) {
 		{[]string{"--tools", "tasks"}, "tasks", nil, "", false},
 		{[]string{"--tools", "all"}, "all", nil, "", false},
 		{[]string{"--tools=all"}, "all", nil, "", false},
+		// "chat" is a RESERVED toolset word (the Studio loopback's selector), not
+		// a one-noun subset — before task-scc-bl-mcp-chat-toolset it parsed as
+		// subset/["chat"] and then refused startup on zero tools.
+		{[]string{"--tools", "chat"}, "chat", nil, "", false},
+		{[]string{"--tools=chat"}, "chat", nil, "", false},
+		{[]string{"--tools", "chat", "--http", ":4010"}, "chat", nil, ":4010", false},
 		{[]string{"--http", "127.0.0.1:4010"}, "tasks", nil, "127.0.0.1:4010", false},
 		{[]string{"--http=127.0.0.1:4010"}, "tasks", nil, "127.0.0.1:4010", false},
 		{[]string{"--tools", "all", "--http", ":4010"}, "all", nil, ":4010", false},
@@ -754,6 +762,8 @@ func TestParseMCPServeArgs(t *testing.T) {
 		// Reserved words may not be MIXED into a noun list.
 		{[]string{"--tools", "github,tasks"}, "", nil, "", true},
 		{[]string{"--tools", "all,github"}, "", nil, "", true},
+		{[]string{"--tools", "chat,doc"}, "", nil, "", true},
+		{[]string{"--tools", "doc,chat"}, "", nil, "", true},
 		// Empty comma tokens are rejected.
 		{[]string{"--tools", "github,"}, "", nil, "", true},
 		{[]string{"--tools", ",linear"}, "", nil, "", true},
@@ -847,3 +857,314 @@ func TestTasksLessManifestGracefulUnderAll(t *testing.T) {
 
 // ensure json import used (guards against a refactor dropping the receipt path).
 var _ = json.Marshal
+
+// ---------------------------------------------------------------------------
+// --tools chat — the curated Studio-loopback toolset (task-scc-bl-mcp-chat-toolset)
+// ---------------------------------------------------------------------------
+
+// chatBridgeCommandsJSON declares the six manifest commands chatBridgeToolIDs
+// names, in the HTTP shapes the live manifest uses. Appended to mcpTestManifest
+// (which already carries the curated task verbs) by chatTestManifest.
+const chatBridgeCommandsJSON = `
+    {"id":"search.query","noun":"search","verb":"query","summary":"Full-text search across documents.","http":{"method":"GET","path_template":"/v1/data/search/:dataset"},"auth_tier":"read","args":[{"name":"q","required":true,"type":"string","summary":"query"}],"flags":[{"name":"limit","type":"int","summary":"l"}],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table"},
+    {"id":"doc.ls","noun":"doc","verb":"ls","summary":"List documents.","http":{"method":"GET","path_template":"/v1/data/query/:dataset/:type"},"auth_tier":"read","args":[{"name":"type","required":true,"type":"string","summary":"t"}],"flags":[{"name":"limit","type":"int","summary":"l"}],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table"},
+    {"id":"doc.get","noun":"doc","verb":"get","summary":"Fetch one document by type and id.","http":{"method":"GET","path_template":"/v1/data/doc/:dataset/:type/:doc_id"},"auth_tier":"read","args":[{"name":"type","required":true,"type":"string","summary":"t"},{"name":"doc_id","required":true,"type":"string","summary":"i"}],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"},
+    {"id":"doc.create","noun":"doc","verb":"create","summary":"Create a document.","http":{"method":"POST","path_template":"/v1/data/mutate/:dataset"},"auth_tier":"write","mutation_op":"create","args":[{"name":"type","required":true,"type":"string","summary":"t"}],"flags":[{"name":"set","repeatable":true,"type":"string","summary":"f"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
+    {"id":"doc.mutate","noun":"doc","verb":"mutate","summary":"Patch an existing document.","http":{"method":"POST","path_template":"/v1/data/mutate/:dataset"},"auth_tier":"write","mutation_op":"patch","args":[{"name":"type","required":true,"type":"string","summary":"t"},{"name":"doc_id","required":true,"type":"string","summary":"i"}],"flags":[{"name":"set","repeatable":true,"type":"string","summary":"f"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
+    {"id":"doc.publish","noun":"doc","verb":"publish","summary":"Publish a draft document.","http":{"method":"POST","path_template":"/v1/data/mutate/:dataset"},"auth_tier":"write","mutation_op":"publish","args":[{"name":"type","required":true,"type":"string","summary":"t"},{"name":"doc_id","required":true,"type":"string","summary":"i"}],"flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"}`
+
+// chatTestManifest builds mcpTestManifest + the six chat-allowlisted commands,
+// plus any `extra` command JSON the caller appends (used to prove a NEW manifest
+// command does not enter the chat set). `drop` removes an allowlisted command id
+// so the missing-verb policy can be exercised.
+func chatTestManifest(t *testing.T, extra string, drop string) *manifest.Manifest {
+	t.Helper()
+	cmds := chatBridgeCommandsJSON
+	if drop != "" {
+		var kept []string
+		for _, line := range strings.Split(cmds, "\n") {
+			if strings.TrimSpace(line) == "" || strings.Contains(line, `"id":"`+drop+`"`) {
+				continue
+			}
+			kept = append(kept, line)
+		}
+		cmds = "\n" + strings.Join(kept, "\n")
+		cmds = strings.TrimSuffix(cmds, ",")
+	}
+	base := strings.TrimSuffix(mcpTestManifest, "\n  ]\n}")
+	if base == mcpTestManifest {
+		t.Fatalf("mcpTestManifest shape changed; chatTestManifest cannot append commands")
+	}
+	src := base + "," + cmds + extra + "\n  ]\n}"
+	src = strings.Replace(src,
+		`"nouns": [{"name": "task", "summary": "tasks"}],`,
+		`"nouns": [{"name":"task","summary":"tasks"},{"name":"doc","summary":"documents"},{"name":"search","summary":"search"}],`, 1)
+	m, err := manifest.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parse chat manifest: %v", err)
+	}
+	return m
+}
+
+// chatSession builds the real `--tools chat` server through buildMCPServer and
+// connects a client to it over the SDK's in-memory transport — the same seam the
+// bridge tests use, so tools/list here is the list a Studio loopback would see.
+func chatSession(t *testing.T, out *writer, m *manifest.Manifest, toolset string) *mcp.ClientSession {
+	t.Helper()
+	srv, err := buildMCPServer(out, globals{}, manifest.Context{Server: "http://x"}, m, toolset, nil, false)
+	if err != nil {
+		t.Fatalf("buildMCPServer(%q): %v", toolset, err)
+	}
+	serverT, clientT := mcp.NewInMemoryTransports()
+	bg := context.Background()
+	ss, err := srv.Connect(bg, serverT, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { ss.Close() })
+	client := mcp.NewClient(&mcp.Implementation{Name: "chat-toolset-test", Version: "0"}, nil)
+	cs, err := client.Connect(bg, clientT, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { cs.Close() })
+	return cs
+}
+
+// studioLoopbackSpawnSites are the two Elixir call sites that spawn the Studio
+// chat loopback's `bp mcp serve`. Read across the package boundary on purpose —
+// the same reason internal/chat/stable_test.go reads ../../api/test/fixtures and
+// internal/pdrender/testdata: the toolset WORD is one contract living on two
+// surfaces, and a copy of it here would fork exactly the thing being locked.
+var studioLoopbackSpawnSites = []string{
+	"../../api/lib/barkpark/studio_chat/provider/claude.ex",
+	"../../api/lib/barkpark/studio_chat/runtime/codex/session.ex",
+}
+
+// loopbackToolsSelector matches the spawn argv these sites build:
+//
+//	"args" => ["mcp", "serve", "--tools", "chat"]
+var loopbackToolsSelector = regexp.MustCompile(`\["mcp",\s*"serve",\s*"--tools",\s*"([^"]+)"\]`)
+
+// TestStudioLoopbackSpawnsTheChatToolset is the CROSS-SURFACE LOCK.
+//
+// `--tools chat` is one value on two surfaces: the Go parser reserves the word
+// (parseToolsSelector → mcpToolsetChat) and two Elixir modules put it on a real
+// argv. Nothing else ties them together — no shared fixture, no generated file.
+// Without this test both suites stay green while the surfaces drift: rename the
+// Go word and update TestParseMCPServeArgs and Go is green; the Elixir suite
+// never sees Go, so its three `--tools chat` assertions stay green too — and the
+// shipped loopback spawns a `bp` that exits "invalid --tools chat". Green, green,
+// dead chat.
+//
+// So: parse the word OUT of the Elixir source and push it through the REAL Go
+// parser. Either surface moving alone reds this.
+func TestStudioLoopbackSpawnsTheChatToolset(t *testing.T) {
+	for _, rel := range studioLoopbackSpawnSites {
+		path := filepath.FromSlash(rel)
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read loopback spawn site %s: %v", rel, err)
+		}
+		matches := loopbackToolsSelector.FindAllStringSubmatch(string(src), -1)
+		// Absence control: a refactor that reshapes the argv must FAIL here, not
+		// pass vacuously on zero matches.
+		if len(matches) == 0 {
+			t.Fatalf("%s: found no `[\"mcp\", \"serve\", \"--tools\", <word>]` argv — the loopback spawn shape changed and this lock went blind; re-point loopbackToolsSelector at the new shape", rel)
+		}
+		for _, m := range matches {
+			word := m[1]
+			toolset, nouns, err := parseToolsSelector(word)
+			if err != nil {
+				t.Errorf("%s spawns `--tools %s`, which the Go parser REJECTS: %v", rel, word, err)
+				continue
+			}
+			if toolset != mcpToolsetChat || nouns != nil {
+				t.Errorf("%s spawns `--tools %s` → toolset %q nouns %v, want the curated chat toolset %q with no noun subset — the Studio loopback must not fall back to `all` or a noun list",
+					rel, word, toolset, nouns, mcpToolsetChat)
+			}
+		}
+	}
+}
+
+// listToolsInWireOrder pages tools/list and returns the names in the order they
+// arrive on the wire — the order a Studio loopback client actually reads them
+// in. listAllTools deliberately loses this (it collects into a map and sorts),
+// so a test that only uses it pins the SET and says nothing about ORDER.
+func listToolsInWireOrder(t *testing.T, cs *mcp.ClientSession) []string {
+	t.Helper()
+	bg := context.Background()
+	var names []string
+	var cursor string
+	for {
+		res, err := cs.ListTools(bg, &mcp.ListToolsParams{Cursor: cursor})
+		if err != nil {
+			t.Fatalf("ListTools: %v", err)
+		}
+		for _, tool := range res.Tools {
+			names = append(names, tool.Name)
+		}
+		if res.NextCursor == "" {
+			return names
+		}
+		cursor = res.NextCursor
+	}
+}
+
+// chatToolsetExpectedNames is the ENTIRE advertised surface of `--tools chat`,
+// sorted — the curated eight task tools, the six allowlisted document/search
+// bridge tools, and the four curated chat session tools. Eighteen, and nothing
+// else. This literal IS the review: changing the chat surface must change this
+// list in the same commit.
+var chatToolsetExpectedNames = []string{
+	"bp_doc_create",
+	"bp_doc_get",
+	"bp_doc_ls",
+	"bp_doc_mutate",
+	"bp_doc_publish",
+	"bp_search_query",
+	"chat_read_tail",
+	"chat_send",
+	"chat_spawn_session",
+	"chat_wait_for_state",
+	"task_close",
+	"task_create",
+	"task_next",
+	"task_prime",
+	"task_pulse",
+	"task_ready",
+	"task_show",
+	"task_stamp",
+}
+
+// TestChatToolsetAdvertisesExactlyTheCuratedSet drives tools/list over a real
+// MCP session and pins the exact allowlist — names AND the descriptions the
+// bridged half carries (which come from the manifest Summary, so a client sees
+// the same prose bp help does). It also proves the server wrote ZERO bytes to
+// os.Stdout while doing it: stdout is the JSON-RPC stream, and any diagnostic
+// byte there corrupts a real stdio session.
+func TestChatToolsetAdvertisesExactlyTheCuratedSet(t *testing.T) {
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = origStdout }()
+	stdoutCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); stdoutCh <- b }()
+
+	m := chatTestManifest(t, "", "")
+	var errBuf strings.Builder
+	cs := chatSession(t, newWriter(io.Discard, &errBuf), m, mcpToolsetChat)
+	tools := listAllTools(t, cs)
+
+	got := toolNames(tools)
+	if strings.Join(got, ",") != strings.Join(chatToolsetExpectedNames, ",") {
+		t.Fatalf("--tools chat advertises\n  %v\nwant\n  %v", got, chatToolsetExpectedNames)
+	}
+
+	// ORDER, not just the set. chatToolsetExpectedNames is name-sorted, and the
+	// SDK serves tools/list from slices.Sorted(maps.Keys(...)) (go-sdk
+	// mcp/features.go), so the wire order must equal it EXACTLY — registration
+	// order (task tools, then chatBridgeToolIDs, then chat session tools) is
+	// discarded before a client sees anything. This is the assertion
+	// chatBridgeToolIDs points at: if a future SDK ever preserves insertion
+	// order, this reds, and the curated set pin has to become an order pin.
+	if wire := listToolsInWireOrder(t, cs); strings.Join(wire, ",") != strings.Join(chatToolsetExpectedNames, ",") {
+		t.Fatalf("--tools chat tools/list wire ORDER is\n  %v\nwant name-sorted\n  %v", wire, chatToolsetExpectedNames)
+	}
+
+	// Descriptions are stable and come straight from the manifest summaries.
+	wantDesc := map[string]string{
+		"bp_search_query": "Full-text search across documents.",
+		"bp_doc_ls":       "List documents.",
+		"bp_doc_get":      "Fetch one document by type and id.",
+		"bp_doc_create":   "Create a document.",
+		"bp_doc_mutate":   "Patch an existing document.",
+		"bp_doc_publish":  "Publish a draft document.",
+	}
+	for name, want := range wantDesc {
+		if tools[name].Description != want {
+			t.Errorf("%s description = %q, want %q", name, tools[name].Description, want)
+		}
+	}
+	// And the read/write hints ride the manifest's Writes bit, same as --tools all.
+	if a := tools["bp_search_query"].Annotations; a == nil || !a.ReadOnlyHint {
+		t.Errorf("bp_search_query annotations = %+v, want ReadOnlyHint:true", tools["bp_search_query"].Annotations)
+	}
+	if a := tools["bp_doc_publish"].Annotations; a == nil || a.ReadOnlyHint {
+		t.Errorf("bp_doc_publish annotations = %+v, want ReadOnlyHint:false", tools["bp_doc_publish"].Annotations)
+	}
+
+	os.Stdout = origStdout
+	w.Close()
+	if stray := <-stdoutCh; len(stray) != 0 {
+		t.Errorf("--tools chat wrote %d bytes to os.Stdout (protocol stream): %q", len(stray), stray)
+	}
+	if errBuf.Len() != 0 {
+		t.Errorf("healthy --tools chat startup should be quiet on stderr, got %q", errBuf.String())
+	}
+}
+
+// TestChatToolsetIsAnIDAllowlist is the c4 guard: a NEW manifest command — even
+// one on a noun the chat set already draws from — does not enter `--tools chat`
+// automatically. A noun filter would have adopted it; the ID allowlist does not.
+// The same command IS served under --tools all, which proves the manifest really
+// carries it and the test is not passing vacuously.
+func TestChatToolsetIsAnIDAllowlist(t *testing.T) {
+	const newCmd = `,
+    {"id":"doc.delete","noun":"doc","verb":"delete","summary":"Delete a document.","http":{"method":"POST","path_template":"/v1/data/mutate/:dataset"},"auth_tier":"write","mutation_op":"delete","args":[{"name":"type","required":true,"type":"string","summary":"t"},{"name":"doc_id","required":true,"type":"string","summary":"i"}],"flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"}`
+	m := chatTestManifest(t, newCmd, "")
+
+	chat := listAllTools(t, chatSession(t, newWriter(io.Discard, io.Discard), m, mcpToolsetChat))
+	if _, ok := chat["bp_doc_delete"]; ok {
+		t.Errorf("a newly added manifest command entered --tools chat automatically: %v", toolNames(chat))
+	}
+	if strings.Join(toolNames(chat), ",") != strings.Join(chatToolsetExpectedNames, ",") {
+		t.Errorf("--tools chat surface moved when a manifest command was added: %v", toolNames(chat))
+	}
+
+	// Control: the command is real — --tools all serves it.
+	all := listAllTools(t, chatSession(t, newWriter(io.Discard, io.Discard), m, "all"))
+	if _, ok := all["bp_doc_delete"]; !ok {
+		t.Fatalf("control failed: --tools all does not serve bp_doc_delete either; have %v", toolNames(all))
+	}
+}
+
+// TestChatToolsetMissingVerbPolicy pins the ONE documented policy for a backing
+// verb the manifest cannot supply: stdio REFUSES to start (and registers
+// nothing), --http OMITS it with one loud stderr line and serves the rest.
+func TestChatToolsetMissingVerbPolicy(t *testing.T) {
+	m := chatTestManifest(t, "", "doc.publish")
+	if _, ok := m.Tree().Lookup("doc", "publish"); ok {
+		t.Fatal("control failed: doc.publish should be absent from this manifest")
+	}
+	if _, ok := m.Tree().Lookup("doc", "create"); !ok {
+		t.Fatal("control failed: doc.create should still be present")
+	}
+
+	// stdio: refuse to come up.
+	if _, err := buildMCPServer(newWriter(io.Discard, io.Discard), globals{}, manifest.Context{Server: "http://x"}, m, mcpToolsetChat, nil, false); err == nil {
+		t.Fatal("--tools chat should refuse startup when the manifest cannot back an allowlisted verb")
+	} else if !strings.Contains(err.Error(), "doc.publish") {
+		t.Errorf("startup error should name the missing verb, got %v", err)
+	}
+
+	// --http best-effort: serve the rest, say so once on stderr.
+	var errBuf strings.Builder
+	tools := listAllTools(t, chatSession(t, newWriter(io.Discard, &errBuf), m, mcpToolsetChatBestEffort))
+	if _, ok := tools["bp_doc_publish"]; ok {
+		t.Error("best-effort chat advertised bp_doc_publish with no backing verb")
+	}
+	if _, ok := tools["bp_doc_create"]; !ok {
+		t.Errorf("best-effort chat should still serve the verbs it CAN back; have %v", toolNames(tools))
+	}
+	if !strings.Contains(errBuf.String(), "doc.publish") {
+		t.Errorf("best-effort omission must be loud on stderr, got %q", errBuf.String())
+	}
+	// toolsetLabel prints what the operator typed, not the internal mode.
+	if got := toolsetLabel(mcpToolsetChatBestEffort, nil); got != "chat" {
+		t.Errorf("toolsetLabel(chat-best-effort) = %q, want \"chat\"", got)
+	}
+}
