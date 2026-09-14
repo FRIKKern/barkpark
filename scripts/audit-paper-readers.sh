@@ -465,8 +465,29 @@ done
 structure_input="$tmp/structures.json"
 structure_report="$tmp/structure-report.json"
 jq -s '.' "$structures" >"$structure_input"
+# THE ASYMMETRIC FAILURE MODE. If this python3 cannot produce a report the
+# file is EMPTY, and both ok expressions below fail on `$structure | length
+# == 1` — a loud red that LOOKS like a block-shape violation in the live
+# corpus and reads as flaky.
+#
+# DO NOT branch on the exit code. paper_structure.py's main() RETURNS
+# `1 if report["violations"] else 0`, so exit 1 is the DESIGNED
+# violations-found code with a perfectly intact report; an rc test flags it
+# and cries wolf on the one case the audit exists to report. Measured
+# 2026-09-14: scripts/audit-paper-readers-test.sh's one-violation fixture
+# drives exactly that exit 1.
+#
+# The `|| true` was also never what suppressed anything: this script runs
+# under `set -uo pipefail` with NO `-e`, so a bare failure here continues just
+# the same. What was missing is a CHECK OF THE ARTIFACT. Keep going (the JSON
+# witness for every audited Paper is the artifact's whole point), but say out
+# loud when the report is unusable, so the red below is attributable.
+structure_rc=0
 python3 scripts/paper_structure.py --input "$structure_input" --summary-only \
-  >"$structure_report" || true
+  >"$structure_report" || structure_rc=$?
+if ! jq -e 'type == "object" and has("violations")' "$structure_report" >/dev/null 2>&1; then
+  echo "audit-paper-readers: scripts/paper_structure.py exited ${structure_rc} WITHOUT a usable summary report. The ok expression below therefore fails on the MISSING report, NOT on a block-shape violation in the corpus. Read the python traceback above. Its unit suite is scripts/paper_structure_test.py, wired in shell-harnesses.yml job tooling-harnesses." >&2
+fi
 
 jq -s --arg server "$server" --arg base "$base" --argjson inventory "$inventory_count" \
   --arg inventory_digest "$inventory_digest" --slurpfile inventory_ids "$inventory_ids" \
