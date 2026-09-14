@@ -149,6 +149,69 @@ done <"$TMP/paths.txt"
 if [ -z "$missing_down" ]; then ok "B union: every on.pull_request.paths entry has a roster row"
 else bad "B union: workflow paths with NO roster row (a harness that would never fire):$missing_down"; fi
 
+# ── B2: THE AXIS-D CORPUS REACHES ITS JOB ────────────────────────────────────
+# Arm B is satisfied by DELETING a path entry just as well as by adding a roster
+# row. Measured: with `scripts/pds-*.sh` and `tooling/pds/**` struck from both
+# paths lists, this harness printed 21 passed / 0 failed — byte-identical to the
+# real fix — while an edit to scripts/pds-secret-scan.sh started no run at all.
+# An arm that cannot tell a repair from an amputation is not a ratchet.
+#
+# So this arm is a PREDICATE over the real tree, not a list: it derives the
+# axis-d corpus the way scripts/pds-record-parity.sh's axis_d_corpus_files()
+# does (scripts/pds-*.sh at depth 1, minus the harnesses, plus all of
+# tooling/pds), and demands of EVERY member that it (a) matches an
+# on.pull_request.paths entry — or the workflow never starts — and (b) matches a
+# `pds-harnesses` roster row — or the run starts with that job skipped. Both
+# halves are matched with `case`, which is exactly how the dispatcher itself
+# reads the roster; `case` lets `*` cross `/`, so it is the PERMISSIVE side of
+# GitHub's filter and a MISS here is a real miss, never an artefact.
+#
+# Non-vacuity: the corpus must be non-empty. An empty find is UNAVAILABLE, not a
+# pass — that is the shape that would let this whole arm green on a tree where
+# the PDS scripts had simply been deleted out from under it.
+awk '$1 == "pds-harnesses" { print $2 }' "$TMP/roster.txt" >"$TMP/pdsh-paths.txt"
+d_corpus="$TMP/axis-d-corpus.txt"
+: >"$d_corpus"
+if [ -d "$REPO_ROOT/scripts" ]; then
+  find "$REPO_ROOT/scripts" -maxdepth 1 -type f -name 'pds-*.sh' >>"$d_corpus"
+fi
+if [ -d "$REPO_ROOT/tooling/pds" ]; then
+  find "$REPO_ROOT/tooling/pds" -type f >>"$d_corpus"
+fi
+N_CORPUS=$(wc -l <"$d_corpus" | tr -d ' ')
+if [ "$N_CORPUS" -eq 0 ]; then
+  unavailable "the axis-d corpus (scripts/pds-*.sh + tooling/pds/**) matched NO file under $REPO_ROOT — this arm would green over an empty set"
+fi
+undispatched=""
+unrostered=""
+while IFS= read -r abs; do
+  [ -n "$abs" ] || continue
+  rel="${abs#"$REPO_ROOT"/}"
+  case "$rel" in *.test.sh|*_test.sh) continue ;; esac   # axis d skips its own harnesses
+  covered=0
+  while IFS= read -r pat; do
+    [ -n "$pat" ] || continue
+    # shellcheck disable=SC2254
+    case "$rel" in $pat) covered=1; break ;; esac
+  done <"$TMP/paths.txt"
+  [ "$covered" = 1 ] || undispatched="$undispatched $rel"
+  rostered=0
+  while IFS= read -r pat; do
+    [ -n "$pat" ] || continue
+    # shellcheck disable=SC2254
+    case "$rel" in $pat) rostered=1; break ;; esac
+  done <"$TMP/pdsh-paths.txt"
+  [ "$rostered" = 1 ] || unrostered="$unrostered $rel"
+done <"$d_corpus"
+if [ -n "$undispatched" ]; then
+  bad "B2: axis-d corpus files that match NO on.pull_request.paths entry (editing them starts no run):$undispatched"
+elif [ -n "$unrostered" ]; then
+  bad "B2: axis-d corpus files that match no pds-harnesses roster row (the run starts, the job is skipped):$unrostered"
+else
+  ok "B2: all $N_CORPUS axis-d corpus files both trigger the workflow and dispatch pds-harnesses"
+fi
+
+
 # ── C: GATING ────────────────────────────────────────────────────────────────
 ungated=""
 while read -r jid needs_ok if_ok; do
