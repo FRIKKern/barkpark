@@ -27,6 +27,42 @@ name: reland-check
 # every loud state is a ::warning/::notice plus an always() summary, NEVER an
 # ::error, because reverts and follow-ups legitimately re-touch landed files.
 # Mutation proof: bash tooling/task-obsession/reland_loudfail.test.sh.
+#
+# WHY `continue-on-error: true` IS NOT A SWALLOWED RED (audited 2026-09-15)
+# ------------------------------------------------------------------------
+# A CI cost audit flagged this job as "5,499 PR runs in 30 days, ZERO failures,
+# continue-on-error at JOB level — the zero is structural, the job cannot report
+# red." Every number was right and the conclusion was wrong, so it is written
+# down here rather than re-derived by the next auditor.
+#
+#   1. JOB-LEVEL continue-on-error STILL RENDERS A RED CHECK RUN. What it
+#      launders is the WORKFLOW RUN conclusion and `needs.<job>.result`, both of
+#      which read `success`. This is measured on a throwaway probe repo and
+#      pinned by scripts/security-gate-shape.test.sh; ci.yml:328-331,
+#      breakglass-watch.yml:16-19 and absent-context-census.yml:39-43 all state
+#      it. This job is in NO `needs` set, so it launders nothing. Its red would
+#      show on the PR.
+#   2. THE ZERO IS REAL, NOT MASKED. Census over 788 runs in the 30-day window,
+#      reading JOBS AND STEPS rather than run conclusions (`gh api
+#      repos/:owner/:repo/actions/runs/<id>/jobs`): 788/788 job conclusion
+#      `success`, and ZERO steps with a non-success, non-skipped conclusion.
+#      Nothing was swallowed because nothing failed. Reruns overwrite history,
+#      so that is a floor.
+#   3. THE GREENS ARE NOT EMPTY. In the same window: status=ok, auth=token, the
+#      ledger walked to exhaustion (8935 of 8935, truncated=0, 9 pages), and
+#      36 of 788 runs POSTED A REAL RE-LAND ADVISORY — 34 of the 251 most recent
+#      (13.5%), against 2 of the 537 older, because the signal only switched on
+#      2026-09-13 when landed-mark began stamping content.landed.
+#
+# So the check is neither hollow nor silent, and continue-on-error stays for the
+# reason stated above: a revert or a follow-up legitimately re-touches landed
+# files, so this reports and never blocks. The real residual the audit did find
+# is COST, not correctness: mean 144s/run over 60 sampled runs x ~5,505 runs/30d
+# is ~220 runner-hours a month, of which ~34s is spent downloading all 8935 task
+# documents to extract 16 digests. Narrowing that needs a server-side filter the
+# read plane cannot express today (no `exists` operator —
+# docs/contracts/query-surface-limits.md §1), so it is an api/ change, not one
+# this file can make.
 
 on:
   pull_request:
@@ -276,7 +312,7 @@ jobs:
             echo "findings=0" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if [ "$zero" = "1" ]; then
-            echo "::warning title=Re-land check has NO SIGNAL to read::scanned ${docs} task(s) and not one carries a content.landed digest, so 0 findings means 'nothing to compare against', not 'no overlap'. ROOT CAUSE: content.landed is written only when a closer passes a 'landed' map at close time (close.ex merge_landed) and no closer does — the CLI close sends no such key; the repo also has no merge webhook wired, so the reconcile path never fires either. Fix tracked as arpss-reland-teach-closer-landed; signal gap as arpss-reland-check-zero-landed-signal (advisory)."
+            echo "::warning title=Re-land check has NO SIGNAL to read::scanned ${docs} task(s) and not one carries a content.landed digest, so 0 findings means 'nothing to compare against', not 'no overlap'. THIS IS A REGRESSION, NOT THE KNOWN GAP: a closer DOES write content.landed today — a push to main runs .github/workflows/landed-mark.yml -> scripts/landed-mark.sh, and the live ledger carried 16 done rows with content.landed.files when this banner was last re-measured (2026-09-15). A zero here means that path stopped working: landed-mark did not run, could not resolve the PR's Task: trailer, or its ledger write failed. Check the landed-mark runs on main before reading any 0-finding verdict below (advisory, non-blocking)."
           fi
           echo "findings=${n:-0}" >> "$GITHUB_OUTPUT"
 
@@ -338,7 +374,7 @@ jobs:
             [ -n "${NOTE:-}" ] && echo "| note | ${NOTE} |"
             if [ "${DIGESTS:-0}" = "0" ] && [ "${STATUS:-}" = "ok" ] && [ "${DOCS:-0}" != "0" ]; then
               echo ""
-              echo "> **0 findings here means \"nothing to compare against\"**, not \"no overlap\": no scanned task carries a \`content.landed\` digest. **Root cause (dominant):** \`content.landed\` is written only by the close-path \`merge_landed\` (\`close.ex\`) when the closer supplies a \`landed\` map at close time — and no closer does (the \`bp\` CLI close sends no \`landed\` key). **Secondary:** the repo has no merge webhook wired, so the \`reconcile_merge_gate\` path never fires to backfill one either. Teaching a closer to compute and pass \`landed.files\` is tracked as \`arpss-reland-teach-closer-landed\`; this signal gap as \`arpss-reland-check-zero-landed-signal\`."
+              echo "> **0 findings here means \"nothing to compare against\"**, not \"no overlap\": no scanned task carries a \`content.landed\` digest. **This is a REGRESSION, not the known gap.** A closer writes \`content.landed\` today: a push to main runs \`.github/workflows/landed-mark.yml\` → \`scripts/landed-mark.sh\`, which stamps the merge sha and file list onto the row the \`Task:\` trailer names. Re-measured 2026-09-15 against the live ledger: 8935 published tasks, **16 done rows carrying \`content.landed.files\`**, all stamped 2026-09-13 or later. A zero here therefore means that path broke — landed-mark did not run on main, could not resolve the trailer, or its ledger write failed. **Chase the landed-mark runs on main**; do not read this as the historical never-built gap (\`arpss-reland-check-zero-landed-signal\`, done; build-out \`arpss-reland-teach-closer-landed\`)."
             fi
             if [ "${AUTH:-}" = "anon" ]; then
               echo ""
