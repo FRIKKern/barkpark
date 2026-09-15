@@ -66,20 +66,24 @@ defmodule Barkpark.Release do
   # and survives line moves.
   # sobelow_skip ["RCE.CodeModule"]
   def seed do
-    # DELIBERATELY `start_app/0`, not `load_app/0`. Unlike migrate, the seed
+    # DELIBERATELY a booted tree, not `load_app/0`. Unlike migrate, the seed
     # bodies are ordinary application code: `Barkpark.Seeds.run/0` reaches
     # `Plugins.Bootstrap.register_all_schemas/0` (needs the live
     # `Plugins.Registry` GenServer, populated by the `SchemaBootstrap` boot
     # child), `Content.upsert_schema/2` and `Tenancy`/`Auth` writes (PubSub +
     # `Barkpark.TaskSupervisor` + `Barkpark.Vault`), and the codelist seeders.
-    # Starting a hand-picked subset here would fork the boot order away from
+    # Starting a hand-picked subset HERE would fork the boot order away from
     # `Barkpark.Application.child_specs/4` and silently change what a seeded
     # instance contains. api/** is auto-deploy-exposed (charter D9): the seed
-    # RESULT must not move. Narrowing this step is tracked separately — the
-    # crash storm this module was filed for belongs entirely to `migrate/0`,
-    # which runs FIRST and is what a first-ever boot hits against an empty
-    # schema.
-    start_app()
+    # RESULT must not move.
+    #
+    # `seed_boot!/0` is the NARROWING that comment used to defer ("tracked
+    # separately"): it does not hand-pick children, it sets the boot mode and
+    # lets the composition root FILTER its own canonical list — same children,
+    # same order, minus the listener, with Oban inert. The crash storm this
+    # module was filed for belongs entirely to `migrate/0`, which runs FIRST
+    # and is what a first-ever boot hits against an empty schema.
+    seed_boot!()
 
     for repo <- repos() do
       {:ok, _, _} =
@@ -91,6 +95,39 @@ defmodule Barkpark.Release do
           end
         end)
     end
+  end
+
+  @doc """
+  Boot the tree the way a SEED eval must: everything `Barkpark.Seeds.run/0`
+  reaches, and neither a listener nor a queue consumer.
+
+  Sets `:barkpark, :boot_mode` to `:seed` BEFORE starting the app, so
+  `Barkpark.Application.start/2` builds its children from
+  `Barkpark.Application.child_specs/5` in `:seed` mode — the canonical list
+  minus `BarkparkWeb.Endpoint`, with Oban started inert (`queues: false,
+  plugins: false`). The seam lives in the composition root on purpose: picking
+  a child subset HERE would fork the boot order from the canonical list and
+  can silently change what a seeded instance contains (charter D9 — `api/**`
+  is auto-deploy-exposed).
+
+  Why not repo-only, the way `migrate/0` is: the seed bodies are ordinary
+  application code. `Barkpark.Seeds.run/0` reaches
+  `Plugins.Bootstrap.register_all_schemas/0` (needs the live `Plugins.Registry`
+  GenServer, populated by the `SchemaBootstrap` boot child),
+  `Content.upsert_schema/2` and `Tenancy`/`Auth` writes (PubSub +
+  `Barkpark.TaskSupervisor` + `Barkpark.Vault` + the validation registries),
+  and document mutations that call `Oban.insert/1`, which raises with no Oban
+  instance running. An INERT Oban still accepts those inserts — the jobs stay
+  queued for the serving node — while starting no producer and no plugin.
+
+  `persistent: true` matters: `Application.load/1` (which
+  `ensure_all_started/1` performs) re-applies the `.app` file's env over
+  non-persistent values.
+  """
+  @spec seed_boot!() :: {:ok, [atom()]}
+  def seed_boot! do
+    Application.put_env(@app, :boot_mode, :seed, persistent: true)
+    {:ok, _apps} = Application.ensure_all_started(@app)
   end
 
   defp repos do
@@ -132,9 +169,11 @@ defmodule Barkpark.Release do
   @doc """
   Load AND start `:barkpark` — the full supervision tree.
 
-  Only `seed/0` needs this; see the comment there for why. Kept as a named
-  function so the two release steps differ by one obvious call and a reader
-  can see which one boots a tree.
+  Superseded for `seed/0` by `seed_boot!/0`, which boots the same tree in
+  `:seed` mode (no `BarkparkWeb.Endpoint`, Oban inert). Kept as the plain
+  "load AND start everything" step for any other one-shot task, and so the
+  release steps still differ by one obvious call: `load_app/0` starts nothing,
+  `start_app/0` starts the FULL tree, `seed_boot!/0` starts the seed tree.
   """
   @spec start_app() :: {:ok, [atom()]} | {:error, term()}
   def start_app do

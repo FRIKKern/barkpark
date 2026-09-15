@@ -56,7 +56,8 @@
 #   PORT    preview server port (default: 4180)
 #   SCEN    comma-list of scenario names to shoot (default: all, from scenarios.mjs)
 #   ACCENT  comma-list of accent identities — evergreen|ember|fjord|charple|iris —
-#           each appends &accent=<name> to the URL (mock.js:70 seam) and -<name>
+#           each appends &accent=<name> to the URL (the ?accent= pre-seed seam in
+#           mock.js — `grep -n 'BP_THEME_KEY, accent' mock.js`) and -<name>
 #           to the filename. Unset ⇒ one pass, no ?accent=, filenames unchanged.
 #   REAP_BUDGET  seconds the watchdog gives one Chrome reap before killing the
 #           process TREE (default: 10).
@@ -318,8 +319,9 @@ shot() {
   # dropped — ours already opened the query with ?scen=).
   local search_q=""
   if [[ -n "$ssearch" ]]; then search_q="&${ssearch#\?}"; fi
-  # The account modal opens on a CLICK, so no deepLink can reach it; mock.js:133
-  # drives the REAL openAccountModal() on ?modal=account. The flag is derived
+  # The account modal opens on a CLICK, so no deepLink can reach it; mock.js
+  # drives the REAL openAccountModal() on ?modal=account
+  # (`grep -n 'openAccountModal' mock.js`). The flag is derived
   # from the "account-modal" NAME PREFIX here rather than from a scenarios.mjs
   # field, deliberately: scenarios.mjs is a tail-zone collision anchor this wave.
   # TRADEOFF, stated honestly: this is a naming CONVENTION, not a contract — a
@@ -328,8 +330,9 @@ shot() {
   local modal_q=""
   case "$scen" in account-modal*) modal_q="&modal=account" ;; esac
   # ORDER MATTERS: everything above is a QUERY param and $deep is the URL
-  # FRAGMENT, so the fragment MUST come LAST. mock.js:32 reads accent from
-  # location.search, which excludes everything past `#`, and falls back to
+  # FRAGMENT, so the fragment MUST come LAST. mock.js reads accent from
+  # location.search (`grep -n 'params.get("accent")' mock.js`), which
+  # excludes everything past `#`, and falls back to
   # evergreen SILENTLY — so the old `$deep$accent_q` ordering dropped the accent
   # for every scenario that carries a deepLink — the large majority; the run
   # banner prints the live count, DERIVED, because the number this comment used

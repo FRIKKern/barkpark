@@ -121,9 +121,24 @@ reg_path() {
 }
 
 reg_read() {
-  # $1 = registry path. Prints the JSON on stdout, or refuses.
-  local reg="$1"
+  # $1 = registry path. $2 = "explicit" when the caller NAMED that path with
+  # --registry rather than falling back to the committed default.
+  #
+  # AN ABSENT DEFAULT IS "NO HOLDS YET"; AN ABSENT NAMED PATH IS A FAILED READ.
+  # Synthesising an empty registry for a path that does not exist is correct
+  # exactly once — a repo that has never opened a hold has no file — and is a
+  # FAIL-OPEN everywhere else: a wrong --registry, a deleted file, a typo in a
+  # caller all produced `0 open hold(s) … CLEAR` and exit 0, byte-identical to
+  # a real all-clear. Measured 2026-09-14 by scripts/bp-merge.test.sh row 62
+  # while wiring the merge verb to this script: the missing-file case was the
+  # ONE unreadable shape that did not refuse, while empty and unparseable both
+  # did. A caller that names a path is asserting it exists.
+  local reg="$1" explicit="${2:-}"
   if [ ! -f "$reg" ]; then
+    if [ "$explicit" = "explicit" ]; then
+      cannot_read "registry $reg does not exist — you named that path with --registry, and an absent NAMED registry is a failed read, not an empty one; refusing to report CLEAR off a file that is not there"
+      return 3
+    fi
     printf '{"version":1,"holds":[]}\n'
     return 0
   fi
@@ -305,7 +320,7 @@ $tok"
 # ---------------------------------------------------------------------------
 
 cmd_open() {
-  local owner="" repro="" task="" slug="" mainref="origin/main" do_fetch=1 reg="$REGISTRY_DEFAULT" note=""
+  local owner="" repro="" task="" slug="" mainref="origin/main" do_fetch=1 reg="$REGISTRY_DEFAULT" reg_explicit="" note=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --owner)    [ $# -ge 2 ] || die_usage "--owner needs a value"; owner="$2"; shift 2 ;;
@@ -313,7 +328,7 @@ cmd_open() {
       --task)     [ $# -ge 2 ] || die_usage "--task needs a value"; task="$2"; shift 2 ;;
       --id)       [ $# -ge 2 ] || die_usage "--id needs a value"; slug="$2"; shift 2 ;;
       --main-ref) [ $# -ge 2 ] || die_usage "--main-ref needs a ref"; mainref="$2"; shift 2 ;;
-      --registry) [ $# -ge 2 ] || die_usage "--registry needs a path"; reg="$2"; shift 2 ;;
+      --registry) [ $# -ge 2 ] || die_usage "--registry needs a path"; reg="$2"; reg_explicit=explicit; shift 2 ;;
       --note)     [ $# -ge 2 ] || die_usage "--note needs a value"; note="$2"; shift 2 ;;
       --no-fetch) do_fetch=0; shift ;;
       *) die_usage "unknown argument to open: $1" ;;
@@ -397,6 +412,9 @@ $trees" in
   rm -f "$log"
 
   local existing new
+  # NOT "$reg_explicit": `open` CREATES the registry it writes, so a named path
+  # that does not exist yet is the ordinary first-hold case, not a failed read.
+  # Every READ-ONLY verb (check/lift/list) passes it and refuses instead.
   existing="$(reg_read "$reg_abs")" || return 3
   new="$(printf '%s' "$existing" | jq \
       --arg id "$slug" --argjson trees "$trees_json" --arg repro "$repro" \
@@ -436,12 +454,12 @@ $trees" in
 # ---------------------------------------------------------------------------
 
 cmd_check() {
-  local since="" pathsfrom="" reg="$REGISTRY_DEFAULT" argpaths=""
+  local since="" pathsfrom="" reg="$REGISTRY_DEFAULT" reg_explicit="" argpaths=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --changed-since) [ $# -ge 2 ] || die_usage "--changed-since needs a ref"; since="$2"; shift 2 ;;
       --paths-from)    [ $# -ge 2 ] || die_usage "--paths-from needs a file"; pathsfrom="$2"; shift 2 ;;
-      --registry)      [ $# -ge 2 ] || die_usage "--registry needs a path"; reg="$2"; shift 2 ;;
+      --registry)      [ $# -ge 2 ] || die_usage "--registry needs a path"; reg="$2"; reg_explicit=explicit; shift 2 ;;
       -*) die_usage "unknown argument to check: $1" ;;
       *) argpaths="$argpaths
 $1"; shift ;;
@@ -452,7 +470,7 @@ $1"; shift ;;
 
   local reg_abs json nholds paths=""
   reg_abs="$(reg_path "$reg")"
-  json="$(reg_read "$reg_abs")" || return 3
+  json="$(reg_read "$reg_abs" "$reg_explicit")" || return 3
   nholds="$(printf '%s' "$json" | jq '.holds | length')"
 
   if [ -n "$since" ]; then
@@ -554,12 +572,12 @@ INNER_EOF
 # ---------------------------------------------------------------------------
 
 cmd_lift() {
-  local slug="" mainref="origin/main" do_fetch=1 reg="$REGISTRY_DEFAULT"
+  local slug="" mainref="origin/main" do_fetch=1 reg="$REGISTRY_DEFAULT" reg_explicit=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --id)       [ $# -ge 2 ] || die_usage "--id needs a value"; slug="$2"; shift 2 ;;
       --main-ref) [ $# -ge 2 ] || die_usage "--main-ref needs a ref"; mainref="$2"; shift 2 ;;
-      --registry) [ $# -ge 2 ] || die_usage "--registry needs a path"; reg="$2"; shift 2 ;;
+      --registry) [ $# -ge 2 ] || die_usage "--registry needs a path"; reg="$2"; reg_explicit=explicit; shift 2 ;;
       --no-fetch) do_fetch=0; shift ;;
       # THERE IS DELIBERATELY NO --force AND NO --skip-repro. A hold that can be
       # lifted by assertion is a hold that gets lifted under pressure, and then
@@ -574,7 +592,7 @@ cmd_lift() {
 
   local reg_abs json repro opened_sha owner
   reg_abs="$(reg_path "$reg")"
-  json="$(reg_read "$reg_abs")" || return 3
+  json="$(reg_read "$reg_abs" "$reg_explicit")" || return 3
 
   if ! printf '%s' "$json" | jq -e --arg id "$slug" '.holds[] | select(.id == $id)' >/dev/null 2>&1; then
     cannot_read "no hold with id '$slug' in $reg (holds present: $(printf '%s' "$json" | jq -r '[.holds[].id] | join(", ")'))"
@@ -642,16 +660,16 @@ cmd_lift() {
 }
 
 cmd_list() {
-  local reg="$REGISTRY_DEFAULT"
+  local reg="$REGISTRY_DEFAULT" reg_explicit=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --registry) [ $# -ge 2 ] || die_usage "--registry needs a path"; reg="$2"; shift 2 ;;
+      --registry) [ $# -ge 2 ] || die_usage "--registry needs a path"; reg="$2"; reg_explicit=explicit; shift 2 ;;
       *) die_usage "unknown argument to list: $1" ;;
     esac
   done
   require_jq || return 3
   local json
-  json="$(reg_read "$(reg_path "$reg")")" || return 3
+  json="$(reg_read "$(reg_path "$reg")" "$reg_explicit")" || return 3
   printf '%s' "$json" | jq -r '
     if (.holds | length) == 0 then "no open holds"
     else (.holds[] | "\(.id)\towner=\(.owner)\ttrees=\(.trees | join(","))\topened_on=\(.opened_on_sha)\trepro=\(.repro)")

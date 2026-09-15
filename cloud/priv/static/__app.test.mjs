@@ -2945,7 +2945,7 @@ test("cch-w12-bl-e12: the shipped .inst-sites-card case reds once its focus fix 
 //
 // E11's census is only as honest as the file list it iterates, and until this
 // wave NOTHING checked that list. `citationScanFiles()` builds it from two
-// readdir calls and one extension filter; every one of the three can silently
+// readdir calls and one text-shape predicate; every one of the three can silently
 // return nothing, and E11 then prints `0 error(s)` over an EMPTY set — a green
 // from a scan that read nothing, byte-identical to a green from a scan that read
 // everything. Measured on origin/main: editing the extension filter to a shape
@@ -2959,12 +2959,38 @@ test("cch-w12-bl-e12: the shipped .inst-sites-card case reds once its focus fix 
 // the exact reason --citation-inventory is a SUB-MODE and not an export. A
 // second implementation that must agree with the first is the point: change the
 // filter and this reds.
+// Mirrors the gate's TEXT-SHAPE predicate (cchi-w18): a member is any regular
+// file in either arm whose sniff window holds no NUL byte. Independently
+// re-implemented from the documented rule, exactly as the extension filter it
+// replaces was — change the predicate in either place and this reds.
 const citationScanSetFrom = (root) => {
-  const scanned = (f) => /\.(m?js|css)$/.test(f);
+  const isText = (abs) => {
+    let st;
+    try {
+      st = fs.statSync(abs);
+    } catch {
+      return false;
+    }
+    if (!st.isFile()) return false;
+    let fd;
+    try {
+      fd = fs.openSync(abs, "r");
+    } catch {
+      return false;
+    }
+    try {
+      const buf = Buffer.alloc(4096);
+      const n = fs.readSync(fd, buf, 0, 4096, 0);
+      return buf.subarray(0, n).indexOf(0) === -1;
+    } finally {
+      fs.closeSync(fd);
+    }
+  };
   const out = [];
-  for (const f of fs.readdirSync(root)) if (scanned(f)) out.push(f);
+  for (const f of fs.readdirSync(root)) if (isText(path.join(root, f))) out.push(f);
   const pv = path.join(root, "__preview__");
-  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (scanned(f)) out.push(path.join("__preview__", f));
+  if (fs.existsSync(pv))
+    for (const f of fs.readdirSync(pv)) if (isText(path.join(pv, f))) out.push(path.join("__preview__", f));
   return out.sort();
 };
 // The RULED alternation (charter D201 / cch-w16-s7), duplicated here for the

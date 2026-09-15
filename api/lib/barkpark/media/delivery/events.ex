@@ -160,6 +160,21 @@ defmodule Barkpark.Media.Delivery.Events do
           _ = Dispatcher.deliver_media(webhook, body, delivery)
           :ok
 
+        {:error, :already_delivered} ->
+          # THE DEDUP ARM, and it must sit ABOVE the catch-all below.
+          # `create_media_delivery/1` refuses a second row for the same logical
+          # media event via the partial UNIQUE index on `dedupe_key`. That
+          # refusal is a SUCCESS: the event has already been delivered, so the
+          # only correct action is to do nothing.
+          #
+          # Falling through to the `{:error, reason}` arm would POST the
+          # duplicate anyway through `single_shot/3`, which is the exact
+          # behaviour the dedup exists to stop — the durable row would be
+          # deduplicated while the endpoint still received the event twice.
+          # A guard that dedupes the record and not the effect is worse than
+          # none, because it reads as protection.
+          :ok
+
         {:error, reason} ->
           # Durable row couldn't be persisted (rare DB hiccup). Don't strand the
           # event: fall back to a SINGLE best-effort signed attempt (no retry, no

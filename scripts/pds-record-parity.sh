@@ -1123,10 +1123,35 @@ axis_d() {
 
   # file:line:PDS-Dn, one per occurrence. `-I` drops binaries; the corpus is
   # text today and a future .png in tooling/pds must not make the axis UNCHECKED.
+  #
+  # THE PRODUCER SURFACES ITS OWN REFUSAL. grep rc 1 means "this file cites no
+  # PDS-D" — normal, and true of most of the corpus, so it must never red. rc >= 2
+  # is grep REFUSING (unreadable file, a corpus root that moved under the scan):
+  # it contributes no lines, and left silent it shows up only as a short — or
+  # zero — citation count, which the reader below then reports as its OWN "ZERO
+  # citations" complaint. The refusal is named HERE, by file, carrying grep's own
+  # stderr, before any consumer can mistake it for a clean answer. Teaching that
+  # consumer to tolerate a short corpus instead would turn a detectable refusal
+  # into a silent zero: the same defect, one layer deeper, on the arbiter.
   : > "$cites"
+  local f_err="$WORKDIR/d_grep_err" f_refused="$WORKDIR/d_refused" grc=0
+  : > "$f_refused"
   while IFS= read -r f; do
-    grep -I -noE 'PDS-D[0-9]+' "$f" 2>/dev/null | sed "s|^|${f#"$CITATION_ROOT"/}:|" >> "$cites" || true
+    grep -I -noE 'PDS-D[0-9]+' "$f" 2>"$f_err" | sed "s|^|${f#"$CITATION_ROOT"/}:|" >> "$cites"
+    grc="${PIPESTATUS[0]}"
+    [ "$grc" -le 1 ] && continue
+    printf '%s (grep rc=%s) %s\n' "${f#"$CITATION_ROOT"/}" "$grc" "$(tr '\n' ' ' < "$f_err")" >> "$f_refused"
   done < "$files"
+
+  if [ -s "$f_refused" ]; then
+    echo "  UNCHECKED: the citation scan REFUSED on $(wc -l < "$f_refused" | tr -d ' ') file(s)." >&2
+    echo "             grep exited >=2 on them, so their citations are ABSENT from the" >&2
+    echo "             corpus and every count below would be short. This is the" >&2
+    echo "             PRODUCER refusal, named before the reader can report it as" >&2
+    echo "             its own empty-artifact complaint:" >&2
+    sed 's/^/               /' "$f_refused" >&2
+    raise 2; return 0
+  fi
 
   local n_files n_occ n_distinct
   n_files="$(wc -l < "$files" | tr -d ' ')"

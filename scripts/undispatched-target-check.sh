@@ -647,11 +647,24 @@ fi
 # instance — one keyed on vocabulary, one structurally. So this one is trusted
 # on nothing else until it both FINDS the console pair and CLEARS it.
 echo
+# THE CONTROL ASSERTS TWO DIFFERENT THINGS AND MUST SAY WHICH ONE BROKE.
+# "Was the console pair DERIVED" is a fact about this generator. "Did it
+# classify IMMUNE" is a fact about the TREE — the pair goes AT-RISK the moment
+# console-harness.yml's own trigger falls behind CONSOLE_PATHS, which is the
+# very drift this file exists to find. Both still red, and the pass condition
+# below is unchanged; but a run that blames the GENERATOR for a real dispatch
+# finding sends its reader to debug the instrument instead of the tree. That
+# misdiagnosis cost this check hours of being read as broken-and-unownable
+# while it was reporting correctly. So: name the direction.
 ccls="$(awk -F'|' '$2 ~ /console-path-escape-check.sh/ && $2 ~ /console-harness.yml/ {print $1; exit}' "$CLASSES")"
 if [ "$ccls" = "IMMUNE" ]; then
   echo "GENERATOR CONTROL: the known-immune console pair was derived AND classified IMMUNE by this run."
+elif [ -z "$ccls" ]; then
+  finding "GENERATOR CONTROL FAILED — THE GENERATOR: the known-immune pair (scripts/console-path-escape-check.sh -> console-harness.yml) is ABSENT FROM THE DERIVATION. D1/D2 stopped seeing a pair that is still in the tree, so this run's output is not trustable on any other entry: an entry the generator never derived cannot be classified, and a derivation that silently shrank reads exactly like a clean tree."
+elif grep -q '^::error::UNDISPATCHED DECLARED TARGET.*console-path-escape-check\.sh' "$TMP/entry-report.txt" 2>/dev/null; then
+  finding "GENERATOR CONTROL FAILED — THE TREE, NOT THE GENERATOR: the console pair WAS derived and its P1/P2/P3 properties were evaluated; it classified '$ccls' because the dispatch check found REAL undispatched declared targets on it, named as ::error::UNDISPATCHED lines above. Those lines are MEASURED, and the both-arm controls for this entry ran and held in this same run — read them and fix console-harness.yml's trigger (or drop the rows from CONSOLE_PATHS). Do NOT debug this script: it is reporting, not failing."
 else
-  finding "GENERATOR CONTROL FAILED: the known-immune pair (scripts/console-path-escape-check.sh -> console-harness.yml) classified '${ccls:-<absent from the derivation>}', not IMMUNE. This run's output is not trustable on any other entry until that case reproduces."
+  finding "GENERATOR CONTROL FAILED — A PROPERTY: the known-immune pair (scripts/console-path-escape-check.sh -> console-harness.yml) classified '$ccls', not IMMUNE, and NOT because of a dispatch finding — one of P1/P2/P3 no longer holds (the failing property is NAMED on the entry's own line above). Either the pair genuinely stopped being immune, or the property test broke; this run's output is not trustable on any other entry until that is settled."
 fi
 
 echo

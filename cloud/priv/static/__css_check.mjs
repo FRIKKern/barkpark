@@ -1139,14 +1139,37 @@ export function wrapParityErrors(cssRawText, file = "app.css") {
 //       design/handover/…/*.dc.html — a frozen handover artifact outside this
 //       directory that does not receive the sibling shifts app.css does. Not in
 //       the alternation; not a citation to E11.
-//     • `.sh` IS A CITATION TARGET BUT NOT A SCANNED FILE. citationScanFiles()
-//       matches /\.(m?js|css)$/ — re-derive with `node __css_check.mjs
-//       --citation-inventory`. So `__preview__/shoot.sh`'s own `mock.js:<n>`
-//       cites are STRUCTURALLY UNREACHABLE at any regex width, even though a
-//       `.sh:<n>` cite written INSIDE a scanned .js/.mjs/.css file now reds.
-//       That asymmetry is deliberate and is the same REACH-not-SHAPE defect
-//       charter D292 fixed for app.css. Filed:
-//       cch-w17-bl-e11-scan-set-app-css-and-shoot-sh.
+//     • `.sh` AND EVERY OTHER TEXT SIDECAR ARE NOW SCANNED — THE ASYMMETRY IS
+//       GONE (cchi-w18). This bullet used to record the opposite: the scan set
+//       matched an allowlist of three extensions, so a shell instrument's own
+//       cites, and every recorded `.baseline`, were STRUCTURALLY UNREACHABLE at
+//       any regex width while a cite of the same shape one file away reddened.
+//       That was the REACH-not-SHAPE defect charter D292 fixed for app.css,
+//       left standing for everything else. citationScanFiles() now admits any
+//       TEXT file in the two arms (see the predicate above), which closed it and
+//       surfaced fourteen live citations across three previously-unreachable
+//       files — all re-anchored in the same commit that widened the set, so the
+//       widened guard is green here rather than vacuous, exactly as D292 was.
+//       Re-derive the set and its per-file cross with
+//       `node __css_check.mjs --citation-inventory`. Rows:
+//       cch-w17-bl-e11-scan-set-app-css-and-shoot-sh (app.css + shoot.sh) and
+//       cchi-w18-bl-e11-scan-set-third-blind-spot-baseline (the baselines).
+//     • THE BARE ANCHOR — A KNOWN-UNREACHABLE FORM, NOT AN OVERSIGHT. A
+//       citation that drops the filename and keeps only the number, written as
+//       a colon or a parenthesised colon immediately before the digits, carries
+//       NO filename for any filename-anchored regex to bind to, so it is
+//       unreachable at every regex width AND at every scan-set width — widening
+//       the FILE SET (which this gate now does by text shape) cannot reach it
+//       either, because the defect is in the CITATION, not in the reach. It is
+//       the same class as the `if $. == <n>` recipe. Banning it is NOT free and
+//       is deliberately NOT done: the shape collides with legitimate CSS and
+//       prose (a bare number after a colon is a declaration value, a port, a
+//       viewport width, a byte count), so a ban here would be a false-positive
+//       engine rather than a tripwire. Re-derive the live population — never
+//       quote a count, every figure written for one in this tree has gone stale:
+//         grep -cP '(?<![A-Za-z0-9_.\-]):\d{3,5}-\d{3,5}' app.css   # bare ranges
+//         grep -oP '\(:\d{3,5}\)' app.css | wc -l                    # bare singles
+//       Owner row: cchi-w18-bl-e11-scan-set-third-blind-spot-baseline.
 //     • app.css's OWN self-citations are DEFERRED, and the deferral is a SHAPE
 //       exemption, not a set exclusion. app.css joined the scan set in D292 so
 //       that `app.js:<n>` inside the stylesheet reds — that stays. The WIDENED
@@ -1235,13 +1258,62 @@ export function bannedSourceCitationErrors(src, file) {
 // same derivation at a directory where the set legitimately collapses and watch
 // it refuse. A guard whose failure arm no test can reach is a guard nobody has
 // ever seen fire.
+// THE SCAN PREDICATE IS A RULE, NOT AN EXTENSION LIST (charter D41 /
+// bp-honest-gates D5: "ban the SHAPE, do not enumerate"). This filter read
+// `/\.(m?js|css)$/` — an ALLOWLIST OF THREE EXTENSIONS — so every sidecar,
+// shell instrument and recorded baseline in the same two directories was
+// structurally unreachable at any regex width, exactly the REACH-not-SHAPE
+// defect D292 fixed for app.css and the coverage boundary above filed against
+// itself. An extension list is a SNAPSHOT: it covers what existed the day it
+// was written, and a new sidecar lands unscanned and silent.
+//
+// The replacement asks the only question E11 actually needs answered — CAN
+// THIS FILE CARRY A CITATION, i.e. is it text? — and asks it of the BYTES,
+// never of the name. A NUL byte in the sniff window is the binary signal
+// (favicon.ico is the one member of these two directories it excludes today;
+// re-derive that with `node __css_check.mjs --citation-inventory`). Anything
+// textual is in, whatever it is called, the day it lands.
+//
+// WHY NOT A SKIP LIST OF BINARY EXTENSIONS. Same disease, opposite sign: a
+// two-item skip list in this repo turned out to really be eight. The bytes
+// cannot go stale; a list of names always does.
+const CITATION_TEXT_SNIFF_BYTES = 4096;
+function isTextFile(abs) {
+  let fd;
+  try {
+    fd = fs.openSync(abs, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const buf = Buffer.alloc(CITATION_TEXT_SNIFF_BYTES);
+    const n = fs.readSync(fd, buf, 0, CITATION_TEXT_SNIFF_BYTES, 0);
+    return buf.subarray(0, n).indexOf(0) === -1;
+  } catch {
+    return false;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function citationScanFiles(root = dir) {
   const out = [];
-  const scanned = (f) => /\.(m?js|css)$/.test(f);
   if (!fs.existsSync(root)) return out;
-  for (const f of fs.readdirSync(root)) if (scanned(f)) out.push(f);
+  const take = (base, rel) => {
+    const abs = path.join(base, rel.split("/").pop());
+    let st;
+    try {
+      st = fs.statSync(abs);
+    } catch {
+      return;
+    }
+    if (!st.isFile()) return;
+    if (!isTextFile(abs)) return;
+    out.push(rel);
+  };
+  for (const f of fs.readdirSync(root)) take(root, f);
   const pv = path.join(root, "__preview__");
-  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (scanned(f)) out.push(path.join("__preview__", f));
+  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) take(pv, path.join("__preview__", f));
   return out.sort();
 }
 
