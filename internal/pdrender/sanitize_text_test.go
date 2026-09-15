@@ -35,9 +35,10 @@ func TestSanitizeC1TextAndCode(t *testing.T) {
 }
 
 func TestRenderNoColorStripsC1Controls(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(previousProfile) })
 	reg := testRegistry()
 	lipgloss.SetColorProfile(3)
-	t.Cleanup(func() { lipgloss.SetColorProfile(3) })
 	ctx := RenderCtx{Width: 100, Theme: DarkTheme(), Profile: NoColor}
 	for r := rune(0x80); r <= 0x9f; r++ {
 		t.Run(fmt.Sprintf("U+%04X", r), func(t *testing.T) {
