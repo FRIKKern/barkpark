@@ -93,10 +93,24 @@
 # are all path-keyed and every one of them stayed silent. Membership here is
 # decided by what a file CONTAINS after the edit, not by where it sits.
 #
-# Hence --content-at: a membership question must be asked of the tree the change
-# produced. A historical replay that asks it of the current working tree gets the
-# wrong answer in both directions, and the harness proves both — the SAME path set
-# is CLEAN at d3af39283^ and IMPLICATED at d3af39283, with only that flag moving.
+# Hence --at: a membership question must be asked of the tree the change produced.
+# A historical replay that asks it of the current working tree gets the wrong
+# answer in both directions, and the harness proves both — the SAME path set is
+# CLEAN at d3af39283^ and IMPLICATED at d3af39283, with only that flag moving.
+#
+# --at PINS THE WHOLE EVALUATION, AND IT HAD TO LEARN TO. It first pinned only
+# CONTENT, leaving the tracked list, the registry set, each registry's source and
+# each EXPECTATION ARTIFACT read from the working tree. That split is a replay
+# asking one question of two trees, and it went undetected until main adjudicated
+# tooling/concept-map/ci-boundary.test.mjs into .github/run-level-readers.allow:
+# D1 read the artifact from the present, saw the row, and claimed the hit as
+# D1-ENUMERATED — while the d3af39283^ CONTROL, which D1 ignores entirely because
+# D1 is path-keyed, fired too. Subject and control produced BYTE-IDENTICAL output.
+# The harness still scored 24/24 on a stale local branch and 20/24 in CI, on the
+# same commit, because every arm asserted about the subject and none about the
+# RELATIONSHIP between a subject and its control. Every tree read now goes through
+# tree_grep_l() or content_of(), so honouring the ref in one place and forgetting
+# it in another is not representable.
 #
 # D4'S DECLARED GAP — the honest half, and it is stated in the CLEAN output too.
 # D4 reads patterns ONLY from the `-e '<pat>'` shape. A registry that passes a
@@ -135,8 +149,11 @@
 #   registry-impact-check.sh --base <ref>
 #   registry-impact-check.sh --path P [--path Q]  # explicit path set
 #   registry-impact-check.sh --paths-from <file>  # one path per line, - for stdin
-#   registry-impact-check.sh --content-at <ref>   # ask content membership of <ref>
-#                                                 # (default: the working tree)
+#   registry-impact-check.sh --at <ref>           # pin the WHOLE evaluation to
+#                                                 # <ref> (default: working tree).
+#                                                 # --content-at is a deprecated
+#                                                 # alias from when it pinned only
+#                                                 # content, which was the bug.
 #   registry-impact-check.sh --list-registries    # the derived set, with misses
 #   registry-impact-check.sh --selftest           # harness hook
 #
@@ -171,14 +188,18 @@ MODE=run
 BASE="${REGISTRY_IMPACT_BASE:-origin/main}"
 # Empty = the working tree. A historical replay must set this to the commit under
 # test, or the content-membership door asks its question of the wrong tree.
-CONTENT_REF="${REGISTRY_IMPACT_CONTENT_REF:-}"
+# Empty = the working tree. When set, it pins THE WHOLE EVALUATION to that ref:
+# the tracked file list, the derived registry set, every registry's source, every
+# expectation artifact, and file content. It used to pin ONLY content, and that
+# split is what made the d3af39283 replay stop replaying — see the header.
+AT_REF="${REGISTRY_IMPACT_AT_REF:-${REGISTRY_IMPACT_CONTENT_REF:-}}"
 : > "$TMP/paths.explicit"
 HAVE_EXPLICIT=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --base) shift; [ $# -gt 0 ] || cannot_read "--base needs a ref"; BASE="$1" ;;
-    --content-at) shift; [ $# -gt 0 ] || cannot_read "--content-at needs a ref"; CONTENT_REF="$1" ;;
+    --at|--content-at) shift; [ $# -gt 0 ] || cannot_read "$1 needs a ref"; AT_REF="$1" ;;
     --path) shift; [ $# -gt 0 ] || cannot_read "--path needs a path"; printf '%s\n' "$1" >> "$TMP/paths.explicit"; HAVE_EXPLICIT=1 ;;
     --paths-from)
       shift; [ $# -gt 0 ] || cannot_read "--paths-from needs a file"
@@ -202,7 +223,12 @@ if [ "$MODE" = selftest ]; then
 fi
 
 # ------------------------------------------------------------------ tracked tree
-git -C "$ROOT" ls-files > "$TMP/tracked" 2>/dev/null || cannot_read "git ls-files failed under $ROOT"
+if [ -n "$AT_REF" ]; then
+  git -C "$ROOT" ls-tree -r --name-only "$AT_REF" > "$TMP/tracked" 2>/dev/null \
+    || cannot_read "git ls-tree failed for ref '$AT_REF' under $ROOT"
+else
+  git -C "$ROOT" ls-files > "$TMP/tracked" 2>/dev/null || cannot_read "git ls-files failed under $ROOT"
+fi
 TRACKED_N=$(wc -l < "$TMP/tracked" | tr -d ' ')
 [ "$TRACKED_N" -gt 0 ] 2>/dev/null || cannot_read "git ls-files returned nothing under $ROOT"
 
@@ -223,7 +249,19 @@ BREADTH_MAX=$(( TRACKED_N / 20 ))
 # silently returned ZERO FILES for a pattern that is everywhere; a -P sweep whose
 # control also returns zero is a broken instrument, not an absence. This control
 # must hit, or there is no verdict.
-CTRL_N=$(git -C "$ROOT" grep -lP 'set -uo pipefail' -- '*.sh' 2>/dev/null | wc -l | tr -d ' ')
+# Every corpus grep goes through here so the ref cannot be honoured in one place
+# and forgotten in another — which is precisely the bug this function exists to
+# make unrepresentable. `git grep -l <ref>` prefixes each path with "<ref>:".
+tree_grep_l() {
+  local re="$1"; shift
+  if [ -n "$AT_REF" ]; then
+    git -C "$ROOT" grep -lP "$re" "$AT_REF" -- "$@" 2>/dev/null | sed "s|^${AT_REF}:||"
+  else
+    git -C "$ROOT" grep -lP "$re" -- "$@" 2>/dev/null
+  fi
+}
+
+CTRL_N=$(tree_grep_l 'set -uo pipefail' '*.sh' | wc -l | tr -d ' ')
 [ "${CTRL_N:-0}" -gt 5 ] 2>/dev/null || cannot_read "grep control failed: a -P sweep for 'set -uo pipefail' over *.sh matched ${CTRL_N:-0} files. The scan machinery is not working, so an empty result would be meaningless."
 
 # ------------------------------------------------------- PHASE 1: derive the set
@@ -250,10 +288,10 @@ B3_RE='(git ls-files|\bfind\s|git grep|Path\.wildcard|File\.ls|readdirSync|\bfor
 SRC_GLOBS=( '*.sh' '*.mjs' '*.js' '*.exs' '*.ex' '*.py' '*.yml' )
 
 {
-  git -C "$ROOT" grep -lP "$B1_RE"  -- "${SRC_GLOBS[@]}" 2>/dev/null
-  git -C "$ROOT" grep -lP "$B2_RE"  -- "${SRC_GLOBS[@]}" 2>/dev/null
-  git -C "$ROOT" grep -lP "$B2B_RE" -- "${SRC_GLOBS[@]}" 2>/dev/null
-  git -C "$ROOT" grep -lP "$B3_RE"  -- "${SRC_GLOBS[@]}" 2>/dev/null
+  tree_grep_l "$B1_RE"  "${SRC_GLOBS[@]}"
+  tree_grep_l "$B2_RE"  "${SRC_GLOBS[@]}"
+  tree_grep_l "$B2B_RE" "${SRC_GLOBS[@]}"
+  tree_grep_l "$B3_RE"  "${SRC_GLOBS[@]}"
 } | LC_ALL=C sort -u > "$TMP/registries"
 
 REG_N=$(wc -l < "$TMP/registries" | tr -d ' ')
@@ -293,8 +331,8 @@ content_of() {
   local p="$1" cs
   cs="$TMP/content/$(slug_of "$p")"
   if [ ! -e "$cs" ]; then
-    if [ -n "$CONTENT_REF" ]; then
-      git -C "$ROOT" show "$CONTENT_REF:$p" 2>/dev/null | head -c 2000000 > "$cs" || : > "$cs"
+    if [ -n "$AT_REF" ]; then
+      git -C "$ROOT" show "$AT_REF:$p" 2>/dev/null | head -c 2000000 > "$cs" || : > "$cs"
     elif [ -f "$ROOT/$p" ]; then
       head -c 2000000 "$ROOT/$p" > "$cs" 2>/dev/null || : > "$cs"
     else
@@ -309,9 +347,9 @@ SCAN_VERB_RE='git ls-files|\bfind[[:space:]]|git grep|Path\.wildcard|File\.ls|re
 extract_for() {
   local r="$1" slug f line tok norm
   slug="$(slug_of "$r")"
-  f="$ROOT/$r"
+  f="$(content_of "$r")"
   : > "$TMP/art/$slug"; : > "$TMP/glob/$slug"
-  [ -f "$f" ] || return 0
+  [ -s "$f" ] || return 0
 
   # --- expectation artifacts: path-shaped tokens that EXIST in the tracked tree.
   #
@@ -614,7 +652,12 @@ while IFS= read -r r; do
       p_ere="$(printf '%s' "$p" | sed -E 's/[][^$.*\\\/+?(){}|]/\\&/g')"
       while IFS= read -r a; do
         [ -n "$a" ] || continue
-        if LC_ALL=C grep -qE "(^|[^A-Za-z0-9_./-])${p_ere}([^A-Za-z0-9_./-]|$)" "$ROOT/$a" 2>/dev/null; then
+        # READ AT THE REF, not from the working tree. Reading the artifact here
+        # while D4 read content at the ref is what made the d3af39283 subject and
+        # its d3af39283^ CONTROL produce BYTE-IDENTICAL output the moment main
+        # adjudicated the row: D1 answered for the present, the control claimed to
+        # answer for the past, and both said the same thing.
+        if LC_ALL=C grep -qE "(^|[^A-Za-z0-9_./-])${p_ere}([^A-Za-z0-9_./-]|$)" "$(content_of "$a")" 2>/dev/null; then
           door="D1-ENUMERATED"; break
         fi
       done < "$TMP/art/$s"
@@ -662,10 +705,10 @@ if [ "${HIT_N:-0}" -eq 0 ]; then
   # script's own rules forbid. -size +0 asks the only question that matters here.
   CK_N=$(find "$TMP/cpat" -type f 2>/dev/null | wc -l | tr -d ' ')
   CK_LIVE=$(find "$TMP/cpat" -type f -size +0 2>/dev/null | wc -l | tr -d ' ')
-  echo "Content membership (D4) was evaluated for $CK_LIVE content-keyed registr(y|ies) of $CK_N examined,"
-  echo "against ${CONTENT_REF:-the working tree}. A registry whose corpus is decided by file CONTENT is only"
-  echo "answered correctly for the tree the change produces — if you are replaying a commit, pass"
-  echo "--content-at <that commit> or this line is measuring the wrong tree."
+  echo "Whole evaluation was pinned to: ${AT_REF:-the working tree} — tracked list, registry set,"
+  echo "each registry's source, each expectation artifact, and file content, all read there."
+  echo "Content membership (D4) was evaluated for $CK_LIVE content-keyed registr(y|ies) of $CK_N examined."
+  echo "If you are replaying a commit and did NOT pass --at <that commit>, this run measured TODAY's tree."
   echo "THIS CLEAN DOES NOT COVER: a registry whose corpus grep passes a BARE quoted pattern rather"
   echo "than -e '<pat>' (scripts/docs-anchors-check.sh is the known one: a doc gaining a"
   echo "'## Code anchors' heading becomes a member). Extraction cannot tell that pattern from a"

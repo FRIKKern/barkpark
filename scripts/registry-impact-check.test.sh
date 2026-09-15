@@ -92,12 +92,12 @@ fi
 # member by gaining run-level reads (0 source hits at d3af39283^, 2 at
 # d3af39283). Every path-keyed door is structurally blind to that transition.
 #
-# THE CONTROL IS THE POINT AND IT RUNS THE SAME PATHS. Only --content-at differs
+# THE CONTROL IS THE POINT AND IT RUNS THE SAME PATHS. Only --at differs
 # between the two arms, so a D4 that simply always fires fails the control, and a
 # D4 that reads the wrong tree fails the subject. Both directions, one mechanism.
 if have_rev d3af39283; then
   git -C "$ROOT" show --name-only --format= d3af39283 > "$TMP/c3.paths" 2>/dev/null
-  out3="$(bash "$CHECK" --paths-from "$TMP/c3.paths" --content-at d3af39283 2>&1)"; rc3=$?
+  out3="$(bash "$CHECK" --paths-from "$TMP/c3.paths" --at d3af39283 2>&1)"; rc3=$?
   [ "$rc3" = 1 ] && ok "case 3: exits 1 (implicated) on the content-membership case" \
     || bad "case 3: expected rc=1, got $rc3 — the live main red is invisible to this check"
   grep -q 'REGISTRY  scripts/run-level-reader-census\.sh' <<< "$out3" \
@@ -116,14 +116,66 @@ if have_rev d3af39283; then
   grep -q 'REGISTRY  scripts/registry-impact-check\.sh' <<< "$out3" \
     && bad "case 3: the check reported ITSELF as a content member — it is matching its own documentation" \
     || ok "case 3: the check does not match its own prose about another instrument"
-  # THE CONTROL: identical paths, content one commit earlier, when the file was
+  # ARM A — THE CONTROL MUST NOT AGREE WITH ITS SUBJECT.
+  # This is the arm that was missing, and its absence is the real finding of the
+  # CI/local split: the harness scored 24/24 on a tree where CI scored 20/24,
+  # because every case-3 arm asserted something about the SUBJECT and nothing
+  # about the RELATIONSHIP between the subject and its control. When main
+  # adjudicated tooling/concept-map/ci-boundary.test.mjs into
+  # .github/run-level-readers.allow, D1 began answering from the WORKING TREE
+  # while the control still claimed to answer for d3af39283^, and the two runs
+  # produced BYTE-IDENTICAL output — a control that agrees with its subject has
+  # stopped controlling, whatever the reason. This arm is tree-independent and
+  # fails on any tree where that happens.
+  # THE CONTROL: identical paths, evaluated one commit earlier, when the file was
   # not yet a member.
-  out3c="$(bash "$CHECK" --paths-from "$TMP/c3.paths" --content-at 'd3af39283^' 2>&1)"; rc3c=$?
+  out3c="$(bash "$CHECK" --paths-from "$TMP/c3.paths" --at 'd3af39283^' 2>&1)"; rc3c=$?
   [ "$rc3c" = 0 ] && ok "case 3 control: the SAME paths at d3af39283^ are CLEAN (rc=0)" \
     || bad "case 3 control: expected rc=0 before the content landed, got $rc3c — D4 fires on the path, not the transition"
   grep -q 'REGISTRY  scripts/run-level-reader-census\.sh' <<< "$out3c" \
     && bad "case 3 control: named the census at d3af39283^, where the file had ZERO run-level reads" \
     || ok "case 3 control: does not name the census before the reads were added"
+
+  # ARM A, asserted directly on the two transcripts.
+  if [ "$out3" = "$out3c" ]; then
+    bad "case 3 ARM A: the subject and its control produced IDENTICAL output — the control has stopped controlling"
+  else
+    ok "case 3 ARM A: the subject and its control disagree, so the control is still measuring something"
+  fi
+
+  # ARM B — THE DRIFT SENTINEL, precondition-guarded.
+  # The exact condition that broke CI: the path is adjudicated in the tree we are
+  # standing in, but NOT at the replayed ref. A replay that is correctly pinned to
+  # the ref must be UNMOVED by that; one that leaks the working tree in flips to
+  # D1-ENUMERATED and its control dies. The precondition is asserted, never
+  # assumed — when the tree has not drifted the sentinel is NOT armed and says so
+  # rather than passing silently, because a green from an unarmed detector is the
+  # vacuous green this whole harness exists to refuse.
+  SUBJ_PATH='tooling/concept-map/ci-boundary.test.mjs'
+  ALLOW='.github/run-level-readers.allow'
+  # NOT `$(grep -c … || echo 0)`. grep -c PRINTS its count and THEN exits 1 on
+  # zero matches, so that idiom yields the two-line string "0\n0" and the `-eq`
+  # below is not false but an ERROR — which silently routes an ARMED sentinel to
+  # the skip branch. This is the SAME defect I removed from the check itself and
+  # then reintroduced here; it is why the first run of this arm reported NOT
+  # ARMED while printing here_rows=1 ref_rows=0, which is the armed condition.
+  here_rows=0; ref_rows=0
+  if [ -f "$ROOT/$ALLOW" ]; then
+    here_rows=$(grep -c "$SUBJ_PATH" "$ROOT/$ALLOW" 2>/dev/null) || here_rows=0
+  fi
+  ref_rows=$(git -C "$ROOT" show "d3af39283:$ALLOW" 2>/dev/null | grep -c "$SUBJ_PATH") || ref_rows=0
+  case "$here_rows" in ''|*[!0-9]*) here_rows=0 ;; esac
+  case "$ref_rows"  in ''|*[!0-9]*) ref_rows=0  ;; esac
+  if [ "$here_rows" -gt 0 ] && [ "$ref_rows" -eq 0 ]; then
+    grep -q 'via D4-CONTENT' <<< "$out3" \
+      && ok "case 3 ARM B (drift sentinel ARMED: adjudicated here, not at the ref): still attributes D4-CONTENT" \
+      || bad "case 3 ARM B: the working tree's adjudication leaked into a replay of d3af39283 — the ref is not pinning every read"
+    [ "$rc3c" = 0 ] \
+      && ok "case 3 ARM B: the control is still CLEAN despite the working tree having adjudicated the path" \
+      || bad "case 3 ARM B: the control fired because the WORKING TREE lists the path — D1 is not reading at the ref"
+  else
+    skip "case 3 ARM B drift sentinel NOT ARMED on this tree (here_rows=$here_rows ref_rows=$ref_rows); it arms wherever the path is adjudicated in the tree but not at the replayed ref, which is how CI differs from a stale local branch"
+  fi
 else
   skip "case 3: commit d3af39283 not in this checkout — the content-membership arms measured NOTHING"
 fi
