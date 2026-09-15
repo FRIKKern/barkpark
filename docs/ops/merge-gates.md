@@ -633,23 +633,27 @@ artifact worse than the noise it removed.
 
 ### PARSED BUT NOT RUN — the static check that cannot see an expansion-time error
 
-The five above are about a CHECK that reads green. The sixth's victim is the
-verification an author runs by hand on a gate script: **`sh -n script.sh` answers
-0 on a script that then exits 0 having compared NOTHING.** bash parses a command
-substitution's body LAZILY, so a process substitution nested inside one —
-`x=$(comm -13 <(sort a) <(sort b))` — raises its syntax error at EXPANSION
-time, after `-n` has said yes. Both operands come back empty, every comparison
-over them passes, and the harness announces a pass. Measured
-2026-09-13 on `scripts/sunset-route-consumers.test.sh` under `sh`: exit 0,
-`---- 0 failure(s), 32 pass(es)`, `SUNSET-CONSUMER TEST PASSED`, and four
-swallowed `command substitution: … syntax error` lines on stderr.
+Those five are about a CHECK that reads green; the sixth is the hand check
+an author runs on a gate script: **`sh -n script.sh` answers 0 on a script that
+then exits 0 having compared NOTHING.** A capture that fails at RUN time leaves
+its operand EMPTY, the assignment discards the status, and emptiness reads as "no
+differences". Measured 2026-09-13, `scripts/sunset-route-consumers.test.sh`
+under `sh`: exit 0, `---- 0 failure(s), 32 pass(es)`, and four swallowed
+`command substitution: … syntax error` lines on stderr.
 
-**A gate script is verified by RUNNING it under the interpreter in question,
-never by parsing it.** `scripts/posix-vacuous-green-census.sh` holds the whole
-`scripts/` population to that, says so in its RED remedy line, and re-measures
-both exit codes on every `--selftest` run in its `sh-n-blindness` arm rather
-than remembering them. That arm uses `bash --posix`, not `sh`: `/bin/sh` is dash
-on a CI runner, and dash reds this shape at parse time instead.
+**THE TRIGGER IS PLATFORM-SHAPED; THE SHAPE IS NOT.** That was bash 3.2 (macOS),
+which refuses process substitution in POSIX mode and parses command
+substitutions LAZILY — the refusal lands at expansion time. bash 5.2.21 (ubuntu
+24.04, CI) ALLOWS it: same fixture, exit 2, both comparisons red
+(2026-09-15). **The vacuous variant is what a macOS developer sees; CI sees the
+loud one.**
+
+**Verify a gate script by RUNNING it under the interpreter in question.**
+`scripts/posix-vacuous-green-census.sh` says so in its RED remedy line: its
+`sh-n-blindness` arms re-measure it on any interpreter; its
+`procsub-under-posix` arms DETECT which world they are in, then assert what that
+world owes — vacuous where refused, loud where allowed, CANNOT READ where
+neither, never a skip.
 
 ## Security gates (Sobelow + mix_audit)
 

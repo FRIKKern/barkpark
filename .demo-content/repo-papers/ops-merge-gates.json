@@ -5002,44 +5002,7 @@
       "content": [
         {
           "type": "text",
-          "value": "Measured on merged PRs, not inferred: on #10565 (a single ledger "
-        },
-        {
-          "type": "text",
-          "value": ".md",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": ") the per-commit check-runs read both Cloud jobs "
-        },
-        {
-          "type": "text",
-          "value": "skipped",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " under a "
-        },
-        {
-          "type": "text",
-          "value": "success",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " gate carrying one annotation, and #10450 is the same shape. "
-        },
-        {
-          "type": "text",
-          "value": "gh pr checks 10565",
+          "value": "gh pr checks <N>",
           "marks": [
             "code"
           ]
@@ -5050,14 +5013,28 @@
         },
         {
           "type": "text",
-          "value": "Cloud gate  pass  4s",
+          "value": "Cloud gate  pass",
           "marks": [
             "code"
           ]
         },
         {
           "type": "text",
-          "value": " and stops there — the disclosure is one API call or one UI click further on, which is why this page has to tell you it exists."
+          "value": " and stops there — the disclosure is one API call or one UI click further on, which is why this page has to tell you it exists. Measured on merged PRs: "
+        },
+        {
+          "type": "link",
+          "href": "merge-gates-history.md#the-path-gated-green-measured-on-merged-prs",
+          "children": [
+            {
+              "type": "text",
+              "value": "merge-gates-history.md"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "value": "."
         }
       ]
     },
@@ -6716,47 +6693,7 @@
           [
             {
               "type": "text",
-              "value": "sobelow.ex",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " calls "
-            },
-            {
-              "type": "text",
-              "value": "Config.fetch(project_root, routers, endpoints)",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " and only "
-            },
-            {
-              "type": "text",
-              "value": "then",
-              "marks": [
-                "em"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " does "
-            },
-            {
-              "type": "text",
-              "value": "allowed = allowed -- [Config, Vuln]",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": ". Config findings are produced outside the "
+              "value": "Config findings are produced outside the "
             },
             {
               "type": "text",
@@ -6778,7 +6715,7 @@
             },
             {
               "type": "text",
-              "value": " is never consulted. "
+              "value": " is never consulted; "
             },
             {
               "type": "text",
@@ -6853,33 +6790,11 @@
             },
             {
               "type": "text",
-              "value": " builds the template AST with "
+              "value": " bypasses the reader that rewrites "
             },
             {
               "type": "text",
-              "value": "EEx.compile_string(File.read!(filepath))",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": ". It bypasses "
-            },
-            {
-              "type": "text",
-              "value": "Parse.read_file/1",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": ", the reader that rewrites "
-            },
-            {
-              "type": "text",
-              "value": "# sobelow_skip [...]",
+              "value": "# sobelow_skip",
               "marks": [
                 "code"
               ]
@@ -6890,25 +6805,14 @@
             },
             {
               "type": "text",
-              "value": "@sobelow_skip [...]",
+              "value": "@sobelow_skip",
               "marks": [
                 "code"
               ]
             },
             {
               "type": "text",
-              "value": " when "
-            },
-            {
-              "type": "text",
-              "value": "--skip",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " is set, so a template's source never sees the substitution."
+              "value": ", so a template's source never sees the substitution."
             }
           ]
         ]
@@ -6942,29 +6846,7 @@
         },
         {
           "type": "text",
-          "value": ", never from memory: this table carried "
-        },
-        {
-          "type": "text",
-          "value": "bulldocs.html.heex:67",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " for the row that is really at "
-        },
-        {
-          "type": "text",
-          "value": ":95",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": "."
+          "value": ", never from memory — this table has carried a wrong one."
         }
       ]
     },
@@ -8170,6 +8052,10 @@
       "content": [
         {
           "type": "text",
+          "value": "Owned by "
+        },
+        {
+          "type": "text",
           "value": "CLAUDE.md",
           "marks": [
             "code"
@@ -8177,18 +8063,7 @@
         },
         {
           "type": "text",
-          "value": " golden rule #1 and \"Past Mistakes\" #1: cleaning only "
-        },
-        {
-          "type": "text",
-          "value": "_build/prod/lib/barkpark",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " (or any subset) leaves stale "
+          "value": " golden rule #1 and \"Past Mistakes\" #1: a subset clean leaves stale "
         },
         {
           "type": "text",
@@ -8199,7 +8074,7 @@
         },
         {
           "type": "text",
-          "value": " artifacts for HEEx templates and dependent modules. The compiler is happy with the existing artifacts and does not re-evaluate the module graph; the bug then surfaces only on the production server after a fresh deploy. "
+          "value": " artifacts and the bug surfaces only after a prod deploy. "
         },
         {
           "type": "text",
