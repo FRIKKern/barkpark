@@ -132,7 +132,7 @@ jobs:
       rc: ${{ steps.watch.outputs.rc }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The scream's own tripwire. If the harness stops being able to fail, the
       # watch below is decoration — and this run says so first.
@@ -208,7 +208,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Interpretation only — the read itself happened once, in the sibling job.
       # rc 0 clean, rc 1 scream, rc 2 PARTIAL warning, rc 8 BASELINE DRIFT. A
@@ -224,7 +224,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Shell syntax
         run: bash -n scripts/stale-verdict-watch.sh
       - name: Shell syntax (stale-verdict-watch-route.sh)

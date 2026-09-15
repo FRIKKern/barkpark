@@ -84,7 +84,7 @@ jobs:
       BARKPARK_API_URL: http://127.0.0.1:9
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4

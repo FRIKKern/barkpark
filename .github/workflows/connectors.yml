@@ -69,7 +69,7 @@ jobs:
     name: Cloud shim confinement + session-sandbox proofs (black-box, no real Vercel)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -217,7 +217,7 @@ jobs:
       CONNECTORS_REQUIRE_DB: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v4
