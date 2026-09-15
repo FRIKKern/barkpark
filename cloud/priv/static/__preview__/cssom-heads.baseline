@@ -216,7 +216,8 @@
 # authored rule heads, ALL ADDS under wrapper selectors — `.detail-rail .status-pill`,
 # `.detail-rail .status-pill-label`, `.fleet-status .status-pill`,
 # `.fleet-status .status-pill-dot`, `.fleet-status .status-pill-detail`. The pill's own
-# four families at app.css:2913-2957 are byte-identical (GR11/GR25 carve-out, D157
+# four families (the quarantined pill heads; re-derive with
+# `grep -nE '^\.status-pill' app.css`) are byte-identical (GR11/GR25 carve-out, D157
 # ADD-not-restyle). MISSES 0, so this is an unrecorded ADD, never a parity defect.
 # HOW 1253 WAS OBTAINED, since a sixth collision in this file is likely: the sentinel
 # `1` was written here deliberately and cssom-parity.mjs run — it printed
@@ -233,12 +234,13 @@
 # first). It is cause 2 of the two the failure text names — a DELIBERATE DELETION — not
 # cause 1, a stray `/*` swallowing a live region. The MINUS ONE is one whole @media
 # wrapper holding exactly one rule: `@media (max-width: 900px) { .tier-grid {
-# grid-template-columns: 1fr 1fr; } }` at app.css:1051, which forced two tier tracks
+# grid-template-columns: 1fr 1fr; } }` — DELETED by this slice, so it has no live
+# anchor; its selector survives (`grep -n '^\.tier-grid' app.css`). It forced two tier tracks
 # onto every phone and pushed documentElement.scrollWidth to 413 in a 320 viewport.
 # THE SIGNATURE THAT SEPARATES A DELETION FROM A SWALLOW: flattened selectors are
 # 1218/1218 BEFORE and 1218/1218 AFTER, and MISSES stays 0. A `/*` swallow drops
 # flattened selectors with the heads; this drops one head and no selector, because the
-# deleted block's single selector `.tier-grid` still exists at app.css:1046.
+# deleted block's single selector `.tier-grid` still exists (`grep -n '^\.tier-grid' app.css`).
 # NOT TOUCHED, and it matters: `@media (min-width: 900px)` at :2273 stays. That block is
 # what keeps 899 in the derived breakpoint axis after this deletion.
 # HOW 1252 WAS OBTAINED (D158, and the sixth-collision warning above was written for
@@ -265,10 +267,10 @@
 # 1256, +4 authored rule heads, ALL ADDS under a WRAPPER selector —
 # `.instance-card-head` (a second, tail-authored head carrying only `flex-wrap: wrap`),
 # `.instance-card-head .status-pill`, `… .status-pill-dot`, `… .status-pill-detail`.
-# The pill's own four quarantined families at app.css:2913-2957 are byte-identical
+# The pill's own four quarantined families (`grep -nE '^\.status-pill' app.css`) are byte-identical
 # (GR11/GR25 carve-out, D157 ADD-not-restyle, D198 wrapper ruling).
 # WHY FOUR AND NOT THREE, since a +3 variant exists and is cheaper: folding
-# `flex-wrap: wrap` into the EXISTING `.instance-card-head` at app.css:3064 edits an
+# `flex-wrap: wrap` into the EXISTING `.instance-card-head` (`grep -n '^\.instance-card-head' app.css`) edits an
 # existing declaration line and forfeits the old-length-zero `git diff -U0`
 # construction that proves :2913-2957 untouched WITHOUT anyone inspecting it. D198
 # refused the +3 on exactly that ground: the fourth head IS the carve-out proof's
@@ -287,7 +289,8 @@
 # W19-S2 2026-08-01 (cch-w19-s2-topbar-phone-band-620 — the phone topbar wraps at 620):
 # 1256 -> 1259, +3 authored rule heads, ALL ADDS, all inside ONE new
 # `@media (max-width: 620px)` block authored immediately after the 830 block at
-# app.css:3963-3967 — `.topbar`, `.topbar-right`, `.billing-chip`. Nothing existing was
+# the 620 block (`grep -n '@media (max-width: 620px)' app.css`) — `.topbar`,
+# `.topbar-right`, `.billing-chip`. Nothing existing was
 # edited: the block is a pure append, so every prior head is byte-identical.
 # HOW 1259 WAS OBTAINED (D158 sentinel, and NO ARITHMETIC — 1256 + 3 also equals 1259
 # and that coincidence is NOT how this line may be produced): the sentinel `1` was
@@ -328,7 +331,8 @@
 # / 1221 CSSOM, MISSES 0, PARITY PASS.
 # THE FLATTENED PAIR DOES NOT MOVE, AND THAT IS NOT AN OMISSION (D222 — record the pair,
 # not half the instrument). `authored` is a Map keyed by NORMALISED SELECTOR, first
-# occurrence only (cssom-parity.mjs:532-537), so it is a DISTINCT-selector census:
+# occurrence only — the first-wins `authored` Map in authoredIndex(); re-derive with
+# `grep -n 'const authored = new Map' cssom-parity.mjs` — so it is a DISTINCT-selector census:
 # `.topbar` is already authored at :794 and again in the 830 block, so a third head
 # carrying the same single selector adds a HEAD and no distinct SELECTOR. Heads +1,
 # flattened +0 is the signature of a scoped re-declaration, and it is the opposite of a

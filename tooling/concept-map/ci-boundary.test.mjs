@@ -633,3 +633,209 @@ test("MUTATION arm (c): a healed check that never triggers stops the HEALED case
   });
   assert.equal(res.failed, false, "ARM (c) NEUTERED: a healed entry survives forever");
 });
+
+// ── --from-ci: THE CHEAP VERDICT, AND THE LINE IT MUST NEVER PRINT ──────────
+//
+// task-3b79b6580fe877c6. The local gate refuses in a cold tree (pinned above),
+// and warming it costs a full mix compile — so the verdict that criteria
+// actually cite is CI's own check-run conclusion. `--from-ci <sha>` makes that
+// reading a command instead of a glance at a web page.
+//
+// THE ONE PROPERTY THAT MATTERS: a verdict it could not obtain must never be
+// byte-identical to a pass. The four shapes a reviewer meets in the minutes
+// after a push — no check-run, queued, in_progress, and a failed API read — are
+// each driven below, and then compared BYTE-FOR-BYTE against the pass
+// rendering. A test that only asserted "exit != 0" would pass on a pass line
+// with a bad exit code; a test that only asserted the text would pass on a
+// distinct line that exited 0. Both halves are asserted for every case.
+//
+// No network and no `gh`: apiGet is injected. The success/failure payloads are
+// the REAL shape, trimmed — captured 2026-09-13 from
+//   gh api repos/FRIKKern/barkpark/commits/<sha>/check-runs?check_name=Boundary+gate
+// for sha 24cf74bd00e01a7cfb886f94fae11d187d4d020e (check-run 103716446265,
+// conclusion "failure").
+
+import { ciVerdict, renderCiVerdict, resolveRepo, CI_CHECK_NAME } from "./ci-boundary.mjs";
+
+const REAL_RUN = {
+  id: 103716446265,
+  name: "Boundary gate",
+  head_sha: "24cf74bd00e01a7cfb886f94fae11d187d4d020e",
+  html_url: "https://github.com/FRIKKern/barkpark/actions/runs/34754488625/job/103716446265",
+  details_url: "https://github.com/FRIKKern/barkpark/actions/runs/34754488625/job/103716446265",
+  status: "completed",
+  conclusion: "failure",
+  started_at: "2026-09-13T11:28:55Z",
+  completed_at: "2026-09-13T11:30:30Z",
+};
+const SHA = REAL_RUN.head_sha;
+const REPO = "FRIKKern/barkpark";
+
+const payload = (runs) => ({ total_count: runs.length, check_runs: runs });
+const withRun = (over) => payload([{ ...REAL_RUN, ...over }]);
+const serve = (p) => async () => p;
+const explode = (msg) => async () => {
+  const err = new Error("Command failed: gh api …");
+  err.stderr = msg;
+  throw err;
+};
+const verdict = (apiGet) => ciVerdict(SHA, { repo: REPO, apiGet });
+
+// The two shapes everything else is measured against.
+const PASS = await verdict(serve(withRun({ conclusion: "success" })));
+const PASS_BYTES = renderCiVerdict(PASS);
+
+test("--from-ci PASS: a success conclusion is exit 0 and says PASS, with the job URL", async () => {
+  assert.equal(PASS.kind, "pass");
+  assert.equal(PASS.exitCode, 0);
+  assert.match(PASS.line, /CI VERDICT PASS/);
+  assert.match(PASS_BYTES, /job: https:\/\/github\.com\/FRIKKern\/barkpark\/actions\/runs\//);
+});
+
+test("--from-ci RED: the real captured failure payload is exit 1 and names the conclusion", async () => {
+  const v = await verdict(serve(withRun({})));
+  assert.equal(v.kind, "red");
+  assert.equal(v.exitCode, 1);
+  assert.match(v.line, /CI VERDICT RED/);
+  assert.match(v.line, /conclusion=failure/);
+  assert.match(v.line, /check-run 103716446265/);
+  assert.notEqual(renderCiVerdict(v), PASS_BYTES);
+});
+
+// ── the four CANNOT-READ shapes, each driven, each compared to the pass ─────
+
+const CANNOT_CASES = [
+  ["ABSENT: no Boundary gate check-run exists for the sha", serve(payload([]))],
+  ["QUEUED: the check-run exists but has published nothing", serve(withRun({ status: "queued", conclusion: null }))],
+  ["IN_PROGRESS: the job is still running", serve(withRun({ status: "in_progress", conclusion: null }))],
+  ["API READ FAILED: gh could not complete the read", explode("gh: Not Found (HTTP 404)")],
+];
+
+for (const [label, apiGet] of CANNOT_CASES) {
+  test(`--from-ci CANNOT READ — ${label}`, async () => {
+    const v = await verdict(apiGet);
+    assert.equal(v.kind, "cannot-read", `${label} must not be classified as a verdict`);
+    assert.notEqual(v.exitCode, 0, `${label} must exit NON-ZERO`);
+    assert.equal(v.exitCode, 2);
+    assert.match(v.line, /CANNOT READ CI VERDICT/);
+    // The criterion's RED, asserted directly: byte-identity with a pass.
+    const bytes = renderCiVerdict(v);
+    assert.notEqual(bytes, PASS_BYTES, `${label} rendered BYTE-IDENTICALLY to a pass`);
+    assert.doesNotMatch(bytes, /CI VERDICT PASS/, `${label} must not contain the pass phrase`);
+  });
+}
+
+test("--from-ci: the four CANNOT-READ shapes are distinct from EACH OTHER, not just from the pass", async () => {
+  const rendered = [];
+  for (const [, apiGet] of CANNOT_CASES) rendered.push(renderCiVerdict(await verdict(apiGet)));
+  assert.equal(new Set(rendered).size, CANNOT_CASES.length, "a shape was indistinguishable from another");
+});
+
+test("--from-ci: a null, neutral or skipped conclusion on a COMPLETED run is still CANNOT READ", async () => {
+  for (const conclusion of [null, "neutral", "skipped"]) {
+    const v = await verdict(serve(withRun({ conclusion })));
+    assert.equal(v.kind, "cannot-read", `conclusion=${conclusion} must not read as a verdict`);
+    assert.notEqual(v.exitCode, 0);
+  }
+});
+
+test("--from-ci: a malformed payload and a junk sha both refuse rather than guess", async () => {
+  for (const bad of [{}, { check_runs: "nope" }, null]) {
+    const v = await verdict(serve(bad));
+    assert.equal(v.kind, "cannot-read");
+    assert.equal(v.exitCode, 2);
+  }
+  const badSha = await ciVerdict("not-a-sha", { repo: REPO, apiGet: serve(withRun({ conclusion: "success" })) });
+  assert.equal(badSha.kind, "cannot-read");
+  const noRepo = await ciVerdict(SHA, { repo: null, apiGet: serve(withRun({ conclusion: "success" })) });
+  assert.equal(noRepo.kind, "cannot-read");
+});
+
+test("--from-ci: a re-run reports the NEWEST check-run, not the first the API lists", async () => {
+  const stale = { ...REAL_RUN, id: 1, conclusion: "failure", started_at: "2026-09-13T10:00:00Z" };
+  const fresh = { ...REAL_RUN, id: 2, conclusion: "success", started_at: "2026-09-13T12:00:00Z" };
+  const v = await ciVerdict(SHA, { repo: REPO, apiGet: serve(payload([stale, fresh])) });
+  assert.equal(v.kind, "pass");
+  assert.match(v.line, /check-run 2/);
+});
+
+test("--from-ci: the API path asks for the Boundary gate by name, on the sha it was given", async () => {
+  let seen = null;
+  await ciVerdict(SHA, { repo: REPO, apiGet: async (p) => { seen = p; return withRun({ conclusion: "success" }); } });
+  assert.equal(seen, `repos/${REPO}/commits/${SHA}/check-runs?check_name=${encodeURIComponent(CI_CHECK_NAME)}`);
+  assert.equal(CI_CHECK_NAME, "Boundary gate", "the check name must match architecture.yml's job");
+});
+
+test("resolveRepo prefers --repo, then GITHUB_REPOSITORY, then the origin remote", () => {
+  assert.equal(resolveRepo({ override: "a/b", env: { GITHUB_REPOSITORY: "c/d" }, remoteUrl: "" }), "a/b");
+  assert.equal(resolveRepo({ env: { GITHUB_REPOSITORY: "c/d" }, remoteUrl: "" }), "c/d");
+  assert.equal(resolveRepo({ env: {}, remoteUrl: "git@github.com:FRIKKern/barkpark.git" }), "FRIKKern/barkpark");
+  assert.equal(resolveRepo({ env: {}, remoteUrl: "https://github.com/FRIKKern/barkpark" }), "FRIKKern/barkpark");
+  assert.equal(resolveRepo({ env: {}, remoteUrl: "/some/local/path" }), null);
+});
+
+// ── MUTATION: prove the distinction is load-bearing ─────────────────────────
+
+test("MUTATION --from-ci: the queued/in_progress refusal is the STATUS guard, not a coincidence", async () => {
+  // queued and in_progress are defended TWICE — the status guard, and then the
+  // null-conclusion guard behind it. So "it still refuses when mutated" would
+  // prove nothing. What is asserted instead is WHICH guard fired: neuter the
+  // status check and the REASON must change, from the status clause to the
+  // conclusion clause. If it does not, the status guard was never reached and
+  // the two cases above are measuring the null-conclusion path by accident.
+  const queued = serve(withRun({ status: "queued", conclusion: null }));
+  const live = await verdict(queued);
+  assert.match(live.line, /status="queued", not completed/);
+
+  const m = await neuter('if (run.status !== "completed")', "if (false)");
+  const mutated = await m.ciVerdict(SHA, { repo: REPO, apiGet: queued });
+  assert.notEqual(mutated.line, live.line, "MUTATION did not apply — the status guard is unmeasured");
+  assert.doesNotMatch(mutated.line, /not completed/, "the status clause survived its own neutering");
+  assert.match(mutated.line, /conclusion=null/, "the mutant should now fall through to the conclusion guard");
+});
+
+test("MUTATION --from-ci: a pass branch that fires for EVERY conclusion makes a red read green", async () => {
+  const m = await neuter("if (conclusion === CI_PASS_CONCLUSION)", "if (true)");
+  const v = await m.ciVerdict(SHA, { repo: REPO, apiGet: serve(withRun({})) });
+  assert.equal(v.kind, "pass", "MUTATION did not apply — the RED case above is vacuous");
+  assert.equal(v.exitCode, 0);
+});
+
+// ── CRITERION 2: the warm-tree precondition is where an author will see it ──
+
+test("the docs surface names BOTH refusal strings verbatim, the cost, and the cheap path", () => {
+  const readme = _read(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
+  const help = execFileSync(process.execPath, [CI_BOUNDARY_SRC, "--help"], { encoding: "utf8" });
+
+  const REFUSAL_COLD =
+    "ci-boundary: REFUSING to gate an unwarmed tree — no blast-radius index at tooling/blast-radius/index.json " +
+    "(this tree was never warmed); build it first: node tooling/blast-radius/build-index.mjs (a cold run compares " +
+    "HEURISTIC edges against an EXACT-edge baseline and silently misstates the debt; pass --allow-cold-index to override)";
+  const REFUSAL_NO_ELIXIR =
+    "ci-boundary: REFUSING to gate an unwarmed tree — tooling/blast-radius/index.json carries no elixir.forward graph " +
+    "(mix compile or mix xref did not run); build it first: node tooling/blast-radius/build-index.mjs (a cold run compares " +
+    "HEURISTIC edges against an EXACT-edge baseline and silently misstates the debt; pass --allow-cold-index to override)";
+
+  for (const [name, surface] of [["README.md", readme], ["--help", help]]) {
+    // The criterion's own RED, first.
+    assert.ok(surface.includes("elixir.forward"), `${name} does not mention elixir.forward`);
+    assert.ok(surface.includes(REFUSAL_COLD), `${name} does not carry refusal 1 VERBATIM`);
+    assert.ok(surface.includes(REFUSAL_NO_ELIXIR), `${name} does not carry refusal 2 VERBATIM`);
+    assert.ok(surface.includes("node tooling/blast-radius/build-index.mjs"), `${name} omits the build-index cost`);
+    assert.ok(/mix compile/.test(surface) && /mix deps\.get/.test(surface), `${name} omits the mix-compile cost`);
+    assert.ok(surface.includes("--from-ci"), `${name} omits the supported cheap path`);
+  }
+});
+
+test("the refusal strings pinned above are the ones preflightRefusal actually emits", () => {
+  // A doc-surface assertion is worth nothing if it pins a string the code no
+  // longer prints. Both expectations are re-derived from the live predicate.
+  const t = plantTree();
+  const cold = preflightRefusal({ indexPath: t.indexPath, symbolsPath: t.symbolsPath });
+  _write(t.indexPath, JSON.stringify({ elixir: {} }));
+  const noElixir = preflightRefusal({ indexPath: t.indexPath, symbolsPath: t.symbolsPath });
+  assert.ok(cold && noElixir && cold !== noElixir, "the two refusals must be distinct, live strings");
+  const help = execFileSync(process.execPath, [CI_BOUNDARY_SRC, "--help"], { encoding: "utf8" });
+  assert.ok(help.includes(cold), "the help text's refusal 1 has DRIFTED from the emitted one");
+  assert.ok(help.includes(noElixir), "the help text's refusal 2 has DRIFTED from the emitted one");
+});

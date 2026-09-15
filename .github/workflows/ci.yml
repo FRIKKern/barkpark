@@ -67,11 +67,24 @@ on:
     # scripts/shim-trigger-filter-check.sh reads exactly this distinction: its
     # predicate is `on.pull_request.paths`/`paths-ignore` and nothing else.
     #
-    # KEPT IN STEP WITH THE DISPATCHED SET: these are the same trees
+    # KEPT IN STEP WITH THE DISPATCHED SET: these are the trees
     # scripts/web-path-escape-check.sh declares, plus the script itself. A merge
     # that touches none of them cannot change what this workflow would say.
+    # "KEPT IN STEP" IS A CLAIM, AND IT HAS BEEN FALSE: this list fell behind
+    # the declared set three rows at a time and nothing said so, because a
+    # trigger that never fires emits no red of its own.
+    # scripts/undispatched-target-check.sh is the detector for that direction.
+    # It still names `templates/**` and `js/**` here; both are carried in that
+    # script's ACKNOWLEDGED block with their measurement, so they are WARNINGS,
+    # not silence. `design/tokens.json` was the third, and is fixed below:
+    # web/__tests__/type-ladder-emitted.test.ts and
+    # js/packages/react/tests/verdict-accent.parity.test.ts both READ it, so a
+    # merge changing it genuinely changes what this workflow would say.
+    # Re-derive before editing, never retype:
+    #   bash scripts/web-path-escape-check.sh --print-set web
     paths:
       - "web/**"
+      - "design/tokens.json"
       - "js/packages/core/**"
       - "js/packages/react/**"
       - "js/packages/create-barkpark-app/templates/**"
