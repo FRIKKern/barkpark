@@ -789,6 +789,51 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert reload_html =~ ~s(data-test-id="paper-canvas-run")
     end
 
+    test "an already connected anonymous reader keeps every block through repeated batch edits",
+         %{
+           conn: conn,
+           slug: slug
+         } do
+      {:ok, editor, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      {:ok, reader, reader_html} = live(scoped_conn(), "/papers/#{slug}")
+      reader_pid = reader.pid
+
+      assert reader_html =~ "Original body text"
+      assert reader_html =~ "Spare block"
+      assert reader_html =~ "Edit on the link probe"
+      assert assigns_of(reader).can_edit? == false
+
+      render_click(editor, "paper-toggle-edit", %{})
+
+      for {body, extra} <- [
+            {"First batch body", "First batch extra"},
+            {"Second batch body", "Second batch extra"}
+          ] do
+        render_hook(editor, "paper-ops", %{
+          "request_id" => Ecto.UUID.generate(),
+          "if_rev" => assigns_of(editor).paper_rev,
+          "ops" => [
+            %{
+              "op" => "patch-block",
+              "id" => "b-body",
+              "patch" => %{"content" => [%{"type" => "text", "value" => body}]}
+            },
+            %{
+              "op" => "patch-block",
+              "id" => "b-extra",
+              "patch" => %{"content" => [%{"type" => "text", "value" => extra}]}
+            }
+          ]
+        })
+
+        assert block_text(slug, "b-body") == body
+        assert block_text(slug, "b-extra") == extra
+        assert eventually_renders(reader, body) =~ extra
+        assert reader.pid == reader_pid
+        assert render(reader) =~ "Edit on the link probe"
+      end
+    end
+
     test "paper-ops invalid payloads reject a prior successful save without mutating", %{
       conn: conn,
       slug: slug
