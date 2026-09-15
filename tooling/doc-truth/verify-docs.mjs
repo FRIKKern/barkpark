@@ -557,6 +557,68 @@ function unitSuffixed(scan, idx) {
   return /^(?:\s*[-\u2013]\s*\d{1,5})?(?:-|\/)?[A-Za-z]/.test(rest) || SPACED_UNIT.test(rest);
 }
 
+// A NUMBER BEING COMPARED AGAINST A BUDGET IS A MEASUREMENT, NOT A LINE.
+//
+// `SPACED_UNIT` above is LEXICAL: it can only ever refuse the units it spells
+// out. An enumeration is a snapshot; the next instrument to print a quantity
+// beside a filename will not wear one of those five words. The SAME refusal,
+// reworded one notch \u2014
+//
+//     docs/cheatsheets/bp.md: 3298 over cap 2400
+//
+// carries no unit token at all and sails straight back through as a citation of
+// line 3298. So this is a PREDICATE over the shape instead: whatever the unit,
+// a quantity an instrument printed is immediately followed by the COMPARISON it
+// lost \u2014 an operator, an "over/under cap", an "exceeds", a "% of budget".
+//
+// DELIBERATELY NUMBER-ADJACENT, AND THAT IS THE WHOLE DESIGN. The tempting rule
+// is "the quoted span carries a verdict token somewhere" (`>`, `cap`, `exceed`,
+// `FAILED`, `exit`). MEASURED on the live corpus: that reads 27 of the 1006
+// lineref claims as instrument output, and ALL 27 ARE GENUINE CITATIONS \u2014
+//
+//     ops.ex:429) \u2014 the ONE cap path that does not route through
+//     writer.ex:1202): **13 tests, 8 failures** \u2014 four
+//     internal/hetzner/dns.go:74 \u2014 hetzner dns upsert %q: %w
+//
+// \u2014 while removing exactly ZERO false positives. A span-level tell is a pure
+// blind spot, which is the same trade the "any letter after whitespace" fix
+// offered #18452 (19 real stale linerefs silenced, 16 of them baselined). The
+// comparison has to sit on the NUMBER, because that is what distinguishes a
+// quantity being judged from a line number in a sentence that happens to
+// discuss judging.
+//
+// THE BARE DIRECTION WORDS ARE EXCLUDED FROM STANDING ALONE for the same
+// reason, also measured: `over` and `below` are ordinary prose next to a
+// citation \u2014
+//
+//     Sync.Finch:~51 below),
+//     app.js:674-682 over instanceLifecycle :2375-2383
+//
+// \u2014 so they count only when a BUDGET noun follows them. `exceeds` needs no such
+// escort; nothing in this corpus writes it as connective prose after a line
+// number.
+const BUDGET_NOUN = String.raw`(?:cap|caps|limit|limits|budget|budgets|quota|quotas|threshold|thresholds|max|ceiling|by)`;
+const MEASURED_QUANTITY = new RegExp(
+  String.raw`^(?:\s*[-\u2013]\s*\d{1,5})?` + // the far end of a range: `3298-4000 B > cap`
+    String.raw`\s*%?` + //                     a glued percent sign: `42% of budget`
+    String.raw`(?:\s+[A-Za-z]{1,6})?` + //     an unknown SPACED unit: `3298 kb`, `1204 rows`
+    String.raw`\s*(?:` +
+    String.raw`[<>]=?\s*\d|` + //                 `3298 B > 2400`
+    String.raw`[<>]=?\s*` + BUDGET_NOUN + String.raw`\b|` + // `3298 B > cap`
+    String.raw`\b(?:over|under|above|below)\s+` + BUDGET_NOUN + String.raw`\b|` + // `3298 over cap`, `over by`
+    String.raw`\bexceed(?:s|ed|ing)?\b|` + //      `3298 exceeds 2400`
+    String.raw`\bof\s+(?:the\s+)?` + BUDGET_NOUN + String.raw`\b` + // `42% of the cap`
+    String.raw`)`,
+  "i",
+);
+
+// The two reasons a harvested number is not a line number. Kept as one call so
+// both harvest loops \u2014 the `:N` cue and the bare RANGE cue \u2014 ask the same
+// question.
+function notALineNumber(scan, idx) {
+  return unitSuffixed(scan, idx) || MEASURED_QUANTITY.test(scan.slice(idx));
+}
+
 function matchLineref(raw) {
   // basename.ext with an explicit line number nearby. Tolerate ~ and ranges.
   // Examples: mix.exs:55 · content.ex ~:2153/:2172 · router.ex line ~672 ·
@@ -604,7 +666,7 @@ function matchLineref(raw) {
     //     number, so reading only the character after `180` sees a digit and
     //     lets a duration through as a pair of line numbers. Measured: that is
     //     how `cp-deploy.sh` was reported as citing lines 180 and 400.
-    if (unitSuffixed(scan, numRe.lastIndex)) continue;
+    if (notALineNumber(scan, numRe.lastIndex)) continue;
     nums.push(parseInt(nm[1], 10));
   }
   // BARE-RANGE cue (code-comment prose): a `NNN-NNN` line span written WITHOUT a
@@ -622,7 +684,7 @@ function matchLineref(raw) {
     while ((rm = rangeRe.exec(scan))) {
       // A unit hanging off the range — `~180-400s`, `50-100ms` — makes it a
       // duration or a size, never a pair of line numbers.
-      if (unitSuffixed(scan, rangeRe.lastIndex)) continue;
+      if (notALineNumber(scan, rangeRe.lastIndex)) continue;
       nums.push(parseInt(rm[1], 10), parseInt(rm[2], 10));
       rangeCue = true;
     }

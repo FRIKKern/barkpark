@@ -1129,6 +1129,105 @@ function selftest() {
         );
       }
     }
+
+    // ── (s) A QUANTITY BEING COMPARED TO A BUDGET IS NOT A LINE NUMBER ────────
+    // (r) closed the byte count LEXICALLY — a closed list of unit words. The
+    // same instrument refusal reworded one notch drops the unit entirely:
+    //
+    //   docs/cheatsheets/bp.md: 3298 over cap 2400
+    //
+    // and the enumeration cannot see it, because an enumeration is a snapshot
+    // and the next tool to print a quantity beside a filename will use a word
+    // nobody listed. So (s) is the PREDICATE arm: whatever the unit, the number
+    // is followed by the COMPARISON it was printed for.
+    //
+    // THE FOUR CONTROLS ARE THE POINT, AND THEY ARE WHY THE RULE IS
+    // NUMBER-ADJACENT RATHER THAN SPAN-LEVEL. The obvious tell — "the quoted
+    // span carries a verdict token somewhere" — was measured against the live
+    // corpus: 27 of 1006 lineref claims match it and ALL 27 ARE GENUINE
+    // CITATIONS, while ZERO false positives come off. (s-control-b) and
+    // (s-control-c) are two of those 27 specimens, reproduced verbatim in
+    // shape, and they must still RED.
+    if (!plant) {
+      fails.push("(s) SETUP: shares the plant target and it was unavailable");
+    } else {
+      const silent = [
+        ["(s)", `${plant.base}: ${plant.beyond} over cap 2400`, "an over-cap refusal with NO unit token"],
+        ["(s-b)", `${plant.base}: ${plant.beyond} exceeds the cap`, "an `exceeds` verdict"],
+        ["(s-c)", `${plant.base}: ${plant.beyond} kb > 2400 kb`, "a comparison carrying a unit no list enumerates"],
+        ["(s-d)", `${plant.base}: ${plant.beyond}% of budget`, "a percentage of a budget"],
+      ];
+      for (const [arm, sentence, what] of silent) {
+        writeFileSync(
+          probeAbs,
+          "defmodule LinerefSelftestProbe do\n" +
+            `  # The gate refused with "${sentence}".\n` +
+            "  def noop, do: :ok\n" +
+            "end\n",
+        );
+        const found = linerefFindings([probeRel]);
+        if (found.length !== 0) {
+          fails.push(
+            `${arm} MEASURED QUANTITY: ${what} — "${sentence}" — was read as a citation of line ` +
+              `${plant.beyond}: ` + (found[0].evidence || ""),
+          );
+        }
+      }
+
+      // (s-control-a) A GENUINE CITATION INSIDE A BACKTICKED SPAN STILL BINDS.
+      // The classification rule must key on the number's own continuation, never
+      // on the citation sitting in quotes — quoting is how people write
+      // citations, so a quote-level rule blinds the corpus.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${plant.symbol}\` is the enclosing def at \`${plant.base}:${plant.beyond}\`.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      if (linerefFindings([probeRel]).length === 0) {
+        fails.push(
+          `(s-control-a) BLIND SPOT: a real \`${plant.base}:${plant.beyond}\` citation inside a BACKTICKED ` +
+            "span went SILENT past EOF. A citation does not stop being one because it is quoted.",
+        );
+      }
+
+      // (s-control-b) A VERDICT WORD LATER IN THE SENTENCE IS PROSE. Shape taken
+      // from the live corpus: `ops.ex:429) — the ONE cap path that does not route
+      // through`. The word `cap` is there; it is not what the number is being
+      // compared against.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${plant.symbol}\` (${plant.base}:${plant.beyond}) — the ONE cap path that does not route through.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      if (linerefFindings([probeRel]).length === 0) {
+        fails.push(
+          `(s-control-b) BLIND SPOT: \`${plant.base}:${plant.beyond}) — the ONE cap path …\` went SILENT. ` +
+            "The rule has drifted from the NUMBER to the SPAN, and every citation in a sentence that " +
+            "mentions a cap is now invisible.",
+        );
+      }
+
+      // (s-control-c) A BARE DIRECTION WORD IS PROSE. Live specimens:
+      // `Sync.Finch:~51 below),` and `app.js:674-682 over instanceLifecycle`.
+      // `over`/`below` count only with a BUDGET NOUN behind them.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${plant.symbol}\` is wired at ${plant.base}:${plant.beyond} below), the same boolean ladder.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      if (linerefFindings([probeRel]).length === 0) {
+        fails.push(
+          `(s-control-c) BLIND SPOT: \`${plant.base}:${plant.beyond} below),\` went SILENT. A bare ` +
+            "direction word has been read as a comparison, and prose like `:~51 below)` is now a measurement.",
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -1162,6 +1261,10 @@ function selftest() {
   process.stdout.write("  ok: (r) silent on a QUOTED BYTE COUNT — `<file>: <n> B` is a size, not a line\n");
   process.stdout.write("  ok: (r-control-a) the SAME `<file>: <n>` shape with NO unit still REDS\n");
   process.stdout.write("  ok: (r-control-b) a citation trailed by an ordinary WORD still REDS — the guard widened to UNITS, not to letters\n");
+  process.stdout.write("  ok: (s/s-b/s-c/s-d) silent on a QUANTITY COMPARED TO A BUDGET — `over cap`, `exceeds`, `kb >`, `% of budget` — with no unit list to enumerate\n");
+  process.stdout.write("  ok: (s-control-a) a genuine citation inside a BACKTICKED span still REDS\n");
+  process.stdout.write("  ok: (s-control-b) a citation in a sentence that merely MENTIONS a cap still REDS — the rule keys on the number, not the span\n");
+  process.stdout.write("  ok: (s-control-c) a citation trailed by a bare direction word (`below),`) still REDS\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }
