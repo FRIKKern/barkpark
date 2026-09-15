@@ -1341,32 +1341,41 @@ function noteScalarText(value) {
   return Number.isInteger(value) ? String(value) : "";
 }
 
+// Mirror Blocks.note_no_rich_shadow?: only absent/null/empty alternate
+// carriers are harmless. Keep their original keys and values when editing.
+function noteNoRichShadow(value, fields) {
+  return fields.every(key => !Object.hasOwn(value, key) || value[key] === null ||
+    value[key] === "" || (Array.isArray(value[key]) && value[key].length === 0));
+}
+
 function noteInlineTerminal(value, path) {
   if (value == null || (Array.isArray(value) && value.length === 0))
     return { path, empty: true };
-  if (typeof value === "string") return { path };
   if (!Array.isArray(value) || value.length !== 1) return null;
   const leaf = value[0];
-  if (typeof leaf === "string") return { path: [...path, 0] };
   if (!leaf || typeof leaf !== "object" || Array.isArray(leaf)) return null;
   if (leaf.type === "text" || leaf.type === "code") {
+    if (!noteNoRichShadow(leaf, ["children", "content", "text"])) return null;
     if (leaf.value != null && typeof leaf.value !== "string" && !Number.isInteger(leaf.value)) return null;
     return { path: [...path, 0, "value"] };
   }
-  if (Array.isArray(leaf.children) && leaf.children.length === 1)
+  if (Array.isArray(leaf.children) && leaf.children.length === 1 &&
+      noteNoRichShadow(leaf, ["content", "text", "value"]))
     return noteInlineTerminal(leaf.children, [...path, 0, "children"]);
   return null;
 }
 
 function noteFieldState(block, name, flatKey) {
   const slot = block.slots && block.slots[name];
+  if (slot != null && (!Array.isArray(slot) || (slot.length === 0 && name !== "lead"))) return null;
   let text = noteScalarText(block[flatKey]);
   let terminal = { path: [flatKey], scalar: true };
-  // Slots.slot_elements/2 only takes a stored ARRAY. An empty array falls back
-  // to the scalar; a populated map's content wins even when it reads as empty.
+  // Server authoring permits only the optional lead slot to be an empty array.
+  // A populated paragraph's content wins even when it reads as empty.
   if (Array.isArray(slot) && slot.length) {
     const first = slot[0];
     if (!first || typeof first !== "object" || Array.isArray(first) || slot.length !== 1 || first.type !== "paragraph") return null;
+    if (!noteNoRichShadow(first, ["children", "text", "value"])) return null;
     text = flattenInlineText(first.content);
     terminal = noteInlineTerminal(first.content, ["slots", name, 0, "content"]);
   } else if (block[flatKey] != null && typeof block[flatKey] !== "string" && !Number.isInteger(block[flatKey])) {
@@ -1388,6 +1397,7 @@ function noteFieldState(block, name, flatKey) {
 }
 
 function noteState(block) {
+  if (block.slots != null && !isPlainObject(block.slots)) return { label: null, lead: null, body: null };
   return {
     label: noteFieldState(block, "label", "label"),
     lead: noteFieldState(block, "lead", "lead"),

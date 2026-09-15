@@ -112,6 +112,218 @@ try {
       assert.deepEqual(runToOps([unsupported], editor.getJSON()), []);
     } finally { editor.destroy(); }
   });
+  check("note slot admission: malformed maps and non-lead empty slots stay opaque without normalization", () => {
+    const invalid = [
+      ...[[], "bad", 7, false].map(slots => ({ slots })),
+      ...["label", "lead", "body"].flatMap(field =>
+        [{}, "bad", 7, false, ...(field === "lead" ? [] : [[]])].map(value => ({ slots: { [field]: value, unknown: { keep: true } } }))),
+      { slots: { label: [], lead: [], body: [] } },
+    ];
+    for (const carrier of invalid) {
+      const before = { id: "bad-slots", type: "note", label: "Label", lead: "Lead", text: "Body", extra: [null, 7], ...carrier };
+      const projected = runToTiptap([before]);
+      assert.equal(projected.content[0].type, "bpOpaque", JSON.stringify(carrier));
+      assert.deepEqual(docToBlocks(projected), [before]);
+      assert.deepEqual(runToOps([before], projected), []);
+      const editor = mount(before);
+      try {
+        assert.equal(editor.state.doc.firstChild.type.name, "bpOpaque");
+        assert.equal(editor.view.dom.querySelector(".bp-canvas-note__body, [data-test-id='paper-note-label'], [data-test-id='paper-note-lead']"), null);
+        assert.deepEqual(editor.state.doc.firstChild.attrs.bpBlock, before);
+        assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
+        assert.deepEqual(runToOps([before], editor.getJSON()), []);
+      } finally { editor.destroy(); }
+    }
+  });
+  check("note slot admission: absent/null maps and fields plus empty optional lead preserve exact source on edit", () => {
+    for (const carrier of [{}, { slots: null }, { slots: {} },
+      { slots: { label: null, lead: null, body: null } }, { slots: { lead: [], unknown: { keep: true } } }]) {
+      const before = { id: "safe-slots", type: "note", label: "Label", lead: "Lead", text: "Body", extra: [null, 7], ...carrier };
+      const editor = mount(before);
+      try {
+        assert.equal(editor.state.doc.firstChild.type.name, "note");
+        assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
+        assert.deepEqual(runToOps([before], editor.getJSON()), []);
+        const field = editor.view.dom.querySelector('[data-test-id="paper-note-lead"]');
+        fieldValue(field, "Changed lead");
+        field.dispatchEvent(new window.Event("input", { bubbles: true }));
+        const expected = { ...before, lead: "Changed lead" };
+        const ops = runToOps([before], editor.getJSON());
+        assert.equal(ops.length, 1);
+        assert.deepEqual(applyOps([before], ops), [expected]);
+        assert.deepEqual(docToBlocks(editor.getJSON()), [expected]);
+      } finally { editor.destroy(); }
+    }
+  });
+  check("note admission: invalid scalars, leaves and wrapper shapes remain exact opaque carries", () => {
+    const invalid = [
+      ...["label", "lead", "text"].flatMap(field => [false, 1.5, [], {}].map(value => ({ [field]: value }))),
+      ...[false, 1.5, [], {}].map(value => ({ content: [{ type: "text", value }] })),
+      ...[false, 1.5, {}, [false], [[]], [{ type: "strong" }], [{ type: "strong", children: [] }],
+        [{ type: "strong", children: [{ type: "text", value: "a" }, { type: "text", value: "b" }] }]]
+        .map(content => ({ slots: { label: [{ type: "paragraph", content }] } })),
+    ];
+    for (const carrier of invalid) {
+      const before = { id: "invalid-inline", type: "note", label: "Label", text: "", extra: { keep: [7, null] }, ...carrier };
+      assert.equal(runToTiptap([before]).content[0].type, "bpOpaque", JSON.stringify(carrier));
+      const editor = mount(before);
+      try {
+        assert.equal(editor.state.doc.firstChild.type.name, "bpOpaque");
+        assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
+        assert.deepEqual(runToOps([before], editor.getJSON()), []);
+      } finally { editor.destroy(); }
+    }
+  });
+  check("note body admission: retain conservative non-list readonly guard and safe null/empty edit", () => {
+    for (const content of [null, "", "Unread source", 7, false, { hidden: ["metadata"] }, []]) {
+      for (const text of ["", "Primary"]) {
+        const before = { id: "inert-content", type: "note", label: "Label", text, content, extra: { keep: [7, null] } };
+        const editable = content === null || Array.isArray(content);
+        assert.equal(runToTiptap([before]).content[0].type, editable ? "note" : "bpOpaque", JSON.stringify(before));
+        const editor = mount(before);
+        try {
+          assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
+          assert.deepEqual(runToOps([before], editor.getJSON()), []);
+          if (!editable) {
+            assert.equal(editor.state.doc.firstChild.type.name, "bpOpaque");
+            assert.equal(editor.view.dom.querySelector(".bp-canvas-note__body"), null);
+            continue;
+          }
+          assert.equal(editor.state.doc.firstChild.type.name, "note");
+          assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
+          assert.deepEqual(runToOps([before], editor.getJSON()), []);
+          editor.commands.insertContentAt({ from: 1, to: editor.state.doc.firstChild.nodeSize - 1 }, "Edited body");
+          const expected = { ...before, text: "Edited body" };
+          const ops = runToOps([before], editor.getJSON());
+          assert.equal(ops.length, 1);
+          assert.deepEqual(applyOps([before], ops), [expected]);
+          assert.deepEqual(docToBlocks(editor.getJSON()), [expected]);
+        } finally { editor.destroy(); }
+      }
+    }
+  });
+  check("note body admission: competing content including equal text stays opaque; empty-render lists stay inert", () => {
+    for (const [content, competing] of [
+      [[{ type: "text", value: "Primary" }], true], [[{ type: "code", value: "Different" }], true],
+      [["Primary"], true], [[{ type: "text", value: "" }], false], [[{ type: "image", src: "/preserved.png" }], false],
+    ]) {
+      const before = { id: "competing-body", type: "note", label: "Label", text: "Primary", content, extra: { keep: true } };
+      const projected = runToTiptap([before]);
+      assert.equal(projected.content[0].type, competing ? "bpOpaque" : "note");
+      const editor = mount(before);
+      try {
+        assert.equal(editor.state.doc.firstChild.type.name, competing ? "bpOpaque" : "note");
+        assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
+        assert.deepEqual(runToOps([before], editor.getJSON()), []);
+        if (!competing) {
+          const field = editor.view.dom.querySelector('[data-test-id="paper-note-label"]');
+          fieldValue(field, "Edited label");
+          field.dispatchEvent(new window.Event("input", { bubbles: true }));
+          assert.deepEqual(applyOps([before], runToOps([before], editor.getJSON())), [{ ...before, label: "Edited label" }]);
+        }
+      } finally { editor.destroy(); }
+    }
+  });
+  // These shadow keys/empty values mirror Blocks.note_no_rich_shadow?, not a
+  // broader claim that every canvas-supported carrier matches server admission.
+  for (const carrier of ["label", "lead", "body", "content"]) {
+    const shadowFixture = (leafType = "text") => {
+      const leaf = { type: leafType, value: "Shown", extra: { leaf: [null, 7] } };
+      const wrapper = { type: "strong", children: [leaf], extra: { wrapper: true } };
+      const paragraph = { type: "paragraph", content: [wrapper], extra: { paragraph: true } };
+      const block = { id: "shadow-note", type: "note", label: "Flat label", text: "",
+        extra: { block: [false] }, slots: { unknown: [{ untouched: true }] } };
+      if (carrier === "content") block.content = [wrapper];
+      else block.slots[carrier] = [paragraph];
+      return { block, leaf, wrapper, paragraph };
+    };
+    for (const kind of ["text", "code", "wrapper", ...(carrier === "content" ? [] : ["paragraph"])]) {
+      check(`note rich shadows: ${carrier} ${kind} stays opaque with exact source`, () => {
+        const keys = kind === "wrapper" ? ["content", "text", "value"]
+          : kind === "paragraph" ? ["children", "text", "value"] : ["children", "content", "text"];
+        for (const key of keys) {
+          for (const value of [[{ type: "text", value: "Hidden rich text", extra: 7 }], "hidden", {}, 0, false]) {
+            const fixture = shadowFixture(kind === "code" ? "code" : "text");
+            fixture[kind === "text" || kind === "code" ? "leaf" : kind][key] = value;
+            const before = structuredClone(fixture.block);
+            const projected = runToTiptap([before]);
+            assert.equal(projected.content[0].type, "bpOpaque", `${kind}.${key}=${JSON.stringify(value)}`);
+            assert.deepEqual(projected.content[0].attrs.bpBlock, before);
+            assert.deepEqual(docToBlocks(projected), [before]);
+            assert.deepEqual(runToOps([before], projected), []);
+            const editor = mount(before);
+            try {
+              assert.equal(editor.state.doc.firstChild.type.name, "bpOpaque");
+              assert.ok(editor.view.dom.querySelector('[data-test-id="paper-opaque-note"]'));
+              assert.equal(editor.view.dom.querySelector(".bp-canvas-note__body, [data-test-id='paper-note-label'], [data-test-id='paper-note-lead']"), null);
+              assert.deepEqual(editor.state.doc.firstChild.attrs.bpBlock, before);
+              assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
+              assert.deepEqual(runToOps([before], editor.getJSON()), []);
+            } finally { editor.destroy(); }
+            assert.deepEqual(fixture.block, before);
+          }
+        }
+      });
+    }
+    check(`note terminal grammar: ${carrier} raw strings stay opaque and exact`, () => {
+      for (const content of [...(carrier === "content" ? [] : ["", "Shown"]), [""], ["Shown"], [{ type: "strong", children: ["Shown"], extra: true }]]) {
+        const { block } = shadowFixture();
+        if (carrier === "content") block.content = content;
+        else block.slots[carrier][0].content = content;
+        const before = structuredClone(block);
+        const projected = runToTiptap([before]);
+        assert.equal(projected.content[0].type, "bpOpaque", JSON.stringify(content));
+        assert.deepEqual(docToBlocks(projected), [before]);
+        assert.deepEqual(runToOps([before], projected), []);
+        const editor = mount(before);
+        try {
+          assert.equal(editor.state.doc.firstChild.type.name, "bpOpaque");
+          assert.ok(editor.view.dom.querySelector('[data-test-id="paper-opaque-note"]'));
+          assert.equal(editor.view.dom.querySelector(".bp-canvas-note__body, [data-test-id='paper-note-label'], [data-test-id='paper-note-lead']"), null);
+          assert.deepEqual(editor.state.doc.firstChild.attrs.bpBlock, before);
+          assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
+          assert.deepEqual(runToOps([before], editor.getJSON()), []);
+        } finally { editor.destroy(); }
+        assert.deepEqual(block, before);
+      }
+    });
+    for (const empty of ["missing", null, "", []]) {
+      check(`note rich shadows: ${carrier} single chain preserves ${JSON.stringify(empty)} empties on edit`, () => {
+        const { block, leaf, wrapper, paragraph } = shadowFixture();
+        if (empty !== "missing") {
+          for (const key of ["children", "content", "text"]) leaf[key] = structuredClone(empty);
+          for (const key of ["content", "text", "value"]) wrapper[key] = structuredClone(empty);
+          for (const key of ["children", "text", "value"]) paragraph[key] = structuredClone(empty);
+        }
+        const before = structuredClone(block);
+        const projected = runToTiptap([before]);
+        assert.equal(projected.content[0].type, "note");
+        assert.deepEqual(docToBlocks(projected), [before]);
+        assert.deepEqual(runToOps([before], projected), []);
+        const editor = mount(before);
+        try {
+          assert.equal(editor.state.doc.firstChild.type.name, "note");
+          assert.ok(editor.view.dom.querySelector(".bp-canvas-note__body"));
+          assert.deepEqual(docToBlocks(editor.getJSON()), [before]);
+          assert.deepEqual(runToOps([before], editor.getJSON()), []);
+          if (carrier === "label" || carrier === "lead") {
+            const field = editor.view.dom.querySelector(`[data-test-id="paper-note-${carrier}"]`);
+            fieldValue(field, "Changed");
+            field.dispatchEvent(new window.Event("input", { bubbles: true }));
+          } else {
+            editor.commands.insertContentAt({ from: 1, to: editor.state.doc.firstChild.nodeSize - 1 }, "Changed");
+          }
+          const expected = structuredClone(before);
+          const content = carrier === "content" ? expected.content : expected.slots[carrier][0].content;
+          content[0].children[0].value = "Changed";
+          const ops = runToOps([before], editor.getJSON());
+          assert.equal(ops.length, 1);
+          assert.deepEqual(applyOps([before], ops), [expected]);
+          assert.deepEqual(docToBlocks(editor.getJSON()), [expected]);
+        } finally { editor.destroy(); }
+      });
+    }
+  }
   for (const lead of [undefined, "", "  ", "Short lead", "A long lead that wraps across several lines alongside the body at narrow widths"]) {
     check(`note resting DOM uses reader-shaped inline lead and body ${JSON.stringify(lead)}`, () => {
       const before = { id: "layout", type: "note", label: "label", text: "Body text that continues on the same line and wraps naturally at the available width." };

@@ -237,7 +237,7 @@ for (const field of ["label", "lead", "body"]) {
 
 for (const carrier of [{}, { label: null, lead: null, text: null }, { label: "", lead: "", text: "" },
   { label: 7, lead: 8, text: 9 }, { slots: null }, { slots: {} },
-  { slots: { label: [], lead: [], body: [] } }]) {
+  { slots: { lead: [] } }]) {
   check(`note no-op and single-field edit preserve missing/null/empty/integer ${JSON.stringify(carrier)}`, () => {
     const before = { id: "shape", type: "note", custom: { keep: true }, ...carrier };
     const doc = runToTiptap([before]);
@@ -293,14 +293,18 @@ for (const content of [undefined, null, [], "", [""], [{ type: "text", value: nu
     if (content !== undefined) paragraph.content = content;
     before.slots.body = [paragraph];
     const doc = runToTiptap([before]);
+    if (typeof content === "string" || (Array.isArray(content) && typeof content[0] === "string")) {
+      assert.equal(doc.content[0].type, "bpOpaque", "raw strings are not server-admitted terminals");
+      assert.deepEqual(runToOps([before], doc), []);
+      assert.deepEqual(docToBlocks(doc), [before]);
+      return;
+    }
     assert.equal(doc.content[0].type, "note");
     assert.deepEqual(runToOps([before], doc), []);
     assert.deepEqual(docToBlocks(doc), [before]);
     const expected = structuredClone(before);
     expected.slots.body[0].content = content == null || (Array.isArray(content) && !content.length)
       ? [{ type: "text", value: "First body" }]
-      : typeof content === "string" ? "First body"
-      : typeof content[0] === "string" ? ["First body"]
       : [{ ...content[0], value: "First body" }];
     assertNoteEdit(before, "body", "First body", expected);
   });

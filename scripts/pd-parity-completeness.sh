@@ -3,22 +3,17 @@
 # pd-parity-completeness.sh — the anti-drift lock for the PortableDoc render-parity
 # kitchen-sink array (render-path unification Wave 1, charter D8).
 #
-# It greps compose.ex's dispatched block types — the `"type" => "X"` clause heads
+# It scans compose.ex's dispatched block types — the `"type" => "X"` clause heads
 # AND the `when ... t in [...]` guard members — subtracts the 14 excluded
 # schema-field/embed types (charter D7), and FAILS if any in-scope type lacks a
 # committed golden fixture. That is the mechanism that keeps the hand-authored array
 # complete: add a new blog-grammar type to compose.ex and forget to seed it here →
 # this reds.
 #
-# The guard harvester is anchored on a literal `when ` / `and ` before `t in [` ON
-# PURPOSE. A bare `t in \[` also matches the TAIL of any identifier ending in "t"
-# — `layout in ["chapters", "timeline"]` contains the substring `t in [` — so the
-# unanchored form harvested `paper-links` LAYOUT VARIANTS as if they were block
-# types and demanded golden fixtures for block types that do not exist. Only the
-# block-type dispatch guards bind the variable `t` (`compose_block(%{"type" => t}
-# ...) when t in [...]`), so requiring the `when`/`and` keyword is exact, not lax.
-# Anything genuinely new that this misses still reds via the EXPECTED_COUNT check
-# below, which catches drift in BOTH directions.
+# Only compose_block function headers, ending before `do` / `do:`, contribute.
+# Helpers, bodies and comments can contain identical type literals and guards.
+# Literal-list aliases count; attribute/equality aliases still borrow their
+# target golden. No Elixir runtime is needed in the doc-gates CI job.
 #
 # MUST run under bash (its shebang). Under zsh an unquoted `$var` does NOT
 # word-split, so the loop would iterate once over the whole blob and the coverage
@@ -60,13 +55,64 @@ fi
 # words only. This is the ONE lever a later wave edits to pull the field-* set in.
 EXCLUDED=" field-string field-slug field-text field-boolean field-select field-datetime field-color field-reference field-image field-number composite arrayOf codelist localizedText embed "
 
-# Dispatched types = `"type" => "X"` clause heads ∪ `when|and t in [...]` guard
-# members. See the header note on why the guard grep is keyword-anchored.
+# Join multiline headers before extracting literals. Track quoted strings and
+# heredocs so comments and body/documentation text cannot open a fake header.
 DISPATCHED="$(
-  {
-    grep -oE '"type" => "[a-zA-Z-]+"' "$COMPOSE" | sed -E 's/.*"type" => "//; s/"$//'
-    grep -oE '(when|and) t in \[[^]]+\]' "$COMPOSE" | grep -oE '"[a-zA-Z-]+"' | tr -d '"'
-  } | sort -u
+  awk '
+    function emit(header, rest, literal) {
+      rest = header
+      while (match(rest, /"type"[[:space:]]*=>[[:space:]]*"[a-zA-Z-]+"/)) {
+        literal = substr(rest, RSTART, RLENGTH)
+        sub(/^"type"[[:space:]]*=>[[:space:]]*"/, "", literal)
+        sub(/"$/, "", literal)
+        print literal
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+      if (header !~ /"type"[[:space:]]*=>[[:space:]]*t([^[:alnum:]_]|$)/) return
+      rest = header
+      while (match(rest, /(when|and)[[:space:]]+t[[:space:]]+in[[:space:]]*\[[^]]*\]/)) {
+        literal = substr(rest, RSTART, RLENGTH)
+        rest = substr(rest, RSTART + RLENGTH)
+        while (match(literal, /"[a-zA-Z-]+"/)) {
+          print substr(literal, RSTART + 1, RLENGTH - 2)
+          literal = substr(literal, RSTART + RLENGTH)
+        }
+      }
+    }
+    {
+      if (!quote && !heredoc && /^[[:space:]]*defp?[[:space:]]+compose_block[[:space:]]*\(/) {
+        active = 1
+        header = ""
+      }
+      for (i = 1; i <= length($0); i++) {
+        c = substr($0, i, 1)
+        triple = substr($0, i, 3)
+        if (heredoc) {
+          if (triple == heredoc) { heredoc = ""; i += 2 }
+          continue
+        }
+        if (quote) {
+          if (active) header = header c
+          if (escaped) escaped = 0
+          else if (c == "\\") escaped = 1
+          else if (c == quote) quote = ""
+          continue
+        }
+        if (c == "#") break
+        if (c == "\"" || c == sprintf("%c", 39)) {
+          if (triple == c c c) { heredoc = triple; i += 2; continue }
+          quote = c
+        }
+        if (active && !quote && header ~ /[^[:alnum:]_!?]$/ &&
+            substr($0, i) ~ /^do([[:space:]:,]|$)/) {
+          emit(header)
+          active = 0
+        }
+        if (active) header = header c
+      }
+      if (active) header = header " "
+    }
+  ' "$COMPOSE" | sort -u
 )"
 
 count=0
