@@ -222,11 +222,23 @@ set -euo pipefail
 # is the intended non-vacuity, the same bill `cloud/lib/**` and the two
 # `deploy/` entries above pay for the same reason. The alternative is a required
 # context that greens over a guard the change just broke.
+#
+# THE COVERAGE CLASS (dr-bl-internal-tree-has-no-blocking-gate). Four of the Go
+# rows above — internal/agent/report.go, internal/cli/cloud_status_cmd.go,
+# internal/cli/sites_cmd.go and internal/builder/builder.go — are neither
+# generated nor carriers of a generated region. They are declared because the
+# console harness READS them to pin a contract the console shares with the CLI,
+# and because `internal/**` reaches no required context that asserts anything
+# about its Go behaviour while deploy.yml ships it to production on merge. Each
+# is ONE EXACT FILE for the reason cch-w30-bl-artifacts-paths-ungated gives: a
+# tree-wide `internal/cli/**` would bill every unrelated CLI PR for a console
+# harness run, which is the smell, not the remedy.
 CONSOLE_PATHS='cloud/priv/static/**
 internal/taskboard/testdata/styleguide_lifecycle.txt
 internal/pdrender/testdata/styleguide_tokens.txt
 internal/agent/report.go
 internal/cli/cloud_status_cmd.go
+internal/cli/sites_cmd.go
 .github/workflows/cloud.yml
 design/emit-fence.test.mjs
 cloud/priv/audit-actions.json
