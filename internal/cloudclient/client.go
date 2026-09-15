@@ -144,7 +144,24 @@ type Barkpark struct {
 	//     paints, with a behind marker when they differ). Empty until the CP
 	//     emits them.
 	//   - UpdateCheckedAt — when the CP last refreshed this instance's verdict
-	//     (RFC3339). Empty on an older CP.
+	//     (RFC3339). A POINTER for the same reason AutoupdateEnabled below is
+	//     one: nil means THE PLANE RECORDED NO CHECK, which is not a time and
+	//     must never be handed to a consumer as one.
+	//
+	//     cch-w65-s2 made this column honest on the control plane — `@unclocked_reasons`
+	//     in registry.ex (`:no_admin_token`, `:decrypt_failed`, `:not_live`) omits
+	//     the stamp on exactly the three of nine unknown rungs that return before
+	//     a single byte leaves the plane, so those rows serve an explicit
+	//     `"update_checked_at": null`. As a plain `string` that null and an older
+	//     CP's omitted key BOTH decoded to `""`, the projection emitted
+	//     `"update_checked_at": ""` for both, and no script could tell "we never
+	//     spoke to this box" from "this CLI's plane predates the field" — nor
+	//     from a value it could try to parse. As a `*string` both read nil, the
+	//     projection omits the key (cli.rankedBarkparkRow), and a consumer is
+	//     forced to branch instead of parsing an empty timestamp.
+	//
+	//     UpdateCheckedAtMissing below keeps the wire-level half of that
+	//     distinction that the pointer alone cannot carry.
 	//   - UpdateUnavailableReason — WHY the verdict is unknown, measured by the
 	//     control plane at probe time ("identity_refused" when the box rejected
 	//     our credential, a transport failure, an unparseable reply). Empty
@@ -159,7 +176,7 @@ type Barkpark struct {
 	//     Empty until the CP emits it.
 	UpdateRunningRelease    string `json:"update_running_release"`
 	UpdateLatestRelease     string `json:"update_latest_release"`
-	UpdateCheckedAt         string `json:"update_checked_at"`
+	UpdateCheckedAt         *string `json:"update_checked_at"`
 	UpdateUnavailableReason string `json:"update_unavailable_reason"`
 	AutoupdateEnabled       *bool  `json:"autoupdate_enabled"`
 	AutoupdatePaused        bool   `json:"autoupdate_paused"`
@@ -238,6 +255,20 @@ type Barkpark struct {
 	// omitted key means the control plane is too old or its contract drifted.
 	QueuedDeployAgeSeconds        *float64 `json:"queued_deploy_age_seconds"`
 	QueuedDeployAgeSecondsMissing bool     `json:"-"`
+
+	// UpdateCheckedAtMissing is the wire-level half of the UpdateCheckedAt
+	// distinction, recorded by the SAME idiom QueuedDeployAgeSecondsMissing uses
+	// and for the same reason: a `*string` collapses an omitted key and an
+	// explicit null into one nil, and those are two different facts about the
+	// control plane. true = the plane never emitted the key (it predates
+	// cch-w65 / isu-w5); false with a nil pointer = the plane emitted an
+	// explicit null, i.e. it MEASURED that no check has ever been made on one of
+	// the three unclocked rungs. Nothing in `bp cloud status -o json` projects
+	// this today — the projection follows the AutoupdateEnabled house rule and
+	// simply omits the key for both — but the decode no longer DESTROYS the
+	// distinction, so a future reader does not have to re-fetch the wire to get
+	// it back.
+	UpdateCheckedAtMissing bool `json:"-"`
 }
 
 // UnmarshalJSON preserves whether the control plane emitted
@@ -260,6 +291,8 @@ func (b *Barkpark) UnmarshalJSON(data []byte) error {
 	*b = Barkpark(decoded)
 	_, present := fields["queued_deploy_age_seconds"]
 	b.QueuedDeployAgeSecondsMissing = !present
+	_, clockPresent := fields["update_checked_at"]
+	b.UpdateCheckedAtMissing = !clockPresent
 	return nil
 }
 

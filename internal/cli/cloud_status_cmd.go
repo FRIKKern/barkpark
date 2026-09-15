@@ -1202,7 +1202,9 @@ func rankBarkparks(list []cloudclient.Barkpark) []rankedBarkpark {
 // fields (isu-w5) ride here too: the running/latest release, when the verdict was
 // checked, the full autoupdate policy, and the channel. autoupdate_enabled is a
 // tri-state — true/false when the control plane reported it, absent entirely when
-// it didn't (an older CP) so a script never mistakes "unknown" for "off".
+// it didn't (an older CP) so a script never mistakes "unknown" for "off", and
+// update_checked_at follows the same rule (cch-w65-bl) so a script never mistakes
+// "no check was ever made" for a timestamp.
 func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 	row := map[string]any{
 		// dr-w21-s3: the SERVING COMMIT — the raw sha the box actually runs, the
@@ -1263,7 +1265,8 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		"suspended":              r.BP.Suspended,
 		"update_running_release": r.BP.UpdateRunningRelease,
 		"update_latest_release":  r.BP.UpdateLatestRelease,
-		"update_checked_at":      r.BP.UpdateCheckedAt,
+		// update_checked_at is TRI-STATE below, with autoupdate_enabled and
+		// commit_distance — it is deliberately NOT in this always-present block.
 		// dr-w24-s2: the plane's own commit-distance measurement, beside the
 		// release-tag grade it contradicts. ancestry + checked_at are ALWAYS
 		// present (empty on a plane that predates the emission) so a script can
@@ -1279,6 +1282,20 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 	// -o json is as honest as the table (nil = policy unknown, never a fake false).
 	if r.BP.AutoupdateEnabled != nil {
 		row["autoupdate_enabled"] = *r.BP.AutoupdateEnabled
+	}
+	// Tri-state, the SAME idiom, three lines from its two neighbours
+	// (cch-w65-bl): emit update_checked_at only when the plane actually recorded
+	// a check. cch-w65-s2 made the column honest — the three unclocked rungs
+	// (:no_admin_token, :decrypt_failed, :not_live) return before a request is
+	// built, so the plane serves an explicit null rather than inventing a time.
+	// Emitting `"update_checked_at": ""` for that row put a never-checked box,
+	// an older control plane, and a parseable timestamp field into one shape:
+	// a script reading it cannot tell which, and an empty string invites
+	// time.Parse far more readily than an absent key does. An absent key forces
+	// the consumer to branch — exactly the argument commit_distance's *int
+	// already makes one comment below.
+	if r.BP.UpdateCheckedAt != nil {
+		row["update_checked_at"] = *r.BP.UpdateCheckedAt
 	}
 	// Tri-state, the same idiom: emit commit_distance only when the plane
 	// actually measured one. `"commit_distance": 0` for an ungradeable box would
