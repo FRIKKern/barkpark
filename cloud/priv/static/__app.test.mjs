@@ -21,6 +21,7 @@ import vm from "node:vm";
 import fs from "node:fs";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
+import { replaceUnique } from "./__preview__/anchored-replace.mjs";
 // fileURLToPath is imported once, further down with the path helpers — ESM
 // imports hoist, so the CSS-fixture tests above that line resolve it fine.
 
@@ -22335,7 +22336,13 @@ test("cch-w57-s4 CONTROL: deleting the suspended branch changes the answer — o
   assert.ok(src.includes(BRANCH),
     "webhookMutationError's `suspended` branch is gone from the shipped app.js — " +
     "grep -n 'err.code === \"suspended\"' cloud/priv/static/app.js");
-  const mutant = evalApp(src.replace(BRANCH, "")).hooks.webhookMutationError;
+  // replaceUnique (anchored-replace.mjs) REFUSES unless the needle hits exactly
+  // once, so the mutation is proven APPLIED rather than assumed — a bare
+  // `.replace` with a string needle takes the first match anywhere and goes
+  // silent when the anchor drifts.
+  const mutant = evalApp(
+    replaceUnique(src, BRANCH, "", { what: "cch-w57-s4 CONTROL: drop the suspended branch" })
+  ).hooks.webhookMutationError;
   const withBranch = hooks.webhookMutationError;
 
   // WHERE THE BRANCH IS THE ONLY THING STANDING. A suspended envelope that also
