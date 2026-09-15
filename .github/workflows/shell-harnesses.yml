@@ -657,6 +657,26 @@ on:
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
+      # A self-test named `*-selftest.sh` is NOT in the census's corpus globs
+      # above, which key on `.test.sh` / `.test.mjs` / `_test.sh`. That naming
+      # shape is how scripts/ledger/claim-health-selftest.sh sat unwired while
+      # the census reported "0 orphaned" — it was never in the corpus to orphan.
+      # The census now finds it too (see its `find` list), so this trigger has
+      # to exist or the widened corpus would only be measured on the push arm.
+      - "scripts/*-selftest.sh"
+      # ── CLAIM HEALTH (task-d64ecb4727209800, 2026-09-15) ────────────────────
+      # claim-health.sh read the claim at `.content.claim` while the ledger puts
+      # it at `.claim`, and reported ZERO holders on a live page where 19 of 19
+      # rows were held. It went uncaught because claim-health-selftest.sh built
+      # its only fixture under THE SAME WRONG PATH THE READER USED: the suite and
+      # its subject agreed with each other, both disagreed with the server, and
+      # the suite passed. The fixtures were fixed in #18376; nothing ran the
+      # suite, so the next drift would have been equally invisible. Both the
+      # subject and its harness are rows here because the suite runs the subject.
+      # Hermetic and wired rather than exempted: `--from-file` fixtures, python3,
+      # no `bp`, no token, no network — measured 16 arms, 0 failed, under 2 s.
+      - "scripts/ledger/claim-health.sh"
+      - "scripts/ledger/claim-health-selftest.sh"
   push:
     branches: [main]
     paths:
@@ -1144,6 +1164,26 @@ on:
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
+      # A self-test named `*-selftest.sh` is NOT in the census's corpus globs
+      # above, which key on `.test.sh` / `.test.mjs` / `_test.sh`. That naming
+      # shape is how scripts/ledger/claim-health-selftest.sh sat unwired while
+      # the census reported "0 orphaned" — it was never in the corpus to orphan.
+      # The census now finds it too (see its `find` list), so this trigger has
+      # to exist or the widened corpus would only be measured on the push arm.
+      - "scripts/*-selftest.sh"
+      # ── CLAIM HEALTH (task-d64ecb4727209800, 2026-09-15) ────────────────────
+      # claim-health.sh read the claim at `.content.claim` while the ledger puts
+      # it at `.claim`, and reported ZERO holders on a live page where 19 of 19
+      # rows were held. It went uncaught because claim-health-selftest.sh built
+      # its only fixture under THE SAME WRONG PATH THE READER USED: the suite and
+      # its subject agreed with each other, both disagreed with the server, and
+      # the suite passed. The fixtures were fixed in #18376; nothing ran the
+      # suite, so the next drift would have been equally invisible. Both the
+      # subject and its harness are rows here because the suite runs the subject.
+      # Hermetic and wired rather than exempted: `--from-file` fixtures, python3,
+      # no `bp`, no token, no network — measured 16 arms, 0 failed, under 2 s.
+      - "scripts/ledger/claim-health.sh"
+      - "scripts/ledger/claim-health-selftest.sh"
 
 permissions:
   contents: read
@@ -1253,6 +1293,7 @@ jobs:
       orphan-harnesses: ${{ steps.sets.outputs.orphan-harnesses }}
       selftest-wiring-census: ${{ steps.sets.outputs.selftest-wiring-census }}
       registry-impact-check: ${{ steps.sets.outputs.registry-impact-check }}
+      claim-health: ${{ steps.sets.outputs.claim-health }}
       exit-laundering-sweep: ${{ steps.sets.outputs.exit-laundering-sweep }}
       dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
@@ -1511,6 +1552,9 @@ jobs:
           selftest-wiring-census scripts/*.test.sh
           selftest-wiring-census scripts/*.test.mjs
           selftest-wiring-census scripts/*_test.sh
+          selftest-wiring-census scripts/*-selftest.sh
+          claim-health scripts/ledger/claim-health.sh
+          claim-health scripts/ledger/claim-health-selftest.sh
           selftest-wiring-census .github/workflows/*.yml
           registry-impact-check scripts/registry-impact-check.sh
           registry-impact-check scripts/registry-impact-check.test.sh
@@ -3584,6 +3628,48 @@ jobs:
           fetch-depth: 0
       - name: registry-impact-check harness (two historical replays + controls)
         run: bash scripts/registry-impact-check.test.sh
+  claim-health:
+    needs: [changes]
+    if: needs.changes.outputs.claim-health == 'true'
+    # THE SUITE THAT RAN GREEN AGAINST A SHAPE THE SERVER NEVER EMITS
+    # (task-d64ecb4727209800). claim-health.sh resolved the claim at
+    # `.content.claim`; the ledger puts it at `.claim`. On a live
+    # `bp task ls --status in_progress` page 19 of 19 rows were held and the
+    # tool reported ZERO holders. claim-health-selftest.sh could not catch it:
+    # it had exactly ONE fixture builder and that builder emitted the claim
+    # under the SAME WRONG PATH the reader used, so the suite and its subject
+    # agreed with each other, both disagreed with the server, and the suite
+    # passed. #18376 fixed the fixtures (real shape, legacy shape kept as an
+    # explicit compatibility arm). This job is the second-order half: NOTHING
+    # RAN THAT SUITE, so the next fixture drift would have been equally
+    # invisible, and a selftest nobody runs is how the first one survived.
+    #
+    # WIRED, NOT EXEMPTED. The exemption marker is for a slow or
+    # environment-dependent proof; this one is neither. Every arm feeds the
+    # subject a `--from-file` fixture built by printf in the harness — no `bp`,
+    # no token, no network, no database — and a full run is 16 arms, 0 failed,
+    # under two seconds (measured 2026-09-15 at 1e7231858 in a clean worktree).
+    name: claim-health resolves the claim by shape (16 arms)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+
+      - name: claim-health.sh syntax check
+        run: bash -n scripts/ledger/claim-health.sh
+
+      - name: claim-health-selftest.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/ledger/claim-health-selftest.sh
+
+      # No pipe and no `|| true`. The suite's own exit status IS this step's:
+      # `[ "$FAIL" = 0 ] || exit 1` is its last line, and a `| tee` here would
+      # report tee's status and green a failing suite — the exact laundering
+      # scripts/exit-laundering-sweep.sh exists to find.
+      - name: "the suite (16 arms: real shape, doc envelope, legacy compat, 2 disjoint mutations, 3 controls)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/ledger/claim-health-selftest.sh
 
   exit-laundering-sweep:
     needs: [changes]
