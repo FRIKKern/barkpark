@@ -5825,6 +5825,30 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read — THE FAILED SITES READ,
+  // rendered. THE FIXTURE IS BYTE-IDENTICAL TO A GENUINELY-EMPTY INSTANCE — same
+  // owner, same live box, the same `sites: []` — and ONE field differs: the read
+  // does not succeed. That is deliberate, and it is the whole discriminator.
+  // Charter D382's rule is that a failed read is never reported as an empty one;
+  // with the failed arm folded into the empty default (as loadInstanceSites did
+  // before cch-w34-s1) this screen and a true empty render the SAME BYTES, and
+  // no instrument in the repo could tell them apart. `liveInstance` carries a
+  // `host`, so the pre-fix bytes are not blank-and-ambiguous — they are the
+  // confident sentence "No sites yet", an assertion about an instance whose
+  // sites we never received.
+  "instance-sites-unreadable": {
+    label: "Instance workspace — /v1/sites 500s: the Sites section says it couldn't READ them, and never claims the instance has none",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      sitesFault: { status: 500, body: { error: "internal" } },
+    },
+  },
   "verify-no-credentials": {
     label: "Verify card — the box predates verification: POST /verify answers 404 no_admin_token and the note offers its ONE recovery, Re-provision",
     authed: true,
@@ -6546,6 +6570,46 @@ export function route(name, method, path, state) {
   // (today: DELETE /v1/sites/:id/github) is visible to the very next read. The
   // no-state arm is the old `d.sites` verbatim, and listOf's per-boot copy makes
   // the collection and the drill-down below answer the SAME objects.
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read — THE FAILED READ,
+  // which no committed fixture could express. This arm answered a flat 200 in
+  // EVERY scenario, so app.js's failed-read branch in loadInstanceSites — the
+  // one charter D382 ratified, where a failed read is never reported as an
+  // empty one (re-derive: `grep -n "Couldn.t load sites"
+  // cloud/priv/static/app.js`) — was unreachable from BOTH harnesses, and every
+  // DOM-geometry assertion over `#instance-sites` was on the happy path.
+  //
+  // `sitesFault` is a per-scenario override with the same shape route() already
+  // honours for `meFault` above: `{status, body}`, forwarded VERBATIM by
+  // mock.js's jsonResponse (`grep -n 'function jsonResponse'
+  // cloud/priv/static/__preview__/mock.js`) and by smoke.mjs's fetch stub, so
+  // ONE mechanism drives both copies of loadInstanceSites's failed arm — a 403
+  // body reaches the forbidden copy, a 5xx the transport copy.
+  //
+  // GET-GUARDED: the 200 arm below carries no method guard, so an unguarded
+  // fault would also refuse the site-creation POST that falls through to it —
+  // a scenario asking for a failed READ must not silently break a WRITE.
+  //
+  // ── THE TWO RESIDUALS THIS MECHANISM DOES NOT REACH ───────────────────────
+  // Stated here rather than left to be rediscovered, because both are about
+  // THIS route and neither is expressible by any status code:
+  //
+  //  (1) A NEVER-SETTLING READ is inexpressible in BOTH harnesses. Every arm of
+  //      route() RESOLVES — there is no hang, no reject and no abort arm
+  //      anywhere in this file — and both consumers are total over that: mock.js
+  //      wraps the return in a resolved promise, and smoke.mjs's stub does the
+  //      same (`grep -n 'fetchStub' cloud/priv/static/__preview__/smoke.mjs`).
+  //      So `loadInstanceSites`'s PENDING state — the "Loading sites…" box that
+  //      never settles, which is what a real hung control plane paints — cannot
+  //      be reached from either harness at all. Reaching it needs a fixture that
+  //      returns a promise nobody resolves, which would change route()'s
+  //      contract for every caller; it is deliberately not done here.
+  //  (2) SSE DEATH is not contrastable in the browser. mock.js's
+  //      PreviewEventSource reports `readyState = 1 // OPEN — but silent` and
+  //      never fires, so a stream that DIES and a stream that is merely quiet
+  //      render identically. Separating them needs a `__preview.drop()` seam
+  //      beside the existing `__preview.push()` — it does not exist, and this
+  //      row did not add it.
+  if (p === "/v1/sites" && method === "GET" && d.sitesFault) return d.sitesFault;
   if (p === "/v1/sites") return { status: 200, body: { sites: listOf(d, state, "sites") } };
 
   // G-05 API tokens (GR34). GET → the caller's PATs (newest-first as fixtured);

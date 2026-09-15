@@ -322,6 +322,7 @@ const DEFECTS = [
   "W23-overview-digest-activity-row",
   "W27-failed-bar-announces-the-count",
   "W22-url-remedy-pricing",
+  "W34-sites-read-failed-bounded",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -12278,6 +12279,209 @@ async function main() {
     //    rows in any cell is a FAILURE, not a clean cell (the GR109 singular-
     //    selector lesson). Every walk below is scoped to
     //    `section.view:not([hidden])` — the W35 register stays untouched.
+    if (requested.includes("W34-sites-read-failed-bounded")) {
+      const D = "W34-sites-read-failed-bounded";
+      // ── cch-w34-bl-preview-scenario-for-a-failed-sites-read ─────────────
+      // THE ROUTE'S FAILED STATE, RENDERED — which no leg in this file could
+      // reach before this row, for a reason that had nothing to do with widths.
+      // scenarios.mjs answered `/v1/sites` a flat 200 in EVERY scenario, so
+      // `#instance-sites` could only ever be measured on the happy path (rows,
+      // or the honest empty). loadInstanceSites's failed arm — charter D382's
+      // rule that a failed read is never reported as an empty one (re-derive:
+      // `grep -n "Couldn.t load sites" cloud/priv/static/app.js`) — had no
+      // fixture able to paint it, so no DOM-geometry assertion anywhere in the
+      // repo had ever had it as a subject.
+      //
+      // TWO FIXTURES, AND THE SECOND IS THE SEPARATION CONTROL, NOT A SECOND
+      // SUBJECT. `verify-no-credentials` is the same owner, the same live box,
+      // the same `sites: []`, the same instance route — it differs from the
+      // failed fixture in the STATUS of one read and in nothing else. That is
+      // what makes this leg a control rather than a description: on the
+      // PRE-FIX renderer (the one that folded `r.ok` into the `all` default)
+      // the two cells render the SAME HEAD, and the separation refusal at the
+      // bottom of this leg dies at exit 2 saying so.
+      const SITES_INST = "5b2c1e00-0000-4000-8000-0000000000a1";
+      // Phone through desktop: the failed box is an .empty-state block whose
+      // head and sentence are the only things on the screen at 320, and the
+      // widest cell is where a one-line head stops wrapping and starts
+      // clipping. 620/900 straddle app.css's 620 breakpoint.
+      const SITES_WIDTHS = [320, 390, 620, 900, 1440];
+      const SITES_CASES = [
+        { scen: "instance-sites-unreadable", failed: true, head: "Couldn't load sites" },
+        { scen: "verify-no-credentials", failed: false, head: "No sites yet" },
+      ];
+      const sitesCells = SITES_CASES.length * SITES_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${SITES_CASES.length} fixtures (a FAILED /v1/sites read + its genuinely-empty control) x ` +
+        `${SITES_WIDTHS.length} widths x 2 themes (${sitesCells} cells; #instance-sites rendered head + box geometry)\n`,
+      );
+      let cells = 0, boxesSeen = 0, charsSeen = 0;
+      // scen -> the set of heads this leg actually read off the screen.
+      const headsByScen = new Map(SITES_CASES.map((c) => [c.scen, new Set()]));
+      for (const c of SITES_CASES) {
+        for (const theme of ["light", "dark"]) {
+          const row = [];
+          for (const width of SITES_WIDTHS) {
+            await setViewport(width);
+            // The hash is pinned on every navigation: `?scen=` alone renders
+            // #overview (the W13 routing trap), and an overview screen measured
+            // under an instance-route heading is a phantom table. The readiness
+            // expression waits for the READ TO SETTLE — `#instance-sites` mounts
+            // carrying a `.loading` box, and measuring that would be measuring
+            // the spinner, not the answer.
+            await nav(
+              `${BASE}/?scen=${c.scen}&theme=${theme}#instance/${SITES_INST}`,
+              `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+              `if(!v||v.id!=='view-instance') return false;` +
+              `var b=v.querySelector('#instance-sites');` +
+              `return !!(b && !b.querySelector('.loading'));})()`,
+            );
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,` +
+              `  mounted:false,chars:0,empties:0,rows:0,loading:0,head:null,body:null};` +
+              `if(!v) return out;` +
+              `var b=v.querySelector('#instance-sites');` +
+              `if(!b) return out;` +
+              `out.mounted=true;` +
+              `out.chars=(b.textContent||'').trim().length;` +
+              `out.empties=b.querySelectorAll('.empty-state').length;` +
+              `out.rows=b.querySelectorAll('.site-row').length;` +
+              `out.loading=b.querySelectorAll('.loading').length;` +
+              `var h=b.querySelector('.empty-state h2');` +
+              `if(h) out.head=(h.textContent||'').trim();` +
+              `var pp=b.querySelector('.empty-state p');` +
+              `if(pp) out.body=(pp.textContent||'').trim();` +
+              `out.bcw=b.clientWidth; out.bsw=b.scrollWidth;` +
+              `var br=b.getBoundingClientRect();` +
+              `out.bLeft=+br.left.toFixed(2); out.bRight=+br.right.toFixed(2);` +
+              `out.bDisplay=getComputedStyle(b).display;` +
+              `if(h){var hr=h.getBoundingClientRect();out.hcw=h.clientWidth;out.hsw=h.scrollWidth;` +
+              `  out.hLeft=+hr.left.toFixed(2);out.hRight=+hr.right.toFixed(2);}` +
+              `if(pp){out.pcw2=pp.clientWidth;out.psw2=pp.scrollWidth;}` +
+              `return out;})()`,
+            );
+            cells++;
+            const at = `${c.scen}/${theme}@${width}`;
+            if (m.view !== "view-instance") {
+              fail(D, `${at}: rendered section.view "${m.view}", asked for "view-instance" — the hash did not route, so nothing below this line measures the instance workspace's Sites card`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) {
+              fail(D, `${at}: computed data-theme "${m.theme}" — the theme did not apply and the two theme columns are the same measurement twice`);
+            }
+            if (!m.mounted) {
+              fail(D, `${at}: no #instance-sites in the visible view — the Sites card is the whole subject of this leg and it did not mount. Nothing was measured; this is not a pass`);
+              row.push(`${width}:0m`);
+              continue;
+            }
+            boxesSeen++;
+            // ── THE VACUITY REFUSAL, the idiom this file already uses for its
+            //    cells ("measured ZERO pills across all N cells … a vacuous
+            //    green is refused"). A failed read that paints NOTHING satisfies
+            //    every negative assertion below by saying nothing at all, and a
+            //    box with no characters in it is exactly that. It reds HERE,
+            //    before any `!==` can score a point off an empty string.
+            if (!(m.chars > 0)) {
+              fail(D, `${at}: #instance-sites rendered ZERO characters (${m.empties} .empty-state / ${m.rows} .site-row) — a silent box tells the person nothing, and every assertion after this line would be scoring an empty string. A vacuous green is refused`);
+              row.push(`${width}:0c`);
+              continue;
+            }
+            charsSeen += m.chars;
+            if (m.loading) {
+              fail(D, `${at}: #instance-sites still carries ${m.loading} \`.loading\` box after its request settled — a spinner that outlives its read claims we are still asking`);
+            }
+            if (m.empties !== 1) {
+              fail(D, `${at}: ${m.empties} \`.empty-state\` block(s) in #instance-sites — both fixtures in this leg render EXACTLY ONE (one carries the failure, one the honest empty), and neither number above or below it is a state this leg can read`);
+              row.push(`${width}:${m.empties}e`);
+              continue;
+            }
+            if (!m.head) {
+              fail(D, `${at}: the .empty-state block carries no <h2> — the sentence a person reads off this card is the head, and a block without one has nothing to say`);
+              row.push(`${width}:nohead`);
+              continue;
+            }
+            headsByScen.get(c.scen).add(m.head);
+            // ── THE HEAD, WHICH IS THE WHOLE CLAIM ────────────────────────
+            if (m.head !== c.head) {
+              fail(D, `${at}: #instance-sites reads "${m.head}", expected "${c.head}" — ${c.failed ? "this fixture's /v1/sites read FAILED, and the card must say so rather than describe an instance whose sites never arrived" : "this fixture's read SUCCEEDED with zero rows, and the honest empty is the only thing it may say"}`);
+            }
+            if (c.failed) {
+              // THE DEFECT, DRIVEN (charter D382). This is the assertion that
+              // fails on the pre-fix renderer.
+              if (/No sites yet|will appear here/.test(`${m.head} ${m.body || ""}`)) {
+                fail(D, `${at}: a FAILED read rendered "${m.head} — ${m.body}". "No sites yet" is an assertion about an instance whose sites we never received, and a failed read is never an empty one`);
+              }
+              if (m.rows) {
+                fail(D, `${at}: ${m.rows} \`.site-row\` painted off a read that failed — a row invented from a body that carried none`);
+              }
+            } else if (m.rows) {
+              fail(D, `${at}: the control fixture painted ${m.rows} \`.site-row\` — it is supposed to be a zero-row 200, and a populated control separates nothing`);
+            }
+            // ── THE GEOMETRY. The head and the sentence must be WHOLE, the
+            //    box must be on the screen, and the page must not have started
+            //    scrolling sideways to hold either of them.
+            if (m.bDisplay === "none") {
+              fail(D, `${at}: #instance-sites computes display:none — the card this leg just read a sentence off is not on the screen at this width`);
+            }
+            if (m.bsw > m.bcw) {
+              fail(D, `${at}: #instance-sites scrollWidth ${m.bsw} > clientWidth ${m.bcw} — the Sites card is clipping its own contents`);
+            }
+            if (m.hsw > m.hcw) {
+              fail(D, `${at}: the head "${m.head}" measures scrollWidth ${m.hsw} inside a ${m.hcw}px box — the sentence that states what happened is cut off`);
+            }
+            if (m.psw2 > m.pcw2) {
+              fail(D, `${at}: the supporting line "${m.body}" measures scrollWidth ${m.psw2} inside a ${m.pcw2}px box — the half that tells a person what to do next is cut off`);
+            }
+            if (m.bLeft < -0.5 || m.bRight > m.pcw + 0.5) {
+              fail(D, `${at}: #instance-sites spans ${m.bLeft}..${m.bRight} against a ${m.pcw}px viewport — the card is off-screen at rest`);
+            }
+            if (m.psw !== m.pcw) {
+              fail(D, `${at}: documentElement.scrollWidth ${m.psw} != clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the instance workspace is off-screen sideways`);
+            }
+            row.push(`${width}:${m.chars}c/${m.rows}r`);
+          }
+          process.stdout.write(`   ${c.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // ── THE SEPARATION REFUSAL, and it is the point of the second fixture.
+      //    A grid on which the FAILED read and the genuinely-empty read render
+      //    the same head has measured nothing: that IS the pre-fix state, where
+      //    a 500 and a 200-with-zero-rows were byte-identical and no instrument
+      //    in the repo could tell them apart. Exit 2, not a finding — an
+      //    indistinguishable pair means this leg never had a subject.
+      const failedHeads = headsByScen.get("instance-sites-unreadable");
+      const emptyHeads = headsByScen.get("verify-no-credentials");
+      if (!failedHeads.size || !emptyHeads.size) {
+        return die(`${D}: read ${failedHeads.size} head(s) off the failed fixture and ${emptyHeads.size} off the empty control across ${cells} cells — one side of the comparison never rendered, so nothing was separated`);
+      }
+      const shared = [...failedHeads].filter((h) => emptyHeads.has(h));
+      if (shared.length) {
+        return die(`${D}: the FAILED read and the genuinely-empty read rendered the SAME head ${JSON.stringify(shared)} across ${cells} cells — a 500 and a 200-with-zero-rows are indistinguishable on this screen, which is the exact pre-fix state charter D382 ruled against. This leg has no subject; re-check loadInstanceSites's failed arm before trusting any count in it`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `THE FAILED /v1/sites READ IS REACHABLE AND BOUNDED — ${cells} cells (${SITES_CASES.map((c) => c.scen).join(" + ")} x ` +
+          `${SITES_WIDTHS.join("/")} x light+dark), ${boxesSeen} #instance-sites mount(s), ${charsSeen} rendered character(s) ` +
+          `measured. The failed fixture's head set is ${JSON.stringify([...failedHeads])} and the genuinely-empty control's is ` +
+          `${JSON.stringify([...emptyHeads])} — DISJOINT, which is the whole claim: the two fixtures differ in the STATUS of one ` +
+          `read and in nothing else, so a renderer that folds \`r.ok\` back into the empty default collapses those two sets into ` +
+          `one and this leg refuses at exit 2 rather than printing a green`,
+        );
+        okLine(
+          `WHAT THIS LEG STILL CANNOT REACH, and neither harness can: a NEVER-SETTLING read. Every arm of scenarios.mjs's ` +
+          `route() resolves, and both consumers are total over that (\`grep -n 'function jsonResponse' ` +
+          `cloud/priv/static/__preview__/mock.js\`), so loadInstanceSites's PENDING state — the "Loading sites…" box that never ` +
+          `settles — is inexpressible. This leg asserts that box is GONE once the read lands; it has no way to hold it open. ` +
+          `Nor is SSE death contrastable: mock.js's PreviewEventSource reports itself OPEN and never fires, so a dead stream ` +
+          `and a quiet one paint identically, and separating them needs a \`__preview.drop()\` seam that does not exist`,
+        );
+      }
+    }
+
     if (requested.includes("W27-failed-bar-announces-the-count")) {
       const D = "W27-failed-bar-announces-the-count";
       // BLOCK-SCOPED (D247): these axes belong to this leg alone.

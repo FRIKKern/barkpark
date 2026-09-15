@@ -740,6 +740,18 @@ function bootScenario(name, opts) {
   const heldMe = [];
   const resolveMe = () => { heldMe.splice(0).forEach((land) => land()); };
 
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read — THE LIMIT OF THIS
+  // STUB, stated at the stub rather than in a report nobody reads. It is TOTAL:
+  // `answer()` below always produces a Response-like (route()'s arm, or a 404
+  // fallback), and the only asynchrony it models is a DEFERRAL that still lands
+  // (`heldMe` / opts.deferMe — held, then drained). There is no arm that hangs,
+  // rejects or aborts, and scenarios.mjs's route() has none either, so a
+  // NEVER-SETTLING read is inexpressible in THIS harness and in the browser twin
+  // alike (`grep -n 'RESIDUAL 1 OF 2' mock.js`). Every failed-read fixture in
+  // this corpus — `meFault`, `auditDenied`, `operatorDenied`, `sitesFault` — is
+  // a read that FAILED, never one that never answered, and the settled-failure
+  // state is precisely the one a hung read is not. The other half of the pair is
+  // SSE death, which needs a `__preview.drop()` seam mock.js does not have.
   function fetchStub(url, init) {
     const method = (init && init.method) || "GET";
     const p = String(url);
@@ -5667,6 +5679,81 @@ const EXPECTATIONS = {
       assert.ok(body.includes("Update available"), "the pill states the same fact the CTA acts on");
       assert.ok(!body.includes("inst-life-disabled"),
         "this scenario's actor is an owner — a disable-and-explain wrapper here would mean the fixture lost its authority");
+    },
+  },
+  // ── cch-w34-bl-preview-scenario-for-a-failed-sites-read ──────────────────
+  // THE FAILED /v1/sites READ, which no committed fixture could express before
+  // this row: scenarios.mjs answered that route a flat 200 in every scenario,
+  // so loadInstanceSites's failed arm (`grep -n "Couldn.t load sites"
+  // cloud/priv/static/app.js`) was unreachable from BOTH harnesses.
+  //
+  // THE DISCRIMINATOR IS THE WHOLE POINT AND IT IS THE SECOND ASSERTION, not
+  // the first. The fixture is byte-identical to a genuinely-empty live
+  // instance, so on the PRE-FIX renderer — the one that folded `r.ok` into the
+  // `all` default, which is what charter D382 / cch-w34-s1 ruled against — this
+  // screen renders the confident sentence "No sites yet": an assertion about an
+  // instance whose sites we never received. Deleting the failed arm from app.js
+  // reds `the failed read must never be reported as an empty one` here, which
+  // is what makes this expectation a control rather than a description.
+  //
+  // ANTI-VACUITY, the idiom overflow-guard.mjs already uses for its cells
+  // ("measured ZERO pills across all N cells … a vacuous green is refused"): a
+  // renderer that answers a failed read by painting NOTHING would satisfy every
+  // negative assertion below and say nothing to the person reading the screen.
+  // So the box is asserted NON-EMPTY first, before any `!includes` runs.
+  //
+  // TWO RESIDUALS THIS EXPECTATION CANNOT REACH, stated rather than left to be
+  // rediscovered — neither is a status code and neither is expressible here:
+  //  (1) A NEVER-SETTLING READ. This harness's fetch stub always RESOLVES (it
+  //      returns route()'s answer synchronously wrapped), and so does mock.js's
+  //      window.fetch in the browser — no hang, no reject, no abort arm exists
+  //      in either. So loadInstanceSites's PENDING state, the "Loading sites…"
+  //      box that never settles, is inexpressible in BOTH harnesses.
+  //  (2) SSE DEATH. mock.js's PreviewEventSource reports itself OPEN and never
+  //      fires, so a dead stream and a quiet one render identically; separating
+  //      them needs a `__preview.drop()` seam beside the existing
+  //      `__preview.push()`, and that seam does not exist.
+  "instance-sites-unreadable": {
+    what: "the instance Sites section on a FAILED /v1/sites read — it says it couldn't READ them, and never claims the instance has none",
+    check(reg, hooks, ctx) {
+      const box = reg.get("instance-sites");
+      assert.ok(box, "#instance-sites never mounted — nothing below this line measures anything");
+      const sites = box.innerHTML || "";
+      // ANTI-VACUITY: a state that renders nothing passes every negative
+      // assertion below by measuring nothing. Refuse it first.
+      assert.ok(sites.trim().length > 0,
+        "#instance-sites rendered ZERO bytes on a failed read — a silent box tells the person nothing and makes every assertion after this one vacuous");
+      assert.ok(!sites.includes("Loading sites"),
+        "the box is still spinning after its request settled — a spinner that outlives the read claims we are still asking");
+      // THE FAILED READ IS SAID, IN WORDS.
+      assert.ok(sites.includes("Couldn&#39;t load sites") || sites.includes("Couldn't load sites"),
+        "the failed read names itself; got: " + sites);
+      // faultCopy() classifies the 500 before readFailureCopy's own fallback is
+      // reached, so the sentence a person reads is the 5xx one — "our side, not
+      // your input". Asserted as the SERVER-FAULT class, which is the half that
+      // matters: a failed read that blamed the person would be the same defect
+      // in a different direction.
+      assert.ok(sites.includes("broke on our side"),
+        "a 5xx reads as OUR fault, never as the person's input; got: " + sites);
+      assert.ok(/Try again in a moment/i.test(sites),
+        "…and offers the retry-later sentence rather than a dead end; got: " + sites);
+      // THE DEFECT, DRIVEN (charter D382 / cch-w34-s1). This is the assertion
+      // that fails on the pre-fix renderer.
+      assert.ok(!sites.includes("No sites yet"),
+        "the failed read must never be reported as an empty one — 'No sites yet' is an assertion about an instance whose sites never arrived; got: " + sites);
+      assert.ok(!sites.includes("Sites hosted on this instance will appear here"),
+        "…nor the empty state's supporting line, which is the same claim one sentence down");
+      // …and no row is invented off a body that carried none.
+      assert.ok(!sites.includes("site-row"),
+        "a failed read paints no site rows");
+      // A 403 IS NOT WHAT THIS FIXTURE SENDS, so the access sentence must not
+      // appear: readFailureCopy's two arms must stay distinguishable.
+      assert.ok(!/don&#39;t have access|don't have access/.test(sites),
+        "a 500 is not an authority refusal and must not be reported as one");
+      // THE WIRE: the read was actually issued. Without this the whole
+      // expectation could pass off a section that never fetched at all.
+      assert.equal(ctx.countCalls("GET", "/v1/sites"), 1,
+        "exactly one /v1/sites read was issued for this workspace");
     },
   },
   "instance-remove-failed": {
