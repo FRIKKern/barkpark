@@ -12,9 +12,12 @@
 // grep the census mechanises, with the control that proves it discriminates:
 //
 //   $ git grep -n -E 'new Set\(steps\.map\(\(\[, ?size\]\) => size\)\)' origin/main
-//   design/emit.mjs:255                            typeLadderFrom        PR #18275
-//   design/validate.mjs:340                        chromeLadderAscending PR #18322
-//   web/__tests__/type-ladder-emitted.test.ts:102  ladderFrom            PR #18142
+//   design/emit.mjs                            typeLadderFrom        PR #18275
+//   design/validate.mjs                        chromeLadderAscending PR #18322
+//   web/__tests__/type-ladder-emitted.test.ts  ladderFrom            PR #18142
+//   (No line numbers, deliberately: scripts/new-lineref-check.sh reds a comment
+//   that introduces one, and a cited line goes stale the next time the file
+//   above it grows. Re-find each site with the grep, or by symbol name.)
 //   CONTROL — the same regex over design/tokens.json and design/derive.mjs
 //   (the two nearest look-alikes; derive.mjs has neutralLadder/chromeLadder,
 //   which are OKLCH COLOUR ladders, not type ladders): 0 hits, rc 1.
