@@ -3536,6 +3536,41 @@ export const SCENARIOS = {
     },
   },
 
+  // cch-w36-bl: the SAME Activity screen entered by a plain MEMBER, whose
+  // GET /v1/audit is refused. /v1/audit is team-admin-only server-side
+  // (Auth.require_current_team_admin answers `required: "admin", scope: "team"`),
+  // and #activity is the ONE screen whose entire body is that endpoint — so a
+  // member reaching it renders loadActivity's refusal arm (grep app.js for
+  // `Couldn't load activity`), an `.empty-state` built by readFailureCopy. Until
+  // this fixture NO committed scenario could reach that arm at all: the corpus's
+  // only #activity scenario is an OWNER (`activity`, whose me() omits the role
+  // argument and so defaults to "owner"), and the corpus's only auditDenied
+  // fixture (`timeline-events-only`) sits on #instance/:id/timeline, where the
+  // 403 degrades to events-only instead of taking over the view.
+  //
+  // It is a BEFORE/AFTER pin by construction: every field below is `activity`'s
+  // verbatim, except the two that carry the exhibit — me()'s role argument and
+  // the auditDenied flag. A divergence in the rendered bytes is therefore
+  // attributable to the refusal and to nothing else.
+  "activity-denied": {
+    label: "Activity as a plain MEMBER — /v1/audit 403 takes over the whole screen",
+    authed: true,
+    deepLink: "#activity",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      // The trail is POPULATED on purpose. A member denied an EMPTY feed and a
+      // member denied a full one must render identically — the refusal is the
+      // endpoint's answer, never a row count — and an empty fixture here could
+      // pass by accident if the refusal arm ever fell through to the empty state.
+      audit: activityFeed,
+      auditDenied: true, // /v1/audit → 403 (team-admin-only)
+      members: teamMembers,
+    },
+  },
+
   // ── G-06 Members (Settings wave, phase 4) ─────────────────────────────────
   // The roster on the GR33 .set-* anatomy: mixed roles (owner "(you)" / admin /
   // member), the admin-only pending-invitations card, per-manageable-row Change
