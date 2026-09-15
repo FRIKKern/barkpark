@@ -19,6 +19,39 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// ── --selftest: this tripwire's negative half ────────────────────────────────
+// This gate ran for its whole life with nothing exercising it, and produced two
+// ok-summary defect rows in a single day — one part printing `ok` beside its own
+// FAIL lines, then Part B swallowing a TRUE `ok` — each proven only by a
+// throwaway harness the builder wrote and threw away. --selftest is the standing
+// replacement, in the idiom scripts/check-vendor-freshness.mjs and
+// scripts/preview-parity-check.sh already use: it re-invokes THIS file as a
+// subprocess with one part's failure path forced, and asserts the ok-summary
+// gating in BOTH directions — a part that failed must WITHHOLD its ok, and a part
+// that passed must PRINT its ok even when an earlier part failed. The body lives
+// in design/check-selftest.mjs so the switch costs this file a dispatch rather
+// than an indentation level wrapped around every Part.
+if (process.argv.slice(2).includes("--selftest")) {
+  const { selftest } = await import("./check-selftest.mjs");
+  const ok = await selftest();
+  // Drain before exiting. Node does not flush a pending stdout write on
+  // process.exit(), so a piped reader can lose the verdict line while the exit
+  // code still arrives — write("", cb) calls back only once everything queued
+  // ahead of it has gone out. process.exitCode on its own will not do here: every
+  // Part below is a top-level statement and would run on regardless.
+  await new Promise((r) => process.stdout.write("", r));
+  process.exit(ok ? 0 : 1);
+}
+
+// Fault injection, driven only by the selftest above. BP_DESIGN_CHECK_FAULT is a
+// comma-separated set of part letters; each named part records ONE EXTRA failure
+// at the point it records its own. It can only ADD a failure, never suppress one,
+// so the worst a stray value in CI can do is red this gate loudly — there is no
+// value of this variable that mutes a real drift.
+const FAULT = new Set(
+  (process.env.BP_DESIGN_CHECK_FAULT || "").split(",").map((s) => s.trim()).filter(Boolean),
+);
+
 // `failed` is a COUNT, not a flag. Every part below gates its `ok` summary on
 // `failed === failedBefore<X>` — a snapshot taken at the part's head. With a
 // sticky boolean that comparison answered "has anything failed all run?", so
@@ -128,6 +161,7 @@ for (const r of evaluateAll()) {
     console.log(`  ok   ${mr.name} (${mr.path})`);
   }
 }
+if (FAULT.has("A")) fail("  FAIL Part A: injected fault (--selftest)");
 // The blanket "Fix: --write" is safe ONLY where nothing is unattributed; where a
 // region holds hand-written bytes, --write is the destructive act, not the fix.
 if (failed && !unattributedSeen) console.error("\n  Fix: node design/emit.mjs --write\n");
@@ -139,6 +173,13 @@ else if (unattributedSeen) console.error("\n  Fix: relocate hand-written content
 //   • Go   : internal/taskboard/tokens_gen.go  (GenLifecycle literals + frames)
 //   • CSS  : paper-surface.css  .bp-lg--<state> glyph-tone classes
 console.log("\ndesign/check.mjs — Part B (§6): GUI/TUI lifecycle parity");
+// Part B's snapshot, the same declaration its nine sibling gates carry. It was
+// the one part that read the run-wide `failed` directly, so ANY earlier failure
+// suppressed a TRUE Part B ok and the part reported nothing at all about a check
+// that passed — a diagnostic that reads identically for "passed, suppressed" and
+// "did not run". Deleting the gate instead would make the line unconditional and
+// so report nothing either; the snapshot is what makes it say something.
+const failedBeforeB = failed;
 
 // tokens.lifecycle → canonical facts
 const wantGlyph = {}, wantLight = {}, wantDark = {};
@@ -235,7 +276,9 @@ for (const s of ["done", "closed"]) {
     fail(`  §6 FAIL: ${s} is not teal (#0d9488/#2dd4bf) in the Go artifact`);
 }
 
-if (!failed)
+if (FAULT.has("B")) fail("  §6 FAIL Part B: injected fault (--selftest)");
+
+if (failed === failedBeforeB)
   console.log(`  ok   ${LIFE_ORDER.length} lifecycle states agree across Go + CSS + Studio (CSS var + TokensGen) + tokens (glyph, colour, frames); done/closed teal ≠ status.ok green`);
 
 // ── Part C: Studio chrome type-scale parity (Decision D2) ────────────────────
@@ -434,6 +477,8 @@ for (const k of PROVIDERS) {
   if (g.light !== t.light || g.dark !== t.dark)
     fail(`  Part D FAIL: ${k} Go mark {${g.light},${g.dark}} ≠ tokens {${t.light},${t.dark}}`);
 }
+
+if (FAULT.has("D")) fail("  Part D FAIL: injected fault (--selftest)");
 
 if (failed === failedBeforeD)
   console.log(`  ok   ${INST_ORDER.length} instance states + ${PROVIDERS.length} provider marks agree across CSS + Go + tokens (glyph, role→hue, tint hex)`);
