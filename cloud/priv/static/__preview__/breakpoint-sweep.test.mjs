@@ -1218,13 +1218,30 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // (family hash:#instance)`) and smoke.mjs at exit 1 (`CENSUS: 1 committed
   // scenario(s) have NO expectation`) until both were taught — the literal
   // doing its job, not friction.
-  assert.equal(r.total, 134);
+  //
+  // cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority moved it
+  // by ONE: `members-self-role-drift` — the acting owner whose OWN roster row
+  // carries a role its resolved `team_authority` disagrees with, the first
+  // fixture in this corpus in which those two values differ at all — is the
+  // 135th scenario and the 111th residue entry (family `hash:#settings`). The
+  // cell count does NOT move: it is the `members` cell's own roster with one
+  // role string changed, so it paints the same .set-row the settings cells
+  // already walk at all 18 widths, and the thing it carries that no width can
+  // score — WHICH of the two values the role chip is painted from — is driven
+  // by smoke.mjs's `members-self-role-drift` expectation instead. The three
+  // numerals below were RE-DERIVED, not incremented, by RUNNING the bare sweep
+  // on this branch and reading what it PRINTED: `135 scenarios · 24 distinct
+  // covered by 25 cells · 111 residue over 14 families (committed literal)`.
+  // The sweep refused at exit 2 (`UNLISTED scenario "members-self-role-drift"
+  // (family hash:#settings)`) until the entry was written — the literal doing
+  // its job, not friction.
+  assert.equal(r.total, 135);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 110, "110 is the RESIDUE, not the census");
+  assert.equal(r.residue, 111, "111 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 110, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 111, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
