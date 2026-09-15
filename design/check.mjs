@@ -701,11 +701,22 @@ try { themeFiles = readdirSync(themesDir).filter((f) => f.endsWith(".json")); }
 catch (e) { fail(`  Part F FAIL: cannot read design/themes/ — ${e.message}`); }
 if (themeFiles.length === 0) fail("  Part F FAIL: no design/themes/*.json — the theme system has no authored theme");
 
+// Part F's two PER-THEME ok lines need a PER-THEME delta, not the part-level
+// `failed === failedBeforeF` the part summary uses. `themeFaults[f]` counts the
+// failures THIS theme file recorded, across BOTH loops below: the schema loop adds
+// its own delta, the resolve loop reads that total back and adds its own. A theme
+// that fails its shape gate therefore withholds BOTH of its ok lines — its
+// `complete (0 unresolved)` line asserts a verdict about a file whose own FAIL two
+// lines above says it is broken — while every OTHER theme keeps both of its true
+// ok lines. The part-level snapshot is the WRONG gate here for exactly that
+// reason: it would silence four healthy themes over one broken one.
+const themeFaults = {};
 const themeCache = {};
 for (const f of themeFiles) {
+  const snap = failed;
   let theme;
   try { theme = JSON.parse(readFileSync(join(themesDir, f), "utf8")); }
-  catch (e) { fail(`  Part F FAIL: ${f} is not valid JSON — ${e.message}`); continue; }
+  catch (e) { fail(`  Part F FAIL: ${f} is not valid JSON — ${e.message}`); themeFaults[f] = failed - snap; continue; }
   themeCache[f] = theme;
   const name = theme.name || f.replace(/\.json$/, "");
 
@@ -733,7 +744,9 @@ for (const f of themeFiles) {
     if (!e || typeof e.slot !== "string" || typeof e.reason !== "string")
       fail(`  Part F FAIL: ${f} _aaExceptions entry must be {slot, reason} strings — got ${JSON.stringify(e)}`);
   }
-  console.log(`  ok   schema: ${name} — {bg,ink,accent}×2 modes, ${Object.keys(overrides).length} reasoned override(s), ${(theme.passthrough || []).length} declared passthrough(s)`);
+  themeFaults[f] = failed - snap;
+  if (failed === snap)
+    console.log(`  ok   schema: ${name} — {bg,ink,accent}×2 modes, ${Object.keys(overrides).length} reasoned override(s), ${(theme.passthrough || []).length} declared passthrough(s)`);
 }
 
 // (1b) PER-THEME completeness + non-vacuous + AA-exception + ratchet + native%.
@@ -752,6 +765,10 @@ for (const f of themeFiles) {
 for (const f of themeFiles) {
   const theme = themeCache[f];
   if (!theme) continue;
+  // Per-theme delta again, AND the schema loop's verdict for this same file: a
+  // theme whose shape gate failed has no business printing "complete".
+  const snap = failed;
+  const schemaFaults = themeFaults[f] || 0;
   const name = theme.name || f.replace(/\.json$/, "");
   const frozen = OVERRIDE_COUNT_FROZEN[name];
 
@@ -788,11 +805,12 @@ for (const f of themeFiles) {
 
   const nativePct = (100 * full.native.length / SLOTS.length).toFixed(1);
   const barePct = (100 * bare.native.length / SLOTS.length).toFixed(1);
-  console.log(
-    `  ok   ${name}: complete (0 unresolved), bare skin resolves all ${SLOTS.length} slots natively (${barePct}% formula), ` +
-    `${full.native.length} native / ${full.pinned.length} pinned = ${nativePct}% native [reported, not gated]` +
-    (full.misses.length ? `, ${full.misses.length} AA exception(s) declared` : ""),
-  );
+  if (failed === snap && schemaFaults === 0)
+    console.log(
+      `  ok   ${name}: complete (0 unresolved), bare skin resolves all ${SLOTS.length} slots natively (${barePct}% formula), ` +
+      `${full.native.length} native / ${full.pinned.length} pinned = ${nativePct}% native [reported, not gated]` +
+      (full.misses.length ? `, ${full.misses.length} AA exception(s) declared` : ""),
+    );
 }
 
 // (2) no-hole gate: the SLOTS contract must EXACTLY equal tokens' theme-varying leaf
