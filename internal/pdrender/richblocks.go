@@ -38,9 +38,32 @@ import (
 // api/lib/barkpark/portable_doc/render/compose.ex (table_col_types /
 // table_delta_cell / table_spark_cell) + walk.ex table_col_class. The type set
 // and the delta glyphs below are recorded once, for both, in
-// api/test/support/fixtures/table-col-types.json — the Elixir suite reads that
-// file; the literals here do NOT yet (a Go-side read is follow-up work). Change
-// a glyph or a type name in one place and you must change all three.
+// api/test/support/fixtures/table-col-types.json. BOTH suites now read that file:
+// the Elixir suite directly, and the Go side via TestColTypeContractMatchesFixture
+// (richblocks_col_contract_test.go), which asserts colTypeNames /
+// colRightAlignNames / deltaGlyphs below are term-identical to the fixture. Change
+// a glyph or a type name in one place and the Go test reds until all three agree.
+// colTypeNames is the CLOSED set of `cols` column types, colRightAlignNames the
+// subset that right-aligns, and deltaGlyphs the direction glyphs deltaCell emits.
+// These three are the Go half of the cross-runtime contract recorded in
+// api/test/support/fixtures/table-col-types.json; richblocks_col_contract_test.go
+// holds them term-identical to that file.
+var (
+	colTypeNames       = []string{"text", "num", "delta", "spark"}
+	colRightAlignNames = []string{"num", "delta"}
+	deltaGlyphs        = map[string]string{"up": "▲", "down": "▼", "flat": "-"}
+)
+
+// hasColName reports whether name is in names.
+func hasColName(names []string, name string) bool {
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
 type tableRenderer struct{ ir InlineRenderer }
 
 func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -178,12 +201,12 @@ func (tr tableRenderer) deltaCell(cell any, ctx RenderCtx) string {
 	if !ok {
 		return tr.cellString(cell, ctx)
 	}
-	glyph := "-"
+	glyph := deltaGlyphs["flat"]
 	switch {
 	case f > 0:
-		glyph = "▲"
+		glyph = deltaGlyphs["up"]
 	case f < 0:
-		glyph = "▼"
+		glyph = deltaGlyphs["down"]
 	}
 	return glyph + " " + toStr(math.Abs(f))
 }
@@ -220,8 +243,7 @@ func parseColTypes(cols []any) []string {
 	for i, c := range cols {
 		typ := "text"
 		if m, ok := c.(map[string]any); ok {
-			switch t := attrStr(m, "type"); t {
-			case "num", "delta", "spark", "text":
+			if t := attrStr(m, "type"); hasColName(colTypeNames, t) {
 				typ = t
 			}
 		}
@@ -241,11 +263,7 @@ func colType(types []string, i int) string {
 // colRightAlign reports whether column col right-aligns (num + delta). Always
 // false when `cols` is absent, which is what keeps the legacy render byte-stable.
 func colRightAlign(types []string, col int) bool {
-	switch colType(types, col) {
-	case "num", "delta":
-		return true
-	}
-	return false
+	return hasColName(colRightAlignNames, colType(types, col))
 }
 
 // cellString renders one cell. A cell is an array of inline nodes; a bare
