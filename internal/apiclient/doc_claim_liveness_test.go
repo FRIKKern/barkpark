@@ -55,8 +55,9 @@ func TestClaimInfoLiveIsDecidedByTheWorkerValueAlone(t *testing.T) {
 }
 
 // THE RETAINED EPOCH IS LOAD-BEARING. ClaimEpoch must keep reporting it off a
-// RELEASED row: claim.ex:481 computes next_epoch = current_epoch(doc) + 1 from
-// exactly that row, and close.ex:741-742 fences :fenced_off on any mismatch.
+// RELEASED row: Barkpark.Tasks.Claim computes `next_epoch = current_epoch(doc)
+// + 1` from exactly that row, and check_fencing/2 in Barkpark.Tasks.Close
+// fences :fenced_off on any epoch mismatch.
 // Clearing it would restart the lease numbering and let a stale holder's
 // old-epoch close land on the NEXT worker.
 func TestClaimEpochStillReportsTheRetainedEpochOnAReleasedRow(t *testing.T) {
@@ -93,11 +94,11 @@ func TestClaimEpochAndClaimInfoDocstringsAgree(t *testing.T) {
 	// The replacement must SAY what the value is and point at the predicate.
 	for _, want := range []string{
 		"THE BOOL IS NOT A LIVENESS ANSWER",
-		"claim_fence.ex:58-59",
+		"verify_task/2 in\n// api/lib/barkpark/tasks/claim_fence.ex",
 		"ClaimInfo().Live()",
 		"DO NOT CLEAR, ZERO OR \"NORMALISE\" IT",
-		"claim.ex:481",
-		"close.ex:741-742",
+		"api/lib/barkpark/tasks/claim.ex computes",
+		"check_fencing/2 in\n// api/lib/barkpark/tasks/close.ex",
 		"SEVEN keys",
 	} {
 		if !strings.Contains(text, want) {

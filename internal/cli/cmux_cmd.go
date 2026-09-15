@@ -170,7 +170,8 @@ type cmuxStatus struct {
 // top-level fields (content.claim / lifecycle_status).
 //
 // HasClaim comes from ClaimInfo().Live() — the worker-value predicate that
-// mirrors the server fence at claim_fence.ex:58-59 — NOT from ClaimEpoch's
+// mirrors the server fence in verify_task/2 in Barkpark.Tasks.ClaimFence — NOT
+// from ClaimEpoch's
 // bool. It used to come from ClaimEpoch, and a released row kept its epoch, so
 // this reported has_claim:true for a row nobody held and rendered `held by —`
 // with a live lease countdown beside it. Measured on guerrilla against a row

@@ -334,19 +334,22 @@ func (d Doc) ContentString(field string) string {
 // retained epoch, which the server ACCEPTED (lifecycle went to done).
 //
 // FOR LIVENESS USE ClaimInfo().Live(), never this bool. The authoritative
-// predicate is server-side at api/lib/barkpark/tasks/claim_fence.ex:58-59 —
-// content.claim.worker must be a binary, or the fence answers
-// :task_not_claimed. Live() reads that field and additionally rejects a blank
+// predicate is server-side in verify_task/2 in
+// api/lib/barkpark/tasks/claim_fence.ex — content.claim.worker must satisfy
+// is_binary/1, or the fence answers :task_not_claimed. Live() reads that field
+// and additionally rejects a blank
 // worker, matching the in-tree claimVerdict in internal/cli/tasks_claim_cmd.go.
 // Use THIS function only where you need the epoch VALUE to echo back — a close
 // or release payload's observed_epoch — after Live() has already said held.
 //
 // THE RETAINED EPOCH IS LOAD-BEARING. DO NOT CLEAR, ZERO OR "NORMALISE" IT.
 // It looks like residue on a released row and it is not: the next claim reads
-// it straight off that released row — api/lib/barkpark/tasks/claim.ex:481
-// computes next_epoch = current_epoch(doc) + 1 — and
-// api/lib/barkpark/tasks/close.ex:741-742 refuses :fenced_off on any mismatch
-// (api/lib/barkpark/tasks/release.ex:226 says so in source). Zeroing it would
+// it straight off that released row — api/lib/barkpark/tasks/claim.ex computes
+// `next_epoch = current_epoch(doc) + 1` — and check_fencing/2 in
+// api/lib/barkpark/tasks/close.ex refuses :fenced_off on any epoch mismatch
+// (api/lib/barkpark/tasks/release.ex says so in source, in the comment beside
+// its `Map.delete("expired_at")`: "NOT `epoch` either — the CAS fence rides on
+// it"). Zeroing it would
 // restart the lease numbering, so a stale holder's old-epoch close would land
 // on the NEXT worker's claim. That is data corruption, and it is strictly worse
 // than the misreport this comment replaces. The row is not messy; it is correct
@@ -420,8 +423,8 @@ func (d Doc) ClaimInfo() ClaimInfo {
 
 // Live reports whether this claim is CURRENTLY HELD — the one predicate a
 // caller asking "is anybody on this row?" should use. It mirrors the
-// server-side fence at api/lib/barkpark/tasks/claim_fence.ex:58-59, which
-// answers :task_not_claimed unless content.claim.worker is a binary, and adds
+// server-side fence in verify_task/2 in api/lib/barkpark/tasks/claim_fence.ex,
+// which answers :task_not_claimed unless content.claim.worker is a binary, and adds
 // the blank-worker rejection the in-tree claimVerdict already applies.
 //
 // ONLY THE WORKER VALUE DISCRIMINATES. On a released row claim != null, Epoch
