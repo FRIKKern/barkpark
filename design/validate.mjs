@@ -302,7 +302,48 @@ const type = tokens.type || {};
 // exactly the hole that let web/components/styleguide.tsx hand-keep a parallel
 // 700/700/600/400/400/400 column beside this file (au-r4-web-type-ladder).
 const CHROME_WEIGHT_RANGE = (tokens.font && tokens.font.chrome && tokens.font.chrome.weightRange) || [100, 900];
-const CHROME_ORDER = ["3xs", "2xs", "xs", "sm", "base", "lg", "xl", "2xl"];
+// CHROME_ORDER is DERIVED from tokens.type.chrome, ASCENDING BY SIZE — it used to be
+//
+//     const CHROME_ORDER = ["3xs","2xs","xs","sm","base","lg","xl","2xl"];
+//
+// a hand copy of the very object the two loops below validate. A gate that walks a
+// hand copy and looks each of ITS OWN entries up in the source can only fail in one
+// direction: a rung added to tokens.json and not to the literal was NEVER VALIDATED —
+// no {size,lineHeight}, no weight, no place in the monotonicity chain — and this file
+// still exited 0 without ever naming it. PR #18275 fixed the SAME shape one file over
+// (emit.mjs TYPE_STEPS, now typeLadderFrom) and did not reach here; this is that fix's
+// other half, and adjudication (1) in the CROSS-FILE LADDER CENSUS at the bottom of
+// this file explains why the two derivations are deliberately not shared.
+//
+// DIRECTION. emit.mjs derives the same ladder DESCENDING (display order, largest →
+// smallest); this file needs ASCENDING, because the monotonic-weight chain below reads
+// "as the ladder gets LARGER it must not get LIGHTER". Same fact, opposite traversal —
+// so neither list can be pasted into the other and no third copy is created either.
+//
+// AND IT REFUSES RATHER THAN GOING BLIND. A derivation that hands back [] would leave
+// both loops iterating nothing and this whole section would pass vacuously — the exact
+// defect being removed, re-entered through the fix. Every way of seeing nothing (a
+// missing family, a non-object family, zero rungs, or two rungs of the same size, which
+// does not name ONE order) records a REFUSING TO MEASURE error, so the exit is non-zero
+// and the reason is named.
+const LADDER_REFUSE = "REFUSING TO MEASURE";
+function chromeLadderAscending(block) {
+  if (!block || typeof block !== "object")
+    return { err: `${LADDER_REFUSE} — type.chrome is missing or is not an object; the chrome ladder below would be validated against nothing` };
+  // A rung is an entry carrying a finite positive `size`; `_note` prose is not one.
+  const steps = Object.entries(block)
+    .filter(([k]) => !k.startsWith("_"))
+    .map(([k, v]) => [k, v && v.size])
+    .filter(([, size]) => typeof size === "number" && Number.isFinite(size) && size > 0);
+  if (steps.length === 0)
+    return { err: `${LADDER_REFUSE} — derived ZERO rungs from type.chrome; every chrome ladder assertion below would pass vacuously` };
+  if (new Set(steps.map(([, size]) => size)).size !== steps.length)
+    return { err: `${LADDER_REFUSE} — type.chrome has two rungs of the same size, so "smallest → largest" does not name one order` };
+  return { order: steps.slice().sort((a, b) => a[1] - b[1]).map(([k]) => k) };
+}
+const chromeLadder = chromeLadderAscending(type.chrome);
+ok(!chromeLadder.err, chromeLadder.err);
+const CHROME_ORDER = chromeLadder.order || [];
 for (const step of CHROME_ORDER) {
   const s = (type.chrome || {})[step];
   ok(s && typeof s.size === "number" && typeof s.lineHeight === "number", `type.chrome.${step} needs {size,lineHeight}`);
@@ -554,6 +595,293 @@ ok(life.done && life.done.color && life.done.color.light === "#0d9488",
 ok(life.done && life.done.color && life.done.color.dark === "#2dd4bf",
   `lifecycle.done.color.dark must stay teal #2dd4bf (distinct from status.ok green), got ${JSON.stringify(life.done && life.done.color && life.done.color.dark)}`);
 
+
+// --- CROSS-FILE LADDER CENSUS ----------------------------------------------
+// WHY THIS EXISTS. design/emit.mjs and this file each carry hand-kept lists of
+// the same token vocabularies. PR #18275 derived ONE of them (emit.mjs
+// TYPE_STEPS) and the derivation above closed its partner here — but that fixed
+// two entries of a list nobody had enumerated. An enumeration is a snapshot; a
+// predicate is a rule, so what follows DISCOVERS the pairs instead of listing
+// them, and every pair it finds must carry a written verdict below.
+//
+// SHAPE-KEYED, NOT NAME-KEYED. A guard that compares LIKE-NAMED constants across
+// the two files finds SECTION_KEYS/SECTION_KEYS, RULE_KEYS/RULE_KEYS and
+// EVIDENCE_KEYS/EVIDENCE_KEYS and is blind BY CONSTRUCTION to every pair whose
+// two halves were named differently — which is most of them:
+//
+//   AIR_LADDER          <-> AIR_STEPS            (this file / emit.mjs)
+//   CC_HEX_ROLES        <-> CC_ROLES             (differs by one member, on purpose)
+//   CLI_NEW             <-> CLI_CHROME_NEW       (and emit's half is [GoName, role] rows)
+//   CLI_REUSE           <-> CLI_CHROME_REUSE     (and THIS half is an object's keys)
+//
+// so the census pairs by MEMBERSHIP (Jaccard >= 0.5 on the id sets), projects
+// row-shaped literals column by column, and reads an object literal's keys as a
+// vector too. Names are used only to report what it found.
+//
+// THE RATCHET RUNS BOTH WAYS. An undeclared pair reds ("adjudicate it"), and a
+// declared pair that is no longer discoverable reds too ("this verdict is about
+// something that is gone"). Without the second arm the table rots into a list of
+// claims about code that has moved.
+//
+// AND IT REFUSES RATHER THAN GOING BLIND. A parser that stops matching would
+// discover zero pairs and every assertion here would pass on an empty set, which
+// is the exact failure this census exists to catch one level down. Floors on the
+// literal counts and on the discovered-pair count make that a named refusal.
+
+// Collect `const NAME = [...]` / `const NAME = {...}` literals from JS source,
+// bracket-aware (so nested rows survive) and string/comment-aware.
+function literalsIn(src) {
+  const out = [];
+  const head = /(?:^|\n)[ \t]*(?:export[ \t]+)?const[ \t]+([A-Za-z_$][\w$]*)[ \t]*=[ \t]*([[{])/g;
+  for (const m of src.matchAll(head)) {
+    const open = m.index + m[0].length - 1;
+    const close = open === -1 ? -1 : matchBracket(src, open);
+    if (close === -1) continue;
+    out.push({ name: m[1], kind: m[2], body: src.slice(open + 1, close) });
+  }
+  return out;
+}
+function matchBracket(src, open) {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const c = src[i];
+    if (c === '"' || c === "'" || c === "`") { i = skipString(src, i); if (i === -1) return -1; continue; }
+    if (c === "/" && src[i + 1] === "/") { const nl = src.indexOf("\n", i); if (nl === -1) return -1; i = nl; continue; }
+    if (c === "[" || c === "{") depth++;
+    else if (c === "]" || c === "}") { depth--; if (depth === 0) return i; }
+  }
+  return -1;
+}
+function skipString(src, i) {
+  const q = src[i];
+  for (let j = i + 1; j < src.length; j++) {
+    if (src[j] === "\\") { j++; continue; }
+    if (src[j] === q) return j;
+  }
+  return -1;
+}
+// Split a literal body on TOP-LEVEL commas, stripping line comments.
+function topLevelParts(body) {
+  const parts = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === '"' || c === "'" || c === "`") { const e = skipString(body, i); if (e === -1) break; i = e; continue; }
+    if (c === "/" && body[i + 1] === "/") { const nl = body.indexOf("\n", i); i = nl === -1 ? body.length : nl; continue; }
+    if (c === "[" || c === "{" || c === "(") depth++;
+    else if (c === "]" || c === "}" || c === ")") depth--;
+    else if (c === "," && depth === 0) { parts.push(body.slice(start, i)); start = i + 1; }
+  }
+  parts.push(body.slice(start));
+  return parts.map((p) => p.replace(/\/\/[^\n]*/g, "").trim()).filter((p) => p !== "");
+}
+const asString = (p) => (/^"[^"]*"$/.test(p) ? p.slice(1, -1) : null);
+// Turn one literal into zero or more comparable VECTORS of ids.
+//   ["a","b"]                    -> one vector, ["a","b"]
+//   [["A","a"],["B","b"]]        -> one vector per column: ["A","B"] and ["a","b"]
+//   { "a": ..., "b": ... }       -> one vector of the keys
+// Anything else (computed entries, spreads, template literals) yields none: a
+// list the file does not spell out is not a hand copy.
+function vectorsOf(lit) {
+  const parts = topLevelParts(lit.body);
+  if (parts.length === 0) return [];
+  if (lit.kind === "{") {
+    const keys = parts.map((p) => {
+      const m = /^(?:"([^"]*)"|([A-Za-z_$][\w$-]*))[ \t]*:/.exec(p);
+      return m ? (m[1] !== undefined ? m[1] : m[2]) : null;
+    });
+    return keys.every((k) => k !== null) ? [{ id: lit.name, items: keys }] : [];
+  }
+  if (parts.every((p) => asString(p) !== null)) return [{ id: lit.name, items: parts.map(asString) }];
+  if (parts.every((p) => p.startsWith("["))) {
+    const rows = parts.map((p) => topLevelParts(p.slice(1, p.lastIndexOf("]"))).map(asString));
+    const width = rows[0].length;
+    if (!rows.every((r) => r.length === width && r.every((x) => x !== null))) return [];
+    return Array.from({ length: width }, (_, c) => ({ id: `${lit.name}[${c}]`, items: rows.map((r) => r[c]) }));
+  }
+  return [];
+}
+
+const emitPath = join(here, "emit.mjs");
+let emitSrc = "";
+try { emitSrc = readFileSync(emitPath, "utf8"); } catch (e) {
+  ok(false, `${LADDER_REFUSE} — cannot read ${emitPath} (${e.message}); the cross-file ladder census would report a clean tree having compared nothing`);
+}
+const emitVecs = emitSrc ? literalsIn(emitSrc).flatMap(vectorsOf) : [];
+const selfPath = join(here, "validate.mjs");
+let selfSrc = "";
+try { selfSrc = readFileSync(selfPath, "utf8"); } catch (e) {
+  ok(false, `${LADDER_REFUSE} — cannot read ${selfPath} (${e.message}); the census cannot see its own half of the pairs`);
+}
+const selfVecs = literalsIn(selfSrc).flatMap(vectorsOf);
+// POSITIVE CONTROLS on the reader itself. These floors are the difference between
+// "no drift" and "read nothing"; both are well below today's counts (emit 20+,
+// this file 7+) and only a broken parser can cross them.
+ok(emitVecs.length >= 12, `${LADDER_REFUSE} — extracted only ${emitVecs.length} list literal(s) from design/emit.mjs; the census reader has gone blind and every pair below would be "clean" because nothing was compared`);
+ok(selfVecs.length >= 5, `${LADDER_REFUSE} — extracted only ${selfVecs.length} list literal(s) from design/validate.mjs itself; the census reader has gone blind`);
+
+// THE VERDICTS. One entry per discovered pair, keyed `<this file> <-> <emit.mjs>`.
+// `relation` is what must hold; `why` is the adjudication a reader arrives at.
+const LADDER_VERDICTS = {
+  // (2) ONE FACT KEPT TWICE — and deliberately NOT derived from tokens.json.
+  // The order IS the specification here, not an observation of it: the loop above
+  // asserts space.air is MONOTONIC in this order, so deriving the order by sorting
+  // the values would make that assertion prove itself and the ladder could flatten
+  // or invert without a word. tokens.json holds the ratios; these two lists hold
+  // the intended RANKING, and they are one fact because emit.mjs emits the vars in
+  // this order and validate.mjs grades them in it. They would legitimately diverge
+  // only if emission order stopped meaning ladder order — at which point emit.mjs'
+  // own comment ("Emission order IS the ladder order design/validate.mjs asserts
+  // monotonic") is the thing to change first.
+  "AIR_LADDER <-> AIR_STEPS": { relation: "equal", why: "one fact: the intended air ranking, spelled in both files because tokens.json holds ratios, not an order" },
+  // (3)(4)(5) ONE FACT KEPT TWICE, same name on both sides. Each is the CLOSED
+  // vocabulary of a token family: emit.mjs walks it to emit `--tok-*`, this file
+  // walks it to require every member AND to refuse a token that is not on it. The
+  // membership closure already makes each list equal to its tokens.json key SET;
+  // what nothing held until now is that the two FILES agree — a member added to
+  // tokens.json + this file but not to emit.mjs is required, valid, and emitted
+  // nowhere. No derivation is possible for the same reason as (2) for SECTION/AIR
+  // (order carries meaning) and because for RULE/EVIDENCE the list is what tells
+  // check.mjs Parts K/M what a consumer census is allowed to see.
+  "SECTION_KEYS <-> SECTION_KEYS": { relation: "equal", why: "one fact: the closed space.section vocabulary, walked by the emitter and graded here" },
+  "RULE_KEYS <-> RULE_KEYS": { relation: "equal", why: "one fact: the closed space.rule vocabulary" },
+  "EVIDENCE_KEYS <-> EVIDENCE_KEYS": { relation: "equal", why: "one fact: the closed space.evidence vocabulary" },
+  // (6) TWO FACTS THAT OVERLAP BY DESIGN, and the overlap is exactly measurable.
+  // emit.mjs CC_ROLES is "every cloudChrome role emitted as --cc-*"; CC_HEX_ROLES
+  // here is "the roles that are {light,dark} HEX PAIRS". `line-rgb` is emitted like
+  // the rest but is an "R,G,B" triplet, so it cannot ride the HEX loop and is graded
+  // by RGB_TRIPLET immediately below. They legitimately diverge the day another role
+  // stops being a hex pair — and then this entry's `extra` gains that role and says
+  // so. Until then the two retirements both files' comments promise happen "IN
+  // LOCKSTEP" are held by something other than the promise.
+  "CC_HEX_ROLES <-> CC_ROLES": { relation: "emit-minus", extra: ["line-rgb"], why: "two facts: every emitted --cc-* role vs the subset that is a hex pair; line-rgb is an R,G,B triplet and is graded separately here" },
+  // (7)(8) ONE FACT KEPT TWICE in two SHAPES. emit.mjs keeps [GoFieldName, role]
+  // rows because it generates Go field names; this file keeps the bare roles (and
+  // for REUSE, an object mapping role -> the var() ref it must hold). The role
+  // column is the same vocabulary and a role added to one side only is a token this
+  // file requires and the emitter never writes, or vice versa. Not derivable from
+  // tokens.json: the split between NEW (hex) and REUSE (a var ref) is a decision
+  // about the CLI, not a property of the token file.
+  "CLI_NEW <-> CLI_CHROME_NEW[1]": { relation: "equal", why: "one fact in two shapes: the NEW cliChrome hex roles; emit.mjs carries a Go field name beside each" },
+  "CLI_REUSE <-> CLI_CHROME_REUSE[1]": { relation: "equal", why: "one fact in two shapes: the REUSE cliChrome roles; this file keys them to the var() ref they must resolve to" },
+  // (9)(10)(11) THE SAME VOCABULARY, ONE FILE OVER: emit.mjs keeps each family as a
+  // KEY LIST plus a UNITS MAP, and the census pairs this file's key list against
+  // both halves. That is not noise — the units map is the half that decides whether
+  // `fill` emits as a bare ratio or as `0.92px`, so a key present in one and absent
+  // from the other is a real hole, and holding all three in step costs nothing.
+  "SECTION_KEYS <-> SECTION_UNITS": { relation: "equal", why: "one fact: the space.section vocabulary, kept in emit.mjs as a key list AND a units map" },
+  "RULE_KEYS <-> RULE_UNITS": { relation: "equal", why: "one fact: the space.rule vocabulary, key list + units map" },
+  "EVIDENCE_KEYS <-> EVIDENCE_UNITS": { relation: "equal", why: "one fact: the space.evidence vocabulary, key list + units map" },
+  // (12) ONE FACT — THE LIFECYCLE STATE SET — AND IT IS THE ONE THE CENSUS FOUND
+  // THAT NOBODY WAS LOOKING FOR. EXPECTED_ROLE here is already closed BOTH ways
+  // against design/status-manifest.json (a state in the manifest and not in the map
+  // reds, and the reverse reds too; design/validate-life-fence.test.mjs proves it by
+  // mutation). emit.mjs LIFE_ORDER is a HAND LIST of the same nine states that
+  // nothing pins to the manifest — check.mjs Part 5 ITERATES it, so a state added to
+  // the manifest, to tokens.json and to EXPECTED_ROLE but not to LIFE_ORDER is
+  // emitted nowhere and checked by nothing. That is the blind direction PR #18275
+  // removed from the type ladder, alive in a third place. Pinning membership here
+  // ratchets LIFE_ORDER to the manifest transitively.
+  // ORDER IS DELIBERATELY NOT PINNED: LIFE_ORDER's sequence is emit.mjs' own
+  // emission order ("appended so the canonical emission order ... extends without
+  // renumbering the shipped states") and this file's map has no order at all. They
+  // legitimately diverge in order and must not in membership.
+  "EXPECTED_ROLE <-> LIFE_ORDER": { relation: "same-set", why: "one fact (the lifecycle state set) in two shapes; LIFE_ORDER additionally carries an emission ORDER this file does not hold, so only membership is pinned" },
+};
+// NOTE ON THE PAIR THAT IS NOT HERE. emit.mjs TYPE_STEPS <-> this file's
+// CHROME_ORDER was the sixth pair and the one that cost a row to find: same set,
+// REVERSED, different name. It is absent from this table because it no longer
+// exists — both sides are now derived from tokens.type.chrome (emit.mjs
+// typeLadderFrom, descending; chromeLadderAscending above, ascending), so there is
+// no second copy left to hold in step. Adjudication (1): ONE FACT KEPT TWICE,
+// DERIVED. The two derivations are NOT shared on purpose — see the note at the
+// foot of this file.
+
+const setOf = (v) => new Set(v);
+function jaccard(a, b) {
+  const A = setOf(a), B = setOf(b);
+  let inter = 0;
+  for (const x of A) if (B.has(x)) inter++;
+  const union = A.size + B.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+const seen = new Set();
+for (const sv of selfVecs) {
+  for (const ev of emitVecs) {
+    if (jaccard(sv.items, ev.items) < 0.5) continue;
+    const key = `${sv.id} <-> ${ev.id}`;
+    seen.add(key);
+    const verdict = LADDER_VERDICTS[key];
+    if (!verdict) {
+      ok(false,
+        `cross-file ladder census: design/validate.mjs ${sv.id} [${sv.items.join(", ")}] and design/emit.mjs ${ev.id} ` +
+        `[${ev.items.join(", ")}] are the same vocabulary kept twice by hand, and no verdict in LADDER_VERDICTS says whether ` +
+        `that is ONE FACT (make them one, or pin them here) or TWO FACTS that merely look alike (say what would make them ` +
+        `legitimately diverge). Adjudicate it in design/validate.mjs' LADDER_VERDICTS — an unjudged pair is how the last one hid.`);
+      continue;
+    }
+    let expected = ev.items;
+    if (verdict.relation === "reversed") expected = ev.items.slice().reverse();
+    else if (verdict.relation === "emit-minus") expected = ev.items.filter((x) => !verdict.extra.includes(x));
+    // "same-set" pins MEMBERSHIP only, for a pair whose two orders mean different
+    // things. Compare sorted copies so a reorder on one side is not a false red.
+    const lhs = verdict.relation === "same-set" ? sv.items.slice().sort() : sv.items;
+    if (verdict.relation === "same-set") expected = expected.slice().sort();
+    ok(
+      lhs.length === expected.length && lhs.every((x, i) => x === expected[i]),
+      `cross-file ladder census: design/validate.mjs ${sv.id} [${sv.items.join(", ")}] has drifted from design/emit.mjs ${ev.id} ` +
+      `[${ev.items.join(", ")}] under the declared relation "${verdict.relation}"${verdict.relation === "emit-minus" ? ` minus [${verdict.extra.join(", ")}]` : ""} ` +
+      `(expected [${expected.join(", ")}]). The verdict on record is: ${verdict.why}. Fix the copy that moved, or change the verdict.`,
+    );
+  }
+}
+// The ratchet's OTHER direction: a verdict about a pair that is no longer there.
+for (const key of Object.keys(LADDER_VERDICTS)) {
+  ok(seen.has(key),
+    `cross-file ladder census: LADDER_VERDICTS still carries a verdict for "${key}" but the census no longer finds that pair — ` +
+    `one of the two lists was renamed, restructured or derived away. Delete the entry (and say so where the derivation landed) or restore the pair.`);
+}
+// SECOND WITNESS on the pairing itself, not just on the parse. Read what it can
+// and cannot do before trusting it:
+//
+//   IT CANNOT FIRE ALONE. The stale-verdict loop immediately above asserts that
+//   EVERY key in LADDER_VERDICTS is still in `seen`, so `seen.size` cannot fall
+//   below the size of that table without those by-name reds firing first. The
+//   by-name arm is the primary instrument; this one only converts a BULK collapse
+//   — a pairing that stopped pairing, which loses every pair at once — from a
+//   scatter of identical "pair is gone" lines into one sentence that names the
+//   count and says what it means.
+//
+//   THE FLOOR IS DELIBERATELY BELOW TODAY'S COUNT, not near it. The census finds
+//   ELEVEN pairs on this tree (the run prints the number; do not take it from this
+//   comment — the comment is the thing that rots). A pair LEGITIMATELY retired by
+//   deriving both halves from one source is a good change and must not red here:
+//   TYPE_STEPS/CHROME_ORDER was exactly that and it is why there are eleven rather
+//   than twelve. Six is a little over half of eleven — it absorbs five such
+//   retirements and still reds on a collapse. A floor set AT the current count
+//   would be a coverage ratchet wearing a control's clothes, and it would red the
+//   next time someone does the right thing.
+const LADDER_PAIR_FLOOR = 6;
+ok(seen.size >= LADDER_PAIR_FLOOR,
+  `${LADDER_REFUSE} — the cross-file ladder census discovered only ${seen.size} pair(s) between design/validate.mjs and design/emit.mjs, ` +
+  `below the floor of ${LADDER_PAIR_FLOOR}. Pairs are retired one at a time by deriving both halves from one source; losing this many at once means the ` +
+  `pairing has gone blind, and its silence is not evidence that the two files agree`);
+
+// WHY THE TWO LADDER DERIVATIONS ARE NOT SHARED (adjudication (1), the cost side).
+// There are now three implementations of "sort tokens.type.<family> by size and
+// refuse rather than go blind": typeLadderFrom in design/emit.mjs, ladderFrom in
+// web/__tests__/type-ladder-emitted.test.ts, and chromeLadderAscending above.
+// Sharing one would mean importing it, and the importer cannot be this file: the
+// header contract is "dependency-free (Node built-ins only) ... W1.2 emitters
+// trust it", and design/emit.mjs CALLS typeLadderFrom at module scope, so a
+// malformed tokens.json would throw INSIDE the import and this validator would
+// die with a stack trace instead of printing the numbered problem report that is
+// its entire job — the one input it exists to grade is the one input that would
+// break it. The web test is across a tree boundary with its own path-escape
+// declaration. So the duplication here is DELIBERATE and its cost is stated: if
+// the refusal contract changes, it changes in three places, and the census above
+// holds the LISTS in step while nothing holds the three SORTS in step.
+
 // --- report ----------------------------------------------------------------
 if (errors.length) {
   console.error(`FAIL: design/tokens.json has ${errors.length} problem(s):`);
@@ -565,4 +893,5 @@ console.log("  color roles: 10 base + 4 status (ok/warn/danger/info), light+dark
 console.log(`  lifecycle states: ${REQUIRED_LIFE.length} reconciled 1:1 with internal/semrole + taskboard`);
 console.log("  fonts: chrome (self-hosted Inter) / mono / reading; type: chrome + reading scales");
 console.log("  paper/email/callout/mailChrome/provider/cloudChrome/authButton/statusChrome/statusHealth/fleetStatus/errorPage/readerInfo: shape-gated");
+console.log(`  cross-file ladder census: ${seen.size} vocabulary pair(s) between this file and design/emit.mjs, each adjudicated in LADDER_VERDICTS (${emitVecs.length} emit literals x ${selfVecs.length} here)`);
 process.exit(0);
