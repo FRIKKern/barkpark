@@ -544,6 +544,11 @@ on:
       # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
       # catches it, and the census resolves that directory correctly either way.
       - "scripts/selftest-wiring-census.sh"
+      # REGISTRY IMPACT CHECK. Derives, from the tree, every census/ratchet/pin
+      # that counts or enumerates anything in a changed path, so an author sees
+      # the obligation BEFORE the merge instead of a red on main after it.
+      - "scripts/registry-impact-check.sh"
+      - "scripts/registry-impact-check.test.sh"
       # EXIT-LAUNDERING SWEEP (task-20fe68463c87e136). The instrument that
       # separates `cmd >/dev/null 2>&1 || true` on a PRODUCER whose artifact a
       # later line CONSUMES (the #14371 shape: seven days of a repo-wide red
@@ -1036,6 +1041,11 @@ on:
       # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
       # catches it, and the census resolves that directory correctly either way.
       - "scripts/selftest-wiring-census.sh"
+      # REGISTRY IMPACT CHECK. Derives, from the tree, every census/ratchet/pin
+      # that counts or enumerates anything in a changed path, so an author sees
+      # the obligation BEFORE the merge instead of a red on main after it.
+      - "scripts/registry-impact-check.sh"
+      - "scripts/registry-impact-check.test.sh"
       # EXIT-LAUNDERING SWEEP (task-20fe68463c87e136). The instrument that
       # separates `cmd >/dev/null 2>&1 || true` on a PRODUCER whose artifact a
       # later line CONSUMES (the #14371 shape: seven days of a repo-wide red
@@ -1242,6 +1252,7 @@ jobs:
       undispatched-target: ${{ steps.sets.outputs.undispatched-target }}
       orphan-harnesses: ${{ steps.sets.outputs.orphan-harnesses }}
       selftest-wiring-census: ${{ steps.sets.outputs.selftest-wiring-census }}
+      registry-impact-check: ${{ steps.sets.outputs.registry-impact-check }}
       exit-laundering-sweep: ${{ steps.sets.outputs.exit-laundering-sweep }}
       dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
@@ -1487,6 +1498,8 @@ jobs:
           selftest-wiring-census scripts/*.test.mjs
           selftest-wiring-census scripts/*_test.sh
           selftest-wiring-census .github/workflows/*.yml
+          registry-impact-check scripts/registry-impact-check.sh
+          registry-impact-check scripts/registry-impact-check.test.sh
           exit-laundering-sweep scripts/exit-laundering-sweep.sh
           which-gates scripts/which-gates.sh
           which-gates scripts/which-gates.test.sh
@@ -3530,6 +3543,33 @@ jobs:
       - name: The census over this tree
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/selftest-wiring-census.sh --list
+
+  registry-impact-check:
+    needs: [changes]
+    if: needs.changes.outputs.registry-impact-check == 'true'
+    # A FENCE AROUND A FILE DOES NOT COVER THE REGISTRIES THAT COUNT THINGS IN IT.
+    # scripts/registry-impact-check.sh derives, from the tree, every census,
+    # ratchet and pin that counts or enumerates anything in a changed path, and
+    # names what the author must declare in the SAME PR. What runs here is its
+    # harness, and the arms that carry it are two REAL main-reddenings replayed
+    # by path set: #18213 against the .github/run-level-readers.allow row whose
+    # count it moved, and deploy/assets-survive-gap against the deploy/README.md
+    # count guard from #18191. A new check's first green is the least
+    # trustworthy green there is, so the load-bearing arms MUST FIND SOMETHING.
+    name: registry impact check harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+        with:
+          # MUST be a full clone. The replays resolve commits 7d56df653 and
+          # 90d63a4dd and the branch origin/deploy/assets-survive-gap. On a
+          # shallow checkout those arms SKIP, and a skipped arm measures nothing
+          # — the harness says so in its tally rather than counting them green.
+          fetch-depth: 0
+      - name: registry-impact-check harness (two historical replays + controls)
+        run: bash scripts/registry-impact-check.test.sh
 
   exit-laundering-sweep:
     needs: [changes]
