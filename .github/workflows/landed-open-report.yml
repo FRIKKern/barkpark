@@ -59,7 +59,7 @@ jobs:
       # of this checkout; a shallow clone carries none of them and every row
       # would render `?` — legible, but it throws away the one column that says
       # which rows have been stranded longest.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

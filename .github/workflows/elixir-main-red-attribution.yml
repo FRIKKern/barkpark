@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The MERGE COMMIT the upstream run judged, with its first parent, so
           # `git diff HEAD^1 HEAD` reproduces the file set the pull request

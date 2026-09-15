@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so `origin/main` resolves for rerun.test.mjs's own
           # ref-resolution tests — see the file header for the measurement

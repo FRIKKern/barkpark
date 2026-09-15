@@ -63,7 +63,7 @@ jobs:
     name: cp-ops operator command
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run ${{ inputs.operation }} on the control plane
         env:
