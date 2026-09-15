@@ -33,6 +33,19 @@ config :barkpark_cloud, :public_url, "https://api.barkpark.cloud"
 # address tuples.
 config :barkpark_cloud, :trusted_proxy_peers, [{172, 18, 0, 1}]
 
+# dr-w24-bl-internal-write-route-is-publicly-reachable — who may reach the
+# `/v1/internal/*` fleet-ops surface, whose only other gate is the shared
+# WORKER_TOKEN. `Web.Router.fence_internal_surface/2` 404s every other caller
+# BEFORE the token compare runs, so that bearer stops being the entire perimeter.
+#
+# `:any` is the NAMED OPT-OUT — no network factor — and it is what dev and test
+# ship, so local and CI behaviour is unchanged. It is NOT the prod default:
+# `config/runtime.exs` REFUSES TO BOOT a prod release that never declared
+# `INTERNAL_ALLOWED_CIDRS`, because a perimeter that defaults open when its
+# config is unset is not a perimeter. Prod may still say `any` — but it has to
+# say it. See `BarkparkCloud.Web.InternalPerimeter`.
+config :barkpark_cloud, :internal_allowed_cidrs, :any
+
 # Configure Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
