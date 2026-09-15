@@ -323,6 +323,7 @@ const DEFECTS = [
   "W27-failed-bar-announces-the-count",
   "W22-url-remedy-pricing",
   "W34-sites-read-failed-bounded",
+  "W16-site-freshness-agrees-with-production-ladder",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -12082,6 +12083,273 @@ async function main() {
     // the `.oauth-divider` rules are drawn there), it does not see text inside
     // a closed `<details>` or a `hidden` ancestor (deliberately — those are not
     // painted), and it measures ONE fixture per route.
+    // ── W16-site-freshness-agrees-with-production-ladder ─────────────────────
+    //
+    //  WHAT IT ASSERTS, AND WHY IT IS THE HALF THAT WAS MISSING.
+    //  #8659 ruled that the sites-list freshness embed is PRODUCTION-ONLY: a
+    //  torn-down branch preview, however new, must not become the sentence the
+    //  list tells a person about production. That ruling is pinned at the HTTP
+    //  layer in ExUnit and had NO browser-level guard at all — so a regression
+    //  in app.js's freshness paint (`freshnessModel` / `siteStatusPill`) was
+    //  invisible to every instrument in this epic.
+    //
+    //  THE VACUOUS GREEN THIS LEG IS MADE OUT OF (the filed row): the same
+    //  comparison was DRIVEN once already, on the `sites` scenario at
+    //  1440x900, and printed "0 sites disagree". It could not have printed
+    //  anything else — that scenario carried no per-site deployments payload,
+    //  so every detail ladder rendered EMPTY (`ladder[0] = null`,
+    //  `previews = []`) and the equality was between two empty strings. An
+    //  equality assertion over nothing passes and MEASURES nothing.
+    //
+    //  SO THE NON-EMPTINESS IS ASSERTED FIRST, AND IT IS A REFUSAL. Before any
+    //  comparison this leg requires: the list rendered rows, the row under test
+    //  is one of them, the production ladder has at least one `.deploy-row`,
+    //  and both texts are non-empty. Each of those reds BY NAME. The idiom is
+    //  the attention-row sweep's ("measured ZERO pills across all N cells —
+    //  the queue stopped rendering or the selector went stale"), applied to the
+    //  defect that produced this row rather than to a selector drift.
+    //
+    //  THE TWO VALUES, AND WHY THEY ARE COMPARABLE AT ALL. `freshnessModel`
+    //  spells a live production deploy "Live" and a cancelled one "Cancelled"
+    //  (`siteStatusPill` paints that into `.status-pill-label`); `cap(st)`
+    //  spells the ladder pill the same two words (`deployRow` → `.dep-pill`).
+    //  Re-derive by symbol, never by line:
+    //    grep -n 'function freshnessModel\|function siteStatusPill' cloud/priv/static/app.js
+    //    grep -n 'function deployRow' cloud/priv/static/app.js
+    //  So string equality between the list pill and the ladder head is the
+    //  SAME statement the ExUnit test makes about the two payloads, made at the
+    //  surface a person actually reads.
+    //
+    //  THE FIXTURE IS A PRECONDITION, NOT AN EXTRA, and it is asserted as one.
+    //  `scenarios.mjs` gives the acme-web row an UNSPLIT ledger
+    //  (`siteLedgerBySite`) holding a live production deploy and a CANCELLED
+    //  PREVIEW 600 seconds NEWER than it — the adversarial shape #8659 fixed,
+    //  which no committed console scenario carried. This leg re-derives that
+    //  shape out of the scenario before it drives anything: a fixture that
+    //  drifted back to production-only would make every cell below green by
+    //  construction, so it refuses instead.
+    //
+    //  HOW IT LOSES, DRIVEN (criterion 2 of the filed row): defeat the
+    //  production filter at the console layer — `isPreviewDeploy` in
+    //  scenarios.mjs, the one predicate both partition call sites read — and
+    //  the cancelled preview joins the production ladder as its NEWEST row.
+    //  The list still says "Live" (its embed is a different payload), the
+    //  ladder head says "Cancelled", and this leg reds naming the site and both
+    //  values. Restore the predicate and it goes green again.
+    //
+    //  BOTH THEMES, ONE RUN. The paint is theme-independent today; driving both
+    //  is what makes that a MEASUREMENT rather than an assumption, and it is
+    //  what the filed criterion asks for.
+    if (requested.includes("W16-site-freshness-agrees-with-production-ladder")) {
+      const D = "W16-site-freshness-agrees-with-production-ladder";
+      // The comparison is about TEXT, not geometry: one comfortable desktop
+      // viewport, both themes. A width sweep here would print a wider table
+      // about the same two strings.
+      const FRESH_WIDTH = 1440;
+      const FRESH_SCEN = "sites";
+      const { SCENARIOS: FRESH_SCENARIOS, FRESHNESS_LADDER_SITE_ID: FRESH_SITE_ID, route: freshRoute } =
+        await import("./scenarios.mjs");
+      // This leg's OWN reading of "is this row a preview", written here rather
+      // than imported: the thing under test is scenarios.mjs's filter, and a
+      // precondition that re-used the predicate it is checking would agree with
+      // it by construction.
+      const isPreviewEnv = (x) => !!x && x.environment === "preview";
+
+      // ── THE PRECONDITION, RE-DERIVED FROM THE FIXTURE ──────────────────────
+      const sc = FRESH_SCENARIOS[FRESH_SCEN];
+      if (!sc || sc.deepLink !== "#sites") {
+        return die(`${D}: SCENARIOS["${FRESH_SCEN}"] no longer carries a "#sites" deepLink — the list surface this leg compares against cannot be reached, so every cell below would measure another screen`);
+      }
+      const freshSite = (sc.data && Array.isArray(sc.data.sites) ? sc.data.sites : [])
+        .find((s) => s && s.id === FRESH_SITE_ID);
+      if (!freshSite) {
+        return die(`${D}: site ${FRESH_SITE_ID} is not in SCENARIOS["${FRESH_SCEN}"].data.sites — the fixture and the id this leg drives have drifted apart`);
+      }
+      // THE PRECONDITION IS READ OFF THE UNSPLIT LEDGER, NOT OFF THE FILTERED
+      // PARTITION — and that distinction is the whole reason criterion 2 has a
+      // red to paste. The first draft asked the ROUTE SEAM for the production
+      // ladder and refused (exit 2) when its head was a preview; under the
+      // criterion-2 mutation that refusal fired BEFORE a browser opened, so
+      // the run named the seam instead of naming the site and both values. A
+      // precondition must describe the FIXTURE, which the mutation does not
+      // touch; the filter is the thing under test and is judged at the SURFACE.
+      const rawLedger = (sc.data && sc.data.siteLedgerBySite && sc.data.siteLedgerBySite[FRESH_SITE_ID]) || null;
+      if (!Array.isArray(rawLedger) || rawLedger.length === 0) {
+        return die(`${D}: SCENARIOS["${FRESH_SCEN}"].data.siteLedgerBySite carries no ledger for ${FRESH_SITE_ID} — the fixture is back to the state this row was filed against (no per-site deployments payload), so the detail ladder renders EMPTY and every comparison below is vacuous`);
+      }
+      const tOf = (x) => (x && Date.parse(x.updated_at || x.inserted_at)) || NaN;
+      const headProd = rawLedger.filter((x) => !isPreviewEnv(x))[0] || null;
+      const newestPreview = rawLedger.filter(isPreviewEnv)[0] || null;
+      if (!headProd || headProd.status !== "live") {
+        return die(`${D}: the fixture ledger's newest PRODUCTION row is ${headProd ? `"${headProd.status}"` : "ABSENT"} — this leg needs a LIVE production head to compare against, and without one the comparison below is the vacuous green this row was filed for`);
+      }
+      if (!newestPreview || newestPreview.status !== "cancelled") {
+        return die(`${D}: the fixture ledger carries ${newestPreview ? `a "${newestPreview.status}"` : "NO"} newest preview row — the adversarial shape #8659 pinned is a live production deploy under a CANCELLED preview, and without it a green here says only that a site with no previews agrees with itself`);
+      }
+      if (!(tOf(newestPreview) > tOf(headProd))) {
+        return die(`${D}: the cancelled preview (${newestPreview.updated_at}) is NOT newer than the live production deploy (${headProd.updated_at}) — the whole point of the shape is that the newest row of ANY environment is the preview, so a filter that ignored environment entirely would still pass`);
+      }
+      // `cap(st)` is what BOTH surfaces spell (app.js `deployRow` →
+      // `.dep-pill`, and `freshnessModel`'s live arm), so the expected word is
+      // DERIVED from the fixture's own live production head rather than typed.
+      const wantPill = headProd.status.charAt(0).toUpperCase() + headProd.status.slice(1);
+      const previewLeadS = Math.round((tOf(newestPreview) - tOf(headProd)) / 1000);
+      // What the ROUTE SEAM does with that ledger — REPORTED, never asserted.
+      // Under the criterion-2 mutation this line is where the defeat becomes
+      // visible in the transcript, and the run still goes on to drive the
+      // browser so the red below can name the site and both values.
+      const prodLadder = freshRoute(FRESH_SCEN, "GET", `/v1/sites/${FRESH_SITE_ID}/deployments`, {}).body.deployments || [];
+      const prevLadder = freshRoute(FRESH_SCEN, "GET", `/v1/sites/${FRESH_SITE_ID}/previews`, {}).body.previews || [];
+      process.stdout.write(
+        `\n${D} — scen=${FRESH_SCEN} site=${FRESH_SITE_ID} @${FRESH_WIDTH} x light+dark (2 cells)\n` +
+        `   fixture ledger (UNSPLIT, ${rawLedger.length} rows): newest production ${headProd.status}/${headProd.environment}` +
+        ` @${headProd.updated_at} · newest preview ${newestPreview.status}/${newestPreview.environment}` +
+        ` @${newestPreview.updated_at} (${previewLeadS}s NEWER than the live production row)\n` +
+        `   route seam serves: /deployments ${prodLadder.length} row(s) (${prodLadder.filter(isPreviewEnv).length} preview)` +
+        ` · /previews ${prevLadder.length} row(s) — the production filter is ` +
+        `${prodLadder.some(isPreviewEnv) ? "DEFEATED (a preview row is in the production partition)" : "holding"}\n`,
+      );
+
+      let freshCells = 0, listRowsSeen = 0, ladderRowsSeen = 0, agreed = 0;
+      for (const theme of ["light", "dark"]) {
+        // (1) THE LIST. Read the freshness pill off the row under test.
+        await setViewport(FRESH_WIDTH);
+        await nav(
+          `${BASE}/?scen=${FRESH_SCEN}&theme=${theme}#sites`,
+          `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+          `return !!(v && v.id==='view-sites' && v.querySelector('.site-row[data-id]'));})()`,
+        );
+        const list = await evalJs(
+          `(function(){var d=document.documentElement;` +
+          `var v=document.querySelector('section.view:not([hidden])');` +
+          // THE ROW IS PICKED OUT OF THE COUNTED POPULATION, never walked for
+          // singly (view-scope-census D228): `rows.length` is printed in this
+          // leg's own output, so the one row this comparison rests on is a
+          // named member of a number the run re-measures, not an arbitrary
+          // first match off a half-painted screen.
+          `var rows=document.querySelectorAll('#sites-body .site-row[data-id]');` +
+          `var want=${JSON.stringify(FRESH_SITE_ID)};var r=null;` +
+          `for(var i=0;i<rows.length;i++){if(rows[i].getAttribute('data-id')===want){r=rows[i];break;}}` +
+          `var p=r&&r.querySelector('.status-pill-label');` +
+          `return {view:v?v.id:'none',theme:d.getAttribute('data-theme'),rows:rows.length,` +
+          ` found:!!r,pill:p?(p.textContent||'').trim():null};})()`,
+        );
+        // (2) THE DETAIL. Same scenario, same run, the site's own route.
+        await setViewport(FRESH_WIDTH);
+        await nav(
+          `${BASE}/?scen=${FRESH_SCEN}&theme=${theme}#site/${FRESH_SITE_ID}`,
+          `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+          `return !!(v && v.id==='view-site' && v.querySelector('#site-deploys'));})()`,
+        );
+        const det = await evalJs(
+          `(function(){var d=document.documentElement;` +
+          `var v=document.querySelector('section.view:not([hidden])');` +
+          `var rows=document.querySelectorAll('#site-deploys .deploy-row');` +
+          `var h=rows[0]?rows[0].querySelector('.dep-pill'):null;` +
+          `var hm=rows[0]?rows[0].querySelector('.deploy-meta'):null;` +
+          `return {view:v?v.id:'none',theme:d.getAttribute('data-theme'),rows:rows.length,` +
+          ` previews:document.querySelectorAll('.deploys.previews .deploy-row.preview-row').length,` +
+          ` head:h?(h.textContent||'').trim():null,` +
+          ` meta:hm?(hm.textContent||'').replace(/\\s+/g,' ').trim():null};})()`,
+        );
+        freshCells++;
+        listRowsSeen += list.rows;
+        ladderRowsSeen += det.rows;
+
+        // (3) THE ROUTES AND THE THEME. Without these every string below is a
+        //     string off some other screen.
+        if (list.view !== "view-sites") {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#sites: rendered section.view "${list.view}", asked for "view-sites" — the hash did not route, so the pill read below is not a sites-list pill`);
+          continue;
+        }
+        if (det.view !== "view-site") {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#site/${FRESH_SITE_ID}: rendered section.view "${det.view}", asked for "view-site" — the hash did not route, so the ladder read below is not this site's ladder`);
+          continue;
+        }
+        if (list.theme !== theme || det.theme !== theme) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}: data-theme is list "${list.theme}" / detail "${det.theme}" — the theme did not apply, so the dark half of this run measured the light one`);
+        }
+
+        // (4) THE VACUITY REFUSALS. Each of these is the shape that printed
+        //     "0 sites disagree" on a screen with nothing on it.
+        let vacuous = false;
+        if (list.rows === 0) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#sites: measured ZERO .site-row[data-id] in #sites-body — the list stopped rendering or the selector went stale; a comparison against an unrendered list is refused, not passed`);
+          vacuous = true;
+        }
+        if (!list.found) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#sites: site ${FRESH_SITE_ID} is in the fixture but has NO .site-row[data-id] among the ${list.rows} rendered — the row this leg compares was never painted`);
+          vacuous = true;
+        }
+        if (det.rows === 0) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#site/${FRESH_SITE_ID}: measured ZERO #site-deploys .deploy-row — the production ladder rendered EMPTY. This is the exact vacuous green this row was filed for ("ladder[0] = null, previews = []", "0 sites disagree"): an equality assertion over two empty strings passes and measures nothing. Refused, never passed`);
+          vacuous = true;
+        }
+        if (!list.pill) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#sites: the row's .status-pill-label is ${list.pill === null ? "ABSENT" : "EMPTY"} — there is no freshness sentence to compare`);
+          vacuous = true;
+        }
+        if (!det.head) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#site/${FRESH_SITE_ID}: the ladder head's .dep-pill is ${det.head === null ? "ABSENT" : "EMPTY"} — there is no ladder status to compare`);
+          vacuous = true;
+        }
+        if (vacuous) {
+          process.stdout.write(`   ${FRESH_SCEN}/${theme}  list rows ${list.rows} pill "${list.pill}" | ladder rows ${det.rows} head "${det.head}"  REFUSED\n`);
+          continue;
+        }
+
+        // (5) THE COMPARISON. Both values quoted, in both directions.
+        if (list.pill !== det.head) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}: site ${FRESH_SITE_ID} ("${freshSite.name}") — the sites-list freshness pill reads "${list.pill}" and the head of its PRODUCTION ladder reads "${det.head}" (head meta: "${det.meta}"). These are the same deployment read through two serializers, so they must be the same word. #8659 made the list embed production-only precisely so a newer CANCELLED PREVIEW cannot become the sentence the list tells about production`);
+        } else {
+          agreed++;
+        }
+        // The expected value is derived from the FIXTURE's ladder head, not
+        // transcribed: a leg that only asserted list === ladder would go green
+        // with both of them reading "Cancelled".
+        if (list.pill !== wantPill) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}: site ${FRESH_SITE_ID} ("${freshSite.name}") — the sites-list freshness pill reads "${list.pill}", expected "${wantPill}" from the fixture's LIVE production ladder head (${headProd.status}/${headProd.environment} @${headProd.updated_at}). Both surfaces agreeing on the WRONG word is still a defect`);
+        }
+        process.stdout.write(
+          `   ${FRESH_SCEN}/${theme}  list rows ${list.rows} pill "${list.pill}" | ladder rows ${det.rows} head "${det.head}"` +
+          ` | previews painted ${det.previews}\n`,
+        );
+      }
+
+      // AN EMPTY POPULATION IS NOT A CLEAN ONE — the run-level twin of the
+      // per-cell refusals above, so a leg whose every cell `continue`d cannot
+      // reach the success tail.
+      if (ladderRowsSeen === 0) {
+        fail(D, `${D}: measured ZERO #site-deploys .deploy-row across all ${freshCells} cells — the production ladder never rendered, so nothing this leg is named for was measured. This is a refusal, not a pass`);
+      }
+      if (listRowsSeen === 0) {
+        fail(D, `${D}: measured ZERO sites-list rows across all ${freshCells} cells — the list never rendered`);
+      }
+      if (freshCells !== 2) {
+        fail(D, `${D}: ${freshCells} of 2 cells measured (light + dark) — a half-driven run does not certify both themes`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${agreed} / ${freshCells} cells AGREE, both themes, one run: the sites-list freshness pill and the head of ` +
+          `site ${FRESH_SITE_ID} ("${freshSite.name}")'s production ladder both read "${wantPill}" — measured, quoted, ` +
+          `and asserted EQUAL at ${FRESH_WIDTH}px in light and dark. The ladder was ASSERTED NON-EMPTY first ` +
+          `(${ladderRowsSeen} .deploy-row across ${freshCells} cells, ${listRowsSeen} list rows), because the ` +
+          `comparison this leg replaces printed "0 sites disagree" over an EMPTY ladder and could not have said ` +
+          `anything else`,
+        );
+        okLine(
+          `THE SHAPE IS ADVERSARIAL, RE-DERIVED FROM THE FIXTURE RATHER THAN ASSUMED: site ${FRESH_SITE_ID} carries a ` +
+          `LIVE production deploy (${headProd.updated_at}) under a CANCELLED PREVIEW ${previewLeadS}s NEWER ` +
+          `(${newestPreview.updated_at}, branch "${newestPreview.branch}") — the shape #8659 fixed and pinned in ` +
+          `ExUnit, which no committed console scenario carried until now. The production partition served ` +
+          `${prodLadder.length} row(s), ${prodLadder.filter(isPreviewEnv).length} of them preview; the preview ` +
+          `partition served ${prevLadder.length}. Defeat ` +
+          `\`isPreviewDeploy\` in scenarios.mjs and the cancelled preview becomes the ladder head: this leg then reds ` +
+          `naming the site, "${wantPill}" and "Cancelled" (driven both ways)`,
+        );
+      }
+    }
+
     if (requested.includes("W20-type-floor-instances")) {
       const D = "W20-type-floor-instances";
       const { FLOOR_PX: TF_FLOOR, ALLOWLIST: TF_ALLOW, audit: tfAudit, APP_CSS: TF_CSS } =
