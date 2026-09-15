@@ -41,6 +41,16 @@ MAIN_N="${MERGE_CHECK_MAIN_SAMPLE:-5}"
 # A real main head renders 46-118 check-runs. A census far below that is a broken
 # or rate-limited reader, NOT a clean main.
 MC_CENSUS_FLOOR="${MERGE_CHECK_CENSUS_FLOOR:-10}"
+# THE SECOND PASS, for UNPROVEN only. A sliding 5-head window is a small sample:
+# a context that runs on main but not on those particular 5 commits reads
+# UNPROVEN (a refusal) purely because the window moved. Measured while writing
+# this: `Required-check spec gate` classified `OWN 0/1` on one run and
+# `UNPROVEN 0/0` twenty minutes later, with nothing about the PR changed —
+# other lanes had merged and slid the window. Only the names that came back
+# UNPROVEN are re-sampled, so the cost lands on the rare case and not on every
+# run. A context still unrendered at this depth is genuinely not comparable
+# against main -- see the UNPROVEN note below.
+MAIN_DEEP="${MERGE_CHECK_MAIN_DEEP:-20}"
 
 # --- mc_main_census <outfile> ------------------------------------------------
 # The newest-per-name check-run outcome for each of the MAIN_N most recent
@@ -60,10 +70,10 @@ MC_CENSUS_FLOOR="${MERGE_CHECK_CENSUS_FLOOR:-10}"
 # `--paginate` with NO -q, piped into `jq -s` over the page objects: a STREAM is
 # safe under per-page evaluation, an AGGREGATE is not. Arm A12 pins this.
 mc_main_census(){
-  local out="$1" c
+  local out="$1" depth="${2:-$MAIN_N}" c
   : > "$out"
   git fetch -q origin main:refs/remotes/origin/main 2>/dev/null
-  for c in $(git rev-list refs/remotes/origin/main -n "$MAIN_N" 2>/dev/null); do
+  for c in $(git rev-list refs/remotes/origin/main -n "$depth" 2>/dev/null); do
     gh api "repos/$REPO/commits/$c/check-runs?per_page=100" --paginate 2>/dev/null \
       | jq -s -r '[.[].check_runs[]]
                   | group_by(.name) | map(sort_by(.started_at)|last) | .[]
@@ -96,6 +106,23 @@ mc_main_census(){
 # UNPROVEN IS OWN-CLASS ON PURPOSE. A context that rendered NO row on any sampled
 # main head has not been shown to be healthy OR broken there — and an absence is
 # never evidence of health. Fail closed: refuse and say why.
+#
+# THE HONEST LIMIT OF THIS WHOLE ARM: PATH FILTERS, not missing `push:` arms.
+# Measured 2026-09-15: `tooling/{aesthetics,ergonomics,risk} node --test suite +
+# tooling/pds gate` rendered 0 rows across the last 20 main heads. The tempting
+# reading is "it has no push arm" — and it is WRONG. research-coverage-suite.yml
+# DOES have `push: branches: [main]`; both of its arms carry the same `paths:`
+# filter, so on main it fires only when a merged commit happens to touch those
+# paths, which none of the last 20 did. A PR that touches them gets a row and
+# main usually does not.
+# So UNPROVEN here is a true statement about the WINDOW, not about the workflow,
+# and it does not become answerable by sampling deeper — only by waiting for a
+# main commit that trips the same filter. The arm refuses, correctly, but this
+# fix helps only contexts that actually recur on main. The named r19 specimens
+# (`Doc budgets + anchors`, `Required-check spec drift (advisory)`) do recur,
+# which is why they are the ones it fixes. Establishing inheritance for a
+# path-filtered context needs a different comparison (other recent PR heads that
+# tripped the same filter), deliberately NOT attempted here.
 #
 # AN EMPTY CENSUS IS NOT A CLEAN MAIN. An exhausted shared rate limit renders as
 # an EMPTY RESULT SET with stderr suppressed, which would otherwise classify
@@ -192,9 +219,30 @@ mc_rollup(){
     # is wrong most of the time is worse than no guard — it manufactures the very
     # reflex it exists to prevent.
     CN=$(mktemp); NF=$(mktemp); CLS=$(mktemp)
-    printf '%s' "$FAILED" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' > "$NF"
-    mc_main_census "$CN"
+    # ONE NAME PER LINE, STRAIGHT FROM jq — never by splitting $FAILED on commas.
+    # CHECK NAMES CONTAIN COMMAS. Caught dogfooding this very PR: the real context
+    # `tooling/{aesthetics, ergonomics, risk} node --test suite + tooling/pds gate`
+    # was shredded into three fragments, none of which matches any row on main, so
+    # all three classified UNPROVEN and the arm REFUSED — manufacturing exactly the
+    # false refusal this change exists to remove, inside the fix for it.
+    # $FAILED stays a comma-joined string for DISPLAY only; it is never re-parsed.
+    jq -s -r '[ . | group_by(.name) | map(sort_by(.started_at)|last) | .[] | select(.status=="completed") | select(.conclusion!="success" and .conclusion!="neutral" and .conclusion!="skipped") | .name ] | .[]' "$T" > "$NF"
+    mc_main_census "$CN" "$MAIN_N"
     mc_classify "$NF" "$CN" > "$CLS"; RC=$?
+    # SECOND PASS: re-sample ONLY the unproven names, deeper. A refusal caused by
+    # a window that happened to slide is not a finding about the PR.
+    if [ "$RC" != 3 ] && grep -q '^UNPROVEN' "$CLS"; then
+      CN2=$(mktemp); NF2=$(mktemp); CLS2=$(mktemp)
+      awk -F'\t' '$1=="UNPROVEN"{print $2}' "$CLS" > "$NF2"
+      mc_main_census "$CN2" "$MAIN_DEEP"
+      if mc_classify "$NF2" "$CN2" > "$CLS2"; then :; fi
+      if [ -s "$CLS2" ] && ! grep -q 'CENSUS-UNREADABLE' "$CLS2"; then
+        grep -v '^UNPROVEN' "$CLS" > "$CLS.m" 2>/dev/null; cat "$CLS2" >> "$CLS.m"
+        mv "$CLS.m" "$CLS"
+        if awk -F'\t' '$1=="OWN"||$1=="UNPROVEN"||$1=="OWN-DISARMED"{f=1} END{exit !f}' "$CLS"; then RC=1; else RC=0; fi
+      fi
+      rm -f "$CN2" "$NF2" "$CLS2"
+    fi
     if [ "$RC" = 3 ]; then
       cannot "full rollup" "CONCLUDED non-success ($FAILED) but the origin/main census came back $(cut -f3 "$CLS" | head -1) — an empty or short census is a BROKEN READER (or an exhausted shared rate limit), NOT a clean main. No inherited/own verdict is available; do not read this as either."
     else
@@ -431,9 +479,30 @@ if [ "${1:-}" = "--selftest" ]; then
   else _no "disarm switch flips the verdict" "armed=$_armed disarmed=$_dis — the mutation arm cannot discriminate"; fi
   rm -f "$_cens" "$_nm" "$_outf"
 
+  # A14 — A CHECK NAME CONTAINING COMMAS MUST SURVIVE AS ONE NAME. The first cut
+  # of this fix built the name list by splitting the comma-joined display string,
+  # which shredded `tooling/{aesthetics, ergonomics, risk} ...` into three
+  # fragments that match nothing on main -> three UNPROVEN -> a false refusal,
+  # produced by the very code meant to remove false refusals. Found by running
+  # the tool against its own PR, not by reading it.
+  _cn='tooling/{aesthetics, ergonomics, risk} node --test suite + tooling/pds gate'
+  _cens2=$(mktemp); _nm2=$(mktemp)
+  for _i in 1 2 3 4 5; do printf 'FAIL\t%s\n' "$_cn" >> "$_cens2"; printf 'OK\tCloud gate\n' >> "$_cens2"; done
+  printf '%s\n' "$_cn" > "$_nm2"
+  _out2=$(mc_classify "$_nm2" "$_cens2"); _rc=$?
+  case "$_rc:$_out2" in
+    0:INHERITED-STABLE*5/5*) _ok "comma-bearing name survives" "classified as ONE name, 5/5" ;;
+    *) _no "comma-bearing name survives" "rc=$_rc out=$_out2 — a comma in a check name split it" ;;
+  esac
+  # A14b — CONTROL: the shredding form really does shred, or A14 proves nothing.
+  _frag=$(printf '%s' "$_cn" | tr ',' '\n' | grep -c '^')
+  if [ "$_frag" -ge 3 ]; then _ok "CONTROL comma-split shreds" "the old form yields $_frag fragments from 1 name"
+  else _no "CONTROL comma-split shreds" "the old form yielded $_frag — A14 cannot discriminate"; fi
+  rm -f "$_cens2" "$_nm2"
+
   # DERIVED tally with its own floor. A hardcoded count is a lie waiting.
   _total=$((_p+_f))
-  if [ "$_total" -lt 24 ]; then
+  if [ "$_total" -lt 26 ]; then
     echo "MERGE-CHECK SELFTEST: CANNOT READ — only $_total arm(s) reported; this tally measures nothing"; exit 3
   fi
   if [ "$_f" -eq 0 ]; then echo "MERGE-CHECK SELFTEST: $_p/$_total arms pass"; exit 0
