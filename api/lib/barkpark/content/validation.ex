@@ -405,6 +405,11 @@ defmodule Barkpark.Content.Validation do
     Map.get(schema, :fields) || Map.get(schema, "fields") || []
   end
 
+  # The v1 `String.to_atom` on a schema-declared field key — waived INLINE so
+  # the waiver binds by AST adjacency and survives line moves; the baseline
+  # row it replaces (`validation.ex:286`) went stale the first time a function
+  # was added above it (E1.11).
+  # sobelow_skip ["DOS.StringToAtom"]
   defp get_in_field(field, key) when is_map(field) do
     Map.get(field, key) || Map.get(field, String.to_atom(key))
   end
