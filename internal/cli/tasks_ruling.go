@@ -121,10 +121,46 @@ func emitTaskRuling(out *writer, cmd manifest.Command, respBody []byte) {
 		return
 	}
 	out.errf("%s%s", rulingBannerPrefix, r.Reason)
-	if r.Disposition != "" {
-		out.errf("   disposition=%s — this decision is ALREADY MADE; re-read the row before you build to it", r.Disposition)
+	if r.Disposition == "" {
+		return
 	}
+	if rulingIsDecided(r.Disposition) {
+		out.errf("%s%s%s", rulingDecidedPrefix, r.Disposition, rulingDecidedSuffix)
+		return
+	}
+	out.errf("%s%s%s", rulingUndecidedPrefix, r.Disposition, rulingUndecidedSuffix)
 }
+
+// rulingUndecidedDispositions is the UNDECIDED half of the adjudication
+// vocabulary (`bp task stage --disposition open|parked|closed`, trimmed and
+// downcased by the server's one writer). It is deliberately the SHORT half:
+// the shout must fail LOUD, so anything outside this set — including a term
+// the vocabulary grows later — is treated as decided. "" is handled by the
+// caller and never reaches here, because an absent disposition has no term to
+// name at all.
+var rulingUndecidedDispositions = map[string]bool{"open": true}
+
+// rulingIsDecided reports whether a disposition term records a decision
+// somebody actually made. THE DEFECT THIS FIXES (task-4a0eaac03a222e9a): the
+// second line shouted "this decision is ALREADY MADE" on EVERY non-empty
+// disposition, `open` included — so the row a worker is supposed to build,
+// carrying a context note and the term that means "not decided", told them a
+// decision had been made. A warning that fires when nothing was decided is a
+// warning every worker learns to skim, which is exactly how a REAL ruling gets
+// walked past.
+func rulingIsDecided(disposition string) bool {
+	return !rulingUndecidedDispositions[strings.ToLower(strings.TrimSpace(disposition))]
+}
+
+// The two second-line shapes. Split into constants so a test can assert the
+// DECIDED wording is absent without matching the undecided line by accident,
+// and so the two can never drift into each other's phrasing.
+const (
+	rulingDecidedPrefix   = "   disposition="
+	rulingDecidedSuffix   = " — this decision is ALREADY MADE; re-read the row before you build to it"
+	rulingUndecidedPrefix = "   disposition="
+	rulingUndecidedSuffix = " — NO decision is recorded yet; the note above is context, not a verdict"
+)
 
 // rulingHeaderKeys are the header's column labels; the widest one sets the pad
 // so the block aligns with itself (renderKV measures its own keys separately).
