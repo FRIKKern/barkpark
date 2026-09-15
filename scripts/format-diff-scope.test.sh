@@ -89,7 +89,15 @@ want format_present True
 # coe job. Both halves are asserted, so neither can be reintroduced alone.
 want format_coe False
 want format_if "needs.changes.outputs.compile == 'true'"
-want format_outputs "unformatted_in_diff,unformatted_total"
+# SET EQUALITY, KEPT DELIBERATELY — not relaxed to "contains". Equality is what
+# catches the OTHER direction: an output deleted or renamed out from under the
+# aggregator, which `agg_binds_names` alone would not see until the binding
+# silently resolved to empty. `verdict` is the refusal channel (rc 2 = COULD
+# NOT MEASURE, distinct from a measured defect); it is here because the format
+# job publishes it and `elixir-gate` binds AND reads it as V_FORMAT — the
+# refusal-vocabulary guard reds if either half goes missing. Adding a key to
+# an equality set does not widen it: a FOURTH, undeclared output still reds.
+want format_outputs "unformatted_in_diff,unformatted_total,verdict"
 want guard_present True
 want guard_coe True      # the WHOLE-TREE read is data, never the verdict
 want scope_present True

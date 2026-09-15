@@ -516,6 +516,11 @@ jobs:
     # All three are ~1s, no BEAM, no deps.
     needs: changes
     if: needs.changes.outputs.api == 'true'
+    outputs:
+      # REFUSED when main-red-breaker.sh exited 2 — it could not DECIDE
+      # ownership, which is not a claim that this PR is clean. Read by
+      # `security-gate` as V_OVERLAP.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -599,7 +604,20 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         # absolute path: jobs with defaults.run.working-directory (api/) ran the
         # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
-        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+        run: bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-inline-overlap -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when the Decide step above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `security-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
   # spec-authority: advisory-ok — same standing as the job above, for the same
   # reason. The `(blocking)` token is inside the JOB name, which IS this job's
@@ -668,6 +686,11 @@ jobs:
     # rows.
     needs: changes
     if: needs.changes.outputs.api == 'true'
+    outputs:
+      # REFUSED when main-red-breaker.sh exited 2 — it could not DECIDE
+      # ownership, which is not a claim that this PR is clean. Read by
+      # `security-gate` as V_FINGERPRINT.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -737,7 +760,20 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         # absolute path: jobs with defaults.run.working-directory (api/) ran the
         # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
-        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+        run: bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-baseline-fingerprint -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when the Decide step above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `security-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
 
   mix-audit:
@@ -757,6 +793,11 @@ jobs:
     # suppression below; revisit if esaml ships a patched release.
     needs: changes
     if: needs.changes.outputs.api == 'true'
+    outputs:
+      # REFUSED when main-red-breaker.sh exited 2 — it could not DECIDE
+      # ownership, which is not a claim that this PR is clean. Read by
+      # `security-gate` as V_AUDIT.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -874,7 +915,20 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         # absolute path: jobs with defaults.run.working-directory (api/) ran the
         # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
-        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+        run: bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-mix-audit -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when the Decide step above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `security-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
 
   security-gate:
@@ -930,6 +984,18 @@ jobs:
           R_FINGERPRINT: ${{ needs.sobelow-baseline-fingerprint.result }}
           R_AUDIT: ${{ needs.mix-audit.result }}
           O_API: ${{ needs.changes.outputs.api }}
+          # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ───────────
+          # `R_*` is a RESULT — success/failure/skipped — and a failure on that
+          # channel is ONE word over two utterly different facts: "I measured
+          # and found a defect" and "I could not measure at all". `V_*` is the
+          # second fact, published by `scripts/run-instrument.sh` at the call
+          # site of every refusal-capable instrument in the job. Empty means
+          # the job never reached one of those steps (skipped, or it died
+          # earlier) — which is NOT a claim that nothing refused, so this step
+          # never reads an empty V_* as MEASURED.
+          V_OVERLAP: ${{ needs.sobelow-inline-overlap.outputs.verdict }}
+          V_FINGERPRINT: ${{ needs.sobelow-baseline-fingerprint.outputs.verdict }}
+          V_AUDIT: ${{ needs.mix-audit.outputs.verdict }}
         run: |
           set -euo pipefail
 
@@ -1014,6 +1080,34 @@ jobs:
 
           # The dispatcher itself may never skip: without it there are no gate
           # values, so nothing downstream can be judged.
+          # ── the refusal ledger ───────────────────────────────────────────
+          # Built BEFORE the verdict, so the `::error::` below can say WHICH
+          # instruments refused. Derived from ${job}, never a hardcoded name.
+          # `sobelow` is absent on purpose: it is not in `needs` at all (see the
+          # job header above), so it has no verdict to publish and this ledger
+          # makes no claim about it — which is the same vocabulary, applied to
+          # itself.
+          refusals=""
+          note_verdict() {
+            local job="$1" v="$2"
+            case "$v" in
+              REFUSED|UNKNOWN)
+                echo "  REFUSED ${job}: the instrument exited 2 — it COULD NOT MEASURE and made NO"
+                echo "          claim in either direction. Read that job's own log: it printed the"
+                echo "          cause by name. This is still red — a refusal is not a pass."
+                refusals="${refusals:+${refusals}, }${job}"
+                ;;
+              MEASURED-DEFECT)
+                echo "  measured ${job}: the instrument RAN and found a defect. The fault is in the"
+                echo "          tree, not on the runner." ;;
+              MEASURED-CLEAN|'') : ;;
+              *) echo "  note    ${job}: unrecognised verdict '${v}' on the refusal channel." ;;
+            esac
+          }
+          note_verdict "sobelow-inline-overlap"       "${V_OVERLAP:-}"
+          note_verdict "sobelow-baseline-fingerprint" "${V_FINGERPRINT:-}"
+          note_verdict "mix-audit"                    "${V_AUDIT:-}"
+
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
           # The shape ratchet is unfiltered, so it may never skip either.
           decide "gate-shape"              "${R_SHAPE}"   "NEVER"
@@ -1028,7 +1122,24 @@ jobs:
             # `Elixir gate`, `Cloud gate`, `Console gate`, `PR references an
             # active task` — enforce_admins=true). Saying otherwise told every
             # reader this red blocked a merge it cannot block.
-            echo "::error::Security gate: at least one upstream job is not in the allow-set (see above). This gate is RED on purpose; it is an advisory context, not one of the four required on main. NOT IN THE ALLOW-SET: ${reds}"
+            if [ -n "$refusals" ]; then
+              # The ONE line the check-run API carries. Say which half of the
+              # vocabulary fired, or the reader re-derives it and usually
+              # guesses "the runner".
+              echo "::error title=Security gate RED — an instrument REFUSED TO MEASURE::RED because at least one upstream job is not in the allow-set.%0AREFUSED TO MEASURE (exit 2): ${refusals}%0AA refusal is the ABSENCE of a measurement: those instruments made no claim about this tree in either direction. main-red-breaker.sh exits 2 only when it CANNOT DECIDE ownership — STEP_OUTCOMES, STEP_NAMES, JOB_NAME or WORKFLOW_FILE empty, or the outcome JSON unparseable — which is a WIRING fault in the job above it, never a verdict about this PR. READ THE REFUSING JOB'S OWN LINE: it printed which input was missing.%0ANOT IN THE ALLOW-SET: ${reds}"
+            else
+              echo "::error::Security gate: at least one upstream job is not in the allow-set (see above). This gate is RED on purpose; it is an advisory context, not one of the four required on main. NOT IN THE ALLOW-SET: ${reds}"
+            fi
+            exit 1
+          fi
+
+          if [ -n "$refusals" ]; then
+            # Every upstream is in the allow-set and an instrument still refused
+            # — possible when a Decide step refuses inside a job that ends green
+            # some other way. Greening on that would publish this context over a
+            # hole nothing looked into, which is the vacuous green the refusal
+            # vocabulary exists to kill.
+            echo "::error title=Security gate RED — a refusal reached the aggregate with every job green::REFUSED TO MEASURE (exit 2): ${refusals}%0AEvery upstream job is in the allow-set, and an instrument still refused to measure. Read the refusing job's own line for the cause."
             exit 1
           fi
 
