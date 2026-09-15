@@ -40,6 +40,17 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		return exitOK
 	}
 
+	// THE NON-EVALUATING PROSE DOOR (prose_text_file.go). `--description-file`
+	// and `--title-file` are resolved FIRST, into the inline `--description=…`
+	// / `--title=…` spelling, so every stage after this line —
+	// parseTaskCreateArgs, the publish wall, the mutation body, the POST — sees
+	// the ordinary flag and can never drift from it. The same pass screens an
+	// implausible INLINE payload against the population-derived ceiling.
+	tail, perr := resolveProseTextFiles(tail, nil, out.errf)
+	if perr != nil {
+		return useError(out, proseTextSourceCode, perr.Error(), exitValidation)
+	}
+
 	body, publish, err := parseTaskCreateArgs(tail)
 	if err != nil {
 		return usageErrf(out, func() { printTaskCreateHelp(out) }, "%v", err)
@@ -1274,6 +1285,10 @@ with the drafts. prefix — bp doc get task drafts.<id> --perspective raw. A bar
 bp doc get task <id> reads the PUBLISHED perspective and 404s (or shows the
 pre-write row) for an unpublished draft: that draft-vs-published asymmetry is
 why a successful write can look like it "read back unchanged" until you publish.`)
+	out.outf("")
+	for _, line := range proseFileHelpLines(nil) {
+		out.outf("%s", line)
+	}
 }
 
 // mutateWarning is ONE advisory off a mutate success envelope. The wire carries
