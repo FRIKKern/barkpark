@@ -52,7 +52,15 @@ name: cli-release-cadence
 on:
   push:
     branches: [main]
-  pull_request:
+  # ── NO `pull_request:` ARM (2026-09-15, task-dee226be3107a98b) ───────────────
+  # Removed, on this file's own reasoning. The header above states it outright:
+  # "a red here is cleared by an ACT OF RELEASE, not by a change to the PR".
+  # A verdict no PR can change has no business rendering two check runs on every
+  # PR (measured 2026-09-15: fires 10/10 of the last 10 merged heads, 2 check
+  # runs each). Cadence drift is a property of main's tip against the newest
+  # `cli-v*` tag, and the `push:` + weekly `schedule:` arms below both measure
+  # exactly that, on exactly the tree a user's installer resolves.
+  # The hermetic harness keeps its venue: it runs on every arm below.
   schedule:
     # Weekly. Cadence drift is a slow condition — it needs a loop that never
     # stops, not a fast one. Offset off the hour because GitHub queues cron
