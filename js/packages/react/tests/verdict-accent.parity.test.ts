@@ -27,9 +27,18 @@ const stat = datavizEmitters.stat
 const stats = datavizEmitters.stats
 const callout = coreEmitters.callout
 
-const emitStat = (block: unknown) => stat(block as never)
-const emitStats = (block: unknown) => stats(block as never)
-const emitCallout = (block: unknown) => callout(block as never)
+const emitStat = (block: unknown) => {
+  if (!stat) throw new Error('missing stat emitter')
+  return stat(block as never)
+}
+const emitStats = (block: unknown) => {
+  if (!stats) throw new Error('missing stats emitter')
+  return stats(block as never)
+}
+const emitCallout = (block: unknown) => {
+  if (!callout) throw new Error('missing callout emitter')
+  return callout(block as never)
+}
 
 describe('stat verdict — the number carries the judgement', () => {
   it('stamps the value modifier for loss and peace, and only the value', () => {
