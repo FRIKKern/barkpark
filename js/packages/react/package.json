@@ -76,7 +76,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
-    "size": "size-limit"
+    "size": "size-limit",
+    "census": "node scripts/bundle-census.mjs"
   },
   "dependencies": {
     "@barkpark/core": "workspace:^"
@@ -86,20 +87,21 @@
     "react-dom": ">=19"
   },
   "devDependencies": {
-    "tsup": "^8.3.0",
-    "typescript": "^5.6.0",
-    "vitest": "^4.1.0",
-    "@vitest/browser": "^4.1.0",
-    "@vitest/browser-playwright": "^4.1.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "@size-limit/preset-small-lib": "^11.1.0",
+    "@testing-library/react": "^16.1.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@testing-library/react": "^16.1.0",
+    "@vitest/browser": "^4.1.0",
+    "@vitest/browser-playwright": "^4.1.0",
+    "asciinema-player": "^3.8.0",
+    "esbuild": "0.25.12",
     "happy-dom": "^20.0.0",
-    "size-limit": "^11.1.0",
-    "@size-limit/preset-small-lib": "^11.1.0",
     "mermaid": "^11.0.0",
-    "asciinema-player": "^3.8.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "size-limit": "^11.1.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.0"
   }
 }
