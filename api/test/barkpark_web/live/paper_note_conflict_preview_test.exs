@@ -2,12 +2,17 @@ defmodule BarkparkWeb.PaperNoteConflictPreviewTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
+  import BarkparkWeb.PaperEditorTestHelpers, only: [pin_paper_canvas!: 1]
 
   alias Barkpark.{Auth, Content}
   alias BarkparkWeb.Studio.StudioLive.Handlers.Paper, as: PaperHandler
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: SharedPaper
 
   @dataset "production"
+
+  setup do
+    pin_paper_canvas!("1")
+  end
 
   test "conflict resync pairs latest canvas source with canonical readonly Note paint", %{
     conn: conn
