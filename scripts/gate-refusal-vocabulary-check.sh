@@ -68,14 +68,16 @@
 #
 # SCOPE — and the seam, stated so the next author can see it
 # ----------------------------------------------------------
-# GUARDED: `.github/workflows/cloud.yml`.
-# NOT GUARDED YET: `elixir.yml` and `security.yml` carry the identical defect
-# (their `elixir-gate` / `security-gate` `decide()` bodies are ports of the same
-# block and read `.result` only). They are a different lane's fence and a
-# different PR; adding them here is adding their workflow path to WORKFLOWS
-# below plus the same channel edits in those files. This guard does NOT claim
-# they are clean — it makes no claim about a file it does not read, which is
-# the whole point of the vocabulary it enforces.
+# GUARDED: `cloud.yml`, `elixir.yml`, `security.yml` — every workflow that
+# publishes a REQUIRED aggregate context off a `decide()` body reading
+# `needs.<job>.result`. That is the whole set the original defect was measured
+# in; the guard makes no claim about any workflow outside it, which is the same
+# vocabulary it enforces on the instruments.
+#
+# This guard does NOT assert that a refusal is IMPOSSIBLE in a guarded
+# workflow. It asserts that where one is possible it is NAMED: channelled at
+# the call site, published as a job verdict, and read by the aggregator. A
+# deliberately bare site is an EXEMPTION with its reason on the line.
 #
 # EXIT CODES: 0 clean · 1 at least one violation · 2 cannot measure.
 #
@@ -86,20 +88,37 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # The guarded set. One path per line. See SCOPE above before adding to it.
-WORKFLOWS_DEFAULT=".github/workflows/cloud.yml"
+WORKFLOWS_DEFAULT=".github/workflows/cloud.yml .github/workflows/elixir.yml .github/workflows/security.yml"
 WORKFLOWS="${REFUSAL_VOCAB_WORKFLOWS:-$WORKFLOWS_DEFAULT}"
 
 # The one wrapper that reads rc 2 and names it.
 RUNNER_REL="scripts/run-instrument.sh"
 
 # ── EXEMPTIONS ──────────────────────────────────────────────────────────────
-# `<workflow-basename>:<script-basename>` — a refusal-capable script whose call
-# site is deliberately bare, with the reason ON THE LINE. An exemption is a
-# claim that rc 2 CANNOT arrive there, or that nothing downstream could act on
-# it; it is not a way to quiet the check. Keep it short or it stops being read.
+# A refusal-capable script whose call site is deliberately bare, with the
+# reason ON THE LINE. An exemption is a claim that rc 2 CANNOT arrive there,
+# that nothing downstream could act on it, or that channelling would DESTROY a
+# reading the step depends on; it is not a way to quiet the check. Keep it
+# short or it stops being read.
+#
+# TWO KEY SHAPES, and the narrower one wins:
+#   <workflow>:<job>:<script>   — this script, in THIS JOB only.
+#   <workflow>:<script>         — this script anywhere in the workflow.
+#
+# The job-scoped key exists because one script is not one decision. In
+# elixir.yml `elixir-impacted-tests.sh` is a plain instrument in `path-escape`
+# and is channelled there, while in `mix-test` its STDOUT is the payload the
+# step captures — two call sites, two correct answers, and a workflow-wide key
+# could only give one of them. A guard whose exemption granularity is coarser
+# than the decision it records forces the author to over-exempt, and an
+# over-broad exemption is how a real bare site hides behind a true reason.
 EXEMPTIONS="
 cloud.yml:breaker-capture.sh  # not an instrument: a re-exec wrapper. Its own rc 2 fires only when it is called with no step script, which is a wiring bug in the step above it, and it re-execs the step so the step's rc — including 2 — passes through untouched to run-instrument.sh.
 cloud.yml:file-ci-failure-issue.sh  # runs in report-main-failure, which is NOT in cloud-gate's needs set and publishes no required context. There is no verdict for its refusal to reach.
+security.yml:breaker-capture.sh  # the identical re-exec wrapper cloud.yml exempts, in the identical one-line preamble at every site here: its own rc 2 fires only on a missing step script, and the step's real rc passes through untouched.
+security.yml:sobelow:main-red-breaker.sh  # the sobelow job is the one continue-on-error job in this file and is DELIBERATELY absent from security-gate's needs -- a continue-on-error failure reads back as the string success, so aggregating it would launder a red (the aggregator says so itself). With no needs edge there is no outputs.verdict for a refusal to travel along, and security-gate-shape.test.sh forces that exclusion to stay.
+elixir.yml:mix-test:elixir-impacted-tests.sh  # both sites here consume the script's OUTPUT, not its verdict. The --xref-probe site runs under continue-on-error and its own step comment says a dead instrument is deliberately NOT a failure, so publishing REFUSED would red the required gate for the exact case that step exists to tolerate. The --select site captures STDOUT as the payload written to the selection file, which run-instrument.sh's own 'instrument X: exit N -> ...' line would corrupt, and that step already reads rc explicitly and falls back to the FULL suite.
+elixir.yml:mix-prod-compile:prod-build-cache-guard.sh  # this script does NOT speak the house vocabulary at this site: under a deliberate 'set +e' the step reads its rc as 0=cached / 1=contaminated / 3=fall back and acts on each. run-instrument.sh would map rc 3 to UNKNOWN and collapse three live readings into one exit 1 -- channelling here would destroy a distinction rather than add one. Its --selftest sibling above IS channelled.
 "
 
 MODE="check"
@@ -198,9 +217,14 @@ is_capable() {  # $1 = absolute path to a script
 
 capable_count() { live_exit2_lines < "$1" | wc -l | tr -d ' '; }
 
-exemption_reason() {  # $1 = wf basename, $2 = script basename
-  printf '%s\n' "$EXEMPTIONS" | awk -v k="$1:$2" '
-    $1 == k { sub(/^[^ \t]+[ \t]*/, ""); print; exit }'
+exemption_reason() {  # $1 = wf basename, $2 = job, $3 = script basename
+  # NARROWEST FIRST. A job-scoped row must be able to say something the
+  # workflow-wide row for the same script does not, so it wins outright; the
+  # workflow-wide key is only consulted when no job-scoped row matched.
+  printf '%s\n' "$EXEMPTIONS" | awk -v ks="$1:$2:$3" -v kw="$1:$3" '
+    $1 == ks { sub(/^[^ \t]+[ \t]*/, ""); print; found = 1; exit }
+    $1 == kw && w == "" { w = $0; sub(/^[^ \t]+[ \t]*/, "", w) }
+    END { if (!found && w != "") print w }'
 }
 
 # ── the workflow reader ─────────────────────────────────────────────────────
@@ -334,7 +358,7 @@ run_check() {
         printf '  ok      %s:%s  %s — %s live exit-2 site(s), channelled through %s\n' "$base" "$lno" "$srel" "$sites" "$RUNNER_REL"
         continue
       fi
-      local why; why="$(exemption_reason "$base" "$sbase")"
+      local why; why="$(exemption_reason "$base" "$job" "$sbase")"
       if [ -n "$why" ]; then
         printf '  ok      %s:%s  %s — EXEMPT: %s\n' "$base" "$lno" "$srel" "$why"
         continue
@@ -343,7 +367,7 @@ run_check() {
       printf '          Its rc 2 means "I could not measure". Invoked like this, rc 2 and rc 1 both\n'
       printf '          arrive at needs.%s.result as the string "failure", and the aggregator cannot\n' "$job"
       printf '          tell a refusal from a defect. Route it through %s, or\n' "$RUNNER_REL"
-      printf '          add a %s:%s exemption WITH THE REASON in this script.\n' "$base" "$sbase"
+      printf '          add a %s:%s:%s (or the workflow-wide %s:%s) exemption WITH THE REASON in this script.\n' "$base" "$job" "$sbase" "$base" "$sbase"
       echo 1 >> "$tmp"
     done < "$tmp.scan"
 
@@ -569,6 +593,52 @@ FIX
   out="$(REFUSAL_VOCAB_WORKFLOWS=".github/workflows/fix.yml" bash "$0" --root "$d/repo" 2>&1)"; rc=$?
   if [ "$rc" -eq 2 ]; then ok "A3: an EMPTY scan REFUSES (exit 2) instead of reporting a clean zero"
   else bad "A3: expected rc 2 on an empty scan, got $rc"; printf '%s\n' "$out" | sed 's/^/       /'; fi
+
+  # ── EXEMPTION KEYS: the narrow key must be able to say what the broad one
+  #    cannot, and must NOT fire for a job it does not name. Both directions,
+  #    because an exemption that matches too widely is a blind spot wearing a
+  #    reason, and that is worse than a missing row.
+  exr() { exemption_reason "$1" "$2" "$3"; }
+  saved_EXEMPTIONS="$EXEMPTIONS"
+  EXEMPTIONS="
+w.yml:probe.sh  # broad reason
+w.yml:jobA:probe.sh  # narrow reason
+"
+  [ "$(exr w.yml jobA probe.sh)" = "# narrow reason" ] \
+    && ok "exemption: the JOB-scoped row wins over the workflow-wide one" \
+    || bad "exemption: jobA should read the narrow row, got '$(exr w.yml jobA probe.sh)'"
+  [ "$(exr w.yml jobB probe.sh)" = "# broad reason" ] \
+    && ok "exemption: a job with no narrow row falls back to the workflow-wide one" \
+    || bad "exemption: jobB should fall back to the broad row, got '$(exr w.yml jobB probe.sh)'"
+  EXEMPTIONS="
+w.yml:jobA:probe.sh  # narrow reason
+"
+  [ -z "$(exr w.yml jobB probe.sh)" ] \
+    && ok "exemption: a JOB-scoped row does NOT exempt a different job" \
+    || bad "exemption: jobB matched a jobA-scoped row — the key is not job-scoped"
+  [ -z "$(exr other.yml jobA probe.sh)" ] \
+    && ok "exemption: a row does not leak across workflows" \
+    || bad "exemption: other.yml matched w.yml's row"
+  EXEMPTIONS="$saved_EXEMPTIONS"
+
+  # ── NO BACKTICK MAY APPEAR IN THE EXEMPTIONS TABLE. It is a double-quoted
+  #    shell string, so a backtick span is COMMAND SUBSTITUTION: it runs at
+  #    source time and the reason silently loses the text between the ticks.
+  #    Measured while this table was being written — `set +e` in a reason both
+  #    executed and vanished from the printed exemption. The assertion reads
+  #    the SOURCE, not the expanded variable, because by the time the variable
+  #    exists the damage is already done and invisible.
+  if awk '/^EXEMPTIONS="$/{i=1;next} /^"$/{i=0} i' "$0" | grep -q '`'; then
+    bad "EXEMPTIONS contains a backtick — that span is command substitution, not prose"
+  else
+    ok "EXEMPTIONS carries no backtick (a backtick there would RUN, not quote)"
+  fi
+  # the control: the detector must be able to see one at all
+  if printf 'EXEMPTIONS="\nx.yml:y.sh  # a `tick` here\n"\n' | awk '/^EXEMPTIONS="$/{i=1;next} /^"$/{i=0} i' | grep -q '`'; then
+    ok "…and that backtick detector fires on a planted one (it is not blind)"
+  else
+    bad "the backtick detector found nothing in a fixture that CONTAINS one"
+  fi
 
   # ── the guard speaks its own vocabulary: an unknown argument refuses.
   out="$(bash "$0" --no-such-flag 2>&1)"; rc=$?

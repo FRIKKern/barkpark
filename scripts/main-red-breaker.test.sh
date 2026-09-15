@@ -1417,4 +1417,139 @@ if mutate "26g the refusal" 'if [ "${OPAQUE_N:-0}" -gt 0 ]; then' 'if false; the
                    *) echo "  FAIL  26g) MUTATION SURVIVED: still refused with the refusal branch removed"; exit 1 ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
 fi
 
+# ── 26h/26i. THE BARE-IDENTIFIER CLASS (task-a512d8f733bed771) ───────────────
+# THE DEFECT 26f's predicate still had: it asked "does this red name a FILE?"
+# and we read the answer as "does this red name its FINDINGS?". A gate whose
+# findings are BARE IDENTIFIERS has no slash and no dot, so it read OPAQUE
+# forever however well it reported, and the ACTION line told its author to make
+# the step print what it found WHEN THE STEP ALREADY DID.
+#
+# BOTH SPECIMENS BELOW ARE REAL AND WERE RUN, not invented. Measured on a clean
+# detached worktree at main d4177ca6b, 2026-09-14:
+#   bash scripts/pd-parity-completeness.sh   -> EXIT 1, complete captured body
+#   FOUR non-blank lines (the capture is NOT truncated; breaker-capture.sh cats
+#   the whole step output), the FAIL line intact, and the old locator regex
+#   matched ZERO of those four lines.
+#   bash scripts/docs-anchors-check.sh with one @canonical marker duplicated
+#   -> FAIL: @canonical capability:field-encryption claimed by >1 impl (…)
+# and the CONSTANT that must NOT be rescued with them is $SPEC_BUDGET, byte
+# identical whether one document is over cap or twenty.
+#
+# THE TWO HALVES ARE PROVED IN ONE RUN AGAINST THE SAME CLASSIFIER, because a
+# remedy that greens the first by also greening the second has deleted the test.
+SPEC_PDP_TYPES='in-scope types: action api-endpoint bar-chart blockquote callout card delta diagram divider heading list note num paragraph spark stat table toc video'
+SPEC_PDP_FAIL='FAIL: no golden fixture for in-scope type(s): delta num spark'
+SPEC_PDP_HINT='  → add it to @inputs and run `MIX_ENV=test mix barkpark.portable_doc.gen_pd_parity`'
+SPEC_ANCH_DUP='FAIL: @canonical capability:field-encryption claimed by >1 impl (a copy-paste that kept the marker?)'
+mix_names="$(python3 -c 'import json; print(json.dumps({"s1":"Doc byte budgets (fails this job)","s2":"PortableDoc render-parity completeness (fails this job)","s3":"Doc anchors + headers (fails this job)"}))')"
+mix_out='{"s1":{"outcome":"failure"},"s2":{"outcome":"failure"},"s3":{"outcome":"failure"}}'
+mix_jobs="$TMP/mix-jobs.json"; cat > "$mix_jobs" <<'J'
+{"jobs":[{"id":103555717072,"name":"Doc budgets + anchors","conclusion":"failure","steps":[
+  {"name":"Doc byte budgets (fails this job)","conclusion":"success"},
+  {"name":"PortableDoc render-parity completeness (fails this job)","conclusion":"success"},
+  {"name":"Doc anchors + headers (fails this job)","conclusion":"success"},
+  {"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"failure"}]}]}
+J
+mix_ours="$TMP/mix-ours.txt"; {
+  printf '%s%s\n' "$BB" 'bash scripts/check-doc-budgets.sh --selftest'
+  printf '%s\n' "$SPEC_BUDGET"
+  printf '%s\n' "$BE"
+  printf '%s%s\n' "$BB" 'bash scripts/pd-parity-completeness.sh'
+  printf '%s\n' "$SPEC_PDP_TYPES"
+  printf 'in-scope count: 68\n'
+  printf '%s\n' "$SPEC_PDP_FAIL"
+  printf '%s\n' "$SPEC_PDP_HINT"
+  printf '%s\n' "$BE"
+  printf '%s%s\n' "$BB" 'bash scripts/docs-anchors-check.sh'
+  printf '%s\n' "$SPEC_ANCH_DUP"
+  printf '%s\n' "$BE"
+} > "$mix_ours"
+mix_main="$TMP/mix-main.log"; {
+  printf '2026-09-14T23:19:07.0000000Z %s\n' "$SPEC_BUDGET"
+  printf '2026-09-14T23:19:08.0000000Z %s\n' "$SPEC_PDP_TYPES"
+  printf '2026-09-14T23:19:08.1000000Z in-scope count: 68\n'
+  printf '2026-09-14T23:19:08.2000000Z %s\n' "$SPEC_PDP_FAIL"
+  printf '2026-09-14T23:19:08.3000000Z %s\n' "$SPEC_PDP_HINT"
+  printf '2026-09-14T23:19:09.0000000Z %s\n' "$SPEC_ANCH_DUP"
+  printf "2026-09-14T23:19:10.0000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc byte budgets (fails this job)\n"
+  printf "2026-09-14T23:19:10.1000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': PortableDoc render-parity completeness (fails this job)\n"
+  printf "2026-09-14T23:19:10.2000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc anchors + headers (fails this job)\n"
+} > "$mix_main"
+mix_run() { # $1 = subject override is taken from $SUBJECT, as everywhere else here
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$mix_out" STEP_NAMES="$mix_names" \
+      JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE=doc-gates.yml \
+      GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_FIXTURE="$mix_jobs" \
+      MAIN_RED_BREAKER_LOG_FIXTURE="$mix_main" BREAKER_ERROR_LOG="$mix_ours"
+    bash "$SUBJECT" 2>&1; echo "RC=$?" )
+}
+# PRECONDITION. An arm that measured a fixture missing one of its three blocks
+# would print a verdict about a comparison it never made. Assert the setup, not
+# its exit code.
+mix_blocks="$(grep -c 'breaker-block.begin' "$mix_ours")"
+if [ "$mix_blocks" = "3" ] \
+   && grep -qF "$SPEC_BUDGET" "$mix_ours" \
+   && grep -qF "$SPEC_PDP_FAIL" "$mix_ours" \
+   && grep -qF "$SPEC_ANCH_DUP" "$mix_ours"; then
+  ok "26h) PRECONDITION: the mixed fixture carries all THREE blocks (constant + pd-parity + bare-slug), so one run measures both halves"
+else
+  bad "26h) PRECONDITION FAILED: mixed fixture has $mix_blocks block(s) / a specimen line is missing — 26h/26i would prove nothing"
+fi
+mix_o="$(mix_run)"
+# 26h. THE NAMED-FINDING HALF. Neither bare-identifier red may be called opaque.
+case "$mix_o" in *"no golden fixture for in-scope type(s)"*)
+  bad "26h) pd-parity's red was quoted as a red that NAMES NOTHING — the bare-identifier class still reads opaque" ;;
+  *) ok "26h) pd-parity's bare-identifier red is NOT classified opaque (its FAIL line is not in the refusal's quoted set)" ;; esac
+case "$mix_o" in *"capability:field-encryption"*)
+  bad "26h) the duplicated-@canonical red was quoted as naming nothing — a second real bare-identifier gate still reads opaque" ;;
+  *) ok "26h) the duplicated-@canonical red (bare capability slug) is NOT classified opaque" ;; esac
+# 26i. THE CONSTANT HALF, SAME RUN, SAME CLASSIFIER. The doc-budget sentence must
+#      STILL refuse, or the remedy deleted the test it was built from.
+has "$mix_o" "CANNOT READ the finding set: 1 of the failing step(s)" "26i) exactly ONE of the three blocks reads opaque — the constant sentence, and only it"
+has "$mix_o" "$SPEC_BUDGET" "26i) and the refusal quotes that constant sentence verbatim"
+has "$mix_o" "OWNERSHIP-UNDETERMINED" "26i) still the undetermined verdict"
+has "$mix_o" "RC=1" "26i) rc 1"
+case "$mix_o" in *INHERITED-FROM-MAIN*) bad "26i) THE TEST WAS DELETED: the constant sentence now reads as a named finding and the red inherited" ;;
+  *) ok "26i) the constant sentence was not rescued along with the bare identifiers" ;; esac
+# 26i2. THE ACTION LINE STOPS MISDIRECTING. It may no longer open by telling the
+#       author to make the step print what it found.
+case "$mix_o" in *"ACTION: make the step print what it found"*)
+  bad "26i2) the ACTION line still opens by telling the author to print what the step already printed" ;;
+  *) ok "26i2) the ACTION line no longer opens with 'make the step print what it found'" ;; esac
+has "$mix_o" "READ THAT BLOCK FIRST" "26i2) it tells the reader to read the captured block first"
+has "$mix_o" "the defect is HERE, in this classifier" "26i2) and it names the third possibility: the step DID name its findings and this file cannot see it"
+has "$mix_o" "main-red-breaker.test.sh" "26i2) and points at the file where a new specimen and arm go — in the warning itself, not a doc to go open"
+
+# 26j. MUTATION — make the classifier ACCEPT EVERYTHING (the constant included).
+#      26i must RED; 26h must stay GREEN. That direction is the "deleted the
+#      test" failure, and it is the one a widened regex would have produced.
+if mutate "26j accept-everything" 'if LOC.search(l) or WELD.search(l):' 'if True:' 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(mix_run)"; rc=0
+    case "$out" in *"CANNOT READ the finding set"*) echo "  FAIL  26j) MUTATION SURVIVED: the constant still refused with the classifier accepting everything"; rc=1 ;;
+                   *) echo "  PASS  26j) accepting everything stops the constant from refusing — 26i is not vacuous" ;; esac
+    case "$out" in *"no golden fixture for in-scope type(s)"*) echo "  FAIL  26j) it also changed 26h's subject, so the two arms are not independent"; rc=1 ;;
+                   *) echo "  PASS  26j) and 26h's half is UNCHANGED by it — the arms measure different halves" ;; esac
+    exit $rc ) && PASS=$((PASS+2)) || FAIL=$((FAIL+1))
+fi
+# 26k. MUTATION — neutralise the WELD slot only. The bare-slug specimen must RED;
+#      pd-parity (carried by the ITEM-SET slot) and the constant must not move.
+if mutate "26k weld slot" "WELD = re.compile(r'\\b[A-Za-z][A-Za-z0-9_-]*:[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)+\\b')" "WELD = re.compile(r'(?!x)x')" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(mix_run)"; rc=0
+    case "$out" in *"capability:field-encryption"*) echo "  PASS  26k) without the WELD slot the bare capability slug reads opaque again — that arm is load-bearing" ;;
+                   *) echo "  FAIL  26k) MUTATION SURVIVED: the bare slug still discriminated with WELD removed"; rc=1 ;; esac
+    case "$out" in *"no golden fixture for in-scope type(s)"*) echo "  FAIL  26k) it ALSO broke pd-parity, so WELD and ITEM-SET are not two different halves"; rc=1 ;;
+                   *) echo "  PASS  26k) and pd-parity is UNCHANGED — a DIFFERENT arm carries it" ;; esac
+    exit $rc ) && PASS=$((PASS+2)) || FAIL=$((FAIL+1))
+fi
+# 26l. MUTATION — neutralise the ITEM-SET corroboration only. The mirror of 26k:
+#      pd-parity must RED and the bare slug must not move.
+if mutate "26l item-set corroboration" 'if sets[i] & sets[j]:' 'if False:' 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(mix_run)"; rc=0
+    case "$out" in *"no golden fixture for in-scope type(s)"*) echo "  PASS  26l) without the corroborated ITEM-SET slot pd-parity reads opaque again — that arm is load-bearing" ;;
+                   *) echo "  FAIL  26l) MUTATION SURVIVED: pd-parity still discriminated with the ITEM-SET slot removed"; rc=1 ;; esac
+    case "$out" in *"capability:field-encryption"*) echo "  FAIL  26l) it ALSO broke the bare slug, so the asymmetry against 26k is not real"; rc=1 ;;
+                   *) echo "  PASS  26l) and the bare capability slug is UNCHANGED — the asymmetry against 26k holds" ;; esac
+    exit $rc ) && PASS=$((PASS+2)) || FAIL=$((FAIL+1))
+fi
+
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]

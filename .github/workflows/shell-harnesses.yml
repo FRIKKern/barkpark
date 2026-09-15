@@ -283,6 +283,16 @@ on:
       - "scripts/main-workflow-rollup.sh"
       - "scripts/main-workflow-rollup.test.sh"
       - ".github/required-checks.json"
+      # SCHEDULED ARM HEALTH (task-2c762aa7dfca5bd8). The never-succeeded /
+      # staleness reader over every cron'd workflow in the tree, taken with
+      # `event=schedule` — the split that stops a push-green arm from vouching
+      # for a scheduled arm that has never once worked. The workflow file is an
+      # INPUT, not the harness: it is the subject that carried 47 consecutive
+      # scheduled failures, and an edit to its cron or its job conditions must be
+      # able to re-run this pair.
+      - "scripts/scheduled-arm-health.sh"
+      - "scripts/scheduled-arm-health.test.sh"
+      - ".github/workflows/studio-journey-smoke.yml"
       # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
       # trees out of the Elixir census that greps the Go package AND out of the
       # package itself, then mutate both. Same rule as seal-run.test.sh above —
@@ -305,6 +315,8 @@ on:
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
+      - "scripts/paper_structure.py"
+      - "scripts/paper_structure_test.py"
       - "tooling/gate-map/gate-map.mjs"
       - "tooling/gate-map/gate-map.test.mjs"
       - "bin/barkpark"
@@ -793,6 +805,16 @@ on:
       - "scripts/main-workflow-rollup.sh"
       - "scripts/main-workflow-rollup.test.sh"
       - ".github/required-checks.json"
+      # SCHEDULED ARM HEALTH (task-2c762aa7dfca5bd8). The never-succeeded /
+      # staleness reader over every cron'd workflow in the tree, taken with
+      # `event=schedule` — the split that stops a push-green arm from vouching
+      # for a scheduled arm that has never once worked. The workflow file is an
+      # INPUT, not the harness: it is the subject that carried 47 consecutive
+      # scheduled failures, and an edit to its cron or its job conditions must be
+      # able to re-run this pair.
+      - "scripts/scheduled-arm-health.sh"
+      - "scripts/scheduled-arm-health.test.sh"
+      - ".github/workflows/studio-journey-smoke.yml"
       # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
       # trees out of the Elixir census that greps the Go package AND out of the
       # package itself, then mutate both. Same rule as seal-run.test.sh above —
@@ -815,6 +837,8 @@ on:
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
+      - "scripts/paper_structure.py"
+      - "scripts/paper_structure_test.py"
       - "tooling/gate-map/gate-map.mjs"
       - "tooling/gate-map/gate-map.test.mjs"
       - "bin/barkpark"
@@ -1214,6 +1238,7 @@ jobs:
       sunset-route-consumers: ${{ steps.sets.outputs.sunset-route-consumers }}
       mix-test-strict: ${{ steps.sets.outputs.mix-test-strict }}
       main-workflow-rollup: ${{ steps.sets.outputs.main-workflow-rollup }}
+      scheduled-arm-health: ${{ steps.sets.outputs.scheduled-arm-health }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
       scratchpad-reaper: ${{ steps.sets.outputs.scratchpad-reaper }}
     steps:
@@ -1339,6 +1364,8 @@ jobs:
           tooling-harnesses tooling/fleet/fleet-run-verdict-test.sh
           tooling-harnesses scripts/audit-paper-readers.sh
           tooling-harnesses scripts/audit-paper-readers-test.sh
+          tooling-harnesses scripts/paper_structure.py
+          tooling-harnesses scripts/paper_structure_test.py
           tooling-harnesses tooling/gate-map/gate-map.mjs
           tooling-harnesses tooling/gate-map/gate-map.test.mjs
           tooling-harnesses scripts/relandcheck-diff-producer.test.sh
@@ -1467,6 +1494,9 @@ jobs:
           main-workflow-rollup scripts/main-workflow-rollup.sh
           main-workflow-rollup scripts/main-workflow-rollup.test.sh
           main-workflow-rollup .github/required-checks.json
+          scheduled-arm-health scripts/scheduled-arm-health.sh
+          scheduled-arm-health scripts/scheduled-arm-health.test.sh
+          scheduled-arm-health .github/workflows/studio-journey-smoke.yml
           landed-mark scripts/lib/bp-curl.sh
           task-lease-renew scripts/lib/bp-curl.sh
           deploy-receipt-honesty scripts/deploy-receipt-failure.test.sh
@@ -2497,6 +2527,28 @@ jobs:
         # miss — executed nowhere.
         run: bash scripts/audit-paper-readers-test.sh
 
+      - name: paper_structure.py audit unit suite
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # paper-readers.yml (cron "17 5 * * *") folds this module's summary
+        # STRAIGHT into the nightly ok expression — `$structure | length == 1
+        # and .[0].violations == 0` in audit-paper-readers.sh — so a regression
+        # in paper_structure.py either reds the nightly or passes it wrongly.
+        # Its unit suite shipped next to it and ran NOWHERE: shell-harnesses.yml
+        # referenced scripts/paper_structure_test.py zero times.
+        #
+        # Invoked BY PATH, not as a module, and that is what makes the
+        # `from paper_structure import audit_documents, ...` at the top of the
+        # suite resolve: python3 puts the SCRIPT'S OWN directory at sys.path[0],
+        # so scripts/ is already on the path and no PYTHONPATH is needed. (An
+        # earlier draft of this step set PYTHONPATH=scripts and claimed it was
+        # load-bearing; a control run without it passed 19/19, so the setting
+        # was inert and the claim false. Measured 2026-09-14.)
+        #
+        # No pipe and no `|| true`: unittest's non-zero exit IS this step's
+        # exit status. A `| tee` here would report tee's status and green a
+        # failing suite.
+        run: python3 scripts/paper_structure_test.py -v
+
   launcher-boot-selftest:
     needs: [changes]
     if: needs.changes.outputs.launcher-boot-selftest == 'true'
@@ -3245,6 +3297,33 @@ jobs:
       - name: no declared path alternative is dead
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/workflow-trigger-coverage.sh
+
+  # SCHEDULED ARM HEALTH (task-2c762aa7dfca5bd8). A cron'd job that gates
+  # nothing still has to be READ: studio-journey-smoke failed 47 of 47 scheduled
+  # runs over six weeks and cost nobody a second, while the same workflow's
+  # all-events count read success=51 and looked healthy. The harness below is
+  # hermetic — scratch trees, fixture payloads, a pinned --now, no network — and
+  # every case is a PAIR, so the reader is shown losing and winning on inputs
+  # that differ in one field. The LIVE both-directions proof against real named
+  # workflows is not run here on purpose: a green that depends on GitHub's run
+  # history rots the moment that history moves.
+  scheduled-arm-health:
+    needs: [changes]
+    if: needs.changes.outputs.scheduled-arm-health == 'true'
+    name: a cron that has never succeeded is visible
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: subject syntax check
+        run: bash -n scripts/scheduled-arm-health.sh
+      - name: harness syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/scheduled-arm-health.test.sh
+      - name: prove the reader can lose (hermetic, fixture payloads)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/scheduled-arm-health.test.sh
 
   undispatched-target:
     needs: [changes]

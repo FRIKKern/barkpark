@@ -181,6 +181,24 @@ defmodule Barkpark.Tasks.Internal do
   # fails (nil ≠ worker_id): there is no lease to act on. Extracted from
   # `Tasks.Release` (D7, expressive-agent-loops) so every new holder-only verb
   # reuses one definition instead of growing its own subtly-different copy.
+  #
+  # THE HOLDER KEY IS `claim.worker`, AND `claim.worker_id` DOES NOT EXIST
+  # (task-371c506d42be02cd). `worker_id` is the REQUEST parameter name — the
+  # JSON body key of claim/pulse/release/stamp/close, and the argument name
+  # below — never a key of the STORED claim map. The authority is the writer:
+  # `Tasks.Claim` builds `new_claim` with `"worker" => worker_id`, so the value
+  # goes in under `worker_id` and comes back out under `worker`.
+  #
+  # This matters because a reader that probes the readback for `worker_id` gets
+  # nil on EVERY row (measured 2026-09-14: 199 claim objects across 1133 live
+  # rows, 199 carry `worker`, 0 carry `worker_id`), and a field that is nil
+  # everywhere discriminates nothing — a lapse check keyed on it takes the
+  # "unheld" branch unconditionally and re-claims under the live holder, whose
+  # close is a CAS on (worker, epoch). The discriminator for "is this row held"
+  # is the PRESENCE OF THE CLAIM MAP (nil when unclaimed), not a key inside it.
+  #
+  # `claim_holder_key_test.exs` reds if this gate and the stored readback ever
+  # name different keys.
   def check_holder(%Document{content: content}, worker_id) do
     case get_in(content, ["claim", "worker"]) do
       ^worker_id -> :ok

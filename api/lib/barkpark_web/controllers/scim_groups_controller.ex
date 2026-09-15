@@ -29,6 +29,14 @@ defmodule BarkparkWeb.ScimGroupsController do
   def create(conn, params) do
     org = conn.assigns.scim_org
 
+    with :ok <- member_total_within_bound(params["members"]) do
+      do_create(conn, org, params)
+    else
+      {:error, scim_type, detail} -> ScimResponse.error(conn, 400, detail, scim_type)
+    end
+  end
+
+  defp do_create(conn, org, params) do
     case Scim.create_group(org, params) do
       {:ok, group} ->
         case apply_members(org, group, member_ids(params["members"])) do
@@ -120,7 +128,8 @@ defmodule BarkparkWeb.ScimGroupsController do
 
     # Body shape is judged BEFORE the group is read or written, so a refused
     # PATCH leaves no partial write behind.
-    with {:ok, patch} <- ScimPatch.classify(params) do
+    with {:ok, patch} <- ScimPatch.classify(params),
+         :ok <- ScimPatch.check_member_total(patch_member_total(patch)) do
       case Scim.get_org_group(org, id) do
         nil ->
           ScimResponse.error(conn, 404, "group not found in this organization")
@@ -254,6 +263,14 @@ defmodule BarkparkWeb.ScimGroupsController do
   def replace(conn, %{"id" => id} = params) do
     org = conn.assigns.scim_org
 
+    with :ok <- member_total_within_bound(params["members"]) do
+      do_replace(conn, org, id, params)
+    else
+      {:error, scim_type, detail} -> ScimResponse.error(conn, 400, detail, scim_type)
+    end
+  end
+
+  defp do_replace(conn, org, id, params) do
     case Scim.get_org_group(org, id) do
       nil ->
         ScimResponse.error(conn, 404, "group not found in this organization")
@@ -338,6 +355,38 @@ defmodule BarkparkWeb.ScimGroupsController do
       "the mapped role is not a valid role for this organization's workspaces; no memberships were changed",
       "invalidValue"
     )
+  end
+
+  # The `members` ceiling, applied to whatever a request actually walks.
+  #
+  # POST and PUT carry ONE top-level array; a PATCH can carry the same ids in
+  # two places at once — a path-less whole-resource replace's `members`, and any
+  # number of path-keyed member operations — and every one of them reaches
+  # `member_ids/1` and then one `Scim.add_group_member/3` per id. So the PATCH
+  # bound is on the SUM: a per-operation bound is defeated by splitting one
+  # over-long list across two operations, which buys the caller the entire cost
+  # the bound exists to refuse.
+  defp member_total_within_bound(members),
+    do: ScimPatch.check_member_total(ScimPatch.member_count(members))
+
+  # Only operations the member reader will actually walk are counted, so the
+  # number in the refusal is the number of member resolutions the request asked
+  # for — `member_ops/1` keeps exactly the `path == "members"` operations, and
+  # this mirrors that filter rather than restating a looser one.
+  defp patch_member_total(patch) do
+    whole =
+      case patch.whole_resource do
+        %{} = attrs -> ScimPatch.member_count(Map.get(attrs, "members"))
+        _ -> 0
+      end
+
+    Enum.reduce(patch.ops, whole, fn op, n ->
+      if is_map(op) and String.downcase(to_string(op["path"] || "")) == "members" do
+        n + ScimPatch.member_count(op["value"])
+      else
+        n
+      end
+    end)
   end
 
   defp member_ids(nil), do: []
