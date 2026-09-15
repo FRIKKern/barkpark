@@ -1,6 +1,9 @@
 package pdrender
 
 import (
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -194,5 +197,367 @@ func TestCardRendersNormally(t *testing.T) {
 	}
 	if !strings.Contains(flat, "The Title") {
 		t.Errorf("card flat-degrade should keep slot content, got:\n%s", flat)
+	}
+}
+
+// The three carrier shapes from the private browser proof, with opaque vendor
+// data retained to guard against render-time normalization of authored source.
+func noteReaderCarrierFixtures(t *testing.T) []Block {
+	t.Helper()
+	blocks, err := Decode([]byte(`
+[
+	{
+		"id": "note-chain-shadow",
+		"lead": null,
+		"text": 47,
+		"type": "note",
+		"label": "Divergent flat label: never overwrite",
+		"slots": {
+			"body": [
+				{
+					"id": "note-chain-shadow-body",
+					"type": "paragraph",
+					"vendor": {
+						"paragraph": [
+							"keep",
+							2
+						]
+					},
+					"content": [
+						{
+							"type": "strong",
+							"vendor": {
+								"wrapper": {
+									"keep": true
+								}
+							},
+							"children": [
+								{
+									"type": "code",
+									"value": "Shadow carrier body edited.",
+									"vendor": {
+										"leaf": [
+											1,
+											{
+												"keep": "exact"
+											}
+										]
+									}
+								}
+							]
+						}
+					]
+				}
+			],
+			"lead": [
+				{
+					"id": "note-chain-shadow-lead",
+					"type": "paragraph",
+					"vendor": {
+						"paragraph": [
+							"keep",
+							2
+						]
+					},
+					"content": [
+						{
+							"type": "strong",
+							"vendor": {
+								"wrapper": {
+									"keep": true
+								}
+							},
+							"children": [
+								{
+									"type": "code",
+									"value": "Chain lead",
+									"vendor": {
+										"leaf": [
+											1,
+											{
+												"keep": "exact"
+											}
+										]
+									}
+								}
+							]
+						}
+					]
+				}
+			],
+			"label": [
+				{
+					"id": "note-chain-shadow-label",
+					"type": "paragraph",
+					"vendor": {
+						"paragraph": [
+							"keep",
+							2
+						]
+					},
+					"content": [
+						{
+							"type": "strong",
+							"vendor": {
+								"wrapper": {
+									"keep": true
+								}
+							},
+							"children": [
+								{
+									"type": "code",
+									"value": "Shadow carrier label edited",
+									"vendor": {
+										"leaf": [
+											1,
+											{
+												"keep": "exact"
+											}
+										]
+									}
+								}
+							]
+						}
+					]
+				}
+			],
+			"vendor-extra": {
+				"opaque": {
+					"keep": [
+						1,
+						2,
+						{
+							"untouched": true
+						}
+					]
+				}
+			}
+		},
+		"vendor": {
+			"note": [
+				"keep",
+				{
+					"version": 1
+				}
+			]
+		}
+	},
+	{
+		"id": "note-content-body",
+		"text": "",
+		"type": "note",
+		"label": "Content",
+		"vendor": {
+			"keep": "content-only-edit"
+		},
+		"content": [
+			{
+				"type": "em",
+				"vendor": {
+					"wrapper": "preserve"
+				},
+				"children": [
+					{
+						"type": "text",
+						"value": "Direct content carrier edited.",
+						"vendor": {
+							"leaf": "preserve"
+						}
+					}
+				]
+			}
+		]
+	},
+	{
+		"id": "note-unsafe-multirun",
+		"type": "note",
+		"label": "Read only",
+		"slots": {
+			"body": [
+				{
+					"id": "note-unsafe-body",
+					"type": "paragraph",
+					"vendor": {
+						"paragraph": "retain"
+					},
+					"content": [
+						{
+							"type": "text",
+							"value": "First authored run. ",
+							"vendor": {
+								"run": 1
+							}
+						},
+						{
+							"type": "code",
+							"value": "Second authored run stays separate.",
+							"vendor": {
+								"run": 2
+							}
+						}
+					]
+				}
+			],
+			"vendor-extra": {
+				"opaque": [
+					"keep"
+				]
+			}
+		},
+		"vendor": {
+			"keep": "no-writable-note-controls"
+		}
+	}
+]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return blocks
+}
+
+func TestNoteReaderBrowserCarriers(t *testing.T) {
+	expected := []map[string]any{
+		{"label": "Shadow carrier label edited", "lead": "Chain lead", "text": "Shadow carrier body edited."},
+		{"label": "Content", "text": "Direct content carrier edited."},
+		{"label": "Read only", "text": "First authored run. Second authored run stays separate."},
+	}
+	blocks := noteReaderCarrierFixtures(t)
+	if len(blocks) != len(expected) {
+		t.Fatalf("got %d fixtures", len(blocks))
+	}
+	for i, block := range blocks {
+		t.Run(block.ID, func(t *testing.T) {
+			assertNoteReaderMatchesFlat(t, block, expected[i])
+			assertStripComplete(t, block.ID, func(width int, profile Profile) string {
+				return strings.Join(testRegistry().Render(block, RenderCtx{Width: width, Theme: DarkTheme(), Profile: profile}), "\n")
+			})
+		})
+	}
+}
+
+func assertNoteReaderMatchesFlat(t *testing.T, block Block, flat map[string]any) {
+	t.Helper()
+	before, err := json.Marshal(block.Attrs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := testRegistry()
+	for _, width := range []int{1, 10, 20, 40, 80, 120} {
+		ctx := RenderCtx{Width: width, Theme: DarkTheme(), Profile: NoColor}
+		got := reg.Render(block, ctx)
+		want := reg.Render(Block{Type: "note", Attrs: flat}, ctx)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("width %d: got %q; want %q", width, got, want)
+		}
+		for _, line := range got {
+			if ansi.StringWidth(line) > width {
+				t.Errorf("width %d overflow: %q", width, line)
+			}
+		}
+	}
+	after, err := json.Marshal(block.Attrs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("reader mutated source carriers or metadata")
+	}
+}
+
+func TestNoteReaderSlotSemantics(t *testing.T) {
+	paragraph := func(content any) any { return map[string]any{"type": "paragraph", "content": content} }
+	cases := []struct {
+		name string
+		slot any
+		want string
+	}{
+		{"null slot", nil, "shadow"},
+		{"nonlist", "bad", "shadow"},
+		{"empty list", []any{}, "shadow"},
+		{"null first", []any{nil, paragraph("ignored")}, "shadow"},
+		{"scalar first", []any{"bad", paragraph("ignored")}, "shadow"},
+		{"empty map", []any{map[string]any{}}, ""},
+		{"empty paragraph", []any{paragraph([]any{})}, ""},
+		{"bad content", []any{paragraph(47)}, ""},
+		{"first paragraph only", []any{paragraph("primary"), paragraph("ignored")}, "primary"},
+		{"whitespace primary", []any{paragraph("   ")}, "   "},
+	}
+	for _, field := range []string{"label", "lead", "body"} {
+		flatKey := field
+		if field == "body" {
+			flatKey = "text"
+		}
+		for _, tc := range cases {
+			t.Run(field+"/"+tc.name, func(t *testing.T) {
+				attrs := map[string]any{flatKey: "shadow", "slots": map[string]any{field: tc.slot}, "content": []any{"fallback"}}
+				want := tc.want
+				if field == "body" && want == "" {
+					want = "fallback"
+				}
+				expected := map[string]any{flatKey: want}
+				if field != "body" {
+					expected["text"] = "fallback"
+				}
+				assertNoteReaderMatchesFlat(t, Block{Type: "note", Attrs: attrs}, expected)
+			})
+		}
+	}
+	for _, slots := range []any{nil, "bad", []any{}, map[string]any{}} {
+		t.Run(fmt.Sprintf("slots/%v", slots), func(t *testing.T) {
+			attrs := map[string]any{"slots": slots, "label": "label", "lead": "lead", "text": "body", "content": []any{"ignored"}}
+			assertNoteReaderMatchesFlat(t, Block{Type: "note", Attrs: attrs}, map[string]any{"label": "label", "lead": "lead", "text": "body"})
+		})
+	}
+	for _, content := range []any{nil, "stranded scalar", 47, []any{}, map[string]any{"value": "stranded"}, []any{"body"}} {
+		t.Run(fmt.Sprintf("content/%v", content), func(t *testing.T) {
+			want := ""
+			if list, ok := content.([]any); ok && len(list) > 0 {
+				want = "body"
+			}
+			assertNoteReaderMatchesFlat(t, Block{Type: "note", Attrs: map[string]any{"content": content}}, map[string]any{"text": want})
+		})
+	}
+}
+
+// Integral float64 is the existing Go decoded-number convention, not full
+// Elixir numeric parity: Decode erases lexical 47 versus 47.0 before rendering.
+func TestNoteReaderScalarsAndInlineNodes(t *testing.T) {
+	for _, tc := range []struct {
+		value any
+		want  string
+	}{
+		{nil, ""}, {true, ""}, {false, ""}, {47, "47"}, {int64(-47), "-47"},
+		{float64(47), "47"}, {47.5, ""}, {"text", "text"}, {[]any{"bad"}, ""}, {map[string]any{"bad": true}, ""},
+	} {
+		t.Run(fmt.Sprintf("%T/%v", tc.value, tc.value), func(t *testing.T) {
+			assertNoteReaderMatchesFlat(t, Block{Type: "note", Attrs: map[string]any{"label": tc.value, "lead": tc.value, "text": tc.value}}, map[string]any{"label": tc.want, "lead": tc.want, "text": tc.want})
+			inline := []any{map[string]any{"type": "text", "value": tc.value, "children": []any{"ignored"}}, map[string]any{"type": "code", "value": tc.value}}
+			attrs := map[string]any{"slots": map[string]any{"body": []any{map[string]any{"content": inline}}}}
+			assertNoteReaderMatchesFlat(t, Block{Type: "note", Attrs: attrs}, map[string]any{"text": tc.want + tc.want})
+		})
+	}
+	attrs := map[string]any{"content": []any{"bare ", map[string]any{"type": "strong", "children": []any{map[string]any{"type": "link", "children": []any{map[string]any{"type": "code", "value": "nested"}}}}}, nil, 47, []any{"ignored"}, map[string]any{"children": "ignored"}, map[string]any{"type": "text", "value": true, "children": []any{"ignored"}}}}
+	assertNoteReaderMatchesFlat(t, Block{Type: "note", Attrs: attrs}, map[string]any{"text": "bare nested"})
+}
+
+func TestNoteReaderSanitizesSlotAndContentCarriers(t *testing.T) {
+	hostile := "safe\x1b[31m red\x1b[0m\x1b]52;c;YXR0YWNr\a\r\x00\u009b31m end"
+	safe := sanitizeText(hostile)
+	for _, carrier := range []string{"slots", "content"} {
+		t.Run(carrier, func(t *testing.T) {
+			attrs := map[string]any{"content": []any{hostile}}
+			expected := map[string]any{"text": safe}
+			if carrier == "slots" {
+				slots := map[string]any{}
+				for _, field := range []string{"label", "lead", "body"} {
+					slots[field] = []any{map[string]any{"content": []any{map[string]any{"type": "strong", "children": []any{map[string]any{"type": "text", "value": hostile}}}}}}
+				}
+				attrs = map[string]any{"slots": slots}
+				expected["label"] = safe
+				expected["lead"] = safe
+			}
+			assertNoteReaderMatchesFlat(t, Block{Type: "note", Attrs: attrs}, expected)
+		})
 	}
 }
