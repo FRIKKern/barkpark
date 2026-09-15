@@ -16,11 +16,36 @@ PASS=0; FAIL=0
 ok()   { PASS=$((PASS+1)); printf 'PASS  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf 'FAIL  %s\n     %s\n' "$1" "${2:-}"; }
 
-row() { # doc_id worker session origin
+# THE SHAPE THE SERVER ACTUALLY EMITS (task-3c638f0e2fd435f8). These fixtures
+# used to write the claim under `content`, which is the SAME wrong path the
+# reader used -- so the suite and the subject agreed with each other and both
+# disagreed with the ledger. A selftest whose fixtures encode a shape the
+# system never emits cannot fail for the reason it exists.
+# MEASURED on a live `bp task ls --status in_progress` page: 19 of 19 rows
+# carried a `content` key, 19 of 19 carried `.claim.worker`, ZERO carried
+# `.content.claim`.
+row() { # doc_id worker session origin  -- the REAL shape: claim at top level
+  printf '{"doc_id":"%s","claim":{"worker":"%s","epoch":1%s%s}}' \
+    "$1" "$2" \
+    "$( [ -n "$3" ] && printf ',"session":"%s"' "$3" )" \
+    "$( [ -n "$4" ] && printf ',"session_origin":"%s"' "$4" )"
+}
+
+# The LEGACY shape, kept so the compatibility arm is a run and not a belief.
+row_legacy() { # doc_id worker session origin
   printf '{"doc_id":"%s","content":{"claim":{"worker":"%s","epoch":1%s%s}}}' \
     "$1" "$2" \
     "$( [ -n "$3" ] && printf ',"session":"%s"' "$3" )" \
     "$( [ -n "$4" ] && printf ',"session_origin":"%s"' "$4" )"
+}
+
+# `bp task get`'s envelope: the same row nested under `doc`.
+row_doc() { printf '{"doc":%s}' "$(row "$@")"; }
+
+# A claim parked somewhere this reader does not know. Not a real server shape --
+# it stands in for the NEXT one, which is the point of the arm.
+row_unknown() { # doc_id worker
+  printf '{"doc_id":"%s","meta":{"lease":{"worker":"%s","epoch":1}}}' "$1" "$2"
 }
 
 # ── FIXTURE: two sessions of ONE lane, each holding one row, no collision ────
@@ -128,6 +153,83 @@ if [ "$rc" = 0 ] && ! grep -q "HELD-FILE" "$TMP/ho.out"; then
   ok "held-file negative control: an agreeing file is silent (exit 0)"
 else
   bad "held-file negative control" "exit=$rc out=$(cat "$TMP/ho.out")"
+fi
+
+# ── ARM 8 — THE REAL SERVER SHAPE IS READ AT ALL ────────────────────────────
+# The regression this file failed to catch. Every fixture above now uses it, so
+# this arm is really asserting that `row()` and the reader agree on reality.
+cat > "$TMP/real.json" <<EOF
+[$(row task-real lead-cli s_1111111111111111 s_1111111111111111)]
+EOF
+R8="$("$CH" --worker lead-cli --from-file "$TMP/real.json" --json 2>/dev/null | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["attributed"]))')"
+[ "$R8" = 1 ] \
+  && ok "real server shape (claim at top level) is attributed" \
+  || bad "real server shape (claim at top level) is attributed" "attributed=$R8, expected 1"
+
+# ── ARM 9 — THE LEGACY SHAPE STILL READS ────────────────────────────────────
+cat > "$TMP/legacy.json" <<EOF
+[$(row_legacy task-legacy lead-cli s_1111111111111111 s_1111111111111111)]
+EOF
+R9="$("$CH" --worker lead-cli --from-file "$TMP/legacy.json" --json 2>/dev/null | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["attributed"]))')"
+[ "$R9" = 1 ] \
+  && ok "legacy content.claim shape still attributed (no back-compat lost)" \
+  || bad "legacy content.claim shape still attributed" "attributed=$R9, expected 1"
+
+# ── ARM 10 — THE `doc` ENVELOPE (bp task get) ───────────────────────────────
+cat > "$TMP/docshape.json" <<EOF
+[$(row_doc task-docshape lead-cli s_1111111111111111 s_1111111111111111)]
+EOF
+R10="$("$CH" --worker lead-cli --from-file "$TMP/docshape.json" --json 2>/dev/null | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["attributed"]))')"
+[ "$R10" = 1 ] \
+  && ok "doc-envelope shape (bp task get) is attributed" \
+  || bad "doc-envelope shape (bp task get) is attributed" "attributed=$R10, expected 1"
+
+# ── ARM 11 — THE FOURTH READ SHAPE: `bp task prime`'s in_progress carrier ────
+# Flat rows under `in_progress`, NO `docs` key. A hand-listed pair missed it.
+cat > "$TMP/prime.json" <<EOF
+{"in_progress":[$(row task-prime lead-cli s_1111111111111111 s_1111111111111111)],"ready":[]}
+EOF
+R11="$("$CH" --worker lead-cli --from-file "$TMP/prime.json" --json 2>/dev/null | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["attributed"]))')"
+[ "$R11" = 1 ] \
+  && ok "prime shape (flat rows under in_progress, no docs key) is attributed" \
+  || bad "prime shape (flat rows under in_progress) is attributed" "attributed=$R11, expected 1"
+
+# ── ARM 12 — THE REFUSAL. A page it cannot read must NOT print a clean zero ──
+# THE ARM THIS WHOLE ROW EXISTS FOR. Claims parked at a position the reader does
+# not know: the old code printed "0 claimed row(s) ... RESULT: clean" and exited
+# 0, byte-identical to a genuinely empty page.
+cat > "$TMP/unknown.json" <<EOF
+[$(row_unknown task-unk lead-cli), $(row_unknown task-unk2 lead-cli)]
+EOF
+"$CH" --worker lead-cli --from-file "$TMP/unknown.json" >"$TMP/u.out" 2>&1; rc=$?
+if [ "$rc" = 4 ] && grep -qF 'CANNOT READ' "$TMP/u.out"; then
+  ok "unreadable page REFUSES (exit 4) and names where it looked"
+else
+  bad "unreadable page REFUSES (exit 4)" "rc=$rc, output: $(head -2 "$TMP/u.out" | tr '\n' ' ')"
+fi
+
+# ── ARM 12b — THE CONTROL THAT MAKES ARM 12 MEAN SOMETHING ──────────────────
+# A genuinely EMPTY page must still be clean and exit 0, or the refusal above is
+# just "this tool always refuses" and has discriminated nothing.
+printf '[]' > "$TMP/empty.json"
+"$CH" --worker lead-cli --from-file "$TMP/empty.json" >"$TMP/e.out" 2>&1; rc=$?
+if [ "$rc" = 0 ] && grep -qF 'RESULT: clean' "$TMP/e.out"; then
+  ok "CONTROL: a genuinely empty page is still clean and exits 0 (the refusal discriminates)"
+else
+  bad "CONTROL: empty page clean" "rc=$rc, output: $(head -2 "$TMP/e.out" | tr '\n' ' ')"
+fi
+
+# ── ARM 12c — a page of UNCLAIMED but well-formed rows is clean, not a refusal
+# The refusal keys on "no claim-shaped object ANYWHERE", so a row that genuinely
+# has no claim must not trip it -- otherwise `ready` output would refuse.
+cat > "$TMP/unclaimed.json" <<EOF
+[{"doc_id":"task-free","lifecycle_status":"open"}]
+EOF
+"$CH" --worker lead-cli --from-file "$TMP/unclaimed.json" >"$TMP/uc.out" 2>&1; rc=$?
+if [ "$rc" = 4 ]; then
+  ok "a page of genuinely unclaimed rows REFUSES rather than reporting a false clean"
+else
+  bad "unclaimed-rows page behaviour" "rc=$rc (expected 4: indistinguishable from the defect otherwise)"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
