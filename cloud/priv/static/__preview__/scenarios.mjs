@@ -867,10 +867,15 @@ export const CRUEL_SITE_STRINGS = {
 };
 export const CRUEL_SITE_ROW_ID = "5b2c1e00-0000-4000-8000-0000000000c9";
 export const ONE_LABEL_HOST_ROW_ID = "5b2c1e00-0000-4000-8000-0000000000ca";
+// cch-w16-bl-no-preview-plus-production-console-fixture — THE ROW THE LIST PILL
+// AND THE DETAIL LADDER ARE COMPARED ON. Exported so overflow-guard's leg
+// DERIVES the id it drives instead of transcribing a uuid that can drift (the
+// W14 precedent: a transcribed id renders #overview and prints a phantom table).
+export const FRESHNESS_LADDER_SITE_ID = "5b2c1e00-0000-4000-8000-0000000000c3";
 
 const sitesListRows = [
   site({
-    id: "5b2c1e00-0000-4000-8000-0000000000c3",
+    id: FRESHNESS_LADDER_SITE_ID,
     name: "acme-web", slug: "acme-web", domains: ["acme.com", "www.acme.com"],
     framework: "nextjs", github_repo: "acme/web", github_branch: "main",
     github_webhook_configured: true,
@@ -2555,6 +2560,111 @@ const previewCruelRow = deployment({
   updated_at: tMinus(3600),
 });
 const siteStatesPreviews = [previewCruelRow, previewLiveRow, previewFailedRow];
+
+// ── cch-w16-bl-no-preview-plus-production-console-fixture ────────────────────
+// THE ADVERSARIAL SHAPE #8659 PINNED IN ExUnit, AND THE ONE NO CONSOLE FIXTURE
+// COULD CARRY: a site with a LIVE PRODUCTION deployment and a NEWER CANCELLED
+// PREVIEW. The list embed `last_deployment` is production-only, so the row's
+// freshness pill must read "Live" even though the site's newest deployment row
+// of ANY environment is a cancelled preview 300s old.
+//
+// WHY THE ROW THIS CLOSES EXISTS. The `sites` scenario carried NO per-site
+// deployments payload at all, so every detail ladder driven on it rendered
+// EMPTY (`ladder[0] = null`, `previews = []`) and a list-vs-ladder comparison
+// printed "0 sites disagree" while being STRUCTURALLY unable to disagree. An
+// equality assertion over two empty strings passes and measures nothing; the
+// non-emptiness of the ladder is the half that makes the rest mean anything,
+// which is why the leg that reads these rows asserts it first and refuses.
+//
+// THE LEDGER IS UNSPLIT ON PURPOSE. Every fixture before this line pre-split
+// production from preview BY HAND (`deployments:` vs `previews:`), which means
+// the two halves never met in one array and the production filter was a
+// property of how somebody TYPED the fixture rather than a line of code. The
+// server keeps ONE deployments table and splits it by `environment`
+// — `list_deployments/3`'s `filter_environment/2` clause, which the
+// /v1/sites/:id/deployments handler calls with `environment: "production"`
+// while the previews handler takes the preview side. Re-derive by symbol:
+//   grep -n 'def list_deployments\|defp filter_environment' cloud/lib/barkpark_cloud/registry.ex
+//   grep -n 'get "/v1/sites/:id/deployments"' -A 12 cloud/lib/barkpark_cloud/web/router.ex
+// `siteLedgerBySite` carries the ledger UNSPLIT and the route seam below
+// applies the filter, so defeating that filter is a one-line mutation a proof
+// can actually make — and does.
+//
+// EVERY STAMP AGREES WITH THE LIST EMBED BY CONSTRUCTION: the acme-web row's
+// `lastDeploy("live", "content-auto", 900)` is updated_at T-900 / inserted_at
+// T-1020, and the live production row below carries exactly those two stamps,
+// because on the server they are THE SAME ROW read through two serializers.
+const freshnessLadderLive = deployment({
+  id: depOf(3),
+  site_id: FRESHNESS_LADDER_SITE_ID,
+  status: "live",
+  environment: "production",
+  trigger: "content-auto",
+  branch: "main",
+  git_ref: "7d41ba06c58e9f2a3b4c5d6e7f8091a2b3c4d5e6",
+  artifact_url: "file:///var/lib/barkpark/artifacts/acme-web-7d41ba0.tar.gz",
+  became_live_at: tMinus(900),
+  inserted_at: tMinus(1020),
+  updated_at: tMinus(900),
+});
+// The last good build before it — the row "Roll back to this" is offered on, so
+// the ladder is PLURAL and a head-of-list read is a real choice rather than the
+// only row present.
+const freshnessLadderPrior = deployment({
+  id: depOf(2),
+  site_id: FRESHNESS_LADDER_SITE_ID,
+  status: "live",
+  environment: "production",
+  trigger: "manual",
+  branch: "main",
+  git_ref: "1c0d9e8f7a6b5c4d3e2f10293847566a7b8c9d0e",
+  artifact_url: "file:///var/lib/barkpark/artifacts/acme-web-1c0d9e8.tar.gz",
+  became_live_at: tMinus(90000),
+  inserted_at: tMinus(90400),
+  updated_at: tMinus(90000),
+});
+// THE NEWER CANCELLED PREVIEW. Newest row in the ledger by 600 seconds, and the
+// one that must NOT reach the list pill: a torn-down branch preview says
+// nothing about what production is serving. `cancelled` rather than `failed`
+// deliberately — `freshnessModel` spells a cancelled deploy "Cancelled" and
+// `cap(st)` spells the ladder pill "Cancelled", so the two surfaces would read
+// IDENTICALLY if the filter were defeated at only one of them. The disagreement
+// this fixture makes reachable is "Live" vs "Cancelled", which is legible.
+const freshnessLadderCancelledPreview = deployment({
+  id: depOf(6),
+  site_id: FRESHNESS_LADDER_SITE_ID,
+  status: "cancelled",
+  environment: "preview",
+  trigger: "manual",
+  branch: "draft/pricing-table",
+  git_ref: "5a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+  preview_host: previewHostFor("acme-web", "draft/pricing-table", "3f91ba"),
+  preview_url: "https://" + previewHostFor("acme-web", "draft/pricing-table", "3f91ba"),
+  inserted_at: tMinus(360),
+  updated_at: tMinus(300),
+});
+// Newest first — the order /v1/sites/:id/deployments answers in, kept here so
+// the partition below never has to sort and a mis-ordered fixture is visible in
+// the source rather than inferred from a screenshot.
+const freshnessLadderBySite = {
+  [FRESHNESS_LADDER_SITE_ID]: [
+    freshnessLadderCancelledPreview,
+    freshnessLadderLive,
+    freshnessLadderPrior,
+  ],
+};
+// THE PRODUCTION FILTER, AT THE CONSOLE LAYER. One predicate, two call sites,
+// so the rule is a thing that can be defeated by a mutation and re-asserted by
+// a run — not a property of how a fixture was typed.
+const isPreviewDeploy = (d) => !!d && d.environment === "preview";
+// The unsplit ledger for one site, or null when this scenario does not carry
+// one (which is every scenario written before this line — they keep the
+// pre-split `deployments` / `deploymentsBySite` / `previews` seams unchanged).
+function siteLedger(data, siteId) {
+  const all = data && data.siteLedgerBySite;
+  if (!all || !Object.prototype.hasOwnProperty.call(all, siteId)) return null;
+  return all[siteId] || [];
+}
 // The site domain-status envelope (DomainStatus.check(%Site{})): a CF-proxied
 // apex (points_here classified `proxied` — informational, GR27) and a www
 // whose TLS is still issuing, with the server-owned remediation verbatim.
@@ -3184,6 +3294,19 @@ if (/[^a-z0-9]/.test(cruelMemberLocal)) {
 const teamMembersCruel = teamMembers.concat([
   { user_id: "usr_sol", email: cruelMemberEmail, role: "member", joined_at: tMinus(3 * 86400) },
 ]);
+// cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority — THE
+// DIVERGENCE THE CORPUS COULD NOT REACH. Every other roster fixture agrees with
+// its own me() envelope, so the acting user's row role and their resolved
+// `team_authority.role` were always the same string and NOTHING could tell you
+// which of the two a given line of the row was painted from. Here they DISAGREE:
+// the roster row for the acting user says "member" while the envelope's
+// team_authority says "owner" — the shape a stale roster read, a role changed in
+// another tab, or a team switch mid-flight actually produces on the wire.
+// DERIVED from `teamMembers` by map, never retyped: the disagreement is the ONE
+// field that moves, and the emails/ids/joined_at that every other assertion
+// stands on cannot drift apart from their originals.
+const teamMembersSelfRoleDrift = teamMembers.map((mem) =>
+  mem.user_id === "usr_ada" ? Object.assign({}, mem, { role: "member" }) : mem);
 
 export const SCENARIOS = {
   loggedout: {
@@ -3471,6 +3594,14 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: sitesListRows,
       audit: [],
+      // cch-w16-bl-no-preview-plus-production-console-fixture: the acme-web
+      // row's own UNSPLIT deployment ledger — a live production deploy, its
+      // predecessor, and a CANCELLED PREVIEW 600 seconds NEWER than the live
+      // one. Until this key the scenario carried no per-site deployments
+      // payload at all, so its detail ladder rendered EMPTY and any
+      // list-vs-ladder comparison on it was vacuous by construction. The route
+      // seam partitions it by `environment`; see `freshnessLadderBySite`.
+      siteLedgerBySite: freshnessLadderBySite,
     },
   },
 
@@ -3532,6 +3663,41 @@ export const SCENARIOS = {
       // own default Activity fixture was structurally blind to its own Who axis
       // (the cold-boot latch bug lived here undetected for eleven waves).
       // ada is the me() user, so the axis reads Everyone / Just me / lin / rex.
+      members: teamMembers,
+    },
+  },
+
+  // cch-w36-bl: the SAME Activity screen entered by a plain MEMBER, whose
+  // GET /v1/audit is refused. /v1/audit is team-admin-only server-side
+  // (Auth.require_current_team_admin answers `required: "admin", scope: "team"`),
+  // and #activity is the ONE screen whose entire body is that endpoint — so a
+  // member reaching it renders loadActivity's refusal arm (grep app.js for
+  // `Couldn't load activity`), an `.empty-state` built by readFailureCopy. Until
+  // this fixture NO committed scenario could reach that arm at all: the corpus's
+  // only #activity scenario is an OWNER (`activity`, whose me() omits the role
+  // argument and so defaults to "owner"), and the corpus's only auditDenied
+  // fixture (`timeline-events-only`) sits on #instance/:id/timeline, where the
+  // 403 degrades to events-only instead of taking over the view.
+  //
+  // It is a BEFORE/AFTER pin by construction: every field below is `activity`'s
+  // verbatim, except the two that carry the exhibit — me()'s role argument and
+  // the auditDenied flag. A divergence in the rendered bytes is therefore
+  // attributable to the refusal and to nothing else.
+  "activity-denied": {
+    label: "Activity as a plain MEMBER — /v1/audit 403 takes over the whole screen",
+    authed: true,
+    deepLink: "#activity",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      // The trail is POPULATED on purpose. A member denied an EMPTY feed and a
+      // member denied a full one must render identically — the refusal is the
+      // endpoint's answer, never a row count — and an empty fixture here could
+      // pass by accident if the refusal arm ever fell through to the empty state.
+      audit: activityFeed,
+      auditDenied: true, // /v1/audit → 403 (team-admin-only)
       members: teamMembers,
     },
   },
@@ -3633,6 +3799,28 @@ export const SCENARIOS = {
       sites: [],
       audit: [],
       members: teamMembersPeerOwner,
+      invitations: teamInvites,
+    },
+  },
+  // cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority: the
+  // acting OWNER whose OWN roster row says "member". memberRowHtml already
+  // decides BOTH controls on the self row from ctx.role (the resolved
+  // team_authority) and not from the row — that is correct, because the server
+  // compares against the actor's real authority — but nothing in the corpus
+  // could show it, and the chip beside those controls was reading the ROW. This
+  // is the fixture in which the two values differ, so the row can be judged on
+  // whether it is internally coherent instead of on a coincidence.
+  "members-self-role-drift": {
+    label: "Members (owner) — the SELF row's roster role DISAGREES with team_authority: chip and controls must name the same rank",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembersSelfRoleDrift,
       invitations: teamInvites,
     },
   },
@@ -5790,6 +5978,30 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read — THE FAILED SITES READ,
+  // rendered. THE FIXTURE IS BYTE-IDENTICAL TO A GENUINELY-EMPTY INSTANCE — same
+  // owner, same live box, the same `sites: []` — and ONE field differs: the read
+  // does not succeed. That is deliberate, and it is the whole discriminator.
+  // Charter D382's rule is that a failed read is never reported as an empty one;
+  // with the failed arm folded into the empty default (as loadInstanceSites did
+  // before cch-w34-s1) this screen and a true empty render the SAME BYTES, and
+  // no instrument in the repo could tell them apart. `liveInstance` carries a
+  // `host`, so the pre-fix bytes are not blank-and-ambiguous — they are the
+  // confident sentence "No sites yet", an assertion about an instance whose
+  // sites we never received.
+  "instance-sites-unreadable": {
+    label: "Instance workspace — /v1/sites 500s: the Sites section says it couldn't READ them, and never claims the instance has none",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      sitesFault: { status: 500, body: { error: "internal" } },
+    },
+  },
   "verify-no-credentials": {
     label: "Verify card — the box predates verification: POST /verify answers 404 no_admin_token and the note offers its ONE recovery, Re-provision",
     authed: true,
@@ -6511,6 +6723,46 @@ export function route(name, method, path, state) {
   // (today: DELETE /v1/sites/:id/github) is visible to the very next read. The
   // no-state arm is the old `d.sites` verbatim, and listOf's per-boot copy makes
   // the collection and the drill-down below answer the SAME objects.
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read — THE FAILED READ,
+  // which no committed fixture could express. This arm answered a flat 200 in
+  // EVERY scenario, so app.js's failed-read branch in loadInstanceSites — the
+  // one charter D382 ratified, where a failed read is never reported as an
+  // empty one (re-derive: `grep -n "Couldn.t load sites"
+  // cloud/priv/static/app.js`) — was unreachable from BOTH harnesses, and every
+  // DOM-geometry assertion over `#instance-sites` was on the happy path.
+  //
+  // `sitesFault` is a per-scenario override with the same shape route() already
+  // honours for `meFault` above: `{status, body}`, forwarded VERBATIM by
+  // mock.js's jsonResponse (`grep -n 'function jsonResponse'
+  // cloud/priv/static/__preview__/mock.js`) and by smoke.mjs's fetch stub, so
+  // ONE mechanism drives both copies of loadInstanceSites's failed arm — a 403
+  // body reaches the forbidden copy, a 5xx the transport copy.
+  //
+  // GET-GUARDED: the 200 arm below carries no method guard, so an unguarded
+  // fault would also refuse the site-creation POST that falls through to it —
+  // a scenario asking for a failed READ must not silently break a WRITE.
+  //
+  // ── THE TWO RESIDUALS THIS MECHANISM DOES NOT REACH ───────────────────────
+  // Stated here rather than left to be rediscovered, because both are about
+  // THIS route and neither is expressible by any status code:
+  //
+  //  (1) A NEVER-SETTLING READ is inexpressible in BOTH harnesses. Every arm of
+  //      route() RESOLVES — there is no hang, no reject and no abort arm
+  //      anywhere in this file — and both consumers are total over that: mock.js
+  //      wraps the return in a resolved promise, and smoke.mjs's stub does the
+  //      same (`grep -n 'fetchStub' cloud/priv/static/__preview__/smoke.mjs`).
+  //      So `loadInstanceSites`'s PENDING state — the "Loading sites…" box that
+  //      never settles, which is what a real hung control plane paints — cannot
+  //      be reached from either harness at all. Reaching it needs a fixture that
+  //      returns a promise nobody resolves, which would change route()'s
+  //      contract for every caller; it is deliberately not done here.
+  //  (2) SSE DEATH is not contrastable in the browser. mock.js's
+  //      PreviewEventSource reports `readyState = 1 // OPEN — but silent` and
+  //      never fires, so a stream that DIES and a stream that is merely quiet
+  //      render identically. Separating them needs a `__preview.drop()` seam
+  //      beside the existing `__preview.push()` — it does not exist, and this
+  //      row did not add it.
+  if (p === "/v1/sites" && method === "GET" && d.sitesFault) return d.sitesFault;
   if (p === "/v1/sites") return { status: 200, body: { sites: listOf(d, state, "sites") } };
 
   // G-05 API tokens (GR34). GET → the caller's PATs (newest-first as fixtured);
@@ -6737,13 +6989,28 @@ export function route(name, method, path, state) {
   // the census/residue blast radius twice for one measurement.
   const depMatch = p.match(/^\/v1\/sites\/([^/]+)\/deployments$/);
   if (depMatch) {
+    // cch-w16-bl: THE PRODUCTION FILTER. A scenario carrying an UNSPLIT ledger
+    // for this site gets the production partition here and the preview
+    // partition at /previews below — the split `list_deployments/3` does with
+    // `filter_environment/2`. Checked FIRST and returned FROM, so the two
+    // pre-split seams below keep their exact bytes for every scenario written
+    // before this line.
+    const ledger = siteLedger(d, depMatch[1]);
+    if (ledger) return { status: 200, body: { deployments: ledger.filter((x) => !isPreviewDeploy(x)) } };
     const bySite = d.deploymentsBySite || null;
     const own = bySite && Object.prototype.hasOwnProperty.call(bySite, depMatch[1]) ? bySite[depMatch[1]] : null;
     return { status: 200, body: { deployments: own || d.deployments || [] } };
   }
   // gr-p3: branch previews now come from the scenario (d.previews) so the
   // preview-rows section is observable; absent → the honest empty list.
-  if (/^\/v1\/sites\/[^/]+\/previews$/.test(p)) return { status: 200, body: { previews: d.previews || [] } };
+  const prevMatch = p.match(/^\/v1\/sites\/([^/]+)\/previews$/);
+  if (prevMatch) {
+    // cch-w16-bl: the OTHER half of the same partition — see the deployments
+    // seam above. Same ledger, opposite side of `isPreviewDeploy`.
+    const ledger = siteLedger(d, prevMatch[1]);
+    if (ledger) return { status: 200, body: { previews: ledger.filter(isPreviewDeploy) } };
+    return { status: 200, body: { previews: d.previews || [] } };
+  }
   // gr-p3: the site domain-status checklist (same envelope as the instance
   // sibling, CF-mode-aware). MUST precede the /v1/ catch-all (its 200 {} would
   // read as "no domains" and no scenario could pin the rungs). Absent fixture →

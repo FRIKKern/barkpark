@@ -116,6 +116,19 @@ on:
       - "js/packages/react/package.json"
       - "js/packages/react/tsup.config.ts"
       - "js/packages/react/tsconfig.json"
+      # THE PACK INPUTS THAT LIVE OUTSIDE js/packages/<pkg>. Both packages build
+      # with `tsup && node ../../scripts/post-build-dts.mjs`, and the react
+      # tsup.config.ts copies api/assets/paper-surface/paper-surface.css into
+      # dist/paper-surface.css — the file @barkpark/react consumers import to
+      # skin PortableDoc output. Editing either changes what `pnpm pack` emits
+      # while nothing under js/packages/ moves a byte, so on the same argument
+      # the block above makes for registry.ts, they belong here: a gate that
+      # never fires on the change it guards is indistinguishable from one that
+      # ran and found nothing. check-vendor-freshness.mjs now hashes both as
+      # VENDORED[pkg].external, and its correspondence check compares the
+      # stylesheet source against the packed dist/paper-surface.css.
+      - "js/scripts/post-build-dts.mjs"
+      - "api/assets/paper-surface/paper-surface.css"
       - "scripts/check-vendor-blocks.mjs"
       - "scripts/check-vendor-freshness.mjs"
       - "scripts/recut-vendor-tarballs.sh"

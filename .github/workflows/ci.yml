@@ -85,6 +85,7 @@ on:
     paths:
       - "web/**"
       - "design/tokens.json"
+      - "design/ladder-refusal-fixture.json"
       - "js/packages/core/**"
       - "js/packages/react/**"
       - "js/packages/create-barkpark-app/templates/**"

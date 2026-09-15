@@ -140,6 +140,15 @@ js/packages/create-barkpark-app/templates/**
 # here would dispatch no web job at all while this test is the thing that pins
 # the ladder. RETIRE THIS ROW only together with that derivation.
 design/tokens.json
+# web/__tests__/type-ladder-emitted.test.ts also reads the ONE fixture of
+# malformed type.chrome families that design/emit.mjs' typeLadderFrom,
+# design/validate.mjs' chromeLadderAscending and the web copy's ladderFrom are
+# all driven against (task-833f347eaa78a2a5). The web arm of that conformance
+# table has to run HERE because the doc-gates design job is Node 20 and cannot
+# execute TypeScript, so the fixture is a genuine cross-tree read from web/:
+# without this row the ratchet above reds ESCAPED, and a case added to the
+# fixture would dispatch no web job while the web arm is what pins the web copy.
+design/ladder-refusal-fixture.json
 
 # ---- the js/ workspace ROOT files the web-checks job reads ------------------
 # NOT surfaced by the census: the census resolves literals written INSIDE web/,

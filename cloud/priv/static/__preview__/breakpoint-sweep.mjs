@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  132 scenarios, 24 rendered, 108 in a COMMITTED residue literal.
+//   SCENARIO  135 scenarios, 24 rendered, 111 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -497,10 +497,10 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 96
 // name-keyed entries below, which is what makes a 121st scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 29 vary the CONTENT of a panel already rendered at all 18 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
+  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 30 vary the CONTENT of a panel already rendered at all 18 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 12 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all), and cch-w12-followup-login-fixture-gap's `activity-identity-change` (the corpus's ONLY successful-login fixture, a DRIVE through three states rather than a screen — smoke.mjs steps it from Activity to signed out to signed in as another team, and a transition is not a width) — over a grid already walked at all 18 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 14 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 18 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 3 routes (cruel + kind control + the classified caption), by overflow-guard's W25-deploy-rail-fail-wrap leg. `site-deploy-rail-failed-classified` (task-877bfc465162e104) is the third of those routes and the family's FOURTH instrument fixture: it renders the same `.deploy-rail-fail` box carrying the one capture in this corpus whose caption MOVES between the box and the browser (`FailureCopy.humanize/1` classifies it; the wave-26 pair passes through unchanged), and its classified sentence is a DIFFERENT length from both, which is content length again — overflow-guard's axis, not this sweep's. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) is the family's THIRD instrument fixture and the only one that is not cruel at all: it renders the rail's OTHER footer — `.deploy-rail-live`, which no scenario in this harness had ever produced — carrying the site's ordinary 55-character live URL. It is here rather than in a cell because what it exists to measure is one ANCHOR's wrap against its own container at phone widths, which is overflow-guard's axis and not a width walk over a .detail-grid the two cells already sweep at all 18 widths. It is driven at 320/360/390 x 2 themes by overflow-guard's W29-deploy-rail-live-url-wrap leg.",
-  "hash:#settings": "The settings screens are swept by EIGHT cells across billing/providers/notifications/tokens/members. These 8 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 18 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
+  "hash:#settings": "The settings screens are swept by EIGHT cells across billing/providers/notifications/tokens/members. These 9 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 18 widths, and a row with fewer buttons is strictly narrower than the one they walk. The followup's `members-self-role-drift` varies one CHIP WORD on one row (Member -> Owner, the shorter string becoming the longer by one character) against a roster the members cells already walk at every width.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner. `account-modal-cruel-identity` (cch-w23-bl-cruel-identity-own-scenario) is the family's CRUEL twin, wearing the same axis `fleet-cruel-content` and `deploy-detail-cruel` do: its `.am-name` is a 158-character email local part at the server's own `validate_length(:email, max: 160)` cap, and content length is overflow-guard's axis, not this sweep's. It is driven at 320/360/390/430/620/900/1440 x 2 themes by overflow-guard's W23-account-modal-identity-bounded leg, beside `account-modal` as the kind control.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
@@ -510,9 +510,10 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
   "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
+  "hash:#activity": "The Activity feed is swept by the `activity` cell at all 18 widths. cch-w36-bl's `activity-denied` is the plain-MEMBER twin of that same screen, and it renders STRICTLY LESS: /v1/audit answers 403, so loadActivity replaces the whole coalesced feed with ONE .empty-state block — the identical geometry the refusal fixtures in `hash:#operator` and `hash:#billing` already occupy, and narrower at every width than the grid the cell walks. What it exists to measure is an AUTHORITY answer, not a width: it was the first fixture in this corpus able to reach that refusal arm at all, because the only other #activity scenario is an owner and the only other auditDenied fixture sits on the instance timeline, where the same 403 degrades to events-only instead of taking over the view.",
 };
 
-// THE RESIDUE — 96 scenarios that exist and are NOT rendered by any cell,
+// THE RESIDUE — 110 scenarios that exist and are NOT rendered by any cell,
 // COMMITTED AS A LITERAL, name-keyed to the family that explains them.
 //
 // WHY A COMMITTED LITERAL AND NOT A COMPUTED ONE (charter D180). An allowlist
@@ -524,8 +525,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 132 scenarios · 25 cells over 24 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 108 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 135 scenarios · 25 cells over 24 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 111 · 14 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -666,6 +667,21 @@ export const RESIDUE_FAMILY_REASONS = {
 // breakpoint-sweep.mjs` on this branch, never by adding one — and the family
 // stays at 13 because `hash:#billing` already had seven members.
 //
+// cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority moved it by
+// ONE: `members-self-role-drift` — the acting owner whose OWN roster row says
+// "member", the first fixture in which a member's roster role and the resolved
+// `team_authority` the row's controls are decided from DISAGREE — is the 135th
+// scenario and the 111th residue entry (family `hash:#settings`). RESIDUE, not
+// a cell: it is the `members` cell's own roster with ONE role string changed,
+// so it paints the same .set-row at the same widths, and what it carries that
+// no width can score (which value the chip is painted from) is driven by
+// smoke.mjs's `members-self-role-drift` expectation instead. The family count
+// does not move — `hash:#settings` already had entries. Both numerals were
+// RE-READ from a RUN of `node breakpoint-sweep.mjs` on this branch, never by
+// adding one: the sweep exited 2 with `UNLISTED scenario
+// "members-self-role-drift" (family hash:#settings)` until the entry below was
+// written, and its own `>> scenarios` line printed the pair.
+//
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527; recut by
 // cch-w48-bl-the-scenario-census-five-numerals-cannot-lose). The old header here
 // read "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed
@@ -682,16 +698,19 @@ export const RESIDUE_FAMILY_REASONS = {
 // this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
 // below is now recounted, either from `scenarioReport` or from these same
 // committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
-//   * 132 / 25 / 24 / 108 / 13 — "the census five in breakpoint-sweep.mjs's
+//   * 135 / 25 / 24 / 111 / 14 — "the census five in breakpoint-sweep.mjs's
 //     prose are recounted from the derived report", which reads BOTH typed
 //     copies out of the committed bytes (this bullet and "THE CENSUS THIS
 //     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
 //     site. The census test's own TITLE is built from `scenarioReport` by
 //     template literal rather than typed, so the printed line has no second
 //     copy left to rot.
-//   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
-//     "the two ZERO-residue families are named, and 15 families over all
-//     scenarios is not 13", which owns those numbers as VALUES, plus "the
+//   * 15, and the ONE ZERO-residue name `hash:#sites` — cch-w36-bl's
+//     `activity-denied` took `hash:#activity` off this list by giving it its
+//     first residue entry, which is why the wording here is singular and the
+//     residue-family count it contrasts with went up by one —
+//     "the ONE ZERO-residue family is named, and 15 families over all
+//     scenarios is not 14", which owns those numbers as VALUES, plus "the
 //     ownership map's own family numerals are recounted from the literal",
 //     which owns THESE BYTES: the family total this bullet leads with, the
 //     residue-family count it says that total is NOT, and the span the header
@@ -701,9 +720,9 @@ export const RESIDUE_FAMILY_REASONS = {
 //     "every `// <family> — N` header inside SCENARIO_RESIDUE is recounted from
 //     the literal itself".
 //   * each `These N` in RESIDUE_FAMILY_REASONS above — "every `These N` clause
-//     in RESIDUE_FAMILY_REASONS is recounted from the literal". Five reasons
+//     in RESIDUE_FAMILY_REASONS is recounted from the literal". Six reasons
 //     spell no count and are honestly SKIPPED by that arm; their membership is
-//     covered by the header arm, which spans all 13.
+//     covered by the header arm, which spans all 14.
 //   * the chronicle ordinals above ("the Nth scenario / Mth residue entry") —
 //     "the chronicle's ordinals strictly increase and stay inside the census —
 //     in this file and the bare sweep", which reads THESE bytes and reds on a
@@ -739,7 +758,7 @@ export const RESIDUE_FAMILY_REASONS = {
 //     until cch-w47-s4 this file was carrying two of them: `hash:#billing — 3`
 //     over four entries, and a `These 9` over ten.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 29
+  // hash:#instance — 30
   "sites-on-instance": "hash:#instance",
   "panel-overview-member": "hash:#instance",
   "instance-cruel-detail": "hash:#instance",
@@ -786,6 +805,21 @@ export const SCENARIO_RESIDUE = {
   "instance-behind-member": "hash:#instance",
   "instance-remove-failed-member": "hash:#instance",
   "instance-failed-member": "hash:#instance",
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read — the FAILED
+  // /v1/sites read. Residue rather than a cell for the same reason as the
+  // six above and one of its own: it paints the instance-detail layout every
+  // hash:#instance cell already walks at all 18 widths, and the only thing it
+  // moves is ONE panel's contents — `#instance-sites` swaps its site rows for
+  // a single .empty-state block, the identical geometry `activity-denied` and
+  // the operator/billing refusal fixtures already occupy, and narrower at
+  // every width than the rows it replaces. What it carries that no width can
+  // score is that the block says the read FAILED rather than that the
+  // instance has no sites — a rendered-state question, which is smoke.mjs's
+  // axis. Its geometry IS driven, and by the instrument that owns geometry:
+  // overflow-guard.mjs's W34-sites-read-failed-bounded leg walks it at
+  // 320/390/620/900/1440 x 2 themes beside the kind control that renders the
+  // SAME fixture with a 200.
+  "instance-sites-unreadable": "hash:#instance",
   // hash:#overview — 12
   "loggedout": "hash:#overview",
   "empty": "hash:#overview",
@@ -828,8 +862,9 @@ export const SCENARIO_RESIDUE = {
   // family its own deepLink (`#site/<id>`) has always named. Its geometry is the
   // .detail-grid the `rollback` and `states` cells already walk at all 18 widths.
   "env-editor": "hash:#site",
-  // hash:#settings — 8
+  // hash:#settings — 9
   "members-admin-actor": "hash:#settings",
+  "members-self-role-drift": "hash:#settings",
   "members-peer-owner": "hash:#settings",
   "members-cruel-content": "hash:#settings",
   "tokens-empty": "hash:#settings",
@@ -896,6 +931,8 @@ export const SCENARIO_RESIDUE = {
   "fleet-cruel-content": "hash:#fleet",
   // hash:#signup — 1
   "loggedout-signup": "hash:#signup",
+  // hash:#activity — 1
+  "activity-denied": "hash:#activity",
 };
 
 // `--cell a,b,c` — SELECTION, AND A PER-NAME REFUSAL. The per-name check is the

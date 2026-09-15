@@ -27,6 +27,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :field, :map, required: true
   attr :value, :map, default: %{}
   attr :errors, :map, default: %{}
+  # Gyldendal parity E1.11 — the warning half of `Validation.check_tree/3`,
+  # the same subtree shape as `:errors`, rendered under the subfield it names.
+  attr :warnings, :map, default: %{}
   attr :on_change, :string, default: nil
   attr :plugin_name, :string, default: "core"
   attr :path, :string, default: ""
@@ -47,6 +50,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       assigns
       |> Map.put_new(:value, %{})
       |> Map.put_new(:errors, %{})
+      |> Map.put_new(:warnings, %{})
       |> Map.put_new(:on_change, nil)
       |> Map.put_new(:plugin_name, "core")
       |> Map.put_new(:path, "")
@@ -66,7 +70,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     <%= cond do %>
       <% @bare -> %>
         <.composite_body
-          field={@field} value={@value} errors={@errors} subfields={@subfields} groups={@groups}
+          field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
           tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
         />
@@ -75,7 +79,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <summary class="bp-field-title"><%= @title %></summary>
           <p :if={@description} class="bp-field-description"><%= @description %></p>
           <.composite_body
-            field={@field} value={@value} errors={@errors} subfields={@subfields} groups={@groups}
+            field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
           />
@@ -85,7 +89,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <legend class="bp-field-title"><%= @title %></legend>
           <p :if={@description} class="bp-field-description"><%= @description %></p>
           <.composite_body
-            field={@field} value={@value} errors={@errors} subfields={@subfields} groups={@groups}
+            field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
           />
@@ -106,6 +110,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :field, :map, required: true
   attr :value, :map, required: true
   attr :errors, :map, required: true
+  attr :warnings, :map, default: %{}
   attr :subfields, :list, required: true
   attr :groups, :list, required: true
   attr :tabs_id, :string, required: true
@@ -147,8 +152,11 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
             </span>
           <% end %>
           <%= render_subfield(assigns, sub) %>
-          <%= for err <- Map.get(@errors, sub.name, []) do %>
+          <%= for err <- own_findings(@errors, sub.name) do %>
             <span class="error" data-error-for={sub.name}><%= err %></span>
+          <% end %>
+          <%= for warn <- own_findings(@warnings, sub.name) do %>
+            <span class="warning" role="note" data-warning-for={sub.name}><%= warn %></span>
           <% end %>
         </div>
       <% end %>
@@ -162,6 +170,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       field: sub,
       value: get_value(assigns.value, sub.name, %{}),
       errors: nested_errors(assigns.errors, sub.name),
+      warnings: nested_errors(assigns.warnings, sub.name),
       on_change: assigns.on_change,
       plugin_name: assigns.plugin_name,
       path: child_path(assigns.path, sub.name),
@@ -179,6 +188,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       field: sub,
       value: get_value(assigns.value, sub.name, []),
       errors: nested_errors(assigns.errors, sub.name),
+      warnings: nested_errors(assigns.warnings, sub.name),
       on_change: assigns.on_change,
       plugin_name: assigns.plugin_name,
       path: child_path(assigns.path, sub.name),
@@ -595,6 +605,18 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   end
 
   defp nested_errors(_, _), do: %{}
+
+  # A subfield's OWN findings out of a `Validation.check_tree/3` subtree: a
+  # leaf is a list, a composite/array node keeps its own under `:__self__`.
+  defp own_findings(findings, key) when is_map(findings) do
+    case Map.get(findings, key) do
+      list when is_list(list) -> list
+      %{__self__: list} when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  defp own_findings(_, _), do: []
 
   defp child_path("", child), do: child
   defp child_path(parent, child), do: "#{parent}.#{child}"

@@ -374,8 +374,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     <% type = @field["type"] %>
     <% rules = Barkpark.Content.Validation.rules_at(@field["validation"], :error) %>
     <% required? = rules["required"] == true %>
-    <% errors = Map.get(@validation_errors, field_name, []) %>
-    <% warnings = Map.get(@validation_warnings, field_name, []) %>
+    <%!-- Only the field's OWN findings here; a composite / array subtree
+         (Gyldendal parity E1.11) is handed to the component, which renders
+         each finding under the subfield or row it names. --%>
+    <% errors = own_findings(Map.get(@validation_errors, field_name, [])) %>
+    <% warnings = own_findings(Map.get(@validation_warnings, field_name, [])) %>
     <%= if self_titled?(type) do %>
       <%!-- v2 structural types render their own <legend>; skip outer label,
            but keep error display + onix hint as inline rows below the field. --%>
@@ -702,7 +705,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <%!-- Gyldendal parity E1.6 — the publish bar's warning count:
                       Sanity's warning-level validation nags here and never
                       blocks; the fields carry the wording inline. --%>
-                <% warning_count = @validation_warnings |> Map.values() |> Enum.map(&length/1) |> Enum.sum() %>
+                <% warning_count = Barkpark.Content.Validation.leaf_count(@validation_warnings) %>
                 <span
                   :if={warning_count > 0}
                   class="bp-validation-warnings"
@@ -1188,4 +1191,12 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   def visible_fields(fields, group_name) when is_binary(group_name) do
     Enum.filter(fields, fn f -> Map.get(f, "group") == group_name end)
   end
+
+  # A top-level field's own findings out of a `Validation.check_tree/3` half:
+  # a leaf is a plain list; a composite / array node keeps its own under
+  # `:__self__` and its subfields' under their names (rendered by the
+  # component, never joined into the top-level line).
+  defp own_findings(list) when is_list(list), do: list
+  defp own_findings(%{__self__: list}) when is_list(list), do: list
+  defp own_findings(_), do: []
 end

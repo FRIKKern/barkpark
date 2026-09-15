@@ -21431,6 +21431,12 @@
   // the axis is never a fake and never an empty row.
   var activityActors = null; // [{id,email}] once read; null = not read yet
   var activityActorsTried = false;
+  // cch-w36-bl: did the trail READ get refused? It gates the filter row, and it
+  // is STATE rather than a clear-once at the refusal site on purpose — the chips
+  // have two independent painters (loadActivity up front, and ensureActivityActors
+  // again when the roster lands), so a clear performed by one of them is undone by
+  // whichever finishes last. A flag every painter reads is order-independent.
+  var activityDenied = false;
 
   // Pure: the actor chip set from a member list + the /v1/me envelope. Never
   // fabricates a name — a member with no email renders its short id.
@@ -21572,7 +21578,11 @@
 
   function paintActivityFilters() {
     var box = $("#activity-filters");
-    if (box) box.innerHTML = activityFiltersHtml();
+    if (!box) return;
+    // A refused trail carries NO filter row: every chip re-issues the same
+    // admin-gated GET /v1/audit and lands back on the same refusal, so to a
+    // plain member the whole axis is controls that can only fail.
+    box.innerHTML = activityDenied ? "" : activityFiltersHtml();
   }
 
   // Paint the cached feed, coalesced through the by-target grammar. Re-opens the
@@ -21600,10 +21610,26 @@
   function loadActivity() {
     var body = $("#activity-body");
     body.innerHTML = '<div class="loading">Loading activity&hellip;</div>';
+    // a fresh read is not refused until it says so — a retry must be able to
+    // bring the filter row back
+    activityDenied = false;
     paintActivityFilters();
     ensureActivityActors();
     api("GET", activityQuery(null)).then(function (r) {
       if (!r.ok) {
+        // cch-w36-bl — THE CHIPS GO WITH THE FEED THEY FILTER. paintActivityFilters
+        // runs BEFORE this read is issued, so a refused reader was left holding a
+        // live filter row over a feed the server would not give them: every chip
+        // re-issues this same GET through activityQuery and lands on this same
+        // refusal. /v1/audit is team-admin-only, so for a plain member that is a
+        // whole axis of controls that can only fail. Measured, not supposed:
+        // member-authority-sweep.mjs reported 13 findings against the
+        // `activity-denied` fixture ("a control rendered to a MEMBER … the server
+        // will refuse") and exits 0 once the row is cleared here. Clearing rather
+        // than hiding keeps one rule for the screen: on a refused read the body's
+        // .empty-state is the ONLY thing #activity carries.
+        activityDenied = true;
+        paintActivityFilters();
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load activity</h2><p>' +
           esc(readFailureCopy(r, "You don't have access to this activity.",
             "The activity feed couldn't be loaded, and the answer didn't say why.")) + "</p></div>";
@@ -26485,7 +26511,17 @@
       '<div class="set-row-main"><div class="set-row-name">' + esc(m.email) +
         (isSelf ? ' <span class="dim">(you)</span>' : "") + "</div>" +
         '<div class="set-row-meta">joined ' + esc(relTime(m.joined_at)) + "</div></div>" +
-      '<div class="set-row-side"><span class="set-chip">' + esc(ROLE_LABELS[m.role] || m.role) + "</span>" +
+      // THE CHIP READS `targetRole`, NOT `m.role`
+      // (cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority).
+      // On every row but your own the two ARE the same string, so this changes
+      // nothing there. On the SELF row they can differ — a stale roster read, a
+      // role changed in another tab, a team switch mid-flight — and the chip
+      // used to name the ROSTER's rank while the two controls beside it had
+      // already been decided from `ctx.role`, the resolved team_authority the
+      // server actually compares against. One row cannot honestly assert two
+      // ranks: the chip now names the value its own controls were decided from,
+      // so the row is internally coherent whatever the roster says.
+      '<div class="set-row-side"><span class="set-chip">' + esc(ROLE_LABELS[targetRole] || targetRole) + "</span>" +
         actions + "</div></div>";
   }
 

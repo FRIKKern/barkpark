@@ -1,4 +1,5 @@
 lib/barkpark/accounts/webauthn.ex	load_cose
+lib/barkpark/content/validation.ex	get_in_field
 lib/barkpark/media/blobstore/local.ex	delete
 lib/barkpark/media/blobstore/local.ex	put_bytes
 lib/barkpark/media/blobstore/local.ex	put_file

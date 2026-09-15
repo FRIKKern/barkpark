@@ -880,7 +880,21 @@ ok(seen.size >= LADDER_PAIR_FLOOR,
 // break it. The web test is across a tree boundary with its own path-escape
 // declaration. So the duplication here is DELIBERATE and its cost is stated: if
 // the refusal contract changes, it changes in three places, and the census above
-// holds the LISTS in step while nothing holds the three SORTS in step.
+// holds the LISTS in step.
+//
+// AND THE SENTENCE THAT USED TO END HERE — "while nothing holds the three SORTS
+// in step" — IS NO LONGER TRUE, which is why it is quoted rather than deleted.
+// design/ladder-refusal-conformance.test.mjs now drives all three against ONE
+// fixture of malformed families (design/ladder-refusal-fixture.json) and names
+// the implementation that diverged. It pins the REFUSAL DECISION only — which
+// inputs must be refused — and deliberately not the direction or the transport,
+// because those legitimately differ: this file returns { err } into a numbered
+// problem report where emit.mjs throws, and folding the three into one module
+// would force this file to adopt throw semantics or wrap every call, which is
+// the SECOND ground (beyond the module-scope import above) on which sharing was
+// refused. chromeLadderAscending is driven through the real CLI on a throwaway
+// copy of design/, so that conformance table costs this file no dependency at
+// all. See task-833f347eaa78a2a5.
 
 // --- report ----------------------------------------------------------------
 if (errors.length) {

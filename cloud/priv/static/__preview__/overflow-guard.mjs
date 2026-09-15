@@ -322,6 +322,8 @@ const DEFECTS = [
   "W23-overview-digest-activity-row",
   "W27-failed-bar-announces-the-count",
   "W22-url-remedy-pricing",
+  "W34-sites-read-failed-bounded",
+  "W16-site-freshness-agrees-with-production-ladder",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -12081,6 +12083,273 @@ async function main() {
     // the `.oauth-divider` rules are drawn there), it does not see text inside
     // a closed `<details>` or a `hidden` ancestor (deliberately — those are not
     // painted), and it measures ONE fixture per route.
+    // ── W16-site-freshness-agrees-with-production-ladder ─────────────────────
+    //
+    //  WHAT IT ASSERTS, AND WHY IT IS THE HALF THAT WAS MISSING.
+    //  #8659 ruled that the sites-list freshness embed is PRODUCTION-ONLY: a
+    //  torn-down branch preview, however new, must not become the sentence the
+    //  list tells a person about production. That ruling is pinned at the HTTP
+    //  layer in ExUnit and had NO browser-level guard at all — so a regression
+    //  in app.js's freshness paint (`freshnessModel` / `siteStatusPill`) was
+    //  invisible to every instrument in this epic.
+    //
+    //  THE VACUOUS GREEN THIS LEG IS MADE OUT OF (the filed row): the same
+    //  comparison was DRIVEN once already, on the `sites` scenario at
+    //  1440x900, and printed "0 sites disagree". It could not have printed
+    //  anything else — that scenario carried no per-site deployments payload,
+    //  so every detail ladder rendered EMPTY (`ladder[0] = null`,
+    //  `previews = []`) and the equality was between two empty strings. An
+    //  equality assertion over nothing passes and MEASURES nothing.
+    //
+    //  SO THE NON-EMPTINESS IS ASSERTED FIRST, AND IT IS A REFUSAL. Before any
+    //  comparison this leg requires: the list rendered rows, the row under test
+    //  is one of them, the production ladder has at least one `.deploy-row`,
+    //  and both texts are non-empty. Each of those reds BY NAME. The idiom is
+    //  the attention-row sweep's ("measured ZERO pills across all N cells —
+    //  the queue stopped rendering or the selector went stale"), applied to the
+    //  defect that produced this row rather than to a selector drift.
+    //
+    //  THE TWO VALUES, AND WHY THEY ARE COMPARABLE AT ALL. `freshnessModel`
+    //  spells a live production deploy "Live" and a cancelled one "Cancelled"
+    //  (`siteStatusPill` paints that into `.status-pill-label`); `cap(st)`
+    //  spells the ladder pill the same two words (`deployRow` → `.dep-pill`).
+    //  Re-derive by symbol, never by line:
+    //    grep -n 'function freshnessModel\|function siteStatusPill' cloud/priv/static/app.js
+    //    grep -n 'function deployRow' cloud/priv/static/app.js
+    //  So string equality between the list pill and the ladder head is the
+    //  SAME statement the ExUnit test makes about the two payloads, made at the
+    //  surface a person actually reads.
+    //
+    //  THE FIXTURE IS A PRECONDITION, NOT AN EXTRA, and it is asserted as one.
+    //  `scenarios.mjs` gives the acme-web row an UNSPLIT ledger
+    //  (`siteLedgerBySite`) holding a live production deploy and a CANCELLED
+    //  PREVIEW 600 seconds NEWER than it — the adversarial shape #8659 fixed,
+    //  which no committed console scenario carried. This leg re-derives that
+    //  shape out of the scenario before it drives anything: a fixture that
+    //  drifted back to production-only would make every cell below green by
+    //  construction, so it refuses instead.
+    //
+    //  HOW IT LOSES, DRIVEN (criterion 2 of the filed row): defeat the
+    //  production filter at the console layer — `isPreviewDeploy` in
+    //  scenarios.mjs, the one predicate both partition call sites read — and
+    //  the cancelled preview joins the production ladder as its NEWEST row.
+    //  The list still says "Live" (its embed is a different payload), the
+    //  ladder head says "Cancelled", and this leg reds naming the site and both
+    //  values. Restore the predicate and it goes green again.
+    //
+    //  BOTH THEMES, ONE RUN. The paint is theme-independent today; driving both
+    //  is what makes that a MEASUREMENT rather than an assumption, and it is
+    //  what the filed criterion asks for.
+    if (requested.includes("W16-site-freshness-agrees-with-production-ladder")) {
+      const D = "W16-site-freshness-agrees-with-production-ladder";
+      // The comparison is about TEXT, not geometry: one comfortable desktop
+      // viewport, both themes. A width sweep here would print a wider table
+      // about the same two strings.
+      const FRESH_WIDTH = 1440;
+      const FRESH_SCEN = "sites";
+      const { SCENARIOS: FRESH_SCENARIOS, FRESHNESS_LADDER_SITE_ID: FRESH_SITE_ID, route: freshRoute } =
+        await import("./scenarios.mjs");
+      // This leg's OWN reading of "is this row a preview", written here rather
+      // than imported: the thing under test is scenarios.mjs's filter, and a
+      // precondition that re-used the predicate it is checking would agree with
+      // it by construction.
+      const isPreviewEnv = (x) => !!x && x.environment === "preview";
+
+      // ── THE PRECONDITION, RE-DERIVED FROM THE FIXTURE ──────────────────────
+      const sc = FRESH_SCENARIOS[FRESH_SCEN];
+      if (!sc || sc.deepLink !== "#sites") {
+        return die(`${D}: SCENARIOS["${FRESH_SCEN}"] no longer carries a "#sites" deepLink — the list surface this leg compares against cannot be reached, so every cell below would measure another screen`);
+      }
+      const freshSite = (sc.data && Array.isArray(sc.data.sites) ? sc.data.sites : [])
+        .find((s) => s && s.id === FRESH_SITE_ID);
+      if (!freshSite) {
+        return die(`${D}: site ${FRESH_SITE_ID} is not in SCENARIOS["${FRESH_SCEN}"].data.sites — the fixture and the id this leg drives have drifted apart`);
+      }
+      // THE PRECONDITION IS READ OFF THE UNSPLIT LEDGER, NOT OFF THE FILTERED
+      // PARTITION — and that distinction is the whole reason criterion 2 has a
+      // red to paste. The first draft asked the ROUTE SEAM for the production
+      // ladder and refused (exit 2) when its head was a preview; under the
+      // criterion-2 mutation that refusal fired BEFORE a browser opened, so
+      // the run named the seam instead of naming the site and both values. A
+      // precondition must describe the FIXTURE, which the mutation does not
+      // touch; the filter is the thing under test and is judged at the SURFACE.
+      const rawLedger = (sc.data && sc.data.siteLedgerBySite && sc.data.siteLedgerBySite[FRESH_SITE_ID]) || null;
+      if (!Array.isArray(rawLedger) || rawLedger.length === 0) {
+        return die(`${D}: SCENARIOS["${FRESH_SCEN}"].data.siteLedgerBySite carries no ledger for ${FRESH_SITE_ID} — the fixture is back to the state this row was filed against (no per-site deployments payload), so the detail ladder renders EMPTY and every comparison below is vacuous`);
+      }
+      const tOf = (x) => (x && Date.parse(x.updated_at || x.inserted_at)) || NaN;
+      const headProd = rawLedger.filter((x) => !isPreviewEnv(x))[0] || null;
+      const newestPreview = rawLedger.filter(isPreviewEnv)[0] || null;
+      if (!headProd || headProd.status !== "live") {
+        return die(`${D}: the fixture ledger's newest PRODUCTION row is ${headProd ? `"${headProd.status}"` : "ABSENT"} — this leg needs a LIVE production head to compare against, and without one the comparison below is the vacuous green this row was filed for`);
+      }
+      if (!newestPreview || newestPreview.status !== "cancelled") {
+        return die(`${D}: the fixture ledger carries ${newestPreview ? `a "${newestPreview.status}"` : "NO"} newest preview row — the adversarial shape #8659 pinned is a live production deploy under a CANCELLED preview, and without it a green here says only that a site with no previews agrees with itself`);
+      }
+      if (!(tOf(newestPreview) > tOf(headProd))) {
+        return die(`${D}: the cancelled preview (${newestPreview.updated_at}) is NOT newer than the live production deploy (${headProd.updated_at}) — the whole point of the shape is that the newest row of ANY environment is the preview, so a filter that ignored environment entirely would still pass`);
+      }
+      // `cap(st)` is what BOTH surfaces spell (app.js `deployRow` →
+      // `.dep-pill`, and `freshnessModel`'s live arm), so the expected word is
+      // DERIVED from the fixture's own live production head rather than typed.
+      const wantPill = headProd.status.charAt(0).toUpperCase() + headProd.status.slice(1);
+      const previewLeadS = Math.round((tOf(newestPreview) - tOf(headProd)) / 1000);
+      // What the ROUTE SEAM does with that ledger — REPORTED, never asserted.
+      // Under the criterion-2 mutation this line is where the defeat becomes
+      // visible in the transcript, and the run still goes on to drive the
+      // browser so the red below can name the site and both values.
+      const prodLadder = freshRoute(FRESH_SCEN, "GET", `/v1/sites/${FRESH_SITE_ID}/deployments`, {}).body.deployments || [];
+      const prevLadder = freshRoute(FRESH_SCEN, "GET", `/v1/sites/${FRESH_SITE_ID}/previews`, {}).body.previews || [];
+      process.stdout.write(
+        `\n${D} — scen=${FRESH_SCEN} site=${FRESH_SITE_ID} @${FRESH_WIDTH} x light+dark (2 cells)\n` +
+        `   fixture ledger (UNSPLIT, ${rawLedger.length} rows): newest production ${headProd.status}/${headProd.environment}` +
+        ` @${headProd.updated_at} · newest preview ${newestPreview.status}/${newestPreview.environment}` +
+        ` @${newestPreview.updated_at} (${previewLeadS}s NEWER than the live production row)\n` +
+        `   route seam serves: /deployments ${prodLadder.length} row(s) (${prodLadder.filter(isPreviewEnv).length} preview)` +
+        ` · /previews ${prevLadder.length} row(s) — the production filter is ` +
+        `${prodLadder.some(isPreviewEnv) ? "DEFEATED (a preview row is in the production partition)" : "holding"}\n`,
+      );
+
+      let freshCells = 0, listRowsSeen = 0, ladderRowsSeen = 0, agreed = 0;
+      for (const theme of ["light", "dark"]) {
+        // (1) THE LIST. Read the freshness pill off the row under test.
+        await setViewport(FRESH_WIDTH);
+        await nav(
+          `${BASE}/?scen=${FRESH_SCEN}&theme=${theme}#sites`,
+          `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+          `return !!(v && v.id==='view-sites' && v.querySelector('.site-row[data-id]'));})()`,
+        );
+        const list = await evalJs(
+          `(function(){var d=document.documentElement;` +
+          `var v=document.querySelector('section.view:not([hidden])');` +
+          // THE ROW IS PICKED OUT OF THE COUNTED POPULATION, never walked for
+          // singly (view-scope-census D228): `rows.length` is printed in this
+          // leg's own output, so the one row this comparison rests on is a
+          // named member of a number the run re-measures, not an arbitrary
+          // first match off a half-painted screen.
+          `var rows=document.querySelectorAll('#sites-body .site-row[data-id]');` +
+          `var want=${JSON.stringify(FRESH_SITE_ID)};var r=null;` +
+          `for(var i=0;i<rows.length;i++){if(rows[i].getAttribute('data-id')===want){r=rows[i];break;}}` +
+          `var p=r&&r.querySelector('.status-pill-label');` +
+          `return {view:v?v.id:'none',theme:d.getAttribute('data-theme'),rows:rows.length,` +
+          ` found:!!r,pill:p?(p.textContent||'').trim():null};})()`,
+        );
+        // (2) THE DETAIL. Same scenario, same run, the site's own route.
+        await setViewport(FRESH_WIDTH);
+        await nav(
+          `${BASE}/?scen=${FRESH_SCEN}&theme=${theme}#site/${FRESH_SITE_ID}`,
+          `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+          `return !!(v && v.id==='view-site' && v.querySelector('#site-deploys'));})()`,
+        );
+        const det = await evalJs(
+          `(function(){var d=document.documentElement;` +
+          `var v=document.querySelector('section.view:not([hidden])');` +
+          `var rows=document.querySelectorAll('#site-deploys .deploy-row');` +
+          `var h=rows[0]?rows[0].querySelector('.dep-pill'):null;` +
+          `var hm=rows[0]?rows[0].querySelector('.deploy-meta'):null;` +
+          `return {view:v?v.id:'none',theme:d.getAttribute('data-theme'),rows:rows.length,` +
+          ` previews:document.querySelectorAll('.deploys.previews .deploy-row.preview-row').length,` +
+          ` head:h?(h.textContent||'').trim():null,` +
+          ` meta:hm?(hm.textContent||'').replace(/\\s+/g,' ').trim():null};})()`,
+        );
+        freshCells++;
+        listRowsSeen += list.rows;
+        ladderRowsSeen += det.rows;
+
+        // (3) THE ROUTES AND THE THEME. Without these every string below is a
+        //     string off some other screen.
+        if (list.view !== "view-sites") {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#sites: rendered section.view "${list.view}", asked for "view-sites" — the hash did not route, so the pill read below is not a sites-list pill`);
+          continue;
+        }
+        if (det.view !== "view-site") {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#site/${FRESH_SITE_ID}: rendered section.view "${det.view}", asked for "view-site" — the hash did not route, so the ladder read below is not this site's ladder`);
+          continue;
+        }
+        if (list.theme !== theme || det.theme !== theme) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}: data-theme is list "${list.theme}" / detail "${det.theme}" — the theme did not apply, so the dark half of this run measured the light one`);
+        }
+
+        // (4) THE VACUITY REFUSALS. Each of these is the shape that printed
+        //     "0 sites disagree" on a screen with nothing on it.
+        let vacuous = false;
+        if (list.rows === 0) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#sites: measured ZERO .site-row[data-id] in #sites-body — the list stopped rendering or the selector went stale; a comparison against an unrendered list is refused, not passed`);
+          vacuous = true;
+        }
+        if (!list.found) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#sites: site ${FRESH_SITE_ID} is in the fixture but has NO .site-row[data-id] among the ${list.rows} rendered — the row this leg compares was never painted`);
+          vacuous = true;
+        }
+        if (det.rows === 0) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#site/${FRESH_SITE_ID}: measured ZERO #site-deploys .deploy-row — the production ladder rendered EMPTY. This is the exact vacuous green this row was filed for ("ladder[0] = null, previews = []", "0 sites disagree"): an equality assertion over two empty strings passes and measures nothing. Refused, never passed`);
+          vacuous = true;
+        }
+        if (!list.pill) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#sites: the row's .status-pill-label is ${list.pill === null ? "ABSENT" : "EMPTY"} — there is no freshness sentence to compare`);
+          vacuous = true;
+        }
+        if (!det.head) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#site/${FRESH_SITE_ID}: the ladder head's .dep-pill is ${det.head === null ? "ABSENT" : "EMPTY"} — there is no ladder status to compare`);
+          vacuous = true;
+        }
+        if (vacuous) {
+          process.stdout.write(`   ${FRESH_SCEN}/${theme}  list rows ${list.rows} pill "${list.pill}" | ladder rows ${det.rows} head "${det.head}"  REFUSED\n`);
+          continue;
+        }
+
+        // (5) THE COMPARISON. Both values quoted, in both directions.
+        if (list.pill !== det.head) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}: site ${FRESH_SITE_ID} ("${freshSite.name}") — the sites-list freshness pill reads "${list.pill}" and the head of its PRODUCTION ladder reads "${det.head}" (head meta: "${det.meta}"). These are the same deployment read through two serializers, so they must be the same word. #8659 made the list embed production-only precisely so a newer CANCELLED PREVIEW cannot become the sentence the list tells about production`);
+        } else {
+          agreed++;
+        }
+        // The expected value is derived from the FIXTURE's ladder head, not
+        // transcribed: a leg that only asserted list === ladder would go green
+        // with both of them reading "Cancelled".
+        if (list.pill !== wantPill) {
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}: site ${FRESH_SITE_ID} ("${freshSite.name}") — the sites-list freshness pill reads "${list.pill}", expected "${wantPill}" from the fixture's LIVE production ladder head (${headProd.status}/${headProd.environment} @${headProd.updated_at}). Both surfaces agreeing on the WRONG word is still a defect`);
+        }
+        process.stdout.write(
+          `   ${FRESH_SCEN}/${theme}  list rows ${list.rows} pill "${list.pill}" | ladder rows ${det.rows} head "${det.head}"` +
+          ` | previews painted ${det.previews}\n`,
+        );
+      }
+
+      // AN EMPTY POPULATION IS NOT A CLEAN ONE — the run-level twin of the
+      // per-cell refusals above, so a leg whose every cell `continue`d cannot
+      // reach the success tail.
+      if (ladderRowsSeen === 0) {
+        fail(D, `${D}: measured ZERO #site-deploys .deploy-row across all ${freshCells} cells — the production ladder never rendered, so nothing this leg is named for was measured. This is a refusal, not a pass`);
+      }
+      if (listRowsSeen === 0) {
+        fail(D, `${D}: measured ZERO sites-list rows across all ${freshCells} cells — the list never rendered`);
+      }
+      if (freshCells !== 2) {
+        fail(D, `${D}: ${freshCells} of 2 cells measured (light + dark) — a half-driven run does not certify both themes`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${agreed} / ${freshCells} cells AGREE, both themes, one run: the sites-list freshness pill and the head of ` +
+          `site ${FRESH_SITE_ID} ("${freshSite.name}")'s production ladder both read "${wantPill}" — measured, quoted, ` +
+          `and asserted EQUAL at ${FRESH_WIDTH}px in light and dark. The ladder was ASSERTED NON-EMPTY first ` +
+          `(${ladderRowsSeen} .deploy-row across ${freshCells} cells, ${listRowsSeen} list rows), because the ` +
+          `comparison this leg replaces printed "0 sites disagree" over an EMPTY ladder and could not have said ` +
+          `anything else`,
+        );
+        okLine(
+          `THE SHAPE IS ADVERSARIAL, RE-DERIVED FROM THE FIXTURE RATHER THAN ASSUMED: site ${FRESH_SITE_ID} carries a ` +
+          `LIVE production deploy (${headProd.updated_at}) under a CANCELLED PREVIEW ${previewLeadS}s NEWER ` +
+          `(${newestPreview.updated_at}, branch "${newestPreview.branch}") — the shape #8659 fixed and pinned in ` +
+          `ExUnit, which no committed console scenario carried until now. The production partition served ` +
+          `${prodLadder.length} row(s), ${prodLadder.filter(isPreviewEnv).length} of them preview; the preview ` +
+          `partition served ${prevLadder.length}. Defeat ` +
+          `\`isPreviewDeploy\` in scenarios.mjs and the cancelled preview becomes the ladder head: this leg then reds ` +
+          `naming the site, "${wantPill}" and "Cancelled" (driven both ways)`,
+        );
+      }
+    }
+
     if (requested.includes("W20-type-floor-instances")) {
       const D = "W20-type-floor-instances";
       const { FLOOR_PX: TF_FLOOR, ALLOWLIST: TF_ALLOW, audit: tfAudit, APP_CSS: TF_CSS } =
@@ -12278,6 +12547,209 @@ async function main() {
     //    rows in any cell is a FAILURE, not a clean cell (the GR109 singular-
     //    selector lesson). Every walk below is scoped to
     //    `section.view:not([hidden])` — the W35 register stays untouched.
+    if (requested.includes("W34-sites-read-failed-bounded")) {
+      const D = "W34-sites-read-failed-bounded";
+      // ── cch-w34-bl-preview-scenario-for-a-failed-sites-read ─────────────
+      // THE ROUTE'S FAILED STATE, RENDERED — which no leg in this file could
+      // reach before this row, for a reason that had nothing to do with widths.
+      // scenarios.mjs answered `/v1/sites` a flat 200 in EVERY scenario, so
+      // `#instance-sites` could only ever be measured on the happy path (rows,
+      // or the honest empty). loadInstanceSites's failed arm — charter D382's
+      // rule that a failed read is never reported as an empty one (re-derive:
+      // `grep -n "Couldn.t load sites" cloud/priv/static/app.js`) — had no
+      // fixture able to paint it, so no DOM-geometry assertion anywhere in the
+      // repo had ever had it as a subject.
+      //
+      // TWO FIXTURES, AND THE SECOND IS THE SEPARATION CONTROL, NOT A SECOND
+      // SUBJECT. `verify-no-credentials` is the same owner, the same live box,
+      // the same `sites: []`, the same instance route — it differs from the
+      // failed fixture in the STATUS of one read and in nothing else. That is
+      // what makes this leg a control rather than a description: on the
+      // PRE-FIX renderer (the one that folded `r.ok` into the `all` default)
+      // the two cells render the SAME HEAD, and the separation refusal at the
+      // bottom of this leg dies at exit 2 saying so.
+      const SITES_INST = "5b2c1e00-0000-4000-8000-0000000000a1";
+      // Phone through desktop: the failed box is an .empty-state block whose
+      // head and sentence are the only things on the screen at 320, and the
+      // widest cell is where a one-line head stops wrapping and starts
+      // clipping. 620/900 straddle app.css's 620 breakpoint.
+      const SITES_WIDTHS = [320, 390, 620, 900, 1440];
+      const SITES_CASES = [
+        { scen: "instance-sites-unreadable", failed: true, head: "Couldn't load sites" },
+        { scen: "verify-no-credentials", failed: false, head: "No sites yet" },
+      ];
+      const sitesCells = SITES_CASES.length * SITES_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${SITES_CASES.length} fixtures (a FAILED /v1/sites read + its genuinely-empty control) x ` +
+        `${SITES_WIDTHS.length} widths x 2 themes (${sitesCells} cells; #instance-sites rendered head + box geometry)\n`,
+      );
+      let cells = 0, boxesSeen = 0, charsSeen = 0;
+      // scen -> the set of heads this leg actually read off the screen.
+      const headsByScen = new Map(SITES_CASES.map((c) => [c.scen, new Set()]));
+      for (const c of SITES_CASES) {
+        for (const theme of ["light", "dark"]) {
+          const row = [];
+          for (const width of SITES_WIDTHS) {
+            await setViewport(width);
+            // The hash is pinned on every navigation: `?scen=` alone renders
+            // #overview (the W13 routing trap), and an overview screen measured
+            // under an instance-route heading is a phantom table. The readiness
+            // expression waits for the READ TO SETTLE — `#instance-sites` mounts
+            // carrying a `.loading` box, and measuring that would be measuring
+            // the spinner, not the answer.
+            await nav(
+              `${BASE}/?scen=${c.scen}&theme=${theme}#instance/${SITES_INST}`,
+              `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+              `if(!v||v.id!=='view-instance') return false;` +
+              `var b=v.querySelector('#instance-sites');` +
+              `return !!(b && !b.querySelector('.loading'));})()`,
+            );
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,` +
+              `  mounted:false,chars:0,empties:0,rows:0,loading:0,head:null,body:null};` +
+              `if(!v) return out;` +
+              `var b=v.querySelector('#instance-sites');` +
+              `if(!b) return out;` +
+              `out.mounted=true;` +
+              `out.chars=(b.textContent||'').trim().length;` +
+              `out.empties=b.querySelectorAll('.empty-state').length;` +
+              `out.rows=b.querySelectorAll('.site-row').length;` +
+              `out.loading=b.querySelectorAll('.loading').length;` +
+              `var h=b.querySelector('.empty-state h2');` +
+              `if(h) out.head=(h.textContent||'').trim();` +
+              `var pp=b.querySelector('.empty-state p');` +
+              `if(pp) out.body=(pp.textContent||'').trim();` +
+              `out.bcw=b.clientWidth; out.bsw=b.scrollWidth;` +
+              `var br=b.getBoundingClientRect();` +
+              `out.bLeft=+br.left.toFixed(2); out.bRight=+br.right.toFixed(2);` +
+              `out.bDisplay=getComputedStyle(b).display;` +
+              `if(h){var hr=h.getBoundingClientRect();out.hcw=h.clientWidth;out.hsw=h.scrollWidth;` +
+              `  out.hLeft=+hr.left.toFixed(2);out.hRight=+hr.right.toFixed(2);}` +
+              `if(pp){out.pcw2=pp.clientWidth;out.psw2=pp.scrollWidth;}` +
+              `return out;})()`,
+            );
+            cells++;
+            const at = `${c.scen}/${theme}@${width}`;
+            if (m.view !== "view-instance") {
+              fail(D, `${at}: rendered section.view "${m.view}", asked for "view-instance" — the hash did not route, so nothing below this line measures the instance workspace's Sites card`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) {
+              fail(D, `${at}: computed data-theme "${m.theme}" — the theme did not apply and the two theme columns are the same measurement twice`);
+            }
+            if (!m.mounted) {
+              fail(D, `${at}: no #instance-sites in the visible view — the Sites card is the whole subject of this leg and it did not mount. Nothing was measured; this is not a pass`);
+              row.push(`${width}:0m`);
+              continue;
+            }
+            boxesSeen++;
+            // ── THE VACUITY REFUSAL, the idiom this file already uses for its
+            //    cells ("measured ZERO pills across all N cells … a vacuous
+            //    green is refused"). A failed read that paints NOTHING satisfies
+            //    every negative assertion below by saying nothing at all, and a
+            //    box with no characters in it is exactly that. It reds HERE,
+            //    before any `!==` can score a point off an empty string.
+            if (!(m.chars > 0)) {
+              fail(D, `${at}: #instance-sites rendered ZERO characters (${m.empties} .empty-state / ${m.rows} .site-row) — a silent box tells the person nothing, and every assertion after this line would be scoring an empty string. A vacuous green is refused`);
+              row.push(`${width}:0c`);
+              continue;
+            }
+            charsSeen += m.chars;
+            if (m.loading) {
+              fail(D, `${at}: #instance-sites still carries ${m.loading} \`.loading\` box after its request settled — a spinner that outlives its read claims we are still asking`);
+            }
+            if (m.empties !== 1) {
+              fail(D, `${at}: ${m.empties} \`.empty-state\` block(s) in #instance-sites — both fixtures in this leg render EXACTLY ONE (one carries the failure, one the honest empty), and neither number above or below it is a state this leg can read`);
+              row.push(`${width}:${m.empties}e`);
+              continue;
+            }
+            if (!m.head) {
+              fail(D, `${at}: the .empty-state block carries no <h2> — the sentence a person reads off this card is the head, and a block without one has nothing to say`);
+              row.push(`${width}:nohead`);
+              continue;
+            }
+            headsByScen.get(c.scen).add(m.head);
+            // ── THE HEAD, WHICH IS THE WHOLE CLAIM ────────────────────────
+            if (m.head !== c.head) {
+              fail(D, `${at}: #instance-sites reads "${m.head}", expected "${c.head}" — ${c.failed ? "this fixture's /v1/sites read FAILED, and the card must say so rather than describe an instance whose sites never arrived" : "this fixture's read SUCCEEDED with zero rows, and the honest empty is the only thing it may say"}`);
+            }
+            if (c.failed) {
+              // THE DEFECT, DRIVEN (charter D382). This is the assertion that
+              // fails on the pre-fix renderer.
+              if (/No sites yet|will appear here/.test(`${m.head} ${m.body || ""}`)) {
+                fail(D, `${at}: a FAILED read rendered "${m.head} — ${m.body}". "No sites yet" is an assertion about an instance whose sites we never received, and a failed read is never an empty one`);
+              }
+              if (m.rows) {
+                fail(D, `${at}: ${m.rows} \`.site-row\` painted off a read that failed — a row invented from a body that carried none`);
+              }
+            } else if (m.rows) {
+              fail(D, `${at}: the control fixture painted ${m.rows} \`.site-row\` — it is supposed to be a zero-row 200, and a populated control separates nothing`);
+            }
+            // ── THE GEOMETRY. The head and the sentence must be WHOLE, the
+            //    box must be on the screen, and the page must not have started
+            //    scrolling sideways to hold either of them.
+            if (m.bDisplay === "none") {
+              fail(D, `${at}: #instance-sites computes display:none — the card this leg just read a sentence off is not on the screen at this width`);
+            }
+            if (m.bsw > m.bcw) {
+              fail(D, `${at}: #instance-sites scrollWidth ${m.bsw} > clientWidth ${m.bcw} — the Sites card is clipping its own contents`);
+            }
+            if (m.hsw > m.hcw) {
+              fail(D, `${at}: the head "${m.head}" measures scrollWidth ${m.hsw} inside a ${m.hcw}px box — the sentence that states what happened is cut off`);
+            }
+            if (m.psw2 > m.pcw2) {
+              fail(D, `${at}: the supporting line "${m.body}" measures scrollWidth ${m.psw2} inside a ${m.pcw2}px box — the half that tells a person what to do next is cut off`);
+            }
+            if (m.bLeft < -0.5 || m.bRight > m.pcw + 0.5) {
+              fail(D, `${at}: #instance-sites spans ${m.bLeft}..${m.bRight} against a ${m.pcw}px viewport — the card is off-screen at rest`);
+            }
+            if (m.psw !== m.pcw) {
+              fail(D, `${at}: documentElement.scrollWidth ${m.psw} != clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the instance workspace is off-screen sideways`);
+            }
+            row.push(`${width}:${m.chars}c/${m.rows}r`);
+          }
+          process.stdout.write(`   ${c.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // ── THE SEPARATION REFUSAL, and it is the point of the second fixture.
+      //    A grid on which the FAILED read and the genuinely-empty read render
+      //    the same head has measured nothing: that IS the pre-fix state, where
+      //    a 500 and a 200-with-zero-rows were byte-identical and no instrument
+      //    in the repo could tell them apart. Exit 2, not a finding — an
+      //    indistinguishable pair means this leg never had a subject.
+      const failedHeads = headsByScen.get("instance-sites-unreadable");
+      const emptyHeads = headsByScen.get("verify-no-credentials");
+      if (!failedHeads.size || !emptyHeads.size) {
+        return die(`${D}: read ${failedHeads.size} head(s) off the failed fixture and ${emptyHeads.size} off the empty control across ${cells} cells — one side of the comparison never rendered, so nothing was separated`);
+      }
+      const shared = [...failedHeads].filter((h) => emptyHeads.has(h));
+      if (shared.length) {
+        return die(`${D}: the FAILED read and the genuinely-empty read rendered the SAME head ${JSON.stringify(shared)} across ${cells} cells — a 500 and a 200-with-zero-rows are indistinguishable on this screen, which is the exact pre-fix state charter D382 ruled against. This leg has no subject; re-check loadInstanceSites's failed arm before trusting any count in it`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `THE FAILED /v1/sites READ IS REACHABLE AND BOUNDED — ${cells} cells (${SITES_CASES.map((c) => c.scen).join(" + ")} x ` +
+          `${SITES_WIDTHS.join("/")} x light+dark), ${boxesSeen} #instance-sites mount(s), ${charsSeen} rendered character(s) ` +
+          `measured. The failed fixture's head set is ${JSON.stringify([...failedHeads])} and the genuinely-empty control's is ` +
+          `${JSON.stringify([...emptyHeads])} — DISJOINT, which is the whole claim: the two fixtures differ in the STATUS of one ` +
+          `read and in nothing else, so a renderer that folds \`r.ok\` back into the empty default collapses those two sets into ` +
+          `one and this leg refuses at exit 2 rather than printing a green`,
+        );
+        okLine(
+          `WHAT THIS LEG STILL CANNOT REACH, and neither harness can: a NEVER-SETTLING read. Every arm of scenarios.mjs's ` +
+          `route() resolves, and both consumers are total over that (\`grep -n 'function jsonResponse' ` +
+          `cloud/priv/static/__preview__/mock.js\`), so loadInstanceSites's PENDING state — the "Loading sites…" box that never ` +
+          `settles — is inexpressible. This leg asserts that box is GONE once the read lands; it has no way to hold it open. ` +
+          `Nor is SSE death contrastable: mock.js's PreviewEventSource reports itself OPEN and never fires, so a dead stream ` +
+          `and a quiet one paint identically, and separating them needs a \`__preview.drop()\` seam that does not exist`,
+        );
+      }
+    }
+
     if (requested.includes("W27-failed-bar-announces-the-count")) {
       const D = "W27-failed-bar-announces-the-count";
       // BLOCK-SCOPED (D247): these axes belong to this leg alone.

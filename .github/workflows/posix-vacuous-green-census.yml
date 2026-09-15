@@ -42,7 +42,14 @@ name: POSIX vacuous-green census
 on:
   push:
     branches: [main]
-  pull_request:
+  # ── NO `pull_request:` ARM (2026-09-15, task-dee226be3107a98b) ───────────────
+  # Removed. The header above calls this a census whose "population is derived
+  # from the tree on every run" — the subject is the tree, not a diff, and the
+  # `push: main` arm sees every new member within minutes of its merge, named,
+  # by the same predicate. The PR arm bought a few minutes of earliness for two
+  # check runs on every pull request (measured 2026-09-15: fires 10/10 of the
+  # last 10 merged heads), and it could block nothing: this workflow publishes
+  # no context in the required set.
   schedule:
     # Weekly. A latent class needs a loop that never stops, not a fast one.
     # Offset off the hour because GitHub queues cron under load — read this as

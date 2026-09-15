@@ -170,6 +170,20 @@ export const ROUTE_TIERS = [
   { key: "GET /v1/notifications/deliveries", auth_fn: A_USER, pin: null,
     why_no_pin: "a READ. The census PIN is 80 WRITE call sites; no read has a row there. The overlay records this route as the EXCLUDED self-scope narrowing — a member sees their own rows, never a refusal",
     why: "any member may page their own delivery log" },
+  // cch-w36-bl: the team audit trail, which entered this table when
+  // `activity-denied` gave the corpus its first member actor on #activity and
+  // member-authority-sweep refused the Activity filter chips as UNFENCED. The
+  // tier is READ OFF THE ROUTER, not off the fixture: `get "/v1/audit"` opens
+  // with `conn = Auth.require_current_team_admin(conn)` and halts on refusal
+  // (cloud/lib/barkpark_cloud/web/router.ex — grep `get "/v1/audit"`), which is
+  // the same gate the router's own index line summarises as `admin`. This is the
+  // ONE read in this table that REFUSES rather than narrowing: the deliveries
+  // row above binds `admin?` as a local and shows a member their own rows, while
+  // a member asking for the team trail is answered 403 with
+  // `required: "admin", scope: "team"` and renders nothing.
+  { key: "GET /v1/audit", auth_fn: A_PTADMIN, pin: null,
+    why_no_pin: "a READ. The census PIN is 80 WRITE call sites; no read has a row there",
+    why: "the team's append-only trail is team-admin-only — a plain member is REFUSED, not narrowed" },
 
   // ── site writes — ruling (a): require_ability is a no-op for a session ──
   { key: "POST /v1/sites", auth_fn: A_USER, pin: "POST /v1/sites", why: "any member may create a site" },

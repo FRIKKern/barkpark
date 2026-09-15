@@ -530,12 +530,38 @@ defmodule PDS.Census do
   # verb adds no sibling GET — and `phantom` holding at 9 is the tell that the receipt's
   # own comments do not spell the needle, so an explanation cannot inflate the population
   # it explains.
+  # RE-DERIVED AGAIN 2026-09-15 at task-00dc067ad2931221 (PR #18420, the distinct webhook
+  # refusal/ingest receipts): textual 111 -> 113, ast-literal 102 -> 104, emitted 98 -> 100,
+  # unrouted 12 -> 14. FOUR ROWS, ONE ARRIVAL, +2 EACH — the signature of ADDED sites, not
+  # of a reclassification: `phantom` (9), `consumer` (4), `write-routed` (57) and
+  # `read-routed` (29) all read `==` in the SAME run, so nothing left or entered the route
+  # relation. `github_webhook_controller.ex`'s handle_intake/2 split ONE
+  # `%{ok: true, refused: true}` arm into three (`dedup_refused` with a `recorded` boolean,
+  # `vetoed`, and the legacy 2-tuple `unspecified`); the diff against origin/main adds 4
+  # `ok: true` lines and removes 2, in that ONE file and no other — `git diff
+  # origin/main...HEAD -- api/lib/barkpark/plugins/github/intake.ex | grep -c "ok: true"`
+  # returns 0, so the whole +2 is the controller. Every one of the two lands UNROUTED
+  # because handle_intake/2 reaches no write verb inside the depth-6 budget, which is why
+  # `unrouted` moves with `emitted` and the two routed rows do not.
+  #
+  # DERIVED BY THE INSTRUMENT ITSELF, NOT TYPED FROM A BRIEF: these four numbers are the
+  # `derived` half of this census's own D448-DRIFT-REFUSES line, run UNPIPED from the
+  # repo root on the tree this change ships (`CC=/usr/bin/cc elixir
+  # scripts/pds-elixir-receipt-census.exs`), amended in the SAME commit as the change that
+  # moved them (PDS-D448a). Lens unchanged (build-free AST, :binary.matches/2 substring
+  # counts, route depth 6, @write_verbs without `transaction`, corpus api/lib/**/*.ex).
+  # Engine printed live by that run:
+  #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
+  # THE CI ENGINE IS NOT THIS ONE (Elixir 1.18 · OTP 27) and this lens is regex-free and
+  # build-free by construction, so the figures are engine-independent by design — but that
+  # is a claim the required Elixir gate re-measures on every run, not one this comment
+  # settles.
   @rederived %{
-    textual: 111,
-    ast: 102,
+    textual: 113,
+    ast: 104,
     phantom: 9,
     consumer: 4,
-    emitted: 98,
+    emitted: 100,
     # RE-DERIVED BY RUN AT PDS-D480/D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -638,7 +664,7 @@ defmodule PDS.Census do
     #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
     write: 57,
     read: 29,
-    unrouted: 12
+    unrouted: 14
   }
 
   # THE ROW THE TWO D448 SELFTEST CASES INJECT, BUILT THE WAY drift/4 BUILDS IT — including
@@ -1375,11 +1401,16 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "17468236"},
-      basis_spans: [{75, 79}],
+      basis_spans: [{87, 91}],
       basis_token: "always answers 2xx unless intake genuinely",
       class: "NO-OP-ACK",
       confirmation: "declared",
-      basis: "@doc :75-79 — \"always answers 2xx unless intake genuinely fails\"",
+      basis:
+        "@doc :87-91 — \"always answers 2xx unless intake genuinely fails\". RE-ANCHORED off " <>
+          ":75-79 on task-00dc067ad2931221 (the distinct-refusal-receipt lane): that change " <>
+          "grew the @moduledoc above this @doc by 12 lines when it started naming which " <>
+          "refusal the receipt reports — +12, the sentence did not move relative to the def, " <>
+          "and its bytes are unchanged. The SPAN slid; the BASIS did not.",
       why:
         "the `\"ping\"` clause head is a literal match, not a failure-discarding head, so the arm " <>
           "never fires here. A ping ack claims nothing beyond having been reached."
@@ -1387,11 +1418,15 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "105570378"},
-      basis_spans: [{75, 79}, {88, 88}],
+      basis_spans: [{87, 91}, {100, 100}],
       basis_token: "ignored:",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
-      basis: "the response body itself — `ignored: \"event\"` on :88, plus @doc :75-79",
+      basis:
+        "the response body itself — `ignored: \"event\"` on :100, plus @doc :87-91. " <>
+          "RE-ANCHORED off :75-79,:88-88 on task-00dc067ad2931221 by the SAME +12 @moduledoc " <>
+          "growth recorded on the row above: both spans slid by exactly 12 and neither line's " <>
+          "bytes changed. The receipt still NAMES the outcome, which is what this row declares.",
       why:
         "THE ONE ROW THAT ACTUALLY SUPPRESSES. The arm fires here (head `_other`, body renders " <>
           "ok: true, site contained), and it is right to: this IS a catch-all routed to success. " <>
@@ -2089,12 +2124,19 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :two_hop_composed, evidence:
         {"api/test/barkpark/plugins/github/inbound_events_test.exs",
          ~S|test "a Bot-sender deleted → :dropped, NO detach", %{scope: scope} do|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:145
+    # barkpark_web/controllers/github_webhook_controller.ex:165 — RE-KEYED, NOT RE-TYPED
+    # (task-00dc067ad2931221). expr_fp 38180227 -> 121328124 under an UNMOVED head_hash:
+    # the ingest arm now matches the tag it used to discard and renders `outcome: "born"`
+    # (a row was created) or `outcome: "exists"` (an idempotent re-delivery) beside the
+    # verbatim `ingested: true`. The pair is read off `elixir scripts/pds-elixir-receipt-census.exs --keys`
+    # on this tree, never composed by hand. The citation moves with it: the old witness
+    # asserted a birth, and the claim this arm now makes is WHICH ingest happened, which
+    # only the re-delivery arm of the new test can refute.
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
-            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "38180227"},
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "121328124"},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
-         ~S|test "a signed issues.opened delivery → 2xx and a real gh-<num> task is born" do|}},
+         ~S|test "a fresh birth says outcome: born, and its re-delivery says outcome: exists" do|}},
     # barkpark_web/controllers/github_webhook_controller.ex:150
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "96836141"},
@@ -2107,12 +2149,45 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
          ~S|test "a non-opened, non-inbound action (edited → :ignored) answers 202 via Intake" do|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:161
+    # THE ONE REFUSAL ROW BECAME THREE (task-00dc067ad2931221). The retired row keyed
+    # 108173332/109773520 named the single `{:refused, _doc_id}` arm whose whole receipt
+    # was `%{ok: true, refused: true}` — one body for three different outcomes. That arm
+    # no longer exists in that shape, so the row names no emitted site and is REMOVED
+    # rather than re-pointed: re-keying it onto one of the three would silently carry a
+    # verdict earned on a body that answered all three. The three keys below are read off
+    # `elixir scripts/pds-elixir-receipt-census.exs --keys` on this tree.
+    #
+    # barkpark_web/controllers/github_webhook_controller.ex:186 — the dedup refusal.
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
-            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "109773520"},
-      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
-        {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
-         ~S|test "opened issue forwards the payload to Intake and answers 200" do|}},
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "21667326"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
+         ~S|test "a dedup refusal whose dead-letter write LANDS says recorded: true — and the row is there",|}},
+    # barkpark_web/controllers/github_webhook_controller.ex:202 — the lifecycle-gate veto.
+    # `recorded: false` is the claim, and the cited test reads the store back for BOTH
+    # halves of it (no task row, no `dedup_refused` conflict row) rather than asserting
+    # the body alone.
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "37628504"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
+         ~S|test "a lifecycle-gate veto says outcome: vetoed — nothing was written, and it says so" do|}},
+    # barkpark_web/controllers/github_webhook_controller.ex:212 — the LEGACY 2-tuple arm.
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "21231715"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "UNREACHABLE FROM THE REAL INTAKE, AND THAT IS WHY IT IS UNJUDGED RATHER THAN " <>
+        "WEAK. `Barkpark.Plugins.Github.Intake` emits only the 3-tuple `{:refused, reason, " <>
+        "doc_id}` shapes; this clause exists so a seam-injected stub or an older release " <>
+        "loaded beside a newer controller meets a 2xx instead of a CaseClauseError GitHub " <>
+        "retry-storms. NO committed test drives it through the request edge — an " <>
+        "end_to_end citation would have to be a conn against a stubbed intake_fun, which " <>
+        "proves the controller's mapping and nothing about a stored row — and its body " <>
+        "deliberately claims LESS than the other two (`outcome: \"unspecified\"`, no " <>
+        "`recorded` boolean) precisely because nothing measured one. Judging it would mean " <>
+        "authoring a fixture for a shape the shipping code cannot produce; recording that " <>
+        "here is the honest disposition until the legacy shape is either exercised or deleted."},
     # barkpark_web/controllers/github_webhook_controller.ex:189
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "46526763"},
