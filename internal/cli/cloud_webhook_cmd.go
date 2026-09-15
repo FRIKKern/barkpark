@@ -891,6 +891,13 @@ func upstreamDetail(raw json.RawMessage) string {
 // computed STATUS cell painted through the statusRole seam: active → ok (green),
 // auto-disabled (a disable_reason present) → failed (red), manually off →
 // inactive (yellow).
+//
+// The TYPES cell is the doc-type filter, rendered through typesLabel so the
+// empty array reads "{} (match everything)" and not "[]". Without this column
+// a webhook scoped to two document types and one that fires on every document
+// printed the same row, so the operator could not see what an endpoint
+// actually listens to; an EMPTY cell would reproduce that exact ambiguity,
+// which is why the sentinel is labelled rather than blanked.
 func renderWebhookList(out *writer, data json.RawMessage, dataset string) {
 	var body struct {
 		Webhooks []map[string]any `json:"webhooks"`
@@ -908,6 +915,7 @@ func renderWebhookList(out *writer, data json.RawMessage, dataset string) {
 			"status":   webhookStateToken(wh),
 			"url":      webhookCell(wh["url"]),
 			"events":   webhookCell(wh["events"]),
+			"types":    typesLabel(webhookTypes(wh)),
 			"failures": webhookCell(wh["consecutive_failures"]),
 		})
 	}
