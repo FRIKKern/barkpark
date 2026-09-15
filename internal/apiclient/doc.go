@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -318,8 +319,45 @@ func (d Doc) ContentString(field string) string {
 
 // ClaimEpoch returns the fencing epoch of this task document's claim object
 // (content.claim.epoch, flattened to the envelope top level as "claim") and
-// whether a live claim is present. Epochs start at 1 on first claim, so 0
-// never names a real claim — absent / unparseable / zero all report ok=false.
+// whether a USABLE EPOCH VALUE was found. Epochs start at 1 on first claim, so
+// 0 never names one — absent / unparseable / zero all report ok=false.
+//
+// THE BOOL IS NOT A LIVENESS ANSWER, and calling it one is the defect
+// task-6d7b68c7c0e7e8cc was filed for. A RELEASED row KEEPS its epoch: the
+// release path sets claim.worker to null and stamps released_at/released_by
+// while leaving claim.epoch in place (measured against guerrilla — claim, then
+// release through the real verbs, and the read-back is
+// {"epoch":2,"released_at":…,"released_by":…,"worker":null}). So ok=true on a
+// row nobody holds, and every caller that read it as "held" reported a phantom
+// holder. Two did: bp cmux status printed `held by —` with "has_claim": true,
+// and the desk TUI's close guard waved a released row through and POSTed the
+// retained epoch, which the server ACCEPTED (lifecycle went to done).
+//
+// FOR LIVENESS USE ClaimInfo().Live(), never this bool. The authoritative
+// predicate is server-side at api/lib/barkpark/tasks/claim_fence.ex:58-59 —
+// content.claim.worker must be a binary, or the fence answers
+// :task_not_claimed. Live() reads that field and additionally rejects a blank
+// worker, matching the in-tree claimVerdict in internal/cli/tasks_claim_cmd.go.
+// Use THIS function only where you need the epoch VALUE to echo back — a close
+// or release payload's observed_epoch — after Live() has already said held.
+//
+// THE RETAINED EPOCH IS LOAD-BEARING. DO NOT CLEAR, ZERO OR "NORMALISE" IT.
+// It looks like residue on a released row and it is not: the next claim reads
+// it straight off that released row — api/lib/barkpark/tasks/claim.ex:481
+// computes next_epoch = current_epoch(doc) + 1 — and
+// api/lib/barkpark/tasks/close.ex:741-742 refuses :fenced_off on any mismatch
+// (api/lib/barkpark/tasks/release.ex:226 says so in source). Zeroing it would
+// restart the lease numbering, so a stale holder's old-epoch close would land
+// on the NEXT worker's claim. That is data corruption, and it is strictly worse
+// than the misreport this comment replaces. The row is not messy; it is correct
+// and was badly documented. Fix the READER, never the row.
+//
+// KEYSET BASELINE, so nobody writes an assertion that reds on an ordinary row:
+// a released claim carries SEVEN keys — epoch, released_at, released_by,
+// ts_iso, work_digest, work_field_digests, worker. "now" appears only after a
+// pulse; "session"/"session_origin" only on a session-bearing claim (a
+// session-bearing release therefore reads NINE, measured). Only worker and
+// epoch are load-bearing; anything asserting a fixed ten-key shape is wrong.
 func (d Doc) ClaimEpoch() (int, bool) {
 	raw, ok := d.Extra["claim"]
 	if !ok {
@@ -378,6 +416,22 @@ func (d Doc) ClaimInfo() ClaimInfo {
 		info.Worker = *c.Worker
 	}
 	return info
+}
+
+// Live reports whether this claim is CURRENTLY HELD — the one predicate a
+// caller asking "is anybody on this row?" should use. It mirrors the
+// server-side fence at api/lib/barkpark/tasks/claim_fence.ex:58-59, which
+// answers :task_not_claimed unless content.claim.worker is a binary, and adds
+// the blank-worker rejection the in-tree claimVerdict already applies.
+//
+// ONLY THE WORKER VALUE DISCRIMINATES. On a released row claim != null, Epoch
+// is non-zero, and the "worker" key is PRESENT — set to JSON null, which
+// decodes here to Worker:"" . So Present, a non-zero Epoch, and the mere
+// presence of a worker key are ALL false positives for liveness; see
+// ClaimEpoch's comment for the measurement and for why the retained epoch must
+// stay exactly where it is.
+func (c ClaimInfo) Live() bool {
+	return c.Present && strings.TrimSpace(c.Worker) != ""
 }
 
 // PaperBlocks returns the raw JSON for this document's portable-doc block tree,

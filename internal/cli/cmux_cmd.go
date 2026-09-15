@@ -153,6 +153,10 @@ type cmuxStatus struct {
 	Lifecycle    string
 	ClaimedAtISO string
 	ExpiresISO   string
+	// ReleasedAtISO is claim.released_at — set only on a row that WAS held and
+	// was released. It is the breadcrumb that tells a reader the retained epoch
+	// beside it is a spent lease's, not a live one's.
+	ReleasedAtISO string
 
 	// Last swallowed-hook-failure breadcrumb (gated by HasLastError).
 	HasLastError   bool
@@ -164,20 +168,28 @@ type cmuxStatus struct {
 
 // hydrateLease reads the claim + lifecycle off the task envelope's flattened
 // top-level fields (content.claim / lifecycle_status).
+//
+// HasClaim comes from ClaimInfo().Live() — the worker-value predicate that
+// mirrors the server fence at claim_fence.ex:58-59 — NOT from ClaimEpoch's
+// bool. It used to come from ClaimEpoch, and a released row kept its epoch, so
+// this reported has_claim:true for a row nobody held and rendered `held by —`
+// with a live lease countdown beside it. Measured on guerrilla against a row
+// claimed and then released through the real verbs. The epoch is still read,
+// and still read from a released row, because it is the value the NEXT claim
+// increments; see apiclient.Doc.ClaimEpoch for why clearing it corrupts data.
 func (st *cmuxStatus) hydrateLease(doc apiclient.Doc) {
 	st.Lifecycle = doc.ContentString("lifecycle_status")
-	if epoch, ok := doc.ClaimEpoch(); ok {
-		st.HasClaim = true
-		st.ClaimEpoch = epoch
-	}
+	claim := doc.ClaimInfo()
+	st.HasClaim = claim.Live()
+	st.ClaimEpoch = claim.Epoch
+	st.ClaimWorker = claim.Worker
+	st.ReleasedAtISO = claim.ReleasedAt
 	if raw, ok := doc.Extra["claim"]; ok {
 		var c struct {
-			Worker    string `json:"worker"`
 			TsISO     string `json:"ts_iso"`
 			ExpiredAt string `json:"expired_at"`
 		}
 		if json.Unmarshal(raw, &c) == nil {
-			st.ClaimWorker = c.Worker
 			st.ClaimedAtISO = c.TsISO
 			st.ExpiresISO = c.ExpiredAt
 		}
@@ -206,13 +218,27 @@ func renderCmuxStatus(out *writer, st cmuxStatus) int {
 	case st.HasClaim:
 		out.outf("%-10s%s", "claim", st.claimHealth())
 	default:
-		out.outf("%-10s%s", "claim", "(no live claim on this task)")
+		out.outf("%-10s%s%s", "claim", "(no live claim on this task)", st.noClaimDetail())
 	}
 	if st.Lifecycle != "" {
 		out.outf("%-10s%s", "lifecycle", st.Lifecycle)
 	}
 	renderLastError(out, st)
 	return exitOK
+}
+
+// noClaimDetail is the tail appended to the no-live-claim line when the row was
+// released rather than never claimed. The two cases used to be indistinguishable
+// because neither ever printed — hydrateLease called a released row "held". Now
+// that the branch is reachable, saying WHICH it is keeps the retained epoch
+// visible and explains it, so no reader files "a released row should not keep an
+// epoch" as a cleanup; apiclient.Doc.ClaimEpoch documents why that is corruption.
+func (st cmuxStatus) noClaimDetail() string {
+	if st.ReleasedAtISO == "" {
+		return ""
+	}
+	return fmt.Sprintf(" · released at %s · retains epoch %d (the base the next claim increments — not residue)",
+		st.ReleasedAtISO, st.ClaimEpoch)
 }
 
 // renderLastError prints the last swallowed-hook-failure breadcrumb, silent when
@@ -272,12 +298,16 @@ func emitCmuxStatusJSON(out *writer, st cmuxStatus) int {
 		"claim_epoch":        st.ClaimEpoch,
 		"claimed_at":         st.ClaimedAtISO,
 		"expires_at":         st.ExpiresISO,
+		"released_at":        st.ReleasedAtISO,
 		"lifecycle":          st.Lifecycle,
 		"lease_ttl_seconds":  ttl,
 	}
 	// Honest lease health from ts_iso + the TTL default (approximate; see
-	// claimHealth). Emitted only when the claim timestamp is parseable.
-	if age, ok := ageSince(st.ClaimedAtISO); ok {
+	// claimHealth). Emitted only when the claim timestamp is parseable AND the
+	// claim is actually LIVE: ts_iso survives a release, so an unguarded
+	// countdown printed "~44m34s left" on a row nobody held — the same misread
+	// as has_claim, one field over.
+	if age, ok := ageSince(st.ClaimedAtISO); ok && st.HasClaim {
 		payload["claimed_age_seconds"] = int(age.Seconds())
 		payload["approx_remaining_seconds"] = ttl - int(age.Seconds())
 	}
