@@ -12,6 +12,35 @@ command; nothing here was typed from memory, and the JSON beside it is the run t
 
 ---
 
+## Relation to the prior instrument — found late, declared rather than buried
+
+`.github/ci-pr-inventory.md` + `scripts/ci-pr-inventory.py` (PR #16550, 2026-09-06, the same
+parent row's criterion 1) already census the PR path. **This is not a replacement and it does not
+re-derive what that table already holds.** The overlap and the delta, stated exactly:
+
+| | prior inventory | this census |
+|---|---|---|
+| Unit of verdict | **workflow** (46 rows) | **check-run name** (185 rows) |
+| Red rate measured on | `push` to **main** | **`pull_request`** — the venue the verdict is about |
+| Feeds-required | 0 *at workflow granularity*, with the job-level table given by hand | **derived**: the transitive `needs:` closure of each required aggregator, matched through matrix-name rendering — **25 names** |
+| Compute | median real compute per workflow, excluding runs that executed no step | wall-clock per check-run name, plus the **executed / skipped** split per head |
+| "Acted on" | not attempted | **Layer M**: advisory reds sitting on **merged** heads |
+| `continue-on-error` | noted for `Format` in prose | counted per workflow and attached to **every** verdict's `why` |
+
+That document names **"per-job venue verdicts"** in its own *What was NOT measured* section. This
+census is that gap, at that granularity, on the PR-event red rate — and it reaches a verdict the
+workflow-granular table structurally could not: `reland-check` is one workflow with one job, so the
+prior table can see its cost, but only a job-level read of `continue-on-error` turns 0-failures
+from a clean record into a **structural impossibility**.
+
+It also **independently corroborates the contested criterion 2** ("check runs per PR push … under
+20"). That criterion was contested on 15 merged PRs with the argument that skipped check-runs cost
+nothing and job-seconds is the right metric. Measured here over 30 heads: **48.4 of 99.3 check-runs
+per head are `skipped`**. Same conclusion, four times the sample, arrived at without reading the
+objection first.
+
+---
+
 ## Window and method
 
 | | |
