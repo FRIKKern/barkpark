@@ -153,7 +153,13 @@ defmodule Barkpark.Structure do
       [include_global: true] ++
         Keyword.take(opts, [:workspace_id, :grant_scoped, :caller_context])
 
-    schemas = Content.list_schemas(dataset, schema_opts)
+    # Named object types (Gyldendal parity E3.6) own no documents and are
+    # inlined into the schemas that reference them; the desk never lists them.
+    schemas =
+      dataset
+      |> Content.list_schemas(schema_opts)
+      |> Enum.reject(&(Map.get(&1, :kind) == "object"))
+
     schema_map = Map.new(schemas, &{&1.name, &1})
 
     %Node{
