@@ -452,17 +452,35 @@ defmodule BarkparkWeb.TasksController.Params do
   # omitted (never "" and never null) when it does not, so the exact-key-set
   # contract on a minimal open row is untouched.
   #
-  # THE TERM ONLY, and that is MEASURED, not taste. The hostile 50-card
-  # tripwire below params' own tests had 2080 B of headroom under its 30,720 B
-  # ceiling. Marginal cost over 50 cards:
+  # THE TERM ONLY — AND THE BYTE ARGUMENT THAT USED TO SAY SO IS RETIRED.
+  # This comment previously read "2080 B of headroom" under the hostile
+  # tripwire's 30,720 B ceiling and concluded that `reopen_trigger` "overflows
+  # the ceiling before a single character of content". BOTH HALVES ARE FALSE.
+  # Re-measured at d5582da889d728cf1327d2fb322e82d6464fb745
+  # (task-935213699e606b6a), three identical runs:
   #
-  #   * `,"disposition":"parked"`   = 23 B × 50 = 1150 B — fits, ~930 B spare.
-  #   * `,"reopen_trigger":""`      = 20 B × 50 = 1000 B MORE, with a
-  #     ZERO-LENGTH value: 1150 + 1000 = 2150 B > 2080 B. The trigger overflows
-  #     the ceiling before a single character of content — no grapheme cap can
-  #     rescue it, the cap would have to be negative.
-  #   * `disposition_reason` averages 753 B (max 1612 B) per row — the worst-50
-  #     full triple is 72,232 B, 34.7× the headroom.
+  #   * hostile-ceiling probe          18,831 B of 30,720 B — 11,889 B headroom.
+  #   * fully-delegated hostile probe  20,031 B of 30,720 B — 10,689 B headroom.
+  #   * realistic-mix probe            14,038 B of 15,360 B —  1,322 B headroom.
+  #
+  # And the refusal was tested by MUTATION, not arithmetic — `reopen_trigger`
+  # was actually emitted on the brief card and both probes re-run:
+  #
+  #   * hostile:   18,831 → 22,031 B (+3,200 B = 50 × 64 B: the 20 B key plus
+  #     the fixture's 44 B trigger value) — GREEN, 8,689 B still spare. Not
+  #     "before a single character of content": 2,200 B OF content rode, and
+  #     8,689 B were still unused.
+  #   * realistic: 14,038 → 14,283 B (+245 B) — GREEN, 1,077 B spare.
+  #
+  # So THE CEILING NO LONGER REFUSES `reopen_trigger`. Whoever revisits this is
+  # deciding a DESIGN question (does a list card owe the reader the trigger, or
+  # is `bp task get` the right door?) and must not cite bytes as the reason. The
+  # binding constraint is now the REALISTIC 15,360 B bound — 1,077 B of margin
+  # after the trigger, ~7% — not the hostile ceiling, which has 8,689 B.
+  #
+  # `disposition_reason` IS still refused on bytes, and that one is not close:
+  # it averages 753 B (max 1,612 B) per row — the worst-50 full triple is
+  # 72,232 B, 6.1× the 11,889 B headroom measured above.
   #
   # Both omitted companions already ride the FULL view (render_doc(_, :full) is
   # a whole-content passthrough): `bp task get <doc_id>` is the escape hatch
@@ -541,10 +559,14 @@ defmodule BarkparkWeb.TasksController.Params do
   # ADDITIVE BY CONSTRUCTION, and that IS the negative arm: `classify/2`
   # answers nil for every zero-child row, so all 979 of the 1,000 measured
   # leaves emit a byte-identical card. A page of pure leaves is unchanged on
-  # the wire — including the hostile 50-card byte tripwire below, whose ~2,080
-  # B of headroom this cannot touch. Worst case is 50 delegated cards at
-  # `,"dispatch":"delegated"` = 24 B each = 1,200 B, inside that headroom; the
-  # measured page carries 13.
+  # the wire — including the hostile 50-card byte tripwire below, whose
+  # headroom this cannot touch: re-measured 2026-09-13 at e2c55a71e as
+  # 11,889 B plain (18,831 B of 30,720 B) and 10,689 B fully delegated
+  # (20,031 B). An earlier "~2,080 B" figure here, and a "765 B" one carried
+  # by task-935213699e606b6a, were never re-derived and are retired. Worst case
+  # is 50 delegated cards at `,"dispatch":"delegated"` = 24 B each = 1,200 B,
+  # measured exactly by the fully-delegated sibling tripwire; the measured
+  # page carries 13.
   #
   # `live_child_counts` DEFAULTS TO nil, NOT %{}: an empty map would read as
   # "zero live children" and stamp `undecided` on every parent a caller could
