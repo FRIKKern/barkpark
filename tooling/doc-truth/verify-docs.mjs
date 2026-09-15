@@ -537,8 +537,24 @@ function claimsFromSpan(doc, span) {
 // The slash arm is what separates a RATE from a multi-line citation: `1000/page`
 // is a clamp, while `content.ex ~:2153/:2172` puts a `:` or a digit after the
 // slash, never a letter.
+// A SPACED unit token is STILL a unit. `docs/cheatsheets/bp.md: 3298 B > cap
+// 2400 B` is a byte count an instrument printed, not a citation of line 3298 —
+// but the glued-letter test above sees `" B >"` and says no unit, because the
+// only difference from `3298B` is ONE SPACE. (Measured on the real string: the
+// slice after the digits is `" B >"` → false, while `"B > "` → true.)
+//
+// THE LIST IS CLOSED ON PURPOSE. The tempting one-token fix — let the unit
+// letter follow optional whitespace — reads EVERY citation trailed by an
+// ordinary word as a measurement: `" and more"` and `" is where the guard
+// sits"` both become units, and the guard turns a false POSITIVE into a
+// blind spot across the whole corpus. So only size/quantity units that are
+// idiomatically written detached from their number are spelled out here, each
+// anchored on a word boundary so `B` matches `3298 B` and never `3298 Before`.
+const SPACED_UNIT = /^(?:\s*[-\u2013]\s*\d{1,5})?\s+(?:B|[KMGT]i?B|bytes?|tok|tokens?)\b/;
+
 function unitSuffixed(scan, idx) {
-  return /^(?:\s*[-\u2013]\s*\d{1,5})?(?:-|\/)?[A-Za-z]/.test(scan.slice(idx));
+  const rest = scan.slice(idx);
+  return /^(?:\s*[-\u2013]\s*\d{1,5})?(?:-|\/)?[A-Za-z]/.test(rest) || SPACED_UNIT.test(rest);
 }
 
 function matchLineref(raw) {
