@@ -1648,6 +1648,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 @media (max-width: 720px) { .bp-paper-surface .bp-cols { grid-template-columns: 1fr; } }
 .bp-paper-surface .bp-cols__c { min-width: 0; }
 .bp-paper-surface .bp-cols__c > :first-child { margin-top: 0; }
+/* Nested columns use their section cell, not the page-wide evidence band. */
+.bp-paper-surface .bp-section__cell .bp-cols { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
 
 /* ── section grid — the step-2 layout engine (mode:grid). Shared class so the
    reader AND the canvas node-view paint the SAME grid (parity by construction).

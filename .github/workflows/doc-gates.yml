@@ -210,6 +210,7 @@ on:
       # itself and the golden mirror need their own triggers (a seeded/removed
       # fixture is a .json, covered by no glob above).
       - "scripts/pd-parity-completeness.sh"
+      - "scripts/pd-parity-completeness.test.sh"
       - "api/test/support/fixtures/pd-parity/**"
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
       # command files themselves, plus the only two anchored target surfaces NOT
@@ -539,6 +540,7 @@ on:
       # itself and the golden mirror need their own triggers (a seeded/removed
       # fixture is a .json, covered by no glob above).
       - "scripts/pd-parity-completeness.sh"
+      - "scripts/pd-parity-completeness.test.sh"
       - "api/test/support/fixtures/pd-parity/**"
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
       # command files themselves, plus the only two anchored target surfaces NOT
@@ -1276,6 +1278,7 @@ jobs:
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/pd-parity-completeness.sh --selftest
+          bash scripts/pd-parity-completeness.test.sh
           bash scripts/pd-parity-completeness.sh
 
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The

@@ -92,6 +92,15 @@
     "paper-add-property",
     "paper-edit-block",
   ]);
+  // Studio handlers navigate away from the document, destroying pending canvases.
+  // Replay the original control only after this document's saves are acknowledged.
+  const PAPER_NAVIGATION_EVENTS = new Set([
+    "select",
+    "expand-pane",
+    "open-backlink",
+    "new-document",
+    "scope-open",
+  ]);
   const PAPER_POSITIONAL_COLLECTION_PARAM =
     /^(note|tab|param|ref|bar|toc|criterion|gauge|panel|step|question)-(?:count|action|\d+-)/;
   const PAPER_POSITIONAL_COLLECTION_ACTION_PARAM =
@@ -2741,14 +2750,15 @@
         const betaPanel = target.closest?.('[data-test-id="studio-doc-beta-editor"]');
         const modeSwitch = clickEvent === "editor-set-mode" &&
           betaPanel === main.closest?.('[data-test-id="studio-doc-beta-editor"]');
+        const navigation = PAPER_NAVIGATION_EVENTS.has(clickEvent);
         const anchor = target.matches("a[href]");
         if (anchor) {
           const href = target.getAttribute("href");
           if (!href || href.startsWith("#") || target.hasAttribute("download") ||
               target.getAttribute("target") === "_blank") return;
         }
-        if (!anchor && !structural && !modeSwitch) return;
-        if ((anchor || modeSwitch) && !coordinator.hasUnsaved()) return;
+        if (!anchor && !structural && !modeSwitch && !navigation) return;
+        if ((anchor || modeSwitch || navigation) && !coordinator.hasUnsaved()) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         if (structural) {

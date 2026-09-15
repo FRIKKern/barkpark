@@ -151,13 +151,39 @@ function emit(h,   p, s, i, c, d, q, cur, nargs, a1, m, var, guard, g, seg, lit)
     }
   }
 }
+# Track literals outside clause heads too: documentation/body strings can
+# contain apparent function declarations that must not start a census entry.
+function track_literals(line,   i, c, triple) {
+  for (i = 1; i <= length(line); i++) {
+    c = substr(line, i, 1)
+    triple = substr(line, i, 3)
+    if (heredoc) {
+      if (triple == heredoc) { heredoc = ""; i += 2 }
+      continue
+    }
+    if (quote) {
+      if (escaped) escaped = 0
+      else if (c == "\\") escaped = 1
+      else if (c == quote) quote = ""
+      continue
+    }
+    if (c == "#") break
+    if (c == "\"" || c == sprintf("%c", 39)) {
+      if (triple == c c c) { heredoc = triple; i += 2; continue }
+      quote = c
+    }
+  }
+}
 BEGIN { collecting = 0; depth = 0; instr = 0; buf = "" }
 {
-  if (!collecting) {
-    if ($0 !~ /^[ \t]*def[ \t]+compose_block\(/) next
+  if (!collecting && !quote && !heredoc &&
+      $0 ~ /^[ \t]*def[ \t]+compose_block\(/) {
     collecting = 1; depth = 0; instr = 0; buf = ""
   }
-  if (scan($0)) { emit(buf); collecting = 0; buf = "" } else { buf = buf " " }
+  if (collecting) {
+    if (scan($0)) { emit(buf); collecting = 0; buf = "" } else { buf = buf " " }
+  }
+  track_literals($0)
 }
 END { if (collecting) emit(buf) }
 ' "$1" | sort -u

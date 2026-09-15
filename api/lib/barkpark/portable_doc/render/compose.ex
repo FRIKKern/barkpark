@@ -2089,8 +2089,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # the single file both engines' tests assert against.
   #
   # PRECEDENCE is FIRST NON-BLANK, not first-present: a leading key holding "" or
-  # whitespace falls through, so a Studio-seeded `"value" => ""` (blocks.ex:3899
-  # mints one on every new code block) cannot mask a real `code`. With `both` = 0
+  # whitespace falls through, so a Studio-seeded `"value" => ""` (the code clause
+  # of Blocks.default_block/2 mints one) cannot mask a real `code`. With `both` = 0
   # in the corpus the order is unobservable today; `value` leads because it is the
   # canonical field and because bpml/printer.ex has printed exactly
   # `["value", "code", "content", "text"]` since it was written — this reuses that

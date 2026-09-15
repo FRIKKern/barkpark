@@ -489,7 +489,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def valueref_accept_baseline(_params, socket), do: {:noreply, socket}
 
   def paper_add_block(%{"block-type" => type} = params, socket) do
-    new = Blocks.default_block(type, Blocks.new_block_id())
+    new = Blocks.default_block(type, Blocks.new_block_id(params["request_id"]))
 
     op =
       case params["after-id"] do
@@ -517,7 +517,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   unknown kind / missing anchor is a calm no-op.
   """
   def paper_materialize_slot(%{"kind" => kind} = params, socket) do
-    case materialize_slot_block(kind) do
+    case materialize_slot_block(kind, Blocks.new_block_id(params["request_id"])) do
       nil ->
         failed_reply(socket, params)
 
@@ -541,25 +541,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # (the seeded featured block, now birthed on demand); ingress is an unlocked
   # role:ingress paragraph. Both carry the role the reader + template validate key
   # on. Unknown kinds mint nothing.
-  defp materialize_slot_block("featured") do
+  defp materialize_slot_block("featured", id) do
     %{
-      "id" => Blocks.new_block_id(),
+      "id" => id,
       "type" => "image",
       "role" => "featured",
       "locked" => true
     }
   end
 
-  defp materialize_slot_block("ingress") do
+  defp materialize_slot_block("ingress", id) do
     %{
-      "id" => Blocks.new_block_id(),
+      "id" => id,
       "type" => "paragraph",
       "role" => "ingress",
       "content" => []
     }
   end
 
-  defp materialize_slot_block(_), do: nil
+  defp materialize_slot_block(_, _id), do: nil
 
   def paper_slash_insert(%{"type" => type, "fieldName" => fname} = params, socket)
       when is_binary(fname) and fname != "" do
@@ -568,7 +568,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       |> put_flash(:error, "That field is already at its limit.")
       |> failed_reply(params)
     else
-      new = Map.put(Blocks.default_block(type, Blocks.new_block_id()), "fieldName", fname)
+      new =
+        Map.put(
+          Blocks.default_block(type, Blocks.new_block_id(params["request_id"])),
+          "fieldName",
+          fname
+        )
 
       paper_reply(
         Shared.paper_op(
@@ -583,7 +588,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # `> [!type]` gesture; merge them onto the seeded default block. Ordered ABOVE
   # the generic clause (a more specific head must match first).
   def paper_slash_insert(%{"type" => "callout"} = params, socket) do
-    id = Blocks.new_block_id()
+    id = Blocks.new_block_id(params["request_id"])
 
     new =
       "callout"
@@ -599,7 +604,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   end
 
   def paper_slash_insert(%{"type" => type} = params, socket) do
-    new = Blocks.default_block(type, Blocks.new_block_id())
+    new = Blocks.default_block(type, Blocks.new_block_id(params["request_id"]))
 
     paper_reply(
       Shared.paper_op(
@@ -643,7 +648,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
         case Enum.find(Shared.paper_all_descriptors(socket), fn d -> d.name == fname end) do
           %{type: type, label: label} ->
             new =
-              Blocks.default_block(type, Blocks.new_block_id())
+              Blocks.default_block(type, Blocks.new_block_id(params["request_id"]))
               |> Map.put("fieldName", fname)
               |> Map.put("label", label)
 
