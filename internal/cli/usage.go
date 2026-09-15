@@ -262,6 +262,16 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		out.errf("%s", line)
 	}
 
+	// The envelope key was only half the guess. WHERE THE CLAIM SITS INSIDE A
+	// ROW also differs per verb — `.doc.claim` on `task get`, `.claim` on the
+	// flat `ls`/`ready`/`prime` rows — and each verb's path is ABSENT on the
+	// others, so the wrong one answers null on every row and reads as UNCLAIMED.
+	// Derived from taskReadShapes() so help and behaviour cannot drift
+	// (tasks_claim_path.go).
+	for _, line := range taskClaimPathHelpLines(cmd) {
+		out.errf("%s", line)
+	}
+
 	// `--match` is honoured entirely client-side (see tasks_match.go), so the
 	// manifest cannot declare it and the flags block above cannot show it. A
 	// flag nobody can discover is a flag nobody uses — and this one exists
