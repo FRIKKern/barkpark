@@ -897,11 +897,18 @@ defmodule Barkpark.Content.Schema do
   # written (or any cycle) is refused the same way. The inliner is cycle-safe
   # regardless: a type already on the walk is left as-is.
 
+  # The editor's vocabulary is OPEN at render time (an unknown type falls back
+  # to a text input — see `FieldInputs`), so this list is the platform's
+  # DECLARED vocabulary: every type the editor/validator dispatch on plus the
+  # types shipped templates and plugins declare (`portableDocument` — the
+  # search-starter templates). `shipped_schema_vocabulary_test.exs` walks every
+  # shipped schema JSON through the gate so a new template type cannot be
+  # refused at boot or at workspace import.
   @builtin_field_types ~w(
     string text number integer float boolean datetime date time color select
     richText reference image file slug source url email array object composite
     arrayOf codelist localizedText json markdown geopoint tags embed paragraph
-    park sheet valueref task paper
+    park sheet valueref task paper portableDocument
   )
 
   @doc "Every field type the platform renders/validates natively; anything else must name an object type."
