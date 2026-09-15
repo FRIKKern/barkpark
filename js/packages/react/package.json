@@ -76,7 +76,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
-    "size": "size-limit"
+    "size": "size-limit",
+    "census": "node scripts/bundle-census.mjs"
   },
   "dependencies": {
     "@barkpark/core": "workspace:^"
