@@ -44,10 +44,23 @@ if (process.argv.slice(2).includes("--selftest")) {
 }
 
 // Fault injection, driven only by the selftest above. BP_DESIGN_CHECK_FAULT is a
-// comma-separated set of part letters; each named part records ONE EXTRA failure
-// at the point it records its own. It can only ADD a failure, never suppress one,
-// so the worst a stray value in CI can do is red this gate loudly — there is no
-// value of this variable that mutes a real drift.
+// comma-separated set of part ids; each named part records ONE EXTRA failure at
+// the point it records its own. It can only ADD a failure, never suppress one, so
+// the worst a stray value in CI can do is red this gate loudly — there is no value
+// of this variable that mutes a real drift.
+//
+// There is ONE hook beside EVERY ok-gate in this file, and that is the contract
+// the selftest reads. It derives the injectable set by scanning THIS FILE for
+// `FAULT.has("<id>")`, loops it, and NAMES any Part carrying no hook as uncovered.
+// A Part added below is therefore covered by adding its hook HERE, never by
+// editing the selftest, and a Part whose author forgets the hook is named in the
+// output instead of passing in silence. Every hook prints the same shape,
+// `  Part <id> FAIL: injected fault (--selftest)`, because the selftest derives
+// that line from the id to prove the fault LANDED before it judges anything.
+// Part A's hook says more: Part A prints a per-ARTIFACT ok line and gates no
+// part-summary, so it is the one injectable part whose fault withholds no ok. That
+// exemption is declared AT THE HOOK, where a reader of either file meets it, and
+// is read back by the selftest instead of being hand-listed there.
 const FAULT = new Set(
   (process.env.BP_DESIGN_CHECK_FAULT || "").split(",").map((s) => s.trim()).filter(Boolean),
 );
@@ -161,7 +174,7 @@ for (const r of evaluateAll()) {
     console.log(`  ok   ${mr.name} (${mr.path})`);
   }
 }
-if (FAULT.has("A")) fail("  FAIL Part A: injected fault (--selftest)");
+if (FAULT.has("A")) fail("  Part A FAIL: injected fault (--selftest; Part A prints per-item ok lines and gates no part-summary)");
 // The blanket "Fix: --write" is safe ONLY where nothing is unattributed; where a
 // region holds hand-written bytes, --write is the destructive act, not the fix.
 if (failed && !unattributedSeen) console.error("\n  Fix: node design/emit.mjs --write\n");
@@ -276,7 +289,7 @@ for (const s of ["done", "closed"]) {
     fail(`  §6 FAIL: ${s} is not teal (#0d9488/#2dd4bf) in the Go artifact`);
 }
 
-if (FAULT.has("B")) fail("  §6 FAIL Part B: injected fault (--selftest)");
+if (FAULT.has("B")) fail("  Part B FAIL: injected fault (--selftest)");
 
 if (failed === failedBeforeB)
   console.log(`  ok   ${LIFE_ORDER.length} lifecycle states agree across Go + CSS + Studio (CSS var + TokensGen) + tokens (glyph, colour, frames); done/closed teal ≠ status.ok green`);
@@ -302,6 +315,7 @@ for (const step of TYPE_STEPS) {
     typeOk = false;
   }
 }
+if (FAULT.has("C")) { fail("  Part C FAIL: injected fault (--selftest)"); typeOk = false; }
 if (typeOk)
   console.log(`  ok   ${TYPE_STEPS.length} chrome type steps emit --text-* vars matching tokens.type.chrome (size + line-height)`);
 
@@ -401,6 +415,7 @@ if (!/from "@\/lib\/tokens\.gen"/.test(styleguideText))
 for (const [re, what] of [[/\bsize:\s*\d/, "a literal type size"], [/\blh:\s*\d/, "a literal line height"], [/\bfontWeight:\s*\d{3}\b/, "a literal font weight"]])
   if (re.test(styleguideText))
     webTypeFail(`  Part C2 FAIL: ${styleguidePath} declares ${what} — the hand-kept ladder is back beside the emitted one`);
+if (FAULT.has("C2")) webTypeFail("  Part C2 FAIL: injected fault (--selftest)");
 if (webTypeOk)
   console.log(`  ok   ${TYPE_STEPS.length} chrome (derived from tokens.type.chrome, descending size) + ${READING_STEPS.length} reading steps emit typed {size,lineHeight,weight} into ${webTokensPath}, and ${styleguidePath} consumes them without restating a step`);
 
@@ -602,6 +617,7 @@ for (const entry of ledger.entries) {
   console.log(`  ${pad("TOTAL", wPath)}  ${pad(ledgerBaselineTotal, 8)}  ${pad(ledgerActualTotal, 6)}`);
 }
 
+if (FAULT.has("E")) fail("  Part E FAIL: injected fault (--selftest)");
 if (failed === failedBeforeE)
   console.log(
     `  ok   ${ledgerRows.length} ledgered surface(s), ${ledgerActualTotal} hand-stamped ` +
@@ -847,6 +863,7 @@ if (!evergreenFile) {
   }
 }
 
+if (FAULT.has("F")) fail("  Part F FAIL: injected fault (--selftest)");
 if (failed === failedBeforeF)
   console.log("  ok   Part F PASS — the theme compiler reproduces evergreen byte-for-byte; adding theme N+1 is one more design/themes/*.json.");
 
@@ -891,6 +908,7 @@ for (const a of ARTIFACTS) {
     }
   }
 }
+if (FAULT.has("G")) fail("  Part G FAIL: injected fault (--selftest)");
 if (d25Clean && failed === failedBeforeG)
   console.log("  ok   no --life-*/--provider-*/--cc-*/.bp-lg--/.bp-inst-- leaked into any [data-bp-theme] scope");
 
@@ -1061,6 +1079,7 @@ for (const p of PAIRINGS) {
     }
   }
 }
+if (FAULT.has("H")) fail("  Part H FAIL: injected fault (--selftest)");
 if (failed === failedBeforeH)
   console.log(`  ok   ${PAIRINGS.length} curated pairings × ${Object.keys(contrastThemes).length} themes × 2 modes = ${pairChecks} checks, all ≥ AA (text 4.5 / nontext 3.0)`);
 
@@ -1191,6 +1210,7 @@ if (failed === failedBeforeH)
   if (lostLines("a\n\n\nb\n", region).length !== 0)
     fail(`  Part I FAIL: lostLines() must ignore blank lines, got ${JSON.stringify(lostLines("a\n\n\nb\n", region))}`);
 
+  if (FAULT.has("I")) fail("  Part I FAIL: injected fault (--selftest)");
   if (failed === failedBeforeI)
     console.log(`  ok   ${cases.length} attribution outcomes + 3 lostLines properties`);
 }
@@ -1248,6 +1268,7 @@ console.log("\ndesign/check.mjs — Part J: air-scale consumer census");
           `    the step from space.air + AIR_STEPS.`,
       );
   }
+  if (FAULT.has("J")) fail("  Part J FAIL: injected fault (--selftest)");
   if (failed === failedBeforeJ)
     console.log(`  ok   ${AIR_STEPS.length} air steps emitted as beat ratios, bridged onto --bp-air-*, and each read by a live consumer`);
 }
@@ -1410,6 +1431,7 @@ console.log("\ndesign/check.mjs — Part K: evidence-band consumer census");
     }
   }
 
+  if (FAULT.has("K")) kFail("  Part K FAIL: injected fault (--selftest)");
   if (!kFailed)
     console.log(
       `  ok   ${EVIDENCE_KEYS.length} evidence tokens emitted with their authored units, bridged onto --bp-evidence-*, ` +
@@ -1508,6 +1530,7 @@ console.log("\ndesign/check.mjs — Part L: section-boundary consumer census");
         `    \`> #paper-body > div:not([class]) > h2\` the device is dead on the page that ships.`,
     );
 
+  if (FAULT.has("L")) lFail("  Part L FAIL: injected fault (--selftest)");
   if (!lFailed)
     console.log(
       `  ok   ${SECTION_KEYS.length} section tokens emitted, bridged and consumed on both the reader and the editor surface, ` +
@@ -1596,6 +1619,7 @@ console.log("\ndesign/check.mjs — Part M: rule-ladder consumer census + heavy-
     }
   }
 
+  if (FAULT.has("M")) mFail("  Part M FAIL: injected fault (--selftest)");
   if (!mFailed)
     console.log(
       `  ok   --tok-rule-hairline emitted, bridged and consumed on both surfaces, and neither stylesheet ` +
@@ -1771,6 +1795,7 @@ console.log("\ndesign/check.mjs — Part N: motion-ladder parity + hand-typed du
     console.log(`  ${pad("TOTAL", wPath)}  ${pad(baseTotal, 8)}  ${pad(actualTotal, 6)}`);
   }
 
+  if (FAULT.has("N")) nFail("  Part N FAIL: injected fault (--selftest)");
   if (!nFailed)
     console.log(
       `  ok   the ${MOTION_STEPS.length}-rung motion ladder reaches ${MOTION_SURFACES.length} surface(s) ` +
@@ -1947,6 +1972,7 @@ console.log("\ndesign/check.mjs — Part O: hand-stamped type/measure literal ra
     console.log(`  ${pad("TOTAL", wPath)}  ${pad(oBaseTotal, 8)}  ${pad(oActualTotal, 6)}`);
   }
 
+  if (FAULT.has("O")) oFail("  Part O FAIL: injected fault (--selftest)");
   if (!oFailed)
     console.log(
       `  ok   ${oRows.length} derived stylesheet(s), ${oActualTotal} hand-stamped type/measure ` +

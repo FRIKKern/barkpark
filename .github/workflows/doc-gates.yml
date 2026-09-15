@@ -974,7 +974,7 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node design/validate.mjs
           # --selftest FIRST (distrust a vacuous green, same order as the preview
-          # parity gate above). check.mjs's clean run is a PASS line and 25 ok
+          # parity gate above). check.mjs's clean run is a PASS line and 56 ok
           # lines — which is also what a gate whose parts stopped recording
           # failures prints. The selftest re-invokes check.mjs as a subprocess with
           # one part's failure forced (BP_DESIGN_CHECK_FAULT, a hook that can only
@@ -982,6 +982,16 @@ jobs:
           # directions: a part that failed withholds its ok, a part that passed
           # prints its ok even when an earlier part failed. Giving Part B back its
           # pre-fix run-wide read reds it, naming Part B (proven able to fail).
+          #
+          # The arms are DERIVED, not listed: the Parts come from check.mjs's own
+          # `— Part <id>:` headers, the injectable ones from its own
+          # `FAULT.has("<id>")` hooks (one beside every ok-gate), and the selftest
+          # loops them — so covering a Part added later is a hook in check.mjs and
+          # no edit here. It also PRINTS its coverage: any Part with no hook is
+          # named as UNEXERCISED (Part 0 today, which exits on failure and prints
+          # no ok line), and any ok line no fault withholds is named as unproven.
+          # It was three hand-named arms until r19: neutering Part E's ok-gate then
+          # exited 0 and was invisible; all 15 gate-neutering mutations red now.
           node design/check.mjs --selftest
           node design/check.mjs
           # theme-system Wave 2 (D17): the zero-dep OKLCH compiler core's unit
