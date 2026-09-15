@@ -431,9 +431,9 @@ var allowedURLScheme = map[string]bool{
 }
 
 // sanitizeURL cleans a document-controlled URL before it is spliced into an
-// OSC 8 hyperlink. It (a) strips terminal control bytes (C0 controls + DEL) so
+// OSC 8 hyperlink. It (a) strips terminal control runes (C0, DEL, and C1) so
 // a href/src can't close or hijack the OSC 8 sequence (an embedded ST/BEL/CSI
-// byte would otherwise emit raw escapes into the reader's terminal), then
+// control would otherwise emit raw escapes into the reader's terminal), then
 // (b) enforces a scheme allowlist so a `javascript:`, `file:`, `data:` or other
 // custom-scheme URI can't become a clickable link the OS open handler follows.
 // A URL whose scheme is not http/https/mailto/tel (case-insensitive), or which
@@ -485,14 +485,15 @@ func isASCIILetter(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
+// isCtrlRune covers C0, DEL, and Unicode C1 controls, including CSI/OSC/ST.
+// Keep the set aligned with the Elixir render util's URL control regex.
 func isCtrlRune(r rune) bool {
-	return r < 0x20 || r == 0x7f
+	return r < 0x20 || (r >= 0x7f && r <= 0x9f)
 }
 
 // sanitizeCodeText is sanitizeText for a SOURCE line: it strips the same
-// escape-class control bytes but PRESERVES the horizontal tab (0x09) so code
-// indentation survives — a tab is display-safe; only the escape-class C0 bytes
-// can hijack the terminal.
+// control runes but PRESERVES the horizontal tab (0x09) so code indentation
+// survives. C1 controls are removed just as they are from display text.
 func sanitizeCodeText(s string) string {
 	if strings.IndexFunc(s, isCtrlNonTab) < 0 {
 		return s
@@ -530,7 +531,7 @@ func isCtrlNonTabNL(r rune) bool {
 	return r != '\t' && r != '\n' && isCtrlRune(r)
 }
 
-// sanitizeText strips terminal control bytes (C0 controls + DEL) from
+// sanitizeText strips terminal control runes (C0, DEL, and C1) from
 // document-controlled display text so an embedded escape (e.g. an alt of
 // "\x1b[2J") can't repaint or hijack the reader's terminal when the text is
 // spliced into a lipgloss Render (which styles but does not strip escapes).
