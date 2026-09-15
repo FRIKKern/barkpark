@@ -1061,6 +1061,74 @@ function selftest() {
         );
       }
     }
+
+    // ── (r) A QUOTED BYTE COUNT IS NOT A CITATION ─────────────────────────────
+    // The specimen: api/test/barkpark/doc_budget_cap_test.exs quotes the doc-budget
+    // gate's own refusal string inside a comment —
+    //
+    //   docs/cheatsheets/bp.md: 3298 B > cap 2400 B (over by 898 B)
+    //
+    // and the sweep reported `cited line(s) 3298 exceed file length (40)` at HIGH
+    // confidence. Nothing in that sentence cites anything; it reproduces an
+    // instrument's output. The unit guard already existed for `12px` and
+    // `~180-400s`, but it requires the unit to be GLUED to the digits, and the only
+    // difference here is ONE SPACE: the slice after `3298` is `" B >"`, which the
+    // glued test reads as no-unit.
+    //
+    // THE TWO CONTROLS ARE THE POINT. Widening a guard is exactly how a false
+    // positive becomes a blind spot, so (r-control-a) keeps the same `<file>: <n>`
+    // shape with NO unit and (r-control-b) trails the number with an ordinary WORD
+    // — the shape the tempting "any letter after whitespace" fix would have
+    // silently swallowed corpus-wide. Both must still RED.
+    if (!plant) {
+      fails.push("(r) SETUP: shares the plant target and it was unavailable");
+    } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # The cap arm fails with "${plant.base}: ${plant.beyond} B > cap 2400 B (over by 898 B)".\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const byteFindings = linerefFindings([probeRel]);
+      if (byteFindings.length !== 0) {
+        fails.push(
+          `(r) BYTE COUNT: "${plant.beyond} B", a size printed beside ${plant.base}, was read as a ` +
+            "line number — a quoted instrument refusal now reports drift: " + (byteFindings[0].evidence || ""),
+        );
+      }
+      // (r-control-a) SAME SHAPE, NO UNIT → must still RED.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${plant.symbol}\` is built at ${plant.base}: ${plant.beyond} (the head of the clause).\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      if (linerefFindings([probeRel]).length === 0) {
+        fails.push(
+          `(r-control-a) BLIND SPOT: a real \`${plant.base}: ${plant.beyond}\` citation — colon, space, ` +
+            "digits, NO unit — went SILENT past EOF. The unit guard has swallowed the citation shape it " +
+            "was supposed to stand beside.",
+        );
+      }
+      // (r-control-b) NUMBER TRAILED BY AN ORDINARY WORD → must still RED. This is
+      // the arm that refutes the one-token "unit letter may follow whitespace" fix.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${plant.symbol}\` sits at ${plant.base}:${plant.beyond} and is where the guard runs.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      if (linerefFindings([probeRel]).length === 0) {
+        fails.push(
+          `(r-control-b) BLIND SPOT: \`${plant.base}:${plant.beyond} and is where …\` went SILENT. Any ` +
+            "citation followed by a word now reads as a measurement — the guard was widened to letters " +
+            "instead of to UNITS.",
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -1091,6 +1159,9 @@ function selftest() {
   process.stdout.write("  ok: (o-control) the SAME citation, unqualified, still REDS — (o) is a binding, not a blind spot\n");
   process.stdout.write("  ok: (p) two paths for one basename REFUSE — `cannot resolve`, never a pick\n");
   process.stdout.write("  ok: (q) a doc-local binding to a file that cannot hold the line still REDS\n");
+  process.stdout.write("  ok: (r) silent on a QUOTED BYTE COUNT — `<file>: <n> B` is a size, not a line\n");
+  process.stdout.write("  ok: (r-control-a) the SAME `<file>: <n>` shape with NO unit still REDS\n");
+  process.stdout.write("  ok: (r-control-b) a citation trailed by an ordinary WORD still REDS — the guard widened to UNITS, not to letters\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }
