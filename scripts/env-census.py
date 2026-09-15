@@ -130,6 +130,12 @@ RESOLUTIONS = {
         why="module attribute, single literal binding in the same module",
         names=["BARKPARK_GITHUB_INTAKE_WORKSPACE_ID"],
     ),
+    ("cloud/lib/barkpark_cloud/health/serving_memory.ex", "@env"): dict(
+        why="module attribute, single literal binding in the same module "
+        "(`@env \"BARKPARK_GIT_SHA\"`); ServingMemory.read/1 falls back to it "
+        "when no :sha option is passed (2026-09-15)",
+        names=["BARKPARK_GIT_SHA"],
+    ),
     ("api/lib/barkpark/sites/deploy_runner.ex", "name"): dict(
         why="env_or_nil/1 helper; callers pass literals (site deploy runner)",
         names="CALLERS",
