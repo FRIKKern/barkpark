@@ -22282,6 +22282,83 @@ test("cch-w31-s4: webhookMutationError's specific branches still win over the st
   assert.equal(hooks.webhookMutationError({}), "Please check the details and try again.");
 });
 
+// ── cch-w57-s4: A 409 SUSPENDED NAMES THE SUSPENSION, and what the branch
+//    that does it is actually WORTH ───────────────────────────────────────────
+//
+// cch-w57-s4 gave webhookMutationError a `suspended` branch — the proxy refuses
+// a :mutate on a suspended box with 409 suspended without ever reaching the
+// instance, so nothing about the person's input was ever judged. It shipped
+// with no console-side test at all. Find it with:
+//   grep -n 'err.code === "suspended"' cloud/priv/static/app.js
+//
+// MEASURED, not assumed: deleting that branch does NOT change the bare 409
+// answer. friendly() unwraps a nested `{error:{code}}` envelope and resolves
+// the slug against ERRORS before it ever consults a caller's fallback, and
+// ERRORS carries a `suspended` key — so the terminal faultCopy() call returns
+// the SAME sentence, at 409, at 500, at status 0 and with no status at all. The
+// branch is defence-in-depth over that resolution, not the mechanism behind it.
+//
+// So there are two different things to pin, and the second one is the one with
+// teeth:
+//   1. THE CONTRACT — the sentence a suspended mutation renders. It would red
+//      if either the branch or the ERRORS key went away, which is what the
+//      screen actually depends on.
+//   2. THE BRANCH — where it is the ONLY thing standing: precedence over the
+//      instance-validation detail ladder below it. A `suspended` envelope that
+//      also carries a detail payload renders the field error without it.
+// Both drive the shipped file; (2) drives a MUTANT of it through evalApp, so it
+// reds by name the moment the branch stops being load-bearing.
+
+test("cch-w57-s4: a 409 suspended names the SUSPENSION, never the person's input", () => {
+  const copy = hooks.webhookMutationError({ ok: false, error: { code: "suspended" } }, 409);
+  assert.match(copy, /suspended/i,
+    "a 409 suspended must say the instance is suspended, got: " + copy);
+  assert.ok(!/check the details/i.test(copy),
+    "a 409 suspended judged no input — it must not blame the person: " + copy);
+  // The NAMED sentence, not the bare slug a key.replace fallback would echo.
+  assert.equal(copy,
+    "This instance is suspended — Barkpark Cloud won't act on it until the suspension is cleared.");
+  // And it is not a 409 accident: the same envelope at every status the proxy
+  // can produce reads the same way, never the check-the-details copy.
+  for (const status of [409, 500, 0, undefined]) {
+    const c = hooks.webhookMutationError({ ok: false, error: { code: "suspended" } }, status);
+    assert.equal(c, copy, "status " + status + " drifted off the suspension sentence: " + c);
+  }
+});
+
+test("cch-w57-s4 CONTROL: deleting the suspended branch changes the answer — on the detail ladder", () => {
+  const src = fs.readFileSync(APP_PATH, "utf8");
+  const BRANCH = '    if (err.code === "suspended") return ERRORS.suspended;\n';
+  // The branch still exists in the shipped file. This is the on-disk mutation
+  // detector: delete the line and THIS test reds by name, before any behaviour
+  // is measured at all.
+  assert.ok(src.includes(BRANCH),
+    "webhookMutationError's `suspended` branch is gone from the shipped app.js — " +
+    "grep -n 'err.code === \"suspended\"' cloud/priv/static/app.js");
+  const mutant = evalApp(src.replace(BRANCH, "")).hooks.webhookMutationError;
+  const withBranch = hooks.webhookMutationError;
+
+  // WHERE THE BRANCH IS THE ONLY THING STANDING. A suspended envelope that also
+  // carries an instance-validation detail payload: without the branch the
+  // ladder below wins and the person reads a field error about input the proxy
+  // never forwarded.
+  const laddered = { ok: false, error: { code: "suspended", detail: { error: { details: { url: ["must be https"] } } } } };
+  assert.equal(withBranch(laddered, 409),
+    "This instance is suspended — Barkpark Cloud won't act on it until the suspension is cleared.");
+  assert.equal(mutant(laddered, 409), "url must be https",
+    "the mutant no longer differs — the branch has stopped being load-bearing, " +
+    "so this control proves nothing and must be re-derived");
+
+  // WHERE IT IS NOT. Pinned so the redundancy is a re-runnable measurement
+  // rather than a claim in a comment: the bare envelope is ERRORS-resolved by
+  // friendly() with or without the branch.
+  const bare = { ok: false, error: { code: "suspended" } };
+  for (const status of [409, 500, 0, undefined]) {
+    assert.equal(mutant(bare, status), withBranch(bare, status),
+      "status " + status + ": the bare 409 path is no longer branch-independent");
+  }
+});
+
 test("cch-w31-s4: every webhookMutationError call site passes the status it already had", () => {
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const calls = [...src.matchAll(/webhookMutationError\(([^)]*)\)/g)]
