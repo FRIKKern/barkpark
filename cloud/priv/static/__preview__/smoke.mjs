@@ -661,6 +661,18 @@ function makeDom() {
 //     that read /v1/me at paint time and never again is observable as such
 //     (before/after bytes). Without it the whole corpus resolves /v1/me on the
 //     first microtask and no late-answer defect can be represented at all.
+//
+// HOW A SCENARIO ASKS FOR ONE (cch-w46-bl): an EXPECTATIONS entry may carry a
+//   • boot — the options object runScenario hands straight to bootScenario
+//     (`bootScenario(name, exp.boot)`). Omit it and the boot is byte-for-byte
+//     the shipped one, so every existing entry is unchanged. Until this key
+//     existed the ONLY consumer of the options above was the module-level
+//     assertLateMeRepaintsTheRail() guard: a scenario that wanted to be checked
+//     with the authority read STILL IN FLIGHT could not ask for it, so every
+//     late-answer claim had to be made by a hand-written guard instead of by
+//     the table. A check whose entry sets `{ deferMe: true }` is handed
+//     `ctx.resolveMe()` to land the held answer mid-check (see runScenario), so
+//     the before/after of a repaint seam is assertable from EXPECTATIONS.
 function bootScenario(name, opts) {
   const { registry, document, byId } = makeDom();
 
@@ -1848,24 +1860,76 @@ const EXPECTATIONS = {
   // corpus proof of that fix: the refusal card is what renders, and the form is
   // GONE rather than merely disabled (a disabled submit leaves three live
   // controls still selling the refusal).
+  // cch-w46-bl — THE FIRST EXPECTATIONS ENTRY TO DECLARE BOOT OPTIONS, and the
+  // reason the `boot` key exists at all. Everything this entry asserted before
+  // is still asserted, verbatim; what changed is WHEN. The screen is now
+  // entered with GET /v1/me still in flight (`boot: { deferMe: true }`), which
+  // is the state a deep link into a slow control plane actually produces, and
+  // the refusal is reached by LANDING that answer mid-check.
+  //
+  // THE SEAM UNDER TEST is `repaintLaunchAuthority()` in loadMe — NOT the one
+  // the two late-/v1/me harness guards above cover. Those are pinned on the
+  // INSTANCE screen (repaintLifecycleAuthority / repaintInstanceAuthority: the
+  // CLI rail, #inst-header-actions, #inst-update-actions) and go green whatever
+  // happens here. Delete `repaintLaunchAuthority()` from loadMe's success arm
+  // and this scenario is the ONLY thing in the run that reds: #overview-body
+  // keeps saying "Checking your account…" about an answer the console already
+  // holds, and every needle below that names the refusal fails by name.
   "overview-member-empty-fleet": {
-    what: "a member with no instances is REFUSED up front, in the server's own words — the launch form is withheld, not disabled",
-    container: "overview-body",
-    includes: [
-      "empty-state",
-      "You can&#39;t launch for this team",
-      "Launching needs the admin role on this team. Ask a team admin to launch it, or to give you that role.",
-    ],
-    // The whole form, named control by control — the name field, the provider
-    // seg-buttons and the submit. `launch-form` alone would go green on a form
-    // that lost only its wrapper class.
-    excludes: [
-      "launch-form",
-      "launch-flow-name-",
-      "seg-btn",
-      'type="submit"',
-      "Create your first Barkpark",
-    ],
+    what: "a member with no instances is REFUSED up front, in the server's own words — reached LATE: the screen paints while /v1/me is in flight and heals to the refusal when it lands",
+    boot: { deferMe: true },
+    async check(reg, hooks, ctx) {
+      const body = () => (reg.get("overview-body") || {}).innerHTML || "";
+
+      // ── in flight: the unknown arm, with an exit ──────────────────────────
+      const inFlight = body();
+      assert.ok(inFlight.length > 0, "#overview-body rendered empty with /v1/me in flight");
+      assert.ok(inFlight.includes("Checking your account"),
+        "the launch band did not paint its UNKNOWN arm while /v1/me was held — there is no state to heal FROM, and every after-assertion below would be vacuous");
+      assert.ok(inFlight.includes("data-me-retry"),
+        "an UNKNOWN authority rendered no exit: no [data-me-retry] in the in-flight launch band");
+      assert.equal(inFlight.indexOf("Launching needs the admin role on this team"), -1,
+        "the refusal was already painted with the answer STILL OUT — the band is not fenced on the read at all");
+
+      // ── land it LATE, exactly as a slow control plane does ────────────────
+      ctx.resolveMe();
+      await ctx.settle();
+
+      const landed = body();
+      assert.notEqual(landed, inFlight,
+        "a /v1/me that answered LATE left #overview-body BYTE-IDENTICAL (" + inFlight.length + " bytes) — the launch " +
+        "band is still decided at paint time only, so a member sits on \"Checking your account…\" for the life of the page");
+
+      // The ORIGINAL expectation, unchanged in substance: the refusal, in the
+      // server's own words, on the empty-state shell.
+      for (const needle of [
+        "empty-state",
+        "You can&#39;t launch for this team",
+        "Launching needs the admin role on this team. Ask a team admin to launch it, or to give you that role.",
+      ]) {
+        assert.ok(landed.includes(needle),
+          "#overview-body missing " + JSON.stringify(needle) + " after the late answer landed");
+      }
+      // The whole form, named control by control — the name field, the provider
+      // seg-buttons and the submit. `launch-form` alone would go green on a form
+      // that lost only its wrapper class.
+      for (const needle of [
+        "launch-form",
+        "launch-flow-name-",
+        "seg-btn",
+        'type="submit"',
+        "Create your first Barkpark",
+      ]) {
+        assert.equal(landed.indexOf(needle), -1, "#overview-body unexpectedly has " + JSON.stringify(needle));
+      }
+      // A determinate refusal has no question left to retry (launchFlow returns
+      // before wireMeRetry on that arm), so the exit must be GONE — a Retry that
+      // survives a landed answer is an invitation to re-ask a settled question.
+      assert.equal(landed.indexOf("Checking your account"), -1,
+        "the repainted band still says \"Checking your account…\" about a read that already answered");
+      assert.equal(landed.indexOf("data-me-retry"), -1,
+        "the landed refusal still offers [data-me-retry] — the unknown arm was never replaced, only appended to");
+    },
   },
   // cch-w48-s6: the site layer, entered by a MEMBER for the first time. This is
   // the PAIRED POSITIVE CONTROL — it asserts what a member legitimately keeps,
@@ -5951,7 +6015,11 @@ function armConfirmSheet(reg, resourceName) {
 async function runScenario(name) {
   const exp = EXPECTATIONS[name];
   if (!exp) throw new Error("no expectations for scenario " + name);
-  const { registry, byId, hooks, calls, fixtureState, localStorage, location, reloads } = bootScenario(name);
+  // cch-w46-bl: `exp.boot` is the ONLY pass-through — undefined for every entry
+  // that does not declare one, which is exactly the shipped `bootScenario(name)`
+  // call this replaced (opts is read as `opts && opts.X` throughout).
+  const { registry, byId, hooks, calls, fixtureState, localStorage, location, reloads, resolveMe } =
+    bootScenario(name, exp.boot);
   await flush();
 
   if (exp.check) {
@@ -5981,6 +6049,10 @@ async function runScenario(name) {
       // a logged-out render() writes to #auth-email, so it is absent from the
       // registry until something types into it.
       byId,
+      // cch-w46-bl: the drain for `boot: { deferMe: true }`. A check that did not
+      // ask for deferMe gets a resolveMe() that has nothing held and is a no-op,
+      // so this is inert for every entry with no `boot` key.
+      resolveMe,
       // How many times METHOD PATH was requested — the wire assertion.
       countCalls(method, path) {
         return calls.filter((c) => c.method === method && c.path === path).length;
