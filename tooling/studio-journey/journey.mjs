@@ -3083,7 +3083,33 @@ const SELF_TEST_REFSTUCK_KEY = "pane_item#item-sheet|Sheets";
 // pin: it fires when a whole leg stops being asserted, and it does not have to be
 // edited every time one beat is added. Raise it when a leg is added; if it ever
 // has to be LOWERED, that is the finding, not the fix.
-const SELF_TEST_ASSERTION_FLOOR = Number(process.env.SELF_TEST_ASSERTION_FLOOR || 40);
+//
+// THE OVERRIDE CAN ONLY RAISE THE FLOOR (task-c1148783a9ee36e7, 2026-09-15).
+// `Number(process.env.X || 40)` let one env var set the floor to 0, and a floor
+// of 0 passes off ZERO assertions — the exact vacuity this guard exists to
+// prevent, reachable without touching a file anybody reviews. Nothing in CI sets
+// it, so nothing legitimate is lost by making the hard floor the minimum: the
+// env var is honoured only where it makes the check STRICTER. A caller who wants
+// a weaker floor has to edit HARD_ASSERTION_FLOOR here, in the diff, in review.
+const HARD_ASSERTION_FLOOR = 40;
+const SELF_TEST_ASSERTION_FLOOR = (() => {
+  const raw = process.env.SELF_TEST_ASSERTION_FLOOR;
+  if (raw === undefined || raw === '') return HARD_ASSERTION_FLOOR;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    throw new Error(
+      `SELF_TEST_ASSERTION_FLOOR=${JSON.stringify(raw)} is not a number. ` +
+      `A floor that fails to parse would silently become NaN and every comparison ` +
+      `against it would be false — a guard that cannot fire. Refusing.`);
+  }
+  if (n < HARD_ASSERTION_FLOOR) {
+    throw new Error(
+      `SELF_TEST_ASSERTION_FLOOR=${n} is BELOW the hard floor of ${HARD_ASSERTION_FLOOR}. ` +
+      `This override exists to make the self-test stricter, never to manufacture a ` +
+      `green off fewer assertions. Refusing.`);
+  }
+  return n;
+})();
 
 async function selfTest(opts) {
   const { server, port, store } = await startFixture();

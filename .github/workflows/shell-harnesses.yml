@@ -125,6 +125,18 @@ on:
   # arm dispatches TRUE for every harness set, so a dispatched run measures
   # everything, exactly like a push.
   workflow_dispatch:
+  # THE CRON LANE (task-c1148783a9ee36e7). It exists for exactly ONE job below,
+  # `scheduled-arm-health-live`, and that job runs on NO other event. Read that
+  # sentence twice: it is the property that stops this cron being the very thing
+  # the job detects. scripts/scheduled-arm-health.sh had an owner for its SYNTAX
+  # (`bash -n`) and for its SELF-TEST, both gated on its own paths changing, and
+  # NOTHING anywhere ran it against this repository. A reader with no caller is a
+  # reader nobody reads — the same shape as the cron'd job that gates nothing,
+  # which is the defect the script was written to find. Daily at 07:20 UTC, well
+  # after the smoke crons it measures (studio-journey-smoke 13:20, search-starter
+  # 12:50 the previous day) so it reads a settled history.
+  schedule:
+    - cron: "20 7 * * *"
   pull_request:
     paths:
       - "scripts/doctor.sh"
@@ -3424,6 +3436,59 @@ jobs:
       - name: prove the reader can lose (hermetic, fixture payloads)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/scheduled-arm-health.test.sh
+
+  # THE READER'S OWN OWNER (task-c1148783a9ee36e7). The job ABOVE proves the
+  # reader CAN lose on fixtures; it never once points the reader at this
+  # repository, and it only runs when the reader's own files change. So for the
+  # whole of its first day this repo held a scheduled-arm health check that had
+  # never read a single real scheduled arm — the reader reproducing, one level
+  # up, the disease it was built to cure.
+  #
+  # THIS JOB IS THE INVOCATION. It runs on `schedule` and `workflow_dispatch`
+  # ONLY — never on push or pull_request — which is deliberate and load-bearing
+  # twice over. (1) It keeps a live `gh api` sweep off every PR. (2) It makes
+  # this workflow's own cron non-vacuous BY THE READER'S OWN RULE: the job set
+  # the cron executes is not a subset of the job set a push executes, because
+  # this job is in the first and not the second. A cron whose only job also runs
+  # on push would be exactly the VACUOUS CRON row this file would then print
+  # about itself.
+  #
+  # IT FAILS ON A RED, AND THE RED IS EXPECTED TO BE NON-EMPTY TODAY.
+  # studio-journey-smoke's scheduled arm is 47-of-47 failed and has never once
+  # succeeded; that row is the open finding, not noise, and a job that printed it
+  # while exiting 0 would be the report-mode shape this whole lane objects to.
+  # Exit 2 (CANNOT MEASURE) fails too: a sweep that could not read a row must
+  # never be mistaken for a sweep that found nothing.
+  #
+  # `github.token` carries actions:read on this repository, which is every scope
+  # the reader needs. It creates nothing and writes nothing.
+  scheduled-arm-health-live:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    name: every cron'd workflow in this tree, read against its real run history
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: read every declared cron against its real scheduled runs
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          bash scripts/scheduled-arm-health.sh 2>&1 | tee "$RUNNER_TEMP/arm-health.txt"
+          rc=${PIPESTATUS[0]}
+          {
+            echo '## scheduled-arm-health'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/arm-health.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
 
   undispatched-target:
     needs: [changes]

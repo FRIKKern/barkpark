@@ -55,6 +55,76 @@
 #                    disabled, and reading the first as a defect would make this
 #                    instrument cry wolf on its own first day. --strict-never-ran
 #                    promotes it. Either way the line is printed, never omitted.
+#   VACUOUS CRON     it succeeds on the cron, but a JOB-LEVEL read of that very
+#                    run shows the cron SKIPPED a job and EXECUTED NOTHING THE
+#                    PUSH/PR ARM DOES NOT ALREADY EXECUTE. RED. See below — this is the
+#                    defect this reader reproduced one level up on its own day
+#                    one, and a run-level `.conclusion` read is structurally
+#                    blind to it.
+#
+#   ASSERTED NOTHING it succeeds on the cron with EVERY job in that run skipped.
+#                    A run whose entire job graph was skipped concludes
+#                    `success`. RED, and the loudest shape of the same disease.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#  A RUN-LEVEL CONCLUSION IS NOT COVERAGE (task-c1148783a9ee36e7, 2026-09-15)
+# ─────────────────────────────────────────────────────────────────────────────
+# THIS FILE'S FIRST VERSION WOULD HAVE CERTIFIED ITS OWN SUBJECT AS `ok` WITHIN
+# FIVE CRONS. It counted `.conclusion` at RUN level and never once read a job.
+# The remedy landed for studio-journey-smoke in #18323 took the live arm off the
+# cron (the credential it needs does not exist) and put `harness-self-test` on
+# it instead. Measured on run 34910849865 (dbe6ba4d, the merge of #18323), the
+# resulting job graph is:
+#
+#     success  Studio journey — self-test (fixtures, no network)
+#     skipped  Studio journey — deployed (report mode, gates nothing)
+#
+# A RUN WHOSE ONLY EXECUTED JOB SUCCEEDED CONCLUDES `success`. So the very next
+# cron would have flipped this workflow from NEVER SUCCEEDED to `ok` while the
+# DEPLOYED journey — the only thing the cron was ever for — stayed exactly as
+# unmeasured as it was during the 47-of-47 streak. The instrument would have
+# printed the healthy word over the unhealthy state: the disease itself.
+#
+# THE RULE THAT WAS TRIED FIRST AND IS WRONG: "red any scheduled success that
+# contains a skipped job". Measured the same day on the intended POSITIVE
+# CONTROL, search-starter-smoke.yml run 34845674798 (scheduled, success; its
+# scheduled arm genuinely runs — event=schedule total_count 50, received 50,
+# success 50):
+#
+#     success  Journey smoke — live demo (report mode, never gates)
+#     skipped  Finder unit specs (dep-free, no browser)
+#     skipped  Journey smoke — self-test (fixtures, no network)
+#
+# TWO SKIPPED JOBS, AND IT IS THE HEALTHY ONE. A skipped-job rule reds both, and
+# a guard that reds on everything discriminates nothing.
+#
+# THE RULE USED HERE — DOES THE CRON EXECUTE ANYTHING THE PR ARM DOES NOT? The
+# job names EXECUTED (conclusion neither `skipped` nor `cancelled`) on the
+# newest SCHEDULED success are compared against the job names executed on the
+# newest NON-SCHEDULE success of the same workflow. If the scheduled set is a
+# SUBSET of the non-schedule set, the cron adds no coverage that every push
+# already buys, and calling it `ok` is the launder. On the two workflows above:
+#
+#     studio-journey-smoke   sched {self-test} SUBSET OF push {self-test}  -> VACUOUS CRON
+#                            (and the cron SKIPPED "Studio journey — deployed")
+#     search-starter-smoke   sched {live demo} NOT subset of push {...}    -> ok
+#
+# Same reader, opposite verdicts, on real runs. That is the discrimination a
+# `.conclusion` count cannot make.
+#
+# AND THE SUBSET ALONE IS NOT ENOUGH — A RERUN IS NOT A LAUNDER. The red also
+# requires that the scheduled run SKIPPED at least one job. A nightly that
+# re-runs the whole suite the push arm runs, skipping nothing, is a REPEAT: it
+# buys time-coverage rather than new coverage, which is weak but honest. Subset
+# alone reds 10 of this tree's 29 cron'd workflows (measured 2026-09-15) and a
+# verdict that fires on a third of the roster stops being read at all. Subset
+# AND a skipped job reds 4, and every one of the 4 is a job the cron declares
+# and then does not run. `ok (rerun)` is the noted, non-red half of that pair.
+#
+# WHERE A WORKFLOW HAS NO NON-SCHEDULE SUCCESS AT ALL, the cron is its only arm
+# and cannot be redundant with an arm that does not exist: `ok`, with the reason
+# printed. That is a stated exemption, not a silent one.
+#
 #
 # AN UNREADABLE WORKFLOW IS NEVER GREEN. A `gh api` that errors or times out
 # (main-gate-watch.yml did exactly that during this script's own bring-up) exits
@@ -74,7 +144,10 @@
 #   --now ISO8601 (default: now — pinned by the self-test so it cannot rot)
 #
 # OFFLINE FIXTURES. --runs-dir DIR reads DIR/<basename>.schedule.json and
-# DIR/<basename>.all.json, each the raw `actions/workflows/<file>/runs` payload.
+# DIR/<basename>.all.json, each the raw `actions/workflows/<file>/runs` payload,
+# and DIR/jobs.<run_id>.json for the job-level read, each the raw
+# `actions/runs/<id>/jobs` payload. A referenced jobs fixture that is ABSENT is
+# UNREADABLE and exits 2 — never a quiet skip back onto the `ok` path.
 # That is the route the self-test uses; it never touches the network.
 #
 # EXIT: 0 no red · 1 at least one red · 2 cannot measure.
@@ -146,6 +219,44 @@ fetch_runs() {
   fi
   jq -e 'has("workflow_runs")' >/dev/null 2>&1 <<<"$body" || { echo UNREADABLE; return 0; }
   printf '%s' "$body"
+}
+
+# Fetch one RUN's jobs. Echoes the JSON body, or the literal UNREADABLE — which
+# the caller turns into exit 2, never a skip. THE WHOLE POINT OF THIS FUNCTION:
+# a run-level `.conclusion` is the conclusion of the jobs that ACTUALLY RAN, so
+# a run whose substantive job was skipped concludes `success`. Only this read
+# can tell those apart.
+fetch_jobs() {
+  local run_id="$1" body=""
+  [ -n "$run_id" ] || { echo UNREADABLE; return 0; }
+  if [ -n "$RUNS_DIR" ]; then
+    local f="$RUNS_DIR/jobs.$run_id.json"
+    [ -f "$f" ] || { echo UNREADABLE; return 0; }
+    body="$(cat "$f")"
+  else
+    body="$(gh api "repos/$REPO/actions/runs/$run_id/jobs?per_page=100" 2>&1)" || { echo UNREADABLE; return 0; }
+  fi
+  jq -e 'has("jobs")' >/dev/null 2>&1 <<<"$body" || { echo UNREADABLE; return 0; }
+  printf '%s' "$body"
+}
+
+# Job names a run EXECUTED, one per line. `skipped` and `cancelled` are the two
+# conclusions that mean "this job did not assert anything"; every other
+# conclusion (success, failure, neutral, timed_out) means it ran and produced a
+# result, and only `executed` is what the subset rule below compares.
+executed_job_names() { jq -r '[(.jobs // [])[] | select(.conclusion != "skipped" and .conclusion != "cancelled") | .name] | sort | unique | .[]'; }
+
+# Newest success run id in a runs payload, optionally EXCLUDING one event.
+# Prints nothing when there is none, and every caller distinguishes "none"
+# from "could not read" rather than collapsing them.
+newest_success_id() {
+  local exclude_event="${1:-}"
+  jq -r --arg ex "$exclude_event" '
+    [ (.workflow_runs // [])[]
+      | select(.conclusion == "success")
+      | select($ex == "" or ((.event // "") != $ex)) ]
+    | sort_by(.run_started_at // .created_at) | last | (.id // "") | tostring' \
+    | sed 's/^null$//'
 }
 
 # total_count <TAB> received <TAB> success <TAB> failure <TAB> newest-success-iso
@@ -251,8 +362,98 @@ EOF
     REDS=$((REDS + 1))
     say "STALE           $base — $window; newest scheduled success $s_last is ${age_days}d old (> $STALE_DAYS)."
   else
+    # ── THE JOB-LEVEL READ ───────────────────────────────────────────────────
+    # Everything above this point is a RUN-LEVEL `.conclusion` count, and a
+    # run-level count cannot see a scheduled arm whose substantive job is
+    # skipped: the run concludes `success` off whatever DID run. This is the
+    # last gate before the word `ok` is printed, and it is the only gate that
+    # looks at what the cron actually executed.
+    s_win_id="$(printf '%s' "$sched" | newest_success_id)"
+    if [ -z "$s_win_id" ]; then
+      say "CANNOT MEASURE  $base — a scheduled success was counted but carries no run id to read jobs from."
+      exit 2
+    fi
+    s_jobs="$(fetch_jobs "$s_win_id")"
+    if [ "$s_jobs" = UNREADABLE ]; then
+      say "CANNOT MEASURE  $base — jobs of scheduled run $s_win_id could not be read."
+      say "                Printing ok here would be a verdict taken without looking."
+      exit 2
+    fi
+    s_exec="$(printf '%s' "$s_jobs" | executed_job_names)"
+    s_exec_n=0
+    while IFS= read -r j; do [ -n "$j" ] || continue; s_exec_n=$((s_exec_n + 1)); done <<EOF
+$s_exec
+EOF
+
+    if [ "$s_exec_n" -eq 0 ]; then
+      REDS=$((REDS + 1))
+      say "ASSERTED NOTHING $base — $window"
+      say "                 newest scheduled success is run $s_win_id, and EVERY job in it was skipped."
+      say "                 A run whose whole job graph skipped still concludes \`success\`. It measured nothing."
+      continue
+    fi
+
+    o_win_id="$(printf '%s' "$allev" | newest_success_id schedule)"
+    if [ -z "$o_win_id" ]; then
+      OK_N=$((OK_N + 1))
+      say "ok              $base — $window; newest scheduled success $s_last (${age_days}d)."
+      say "                job read: run $s_win_id executed $s_exec_n job(s); no non-schedule success exists to"
+      say "                compare against, so the cron is this workflow's only arm and cannot be redundant."
+      continue
+    fi
+    o_jobs="$(fetch_jobs "$o_win_id")"
+    if [ "$o_jobs" = UNREADABLE ]; then
+      say "CANNOT MEASURE  $base — jobs of non-schedule run $o_win_id could not be read."
+      exit 2
+    fi
+    o_exec="$(printf '%s' "$o_jobs" | executed_job_names)"
+
+    UNIQUE_TO_CRON=""
+    while IFS= read -r j; do
+      [ -n "$j" ] || continue
+      printf '%s\n' "$o_exec" | grep -Fxq -- "$j" || UNIQUE_TO_CRON="$UNIQUE_TO_CRON$j
+"
+    done <<EOF
+$s_exec
+EOF
+
+    s_skipped="$(printf '%s' "$s_jobs" | jq -r '[(.jobs // [])[] | select(.conclusion == "skipped") | .name] | sort | unique | .[]')"
+    s_skipped_n=0
+    while IFS= read -r j; do [ -n "$j" ] || continue; s_skipped_n=$((s_skipped_n + 1)); done <<EOF
+$s_skipped
+EOF
+
+    # A CRON THAT RERUNS THE SAME JOB IS NOT THE DISEASE. When the scheduled run
+    # executed everything the workflow has (nothing skipped) and those jobs also
+    # run on push, the cron is a REPEAT — it catches rot that arrives with time
+    # rather than with a diff, which is a real, if weak, reason to exist. Noted,
+    # never red. Measured 2026-09-15 this separates 4 genuine launders from 6
+    # plain nightly reruns among this tree's 29 cron'd workflows; without the
+    # split the reader reds 10 of 29 and its verdict stops meaning anything.
+    if [ -z "$UNIQUE_TO_CRON" ] && [ "$s_skipped_n" -eq 0 ]; then
+      OK_N=$((OK_N + 1))
+      say "ok (rerun)      $base — $window; newest scheduled success $s_last (${age_days}d)."
+      say "                job read: scheduled run $s_win_id executed the SAME job(s) the push arm executes and"
+      say "                skipped none. A repeat of a full run, not a launder — it buys time-coverage only."
+      continue
+    fi
+
+    if [ -z "$UNIQUE_TO_CRON" ]; then
+      REDS=$((REDS + 1))
+      say "VACUOUS CRON    $base — $window"
+      say "                SKIPPED on the cron: $(printf '%s' "$s_skipped" | tr '\n' '|' | sed 's/|$//')"
+      say "                It SUCCEEDS on the cron, and that success asserts nothing a push does not."
+      say "                scheduled run $s_win_id executed: $(printf '%s' "$s_exec" | tr '\n' '|' | sed 's/|$//')"
+      say "                non-schedule run $o_win_id executed: $(printf '%s' "$o_exec" | tr '\n' '|' | sed 's/|$//')"
+      say "                Every job the cron ran, the push arm already runs. The cron buys NO coverage,"
+      say "                and a run-level conclusion count would have printed 'ok' over exactly this."
+      continue
+    fi
+
     OK_N=$((OK_N + 1))
     say "ok              $base — $window; newest scheduled success $s_last (${age_days}d)."
+    say "                job read: scheduled run $s_win_id executed $(printf '%s' "$UNIQUE_TO_CRON" | tr '\n' '|' | sed 's/|$//') which the"
+    say "                non-schedule arm (run $o_win_id) does not. The cron buys coverage nothing else buys."
   fi
 done <<EOF
 $FILES
