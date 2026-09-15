@@ -1269,7 +1269,8 @@ class BpPaperCanvas extends HTMLElement {
       this._mode === "source" && this._sourceEl &&
       this._sourceEl.value !== this._sourceOriginalMd;
     return Boolean(
-      sourceChanged || this._debounceTimer || this._inflightOps ||
+      sourceChanged || this.querySelector(".bp-canvas-note[data-note-pending]") ||
+      this._debounceTimer || this._inflightOps ||
       this._dirtyWhileInflight
     );
   }
@@ -2641,7 +2642,13 @@ class BpPaperCanvas extends HTMLElement {
       if (w.bpType != null && node.attrs && node.attrs.bpType == null) {
         attrs.bpType = w.bpType;
       }
-      tr.setNodeMarkup(offset, undefined, attrs);
+      if (node.type.name === "note") {
+        // Note field history must survive the non-history identity stamp.
+        tr.setNodeAttribute(offset, "bpId", attrs.bpId);
+        if (attrs.bpType !== node.attrs.bpType) tr.setNodeAttribute(offset, "bpType", attrs.bpType);
+      } else {
+        tr.setNodeMarkup(offset, undefined, attrs);
+      }
       mutated = true;
     });
     if (!mutated) return;
@@ -2674,11 +2681,14 @@ class BpPaperCanvas extends HTMLElement {
       const stable = stableNodes[index++];
       const stableId = stable?.attrs?.bpId;
       if (!node.isText && node.attrs?.bpId == null && stableId != null) {
-        tr.setNodeMarkup(pos, undefined, {
-          ...node.attrs,
-          bpId: stableId,
-          bpType: node.attrs.bpType == null ? stable.attrs?.bpType : node.attrs.bpType,
-        });
+        const bpType = node.attrs.bpType == null ? stable.attrs?.bpType : node.attrs.bpType;
+        if (node.type.name === "note") {
+          // Keep pre-save label/lead AttrSteps mapped to this same note.
+          tr.setNodeAttribute(pos, "bpId", stableId);
+          if (bpType !== node.attrs.bpType) tr.setNodeAttribute(pos, "bpType", bpType);
+        } else {
+          tr.setNodeMarkup(pos, undefined, { ...node.attrs, bpId: stableId, bpType });
+        }
         mutated = true;
       }
     });
@@ -2703,7 +2713,8 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._editor) return false;
     if (this._mode === "source") return true;
     const composing = !!(this._editor.view && this._editor.view.composing);
-    return this._editor.isFocused || this._bubble?.hasFocus() || composing || this._debounceTimer != null;
+    const noteIslandFocused = this.querySelector('.bp-canvas-note [role="textbox"]:focus, .bp-canvas-note[data-note-pending]');
+    return this._editor.isFocused || noteIslandFocused || this._bubble?.hasFocus() || composing || this._debounceTimer != null;
   }
 
   // Apply the confirmed external content to the editor WITHOUT entering the undo
@@ -2751,7 +2762,17 @@ class BpPaperCanvas extends HTMLElement {
           if (refreshes !== null) {
             for (const refresh of refreshes) {
               const target = refresh.replacement;
-              tr.setNodeMarkup(refresh.position, target.type, target.attrs, target.marks);
+              const current = tr.doc.nodeAt(refresh.position);
+              if (target.type.name === "note" &&
+                  current.attrs.label === target.attrs.label && current.attrs.lead === target.attrs.lead) {
+                // Preserve local field history only for same-visible metadata.
+                // Remote field edits must map conflicting label/lead steps away.
+                for (const [key, value] of Object.entries(target.attrs)) {
+                  if (current.attrs[key] !== value) tr.setNodeAttribute(refresh.position, key, value);
+                }
+              } else {
+                tr.setNodeMarkup(refresh.position, target.type, target.attrs, target.marks);
+              }
             }
           } else {
             tr.replaceWith(position, position + node.nodeSize, replacement);
@@ -2817,6 +2838,7 @@ class BpPaperCanvas extends HTMLElement {
     if (this._mode === "source") return;
     if (this._editor && this._editor.isFocused) return;
     if (this._bubble?.hasFocus()) return;
+    if (this.querySelector('.bp-canvas-note [role="textbox"]:focus, .bp-canvas-note[data-note-pending]')) return;
     if (this._debounceTimer) return;
     if (this._inflightOps || this._dirtyWhileInflight || this._awaitingOwnEchoes.length > 0) return;
     const pending = this._pendingServerBlocks;

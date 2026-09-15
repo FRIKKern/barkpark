@@ -3066,6 +3066,25 @@ const SELF_TEST_CENSUS_EXPECT = {
 // it and its complement — a key spelled twice is a key that drifts apart.
 const SELF_TEST_REFSTUCK_KEY = "pane_item#item-sheet|Sheets";
 
+// ── THE ASSERTION FLOOR ──────────────────────────────────────────────────────
+// A GREEN WITH NO SUBJECT IS NOT EVIDENCE, and this harness has a documented way
+// of producing one: the scheduled CI lane that was supposed to run it carried
+// `if: github.event_name != 'schedule'` while the live arm died at the credential
+// GUARD, so for forty-seven consecutive scheduled runs ZERO assertions executed
+// and the only visible artefact was a red nobody read (task-2c762aa7dfca5bd8).
+//
+// So the self-test now COUNTS the comparisons it actually performs and refuses
+// to print PASS below a floor. The count is printed on the PASS line and on the
+// FAIL line, so a reader — or a CI log grep — can see the subject, not just the
+// verdict. `SELF-TEST PASS` with no number is an OLD binary.
+//
+// The floor is deliberately well under the count a healthy run produces (measured
+// 2026-09-15 on this tree: see the number the run prints). It is a FLOOR, not a
+// pin: it fires when a whole leg stops being asserted, and it does not have to be
+// edited every time one beat is added. Raise it when a leg is added; if it ever
+// has to be LOWERED, that is the finding, not the fix.
+const SELF_TEST_ASSERTION_FLOOR = Number(process.env.SELF_TEST_ASSERTION_FLOOR || 40);
+
 async function selfTest(opts) {
   const { server, port, store } = await startFixture();
   const results = {}, exits = {}, residue = {}, censuses = {};
@@ -3103,10 +3122,16 @@ async function selfTest(opts) {
   }
 
   const problems = [];
+  // Every comparison below goes through `check`, so the count cannot drift away
+  // from the assertions: adding a `problems.push` without a `check` is the one
+  // way to under-report, and the coverage guards above/below are what stop a beat
+  // from being added with no comparison at all.
+  let asserted = 0;
+  const check = (ok, msg) => { asserted += 1; if (!ok) problems.push(msg); };
   for (const [site, expected] of Object.entries(SELF_TEST_EXPECT)) {
     for (const [beat, want] of Object.entries(expected)) {
       const got = results[site]?.[beat];
-      if (got !== want) problems.push(`${site}/${beat}: expected ${want}, got ${got ?? "(missing)"}`);
+      check(got === want, `${site}/${beat}: expected ${want}, got ${got ?? "(missing)"}`);
     }
   }
 
@@ -3124,8 +3149,8 @@ async function selfTest(opts) {
   // key from SELF_TEST_EXPECT and this reds while the run itself is unchanged.
   for (const site of sites) {
     for (const [beat, got] of Object.entries(results[site] || {})) {
-      if (Object.prototype.hasOwnProperty.call(SELF_TEST_EXPECT[site] || {}, beat)) continue;
-      problems.push(
+      check(
+        Object.prototype.hasOwnProperty.call(SELF_TEST_EXPECT[site] || {}, beat),
         `${site}/${beat}: THE RUN PRODUCED THIS BEAT (${got}) AND SELF_TEST_EXPECT DOES NOT NAME IT — ` +
           `an unnamed beat is silently unasserted, so it can never red and it is a decoration. Name it.`,
       );
@@ -3138,24 +3163,22 @@ async function selfTest(opts) {
   for (const site of sites) {
     const want = SELF_TEST_CENSUS_EXPECT[site] || {};
     const rows = censuses[site]?.rows || [];
-    if (!rows.length) { problems.push(`${site}: LEG C produced NO census rows at all — a census of nothing is not a census`); continue; }
-    if (censuses[site]?.truncated) {
-      problems.push(
-        `${site}: LEG C hit its ${LEG_C_BUDGET}ms LEG_C_BUDGET on the FIXTURE, which is a few local rows — ` +
-          `the row verdicts below are load-dependent and this self-test cannot assert them. Raise LEG_C_BUDGET_MS or run on a quieter host.`,
-      );
-    }
+    check(rows.length > 0, `${site}: LEG C produced NO census rows at all — a census of nothing is not a census`);
+    if (!rows.length) continue;
+    check(!censuses[site]?.truncated,
+      `${site}: LEG C hit its ${LEG_C_BUDGET}ms LEG_C_BUDGET on the FIXTURE, which is a few local rows — ` +
+        `the row verdicts below are load-dependent and this self-test cannot assert them. Raise LEG_C_BUDGET_MS or run on a quieter host.`,
+    );
     for (const rec of rows) {
-      if (!Object.prototype.hasOwnProperty.call(want, rec.key)) {
-        problems.push(
-          `${site}: LEG C CENSUSED A ROW NOBODY NAMED — "${rec.key}" came back ${rec.outcome}. ` +
-            `Name it in SELF_TEST_CENSUS_EXPECT or an unasserted row can never red.`,
-        );
-        continue;
-      }
-      if (rec.outcome !== want[rec.key]) {
-        problems.push(`${site}: census row "${rec.key}" expected ${want[rec.key]}, got ${rec.outcome} — ${rec.detail}`);
-      }
+      const named = Object.prototype.hasOwnProperty.call(want, rec.key);
+      check(
+        named,
+        `${site}: LEG C CENSUSED A ROW NOBODY NAMED — "${rec.key}" came back ${rec.outcome}. ` +
+          `Name it in SELF_TEST_CENSUS_EXPECT or an unasserted row can never red.`,
+      );
+      if (!named) continue;
+      check(rec.outcome === want[rec.key],
+        `${site}: census row "${rec.key}" expected ${want[rec.key]}, got ${rec.outcome} — ${rec.detail}`);
       // ── THE WIRE READING, ASSERTED (spd-w18-desk-click-latency, crit. 0) ──
       // A reading nobody asserts is a decoration, and this one has a specific
       // way of going quietly blind: if the tap ever stops seeing the socket it
@@ -3167,56 +3190,70 @@ async function selfTest(opts) {
       // on those would be asserting an instrument against a question they do
       // not pose.
       const wireApplies = rec.presses > 0 && rec.kind !== "plugin_link";
-      if (wireApplies && (rec.wire === "CANNOT READ" || rec.wire === null)) {
-        problems.push(
+      if (wireApplies) {
+        check(
+          !(rec.wire === "CANNOT READ" || rec.wire === null),
           `${site}: census row "${rec.key}" came back with NO WIRE READING (${rec.wire}) — ` +
             `the tap saw no /live/websocket socket, so the SENT / NOT SENT distinction was asserted nowhere on this run`,
         );
       }
       // The two verdicts, pinned to the two shapes the fixture builds. Without
       // BOTH of these the instrument could be stuck on one answer and stay green.
-      if (wireApplies && site === "rot" && rec.key === SELF_TEST_REFSTUCK_KEY && rec.wire !== "NOT SENT") {
-        problems.push(
+      if (wireApplies && site === "rot" && rec.key === SELF_TEST_REFSTUCK_KEY) {
+        check(
+          rec.wire === "NOT SENT",
           `rot: "${rec.key}" carries data-phx-ref-src, so its press is discarded IN THE BROWSER and the wire ` +
             `must read NOT SENT — it read ${rec.wire}. Either the drop gate stopped firing or the tap counts frames it should not.`,
         );
       }
-      if (wireApplies && site === "rot" && rec.outcome === FAIL && rec.key !== SELF_TEST_REFSTUCK_KEY && rec.wire === "NOT SENT") {
-        problems.push(
+      if (wireApplies && site === "rot" && rec.outcome === FAIL && rec.key !== SELF_TEST_REFSTUCK_KEY) {
+        check(
+          rec.wire !== "NOT SENT",
           `rot: "${rec.key}" is dead SERVER-side (the fixture answers it with nothing) and its press does go out, ` +
             `so the wire must read SENT — it read NOT SENT. The tap is not seeing frames the browser sent.`,
         );
       }
-      if (wireApplies && site === "good" && rec.outcome === PASS && rec.wire !== "SENT") {
-        problems.push(
+      if (wireApplies && site === "good" && rec.outcome === PASS) {
+        check(
+          rec.wire === "SENT",
           `good: "${rec.key}" ANSWERED, so its press was necessarily on the wire — the wire read ${rec.wire}`,
         );
       }
     }
     const producedKeys = new Set(rows.map((r) => r.key));
     for (const key of Object.keys(want)) {
-      if (!producedKeys.has(key)) {
-        problems.push(`${site}: census row "${key}" is named in SELF_TEST_CENSUS_EXPECT and the run never produced it — the fixture row is gone, or the enumeration stopped seeing its kind`);
-      }
+      check(producedKeys.has(key), `${site}: census row "${key}" is named in SELF_TEST_CENSUS_EXPECT and the run never produced it — the fixture row is gone, or the enumeration stopped seeing its kind`);
     }
   }
-  if (exits.good !== 0) problems.push(`good: expected product exit 0, got ${exits.good}`);
-  if (exits.rot !== 1) problems.push(`rot: expected product exit 1, got ${exits.rot}`);
+  check(exits.good === 0, `good: expected product exit 0, got ${exits.good}`);
+  check(exits.rot === 1, `rot: expected product exit 1, got ${exits.rot}`);
   for (const site of Object.keys(SELF_TEST_EXPECT)) {
     const left = residue[site] || [];
-    if (left.length) problems.push(`${site}: the run LEFT LITTER on the dataset — ${left.join(", ")} (the self-clean sweep did not remove what the "+" created)`);
+    check(left.length === 0, `${site}: the run LEFT LITTER on the dataset — ${left.join(", ")} (the self-clean sweep did not remove what the "+" created)`);
+  }
+
+  // THE FLOOR ITSELF. A run that compared almost nothing must not be allowed to
+  // print PASS — that is the whole shape this workflow's scheduled lane had for
+  // six weeks. This is the LAST check, so the number it guards is final.
+  if (asserted < SELF_TEST_ASSERTION_FLOOR) {
+    problems.push(
+      `THE SELF-TEST EXECUTED ONLY ${asserted} ASSERTIONS, BELOW THE FLOOR OF ${SELF_TEST_ASSERTION_FLOOR} — ` +
+        `a green produced by a run that compared almost nothing is not evidence. Either a whole leg stopped ` +
+        `being asserted, or the fixture stopped producing rows. Do not lower the floor to clear this.`,
+    );
   }
 
   if (problems.length) {
     process.stderr.write(
-      `\n!! SELF-TEST FAIL — the harness does not behave as specified:\n` +
+      `\n!! SELF-TEST FAIL — ${asserted} assertions executed; the harness does not behave as specified:\n` +
         problems.map((p) => `   ✗ ${p}\n`).join("") +
         `\n   This is a fault in tooling/studio-journey/journey.mjs itself, NOT in any deployment.\n`,
     );
     return 1;
   }
   process.stdout.write(
-    `\nSELF-TEST PASS — the whole journey is green on /good/ (mint → redeem → admin discriminator →\n` +
+    `\nSELF-TEST PASS — ${asserted} assertions executed (floor ${SELF_TEST_ASSERTION_FLOOR}).\n` +
+      `  The whole journey is green on /good/ (mint → redeem → admin discriminator →\n` +
       `  desk → create → canvas hydrates → real keystrokes → the API carries the text → it survives a\n` +
       `  reload → self-clean), and RED on /rot/, whose canvas upgrades with a truthy _editor and NEVER\n` +
       `  populates blocks — the exact trap a readiness check on _editor cannot see. Product exits:\n` +

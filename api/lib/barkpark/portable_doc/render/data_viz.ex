@@ -1398,6 +1398,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       empty_email("stat", theme)
     else
       label = block |> get("label") |> display_string()
+      denom = block |> get("denom") |> display_string()
       unit = block |> get("unit") |> display_string()
       body = block |> get("body") |> display_string()
       max = numeric(get(block, "max"))
@@ -1421,6 +1422,11 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           else:
             ~s|<div style="font-size:12px;color:#{sk.muted};margin-top:2px">#{escape_html(label)}</div>|
 
+      denom_html =
+        if denom == "",
+          do: "",
+          else: ~s|<span style="font-weight:400;color:#{sk.muted}">/#{escape_html(denom)}</span>|
+
       unit_html =
         if unit == "",
           do: "",
@@ -1443,7 +1449,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
       ~s|<div style="display:inline-block;min-width:120px;background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
         bar <>
-        ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:24px;font-weight:700;color:#{sk.ink};line-height:1.1">#{escape_html(value)}#{unit_html}</div>| <>
+        ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:24px;font-weight:700;color:#{sk.ink};line-height:1.1">#{escape_html(value)}#{denom_html}#{unit_html}</div>| <>
         label_html <> body_html <> kilde <> "</div>"
     end
   end

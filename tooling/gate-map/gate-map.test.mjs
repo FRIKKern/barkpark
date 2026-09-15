@@ -36,12 +36,82 @@ test("the population is committed files, and it is not empty", () => {
   assert.ok(pop.includes(SWEEP), "breakpoint-sweep.mjs is in the population");
 });
 
+// Strip `//` line comments the way a tokenizer would, not the way a regex
+// does: string, char and template-literal bodies are copied through untouched,
+// so a `://` inside a URL literal is never mistaken for the start of a comment.
+// Template state carries across newlines (this file has multi-line templates);
+// a plain quote is force-closed at EOL so one stray apostrophe cannot desync
+// the rest of the file. Returns `open`, the quote still unclosed at EOF — null
+// on a clean walk, and a caller that does not assert it is trusting a lexer it
+// never checked. Block comments are NOT handled, on purpose: see the WAVE-16
+// test below for why a block strip makes the absence vacuous.
+function stripLineComments(source) {
+  let out = "";
+  let i = 0;
+  let quote = null;
+  while (i < source.length) {
+    const c = source[i];
+    if (quote !== null) {
+      if (c === "\\") { out += source.slice(i, i + 2); i += 2; continue; }
+      if (c === quote) quote = null;
+      else if (c === "\n" && quote !== "`") quote = null;
+      out += c; i++; continue;
+    }
+    if (c === "'" || c === '"' || c === "`") { quote = c; out += c; i++; continue; }
+    if (c === "/" && source[i + 1] === "/") {
+      while (i < source.length && source[i] !== "\n") i++;
+      out += " ";
+      continue;
+    }
+    out += c; i++;
+  }
+  return { code: out, open: quote };
+}
+
+test("the comment lexer drops comments and keeps URLs, including the shapes this file has no specimen of", () => {
+  // Every arm is a fixture, because __css_check carries no URL in a code line
+  // today: an absent specimen is not an absent hazard.
+  const url = 'const u = "https://example.test/a//b"; // trailing prose\n';
+  const { code: stripped, open } = stripLineComments(url);
+  assert.equal(open, null);
+  assert.ok(stripped.includes("https://example.test/a//b"), "a URL literal survives the strip");
+  assert.ok(!stripped.includes("trailing prose"), "the trailing comment does not");
+
+  const trailing = stripLineComments('  "tier-free", // names breakpoint-sweep.mjs\n');
+  assert.ok(!trailing.code.includes("breakpoint-sweep"), "a TRAILING comment is stripped (the WAVE-16 red)");
+  assert.equal(trailing.open, null);
+
+  const whole = stripLineComments("// breakpoint-sweep.mjs\nconst keep = 1;\n");
+  assert.ok(!whole.code.includes("breakpoint-sweep"), "a whole-line comment is still stripped");
+  assert.ok(whole.code.includes("const keep = 1;"), "and the code after it survives");
+
+  const tpl = stripLineComments("const t = `line // not a comment\nstill template`;\n");
+  assert.ok(tpl.code.includes("line // not a comment"), "a `//` inside a multi-line template is not a comment");
+  assert.equal(tpl.open, null);
+
+  const inCode = stripLineComments('const p = "__preview__/breakpoint-sweep.mjs";\n');
+  assert.ok(inCode.code.includes("breakpoint-sweep"), "a REAL code occurrence survives — the absence assertion can still red");
+});
+
 test("THE WAVE-16 EDGE: __css_check's directory readdir is derived, not imported", () => {
   const src = fs.readFileSync(path.join(REPO, CSS), "utf8");
   const sites = scanSites(CSS, src);
+  // ASSERTED THROUGH `matches`, NOT AGAINST A SITE KIND. The property this test
+  // is about is that __css_check's directory scan REACHES the sweep; the shape
+  // that carries it is the deriver's business and has already changed once
+  // (two `dir` arms became one descending `tree` when citationScanFiles() went
+  // recursive). Pinning `kind === "dir" && p === ".../__preview__"` reds on a
+  // widening that makes the edge STRONGER, which is a ratchet pointing the
+  // wrong way.
   assert.ok(
-    sites.some((s) => s.kind === "dir" && s.p === "cloud/priv/static/__preview__"),
-    "the readdirSync over __preview__ is a derived scan site"
+    sites.some((s) => matches(s, SWEEP)),
+    `no derived scan site of __css_check reaches ${SWEEP}: ${JSON.stringify(sites)}`
+  );
+  // NON-VACUITY: a site list that matched everything would pass the line above
+  // while modelling nothing. A file in a sibling tree must NOT be reached.
+  assert.ok(
+    !sites.some((s) => matches(s, "api/lib/barkpark/application.ex")),
+    `the scan sites must not match everything: ${JSON.stringify(sites)}`
   );
   // The negative half: __css_check does NOT import or name the sweep IN CODE, so
   // an import-graph reader could not have found this. Prove the absence.
@@ -56,15 +126,33 @@ test("THE WAVE-16 EDGE: __css_check's directory readdir is derived, not imported
   // paper-reader-audit harnesses", subtest 2). So the absence is asserted over
   // the CODE, with comments stripped — the property the test was always about.
   //
-  // WHOLE-LINE `//` ONLY, and deliberately not a block-comment strip: this file
-  // writes all its prose in `//` lines, and 44 of those lines (plus a string
-  // literal at :810) contain a bare `/*` token, so a `/\*[\s\S]*?\*\//`
-  // replace swallows the file from :55 past :1139 and the absence below goes
-  // vacuous — measured here 2026-09-13 by the control on the next line, which
-  // caught it.
-  const code = src.replace(/^[ \t]*\/\/.*$/gm, " ");
-  // The stripper's own control: a regex that ate the file would make the
-  // absence below vacuously true, so prove the code survived it.
+  // The strip is a LEXER, not a regex, and still deliberately NOT a
+  // block-comment strip: this file writes all its prose in `//` lines, and many
+  // of those lines (plus a string literal in the CSS-token table) carry a bare
+  // `/*` token, so a `/\*[\s\S]*?\*\//` replace swallows most of the file and
+  // the absence below goes vacuous — measured 2026-09-13, caught by the
+  // readdirSync control below, which is why that control stays.
+  //
+  // A WHOLE-LINE `//` strip was the previous shape and it was not enough: a
+  // TRAILING `//` comment in the CSS-token table names
+  // __preview__/breakpoint-sweep.mjs, the strip never reached it, and the raw
+  // source regex reddened main (measured 2026-09-15 on 7bf8f8e66; the assertion
+  // below was the failing one). A naive `//.*$` would fix that instance and arm
+  // a worse trap: it truncates any line containing `://`, so the first URL
+  // literal anyone adds silently amputates code and the absence goes vacuous
+  // again. __css_check has exactly ONE `://` line today (a prose line) and 76
+  // trailing comments, none of them with a URL — measured 2026-09-15 — so the
+  // hazard is real and unwitnessed, which is the worst kind to leave to a regex.
+  //
+  // So: walk the source, skip string and template-literal bodies (16 of this
+  // file's template literals span lines, so the state carries across newlines),
+  // and only then treat `//` as a comment. `open` is the lexer's own desync
+  // detector: if it ends inside a quote it mis-tracked something and every
+  // verdict downstream is worthless.
+  const { code, open } = stripLineComments(src);
+  // Three controls, because the absence below is only as good as the strip.
+  assert.equal(open, null, "the comment lexer ended outside every string (it did not desync)");
+  assert.equal(code.split("\n").length, src.split("\n").length, "the strip removed no newlines");
   assert.ok(/readdirSync/.test(code), "comment-stripping left __css_check's code intact (the absence below is not vacuous)");
   assert.ok(!/breakpoint-sweep/.test(code), "__css_check never names breakpoint-sweep in code — only the directory scan links them");
 });
@@ -103,7 +191,13 @@ test("THE COMPOSITION: a slice touching only breakpoint-sweep.mjs REQUIRES __css
   assert.ok(paths.includes(SWEEP), "the edited instrument runs too");
   assert.ok(paths.includes("cloud/priv/static/__preview__/breakpoint-sweep.test.mjs"), "and its unit suite");
   const why = req.find((r) => r.path === CSS).why[0];
-  assert.equal(why.via.kind, "dir");
+  // A DIRECTORY-SHAPED SITE, not a named file: that is the property the edge is
+  // about (an import graph could not have found it). Which directory shape —
+  // `dir` for a flat readdir, `tree` for one that descends — follows
+  // citationScanFiles()'s reach and has already changed once; pinning the
+  // narrower of the two reds when the instrument gets STRONGER.
+  assert.ok(["dir", "tree"].includes(why.via.kind), `expected a directory scan site, got ${why.via.kind}`);
+  assert.notEqual(why.via.kind, "file", "a file site would mean an import graph could have found this");
   assert.match(why.via.evidence, /__css_check\.mjs:\d+/);
 });
 
@@ -163,7 +257,16 @@ test("SELFTEST — a MOVED scan set is refused", () => {
   const map = currentMap();
   const moved = JSON.parse(JSON.stringify(map));
   const css = moved.instruments.find((i) => i.path === CSS);
-  css.scans = css.scans.filter((s) => s.p !== "cloud/priv/static/__preview__");
+  // THE MUTATION IS DERIVED, NOT NAMED. This filtered a literal
+  // "cloud/priv/static/__preview__" site; when citationScanFiles() went
+  // recursive that exact site stopped existing, and the filter silently removed
+  // NOTHING — the "narrowed" map was identical to the fresh one, verify
+  // correctly said ok, and a mutation test that no longer mutates passes for
+  // the wrong reason. Drop whatever sites actually carry the reach, and assert
+  // that something was dropped before asking for the refusal.
+  const before = css.scans.length;
+  css.scans = css.scans.filter((s) => !matches(s, SWEEP));
+  assert.ok(css.scans.length < before, `the mutation must remove a scan site (had ${before})`);
   const v = verify(moved);
   assert.equal(v.ok, false, "a narrowed scan set must be a refusal");
   assert.ok(v.problems.some((p) => /scan set moved/.test(p)), v.problems.join("; "));

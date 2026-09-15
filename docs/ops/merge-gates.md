@@ -34,9 +34,8 @@ A PR targeting `main` must clear:
    comment directly beneath it records why it was removed, and a reader who
    plans around a test→compile ordering is planning around an edge that no
    longer exists. Cited by JOB KEY, not by line, and the reason is measured:
-   this sentence pinned bare line numbers (510, 515) until 2026-09-01, by which
-   time the job had moved past line 760 — and it moved AGAIN during the very
-   session that fixed it, when an unrelated merge landed in the same workflow.
+   this sentence pinned bare line numbers until the job moved past them twice,
+   the second time mid-session ([history](merge-gates-history.md#the-line-numbers-this-page-pinned-and-lost)).
    A line number in a doc is correct exactly once; `grep -n '^  mix-prod-compile:'`
    is correct always). Cleans `api/_build/prod`, force-recompiles deps,
    then runs `MIX_ENV=prod mix compile --warnings-as-errors`. **This is the
@@ -384,9 +383,8 @@ History: [merge-gates-history.md](merge-gates-history.md#the-2026-08-24-merge-th
 **The mechanism is the trigger block, not the required list.** A workflow with a
 `push:` arm re-runs against the merge commit, so a red one on the PR is a red one
 on main — required or not. **RE-DERIVE these counts; do not quote them.** The
-2026-08-24 measurement over 55 workflows was stale within a day (three landed
-2026-08-24/25) and this block still read "41 of 55" a week later. The figures
-below are the 2026-09-01 re-derivation:
+2026-08-24 measurement over 55 workflows was stale within a day, and this block
+still read "41 of 55" a week later. The figures are the 2026-09-01 re-derivation:
 
 ```bash
 # workflows that re-run on main after a merge — 42 of 57 on 2026-09-01
@@ -477,11 +475,9 @@ gh api repos/FRIKKern/barkpark/branches/main/protection \
   -q .required_status_checks.strict    # false → up-to-date not required
 ```
 
-(The wave-2 record explained this posture with the exact claim the
-Security-gates topology note above retires as **false since 2026-07-28**. It is
-deliberately not re-quoted here — §18 of `scripts/required-checks.test.sh`
-censuses every unpinned restatement, and one pinned copy is enough. The
-conclusion survives on `strict: false` alone.)
+(The wave-2 record's version of this posture rests on a claim retired as false
+since 2026-07-28; §18 of `scripts/required-checks.test.sh` censuses every
+unpinned restatement. The conclusion survives on `strict: false` alone.)
 
 
 ### NOT APPLICABLE — the required green that ran nothing
@@ -493,16 +489,15 @@ declared path sets.** That green means **NOT APPLICABLE to this diff** — never
 "the suite passed". Nothing was compiled, nothing was tested, no job was
 dispatched, and the check-run still reads `pass` next to the merge button.
 
-Measured on merged PRs, not inferred: on #10565 (a single ledger `.md`) the
-per-commit check-runs read both Cloud jobs `skipped` under a `success` gate
-carrying one annotation, and #10450 is the same shape. `gh pr checks 10565`
-prints `Cloud gate  pass  4s` and stops there — the disclosure is one API call
-or one UI click further on, which is why this page has to tell you it exists.
+`gh pr checks <N>` prints `Cloud gate  pass` and stops there — the disclosure is
+one API call or one UI click further on, which is why this page has to tell you
+it exists. Measured on merged PRs:
+[merge-gates-history.md](merge-gates-history.md#the-path-gated-green-measured-on-merged-prs).
 
 Each path-gated aggregator emits the disclosure itself, as a `::notice`
-annotation on its own check-run. The roster below is the contract §21 of
-`scripts/required-checks.test.sh` holds both sides of; `—` in the second column
-means that gate does not emit, because it is not path-gated at all.
+annotation on its own check-run. §21 of `scripts/required-checks.test.sh` holds
+both sides of the roster below; `—` means that gate does not emit, because it is
+not path-gated at all.
 
 | Gate | Emits `gate: green — nothing ran` from | Required context |
 | --- | --- | --- |
@@ -595,26 +590,22 @@ History: [merge-gates-history.md](merge-gates-history.md#the-stale-verdict-popul
 conflicted PR asserts a green whose `completedAt` predates a commit on main, and
 that red cannot clear itself — only a rebase, a push, or a close clears it.
 
-Two counting traps it exists to avoid, both of which lie in the comforting
-direction:
+Two counting traps it avoids, both lying in the comforting direction:
 
-- **Count ALL-OF-PRESENT, never occurrences-of-SUCCESS.** #10722 and #10720
-  render FIVE required-named rollup entries, because `PR references an active
-  task` appears twice on one head: once FAILURE, once SUCCESS. Counting SUCCESS
-  occurrences still reaches 4, laundering the failing required context out of
-  the report (TEN by occurrence, EIGHT all-of-present — a 25% over-report). A
-  context is green only when it rendered and *every* entry carrying its name
-  concluded SUCCESS.
-- **`mergeable` is LAZILY COMPUTED, and UNKNOWN is a warning row.** On
-  2026-08-09 the first `gh pr list` after a quiet period answered 39 UNKNOWN of
-  40 open; 12 seconds later, 22 CONFLICTING / 18 MERGEABLE. A naive
-  `select(.mergeable == "CONFLICTING")` drops those rows and prints a calmer
-  number. Re-poll, and print whatever is still UNKNOWN as a warning row.
+- **Count ALL-OF-PRESENT, never occurrences-of-SUCCESS.** A required context can
+  render twice on one head, once FAILURE and once SUCCESS; counting SUCCESS
+  occurrences launders the failing one out of the report. A context is green
+  only when it rendered and *every* entry carrying its name concluded SUCCESS.
+- **`mergeable` is LAZILY COMPUTED, and UNKNOWN is a warning row.** The first
+  `gh pr list` after a quiet period answers UNKNOWN for most rows and settles
+  seconds later. A naive `select(.mergeable == "CONFLICTING")` drops those rows
+  and prints a calmer number. Re-poll, and print whatever is still UNKNOWN as a
+  warning row. Both traps are measured on the history page linked above.
 
 Being merely **behind** main is not in this class and is never reported: main is
-`strict: false`, so a MERGEABLE PR behind main is exactly what the merge policy
-permits. Only a conflicted one is stuck. All four behaviours are mutation-proved
-over self-written fixtures in `scripts/stale-verdict-watch.test.sh`.
+`strict: false`, so a MERGEABLE PR behind main is what the merge policy permits.
+Only a conflicted one is stuck. All four behaviours are mutation-proved over
+fixtures in `scripts/stale-verdict-watch.test.sh`.
 
 ### SELF-CAMOUFLAGING — the fix that narrates itself in the vocabulary it removed
 
@@ -630,15 +621,39 @@ Measured, not inferred, on #16888:
 
 When a fix narrates the pattern it deleted, describe that pattern in prose —
 name the statuses, not the numerals — rather than reproducing a greppable
-literal. The durable second layer is to anchor the sweep grep on `status` before
-the bracket, so an assertion and a sentence about an assertion stop matching the
-same expression; that strict form is invariant across the reword, which is how
-you prove the reword removed only phantoms.
+literal. Then anchor the sweep grep on `status` before the bracket, so an
+assertion and a sentence about one stop matching the same expression; that
+strict form is invariant across the reword, which is how you prove the reword
+removed only phantoms.
 
-The non-vacuity arm is the acceptance criterion that matters. Re-run the loose
+The non-vacuity arm is the acceptance criterion that matters: re-run the loose
 sweep after the reword and confirm it still returns the same number of LIVE-CODE
-sites. A fix that silences false positives by also blinding the search has made
-the artifact worse than the noise it removed.
+sites. A fix that silences false positives by blinding the search has made the
+artifact worse than the noise it removed.
+
+### PARSED BUT NOT RUN — the static check that cannot see an expansion-time error
+
+Those five are about a CHECK that reads green; the sixth is the hand check
+an author runs on a gate script: **`sh -n script.sh` answers 0 on a script that
+then exits 0 having compared NOTHING.** A capture that fails at RUN time leaves
+its operand EMPTY, the assignment discards the status, and emptiness reads as "no
+differences". Measured 2026-09-13, `scripts/sunset-route-consumers.test.sh`
+under `sh`: exit 0, `---- 0 failure(s), 32 pass(es)`, and four swallowed
+`command substitution: … syntax error` lines on stderr.
+
+**THE TRIGGER IS PLATFORM-SHAPED; THE SHAPE IS NOT.** That was bash 3.2 (macOS),
+which refuses process substitution in POSIX mode and parses command
+substitutions LAZILY — the refusal lands at expansion time. bash 5.2.21 (ubuntu
+24.04, CI) ALLOWS it: same fixture, exit 2, both comparisons red
+(2026-09-15). **The vacuous variant is what a macOS developer sees; CI sees the
+loud one.**
+
+**Verify a gate script by RUNNING it under the interpreter in question.**
+`scripts/posix-vacuous-green-census.sh` says so in its RED remedy line: its
+`sh-n-blindness` arms re-measure it on any interpreter; its
+`procsub-under-posix` arms DETECT which world they are in, then assert what that
+world owes — vacuous where refused, loud where allowed, CANNOT READ where
+neither, never a skip.
 
 ## Security gates (Sobelow + mix_audit)
 
@@ -684,18 +699,16 @@ Elixir security gates, path-triggered on `api/**`:
    `grep -c '^[A-Za-z]' api/.sobelow-skips` prints — **35** rows read at
    a333e4b58 on 2026-09-11, a dated snapshot and not a live fact — in two
    mechanical classes.
-   Derive both numbers rather than quoting this paragraph — it said **10** and
-   **8** until 2026-09-01, having predicted its own decay two paragraphs down
-   and never been re-derived after the fix landed:
+   Derive both numbers rather than quoting this paragraph; it has already gone
+   stale once by being quoted instead of re-derived:
 
    | Class | Count | Entries | Why no annotation can ever reach it |
    |---|---|---|---|
-   | `Sobelow.Config.*` | **7** | 6 `Config.CSRF` + 1 `Config.HTTPS` (`config/prod.exs:0`) | `sobelow.ex` calls `Config.fetch(project_root, routers, endpoints)` and only *then* does `allowed = allowed -- [Config, Vuln]`. Config findings are produced outside the `def_funs |> combine_skips()` pipeline, so `@sobelow_skip` is never consulted. `config/prod.exs:0` has no function to annotate at all. |
-   | `.heex` `XSS.Raw` | **2** | `layouts/bulldocs.html.heex:95`, `layouts/quiz.html.heex:21` | `Parse.get_meta_template_funs/1` builds the template AST with `EEx.compile_string(File.read!(filepath))`. It bypasses `Parse.read_file/1`, the reader that rewrites `# sobelow_skip [...]` into `@sobelow_skip [...]` when `--skip` is set, so a template's source never sees the substitution. |
+   | `Sobelow.Config.*` | **7** | 6 `Config.CSRF` + 1 `Config.HTTPS` (`config/prod.exs:0`) | Config findings are produced outside the `def_funs |> combine_skips()` pipeline, so `@sobelow_skip` is never consulted; `config/prod.exs:0` has no function to annotate at all. |
+   | `.heex` `XSS.Raw` | **2** | `layouts/bulldocs.html.heex:95`, `layouts/quiz.html.heex:21` | `Parse.get_meta_template_funs/1` bypasses the reader that rewrites `# sobelow_skip` into `@sobelow_skip`, so a template's source never sees the substitution. |
 
-   The `.heex` line numbers are part of each row's fingerprint,
-   so read them off `api/.sobelow-skips`, never from memory: this table carried
-   `bulldocs.html.heex:67` for the row that is really at `:95`.
+   The `.heex` line numbers are part of each row's fingerprint, so read them off
+   `api/.sobelow-skips`, never from memory — this table has carried a wrong one.
 
    The third `XSS.Raw` entry (`controllers/error_html.ex:25`) is a normal `.ex`
    function and **is** annotatable — it is not part of the floor. Re-evaluate
@@ -815,20 +828,15 @@ cd api && rm -rf _build/prod && MIX_ENV=prod mix deps.get && \
 
 ### Why a partial clean is not enough
 
-`CLAUDE.md` golden rule #1 and "Past Mistakes" #1: cleaning only
-`_build/prod/lib/barkpark` (or any subset) leaves stale `.beam` artifacts for
-HEEx templates and dependent modules. The compiler is happy with the
-existing artifacts and does not re-evaluate the module graph; the bug then
-surfaces only on the production server after a fresh deploy. **Always
-`rm -rf _build/prod` first.**
+Owned by `CLAUDE.md` golden rule #1 and "Past Mistakes" #1: a subset clean
+leaves stale `.beam` artifacts and the bug surfaces only after a prod deploy.
+**Always `rm -rf _build/prod` first.**
 
 ### Why dev-mode `mix compile` is insufficient
 
-`MIX_ENV=dev` enables compile-time leniency that `:prod` does not — most
-notably, certain macro-vs-function ambiguities in `runtime.exs` `when`
-guards. `mix test` runs under `:test` and is similarly lenient. Only
-`MIX_ENV=prod mix compile` exercises the prod compiler; only the prod
-compiler rejects the PR #42 bug class.
+`MIX_ENV=dev` enables compile-time leniency that `:prod` does not — notably some
+macro-vs-function ambiguities in `runtime.exs` `when` guards — and `:test` is
+similarly lenient. Only `MIX_ENV=prod mix compile` rejects the PR #42 bug class.
 
 ## Lessons-learned: PR #42 macro-in-guard (2026-04-25)
 
@@ -865,9 +873,8 @@ JOB on the PRs where it runs, and that red is visible on the PR; **none of it
 stops a merge**, and `doc-gates` **cannot block a merge** by itself. That is the
 whole of its authority.
 
-(The count read 17 until 2026-08-07 — `Never-cancel-main concurrency ratchet`
-and `Nil-polarity fail-closed gate` were missing from the table below. The 26 is
-derived by running, not transcribed:
+(The count read 17 until 2026-08-07, two steps short. The 26 is derived by
+running, not transcribed:
 
 ```bash
 grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 26
@@ -1002,8 +1009,6 @@ content — never raise the cap.
 | Run the plugin matrix test | `bash api/test/scripts/test-plugin-node-matrix.sh` |
 | Lint the workflows         | `actionlint .github/workflows/*.yml`           |
 
-`actionlint` is not installed by default in this repo's environment. To add
-it locally: `brew install actionlint` (macOS) or
-`go install github.com/rhysd/actionlint/cmd/actionlint@latest`. CI does not
-currently run `actionlint`; add it as a separate workflow if drift becomes
-common.
+`actionlint` is not installed here by default (`brew install actionlint`, or
+`go install github.com/rhysd/actionlint/cmd/actionlint@latest`) and CI does not
+run it; add it as a separate workflow if drift becomes common.

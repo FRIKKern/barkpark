@@ -40,6 +40,43 @@ defmodule Barkpark.PortableDoc.Render.UtilTest do
   end
 
   describe "safe_url/1" do
+    for codepoint <- 0x80..0x9F do
+      test "removes C1 U+#{Integer.to_string(codepoint, 16)} before URL validation" do
+        control = <<unquote(codepoint)::utf8>>
+
+        for raw <- [
+              "/" <> control <> "/evil.example",
+              "/" <> control <> "\\evil.example",
+              "jav" <> control <> "ascript:alert(1)",
+              "da" <> control <> "ta:text/html,bad",
+              control,
+              " " <> control <> " "
+            ] do
+          assert Util.safe_url(raw) == "#", "must refuse #{inspect(raw)}"
+        end
+
+        for {raw, expected} <- [
+              {"https://example.com/a" <> control <> "b", "https://example.com/ab"},
+              {"/docs/a" <> control <> "b", "/docs/ab"},
+              {"#an" <> control <> "chor", "#anchor"},
+              {"?a" <> control <> "=1&b=2", "?a=1&amp;b=2"},
+              {"./a" <> control <> "b", "./ab"},
+              {"../a" <> control <> "b", "../ab"},
+              {"mailto:a" <> control <> "b@example.com", "mailto:ab@example.com"},
+              {"https://example.com/a" <> control <> "\u00A0exämple世界☕",
+               "https://example.com/a\u00A0exämple世界☕"}
+            ] do
+          assert Util.safe_url(raw) == expected, "must clean #{inspect(raw)}"
+        end
+      end
+    end
+
+    test "preserves non-control Unicode, including the U+00A0 boundary" do
+      for raw <- ["/docs/a\u00A0exämple世界☕", "https://example.com/a\u00A0世界"] do
+        assert Util.safe_url(raw) == raw
+      end
+    end
+
     test "allows https URLs" do
       assert Util.safe_url("https://example.com") == "https://example.com"
     end

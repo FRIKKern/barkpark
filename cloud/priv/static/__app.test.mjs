@@ -2959,10 +2959,13 @@ test("cch-w12-bl-e12: the shipped .inst-sites-card case reds once its focus fix 
 // the exact reason --citation-inventory is a SUB-MODE and not an export. A
 // second implementation that must agree with the first is the point: change the
 // filter and this reds.
-// Mirrors the gate's TEXT-SHAPE predicate (cchi-w18): a member is any regular
-// file in either arm whose sniff window holds no NUL byte. Independently
-// re-implemented from the documented rule, exactly as the extension filter it
-// replaces was — change the predicate in either place and this reds.
+// Mirrors BOTH halves of the gate's documented rule: the TEXT-SHAPE predicate
+// (cchi-w18 — a member is a regular file whose 4096-byte sniff window holds no
+// NUL) and the REACH predicate (this row — anywhere under the scan root, found
+// by descending, with symlinks and non-regular files excluded by property).
+// Independently re-implemented from the prose, exactly as the extension filter
+// and the two hardcoded arms it replaces were: change either predicate in one
+// place and this reds.
 const citationScanSetFrom = (root) => {
   const isText = (abs) => {
     let st;
@@ -2987,10 +2990,39 @@ const citationScanSetFrom = (root) => {
     }
   };
   const out = [];
-  for (const f of fs.readdirSync(root)) if (isText(path.join(root, f))) out.push(f);
+  const walk = (absDir, rel) => {
+    for (const ent of fs.readdirSync(absDir, { withFileTypes: true })) {
+      if (ent.isSymbolicLink()) continue;
+      const abs = path.join(absDir, ent.name);
+      const childRel = rel ? path.join(rel, ent.name) : ent.name;
+      if (ent.isDirectory()) walk(abs, childRel);
+      else if (isText(abs)) out.push(childRel);
+    }
+  };
+  walk(root, "");
+  return out.sort();
+};
+// THE PRE-CHANGE DERIVATION, KEPT ON PURPOSE AS THE NEGATIVE HALF OF A PAIRED
+// CONTROL. This is verbatim the reach the gate had before the recursive walk
+// landed: a readdir of the root and a readdir of `__preview__/`, nothing else.
+// It exists so a test can show that a file planted in a nested subtree is
+// INVISIBLE to it and NAMED by the walk above — which is what proves the
+// widening did the work, rather than the plant having been findable all along.
+// Without this arm, "the new traversal finds the plant" is consistent with the
+// old traversal having found it too, and the test would measure nothing.
+const citationScanSetTwoArmLegacy = (root) => {
+  const isFile = (abs) => {
+    try {
+      return fs.statSync(abs).isFile();
+    } catch {
+      return false;
+    }
+  };
+  const out = [];
+  for (const f of fs.readdirSync(root)) if (isFile(path.join(root, f))) out.push(f);
   const pv = path.join(root, "__preview__");
   if (fs.existsSync(pv))
-    for (const f of fs.readdirSync(pv)) if (isText(path.join(pv, f))) out.push(path.join("__preview__", f));
+    for (const f of fs.readdirSync(pv)) if (isFile(path.join(pv, f))) out.push(path.join("__preview__", f));
   return out.sort();
 };
 // The RULED alternation (charter D201 / cch-w16-s7), duplicated here for the
@@ -3018,8 +3050,9 @@ test("cchi-w20: --citation-inventory prints the REAL scan set crossed with the r
   assert.equal(r.status, 0, "the real tree's scan set is intact, so the mode must exit 0:\n" + r.out);
   assert.ok(
     r.out.includes(
-      `${files.length} file(s) scanned (${files.filter((f) => !f.startsWith("__preview__" + path.sep)).length} top-level, ` +
-        `${files.filter((f) => f.startsWith("__preview__" + path.sep)).length} __preview__/), `,
+      `${files.length} file(s) scanned (${files.filter((f) => !f.includes(path.sep)).length} at the root, ` +
+        `${files.filter((f) => f.startsWith("__preview__" + path.sep)).length} under __preview__/, ` +
+        `${files.filter((f) => f.split(path.sep).length > 2).length} below the first level), `,
     ),
     `the mode's scan set must equal this test's independent derivation (${files.length} files):\n` + r.out,
   );
@@ -3035,6 +3068,67 @@ test("cchi-w20: --citation-inventory prints the REAL scan set crossed with the r
       new RegExp(`ruled=\\s*${heaviest[1]}  E11=\\s*\\d+  ${heaviest[0].replace(/[.\\/]/g, "\\$&")}$`, "m").test(r.out),
     `the mode must cross the set with the alternation per FILE (${heaviest[0]} = ${heaviest[1]}):\n` + r.out,
   );
+});
+
+test("w10: the scan set REACHES a nested subtree, and the pre-change two-arm reach did NOT", () => {
+  // THE PAIRED CONTROL. Both halves run against the SAME planted file: the
+  // legacy two-arm reach must not see it (so the widening is what found it),
+  // and the shipped derivation must name it (so the widening actually landed).
+  // One half alone proves nothing — a plant the old reach could already see
+  // would make the new reach look effective while measuring nothing.
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "bp-citreach-"));
+  try {
+    fs.writeFileSync(path.join(d, "app.js"), "// nothing to cite\n");
+    fs.mkdirSync(path.join(d, "__preview__"));
+    fs.writeFileSync(path.join(d, "__preview__", "smoke.mjs"), "// nothing to cite\n");
+    const nested = path.join(d, "__preview__", "fixtures", "deep-arm");
+    fs.mkdirSync(nested, { recursive: true });
+    const rel = path.join("__preview__", "fixtures", "deep-arm", "proof.sh");
+    // COMPOSED, NEVER WRITTEN WHOLE. This file is inside the scan set the test
+    // is about, so a literal banned citation here would red E11 against the
+    // test itself — which is exactly what the widening proves, at the wrong
+    // target. Assembling it at runtime keeps the fixture a VALUE, not source.
+    const plant = ["app", ".js"].join("") + ":" + "4242";
+    fs.writeFileSync(path.join(d, rel), `# see ${plant} for the handler\n`);
+
+    const legacy = citationScanSetTwoArmLegacy(d);
+    assert.ok(legacy.length > 0, "the legacy control must not be vacuously empty");
+    assert.ok(
+      !legacy.includes(rel),
+      `the PRE-CHANGE reach must be BLIND to the nested plant, else this test measures nothing: ${legacy.join(", ")}`,
+    );
+
+    const now = citationScanSetFrom(d);
+    assert.ok(now.includes(rel), `the widened reach must SEE the nested plant: ${now.join(", ")}`);
+
+    const r = runCssCheck("--citation-inventory", d);
+    assert.equal(r.status, 0, r.out);
+    assert.match(
+      r.out,
+      new RegExp(`ruled=\\s*1  E11=\\s*1  ${rel.replace(/[.\\/]/g, "\\$&")}$`, "m"),
+      "the gate's own derivation must reach the nested plant and cross it with the alternation:\n" + r.out,
+    );
+    assert.ok(r.out.includes(plant), `the mode must print the matched text (${plant}):\n` + r.out);
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("cchi-w20: E17 refuses when the recursive DESCENT of the derivation collapses", () => {
+  // The flattened-walk case: every depth-0 and depth-1 member is still present,
+  // so both arms above stay healthy and the totals line reads like a clean tree
+  // while every nested fixture subtree has silently stopped being scanned.
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "bp-citinv-flat-"));
+  try {
+    fs.writeFileSync(path.join(d, "app.js"), "// nothing to cite\n");
+    fs.mkdirSync(path.join(d, "__preview__"));
+    fs.writeFileSync(path.join(d, "__preview__", "smoke.mjs"), "// nothing to cite\n");
+    const r = runCssCheck("--citation-inventory", d);
+    assert.equal(r.status, 1, "a set with nothing below the first level must REFUSE:\n" + r.out);
+    assert.match(r.out, /E17 .*ZERO members below the first level/, "the refusal must NAME the arm:\n" + r.out);
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
 });
 
 test("cchi-w20: --citation-inventory runs ABOVE the gate body, so a red gate cannot swallow it", () => {
@@ -16347,6 +16441,69 @@ test("stw4 freshnessModel: amber-pulse ONLY for an in-flight content-auto rebuil
   assert.equal(manual.rebuilding, false);
   assert.equal(manual.label, "Deploying");
   assert.equal(manual.dot, "deploy");
+});
+
+// ── dr-bl-internal-tree-has-no-blocking-gate: internal/cli/** under a REQUIRED gate ──
+//
+// THE HOLE THIS CLOSES. `internal/cli/**` reaches no required context that
+// asserts anything about its Go behaviour, while .github/workflows/deploy.yml
+// lists `internal/**` in its push-to-main paths — merged IS live. Two files of
+// that tree were already pulled under `Console gate` by being declared in
+// CONSOLE_PATHS and read from this harness (internal/cli/cloud_status_cmd.go,
+// internal/builder/builder.go). This arm adds the third, and it is declared the
+// same way: ONE exact file, never `internal/cli/**`.
+//
+// THE CONTRACT, and it is a real one rather than a decorative pin. Both
+// surfaces answer the same question — "is this deployment still moving?" — and
+// they must answer it over the SAME status words:
+//
+//   * the console's `freshnessModel` computes `inFlight` from a status word and
+//     renders an in-flight row as a pulsing "Rebuilding"/"Deploying" pill;
+//   * the CLI's `classifySiteStatus` buckets the same word into
+//     `siteOutcomeBuilding`, which `siteCohort` counts as IN FLIGHT and
+//     deliberately keeps OUT of `Outcomes()`.
+//
+// A word that the CLI knows is still moving but the console does not falls to
+// `freshnessModel`'s generic else arm: dot "unknown", which `siteStatusPill`
+// maps to role NEUTRAL and `.fresh-badge--unknown` styles not at all — a build
+// still in flight resting on the list looking exactly as calm as a healthy one.
+// That is not a hypothetical: it is precisely the defect cch-w64-s6 fixed for
+// `deferred`, recorded in freshnessModel's own comment. This arm makes the
+// NEXT such word red instead of shipping quiet.
+//
+// BOTH SIDES ARE DERIVED FROM SOURCE — neither is a remembered list. Editing
+// either producer alone reds this test; editing this test to match is the
+// wrong repair, because the two surfaces would still disagree in front of a
+// person. Re-derive the arms with:
+//   grep -n -A1 'return siteOutcomeBuilding' internal/cli/sites_cmd.go
+//   grep -n 'var inFlight' cloud/priv/static/app.js
+//
+// ONLY the in-flight set is pinned. The two LIVE sets legitimately differ (the
+// CLI also accepts running/ready/active; the console renders those through its
+// else arm), so asserting equality there would pin a disagreement that is by
+// design.
+test("dr-bl-internal-tree: the console's in-flight status set and the CLI cohort's BUILDING arm name the same words", () => {
+  const goSrc = fs.readFileSync(path.join(REPO_ROOT, "internal/cli/sites_cmd.go"), "utf8");
+  const arm = goSrc.match(/case ([^\n:]+):\s*\n\s*return siteOutcomeBuilding\b/);
+  assert.ok(arm,
+    "internal/cli/sites_cmd.go no longer has a `case …: return siteOutcomeBuilding` arm — the CLI half of the " +
+    "in-flight contract lost its producer, so this assertion can no longer see what the cohort counts as in flight");
+  const goWords = (arm[1].match(/"([^"]*)"/g) || []).map((q) => q.slice(1, -1)).sort();
+  assert.ok(goWords.length > 0, "the siteOutcomeBuilding arm matched but carries no quoted status word");
+
+  const js = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const decl = js.match(/var inFlight = ([^;]+);/);
+  assert.ok(decl,
+    "freshnessModel no longer computes `var inFlight = …` in app.js — the console half of the in-flight contract " +
+    "lost its producer");
+  const jsWords = [...decl[1].matchAll(/d\.status === "([^"]*)"/g)].map((m) => m[1]).sort();
+  assert.ok(jsWords.length > 0, "the inFlight declaration matched but compares against no status literal");
+
+  assert.deepEqual(jsWords, goWords,
+    "the console treats [" + jsWords.join(", ") + "] as in flight while internal/cli/sites_cmd.go's cohort " +
+    "counts [" + goWords.join(", ") + "] as building. A word only the CLI knows falls to freshnessModel's else " +
+    "arm and renders as a SETTLED-looking neutral pill; a word only the console knows is counted by the CLI as " +
+    "an outcome it is not. Add it to BOTH producers in the same PR — never to this list");
 });
 
 test("stw4 freshnessModel: settled rows state status · trigger · when", () => {

@@ -1732,25 +1732,25 @@ defmodule PDS.Census do
       note: "A PURE DELEGATE, AND THAT IS THE WHOLE ROW. `def replace(conn, params), do: update(conn, params)` renders nothing of its own: PUT /scim/v2/Users/:id reaches the receipt the row above judges. IT IS STILL CARRIED SEPARATELY rather than folded into that row, because @roster disposes BY DEF and the routed member is keyed on the :replace action — folding it would leave the PUT arrival undisposed. WHY UNJUDGED AND NOT PROVEN: the committed PUT cases (`a stale If-Match on PUT -> 412`, `a matching If-Match on PUT proceeds -> 200`) drive the route and assert the STATUS and the precondition, and neither reads a stored row back, so the end_to_end falsifier would refuse this row on its own citation. The delegate is judged as far as it goes and no further, and the gap is this sentence rather than a silence."},
     %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
       literal: "case Scim.create_group(org, params) do",
-      anchor_mfa: "BarkparkWeb.ScimGroupsController.create/2", def_fp: "9423216",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.do_create/3", def_fp: "108471285",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
                  "test \"cross-org: a token for org A cannot grant membership to a user in org B\" do"},
-      note: "THE 201 ANSWERS OVER THE RECONCILIATION IT PERFORMED, NOT OVER THE REQUEST. `render_group(conn, group, Scim.group_member_ids(org, group), unmatched)` takes the group from `{:ok, group} <- Scim.create_group(org, params)` and the member list from a STORED read, and the `unmatched` set names the member ids the write refused — so a request member that matched nobody comes back as `unmatchedMembers`, never as a granted member. The cited case drives the cross-org shape where that distinction is load-bearing and asserts BOTH the receipt and the untouched stored rows."},
+      note: "RE-DERIVED at 2b824bf75 (#18300, the SCIM request-body member bound). The verdict is UNCHANGED and the citation is unchanged: that commit adds a REFUSAL in front of this receipt and moves no byte of the rendering the row judges. THE ANCHOR MOVED ONTO `do_create/3` ON PURPOSE, NOT TO SILENCE THE ARM: `create/2` is now a four-line bound check that delegates, and the receipt this row judges lives entirely in `do_create/3`. Anchoring def_fp on the wrapper would leave a DEAD DETECTOR — every future edit to the rendering would move no byte inside `create/2` and this row would print fresh through it. The routed member `post /scim/v2/Groups -> create` stays disposed because roster_functions/2 resolves the LITERAL to its containing def and disposition is REACHABILITY (`create/2` calls `do_create/3`), not def equality. THE 201 ANSWERS OVER THE RECONCILIATION IT PERFORMED, NOT OVER THE REQUEST. `render_group(conn, group, Scim.group_member_ids(org, group), unmatched)` takes the group from `{:ok, group} <- Scim.create_group(org, params)` and the member list from a STORED read, and the `unmatched` set names the member ids the write refused — so a request member that matched nobody comes back as `unmatchedMembers`, never as a granted member. The cited case drives the cross-org shape where that distinction is load-bearing and asserts BOTH the receipt and the untouched stored rows."},
     %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
-      literal: "with {:ok, patch} <- ScimPatch.classify(params) do",
-      anchor_mfa: "BarkparkWeb.ScimGroupsController.update/2", def_fp: "83845777",
+      literal: "with {:ok, patch} <- ScimPatch.classify(params),",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.update/2", def_fp: "15721568",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
                  "test \"membership changes are audited\" do"},
-      note: "RE-READ AFTER THE WRITES, BY CONSTRUCTION. `apply_patch/5` fetches the group BEFORE the member ops and then re-reads it — `group = Scim.get_org_group(org, id) || group` — with the comment PDS-D551 left there saying why: rendering the pre-fetched struct would answer for the PRE-mutation resource. Members come from `Scim.group_member_ids(org, group)`, a stored read, and ops that matched nobody are reported as `unmatchedMembers` rather than folded into a bare 200."},
+      note: "RE-DERIVED at 2b824bf75 (#18300, the SCIM request-body member bound). The verdict is UNCHANGED and the citation is unchanged: that commit adds a REFUSAL in front of this receipt and moves no byte of the rendering the row judges. THE LITERAL MOVED BECAUSE THE OLD ONE LEFT THE FILE: the `with` grew a second clause (`:ok <- ScimPatch.check_member_total(...)`), so `... classify(params) do` no longer occurs and ROSTER-ANCHORS-EXIST reddened on it — which is ALSO what took `patch /scim/v2/Groups/:id -> update` out of the disposed population and reddened ROUTED-POPULATION-COMPLETE. The anchor is the same `with` head, one line as it is written today. RE-READ AFTER THE WRITES, BY CONSTRUCTION. `apply_patch/5` fetches the group BEFORE the member ops and then re-reads it — `group = Scim.get_org_group(org, id) || group` — with the comment PDS-D551 left there saying why: rendering the pre-fetched struct would answer for the PRE-mutation resource. Members come from `Scim.group_member_ids(org, group)`, a stored read, and ops that matched nobody are reported as `unmatchedMembers` rather than folded into a bare 200."},
     %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
-      literal: "def replace(conn, %{\"id\" => id} = params) do",
-      anchor_mfa: "BarkparkWeb.ScimGroupsController.replace/2", def_fp: "28821606",
+      literal: "case Scim.update_group(org, group, params) do",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.do_replace/4", def_fp: "60781801",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
                  "test \"membership changes are audited\" do"},
-      note: "PUT is a REAL def here, not a delegate: it reads the group, guards the precondition, calls `Scim.update_group/3` then `Scim.replace_group_members/3`, and renders `updated` — the struct update_group RETURNED — beside `Scim.group_member_ids(org, updated)`, a stored read, and the `unmatched` set the reconciliation refused. The `{:error, :invalid_role}` arm cannot reach a 2xx. CITATION NOTE, SAID PLAINLY: the sharpest PUT witness is `PUT: full-replace answers over the reconciliation it actually performed`, which asserts the receipt AND `stored_roles/1` on both the granted and the reverted user; it reads the store through a same-file helper rather than a `Repo.` token in its own block, so this row cites the case whose read-back token is IN the block and the sharper case is named here instead of being claimed by a citation the falsifier could not open."},
+      note: "RE-DERIVED at 2b824bf75 (#18300, the SCIM request-body member bound). The verdict is UNCHANGED and the citation is unchanged: that commit adds a REFUSAL in front of this receipt and moves no byte of the rendering the row judges. THE ANCHOR MOVED ONTO `do_replace/4` FOR THE SAME REASON `create` MOVED ONTO `do_create/3`: `replace/2` is now the bound check and every call this note describes lives in `do_replace/4`, so the wrapper's def_fp would detect nothing. `put /scim/v2/Groups/:id -> replace` stays disposed by reachability. PUT is a REAL def here, not a delegate: it reads the group, guards the precondition, calls `Scim.update_group/3` then `Scim.replace_group_members/3`, and renders `updated` — the struct update_group RETURNED — beside `Scim.group_member_ids(org, updated)`, a stored read, and the `unmatched` set the reconciliation refused. The `{:error, :invalid_role}` arm cannot reach a 2xx. CITATION NOTE, SAID PLAINLY: the sharpest PUT witness is `PUT: full-replace answers over the reconciliation it actually performed`, which asserts the receipt AND `stored_roles/1` on both the granted and the reverted user; it reads the store through a same-file helper rather than a `Repo.` token in its own block, so this row cites the case whose read-back token is IN the block and the sharper case is named here instead of being claimed by a citation the falsifier could not open."},
     %{path: "api/lib/barkpark_web/controllers/session_controller.ex",
       literal: "Barkpark.Accounts.revoke_user_session_token(token)",
       anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "94722031",
@@ -8887,7 +8887,9 @@ defmodule PDS.Census do
     p(String.duplicate("-", 78))
     p("  key         {method, path, module, action}  (the QUAD; a {module, action} key")
     p("              collapses this population #{length(d.population)} -> #{pairs} and cannot see an arriving")
-    p("              route to an action it already disposed)")
+    p("              route to an action it already disposed — which is what JUDGED and")
+    p("              ROSTERED are keyed on, so ROUTED-DERIVED-ARRIVALS-PINNED below is the")
+    p("              arm that sees it; EXCLUDED carries the quad and reds on its own)")
     p("  derived     #{length(d.routes)} routed entries from #{@router_path} AST + #{length(d.specs)} plugin spec(s)")
     p("              mounted at #{length(d.mounts)} #{@routed_resolved_macro}/1 callsite(s)")
     p("  ROUTED-WRITE #{length(d.population)} member(s) — methods #{Enum.map_join(@routed_write_methods, "/", &to_string/1)} plus every LiveView mount")
@@ -8910,6 +8912,10 @@ defmodule PDS.Census do
     p("                  exclusion row — rows the precedence SWALLOWS, which is why every")
     p("                  number on this page can be identical with the table one row larger.")
     p("    sum       #{pad(disp.judged + disp.rostered + disp.excluded + length(disp.undisposed))}  == population #{length(d.population)}")
+    p("    DERIVED PIN  count #{derived_disposition(disp).count} fp #{derived_disposition(disp).fp}  <- ROUTED-DERIVED-ARRIVALS-PINNED")
+    p("                  compares JUDGED+ROSTERED, the two classes keyed on {module, action}")
+    p("                  alone, against @derived_disposition_pin. COPY THIS PAIR to amend it;")
+    p("                  a pin typed from memory is the drift it exists to refuse.")
 
     if opts.routed_rows?, do: routed_rows_proposal(disp, parsed)
 
@@ -10504,6 +10510,90 @@ defmodule PDS.Census do
   # @register's controller paths, and router.ex is not one of them — an arm added there is
   # UNMUTATABLE: a probe hardcoded false in that branch still printed SELFTEST OK. Each arm
   # carries its OWN router-presence predicate instead.
+  # ---------------------------------------- THE DERIVED-DISPOSITION ARRIVAL PIN
+  #
+  # WHAT THIS CLOSES. dispose_routed/4's cond labels a member JUDGED or ROSTERED through
+  # reaches?/4, which is handed `mod` and `action` and NEVER the {method, path} half of
+  # the quad. EXCLUDED, one clause below it, is keyed on the FULL quad. So a SECOND route
+  # onto an action this lens already judges is disposed BY CONSTRUCTION and exits 0, while
+  # the identically-shaped arrival onto an EXCLUDED action reds as an UNDISPOSED ARRIVAL.
+  # The population header above has printed that asymmetry as a blind shape since wave 38;
+  # this is the arm that makes it a red.
+  #
+  # MEASURED, BOTH TREES, SAME READING (task-54e9fdfbfa0bfd3a, 2026-09-15). Plant
+  # `post("/Groups/:id/probe", ScimGroupsController, :update)` — an action @roster judges:
+  # ROUTED-WRITE 268 -> 269, ROSTERED 15 -> 16, PASS ROUTED-POPULATION-COMPLETE, rc 0, on
+  # origin/main 1e7231858 AND on merge-base 2fb7ee73a. The blindness is PRE-EXISTING and
+  # belongs to no one change. THE CONTROL, SAME SESSION: the same edit naming an action
+  # nothing disposes (`:probe_undisposed_zap`) reds ROUTED-POPULATION-COMPLETE at rc 1 —
+  # so the two rc 0s above are a reading, not a census that cannot fail.
+  #
+  # A COUNT AND A FINGERPRINT, NEVER A TABLE. Committing the quads would be a third route
+  # table to rot beside @routed_excluded and @roster. `count` is the half a reader can act
+  # on; `fp` (:erlang.phash2 over the SORTED quads) catches the swap a count cannot see —
+  # one arrival and one departure in the same commit. BOTH ARE DERIVED AND PRINTED on
+  # every run in the DISPOSITION block, so the repair is to COPY THE PRINTED PAIR.
+  #
+  # FAILURE DIRECTION, STATED — this arm reds when the set of members this run disposes
+  # JUDGED or ROSTERED differs from the pin IN EITHER DIRECTION:
+  #   ARRIVAL    a new route onto an already-judged or already-rostered action. The class
+  #              nothing saw, and the whole reason this exists.
+  #   DEPARTURE  a judged route removed, or a judgement lost. ROUTED-POPULATION-COMPLETE
+  #              already reds on the second half of that unless a committed exclusion row
+  #              catches the member in the same commit; this reds on both halves.
+  #   NOT HERE   an arrival onto an action NOTHING disposes. That is and stays
+  #              ROUTED-POPULATION-COMPLETE's UNDISPOSED ARRIVAL — this arm adds a red,
+  #              it takes none away.
+  # IT IS NOT A FLOOR AND NOT A THRESHOLD; PDS-D454 stands and no count has to be under
+  # anything. It is a RATCHET, and the repair is RE-DERIVE AND AMEND WITH THE RUN, in the
+  # SAME commit as the change that moved it — never edit the literal blind.
+  #
+  # SCOPED THE WAY THE REGISTER ARMS ARE. Over the --selftest synthetic tree the register
+  # and roster resolve nothing, so an unconditional pin would red on every fixture case and
+  # certify nothing; `register_scope` is the guard stale_arm_checks/1 already uses.
+  # DERIVED BY RUN, NEVER TYPED (PDS-D448a's rule, applied to this pin's own first value):
+  #   command  elixir scripts/pds-elixir-receipt-census.exs   (from the repo root)
+  #   at       2026-09-15, tree 1e7231858, engine Elixir 1.19.5 / Erlang-OTP 28
+  #            (erts 16.3.1), darwin arm64 — the run printed `DERIVED PIN count 83
+  #            fp 100841140` and this pair is a COPY OF THAT LINE.
+  #   split    83 == JUDGED 68 + ROSTERED 15 over a 268-member quad population; the
+  #            remaining 185 are EXCLUDED, already quad-keyed, and not this arm's.
+  # :erlang.phash2/1 is the same hash roster_def_fp/1 already fingerprints defs with, and
+  # it is stable across OTP releases — which is why a CI run on another engine compares.
+  @derived_disposition_pin %{count: 83, fp: "100841140"}
+
+  # ONE DERIVATION, READ TWICE — the printed pair and the compared pair are this function,
+  # so the value a maintainer copies out of the report cannot differ from the value the arm
+  # tests. A second normaliser would be a second table of "the derived set".
+  defp derived_disposition(disp) do
+    quads = Enum.sort(for {key, v, _} <- disp.rows, v in [:judged, :rostered], do: key)
+    %{count: length(quads), fp: to_string(:erlang.phash2(quads))}
+  end
+
+  defp derived_arrival_checks(%{disposition: %{ladder: %{register_scope: :real}} = disp}) do
+    got = derived_disposition(disp)
+    pin = @derived_disposition_pin
+    ok? = got.count == pin.count and got.fp == pin.fp
+
+    why =
+      if ok? do
+        "#{got.count} member(s) disposed JUDGED or ROSTERED, fingerprint #{got.fp} — BOTH halves equal the pin. WHAT IT WATCHES: reaches?/4 keys {module, action} and never the quad, so a route arriving onto an already-judged action is disposed by construction and moved no printed number before this arm. FAILURE DIRECTION: ARRIVAL onto an already-judged or already-rostered action, and DEPARTURE of one, alike — never an arrival onto an action nothing disposes, which is ROUTED-POPULATION-COMPLETE's UNDISPOSED ARRIVAL and stays there. BLIND SHAPE, PRINTED: the COUNT alone cannot see one arrival cancelling one departure — the FINGERPRINT is what does — and NEITHER half can name WHICH route arrived, so a red sends the reader to the DISPOSITION block above, not to a delta this arm does not have"
+      else
+        direction =
+          cond do
+            got.count > pin.count -> "ARRIVAL: #{got.count - pin.count} more member(s) are disposed JUDGED or ROSTERED than the pin records — a route arriving onto an action already judged is the shape that lands here, and it is INVISIBLE to ROUTED-POPULATION-COMPLETE"
+            got.count < pin.count -> "DEPARTURE: #{pin.count - got.count} fewer member(s) are disposed JUDGED or ROSTERED than the pin records — a judged route removed, or a judgement lost"
+            true -> "SWAP: the count is unchanged and the fingerprint is not, so at least one arrival and one departure landed together — the direction the count alone is blind to"
+          end
+
+        "the derived disposition moved off its pin · count #{pin.count} -> #{got.count} · fingerprint #{pin.fp} -> #{got.fp} · #{direction} · RE-DERIVE, NEVER RE-TYPE: run `elixir scripts/pds-elixir-receipt-census.exs` from the repo root, copy the DERIVED PIN pair printed in the DISPOSITION block, and amend @derived_disposition_pin in the SAME commit as the change that moved it. THE FORBIDDEN REPAIR: a @routed_excluded row for the arriving member greens this and reds ROUTED-DISPOSITION-UNSHADOWED the moment anyone repairs the roster row, because that arm reds on a committed row naming a member this run disposes ROSTERED"
+      end
+
+    [{"ROUTED-DERIVED-ARRIVALS-PINNED", ok?, why}]
+  end
+
+  defp derived_arrival_checks(_), do: []
+
   defp routed_checks(:no_router), do: []
 
   defp routed_checks(d) do
@@ -10521,7 +10611,7 @@ defmodule PDS.Census do
             "#{length(disp.undisposed)} ROUTED-WRITE member(s) carry NO disposition",
             "#{length(disp.orphans)} disposition row(s) name NO live routed member",
             "#{length(disp.dupes)} disposition key(s) carry more than one row",
-            "the quad key sees #{length(d.population)} member(s) where a {module, action} key sees #{pairs} — an arrival onto an already-disposed pair is INVISIBLE under the pair key"
+            "the quad key sees #{length(d.population)} member(s) where a {module, action} key sees #{pairs} — an arrival onto an already-disposed pair is INVISIBLE to THIS arm, because JUDGED and ROSTERED are resolved by {module, action} reachability; ROUTED-DERIVED-ARRIVALS-PINNED is the arm that reds on that class"
           ] ++
             Enum.map(Enum.take(disp.undisposed, 4), fn {m, p, mod, a} ->
               "UNDISPOSED ARRIVAL #{m} #{p} -> #{mod}.#{a}"
@@ -10579,6 +10669,7 @@ defmodule PDS.Census do
       {"LENS-CAN-MISS", resolved != [], lens_why},
       {"ROUTED-DISPOSITION-UNSHADOWED", disp.shadowed == [], shadow_why}
     ] ++
+      derived_arrival_checks(d) ++
       exclusion_table_checks(d) ++
       exclusion_freshness_checks(d) ++
       derivation_checks(d) ++ derivation_witness_checks(d) ++ liveview_checks(d) ++ stale_arm_checks(d)
@@ -11531,6 +11622,41 @@ defmodule PDS.Census do
         "PASS  RESPONSE-CARRIES-THE-READ-PINNED"
       ],
       proves: "the repo corpus DOES carry the tripwire — the same syntactic shape dispatching through a runtime capture — and the arm names it in the REFUSED roll, so the two mutants below have something real to destroy"
+    },
+    # ROUTED-DERIVED-ARRIVALS-PINNED, PROVEN ON ITS DERIVED SIDE (task-54e9fdfbfa0bfd3a).
+    #
+    # WHY corpus: :repo — the arm scopes itself through `register_scope`, exactly as
+    # stale_arm_checks/1 does, so over the synthetic tree it emits NO tuple at all and a
+    # fixture mutant would prove a red on an arm that was never armed (PDS-D541).
+    #
+    # WHY THE DERIVED SIDE AND NOT THE PIN. Retyping the literal would red the arm while
+    # proving only that a comparison compares. This mutant moves the MEASUREMENT: gut the
+    # cond clause that labels a member ROSTERED and the 15 roster-disposed members leave
+    # the derived set, so the pin's count AND its fingerprint both move and the arm must
+    # name the DEPARTURE direction. THE ARRIVAL direction is not mutatable from inside
+    # this file — it needs a second route in the tree's own router — and is recorded with
+    # its two measured runs in the @derived_disposition_pin block instead of asserted here.
+    #
+    # ROUTED-POPULATION-COMPLETE REDS ALONGSIDE, AND IS ASSERTED, so this case is not read
+    # as "only the new arm can see this": losing 15 rosterings drops those members to
+    # UNDISPOSED, which the older arm has always caught. The class the new arm ADDS is the
+    # one where the population stays complete — that is the pair of runs in the pin block.
+    %{
+      name: "DERIVED-ARRIVAL-PIN-MEASURES",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"          reaches?(index, mod, action, rostered) -> " <> "{key, :rostered, nil}",
+         "          false and reaches?(index, mod, action, rostered) -> {key, :rostered, nil}"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-DERIVED-ARRIVALS-PINNED",
+        "the derived disposition moved off its pin",
+        "DEPARTURE:",
+        "FAIL  ROUTED-POPULATION-COMPLETE"
+      ],
+      refute: ["PASS  ROUTED-DERIVED-ARRIVALS-PINNED"],
+      proves: "the pin is compared against a LIVE derivation and not against itself: destroy the ROSTERED label and both halves of the pin move, the arm names the direction, and the older population arm reds beside it on the members that fell out"
     },
     %{
       name: "RCR-CAPTURE-FIRE-REDS",

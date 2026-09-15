@@ -1113,7 +1113,7 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
     // callout OR note (the notes-grid split) — sub-route by node type.
     if (isNoteType(nextChild && nextChild.type)) {
       return noteNodeChanged(prevChild, nextChild)
-        ? noteNodeToPatch(nextChild)
+        ? noteNodeToPatch(nextChild, prevBlock)
         : null;
     }
     return calloutNodeChanged(prevChild, nextChild)
@@ -1332,58 +1332,77 @@ function stableCalloutKey(node) {
   });
 }
 
-// ── note ⇄ canvas content node (the notes-grid split) ────────────────────────
-//
-// The NEW singular `note` block ⇄ a native `note` content node. Persisted shape
-// (COMPAT/wire form — the callout precedent, flat strings the default):
-//   { id, type:"note", label, lead?, text }
-// (or, MATERIALIZED/additive: { …, slots:{ label:[<p>], lead?:[<p>], body:[<p>] } }).
-//
-// A note is a SUPERSET of callout: it exposes THREE editable fields, not one.
-//   body  → the ONE editable inline contentDOM (the callout body precedent — a widget
-//           FLATTENS its body slot to inline). The `text` flat field is its plain
-//           encoding; a note body persists as PLAIN TEXT (marks dropped) to match the
-//           legacy `escape_html(text)` reader contract (a DELIBERATE lossy tradeoff).
-//   label → a plain string on node.attrs, edited by a non-PM input island.
-//   lead  → a plain string on node.attrs, edited by a non-PM input island; ABSENT
-//           (null) round-trips as no `lead` field (byte-fidelity, the callout title
-//           precedent — an absent lead is never "").
-
-// noteBodyInline(block) → the note body's inline array (Elixir Slots.note_body_text's
-// SOURCE, before the plain flatten). slots.body[0].content when materialized, else the
-// flat `text` field wrapped as a single inline text run (the compat encoding).
-function noteBodyInline(block) {
-  const slotBody = block && block.slots && block.slots.body;
-  if (Array.isArray(slotBody) && slotBody.length) {
-    const first = slotBody[0];
-    return (first && first.content) || [];
-  }
-  const t = block && block.text;
-  if (typeof t === "string" && t !== "") return [{ type: "text", value: t }];
-  if (typeof t === "number") return [{ type: "text", value: String(t) }];
-  return [];
+// ── note ⇄ canvas content node ──────────────────────────────────────────────
+// The reader displays plain strings, but persistence retains the original carrier.
+// A single terminal may be edited through any number of wrappers without discarding
+// their metadata. Multi-run/opaque carriers use the existing read-only atom route.
+function noteScalarText(value) {
+  if (typeof value === "string") return value;
+  return Number.isInteger(value) ? String(value) : "";
 }
 
-// noteFieldText(block, slotName, flatKey) → a note field as a plain string. The slot's
-// lone paragraph inline FLATTENED to plain text (marks dropped) when materialized, else
-// the flat field. JS twin of Elixir Slots.note_{label,lead}_text/1.
-function noteFieldText(block, slotName, flatKey) {
-  const slot = block && block.slots && block.slots[slotName];
+// Mirror Blocks.note_no_rich_shadow?: only absent/null/empty alternate
+// carriers are harmless. Keep their original keys and values when editing.
+function noteNoRichShadow(value, fields) {
+  return fields.every(key => !Object.hasOwn(value, key) || value[key] === null ||
+    value[key] === "" || (Array.isArray(value[key]) && value[key].length === 0));
+}
+
+function noteInlineTerminal(value, path) {
+  if (value == null || (Array.isArray(value) && value.length === 0))
+    return { path, empty: true };
+  if (!Array.isArray(value) || value.length !== 1) return null;
+  const leaf = value[0];
+  if (!leaf || typeof leaf !== "object" || Array.isArray(leaf)) return null;
+  if (leaf.type === "text" || leaf.type === "code") {
+    if (!noteNoRichShadow(leaf, ["children", "content", "text"])) return null;
+    if (leaf.value != null && typeof leaf.value !== "string" && !Number.isInteger(leaf.value)) return null;
+    return { path: [...path, 0, "value"] };
+  }
+  if (Array.isArray(leaf.children) && leaf.children.length === 1 &&
+      noteNoRichShadow(leaf, ["content", "text", "value"]))
+    return noteInlineTerminal(leaf.children, [...path, 0, "children"]);
+  return null;
+}
+
+function noteFieldState(block, name, flatKey) {
+  const slot = block.slots && block.slots[name];
+  if (slot != null && (!Array.isArray(slot) || (slot.length === 0 && name !== "lead"))) return null;
+  let text = noteScalarText(block[flatKey]);
+  let terminal = { path: [flatKey], scalar: true };
+  // Server authoring permits only the optional lead slot to be an empty array.
+  // A populated paragraph's content wins even when it reads as empty.
   if (Array.isArray(slot) && slot.length) {
     const first = slot[0];
-    return flattenInlineText((first && first.content) || []);
+    if (!first || typeof first !== "object" || Array.isArray(first) || slot.length !== 1 || first.type !== "paragraph") return null;
+    if (!noteNoRichShadow(first, ["children", "text", "value"])) return null;
+    text = flattenInlineText(first.content);
+    terminal = noteInlineTerminal(first.content, ["slots", name, 0, "content"]);
+  } else if (block[flatKey] != null && typeof block[flatKey] !== "string" && !Number.isInteger(block[flatKey])) {
+    return null;
   }
-  const v = block && block[flatKey];
-  if (typeof v === "string") return v;
-  if (typeof v === "number") return String(v);
-  return "";
+  if (!terminal) return null;
+  if (name === "body" && Array.isArray(block.content) && block.content.length) {
+    if (text === "") {
+      text = flattenInlineText(block.content);
+      terminal = noteInlineTerminal(block.content, ["content"]);
+    } else if (flattenInlineText(block.content) !== "") {
+      // Clearing the primary would resurrect this dormant fallback. Preserving
+      // that unrelated carrier and promising an editable clear are incompatible.
+      return null;
+    }
+  }
+  if (name === "body" && block.content != null && !Array.isArray(block.content)) return null;
+  return terminal && { text, ...terminal };
 }
 
-function noteLabelText(block) {
-  return noteFieldText(block, "label", "label");
-}
-function noteLeadText(block) {
-  return noteFieldText(block, "lead", "lead");
+function noteState(block) {
+  if (block.slots != null && !isPlainObject(block.slots)) return { label: null, lead: null, body: null };
+  return {
+    label: noteFieldState(block, "label", "label"),
+    lead: noteFieldState(block, "lead", "lead"),
+    body: noteFieldState(block, "body", "text"),
+  };
 }
 
 // Flatten a portable-doc inline array to plain text, marks dropped — the JS twin of
@@ -1398,7 +1417,7 @@ function flattenInlineNode(n) {
   if (typeof n === "string") return n;
   if (!n || typeof n !== "object") return "";
   if (n.type === "text" || n.type === "code")
-    return n.value == null ? "" : String(n.value);
+    return noteScalarText(n.value);
   if (Array.isArray(n.children)) return flattenInlineText(n.children);
   return "";
 }
@@ -1410,29 +1429,26 @@ function noteNodeBodyText(node) {
   return flattenInlineText(tiptapInlineToPd((node && node.content) || []));
 }
 
-// noteBlockToNode(block) → { type:"note", attrs:{ bpId, bpType, label?, lead? },
-//   content:[inline…] }. body slot inline → contentDOM via the shared serializer;
-// label/lead → attrs, PRESENT-ONLY ("" and absent both → no attr) so an untouched
-// note's getJSON re-projection matches and emits zero ops (stableNoteKey).
 function noteBlockToNode(block, bpId, bpType) {
-  const attrs = { bpId, bpType: bpType || "note" };
-  const label = noteLabelText(block);
-  if (label !== "") attrs.label = label;
-  const lead = noteLeadText(block);
-  if (lead !== "") attrs.lead = lead;
-
+  const state = noteState(block);
+  if (Object.values(state).some(field => !field)) {
+    return { type: "bpOpaque", attrs: { bpId, bpType, bpBlock: deepClone(block) } };
+  }
+  const attrs = { bpId, bpType: bpType || "note", bpBlock: deepClone(block) };
+  if (state.label.text !== "") attrs.label = state.label.text;
+  if (state.lead.text !== "") attrs.lead = state.lead.text;
   const node = { type: bpType || "note", attrs };
-  const inline = inlineArrayToTiptap(noteBodyInline(block));
-  if (inline.length) node.content = inline;
+  if (state.body.text !== "") node.content = [{ type: "text", text: state.body.text }];
   return node;
 }
 
-// noteNodeToBlock(node, id) → { id, type:"note", label?, lead?, text }. Reconstruct
-// the FLAT wire form (the callout precedent — note keeps flat strings as the persisted
-// encoding, slots additive server-side). label/lead threaded ONLY when present; body
-// → the plain `text` field (always, even ""). Absent lead → ABSENT key (byte-fidelity).
+// Existing notes reconstruct from their complete source plus changed carriers.
+// New slash-inserted notes have no source carrier and keep the flat wire form.
 function noteNodeToBlock(node, id) {
   const attrs = (node && node.attrs) || {};
+  if (attrs.bpBlock) {
+    return { ...deepClone(attrs.bpBlock), ...noteNodeToPatch(node, attrs.bpBlock), id, type: "note" };
+  }
   const block = { id, type: "note" };
   if (attrs.label != null && attrs.label !== "") block.label = attrs.label;
   if (attrs.lead != null && attrs.lead !== "") block.lead = attrs.lead;
@@ -1440,36 +1456,53 @@ function noteNodeToBlock(node, id) {
   return block;
 }
 
-// The mutable-fields PATCH for a note. patch-block is a SHALLOW Map.merge (patch.ex
-// merge_block) that REPLACES or PRESERVES a key but never DELETES one — so a cleared
-// label/lead must be emitted EXPLICITLY as null (else the stale value survives),
-// mirroring calloutNodeToPatch's removal-safe contract. `text` is emitted always. On
-// the reader, compose maybe_put/note_lead_text drops an empty lead, so lead:null and
-// an absent lead render identically.
-function noteNodeToPatch(node) {
-  const attrs = (node && node.attrs) || {};
-  return {
-    label: attrs.label == null || attrs.label === "" ? null : attrs.label,
-    lead: attrs.lead == null || attrs.lead === "" ? null : attrs.lead,
-    text: noteNodeBodyText(node),
-  };
+// patch-block merges shallowly, so any slot edit sends the complete slots map.
+// Only an already-equal binary flat twin follows a materialized edit. Absent,
+// null, numeric and divergent shadows stay exactly as stored.
+function noteNodeToPatch(node, original) {
+  const block = original || (node.attrs && node.attrs.bpBlock);
+  if (!block) return {};
+  const state = noteState(block);
+  if (Object.values(state).some(field => !field)) return {};
+  const attrs = node.attrs || {};
+  const values = { label: attrs.label || "", lead: attrs.lead || "", body: noteNodeBodyText(node) };
+  const patch = {};
+  for (const [name, value] of Object.entries(values)) {
+    const carrier = state[name];
+    if (value === carrier.text) continue;
+    const flatKey = name === "body" ? "text" : name;
+    const [root, ...rest] = carrier.path;
+    if (!rest.length) {
+      patch[root] = carrier.scalar && name !== "body" && value === "" ? null : value;
+    } else {
+      if (!(root in patch)) patch[root] = deepClone(block[root]);
+      let target = patch[root];
+      for (const key of rest.slice(0, -1)) target = target[key];
+      target[rest[rest.length - 1]] = carrier.empty ? [{ type: "text", value }] : value;
+    }
+    if (root === "slots" && typeof block[flatKey] === "string" && block[flatKey] === carrier.text)
+      patch[flatKey] = value;
+  }
+  return patch;
 }
 
 // True when a note node's body OR chrome (label/lead) changed — an interior edit.
 // Canonical (key-order-insensitive) compare on the diff-relevant fields, so a body/
 // label/lead edit flips it but a pure reorder (bpId/bpType only) does not. Keys on
-// node.content so a legacy-loaded note and its re-projection compare EQUAL
-// (zero-op-on-load), the stableCalloutKey precedent.
+// plain body text so mark-only or empty-content representation changes are no-ops.
 function noteNodeChanged(prevNode, nextNode) {
   return stableNoteKey(prevNode) !== stableNoteKey(nextNode);
 }
 
-function stableNoteKey(node) {
+function stableNoteKey(node, includeCarrier = false) {
   const a = (node && node.attrs) || {};
   return canonicalJSON({
     label: a.label == null || a.label === "" ? null : a.label,
     lead: a.lead == null || a.lead === "" ? null : a.lead,
-    content: (node && node.content) || null,
+    text: noteNodeBodyText(node),
+    // Compare the effective edited source, not the original bpBlock: a genuine
+    // own edit still matches, but equal text cannot hide external metadata.
+    ...(includeCarrier ? { block: noteNodeToBlock(node, null) } : {}),
   });
 }
 
@@ -3839,7 +3872,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
           ops.push({
             op: "patch-block",
             id: entry.id,
-            patch: noteNodeToPatch(entry.node),
+            patch: noteNodeToPatch(entry.node, prevBlock),
           });
         }
         continue;
@@ -4077,7 +4110,7 @@ function nodeContentEqual(serverNode, liveNode) {
   // Content node — callout (tone/title/collapsible/collapsed/body) OR note
   // (label/lead/body, the notes-grid split). Sub-route by node type.
   if (isCanvasContentType(type)) {
-    if (isNoteType(type)) return !noteNodeChanged(serverNode, liveNode);
+    if (isNoteType(type)) return stableNoteKey(serverNode, true) === stableNoteKey(liveNode, true);
     return !calloutNodeChanged(serverNode, liveNode);
   }
   // Card (STEP 4 widget, bpCard): tone/title/media/action/body.

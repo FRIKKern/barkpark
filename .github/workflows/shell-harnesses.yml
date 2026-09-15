@@ -283,6 +283,16 @@ on:
       - "scripts/main-workflow-rollup.sh"
       - "scripts/main-workflow-rollup.test.sh"
       - ".github/required-checks.json"
+      # SCHEDULED ARM HEALTH (task-2c762aa7dfca5bd8). The never-succeeded /
+      # staleness reader over every cron'd workflow in the tree, taken with
+      # `event=schedule` — the split that stops a push-green arm from vouching
+      # for a scheduled arm that has never once worked. The workflow file is an
+      # INPUT, not the harness: it is the subject that carried 47 consecutive
+      # scheduled failures, and an edit to its cron or its job conditions must be
+      # able to re-run this pair.
+      - "scripts/scheduled-arm-health.sh"
+      - "scripts/scheduled-arm-health.test.sh"
+      - ".github/workflows/studio-journey-smoke.yml"
       # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
       # trees out of the Elixir census that greps the Go package AND out of the
       # package itself, then mutate both. Same rule as seal-run.test.sh above —
@@ -479,6 +489,13 @@ on:
       - "scripts/landed-open-report-schedule.sh"
       - "scripts/landed-open-report-schedule.test.sh"
       - ".github/workflows/landed-open-report.yml"
+      # ── STALE PR-CITATION DETECTOR (task-6e7fa96e3b53c561) ────────────────
+      # Its --selftest is hermetic: it builds a throwaway git repo of fixtures
+      # and runs the REAL scan over it. Four of its arms bypass one noise-family
+      # rule each and require the SAME fixture to become a finding — a rule that
+      # changes no verdict when removed is decorative, and the first draft had
+      # four such rules passing 20 of 21 arms green.
+      - "scripts/stale-pr-citation-detector.sh"
       # ── TASK LEASE RENEW (task-16e56d05b809dd39) ────────────────────────────
       # Per file, D26 — plus scripts/pr-task-gate.sh for the SAME reason the
       # landed-mark block above names it: that file OWNS the `Task:` trailer
@@ -527,6 +544,11 @@ on:
       # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
       # catches it, and the census resolves that directory correctly either way.
       - "scripts/selftest-wiring-census.sh"
+      # REGISTRY IMPACT CHECK. Derives, from the tree, every census/ratchet/pin
+      # that counts or enumerates anything in a changed path, so an author sees
+      # the obligation BEFORE the merge instead of a red on main after it.
+      - "scripts/registry-impact-check.sh"
+      - "scripts/registry-impact-check.test.sh"
       # EXIT-LAUNDERING SWEEP (task-20fe68463c87e136). The instrument that
       # separates `cmd >/dev/null 2>&1 || true` on a PRODUCER whose artifact a
       # later line CONSUMES (the #14371 shape: seven days of a repo-wide red
@@ -635,6 +657,26 @@ on:
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
+      # A self-test named `*-selftest.sh` is NOT in the census's corpus globs
+      # above, which key on `.test.sh` / `.test.mjs` / `_test.sh`. That naming
+      # shape is how scripts/ledger/claim-health-selftest.sh sat unwired while
+      # the census reported "0 orphaned" — it was never in the corpus to orphan.
+      # The census now finds it too (see its `find` list), so this trigger has
+      # to exist or the widened corpus would only be measured on the push arm.
+      - "scripts/*-selftest.sh"
+      # ── CLAIM HEALTH (task-d64ecb4727209800, 2026-09-15) ────────────────────
+      # claim-health.sh read the claim at `.content.claim` while the ledger puts
+      # it at `.claim`, and reported ZERO holders on a live page where 19 of 19
+      # rows were held. It went uncaught because claim-health-selftest.sh built
+      # its only fixture under THE SAME WRONG PATH THE READER USED: the suite and
+      # its subject agreed with each other, both disagreed with the server, and
+      # the suite passed. The fixtures were fixed in #18376; nothing ran the
+      # suite, so the next drift would have been equally invisible. Both the
+      # subject and its harness are rows here because the suite runs the subject.
+      # Hermetic and wired rather than exempted: `--from-file` fixtures, python3,
+      # no `bp`, no token, no network — measured 16 arms, 0 failed, under 2 s.
+      - "scripts/ledger/claim-health.sh"
+      - "scripts/ledger/claim-health-selftest.sh"
   push:
     branches: [main]
     paths:
@@ -795,6 +837,16 @@ on:
       - "scripts/main-workflow-rollup.sh"
       - "scripts/main-workflow-rollup.test.sh"
       - ".github/required-checks.json"
+      # SCHEDULED ARM HEALTH (task-2c762aa7dfca5bd8). The never-succeeded /
+      # staleness reader over every cron'd workflow in the tree, taken with
+      # `event=schedule` — the split that stops a push-green arm from vouching
+      # for a scheduled arm that has never once worked. The workflow file is an
+      # INPUT, not the harness: it is the subject that carried 47 consecutive
+      # scheduled failures, and an edit to its cron or its job conditions must be
+      # able to re-run this pair.
+      - "scripts/scheduled-arm-health.sh"
+      - "scripts/scheduled-arm-health.test.sh"
+      - ".github/workflows/studio-journey-smoke.yml"
       # task-5ddbd0702c213aec: which-gates.test.sh cases 6-8 build their scratch
       # trees out of the Elixir census that greps the Go package AND out of the
       # package itself, then mutate both. Same rule as seal-run.test.sh above —
@@ -957,6 +1009,13 @@ on:
       - "scripts/landed-open-report-schedule.sh"
       - "scripts/landed-open-report-schedule.test.sh"
       - ".github/workflows/landed-open-report.yml"
+      # ── STALE PR-CITATION DETECTOR (task-6e7fa96e3b53c561) ────────────────
+      # Its --selftest is hermetic: it builds a throwaway git repo of fixtures
+      # and runs the REAL scan over it. Four of its arms bypass one noise-family
+      # rule each and require the SAME fixture to become a finding — a rule that
+      # changes no verdict when removed is decorative, and the first draft had
+      # four such rules passing 20 of 21 arms green.
+      - "scripts/stale-pr-citation-detector.sh"
       # The renew lane's harness, on the push arm too: a lane wired on PRs only
       # goes dark the moment a merge lands.
       - "scripts/task-lease-renew.sh"
@@ -1002,6 +1061,11 @@ on:
       # scripts/measurements/ does not trigger the PR arm — the push-to-main arm
       # catches it, and the census resolves that directory correctly either way.
       - "scripts/selftest-wiring-census.sh"
+      # REGISTRY IMPACT CHECK. Derives, from the tree, every census/ratchet/pin
+      # that counts or enumerates anything in a changed path, so an author sees
+      # the obligation BEFORE the merge instead of a red on main after it.
+      - "scripts/registry-impact-check.sh"
+      - "scripts/registry-impact-check.test.sh"
       # EXIT-LAUNDERING SWEEP (task-20fe68463c87e136). The instrument that
       # separates `cmd >/dev/null 2>&1 || true` on a PRODUCER whose artifact a
       # later line CONSUMES (the #14371 shape: seven days of a repo-wide red
@@ -1100,6 +1164,26 @@ on:
       - "scripts/*.test.sh"
       - "scripts/*.test.mjs"
       - "scripts/*_test.sh"
+      # A self-test named `*-selftest.sh` is NOT in the census's corpus globs
+      # above, which key on `.test.sh` / `.test.mjs` / `_test.sh`. That naming
+      # shape is how scripts/ledger/claim-health-selftest.sh sat unwired while
+      # the census reported "0 orphaned" — it was never in the corpus to orphan.
+      # The census now finds it too (see its `find` list), so this trigger has
+      # to exist or the widened corpus would only be measured on the push arm.
+      - "scripts/*-selftest.sh"
+      # ── CLAIM HEALTH (task-d64ecb4727209800, 2026-09-15) ────────────────────
+      # claim-health.sh read the claim at `.content.claim` while the ledger puts
+      # it at `.claim`, and reported ZERO holders on a live page where 19 of 19
+      # rows were held. It went uncaught because claim-health-selftest.sh built
+      # its only fixture under THE SAME WRONG PATH THE READER USED: the suite and
+      # its subject agreed with each other, both disagreed with the server, and
+      # the suite passed. The fixtures were fixed in #18376; nothing ran the
+      # suite, so the next drift would have been equally invisible. Both the
+      # subject and its harness are rows here because the suite runs the subject.
+      # Hermetic and wired rather than exempted: `--from-file` fixtures, python3,
+      # no `bp`, no token, no network — measured 16 arms, 0 failed, under 2 s.
+      - "scripts/ledger/claim-health.sh"
+      - "scripts/ledger/claim-health-selftest.sh"
 
 permissions:
   contents: read
@@ -1208,6 +1292,8 @@ jobs:
       undispatched-target: ${{ steps.sets.outputs.undispatched-target }}
       orphan-harnesses: ${{ steps.sets.outputs.orphan-harnesses }}
       selftest-wiring-census: ${{ steps.sets.outputs.selftest-wiring-census }}
+      registry-impact-check: ${{ steps.sets.outputs.registry-impact-check }}
+      claim-health: ${{ steps.sets.outputs.claim-health }}
       exit-laundering-sweep: ${{ steps.sets.outputs.exit-laundering-sweep }}
       dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
@@ -1218,6 +1304,7 @@ jobs:
       sunset-route-consumers: ${{ steps.sets.outputs.sunset-route-consumers }}
       mix-test-strict: ${{ steps.sets.outputs.mix-test-strict }}
       main-workflow-rollup: ${{ steps.sets.outputs.main-workflow-rollup }}
+      scheduled-arm-health: ${{ steps.sets.outputs.scheduled-arm-health }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
       scratchpad-reaper: ${{ steps.sets.outputs.scratchpad-reaper }}
     steps:
@@ -1249,6 +1336,18 @@ jobs:
           # path is IN — over-running a harness is cheap; a false skip is the
           # defect. This workflow file is in every set implicitly (see below)
           # and is deliberately not a row.
+          #
+          # AXIS D'S CORPUS IS TWO GLOBS, AND THEY ARE ROWS (task-74f54db3b1f353d2).
+          # scripts/pds-record-parity.sh --axis d resolves the PDS-D literals carried
+          # in `scripts/pds-*.sh` + `tooling/pds/**` against the charter, and the
+          # pds-harnesses job runs that arm. Both globs were added to the paths lists
+          # when axis d landed; NEITHER got a roster row, so the half that dispatches
+          # the workflow and the half that selects the job disagreed: an edit to
+          # scripts/pds-secret-scan.sh started a run in which every one of the 48 jobs
+          # was skipped. Neither glob is an exclusion — a PREDICATE, not the
+          # enumerated pds rows above, is what makes the corpus and the roster the
+          # same set. The enumerated rows stay: they are cheap, and several name
+          # inputs (the charter, docs/setup/personal-local.md) the globs do not cover.
           roster='
           node-test-floor scripts/node-test-floor.mjs
           node-test-floor scripts/node-test-floor.test.sh
@@ -1312,6 +1411,8 @@ jobs:
           pds-harnesses scripts/pds-record-parity.test.sh
           pds-harnesses .claude/workflows/bp-pds-charter.md
           pds-harnesses tooling/pds/d-number-reservations.tsv
+          pds-harnesses scripts/pds-*.sh
+          pds-harnesses tooling/pds/**
           pds-harnesses scripts/pds-scratch-target.sh
           pds-harnesses scripts/pds-scratch-target_test.sh
           pds-harnesses scripts/pds-read-preflight-audit.sh
@@ -1409,6 +1510,7 @@ jobs:
           landed-mark scripts/landed-open-report-schedule.sh
           landed-mark scripts/landed-open-report-schedule.test.sh
           landed-mark .github/workflows/landed-open-report.yml
+          landed-mark scripts/stale-pr-citation-detector.sh
           doc-gates-paths-parity scripts/doc-gates-paths-parity-check.sh
           doc-gates-paths-parity .github/workflows/doc-gates.yml
           merge-gate-bridge scripts/github-webhook-subscription-parity.sh
@@ -1450,7 +1552,12 @@ jobs:
           selftest-wiring-census scripts/*.test.sh
           selftest-wiring-census scripts/*.test.mjs
           selftest-wiring-census scripts/*_test.sh
+          selftest-wiring-census scripts/*-selftest.sh
+          claim-health scripts/ledger/claim-health.sh
+          claim-health scripts/ledger/claim-health-selftest.sh
           selftest-wiring-census .github/workflows/*.yml
+          registry-impact-check scripts/registry-impact-check.sh
+          registry-impact-check scripts/registry-impact-check.test.sh
           exit-laundering-sweep scripts/exit-laundering-sweep.sh
           which-gates scripts/which-gates.sh
           which-gates scripts/which-gates.test.sh
@@ -1473,6 +1580,9 @@ jobs:
           main-workflow-rollup scripts/main-workflow-rollup.sh
           main-workflow-rollup scripts/main-workflow-rollup.test.sh
           main-workflow-rollup .github/required-checks.json
+          scheduled-arm-health scripts/scheduled-arm-health.sh
+          scheduled-arm-health scripts/scheduled-arm-health.test.sh
+          scheduled-arm-health .github/workflows/studio-journey-smoke.yml
           landed-mark scripts/lib/bp-curl.sh
           task-lease-renew scripts/lib/bp-curl.sh
           deploy-receipt-honesty scripts/deploy-receipt-failure.test.sh
@@ -2933,6 +3043,20 @@ jobs:
           bash scripts/landed-open-report.sh --selftest
           bash scripts/landed-open-report.test.sh
 
+      - name: a comment whose CLAIM the repo contradicts, where it cites a PR
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # scripts/stale-pr-citation-detector.sh --selftest ONLY. The live scan
+        # is an AUDIT AID, not a gate, and the file header carries the measured
+        # numbers that say so: on the full tree the wide arm scored ~14%
+        # precision (1 of 7 sampled), and --strict scored 1 of 2 over 2081
+        # citation lines. Neither earns the merge button; both are useful to a
+        # human. Running the live scan here would red main on prose.
+        #
+        # The selftest is hermetic (throwaway git repo, no network, no token)
+        # and asserts BOTH directions: a known-positive fixture IS detected and
+        # a known-negative is NOT, so it cannot pass with the detector deleted.
+        run: bash scripts/stale-pr-citation-detector.sh --selftest
+
       - name: the CONSUMER refuses a failed read, and that refusal is load-bearing
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # scripts/landed-open-report-schedule.sh is the step body of
@@ -3282,6 +3406,33 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/workflow-trigger-coverage.sh
 
+  # SCHEDULED ARM HEALTH (task-2c762aa7dfca5bd8). A cron'd job that gates
+  # nothing still has to be READ: studio-journey-smoke failed 47 of 47 scheduled
+  # runs over six weeks and cost nobody a second, while the same workflow's
+  # all-events count read success=51 and looked healthy. The harness below is
+  # hermetic — scratch trees, fixture payloads, a pinned --now, no network — and
+  # every case is a PAIR, so the reader is shown losing and winning on inputs
+  # that differ in one field. The LIVE both-directions proof against real named
+  # workflows is not run here on purpose: a green that depends on GitHub's run
+  # history rots the moment that history moves.
+  scheduled-arm-health:
+    needs: [changes]
+    if: needs.changes.outputs.scheduled-arm-health == 'true'
+    name: a cron that has never succeeded is visible
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: subject syntax check
+        run: bash -n scripts/scheduled-arm-health.sh
+      - name: harness syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/scheduled-arm-health.test.sh
+      - name: prove the reader can lose (hermetic, fixture payloads)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/scheduled-arm-health.test.sh
+
   undispatched-target:
     needs: [changes]
     if: needs.changes.outputs.undispatched-target == 'true'
@@ -3458,6 +3609,75 @@ jobs:
       - name: The census over this tree
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/selftest-wiring-census.sh --list
+
+  registry-impact-check:
+    needs: [changes]
+    if: needs.changes.outputs.registry-impact-check == 'true'
+    # A FENCE AROUND A FILE DOES NOT COVER THE REGISTRIES THAT COUNT THINGS IN IT.
+    # scripts/registry-impact-check.sh derives, from the tree, every census,
+    # ratchet and pin that counts or enumerates anything in a changed path, and
+    # names what the author must declare in the SAME PR. What runs here is its
+    # harness, and the arms that carry it are two REAL main-reddenings replayed
+    # by path set: #18213 against the .github/run-level-readers.allow row whose
+    # count it moved, and deploy/assets-survive-gap against the deploy/README.md
+    # count guard from #18191. A new check's first green is the least
+    # trustworthy green there is, so the load-bearing arms MUST FIND SOMETHING.
+    name: registry impact check harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+        with:
+          # MUST be a full clone. The replays resolve commits 7d56df653 and
+          # 90d63a4dd and the branch origin/deploy/assets-survive-gap. On a
+          # shallow checkout those arms SKIP, and a skipped arm measures nothing
+          # — the harness says so in its tally rather than counting them green.
+          fetch-depth: 0
+      - name: registry-impact-check harness (two historical replays + controls)
+        run: bash scripts/registry-impact-check.test.sh
+  claim-health:
+    needs: [changes]
+    if: needs.changes.outputs.claim-health == 'true'
+    # THE SUITE THAT RAN GREEN AGAINST A SHAPE THE SERVER NEVER EMITS
+    # (task-d64ecb4727209800). claim-health.sh resolved the claim at
+    # `.content.claim`; the ledger puts it at `.claim`. On a live
+    # `bp task ls --status in_progress` page 19 of 19 rows were held and the
+    # tool reported ZERO holders. claim-health-selftest.sh could not catch it:
+    # it had exactly ONE fixture builder and that builder emitted the claim
+    # under the SAME WRONG PATH the reader used, so the suite and its subject
+    # agreed with each other, both disagreed with the server, and the suite
+    # passed. #18376 fixed the fixtures (real shape, legacy shape kept as an
+    # explicit compatibility arm). This job is the second-order half: NOTHING
+    # RAN THAT SUITE, so the next fixture drift would have been equally
+    # invisible, and a selftest nobody runs is how the first one survived.
+    #
+    # WIRED, NOT EXEMPTED. The exemption marker is for a slow or
+    # environment-dependent proof; this one is neither. Every arm feeds the
+    # subject a `--from-file` fixture built by printf in the harness — no `bp`,
+    # no token, no network, no database — and a full run is 16 arms, 0 failed,
+    # under two seconds (measured 2026-09-15 at 1e7231858 in a clean worktree).
+    name: claim-health resolves the claim by shape (16 arms)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+
+      - name: claim-health.sh syntax check
+        run: bash -n scripts/ledger/claim-health.sh
+
+      - name: claim-health-selftest.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/ledger/claim-health-selftest.sh
+
+      # No pipe and no `|| true`. The suite's own exit status IS this step's:
+      # `[ "$FAIL" = 0 ] || exit 1` is its last line, and a `| tee` here would
+      # report tee's status and green a failing suite — the exact laundering
+      # scripts/exit-laundering-sweep.sh exists to find.
+      - name: "the suite (16 arms: real shape, doc envelope, legacy compat, 2 disjoint mutations, 3 controls)"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/ledger/claim-health-selftest.sh
 
   exit-laundering-sweep:
     needs: [changes]

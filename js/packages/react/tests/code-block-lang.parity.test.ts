@@ -70,9 +70,11 @@ describe('code-block language-field contract (shared fixture)', () => {
     // would differ across cases; it does not.
     const htmls = fixture.cases.map((c) => renderPortableDocument([c.block]))
     for (const [i, html] of htmls.entries()) {
+      const c = fixture.cases[i]
+      if (!c) throw new Error(`missing language fixture case ${i}`)
       expect(
         html,
-        `case ${i} (${fixture.cases[i].name}): differs from the lang-bearing case; ` +
+        `case ${i} (${c.name}): differs from the lang-bearing case; ` +
           'the JS code emitter must branch on NEITHER `lang` nor `language`',
       ).toBe(htmls[0])
     }

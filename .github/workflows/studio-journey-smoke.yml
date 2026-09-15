@@ -46,6 +46,70 @@ name: studio-journey-smoke
 #     above did not already settle it: a deploy outage is not a property of
 #     anybody's changes.
 #
+# ─────────────────────────────────────────────────────────────────────────────
+#  2026-09-15 — WHY THE LIVE JOB IS NO LONGER ON THE CRON (task-2c762aa7dfca5bd8)
+# ─────────────────────────────────────────────────────────────────────────────
+# THE SCHEDULED LANE HAD NEVER SUCCEEDED ONCE. Measured against this workflow's
+# own run history on 2026-09-15: `event=schedule`, status=completed, total_count
+# 47, received 47, conclusion failure 47, success 0 — every scheduled run from
+# 2026-07-30 to 2026-09-14. Every one of them died in `live-journey` at the
+# harness's credential GUARD, before walking anything, so the deployed Studio
+# journey was UNMEASURED for six weeks while a red was emitted daily.
+#
+# AND THE SCHEDULED RUN MEASURED NOTHING AT ALL, which is the worse half.
+# `harness-self-test` used to carry `if: github.event_name != 'schedule'`, so on
+# the cron the self-test was SKIPPED and the live arm GUARD-failed: run
+# 34848686219 had jobs total_count=2, one failure and one skipped, and ZERO
+# assertions executed. A SKIPPED JOB REPORTS SUCCESS and must never be read as
+# coverage.
+#
+# A NAIVE COUNT OVER THIS WORKFLOW WILL TELL YOU THE OPPOSITE. Over the last 50
+# runs of ALL events it reads success=38 — those are `harness-self-test` on push
+# and pull_request, which is exactly the arm the cron skipped. THE GREEN RUNS AND
+# THE RED RUNS MEASURE DIFFERENT THINGS. Scope every count of this workflow BY
+# EVENT or the arm that works will vouch for the arm that does not. The reader
+# that does that split for every cron'd workflow in the tree is
+# `scripts/scheduled-arm-health.sh`.
+#
+# THE CAUSE IS A MISSING CREDENTIAL, NOT A BUG. `JOURNEY_TOKEN` comes from
+# `secrets.GUERRILLA_ADMIN_TOKEN`, and that secret DOES NOT EXIST on this
+# repository (Actions secrets on 2026-09-15, total_count 8:
+# BARKPARK_INGEST_TOKEN, BARKPARK_TASK_TOKEN, BREAKGLASS_TOKEN, CP_HOST,
+# DEPLOY_SSH_KEY, GUERRILLA_HOST, HETZNER_DNS_TOKEN, NPM_TOKEN). An unset secret
+# interpolates to the empty string, so the env pair arrives half-set and the
+# harness GUARDs, correctly.
+#
+# THE GUARD IS NOT THE DEFECT AND MUST NOT BE SOFTENED. `readServer()` in
+# tooling/studio-journey/journey.mjs refuses an env pair that is half-set, in
+# those words: "This is an ENVIRONMENT or INVOCATION failure. A transport failure
+# is never a product fact." Making a missing credential report as a journey
+# failure is the one change here that would make things worse.
+#
+# THE CHOICE MADE, OF THE THREE AVAILABLE, AND WHY. (a) take the live arm off
+# the cron until the credential exists; (b) let the live job run on the cron and
+# SKIP green with a "not configured" notice; (c) the owner supplies
+# GUERRILLA_ADMIN_TOKEN and the journey actually walks.
+#
+#   (c) IS THE RIGHT ANSWER AND IS NOT A BUILDER'S TO MAKE. Whether an admin
+#   token for a live deployment should exist, and with what scope, is an owner
+#   decision about credentials. Nothing here creates, rotates or guesses one.
+#
+#   (b) WAS REJECTED. A daily job that runs, asserts nothing about the deployment
+#   and reports SUCCESS is a vacuous green — the same disease as the skipped
+#   self-test above, wearing a friendlier colour. This repo has a standing
+#   objection to exactly that shape.
+#
+#   (a) IS WHAT IS IMPLEMENTED. `live-journey` is workflow_dispatch ONLY, so it
+#   makes no daily claim it cannot support; the cron now runs `harness-self-test`
+#   instead, which asserts 134 things offline and CAN go red. The gap the cron no
+#   longer papers over is stated out loud on every scheduled run by the
+#   "Deployed-journey coverage" step below, and by scheduled-arm-health.sh.
+#
+# TO UNDO THIS once GUERRILLA_ADMIN_TOKEN exists: put
+# `github.event_name == 'schedule' ||` back at the front of live-journey's `if:`
+# and delete the coverage-notice step. One line each, and this block explains
+# both.
+#
 # The strict live run (no --report, exit 1 on any non-PASS LEG A beat) is
 # deliberately NOT wired here. That run is the wave-seal evidence, taken by hand
 # after a redeploy; scheduling it would red the repo daily for as long as any
@@ -87,9 +151,17 @@ concurrency:
 jobs:
   harness-self-test:
     name: Studio journey — self-test (fixtures, no network)
-    # Nothing to certify at 06:40: there is no diff, and the live job below is
-    # the only reason that run exists.
-    if: github.event_name != 'schedule'
+    # RUNS ON EVERY EVENT, THE CRON INCLUDED. It used to carry
+    # `if: github.event_name != 'schedule'`, reasoning that there is no diff to
+    # certify at 06:40. That reasoning was sound only while the live job below
+    # was measuring something on the cron, and it never was (see the 2026-09-15
+    # block in the header). With the self-test skipped and the live arm dying at
+    # a GUARD, the scheduled run executed ZERO assertions for six weeks.
+    #
+    # There is still no diff at 06:40 — but there is a runner image, a Chrome
+    # build and a Node build that all move underneath this harness, and the
+    # self-test is the only thing in the tree that can say the instrument still
+    # works. That is a real daily question, and its answer is a real red.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -106,14 +178,62 @@ jobs:
       # findChrome() honours CHROME first. Pinning the path explicitly means a
       # future runner image that drops the binary exits 2 as a GUARD naming what
       # is missing, instead of silently falling through to another browser.
+      # The harness prints `SELF-TEST PASS — <N> assertions executed (floor 40)`
+      # and refuses to print PASS below that floor: a green produced by a run
+      # that compared almost nothing is the exact shape this lane had. N is in
+      # the step log and is the answer to "did the scheduled run measure
+      # anything?"
       - name: Self-test (healthy fixture green, rotten fixture red)
         env:
           CHROME: /usr/bin/google-chrome
         run: scripts/studio-journey-smoke.sh self-test
 
+      # THE GAP, SAID OUT LOUD, ON EVERY SCHEDULED RUN. Taking the live arm off
+      # the cron removes a daily red that measured nothing; it must not also
+      # remove the knowledge that the deployed Studio journey is uncovered. This
+      # step writes that into the run summary and raises a warning annotation, so
+      # the absence has a daily artefact instead of being the quiet default it
+      # was for six weeks.
+      #
+      # It is deliberately NOT a failure: this job's red means "the instrument is
+      # broken", and overloading it with "a credential is missing" would make the
+      # one signal unreadable. It is deliberately not a `secrets` test either —
+      # the `secrets` context is not available in any `if:` expression, and this
+      # step makes no claim about the secret's current value, only about the fact
+      # that the cron does not walk the deployment.
+      - name: Deployed-journey coverage (scheduled runs only)
+        if: github.event_name == 'schedule'
+        run: |
+          {
+            echo "### Deployed Studio journey: NOT COVERED BY THIS SCHEDULED RUN"
+            echo
+            echo "This cron runs \`harness-self-test\` only. The \`live-journey\` job that walks"
+            echo "<https://guerrilla.barkpark.cloud> is \`workflow_dispatch\` only, because the"
+            echo "credential it needs (\`GUERRILLA_ADMIN_TOKEN\`) does not exist on this repository."
+            echo "See the 2026-09-15 block at the top of \`.github/workflows/studio-journey-smoke.yml\`."
+            echo
+            echo "**What this green does and does not say.** It says the browser harness still"
+            echo "behaves as specified against its two offline fixtures. It says NOTHING about the"
+            echo "deployed Studio, which has been unmeasured by CI since 2026-07-30."
+            echo
+            echo "**To close the gap:** the owner adds \`GUERRILLA_ADMIN_TOKEN\`, then the live job"
+            echo "goes back on the cron (one line, documented in the header)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=Deployed Studio journey is not covered by CI::live-journey is workflow_dispatch only — GUERRILLA_ADMIN_TOKEN does not exist on this repository. The deployed Studio journey has been unmeasured since 2026-07-30. See the workflow header."
+
   live-journey:
     name: Studio journey — deployed (report mode, gates nothing)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # DISPATCH ONLY, NOT SCHEDULED — 2026-09-15, task-2c762aa7dfca5bd8. This
+    # condition used to read `github.event_name == 'schedule' ||
+    # github.event_name == 'workflow_dispatch'` and produced 47 consecutive
+    # scheduled failures, none of which walked a single beat, because
+    # GUERRILLA_ADMIN_TOKEN does not exist. The full reasoning, the measurement
+    # and the one-line undo are in the 2026-09-15 block at the top of this file.
+    #
+    # Dispatching it by hand still works exactly as before and is the intended
+    # route for a post-deploy check — but only from a machine or a repository
+    # that actually has the credential, and the GUARD will say so if it does not.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
