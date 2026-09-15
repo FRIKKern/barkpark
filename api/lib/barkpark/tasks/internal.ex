@@ -21,6 +21,63 @@ defmodule Barkpark.Tasks.Internal do
   def current_epoch(%Document{content: %{"claim" => %{"epoch" => e}}}) when is_integer(e), do: e
   def current_epoch(_), do: 0
 
+  # ─── THE HELD PREDICATE (task-4787fdd569f3aff4) ───────────────────────────
+  #
+  # "Is this row HELD right now?" has exactly ONE authoritative answer, and it
+  # is `content.claim.worker` being a NON-BLANK binary. Every server-side door
+  # already fences on that field and nothing else:
+  #
+  #   * `Tasks.ClaimFence.verify_task/2` (claim_fence.ex:58) refuses
+  #     `:task_not_claimed` on `not is_binary(Map.get(claim, "worker"))`;
+  #   * `Tasks.Internal.check_holder/2` (below) compares `claim.worker`;
+  #   * `Tasks.Release.check_releasable/1` calls a row STRANDED on
+  #     `claim.worker` alone;
+  #   * `Tasks.QueueGate.live_claim_worker/1` starts from a non-blank
+  #     `claim.worker`.
+  #
+  # THREE PRESENCE TESTS ARE FALSE TESTS OF HELDNESS, because `Tasks.Release`
+  # deliberately PRESERVES the claim object as an audit trail
+  # (`Release.apply_release_update/1`) — it nulls `worker` and nothing else:
+  #
+  #   claim != nil        -> TRUE on a released row  (the map survives)
+  #   claim.epoch != nil  -> TRUE on a released row  (BUMPED, not cleared)
+  #   has_key?(claim, "worker") -> TRUE on a released row (the key stays, nil)
+  #
+  # Measured on the live store: 48 of 400 open rows answer "claimed" to any of
+  # those, hiding genuinely available work from reconciliation sweeps.
+  #
+  # THE RETAINED EPOCH IS LOAD-BEARING, NOT RESIDUE. `Tasks.Claim` computes the
+  # next lease as `current_epoch(doc) + 1` (claim.ex:481), reading it straight
+  # off the released row, so the epoch is what keeps the fence MONOTONIC across
+  # release-then-reclaim; and `Tasks.Close.check_fencing/2` (close.ex:741-742)
+  # refuses `:fenced_off` whenever a claim map carries an epoch that does not
+  # match the caller's. Clearing it would let a stale holder's old-epoch close
+  # land on the next worker's lease. DO NOT "CLEAN IT UP".
+  #
+  # So: read `held?/1` when you mean "held". Read `current_epoch/1` when you
+  # mean "the number the next CAS must carry". They are different questions and
+  # a released row is exactly the row on which they disagree.
+  # NOT stamped `@canonical capability:task-held-predicate` yet: the marker's
+  # binding pin lives at scripts/canonical-marker-bindings.pin, outside this
+  # change's fence. Stamp both together (task-4787fdd569f3aff4 follow-up).
+  @spec held?(map() | nil) :: boolean()
+  def held?(content), do: not is_nil(holder(content))
+
+  @doc false
+  @spec holder(map() | nil) :: String.t() | nil
+  def holder(content) do
+    case claim_map(content) do
+      nil ->
+        nil
+
+      claim ->
+        case Map.get(claim, "worker") do
+          worker when is_binary(worker) -> if String.trim(worker) == "", do: nil, else: worker
+          _ -> nil
+        end
+    end
+  end
+
   # ─── The fenced content write (PDS-D451: the receipt is the STORED row) ───
   #
   # Every task CAS write path used to do the same two things: run a rev-fenced
