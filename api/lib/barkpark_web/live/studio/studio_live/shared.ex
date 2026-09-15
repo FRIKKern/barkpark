@@ -461,6 +461,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           # show what the store holds.
           new_title = saved_doc.title || Map.get(params, "title", doc.title)
 
+          # Both halves as a TREE (Gyldendal parity E1.11): a finding on
+          # `seo.description` or `banners[1].title` renders under that input.
+          findings = validation_findings(schema, new_title, saved_doc.content, errs)
+
           panes =
             PaneBuilder.update_title(
               socket.assigns.panes,
@@ -474,8 +478,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             editor_is_draft: Content.draft?(saved_doc.doc_id),
             editor_form: Map.merge(socket.assigns[:editor_form] || %{}, params),
             save_status: "Saved",
-            validation_errors: errs,
-            validation_warnings: validation_warnings(schema, new_title, saved_doc.content),
+            validation_errors: findings.errors,
+            validation_warnings: findings.warnings,
             cross_violations: compute_cross_violations(schema, params)
           )
           |> maybe_refresh_content_preview()
@@ -1702,13 +1706,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   end
 
   @doc """
-  Warning-level findings for the open document against the schema the Studio
-  resolved (Gyldendal parity E1.6). `%{}` without a schema.
+  Error and warning findings for the open document against the schema the
+  Studio resolved, as the tree `Validation.check_tree/3` reads (Gyldendal
+  parity E1.6 warnings, E1.11 nested). Without a schema the save path's own
+  flat verdict stands and there are no warnings.
   """
-  def validation_warnings(nil, _title, _content), do: %{}
+  def validation_findings(nil, _title, _content, errs), do: %{errors: errs || %{}, warnings: %{}}
 
-  def validation_warnings(schema, title, content),
-    do: Barkpark.Content.Validation.check(content, title, schema).warnings
+  def validation_findings(schema, title, content, _errs),
+    do: Barkpark.Content.Validation.check_tree(content, title, schema)
 
   @doc false
   def resolve_nav_group(_current, _old, nil), do: nil
