@@ -34,7 +34,10 @@ const STRIP = {
   ],
 }
 
-const emit = (block: unknown) => lineage(block as never)
+const emit = (block: unknown) => {
+  if (!lineage) throw new Error('missing lineage emitter')
+  return lineage(block as never)
+}
 
 describe('lineage tone — the clock strip’s per-stop verdict', () => {
   it('emits one verdict modifier per toned stop', () => {
@@ -52,7 +55,9 @@ describe('lineage tone — the clock strip’s per-stop verdict', () => {
         { overline: 'later still', title: 'Tone off-vocabulary', tone: 'puce' },
       ],
     })
-    expect(html).toContain('<li class="bp-lineage__node"><div class="bp-lineage__overline">later</div>')
+    expect(html).toContain(
+      '<li class="bp-lineage__node"><div class="bp-lineage__overline">later</div>',
+    )
     expect(html).toContain(
       '<li class="bp-lineage__node"><div class="bp-lineage__overline">later still</div>',
     )

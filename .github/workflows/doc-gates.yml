@@ -90,6 +90,9 @@ on:
       - "design/validate.mjs"
       - "design/emit.mjs"
       - "design/check.mjs"
+      # check.mjs's own negative half. Without this glob a change that breaks the
+      # selftest — or the selftest itself — never runs the step that executes it.
+      - "design/check-selftest.mjs"
       # theme-system compiler (Wave 2 D17) — the zero-dep OKLCH derive core, its
       # unit tests, and the per-theme spec files. Without these globs Part F is a
       # script nobody runs (doc-gates has no broad **/*.mjs / **/*.json trigger).
@@ -417,6 +420,9 @@ on:
       - "design/validate.mjs"
       - "design/emit.mjs"
       - "design/check.mjs"
+      # check.mjs's own negative half. Without this glob a change that breaks the
+      # selftest — or the selftest itself — never runs the step that executes it.
+      - "design/check-selftest.mjs"
       # theme-system compiler (Wave 2 D17) — the zero-dep OKLCH derive core, its
       # unit tests, and the per-theme spec files. Without these globs Part F is a
       # script nobody runs (doc-gates has no broad **/*.mjs / **/*.json trigger).
@@ -961,6 +967,16 @@ jobs:
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node design/validate.mjs
+          # --selftest FIRST (distrust a vacuous green, same order as the preview
+          # parity gate above). check.mjs's clean run is a PASS line and 25 ok
+          # lines — which is also what a gate whose parts stopped recording
+          # failures prints. The selftest re-invokes check.mjs as a subprocess with
+          # one part's failure forced (BP_DESIGN_CHECK_FAULT, a hook that can only
+          # ADD a failure) and requires the ok-summary gating to hold in BOTH
+          # directions: a part that failed withholds its ok, a part that passed
+          # prints its ok even when an earlier part failed. Giving Part B back its
+          # pre-fix run-wide read reds it, naming Part B (proven able to fail).
+          node design/check.mjs --selftest
           node design/check.mjs
           # theme-system Wave 2 (D17): the zero-dep OKLCH compiler core's unit
           # tests. Runs here so a change to design/derive.mjs re-proves the colour
@@ -1261,6 +1277,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/pd-parity-completeness.sh --selftest
           bash scripts/pd-parity-completeness.test.sh
           bash scripts/pd-parity-completeness.sh
 

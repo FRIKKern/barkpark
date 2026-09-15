@@ -90,9 +90,15 @@ describe('code-block line-emphasis contract (shared fixture)', () => {
   }
 
   it('a block whose ranges all drop is byte-identical to one with no emphasis key', () => {
-    const legacy = renderPortableDocument([fixture.cases[0].block])
-    const unknownTone = renderPortableDocument([fixture.cases[4].block])
-    const live = renderPortableDocument([fixture.cases[5].block])
+    const legacyCase = fixture.cases[0]
+    const unknownToneCase = fixture.cases[4]
+    const liveCase = fixture.cases[5]
+    if (!legacyCase) throw new Error('missing legacy fixture case 0')
+    if (!unknownToneCase) throw new Error('missing unknown-tone fixture case 4')
+    if (!liveCase) throw new Error('missing live-range fixture case 5')
+    const legacy = renderPortableDocument([legacyCase.block])
+    const unknownTone = renderPortableDocument([unknownToneCase.block])
+    const live = renderPortableDocument([liveCase.block])
 
     expect(
       unknownTone,
@@ -112,6 +118,8 @@ describe('code-block line-emphasis contract (shared fixture)', () => {
     } as unknown as Block
     const html = renderPortableDocument([hostile])
     expect(html).not.toContain('<script>')
-    expect(html).toBe(renderPortableDocument([fixture.cases[0].block]))
+    const legacyCase = fixture.cases[0]
+    if (!legacyCase) throw new Error('missing legacy fixture case 0')
+    expect(html).toBe(renderPortableDocument([legacyCase.block]))
   })
 })

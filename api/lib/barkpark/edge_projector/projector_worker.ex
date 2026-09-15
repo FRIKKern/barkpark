@@ -242,15 +242,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     # while the log below reported a clean rebuild. `rebuild_scope`'s own
     # transaction budget is sized for "the largest measured corpus (~4k docs)"
     # — 4x the cap — so the capped read was never the intended contract.
-    {docs, truncated} =
-      types
-      |> Enum.map_reduce(nil, fn type, trunc_acc ->
-        {page, trunc} = content_mod(args).collect_all_documents(type, scope, list_opts)
-        {page, trunc_acc || trunc}
-      end)
-      |> then(fn {per_type, trunc} ->
-        {per_type |> Enum.concat() |> hydrate_task_edges(), trunc}
-      end)
+    {docs, truncated} = collect_corpus(content_mod(args), types, scope, list_opts)
 
     case projector_mod(args).rebuild_scope(scope, docs, project_opts) do
       {:ok, %{added: added, deleted: deleted}} ->
@@ -453,6 +445,97 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   # path still hydrates its single doc via `Tasks.hydrate_edges/1`. The Tasks
   # plugin is first-party + always compiled; the fallback clause only protects
   # a doc payload that is not a map (never crashes the projection).
+  # ONE BOUNDED READ, not (types x pages) OFFSET pages.
+  #
+  # THE DEFECT this replaces: the rebuild collected its corpus with
+  # `collect_all_documents/3` ONCE PER TYPE — a `LIMIT/OFFSET` page walk
+  # (`Content.Query.collect_all_documents/3`) at page_size 1000, max_pages 50,
+  # i.e. up to 50 separate connection checkouts PER TYPE per attempt, each at
+  # Ecto's UNCONFIGURED 15,000 ms checkout deadline (queue time included). No
+  # `documents` index carries `updated_at`, so every page re-sorted the entire
+  # type partition — total work QUADRATIC in the corpus (pages x corpus), with
+  # the outer sort spilling to disk at 8k docs. That is the pre-transaction
+  # region the live `Postgrex.Protocol ... client (…ProjectorWorker) timed out
+  # ... longer than 15000ms` disconnect landed on (quoted verbatim in
+  # `Barkpark.Repo`); the rebuild TRANSACTION itself is NOT the exposed part
+  # (`Projector.rebuild_scope/3` sets an explicit `timeout: 60_000`).
+  #
+  # `Content.Query.collect_corpus_documents/3` exists precisely for this: ONE
+  # bounded `DISTINCT ON` read of the whole corpus, one sort, no OFFSET walk.
+  # Checkouts here are now bounded by the number of ACL CLASSES (at most two:
+  # owner-scoped and not), NOT by the corpus size.
+  #
+  # Two things are preserved exactly:
+  #
+  #   * `perspective: :published` — `collect_corpus_documents/3` applies the
+  #     same `apply_perspective/2` clause, so the rows are the walk's rows.
+  #   * the row-ownership ACL — `collect_corpus_documents/3` takes a
+  #     WHOLE-CALL `:owner_scoped` flag (a mixed call would apply one type's
+  #     ACL to another's rows), so the types are SPLIT by
+  #     `Content.owner_scoped?/3` and each class read once. With no
+  #     caller_context (the worker is an internal caller) `scope_to_owner/2`
+  #     fails closed to `owner_id IS NULL`, exactly as `base_query/4` did.
+  #
+  # The document bound is unchanged: `page_size x max_pages` (50,000 by
+  # default) is now a WHOLE-CORPUS `:limit` instead of a per-type page budget,
+  # and `:cap` still means "this is a PREFIX" — the truncation warning below
+  # is untouched.
+  #
+  # A content seam that does NOT export `collect_corpus_documents/3` keeps the
+  # old per-type walk. That is deliberate, not a leftover: the test seams that
+  # drive the walk's `:cap`/opts contract still drive it, and a checkout-count
+  # test can measure BOTH collectors in one run.
+  defp collect_corpus(content, types, scope, list_opts) do
+    {docs, truncated} =
+      if corpus_collector?(content) do
+        bounded_collect(content, types, scope, list_opts)
+      else
+        page_walk_collect(content, types, scope, list_opts)
+      end
+
+    {hydrate_task_edges(docs), truncated}
+  end
+
+  defp corpus_collector?(content) do
+    Code.ensure_loaded?(content) and function_exported?(content, :collect_corpus_documents, 3)
+  end
+
+  defp bounded_collect(content, types, scope, list_opts) do
+    corpus_opts =
+      list_opts
+      |> Keyword.drop([:page_size, :max_pages])
+      |> Keyword.put(:limit, corpus_limit(list_opts))
+
+    {owned, plain} = Enum.split_with(types, &Content.owner_scoped?(&1, scope, list_opts))
+
+    [{plain, false}, {owned, true}]
+    |> Enum.reject(fn {class_types, _} -> class_types == [] end)
+    |> Enum.map_reduce(nil, fn {class_types, owner_scoped?}, trunc_acc ->
+      {rows, trunc} =
+        content.collect_corpus_documents(
+          class_types,
+          scope,
+          Keyword.put(corpus_opts, :owner_scoped, owner_scoped?)
+        )
+
+      {rows, trunc_acc || trunc}
+    end)
+    |> then(fn {per_class, trunc} -> {Enum.concat(per_class), trunc} end)
+  end
+
+  defp page_walk_collect(content, types, scope, list_opts) do
+    types
+    |> Enum.map_reduce(nil, fn type, trunc_acc ->
+      {page, trunc} = content.collect_all_documents(type, scope, list_opts)
+      {page, trunc_acc || trunc}
+    end)
+    |> then(fn {per_type, trunc} -> {Enum.concat(per_type), trunc} end)
+  end
+
+  defp corpus_limit(list_opts) do
+    Keyword.fetch!(list_opts, :page_size) * Keyword.fetch!(list_opts, :max_pages)
+  end
+
   defp hydrate_task_edges(docs) when is_list(docs) do
     Barkpark.Plugins.Tasks.hydrate_edges_batch(docs)
   end
