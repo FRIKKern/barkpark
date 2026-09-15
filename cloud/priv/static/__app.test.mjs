@@ -25383,36 +25383,23 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
 });
 
 test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support channel", () => {
-  // The same enumeration the pin above sweeps — see "cch-w35-s4 THE FENCE IS
-  // INERT". Kept in its own test so this reds BY NAME and FIRST: inside the pin
-  // block a byte-exact equality would fire before it and the record would show
-  // a moved pin rather than the property that was broken.
-  const PINNED_SLUGS = [
-    "invalid_credentials", "email_taken", "email_invalid", "password_invalid",
-    "validation_failed", "name_required", "no_active_subscription", "plan_invalid",
-    "invalid_code", "rate_limited", "no_team", "invalid", "not_live",
-    "no_admin_token", "instance_unreachable", "network_error", "limit_reached",
-    "billing_not_configured", "billing_test_mode", "forbidden", "server_error", "malformed_body",
-    "malformed_request", "unsupported_media_type", "request_too_large",
-    // cch-w72-s2 (D871) — the five new curated readers join the ban sweep in the
-    // same commit that registered them; each must stay free of a support-channel.
-    "checkout_failed", "portal_failed", "no_subscription", "live_twin", "role_too_high",
-    // cch-w72-bl (D878/D879) — the deploy arm's two curated cures join the ban
-    // sweep in the same commit. instance_not_live stays OUT: no ERRORS entry
-    // exists for it (the fence's shadow law), so listing it here would red the
-    // registered-slug assertion by design.
-    "deploy_not_started", "no_content_binding",
-    // cch-w75-s1 (D883) + cch-w72-bl (D875/D878) — the github arm's three curated
-    // cures join the ban sweep; repo_not_in_installation is a backfill (#12128
-    // registered it without adding it here).
-    "repo_not_in_installation", "github_error", "invalid_name",
-  ];
-
-  // cch-w50-s2 — THE BAN, swept over the SAME enumeration the pin above uses,
-  // so it covers every registered ERRORS slug rather than the one sentence that
-  // happened to carry the phrase. `ERRORS` itself is not exported, and this
-  // slice does not own the export block, so `friendly({error: slug})` is the
-  // emission path — which is also the path a person actually reads.
+  // Kept in its own test, beside the "cch-w35-s4 THE FENCE IS INERT" pin, so
+  // this reds BY NAME and FIRST: inside the pin block a byte-exact equality
+  // would fire before it and the record would show a moved pin rather than the
+  // property that was broken.
+  //
+  // cch-w50-s2-followup — THIS SWEEPS THE LIVE MAP NOW. It used to drive a
+  // HAND-COPIED list of the pin's 34 slug names, and that made the ban LAG the
+  // map: a slug registered in app.js was banned only once someone also edited
+  // this file, with nothing but the neighbouring pin's byte-exactness to force
+  // that edit. app.js now exports the map as a frozen shallow copy through the
+  // test hooks (`errors:`, beside `friendly:` — re-derive it with
+  // grep -n "errors: Object.freeze" cloud/priv/static/app.js), so the ban sweeps
+  // Object.values() and follows the map BY CONSTRUCTION. Register a slug whose
+  // copy names a support channel and this reds with NO test edit anywhere. The
+  // hand-copied list is deleted; three slugs it never carried
+  // (instance_not_armed, installation_not_found, suspended) — and every future
+  // one — are swept for free.
   //
   // WHY A BAN AND NOT JUST A PIN: a pin certifies one string. This certifies a
   // PROPERTY — no curated console sentence may name a support channel — and it
@@ -25426,19 +25413,35 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
   // VERBATIM. This closes that contradiction on the JS side; the Elixir twin is
   // cloud/test/barkpark_cloud/failure_copy_support_channel_test.exs.
   //
-  // LOSABLE: re-add "; if it keeps happening, contact support." to the ERRORS
-  // map's server_error entry (grep -n 'server_error:' app.js, inside the
-  // `var ERRORS = {` block) and this assertion names the slug that carries it.
-  for (const slug of PINNED_SLUGS) {
+  // LOSABLE, and now losable from app.js ALONE: add any slug to the `var ERRORS`
+  // map whose sentence says "contact support" — or re-add
+  // "; if it keeps happening, contact support." to its server_error entry
+  // (re-derive with grep -n "server_error:" cloud/priv/static/app.js, inside the
+  // `var ERRORS = {` block) — and this assertion names the slug that carries it,
+  // with no edit to this file.
+  const ERRORS = hooks.errors;
+  assert.ok(ERRORS && typeof ERRORS === "object" && !Array.isArray(ERRORS),
+    "app.js must export the ERRORS map to the harness or this ban sweeps nothing");
+  const swept = Object.keys(ERRORS);
+  // A FLOOR, not a pin. An export that regressed to {} — or to a handful of keys
+  // — would sweep nothing and pass GREEN, which is precisely the vacuous shape
+  // the hand-copied list was replaced to avoid. 38 is the map's size on the
+  // commit that introduced this sweep; the floor reds only if the curated set
+  // SHRINKS, and the pin above already owns growth.
+  assert.ok(swept.length >= 38,
+    "the exported ERRORS map swept only " + swept.length + " slugs; it must not shrink below the 38 curated on main");
+  for (const [slug, sentence] of Object.entries(ERRORS)) {
+    // The VALUE as registered — the ban's subject, straight off the map.
+    assert.equal(typeof sentence, "string", slug + " is not a string sentence: " + typeof sentence);
+    assert.ok(!/contact support/i.test(sentence),
+      slug + " names a support channel this deployment does not have: " + sentence);
+    // …and as EMITTED, which is the path a person actually reads. A registered
+    // slug never falls through to the caller's fallback, so this also proves the
+    // exported map and friendly()'s own lookup have not drifted apart.
     const copy = hooks.friendly({ error: slug }, "a caller fallback");
-    // HONEST LIMIT: this list is a copy of the pin's key set, so a slug added to
-    // ERRORS is banned only once it is added here too — the pin test reds on any
-    // map change, which is what forces that edit. What this DOES guarantee is
-    // that every name here is really registered: an unregistered slug would fall
-    // through to the caller's fallback and quietly sweep nothing.
-    assert.notEqual(copy, "a caller fallback", slug + " is no longer a registered ERRORS slug");
+    assert.notEqual(copy, "a caller fallback", slug + " is in the exported map but friendly() does not resolve it");
     assert.ok(!/contact support/i.test(copy),
-      slug + " names a support channel this deployment does not have: " + copy);
+      slug + " names a support channel this deployment does not have, as emitted: " + copy);
   }
   // …and through faultCopy, the 5xx path that reaches ERRORS.server_error as a
   // FALLBACK. Stated honestly: this sentence is not "what every 5xx says" — a
