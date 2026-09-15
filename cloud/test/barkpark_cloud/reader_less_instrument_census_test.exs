@@ -45,12 +45,81 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
   The stripper is line-anchored: a line whose FIRST non-space characters are
   `//`, `#`, `*`, `/*` or `<!--` is dropped. It therefore still counts a
   TRAILING comment on a code line, and still counts a block-comment body line
-  that starts with a word. That is deliberate and it is the SAFE direction: an
-  over-counted reader can only ever PROTECT an instrument from deletion. It
-  never authorises one. The unsafe direction — under-counting, i.e. deleting an
-  instrument something reads — is the one this bias cannot produce. The cost is
-  named honestly below: an over-count can also MASK the loss of a real reader on
-  a `:has_reader` row.
+  that starts with a word. That is deliberate — but the safety argument that
+  used to stand here was TRUE OF TWO DISPOSITIONS AND FALSE OF THE THIRD, and
+  the false one is the case the bias actually reaches.
+
+  ## THE OVER-COUNT IS SAFE FOR PROTECTION AND UNSAFE FOR CERTIFICATION
+
+  The sentence this file carried for six waves was: *an over-counted reader can
+  only ever PROTECT an instrument from deletion; it never authorises one.* Read
+  it against each disposition and it splits:
+
+    * `:stay` / `:deleted` — TRUE, and it is the whole reason the bias is
+      tolerated. These rows red when the derived reader set is NON-EMPTY, so a
+      spurious hit can only produce a ROT red: a loud demand that a human look
+      at a row claiming nobody reads the key. An over-count here costs a false
+      alarm and can never hide a deletion that should have happened.
+
+    * `:has_reader` — FALSE. This row reds when the derived reader set is
+      EMPTY. A spurious hit is therefore not a protection, it IS THE
+      CERTIFICATION: it is the evidence, and the only evidence, that the key
+      still has an audience. An over-count here does not raise a false alarm,
+      it SUPPRESSES a true one — and it will certify a key with zero code
+      readers as read.
+
+  That third failure mode was PROVED BY MUTATION in wave 32 (charter D550) and
+  it is not hypothetical arithmetic. `agency` derived four hits, ALL FOUR
+  markup: `cloud/priv/static/styleguide.html` three times and
+  `cloud/priv/static/app.css` once. Two of the four were not comments at all —
+  they were rendered `<p>`/`<code>` page text about a design-agency handover, so
+  no comment stripper of any strictness removes them, and the line-anchored
+  stripper kept the other two because those lines begin with a word. Enrolling
+  `agency` as `:has_reader` passed 15 tests, 0 failures, on a key `git grep`
+  proved had no reader in any code tree. The SAME prose was load-bearing in the
+  other direction too: declared `:stay`, that row redded as
+  `agency (rot, 4 reader(s))` and would have forced a real stay to be deleted.
+
+  ## THE FIX, AND THE SHAPE IT DELIBERATELY IS NOT
+
+  The two dispositions do not get the same predicate any more, because they do
+  not want the same bias.
+
+    * `:stay` / `:deleted` still red on ANY hit — raw `hits/2`, markup and
+      trailing comments included. Nothing about the rot side is relaxed. The
+      wave-32 counterfactual above is still exactly what that row would print.
+    * `:has_reader` now requires a CERTIFYING hit — `certifying_hits/1`, a hit
+      in a file whose extension can hold a code path at all.
+
+  Two routes were on the table and this is the one that was taken, with grounds.
+  The refused route was "make the scan stop scoring prose": *is this line prose?*
+  is an unbounded classification problem, and the wave-32 specimen defeats it by
+  construction — two of the four hits are rendered page TEXT, not comments, so
+  there is no comment syntax to strip. *Can a file of this kind hold a code
+  path?* is bounded and mechanical, and it is answered once per extension rather
+  than once per line.
+
+  The granularity is FILE KIND, not tree, and that distinction was measured, not
+  assumed. `cloud/priv/static` holds the prose (`styleguide.html`, `app.css`)
+  AND real readers (`app.js`, `__app.test.mjs`): `claim_leg` derives all seven
+  of its readers from that tree. A "`:has_reader` needs a hit outside
+  cloud/priv/static" rule would have emptied that row and redded it as
+  `:lost_reader` — the unsafe direction, on a row with a genuine audience.
+
+  `@code_bearing_extensions` is a POSITIVE declaration and its ground is one
+  sentence: a file of this kind can contain an executable statement or a
+  declaration that binds the key, so deleting the key can red something. `.css`
+  is a stylesheet and `.html` in this corpus is a static document; neither can.
+  It is stated positively so the default for an extension nobody has classified
+  is NOT-certifying, which fails CLOSED and LOUD — an unclassified new extension
+  can empty a `:has_reader` row and red it, never silently certify one.
+
+  The residual bias is named rather than buried: a trailing comment on a code
+  line, and a block-comment body line starting with a word, are still counted
+  INSIDE a code-bearing file. That over-count survives on both sides and the
+  `:has_reader` half of it is still a certification hazard — narrowed by file
+  kind, not closed. The way to close it is a real parse, which this file does
+  not do.
 
   `.json` is not in `@extensions`. A JSON fixture naming a key is DATA, not a
   code path, by the same rule that refuses the comment — and admitting it would
@@ -167,6 +236,22 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
 
   @extensions ~w(.go .ex .exs .heex .ts .tsx .js .mjs .cjs .jsx .html .css)
 
+  # THE CERTIFYING SUBSET — see "THE OVER-COUNT IS SAFE FOR PROTECTION AND
+  # UNSAFE FOR CERTIFICATION" above. The ground, in one sentence: a file of this
+  # kind can contain an executable statement or a declaration that binds the
+  # key, so deleting the key can red something. `.css` is a stylesheet and
+  # `.html` in this corpus is a static document; neither can, and wave 32 proved
+  # that four lines of `.html`/`.css` prose about a design agency were enough to
+  # certify a key with zero code readers as read.
+  #
+  # POSITIVE on purpose. An extension added to `@extensions` and not classified
+  # here defaults to NOT-certifying, which can only EMPTY a `:has_reader` row
+  # and red it — loud and fail-closed. The inverse default would silently
+  # certify. `test "@extensions is CLASSIFIED, and the split is deliberate"`
+  # refuses an unclassified addition outright so the default is never reached by
+  # accident.
+  @code_bearing_extensions ~w(.go .ex .exs .heex .ts .tsx .js .mjs .cjs .jsx)
+
   # Refused by name: build output and vendored dependencies are not code anyone
   # in this repo can be said to have written a reader in.
   @refused_dirs ~w(node_modules _build deps dist .next .git coverage cover)
@@ -186,6 +271,39 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
   @doc "The declared source extensions."
   @spec extensions() :: [binary()]
   def extensions, do: @extensions
+
+  @doc """
+  The subset of `extensions/0` a CERTIFYING hit may live in.
+
+  A `:has_reader` row is an assertion that an audience exists, and the hit is
+  the whole evidence for it — so that hit must come from a file kind that can
+  hold a code path. The rot side (`:stay` / `:deleted`) deliberately does NOT
+  use this: there an extra hit is a loud false alarm, never a silent pass.
+  """
+  @spec code_bearing_extensions() :: [binary()]
+  def code_bearing_extensions, do: @code_bearing_extensions
+
+  @doc """
+  True when a corpus file's kind can hold a code path that names a key.
+
+      iex> code_bearing?("internal/cloudclient/client.go")
+      true
+      iex> code_bearing?("cloud/priv/static/styleguide.html")
+      false
+  """
+  @spec code_bearing?(binary()) :: boolean()
+  def code_bearing?(file), do: Path.extname(file) in @code_bearing_extensions
+
+  @doc """
+  The hits that may CERTIFY a `:has_reader` row: those in code-bearing files.
+
+  Never call this on the rot side. `hits/2` stays the honest raw count and
+  remains what `:stay` and `:deleted` are judged against — narrowing THAT side
+  is how a stale stay gets a free green, and the wave-32 measurement shows the
+  same prose is load-bearing in both directions.
+  """
+  @spec certifying_hits([hit()]) :: [hit()]
+  def certifying_hits(hits), do: Enum.filter(hits, &code_bearing?(&1.file))
 
   @doc """
   The three casings of an instrument key: snake, camel, Pascal.
@@ -1381,6 +1499,220 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
   end
 
   # ---------------------------------------------------------------------------
+  # PROSE IS NOT A READER — the wave-32 mutation, as a permanent arm
+  #
+  # Wave 32 (charter D550) enrolled `agency` as `:has_reader` and it PASSED on
+  # four hits that were all `.html`/`.css` prose about a design-agency handover.
+  # The arms below make that mutation an assertion instead of a memory: a key
+  # whose only hits are non-code-bearing must RED on `:has_reader`, and a key
+  # with a genuine code reader must still PASS. Both directions, or the rule is
+  # just "red everything".
+  # ---------------------------------------------------------------------------
+
+  test "@extensions is CLASSIFIED, and the split is deliberate" do
+    unclassified = ReaderScan.extensions() -- ReaderScan.code_bearing_extensions()
+
+    assert unclassified == ~w(.html .css),
+           """
+           an extension in the scan corpus is not classified as code-bearing or
+           markup: #{inspect(unclassified)}.
+
+           `@code_bearing_extensions` is the POSITIVE half and an unclassified
+           extension defaults to NOT-certifying, which can only empty a
+           `:has_reader` row and red it. That default is fail-closed on purpose
+           and must never be reached by accident, so classify the extension in
+           the same commit that adds it — and say in one sentence whether a file
+           of that kind can hold a code path that names a key.
+           """
+
+    assert ReaderScan.code_bearing_extensions() -- ReaderScan.extensions() == [],
+           "an extension is declared code-bearing that the scan never reads."
+
+    assert ReaderScan.code_bearing?("internal/cloudclient/client.go")
+    refute ReaderScan.code_bearing?("cloud/priv/static/styleguide.html")
+    refute ReaderScan.code_bearing?("cloud/priv/static/app.css")
+  end
+
+  test "MUTATION (wave 32, D550): a key whose ONLY hits are PROSE REDS on `:has_reader`" do
+    # A hermetic corpus, so the arm cannot be overtaken by the real tree the way
+    # the wave-32 specimen was — see the live arm below for what happened to
+    # `agency`. Two keys, one fixture: one named only in markup, one named in a
+    # code-bearing file, so BOTH directions are measured in the same run.
+    root = fixture_corpus!()
+
+    prose = "handover_only_key"
+    code = "carved_code_key"
+
+    hits = ReaderScan.hits([prose, code], roots: [root])
+
+    # PRECONDITION, asserted rather than assumed: the fixture must actually
+    # produce the shape the arm is about. A fixture that scanned nothing would
+    # make every assertion below vacuously true.
+    assert length(hits[prose]) == 2,
+           "the prose fixture derived #{length(hits[prose])} hits, expected 2 " <>
+             "(.html + .css): #{inspect(hits[prose])}"
+
+    assert Enum.map(hits[prose], &Path.extname(&1.file)) |> Enum.sort() == [".css", ".html"],
+           "the prose fixture's hits are not the markup pair: #{inspect(hits[prose])}"
+
+    assert length(hits[code]) == 1,
+           "the code fixture derived #{length(hits[code])} hits, expected 1 (.go): " <>
+             inspect(hits[code])
+
+    register = [
+      %{
+        key: prose,
+        what: "a key named only in rendered page text and a stylesheet",
+        surface: "a styleguide page",
+        audience: "nobody who can act on it",
+        reason: "the wave-32 mutation, kept as an arm",
+        disposition: :has_reader,
+        stay: nil
+      },
+      %{
+        key: code,
+        what: "a key a code path genuinely names",
+        surface: "the CLI",
+        audience: "the operator at a terminal",
+        reason: "the counterfactual: the rule must not red everything",
+        disposition: :has_reader,
+        stay: nil
+      }
+    ]
+
+    lost = violations(register, hits, :lost_reader)
+
+    # DIRECTION 1 — the prose-only key must RED.
+    assert Enum.any?(lost, &match?(%{key: ^prose, kind: :lost_reader}, &1)),
+           """
+           a `:has_reader` row whose ONLY hits are `.html`/`.css` did NOT red.
+           This is the wave-32 defect exactly: four lines of prose about a design
+           agency certified a key with zero code readers as read. The census is
+           back to authorising a deletion-proof it cannot support.
+
+           derived: #{inspect(hits[prose])}
+           #{fmt(lost)}
+           """
+
+    # DIRECTION 2 — the key with a real code reader must NOT red. Without this
+    # the rule could be "certifying_hits/1 returns []" and direction 1 would
+    # still pass.
+    refute Enum.any?(lost, &(&1.key == code)),
+           """
+           a `:has_reader` row with a genuine `.go` reader redded. A rule that
+           reds everything is not a fix — it would order the deletion of every
+           instrument in the register.
+
+           derived: #{inspect(hits[code])}
+           #{fmt(lost)}
+           """
+
+    # DIRECTION 3 — the ROT side is NOT relaxed. The same prose is load-bearing
+    # in both directions (wave 32 measured `agency (rot, 4 reader(s))` under
+    # `:stay`), and narrowing the rot side to match would hand every stale stay
+    # a free green. Declared `:stay`, the prose-only key must STILL rot.
+    stayed = [
+      %{
+        key: prose,
+        what: "the same key, declared reader-less",
+        surface: "a styleguide page",
+        audience: "nobody who can act on it",
+        reason: "proves the rot side still sees what the certification side refuses",
+        disposition: :stay,
+        stay: {:data, "a stay whose excuse this arm does not evaluate"}
+      }
+    ]
+
+    rots = violations(stayed, hits, :rot)
+
+    assert Enum.any?(rots, &match?(%{key: ^prose, kind: :rot, readers: 2}, &1)),
+           """
+           the rot side stopped seeing the markup hits. `:stay` and `:deleted`
+           must red on ANY hit, prose included: there an over-count is a loud
+           false alarm, and narrowing it is the one change that CAN hide a
+           deletion that should have happened.
+
+           #{fmt(rots)}
+           """
+  end
+
+  test "the wave-32 specimen's prose is still in the tree, and still does not certify" do
+    # THE LIVE ARM, and it carries a finding the filing could not have known:
+    # `agency` HAS BEEN OVERTAKEN as a reader-less specimen. On 2026-09-15 it
+    # derives 32 hits — `internal/cloudclient/client.go` decodes it, the deploy
+    # census CLI renders it, the console harness names it — so it is no longer
+    # a key with zero code readers. That is the same fate `queued_seconds` met
+    # (see the census moduledoc), and it is exactly why the mutation above is
+    # hermetic and this arm asserts only the part that is still true.
+    #
+    # What IS still true, and is the whole point: the four wave-32 markup lines
+    # are still in the tree, and the new rule refuses every one of them.
+    hits = ReaderScan.hits(["agency"])["agency"]
+
+    markup = hits -- ReaderScan.certifying_hits(hits)
+
+    # PRECONDITION that FAILS THE HARNESS rather than passing quietly: if the
+    # styleguide prose is ever rewritten away, this arm stops measuring anything
+    # and must say so instead of going green on an empty set.
+    refute markup == [],
+           """
+           the wave-32 prose specimen is GONE from the corpus: no `agency` hit
+           lands in a non-code-bearing file any more. This arm is now vacuous.
+           Re-point it at a live markup hit, or delete it and rely on the
+           hermetic mutation above — do not leave it green and empty.
+           """
+
+    for hit <- markup do
+      assert Path.extname(hit.file) in ~w(.html .css),
+             "a non-certifying `agency` hit is not markup: #{hit.file}:#{hit.line}"
+
+      refute ReaderScan.code_bearing?(hit.file),
+             "#{hit.file} certifies a `:has_reader` row off rendered page text."
+    end
+
+    # And the rot side still sees them — the load-bearing-in-both-directions
+    # measurement, re-derived rather than quoted.
+    assert length(ReaderScan.hits(["agency"])["agency"]) > length(markup),
+           "expected `agency` to carry code hits too; it does not, so the " <>
+             "overtaken-specimen note above is stale — re-derive it."
+  end
+
+  # A throwaway corpus root under `cloud/test/tmp`, outside all five `@roots`,
+  # so it can never join the real census. Returned as a repo-relative path
+  # because that is what `ReaderScan.files/1` joins to the repo root.
+  defp fixture_corpus! do
+    rel = Path.join(["cloud", "test", "tmp", "readerscan_#{System.unique_integer([:positive])}"])
+    abs = Path.join(ReaderScan.repo_root(), rel)
+
+    File.mkdir_p!(abs)
+    on_exit(fn -> File.rm_rf!(abs) end)
+
+    # RENDERED PAGE TEXT, not a comment — the half of the wave-32 specimen that
+    # defeats a comment stripper by construction. There is no comment syntax to
+    # strip from a `<p>`.
+    File.write!(Path.join(abs, "styleguide.html"), """
+    <h2>Handover</h2>
+    <p>The handover_only_key column came from the agency handover deck.</p>
+    """)
+
+    # A stylesheet line. Also not a comment, also not a code path.
+    File.write!(Path.join(abs, "app.css"), """
+    .panel { color: #333; }
+    .handover_only_key-note { display: none; }
+    """)
+
+    File.write!(Path.join(abs, "reader.go"), """
+    package fixture
+
+    type Row struct {
+    	CarvedCodeKey string `json:"carved_code_key"`
+    }
+    """)
+
+    rel
+  end
+
+  # ---------------------------------------------------------------------------
   # THE STAY
   # ---------------------------------------------------------------------------
 
@@ -1504,10 +1836,23 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
   # ---------------------------------------------------------------------------
 
   # The two directions, as data so the mutation tests can drive them.
+  # `:has_reader` is judged on the CERTIFYING hits only — a hit in a file kind
+  # that can hold a code path. A `.html`/`.css` hit is not evidence of an
+  # audience; wave 32 proved four of them certify a key with zero code readers.
+  # `readers:` prints the raw count beside the certifying one so the message
+  # distinguishes "nothing names this key" from "only prose names it".
   defp violations(register, hits, :lost_reader) do
     for %{disposition: :has_reader} = row <- register,
-        Map.get(hits, row.key, []) == [],
-        do: %{key: row.key, kind: :lost_reader, readers: 0, sample: []}
+        raw = Map.get(hits, row.key, []),
+        ReaderScan.certifying_hits(raw) == [],
+        do: %{
+          key: row.key,
+          kind: :lost_reader,
+          readers: 0,
+          sample:
+            Enum.map(raw, &"NON-CERTIFYING #{&1.file}:#{&1.line}")
+            |> Enum.take(3)
+        }
   end
 
   defp violations(register, hits, :rot) do

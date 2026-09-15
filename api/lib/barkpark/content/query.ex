@@ -258,6 +258,12 @@ defmodule Barkpark.Content.Query do
       `owner_scoped: true` type. Callers holding the schema list MUST split
       their types by that flag and make one call per class; a mixed call would
       apply one type's ACL to another's rows.
+    * `:perspective` — `:published` applies the SAME `doc_id NOT LIKE
+      'drafts.%'` clause `list_linear/5` applies (`apply_perspective/2`), so a
+      published-perspective corpus read is row-identical to the walk it
+      replaces. Any other value (default) leaves the draft-preferred
+      `DISTINCT ON` in place. The two are mutually exclusive by construction:
+      with drafts excluded there is no draft twin left to prefer.
     * `:workspace_id` / `:project_id` / `:caller_context` — as `list_documents/3`.
 
   ## Identity
@@ -405,9 +411,12 @@ defmodule Barkpark.Content.Query do
       )
       |> maybe_scope_to_grants(opts)
 
-    if Keyword.get(opts, :owner_scoped, false),
-      do: scope_to_owner(base, Keyword.get(opts, :caller_context)),
-      else: base
+    base =
+      if Keyword.get(opts, :owner_scoped, false),
+        do: scope_to_owner(base, Keyword.get(opts, :caller_context)),
+        else: base
+
+    apply_perspective(base, Keyword.get(opts, :perspective, :raw))
   end
 
   # One read of `limit + 1`: the extra row is the honest truncation probe — it

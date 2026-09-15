@@ -103,6 +103,20 @@
 #     state nothing re-reports). Precise scope, stated because it is easy to
 #     misread: a DEADLOCK or RERUN learned from GH's OWN refusal string mid-loop
 #     exits 1 like every other quoted refusal — 3 means the DETECTOR said so.
+#   5 MAIN-RED HOLD: this PR changes a file under a tree recorded in
+#     .github/main-red-holds.json as RED ON MAIN with a reproduction and an
+#     owner. Distinct from 1 and from 3 because it is not a finding about the
+#     PR's checks at all — the PR may be 4/4 green. It releases when the hold
+#     lifts (`scripts/main-red-hold.sh lift --id <id>`, which re-measures) or
+#     when it is OVERRIDDEN ON THE RECORD by the three
+#     BP_MERGE_HOLD_OVERRIDE_* variables, which post the authorisation to the
+#     PR before merging. An incomplete override, an override naming a hold this
+#     PR is not held by, and an override whose record could not be posted all
+#     exit 5 too: the hold stood in every one of those cases.
+#   6 HOLD CHECK CANNOT READ: the hold registry, or this PR's file list, could
+#     not be read — so NOTHING was measured about holds. Never folded into 0.
+#     A merge path that fails OPEN on a hold is strictly worse than no hold at
+#     all, so an unreadable registry refuses. Exit 6 has no override door.
 #
 # USAGE
 #   scripts/bp-merge.sh              # no arguments; the PR is derived from HEAD
@@ -447,6 +461,188 @@ preflight_mergeable() {
       exit 1 ;;
     *)
       echo "bp-merge: pre-flight ok — mergeable_state: $state (not a conflict)." ;;
+  esac
+}
+
+# ── pre-flight 0: THE MAIN-RED HOLD REGISTRY ────────────────────────────────
+#
+# WHY THIS LIVES HERE AND NOT IN THE REQUIRED CHECK SET (ruled 2026-09-13).
+# `scripts/main-red-hold.sh` records a red that REPRODUCES on a clean checkout
+# of main, with an owner and a per-tree scope, in .github/main-red-holds.json.
+# Until this block existed the registry was ADVISORY everywhere: pr-meta.yml
+# runs `check` and annotates, but that workflow is not in the required four
+# (Cloud gate / Console gate / Elixir gate / PR references an active task) and
+# CANNOT be, because a paths-filtered workflow emits no check run on a
+# non-matching PR and a required context that never renders deadlocks the
+# branch forever. Widening the required set is the wrong fix and was rejected
+# twice.
+#
+# THE HELPER LAYER IS WHERE A HOLD CAN ACTUALLY REFUSE. This fleet does not
+# merge with the GitHub button; every lane merges through THIS script — it is
+# the only live `gh pr merge` call in the repository. So the hold is advisory
+# at the GitHub layer and ENFORCED here. That needs no required context and it
+# cannot deadlock a branch: lifting the hold, or overriding it on the record,
+# releases the merge immediately.
+#
+# IT FAILS CLOSED, AND THAT IS THE PROPERTY THAT MATTERS MOST. A merge path
+# that fails OPEN on an unreadable registry is strictly worse than no hold at
+# all: it teaches everyone the hold is real while quietly merging through it
+# whenever the file is missing, empty, unparseable, or the file list could not
+# be read. Every one of those is `HOLD CHECK CANNOT READ` and exit 6. An
+# unreadable hold registry is a refusal, never a skip — the same rule this
+# script already applies to its own pre-flight.
+#
+# IT DOES NOT REFUSE A PR THAT TOUCHES NOTHING HELD. A hold that blocks
+# everything gets lifted under pressure, which is exactly why fleet-wide holds
+# were rejected on 2026-09-13 after one was issued and retracted the same
+# morning. The judgement is per-file against the hold's own trees, and the
+# CLEAR path prints which holds it considered and did not hit.
+HOLD_SCRIPT="$REPO_ROOT/scripts/main-red-hold.sh"
+
+# Selects WHICH registry to judge; it cannot select NO registry. An empty value
+# falls back to the committed default rather than skipping — an env var that
+# can turn the check off is the fail-open door this block exists to close, and
+# an unreadable path here is exit 6, not a pass.
+HOLD_REGISTRY="${BP_MERGE_HOLD_REGISTRY:-.github/main-red-holds.json}"
+
+# IMPURE (it calls gh) and kept as its own one-line function for the same
+# reason read_mergeable_state is: the harness stubs `gh` around it and drives
+# the REAL reader rather than a re-implementation of it.
+read_pr_files() {
+  gh pr view "$PR_NUMBER" --json files --jq '.files[].path' 2>&1
+}
+
+# The distinct CANNOT READ line. It is never byte-identical to the CLEAR line
+# and never to the HELD line, so no caller can confuse "nothing is held" with
+# "I could not look".
+hold_cannot_read() { # $1 = what could not be read
+  echo "bp-merge: HOLD CHECK CANNOT READ — $1" >&2
+  echo "          NOTHING is known about whether this PR touches a tree that is RED ON MAIN." >&2
+  echo "          This refusal carries no claim that your PR is held, and none that it is clear." >&2
+  echo "          An unreadable hold registry is a REFUSAL, never a skip: a merge path that fails" >&2
+  echo "          OPEN on a hold is strictly worse than no hold at all. Fix the read and re-run." >&2
+  echo "          Registry judged: $HOLD_REGISTRY   (scripts/main-red-hold.sh check)" >&2
+  exit 6
+}
+
+# The override, and why it exists at all.
+#
+# A HOLD WITHOUT A DOOR DEADLOCKS ITS OWN FIX. The hold's scope is the tree the
+# red reproduces in, and `lift` clears it only by re-running the reproduction on
+# a LATER main sha — i.e. only AFTER the fix has landed. The PR that carries the
+# fix touches the held tree by construction, so with no door the fix can never
+# merge and the hold can never lift. That is not a hypothetical: the single hold
+# open on 2026-09-14 (internal-taskboard-golden-drift, owner lane:cli, tree
+# internal/taskboard) has exactly this shape.
+#
+# SO THE DOOR IS EXPLICIT, NAMED, AND RECORDED — THREE VARIABLES, ALL REQUIRED:
+#   BP_MERGE_HOLD_OVERRIDE_ID    the hold slug being overridden (must be one
+#                                that actually held THIS PR — an override that
+#                                names a hold this PR is not held by releases
+#                                nothing and refuses)
+#   BP_MERGE_HOLD_OVERRIDE_WHO   who authorised it
+#   BP_MERGE_HOLD_OVERRIDE_WHY   why
+# A partial set is a refusal that names the missing ones. There is no single
+# `--force`: a one-flag door is the one that gets used reflexively.
+#
+# THE RECORD IS A PRECONDITION, NOT A SIDE EFFECT. The override posts a comment
+# on the PR naming the hold, the owner, who authorised it, why, and the held
+# files that decided it — and if that write FAILS the merge is refused. A record
+# that only ever reached this script's stdout is not a record; the terminal
+# scrolls, the PR does not. It cannot be un-posted, and the hold stays open in
+# the committed registry either way, so the next PR into the same tree meets the
+# same refusal rather than inheriting this one's exception.
+#
+# AN UNREADABLE REGISTRY CANNOT BE OVERRIDDEN, BY CONSTRUCTION. The override is
+# reachable only from the HELD arm, and it must name a hold id that appeared in
+# the check's own output — which an unreadable registry never produces. Exit 6
+# has no door.
+hold_override_or_refuse() { # $1 = the check's own HELD output
+  local held_out="$1"
+  local oid="${BP_MERGE_HOLD_OVERRIDE_ID:-}"
+  local owho="${BP_MERGE_HOLD_OVERRIDE_WHO:-}"
+  local owhy="${BP_MERGE_HOLD_OVERRIDE_WHY:-}"
+
+  if [ -z "$oid" ] && [ -z "$owho" ] && [ -z "$owhy" ]; then
+    echo "bp-merge: REFUSED — MAIN-RED HOLD" >&2
+    echo "          This PR changes a file under a tree that is RED ON MAIN, reproduced on a clean" >&2
+    echo "          checkout. The verdict above names the hold, the held trees, the OWNER, the task" >&2
+    echo "          and the files of yours that fall inside it." >&2
+    echo "          LIFT IT (the ordinary path, and it lifts on a MEASUREMENT, never on a claim):" >&2
+    echo "            bash scripts/main-red-hold.sh lift --id <id>" >&2
+    echo "          OVERRIDE IT ON THE RECORD (for the PR that CARRIES the fix, which touches the" >&2
+    echo "          held tree by construction and could otherwise never merge):" >&2
+    echo "            BP_MERGE_HOLD_OVERRIDE_ID=<id> BP_MERGE_HOLD_OVERRIDE_WHO=<who> \\" >&2
+    echo "            BP_MERGE_HOLD_OVERRIDE_WHY='<why>' scripts/bp-merge.sh" >&2
+    echo "          The override posts the authorisation as a PR comment BEFORE merging; if that" >&2
+    echo "          comment cannot be posted, the merge is refused." >&2
+    exit 5
+  fi
+
+  local missing=""
+  [ -n "$oid" ]  || missing="$missing BP_MERGE_HOLD_OVERRIDE_ID"
+  [ -n "$owho" ] || missing="$missing BP_MERGE_HOLD_OVERRIDE_WHO"
+  [ -n "$owhy" ] || missing="$missing BP_MERGE_HOLD_OVERRIDE_WHY"
+  if [ -n "$missing" ]; then
+    echo "bp-merge: REFUSED — MAIN-RED HOLD OVERRIDE INCOMPLETE" >&2
+    echo "          An override names WHO authorised it and WHY, against a specific hold. Missing:$missing" >&2
+    echo "          A partial override is not an authorisation, so the hold above still stands." >&2
+    exit 5
+  fi
+
+  case "$held_out" in
+    *"HELD: $oid"*) : ;;
+    *) echo "bp-merge: REFUSED — MAIN-RED HOLD OVERRIDE NAMES THE WRONG HOLD" >&2
+       echo "          BP_MERGE_HOLD_OVERRIDE_ID='$oid' does not match any hold that held this PR." >&2
+       echo "          The verdict above names the hold(s) that did. An override releases the hold it" >&2
+       echo "          NAMES and nothing else — a mis-typed id must never read as a blanket bypass." >&2
+       exit 5 ;;
+  esac
+
+  local body crc=0 cout
+  body="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n```\n%s\n```\n' \
+    "**MAIN-RED HOLD OVERRIDDEN — \`$oid\`**" \
+    "AUTHORISED BY: $owho" \
+    "REASON: $owhy" \
+    "Merged by \`scripts/bp-merge.sh\` through the hold above. The hold is NOT lifted by this override and stays open in \`$HOLD_REGISTRY\`; it lifts only when \`scripts/main-red-hold.sh lift --id $oid\` re-runs its own reproduction on a later main sha and that command exits 0. The registry verdict this override answers:" \
+    "$held_out")"
+
+  echo "bp-merge: MAIN-RED HOLD OVERRIDE — recording the authorisation on PR #$PR_NUMBER before merging"
+  cout="$(gh pr comment "$PR_NUMBER" --body "$body" 2>&1)" || crc=$?
+  if [ "$crc" != "0" ]; then
+    echo "bp-merge: REFUSED — MAIN-RED HOLD OVERRIDE COULD NOT BE RECORDED" >&2
+    echo "          gh pr comment failed, so the authorisation exists nowhere but this terminal." >&2
+    echo "          The record is a PRECONDITION of the override, not a side effect of it, so the" >&2
+    echo "          hold STANDS. gh said:" >&2
+    printf '%s\n' "$cout" | sed 's/^/          | /' >&2
+    exit 5
+  fi
+  echo "bp-merge: hold '$oid' OVERRIDDEN by $owho — authorisation recorded on the PR; proceeding."
+}
+
+preflight_hold() {
+  echo "bp-merge: pre-flight — main-red hold registry ($HOLD_REGISTRY)"
+  [ -f "$HOLD_SCRIPT" ] \
+    || hold_cannot_read "missing $HOLD_SCRIPT — the registry cannot be judged without it"
+
+  local files rc=0
+  files="$(read_pr_files)" || rc=$?
+  [ "$rc" = "0" ] \
+    || hold_cannot_read "gh could not list the changed files on PR #$PR_NUMBER (exit $rc): $files"
+  [ -n "$files" ] \
+    || hold_cannot_read "PR #$PR_NUMBER lists ZERO changed files; an empty file list is a failed read, not a clean PR, and CLEAR off zero paths asserts nothing"
+
+  local out
+  rc=0
+  out="$(printf '%s\n' "$files" | bash "$HOLD_SCRIPT" check --registry "$HOLD_REGISTRY" --paths-from - 2>&1)" || rc=$?
+  printf '%s\n' "$out" | sed 's/^/          /'
+
+  case "$rc" in
+    0) echo "bp-merge: hold pre-flight ok — CLEAR: this PR touches no held tree." ;;
+    1) hold_override_or_refuse "$out" ;;
+    2) hold_cannot_read "scripts/main-red-hold.sh check rejected its own arguments (exit 2); the judgement never ran" ;;
+    3) hold_cannot_read "scripts/main-red-hold.sh check could not read its input (exit 3); its own CANNOT READ line is quoted above" ;;
+    *) hold_cannot_read "scripts/main-red-hold.sh check exited $rc, which is not a code it documents" ;;
   esac
 }
 
@@ -805,6 +1001,7 @@ main() {
   esac
   [ -x "$VERIFY" ] || [ -f "$VERIFY" ] || die "missing $VERIFY — the pre-flight cannot run."
   resolve_pr
+  preflight_hold
   preflight
   preflight_mergeable
   merge_loop

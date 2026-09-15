@@ -224,20 +224,41 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPerformTest do
     end
 
     test "a raising rebuild CONSUMES attempts and DISCARDS at max_attempts" do
-      # Drain with retries (with_scheduled + with_recursion re-executes
-      # retryable jobs until the queue stabilises). Under the old snooze
-      # rescue this loop NEVER terminated — snoozed re-scheduled the job with
-      # max_attempts bumped, forever. Now: max_attempts(5) executions total —
-      # 4 recorded failures, then the 5th attempt exhausts the job → discard.
-      # Zero snoozes.
+      # max_attempts(5) executions total — 4 recorded failures, then the 5th
+      # attempt exhausts the job → discard. Zero snoozes.
+      #
+      # WHY A BOUNDED DRAIN AND NOT `with_recursion: true`. A recursive drain
+      # re-executes retryable jobs until the queue stabilises — and under a
+      # SNOOZING rescue it never stabilises: Oban's `snooze_job` does
+      # `inc: [max_attempts: 1]`, exactly refunding fetch's `inc: [attempt: 1]`,
+      # so the job is immortal and the drain loops forever. This guard would
+      # then die on the ExUnit timeout (measured: 60.1s, "test timed out after
+      # 60000ms") instead of reddening — a guard that HANGS on the defect it
+      # exists to catch reports "slow suite", not "the rescue snoozes".
+      #
+      # So: drain ONE generation at a time (`with_scheduled: true` picks up the
+      # retryable job regardless of its backoff), at most max_attempts + 1
+      # times, and fail on the FIRST snooze. Under the snoozing rescue that
+      # reds on generation 1, in about a second.
       Oban.insert!(ProjectorWorker.new(@raising_rebuild_args))
 
-      assert %{failure: 4, discard: 1, snoozed: 0} =
-               Oban.drain_queue(
-                 queue: :edge_projector,
-                 with_scheduled: true,
-                 with_recursion: true
-               )
+      totals =
+        Enum.reduce(1..6, %{failure: 0, discard: 0, snoozed: 0}, fn _generation, acc ->
+          result = Oban.drain_queue(queue: :edge_projector, with_scheduled: true)
+
+          assert result.snoozed == 0,
+                 "the rescue SNOOZED — snooze_job refunds the attempt, so this poison " <>
+                   "rebuild is IMMORTAL and max_attempts: 5 is decorative " <>
+                   "(drain generation returned #{inspect(result)})"
+
+          %{
+            failure: acc.failure + result.failure,
+            discard: acc.discard + result.discard,
+            snoozed: acc.snoozed + result.snoozed
+          }
+        end)
+
+      assert %{failure: 4, discard: 1, snoozed: 0} = totals
     end
   end
 end

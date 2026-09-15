@@ -46,6 +46,62 @@ defmodule BarkparkWeb.ScimPatch do
   @type op :: map()
   @type patch :: %{whole_resource: map() | nil, ops: [op()]}
 
+  # ── Request-body list ceilings ─────────────────────────────────────────────
+  #
+  # The PATCH `Operations` array and the `/Groups` `members` array were bounded
+  # at NEITHER end while the numeric query parameters next door were bounded at
+  # both. Each element of either list is walked individually — an `Operations`
+  # element by `classify/1` and again by `ScimUsersController.deactivating?/1`,
+  # a `members` element by `Barkpark.Scim.add_group_member/3` — so the request
+  # body alone chose how much work one authenticated SCIM bearer could buy.
+  #
+  # WHY 1_000, AND WHAT IT IS DERIVED FROM. The honest answer is that no IdP
+  # documents a per-request ceiling for what it SENDS, so the bound is derived
+  # from the largest legitimate request the ecosystem's own documents sanction,
+  # then set well above it:
+  #
+  #   * Okta's SCIM 2.0 guide explicitly sanctions a FULL-membership push —
+  #     `{"op":"replace","path":"members","value":[…]}`, "This operation
+  #     replaces all the group members with the supplied object values" — and
+  #     states no maximum member count anywhere. Its LIST paging, by contrast,
+  #     is documented at `count=100`. That is the only documented number Okta
+  #     gives for a batch of SCIM resources.
+  #     https://developer.okta.com/docs/api/openapi/okta-scim/guides/scim-20/
+  #   * Microsoft Entra ID does NOT document how many members its provisioning
+  #     service sends per outbound PATCH. The one member ceiling Microsoft does
+  #     publish runs the OPPOSITE direction — Entra acting as the service
+  #     PROVIDER caps a client at "up to only 20 members" per add — so it is
+  #     evidence of the order of magnitude the ecosystem treats as normal, not
+  #     a claim about what Entra sends us.
+  #     https://learn.microsoft.com/en-us/entra/identity/app-provisioning/entra-id-scim-api-reference
+  #   * RFC 7644 §3.12 Table 8's own worked 413 row carries the literal
+  #     `{"maxOperations": 1000, "maxPayloadSize": 1048576}` — the spec's own
+  #     illustrative operation ceiling for a batched request.
+  #   * This server already advertises `@max_page` = 200 (RFC 7644 §3.4.2.4) as
+  #     the largest set of resources it will hand back in one response.
+  #
+  # 1_000 is 10x Okta's documented batch, 50x Entra's published member cap, 5x
+  # this server's own page ceiling, and equal to the RFC's illustrative
+  # `maxOperations`. THE TRADE-OFF, recorded rather than hidden: an Okta
+  # full-membership replace of a group with more than 1_000 members WILL now be
+  # refused, with a 400 naming the ceiling, where before it was accepted. That
+  # is the intended behaviour — such a group must be reconciled in pages — and
+  # it is why the refusal names the limit instead of failing opaquely.
+  @max_operations 1_000
+  @max_members 1_000
+
+  @doc """
+  The ceiling on a PATCH body's `Operations` array. Exposed so a route-driven
+  test can name the bound instead of hard-coding a magic number.
+  """
+  def max_operations, do: @max_operations
+
+  @doc """
+  The ceiling on the TOTAL number of `members` entries in one `/Groups` request.
+  Exposed so a route-driven test can name the bound.
+  """
+  def max_members, do: @max_members
+
   @doc """
   Split a PATCH body's `Operations` into a whole-resource attribute map plus the
   path-keyed operations the caller still handles itself.
@@ -58,6 +114,12 @@ defmodule BarkparkWeb.ScimPatch do
   `{:ok, %{whole_resource: nil, ops: []}}` — never an error.
   """
   @spec classify(map()) :: {:ok, patch()} | {:error, String.t(), String.t()}
+  def classify(%{"Operations" => ops}) when is_list(ops) and length(ops) > @max_operations do
+    {:error, "invalidValue",
+     "the Operations array carries #{length(ops)} operations; this server accepts at most " <>
+       "#{@max_operations} in one request"}
+  end
+
   def classify(%{"Operations" => ops}) when is_list(ops) do
     ops
     |> Enum.filter(&is_map/1)
@@ -115,4 +177,34 @@ defmodule BarkparkWeb.ScimPatch do
          "a path-less `#{verb}` operation requires an object `value` naming the attributes to set"}
     end
   end
+
+  @doc """
+  Refuse a `/Groups` write whose TOTAL member count exceeds `max_members/0`.
+
+  The ceiling is on the REQUEST, not on one operation. Every `members` entry in
+  a body — a top-level array on POST/PUT, a path-less whole-resource replace's
+  `members`, and each path-keyed member operation's `value` — is resolved one id
+  at a time by `Barkpark.Scim.add_group_member/3`, so a PER-OPERATION bound
+  would be defeated by splitting the same list across two operations and would
+  buy the caller exactly the work the bound exists to refuse.
+
+  Returns `:ok`, or the same `{:error, scim_type, detail}` shape `classify/1`
+  returns, so a caller renders both refusals through one clause.
+  """
+  @spec check_member_total(non_neg_integer()) :: :ok | {:error, String.t(), String.t()}
+  def check_member_total(n) when is_integer(n) and n > @max_members do
+    {:error, "invalidValue",
+     "the request carries #{n} members entries; this server accepts at most " <>
+       "#{@max_members} in one request"}
+  end
+
+  def check_member_total(n) when is_integer(n), do: :ok
+
+  @doc """
+  The number of entries in a SCIM `members` value. A non-list (absent, null, a
+  scalar) carries no members — the same reading `member_ids/1` gives it.
+  """
+  @spec member_count(term()) :: non_neg_integer()
+  def member_count(members) when is_list(members), do: length(members)
+  def member_count(_), do: 0
 end
