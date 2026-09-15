@@ -144,7 +144,7 @@ echo "== 6. the WORKFLOW's own shell, run against a localhost stub ledger =="
 if python3 -c 'import yaml' 2>/dev/null; then
   # Plain files, not an associative array: this must run on bash 3.2 too.
   sim() { sed -n "s/^$2=//p" "$tmp/sim-$1.txt" | head -1; }
-  scenarios="healthy short error rotated fork-refused fork-anon"
+  scenarios="healthy short error rotated fork-refused fork-anon no-signal"
   for sc in $scenarios; do
     python3 reland_workflow_sim.py --scenario "$sc" --repo-root ../.. > "$tmp/sim-$sc.txt"
   done
@@ -159,6 +159,29 @@ if python3 -c 'import yaml' 2>/dev/null; then
   check "healthy: summary prints digests"      1       "$(sim healthy SIM_SUMMARY_HAS_DIGESTS)"
 
   check "healthy: NOT flagged as truncated"    0       "$(sim healthy SIM_WARN_TRUNCATED)"
+
+  # THE NO-SIGNAL BANNER, AND WHAT IT BLAMES (2026-09-15).
+  # A ledger that answers with real closed tasks but carries NO content.landed
+  # digest used to be the steady state, and the banner said so: "no closer
+  # passes a landed map — the CLI close sends no such key". That is now FALSE.
+  # scripts/landed-mark.sh runs on every push to main and stamps the digest;
+  # re-measured against the live ledger 2026-09-15, 16 done rows carry
+  # content.landed.files, all from 2026-09-13 or later, and the CI job reads
+  # RELAND_DIGESTS_SCANNED=16 / RELAND_ZERO_DIGEST=0.
+  #
+  # So a zero TODAY is a landed-mark regression, and the banner must send the
+  # reader there instead of at a gap that shipped. Three arms, because "it
+  # fired" and "it said the right thing" are different claims — and the third
+  # is the one that reds if the retired wording is ever restored:
+  check "no-signal: ledger still scanned ok"    ok      "$(sim no-signal SIM_STATUS)"
+  check "no-signal: docs really were read"      3       "$(sim no-signal SIM_DOCS)"
+  check "no-signal: 0 findings"                 0       "$(sim no-signal SIM_FINDINGS)"
+  check "no-signal: NO SIGNAL banner fires"     1       "$(sim no-signal SIM_WARN_NO_SIGNAL)"
+  check "no-signal: banner names the REGRESSION" 1      "$(sim no-signal SIM_NO_SIGNAL_NAMES_REGRESSION)"
+  check "no-signal: does NOT blame retired gap" 0       "$(sim no-signal SIM_NO_SIGNAL_BLAMES_RETIRED_GAP)"
+  # CONTROL — the same banner must stay SILENT when digests exist, or the two
+  # arms above would pass on a check that simply always fires.
+  check "healthy: NO SIGNAL banner is SILENT"   0       "$(sim healthy SIM_WARN_NO_SIGNAL)"
 
   check "total > reachable rows: status"        ok      "$(sim short SIM_STATUS)"
   check "total > reachable rows: PARTIAL warn"  1       "$(sim short SIM_WARN_TRUNCATED)"

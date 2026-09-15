@@ -1005,12 +1005,12 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 //   test whose title is BUILT from scenarioReport (grep: `the census
 //   reconciles:`). Six numbers, all from ONE measurement:
 //
-//     r.total            133   grep `assert.equal(r.total, 133)`
+//     r.total            134   grep `assert.equal(r.total, 134)`
 //     r.cells             25   grep `assert.equal(r.cells, 25)`
 //     r.distinctCovered   24   grep `mixed-fleet is used twice`
-//     r.residue          109   grep `109 is the RESIDUE, not the census`
+//     r.residue          110   grep `110 is the RESIDUE, not the census`
 //     r.families          14   grep `assert.equal(r.families, 14)`
-//     SCENARIO_RESIDUE   109   grep `the COMMITTED literal, counted from the
+//     SCENARIO_RESIDUE   110   grep `the COMMITTED literal, counted from the
 //                              committed bytes` — this is residue typed a
 //                              SECOND time, deliberately, against the committed
 //                              bytes rather than the report. Move BOTH or the
@@ -1028,7 +1028,7 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 //
 //   RE-DERIVE, never increment: `node cloud/priv/static/__preview__/breakpoint-sweep.mjs`
 //   prints the whole set on its `>> scenarios` line —
-//   `133 scenarios · 24 distinct covered by 25 cells · 109 residue over 14
+//   `134 scenarios · 24 distinct covered by 25 cells · 110 residue over 14
 //   families (committed literal)`. Read that line and copy from it.
 //
 // OWNER 2 — cloud/priv/static/__binding_census.mjs (NOT under __preview__, and
@@ -1203,13 +1203,45 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // this branch and reading the `>> scenarios` line it PRINTED (`133 scenarios ·
   // 24 distinct covered by 25 cells · 109 residue over 14 families`), never by
   // adding one to the line above.
-  assert.equal(r.total, 133);
+  //
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read moved it by ONE:
+  // `instance-sites-unreadable` — the first fixture in this corpus able to FAIL
+  // the /v1/sites read — is the 134th scenario and the 110th residue entry
+  // (family `hash:#instance`). The cell count does NOT move: it paints the
+  // instance-detail layout the five hash:#instance cells already walk at all 18
+  // widths, and what it carries that no width can score is driven by
+  // overflow-guard.mjs's W34-sites-read-failed-bounded leg instead. The three
+  // numerals below were RE-DERIVED, not incremented, by RUNNING the bare sweep
+  // on this branch and reading what it PRINTED: `134 scenarios · 24 distinct
+  // covered by 25 cells · 110 residue over 14 families (committed literal)`.
+  // The sweep refused at exit 2 (`UNLISTED scenario "instance-sites-unreadable"
+  // (family hash:#instance)`) and smoke.mjs at exit 1 (`CENSUS: 1 committed
+  // scenario(s) have NO expectation`) until both were taught — the literal
+  // doing its job, not friction.
+  //
+  // cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority moved it
+  // by ONE: `members-self-role-drift` — the acting owner whose OWN roster row
+  // carries a role its resolved `team_authority` disagrees with, the first
+  // fixture in this corpus in which those two values differ at all — is the
+  // 135th scenario and the 111th residue entry (family `hash:#settings`). The
+  // cell count does NOT move: it is the `members` cell's own roster with one
+  // role string changed, so it paints the same .set-row the settings cells
+  // already walk at all 18 widths, and the thing it carries that no width can
+  // score — WHICH of the two values the role chip is painted from — is driven
+  // by smoke.mjs's `members-self-role-drift` expectation instead. The three
+  // numerals below were RE-DERIVED, not incremented, by RUNNING the bare sweep
+  // on this branch and reading what it PRINTED: `135 scenarios · 24 distinct
+  // covered by 25 cells · 111 residue over 14 families (committed literal)`.
+  // The sweep refused at exit 2 (`UNLISTED scenario "members-self-role-drift"
+  // (family hash:#settings)`) until the entry was written — the literal doing
+  // its job, not friction.
+  assert.equal(r.total, 135);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 109, "109 is the RESIDUE, not the census");
+  assert.equal(r.residue, 111, "111 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 109, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 111, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

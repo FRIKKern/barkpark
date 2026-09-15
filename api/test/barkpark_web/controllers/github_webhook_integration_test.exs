@@ -635,4 +635,249 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
     :ok
   end
+
+  # ── task-00dc067ad2931221: `refused: true` was ONE receipt for THREE outcomes ──
+  #
+  # Before this block, `github_webhook_controller.ex` answered the SAME
+  # `202 {ok: true, refused: true}` whether Intake had (a) quarantined the issue
+  # with a findable `dedup_refused` dead-letter row, (b) tried to and had the
+  # best-effort write FAIL, or (c) vetoed the birth at a lifecycle gate having
+  # written nothing at all. And `{:ok, _tag, _doc}` discarded the `:born`/
+  # `:exists` tag, so `ingested: true` never said whether a row was created.
+  #
+  # Every arm below drives the REAL request edge — signed raw bytes through
+  # `Plug.Parsers` + `CacheBodyReader` + the HMAC gate + the controller + the
+  # REAL `Github.Intake` — and asserts the RECEIPT against the STORE it implies.
+  # A fixture assembled by hand could not have told us the real code emits these
+  # shapes.
+  describe "the refusal receipt names WHICH refusal (and the ingest receipt WHICH ingest)" do
+    # A genuine parentless task the outsider issue reads as a near-identical
+    # look-alike, so the REAL `Tasks.Dedup` seam (through `Content.Writer`)
+    # refuses the birth. Title/body mirror `opened_body/1` exactly.
+    defp seed_lookalike!(doc_id, scope) do
+      {:ok, _} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => doc_id,
+            "title" => "Outsider hit a wall",
+            "content" => %{
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "description" => "Reproduction: it just broke."
+            }
+          },
+          @dataset,
+          scope
+        )
+    end
+
+    # Every `dedup_refused` conflict row for this issue number (never a
+    # table-wide read — one test database is shared by every agent).
+    defp refusal_rows(number) do
+      Repo.all(
+        from(c in Barkpark.Plugins.Github.Conflict,
+          where: c.issue == ^number and c.kind == "dedup_refused",
+          select: %{kind: c.kind, doc_id: c.doc_id}
+        )
+      )
+    end
+
+    # Add a repo to the plugin credentials for ONE test, restoring the prior
+    # value on exit. A configured repo is what lets `record_refusal/4` build a
+    # valid `Github.Conflict` (its changeset REQUIRES `repo`). The maintainer
+    # comment stays hermetic regardless: `Client.create_comment/4` goes through
+    # `Auth.token()`, which has no app_id/private_key here and fails locally
+    # before any socket is opened.
+    defp put_repo!(repo) do
+      prior = Application.get_env(:barkpark, @config_key)
+      Application.put_env(:barkpark, @config_key, Keyword.put(prior, :repo, repo))
+      Settings.reset_webhook_secret_cache()
+      on_exit(fn -> Application.put_env(:barkpark, @config_key, prior) end)
+    end
+
+    defp deliver_opened(number) do
+      body = opened_body(number)
+      deliver(body, Signature.sign(body, @secret))
+    end
+
+    # THE PRECONDITION FOR THE DEDUP ARM AT ALL (charter D15).
+    #
+    # `Tasks.Dedup.fetch_candidates/2` scopes its backlog scan with
+    # `Content.Scope.scope_to_workspace/3`, which FAILS CLOSED on a nil
+    # workspace_id (`where: false` — zero candidates, never "every tenant").
+    # The webhook pipeline carries no scope plug, so the controller's
+    # `ingest_opts/0` threads a `:workspace_id` ONLY when
+    # `Settings.intake_workspace_id/0` (env `BARKPARK_GITHUB_INTAKE_WORKSPACE_ID`)
+    # is set. Without it the dedup gate scans an EMPTY candidate set and every
+    # outsider issue births — the refusal arm is unreachable, not merely rare.
+    # Set it to the workspace this suite's scope resolves to so the REAL gate
+    # can actually see the seeded look-alike.
+    defp put_intake_workspace!(%{workspace_id: workspace_id}) do
+      prior = System.get_env("BARKPARK_GITHUB_INTAKE_WORKSPACE_ID")
+      System.put_env("BARKPARK_GITHUB_INTAKE_WORKSPACE_ID", workspace_id)
+
+      on_exit(fn ->
+        if prior,
+          do: System.put_env("BARKPARK_GITHUB_INTAKE_WORKSPACE_ID", prior),
+          else: System.delete_env("BARKPARK_GITHUB_INTAKE_WORKSPACE_ID")
+      end)
+    end
+
+    defp put_intake_workspace!(scope), do: put_intake_workspace!(Map.new(scope))
+
+    test "a fresh birth says outcome: born, and its re-delivery says outcome: exists" do
+      number = 90_310 + System.unique_integer([:positive])
+
+      assert %{"ok" => true, "ingested" => true, "outcome" => "born"} =
+               json_response(deliver_opened(number), 200)
+
+      # THE STORE — `born` claims a row was created. It was.
+      assert {:ok, _doc} =
+               Content.get_document(Content.draft_id("gh-#{number}"), "task", @dataset, [])
+
+      # The SAME delivery again. Nothing new is created; the receipt must not
+      # keep saying `born`, which is precisely what the discarded tag hid.
+      assert %{"ok" => true, "ingested" => true, "outcome" => "exists"} =
+               json_response(deliver_opened(number), 200)
+
+      assert length(task_rows(number)) == 1,
+             "a re-delivery reported `exists` but the store gained a row"
+    end
+
+    test "a lifecycle-gate veto says outcome: vetoed — nothing was written, and it says so" do
+      number = 90_320 + System.unique_integer([:positive])
+
+      # A blank title is refused by the task lifecycle gate BEFORE persistence:
+      # `Content.Writer` halts, so there is no task, no comment and no row.
+      body =
+        Jason.encode!(%{
+          "action" => "opened",
+          "issue" => %{"number" => number, "title" => "   ", "body" => "no title at all"},
+          "sender" => %{"login" => "outsider", "type" => "User"}
+        })
+
+      conn = deliver(body, Signature.sign(body, @secret))
+
+      assert %{
+               "ok" => true,
+               "refused" => true,
+               "outcome" => "vetoed",
+               "recorded" => false
+             } = json_response(conn, 202)
+
+      # THE STORE — `recorded: false` claims nothing is findable. Nothing is.
+      assert task_rows(number) == []
+      assert refusal_rows(number) == []
+    end
+
+    test "a dedup refusal whose dead-letter write LANDS says recorded: true — and the row is there",
+         %{scope: scope} do
+      put_repo!("acme/refusal-receipt")
+      put_intake_workspace!(scope)
+      number = 90_330 + System.unique_integer([:positive])
+      seed_lookalike!("lookalike-recorded-#{number}", scope)
+
+      conn = deliver_opened(number)
+
+      assert %{
+               "ok" => true,
+               "refused" => true,
+               "outcome" => "dedup_refused",
+               "recorded" => true
+             } = json_response(conn, 202)
+
+      # No task born — the refusal is real, not a mislabelled birth.
+      assert task_rows(number) == []
+
+      # THE STORE — `recorded: true` promises a maintainer something to find.
+      # Bound first, then asserted on a boolean: `assert pattern = expr, msg`
+      # silently DISCARDS the message (the match form of assert/1 takes no
+      # second argument), so the sentence below could never have printed.
+      rows = refusal_rows(number)
+
+      assert match?([%{kind: "dedup_refused", doc_id: nil}], rows),
+             "the receipt said recorded: true but no dead-letter row exists " <>
+               "for ##{number} — got #{inspect(rows)}"
+    end
+
+    test "a dedup refusal whose dead-letter write FAILS says recorded: false — no row is promised",
+         %{scope: scope} do
+      # No repo is configured in this suite's setup, and `Github.Conflict`'s
+      # changeset REQUIRES `repo` — so the best-effort dead-letter write fails
+      # for real, through the real recorder. This is the case where the OLD
+      # receipt lied: identical `refused: true`, but nothing to find.
+      put_intake_workspace!(scope)
+      number = 90_340 + System.unique_integer([:positive])
+      seed_lookalike!("lookalike-unrecorded-#{number}", scope)
+
+      conn = deliver_opened(number)
+
+      assert %{
+               "ok" => true,
+               "refused" => true,
+               "outcome" => "dedup_refused",
+               "recorded" => false
+             } = json_response(conn, 202)
+
+      assert task_rows(number) == []
+
+      # THE STORE — and `recorded: false` is the TRUE statement about it.
+      assert refusal_rows(number) == [],
+             "the recorder was expected to fail with no repo configured, but a row exists"
+    end
+
+    # THE COLLAPSE DETECTOR. Each pair below was answered by the SAME bytes
+    # before this change. If a later edit maps them back onto one receipt, this
+    # test names the pair it can no longer tell apart — the arms above would all
+    # still pass individually against a collapsed `%{ok: true, refused: true}`
+    # only if they stopped asserting `outcome`, so this one asserts the
+    # DISTINCTION itself rather than any single shape.
+    test "the three refusal receipts are pairwise DISTINCT bodies", %{scope: scope} do
+      put_intake_workspace!(scope)
+      vetoed_number = 90_350 + System.unique_integer([:positive])
+      unrecorded_number = 90_360 + System.unique_integer([:positive])
+
+      vetoed_body =
+        Jason.encode!(%{
+          "action" => "opened",
+          "issue" => %{"number" => vetoed_number, "title" => "   ", "body" => "x"},
+          "sender" => %{"login" => "outsider", "type" => "User"}
+        })
+
+      vetoed = json_response(deliver(vetoed_body, Signature.sign(vetoed_body, @secret)), 202)
+
+      # ONE seeded look-alike serves BOTH dedup arms: neither refusal births a
+      # task, so the candidate set is unchanged between them. (Seeding a second
+      # look-alike would be refused by the very gate under test — the seed
+      # matches the seed.)
+      seed_lookalike!("lookalike-distinct-#{unrecorded_number}", scope)
+      unrecorded = json_response(deliver_opened(unrecorded_number), 202)
+
+      # Same gate, same seed, one difference: a configured repo, which is what
+      # lets the dead-letter write actually land.
+      put_repo!("acme/refusal-receipt-distinct")
+      recorded_number = 90_370 + System.unique_integer([:positive])
+      recorded = json_response(deliver_opened(recorded_number), 202)
+
+      labelled = [
+        {"lifecycle veto (nothing written)", vetoed},
+        {"dedup refusal, dead-letter write FAILED (nothing findable)", unrecorded},
+        {"dedup refusal, dead-letter row WRITTEN (findable)", recorded}
+      ]
+
+      for {{label_a, a}, i} <- Enum.with_index(labelled),
+          {label_b, b} <- Enum.drop(labelled, i + 1) do
+        refute a == b,
+               "the webhook answers the SAME receipt for two different outcomes — " <>
+                 "#{label_a} and #{label_b} both returned #{inspect(a)}. " <>
+                 "A caller reading this body cannot tell whether a dead-letter row " <>
+                 "exists to go look at, or whether nothing was written at all."
+      end
+
+      # Positive control: all three really are refusals (not, say, three 500s
+      # that happen to differ), so the distinction above is about REFUSALS.
+      for {_label, r} <- labelled, do: assert(r["refused"] == true)
+    end
+  end
 end

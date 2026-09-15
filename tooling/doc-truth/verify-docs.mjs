@@ -537,8 +537,24 @@ function claimsFromSpan(doc, span) {
 // The slash arm is what separates a RATE from a multi-line citation: `1000/page`
 // is a clamp, while `content.ex ~:2153/:2172` puts a `:` or a digit after the
 // slash, never a letter.
+// A SPACED unit token is STILL a unit. `docs/cheatsheets/bp.md: 3298 B > cap
+// 2400 B` is a byte count an instrument printed, not a citation of line 3298 —
+// but the glued-letter test above sees `" B >"` and says no unit, because the
+// only difference from `3298B` is ONE SPACE. (Measured on the real string: the
+// slice after the digits is `" B >"` → false, while `"B > "` → true.)
+//
+// THE LIST IS CLOSED ON PURPOSE. The tempting one-token fix — let the unit
+// letter follow optional whitespace — reads EVERY citation trailed by an
+// ordinary word as a measurement: `" and more"` and `" is where the guard
+// sits"` both become units, and the guard turns a false POSITIVE into a
+// blind spot across the whole corpus. So only size/quantity units that are
+// idiomatically written detached from their number are spelled out here, each
+// anchored on a word boundary so `B` matches `3298 B` and never `3298 Before`.
+const SPACED_UNIT = /^(?:\s*[-\u2013]\s*\d{1,5})?\s+(?:B|[KMGT]i?B|bytes?|tok|tokens?)\b/;
+
 function unitSuffixed(scan, idx) {
-  return /^(?:\s*[-\u2013]\s*\d{1,5})?(?:-|\/)?[A-Za-z]/.test(scan.slice(idx));
+  const rest = scan.slice(idx);
+  return /^(?:\s*[-\u2013]\s*\d{1,5})?(?:-|\/)?[A-Za-z]/.test(rest) || SPACED_UNIT.test(rest);
 }
 
 function matchLineref(raw) {
@@ -878,13 +894,88 @@ function verifyRoute(claim) {
 // unambiguously) is the answer, and there is NO basename fallback: falling back
 // is what produced the false positives, and a cited path that does not exist is
 // its own honest verdict rather than an excuse to go looking elsewhere.
-function linerefCandidates(t, docPath) {
+// EVERY EXPLICIT PATH A DOCUMENT CITES, KEYED BY BASENAME. Built once per doc
+// from that doc's OWN lineref claims, and consulted only for BARE-STEM
+// citations.
+//
+// THE CLASS THIS CLOSES. Long-form comment prose introduces a file by its full
+// path once and then refers to it by bare basename for the rest of the passage
+// — which is how people write, and which the resolver had no way to read:
+//
+//   `deps/postgrex/lib/postgrex/protocol.ex:3428-3436` formats a non-POSIX …
+//   … `protocol.ex:840` recvs with `:infinity` …
+//
+// The first citation carries its path, resolves to no tracked file, and exits
+// `unverifiable` — honest. The six shorthand ones lose the path at the grammar
+// (the token IS just `protocol.ex`), land in the bare-stem branch, and get
+// matched against the two TRACKED files that happen to share the basename
+// (28 and 271 lines). A line number written for a 3,600-line driver is then
+// compared against a 28-line namesake and reported `stale` at HIGH confidence:
+// a drift verdict about a comment that never drifted, on a file the comment
+// never named. Measured on this tree: 7 of the 17 novel findings, one passage.
+//
+// A NAME-KEYED LOOKUP CANNOT RESOLVE A SHAPE-KEYED REFERENCE. The information
+// needed to bind `protocol.ex` is not in the tracked corpus at all — it is two
+// paragraphs up, in the document being scanned. So read it from there.
+//
+// AND REFUSE RATHER THAN PICK. If the doc names TWO different paths ending in
+// the same basename, the shorthand is genuinely ambiguous *in its own context*
+// and this returns null — the caller then refuses, it does not choose. Same
+// shape as the task-trailer rule (704559ba1): an ambiguous reference is its own
+// verdict, never a coin flip dressed as an answer.
+function docLocalPathIndex(claims) {
+  const byBase = new Map();
+  for (const c of claims) {
+    if (c.type !== "lineref") continue;
+    const tok = (c.target.file || "").replace(/^\.\//, "");
+    if (!tok.includes("/")) continue;
+    const b = basename(tok);
+    if (!byBase.has(b)) byBase.set(b, new Set());
+    byBase.get(b).add(tok);
+  }
+  return byBase;
+}
+
+// The doc-local referent for a bare stem: the single explicit path this
+// document elsewhere gave for that basename, or null when there is none — or
+// when there is more than one, which is a refusal, not a pick.
+function docLocalPath(t, claim) {
+  const idx = claim && claim.docPaths;
+  if (!idx) return null;
+  const paths = idx.get(t.base);
+  if (!paths || paths.size !== 1) return null;
+  return [...paths][0];
+}
+
+function linerefCandidates(t, docPath, claim) {
   const tok = (t.file || "").replace(/^\.\//, "");
   if (tok.includes("/")) {
     const hits = [];
     for (const p of trackedFiles()) if (p === tok || p.endsWith("/" + tok)) hits.push(p);
-    return { candidates: hits, explicit: true };
+    return { candidates: hits, explicit: true, cited: tok };
   }
+
+  // A BARE STEM THE DOCUMENT ITSELF ALREADY QUALIFIED IS NOT A BARE STEM.
+  // Before falling back to the tracked corpus, take the path this same doc gave
+  // for this basename. That path is then resolved EXACTLY as an explicit
+  // citation is — suffix match against tracked files, and NO basename fallback,
+  // because falling back is the whole defect. See docLocalPathIndex.
+  const local = docLocalPath(t, claim);
+  if (local) {
+    const hits = [];
+    for (const p of trackedFiles()) if (p === local || p.endsWith("/" + local)) hits.push(p);
+    return { candidates: hits, explicit: true, cited: local, viaDoc: true };
+  }
+
+  // REFUSE RATHER THAN PICK. The doc named more than one path for this
+  // basename, so its own shorthand is ambiguous in its own context and there is
+  // no honest way to choose. Signalled, not resolved.
+  const idx = claim && claim.docPaths;
+  const localSet = idx && idx.get(t.base);
+  if (localSet && localSet.size > 1) {
+    return { candidates: [], explicit: false, docAmbiguous: [...localSet].sort() };
+  }
+
   const hits = [];
   for (const p of trackedFiles()) if (basename(p) === t.base) hits.push(p);
   if (hits.length > 1) {
@@ -959,9 +1050,29 @@ function candidateSummary(cands) {
 // enclosing-definition selftest arm, which passed vacuously because of it.
 function verifyLineref(claim) {
   const t = claim.target;
-  const { candidates, explicit } = linerefCandidates(t, claim.doc);
+  const res = linerefCandidates(t, claim.doc, claim);
+  const { candidates, explicit } = res;
+
+  if (res.docAmbiguous) {
+    // CANNOT RESOLVE — its own category, deliberately NOT `stale`. A staleness
+    // verdict asserts the comment drifted; this says only that the reference
+    // cannot be bound, which is a different fact and belongs in a different word.
+    return tag(claim, "unverifiable", "low",
+      `CANNOT RESOLVE: bare stem \`${t.base}\` — this file cites ${res.docAmbiguous.length} ` +
+      `different paths of that basename (${res.docAmbiguous.join(" · ")}), so the shorthand ` +
+      `names no one file. Write the path you mean.`);
+  }
 
   if (candidates.length === 0) {
+    if (res.viaDoc) {
+      // The doc qualified this stem, and the path it gave is not in the repo —
+      // a vendored `deps/` file, most often. A checker that does not HAVE the
+      // file cannot judge a line number in it; it can only be lucky. Out of
+      // scope, said out loud, never silently re-bound to a tracked namesake.
+      return tag(claim, "unverifiable", "low",
+        `CANNOT RESOLVE: bare stem \`${t.base}\` is shorthand for \`${res.cited}\`, cited in this ` +
+        `same file, which is not a tracked file — out of scope for a staleness check.`);
+    }
     return explicit
       ? tag(claim, "unverifiable", "low", `lineref path does not resolve to a tracked file: ${t.file}`)
       : tag(claim, "unverifiable", "low", `lineref basename does not resolve to a file: ${t.base}`);
@@ -1591,7 +1702,7 @@ function reverify(claim) {
     // citation could be suppressed by a namesake the citation never named.
     // Measured while building the enclosing-definition and filename-date
     // selftest arms — both passed VACUOUSLY because the gate scored a twin.
-    const { candidates } = linerefCandidates(t, claim.doc);
+    const { candidates } = linerefCandidates(t, claim.doc, claim);
     const rel = candidates[0] || resolveBasenameNear(t.base, claim.doc);
     if (rel) {
       const lines = fileLines(linerefTargetPath(rel));
@@ -1666,7 +1777,10 @@ function verifyDoc(relDoc) {
 // is exactly the coupling that would otherwise turn every fix into a red gate.
 export function verifyDocText(relDoc, text) {
   const verified = [];
-  for (const claim of claimsForDoc(relDoc, text)) {
+  const claims = claimsForDoc(relDoc, text);
+  const docPaths = docLocalPathIndex(claims);
+  for (const claim of claims) {
+    if (claim.type === "lineref") claim.docPaths = docPaths;
     let v = verifyClaim(claim);
     if (v.status === "false" || v.status === "stale") v = reverify(v);
     v = commentDiscount(v);

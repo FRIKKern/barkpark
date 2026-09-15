@@ -661,6 +661,18 @@ function makeDom() {
 //     that read /v1/me at paint time and never again is observable as such
 //     (before/after bytes). Without it the whole corpus resolves /v1/me on the
 //     first microtask and no late-answer defect can be represented at all.
+//
+// HOW A SCENARIO ASKS FOR ONE (cch-w46-bl): an EXPECTATIONS entry may carry a
+//   • boot — the options object runScenario hands straight to bootScenario
+//     (`bootScenario(name, exp.boot)`). Omit it and the boot is byte-for-byte
+//     the shipped one, so every existing entry is unchanged. Until this key
+//     existed the ONLY consumer of the options above was the module-level
+//     assertLateMeRepaintsTheRail() guard: a scenario that wanted to be checked
+//     with the authority read STILL IN FLIGHT could not ask for it, so every
+//     late-answer claim had to be made by a hand-written guard instead of by
+//     the table. A check whose entry sets `{ deferMe: true }` is handed
+//     `ctx.resolveMe()` to land the held answer mid-check (see runScenario), so
+//     the before/after of a repaint seam is assertable from EXPECTATIONS.
 function bootScenario(name, opts) {
   const { registry, document, byId } = makeDom();
 
@@ -728,6 +740,18 @@ function bootScenario(name, opts) {
   const heldMe = [];
   const resolveMe = () => { heldMe.splice(0).forEach((land) => land()); };
 
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read — THE LIMIT OF THIS
+  // STUB, stated at the stub rather than in a report nobody reads. It is TOTAL:
+  // `answer()` below always produces a Response-like (route()'s arm, or a 404
+  // fallback), and the only asynchrony it models is a DEFERRAL that still lands
+  // (`heldMe` / opts.deferMe — held, then drained). There is no arm that hangs,
+  // rejects or aborts, and scenarios.mjs's route() has none either, so a
+  // NEVER-SETTLING read is inexpressible in THIS harness and in the browser twin
+  // alike (`grep -n 'RESIDUAL 1 OF 2' mock.js`). Every failed-read fixture in
+  // this corpus — `meFault`, `auditDenied`, `operatorDenied`, `sitesFault` — is
+  // a read that FAILED, never one that never answered, and the settled-failure
+  // state is precisely the one a hung read is not. The other half of the pair is
+  // SSE death, which needs a `__preview.drop()` seam mock.js does not have.
   function fetchStub(url, init) {
     const method = (init && init.method) || "GET";
     const p = String(url);
@@ -1848,24 +1872,76 @@ const EXPECTATIONS = {
   // corpus proof of that fix: the refusal card is what renders, and the form is
   // GONE rather than merely disabled (a disabled submit leaves three live
   // controls still selling the refusal).
+  // cch-w46-bl — THE FIRST EXPECTATIONS ENTRY TO DECLARE BOOT OPTIONS, and the
+  // reason the `boot` key exists at all. Everything this entry asserted before
+  // is still asserted, verbatim; what changed is WHEN. The screen is now
+  // entered with GET /v1/me still in flight (`boot: { deferMe: true }`), which
+  // is the state a deep link into a slow control plane actually produces, and
+  // the refusal is reached by LANDING that answer mid-check.
+  //
+  // THE SEAM UNDER TEST is `repaintLaunchAuthority()` in loadMe — NOT the one
+  // the two late-/v1/me harness guards above cover. Those are pinned on the
+  // INSTANCE screen (repaintLifecycleAuthority / repaintInstanceAuthority: the
+  // CLI rail, #inst-header-actions, #inst-update-actions) and go green whatever
+  // happens here. Delete `repaintLaunchAuthority()` from loadMe's success arm
+  // and this scenario is the ONLY thing in the run that reds: #overview-body
+  // keeps saying "Checking your account…" about an answer the console already
+  // holds, and every needle below that names the refusal fails by name.
   "overview-member-empty-fleet": {
-    what: "a member with no instances is REFUSED up front, in the server's own words — the launch form is withheld, not disabled",
-    container: "overview-body",
-    includes: [
-      "empty-state",
-      "You can&#39;t launch for this team",
-      "Launching needs the admin role on this team. Ask a team admin to launch it, or to give you that role.",
-    ],
-    // The whole form, named control by control — the name field, the provider
-    // seg-buttons and the submit. `launch-form` alone would go green on a form
-    // that lost only its wrapper class.
-    excludes: [
-      "launch-form",
-      "launch-flow-name-",
-      "seg-btn",
-      'type="submit"',
-      "Create your first Barkpark",
-    ],
+    what: "a member with no instances is REFUSED up front, in the server's own words — reached LATE: the screen paints while /v1/me is in flight and heals to the refusal when it lands",
+    boot: { deferMe: true },
+    async check(reg, hooks, ctx) {
+      const body = () => (reg.get("overview-body") || {}).innerHTML || "";
+
+      // ── in flight: the unknown arm, with an exit ──────────────────────────
+      const inFlight = body();
+      assert.ok(inFlight.length > 0, "#overview-body rendered empty with /v1/me in flight");
+      assert.ok(inFlight.includes("Checking your account"),
+        "the launch band did not paint its UNKNOWN arm while /v1/me was held — there is no state to heal FROM, and every after-assertion below would be vacuous");
+      assert.ok(inFlight.includes("data-me-retry"),
+        "an UNKNOWN authority rendered no exit: no [data-me-retry] in the in-flight launch band");
+      assert.equal(inFlight.indexOf("Launching needs the admin role on this team"), -1,
+        "the refusal was already painted with the answer STILL OUT — the band is not fenced on the read at all");
+
+      // ── land it LATE, exactly as a slow control plane does ────────────────
+      ctx.resolveMe();
+      await ctx.settle();
+
+      const landed = body();
+      assert.notEqual(landed, inFlight,
+        "a /v1/me that answered LATE left #overview-body BYTE-IDENTICAL (" + inFlight.length + " bytes) — the launch " +
+        "band is still decided at paint time only, so a member sits on \"Checking your account…\" for the life of the page");
+
+      // The ORIGINAL expectation, unchanged in substance: the refusal, in the
+      // server's own words, on the empty-state shell.
+      for (const needle of [
+        "empty-state",
+        "You can&#39;t launch for this team",
+        "Launching needs the admin role on this team. Ask a team admin to launch it, or to give you that role.",
+      ]) {
+        assert.ok(landed.includes(needle),
+          "#overview-body missing " + JSON.stringify(needle) + " after the late answer landed");
+      }
+      // The whole form, named control by control — the name field, the provider
+      // seg-buttons and the submit. `launch-form` alone would go green on a form
+      // that lost only its wrapper class.
+      for (const needle of [
+        "launch-form",
+        "launch-flow-name-",
+        "seg-btn",
+        'type="submit"',
+        "Create your first Barkpark",
+      ]) {
+        assert.equal(landed.indexOf(needle), -1, "#overview-body unexpectedly has " + JSON.stringify(needle));
+      }
+      // A determinate refusal has no question left to retry (launchFlow returns
+      // before wireMeRetry on that arm), so the exit must be GONE — a Retry that
+      // survives a landed answer is an invitation to re-ask a settled question.
+      assert.equal(landed.indexOf("Checking your account"), -1,
+        "the repainted band still says \"Checking your account…\" about a read that already answered");
+      assert.equal(landed.indexOf("data-me-retry"), -1,
+        "the landed refusal still offers [data-me-retry] — the unknown arm was never replaced, only appended to");
+    },
   },
   // cch-w48-s6: the site layer, entered by a MEMBER for the first time. This is
   // the PAIRED POSITIVE CONTROL — it asserts what a member legitimately keeps,
@@ -5039,6 +5115,74 @@ const EXPECTATIONS = {
         "them — got " + JSON.stringify(removeOffers));
     },
   },
+  // cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority.
+  // THE SELF ROW, JUDGED ON COHERENCE INSTEAD OF ON A COINCIDENCE.
+  // memberRowHtml (`grep -n "function memberRowHtml" cloud/priv/static/app.js`)
+  // decides both self-row controls from `ctx.role` — the resolved
+  // team_authority — because that is the value the server compares against. In
+  // every other corpus cell the actor's roster row carries the SAME string, so
+  // a chip painted from the ROW and a chip painted from the AUTHORITY rendered
+  // byte-identically and no instrument could tell which one the code read.
+  // This scenario is the fixture where they differ, so the question becomes
+  // answerable: the chip must name the rank the controls beside it were decided
+  // from, or the panel is telling a person two different things about one row.
+  "members-self-role-drift": {
+    what: "Members — the SELF row's chip names the rank its two controls were decided from (team_authority), not the stale roster role",
+    check(reg) {
+      assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
+      const panel = reg.get("members-body");
+      const body = panel.innerHTML || "";
+      const LABELS = { owner: "Owner", admin: "Admin", member: "Member" };
+      // THE DISAGREEMENT IS THE PRECONDITION, so it is asserted before anything
+      // is claimed about how it renders. A corpus edit that quietly re-aligned
+      // this roster with its envelope would leave every line below trivially
+      // true against a row that measures nothing — the exact vacuous green this
+      // fixture exists to end.
+      const scen = SCENARIOS["members-self-role-drift"];
+      const authority = scen.data.me.team_authority.role;
+      const selfRow = scen.data.members.find((m) => m.user_id === scen.data.me.user.id);
+      assert.ok(selfRow, "the fixture must carry a roster row for the acting user");
+      assert.notEqual(selfRow.role, authority,
+        "this scenario only measures anything while the SELF roster row DISAGREES with team_authority — " +
+        "roster says " + JSON.stringify(selfRow.role) + ", envelope says " + JSON.stringify(authority));
+      assert.ok(LABELS[selfRow.role] && LABELS[authority] && LABELS[selfRow.role] !== LABELS[authority],
+        "the two roles must carry DIFFERENT chip labels, or a chip read from either side would look the same");
+      // Slice the self row out of the rendered panel by its own markup. The
+      // chip is a <span>, which the DOM shim does not parse into a node, so it
+      // is read from the row's bytes — and an absent row, or a row with no
+      // chip, must REFUSE. An assertion over markup that never rendered is a
+      // green with no subject.
+      const rows = body.split('<div class="set-row">').slice(1);
+      const mine = rows.filter((r) => r.includes("(you)"));
+      assert.equal(mine.length, 1,
+        "exactly ONE row must be self-tagged (you) — the row this check is about; got " + mine.length +
+        " over " + rows.length + " rendered rows");
+      const row = mine[0];
+      assert.ok(row.includes(selfRow.email),
+        "the self-tagged row must be the acting user's; got: " + row.slice(0, 300));
+      const chip = /<span class="set-chip">([^<]*)<\/span>/.exec(row);
+      assert.ok(chip, "the self row rendered NO role chip — there is nothing for it to be coherent WITH; got: " + row.slice(0, 400));
+      // The controls state, in the markup, the value they were decided from:
+      // `data-role` is `targetRole`, which on the self row is ctx.role.
+      const changeCtl = /data-member-role="[^"]*" data-role="([^"]*)"/.exec(row);
+      assert.ok(changeCtl,
+        "the self row must carry the Change role control this coherence is about — an owner who is not the " +
+        "last owner may re-role themselves; got: " + row.slice(0, 400));
+      assert.ok(/data-member-remove="/.test(row),
+        "the self row must carry Remove too — this roster has no second owner problem to withhold it; got: " + row.slice(0, 400));
+      assert.equal(changeCtl[1], authority,
+        "the self row's controls must be decided from team_authority (" + authority + "), never from the roster row; got " +
+        JSON.stringify(changeCtl[1]));
+      // THE ROW ITSELF: one value, two places. The chip must name what the
+      // controls named.
+      assert.equal(chip[1], LABELS[changeCtl[1]],
+        "the self row's chip says " + JSON.stringify(chip[1]) + " while its own controls were decided from " +
+        JSON.stringify(changeCtl[1]) + " — the panel names one rank and offers another rank's controls on the SAME row");
+      assert.notEqual(chip[1], LABELS[selfRow.role],
+        "the self row's chip is still painted from the stale ROSTER role " + JSON.stringify(selfRow.role) +
+        " — the value nothing on this row was decided from");
+    },
+  },
   // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ─────────────────────
   // The crown surface, states-complete: rolling / halted / bounced / unreadable.
   "operator-console": {
@@ -5605,6 +5749,81 @@ const EXPECTATIONS = {
         "this scenario's actor is an owner — a disable-and-explain wrapper here would mean the fixture lost its authority");
     },
   },
+  // ── cch-w34-bl-preview-scenario-for-a-failed-sites-read ──────────────────
+  // THE FAILED /v1/sites READ, which no committed fixture could express before
+  // this row: scenarios.mjs answered that route a flat 200 in every scenario,
+  // so loadInstanceSites's failed arm (`grep -n "Couldn.t load sites"
+  // cloud/priv/static/app.js`) was unreachable from BOTH harnesses.
+  //
+  // THE DISCRIMINATOR IS THE WHOLE POINT AND IT IS THE SECOND ASSERTION, not
+  // the first. The fixture is byte-identical to a genuinely-empty live
+  // instance, so on the PRE-FIX renderer — the one that folded `r.ok` into the
+  // `all` default, which is what charter D382 / cch-w34-s1 ruled against — this
+  // screen renders the confident sentence "No sites yet": an assertion about an
+  // instance whose sites we never received. Deleting the failed arm from app.js
+  // reds `the failed read must never be reported as an empty one` here, which
+  // is what makes this expectation a control rather than a description.
+  //
+  // ANTI-VACUITY, the idiom overflow-guard.mjs already uses for its cells
+  // ("measured ZERO pills across all N cells … a vacuous green is refused"): a
+  // renderer that answers a failed read by painting NOTHING would satisfy every
+  // negative assertion below and say nothing to the person reading the screen.
+  // So the box is asserted NON-EMPTY first, before any `!includes` runs.
+  //
+  // TWO RESIDUALS THIS EXPECTATION CANNOT REACH, stated rather than left to be
+  // rediscovered — neither is a status code and neither is expressible here:
+  //  (1) A NEVER-SETTLING READ. This harness's fetch stub always RESOLVES (it
+  //      returns route()'s answer synchronously wrapped), and so does mock.js's
+  //      window.fetch in the browser — no hang, no reject, no abort arm exists
+  //      in either. So loadInstanceSites's PENDING state, the "Loading sites…"
+  //      box that never settles, is inexpressible in BOTH harnesses.
+  //  (2) SSE DEATH. mock.js's PreviewEventSource reports itself OPEN and never
+  //      fires, so a dead stream and a quiet one render identically; separating
+  //      them needs a `__preview.drop()` seam beside the existing
+  //      `__preview.push()`, and that seam does not exist.
+  "instance-sites-unreadable": {
+    what: "the instance Sites section on a FAILED /v1/sites read — it says it couldn't READ them, and never claims the instance has none",
+    check(reg, hooks, ctx) {
+      const box = reg.get("instance-sites");
+      assert.ok(box, "#instance-sites never mounted — nothing below this line measures anything");
+      const sites = box.innerHTML || "";
+      // ANTI-VACUITY: a state that renders nothing passes every negative
+      // assertion below by measuring nothing. Refuse it first.
+      assert.ok(sites.trim().length > 0,
+        "#instance-sites rendered ZERO bytes on a failed read — a silent box tells the person nothing and makes every assertion after this one vacuous");
+      assert.ok(!sites.includes("Loading sites"),
+        "the box is still spinning after its request settled — a spinner that outlives the read claims we are still asking");
+      // THE FAILED READ IS SAID, IN WORDS.
+      assert.ok(sites.includes("Couldn&#39;t load sites") || sites.includes("Couldn't load sites"),
+        "the failed read names itself; got: " + sites);
+      // faultCopy() classifies the 500 before readFailureCopy's own fallback is
+      // reached, so the sentence a person reads is the 5xx one — "our side, not
+      // your input". Asserted as the SERVER-FAULT class, which is the half that
+      // matters: a failed read that blamed the person would be the same defect
+      // in a different direction.
+      assert.ok(sites.includes("broke on our side"),
+        "a 5xx reads as OUR fault, never as the person's input; got: " + sites);
+      assert.ok(/Try again in a moment/i.test(sites),
+        "…and offers the retry-later sentence rather than a dead end; got: " + sites);
+      // THE DEFECT, DRIVEN (charter D382 / cch-w34-s1). This is the assertion
+      // that fails on the pre-fix renderer.
+      assert.ok(!sites.includes("No sites yet"),
+        "the failed read must never be reported as an empty one — 'No sites yet' is an assertion about an instance whose sites never arrived; got: " + sites);
+      assert.ok(!sites.includes("Sites hosted on this instance will appear here"),
+        "…nor the empty state's supporting line, which is the same claim one sentence down");
+      // …and no row is invented off a body that carried none.
+      assert.ok(!sites.includes("site-row"),
+        "a failed read paints no site rows");
+      // A 403 IS NOT WHAT THIS FIXTURE SENDS, so the access sentence must not
+      // appear: readFailureCopy's two arms must stay distinguishable.
+      assert.ok(!/don&#39;t have access|don't have access/.test(sites),
+        "a 500 is not an authority refusal and must not be reported as one");
+      // THE WIRE: the read was actually issued. Without this the whole
+      // expectation could pass off a section that never fetched at all.
+      assert.equal(ctx.countCalls("GET", "/v1/sites"), 1,
+        "exactly one /v1/sites read was issued for this workspace");
+    },
+  },
   "instance-remove-failed": {
     what: "a teardown that FAILED paints Retry removal — and the retry is CLICKED: exactly one DELETE /v1/barkparks/:id on the wire and the SERVER fleet shrinks 2 → 1",
     async check(reg, hooks, ctx) {
@@ -5951,7 +6170,11 @@ function armConfirmSheet(reg, resourceName) {
 async function runScenario(name) {
   const exp = EXPECTATIONS[name];
   if (!exp) throw new Error("no expectations for scenario " + name);
-  const { registry, byId, hooks, calls, fixtureState, localStorage, location, reloads } = bootScenario(name);
+  // cch-w46-bl: `exp.boot` is the ONLY pass-through — undefined for every entry
+  // that does not declare one, which is exactly the shipped `bootScenario(name)`
+  // call this replaced (opts is read as `opts && opts.X` throughout).
+  const { registry, byId, hooks, calls, fixtureState, localStorage, location, reloads, resolveMe } =
+    bootScenario(name, exp.boot);
   await flush();
 
   if (exp.check) {
@@ -5981,6 +6204,10 @@ async function runScenario(name) {
       // a logged-out render() writes to #auth-email, so it is absent from the
       // registry until something types into it.
       byId,
+      // cch-w46-bl: the drain for `boot: { deferMe: true }`. A check that did not
+      // ask for deferMe gets a resolveMe() that has nothing held and is a no-op,
+      // so this is inert for every entry with no `boot` key.
+      resolveMe,
       // How many times METHOD PATH was requested — the wire assertion.
       countCalls(method, path) {
         return calls.filter((c) => c.method === method && c.path === path).length;

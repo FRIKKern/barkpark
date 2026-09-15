@@ -500,6 +500,60 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/workflow-job-shape-check.sh --dir .github/workflows
 
+  # ── required contexts must be unable to conclude `cancelled` ────────────────
+  #
+  # WHY IT LIVES HERE. Its two inputs are this workflow's own subjects: the
+  # REQUIRED SET (.github/required-checks.json, which it reads rather than
+  # hardcoding) and the workflow tree that publishes those names. A context
+  # promoted into protection tomorrow is judged by this gate the same day, with
+  # no edit to the script.
+  #
+  # WHY IT IS ITS OWN JOB and not a step on `spec-gate`: that job's red would
+  # then be ambiguous between two unrelated subjects — the same reasoning the
+  # `workflow-job-shape` block above records for itself, applied again rather
+  # than re-derived.
+  #
+  # WHY IT IS DISPATCHER-INDEPENDENT. Like `workflow-job-shape` it carries no
+  # `needs: changes`, so it renders on EVERY pull request. The hazard it forbids
+  # is introduced by editing a workflow's `concurrency:` or by promoting a new
+  # required context, and a guard that is ABSENT on the PR which does the thing
+  # is worse than a guard that is noisy: the name would simply not appear, and
+  # nothing reports a check that never ran. The scan is a single PyYAML pass
+  # over .github/workflows — no network, no token, ~1 s.
+  #
+  # NOT a required context, and not proposed as one: it is held out for the same
+  # reason as its siblings in this file — this workflow's own gate
+  # (`Required-check spec gate`) is itself excluded, and registering one job of
+  # an unregistered workflow is the leaf-granularity trap S6 names. It carries an
+  # S7 exclusion row in .github/required-checks.json, as its siblings do.
+  #
+  # NO `continue-on-error` ANYWHERE IN THIS JOB, deliberately. This gate's whole
+  # value is that its red renders as a red; a swallowed exit code would make it
+  # one more green that is not evidence.
+  required-context-never-cancels:
+    name: Required contexts cannot conclude cancelled
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        id: setup
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # The harness proves itself before it judges the tree: red arms for both
+      # truthy spellings of cancel-in-progress, green arms for never-cancel, for
+      # an `always()` decider and for a workflow with no concurrency block, a
+      # scope arm (a NON-required job is never judged), and E2E arms that re-exec
+      # the whole script so the verdict wiring — not just the text it returns —
+      # is under test. The sibling gate scripts/never-cancel-main-check.sh was
+      # measured staying fully green with that branch disarmed; this one reds.
+      - name: Prove the gate on planted fixtures (--selftest)
+        run: bash scripts/required-context-never-cancels-check.sh --selftest
+
+      - name: No required context can conclude `cancelled`
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/required-context-never-cancels-check.sh
+
   # ── stale-tree regression check (task-e75a5acd30825d77, C1) ─────────────────
   #
   # WHY IT LIVES HERE AND NOT IN ITS OWN WORKFLOW. Its subject is the WHOLE tree

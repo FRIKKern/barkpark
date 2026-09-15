@@ -78,7 +78,7 @@ defmodule Barkpark.Tasks.Dedup do
 
   require Logger
 
-  alias Barkpark.Content.{Document, Scope}
+  alias Barkpark.Content.{Document, Scope, WriteScope}
   alias Barkpark.Repo
   alias Barkpark.Tasks.{Judge, Similarity}
 
@@ -655,8 +655,90 @@ defmodule Barkpark.Tasks.Dedup do
   # An empty probe title cannot be allowed to silently match nothing (that would
   # be a fail-OPEN gate wearing a green light), so it falls back to the
   # unfiltered scan — see `fetch_rows/6`.
+  #
+  # ## THE SCAN MUST BE SCOPED TO THE TENANT THE WRITE WILL LAND IN
+  #
+  # task-893cf2751bac7428. This used to read `opts[:workspace_id]` RAW and hand
+  # the result to `Content.Scope.scope_to_workspace/3`. That is correct for a
+  # caller who threads a tenant and WRONG for one who threads none, because the
+  # two halves of this find-or-create then resolve tenancy by two DIFFERENT
+  # rules:
+  #
+  #   * the WRITE resolves through `Content.WriteScope.resolve_write_scope/1`,
+  #     which falls back to the seeded Default workspace when no `:workspace_id`
+  #     opt is present;
+  #   * the READ took `nil` straight to `scope_to_workspace/3`, whose nil arm
+  #     fails CLOSED (`where: false`, scope.ex — CORRECT, and untouched here).
+  #
+  # So on the GitHub webhook path — which carries NO scope plug, and whose
+  # `ingest_opts/0` threads `:workspace_id` only when
+  # `Plugins.Github.Settings.intake_workspace_id/0` (charter D15) returns one —
+  # the gate scanned ZERO rows, matched nothing, and every outsider issue was
+  # born beside the look-alike it was supposed to be refused against. Nothing
+  # errored and nothing logged: a correct-looking green from a gate that never
+  # ran, and the failure direction is the severity — it did not refuse work, it
+  # ADMITTED duplicates.
+  #
+  # WHY NOT "REQUIRE THE INTAKE WORKSPACE / REFUSE LOUDLY WHEN IT IS ABSENT":
+  # an absent `BARKPARK_GITHUB_INTAKE_WORKSPACE_ID` is a SUPPORTED configuration,
+  # not an outage. The controller's own moduledoc says "absent → today's
+  # default-workspace behavior byte-identical, no `:workspace_id` key threaded",
+  # and that default-workspace write is where the row actually goes. A loud
+  # refusal would 5xx every legitimate outsider issue on an instance that is
+  # configured exactly as designed. The defect is the ASYMMETRY, so the fix is
+  # the scoping verb: bind the read to the write's own resolver.
+  #
+  # AND IT STILL SAYS SO WHEN IT CANNOT RUN: if that resolution yields no
+  # workspace at all (no scope threaded AND no seeded Default) or refuses, the
+  # gate degrades to the module's existing `{:dedup_unavailable, _}` refusal
+  # rather than scanning an empty set — the one thing this module promises never
+  # to do silently.
+  #
+  # NARROW BY CONSTRUCTION: only the key-absent/`nil` case changes. A caller that
+  # threads a workspace id, and the `:shared_only` request sentinel, both reach
+  # `scope_to_workspace/3` exactly as before.
   defp fetch_candidates(dataset, opts) do
-    workspace_id = Keyword.get(opts, :workspace_id)
+    with {:ok, workspace_id} <- candidate_workspace(opts) do
+      scan_candidates(dataset, opts, workspace_id)
+    end
+  rescue
+    e ->
+      Logger.warning("Tasks.Dedup degraded: candidate fetch failed: #{inspect(e)}")
+      {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
+  catch
+    :exit, reason ->
+      Logger.warning("Tasks.Dedup degraded: candidate fetch exited: #{inspect(reason)}")
+      {:degraded, "the backlog scan was cut off by the database"}
+  end
+
+  # The candidate scope. Present key → the caller's own tenant, untouched.
+  # Absent/nil → whatever `put_scope_attrs/2` would stamp on the write this gate
+  # is guarding, so read and write see one tenant.
+  defp candidate_workspace(opts) do
+    case Keyword.get(opts, :workspace_id) do
+      nil -> resolved_write_workspace(opts)
+      workspace_id -> {:ok, workspace_id}
+    end
+  end
+
+  defp resolved_write_workspace(opts) do
+    case WriteScope.resolve_write_scope(opts) do
+      {:ok, {workspace_id, _project_id}} when not is_nil(workspace_id) ->
+        {:ok, workspace_id}
+
+      {:ok, {nil, _project_id}} ->
+        {:degraded,
+         "the backlog scan could not be scoped — this write threads no workspace and no " <>
+           "default workspace is seeded, so there is no candidate set to compare against"}
+
+      {:error, reason} ->
+        {:degraded,
+         "the backlog scan could not be scoped: the workspace this task would be written " <>
+           "to could not be resolved (#{inspect(reason)})"}
+    end
+  end
+
+  defp scan_candidates(dataset, opts, workspace_id) do
     project_id = Keyword.get(opts, :project_id)
     timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
     # TWO CAPS, TWO OVERRIDES, BECAUSE THEY ARE TWO DIFFERENT NUMBERS.
@@ -686,16 +768,29 @@ defmodule Barkpark.Tasks.Dedup do
       if length(rows) > limit, do: {Enum.take(rows, limit), true}, else: {rows, false}
 
     report_scan(truncated?, length(kept), limit, dataset, shape)
+    report_scanned(length(kept), workspace_id, dataset, shape, truncated?)
 
     {:ok, to_tasks(kept), scan_report(truncated?, length(kept), limit)}
-  rescue
-    e ->
-      Logger.warning("Tasks.Dedup degraded: candidate fetch failed: #{inspect(e)}")
-      {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
-  catch
-    :exit, reason ->
-      Logger.warning("Tasks.Dedup degraded: candidate fetch exited: #{inspect(reason)}")
-      {:degraded, "the backlog scan was cut off by the database"}
+  end
+
+  # EVERY scan, not only a truncated one. `scan_report/3`'s
+  # `candidates_scanned` rides out only on a REFUSAL payload, so on the birth
+  # path — the exact path an inert gate takes — nothing observable distinguished
+  # "scanned the backlog and found no look-alike" from "scanned nothing". This
+  # event is that distinction, and it is what
+  # `github_webhook_dedup_scope_test.exs` asserts on: a test that reads only the
+  # final receipt cannot tell an inert gate from a gate that ran and disagreed.
+  defp report_scanned(candidates, workspace_id, dataset, shape, truncated?) do
+    :telemetry.execute(
+      [:barkpark, :tasks, :dedup, :scan],
+      %{candidates: candidates},
+      %{
+        workspace_id: workspace_id,
+        dataset: dataset,
+        shape: shape,
+        truncated: truncated?
+      }
+    )
   end
 
   # ── the cap CANNOT bind silently ───────────────────────────────────────────
