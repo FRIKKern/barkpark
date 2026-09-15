@@ -362,12 +362,23 @@ func (m *model) claimTask(doc *Doc) {
 // object (Extra["claim"].epoch). An unclaimed task errors LOCALLY — the server
 // would only fence it off anyway — and an ok:false envelope surfaces the
 // server's reason verbatim (fenced_off, not_claimed, …).
+//
+// THE GUARD IS ClaimInfo().Live(), NOT ClaimEpoch's bool. It used to be the
+// latter, and a RELEASED row keeps its epoch, so the guard waved it through and
+// the close POSTed that retained epoch — which the server ACCEPTS, because
+// close.ex's fence only compares the number and the number still matches
+// (measured on guerrilla: a released row closed to lifecycle_status=done on its
+// retained epoch, while the same close on a deliberately wrong epoch was
+// refused fenced_off). The epoch is still what we echo once Live() says held:
+// it is the fence's currency, and see apiclient.Doc.ClaimEpoch for why it stays
+// on the released row rather than being cleared.
 func (m *model) closeTask(doc *Doc) {
-	epoch, ok := doc.ClaimEpoch()
-	if !ok {
-		m.setStatus("not claimed — claim first (c)", true)
+	claim := doc.ClaimInfo()
+	if !claim.Live() {
+		m.setStatus(notClaimedStatus(claim), true)
 		return
 	}
+	epoch := claim.Epoch
 	notices, help, err := m.ds.TaskCloseN(doc.ID, m.workerID, epoch)
 	if err != nil {
 		m.setStatus(err.Error(), true)
@@ -375,6 +386,18 @@ func (m *model) closeTask(doc *Doc) {
 	}
 	m.refreshDocViews()
 	m.setStatus("closed"+taskAdvisorySuffix(notices, help), false)
+}
+
+// notClaimedStatus is the desk's refusal copy when the close guard finds no
+// live holder. It names the RELEASED case separately from the never-claimed one
+// because they used to be indistinguishable — neither ever printed, since the
+// old ClaimEpoch guard called a released row claimed. Naming the release is
+// what turns "not claimed" from a puzzle into an instruction.
+func notClaimedStatus(claim apiclient.ClaimInfo) string {
+	if claim.Present && claim.ReleasedAt != "" {
+		return "released at " + claim.ReleasedAt + " — its epoch is retained for the NEXT claim, not for you; claim first (c)"
+	}
+	return "not claimed — claim first (c)"
 }
 
 // taskAdvisorySuffix builds the compact tail the desk TUI appends to a claim/
