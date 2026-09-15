@@ -1398,8 +1398,11 @@ function citationScanSetRefusals(files, root = dir) {
   if (!files.length) {
     return [
       `E17 ${root}  citation scan set is EMPTY — E11 would have reported a clean census over ` +
-        `ZERO files. Either the scan root does not exist, or the extension filter in ` +
-        `citationScanFiles() now matches nothing. A green over an empty set is not a green.`,
+        `ZERO files. Membership here is an invariant, not a mechanism: a file is in the set ` +
+        `when it lives under this scan root and its bytes read as text. So an empty set means ` +
+        `one of exactly two things — nothing lives under this root (missing, moved, or bare), ` +
+        `or nothing under it reads as text. Re-derive with: node __css_check.mjs ` +
+        `--citation-inventory ${root}. A green over an empty set is not a green.`,
     ];
   }
   const PV = "__preview__" + path.sep;
