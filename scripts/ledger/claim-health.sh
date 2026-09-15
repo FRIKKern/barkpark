@@ -28,7 +28,9 @@
 #                        the two discrimination arms are reproducible offline
 #   --json               machine output
 #
-# EXIT: 0 clean · 3 a collision or a held-file gap was reported · 2 usage.
+# EXIT: 0 clean · 3 a collision or a held-file gap was reported · 2 usage
+#       · 4 UNREADABLE PAGE — rows fetched but no claim found at any known
+#         position (never a silent zero; see CLAIM_POSITIONS).
 set -uo pipefail
 
 usage() { sed -n '2,30p' "$0"; exit 2; }
@@ -59,7 +61,7 @@ else
     | python3 -c 'import json,sys
 try: d=json.load(sys.stdin)
 except Exception: print("[]"); raise SystemExit
-print(json.dumps(d.get("tasks") or d.get("docs") or d.get("items") or []))')"
+print(json.dumps(d.get("tasks") or d.get("docs") or d.get("items") or d.get("in_progress") or []))')"
 fi
 
 SESSION_FILTER="$(printf '%s\n' "${SESSIONS[@]+"${SESSIONS[@]}"}" | grep -v '^$' | paste -sd, - 2>/dev/null || true)"
@@ -80,7 +82,10 @@ import json, os, sys
 
 rows = json.loads(sys.argv[1] or "[]")
 if isinstance(rows, dict):
-    rows = rows.get("tasks") or rows.get("docs") or rows.get("items") or [rows]
+    # `in_progress` is `bp task prime`'s carrier: a FOURTH read shape, flat rows
+    # with no `docs` key. A hand-listed pair missed it entirely.
+    rows = (rows.get("tasks") or rows.get("docs") or rows.get("items")
+            or rows.get("in_progress") or [rows])
 
 worker = os.environ["WORKER"]
 wanted = [s for s in os.environ.get("SESSION_FILTER", "").split(",") if s]
@@ -88,12 +93,67 @@ held_path = os.environ.get("HELD", "")
 held_ids = [s for s in os.environ.get("HELD_IDS", "").split(",") if s]
 as_json = os.environ.get("JSON") == "1"
 
+# THE CLAIM IS RESOLVED BY SHAPE, NOT BY A PATH (task-3c638f0e2fd435f8).
+# This script shipped reading `.content.claim` and reported a CONFIDENT ZERO on
+# a page where every row was held: measured 19 of 19 rows carrying a `content`
+# key, 19 of 19 carrying `.claim.worker`, and ZERO carrying `.content.claim`.
+# It was not missing data -- the claim simply is not in `content`.
+#
+# There are at least THREE wrong paths in this family (`.doc.claim` on a flat
+# row, `.doc.content.claim`, `.content.claim`) and FOUR read shapes that carry a
+# claim, so an enumeration of paths is a snapshot. The rule instead: unwrap the
+# `doc` envelope if there is one, then take the FIRST position that holds a
+# CLAIM-SHAPED object -- a dict carrying a `worker` key. A position that holds
+# something else is not a claim, whatever it is called.
+#
+# THE WIRE SHAPE IS NOT TOUCHED, deliberately. Presence-of-`doc` is the
+# load-bearing discriminator that nine shipped readers dispatch on via
+# `row.get("doc", row)` -- including this file -- so planting a claim at
+# `.doc.claim` on a flat row would CREATE a `doc` key and drop every row in
+# those readers. The reader changes; the payload does not.
+CLAIM_POSITIONS = (
+    ("claim",            lambda d: d.get("claim")),
+    ("content.claim",    lambda d: (d.get("content") or {}).get("claim")),
+)
+
+def _claim_shaped(v):
+    return isinstance(v, dict) and "worker" in v
+
 def claim_of(row):
     doc = row.get("doc") if isinstance(row.get("doc"), dict) else row
-    return (doc.get("content") or {}).get("claim") or {}, doc.get("doc_id") or row.get("doc_id") or "?"
+    doc_id = doc.get("doc_id") or row.get("doc_id") or "?"
+    for _name, get in CLAIM_POSITIONS:
+        v = get(doc)
+        if _claim_shaped(v):
+            return v, doc_id
+    return {}, doc_id
+
+def _looks_claimable(row):
+    """A row that SHOULD carry a claim: it is a task document, not a stray."""
+    doc = row.get("doc") if isinstance(row.get("doc"), dict) else row
+    return isinstance(doc, dict) and bool(doc.get("doc_id") or row.get("doc_id"))
 
 attributed, collisions, unattributed = [], [], []
 claimed_ids = []
+
+# A FAILED READ MUST NOT BE BYTE-IDENTICAL TO A CLEAN BILL OF HEALTH. If this
+# page has rows that look like task documents and NOT ONE of them yields a
+# claim-shaped object at any position we know, the page is UNREADABLE and the
+# honest answer is a refusal naming where we looked -- not "0 claimed row(s)",
+# which is exactly what a healthy empty page prints.
+claimable = [r for r in rows if _looks_claimable(r)]
+resolved = [r for r in claimable if claim_of(r)[0]]
+if claimable and not resolved:
+    where = ", ".join(name for name, _ in CLAIM_POSITIONS)
+    print(f"claim-health: CANNOT READ -- {len(claimable)} task row(s) fetched and "
+          f"NOT ONE carries a claim-shaped object (a dict with a `worker` key) at "
+          f"any position this reader knows: {where}. This is an UNREADABLE PAGE, "
+          f"not a clean one: a confident zero here is indistinguishable from the "
+          f"defect that made this refusal necessary (task-3c638f0e2fd435f8). "
+          f"Add the position to CLAIM_POSITIONS, or check the verb -- "
+          f"`bp task get/show` nest under `doc`, `ls`/`ready`/`prime` are flat, "
+          f"and the claim itself lives at `.claim`.", file=sys.stderr)
+    sys.exit(4)
 
 for row in rows:
     claim, doc_id = claim_of(row)

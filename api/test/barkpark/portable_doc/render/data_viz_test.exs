@@ -61,6 +61,91 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     end
   end
 
+  test "email stat places a muted display denominator between value and unit" do
+    for {theme, muted} <- [{:evergreen, "#55635e"}, {%{muted: "#654321"}, "#654321"}],
+        {denom, display} <- [{" 118 ", "118"}, {118, "118"}, {118.5, "118.5"}, {0, "0"}] do
+      html =
+        DataViz.stat_email_html(%{"value" => "71", "denom" => denom, "unit" => "blocks"}, theme)
+
+      assert html =~
+               ~s|>71<span style="font-weight:400;color:#{muted}">/#{display}</span> <span style="font-size:12px;font-weight:400;color:#{muted}">blocks</span></div>|
+
+      refute html =~ "class="
+      refute html =~ "var("
+    end
+  end
+
+  test "email stats and stat-grid compose each denominator through the shared stat renderer" do
+    for type <- ["stats", "stat-grid"] do
+      block = %{
+        "type" => type,
+        "items" => [
+          %{"value" => "71", "denom" => "118", "unit" => "blocks"},
+          %{"value" => "3", "denom" => "5"}
+        ]
+      }
+
+      %{"kind" => "_raw", "html" => html} = Compose.compose_block(block, :email)
+      assert html =~ ~s|>71<span style="font-weight:400;color:#55635e">/118</span> |
+      assert html =~ ~s|>3<span style="font-weight:400;color:#55635e">/5</span></div>|
+    end
+  end
+
+  test "email stat and stats escape hostile denominator HTML as display text" do
+    item = %{"value" => "71", "denom" => ~s|<img src=x onerror="alert('x')">&|}
+
+    for html <- [DataViz.stat_email_html(item), DataViz.stats_email_html(%{"items" => [item]})] do
+      assert html =~ "/&lt;img src=x onerror=&quot;alert(&#39;x&#39;)&quot;&gt;&amp;</span>"
+      refute html =~ "<img"
+    end
+  end
+
+  test "email denominator rendering preserves authored blocks and source provenance" do
+    item = %{
+      "value" => "71",
+      "denom" => " 118 ",
+      "unit" => "blocks",
+      "body" => "Completed blocks.",
+      "source" => "paper:denom-fixture"
+    }
+
+    block = %{"type" => "stats", "items" => [item, item]}
+    before = :erlang.term_to_binary({item, block})
+    singular = DataViz.stat_email_html(item)
+    plural = DataViz.stats_email_html(block)
+
+    assert singular =~ "Kilde: paper:denom-fixture"
+    assert singular =~ "Completed blocks."
+    assert length(String.split(plural, "Kilde: paper:denom-fixture")) == 2
+    assert :erlang.term_to_binary({item, block}) == before
+  end
+
+  test "email stat absent or unsupported denominators retain exact legacy bytes" do
+    block = %{
+      "value" => "71",
+      "unit" => "blocks",
+      "label" => "Completed",
+      "body" => "Completed blocks.",
+      "source" => "paper:denom-fixture"
+    }
+
+    expected =
+      ~s|<div style="display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
+        ~s|<div style="font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1">71 <span style="font-size:12px;font-weight:400;color:#55635e">blocks</span></div>| <>
+        ~s|<div style="font-size:12px;color:#55635e;margin-top:2px">Completed</div>| <>
+        ~s|<div style="font-size:12px;color:#15211d;margin-top:4px">Completed blocks.</div>| <>
+        ~s|<div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;margin-top:8px">Kilde: paper:denom-fixture</div></div>|
+
+    assert DataViz.stat_email_html(block) == expected
+    plural = DataViz.stats_email_html(%{"items" => [block]})
+
+    for denom <- [nil, "", " \t\n ", false, true, [], [118], %{"value" => 118}] do
+      with_denom = Map.put(block, "denom", denom)
+      assert DataViz.stat_email_html(with_denom) == expected
+      assert DataViz.stats_email_html(%{"items" => [with_denom]}) == plural
+    end
+  end
+
   # ── heatmap ──────────────────────────────────────────────────────────────────
 
   test "heatmap normalizes intensity against the explicit max and keeps grid shape on junk" do
