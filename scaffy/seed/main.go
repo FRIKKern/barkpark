@@ -64,6 +64,17 @@ import (
 // credential is ever needed for the audit.
 const defaultServer = "https://guerrilla.barkpark.cloud"
 
+// defaultCommandsDir and corpusGlobPattern are THE corpus read set, in one
+// place. deriveAll globs exactly `defaultCommandsDir/corpusGlobPattern`, the
+// --commands flag defaults to it, and --impact's read-path predicate reads
+// these same two identifiers rather than restating them — so a corpus move is
+// one edit, not an enumeration to keep in step (an enumeration is a snapshot;
+// this is the rule).
+const (
+	defaultCommandsDir = "scaffy/commands"
+	corpusGlobPattern  = "*.scaffy"
+)
+
 // payload is one flat `command` document body for
 // `bp doc create-or-replace command --file <payload>` — the CLI wraps it
 // under a createOrReplace mutation; the type comes from the verb argument.
@@ -94,10 +105,17 @@ type weightedTag struct {
 }
 
 func main() {
-	commandsDir := flag.String("commands", "scaffy/commands", "directory of .scaffy corpus files")
+	commandsDir := flag.String("commands", defaultCommandsDir, "directory of .scaffy corpus files")
 	outDir := flag.String("out", "scaffy/seed/out", "directory to write one <_id>.json payload per command (derived; never committed)")
 	check := flag.Bool("check", false, "audit mode: derive in memory (no out/ writes), fetch the served catalog tokenless, compare every field seeding writes (title, description, concept, variant, domain, direction, tags, source) per command id, print a table naming the divergent fields, exit nonzero on any drift")
+	impact := flag.Bool("impact", false, "PR-time preflight: read a changed-file list, decide whether it touches what the DERIVER reads, and if so name the commands merging it would put behind the served catalog. Exit 0 = nothing to say, 2 = CANNOT READ, 3 = notice. See impact.go.")
+	changedFiles := flag.String("changed-files", "-", "--impact only: file holding the PR's changed paths, one repo-relative path per line ('-' = stdin). Produce it with `git diff --name-only <merge-base>...<head>`.")
+	root := flag.String("root", ".", "--impact only: module root the changed paths are relative to")
 	flag.Parse()
+
+	if *impact {
+		os.Exit(runImpact(os.Stdout, os.Stderr, *root, *commandsDir, *changedFiles))
+	}
 
 	if *check {
 		if err := runCheck(*commandsDir); err != nil {
@@ -144,7 +162,7 @@ func run(commandsDir, outDir string) error {
 // refuses the run, so no partial/inconsistent set is ever produced) → derive →
 // D46 uniqueness dedup. Payloads come back in sorted-filename order.
 func deriveAll(commandsDir string) ([]*payload, error) {
-	files, err := filepath.Glob(filepath.Join(commandsDir, "*.scaffy"))
+	files, err := filepath.Glob(filepath.Join(commandsDir, corpusGlobPattern))
 	if err != nil {
 		return nil, err
 	}
@@ -474,41 +492,20 @@ func printCheckTable(w io.Writer, server string, payloads []*payload, served map
 	}
 	sort.Strings(ids)
 
-	rows := make([]row, 0, len(ids))
+	rows := buildRows(ids, local, servedF)
 	nonMatch, sourceDrift, metadataOnlyDrift := 0, 0, 0
-	for _, id := range ids {
-		lf, hasLocal := local[id]
-		sf, hasServed := servedF[id]
-		var status string
-		var diverged []string
-		switch {
-		case hasLocal && hasServed:
-			diverged = divergentFields(lf, sf)
-			if len(diverged) == 0 {
-				status = "MATCH"
+	for _, r := range rows {
+		if r.status == "MATCH" {
+			continue
+		}
+		nonMatch++
+		if r.status == "DRIFT" {
+			if slicesContains(r.fields, "source") {
+				sourceDrift++
 			} else {
-				status = "DRIFT"
-				if slicesContains(diverged, "source") {
-					sourceDrift++
-				} else {
-					metadataOnlyDrift++
-				}
+				metadataOnlyDrift++
 			}
-		case hasLocal && !hasServed:
-			status = "MISSING" // in the repo, not served — never seeded
-		default:
-			status = "EXTRA" // served, no local corpus file backs it
 		}
-		if status != "MATCH" {
-			nonMatch++
-		}
-		rows = append(rows, row{
-			id:        id,
-			localSHA:  sha8(sourceSHA(lf, hasLocal)),
-			servedSHA: sha8(sourceSHA(sf, hasServed)),
-			fields:    diverged,
-			status:    status,
-		})
 	}
 
 	fmt.Fprintf(w, "scaffy catalog drift check — %s (%d local, %d served)\n\n", server, len(local), len(servedF))
@@ -535,6 +532,42 @@ func printCheckTable(w io.Writer, server string, payloads []*payload, served map
 		}
 	}
 	return nonMatch
+}
+
+// buildRows is the row-construction half of printCheckTable, factored out so
+// --impact can ask the SAME comparison "which ids are not MATCH" without
+// re-implementing the status switch. Two copies of this switch would be two
+// definitions of "drift", and the PR-time notice must mean exactly what the
+// post-merge gate means.
+func buildRows(ids []string, local, servedF map[string]map[string]string) []row {
+	rows := make([]row, 0, len(ids))
+	for _, id := range ids {
+		lf, hasLocal := local[id]
+		sf, hasServed := servedF[id]
+		var status string
+		var diverged []string
+		switch {
+		case hasLocal && hasServed:
+			diverged = divergentFields(lf, sf)
+			if len(diverged) == 0 {
+				status = "MATCH"
+			} else {
+				status = "DRIFT"
+			}
+		case hasLocal && !hasServed:
+			status = "MISSING" // in the repo, not served — never seeded
+		default:
+			status = "EXTRA" // served, no local corpus file backs it
+		}
+		rows = append(rows, row{
+			id:        id,
+			localSHA:  sha8(sourceSHA(lf, hasLocal)),
+			servedSHA: sha8(sourceSHA(sf, hasServed)),
+			fields:    diverged,
+			status:    status,
+		})
+	}
+	return rows
 }
 
 // sourceSHA returns the hex sha256 of the `source` field of a projected side,
