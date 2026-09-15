@@ -992,6 +992,33 @@ const CHIP_WIDTHS = [721, 725, 730, 735, 740, 741, 750, 768, 769, 775, 780, 785,
 //    FILTER that suppresses a spill finding, which is the opposite polarity:
 //    suppressing is safe for a detector and fatal for a wholeness claim.
 const CLIPPING_OVERFLOW = ["hidden", "clip", "auto", "scroll"];
+
+// ── THE PRECONDITION LIVES IN ONE FUNCTION, NOT IN TWO HAND-COPIES ────────
+//    TWO legs in this file make a POSITIVE WHOLENESS CLAIM about the SAME
+//    element through the SAME predicate — the GR108 tablet band over
+//    CHIP_WIDTHS and the W20 phone band over PHONE_WIDTHS. The rule that makes
+//    that predicate mean anything therefore belongs to neither of them.
+//
+//    THAT IS NOT STYLE, IT IS THE MEASURED HISTORY. The precondition was first
+//    written INLINE in the GR108 leg. Its twin, byte-identical in the part that
+//    mattered, kept the old self-disarming comparison and outlived the fix by a
+//    whole wave — a repair applied to one copy is a repair the other silently
+//    does not get. So the set of guarded legs is now whatever calls this
+//    function; re-derive it with
+//      grep -n 'chipUnclippedReason(' cloud/priv/static/__preview__/overflow-guard.mjs
+//    and a leg that reads #billing-chip without appearing in that list is the
+//    bug, visibly.
+//
+//    RETURNS null when the box CAN clip (the comparison has something to
+//    measure), and otherwise the finding TEXT — stated as a cause, carrying the
+//    geometry as geometry, and never as the wholeness verdict the caller was
+//    about to compute. The caller must `continue` on a reason: a cell that
+//    could not be asked the question has not been measured, and must not be
+//    counted toward any "MEASURED n of N" denominator or any ✓.
+function chipUnclippedReason(chip) {
+  if (CLIPPING_OVERFLOW.includes(chip.ox)) return null;
+  return `#billing-chip computes overflow-x "${chip.ox}" (shorthand "${chip.ov}") — NOT a clipping value, so \`scrollWidth > clientWidth\` cannot detect truncation here and a pass on this cell would measure NOTHING. The chip's own clip is the instrument; re-derive it with \`grep -n '^.billing-chip {' cloud/priv/static/app.css\`. Read sw ${chip.sw} / cw ${chip.cw}, rect ${chip.w}px, "${chip.text}" — reported as geometry, NOT as a wholeness verdict.`;
+}
 const HEIGHT = 800;
 const CLASSIC_SCROLLBARS = process.env.OVERFLOW_GUARD_CLASSIC_SCROLLBARS === "1";
 
@@ -1661,9 +1688,10 @@ async function main() {
             // leg prints a green over a REMOVED protection. So a box that
             // cannot clip is a FINDING, stated as a cause, and the reader is
             // never handed the wholeness verdict that would follow it.
-            if (!CLIPPING_OVERFLOW.includes(chip.ox)) {
+            const chipUnclippedWhy = chipUnclippedReason(chip);
+            if (chipUnclippedWhy) {
               chipUnclipped++;
-              fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: #billing-chip computes overflow-x "${chip.ox}" (shorthand "${chip.ov}") — NOT a clipping value, so \`scrollWidth > clientWidth\` cannot detect truncation here and a pass on this cell would measure NOTHING. The chip's own clip is the instrument; re-derive it with \`grep -n '^.billing-chip {' cloud/priv/static/app.css\`. Read sw ${chip.sw} / cw ${chip.cw}, rect ${chip.w}px, "${chip.text}" — reported as geometry, NOT as a wholeness verdict.`);
+              fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: ${chipUnclippedWhy}`);
               chipRow.push(`${width}:${chip.sw}/${chip.cw}?ox=${chip.ox}`);
               continue;
             }
@@ -1728,12 +1756,36 @@ async function main() {
     //    rowMeasured === PHONE_WIDTHS.length, a partial row prints a `!` naming
     //    what it could NOT reach, and the leg closes with an unconditional
     //    MEASURED n of N line so a reader never has to infer the denominator.
+    //
+    //    AND THE COMPARISON IS NOW GATED ON THE CHIP BEING ABLE TO CLIP
+    //    (chipUnclippedReason above, shared with the GR108 leg). This leg used
+    //    to read only the geometry, and that was MEASURED vacuous, not merely
+    //    suspected: on a clean tree the chip is 168/168 at all ten widths, and
+    //    with `.billing-chip` capped to 160px inside the 620 block the leg reds
+    //    correctly with 40 TRUNCATED cells at 168/158 — but add the single
+    //    change `overflow: hidden` -> `visible` on `.billing-chip` and the SAME
+    //    cut chip reads 158/158 and the leg printed "chip whole at all 10 phone
+    //    widths ... 10/10 cells MEASURED" and exited 0. The chip was 10px
+    //    SHORTER than its intrinsic width and the money message was cut, and
+    //    the transcript was indistinguishable from a real green.
+    //
+    //    WHY THE LEG'S OWN HONESTY MACHINERY DID NOT CATCH IT: the MEASURED
+    //    n of N line counts cells the read REACHED, and a disarmed cell is
+    //    reached. It printed 40 of 40. A denominator answers "was the question
+    //    asked of every cell", never "did the question mean anything" — so the
+    //    two guards are complements and this leg needed both.
+    //
+    //    THE QUANTIFIED BLIND SPOT under the disarm: scrollWidth saturates at
+    //    the chip's content width, so every shortfall up to the chip's
+    //    horizontal padding read as whole. Re-derive both arms by name:
+    //      grep -n '^.billing-chip {' cloud/priv/static/app.css
+    //      grep -n 'max-width: 620px' cloud/priv/static/app.css   (the W19-S2 block)
     if (requested.includes("W20-phone-band-billing-chip")) {
       const D = "W20-phone-band-billing-chip";
       const PHONE_SCENS = ["billing-past-due", "overview-past-due"];
       const phoneCells = PHONE_SCENS.length * 2 * PHONE_WIDTHS.length;
       process.stdout.write(`\n${D} — ${PHONE_WIDTHS.length} phone widths x 2 themes x ${PHONE_SCENS.length} past-due scenarios = ${phoneCells} cells\n`);
-      let measured = 0;
+      let measured = 0, unclipped = 0;
       for (const scen of PHONE_SCENS) {
         for (const theme of ["light", "dark"]) {
           await setViewport(390);
@@ -1742,16 +1794,29 @@ async function main() {
             `document.querySelector('.topbar') && (function(){var c=document.getElementById('billing-chip');return c && !c.hidden;})()`,
           );
           const row = [];
-          let cut = 0, rowMeasured = 0;
+          let cut = 0, rowMeasured = 0, rowUnclipped = 0;
           for (const width of PHONE_WIDTHS) {
             await setViewport(width);
             const chip = await evalJs(
               `(function(){var c=document.getElementById('billing-chip');if(!c)return null;` +
-              `var r=c.getBoundingClientRect();` +
-              `return {sw:c.scrollWidth, cw:c.clientWidth, w:Math.round(r.width*100)/100, text:c.textContent};})()`,
+              `var r=c.getBoundingClientRect(), cs=getComputedStyle(c);` +
+              `return {sw:c.scrollWidth, cw:c.clientWidth, w:Math.round(r.width*100)/100, ` +
+              `ox:cs.overflowX, ov:cs.overflow, text:c.textContent};})()`,
             );
             if (!chip) { fail(D, `${scen}/${theme}@${width}: #billing-chip MISSING — the readiness gate saw it and this read did not`); row.push(`${width}:missing`); continue; }
             if (chip.w <= 0) { fail(D, `${scen}/${theme}@${width}: #billing-chip paints a ${chip.w}px rect — hidden is not whole ("${chip.text}")`); row.push(`${width}:0px`); continue; }
+            // PRECONDITION BEFORE THE MEASUREMENT, and before `measured++`: a
+            // cell whose box cannot clip was never asked the question, so it
+            // must not be counted into the denominator that certifies the band.
+            // See chipUnclippedReason above for why this is a shared function.
+            const unclippedWhy = chipUnclippedReason(chip);
+            if (unclippedWhy) {
+              unclipped++;
+              rowUnclipped++;
+              fail(D, `${scen}/${theme}@${width}: ${unclippedWhy}`);
+              row.push(`${width}:${chip.sw}/${chip.cw}?ox=${chip.ox}`);
+              continue;
+            }
             measured++;
             rowMeasured++;
             const over = chip.sw > chip.cw;
@@ -1764,9 +1829,15 @@ async function main() {
           } else if (!cut) {
             // Not a ✓: nothing was cut among the cells this row could READ, but
             // the rest are ✗ above and the band is uncertified for them.
+            // rowUnclipped is named as its OWN number and never folded into the
+            // remainder: "the chip was cut" and "the question could not be
+            // asked because the box does not clip" are different findings and
+            // must not impersonate each other. A ✓ is unreachable while either
+            // is non-zero, because rowMeasured cannot then reach the width count.
             process.stdout.write(
               `   ! ${scen}/${theme}: no cut among the ${rowMeasured} of ${PHONE_WIDTHS.length} widths this row could MEASURE — ` +
-              `the remaining ${PHONE_WIDTHS.length - rowMeasured} are ✗ above and this band is NOT certified\n`,
+              `the remaining ${PHONE_WIDTHS.length - rowMeasured} are ✗ above ` +
+              `(${rowUnclipped} of them UNMEASURABLE: the chip does not clip) and this band is NOT certified\n`,
             );
           }
         }
@@ -1776,7 +1847,8 @@ async function main() {
       // this line is where that shows.
       process.stdout.write(
         `   MEASURED ${measured} of ${phoneCells} #billing-chip cells ` +
-        `(${PHONE_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes) — ` +
+        `(${PHONE_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes` +
+        `${unclipped ? `, ${unclipped} UNMEASURABLE — chip does not clip` : ""}) — ` +
         `the ✓ lines above are claims about THESE cells and no others\n`,
       );
       // A leg that measured nothing certifies nothing — zero cells is a RED,
