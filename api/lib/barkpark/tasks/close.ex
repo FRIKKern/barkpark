@@ -1301,7 +1301,11 @@ defmodule Barkpark.Tasks.Close do
   # doc's current work-defining fields (title/brief/description/acceptance_criteria —
   # for criteria, only each entry's `criterion` TEXT is work-defining; the
   # met/evidence/attempts progress subfields a mid-claim `stamp` writes are
-  # excluded by WorkDigest D5, so a worker's own stamps never fence its close)
+  # excluded by WorkDigest D5, so a worker's own stamps to an EXISTING
+  # criterion never fence its close. A stamp that SEEDS a criterion is the
+  # exception and fences correctly: it adds criterion TEXT, which IS the work
+  # definition, so the holder must re-read and pin observed_rev before sealing
+  # a row whose bar it just moved)
   # are re-digested inside this close txn and compared to the claim-time stamp.
   # Drift → {:error, {:doc_changed_since_claim, current_rev, changed_fields}} so
   # the worker re-reads the changed brief before closing against stale

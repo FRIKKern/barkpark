@@ -25,7 +25,12 @@ defmodule Barkpark.Tasks.WorkDigest do
   # hashing (see `criteria_texts/1`). Without this, stamping a criterion under
   # a claim would make the worker's own default-path close 409
   # `doc_changed_since_claim`. Editing/adding/removing/REORDERING criterion
-  # text still trips the fence (the list keeps its order and length).
+  # text still trips the fence (the list keeps its order and length) —
+  # INCLUDING a `stamp` that SEEDS a criterion one past the end. A seed writes
+  # TEXT, not progress, so it lands on the work-defining side of this line by
+  # construction and its own holder's default-path close is refused. That
+  # refusal is the contract, not a gap: the bar the row will be judged against
+  # moved, so it has to be re-read and pinned with an explicit observed_rev.
 
   # The work-defining fields, in the order `changed_fields/3` reports them.
   @fields ~w(title brief description acceptance_criteria execution_policy queue_gate)
