@@ -3,11 +3,14 @@ package pdrender
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 // TestComposeBlocksNeverPanic asserts note/stage/card degrade gracefully on
@@ -523,6 +526,18 @@ func TestNoteReaderSlotSemantics(t *testing.T) {
 // Integral float64 is the existing Go decoded-number convention, not full
 // Elixir numeric parity: Decode erases lexical 47 versus 47.0 before rendering.
 func TestNoteReaderScalarsAndInlineNodes(t *testing.T) {
+	// Nonfinite values cannot pass through the JSON-based nonmutation helper.
+	// Exercise the Go scalar path directly instead.
+	for _, number := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		t.Run(fmt.Sprint(number), func(t *testing.T) {
+			attrs := map[string]any{"label": number, "lead": number, "text": number}
+			got := noteRenderer{}.Render(Block{Type: "note", Attrs: attrs}, RenderCtx{Width: 80, Profile: NoColor})
+			if !reflect.DeepEqual(got, []string{""}) {
+				t.Fatalf("nonfinite scalar rendered as %q", got)
+			}
+		})
+	}
+
 	for _, tc := range []struct {
 		value any
 		want  string
@@ -541,23 +556,37 @@ func TestNoteReaderScalarsAndInlineNodes(t *testing.T) {
 	assertNoteReaderMatchesFlat(t, Block{Type: "note", Attrs: attrs}, map[string]any{"text": "bare nested"})
 }
 
+// The shared sanitizer contract covers C0 and DEL. C1 hardening is a separate
+// shared-sanitizer follow-up, not part of this Note carrier regression.
 func TestNoteReaderSanitizesSlotAndContentCarriers(t *testing.T) {
-	hostile := "safe\x1b[31m red\x1b[0m\x1b]52;c;YXR0YWNr\a\r\x00\u009b31m end"
-	safe := sanitizeText(hostile)
+	hostile := "safe\x1b[31m red\x1b[0m\x1b]52;c;YXR0YWNr\a\r\x00\x7f end"
+	// Use a literal oracle, not sanitizeText or a second renderer invocation.
+	const safe = "safe[31m red[0m]52;c;YXR0YWNr end"
+	savedProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.Ascii)
+	t.Cleanup(func() { lipgloss.SetColorProfile(savedProfile) })
 	for _, carrier := range []string{"slots", "content"} {
 		t.Run(carrier, func(t *testing.T) {
 			attrs := map[string]any{"content": []any{hostile}}
-			expected := map[string]any{"text": safe}
+			want := "▌ " + safe
 			if carrier == "slots" {
 				slots := map[string]any{}
 				for _, field := range []string{"label", "lead", "body"} {
 					slots[field] = []any{map[string]any{"content": []any{map[string]any{"type": "strong", "children": []any{map[string]any{"type": "text", "value": hostile}}}}}}
 				}
 				attrs = map[string]any{"slots": slots}
-				expected["label"] = safe
-				expected["lead"] = safe
+				want += "  " + safe + " " + safe
 			}
-			assertNoteReaderMatchesFlat(t, Block{Type: "note", Attrs: attrs}, expected)
+			// Plain styles and Ascii profile keep theme escapes out of the raw output.
+			got := strings.Join(noteRenderer{}.Render(Block{Type: "note", Attrs: attrs}, RenderCtx{Width: 512, Profile: NoColor}), "\n")
+			if got != want {
+				t.Errorf("sanitized text = %q; want %q", got, want)
+			}
+			for _, r := range got {
+				if r < 0x20 || r == 0x7f {
+					t.Errorf("terminal control U+%04X survived in %q", r, got)
+				}
+			}
 		})
 	}
 }
