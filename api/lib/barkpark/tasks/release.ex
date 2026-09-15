@@ -37,6 +37,7 @@ defmodule Barkpark.Tasks.Release do
       fenced_content_write: 4,
       insert_mutation_event!: 5,
       check_holder: 2,
+      holder: 1,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -156,16 +157,16 @@ defmodule Barkpark.Tasks.Release do
 
   defp check_holder_for_mode(:stranded, _doc, _worker_id), do: :ok
 
-  defp holder_present?(content), do: not is_nil(holder_in(content))
+  # ONE definition of "held", shared with every other door: `Internal.holder/1`
+  # / `Internal.held?/1`. Keyed on `claim.worker` and NOTHING ELSE — this module
+  # is the reason why. `apply_release_update/1` below leaves the claim OBJECT,
+  # its `epoch`, and the `worker` KEY all in place on a released row, so
+  # `claim != nil`, `claim.epoch != nil` and `has_key?(claim, "worker")` each
+  # answer "held" about a row nobody holds. See the doctrine block above
+  # `Internal.held?/1`.
+  defp holder_present?(content), do: not is_nil(holder(content))
 
-  defp holder_of(%Document{content: content}), do: holder_in(content || %{})
-
-  defp holder_in(content) do
-    case get_in(content, ["claim", "worker"]) do
-      worker when is_binary(worker) -> if String.trim(worker) == "", do: nil, else: worker
-      _ -> nil
-    end
-  end
+  defp holder_of(%Document{content: content}), do: holder(content || %{})
 
   # check_holder/2 → Tasks.Internal (D7 extraction, expressive-agent-loops):
   # one holder-check definition shared with `Tasks.Stamp` (and future
