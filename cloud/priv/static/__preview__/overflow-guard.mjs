@@ -958,6 +958,40 @@ const CHIP_WIDTHS = [721, 725, 730, 735, 740, 741, 750, 768, 769, 775, 780, 785,
 // where 12 was the truth. The band is now paid in CSS (app.css, the 621-740
 // block) and every one of these widths is asserted STRICTLY — no band, no cap,
 // no exemption. The shortfall it used to tolerate reds like any other cut.
+
+// ── THE CLIPPING PRECONDITION. `scrollWidth > clientWidth` IS ONLY A
+//    TRUNCATION TEST WHILE THE BOX CLIPS. Give a box `overflow: visible` and
+//    its scrollWidth stops exceeding its clientWidth no matter how much text
+//    is painted outside it — so the comparison silently stops measuring and
+//    the leg PRINTS A PASS. That is worse than a missing assertion: the PASS
+//    arm is the one where a protection was REMOVED, and the transcript cannot
+//    be told apart from a real green.
+//
+//    MEASURED (task-f6f20625305277c4, filed by r18-w6, re-run here at
+//    f7b58d09e). Two anchored single-line app.css mutations, each on a
+//    worktree restored byte-clean, exit read directly and never piped:
+//      F    the 830-block liveness-label hide un-hidden           -> rc 1, 24
+//           chip-TRUNCATED cells across 721-750
+//      F+D  the same, PLUS `.billing-chip` overflow hidden->visible -> rc 0,
+//           PASS. Same slack, same content, opposite verdict.
+//    Re-derive the two anchors by name, not by line:
+//      grep -n 'live-chip-label, .live-chip-ago' cloud/priv/static/app.css
+//      grep -n '^.billing-chip {' cloud/priv/static/app.css
+//
+//    SO THE TRAP IS MADE MECHANICAL RATHER THAN WRITTEN DOWN. A comment asking
+//    the next reader to be careful does not fire on its own case; this set
+//    does. Any leg asserting an element's wholeness through scrollWidth must
+//    establish the box CAN clip first and RED when it cannot, naming the cause
+//    instead of handing the reader a verdict to interpret.
+//
+//    `auto` and `scroll` are in the set because a scroller's scrollWidth is
+//    still a real overflow signal. Only `visible` (and the values that compute
+//    to it) leave the comparison with nothing to measure. The same map exists
+//    in the sibling sweep as `CLIPPY` — `grep -n 'var CLIPPY=' \
+//    cloud/priv/static/__preview__/breakpoint-sweep.mjs` — but THERE it is a
+//    FILTER that suppresses a spill finding, which is the opposite polarity:
+//    suppressing is safe for a detector and fatal for a wholeness claim.
+const CLIPPING_OVERFLOW = ["hidden", "clip", "auto", "scroll"];
 const HEIGHT = 800;
 const CLASSIC_SCROLLBARS = process.env.OVERFLOW_GUARD_CLASSIC_SCROLLBARS === "1";
 
@@ -1594,12 +1628,14 @@ async function main() {
           // 768; the 768-block tighten alone leaves it cut from 769 to 805.
           const chipRow = [];
           let chipCut = 0;
+          let chipUnclipped = 0;
           for (const width of CHIP_WIDTHS) {
             await setViewport(width);
             const chip = await evalJs(
               `(function(){var c=document.getElementById('billing-chip');if(!c)return null;` +
-              `var r=c.getBoundingClientRect();` +
-              `return {sw:c.scrollWidth, cw:c.clientWidth, w:Math.round(r.width*100)/100, text:c.textContent};})()`,
+              `var r=c.getBoundingClientRect(), cs=getComputedStyle(c);` +
+              `return {sw:c.scrollWidth, cw:c.clientWidth, w:Math.round(r.width*100)/100, ` +
+              `ox:cs.overflowX, ov:cs.overflow, text:c.textContent};})()`,
             );
             if (!chip) { fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: #billing-chip missing`); chipRow.push(`${width}:missing`); continue; }
             // EVERY WIDTH IS ASSERTED STRICTLY. The `+ 1` that used to sit on
@@ -1618,6 +1654,19 @@ async function main() {
             // future sub-pixel residual must arrive as a NAMED constant with a
             // reason, a cap and a printed marker on every cell it forgives —
             // the band-A shape — never as `+ 1` on the comparison.
+            // PRECONDITION BEFORE THE MEASUREMENT — see CLIPPING_OVERFLOW above
+            // for the two arms that measured this. The comparison on the next
+            // line is a truncation test ONLY while this box clips; if the chip
+            // stops clipping the comparison is false at every width and this
+            // leg prints a green over a REMOVED protection. So a box that
+            // cannot clip is a FINDING, stated as a cause, and the reader is
+            // never handed the wholeness verdict that would follow it.
+            if (!CLIPPING_OVERFLOW.includes(chip.ox)) {
+              chipUnclipped++;
+              fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: #billing-chip computes overflow-x "${chip.ox}" (shorthand "${chip.ov}") — NOT a clipping value, so \`scrollWidth > clientWidth\` cannot detect truncation here and a pass on this cell would measure NOTHING. The chip's own clip is the instrument; re-derive it with \`grep -n '^.billing-chip {' cloud/priv/static/app.css\`. Read sw ${chip.sw} / cw ${chip.cw}, rect ${chip.w}px, "${chip.text}" — reported as geometry, NOT as a wholeness verdict.`);
+              chipRow.push(`${width}:${chip.sw}/${chip.cw}?ox=${chip.ox}`);
+              continue;
+            }
             const cut = chip.sw > chip.cw;
             if (cut) { chipCut++; fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: billing chip TRUNCATED — scrollWidth ${chip.sw} > clientWidth ${chip.cw} (rect ${chip.w}px, "${chip.text}")`); }
             chipRow.push(`${width}:${chip.sw}/${chip.cw}${cut ? "!" : ""}`);
@@ -1626,10 +1675,17 @@ async function main() {
           // A summary line only when there is something to summarise. A green
           // sentence printed beside its own ✗ lines is how this leg misled a
           // reader for four waves — it does not get to do that again.
-          if (chipCut) {
-            process.stdout.write(`   ${scen}/${theme}: ${chipCut} of ${CHIP_WIDTHS.length} tablet widths CUT — see the ✗ lines above\n`);
+          if (chipCut || chipUnclipped) {
+            // chipUnclipped is printed as its OWN number and never folded into
+            // chipCut: "the chip was cut" and "the question could not be asked"
+            // are different findings and must not cancel or impersonate each
+            // other. A ✓ is unreachable while either is non-zero.
+            process.stdout.write(
+              `   ${scen}/${theme}: ${chipCut} of ${CHIP_WIDTHS.length} tablet widths CUT, ` +
+              `${chipUnclipped} UNMEASURABLE (chip does not clip) — see the ✗ lines above\n`,
+            );
           } else {
-            okLine(`${scen}/${theme}: chip whole at all ${CHIP_WIDTHS.length} tablet widths ${CHIP_WIDTHS[0]}-${CHIP_WIDTHS[CHIP_WIDTHS.length - 1]}`);
+            okLine(`${scen}/${theme}: chip whole at all ${CHIP_WIDTHS.length} tablet widths ${CHIP_WIDTHS[0]}-${CHIP_WIDTHS[CHIP_WIDTHS.length - 1]} (all ${CHIP_WIDTHS.length} MEASURED under a clipping overflow-x — the truncation test had something to measure in every cell)`);
           }
         }
       }

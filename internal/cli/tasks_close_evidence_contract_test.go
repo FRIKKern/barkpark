@@ -70,6 +70,19 @@ func TestCloseReasonAnchors_MatchesTheSweepsThreeArms(t *testing.T) {
 // reds: `bp task close --help` must carry, in words, what a close has to name
 // AND what happens to the rows already closed without it.
 func TestTaskCloseHelp_CarriesTheClosePolicyRuling(t *testing.T) {
+	// THIS TEST USED TO READ THE OPERATOR'S ~/.config/barkpark
+	// (task-23c76938811ff2db). `bp task close --help` renders the MANIFEST's
+	// argument table before this file's ruling is appended (cli.go, usageCommand),
+	// so with no config, no ETag cache and no server the whole page refuses with
+	// "no server configured" and exit 1 — which is precisely what the Go gate
+	// measured on 6 of the 6 last-40 first-parent main shas where it rendered,
+	// while this laptop stayed green off a config file the runner does not have.
+	// A test that passes because ~/.config exists is not asserting the ruling; it
+	// is asserting the author's machine. So: neutralise every ambient source AND
+	// hand it the committed manifest fixture, the same seam every other help test
+	// in this package uses (cli_test.go, fullManifest).
+	helpEnvFromFixtureOnly(t)
+
 	out, code := captureExecuteCode(t, []string{"task", "close", "--help"})
 	if code != exitOK {
 		t.Fatalf("`bp task close --help` exit = %d, want %d; out:\n%s", code, exitOK, out)
@@ -175,4 +188,104 @@ func TestTaskCloseExecute_RequireAnchorIsOffByDefault(t *testing.T) {
 		t.Fatalf("an anchorless close did not land by default (exit %d, %d POSTs) — the contract is refusing when it must only advise; out:\n%s",
 			code, atomic.LoadInt32(hits), out)
 	}
+}
+
+// ── the operator-state seam this contract sits on ──────────────────────────
+
+// helpEnvFromFixtureOnly makes a help assertion depend on the TREE and nothing
+// else: no config file, no manifest ETag cache, no BARKPARK_* server or token
+// from the caller's shell — only the committed manifest fixture. Every ambient
+// source is removed BEFORE the fixture is installed, so the order is the
+// guarantee (isolatedEnv blanks BARKPARK_MANIFEST).
+func helpEnvFromFixtureOnly(t *testing.T) {
+	t.Helper()
+	helpEnvNoManifestAtAll(t)
+	t.Setenv("BARKPARK_MANIFEST", fullManifest)
+}
+
+// helpEnvNoManifestAtAll is the same isolation WITHOUT the fixture: the CI
+// environment, reproduced. Nothing can supply a manifest.
+func helpEnvNoManifestAtAll(t *testing.T) {
+	t.Helper()
+	isolatedEnv(t) // temp XDG_CONFIG_HOME + XDG_CACHE_HOME, BARKPARK_MANIFEST=""
+	t.Setenv("HOME", t.TempDir())
+	for _, n := range ServerEnvNames {
+		t.Setenv(n, "")
+	}
+	for _, n := range TokenEnvNames {
+		t.Setenv(n, "")
+	}
+}
+
+// TestHelpIsManifestDerived_AndSaysSoWhenItCannotLoadOne pins the DISTINCTION
+// the fix above rests on, so nobody re-derives it from one laptop.
+//
+// THE PREDICATE, not a hand-listed pair: a `bp <noun> <verb> --help` page is
+// server-free IFF the noun is intercepted CLI-natively in Execute before
+// loadManifest; everything that reaches the manifest tree renders from the
+// manifest and cannot print help without one. Measured at origin/main
+// 7bc83e643b against docs/cli/fixtures/full-manifest.json: of its 143 commands,
+// 136 refuse with "no server configured" under the isolation above and 7 (all
+// of them `chat …`, shadowed by the `case "chat"` built-in) exit 0. With the
+// fixture installed, 143 of 143 exit 0.
+//
+// So a server-free `--help` for a manifest verb is not a short-circuit — it is
+// a baked fallback command tree for 136 commands, which this row does not
+// carry. What the CLI owes the reader instead is the REASON, and that is the
+// arm below: the refusal must name that help is manifest-derived and name the
+// offline route, or an operator reads "run `bp setup`" and thinks help is
+// broken. Delete those three lines in cli.go and this reds.
+func TestHelpIsManifestDerived_AndSaysSoWhenItCannotLoadOne(t *testing.T) {
+	// A MANIFEST VERB: no manifest anywhere → refuses, and explains why.
+	t.Run("manifest verb refuses and names the offline route", func(t *testing.T) {
+		helpEnvNoManifestAtAll(t)
+		resetManifestMemo()
+
+		out, code := captureExecuteCode(t, []string{"task", "close", "--help"})
+		if code == exitOK {
+			t.Fatalf("`bp task close --help` exited 0 with NO manifest source — if help became server-free, this contract's premise changed and the test above must be re-derived; out:\n%s", out)
+		}
+		for _, want := range []string{
+			"no server configured",
+			"per-command help is rendered from the server's capabilities manifest",
+			"bp task close --help",
+			"BARKPARK_MANIFEST",
+		} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("the refusal does not carry %q — the reader is told to `bp setup` with no hint that they asked for DOCUMENTATION; out:\n%s", want, out)
+			}
+		}
+	})
+
+	// THE POSITIVE CONTROL on the same command and the same isolation: the ONLY
+	// difference is the fixture. Without this arm the refusal above could be
+	// produced by a broken harness rather than by the absent manifest.
+	t.Run("the same command with only the fixture added renders", func(t *testing.T) {
+		helpEnvFromFixtureOnly(t)
+		resetManifestMemo()
+
+		out, code := captureExecuteCode(t, []string{"task", "close", "--help"})
+		if code != exitOK {
+			t.Fatalf("`bp task close --help` exit = %d, want %d with the committed fixture installed; out:\n%s", code, exitOK, out)
+		}
+		if strings.Contains(out, "no server configured") {
+			t.Fatalf("the fixture did not satisfy the manifest load; out:\n%s", out)
+		}
+	})
+
+	// THE OTHER SIDE OF THE PREDICATE: a CLI-native noun prints help with
+	// nothing configured at all. `login` returns from its own printLoginHelp
+	// before loadManifest is ever called.
+	t.Run("a CLI-native noun needs nothing", func(t *testing.T) {
+		helpEnvNoManifestAtAll(t)
+		resetManifestMemo()
+
+		out, code := captureExecuteCode(t, []string{"login", "--help"})
+		if code != exitOK {
+			t.Fatalf("`bp login --help` exit = %d, want %d with nothing configured — a CLI-native help page must never need a manifest; out:\n%s", code, exitOK, out)
+		}
+		if strings.Contains(out, "no server configured") {
+			t.Fatalf("`bp login --help` reached the manifest path; out:\n%s", out)
+		}
+	})
 }
