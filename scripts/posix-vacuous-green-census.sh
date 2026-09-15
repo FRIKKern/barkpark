@@ -156,7 +156,7 @@ run_census() {  # run_census <repo_root> <roster>  -> prints report, sets FAILED
         rc="$(grep "^$rel|" "$roster" 2>/dev/null | cut -d'|' -f2 | sed -n '1p')"
         rcls="$(grep "^$rel|" "$roster" 2>/dev/null | cut -d'|' -f3 | sed -n '1p')"
         if [ -z "$rc" ]; then
-          echo "RED: $rel uses process substitution, carries no interpreter guard, and is NOT on $roster. RUN it under \`sh\` and record its exit code, or add the guard. DO NOT reach for \`sh -n\`: it is blind to this class BY CONSTRUCTION and answers 0 on a script that then exits 0 having compared NOTHING — proved, not remembered, by the sh-n-blindness arm of \`--selftest\`; the class is owned by docs/ops/merge-gates.md, section 'PARSED BUT NOT RUN'." >&2
+          echo "RED: $rel uses process substitution, carries no interpreter guard, and is NOT on $roster. RUN it under \`sh\` and record its exit code, or add the guard. DO NOT reach for \`sh -n\`: it is blind to this class BY CONSTRUCTION and answers 0 on a script that then exits 0 having compared NOTHING — proved, not remembered, by the sh-n-blindness and procsub-under-posix arms of \`--selftest\`; the class is owned by docs/ops/merge-gates.md, section 'PARSED BUT NOT RUN'." >&2
           FAILED=1
         elif [ "$rc" = "0" ] && [ "$rcls" != "honest-green" ]; then
           echo "RED: $rel is rostered with exit code 0 under class '$rcls'. Exit 0 is admissible only as 'honest-green' with a bash-control note — a truncated 0 is the vacuous green this census exists to catch." >&2
@@ -281,22 +281,83 @@ $GUARD_LINES"
     && ok "instrument: a missing roster prints CANNOT READ and exits 2" \
     || no "instrument: missing roster should exit 2 with CANNOT READ, got rc=$CRC: $(cat "$LOG")"
 
-  # ---------------------------------------------------------- sh -n blindness
+  # ------------------------------------------------- (a) sh -n blindness, PORTABLE
   #
   # THE POINT OF THIS ARM. Everything above proves the census catches the class.
-  # This proves the check a reader reaches for INSTEAD cannot. bash parses the
-  # body of a command substitution LAZILY, so a process substitution nested
-  # inside one raises its syntax error at EXPANSION time — long after `-n` has
-  # already answered 0. The script then runs to completion, both operands come
-  # back EMPTY, the comparisons compare NOTHING, and the harness announces a
-  # pass. A remembered fact about a tool rots; this fixture does not.
+  # This proves the check a reader reaches for INSTEAD cannot — and it proves it
+  # on EVERY interpreter, because it does not depend on one.
   #
-  # `bash --posix` is deliberate, NOT `sh`: /bin/sh is bash on macOS but dash on
-  # a CI runner, and dash reds this fixture at parse time (rc 2, measured
-  # 2026-09-14). Under dash the arm would measure a different interpreter and
-  # quietly stop being about the thing it is named after. The subject is
-  # bash-in-POSIX-mode, which is exactly what a `#!/usr/bin/env bash` script
-  # becomes when somebody types `sh scripts/whatever.test.sh`.
+  # The shape of the class: a comparison's operands are captured in a command
+  # substitution; the capture FAILS at run time; the assignment throws the exit
+  # status away; both operands come back EMPTY; emptiness reads as "no
+  # differences"; the harness announces a pass having compared NOTHING. `-n`
+  # reads the file and answers 0, because nothing about it is ill-formed.
+  #
+  # The TRIGGER here is a comparator that is not installed. The trigger in the
+  # incident this census was built from was a process substitution the running
+  # interpreter refuses. The trigger is platform-shaped (arm (b) below measures
+  # exactly how); the SHAPE is not, and the shape is what `-n` cannot see.
+  BLIND="$TMPDIR_CENSUS/blind-fixture.sh"
+  cat > "$BLIND" <<'FIXTURE'
+#!/usr/bin/env bash
+# Shaped like the real harnesses. $CMP is the comparator, $1/$2 the operands.
+fails=0
+only_left=$("$CMP" -13 "$1" "$2" 2>/dev/null)
+only_right=$("$CMP" -23 "$1" "$2" 2>/dev/null)
+[ -z "$only_left" ]  || { echo "FAIL: left operand differs";  fails=$((fails + 1)); }
+[ -z "$only_right" ] || { echo "FAIL: right operand differs"; fails=$((fails + 1)); }
+echo "---- $fails failure(s), 2 pass(es)"
+[ "$fails" -eq 0 ] && echo "FIXTURE TEST PASSED"
+exit "$fails"
+FIXTURE
+  printf 'a\n' > "$TMPDIR_CENSUS/left"
+  printf 'b\n' > "$TMPDIR_CENSUS/right"
+
+  bash -n "$BLIND" > "$TMPDIR_CENSUS/blind.parse" 2>&1; BLIND_PARSE_RC=$?
+  [ "$BLIND_PARSE_RC" -eq 0 ] \
+    && ok "sh-n-blindness[parse]: \`bash -n\` on the fixture EXITS $BLIND_PARSE_RC — the static check sees nothing wrong, on every platform" \
+    || no "sh-n-blindness[parse]: expected the parse check to exit 0 (that IS the blindness), got rc=$BLIND_PARSE_RC: $(cat "$TMPDIR_CENSUS/blind.parse")"
+
+  CMP="comparator-that-is-not-installed" bash "$BLIND" "$TMPDIR_CENSUS/left" "$TMPDIR_CENSUS/right" \
+    > "$TMPDIR_CENSUS/blind.out" 2> "$TMPDIR_CENSUS/blind.err"; BLIND_RUN_RC=$?
+  { [ "$BLIND_RUN_RC" -eq 0 ] && grep -q "FIXTURE TEST PASSED" "$TMPDIR_CENSUS/blind.out" \
+      && ! grep -q "operand differs" "$TMPDIR_CENSUS/blind.out"; } \
+    && ok "sh-n-blindness[compared-nothing]: the run EXITS $BLIND_RUN_RC and prints \"$(grep -- '---- ' "$TMPDIR_CENSUS/blind.out")\" + FIXTURE TEST PASSED, with both operands EMPTY" \
+    || no "sh-n-blindness[compared-nothing]: expected rc=0 with an announced pass and no operand-differs line, got rc=$BLIND_RUN_RC: $(cat "$TMPDIR_CENSUS/blind.out") / $(cat "$TMPDIR_CENSUS/blind.err")"
+
+  # POSITIVE CONTROL. Without it the arm above is satisfiable by a fixture with
+  # nothing to say: an honest pass and a vacuous one both exit 0. With a working
+  # comparator the SAME file, the SAME operands, reds both comparisons — so the
+  # exit 0 measured above was vacuous, not honest.
+  CMP="comm" bash "$BLIND" "$TMPDIR_CENSUS/left" "$TMPDIR_CENSUS/right" \
+    > "$TMPDIR_CENSUS/blind.ctl" 2>&1; BLIND_CTL_RC=$?
+  { [ "$BLIND_CTL_RC" -ne 0 ] && grep -q "FAIL: left operand differs" "$TMPDIR_CENSUS/blind.ctl" \
+      && grep -q "FAIL: right operand differs" "$TMPDIR_CENSUS/blind.ctl"; } \
+    && ok "sh-n-blindness[control]: with a comparator that WORKS the same file EXITS $BLIND_CTL_RC and reds both comparisons — the 0 above was vacuous" \
+    || no "sh-n-blindness[control]: the fixture must FAIL with a working comparator or it proves nothing, got rc=$BLIND_CTL_RC: $(cat "$TMPDIR_CENSUS/blind.ctl")"
+
+  # --------------------------------- (b) the incident's trigger, PLATFORM-SHAPED
+  #
+  # The incident: `sh scripts/sunset-route-consumers.test.sh` on macOS exited 0
+  # announcing 32 passes, having compared nothing, because bash 3.2 refuses a
+  # process substitution in POSIX mode and parses a command substitution's body
+  # LAZILY — so the refusal lands at EXPANSION time, long after `-n` answered 0.
+  #
+  # THAT IS NOT PORTABLE, AND THIS ARM USED TO ASSERT IT AS THOUGH IT WERE. It
+  # reddened main on 2026-09-14. Measured 2026-09-15, same fixture:
+  #   bash 3.2.57 (macOS /bin/bash, and what `sh` becomes there), `--posix`:
+  #     rc 0, "FIXTURE TEST PASSED", `command substitution: syntax error` on
+  #     stderr   <- THE VACUOUS VARIANT
+  #   bash 5.2.21 (ubuntu 24.04, the CI runner), `--posix`: rc 2, both operands
+  #     compared, both comparisons red   <- THE LOUD VARIANT. bash >= 5.1 allows
+  #     process substitution in POSIX mode, so the fixture simply WORKS there.
+  #   dash / `sh` on Linux: rc 2 at PARSE time — a third outcome, not this one.
+  # No interpreter measured on Linux produces the vacuous variant.
+  #
+  # So the arm DETECTS which world it is in, ASSERTS the detection, and then
+  # asserts the outcome that world owes. It never skips: a skip counted as a
+  # pass is the exact vacuity this census exists to catch, and an unrecognised
+  # probe answer is CANNOT READ (exit 2), not a shrug.
   #
   # `@PSUB@` is substituted rather than written, for the same reason PSUB exists
   # at the top of this file: a literal occurrence on a code line would enrol this
@@ -315,40 +376,94 @@ echo "---- $fails failure(s), 2 pass(es)"
 [ "$fails" -eq 0 ] && echo "FIXTURE TEST PASSED"
 exit "$fails"
 FIXTURE
+  # The honest twin: identical operands, so it passes by AGREEING, not by
+  # failing to look. It is the control for the LOUD branch.
+  TWIN="$TMPDIR_CENSUS/honest-twin.sh"
+  sed "s/@PSUB@/$PSUB/g" > "$TWIN" <<'FIXTURE'
+#!/usr/bin/env bash
+fails=0
+only_left=$(comm -13 @PSUB@printf 'a\n') @PSUB@printf 'a\n'))
+[ -z "$only_left" ] || { echo "FAIL: left operand differs"; fails=$((fails + 1)); }
+echo "---- $fails failure(s), 1 pass(es)"
+exit "$fails"
+FIXTURE
+  # The probe. It asks ONE question of ONE interpreter: does a process
+  # substitution nested inside a command substitution yield its value here?
+  DET="$TMPDIR_CENSUS/procsub-probe.sh"
+  sed "s/@PSUB@/$PSUB/g" > "$DET" <<'PROBE'
+#!/usr/bin/env bash
+v=$(cat @PSUB@printf 'x\n'))
+printf '[%s]' "$v"
+PROBE
 
-  bash --posix -n "$VAC" > "$TMPDIR_CENSUS/vac.parse" 2>&1;            VAC_PARSE_RC=$?
-  bash --posix    "$VAC" > "$TMPDIR_CENSUS/vac.out" 2> "$TMPDIR_CENSUS/vac.err"; VAC_RUN_RC=$?
-  bash            "$VAC" > "$TMPDIR_CENSUS/ctl.out" 2>&1;              VAC_CTL_RC=$?
+  # $POSIX_SH is the invocation a reader gets when they type `sh scripts/x.sh`:
+  # bash in POSIX mode. Overridable so the OTHER branch can be exercised
+  # deliberately on a host that only has one of the two worlds (see the
+  # PLATFORMS note in docs/ops/merge-gates.md, section 'PARSED BUT NOT RUN').
+  POSIX_SH="${CENSUS_SELFTEST_POSIX_SH:-bash --posix}"
+
+  $POSIX_SH "$DET" > "$TMPDIR_CENSUS/det.out" 2> "$TMPDIR_CENSUS/det.err"
+  DET_OUT=$(cat "$TMPDIR_CENSUS/det.out")
+  if [ "$DET_OUT" = "[x]" ]; then
+    PSUB_WORLD=allows
+  elif [ "$DET_OUT" = "[]" ] && grep -q "command substitution" "$TMPDIR_CENSUS/det.err"; then
+    PSUB_WORLD=refuses
+  else
+    echo "posix-vacuous-green-census --selftest: CANNOT READ — the procsub probe under '$POSIX_SH' answered neither '[x]' (allows) nor '[]' + an expansion-time command-substitution error (refuses). It printed '$DET_OUT' with stderr: $(cat "$TMPDIR_CENSUS/det.err"). This selftest cannot say which world it is in, so it asserts nothing rather than guessing." >&2
+    exit 2
+  fi
+  ok "procsub-under-posix[precondition]: '$POSIX_SH' (bash $BASH_VERSION) $PSUB_WORLD a process substitution nested in a command substitution — the branch below is chosen by this measurement, never by uname"
+
+  $POSIX_SH -n "$VAC" > "$TMPDIR_CENSUS/vac.parse" 2>&1;            VAC_PARSE_RC=$?
+  $POSIX_SH    "$VAC" > "$TMPDIR_CENSUS/vac.out" 2> "$TMPDIR_CENSUS/vac.err"; VAC_RUN_RC=$?
+  bash         "$VAC" > "$TMPDIR_CENSUS/ctl.out" 2>&1;              VAC_CTL_RC=$?
+  $POSIX_SH    "$TWIN" > "$TMPDIR_CENSUS/twin.out" 2> "$TMPDIR_CENSUS/twin.err"; TWIN_RC=$?
 
   [ "$VAC_PARSE_RC" -eq 0 ] \
-    && ok "sh-n-blindness[parse]: \`bash --posix -n\` on the fixture EXITS $VAC_PARSE_RC — the static check sees nothing wrong" \
-    || no "sh-n-blindness[parse]: expected the parse check to exit 0 (that IS the blindness), got rc=$VAC_PARSE_RC: $(cat "$TMPDIR_CENSUS/vac.parse")"
+    && ok "procsub-under-posix[parse]: \`$POSIX_SH -n\` on the fixture EXITS $VAC_PARSE_RC — the static check answers 0 in BOTH worlds, which is why it is worth nothing in either" \
+    || no "procsub-under-posix[parse]: expected the parse check to exit 0, got rc=$VAC_PARSE_RC: $(cat "$TMPDIR_CENSUS/vac.parse")"
 
-  { [ "$VAC_RUN_RC" -eq 0 ] && grep -q "FIXTURE TEST PASSED" "$TMPDIR_CENSUS/vac.out"; } \
-    && ok "sh-n-blindness[run]: the real run EXITS $VAC_RUN_RC and prints \"$(grep -- '---- ' "$TMPDIR_CENSUS/vac.out")\" + FIXTURE TEST PASSED" \
-    || no "sh-n-blindness[run]: expected rc=0 with an announced pass, got rc=$VAC_RUN_RC: $(cat "$TMPDIR_CENSUS/vac.out") / $(cat "$TMPDIR_CENSUS/vac.err")"
+  if [ "$PSUB_WORLD" = refuses ]; then
+    { [ "$VAC_RUN_RC" -eq 0 ] && grep -q "FIXTURE TEST PASSED" "$TMPDIR_CENSUS/vac.out"; } \
+      && ok "procsub-under-posix[run/vacuous]: the run EXITS $VAC_RUN_RC and prints \"$(grep -- '---- ' "$TMPDIR_CENSUS/vac.out")\" + FIXTURE TEST PASSED — this is the variant a macOS reader gets" \
+      || no "procsub-under-posix[run/vacuous]: this interpreter refuses the construct, so the run must exit 0 announcing a pass, got rc=$VAC_RUN_RC: $(cat "$TMPDIR_CENSUS/vac.out") / $(cat "$TMPDIR_CENSUS/vac.err")"
 
-  { grep -q "syntax error near unexpected token" "$TMPDIR_CENSUS/vac.err" \
-      && grep -q "command substitution" "$TMPDIR_CENSUS/vac.err"; } \
-    && ok "sh-n-blindness[compared-nothing]: stderr carries the EXPANSION-time \`command substitution: syntax error\` — both operands were empty, so the two checks compared nothing" \
-    || no "sh-n-blindness[compared-nothing]: expected an expansion-time command-substitution syntax error on stderr, got: $(cat "$TMPDIR_CENSUS/vac.err")"
+    { grep -q "syntax error near unexpected token" "$TMPDIR_CENSUS/vac.err" \
+        && grep -q "command substitution" "$TMPDIR_CENSUS/vac.err"; } \
+      && ok "procsub-under-posix[compared-nothing]: stderr carries the EXPANSION-time \`command substitution: syntax error\` — both operands were empty, so the two checks compared nothing" \
+      || no "procsub-under-posix[compared-nothing]: expected an expansion-time command-substitution syntax error on stderr, got: $(cat "$TMPDIR_CENSUS/vac.err")"
 
-  # POSITIVE CONTROL. Without this the arm above is satisfiable by a fixture that
-  # simply has nothing to say: an honest pass and a vacuous one both exit 0. Real
-  # bash expands the process substitutions, the operands DIFFER, and the fixture
-  # reds — so the exit 0 measured under POSIX mode is vacuous, not honest.
-  { [ "$VAC_CTL_RC" -ne 0 ] && grep -q "FAIL: left operand differs" "$TMPDIR_CENSUS/ctl.out"; } \
-    && ok "sh-n-blindness[control]: real bash on the SAME file EXITS $VAC_CTL_RC and reds both comparisons — the POSIX-mode 0 was vacuous, not honest" \
-    || no "sh-n-blindness[control]: the fixture must FAIL under real bash or it proves nothing, got rc=$VAC_CTL_RC: $(cat "$TMPDIR_CENSUS/ctl.out")"
+    { [ "$VAC_CTL_RC" -ne 0 ] && grep -q "FAIL: left operand differs" "$TMPDIR_CENSUS/ctl.out"; } \
+      && ok "procsub-under-posix[control]: real bash on the SAME file EXITS $VAC_CTL_RC and reds both comparisons — the 0 above was vacuous, not honest" \
+      || no "procsub-under-posix[control]: the fixture must FAIL under real bash or it proves nothing, got rc=$VAC_CTL_RC: $(cat "$TMPDIR_CENSUS/ctl.out")"
+  else
+    { [ "$VAC_RUN_RC" -ne 0 ] && grep -q "FAIL: left operand differs" "$TMPDIR_CENSUS/vac.out" \
+        && grep -q "FAIL: right operand differs" "$TMPDIR_CENSUS/vac.out"; } \
+      && ok "procsub-under-posix[run/loud]: the run EXITS $VAC_RUN_RC and reds BOTH comparisons — where the construct is allowed the same class arrives loudly, and there is nothing vacuous left to hide in" \
+      || no "procsub-under-posix[run/loud]: this interpreter allows the construct, so the run must red both comparisons, got rc=$VAC_RUN_RC: $(cat "$TMPDIR_CENSUS/vac.out") / $(cat "$TMPDIR_CENSUS/vac.err")"
 
+    grep -q -- "---- 2 failure(s), 2 pass(es)" "$TMPDIR_CENSUS/vac.out" \
+      && ok "procsub-under-posix[compared-something]: the tally line says \"---- 2 failure(s), 2 pass(es)\" — both comparisons produced a verdict, the opposite of the vacuous branch" \
+      || no "procsub-under-posix[compared-something]: expected a 2-failure tally proving both comparisons ran, got: $(cat "$TMPDIR_CENSUS/vac.out")"
+
+    # CONTROL for the loud branch: a twin with IDENTICAL operands. If the red
+    # above came from the fixture always reding rather than from a measured
+    # difference, this would red too.
+    { [ "$TWIN_RC" -eq 0 ] && ! grep -q "operand differs" "$TMPDIR_CENSUS/twin.out"; } \
+      && ok "procsub-under-posix[control]: the honest twin — same construct, IDENTICAL operands — EXITS $TWIN_RC green, so the red above is a measured difference, not a fixture that always reds" \
+      || no "procsub-under-posix[control]: the identical-operand twin must pass or the loud arm proves nothing, got rc=$TWIN_RC: $(cat "$TMPDIR_CENSUS/twin.out") / $(cat "$TMPDIR_CENSUS/twin.err")"
+  fi
   echo
   echo "----"
   # DERIVED, never hand-counted: a tally typed as a literal survives the arm you
   # forgot to run. `passes` is incremented by ok(), and the floor makes a
   # selftest that silently executed fewer arms than it carries exit 2 rather than
   # print a smaller, clean-looking green. Floor = the arm count at the time this
-  # was written (2026-09-14), raised deliberately whenever an arm is added.
-  ARMS_FLOOR=13
+  # was written (2026-09-15), raised deliberately whenever an arm is added.
+  # It is BRANCH-INVARIANT on purpose: the procsub-under-posix branches emit the
+  # same number of verdicts, so a host that takes the other one cannot come in
+  # under the floor and read as a smaller, clean-looking green.
+  ARMS_FLOOR=17
   reported=$((passes + fails))
   if [ "$reported" -lt "$ARMS_FLOOR" ]; then
     echo "posix-vacuous-green-census --selftest: CANNOT READ — only $reported arms reported a verdict, floor is $ARMS_FLOOR; this run measured LESS than the selftest carries" >&2
